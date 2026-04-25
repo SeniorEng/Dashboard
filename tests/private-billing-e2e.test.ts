@@ -952,7 +952,7 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
   it("CP-9 – Kundenpreis löschen setzt validTo und kein aktiver Preis verbleibt", async () => {
     expect(cpPriceId).toBeDefined();
-    const deleteRes = await apiDelete(`/api/customers/${cpCustomerId}/service-prices/${cpPriceId}`);
+    const deleteRes = await apiDelete(`/api/customers/${cpCustomerId}/service-prices/${cpPriceId}?confirmInvoiceOverride=true`);
     expect(deleteRes.status).toBe(200);
 
     const allPricesRes = await apiGet<any[]>(`/api/customers/${cpCustomerId}/service-prices/all`);

@@ -3,11 +3,33 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@shared/utils/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api, unwrapResult } from "@/lib/api";
+import { api, unwrapResult, ApiError } from "@/lib/api";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Pencil, Check, X, RotateCcw, Calendar, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Pencil, Check, X, RotateCcw, Calendar, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import { parseLocalDate } from "@shared/utils/datetime";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+interface AffectedInvoice {
+  id: number;
+  invoiceNumber: string;
+  billingMonth: number;
+  billingYear: number;
+  status: string;
+}
+
+type PendingChange =
+  | { kind: "save"; serviceId: number; priceCents: number; validFrom?: string; invoices: AffectedInvoice[] }
+  | { kind: "delete"; priceId: number; invoices: AffectedInvoice[] };
 
 interface CatalogService {
   id: number;
@@ -66,6 +88,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   const [editPrice, setEditPrice] = useState("");
   const [editValidFrom, setEditValidFrom] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
 
   const { data: services, isLoading: loadingServices } = useQuery<CatalogService[]>({
     queryKey: ["/api/services"],
@@ -101,9 +124,20 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   });
 
   const saveMutation = useMutation({
-    mutationFn: async ({ serviceId, priceCents, validFrom }: { serviceId: number; priceCents: number; validFrom?: string }) => {
+    mutationFn: async ({
+      serviceId,
+      priceCents,
+      validFrom,
+      confirmInvoiceOverride,
+    }: {
+      serviceId: number;
+      priceCents: number;
+      validFrom?: string;
+      confirmInvoiceOverride?: boolean;
+    }) => {
       const body: Record<string, unknown> = { serviceId, priceCents };
       if (validFrom) body.validFrom = validFrom;
+      if (confirmInvoiceOverride) body.confirmInvoiceOverride = true;
       const result = await api.post(`/customers/${customerId}/service-prices`, body);
       return unwrapResult(result);
     },
@@ -112,26 +146,73 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       setEditingServiceId(null);
       setEditPrice("");
       setEditValidFrom("");
+      setPendingChange(null);
       toast({ title: "Kundenpreis gespeichert" });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, variables) => {
+      if (
+        error instanceof ApiError
+        && error.code === "INVOICED_PERIOD_AFFECTED"
+        && !variables.confirmInvoiceOverride
+      ) {
+        const invoices = (error.details?.invoices as AffectedInvoice[] | undefined) || [];
+        setPendingChange({
+          kind: "save",
+          serviceId: variables.serviceId,
+          priceCents: variables.priceCents,
+          validFrom: variables.validFrom,
+          invoices,
+        });
+        return;
+      }
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (priceId: number) => {
-      const result = await api.delete(`/customers/${customerId}/service-prices/${priceId}`);
+    mutationFn: async ({ priceId, confirmInvoiceOverride }: { priceId: number; confirmInvoiceOverride?: boolean }) => {
+      const url = confirmInvoiceOverride
+        ? `/customers/${customerId}/service-prices/${priceId}?confirmInvoiceOverride=true`
+        : `/customers/${customerId}/service-prices/${priceId}`;
+      const result = await api.delete(url);
       return unwrapResult(result);
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "customer-service-prices");
+      setPendingChange(null);
       toast({ title: "Kundenpreis zurückgesetzt auf Katalogpreis" });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, variables) => {
+      if (
+        error instanceof ApiError
+        && error.code === "INVOICED_PERIOD_AFFECTED"
+        && !variables.confirmInvoiceOverride
+      ) {
+        const invoices = (error.details?.invoices as AffectedInvoice[] | undefined) || [];
+        setPendingChange({
+          kind: "delete",
+          priceId: variables.priceId,
+          invoices,
+        });
+        return;
+      }
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
+
+  function confirmPendingChange() {
+    if (!pendingChange) return;
+    if (pendingChange.kind === "save") {
+      saveMutation.mutate({
+        serviceId: pendingChange.serviceId,
+        priceCents: pendingChange.priceCents,
+        validFrom: pendingChange.validFrom,
+        confirmInvoiceOverride: true,
+      });
+    } else {
+      deleteMutation.mutate({ priceId: pendingChange.priceId, confirmInvoiceOverride: true });
+    }
+  }
 
   if (loadingServices || loadingPrices) {
     return (
@@ -230,7 +311,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                       variant="ghost"
                       size="sm"
                       className="h-5 w-5 p-0 ml-1"
-                      onClick={() => deleteMutation.mutate(fp.id)}
+                      onClick={() => deleteMutation.mutate({ priceId: fp.id })}
                       disabled={deleteMutation.isPending}
                       data-testid={`btn-delete-future-${fp.id}`}
                     >
@@ -311,7 +392,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0"
-                        onClick={() => deleteMutation.mutate(customPrice.id)}
+                        onClick={() => deleteMutation.mutate({ priceId: customPrice.id })}
                         disabled={deleteMutation.isPending}
                         data-testid={`btn-reset-price-${service.id}`}
                       >
@@ -371,6 +452,65 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
           <p className="text-xs text-gray-500 text-center py-2">Keine Preishistorie vorhanden.</p>
         )}
       </div>
+
+      <AlertDialog
+        open={pendingChange !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingChange(null);
+        }}
+      >
+        <AlertDialogContent data-testid="dialog-confirm-invoiced-period">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              Bereits abgerechnete Monate betroffen
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Sie ändern eine Preis-Periode, die bereits in abgerechneten Zeiträumen liegt.
+                  Diese Änderung könnte zukünftige Nachberechnungen oder erneute Rechnungserstellungen
+                  mit anderen Preisen abrechnen, als ursprünglich auf der Rechnung standen.
+                </p>
+                {pendingChange && pendingChange.invoices.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-2">
+                    <p className="font-medium mb-1">Betroffene Rechnungen:</p>
+                    <ul className="space-y-0.5">
+                      {pendingChange.invoices.slice(0, 10).map((inv) => (
+                        <li
+                          key={inv.id}
+                          className="text-xs"
+                          data-testid={`affected-invoice-${inv.id}`}
+                        >
+                          {inv.invoiceNumber} ({String(inv.billingMonth).padStart(2, "0")}/{inv.billingYear}, {inv.status})
+                        </li>
+                      ))}
+                      {pendingChange.invoices.length > 10 && (
+                        <li className="text-xs text-gray-500">
+                          … und {pendingChange.invoices.length - 10} weitere
+                        </li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+                <p className="text-xs text-gray-600">
+                  Bitte bestätigen Sie nur, wenn Sie sicher sind. Die Aktion wird im Audit-Log dokumentiert.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="btn-cancel-invoiced-override">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmPendingChange}
+              className="bg-amber-600 hover:bg-amber-700"
+              data-testid="btn-confirm-invoiced-override"
+            >
+              Trotzdem speichern
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

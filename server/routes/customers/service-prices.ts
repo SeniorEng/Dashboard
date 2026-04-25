@@ -6,8 +6,47 @@ import { requireIntParam } from "../../lib/params";
 import { todayISO, addDays } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import { sql } from "drizzle-orm";
+import { auditService } from "../../services/audit";
 
 const router = Router();
+
+interface AffectedInvoice {
+  id: number;
+  invoiceNumber: string;
+  billingMonth: number;
+  billingYear: number;
+  status: string;
+}
+
+async function findAffectedInvoicesFromDate(
+  tx: typeof db,
+  customerId: number,
+  fromDate: string,
+): Promise<AffectedInvoice[]> {
+  const [yearStr, monthStr] = fromDate.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const result = await tx.execute(sql`
+    SELECT id, invoice_number AS "invoiceNumber",
+           billing_month AS "billingMonth", billing_year AS "billingYear",
+           status
+    FROM invoices
+    WHERE customer_id = ${customerId}
+      AND status != 'storniert'
+      AND (billing_year > ${year}
+           OR (billing_year = ${year} AND billing_month >= ${month}))
+    ORDER BY billing_year, billing_month, id
+  `);
+  return result.rows as unknown as AffectedInvoice[];
+}
+
+function sendInvoicedPeriodConflict(res: any, message: string, invoices: AffectedInvoice[]) {
+  res.status(409).json({
+    code: "INVOICED_PERIOD_AFFECTED",
+    message,
+    details: { invoices },
+  });
+}
 
 router.get("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreise konnten nicht geladen werden", async (req, res) => {
   const customerId = requireIntParam(req.params.id, res);
@@ -70,6 +109,7 @@ router.get("/:id/service-prices/future", requireAdmin, asyncHandler("Zukünftige
 router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnte nicht gespeichert werden", async (req, res) => {
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
+  const confirmInvoiceOverride = req.body?.confirmInvoiceOverride === true;
   const parsed = insertCustomerServicePriceSchema.safeParse({ ...req.body, customerId });
   if (!parsed.success) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: parsed.error.message });
@@ -87,6 +127,16 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
 
   const newValidFromDate = newValidFrom;
   const dayBeforeNew = addDays(newValidFrom, -1);
+
+  const affectedInvoices = await findAffectedInvoicesFromDate(db, customerId, newValidFrom);
+  if (affectedInvoices.length > 0 && !confirmInvoiceOverride) {
+    sendInvoicedPeriodConflict(
+      res,
+      "Diese Preisänderung betrifft bereits abgerechnete Monate. Bitte bestätigen Sie die Änderung.",
+      affectedInvoices,
+    );
+    return;
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`
@@ -129,6 +179,29 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
     `);
     return inserted;
   });
+
+  if (affectedInvoices.length > 0 && req.user?.id) {
+    await auditService.log(
+      req.user.id,
+      "customer_price_changed_invoiced",
+      "customer",
+      customerId,
+      {
+        action: "create_price",
+        serviceId,
+        priceCents,
+        validFrom: newValidFrom,
+        affectedInvoices: affectedInvoices.map(i => ({
+          id: i.id,
+          invoiceNumber: i.invoiceNumber,
+          billingMonth: i.billingMonth,
+          billingYear: i.billingYear,
+        })),
+      },
+      req.ip,
+    );
+  }
+
   res.json(result.rows[0]);
 }));
 
@@ -138,21 +211,35 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
   const priceId = requireIntParam(req.params.priceId, res);
   if (priceId === null) return;
   const today = todayISO();
+  const confirmInvoiceOverride = req.body?.confirmInvoiceOverride === true
+    || req.query?.confirmInvoiceOverride === "true";
+
+  const existing = await db.execute(sql`
+    SELECT id, customer_id, service_id, valid_from, valid_to FROM customer_service_prices
+    WHERE id = ${priceId} AND customer_id = ${customerId} AND deleted_at IS NULL
+  `);
+  if (existing.rows.length === 0) {
+    res.json({ success: true });
+    return;
+  }
+  const row = existing.rows[0] as { id: number; customer_id: number; service_id: number; valid_from: string | Date; valid_to: string | Date | null };
+  const vf = row.valid_from;
+  const recordValidFrom = vf instanceof Date
+    ? `${vf.getFullYear()}-${String(vf.getMonth() + 1).padStart(2, "0")}-${String(vf.getDate()).padStart(2, "0")}`
+    : String(vf).substring(0, 10);
+
+  const affectFromDate = recordValidFrom > today ? recordValidFrom : addDays(today, 1);
+  const affectedInvoices = await findAffectedInvoicesFromDate(db, customerId, affectFromDate);
+  if (affectedInvoices.length > 0 && !confirmInvoiceOverride) {
+    sendInvoicedPeriodConflict(
+      res,
+      "Das Löschen dieses Preises betrifft bereits abgerechnete Monate. Bitte bestätigen Sie die Änderung.",
+      affectedInvoices,
+    );
+    return;
+  }
 
   await db.transaction(async (tx) => {
-    const record = await tx.execute(sql`
-      SELECT id, customer_id, service_id, valid_from, valid_to FROM customer_service_prices
-      WHERE id = ${priceId} AND customer_id = ${customerId} AND deleted_at IS NULL
-    `);
-    if (record.rows.length === 0) {
-      return;
-    }
-    const row = record.rows[0] as { id: number; customer_id: number; service_id: number; valid_from: string | Date; valid_to: string | Date | null };
-    const vf = row.valid_from;
-    const recordValidFrom = vf instanceof Date
-      ? `${vf.getFullYear()}-${String(vf.getMonth() + 1).padStart(2, "0")}-${String(vf.getDate()).padStart(2, "0")}`
-      : String(vf).substring(0, 10);
-
     if (recordValidFrom > today) {
       await tx.execute(sql`UPDATE customer_service_prices SET deleted_at = NOW() WHERE id = ${priceId}`);
 
@@ -194,6 +281,28 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
       `);
     }
   });
+
+  if (affectedInvoices.length > 0 && req.user?.id) {
+    await auditService.log(
+      req.user.id,
+      "customer_price_changed_invoiced",
+      "customer",
+      customerId,
+      {
+        action: "delete_price",
+        priceId,
+        serviceId: row.service_id,
+        validFrom: recordValidFrom,
+        affectedInvoices: affectedInvoices.map(i => ({
+          id: i.id,
+          invoiceNumber: i.invoiceNumber,
+          billingMonth: i.billingMonth,
+          billingYear: i.billingYear,
+        })),
+      },
+      req.ip,
+    );
+  }
 
   res.json({ success: true });
 }));
