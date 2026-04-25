@@ -81,6 +81,13 @@ export interface PricingSectionProps {
   onRefresh: () => void;
 }
 
+interface PendingReplaceState {
+  serviceId: number;
+  priceCents: number;
+  validFrom?: string;
+  existing: { id: number; priceCents: number; validFrom: string; serviceName: string };
+}
+
 export function PricingSection({ customerId, customerName, onRefresh }: PricingSectionProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -89,6 +96,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   const [editValidFrom, setEditValidFrom] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<PendingReplaceState | null>(null);
 
   const { data: services, isLoading: loadingServices } = useQuery<CatalogService[]>({
     queryKey: ["/api/services"],
@@ -129,25 +137,29 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       priceCents,
       validFrom,
       confirmInvoiceOverride,
+      confirmReplace,
     }: {
       serviceId: number;
       priceCents: number;
       validFrom?: string;
       confirmInvoiceOverride?: boolean;
+      confirmReplace?: boolean;
     }) => {
       const body: Record<string, unknown> = { serviceId, priceCents };
       if (validFrom) body.validFrom = validFrom;
       if (confirmInvoiceOverride) body.confirmInvoiceOverride = true;
+      if (confirmReplace) body.confirmReplace = true;
       const result = await api.post(`/customers/${customerId}/service-prices`, body);
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       invalidateRelated(queryClient, "customer-service-prices");
       setEditingServiceId(null);
       setEditPrice("");
       setEditValidFrom("");
       setPendingChange(null);
-      toast({ title: "Kundenpreis gespeichert" });
+      setPendingReplace(null);
+      toast({ title: variables.confirmReplace ? "Bestehender Preis ersetzt" : "Kundenpreis gespeichert" });
     },
     onError: (error: Error, variables) => {
       if (
@@ -164,6 +176,18 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
           invoices,
         });
         return;
+      }
+      if (error instanceof ApiError && error.code === "PRICE_CONFLICT") {
+        const existing = (error.details?.existing as PendingReplaceState["existing"] | undefined);
+        if (existing) {
+          setPendingReplace({
+            serviceId: variables.serviceId,
+            priceCents: variables.priceCents,
+            validFrom: variables.validFrom,
+            existing,
+          });
+          return;
+        }
       }
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
@@ -261,6 +285,56 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   }
 
   return (
+    <>
+    <AlertDialog
+      open={!!pendingReplace}
+      onOpenChange={(open) => { if (!open) setPendingReplace(null); }}
+    >
+      <AlertDialogContent data-testid="dialog-replace-price">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Bestehenden Kundenpreis ersetzen?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {pendingReplace ? (
+              <>
+                Für <span className="font-medium">{pendingReplace.existing.serviceName}</span> existiert
+                bereits ein aktiver Preis ab dem{" "}
+                <span className="font-medium">{formatDateDisplay(pendingReplace.existing.validFrom)}</span>:
+                <div className="mt-3 rounded-md border bg-gray-50 px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Bisheriger Preis</span>
+                    <span className="font-semibold" data-testid="text-existing-price">{formatCurrency(pendingReplace.existing.priceCents)}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-gray-600">Neuer Preis</span>
+                    <span className="font-semibold text-amber-700" data-testid="text-new-price">{formatCurrency(pendingReplace.priceCents)}</span>
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-gray-500">
+                  Der bestehende Eintrag wird als ersetzt markiert. Die Aktion erscheint im Audit-Log.
+                </div>
+              </>
+            ) : null}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel data-testid="btn-cancel-replace">Abbrechen</AlertDialogCancel>
+          <AlertDialogAction
+            data-testid="btn-confirm-replace"
+            onClick={() => {
+              if (!pendingReplace) return;
+              saveMutation.mutate({
+                serviceId: pendingReplace.serviceId,
+                priceCents: pendingReplace.priceCents,
+                validFrom: pendingReplace.validFrom,
+                confirmReplace: true,
+              });
+            }}
+          >
+            Ja, ersetzen
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <div className="space-y-1" data-testid="pricing-section">
       {hasCustomPrices && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
@@ -512,5 +586,6 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </>
   );
 }

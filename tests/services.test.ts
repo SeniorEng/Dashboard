@@ -163,6 +163,93 @@ describe("Dienstleistungskatalog", () => {
     });
   });
 
+  describe("Sonderpreis-Konflikt bei identischem Stichtag", () => {
+    it("zweiter POST mit gleichem Stichtag liefert 409 PRICE_CONFLICT statt stiller Ersetzung", async () => {
+      const conflictDate = getFutureDate(45);
+      const first = await apiPost<any>(
+        `/api/customers/${firstCustomerId}/service-prices`,
+        { serviceId: createdServiceId, priceCents: 4200, validFrom: conflictDate }
+      );
+      expect(first.status).toBe(200);
+      const firstId = first.data.id as number;
+
+      const conflict = await apiPost<any>(
+        `/api/customers/${firstCustomerId}/service-prices`,
+        { serviceId: createdServiceId, priceCents: 4900, validFrom: conflictDate }
+      );
+      expect(conflict.status).toBe(409);
+      expect(conflict.data?.code).toBe("PRICE_CONFLICT");
+      expect(conflict.data?.details?.existing?.id).toBe(firstId);
+      expect(conflict.data?.details?.existing?.priceCents).toBe(4200);
+
+      const stillFirst = await apiGet<any[]>(
+        `/api/customers/${firstCustomerId}/service-prices/all`
+      );
+      const stillActive = stillFirst.data.find((p: any) => p.id === firstId);
+      expect(stillActive, "Erster Preis darf bei abgelehnter Ersetzung nicht weichen").toBeDefined();
+      expect(stillActive.priceCents).toBe(4200);
+
+      const replace = await apiPost<any>(
+        `/api/customers/${firstCustomerId}/service-prices`,
+        { serviceId: createdServiceId, priceCents: 4900, validFrom: conflictDate, confirmReplace: true }
+      );
+      expect(replace.status).toBe(200);
+      expect(replace.data.priceCents).toBe(4900);
+      const newId = replace.data.id as number;
+      expect(newId).not.toBe(firstId);
+
+      const after = await apiGet<any[]>(
+        `/api/customers/${firstCustomerId}/service-prices/all`
+      );
+      const replacement = after.data.find((p: any) => p.id === newId);
+      expect(replacement).toBeDefined();
+      expect(replacement.priceCents).toBe(4900);
+
+      const auditRes = await apiGet<{ entries: any[]; total: number }>(
+        `/api/admin/audit-log?entityType=customer&action=customer_price_replaced&entityId=${firstCustomerId}&limit=10`
+      );
+      expect(auditRes.status).toBe(200);
+      const replaceEntry = auditRes.data.entries.find(
+        (e: any) => e.metadata?.replacedPriceId === firstId && e.metadata?.newPriceId === newId
+      );
+      expect(replaceEntry, "Audit-Log muss Eintrag für ersetzten Preis enthalten").toBeDefined();
+      expect(replaceEntry.metadata.oldPriceCents).toBe(4200);
+      expect(replaceEntry.metadata.newPriceCents).toBe(4900);
+      expect(replaceEntry.metadata.serviceId).toBe(createdServiceId);
+
+      await apiDelete(`/api/customers/${firstCustomerId}/service-prices/${newId}`);
+    });
+
+    it("zwei parallele POSTs mit identischem Stichtag: einer gewinnt mit 200, der andere bekommt 409 (DB-Constraint)", async () => {
+      const conflictDate = getFutureDate(90);
+      const [r1, r2] = await Promise.all([
+        apiPost<any>(
+          `/api/customers/${firstCustomerId}/service-prices`,
+          { serviceId: createdServiceId, priceCents: 6100, validFrom: conflictDate }
+        ),
+        apiPost<any>(
+          `/api/customers/${firstCustomerId}/service-prices`,
+          { serviceId: createdServiceId, priceCents: 6200, validFrom: conflictDate }
+        ),
+      ]);
+      const successes = [r1, r2].filter((r) => r.status === 200);
+      const conflicts = [r1, r2].filter((r) => r.status === 409);
+      expect(successes.length, `Genau ein POST darf gewinnen (got ${JSON.stringify([r1.status, r2.status])})`).toBe(1);
+      expect(conflicts.length).toBe(1);
+      expect(conflicts[0].data?.code).toBe("PRICE_CONFLICT");
+
+      const after = await apiGet<any[]>(
+        `/api/customers/${firstCustomerId}/service-prices/all`
+      );
+      const activeSameDay = after.data.filter(
+        (p: any) => p.serviceId === createdServiceId && String(p.validFrom).startsWith(conflictDate)
+      );
+      expect(activeSameDay.length, "Höchstens ein aktiver Preis pro Stichtag").toBe(1);
+
+      await apiDelete(`/api/customers/${firstCustomerId}/service-prices/${successes[0].data.id}`);
+    });
+  });
+
   describe("Sonderpreis löschen", () => {
     it("sollte den Sonderpreis löschen können", async () => {
       const { status } = await apiDelete(

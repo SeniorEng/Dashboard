@@ -8,6 +8,37 @@ import { db } from "../../lib/db";
 import { sql } from "drizzle-orm";
 import { auditService } from "../../services/audit";
 
+function rawDateToISO(value: unknown): string {
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  return String(value).substring(0, 10);
+}
+
+type ConflictRow = { id: number; priceCents: number; validFrom: unknown; serviceName: string };
+
+class PriceConflictError extends Error {
+  readonly row: ConflictRow;
+  constructor(row: ConflictRow) {
+    super("PRICE_CONFLICT");
+    this.row = row;
+  }
+}
+
+function hasPgCode(value: unknown): value is { code: string } {
+  return typeof value === "object" && value !== null && "code" in value
+    && typeof (value as { code: unknown }).code === "string";
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  if (hasPgCode(err) && err.code === "23505") return true;
+  if (typeof err === "object" && err !== null && "cause" in err) {
+    const cause = (err as { cause: unknown }).cause;
+    if (hasPgCode(cause) && cause.code === "23505") return true;
+  }
+  return false;
+}
+
 const router = Router();
 
 interface AffectedInvoice {
@@ -110,6 +141,7 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
   const confirmInvoiceOverride = req.body?.confirmInvoiceOverride === true;
+  const confirmReplace = req.body?.confirmReplace === true;
   const parsed = insertCustomerServicePriceSchema.safeParse({ ...req.body, customerId });
   if (!parsed.success) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: parsed.error.message });
@@ -138,47 +170,160 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
     return;
   }
 
-  const result = await db.transaction(async (tx) => {
-    await tx.execute(sql`
-      UPDATE customer_service_prices SET deleted_at = NOW()
-      WHERE customer_id = ${customerId} AND service_id = ${serviceId}
-        AND valid_from::date = ${newValidFromDate}::date AND deleted_at IS NULL
-    `);
+  const existingSameDate = await db.execute(sql`
+    SELECT csp.id, csp.price_cents AS "priceCents", csp.valid_from AS "validFrom",
+           s.name AS "serviceName"
+    FROM customer_service_prices csp
+    JOIN services s ON s.id = csp.service_id
+    WHERE csp.customer_id = ${customerId} AND csp.service_id = ${serviceId}
+      AND csp.valid_from::date = ${newValidFromDate}::date AND csp.deleted_at IS NULL
+    ORDER BY csp.id DESC LIMIT 1
+  `);
 
-    await tx.execute(sql`
-      UPDATE customer_service_prices
-      SET valid_to = ${dayBeforeNew}::date
-      WHERE customer_id = ${customerId} AND service_id = ${serviceId}
-        AND valid_from::date < ${newValidFromDate}::date
-        AND (valid_to IS NULL OR valid_to::date >= ${newValidFromDate}::date)
-        AND deleted_at IS NULL
-    `);
+  if (existingSameDate.rows.length > 0 && !confirmReplace) {
+    const row = existingSameDate.rows[0] as ConflictRow;
+    const validFromIso = rawDateToISO(row.validFrom);
+    res.status(409).json({
+      error: "PRICE_CONFLICT",
+      code: "PRICE_CONFLICT",
+      message: `Es existiert bereits ein aktiver Preis ab dem ${validFromIso} für ${row.serviceName}. Möchten Sie ihn ersetzen?`,
+      details: {
+        existing: {
+          id: row.id,
+          priceCents: row.priceCents,
+          validFrom: validFromIso,
+          serviceName: row.serviceName,
+        },
+        newPriceCents: priceCents,
+      },
+    });
+    return;
+  }
 
-    const futureRecords = await tx.execute(sql`
-      SELECT id, valid_from FROM customer_service_prices
-      WHERE customer_id = ${customerId} AND service_id = ${serviceId}
-        AND valid_from::date > ${newValidFromDate}::date
-        AND deleted_at IS NULL
-      ORDER BY valid_from ASC LIMIT 1
-    `);
+  let replacedRow: ConflictRow | null = existingSameDate.rows.length > 0
+    ? (existingSameDate.rows[0] as ConflictRow)
+    : null;
 
-    let newValidTo: string | null = null;
-    if (futureRecords.rows.length > 0) {
-      const futureStartRaw = futureRecords.rows[0].valid_from;
-      const futureDate = futureStartRaw instanceof Date
-        ? `${futureStartRaw.getFullYear()}-${String(futureStartRaw.getMonth() + 1).padStart(2, "0")}-${String(futureStartRaw.getDate()).padStart(2, "0")}`
-        : String(futureStartRaw).substring(0, 10);
-      newValidTo = addDays(futureDate, -1);
+  let result;
+  try {
+    result = await db.transaction(async (tx) => {
+      const lockedExisting = await tx.execute(sql`
+        SELECT csp.id, csp.price_cents AS "priceCents", csp.valid_from AS "validFrom",
+               s.name AS "serviceName"
+        FROM customer_service_prices csp
+        JOIN services s ON s.id = csp.service_id
+        WHERE csp.customer_id = ${customerId} AND csp.service_id = ${serviceId}
+          AND csp.valid_from::date = ${newValidFromDate}::date AND csp.deleted_at IS NULL
+        ORDER BY csp.id DESC LIMIT 1
+        FOR UPDATE
+      `);
+
+      if (lockedExisting.rows.length > 0) {
+        if (!confirmReplace) {
+          throw new PriceConflictError(lockedExisting.rows[0] as ConflictRow);
+        }
+        replacedRow = lockedExisting.rows[0] as ConflictRow;
+      }
+
+      await tx.execute(sql`
+        UPDATE customer_service_prices SET deleted_at = NOW()
+        WHERE customer_id = ${customerId} AND service_id = ${serviceId}
+          AND valid_from::date = ${newValidFromDate}::date AND deleted_at IS NULL
+      `);
+
+      await tx.execute(sql`
+        UPDATE customer_service_prices
+        SET valid_to = ${dayBeforeNew}::date
+        WHERE customer_id = ${customerId} AND service_id = ${serviceId}
+          AND valid_from::date < ${newValidFromDate}::date
+          AND (valid_to IS NULL OR valid_to::date >= ${newValidFromDate}::date)
+          AND deleted_at IS NULL
+      `);
+
+      const futureRecords = await tx.execute(sql`
+        SELECT id, valid_from FROM customer_service_prices
+        WHERE customer_id = ${customerId} AND service_id = ${serviceId}
+          AND valid_from::date > ${newValidFromDate}::date
+          AND deleted_at IS NULL
+        ORDER BY valid_from ASC LIMIT 1
+      `);
+
+      let newValidTo: string | null = null;
+      if (futureRecords.rows.length > 0) {
+        const futureStartRaw = futureRecords.rows[0].valid_from;
+        const futureDate = rawDateToISO(futureStartRaw);
+        newValidTo = addDays(futureDate, -1);
+      }
+
+      const inserted = await tx.execute(sql`
+        INSERT INTO customer_service_prices (customer_id, service_id, price_cents, valid_from, valid_to)
+        VALUES (${customerId}, ${serviceId}, ${priceCents}, ${newValidFromDate}::date, ${newValidTo ? sql`${newValidTo}::date` : sql`NULL`})
+        RETURNING id, customer_id AS "customerId", service_id AS "serviceId", price_cents AS "priceCents",
+                  valid_from AS "validFrom", valid_to AS "validTo"
+      `);
+      return inserted;
+    });
+  } catch (err) {
+    const isAppConflict = err instanceof PriceConflictError;
+    const isPgUniqueViolation = !isAppConflict && isUniqueViolation(err);
+
+    if (isAppConflict || isPgUniqueViolation) {
+      let conflictRow: ConflictRow;
+      if (isAppConflict) {
+        conflictRow = err.row;
+      } else {
+        const refetch = await db.execute(sql`
+          SELECT csp.id, csp.price_cents AS "priceCents", csp.valid_from AS "validFrom",
+                 s.name AS "serviceName"
+          FROM customer_service_prices csp
+          JOIN services s ON s.id = csp.service_id
+          WHERE csp.customer_id = ${customerId} AND csp.service_id = ${serviceId}
+            AND csp.valid_from::date = ${newValidFromDate}::date AND csp.deleted_at IS NULL
+          ORDER BY csp.id DESC LIMIT 1
+        `);
+        conflictRow = refetch.rows[0] as ConflictRow;
+      }
+
+      const validFromIso = rawDateToISO(conflictRow.validFrom);
+      res.status(409).json({
+        error: "PRICE_CONFLICT",
+        code: "PRICE_CONFLICT",
+        message: `Es existiert bereits ein aktiver Preis ab dem ${validFromIso} für ${conflictRow.serviceName}. Möchten Sie ihn ersetzen?`,
+        details: {
+          existing: {
+            id: conflictRow.id,
+            priceCents: conflictRow.priceCents,
+            validFrom: validFromIso,
+            serviceName: conflictRow.serviceName,
+          },
+          newPriceCents: priceCents,
+        },
+      });
+      return;
     }
+    throw err;
+  }
 
-    const inserted = await tx.execute(sql`
-      INSERT INTO customer_service_prices (customer_id, service_id, price_cents, valid_from, valid_to)
-      VALUES (${customerId}, ${serviceId}, ${priceCents}, ${newValidFromDate}::date, ${newValidTo ? sql`${newValidTo}::date` : sql`NULL`})
-      RETURNING id, customer_id AS "customerId", service_id AS "serviceId", price_cents AS "priceCents",
-                valid_from AS "validFrom", valid_to AS "validTo"
-    `);
-    return inserted;
-  });
+  if (replacedRow && req.user) {
+    const insertedRow = result.rows[0] as { id: number };
+    auditService.log(
+      req.user.id,
+      "customer_price_replaced",
+      "customer",
+      customerId,
+      {
+        customerId,
+        serviceId,
+        serviceName: replacedRow.serviceName,
+        validFrom: newValidFromDate,
+        replacedPriceId: replacedRow.id,
+        oldPriceCents: replacedRow.priceCents,
+        newPriceId: insertedRow.id,
+        newPriceCents: priceCents,
+      },
+      req.ip,
+    ).catch(() => {});
+  }
 
   if (affectedInvoices.length > 0 && req.user?.id) {
     await auditService.log(

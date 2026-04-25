@@ -1726,12 +1726,11 @@ describe("CPB: Kundenpreis-Grenzfälle (validFrom/validTo + Race-Conditions)", (
     serviceId: number,
     priceCents: number,
     validFrom: string,
+    opts: { confirmReplace?: boolean } = {},
   ): Promise<number> {
-    const res = await apiPost<any>(`/api/customers/${customerId}/service-prices`, {
-      serviceId,
-      priceCents,
-      validFrom,
-    });
+    const body: Record<string, unknown> = { serviceId, priceCents, validFrom };
+    if (opts.confirmReplace) body.confirmReplace = true;
+    const res = await apiPost<any>(`/api/customers/${customerId}/service-prices`, body);
     expect(res.status, `Kundenpreis ${priceCents} ab ${validFrom} muss gesetzt werden (body=${JSON.stringify(res.data)})`).toBe(200);
     cleanupCustomerPriceIds.push({ customerId, priceId: res.data.id });
     return res.data.id;
@@ -1890,22 +1889,28 @@ describe("CPB: Kundenpreis-Grenzfälle (validFrom/validTo + Race-Conditions)", (
     expect(newItem.unitPriceCents, `Tag X+1 (${dayXPlus1Str}, = neues validFrom) muss neuen Preis 7000 nutzen`).toBe(7000);
   });
 
-  it("CPB-5 – Parallele Preise mit identischem validFrom (Roh-Insert): höchste id (= zuletzt eingefügt) gewinnt deterministisch", async () => {
+  it("CPB-5 – Partial-Unique-Index verhindert zwei aktive Preise mit identischem validFrom (Roh-Insert)", async () => {
     const custId = await createBoundaryCustomer("parallel-raw");
-    // Beide Preise mit identischem validFrom, ohne validTo, OHNE Soft-Delete-Flag.
-    // Simuliert eine echte Race-Condition oder einen manuellen DB-Eingriff.
+    // Erster Roh-Insert geht durch.
     const idA = await insertCustomerPriceRaw(custId, hwServiceId, 5500, D0Str);
-    const idB = await insertCustomerPriceRaw(custId, hwServiceId, 7000, D0Str);
-    expect(idB, "Zweiter Insert muss höhere id bekommen").toBeGreaterThan(idA);
 
-    const appt = await createApptOnDate(custId, hwServiceId, D0Str, 60);
-    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-5-parallel", 0, 0);
-
-    const unitPrice = await billAndGetUnitPriceFor(custId, D0Str, "hauswirtschaft", "CPB-5-parallel");
+    // Zweiter Roh-Insert mit identischem validFrom muss am Partial-Unique-Index
+    // (csp_customer_service_validfrom_active_idx WHERE deleted_at IS NULL) scheitern.
+    const dup = await apiPost<any>(
+      "/api/admin/test-cleanup/insert-customer-service-price-raw",
+      { customerId: custId, serviceId: hwServiceId, priceCents: 7000, validFrom: D0Str },
+    );
     expect(
-      unitPrice,
-      `Bei identischem validFrom muss zuletzt eingefügter Preis (id=${idB}, 7000) gewinnen, nicht ${unitPrice}`,
-    ).toBe(7000);
+      dup.status,
+      `Zweiter Roh-Insert mit identischem validFrom muss vom DB-Constraint abgelehnt werden (got ${dup.status} ${JSON.stringify(dup.data)})`,
+    ).not.toBe(200);
+
+    // Über die Route nutzt der Termin den einen aktiven Preis (5500).
+    const appt = await createApptOnDate(custId, hwServiceId, D0Str, 60);
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-5-unique", 0, 0);
+
+    const unitPrice = await billAndGetUnitPriceFor(custId, D0Str, "hauswirtschaft", "CPB-5-unique");
+    expect(unitPrice, `Einzig aktiver Preis (id=${idA}, 5500) muss verwendet werden`).toBe(5500);
   });
 
   it("CPB-6 – Sequentielles POST mit identischem validFrom: Vorgänger wird soft-deleted und ignoriert (deleted_at-Filter im Billing)", async () => {
@@ -1914,7 +1919,7 @@ describe("CPB: Kundenpreis-Grenzfälle (validFrom/validTo + Race-Conditions)", (
     // Die Route soft-deleted PriceA. Ohne deleted_at-Filter im Billing würde
     // PriceA weiterhin als Kandidat auftauchen und ggf. fälschlich gewinnen.
     await setCustomerPriceViaApi(custId, hwServiceId, 5500, D0Str);
-    await setCustomerPriceViaApi(custId, hwServiceId, 7000, D0Str);
+    await setCustomerPriceViaApi(custId, hwServiceId, 7000, D0Str, { confirmReplace: true });
 
     const appt = await createApptOnDate(custId, hwServiceId, D0Str, 60);
     await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-6-resequenced", 0, 0);

@@ -25,6 +25,7 @@ const ACTION_LABELS: Record<string, string> = {
   import_trim_reconciled: "Import-Reparatur (Termin)",
   import_trim_reconciled_batch: "Import-Reparatur (Sitzung)",
   customer_hard_deleted: "Kunde gelöscht (hart)",
+  customer_price_replaced: "Kundenpreis ersetzt",
 };
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
@@ -121,6 +122,14 @@ export default function AdminAuditLog() {
     }
     if (typeof m.batchId === "string") {
       parts.push(`Sitzung: ${m.batchId.slice(0, 8)}`);
+    }
+    if (entry.action === "customer_price_replaced") {
+      if (typeof m.serviceName === "string") parts.push(`Service: ${m.serviceName}`);
+      if (typeof m.validFrom === "string") parts.push(`Stichtag: ${m.validFrom}`);
+      if (typeof m.oldPriceCents === "number" && typeof m.newPriceCents === "number") {
+        const fmt = (c: number) => `${(c / 100).toFixed(2).replace(".", ",")} €`;
+        parts.push(`${fmt(m.oldPriceCents as number)} → ${fmt(m.newPriceCents as number)}`);
+      }
     }
     return parts.join(" · ");
   };

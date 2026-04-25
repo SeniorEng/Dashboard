@@ -54,6 +54,7 @@ export const AUDIT_ACTIONS = [
   "import_trim_reconciled_batch",
   "customer_hard_deleted",
   "customer_price_changed_invoiced",
+  "customer_price_replaced",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

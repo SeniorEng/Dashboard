@@ -1,4 +1,5 @@
 import { pgTable, text, integer, serial, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -51,6 +52,9 @@ export const customerServicePrices = pgTable("customer_service_prices", {
 }, (table) => [
   index("csp_customer_service_idx").on(table.customerId, table.serviceId),
   uniqueIndex("csp_customer_service_active_idx").on(table.customerId, table.serviceId, table.validTo),
+  uniqueIndex("csp_customer_service_validfrom_active_idx")
+    .on(table.customerId, table.serviceId, table.validFrom)
+    .where(sql`deleted_at IS NULL`),
 ]);
 
 export const insertCustomerServicePriceSchema = z.object({
