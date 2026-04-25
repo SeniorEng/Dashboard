@@ -7,9 +7,15 @@ import type { User, SafeUser } from "@shared/schema";
  * Prüft, ob ein Benutzer als Teamleiter markiert ist und aktiv.
  * Admins/SuperAdmins sind keine Teamleiter, auch wenn sie das Flag tragen würden.
  */
-export function isTeamLead(user: Pick<User, "isTeamLead" | "isActive" | "isAdmin"> | SafeUser | null | undefined): boolean {
+export function isTeamLead(
+  user:
+    | Pick<User, "isTeamLead" | "isActive" | "isAdmin" | "isSuperAdmin">
+    | SafeUser
+    | null
+    | undefined,
+): boolean {
   if (!user) return false;
-  if (user.isAdmin) return false;
+  if (user.isAdmin || (user as { isSuperAdmin?: boolean }).isSuperAdmin) return false;
   return Boolean(user.isTeamLead) && Boolean(user.isActive);
 }
 
