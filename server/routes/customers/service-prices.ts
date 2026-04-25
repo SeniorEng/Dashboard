@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { insertCustomerServicePriceSchema } from "@shared/schema";
 import { requireAdmin } from "../../middleware/auth";
 import { asyncHandler } from "../../lib/errors";
@@ -38,6 +39,24 @@ function isUniqueViolation(err: unknown): boolean {
   }
   return false;
 }
+
+const updateCustomerServicePriceSchema = z
+  .object({
+    priceCents: z.number().int().min(1, "Preis muss mindestens 1 Cent betragen").optional(),
+    validFrom: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein")
+      .optional(),
+    validTo: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein")
+      .nullable()
+      .optional(),
+  })
+  .refine(
+    (d) => d.priceCents !== undefined || d.validFrom !== undefined || d.validTo !== undefined,
+    { message: "Mindestens ein Feld (priceCents, validFrom oder validTo) muss angegeben werden" },
+  );
 
 const router = Router();
 
@@ -348,6 +367,116 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
   }
 
   res.json(result.rows[0]);
+}));
+
+router.patch("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kundenpreis konnte nicht aktualisiert werden", async (req, res) => {
+  const customerId = requireIntParam(req.params.id, res);
+  if (customerId === null) return;
+  const priceId = requireIntParam(req.params.priceId, res);
+  if (priceId === null) return;
+
+  const confirmInvoiceOverride = req.body?.confirmInvoiceOverride === true;
+  const { confirmInvoiceOverride: _omit, ...patchBody } = req.body ?? {};
+  const parsed = updateCustomerServicePriceSchema.safeParse(patchBody);
+  if (!parsed.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: parsed.error.message });
+    return;
+  }
+
+  const existing = await db.execute(sql`
+    SELECT id, service_id, price_cents, valid_from, valid_to FROM customer_service_prices
+    WHERE id = ${priceId} AND customer_id = ${customerId} AND deleted_at IS NULL
+  `);
+  if (existing.rows.length === 0) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kundenpreis nicht gefunden" });
+    return;
+  }
+  const row = existing.rows[0] as {
+    id: number;
+    service_id: number;
+    price_cents: number;
+    valid_from: string | Date;
+    valid_to: string | Date | null;
+  };
+
+  function dateToISO(v: string | Date): string {
+    return v instanceof Date
+      ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`
+      : String(v).substring(0, 10);
+  }
+
+  const oldValidFrom = dateToISO(row.valid_from);
+  const oldValidTo = row.valid_to ? dateToISO(row.valid_to) : null;
+  const oldPriceCents = row.price_cents;
+
+  const newValidFrom = parsed.data.validFrom ?? oldValidFrom;
+  const newValidTo = parsed.data.validTo === undefined ? oldValidTo : parsed.data.validTo;
+  const newPriceCents = parsed.data.priceCents ?? oldPriceCents;
+
+  if (newValidTo !== null && newValidTo < newValidFrom) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: "Gültig-bis-Datum darf nicht vor Gültig-ab-Datum liegen.",
+    });
+    return;
+  }
+
+  const validFromChanged = newValidFrom !== oldValidFrom;
+  const validToChanged = (newValidTo ?? null) !== (oldValidTo ?? null);
+  const priceChanged = newPriceCents !== oldPriceCents;
+
+  let affectedInvoices: AffectedInvoice[] = [];
+  if (validFromChanged || validToChanged || priceChanged) {
+    const earliestAffected = newValidFrom < oldValidFrom ? newValidFrom : oldValidFrom;
+    affectedInvoices = await findAffectedInvoicesFromDate(db, customerId, earliestAffected);
+  }
+
+  if (affectedInvoices.length > 0 && !confirmInvoiceOverride) {
+    sendInvoicedPeriodConflict(
+      res,
+      "Diese Preisänderung betrifft bereits abgerechnete Monate. Bitte bestätigen Sie die Änderung.",
+      affectedInvoices,
+    );
+    return;
+  }
+
+  await db.execute(sql`
+    UPDATE customer_service_prices
+    SET price_cents = ${newPriceCents},
+        valid_from = ${newValidFrom}::date,
+        valid_to = ${newValidTo ? sql`${newValidTo}::date` : sql`NULL`}
+    WHERE id = ${priceId}
+  `);
+
+  if (affectedInvoices.length > 0 && req.user?.id) {
+    await auditService.log(
+      req.user.id,
+      "customer_price_changed_invoiced",
+      "customer",
+      customerId,
+      {
+        action: "update_price",
+        priceId,
+        serviceId: row.service_id,
+        before: { priceCents: oldPriceCents, validFrom: oldValidFrom, validTo: oldValidTo },
+        after: { priceCents: newPriceCents, validFrom: newValidFrom, validTo: newValidTo },
+        affectedInvoices: affectedInvoices.map((i) => ({
+          id: i.id,
+          invoiceNumber: i.invoiceNumber,
+          billingMonth: i.billingMonth,
+          billingYear: i.billingYear,
+        })),
+      },
+      req.ip,
+    );
+  }
+
+  const updated = await db.execute(sql`
+    SELECT id, customer_id AS "customerId", service_id AS "serviceId", price_cents AS "priceCents",
+           valid_from AS "validFrom", valid_to AS "validTo"
+    FROM customer_service_prices WHERE id = ${priceId}
+  `);
+  res.json(updated.rows[0]);
 }));
 
 router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kundenpreis konnte nicht gelöscht werden", async (req, res) => {
