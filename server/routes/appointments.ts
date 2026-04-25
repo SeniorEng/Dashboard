@@ -113,8 +113,10 @@ export async function checkCustomerAccess(
   if (assignedCustomerIds.includes(customerId)) return true;
 
   if (lead) {
-    const teamCustomerIds = await getTeamLeadVisibleCustomerIds(user.id);
-    if (teamCustomerIds.includes(customerId)) return true;
+    // Teamleiter dürfen einen Termin nur lesen, wenn der zugewiesene oder
+    // dokumentierende Mitarbeiter zum eigenen Team gehört. Eine reine
+    // "Kunde liegt im Team-Sichtfeld"-Bedingung würde Außenstehenden-
+    // Termine auf gemeinsamen Kunden leaken (Task #201, read-only).
     if (appointmentEmployeeIds) {
       const assigned = appointmentEmployeeIds.assignedEmployeeId;
       const performed = appointmentEmployeeIds.performedByEmployeeId;
@@ -309,7 +311,10 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
     customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
   } else if (lead) {
-    customerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    // Strikt mitarbeiter-basiert: Teamleiter sehen nur Termine ihres Teams
+    // (eigene + zugeordnete Mitarbeiter). customerIds bleibt undefined,
+    // damit Außenstehenden-Termine auf gemeinsamen Kunden NICHT geladen
+    // werden (Task #201, read-only Sichten).
     employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
   } else if (!user.isAdmin) {
     customerIds = await storage.getPrimaryCustomerIds(user.id);
@@ -318,14 +323,14 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
 
   if (customerId) {
     if (lead) {
-      const teamCustomerIds = customerIds ?? await getTeamLeadVisibleCustomerIds(user.id);
+      const teamCustomerIds = await getTeamLeadVisibleCustomerIds(user.id);
       if (!teamCustomerIds.includes(customerId)) {
         return res.json([]);
       }
       // Strikte UND-Verknüpfung erzwingen: Termine müssen sowohl auf den
       // gewählten Kunden lauten ALS AUCH von Lead/Mitglied stammen. Ohne
       // assignedOnly würde der Storage OR-verknüpfen und Außenstehenden-
-      // Termine auf gemeinsamen Kunden zurückgeben (Task #201).
+      // Termine auf gemeinsamen Kunden zurückgeben.
       assignedOnly = true;
     } else if (employeeId !== undefined && !Array.isArray(employeeId)) {
       const allAssignedIds = await storage.getAssignedCustomerIds(employeeId);
@@ -362,7 +367,8 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
     customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
   } else if (lead) {
-    customerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    // Strikt mitarbeiter-basiert (vgl. List-Endpoint): Außenstehenden-
+    // Termine auf gemeinsamen Kunden bleiben unsichtbar.
     employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
   } else if (!user.isAdmin) {
     customerIds = await storage.getPrimaryCustomerIds(user.id);
@@ -399,7 +405,7 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
     employeeId = viewAsEmployeeId;
     assignedOnlyUndoc = true;
   } else if (lead) {
-    customerIds = await getTeamLeadVisibleCustomerIds(user.id);
+    // Strikt mitarbeiter-basiert (vgl. List-Endpoint).
     employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
   } else if (!user.isAdmin) {
     customerIds = await storage.getAssignedCustomerIds(user.id);

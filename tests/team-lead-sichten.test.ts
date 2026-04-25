@@ -365,6 +365,60 @@ describe("Task #201 – Teamleiter-Sichten", () => {
       const res = await apiGetAs<any>(setup.memberAuth, `/api/appointments/${setup.appointmentLead}`);
       expect(res.status).toBe(403);
     });
+
+    it("Teamleiter: darf NICHT Outsider-Termin auf gemeinsamem Kunden lesen", async () => {
+      // Outsider zusätzlich zu customerMember zuordnen, dann einen Termin
+      // des Outsiders auf diesem geteilten Kunden anlegen.
+      await assignEmployeeToCustomer(setup.customerMember, setup.outsider.id);
+      const sharedDate = nextWeekday(9);
+      const aOutsiderOnShared = await createApptForCustomer(
+        setup.customerMember,
+        setup.outsider.id,
+        setup.serviceId,
+        sharedDate,
+        "13:00"
+      );
+      const res = await apiGetAs<any>(setup.leadAuth, `/api/appointments/${aOutsiderOnShared}`);
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe("Negativ-Regressionen: Geteilter Kunde + Outsider", () => {
+    it("Teamleiter: /counts darf Outsider-Termin auf gemeinsamem Kunden NICHT mitzählen", async () => {
+      await assignEmployeeToCustomer(setup.customerMember, setup.outsider.id);
+      const sharedDate = nextWeekday(10);
+      // Outsider-Termin auf geteiltem Kunden anlegen
+      await createApptForCustomer(
+        setup.customerMember,
+        setup.outsider.id,
+        setup.serviceId,
+        sharedDate,
+        "14:00"
+      );
+      const res = await apiGetAs<any>(setup.leadAuth, `/api/appointments/counts?dates=${sharedDate}`);
+      expect(res.status).toBe(200);
+      const counts = res.data?.counts ?? res.data ?? {};
+      const value = counts[sharedDate] ?? 0;
+      // Lead/Member haben an diesem Tag keinen Termin → Counts müssen 0 bleiben.
+      expect(value).toBe(0);
+    });
+
+    it("Teamleiter: /undocumented darf Outsider-Termin auf gemeinsamem Kunden NICHT enthalten", async () => {
+      await assignEmployeeToCustomer(setup.customerMember, setup.outsider.id);
+      const sharedDate = nextWeekday(11);
+      const aOutsiderOnShared = await createApptForCustomer(
+        setup.customerMember,
+        setup.outsider.id,
+        setup.serviceId,
+        sharedDate,
+        "15:00"
+      );
+      const res = await apiGetAs<any>(setup.leadAuth, `/api/appointments/undocumented`);
+      expect(res.status).toBe(200);
+      const list = Array.isArray(res.data) ? res.data : (res.data?.appointments ?? []);
+      const ids = list.map((a: any) => a.id);
+      expect(ids).not.toContain(aOutsiderOnShared);
+    });
   });
 
   describe("GET /api/team/weekly-availability", () => {
