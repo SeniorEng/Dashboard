@@ -390,6 +390,36 @@ export async function createSignedServiceRecord(
   return res.data;
 }
 
+export async function createTestService(opts: {
+  namePrefix?: string;
+  category?: string;
+  basePriceCents?: number;
+  unit?: string;
+  durationMinutes?: number;
+} = {}): Promise<{ id: number; name: string; [key: string]: unknown }> {
+  const id = uniqueId();
+  const prefix = opts.namePrefix || "auto";
+  const name = `${prefix}_test_${id}`;
+  const res = await apiPost<any>("/api/admin/services", {
+    name,
+    category: opts.category || "betreuung",
+    basePriceCents: opts.basePriceCents ?? 3500,
+    unit: opts.unit || "hour",
+    durationMinutes: opts.durationMinutes ?? 60,
+    isActive: true,
+  });
+  if (res.status !== 201 && res.status !== 200) {
+    throw new Error(`createTestService failed: ${res.status} ${JSON.stringify(res.data)}`);
+  }
+  const created = res.data as { id: number; name: string };
+  trackCleanup(async () => {
+    try {
+      await apiPost(`/api/admin/test-cleanup/purge-test-services`, { ids: [created.id] });
+    } catch {}
+  });
+  return created;
+}
+
 const cleanupQueue: Array<() => Promise<void>> = [];
 
 export function trackCleanup(fn: () => Promise<void>): void {

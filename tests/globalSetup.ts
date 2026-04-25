@@ -17,6 +17,17 @@ interface Prospect {
   nachname: string;
 }
 
+interface User {
+  id: number;
+  email: string;
+  nachname: string;
+}
+
+interface Service {
+  id: number;
+  name: string;
+}
+
 async function loginAndGetAuth(): Promise<AuthInfo> {
   const email = process.env.TEST_USER_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
   const password = process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL;
@@ -87,6 +98,21 @@ function isTestProspect(p: Prospect): boolean {
   const n = (p.nachname || "").toLowerCase();
   return v.includes("test") || n.includes("test") || v.startsWith("eb-") ||
     v.startsWith("status-") || n.startsWith("eb");
+}
+
+function isTestUser(u: User): boolean {
+  const e = (u.email || "").toLowerCase();
+  const n = (u.nachname || "").toLowerCase();
+  return e.endsWith("@test.local") || e.startsWith("testemp-") || n.startsWith("testemp_");
+}
+
+function isTestService(s: Service): boolean {
+  const n = (s.name || "").toLowerCase();
+  return n.includes("_test_") || n.includes("test") ||
+    n.startsWith("auto-") || n.startsWith("integ-") ||
+    n.startsWith("fd-") || n.startsWith("pv-") || n.startsWith("sz-") ||
+    n.startsWith("eb-") || n.startsWith("pg1-") || n.startsWith("qs-") ||
+    n.startsWith("status-");
 }
 
 export async function setup() {
@@ -182,6 +208,62 @@ export async function setup() {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn(`[globalSetup] Calendar purge errored: ${msg}`);
+  }
+
+  // Schritt 4: Test-User aufräumen (Domain @test.local oder testemp- Prefix)
+  try {
+    const userRes = await apiGet(auth, "/api/admin/users?limit=1000");
+    if (userRes.ok) {
+      const userData: unknown = await userRes.json();
+      const allUsers: User[] = Array.isArray(userData)
+        ? userData
+        : (userData as Record<string, unknown>).data as User[] || [];
+      const testUsers = allUsers.filter(isTestUser);
+      if (testUsers.length > 0) {
+        console.log(`[globalSetup] Found ${testUsers.length} stale test users, purging...`);
+        const ids = testUsers.map((u) => u.id);
+        for (let i = 0; i < ids.length; i += 100) {
+          const batch = ids.slice(i, i + 100);
+          const res = await apiPost(auth, "/api/admin/test-cleanup/purge-test-users", { ids: batch });
+          if (!res.ok) {
+            console.warn(`[globalSetup] User purge batch failed: ${res.status} ${await res.text()}`);
+            break;
+          }
+        }
+        console.log(`[globalSetup] Test-User-Cleanup abgeschlossen`);
+      }
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[globalSetup] User purge errored: ${msg}`);
+  }
+
+  // Schritt 5: Test-Services aufräumen (Name enthält _test_ etc.)
+  try {
+    const svcRes = await apiGet(auth, "/api/services");
+    if (svcRes.ok) {
+      const svcData: unknown = await svcRes.json();
+      const allServices: Service[] = Array.isArray(svcData)
+        ? svcData
+        : (svcData as Record<string, unknown>).data as Service[] || [];
+      const testServices = allServices.filter(isTestService);
+      if (testServices.length > 0) {
+        console.log(`[globalSetup] Found ${testServices.length} stale test services, purging unreferenced...`);
+        const ids = testServices.map((s) => s.id);
+        for (let i = 0; i < ids.length; i += 100) {
+          const batch = ids.slice(i, i + 100);
+          const res = await apiPost(auth, "/api/admin/test-cleanup/purge-test-services", { ids: batch });
+          if (!res.ok) {
+            console.warn(`[globalSetup] Service purge batch failed: ${res.status} ${await res.text()}`);
+            break;
+          }
+        }
+        console.log(`[globalSetup] Test-Service-Cleanup abgeschlossen`);
+      }
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[globalSetup] Service purge errored: ${msg}`);
   }
 
   console.log("[globalSetup] Cleanup complete");

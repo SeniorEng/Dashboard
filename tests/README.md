@@ -81,3 +81,50 @@ folgendes Pattern:
 Beispiele für korrektes Pattern: `appointments.test.ts`, `time-entries.test.ts`,
 `appointment-series.test.ts`, `budget-e2e.test.ts`, `private-billing-e2e.test.ts`,
 `customer-hard-delete.test.ts`.
+
+## Test-Daten-Konventionen (verbindlich)
+
+Damit die Datenbank nicht erneut zumüllt, gilt **für jede neue Test-Datei**:
+
+### Naming-Pattern (werden vom Cleanup erkannt)
+
+- **Customers / Prospects**: `nachname` startet mit `Auto_`, `Privat-`,
+  `Fahrtdienst-`, `Integ-`; oder `vorname` startet mit `Sz-`, `Pv-`, `Fd-`,
+  `Eb-`, `Pg1-`, `Qs-`, `Status-`; oder Vor-/Nachname enthält `Test`.
+- **Users (Mitarbeiter)**: E-Mail endet auf `@test.local` oder beginnt mit
+  `testemp-`; Nachname beginnt mit `TestEmp_`. `createTestEmployee()` aus
+  `test-utils.ts` macht das automatisch korrekt.
+- **Services**: Name enthält `_test_`. `createTestService()` aus
+  `test-utils.ts` setzt das Pattern automatisch.
+
+### Pflicht zur Cleanup-Registrierung
+
+Jede neu angelegte Test-Entität **muss** über `trackCleanup()` registriert
+sein — entweder direkt oder über die Helper, die das schon eingebaut haben:
+
+| Helper                    | Datei            | Cleanup automatisch |
+|--------------------------|------------------|---------------------|
+| `createTestCustomer()`   | `test-utils.ts`  | ja, via `purge-customers` |
+| `createTestEmployee()`   | `test-utils.ts`  | manuell mit `deactivateTestEmployee()` |
+| `createTestService()`    | `test-utils.ts`  | ja, via `purge-test-services` |
+| `createAndDocumentAppointment()` | `test-utils.ts` | über Customer-Cascade |
+
+In jeder Test-Datei in einem `afterAll`/`afterEach`-Hook `runCleanup()`
+aufrufen.
+
+### Manuelles Cleanup (Trockenlauf, dann anwenden)
+
+```bash
+# Trockenlauf: zeigt nur an, was gelöscht würde
+npx tsx server/scripts/cleanup-test-data.ts --dry-run --scope=all
+
+# Wirklich anwenden (löscht in einer Transaktion, mit Whitelist-Guard)
+npx tsx server/scripts/cleanup-test-data.ts --apply --scope=all
+
+# Nur eine Kategorie (customers | prospects | services | users | orphans | all)
+npx tsx server/scripts/cleanup-test-data.ts --apply --scope=services
+```
+
+Das Skript verweigert die Ausführung, wenn `NODE_ENV=production` gesetzt ist
+oder die Whitelist-Counts (echte Kunden, echte Mitarbeiter, echte Services)
+durch eine Lösch-Operation kleiner werden würden.

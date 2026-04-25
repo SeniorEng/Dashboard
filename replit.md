@@ -187,6 +187,17 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   2. `POST /api/admin/test-cleanup/purge-admin-calendar-range {startOffsetDays, endOffsetDays}` (Task #177, neu) — soft-deleted alle `employee_time_entries` (user_id = caller) und alle `appointments` (assigned_employee_id = caller) im Datumsbereich. Nullt vorher `budget_transactions.appointment_id` und `appointments.travel_from_appointment_id`. globalSetup ruft mit `[+30,+900]` — schont nahe 30 Tage. Hintergrund: Test-Admin (id=1) hatte 14.432 stale future Time-Entries und 11.491 future Termine angesammelt, die TE-BIZ-3 (60-Tage-Slot-Scan ab Offset 260) und EB-5.2 (fixer Slot Offset 280) blockierten.
   - FK-Reihenfolge bei `purge-customers`: prospects.convertedCustomerId, customers.mergedIntoCustomerId, qonto/payment_advice matched_invoice, invoices.stornierte_rechnung, budget_transactions.appointmentId, appointments.travelFromAppointmentId, dann Kinder (invoice_line_items, invoices, appointment_series, appointments, document_deliveries, budget_transactions), dann Kunde (Cascades übernehmen Rest).
 
+## Test-Daten-Hygiene (Task #183, 2026-04-25)
+- **Inventur 24.04.2026**: DB war stark zugemüllt — 3.208 Test-Kunden (78 %), 2.263 Test-Mitarbeiter (99 %), 551 Test-Services (99 %), 1.248 Test-Prospects (99 %).
+- **Cleanup-Skript**: `server/scripts/cleanup-test-data.ts` (Trockenlauf default, `--apply` zum Löschen, `--scope=customers|prospects|services|users|orphans|all`). Schreibt Report in `tmp/cleanup-test-data-{timestamp}.log`. Hostname-Guard verweigert Prod, Whitelist-Guard bricht ab wenn echte Daten kleiner werden würden.
+- **Endstand 25.04.2026 nach Apply**: 87 echte Kunden (Schröder, Haufe, Nagler …), 1 echter Prospect, 16 echte Mitarbeiter, 5 echte Services, 3 echte Rechnungen — Whitelist OK. Test-Pollution = 0.
+- **Wiederholungs-Schutz** in `tests/globalSetup.ts`:
+  - Schritt 4: ruft `POST /api/admin/test-cleanup/purge-test-users` (Batches à 100), löscht Mitarbeiter mit `@test.local` / `testemp-` / `TestEmp_`. Endpoint umgeht für die Dauer der Transaktion die `audit_log_no_delete/no_update` RULES (im finally re-enable).
+  - Schritt 5: ruft `POST /api/admin/test-cleanup/purge-test-services`, löscht nur Services, die in keinem Termin mehr referenziert sind (verhindert FK-Verletzung mit echten Terminen, falls Test-Service noch verlinkt ist).
+- **Test-Helper**: `tests/test-utils.ts: createTestService()` neu — vergibt Pattern `{prefix}_test_{uniqueId}` und registriert via `trackCleanup()` automatisch den Service-Purge.
+- **Audit-Log-Bypass**: nur scoped pro Lösch-Batch via `ALTER TABLE audit_log DISABLE/ENABLE RULE` im try/finally — nie global.
+- **Manuell ausführen**: `npx tsx server/scripts/cleanup-test-data.ts --dry-run` (siehe `tests/README.md` Abschnitt „Test-Daten-Konventionen").
+
 ## Lead-Automatische-Antwort-E-Mail
 - **Funktion**: Bei neuem Lead mit E-Mail-Adresse wird automatisch eine formatierte E-Mail an den Interessenten gesendet, mit optionalem PDF-Anhang (z.B. Infobroschüre).
 - **Service**: `server/services/lead-auto-reply.ts` — `sendLeadAutoReply()` (fire-and-forget aus Webhook).

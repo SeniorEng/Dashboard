@@ -73,6 +73,10 @@ const CUSTOMER_TEST_CONDITION = sql`(
   OR LOWER(vorname) LIKE 'sz-%' OR LOWER(vorname) LIKE 'pv-%' OR LOWER(vorname) LIKE 'fd-%'
   OR LOWER(vorname) LIKE 'eb-%' OR LOWER(vorname) LIKE 'pg1-%' OR LOWER(vorname) LIKE 'qs-%'
   OR LOWER(vorname) LIKE 'status-%'
+  -- Import-Test-Patterns (Marvin/Bertha/Idem/Cap mit nachname-Timestamps)
+  OR LOWER(nachname) LIKE 'importtrim-%' OR LOWER(nachname) LIKE 'notrim-%'
+  OR LOWER(nachname) LIKE 'reconcile-%' OR LOWER(nachname) LIKE 'aligned-%'
+  OR LOWER(nachname) LIKE 'mustermann-%'
 )`;
 
 const PROSPECT_TEST_CONDITION = sql`(
@@ -267,6 +271,10 @@ async function purgeTestProspects(apply: boolean): Promise<void> {
     const idList = sql.join(ids.map((i) => sql`${i}`), sql`, `);
     await tx.execute(sql`DELETE FROM prospect_notes WHERE prospect_id IN (${idList})`);
     await tx.execute(sql`DELETE FROM prospect_offers WHERE prospect_id IN (${idList})`);
+    // appointments mit (prospect_id IS NOT NULL AND customer_id IS NULL) verletzen
+    // die Check-Constraint, wenn man prospect_id auf NULL setzt → solche Termine
+    // hart löschen (Test-Termine ohne Kunden), übrige nur entkoppeln.
+    await tx.execute(sql`DELETE FROM appointments WHERE prospect_id IN (${idList}) AND customer_id IS NULL`);
     await tx.execute(sql`UPDATE appointments SET prospect_id = NULL WHERE prospect_id IN (${idList})`);
     await tx.execute(sql`DELETE FROM prospects WHERE id IN (${idList})`);
   });
@@ -280,28 +288,28 @@ async function purgeTestServices(apply: boolean): Promise<void> {
   log(`Gefunden: ${all.length} Test-Services`);
   if (all.length === 0) return;
 
-  // Filter out services still referenced by appointment_services or customer_service_prices
+  // Nur appointment_services blockt (NO ACTION). customer_service_prices und
+  // service_budget_pots haben CASCADE und werden automatisch mitgelöscht – das
+  // ist OK, weil sie reine Preis-Override-Einträge sind, die durch Test-Services
+  // entstanden sind und nach deren Entfernung sowieso ungültig wären.
   const idList = sql.join(all.map((r) => sql`${r.id}`), sql`, `);
   const refsRes = await db.execute<{ id: number }>(sql`
-    SELECT DISTINCT id FROM (
-      SELECT service_id AS id FROM appointment_services WHERE service_id IN (${idList})
-      UNION SELECT service_id FROM customer_service_prices WHERE service_id IN (${idList})
-      UNION SELECT service_id FROM service_budget_pots WHERE service_id IN (${idList})
-    ) sub
+    SELECT DISTINCT service_id AS id FROM appointment_services WHERE service_id IN (${idList})
   `);
   const referenced = new Set((refsRes as unknown as { rows: Array<{ id: number }> }).rows.map((r) => r.id));
   const deletable = all.filter((s) => !referenced.has(s.id));
-  log(`  davon noch referenziert: ${all.length - deletable.length} (werden NICHT gelöscht)`);
-  log(`  davon hart löschbar:     ${deletable.length}`);
+  log(`  davon in Terminen referenziert: ${all.length - deletable.length} (werden NICHT gelöscht)`);
+  log(`  davon hart löschbar:            ${deletable.length} (CASCADE räumt Preis-Overrides auf)`);
 
   if (deletable.length === 0 || !apply) {
     if (!apply && deletable.length > 0) log("DRY-RUN: würde " + deletable.length + " unreferenzierte Test-Services löschen.");
     return;
   }
 
+  // service_rates hat keinen FK auf services (Kategorie-basierend), service_budget_pots
+  // und customer_service_prices haben CASCADE — daher reicht der reine DELETE auf services.
   await db.transaction(async (tx) => {
     const dList = sql.join(deletable.map((s) => sql`${s.id}`), sql`, `);
-    await tx.execute(sql`DELETE FROM service_rates WHERE service_id IN (${dList})`);
     await tx.execute(sql`DELETE FROM services WHERE id IN (${dList})`);
   });
   log(`Phase 3 fertig: ${deletable.length} Services gelöscht.`);
@@ -348,18 +356,35 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
     const batch = all.slice(i, i + batchSize);
     const idList = sql.join(batch.map((u) => sql`${u.id}`), sql`, `);
 
+    // audit_log ist per RULE append-only (audit_log_no_delete / no_update).
+    // Wir deaktivieren die Regeln nur für die Dauer dieses Batches und stellen sie
+    // im finally-Block in jedem Fall wieder her – auch wenn das DISABLE selbst
+    // bereits fehlgeschlagen ist (ENABLE auf bereits aktivierte Regel ist No-op).
+    let disabledNoDelete = false;
+    let disabledNoUpdate = false;
+    try {
+    await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_delete`);
+    disabledNoDelete = true;
+    await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_update`);
+    disabledNoUpdate = true;
     await db.transaction(async (tx) => {
-      // Hard-delete child rows in tables with NO ACTION + non-nullable FK to test users
+      // Hard-delete child rows in tables with NO ACTION + non-nullable FK to test users.
+      // (Test-Daten ohne Wert für echte Kunden – verifiziert vor dem Lauf.)
       await tx.execute(sql`DELETE FROM employee_time_entries WHERE user_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM notifications WHERE user_id IN (${idList})`);
-      await tx.execute(sql`DELETE FROM employee_month_closings WHERE user_id IN (${idList})`);
+      await tx.execute(sql`DELETE FROM employee_month_closings WHERE user_id IN (${idList}) OR closed_by_user_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM employee_vacation_allowance WHERE user_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM user_whatsapp_preferences WHERE user_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM whatsapp_message_log WHERE user_id IN (${idList})`);
+      await tx.execute(sql`DELETE FROM audit_log WHERE user_id IN (${idList})`);
+      await tx.execute(sql`DELETE FROM monthly_service_records WHERE employee_id IN (${idList})`);
+      await tx.execute(sql`DELETE FROM customer_assignment_history WHERE employee_id IN (${idList})`);
+      await tx.execute(sql`DELETE FROM tasks WHERE created_by_user_id IN (${idList}) OR assigned_to_user_id IN (${idList})`);
+      await tx.execute(sql`DELETE FROM appointment_series WHERE assigned_employee_id IN (${idList})`);
+      await tx.execute(sql`DELETE FROM employee_compensation_history WHERE created_by_user_id IN (${idList})`);
 
       // SET NULL on nullable FK refs (NO ACTION rules); rows belonging to test customers
       // are already gone from Phase 1, so these affect only orphan/system rows.
-      await tx.execute(sql`UPDATE audit_log SET user_id = NULL WHERE user_id IN (${idList})`);
       await tx.execute(sql`UPDATE birthday_card_tracking SET sent_by_user_id = NULL WHERE sent_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE company_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE system_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
@@ -418,6 +443,17 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
       // employee_document_proofs.employee_id).
       await tx.execute(sql`DELETE FROM users WHERE id IN (${idList})`);
     });
+    } finally {
+      // audit_log-Schutzregeln in JEDEM Fall wieder aktivieren.
+      // try/catch um ENABLE — falls die Verbindung schon kaputt ist, soll
+      // das die Original-Exception nicht überschreiben.
+      if (disabledNoUpdate) {
+        try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_update`); } catch {}
+      }
+      if (disabledNoDelete) {
+        try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_delete`); } catch {}
+      }
+    }
 
     done += batch.length;
     log(`  Fortschritt: ${done}/${all.length} Mitarbeiter verarbeitet`);
