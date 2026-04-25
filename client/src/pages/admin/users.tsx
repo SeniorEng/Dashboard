@@ -540,7 +540,14 @@ export default function AdminUsers() {
   const teamLeadsList = useMemo(
     () =>
       (users ?? [])
-        .filter((u) => u.isTeamLead && u.isActive && !u.isAnonymized)
+        .filter(
+          (u) =>
+            u.isTeamLead &&
+            u.isActive &&
+            !u.isAnonymized &&
+            !u.isAdmin &&
+            !u.isSuperAdmin,
+        )
         .sort((a, b) => a.displayName.localeCompare(b.displayName, "de")),
     [users],
   );
