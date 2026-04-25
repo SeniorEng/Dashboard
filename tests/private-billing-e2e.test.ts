@@ -1009,6 +1009,58 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     ).toBe(defaultHwPrice);
     expect(hwItem.unitPriceCents).not.toBe(5500);
   });
+
+  it("CP-11 – Soft-gelöschter zukünftiger Kundenpreis darf nicht in Rechnung einfließen", async () => {
+    expect(cpCustomerId).toBeDefined();
+    expect(defaultHwPrice).toBeGreaterThan(0);
+
+    const futureValidFrom = addDaysStr(ymdLocal(new Date()), 14);
+
+    const createRes = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
+      serviceId: hwServiceId,
+      priceCents: 7700,
+      validFrom: futureValidFrom,
+    });
+    expect(createRes.status, `Zukünftiger Kundenpreis konnte nicht angelegt werden: ${JSON.stringify(createRes.data)}`).toBe(200);
+    const futurePriceId = createRes.data.id as number;
+    cleanupCustomerPriceIds.push({ customerId: cpCustomerId, priceId: futurePriceId });
+
+    const deleteRes = await apiDelete(`/api/customers/${cpCustomerId}/service-prices/${futurePriceId}`);
+    expect(deleteRes.status).toBe(200);
+
+    const futurePricesRes = await apiGet<any[]>(`/api/customers/${cpCustomerId}/service-prices/future`);
+    const stillVisible = (futurePricesRes.data as any[]).find((p: any) => p.id === futurePriceId);
+    expect(stillVisible, "Soft-gelöschter zukünftiger Preis darf nicht mehr im /future-Endpoint erscheinen").toBeUndefined();
+
+    const cpApptInDeletedRange = await findFreeSlotAndCreate(
+      cpCustomerId, hwServiceId, 60,
+      [14, 40], ["07:00", "07:30", "08:00", "08:30", "09:00", "09:30"],
+      undefined,
+      { direction: "future", minDate: futureValidFrom },
+    );
+    expect(
+      cpApptInDeletedRange.date >= futureValidFrom,
+      `Termin (${cpApptInDeletedRange.date}) muss >= validFrom des gelöschten Preises (${futureValidFrom}) sein`,
+    ).toBe(true);
+    await documentAppointment(cpApptInDeletedRange.id, cpApptInDeletedRange.time, hwServiceId, 60, "CP-Future-Deleted", 0, 0);
+
+    const apptDate = new Date(cpApptInDeletedRange.date);
+    const srId = await createServiceRecord(cpCustomerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    await signServiceRecord(srId);
+    const invData = await generateInvoice(cpCustomerId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    const inv = Array.isArray(invData) ? invData[0] : invData;
+
+    const detail = await getInvoiceWithLineItems(inv.id);
+    const hwItem = detail.lineItems.find(
+      (li: any) => li.serviceCode === "hauswirtschaft" && li.serviceDetails === "CP-Future-Deleted",
+    );
+    expect(hwItem, "HW-Position für CP-Future-Deleted muss vorhanden sein").toBeDefined();
+    expect(
+      hwItem.unitPriceCents,
+      `Termin innerhalb des Original-Bereichs eines soft-gelöschten Kundenpreises muss Standardpreis ${defaultHwPrice} nutzen, nicht den gelöschten Preis 7700`,
+    ).toBe(defaultHwPrice);
+    expect(hwItem.unitPriceCents).not.toBe(7700);
+  });
 });
 
 
