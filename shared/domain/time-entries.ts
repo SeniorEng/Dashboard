@@ -74,3 +74,35 @@ export function getEntryDuration(entry: { durationMinutes: number | null; startT
   return 0;
 }
 
+/**
+ * Liste der Eintragsarten, die als "echte" Arbeitszeit zählen
+ * (relevant für Pausenpflicht und Arbeitszeit-Kappung gem. ArbZG).
+ *
+ * Pause selbst zählt NICHT als Arbeitszeit. Urlaub/Krankheit sind
+ * Abwesenheiten. Verfügbar/Blocker sind organisatorisch.
+ */
+export const WORK_ENTRY_TYPES = ["bueroarbeit", "vertrieb", "sonstiges"] as const;
+export type WorkEntryType = typeof WORK_ENTRY_TYPES[number];
+
+export function isWorkEntryType(entryType: string): entryType is WorkEntryType {
+  return (WORK_ENTRY_TYPES as readonly string[]).includes(entryType);
+}
+
+/**
+ * Pausenpflicht gem. §4 ArbZG:
+ * - > 6 h Arbeit  → mindestens 30 min Pause
+ * - > 9 h Arbeit  → mindestens 45 min Pause
+ *
+ * Liefert 0, wenn keine Pause vorgeschrieben ist.
+ */
+export function calculateRequiredBreak(workMinutes: number): number {
+  if (workMinutes > 540) return 45; // > 9 h
+  if (workMinutes > 360) return 30; // > 6 h
+  return 0;
+}
+
+/**
+ * Tägliches gesetzliches Arbeitszeit-Maximum gem. §3 ArbZG: 10 h = 600 min.
+ */
+export const ARBZG_MAX_DAILY_MINUTES = 600;
+

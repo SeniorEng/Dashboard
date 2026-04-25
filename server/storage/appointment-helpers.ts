@@ -6,7 +6,37 @@ import {
   prospects,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { sql as sqlBuilder } from "drizzle-orm";
+import { sql as sqlBuilder, type SQL } from "drizzle-orm";
+
+/**
+ * SQL-Fragment "Termine, die ein Mitarbeiter sehen darf".
+ *
+ * Ein Termin ist sichtbar, wenn:
+ *  - er dem Mitarbeiter direkt zugewiesen ist (`assignedEmployeeId`), ODER
+ *  - er nicht zugewiesen ist UND der Mitarbeiter Primär- oder Vertretungs-
+ *    Mitarbeiter (1 oder 2) des Kunden ist.
+ *
+ * Vorausgesetzt: die `customers`-Tabelle ist gejoint (innerJoin oder
+ * leftJoin). Bei leftJoin liefert NULL = userId konsistent FALSE, sodass
+ * das Verhalten identisch bleibt.
+ */
+export function employeeVisibleAppointmentsFilter(userId: number): SQL {
+  return sqlBuilder`(
+    ${appointments.assignedEmployeeId} = ${userId}
+    OR (${appointments.assignedEmployeeId} IS NULL AND (${customers.primaryEmployeeId} = ${userId} OR ${customers.backupEmployeeId} = ${userId} OR ${customers.backupEmployeeId2} = ${userId}))
+  )`;
+}
+
+/**
+ * SQL-Fragment "Termine, an denen ein Mitarbeiter (geplant oder tatsächlich)
+ * gearbeitet hat" – für Pausen- und Arbeitszeit-Berechnungen.
+ *
+ * Ein Termin zählt, wenn der Mitarbeiter ihm zugewiesen ist ODER ihn
+ * tatsächlich durchgeführt hat.
+ */
+export function employeeWorkedAppointmentsFilter(userId: number): SQL {
+  return sqlBuilder`(${appointments.assignedEmployeeId} = ${userId} OR ${appointments.performedByEmployeeId} = ${userId})`;
+}
 
 export const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
 

@@ -1,117 +1,16 @@
 import { Router, Request, Response } from "express";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { insertTimeEntrySchema, updateTimeEntrySchema } from "@shared/schema";
+import { insertTimeEntrySchema, updateTimeEntrySchema, type EmployeeTimeEntry } from "@shared/schema";
 import type { TimesPageData, TimeOverviewData, VacationSummary } from "@shared/api";
-import { storage } from "../storage";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
-import { timeToMinutes, isWeekend, parseLocalDate, isPast, formatDateISO } from "@shared/utils/datetime";
-import { getEntryTypeLabel, formatTimeShort, timeRangesOverlap, getAppointmentEndMinutes } from "@shared/domain/time-entries";
+import { timeToMinutes, isWeekend, isPast } from "@shared/utils/datetime";
 import { checkAndRecalcDailyAutoBreak, checkDailyMaximum } from "../services/auto-breaks";
+import { checkTimeConflicts } from "../services/time-entry-validation";
 import monthClosingRouter from "./month-closing";
-
-/**
- * Check for time conflicts with existing appointments and time entries
- * Returns error message if conflict found, null otherwise
- */
-async function checkTimeConflicts(
-  userId: number,
-  date: string,
-  startTime: string | null | undefined,
-  endTime: string | null | undefined,
-  isFullDay: boolean,
-  excludeEntryId?: number,
-  entryType?: string
-): Promise<string | null> {
-  if (entryType === "verfuegbar" || entryType === "blocker") {
-    return null;
-  }
-
-  // Get appointments for this date
-  const appointments = await storage.getAppointmentsForDay(userId, date);
-  
-  // Filter out cancelled appointments
-  const activeAppointments = appointments.filter(a => a.status !== 'cancelled');
-  
-  // Get time entries for this date
-  const timeEntries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
-  
-  // Filter out the entry we're updating (if any) and verfuegbar/blocker entries (organizational only)
-  const otherEntries = timeEntries
-    .filter(e => e.id !== excludeEntryId)
-    .filter(e => e.entryType !== "verfuegbar" && e.entryType !== "blocker");
-  
-  // For full-day entries, check if there are any other active appointments or entries
-  if (isFullDay) {
-    if (activeAppointments.length > 0) {
-      const apptTimes = activeAppointments
-        .map(a => a.scheduledStart)
-        .slice(0, 3)
-        .join(", ");
-      return `An diesem Tag gibt es bereits Termine (${apptTimes})`;
-    }
-    if (otherEntries.length > 0) {
-      const entryTypes = otherEntries.map(e => getEntryTypeLabel(e.entryType)).slice(0, 3).join(", ");
-      return `An diesem Tag gibt es bereits Zeiteinträge (${entryTypes})`;
-    }
-    return null;
-  }
-  
-  // Even without times, check if there's a full-day entry blocking this date
-  for (const entry of otherEntries) {
-    if (entry.isFullDay) {
-      return `An diesem Tag ist bereits ein ganztägiger Eintrag (${getEntryTypeLabel(entry.entryType)}) vorhanden`;
-    }
-  }
-  
-  // For time-based entries, require both start and end times for overlap checks
-  if (!startTime || !endTime) {
-    // Can't check time overlaps without specific times
-    return null;
-  }
-  
-  const newStart = timeToMinutes(startTime);
-  const newEnd = timeToMinutes(endTime);
-  
-  if (newEnd <= newStart) {
-    return "Die Endzeit muss nach der Startzeit liegen";
-  }
-  
-  // Check against active appointments
-  for (const appt of activeAppointments) {
-    const apptStart = timeToMinutes(appt.scheduledStart);
-    const apptEnd = getAppointmentEndMinutes(appt);
-    
-    // Skip appointments with no determinable end time
-    if (apptEnd === -1) continue;
-    
-    if (timeRangesOverlap(newStart, newEnd, apptStart, apptEnd)) {
-      const customerName = appt.customer?.name || `${appt.customer?.vorname || ''} ${appt.customer?.nachname || ''}`.trim() || 'Unbekannt';
-      return `Überlappung mit Termin um ${appt.scheduledStart.slice(0, 5)} Uhr bei ${customerName}`;
-    }
-  }
-  
-  // Check against other time entries
-  for (const entry of otherEntries) {
-    if (entry.isFullDay) {
-      return `An diesem Tag ist bereits ein ganztägiger Eintrag (${getEntryTypeLabel(entry.entryType)}) vorhanden`;
-    }
-    
-    if (entry.startTime && entry.endTime) {
-      const entryStart = timeToMinutes(entry.startTime);
-      const entryEnd = timeToMinutes(entry.endTime);
-      
-      if (timeRangesOverlap(newStart, newEnd, entryStart, entryEnd)) {
-        return `Überlappung mit bestehendem Eintrag (${getEntryTypeLabel(entry.entryType)}) von ${formatTimeShort(entry.startTime)} bis ${formatTimeShort(entry.endTime)} Uhr`;
-      }
-    }
-  }
-  
-  return null;
-}
 
 const router = Router();
 
@@ -250,15 +149,15 @@ router.post("/check-conflicts", asyncHandler("Konfliktprüfung fehlgeschlagen", 
     return res.status(400).json({ error: "Datum erforderlich" });
   }
   
-  const conflict = await checkTimeConflicts(
+  const conflict = await checkTimeConflicts({
     userId,
     date,
-    startTime || null,
-    endTime || null,
-    isFullDay ?? false,
-    excludeEntryId
-  );
-  
+    startTime: startTime || null,
+    endTime: endTime || null,
+    isFullDay: isFullDay ?? false,
+    excludeEntryId,
+  });
+
   res.json({ conflict });
 }));
 
@@ -323,29 +222,18 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
       return res.status(400).json({ error: "Ungültiges Datumsformat für Enddatum" });
     }
-    
-    const startDate = parseLocalDate(validatedData.entryDate);
-    const end = parseLocalDate(endDate);
-    
-    if (end < startDate) {
+
+    if (endDate < validatedData.entryDate) {
       return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
     }
-    
+
     // Collect weekday dates (skip weekends)
-    const weekdayDates: string[] = [];
-    const collectDate = new Date(startDate.getTime());
-    while (collectDate <= end) {
-      const dateStr = formatDateISO(collectDate);
-      if (!isWeekend(dateStr)) {
-        weekdayDates.push(dateStr);
-      }
-      collectDate.setDate(collectDate.getDate() + 1);
-    }
-    
+    const weekdayDates = timeTrackingStorage.collectWeekdayDates(validatedData.entryDate, endDate);
+
     if (weekdayDates.length === 0) {
       return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
     }
-    
+
     if (!req.user!.isAdmin) {
       const checkedMonths = new Map<string, boolean>();
       for (const dateStr of weekdayDates) {
@@ -360,33 +248,25 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
         }
       }
     }
-    
+
     // Check conflicts for all weekdays first
     for (const dateStr of weekdayDates) {
-      const conflict = await checkTimeConflicts(
+      const conflict = await checkTimeConflicts({
         userId,
-        dateStr,
-        validatedData.startTime,
-        validatedData.endTime,
-        validatedData.isFullDay ?? true,
-        undefined,
-        validatedData.entryType
-      );
+        date: dateStr,
+        startTime: validatedData.startTime,
+        endTime: validatedData.endTime,
+        isFullDay: validatedData.isFullDay ?? true,
+        entryType: validatedData.entryType,
+      });
       if (conflict) {
         return res.status(400).json({ 
           error: `Konflikt am ${dateStr.split('-').reverse().join('.')}: ${conflict}` 
         });
       }
     }
-    
-    const entries = [];
-    for (const dateStr of weekdayDates) {
-      const entry = await timeTrackingStorage.createTimeEntry(userId, {
-        ...validatedData,
-        entryDate: dateStr,
-      });
-      entries.push(entry);
-    }
+
+    const entries = await timeTrackingStorage.createTimeEntriesForDates(userId, weekdayDates, validatedData);
     
     for (const e of entries) {
       await auditService.log(req.user!.id, isAdminActingForOther ? "admin_time_entry_created" : "time_entry_created", "time_entry", e.id, {
@@ -434,15 +314,14 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   }
   
   // Single day entry - check for conflicts
-  const conflict = await checkTimeConflicts(
+  const conflict = await checkTimeConflicts({
     userId,
-    validatedData.entryDate,
-    validatedData.startTime,
-    validatedData.endTime,
-    validatedData.isFullDay ?? false,
-    undefined,
-    validatedData.entryType
-  );
+    date: validatedData.entryDate,
+    startTime: validatedData.startTime,
+    endTime: validatedData.endTime,
+    isFullDay: validatedData.isFullDay ?? false,
+    entryType: validatedData.entryType,
+  });
   if (conflict) {
     return res.status(400).json({ error: conflict });
   }
@@ -522,15 +401,15 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
   const newIsFullDay = validatedData.isFullDay !== undefined ? validatedData.isFullDay : existing.isFullDay;
   
   const newEntryType = validatedData.entryType ?? existing.entryType;
-  const conflict = await checkTimeConflicts(
-    existing.userId,
-    newDate,
-    newStartTime,
-    newEndTime,
-    newIsFullDay,
-    entryId,
-    newEntryType
-  );
+  const conflict = await checkTimeConflicts({
+    userId: existing.userId,
+    date: newDate,
+    startTime: newStartTime,
+    endTime: newEndTime,
+    isFullDay: newIsFullDay,
+    excludeEntryId: entryId,
+    entryType: newEntryType,
+  });
   if (conflict) {
     return res.status(400).json({ error: conflict });
   }
@@ -550,11 +429,16 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
   const changedFields: string[] = [];
   const oldValues: Record<string, unknown> = {};
   const newValues: Record<string, unknown> = {};
-  for (const key of Object.keys(validatedData) as Array<keyof typeof validatedData>) {
-    if (validatedData[key] !== undefined && validatedData[key] !== (existing as any)[key]) {
+  // Diff only fields that exist on both the validated patch and the persisted row.
+  // Type-narrowed via keyof intersection — no `any` casts required.
+  type DiffableKey = keyof typeof validatedData & keyof EmployeeTimeEntry;
+  for (const key of Object.keys(validatedData) as DiffableKey[]) {
+    const newValue = validatedData[key];
+    const oldValue = existing[key];
+    if (newValue !== undefined && newValue !== oldValue) {
       changedFields.push(key);
-      oldValues[key] = (existing as any)[key];
-      newValues[key] = validatedData[key];
+      oldValues[key] = oldValue;
+      newValues[key] = newValue;
     }
   }
 
