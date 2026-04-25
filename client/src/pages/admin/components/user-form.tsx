@@ -524,6 +524,8 @@ export function UserForm({
                             u.isTeamLead &&
                             u.isActive &&
                             !u.isAnonymized &&
+                            !u.isAdmin &&
+                            !u.isSuperAdmin &&
                             u.id !== user?.id,
                         )
                         .map((u) => (

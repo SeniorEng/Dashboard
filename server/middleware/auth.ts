@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { authService } from "../services/auth";
 import { adminPermissionStorage } from "../storage/admin-permissions";
+import { isTeamLead as userIsTeamLead } from "../lib/team-lead";
 import type { UserWithRoles, EmployeeRole, AdminPermissionKey } from "@shared/schema";
 
 declare global {
@@ -181,7 +182,7 @@ export function requireTeamLeadOrAdmin(
     return;
   }
 
-  if (req.user.isAdmin || (req.user.isTeamLead && req.user.isActive)) {
+  if (req.user.isAdmin || userIsTeamLead(req.user)) {
     next();
     return;
   }
