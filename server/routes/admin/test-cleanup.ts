@@ -15,6 +15,7 @@ import { employeeTimeEntries } from "@shared/schema/time-tracking";
 import { users } from "@shared/schema/users";
 import { services } from "@shared/schema";
 import { appointmentServices } from "@shared/schema";
+import { customerServicePrices } from "@shared/schema";
 
 const router = Router();
 
@@ -407,6 +408,47 @@ router.post(
       skippedReferenced: candidateIds.filter((i) => referenced.has(i)),
       rejected: ids.filter((i) => !candidateIds.includes(i)),
     });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Test-Helfer: Roher Insert in customer_service_prices, ohne Dedup-/Soft-Delete-
+// Logik der regulären POST /api/customers/:id/service-prices Route.
+// Ausschließlich für Boundary-Tests gedacht (Race-Condition / manuelles Insert
+// gleicher validFrom). In Produktion deaktiviert.
+// ---------------------------------------------------------------------------
+const insertCustomerPriceRawSchema = z.object({
+  customerId: z.number().int().positive(),
+  serviceId: z.number().int().positive(),
+  priceCents: z.number().int().min(1),
+  validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+});
+
+router.post(
+  "/test-cleanup/insert-customer-service-price-raw",
+  requireSuperAdmin,
+  asyncHandler("Roh-Insert Kundenpreis fehlgeschlagen", async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === "production") {
+      res.status(403).json({ error: "FORBIDDEN", message: "Test-Helfer ist in Produktion deaktiviert" });
+      return;
+    }
+    const parsed = insertCustomerPriceRawSchema.parse(req.body);
+    const inserted = await db.insert(customerServicePrices).values({
+      customerId: parsed.customerId,
+      serviceId: parsed.serviceId,
+      priceCents: parsed.priceCents,
+      validFrom: new Date(parsed.validFrom + "T00:00:00Z"),
+      validTo: parsed.validTo ? new Date(parsed.validTo + "T00:00:00Z") : null,
+    }).returning({
+      id: customerServicePrices.id,
+      customerId: customerServicePrices.customerId,
+      serviceId: customerServicePrices.serviceId,
+      priceCents: customerServicePrices.priceCents,
+      validFrom: customerServicePrices.validFrom,
+      validTo: customerServicePrices.validTo,
+    });
+    res.json(inserted[0]);
   })
 );
 

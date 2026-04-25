@@ -1604,3 +1604,273 @@ describe("IP: Individuelle Preise – Zwei Kunden mit verschiedenen Preisen für
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// CPB: Customer-Pricing Boundaries — Tests für Datums-Grenzen und Race-Cases.
+// Deckt die exakten validFrom/validTo-Übergänge ab, die im Code-Review als
+// Risiko genannt wurden. Off-by-One in der Preis-Auswahl wäre in einer
+// fertigen Rechnung kaum mehr zurückzurechnen.
+// ---------------------------------------------------------------------------
+describe("CPB: Kundenpreis-Grenzfälle (validFrom/validTo + Race-Conditions)", () => {
+  function nextWeekday(date: Date): Date {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+    return d;
+  }
+
+  /**
+   * Findet ein Paar (X, X+1) bei dem BEIDE Tage Werktage sind, beginnend ab
+   * `from`. Für Tests "konsekutiver Preis-Perioden" — Tag X = altes validTo,
+   * Tag X+1 = neues validFrom. Mo-Do qualifizieren als X (Folge-Tag dann Werktag).
+   */
+  function findConsecutiveWeekdayPair(from: Date): { dayX: Date; dayXPlus1: Date } {
+    const d = new Date(from);
+    d.setHours(0, 0, 0, 0);
+    while (true) {
+      const dow = d.getDay();
+      if (dow >= 1 && dow <= 4) {
+        const next = new Date(d);
+        next.setDate(next.getDate() + 1);
+        return { dayX: new Date(d), dayXPlus1: next };
+      }
+      d.setDate(d.getDate() + 1);
+    }
+  }
+
+  /** Erstellt einen Termin auf einem EXAKTEN Datum (kein Weekend-Skip). */
+  async function createApptOnDate(
+    customerId: number,
+    serviceId: number,
+    dateStr: string,
+    durationMinutes: number,
+    employeeId?: number,
+  ): Promise<{ id: number; date: string; time: string }> {
+    const times = buildFallbackTimeGrid(5);
+    let lastStatus: number | undefined;
+    let lastBody: any;
+    for (const time of times) {
+      const res = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId,
+        date: dateStr,
+        scheduledStart: time,
+        services: [{ serviceId, durationMinutes }],
+        assignedEmployeeId: employeeId || testEmployeeId,
+      });
+      if (res.status === 201) {
+        cleanupApptIds.push(res.data.id);
+        return { id: res.data.id, date: dateStr, time };
+      }
+      lastStatus = res.status;
+      lastBody = res.data;
+    }
+    throw new Error(
+      `Kein freier Slot auf ${dateStr} (lastStatus=${lastStatus}, body=${JSON.stringify(lastBody)})`,
+    );
+  }
+
+  async function setCustomerPriceViaApi(
+    customerId: number,
+    serviceId: number,
+    priceCents: number,
+    validFrom: string,
+  ): Promise<number> {
+    const res = await apiPost<any>(`/api/customers/${customerId}/service-prices`, {
+      serviceId,
+      priceCents,
+      validFrom,
+    });
+    expect(res.status, `Kundenpreis ${priceCents} ab ${validFrom} muss gesetzt werden (body=${JSON.stringify(res.data)})`).toBe(200);
+    cleanupCustomerPriceIds.push({ customerId, priceId: res.data.id });
+    return res.data.id;
+  }
+
+  async function insertCustomerPriceRaw(
+    customerId: number,
+    serviceId: number,
+    priceCents: number,
+    validFrom: string,
+    validTo: string | null = null,
+  ): Promise<number> {
+    const res = await apiPost<any>(
+      "/api/admin/test-cleanup/insert-customer-service-price-raw",
+      { customerId, serviceId, priceCents, validFrom, validTo },
+    );
+    expect(res.status, `Roh-Insert Kundenpreis muss erfolgreich sein (body=${JSON.stringify(res.data)})`).toBe(200);
+    cleanupCustomerPriceIds.push({ customerId, priceId: res.data.id });
+    return res.data.id;
+  }
+
+  async function billAndGetUnitPriceFor(
+    customerId: number,
+    apptDate: string,
+    serviceCode: string,
+    serviceDetails: string,
+  ): Promise<number | undefined> {
+    const d = new Date(apptDate);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const srId = await createServiceRecord(customerId, year, month);
+    await signServiceRecord(srId);
+    const invData = await generateInvoice(customerId, year, month);
+    const inv = Array.isArray(invData) ? invData[0] : invData;
+    const detail = await getInvoiceWithLineItems(inv.id);
+    const item = (detail.lineItems as any[]).find(
+      (li: any) => li.serviceCode === serviceCode && li.serviceDetails === serviceDetails,
+    );
+    return item?.unitPriceCents;
+  }
+
+  async function createBoundaryCustomer(label: string): Promise<number> {
+    const res = await apiPost<any>(
+      "/api/admin/customers",
+      szCustomerPayload({ nachname: `CPB-${label}-` + uniqueId() }),
+    );
+    expect(res.status).toBe(201);
+    const customerId = res.data.id as number;
+    cleanupCustomerIds.push(customerId);
+    await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: testEmployeeId,
+      backupEmployeeId2: null,
+    });
+    return customerId;
+  }
+
+  // Globale Anker-Daten, einmal pro Suite berechnet — sorgen dafür, dass alle
+  // CPB-Tests strikt mit Werktagen arbeiten und keine Wochenend-Validierungen
+  // der Termin-API auslösen.
+  const today = new Date();
+  const D0 = nextWeekday(today);
+  const D0Str = ymdLocal(D0);
+  // Suchstart deutlich nach D0, damit dayX > D0 garantiert ist (keine Überlappung
+  // mit der Erst-Preis-Periode).
+  const searchStart = new Date(D0); searchStart.setDate(searchStart.getDate() + 7);
+  const { dayX, dayXPlus1 } = findConsecutiveWeekdayPair(searchStart);
+  const dayXStr = ymdLocal(dayX);
+  const dayXPlus1Str = ymdLocal(dayXPlus1);
+
+  it("CPB-1 – Termin am EXAKTEN validFrom-Datum nutzt Kundenpreis", async () => {
+    const custId = await createBoundaryCustomer("validFrom-exact");
+    await setCustomerPriceViaApi(custId, hwServiceId, 5500, D0Str);
+
+    const appt = await createApptOnDate(custId, hwServiceId, D0Str, 60);
+    expect(appt.date, "Termin muss exakt auf validFrom liegen").toBe(D0Str);
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-1-validFrom-exact", 0, 0);
+
+    const unitPrice = await billAndGetUnitPriceFor(custId, D0Str, "hauswirtschaft", "CPB-1-validFrom-exact");
+    expect(unitPrice, `Termin am validFrom (${D0Str}) muss Kundenpreis 5500 nutzen, nicht ${unitPrice}`).toBe(5500);
+  });
+
+  it("CPB-2 – Termin am EXAKTEN validTo-Datum nutzt (alten) Kundenpreis", async () => {
+    const custId = await createBoundaryCustomer("validTo-exact");
+    // PriceA wird durch POST von PriceB automatisch validTo = (validFromB - 1) = dayX bekommen.
+    await setCustomerPriceViaApi(custId, hwServiceId, 5500, D0Str);
+    await setCustomerPriceViaApi(custId, hwServiceId, 7000, dayXPlus1Str);
+
+    // Sicherstellen, dass die Route validTo korrekt gesetzt hat.
+    const allPrices = await apiGet<any[]>(`/api/customers/${custId}/service-prices/all`);
+    const priceA = (allPrices.data as any[]).find((p: any) => p.priceCents === 5500);
+    expect(priceA, "PriceA (5500) muss in History existieren").toBeDefined();
+    const validToStr = priceA.validTo ? String(priceA.validTo).substring(0, 10) : null;
+    expect(validToStr, `PriceA.validTo muss auf ${dayXStr} gesetzt sein (= dayXPlus1 - 1)`).toBe(dayXStr);
+
+    const appt = await createApptOnDate(custId, hwServiceId, dayXStr, 60);
+    expect(appt.date, "Termin muss exakt auf validTo liegen").toBe(dayXStr);
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-2-validTo-exact", 0, 0);
+
+    const unitPrice = await billAndGetUnitPriceFor(custId, dayXStr, "hauswirtschaft", "CPB-2-validTo-exact");
+    expect(unitPrice, `Termin am validTo (${dayXStr}) muss noch alten Kundenpreis 5500 nutzen, nicht ${unitPrice}`).toBe(5500);
+  });
+
+  it("CPB-3 – Termin am Tag NACH validTo nutzt Folge-Preis (nicht abgelaufenen)", async () => {
+    const custId = await createBoundaryCustomer("after-validTo");
+    await setCustomerPriceViaApi(custId, hwServiceId, 5500, D0Str);
+    await setCustomerPriceViaApi(custId, hwServiceId, 7000, dayXPlus1Str);
+
+    const appt = await createApptOnDate(custId, hwServiceId, dayXPlus1Str, 60);
+    expect(appt.date, "Termin muss exakt auf neuem validFrom (= alter validTo + 1) liegen").toBe(dayXPlus1Str);
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-3-after-validTo", 0, 0);
+
+    const unitPrice = await billAndGetUnitPriceFor(custId, dayXPlus1Str, "hauswirtschaft", "CPB-3-after-validTo");
+    expect(unitPrice, `Termin Tag nach validTo (${dayXPlus1Str}) muss neuen Preis 7000 nutzen, nicht ${unitPrice}`).toBe(7000);
+  });
+
+  it("CPB-4 – Konsekutive Perioden: Tag X nutzt alten Preis, Tag X+1 nutzt neuen Preis (gleicher Kunde)", async () => {
+    const custId = await createBoundaryCustomer("consecutive");
+    await setCustomerPriceViaApi(custId, hwServiceId, 5500, D0Str);
+    await setCustomerPriceViaApi(custId, hwServiceId, 7000, dayXPlus1Str);
+
+    const apptOld = await createApptOnDate(custId, hwServiceId, dayXStr, 60);
+    await documentAppointment(apptOld.id, apptOld.time, hwServiceId, 60, "CPB-4-old-period", 0, 0);
+
+    const apptNew = await createApptOnDate(custId, hwServiceId, dayXPlus1Str, 60);
+    await documentAppointment(apptNew.id, apptNew.time, hwServiceId, 60, "CPB-4-new-period", 0, 0);
+
+    // Beide Termine können in unterschiedlichen Monaten liegen — pro Monat ein LN.
+    const monthsSet = new Set<string>();
+    for (const dStr of [dayXStr, dayXPlus1Str]) {
+      const d = new Date(dStr);
+      monthsSet.add(`${d.getFullYear()}-${d.getMonth() + 1}`);
+    }
+    const allInvoiceIds: number[] = [];
+    for (const m of monthsSet) {
+      const [year, month] = m.split("-").map(Number);
+      const srId = await createServiceRecord(custId, year, month);
+      await signServiceRecord(srId);
+      const invData = await generateInvoice(custId, year, month);
+      const invs = Array.isArray(invData) ? invData : [invData];
+      for (const inv of invs) allInvoiceIds.push(inv.id);
+    }
+
+    const allLineItems: any[] = [];
+    for (const id of allInvoiceIds) {
+      const detail = await getInvoiceWithLineItems(id);
+      allLineItems.push(...detail.lineItems);
+    }
+
+    const oldItem = allLineItems.find((li: any) => li.serviceDetails === "CPB-4-old-period");
+    const newItem = allLineItems.find((li: any) => li.serviceDetails === "CPB-4-new-period");
+
+    expect(oldItem, "Alte-Periode-Position muss vorhanden sein").toBeDefined();
+    expect(newItem, "Neue-Periode-Position muss vorhanden sein").toBeDefined();
+    expect(oldItem.unitPriceCents, `Tag X (${dayXStr}, = altes validTo) muss alten Preis 5500 nutzen`).toBe(5500);
+    expect(newItem.unitPriceCents, `Tag X+1 (${dayXPlus1Str}, = neues validFrom) muss neuen Preis 7000 nutzen`).toBe(7000);
+  });
+
+  it("CPB-5 – Parallele Preise mit identischem validFrom (Roh-Insert): höchste id (= zuletzt eingefügt) gewinnt deterministisch", async () => {
+    const custId = await createBoundaryCustomer("parallel-raw");
+    // Beide Preise mit identischem validFrom, ohne validTo, OHNE Soft-Delete-Flag.
+    // Simuliert eine echte Race-Condition oder einen manuellen DB-Eingriff.
+    const idA = await insertCustomerPriceRaw(custId, hwServiceId, 5500, D0Str);
+    const idB = await insertCustomerPriceRaw(custId, hwServiceId, 7000, D0Str);
+    expect(idB, "Zweiter Insert muss höhere id bekommen").toBeGreaterThan(idA);
+
+    const appt = await createApptOnDate(custId, hwServiceId, D0Str, 60);
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-5-parallel", 0, 0);
+
+    const unitPrice = await billAndGetUnitPriceFor(custId, D0Str, "hauswirtschaft", "CPB-5-parallel");
+    expect(
+      unitPrice,
+      `Bei identischem validFrom muss zuletzt eingefügter Preis (id=${idB}, 7000) gewinnen, nicht ${unitPrice}`,
+    ).toBe(7000);
+  });
+
+  it("CPB-6 – Sequentielles POST mit identischem validFrom: Vorgänger wird soft-deleted und ignoriert (deleted_at-Filter im Billing)", async () => {
+    const custId = await createBoundaryCustomer("dedup-via-route");
+    // Erst PriceA (5500), dann PriceB (7000) mit gleichem validFrom.
+    // Die Route soft-deleted PriceA. Ohne deleted_at-Filter im Billing würde
+    // PriceA weiterhin als Kandidat auftauchen und ggf. fälschlich gewinnen.
+    await setCustomerPriceViaApi(custId, hwServiceId, 5500, D0Str);
+    await setCustomerPriceViaApi(custId, hwServiceId, 7000, D0Str);
+
+    const appt = await createApptOnDate(custId, hwServiceId, D0Str, 60);
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "CPB-6-resequenced", 0, 0);
+
+    const unitPrice = await billAndGetUnitPriceFor(custId, D0Str, "hauswirtschaft", "CPB-6-resequenced");
+    expect(
+      unitPrice,
+      `Nach Re-POST mit gleichem validFrom muss neuester aktiver Preis 7000 gelten, nicht ${unitPrice} (Soft-Delete-Filter wirksam)`,
+    ).toBe(7000);
+  });
+});

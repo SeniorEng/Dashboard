@@ -112,16 +112,20 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
   .where(inArray(appointmentServicesTable.appointmentId, apptIds));
 
   const resolvedCustomerId = customerId ?? appts[0]?.customerId;
-  let allCustomerPrices: { serviceId: number; priceCents: number; validFrom: Date | null; validTo: Date | null }[] = [];
+  let allCustomerPrices: { id: number; serviceId: number; priceCents: number; validFrom: Date | null; validTo: Date | null }[] = [];
   if (resolvedCustomerId) {
     allCustomerPrices = await db.select({
+      id: customerServicePrices.id,
       serviceId: customerServicePrices.serviceId,
       priceCents: customerServicePrices.priceCents,
       validFrom: customerServicePrices.validFrom,
       validTo: customerServicePrices.validTo,
     })
     .from(customerServicePrices)
-    .where(eq(customerServicePrices.customerId, resolvedCustomerId));
+    .where(and(
+      eq(customerServicePrices.customerId, resolvedCustomerId),
+      isNull(customerServicePrices.deletedAt),
+    ));
   }
 
   function toDateStr(d: Date | string | null): string {
@@ -143,7 +147,10 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     matching.sort((a, b) => {
       const aFrom = a.validFrom ? new Date(a.validFrom).getTime() : 0;
       const bFrom = b.validFrom ? new Date(b.validFrom).getTime() : 0;
-      return bFrom - aFrom;
+      if (bFrom !== aFrom) return bFrom - aFrom;
+      // Tiebreaker für identisches validFrom (Race-Condition / Parallel-Insert):
+      // Höchste id (= zuletzt eingefügt) gewinnt deterministisch.
+      return b.id - a.id;
     });
     return matching[0].priceCents;
   }
