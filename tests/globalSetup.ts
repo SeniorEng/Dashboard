@@ -26,6 +26,7 @@ interface User {
 interface Service {
   id: number;
   name: string;
+  code?: string | null;
 }
 
 async function loginAndGetAuth(): Promise<AuthInfo> {

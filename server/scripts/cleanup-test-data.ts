@@ -172,6 +172,9 @@ interface Snapshot {
 }
 
 // Aliase für JOIN-Versionen (gleiche Bedingung, aber mit Tabellen-Alias).
+// MUSS deckungsgleich mit CUSTOMER_TEST_CONDITION bleiben — nur die
+// Spalten-Aliase mit `c.` Prefix unterscheiden sich. Wenn du oben ein
+// neues Pattern hinzufügst, hier ebenfalls!
 const CUSTOMER_TEST_C = sql`(
   LOWER(c.vorname) LIKE '%test%' OR LOWER(c.nachname) LIKE '%test%'
   OR LOWER(c.nachname) LIKE 'auto#_%' ESCAPE '#'
@@ -179,6 +182,9 @@ const CUSTOMER_TEST_C = sql`(
   OR LOWER(c.vorname) LIKE 'sz-%' OR LOWER(c.vorname) LIKE 'pv-%' OR LOWER(c.vorname) LIKE 'fd-%'
   OR LOWER(c.vorname) LIKE 'eb-%' OR LOWER(c.vorname) LIKE 'pg1-%' OR LOWER(c.vorname) LIKE 'qs-%'
   OR LOWER(c.vorname) LIKE 'status-%'
+  OR LOWER(c.nachname) LIKE 'importtrim-%' OR LOWER(c.nachname) LIKE 'notrim-%'
+  OR LOWER(c.nachname) LIKE 'reconcile-%' OR LOWER(c.nachname) LIKE 'aligned-%'
+  OR LOWER(c.nachname) LIKE 'mustermann-%'
 )`;
 
 const USER_TEST_U = sql`(
