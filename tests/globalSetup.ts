@@ -88,8 +88,12 @@ function isTestCustomer(c: Customer): boolean {
     v.startsWith("sz-") || v.startsWith("pv-") ||
     v.startsWith("fd-") || v.startsWith("eb-") ||
     v.startsWith("pg1-") || v.startsWith("qs-") ||
+    v.startsWith("status-") ||
     n.startsWith("privat-") || n.startsWith("fahrtdienst-") ||
-    n.startsWith("integ-")
+    n.startsWith("integ-") ||
+    n.startsWith("mustermann-") || n.startsWith("importtrim-") ||
+    n.startsWith("notrim-") || n.startsWith("reconcile-") ||
+    n.startsWith("aligned-")
   );
 }
 

@@ -23,6 +23,8 @@
 
 import { sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 type Scope = "customers" | "prospects" | "services" | "users" | "orphans" | "all";
 
@@ -43,25 +45,83 @@ function parseArgs(): Args {
   return { apply, scope };
 }
 
+// File logging: parallel zur Konsole, immer in tmp/cleanup-test-data-{ts}.log
+const TS = new Date().toISOString().replace(/[:.]/g, "-");
+const LOG_DIR = path.resolve("tmp");
+const LOG_FILE = path.join(LOG_DIR, `cleanup-test-data-${TS}.log`);
+let logStream: fs.WriteStream | null = null;
+function ensureLogStream(): void {
+  if (logStream) return;
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+  logStream = fs.createWriteStream(LOG_FILE, { flags: "a" });
+}
+
 function log(msg: string): void {
   console.log(msg);
+  ensureLogStream();
+  logStream!.write(msg + "\n");
 }
 
 function header(title: string): void {
-  console.log("\n" + "=".repeat(70));
-  console.log(title);
-  console.log("=".repeat(70));
+  log("\n" + "=".repeat(70));
+  log(title);
+  log("=".repeat(70));
 }
 
 async function safetyChecks(apply: boolean): Promise<void> {
   if (process.env.NODE_ENV === "production") {
     throw new Error("ABBRUCH: NODE_ENV=production. Dieses Skript darf nie auf Produktion laufen.");
   }
+  // Hostname-Check, nicht Substring-Check: parse die URL und prüfe Host
+  // gegen Deny-Pattern (prod, production). DATABASE_URL kann eine valide URL
+  // sein oder ein Postgres-Connection-String.
   const url = process.env.DATABASE_URL || "";
-  if (apply && /\bprod\b/i.test(url)) {
-    throw new Error("ABBRUCH: DATABASE_URL enthält 'prod'. Verdacht auf Produktions-Datenbank.");
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    // Fallback: postgres://user:pass@host:port/db ohne valides URL-Schema
+    const m = url.match(/@([^:/?#]+)/);
+    host = (m ? m[1] : "").toLowerCase();
   }
-  log(`Sicherheits-Checks ok. Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN"}`);
+  // Hard-Stop bei Hostname-Match auf prod-Pattern (auch im Trockenlauf)
+  if (host && /(^|[.-])prod([.-]|$)|production/.test(host)) {
+    throw new Error(`ABBRUCH: DB-Host '${host}' sieht nach Produktion aus. Dieses Skript darf nie auf Produktion laufen.`);
+  }
+  log(`Sicherheits-Checks ok. DB-Host: ${host || "(unbekannt)"}, Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN"}`);
+}
+
+async function listWhitelistEntities(): Promise<void> {
+  // Sanity-Output: liste die echten Daten namentlich, damit ein menschlicher
+  // Operator vor dem Apply nochmal verifizieren kann, dass die Whitelist korrekt
+  // klassifiziert ist.
+  header("Sanity-Check: Liste der echten (whitelist) Entitäten");
+
+  const realUsers = await db.execute<{ id: number; email: string; nachname: string }>(sql`
+    SELECT id, email, nachname FROM users WHERE NOT ${USER_TEST_CONDITION} ORDER BY id
+  `);
+  const u = (realUsers as unknown as { rows: Array<{ id: number; email: string; nachname: string }> }).rows;
+  log(`\nEchte Mitarbeiter (${u.length}):`);
+  for (const r of u) log(`   #${r.id}  ${r.nachname.padEnd(20)} <${r.email}>`);
+
+  const realServices = await db.execute<{ id: number; name: string; code: string | null }>(sql`
+    SELECT id, name, code FROM services WHERE NOT ${SERVICE_TEST_CONDITION} ORDER BY id
+  `);
+  const s = (realServices as unknown as { rows: Array<{ id: number; name: string; code: string | null }> }).rows;
+  log(`\nEchte Services (${s.length}):`);
+  for (const r of s) log(`   #${r.id}  ${(r.code || "—").padEnd(15)} ${r.name}`);
+
+  const realCustHead = await db.execute<{ id: number; vorname: string; nachname: string }>(sql`
+    SELECT id, vorname, nachname FROM customers WHERE NOT ${CUSTOMER_TEST_CONDITION} ORDER BY id LIMIT 20
+  `);
+  const cHead = (realCustHead as unknown as { rows: Array<{ id: number; vorname: string; nachname: string }> }).rows;
+  const totalReal = await db.execute<{ n: number }>(sql`
+    SELECT COUNT(*)::int AS n FROM customers WHERE NOT ${CUSTOMER_TEST_CONDITION}
+  `);
+  const totalCount = (totalReal as unknown as { rows: Array<{ n: number }> }).rows[0].n;
+  log(`\nEchte Kunden (${totalCount} gesamt, erste 20):`);
+  for (const r of cHead) log(`   #${r.id}  ${r.vorname} ${r.nachname}`);
+  if (totalCount > 20) log(`   … plus ${totalCount - 20} weitere`);
 }
 
 // SQL-Bedingungen für Test-Pattern (gespiegelt aus tests/globalSetup.ts).
@@ -298,21 +358,32 @@ async function purgeTestServices(apply: boolean): Promise<void> {
   `);
   const referenced = new Set((refsRes as unknown as { rows: Array<{ id: number }> }).rows.map((r) => r.id));
   const deletable = all.filter((s) => !referenced.has(s.id));
-  log(`  davon in Terminen referenziert: ${all.length - deletable.length} (werden NICHT gelöscht)`);
+  const referencedList = all.filter((s) => referenced.has(s.id));
+  log(`  davon in Terminen referenziert: ${referencedList.length} (Fallback: is_active=false statt löschen)`);
   log(`  davon hart löschbar:            ${deletable.length} (CASCADE räumt Preis-Overrides auf)`);
 
-  if (deletable.length === 0 || !apply) {
-    if (!apply && deletable.length > 0) log("DRY-RUN: würde " + deletable.length + " unreferenzierte Test-Services löschen.");
+  if (!apply) {
+    if (deletable.length > 0) log("DRY-RUN: würde " + deletable.length + " unreferenzierte Test-Services löschen.");
+    if (referencedList.length > 0) log("DRY-RUN: würde " + referencedList.length + " referenzierte Test-Services auf is_active=false setzen.");
     return;
   }
 
   // service_rates hat keinen FK auf services (Kategorie-basierend), service_budget_pots
   // und customer_service_prices haben CASCADE — daher reicht der reine DELETE auf services.
   await db.transaction(async (tx) => {
-    const dList = sql.join(deletable.map((s) => sql`${s.id}`), sql`, `);
-    await tx.execute(sql`DELETE FROM services WHERE id IN (${dList})`);
+    if (deletable.length > 0) {
+      const dList = sql.join(deletable.map((s) => sql`${s.id}`), sql`, `);
+      await tx.execute(sql`DELETE FROM services WHERE id IN (${dList})`);
+    }
+    // Fallback für referenzierte Test-Services: nicht löschen (würde historische
+    // Termine kaputtmachen), aber deaktivieren, damit sie nicht mehr in Picklists
+    // auftauchen und keine neuen Termine sie nutzen können.
+    if (referencedList.length > 0) {
+      const rList = sql.join(referencedList.map((s) => sql`${s.id}`), sql`, `);
+      await tx.execute(sql`UPDATE services SET is_active = false WHERE id IN (${rList})`);
+    }
   });
-  log(`Phase 3 fertig: ${deletable.length} Services gelöscht.`);
+  log(`Phase 3 fertig: ${deletable.length} Services gelöscht, ${referencedList.length} deaktiviert.`);
 }
 
 async function purgeTestUsers(apply: boolean): Promise<void> {
@@ -520,6 +591,11 @@ async function main(): Promise<void> {
   header(`Cleanup Test-Daten — Modus: ${args.apply ? "APPLY (scharf)" : "DRY-RUN"}, Scope: ${args.scope}`);
   await safetyChecks(args.apply);
 
+  // Sanity-Output: liste die echten Entitäten namentlich, damit der Operator
+  // vor dem Apply nochmal verifizieren kann, dass die Whitelist korrekt
+  // klassifiziert ist (insb. dass keine Test-Daten als „echt" eingestuft sind).
+  await listWhitelistEntities();
+
   const before = await takeSnapshot("VOR Cleanup");
 
   const cntBefore = await countTestEntities();
@@ -554,9 +630,16 @@ async function main(): Promise<void> {
   }
 
   await pool.end();
+  // Log-Stream sauber schließen, sonst kann das letzte Schreiben verloren gehen.
+  if (logStream) {
+    await new Promise<void>((resolve) => logStream!.end(() => resolve()));
+  }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error("Skript-Fehler:", err);
+  if (logStream) {
+    await new Promise<void>((resolve) => logStream!.end(() => resolve()));
+  }
   process.exit(1);
 });

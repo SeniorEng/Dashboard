@@ -307,7 +307,13 @@ export async function createTestEmployee(opts: { isAdmin?: boolean; nachnamePref
   if (res.status !== 201) {
     throw new Error(`createTestEmployee failed: ${res.status} ${JSON.stringify(res.data)}`);
   }
-  return { id: res.data.id, email, password };
+  const created = { id: res.data.id as number, email, password };
+  trackCleanup(async () => {
+    try {
+      await apiPost(`/api/admin/users/${created.id}/deactivate`, {});
+    } catch {}
+  });
+  return created;
 }
 
 export async function deactivateTestEmployee(id: number | null | undefined): Promise<void> {
