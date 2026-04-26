@@ -205,6 +205,7 @@ export const customerAssignmentHistory = pgTable("customer_assignment_history", 
   validFrom: date("valid_from").notNull(),
   validTo: date("valid_to"), // null = currently active
   changedByUserId: integer("changed_by_user_id").references(() => users.id),
+  changedByRole: text("changed_by_role"), // "admin" | "teamLead" | "employee" | null
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   index("assignment_history_customer_idx").on(table.customerId),

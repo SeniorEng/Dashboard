@@ -658,6 +658,18 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     await storage.createAppointmentServices(appointment.id, serviceEntries);
   }
 
+  await auditService.appointmentCreated(
+    user.id,
+    appointment.id,
+    {
+      customerId: validatedData.customerId,
+      assignedEmployeeId,
+      date: validatedData.date,
+      actor: { role: actorRole(user) },
+    },
+    req.ip,
+  );
+
   if (assignedEmployeeId !== user.id) {
     const customerName = `${customer.vorname} ${customer.nachname}`;
     notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId, user.id);
@@ -836,6 +848,23 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       if (assignedEmpId) {
         const empOverlap = await appointmentService.checkOverlap(checkDate, checkStart, checkEnd, assignedEmpId, id);
         if (empOverlap.hasOverlap) {
+          // Reassign-spezifische Klarheit: bei Mitarbeiterwechsel den Namen + blockierten Zeitraum nennen,
+          // ohne Details des fremden Termins (Kunde, Notizen) preiszugeben.
+          const isReassign = validatedData.assignedEmployeeId !== undefined
+            && validatedData.assignedEmployeeId !== existingAppointment.assignedEmployeeId;
+          if (isReassign) {
+            const targetEmployee = await authService.getUser(assignedEmpId);
+            const employeeName = targetEmployee
+              ? `${targetEmployee.vorname} ${targetEmployee.nachname}`.trim() || targetEmployee.email
+              : `Mitarbeiter #${assignedEmpId}`;
+            const startHHMM = checkStart.slice(0, 5);
+            const endHHMM = checkEnd.slice(0, 5);
+            return sendConflict(
+              res,
+              "Terminüberschneidung",
+              `${employeeName} hat um ${startHHMM}–${endHHMM} bereits einen anderen Termin.`,
+            );
+          }
           return sendConflict(res, "Terminüberschneidung", ErrorMessages.timeOverlap);
         }
 

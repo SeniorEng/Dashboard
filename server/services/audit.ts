@@ -92,6 +92,15 @@ class AuditService {
     await this.log(userId, "appointment_updated", "appointment", appointmentId, metadata, ipAddress);
   }
 
+  async appointmentCreated(
+    userId: number,
+    appointmentId: number,
+    metadata: { customerId: number; assignedEmployeeId: number; date: string; actor?: { role: ActorRole } },
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log(userId, "appointment_created", "appointment", appointmentId, metadata, ipAddress);
+  }
+
   async appointmentDeleted(
     userId: number,
     appointmentId: number,

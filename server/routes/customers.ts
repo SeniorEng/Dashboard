@@ -287,7 +287,7 @@ router.patch("/:id/assignment", asyncHandler("Zuordnung konnte nicht aktualisier
     .filter((k) => oldValues[k] !== newValues[k]);
 
   const updated = await customerManagementStorage.updateCustomerAssignment(
-    id, primaryEmployeeId, backupEmployeeId, user.id, backupEmployeeId2,
+    id, primaryEmployeeId, backupEmployeeId, user.id, backupEmployeeId2, actorRole(user),
   );
 
   birthdaysCache.invalidateAll();

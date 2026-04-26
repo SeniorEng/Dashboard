@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { eq, desc } from "drizzle-orm";
+import { db } from "../server/lib/db";
+import { customerAssignmentHistory } from "../shared/schema/customers";
 import {
   apiPost,
   apiPatch,
@@ -161,7 +164,7 @@ describe("Task #202 – Teamleiter-Schreibrechte", () => {
       expect(entry.metadata?.actor?.role).toBe("teamLead");
     });
 
-    it("Conflict: Teamleiter Reassign auf MA mit Überlappung → 409", async () => {
+    it("Conflict: Teamleiter Reassign auf MA mit Überlappung → 409 mit MA-Name + Zeitraum", async () => {
       const date = nextWeekday(15);
       // Lead hat 10:00–11:00 Termin auf customerLead.
       await createApptForCustomer(setup.customerLead, setup.lead.id, setup.serviceId, date, "10:00");
@@ -173,6 +176,13 @@ describe("Task #202 – Teamleiter-Schreibrechte", () => {
         assignedEmployeeId: setup.lead.id,
       });
       expect(res.status).toBe(409);
+      // Spezifischer Message: Mitarbeitername + blockierter Zeitraum, ohne Termin-Details des Konflikts.
+      const msg: string = res.data?.message || "";
+      expect(msg).toMatch(/10:00.*11:00/);
+      expect(msg.toLowerCase()).toContain("bereits");
+      // Keine fremden Kunden- oder Termin-IDs in der Antwort.
+      expect(msg).not.toContain(String(setup.customerLead));
+      expect(msg).not.toMatch(/customerId|appointmentId/i);
     });
 
     it("Forbidden: Teamleiter darf Outsider-Termin NICHT umhängen → 403", async () => {
@@ -197,7 +207,7 @@ describe("Task #202 – Teamleiter-Schreibrechte", () => {
   });
 
   describe("POST /api/appointments/kundentermin (Anlage im Namen von Team-Mitarbeiter)", () => {
-    it("Happy: Teamleiter legt Termin im Namen von Member an → 201", async () => {
+    it("Happy: Teamleiter legt Termin im Namen von Member an → 201, Audit actor.role=teamLead", async () => {
       const date = nextWeekday(18);
       const res = await apiPostAs<any>(setup.leadAuth, "/api/appointments/kundentermin", {
         customerId: setup.customerMember,
@@ -208,6 +218,17 @@ describe("Task #202 – Teamleiter-Schreibrechte", () => {
       });
       expect(res.status).toBe(201);
       expect(res.data.assignedEmployeeId).toBe(setup.member.id);
+
+      // Audit-Eintrag für Termin-Anlage muss actor.role=teamLead enthalten,
+      // damit Team-Lead-Schreibaktionen im Audit-Log unterscheidbar bleiben.
+      const audit = await apiGetAs<any>(
+        setup.adminAuth,
+        `/api/admin/audit-log?entityType=appointment&entityId=${res.data.id}&action=appointment_created`,
+      );
+      expect(audit.status).toBe(200);
+      const entry = (audit.data.entries || []).find((e: any) => e.userId === setup.lead.id);
+      expect(entry).toBeDefined();
+      expect(entry.metadata?.actor?.role).toBe("teamLead");
     });
 
     it("Forbidden: Teamleiter darf NICHT im Namen von Outsider anlegen → 403", async () => {
@@ -277,6 +298,18 @@ describe("Task #202 – Teamleiter-Schreibrechte", () => {
       expect(entry).toBeDefined();
       expect(entry.metadata?.actor?.role).toBe("teamLead");
       expect(entry.metadata?.changedFields).toContain("backupEmployeeId");
+
+      // DB-Persistenz: changedByRole im History-Eintrag
+      const histRows = await db
+        .select()
+        .from(customerAssignmentHistory)
+        .where(eq(customerAssignmentHistory.customerId, setup.customerMember))
+        .orderBy(desc(customerAssignmentHistory.id))
+        .limit(3);
+      const leadEntry = histRows.find(
+        (r) => r.changedByUserId === setup.lead.id && r.changedByRole === "teamLead",
+      );
+      expect(leadEntry).toBeDefined();
     });
 
     it("Forbidden: Teamleiter darf Outsider-Kunden NICHT ändern → 403", async () => {

@@ -11,6 +11,7 @@ export const AUDIT_ACTIONS = [
   "service_record_signed_customer",
   "service_record_revoked",
   "appointment_revoked",
+  "appointment_created",
   "appointment_updated",
   "appointment_deleted",
   "employee_anonymized",

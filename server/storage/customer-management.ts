@@ -541,7 +541,8 @@ export class CustomerManagementStorage {
     primaryEmployeeId: number | null,
     backupEmployeeId: number | null,
     changedByUserId?: number,
-    backupEmployeeId2: number | null | undefined = undefined
+    backupEmployeeId2: number | null | undefined = undefined,
+    changedByRole: "admin" | "teamLead" | "employee" | null = null,
   ) {
     const today = todayISO();
     const backup2 = backupEmployeeId2 === undefined ? undefined : backupEmployeeId2;
@@ -568,6 +569,7 @@ export class CustomerManagementStorage {
               role: "primary",
               validFrom: today,
               changedByUserId: changedByUserId ?? null,
+              changedByRole,
             });
           }
         }
@@ -590,6 +592,7 @@ export class CustomerManagementStorage {
               role: "backup",
               validFrom: today,
               changedByUserId: changedByUserId ?? null,
+              changedByRole,
             });
           }
         }
@@ -612,6 +615,7 @@ export class CustomerManagementStorage {
               role: "backup2",
               validFrom: today,
               changedByUserId: changedByUserId ?? null,
+              changedByRole,
             });
           }
         }
