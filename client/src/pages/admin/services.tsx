@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { api, unwrapResult } from "@/lib/api";
-import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList, Calculator } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatCurrency } from "@shared/utils/format";
@@ -149,6 +149,91 @@ export default function AdminServices() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingService, setEditingService] = useState<ServiceWithPots | null>(null);
   const [form, setForm] = useState<ServiceFormData>(EMPTY_FORM);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkPrices, setBulkPrices] = useState<Record<number, string>>({});
+  const [bulkPercent, setBulkPercent] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+
+  const openBulkPrices = () => {
+    if (!services) return;
+    const initial: Record<number, string> = {};
+    services
+      .filter(s => s.isBillable && s.isActive)
+      .forEach(s => { initial[s.id] = formatPrice(s.defaultPriceCents); });
+    setBulkPrices(initial);
+    setBulkPercent("");
+    setBulkOpen(true);
+  };
+
+  const applyBulkPercent = () => {
+    const pct = parseFloat(bulkPercent.replace(",", "."));
+    if (isNaN(pct)) {
+      toast({ title: "Ungültiger Prozentwert", variant: "destructive" });
+      return;
+    }
+    if (!services) return;
+    const factor = 1 + pct / 100;
+    const next: Record<number, string> = {};
+    services
+      .filter(s => s.isBillable && s.isActive)
+      .forEach(s => {
+        const newCents = Math.max(0, Math.round(s.defaultPriceCents * factor));
+        next[s.id] = formatPrice(newCents);
+      });
+    setBulkPrices(next);
+  };
+
+  const handleBulkSave = async () => {
+    if (!services) return;
+    const updates: { id: number; name: string; oldCents: number; newCents: number }[] = [];
+    for (const s of services) {
+      if (!s.isBillable || !s.isActive) continue;
+      const raw = bulkPrices[s.id];
+      if (raw === undefined || raw === "") continue;
+      const euros = parseFloat(raw.replace(",", "."));
+      if (isNaN(euros) || euros < 0) {
+        toast({ title: `Ungültiger Preis für ${s.name}`, variant: "destructive" });
+        return;
+      }
+      const newCents = Math.round(euros * 100);
+      if (newCents !== s.defaultPriceCents) {
+        updates.push({ id: s.id, name: s.name, oldCents: s.defaultPriceCents, newCents });
+      }
+    }
+
+    if (updates.length === 0) {
+      toast({ title: "Keine Änderungen", description: "Es wurden keine Preise verändert." });
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      let okCount = 0;
+      const failed: string[] = [];
+      for (const u of updates) {
+        const result = await api.put<ServiceWithPots, Partial<InsertService>>(`/services/${u.id}`, { defaultPriceCents: u.newCents });
+        if (result.success) {
+          okCount++;
+        } else {
+          failed.push(u.name);
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ["/api/services/all"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/services"] });
+      if (failed.length === 0) {
+        toast({ title: "Standardpreise aktualisiert", description: `${okCount} Dienstleistung(en) angepasst.` });
+        setBulkOpen(false);
+      } else {
+        toast({
+          title: "Teilweise gespeichert",
+          description: `${okCount} aktualisiert, fehlgeschlagen: ${failed.join(", ")}`,
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setBulkSaving(false);
+    }
+  };
 
   const openCreate = () => {
     setEditingService(null);
@@ -275,12 +360,24 @@ export default function AdminServices() {
             </Link>
             <h1 className={componentStyles.pageTitle}>Dienstleistungskatalog</h1>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <p className="text-sm text-gray-600">Leistungen und Standardpreise</p>
-            <Button onClick={openCreate} className={componentStyles.btnPrimary} size="sm" data-testid="button-add-service">
-              <Plus className={`${iconSize.sm} mr-1`} />
-              Neue Dienstleistung
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={openBulkPrices}
+                variant="outline"
+                size="sm"
+                disabled={!services || services.length === 0}
+                data-testid="button-bulk-prices"
+              >
+                <Calculator className={`${iconSize.sm} mr-1`} />
+                Preise anpassen
+              </Button>
+              <Button onClick={openCreate} className={componentStyles.btnPrimary} size="sm" data-testid="button-add-service">
+                <Plus className={`${iconSize.sm} mr-1`} />
+                Neue Dienstleistung
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -573,6 +670,130 @@ export default function AdminServices() {
                   "Änderungen speichern"
                 ) : (
                   "Dienstleistung hinzufügen"
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkOpen} onOpenChange={(open) => { if (!bulkSaving) setBulkOpen(open); }}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" data-testid="dialog-bulk-prices">
+          <DialogHeader>
+            <DialogTitle>Standardpreise anpassen</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-2">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-700">
+              Hier passen Sie die Standardpreise des Katalogs an. Sie gelten automatisch für alle Kunden ohne individuellen Preis. Kundenindividuelle Preise bleiben unverändert.
+            </div>
+
+            <div className="space-y-2 border rounded-lg p-3">
+              <Label htmlFor="bulk-percent">Pauschale prozentuale Anpassung</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="bulk-percent"
+                  type="text"
+                  inputMode="decimal"
+                  value={bulkPercent}
+                  onChange={(e) => setBulkPercent(e.target.value)}
+                  placeholder="z. B. 5 für +5 %"
+                  className="text-base"
+                  data-testid="input-bulk-percent"
+                />
+                <span className="text-sm text-gray-500">%</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={applyBulkPercent}
+                  disabled={!bulkPercent}
+                  data-testid="button-apply-bulk-percent"
+                >
+                  Anwenden
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Berechnet aus den aktuellen Werten und überschreibt die Eingabefelder unten. Negative Werte (z. B. -10) für Senkungen.
+              </p>
+            </div>
+
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-gray-500">Dienstleistung</th>
+                    <th className="text-right px-3 py-2 font-medium text-gray-500">Aktuell</th>
+                    <th className="text-right px-3 py-2 font-medium text-gray-500">Neu (€)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(services || [])
+                    .filter(s => s.isBillable && s.isActive)
+                    .map((s) => {
+                      const suffix = UNIT_SUFFIX[s.unitType] || "";
+                      return (
+                        <tr key={s.id} className="border-t" data-testid={`bulk-row-${s.id}`}>
+                          <td className="px-3 py-2">
+                            <div className="font-medium">{s.name}</div>
+                            <div className="text-xs text-gray-500">{UNIT_TYPE_LABELS[s.unitType] || s.unitType}{suffix}</div>
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-600 whitespace-nowrap">
+                            {formatPrice(s.defaultPriceCents)} €
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              value={bulkPrices[s.id] ?? ""}
+                              onChange={(e) => setBulkPrices(prev => ({ ...prev, [s.id]: e.target.value }))}
+                              className="h-8 text-sm text-right w-24 ml-auto"
+                              placeholder="0,00"
+                              data-testid={`input-bulk-price-${s.id}`}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  {(services || []).filter(s => s.isBillable && s.isActive).length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-4 text-center text-sm text-gray-500">
+                        Keine abrechenbaren Dienstleistungen vorhanden.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Es werden nur veränderte Preise gespeichert. Die Anpassung wirkt sich auf zukünftige Abrechnungen aus.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setBulkOpen(false)}
+                disabled={bulkSaving}
+                data-testid="button-cancel-bulk"
+              >
+                Abbrechen
+              </Button>
+              <Button
+                type="button"
+                className={componentStyles.btnPrimary}
+                onClick={handleBulkSave}
+                disabled={bulkSaving}
+                data-testid="button-save-bulk"
+              >
+                {bulkSaving ? (
+                  <>
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                    Speichern...
+                  </>
+                ) : (
+                  "Änderungen speichern"
                 )}
               </Button>
             </div>

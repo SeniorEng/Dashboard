@@ -30,7 +30,8 @@ interface AffectedInvoice {
 type PendingChange =
   | { kind: "save"; serviceId: number; priceCents: number; validFrom?: string; invoices: AffectedInvoice[] }
   | { kind: "edit"; priceId: number; priceCents: number; invoices: AffectedInvoice[] }
-  | { kind: "delete"; priceId: number; invoices: AffectedInvoice[] };
+  | { kind: "delete"; priceId: number; invoices: AffectedInvoice[] }
+  | { kind: "update"; priceId: number; validFrom: string; validTo: string | null; invoices: AffectedInvoice[] };
 
 interface CatalogService {
   id: number;
@@ -98,6 +99,9 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   const [showHistory, setShowHistory] = useState(false);
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
   const [pendingReplace, setPendingReplace] = useState<PendingReplaceState | null>(null);
+  const [editingPriceId, setEditingPriceId] = useState<number | null>(null);
+  const [editPriceValidFrom, setEditPriceValidFrom] = useState("");
+  const [editPriceValidTo, setEditPriceValidTo] = useState("");
 
   const { data: services, isLoading: loadingServices } = useQuery<CatalogService[]>({
     queryKey: ["/api/services"],
@@ -236,6 +240,51 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: async ({
+      priceId,
+      validFrom,
+      validTo,
+      confirmInvoiceOverride,
+    }: {
+      priceId: number;
+      validFrom: string;
+      validTo: string | null;
+      confirmInvoiceOverride?: boolean;
+    }) => {
+      const body: Record<string, unknown> = { validFrom, validTo };
+      if (confirmInvoiceOverride) body.confirmInvoiceOverride = true;
+      const result = await api.patch(`/customers/${customerId}/service-prices/${priceId}`, body);
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "customer-service-prices");
+      setEditingPriceId(null);
+      setEditPriceValidFrom("");
+      setEditPriceValidTo("");
+      setPendingChange(null);
+      toast({ title: "Gültigkeitszeitraum aktualisiert" });
+    },
+    onError: (error: Error, variables) => {
+      if (
+        error instanceof ApiError
+        && error.code === "INVOICED_PERIOD_AFFECTED"
+        && !variables.confirmInvoiceOverride
+      ) {
+        const invoices = (error.details?.invoices as AffectedInvoice[] | undefined) || [];
+        setPendingChange({
+          kind: "update",
+          priceId: variables.priceId,
+          validFrom: variables.validFrom,
+          validTo: variables.validTo,
+          invoices,
+        });
+        return;
+      }
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async ({ priceId, confirmInvoiceOverride }: { priceId: number; confirmInvoiceOverride?: boolean }) => {
       const url = confirmInvoiceOverride
@@ -280,6 +329,13 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       editMutation.mutate({
         priceId: pendingChange.priceId,
         priceCents: pendingChange.priceCents,
+        confirmInvoiceOverride: true,
+      });
+    } else if (pendingChange.kind === "update") {
+      updateMutation.mutate({
+        priceId: pendingChange.priceId,
+        validFrom: pendingChange.validFrom,
+        validTo: pendingChange.validTo,
         confirmInvoiceOverride: true,
       });
     } else {
@@ -550,6 +606,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
           Preise zzgl. MwSt. Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
           {" "}Über das Datumsfeld können Sie einen zukünftigen Gültigkeitszeitpunkt festlegen.
           {hasCustomPrices ? " Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
+          {" "}In der Preishistorie können Sie Gültig-ab und Gültig-bis bestehender Preise nachträglich anpassen.
         </p>
         <Button
           variant="ghost"
@@ -571,17 +628,105 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                   <th className="text-right px-2 py-1.5 font-medium text-gray-500">Preis</th>
                   <th className="text-left px-2 py-1.5 font-medium text-gray-500">Gültig ab</th>
                   <th className="text-left px-2 py-1.5 font-medium text-gray-500">Gültig bis</th>
+                  <th className="px-2 py-1.5 w-20"></th>
                 </tr>
               </thead>
               <tbody>
-                {allPrices.map(p => (
-                  <tr key={p.id} className={`border-t ${!p.validTo ? 'bg-amber-50/50' : ''}`} data-testid={`history-row-${p.id}`}>
-                    <td className="px-2 py-1.5">{p.serviceName}</td>
-                    <td className="px-2 py-1.5 text-right font-medium">{formatCurrency(p.priceCents)} {UNIT_LABELS[p.unitType] || "€"}</td>
-                    <td className="px-2 py-1.5">{formatDateDisplay(p.validFrom)}</td>
-                    <td className="px-2 py-1.5">{p.validTo ? formatDateDisplay(p.validTo) : "—"}</td>
-                  </tr>
-                ))}
+                {allPrices.map(p => {
+                  const isRowEditing = editingPriceId === p.id;
+                  return (
+                    <tr key={p.id} className={`border-t ${!p.validTo ? 'bg-amber-50/50' : ''}`} data-testid={`history-row-${p.id}`}>
+                      <td className="px-2 py-1.5">{p.serviceName}</td>
+                      <td className="px-2 py-1.5 text-right font-medium">{formatCurrency(p.priceCents)} {UNIT_LABELS[p.unitType] || "€"}</td>
+                      <td className="px-2 py-1.5">
+                        {isRowEditing ? (
+                          <Input
+                            type="date"
+                            value={editPriceValidFrom}
+                            onChange={e => setEditPriceValidFrom(e.target.value)}
+                            className="h-7 text-xs w-32"
+                            data-testid={`input-history-valid-from-${p.id}`}
+                          />
+                        ) : (
+                          formatDateDisplay(p.validFrom)
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {isRowEditing ? (
+                          <Input
+                            type="date"
+                            value={editPriceValidTo}
+                            onChange={e => setEditPriceValidTo(e.target.value)}
+                            min={editPriceValidFrom || undefined}
+                            className="h-7 text-xs w-32"
+                            data-testid={`input-history-valid-to-${p.id}`}
+                          />
+                        ) : (
+                          p.validTo ? formatDateDisplay(p.validTo) : "—"
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <div className="flex justify-end gap-1">
+                          {isRowEditing ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={() => {
+                                  if (!editPriceValidFrom) {
+                                    toast({ title: "Gültig-ab-Datum erforderlich", variant: "destructive" });
+                                    return;
+                                  }
+                                  if (editPriceValidTo && editPriceValidTo < editPriceValidFrom) {
+                                    toast({ title: "Gültig-bis-Datum darf nicht vor Gültig-ab-Datum liegen", variant: "destructive" });
+                                    return;
+                                  }
+                                  updateMutation.mutate({
+                                    priceId: p.id,
+                                    validFrom: editPriceValidFrom,
+                                    validTo: editPriceValidTo || null,
+                                  });
+                                }}
+                                disabled={updateMutation.isPending}
+                                data-testid={`btn-save-history-${p.id}`}
+                              >
+                                <Check className="h-3.5 w-3.5 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={() => {
+                                  setEditingPriceId(null);
+                                  setEditPriceValidFrom("");
+                                  setEditPriceValidTo("");
+                                }}
+                                data-testid={`btn-cancel-history-${p.id}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={() => {
+                                setEditingPriceId(p.id);
+                                setEditPriceValidFrom(p.validFrom.substring(0, 10));
+                                setEditPriceValidTo(p.validTo ? p.validTo.substring(0, 10) : "");
+                              }}
+                              data-testid={`btn-edit-history-${p.id}`}
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-gray-500" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
