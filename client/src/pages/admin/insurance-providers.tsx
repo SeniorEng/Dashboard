@@ -40,7 +40,7 @@ import {
 } from "@shared/schema";
 import { formatAddress } from "@shared/utils/format";
 import { api, unwrapResult } from "@/lib/api";
-import { ArrowLeft, Plus, Pencil, Loader2, Building2, AlertTriangle, Search, X } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Loader2, Building2, AlertTriangle, Search, X, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -332,14 +332,25 @@ export default function AdminInsuranceProviders() {
                             <div className="flex items-center gap-2 mb-1">
                               <span className="font-medium text-gray-900 truncate">{provider.name}</span>
                               {provider.isPrivate && (
-                                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full" data-testid={`badge-private-${provider.id}`}>Privat</span>
+                                <span
+                                  className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium"
+                                  title="Private Krankenversicherung"
+                                  data-testid={`badge-private-${provider.id}`}
+                                >
+                                  <ShieldCheck className="h-3 w-3" />
+                                  PKV
+                                </span>
                               )}
                               {!provider.isActive && (
                                 <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">Inaktiv</span>
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                              {provider.ikNummer ? <span>IK: {provider.ikNummer}</span> : <span>Privat</span>}
+                              {provider.ikNummer ? (
+                                <span>IK: {provider.ikNummer}</span>
+                              ) : provider.isPrivate ? (
+                                <span>Keine IK (PKV)</span>
+                              ) : null}
                               {provider.empfaenger && <span>· {provider.empfaenger}</span>}
                               {(provider.strasse || provider.plz || provider.stadt) && (
                                 <span>· {formatAddress(provider)}</span>
@@ -393,16 +404,26 @@ export default function AdminInsuranceProviders() {
               />
             </div>
 
-            <div className="flex items-center gap-3 py-2">
-              <Switch
-                id="isPrivate"
-                checked={form.isPrivate || false}
-                onCheckedChange={(checked) => handleChange("isPrivate", checked)}
-                data-testid="switch-provider-is-private"
-              />
-              <Label htmlFor="isPrivate" className="cursor-pointer">
-                Private Pflegekasse
-              </Label>
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+              <div className="flex items-start gap-3">
+                <ShieldCheck className={`${iconSize.md} text-purple-700 mt-0.5 shrink-0`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="isPrivate" className="cursor-pointer font-medium text-purple-900">
+                      Privat (PKV) – Private Krankenversicherung
+                    </Label>
+                    <Switch
+                      id="isPrivate"
+                      checked={form.isPrivate || false}
+                      onCheckedChange={(checked) => handleChange("isPrivate", checked)}
+                      data-testid="switch-provider-is-private"
+                    />
+                  </div>
+                  <p className="text-xs text-purple-800/80 mt-1">
+                    Bei privaten Krankenversicherungen ist die IK-Nummer optional.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -438,7 +459,7 @@ export default function AdminInsuranceProviders() {
                 data-testid="input-provider-ik"
               />
               <p className="text-xs text-gray-500">
-                {form.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei privaten Kassen)" : "9-stelliges Institutionskennzeichen"}
+                {form.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei PKV)" : "9-stelliges Institutionskennzeichen"}
               </p>
             </div>
 
