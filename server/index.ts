@@ -177,6 +177,13 @@ async function runStartupTasks() {
     const { importPflegekassen } = await import("./startup/import-pflegekassen");
     await importPflegekassen();
 
+    const { seedPkvProviders } = await import("./startup/seed-pkv-providers");
+    try {
+      await seedPkvProviders();
+    } catch (err) {
+      log(`PKV-Provider-Seed fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateBudgetSources } = await import("./startup/migrate-budget-sources");
     try {
       await migrateBudgetSources();
