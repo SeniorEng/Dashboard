@@ -564,6 +564,7 @@ export default function AdminCustomerDetail() {
             <TabsContent value="insurance" className="space-y-4">
               <CustomerInsuranceTab
                 customerId={customerId}
+                customerBillingType={customer.billingType}
                 currentInsurance={customer.currentInsurance}
               />
             </TabsContent>

@@ -135,5 +135,39 @@ export const versichertennummerFlexSchema = z.string()
   .max(20, "Versichertennummer darf maximal 20 Zeichen haben")
   .regex(/^[A-Za-z0-9\-\/]+$/, "Versichertennummer darf nur Buchstaben, Ziffern, Bindestriche und Schrägstriche enthalten");
 
+export const VERSICHERTENNUMMER_GKV_REGEX = /^[A-Z]\d{9}$/;
+export const VERSICHERTENNUMMER_FLEX_REGEX = /^[A-Za-z0-9\-\/]{3,20}$/;
+export const VERSICHERTENNUMMER_GKV_HINT = "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)";
+export const VERSICHERTENNUMMER_FLEX_HINT = "3–20 Zeichen: Buchstaben, Ziffern, Bindestriche, Schrägstriche";
+
+export function isPrivatePatientCase(opts: {
+  billingType?: string | null;
+  isPrivateProvider?: boolean | null;
+}): boolean {
+  return opts.billingType === "pflegekasse_privat" || !!opts.isPrivateProvider;
+}
+
+export function pickVersichertennummerSchema(opts: {
+  billingType?: string | null;
+  isPrivateProvider?: boolean | null;
+}) {
+  return isPrivatePatientCase(opts) ? versichertennummerFlexSchema : versichertennummerSchema;
+}
+
+export function validateVersichertennummerFor(
+  value: string,
+  opts: { billingType?: string | null; isPrivateProvider?: boolean | null },
+): { ok: true } | { ok: false; message: string } {
+  const isPrivate = isPrivatePatientCase(opts);
+  if (isPrivate) {
+    return VERSICHERTENNUMMER_FLEX_REGEX.test(value)
+      ? { ok: true }
+      : { ok: false, message: "Versichertennummer muss 3-20 Zeichen sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche)" };
+  }
+  return VERSICHERTENNUMMER_GKV_REGEX.test(value)
+    ? { ok: true }
+    : { ok: false, message: "Versichertennummer muss 1 Großbuchstabe + 9 Ziffern sein (z.B. A123456789)" };
+}
+
 export const plzSchema = z.string()
   .regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben");

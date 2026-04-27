@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { customerManagementStorage } from "../../../storage/customer-management";
+import { storage } from "../../../storage";
 import { asyncHandler } from "../../../lib/errors";
 import { requireIntParam } from "../../../lib/params";
 import {
@@ -7,7 +8,7 @@ import {
   insertCustomerContactSchema,
   insertCareLevelHistorySchema,
 } from "@shared/schema";
-import { versichertennummerFlexSchema } from "@shared/schema/common";
+import { pickVersichertennummerSchema } from "@shared/schema/common";
 
 const router = Router();
 
@@ -24,12 +25,17 @@ router.post("/customers/:id/insurance", asyncHandler("Versicherung konnte nicht 
   if (customerId === null) return;
   
   const providerId = Number(req.body.insuranceProviderId);
-  const provider = providerId ? await customerManagementStorage.getInsuranceProvider(providerId) : null;
-  const isPrivate = provider?.isPrivate || false;
+  const [provider, customer] = await Promise.all([
+    providerId ? customerManagementStorage.getInsuranceProvider(providerId) : Promise.resolve(null),
+    storage.getCustomer(customerId),
+  ]);
 
-  const schema = isPrivate
-    ? insertCustomerInsuranceSchema.extend({ versichertennummer: versichertennummerFlexSchema })
-    : insertCustomerInsuranceSchema;
+  const versichertennummerSchemaForCase = pickVersichertennummerSchema({
+    billingType: customer?.billingType,
+    isPrivateProvider: provider?.isPrivate ?? false,
+  });
+
+  const schema = insertCustomerInsuranceSchema.extend({ versichertennummer: versichertennummerSchemaForCase });
 
   const data = schema.parse({ ...req.body, customerId });
   const insurance = await customerManagementStorage.addCustomerInsurance(data, req.user!.id);

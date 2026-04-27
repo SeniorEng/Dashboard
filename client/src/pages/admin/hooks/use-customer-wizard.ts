@@ -287,15 +287,16 @@ export function useCustomerWizard() {
     const versNr = formData.versichertennummer.trim();
     const selectedProvider = insuranceProviders?.find(p => p.id.toString() === formData.insuranceProviderId);
     const isPrivateProvider = selectedProvider?.isPrivate || false;
+    const isPrivateCase = formData.billingType === "pflegekasse_privat" || isPrivateProvider;
     if (formData.insuranceProviderId && versNr) {
-      if (isPrivateProvider && !/^[A-Za-z0-9\-\/]{3,20}$/.test(versNr)) {
+      if (isPrivateCase && !/^[A-Za-z0-9\-\/]{3,20}$/.test(versNr)) {
         toast({
           title: "Ungültige Versichertennummer",
           description: "3-20 Zeichen: Buchstaben, Ziffern, Bindestriche, Schrägstriche",
           variant: "destructive",
         });
         return;
-      } else if (!isPrivateProvider && !/^[A-Z]\d{9}$/.test(versNr)) {
+      } else if (!isPrivateCase && !/^[A-Z]\d{9}$/.test(versNr)) {
         toast({
           title: "Ungültige Versichertennummer",
           description: "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)",

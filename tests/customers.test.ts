@@ -270,6 +270,136 @@ describe("KV-3: Versichertennummer-Validierung", () => {
     }));
     expect(res.status).toBe(400);
   });
+
+  it("KV-3.4 – Privatpatient (pflegekasse_privat) akzeptiert PKV-Format trotz GKV-Provider", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      billingType: "pflegekasse_privat",
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "PKV-2024-12345",
+        validFrom: "2024-01-01",
+      },
+    }));
+    expect(res.status, `Expected 201, got ${res.status}: ${JSON.stringify(res.data)}`).toBe(201);
+    createdCustomerIds.push(res.data.id);
+  });
+
+  it("KV-3.5 – Privatpatient akzeptiert auch PKV-Nummer mit Schrägstrich", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      billingType: "pflegekasse_privat",
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "1234567/01",
+        validFrom: "2024-01-01",
+      },
+    }));
+    expect(res.status, `Expected 201, got ${res.status}: ${JSON.stringify(res.data)}`).toBe(201);
+    createdCustomerIds.push(res.data.id);
+  });
+
+  it("KV-3.6 – GKV-Patient mit Phantasieformat wird weiterhin abgelehnt", async () => {
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      billingType: "pflegekasse_gesetzlich",
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "PKV-2024-12345",
+        validFrom: "2024-01-01",
+      },
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it("KV-3.7 – Versicherungs-Update für Privatpatient akzeptiert PKV-Nummer", async () => {
+    const createRes = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      billingType: "pflegekasse_privat",
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "PKV-START-001",
+        validFrom: "2024-01-01",
+      },
+    }));
+    expect(createRes.status).toBe(201);
+    const customerId = createRes.data.id;
+    createdCustomerIds.push(customerId);
+
+    const updateRes = await apiPost<any>(`/api/admin/customers/${customerId}/insurance`, {
+      insuranceProviderId,
+      versichertennummer: "PKV-NEU/2024-77",
+      validFrom: "2025-01-01",
+    });
+    expect(updateRes.status, `Expected 201, got ${updateRes.status}: ${JSON.stringify(updateRes.data)}`).toBe(201);
+  });
+
+  it("KV-3.8 – Versicherungs-Update für GKV-Patient lehnt PKV-Format ab", async () => {
+    const createRes = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      billingType: "pflegekasse_gesetzlich",
+    }));
+    expect(createRes.status).toBe(201);
+    const customerId = createRes.data.id;
+    createdCustomerIds.push(customerId);
+
+    const updateRes = await apiPost<any>(`/api/admin/customers/${customerId}/insurance`, {
+      insuranceProviderId,
+      versichertennummer: "PKV-NEU-77",
+      validFrom: "2025-01-01",
+    });
+    expect(updateRes.status).toBe(400);
+  });
+
+  it("KV-3.9a – GKV-billingType + Provider isPrivate=true akzeptiert PKV-Nummer (Discriminator-Fallback)", async () => {
+    const provRes = await apiPost<any>("/api/admin/insurance-providers", {
+      name: "QS-PKV-Provider-" + uniqueId(),
+      isPrivate: true,
+      isActive: true,
+    });
+    expect(provRes.status, `Provider-Setup fehlgeschlagen: ${JSON.stringify(provRes.data)}`).toBe(201);
+    const privateProviderId = provRes.data.id;
+
+    const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
+      billingType: "pflegekasse_gesetzlich",
+      insurance: {
+        providerId: privateProviderId,
+        versichertennummer: "PKV-NEU-2026/01",
+        validFrom: "2024-01-01",
+      },
+    }));
+    expect(res.status, `Expected 201, got ${res.status}: ${JSON.stringify(res.data)}`).toBe(201);
+    createdCustomerIds.push(res.data.id);
+  });
+
+  it("KV-3.9 – Prospect-Konvertierung zu Privatpatient akzeptiert PKV-Nummer", async () => {
+    const prospectRes = await apiPost<any>("/api/prospects/inline", {
+      vorname: "QS-Konv-Privat",
+      nachname: "PrivatPKV-" + uniqueId(),
+      telefon: "+4917600000111",
+    });
+    expect(prospectRes.status, `Prospect-Setup fehlgeschlagen: ${JSON.stringify(prospectRes.data)}`).toBe(201);
+    const prospectId = prospectRes.data.id;
+
+    const convertRes = await apiPost<any>(`/api/admin/prospects/${prospectId}/convert`, {
+      billingType: "pflegekasse_privat",
+      vorname: "QS-Konv-Privat",
+      nachname: "Konvert-PKV-" + uniqueId(),
+      geburtsdatum: "1942-03-20",
+      strasse: "Konvertweg",
+      nr: "5",
+      plz: "10115",
+      stadt: "Berlin",
+      pflegegrad: 2,
+      pflegegradSeit: "2024-01-01",
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "PKV-CONV-2026/01",
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(convertRes.status, `Expected 201, got ${convertRes.status}: ${JSON.stringify(convertRes.data)}`).toBe(201);
+    if (convertRes.data?.customer?.id) {
+      createdCustomerIds.push(convertRes.data.customer.id);
+    } else if (convertRes.data?.id) {
+      createdCustomerIds.push(convertRes.data.id);
+    }
+  });
 });
 
 describe("KV-4: Pflegegrad-Historie", () => {

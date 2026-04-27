@@ -36,6 +36,7 @@ interface InsuranceHistoryEntry {
 
 interface CustomerInsuranceTabProps {
   customerId: number;
+  customerBillingType?: string | null;
   currentInsurance?: {
     id: number;
     providerName: string;
@@ -48,7 +49,7 @@ interface CustomerInsuranceTabProps {
 const VERSICHERTENNUMMER_REGEX = /^[A-Z]\d{9}$/;
 const VERSICHERTENNUMMER_FLEX_REGEX = /^[A-Za-z0-9\-\/]{3,20}$/;
 
-export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerInsuranceTabProps) {
+export function CustomerInsuranceTab({ customerId, customerBillingType, currentInsurance }: CustomerInsuranceTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -107,13 +108,14 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
 
   const selectedProvider = providers?.find(p => p.id.toString() === insuranceProviderId);
   const isPrivateProvider = selectedProvider?.isPrivate || false;
+  const isPrivateCase = customerBillingType === "pflegekasse_privat" || isPrivateProvider;
 
   const handleVnChange = (value: string) => {
-    const processed = isPrivateProvider ? value : value.toUpperCase();
+    const processed = isPrivateCase ? value : value.toUpperCase();
     setVersichertennummer(processed);
     if (processed.length === 0) {
       setVnError(null);
-    } else if (isPrivateProvider) {
+    } else if (isPrivateCase) {
       if (processed.length > 20) {
         setVnError("Maximal 20 Zeichen");
       } else if (processed.length < 3) {
@@ -139,7 +141,7 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
       toast({ title: "Bitte Pflegekasse auswählen", variant: "destructive" });
       return;
     }
-    if (isPrivateProvider) {
+    if (isPrivateCase) {
       if (!VERSICHERTENNUMMER_FLEX_REGEX.test(versichertennummer)) {
         setVnError("Versichertennummer muss 3-20 Zeichen lang sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche)");
         return;
@@ -293,8 +295,8 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
                 id="versichertennummer"
                 value={versichertennummer}
                 onChange={(e) => handleVnChange(e.target.value)}
-                placeholder="A123456789"
-                maxLength={10}
+                placeholder={isPrivateCase ? "Vertragsnummer" : "A123456789"}
+                maxLength={isPrivateCase ? 20 : 10}
                 className={vnError ? "border-red-500" : ""}
                 data-testid="input-versichertennummer"
               />
@@ -302,7 +304,9 @@ export function CustomerInsuranceTab({ customerId, currentInsurance }: CustomerI
                 <p className="text-xs text-red-500">{vnError}</p>
               ) : (
                 <p className="text-xs text-gray-500">
-                  Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)
+                  {isPrivateCase
+                    ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen)"
+                    : "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)"}
                 </p>
               )}
             </div>

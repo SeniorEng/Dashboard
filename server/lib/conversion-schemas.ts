@@ -1,6 +1,9 @@
 import { z } from "zod";
-import { versichertennummerSchema } from "@shared/schema";
-import { optionalGermanPhoneSchema, internationalEmailSchema } from "@shared/schema/common";
+import {
+  optionalGermanPhoneSchema,
+  internationalEmailSchema,
+  versichertennummerFlexSchema,
+} from "@shared/schema/common";
 
 const baseContactSchema = z.object({
   contactType: z.string(),
@@ -34,7 +37,7 @@ const baseConversionFields = {
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   insurance: z.object({
     providerId: z.number(),
-    versichertennummer: versichertennummerSchema,
+    versichertennummer: versichertennummerFlexSchema,
     validFrom: z.string(),
   }).optional(),
   budgets: z.object({

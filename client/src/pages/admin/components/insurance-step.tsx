@@ -172,6 +172,7 @@ export function InsuranceStep({
           {formData.insuranceProviderId && (() => {
             const selectedProvider = insuranceProviders.find(p => p.id.toString() === formData.insuranceProviderId);
             const isProviderPrivate = selectedProvider?.isPrivate ?? false;
+            const isPrivateCase = formData.billingType === "pflegekasse_privat" || isProviderPrivate;
             return (
               <>
                 <div className="space-y-2">
@@ -179,14 +180,14 @@ export function InsuranceStep({
                   <Input
                     id="versichertennummer"
                     value={formData.versichertennummer}
-                    onChange={(e) => onChange("versichertennummer", isProviderPrivate ? e.target.value : e.target.value.toUpperCase())}
-                    placeholder={isProviderPrivate ? "Vertragsnummer" : "A123456789"}
-                    maxLength={isProviderPrivate ? 20 : 10}
+                    onChange={(e) => onChange("versichertennummer", isPrivateCase ? e.target.value : e.target.value.toUpperCase())}
+                    placeholder={isPrivateCase ? "Vertragsnummer" : "A123456789"}
+                    maxLength={isPrivateCase ? 20 : 10}
                     required
                     data-testid="input-versichertennummer"
                   />
                   <p className="text-xs text-gray-500">
-                    {isProviderPrivate
+                    {isPrivateCase
                       ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen)"
                       : "Format: Buchstabe + 9 Ziffern (z.B. A123456789)"}
                   </p>

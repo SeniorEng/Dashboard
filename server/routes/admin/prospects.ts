@@ -7,8 +7,9 @@ import {
   PROSPECT_STATUSES,
   customers, prospects, appointments, prospectOffers, prospectNotes,
 } from "@shared/schema";
-import { optionalGermanPhoneSchema } from "@shared/schema/common";
+import { optionalGermanPhoneSchema, validateVersichertennummerFor } from "@shared/schema/common";
 import { convertProspectSchema } from "../../lib/conversion-schemas";
+import { customerManagementStorage } from "../../storage/customer-management";
 import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
@@ -312,6 +313,19 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
   }
 
   const data = convertProspectSchema.parse(req.body);
+
+  if (data.insurance?.versichertennummer) {
+    const vnr = data.insurance.versichertennummer;
+    const provider = await customerManagementStorage.getInsuranceProvider(data.insurance.providerId);
+    const result = validateVersichertennummerFor(vnr, {
+      billingType: data.billingType,
+      isPrivateProvider: provider?.isPrivate ?? false,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: result.message });
+      return;
+    }
+  }
 
   if (!data.skipDuplicateCheck) {
     const duplicates = await findCustomerDuplicates(data.vorname, data.nachname, data.geburtsdatum);

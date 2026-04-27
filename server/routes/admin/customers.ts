@@ -14,7 +14,7 @@ import {
   type Customer,
 } from "@shared/schema";
 import type { CustomerDetail } from "@shared/api";
-import { internationalEmailSchema, optionalGermanPhoneSchema } from "@shared/schema/common";
+import { internationalEmailSchema, optionalGermanPhoneSchema, validateVersichertennummerFor } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { z } from "zod";
@@ -221,17 +221,13 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   if (data.insurance?.versichertennummer) {
     const vnr = data.insurance.versichertennummer;
     const provider = await customerManagementStorage.getInsuranceProvider(data.insurance.providerId);
-    const isPrivateProvider = provider?.isPrivate || false;
-    if (isPrivateProvider) {
-      if (!/^[A-Za-z0-9\-\/]{3,20}$/.test(vnr)) {
-        res.status(400).json({ error: "VALIDATION_ERROR", message: "Versichertennummer muss 3-20 Zeichen sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche)" });
-        return;
-      }
-    } else {
-      if (!/^[A-Z]\d{9}$/.test(vnr)) {
-        res.status(400).json({ error: "VALIDATION_ERROR", message: "Versichertennummer muss 1 Großbuchstabe + 9 Ziffern sein (z.B. A123456789)" });
-        return;
-      }
+    const result = validateVersichertennummerFor(vnr, {
+      billingType: data.billingType,
+      isPrivateProvider: provider?.isPrivate ?? false,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: result.message });
+      return;
     }
   }
 

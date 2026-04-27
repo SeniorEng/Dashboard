@@ -3,7 +3,6 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { insertCustomerSchema } from "@shared/schema";
 import { optionalGermanPhoneSchema, internationalEmailSchema } from "@shared/schema/common";
-import { convertCustomerSchema } from "../lib/conversion-schemas";
 import { requireAuth, requireRoles } from "../middleware/auth";
 import { birthdaysCache, customerIdsCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
