@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq, desc } from "drizzle-orm";
 import { db } from "../server/lib/db";
 import { customerAssignmentHistory } from "../shared/schema/customers";
+import { appointments } from "../shared/schema/appointments";
 import {
   apiPost,
   apiPatch,
@@ -262,6 +263,38 @@ describe("Task #202 – Teamleiter-Schreibrechte", () => {
       const apptId = await createApptForCustomer(setup.customerMember, setup.member.id, setup.serviceId, date, "09:00");
       const res = await apiPostAs<any>(setup.leadAuth, `/api/appointments/${apptId}/start`, {});
       expect(res.status).toBe(403);
+    });
+
+    it("Forbidden: Teamleiter darf Member-Termin NICHT beenden (POST /:id/end) → 403 ACCESS_DENIED", async () => {
+      const date = nextWeekday(24);
+      const apptId = await createApptForCustomer(setup.customerMember, setup.member.id, setup.serviceId, date, "09:00");
+      // Termin in den für /end gültigen Zustand bringen, damit ein 403 nicht
+      // versehentlich aus dem Status-Check (INVALID_STATUS) kommt.
+      await db
+        .update(appointments)
+        .set({ status: "in-progress", actualStart: "09:00:00" })
+        .where(eq(appointments.id, apptId));
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/appointments/${apptId}/end`, {});
+      expect(res.status).toBe(403);
+      // Sicherstellen, dass die Ablehnung aus dem Access-Check stammt, nicht
+      // aus dem späteren Status-Check (INVALID_STATUS).
+      expect(res.data?.error).toBe("ACCESS_DENIED");
+    });
+
+    it("Forbidden: Teamleiter darf Member-Termin NICHT wieder öffnen (POST /:id/reopen) → 403 ACCESS_DENIED", async () => {
+      const date = nextWeekday(25);
+      const apptId = await createApptForCustomer(setup.customerMember, setup.member.id, setup.serviceId, date, "09:00");
+      // Termin in den für /reopen gültigen Zustand bringen, damit ein 403 nicht
+      // versehentlich aus dem Status-Check (INVALID_STATUS) kommt.
+      await db
+        .update(appointments)
+        .set({ status: "completed", actualStart: "09:00:00", actualEnd: "10:00:00" })
+        .where(eq(appointments.id, apptId));
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/appointments/${apptId}/reopen`, {});
+      expect(res.status).toBe(403);
+      // Sicherstellen, dass die Ablehnung aus dem Access-Check stammt, nicht
+      // aus dem späteren Status-Check (INVALID_STATUS).
+      expect(res.data?.error).toBe("ACCESS_DENIED");
     });
 
     it("Forbidden: Teamleiter darf Member-Termin NICHT löschen (DELETE /:id) → 403", async () => {
