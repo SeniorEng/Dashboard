@@ -31,7 +31,7 @@ type PendingChange =
   | { kind: "save"; serviceId: number; priceCents: number; validFrom?: string; invoices: AffectedInvoice[] }
   | { kind: "edit"; priceId: number; priceCents: number; invoices: AffectedInvoice[] }
   | { kind: "delete"; priceId: number; invoices: AffectedInvoice[] }
-  | { kind: "update"; priceId: number; validFrom: string; validTo: string | null; invoices: AffectedInvoice[] };
+  | { kind: "update"; priceId: number; validFrom: string; validTo: string | null; priceCents?: number; invoices: AffectedInvoice[] };
 
 interface CatalogService {
   id: number;
@@ -102,6 +102,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
   const [editingPriceId, setEditingPriceId] = useState<number | null>(null);
   const [editPriceValidFrom, setEditPriceValidFrom] = useState("");
   const [editPriceValidTo, setEditPriceValidTo] = useState("");
+  const [editPriceAmount, setEditPriceAmount] = useState("");
 
   const { data: services, isLoading: loadingServices } = useQuery<CatalogService[]>({
     queryKey: ["/api/services"],
@@ -245,25 +246,33 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       priceId,
       validFrom,
       validTo,
+      priceCents,
       confirmInvoiceOverride,
     }: {
       priceId: number;
       validFrom: string;
       validTo: string | null;
+      priceCents?: number;
       confirmInvoiceOverride?: boolean;
     }) => {
       const body: Record<string, unknown> = { validFrom, validTo };
+      if (priceCents !== undefined) body.priceCents = priceCents;
       if (confirmInvoiceOverride) body.confirmInvoiceOverride = true;
       const result = await api.patch(`/customers/${customerId}/service-prices/${priceId}`, body);
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       invalidateRelated(queryClient, "customer-service-prices");
       setEditingPriceId(null);
       setEditPriceValidFrom("");
       setEditPriceValidTo("");
+      setEditPriceAmount("");
       setPendingChange(null);
-      toast({ title: "Gültigkeitszeitraum aktualisiert" });
+      toast({
+        title: variables.priceCents !== undefined
+          ? "Kundenpreis aktualisiert"
+          : "Gültigkeitszeitraum aktualisiert",
+      });
     },
     onError: (error: Error, variables) => {
       if (
@@ -277,6 +286,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
           priceId: variables.priceId,
           validFrom: variables.validFrom,
           validTo: variables.validTo,
+          priceCents: variables.priceCents,
           invoices,
         });
         return;
@@ -336,6 +346,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
         priceId: pendingChange.priceId,
         validFrom: pendingChange.validFrom,
         validTo: pendingChange.validTo,
+        priceCents: pendingChange.priceCents,
         confirmInvoiceOverride: true,
       });
     } else {
@@ -606,7 +617,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
           Preise zzgl. MwSt. Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
           {" "}Über das Datumsfeld können Sie einen zukünftigen Gültigkeitszeitpunkt festlegen.
           {hasCustomPrices ? " Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
-          {" "}In der Preishistorie können Sie Gültig-ab und Gültig-bis bestehender Preise nachträglich anpassen.
+          {" "}In der Preishistorie können Sie Preis, Gültig-ab und Gültig-bis bestehender Einträge nachträglich anpassen.
         </p>
         <Button
           variant="ghost"
@@ -637,7 +648,23 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                   return (
                     <tr key={p.id} className={`border-t ${!p.validTo ? 'bg-amber-50/50' : ''}`} data-testid={`history-row-${p.id}`}>
                       <td className="px-2 py-1.5">{p.serviceName}</td>
-                      <td className="px-2 py-1.5 text-right font-medium">{formatCurrency(p.priceCents)} {UNIT_LABELS[p.unitType] || "€"}</td>
+                      <td className="px-2 py-1.5 text-right font-medium">
+                        {isRowEditing ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <Input
+                              type="text"
+                              value={editPriceAmount}
+                              onChange={e => setEditPriceAmount(e.target.value)}
+                              className="h-7 text-xs text-right w-20"
+                              placeholder="0,00"
+                              data-testid={`input-history-price-${p.id}`}
+                            />
+                            <span className="text-xs text-gray-500">{UNIT_LABELS[p.unitType] || "€"}</span>
+                          </div>
+                        ) : (
+                          <>{formatCurrency(p.priceCents)} {UNIT_LABELS[p.unitType] || "€"}</>
+                        )}
+                      </td>
                       <td className="px-2 py-1.5">
                         {isRowEditing ? (
                           <Input
@@ -682,10 +709,18 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                                     toast({ title: "Gültig-bis-Datum darf nicht vor Gültig-ab-Datum liegen", variant: "destructive" });
                                     return;
                                   }
+                                  const normalized = editPriceAmount.replace(",", ".");
+                                  const euros = parseFloat(normalized);
+                                  if (isNaN(euros) || euros <= 0) {
+                                    toast({ title: "Ungültiger Preis", variant: "destructive" });
+                                    return;
+                                  }
+                                  const newPriceCents = Math.round(euros * 100);
                                   updateMutation.mutate({
                                     priceId: p.id,
                                     validFrom: editPriceValidFrom,
                                     validTo: editPriceValidTo || null,
+                                    priceCents: newPriceCents !== p.priceCents ? newPriceCents : undefined,
                                   });
                                 }}
                                 disabled={updateMutation.isPending}
@@ -701,6 +736,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                                   setEditingPriceId(null);
                                   setEditPriceValidFrom("");
                                   setEditPriceValidTo("");
+                                  setEditPriceAmount("");
                                 }}
                                 data-testid={`btn-cancel-history-${p.id}`}
                               >
@@ -716,6 +752,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                                 setEditingPriceId(p.id);
                                 setEditPriceValidFrom(p.validFrom.substring(0, 10));
                                 setEditPriceValidTo(p.validTo ? p.validTo.substring(0, 10) : "");
+                                setEditPriceAmount((p.priceCents / 100).toFixed(2).replace(".", ","));
                               }}
                               data-testid={`btn-edit-history-${p.id}`}
                             >
