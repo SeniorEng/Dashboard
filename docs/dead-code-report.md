@@ -342,15 +342,12 @@ Alle 21 Schema-Dateien werden aktiv verwendet. **Risiko-Einstufung auf Datei-Ebe
 | `typescript`, `tsx`, `vite`, `vitest`, `esbuild` | `nicht anfassen` | – | Build-/Runtime-Tools, werden über CLI-Skripte in `package.json` aufgerufen, nicht importiert. |
 | `postcss`, `autoprefixer`, `tailwindcss` | `nicht anfassen` | – | CSS-Toolchain — werden von Vite/PostCSS implizit geladen via `postcss.config.js`. |
 | `@types/bcrypt`, `@types/compression`, `@types/cookie-parser`, `@types/express`, `@types/multer`, `@types/node`, `@types/nodemailer`, `@types/react`, `@types/react-dom`, `@types/ws` | `nicht anfassen` | – | TypeScript-Type-Pakete, werden vom TS-Compiler via `tsconfig.json#types`/`compilerOptions.types` automatisch eingezogen. |
-| `@playwright/test` | `bitte prüfen` | S | E2E-Test-Framework. Aktuell **kein** `playwright.config.*` und **keine** `*.spec.ts`-Dateien gefunden. → **Verdacht: ungenutzt.** Vor Löschung CI-Pipeline / GitHub-Actions prüfen, ob dort `npx playwright test` aufgerufen wird. |
-| `libphonenumber-js` | `bitte prüfen` | S | Wird **nicht direkt importiert** in der App-Codebase. Eventueller transitive Verwendung durch ein anderes Paket. → vor Löschung `npm ls libphonenumber-js` prüfen. |
+| `@playwright/test` | ~~`bitte prüfen`~~ → **`nicht anfassen`** | – | ⚠️ **Korrektur (Task #229):** Ursprünglich als „Verdacht: ungenutzt" eingestuft — **falsch**. Das Paket wird aktiv eingesetzt: `playwright.config.ts:1`, `e2e/health.spec.ts`, `e2e/login.spec.ts`. **Nicht entfernen.** Quelle: [`dependency-audit-report.md` §3.2](./dependency-audit-report.md#3-befunde-nach-paket). |
+| `libphonenumber-js` | ~~`bitte prüfen`~~ → **`nicht anfassen`** | – | ⚠️ **Korrektur (Task #229):** Ursprünglich als „nicht direkt importiert" eingestuft — **falsch**. Drei direkte Importe in der App: `shared/schema/common.ts:3`, `shared/utils/phone.ts:7`, `client/src/pages/admin/settings.tsx:18` (Telefonnummer-Validierung mit DE-CountryCode). **Nicht entfernen.** Quelle: [`dependency-audit-report.md` §3.1](./dependency-audit-report.md#3-befunde-nach-paket). |
 
-**Konkrete Funde zur Aktion:**
+> ⚠️ **Korrektur-Hinweis (Task #229, April 2026):** Die ursprünglichen Einträge zu `@playwright/test` und `libphonenumber-js` in dieser Tabelle waren falsch. Beide Pakete sind **produktiv im Einsatz** und dürfen **nicht** entfernt werden. Die Detail-Belege (Fundstellen mit Zeilennummern) stehen in [`dependency-audit-report.md` §3](./dependency-audit-report.md#3-befunde-nach-paket) sowie in der Empfehlungs-Tabelle [§6 #3](./dependency-audit-report.md#6-empfehlungs-tabelle-zusammenfassung). Die ursprünglichen Aktions-Hinweise („Top-Kandidat zum Entfernen" / „mit `npm ls` verifizieren") sind damit gegenstandslos.
 
-- **`@playwright/test`** ist mit hoher Wahrscheinlichkeit obsolet (kein Playwright-Setup vorhanden). Bei einem Dependency-Cleanup-Sprint Top-Kandidat zum Entfernen.
-- **`libphonenumber-js`** könnte transitive Dep einer anderen Library sein — vor dem Löschen mit `npm ls` verifizieren.
-
-→ Detaillierte Untersuchung inkl. transitiver Dependencies, Bundle-Size-Effekt und CI-Pipeline-Cross-Check ist dem **Folge-Task #220 (Dependency-Audit)** vorbehalten.
+→ Detaillierte Untersuchung inkl. transitiver Dependencies, Bundle-Size-Effekt und CI-Pipeline-Cross-Check ist im **Folge-Task #220 (Dependency-Audit)** erfolgt — siehe [`dependency-audit-report.md`](./dependency-audit-report.md).
 
 ---
 
