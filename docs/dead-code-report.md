@@ -317,7 +317,7 @@ Alle 21 Schema-Dateien werden aktiv verwendet. **Risiko-Einstufung auf Datei-Ebe
 
 | Pfad:Zeile | Typ | Kategorie | Aufwand | Begründung |
 |-----------|-----|-----------|:-------:|------------|
-| `shared/api/customers.ts:38,49,61,67,95,122` | `CustomerPricingInfo`, `BudgetSummaryInfo`, `CustomerBudgetsInfo`, `CustomerNeedsAssessmentInfo`, `CustomerContractInfo`, `CustomerCareLevelHistoryItem` | `wahrscheinlich löschbar` | M | 1–2 Treffer pro Symbol — tatsächlich nur Eigen-Definition + ggf. Re-Export. |
+| `shared/api/customers.ts` | `BudgetSummaryInfo`, `CustomerBudgetsInfo`, `CustomerNeedsAssessmentInfo`, `CustomerContractInfo`, `CustomerCareLevelHistoryItem` | `wahrscheinlich löschbar` | M | 1–2 Treffer pro Symbol — tatsächlich nur Eigen-Definition + ggf. Re-Export. (`CustomerPricingInfo` entfernt mit Task #231.) |
 | `shared/api/time-tracking.ts:60` | `AppointmentServiceBreakdown` | `sicher löschbar` | XS | |
 | `shared/api/billing.ts:23` | `InvoiceLineItem` | `bitte prüfen` | S | Name-Kollision mit Drizzle-Typ; vorsichtig prüfen. |
 | `shared/api/index.ts` (Sammeldatei mit ~50 Typ-Re-Exports) | mehrere | `bitte prüfen` | M | Re-Export-Index — wenn der Index konsumentenlos ist, in einem Rutsch entfernen. **Vor Löschung explizit per ripgrep gegenchecken.** |

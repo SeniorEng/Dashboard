@@ -685,7 +685,7 @@ Eintrag erfolgt nur, wenn **alle** folgenden Bedingungen erfüllt sind: leer in 
 
 | Objekt | Typ | Begründung | SQL-Evidenz | Status |
 |---|---|---|---|---|
-| `customer_pricing_history` | **Tabelle** | 0 Zeilen, kein Storage-Read/Write, nur in Cleanup-Skripten referenziert | `SELECT COUNT(*) FROM customer_pricing_history → 0` + `rg "customerPricingHistory" server/storage/` ergibt 0 Treffer | offen |
+| `customer_pricing_history` | **Tabelle** | 0 Zeilen, kein Storage-Read/Write, nur in Cleanup-Skripten referenziert | `SELECT COUNT(*) FROM customer_pricing_history → 0` + `rg "customerPricingHistory" server/storage/` ergibt 0 Treffer | **erledigt (Task #231, 2026-04-28)** |
 | `appointments.services_done` (text[]) | Spalte | 0/735 nicht-leere Arrays, ersetzt durch `appointment_services` | `SELECT COUNT(*) FILTER (WHERE array_length(services_done, 1) > 0) FROM appointments → 0` | **erledigt (Task #228, 2026-04-28)** |
 | `customer_contracts.hauswirtschaft_rate_cents` | Spalte | 108/108 = 0 (Default), ersetzt durch `customer_service_prices` | `SELECT COUNT(DISTINCT hauswirtschaft_rate_cents), MAX(hauswirtschaft_rate_cents) FROM customer_contracts → 1, 0` | **erledigt (Task #228, 2026-04-28)** |
 | `customer_contracts.alltagsbegleitung_rate_cents` | Spalte | 108/108 = 0 (Default) | `SELECT COUNT(DISTINCT alltagsbegleitung_rate_cents), MAX(alltagsbegleitung_rate_cents) FROM customer_contracts → 1, 0` | **erledigt (Task #228, 2026-04-28)** |
