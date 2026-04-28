@@ -419,7 +419,16 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
       message: "Sie haben keinen Zugriff auf diesen Leistungsnachweis" 
     });
   }
-  
+
+  // Nur der zugeordnete Mitarbeiter (oder ein Admin) darf seinen Leistungsnachweis unterschreiben.
+  // Backup-Mitarbeiter mit Kunden-Zugriff dürfen keine Records anderer Mitarbeiter signieren.
+  if (!req.user!.isAdmin && existingRecord.employeeId !== req.user!.id) {
+    return res.status(403).json({
+      error: "FORBIDDEN",
+      message: "Nur der zugeordnete Mitarbeiter darf diesen Leistungsnachweis unterschreiben",
+    });
+  }
+
   const parsed = signServiceRecordSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ 

@@ -8,6 +8,13 @@ export function generateCsrfToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, "utf8");
+  const bBuf = Buffer.from(b, "utf8");
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 export function setCsrfCookie(res: Response, token: string): void {
   res.cookie(CSRF_COOKIE_NAME, token, {
     httpOnly: false,
@@ -48,7 +55,7 @@ export function csrfProtection(
     return;
   }
 
-  if (!headerToken || headerToken !== cookieToken) {
+  if (!headerToken || !timingSafeEqualStrings(headerToken, cookieToken)) {
     res.status(403).json({
       error: "CSRF_TOKEN_INVALID",
       message: "CSRF-Token ungültig. Bitte laden Sie die Seite neu.",

@@ -99,11 +99,12 @@ export async function getTaskById(id: number): Promise<TaskWithRelations | null>
 
 export async function createTask(
   data: InsertTask,
-  createdByUserId: number
+  createdByUserId: number,
+  txOrDb: DbOrTx = db,
 ): Promise<Task> {
   const assignedToUserId = data.assignedToUserId || createdByUserId;
 
-  const result = await db
+  const result = await txOrDb
     .insert(tasks)
     .values({
       title: data.title,

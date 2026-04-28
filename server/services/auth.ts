@@ -23,6 +23,15 @@ const PASSWORD_RESET_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const WELCOME_TOKEN_DURATION_MS = 48 * 60 * 60 * 1000; // 48 hours
 const BCRYPT_ROUNDS = 12;
 
+// Lazy-initialized dummy hash for login-timing protection (avoids blocking startup).
+let dummyBcryptHashCache: string | null = null;
+async function getDummyBcryptHash(): Promise<string> {
+  if (!dummyBcryptHashCache) {
+    dummyBcryptHashCache = await bcrypt.hash("dummy", BCRYPT_ROUNDS);
+  }
+  return dummyBcryptHashCache;
+}
+
 async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
@@ -136,6 +145,9 @@ export class AuthService {
       .where(eq(users.email, email.toLowerCase()));
 
     if (!user || !user.isActive) {
+      // Constant-time mitigation: perform a dummy bcrypt compare so that response
+      // timing for unknown / inactive accounts matches that of valid ones.
+      await bcrypt.compare(password, await getDummyBcryptHash()).catch(() => false);
       if (user) {
         auditService.loginFailed(user.id, { email: email.toLowerCase(), reason: "inactive_account" }).catch(() => {});
       }

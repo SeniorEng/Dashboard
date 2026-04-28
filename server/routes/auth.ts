@@ -313,7 +313,7 @@ router.get("/session-info", requireAuth, asyncHandler("Session-Info konnte nicht
   res.json(info);
 }));
 
-router.post("/keepalive", requireAuth, asyncHandler("Session konnte nicht verlängert werden", async (req: Request, res: Response) => {
+router.post("/keepalive", requireAuth, csrfProtection, asyncHandler("Session konnte nicht verlängert werden", async (req: Request, res: Response) => {
   const token = getSessionToken(req);
   if (!token) {
     res.status(401).json({ error: "UNAUTHORIZED" });

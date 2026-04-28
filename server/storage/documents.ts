@@ -28,7 +28,7 @@ import {
   type DocumentSigningToken,
   type EmployeeDocumentProof,
 } from "@shared/schema";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 
 function buildDocumentInsertValues(
   data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null },
@@ -670,8 +670,8 @@ export class DocumentStorage implements IDocumentStorage {
     return { ...rows[0].token, document: rows[0].document };
   }
 
-  async markSigningTokenUsed(id: number): Promise<boolean> {
-    const [result] = await db
+  async markSigningTokenUsed(id: number, txOrDb: DbOrTx = db): Promise<boolean> {
+    const [result] = await txOrDb
       .update(documentSigningTokens)
       .set({ usedAt: new Date() })
       .where(and(eq(documentSigningTokens.id, id), isNull(documentSigningTokens.usedAt)))
@@ -687,8 +687,9 @@ export class DocumentStorage implements IDocumentStorage {
     fileName: string,
     signingIp?: string | null,
     signingLocation?: string | null,
+    txOrDb: DbOrTx = db,
   ): Promise<GeneratedDocument | null> {
-    const [result] = await db
+    const [result] = await txOrDb
       .update(generatedDocuments)
       .set({
         employeeSignatureData,
@@ -700,7 +701,10 @@ export class DocumentStorage implements IDocumentStorage {
         ...(signingIp ? { signingIp } : {}),
         ...(signingLocation ? { signingLocation } : {}),
       })
-      .where(eq(generatedDocuments.id, id))
+      .where(and(
+        eq(generatedDocuments.id, id),
+        eq(generatedDocuments.signingStatus, "pending_employee_signature"),
+      ))
       .returning();
     return result || null;
   }
