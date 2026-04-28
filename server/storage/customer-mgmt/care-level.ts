@@ -32,8 +32,12 @@ export async function getCustomerCurrentCareLevel(customerId: number): Promise<C
 }
 
 export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?: number): Promise<CustomerCareLevelHistory> {
+  // K2: validFrom kommt als YYYY-MM-DD-String — parseLocalDate hält die
+  // lokale TZ. dayBeforeDate ist eine Kopie des resultierenden Date-Objekts
+  // (kein erneutes String-Parsing!), daher ist `new Date(validFromDate)` hier
+  // bewusst korrekt — wir klonen ein Date, kein Parsing eines Strings.
   const validFromDate = parseLocalDate(data.validFrom);
-  const dayBeforeDate = new Date(validFromDate);
+  const dayBeforeDate = new Date(validFromDate.getTime());
   dayBeforeDate.setDate(dayBeforeDate.getDate() - 1);
   const dayBeforeValidFrom = formatDateISO(dayBeforeDate);
   

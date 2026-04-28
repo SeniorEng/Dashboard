@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useNotifications, useMarkAsRead, useMarkAllAsRead } from "./use-notifications";
 import type { Notification } from "@shared/schema";
+import { parseTimestamp } from "@shared/utils/datetime";
 import { useState } from "react";
 
 function getIcon(type: string) {
@@ -36,7 +37,7 @@ function getNavigationPath(notification: Notification): string | null {
 }
 
 function formatTimeAgo(dateStr: string | Date): string {
-  const date = new Date(dateStr);
+  const date = parseTimestamp(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);

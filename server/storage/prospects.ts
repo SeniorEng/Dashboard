@@ -12,6 +12,7 @@ import {
 } from "@shared/schema";
 import { eq, and, or, ilike, isNull, desc, sql, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 export const prospectStorage = {
   async create(data: InsertProspect): Promise<Prospect> {
@@ -145,7 +146,7 @@ export const prospectStorage = {
       prospectId,
       wizardData,
       createdBy: userId,
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      expiresAt: expiresAt ? parseLocalDate(expiresAt) : null,
     }).returning();
     return offer;
   },

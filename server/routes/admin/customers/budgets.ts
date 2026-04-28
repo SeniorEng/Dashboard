@@ -5,7 +5,7 @@ import { budgetLedgerStorage } from "../../../storage/budget-ledger";
 import { computeDataHash } from "../../../services/signature-integrity";
 import { auditService } from "../../../services/audit";
 import { asyncHandler } from "../../../lib/errors";
-import { requireIntParam } from "../../../lib/params";
+import { requireIntParam, parseOptionalIntQuery } from "../../../lib/params";
 import { z } from "zod";
 import { validate45aAmount, validate45bAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import {
@@ -25,11 +25,23 @@ router.get("/customers/:id/budgets", asyncHandler("Budget-Historie konnte nicht 
   res.json(history);
 }));
 
+const customerBudgetBodySchema = insertCustomerBudgetSchema
+  .pick({
+    entlastungsbetrag45b: true,
+    verhinderungspflege39: true,
+    pflegesachleistungen36: true,
+    validFrom: true,
+    validTo: true,
+    notes: true,
+  })
+  .strict();
+
 router.post("/customers/:id/budgets", asyncHandler("Budget konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
 
-  const validatedData = insertCustomerBudgetSchema.parse({ ...req.body, customerId });
+  const body = customerBudgetBodySchema.parse(req.body);
+  const validatedData = { ...body, customerId };
   
   const customer = await storage.getCustomer(customerId);
   if (!customer) {
@@ -66,7 +78,9 @@ router.post("/customers/:id/budgets", asyncHandler("Budget konnte nicht aktualis
 }));
 
 router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", async (req: Request, res: Response) => {
-  const customerIdFilter = req.query.customerId ? parseInt(req.query.customerId as string) : null;
+  const customerIdParsed = parseOptionalIntQuery(req.query.customerId, res, "customerId");
+  if (customerIdParsed === null) return;
+  const customerIdFilter = customerIdParsed ?? null;
   const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : null;
   const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : null;
 

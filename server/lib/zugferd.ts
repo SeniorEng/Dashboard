@@ -1,5 +1,6 @@
 import type { InvoicePdfData } from "./pdf-generator";
 import { log } from "./log";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 interface ZugferdInvoice {
   toXML(): Promise<string>;
@@ -33,6 +34,9 @@ function parseDateString(dateStr: string): Date {
   const parts = dateStr.split(".");
   if (parts.length === 3) {
     return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return parseLocalDate(dateStr);
   }
   return new Date(dateStr);
 }

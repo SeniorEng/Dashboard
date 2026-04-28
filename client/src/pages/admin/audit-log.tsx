@@ -11,6 +11,7 @@ import { StatusBadge } from "@/components/patterns/status-badge";
 import { ArrowLeft, Loader2, Shield, ChevronLeft, ChevronRight, Layers, X } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
+import { parseTimestamp } from "@shared/utils/datetime";
 
 const ACTION_LABELS: Record<string, string> = {
   documentation_submitted: "Dokumentation eingereicht",
@@ -88,7 +89,7 @@ export default function AdminAuditLog() {
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0;
 
   const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr);
+    const d = parseTimestamp(dateStr);
     return d.toLocaleString("de-DE", {
       day: "2-digit",
       month: "2-digit",

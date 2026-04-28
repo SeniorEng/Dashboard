@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { authService } from "../services/auth";
 import { adminPermissionStorage } from "../storage/admin-permissions";
 import { isTeamLead as userIsTeamLead } from "../lib/team-lead";
+import { requireIntParam } from "../lib/params";
 import type { UserWithRoles, EmployeeRole, AdminPermissionKey } from "@shared/schema";
 
 declare global {
@@ -323,15 +324,8 @@ export function requireCustomerAccess(
       return;
     }
 
-    const customerIdRaw = parseInt(req.params.customerId, 10);
-    if (isNaN(customerIdRaw)) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Ungültige Kunden-ID",
-      });
-      return;
-    }
-    const customerId = customerIdRaw;
+    const customerId = requireIntParam(req.params.customerId, res);
+    if (customerId === null) return;
 
     const hasAccess = await canAccessCustomer(
       req.user.id,

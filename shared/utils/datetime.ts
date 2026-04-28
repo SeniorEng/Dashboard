@@ -298,6 +298,33 @@ export function currentYearAndMonth(): { year: number; month: number } {
   return { year: d.getFullYear(), month: d.getMonth() + 1 };
 }
 
+/**
+ * Parst einen System-Zeitstempel (z. B. von einer `timestamptz`-Spalte oder
+ * einem `created_at`/`updated_at`-Feld) zu einem `Date`-Objekt.
+ *
+ * - Erlaubt: vollständige ISO-8601-Strings inkl. Timezone-Suffix
+ *   (z. B. "2026-04-28T15:30:00.000Z") sowie `Date`-Objekte (Pass-Through).
+ * - Verboten: reine "YYYY-MM-DD"-Strings → dafür `parseLocalDate` nutzen,
+ *   sonst entstehen Off-by-one-Bugs beim Wechsel zwischen UTC und CET.
+ *
+ * Diese Funktion ist die einzige Stelle, an der `new Date(stringVar)` für
+ * Zeitstempel-Strings benutzt werden darf. So bleibt das Verbot aus K2
+ * (Tiefenanalyse 2026-04-18) projektweit konsequent durchsetzbar.
+ */
+export function parseTimestamp(value: string | Date): Date {
+  if (value instanceof Date) return value;
+  if (typeof value !== "string") {
+    throw new TypeError(`parseTimestamp: erwartet string|Date, erhielt ${typeof value}`);
+  }
+  // YYYY-MM-DD ohne Zeit-Anteil → Aufrufer hat das falsche Werkzeug gewählt.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new RangeError(
+      `parseTimestamp: "${value}" ist ein Datums-String ohne Zeitzone. Bitte parseLocalDate() verwenden.`
+    );
+  }
+  return new Date(value);
+}
+
 export function isChild(geburtsdatum: string | null): boolean {
   if (!geburtsdatum) return false;
   const birth = parseLocalDate(geburtsdatum);

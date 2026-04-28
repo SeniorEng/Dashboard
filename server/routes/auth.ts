@@ -345,8 +345,32 @@ router.post("/setup", csrfProtection, asyncHandler("Administrator-Konto konnte n
     return;
   }
 
+  const setupBodySchema = insertUserSchema
+    .pick({
+      email: true,
+      password: true,
+      vorname: true,
+      nachname: true,
+      strasse: true,
+      hausnummer: true,
+      plz: true,
+      stadt: true,
+      geburtsdatum: true,
+    })
+    .strict();
+
+  const bodyResult = setupBodySchema.safeParse(req.body);
+  if (!bodyResult.success) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: "Ungültige Daten",
+      details: bodyResult.error.issues,
+    });
+    return;
+  }
+
   const result = insertUserSchema.safeParse({
-    ...req.body,
+    ...bodyResult.data,
     isAdmin: true,
     roles: EMPLOYEE_ROLES as unknown as EmployeeRole[],
   });

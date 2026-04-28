@@ -16,7 +16,7 @@ import {
 import type { CustomerDetail } from "@shared/api";
 import { internationalEmailSchema, optionalGermanPhoneSchema, validateVersichertennummerFor } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
-import { requireIntParam } from "../../lib/params";
+import { requireIntParam, parseOptionalIntQuery } from "../../lib/params";
 import { z } from "zod";
 import { db } from "../../lib/db";
 import { eq, and, sql, isNull, desc } from "drizzle-orm";
@@ -62,25 +62,41 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     ? (sortOrder as "asc" | "desc")
     : undefined;
 
-  const resolvedEmployeeId = (responsibleEmployeeId as string) === "unassigned"
-    ? "unassigned" as const
-    : responsibleEmployeeId
-      ? parseInt(responsibleEmployeeId as string)
-      : (primaryEmployeeId ? parseInt(primaryEmployeeId as string) : undefined);
+  let resolvedEmployeeId: number | "unassigned" | undefined;
+  if ((responsibleEmployeeId as string) === "unassigned") {
+    resolvedEmployeeId = "unassigned";
+  } else if (responsibleEmployeeId !== undefined) {
+    const v = parseOptionalIntQuery(responsibleEmployeeId, res, "responsibleEmployeeId");
+    if (v === null) return;
+    resolvedEmployeeId = v;
+  } else {
+    const v = parseOptionalIntQuery(primaryEmployeeId, res, "primaryEmployeeId");
+    if (v === null) return;
+    resolvedEmployeeId = v;
+  }
+
+  const pflegegradNum = parseOptionalIntQuery(pflegegrad, res, "pflegegrad");
+  if (pflegegradNum === null) return;
+  const insuranceProviderIdNum = parseOptionalIntQuery(insuranceProviderId, res, "insuranceProviderId");
+  if (insuranceProviderIdNum === null) return;
 
   const filters = {
     search: search as string | undefined,
-    pflegegrad: pflegegrad ? parseInt(pflegegrad as string) : undefined,
+    pflegegrad: pflegegradNum,
     responsibleEmployeeId: resolvedEmployeeId,
     status: status as string | undefined,
     billingType: billingType as string | undefined,
-    insuranceProviderId: insuranceProviderId ? parseInt(insuranceProviderId as string) : undefined,
+    insuranceProviderId: insuranceProviderIdNum,
     sortBy: validSortBy,
     sortOrder: validSortOrder,
   };
-  
-  const pageNum = page ? parseInt(page as string) : 1;
-  const limitNum = limit ? parseInt(limit as string) : 20;
+
+  const pageNumOrNull = parseOptionalIntQuery(page, res, "page");
+  if (pageNumOrNull === null) return;
+  const limitNumOrNull = parseOptionalIntQuery(limit, res, "limit");
+  if (limitNumOrNull === null) return;
+  const pageNum = pageNumOrNull ?? 1;
+  const limitNum = limitNumOrNull ?? 20;
   
   const result = await customerManagementStorage.getCustomersPaginated(filters, {
     limit: limitNum,
