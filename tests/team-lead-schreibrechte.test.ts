@@ -9,6 +9,7 @@ import {
   apiPostAs,
   apiPatchAs,
   apiGetAs,
+  apiDeleteAs,
   loginAs,
   createTestEmployee,
   createTestCustomer,
@@ -297,16 +298,47 @@ describe("Task #202 – Teamleiter-Schreibrechte", () => {
       expect(res.data?.error).toBe("ACCESS_DENIED");
     });
 
-    it("Forbidden: Teamleiter darf Member-Termin NICHT löschen (DELETE /:id) → 403", async () => {
+    it("Happy: Teamleiter darf Member-Termin löschen, solange nicht gestartet → 200, Audit actor.role=teamLead", async () => {
       const date = nextWeekday(28);
       const apptId = await createApptForCustomer(setup.customerMember, setup.member.id, setup.serviceId, date, "09:00");
-      const baseUrl = process.env.TEST_BASE_URL || "http://localhost:5000";
-      const auth = setup.leadAuth;
-      const cookie = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-      const delRes = await fetch(`${baseUrl}/api/appointments/${apptId}`, {
-        method: "DELETE",
-        headers: { Cookie: cookie, "x-csrf-token": auth.csrfToken },
-      });
+      const delRes = await apiDeleteAs(setup.leadAuth, `/api/appointments/${apptId}`);
+      expect(delRes.status).toBe(200);
+
+      const audit = await apiGetAs<any>(
+        setup.adminAuth,
+        `/api/admin/audit-log?entityType=appointment&entityId=${apptId}&action=appointment_deleted`,
+      );
+      expect(audit.status).toBe(200);
+      const entry = (audit.data.entries || []).find((e: any) => e.userId === setup.lead.id);
+      expect(entry).toBeDefined();
+      expect(entry.metadata?.actor?.role).toBe("teamLead");
+    });
+
+    it("Forbidden: Teamleiter darf bereits gestarteten Member-Termin NICHT löschen → 403 APPOINTMENT_STARTED", async () => {
+      const date = nextWeekday(29);
+      const apptId = await createApptForCustomer(setup.customerMember, setup.member.id, setup.serviceId, date, "09:00");
+      // Termin „starten": actualStart und Status auf in_progress setzen.
+      await db
+        .update(appointments)
+        .set({ status: "in_progress", actualStart: "09:00:00" })
+        .where(eq(appointments.id, apptId));
+      const delRes = await apiDeleteAs(setup.leadAuth, `/api/appointments/${apptId}`);
+      expect(delRes.status).toBe(403);
+      expect((delRes.data as any)?.error).toBe("APPOINTMENT_STARTED");
+    });
+
+    it("Forbidden: Teamleiter darf Outsider-Termin NICHT löschen → 403 ACCESS_DENIED", async () => {
+      const date = nextWeekday(30);
+      const apptId = await createApptForCustomer(setup.customerOutsider, setup.outsider.id, setup.serviceId, date, "09:00");
+      const delRes = await apiDeleteAs(setup.leadAuth, `/api/appointments/${apptId}`);
+      expect(delRes.status).toBe(403);
+      expect((delRes.data as any)?.error).toBe("ACCESS_DENIED");
+    });
+
+    it("Forbidden: regulärer Mitarbeiter darf fremden Termin NICHT löschen → 403", async () => {
+      const date = nextWeekday(31);
+      const apptId = await createApptForCustomer(setup.customerMember, setup.member.id, setup.serviceId, date, "09:00");
+      const delRes = await apiDeleteAs(setup.outsiderAuth, `/api/appointments/${apptId}`);
       expect(delRes.status).toBe(403);
     });
   });

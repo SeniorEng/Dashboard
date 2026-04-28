@@ -172,9 +172,17 @@ router.use(requireAuth);
 
 router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen werden", async (_req, res) => {
   const employees = await authService.getActiveEmployees();
+  // Map: userId -> displayName, damit wir den Namen des eigenen Teamleiters mitliefern können.
+  const nameById = new Map<number, string>();
+  for (const e of employees) {
+    nameById.set(e.id, e.displayName ?? `${e.vorname ?? ""} ${e.nachname ?? ""}`.trim());
+  }
   const safeEmployees = employees.map((e) => ({
     id: e.id,
     displayName: e.displayName,
+    isTeamLead: Boolean(e.isTeamLead),
+    teamLeadId: e.teamLeadId ?? null,
+    teamLeadName: e.teamLeadId ? (nameById.get(e.teamLeadId) ?? null) : null,
   }));
   res.json(safeEmployees);
 }));
@@ -1223,9 +1231,29 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
   
-  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
+  const user = req.user!;
+  const isAdmin = user.isAdmin;
+  const isAssigned = appointment.assignedEmployeeId === user.id;
+  // Termin gilt als „gestartet", sobald eine tatsächliche Start- oder Endzeit
+  // erfasst wurde oder der Status nicht mehr „scheduled" ist.
+  const isStarted = Boolean(appointment.actualStart) || Boolean(appointment.actualEnd) || appointment.status !== "scheduled";
 
-  const isAdmin = req.user!.isAdmin;
+  if (!isAdmin && !isAssigned) {
+    if (isTeamLead(user)) {
+      const teamMemberIds = await getTeamMemberIds(user.id);
+      const assigned = appointment.assignedEmployeeId;
+      const inTeam = assigned !== null && assigned !== undefined && teamMemberIds.includes(assigned);
+      if (!inTeam) {
+        return sendForbidden(res, "ACCESS_DENIED", "Sie dürfen nur Termine Ihrer Team-Mitarbeiter löschen.");
+      }
+      if (isStarted) {
+        return sendForbidden(res, "APPOINTMENT_STARTED", "Bereits gestartete oder abgeschlossene Termine können nicht mehr gelöscht werden.");
+      }
+    } else {
+      return sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
+    }
+  }
+
   const isCompleted = appointment.status === "completed";
   
   const isLocked = await storage.isAppointmentLocked(id);
@@ -1275,6 +1303,7 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
       adminForceDelete: isAdmin && isCompleted,
       reversedTransactions,
       wasLocked: isLocked,
+      actor: { role: actorRole(user) },
     },
     ip
   );

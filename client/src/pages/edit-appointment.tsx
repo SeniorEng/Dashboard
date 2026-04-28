@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { 
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -26,7 +27,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstPanel } from "@/features/appointments";
-import { useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
+import { useActiveEmployees, useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import type { FahrtdienstState } from "@/features/appointments/components/fahrtdienst-panel";
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
@@ -42,11 +43,15 @@ export default function EditAppointment() {
   const queryClient = useQueryClient();
   const id = params?.id ? parseInt(params.id) : 0;
   const isAdmin = user?.isAdmin ?? false;
+  const isTeamLead = user?.isTeamLead ?? false;
+  const canChangeKtAssignment = isAdmin || isTeamLead;
 
   const { data: appointment, isLoading: appointmentLoading } = useAppointment(id);
   
   const { data: customers = [] } = useCustomerList();
   const { data: employees = [] } = useAdminEmployees({ enabled: isAdmin });
+  // Aktive Mitarbeiter inklusive Teamleiter-Info (für Cross-Team-Confirm).
+  const { data: activeEmployees = [] } = useActiveEmployees({ enabled: canChangeKtAssignment });
 
   const { data: appointmentServiceEntries = [], isSuccess: appointmentServicesLoaded } = useQuery<Array<{
     serviceId: number;
@@ -81,6 +86,7 @@ export default function EditAppointment() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
   const [showSeriesEditDialog, setShowSeriesEditDialog] = useState(false);
+  const [showCrossTeamConfirm, setShowCrossTeamConfirm] = useState(false);
 
   const [ebVorname, setEbVorname] = useState("");
   const [ebNachname, setEbNachname] = useState("");
@@ -258,13 +264,22 @@ export default function EditAppointment() {
   const effectiveCustomerLng = customerForGeocode?.longitude
     ?? (geocodedCoords?.customerId === customerForGeocode?.id ? geocodedCoords?.lng ?? null : null);
 
+  // Quelle: aktive Mitarbeiter (für Admin und Teamleiter gleichermaßen verfügbar).
+  // Admins können die volle Liste aus useAdminEmployees nutzen, fallen aber auf
+  // active-employees zurück, falls die Admin-Liste (noch) nicht geladen ist.
+  const ktEmployeeSource = useMemo(() => {
+    if (isAdmin && employees.length > 0) {
+      return employees.filter(e => e.isActive).map(e => ({ id: e.id, displayName: e.displayName }));
+    }
+    return activeEmployees.map(e => ({ id: e.id, displayName: e.displayName }));
+  }, [isAdmin, employees, activeEmployees]);
+
   const ktEmployeeOptions = useMemo(() => {
-    const active = employees.filter(e => e.isActive);
     if (appointment?.customer) {
       const c = appointment.customer;
       const assignedIds = [c.primaryEmployeeId, c.backupEmployeeId, c.backupEmployeeId2].filter(Boolean);
       if (assignedIds.length > 0) {
-        return active
+        return ktEmployeeSource
           .filter(e => assignedIds.includes(e.id))
           .map((e) => ({
             value: e.id.toString(),
@@ -273,11 +288,11 @@ export default function EditAppointment() {
           .sort((a, b) => a.label.localeCompare(b.label, "de"));
       }
     }
-    return active.map((e) => ({
+    return ktEmployeeSource.map((e) => ({
       value: e.id.toString(),
       label: e.displayName,
     })).sort((a, b) => a.label.localeCompare(b.label, "de"));
-  }, [employees, appointment]);
+  }, [ktEmployeeSource, appointment]);
 
   const ebEmployeeOptions = useMemo(() => {
     return employees
@@ -381,7 +396,7 @@ export default function EditAppointment() {
       if (services.length === 0) {
         newErrors.services = "Bitte wählen Sie mindestens einen Service";
       }
-      if (isAdmin && !ktAssignedEmployeeId) {
+      if (canChangeKtAssignment && !ktAssignedEmployeeId) {
         newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
       }
       if (hasAlltagsbegleitung && fahrtdienst.enabled) {
@@ -409,7 +424,7 @@ export default function EditAppointment() {
     if (date !== appointment.date) fields.date = date;
     const normalizedStart = (appointment.scheduledStart || "").slice(0, 5);
     if (time !== normalizedStart) fields.scheduledStart = time;
-    if (isAdmin && ktAssignedEmployeeId && parseInt(ktAssignedEmployeeId) !== appointment.assignedEmployeeId) {
+    if (canChangeKtAssignment && ktAssignedEmployeeId && parseInt(ktAssignedEmployeeId) !== appointment.assignedEmployeeId) {
       fields.assignedEmployeeId = parseInt(ktAssignedEmployeeId);
     }
     if ((notes || null) !== (appointment.notes || null)) fields.notes = notes || null;
@@ -460,7 +475,7 @@ export default function EditAppointment() {
         scheduledEnd: calculatedEndTime,
         durationPromised: totalDuration,
         notes: notes || null,
-        assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
+        assignedEmployeeId: canChangeKtAssignment && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
         services: services.map(s => ({
           serviceId: s.serviceId,
           plannedDurationMinutes: s.durationMinutes,
@@ -474,8 +489,35 @@ export default function EditAppointment() {
     seriesUpdateMutation.mutate({ mode, updateFields });
   };
 
+  // Cross-Team-Bestätigung: nur wenn ein Teamleiter (kein Admin) den Termin auf
+  // einen Mitarbeiter aus einem fremden Team umhängt. Innerhalb des eigenen Teams
+  // (oder wenn der Ziel-Mitarbeiter selbst der Teamleiter ist) keine Rückfrage.
+  const crossTeamTarget = useMemo(() => {
+    if (!isTeamLead || isAdmin) return null;
+    if (!appointment || appointment.appointmentType !== "Kundentermin") return null;
+    if (!ktAssignedEmployeeId) return null;
+    const targetId = parseInt(ktAssignedEmployeeId);
+    if (!targetId || targetId === appointment.assignedEmployeeId) return null;
+    const target = activeEmployees.find(e => e.id === targetId);
+    if (!target) return null;
+    if (target.id === user?.id) return null;
+    if (target.teamLeadId === user?.id) return null;
+    return target;
+  }, [isTeamLead, isAdmin, appointment, ktAssignedEmployeeId, activeEmployees, user?.id]);
+
   const handleSubmit = () => {
     if (!validate() || !appointment) return;
+
+    if (crossTeamTarget) {
+      setShowCrossTeamConfirm(true);
+      return;
+    }
+
+    runSubmit();
+  };
+
+  const runSubmit = () => {
+    if (!appointment) return;
 
     if (appointment.seriesId && appointment.appointmentType === "Kundentermin") {
       setShowSeriesEditDialog(true);
@@ -492,7 +534,7 @@ export default function EditAppointment() {
         scheduledEnd: calculatedEndTime,
         durationPromised: totalDuration,
         notes: notes || null,
-        assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
+        assignedEmployeeId: canChangeKtAssignment && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
         services: services.map(s => ({
           serviceId: s.serviceId,
           plannedDurationMinutes: s.durationMinutes,
@@ -623,7 +665,7 @@ export default function EditAppointment() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          {isKundentermin && isAdmin && (
+          {isKundentermin && canChangeKtAssignment && (
             <div className="space-y-2">
               <Label>
                 <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
@@ -1042,6 +1084,46 @@ export default function EditAppointment() {
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           )}
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showCrossTeamConfirm} onOpenChange={setShowCrossTeamConfirm}>
+        <AlertDialogContent className="max-w-md" data-testid="dialog-cross-team-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className={`${iconSize.md} text-amber-500`} />
+              Mitarbeiter aus anderem Team
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-sm text-muted-foreground space-y-2">
+                <span className="block">
+                  <strong data-testid="text-cross-team-target-name">{crossTeamTarget?.displayName}</strong>{" "}
+                  gehört nicht zu Ihrem Team.
+                </span>
+                {crossTeamTarget?.teamLeadName && (
+                  <span className="block">
+                    Teamleitung:{" "}
+                    <strong data-testid="text-cross-team-lead-name">{crossTeamTarget.teamLeadName}</strong>
+                  </span>
+                )}
+                <span className="block">
+                  Möchten Sie die Zuweisung trotzdem speichern?
+                </span>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cross-team-cancel">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="button-cross-team-confirm"
+              onClick={() => {
+                setShowCrossTeamConfirm(false);
+                runSubmit();
+              }}
+            >
+              Trotzdem speichern
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </Layout>

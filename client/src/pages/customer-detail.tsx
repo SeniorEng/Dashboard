@@ -20,6 +20,7 @@ import { AppointmentCard } from "@/features/appointments/components/appointment-
 import { CustomerContactSection } from "@/features/customers/components/customer-contact-section";
 import { CustomerMedicalSection } from "@/features/customers/components/customer-medical-section";
 import { CustomerEmergencySection } from "@/features/customers/components/customer-emergency-section";
+import { CustomerAssignmentSection } from "@/features/customers/components/customer-assignment-section";
 import { CustomerPetsSection } from "@/features/customers/components/customer-pets-section";
 import { CustomerDocumentsSection } from "@/features/customers/components/customer-documents-section";
 import { useCustomerDetailForm } from "@/features/customers/hooks/use-customer-detail-form";
@@ -313,6 +314,10 @@ export default function CustomerDetailPage() {
           validatePhone={form.validatePhone}
           validateEmail={form.validateEmail}
         />
+
+        {customerId && (
+          <CustomerAssignmentSection customer={customer} customerId={customerId} />
+        )}
 
         <CustomerPetsSection
           customer={customer}
