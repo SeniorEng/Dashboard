@@ -723,12 +723,28 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
             data-testid={`warning-mid-year-stichmonat-${budgetType}`}
           >
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <span>
-              <strong>Hinweis:</strong> Stichmonat ist nicht Januar. Der eingegebene Betrag gilt
-              als Restguthaben <strong>ab {formatMonthYear(month)}</strong>. Bereits in den Vormonaten
-              ({selectedYear}) verbrauchtes Budget muss in diesem Wert berücksichtigt sein —
-              sonst werden Buchungen aus den Vormonaten doppelt gezählt.
-            </span>
+            <div className="space-y-1">
+              <p>
+                <strong>Hinweis:</strong> Startwert <strong>ab {formatMonthYear(month)}</strong> –
+                frühere monatliche Allokationen aus den Vormonaten ({selectedYear}) bleiben bestehen.
+              </p>
+              <p>
+                Der eingegebene Betrag gilt als Restguthaben ab dem Stichmonat. Bereits in den
+                Vormonaten verbrauchtes Budget muss in diesem Wert berücksichtigt sein – sonst werden
+                Buchungen aus den Vormonaten doppelt gezählt.
+              </p>
+              {hasHistory && allocations && allocations.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => { if (!expanded) onToggleHistory(); }}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-amber-900 underline hover:text-amber-700"
+                  data-testid={`link-open-balance-history-${budgetType}`}
+                >
+                  <History className="h-3 w-3" />
+                  Startwert-Historie ansehen ({allocations.length - 1} weitere {allocations.length - 1 === 1 ? "Eintrag" : "Einträge"})
+                </button>
+              )}
+            </div>
           </div>
         )}
 
