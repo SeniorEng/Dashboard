@@ -154,3 +154,35 @@ psql "$PROD_DATABASE_URL" \
 - [ ] `unset PROD_DATABASE_URL` in der aktuellen Shell
 
 Erst danach: Publish.
+
+---
+
+## 8. Automatischer Backup-Gate (Task #240)
+
+Damit der manuelle Schritt nicht vergessen wird, gibt es zwei Sicherheitsnetze:
+
+### 8.1 Build-Warnung
+
+Sowohl `npm run build` (`script/build.ts`) als auch der Deployment-Startup-Check
+(`script/check-build.mjs`) führen am Ende `script/check-pre-publish-backup.mjs` aus.
+Das Skript scannt die jüngste Datei in `migrations/` auf `DROP COLUMN`/`DROP TABLE`
+und prüft `tmp/db-backups/` auf eine Datei, die **jünger als 24 Stunden** ist.
+
+- Keine destruktive Migration → keine Warnung.
+- Destruktive Migration + frisches Backup vorhanden → Hinweis mit Pfad und Alter.
+- Destruktive Migration + **kein** frisches Backup → deutliche Warnung mit Verweis
+  auf dieses Runbook. **Der Build bricht NICHT ab** (Backups werden bewusst nicht
+  ins Repo eingecheckt — der Warnhinweis ist ein Reminder, kein Fehler).
+
+### 8.2 Pre-Publish-Checkliste auf der Konsole
+
+Vor dem Klick auf „Publish" empfohlen:
+
+```bash
+node script/preflight-publish.mjs
+```
+
+Das Skript hakt automatisch ab, was es prüfen kann (Backup-Datei < 24 h alt,
+destruktive Statements in der jüngsten Migration), und listet die manuellen
+Restpunkte (Replit-Auto-Backup verifizieren, Eintrag in `docs/deployment-log.md`,
+`unset PROD_DATABASE_URL`) auf.

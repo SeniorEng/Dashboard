@@ -26,19 +26,32 @@ async function getSourceHash() {
   return hash.digest("hex").slice(0, 16);
 }
 
+async function runBackupCheck() {
+  try {
+    const { checkPrePublishBackup, printPrePublishBackupResult } = await import(
+      "./check-pre-publish-backup.mjs"
+    );
+    const result = await checkPrePublishBackup();
+    printPrePublishBackupResult(result, { quietWhenOk: true });
+  } catch (err) {
+    console.warn("Pre-Publish-Backup-Check übersprungen:", err.message);
+  }
+}
+
 async function main() {
   try {
     const meta = JSON.parse(await readFile("dist/.build-meta.json", "utf-8"));
     const currentHash = await getSourceHash();
-    
+
     if (meta.sourceHash !== currentHash) {
       console.error(`\n⚠️  BUILD VERALTET! Build-Hash: ${meta.sourceHash}, Quellcode-Hash: ${currentHash}`);
       console.error(`   Build erstellt am: ${meta.builtAt}`);
       console.error(`   Bitte 'npm run build' ausführen vor dem Deployment!\n`);
       process.exit(1);
     }
-    
+
     console.log(`✓ Build ist aktuell (Hash: ${currentHash}, erstellt: ${meta.builtAt})`);
+    await runBackupCheck();
   } catch (err) {
     console.error("\n⚠️  Kein Build gefunden! Bitte 'npm run build' ausführen.\n");
     process.exit(1);

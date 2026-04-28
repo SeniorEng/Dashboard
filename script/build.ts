@@ -64,6 +64,16 @@ buildAll().then(async () => {
     sourceHash,
   }));
   console.log(`Build complete. Source hash: ${sourceHash}`);
+
+  try {
+    const { checkPrePublishBackup, printPrePublishBackupResult } = await import(
+      "./check-pre-publish-backup.mjs"
+    );
+    const backupResult = await checkPrePublishBackup();
+    printPrePublishBackupResult(backupResult);
+  } catch (err) {
+    console.warn("Pre-Publish-Backup-Check übersprungen:", (err as Error).message);
+  }
 }).catch((err) => {
   console.error(err);
   process.exit(1);
