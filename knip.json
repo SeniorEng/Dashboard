@@ -30,8 +30,6 @@
     "tsx",
     "@types/*",
     "tailwindcss",
-    "autoprefixer",
-    "postcss",
     "@tailwindcss/*",
     "node-zugferd",
     "tw-animate-css"
