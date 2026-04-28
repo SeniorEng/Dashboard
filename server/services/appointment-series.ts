@@ -39,7 +39,7 @@ function formatDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-export function generateSeriesDates(
+function generateSeriesDates(
   startDate: string,
   endDate: string,
   weekdays: Weekday[],

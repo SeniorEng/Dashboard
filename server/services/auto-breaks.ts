@@ -13,7 +13,7 @@ import {
 } from "@shared/domain/time-entries";
 import { employeeWorkedAppointmentsFilter } from "../storage/appointment-helpers";
 
-export interface AutoBreakResult {
+interface AutoBreakResult {
   date: string;
   totalWorkMinutes: number;
   existingBreakMinutes: number;

@@ -31,17 +31,6 @@ export function useProspect(id: number | null) {
   });
 }
 
-export function useProspectAppointmentData(id: number | null) {
-  return useQuery<{ prospect: Prospect; appointments: Array<{ id: number; appointmentType: string; status: string }> }>({
-    queryKey: ["prospect-appointment-data", id],
-    queryFn: async () => {
-      const result = await api.get<{ prospect: Prospect; appointments: Array<{ id: number; appointmentType: string; status: string }> }>(`/prospects/${id}/appointment-data`);
-      return unwrapResult(result);
-    },
-    enabled: !!id,
-  });
-}
-
 export function useProspectStats() {
   return useQuery<Record<string, number>>({
     queryKey: ["prospect-stats"],

@@ -8,7 +8,7 @@ import { calculateAppointmentCost } from "../storage/budget/appointment-cost-cal
 import { getAvailableForDate } from "../storage/budget/import-availability";
 import { isWeekend } from "@shared/utils/datetime";
 
-export interface ImportRow {
+interface ImportRow {
   rowIndex: number;
   kundeRaw: string;
   kundeId: string;
@@ -28,7 +28,7 @@ export interface ImportRow {
   pflegegrad: string;
 }
 
-export interface BudgetTrimInfo {
+interface BudgetTrimInfo {
   originalMinutes: number;
   trimmedMinutes: number;
   reason: string;
@@ -46,13 +46,13 @@ export interface MatchedRow extends ImportRow {
   budgetTrimInfo: BudgetTrimInfo | null;
 }
 
-export interface ImportAction {
+interface ImportAction {
   action: "import" | "update" | "skip";
   rowIndex: number;
   employeeIdOverride?: number;
 }
 
-export interface ImportResult {
+interface ImportResult {
   imported: number;
   updated: number;
   skipped: number;

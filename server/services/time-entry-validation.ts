@@ -16,7 +16,7 @@ import {
 } from "@shared/domain/time-entries";
 import { timeToMinutes } from "@shared/utils/datetime";
 
-export interface CheckTimeConflictsArgs {
+interface CheckTimeConflictsArgs {
   userId: number;
   date: string;
   startTime: string | null | undefined;

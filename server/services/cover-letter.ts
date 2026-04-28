@@ -52,7 +52,7 @@ export function renderEmailSubject(settings: CompanySettings, data: PlaceholderD
   return replacePlaceholders(template, values);
 }
 
-export function renderCoverLetterText(settings: CompanySettings, data: PlaceholderData): string {
+function renderCoverLetterText(settings: CompanySettings, data: PlaceholderData): string {
   const template = settings.deliveryCoverLetterText || DEFAULT_COVER_LETTER_TEXT;
   const values = buildPlaceholderValues(data);
   return replacePlaceholders(template, values);

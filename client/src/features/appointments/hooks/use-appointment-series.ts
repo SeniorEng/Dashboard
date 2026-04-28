@@ -65,7 +65,7 @@ export interface SeriesCreateInput {
   notes?: string;
 }
 
-export interface SeriesPreviewResponse {
+interface SeriesPreviewResponse {
   valid: boolean;
   totalDates: number;
   validDates: number;
@@ -74,7 +74,7 @@ export interface SeriesPreviewResponse {
   error: string | null;
 }
 
-export interface SeriesCreateResponse {
+interface SeriesCreateResponse {
   series: { id: number };
   createdAppointments: number;
   skippedDates?: Array<{ date: string; skipped: boolean; reason?: string }>;

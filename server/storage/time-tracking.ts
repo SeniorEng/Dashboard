@@ -56,7 +56,6 @@ export type {
   TimeOverviewData,
 };
 export type { MissingBreakDay, OpenTasksSummary };
-export type { AppointmentServiceDetail } from "./time-tracking/appointments";
 
 export interface ITimeTrackingStorage {
   // Time Entries

@@ -62,7 +62,7 @@ function writeChunkReloadCount(value: number): boolean {
   }
 }
 
-export function resetChunkReloadCount(): void {
+function resetChunkReloadCount(): void {
   writeChunkReloadCount(0);
 }
 

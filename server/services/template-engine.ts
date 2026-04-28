@@ -4,7 +4,7 @@ import { getCustomerCurrentInsurance, getInsuranceProvider } from "../storage/cu
 import { formatDateISO, formatDateForDisplay } from "@shared/utils/datetime";
 import { BILLING_TYPE_LABELS, type BillingType, CONTACT_TYPE_LABELS } from "@shared/domain/customers";
 
-export interface TemplatePlaceholders {
+interface TemplatePlaceholders {
   [key: string]: string;
 }
 
@@ -132,7 +132,7 @@ export function getPlaceholderCatalog() {
   }));
 }
 
-export interface InputField {
+interface InputField {
   key: string;
   label: string;
 }

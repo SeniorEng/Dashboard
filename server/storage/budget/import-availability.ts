@@ -6,7 +6,7 @@ import { getBudgetTypeSettings, getBudgetPreferences } from "./preferences-stora
 import { calculateAllocatedCents, syncCarryoverAndExpiry } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
 
-export interface DateAwareAvailability {
+interface DateAwareAvailability {
   total45b: number;
   total45a: number;
   total39_42a: number;

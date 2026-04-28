@@ -51,7 +51,7 @@ function splitCsvLine(line: string, delimiter: string): string[] {
   return parts;
 }
 
-export interface QontoCsvImportResult {
+interface QontoCsvImportResult {
   transactions: InsertQontoTransaction[];
   skippedRows: number;
 }

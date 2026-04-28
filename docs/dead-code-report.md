@@ -358,25 +358,31 @@ Alle 21 Schema-Dateien werden aktiv verwendet. **Risiko-Einstufung auf Datei-Ebe
 
 ### 7.1 Empfohlene Quick-Wins — `sicher löschbar`
 
-> ⚠️ **Trotz „sicher löschbar": Erst nach Merge der Refactoring-Sprints #107/#108/#109 anfassen.** Auch isolierte Symbole können zwischenzeitlich von Sprint-Branches re-aktiviert werden — ein Merge-Konflikt mit gelöschtem Code ist viel teurer als 1–2 Wochen warten. Die Quick-Wins werden dann in einer eigenen Folge-Aufgabe (Task #218) gebündelt umgesetzt.
+> ✅ **Erledigt in Task #218 (April 2026).** Alle anwendbaren Quick-Wins wurden umgesetzt: dead Re-Exports gelöscht, intern genutzte Symbole entexportiert (statt gelöscht), tatsächlich tote Symbole entfernt. Bei der Verifikation stellte sich heraus, dass der ursprüngliche Bericht in einigen Punkten ungenau war — siehe „Anmerkungen / Korrekturen" unten.
 
-| # | Bereich | Konkretes Symbol / Datei | Aufwand | Geschätzte LOC |
-|---|---------|---------------------------|:-------:|---------------:|
-| 1 | Frontend (Re-Export-Indizes) | `client/src/lib/api/index.ts`, `components/charts/index.ts`, `components/patterns/index.ts`, `features/appointments/components/index.ts` | 4 × XS | ~40 |
-| 2 | Frontend (Hook-Re-Export) | `features/prospects/index.ts:1` (`useProspectAppointmentData`) | XS | ~3 |
-| 3 | Frontend (interne Helper) | error-boundary `resetChunkReloadCount`, use-toast `reducer`/`toast`, public-branding, use-appointment-series Typen | 5 × XS | ~10 |
-| 4 | Frontend (Pages-Helper) | `customer-pricing-section.tsx:80`, `customer-types.ts:71` | 2 × XS | ~5 |
-| 5 | Backend-Service (Klasse) | `server/services/auth.ts:85` `AuthService` | M | ~80 |
-| 6 | Backend-Service (Helper) | `cover-letter.ts:55` `renderCoverLetterText`, `appointment-series.ts:42` `generateSeriesDates` | 2 × S | ~30 |
-| 7 | Backend-Service (Typen) | 30+ interne Typen aus `appointments.ts`, `appointment-import.ts`, `auto-breaks.ts`, `avis-parser.ts`, `qonto-csv-parser.ts`, `email-parser.ts`, `employee-availability.ts`, `document-trigger-engine.ts`, `time-entry-validation.ts`, `template-engine.ts` | 30 × XS | ~80 |
-| 8 | Backend-Storage (Tasks) | `server/storage/tasks.ts:231,342,405,425,10` | 5 × S | ~120 |
-| 9 | Backend-Storage (cap-calculator) | 8 interne Symbole in `cap-calculator.ts` | 8 × XS | ~25 |
-| 10 | Backend-Storage (Helper) | appointment-helpers, appointment-series-storage, qonto, time-tracking/appointments, budget/import-availability | 6 × XS | ~20 |
-| 11 | Routes-Layer (`export` entfernen) | `appointments.ts:84,149`, `lib/duplicate-check.ts:5`, `lib/conversion-schemas.ts:66` | 4 × XS | ~5 (nur Keywords) |
-| 12 | Shared-Domain (Color-Utils) | `shared/domain/appointments.ts:148–180` (6 Symbole) | S | ~50 |
-| 13 | Shared-API (kleine Typen) | `time-tracking.ts:60` `AppointmentServiceBreakdown` | XS | ~5 |
-| 14 | Shared-Utils | `datetime.ts:29` `ParsedTime`, `phone.ts:9,15` | 3 × XS | ~10 |
-| **Σ** | | **42 Funde** | **~3-4 h** | **~480 LOC** |
+| # | Bereich | Konkretes Symbol / Datei | Status |
+|---|---------|---------------------------|--------|
+| 1 | Frontend (Re-Export-Indizes) | `client/src/lib/api/index.ts`, `components/charts/index.ts`, `components/patterns/index.ts`, `features/appointments/components/index.ts` | ⚠️ teilweise — `lib/api/index.ts`, `charts/index.ts` und `appointments/components/index.ts` werden tatsächlich genutzt, daher behalten. `components/patterns/index.ts` auf nur PageHeader/SectionCard reduziert. |
+| 2 | Frontend (Hook-Re-Export) | `features/prospects/index.ts:1` (`useProspectAppointmentData`) | ✅ Re-Export entfernt, Hook gelöscht |
+| 3 | Frontend (interne Helper) | error-boundary `resetChunkReloadCount`, use-toast `reducer`/`toast`, public-branding, use-appointment-series Typen | ⚠️ teilweise — `toast` wird extern genutzt (behalten); `reducer`, `resetChunkReloadCount`, `PublicBranding`, `SeriesPreviewResponse`, `SeriesCreateResponse` entexportiert |
+| 4 | Frontend (Pages-Helper) | `customer-pricing-section.tsx:80`, `customer-types.ts:71` | ✅ `PricingSectionProps`, `StepConfig` entexportiert |
+| 5 | Backend-Service (Klasse) | `server/services/auth.ts:85` `AuthService` | ✅ Klasse entexportiert (Singleton-Export `authService` bleibt) |
+| 6 | Backend-Service (Helper) | `cover-letter.ts:55` `renderCoverLetterText`, `appointment-series.ts:42` `generateSeriesDates` | ✅ entexportiert |
+| 7 | Backend-Service (Typen) | 30+ interne Typen aus `appointments.ts`, `appointment-import.ts`, `auto-breaks.ts`, `avis-parser.ts`, `qonto-csv-parser.ts`, `email-parser.ts`, `employee-availability.ts`, `document-trigger-engine.ts`, `time-entry-validation.ts`, `template-engine.ts` | ✅ alle entexportiert |
+| 8 | Backend-Storage (Tasks) | `server/storage/tasks.ts:231,342,405,425,10` | ✅ `findMonthClosingTask`/`findBirthdayTask`/`TaskWithRelations` entexportiert; `completeBirthdayTask`/`reopenBirthdayTask` gelöscht |
+| 9 | Backend-Storage (cap-calculator) | 8 interne Symbole in `cap-calculator.ts` | ✅ alle entexportiert |
+| 10 | Backend-Storage (Helper) | appointment-helpers, appointment-series-storage, qonto, time-tracking/appointments, budget/import-availability | ✅ alle entexportiert; `AppointmentServiceDetail`-Re-Export aus `time-tracking.ts` entfernt |
+| 11 | Routes-Layer (`export` entfernen) | `appointments.ts:84,149`, `lib/duplicate-check.ts:5`, `lib/conversion-schemas.ts:66` | ✅ `checkCustomerAccess`, `checkAppointmentReassignAccess`, `DuplicateCustomer` entexportiert; `convertCustomerSchema` gelöscht |
+| 12 | Shared-Domain (Color-Utils) | `shared/domain/appointments.ts:148–180` (6 Symbole) | ✅ `STATUS_COLORS`, `SERVICE_TYPE_COLORS`, `APPOINTMENT_TYPE_COLORS`, `getStatusColor`, `getStatusLabel`, `getAppointmentTypeColor`, `getServiceColor` gelöscht; `ServiceInfo` entexportiert; `STATUS_LABELS` behalten (wird genutzt) |
+| 13 | Shared-API (kleine Typen) | `time-tracking.ts:60` `AppointmentServiceBreakdown` | ✅ entexportiert |
+| 14 | Shared-Utils | `datetime.ts:29` `ParsedTime`, `phone.ts:9,15` | ✅ `ParsedTime`, `DACH_COUNTRIES`, `PhoneValidationResult` entexportiert |
+
+**Anmerkungen / Korrekturen zur ursprünglichen Liste:**
+- `client/src/lib/api/index.ts`, `client/src/components/charts/index.ts`, `client/src/features/appointments/components/index.ts` werden aktiv durch Konsumenten verwendet (Indirekt via `@/features/appointments` o. ä.) — daher entgegen Bericht **behalten**.
+- `toast` aus `use-toast.ts` ist die zentrale Toast-API der App und wird extern genutzt — **behalten**.
+- `STATUS_LABELS` in `shared/domain/appointments.ts` wird von `server/routes/month-closing.ts` genutzt — **behalten**.
+
+**Verifikation:** `npm run check` (tsc) ✅, `npx vitest run` 652/652 ✅.
 
 ### 7.2 Diskussionspunkte — `wahrscheinlich löschbar` und `bitte prüfen`
 

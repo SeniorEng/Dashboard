@@ -63,11 +63,6 @@ const baseConversionFields = {
   skipDuplicateCheck: z.boolean().optional(),
 } as const;
 
-export const convertCustomerSchema = z.object({
-  ...baseConversionFields,
-  contacts: z.array(baseContactSchema).optional(),
-});
-
 export const convertProspectSchema = z.object({
   ...baseConversionFields,
   contacts: z.array(baseContactSchema.extend({

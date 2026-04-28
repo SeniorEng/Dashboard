@@ -81,7 +81,7 @@ function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
   return date < threeMonthsAgo;
 }
 
-export async function checkCustomerAccess(
+async function checkCustomerAccess(
   user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean },
   customerId: number | null,
   res: Response,
@@ -146,7 +146,7 @@ export async function checkAppointmentWriteAccess(user: { id: number; isAdmin: b
  * bearbeiten, deren assigned- oder performed-Mitarbeiter im Team-Bereich liegt.
  * Diese erweiterte Sicht gilt NICHT für start/end/reopen/delete (Task #202 OOS).
  */
-export async function checkAppointmentReassignAccess(
+async function checkAppointmentReassignAccess(
   user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean },
   appointment: { assignedEmployeeId: number | null; performedByEmployeeId?: number | null; customerId: number | null },
   res: Response,

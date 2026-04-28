@@ -1,4 +1,4 @@
-export interface ParsedAvisHeader {
+interface ParsedAvisHeader {
   format: "davaso" | "barmer";
   avisNummer: string | null;
   belegNummer: string | null;
@@ -12,7 +12,7 @@ export interface ParsedAvisHeader {
   kuerzungCents: number;
 }
 
-export interface ParsedAvisItem {
+interface ParsedAvisItem {
   belegNr: string | null;
   vorgangsNr: string | null;
   rechnungsNummer: string | null;
@@ -23,7 +23,7 @@ export interface ParsedAvisItem {
   buchungsDatum: string | null;
 }
 
-export interface ParsedAvis {
+interface ParsedAvis {
   header: ParsedAvisHeader;
   items: ParsedAvisItem[];
 }

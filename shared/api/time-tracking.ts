@@ -57,7 +57,7 @@ export interface VacationSummary {
   sickDays: number;
 }
 
-export interface AppointmentServiceBreakdown {
+interface AppointmentServiceBreakdown {
   serviceCode: string | null;
   plannedDurationMinutes: number;
   actualDurationMinutes: number | null;

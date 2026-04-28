@@ -91,7 +91,7 @@ export function buildDateRange(startDate: string, days: number): string[] {
   return dates;
 }
 
-export type WeeklyAvailabilityDay = {
+type WeeklyAvailabilityDay = {
   availability: { startTime: string | null; endTime: string | null }[];
   appointments: {
     appointmentId: number;
@@ -107,13 +107,13 @@ export type WeeklyAvailabilityDay = {
   freeSlots: { start: string; end: string }[];
 };
 
-export type WeeklyAvailabilityEmployee = {
+type WeeklyAvailabilityEmployee = {
   id: number;
   displayName: string;
   days: Record<string, WeeklyAvailabilityDay>;
 };
 
-export type WeeklyAvailabilityResponse = {
+type WeeklyAvailabilityResponse = {
   dates: string[];
   employees: WeeklyAvailabilityEmployee[];
 };

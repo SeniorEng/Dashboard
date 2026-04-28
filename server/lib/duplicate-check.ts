@@ -2,7 +2,7 @@ import { db } from "./db";
 import { customers } from "@shared/schema";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 
-export interface DuplicateCustomer {
+interface DuplicateCustomer {
   id: number;
   vorname: string | null;
   nachname: string | null;

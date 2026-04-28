@@ -18,26 +18,26 @@ export interface IAppointmentStorage {
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
 }
 
-export interface OverlapCheckResult {
+interface OverlapCheckResult {
   hasOverlap: boolean;
   hasUnreliableData: boolean;
   unreliableAppointmentId?: number;
 }
 
-export interface ValidationResult {
+interface ValidationResult {
   valid: boolean;
   error?: string;
   message?: string;
 }
 
-export interface DocumentationServiceEntry {
+interface DocumentationServiceEntry {
   serviceId: number;
   actualDurationMinutes: number;
   details?: string | null;
   serviceCode?: string | null;
 }
 
-export interface DocumentationInput {
+interface DocumentationInput {
   performedByEmployeeId?: number | null;
   actualStart: string;
   travelOriginType: "home" | "appointment";
@@ -49,7 +49,7 @@ export interface DocumentationInput {
   services: DocumentationServiceEntry[];
 }
 
-export interface DocumentationResult {
+interface DocumentationResult {
   updateData: Record<string, unknown>;
   totalDurationMinutes: number;
   hauswirtschaftMinutes: number;
@@ -60,7 +60,7 @@ export interface DocumentationResult {
   serviceUpdates?: DocumentationServiceEntry[];
 }
 
-export interface KundenterminInput {
+interface KundenterminInput {
   customerId: number;
   date: string;
   scheduledStart: string;
@@ -80,7 +80,7 @@ export interface KundenterminInput {
   travelBufferMinutes?: number;
 }
 
-export class AppointmentService {
+class AppointmentService {
   private storage: IAppointmentStorage;
 
   /**

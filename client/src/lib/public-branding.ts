@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 
-export interface PublicBranding {
+interface PublicBranding {
   logoUrl: string | null;
   pdfLogoUrl: string | null;
   companyName: string | null;

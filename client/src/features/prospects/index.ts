@@ -1,1 +1,1 @@
-export { useProspects, useProspect, useProspectAppointmentData, useProspectStats, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "./hooks/use-prospects";
+export { useProspects, useProspect, useProspectStats, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "./hooks/use-prospects";

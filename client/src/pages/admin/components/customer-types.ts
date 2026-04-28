@@ -68,7 +68,7 @@ export interface SelectOption {
   sublabel?: string;
 }
 
-export interface StepConfig {
+interface StepConfig {
   id: string;
   title: string;
   icon: typeof User2;

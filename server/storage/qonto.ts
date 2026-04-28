@@ -12,7 +12,7 @@ import {
 import { eq, and, isNull, isNotNull, desc, gte, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 
-export interface PaymentAdviceWithItems extends PaymentAdvice {
+interface PaymentAdviceWithItems extends PaymentAdvice {
   items: PaymentAdviceItem[];
 }
 

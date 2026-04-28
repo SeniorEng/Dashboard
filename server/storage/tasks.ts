@@ -7,7 +7,7 @@ import { parseLocalDate } from "@shared/utils/datetime";
 const creatorUsers = alias(users, "creator_users");
 const assigneeUsers = alias(users, "assignee_users");
 
-export interface TaskWithRelations extends Task {
+interface TaskWithRelations extends Task {
   createdBy: { id: number; displayName: string } | null;
   assignedTo: { id: number; displayName: string } | null;
   customer: { id: number; name: string } | null;
@@ -228,7 +228,7 @@ const MONTH_CLOSING_DESCRIPTION = `So schließt du deinen Monat ab:
 
 Hinweis: Alle Termine des Monats müssen dokumentiert sein, bevor der Abschluss möglich ist.`;
 
-export async function findMonthClosingTask(
+async function findMonthClosingTask(
   userId: number,
   month: number,
   year: number,
@@ -339,7 +339,7 @@ export function parseBirthdayMarker(description: string | null): { personType: "
   };
 }
 
-export async function findBirthdayTask(
+async function findBirthdayTask(
   adminUserId: number,
   personType: string,
   personId: number,
@@ -400,46 +400,6 @@ export async function ensureBirthdayTask(
     .returning();
 
   return result[0];
-}
-
-export async function completeBirthdayTask(
-  adminUserId: number,
-  personType: string,
-  personId: number,
-  year: number,
-  txOrDb: DbOrTx = db
-): Promise<void> {
-  const existing = await findBirthdayTask(adminUserId, personType, personId, year, txOrDb);
-  if (existing && existing.status !== "completed") {
-    await txOrDb
-      .update(tasks)
-      .set({
-        status: "completed",
-        completedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(tasks.id, existing.id));
-  }
-}
-
-export async function reopenBirthdayTask(
-  adminUserId: number,
-  personType: string,
-  personId: number,
-  year: number,
-  txOrDb: DbOrTx = db
-): Promise<void> {
-  const existing = await findBirthdayTask(adminUserId, personType, personId, year, txOrDb);
-  if (existing && existing.status === "completed") {
-    await txOrDb
-      .update(tasks)
-      .set({
-        status: "open",
-        completedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(tasks.id, existing.id));
-  }
 }
 
 export async function completeAllBirthdayTasks(

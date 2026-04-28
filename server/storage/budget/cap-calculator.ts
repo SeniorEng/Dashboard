@@ -5,16 +5,16 @@ import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { getTotalCarryoverCents } from "./summary-queries";
 
-export type MonthlyBudgetType = "entlastungsbetrag_45b" | "umwandlung_45a";
-export type YearlyBudgetType = "ersatzpflege_39_42a";
+type MonthlyBudgetType = "entlastungsbetrag_45b" | "umwandlung_45a";
+type YearlyBudgetType = "ersatzpflege_39_42a";
 export type CappedBudgetType = MonthlyBudgetType | YearlyBudgetType;
 
-export interface DateRange {
+interface DateRange {
   fromDate: string;
   toDate: string;
 }
 
-export function getMonthRange(date: string): DateRange {
+function getMonthRange(date: string): DateRange {
   const d = parseLocalDate(date);
   const y = d.getFullYear();
   const m = d.getMonth() + 1;
@@ -26,7 +26,7 @@ export function getMonthRange(date: string): DateRange {
   };
 }
 
-export function getYearRange(date: string): DateRange {
+function getYearRange(date: string): DateRange {
   const d = parseLocalDate(date);
   const y = d.getFullYear();
   return { fromDate: `${y}-01-01`, toDate: `${y}-12-31` };
@@ -41,7 +41,7 @@ export function getYearRange(date: string): DateRange {
  * how much new consumption a single window can absorb, and write-offs are
  * pot-level corrections, not window consumption.
  */
-export async function netConsumedInRange(
+async function netConsumedInRange(
   customerId: number,
   budgetType: string,
   range: DateRange,
@@ -71,7 +71,7 @@ export async function netConsumedInRange(
   return Math.max(0, Number(consumed[0]?.total ?? 0) - Number(reversed[0]?.total ?? 0));
 }
 
-export interface CapInputs {
+interface CapInputs {
   customerId: number;
   budgetType: CappedBudgetType;
   transactionDate: string;
@@ -79,7 +79,7 @@ export interface CapInputs {
   yearlyLimitCents: number | null;
 }
 
-export interface CapResult {
+interface CapResult {
   /** Date window relevant for this pot (month for §45b/§45a, year for §39/§42a). */
   range: DateRange;
   /** Net used inside the window (consumption - reversal, no write_off). */

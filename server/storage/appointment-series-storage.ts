@@ -21,7 +21,7 @@ export async function getSeries(id: number): Promise<AppointmentSeries | undefin
   return result;
 }
 
-export interface SeriesWithCustomerName extends AppointmentSeries {
+interface SeriesWithCustomerName extends AppointmentSeries {
   customerName: string;
 }
 

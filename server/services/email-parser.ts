@@ -1,6 +1,6 @@
 import { normalizePhone } from "@shared/utils/phone";
 
-export interface ParsedLead {
+interface ParsedLead {
   vorname: string;
   nachname: string;
   telefon?: string;

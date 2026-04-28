@@ -6,13 +6,13 @@ import {
   PhoneNumber,
 } from "libphonenumber-js/min";
 
-export const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
+const DACH_COUNTRIES: CountryCode[] = ["DE", "AT", "CH"];
 
 function isDACHCountry(country: string | undefined): boolean {
   return DACH_COUNTRIES.includes(country as CountryCode);
 }
 
-export type PhoneValidationResult =
+type PhoneValidationResult =
   | { valid: true; normalized: string; formatted: string; type: "mobile" | "landline" | "unknown" }
   | { valid: false; error: string };
 

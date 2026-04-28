@@ -6,7 +6,6 @@ import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils
 // ============================================
 
 export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled";
-type AppointmentType = "Erstberatung" | "Kundentermin";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 
@@ -106,7 +105,7 @@ export function getEndTime(
   return "--:--";
 }
 
-export interface ServiceInfo {
+interface ServiceInfo {
   hasHauswirtschaft: boolean;
   hasAlltagsbegleitung: boolean;
   hasErstberatung: boolean;
@@ -144,44 +143,6 @@ export function canModifyAppointment(status: AppointmentStatus): boolean {
 export function canEditNotes(status: AppointmentStatus): boolean {
   return status === "scheduled" || status === "documenting";
 }
-
-export const STATUS_COLORS: Record<AppointmentStatus, string> = {
-  "scheduled": "bg-muted text-muted-foreground border-muted-foreground/20",
-  "in-progress": "bg-blue-50 text-blue-700 border-blue-200 animate-pulse",
-  "documenting": "bg-orange-50 text-orange-700 border-orange-200",
-  "completed": "bg-green-50 text-green-700 border-green-200",
-  "cancelled": "bg-red-50 text-red-700 border-red-200",
-};
-
-const APPOINTMENT_TYPE_COLORS: Record<AppointmentType, string> = {
-  "Erstberatung": "bg-purple-100 text-purple-800 border-purple-200",
-  "Kundentermin": "bg-teal-100 text-teal-800 border-teal-200",
-};
-
-export const SERVICE_TYPE_COLORS: Record<ServiceType, string> = {
-  "Hauswirtschaft": "bg-amber-50 text-amber-700 border-amber-200",
-  "Alltagsbegleitung": "bg-sky-50 text-sky-700 border-sky-200",
-  "Erstberatung": "bg-purple-50 text-purple-700 border-purple-200",
-};
-
-
-export function getStatusColor(status: string): string {
-  return STATUS_COLORS[status as AppointmentStatus] ?? STATUS_COLORS.scheduled;
-}
-
-export function getStatusLabel(status: string): string {
-  return STATUS_LABELS[status as AppointmentStatus] ?? status;
-}
-
-export function getAppointmentTypeColor(appointmentType: string): string {
-  return APPOINTMENT_TYPE_COLORS[appointmentType as AppointmentType] ?? APPOINTMENT_TYPE_COLORS.Kundentermin;
-}
-
-export function getServiceColor(serviceType: string | null): string {
-  if (!serviceType) return "bg-gray-100 text-gray-600 border-gray-200";
-  return SERVICE_TYPE_COLORS[serviceType as ServiceType] ?? "bg-gray-100 text-gray-600 border-gray-200";
-}
-
 
 export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
   "in-progress": 0,

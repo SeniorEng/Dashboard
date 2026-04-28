@@ -38,7 +38,7 @@ export function employeeWorkedAppointmentsFilter(userId: number): SQL {
   return sqlBuilder`(${appointments.assignedEmployeeId} = ${userId} OR ${appointments.performedByEmployeeId} = ${userId})`;
 }
 
-export const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
+const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
 
 export const appointmentWithCustomerSelectFields = {
   id: appointments.id,
@@ -122,7 +122,7 @@ export const appointmentWithCustomerSelectFields = {
   }
 };
 
-export type AppointmentQueryRow = typeof appointmentWithCustomerSelectFields extends infer T
+type AppointmentQueryRow = typeof appointmentWithCustomerSelectFields extends infer T
   ? { [K in keyof T]: T[K] extends { $inferSelect: infer S } ? S : unknown }
   : never;
 

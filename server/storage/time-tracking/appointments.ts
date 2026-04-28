@@ -75,7 +75,7 @@ export async function getAllAppointmentsInRange(
   }));
 }
 
-export interface AppointmentServiceDetail {
+interface AppointmentServiceDetail {
   serviceCode: string | null;
   serviceName: string;
   actualMinutes: number | null;

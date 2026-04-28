@@ -82,7 +82,7 @@ export interface CreateUserData {
   roles?: EmployeeRole[];
 }
 
-export class AuthService {
+class AuthService {
   async createUser(data: CreateUserData): Promise<UserWithRoles> {
     const existingUser = await db
       .select()

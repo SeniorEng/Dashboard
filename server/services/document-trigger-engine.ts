@@ -4,7 +4,7 @@ import { db } from "../lib/db";
 import { documentTemplates } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
-export interface DocumentRequirement {
+interface DocumentRequirement {
   documentType: DocumentType;
   requirement: "pflicht" | "optional";
   triggeredBy: string;
