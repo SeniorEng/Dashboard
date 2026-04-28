@@ -11,3 +11,6 @@ vite.config.ts.*
 .env.development
 *.pem
 *.key
+
+# Pre-publish DB-Backups (siehe docs/pre-publish-backup-runbook.md)
+tmp/db-backups/
