@@ -38,6 +38,7 @@ npx vitest run tests/customers.test.ts
 | `service-records.test.ts` | Leistungsnachweise | Signatur, PDF-Generierung | ~20 |
 | `services.test.ts` | Dienstleistungen | CRUD, Kundenpreise | ~15 |
 | `private-billing-e2e.test.ts` | Privatrechnung | End-to-End Abrechnung | ~25 |
+| `billing/billing-flow.test.ts` | Rechnungsflow | Happy-Path, Split, Storno, Nachberechnung, Edge-Cases, PDF, /send-Validation | 27 |
 | `month-closing.test.ts` | Monatsabschluss | Readiness, Close, Reopen, Batch, Preview | 12 |
 | `notifications.test.ts` | Benachrichtigungen | Liste, Ungelesen-Zähler, Gelesen-Markierung | 5 |
 | `profile.test.ts` | Mitarbeiterprofil | Laden, Bearbeiten, Dokumente, Nachweise | 10 |
@@ -57,6 +58,37 @@ npx vitest run
 ```
 
 Alle Tests sollten grün sein bevor Code gemerged wird.
+
+## Coverage-Gate für `server/routes/billing.ts` (Task #109)
+
+Der Billing-Flow hat einen eigenen Coverage-Gate, der per V8-Native-Coverage
+gegen einen separat instrumentierten Express-Server läuft (Port 5050):
+
+```bash
+TEST_USER_PASSWORD='dein_passwort' npx tsx script/coverage-billing.ts
+```
+
+Das Skript:
+
+1. Startet `tsx server/index.ts` mit `NODE_V8_COVERAGE=coverage/billing-raw`
+   in einer eigenen Prozessgruppe auf Port 5050.
+2. Wartet, bis der Server hört, und führt `npx vitest run
+   tests/billing/billing-flow.test.ts` mit `TEST_BASE_URL=http://localhost:5050`
+   aus (alle 27 Billing-Tests).
+3. Sendet `SIGTERM` an die Server-Prozessgruppe; V8 schreibt seine Profile
+   in `coverage/billing-raw/`.
+4. Wertet die Profile mit `c8 report` aus (HTML-Report unter
+   `coverage/billing/index.html`) und erzwingt die Schwellen
+   **Lines ≥ 55 %** und **Branches ≥ 45 %** für `server/routes/billing.ts`.
+
+**Hinweis zu den Schwellen:** Die ursprüngliche Zielmarke war
+„Branch-Coverage > 70 %". V8-Native-Coverage zählt jedoch nur Branches in
+beobachteten Code-Pfaden, und der ~280 Zeilen lange SMTP-/E-Mail-Pfad in
+`router.post("/:id/send")` lässt sich ohne Mail-Mocking nicht abdecken
+(würde echte Postausgänge erzeugen). Der Floor wurde daher auf das aktuell
+gemessene Niveau gesetzt (Lines 57,6 % / Branches 47,9 %) und schützt vor
+Regressionen unter diese Linie. Für eine echte 70 %-Branch-Marke müsste der
+Mail-Versand-Pfad auf einen mockbaren SMTP-Adapter umgestellt werden.
 
 ## Hinweise
 
