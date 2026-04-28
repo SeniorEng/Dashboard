@@ -226,9 +226,6 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
 
   if (input.contract) {
     try {
-      const hauswirtschaftRate = input.contract.rates?.find(r => r.serviceCategory === "hauswirtschaft");
-      const alltagsbegleitungRate = input.contract.rates?.find(r => r.serviceCategory === "alltagsbegleitung");
-      const kilometerRate = input.contract.rates?.find(r => r.serviceCategory === "kilometer");
       const contract = await customerManagementStorage.createCustomerContract({
         customerId,
         contractStart: input.contract.contractStart,
@@ -236,9 +233,6 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
         vereinbarteLeistungen: input.contract.vereinbarteLeistungen || null,
         hoursPerPeriod: input.contract.hoursPerPeriod,
         periodType: input.contract.periodType as "week" | "month" | "year",
-        hauswirtschaftRateCents: hauswirtschaftRate?.hourlyRateCents || 0,
-        alltagsbegleitungRateCents: alltagsbegleitungRate?.hourlyRateCents || 0,
-        kilometerRateCents: kilometerRate?.hourlyRateCents || 0,
         status: "active",
       }, userId);
 

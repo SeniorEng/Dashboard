@@ -20,10 +20,7 @@ export const customerContracts = pgTable("customer_contracts", {
   // Service scope (legacy, kept for backwards compatibility)
   hoursPerPeriod: integer("hours_per_period").notNull().default(0), // Total hours
   periodType: text("period_type").notNull().default("month"), // "week" | "month" | "year"
-  // Pricing (in cents) - required for all contracts
-  hauswirtschaftRateCents: integer("hauswirtschaft_rate_cents").notNull().default(0), // €/Stunde in Cent
-  alltagsbegleitungRateCents: integer("alltagsbegleitung_rate_cents").notNull().default(0), // €/Stunde in Cent
-  kilometerRateCents: integer("kilometer_rate_cents").notNull().default(0), // €/km in Cent
+  // Pricing is now historized in customer_service_prices / customer_contract_rates.
   // Status
   status: text("status").notNull().default("active"), // "active" | "paused" | "terminated"
   notes: text("notes"),
@@ -81,9 +78,6 @@ export const insertCustomerContractSchema = z.object({
   vereinbarteLeistungen: z.string().max(2000, "Maximal 2000 Zeichen").optional().nullable(),
   hoursPerPeriod: z.number().min(0, "Stunden dürfen nicht negativ sein").optional().default(0),
   periodType: z.enum(CONTRACT_PERIOD_TYPES).optional().default("month"),
-  hauswirtschaftRateCents: z.number().min(0, "Betrag darf nicht negativ sein").optional().default(0),
-  alltagsbegleitungRateCents: z.number().min(0, "Betrag darf nicht negativ sein").optional().default(0),
-  kilometerRateCents: z.number().min(0, "Betrag darf nicht negativ sein").optional().default(0),
   status: z.enum(CONTRACT_STATUS).optional().default("active"),
   notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });

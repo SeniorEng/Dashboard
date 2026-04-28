@@ -281,7 +281,6 @@ class AppointmentService {
 
   validateDocumentationChanges(currentStatus: string, updates: UpdateAppointment): ValidationResult {
     const hasDocumentationChanges = 
-      updates.servicesDone !== undefined || 
       updates.signatureData !== undefined;
     
     if (hasDocumentationChanges && currentStatus !== "documenting") {

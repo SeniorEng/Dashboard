@@ -111,7 +111,6 @@ export const appointments = pgTable("appointments", {
   // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
   customerKilometers: real("customer_kilometers"),
   notes: text("notes"),
-  servicesDone: text("services_done").array().default([]), // Legacy: replaced by appointment_services junction table
   signatureData: text("signature_data"),
   signatureHash: text("signature_hash"),
   signedAt: timestamp("signed_at"),

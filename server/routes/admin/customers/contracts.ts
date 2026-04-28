@@ -84,9 +84,6 @@ router.post("/customers/:id/contract", asyncHandler("Vertrag konnte nicht angele
     hoursPerPeriod: data.hoursPerPeriod ?? 0,
     periodType: data.periodType ?? "week",
     status: "active",
-    hauswirtschaftRateCents: 0,
-    alltagsbegleitungRateCents: 0,
-    kilometerRateCents: 0,
   });
 
   res.status(201).json(result);

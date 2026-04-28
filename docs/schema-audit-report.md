@@ -683,13 +683,13 @@ Alle 6 Spalten **active / keep** — keine auffälligen Befunde.
 
 Eintrag erfolgt nur, wenn **alle** folgenden Bedingungen erfüllt sind: leer in Prod (oder konstanter Default), kein produktiver Schreib-Pfad, kein produktiver Lese-Pfad oder eindeutig durch Nachfolger ersetzt.
 
-| Objekt | Typ | Begründung | SQL-Evidenz |
-|---|---|---|---|
-| `customer_pricing_history` | **Tabelle** | 0 Zeilen, kein Storage-Read/Write, nur in Cleanup-Skripten referenziert | `SELECT COUNT(*) FROM customer_pricing_history → 0` + `rg "customerPricingHistory" server/storage/` ergibt 0 Treffer |
-| `appointments.services_done` (text[]) | Spalte | 0/735 nicht-leere Arrays, ersetzt durch `appointment_services` | `SELECT COUNT(*) FILTER (WHERE array_length(services_done, 1) > 0) FROM appointments → 0` |
-| `customer_contracts.hauswirtschaft_rate_cents` | Spalte | 108/108 = 0 (Default), ersetzt durch `customer_service_prices` | `SELECT COUNT(DISTINCT hauswirtschaft_rate_cents), MAX(hauswirtschaft_rate_cents) FROM customer_contracts → 1, 0` |
-| `customer_contracts.alltagsbegleitung_rate_cents` | Spalte | 108/108 = 0 (Default) | `SELECT COUNT(DISTINCT alltagsbegleitung_rate_cents), MAX(alltagsbegleitung_rate_cents) FROM customer_contracts → 1, 0` |
-| `customer_contracts.kilometer_rate_cents` | Spalte | 108/108 = 0 (Default) | `SELECT COUNT(DISTINCT kilometer_rate_cents), MAX(kilometer_rate_cents) FROM customer_contracts → 1, 0` |
+| Objekt | Typ | Begründung | SQL-Evidenz | Status |
+|---|---|---|---|---|
+| `customer_pricing_history` | **Tabelle** | 0 Zeilen, kein Storage-Read/Write, nur in Cleanup-Skripten referenziert | `SELECT COUNT(*) FROM customer_pricing_history → 0` + `rg "customerPricingHistory" server/storage/` ergibt 0 Treffer | offen |
+| `appointments.services_done` (text[]) | Spalte | 0/735 nicht-leere Arrays, ersetzt durch `appointment_services` | `SELECT COUNT(*) FILTER (WHERE array_length(services_done, 1) > 0) FROM appointments → 0` | **erledigt (Task #228, 2026-04-28)** |
+| `customer_contracts.hauswirtschaft_rate_cents` | Spalte | 108/108 = 0 (Default), ersetzt durch `customer_service_prices` | `SELECT COUNT(DISTINCT hauswirtschaft_rate_cents), MAX(hauswirtschaft_rate_cents) FROM customer_contracts → 1, 0` | **erledigt (Task #228, 2026-04-28)** |
+| `customer_contracts.alltagsbegleitung_rate_cents` | Spalte | 108/108 = 0 (Default) | `SELECT COUNT(DISTINCT alltagsbegleitung_rate_cents), MAX(alltagsbegleitung_rate_cents) FROM customer_contracts → 1, 0` | **erledigt (Task #228, 2026-04-28)** |
+| `customer_contracts.kilometer_rate_cents` | Spalte | 108/108 = 0 (Default) | `SELECT COUNT(DISTINCT kilometer_rate_cents), MAX(kilometer_rate_cents) FROM customer_contracts → 1, 0` | **erledigt (Task #228, 2026-04-28)** |
 
 > **Hinweis:** Die in §5.1 genannten Drops dürfen erst nach erfolgreicher Verifikation durch ein Refactoring-Task erfolgen (Lese-Pfade in Code/Reports/PDF-Templates final entfernen). Dieser Audit liefert die Faktenbasis, schreibt aber keine Migrationen.
 

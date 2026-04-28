@@ -101,9 +101,6 @@ export interface CustomerContractInfo {
   hoursPerPeriod: number;
   periodType: string;
   status: string;
-  hauswirtschaftRateCents: number;
-  alltagsbegleitungRateCents: number;
-  kilometerRateCents: number;
   notes: string | null;
 }
 
