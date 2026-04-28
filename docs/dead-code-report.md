@@ -13,8 +13,8 @@ Damit klar ist, was dieser Bericht **nicht** abdeckt:
 | `client/src/components/ui/**` (shadcn-Komponenten) | **nicht analysiert** | In `knip.json` per `ignore` ausgenommen — Shadcn-Bibliothek wird bewusst komplett ausgeliefert. |
 | `server/replit_integrations/**` | **nicht analysiert** | In `knip.json` per `ignore` ausgenommen — von Replit-Plattform vorgegeben, kein Cleanup-Kandidat. |
 | `tests/**/*.test.ts` | **nicht prüfbar** | In `knip.json` als `entry` eingetragen → jede Testdatei gilt als Wurzelpunkt; tote Tests können so nicht erkannt werden. Eigene Untersuchung nötig. |
-| `package.json` Dependencies | **nicht ausgewertet** | knip hat keine ungenutzten Dependencies gemeldet, aber wegen `ignoreDependencies`-Liste (8 Einträge wie `tsx`, `@types/*`, `tailwindcss`, `node-zugferd`) ist der Dependency-Audit nicht abschließend. → eigene Prüfung empfohlen (Folge-Task #220). |
-| Schema-Spalten (`shared/schema/**`) auf Spaltenebene | **nur strukturell analysiert** | Statische Analyse kann nicht erkennen, ob eine Spalte in Produktion noch beschrieben/gelesen wird. Abschnitt 5 listet die Tabellen-Übersicht und Risiko-Markierung pro Tabelle. Spalten-Ebene → Folge-Task #219. |
+| `package.json` Dependencies | **statisch analysiert** | Direkter String-Treffer pro Paket gegen alle Source- + Config-Dateien. Siehe Abschnitt 6a. Transitive-Dependency-Auflösung und CI-Pipeline-Cross-Check bleibt Folge-Task #220. |
+| Schema-Spalten (`shared/schema/**`) auf Spaltenebene | **statisch analysiert** | Property-Zugriff-Suche pro Spalte gegen `server/` + `client/src/`. Siehe Abschnitt 5.2. Drizzle-Spread-Inserts und Produktions-DB-Befüllung können statisch nicht abschließend bewertet werden — daher alle Verdachtskandidaten als `bitte prüfen`, definitive Klärung im Folge-Task #219. |
 | Drizzle-Migrations (`migrations/`) | **nicht analysiert** | Migrations-Historie darf nie rückwirkend geändert werden. |
 | `client/src/features/*/hooks/index.ts` | **als entry markiert** | In `knip.json` als `entry` eingetragen → Re-Exports darin werden nicht als „tot" erkannt. ts-prune fängt sie auf, daher trotzdem im Bericht. |
 
@@ -49,8 +49,10 @@ Damit klar ist, was dieser Bericht **nicht** abdeckt:
 | Routes-Layer | 4 | 0 | 1 | – |
 | API-Routes (Datei-Ebene) | 0 | 0 | 0 | 29 (alle aktiv) |
 | Schema-Tabellen (Tabellen-Ebene) | 0 | 0 | 0 | 21 (alle benötigt) |
+| Schema-Spalten (Spalten-Ebene) | 0 | 0 | 47 | ~553 |
+| Dependencies (`package.json`) | 0 | 0 | 2 | 14 (Build/Types implizit) |
 | Shared-Utils & Types | 11 | 2 | 4 | – |
-| **Summe** | **42** | **14** | **20** | **50** |
+| **Summe** | **42** | **14** | **69** | **617** |
 
 Geschätzter Code-Reduktions-Spielraum bei Komplettausführung: **ca. 1.500–2.200 Zeilen** (≈1,5–2 % der Codebase). Größter Effekt liegt bei toten Re-Exports und ungenutzten Helper-Funktionen.
 
@@ -262,11 +264,41 @@ Alle 21 Schema-Dateien werden aktiv verwendet. **Risiko-Einstufung auf Datei-Ebe
 | `shared/schema/whatsapp.ts` | – | `nicht anfassen` | – | WhatsApp-Integration. |
 | `shared/schema/customer-full.ts` | – | `nicht anfassen` | – | Kunden-Aggregat-Typ. |
 
-### 5.2 Spalten-Ebene
+### 5.2 Spalten-Ebene — statische Erst-Analyse
 
-> 🔒 **Bewusst nicht in dieser Aufgabe analysiert.** Drizzle-Spalten zu identifizieren, die in keiner Storage-Funktion mehr gelesen/geschrieben werden, erfordert eine **separate, dedizierte Untersuchung** mit Produktions-Datencheck (`SELECT count(*) WHERE col IS NOT NULL`) pro Verdacht. Reine statische Analyse erkennt nicht, ob ein Feld z. B. nur in einem Migrations-Skript oder einem ETL-Job geschrieben wird.
->
-> **Empfehlung:** Eigene Folge-Aufgabe (Task #219 vorgeschlagen) für „Schema-Audit nach Refactoring-Sprints". Diese muss zwingend nach #107/#108/#109 erfolgen, da dort Felder umgebaut werden könnten.
+**Methodik:** Für jede Spalte (außer `id`) in den 21 Schema-Dateien wurde per ripgrep geprüft, ob sie in `server/` oder `client/src/` als Property-Zugriff (`.colName`) referenziert wird. Spalten ohne Treffer sind **Verdachtskandidaten**, **nicht** garantiert tot — siehe Vorbehalte unter der Tabelle.
+
+**Ergebnis:** Von ~600 Spalten haben **47 keinen statischen Property-Treffer** in `server/` oder `client/src/`. Verteilung:
+
+| Tabelle | Spalten ohne Treffer | Kategorie | Aufwand | Konkrete Spalten |
+|---------|:--:|-----------|:-------:|------------------|
+| `billing.ts` | 4 | `bitte prüfen` | ? | `pdfPath`, `pdfHash`, `leistungsnachweisPath`, `leistungsnachweisHash` — vermutlich dynamisch über `returning()`/Drizzle-Inserts; PDF-Workflow aktiv |
+| `birthday-cards.ts` | 1 | `bitte prüfen` | ? | `sentByUserId` — Audit-Spalte, ggf. nur in Insert |
+| `budget.ts` | 1 | `bitte prüfen` | ? | `initialBalanceCents` — Sprint #108 Kollision wahrscheinlich |
+| `company.ts` | 8 | `bitte prüfen` | ? | `lohnartHauswirtschaft/Alltagsbegleitung/Urlaub/Krankheit`, `epostLetterId`, `generatedDocumentId`, `deliveredAt`, `updatedByUserId` — Lohnart-Felder evtl. via Lexware-Export-Job genutzt |
+| `customers.ts` | 11 | `bitte prüfen` | ? | `serviceKreativ`, `serviceGrundpflege`, `serviceFreizeitgestaltung`, `pflegedienstBeauftragt`, `pflegegradBeantragt`, `sonstigeLeistungen`, `householdSize`, `anamnese`, `anonymizedAt`, `changedByUserId`, `changedByRole` — Anamnese-/Service-Flags evtl. veralt., Audit-Felder evtl. dynamisch |
+| `documents.ts` | 2 | `bitte prüfen` | ? | `uploadedByUserId`, `signedByEmployeeId` — Audit-Spalten |
+| `prospects.ts` | 3 | `bitte prüfen` | ? | `createdBy`, `lastError`, `executedAt` — Workflow-Felder, Sprint-Kollision möglich |
+| `qonto.ts` | 1 | `bitte prüfen` | ? | `uploadedByUserId` |
+| `qualifications.ts` | 3 | `bitte prüfen` | ? | `assignedAt`, `assignedByUserId`, `isRequired` |
+| `service-records.ts` | 4 | `bitte prüfen` | ? | `employeeSigningIp/Location`, `customerSigningIp/Location` — Compliance-/Audit-Felder, evtl. nur per `INSERT … VALUES` geschrieben |
+| `system.ts` | 4 | `bitte prüfen` | ? | `closedAt`, `closedByUserId`, `reopenedByUserId`, `updatedByUserId` |
+| `users.ts` | 4 | `bitte prüfen` | ? | `deactivatedAt`, `anonymizedAt`, `monthlyTravelAllowanceCents`, `travelCostType` |
+| `whatsapp.ts` | 1 | `bitte prüfen` | ? | `metaMessageId` |
+
+**Vorbehalte (warum keine dieser Spalten als „sicher löschbar" gilt):**
+
+1. **Drizzle-Insert-Builder** verwendet die Property häufig nur einmal (im Schema selbst); der eigentliche Wert kommt über das Insert-Objekt rein, ohne Property-Zugriff (`db.insert(table).values({ colName: x })` — die Property `colName` lebt im Schlüssel des Object-Literals, nicht als Member-Access).
+2. **Spread-Inserts** (`db.insert(table).values(payload)` mit `payload: typeof table.$inferInsert`) verstecken jeden Spaltennutzen vollständig vor statischer Analyse.
+3. **`returning()`** kann ganze Tabellen-Rows zurückgeben, die dann via `result[0]` weitergereicht werden — auch das versteckt Spaltennutzen.
+4. **Migrations-Historie:** Selbst wenn eine Spalte heute tot ist, kann sie Produktionsdaten enthalten, die für Audit/Compliance/Backups erhalten bleiben müssen (Pflege-Branche: 10 Jahre Aufbewahrungspflicht).
+
+**Konsequenz:** Alle 47 Verdachtskandidaten werden mit `bitte prüfen` markiert, **keine einzige mit `sicher löschbar`**. Die definitive Entscheidung pro Spalte erfordert pro Verdacht:
+- `SELECT count(*) WHERE col IS NOT NULL` auf der Produktions-DB,
+- gezielte Suche nach Insert-Payloads (`*: \w+,` statt nur `\.col`),
+- Cross-Check mit Lexware-Export-, ePost- und Compliance-Workflows.
+
+→ Dafür ist die Folge-Aufgabe **#219 (Schema-Audit)** angedacht.
 
 ---
 
@@ -296,6 +328,29 @@ Alle 21 Schema-Dateien werden aktiv verwendet. **Risiko-Einstufung auf Datei-Ebe
 |-----------|--------|-----------|:-------:|------------|
 | `shared/utils/datetime.ts:29` | `ParsedTime` | `sicher löschbar` | XS | |
 | `shared/utils/phone.ts:9,15` | `DACH_COUNTRIES`, `PhoneValidationResult` | `sicher löschbar` | XS | |
+
+---
+
+## 6a. Dependencies (`package.json`)
+
+**Methodik:** Für jede der 76 Dependencies (51 prod + 25 dev) wurde per ripgrep gegen alle Source- und Config-Dateien (`vite.config.ts`, `drizzle.config.ts`, `tailwind.config.ts`, `postcss.config.js`, `components.json`) geprüft, ob der Paketname als String-Literal vorkommt.
+
+**Ergebnis:** **60 von 76 Dependencies** haben mindestens einen direkten String-Treffer. Die übrigen **16** sind erwartbar implizit:
+
+| Paket | Kategorie | Aufwand | Begründung |
+|-------|-----------|:-------:|------------|
+| `typescript`, `tsx`, `vite`, `vitest`, `esbuild` | `nicht anfassen` | – | Build-/Runtime-Tools, werden über CLI-Skripte in `package.json` aufgerufen, nicht importiert. |
+| `postcss`, `autoprefixer`, `tailwindcss` | `nicht anfassen` | – | CSS-Toolchain — werden von Vite/PostCSS implizit geladen via `postcss.config.js`. |
+| `@types/bcrypt`, `@types/compression`, `@types/cookie-parser`, `@types/express`, `@types/multer`, `@types/node`, `@types/nodemailer`, `@types/react`, `@types/react-dom`, `@types/ws` | `nicht anfassen` | – | TypeScript-Type-Pakete, werden vom TS-Compiler via `tsconfig.json#types`/`compilerOptions.types` automatisch eingezogen. |
+| `@playwright/test` | `bitte prüfen` | S | E2E-Test-Framework. Aktuell **kein** `playwright.config.*` und **keine** `*.spec.ts`-Dateien gefunden. → **Verdacht: ungenutzt.** Vor Löschung CI-Pipeline / GitHub-Actions prüfen, ob dort `npx playwright test` aufgerufen wird. |
+| `libphonenumber-js` | `bitte prüfen` | S | Wird **nicht direkt importiert** in der App-Codebase. Eventueller transitive Verwendung durch ein anderes Paket. → vor Löschung `npm ls libphonenumber-js` prüfen. |
+
+**Konkrete Funde zur Aktion:**
+
+- **`@playwright/test`** ist mit hoher Wahrscheinlichkeit obsolet (kein Playwright-Setup vorhanden). Bei einem Dependency-Cleanup-Sprint Top-Kandidat zum Entfernen.
+- **`libphonenumber-js`** könnte transitive Dep einer anderen Library sein — vor dem Löschen mit `npm ls` verifizieren.
+
+→ Detaillierte Untersuchung inkl. transitiver Dependencies, Bundle-Size-Effekt und CI-Pipeline-Cross-Check ist dem **Folge-Task #220 (Dependency-Audit)** vorbehalten.
 
 ---
 
