@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useCreateInsuranceProvider } from "@/features/customers";
 import type { InsuranceProviderFormData } from "@/features/customers";
-import { Loader2, Check, Plus, X } from "lucide-react";
+import { Loader2, Check, Plus, X, ShieldCheck } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CustomerFormData, SelectOption } from "./customer-types";
@@ -253,16 +253,26 @@ export function InsuranceStep({
               />
             </div>
 
-            <div className="flex items-center gap-3 py-2">
-              <Switch
-                id="newProviderIsPrivate"
-                checked={newProvider.isPrivate || false}
-                onCheckedChange={(checked) => handleNewProviderChange("isPrivate", checked)}
-                data-testid="switch-new-provider-is-private"
-              />
-              <Label htmlFor="newProviderIsPrivate" className="cursor-pointer">
-                Private Pflegekasse
-              </Label>
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+              <div className="flex items-start gap-3">
+                <ShieldCheck className={`${iconSize.md} text-purple-700 mt-0.5 shrink-0`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="newProviderIsPrivate" className="cursor-pointer font-medium text-purple-900">
+                      Privat (PKV) – Private Krankenversicherung
+                    </Label>
+                    <Switch
+                      id="newProviderIsPrivate"
+                      checked={newProvider.isPrivate || false}
+                      onCheckedChange={(checked) => handleNewProviderChange("isPrivate", checked)}
+                      data-testid="switch-new-provider-is-private"
+                    />
+                  </div>
+                  <p className="text-xs text-purple-800/80 mt-1">
+                    Bei privaten Krankenversicherungen ist die IK-Nummer optional.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -298,7 +308,7 @@ export function InsuranceStep({
                 data-testid="input-new-provider-ik"
               />
               <p className="text-xs text-gray-500">
-                {newProvider.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei privaten Kassen)" : "9-stelliges Institutionskennzeichen"}
+                {newProvider.isPrivate ? "9-stelliges Institutionskennzeichen (optional bei PKV)" : "9-stelliges Institutionskennzeichen"}
               </p>
             </div>
 
