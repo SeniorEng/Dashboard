@@ -212,6 +212,13 @@ async function runStartupTasks() {
       log(`Schulung/Besprechung-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { cleanupDuplicateCarryovers } = await import("./startup/cleanup-duplicate-carryovers");
+    try {
+      await cleanupDuplicateCarryovers();
+    } catch (err) {
+      log(`Carryover-Cleanup fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { syncAllBudgetAllocations } = await import("./startup/sync-budget-allocations");
     try {
       const synced = await syncAllBudgetAllocations();
