@@ -111,6 +111,20 @@ konfiguriert" bleibt eine echte Exception).
 - Beim Server-Start wird ein lautes `[email-stub]`-Log ausgegeben, sobald
   `NODE_ENV=test` aktiv ist.
 
+**Echten SMTP-Pfad in Unit-Tests prüfen** (Task #232):
+Damit der Real-Pfad in `email-service.ts` (nodemailer.createTransport,
+`requireTLS`, TLS-Floor, `verify()`, `sendMail()`) trotz Stub-Postausgang
+nicht atrophiert, gibt es einen expliziten Opt-out:
+
+- `EMAIL_TRANSPORT=real` schaltet den Stub auch unter `NODE_ENV=test` aus.
+- Dieser Opt-out darf **nur** in Verbindung mit gemocktem nodemailer
+  (`vi.mock('nodemailer')`) oder einem lokalen Mail-Catcher
+  (z. B. MailHog/maildev) gesetzt werden — Office 365 darf NIE aus Tests
+  heraus angesprochen werden.
+- `tests/email-service.test.ts` deckt diesen Pfad mit gemocktem nodemailer
+  ab und verifiziert Host/Port/STARTTLS/`requireTLS`/TLS 1.2-Floor/
+  `rejectUnauthorized` sowie Header-, Attachment- und Fehler-Verhalten.
+
 **Postausgang aus Tests abfragen:**
 
 ```ts

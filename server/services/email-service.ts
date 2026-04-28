@@ -26,7 +26,14 @@ export interface TestOutboxEntry {
 const testOutbox: TestOutboxEntry[] = [];
 
 export function isStubEmailTransport(): boolean {
-  return process.env.NODE_ENV === "test" || process.env.EMAIL_TRANSPORT === "stub";
+  // Explicit opt-out lets unit tests exercise the real nodemailer path
+  // (e.g. tests/email-service.test.ts) without sending mail anywhere — the
+  // real transport is mocked in that test file. Office 365 must NEVER be
+  // contacted from tests, so this opt-out is only meaningful when paired
+  // with a mocked nodemailer or a local mail catcher.
+  if (process.env.EMAIL_TRANSPORT === "real") return false;
+  if (process.env.EMAIL_TRANSPORT === "stub") return true;
+  return process.env.NODE_ENV === "test";
 }
 
 export function getTestOutbox(): TestOutboxEntry[] {
@@ -53,11 +60,19 @@ function createTransporter(settings: CompanySettings) {
     host: settings.smtpHost!,
     port,
     secure: useSecure,
+    // Force STARTTLS on submission ports (587 etc.). Office 365 rejects
+    // plain-text submissions, so requireTLS must be true whenever we are
+    // not already in implicit-TLS mode (port 465).
+    requireTLS: !useSecure,
     auth: {
       user: settings.smtpUser!,
       pass: settings.smtpPass!,
     },
     tls: {
+      // Pin the TLS floor to 1.2 — Office 365 disabled TLS 1.0/1.1 in 2020,
+      // and modern providers all support 1.2+. This also guarantees a
+      // modern cipher suite is negotiated.
+      minVersion: "TLSv1.2",
       rejectUnauthorized: process.env.NODE_ENV === "production",
     },
   });
