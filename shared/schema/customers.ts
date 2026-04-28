@@ -172,25 +172,6 @@ export const customerNeedsAssessments = pgTable("customer_needs_assessments", {
 ]);
 
 // ============================================
-// CUSTOMER PRICING (historized - like employee compensation)
-// ============================================
-
-export const customerPricingHistory = pgTable("customer_pricing_history", {
-  id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
-  hauswirtschaftRateCents: integer("hauswirtschaft_rate_cents"), // €/Stunde in Cent
-  alltagsbegleitungRateCents: integer("alltagsbegleitung_rate_cents"), // €/Stunde in Cent
-  kilometerRateCents: integer("kilometer_rate_cents"), // €/km in Cent
-  validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"), // null = currently valid
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
-}, (table) => [
-  index("customer_pricing_customer_idx").on(table.customerId),
-  index("customer_pricing_valid_idx").on(table.customerId, table.validFrom, table.validTo),
-]);
-
-// ============================================
 // CUSTOMER ASSIGNMENT HISTORY (ZUWEISUNGS-HISTORIE)
 // ============================================
 
@@ -290,5 +271,3 @@ export const insertNeedsAssessmentSchema = z.object({
 
 export type CustomerNeedsAssessment = typeof customerNeedsAssessments.$inferSelect;
 export type InsertNeedsAssessment = z.infer<typeof insertNeedsAssessmentSchema>;
-
-export type CustomerPricing = typeof customerPricingHistory.$inferSelect;

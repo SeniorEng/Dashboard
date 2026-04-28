@@ -1,4 +1,4 @@
-import type { Customer, CustomerContact, CustomerCareLevelHistory, CustomerNeedsAssessment, CustomerPricing } from "./customers";
+import type { Customer, CustomerContact, CustomerCareLevelHistory, CustomerNeedsAssessment } from "./customers";
 import type { CustomerInsuranceHistory, InsuranceProvider } from "./insurance";
 import type { CustomerContract, CustomerContractRate } from "./contracts";
 import type { CustomerBudget, BudgetSummary } from "./budget";
@@ -14,7 +14,5 @@ export type CustomerWithDetails = Customer & {
   primaryEmployee?: { id: number; displayName: string };
   backupEmployee?: { id: number; displayName: string };
   backupEmployee2?: { id: number; displayName: string };
-  pricingHistory?: CustomerPricing[];
-  currentPricing?: CustomerPricing;
   budgetSummary?: BudgetSummary;
 };

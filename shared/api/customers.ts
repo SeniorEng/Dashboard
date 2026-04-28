@@ -35,17 +35,6 @@ export interface CustomerListParams extends PaginationParams {
   sortOrder?: string;
 }
 
-export interface CustomerPricingInfo {
-  id: number;
-  customerId: number;
-  hauswirtschaftRateCents: number | null;
-  alltagsbegleitungRateCents: number | null;
-  kilometerRateCents: number | null;
-  validFrom: string;
-  validTo: string | null;
-  createdAt: string;
-}
-
 export interface BudgetSummaryInfo {
   customerId: number;
   totalAllocatedCents: number;
@@ -141,7 +130,6 @@ export interface CustomerDetail extends Customer {
   primaryEmployee: { id: number; displayName: string } | null;
   backupEmployee: { id: number; displayName: string } | null;
   backupEmployee2: { id: number; displayName: string } | null;
-  pricingHistory: CustomerPricingInfo[];
 }
 
 export interface CreateCustomerRequest {

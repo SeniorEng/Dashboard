@@ -199,7 +199,6 @@ router.post(
       await simpleUpdate("customer_contacts", "customer_id");
       await simpleUpdate("customer_care_level_history", "customer_id");
       await simpleUpdate("customer_needs_assessments", "customer_id");
-      await simpleUpdate("customer_pricing_history", "customer_id");
       await simpleUpdate("customer_assignment_history", "customer_id");
       await simpleUpdate("customer_insurance_history", "customer_id");
       await simpleUpdate("customer_budgets", "customer_id");
