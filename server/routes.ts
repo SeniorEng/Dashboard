@@ -27,6 +27,14 @@ export async function registerRoutes(
   app.use("/api/webhook", webhookRouter);
   app.use("/api/webhook/twilio", twilioWebhookRouter);
 
+  // Test-only Postausgangs-Endpoint: ausschließlich unter NODE_ENV=test
+  // verfügbar, damit Integrationstests den Mail-Stub abfragen/leeren können.
+  // In Dev/Production ist diese Route nicht eingehängt.
+  if (process.env.NODE_ENV === "test") {
+    const { default: testOutboxRouter } = await import("./routes/test-outbox");
+    app.use("/api/test", testOutboxRouter);
+  }
+
   app.use("/api", apiRouter);
 
   registerObjectStorageRoutes(app);

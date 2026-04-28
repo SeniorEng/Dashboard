@@ -287,6 +287,42 @@ export function uniqueId(): string {
   return `test_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+export interface TestOutboxMessage {
+  to: string;
+  subject: string;
+  html: string;
+  from: string;
+  attachmentCount: number;
+  attachmentNames: string[];
+  messageId: string;
+  sentAt: string;
+}
+
+/**
+ * Liefert alle Mails, die der Server seit dem letzten clearTestOutbox()
+ * in den In-Memory-Stub-Postausgang geschrieben hat. Funktioniert nur,
+ * wenn der Server mit NODE_ENV=test läuft (sonst 404).
+ */
+export async function getTestOutbox(): Promise<TestOutboxMessage[]> {
+  const res = await fetch(`${BASE_URL}/api/test/outbox`);
+  if (!res.ok) {
+    throw new Error(
+      `getTestOutbox failed: ${res.status}. Läuft der Server mit NODE_ENV=test?`,
+    );
+  }
+  const data = (await res.json()) as { messages: TestOutboxMessage[] };
+  return data.messages;
+}
+
+export async function clearTestOutbox(): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/test/outbox`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(
+      `clearTestOutbox failed: ${res.status}. Läuft der Server mit NODE_ENV=test?`,
+    );
+  }
+}
+
 export async function createTestEmployee(opts: { isAdmin?: boolean; nachnamePrefix?: string } = {}): Promise<{ id: number; email: string; password: string }> {
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 7);

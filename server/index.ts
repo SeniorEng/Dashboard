@@ -248,6 +248,24 @@ async function runStartupTasks() {
       log(`Fehler bei Superadmin-Promotion: ${e}`, "startup");
     }
 
+    if (process.env.NODE_ENV === "test") {
+      try {
+        const { getCachedCompanySettings } = await import("./services/cache");
+        const settings = await getCachedCompanySettings();
+        if (settings && (settings.smtpHost || settings.smtpUser)) {
+          log(
+            "ACHTUNG: NODE_ENV=test aktiv — Mail-Versand läuft gegen den In-Memory-Stub-Postausgang, " +
+              "obwohl in den Firmeneinstellungen SMTP-Daten konfiguriert sind. Es gehen KEINE echten Mails raus.",
+            "email-stub",
+          );
+        } else {
+          log("NODE_ENV=test aktiv — Mail-Versand läuft gegen den In-Memory-Stub-Postausgang.", "email-stub");
+        }
+      } catch (err) {
+        log(`Stub-Hinweis konnte nicht geprüft werden: ${err}`, "email-stub");
+      }
+    }
+
     log("Alle Startup-Aufgaben abgeschlossen", "startup");
   } catch (err) {
     log(`Kritischer Fehler bei Startup-Aufgaben: ${err}`, "startup");

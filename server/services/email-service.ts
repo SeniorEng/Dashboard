@@ -12,21 +12,50 @@ interface EmailOptions {
   }>;
 }
 
-function createTransporter(settings: CompanySettings) {
+export interface TestOutboxEntry {
+  to: string;
+  subject: string;
+  html: string;
+  from: string;
+  attachmentCount: number;
+  attachmentNames: string[];
+  messageId: string;
+  sentAt: string;
+}
+
+const testOutbox: TestOutboxEntry[] = [];
+
+export function isStubEmailTransport(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.EMAIL_TRANSPORT === "stub";
+}
+
+export function getTestOutbox(): TestOutboxEntry[] {
+  return [...testOutbox];
+}
+
+export function clearTestOutbox(): void {
+  testOutbox.length = 0;
+}
+
+function ensureSmtpConfigured(settings: CompanySettings): void {
   if (!settings.smtpHost || !settings.smtpPort || !settings.smtpUser || !settings.smtpPass) {
     throw new Error("SMTP-Konfiguration unvollständig. Bitte in den Einstellungen konfigurieren.");
   }
+}
 
-  const port = parseInt(settings.smtpPort, 10);
+function createTransporter(settings: CompanySettings) {
+  ensureSmtpConfigured(settings);
+
+  const port = parseInt(settings.smtpPort!, 10);
   const useSecure = port === 465;
 
   return nodemailer.createTransport({
-    host: settings.smtpHost,
+    host: settings.smtpHost!,
     port,
     secure: useSecure,
     auth: {
-      user: settings.smtpUser,
-      pass: settings.smtpPass,
+      user: settings.smtpUser!,
+      pass: settings.smtpPass!,
     },
     tls: {
       rejectUnauthorized: process.env.NODE_ENV === "production",
@@ -35,13 +64,33 @@ function createTransporter(settings: CompanySettings) {
 }
 
 export async function sendEmail(settings: CompanySettings, options: EmailOptions): Promise<{ messageId: string }> {
-  const transporter = createTransporter(settings);
+  // Validation branches (BF-7-style "SMTP nicht konfiguriert") must keep working
+  // identically in stub mode, so we run the same check first.
+  ensureSmtpConfigured(settings);
 
   const fromName = settings.smtpFromName || settings.companyName || "SeniorenEngel";
-  const fromEmail = settings.smtpFromEmail || settings.smtpUser;
+  const fromEmail = settings.smtpFromEmail || settings.smtpUser!;
+  const fromHeader = `"${fromName}" <${fromEmail}>`;
+
+  if (isStubEmailTransport()) {
+    const messageId = `<stub-${Date.now()}-${Math.random().toString(36).slice(2, 10)}@test.local>`;
+    testOutbox.push({
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      from: fromHeader,
+      attachmentCount: options.attachments?.length ?? 0,
+      attachmentNames: options.attachments?.map((a) => a.filename) ?? [],
+      messageId,
+      sentAt: new Date().toISOString(),
+    });
+    return { messageId };
+  }
+
+  const transporter = createTransporter(settings);
 
   const result = await transporter.sendMail({
-    from: `"${fromName}" <${fromEmail}>`,
+    from: fromHeader,
     to: options.to,
     subject: options.subject,
     html: options.html,
@@ -57,6 +106,14 @@ export async function sendEmail(settings: CompanySettings, options: EmailOptions
 
 export async function testSmtpConnection(settings: CompanySettings): Promise<{ success: boolean; error?: string }> {
   try {
+    // Same validation as real send, so the admin button surfaces the same
+    // "SMTP nicht konfiguriert" errors in test/dev as it would in production.
+    ensureSmtpConfigured(settings);
+
+    if (isStubEmailTransport()) {
+      return { success: true };
+    }
+
     const transporter = createTransporter(settings);
     await transporter.verify();
     return { success: true };

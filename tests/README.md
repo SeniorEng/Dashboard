@@ -96,6 +96,41 @@ Mail-Versand-Pfad auf einen mockbaren SMTP-Adapter umgestellt werden.
 - Nach dem Testlauf können Test-Daten übrig bleiben (Termine, Kunden)
 - Die Tests prüfen echte API-Antworten - Änderungen an der API können Tests fehlschlagen lassen
 
+## E-Mail-Versand in Tests (In-Memory-Stub-Postausgang)
+
+Damit Tests **keine echten Mails** mehr über Office 365 verschicken (vorher: Account
+wurde wegen "Message rate limit exceeded" gedrosselt), läuft der Server im
+Test-Workflow mit `NODE_ENV=test`. In diesem Modus leitet `email-service.ts`
+jede Mail in einen modul-internen In-Memory-Postausgang um — `sendEmail` und
+`testSmtpConnection` behalten ihre Signatur und Fehlerpfade (z. B. "SMTP nicht
+konfiguriert" bleibt eine echte Exception).
+
+**Aktivierung:**
+- Automatisch über die "Start application"-Workflow (`NODE_ENV=test tsx server/index.ts`).
+- Alternativ explizit über `EMAIL_TRANSPORT=stub` als Umgebungsvariable.
+- Beim Server-Start wird ein lautes `[email-stub]`-Log ausgegeben, sobald
+  `NODE_ENV=test` aktiv ist.
+
+**Postausgang aus Tests abfragen:**
+
+```ts
+import { getTestOutbox, clearTestOutbox } from "./test-utils";
+
+beforeEach(async () => {
+  await clearTestOutbox();
+});
+
+it("schickt eine Welcome-Mail beim Anlegen eines Mitarbeiters", async () => {
+  await createTestEmployee();
+  const outbox = await getTestOutbox();
+  expect(outbox.some(m => m.subject.includes("Willkommen"))).toBe(true);
+});
+```
+
+Die Helfer rufen den nur unter `NODE_ENV=test` registrierten Endpoint
+`GET /api/test/outbox` bzw. `DELETE /api/test/outbox` auf. In Dev/Production
+sind diese Routen nicht eingehängt.
+
 ## Test-Datenisolation
 
 Damit Test-Suites unabhängig voneinander und reihenfolge-stabil laufen, gilt
