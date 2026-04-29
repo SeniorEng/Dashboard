@@ -82,8 +82,10 @@ export function useNewAppointmentForm() {
     doctorLat?: number,
     doctorLng?: number,
   ) => {
+    // Routing-Daten merken (für die Termin-Payload), aber die Startzeit
+    // bewusst NICHT mehr automatisch überschreiben — die Übernahme erfolgt
+    // jetzt explizit per Knopf in <FahrtdienstDetails />.
     setFahrtdienstTravelData({ pickupTime, travelMinutes, bufferMinutes, distanceKm, doctorLat, doctorLng });
-    setKtTime(pickupTime);
   }, []);
 
   const { data: catalogServices = [] } = useQuery<Service[]>({

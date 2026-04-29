@@ -23,7 +23,7 @@ import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle
 import { WEEKDAYS, type Weekday } from "@shared/schema/appointments";
 import { WEEKDAY_LABELS, formatWeekdays } from "@/features/appointments/hooks/use-appointment-series";
 import { iconSize, componentStyles } from "@/design-system";
-import { useNewAppointmentForm, ServiceSelector, AppointmentSummary, FahrtdienstPanel } from "@/features/appointments";
+import { useNewAppointmentForm, ServiceSelector, AppointmentSummary, FahrtdienstDetails } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import { AddressFields } from "@/pages/admin/components/address-fields";
 import { isDachPhone } from "@shared/schema/common";
@@ -336,7 +336,7 @@ export default function NewAppointment() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="kt-time">
-                    <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit
+                    <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit / Abholzeit
                   </Label>
                   <Input
                     id="kt-time"
@@ -353,20 +353,21 @@ export default function NewAppointment() {
                 services={form.ktServices}
                 onChange={form.setKtServices}
                 error={form.errors.ktServices}
+                renderAlltagsbegleitungDetails={() => (
+                  <FahrtdienstDetails
+                    fahrtdienst={form.fahrtdienst}
+                    onChange={form.setFahrtdienst}
+                    customerLat={form.effectiveCustomerLat}
+                    customerLng={form.effectiveCustomerLng}
+                    onPickupTimeCalculated={form.handlePickupTimeCalculated}
+                    currentStartTime={form.ktTime}
+                    onApplyPickupTime={form.setKtTime}
+                    errors={form.errors}
+                    isGeocodingCustomer={form.isGeocodingCustomer}
+                    geocodingError={form.geocodingError}
+                  />
+                )}
               />
-
-              {form.hasAlltagsbegleitung && (
-                <FahrtdienstPanel
-                  fahrtdienst={form.fahrtdienst}
-                  onChange={form.setFahrtdienst}
-                  customerLat={form.effectiveCustomerLat}
-                  customerLng={form.effectiveCustomerLng}
-                  onPickupTimeCalculated={form.handlePickupTimeCalculated}
-                  errors={form.errors}
-                  isGeocodingCustomer={form.isGeocodingCustomer}
-                  geocodingError={form.geocodingError}
-                />
-              )}
 
               {form.ktSummary.hasServices && (
                 <AppointmentSummary

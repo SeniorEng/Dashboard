@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -17,11 +17,18 @@ interface ServiceSelectorProps {
   services: ServiceEntry[];
   onChange: (services: ServiceEntry[]) => void;
   error?: string;
+  /**
+   * Optionaler Slot, der unterhalb der ersten Alltagsbegleitung-Karte
+   * (eingerückt, als Detail-Sektion zur Karte) gerendert wird.
+   * Wird genutzt, um den Fahrtdienst (Arztbegleitung) als Eigenschaft
+   * der Alltagsbegleitung darzustellen statt als eigenen Block.
+   */
+  renderAlltagsbegleitungDetails?: () => ReactNode;
 }
 
 const EXCLUDED_CODES = ["erstberatung", "kilometer"];
 
-export function ServiceSelector({ services, onChange, error }: ServiceSelectorProps) {
+export function ServiceSelector({ services, onChange, error, renderAlltagsbegleitungDetails }: ServiceSelectorProps) {
   const [showPicker, setShowPicker] = useState(false);
 
   const { data: catalogServices, isLoading } = useQuery<Service[]>({
@@ -35,6 +42,18 @@ export function ServiceSelector({ services, onChange, error }: ServiceSelectorPr
 
   const selectedIds = new Set(services.map(s => s.serviceId));
   const availableToAdd = selectableServices.filter(s => !selectedIds.has(s.id));
+
+  // Erste Alltagsbegleitung-Karte ermitteln — nur dort zeigen wir den
+  // Detail-Slot, weil ein Termin nur einen Arzttermin haben kann.
+  const firstAlltagsbegleitungServiceId = (() => {
+    for (const entry of services) {
+      const service = selectableServices.find(s => s.id === entry.serviceId);
+      if (service?.lohnartKategorie === "alltagsbegleitung") {
+        return service.id;
+      }
+    }
+    return null;
+  })();
 
   const handleDurationChange = (serviceId: number, durationMinutes: number) => {
     onChange(services.map(s =>
@@ -76,47 +95,56 @@ export function ServiceSelector({ services, onChange, error }: ServiceSelectorPr
     <div className="space-y-3">
       <Label>Services (mindestens einer)</Label>
 
-      <div className="space-y-2 max-h-72 overflow-y-auto rounded-lg">
+      <div className="space-y-2 max-h-[32rem] overflow-y-auto rounded-lg">
         {services.map((entry) => {
           const service = selectableServices.find(s => s.id === entry.serviceId);
           if (!service) return null;
+          const showFahrtdienstDetails =
+            !!renderAlltagsbegleitungDetails && service.id === firstAlltagsbegleitungServiceId;
           return (
             <div
               key={service.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-primary/30 bg-primary/5"
+              className="rounded-lg border border-primary/30 bg-primary/5"
               data-testid={`service-row-${service.id}`}
             >
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-foreground">
-                  {service.name}
-                </span>
-                {service.description && (
-                  <p className="text-xs text-muted-foreground truncate">{service.description}</p>
-                )}
+              <div className="flex items-center gap-3 p-3">
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-foreground">
+                    {service.name}
+                  </span>
+                  {service.description && (
+                    <p className="text-xs text-muted-foreground truncate">{service.description}</p>
+                  )}
+                </div>
+                <Select
+                  value={String(entry.durationMinutes)}
+                  onValueChange={(v) => handleDurationChange(service.id, parseInt(v))}
+                >
+                  <SelectTrigger className="w-auto min-w-[110px]" data-testid={`duration-select-${service.id}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATION_OPTIONS.map((d) => (
+                      <SelectItem key={d} value={String(d)}>
+                        {formatDuration(d)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  onClick={() => handleRemove(service.id)}
+                  className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                  data-testid={`remove-service-${service.id}`}
+                >
+                  <X className={iconSize.sm} />
+                </button>
               </div>
-              <Select
-                value={String(entry.durationMinutes)}
-                onValueChange={(v) => handleDurationChange(service.id, parseInt(v))}
-              >
-                <SelectTrigger className="w-auto min-w-[110px]" data-testid={`duration-select-${service.id}`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DURATION_OPTIONS.map((d) => (
-                    <SelectItem key={d} value={String(d)}>
-                      {formatDuration(d)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <button
-                type="button"
-                onClick={() => handleRemove(service.id)}
-                className="text-muted-foreground hover:text-destructive transition-colors p-1"
-                data-testid={`remove-service-${service.id}`}
-              >
-                <X className={iconSize.sm} />
-              </button>
+              {showFahrtdienstDetails && (
+                <div className="px-3 pb-3" data-testid={`fahrtdienst-slot-${service.id}`}>
+                  {renderAlltagsbegleitungDetails!()}
+                </div>
+              )}
             </div>
           );
         })}

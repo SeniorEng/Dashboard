@@ -26,7 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
-import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstPanel } from "@/features/appointments";
+import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstDetails } from "@/features/appointments";
 import { useActiveEmployees, useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import type { FahrtdienstState } from "@/features/appointments/components/fahrtdienst-panel";
@@ -130,8 +130,10 @@ export default function EditAppointment() {
     doctorLat?: number,
     doctorLng?: number,
   ) => {
+    // Routing-Daten merken (für die PATCH-Payload), aber die Startzeit
+    // beim Bearbeiten bewusst NICHT überschreiben. Die Übernahme passiert
+    // jetzt explizit per Knopf in <FahrtdienstDetails />.
     setFahrtdienstTravelData({ pickupTime, travelMinutes, bufferMinutes, distanceKm, doctorLat, doctorLng });
-    setTime(pickupTime);
   }, []);
 
   useEffect(() => {
@@ -993,7 +995,8 @@ export default function EditAppointment() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="time">
-                <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit {isErstberatung ? "*" : ""}
+                <Clock className={`${iconSize.sm} inline mr-1`} />{" "}
+                {isErstberatung ? "Startzeit *" : "Startzeit / Abholzeit"}
               </Label>
               <Input
                 id="time"
@@ -1020,20 +1023,21 @@ export default function EditAppointment() {
                 services={services}
                 onChange={setServices}
                 error={errors.services}
+                renderAlltagsbegleitungDetails={() => (
+                  <FahrtdienstDetails
+                    fahrtdienst={fahrtdienst}
+                    onChange={setFahrtdienst}
+                    customerLat={effectiveCustomerLat}
+                    customerLng={effectiveCustomerLng}
+                    onPickupTimeCalculated={handlePickupTimeCalculated}
+                    currentStartTime={time}
+                    onApplyPickupTime={setTime}
+                    errors={errors}
+                    isGeocodingCustomer={isGeocodingCustomer}
+                    geocodingError={geocodingError}
+                  />
+                )}
               />
-
-              {hasAlltagsbegleitung && (
-                <FahrtdienstPanel
-                  fahrtdienst={fahrtdienst}
-                  onChange={setFahrtdienst}
-                  customerLat={effectiveCustomerLat}
-                  customerLng={effectiveCustomerLng}
-                  onPickupTimeCalculated={handlePickupTimeCalculated}
-                  errors={errors}
-                  isGeocodingCustomer={isGeocodingCustomer}
-                  geocodingError={geocodingError}
-                />
-              )}
 
               {summary && summary.hasServices && (
                 <AppointmentSummary
