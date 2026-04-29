@@ -882,11 +882,16 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
         }
       }
 
-      const customerOverlap = await appointmentService.checkCustomerOverlap(
-        checkDate, checkStart, checkEnd, existingAppointment.customerId!, id
-      );
-      if (customerOverlap) {
-        return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
+      // Erstberatungen sind an einen Interessenten (prospectId) gebunden und
+      // haben customerId = null. Eine Kunden-Überlappung kann es nur geben,
+      // wenn tatsächlich eine customerId existiert.
+      if (existingAppointment.customerId != null) {
+        const customerOverlap = await appointmentService.checkCustomerOverlap(
+          checkDate, checkStart, checkEnd, existingAppointment.customerId, id
+        );
+        if (customerOverlap) {
+          return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
+        }
       }
     }
   }

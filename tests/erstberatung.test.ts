@@ -411,6 +411,148 @@ describe("EB-11: Termin-Validierung – Person darf nicht entfernt werden", () =
   });
 });
 
+// Regression für Bug #246: Editieren einer Erstberatung darf nicht am
+// Kunden-Überlappungs-Check scheitern, weil eine andere Erstberatung
+// am selben Tag existiert. Beide Termine haben customerId = null und
+// dürfen daher NICHT als "selber Kunde" gewertet werden.
+describe("EB-BUG246: Erstberatung PATCH stört nicht andere Erstberatungen", () => {
+  it("EB-BUG246.1 – PATCH (notes only) auf Erstberatung A trotz Erstberatung B am selben Tag liefert 200", async () => {
+    // Zwei verschiedene Interessenten anlegen
+    const pA = await apiPost<any>("/api/prospects/inline", {
+      vorname: "BugA",
+      nachname: "Bug246A-" + uniqueId(),
+      telefon: "+4917600246001",
+    });
+    expect(pA.status).toBe(201);
+    cleanupProspectIds.push(pA.data.id);
+
+    const pB = await apiPost<any>("/api/prospects/inline", {
+      vorname: "BugB",
+      nachname: "Bug246B-" + uniqueId(),
+      telefon: "+4917600246002",
+    });
+    expect(pB.status).toBe(201);
+    cleanupProspectIds.push(pB.data.id);
+
+    // Freien Tag mit zwei nicht-überschneidenden Slots finden.
+    // Slot A: 14:00–15:00 (60 Min), Slot B: 15:00–16:30 (90 Min).
+    const slotA = "14:00";
+    const slotB = "15:00";
+    const candidateOffsets = [201, 202, 203, 204, 205, 206, 207, 208, 209, 210];
+    let apptAId: number | null = null;
+    let apptBId: number | null = null;
+    let foundDate: string | null = null;
+    for (const off of candidateOffsets) {
+      const date = getFutureDate(off);
+      const resA = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+        prospectId: pA.data.id,
+        date,
+        scheduledStart: slotA,
+        erstberatungDauer: 60,
+        assignedEmployeeId: auth.user.id,
+        notes: "Slot A",
+      });
+      if (resA.status !== 201) continue;
+      const apptA = resA.data.appointment || resA.data;
+      const resB = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+        prospectId: pB.data.id,
+        date,
+        scheduledStart: slotB,
+        erstberatungDauer: 90,
+        assignedEmployeeId: auth.user.id,
+        notes: "Slot B",
+      });
+      if (resB.status !== 201) {
+        // Slot A räumen und nächsten Tag versuchen.
+        await apiDelete(`/api/appointments/${apptA.id}`);
+        continue;
+      }
+      const apptB = resB.data.appointment || resB.data;
+      apptAId = apptA.id;
+      apptBId = apptB.id;
+      foundDate = date;
+      cleanupIds.push(apptAId!, apptBId!);
+      break;
+    }
+    expect(foundDate, "Es muss ein Tag mit zwei freien Erstberatungs-Slots gefunden werden").toBeTruthy();
+    expect(apptAId).toBeTruthy();
+    expect(apptBId).toBeTruthy();
+
+    // Reine Notiz-Änderung auf Termin A darf NICHT 409 wegen Kunde liefern.
+    const patchRes = await apiPatch<any>(`/api/appointments/${apptAId}`, {
+      notes: "Notiz Bug246 nachträglich geändert",
+    });
+    expect(patchRes.status, `Erwartet 200, bekam ${patchRes.status} mit Body ${JSON.stringify(patchRes.data)}`).toBe(200);
+    expect(patchRes.data.notes).toBe("Notiz Bug246 nachträglich geändert");
+  });
+
+  it("EB-BUG246.2 – PATCH mit identischen Scheduling-Feldern + Notiz liefert 200", async () => {
+    // Reproduziert das Frontend-Verhalten: alle Felder werden mitgesendet,
+    // aber nichts hat sich verändert. Das darf nicht in einen Konflikt laufen.
+    const pC = await apiPost<any>("/api/prospects/inline", {
+      vorname: "BugC",
+      nachname: "Bug246C-" + uniqueId(),
+      telefon: "+4917600246003",
+    });
+    expect(pC.status).toBe(201);
+    cleanupProspectIds.push(pC.data.id);
+
+    const pD = await apiPost<any>("/api/prospects/inline", {
+      vorname: "BugD",
+      nachname: "Bug246D-" + uniqueId(),
+      telefon: "+4917600246004",
+    });
+    expect(pD.status).toBe(201);
+    cleanupProspectIds.push(pD.data.id);
+
+    let apptCId: number | null = null;
+    let apptCDate: string | null = null;
+    let apptCStart: string | null = null;
+    for (const off of [231, 232, 233, 234, 235, 236, 237, 238, 239, 240]) {
+      const date = getFutureDate(off);
+      const resC = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+        prospectId: pC.data.id,
+        date,
+        scheduledStart: "10:00",
+        erstberatungDauer: 60,
+        assignedEmployeeId: auth.user.id,
+      });
+      if (resC.status !== 201) continue;
+      const apptC = resC.data.appointment || resC.data;
+      const resD = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+        prospectId: pD.data.id,
+        date,
+        scheduledStart: "11:00",
+        erstberatungDauer: 60,
+        assignedEmployeeId: auth.user.id,
+      });
+      if (resD.status !== 201) {
+        await apiDelete(`/api/appointments/${apptC.id}`);
+        continue;
+      }
+      apptCId = apptC.id;
+      apptCDate = date;
+      apptCStart = "10:00";
+      cleanupIds.push(apptCId!, (resD.data.appointment || resD.data).id);
+      break;
+    }
+    expect(apptCId).toBeTruthy();
+
+    // Vollständiger PATCH wie vom alten Frontend gesendet (alle Felder gleich,
+    // nur Notiz geändert) — darf KEIN 409 ergeben.
+    const patchRes = await apiPatch<any>(`/api/appointments/${apptCId}`, {
+      date: apptCDate,
+      scheduledStart: apptCStart,
+      scheduledEnd: "11:00",
+      durationPromised: 60,
+      assignedEmployeeId: auth.user.id,
+      notes: "Bug246 vollständiger PATCH",
+    });
+    expect(patchRes.status, `Erwartet 200, bekam ${patchRes.status} mit Body ${JSON.stringify(patchRes.data)}`).toBe(200);
+    expect(patchRes.data.notes).toBe("Bug246 vollständiger PATCH");
+  });
+});
+
 describe("EB-10: Erstberatungs-Termin PATCH (Scheduling-Felder)", () => {
   it("EB-10.1 – Erstberatungs-Termin scheduledStart aktualisieren", async () => {
     expect(erstberatungId, "erstberatungId muss gesetzt sein").toBeTruthy();

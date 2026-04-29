@@ -153,9 +153,16 @@ class AppointmentService {
     date: string,
     startTime: string,
     endTime: string,
-    customerId: number,
+    customerId: number | null,
     excludeId?: number
   ): Promise<boolean> {
+    // Defensive Schicht: Erstberatungen haben customerId = null (sie hängen an
+    // prospectId). Würde der Aufrufer hier null durchreichen, würde die Skip-
+    // Bedingung `apt.customerId !== customerId` zu `null !== null` = false
+    // werden und alle anderen prospect-basierten Termine fälschlich als
+    // "selber Kunde" werten. Daher hier hart abbrechen.
+    if (customerId == null) return false;
+
     const existingAppointments = await this.storage.getAppointmentsByDate(date);
 
     for (const apt of existingAppointments) {

@@ -431,6 +431,94 @@ export default function EditAppointment() {
     return fields;
   };
 
+  // Diff für Erstberatung-Save: nur tatsächlich geänderte Felder werden an den
+  // Server geschickt, damit der Backend-Konfliktcheck (Mitarbeiter, Wochenende)
+  // bei reinen Notiz-Änderungen erst gar nicht greift.
+  const getErstberatungUpdateFields = (): Record<string, unknown> => {
+    if (!appointment) return {};
+    const fields: Record<string, unknown> = {};
+    if (date !== appointment.date) fields.date = date;
+    const normalizedStart = (appointment.scheduledStart || "").slice(0, 5);
+    const timeChanged = time !== normalizedStart;
+    const durationChanged = duration !== appointment.durationPromised;
+    if (timeChanged) fields.scheduledStart = time;
+    if (timeChanged || durationChanged) {
+      fields.scheduledEnd = addMinutesToTime(time, duration);
+    }
+    if (durationChanged) fields.durationPromised = duration;
+    if ((notes || null) !== (appointment.notes || null)) fields.notes = notes || null;
+    if (ebAssignedEmployeeId) {
+      const newEmpId = parseInt(ebAssignedEmployeeId);
+      if (newEmpId !== appointment.assignedEmployeeId) fields.assignedEmployeeId = newEmpId;
+    }
+    return fields;
+  };
+
+  // Diff für Kundentermin-Save: spart Konfliktchecks, wenn sich nur Notizen
+  // ändern. Services werden nur mitgesendet, wenn sich Liste oder Dauern
+  // unterscheiden.
+  const getKundenterminUpdateFields = (): Record<string, unknown> => {
+    if (!appointment) return {};
+    const fields: Record<string, unknown> = {};
+    if (date !== appointment.date) fields.date = date;
+    const normalizedStart = (appointment.scheduledStart || "").slice(0, 5);
+    const timeChanged = time !== normalizedStart;
+    const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
+    const durationChanged = totalDuration !== appointment.durationPromised;
+    if (timeChanged) fields.scheduledStart = time;
+    if (timeChanged || durationChanged) {
+      fields.scheduledEnd = addMinutesToTime(time, totalDuration);
+    }
+    if (durationChanged) fields.durationPromised = totalDuration;
+    if ((notes || null) !== (appointment.notes || null)) fields.notes = notes || null;
+    if (canChangeKtAssignment && ktAssignedEmployeeId) {
+      const newEmpId = parseInt(ktAssignedEmployeeId);
+      if (newEmpId !== appointment.assignedEmployeeId) fields.assignedEmployeeId = newEmpId;
+    }
+
+    // Services-Diff: vergleiche aktuelle Auswahl mit Server-Stand.
+    const originalSorted = [...appointmentServiceEntries]
+      .map(e => ({ serviceId: e.serviceId, durationMinutes: e.plannedDurationMinutes }))
+      .sort((a, b) => a.serviceId - b.serviceId);
+    const currentSorted = [...services].sort((a, b) => a.serviceId - b.serviceId);
+    const servicesChanged =
+      originalSorted.length !== currentSorted.length ||
+      originalSorted.some((o, i) =>
+        o.serviceId !== currentSorted[i].serviceId ||
+        o.durationMinutes !== currentSorted[i].durationMinutes
+      );
+    if (servicesChanged) {
+      fields.services = services.map(s => ({
+        serviceId: s.serviceId,
+        plannedDurationMinutes: s.durationMinutes,
+      }));
+    }
+
+    // Fahrtdienst-Diff: vergleiche alle relevanten Felder inkl. der routing-
+    // Metadaten (Reisezeit, Puffer, Geokoordinaten). Bei jeder Änderung wird
+    // die komplette Fahrtdienst-Payload geschickt, weil die Felder
+    // zusammenhängen und die Backend-Validierung sie als Block erwartet.
+    const fdEnabledNow = hasAlltagsbegleitung && fahrtdienst.enabled;
+    const fdEnabledChanged = fdEnabledNow !== !!appointment.isFahrtdienst;
+    const fdDoctorTimeChanged = (fahrtdienst.doctorAppointmentTime || "") !== ((appointment.doctorAppointmentTime ?? "").slice(0, 5));
+    const fdDoctorAddrChanged =
+      (fahrtdienst.doctorName || "") !== (appointment.doctorName ?? "") ||
+      (fahrtdienst.doctorStrasse || "") !== (appointment.doctorStrasse ?? "") ||
+      (fahrtdienst.doctorNr || "") !== (appointment.doctorNr ?? "") ||
+      (fahrtdienst.doctorPlz || "") !== (appointment.doctorPlz ?? "") ||
+      (fahrtdienst.doctorStadt || "") !== (appointment.doctorStadt ?? "");
+    const fdRoutingChanged =
+      (fahrtdienstTravelData?.travelMinutes ?? null) !== (appointment.estimatedTravelMinutes ?? null) ||
+      (fahrtdienstTravelData?.bufferMinutes ?? null) !== (appointment.travelBufferMinutes ?? null) ||
+      (fahrtdienstTravelData?.doctorLat ?? null) !== (appointment.doctorLatitude ?? null) ||
+      (fahrtdienstTravelData?.doctorLng ?? null) !== (appointment.doctorLongitude ?? null);
+    if (fdEnabledChanged || fdDoctorTimeChanged || fdDoctorAddrChanged || fdRoutingChanged) {
+      Object.assign(fields, buildFahrtdienstPayload());
+    }
+
+    return fields;
+  };
+
   const buildFahrtdienstPayload = (): Record<string, unknown> => {
     if (!hasAlltagsbegleitung || !fahrtdienst.enabled) {
       return {
@@ -525,28 +613,16 @@ export default function EditAppointment() {
     }
     
     if (appointment.appointmentType === "Kundentermin") {
-      const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
-      const calculatedEndTime = addMinutesToTime(time, totalDuration);
-      
-      updateMutation.mutate({
-        date,
-        scheduledStart: time,
-        scheduledEnd: calculatedEndTime,
-        durationPromised: totalDuration,
-        notes: notes || null,
-        assignedEmployeeId: canChangeKtAssignment && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
-        services: services.map(s => ({
-          serviceId: s.serviceId,
-          plannedDurationMinutes: s.durationMinutes,
-        })),
-        ...buildFahrtdienstPayload(),
-      });
+      const updateFields = getKundenterminUpdateFields();
+      if (Object.keys(updateFields).length === 0) {
+        toast({ title: "Keine Änderungen", description: "Es gibt nichts zu speichern." });
+        return;
+      }
+      updateMutation.mutate(updateFields);
     } else if (appointment.appointmentType === "Erstberatung") {
-      const calculatedEnd = addMinutesToTime(time, duration);
-      if (appointment.prospectId) {
-        updateProspectMutation.mutate({
-          prospectId: appointment.prospectId,
-          data: {
+      const updateFields = getErstberatungUpdateFields();
+      const prospectPayload = appointment.prospectId
+        ? {
             vorname: ebVorname.trim(),
             nachname: ebNachname.trim(),
             telefon: ebTelefon.trim() || null,
@@ -556,20 +632,39 @@ export default function EditAppointment() {
             plz: ebPlz.trim() || null,
             stadt: ebStadt.trim() || null,
             pflegegrad: ebPflegegrad && ebPflegegrad !== "none" ? parseInt(ebPflegegrad) : null,
+          }
+        : null;
+
+      // Bei Erstberatung können sich Interessenten-Stammdaten parallel zum
+      // Termin geändert haben. Wir senden den Prospect-PATCH unkonditional
+      // (idempotent), erst danach den Termin-PATCH bzw. die Navigation.
+      if (prospectPayload && appointment.prospectId) {
+        updateProspectMutation.mutate(
+          { prospectId: appointment.prospectId, data: prospectPayload },
+          {
+            onSuccess: () => {
+              if (Object.keys(updateFields).length === 0) {
+                // Termin selbst unverändert: nach erfolgreichem Stammdaten-
+                // Update zurück zur Tagesansicht navigieren.
+                toast({ title: "Termin aktualisiert", description: "Die Änderungen wurden gespeichert." });
+                setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
+                return;
+              }
+              updateMutation.mutate(updateFields);
+            },
           },
-        });
+        );
+        return;
       }
-      updateMutation.mutate({
-        date,
-        scheduledStart: time,
-        scheduledEnd: calculatedEnd,
-        durationPromised: duration,
-        notes: notes || null,
-        assignedEmployeeId: ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
-      });
+
+      if (Object.keys(updateFields).length === 0) {
+        toast({ title: "Keine Änderungen", description: "Es gibt nichts zu speichern." });
+        return;
+      }
+      updateMutation.mutate(updateFields);
     } else {
       const calculatedEnd = addMinutesToTime(time, duration);
-      
+
       updateMutation.mutate({
         date,
         scheduledStart: time,
