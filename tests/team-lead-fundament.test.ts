@@ -70,6 +70,32 @@ describe("Task #252 – Teamleitung (flacher Marker)", () => {
     });
   });
 
+  describe("Inaktive/anonymisierte Mitarbeiter", () => {
+    it("ein inaktiver Mitarbeiter kann nicht zum Teamleiter gemacht werden", async () => {
+      const empId = await makeEmployee("TLInactive");
+      const deactivate = await apiPatch<any>(`/api/admin/users/${empId}`, { isActive: false });
+      expect(deactivate.status).toBe(200);
+
+      const setLead = await apiPatch<any>(`/api/admin/users/${empId}`, { isTeamLead: true });
+      expect(setLead.status).toBe(400);
+    });
+
+    it("Deaktivieren eines bestehenden Teamleiters setzt isTeamLead automatisch zurück", async () => {
+      const leadId = await makeEmployee("TLAutoReset");
+      const promote = await apiPatch<any>(`/api/admin/users/${leadId}`, { isTeamLead: true });
+      expect(promote.status).toBe(200);
+      expect(promote.data.isTeamLead).toBe(true);
+
+      const deactivate = await apiPatch<any>(`/api/admin/users/${leadId}`, { isActive: false });
+      expect(deactivate.status).toBe(200);
+      expect(deactivate.data.isTeamLead).toBe(false);
+
+      const reread = await apiGet<any>(`/api/admin/users/${leadId}`);
+      expect(reread.status).toBe(200);
+      expect(reread.data.isTeamLead).toBe(false);
+    });
+  });
+
   describe("Konflikt mit Admin-Rolle", () => {
     it("ein Admin kann nicht gleichzeitig Teamleiter sein", async () => {
       const adminId = await makeAdmin("TLConflictA");

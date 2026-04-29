@@ -3,16 +3,18 @@ import type { User, SafeUser } from "@shared/schema";
 /**
  * Prüft, ob ein Benutzer als Teamleiter markiert ist und aktiv.
  * Admins/SuperAdmins sind keine Teamleiter, auch wenn sie das Flag tragen würden.
+ * Anonymisierte oder inaktive Nutzer gelten ebenfalls nicht als Teamleitung.
  */
 export function isTeamLead(
   user:
-    | Pick<User, "isTeamLead" | "isActive" | "isAdmin" | "isSuperAdmin">
+    | Pick<User, "isTeamLead" | "isActive" | "isAdmin" | "isSuperAdmin" | "isAnonymized">
     | SafeUser
     | null
     | undefined,
 ): boolean {
   if (!user) return false;
   if (user.isAdmin || (user as { isSuperAdmin?: boolean }).isSuperAdmin) return false;
+  if ((user as { isAnonymized?: boolean }).isAnonymized) return false;
   return Boolean(user.isTeamLead) && Boolean(user.isActive);
 }
 
@@ -25,7 +27,7 @@ export type ActorRole = "admin" | "teamLead" | "employee";
  */
 export function actorRole(
   user:
-    | Pick<User, "isTeamLead" | "isActive" | "isAdmin" | "isSuperAdmin">
+    | Pick<User, "isTeamLead" | "isActive" | "isAdmin" | "isSuperAdmin" | "isAnonymized">
     | SafeUser
     | null
     | undefined,

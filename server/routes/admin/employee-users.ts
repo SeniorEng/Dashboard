@@ -288,14 +288,35 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
 
   const nextIsAdmin = result.data.isAdmin ?? currentUserBefore.isAdmin;
   const nextIsSuperAdmin = currentUserBefore.isSuperAdmin;
-  const nextIsTeamLead = result.data.isTeamLead ?? currentUserBefore.isTeamLead;
+  const requestedIsTeamLead = result.data.isTeamLead ?? currentUserBefore.isTeamLead;
+  const nextIsActive = result.data.isActive ?? currentUserBefore.isActive;
 
-  if (nextIsTeamLead && (nextIsAdmin || nextIsSuperAdmin)) {
+  if (requestedIsTeamLead && (nextIsAdmin || nextIsSuperAdmin)) {
     res.status(400).json({
       error: "VALIDATION_ERROR",
       message: "Ein Administrator kann nicht gleichzeitig Teamleiter sein",
     });
     return;
+  }
+
+  if (
+    result.data.isTeamLead === true &&
+    (currentUserBefore.isAnonymized || nextIsActive === false)
+  ) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message:
+        "Inaktive oder anonymisierte Mitarbeiter können nicht als Teamleitung markiert werden",
+    });
+    return;
+  }
+
+  let nextIsTeamLead = requestedIsTeamLead;
+  if (currentUserBefore.isAnonymized || nextIsActive === false) {
+    nextIsTeamLead = false;
+    if (currentUserBefore.isTeamLead) {
+      result.data.isTeamLead = false;
+    }
   }
   // ---------- /Teamleiter-Validierung ----------
 
@@ -589,6 +610,7 @@ router.post("/users/:id/anonymize", asyncHandler("Mitarbeiter konnte nicht anony
       passwordHash: "anonymized",
       isAnonymized: true,
       anonymizedAt: now,
+      isTeamLead: false,
       updatedAt: now,
     }).where(eq(users.id, id));
 
