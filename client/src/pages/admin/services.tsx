@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -202,7 +202,6 @@ export default function AdminServices() {
     }
 
     if (updates.length === 0) {
-      toast({ title: "Keine Änderungen", description: "Es wurden keine Preise verändert." });
       return;
     }
 
@@ -347,6 +346,43 @@ export default function AdminServices() {
   };
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
+
+  const hasServiceChanges = useMemo(() => {
+    if (!editingService) return true;
+    if (form.name !== editingService.name) return true;
+    if (form.code !== (editingService.code || "")) return true;
+    if (form.description !== (editingService.description || "")) return true;
+    if (form.unitType !== editingService.unitType) return true;
+    if (form.isBillable !== editingService.isBillable) return true;
+    if (form.defaultPriceCents !== formatPrice(editingService.defaultPriceCents)) return true;
+    if (form.vatRate !== String(editingService.vatRate)) return true;
+    const initialMinDuration = editingService.minDurationMinutes ? String(editingService.minDurationMinutes) : "";
+    if (form.minDurationMinutes !== initialMinDuration) return true;
+    const initialEmployeeRate = editingService.employeeRateCents ? formatPrice(editingService.employeeRateCents) : "";
+    if (form.employeeRateCents !== initialEmployeeRate) return true;
+    if (form.lohnartKategorie !== (editingService.lohnartKategorie || "hauswirtschaft")) return true;
+    if (form.isDefault !== (editingService.isDefault ?? false)) return true;
+    if (form.isActive !== editingService.isActive) return true;
+    if (form.sortOrder !== String(editingService.sortOrder)) return true;
+    const initialPots = [...(editingService.budgetPots || [])].sort();
+    const currentPots = [...form.budgetPots].sort();
+    if (initialPots.length !== currentPots.length) return true;
+    if (initialPots.some((p, i) => p !== currentPots[i])) return true;
+    return false;
+  }, [editingService, form]);
+
+  const hasBulkChanges = useMemo(() => {
+    if (!services) return false;
+    return services
+      .filter(s => s.isBillable && s.isActive)
+      .some(s => {
+        const raw = bulkPrices[s.id];
+        if (raw === undefined || raw === "") return false;
+        const euros = parseFloat(raw.replace(",", "."));
+        if (isNaN(euros) || euros < 0) return false;
+        return Math.round(euros * 100) !== s.defaultPriceCents;
+      });
+  }, [services, bulkPrices]);
 
   return (
     <Layout variant="admin">
@@ -658,7 +694,8 @@ export default function AdminServices() {
                 type="button"
                 className={componentStyles.btnPrimary}
                 onClick={handleSave}
-                disabled={isSaving}
+                disabled={isSaving || !hasServiceChanges}
+                title={!isSaving && !hasServiceChanges ? "Keine Änderungen zu speichern" : undefined}
                 data-testid="button-save-service"
               >
                 {isSaving ? (
@@ -784,7 +821,8 @@ export default function AdminServices() {
                 type="button"
                 className={componentStyles.btnPrimary}
                 onClick={handleBulkSave}
-                disabled={bulkSaving}
+                disabled={bulkSaving || !hasBulkChanges}
+                title={!bulkSaving && !hasBulkChanges ? "Keine Änderungen zu speichern" : undefined}
                 data-testid="button-save-bulk"
               >
                 {bulkSaving ? (

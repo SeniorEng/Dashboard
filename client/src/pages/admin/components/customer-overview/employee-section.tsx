@@ -70,6 +70,18 @@ export function EmployeeSection({ customer, customerId, editingSection, setEditi
     setEditingSection("mitarbeiter");
   };
 
+  const hasChanges = useMemo(() => {
+    if (editingSection !== "mitarbeiter") return false;
+    const initialPrimary = customer.primaryEmployee?.id?.toString() || "";
+    const initialBackup = customer.backupEmployee?.id?.toString() || "";
+    const initialBackup2 = customer.backupEmployee2?.id?.toString() || "";
+    return (
+      employeeData.primaryEmployeeId !== initialPrimary ||
+      employeeData.backupEmployeeId !== initialBackup ||
+      employeeData.backupEmployeeId2 !== initialBackup2
+    );
+  }, [editingSection, employeeData, customer.primaryEmployee, customer.backupEmployee, customer.backupEmployee2]);
+
   return (
     <SectionCard
       title="Zuständige Mitarbeiter"
@@ -125,7 +137,7 @@ export function EmployeeSection({ customer, customerId, editingSection, setEditi
             selectedLabel="Vorschläge für Hauptzuständig"
           />
 
-          <SaveCancelButtons onSave={handleSaveEmployees} testIdPrefix="mitarbeiter" saving={saving} onCancel={() => setEditingSection(null)} />
+          <SaveCancelButtons onSave={handleSaveEmployees} testIdPrefix="mitarbeiter" saving={saving} hasChanges={hasChanges} onCancel={() => setEditingSection(null)} />
         </div>
       ) : (
         <div className="space-y-3">

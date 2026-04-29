@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -234,6 +234,26 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
 
   const isSaving = addMutation.isPending || updateMutation.isPending;
 
+  // Beim Bearbeiten eines bestehenden Kontakts soll der Speichern-Button
+  // erst aktiv sein, wenn sich gegenüber dem geladenen Kontakt etwas
+  // geändert hat. Beim Anlegen eines neuen Kontakts ist er immer aktiv.
+  const hasChanges = useMemo(() => {
+    if (editingId === null) return true;
+    const original = contacts?.find(c => c.id === editingId);
+    if (!original) return true;
+    const initial = contactToForm(original);
+    return (
+      form.vorname.trim() !== initial.vorname.trim() ||
+      form.nachname.trim() !== initial.nachname.trim() ||
+      form.contactType !== initial.contactType ||
+      form.festnetz.trim() !== initial.festnetz.trim() ||
+      form.mobilnummer.trim() !== initial.mobilnummer.trim() ||
+      (form.email || "").trim() !== (initial.email || "").trim() ||
+      (form.notes || "").trim() !== (initial.notes || "").trim() ||
+      form.isPrimary !== initial.isPrimary
+    );
+  }, [editingId, contacts, form]);
+
   const renderForm = () => (
     <div className="p-4 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
       <p className="text-sm font-medium text-gray-700">
@@ -334,7 +354,8 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
         <Button
           size="sm"
           onClick={handleSubmit}
-          disabled={isSaving}
+          disabled={isSaving || !hasChanges}
+          title={!isSaving && !hasChanges ? "Keine Änderungen zu speichern" : undefined}
           className={componentStyles.btnPrimary}
           data-testid="button-contact-save"
         >

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { DEACTIVATION_REASON_SELECT_OPTIONS } from "@shared/domain/customers";
@@ -139,6 +139,31 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     setEditingSection(null);
   };
 
+  const hasVertragsdatenChanges = useMemo(() => {
+    if (editingSection !== "vertragsdaten" || !contract) return false;
+    if ((contractStart || "") !== (contract.contractStart || "")) return true;
+    if ((contractDate || "") !== (contract.contractDate || "")) return true;
+    if ((contractEnd || "") !== (contract.contractEnd || "")) return true;
+    if ((hoursPerPeriod || 0) !== (contract.hoursPerPeriod || 0)) return true;
+    if ((periodType || "week") !== (contract.periodType || "week")) return true;
+    return false;
+  }, [editingSection, contract, contractStart, contractDate, contractEnd, hoursPerPeriod, periodType]);
+
+  const hasLeistungenChanges = useMemo(() => {
+    if (editingSection !== "leistungen") return false;
+    const initialText = contract?.vereinbarteLeistungen || "";
+    if ((vereinbarteLeistungen.trim() || "") !== initialText) return true;
+    if (personenbefoerderungGewuenscht !== (customer.personenbefoerderungGewuenscht ?? false)) return true;
+    return false;
+  }, [editingSection, contract?.vereinbarteLeistungen, vereinbarteLeistungen, personenbefoerderungGewuenscht, customer.personenbefoerderungGewuenscht]);
+
+  const hasAbrechnungChanges = useMemo(() => {
+    if (editingSection !== "abrechnung") return false;
+    if (acceptsPrivatePayment !== (customer.acceptsPrivatePayment ?? false)) return true;
+    if (customer.billingType === "pflegekasse_privat" && beihilfeBerechtigt !== (customer.beihilfeBerechtigt ?? false)) return true;
+    return false;
+  }, [editingSection, acceptsPrivatePayment, beihilfeBerechtigt, customer.acceptsPrivatePayment, customer.beihilfeBerechtigt, customer.billingType]);
+
   const invalidateCustomer = () => {
     invalidateRelated(queryClient, "customers");
     queryClient.invalidateQueries({ queryKey: ["deactivation-readiness", customerId] });
@@ -276,12 +301,19 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     </Button>
   );
 
-  const saveCancel = (onSave: () => void, isSaving: boolean, testIdPrefix: string, extraDisabled = false) => (
+  const saveCancel = (
+    onSave: () => void,
+    isSaving: boolean,
+    testIdPrefix: string,
+    extraDisabled = false,
+    hasChanges = true,
+  ) => (
     <div className="flex items-center gap-2 pt-3">
       <Button
         className={componentStyles.btnPrimary}
         onClick={onSave}
-        disabled={isSaving || extraDisabled}
+        disabled={isSaving || extraDisabled || !hasChanges}
+        title={!isSaving && !extraDisabled && !hasChanges ? "Keine Änderungen zu speichern" : undefined}
         data-testid={`button-save-${testIdPrefix}`}
       >
         {isSaving ? (
@@ -424,7 +456,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 </div>
               </div>
             </div>
-            {saveCancel(handleSaveVertragsdaten, saving, "vertragsdaten")}
+            {saveCancel(handleSaveVertragsdaten, saving, "vertragsdaten", false, hasVertragsdatenChanges)}
           </div>
         ) : (
           <div className="space-y-3" data-testid="text-contract">
@@ -626,7 +658,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 data-testid="switch-personenbefoerderung"
               />
             </div>
-            {saveCancel(handleSaveLeistungen, saving, "leistungen")}
+            {saveCancel(handleSaveLeistungen, saving, "leistungen", false, hasLeistungenChanges)}
           </div>
         ) : (
           <div className="space-y-3">
@@ -678,7 +710,8 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
               <Button
                 className={componentStyles.btnPrimary}
                 onClick={() => saveAbrechnung.mutate({ acceptsPrivatePayment, beihilfeBerechtigt })}
-                disabled={saveAbrechnung.isPending}
+                disabled={saveAbrechnung.isPending || !hasAbrechnungChanges}
+                title={!saveAbrechnung.isPending && !hasAbrechnungChanges ? "Keine Änderungen zu speichern" : undefined}
                 data-testid="button-save-abrechnung"
               >
                 {saveAbrechnung.isPending ? (

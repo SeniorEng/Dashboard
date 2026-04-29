@@ -28,16 +28,19 @@ interface SaveCancelProps {
   saving: boolean;
   isPending?: boolean;
   onCancel: () => void;
+  hasChanges?: boolean;
 }
 
-export function SaveCancelButtons({ onSave, testIdPrefix, saving, isPending = false, onCancel }: SaveCancelProps) {
+export function SaveCancelButtons({ onSave, testIdPrefix, saving, isPending = false, onCancel, hasChanges = true }: SaveCancelProps) {
   const isLoading = saving || isPending;
+  const noChanges = !isLoading && !hasChanges;
   return (
     <div className="flex items-center gap-2 pt-3">
       <Button
         className={componentStyles.btnPrimary}
         onClick={onSave}
-        disabled={isLoading}
+        disabled={isLoading || !hasChanges}
+        title={noChanges ? "Keine Änderungen zu speichern" : undefined}
         data-testid={`button-save-${testIdPrefix}`}
       >
         {isLoading ? (

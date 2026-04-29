@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { formatAddress } from "@shared/utils/format";
 import { formatPhoneForDisplay, validateDachPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
@@ -122,6 +122,28 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
     setEditingSection("kontakt");
   };
 
+  // Speichern-Button aktivieren nur, wenn sich gegenüber dem geladenen
+  // Stand etwas geändert hat. Telefonnummern werden zum Vergleich auf die
+  // gespeicherte Normalform reduziert, damit reine Formatierungs-
+  // Unterschiede (Leerzeichen) nicht als Änderung zählen.
+  const hasChanges = useMemo(() => {
+    if (editingSection !== "kontakt") return false;
+    if (stammdaten.vorname.trim() !== (customer.vorname || "")) return true;
+    if (stammdaten.nachname.trim() !== (customer.nachname || "")) return true;
+    if (stammdaten.billingType !== (customer.billingType || "pflegekasse_gesetzlich")) return true;
+    if ((stammdaten.geburtsdatum?.trim() || null) !== (customer.geburtsdatum || null)) return true;
+    if ((stammdaten.email.trim() || null) !== (customer.email || null)) return true;
+    const normTelefon = stammdaten.telefon.trim() ? normalizePhone(stammdaten.telefon) : null;
+    if (normTelefon !== (customer.telefon || null)) return true;
+    const normFestnetz = stammdaten.festnetz.trim() ? normalizePhone(stammdaten.festnetz) : null;
+    if (normFestnetz !== (customer.festnetz || null)) return true;
+    if ((stammdaten.strasse.trim() || null) !== (customer.strasse || null)) return true;
+    if ((stammdaten.nr.trim() || null) !== (customer.nr || null)) return true;
+    if ((stammdaten.plz.trim() || null) !== (customer.plz || null)) return true;
+    if ((stammdaten.stadt.trim() || null) !== (customer.stadt || null)) return true;
+    return false;
+  }, [editingSection, stammdaten, customer]);
+
   return (
     <>
     <DuplicateDialog
@@ -240,7 +262,7 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
             onChange={(field, value) => setStammdaten((prev) => ({ ...prev, [field]: value }))}
           />
 
-          <SaveCancelButtons onSave={handleSaveStammdaten} testIdPrefix="kontakt" saving={saving} onCancel={() => setEditingSection(null)} />
+          <SaveCancelButtons onSave={handleSaveStammdaten} testIdPrefix="kontakt" saving={saving} hasChanges={hasChanges} onCancel={() => setEditingSection(null)} />
         </div>
       ) : (
         <div className="space-y-3">

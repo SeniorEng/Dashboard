@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { SectionCard } from "@/components/patterns/section-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +41,11 @@ export function MedicalSection({ customer, customerId, editingSection, setEditin
     setEditingSection("vorerkrankungen");
   };
 
+  const hasChanges = useMemo(() => {
+    if (editingSection !== "vorerkrankungen") return false;
+    return (vorerkrankungen.trim() || null) !== (customer.vorerkrankungen || null);
+  }, [editingSection, vorerkrankungen, customer.vorerkrankungen]);
+
   return (
     <SectionCard
       title="Vorerkrankungen"
@@ -56,7 +61,7 @@ export function MedicalSection({ customer, customerId, editingSection, setEditin
             rows={3}
             data-testid="input-vorerkrankungen"
           />
-          <SaveCancelButtons onSave={handleSaveVorerkrankungen} testIdPrefix="vorerkrankungen" saving={saving} onCancel={() => setEditingSection(null)} />
+          <SaveCancelButtons onSave={handleSaveVorerkrankungen} testIdPrefix="vorerkrankungen" saving={saving} hasChanges={hasChanges} onCancel={() => setEditingSection(null)} />
         </div>
       ) : (
         <p className="text-gray-700 whitespace-pre-wrap" data-testid="text-vorerkrankungen">
@@ -104,6 +109,17 @@ export function SpecialFeaturesSection({ customer, customerId, editingSection, s
     setEditingSection("besonderheiten");
   };
 
+  const hasChanges = useMemo(() => {
+    if (editingSection !== "besonderheiten") return false;
+    const initialHaustier = customer.haustierVorhanden ?? false;
+    if (besonderheiten.haustierVorhanden !== initialHaustier) return true;
+    if (besonderheiten.haustierVorhanden) {
+      const initialDetails = customer.haustierDetails || "";
+      if ((besonderheiten.haustierDetails || "").trim() !== initialDetails) return true;
+    }
+    return false;
+  }, [editingSection, besonderheiten, customer.haustierVorhanden, customer.haustierDetails]);
+
   return (
     <SectionCard
       title="Besonderheiten"
@@ -133,7 +149,7 @@ export function SpecialFeaturesSection({ customer, customerId, editingSection, s
               />
             </div>
           )}
-          <SaveCancelButtons onSave={handleSaveBesonderheiten} testIdPrefix="besonderheiten" saving={saving} onCancel={() => setEditingSection(null)} />
+          <SaveCancelButtons onSave={handleSaveBesonderheiten} testIdPrefix="besonderheiten" saving={saving} hasChanges={hasChanges} onCancel={() => setEditingSection(null)} />
         </div>
       ) : (
         <div className="space-y-3">
@@ -182,6 +198,14 @@ export function DocumentDeliverySection({ customer, customerId, editingSection, 
     initDocumentDelivery();
     setEditingSection("versandart");
   };
+
+  const hasChanges = useMemo(() => {
+    if (editingSection !== "versandart") return false;
+    const initialMethod = (customer.documentDeliveryMethod as "email" | "post") || "email";
+    if (documentDeliveryMethod !== initialMethod) return true;
+    if (receivesMonthlyInvoice !== (customer.receivesMonthlyInvoice ?? false)) return true;
+    return false;
+  }, [editingSection, documentDeliveryMethod, receivesMonthlyInvoice, customer.documentDeliveryMethod, customer.receivesMonthlyInvoice]);
 
   return (
     <SectionCard
@@ -251,7 +275,7 @@ export function DocumentDeliverySection({ customer, customerId, editingSection, 
               </div>
             </div>
           </div>
-          <SaveCancelButtons onSave={handleSaveDocumentDelivery} testIdPrefix="versandart" saving={saving} onCancel={() => setEditingSection(null)} />
+          <SaveCancelButtons onSave={handleSaveDocumentDelivery} testIdPrefix="versandart" saving={saving} hasChanges={hasChanges} onCancel={() => setEditingSection(null)} />
         </div>
       ) : (
         <div className="space-y-2">
