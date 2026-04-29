@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth, canCreateErstberatung } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useCustomerList } from "./use-customer-list";
+import { shouldResetFahrtdienst } from "../utils";
 import { useAdminEmployees } from "./use-active-employees";
 import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-mutations";
 import { useCreateAppointmentSeries, usePreviewAppointmentSeries } from "./use-appointment-series";
@@ -88,7 +89,7 @@ export function useNewAppointmentForm() {
     setFahrtdienstTravelData({ pickupTime, travelMinutes, bufferMinutes, distanceKm, doctorLat, doctorLng });
   }, []);
 
-  const { data: catalogServices = [] } = useQuery<Service[]>({
+  const { data: catalogServices = [], isSuccess: catalogServicesLoaded } = useQuery<Service[]>({
     queryKey: ["/api/services"],
     staleTime: 60_000,
   });
@@ -332,19 +333,27 @@ export function useNewAppointmentForm() {
   }, [ktServices, catalogServices]);
 
   useEffect(() => {
-    if (!hasAlltagsbegleitung && fahrtdienst.enabled) {
-      setFahrtdienst({
-        enabled: false,
-        doctorName: "",
-        doctorAppointmentTime: "",
-        doctorStrasse: "",
-        doctorNr: "",
-        doctorPlz: "",
-        doctorStadt: "",
-      });
-      setFahrtdienstTravelData(null);
+    // Erst zurücksetzen, wenn der Servicekatalog wirklich da ist – so kann
+    // ein verzögertes `/api/services` keinen bereits ausgewählten
+    // Fahrtdienst-Block aus Versehen aushebeln.
+    if (!shouldResetFahrtdienst({
+      catalogLoaded: catalogServicesLoaded,
+      hasAlltagsbegleitung,
+      fahrtdienstEnabled: fahrtdienst.enabled,
+    })) {
+      return;
     }
-  }, [hasAlltagsbegleitung]);
+    setFahrtdienst({
+      enabled: false,
+      doctorName: "",
+      doctorAppointmentTime: "",
+      doctorStrasse: "",
+      doctorNr: "",
+      doctorPlz: "",
+      doctorStadt: "",
+    });
+    setFahrtdienstTravelData(null);
+  }, [catalogServicesLoaded, hasAlltagsbegleitung, fahrtdienst.enabled]);
 
   const ktSummary = useMemo(() => {
     const servicesList = ktServices.map(s => {

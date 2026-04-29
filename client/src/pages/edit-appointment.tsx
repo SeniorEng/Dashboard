@@ -26,7 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
-import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstDetails } from "@/features/appointments";
+import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstDetails, shouldResetFahrtdienst } from "@/features/appointments";
 import { useActiveEmployees, useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import type { FahrtdienstState } from "@/features/appointments/components/fahrtdienst-panel";
@@ -72,7 +72,7 @@ export default function EditAppointment() {
     enabled: id > 0,
   });
 
-  const { data: catalogServices = [] } = useQuery<Service[]>({
+  const { data: catalogServices = [], isSuccess: catalogServicesLoaded } = useQuery<Service[]>({
     queryKey: ["/api/services"],
     staleTime: 60_000,
   });
@@ -216,20 +216,29 @@ export default function EditAppointment() {
   }, [services, catalogServices]);
 
   useEffect(() => {
-    if (!fahrtdienstInitializedRef.current) return;
-    if (!hasAlltagsbegleitung && fahrtdienst.enabled) {
-      setFahrtdienst({
-        enabled: false,
-        doctorName: "",
-        doctorAppointmentTime: "",
-        doctorStrasse: "",
-        doctorNr: "",
-        doctorPlz: "",
-        doctorStadt: "",
-      });
-      setFahrtdienstTravelData(null);
+    // Reset NUR ausführen, wenn der Servicekatalog wirklich geladen ist –
+    // sonst könnte ein langsames `/api/services` einen gespeicherten
+    // Fahrtdienst-Block kurzzeitig zurücksetzen, bevor der Katalog ankommt
+    // und `hasAlltagsbegleitung` korrekt berechnet werden kann.
+    if (!shouldResetFahrtdienst({
+      catalogLoaded: catalogServicesLoaded,
+      fahrtdienstInitialized: fahrtdienstInitializedRef.current,
+      hasAlltagsbegleitung,
+      fahrtdienstEnabled: fahrtdienst.enabled,
+    })) {
+      return;
     }
-  }, [hasAlltagsbegleitung, fahrtdienst.enabled]);
+    setFahrtdienst({
+      enabled: false,
+      doctorName: "",
+      doctorAppointmentTime: "",
+      doctorStrasse: "",
+      doctorNr: "",
+      doctorPlz: "",
+      doctorStadt: "",
+    });
+    setFahrtdienstTravelData(null);
+  }, [catalogServicesLoaded, hasAlltagsbegleitung, fahrtdienst.enabled]);
 
   const customerForGeocode = appointment?.customer;
   useEffect(() => {
