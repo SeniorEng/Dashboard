@@ -52,9 +52,16 @@ interface PersonaSetup {
 let setup: PersonaSetup;
 
 function nextWeekday(daysFromNow: number): string {
+  // Zähle daysFromNow tatsächliche Werktage ab heute hoch, damit
+  // unterschiedliche Indizes nie auf denselben Tag kollabieren (sonst
+  // Slot-Kollisionen z.B. zwischen nextWeekday(24) und nextWeekday(25),
+  // wenn ein Wochenende dazwischenliegt).
   const d = new Date();
-  d.setDate(d.getDate() + daysFromNow);
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  let added = 0;
+  while (added < daysFromNow) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) added += 1;
+  }
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
