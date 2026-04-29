@@ -94,6 +94,21 @@ describe("Task #252 – Teamleitung (flacher Marker)", () => {
       expect(reread.status).toBe(200);
       expect(reread.data.isTeamLead).toBe(false);
     });
+
+    it("Deaktivieren via /deactivate-Endpoint setzt isTeamLead persistent zurück", async () => {
+      const leadId = await makeEmployee("TLDeactivateEp");
+      const promote = await apiPatch<any>(`/api/admin/users/${leadId}`, { isTeamLead: true });
+      expect(promote.status).toBe(200);
+      expect(promote.data.isTeamLead).toBe(true);
+
+      const deactivate = await apiPost<any>(`/api/admin/users/${leadId}/deactivate`, {});
+      expect(deactivate.status).toBe(200);
+
+      const reread = await apiGet<any>(`/api/admin/users/${leadId}`);
+      expect(reread.status).toBe(200);
+      expect(reread.data.isActive).toBe(false);
+      expect(reread.data.isTeamLead).toBe(false);
+    });
   });
 
   describe("Konflikt mit Admin-Rolle", () => {

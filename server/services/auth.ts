@@ -534,7 +534,7 @@ class AuthService {
     
     const result = await db
       .update(users)
-      .set({ isActive: false, deactivatedAt: now, updatedAt: now })
+      .set({ isActive: false, isTeamLead: false, deactivatedAt: now, updatedAt: now })
       .where(eq(users.id, id))
       .returning();
 
@@ -569,7 +569,7 @@ class AuthService {
   async deleteUser(id: number): Promise<boolean> {
     const result = await db
       .update(users)
-      .set({ isActive: false, deactivatedAt: new Date(), updatedAt: new Date() })
+      .set({ isActive: false, isTeamLead: false, deactivatedAt: new Date(), updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
     return result.length > 0;
