@@ -129,7 +129,7 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
       expect(res.data.assignedEmployeeId).toBe(setup.employeeB.id);
     });
 
-    it("Teamleiter erhält Validierungsfehler, wenn Mitarbeiter dem Kunden nicht zugeordnet ist", async () => {
+    it("Teamleiter darf Termin auch mit nicht-zugeordnetem aktivem Mitarbeiter anlegen (firmenweit)", async () => {
       const res = await apiPostAs<any>(setup.leadAuth, "/api/appointments/kundentermin", {
         customerId: setup.customerB,
         date: setup.testDate,
@@ -137,8 +137,8 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
         services: [{ serviceId: setup.serviceId, durationMinutes: 60 }],
         assignedEmployeeId: setup.employeeA.id,
       });
-      expect(res.status).toBe(400);
-      expect(String(res.data?.message ?? "")).toMatch(/zugeordnet/i);
+      expect(res.status).toBe(201);
+      expect(res.data.assignedEmployeeId).toBe(setup.employeeA.id);
     });
 
     it("regulärer Mitarbeiter darf keinen Termin für anderen Mitarbeiter anlegen", async () => {

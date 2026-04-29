@@ -175,7 +175,7 @@ router.post("/:id/documents/generate-pdf", asyncHandler("PDF konnte nicht erstel
 router.get("/:id/generated-documents", asyncHandler("Generierte Dokumente konnten nicht geladen werden", async (req, res) => {
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
-  if (!await requireCustomerAccess(req, res, customerId)) return;
+  if (!await requireCustomerReadAccess(req, res, customerId)) return;
 
   const docs = await documentStorage.getGeneratedDocuments(customerId);
   res.json(docs);

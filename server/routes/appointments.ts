@@ -490,22 +490,23 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
 
   let assignedEmployeeId: number;
   // Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker) und dürfen
-  // Termine im Namen jedes aktiven Mitarbeiters anlegen.
+  // Termine im Namen jedes aktiven Mitarbeiters anlegen — unabhängig davon,
+  // ob der Mitarbeiter dem Kunden bereits zugeordnet ist.
   if (user.isAdmin || isTeamLead(user)) {
     if (!validatedData.assignedEmployeeId) {
       return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diesen Termin aus.");
     }
     assignedEmployeeId = validatedData.assignedEmployeeId;
 
-    const isAssignedEmployee =
-      customer.primaryEmployeeId === assignedEmployeeId ||
-      customer.backupEmployeeId === assignedEmployeeId ||
-      customer.backupEmployeeId2 === assignedEmployeeId;
-
-    if (!isAssignedEmployee) {
+    const [targetEmployee] = await db
+      .select({ id: users.id, isActive: users.isActive })
+      .from(users)
+      .where(eq(users.id, assignedEmployeeId))
+      .limit(1);
+    if (!targetEmployee || targetEmployee.isActive === false) {
       return sendBadRequest(
         res,
-        "Der ausgewählte Mitarbeiter ist diesem Kunden nicht zugeordnet. Bitte weisen Sie den Mitarbeiter zuerst dem Kunden zu."
+        "Der ausgewählte Mitarbeiter ist nicht aktiv. Bitte wählen Sie einen aktiven Mitarbeiter aus.",
       );
     }
   } else {
