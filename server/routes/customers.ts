@@ -11,7 +11,7 @@ import { generateAndStorePdf } from "../services/document-pdf";
 import { computeDataHash } from "../services/signature-integrity";
 import { customerManagementStorage } from "../storage/customer-management";
 import { asyncHandler } from "../lib/errors";
-import { requireIntParam, requireCustomerAccess } from "../lib/params";
+import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../lib/params";
 import { authService } from "../services/auth";
 import { isTeamLead, actorRole } from "../lib/team-lead";
 import { todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
@@ -57,7 +57,7 @@ router.get("/", asyncHandler("Kunden konnten nicht geladen werden", async (req, 
 router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  if (!await requireCustomerAccess(req, res, id)) return;
+  if (!await requireCustomerReadAccess(req, res, id)) return;
   
   const customer = await storage.getCustomer(id);
   if (!customer) {
@@ -70,7 +70,7 @@ router.get("/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req,
 router.get("/:id/details", asyncHandler("Kundendetails konnten nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  if (!await requireCustomerAccess(req, res, id)) return;
+  if (!await requireCustomerReadAccess(req, res, id)) return;
   
   const [contacts, insurance, contract] = await Promise.all([
     customerManagementStorage.getCustomerContacts(id),
@@ -374,7 +374,7 @@ router.post("/:id/signatures", asyncHandler("Unterschriften konnten nicht gespei
 router.get("/:id/timeline", asyncHandler("Timeline konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  if (!await requireCustomerAccess(req, res, id)) return;
+  if (!await requireCustomerReadAccess(req, res, id)) return;
 
   const customer = await storage.getCustomer(id);
   if (!customer) {

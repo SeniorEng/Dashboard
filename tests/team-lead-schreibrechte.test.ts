@@ -242,4 +242,47 @@ describe("Task #252 – Teamleitung Schreibrechte (firmenweit)", () => {
       expect([401, 403]).toContain(res.status);
     });
   });
+
+  describe("Kunden-Stammdaten / Dokumente / Kontakte bleiben Admin/Zugeordnete-only", () => {
+    it("Teamleiter darf KEINE Kunden-Stammdaten eines fremden Kunden ändern (PATCH /api/customers/:id)", async () => {
+      const res = await apiPatchAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}`, {
+        telefon: "+4917699999999",
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("Teamleiter darf KEINEN Pflegegrad eines fremden Kunden setzen", async () => {
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/care-level`, {
+        pflegegrad: 4,
+        seitDatum: "2024-06-01",
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("Teamleiter darf KEINEN Vertragstext eines fremden Kunden ändern", async () => {
+      const res = await apiPatchAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/contract`, {
+        vereinbarteLeistungen: "TL252 darf das nicht",
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("Teamleiter darf KEINEN Kontakt eines fremden Kunden anlegen", async () => {
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/contacts`, {
+        vorname: "Test",
+        nachname: "Forbidden",
+        telefon: "+4917600000000",
+        beziehung: "Sohn/Tochter",
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("Teamleiter darf KEIN Dokument eines fremden Kunden hochladen", async () => {
+      const res = await apiPostAs<any>(setup.leadAuth, `/api/customers/${setup.customerB}/documents`, {
+        documentTypeId: 1,
+        objectPath: ".private/test/forbidden.pdf",
+        fileName: "forbidden.pdf",
+      });
+      expect(res.status).toBe(403);
+    });
+  });
 });
