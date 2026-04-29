@@ -53,6 +53,8 @@ Erzeugt zwei Dateien in `tmp/db-backups/`:
 
 Das Skript gibt am Ende SHA256-Summen aus → für Schritt 4 mitschreiben.
 
+> **Konsistenz-Hinweis (aus Restore-Drill 2026-04-28, Task #239):** Die zwei Dumps werden in **getrennten** `pg_dump`-Aufrufen gezogen. Jeder Dump ist intern transaktional konsistent, aber Custom- und Plain-Dump können sich um wenige Zeilen unterscheiden, falls die App parallel schreibt. **Empfehlung:** Vor `Publish` im Replit-Tab die App pausieren / keine aktiven Workflows laufen lassen, dann starten — beide Dumps stimmen dann auf die Zeile genau überein.
+
 ### 3.2 Fokus-Snapshot der betroffenen Daten (Pflicht für Sprint #228)
 
 ```bash
