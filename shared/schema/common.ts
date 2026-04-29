@@ -130,15 +130,18 @@ export const internationalEmailSchema = z.string()
 export const versichertennummerSchema = z.string()
   .regex(/^[A-Z]\d{9}$/, "Versichertennummer muss 1 Buchstabe + 9 Ziffern sein (z.B. A123456789)");
 
+// Privatpatienten haben uneinheitliche Nummernformate (z.B. Debeka:
+// "6163938.1"). Daher zusätzlich zu Buchstaben/Ziffern/Binde-/Schrägstrichen
+// auch Punkte erlauben.
 export const versichertennummerFlexSchema = z.string()
   .min(3, "Versichertennummer muss mindestens 3 Zeichen haben")
   .max(20, "Versichertennummer darf maximal 20 Zeichen haben")
-  .regex(/^[A-Za-z0-9\-\/]+$/, "Versichertennummer darf nur Buchstaben, Ziffern, Bindestriche und Schrägstriche enthalten");
+  .regex(/^[A-Za-z0-9\-\/.]+$/, "Versichertennummer darf nur Buchstaben, Ziffern, Bindestriche, Schrägstriche und Punkte enthalten");
 
 export const VERSICHERTENNUMMER_GKV_REGEX = /^[A-Z]\d{9}$/;
-export const VERSICHERTENNUMMER_FLEX_REGEX = /^[A-Za-z0-9\-\/]{3,20}$/;
+export const VERSICHERTENNUMMER_FLEX_REGEX = /^[A-Za-z0-9\-\/.]{3,20}$/;
 export const VERSICHERTENNUMMER_GKV_HINT = "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)";
-export const VERSICHERTENNUMMER_FLEX_HINT = "3–20 Zeichen: Buchstaben, Ziffern, Bindestriche, Schrägstriche";
+export const VERSICHERTENNUMMER_FLEX_HINT = "3–20 Zeichen: Buchstaben, Ziffern, Bindestriche, Schrägstriche, Punkte";
 
 export function isPrivatePatientCase(opts: {
   billingType?: string | null;
@@ -162,7 +165,7 @@ export function validateVersichertennummerFor(
   if (isPrivate) {
     return VERSICHERTENNUMMER_FLEX_REGEX.test(value)
       ? { ok: true }
-      : { ok: false, message: "Versichertennummer muss 3-20 Zeichen sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche)" };
+      : { ok: false, message: "Versichertennummer muss 3-20 Zeichen sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche, Punkte)" };
   }
   return VERSICHERTENNUMMER_GKV_REGEX.test(value)
     ? { ok: true }

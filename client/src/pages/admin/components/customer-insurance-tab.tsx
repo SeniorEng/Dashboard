@@ -19,6 +19,10 @@ import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
+import {
+  VERSICHERTENNUMMER_GKV_REGEX,
+  VERSICHERTENNUMMER_FLEX_REGEX,
+} from "@shared/schema/common";
 import { Heart, Loader2, Clock, Plus, ArrowRightLeft } from "lucide-react";
 import type { InsuranceProviderItem } from "@/lib/api/types";
 
@@ -46,8 +50,9 @@ interface CustomerInsuranceTabProps {
   } | null;
 }
 
-const VERSICHERTENNUMMER_REGEX = /^[A-Z]\d{9}$/;
-const VERSICHERTENNUMMER_FLEX_REGEX = /^[A-Za-z0-9\-\/]{3,20}$/;
+// Verwendet die zentralen Regex-Konstanten aus shared/schema/common, damit
+// Frontend- und Backend-Validierung nicht auseinanderlaufen.
+const VERSICHERTENNUMMER_REGEX = VERSICHERTENNUMMER_GKV_REGEX;
 
 export function CustomerInsuranceTab({ customerId, customerBillingType, currentInsurance }: CustomerInsuranceTabProps) {
   const { toast } = useToast();
@@ -121,7 +126,7 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
       } else if (processed.length < 3) {
         setVnError(null);
       } else if (!VERSICHERTENNUMMER_FLEX_REGEX.test(processed)) {
-        setVnError("Nur Buchstaben, Ziffern, Bindestriche und Schrägstriche erlaubt");
+        setVnError("Nur Buchstaben, Ziffern, Bindestriche, Schrägstriche und Punkte erlaubt");
       } else {
         setVnError(null);
       }
@@ -143,7 +148,7 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
     }
     if (isPrivateCase) {
       if (!VERSICHERTENNUMMER_FLEX_REGEX.test(versichertennummer)) {
-        setVnError("Versichertennummer muss 3-20 Zeichen lang sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche)");
+        setVnError("Versichertennummer muss 3-20 Zeichen lang sein (Buchstaben, Ziffern, Bindestriche, Schrägstriche, Punkte)");
         return;
       }
     } else if (!VERSICHERTENNUMMER_REGEX.test(versichertennummer)) {
@@ -305,7 +310,7 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
               ) : (
                 <p className="text-xs text-gray-500">
                   {isPrivateCase
-                    ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen)"
+                    ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen, z.B. 6163938.1)"
                     : "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)"}
                 </p>
               )}

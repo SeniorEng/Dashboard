@@ -188,7 +188,7 @@ export function InsuranceStep({
                   />
                   <p className="text-xs text-gray-500">
                     {isPrivateCase
-                      ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen)"
+                      ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen, z.B. 6163938.1)"
                       : "Format: Buchstabe + 9 Ziffern (z.B. A123456789)"}
                   </p>
                 </div>

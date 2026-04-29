@@ -8,6 +8,7 @@ import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
+import { validateVersichertennummerFor } from "@shared/schema/common";
 import type { WizardUploadedDoc } from "../components/signatures-step";
 
 const DRAFT_KEY = "careconnect_customer_draft";
@@ -289,17 +290,16 @@ export function useCustomerWizard() {
     const isPrivateProvider = selectedProvider?.isPrivate || false;
     const isPrivateCase = formData.billingType === "pflegekasse_privat" || isPrivateProvider;
     if (formData.insuranceProviderId && versNr) {
-      if (isPrivateCase && !/^[A-Za-z0-9\-\/]{3,20}$/.test(versNr)) {
+      // Zentrale Validierung verwenden, damit Frontend- und Backend-Regeln
+      // garantiert übereinstimmen (siehe shared/schema/common.ts).
+      const vnCheck = validateVersichertennummerFor(versNr, {
+        billingType: formData.billingType,
+        isPrivateProvider,
+      });
+      if (!vnCheck.ok) {
         toast({
           title: "Ungültige Versichertennummer",
-          description: "3-20 Zeichen: Buchstaben, Ziffern, Bindestriche, Schrägstriche",
-          variant: "destructive",
-        });
-        return;
-      } else if (!isPrivateCase && !/^[A-Z]\d{9}$/.test(versNr)) {
-        toast({
-          title: "Ungültige Versichertennummer",
-          description: "Format: 1 Buchstabe + 9 Ziffern (z.B. A123456789)",
+          description: vnCheck.message,
           variant: "destructive",
         });
         return;
