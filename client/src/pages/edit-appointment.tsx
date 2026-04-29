@@ -614,10 +614,9 @@ export default function EditAppointment() {
     
     if (appointment.appointmentType === "Kundentermin") {
       const updateFields = getKundenterminUpdateFields();
-      if (Object.keys(updateFields).length === 0) {
-        toast({ title: "Keine Änderungen", description: "Es gibt nichts zu speichern." });
-        return;
-      }
+      // Sicherheitsnetz: button-save ist via hasChanges deaktiviert, sodass
+      // dieser Fall normalerweise nicht eintritt.
+      if (Object.keys(updateFields).length === 0) return;
       updateMutation.mutate(updateFields);
     } else if (appointment.appointmentType === "Erstberatung") {
       const updateFields = getErstberatungUpdateFields();
@@ -657,10 +656,9 @@ export default function EditAppointment() {
         return;
       }
 
-      if (Object.keys(updateFields).length === 0) {
-        toast({ title: "Keine Änderungen", description: "Es gibt nichts zu speichern." });
-        return;
-      }
+      // Sicherheitsnetz: button-save ist via hasChanges deaktiviert, sodass
+      // dieser Fall normalerweise nicht eintritt.
+      if (Object.keys(updateFields).length === 0) return;
       updateMutation.mutate(updateFields);
     } else {
       const calculatedEnd = addMinutesToTime(time, duration);
@@ -676,6 +674,59 @@ export default function EditAppointment() {
   };
 
   const isPending = updateMutation.isPending || updateProspectMutation.isPending || seriesUpdateMutation.isPending;
+
+  // Stammdaten-Diff bei Erstberatung: Vergleicht die aktuell im Formular
+  // sichtbaren Interessenten-Felder mit dem geladenen Stand.
+  const hasProspectChanges = useMemo(() => {
+    if (!appointment || appointment.appointmentType !== "Erstberatung") return false;
+    if (!appointment.prospectId || !appointment.customer) return false;
+    const c = appointment.customer;
+    if (ebVorname.trim() !== (c.vorname || "")) return true;
+    if (ebNachname.trim() !== (c.nachname || "")) return true;
+    if ((ebTelefon.trim() || null) !== (c.telefon || null)) return true;
+    if ((ebEmail.trim() || null) !== (c.email || null)) return true;
+    if ((ebStrasse.trim() || null) !== (c.strasse || null)) return true;
+    if ((ebNr.trim() || null) !== (c.nr || null)) return true;
+    if ((ebPlz.trim() || null) !== (c.plz || null)) return true;
+    if ((ebStadt.trim() || null) !== (c.stadt || null)) return true;
+    const currentPg = ebPflegegrad && ebPflegegrad !== "none" ? parseInt(ebPflegegrad) : null;
+    if (currentPg !== (c.pflegegrad ?? null)) return true;
+    return false;
+  }, [appointment, ebVorname, ebNachname, ebTelefon, ebEmail, ebStrasse, ebNr, ebPlz, ebStadt, ebPflegegrad]);
+
+  // Speichern-Button-Status: aktiv nur, wenn es etwas zu speichern gibt.
+  // Wir nutzen die bestehenden Diff-Funktionen, damit Button und tatsächlich
+  // gesendete Felder synchron bleiben.
+  const hasChanges = useMemo(() => {
+    if (!appointment) return false;
+    if (appointment.appointmentType === "Kundentermin") {
+      return Object.keys(getKundenterminUpdateFields()).length > 0;
+    }
+    if (appointment.appointmentType === "Erstberatung") {
+      if (hasProspectChanges) return true;
+      return Object.keys(getErstberatungUpdateFields()).length > 0;
+    }
+    if (date !== appointment.date) return true;
+    if (time !== (appointment.scheduledStart || "").slice(0, 5)) return true;
+    if (duration !== appointment.durationPromised) return true;
+    if ((notes || null) !== (appointment.notes || null)) return true;
+    return false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    appointment,
+    date,
+    time,
+    duration,
+    notes,
+    services,
+    ktAssignedEmployeeId,
+    ebAssignedEmployeeId,
+    fahrtdienst,
+    fahrtdienstTravelData,
+    hasAlltagsbegleitung,
+    appointmentServiceEntries,
+    hasProspectChanges,
+  ]);
 
   if (appointmentLoading) {
     return (
@@ -1108,7 +1159,8 @@ export default function EditAppointment() {
             className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={handleSubmit}
-            disabled={isPending}
+            disabled={isPending || !hasChanges}
+            title={!hasChanges && !isPending ? "Keine Änderungen zu speichern" : undefined}
             data-testid="button-save"
           >
             {isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
