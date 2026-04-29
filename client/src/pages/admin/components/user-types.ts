@@ -19,7 +19,6 @@ export interface UserData {
   isAdmin: boolean;
   isSuperAdmin?: boolean;
   isTeamLead: boolean;
-  teamLeadId: number | null;
   haustierAkzeptiert: boolean;
   isEuRentner: boolean;
   employmentType: string;
@@ -49,7 +48,6 @@ export interface UserFormData {
   carryOverDays?: number | null;
   isAdmin: boolean;
   isTeamLead?: boolean;
-  teamLeadId?: number | null;
   haustierAkzeptiert: boolean;
   isEuRentner: boolean;
   employmentType: string;

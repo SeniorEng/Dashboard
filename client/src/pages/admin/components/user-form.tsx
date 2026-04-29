@@ -61,7 +61,6 @@ export function UserForm({
   );
   const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
   const [isTeamLead, setIsTeamLead] = useState(user?.isTeamLead ?? false);
-  const [teamLeadId, setTeamLeadId] = useState<string>(user?.teamLeadId ? String(user.teamLeadId) : "");
   const [haustierAkzeptiert, setHaustierAkzeptiert] = useState(user?.haustierAkzeptiert ?? true);
   const [isEuRentner, setIsEuRentner] = useState(user?.isEuRentner ?? false);
   const [employmentType, setEmploymentType] = useState(user?.employmentType ?? "sozialversicherungspflichtig");
@@ -158,13 +157,7 @@ export function UserForm({
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       ...(mode === "edit" && carryOverDaysTouched ? { carryOverDays: carryOverDays ? parseInt(carryOverDays) : 0 } : {}),
       isAdmin,
-      ...(mode === "edit"
-        ? {
-            isTeamLead,
-            teamLeadId:
-              isAdmin || isTeamLead || !teamLeadId ? null : parseInt(teamLeadId),
-          }
-        : {}),
+      ...(mode === "edit" ? { isTeamLead } : {}),
       haustierAkzeptiert,
       isEuRentner,
       employmentType,
@@ -473,7 +466,6 @@ export function UserForm({
                   setIsAdmin(next);
                   if (next) {
                     setIsTeamLead(false);
-                    setTeamLeadId("");
                   }
                 }}
                 data-testid="checkbox-is-admin"
@@ -482,65 +474,23 @@ export function UserForm({
             </div>
           )}
 
-          {mode === "edit" && (
+          {mode === "edit" && isSuperAdmin && (
             <div className="space-y-3 rounded-lg border p-3">
-              {isSuperAdmin && (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label htmlFor="isTeamLead">Teamleiter</Label>
-                    <p className="text-xs text-gray-500">
-                      Koordiniert ein Team von Mitarbeitern (folgt in weiteren Schritten).
-                    </p>
-                  </div>
-                  <Switch
-                    id="isTeamLead"
-                    checked={isTeamLead}
-                    disabled={isAdmin}
-                    onCheckedChange={(checked) => {
-                      setIsTeamLead(checked);
-                      if (checked) setTeamLeadId("");
-                    }}
-                    data-testid="switch-is-team-lead"
-                  />
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="isTeamLead">Teamleiter</Label>
+                  <p className="text-xs text-gray-500">
+                    Teamleiter haben die gleiche Sicht auf Termine und Kunden wie Administratoren (firmenweit, mit Mitarbeiter-Toggle).
+                  </p>
                 </div>
-              )}
-              {!isAdmin && !isTeamLead && (
-                <div className="space-y-2">
-                  <Label htmlFor="teamLeadSelect">Teamleiter dieses Mitarbeiters</Label>
-                  <Select
-                    value={teamLeadId || "__none__"}
-                    onValueChange={(v) => setTeamLeadId(v === "__none__" ? "" : v)}
-                  >
-                    <SelectTrigger id="teamLeadSelect" data-testid="select-team-lead">
-                      <SelectValue placeholder="Kein Teamleiter" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__" data-testid="select-team-lead-none">
-                        — Kein Teamleiter —
-                      </SelectItem>
-                      {allUsers
-                        .filter(
-                          (u) =>
-                            u.isTeamLead &&
-                            u.isActive &&
-                            !u.isAnonymized &&
-                            !u.isAdmin &&
-                            !u.isSuperAdmin &&
-                            u.id !== user?.id,
-                        )
-                        .map((u) => (
-                          <SelectItem
-                            key={u.id}
-                            value={String(u.id)}
-                            data-testid={`select-team-lead-${u.id}`}
-                          >
-                            {u.displayName}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+                <Switch
+                  id="isTeamLead"
+                  checked={isTeamLead}
+                  disabled={isAdmin}
+                  onCheckedChange={setIsTeamLead}
+                  data-testid="switch-is-team-lead"
+                />
+              </div>
             </div>
           )}
           

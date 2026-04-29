@@ -53,7 +53,6 @@ const AdminQonto = lazy(() => import("@/pages/admin/qonto"));
 const AdminWhatsApp = lazy(() => import("@/pages/admin/whatsapp"));
 const AdminImportAppointments = lazy(() => import("@/pages/admin/import-appointments"));
 const AdminAvailability = lazy(() => import("@/pages/admin/availability"));
-const TeamPage = lazy(() => import("@/pages/team"));
 const AdminContactMigration = lazy(() => import("@/pages/admin/contact-migration"));
 const AdminMonthClosing = lazy(() => import("@/pages/admin/month-closing"));
 const AdminAppointmentSeries = lazy(() => import("@/pages/admin/appointment-series"));
@@ -108,30 +107,6 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
   }
 
   if (!user?.isAdmin) {
-    return <Redirect to="/" />;
-  }
-
-  return (
-    <PageErrorBoundary>
-      <Suspense fallback={<PageLoader />}>
-        <Component />
-      </Suspense>
-    </PageErrorBoundary>
-  );
-}
-
-function TeamRoute({ component: Component }: { component: React.ComponentType }) {
-  const { isAuthenticated, isLoading, user } = useAuth();
-
-  if (isLoading) {
-    return <PageLoader />;
-  }
-
-  if (!isAuthenticated) {
-    return <Redirect to="/login" />;
-  }
-
-  if (!user?.isAdmin && !user?.isTeamLead) {
     return <Redirect to="/" />;
   }
 
@@ -205,9 +180,6 @@ function Router() {
       </Route>
       <Route path="/help">
         <ProtectedRoute component={HelpPage} />
-      </Route>
-      <Route path="/team">
-        <TeamRoute component={TeamPage} />
       </Route>
       <Route path="/admin">
         <AdminRoute component={AdminDashboard} />

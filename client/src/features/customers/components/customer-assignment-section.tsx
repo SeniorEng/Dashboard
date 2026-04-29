@@ -4,22 +4,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
-import { AlertTriangle, Loader2, Pencil, Save, Users, X } from "lucide-react";
-import { useActiveEmployees, type ActiveEmployeeListItem } from "@/features/appointments/hooks/use-active-employees";
+import { Loader2, Pencil, Save, Users, X } from "lucide-react";
+import { useActiveEmployees } from "@/features/appointments/hooks/use-active-employees";
 import type { Customer } from "@shared/schema";
 
 interface CustomerAssignmentSectionProps {
@@ -42,8 +32,6 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
   const [primaryId, setPrimaryId] = useState<string>("");
   const [backupId, setBackupId] = useState<string>("");
   const [backupId2, setBackupId2] = useState<string>("");
-  const [pendingCrossTeam, setPendingCrossTeam] = useState<ActiveEmployeeListItem[]>([]);
-  const [showCrossTeamConfirm, setShowCrossTeamConfirm] = useState(false);
 
   const employeeOptions = useMemo(() => {
     const opts = activeEmployees
@@ -67,34 +55,6 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
 
   const cancelEditing = () => {
     setEditing(false);
-  };
-
-  // Berechnet alle neu zugewiesenen Mitarbeiter aus fremden Teams (nur für Teamleiter, nicht Admin).
-  const computeCrossTeamTargets = (
-    primary: number | null,
-    backup: number | null,
-    backup2: number | null,
-  ): ActiveEmployeeListItem[] => {
-    if (!isTeamLead || isAdmin || !user) return [];
-    const previousIds = new Set(
-      [customer.primaryEmployeeId, customer.backupEmployeeId, customer.backupEmployeeId2]
-        .filter((v): v is number => v != null),
-    );
-    const newlyAssigned = [primary, backup, backup2]
-      .filter((v): v is number => v != null)
-      .filter((id) => !previousIds.has(id));
-    const flagged: ActiveEmployeeListItem[] = [];
-    const seen = new Set<number>();
-    for (const id of newlyAssigned) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const target = activeEmployees.find((e) => e.id === id);
-      if (!target) continue;
-      if (target.id === user.id) continue;
-      if (target.teamLeadId === user.id) continue;
-      flagged.push(target);
-    }
-    return flagged;
   };
 
   const performSave = async (primary: number | null, backup: number | null, backup2: number | null) => {
@@ -135,21 +95,6 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
       return;
     }
 
-    const flagged = computeCrossTeamTargets(primary, backup, backup2);
-    if (flagged.length > 0) {
-      setPendingCrossTeam(flagged);
-      setShowCrossTeamConfirm(true);
-      return;
-    }
-
-    void performSave(primary, backup, backup2);
-  };
-
-  const confirmCrossTeamAndSave = () => {
-    setShowCrossTeamConfirm(false);
-    const primary = primaryId ? parseInt(primaryId) : null;
-    const backup = backupId ? parseInt(backupId) : null;
-    const backup2 = backupId2 ? parseInt(backupId2) : null;
     void performSave(primary, backup, backup2);
   };
 
@@ -262,48 +207,6 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
           </div>
         )}
       </CardContent>
-
-      <AlertDialog open={showCrossTeamConfirm} onOpenChange={setShowCrossTeamConfirm}>
-        <AlertDialogContent className="max-w-md" data-testid="dialog-customer-cross-team-confirm">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className={`${iconSize.md} text-amber-500`} />
-              Mitarbeiter aus anderem Team
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="text-sm text-muted-foreground space-y-2">
-                <span className="block">
-                  {pendingCrossTeam.length === 1
-                    ? "Folgender Mitarbeiter gehört nicht zu Ihrem Team:"
-                    : "Folgende Mitarbeiter gehören nicht zu Ihrem Team:"}
-                </span>
-                <ul className="block space-y-1 list-disc pl-5">
-                  {pendingCrossTeam.map((t) => (
-                    <li key={t.id} data-testid={`text-customer-cross-team-target-${t.id}`}>
-                      <strong>{t.displayName}</strong>
-                      {t.teamLeadName && (
-                        <>
-                          {" "}— Teamleitung: <strong>{t.teamLeadName}</strong>
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <span className="block">Möchten Sie die Zuordnung trotzdem speichern?</span>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-customer-cross-team-cancel">Abbrechen</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmCrossTeamAndSave}
-              data-testid="button-customer-cross-team-confirm"
-            >
-              Trotzdem speichern
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Card>
   );
 }

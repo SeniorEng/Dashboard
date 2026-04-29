@@ -211,7 +211,6 @@ const updateUserSchema = z.object({
   notfallkontaktBeziehung: z.string().optional(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional(),
   isTeamLead: z.boolean().optional(),
-  teamLeadId: z.number().int().positive().nullable().optional(),
 });
 
 router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
@@ -290,18 +289,6 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
   const nextIsAdmin = result.data.isAdmin ?? currentUserBefore.isAdmin;
   const nextIsSuperAdmin = currentUserBefore.isSuperAdmin;
   const nextIsTeamLead = result.data.isTeamLead ?? currentUserBefore.isTeamLead;
-  const teamLeadIdProvided = "teamLeadId" in result.data;
-
-  // Auto-Bereinigung VOR den Konflikt-Checks: wenn jemand Admin oder Teamleiter
-  // wird und keinen expliziten teamLeadId mitschickt, wird der bestehende
-  // teamLeadId implizit entfernt.
-  let effectiveTeamLeadId: number | null = teamLeadIdProvided
-    ? (result.data.teamLeadId ?? null)
-    : currentUserBefore.teamLeadId;
-  if (!teamLeadIdProvided && (nextIsAdmin || nextIsSuperAdmin || nextIsTeamLead)) {
-    effectiveTeamLeadId = null;
-  }
-  const nextTeamLeadId = effectiveTeamLeadId;
 
   if (nextIsTeamLead && (nextIsAdmin || nextIsSuperAdmin)) {
     res.status(400).json({
@@ -310,89 +297,10 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     });
     return;
   }
-
-  if (nextTeamLeadId !== null && nextTeamLeadId === id) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ein Mitarbeiter kann nicht sein eigener Teamleiter sein",
-    });
-    return;
-  }
-
-  if ((nextIsAdmin || nextIsSuperAdmin) && nextTeamLeadId !== null) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Administratoren und Hauptadministratoren können keinen Teamleiter haben",
-    });
-    return;
-  }
-
-  if (nextIsTeamLead && nextTeamLeadId !== null) {
-    res.status(400).json({
-      error: "VALIDATION_ERROR",
-      message: "Ein Teamleiter kann selbst keinen Teamleiter haben",
-    });
-    return;
-  }
-
-  if (nextTeamLeadId !== null) {
-    const lead = await authService.getUser(nextTeamLeadId);
-    if (
-      !lead ||
-      !lead.isTeamLead ||
-      !lead.isActive ||
-      lead.isAnonymized ||
-      lead.isAdmin ||
-      lead.isSuperAdmin
-    ) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Der ausgewählte Teamleiter ist nicht (mehr) verfügbar",
-      });
-      return;
-    }
-  }
-
-  if (currentUserBefore.isTeamLead && !nextIsTeamLead) {
-    const { countActiveReports } = await import("../../lib/team-lead");
-    const reportCount = await countActiveReports(id);
-    if (reportCount > 0) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: `Teamleiter-Markierung kann nicht entfernt werden: ${reportCount} aktive Mitarbeiter sind diesem Teamleiter noch zugeordnet. Bitte zuerst die Zuordnungen entfernen oder umhängen.`,
-      });
-      return;
-    }
-  }
-
-  // Deactivation-Block auch im PATCH-Pfad: ein Teamleiter mit aktiven
-  // Reports darf weder über /deactivate noch über PATCH isActive=false
-  // deaktiviert werden.
-  if (
-    result.data.isActive === false &&
-    currentUserBefore.isActive &&
-    currentUserBefore.isTeamLead &&
-    nextIsTeamLead
-  ) {
-    const { countActiveReports } = await import("../../lib/team-lead");
-    const reportCount = await countActiveReports(id);
-    if (reportCount > 0) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: `Teamleiter kann nicht deaktiviert werden: ${reportCount} aktive Mitarbeiter sind ihm noch zugeordnet. Bitte zuerst die Zuordnungen entfernen oder umhängen.`,
-      });
-      return;
-    }
-  }
   // ---------- /Teamleiter-Validierung ----------
 
   const { roles, carryOverDays, ...rest } = result.data;
-  const userUpdates = {
-    ...rest,
-    ...(teamLeadIdProvided || effectiveTeamLeadId !== currentUserBefore.teamLeadId
-      ? { teamLeadId: effectiveTeamLeadId }
-      : {}),
-  };
+  const userUpdates = { ...rest };
 
   const updatedUser = await executeUserUpdate(res, id, userUpdates, authService.updateUser.bind(authService));
   if (!updatedUser) return;
@@ -405,16 +313,6 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
       "user",
       id,
       { previous: currentUserBefore.isTeamLead, new: nextIsTeamLead },
-      req.ip,
-    );
-  }
-  if ((effectiveTeamLeadId ?? null) !== (currentUserBefore.teamLeadId ?? null)) {
-    await auditService.log(
-      req.user!.id,
-      "user_team_lead_assigned",
-      "user",
-      id,
-      { previous: currentUserBefore.teamLeadId ?? null, new: effectiveTeamLeadId ?? null },
       req.ip,
     );
   }
@@ -540,19 +438,6 @@ router.post("/users/:id/deactivate", asyncHandler("Benutzer konnte nicht deaktiv
       message: "Sie können sich nicht selbst deaktivieren",
     });
     return;
-  }
-
-  const userToDeactivate = await authService.getUser(id);
-  if (userToDeactivate?.isTeamLead) {
-    const { countActiveReports } = await import("../../lib/team-lead");
-    const reportCount = await countActiveReports(id);
-    if (reportCount > 0) {
-      res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: `Teamleiter kann nicht deaktiviert werden: ${reportCount} aktive Mitarbeiter sind diesem Teamleiter noch zugeordnet. Bitte zuerst die Zuordnungen entfernen oder umhängen.`,
-      });
-      return;
-    }
   }
 
   const success = await authService.deactivateUser(id);

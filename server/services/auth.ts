@@ -414,7 +414,6 @@ class AuthService {
       isActive?: boolean;
       isAdmin?: boolean;
       isTeamLead?: boolean;
-      teamLeadId?: number | null;
       haustierAkzeptiert?: boolean;
       isEuRentner?: boolean;
       employmentType?: string;
@@ -465,10 +464,6 @@ class AuthService {
       if (updates[field] !== undefined) {
         dbUpdates[field] = updates[field];
       }
-    }
-
-    if (updates.teamLeadId !== undefined) {
-      dbUpdates.teamLeadId = updates.teamLeadId ?? null;
     }
 
     if (updates.vorname !== undefined || updates.nachname !== undefined) {

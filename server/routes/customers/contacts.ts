@@ -2,7 +2,7 @@ import { Router } from "express";
 import { insertCustomerContactSchema } from "@shared/schema";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { asyncHandler } from "../../lib/errors";
-import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../../lib/params";
+import { requireIntParam, requireCustomerAccess } from "../../lib/params";
 import { auditService } from "../../services/audit";
 
 const router = Router();
@@ -14,7 +14,7 @@ const employeeContactUpdateSchema = insertCustomerContactSchema
 router.get("/:id/contacts", asyncHandler("Kontakte konnten nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  if (!await requireCustomerReadAccess(req, res, id)) return;
+  if (!await requireCustomerAccess(req, res, id)) return;
 
   const contacts = await customerManagementStorage.getCustomerContacts(id);
   res.json(contacts);

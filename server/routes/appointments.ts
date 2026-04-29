@@ -38,7 +38,7 @@ import type { CoverageCheckResponse } from "@shared/api";
 import appointmentDocumentationRouter from "./appointment-documentation";
 import { db } from "../lib/db";
 import { customerManagementStorage } from "../storage/customer-management";
-import { isTeamLead, getTeamLeadVisibleEmployeeIds, getTeamLeadVisibleCustomerIds, getTeamMemberIds, actorRole } from "../lib/team-lead";
+import { isTeamLead, actorRole } from "../lib/team-lead";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers, users } from "@shared/schema";
@@ -87,10 +87,8 @@ async function checkCustomerAccess(
   res: Response,
   appointmentEmployeeIds?: { assignedEmployeeId?: number | null; performedByEmployeeId?: number | null }
 ): Promise<boolean> {
-  if (user.isAdmin) return true;
-
-  const lead = isTeamLead(user as Parameters<typeof isTeamLead>[0]);
-  const teamEmployeeIds = lead ? await getTeamLeadVisibleEmployeeIds(user.id) : [];
+  // Teamleiter besitzen firmenweit dieselbe Sicht wie Admins (flacher Marker).
+  if (user.isAdmin || isTeamLead(user as Parameters<typeof isTeamLead>[0])) return true;
 
   if (customerId === null) {
     if (appointmentEmployeeIds &&
@@ -98,34 +96,11 @@ async function checkCustomerAccess(
          appointmentEmployeeIds.performedByEmployeeId === user.id)) {
       return true;
     }
-    if (lead && appointmentEmployeeIds) {
-      const assigned = appointmentEmployeeIds.assignedEmployeeId;
-      const performed = appointmentEmployeeIds.performedByEmployeeId;
-      if ((assigned !== null && assigned !== undefined && teamEmployeeIds.includes(assigned)) ||
-          (performed !== null && performed !== undefined && teamEmployeeIds.includes(performed))) {
-        return true;
-      }
-    }
     sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
     return false;
   }
   const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
   if (assignedCustomerIds.includes(customerId)) return true;
-
-  if (lead) {
-    // Teamleiter dürfen einen Termin nur lesen, wenn der zugewiesene oder
-    // dokumentierende Mitarbeiter zum eigenen Team gehört. Eine reine
-    // "Kunde liegt im Team-Sichtfeld"-Bedingung würde Außenstehenden-
-    // Termine auf gemeinsamen Kunden leaken (Task #201, read-only).
-    if (appointmentEmployeeIds) {
-      const assigned = appointmentEmployeeIds.assignedEmployeeId;
-      const performed = appointmentEmployeeIds.performedByEmployeeId;
-      if ((assigned !== null && assigned !== undefined && teamEmployeeIds.includes(assigned)) ||
-          (performed !== null && performed !== undefined && teamEmployeeIds.includes(performed))) {
-        return true;
-      }
-    }
-  }
 
   sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
   return false;
@@ -142,9 +117,9 @@ export async function checkAppointmentWriteAccess(user: { id: number; isAdmin: b
 
 /**
  * Schreibrecht für PATCH /api/appointments/:id (Reassign / Bearbeiten).
- * Im Gegensatz zu `checkAppointmentWriteAccess` dürfen aktive Teamleiter Termine
- * bearbeiten, deren assigned- oder performed-Mitarbeiter im Team-Bereich liegt.
- * Diese erweiterte Sicht gilt NICHT für start/end/reopen/delete (Task #202 OOS).
+ * Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker) und dürfen
+ * jeden Termin bearbeiten/zuordnen/umplanen. Start/end/reopen/delete bleiben
+ * an die jeweiligen Sperren (gestartet, locked, Monat geschlossen) gebunden.
  */
 async function checkAppointmentReassignAccess(
   user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean },
@@ -152,17 +127,8 @@ async function checkAppointmentReassignAccess(
   res: Response,
 ): Promise<boolean> {
   if (user.isAdmin) return true;
+  if (isTeamLead(user as Parameters<typeof isTeamLead>[0])) return true;
   if (appointment.assignedEmployeeId === user.id) return true;
-
-  if (isTeamLead(user as Parameters<typeof isTeamLead>[0])) {
-    const teamEmployeeIds = await getTeamLeadVisibleEmployeeIds(user.id);
-    const assigned = appointment.assignedEmployeeId;
-    const performed = appointment.performedByEmployeeId ?? null;
-    if ((assigned !== null && assigned !== undefined && teamEmployeeIds.includes(assigned)) ||
-        (performed !== null && performed !== undefined && teamEmployeeIds.includes(performed))) {
-      return true;
-    }
-  }
 
   sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
   return false;
@@ -172,17 +138,10 @@ router.use(requireAuth);
 
 router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen werden", async (_req, res) => {
   const employees = await authService.getActiveEmployees();
-  // Map: userId -> displayName, damit wir den Namen des eigenen Teamleiters mitliefern können.
-  const nameById = new Map<number, string>();
-  for (const e of employees) {
-    nameById.set(e.id, e.displayName ?? `${e.vorname ?? ""} ${e.nachname ?? ""}`.trim());
-  }
   const safeEmployees = employees.map((e) => ({
     id: e.id,
     displayName: e.displayName,
     isTeamLead: Boolean(e.isTeamLead),
-    teamLeadId: e.teamLeadId ?? null,
-    teamLeadName: e.teamLeadId ? (nameById.get(e.teamLeadId) ?? null) : null,
   }));
   res.json(safeEmployees);
 }));
@@ -340,35 +299,20 @@ router.get("/", asyncHandler(ErrorMessages.fetchAppointmentsFailed, async (req, 
 
   let customerIds: number[] | undefined;
   let employeeId: number | number[] | undefined;
-  let assignedOnly = false;
-  const lead = !user.isAdmin && isTeamLead(user);
+  const assignedOnly = false;
+  // Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker).
+  const adminScope = user.isAdmin || isTeamLead(user);
 
-  if (user.isAdmin && viewAsEmployeeId) {
+  if (adminScope && viewAsEmployeeId) {
     customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
-  } else if (lead) {
-    // Strikt mitarbeiter-basiert: Teamleiter sehen nur Termine ihres Teams
-    // (eigene + zugeordnete Mitarbeiter). customerIds bleibt undefined,
-    // damit Außenstehenden-Termine auf gemeinsamen Kunden NICHT geladen
-    // werden (Task #201, read-only Sichten).
-    employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
-  } else if (!user.isAdmin) {
+  } else if (!adminScope) {
     customerIds = await storage.getPrimaryCustomerIds(user.id);
     employeeId = user.id;
   }
 
   if (customerId) {
-    if (lead) {
-      const teamCustomerIds = await getTeamLeadVisibleCustomerIds(user.id);
-      if (!teamCustomerIds.includes(customerId)) {
-        return res.json([]);
-      }
-      // Strikte UND-Verknüpfung erzwingen: Termine müssen sowohl auf den
-      // gewählten Kunden lauten ALS AUCH von Lead/Mitglied stammen. Ohne
-      // assignedOnly würde der Storage OR-verknüpfen und Außenstehenden-
-      // Termine auf gemeinsamen Kunden zurückgeben.
-      assignedOnly = true;
-    } else if (employeeId !== undefined && !Array.isArray(employeeId)) {
+    if (!adminScope && employeeId !== undefined && !Array.isArray(employeeId)) {
       const allAssignedIds = await storage.getAssignedCustomerIds(employeeId);
       if (!allAssignedIds.includes(customerId)) {
         return res.json([]);
@@ -397,16 +341,13 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
   let customerIds: number[] | undefined;
   let employeeId: number | number[] | undefined;
   const assignedOnlyCounts = false;
-  const lead = !user.isAdmin && isTeamLead(user);
+  // Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker).
+  const adminScope = user.isAdmin || isTeamLead(user);
 
-  if (user.isAdmin && viewAsEmployeeId) {
+  if (adminScope && viewAsEmployeeId) {
     customerIds = await storage.getPrimaryCustomerIds(viewAsEmployeeId);
     employeeId = viewAsEmployeeId;
-  } else if (lead) {
-    // Strikt mitarbeiter-basiert (vgl. List-Endpoint): Außenstehenden-
-    // Termine auf gemeinsamen Kunden bleiben unsichtbar.
-    employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
-  } else if (!user.isAdmin) {
+  } else if (!adminScope) {
     customerIds = await storage.getPrimaryCustomerIds(user.id);
     employeeId = user.id;
   }
@@ -435,15 +376,13 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
   let customerIds: number[] | undefined;
   let employeeId: number | number[] | undefined;
   let assignedOnlyUndoc = false;
-  const lead = !user.isAdmin && isTeamLead(user);
+  // Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker).
+  const adminScope = user.isAdmin || isTeamLead(user);
 
-  if (user.isAdmin && viewAsEmployeeId) {
+  if (adminScope && viewAsEmployeeId) {
     employeeId = viewAsEmployeeId;
     assignedOnlyUndoc = true;
-  } else if (lead) {
-    // Strikt mitarbeiter-basiert (vgl. List-Endpoint).
-    employeeId = await getTeamLeadVisibleEmployeeIds(user.id);
-  } else if (!user.isAdmin) {
+  } else if (!adminScope) {
     customerIds = await storage.getAssignedCustomerIds(user.id);
     employeeId = user.id;
   }
@@ -550,35 +489,13 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   }
 
   let assignedEmployeeId: number;
-  if (user.isAdmin) {
+  // Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker) und dürfen
+  // Termine im Namen jedes aktiven Mitarbeiters anlegen.
+  if (user.isAdmin || isTeamLead(user)) {
     if (!validatedData.assignedEmployeeId) {
       return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diesen Termin aus.");
     }
     assignedEmployeeId = validatedData.assignedEmployeeId;
-    
-    const isAssignedEmployee = 
-      customer.primaryEmployeeId === assignedEmployeeId || 
-      customer.backupEmployeeId === assignedEmployeeId ||
-      customer.backupEmployeeId2 === assignedEmployeeId;
-    
-    if (!isAssignedEmployee) {
-      return sendBadRequest(
-        res, 
-        "Der ausgewählte Mitarbeiter ist diesem Kunden nicht zugeordnet. Bitte weisen Sie den Mitarbeiter zuerst dem Kunden zu."
-      );
-    }
-  } else if (isTeamLead(user) && validatedData.assignedEmployeeId && validatedData.assignedEmployeeId !== user.id) {
-    // Teamleiter dürfen Termine im Namen ihrer Team-Mitarbeiter anlegen.
-    assignedEmployeeId = validatedData.assignedEmployeeId;
-
-    const memberIds = await getTeamMemberIds(user.id);
-    if (!memberIds.includes(assignedEmployeeId)) {
-      return sendForbidden(
-        res,
-        "NOT_TEAM_MEMBER",
-        "Der ausgewählte Mitarbeiter ist nicht Teil Ihres Teams.",
-      );
-    }
 
     const isAssignedEmployee =
       customer.primaryEmployeeId === assignedEmployeeId ||
@@ -588,7 +505,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     if (!isAssignedEmployee) {
       return sendBadRequest(
         res,
-        "Der ausgewählte Mitarbeiter ist diesem Kunden nicht zugeordnet. Bitte weisen Sie den Mitarbeiter zuerst dem Kunden zu.",
+        "Der ausgewählte Mitarbeiter ist diesem Kunden nicht zugeordnet. Bitte weisen Sie den Mitarbeiter zuerst dem Kunden zu."
       );
     }
   } else {
@@ -1238,23 +1155,20 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   
   const user = req.user!;
   const isAdmin = user.isAdmin;
+  const lead = isTeamLead(user);
   const isAssigned = appointment.assignedEmployeeId === user.id;
   // Termin gilt als „gestartet", sobald eine tatsächliche Start- oder Endzeit
   // erfasst wurde oder der Status nicht mehr „scheduled" ist.
   const isStarted = Boolean(appointment.actualStart) || Boolean(appointment.actualEnd) || appointment.status !== "scheduled";
 
-  if (!isAdmin && !isAssigned) {
-    if (isTeamLead(user)) {
-      const teamMemberIds = await getTeamMemberIds(user.id);
-      const assigned = appointment.assignedEmployeeId;
-      const inTeam = assigned !== null && assigned !== undefined && teamMemberIds.includes(assigned);
-      if (!inTeam) {
-        return sendForbidden(res, "ACCESS_DENIED", "Sie dürfen nur Termine Ihrer Team-Mitarbeiter löschen.");
-      }
+  if (!isAdmin) {
+    if (lead) {
+      // Teamleiter dürfen firmenweit löschen, aber nur Termine, die noch nicht
+      // gestartet sind (gestartete/abgeschlossene Termine bleiben gesperrt).
       if (isStarted) {
         return sendForbidden(res, "APPOINTMENT_STARTED", "Bereits gestartete oder abgeschlossene Termine können nicht mehr gelöscht werden.");
       }
-    } else {
+    } else if (!isAssigned) {
       return sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
     }
   }

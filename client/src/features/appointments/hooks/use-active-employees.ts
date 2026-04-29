@@ -6,8 +6,6 @@ export interface ActiveEmployeeListItem {
   id: number;
   displayName: string;
   isTeamLead: boolean;
-  teamLeadId: number | null;
-  teamLeadName: string | null;
 }
 
 export function useActiveEmployees(options?: { enabled?: boolean }) {

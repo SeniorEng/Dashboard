@@ -86,7 +86,6 @@ export default function EditAppointment() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
   const [showSeriesEditDialog, setShowSeriesEditDialog] = useState(false);
-  const [showCrossTeamConfirm, setShowCrossTeamConfirm] = useState(false);
 
   const [ebVorname, setEbVorname] = useState("");
   const [ebNachname, setEbNachname] = useState("");
@@ -579,30 +578,8 @@ export default function EditAppointment() {
     seriesUpdateMutation.mutate({ mode, updateFields });
   };
 
-  // Cross-Team-Bestätigung: nur wenn ein Teamleiter (kein Admin) den Termin auf
-  // einen Mitarbeiter aus einem fremden Team umhängt. Innerhalb des eigenen Teams
-  // (oder wenn der Ziel-Mitarbeiter selbst der Teamleiter ist) keine Rückfrage.
-  const crossTeamTarget = useMemo(() => {
-    if (!isTeamLead || isAdmin) return null;
-    if (!appointment || appointment.appointmentType !== "Kundentermin") return null;
-    if (!ktAssignedEmployeeId) return null;
-    const targetId = parseInt(ktAssignedEmployeeId);
-    if (!targetId || targetId === appointment.assignedEmployeeId) return null;
-    const target = activeEmployees.find(e => e.id === targetId);
-    if (!target) return null;
-    if (target.id === user?.id) return null;
-    if (target.teamLeadId === user?.id) return null;
-    return target;
-  }, [isTeamLead, isAdmin, appointment, ktAssignedEmployeeId, activeEmployees, user?.id]);
-
   const handleSubmit = () => {
     if (!validate() || !appointment) return;
-
-    if (crossTeamTarget) {
-      setShowCrossTeamConfirm(true);
-      return;
-    }
-
     runSubmit();
   };
 
@@ -1238,45 +1215,6 @@ export default function EditAppointment() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={showCrossTeamConfirm} onOpenChange={setShowCrossTeamConfirm}>
-        <AlertDialogContent className="max-w-md" data-testid="dialog-cross-team-confirm">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className={`${iconSize.md} text-amber-500`} />
-              Mitarbeiter aus anderem Team
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="text-sm text-muted-foreground space-y-2">
-                <span className="block">
-                  <strong data-testid="text-cross-team-target-name">{crossTeamTarget?.displayName}</strong>{" "}
-                  gehört nicht zu Ihrem Team.
-                </span>
-                {crossTeamTarget?.teamLeadName && (
-                  <span className="block">
-                    Teamleitung:{" "}
-                    <strong data-testid="text-cross-team-lead-name">{crossTeamTarget.teamLeadName}</strong>
-                  </span>
-                )}
-                <span className="block">
-                  Möchten Sie die Zuweisung trotzdem speichern?
-                </span>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cross-team-cancel">Abbrechen</AlertDialogCancel>
-            <AlertDialogAction
-              data-testid="button-cross-team-confirm"
-              onClick={() => {
-                setShowCrossTeamConfirm(false);
-                runSubmit();
-              }}
-            >
-              Trotzdem speichern
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Layout>
   );
 }

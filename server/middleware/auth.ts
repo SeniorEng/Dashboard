@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { authService } from "../services/auth";
 import { adminPermissionStorage } from "../storage/admin-permissions";
-import { isTeamLead as userIsTeamLead } from "../lib/team-lead";
 import { requireIntParam } from "../lib/params";
 import type { UserWithRoles, EmployeeRole, AdminPermissionKey } from "@shared/schema";
 
@@ -168,30 +167,6 @@ export function requireAdminPermission(permissionKey: AdminPermissionKey) {
 
     next();
   };
-}
-
-export function requireTeamLeadOrAdmin(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
-  if (!req.user) {
-    res.status(401).json({
-      error: "UNAUTHORIZED",
-      message: "Bitte melden Sie sich an",
-    });
-    return;
-  }
-
-  if (req.user.isAdmin || userIsTeamLead(req.user)) {
-    next();
-    return;
-  }
-
-  res.status(403).json({
-    error: "FORBIDDEN",
-    message: "Nur Teamleiter oder Administratoren können diese Aktion ausführen",
-  });
 }
 
 export function requireRoles(...requiredRoles: EmployeeRole[]) {

@@ -58,7 +58,6 @@ export const AUDIT_ACTIONS = [
   "customer_price_replaced",
   "user_team_lead_set",
   "user_team_lead_unset",
-  "user_team_lead_assigned",
   "customer_price_history_consolidated",
 ] as const;
 
