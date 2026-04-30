@@ -72,12 +72,13 @@ async function getTemplateForDocumentType(documentTypeId: number): Promise<{ id:
 async function evaluateTriggersForEntityType(
   entityType: "customer" | "employee",
   entityData: Record<string, unknown>,
+  options: { contextFilter?: ReadonlyArray<string> } = {},
 ): Promise<DocumentRequirement[]> {
   const triggers = await documentStorage.getActiveTriggersForEntityType(entityType);
 
-  const mandatoryTypes = await documentStorage.getDocumentTypes(true, entityType);
+  const allActiveTypes = await documentStorage.getDocumentTypes(true, entityType);
   const mandatoryRequirements: DocumentRequirement[] = [];
-  for (const dt of mandatoryTypes) {
+  for (const dt of allActiveTypes) {
     if (dt.isMandatory) {
       const template = await getTemplateForDocumentType(dt.id);
       mandatoryRequirements.push({
@@ -106,15 +107,40 @@ async function evaluateTriggersForEntityType(
     }
   }
 
-  return [...mandatoryRequirements, ...triggerRequirements];
+  const contextRequirements: DocumentRequirement[] = [];
+  if (options.contextFilter && options.contextFilter.length > 0) {
+    const allowed = new Set(options.contextFilter);
+    for (const dt of allActiveTypes) {
+      if (seenTypeIds.has(dt.id)) continue;
+      if (!allowed.has(dt.context)) continue;
+      seenTypeIds.add(dt.id);
+      const template = await getTemplateForDocumentType(dt.id);
+      contextRequirements.push({
+        documentType: dt,
+        requirement: "optional",
+        triggeredBy: formatContextDescription(dt.context),
+        template,
+      });
+    }
+  }
+
+  return [...mandatoryRequirements, ...triggerRequirements, ...contextRequirements];
 }
 
 export async function evaluateTriggersForCustomer(customerData: CustomerTriggerData): Promise<DocumentRequirement[]> {
-  return evaluateTriggersForEntityType("customer", { ...customerData });
+  return evaluateTriggersForEntityType("customer", { ...customerData }, {
+    contextFilter: ["vertragsabschluss", "beide"],
+  });
 }
 
 export async function evaluateTriggersForEmployee(employeeData: EmployeeTriggerData): Promise<DocumentRequirement[]> {
   return evaluateTriggersForEntityType("employee", { ...employeeData });
+}
+
+function formatContextDescription(context: string): string {
+  if (context === "vertragsabschluss") return "Vertragsabschluss-Dokument";
+  if (context === "beide") return "Allgemein verfügbar";
+  return "Allgemein verfügbar";
 }
 
 function formatTriggerDescription(trigger: DocumentTypeTrigger): string {

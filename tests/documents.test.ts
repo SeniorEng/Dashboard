@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
   apiPost,
+  apiPatch,
+  apiPut,
   getAuthCookie,
 } from "./test-utils";
 
@@ -67,6 +69,106 @@ describe("DOC-4: Fällige Dokumente und Nachweise", () => {
     const res = await apiGet<any>("/api/profile/proofs/pending-count");
     expect(res.status).toBe(200);
     expect(typeof res.data.count).toBe("number");
+  });
+});
+
+describe("DOC-6: Vertragsabschluss-Kontext im Anforderungs-Motor", () => {
+  const createdTypeIds: number[] = [];
+
+  async function createCustomerDocType(overrides: Record<string, unknown>): Promise<{ id: number; [key: string]: unknown }> {
+    const ts = Date.now();
+    const rand = Math.random().toString(36).slice(2, 7);
+    const payload = {
+      name: `DOC6_${ts}_${rand}`,
+      targetType: "customer",
+      inputMethod: "upload",
+      isMandatory: false,
+      isActive: true,
+      ...overrides,
+    };
+    const res = await apiPost<any>("/api/admin/document-types", payload);
+    expect(res.status).toBe(201);
+    createdTypeIds.push(res.data.id);
+    return res.data;
+  }
+
+  afterAll(async () => {
+    for (const id of createdTypeIds) {
+      try {
+        await apiPatch(`/api/admin/document-types/${id}`, { isActive: false });
+      } catch {}
+    }
+  });
+
+  it("DOC-6.1 – Vertragsabschluss-Dokument ohne Trigger erscheint als optionale Anforderung", async () => {
+    const docType = await createCustomerDocType({ context: "vertragsabschluss" });
+
+    const res = await apiGet<any[]>("/api/customers/document-requirements/pflegekasse_gesetzlich");
+    expect(res.status).toBe(200);
+
+    const found = res.data.find((r) => r.documentType.id === docType.id);
+    expect(found).toBeDefined();
+    expect(found.requirement).toBe("optional");
+    expect(found.triggeredBy).toBe("Vertragsabschluss-Dokument");
+  });
+
+  it("DOC-6.2 – Bestandskunden-Dokument erscheint nicht in Vertragsabschluss-Anforderungen", async () => {
+    const docType = await createCustomerDocType({ context: "bestandskunde" });
+
+    const res = await apiGet<any[]>("/api/customers/document-requirements/privat");
+    expect(res.status).toBe(200);
+
+    const found = res.data.find((r) => r.documentType.id === docType.id);
+    expect(found).toBeUndefined();
+  });
+
+  it("DOC-6.3 – Mitarbeiter-Anforderungen sind vom Kunden-Kontext nicht betroffen", async () => {
+    const docType = await createCustomerDocType({ context: "vertragsabschluss" });
+
+    const auth = await getAuthCookie();
+    const res = await apiGet<any[]>(`/api/admin/document-requirements/employee/${auth.user.id}`);
+    expect(res.status).toBe(200);
+
+    const found = res.data.find((r) => r.documentType.id === docType.id);
+    expect(found).toBeUndefined();
+  });
+
+  it("DOC-6.4 – Dokumententyp mit Trigger UND passendem Kontext erscheint nur einmal", async () => {
+    const docType = await createCustomerDocType({ context: "vertragsabschluss" });
+
+    const triggerRes = await apiPut<any>(`/api/admin/document-types/${docType.id}/triggers`, {
+      triggers: [{
+        entityType: "customer",
+        triggerType: "field_match",
+        conditionField: "billingType",
+        conditionOperator: "equals",
+        conditionValue: "pflegekasse_gesetzlich",
+        requirement: "pflicht",
+        sortOrder: 0,
+        isActive: true,
+      }],
+    });
+    expect(triggerRes.status).toBe(200);
+
+    const res = await apiGet<any[]>("/api/customers/document-requirements/pflegekasse_gesetzlich");
+    expect(res.status).toBe(200);
+
+    const matches = res.data.filter((r) => r.documentType.id === docType.id);
+    expect(matches.length).toBe(1);
+    expect(matches[0].requirement).toBe("pflicht");
+    expect(matches[0].triggeredBy).not.toBe("Vertragsabschluss-Dokument");
+  });
+
+  it("DOC-6.5 – Kontext 'beide' erscheint ebenfalls als optionale Anforderung im Wizard", async () => {
+    const docType = await createCustomerDocType({ context: "beide" });
+
+    const res = await apiGet<any[]>("/api/customers/document-requirements/privat");
+    expect(res.status).toBe(200);
+
+    const found = res.data.find((r) => r.documentType.id === docType.id);
+    expect(found).toBeDefined();
+    expect(found.requirement).toBe("optional");
+    expect(found.triggeredBy).toBe("Allgemein verfügbar");
   });
 });
 
