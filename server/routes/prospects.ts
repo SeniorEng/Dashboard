@@ -46,14 +46,21 @@ const inlineProspectSchema = z.object({
   quelleDetails: z.string().optional().nullable(),
 }).strict();
 
+// Erlaubt Erstberatungs-Berechtigten (inkl. Teamleitungen) das Aktualisieren
+// derselben Stammdaten-Felder, die auch das Formular zur Erstberatungs-
+// Bearbeitung sendet. Wir spiegeln hier bewusst den Feldumfang des Admin-
+// Endpunkts (Vor-/Nachname inklusive), damit Admins keinen Funktionsverlust
+// erleiden, wenn das Frontend auf diesen Endpunkt umstellt.
 const prospectContactUpdateSchema = z.object({
-  telefon: optionalGermanPhoneSchema,
-  email: z.string().optional().nullable(),
-  strasse: z.string().optional().nullable(),
-  nr: z.string().optional().nullable(),
-  plz: z.string().optional().nullable(),
-  stadt: z.string().optional().nullable(),
-  pflegegrad: z.number().int().min(1).max(5).optional().nullable(),
+  vorname: z.string().min(1, "Vorname ist erforderlich").max(100, "Maximal 100 Zeichen").optional(),
+  nachname: z.string().min(1, "Nachname ist erforderlich").max(100, "Maximal 100 Zeichen").optional(),
+  telefon: optionalGermanPhoneSchema.nullable(),
+  email: internationalEmailSchema.optional().or(z.literal("")).nullable(),
+  strasse: z.string().max(200, "Maximal 200 Zeichen").optional().nullable(),
+  nr: z.string().max(20, "Maximal 20 Zeichen").optional().nullable(),
+  plz: z.string().regex(/^\d{5}$/, "PLZ muss 5 Ziffern haben").optional().or(z.literal("")).nullable(),
+  stadt: z.string().max(100, "Maximal 100 Zeichen").optional().nullable(),
+  pflegegrad: z.number().int().min(1, "Pflegegrad muss zwischen 1 und 5 liegen").max(5, "Pflegegrad muss zwischen 1 und 5 liegen").optional().nullable(),
 }).strict();
 
 router.post("/inline", requireRoles("erstberatung"), asyncHandler("Interessent konnte nicht erstellt werden", async (req: Request, res: Response) => {

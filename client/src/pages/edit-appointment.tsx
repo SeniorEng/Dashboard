@@ -45,6 +45,11 @@ export default function EditAppointment() {
   const isAdmin = user?.isAdmin ?? false;
   const isTeamLead = user?.isTeamLead ?? false;
   const canChangeKtAssignment = isAdmin || isTeamLead;
+  // Stammdaten des Interessenten (Name, Telefon, Adresse, Pflegegrad) dürfen
+  // nur Admins und Nutzer mit Erstberatungs-Rolle ändern. Teamleitungen ohne
+  // diese Rolle können den Termin trotzdem verlegen, sehen die Stammdaten-
+  // Felder aber schreibgeschützt.
+  const canEditProspectFields = isAdmin || (user?.roles?.includes("erstberatung") ?? false);
 
   const { data: appointment, isLoading: appointmentLoading } = useAppointment(id);
   
@@ -366,7 +371,11 @@ export default function EditAppointment() {
 
   const updateProspectMutation = useMutation({
     mutationFn: async ({ prospectId, data }: { prospectId: number; data: Record<string, unknown> }) => {
-      const result = await api.patch(`/admin/prospects/${prospectId}`, data);
+      // Bewusst der nicht-Admin-Endpunkt: Teamleitungen mit Erstberatungs-
+      // Rolle dürfen Stammdaten aktualisieren, der Admin-Endpunkt würde sie
+      // mit 403 abweisen und damit auch das nachgelagerte Termin-Update
+      // blockieren.
+      const result = await api.patch(`/prospects/${prospectId}`, data);
       return unwrapResult(result);
     },
     onSuccess: () => {
@@ -608,26 +617,30 @@ export default function EditAppointment() {
       updateMutation.mutate(updateFields);
     } else if (appointment.appointmentType === "Erstberatung") {
       const updateFields = getErstberatungUpdateFields();
-      const prospectPayload = appointment.prospectId
-        ? {
-            vorname: ebVorname.trim(),
-            nachname: ebNachname.trim(),
-            telefon: ebTelefon.trim() || null,
-            email: ebEmail.trim() || null,
-            strasse: ebStrasse.trim() || null,
-            nr: ebNr.trim() || null,
-            plz: ebPlz.trim() || null,
-            stadt: ebStadt.trim() || null,
-            pflegegrad: ebPflegegrad && ebPflegegrad !== "none" ? parseInt(ebPflegegrad) : null,
-          }
-        : null;
 
-      // Bei Erstberatung können sich Interessenten-Stammdaten parallel zum
-      // Termin geändert haben. Wir senden den Prospect-PATCH unkonditional
-      // (idempotent), erst danach den Termin-PATCH bzw. die Navigation.
-      if (prospectPayload && appointment.prospectId) {
+      // Stammdaten-PATCH nur dann feuern, wenn (a) der Nutzer sie überhaupt
+      // ändern darf, (b) ein verknüpfter Interessent existiert und (c) sich
+      // tatsächlich ein Stammdaten-Feld geändert hat. Sonst würde z. B. ein
+      // bedingungsloser PATCH eine Teamleitung ohne Erstberatungs-Rolle
+      // blockieren und das nachgelagerte Termin-Update verhindern.
+      const shouldUpdateProspect =
+        canEditProspectFields && !!appointment.prospectId && hasProspectChanges;
+
+      if (shouldUpdateProspect) {
+        const prospectPayload = {
+          vorname: ebVorname.trim(),
+          nachname: ebNachname.trim(),
+          telefon: ebTelefon.trim() || null,
+          email: ebEmail.trim() || null,
+          strasse: ebStrasse.trim() || null,
+          nr: ebNr.trim() || null,
+          plz: ebPlz.trim() || null,
+          stadt: ebStadt.trim() || null,
+          pflegegrad: ebPflegegrad && ebPflegegrad !== "none" ? parseInt(ebPflegegrad) : null,
+        };
+
         updateProspectMutation.mutate(
-          { prospectId: appointment.prospectId, data: prospectPayload },
+          { prospectId: appointment.prospectId!, data: prospectPayload },
           {
             onSuccess: () => {
               if (Object.keys(updateFields).length === 0) {
@@ -691,7 +704,11 @@ export default function EditAppointment() {
       return Object.keys(getKundenterminUpdateFields()).length > 0;
     }
     if (appointment.appointmentType === "Erstberatung") {
-      if (hasProspectChanges) return true;
+      // Stammdaten-Änderungen zählen nur, wenn der Nutzer sie auch speichern
+      // darf — sonst würde der Speichern-Button für Teamleitungen ohne
+      // Erstberatungs-Rolle „grundlos" aktiv erscheinen, obwohl die Felder
+      // disabled sind.
+      if (hasProspectChanges && canEditProspectFields) return true;
       return Object.keys(getErstberatungUpdateFields()).length > 0;
     }
     if (date !== appointment.date) return true;
@@ -714,6 +731,7 @@ export default function EditAppointment() {
     hasAlltagsbegleitung,
     appointmentServiceEntries,
     hasProspectChanges,
+    canEditProspectFields,
   ]);
 
   if (appointmentLoading) {
@@ -824,6 +842,16 @@ export default function EditAppointment() {
                 <UserCheck className="h-4 w-4" />
                 <span>Kontaktdaten des Interessenten</span>
               </div>
+              {!canEditProspectFields && (
+                <p
+                  className="text-xs text-muted-foreground -mt-2"
+                  data-testid="text-prospect-readonly-hint"
+                >
+                  Stammdaten des Interessenten können nur Admins oder Mitarbeiter mit
+                  Erstberatungs-Berechtigung ändern. Datum, Uhrzeit, Dauer und Notizen
+                  können Sie weiterhin anpassen.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="eb-vorname">Vorname *</Label>
@@ -832,6 +860,7 @@ export default function EditAppointment() {
                     value={ebVorname}
                     onChange={(e) => setEbVorname(e.target.value)}
                     placeholder="Max"
+                    disabled={!canEditProspectFields}
                     data-testid="input-eb-vorname"
                   />
                   {errors.ebVorname && <p className="text-destructive text-sm">{errors.ebVorname}</p>}
@@ -843,6 +872,7 @@ export default function EditAppointment() {
                     value={ebNachname}
                     onChange={(e) => setEbNachname(e.target.value)}
                     placeholder="Mustermann"
+                    disabled={!canEditProspectFields}
                     data-testid="input-eb-nachname"
                   />
                   {errors.ebNachname && <p className="text-destructive text-sm">{errors.ebNachname}</p>}
@@ -857,6 +887,7 @@ export default function EditAppointment() {
                   value={ebTelefon}
                   onChange={(e) => setEbTelefon(formatPhoneAsYouType(e.target.value))}
                   placeholder="0171 1234567"
+                  disabled={!canEditProspectFields}
                   data-testid="input-eb-telefon"
                 />
                 <p className="text-xs text-muted-foreground">Mobil (0171...) oder Festnetz (030...)</p>
@@ -871,6 +902,7 @@ export default function EditAppointment() {
                   value={ebEmail}
                   onChange={(e) => setEbEmail(e.target.value)}
                   placeholder="beispiel@email.de"
+                  disabled={!canEditProspectFields}
                   data-testid="input-eb-email"
                 />
               </div>
@@ -887,6 +919,7 @@ export default function EditAppointment() {
                       value={ebStrasse}
                       onChange={(e) => setEbStrasse(e.target.value)}
                       placeholder="Musterstraße"
+                      disabled={!canEditProspectFields}
                       data-testid="input-eb-strasse"
                     />
                     {errors.ebStrasse && <p className="text-destructive text-sm">{errors.ebStrasse}</p>}
@@ -898,6 +931,7 @@ export default function EditAppointment() {
                       value={ebNr}
                       onChange={(e) => setEbNr(e.target.value)}
                       placeholder="42"
+                      disabled={!canEditProspectFields}
                       data-testid="input-eb-nr"
                     />
                     {errors.ebNr && <p className="text-destructive text-sm">{errors.ebNr}</p>}
@@ -912,6 +946,7 @@ export default function EditAppointment() {
                       onChange={(e) => setEbPlz(e.target.value)}
                       placeholder="10969"
                       maxLength={5}
+                      disabled={!canEditProspectFields}
                       data-testid="input-eb-plz"
                     />
                     {errors.ebPlz && <p className="text-destructive text-sm">{errors.ebPlz}</p>}
@@ -923,6 +958,7 @@ export default function EditAppointment() {
                       value={ebStadt}
                       onChange={(e) => setEbStadt(e.target.value)}
                       placeholder="Berlin"
+                      disabled={!canEditProspectFields}
                       data-testid="input-eb-stadt"
                     />
                     {errors.ebStadt && <p className="text-destructive text-sm">{errors.ebStadt}</p>}
@@ -932,7 +968,11 @@ export default function EditAppointment() {
 
               <div className="space-y-2">
                 <Label>Pflegegrad *</Label>
-                <Select value={ebPflegegrad} onValueChange={setEbPflegegrad}>
+                <Select
+                  value={ebPflegegrad}
+                  onValueChange={setEbPflegegrad}
+                  disabled={!canEditProspectFields}
+                >
                   <SelectTrigger data-testid="select-pflegegrad">
                     <SelectValue />
                   </SelectTrigger>
