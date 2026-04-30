@@ -2,7 +2,7 @@ import {
   type Invoice,
   type InvoiceLineItem,
 } from "@shared/schema";
-import { db, type DbOrTx } from "../lib/db";
+import { db, type DbOrTx, type Tx } from "../lib/db";
 import type { InvoiceWithCustomer } from "../storage";
 
 export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<InvoiceWithCustomer[]> {
@@ -87,16 +87,17 @@ export async function updateInvoiceStatus(id: number, status: string, userId: nu
   return updateInvoiceStatusTx(db, id, status, userId);
 }
 
-// Hält bis Commit/Rollback. Muss in derselben Tx wie der nachfolgende
-// invoices-Insert laufen, damit die ermittelte Nummer race-frei bleibt.
-export async function getNextInvoiceNumberTx(exec: DbOrTx, year: number): Promise<string> {
+// Tx-only: pg_advisory_xact_lock wird beim Commit/Rollback freigegeben.
+// Erzwingt den Tx-Typ damit niemand versehentlich `db` übergibt — sonst wäre
+// der Lock am Statement-Ende weg und MAX/Insert wieder race-anfällig.
+export async function getNextInvoiceNumberTx(tx: Tx, year: number): Promise<string> {
   const { invoices } = await import("@shared/schema");
   const { eq, sql } = await import("drizzle-orm");
 
   const lockKey = `invoice_number_${year}`;
-  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::int8)`);
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::int8)`);
 
-  const result = await exec.select({
+  const result = await tx.select({
     maxNum: sql<number>`COALESCE(MAX(CAST(SUBSTRING(${invoices.invoiceNumber} FROM 'RE-\\d{4}-(\\d+)') AS INTEGER)), 0)`,
   })
   .from(invoices)
