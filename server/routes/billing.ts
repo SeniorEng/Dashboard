@@ -1146,10 +1146,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
     });
 
-    // Audit AFTER commit — der Audit-Service schreibt selbst über `db` (nicht
-    // tx-aware); würde er innerhalb der Transaktion laufen, wäre der Eintrag
-    // bei Rollback trotzdem persistent. Loggen wir erst nach erfolgreichem
-    // Commit, ist Audit immer konsistent mit dem Datenstand.
+    // Audit nach Commit, weil auditService nicht tx-aware ist.
     await auditService.log(req.user!.id, "invoice_cancelled", "invoice", id, {
       originalInvoiceNumber: invoice.invoiceNumber,
       stornoInvoiceId: stornoInvoice.id,

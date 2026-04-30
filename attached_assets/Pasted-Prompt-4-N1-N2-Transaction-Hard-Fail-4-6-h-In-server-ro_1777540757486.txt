@@ -1,0 +1,16 @@
+Prompt 4 — N1+N2: Transaction + Hard-Fail (~4–6 h)
+In server/routes/admin/customers.ts ändere den POST /customers-Handler ab Zeile 218 so, dass customerManagementStorage.createCustomerDirect(customerData) und createCustomerRelatedData(...) innerhalb einer einzigen db.transaction(async (tx) => { ... }) laufen. Dafür müssen folgende Methoden ein optionales tx-Handle akzeptieren und durchreichen: customerManagementStorage.createCustomerDirect, customerManagementStorage.addCareLevelHistory, customerManagementStorage.addCustomerInsurance, customerManagementStorage.addCustomerContact, customerManagementStorage.createCustomerContract, customerManagementStorage.addContractRate, budgetLedgerStorage.upsertBudgetTypeSettings, budgetLedgerStorage.syncCarryoverAndExpiry, budgetLedgerStorage.createBudgetAllocation. Wo Storage-Methoden bisher db.foo(...) nutzen, ändere zu (tx ?? db).foo(...).
+
+In server/lib/customer-creation-helpers.ts:104-256 (createCustomerRelatedData) entferne die try/catch-Blöcke aus den Bereichen, die für den jeweiligen billingType als Pflicht gelten:
+
+Pflegegrad-Historie: Pflicht wenn input.pflegegrad gesetzt → Hard-Fail
+Insurance: Pflicht wenn billingType mit pflegekasse_ beginnt UND input.insurance gesetzt → Hard-Fail
+Budget-Type-Settings: Pflicht wenn useLedgerBudgets && typeSettings.length > 0 → Hard-Fail
+Contract: Pflicht wenn input.contract gesetzt → Hard-Fail
+Contacts: weiterhin als Warnings akzeptabel (optional, nicht abrechnungskritisch), aber im Inneren Promise.all durch for (const c of contacts) { await ... } ersetzen, damit ein Fehler nicht halbe Contacts persistiert lässt.
+Carryover-Allocation: weiterhin Warning (optional), aber loggen.
+Akzeptiere Parameter tx in createCustomerRelatedData und reiche an alle Storage-Methoden durch. Wenn ein Hard-Fail-Bereich wirft, propagiert sich der Fehler aus der Transaktion → automatischer Rollback → Customer wird nicht persistiert. Der HTTP-Endpoint antwortet dann 4xx/5xx (statt 201 mit Warnings).
+
+Erweitere den Vitest in tests/customers.test.ts: Fall A: Insurance-Provider-ID existiert nicht → erwartet 4xx, kein Customer in DB nach Aufruf. Fall B: Budget-Settings-Schreibfehler simulieren (mock) → erwartet 5xx, kein Customer in DB. Fall C: Optionaler Carryover schlägt fehl → erwartet 201, Customer angelegt, warnings-Array enthält Eintrag.
+
+Falls der tx-Refactor zu groß ist: Abgespeckte Variante zulässig — Customer-INSERT und nur die als Pflicht markierten Cascade-Schritte in eine kleinere lokale Transaktion ziehen, optionale Schritte (Contacts, Carryover) außerhalb belassen.

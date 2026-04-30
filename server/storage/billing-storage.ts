@@ -87,19 +87,8 @@ export async function updateInvoiceStatus(id: number, status: string, userId: nu
   return updateInvoiceStatusTx(db, id, status, userId);
 }
 
-/**
- * Race-freie Vergabe der nächsten Rechnungsnummer pro `billingYear`.
- *
- * Die Funktion setzt einen PostgreSQL Transaction-Advisory-Lock pro Jahr
- * (`pg_advisory_xact_lock` über einen `hashtext`-basierten Schlüssel) BEVOR
- * sie die aktuelle Maximalnummer liest. Damit können konkurrierende Aufrufe
- * für dasselbe Jahr keine identische Nummer mehr ermitteln.
- *
- * WICHTIG: Der Lock ist Transaktions-scoped und wird beim Commit/Rollback
- * automatisch freigegeben. Damit der Lock auch das nachgelagerte
- * `INSERT INTO invoices` schützt, MUSS dieser Helper innerhalb derselben
- * Transaktion aufgerufen werden, in der die Rechnung später eingefügt wird.
- */
+// Hält bis Commit/Rollback. Muss in derselben Tx wie der nachfolgende
+// invoices-Insert laufen, damit die ermittelte Nummer race-frei bleibt.
 export async function getNextInvoiceNumberTx(exec: DbOrTx, year: number): Promise<string> {
   const { invoices } = await import("@shared/schema");
   const { eq, sql } = await import("drizzle-orm");
@@ -116,12 +105,8 @@ export async function getNextInvoiceNumberTx(exec: DbOrTx, year: number): Promis
   return `RE-${year}-${String(next).padStart(4, "0")}`;
 }
 
-/**
- * Backwards-kompatibler Wrapper. Standalone genutzt liefert die Funktion
- * eine zum Aufrufzeitpunkt freie Nummer; um Race-Conditions zu vermeiden,
- * sollte der Aufrufer den anschließenden Insert in DERSELBEN Transaktion
- * via `getNextInvoiceNumberTx` + `createInvoiceTx` durchführen.
- */
+// Wrapper für Aufrufer ohne eigene Tx. Race-frei nur in Kombination mit
+// `getNextInvoiceNumberTx` + `createInvoiceTx` in derselben Transaktion.
 export async function getNextInvoiceNumber(year: number): Promise<string> {
   return await db.transaction(async (tx) => getNextInvoiceNumberTx(tx, year));
 }

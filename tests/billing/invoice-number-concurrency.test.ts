@@ -1,23 +1,7 @@
-/**
- * Race-Conditions auf der Rechnungsnummern-Vergabe (Task #261)
- *
- * Sichert ab, dass:
- *   1. 10 parallele `POST /api/billing/generate` für unterschiedliche Kunden
- *      im selben billingYear genau 10 eindeutige, lückenlose Rechnungsnummern
- *      vergeben (kein 500 wegen UNIQUE-Verletzung, keine Duplikate).
- *   2. 5 parallele Storno-Anforderungen auf 5 verschiedene Rechnungen genau
- *      5 eindeutige Stornorechnungs-Nummern erzeugen, die Originale alle den
- *      Status `storniert` tragen und keine waise Stornorechnung übrig bleibt.
- *
- * Hintergrund: Vor dem Fix berechnete `getNextInvoiceNumber` MAX+1 ohne
- * Sperre; konkurrierende Aufrufe konnten dieselbe Nummer ermitteln und beim
- * Insert auf den UNIQUE-Constraint laufen. Der Storno-Pfad führte zudem
- * Stornorechnungs-Insert + Status-Update getrennt aus — bei einem Fehler im
- * Update entstand eine waise Stornorechnung.
- *
- * Tests laufen seriell (vitest fileParallelism: false) und nutzen die
- * gleichen Cleanup- und Naming-Konventionen wie billing-flow.test.ts.
- */
+// Race-Conditions auf Rechnungsnummer-Vergabe + Storno-Atomarität.
+// INC-1.1: 10 parallele POST /generate -> 10 eindeutige, lückenlose Nummern.
+// INC-2.1: 5 parallele Storni -> 5 eindeutige Stornorechnungen ohne Waisen.
+// INC-3.1: Direkte Tx mit Failure-Injection -> Rollback hinterlässt keine Stornorechnung.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
@@ -30,6 +14,15 @@ import {
   createTestEmployee,
   deactivateTestEmployee,
 } from "../test-utils";
+import { db } from "../../server/lib/db";
+import {
+  getNextInvoiceNumberTx,
+  createInvoiceTx,
+  updateInvoiceStatusTx,
+  getInvoiceLineItemsTx,
+} from "../../server/storage/billing-storage";
+import { invoices } from "../../shared/schema";
+import { and, eq } from "drizzle-orm";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testEmployeeId: number;
@@ -38,8 +31,6 @@ let hwServiceId: number;
 const cleanupCustomerIds: number[] = [];
 const cleanupServiceRecordIds: number[] = [];
 const cleanupInvoiceIds: number[] = [];
-
-// ---------- Helpers ----------
 
 const SEED_TIMES = [
   "00:00", "00:15", "00:30", "00:45", "01:00", "01:15", "01:30", "01:45",
@@ -86,7 +77,7 @@ async function findFreeSlotAndCreate(
       }
     }
   }
-  throw new Error(`findFreeSlotAndCreate(${noteTag}): kein freier Slot in den letzten 60 Tagen gefunden`);
+  throw new Error(`findFreeSlotAndCreate(${noteTag}): kein freier Slot`);
 }
 
 async function documentAppointment(
@@ -231,8 +222,6 @@ function parseSequenceFromInvoiceNumber(invoiceNumber: string): { year: number; 
   return { year: Number(match[1]), sequence: Number(match[2]) };
 }
 
-// ---------- Lifecycle ----------
-
 beforeAll(async () => {
   auth = await getAuthCookie();
 
@@ -258,27 +247,18 @@ afterAll(async () => {
   await deactivateTestEmployee(testEmployeeId);
 });
 
-// ============================================================
-// INC-1: 10 parallele Generierungen → 10 eindeutige, lückenlose Nummern
-// ============================================================
-
 describe("INC-1: Parallele Rechnungs-Generierung", () => {
   it("INC-1.1 — 10 parallele POST /api/billing/generate liefern 10 eindeutige, lückenlose Nummern", async () => {
-    // Vorbereitung sequentiell, damit die Slot-Suche nicht miteinander
-    // kollidiert. Die eigentliche Race-Bedingung tritt erst beim
-    // gleichzeitigen Insert in `invoices` auf.
+    // Vorbereitung sequentiell — die Race tritt erst beim parallelen Insert auf.
     const prepared: PreparedInvoiceCustomer[] = [];
     for (let i = 0; i < 10; i++) {
       prepared.push(await prepareCustomerForInvoice(`P${i}`));
     }
 
-    // Alle 10 Kunden müssen denselben billingYear haben — sonst greift der
-    // Per-Year-Lock pro Customer einzeln und prüft die Race nicht.
     const years = new Set(prepared.map((p) => p.year));
     expect(years.size, "Alle Test-Kunden müssen im selben Abrechnungsjahr liegen").toBe(1);
     const billingYear = prepared[0].year;
 
-    // Race: 10 Rechnungs-Generierungen GLEICHZEITIG abschicken.
     const settled = await Promise.allSettled(prepared.map((p) => generateInvoiceForPrepared(p)));
 
     const failures = settled
@@ -289,21 +269,16 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
       `Alle 10 Generierungen müssen erfolgreich sein, Fehler: ${failures.map((f) => `#${f.i}: ${(f.r as PromiseRejectedResult).reason}`).join(" | ")}`,
     ).toBe(0);
 
-    const invoices = settled
+    const invoicesResult = settled
       .filter((r): r is PromiseFulfilledResult<InvoiceLite> => r.status === "fulfilled")
       .map((r) => r.value);
 
-    // Eindeutigkeit: ohne Lock würde der UNIQUE-Constraint mindestens eine
-    // Generierung in einen 500 schicken — wenn alle hier landen, ist auch
-    // garantiert keine Duplikat-Nummer mehr drin. Trotzdem hart prüfen.
-    const numbers = invoices.map((inv) => inv.invoiceNumber);
+    const numbers = invoicesResult.map((inv) => inv.invoiceNumber);
     const unique = new Set(numbers);
     expect(unique.size, `Erwartet 10 eindeutige Rechnungsnummern, bekam: ${numbers.join(", ")}`).toBe(10);
 
-    // Lückenlosigkeit: tests laufen seriell (fileParallelism: false), zwischen
-    // dem Vorbereitungsblock und dieser Race können also keine externen
-    // Rechnungen entstanden sein. Die 10 Nummern müssen exakt einen
-    // Bereich der Länge 10 abdecken.
+    // tests laufen seriell (vitest fileParallelism: false), die 10 Nummern
+    // müssen daher exakt 10 aufeinanderfolgende Sequenzen sein.
     const sequences = numbers
       .map((n) => parseSequenceFromInvoiceNumber(n))
       .map((p) => {
@@ -314,22 +289,15 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
 
     const minSeq = sequences[0];
     const maxSeq = sequences[sequences.length - 1];
-    expect(maxSeq - minSeq, `10 Nummern müssen 10 aufeinanderfolgende Sequenzen sein, sortiert: ${sequences.join(", ")}`).toBe(9);
+    expect(maxSeq - minSeq, `Sortiert: ${sequences.join(", ")}`).toBe(9);
     for (let i = 1; i < sequences.length; i++) {
       expect(sequences[i], `Lücke zwischen ${sequences[i - 1]} und ${sequences[i]}`).toBe(sequences[i - 1] + 1);
     }
   }, 120_000);
 });
 
-// ============================================================
-// INC-2: Storno-Atomarität bei paralleler Last
-// ============================================================
-
 describe("INC-2: Parallele Storno-Operationen", () => {
   it("INC-2.1 — 5 parallele Storno-Anfragen erzeugen 5 eindeutige Stornorechnungen ohne Waisen", async () => {
-    // 5 Kunden + Rechnungen sequentiell aufbauen, dann auf Status "versendet"
-    // schalten (Storno aus "entwurf" wäre auch erlaubt, aber "versendet" ist
-    // das übliche Buchführungs-Setup).
     const prepared: PreparedInvoiceCustomer[] = [];
     for (let i = 0; i < 5; i++) {
       prepared.push(await prepareCustomerForInvoice(`S${i}`));
@@ -342,24 +310,21 @@ describe("INC-2: Parallele Storno-Operationen", () => {
 
     for (const inv of originals) {
       const res = await apiPatch(`/api/billing/${inv.id}/status`, { status: "versendet" });
-      expect(res.status, `versendet-Transition für ${inv.invoiceNumber} muss 200 sein`).toBe(200);
+      expect(res.status, `versendet-Transition für ${inv.invoiceNumber}`).toBe(200);
     }
 
-    // Race: 5 PATCH /status=storniert gleichzeitig.
     const settled = await Promise.allSettled(
       originals.map((inv) => apiPatch(`/api/billing/${inv.id}/status`, { status: "storniert" })),
     );
 
     for (let i = 0; i < settled.length; i++) {
       const r = settled[i];
-      expect(r.status, `Storno #${i} (${originals[i].invoiceNumber}) muss erfolgreich resolven`).toBe("fulfilled");
+      expect(r.status, `Storno #${i} (${originals[i].invoiceNumber})`).toBe("fulfilled");
       if (r.status === "fulfilled") {
         expect(r.value.status, `Storno #${i} HTTP-Status, body=${JSON.stringify(r.value.data)}`).toBe(200);
       }
     }
 
-    // Listen-Aufruf pro Kunde — Stornorechnung muss exakt 1× existieren
-    // und das Original muss `storniert` sein.
     const stornoNumbers: string[] = [];
     for (const inv of originals) {
       const list = await apiGet<InvoiceLite[]>(`/api/billing?customerId=${inv.customerId}`);
@@ -378,12 +343,88 @@ describe("INC-2: Parallele Storno-Operationen", () => {
       expect(original?.status, `Original ${inv.invoiceNumber} muss storniert sein`).toBe("storniert");
     }
 
-    // Stornorechnungs-Nummern müssen eindeutig sein (Race darf keine
-    // doppelten Nummern erzeugt haben).
     const uniqueStornos = new Set(stornoNumbers);
     expect(
       uniqueStornos.size,
       `5 Storni müssen 5 eindeutige Nummern haben, bekam: ${stornoNumbers.join(", ")}`,
     ).toBe(5);
   }, 120_000);
+});
+
+describe("INC-3: Storno-Atomarität bei injiziertem Fehler", () => {
+  it("INC-3.1 — Wirft die Tx nach Stornorechnungs-Insert, bleibt KEINE Stornorechnung in der DB", async () => {
+    // Setup: Kunde + Rechnung versendet.
+    const prepared = await prepareCustomerForInvoice("FAIL");
+    const original = await generateInvoiceForPrepared(prepared);
+    const send = await apiPatch(`/api/billing/${original.id}/status`, { status: "versendet" });
+    expect(send.status).toBe(200);
+
+    // Direkte Tx: Stornorechnung einfügen, Original-Status updaten, dann werfen.
+    // Beide Inserts/Updates müssen via Rollback verworfen werden.
+    const sentinel = `FAIL-INJECT-${uniqueId()}`;
+    await expect(
+      db.transaction(async (tx) => {
+        const number = await getNextInvoiceNumberTx(tx, prepared.year);
+        const lineItems = await getInvoiceLineItemsTx(tx, original.id);
+        const stornoData = {
+          invoiceNumber: number,
+          customerId: original.customerId,
+          billingType: "selbstzahler",
+          invoiceType: "stornorechnung",
+          billingMonth: prepared.month,
+          billingYear: prepared.year,
+          recipientName: sentinel,
+          recipientAddress: "Teststraße 1, 10115 Berlin",
+          customerName: sentinel,
+          insuranceProviderName: null,
+          insuranceIkNummer: null,
+          versichertennummer: null,
+          pflegegrad: 2,
+          netAmountCents: -100,
+          vatAmountCents: -19,
+          grossAmountCents: -119,
+          vatRate: 1900,
+          status: "versendet",
+          stornierteRechnungId: original.id,
+        };
+        const stornoLineItems = lineItems.map((li) => ({
+          appointmentId: li.appointmentId,
+          appointmentDate: li.appointmentDate,
+          serviceDescription: li.serviceDescription,
+          serviceCode: li.serviceCode,
+          startTime: li.startTime,
+          endTime: li.endTime,
+          durationMinutes: li.durationMinutes,
+          unitPriceCents: li.unitPriceCents,
+          totalCents: -li.totalCents,
+          employeeName: li.employeeName,
+          employeeLbnr: li.employeeLbnr,
+          appointmentNotes: li.appointmentNotes ?? null,
+          serviceDetails: li.serviceDetails ?? null,
+        }));
+        await createInvoiceTx(tx, stornoData, stornoLineItems, auth.user.id);
+        await updateInvoiceStatusTx(tx, original.id, "storniert", auth.user.id);
+        throw new Error("simulated failure after storno insert");
+      }),
+    ).rejects.toThrow(/simulated failure/);
+
+    // Beweis: keine Stornorechnung mit unserem Sentinel-Marker oder
+    // stornierteRechnungId=original.id existiert.
+    const orphans = await db
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.invoiceType, "stornorechnung"),
+          eq(invoices.stornierteRechnungId, original.id),
+        ),
+      );
+    expect(orphans.length, `Tx-Rollback muss Stornorechnung verwerfen, gefunden: ${orphans.length}`).toBe(0);
+
+    // Original-Status darf NICHT "storniert" sein — der UpdateInvoiceStatusTx
+    // lief in derselben Tx und muss ebenfalls verworfen worden sein.
+    const list = await apiGet<InvoiceLite[]>(`/api/billing?customerId=${original.customerId}`);
+    const reread = list.data.find((i) => i.id === original.id);
+    expect(reread?.status, `Original-Status muss durch Rollback unverändert bleiben`).toBe("versendet");
+  }, 60_000);
 });
