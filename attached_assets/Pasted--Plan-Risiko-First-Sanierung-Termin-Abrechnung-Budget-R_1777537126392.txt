@@ -1,0 +1,361 @@
+# Plan: Risiko-First-Sanierung Termin-Abrechnung & Budget (Replit-Prompt-Workflow)
+
+## Context
+
+CareConnect (SeniorenEngel) ist eine produktive Pflege-/Fahrtdienst-App auf Replit (Express + React 19 + Drizzle/Neon, ~96k LoC). Du willst zwei Sorgenbereiche absichern, damit am Ende **vollautomatisch zu 100 % korrekt abgerechnet** wird:
+
+- **a) Termin → Zeiterfassung → Dokumentation → Leistungsnachweis → Rechnung** (Datenkonsistenz über den gesamten Flow)
+- **b) Budget**: Neuanlage, Jahresübertrag (§45b 30.06.-Verfall), Wegrechnung über Termine
+
+Die App ist live, **alle Code-Änderungen werden von dir manuell über Replit eingespielt**. Es gibt eine bestehende `TIEFENANALYSE_REFACTORING_2026-04-18.md` mit 29 Findings; meine drei Explore-Agents haben sie bestätigt und um konkrete neue Risiken in genau deinen Sorgenbereichen ergänzt.
+
+**Output-Vereinbarung (auf deinen Wunsch):**
+- Pro Fix: **Replit-Prompt** (Copy-Paste-fertig, semantisch — Replit Agent erledigt den Edit)
+- Pro KRITISCH-Fund: **Read-only Repro-Skript** (SQL oder Test) zur Verifikation in deiner Prod-DB **vor** dem Fix
+- **Reihenfolge: Risiko-First** — erst alle KRITISCHEN aus beiden Bereichen, dann HOCH, dann MITTEL
+
+---
+
+## Vorgehen in 4 Phasen
+
+**Phase 1 — Inventar & Karte (✅ ABGESCHLOSSEN)**
+Drei Explore-Agents haben Datenmodell, Lifecycle, Budget-Mechanik und vorhandene Doks gescannt. Substanz steht im Konversationskontext.
+
+**Phase 2 — KRITISCH-Sanierung (dieser Plan, Sprint 1, ~2–3 Tage netto)**
+Acht Funde, jeweils: Repro → Replit-Prompt → Verifikation. Diese Phase reduziert akute Datenintegritätsrisiken.
+
+**Phase 3 — HOCH-Sanierung (Sprint 2, ~3 Tage)**
+Architektur- und Performance-Findings (N+1, Split-Rechnungen-FK, Indizes, NaN-Guards, Soft-Delete-Konsistenz).
+
+**Phase 4 — Test-Härtung & MITTEL (Sprint 3+)**
+Billing-Test-Coverage von 0 % auf relevant; Bundle-Größe; UX/A11y; `timestamp` → `timestamptz`.
+
+---
+
+## Phase 2: Kritische Funde (Reihenfolge = Bearbeitungsreihenfolge)
+
+> Begründung der Reihenfolge: erst Geld-Korrektheit (Storno/Reversal/Race), dann Zeit-Korrektheit (Timezone), dann Sicherheit (Mass-Assignment), dann strukturelle Locks/Constraints.
+
+| # | Fund | Datei:Zeile | Bereich | Risiko |
+|---|------|-------------|---------|--------|
+| K1 | Race Condition `getNextInvoiceNumber` (zwei Rechnungen, gleiche Nummer) | `server/storage/billing-storage.ts:74-84` | Termin/Rechnung | Doppel-Insert, halbe Rechnungen |
+| K2 | Storno ohne Budget-Reversal (Budget bleibt belastet) | `server/routes/billing.ts:1111-1167` | Termin/Budget | Doppelte Verrechnung möglich |
+| K3 | Nachberechnung nach Storno: `alreadyInvoicedIds`-Filter unvollständig | `server/routes/billing.ts:789-794` | Termin/Rechnung | Termine gehen verloren |
+| K4 | Race Condition parallele Termin-Dokumentation: `consumeFifo` ohne Row-Lock | `server/routes/appointment-documentation.ts:87-168` + `server/storage/budget/consumption-engine.ts` | Budget | Budget-Überschuss, Phantom-Verbrauch |
+| K5 | Timezone-Bugs `new Date(stringVar)` an 6 Prod-Stellen (CET vs UTC) | siehe `TIEFENANALYSE_REFACTORING_2026-04-18.md` (K2) | Termin/Carryover | Tagesgrenze um 1 verschoben |
+| K6 | Mass-Assignment via `...req.body` in Budget- und Auth-Routen | `server/routes/budget.ts` (POST-Routen), `server/routes/auth.ts` (register) | Budget/Sicherheit | Privilege-Escalation, Datenmanipulation |
+| K7 | Write-Off bei Carryover-Expiry hat keine DB-Unique-Constraint | `server/storage/budget/allocation-storage.ts:859-897` | Budget | Doppelter Write-Off bei Parallel-Lauf |
+| K8 | Termin-Änderung nach Leistungsnachweis-Unterschrift nicht hart verhindert | `server/routes/appointments.ts:180-200` (`updateAppointment`) | Termin/Rechnung | Rechnung-Datum ≠ Termin-Datum |
+
+> Die **Detailblöcke pro Fix** (Repro-Skript + Replit-Prompt + Verifikation) folgen in einem zweiten Schreibschritt direkt unten in dieser Datei, damit der Stream nicht erneut timeoutet.
+
+---
+
+## Phase 3: Hoch-Funde (Vorschau, Details später)
+
+- H1: N+1 in `getPlannedCostCents` (Batch-Load einführen)
+- H2: Split-Rechnungen ohne `parent_invoice_id`/`linked_invoice_id`-FK + Index
+- H3: `parseInt(req.params.id)` ohne NaN-Guard → `parseIdParam()` Helper
+- H4: Composite-Index `budget_transactions(customer_id, budget_type, transaction_type)`
+- H5: Auto-Cleanup für Carryover-Duplikate (statt manuelles Script)
+- H6: Soft-Delete-Konsistenz in Leistungsnachweis-Queries (`appointments.deletedAt IS NULL`)
+- H7: `signServiceRecord` in `db.transaction()` wrappen
+- H8: PDF-Hash für Rechnungen speichern (GoBD-Audit)
+- H9: Kilometer-Felder validieren (Min/Max, sinnvolle Range, ggf. Integer in 1/100-km)
+- H10: Pagination für Listen-Endpoints (`/api/customers`, `/api/appointments`)
+
+## Phase 4: Test-Härtung & Mittel
+
+- T1: Vitest-Suite Billing-Flow (Happy-Path, Split, Storno, Re-Abrechnung, Race-Repros)
+- T2: Vitest-Suite Budget-Edge-Cases (Carryover-Expiry, virtuelle §45b-Allocation, Write-Off-Idempotenz)
+- T3: aria-Labels, Skeletons, Touch-Targets (TIEFENANALYSE H6, M4, M7)
+- T4: `timestamp` → `timestamptz` (DST-Sicherheit, Migration mit Care)
+- T5: Bundle-Splitting (`vite.config.ts` ist geschützt → mit dir abstimmen)
+
+---
+
+## Kritische Dateien (Referenz für alle Phasen)
+
+**Termin/Abrechnung:**
+- `shared/schema/appointments.ts` (Schema, Lock-Logik)
+- `shared/schema/billing.ts` (Invoices, UNIQUE invoice_number)
+- `shared/schema/service-records.ts`
+- `server/routes/appointments.ts` (CRUD, Lock-Check)
+- `server/routes/appointment-documentation.ts` (Ist-Zeiten, Budget-Verbrauch)
+- `server/routes/billing.ts` (Generate, Storno, Nachberechnung)
+- `server/storage/billing-storage.ts` (`getNextInvoiceNumber`)
+- `server/storage/service-records-storage.ts` (`isAppointmentLocked`, `signServiceRecord`)
+- `server/lib/pdf-generator.ts`
+
+**Budget:**
+- `shared/schema/budget.ts` (allocations, transactions, settings, preferences)
+- `shared/domain/budgets.ts` (Typen-Konstanten §45b/§45a/§39-42a)
+- `server/routes/budget.ts` (CRUD, Cost-Estimate, Repair)
+- `server/storage/budget-ledger.ts` (Fassade)
+- `server/storage/budget/allocation-storage.ts` (Carryover, virtuelle Allokationen, Write-Off)
+- `server/storage/budget/consumption-engine.ts` (FIFO-Cascade)
+- `server/storage/budget/transaction-storage.ts`
+- `server/storage/budget/cap-calculator.ts`
+- `server/storage/budget/appointment-cost-calculator.ts` (Kilometer × Rate)
+- `server/scripts/cleanup-duplicate-carryovers.ts`
+
+---
+
+## Verifikation (übergeordnet)
+
+Pro Fix-Block siehe Detail unten. Übergeordnet nach Sprint 1:
+
+1. `npm run check` (TypeScript-Check) lokal grün
+2. Vitest-Suite grün (lokal): `TEST_USER_PASSWORD=… npx vitest run`
+3. Read-only-SQL-Reports auf Replit-DB: keine doppelten Rechnungsnummern, keine Storno-Rechnung mit nicht-revertiertem Budget, keine doppelten Write-Offs
+4. Manueller Smoke-Test in Replit-Preview: Termin anlegen → dokumentieren → LN unterschreiben → Rechnung erzeugen → Storno → Nachberechnung
+5. Monitoring: 24 h ohne neue 500er auf den geänderten Routen
+
+---
+
+## Detailblöcke pro KRITISCH-Fix
+
+Format pro Fix: **a) Symptom & Risiko · b) Read-only Repro · c) Replit-Prompt · d) Verifikation.**
+
+---
+
+### K1 — Race Condition `getNextInvoiceNumber`
+
+**Symptom & Risiko.** `server/storage/billing-storage.ts:74-84` liest `MAX(invoice_number)` ohne Serialisierung. Zwei parallele Rechnungs-Generierungen lesen denselben Max-Wert, generieren dieselbe Nummer; das `UNIQUE(invoice_number)`-Constraint fängt nur den zweiten Insert ab → Request bricht mit DB-Error ab, Audit-Trail-Lücken, halbtransaktionale Zustände möglich.
+
+**Read-only Repro.** SQL gegen Replit-DB:
+```sql
+-- 1) Finde Lücken oder Auffälligkeiten in der Nummernfolge pro Jahr
+SELECT billing_year,
+       COUNT(*) AS total,
+       MAX(CAST(SUBSTRING(invoice_number FROM 'RE-\d{4}-(\d+)') AS INTEGER)) AS max_seq,
+       COUNT(*) - MAX(CAST(SUBSTRING(invoice_number FROM 'RE-\d{4}-(\d+)') AS INTEGER)) AS gap
+FROM invoices
+GROUP BY billing_year
+ORDER BY billing_year DESC;
+
+-- 2) Kandidaten für gleichzeitige Erzeugungen (gleicher Sekunden-Bucket)
+SELECT date_trunc('second', created_at) AS sec, COUNT(*)
+FROM invoices
+GROUP BY 1 HAVING COUNT(*) > 1
+ORDER BY 1 DESC LIMIT 50;
+```
+Lasttest (lokal, nicht Prod): zwei parallele `POST /api/billing/generate` mit identischem Customer/Monat → erwartet zweiten 500er.
+
+**Replit-Prompt.**
+> In `server/storage/billing-storage.ts` ändere die Funktion `getNextInvoiceNumber(year)` so, dass sie **innerhalb einer Datenbank-Transaktion** läuft und vor dem `SELECT MAX(...)` einen `pg_advisory_xact_lock` mit einem deterministischen Schlüssel pro Jahr setzt (z. B. `pg_advisory_xact_lock(hashtext('invoice_number_' || year))`). Akzeptiere optional einen `tx`-Parameter (Drizzle-Transaktionshandle), damit die Funktion innerhalb des bestehenden `db.transaction(...)`-Blocks der Rechnungs-Generierung in `server/routes/billing.ts` aufgerufen werden kann. Stelle sicher, dass alle Aufrufstellen (`server/routes/billing.ts` Generate-Flow und Storno-Flow ab Zeile 1111) die Funktion **innerhalb** der jeweiligen Transaktion aufrufen, sodass der Lock bis zum Commit gehalten wird. Schreibe einen Vitest-Test in `tests/billing/invoice-number-race.test.ts`, der zwei `Promise.all`-parallele Generierungen feuert und sicherstellt, dass beide unterschiedliche Rechnungsnummern erhalten und beide erfolgreich sind.
+
+**Verifikation.**
+1. Neuer Test grün.
+2. Repro-SQL nach 24 h: keine neuen Lücken/Kollisionen.
+3. Existierende Billing-Tests (`tests/billing/billing-flow.test.ts`, `tests/private-billing-e2e.test.ts`) weiter grün.
+
+---
+
+### K2 — Storno ohne Budget-Reversal
+
+**Symptom & Risiko.** `server/routes/billing.ts:1111-1167` setzt eine Rechnung auf `storniert` und legt eine Stornorechnung mit negativen Beträgen an, **ruft aber keine Budget-Reversals** für die in der Original-Rechnung enthaltenen Termine auf. Folge: Das Budget des Klienten bleibt belastet, obwohl die Leistung wirtschaftlich rückgängig gemacht wurde. Bei späterer Neuabrechnung dieser Termine wird das Budget ein zweites Mal belastet.
+
+**Read-only Repro.**
+```sql
+-- Stornierte Rechnungen, deren Termine noch ohne Reversal-Transaktion in budget_transactions hängen
+WITH stornierte AS (
+  SELECT i.id AS invoice_id, ili.appointment_id
+  FROM invoices i
+  JOIN invoice_line_items ili ON ili.invoice_id = i.id
+  WHERE i.status = 'storniert' AND ili.appointment_id IS NOT NULL
+)
+SELECT s.invoice_id, s.appointment_id,
+       (SELECT COUNT(*) FROM budget_transactions bt
+         WHERE bt.appointment_id = s.appointment_id
+           AND bt.transaction_type = 'consumption') AS consumptions,
+       (SELECT COUNT(*) FROM budget_transactions bt
+         WHERE bt.appointment_id = s.appointment_id
+           AND bt.transaction_type = 'reversal') AS reversals
+FROM stornierte s
+ORDER BY s.invoice_id DESC;
+```
+Erwartet bei Bug: Zeilen mit `consumptions > 0` und `reversals = 0`.
+
+**Replit-Prompt.**
+> In `server/routes/billing.ts` erweitere den Storno-Endpoint (`PATCH /api/billing/:id/status` mit `status: "storniert"`, ab Zeile ~1111). Bevor die Stornorechnung committed wird, sammle alle `appointment_id`-Werte aus `invoice_line_items` der Original-Rechnung und rufe für jede `budgetLedgerStorage.reverseBudgetTransaction(appointmentId, { reason: 'invoice_storno', invoiceId, tx })` innerhalb derselben `db.transaction(...)` auf. Idempotenz: Wenn für einen Termin bereits ein `transaction_type = 'reversal'` (mit `reversed_transaction_id` einer existierenden consumption) gebucht ist, **nicht** noch einmal reversen. Falls eine `reverseAllForAppointment(appointmentId, tx)`-Hilfe in `server/storage/budget/transaction-storage.ts` noch nicht existiert, lege sie an: liest alle `consumption`-Transaktionen für die `appointment_id` ohne korrespondierendes Reversal und erzeugt für jede ein Reversal mit Negativbetrag und `reversed_transaction_id`. Schreibe Vitest-Test in `tests/billing/storno-budget-reversal.test.ts`: Termin → Dokumentation (Budget belastet) → Rechnung → Storno → erwartet `budget_summary` für Klient/Monat **identisch** zum Vor-Termin-Zustand.
+
+**Verifikation.**
+1. Neuer Test grün.
+2. Repro-SQL: keine `consumptions > 0 AND reversals = 0`-Zeilen mehr für neu stornierte Rechnungen.
+3. Manueller Smoke-Test in Replit-Preview: Klient mit knappem §45b-Budget → Termin abrechnen → Rechnung stornieren → Budget-Übersicht zeigt wieder ursprünglichen Restbetrag.
+
+---
+
+### K3 — Nachberechnung nach Storno: `alreadyInvoicedIds`-Filter unvollständig
+
+**Symptom & Risiko.** `server/routes/billing.ts:789-794` filtert `alreadyInvoicedIds` mit `status != 'storniert' AND invoiceType != 'stornorechnung'`. Das ist auf den ersten Blick korrekt, hat aber zwei Lücken: (1) Wenn ein Termin in einer Rechnung **R1** war und R1 storniert wurde, ist der Termin formal "nicht mehr abgerechnet" — bei der nächsten Generierung wird er erneut aufgenommen, aber **als reguläre Rechnung** statt als Nachberechnung (`isNachberechnung`-Flag falsch). (2) Wenn neue Termine zwischen R1-Storno und neuem Generate-Lauf hinzukommen, werden alle Termine in eine neue Rechnung gepackt — ohne Tracking, dass es eigentlich ein Re-Issue ist. Außerdem fehlt der Bezug auf K2: solange Reversals nicht laufen, kann hier still doppelt verrechnet werden.
+
+**Read-only Repro.**
+```sql
+-- Termine, die in mehr als einer aktiven (nicht-stornierten, nicht-storno-) Rechnung erscheinen
+SELECT ili.appointment_id, COUNT(DISTINCT i.id) AS active_invoices
+FROM invoice_line_items ili
+JOIN invoices i ON i.id = ili.invoice_id
+WHERE ili.appointment_id IS NOT NULL
+  AND i.status != 'storniert'
+  AND (i.invoice_type IS NULL OR i.invoice_type != 'stornorechnung')
+GROUP BY ili.appointment_id
+HAVING COUNT(DISTINCT i.id) > 1;
+```
+Erwartet bei Bug: nicht-leeres Ergebnis.
+
+**Replit-Prompt.**
+> In `server/routes/billing.ts` rund um Zeile 789 (`getAlreadyInvoicedAppointmentIds` und `isNachberechnung`-Logik) führe eine zusätzliche Kategorie ein: `previouslyInvoicedThenStornoedIds`. Diese Liste enthält Termine, die in mindestens einer stornierten oder Stornorechnung referenziert sind, aber aktuell in **keiner aktiven** Rechnung. Wenn `previouslyInvoicedThenStornoedIds.length > 0`, markiere die neue Rechnung als `invoiceType = 'nachberechnung'` und setze `referenced_storno_invoice_ids` (neues Spalten-Array oder JSON-Feld auf `invoices`) zur Nachvollziehbarkeit. Erweitere `tests/billing/billing-flow.test.ts` um einen Fall: Termin in R1 → R1 stornieren → neue Generierung → erwartet eine Rechnung mit `invoiceType='nachberechnung'` und korrektem Bezug. Stelle sicher, dass die SQL-Repro-Query oben nach diesem Fix bei allen Neuvorgängen leer bleibt.
+
+**Verifikation.**
+1. Repro-SQL leer für neu erzeugte Konstellationen.
+2. Test "Storno → Re-Generate" grün.
+3. Smoke: Termin abrechnen → stornieren → erneut abrechnen → in der UI klar als Nachberechnung erkennbar; PDF-Header zeigt korrekten Typ.
+
+---
+
+### K4 — Race Condition bei paralleler Termin-Dokumentation (FIFO ohne Row-Lock)
+
+**Symptom & Risiko.** `server/routes/appointment-documentation.ts:87-168` umhüllt zwar mit `db.transaction(...)`, aber `consumeFifo()` in `server/storage/budget/consumption-engine.ts` macht ein **Read-then-Write** auf `budget_allocations`/`budget_transactions` ohne Row-Lock. Zwei parallel dokumentierende Mitarbeiter auf demselben Klienten/Budget können beide einen Restbetrag > 0 sehen, beide buchen ab, in Summe wird **mehr verbraucht als vorhanden**. Bestehender Schutz: `pg_advisory_xact_lock(customer_id)` ist laut Doku im Budget-Ledger vorhanden — ist aber im Dokumentations-Pfad offensichtlich nicht konsistent angewandt (sonst hätte das Repro-Risiko nicht in der Tiefenanalyse Bestand).
+
+**Read-only Repro.**
+```sql
+-- Klienten, deren Summe verbraucht > Summe verfügbar (Allokation + Carryover) wurde
+WITH alloc AS (
+  SELECT customer_id, budget_type, SUM(amount_cents) AS allocated
+  FROM budget_allocations WHERE deleted_at IS NULL
+  GROUP BY 1,2
+),
+cons AS (
+  SELECT customer_id, budget_type, SUM(amount_cents) AS consumed
+  FROM budget_transactions
+  WHERE transaction_type = 'consumption'
+  GROUP BY 1,2
+)
+SELECT a.customer_id, a.budget_type, a.allocated, COALESCE(c.consumed,0) AS consumed,
+       a.allocated - COALESCE(c.consumed,0) AS rest
+FROM alloc a LEFT JOIN cons c USING (customer_id, budget_type)
+WHERE COALESCE(c.consumed,0) > a.allocated
+ORDER BY (a.allocated - COALESCE(c.consumed,0)) ASC;
+```
+Lasttest (lokal): zwei parallele `POST /api/appointment-documentation/:id` auf zwei Termine desselben Klienten mit Restbudget knapp unter Tageskosten — erwartet bei Bug: beide erfolgreich, Summe Verbrauch > Allokation.
+
+**Replit-Prompt.**
+> In `server/storage/budget/consumption-engine.ts` (`createCascadeConsumption`/`consumeFifo`) und `server/storage/budget/transaction-storage.ts` stelle sicher, dass **am Anfang der Transaktion** ein `pg_advisory_xact_lock(hashtext('customer_budget_' || customer_id))` aufgerufen wird, **bevor** verfügbare Allokationen gelesen werden. Akzeptiere und propagiere ein `tx`-Handle durch die Aufrufkette von `server/routes/appointment-documentation.ts:87-168` bis runter zu `consumeFifo`, damit Lock und Schreibvorgänge in derselben Transaktion liegen. Wenn der Lock-Helper noch nicht existiert, lege ihn als `acquireCustomerBudgetLock(tx, customerId)` in `server/storage/budget-ledger.ts` an. Schreibe Vitest-Test `tests/budget/parallel-documentation-race.test.ts`: zwei Termine an zwei `Promise.all`-Requests, Klient hat exakt für **einen** Termin Budget — erwartet: einer wird abgerechnet, der andere fällt in Privat-Anteil bzw. Hard-Block (je nach `acceptsPrivatePayment`), niemals beide aus dem Budget.
+
+**Verifikation.**
+1. Neuer Race-Test grün.
+2. Repro-SQL: keine Klienten mehr mit `consumed > allocated` (außer historisch dokumentierte Altfälle, die separat zu bereinigen sind).
+3. Smoke in Replit: zwei Sessions/Browser, gleichzeitig dokumentieren — UI zeigt korrektes Budget; nur ein Termin verbucht aus Budget.
+
+---
+
+### K5 — Timezone-Bugs `new Date(stringVar)` (CET vs UTC, 6 Prod-Stellen)
+
+**Symptom & Risiko.** Strings wie `"2026-04-30"` werden von `new Date(s)` als **UTC-Mitternacht** geparst. In CET/CEST verschiebt sich daraus der lokale Tag um −1 (bei `2026-04-30T00:00Z` ist es in Berlin schon der **30.04. 02:00**, aber ein nachfolgender `getDate()` ohne UTC-Spezifizierung kann je nach Codepfad den **29.04.** zurückgeben). Direkt betroffen sind: Carryover-Datumsabschnitte (`expiresAt = '2026-06-30'`), Termin-Filter pro Monat, Leistungsnachweis-Aggregation, Rechnungs-Periodik.
+
+**Read-only Repro.**
+```sql
+-- Termine, deren actual_start lokal in einem anderen Monat liegt als billing_year/month-Kopplung
+-- (Heuristik: Termine im Monatswechsel-Fenster 23:00-01:00 UTC)
+SELECT id, customer_id, scheduled_start, actual_start
+FROM appointments
+WHERE actual_start IS NOT NULL
+  AND (EXTRACT(HOUR FROM actual_start AT TIME ZONE 'UTC') = 23
+       OR EXTRACT(HOUR FROM actual_start AT TIME ZONE 'UTC') = 0)
+ORDER BY actual_start DESC LIMIT 100;
+```
+Manueller Repro: in dev-DB einen Termin mit Datum `2026-06-30` anlegen, Carryover-Verfall prüfen — bei Bug verfällt der Carryover einen Tag früher/später je nach Server-TZ.
+
+**Replit-Prompt.**
+> Erstelle (falls nicht vorhanden) `shared/utils/dates.ts` mit den Helpers `parseLocalDate(s: string): Date` (interpretiert `YYYY-MM-DD` als lokales Datum in `Europe/Berlin`, Mitternacht), `formatLocalDate(d: Date): string` und `startOfMonthLocal(year, month)` / `endOfMonthLocal(year, month)`. Suche in `server/`, `client/src/` und `shared/` nach allen `new Date(` Aufrufen, die einen **String** entgegennehmen, und ersetze sie durch `parseLocalDate(...)` an allen Stellen, die ein lokales Kalenderdatum semantisch meinen (Carryover-Expiry, Termin-Datum-Filter, Billing-Period, Leistungsnachweis-Monat). Lasse `new Date(...)` mit ISO-String mit Zeitzonen-Offset (z. B. aus DB-Reads, `timestamp with time zone`) unverändert. Nutze die bestehenden Listen aus `TIEFENANALYSE_REFACTORING_2026-04-18.md` Abschnitt **K2** als Startpunkt — alle dort genannten Stellen müssen abgedeckt sein. Schreibe Vitest in `tests/utils/dates.test.ts`: deckt CET- und CEST-Übergang ab (DST-Wechsel März/Oktober).
+
+**Verifikation.**
+1. Test `tests/utils/dates.test.ts` grün, inkl. DST-Cases.
+2. `grep -rn "new Date(" server/ client/src/ shared/` zeigt nur noch ISO-mit-Offset oder Zahl-Argumente (keine `YYYY-MM-DD`-Strings mehr).
+3. Smoke: Termin am 30.06., Carryover-Verfall genau am 30.06. lokal um 23:59 (nicht 22:00 UTC verschoben).
+
+---
+
+### K6 — Mass-Assignment via `...req.body` (Budget- und Auth-Routen)
+
+**Symptom & Risiko.** In Budget-POST-Routen (`server/routes/budget.ts`) und im Register-Flow (`server/routes/auth.ts`) werden Body-Felder mit Spread (`...req.body`) ins Insert-Objekt übernommen. Angreifer können nicht vorgesehene Felder injizieren (z. B. `role`, `isAdmin`, `customerId`, `userId`, `createdByUserId`, `source`, `transactionType`). Auch ohne aktiven Angriff verursacht das stille Datenkonsistenz-Verschiebungen, wenn der Client mehr sendet als nötig.
+
+**Read-only Repro.** Code-Audit; keine SQL-Repro nötig. Optional: Logs nach ungewöhnlichen `source`/`transactionType`-Werten in `budget_transactions` durchsuchen.
+```sql
+SELECT DISTINCT source FROM budget_allocations;
+SELECT DISTINCT transaction_type FROM budget_transactions;
+```
+Erwartet: nur die im Schema definierten Enum-Werte; alles andere ist verdächtig.
+
+**Replit-Prompt.**
+> Suche in `server/routes/budget.ts` und `server/routes/auth.ts` (Register, Profile-Update) alle Stellen, an denen Body-Daten mit Object-Spread (`...req.body`) in DB-Inserts oder Updates fließen. Ersetze sie durch **explizit mit Zod gepickte** Felder: `const parsed = insertBudgetAllocationSchema.pick({ amountCents: true, budgetType: true, /* ... */ }).parse(req.body);` — und nur `parsed` weitergeben. Felder wie `userId`, `createdByUserId`, `customerId` (aus URL-Param), `source`, `transactionType` werden serverseitig gesetzt, **niemals aus Body übernommen**. Prüfe insbesondere `POST /api/budget/:customerId/initial-budget` (~Zeile 489-567), `POST /api/budget/:customerId/allocations`, `POST /api/budget/:customerId/transactions`, sowie Auth-`register`/`update-profile`. Schreibe Vitest in `tests/security/mass-assignment.test.ts`: Request mit `role: 'admin'` und `isAdmin: true` im Body — erwartet: Felder ignoriert, User bekommt Default-Rolle.
+
+**Verifikation.**
+1. Mass-Assignment-Test grün.
+2. Code-Review: kein `...req.body` mehr in den genannten Files.
+3. Smoke: Privilege-Escalation-Versuch via curl scheitert.
+
+---
+
+### K7 — Write-Off bei Carryover-Expiry ohne DB-Unique-Constraint
+
+**Symptom & Risiko.** `server/storage/budget/allocation-storage.ts:859-897` (`processExpiredCarryover`) erzeugt `write_off`-Transaktionen für abgelaufene §45b-Carryovers. Schutz im Code: ein In-Memory-`Set` `writtenOffAllocationIds`. **Aber kein** DB-Unique-Constraint auf `(allocation_id, transaction_type='write_off')`. Wenn die Funktion zweimal parallel oder kurz hintereinander aufgerufen wird (sie wird synchron vor jedem Budget-Lookup aufgerufen), kann ein Allocation **doppelt abgeschrieben** werden — Restbudget verschwindet zweimal.
+
+**Read-only Repro.**
+```sql
+-- Allokationen mit mehr als einem write_off
+SELECT bt.allocation_id, COUNT(*) AS write_offs, SUM(bt.amount_cents) AS total
+FROM budget_transactions bt
+WHERE bt.transaction_type = 'write_off'
+GROUP BY bt.allocation_id
+HAVING COUNT(*) > 1;
+```
+Erwartet bei Bug: Allokationen mit `write_offs >= 2`.
+
+**Replit-Prompt.**
+> Lege in `shared/schema/budget.ts` einen partiellen Unique-Index auf `budget_transactions(allocation_id) WHERE transaction_type = 'write_off' AND allocation_id IS NOT NULL` an (Drizzle: `uniqueIndex('budget_tx_writeoff_unique').on(...).where(...)`). Generiere die Migration in `migrations/`. In `server/storage/budget/allocation-storage.ts:859-897` (`processExpiredCarryover`) ändere den Insert auf `onConflictDoNothing()` mit Targeting auf den neuen Index, sodass parallele Aufrufe robust idempotent sind. Davor: schreibe einen einmaligen Bereinigungs-Migrationsschritt, der bestehende doppelte Write-Offs identifiziert und nur den ältesten behält (oder erzeuge einen Reversal für die Duplikate, je nach Audit-Anforderung — bitte mit User abstimmen, wenn Duplikate vorhanden). Schreibe Vitest `tests/budget/writeoff-idempotent.test.ts`: zweifaches `processExpiredCarryover` parallel — erwartet genau ein Write-Off pro Allokation.
+
+**Verifikation.**
+1. Idempotenz-Test grün.
+2. Repro-SQL nach Migration: leer.
+3. Smoke: Allocation knapp vor Expiry → manueller Trigger zweimal in Folge → genau ein Write-Off.
+
+---
+
+### K8 — Termin-Änderung nach Leistungsnachweis-Unterschrift nicht hart verhindert
+
+**Symptom & Risiko.** `isAppointmentLocked()` in `server/storage/service-records-storage.ts` wird zwar bei `PATCH /api/appointments/:id` (`server/routes/appointments.ts:180-200`) geprüft, **aber** der Update läuft trotzdem teilweise durch (z. B. weiche Felder), und für **gelockte** Termine sind Datums-/Service-Änderungen nicht zuverlässig blockiert. Wenn ein Termin in einem signierten LN ist, darf sich das **abrechnungsrelevante** Profil (Datum, Dauer, Services, Kilometer) nicht mehr ändern. Geschieht es doch, weicht das PDF von der DB ab, und die Rechnung wird mit anderem Datum/Betrag generiert als der LN.
+
+**Read-only Repro.**
+```sql
+-- Termine in signierten Leistungsnachweisen, deren updated_at NACH dem signed_at des LN liegt
+SELECT a.id AS appointment_id, a.updated_at AS appt_updated,
+       msr.id AS service_record_id, msr.status, msr.employee_signed_at, msr.customer_signed_at
+FROM appointments a
+JOIN service_record_appointments sra ON sra.appointment_id = a.id
+JOIN monthly_service_records msr ON msr.id = sra.service_record_id
+WHERE msr.status IN ('employee_signed', 'completed')
+  AND a.updated_at > COALESCE(msr.customer_signed_at, msr.employee_signed_at)
+  AND a.deleted_at IS NULL
+ORDER BY a.updated_at DESC;
+```
+Erwartet bei Bug: nicht-leeres Ergebnis.
+
+**Replit-Prompt.**
+> In `server/routes/appointments.ts` (PATCH-Handler `updateAppointment`, Zeilen 180-200) ergänze einen harten Guard: Vor jedem Schreibvorgang `isAppointmentLocked(appointmentId)` aufrufen; wenn `true`, nur Whitelist-Felder zulassen (Notes, interne Flags), **niemals** `scheduledStart`, `scheduledEnd`, `actualStart`, `actualEnd`, `services`, `travelKilometers`, `customerKilometers`, `customerId`, `assignedEmployeeId`, `performedByEmployeeId`. Wirf bei Verstoß `AppError.conflict('Termin ist über signierten Leistungsnachweis gesperrt')`. Spiegle dieselbe Logik in `server/routes/appointment-documentation.ts` (auch Re-Dokumentation darf gelockte Felder nicht ändern). Erweitere `tests/appointments.test.ts` (oder neu `tests/appointments-lock.test.ts`): Termin in completed LN → PATCH mit Datums-Änderung → erwartet 409. Frontend-Hinweis in `client/src/pages/edit-appointment.tsx`: bei `lock=true` Felder disablen mit Tooltip "Im signierten Leistungsnachweis enthalten — nicht mehr änderbar."
+
+**Verifikation.**
+1. Lock-Test grün.
+2. Repro-SQL: leer für neue Vorgänge.
+3. Smoke: signierter LN → Termin in UI öffnen → relevante Felder disabled, PATCH via curl → 409.
+
+---
+
+## Was geschieht nach ExitPlanMode
+
+1. **Du verifizierst jeweils die Repro-SQLs** in deiner Replit-DB und entscheidest, welche der acht Fixes du angehen willst (manche treffen euch evtl. faktisch nicht — z. B. wenn Repro für K1/K7 leer ist, sind die Fixes trotzdem zu empfehlen, aber der Aufwand ist priorisierbar).
+2. **Pro Fix gibst du den Replit-Prompt** an deinen Replit-Agenten. Ich kann auf Wunsch (a) Prompts feiner zerlegen, (b) Fix manuell Code-Block-für-Code-Block ausarbeiten, oder (c) den nächsten Fund nach deiner Wahl detaillierter ausführen.
+3. **Nach jedem applied Fix** prüfen wir gemeinsam Verifikation (Test-Lauf + Repro-SQL re-run + Smoke).
+4. Anschließend gehen wir in **Phase 3 (HOCH)** und ich ergänze für jeden HOCH-Fund einen analogen Block.
