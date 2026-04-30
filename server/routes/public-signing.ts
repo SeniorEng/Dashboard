@@ -69,8 +69,18 @@ router.get("/sign/:token", asyncHandler("Unterschrifts-Link konnte nicht geladen
   });
 }));
 
+const SIGNATURE_DATA_URL_RE = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/]+=*$/;
+const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
+
 const signDocumentSchema = z.object({
-  signatureData: z.string().min(1, "Unterschrift ist erforderlich"),
+  signatureData: z
+    .string()
+    .min(1, "Unterschrift ist erforderlich")
+    .max(MAX_SIGNATURE_BYTES, "Unterschriftsbild ist zu groß (max. 2 MB)")
+    .refine(
+      (val) => SIGNATURE_DATA_URL_RE.test(val),
+      "Unterschriftsdaten müssen ein base64-kodiertes PNG-, JPEG- oder WebP-Bild sein"
+    ),
   signingLocation: z.string().nullable().optional(),
 });
 
