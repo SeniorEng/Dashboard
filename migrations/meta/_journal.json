@@ -92,6 +92,13 @@
       "when": 1777104781298,
       "tag": "0012_add_customer_price_validfrom_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777561346761,
+      "tag": "0013_add_writeoff_unique_idx",
+      "breakpoints": true
     }
   ]
 }
