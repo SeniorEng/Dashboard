@@ -9,6 +9,7 @@ import { auditService } from "../services/audit";
 import { db } from "../lib/db";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { getPrimaryCustomerIds } from "../storage/customers-storage";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 const router = Router();
 
@@ -340,7 +341,9 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
     });
   }
 
-  const appointmentDate = new Date(appointment.date as string);
+  // appointment.date ist YYYY-MM-DD; parseLocalDate vermeidet UTC-Off-by-one
+  // (z. B. Server in America/New_York wertet "2026-05-01" als 30.04. CET).
+  const appointmentDate = parseLocalDate(appointment.date as string);
   const year = appointmentDate.getFullYear();
   const month = appointmentDate.getMonth() + 1;
   

@@ -3,6 +3,7 @@ import { auditLog, type AuditAction, type AuditEntityType, type AuditLogFilter }
 import type { ActorRole } from "../lib/team-lead";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { users } from "@shared/schema";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 class AuditService {
   async log(
@@ -212,10 +213,15 @@ class AuditService {
       conditions.push(eq(auditLog.action, filter.action));
     }
     if (filter.from) {
-      conditions.push(gte(auditLog.createdAt, new Date(filter.from)));
+      // Filter ist YYYY-MM-DD; parseLocalDate liefert lokale Mitternacht
+      // und ist damit deterministisch unabhängig von der Server-TZ.
+      conditions.push(gte(auditLog.createdAt, parseLocalDate(filter.from)));
     }
     if (filter.to) {
-      conditions.push(lte(auditLog.createdAt, new Date(filter.to)));
+      // "to" ist einschließendes Tagesende der lokalen Zeit.
+      const endOfDay = parseLocalDate(filter.to);
+      endOfDay.setHours(23, 59, 59, 999);
+      conditions.push(lte(auditLog.createdAt, endOfDay));
     }
     if (filter.batchId) {
       conditions.push(sql`${auditLog.metadata}->>'batchId' = ${filter.batchId}`);

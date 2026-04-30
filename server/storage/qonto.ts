@@ -11,6 +11,7 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull, isNotNull, desc, gte, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 interface PaymentAdviceWithItems extends PaymentAdvice {
   items: PaymentAdviceItem[];
@@ -27,10 +28,17 @@ class QontoStorage {
     const conditions = [eq(qontoTransactions.side, "credit")];
 
     if (filters.from) {
-      conditions.push(gte(qontoTransactions.emittedAt, new Date(filters.from)));
+      // Filter kommt als YYYY-MM-DD-String. Wir vergleichen gegen
+      // emittedAt (timestamptz). parseLocalDate() liefert lokale
+      // Mitternacht und ist damit unabhängig von der Server-TZ
+      // konsistent zu allen anderen Datums-Operationen im Projekt.
+      conditions.push(gte(qontoTransactions.emittedAt, parseLocalDate(filters.from)));
     }
     if (filters.to) {
-      conditions.push(lte(qontoTransactions.emittedAt, new Date(filters.to + "T23:59:59")));
+      // "to" ist ein einschließendes Tagesende: lokale 23:59:59 des Tages.
+      const endOfDay = parseLocalDate(filters.to);
+      endOfDay.setHours(23, 59, 59, 999);
+      conditions.push(lte(qontoTransactions.emittedAt, endOfDay));
     }
     if (filters.matched === "matched") {
       conditions.push(isNotNull(qontoTransactions.matchedInvoiceId));

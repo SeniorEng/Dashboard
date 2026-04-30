@@ -18,12 +18,23 @@ interface CallScheduleResult {
 }
 
 function getBerlinTime(date: Date): { day: number; hour: number } {
-  const berlinStr = date.toLocaleString("en-US", { timeZone: "Europe/Berlin", weekday: "short", hour: "numeric", hour12: false });
-  const parts = berlinStr.split(", ");
+  // K5: TZ-neutral via Intl.DateTimeFormat.formatToParts statt
+  // toLocaleString-String-Parsing. So entfällt jede Abhängigkeit von
+  // der Server-TZ.
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Berlin",
+    weekday: "short",
+    hour: "numeric",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(date);
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "Sun";
+  const hourStr = parts.find((p) => p.type === "hour")?.value ?? "0";
   const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  const day = dayMap[parts[0]] ?? date.getDay();
-  const hour = parseInt(parts[1], 10);
-  return { day, hour };
+  const hourParsed = parseInt(hourStr, 10);
+  // Intl liefert in en-US/hour12:false bei Mitternacht "24" statt "0".
+  const hour = Number.isFinite(hourParsed) ? hourParsed % 24 : 0;
+  return { day: dayMap[weekday] ?? date.getUTCDay(), hour };
 }
 
 function getNextMondayAt9Berlin(referenceDate: Date): Date {
@@ -33,21 +44,36 @@ function getNextMondayAt9Berlin(referenceDate: Date): Date {
   const mondayCallAt = new Date(referenceDate);
   mondayCallAt.setDate(mondayCallAt.getDate() + daysUntilMonday);
 
-  const mondayStr = mondayCallAt.toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" });
+  // Berlin-Kalenderdatum des Zieltags TZ-neutral extrahieren.
+  const dateFmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+  const mondayStr = dateFmt.format(mondayCallAt);
   const [year, month, dayOfMonth] = mondayStr.split("-").map(Number);
 
-  const berlinMondayMorning = new Date(`${year}-${String(month).padStart(2, "0")}-${String(dayOfMonth).padStart(2, "0")}T${String(MONDAY_CALL_HOUR).padStart(2, "0")}:00:00`);
-
-  const berlinOffset = getBerlinUtcOffsetMs(berlinMondayMorning);
-  return new Date(berlinMondayMorning.getTime() - berlinOffset);
+  // 09:00 Berlin in UTC umrechnen: utc = 09:00_local − berlinOffset.
+  // Den Offset lesen wir am Zieltag selbst, damit DST-Übergänge korrekt
+  // berücksichtigt werden.
+  const utcGuess = Date.UTC(year, month - 1, dayOfMonth, MONDAY_CALL_HOUR, 0, 0);
+  const offsetMs = getBerlinUtcOffsetMs(new Date(utcGuess));
+  return new Date(utcGuess - offsetMs);
 }
 
 function getBerlinUtcOffsetMs(date: Date): number {
-  const utcStr = date.toLocaleString("en-US", { timeZone: "UTC" });
-  const berlinStr = date.toLocaleString("en-US", { timeZone: "Europe/Berlin" });
-  const utcDate = new Date(utcStr);
-  const berlinDate = new Date(berlinStr);
-  return berlinDate.getTime() - utcDate.getTime();
+  // K5: Berlin-Offset via Intl.DateTimeFormat shortOffset, statt zwei
+  // toLocaleString-Strings durch `new Date()` zu schicken (das
+  // funktionierte mathematisch durch Differenzbildung, hing aber
+  // implizit am Roundtrip-Verhalten der ICU-Locale).
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Berlin",
+    timeZoneName: "shortOffset",
+  });
+  const parts = fmt.formatToParts(date);
+  const tzName = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT+0";
+  const match = tzName.match(/GMT([+-])(\d+)(?::(\d+))?/);
+  if (!match) return 0;
+  const sign = match[1] === "-" ? -1 : 1;
+  const hours = parseInt(match[2], 10);
+  const minutes = match[3] ? parseInt(match[3], 10) : 0;
+  return sign * (hours * 60 + minutes) * 60 * 1000;
 }
 
 export function calculateNextCallTime(now: Date): CallScheduleResult {

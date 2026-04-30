@@ -27,7 +27,7 @@ import { documentDeliveries } from "@shared/schema";
 import { eq, and, gte, lte, isNull, inArray, ne, notInArray, or, desc } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
-import { formatDateForDisplay, formatDateISO, todayISO } from "@shared/utils/datetime";
+import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
 import {
@@ -1317,10 +1317,10 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
 
     pdfData.signatures = signedRecords.map(r => ({
       employeeSignatureData: r.employeeSignatureData,
-      employeeSignedAt: r.employeeSignedAt ? formatDateForDisplay(formatDateISO(r.employeeSignedAt instanceof Date ? r.employeeSignedAt : new Date(r.employeeSignedAt))) : null,
+      employeeSignedAt: r.employeeSignedAt ? formatDateForDisplay(formatDateISO(r.employeeSignedAt instanceof Date ? r.employeeSignedAt : parseTimestamp(r.employeeSignedAt))) : null,
       employeeName: employeeMap.get(r.employeeId) || null,
       customerSignatureData: r.customerSignatureData,
-      customerSignedAt: r.customerSignedAt ? formatDateForDisplay(formatDateISO(r.customerSignedAt instanceof Date ? r.customerSignedAt : new Date(r.customerSignedAt))) : null,
+      customerSignedAt: r.customerSignedAt ? formatDateForDisplay(formatDateISO(r.customerSignedAt instanceof Date ? r.customerSignedAt : parseTimestamp(r.customerSignedAt))) : null,
       customerName: invoice.customerName || invoice.recipientName,
       appointmentIds: appointmentsByRecord.get(r.id) ?? [],
       recordType: r.recordType,

@@ -1,6 +1,6 @@
 import type { InvoicePdfData } from "./pdf-generator";
 import { log } from "./log";
-import { parseLocalDate } from "@shared/utils/datetime";
+import { parseLocalDate, parseTimestamp } from "@shared/utils/datetime";
 
 interface ZugferdInvoice {
   toXML(): Promise<string>;
@@ -38,7 +38,10 @@ function parseDateString(dateStr: string): Date {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     return parseLocalDate(dateStr);
   }
-  return new Date(dateStr);
+  // Restfälle (vollständige ISO-8601-Timestamps mit Zeitzone, z. B. von
+  // timestamptz-Spalten); parseTimestamp wirft kontrolliert für unsichere
+  // Eingaben und vermeidet so off-by-one-Fehler bei abweichender Server-TZ.
+  return parseTimestamp(dateStr);
 }
 
 function centsToDecimal(cents: number): string {
