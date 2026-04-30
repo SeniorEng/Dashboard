@@ -1,7 +1,7 @@
 // Race-Conditions auf Rechnungsnummer-Vergabe + Storno-Atomarität.
 // INC-1.1: 10 parallele POST /generate für SAME customer/month — keine 500/UNIQUE,
-//          mindestens 2 erfolgreiche Vergaben (beweist parallele Nummern-Vergabe),
-//          alle vergebenen RE-Nummern eindeutig.
+//          alle 10 Vergaben erfolgreich, alle Nummern eindeutig und lückenlos
+//          aufeinanderfolgend (vitest fileParallelism: false → kein Test-Cross-Talk).
 // INC-2.1: 5 parallele Storni unterschiedlicher Originale -> 5 eindeutige
 //          Stornorechnungen ohne Waisen.
 // INC-2.2: 5 parallele Storni DERSELBEN Originalrechnung -> genau 1 Erfolg,
@@ -253,10 +253,14 @@ afterAll(async () => {
 });
 
 describe("INC-1: Parallele Rechnungs-Generierung", () => {
-  it("INC-1.1 — 10 parallele POST /api/billing/generate für SAME customer/month vergeben keine Duplikat-Nummern (kein 500/UNIQUE)", async () => {
+  it("INC-1.1 — 10 parallele POST /api/billing/generate für SAME customer/month vergeben 10 eindeutige, lückenlose Nummern (kein 500/UNIQUE)", async () => {
     // SAME customer/month-Szenario simuliert "Mehrere Tabs / Doppelklick".
     // Ohne Advisory-Lock würden konkurrierende Tx denselben MAX(invoiceNumber)
     // lesen und beim Insert in einen UNIQUE-Constraint-500 laufen.
+    // Da der Standard-Generate-Pfad keinen "schon abgerechnet"-Check innerhalb
+    // der Tx hat, dürfen alle 10 Tx eine eigene Rechnung mit eigener Nummer
+    // erstellen → strikte Assertion: 10 Erfolge, 10 eindeutige Nummern,
+    // lückenlose Sequenz.
     const prepared = await prepareCustomerForInvoice("SAME");
     const billingYear = prepared.year;
 
@@ -287,8 +291,10 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
       `Keine 500er erwartet (UNIQUE-Race-Symptom), bekam: ${fiveHundreds.map((r) => JSON.stringify(r.data)).join(" | ")}`,
     ).toBe(0);
 
-    // Alle erfolgreich vergebenen Rechnungsnummern sind eindeutig.
+    // Alle 10 Calls müssen 200/201 liefern — sonst wurde der Race-Pfad nicht
+    // wirklich exerziert.
     const successNumbers: string[] = [];
+    const nonSuccessSummary: string[] = [];
     for (const r of responses) {
       if (r.status === 200 || r.status === 201) {
         const data = r.data as GenerateResponse;
@@ -297,25 +303,43 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
           successNumbers.push(inv.invoiceNumber);
           cleanupInvoiceIds.push(inv.id);
         }
+      } else {
+        nonSuccessSummary.push(`${r.status}:${JSON.stringify(r.data)}`);
       }
     }
-    // Mindestens 2 erfolgreiche Vergaben — beweist, dass mehrere Tx den
-    // Nummern-Codepfad parallel erreicht haben (sonst wäre der Lock-Test
-    // semantisch leer).
     expect(
       successNumbers.length,
-      `Mindestens 2 erfolgreiche Generierungen erwartet (sonst kein Beweis für parallele Vergabe), bekam: ${successNumbers.length}`,
-    ).toBeGreaterThanOrEqual(2);
+      `Erwartet 10 erfolgreiche parallele Vergaben. Nicht-Erfolge: ${nonSuccessSummary.join(" | ") || "(keine)"}`,
+    ).toBe(10);
+
+    // Eindeutigkeit aller vergebenen Nummern.
     const unique = new Set(successNumbers);
     expect(
       unique.size,
       `Alle vergebenen RE-Nummern müssen eindeutig sein, bekam: ${successNumbers.join(", ")}`,
-    ).toBe(successNumbers.length);
+    ).toBe(10);
 
-    // Format-Check: jede Nummer matcht RE-YYYY-NNNN für den richtigen Year.
-    for (const n of successNumbers) {
-      const parsed = parseSequenceFromInvoiceNumber(n);
-      expect(parsed.year, `Year-Komponente von ${n}`).toBe(billingYear);
+    // Lückenlose Sequenz: vitest fileParallelism: false, also dürfen keine
+    // anderen Tests parallel Nummern fressen. Die 10 Sequenzen müssen exakt
+    // 10 aufeinanderfolgende Werte ergeben.
+    const sequences = successNumbers
+      .map((n) => parseSequenceFromInvoiceNumber(n))
+      .map((p) => {
+        expect(p.year, `Year-Komponente`).toBe(billingYear);
+        return p.sequence;
+      })
+      .sort((a, b) => a - b);
+    const minSeq = sequences[0];
+    const maxSeq = sequences[sequences.length - 1];
+    expect(
+      maxSeq - minSeq,
+      `10 parallele Vergaben müssen 10 aufeinanderfolgende Sequenzen liefern (sortiert: ${sequences.join(", ")})`,
+    ).toBe(9);
+    for (let i = 1; i < sequences.length; i++) {
+      expect(
+        sequences[i],
+        `Lücke zwischen ${sequences[i - 1]} und ${sequences[i]} in ${sequences.join(", ")}`,
+      ).toBe(sequences[i - 1] + 1);
     }
   }, 120_000);
 });
