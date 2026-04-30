@@ -380,11 +380,11 @@ export async function createConsumptionTransaction(params: {
   userId?: number;
 }, outerTx?: DbClient): Promise<BudgetTransaction> {
   const doWork = async (tx: DbClient): Promise<BudgetTransaction> => {
-    // K4: Advisory-Lock am Anfang BEIDER Pfade (Cascade mit Cost=0 und
-    // hasUsage=true). Namespace-Hash via hashtext('budget_consumption_'||id)
-    // verhindert Kollisionen mit anderen Lock-Konsumenten, die die rohe
-    // customerId verwenden.
-    await (tx as typeof db).execute(
+    // Pro-Kunde-Advisory-Lock serialisiert konkurrierende Konsumbuchungen
+    // (inklusive Cascade-Pfad mit Cost=0), damit das Budget nicht überbucht
+    // werden kann. Namespace-Hash vermeidet Kollisionen mit anderen Locks,
+    // die nur die rohe customerId verwenden.
+    await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${params.customerId}::text))`
     );
 

@@ -1,6 +1,6 @@
 import type { db } from "../../lib/db";
 
-export type DbClient = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete' | 'transaction'>;
+export type DbClient = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete' | 'transaction' | 'execute'>;
 
 export interface BudgetSummary {
   customerId: number;

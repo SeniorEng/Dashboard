@@ -884,10 +884,11 @@ async function processExpiredCarryover(customerId: number, _tx?: DbClient): Prom
 
     if (remaining <= 0) continue;
 
-    // K7: Idempotenter Write-Off — die partielle UNIQUE-Constraint
-    // budget_transactions_write_off_unique_idx schützt auf DB-Ebene gegen
-    // doppelte Verfalls-Buchungen für dieselbe Allokation. Bei Konflikt
-    // liefert RETURNING ein leeres Array, ohne die Transaktion zu poisonieren.
+    // Idempotenter Write-Off: Die partielle UNIQUE auf
+    // (customer_id, allocation_id) WHERE transaction_type='write_off'
+    // schützt auf DB-Ebene gegen doppelte Verfalls-Buchungen pro Allokation.
+    // Bei Konflikt liefert RETURNING ein leeres Array, ohne die Transaktion
+    // zu poisonieren.
     const writeOff = await d.insert(budgetTransactions).values({
       customerId,
       budgetType: "entlastungsbetrag_45b",
