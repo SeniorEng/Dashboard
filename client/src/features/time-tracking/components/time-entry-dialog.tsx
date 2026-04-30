@@ -36,6 +36,7 @@ export interface TimeEntryFormContentProps {
   testIdPrefix?: string;
   isAdmin?: boolean;
   employeeOptions?: EmployeeOption[];
+  hideFooter?: boolean;
 }
 
 export interface TimeEntryDialogProps {
@@ -69,6 +70,7 @@ export function TimeEntryFormContent({
   testIdPrefix = "",
   isAdmin = false,
   employeeOptions = [],
+  hideFooter = false,
 }: TimeEntryFormContentProps) {
   const prefix = testIdPrefix ? `${testIdPrefix}-` : "";
 
@@ -205,31 +207,33 @@ export function TimeEntryFormContent({
         />
       </div>
 
-      <div className="flex justify-end gap-2 pt-4">
-        <Button
-          variant="outline"
-          onClick={onCancel}
-          className="min-h-[44px]"
-          data-testid={`${prefix}button-cancel`}
-        >
-          {cancelLabel}
-        </Button>
-        <Button
-          className="bg-teal-600 hover:bg-teal-700 min-h-[44px]"
-          onClick={onSubmit}
-          disabled={isSubmitting || validation.hasError}
-          data-testid={`${prefix}button-save`}
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-              Speichern...
-            </>
-          ) : (
-            submitLabel
-          )}
-        </Button>
-      </div>
+      {!hideFooter && (
+        <div className="flex justify-end gap-2 pt-4">
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            className="min-h-[44px]"
+            data-testid={`${prefix}button-cancel`}
+          >
+            {cancelLabel}
+          </Button>
+          <Button
+            className="bg-teal-600 hover:bg-teal-700 min-h-[44px]"
+            onClick={onSubmit}
+            disabled={isSubmitting || validation.hasError}
+            data-testid={`${prefix}button-save`}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                Speichern...
+              </>
+            ) : (
+              submitLabel
+            )}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

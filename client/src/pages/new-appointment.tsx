@@ -580,6 +580,16 @@ export default function NewAppointment() {
                 {form.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
                 {form.seriesEnabled ? "Terminserie erstellen" : "Kundentermin erstellen"}
               </Button>
+              <Button
+                variant="outline"
+                className="w-full mt-2"
+                size="lg"
+                onClick={handleBackNavigation}
+                disabled={form.isPending}
+                data-testid="button-cancel-kundentermin"
+              >
+                Abbrechen
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -972,6 +982,16 @@ export default function NewAppointment() {
                     {form.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
                     Erstberatung erstellen
                   </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full mt-2"
+                    size="lg"
+                    onClick={handleBackNavigation}
+                    disabled={form.isPending}
+                    data-testid="button-cancel-erstberatung"
+                  >
+                    Abbrechen
+                  </Button>
                 </>
               )}
             </CardContent>
@@ -999,7 +1019,28 @@ export default function NewAppointment() {
                 testIdPrefix="entry"
                 isAdmin={isAdmin}
                 employeeOptions={entryEmployeeOptions}
+                hideFooter
               />
+              <Button
+                className={`w-full mt-4 ${componentStyles.btnPrimary}`}
+                size="lg"
+                onClick={handleEntrySubmit}
+                disabled={createEntryMutation.isPending || entryValidation.hasError}
+                data-testid="button-create-zeiteintrag"
+              >
+                {createEntryMutation.isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
+                Eintrag erstellen
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full mt-2"
+                size="lg"
+                onClick={handleBackNavigation}
+                disabled={createEntryMutation.isPending}
+                data-testid="button-cancel-zeiteintrag"
+              >
+                Abbrechen
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
