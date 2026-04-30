@@ -30,6 +30,24 @@ import { resolveLogoToDataUrl } from "../../services/logo-resolver";
 
 const router = Router();
 
+function isPrivilegedTarget(targetUser: { isAdmin?: boolean | null; isSuperAdmin?: boolean | null }): boolean {
+  return !!targetUser.isAdmin || !!targetUser.isSuperAdmin;
+}
+
+function denyIfPrivilegedTarget(targetUser: { isAdmin?: boolean | null; isSuperAdmin?: boolean | null }, req: Request, res: Response): boolean {
+  if (isPrivilegedTarget(targetUser) && !req.user!.isSuperAdmin) {
+    const isSuperAdmin = !!targetUser.isSuperAdmin;
+    res.status(403).json({
+      error: "FORBIDDEN",
+      message: isSuperAdmin
+        ? "Aktionen auf den Hauptadministrator-Account sind nur dem Hauptadministrator erlaubt"
+        : "Nur der Hauptadministrator kann Aktionen auf andere Administrator-Accounts durchführen",
+    });
+    return true;
+  }
+  return false;
+}
+
 router.get("/users", asyncHandler("Benutzer konnten nicht geladen werden", async (_req: Request, res: Response) => {
   const cached = usersCache.getAllUsers();
   if (cached) {
@@ -286,6 +304,8 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
     return;
   }
 
+  if (denyIfPrivilegedTarget(currentUserBefore, req, res)) return;
+
   const nextIsAdmin = result.data.isAdmin ?? currentUserBefore.isAdmin;
   const nextIsSuperAdmin = currentUserBefore.isSuperAdmin;
   const requestedIsTeamLead = result.data.isTeamLead ?? currentUserBefore.isTeamLead;
@@ -384,6 +404,14 @@ router.post("/users/:id/reset-password", asyncHandler("Passwort konnte nicht zur
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
 
+  const targetUser = await authService.getUser(id);
+  if (!targetUser) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Benutzer nicht gefunden" });
+    return;
+  }
+
+  if (denyIfPrivilegedTarget(targetUser, req, res)) return;
+
   const parsed = adminResetPasswordSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -461,6 +489,14 @@ router.post("/users/:id/deactivate", asyncHandler("Benutzer konnte nicht deaktiv
     return;
   }
 
+  const targetUser = await authService.getUser(id);
+  if (!targetUser) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Benutzer nicht gefunden" });
+    return;
+  }
+
+  if (denyIfPrivilegedTarget(targetUser, req, res)) return;
+
   const success = await authService.deactivateUser(id);
   if (!success) {
     res.status(404).json({
@@ -526,6 +562,14 @@ router.delete("/users/:id", asyncHandler("Benutzer konnte nicht deaktiviert werd
     return;
   }
 
+  const targetUser = await authService.getUser(id);
+  if (!targetUser) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Benutzer nicht gefunden" });
+    return;
+  }
+
+  if (denyIfPrivilegedTarget(targetUser, req, res)) return;
+
   const success = await authService.deleteUser(id);
   if (!success) {
     res.status(404).json({
@@ -558,6 +602,8 @@ router.post("/users/:id/anonymize", asyncHandler("Mitarbeiter konnte nicht anony
     res.status(404).json({ error: "NOT_FOUND", message: "Benutzer nicht gefunden" });
     return;
   }
+
+  if (denyIfPrivilegedTarget(user, req, res)) return;
 
   if (user.isActive) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: "Nur inaktive Mitarbeiter können anonymisiert werden. Bitte deaktivieren Sie den Mitarbeiter zuerst." });
