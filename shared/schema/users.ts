@@ -35,8 +35,6 @@ export const users = pgTable("users", {
   employmentType: text("employment_type").notNull().default("sozialversicherungspflichtig"), // "minijobber" | "sozialversicherungspflichtig"
   weeklyWorkDays: integer("weekly_work_days").notNull().default(5),
   monthlyWorkHours: real("monthly_work_hours"),
-  lbnr: text("lbnr"),
-  personalnummer: text("personalnummer"),
   notfallkontaktName: text("notfallkontakt_name"),
   notfallkontaktTelefon: text("notfallkontakt_telefon"),
   notfallkontaktBeziehung: text("notfallkontakt_beziehung"),
@@ -203,8 +201,6 @@ export const insertUserSchema = z.object({
   employmentType: z.enum(EMPLOYMENT_TYPES).optional().default("sozialversicherungspflichtig"),
   weeklyWorkDays: z.number().int().min(1, "Mindestens 1 Arbeitstag pro Woche").max(7, "Maximal 7 Arbeitstage pro Woche").optional().default(5),
   monthlyWorkHours: z.number().min(1, "Mindestens 1 Stunde pro Monat").max(300, "Maximal 300 Stunden pro Monat").optional().nullable(),
-  lbnr: z.string().optional().nullable(),
-  personalnummer: z.string().optional().nullable(),
   roles: z.array(z.enum(EMPLOYEE_ROLES)).optional().default([]),
 });
 

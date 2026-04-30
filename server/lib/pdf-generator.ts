@@ -54,7 +54,6 @@ export interface InvoicePdfData {
     unitPriceCents: number;
     totalCents: number;
     employeeName: string | null;
-    employeeLbnr: string | null;
     appointmentNotes: string | null;
     serviceDetails: string | null;
   }[];
@@ -489,9 +488,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
   const allSorted = sortItems(data.lineItems);
   const employeeNames = Array.from(new Set(allSorted.map(i => i.employeeName).filter(Boolean))) as string[];
-  const employeeLbnrs = Array.from(new Set(allSorted.map(i => i.employeeLbnr).filter(Boolean))) as string[];
   const employeeLabel = employeeNames.length > 0 ? employeeNames.map(escapeHtml).join(", ") : "Leistungserbringer/in";
-  const lbnrLabel = employeeLbnrs.map(escapeHtml).join(", ");
 
   const hasMultipleLNs = data.signatures && data.signatures.length > 1 && data.signatures.some(s => s.appointmentIds.length > 0);
 
@@ -515,7 +512,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
       const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
       const sectionEmployeeName = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
-      const sectionEmployeeLbnr = sectionItems[0]?.employeeLbnr ? escapeHtml(sectionItems[0].employeeLbnr) : "";
       const sectionEmployeeQual = sig.employeeName && data.employeeQualifications ? data.employeeQualifications.get(sig.employeeName) || "" : "";
 
       sections.push(`
@@ -542,7 +538,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <div class="info-box">
           <div class="info-label">Leistungserbringer/in</div>
           <div class="info-value">${sectionEmployeeName}</div>
-          ${sectionEmployeeLbnr ? `<div style="font-size: 9pt;">LBNR: ${sectionEmployeeLbnr}</div>` : ""}
           ${sectionEmployeeQual ? `<div style="font-size: 9pt; color: #0d9488;">${escapeHtml(sectionEmployeeQual)}</div>` : ""}
         </div>
       </div>
@@ -698,7 +693,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     <div class="info-box">
       <div class="info-label">Leistungserbringer/in</div>
       <div class="info-value">${employeeLabel}</div>
-      ${lbnrLabel ? `<div style="font-size: 9pt;">LBNR: ${lbnrLabel}</div>` : ""}
       ${(() => {
         if (!data.employeeQualifications || data.employeeQualifications.size === 0) return "";
         const quals = employeeNames.map(n => data.employeeQualifications!.get(n)).filter(Boolean) as string[];

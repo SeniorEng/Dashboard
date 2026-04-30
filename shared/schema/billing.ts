@@ -77,7 +77,6 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   unitPriceCents: integer("unit_price_cents").notNull(),
   totalCents: integer("total_cents").notNull(),
   employeeName: text("employee_name"),
-  employeeLbnr: text("employee_lbnr"),
   appointmentNotes: text("appointment_notes"),
   serviceDetails: text("service_details"),
   sortOrder: integer("sort_order").notNull().default(0),

@@ -24,8 +24,6 @@ export interface UserData {
   employmentType: string;
   weeklyWorkDays: number;
   monthlyWorkHours: number | null;
-  lbnr: string | null;
-  personalnummer: string | null;
   roles: string[];
   whatsappEnabled?: boolean;
   createdAt: string;
@@ -53,8 +51,6 @@ export interface UserFormData {
   employmentType: string;
   weeklyWorkDays: number;
   monthlyWorkHours?: number | null;
-  lbnr?: string | null;
-  personalnummer?: string | null;
   roles: string[];
   whatsappEnabled?: boolean;
 }

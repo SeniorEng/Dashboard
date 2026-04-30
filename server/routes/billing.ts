@@ -53,7 +53,6 @@ interface BuildLineItem extends Record<string, unknown> {
   unitPriceCents: number;
   totalCents: number;
   employeeName: string;
-  employeeLbnr: string;
   appointmentNotes: string | null;
   serviceDetails: string | null;
 }
@@ -163,11 +162,11 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
   }
 
   const employeeIds = [...new Set(appts.map(a => a.assignedEmployeeId || a.performedByEmployeeId).filter((id): id is number => id != null))];
-  const employeeMap = new Map<number, { displayName: string; lbnr: string }>();
+  const employeeMap = new Map<number, { displayName: string }>();
   if (employeeIds.length > 0) {
-    const emps = await db.select({ id: users.id, displayName: users.displayName, lbnr: users.lbnr }).from(users).where(inArray(users.id, employeeIds));
+    const emps = await db.select({ id: users.id, displayName: users.displayName }).from(users).where(inArray(users.id, employeeIds));
     for (const emp of emps) {
-      employeeMap.set(emp.id, { displayName: emp.displayName, lbnr: emp.lbnr || "" });
+      employeeMap.set(emp.id, { displayName: emp.displayName });
     }
   }
 
@@ -193,7 +192,6 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
     const emp = employeeId ? employeeMap.get(employeeId) : undefined;
     const employeeName = emp?.displayName || "";
-    const employeeLbnr = emp?.lbnr || "";
 
     for (const svc of apptServices) {
       const durationMinutes = Math.round(svc.actualDurationMinutes ?? svc.plannedDurationMinutes ?? 0);
@@ -217,7 +215,6 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         unitPriceCents: pricePer60Min,
         totalCents,
         employeeName,
-        employeeLbnr,
         appointmentNotes: appt.notes || null,
         serviceDetails: svc.details || null,
       });
@@ -253,7 +250,6 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         unitPriceCents: pricePerKm,
         totalCents: kmTotalCents,
         employeeName,
-        employeeLbnr,
         appointmentNotes: null,
         serviceDetails: null,
       });
@@ -1162,7 +1158,6 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
         unitPriceCents: item.unitPriceCents,
         totalCents: -item.totalCents,
         employeeName: item.employeeName,
-        employeeLbnr: item.employeeLbnr,
         appointmentNotes: item.appointmentNotes || null,
         serviceDetails: item.serviceDetails || null,
       }));
@@ -1236,7 +1231,6 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
       unitPriceCents: item.unitPriceCents,
       totalCents: item.totalCents,
       employeeName: item.employeeName ?? null,
-      employeeLbnr: item.employeeLbnr ?? null,
       appointmentNotes: item.appointmentNotes || null,
       serviceDetails: item.serviceDetails || null,
     })),

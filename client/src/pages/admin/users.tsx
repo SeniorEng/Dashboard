@@ -704,11 +704,6 @@ export default function AdminUsers() {
                                 <span className="text-sm text-gray-500 italic">Keine zugewiesen</span>
                               )}
                             </div>
-                            {user.lbnr && (
-                              <div className="mt-1 text-xs text-gray-500" data-testid={`text-lbnr-${user.id}`}>
-                                LBNR: {user.lbnr}
-                              </div>
-                            )}
                             {workloadData && workloadData[user.id] && (() => {
                               const wl = workloadData[user.id];
                               const totalCustomers = wl.primaryCount + wl.backupCount + wl.backup2Count;

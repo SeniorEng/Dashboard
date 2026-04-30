@@ -464,7 +464,6 @@ describe("INC-3: Storno-Atomarität bei injiziertem Fehler", () => {
           unitPriceCents: li.unitPriceCents,
           totalCents: -li.totalCents,
           employeeName: li.employeeName,
-          employeeLbnr: li.employeeLbnr,
           appointmentNotes: li.appointmentNotes ?? null,
           serviceDetails: li.serviceDetails ?? null,
         }));

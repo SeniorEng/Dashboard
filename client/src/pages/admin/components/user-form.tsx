@@ -66,8 +66,6 @@ export function UserForm({
   const [employmentType, setEmploymentType] = useState(user?.employmentType ?? "sozialversicherungspflichtig");
   const [weeklyWorkDays, setWeeklyWorkDays] = useState(user?.weeklyWorkDays?.toString() ?? "5");
   const [monthlyWorkHours, setMonthlyWorkHours] = useState(user?.monthlyWorkHours?.toString() ?? "");
-  const [lbnr, setLbnr] = useState(user?.lbnr ?? "");
-  const [personalnummer, setPersonalnummer] = useState(user?.personalnummer ?? "");
   const [carryOverDays, setCarryOverDays] = useState(
     user?.carryOverDays?.toString() ?? ""
   );
@@ -163,8 +161,6 @@ export function UserForm({
       employmentType,
       weeklyWorkDays: weeklyWorkDays ? parseInt(weeklyWorkDays) : 5,
       monthlyWorkHours: monthlyWorkHours ? parseFloat(monthlyWorkHours) : null,
-      lbnr: lbnr || null,
-      personalnummer: personalnummer || null,
       roles,
       whatsappEnabled,
     };
@@ -494,16 +490,6 @@ export function UserForm({
             </div>
           )}
           
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="haustierAkzeptiert"
-              checked={haustierAkzeptiert}
-              onCheckedChange={(checked) => setHaustierAkzeptiert(!!checked)}
-              data-testid="checkbox-haustier-akzeptiert"
-            />
-            <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere im Haushalt</Label>
-          </div>
-
           <div className="flex items-center justify-between p-3 rounded-lg border">
             <div className="flex items-center gap-2">
               <MessageCircle className="h-4 w-4 text-green-600" />
@@ -518,29 +504,6 @@ export function UserForm({
               onCheckedChange={setWhatsappEnabled}
               data-testid="switch-whatsapp-enabled"
             />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="personalnummer">Personalnummer (Lexware)</Label>
-              <Input
-                id="personalnummer"
-                value={personalnummer}
-                onChange={(e) => setPersonalnummer(e.target.value)}
-                placeholder="z.B. 0001"
-                data-testid="input-personalnummer"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lbnr">LBNR (Beschäftigtennummer)</Label>
-              <Input
-                id="lbnr"
-                value={lbnr}
-                onChange={(e) => setLbnr(e.target.value)}
-                placeholder="Lebenslange Beschäftigtennummer"
-                data-testid="input-lbnr"
-              />
-            </div>
           </div>
 
           <div className="space-y-2">
@@ -563,6 +526,18 @@ export function UserForm({
                   <Label htmlFor={`role-${role}`}>{ROLE_LABELS[role]}</Label>
                 </div>
               ))}
+            </div>
+            <div className="flex items-start space-x-2 pt-2">
+              <Checkbox
+                id="haustierAkzeptiert"
+                checked={haustierAkzeptiert}
+                onCheckedChange={(checked) => setHaustierAkzeptiert(!!checked)}
+                data-testid="checkbox-haustier-akzeptiert"
+              />
+              <div className="space-y-1 leading-none">
+                <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere</Label>
+                <p className="text-xs text-gray-500">Bereit, bei Kunden mit Haustieren zu arbeiten</p>
+              </div>
             </div>
           </div>
         </div>

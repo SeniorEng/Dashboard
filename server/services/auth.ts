@@ -420,8 +420,6 @@ class AuthService {
       weeklyWorkDays?: number;
       monthlyWorkHours?: number | null;
       employmentStatus?: string;
-      lbnr?: string | null;
-      personalnummer?: string | null;
       notfallkontaktName?: string;
       notfallkontaktTelefon?: string | null;
       notfallkontaktBeziehung?: string;
@@ -441,7 +439,6 @@ class AuthService {
     const nullableStringFields = [
       "telefon", "strasse", "hausnummer", "plz", "stadt",
       "geburtsdatum", "eintrittsdatum", "austrittsDatum",
-      "lbnr", "personalnummer",
       "notfallkontaktName", "notfallkontaktTelefon", "notfallkontaktBeziehung",
     ] as const;
 

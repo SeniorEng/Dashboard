@@ -99,6 +99,13 @@
       "when": 1777561346761,
       "tag": "0013_add_writeoff_unique_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777580022814,
+      "tag": "0014_remove_lbnr_personalnummer",
+      "breakpoints": true
     }
   ]
 }

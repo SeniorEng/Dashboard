@@ -222,8 +222,6 @@ const updateUserSchema = z.object({
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
   weeklyWorkDays: z.number().int().min(1, "Muss mindestens 1 Tag sein").max(7, "Maximal 7 Tage").optional(),
   monthlyWorkHours: z.number().min(1, "Muss mindestens 1 Stunde sein").max(300, "Maximal 300 Stunden").nullable().optional(),
-  lbnr: z.string().nullable().optional(),
-  personalnummer: z.string().nullable().optional(),
   notfallkontaktName: z.string().optional(),
   notfallkontaktTelefon: optionalGermanPhoneSchema,
   notfallkontaktBeziehung: z.string().optional(),
