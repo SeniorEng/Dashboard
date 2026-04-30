@@ -319,7 +319,11 @@ function pvCustomerPayload(overrides: Record<string, any> = {}) {
     billingType: "pflegekasse_privat",
     acceptsPrivatePayment: true,
     insurance: {
-      providerId: 0,
+      // Task #267: Insurance ist jetzt Pflicht-Cascade (Hard-Fail bei FK-
+      // Verletzung). Vorher reichte providerId: 0, weil Insurance-Fehler
+      // nur als Warning auftauchten — heute würde der Customer-Insert
+      // zurückgerollt. Daher die zur Laufzeit verfügbare ID.
+      providerId: insuranceProviderId,
       versichertennummer: "A" + String(Math.floor(100000000 + Math.random() * 900000000)),
       validFrom: "2024-01-01",
     },

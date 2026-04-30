@@ -827,3 +827,123 @@ describe("KV-24: DSGVO-Anonymisierung inaktiver Kunden", () => {
     }
   });
 });
+
+// KV-TX (Task #267): Atomare Customer-Anlage. Diese Tests verifizieren, dass
+// Pflicht-Cascade-Schritte (Pflegegrad/Insurance/Budget-Type-Settings/Vertrag)
+// die Anlage hart abbrechen und vollständig zurückrollen, während Soft-Schritte
+// (Kontakte, Carryover) nur als Warnings durchgereicht werden.
+//
+// Tests laufen gegen einen separaten Server-Prozess; Stubbing mit vi.spyOn
+// funktioniert daher nicht. Statt dessen wird über den Header
+// `x-test-inject-fault` (nur in NODE_ENV=test aktiv) gezielt an markierten
+// Stellen in `customer-creation-helpers.ts` ein Fehler geworfen.
+describe("KV-TX: Atomare Customer-Anlage (Task #267)", () => {
+  const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
+
+  async function postCustomerWithFaults(
+    payload: Record<string, any>,
+    faults: string[],
+  ): Promise<{ status: number; data: any }> {
+    const a = await getAuthCookie();
+    const cookieHeader = `${a.cookie}; careconnect_csrf=${a.csrfToken}`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Cookie: cookieHeader,
+      "x-csrf-token": a.csrfToken,
+    };
+    if (faults.length > 0) {
+      headers["x-test-inject-fault"] = faults.join(",");
+    }
+    const res = await fetch(`${BASE_URL}/api/admin/customers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => null);
+    return { status: res.status, data };
+  }
+
+  async function customerExistsByNachname(nachname: string): Promise<boolean> {
+    const list = await apiGet<any>(`/api/admin/customers?search=${encodeURIComponent(nachname)}&limit=50`);
+    if (list.status !== 200) return false;
+    const items: any[] = Array.isArray(list.data?.data) ? list.data.data : [];
+    return items.some((c) => c.nachname === nachname);
+  }
+
+  it("KV-TX.1 – Hard-Fail bei Insurance-FK-Verletzung (provider 999999) → kein Customer in DB", async () => {
+    const nachname = "TXFK-" + uniqueId();
+    const payload = validCustomerPayload({
+      nachname,
+      billingType: "pflegekasse_gesetzlich",
+      insurance: {
+        providerId: 999999, // existiert nicht → FK-Verletzung beim Insert in customer_insurance_history
+        versichertennummer: "A" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+    });
+
+    const res = await postCustomerWithFaults(payload, []);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(600);
+
+    // Rollback-Verifikation: Customer darf NICHT in der Liste auftauchen.
+    const exists = await customerExistsByNachname(nachname);
+    expect(exists).toBe(false);
+
+    if (res.status === 201 && res.data?.id) {
+      // Defensive Cleanup falls die Atomarität bricht.
+      createdCustomerIds.push(res.data.id);
+    }
+  });
+
+  it("KV-TX.2 – Hard-Fail bei Budget-Type-Settings (Test-Fault) → kein Customer in DB", async () => {
+    const nachname = "TXBS-" + uniqueId();
+    const payload = validCustomerPayload({
+      nachname,
+      billingType: "pflegekasse_gesetzlich",
+      budgets: {
+        entlastungsbetrag45b: 12500, // > 0 damit typeSettings ein Element bekommt
+        verhinderungspflege39: 0,
+        pflegesachleistungen36: 0,
+        validFrom: "2024-01-01",
+      },
+    });
+
+    const res = await postCustomerWithFaults(payload, ["budget_settings"]);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(600);
+
+    const exists = await customerExistsByNachname(nachname);
+    expect(exists).toBe(false);
+
+    if (res.status === 201 && res.data?.id) {
+      createdCustomerIds.push(res.data.id);
+    }
+  });
+
+  it("KV-TX.3 – Soft-Fail bei Carryover (Test-Fault) → 201 mit Warning, Customer existiert", async () => {
+    const nachname = "TXCO-" + uniqueId();
+    const payload = validCustomerPayload({
+      nachname,
+      billingType: "pflegekasse_gesetzlich",
+      budgets: {
+        entlastungsbetrag45b: 12500,
+        verhinderungspflege39: 0,
+        pflegesachleistungen36: 0,
+        validFrom: "2024-01-01",
+        carryoverAmountCents: 50000, // löst den optional-Pfad in createCustomerRelatedData aus
+      },
+    });
+
+    const res = await postCustomerWithFaults(payload, ["carryover"]);
+    expect(res.status).toBe(201);
+    expect(res.data?.id).toBeDefined();
+    createdCustomerIds.push(res.data.id);
+
+    expect(Array.isArray(res.data?.warnings)).toBe(true);
+    expect(res.data.warnings.some((w: string) => w.toLowerCase().includes("übertrag") || w.toLowerCase().includes("vorjahr"))).toBe(true);
+
+    const exists = await customerExistsByNachname(nachname);
+    expect(exists).toBe(true);
+  });
+});

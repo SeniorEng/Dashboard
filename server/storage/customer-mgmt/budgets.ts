@@ -5,7 +5,7 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
-import { db } from "../../lib/db";
+import { db, type DbOrTx } from "../../lib/db";
 
 export async function getCustomerCurrentBudget(customerId: number): Promise<CustomerBudget | undefined> {
   const result = await db
@@ -27,21 +27,22 @@ export async function getCustomerBudgetHistory(customerId: number): Promise<Cust
     .orderBy(desc(customerBudgets.validFrom));
 }
 
-export async function addCustomerBudget(data: InsertCustomerBudget, userId?: number): Promise<CustomerBudget> {
+export async function addCustomerBudget(data: InsertCustomerBudget, userId?: number, tx?: DbOrTx): Promise<CustomerBudget> {
+  const executor = tx ?? db;
   const today = todayISO();
-  
-  await db
+
+  await executor
     .update(customerBudgets)
     .set({ validTo: today })
     .where(and(
       eq(customerBudgets.customerId, data.customerId),
       isNull(customerBudgets.validTo)
     ));
-  
-  const result = await db.insert(customerBudgets).values({
+
+  const result = await executor.insert(customerBudgets).values({
     ...data,
     createdByUserId: userId,
   }).returning();
-  
+
   return result[0];
 }

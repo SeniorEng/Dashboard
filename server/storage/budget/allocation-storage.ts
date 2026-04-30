@@ -17,8 +17,9 @@ import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-stora
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
-export async function createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number): Promise<BudgetAllocation> {
-  const result = await db.insert(budgetAllocations).values({
+export async function createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation> {
+  const executor = tx ?? db;
+  const result = await executor.insert(budgetAllocations).values({
     ...allocation,
     createdByUserId: userId,
   }).returning();

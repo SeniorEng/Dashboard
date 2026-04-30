@@ -7,6 +7,7 @@ import { geocodeCustomer } from "../../services/geocoding";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { findCustomerDuplicates } from "../../lib/duplicate-check";
+import { readTestFaults } from "../../lib/test-fault-injector";
 import { 
   versichertennummerSchema,
   customers,
@@ -253,20 +254,30 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   const userId = req.user!.id;
 
   const customerData = buildCustomerInsertData(data, userId);
+  const testFaults = readTestFaults(req);
 
-  const customer = await customerManagementStorage.createCustomerDirect(customerData);
-
-  const warnings = await createCustomerRelatedData({
-    customerId: customer.id,
-    userId,
-    logPrefix: "POST /customers",
-    pflegegrad: data.pflegegrad,
-    pflegegradSeit: data.pflegegradSeit,
-    insurance: data.insurance,
-    contacts: data.contacts,
-    budgets: data.budgets,
-    contract: data.contract,
-    useLedgerBudgets: true,
+  // Atomare Customer-Anlage (Task #267): Pflicht-Cascade (Pflegegrad,
+  // Insurance, Budget-Type-Settings, Vertrag/Raten) muss als Einheit
+  // committen oder zurückrollen. Andernfalls bleibt der Customer als
+  // "Halbleiche" zurück und stört Folge-Workflows (Termin-Anlage,
+  // Rechnungslauf, §45b-Buchungen).
+  const { customer, warnings } = await db.transaction(async (tx) => {
+    const created = await customerManagementStorage.createCustomerDirect(customerData, tx);
+    const w = await createCustomerRelatedData({
+      customerId: created.id,
+      userId,
+      logPrefix: "POST /customers",
+      pflegegrad: data.pflegegrad,
+      pflegegradSeit: data.pflegegradSeit,
+      insurance: data.insurance,
+      contacts: data.contacts,
+      budgets: data.budgets,
+      contract: data.contract,
+      useLedgerBudgets: true,
+      tx,
+      testFaults,
+    });
+    return { customer: created, warnings: w };
   });
 
   birthdaysCache.invalidateAll();

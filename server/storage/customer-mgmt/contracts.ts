@@ -11,7 +11,7 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
-import { db } from "../../lib/db";
+import { db, type DbOrTx } from "../../lib/db";
 
 async function fetchContractWithRates(contractResult: CustomerContract[]): Promise<(CustomerContract & { rates: CustomerContractRate[] }) | undefined> {
   if (contractResult.length === 0) return undefined;
@@ -48,18 +48,20 @@ export async function getCustomerLatestContract(customerId: number): Promise<(Cu
   return fetchContractWithRates(contractResult);
 }
 
-export async function createCustomerContract(data: InsertCustomerContract, userId?: number): Promise<CustomerContract> {
-  const result = await db.insert(customerContracts).values({
+export async function createCustomerContract(data: InsertCustomerContract, userId?: number, tx?: DbOrTx): Promise<CustomerContract> {
+  const executor = tx ?? db;
+  const result = await executor.insert(customerContracts).values({
     ...data,
     createdByUserId: userId,
   }).returning();
   return result[0];
 }
 
-export async function addContractRate(data: InsertContractRate, userId?: number): Promise<CustomerContractRate> {
+export async function addContractRate(data: InsertContractRate, userId?: number, tx?: DbOrTx): Promise<CustomerContractRate> {
+  const executor = tx ?? db;
   const today = todayISO();
-  
-  await db
+
+  await executor
     .update(customerContractRates)
     .set({ validTo: today })
     .where(and(
@@ -67,12 +69,12 @@ export async function addContractRate(data: InsertContractRate, userId?: number)
       eq(customerContractRates.serviceCategory, data.serviceCategory),
       isNull(customerContractRates.validTo)
     ));
-  
-  const result = await db.insert(customerContractRates).values({
+
+  const result = await executor.insert(customerContractRates).values({
     ...data,
     createdByUserId: userId,
   }).returning();
-  
+
   return result[0];
 }
 

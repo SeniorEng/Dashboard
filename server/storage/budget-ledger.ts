@@ -22,7 +22,7 @@ import * as rebook from "./budget/rebook-storage";
 import * as pricing from "./budget/appointment-cost-calculator";
 
 export interface BudgetLedgerStorage {
-  createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number): Promise<BudgetAllocation>;
+  createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation>;
   getBudgetAllocations(customerId: number, year?: number): Promise<BudgetAllocation[]>;
 
   createBudgetTransaction(transaction: InsertBudgetTransaction, userId?: number): Promise<BudgetTransaction>;
@@ -38,7 +38,7 @@ export interface BudgetLedgerStorage {
   getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined>;
   upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number): Promise<CustomerBudgetPreferences>;
   getBudgetTypeSettings(customerId: number, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
-  upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>): Promise<CustomerBudgetTypeSetting[]>;
+  upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>, tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
 
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;

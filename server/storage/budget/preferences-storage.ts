@@ -50,19 +50,42 @@ export async function getBudgetTypeSettings(customerId: number, _tx?: DbClient):
 
 export async function upsertBudgetTypeSettings(
   customerId: number,
-  settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>
+  settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>,
+  tx?: DbClient,
 ): Promise<CustomerBudgetTypeSetting[]> {
   if (settings.length === 0) {
-    await db.delete(customerBudgetTypeSettings)
+    const executor = tx ?? db;
+    await executor.delete(customerBudgetTypeSettings)
       .where(eq(customerBudgetTypeSettings.customerId, customerId));
     return [];
   }
 
-  return await db.transaction(async (tx) => {
+  // Wenn bereits eine äußere Transaktion läuft (z.B. atomare Customer-Anlage),
+  // delete + insert direkt auf dem übergebenen Executor — kein neues db.transaction,
+  // weil neon-serverless verschachtelte Transaktionen nicht sauber unterstützt.
+  if (tx) {
     await tx.delete(customerBudgetTypeSettings)
       .where(eq(customerBudgetTypeSettings.customerId, customerId));
 
     return await tx.insert(customerBudgetTypeSettings)
+      .values(settings.map(s => ({
+        customerId,
+        budgetType: s.budgetType,
+        enabled: s.enabled,
+        priority: s.priority,
+        monthlyLimitCents: s.monthlyLimitCents ?? null,
+        yearlyLimitCents: s.yearlyLimitCents ?? null,
+        validFrom: s.validFrom ?? null,
+        validTo: s.validTo ?? null,
+      })))
+      .returning();
+  }
+
+  return await db.transaction(async (innerTx) => {
+    await innerTx.delete(customerBudgetTypeSettings)
+      .where(eq(customerBudgetTypeSettings.customerId, customerId));
+
+    return await innerTx.insert(customerBudgetTypeSettings)
       .values(settings.map(s => ({
         customerId,
         budgetType: s.budgetType,

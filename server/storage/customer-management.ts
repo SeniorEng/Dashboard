@@ -35,7 +35,7 @@ import { eq, and, isNull, isNotNull, desc, asc, count, or, ilike, sql as sqlBuil
 import { alias } from "drizzle-orm/pg-core";
 import { customerIdsCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 
 import * as insuranceModule from "./customer-mgmt/insurance";
 import * as contactsModule from "./customer-mgmt/contacts";
@@ -642,8 +642,9 @@ export class CustomerManagementStorage {
     return updated.result;
   }
 
-  async createCustomerDirect(customerData: InsertCustomer) {
-    const [customer] = await db.insert(customers).values(customerData).returning();
+  async createCustomerDirect(customerData: InsertCustomer, tx?: DbOrTx) {
+    const executor = tx ?? db;
+    const [customer] = await executor.insert(customers).values(customerData).returning();
     return customer;
   }
 }

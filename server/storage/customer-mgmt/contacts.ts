@@ -4,7 +4,7 @@ import {
   customerContacts,
 } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { db } from "../../lib/db";
+import { db, type DbOrTx } from "../../lib/db";
 
 export async function getCustomerContact(id: number): Promise<CustomerContact | undefined> {
   const result = await db.select().from(customerContacts).where(eq(customerContacts.id, id));
@@ -24,15 +24,16 @@ export async function getCustomerContacts(customerId: number, activeOnly = true)
     .orderBy(desc(customerContacts.isPrimary), customerContacts.sortOrder);
 }
 
-export async function addCustomerContact(data: InsertCustomerContact): Promise<CustomerContact> {
+export async function addCustomerContact(data: InsertCustomerContact, tx?: DbOrTx): Promise<CustomerContact> {
+  const executor = tx ?? db;
   if (data.isPrimary) {
-    await db
+    await executor
       .update(customerContacts)
       .set({ isPrimary: false })
       .where(eq(customerContacts.customerId, data.customerId));
   }
-  
-  const result = await db.insert(customerContacts).values(data).returning();
+
+  const result = await executor.insert(customerContacts).values(data).returning();
   return result[0];
 }
 

@@ -8,7 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull, desc, count } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
-import { db } from "../../lib/db";
+import { db, type DbOrTx } from "../../lib/db";
 
 const insuranceHistoryWithProviderSelect = {
   id: customerInsuranceHistory.id,
@@ -112,21 +112,22 @@ export async function getCustomerInsuranceHistory(customerId: number): Promise<(
   return result.map(r => ({ ...r, provider: r.provider }));
 }
 
-export async function addCustomerInsurance(data: InsertCustomerInsurance, userId?: number): Promise<CustomerInsuranceHistory> {
+export async function addCustomerInsurance(data: InsertCustomerInsurance, userId?: number, tx?: DbOrTx): Promise<CustomerInsuranceHistory> {
+  const executor = tx ?? db;
   const today = todayISO();
-  
-  await db
+
+  await executor
     .update(customerInsuranceHistory)
     .set({ validTo: today })
     .where(and(
       eq(customerInsuranceHistory.customerId, data.customerId),
       isNull(customerInsuranceHistory.validTo)
     ));
-  
-  const result = await db.insert(customerInsuranceHistory).values({
+
+  const result = await executor.insert(customerInsuranceHistory).values({
     ...data,
     createdByUserId: userId,
   }).returning();
-  
+
   return result[0];
 }

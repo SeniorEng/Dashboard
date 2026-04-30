@@ -21,6 +21,7 @@ import { birthdaysCache, customerIdsCache } from "../../services/cache";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { findCustomerDuplicates } from "../../lib/duplicate-check";
+import { readTestFaults } from "../../lib/test-fault-injector";
 import { db } from "../../lib/db";
 import { eq, and, isNull } from "drizzle-orm";
 
@@ -348,8 +349,14 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
 
   const userId = req.user!.id;
   const warnings: string[] = [];
+  const testFaults = readTestFaults(req);
 
-  const result = await db.transaction(async (tx) => {
+  // Atomare Konvertierung (Task #267): Customer-Insert, Appointment-
+  // Reassign, Offer-Update, Prospect-Status UND die gesamte Pflicht-
+  // Cascade (Pflegegrad, Insurance, Budget, Vertrag) müssen gemeinsam
+  // committen. Sonst entstehen "halb konvertierte" Interessenten, die im
+  // UI als gewonnen markiert sind, aber Folge-Workflows scheitern lassen.
+  const { result, relatedWarnings } = await db.transaction(async (tx) => {
     const [customer] = await tx.insert(customers).values({
       ...buildCustomerInsertData(data, userId),
       status: "aktiv",
@@ -389,23 +396,25 @@ router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen
       })
       .where(eq(prospects.id, id));
 
-    return customer;
+    const w = await createCustomerRelatedData({
+      customerId: customer.id,
+      userId,
+      logPrefix: "POST /prospects/:id/convert",
+      pflegegrad: data.pflegegrad,
+      pflegegradSeit: data.pflegegradSeit,
+      insurance: data.insurance && isPflegekasseCustomer(data.billingType) ? data.insurance : undefined,
+      contacts: data.contacts,
+      budgets: data.budgets && isPflegekasseCustomer(data.billingType) ? data.budgets : undefined,
+      contract: data.contract,
+      useLedgerBudgets: false,
+      tx,
+      testFaults,
+    });
+
+    return { result: customer, relatedWarnings: w };
   });
 
   customerIdsCache.invalidateAll();
-
-  const relatedWarnings = await createCustomerRelatedData({
-    customerId: result.id,
-    userId,
-    logPrefix: "POST /prospects/:id/convert",
-    pflegegrad: data.pflegegrad,
-    pflegegradSeit: data.pflegegradSeit,
-    insurance: data.insurance && isPflegekasseCustomer(data.billingType) ? data.insurance : undefined,
-    contacts: data.contacts,
-    budgets: data.budgets && isPflegekasseCustomer(data.billingType) ? data.budgets : undefined,
-    contract: data.contract,
-    useLedgerBudgets: false,
-  });
   warnings.push(...relatedWarnings);
 
   if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined || data.backupEmployeeId2 !== undefined) {

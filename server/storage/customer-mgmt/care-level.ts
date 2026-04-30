@@ -9,7 +9,7 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { parseLocalDate, formatDateISO } from "@shared/utils/datetime";
-import { db } from "../../lib/db";
+import { db, type DbOrTx } from "../../lib/db";
 
 export async function getCustomerCareLevelHistory(customerId: number): Promise<CustomerCareLevelHistory[]> {
   return await db
@@ -31,7 +31,8 @@ export async function getCustomerCurrentCareLevel(customerId: number): Promise<C
   return result[0];
 }
 
-export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?: number): Promise<CustomerCareLevelHistory> {
+export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?: number, tx?: DbOrTx): Promise<CustomerCareLevelHistory> {
+  const executor = tx ?? db;
   // K2: validFrom kommt als YYYY-MM-DD-String — parseLocalDate hält die
   // lokale TZ. dayBeforeDate ist eine Kopie des resultierenden Date-Objekts
   // (kein erneutes String-Parsing!), daher ist `new Date(validFromDate)` hier
@@ -40,8 +41,8 @@ export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?:
   const dayBeforeDate = new Date(validFromDate.getTime());
   dayBeforeDate.setDate(dayBeforeDate.getDate() - 1);
   const dayBeforeValidFrom = formatDateISO(dayBeforeDate);
-  
-  const currentEntries = await db
+
+  const currentEntries = await executor
     .select()
     .from(customerCareLevelHistory)
     .where(and(
@@ -52,28 +53,28 @@ export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?:
   for (const entry of currentEntries) {
     const entryFrom = parseLocalDate(entry.validFrom);
     if (entryFrom >= validFromDate) {
-      await db
+      await executor
         .update(customerCareLevelHistory)
         .set({ validTo: data.validFrom })
         .where(eq(customerCareLevelHistory.id, entry.id));
     } else {
-      await db
+      await executor
         .update(customerCareLevelHistory)
         .set({ validTo: dayBeforeValidFrom })
         .where(eq(customerCareLevelHistory.id, entry.id));
     }
   }
-  
-  const result = await db.insert(customerCareLevelHistory).values({
+
+  const result = await executor.insert(customerCareLevelHistory).values({
     ...data,
     createdByUserId: userId,
   }).returning();
-  
-  await db
+
+  await executor
     .update(customers)
     .set({ pflegegrad: data.pflegegrad, updatedAt: new Date() })
     .where(eq(customers.id, data.customerId));
-  
+
   return result[0];
 }
 
