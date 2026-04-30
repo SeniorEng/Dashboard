@@ -379,42 +379,47 @@ export async function createConsumptionTransaction(params: {
   customerKilometers: number;
   userId?: number;
 }, outerTx?: DbClient): Promise<BudgetTransaction> {
-  const client = outerTx || db;
-  const costs = await calculateAppointmentCost({
-    customerId: params.customerId,
-    hauswirtschaftMinutes: params.hauswirtschaftMinutes,
-    alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
-    travelKilometers: params.travelKilometers,
-    customerKilometers: params.customerKilometers,
-    date: params.transactionDate,
-  });
+  const doWork = async (tx: DbClient): Promise<BudgetTransaction> => {
+    // K4: Advisory-Lock am Anfang BEIDER Pfade (Cascade mit Cost=0 und
+    // hasUsage=true). Namespace-Hash via hashtext('budget_consumption_'||id)
+    // verhindert Kollisionen mit anderen Lock-Konsumenten, die die rohe
+    // customerId verwenden.
+    await (tx as typeof db).execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${params.customerId}::text))`
+    );
 
-  const [customer] = await client.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
-    .from(customers).where(eq(customers.id, params.customerId)).limit(1);
-  const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
-
-  const hasUsage = costs.totalCents > 0;
-  if (!hasUsage) {
-    const cascadeResult = await createCascadeConsumption({
+    const costs = await calculateAppointmentCost({
       customerId: params.customerId,
-      appointmentId: params.appointmentId,
-      transactionDate: params.transactionDate,
-      totalAmountCents: 0,
       hauswirtschaftMinutes: params.hauswirtschaftMinutes,
-      hauswirtschaftCents: 0,
       alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
-      alltagsbegleitungCents: 0,
-      travelKilometers: 0,
-      travelCents: 0,
-      customerKilometers: 0,
-      customerKilometersCents: 0,
-      userId: params.userId,
-    }, outerTx);
-    return cascadeResult.transactions[0];
-  }
+      travelKilometers: params.travelKilometers,
+      customerKilometers: params.customerKilometers,
+      date: params.transactionDate,
+    });
 
-  const doWork = async (tx: DbClient) => {
-    await (tx as typeof db).execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(params.customerId))})`);
+    const [customer] = await tx.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
+      .from(customers).where(eq(customers.id, params.customerId)).limit(1);
+    const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
+
+    const hasUsage = costs.totalCents > 0;
+    if (!hasUsage) {
+      const cascadeResult = await createCascadeConsumption({
+        customerId: params.customerId,
+        appointmentId: params.appointmentId,
+        transactionDate: params.transactionDate,
+        totalAmountCents: 0,
+        hauswirtschaftMinutes: params.hauswirtschaftMinutes,
+        hauswirtschaftCents: 0,
+        alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
+        alltagsbegleitungCents: 0,
+        travelKilometers: 0,
+        travelCents: 0,
+        customerKilometers: 0,
+        customerKilometersCents: 0,
+        userId: params.userId,
+      }, tx);
+      return cascadeResult.transactions[0];
+    }
 
     if (!acceptsPrivatePayment) {
       const summaries = await getAllBudgetSummaries(params.customerId);

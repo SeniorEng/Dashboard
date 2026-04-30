@@ -19,6 +19,13 @@ export async function rebookSingleTransaction(
   userId: number
 ): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }> {
   return await db.transaction(async (tx) => {
+    // K4: gleichen Advisory-Lock-Namespace wie createConsumptionTransaction
+    // benutzen, damit Rebook und parallele Buchungen pro Kunde serialisieren
+    // und der Ziel-Topf nicht überbucht werden kann.
+    await (tx as unknown as typeof db).execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`
+    );
+
     const [original] = await tx.select()
       .from(budgetTransactions)
       .where(and(
@@ -200,7 +207,12 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
   for (const [appointmentId] of byAppointment) {
     try {
       const txResult = await db.transaction(async (tx) => {
-        await (tx as unknown as typeof db).execute(sql`SELECT pg_advisory_xact_lock(${sql.raw(String(customerId))})`);
+        // K4: Gleicher Namespace-Hash wie createConsumptionTransaction, damit
+        // Rebook und Konsumbuchungen für denselben Kunden gegenseitig
+        // serialisieren und nicht mit anderen Lock-Konsumenten kollidieren.
+        await (tx as unknown as typeof db).execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`
+        );
 
         const allConsumptions = await tx.select()
           .from(budgetTransactions)

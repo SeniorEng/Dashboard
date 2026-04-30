@@ -112,6 +112,11 @@ export const budgetTransactions = pgTable("budget_transactions", {
   uniqueIndex("budget_transactions_reversal_unique_idx")
     .on(table.reversedTransactionId)
     .where(sql`transaction_type = 'reversal' AND reversed_transaction_id IS NOT NULL`),
+  // K7: Idempotenter Write-Off — verhindert doppelte Verfalls-Buchungen
+  // für dieselbe Allokation (z. B. bei parallelen Reconcile-Läufen).
+  uniqueIndex("budget_transactions_write_off_unique_idx")
+    .on(table.customerId, table.allocationId)
+    .where(sql`transaction_type = 'write_off' AND allocation_id IS NOT NULL`),
 ]);
 
 // Customer budget preferences (monthly limit, etc.)
