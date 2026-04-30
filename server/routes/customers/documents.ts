@@ -31,6 +31,12 @@ router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nich
 
   if (doc.customerId) {
     if (!await requireCustomerReadAccess(req, res, doc.customerId)) return;
+  } else {
+    const user = req.user!;
+    if (doc.employeeId !== user.id && !user.isAdmin) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Kein Zugriff auf dieses Dokument" });
+      return;
+    }
   }
 
   const pdfBuffer = await getDocumentPdfBuffer(doc.objectPath);

@@ -46,6 +46,10 @@ router.patch("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktu
   if (contactId === null) return;
   if (!await requireCustomerAccess(req, res, customerId)) return;
 
+  const existingContact = await customerManagementStorage.getCustomerContact(contactId);
+  if (!existingContact) { res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" }); return; }
+  if (existingContact.customerId !== customerId) { res.status(403).json({ error: "FORBIDDEN", message: "Kein Zugriff auf diesen Kontakt" }); return; }
+
   const result = employeeContactUpdateSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Kontaktdaten", details: result.error.issues });
@@ -71,6 +75,10 @@ router.delete("/:id/contacts/:contactId", asyncHandler("Kontakt konnte nicht gel
   const contactId = requireIntParam(req.params.contactId, res);
   if (contactId === null) return;
   if (!await requireCustomerAccess(req, res, customerId)) return;
+
+  const existingContact = await customerManagementStorage.getCustomerContact(contactId);
+  if (!existingContact) { res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" }); return; }
+  if (existingContact.customerId !== customerId) { res.status(403).json({ error: "FORBIDDEN", message: "Kein Zugriff auf diesen Kontakt" }); return; }
 
   const deleted = await customerManagementStorage.deleteCustomerContact(contactId);
   if (!deleted) { res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" }); return; }

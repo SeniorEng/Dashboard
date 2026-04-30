@@ -6,6 +6,11 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "../../lib/db";
 
+export async function getCustomerContact(id: number): Promise<CustomerContact | undefined> {
+  const result = await db.select().from(customerContacts).where(eq(customerContacts.id, id));
+  return result[0];
+}
+
 export async function getCustomerContacts(customerId: number, activeOnly = true): Promise<CustomerContact[]> {
   const conditions = [eq(customerContacts.customerId, customerId)];
   if (activeOnly) {

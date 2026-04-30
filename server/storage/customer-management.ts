@@ -97,6 +97,7 @@ export class CustomerManagementStorage {
   getCustomerInsuranceHistory = insuranceModule.getCustomerInsuranceHistory;
   addCustomerInsurance = insuranceModule.addCustomerInsurance;
 
+  getCustomerContact = contactsModule.getCustomerContact;
   getCustomerContacts = contactsModule.getCustomerContacts;
   addCustomerContact = contactsModule.addCustomerContact;
   updateCustomerContact = contactsModule.updateCustomerContact;
