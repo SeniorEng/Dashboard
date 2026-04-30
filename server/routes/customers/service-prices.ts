@@ -502,7 +502,13 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
     ? `${vf.getFullYear()}-${String(vf.getMonth() + 1).padStart(2, "0")}-${String(vf.getDate()).padStart(2, "0")}`
     : String(vf).substring(0, 10);
 
-  const affectFromDate = recordValidFrom > today ? recordValidFrom : addDays(today, 1);
+  // Auch wenn die Löschung erst ab morgen wirkt (valid_to = today), war der Preis
+  // bereits seit recordValidFrom aktiv und kann in bestehenden Rechnungen verwendet
+  // worden sein. Wir prüfen daher den gesamten Aktivzeitraum, damit eine spätere
+  // Re-Generierung dieser Monate (z. B. nach Storno) nicht stillschweigend andere
+  // Preise verwendet. Für rein zukünftige Preise (recordValidFrom > today) bleibt
+  // das Verhalten identisch.
+  const affectFromDate = recordValidFrom;
   const affectedInvoices = await findAffectedInvoicesFromDate(db, customerId, affectFromDate);
   if (affectedInvoices.length > 0 && !confirmInvoiceOverride) {
     sendInvoicedPeriodConflict(
