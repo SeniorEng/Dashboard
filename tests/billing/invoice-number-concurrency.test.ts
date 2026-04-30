@@ -1,12 +1,4 @@
-// Race-Conditions auf Rechnungsnummer-Vergabe + Storno-Atomarität.
-// INC-1.1: 10 parallele POST /generate für SAME customer/month — keine 500/UNIQUE,
-//          alle 10 Vergaben erfolgreich, alle Nummern eindeutig und lückenlos
-//          aufeinanderfolgend (vitest fileParallelism: false → kein Test-Cross-Talk).
-// INC-2.1: 5 parallele Storni unterschiedlicher Originale -> 5 eindeutige
-//          Stornorechnungen ohne Waisen.
-// INC-2.2: 5 parallele Storni DERSELBEN Originalrechnung -> genau 1 Erfolg,
-//          4 Konflikte, genau 1 Stornorechnung in DB.
-// INC-3.1: Direkte Tx mit Failure-Injection -> Rollback hinterlässt keine Stornorechnung.
+// Concurrency-Tests: Rechnungsnummer-Vergabe + Storno-Atomarität.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
@@ -254,13 +246,6 @@ afterAll(async () => {
 
 describe("INC-1: Parallele Rechnungs-Generierung", () => {
   it("INC-1.1 — 10 parallele POST /api/billing/generate für SAME customer/month vergeben 10 eindeutige, lückenlose Nummern (kein 500/UNIQUE)", async () => {
-    // SAME customer/month-Szenario simuliert "Mehrere Tabs / Doppelklick".
-    // Ohne Advisory-Lock würden konkurrierende Tx denselben MAX(invoiceNumber)
-    // lesen und beim Insert in einen UNIQUE-Constraint-500 laufen.
-    // Da der Standard-Generate-Pfad keinen "schon abgerechnet"-Check innerhalb
-    // der Tx hat, dürfen alle 10 Tx eine eigene Rechnung mit eigener Nummer
-    // erstellen → strikte Assertion: 10 Erfolge, 10 eindeutige Nummern,
-    // lückenlose Sequenz.
     const prepared = await prepareCustomerForInvoice("SAME");
     const billingYear = prepared.year;
 
@@ -275,7 +260,6 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
       ),
     );
 
-    // Keine Promise-Rejections — alle Calls müssen sauber HTTP zurückliefern.
     for (let i = 0; i < settled.length; i++) {
       expect(settled[i].status, `Call #${i} muss fulfillen`).toBe("fulfilled");
     }
@@ -283,16 +267,12 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
       .filter((r): r is PromiseFulfilledResult<GenResult> => r.status === "fulfilled")
       .map((r) => r.value);
 
-    // Kein 500: Race in Nummer-Vergabe würde zu UNIQUE-Constraint-Violation
-    // → 500 → genau das Symptom, das der Advisory-Lock verhindern soll.
     const fiveHundreds = responses.filter((r) => r.status >= 500);
     expect(
       fiveHundreds.length,
       `Keine 500er erwartet (UNIQUE-Race-Symptom), bekam: ${fiveHundreds.map((r) => JSON.stringify(r.data)).join(" | ")}`,
     ).toBe(0);
 
-    // Alle 10 Calls müssen 200/201 liefern — sonst wurde der Race-Pfad nicht
-    // wirklich exerziert.
     const successNumbers: string[] = [];
     const nonSuccessSummary: string[] = [];
     for (const r of responses) {
@@ -312,16 +292,12 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
       `Erwartet 10 erfolgreiche parallele Vergaben. Nicht-Erfolge: ${nonSuccessSummary.join(" | ") || "(keine)"}`,
     ).toBe(10);
 
-    // Eindeutigkeit aller vergebenen Nummern.
     const unique = new Set(successNumbers);
     expect(
       unique.size,
       `Alle vergebenen RE-Nummern müssen eindeutig sein, bekam: ${successNumbers.join(", ")}`,
     ).toBe(10);
 
-    // Lückenlose Sequenz: vitest fileParallelism: false, also dürfen keine
-    // anderen Tests parallel Nummern fressen. Die 10 Sequenzen müssen exakt
-    // 10 aufeinanderfolgende Werte ergeben.
     const sequences = successNumbers
       .map((n) => parseSequenceFromInvoiceNumber(n))
       .map((p) => {
@@ -329,10 +305,8 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
         return p.sequence;
       })
       .sort((a, b) => a - b);
-    const minSeq = sequences[0];
-    const maxSeq = sequences[sequences.length - 1];
     expect(
-      maxSeq - minSeq,
+      sequences[sequences.length - 1] - sequences[0],
       `10 parallele Vergaben müssen 10 aufeinanderfolgende Sequenzen liefern (sortiert: ${sequences.join(", ")})`,
     ).toBe(9);
     for (let i = 1; i < sequences.length; i++) {
@@ -399,9 +373,6 @@ describe("INC-2: Parallele Storno-Operationen", () => {
   }, 120_000);
 
   it("INC-2.2 — 5 parallele Storni DERSELBEN Originalrechnung erzeugen genau 1 Stornorechnung (Doppelstorno-Race)", async () => {
-    // Doppelstorno-Schutz: zwei parallele PATCHs auf dieselbe Rechnung dürfen
-    // nicht beide eine Stornorechnung erzeugen. FOR-UPDATE-Lock auf Original
-    // muss das serialisieren — genau 1 Tx gewinnt, der Rest sieht "storniert".
     const prepared = await prepareCustomerForInvoice("DUP");
     const original = await generateInvoiceForPrepared(prepared);
     const send = await apiPatch(`/api/billing/${original.id}/status`, { status: "versendet" });
@@ -451,14 +422,11 @@ describe("INC-2: Parallele Storno-Operationen", () => {
 
 describe("INC-3: Storno-Atomarität bei injiziertem Fehler", () => {
   it("INC-3.1 — Wirft die Tx nach Stornorechnungs-Insert, bleibt KEINE Stornorechnung in der DB", async () => {
-    // Setup: Kunde + Rechnung versendet.
     const prepared = await prepareCustomerForInvoice("FAIL");
     const original = await generateInvoiceForPrepared(prepared);
     const send = await apiPatch(`/api/billing/${original.id}/status`, { status: "versendet" });
     expect(send.status).toBe(200);
 
-    // Direkte Tx: Stornorechnung einfügen, Original-Status updaten, dann werfen.
-    // Beide Inserts/Updates müssen via Rollback verworfen werden.
     const sentinel = `FAIL-INJECT-${uniqueId()}`;
     await expect(
       db.transaction(async (tx) => {
