@@ -1,10 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
-import { insertCustomerSchema } from "@shared/schema";
 import { optionalGermanPhoneSchema, internationalEmailSchema } from "@shared/schema/common";
 import { requireAuth, requireRoles } from "../middleware/auth";
-import { birthdaysCache, customerIdsCache } from "../services/cache";
+import { birthdaysCache } from "../services/cache";
 import { documentStorage } from "../storage/documents";
 import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { generateAndStorePdf } from "../services/document-pdf";
@@ -14,9 +13,9 @@ import { asyncHandler } from "../lib/errors";
 import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../lib/params";
 import { authService } from "../services/auth";
 import { isTeamLead, actorRole } from "../lib/team-lead";
-import { todayISO, validateGeburtsdatum } from "@shared/utils/datetime";
+import { todayISO } from "@shared/utils/datetime";
 import { db } from "../lib/db";
-import { customers, prospects, prospectNotes } from "@shared/schema";
+import { prospectNotes } from "@shared/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { auditService } from "../services/audit";
 import contactsRouter from "./customers/contacts";
@@ -282,26 +281,6 @@ router.patch("/:id/assignment", asyncHandler("Zuordnung konnte nicht aktualisier
   }
 
   res.json(updated);
-}));
-
-router.post("/", asyncHandler("Kunde konnte nicht erstellt werden", async (req, res) => {
-  const validatedData = insertCustomerSchema.parse(req.body);
-
-  const geburtsdatumError = validateGeburtsdatum(validatedData.geburtsdatum);
-  if (geburtsdatumError) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
-    return;
-  }
-
-  const customer = await db.transaction(async (tx) => {
-    const result = await tx.insert(customers).values(validatedData).returning();
-    return result[0];
-  });
-
-  customerIdsCache.invalidateForCustomer(customer.primaryEmployeeId, customer.backupEmployeeId, customer.backupEmployeeId2);
-  birthdaysCache.invalidateAll();
-  
-  res.status(201).json(customer);
 }));
 
 const signaturePayloadSchema = z.object({
