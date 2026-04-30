@@ -71,7 +71,7 @@ router.post("/inline", requireRoles("erstberatung"), asyncHandler("Interessent k
   res.status(201).json(prospect);
 }));
 
-router.get("/:id/appointment-data", asyncHandler("Termindaten konnten nicht geladen werden", async (req: Request, res: Response) => {
+router.get("/:id/appointment-data", requireRoles("erstberatung"), asyncHandler("Termindaten konnten nicht geladen werden", async (req: Request, res: Response) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
 
@@ -90,7 +90,7 @@ router.get("/:id/appointment-data", asyncHandler("Termindaten konnten nicht gela
   res.json(data);
 }));
 
-router.patch("/:id", asyncHandler("Interessent konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
+router.patch("/:id", requireRoles("erstberatung"), asyncHandler("Interessent konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
 
