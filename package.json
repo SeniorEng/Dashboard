@@ -94,6 +94,11 @@
   },
   "overrides": {
     "@tootallnate/once": "^3.0.1",
-    "http-proxy-agent": "^7.0.2"
+    "http-proxy-agent": "^7.0.2",
+    "fast-xml-parser": "^5.7.0",
+    "uuid": "^14.0.0",
+    "@esbuild-kit/core-utils": {
+      "esbuild": ">=0.25.0"
+    }
   }
 }
