@@ -105,16 +105,20 @@ export async function getNextInvoiceNumberTx(exec: DbOrTx, year: number): Promis
   return `RE-${year}-${String(next).padStart(4, "0")}`;
 }
 
-// Wrapper für Aufrufer ohne eigene Tx. Race-frei nur in Kombination mit
-// `getNextInvoiceNumberTx` + `createInvoiceTx` in derselben Transaktion.
-export async function getNextInvoiceNumber(year: number): Promise<string> {
-  return await db.transaction(async (tx) => getNextInvoiceNumberTx(tx, year));
-}
-
 export async function getInvoiceLineItemsTx(exec: DbOrTx, invoiceId: number): Promise<InvoiceLineItem[]> {
   const { invoiceLineItems } = await import("@shared/schema");
   const { eq, asc } = await import("drizzle-orm");
   return await exec.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, invoiceId)).orderBy(asc(invoiceLineItems.sortOrder));
+}
+
+// Sperrt die Originalrechnung bis Commit/Rollback. Schützt vor Doppel-Storno
+// derselben Rechnung in parallelen Tx (zwei PATCHs würden sonst beide den
+// alten Status sehen und je eine Stornorechnung erzeugen).
+export async function getInvoiceForUpdateTx(exec: DbOrTx, id: number): Promise<Invoice | undefined> {
+  const { invoices } = await import("@shared/schema");
+  const { eq } = await import("drizzle-orm");
+  const rows = await exec.select().from(invoices).where(eq(invoices.id, id)).for("update");
+  return rows[0];
 }
 
 export async function getInvoiceLineItems(invoiceId: number): Promise<InvoiceLineItem[]> {

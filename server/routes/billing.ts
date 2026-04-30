@@ -35,6 +35,7 @@ import {
   createInvoiceTx,
   updateInvoiceStatusTx,
   getInvoiceLineItemsTx,
+  getInvoiceForUpdateTx,
 } from "../storage/billing-storage";
 import { auditService } from "../services/audit";
 import { deliveryStorage } from "../storage/deliveries";
@@ -823,6 +824,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
       const { kasseItems, privateItems } = splitLineItemsByBudget(allLineItems, budgetSplit);
 
       const createdInvoices: Invoice[] = [];
+      type AuditEntry = { invoiceId: number; payload: Record<string, unknown> };
+      const pendingAudits: AuditEntry[] = [];
 
       const splitResult = await db.transaction(async (tx) => {
       if (kasseItems.length > 0) {
@@ -887,17 +890,20 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         const kasseInvoice = await createInvoiceTx(tx, kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(kasseInvoice);
 
-        await auditService.log(req.user!.id, "invoice_created", "invoice", kasseInvoice.id, {
-          invoiceNumber: kasseInvoiceNumber,
-          customerId,
-          billingType,
-          invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
-          billingMonth,
-          billingYear,
-          grossAmountCents: kasseNetCents,
-          lineItemCount: kasseItems.length,
-          splitType: "kasse",
-        }, req.ip);
+        pendingAudits.push({
+          invoiceId: kasseInvoice.id,
+          payload: {
+            invoiceNumber: kasseInvoiceNumber,
+            customerId,
+            billingType,
+            invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+            billingMonth,
+            billingYear,
+            grossAmountCents: kasseNetCents,
+            lineItemCount: kasseItems.length,
+            splitType: "kasse",
+          },
+        });
       }
 
       if (privateItems.length > 0) {
@@ -938,21 +944,29 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         const privateInvoice = await createInvoiceTx(tx, privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(privateInvoice);
 
-        await auditService.log(req.user!.id, "invoice_created", "invoice", privateInvoice.id, {
-          invoiceNumber: privateInvoiceNumber,
-          customerId,
-          billingType: "selbstzahler",
-          invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
-          billingMonth,
-          billingYear,
-          grossAmountCents: privateNetCents + privateVatCents,
-          lineItemCount: privateItems.length,
-          splitType: "privat",
-        }, req.ip);
+        pendingAudits.push({
+          invoiceId: privateInvoice.id,
+          payload: {
+            invoiceNumber: privateInvoiceNumber,
+            customerId,
+            billingType: "selbstzahler",
+            invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+            billingMonth,
+            billingYear,
+            grossAmountCents: privateNetCents + privateVatCents,
+            lineItemCount: privateItems.length,
+            splitType: "privat",
+          },
+        });
       }
 
         return createdInvoices;
       });
+
+      // Audit nach Commit, weil auditService nicht tx-aware ist.
+      for (const entry of pendingAudits) {
+        await auditService.log(req.user!.id, "invoice_created", "invoice", entry.invoiceId, entry.payload, req.ip);
+      }
 
       if (splitResult.length === 1) {
         res.json(splitResult[0]);
@@ -1100,27 +1114,39 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
     }
 
     const { stornoInvoice, invoiceNumber, updatedOriginal } = await db.transaction(async (tx) => {
-      const number = await getNextInvoiceNumberTx(tx, invoice.billingYear);
+      // Re-Read mit FOR UPDATE: serialisiert parallele Stornos derselben
+      // Originalrechnung. Ohne Lock würden zwei PATCHs den alten Status sehen
+      // und beide eine Stornorechnung erzeugen.
+      const locked = await getInvoiceForUpdateTx(tx, id);
+      if (!locked) throw notFound("Rechnung nicht gefunden");
+      if (locked.status === "storniert") {
+        throw badRequest("Diese Rechnung wurde bereits storniert.");
+      }
+      if (locked.invoiceType === "stornorechnung") {
+        throw badRequest("Stornorechnungen können nicht erneut storniert werden.");
+      }
+
+      const number = await getNextInvoiceNumberTx(tx, locked.billingYear);
       const lineItems = await getInvoiceLineItemsTx(tx, id);
 
       const stornoData = {
         invoiceNumber: number,
-        customerId: invoice.customerId,
-        billingType: invoice.billingType,
+        customerId: locked.customerId,
+        billingType: locked.billingType,
         invoiceType: "stornorechnung",
-        billingMonth: invoice.billingMonth,
-        billingYear: invoice.billingYear,
-        recipientName: invoice.recipientName,
-        recipientAddress: invoice.recipientAddress,
-        customerName: invoice.customerName,
-        insuranceProviderName: invoice.insuranceProviderName,
-        insuranceIkNummer: invoice.insuranceIkNummer,
-        versichertennummer: invoice.versichertennummer,
-        pflegegrad: invoice.pflegegrad,
-        netAmountCents: -invoice.netAmountCents,
-        vatAmountCents: -invoice.vatAmountCents,
-        grossAmountCents: -invoice.grossAmountCents,
-        vatRate: invoice.vatRate,
+        billingMonth: locked.billingMonth,
+        billingYear: locked.billingYear,
+        recipientName: locked.recipientName,
+        recipientAddress: locked.recipientAddress,
+        customerName: locked.customerName,
+        insuranceProviderName: locked.insuranceProviderName,
+        insuranceIkNummer: locked.insuranceIkNummer,
+        versichertennummer: locked.versichertennummer,
+        pflegegrad: locked.pflegegrad,
+        netAmountCents: -locked.netAmountCents,
+        vatAmountCents: -locked.vatAmountCents,
+        grossAmountCents: -locked.grossAmountCents,
+        vatRate: locked.vatRate,
         status: "versendet",
         stornierteRechnungId: id,
       };

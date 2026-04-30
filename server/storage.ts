@@ -179,7 +179,6 @@ export interface IStorage {
   getInvoice(id: number): Promise<InvoiceWithCustomer | undefined>;
   createInvoice(data: Record<string, unknown>, lineItems: Record<string, unknown>[], userId: number): Promise<Invoice>;
   updateInvoiceStatus(id: number, status: string, userId: number): Promise<Invoice>;
-  getNextInvoiceNumber(year: number): Promise<string>;
   getInvoiceLineItems(invoiceId: number): Promise<InvoiceLineItem[]>;
   getInvoicesForCustomerMonth(customerId: number, year: number, month: number): Promise<Invoice[]>;
 }
@@ -262,7 +261,6 @@ export class DatabaseStorage implements IStorage {
   getInvoice = billingStorage.getInvoice;
   createInvoice = billingStorage.createInvoice;
   updateInvoiceStatus = billingStorage.updateInvoiceStatus;
-  getNextInvoiceNumber = billingStorage.getNextInvoiceNumber;
   getInvoiceLineItems = billingStorage.getInvoiceLineItems;
   getInvoicesForCustomerMonth = billingStorage.getInvoicesForCustomerMonth;
 

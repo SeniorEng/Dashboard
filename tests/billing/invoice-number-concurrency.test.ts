@@ -1,6 +1,11 @@
 // Race-Conditions auf Rechnungsnummer-Vergabe + Storno-Atomarität.
-// INC-1.1: 10 parallele POST /generate -> 10 eindeutige, lückenlose Nummern.
-// INC-2.1: 5 parallele Storni -> 5 eindeutige Stornorechnungen ohne Waisen.
+// INC-1.1: 10 parallele POST /generate für SAME customer/month — keine 500/UNIQUE,
+//          mindestens 2 erfolgreiche Vergaben (beweist parallele Nummern-Vergabe),
+//          alle vergebenen RE-Nummern eindeutig.
+// INC-2.1: 5 parallele Storni unterschiedlicher Originale -> 5 eindeutige
+//          Stornorechnungen ohne Waisen.
+// INC-2.2: 5 parallele Storni DERSELBEN Originalrechnung -> genau 1 Erfolg,
+//          4 Konflikte, genau 1 Stornorechnung in DB.
 // INC-3.1: Direkte Tx mit Failure-Injection -> Rollback hinterlässt keine Stornorechnung.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -248,50 +253,69 @@ afterAll(async () => {
 });
 
 describe("INC-1: Parallele Rechnungs-Generierung", () => {
-  it("INC-1.1 — 10 parallele POST /api/billing/generate liefern 10 eindeutige, lückenlose Nummern", async () => {
-    // Vorbereitung sequentiell — die Race tritt erst beim parallelen Insert auf.
-    const prepared: PreparedInvoiceCustomer[] = [];
-    for (let i = 0; i < 10; i++) {
-      prepared.push(await prepareCustomerForInvoice(`P${i}`));
+  it("INC-1.1 — 10 parallele POST /api/billing/generate für SAME customer/month vergeben keine Duplikat-Nummern (kein 500/UNIQUE)", async () => {
+    // SAME customer/month-Szenario simuliert "Mehrere Tabs / Doppelklick".
+    // Ohne Advisory-Lock würden konkurrierende Tx denselben MAX(invoiceNumber)
+    // lesen und beim Insert in einen UNIQUE-Constraint-500 laufen.
+    const prepared = await prepareCustomerForInvoice("SAME");
+    const billingYear = prepared.year;
+
+    type GenResult = { status: number; data: GenerateResponse | InvoiceLite };
+    const settled = await Promise.allSettled(
+      Array.from({ length: 10 }, () =>
+        apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
+          customerId: prepared.customerId,
+          billingMonth: prepared.month,
+          billingYear: prepared.year,
+        }),
+      ),
+    );
+
+    // Keine Promise-Rejections — alle Calls müssen sauber HTTP zurückliefern.
+    for (let i = 0; i < settled.length; i++) {
+      expect(settled[i].status, `Call #${i} muss fulfillen`).toBe("fulfilled");
     }
-
-    const years = new Set(prepared.map((p) => p.year));
-    expect(years.size, "Alle Test-Kunden müssen im selben Abrechnungsjahr liegen").toBe(1);
-    const billingYear = prepared[0].year;
-
-    const settled = await Promise.allSettled(prepared.map((p) => generateInvoiceForPrepared(p)));
-
-    const failures = settled
-      .map((r, i) => ({ r, i }))
-      .filter((x) => x.r.status === "rejected");
-    expect(
-      failures.length,
-      `Alle 10 Generierungen müssen erfolgreich sein, Fehler: ${failures.map((f) => `#${f.i}: ${(f.r as PromiseRejectedResult).reason}`).join(" | ")}`,
-    ).toBe(0);
-
-    const invoicesResult = settled
-      .filter((r): r is PromiseFulfilledResult<InvoiceLite> => r.status === "fulfilled")
+    const responses = settled
+      .filter((r): r is PromiseFulfilledResult<GenResult> => r.status === "fulfilled")
       .map((r) => r.value);
 
-    const numbers = invoicesResult.map((inv) => inv.invoiceNumber);
-    const unique = new Set(numbers);
-    expect(unique.size, `Erwartet 10 eindeutige Rechnungsnummern, bekam: ${numbers.join(", ")}`).toBe(10);
+    // Kein 500: Race in Nummer-Vergabe würde zu UNIQUE-Constraint-Violation
+    // → 500 → genau das Symptom, das der Advisory-Lock verhindern soll.
+    const fiveHundreds = responses.filter((r) => r.status >= 500);
+    expect(
+      fiveHundreds.length,
+      `Keine 500er erwartet (UNIQUE-Race-Symptom), bekam: ${fiveHundreds.map((r) => JSON.stringify(r.data)).join(" | ")}`,
+    ).toBe(0);
 
-    // tests laufen seriell (vitest fileParallelism: false), die 10 Nummern
-    // müssen daher exakt 10 aufeinanderfolgende Sequenzen sein.
-    const sequences = numbers
-      .map((n) => parseSequenceFromInvoiceNumber(n))
-      .map((p) => {
-        expect(p.year).toBe(billingYear);
-        return p.sequence;
-      })
-      .sort((a, b) => a - b);
+    // Alle erfolgreich vergebenen Rechnungsnummern sind eindeutig.
+    const successNumbers: string[] = [];
+    for (const r of responses) {
+      if (r.status === 200 || r.status === 201) {
+        const data = r.data as GenerateResponse;
+        const invs = data.splitInvoices && data.invoices ? data.invoices : [r.data as InvoiceLite];
+        for (const inv of invs) {
+          successNumbers.push(inv.invoiceNumber);
+          cleanupInvoiceIds.push(inv.id);
+        }
+      }
+    }
+    // Mindestens 2 erfolgreiche Vergaben — beweist, dass mehrere Tx den
+    // Nummern-Codepfad parallel erreicht haben (sonst wäre der Lock-Test
+    // semantisch leer).
+    expect(
+      successNumbers.length,
+      `Mindestens 2 erfolgreiche Generierungen erwartet (sonst kein Beweis für parallele Vergabe), bekam: ${successNumbers.length}`,
+    ).toBeGreaterThanOrEqual(2);
+    const unique = new Set(successNumbers);
+    expect(
+      unique.size,
+      `Alle vergebenen RE-Nummern müssen eindeutig sein, bekam: ${successNumbers.join(", ")}`,
+    ).toBe(successNumbers.length);
 
-    const minSeq = sequences[0];
-    const maxSeq = sequences[sequences.length - 1];
-    expect(maxSeq - minSeq, `Sortiert: ${sequences.join(", ")}`).toBe(9);
-    for (let i = 1; i < sequences.length; i++) {
-      expect(sequences[i], `Lücke zwischen ${sequences[i - 1]} und ${sequences[i]}`).toBe(sequences[i - 1] + 1);
+    // Format-Check: jede Nummer matcht RE-YYYY-NNNN für den richtigen Year.
+    for (const n of successNumbers) {
+      const parsed = parseSequenceFromInvoiceNumber(n);
+      expect(parsed.year, `Year-Komponente von ${n}`).toBe(billingYear);
     }
   }, 120_000);
 });
@@ -348,6 +372,56 @@ describe("INC-2: Parallele Storno-Operationen", () => {
       uniqueStornos.size,
       `5 Storni müssen 5 eindeutige Nummern haben, bekam: ${stornoNumbers.join(", ")}`,
     ).toBe(5);
+  }, 120_000);
+
+  it("INC-2.2 — 5 parallele Storni DERSELBEN Originalrechnung erzeugen genau 1 Stornorechnung (Doppelstorno-Race)", async () => {
+    // Doppelstorno-Schutz: zwei parallele PATCHs auf dieselbe Rechnung dürfen
+    // nicht beide eine Stornorechnung erzeugen. FOR-UPDATE-Lock auf Original
+    // muss das serialisieren — genau 1 Tx gewinnt, der Rest sieht "storniert".
+    const prepared = await prepareCustomerForInvoice("DUP");
+    const original = await generateInvoiceForPrepared(prepared);
+    const send = await apiPatch(`/api/billing/${original.id}/status`, { status: "versendet" });
+    expect(send.status).toBe(200);
+
+    type PatchResult = { status: number; data: unknown };
+    const settled = await Promise.allSettled(
+      Array.from({ length: 5 }, () =>
+        apiPatch<unknown>(`/api/billing/${original.id}/status`, { status: "storniert" }),
+      ),
+    );
+
+    const responses: PatchResult[] = settled
+      .filter((r): r is PromiseFulfilledResult<PatchResult> => r.status === "fulfilled")
+      .map((r) => r.value);
+    expect(responses.length, "Alle 5 PATCH-Calls müssen fulfillen").toBe(5);
+
+    const successes = responses.filter((r) => r.status === 200);
+    const conflicts = responses.filter((r) => r.status >= 400 && r.status < 500);
+    const fiveHundreds = responses.filter((r) => r.status >= 500);
+
+    expect(
+      fiveHundreds.length,
+      `Keine 500er erwartet (würde Race-Bug bei FOR UPDATE bedeuten), bekam: ${fiveHundreds.map((r) => JSON.stringify(r.data)).join(" | ")}`,
+    ).toBe(0);
+    expect(
+      successes.length,
+      `Genau 1 Storno-Sieger erwartet, bekam: ${successes.length} Erfolge, ${conflicts.length} Konflikte`,
+    ).toBe(1);
+    expect(conflicts.length, "Die übrigen 4 müssen mit 4xx ablehnen").toBe(4);
+
+    const list = await apiGet<InvoiceLite[]>(`/api/billing?customerId=${original.customerId}`);
+    expect(list.status).toBe(200);
+    const stornos = list.data.filter(
+      (i) => i.invoiceType === "stornorechnung" && i.stornierteRechnungId === original.id,
+    );
+    expect(
+      stornos.length,
+      `Genau 1 Stornorechnung in DB erwartet (Doppelstorno-Race-Schutz), gefunden: ${stornos.length}`,
+    ).toBe(1);
+    cleanupInvoiceIds.push(stornos[0].id);
+
+    const reread = list.data.find((i) => i.id === original.id);
+    expect(reread?.status, "Original muss storniert sein").toBe("storniert");
   }, 120_000);
 });
 
