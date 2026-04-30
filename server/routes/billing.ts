@@ -30,6 +30,12 @@ import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
+import {
+  getNextInvoiceNumberTx,
+  createInvoiceTx,
+  updateInvoiceStatusTx,
+  getInvoiceLineItemsTx,
+} from "../storage/billing-storage";
 import { auditService } from "../services/audit";
 import { deliveryStorage } from "../storage/deliveries";
 import type { InvoicePdfData } from "../lib/pdf-generator";
@@ -819,29 +825,6 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
       const createdInvoices: Invoice[] = [];
 
       const splitResult = await db.transaction(async (tx) => {
-        const txStorage = {
-          async createInvoice(invoiceData: Record<string, unknown>, items: Record<string, unknown>[], userId: number): Promise<Invoice> {
-            const { invoices, invoiceLineItems } = await import("@shared/schema");
-            const invoiceValues = { ...invoiceData, createdByUserId: userId } as typeof invoices.$inferInsert;
-            const [invoice] = await tx.insert(invoices).values(invoiceValues).returning();
-            if (items.length > 0) {
-              await tx.insert(invoiceLineItems).values(
-                items.map((item) => ({ ...item, invoiceId: invoice.id } as typeof invoiceLineItems.$inferInsert))
-              );
-            }
-            return invoice;
-          },
-          async getNextInvoiceNumber(year: number): Promise<string> {
-            const { invoices: invoicesTable } = await import("@shared/schema");
-            const { sql: sqlTag } = await import("drizzle-orm");
-            const result = await tx.select({
-              maxNum: sqlTag<string>`MAX(SUBSTRING(${invoicesTable.invoiceNumber} FROM 'RE-\\d{4}-(\\d+)'))`,
-            }).from(invoicesTable).where(sqlTag`${invoicesTable.invoiceNumber} LIKE ${'RE-' + year + '-%'}`);
-            const maxNum = parseInt(result[0]?.maxNum || "0", 10);
-            return `RE-${year}-${String(maxNum + 1).padStart(4, "0")}`;
-          },
-        };
-
       if (kasseItems.length > 0) {
         const kasseNetCents = kasseItems.reduce((sum, i) => sum + i.totalCents, 0);
         let kasseRecipientName = "";
@@ -878,7 +861,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           }
         }
 
-        const kasseInvoiceNumber = await txStorage.getNextInvoiceNumber(billingYear);
+        const kasseInvoiceNumber = await getNextInvoiceNumberTx(tx, billingYear);
         const kasseInvoiceData = {
           invoiceNumber: kasseInvoiceNumber,
           customerId,
@@ -901,7 +884,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           notes: "Kassenanteil — Leistungen im Rahmen des verfügbaren Budgets",
         };
 
-        const kasseInvoice = await txStorage.createInvoice(kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
+        const kasseInvoice = await createInvoiceTx(tx, kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(kasseInvoice);
 
         await auditService.log(req.user!.id, "invoice_created", "invoice", kasseInvoice.id, {
@@ -929,7 +912,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           versichertennummer = insuranceInfo.versichertennummer;
         }
 
-        const privateInvoiceNumber = await txStorage.getNextInvoiceNumber(billingYear);
+        const privateInvoiceNumber = await getNextInvoiceNumberTx(tx, billingYear);
         const privateInvoiceData = {
           invoiceNumber: privateInvoiceNumber,
           customerId,
@@ -952,7 +935,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           notes: "Privatzahlung — Budget-Überschreitung gem. Vereinbarung",
         };
 
-        const privateInvoice = await txStorage.createInvoice(privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
+        const privateInvoice = await createInvoiceTx(tx, privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(privateInvoice);
 
         await auditService.log(req.user!.id, "invoice_created", "invoice", privateInvoice.id, {
@@ -1025,32 +1008,34 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     }
   }
 
-  const invoiceNumber = await storage.getNextInvoiceNumber(billingYear);
-
-  const invoiceData = {
-    invoiceNumber,
-    customerId,
-    billingType,
-    invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
-    billingMonth,
-    billingYear,
-    recipientName,
-    recipientAddress,
-    customerName,
-    insuranceProviderName: insuranceProviderName || null,
-    insuranceIkNummer: insuranceIkNummer || null,
-    versichertennummer: versichertennummer || null,
-    pflegegrad: customer.pflegegrad || null,
-    netAmountCents: totalNetCents,
-    vatAmountCents: totalVatCents,
-    grossAmountCents: totalNetCents + totalVatCents,
-    vatRate: billingType === "selbstzahler" ? 1900 : 0,
-    status: "entwurf",
-  };
-
   let invoice: Invoice;
+  let invoiceNumber: string;
   try {
-    invoice = await storage.createInvoice(invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
+    ({ invoice, invoiceNumber } = await db.transaction(async (tx) => {
+      const number = await getNextInvoiceNumberTx(tx, billingYear);
+      const invoiceData = {
+        invoiceNumber: number,
+        customerId,
+        billingType,
+        invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+        billingMonth,
+        billingYear,
+        recipientName,
+        recipientAddress,
+        customerName,
+        insuranceProviderName: insuranceProviderName || null,
+        insuranceIkNummer: insuranceIkNummer || null,
+        versichertennummer: versichertennummer || null,
+        pflegegrad: customer.pflegegrad || null,
+        netAmountCents: totalNetCents,
+        vatAmountCents: totalVatCents,
+        grossAmountCents: totalNetCents + totalVatCents,
+        vatRate: billingType === "selbstzahler" ? 1900 : 0,
+        status: "entwurf",
+      };
+      const created = await createInvoiceTx(tx, invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
+      return { invoice: created, invoiceNumber: number };
+    }));
   } catch (err) {
     console.error("[billing/generate] Invoice insert failed.", {
       customerId,
@@ -1108,53 +1093,63 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
     throw badRequest(`Statuswechsel von "${currentStatus}" zu "${status}" ist nicht erlaubt.`);
   }
 
+  let updated: Invoice;
   if (status === "storniert") {
     if (invoice.invoiceType === "stornorechnung") {
       throw badRequest("Stornorechnungen können nicht erneut storniert werden.");
     }
-    const invoiceNumber = await storage.getNextInvoiceNumber(invoice.billingYear);
-    const lineItems = await storage.getInvoiceLineItems(id);
 
-    const stornoData = {
-      invoiceNumber,
-      customerId: invoice.customerId,
-      billingType: invoice.billingType,
-      invoiceType: "stornorechnung",
-      billingMonth: invoice.billingMonth,
-      billingYear: invoice.billingYear,
-      recipientName: invoice.recipientName,
-      recipientAddress: invoice.recipientAddress,
-      customerName: invoice.customerName,
-      insuranceProviderName: invoice.insuranceProviderName,
-      insuranceIkNummer: invoice.insuranceIkNummer,
-      versichertennummer: invoice.versichertennummer,
-      pflegegrad: invoice.pflegegrad,
-      netAmountCents: -invoice.netAmountCents,
-      vatAmountCents: -invoice.vatAmountCents,
-      grossAmountCents: -invoice.grossAmountCents,
-      vatRate: invoice.vatRate,
-      status: "versendet",
-      stornierteRechnungId: id,
-    };
+    const { stornoInvoice, invoiceNumber, updatedOriginal } = await db.transaction(async (tx) => {
+      const number = await getNextInvoiceNumberTx(tx, invoice.billingYear);
+      const lineItems = await getInvoiceLineItemsTx(tx, id);
 
-    const stornoLineItems = lineItems.map((item: InvoiceLineItem) => ({
-      appointmentId: item.appointmentId,
-      appointmentDate: item.appointmentDate,
-      serviceDescription: item.serviceDescription,
-      serviceCode: item.serviceCode,
-      startTime: item.startTime,
-      endTime: item.endTime,
-      durationMinutes: item.durationMinutes,
-      unitPriceCents: item.unitPriceCents,
-      totalCents: -item.totalCents,
-      employeeName: item.employeeName,
-      employeeLbnr: item.employeeLbnr,
-      appointmentNotes: item.appointmentNotes || null,
-      serviceDetails: item.serviceDetails || null,
-    }));
+      const stornoData = {
+        invoiceNumber: number,
+        customerId: invoice.customerId,
+        billingType: invoice.billingType,
+        invoiceType: "stornorechnung",
+        billingMonth: invoice.billingMonth,
+        billingYear: invoice.billingYear,
+        recipientName: invoice.recipientName,
+        recipientAddress: invoice.recipientAddress,
+        customerName: invoice.customerName,
+        insuranceProviderName: invoice.insuranceProviderName,
+        insuranceIkNummer: invoice.insuranceIkNummer,
+        versichertennummer: invoice.versichertennummer,
+        pflegegrad: invoice.pflegegrad,
+        netAmountCents: -invoice.netAmountCents,
+        vatAmountCents: -invoice.vatAmountCents,
+        grossAmountCents: -invoice.grossAmountCents,
+        vatRate: invoice.vatRate,
+        status: "versendet",
+        stornierteRechnungId: id,
+      };
 
-    const stornoInvoice = await storage.createInvoice(stornoData, stornoLineItems, req.user!.id);
+      const stornoLineItems = lineItems.map((item: InvoiceLineItem) => ({
+        appointmentId: item.appointmentId,
+        appointmentDate: item.appointmentDate,
+        serviceDescription: item.serviceDescription,
+        serviceCode: item.serviceCode,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        durationMinutes: item.durationMinutes,
+        unitPriceCents: item.unitPriceCents,
+        totalCents: -item.totalCents,
+        employeeName: item.employeeName,
+        employeeLbnr: item.employeeLbnr,
+        appointmentNotes: item.appointmentNotes || null,
+        serviceDetails: item.serviceDetails || null,
+      }));
 
+      const created = await createInvoiceTx(tx, stornoData, stornoLineItems, req.user!.id);
+      const original = await updateInvoiceStatusTx(tx, id, status, req.user!.id);
+      return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
+    });
+
+    // Audit AFTER commit — der Audit-Service schreibt selbst über `db` (nicht
+    // tx-aware); würde er innerhalb der Transaktion laufen, wäre der Eintrag
+    // bei Rollback trotzdem persistent. Loggen wir erst nach erfolgreichem
+    // Commit, ist Audit immer konsistent mit dem Datenstand.
     await auditService.log(req.user!.id, "invoice_cancelled", "invoice", id, {
       originalInvoiceNumber: invoice.invoiceNumber,
       stornoInvoiceId: stornoInvoice.id,
@@ -1164,9 +1159,12 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       oldStatus: currentStatus,
       newStatus: status,
     }, req.ip);
+
+    updated = updatedOriginal;
+  } else {
+    updated = await storage.updateInvoiceStatus(id, status, req.user!.id);
   }
 
-  const updated = await storage.updateInvoiceStatus(id, status, req.user!.id);
   res.json(updated);
 }));
 
