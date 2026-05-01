@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiPost,
+  apiPostAs,
   apiPatch,
+  apiPut,
   apiGet,
   createTestEmployee,
   deactivateTestEmployee,
   resetAuthCache,
   getAuthCookie,
+  loginAs,
 } from "./test-utils";
 
 /**
@@ -147,6 +150,85 @@ describe("Task #252 – Teamleitung (flacher Marker)", () => {
       // Entweder 404/405 oder die SPA-Fallback-HTML-Antwort (keine JSON-Liste).
       const isJsonResponse = !!(res.data && typeof res.data === "object" && "members" in (res.data as object));
       expect(isJsonResponse).toBe(false);
+    });
+  });
+
+  // Task #285 — neue Anlegen-Pfade aus Task #282:
+  // Super-Admin kann isTeamLead direkt im POST setzen, normale Admins nicht,
+  // und die Invariante "Admin ⇒ kein Teamleiter" greift auch beim Anlegen.
+  describe("Anlegen mit isTeamLead (Task #282 / #285)", () => {
+    function buildNewUserPayload(prefix: string, overrides: Record<string, unknown> = {}) {
+      const ts = Date.now();
+      const rand = Math.random().toString(36).slice(2, 7);
+      const phoneSuffix = String(ts).slice(-9).padStart(9, "0");
+      return {
+        email: `tl-create-${ts}-${rand}@test.local`,
+        password: "TestPasswort123!",
+        vorname: "Test",
+        nachname: `${prefix}_${ts}_${rand}`,
+        geburtsdatum: "1990-01-01",
+        eintrittsdatum: "2024-01-01",
+        telefon: `+49170${phoneSuffix}`,
+        ...overrides,
+      };
+    }
+
+    it("Super-Admin kann beim Anlegen direkt isTeamLead: true setzen", async () => {
+      const payload = buildNewUserPayload("TLCreateLead", { isTeamLead: true });
+      const res = await apiPost<any>("/api/admin/users", payload);
+      expect(res.status).toBe(201);
+      expect(res.data.isTeamLead).toBe(true);
+      expect(res.data.isAdmin).toBe(false);
+      createdIds.push(res.data.id);
+
+      // Persistenz nochmal prüfen: erneutes Lesen liefert denselben Marker.
+      const reread = await apiGet<any>(`/api/admin/users/${res.data.id}`);
+      expect(reread.status).toBe(200);
+      expect(reread.data.isTeamLead).toBe(true);
+      expect(reread.data.isAdmin).toBe(false);
+    });
+
+    it("normaler Admin (kein Super-Admin) bekommt 403 mit klarer Nachricht, wenn er isTeamLead: true mitschickt", async () => {
+      const adminEmp = await createTestEmployee({
+        isAdmin: true,
+        nachnamePrefix: "TLCreateAdminCaller",
+      });
+      createdIds.push(adminEmp.id);
+
+      // Damit das Request den /users-Handler überhaupt erreicht, braucht der
+      // normale Admin die 'users'-Berechtigung. Ohne sie würde schon der
+      // Permission-Guard mit einer generischen Meldung blocken.
+      const grantPerms = await apiPut<any>(`/api/admin/users/${adminEmp.id}/permissions`, {
+        permissions: ["users"],
+      });
+      expect(grantPerms.status).toBe(200);
+
+      const adminAuth = await loginAs(adminEmp.email, adminEmp.password);
+
+      const payload = buildNewUserPayload("TLCreateForbidden", { isTeamLead: true });
+      const res = await apiPostAs<any>(adminAuth, "/api/admin/users", payload);
+
+      expect(res.status).toBe(403);
+      expect(res.data.error).toBe("FORBIDDEN");
+      expect(res.data.message).toBe("Nur der Hauptadministrator kann Teamleitungen anlegen");
+    });
+
+    it("isAdmin: true und isTeamLead: true gemeinsam ⇒ isTeamLead wird auf false gesetzt", async () => {
+      const payload = buildNewUserPayload("TLCreateAdminAndLead", {
+        isAdmin: true,
+        isTeamLead: true,
+      });
+      const res = await apiPost<any>("/api/admin/users", payload);
+      expect(res.status).toBe(201);
+      expect(res.data.isAdmin).toBe(true);
+      expect(res.data.isTeamLead).toBe(false);
+      createdIds.push(res.data.id);
+
+      // Auch beim erneuten Lesen darf der Teamleiter-Marker nicht erscheinen.
+      const reread = await apiGet<any>(`/api/admin/users/${res.data.id}`);
+      expect(reread.status).toBe(200);
+      expect(reread.data.isAdmin).toBe(true);
+      expect(reread.data.isTeamLead).toBe(false);
     });
   });
 });
