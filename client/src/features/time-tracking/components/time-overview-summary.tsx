@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatKm } from "@/lib/utils";
+import { formatKm, formatVacationDays } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Car, Palmtree, ChevronDown, AlertTriangle } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -249,19 +249,19 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         title={`Urlaub ${selectedYear}`}
         icon={<Palmtree className={iconSize.sm} />}
         defaultOpen={false}
-        summaryText={vacationSummary ? `${vacationSummary.remainingDays} Tage verfügbar` : undefined}
+        summaryText={vacationSummary ? `${formatVacationDays(vacationSummary.remainingDays)} Tage verfügbar` : undefined}
         testId="card-vacation-summary"
       >
         {vacationSummary ? (
           <div className="space-y-2">
-            <SummaryRow label="Anspruch" value={`${vacationSummary.totalDays} ${vacationSummary.totalDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-total-vacation" />
+            <SummaryRow label="Anspruch" value={`${formatVacationDays(vacationSummary.totalDays)} ${vacationSummary.totalDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-total-vacation" />
             {vacationSummary.carryOverDays > 0 && (
-              <SummaryRow label="Übertrag (bis 01.04.)" value={`${vacationSummary.carryOverDays} ${vacationSummary.carryOverDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-carry-over" />
+              <SummaryRow label="Übertrag (bis 01.04.)" value={`${formatVacationDays(vacationSummary.carryOverDays)} ${vacationSummary.carryOverDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-carry-over" />
             )}
-            <SummaryRow label="Genommen" value={`${vacationSummary.usedDays} ${vacationSummary.usedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-used-days" />
-            <SummaryRow label="Geplant" value={`${vacationSummary.plannedDays} ${vacationSummary.plannedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-planned-days" />
+            <SummaryRow label="Genommen" value={`${formatVacationDays(vacationSummary.usedDays)} ${vacationSummary.usedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-used-days" />
+            <SummaryRow label="Geplant" value={`${formatVacationDays(vacationSummary.plannedDays)} ${vacationSummary.plannedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-planned-days" />
             <div className="border-t pt-2 mt-2">
-              <SummaryRow label="Verfügbar" value={`${vacationSummary.remainingDays} ${vacationSummary.remainingDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-remaining-days" bold />
+              <SummaryRow label="Verfügbar" value={`${formatVacationDays(vacationSummary.remainingDays)} ${vacationSummary.remainingDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-remaining-days" bold />
             </div>
             <div className="border-t pt-2 mt-2 flex justify-between items-center">
               <span className="text-sm text-gray-600">Krankheit</span>

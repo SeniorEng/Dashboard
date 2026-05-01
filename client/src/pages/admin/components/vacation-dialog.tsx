@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { VacationSummary } from "@/lib/api/types";
+import { formatVacationDays } from "@/lib/utils";
 
 interface VacationDialogProps {
   open: boolean;
@@ -63,7 +64,7 @@ export function VacationDialog({
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Verfügbar:</span>
-                  <span className="font-medium text-teal-700">{vacation.remainingDays} {vacation.remainingDays === 1 ? 'Tag' : 'Tage'}</span>
+                  <span className="font-medium text-teal-700">{formatVacationDays(vacation.remainingDays)} {vacation.remainingDays === 1 ? 'Tag' : 'Tage'}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t pt-2">
                   <span>Krankheitstage:</span>

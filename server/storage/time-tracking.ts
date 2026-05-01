@@ -21,6 +21,8 @@ import type {
   UpdateTimeEntry,
   EmployeeVacationAllowance,
   InsertVacationAllowance,
+  VacationEntitlementHistory,
+  InsertVacationEntitlementHistory,
 } from "@shared/schema";
 import type {
   VacationSummary,
@@ -69,6 +71,8 @@ export interface ITimeTrackingStorage {
   getVacationSummary(userId: number, year: number): Promise<VacationSummary>;
   getVacationAllowance(userId: number, year: number): Promise<EmployeeVacationAllowance | undefined>;
   setVacationAllowance(data: InsertVacationAllowance): Promise<EmployeeVacationAllowance>;
+  getVacationEntitlementHistoryForUser(userId: number): Promise<VacationEntitlementHistory[]>;
+  upsertVacationEntitlementHistory(data: InsertVacationEntitlementHistory): Promise<VacationEntitlementHistory>;
 
   // Admin views
   getAllTimeEntries(filters?: TimeEntryFilters & { userId?: number }): Promise<(EmployeeTimeEntry & { user: { displayName: string } })[]>;
@@ -98,6 +102,10 @@ export const timeTrackingStorage = {
   getVacationAllowance: vacationModule.getVacationAllowance,
   setVacationAllowance: vacationModule.setVacationAllowance,
   getVacationSummary: vacationModule.getVacationSummary,
+  getVacationEntitlementHistoryForUser: vacationModule.getVacationEntitlementHistoryForUser,
+  getVacationEntitlementHistoryForUsers: vacationModule.getVacationEntitlementHistoryForUsers,
+  upsertVacationEntitlementHistory: vacationModule.upsertVacationEntitlementHistory,
+  computeAnnualEntitlement: vacationModule.computeAnnualEntitlement,
 
   // appointments
   getEmployeeAppointments: appointmentsModule.getEmployeeAppointments,

@@ -220,6 +220,14 @@ async function runStartupTasks() {
       log(`Budget-Sync fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { seedInitialVacationHistory } = await import("./startup/seed-initial-vacation-history");
+    try {
+      const seeded = await seedInitialVacationHistory();
+      if (seeded > 0) log(`Urlaubs-Historie initial gesetzt für ${seeded} Mitarbeiter`, "startup");
+    } catch (err) {
+      log(`Urlaubs-Historie-Seed fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { syncVacationCarryover } = await import("./startup/sync-vacation-carryover");
     try {
       const synced = await syncVacationCarryover();

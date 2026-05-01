@@ -5,4 +5,4 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export { formatKm } from "@shared/utils/format";
+export { formatKm, formatVacationDays } from "@shared/utils/format";

@@ -40,6 +40,22 @@ export function formatKm(km: number | string | null | undefined): string {
   return Number(km ?? 0).toFixed(1).replace(".", ",");
 }
 
+/**
+ * Formatiert eine Tageszahl im deutschen Format (Komma statt Punkt). Trimmt
+ * unnötige Nachkommastellen, behält aber bis zu 2 Dezimalstellen, wenn der
+ * Wert nicht ganzzahlig ist (z. B. 17,5 oder 17,42).
+ */
+export function formatVacationDays(days: number | string | null | undefined): string {
+  const n = Number(days ?? 0);
+  if (!Number.isFinite(n)) return "0";
+  if (Number.isInteger(n)) return n.toString();
+  const rounded = Math.round(n * 100) / 100;
+  return rounded.toLocaleString("de-DE", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
 export function formatAddress(entity: {
   strasse?: string | null;
   nr?: string | null;

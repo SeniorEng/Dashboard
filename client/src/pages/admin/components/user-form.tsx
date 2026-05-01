@@ -273,6 +273,11 @@ export function UserForm({
                 data-testid="input-user-vacation-days"
               />
               <p className="text-xs text-gray-500">Urlaubsanspruch auf 12 Monate</p>
+              {mode === "edit" && (
+                <p className="text-xs text-gray-500" data-testid="text-vacation-prorata-hint">
+                  Änderungen wirken anteilig ab dem aktuellen Monat. Monate vor der Änderung behalten den bisherigen Wert.
+                </p>
+              )}
             </div>
             {mode === "edit" && (
               <div className="space-y-2">

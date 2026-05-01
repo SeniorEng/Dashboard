@@ -362,15 +362,35 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
   }
 
   const vacationFieldsChanged = carryOverDays !== undefined || 'vacationDaysPerYear' in userUpdates || 'eintrittsdatum' in userUpdates;
+  const vacationDaysActuallyChanged = (
+    'vacationDaysPerYear' in userUpdates &&
+    (currentUserBefore.vacationDaysPerYear ?? 30) !== (updatedUser.vacationDaysPerYear ?? 30)
+  );
   if (vacationFieldsChanged) {
     const { timeTrackingStorage } = await import("../../storage/time-tracking");
-    const { getVacationEntitlement } = await import("@shared/domain/vacation");
-    const currentYear = new Date().getFullYear();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
     const vacDays = updatedUser.vacationDaysPerYear ?? 30;
     const eintritt = updatedUser.eintrittsdatum ?? null;
-    const totalDays = getVacationEntitlement(vacDays, eintritt, currentYear);
+
+    // Wenn der Jahresurlaubsanspruch tatsächlich geändert wird, schreiben wir
+    // einen History-Eintrag für den aktuellen Monat (Upsert: mehrere Änderungen
+    // im selben Monat ergeben einen Eintrag — letzter Wert gewinnt).
+    if (vacationDaysActuallyChanged) {
+      await timeTrackingStorage.upsertVacationEntitlementHistory({
+        userId: id,
+        validFromYear: currentYear,
+        validFromMonth: currentMonth,
+        daysPerYear: vacDays,
+        createdBy: req.user!.id,
+      });
+    }
+
+    const history = await timeTrackingStorage.getVacationEntitlementHistoryForUser(id);
+    const totalDays = timeTrackingStorage.computeAnnualEntitlement(history, vacDays, eintritt, currentYear);
     const existingAllowance = await timeTrackingStorage.getVacationAllowance(id, currentYear);
-    if (carryOverDays !== undefined || existingAllowance) {
+    if (carryOverDays !== undefined || existingAllowance || vacationDaysActuallyChanged) {
       await timeTrackingStorage.setVacationAllowance({
         userId: id,
         year: currentYear,

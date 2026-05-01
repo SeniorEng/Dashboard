@@ -1,9 +1,13 @@
 import { db } from "../lib/db";
 import { eq, and, gte, lte, isNull, inArray } from "drizzle-orm";
 import { users, employeeVacationAllowance, employeeTimeEntries } from "@shared/schema";
-import { getVacationEntitlement, calculateCarryOverDays } from "@shared/domain/vacation";
+import { calculateCarryOverDays } from "@shared/domain/vacation";
 import { todayISO } from "@shared/utils/datetime";
 import { log } from "../lib/log";
+import {
+  getVacationEntitlementHistoryForUsers,
+  computeAnnualEntitlement,
+} from "../storage/time-tracking/vacation";
 
 export async function syncVacationCarryover(): Promise<number> {
   const currentYear = new Date().getFullYear();
@@ -42,7 +46,7 @@ export async function syncVacationCarryover(): Promise<number> {
 
   const needingSyncIds = employeesNeedingSync.map(e => e.id);
 
-  const [prevYearAllowances, prevYearEntries] = await Promise.all([
+  const [prevYearAllowances, prevYearEntries, historyMap] = await Promise.all([
     db.select()
       .from(employeeVacationAllowance)
       .where(
@@ -64,6 +68,7 @@ export async function syncVacationCarryover(): Promise<number> {
           lte(employeeTimeEntries.entryDate, prevYearEnd),
         )
       ),
+    getVacationEntitlementHistoryForUsers(needingSyncIds),
   ]);
 
   const prevAllowanceMap = new Map(prevYearAllowances.map(a => [a.userId, a]));
@@ -77,26 +82,36 @@ export async function syncVacationCarryover(): Promise<number> {
   for (const emp of employeesNeedingSync) {
     const vacDays = emp.vacationDaysPerYear ?? 30;
     const eintritt = emp.eintrittsdatum ?? null;
+    const history = historyMap.get(emp.id) ?? [];
 
     const prevAllowance = prevAllowanceMap.get(emp.id);
     let prevEntitlement: number;
-    if (prevAllowance) {
-      prevEntitlement = prevAllowance.totalDays + prevAllowance.carryOverDays;
+    if (history.length > 0) {
+      // History-basierte Berechnung des Vorjahresanspruchs (anteilig). Plus
+      // ggf. existierender Übertrag aus dem Vorjahres-Cache.
+      prevEntitlement = computeAnnualEntitlement(history, vacDays, eintritt, currentYear - 1)
+        + (prevAllowance ? prevAllowance.carryOverDays : 0);
+    } else if (prevAllowance) {
+      // Drizzle numeric -> string; Number() ist sicher, weil Schema validiert.
+      const prevTotal = typeof prevAllowance.totalDays === "string"
+        ? Number(prevAllowance.totalDays)
+        : prevAllowance.totalDays;
+      prevEntitlement = prevTotal + prevAllowance.carryOverDays;
     } else {
-      prevEntitlement = getVacationEntitlement(vacDays, eintritt, currentYear - 1);
+      prevEntitlement = computeAnnualEntitlement([], vacDays, eintritt, currentYear - 1);
     }
 
     const prevUsed = prevYearUsedMap.get(emp.id) ?? 0;
     const unusedFromPrevYear = Math.max(0, prevEntitlement - prevUsed);
     const carryOverDays = calculateCarryOverDays(unusedFromPrevYear, currentYear, today);
 
-    const totalDays = getVacationEntitlement(vacDays, eintritt, currentYear);
+    const totalDays = computeAnnualEntitlement(history, vacDays, eintritt, currentYear);
 
     try {
       const result = await db.insert(employeeVacationAllowance).values({
         userId: emp.id,
         year: currentYear,
-        totalDays,
+        totalDays: totalDays.toFixed(2),
         carryOverDays,
         notes: carryOverDays > 0
           ? `Automatischer Übertrag: ${carryOverDays} Tage aus ${currentYear - 1}`

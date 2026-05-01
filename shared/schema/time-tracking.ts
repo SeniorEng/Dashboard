@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, serial, time, date, boolean, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, numeric, real, serial, time, date, boolean, unique, index } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
@@ -46,17 +46,35 @@ export const employeeTimeEntries = pgTable("employee_time_entries", {
 ]);
 
 // Employee vacation allowance per year
+// totalDays als numeric(5,2) damit anteilige Werte (z. B. 11.33 nach unterjähriger
+// Anspruchsänderung — siehe `vacationEntitlementHistory`) sauber abgebildet werden.
 export const employeeVacationAllowance = pgTable("employee_vacation_allowance", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id),
   year: integer("year").notNull(),
-  totalDays: integer("total_days").notNull().default(30), // Standard German vacation days
+  totalDays: numeric("total_days", { precision: 5, scale: 2 }).notNull().default("30"),
   carryOverDays: integer("carry_over_days").notNull().default(0), // Days carried from previous year
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   unique("user_year_unique").on(table.userId, table.year),
+]);
+
+// Historie des Jahresurlaubsanspruchs pro Mitarbeiter — wird benötigt, damit
+// unterjährige Änderungen am `vacationDaysPerYear` anteilig (monatsgenau) in den
+// Jahresanspruch einfließen, statt rückwirkend für das gesamte Jahr zu greifen.
+export const vacationEntitlementHistory = pgTable("vacation_entitlement_history", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  validFromYear: integer("valid_from_year").notNull(),
+  validFromMonth: integer("valid_from_month").notNull(), // 1-12
+  daysPerYear: integer("days_per_year").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdBy: integer("created_by").references(() => users.id),
+}, (table) => [
+  unique("vacation_entitlement_history_unique").on(table.userId, table.validFromYear, table.validFromMonth),
+  index("vacation_entitlement_history_user_idx").on(table.userId),
 ]);
 
 // Insert schemas
@@ -81,9 +99,23 @@ export const insertVacationAllowanceSchema = z.object({
   notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
 });
 
+export const insertVacationEntitlementHistorySchema = z.object({
+  userId: z.number(),
+  validFromYear: z.number().int().min(2020).max(2100),
+  validFromMonth: z.number().int().min(1).max(12),
+  daysPerYear: z.number().int().min(0).max(365),
+  createdBy: z.number().nullable().optional(),
+});
+
 export type EmployeeTimeEntry = typeof employeeTimeEntries.$inferSelect;
 export type InsertTimeEntry = z.infer<typeof insertTimeEntrySchema>;
 export type UpdateTimeEntry = z.infer<typeof updateTimeEntrySchema>;
 
+// Drizzles `numeric`-Typ liefert in TS einen `string`. Das Storage-Layer
+// (`server/storage/time-tracking/vacation.ts`) konvertiert beim Lesen auf
+// `number`, sodass alle Aufrufer mit Zahlen arbeiten.
 export type EmployeeVacationAllowance = typeof employeeVacationAllowance.$inferSelect;
 export type InsertVacationAllowance = z.infer<typeof insertVacationAllowanceSchema>;
+
+export type VacationEntitlementHistory = typeof vacationEntitlementHistory.$inferSelect;
+export type InsertVacationEntitlementHistory = z.infer<typeof insertVacationEntitlementHistorySchema>;

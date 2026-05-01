@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { iconSize, componentStyles } from "@/design-system";
+import { formatVacationDays } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -743,10 +744,10 @@ export default function AdminUsers() {
                                   <span className="inline-flex items-center gap-1 cursor-default">
                                     <Palmtree className="h-3 w-3" />
                                     <span className={`font-medium ${vac.remainingDays <= 0 ? 'text-red-600' : vac.remainingDays <= 3 ? 'text-amber-600' : 'text-teal-700'}`} data-testid={`vacation-remaining-${user.id}`}>
-                                      {vac.remainingDays} Tage übrig
+                                      {formatVacationDays(vac.remainingDays)} Tage übrig
                                     </span>
                                     <span className="text-gray-500">
-                                      (von {totalAvailable}{vac.carryOverDays > 0 ? ` inkl. ${vac.carryOverDays} Übertrag` : ''})
+                                      (von {formatVacationDays(totalAvailable)}{vac.carryOverDays > 0 ? ` inkl. ${formatVacationDays(vac.carryOverDays)} Übertrag` : ''})
                                     </span>
                                   </span>
                                   <span className="text-gray-300">|</span>

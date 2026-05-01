@@ -2,14 +2,30 @@ import { eq, and, gte, lte, inArray, isNull } from "drizzle-orm";
 import {
   employeeTimeEntries,
   employeeVacationAllowance,
+  vacationEntitlementHistory,
   users,
   type EmployeeVacationAllowance,
   type InsertVacationAllowance,
+  type VacationEntitlementHistory,
+  type InsertVacationEntitlementHistory,
 } from "@shared/schema";
 import type { VacationSummary } from "@shared/api";
-import { getVacationEntitlement, calculateCarryOverDays } from "@shared/domain/vacation";
+import {
+  getVacationEntitlement,
+  calculateCarryOverDays,
+  calculateAnnualEntitlementWithHistory,
+  type VacationEntitlementHistoryEntry,
+} from "@shared/domain/vacation";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
+
+// Drizzles `numeric`-Typ liefert Strings; nach außen geben wir reine Zahlen weiter.
+function normalizeAllowance(row: typeof employeeVacationAllowance.$inferSelect): EmployeeVacationAllowance {
+  return {
+    ...row,
+    totalDays: typeof row.totalDays === "string" ? Number(row.totalDays) : row.totalDays,
+  } as unknown as EmployeeVacationAllowance;
+}
 
 export async function getVacationAllowance(
   userId: number,
@@ -24,7 +40,7 @@ export async function getVacationAllowance(
         eq(employeeVacationAllowance.year, year),
       ),
     );
-  return results[0];
+  return results[0] ? normalizeAllowance(results[0]) : undefined;
 }
 
 export async function setVacationAllowance(
@@ -32,18 +48,22 @@ export async function setVacationAllowance(
 ): Promise<EmployeeVacationAllowance> {
   const existing = await getVacationAllowance(data.userId, data.year);
 
+  // numeric-Spalte akzeptiert in Drizzle string|number — wir geben Strings rein,
+  // damit die Nachkommastellen erhalten bleiben.
+  const totalDaysAsString = data.totalDays.toFixed(2);
+
   if (existing) {
     const results = await db
       .update(employeeVacationAllowance)
       .set({
-        totalDays: data.totalDays,
+        totalDays: totalDaysAsString,
         carryOverDays: data.carryOverDays,
         notes: data.notes,
         updatedAt: new Date(),
       })
       .where(eq(employeeVacationAllowance.id, existing.id))
       .returning();
-    return results[0];
+    return normalizeAllowance(results[0]);
   }
 
   const results = await db
@@ -51,12 +71,99 @@ export async function setVacationAllowance(
     .values({
       userId: data.userId,
       year: data.year,
-      totalDays: data.totalDays,
+      totalDays: totalDaysAsString,
       carryOverDays: data.carryOverDays,
       notes: data.notes,
     })
     .returning();
+  return normalizeAllowance(results[0]);
+}
+
+// ============================================
+// Vacation Entitlement History
+// ============================================
+
+export async function getVacationEntitlementHistoryForUser(
+  userId: number,
+): Promise<VacationEntitlementHistory[]> {
+  return await db
+    .select()
+    .from(vacationEntitlementHistory)
+    .where(eq(vacationEntitlementHistory.userId, userId));
+}
+
+export async function getVacationEntitlementHistoryForUsers(
+  userIds: number[],
+): Promise<Map<number, VacationEntitlementHistory[]>> {
+  const map = new Map<number, VacationEntitlementHistory[]>();
+  if (userIds.length === 0) return map;
+  const rows = await db
+    .select()
+    .from(vacationEntitlementHistory)
+    .where(inArray(vacationEntitlementHistory.userId, userIds));
+  for (const row of rows) {
+    const list = map.get(row.userId) ?? [];
+    list.push(row);
+    map.set(row.userId, list);
+  }
+  return map;
+}
+
+/**
+ * Upsert auf `(userId, validFromYear, validFromMonth)`. Wenn im selben Monat
+ * mehrfach geändert wird, gewinnt der letzte Wert (Spec VAC-PRO-8).
+ */
+export async function upsertVacationEntitlementHistory(
+  data: InsertVacationEntitlementHistory,
+): Promise<VacationEntitlementHistory> {
+  const results = await db
+    .insert(vacationEntitlementHistory)
+    .values({
+      userId: data.userId,
+      validFromYear: data.validFromYear,
+      validFromMonth: data.validFromMonth,
+      daysPerYear: data.daysPerYear,
+      createdBy: data.createdBy ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [
+        vacationEntitlementHistory.userId,
+        vacationEntitlementHistory.validFromYear,
+        vacationEntitlementHistory.validFromMonth,
+      ],
+      set: {
+        daysPerYear: data.daysPerYear,
+        createdBy: data.createdBy ?? null,
+      },
+    })
+    .returning();
   return results[0];
+}
+
+function toHistoryEntries(rows: VacationEntitlementHistory[]): VacationEntitlementHistoryEntry[] {
+  return rows.map(r => ({
+    validFromYear: r.validFromYear,
+    validFromMonth: r.validFromMonth,
+    daysPerYear: r.daysPerYear,
+  }));
+}
+
+/**
+ * Liefert den effektiven Jahresanspruch für `year` — bevorzugt aus dem
+ * History-Helper, mit Fallback auf bestehende `getVacationEntitlement`-Logik.
+ */
+export function computeAnnualEntitlement(
+  history: VacationEntitlementHistory[],
+  vacationDaysPerYear: number,
+  eintrittsdatum: string | null,
+  year: number,
+): number {
+  return calculateAnnualEntitlementWithHistory(
+    toHistoryEntries(history),
+    eintrittsdatum,
+    year,
+    vacationDaysPerYear,
+  );
 }
 
 export async function getVacationSummary(
@@ -67,7 +174,7 @@ export async function getVacationSummary(
   const endDate = `${year}-12-31`;
   const today = todayISO();
 
-  const [userResult, allowanceResult, prevAllowanceResult, absenceEntries, prevYearAbsence] = await Promise.all([
+  const [userResult, allowanceResult, prevAllowanceResult, absenceEntries, prevYearAbsence, history] = await Promise.all([
     db.select({
       eintrittsdatum: users.eintrittsdatum,
       vacationDaysPerYear: users.vacationDaysPerYear,
@@ -102,23 +209,31 @@ export async function getVacationSummary(
           isNull(employeeTimeEntries.deletedAt),
         ),
       ),
+    getVacationEntitlementHistoryForUser(userId),
   ]);
 
   const vacationDaysPerYear = userResult?.vacationDaysPerYear ?? 30;
   const eintrittsdatum = userResult?.eintrittsdatum ?? null;
 
-  const entitlement = allowanceResult
-    ? allowanceResult.totalDays
-    : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year);
+  // Wenn History existiert, ist der History-basierte anteilige Anspruch die
+  // autoritative Quelle (auch wenn ein älterer Allowance-Cache abweicht).
+  const entitlement: number = history.length > 0
+    ? computeAnnualEntitlement(history, vacationDaysPerYear, eintrittsdatum, year)
+    : (allowanceResult
+        ? Number(allowanceResult.totalDays)
+        : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year));
 
   let prevYearUsed = 0;
   for (const entry of prevYearAbsence) {
     if (entry.entryType === 'urlaub') prevYearUsed++;
   }
 
-  const prevEntitlement = prevAllowanceResult
-    ? prevAllowanceResult.totalDays + prevAllowanceResult.carryOverDays
-    : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year - 1);
+  const prevEntitlement: number = history.length > 0
+    ? computeAnnualEntitlement(history, vacationDaysPerYear, eintrittsdatum, year - 1)
+      + (prevAllowanceResult?.carryOverDays ?? 0)
+    : (prevAllowanceResult
+        ? Number(prevAllowanceResult.totalDays) + prevAllowanceResult.carryOverDays
+        : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year - 1));
 
   const unusedFromPrevYear = Math.max(0, prevEntitlement - prevYearUsed);
   const rawCarryOver = allowanceResult
@@ -143,11 +258,11 @@ export async function getVacationSummary(
   }
 
   const totalAvailable = entitlement + carryOverDays;
-  const remainingDays = totalAvailable - usedDays - plannedDays;
+  const remainingDays = Math.round((totalAvailable - usedDays - plannedDays) * 100) / 100;
 
   return {
     year,
-    totalDays: entitlement,
+    totalDays: Math.round(entitlement * 100) / 100,
     carryOverDays,
     usedDays,
     plannedDays,
