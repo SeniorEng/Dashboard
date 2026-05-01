@@ -196,6 +196,7 @@ export const insertUserSchema = z.object({
   vacationDaysPerYear: z.number().int().min(0, "Urlaubstage dürfen nicht negativ sein").max(365, "Urlaubstage dürfen maximal 365 sein").optional().default(30),
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional().default("aktiv"),
   isAdmin: z.boolean().optional().default(false),
+  isTeamLead: z.boolean().optional().default(false),
   haustierAkzeptiert: z.boolean().optional().default(true),
   isEuRentner: z.boolean().optional().default(false),
   employmentType: z.enum(EMPLOYMENT_TYPES).optional().default("sozialversicherungspflichtig"),

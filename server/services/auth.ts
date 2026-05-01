@@ -74,6 +74,7 @@ export interface CreateUserData {
   vacationDaysPerYear?: number;
   isAdmin?: boolean;
   isSuperAdmin?: boolean;
+  isTeamLead?: boolean;
   haustierAkzeptiert?: boolean;
   isEuRentner?: boolean;
   employmentType?: string;
@@ -113,6 +114,7 @@ class AuthService {
         eintrittsdatum: data.eintrittsdatum || null,
         vacationDaysPerYear: data.vacationDaysPerYear ?? 30,
         isAdmin: data.isAdmin ?? false,
+        isTeamLead: (data.isAdmin ?? false) ? false : (data.isTeamLead ?? false),
         haustierAkzeptiert: data.haustierAkzeptiert ?? true,
         isEuRentner: data.isEuRentner ?? false,
         employmentType: data.employmentType ?? "sozialversicherungspflichtig",

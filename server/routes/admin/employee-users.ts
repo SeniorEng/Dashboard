@@ -120,6 +120,14 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
     return;
   }
 
+  if (result.data.isTeamLead && !req.user!.isSuperAdmin) {
+    res.status(403).json({
+      error: "FORBIDDEN",
+      message: "Nur der Hauptadministrator kann Teamleitungen anlegen",
+    });
+    return;
+  }
+
   const geburtsdatumError = validateGeburtsdatum(result.data.geburtsdatum);
   if (geburtsdatumError) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
@@ -142,6 +150,7 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       eintrittsdatum: result.data.eintrittsdatum,
       vacationDaysPerYear: result.data.vacationDaysPerYear,
       isAdmin: result.data.isAdmin,
+      isTeamLead: result.data.isTeamLead,
       haustierAkzeptiert: result.data.haustierAkzeptiert,
       isEuRentner: result.data.isEuRentner,
       employmentType: result.data.employmentType,

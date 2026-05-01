@@ -14,7 +14,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Loader2, MessageCircle } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
 import {
   UserData,
   UserFormData,
@@ -155,7 +154,7 @@ export function UserForm({
       vacationDaysPerYear: vacationDaysPerYear ? parseInt(vacationDaysPerYear) : undefined,
       ...(mode === "edit" && carryOverDaysTouched ? { carryOverDays: carryOverDays ? parseInt(carryOverDays) : 0 } : {}),
       isAdmin,
-      ...(mode === "edit" ? { isTeamLead } : {}),
+      isTeamLead,
       haustierAkzeptiert,
       isEuRentner,
       employmentType,
@@ -214,7 +213,7 @@ export function UserForm({
             </div>
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Geburtsdatum</Label>
               <DatePicker
@@ -241,7 +240,7 @@ export function UserForm({
             </div>
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Eintrittsdatum</Label>
               <DatePicker
@@ -259,7 +258,7 @@ export function UserForm({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="vacationDaysPerYear">Jahresurlaub (Tage)</Label>
               <Input
@@ -301,7 +300,7 @@ export function UserForm({
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Beschäftigungsverhältnis</h3>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Beschäftigungsart</Label>
               <Select value={employmentType} onValueChange={handleEmploymentTypeChange}>
@@ -456,7 +455,7 @@ export function UserForm({
 
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Berechtigungen</h3>
-          
+
           {isSuperAdmin && (
             <div className="flex items-center space-x-2">
               <Checkbox
@@ -475,74 +474,74 @@ export function UserForm({
             </div>
           )}
 
-          {mode === "edit" && isSuperAdmin && (
-            <div className="space-y-3 rounded-lg border p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="isTeamLead">Teamleiter</Label>
-                  <p className="text-xs text-gray-500">
-                    Teamleiter haben die gleiche Sicht auf Termine und Kunden wie Administratoren (firmenweit, mit Mitarbeiter-Toggle).
-                  </p>
-                </div>
-                <Switch
-                  id="isTeamLead"
-                  checked={isTeamLead}
-                  disabled={isAdmin}
-                  onCheckedChange={setIsTeamLead}
-                  data-testid="switch-is-team-lead"
-                />
+          {isSuperAdmin && (
+            <div className="flex items-start space-x-2">
+              <Checkbox
+                id="isTeamLead"
+                checked={isTeamLead}
+                disabled={isAdmin}
+                onCheckedChange={(checked) => setIsTeamLead(!!checked)}
+                data-testid="checkbox-is-team-lead"
+              />
+              <div className="space-y-1 leading-none">
+                <Label htmlFor="isTeamLead">Teamleitung</Label>
+                <p className="text-xs text-gray-500">
+                  Teamleitungen haben die gleiche Sicht auf Termine und Kunden wie Administratoren (firmenweit, mit Mitarbeiter-Toggle).
+                </p>
               </div>
             </div>
           )}
-          
-          <div className="flex items-center justify-between p-3 rounded-lg border">
-            <div className="flex items-center gap-2">
-              <MessageCircle className="h-4 w-4 text-green-600" />
-              <div>
-                <Label htmlFor="whatsappEnabled">WhatsApp-Benachrichtigungen</Label>
-                <p className="text-xs text-gray-500">Mitarbeiter erhält Benachrichtigungen per WhatsApp</p>
-              </div>
-            </div>
-            <Switch
+
+          <div className="flex items-start space-x-2">
+            <Checkbox
               id="whatsappEnabled"
               checked={whatsappEnabled}
-              onCheckedChange={setWhatsappEnabled}
-              data-testid="switch-whatsapp-enabled"
+              onCheckedChange={(checked) => setWhatsappEnabled(!!checked)}
+              data-testid="checkbox-whatsapp-enabled"
             />
+            <div className="space-y-1 leading-none">
+              <Label htmlFor="whatsappEnabled" className="flex items-center gap-1.5">
+                <MessageCircle className="h-3.5 w-3.5 text-green-600" />
+                WhatsApp-Benachrichtigungen
+              </Label>
+              <p className="text-xs text-gray-500">Mitarbeiter erhält Benachrichtigungen per WhatsApp</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Tätigkeitsbereiche</h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {AVAILABLE_ROLES.map((role) => (
+              <div key={role} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`role-${role}`}
+                  checked={roles.includes(role)}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setRoles([...roles, role]);
+                    } else {
+                      setRoles(roles.filter((r) => r !== role));
+                    }
+                  }}
+                  data-testid={`checkbox-role-${role}`}
+                />
+                <Label htmlFor={`role-${role}`}>{ROLE_LABELS[role]}</Label>
+              </div>
+            ))}
           </div>
 
-          <div className="space-y-2">
-            <Label>Tätigkeitsbereiche</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {AVAILABLE_ROLES.map((role) => (
-                <div key={role} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={`role-${role}`}
-                    checked={roles.includes(role)}
-                    onCheckedChange={(checked) => {
-                      if (checked) {
-                        setRoles([...roles, role]);
-                      } else {
-                        setRoles(roles.filter((r) => r !== role));
-                      }
-                    }}
-                    data-testid={`checkbox-role-${role}`}
-                  />
-                  <Label htmlFor={`role-${role}`}>{ROLE_LABELS[role]}</Label>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-start space-x-2 pt-2">
-              <Checkbox
-                id="haustierAkzeptiert"
-                checked={haustierAkzeptiert}
-                onCheckedChange={(checked) => setHaustierAkzeptiert(!!checked)}
-                data-testid="checkbox-haustier-akzeptiert"
-              />
-              <div className="space-y-1 leading-none">
-                <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere</Label>
-                <p className="text-xs text-gray-500">Bereit, bei Kunden mit Haustieren zu arbeiten</p>
-              </div>
+          <div className="flex items-start space-x-2 pt-2">
+            <Checkbox
+              id="haustierAkzeptiert"
+              checked={haustierAkzeptiert}
+              onCheckedChange={(checked) => setHaustierAkzeptiert(!!checked)}
+              data-testid="checkbox-haustier-akzeptiert"
+            />
+            <div className="space-y-1 leading-none">
+              <Label htmlFor="haustierAkzeptiert">Akzeptiert Haustiere</Label>
+              <p className="text-xs text-gray-500">Bereit, bei Kunden mit Haustieren zu arbeiten</p>
             </div>
           </div>
         </div>
