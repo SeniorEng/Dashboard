@@ -35,7 +35,7 @@ export interface CustomerListParams extends PaginationParams {
   sortOrder?: string;
 }
 
-export interface BudgetSummaryInfo {
+interface BudgetSummaryInfo {
   customerId: number;
   totalAllocatedCents: number;
   totalUsedCents: number;
@@ -47,13 +47,13 @@ export interface BudgetSummaryInfo {
   currentMonthUsedCents: number;
 }
 
-export interface CustomerBudgetsInfo {
+interface CustomerBudgetsInfo {
   entlastungsbetrag45b: number;
   verhinderungspflege39: number;
   pflegesachleistungen36: number;
 }
 
-export interface CustomerNeedsAssessmentInfo {
+interface CustomerNeedsAssessmentInfo {
   id: number;
   customerId: number;
   createdByUserId: number | null;
@@ -81,7 +81,7 @@ export interface CustomerNeedsAssessmentInfo {
   sonstigeLeistungen: string | null;
 }
 
-export interface CustomerContractInfo {
+interface CustomerContractInfo {
   id: number;
   contractDate: string | null;
   contractStart: string;
@@ -105,7 +105,7 @@ export interface CustomerContactItem {
   notes: string | null;
 }
 
-export interface CustomerCareLevelHistoryItem {
+interface CustomerCareLevelHistoryItem {
   id: number;
   pflegegrad: number;
   validFrom: string;

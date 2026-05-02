@@ -240,11 +240,11 @@ export async function getDocumentPdfBuffer(objectPath: string): Promise<Buffer> 
   return Buffer.from(contents);
 }
 
-export function generateSigningToken(): string {
+function generateSigningToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-export function hashToken(token: string): string {
+function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 

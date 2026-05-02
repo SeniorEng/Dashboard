@@ -75,7 +75,6 @@ export interface PaginationOptions {
 }
 
 import type { PaginatedResult } from "@shared/types";
-export type { PaginatedResult };
 
 export interface SearchOptions {
   query: string;
@@ -196,7 +195,7 @@ export interface ServiceRecordOverviewItem {
   coveredByMonthlyCount: number;
 }
 
-export class DatabaseStorage implements IStorage {
+class DatabaseStorage implements IStorage {
   // Customers
   getCustomers = customersStorage.getCustomers;
   getCustomer = customersStorage.getCustomer;

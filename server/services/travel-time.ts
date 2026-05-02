@@ -18,7 +18,7 @@ interface OsrmResponse {
   }>;
 }
 
-export function calculateBuffer(durationMinutes: number, pickupHour: number): number {
+function calculateBuffer(durationMinutes: number, pickupHour: number): number {
   let buffer = 10;
 
   if ((pickupHour >= 7 && pickupHour < 9) || (pickupHour >= 16 && pickupHour < 18)) {
@@ -32,7 +32,7 @@ export function calculateBuffer(durationMinutes: number, pickupHour: number): nu
   return Math.max(buffer, 10);
 }
 
-export function calculatePickupTime(
+function calculatePickupTime(
   doctorAppointmentTime: string,
   durationMinutes: number,
   bufferMinutes: number
@@ -48,7 +48,7 @@ export function calculatePickupTime(
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-export async function getOsrmRoute(
+async function getOsrmRoute(
   fromLat: number,
   fromLng: number,
   toLat: number,

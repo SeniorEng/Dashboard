@@ -62,7 +62,7 @@ const SYSTEM_SERVICE_DEFINITIONS: SystemServiceDefinition[] = [
   },
 ];
 
-export interface IServiceCatalogStorage {
+interface IServiceCatalogStorage {
   getAllServices(includeInactive?: boolean): Promise<Service[]>;
   getServiceById(id: number): Promise<Service | null>;
   getServicesByIds(ids: number[]): Promise<Service[]>;
@@ -74,7 +74,7 @@ export interface IServiceCatalogStorage {
   ensureSystemServices(): Promise<void>;
 }
 
-export class ServiceCatalogStorage implements IServiceCatalogStorage {
+class ServiceCatalogStorage implements IServiceCatalogStorage {
   async getAllServices(includeInactive = false): Promise<Service[]> {
     if (includeInactive) {
       return db.select().from(services).orderBy(asc(services.name));

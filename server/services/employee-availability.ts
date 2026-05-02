@@ -77,7 +77,7 @@ function collectBlockedSlots(
   return blockedSlots;
 }
 
-export function isValidCalendarDate(dateStr: string): boolean {
+function isValidCalendarDate(dateStr: string): boolean {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;

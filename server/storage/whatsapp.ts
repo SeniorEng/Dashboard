@@ -19,7 +19,7 @@ export async function getWhatsAppNotificationRules(): Promise<WhatsAppNotificati
     .orderBy(whatsappNotificationRules.eventType);
 }
 
-export async function upsertWhatsAppNotificationRule(
+async function upsertWhatsAppNotificationRule(
   rule: InsertWhatsAppNotificationRule
 ): Promise<WhatsAppNotificationRule> {
   const result = await db

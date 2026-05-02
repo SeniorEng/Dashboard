@@ -8,20 +8,14 @@ export interface AppointmentWithCustomer extends Appointment {
   lockedReason?: string;
 }
 
-export type AppointmentWithCustomerResponse = AppointmentWithCustomer;
-
-export interface AppointmentCountsResponse {
-  [date: string]: number;
-}
-
-export interface CoverageUncoveredCustomer {
+interface CoverageUncoveredCustomer {
   id: number;
   name: string;
   role: string;
   primaryEmployeeName?: string;
 }
 
-export interface CoverageMonthData {
+interface CoverageMonthData {
   label: string;
   year: number;
   month: number;

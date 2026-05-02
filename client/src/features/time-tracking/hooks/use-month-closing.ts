@@ -56,30 +56,6 @@ export function useMonthClosingStatus(year: number, month: number) {
   });
 }
 
-export function useMonthClosingReadiness(year: number, month: number, enabled: boolean) {
-  return useQuery<MonthClosingReadiness>({
-    queryKey: ["month-closing-readiness", year, month],
-    queryFn: async () => {
-      const result = await api.get<MonthClosingReadiness>(`/time-entries/month-closing/${year}/${month}/readiness`);
-      return unwrapResult(result);
-    },
-    enabled,
-    staleTime: 30000,
-  });
-}
-
-export function useMonthClosingPreview(year: number, month: number, enabled: boolean) {
-  return useQuery<{ autoBreaks: AutoBreakPreview[] }>({
-    queryKey: ["month-closing-preview", year, month],
-    queryFn: async () => {
-      const result = await api.get<{ autoBreaks: AutoBreakPreview[] }>(`/time-entries/month-closing/${year}/${month}/preview`);
-      return unwrapResult(result);
-    },
-    enabled,
-    staleTime: 30000,
-  });
-}
-
 export function useAdminMonthClosingReadiness(year: number, month: number) {
   return useQuery<{ employees: AdminEmployeeReadiness[] }>({
     queryKey: ["admin-month-closing-readiness", year, month],

@@ -197,7 +197,7 @@ export interface WizardFormData {
   insuranceProviderId?: string;
 }
 
-export async function buildPlaceholdersFromFormData(
+async function buildPlaceholdersFromFormData(
   formData: WizardFormData,
   overrides: TemplatePlaceholders = {}
 ): Promise<TemplatePlaceholders> {

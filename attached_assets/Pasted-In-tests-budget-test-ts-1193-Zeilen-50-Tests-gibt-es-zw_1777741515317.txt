@@ -1,0 +1,36 @@
+In tests/budget.test.ts (~1193 Zeilen, 50 Tests) gibt es zwei Probleme:
+(a) Tests Zeile 34-40 erzeugen einen geteilten Customer für alle 50 Tests → Fehler propagieren.
+(b) Mehrere Tests duplizieren E2E-Coverage, die bereits in tests/budget-e2e.test.ts mit echten Termin-Dokumentationen abgedeckt ist.
+
+Schritt 1 — Duplikate identifizieren und löschen:
+Vergleiche die Test-IDs (BB-*) in budget.test.ts mit den INT-* IDs in budget-e2e.test.ts. Folgende Duplikate sind bekannt:
+- BB-1.1 (§45b Aktivierung) ↔ INT-1.1 → behalte BB-1.1 als Response-Shape-Test, lösche Cascade-Verbrauch-Assertions
+- BB-9 (§45a PG-Limits) ↔ INT-2 → behalte BB-9 (mehr PG-Variation)
+- BB-3 (§39/42a Jahrescap) ↔ INT-3 → behalte BB-3 als API-Test, lösche redundante E2E-Schritte
+- BB-4.4, BB-11 (Reversal) ↔ INT-4.3, INT-12 → lösche BB-4.4 und BB-11 (INT-12 mit echtem Termin-Storno aussagekräftiger)
+- BB-18.4 (FIFO-Reihenfolge) ↔ INT-14.3 → lösche BB-18.4
+- BB-18.2 (Carryover-Expiry-Anzeige) ↔ INT-13.3 (Ablauf+Write-Off) → reduziere BB-18.2 auf reinen Response-Shape-Check
+
+Nach diesem Schritt sollten in budget.test.ts ca. 20 Tests verbleiben, fokussiert auf: API-Response-Shape, Edge-Cases (0-Beträge, negative Limits), §45a-PG-Variationen, Initial-Balance-Deduplizierung (BUD-IB-DEDUP-* behalten — nicht-trivial und nicht in E2E), Manuelle Korrekturen.
+
+Schritt 2 — Customer-Isolation:
+Ersetze die geteilte Customer-Erzeugung an Zeile 34-40 durch Customer-pro-Test:
+
+  let customerId: number;
+  beforeEach(async () => {
+    customerId = await createTestCustomer({ namePrefix: 'BB-' });
+  });
+  afterEach(async () => {
+    await cleanupCustomer(customerId);
+  });
+
+Falls Setup-Aufwand pro Test zu hoch (>500 ms), gruppiere zusammengehörige Tests in eigene describe-Blöcke, jeweils mit eigenem beforeAll/afterAll-Customer. Dokumentiere im PR die Setup-Zeit-Differenz.
+
+Schritt 3 — PR-Doku:
+Im PR-Body listen: gelöschte Test-IDs (BB-X) und die Ziel-Tests in budget-e2e.test.ts (INT-Y), die diese Coverage übernehmen. So kann Code-Review nachvollziehen, dass keine Coverage verloren geht.
+
+Verifikation:
+1. vitest run tests/budget.test.ts grün, deutlich kürzer (~20 Tests).
+2. vitest run tests/budget-e2e.test.ts weiter grün (keine Coverage verloren).
+3. PR-Body listet Mapping BB-X → INT-Y.
+4. Tests sind unabhängig: vitest run tests/budget.test.ts -t "BB-9" allein grün.

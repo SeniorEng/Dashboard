@@ -6,7 +6,7 @@ import { getEnabledRuleByEvent, getUsersWithWhatsAppEnabled } from "../storage/w
 import { whatsAppService } from "./whatsapp-service";
 import { log } from "../lib/log";
 
-export async function sendDailyAppointmentReminders(): Promise<number> {
+async function sendDailyAppointmentReminders(): Promise<number> {
   const rule = await getEnabledRuleByEvent("appointment_reminder");
   if (!rule) return 0;
 

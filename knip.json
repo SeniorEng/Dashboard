@@ -1,13 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
-    "server/index.ts",
-    "client/src/main.tsx",
-    "vite.config.ts",
-    "drizzle.config.ts",
     "tests/**/*.test.ts",
-    "tests/globalSetup.ts",
-    "tests/setup.ts",
     "server/scripts/**/*.ts",
     "client/src/features/*/hooks/index.ts"
   ],
@@ -17,20 +11,11 @@
     "shared/**/*.ts"
   ],
   "ignore": [
-    "**/node_modules/**",
-    ".cache/**",
-    "attached_assets/**",
-    "dist/**",
-    ".local/**",
-    "tests/budget_logic_tests.js",
     "client/src/components/ui/**",
     "server/replit_integrations/**"
   ],
   "ignoreDependencies": [
-    "tsx",
-    "@types/*",
     "tailwindcss",
-    "@tailwindcss/*",
     "node-zugferd",
     "tw-animate-css"
   ]

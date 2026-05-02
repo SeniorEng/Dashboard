@@ -33,7 +33,6 @@ import type {
   TimeOverviewData,
 } from "@shared/api";
 import type { MissingBreakDay, OpenTasksSummary } from "@shared/types";
-import type { DbOrTx } from "../lib/db";
 
 import {
   type TimeEntryFilters,
@@ -45,21 +44,7 @@ import * as appointmentsModule from "./time-tracking/appointments";
 import * as overviewModule from "./time-tracking/overview";
 import * as monthClosingModule from "./time-tracking/month-closing";
 
-export type {
-  TimeEntryFilters,
-  TimeOverviewFilters,
-};
-export type {
-  VacationSummary,
-  AppointmentWithCustomerName,
-  ServiceHoursSummary,
-  TravelSummary,
-  TimeEntrySummary,
-  TimeOverviewData,
-};
-export type { MissingBreakDay, OpenTasksSummary };
-
-export interface ITimeTrackingStorage {
+interface ITimeTrackingStorage {
   // Time Entries
   getTimeEntries(userId: number, filters?: TimeEntryFilters): Promise<EmployeeTimeEntry[]>;
   getTimeEntry(id: number): Promise<EmployeeTimeEntry | undefined>;
@@ -126,8 +111,3 @@ export const timeTrackingStorage = {
   reopenMonth: monthClosingModule.reopenMonth,
 } as const;
 
-// Stable module type alias (used by some callers via inference).
-export type TimeTrackingStorage = typeof timeTrackingStorage;
-
-// Re-export the close-month signature type so Drizzle DbOrTx flow stays intact for callers.
-export type { DbOrTx };

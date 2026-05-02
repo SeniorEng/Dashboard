@@ -55,15 +55,14 @@ export interface CustomerListFilters {
   sortOrder?: "asc" | "desc";
 }
 
-export interface PaginationOptions {
+interface PaginationOptions {
   limit?: number;
   offset?: number;
 }
 
 import type { PaginatedResult } from "@shared/types";
-export type { PaginatedResult };
 
-export interface CustomerListItem {
+interface CustomerListItem {
   id: number;
   name: string;
   vorname: string | null;
@@ -86,7 +85,7 @@ export interface CustomerListItem {
   createdAt: Date;
 }
 
-export class CustomerManagementStorage {
+class CustomerManagementStorage {
   getInsuranceProviders = insuranceModule.getInsuranceProviders;
   getInsuranceProvider = insuranceModule.getInsuranceProvider;
   getInsuranceProviderByIK = insuranceModule.getInsuranceProviderByIK;

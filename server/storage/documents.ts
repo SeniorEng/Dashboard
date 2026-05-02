@@ -71,7 +71,7 @@ const proofBaseSelect = {
   },
 };
 
-export interface DocumentBatch {
+interface DocumentBatch {
   batchId: string;
   batchLabel: string | null;
   uploadedAt: string;
@@ -79,13 +79,13 @@ export interface DocumentBatch {
   files: (EmployeeDocument | CustomerDocument)[];
 }
 
-export interface GroupedDocumentsByType {
+interface GroupedDocumentsByType {
   documentType: DocumentType;
   currentBatches: DocumentBatch[];
   archivedBatches: DocumentBatch[];
 }
 
-export interface IDocumentStorage {
+interface IDocumentStorage {
   getDocumentTypes(activeOnly?: boolean, targetType?: string): Promise<DocumentType[]>;
   getDocumentType(id: number): Promise<DocumentType | null>;
   createDocumentType(data: InsertDocumentType): Promise<DocumentType>;
@@ -113,7 +113,7 @@ export interface IDocumentStorage {
   getActiveTriggersForEntityType(entityType: string): Promise<(DocumentTypeTrigger & { documentType: DocumentType })[]>;
 }
 
-export class DocumentStorage implements IDocumentStorage {
+class DocumentStorage implements IDocumentStorage {
   async getDocumentTypes(activeOnly = true, targetType?: string): Promise<DocumentType[]> {
     const conditions = [];
     if (activeOnly) conditions.push(eq(documentTypes.isActive, true));

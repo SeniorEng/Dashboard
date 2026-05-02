@@ -137,7 +137,7 @@ async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
 /**
  * Core fetch wrapper with error handling and retry logic
  */
-export async function apiRequest<TResponse, TBody = unknown>(
+async function apiRequest<TResponse, TBody = unknown>(
   endpoint: string,
   options: RequestOptions<TBody> = {}
 ): Promise<ApiResult<TResponse>> {

@@ -6,7 +6,6 @@
 
 export { 
   api, 
-  apiRequest, 
   unwrapResult, 
   ApiError,
 } from './client';

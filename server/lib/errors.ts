@@ -8,7 +8,7 @@ interface ApiError {
   details?: string;
 }
 
-export const ErrorCodes = {
+const ErrorCodes = {
   VALIDATION_ERROR: "VALIDATION_ERROR",
   NOT_FOUND: "NOT_FOUND",
   FORBIDDEN: "FORBIDDEN",

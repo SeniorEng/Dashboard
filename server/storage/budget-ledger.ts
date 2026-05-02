@@ -1,6 +1,3 @@
-export type { BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries, CascadeResult } from "./budget/types";
-export type { DbClient } from "./budget/types";
-
 import type {
   BudgetAllocation,
   InsertBudgetAllocation,
@@ -21,7 +18,7 @@ import * as consumption from "./budget/consumption-engine";
 import * as rebook from "./budget/rebook-storage";
 import * as pricing from "./budget/appointment-cost-calculator";
 
-export interface BudgetLedgerStorage {
+interface BudgetLedgerStorage {
   createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation>;
   getBudgetAllocations(customerId: number, year?: number): Promise<BudgetAllocation[]>;
 

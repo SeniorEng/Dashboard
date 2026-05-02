@@ -17,7 +17,7 @@ import type {
   TimesPageData 
 } from "@/lib/api/types";
 
-export const timeEntryKeys = {
+const timeEntryKeys = {
   all: ["time-entries"] as const,
   list: (year?: number, month?: number, viewAsEmployeeId?: number | null) => [...timeEntryKeys.all, "list", { year, month, viewAsEmployeeId }] as const,
   detail: (id: number) => [...timeEntryKeys.all, "detail", id] as const,

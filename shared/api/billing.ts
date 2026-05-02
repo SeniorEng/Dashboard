@@ -20,7 +20,7 @@ export interface InvoiceItem {
   status: string;
 }
 
-export interface InvoiceLineItem {
+interface InvoiceLineItem {
   id: number;
   appointmentDate: string;
   serviceDescription: string;

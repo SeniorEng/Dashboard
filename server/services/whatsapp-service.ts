@@ -34,7 +34,7 @@ interface MetaSendResponse {
   messages: Array<{ id: string }>;
 }
 
-export class WhatsAppService {
+class WhatsAppService {
   async sendTemplateMessage(options: SendTemplateOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const { phoneNumber, templateName, templateParams = [], language = "de", buttonUrl } = options;
 

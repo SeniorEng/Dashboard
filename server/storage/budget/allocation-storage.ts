@@ -825,7 +825,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   return created;
 }
 
-async function processExpiredCarryover(customerId: number, _tx?: DbClient): Promise<import("@shared/schema").BudgetTransaction[]> {
+export async function processExpiredCarryover(customerId: number, _tx?: DbClient): Promise<import("@shared/schema").BudgetTransaction[]> {
   const d = _tx ?? db;
   const today = todayISO();
 

@@ -45,7 +45,7 @@ export function needsVorerkrankungenData(billingType: BillingType | ""): boolean
   return isPflegekasseCustomer(billingType);
 }
 
-export const DEACTIVATION_REASONS = [
+const DEACTIVATION_REASONS = [
   "stationaere_pflege",
   "versterben",
   "anbieterwechsel",
@@ -82,7 +82,7 @@ export const DEACTIVATION_REASON_SELECT_OPTIONS = DEACTIVATION_REASONS.map((v) =
   label: DEACTIVATION_REASON_LABELS[v],
 })).sort((a, b) => a.label.localeCompare(b.label, "de"));
 
-export const PFLEGEGRAD_VALUES = [1, 2, 3, 4, 5] as const;
+const PFLEGEGRAD_VALUES = [1, 2, 3, 4, 5] as const;
 
 export const PFLEGEGRAD_SELECT_OPTIONS = PFLEGEGRAD_VALUES.map((v) => ({
   value: String(v),

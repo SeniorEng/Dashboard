@@ -1,6 +1,6 @@
 import { timeToMinutes } from "../utils/datetime";
 
-export const ENTRY_TYPE_LABELS: Record<string, string> = {
+const ENTRY_TYPE_LABELS: Record<string, string> = {
   urlaub: "Urlaub",
   krankheit: "Krankheit",
   pause: "Pause",
@@ -53,7 +53,7 @@ export function getAppointmentEndMinutes(appt: {
 
 export const FULL_DAY_ENTRY_TYPES = ["urlaub", "krankheit"] as const;
 
-export const ENTRY_TYPES_WITHOUT_KILOMETERS = ["pause", "verfuegbar", "blocker"] as const;
+const ENTRY_TYPES_WITHOUT_KILOMETERS = ["pause", "verfuegbar", "blocker"] as const;
 
 export function entryTypeSupportsKilometers(entryType: string, isFullDay: boolean): boolean {
   if (isFullDay) return false;
@@ -81,8 +81,8 @@ export function getEntryDuration(entry: { durationMinutes: number | null; startT
  * Pause selbst zählt NICHT als Arbeitszeit. Urlaub/Krankheit sind
  * Abwesenheiten. Verfügbar/Blocker sind organisatorisch.
  */
-export const WORK_ENTRY_TYPES = ["bueroarbeit", "vertrieb", "sonstiges"] as const;
-export type WorkEntryType = typeof WORK_ENTRY_TYPES[number];
+const WORK_ENTRY_TYPES = ["bueroarbeit", "vertrieb", "sonstiges"] as const;
+type WorkEntryType = typeof WORK_ENTRY_TYPES[number];
 
 export function isWorkEntryType(entryType: string): entryType is WorkEntryType {
   return (WORK_ENTRY_TYPES as readonly string[]).includes(entryType);

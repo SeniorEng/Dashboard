@@ -183,7 +183,7 @@ function useRequireAuth(): AuthContextType & { user: User } {
   return auth as AuthContextType & { user: User };
 }
 
-export function canCreateHauswirtschaft(roles: string[], isAdmin: boolean): boolean {
+function canCreateHauswirtschaft(roles: string[], isAdmin: boolean): boolean {
   if (isAdmin) return true;
   return roles.includes("hauswirtschaft") || roles.includes("alltagsbegleitung");
 }
