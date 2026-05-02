@@ -379,6 +379,22 @@ export async function createTestCustomer(overrides: Record<string, unknown> = {}
   return res.data;
 }
 
+/**
+ * Hard-deletes a test customer plus its operative cascade (appointments,
+ * invoices, budget transactions, ...) via the `purge-customers` test-cleanup
+ * route. Use this in `afterEach` for per-test customer isolation; safe in
+ * `afterAll` cleanup paths too. Errors are swallowed so cleanup never breaks
+ * the suite.
+ */
+export async function cleanupCustomer(customerId: number | null | undefined): Promise<void> {
+  if (!customerId) return;
+  try {
+    await apiPost(`/api/admin/test-cleanup/purge-customers`, { ids: [customerId] });
+  } catch {
+    // Cleanup is best-effort. globalSetup will remove leftovers.
+  }
+}
+
 export async function assignEmployeeToCustomer(customerId: number, employeeId?: number): Promise<void> {
   const eid = employeeId ?? (await getAuthCookie()).user.id;
   const res = await apiPatch<any>(`/api/admin/customers/${customerId}/assign`, {
