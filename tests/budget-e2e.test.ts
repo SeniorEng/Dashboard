@@ -12,6 +12,10 @@ import {
   runCleanup,
   createTestCustomer,
 } from "./test-utils";
+import {
+  setupBudgetScenario,
+  type BudgetScenarioHandle,
+} from "./helpers/budget-scenarios";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 
@@ -452,23 +456,25 @@ describe("INT-7: Doppelbuchungsschutz", () => {
 
 
 describe("INT-9: Initiale Startwerte (initial_balance)", () => {
+  let scenario: BudgetScenarioHandle;
+
+  beforeAll(async () => {
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-9",
+      types: [
+        { type: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 12500 },
+        { type: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", enabled: false, priority: 3, yearlyLimitCents: null },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await scenario.cleanup();
+  });
 
   it("INT-9.1 – Bestehende Startwerte aufraeumen und neuen setzen", async () => {
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 12500 },
-    ];
-    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
-
-    const existingRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/initial-balances/entlastungsbetrag_45b`);
-    if (existingRes.status === 200 && Array.isArray(existingRes.data)) {
-      for (const ib of existingRes.data) {
-        if (ib.source === "initial_balance") {
-          await apiDeleteRaw(`/api/budget/${testCustomerId}/initial-balance/${ib.id}`);
-        }
-      }
-    }
-
-    const res = await apiPost<any>(`/api/budget/${testCustomerId}/initial-balance/entlastungsbetrag_45b`, {
+    const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-balance/entlastungsbetrag_45b`, {
       amountCents: 50000,
       validFrom: "2025-11",
     });
@@ -476,7 +482,7 @@ describe("INT-9: Initiale Startwerte (initial_balance)", () => {
   });
 
   it("INT-9.2 – Startwert erscheint in initial-balances Liste", async () => {
-    const res = await apiGet<any[]>(`/api/budget/${testCustomerId}/initial-balances/entlastungsbetrag_45b`);
+    const res = await apiGet<any[]>(`/api/budget/${scenario.customerId}/initial-balances/entlastungsbetrag_45b`);
     expect(res.status).toBe(200);
 
     const ib = res.data.find(
@@ -487,11 +493,11 @@ describe("INT-9: Initiale Startwerte (initial_balance)", () => {
   });
 
   it("INT-9.3 – Startwert loeschen (Aufraeumen)", async () => {
-    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/initial-balances/entlastungsbetrag_45b`);
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/initial-balances/entlastungsbetrag_45b`);
     if (allocRes.status === 200 && Array.isArray(allocRes.data)) {
       for (const ib of allocRes.data) {
         if (ib.source === "initial_balance") {
-          await apiDeleteRaw(`/api/budget/${testCustomerId}/initial-balance/${ib.id}`);
+          await apiDelete(`/api/budget/${scenario.customerId}/initial-balance/${ib.id}`);
         }
       }
     }
@@ -535,42 +541,41 @@ describe("INT-10: Alle drei Toepfe zusammen (vollstaendige Kaskade)", () => {
 
 
 describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () => {
+  let scenario: BudgetScenarioHandle;
   let limitAppointmentId: number | null = null;
   let limitTransactionIds: number[] = [];
   let serviceId: number | null = null;
-  let initialBalanceId45a: number | null = null;
   let effectiveLimitCents = 0;
   const monthlyLimitCentsEB = 5000;
 
-  it("INT-11.1 – Setup: §45b mit 50€ Monatslimit Prio 1, §45a als Auffang Prio 2", async () => {
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: "2026-01-01",
-      monthlyLimitCents: null,
-      notes: "T2.3 EB Limit Test",
-    });
-
+  beforeAll(async () => {
     const now = new Date();
     const validFromMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const ibRes = await apiPost<any>(`/api/budget/${testCustomerId}/initial-balance/umwandlung_45a`, {
-      amountCents: 50000,
-      validFrom: validFromMonth,
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-11",
+      preferences: { budgetStartDate: "2026-01-01", notes: "T2.3 EB Limit Test" },
+      initialBalance: {
+        type: "umwandlung_45a",
+        amountCents: 50000,
+        validFrom: validFromMonth,
+      },
+      types: [
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: monthlyLimitCentsEB },
+        { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
     });
-    expect([200, 201]).toContain(ibRes.status);
+  });
 
-    const ibList = await apiGet<any[]>(`/api/budget/${testCustomerId}/initial-balances/umwandlung_45a`);
-    const ib = ibList.data?.find((a: any) => a.amountCents === 50000 && a.source === "initial_balance");
-    if (ib) initialBalanceId45a = ib.id;
+  afterAll(async () => {
+    for (const txId of limitTransactionIds) {
+      try { await apiPost(`/api/budget/transactions/${txId}/reverse`, {}); } catch {}
+    }
+    await scenario.cleanup();
+  });
 
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: monthlyLimitCentsEB },
-      { budgetType: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
-    ];
-    const settingsRes = await apiPut<any>(`/api/budget/${testCustomerId}/type-settings`, { settings });
-    expect(settingsRes.status).toBe(200);
-
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+  it("INT-11.1 – Setup: §45b mit 50€ Monatslimit Prio 1, §45a als Auffang Prio 2", async () => {
+    const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overviewRes.status).toBe(200);
     expect(overviewRes.data.entlastungsbetrag45b.totalAllocatedCents).toBeGreaterThan(0);
     expect(overviewRes.data.umwandlung45a.currentMonthAllocatedCents).toBeGreaterThan(0);
@@ -621,11 +626,11 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
 
       for (const time of timeSlots) {
         createRes = await apiPost<any>("/api/appointments/kundentermin", {
-          customerId: testCustomerId,
+          customerId: scenario.customerId,
           date: dateStr,
           scheduledStart: time,
           notes: "INT-EB-Limit-Test-" + Date.now(),
-          assignedEmployeeId: auth.user.id,
+          assignedEmployeeId: scenario.employeeId,
           services: [{ serviceId, durationMinutes: 120 }],
         });
         if (createRes.status === 201) break outer;
@@ -634,7 +639,6 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
 
     expect(createRes?.status).toBe(201);
     limitAppointmentId = createRes.data.id;
-    createdAppointmentIds.push(limitAppointmentId!);
 
     const docRes = await apiPost<any>(`/api/appointments/${limitAppointmentId}/document`, {
       actualStart: "06:00",
@@ -651,7 +655,7 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
   it("INT-11.3 – §45b-Anteil wird durch effektives Monatslimit gedeckelt", async () => {
     if (!limitAppointmentId) return;
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?limit=5000`);
+    const txRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/transactions?limit=5000`);
     expect(txRes.status).toBe(200);
 
     const consumptions = txRes.data.filter(
@@ -674,31 +678,6 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
       expect(total45aCents).toBeGreaterThan(0);
     }
   });
-
-  afterAll(async () => {
-    for (const txId of limitTransactionIds) {
-      try { await apiPost(`/api/budget/transactions/${txId}/reverse`, {}); } catch {}
-    }
-    createdTransactionIds = createdTransactionIds.filter(id => !limitTransactionIds.includes(id));
-
-    if (initialBalanceId45a) {
-      try { await apiDelete(`/api/budget/${testCustomerId}/initial-balance/${initialBalanceId45a}`); } catch {}
-    }
-
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
-      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
-    ];
-    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
-
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: "2026-01-01",
-      monthlyLimitCents: null,
-      notes: "",
-    });
-  });
 });
 
 
@@ -708,6 +687,15 @@ describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
   let stornoAllocationId: number | null = null;
   let serviceId: number | null = null;
   let rebookAppointmentId: number | null = null;
+  let stornoInitialBalanceId: number | null = null;
+
+  afterAll(async () => {
+    if (stornoInitialBalanceId !== null) {
+      try {
+        await apiDeleteRaw(`/api/budget/${testCustomerId}/initial-balance/${stornoInitialBalanceId}`);
+      } catch {}
+    }
+  });
 
   it("INT-12.1 – Setup und Termin dokumentieren", async () => {
     const settings = [
@@ -716,6 +704,22 @@ describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
       { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
     ];
     await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
+
+    // Eigenständiger §45b-Startwert: notwendig, weil INT-9 nicht mehr auf
+    // testCustomerId läuft und damit nicht mehr beiläufig §45b-Volumen erzeugt.
+    // Ohne diesen IB ist die §45b-Allocation nach den vorhergehenden Tests
+    // erschöpft, sodass INT-12 keinen FIFO-Verbrauch mit allocationId mehr
+    // erzeugt.
+    const ibRes = await apiPost<any>(`/api/budget/${testCustomerId}/initial-balance/entlastungsbetrag_45b`, {
+      amountCents: 50000,
+      validFrom: "2026-01",
+    });
+    expect([200, 201]).toContain(ibRes.status);
+    const ibList = await apiGet<any[]>(`/api/budget/${testCustomerId}/initial-balances/entlastungsbetrag_45b`);
+    if (ibList.status === 200 && Array.isArray(ibList.data)) {
+      const ib = ibList.data.find((a: any) => a.source === "initial_balance" && a.amountCents === 50000 && a.validFrom?.startsWith("2026-01"));
+      if (ib) stornoInitialBalanceId = ib.id;
+    }
 
     const servicesRes = await apiGet<any[]>("/api/services");
     const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
@@ -865,37 +869,37 @@ describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
 
 
 describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => {
-  let originalBudgetStartDate: string | null = null;
+  let scenario: BudgetScenarioHandle;
+
+  beforeAll(async () => {
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-13",
+      preferences: { budgetStartDate: "2024-01-01", notes: "T1.2 Test" },
+      types: [
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+        { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await scenario.cleanup();
+  });
 
   it("INT-13.1 – Aktuelle Budget-Preferences sichern", async () => {
-    const res = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(res.status).toBe(200);
 
-    const prefRes = await apiGet<any>(`/api/budget/${testCustomerId}/preferences`);
-    if (prefRes.status === 200 && prefRes.data) {
-      originalBudgetStartDate = prefRes.data.budgetStartDate ?? null;
-    }
+    const prefRes = await apiGet<any>(`/api/budget/${scenario.customerId}/preferences`);
+    expect(prefRes.status).toBe(200);
   });
 
   it("INT-13.2 – Budget-Start auf 2024 setzen, Carryover pruefen", async () => {
-    const settings = [
-      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
-      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
-    ];
-    await apiPut(`/api/budget/${testCustomerId}/type-settings`, { settings });
-
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: "2024-01-01",
-      monthlyLimitCents: null,
-      notes: "T1.2 Test",
-    });
-
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overviewRes.status).toBe(200);
 
-    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2025`);
     expect(allocRes.status).toBe(200);
 
     const carryover2025 = allocRes.data.filter(
@@ -908,14 +912,14 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
   });
 
   it("INT-13.3 – Abgelaufener Vorjahres-Uebertrag 2025 wurde abgeschrieben", async () => {
-    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2025`);
     const carryover2025 = allocRes.data?.find(
       (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025
     );
     expect(carryover2025).toBeDefined();
     expect(carryover2025.expiresAt).toBe("2025-06-30");
 
-    const txRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5000`);
+    const txRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/transactions?budgetType=entlastungsbetrag_45b&limit=5000`);
     expect(txRes.status).toBe(200);
 
     const consumptionsForCarryover = txRes.data.filter(
@@ -938,12 +942,12 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     const netConsumed = Math.max(0, consumed - reversed);
     expect(writeOffTotal + netConsumed).toBe(carryover2025.amountCents);
 
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overviewRes.status).toBe(200);
     const overview = overviewRes.data.entlastungsbetrag45b;
     expect(overview).toBeDefined();
 
-    const alloc2025 = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2025`);
+    const alloc2025 = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2025`);
     const activeCarryover2025 = alloc2025.data?.filter(
       (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && a.year === 2025 && !a.deletedAt
     ) ?? [];
@@ -964,7 +968,7 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
   });
 
   it("INT-13.4 – Aktueller Uebertrag 2026 ist noch gueltig", async () => {
-    const allocRes = await apiGet<any[]>(`/api/budget/${testCustomerId}/allocations?year=2026`);
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=2026`);
     expect(allocRes.status).toBe(200);
 
     const carryover2026 = allocRes.data.filter(
@@ -974,19 +978,10 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
     expect(carryover2026[0].expiresAt).toBe("2026-06-30");
     expect(carryover2026[0].amountCents).toBeGreaterThan(0);
 
-    const overviewRes = await apiGet<any>(`/api/budget/${testCustomerId}/overview`);
+    const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overviewRes.status).toBe(200);
     expect(overviewRes.data.entlastungsbetrag45b.carryoverCents).toBeGreaterThan(0);
     expect(overviewRes.data.entlastungsbetrag45b.carryoverExpiresAt).toBe("2026-06-30");
-  });
-
-  afterAll(async () => {
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: originalBudgetStartDate ?? "2026-01-01",
-      monthlyLimitCents: null,
-      notes: "Integrationstest",
-    });
   });
 });
 
