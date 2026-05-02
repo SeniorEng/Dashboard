@@ -1,3 +1,11 @@
+/**
+ * @deprecated Wird ersetzt durch:
+ *   - tests/budget/properties.test.ts (Phase 4 T4) — Property-Tests für FIFO, §45b-Cap, Carryover-Math
+ *   - tests/budget/race-*.test.ts (Phase 4 T3) — echte Race-Tests statt der Pseudo-Simulation Zeile 1383+
+ *   - tests/budget-e2e.test.ts — bereits vorhanden für E2E-Pfade
+ *
+ * NICHT in CI laufen lassen. Nach Abschluss von T3 und T4 löschen.
+ */
 "use strict";
 
 const G = "\x1b[32m", R = "\x1b[31m", Y = "\x1b[33m", B = "\x1b[1m", X = "\x1b[0m";

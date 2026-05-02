@@ -244,3 +244,6 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
 - **Backend Libraries**: Express.js, TypeScript, Zod, Drizzle ORM.
 - **Utilities**: `libphonenumber-js/min`, Puppeteer (for PDF generation), Twilio (for Lead-Anruf-Brücke).
 - **Monitoring**: `GET /api/health` endpoint (unauthenticated) for load balancer health checks, returns DB connectivity status.
+
+## TODOs / Followups
+- **T1c-Followup**: nach Abschluss T3+T4 `tests/budget_logic_tests.js` löschen — alle Inhalte in Vitest-Suite migriert (siehe Header-Kommentar in der Datei für Ziel-Tests).
