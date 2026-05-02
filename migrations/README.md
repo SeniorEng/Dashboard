@@ -8,6 +8,8 @@ Für Änderungen, die `db:push` als destruktiv einstuft (z. B. das Entfernen von
 
 `migrations/meta/_journal.json` ist die maßgebliche Liste. Neuere Migrationen am Ende anhängen, niemals Lücken in den Index-Nummern lassen.
 
+Hand-geschriebene Migrationen (z. B. punktuelle Datenkorrekturen, Idempotenz-Patches) haben keine eigene `<idx>_snapshot.json` in `migrations/meta/`. Das ist erwartetes Verhalten — Snapshots werden nur von `drizzle-kit generate` erzeugt, nicht für manuell geschriebene SQL. Existierende Beispiele: `0001`, `0007`, `0008`, `0011`, `0015`, `0016`.
+
 ## Manuelle Ausführung in Production
 
 Beispiel (psql) — vollständige Reihenfolge des Mai-2026-Cleanups:
