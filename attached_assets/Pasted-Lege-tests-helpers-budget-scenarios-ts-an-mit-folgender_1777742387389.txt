@@ -1,0 +1,72 @@
+Lege tests/helpers/budget-scenarios.ts an mit folgender öffentlicher API:
+
+  export interface BudgetScenarioSpec {
+    customerNamePrefix?: string;            // default: "TEST-DSL"
+    pflegegrad?: 1 | 2 | 3 | 4 | 5;          // default: 3
+    billingType?: 'pflegekasse_gesetzlich' | 'pflegekasse_privat' | 'selbstzahler';
+    acceptsPrivatePayment?: boolean;        // default: true
+    types: Array<{
+      type: 'entlastungsbetrag_45b' | 'umwandlung_45a' | 'ersatzpflege_39_42a';
+      enabled: boolean;
+      priority: number;
+      monthlyLimitCents?: number;
+      yearlyLimitCents?: number;
+    }>;
+    initialBalance?: {
+      type: 'entlastungsbetrag_45b' | 'umwandlung_45a' | 'ersatzpflege_39_42a';
+      amountCents: number;
+      validFrom: string;                    // 'YYYY-MM-DD'
+    };
+    carryover?: {
+      type: 'entlastungsbetrag_45b';
+      amountCents: number;
+      year: number;                          // Jahr aus dem der Carryover stammt
+    };
+    appointments?: Array<{
+      date: string;                          // 'YYYY-MM-DD'
+      scheduledStart: string;                // 'HH:MM'
+      scheduledEnd: string;                  // 'HH:MM'
+      services: Array<{ code: string; durationMinutes: number }>;
+      travelKilometers?: number;
+      customerKilometers?: number;
+      document?: boolean;                    // wenn true: nach Anlage automatisch dokumentieren
+    }>;
+  }
+
+  export interface BudgetScenarioHandle {
+    customerId: number;
+    employeeId: number;
+    appointmentIds: number[];
+    cleanup: () => Promise<void>;
+  }
+
+  export async function setupBudgetScenario(spec: BudgetScenarioSpec): Promise<BudgetScenarioHandle>;
+
+Implementierungs-Schritte intern:
+1. createTestCustomer({ namePrefix: spec.customerNamePrefix ?? 'TEST-DSL', pflegegrad: spec.pflegegrad ?? 3, billingType: spec.billingType ?? 'pflegekasse_gesetzlich', acceptsPrivatePayment: spec.acceptsPrivatePayment ?? true }) — reuse den existierenden Helper aus tests/test-utils.ts.
+2. Mitarbeiter via createTestEmployee() falls noch keiner existiert (Pool von einem reicht).
+3. Budget-Type-Settings setzen via apiPut('/api/budget/{customerId}/type-settings', { settings: spec.types }) — exakter Endpoint-Pfad aus server/routes/budget.ts ermitteln.
+4. Falls spec.initialBalance gesetzt: apiPost('/api/budget/{customerId}/initial-budget', { budgetType, currentYearAmountCents, budgetStartDate }) gemäß server/routes/budget.ts:489-567.
+5. Falls spec.carryover gesetzt: zusätzlich carryoverAmountCents im Initial-Budget-Call ODER direkt budgetLedgerStorage.createBudgetAllocation (über Test-internen Helper, falls Server-Endpoint dafür fehlt).
+6. Falls spec.appointments gesetzt: pro Termin apiPost('/api/appointments/kundentermin', {...}) mit dem Test-Mitarbeiter; falls appointment.document = true, anschließend apiPost('/api/appointments/{id}/document', {...}).
+7. Sammle alle erzeugten IDs in einem Cleanup-Array. cleanup() ruft die Routen in umgekehrter Reihenfolge auf (Termine löschen → Customer löschen). Nutze die bestehenden Cleanup-Pattern aus tests/budget-e2e.test.ts als Vorlage.
+
+Migrations-Beweis — drei bestehende Tests umstellen:
+Migriere INT-9, INT-11 und INT-13 aus tests/budget-e2e.test.ts exemplarisch auf die neue DSL. Der vorher-nachher Vergleich der Code-Zeilen pro Test soll im PR sichtbar sein (~50 % Reduktion erwartet). Wichtig: die migrierten Tests müssen weiter dieselben Assertions enthalten wie vorher — nur das Setup ändert sich.
+
+Smoke-Test in tests/helpers/budget-scenarios.smoke.test.ts mit zwei Cases:
+- Case 1: Standard-PG3-Customer mit allen drei Töpfen → apiGet('/api/budget/{id}/overview') zeigt drei aktive Töpfe in korrekter Priorität, alle mit Default-Limits.
+- Case 2: PG3 + §45b-Carryover 5000 Cent für Vorjahr → Overview zeigt verfügbaren Betrag inklusive Carryover.
+
+Cleanup-Konvention in Tests, die die DSL nutzen:
+
+  let scenario: BudgetScenarioHandle;
+  beforeEach(async () => { scenario = await setupBudgetScenario({...}); });
+  afterEach(async () => { await scenario.cleanup(); });
+
+Verifikation:
+1. tests/helpers/budget-scenarios.ts und budget-scenarios.smoke.test.ts existieren.
+2. Smoke-Test grün, beide Cases.
+3. Drei migrierte Tests (INT-9, INT-11, INT-13) weiter grün, Code-Zeilen pro Test sichtbar reduziert.
+4. npm run check grün — Typen sauber, keine any-Fallbacks.
+5. PR-Body zeigt vorher/nachher der drei migrierten Tests.

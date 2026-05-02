@@ -1020,16 +1020,29 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
 
     const futureValidFrom = addDaysStr(ymdLocal(new Date()), 14);
 
+    // CP-11 prüft das Soft-Delete-Verhalten zukünftiger Preise. Da
+    // vorgelagerte CP-Tests (CP-6/CP-10) bereits Entwurf-Rechnungen für die
+    // betroffenen Monate für cpCustomerId erzeugt haben, würde der
+    // INVOICED_PERIOD_AFFECTED-Schutz das Anlegen blocken. Den Override
+    // explizit setzen — der Konflikt-Pfad selbst wird in
+    // tests/customer-service-prices-invoiced.test.ts geprüft.
     const createRes = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
       serviceId: hwServiceId,
       priceCents: 7700,
       validFrom: futureValidFrom,
+      confirmInvoiceOverride: true,
     });
     expect(createRes.status, `Zukünftiger Kundenpreis konnte nicht angelegt werden: ${JSON.stringify(createRes.data)}`).toBe(200);
     const futurePriceId = createRes.data.id as number;
     cleanupCustomerPriceIds.push({ customerId: cpCustomerId, priceId: futurePriceId });
 
-    const deleteRes = await apiDelete(`/api/customers/${cpCustomerId}/service-prices/${futurePriceId}`);
+    // Auch der DELETE-Pfad prüft auf bereits abgerechnete Monate (siehe
+    // server/routes/customers/service-prices.ts Zeile 488). Der Soft-Delete
+    // ist hier explizit gewünscht — Override per Query-Parameter, weil
+    // apiDelete keinen Request-Body unterstützt.
+    const deleteRes = await apiDelete(
+      `/api/customers/${cpCustomerId}/service-prices/${futurePriceId}?confirmInvoiceOverride=true`,
+    );
     expect(deleteRes.status).toBe(200);
 
     const futurePricesRes = await apiGet<any[]>(`/api/customers/${cpCustomerId}/service-prices/future`);

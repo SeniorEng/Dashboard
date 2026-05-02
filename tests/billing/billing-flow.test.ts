@@ -122,13 +122,8 @@ async function findFreeSlotInMonth(
 ): Promise<{ id: number; date: string; time: string }> {
   const today = new Date();
   const lastDay = new Date(year, month, 0).getDate();
-  for (let day = lastDay; day >= 1; day--) {
-    const cand = new Date(year, month - 1, day);
-    if (cand > today) continue;
-    const dow = cand.getDay();
-    if (dow === 0 || dow === 6) continue;
-    const dateStr = ymdLocal(cand);
-    if (dateStr === excludeDateStr) continue;
+
+  const tryCreate = async (dateStr: string): Promise<{ id: number; date: string; time: string } | null> => {
     for (const time of SEED_TIMES) {
       const res = await apiPost<any>("/api/appointments/kundentermin", {
         customerId,
@@ -142,7 +137,38 @@ async function findFreeSlotInMonth(
         return { id: res.data.id, date: dateStr, time };
       }
     }
+    return null;
+  };
+
+  // Pass 1: bevorzugt vergangene Werktage (rückwärts ab Monatsende). Reale
+  // Dokumentation passt am natürlichsten zu vergangenen Daten.
+  for (let day = lastDay; day >= 1; day--) {
+    const cand = new Date(year, month - 1, day);
+    if (cand > today) continue;
+    const dow = cand.getDay();
+    if (dow === 0 || dow === 6) continue;
+    const dateStr = ymdLocal(cand);
+    if (dateStr === excludeDateStr) continue;
+    const created = await tryCreate(dateStr);
+    if (created) return created;
   }
+
+  // Pass 2: Fallback auf zukünftige Werktage im selben Monat. Nötig, wenn der
+  // Anker-Termin (excludeDateStr) der einzige vergangene Werktag des Monats
+  // war (z. B. heute = 2. Tag des Monats, 1. war ein Freitag). Der Test-Admin
+  // darf laut /document-Route auch zukünftige Termine dokumentieren, daher
+  // ist das für die Nachberechnungs-Semantik unkritisch.
+  for (let day = 1; day <= lastDay; day++) {
+    const cand = new Date(year, month - 1, day);
+    if (cand <= today) continue;
+    const dow = cand.getDay();
+    if (dow === 0 || dow === 6) continue;
+    const dateStr = ymdLocal(cand);
+    if (dateStr === excludeDateStr) continue;
+    const created = await tryCreate(dateStr);
+    if (created) return created;
+  }
+
   throw new Error(
     `findFreeSlotInMonth(${year}-${month}, exclude=${excludeDateStr}, ${noteTag}): kein freier Werktag-Slot im Monat`,
   );
