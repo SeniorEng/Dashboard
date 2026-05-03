@@ -85,7 +85,7 @@ afterAll(async () => {
 });
 
 describe("K2 — Storno reversiert §45b-Budget-Transaktionen", () => {
-  it.fails("K2.1 — Nach Storno zeigt §45b currentMonthUsedCents = 0", async () => {
+  it("K2.1 — Nach Storno zeigt §45b currentMonthUsedCents = 0", async () => {
     const today = new Date();
     const year = today.getFullYear();
     const month = today.getMonth() + 1;
@@ -94,7 +94,11 @@ describe("K2 — Storno reversiert §45b-Budget-Transaktionen", () => {
     // LN für aktuellen Monat erzeugen + signieren.
     const srRes = await apiPost<any>("/api/service-records", {
       customerId: scenario.customerId,
-      employeeId: auth.user.id,
+      // Termin wurde im Scenario dem scenario-eigenen Mitarbeiter zugewiesen,
+      // der Auth-User hat keine Termin-Zuordnung. SR muss daher auf den
+      // Scenario-Mitarbeiter ausgestellt werden, sonst sind keine
+      // dokumentierten Termine sichtbar.
+      employeeId: scenario.employeeId,
       year,
       month,
     });

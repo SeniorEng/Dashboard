@@ -187,6 +187,9 @@ async function deliverByPost(
 }
 
 export async function combinePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
+  if (buffers.length === 0) {
+    throw new Error("PDF-Zusammenführung fehlgeschlagen: keine Dokumente übergeben.");
+  }
   if (buffers.length === 1) return buffers[0];
 
   try {
@@ -202,8 +205,9 @@ export async function combinePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
     const mergedBytes = await merged.save();
     return Buffer.from(mergedBytes);
   } catch (error: unknown) {
-    console.error("PDF-Zusammenführung fehlgeschlagen, sende nur erstes Dokument:", error instanceof Error ? error.message : error);
-    return buffers[0];
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("PDF-Zusammenführung fehlgeschlagen:", errMsg);
+    throw new Error(`PDF-Zusammenführung fehlgeschlagen: ${errMsg}`);
   }
 }
 

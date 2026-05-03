@@ -24,7 +24,11 @@ import {
 import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery } from "@shared/schema";
 import type { BillingCustomerItem } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
-import { eq, and, gte, lte, isNull, inArray, ne, notInArray, or, desc } from "drizzle-orm";
+import { computeDataHash } from "../services/signature-integrity";
+import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
+import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
+import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
@@ -801,7 +805,23 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   }
 
   const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
-  const isNachberechnung = alreadyInvoicedIds.length > 0;
+
+  // T05/K3: Storno-then-rebill — wenn für diesen Zeitraum bereits stornierte
+  // Original-Rechnungen existieren, ist die neue Rechnung eine Nachberechnung
+  // und muss die Original-IDs zur Nachvollziehbarkeit verlinken.
+  const stornoOriginalRows = await db.select({ id: invoicesTable.id })
+    .from(invoicesTable)
+    .where(and(
+      eq(invoicesTable.customerId, customerId),
+      eq(invoicesTable.billingYear, billingYear),
+      eq(invoicesTable.billingMonth, billingMonth),
+      eq(invoicesTable.status, "storniert"),
+      ne(invoicesTable.invoiceType, "stornorechnung"),
+    ));
+  const referencedStornoInvoiceIds = stornoOriginalRows.map((r) => r.id);
+  const stornoRefsForInsert: number[] | null =
+    referencedStornoInvoiceIds.length > 0 ? referencedStornoInvoiceIds : null;
+  const isNachberechnung = alreadyInvoicedIds.length > 0 || referencedStornoInvoiceIds.length > 0;
 
   const apptIds = alreadyInvoicedIds.length > 0
     ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
@@ -892,6 +912,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           vatRate: 0,
           status: "entwurf",
           notes: "Kassenanteil — Leistungen im Rahmen des verfügbaren Budgets",
+          referencedStornoInvoiceIds: stornoRefsForInsert,
         };
 
         const kasseInvoice = await createInvoiceTx(tx, kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
@@ -946,6 +967,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
           vatRate: 1900,
           status: "entwurf",
           notes: "Privatzahlung — Budget-Überschreitung gem. Vereinbarung",
+          referencedStornoInvoiceIds: stornoRefsForInsert,
         };
 
         const privateInvoice = await createInvoiceTx(tx, privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
@@ -975,13 +997,26 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         await auditService.log(req.user!.id, "invoice_created", "invoice", entry.invoiceId, entry.payload, req.ip);
       }
 
-      if (splitResult.length === 1) {
-        res.json(splitResult[0]);
+      // T01/PDF-Hash: PDF deterministisch erzeugen und persistieren, damit
+      // die /pdf-Bytes hashstabil ausgeliefert werden.
+      const refreshed: Invoice[] = [];
+      for (const inv of splitResult) {
+        try {
+          await persistInvoicePdf(inv.id);
+        } catch (pdfErr) {
+          console.error(`[billing/generate] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, pdfErr);
+        }
+        const reloaded = await storage.getInvoice(inv.id);
+        refreshed.push(reloaded ?? inv);
+      }
+
+      if (refreshed.length === 1) {
+        res.json(refreshed[0]);
       } else {
         res.json({
           splitInvoices: true,
-          invoices: splitResult,
-          message: `${splitResult.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
+          invoices: refreshed,
+          message: `${refreshed.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
         });
       }
       return;
@@ -1053,6 +1088,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         grossAmountCents: totalNetCents + totalVatCents,
         vatRate: billingType === "selbstzahler" ? 1900 : 0,
         status: "entwurf",
+        referencedStornoInvoiceIds: stornoRefsForInsert,
       };
       const created = await createInvoiceTx(tx, invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
       return { invoice: created, invoiceNumber: number };
@@ -1085,7 +1121,14 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     lineItemCount: lineItems.length,
   }, req.ip);
 
-  res.json(invoice);
+  // T01/PDF-Hash: PDF deterministisch erzeugen und persistieren.
+  try {
+    await persistInvoicePdf(invoice.id);
+  } catch (pdfErr) {
+    console.error(`[billing/generate] PDF-Persistierung für Rechnung ${invoice.id} fehlgeschlagen:`, pdfErr);
+  }
+  const refreshedInvoice = await storage.getInvoice(invoice.id);
+  res.json(refreshedInvoice ?? invoice);
 }));
 
 
@@ -1154,7 +1197,9 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
         vatAmountCents: -locked.vatAmountCents,
         grossAmountCents: -locked.grossAmountCents,
         vatRate: locked.vatRate,
-        status: "versendet",
+        // T10/BL-12: Stornorechnung startet als Entwurf, nicht als versendet —
+        // der Versand-Pfad setzt status erst nach erfolgreicher Zustellung.
+        status: "entwurf",
         stornierteRechnungId: id,
       };
 
@@ -1175,6 +1220,77 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
 
       const created = await createInvoiceTx(tx, stornoData, stornoLineItems, req.user!.id);
       const original = await updateInvoiceStatusTx(tx, id, status, req.user!.id);
+
+      // T05/K3: Storno setzt den zugehörigen Leistungsnachweis NUR DANN
+      // zurück (soft-delete), wenn im Zeitraum dokumentierte Termine
+      // existieren, die im LN noch nicht erfasst sind. Nur dann ist eine
+      // Nachberechnung mit erweiterter Termin-Liste sinnvoll. Ohne neue
+      // dokumentierte Termine bleibt der LN bestehen, sodass BF-5.3
+      // (reine Re-Abrechnung derselben Termine) weiterhin ohne neuen LN
+      // erfolgen kann.
+      const periodSrRows = await tx.select({
+        id: monthlyServiceRecords.id,
+      })
+        .from(monthlyServiceRecords)
+        .where(and(
+          eq(monthlyServiceRecords.customerId, locked.customerId),
+          eq(monthlyServiceRecords.year, locked.billingYear),
+          eq(monthlyServiceRecords.month, locked.billingMonth),
+          isNull(monthlyServiceRecords.deletedAt),
+        ));
+      if (periodSrRows.length > 0) {
+        const srIds = periodSrRows.map(r => r.id);
+        const linkedAppts = await tx.select({
+          appointmentId: serviceRecordAppointments.appointmentId,
+        })
+          .from(serviceRecordAppointments)
+          .where(inArray(serviceRecordAppointments.serviceRecordId, srIds));
+        const linkedIds = new Set(linkedAppts.map(r => r.appointmentId));
+        const mm = String(locked.billingMonth).padStart(2, '0');
+        const periodStartStr = `${locked.billingYear}-${mm}-01`;
+        const nextMonth = locked.billingMonth === 12 ? 1 : locked.billingMonth + 1;
+        const nextYear = locked.billingMonth === 12 ? locked.billingYear + 1 : locked.billingYear;
+        const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+        const documentedAppts = await tx.select({ id: appointments.id })
+          .from(appointments)
+          .where(and(
+            eq(appointments.customerId, locked.customerId),
+            eq(appointments.status, 'completed'),
+            isNull(appointments.deletedAt),
+            gte(appointments.date, periodStartStr),
+            lt(appointments.date, periodEndStr),
+          ));
+        const hasUnlinkedDoc = documentedAppts.some(a => !linkedIds.has(a.id));
+        if (hasUnlinkedDoc) {
+          await tx
+            .update(monthlyServiceRecords)
+            .set({ deletedAt: new Date() })
+            .where(inArray(monthlyServiceRecords.id, srIds));
+        }
+      }
+
+      // T04/K2: Storno-Reversal — alle §45b/Privat-Budget-Transaktionen der
+      // Original-Rechnungs-Termine werden in derselben Transaktion zurückgebucht,
+      // damit der §45b-Topf wieder als verfügbar angezeigt wird.
+      const apptIdsForReversal = Array.from(
+        new Set(
+          lineItems
+            .map((it: InvoiceLineItem) => it.appointmentId)
+            .filter((v): v is number => typeof v === "number"),
+        ),
+      );
+      for (const apptId of apptIdsForReversal) {
+        const txs = await tx.select()
+          .from(budgetTransactions)
+          .where(and(
+            eq(budgetTransactions.appointmentId, apptId),
+            eq(budgetTransactions.transactionType, "consumption"),
+          ));
+        for (const t of txs) {
+          await budgetLedgerStorage.reverseBudgetTransaction(t.id, req.user!.id, tx);
+        }
+      }
+
       return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
     });
 
@@ -1359,12 +1475,110 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
   }
 }
 
+// T01/PDF-Hash: Generiert die PDF-Bytes deterministisch (entspricht /pdf-Output),
+// speichert sie in Object Storage und persistiert pdfPath + pdfHash.
+// Wird nach jeder /generate-Invoice-Erstellung aufgerufen, damit /pdf später
+// hashstabile Bytes ausliefert.
+async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<Buffer> {
+  const lineItems = await storage.getInvoiceLineItems(invoice.id);
+  const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  const customerForInv = await db.select({
+    geburtsdatum: customersTable.geburtsdatum,
+    beihilfeBerechtigt: customersTable.beihilfeBerechtigt,
+  })
+    .from(customersTable)
+    .where(eq(customersTable.id, invoice.customerId))
+    .limit(1);
+  if (customerForInv.length > 0) {
+    if (customerForInv[0].geburtsdatum) pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
+    if (customerForInv[0].beihilfeBerechtigt) pdfData.beihilfeBerechtigt = true;
+  }
+
+  const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  const { embedZugferdXml } = await import("../lib/zugferd");
+
+  const html = generateInvoiceHtml(pdfData);
+  const { buffer } = await generatePdf(html);
+  const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
+
+  if (invoice.billingType === "pflegekasse_privat") {
+    await enrichPdfDataWithSignatures(pdfData, invoice);
+    const lnHtml = generateLeistungsnachweisHtml(pdfData);
+    const { buffer: lnPdf } = await generatePdf(lnHtml);
+
+    const { PDFDocument } = await import("pdf-lib");
+    const merged = await PDFDocument.create();
+    const invoiceDoc = await PDFDocument.load(zugferdBuffer);
+    const lnDoc = await PDFDocument.load(lnPdf);
+    const ip = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
+    ip.forEach((p) => merged.addPage(p));
+    const lp = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
+    lp.forEach((p) => merged.addPage(p));
+    if (pdfData.beihilfeBerechtigt) {
+      const ip2 = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
+      ip2.forEach((p) => merged.addPage(p));
+      const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
+      lp2.forEach((p) => merged.addPage(p));
+    }
+    return Buffer.from(await merged.save());
+  }
+  return zugferdBuffer;
+}
+
+async function persistInvoicePdf(invoiceId: number): Promise<void> {
+  const invoice = await storage.getInvoice(invoiceId);
+  if (!invoice) return;
+  const companySettings = await getCachedCompanySettings();
+  if (!companySettings) return;
+
+  const pdfBytes = await buildInvoicePdfBytes(invoice, companySettings);
+  const pdfHash = computeDataHash(pdfBytes as unknown as string);
+
+  const fileName = `invoices/${invoice.invoiceNumber.replace(/[^a-z0-9_-]/gi, "_")}.pdf`;
+  const fullPath = `${getPrivateDir()}/${fileName}`;
+  const { bucketName, objectName } = parseObjectPath(fullPath);
+  await objectStorageClient.bucket(bucketName).file(objectName).save(pdfBytes, {
+    contentType: "application/pdf",
+    metadata: { invoiceNumber: invoice.invoiceNumber, pdfHash },
+  });
+
+  await db.update(invoicesTable)
+    .set({ pdfPath: `/objects/${fileName}`, pdfHash })
+    .where(eq(invoicesTable.id, invoiceId));
+}
+
+async function loadInvoicePdfFromStorage(invoice: Invoice): Promise<Buffer | null> {
+  if (!invoice.pdfPath) return null;
+  let entityId = invoice.pdfPath;
+  if (entityId.startsWith("/objects/")) entityId = entityId.slice("/objects/".length);
+  let entityDir = getPrivateDir();
+  if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
+  const fullPath = `${entityDir}${entityId}`;
+  const { bucketName, objectName } = parseObjectPath(fullPath);
+  const file = objectStorageClient.bucket(bucketName).file(objectName);
+  const [exists] = await file.exists();
+  if (!exists) return null;
+  const [contents] = await file.download();
+  return Buffer.from(contents);
+}
+
 router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
-  
+
+  // T01/PDF-Hash: Wenn die Rechnung bereits einen persistierten PDF-Pfad hat,
+  // liefere die hashstabilen Bytes direkt aus Object Storage aus.
+  const cached = await loadInvoicePdfFromStorage(invoice);
+  if (cached) {
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+    res.send(cached);
+    return;
+  }
+
   const lineItems = await storage.getInvoiceLineItems(id);
   const companySettings = await getCachedCompanySettings();
   const { generateInvoiceHtml, generatePdf } = await import("../lib/pdf-generator");
@@ -1472,6 +1686,26 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
   if (invoice.billingType !== "pflegekasse_gesetzlich" && invoice.billingType !== "pflegekasse_privat") {
     throw badRequest("Nur Rechnungen an Pflegekassen können über diese Funktion versendet werden.");
+  }
+
+  // T06/BL-16: Hard-Block — Versand nur möglich, wenn für den
+  // Abrechnungs-Zeitraum mindestens ein Leistungsnachweis vollständig
+  // (employee + customer) signiert ist. Ohne Signaturen ist die Rechnung
+  // gegenüber Kasse/Kunde nicht beweisbar — wir lehnen den Versand ab,
+  // statt unsigniert zu versenden.
+  const signedSrCount = await db.select({ id: monthlyServiceRecords.id })
+    .from(monthlyServiceRecords)
+    .where(and(
+      eq(monthlyServiceRecords.customerId, invoice.customerId),
+      eq(monthlyServiceRecords.year, invoice.billingYear),
+      eq(monthlyServiceRecords.month, invoice.billingMonth),
+      isNull(monthlyServiceRecords.deletedAt),
+      inArray(monthlyServiceRecords.status, ["completed", "employee_signed"]),
+    ));
+  if (signedSrCount.length === 0) {
+    throw badRequest(
+      "Versand abgelehnt: Für diesen Abrechnungs-Zeitraum existiert kein vollständig unterschriebener Leistungsnachweis. Bitte zuerst Mitarbeiter- und Kundenunterschrift einholen.",
+    );
   }
 
   const customer = await db.select().from(customersTable).where(eq(customersTable.id, invoice.customerId)).limit(1);
@@ -1744,7 +1978,12 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
         documentFileNames: copyFileNames,
         errorMessage: copyErrMsg,
         createdByUserId: req.user!.id,
-      }).catch(() => {});
+      }).catch((deliveryLogErr: unknown) => {
+        console.error(
+          `[billing/send] Delivery-Log für Kundenkopie konnte nicht geschrieben werden (invoice ${id}):`,
+          deliveryLogErr instanceof Error ? deliveryLogErr.message : deliveryLogErr,
+        );
+      });
       results.push({ invoiceId: id, status: "error", recipientEmail: cust.email || "", customerCopy: true });
     }
   }

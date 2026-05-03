@@ -731,7 +731,19 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked) {
-    return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+    // K8: Whitelist `notes` darf weiterhin geändert werden; alle anderen
+    // Felder brechen die Abrechnungs-Konsistenz und liefern 409 Conflict.
+    const PATCH_LOCK_WHITELIST = new Set(["notes"]);
+    const bodyKeys = Object.keys(req.body || {});
+    const hasProtectedChange = bodyKeys.length === 0
+      || bodyKeys.some((k) => !PATCH_LOCK_WHITELIST.has(k));
+    if (hasProtectedChange) {
+      return sendConflict(
+        res,
+        "APPOINTMENT_LOCKED",
+        "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Geschützte Felder können nicht mehr geändert werden — bitte stornieren Sie die zugehörige Rechnung.",
+      );
+    }
   }
 
   if (!req.user!.isAdmin && existingAppointment.date) {

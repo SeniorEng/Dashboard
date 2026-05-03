@@ -465,12 +465,9 @@ describe("Budget Property-Tests (P1–P5)", () => {
     );
   }, 600_000);
 
-  // P5 — Write-Off ≤ 1 pro Allokation. Per Task-Spec mit `it.fails(...)`
-  // markiert: bis K7 vollständig gefixt ist, soll diese Property einen
-  // shrunked Repro produzieren ("expected to fail and did"). Sobald K7-Fix
-  // greift, wird der Test grün — dann ist `it.fails` umzustellen (separate
-  // Task, hier explizit out-of-scope).
-  it.fails(
+  // P5 — Write-Off ≤ 1 pro Allokation. Nach K7-Fix (Race-Schutz im
+  // processExpiredCarryover) ist die Property erfüllt — daher `it`.
+  it(
     "P5 — höchstens 1 Write-Off pro Allokation",
     async () => {
       await fc.assert(

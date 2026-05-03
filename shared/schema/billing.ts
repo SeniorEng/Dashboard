@@ -45,6 +45,7 @@ export const invoices = pgTable("invoices", {
   vatRate: integer("vat_rate"),
   status: text("status").notNull().default("entwurf"),
   stornierteRechnungId: integer("stornierte_rechnung_id").references((): AnyPgColumn => invoices.id),
+  referencedStornoInvoiceIds: integer("referenced_storno_invoice_ids").array(),
   pdfPath: text("pdf_path"),
   pdfHash: text("pdf_hash"),
   leistungsnachweisPath: text("leistungsnachweis_path"),

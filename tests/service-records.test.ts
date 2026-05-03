@@ -246,7 +246,9 @@ describe("LN-4: Gesperrte Termine nach Unterschrift", () => {
     const res = await apiPatch<any>(`/api/appointments/${completedAppointmentId}`, {
       scheduledStart: "08:00",
     });
-    expect(res.status).toBe(403);
+    // K8: PATCH auf gesperrtem Termin liefert 409 (LOCKED), siehe
+    // tests/appointments/lock-after-ln-sign.test.ts
+    expect(res.status).toBe(409);
   });
 
   it("LN-4.2 – Termin in unterschriebenem LN: Re-Dokumentation wird abgelehnt (403)", async () => {

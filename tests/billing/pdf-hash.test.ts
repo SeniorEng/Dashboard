@@ -100,7 +100,7 @@ afterAll(async () => {
 });
 
 describe("PDF-Hash — invoices.pdf_hash wird bei Generierung befüllt", () => {
-  it.fails("PDFH.1 — pdf_hash != NULL und identisch zu computeDataHash(pdf-bytes)", async () => {
+  it("PDFH.1 — pdf_hash != NULL und identisch zu computeDataHash(pdf-bytes)", async () => {
     const slot = await findFreeSlotAndCreate(customerId, "G");
     const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
       actualStart: slot.time,

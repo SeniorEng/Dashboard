@@ -191,6 +191,13 @@ async function runStartupTasks() {
       log(`Budget-Source-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateInvoiceStornoRefs } = await import("./startup/migrate-invoice-storno-refs");
+    try {
+      await migrateInvoiceStornoRefs();
+    } catch (err) {
+      log(`Invoice-Storno-Refs-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();

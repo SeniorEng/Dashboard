@@ -718,8 +718,9 @@ describe("BF-3: Storno (Stornorechnung + Audit + Schutz)", () => {
     for (const li of stornoDetail.lineItems) {
       expect(li.totalCents).toBeLessThanOrEqual(0);
     }
-    // Storno wird sofort als "versendet" erzeugt (Buchführungs-Spiegelbild).
-    expect(stornoDetail.status).toBe("versendet");
+    // BL-12: Stornorechnung wird als "entwurf" angelegt; Versand erfolgt
+    // durch den Buchhalter aktiv über den Send-Pfad.
+    expect(stornoDetail.status).toBe("entwurf");
   });
 
   it("BF-3.2 — Stornorechnung kann NICHT erneut storniert werden", async () => {

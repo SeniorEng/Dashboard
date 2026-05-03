@@ -118,43 +118,51 @@ export async function signServiceRecord(id: number, signatureData: string, signe
 
   const now = new Date();
   const hash = computeDataHash(signatureData);
-  let updateData: Partial<MonthlyServiceRecord> = { updatedAt: now };
+
+  let nextStatus: ServiceRecordStatus;
+  let signatureFields: Partial<MonthlyServiceRecord>;
 
   if (signerType === 'employee') {
     if (existing.status !== 'pending') {
       throw new Error('Mitarbeiter kann nur bei Status "pending" unterschreiben');
     }
-    updateData = {
-      ...updateData,
+    nextStatus = 'employee_signed' as ServiceRecordStatus;
+    signatureFields = {
       employeeSignatureData: signatureData,
       employeeSignatureHash: hash,
       employeeSignedAt: now,
       employeeSignedByUserId: userId ?? null,
       employeeSigningIp: signingIp ?? null,
       employeeSigningLocation: signingLocation ?? null,
-      status: 'employee_signed' as ServiceRecordStatus,
     };
   } else if (signerType === 'customer') {
     if (existing.status !== 'employee_signed') {
       throw new Error('Kunde kann nur nach Mitarbeiter-Unterschrift unterschreiben');
     }
-    updateData = {
-      ...updateData,
+    nextStatus = 'completed' as ServiceRecordStatus;
+    signatureFields = {
       customerSignatureData: signatureData,
       customerSignatureHash: hash,
       customerSignedAt: now,
       customerSignedByUserId: userId ?? null,
       customerSigningIp: signingIp ?? null,
       customerSigningLocation: signingLocation ?? null,
-      status: 'completed' as ServiceRecordStatus,
     };
+  } else {
+    return undefined;
   }
 
-  const result = await db.update(monthlyServiceRecords)
-    .set(updateData)
-    .where(eq(monthlyServiceRecords.id, id))
-    .returning();
-  return result[0];
+  return await db.transaction(async (tx) => {
+    await tx.update(monthlyServiceRecords)
+      .set({ ...signatureFields, updatedAt: now })
+      .where(eq(monthlyServiceRecords.id, id));
+
+    const result = await tx.update(monthlyServiceRecords)
+      .set({ status: nextStatus, updatedAt: now })
+      .where(eq(monthlyServiceRecords.id, id))
+      .returning();
+    return result[0];
+  });
 }
 
 export async function updateServiceRecord(id: number, data: Partial<typeof monthlyServiceRecords.$inferInsert>): Promise<MonthlyServiceRecord | undefined> {

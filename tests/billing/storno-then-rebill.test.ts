@@ -165,7 +165,7 @@ afterAll(async () => {
 });
 
 describe("K3 — Nachberechnung nach Storno verlinkt Original-Rechnung", () => {
-  it.fails("K3.1 — Re-Generierung nach Storno: invoiceType=nachberechnung + referencedStornoInvoiceIds enthält Original", async () => {
+  it("K3.1 — Re-Generierung nach Storno: invoiceType=nachberechnung + referencedStornoInvoiceIds enthält Original", async () => {
     const today = new Date();
     const year = today.getFullYear();
     const month = today.getMonth() + 1;

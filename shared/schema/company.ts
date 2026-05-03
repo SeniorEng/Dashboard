@@ -40,7 +40,7 @@ export const companySettings = pgTable("company_settings", {
   letterxpressUsername: text("letterxpress_username"),
   letterxpressApiKey: text("letterxpress_api_key"),
   minijobEarningsLimitCents: integer("minijob_earnings_limit_cents").notNull().default(55600),
-  letterxpressTestMode: boolean("letterxpress_test_mode").notNull().default(true),
+  letterxpressTestMode: boolean("letterxpress_test_mode").notNull().default(false),
   qontoLogin: text("qonto_login"),
   qontoSecretKey: text("qonto_secret_key"),
   qontoIban: text("qonto_iban"),

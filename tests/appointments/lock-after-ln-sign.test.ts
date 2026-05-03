@@ -164,39 +164,39 @@ afterAll(async () => {
 });
 
 describe("K8 — Termin-Lock nach LN-Sign liefert 409 statt 403 für geschützte Felder", () => {
-  it.fails("K8.1 — PATCH scheduledStart auf gesperrtem Termin liefert 409", async () => {
+  it("K8.1 — PATCH scheduledStart auf gesperrtem Termin liefert 409", async () => {
     const res = await apiPatch<any>(`/api/appointments/${lockedApptId}`, { scheduledStart: "10:00" });
     expect(res.status, `got ${res.status} ${JSON.stringify(res.data)}`).toBe(409);
   });
 
-  it.fails("K8.2 — PATCH actualStart auf gesperrtem Termin liefert 409", async () => {
+  it("K8.2 — PATCH actualStart auf gesperrtem Termin liefert 409", async () => {
     const res = await apiPatch<any>(`/api/appointments/${lockedApptId}`, { actualStart: "10:00" });
     expect(res.status, `got ${res.status} ${JSON.stringify(res.data)}`).toBe(409);
   });
 
-  it.fails("K8.3 — PATCH services[].actualDurationMinutes auf gesperrtem Termin liefert 409", async () => {
+  it("K8.3 — PATCH services[].actualDurationMinutes auf gesperrtem Termin liefert 409", async () => {
     const res = await apiPatch<any>(`/api/appointments/${lockedApptId}`, {
       services: [{ serviceId: hwServiceId, actualDurationMinutes: 45 }],
     });
     expect(res.status, `got ${res.status} ${JSON.stringify(res.data)}`).toBe(409);
   });
 
-  it.fails("K8.4 — PATCH travelKilometers auf gesperrtem Termin liefert 409", async () => {
+  it("K8.4 — PATCH travelKilometers auf gesperrtem Termin liefert 409", async () => {
     const res = await apiPatch<any>(`/api/appointments/${lockedApptId}`, { travelKilometers: 5 });
     expect(res.status, `got ${res.status} ${JSON.stringify(res.data)}`).toBe(409);
   });
 
-  it.fails("K8.5 — PATCH customerKilometers auf gesperrtem Termin liefert 409", async () => {
+  it("K8.5 — PATCH customerKilometers auf gesperrtem Termin liefert 409", async () => {
     const res = await apiPatch<any>(`/api/appointments/${lockedApptId}`, { customerKilometers: 3 });
     expect(res.status, `got ${res.status} ${JSON.stringify(res.data)}`).toBe(409);
   });
 
-  it.fails("K8.6 — PATCH customerId auf gesperrtem Termin liefert 409", async () => {
+  it("K8.6 — PATCH customerId auf gesperrtem Termin liefert 409", async () => {
     const res = await apiPatch<any>(`/api/appointments/${lockedApptId}`, { customerId: customerAltId });
     expect(res.status, `got ${res.status} ${JSON.stringify(res.data)}`).toBe(409);
   });
 
-  it.fails("K8.7 — PATCH assignedEmployeeId auf gesperrtem Termin liefert 409", async () => {
+  it("K8.7 — PATCH assignedEmployeeId auf gesperrtem Termin liefert 409", async () => {
     const res = await apiPatch<any>(`/api/appointments/${lockedApptId}`, { assignedEmployeeId: altEmployeeId });
     expect(res.status, `got ${res.status} ${JSON.stringify(res.data)}`).toBe(409);
   });

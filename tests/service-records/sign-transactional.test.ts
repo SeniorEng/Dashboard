@@ -128,7 +128,7 @@ afterAll(async () => {
 });
 
 describe("LN-Sign-Tx — signServiceRecord ist transaktional", () => {
-  it.fails(
+  it(
     "LN-Sign-Tx.1 — Bei mid-tx-Fehler bleibt Status=pending und Signatur=NULL",
     async () => {
       const originalTx = (db as any).transaction.bind(db);
