@@ -1,0 +1,38 @@
+Lege tests/helpers/race.ts an mit folgenden Helfern:
+
+  export async function runInParallel<T>(
+    fns: Array<() => Promise<T>>
+  ): Promise<Array<{ status: 'fulfilled'; value: T } | { status: 'rejected'; reason: unknown }>>;
+
+  export function expectExactlyOneSuccess<T>(
+    results: Awaited<ReturnType<typeof runInParallel<T>>>,
+    expectedRejectionPattern?: RegExp
+  ): T;
+
+runInParallel ist ein dünner Wrapper um Promise.allSettled. expectExactlyOneSuccess prüft: genau ein 'fulfilled', alle anderen 'rejected', optional dass die Rejection-Reasons dem Pattern entsprechen — wirft sonst aussagekräftige Vitest-Assertions.
+
+Schreibe tests/billing/race-invoice-number.test.ts (deckt K1 ab):
+
+Setup via setupBudgetScenario aus tests/helpers/budget-scenarios.ts:
+- Zwei verschiedene Customers (zwei DSL-Aufrufe), jeweils mit einem dokumentierten Termin im Vormonat.
+- Pro Customer einen Leistungsnachweis im Status "completed" über die existierenden Test-Helpers.
+
+Action: runInParallel([
+  () => apiPost('/api/billing/generate', { customerId: c1, billingMonth, billingYear }),
+  () => apiPost('/api/billing/generate', { customerId: c2, billingMonth, billingYear }),
+])
+
+Assertions:
+1. Beide Promises fulfilled.
+2. Die zwei zurückgegebenen invoiceNumber-Werte unterscheiden sich.
+3. SELECT COUNT(*) FROM invoices WHERE billing_year = X AND invoice_number IN (n1, n2) liefert 2.
+
+Falls K1 (advisory_xact_lock auf getNextInvoiceNumber) noch NICHT implementiert ist: markiere den Test mit it.fails(...) und dokumentiere im PR-Body, dass dieser Test absichtlich rot ist und nach K1-Fix grün gezogen wird.
+
+Hinweis zur vitest-Config: fileParallelism: false soll bleiben — die Race wird via Promise.all INNERHALB des Tests erzeugt, nicht zwischen Files.
+
+Verifikation:
+1. tests/helpers/race.ts und tests/billing/race-invoice-number.test.ts existieren.
+2. vitest run tests/billing/race-invoice-number.test.ts läuft (vor K1-Fix als it.fails grün, nach Fix als regulär grün).
+3. 10× Wiederholung des Tests liefert reproduzierbar dasselbe Ergebnis (deterministisch).
+4. npm run check grün.

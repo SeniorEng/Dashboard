@@ -1,0 +1,40 @@
+Installiere fast-check als devDependency:
+
+  npm install --save-dev fast-check
+
+Lege tests/budget/properties.test.ts an mit fünf Property-Tests, die je 100 zufällige Op-Sequenzen erzeugen und folgende Invarianten prüfen. Nutze setupBudgetScenario aus T2 für die Setup-Phase, freezeTime aus T1a wo Datum relevant ist.
+
+Allgemeine Konvention pro Property:
+- fc.assert(fc.asyncProperty(generator, async (input) => { setup → ops → assertions; await scenario.cleanup(); }))
+- Generator-Seed in CI fest (vitest config: fc.configureGlobal({ seed: 42 })) damit Failures reproduzierbar.
+- Test-Lauf-Ziel: < 90 Sekunden für alle 5 Properties zusammen. Falls langsamer: numRuns auf 30-50 reduzieren und im Kommentar notieren.
+
+P1 — Verbrauch ≤ Allokation + Carryover:
+Generator: Liste von 1-20 Termin-Dokumentationen (zufällige Kosten 0-15000 Cent), Customer mit zufälligem Initial-Budget (1-100€) und Carryover (0-200€), acceptsPrivatePayment: false (Hard-Block-Modus).
+Assertion nach allen Ops: SELECT SUM(amount_cents) FROM budget_transactions WHERE customer_id = c AND transaction_type = 'consumption' <= SELECT SUM(amount_cents) FROM budget_allocations WHERE customer_id = c AND deleted_at IS NULL.
+
+P2 — Storno-Idempotenz:
+Generator: Liste von 1-10 Termin-Dokumentationen, dann alle wieder stornieren.
+Assertion: budget_overview vor und nach (usedCents, availableCents) sind identisch.
+
+P3 — Cascade respektiert Priority:
+Generator: zwei aktive Töpfe mit zufälliger Priority-Reihenfolge (1 vs 2), monthlyLimitCents je zufällig 1000-10000. Ein Termin, dessen Kosten den priorisierten Topf überschreiten.
+Assertion: SELECT amount_cents FROM budget_transactions WHERE allocation_id = (priorisierter Topf) deckt vollständig den Cap dieses Topfes ab, bevor der zweite Topf belastet wird. SELECT TIMESTAMP-Reihenfolge bestätigt FIFO innerhalb des Topfes.
+
+P4 — Jede Consumption hat Quelle:
+Generator: zufällige Setup+Doku-Sequenzen.
+Assertion: für jede Zeile in budget_transactions WHERE transaction_type = 'consumption' gilt entweder allocation_id IS NOT NULL ODER es gibt einen dokumentierten Marker für unlinked Consumption (im Code prüfen: in shared/schema/budget.ts und consumption-engine.ts, wie unlinked markiert wird — eventuell ein Notes-Feld oder ein separates Flag). Kein "Phantom-Consumption" ohne Spur.
+
+P5 — Write-Off ≤ 1 pro Allokation:
+Generator: simuliert mehrfache Carryover-Expiry-Aufrufe (parallel und sequenziell) mit freezeTime auf verschiedene Daten nach 30.06.
+Assertion: SELECT allocation_id, COUNT(*) FROM budget_transactions WHERE transaction_type = 'write_off' GROUP BY 1 HAVING COUNT(*) > 1 ist leer.
+
+Bei einem Property-Failure schreibt fast-check ein minimales Repro in den Test-Output. Falls ein bekannter Bug (z. B. K7) das Property fail lässt: markiere mit it.fails(...) bis Fix implementiert.
+
+Verifikation:
+1. fast-check ist in package.json devDependencies eingetragen.
+2. tests/budget/properties.test.ts mit fünf Property-Tests existiert.
+3. P5 schlägt vor K7-Fix vermutlich fehl mit shrunked Repro im Output (it.fails grün, "expected to fail and did").
+4. Nach K1/K4/K7/K2-Fixes alle fünf grün als reguläre it().
+5. Gesamt-Lauf < 90s.
+6. npm run check grün.

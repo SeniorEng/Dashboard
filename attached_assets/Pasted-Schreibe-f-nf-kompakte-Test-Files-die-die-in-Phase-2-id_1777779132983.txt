@@ -1,0 +1,84 @@
+Schreibe fünf kompakte Test-Files, die die in Phase 2 identifizierten Bugs absichern. Markiere jeweils mit it.fails(...) bis der korrespondierende Fix in Phase 2 implementiert ist; dokumentiere im PR-Body, welcher Test zu welchem K-Punkt gehört.
+
+Nutze setupBudgetScenario aus T2 wo möglich, ansonsten existierende Helpers aus tests/test-utils.ts und tests/billing/billing-flow.test.ts (Slot-Finder, createTestCustomer).
+
+
+Test 1: tests/appointments/lock-after-ln-sign.test.ts (K8 — Termin-Lock nach LN-Sign)
+
+Setup: Customer + dokumentierter Termin + Leistungsnachweis im Status 'completed' (Mitarbeiter und Kunde unterschrieben — nutze die existierende Test-Sign-Logik).
+
+Cases:
+- PATCH /api/appointments/:id mit verändertem scheduledStart → erwartet 409.
+- Analog für: actualStart, services[].actualDurationMinutes, travelKilometers, customerKilometers, customerId, assignedEmployeeId — jeweils 409.
+- PATCH mit Whitelist-Feld notes → erwartet 200.
+
+Markiere alle 409-Cases mit it.fails bis K8-Fix implementiert.
+
+
+Test 2: tests/billing/storno-reversal.test.ts (K2 — Storno mit Budget-Reversal)
+
+Setup via setupBudgetScenario: PG3, §45b-Topf, ein Termin à 60 € dokumentiert (Budget belastet → 6000 Cent verbraucht).
+
+Action:
+1. apiPost('/api/billing/generate', { customerId, billingMonth, billingYear }) → invoiceId.
+2. apiGet(`/api/budget/${customerId}/overview`) → snapshotBefore.
+3. apiPatch(`/api/billing/${invoiceId}/status`, { status: 'storniert' }).
+
+Assertion:
+- apiGet(`/api/budget/${customerId}/overview`) nach Storno ist identisch zum Zustand VOR Termin-Dokumentation: usedCents = 0 für aktuellen Monat, availableCents = vollständiger §45b-Cap.
+
+Markiere mit it.fails bis K2-Fix (Reversal-Aufrufe im Storno-Endpoint) implementiert.
+
+
+Test 3: tests/billing/storno-then-rebill.test.ts (K3 — Nachberechnung nach Storno)
+
+Setup: Customer + zwei dokumentierte Termine im selben Monat (T1 + T2). Nur T1 in einer ersten Rechnung RE-001 enthalten.
+
+Action:
+1. apiPost('/api/billing/generate') für aktuellen Monat → RE-001 enthält T1.
+2. apiPatch(`/api/billing/RE-001/status`, { status: 'storniert' }).
+3. T2 wird neu dokumentiert (oder existiert bereits).
+4. apiPost('/api/billing/generate') erneut.
+
+Assertion:
+- Zweite Rechnung enthält BEIDE Termine (T1 aus dem stornierten Lauf + T2).
+- Zweite Rechnung hat invoiceType = 'nachberechnung'.
+- referenced_storno_invoice_ids enthält die ID von RE-001 (Feld muss existieren — Teil von K3-Fix).
+
+Markiere mit it.fails bis K3-Fix implementiert.
+
+
+Test 4: tests/service-records/sign-transactional.test.ts (LN-Sign ohne Transaktion)
+
+Setup: Customer + Leistungsnachweis im Status 'pending' mit einem dokumentierten Termin.
+
+Action:
+- Mocke (z. B. via vi.spyOn) den letzten DB-Update-Call innerhalb von signServiceRecord, sodass er nach dem Signature-Insert einen Fehler wirft.
+- Versuche apiPost(`/api/service-records/${id}/sign`, { signatureData, ... }).
+
+Assertion:
+- Response ist 5xx (Fehler propagiert).
+- SELECT signature_data, status FROM monthly_service_records WHERE id = X liefert status = 'pending' UND signature_data IS NULL (Rollback erfolgreich).
+
+Markiere mit it.fails bis db.transaction-Wrap um signServiceRecord implementiert.
+
+
+Test 5: tests/billing/pdf-hash.test.ts (PDF-Hash bei Generierung)
+
+Setup: Standard-Rechnungs-Erzeugung wie in tests/billing/billing-flow.test.ts.
+
+Action: apiPost('/api/billing/generate', {...}) → invoiceId.
+
+Assertion:
+- SELECT pdf_hash FROM invoices WHERE id = invoiceId IS NOT NULL.
+- pdf_hash entspricht computeDataHash über die generierten PDF-Bytes (computeDataHash aus shared/utils oder ähnlichem nutzen — denselben Helper, den server/lib/pdf-generator.ts oder appointments verwenden).
+
+Markiere mit it.fails bis pdf-Hash-Persistierung implementiert (Fix erfordert: Spalte invoices.pdf_hash existiert, Generator schreibt sie beim Insert).
+
+Verifikation für alle fünf Tests:
+1. Fünf Test-Files existieren.
+2. vitest run aller fünf läuft (vor Fix mit it.fails grün, nach jeweiligem Fix als it grün).
+3. PR-Body listet Mapping: Test → K-Punkt → Fix-Status.
+4. afterEach ruft scenario.cleanup() (wo DSL genutzt) bzw. dedicated cleanup auf.
+5. Test-Lauf-Zeit für die fünf zusammen < 60 Sekunden.
+6. npm run check grün.

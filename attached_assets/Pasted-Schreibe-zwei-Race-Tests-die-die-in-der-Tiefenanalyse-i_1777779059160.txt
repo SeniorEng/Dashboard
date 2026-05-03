@@ -1,0 +1,48 @@
+Schreibe zwei Race-Tests, die die in der Tiefenanalyse identifizierten Bugs K4 und K7 absichern.
+
+Test 1: tests/budget/race-documentation.test.ts (K4 — consumeFifo ohne Row-Lock)
+
+Setup via setupBudgetScenario:
+- PG3, billingType: 'pflegekasse_gesetzlich', acceptsPrivatePayment: true
+- Genau ein aktiver Topf: entlastungsbetrag_45b, monthlyLimitCents: 6000
+- Zwei Termine im aktuellen Monat, NICHT dokumentiert (document: false), je 60 Minuten Hauswirtschaft (Kosten je ~6000 Cent → exakt das gesamte Restbudget für einen Termin).
+
+Action: runInParallel([
+  () => apiPost(`/api/appointments/${apptIds[0]}/document`, documentationPayload1),
+  () => apiPost(`/api/appointments/${apptIds[1]}/document`, documentationPayload2),
+])
+
+Assertions (nach beiden Calls):
+1. SELECT SUM(amount_cents) FROM budget_transactions WHERE customer_id = c AND transaction_type = 'consumption' ist <= 6000.
+2. Eine der beiden Dokumentationen hat einen Privat-Anteil verbucht (oder einen Hard-Block-Fehler erhalten — abhängig von acceptsPrivatePayment).
+3. Niemals beide Termine vollständig aus Budget verbucht.
+
+Markiere mit it.fails falls K4-Fix (advisory_xact_lock(customer_id) in consumeFifo) noch nicht implementiert.
+
+
+Test 2: tests/budget/race-writeoff.test.ts (K7 — Write-Off Doppelausführung)
+
+Setup:
+- Nutze freezeTime aus tests/helpers/frozen-clock.ts: freezeTime('2026-07-01T00:01:00+02:00').
+- setupBudgetScenario mit carryover für Vorjahr (year: 2025, amountCents: 5000) und genau einer §45b-Allokation, die mit expiresAt: '2026-06-30' angelegt wurde.
+- Sicherstellen, dass kein vorhandener Write-Off existiert: SELECT COUNT(*) FROM budget_transactions WHERE allocation_id = X AND transaction_type = 'write_off' = 0.
+
+Action: runInParallel([
+  () => apiPost(`/api/budget/${customerId}/process-expired-carryover`),
+  () => apiPost(`/api/budget/${customerId}/process-expired-carryover`),
+])
+
+Falls dieser Endpoint nicht öffentlich existiert: rufe stattdessen zweimal parallel einen Test-internen Hook auf, der budgetLedgerStorage.processExpiredCarryover(customerId) ausführt — alternativ via direktem Storage-Aufruf in einer kleinen Test-Helper-Route, die nur in NODE_ENV=test verfügbar ist.
+
+Assertions:
+1. SELECT COUNT(*) FROM budget_transactions WHERE allocation_id = X AND transaction_type = 'write_off' ist genau 1.
+2. SELECT SUM(amount_cents) FROM budget_transactions WHERE allocation_id = X AND transaction_type = 'write_off' ist == carryover-Betrag (z. B. -5000).
+
+Markiere mit it.fails bis K7-Fix (partieller Unique-Index auf (allocation_id) WHERE transaction_type = 'write_off') implementiert.
+
+Verifikation für beide Tests:
+1. tests/budget/race-documentation.test.ts und tests/budget/race-writeoff.test.ts existieren.
+2. vitest run beide Files (vor Fix als it.fails grün, nach Fix als regulär grün).
+3. 10× wiederholtes Ausführen liefert reproduzierbar dasselbe Ergebnis.
+4. afterEach ruft scenario.cleanup() und thawTime() auf.
+5. npm run check grün.
