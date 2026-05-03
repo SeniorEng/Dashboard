@@ -26,6 +26,55 @@ Neueste Einträge oben.
 
 ## Einträge
 
+### Geplant — Pre-Publish-Backup für Migration `0017_letterxpress_replaces_epost.sql` (Task #303)
+
+**Anlass:** Code-Switch von Deutsche Post E-POST auf LetterXpress (Task #302) ist ausgeliefert. Production-DB hat noch das alte Schema und braucht Migration 0017 beim nächsten Publish.
+
+**Schema-Änderungen (Risiko-Einstufung):**
+- `company_settings` — DROP COLUMN `epost_vendor_id`, `epost_ekp`, `epost_password`, `epost_secret`, `epost_test_mode`; ADD COLUMN `letterxpress_username`, `letterxpress_api_key`, `letterxpress_test_mode` (Default `true`).
+- `document_deliveries` — RENAME COLUMN `epost_letter_id` → `letterxpress_letter_id` (Daten bleiben erhalten).
+
+**Datenverlust-Vorabprüfung gegen Real-Prod (`executeSql({environment:"production"})`, 2026-05-03):**
+| Tabelle / Spalte | Zeilen | Befund |
+|---|---|---|
+| `company_settings` gesamt | 1 | Eine Zeile mit den fünf `epost_*`-Spalten — wird durch Migration entfernt. |
+| `document_deliveries` gesamt | 0 | Tabelle leer — keine Zeilen mit `epost_letter_id`. |
+| `document_deliveries.epost_letter_id IS NOT NULL` | 0 | Rename ist datenmäßig ein No-Op. |
+
+**Bewerteter Datenverlust:** Nur die fünf E-POST-Credential-Felder einer einzigen `company_settings`-Zeile. Diese Credentials werden ohnehin obsolet (Deutsche-Post-E-POST-Vertrag wird ersetzt). Ein Admin muss nach dem Publish in **Admin → Einstellungen** den LetterXpress-Username und API-Key neu eintragen, damit Briefversand wieder funktioniert.
+
+**Vorbereitete Artefakte für den Publish-Tag:**
+- `migrations/0017_letterxpress_replaces_epost.sql` — wird durch `drizzle-kit push` (oder manuell mit `psql`) auf Production angewendet.
+- `scripts/backup-prod-db.sh` — voller Pre-Publish-Dump (Custom + Plain).
+- `scripts/backup-letterxpress-tables.sh` — **neu**, fokussierter Snapshot von `company_settings` + `document_deliveries` inkl. CSV-Export der zu droppenden `epost_*`-Spalten und Row-Count-Bericht.
+- `script/check-pre-publish-backup.mjs` — fängt `DROP COLUMN` in Migration 0017 generisch ab und warnt im Build, falls kein frisches Backup vorliegt.
+
+**Anleitung am Publish-Tag (auszuführen aus dem Replit Publishing-Tab heraus, wo `PROD_DATABASE_URL` verfügbar ist):**
+
+```bash
+export PROD_DATABASE_URL="postgres://..."   # aus Publishing-Tab
+BACKUP_LABEL="-pre-task-303-letterxpress" bash scripts/backup-prod-db.sh
+bash scripts/backup-letterxpress-tables.sh
+node script/preflight-publish.mjs           # Checkliste abhaken
+# → Dumps lokal herunterladen (tmp/db-backups/)
+# → Replit/Neon Auto-Backup ≤ 1 h alt verifizieren
+# → Diesen Eintrag mit echten SHA256 / Timestamps ergänzen
+# → Publish auslösen (drizzle-kit push wendet Migration 0017 an)
+unset PROD_DATABASE_URL
+```
+
+**Post-Publish-Pflichtschritte:**
+1. Verifizieren, dass `company_settings` jetzt die drei `letterxpress_*`-Spalten hat und die fünf `epost_*`-Spalten weg sind.
+2. Verifizieren, dass `document_deliveries.letterxpress_letter_id` existiert und `epost_letter_id` nicht mehr.
+3. **Admin-Aktion:** In Admin → Einstellungen den LetterXpress-Username + API-Key eintragen (Test-Modus standardmäßig auf `true` — bewusst nach Publish auf `false` setzen, sobald Live-Versand gewollt ist).
+4. Diesen Eintrag aktualisieren: Status auf „erfolgreich" / „Rollback nötig", Timestamp, SHA256, Name des Durchführenden.
+
+**Rollback-Plan:** Replit/Neon PITR (Tools → Database → Backups → "Restore to point in time") ist bevorzugter Pfad — schneller als `pg_restore` und nutzt das automatische Snapshot-System. Falls PITR nicht verfügbar: `pg_restore` aus dem in Schritt 1 erzeugten `prod-…-pre-task-303-letterxpress.dump` gegen einen frischen DB-Endpoint (siehe `docs/pre-publish-backup-runbook.md` §6.1 Option B).
+
+**Status:** ⏳ Geplant — Publish ist noch nicht erfolgt. Diesen Eintrag nach dem Publish mit echten Werten füllen.
+
+---
+
 ### 2026-04-28 22:05 UTC — Restore-Drill für `scripts/backup-prod-db.sh` + `scripts/backup-affected-tables.sh` (Task #239)
 
 **Anlass:** Erstmaliger End-to-End-Test des Restore-Pfads aus dem Pre-Publish-Backup-Runbook. Vor Task #239 war der Backup-Weg nie real exekutiert — Bugs in `pg_restore`-Aufrufen, Neon-spezifische Extensions/Owner-Probleme oder gzip-Konfiguration wären erst im Ernstfall aufgefallen.
