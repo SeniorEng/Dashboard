@@ -7,6 +7,7 @@ import {
   cleanupCustomer,
   createTestCustomer,
   createTestEmployee,
+  deactivateTestEmployee,
 } from "../test-utils";
 import {
   BUDGET_39_42A_MAX_YEARLY_CENTS,
@@ -14,6 +15,7 @@ import {
   type BudgetType,
 } from "@shared/domain/budgets";
 import type { BillingType } from "@shared/domain/customers";
+import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 
 export type Pflegegrad = 1 | 2 | 3 | 4 | 5;
 
@@ -53,13 +55,20 @@ export interface BudgetScenarioServiceSpec {
 export interface BudgetScenarioAppointmentSpec {
   date: string;
   scheduledStart: string;
-  scheduledEnd: string;
+  /** Optional. If omitted, computed as scheduledStart + sum(services.durationMinutes). */
+  scheduledEnd?: string;
   services: BudgetScenarioServiceSpec[];
   document?: boolean;
   actualStart?: string;
   notes?: string;
   travelKilometers?: number;
   customerKilometers?: number;
+}
+
+export interface BudgetScenarioManualAdjustmentSpec {
+  type: BudgetType;
+  amountCents: number;
+  notes?: string;
 }
 
 export interface BudgetScenarioSpec {
@@ -71,13 +80,23 @@ export interface BudgetScenarioSpec {
   types: BudgetTypeSettingSpec[];
   initialBalance?: BudgetScenarioInitialBalanceSpec;
   carryover?: BudgetScenarioCarryoverSpec;
+  manualAdjustments?: BudgetScenarioManualAdjustmentSpec[];
   appointments?: BudgetScenarioAppointmentSpec[];
+}
+
+export interface BudgetScenarioTransaction {
+  readonly id: number;
+  readonly appointmentId: number;
+  readonly allocationId: number | null;
+  readonly amountCents: number;
 }
 
 export interface BudgetScenarioHandle {
   readonly customerId: number;
   readonly employeeId: number;
   readonly appointmentIds: readonly number[];
+  readonly transactions: readonly BudgetScenarioTransaction[];
+  readonly manualAdjustmentTxIds: readonly number[];
   cleanup(): Promise<void>;
 }
 
@@ -99,10 +118,18 @@ interface ApiAppointment {
 
 interface ApiBudgetTransaction {
   id: number;
+  allocationId: number | null;
+  amountCents: number;
+  appointmentId: number | null;
 }
 
 interface ApiDocumentationResponse {
   budgetTransaction: ApiBudgetTransaction | null;
+}
+
+interface ApiManualAdjustmentResponse {
+  type: string;
+  data?: { id: number };
 }
 
 interface InitialBudgetResponse {
@@ -119,14 +146,14 @@ interface ServerTypeSetting {
   validTo: string | null;
 }
 
-let cachedEmployeeId: number | null = null;
 let cachedServiceCatalog: ServiceCatalogEntry[] | null = null;
 
-async function getOrCreateScenarioEmployee(): Promise<number> {
-  if (cachedEmployeeId !== null) return cachedEmployeeId;
-  const employee = await createTestEmployee({ nachnamePrefix: "BudgetScenario" });
-  cachedEmployeeId = employee.id;
-  return cachedEmployeeId;
+async function createScenarioEmployee(prefix: string): Promise<number> {
+  // Each scenario gets its own employee so that hard-coded appointment
+  // dates/times in different INT-blocks cannot collide on the employee's
+  // calendar. Cleanup deactivates the employee in cleanup().
+  const employee = await createTestEmployee({ nachnamePrefix: `BS_${prefix}` });
+  return employee.id;
 }
 
 async function getServiceCatalog(): Promise<ServiceCatalogEntry[]> {
@@ -221,7 +248,7 @@ export async function setupBudgetScenario(
   });
   const customerId = customer.id;
 
-  const employeeId = await getOrCreateScenarioEmployee();
+  const employeeId = await createScenarioEmployee(namePrefix);
 
   const assignRes = await apiPatch<unknown>(
     `/api/admin/customers/${customerId}/assign`,
@@ -331,7 +358,30 @@ export async function setupBudgetScenario(
     );
   }
 
+  const manualAdjustmentTxIds: number[] = [];
+  if (spec.manualAdjustments && spec.manualAdjustments.length > 0) {
+    for (const adj of spec.manualAdjustments) {
+      const adjRes = await apiPost<ApiManualAdjustmentResponse>(
+        `/api/budget/${customerId}/manual-adjustment`,
+        {
+          budgetType: adj.type,
+          amountCents: adj.amountCents,
+          notes: adj.notes ?? "BudgetScenario-Adjustment",
+        },
+      );
+      if (adjRes.status !== 201) {
+        throw new Error(
+          `setupBudgetScenario: manual-adjustment fehlgeschlagen (status=${adjRes.status})`,
+        );
+      }
+      if (adjRes.data.type === "transaction" && adjRes.data.data?.id) {
+        manualAdjustmentTxIds.push(adjRes.data.data.id);
+      }
+    }
+  }
+
   const internalAppointmentIds: number[] = [];
+  const internalTransactions: BudgetScenarioTransaction[] = [];
   const internalTransactionIds: number[] = [];
 
   if (spec.appointments && spec.appointments.length > 0) {
@@ -344,13 +394,17 @@ export async function setupBudgetScenario(
         return { serviceId: svc.id, durationMinutes: s.durationMinutes };
       });
 
+      const totalDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
+      const scheduledEnd =
+        a.scheduledEnd ?? addMinutesToTimeHHMMSS(a.scheduledStart, totalDuration);
+
       const apptRes = await apiPost<ApiAppointment>(
         "/api/appointments/kundentermin",
         {
           customerId,
           date: a.date,
           scheduledStart: a.scheduledStart,
-          scheduledEnd: a.scheduledEnd,
+          scheduledEnd,
           notes: a.notes ?? `BudgetScenario-Appt-${Date.now()}-${i}`,
           assignedEmployeeId: employeeId,
           services,
@@ -384,8 +438,16 @@ export async function setupBudgetScenario(
             `setupBudgetScenario: document fehlgeschlagen (status=${docRes.status}, appointmentId=${appointmentId})`,
           );
         }
-        const txId = docRes.data.budgetTransaction?.id ?? null;
-        if (txId !== null) internalTransactionIds.push(txId);
+        const tx = docRes.data.budgetTransaction;
+        if (tx) {
+          internalTransactionIds.push(tx.id);
+          internalTransactions.push({
+            id: tx.id,
+            appointmentId,
+            allocationId: tx.allocationId,
+            amountCents: tx.amountCents,
+          });
+        }
       }
     }
   }
@@ -394,8 +456,10 @@ export async function setupBudgetScenario(
     customerId,
     employeeId,
     appointmentIds: internalAppointmentIds,
+    transactions: internalTransactions,
+    manualAdjustmentTxIds,
     async cleanup() {
-      for (const txId of [...internalTransactionIds].reverse()) {
+      for (const txId of [...internalTransactionIds, ...manualAdjustmentTxIds].reverse()) {
         try {
           await apiPost(`/api/budget/transactions/${txId}/reverse`, {});
         } catch {
@@ -410,6 +474,7 @@ export async function setupBudgetScenario(
         }
       }
       await cleanupCustomer(customerId);
+      await deactivateTestEmployee(employeeId);
     },
   };
 }
