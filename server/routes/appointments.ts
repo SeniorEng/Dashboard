@@ -645,7 +645,9 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
   }
 
   let assignedEmployeeId: number;
-  if (user.isAdmin) {
+  if (user.isAdmin || isTeamLead(user)) {
+    // Admins und Teamleitungen dürfen Erstberatungen im Namen jedes
+    // Erstberaters anlegen (analog Kundentermine, vgl. Task #311).
     if (!validatedData.assignedEmployeeId) {
       return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diese Erstberatung aus.");
     }
