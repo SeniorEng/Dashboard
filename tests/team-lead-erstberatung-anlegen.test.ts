@@ -40,13 +40,15 @@ beforeAll(async () => {
   const regular = await createTestEmployee({ nachnamePrefix: "TL312_Reg" });
   createdEmployeeIds.push(regular.id);
 
-  // Ziel-Erstberater (aktiver Kollege)
+  // Ziel-Erstberater (aktiver Kollege mit Rolle "erstberatung")
   targetErstberater = await createTestEmployee({ nachnamePrefix: "TL312_Target" });
   createdEmployeeIds.push(targetErstberater.id);
+  await apiPatch(`/api/admin/users/${targetErstberater.id}`, { roles: ["erstberatung"] });
 
-  // Inaktiver Mitarbeiter — wird vor den Tests deaktiviert
+  // Inaktiver Mitarbeiter mit Erstberater-Rolle — wird vor den Tests deaktiviert
   inactiveEmployee = await createTestEmployee({ nachnamePrefix: "TL312_Inactive" });
   createdEmployeeIds.push(inactiveEmployee.id);
+  await apiPatch(`/api/admin/users/${inactiveEmployee.id}`, { roles: ["erstberatung"] });
   await deactivateTestEmployee(inactiveEmployee.id);
 
   leadAuth = await loginAs(lead.email, lead.password);
@@ -118,6 +120,23 @@ describe("Task #312 – Teamleitung darf Erstberatung für anderen Erstberater a
     expect(appt).toHaveProperty("id");
     expect(appt.assignedEmployeeId).toBe(targetErstberater.id);
     createdAppointmentIds.push(appt.id);
+  });
+
+  it("Teamleitung mit inaktivem assignedEmployeeId → 400 mit Hinweis auf aktiven Mitarbeiter", async () => {
+    const prospectId = await createProspect();
+    const res = await tryCreateErstberatung(leadAuth, prospectId, inactiveEmployee.id);
+    expect(res.status).toBe(400);
+    const message = String(res.data?.message ?? res.data?.error ?? "").toLowerCase();
+    expect(message).toContain("aktiv");
+  });
+
+  it("Teamleitung mit Mitarbeiter ohne Erstberater-Rolle → 400 mit Hinweis auf Rolle", async () => {
+    // regularAuth.user hat keine Rolle "erstberatung"
+    const prospectId = await createProspect();
+    const res = await tryCreateErstberatung(leadAuth, prospectId, regularAuth.user.id);
+    expect(res.status).toBe(400);
+    const message = String(res.data?.message ?? res.data?.error ?? "").toLowerCase();
+    expect(message).toContain("erstberater");
   });
 
   it("Teamleitung ohne assignedEmployeeId → 400 mit deutscher Fehlermeldung", async () => {

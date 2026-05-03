@@ -41,7 +41,7 @@ import { customerManagementStorage } from "../storage/customer-management";
 import { isTeamLead, actorRole } from "../lib/team-lead";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
-import { customers, users } from "@shared/schema";
+import { customers, users, userRoles } from "@shared/schema";
 import { customerContracts } from "@shared/schema/contracts";
 import { eq, and, or, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
 
@@ -647,11 +647,35 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
   let assignedEmployeeId: number;
   if (user.isAdmin || isTeamLead(user)) {
     // Admins und Teamleitungen dürfen Erstberatungen im Namen jedes
-    // Erstberaters anlegen (analog Kundentermine, vgl. Task #311).
+    // aktiven Erstberaters anlegen (analog Kundentermine, vgl. Task #311/#312).
     if (!validatedData.assignedEmployeeId) {
       return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diese Erstberatung aus.");
     }
     assignedEmployeeId = validatedData.assignedEmployeeId;
+
+    const [targetEmployee] = await db
+      .select({ id: users.id, isActive: users.isActive })
+      .from(users)
+      .where(eq(users.id, assignedEmployeeId))
+      .limit(1);
+    if (!targetEmployee || targetEmployee.isActive === false) {
+      return sendBadRequest(
+        res,
+        "Der ausgewählte Mitarbeiter ist nicht aktiv. Bitte wählen Sie einen aktiven Mitarbeiter aus.",
+      );
+    }
+
+    const [erstberatungRole] = await db
+      .select({ userId: userRoles.userId })
+      .from(userRoles)
+      .where(and(eq(userRoles.userId, assignedEmployeeId), eq(userRoles.role, "erstberatung")))
+      .limit(1);
+    if (!erstberatungRole) {
+      return sendBadRequest(
+        res,
+        "Der ausgewählte Mitarbeiter ist kein Erstberater. Bitte wählen Sie einen aktiven Erstberater aus.",
+      );
+    }
   } else {
     assignedEmployeeId = user.id;
   }
