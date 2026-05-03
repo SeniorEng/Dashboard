@@ -21,7 +21,7 @@ import { LogoUploadCard } from "./settings/logo-upload";
 import { LeadAutoReplyCard } from "./settings/lead-auto-reply-card";
 import { CompanyDetailsForm } from "./settings/company-details-form";
 import { SmtpSettingsCard } from "./settings/smtp-settings";
-import { EPostSettingsCard } from "./settings/epost-settings";
+import { LetterxpressSettingsCard } from "./settings/letterxpress-settings";
 
 function BackfillBudgetCard() {
   const { toast } = useToast();
@@ -272,11 +272,9 @@ export default function AdminSettings() {
         smtpFromEmail: companyData.smtpFromEmail ?? "",
         smtpFromName: companyData.smtpFromName ?? "",
         smtpSecure: companyData.smtpSecure ?? false,
-        epostVendorId: companyData.epostVendorId ?? "",
-        epostEkp: companyData.epostEkp ?? "",
-        epostPassword: companyData.epostPassword ?? "",
-        epostSecret: companyData.epostSecret ?? "",
-        epostTestMode: companyData.epostTestMode ?? true,
+        letterxpressUsername: companyData.letterxpressUsername ?? "",
+        letterxpressApiKey: companyData.letterxpressApiKey ?? "",
+        letterxpressTestMode: companyData.letterxpressTestMode ?? true,
         deliveryEmailSubject: companyData.deliveryEmailSubject ?? "",
         deliveryCoverLetterText: companyData.deliveryCoverLetterText ?? "",
         qontoLogin: companyData.qontoLogin ?? "",
@@ -495,7 +493,7 @@ export default function AdminSettings() {
                 updateField={updateField}
               />
 
-              <EPostSettingsCard
+              <LetterxpressSettingsCard
                 companyForm={companyForm}
                 updateField={updateField}
               />

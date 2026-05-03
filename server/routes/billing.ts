@@ -41,6 +41,7 @@ import { auditService } from "../services/audit";
 import { deliveryStorage } from "../storage/deliveries";
 import type { InvoicePdfData } from "../lib/pdf-generator";
 import { getCachedCompanySettings } from "../services/cache";
+import { sendInvoiceCopyByPost } from "../services/document-delivery";
 
 interface BuildLineItem extends Record<string, unknown> {
   appointmentId: number;
@@ -565,13 +566,23 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
             });
           } else if (deliveryMethod === "post") {
             const customerAddress = [cust[0].strasse, cust[0].nr, cust[0].plz, cust[0].stadt].filter(Boolean).join(", ");
+            const { letterId } = await sendInvoiceCopyByPost(companySettings, {
+              customer: cust[0],
+              invoicePdf: zugferdBuffer,
+              leistungsnachweisPdf: lnPdf,
+              invoiceNumber: invoice.invoiceNumber,
+              monthName,
+              year: invoice.billingYear,
+            });
             await deliveryStorage.createDelivery({
               customerId: invoice.customerId,
               deliveryMethod: "post",
-              status: "pending",
+              status: "sent",
               recipientName: customerFullName,
               recipientAddress: customerAddress,
               documentFileNames: copyFileNames,
+              sentAt: new Date(),
+              letterxpressLetterId: letterId,
               createdByUserId: req.user!.id,
             });
           }
@@ -1646,7 +1657,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     hasParagraph39, isPrivatBilling, isBeihilfe,
   }, req.ip);
 
-  const results: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean }[] = [
+  const results: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean; letterxpressLetterId?: string }[] = [
     { invoiceId: id, status: "sent", recipientEmail },
   ];
 
@@ -1700,16 +1711,26 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
         });
       } else if (custDeliveryMethod === "post") {
         const customerAddress = [cust.strasse, cust.nr, cust.plz, cust.stadt].filter(Boolean).join(", ");
+        const { letterId } = await sendInvoiceCopyByPost(companySettings, {
+          customer: cust,
+          invoicePdf: zugferdBuffer,
+          leistungsnachweisPdf: lnPdf,
+          invoiceNumber: invoice.invoiceNumber,
+          monthName,
+          year: invoice.billingYear,
+        });
         await deliveryStorage.createDelivery({
           customerId: invoice.customerId,
           deliveryMethod: "post",
-          status: "pending",
+          status: "sent",
           recipientName: customerFullName,
           recipientAddress: customerAddress,
           documentFileNames: copyFileNames,
+          sentAt: new Date(),
+          letterxpressLetterId: letterId,
           createdByUserId: req.user!.id,
         });
-        results.push({ invoiceId: id, status: "post_pending", recipientEmail: "", customerCopy: true });
+        results.push({ invoiceId: id, status: "post_sent", recipientEmail: "", customerCopy: true, letterxpressLetterId: letterId });
       }
     } catch (copyError: unknown) {
       const copyErrMsg = copyError instanceof Error ? copyError.message : "Unbekannter Fehler";

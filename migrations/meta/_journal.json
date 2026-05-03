@@ -120,6 +120,13 @@
       "when": 1777728900000,
       "tag": "0016_fix_vacation_allowance_total_days_numeric",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1777729000000,
+      "tag": "0017_letterxpress_replaces_epost",
+      "breakpoints": true
     }
   ]
 }

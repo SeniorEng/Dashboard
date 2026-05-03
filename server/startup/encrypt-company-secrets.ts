@@ -3,7 +3,7 @@ import { encryptSecret, isEncrypted, isEncryptionConfigured } from "../lib/crypt
 import { log } from "../lib/log";
 
 const SENSITIVE_FIELDS = [
-  "smtp_pass", "epost_password", "epost_secret",
+  "smtp_pass", "letterxpress_api_key",
   "qonto_secret_key", "whatsapp_access_token", "twilio_auth_token",
 ];
 

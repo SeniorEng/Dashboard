@@ -4,10 +4,10 @@ import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { deliverDocuments } from "../../services/document-delivery";
 import { testSmtpConnection } from "../../services/email-service";
-import { testEpostConnection, requestSmsCode, setEpostPassword, checkEpostHealthCheck } from "../../services/epost-service";
+import { testLetterxpressConnection, checkLetterxpressHealth } from "../../services/letterxpress-service";
 import { deliveryStorage } from "../../storage/deliveries";
 import { storage } from "../../storage";
-import { getCachedCompanySettings, companySettingsCache } from "../../services/cache";
+import { getCachedCompanySettings } from "../../services/cache";
 
 const router = Router();
 
@@ -108,68 +108,19 @@ router.post("/document-delivery/test-smtp", asyncHandler("SMTP-Test fehlgeschlag
   res.json(result);
 }));
 
-router.post("/document-delivery/test-epost", asyncHandler("E-POST-Test fehlgeschlagen", async (_req: Request, res: Response) => {
+router.post("/document-delivery/test-letterxpress", asyncHandler("LetterXpress-Test fehlgeschlagen", async (_req: Request, res: Response) => {
   const settings = await getCachedCompanySettings();
   if (!settings) {
     res.status(400).json({ error: "CONFIG_ERROR", message: "Firmendaten nicht konfiguriert" });
     return;
   }
 
-  const result = await testEpostConnection(settings);
+  const result = await testLetterxpressConnection(settings);
   res.json(result);
 }));
 
-router.get("/document-delivery/epost-health", asyncHandler("E-POST Health-Check fehlgeschlagen", async (_req: Request, res: Response) => {
-  const result = await checkEpostHealthCheck();
-  res.json(result);
-}));
-
-router.post("/document-delivery/epost-sms-request", asyncHandler("SMS-Anfrage fehlgeschlagen", async (req: Request, res: Response) => {
-  const schema = z.object({
-    vendorId: z.string().min(1, "Vendor-ID ist erforderlich"),
-    ekp: z.string().length(10, "EKP muss 10 Zeichen lang sein"),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message || "Ungültige Daten" });
-    return;
-  }
-
-  const result = await requestSmsCode(parsed.data.vendorId, parsed.data.ekp);
-  res.json(result);
-}));
-
-router.post("/document-delivery/epost-set-password", asyncHandler("Passwort setzen fehlgeschlagen", async (req: Request, res: Response) => {
-  const schema = z.object({
-    vendorId: z.string().min(1, "Vendor-ID ist erforderlich"),
-    ekp: z.string().length(10, "EKP muss 10 Zeichen lang sein"),
-    newPassword: z.string().min(5, "Passwort muss mindestens 5 Zeichen lang sein").max(100),
-    smsCode: z.string().length(6, "SMS-Code muss 6 Zeichen lang sein"),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message || "Ungültige Daten" });
-    return;
-  }
-
-  const result = await setEpostPassword(
-    parsed.data.vendorId,
-    parsed.data.ekp,
-    parsed.data.newPassword,
-    parsed.data.smsCode
-  );
-
-  if (result.success && result.secret) {
-    companySettingsCache.invalidate();
-    await storage.updateCompanySettings({
-      epostVendorId: parsed.data.vendorId,
-      epostEkp: parsed.data.ekp,
-      epostPassword: parsed.data.newPassword,
-      epostSecret: result.secret,
-    }, req.user!.id);
-    companySettingsCache.invalidate();
-  }
-
+router.get("/document-delivery/letterxpress-health", asyncHandler("LetterXpress Health-Check fehlgeschlagen", async (_req: Request, res: Response) => {
+  const result = await checkLetterxpressHealth();
   res.json(result);
 }));
 

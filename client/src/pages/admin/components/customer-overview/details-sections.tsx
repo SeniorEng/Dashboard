@@ -280,7 +280,7 @@ export function DocumentDeliverySection({ customer, customerId, editingSection, 
       ) : (
         <div className="space-y-2">
           <p className="text-gray-700" data-testid="text-delivery-method">
-            {customer.documentDeliveryMethod === "post" ? "Per Deutsche Post (gedruckt)" : "Per E-Mail (digital)"}
+            {customer.documentDeliveryMethod === "post" ? "Per Brief (gedruckt)" : "Per E-Mail (digital)"}
           </p>
           {customer.receivesMonthlyInvoice && (
             <p className="text-xs text-teal-700 bg-teal-50 px-2 py-1 rounded inline-block" data-testid="text-receives-invoice-copy">

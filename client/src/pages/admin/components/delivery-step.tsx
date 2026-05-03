@@ -20,8 +20,8 @@ const OPTIONS = [
   {
     value: "post" as const,
     icon: Truck,
-    title: "Per Deutsche Post",
-    description: "Der Kunde erhält alle Vertragsunterlagen ausgedruckt per Post.",
+    title: "Per Brief",
+    description: "Der Kunde erhält alle Vertragsunterlagen ausgedruckt per Brief.",
     color: "amber",
   },
 ];

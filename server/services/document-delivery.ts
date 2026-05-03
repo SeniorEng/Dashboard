@@ -1,5 +1,5 @@
 import { sendEmail } from "./email-service";
-import { sendEpostLetter } from "./epost-service";
+import { sendLetterxpressLetter } from "./letterxpress-service";
 import { getDocumentPdfBuffer } from "./document-pdf";
 import { renderEmailSubject, renderEmailHtml, renderCoverLetterPdf } from "./cover-letter";
 import { deliveryStorage } from "../storage/deliveries";
@@ -18,6 +18,19 @@ interface DeliveryResult {
   deliveryId: number;
   status: "sent" | "error";
   error?: string;
+}
+
+interface RecipientAddress {
+  vorname: string | null;
+  nachname: string | null;
+  strasse: string | null;
+  nr: string | null;
+  plz: string | null;
+  stadt: string | null;
+}
+
+function fullName(r: { vorname: string | null; nachname: string | null }): string {
+  return [r.vorname, r.nachname].filter(Boolean).join(" ");
 }
 
 async function getCompanySettings(): Promise<CompanySettings> {
@@ -50,7 +63,7 @@ export async function deliverDocuments(options: DeliveryOptions): Promise<Delive
   }
 
   const docFileNames = validDocs.map((d) => d!.fileName).join(", ");
-  const customerFullName = [customer.vorname, customer.nachname].filter(Boolean).join(" ");
+  const customerFullName = fullName(customer);
 
   const delivery = await deliveryStorage.createDelivery({
     customerId,
@@ -70,6 +83,10 @@ export async function deliverDocuments(options: DeliveryOptions): Promise<Delive
     nachname: customer.nachname || "",
     firmenname: companyName,
     documentNames: validDocs.map((d) => d!.fileName.replace(/_/g, " ").replace(/\.pdf$/i, "")),
+    recipientStreet: customer.strasse || "",
+    recipientHouseNumber: customer.nr || "",
+    recipientPostalCode: customer.plz || "",
+    recipientCity: customer.stadt || "",
   };
 
   try {
@@ -80,7 +97,7 @@ export async function deliverDocuments(options: DeliveryOptions): Promise<Delive
       await deliveryStorage.updateDeliveryStatus(delivery.id, {
         status: "sent",
         sentAt: new Date(),
-        epostLetterId: letterId,
+        letterxpressLetterId: letterId,
       });
       return { deliveryId: delivery.id, status: "sent" };
     }
@@ -139,7 +156,10 @@ async function deliverByPost(
   settings: CompanySettings,
   customer: any,
   documents: any[],
-  placeholderData: { kundenname: string; vorname: string; nachname: string; firmenname: string; documentNames: string[] }
+  placeholderData: {
+    kundenname: string; vorname: string; nachname: string; firmenname: string; documentNames: string[];
+    recipientStreet?: string; recipientHouseNumber?: string; recipientPostalCode?: string; recipientCity?: string;
+  }
 ): Promise<string> {
   if (!customer.strasse || !customer.plz || !customer.stadt) {
     throw new Error("Unvollständige Adresse beim Kunden für Postversand");
@@ -153,11 +173,7 @@ async function deliverByPost(
 
   const combinedBuffer = await combinePdfBuffers([coverLetterPdf, ...documentPdfs]);
 
-  const senderLine = [settings.companyName, settings.strasse, settings.hausnummer, settings.plz, settings.stadt]
-    .filter(Boolean)
-    .join(", ");
-
-  const result = await sendEpostLetter(settings, {
+  const result = await sendLetterxpressLetter(settings, {
     pdfBuffer: combinedBuffer,
     recipientFirstName: customer.vorname || "",
     recipientLastName: customer.nachname || "",
@@ -165,13 +181,12 @@ async function deliverByPost(
     recipientHouseNumber: customer.nr || "",
     recipientPostalCode: customer.plz,
     recipientCity: customer.stadt,
-    senderLine,
   });
 
   return result.letterId;
 }
 
-async function combinePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
+export async function combinePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
   if (buffers.length === 1) return buffers[0];
 
   try {
@@ -190,4 +205,53 @@ async function combinePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
     console.error("PDF-Zusammenführung fehlgeschlagen, sende nur erstes Dokument:", error instanceof Error ? error.message : error);
     return buffers[0];
   }
+}
+
+export interface InvoiceCopyPostOptions {
+  customer: RecipientAddress & { email?: string | null };
+  invoicePdf: Buffer;
+  leistungsnachweisPdf: Buffer;
+  invoiceNumber: string;
+  monthName: string;
+  year: number;
+}
+
+export async function sendInvoiceCopyByPost(
+  settings: CompanySettings,
+  options: InvoiceCopyPostOptions
+): Promise<{ letterId: string }> {
+  const { customer, invoicePdf, leistungsnachweisPdf, invoiceNumber, monthName, year } = options;
+
+  if (!customer.strasse || !customer.plz || !customer.stadt) {
+    throw new Error("Unvollständige Adresse beim Kunden für Postversand der Rechnungskopie");
+  }
+
+  const customerFullName = fullName(customer);
+  const placeholderData = {
+    kundenname: customerFullName,
+    vorname: customer.vorname || "",
+    nachname: customer.nachname || "",
+    firmenname: settings.companyName || "SeniorenEngel",
+    documentNames: [
+      `Rechnungskopie ${invoiceNumber} (${monthName} ${year})`,
+      `Leistungsnachweis ${monthName} ${year}`,
+    ],
+    recipientStreet: customer.strasse || "",
+    recipientHouseNumber: customer.nr || "",
+    recipientPostalCode: customer.plz || "",
+    recipientCity: customer.stadt || "",
+  };
+
+  const coverLetter = await renderCoverLetterPdf(settings, placeholderData);
+  const combined = await combinePdfBuffers([coverLetter, invoicePdf, leistungsnachweisPdf]);
+
+  return sendLetterxpressLetter(settings, {
+    pdfBuffer: combined,
+    recipientFirstName: customer.vorname || "",
+    recipientLastName: customer.nachname || "",
+    recipientStreet: customer.strasse,
+    recipientHouseNumber: customer.nr || "",
+    recipientPostalCode: customer.plz,
+    recipientCity: customer.stadt,
+  });
 }

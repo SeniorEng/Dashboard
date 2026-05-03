@@ -574,6 +574,11 @@ export default function AdminBilling() {
                                       {d.sentAt && <span> · {new Date(d.sentAt).toLocaleString("de-DE")}</span>}
                                       {!d.sentAt && d.createdAt && <span> · {new Date(d.createdAt).toLocaleString("de-DE")}</span>}
                                     </div>
+                                    {d.letterxpressLetterId && (
+                                      <div className="text-gray-500 text-xs mt-0.5" data-testid={`text-letterxpress-id-${d.id}`}>
+                                        Brief-ID: <span className="font-mono">{d.letterxpressLetterId}</span>
+                                      </div>
+                                    )}
                                     {d.errorMessage && <div className="text-red-600 text-xs mt-1">{d.errorMessage}</div>}
                                   </div>
                                 </div>

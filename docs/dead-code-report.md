@@ -275,7 +275,7 @@ Alle 21 Schema-Dateien werden aktiv verwendet. **Risiko-Einstufung auf Datei-Ebe
 | `billing.ts` | 4 | `bitte prüfen` | ? | `pdfPath`, `pdfHash`, `leistungsnachweisPath`, `leistungsnachweisHash` — vermutlich dynamisch über `returning()`/Drizzle-Inserts; PDF-Workflow aktiv |
 | `birthday-cards.ts` | 1 | `bitte prüfen` | ? | `sentByUserId` — Audit-Spalte, ggf. nur in Insert |
 | `budget.ts` | 1 | `bitte prüfen` | ? | `initialBalanceCents` — Sprint #108 Kollision wahrscheinlich |
-| `company.ts` | 8 | `bitte prüfen` | ? | `lohnartHauswirtschaft/Alltagsbegleitung/Urlaub/Krankheit`, `epostLetterId`, `generatedDocumentId`, `deliveredAt`, `updatedByUserId` — Lohnart-Felder evtl. via Lexware-Export-Job genutzt |
+| `company.ts` | 8 | `bitte prüfen` | ? | `lohnartHauswirtschaft/Alltagsbegleitung/Urlaub/Krankheit`, `letterxpressLetterId`, `generatedDocumentId`, `deliveredAt`, `updatedByUserId` — Lohnart-Felder evtl. via Lexware-Export-Job genutzt |
 | `customers.ts` | 11 | `bitte prüfen` | ? | `serviceKreativ`, `serviceGrundpflege`, `serviceFreizeitgestaltung`, `pflegedienstBeauftragt`, `pflegegradBeantragt`, `sonstigeLeistungen`, `householdSize`, `anamnese`, `anonymizedAt`, `changedByUserId`, `changedByRole` — Anamnese-/Service-Flags evtl. veralt., Audit-Felder evtl. dynamisch |
 | `documents.ts` | 2 | `bitte prüfen` | ? | `uploadedByUserId`, `signedByEmployeeId` — Audit-Spalten |
 | `prospects.ts` | 3 | `bitte prüfen` | ? | `createdBy`, `lastError`, `executedAt` — Workflow-Felder, Sprint-Kollision möglich |
@@ -296,7 +296,7 @@ Alle 21 Schema-Dateien werden aktiv verwendet. **Risiko-Einstufung auf Datei-Ebe
 **Konsequenz:** Alle 47 Verdachtskandidaten werden mit `bitte prüfen` markiert, **keine einzige mit `sicher löschbar`**. Die definitive Entscheidung pro Spalte erfordert pro Verdacht:
 - `SELECT count(*) WHERE col IS NOT NULL` auf der Produktions-DB,
 - gezielte Suche nach Insert-Payloads (`*: \w+,` statt nur `\.col`),
-- Cross-Check mit Lexware-Export-, ePost- und Compliance-Workflows.
+- Cross-Check mit Lexware-Export-, LetterXpress- und Compliance-Workflows.
 
 → Dafür ist die Folge-Aufgabe **#219 (Schema-Audit)** angedacht.
 

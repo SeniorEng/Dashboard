@@ -21,6 +21,10 @@ interface PlaceholderData {
   nachname: string;
   firmenname: string;
   documentNames: string[];
+  recipientStreet?: string;
+  recipientHouseNumber?: string;
+  recipientPostalCode?: string;
+  recipientCity?: string;
 }
 
 function buildPlaceholderValues(data: PlaceholderData): Record<string, string> {
@@ -124,7 +128,14 @@ export async function renderCoverLetterPdf(settings: CompanySettings, data: Plac
     return `<p style="font-size:12pt;line-height:1.6;margin:0 0 12px;">${p.replace(/\n/g, "<br/>")}</p>`;
   }).join("");
 
-  const senderAddress = [settings.companyName, settings.strasse, settings.hausnummer ? ` ${settings.hausnummer}` : "", settings.plz ? `, ${settings.plz}` : "", settings.stadt ? ` ${settings.stadt}` : ""].filter(Boolean).join("");
+  const senderAddress = [
+    settings.companyName,
+    [settings.strasse, settings.hausnummer].filter(Boolean).join(" "),
+    [settings.plz, settings.stadt].filter(Boolean).join(" "),
+  ].filter(Boolean).join(", ");
+
+  const recipientStreetLine = [data.recipientStreet, data.recipientHouseNumber].filter(Boolean).join(" ");
+  const recipientCityLine = [data.recipientPostalCode, data.recipientCity].filter(Boolean).join(" ");
 
   const html = `<!DOCTYPE html>
 <html lang="de">
@@ -133,16 +144,21 @@ export async function renderCoverLetterPdf(settings: CompanySettings, data: Plac
   <style>
     @page { size: A4; margin: 25mm 20mm 25mm 25mm; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 12pt; color: #333; line-height: 1.5; }
-    .sender { font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2px; margin-bottom: 24px; }
-    .recipient { margin-bottom: 24px; line-height: 1.4; }
-    .date { text-align: right; margin-bottom: 24px; }
+    .sender { font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2px; margin-bottom: 8mm; }
+    .address-window { height: 45mm; padding-top: 5mm; }
+    .recipient { font-size: 11pt; line-height: 1.35; }
+    .date { text-align: right; margin: 8mm 0 6mm; }
     .body { margin-top: 16px; }
   </style>
 </head>
 <body>
   <div class="sender">${senderAddress}</div>
-  <div class="recipient">
-    ${data.kundenname}<br/>
+  <div class="address-window">
+    <div class="recipient">
+      ${data.kundenname}<br/>
+      ${recipientStreetLine ? `${recipientStreetLine}<br/>` : ""}
+      ${recipientCityLine}
+    </div>
   </div>
   <div class="date">${formatDateForDisplay(todayISO())}</div>
   <div class="body">

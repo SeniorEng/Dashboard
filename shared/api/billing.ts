@@ -46,6 +46,7 @@ export interface DeliveryRecord {
   sentAt: string | null;
   createdAt: string;
   errorMessage: string | null;
+  letterxpressLetterId: string | null;
 }
 
 export interface GenerateInvoiceResponse {

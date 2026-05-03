@@ -19,7 +19,7 @@ import { db } from "./lib/db";
 import { encryptSecret, decryptSecret, isEncryptionConfigured } from "./lib/crypto";
 
 const SENSITIVE_COMPANY_FIELDS = [
-  "smtpPass", "epostPassword", "epostSecret",
+  "smtpPass", "letterxpressApiKey",
   "qontoSecretKey", "whatsappAccessToken", "twilioAuthToken",
 ] as const;
 

@@ -11,7 +11,7 @@ class DeliveryStorage {
 
   async updateDeliveryStatus(
     id: number,
-    updates: { status: string; errorMessage?: string | null; sentAt?: Date | null; deliveredAt?: Date | null; epostLetterId?: string | null }
+    updates: { status: string; errorMessage?: string | null; sentAt?: Date | null; deliveredAt?: Date | null; letterxpressLetterId?: string | null }
   ): Promise<DocumentDelivery | null> {
     const [result] = await db
       .update(documentDeliveries)

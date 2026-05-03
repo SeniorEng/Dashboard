@@ -33,7 +33,7 @@
 4. **`appointments.is_series_exception`** — 0/735 Zeilen `true` (`SELECT COUNT(*) FILTER (WHERE is_series_exception = TRUE) FROM appointments → 0`). Wird zwar geschrieben (Default false), hat aber nie produktive Aktivierung gehabt. → **observe** (Logik existiert).
 5. **`appointments.doctor_latitude` / `doctor_longitude`** — 0/9 Fahrtdienst-Termine haben Geokoordinaten (`SELECT COUNT(*) FILTER (WHERE doctor_latitude IS NOT NULL AND is_fahrtdienst = TRUE) FROM appointments → 0` von 9 Fahrtdienst-Terminen). Schema sieht es vor, Geocoding läuft im Code aber nicht in Prod. → **observe**.
 6. **`users.notfallkontakt_name/_telefon/_beziehung`, `lbnr`, `personalnummer`** — alle 0/23 (`SELECT COUNT(*) FILTER (WHERE notfallkontakt_name IS NOT NULL AND notfallkontakt_name <> '') FROM users → 0` etc.). Felder sind im UI sichtbar (Profile/Employees), niemand hat Daten gepflegt. → **observe / Daten nachpflegen**.
-7. **`company_settings`** — **1 Zeile, 60 Spalten**, davon 18 leer (E-POST, Qonto, WhatsApp Konfig, Lohnart-Codes, Anerkennungsnummer §45a). Erwartet — Konfiguration für noch nicht aktive Module. → **keep**.
+7. **`company_settings`** — **1 Zeile, 60 Spalten**, davon 18 leer (LetterXpress, Qonto, WhatsApp Konfig, Lohnart-Codes, Anerkennungsnummer §45a). Erwartet — Konfiguration für noch nicht aktive Module. → **keep**.
 8. **`customers.name`** ist trotz Legacy-Marker noch voll befüllt: 133/133 Datensätze (`SELECT COUNT(*) FILTER (WHERE name IS NOT NULL AND name <> '') FROM customers → 133`). **Nicht** drop-fähig — die Daten existieren weiterhin. → **observe** (Schreib-Pfad bereits abgelöst durch `vorname`/`nachname`, aber Lese-Pfade müssen vor dem Drop sauber sein).
 9. **`customers.telefon`** ist 88/133 befüllt (`SELECT COUNT(*) FILTER (WHERE telefon IS NOT NULL AND telefon <> '') FROM customers → 88`). Migration nach `customer_contacts.festnetz/mobilnummer` unvollständig (dort nur 5 + 11 von 112). → **observe** (Daten-Migration zuerst, dann Drop — wird durch Bestands-Task `cleanup-contact-phone-fields.md` abgedeckt).
 10. **16 leere Tabellen** stammen aus Modulen, die noch nicht in Produktion in Nutzung sind (Rechnungs-Pipeline, Qonto, Qualifikationen, Document-Delivery). → **keep / observe**.
@@ -237,7 +237,7 @@ Alle 8 Spalten **active / keep** — keine auffälligen Befunde.
 | `reversed_transaction_id` | low-usage | `filled = 10/344` | keep |  |
 
 ### `company_settings` — 1 Zeilen, 60 Spalten
-> 1 Zeile, 60 Spalten — 18 leer (Konfig für noch nicht aktive Module: E-POST/Qonto/WhatsApp/Lohnarten), 2 konstant. **keep** als Konfig-Tabelle.
+> 1 Zeile, 60 Spalten — 18 leer (Konfig für noch nicht aktive Module: LetterXpress/Qonto/WhatsApp/Lohnarten), 2 konstant. **keep** als Konfig-Tabelle.
 
 | Spalte | Klassifikation | SQL-Evidenz | Empfehlung | Notiz |
 |---|---|---|---|---|
@@ -248,10 +248,8 @@ Alle 8 Spalten **active / keep** — keine auffälligen Befunde.
 | `lohnart_hauswirtschaft` | empty-in-prod | `filled = 0 / 1` | observe |  |
 | `lohnart_urlaub` | empty-in-prod | `filled = 0 / 1` | observe |  |
 | `lohnart_krankheit` | empty-in-prod | `filled = 0 / 1` | observe |  |
-| `epost_vendor_id` | empty-in-prod | `filled = 0 / 1` | observe |  |
-| `epost_ekp` | empty-in-prod | `filled = 0 / 1` | observe |  |
-| `epost_password` | empty-in-prod | `filled = 0 / 1` | observe |  |
-| `epost_secret` | empty-in-prod | `filled = 0 / 1` | observe |  |
+| `letterxpress_username` | empty-in-prod | `filled = 0 / 1` | observe |  |
+| `letterxpress_api_key` | empty-in-prod | `filled = 0 / 1` | observe |  |
 | `delivery_email_subject` | empty-in-prod | `filled = 0 / 1` | observe |  |
 | `delivery_cover_letter_text` | empty-in-prod | `filled = 0 / 1` | observe |  |
 | `minijob_earnings_limit_cents` | constant-in-prod | `distinct = 1` | keep |  |

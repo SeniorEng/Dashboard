@@ -11,7 +11,7 @@ import { getCachedCompanySettings, companySettingsCache } from "../services/cach
 const router = Router();
 router.use(requireAuth);
 
-const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "epostSecret", "qontoSecretKey", "smtpPass", "epostPassword", "whatsappAccessToken"] as const;
+const SENSITIVE_FIELDS = ["twilioAuthToken", "twilioAccountSid", "letterxpressApiKey", "qontoSecretKey", "smtpPass", "whatsappAccessToken"] as const;
 
 router.get("/", asyncHandler("Firmendaten konnten nicht geladen werden", async (req, res) => {
   const settings = await getCachedCompanySettings();
