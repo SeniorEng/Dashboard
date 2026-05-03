@@ -301,8 +301,8 @@ export default function NewAppointment() {
                 {form.errors.ktCustomerId && <p className="text-destructive text-sm">{form.errors.ktCustomerId}</p>}
               </div>
 
-              {/* Employee Assignment (Admin only - required) */}
-              {form.isAdmin && (
+              {/* Mitarbeiter-Zuweisung (Admin und Teamleitung — Pflichtfeld) */}
+              {form.canChangeAssignment && (
                 <div className="space-y-2">
                   <Label>
                     <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
@@ -858,7 +858,7 @@ export default function NewAppointment() {
                   )}
                   {form.errors.ebProspect && <p className="text-destructive text-sm">{form.errors.ebProspect}</p>}
 
-                  {form.isAdmin && (
+                  {form.canChangeAssignment && (
                     <div className="space-y-2">
                       <Label>
                         <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *

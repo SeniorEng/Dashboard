@@ -6,7 +6,7 @@ import { useAuth, canCreateErstberatung } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useCustomerList } from "./use-customer-list";
 import { shouldResetFahrtdienst } from "../utils";
-import { useAdminEmployees } from "./use-active-employees";
+import { useActiveEmployees, useAdminEmployees } from "./use-active-employees";
 import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-mutations";
 import { useCreateAppointmentSeries, usePreviewAppointmentSeries } from "./use-appointment-series";
 import type { SeriesCreateInput } from "./use-appointment-series";
@@ -24,6 +24,8 @@ export function useNewAppointmentForm() {
   const { user } = useAuth();
   const copyFromId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("copyFrom") : null;
   const isAdmin = user?.isAdmin ?? false;
+  const isTeamLead = user?.isTeamLead ?? false;
+  const canChangeAssignment = isAdmin || isTeamLead;
   const canErstberatung = canCreateErstberatung(user?.roles ?? [], isAdmin);
   const wantsErstberatung = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "erstberatung";
   const requestedTab = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null;
@@ -38,6 +40,9 @@ export function useNewAppointmentForm() {
 
   const { data: customers = [], isLoading: customersLoading } = useCustomerList();
   const { data: employees = [] } = useAdminEmployees({ enabled: isAdmin });
+  // Teamleitungen haben keinen Zugriff auf /admin/employees, sehen die aktive
+  // Mitarbeiterliste aber über /appointments/active-employees (inkl. Rollen).
+  const { data: activeEmployees = [] } = useActiveEmployees({ enabled: canChangeAssignment });
 
   const createKundenterminMutation = useCreateKundentermin();
   const createErstberatungMutation = useCreateErstberatung();
@@ -380,7 +385,7 @@ export function useNewAppointmentForm() {
     const newErrors: Record<string, string> = {};
     if (!ktCustomerId) newErrors.ktCustomerId = "Bitte wählen Sie einen Kunden";
     if (ktServices.length === 0) newErrors.ktServices = "Bitte wählen Sie mindestens einen Service";
-    if (isAdmin && !ktAssignedEmployeeId) newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
+    if (canChangeAssignment && !ktAssignedEmployeeId) newErrors.ktAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
     if (hasAlltagsbegleitung && fahrtdienst.enabled) {
       if (!fahrtdienst.doctorAppointmentTime) newErrors.doctorAppointmentTime = "Arzt-Termin Uhrzeit ist erforderlich";
       if (!fahrtdienst.doctorStrasse) newErrors.doctorStrasse = "Arzt-Adresse (Straße) ist erforderlich";
@@ -394,7 +399,7 @@ export function useNewAppointmentForm() {
   const validateErstberatung = (): boolean => {
     const newErrors: Record<string, string> = {};
     if (!effectiveProspectId) newErrors.ebProspect = "Bitte legen Sie zuerst einen Interessenten an";
-    if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
+    if (canChangeAssignment && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte wählen Sie einen Mitarbeiter";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -496,7 +501,7 @@ export function useNewAppointmentForm() {
       }
 
       const totalMinutes = ktServices.reduce((sum, s) => sum + s.durationMinutes, 0);
-      const employeeId = isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : user?.id;
+      const employeeId = canChangeAssignment && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : user?.id;
       if (!employeeId) {
         toast({ variant: "destructive", title: "Fehler", description: "Kein Mitarbeiter zugewiesen" });
         return;
@@ -545,7 +550,7 @@ export function useNewAppointmentForm() {
       scheduledStart: ktTime,
       services: ktServices,
       notes: ktNotes || undefined,
-      assignedEmployeeId: isAdmin && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
+      assignedEmployeeId: canChangeAssignment && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
     };
 
     if (hasAlltagsbegleitung && fahrtdienst.enabled && fahrtdienst.doctorAppointmentTime && fahrtdienst.doctorStrasse) {
@@ -620,7 +625,7 @@ export function useNewAppointmentForm() {
       scheduledStart: ebStartTime,
       erstberatungDauer: ebErstberatungDauer,
       notes: ebNotes || undefined,
-      assignedEmployeeId: isAdmin && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
+      assignedEmployeeId: canChangeAssignment && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
     }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ["/admin/employees/availability"] });
@@ -649,7 +654,7 @@ export function useNewAppointmentForm() {
   }, [ebStartTime, ebErstberatungDauer]);
 
   const customerOptions = useMemo(() => {
-    const eligible = isAdmin
+    const eligible = canChangeAssignment
       ? customers
       : customers.filter((c) => c.isCurrentlyAssigned !== false);
     return eligible.map((c) => ({
@@ -657,7 +662,7 @@ export function useNewAppointmentForm() {
       label: c.name,
       sublabel: c.address,
     })).sort((a, b) => a.label.localeCompare(b.label, "de"));
-  }, [customers, isAdmin]);
+  }, [customers, canChangeAssignment]);
 
   const selectedCustomer = useMemo(() => {
     if (!ktCustomerId) return null;
@@ -720,12 +725,22 @@ export function useNewAppointmentForm() {
   const effectiveCustomerLat = selectedCustomer?.latitude ?? (geocodedCoords?.customerId === ktCustomerId ? geocodedCoords.lat : null);
   const effectiveCustomerLng = selectedCustomer?.longitude ?? (geocodedCoords?.customerId === ktCustomerId ? geocodedCoords.lng : null);
 
+  // Quelle: aktive Mitarbeiter (für Admin und Teamleitung gleichermaßen).
+  // Admins nutzen die volle Liste aus /admin/employees, fallen aber auf
+  // /appointments/active-employees zurück, falls die Admin-Liste (noch) nicht
+  // geladen ist. Teamleitungen verwenden ausschließlich active-employees.
+  const employeeSource = useMemo(() => {
+    if (isAdmin && employees.length > 0) {
+      return employees.filter(e => e.isActive).map(e => ({ id: e.id, displayName: e.displayName, roles: e.roles ?? [] }));
+    }
+    return activeEmployees.map(e => ({ id: e.id, displayName: e.displayName, roles: e.roles ?? [] }));
+  }, [isAdmin, employees, activeEmployees]);
+
   const employeeOptions = useMemo(() => {
-    const active = employees.filter(e => e.isActive);
     if (selectedCustomer) {
       const assignedIds = [selectedCustomer.primaryEmployeeId, selectedCustomer.backupEmployeeId, selectedCustomer.backupEmployeeId2].filter(Boolean);
       if (assignedIds.length > 0) {
-        return active
+        return employeeSource
           .filter(e => assignedIds.includes(e.id))
           .map((e) => ({
             value: e.id.toString(),
@@ -734,21 +749,21 @@ export function useNewAppointmentForm() {
           .sort((a, b) => a.label.localeCompare(b.label, "de"));
       }
     }
-    return active.map((e) => ({
+    return employeeSource.map((e) => ({
       value: e.id.toString(),
       label: e.displayName,
     })).sort((a, b) => a.label.localeCompare(b.label, "de"));
-  }, [employees, selectedCustomer]);
+  }, [employeeSource, selectedCustomer]);
 
   const ebEmployeeOptions = useMemo(() => {
-    return employees
-      .filter(e => e.isActive && e.roles?.includes("erstberatung"))
+    return employeeSource
+      .filter(e => e.roles?.includes("erstberatung"))
       .map((e) => ({
         value: e.id.toString(),
         label: e.displayName,
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "de"));
-  }, [employees]);
+  }, [employeeSource]);
 
   const isPending = createKundenterminMutation.isPending || createErstberatungMutation.isPending || createSeriesMutation.isPending || previewSeriesMutation.isPending;
 
@@ -756,6 +771,8 @@ export function useNewAppointmentForm() {
     activeTab,
     setActiveTab,
     isAdmin,
+    isTeamLead,
+    canChangeAssignment,
     canErstberatung,
     customersLoading,
 
