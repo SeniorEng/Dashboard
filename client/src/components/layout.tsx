@@ -175,9 +175,12 @@ function ViewAsEmployeeBanner() {
 function ViewAsEmployeeSelector() {
   const { user } = useAuth();
   const { viewAsEmployeeId, setViewAsEmployee } = useViewAsEmployee();
-  const { data: employees = [] } = useActiveEmployees({ enabled: user?.isAdmin ?? false });
+  // Teamleitungen besitzen firmenweite Admin-Sicht und dürfen ebenfalls die
+  // Mitarbeiter-Ansicht wechseln.
+  const canViewAsEmployee = (user?.isAdmin ?? false) || (user?.isTeamLead ?? false);
+  const { data: employees = [] } = useActiveEmployees({ enabled: canViewAsEmployee });
 
-  if (!user?.isAdmin) return null;
+  if (!canViewAsEmployee) return null;
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -300,6 +303,13 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
   };
 
   const isAdmin = user?.isAdmin ?? false;
+  const isTeamLead = user?.isTeamLead ?? false;
+  // Teamleitungen besitzen firmenweite Admin-Sicht und dürfen Termin- und
+  // Erstberatungs-Workflows bedienen. Admin-Toggle, Schnell-Aktionen für
+  // Termin/Interessent und der „View as Employee"-Selector werden deshalb
+  // ebenfalls für sie eingeblendet. Reine Admin-Aktionen wie „+ Kunde" oder
+  // der Eintrag „Administration" bleiben Admins vorbehalten.
+  const hasAdminScope = isAdmin || isTeamLead;
   const isOnAdminPage = location.startsWith("/admin");
 
   const employeeNavItems = [
@@ -316,7 +326,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
     <div className={`min-h-screen ${colors.surface.page} font-sans text-foreground pb-20 md:pb-0`}>
       <OfflineBanner />
       <ViewAsEmployeeBanner />
-      {isAdmin && !isOnAdminPage && (
+      {hasAdminScope && !isOnAdminPage && (
         <div className="md:hidden bg-white border-b border-border/30 px-4 py-2 flex items-center justify-end">
           <ViewAsEmployeeSelector />
         </div>
@@ -347,21 +357,30 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                   <p className="text-sm font-medium">{user.displayName}</p>
                   <p className="text-xs text-muted-foreground">{user.email}</p>
                 </div>
-                {user.isAdmin && (
+                {hasAdminScope && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => navigate("/new-appointment")} data-testid="menu-quick-appointment">
                       <CalendarPlus className="mr-2 h-4 w-4 text-teal-600" />
                       + Termin
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate("/admin/prospects?create=true")} data-testid="menu-quick-interessent">
-                      <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
-                      + Interessent
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => navigate("/admin/customers/new")} data-testid="menu-quick-customer">
-                      <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
-                      + Kunde
-                    </DropdownMenuItem>
+                    {/* „+ Interessent" und „+ Kunde" bleiben admin-only,
+                        weil die zugehörigen Routen (`/admin/prospects`,
+                        `/admin/customers/new`) admin-geschützt sind und
+                        Stammdaten-Berechtigungen voraussetzen, die
+                        Teamleitungen nicht haben. */}
+                    {isAdmin && (
+                      <>
+                        <DropdownMenuItem onClick={() => navigate("/admin/prospects?create=true")} data-testid="menu-quick-interessent">
+                          <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
+                          + Interessent
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate("/admin/customers/new")} data-testid="menu-quick-customer">
+                          <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
+                          + Kunde
+                        </DropdownMenuItem>
+                      </>
+                    )}
                   </>
                 )}
                 <DropdownMenuSeparator />
@@ -381,9 +400,16 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                   <BookOpen className="mr-2 h-4 w-4" />
                   Tour erneut starten
                 </DropdownMenuItem>
-                {user.isAdmin && (
+                {hasAdminScope && (
                   <>
-                    <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin">
+                    {/* Teamleitungen haben (außer der Erstberatungs-Übersicht)
+                        keinen Zugriff auf den Admin-Bereich; das Menü zeigt
+                        deshalb für sie direkt auf die für sie freigegebene
+                        Seite. */}
+                    <DropdownMenuItem
+                      onClick={() => navigate(isAdmin ? "/admin" : "/admin/planned-consultations")}
+                      data-testid="menu-admin"
+                    >
                       <Shield className="mr-2 h-4 w-4" />
                       Administration
                     </DropdownMenuItem>
@@ -410,10 +436,10 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
           <nav className="hidden md:block border-t border-border/30 bg-white/80" aria-label="Hauptnavigation" data-testid="nav-desktop">
             <div className="container mx-auto px-4">
               <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
-                {isAdmin && (
+                {hasAdminScope && (
                   <div className="flex items-center mr-2 shrink-0">
                     <button
-                      onClick={() => navigate("/admin")}
+                      onClick={() => navigate(isAdmin ? "/admin" : "/admin/planned-consultations")}
                       className={`px-3 py-2 text-xs font-semibold rounded-md transition-colors ${
                         isOnAdminPage
                           ? "bg-primary/10 text-primary"
@@ -451,7 +477,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                     </Link>
                   );
                 })}
-                {isAdmin && (
+                {hasAdminScope && (
                   <>
                     <div className="w-px h-6 bg-border/60 mx-1" />
                     <ViewAsEmployeeSelector />

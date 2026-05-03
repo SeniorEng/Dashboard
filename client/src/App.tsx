@@ -119,6 +119,30 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
   );
 }
 
+function AdminOrTeamLeadRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isAuthenticated, isLoading, user } = useAuth();
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect to="/login" />;
+  }
+
+  if (!user?.isAdmin && !user?.isTeamLead) {
+    return <Redirect to="/" />;
+  }
+
+  return (
+    <PageErrorBoundary>
+      <Suspense fallback={<PageLoader />}>
+        <Component />
+      </Suspense>
+    </PageErrorBoundary>
+  );
+}
+
 function Router() {
   return (
     <Switch>
@@ -266,7 +290,7 @@ function Router() {
         <AdminRoute component={AdminAppointmentSeries} />
       </Route>
       <Route path="/admin/planned-consultations">
-        <AdminRoute component={AdminPlannedConsultations} />
+        <AdminOrTeamLeadRoute component={AdminPlannedConsultations} />
       </Route>
       <Route component={NotFound} />
     </Switch>

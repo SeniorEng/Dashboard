@@ -62,14 +62,16 @@ export function ViewAsEmployeeProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, []);
 
-  const isAdmin = user?.isAdmin ?? false;
-  const isViewingAsEmployee = isAdmin && employeeId !== null;
+  // Teamleitungen besitzen firmenweite Admin-Sicht und dürfen ebenfalls
+  // andere Mitarbeiter-Sichten einnehmen.
+  const hasAdminScope = (user?.isAdmin ?? false) || (user?.isTeamLead ?? false);
+  const isViewingAsEmployee = hasAdminScope && employeeId !== null;
 
   return (
     <ViewAsEmployeeContext.Provider
       value={{
-        viewAsEmployeeId: isAdmin ? employeeId : null,
-        viewAsEmployeeName: isAdmin ? employeeName : null,
+        viewAsEmployeeId: hasAdminScope ? employeeId : null,
+        viewAsEmployeeName: hasAdminScope ? employeeName : null,
         setViewAsEmployee,
         clearViewAs,
         isViewingAsEmployee,

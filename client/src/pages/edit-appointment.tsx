@@ -309,15 +309,27 @@ export default function EditAppointment() {
     })).sort((a, b) => a.label.localeCompare(b.label, "de"));
   }, [ktEmployeeSource, appointment]);
 
+  // Admins haben Zugriff auf /admin/employees mit vollen Stammdaten;
+  // Teamleitungen (ohne diesen Zugriff) nutzen die nicht-sensible
+  // active-employees-Liste, die ebenfalls die Rollen enthält.
   const ebEmployeeOptions = useMemo(() => {
-    return employees
-      .filter(e => e.isActive && e.roles?.includes("erstberatung"))
+    if (isAdmin && employees.length > 0) {
+      return employees
+        .filter(e => e.isActive && e.roles?.includes("erstberatung"))
+        .map((e) => ({
+          value: e.id.toString(),
+          label: e.displayName,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, "de"));
+    }
+    return activeEmployees
+      .filter(e => e.roles?.includes("erstberatung"))
       .map((e) => ({
         value: e.id.toString(),
         label: e.displayName,
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "de"));
-  }, [employees]);
+  }, [isAdmin, employees, activeEmployees]);
 
   const summary = useMemo(() => {
     if (!appointment) return null;
@@ -425,7 +437,7 @@ export default function EditAppointment() {
         if (!fahrtdienst.doctorStadt) newErrors.doctorStadt = "Arzt-Adresse (Ort) ist erforderlich";
       }
     } else if (appointment?.appointmentType === "Erstberatung") {
-      if (isAdmin && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte einen Mitarbeiter auswählen";
+      if (canChangeKtAssignment && !ebAssignedEmployeeId) newErrors.ebAssignedEmployeeId = "Bitte einen Mitarbeiter auswählen";
       if (!duration || duration <= 0) newErrors.time = "Bitte wählen Sie eine Dauer";
     } else {
       if (!duration || duration <= 0) {
@@ -986,7 +998,7 @@ export default function EditAppointment() {
                 </Select>
               </div>
 
-              {isAdmin && (
+              {canChangeKtAssignment && (
                 <div className="space-y-2">
                   <Label>
                     <Users className={`${iconSize.sm} inline mr-1`} /> Mitarbeiter zuweisen *
@@ -1035,6 +1047,9 @@ export default function EditAppointment() {
             </div>
           </div>
 
+          {/* Verfügbarkeits-Widget bleibt admin-only, da es den admin-only
+              Endpoint /admin/employees/availability nutzt. Teamleitungen
+              wählen den/die Erstberater/in über das Dropdown oben. */}
           {isAdmin && isErstberatung && date && (
             <EmployeeAvailability
               date={date}

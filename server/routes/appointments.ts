@@ -142,6 +142,11 @@ router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen 
     id: e.id,
     displayName: e.displayName,
     isTeamLead: Boolean(e.isTeamLead),
+    // Rollen werden im Frontend benötigt, damit Teamleitungen
+    // (ohne Zugriff auf /admin/employees) Erstberatungs-Mitarbeiter filtern
+    // können. Es werden ausschließlich die nicht-sensiblen Rollen-Kürzel
+    // ausgeliefert.
+    roles: e.roles ?? [],
   }));
   res.json(safeEmployees);
 }));
@@ -357,7 +362,10 @@ router.get("/counts", asyncHandler("Fehler beim Laden der Terminzähler", async 
 }));
 
 router.get("/planned-consultations", asyncHandler("Fehler beim Laden der geplanten Erstberatungen", async (req, res) => {
-  if (!req.user?.isAdmin) {
+  const user = req.user!;
+  // Teamleitungen besitzen firmenweite Admin-Sicht und dürfen Erstberatungen
+  // ebenfalls einsehen und umterminieren (analog zu /undocumented).
+  if (!user.isAdmin && !isTeamLead(user)) {
     return sendForbidden(res, "FORBIDDEN", "Sie haben keine Berechtigung für diese Aktion");
   }
   const filterParam = (req.query.filter as string | undefined) ?? "all";
