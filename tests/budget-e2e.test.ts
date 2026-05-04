@@ -12,6 +12,8 @@ import {
   setupBudgetScenario,
   type BudgetScenarioHandle,
 } from "./helpers/budget-scenarios";
+import { db } from "../server/lib/db";
+import { sql } from "drizzle-orm";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -1297,5 +1299,158 @@ describe("INT-16: Selbstzahler-Kostenvorschau (cost-estimate)", () => {
     if (hwVat === abVat) {
       expect(d.vatRate).toBe(hwVat);
     }
+  });
+});
+
+/**
+ * INT-17: noPricing-Fehlerfall für Selbstzahler (cost-estimate edge case)
+ *
+ * Hintergrund:
+ * In `server/routes/budget.ts` (cost-estimate, Z. 137-151) wird der
+ * `noPricing`-Fehler-Branch aus dem catch ausgelöst, wenn die Cost-Calculation
+ * eine Exception mit "Preisvereinbarung" im Text wirft. Dieser Branch antwortet
+ * BEVOR die Selbstzahler-Verzweigung (Z. 164-180) erreicht wird.
+ *
+ * Theoretisch hieße das: Ein Selbstzahler ohne Preis-Konfiguration bekäme die
+ * generische `noPricing`-Antwort statt der Selbstzahler-Shape (mit Brutto/MwSt).
+ *
+ * Tatsächlich (Stand dieses Tests):
+ *   - `calculateAppointmentCost` wirft den Preisvereinbarung-Fehler nur, wenn
+ *     ALLE vier Services (`hauswirtschaft`, `alltagsbegleitung`, `travel_km`,
+ *     `customer_km`) im globalen Service-Katalog fehlen.
+ *   - Fehlt nur die kunden-spezifische `customer_service_prices`-Konfiguration,
+ *     greifen die `defaultPriceCents` aus dem Service-Katalog und es wird kein
+ *     Fehler geworfen.
+ *
+ * Konsequenz: Im normalen Betrieb ist der noPricing-Branch für einen
+ * Selbstzahler-Kunden nicht erreichbar – der Selbstzahler-Branch wird wie
+ * erwartet ausgeführt. Die Reihenfolge im Route-Handler (noPricing vor
+ * Selbstzahler) wäre nur dann ein Bug, wenn der Service-Katalog komplett leer
+ * wäre, was einem Konfigurationsfehler des gesamten Systems entspricht.
+ *
+ * Befund: Aktuelles Verhalten ist beabsichtigt/unkritisch. Der noPricing-Pfad
+ * ist ein globaler Katalog-Schutz, kein per-Kunde-Pfad. Diese Tests
+ * dokumentieren das Verhalten und schützen vor Regression. INT-17.2 erzwingt
+ * den noPricing-Pfad deterministisch durch temporäres Umbenennen der vier
+ * Service-Codes per SQL und prüft die echte HTTP-Response. Follow-up #351
+ * schlägt vor, im Handler die Selbstzahler-Verzweigung VOR den
+ * noPricing-Branch zu sortieren.
+ */
+describe("INT-17: Selbstzahler ohne Preis-Konfiguration (noPricing edge case)", () => {
+  let scenario: BudgetScenarioHandle;
+
+  beforeAll(async () => {
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-17",
+      billingType: "selbstzahler",
+      acceptsPrivatePayment: true,
+      types: [
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: false, monthlyLimitCents: null },
+        { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await scenario.cleanup();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Regression: Im Normalbetrieb (Service-Katalog vollständig) bekommt der
+  // Selbstzahler die Selbstzahler-Shape, auch wenn keine kunden-spezifischen
+  // Preise hinterlegt sind. Default-Preise aus dem Katalog greifen.
+  // ---------------------------------------------------------------------------
+  it("INT-17.1 – Normalfall: Selbstzahler ohne customer_service_prices erhält Selbstzahler-Shape", async () => {
+    const today = getTodayDate();
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    expect(res.status).toBe(200);
+    const d = res.data;
+
+    expect(d.noPricing).toBeUndefined();
+    expect(d.warning).toBeNull();
+    expect(d.isSelbstzahler).toBe(true);
+    expect(d.totalCents).toBeGreaterThan(0);
+    expect(d.bruttoCents).toBe(d.totalCents + d.vatCents);
+    expect(d.vatRate).toBe(19);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Edge case: Wenn der Service-Katalog für die vier Kern-Codes
+  // (hauswirtschaft, alltagsbegleitung, travel_km, customer_km) NICHT
+  // auflösbar ist, wirft `calculateAppointmentCost` eine
+  // "Preisvereinbarung"-Exception. Der Route-Handler fängt sie ab und
+  // antwortet mit der noPricing-Shape – BEVOR die Selbstzahler-Verzweigung
+  // erreicht wird. Dieses Verhalten wird hier deterministisch verifiziert,
+  // indem die Codes der vier Services temporär per SQL umbenannt und am Ende
+  // wiederhergestellt werden. Da `vitest.config.ts` `fileParallelism: false`
+  // setzt und Tests innerhalb eines Files sequentiell laufen, ist diese
+  // globale Mutation für die Dauer dieses Tests sicher.
+  //
+  // Befund (siehe Block-Kommentar oben): Die Reihenfolge im Handler
+  // (noPricing vor Selbstzahler) führt dazu, dass ein Selbstzahler in diesem
+  // Edge case KEINE Selbstzahler-Shape erhält. Das ist heute unkritisch, weil
+  // der Trigger nur bei einem global gebrochenen Service-Katalog auftritt.
+  // Follow-up #351 schlägt eine Umsortierung des Handlers vor.
+  // ---------------------------------------------------------------------------
+  it("INT-17.2 – Edge case: Selbstzahler erhält noPricing-Shape, wenn Service-Codes fehlen", async () => {
+    const SUFFIX = "__INT17_DISABLED__";
+
+    // Sanity-Check vorher: alle vier Codes sind im Katalog vorhanden.
+    const before = await db.execute(sql`
+      SELECT id, code FROM services
+      WHERE code IN ('hauswirtschaft', 'alltagsbegleitung', 'travel_km', 'customer_km')
+    `);
+    const beforeCodes = (before.rows as Array<{ code: string }>).map(r => r.code).sort();
+    expect(beforeCodes).toEqual(["alltagsbegleitung", "customer_km", "hauswirtschaft", "travel_km"]);
+
+    try {
+      // Codes umbenennen, damit getServiceByCode() für alle vier null liefert.
+      await db.execute(sql`
+        UPDATE services
+        SET code = code || ${SUFFIX}
+        WHERE code IN ('hauswirtschaft', 'alltagsbegleitung', 'travel_km', 'customer_km')
+      `);
+
+      const today = getTodayDate();
+      const res = await apiGet<any>(
+        `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+      );
+      expect(res.status).toBe(200);
+      const d = res.data;
+
+      // noPricing-Shape exakt aus server/routes/budget.ts (Z. 139-148).
+      expect(d.noPricing).toBe(true);
+      expect(d.warning).toBe("Keine Preisvereinbarung hinterlegt – Kosten können nicht berechnet werden.");
+      expect(d.totalCents).toBe(0);
+      expect(d.hauswirtschaftCents).toBe(0);
+      expect(d.alltagsbegleitungCents).toBe(0);
+      expect(d.travelCents).toBe(0);
+      expect(d.customerKilometersCents).toBe(0);
+
+      // Befund-Dokumentation: Selbstzahler-spezifische Felder fehlen
+      // (Reihenfolge-Effekt: noPricing-Branch antwortet vor Selbstzahler-Check).
+      expect(d.isSelbstzahler).toBeUndefined();
+      expect(d.bruttoCents).toBeUndefined();
+      expect(d.vatCents).toBeUndefined();
+      expect(d.vatRate).toBeUndefined();
+    } finally {
+      // Codes immer wiederherstellen, auch bei Test-Fehler.
+      await db.execute(sql`
+        UPDATE services
+        SET code = REPLACE(code, ${SUFFIX}, '')
+        WHERE code LIKE ${'%' + SUFFIX}
+      `);
+    }
+
+    // Sanity-Check danach: gleiche Codes wie vorher.
+    const after = await db.execute(sql`
+      SELECT id, code FROM services
+      WHERE code IN ('hauswirtschaft', 'alltagsbegleitung', 'travel_km', 'customer_km')
+    `);
+    const afterCodes = (after.rows as Array<{ code: string }>).map(r => r.code).sort();
+    expect(afterCodes).toEqual(beforeCodes);
   });
 });
