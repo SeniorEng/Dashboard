@@ -1329,8 +1329,6 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     bic: companySettings.bic || "",
     bankName: companySettings.bankName || "",
     ikNummer: companySettings.ikNummer ?? null,
-    anerkennungsnummer45a: companySettings.anerkennungsnummer45a ?? null,
-    anerkennungsBundesland: companySettings.anerkennungsBundesland ?? null,
     geschaeftsfuehrer: companySettings.geschaeftsfuehrer ?? null,
     invoiceNumber: invoice.invoiceNumber,
     invoiceDate: invoice.sentAt ? formatDateForDisplay(formatDateISO(invoice.sentAt)) : formatDateForDisplay(todayISO()),

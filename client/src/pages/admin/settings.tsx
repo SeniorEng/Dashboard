@@ -263,8 +263,6 @@ export default function AdminSettings() {
         bic: companyData.bic ?? "",
         bankName: companyData.bankName ?? "",
         ikNummer: companyData.ikNummer ?? "",
-        anerkennungsnummer45a: companyData.anerkennungsnummer45a ?? "",
-        anerkennungsBundesland: companyData.anerkennungsBundesland ?? "",
         smtpHost: companyData.smtpHost ?? "",
         smtpPort: companyData.smtpPort ?? "",
         smtpUser: companyData.smtpUser ?? "",
@@ -314,8 +312,6 @@ export default function AdminSettings() {
     bic: companyForm.bic,
     bankName: companyForm.bankName,
     ikNummer: companyForm.ikNummer,
-    anerkennungsnummer45a: companyForm.anerkennungsnummer45a,
-    anerkennungsBundesland: companyForm.anerkennungsBundesland,
   };
 
   const validateCompanyPhone = () => {

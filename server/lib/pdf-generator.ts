@@ -15,8 +15,6 @@ export interface InvoicePdfData {
   bic: string;
   bankName: string;
   ikNummer: string | null;
-  anerkennungsnummer45a: string | null;
-  anerkennungsBundesland: string | null;
   geschaeftsfuehrer: string | null;
   
   // Invoice data
@@ -233,7 +231,6 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </div>
     <div style="text-align: right;">
       ${data.ikNummer ? `<div class="company-info">IK-Nr.: ${data.ikNummer}</div>` : ""}
-      ${data.anerkennungsnummer45a ? `<div class="company-info">Anerkennung §45a: ${data.anerkennungsnummer45a}</div>` : ""}
       ${data.steuernummer ? `<div class="company-info">St.-Nr.: ${data.steuernummer}</div>` : ""}
       ${data.ustId ? `<div class="company-info">USt-ID: ${data.ustId}</div>` : ""}
     </div>
@@ -535,7 +532,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <div class="title">LEISTUNGSNACHWEIS</div>
         <div style="font-size: 9pt; color: #1f2937;">
           ${data.companyName || ""} | ${data.ikNummer ? `IK-Nr.: ${data.ikNummer}` : ""}
-          ${data.anerkennungsnummer45a ? ` | Anerkennung §45a: ${data.anerkennungsnummer45a}` : ""}
         </div>
         <div style="font-size: 10pt; font-weight: bold; color: #0d9488; margin-top: 6px;">
           ${sectionLabel}
@@ -695,7 +691,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     <div class="title">LEISTUNGSNACHWEIS</div>
     <div style="font-size: 9pt; color: #1f2937;">
       ${data.companyName || ""} | ${data.ikNummer ? `IK-Nr.: ${data.ikNummer}` : ""}
-      ${data.anerkennungsnummer45a ? ` | Anerkennung §45a: ${data.anerkennungsnummer45a}` : ""}
     </div>
   </div>
 

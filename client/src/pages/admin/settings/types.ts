@@ -1,22 +1,3 @@
-export const BUNDESLAENDER = [
-  "Baden-Württemberg",
-  "Bayern",
-  "Berlin",
-  "Brandenburg",
-  "Bremen",
-  "Hamburg",
-  "Hessen",
-  "Mecklenburg-Vorpommern",
-  "Niedersachsen",
-  "Nordrhein-Westfalen",
-  "Rheinland-Pfalz",
-  "Saarland",
-  "Sachsen",
-  "Sachsen-Anhalt",
-  "Schleswig-Holstein",
-  "Thüringen",
-];
-
 export const emptyCompanyForm = {
   companyName: "",
   geschaeftsfuehrer: "",
@@ -33,8 +14,6 @@ export const emptyCompanyForm = {
   bic: "",
   bankName: "",
   ikNummer: "",
-  anerkennungsnummer45a: "",
-  anerkennungsBundesland: "",
   smtpHost: "",
   smtpPort: "",
   smtpUser: "",

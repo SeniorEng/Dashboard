@@ -3,11 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { formatPhoneAsYouType } from "@shared/utils/phone";
 import type { CompanyFormData } from "./types";
-import { BUNDESLAENDER } from "./types";
 
 interface CompanyDetailsFormProps {
   companyForm: CompanyFormData;
@@ -216,33 +214,6 @@ export function CompanyDetailsForm({ companyForm, updateField, onSubmit, isSavin
                   onChange={(e) => updateField("ikNummer", e.target.value)}
                   placeholder="9 Ziffern, Institutionskennzeichen"
                 />
-              </div>
-              <div>
-                <Label htmlFor="anerkennungsnummer45a">Anerkennungsnummer (§45a)</Label>
-                <Input
-                  id="anerkennungsnummer45a"
-                  data-testid="input-company-anerkennungsnummer45a"
-                  value={companyForm.anerkennungsnummer45a}
-                  onChange={(e) => updateField("anerkennungsnummer45a", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="anerkennungsBundesland">Bundesland der Anerkennung</Label>
-                <Select
-                  value={companyForm.anerkennungsBundesland}
-                  onValueChange={(value) => updateField("anerkennungsBundesland", value)}
-                >
-                  <SelectTrigger data-testid="select-company-bundesland" id="anerkennungsBundesland">
-                    <SelectValue placeholder="Bundesland wählen" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {BUNDESLAENDER.map((bl) => (
-                      <SelectItem key={bl} value={bl}>
-                        {bl}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
             </div>
           </div>
