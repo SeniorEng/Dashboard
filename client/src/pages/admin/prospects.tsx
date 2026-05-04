@@ -400,11 +400,6 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
     navigate(`/new-appointment?type=erstberatung&prospectId=${prospect.id}`);
   };
 
-  const handleNavigateToConvert = () => {
-    if (!prospect) return;
-    navigate(`/admin/prospects/${prospect.id}/convert`);
-  };
-
   const handleQualifizieren = () => {
     if (!prospectId) return;
     qualifyMutation.mutate({ id: prospectId, action: "qualify" });
@@ -639,9 +634,6 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         )}
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" className="flex-1" onClick={() => prospectId && navigate(`/admin/prospects/${prospectId}/convert`)} data-testid="button-accept-offer">
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Vertrag abschließen
-                        </Button>
                         <Button size="sm" variant="outline" className="flex-1 text-red-600" onClick={() => prospectId && declineOfferMutation.mutate({ prospectId })} disabled={declineOfferMutation.isPending} data-testid="button-decline-offer">
                           <XCircle className="h-3.5 w-3.5 mr-1" /> Ablehnen
                         </Button>
@@ -686,17 +678,6 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         </Button>
                       )}
 
-                      {["qualifiziert", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
-                        <Button
-                          className="w-full"
-                          variant="outline"
-                          onClick={handleNavigateToConvert}
-                          data-testid="button-start-conversion"
-                        >
-                          <ArrowRightCircle className="h-4 w-4 mr-2" />
-                          Vertrag / Angebot erstellen
-                        </Button>
-                      )}
                     </CardContent>
                   </Card>
                 )}
