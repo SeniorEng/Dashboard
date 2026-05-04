@@ -32,6 +32,10 @@ export function isPflegekasseCustomer(billingType: BillingType | ""): boolean {
   return billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat";
 }
 
+export function isSelbstzahlerCustomer(billingType: BillingType | ""): boolean {
+  return billingType === "selbstzahler";
+}
+
 
 export function needsBudgetData(billingType: BillingType | ""): boolean {
   return isPflegekasseCustomer(billingType);

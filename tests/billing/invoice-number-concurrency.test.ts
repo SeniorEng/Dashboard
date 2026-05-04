@@ -127,6 +127,7 @@ function szPayload(tag: string) {
     vorname: "INC-SZ",
     nachname: `Privat-${tag}-${uniqueId()}`,
     geburtsdatum: "1942-03-10",
+    email: `inc-sz-${uniqueId()}@test.local`,
     strasse: "Teststraße",
     nr: "1",
     plz: "10115",

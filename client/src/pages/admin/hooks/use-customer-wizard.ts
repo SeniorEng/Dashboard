@@ -605,6 +605,11 @@ export function useCustomerWizard() {
         if (!formData.contractStart) errors.push("Vertragsbeginn fehlt");
         if (!formData.vereinbarteLeistungen.trim()) errors.push("Vereinbarte Leistungen ausfüllen");
         break;
+      case "delivery":
+        if (formData.documentDeliveryMethod === "email" && !formData.email.trim()) {
+          errors.push("E-Mail-Adresse ist erforderlich für den E-Mail-Versand");
+        }
+        break;
       case "matching":
         break;
     }
@@ -685,7 +690,7 @@ export function useCustomerWizard() {
   const findStepIndex = (stepId: string) => steps.findIndex((s) => s.id === stepId);
 
   const handleSubmit = () => {
-    const stepsToValidate = ["personal", "insurance", "budgets", "contract", "matching"];
+    const stepsToValidate = ["personal", "insurance", "budgets", "contract", "delivery", "matching"];
     for (const stepId of stepsToValidate) {
       const idx = findStepIndex(stepId);
       if (idx < 0) continue;

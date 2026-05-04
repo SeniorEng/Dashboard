@@ -88,6 +88,7 @@ beforeAll(async () => {
     vorname: "FD-Test",
     nachname: "Fahrtdienst-" + uniqueId(),
     geburtsdatum: "1935-06-15",
+    email: `fd-test-${uniqueId()}@test.local`,
     strasse: "Testweg",
     nr: "5",
     plz: "10115",

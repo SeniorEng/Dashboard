@@ -284,6 +284,7 @@ function szCustomerPayload(overrides: Record<string, any> = {}) {
     vorname: "SZ-Test",
     nachname: "Privat-" + uniqueId(),
     geburtsdatum: "1940-03-15",
+    email: `sz-test-${uniqueId()}@test.local`,
     strasse: "Privatstraße",
     nr: "42",
     plz: "10115",

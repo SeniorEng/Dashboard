@@ -364,6 +364,7 @@ export async function createTestCustomer(overrides: Record<string, unknown> = {}
     vorname: "Test",
     nachname: `Auto_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
     geburtsdatum: "1940-01-15",
+    email: `test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@test.local`,
     strasse: "Teststraße",
     nr: "1",
     plz: "10115",

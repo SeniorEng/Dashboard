@@ -5,6 +5,7 @@ import { birthdaysCache } from "../../services/cache";
 import { auditService } from "../../services/audit";
 import { geocodeCustomer } from "../../services/geocoding";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
+import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/customers";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { findCustomerDuplicates } from "../../lib/duplicate-check";
 import { readTestFaults } from "../../lib/test-fault-injector";
@@ -241,6 +242,25 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     });
     if (!result.ok) {
       res.status(400).json({ error: "VALIDATION_ERROR", message: result.message });
+      return;
+    }
+  }
+
+  if (isPflegekasseCustomer(data.billingType)) {
+    if (!data.geburtsdatum) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Geburtsdatum ist erforderlich für Pflegekasse-Kunden" });
+      return;
+    }
+    if (!data.pflegegrad) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Pflegegrad ist erforderlich für Pflegekasse-Kunden" });
+      return;
+    }
+  }
+
+  if (isSelbstzahlerCustomer(data.billingType)) {
+    const effectiveDelivery = data.documentDeliveryMethod || "email";
+    if (effectiveDelivery === "email" && (!data.email || !data.email.trim())) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "E-Mail-Adresse ist erforderlich für den E-Mail-Versand bei Selbstzahlern" });
       return;
     }
   }
