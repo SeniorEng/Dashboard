@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@shared/utils/format";
+import { displayPriceCents, netFromInputCents } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, unwrapResult, ApiError } from "@/lib/api";
@@ -92,9 +93,8 @@ interface PendingReplaceState {
 }
 
 export function PricingSection({ customerId, customerName, billingType, onRefresh }: PricingSectionProps) {
-  const isSelbstzahler = billingType === "selbstzahler";
-  const displayPrice = (priceCents: number) => isSelbstzahler ? Math.round(priceCents * 1.19) : priceCents;
-  const netFromInput = (inputCents: number) => isSelbstzahler ? Math.round(inputCents / 1.19) : inputCents;
+  const displayPrice = (priceCents: number) => displayPriceCents(priceCents, billingType);
+  const netFromInput = (inputCents: number) => netFromInputCents(inputCents, billingType);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
@@ -619,7 +619,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
 
       <div className="px-2 pt-2 space-y-2">
         <p className="text-[11px] text-gray-500">
-          {isSelbstzahler ? "Preise inkl. MwSt." : "Preise zzgl. MwSt."} Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
+          {billingType === "selbstzahler" ? "Preise inkl. MwSt." : "Preise zzgl. MwSt."} Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
           {" "}Über das Datumsfeld können Sie einen zukünftigen Gültigkeitszeitpunkt festlegen.
           {hasCustomPrices ? " Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
           {" "}In der Preishistorie können Sie Preis, Gültig-ab und Gültig-bis bestehender Einträge nachträglich anpassen.

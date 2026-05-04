@@ -10,7 +10,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay, isChild } from "@shared/utils/datetime";
-import { DEACTIVATION_REASON_LABELS, isPflegekasseCustomer, type DeactivationReason } from "@shared/domain/customers";
+import { DEACTIVATION_REASON_LABELS, isPflegekasseCustomer, getVisibleTabs, getEffectiveTab, CUSTOMER_DETAIL_TABS, type DeactivationReason } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -217,9 +217,6 @@ function BudgetsTabContent({
   );
 }
 
-const VALID_TABS = ["overview", "vertrag", "documents", "contacts", "budgets", "insurance", "timeline"] as const;
-const SELBSTZAHLER_HIDDEN_TABS = ["budgets", "insurance"];
-
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const customerId = parseInt(id || "0");
@@ -228,7 +225,7 @@ export default function AdminCustomerDetail() {
   const activeTab = useMemo(() => {
     const params = new URLSearchParams(searchString);
     const tab = params.get("tab");
-    if (tab && (VALID_TABS as readonly string[]).includes(tab)) return tab;
+    if (tab && (CUSTOMER_DETAIL_TABS as readonly string[]).includes(tab)) return tab;
     return "overview";
   }, [searchString]);
 
@@ -243,15 +240,9 @@ export default function AdminCustomerDetail() {
   const { data: customer, isLoading, error, refetch } = useCustomer(customerId);
 
   const isSelbstzahler = customer?.billingType === "selbstzahler";
-  const visibleTabs = useMemo(() => {
-    if (!isSelbstzahler) return VALID_TABS;
-    return VALID_TABS.filter((t) => !SELBSTZAHLER_HIDDEN_TABS.includes(t));
-  }, [isSelbstzahler]);
+  const visibleTabs = useMemo(() => getVisibleTabs(customer?.billingType), [isSelbstzahler]);
 
-  const effectiveTab = useMemo(() => {
-    if (isSelbstzahler && SELBSTZAHLER_HIDDEN_TABS.includes(activeTab)) return "overview";
-    return activeTab;
-  }, [activeTab, isSelbstzahler]);
+  const effectiveTab = useMemo(() => getEffectiveTab(activeTab, customer?.billingType), [activeTab, isSelbstzahler]);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();

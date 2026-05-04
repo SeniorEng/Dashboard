@@ -45,6 +45,27 @@ export function needsVorerkrankungenData(billingType: BillingType | ""): boolean
   return isPflegekasseCustomer(billingType) || billingType === "selbstzahler";
 }
 
+export const CUSTOMER_DETAIL_TABS = ["overview", "vertrag", "documents", "contacts", "budgets", "insurance", "timeline"] as const;
+export const SELBSTZAHLER_HIDDEN_TABS = ["budgets", "insurance"] as const;
+
+export function getVisibleTabs(billingType: string | null | undefined): readonly string[] {
+  if (billingType !== "selbstzahler") return CUSTOMER_DETAIL_TABS;
+  return CUSTOMER_DETAIL_TABS.filter((t) => !(SELBSTZAHLER_HIDDEN_TABS as readonly string[]).includes(t));
+}
+
+export function getEffectiveTab(activeTab: string, billingType: string | null | undefined): string {
+  if (billingType === "selbstzahler" && (SELBSTZAHLER_HIDDEN_TABS as readonly string[]).includes(activeTab)) return "overview";
+  return activeTab;
+}
+
+export function displayPriceCents(priceCents: number, billingType: string | null | undefined): number {
+  return billingType === "selbstzahler" ? Math.round(priceCents * 1.19) : priceCents;
+}
+
+export function netFromInputCents(inputCents: number, billingType: string | null | undefined): number {
+  return billingType === "selbstzahler" ? Math.round(inputCents / 1.19) : inputCents;
+}
+
 const DEACTIVATION_REASONS = [
   "stationaere_pflege",
   "versterben",
