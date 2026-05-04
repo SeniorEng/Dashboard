@@ -39,6 +39,7 @@ import {
   Shield,
   RotateCcw,
   Filter,
+  Info,
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
@@ -676,12 +677,22 @@ export function DocumentTypesContent() {
               size="sm"
               className="text-xs h-7"
               onClick={handleAddTrigger}
+              disabled={formData.isMandatory}
               data-testid="button-add-trigger"
             >
               <Plus className="h-3 w-3 mr-1" />
               Hinzufügen
             </Button>
           </div>
+
+          {formData.isMandatory && (
+            <div className="flex items-start gap-2 p-2.5 rounded-md bg-blue-50 border border-blue-200" data-testid="text-mandatory-hint">
+              <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+              <p className="text-xs text-blue-700">
+                Bedingungen werden ignoriert, solange „Immer verpflichtend" aktiv ist.
+              </p>
+            </div>
+          )}
 
           {triggers.length === 0 ? (
             <div className="text-center py-3 text-sm text-gray-500 border border-dashed rounded-lg" data-testid="text-no-triggers">
@@ -690,7 +701,7 @@ export function DocumentTypesContent() {
                 : "Keine Bedingungen — wird nur manuell zugewiesen"}
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className={`space-y-2 ${formData.isMandatory ? "opacity-50 pointer-events-none" : ""}`} data-testid="trigger-list">
               {triggers.map((trigger, index) => (
                 <TriggerRow
                   key={index}
