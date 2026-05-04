@@ -163,6 +163,24 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     }
   }
 
+  if (appointment.prospectId && appointment.appointmentType === "Erstberatung") {
+    try {
+      const { prospectStorage } = await import("../storage/prospects");
+      const prospect = await prospectStorage.getById(appointment.prospectId);
+      if (prospect && prospect.status === "erstberatung_vereinbart") {
+        await prospectStorage.update(appointment.prospectId, { status: "erstberatung_durchgeführt" });
+        await prospectStorage.addNote({
+          prospectId: appointment.prospectId,
+          userId: req.user?.id,
+          noteText: "Status geändert: erstberatung_vereinbart → erstberatung_durchgeführt (automatisch nach Dokumentation)",
+          noteType: "statuswechsel",
+        });
+      }
+    } catch (err) {
+      console.warn("[appointment-documentation] Auto-Statuswechsel für Prospect fehlgeschlagen:", err);
+    }
+  }
+
   res.json({
     ...updatedAppointment,
     budgetTransaction,

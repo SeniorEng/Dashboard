@@ -261,7 +261,6 @@ router.post("/prospects/:id/offers", asyncHandler("Angebot konnte nicht gespeich
   const userId = (req as any).user?.id;
   const offer = await prospectStorage.createOffer(id, parsed.data.wizardData, userId, parsed.data.expiresAt);
 
-  await prospectStorage.update(id, { status: "angebot_gemacht" });
   await prospectStorage.addNote({
     prospectId: id,
     userId,

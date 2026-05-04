@@ -13,10 +13,8 @@ export const PROSPECT_STATUSES = [
   "disqualifiziert",
   "erstberatung_vereinbart",
   "erstberatung_durchgeführt",
-  "angebot_gemacht",
   "gewonnen",
   "nicht_interessiert",
-  "absage",
 ] as const;
 
 export type ProspectStatus = (typeof PROSPECT_STATUSES)[number];
@@ -29,10 +27,8 @@ export const PROSPECT_STATUS_LABELS: Record<ProspectStatus, string> = {
   disqualifiziert: "Disqualifiziert",
   erstberatung_vereinbart: "Erstberatung vereinbart",
   erstberatung_durchgeführt: "Erstberatung durchgeführt",
-  angebot_gemacht: "Angebot gemacht",
   gewonnen: "Erfolgreich gewonnen",
   nicht_interessiert: "Nicht interessiert",
-  absage: "Absage",
 };
 
 export const PROSPECT_NOTE_TYPES = [

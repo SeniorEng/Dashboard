@@ -65,7 +65,7 @@ import {
   X,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer, useDeclineProspectOffer } from "@/features/prospects";
+import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpdateProspect, useAddProspectNote, useReparseProspect, useDeleteProspect, useQualifyProspect, useProspectOffer } from "@/features/prospects";
 import { AddressFields } from "@/pages/admin/components/address-fields";
 import { isDachPhone } from "@shared/schema/common";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, DISQUALIFICATION_REASON_LABELS, DISQUALIFICATION_REASONS, type ProspectStatus, type ProspectNoteType, type DisqualificationReason } from "@shared/schema";
@@ -81,10 +81,8 @@ const STATUS_COLORS: Record<ProspectStatus, string> = {
   disqualifiziert: "bg-red-100 text-red-800",
   erstberatung_vereinbart: "bg-cyan-100 text-cyan-800",
   erstberatung_durchgeführt: "bg-emerald-100 text-emerald-800",
-  angebot_gemacht: "bg-amber-100 text-amber-800",
   gewonnen: "bg-green-100 text-green-800",
   nicht_interessiert: "bg-gray-100 text-gray-800",
-  absage: "bg-red-100 text-red-800",
 };
 
 const NOTE_TYPE_ICONS: Record<ProspectNoteType, typeof Phone> = {
@@ -100,14 +98,19 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge className={`${colorClass} font-medium`} data-testid={`badge-status-${status}`}>{label}</Badge>;
 }
 
-function PipelineStats({ stats }: { stats: Record<string, number> }) {
-  const total = Object.values(stats).reduce((a, b) => a + b, 0);
+function PipelineStats({ stats, activeStatus, onStatusClick }: { stats: Record<string, number>; activeStatus: string; onStatusClick: (status: string) => void }) {
   return (
-    <div className="grid grid-cols-4 md:grid-cols-8 gap-2 mb-4" data-testid="pipeline-stats">
+    <div className="grid grid-cols-3 md:grid-cols-9 gap-2 mb-4" data-testid="pipeline-stats">
       {PROSPECT_STATUSES.map((status) => (
         <div
           key={status}
-          className="flex flex-col items-center justify-start text-center px-1.5 py-2 rounded-lg bg-white/60 border min-h-[72px] md:min-h-[76px]"
+          onClick={() => onStatusClick(status)}
+          className={`flex flex-col items-center justify-start text-center px-1.5 py-2 rounded-lg border min-h-[72px] md:min-h-[76px] cursor-pointer transition-all ${
+            activeStatus === status
+              ? "bg-primary/10 border-primary ring-2 ring-primary/30"
+              : "bg-white/60 hover:bg-white/80"
+          }`}
+          data-testid={`stat-box-${status}`}
         >
           <div className="text-lg font-bold leading-none mb-1" data-testid={`stat-count-${status}`}>
             {stats[status] || 0}
@@ -251,8 +254,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
   const addNoteMutation = useAddProspectNote();
   const deleteMutation = useDeleteProspect();
   const reparseMutation = useReparseProspect();
-  const declineOfferMutation = useDeclineProspectOffer();
-  const { data: openOffer } = useProspectOffer(prospect?.status === "angebot_gemacht" ? prospectId : null);
+  const { data: openOffer } = useProspectOffer(prospectId);
   const [, navigate] = useLocation();
   const [noteText, setNoteText] = useState("");
   const [noteType, setNoteType] = useState<ProspectNoteType>("notiz");
@@ -619,7 +621,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                   </Card>
                 )}
 
-                {prospect.status === "angebot_gemacht" && (
+                {openOffer && (
                   <Card data-testid="panel-offer">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm flex items-center gap-2">
@@ -629,20 +631,13 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                     <CardContent className="space-y-3">
                       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" data-testid="banner-angebot">
                         <p className="font-medium">Angebot wurde erstellt</p>
-                        {openOffer && (
-                          <p className="text-xs mt-1">Erstellt am {formatDateForDisplay(String(openOffer.createdAt).substring(0, 10))}</p>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="flex-1 text-red-600" onClick={() => prospectId && declineOfferMutation.mutate({ prospectId })} disabled={declineOfferMutation.isPending} data-testid="button-decline-offer">
-                          <XCircle className="h-3.5 w-3.5 mr-1" /> Ablehnen
-                        </Button>
+                        <p className="text-xs mt-1">Erstellt am {formatDateForDisplay(String(openOffer.createdAt).substring(0, 10))}</p>
                       </div>
                     </CardContent>
                   </Card>
                 )}
 
-                {prospect.status !== "gewonnen" && prospect.status !== "absage" && prospect.status !== "nicht_interessiert" && prospect.status !== "disqualifiziert" && (
+                {prospect.status !== "gewonnen" && prospect.status !== "nicht_interessiert" && prospect.status !== "disqualifiziert" && (
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm">Aktionen</CardTitle>
@@ -657,7 +652,7 @@ function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId: number
                         <Button size="sm" variant="outline" onClick={() => setShowWiedervorlageDialog(true)} data-testid="button-status-wiedervorlage">
                           <CalendarClock className="h-3.5 w-3.5 mr-1" /> Wiedervorlage
                         </Button>
-                        {prospect.status !== "erstberatung_vereinbart" && prospect.status !== "kontaktiert" && !["qualifiziert", "erstberatung_durchgeführt", "angebot_gemacht"].includes(prospect.status) && (
+                        {prospect.status !== "erstberatung_vereinbart" && prospect.status !== "kontaktiert" && !["qualifiziert", "erstberatung_durchgeführt"].includes(prospect.status) && (
                           <Button size="sm" variant="outline" className="text-teal-600" onClick={handleQualifizieren} disabled={qualifyMutation.isPending} data-testid="button-status-qualifiziert">
                             <UserPlus className="h-3.5 w-3.5 mr-1" /> Qualifizieren
                           </Button>
@@ -931,7 +926,7 @@ export default function AdminProspects() {
         </Button>
       </div>
 
-      {stats && <PipelineStats stats={stats} />}
+      {stats && <PipelineStats stats={stats} activeStatus={statusFilter} onStatusClick={(status) => setStatusFilter(prev => prev === status ? "all" : status)} />}
 
       <div className="flex gap-2 mb-4">
         <div className="relative flex-1">

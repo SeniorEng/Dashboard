@@ -177,21 +177,3 @@ export function useProspectOffer(prospectId: number | null) {
   });
 }
 
-export function useDeclineProspectOffer() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async ({ prospectId }: { prospectId: number }) => {
-      const result = await api.patch<Prospect>(`/admin/prospects/${prospectId}`, { status: "absage" });
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "prospects");
-      toast({ title: "Angebot abgelehnt" });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
-  });
-}

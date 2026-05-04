@@ -212,6 +212,21 @@ async function runStartupTasks() {
       log(`Erstberatung-Kunden-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateProspectStatuses } = await import("./startup/migrate-prospect-statuses");
+    try {
+      await migrateProspectStatuses();
+    } catch (err) {
+      log(`Prospect-Status-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
+    const { matchProspectsToCustomers } = await import("./startup/prospect-customer-matching");
+    try {
+      const matched = await matchProspectsToCustomers();
+      if (matched > 0) log(`Prospect-Kunden-Abgleich: ${matched} Interessenten als gewonnen markiert`, "startup");
+    } catch (err) {
+      log(`Prospect-Kunden-Abgleich fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateSchulungBesprechungToSonstiges } = await import("./startup/migrate-schulung-besprechung-to-sonstiges");
     try {
       await migrateSchulungBesprechungToSonstiges();

@@ -288,7 +288,13 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   }, req.ip).catch(() => {});
 
   geocodeCustomer(customer.id).catch(err => console.error("[geocoding] Background geocoding failed:", err));
-  
+
+  import("../../startup/prospect-customer-matching")
+    .then(({ matchNewCustomerToProspects }) =>
+      matchNewCustomerToProspects(customer.id, data.vorname, data.nachname, data.telefon)
+    )
+    .catch(err => console.warn("[prospect-matching] Prospect-Abgleich nach Kundenanlage fehlgeschlagen:", err));
+
   res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
 }));
 
