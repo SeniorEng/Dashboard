@@ -125,14 +125,16 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       });
       totalCostCents = costs.totalCents;
 
-      const [hwService, abService, kmService] = await Promise.all([
+      const [hwService, abService, travelKmService, customerKmService] = await Promise.all([
         serviceCatalogStorage.getServiceByCode("hauswirtschaft"),
         serviceCatalogStorage.getServiceByCode("alltagsbegleitung"),
-        serviceCatalogStorage.getServiceByCode("kilometer"),
+        serviceCatalogStorage.getServiceByCode("travel_km"),
+        serviceCatalogStorage.getServiceByCode("customer_km"),
       ]);
       if (hwService && hauswirtschaftMinutes > 0) costDetails.push({ serviceId: hwService.id, costCents: costs.hauswirtschaftCents, vatRate: hwService.vatRate });
       if (abService && alltagsbegleitungMinutes > 0) costDetails.push({ serviceId: abService.id, costCents: costs.alltagsbegleitungCents, vatRate: abService.vatRate });
-      if (kmService && (travelKilometers > 0 || customerKilometers > 0)) costDetails.push({ serviceId: kmService.id, costCents: costs.travelCents + costs.customerKilometersCents, vatRate: kmService.vatRate });
+      if (travelKmService && travelKilometers > 0 && costs.travelCents > 0) costDetails.push({ serviceId: travelKmService.id, costCents: costs.travelCents, vatRate: travelKmService.vatRate });
+      if (customerKmService && customerKilometers > 0 && costs.customerKilometersCents > 0) costDetails.push({ serviceId: customerKmService.id, costCents: costs.customerKilometersCents, vatRate: customerKmService.vatRate });
     }
   } catch (error: unknown) {
     if (error instanceof Error && error.message.includes("Preisvereinbarung")) {

@@ -1163,4 +1163,139 @@ describe("INT-16: Selbstzahler-Kostenvorschau (cost-estimate)", () => {
     expect(res.status).toBe(200);
     expect(res.data.vatRate).toBe(19);
   });
+
+  it("INT-16.6 – Gemischte Services (HW + AB + km) liefern korrekte gewichtete MwSt und Brutto", async () => {
+    const today = getTodayDate();
+
+    const servicesRes = await apiGet<any[]>("/api/services");
+    expect(servicesRes.status).toBe(200);
+    const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
+    const abService = servicesRes.data.find((s: any) => s.code === "alltagsbegleitung");
+    const travelKmService = servicesRes.data.find((s: any) => s.code === "travel_km");
+    const customerKmService = servicesRes.data.find((s: any) => s.code === "customer_km");
+    expect(hwService).toBeDefined();
+    expect(abService).toBeDefined();
+    expect(travelKmService).toBeDefined();
+    expect(customerKmService).toBeDefined();
+    const hwVat = hwService!.vatRate;
+    const abVat = abService!.vatRate;
+    const travelKmVat = travelKmService!.vatRate;
+    const customerKmVat = customerKmService!.vatRate;
+
+    const hwOnly = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    const abOnly = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=0&alltagsbegleitungMinutes=45&travelKilometers=0&customerKilometers=0`
+    );
+    const travelKmOnly = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=0&alltagsbegleitungMinutes=0&travelKilometers=10&customerKilometers=0`
+    );
+    const customerKmOnly = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=0&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=5`
+    );
+    expect(hwOnly.status).toBe(200);
+    expect(abOnly.status).toBe(200);
+    expect(travelKmOnly.status).toBe(200);
+    expect(customerKmOnly.status).toBe(200);
+    expect(hwOnly.data.totalCents).toBeGreaterThan(0);
+    expect(abOnly.data.totalCents).toBeGreaterThan(0);
+    expect(travelKmOnly.data.totalCents).toBeGreaterThan(0);
+    expect(customerKmOnly.data.totalCents).toBeGreaterThan(0);
+
+    const hwCents = hwOnly.data.totalCents;
+    const abCents = abOnly.data.totalCents;
+    const travelKmCents = travelKmOnly.data.totalCents;
+    const customerKmCents = customerKmOnly.data.totalCents;
+    const expectedTotalCents = hwCents + abCents + travelKmCents + customerKmCents;
+
+    const mixed = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=45&travelKilometers=10&customerKilometers=5`
+    );
+    expect(mixed.status).toBe(200);
+    const d = mixed.data;
+
+    expect(d.isSelbstzahler).toBe(true);
+    expect(d.warning).toBeNull();
+    expect(d.isHardBlock).toBe(false);
+    expect(d.privateCents).toBe(0);
+    expect(d).not.toHaveProperty("availableCents");
+    expect(d).not.toHaveProperty("currentMonthUsedCents");
+    expect(d).not.toHaveProperty("monthlyLimitCents");
+
+    expect(d.totalCents).toBe(expectedTotalCents);
+
+    // Reproduziere die gewichtete MwSt-Berechnung aus server/routes/budget.ts:
+    // weightedVatRate = sum(vatRate * costCents) / sum(costCents) über alle
+    // costDetails (HW, AB, Anfahrts-km, Kunden-km).
+    const weightedNumerator =
+      hwVat * hwCents + abVat * abCents + travelKmVat * travelKmCents + customerKmVat * customerKmCents;
+    const weightedDenominator = hwCents + abCents + travelKmCents + customerKmCents;
+    const expectedWeightedVatRate = weightedNumerator / weightedDenominator;
+    expect(d.vatRate).toBe(Math.round(expectedWeightedVatRate));
+
+    const expectedVatCents = Math.round(d.totalCents * (expectedWeightedVatRate / 100));
+    expect(d.vatCents).toBe(expectedVatCents);
+    expect(d.bruttoCents).toBe(d.totalCents + d.vatCents);
+
+    // Wenn alle beteiligten MwSt-Sätze gleich sind, muss die gewichtete MwSt
+    // exakt diesem Satz entsprechen — unabhängig von den Mengenverhältnissen.
+    const allVatsEqual =
+      hwVat === abVat && abVat === travelKmVat && travelKmVat === customerKmVat;
+    if (allVatsEqual) {
+      expect(d.vatRate).toBe(hwVat);
+      expect(d.vatCents).toBe(Math.round(d.totalCents * (hwVat / 100)));
+    }
+  });
+
+  it("INT-16.7 – Gemischte Services über serviceIds liefern korrekte gewichtete MwSt", async () => {
+    const servicesRes = await apiGet<any[]>("/api/services");
+    expect(servicesRes.status).toBe(200);
+    const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
+    const abService = servicesRes.data.find((s: any) => s.code === "alltagsbegleitung");
+    expect(hwService).toBeDefined();
+    expect(abService).toBeDefined();
+    const hwVat = hwService!.vatRate;
+    const abVat = abService!.vatRate;
+
+    const today = getTodayDate();
+
+    // Einzelne Service-Estimates, um die erwarteten netto-Anteile zu erhalten.
+    const hwSolo = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&serviceIds=${hwService!.id}&serviceDurations=60`
+    );
+    const abSolo = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&serviceIds=${abService!.id}&serviceDurations=45`
+    );
+    expect(hwSolo.status).toBe(200);
+    expect(abSolo.status).toBe(200);
+    const hwCents = hwSolo.data.totalCents;
+    const abCents = abSolo.data.totalCents;
+    expect(hwCents).toBeGreaterThan(0);
+    expect(abCents).toBeGreaterThan(0);
+
+    const ids = `${hwService!.id},${abService!.id}`;
+    const durations = `60,45`;
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&serviceIds=${ids}&serviceDurations=${durations}`
+    );
+    expect(res.status).toBe(200);
+    const d = res.data;
+
+    expect(d.isSelbstzahler).toBe(true);
+    expect(d.warning).toBeNull();
+    expect(d.isHardBlock).toBe(false);
+    expect(d.totalCents).toBe(hwCents + abCents);
+
+    const expectedWeightedVatRate = (hwVat * hwCents + abVat * abCents) / (hwCents + abCents);
+    expect(d.vatRate).toBe(Math.round(expectedWeightedVatRate));
+
+    const expectedVatCents = Math.round(d.totalCents * (expectedWeightedVatRate / 100));
+    expect(d.vatCents).toBe(expectedVatCents);
+    expect(d.bruttoCents).toBe(d.totalCents + d.vatCents);
+
+    if (hwVat === abVat) {
+      expect(d.vatRate).toBe(hwVat);
+    }
+  });
 });
