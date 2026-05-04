@@ -367,39 +367,6 @@ describe("KV-3: Versichertennummer-Validierung", () => {
     createdCustomerIds.push(res.data.id);
   });
 
-  it("KV-3.9 – Prospect-Konvertierung zu Privatpatient akzeptiert PKV-Nummer", async () => {
-    const prospectRes = await apiPost<any>("/api/prospects/inline", {
-      vorname: "QS-Konv-Privat",
-      nachname: "PrivatPKV-" + uniqueId(),
-      telefon: "+4917600000111",
-    });
-    expect(prospectRes.status, `Prospect-Setup fehlgeschlagen: ${JSON.stringify(prospectRes.data)}`).toBe(201);
-    const prospectId = prospectRes.data.id;
-
-    const convertRes = await apiPost<any>(`/api/admin/prospects/${prospectId}/convert`, {
-      billingType: "pflegekasse_privat",
-      vorname: "QS-Konv-Privat",
-      nachname: "Konvert-PKV-" + uniqueId(),
-      geburtsdatum: "1942-03-20",
-      strasse: "Konvertweg",
-      nr: "5",
-      plz: "10115",
-      stadt: "Berlin",
-      pflegegrad: 2,
-      pflegegradSeit: "2024-01-01",
-      insurance: {
-        providerId: insuranceProviderId,
-        versichertennummer: "PKV-CONV-2026/01",
-        validFrom: "2024-01-01",
-      },
-    });
-    expect(convertRes.status, `Expected 201, got ${convertRes.status}: ${JSON.stringify(convertRes.data)}`).toBe(201);
-    if (convertRes.data?.customer?.id) {
-      createdCustomerIds.push(convertRes.data.customer.id);
-    } else if (convertRes.data?.id) {
-      createdCustomerIds.push(convertRes.data.id);
-    }
-  });
 });
 
 describe("KV-4: Pflegegrad-Historie", () => {

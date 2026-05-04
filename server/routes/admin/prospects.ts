@@ -1,29 +1,12 @@
 import { Router, Request, Response } from "express";
-import { z } from "zod";
 import { prospectStorage } from "../../storage/prospects";
 import {
   insertProspectSchema, updateProspectSchema, insertProspectNoteSchema,
   qualifyProspectSchema, insertProspectOfferSchema,
-  PROSPECT_STATUSES,
-  customers, prospects, appointments, prospectOffers, prospectNotes,
 } from "@shared/schema";
-import { optionalGermanPhoneSchema, validateVersichertennummerFor } from "@shared/schema/common";
-import { convertProspectSchema } from "../../lib/conversion-schemas";
-import { customerManagementStorage } from "../../storage/customer-management";
-import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { parseLeadEmail } from "../../services/email-parser";
-import { auditService } from "../../services/audit";
-import { authService } from "../../services/auth";
-import { geocodeCustomer } from "../../services/geocoding";
-import { birthdaysCache, customerIdsCache } from "../../services/cache";
-import { validateGeburtsdatum } from "@shared/utils/datetime";
-import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
-import { findCustomerDuplicates } from "../../lib/duplicate-check";
-import { readTestFaults } from "../../lib/test-fault-injector";
-import { db } from "../../lib/db";
-import { eq, and, isNull } from "drizzle-orm";
 
 const router = Router();
 
@@ -295,152 +278,6 @@ router.get("/prospects/:id/offer", asyncHandler("Angebot konnte nicht geladen we
 
   const offer = await prospectStorage.getOpenOffer(id);
   res.json(offer || null);
-}));
-
-
-router.post("/prospects/:id/convert", asyncHandler("Konvertierung fehlgeschlagen", async (req: Request, res: Response) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-
-  const prospect = await prospectStorage.getById(id);
-  if (!prospect) {
-    res.status(404).json({ error: "NOT_FOUND", message: "Interessent nicht gefunden" });
-    return;
-  }
-
-  if (prospect.convertedCustomerId) {
-    res.status(400).json({ error: "ALREADY_CONVERTED", message: "Interessent wurde bereits konvertiert" });
-    return;
-  }
-
-  const data = convertProspectSchema.parse(req.body);
-
-  if (data.insurance?.versichertennummer) {
-    const vnr = data.insurance.versichertennummer;
-    const provider = await customerManagementStorage.getInsuranceProvider(data.insurance.providerId);
-    const result = validateVersichertennummerFor(vnr, {
-      billingType: data.billingType,
-      isPrivateProvider: provider?.isPrivate ?? false,
-    });
-    if (!result.ok) {
-      res.status(400).json({ error: "VALIDATION_ERROR", message: result.message });
-      return;
-    }
-  }
-
-  if (!data.skipDuplicateCheck) {
-    const duplicates = await findCustomerDuplicates(data.vorname, data.nachname, data.geburtsdatum);
-    if (duplicates.length > 0) {
-      res.status(409).json({
-        error: "DUPLICATE_WARNING",
-        code: "DUPLICATE_WARNING",
-        message: `Es existiert bereits ${duplicates.length === 1 ? "ein Kunde" : `${duplicates.length} Kunden`} mit gleichem Namen. Zum Konvertieren "skipDuplicateCheck" setzen.`,
-        details: { duplicates },
-      });
-      return;
-    }
-  }
-
-  const geburtsdatumError = validateGeburtsdatum(data.geburtsdatum);
-  if (geburtsdatumError) {
-    res.status(400).json({ error: "VALIDATION_ERROR", message: geburtsdatumError });
-    return;
-  }
-
-  const userId = req.user!.id;
-  const warnings: string[] = [];
-  const testFaults = readTestFaults(req);
-
-  // Atomare Konvertierung (Task #267): Customer-Insert, Appointment-
-  // Reassign, Offer-Update, Prospect-Status UND die gesamte Pflicht-
-  // Cascade (Pflegegrad, Insurance, Budget, Vertrag) müssen gemeinsam
-  // committen. Sonst entstehen "halb konvertierte" Interessenten, die im
-  // UI als gewonnen markiert sind, aber Folge-Workflows scheitern lassen.
-  const { result, relatedWarnings } = await db.transaction(async (tx) => {
-    const [customer] = await tx.insert(customers).values({
-      ...buildCustomerInsertData(data, userId),
-      status: "aktiv",
-      primaryEmployeeId: data.primaryEmployeeId ?? null,
-      backupEmployeeId: data.backupEmployeeId ?? null,
-      backupEmployeeId2: data.backupEmployeeId2 ?? null,
-      convertedFromProspectId: id,
-    }).returning();
-
-    await tx.update(appointments)
-      .set({ customerId: customer.id })
-      .where(and(
-        eq(appointments.prospectId, id),
-        isNull(appointments.customerId),
-      ));
-
-    const openOffer = await tx
-      .select()
-      .from(prospectOffers)
-      .where(and(
-        eq(prospectOffers.prospectId, id),
-        eq(prospectOffers.status, "offen"),
-      ))
-      .then(rows => rows[0]);
-
-    if (openOffer) {
-      await tx.update(prospectOffers)
-        .set({ status: "angenommen" })
-        .where(eq(prospectOffers.id, openOffer.id));
-    }
-
-    await tx.update(prospects)
-      .set({
-        status: "gewonnen",
-        convertedCustomerId: customer.id,
-        updatedAt: new Date(),
-      })
-      .where(eq(prospects.id, id));
-
-    const w = await createCustomerRelatedData({
-      customerId: customer.id,
-      userId,
-      logPrefix: "POST /prospects/:id/convert",
-      pflegegrad: data.pflegegrad,
-      pflegegradSeit: data.pflegegradSeit,
-      insurance: data.insurance && isPflegekasseCustomer(data.billingType) ? data.insurance : undefined,
-      contacts: data.contacts,
-      budgets: data.budgets && isPflegekasseCustomer(data.billingType) ? data.budgets : undefined,
-      contract: data.contract,
-      useLedgerBudgets: false,
-      tx,
-      testFaults,
-    });
-
-    return { result: customer, relatedWarnings: w };
-  });
-
-  customerIdsCache.invalidateAll();
-  warnings.push(...relatedWarnings);
-
-  if (data.primaryEmployeeId !== undefined || data.backupEmployeeId !== undefined || data.backupEmployeeId2 !== undefined) {
-    const empIds = [data.primaryEmployeeId, data.backupEmployeeId, data.backupEmployeeId2].filter((id): id is number => id != null);
-    const uniqueEmpIds = new Set(empIds);
-    if (empIds.length !== uniqueEmpIds.size) {
-      warnings.push("Mitarbeiter-Zuordnung: Alle zugewiesenen Mitarbeiter müssen unterschiedlich sein");
-    } else {
-      for (const empId of empIds) {
-        const emp = await authService.getUser(empId);
-        if (!emp || !emp.isActive) {
-          warnings.push(`Mitarbeiter ${empId} nicht gefunden oder nicht aktiv`);
-        }
-      }
-    }
-  }
-
-  auditService.log(userId, "prospect_converted", "prospect", id, { customerId: result.id }, req.ip);
-
-  birthdaysCache.invalidateAll();
-  geocodeCustomer(result.id).catch(err => console.error("[geocoding] Background geocoding failed:", err));
-
-  res.status(201).json({
-    customer: result,
-    warnings: warnings.length > 0 ? warnings : undefined,
-  });
 }));
 
 export default router;
