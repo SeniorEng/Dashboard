@@ -26,7 +26,6 @@ import { db } from "../../lib/db";
 import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { sendEmail, buildWelcomeEmailHtml } from "../../services/email-service";
-import { resolveLogoToDataUrl } from "../../services/logo-resolver";
 
 const router = Router();
 
@@ -180,14 +179,13 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
 
-      const resolvedLogo = await resolveLogoToDataUrl(companySettings.logoUrl);
       const html = buildWelcomeEmailHtml({
         vorname: result.data.vorname,
         nachname: result.data.nachname,
         email: result.data.email,
         companyName: companySettings.companyName || "SeniorenEngel",
         resetUrl,
-        logoUrl: resolvedLogo,
+        logoUrl: companySettings.logoUrl ? "/api/public/logo/main" : null,
       });
 
       const emailResult = await sendEmail(companySettings, {
@@ -483,14 +481,13 @@ router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte
   const baseUrl = `${req.protocol}://${req.get("host")}`;
   const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
 
-  const resolvedLogo = await resolveLogoToDataUrl(companySettings.logoUrl);
   const html = buildWelcomeEmailHtml({
     vorname: user.vorname || "",
     nachname: user.nachname || "",
     email: user.email,
     companyName: companySettings.companyName || "SeniorenEngel",
     resetUrl,
-    logoUrl: resolvedLogo,
+    logoUrl: companySettings.logoUrl ? "/api/public/logo/main" : null,
   });
 
   const emailResult = await sendEmail(companySettings, {

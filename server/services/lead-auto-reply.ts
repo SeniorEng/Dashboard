@@ -3,7 +3,6 @@ import { prospectStorage } from "../storage/prospects";
 import { sendEmail, buildEmailLayout } from "./email-service";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import { withTimeout } from "../lib/with-timeout";
-import { resolveLogoToDataUrl } from "./logo-resolver";
 import { log } from "../lib/log";
 
 interface LeadAutoReplyParams {
@@ -134,7 +133,7 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
     vorname: leadVorname,
     nachname: leadNachname,
     companyName: settings.companyName || "SeniorenEngel",
-    logoUrl: await resolveLogoToDataUrl(settings.logoUrl),
+    logoUrl: settings.logoUrl ? "/api/public/logo/main" : null,
     bodyText: settings.leadAutoReplyBody,
     telefon: settings.telefon,
     email: settings.email,
