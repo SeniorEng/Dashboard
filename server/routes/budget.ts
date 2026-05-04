@@ -152,12 +152,30 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
   const customer = await storage.getCustomer(customerId);
   const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
+  const isSelbstzahler = customer?.billingType === "selbstzahler";
 
   if (costDetails.length > 0) {
     const totalCost = costDetails.reduce((s, c) => s + c.costCents, 0);
     if (totalCost > 0) {
       weightedVatRate = costDetails.reduce((s, c) => s + (c.vatRate * c.costCents / totalCost), 0);
     }
+  }
+
+  if (isSelbstzahler) {
+    const vatCents = Math.round(totalCostCents * (weightedVatRate / 100));
+    const bruttoCents = totalCostCents + vatCents;
+    res.json({
+      totalCents: totalCostCents,
+      isSelbstzahler: true,
+      bruttoCents,
+      vatCents,
+      vatRate: Math.round(weightedVatRate),
+      warning: null,
+      isHardBlock: false,
+      privateCents: 0,
+      acceptsPrivatePayment: false,
+    });
+    return;
   }
 
   const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);

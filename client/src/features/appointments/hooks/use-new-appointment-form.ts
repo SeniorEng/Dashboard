@@ -309,6 +309,10 @@ export function useNewAppointmentForm() {
     projectedMonthUsedCents?: number;
     isHardBlock?: boolean;
     acceptsPrivatePayment?: boolean;
+    isSelbstzahler?: boolean;
+    bruttoCents?: number;
+    vatCents?: number;
+    vatRate?: number;
   }>({
     queryKey: ["/api/budget", ktCustomerId, "cost-estimate", budgetEstimateParams],
     queryFn: async () => {
@@ -322,6 +326,10 @@ export function useNewAppointmentForm() {
         projectedMonthUsedCents?: number;
         isHardBlock?: boolean;
         acceptsPrivatePayment?: boolean;
+        isSelbstzahler?: boolean;
+        bruttoCents?: number;
+        vatCents?: number;
+        vatRate?: number;
       }>(`/budget/${ktCustomerId}/cost-estimate?${budgetEstimateParams}`);
       if (!result.success) return { totalCents: 0, warning: null };
       return result.data;
