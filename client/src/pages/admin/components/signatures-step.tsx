@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { SignaturePad, type SignatureMetadata } from "@/components/ui/signature-pad";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen, ChevronDown, ChevronUp, Eye, ArrowLeft } from "lucide-react";
+import { FileText, Check, AlertCircle, Loader2, AlertTriangle, Upload, Camera, X, Pen, ChevronDown, ChevronUp, Eye, ArrowLeft, Info } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { type BillingType } from "@shared/domain/customers";
 import { useUpload } from "@/hooks/use-upload";
@@ -171,12 +171,13 @@ function RequirementCard({
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const { documentType, template } = requirement;
-  const canSign = (documentType.inputMethod === "signature" || documentType.inputMethod === "both") && !!template;
-  const canUpload = documentType.inputMethod === "upload" || documentType.inputMethod === "both" || !template;
+  const isInfoDoc = documentType.inputMethod === "info";
+  const canSign = !isInfoDoc && (documentType.inputMethod === "signature" || documentType.inputMethod === "both") && !!template;
+  const canUpload = !isInfoDoc && (documentType.inputMethod === "upload" || documentType.inputMethod === "both" || !template);
 
   const isSigned = !!signature;
   const isUploaded = !!uploadedDoc;
-  const isFulfilled = isSigned || isUploaded;
+  const isFulfilled = isInfoDoc || isSigned || isUploaded;
   const testSlug = template?.slug ?? `type-${documentType.id}`;
 
   const { uploadFile, isUploading } = useUpload({
@@ -291,12 +292,18 @@ function RequirementCard({
           <div className="flex-1 min-w-0">
             <h4 className="font-medium text-gray-900">{documentType.name}</h4>
             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-              <Badge
-                variant={requirement.requirement === "pflicht" ? "destructive" : "secondary"}
-                className="text-[10px] px-1.5 py-0.5 leading-none"
-              >
-                {requirement.requirement === "pflicht" ? "Pflicht" : "Optional"}
-              </Badge>
+              {isInfoDoc ? (
+                <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-blue-500">
+                  Automatisch Vertragsbestandteil
+                </Badge>
+              ) : (
+                <Badge
+                  variant={requirement.requirement === "pflicht" ? "destructive" : "secondary"}
+                  className="text-[10px] px-1.5 py-0.5 leading-none"
+                >
+                  {requirement.requirement === "pflicht" ? "Pflicht" : "Optional"}
+                </Badge>
+              )}
               {isSigned && (
                 <Badge variant="default" className="text-[10px] px-1.5 py-0.5 leading-none bg-green-600">
                   Unterschrieben
@@ -352,7 +359,32 @@ function RequirementCard({
 
         {!showPreview && (
           <div className="space-y-2">
-            {showSignaturePad && canSign ? (
+            {isInfoDoc ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md">
+                  <Info className="h-4 w-4 text-blue-500 shrink-0" />
+                  <span className="text-xs text-blue-700">
+                    Dieses Dokument wird automatisch Vertragsbestandteil. Keine Unterschrift oder Upload erforderlich.
+                  </span>
+                </div>
+                {template && formData && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleShowPreview}
+                    disabled={isLoadingPreview}
+                    className="text-sm min-h-[44px]"
+                    data-testid={`button-preview-${testSlug}`}
+                  >
+                    {isLoadingPreview ? (
+                      <><Loader2 className={`${iconSize.sm} mr-1.5 animate-spin`} />Wird geladen...</>
+                    ) : (
+                      <><Eye className={`${iconSize.sm} mr-1.5`} />Vorschau</>
+                    )}
+                  </Button>
+                )}
+              </div>
+            ) : showSignaturePad && canSign ? (
               <SignaturePad
                 title={`Unterschrift: ${documentType.name}`}
                 onSave={handleSignatureSave}
@@ -464,6 +496,7 @@ function OptionalDocsSection({
 }) {
   const [expanded, setExpanded] = useState(false);
   const uploadedCount = requirements.filter(r =>
+    r.documentType.inputMethod === "info" ||
     uploadedDocuments.some(u => u.documentTypeId === r.documentType.id) ||
     (r.template && customerSignatures[r.template.slug])
   ).length;

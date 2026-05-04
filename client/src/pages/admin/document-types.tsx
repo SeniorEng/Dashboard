@@ -549,6 +549,7 @@ export function DocumentTypesContent() {
                 <SelectItem value="upload">Nur Upload</SelectItem>
                 <SelectItem value="signature">Nur digitale Unterschrift</SelectItem>
                 <SelectItem value="both">Upload oder Unterschrift</SelectItem>
+                <SelectItem value="info">Zur Kenntnisnahme</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -813,7 +814,9 @@ export function DocumentTypesContent() {
                         )}
                         <div className="flex flex-wrap gap-x-4 gap-y-1 ml-6">
                           <span className="text-xs text-gray-500 flex items-center gap-1">
-                            {dt.inputMethod === "signature" ? (
+                            {dt.inputMethod === "info" ? (
+                              <><Info className="h-3 w-3 text-blue-500" /> Zur Kenntnisnahme</>
+                            ) : dt.inputMethod === "signature" ? (
                               <><PenTool className="h-3 w-3" /> Digitale Unterschrift</>
                             ) : dt.inputMethod === "both" ? (
                               <><FileText className="h-3 w-3" /> Upload oder Unterschrift</>

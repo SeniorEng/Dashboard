@@ -24,6 +24,7 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
+  Info,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -39,6 +40,7 @@ interface DocumentTypeWithTemplate {
   description: string | null;
   targetType: string;
   context: string;
+  inputMethod: string;
   reviewIntervalMonths: number | null;
   reminderLeadTimeDays: number | null;
   isActive: boolean;
@@ -285,19 +287,23 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                             {formatDateForDisplay(latestUpload.uploadedAt.split("T")[0])}
                           </span>
                         )}
-                        {latestGenDoc && (
+                        {group.docType?.inputMethod === "info" ? (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 flex items-center gap-1">
+                            <Info className="h-3 w-3" />
+                            Zur Kenntnisnahme
+                          </span>
+                        ) : latestGenDoc ? (
                           <span className={`text-xs px-1.5 py-0.5 rounded ${
                             latestGenDoc.signingStatus === "complete" ? "bg-green-100 text-green-700" :
                             "bg-amber-100 text-amber-700"
                           }`}>
                             {latestGenDoc.signingStatus === "complete" ? "Digital unterschrieben" : "Unterschrift ausstehend"}
                           </span>
-                        )}
-                        {latestUpload && !latestGenDoc && (
+                        ) : latestUpload ? (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
                             Hochgeladen
                           </span>
-                        )}
+                        ) : null}
                         {latestUpload && <ReviewBadge reviewDueDate={latestUpload.reviewDueDate} />}
                       </div>
                     </div>
@@ -455,7 +461,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           {!selectedTypeForUpload ? (
             <div className="space-y-1">
               <p className="text-sm text-gray-500 mb-3">Welchen Dokumententyp möchten Sie hinzufügen?</p>
-              {[...(docTypes || [])].sort((a, b) => a.name.localeCompare(b.name, "de")).map(dt => (
+              {[...(docTypes || [])].filter(dt => dt.inputMethod !== "info").sort((a, b) => a.name.localeCompare(b.name, "de")).map(dt => (
                 <div
                   key={dt.id}
                   className="p-3 rounded-lg border border-gray-200 hover:border-teal-300 hover:bg-teal-50/50 cursor-pointer transition-colors"

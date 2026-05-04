@@ -13,13 +13,14 @@ export const DOCUMENT_TYPE_CONTEXT_LABELS: Record<DocumentTypeContext, string> =
   beide: "Immer verfügbar",
 };
 
-export const INPUT_METHODS = ["upload", "signature", "both"] as const;
+export const INPUT_METHODS = ["upload", "signature", "both", "info"] as const;
 export type InputMethod = typeof INPUT_METHODS[number];
 
 export const INPUT_METHOD_LABELS: Record<InputMethod, string> = {
   upload: "Nur Upload",
   signature: "Nur digitale Unterschrift",
   both: "Upload oder digitale Unterschrift",
+  info: "Zur Kenntnisnahme (automatisch Vertragsbestandteil)",
 };
 
 export const documentTypes = pgTable("document_types", {

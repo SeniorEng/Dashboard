@@ -218,6 +218,43 @@ export async function regeneratePdfWithSignature(
   return { objectPath, fileName, integrityHash: combinedHash };
 }
 
+export async function generateInfoDocumentPdfs(options: {
+  customerId: number;
+  billingType: string;
+  generatedByUserId: number;
+}): Promise<void> {
+  const { customerId, billingType, generatedByUserId } = options;
+
+  try {
+    const { evaluateTriggersForCustomer } = await import("./document-trigger-engine");
+    const requirements = await evaluateTriggersForCustomer({ billingType });
+
+    const infoRequirements = requirements.filter(
+      r => r.documentType.inputMethod === "info" && r.template
+    );
+
+    for (const req of infoRequirements) {
+      if (!req.template) continue;
+
+      try {
+        const template = await documentStorage.getDocumentTemplate(req.template.id);
+        if (!template) continue;
+
+        await generateAndStorePdf({
+          template,
+          customerId,
+          generatedByUserId,
+          signingStatus: "complete",
+        });
+      } catch (err) {
+        console.error(`[info-docs] PDF-Generierung fehlgeschlagen für Dokumententyp ${req.documentType.name} (Kunde ${customerId}):`, err);
+      }
+    }
+  } catch (err) {
+    console.error(`[info-docs] Info-Dokument-Generierung fehlgeschlagen für Kunde ${customerId}:`, err);
+  }
+}
+
 export async function getDocumentPdfBuffer(objectPath: string): Promise<Buffer> {
   let fullPath: string;
   if (objectPath.startsWith("/objects/")) {

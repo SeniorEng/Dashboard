@@ -295,6 +295,12 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     )
     .catch(err => console.warn("[prospect-matching] Prospect-Abgleich nach Kundenanlage fehlgeschlagen:", err));
 
+  const { generateInfoDocumentPdfs } = await import("../../services/document-pdf");
+  generateInfoDocumentPdfs({
+    customerId: customer.id,
+    billingType: data.billingType,
+    generatedByUserId: userId,
+  }).catch(err => console.error("[info-docs] Background info doc generation failed:", err));
   res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
 }));
 
