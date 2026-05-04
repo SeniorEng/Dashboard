@@ -10,7 +10,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay, isChild } from "@shared/utils/datetime";
-import { DEACTIVATION_REASON_LABELS, type DeactivationReason } from "@shared/domain/customers";
+import { DEACTIVATION_REASON_LABELS, isPflegekasseCustomer, type DeactivationReason } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -169,12 +169,14 @@ function BudgetsTabContent({
   customerDisplayName,
   pflegegrad,
   careLevelHistory,
+  billingType,
   onRefresh,
 }: {
   customerId: number;
   customerDisplayName: string;
   pflegegrad?: number;
   careLevelHistory?: Array<{ id: number; pflegegrad: number; validFrom: string; validTo: string | null; notes: string | null }>;
+  billingType?: string | null;
   onRefresh: () => void;
 }) {
   return (
@@ -205,6 +207,7 @@ function BudgetsTabContent({
         <PricingSection
           customerId={customerId}
           customerName={customerDisplayName}
+          billingType={billingType ?? undefined}
           onRefresh={onRefresh}
         />
       </SectionCard>
@@ -215,6 +218,7 @@ function BudgetsTabContent({
 }
 
 const VALID_TABS = ["overview", "vertrag", "documents", "contacts", "budgets", "insurance", "timeline"] as const;
+const SELBSTZAHLER_HIDDEN_TABS = ["budgets", "insurance"];
 
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -237,6 +241,18 @@ export default function AdminCustomerDetail() {
   }, [customerId, setLocation]);
 
   const { data: customer, isLoading, error, refetch } = useCustomer(customerId);
+
+  const isSelbstzahler = customer?.billingType === "selbstzahler";
+  const visibleTabs = useMemo(() => {
+    if (!isSelbstzahler) return VALID_TABS;
+    return VALID_TABS.filter((t) => !SELBSTZAHLER_HIDDEN_TABS.includes(t));
+  }, [isSelbstzahler]);
+
+  const effectiveTab = useMemo(() => {
+    if (isSelbstzahler && SELBSTZAHLER_HIDDEN_TABS.includes(activeTab)) return "overview";
+    return activeTab;
+  }, [activeTab, isSelbstzahler]);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -409,7 +425,7 @@ export default function AdminCustomerDetail() {
                 {customer.billingType && (
                   <StatusBadge type="billingType" value={customer.billingType} data-testid="badge-billingtype" />
                 )}
-                {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
+                {!isSelbstzahler && customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                   <>
                     <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
                     {(() => {
@@ -518,8 +534,8 @@ export default function AdminCustomerDetail() {
               { value: "budgets", label: "Budgets", testId: "tab-budgets" },
               { value: "insurance", label: "Versicherung", testId: "tab-insurance" },
               { value: "timeline", label: "Verlauf", testId: "tab-timeline" },
-            ]}
-            value={activeTab}
+            ].filter((t) => (visibleTabs as readonly string[]).includes(t.value))}
+            value={effectiveTab}
             onValueChange={handleTabChange}
             mobileVisibleCount={6}
           >
@@ -557,6 +573,7 @@ export default function AdminCustomerDetail() {
                 customerDisplayName={customerDisplayName}
                 pflegegrad={customer.pflegegrad ?? undefined}
                 careLevelHistory={customer.careLevelHistory}
+                billingType={customer.billingType}
                 onRefresh={refetch}
               />
             </TabsContent>

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
 import { DEACTIVATION_REASON_SELECT_OPTIONS } from "@shared/domain/customers";
+import { PricingSection } from "./customer-pricing-section";
 import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import {
   XCircle,
   UserX,
   Calendar,
+  Euro,
 } from "lucide-react";
 import type { CustomerDetail } from "@/lib/api/types";
 
@@ -673,7 +675,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
         )}
       </SectionCard>
 
-      <SectionCard
+      {customer.billingType !== "selbstzahler" && <SectionCard
         title="Abrechnung"
         icon={<CreditCard className={iconSize.sm} />}
         actions={editingSection !== "abrechnung" ? editButton("abrechnung") : undefined}
@@ -752,7 +754,23 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
             )}
           </div>
         )}
-      </SectionCard>
+      </SectionCard>}
+
+      {customer.billingType === "selbstzahler" && (
+        <SectionCard
+          title="Preisvereinbarung"
+          icon={<Euro className={iconSize.sm} />}
+        >
+          <PricingSection
+            customerId={customerId}
+            customerName={`${customer.vorname ?? ""} ${customer.nachname ?? ""}`.trim() || customer.name}
+            billingType={customer.billingType ?? undefined}
+            onRefresh={() => {
+              invalidateRelated(queryClient, "customers");
+            }}
+          />
+        </SectionCard>
+      )}
     </div>
   );
 }

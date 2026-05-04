@@ -369,7 +369,7 @@ export function useCustomerWizard() {
       email: formData.email.trim() || undefined,
       telefon: formData.telefon.trim() ? (normalizePhone(formData.telefon) || undefined) : undefined,
       festnetz: formData.festnetz.trim() ? (normalizePhone(formData.festnetz) || undefined) : undefined,
-      vorerkrankungen: isPflegekasse ? (formData.vorerkrankungen.trim() || undefined) : undefined,
+      vorerkrankungen: formData.vorerkrankungen.trim() || undefined,
       haustierVorhanden: formData.haustierVorhanden,
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,

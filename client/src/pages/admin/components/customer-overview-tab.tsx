@@ -5,6 +5,7 @@ import { ContactSection } from "./customer-overview/contact-section";
 import { EmployeeSection } from "./customer-overview/employee-section";
 import { CareLevelSection } from "./customer-overview/care-level-section";
 import { MedicalSection, SpecialFeaturesSection, DocumentDeliverySection } from "./customer-overview/details-sections";
+import { isPflegekasseCustomer } from "@shared/domain/customers";
 import type { CustomerDetail } from "@/lib/api/types";
 
 interface CustomerOverviewTabProps {
@@ -35,7 +36,9 @@ export function CustomerOverviewTab({ customer, customerId }: CustomerOverviewTa
     <div className="space-y-4">
       <ContactSection {...sectionProps} />
       <EmployeeSection {...sectionProps} />
-      <CareLevelSection {...sectionProps} />
+      {isPflegekasseCustomer((customer.billingType ?? "") as "" | "pflegekasse_gesetzlich" | "pflegekasse_privat" | "selbstzahler") && (
+        <CareLevelSection {...sectionProps} />
+      )}
       <MedicalSection {...sectionProps} />
       <SpecialFeaturesSection {...sectionProps} />
       <DocumentDeliverySection {...sectionProps} />

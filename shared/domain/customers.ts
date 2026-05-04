@@ -42,7 +42,7 @@ function needsPflegegradData(billingType: BillingType | ""): boolean {
 }
 
 export function needsVorerkrankungenData(billingType: BillingType | ""): boolean {
-  return isPflegekasseCustomer(billingType);
+  return isPflegekasseCustomer(billingType) || billingType === "selbstzahler";
 }
 
 const DEACTIVATION_REASONS = [

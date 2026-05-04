@@ -80,6 +80,7 @@ function getTodayISO(): string {
 interface PricingSectionProps {
   customerId: number;
   customerName: string;
+  billingType?: string;
   onRefresh: () => void;
 }
 
@@ -90,7 +91,10 @@ interface PendingReplaceState {
   existing: { id: number; priceCents: number; validFrom: string; serviceName: string };
 }
 
-export function PricingSection({ customerId, customerName, onRefresh }: PricingSectionProps) {
+export function PricingSection({ customerId, customerName, billingType, onRefresh }: PricingSectionProps) {
+  const isSelbstzahler = billingType === "selbstzahler";
+  const displayPrice = (priceCents: number) => isSelbstzahler ? Math.round(priceCents * 1.19) : priceCents;
+  const netFromInput = (inputCents: number) => isSelbstzahler ? Math.round(inputCents / 1.19) : inputCents;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
@@ -382,7 +386,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
 
   function startEdit(serviceId: number, currentPriceCents: number) {
     setEditingServiceId(serviceId);
-    setEditPrice((currentPriceCents / 100).toFixed(2).replace(".", ","));
+    setEditPrice((displayPrice(currentPriceCents) / 100).toFixed(2).replace(".", ","));
     setEditValidFrom("");
   }
 
@@ -393,7 +397,8 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
       toast({ title: "Ungültiger Preis", variant: "destructive" });
       return;
     }
-    const newPriceCents = Math.round(euros * 100);
+    const inputCents = Math.round(euros * 100);
+    const newPriceCents = netFromInput(inputCents);
     const existingCustomPrice = priceMap.get(serviceId);
     if (!editValidFrom && existingCustomPrice && newPriceCents !== existingCustomPrice.priceCents) {
       editMutation.mutate({
@@ -433,11 +438,11 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                 <div className="mt-3 rounded-md border bg-gray-50 px-3 py-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600">Bisheriger Preis</span>
-                    <span className="font-semibold" data-testid="text-existing-price">{formatCurrency(pendingReplace.existing.priceCents)}</span>
+                    <span className="font-semibold" data-testid="text-existing-price">{formatCurrency(displayPrice(pendingReplace.existing.priceCents))}</span>
                   </div>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-gray-600">Neuer Preis</span>
-                    <span className="font-semibold text-amber-700" data-testid="text-new-price">{formatCurrency(pendingReplace.priceCents)}</span>
+                    <span className="font-semibold text-amber-700" data-testid="text-new-price">{formatCurrency(displayPrice(pendingReplace.priceCents))}</span>
                   </div>
                 </div>
                 <div className="mt-3 text-xs text-gray-500">
@@ -505,13 +510,13 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                 </div>
                 {isCustom && (
                   <div className="text-[11px] text-gray-500 mt-0.5">
-                    Katalog: {formatCurrency(service.defaultPriceCents)} {unitLabel}
+                    Katalog: {formatCurrency(displayPrice(service.defaultPriceCents))} {unitLabel}
                   </div>
                 )}
                 {serviceFuturePrices.map(fp => (
                   <div key={fp.id} className="text-[11px] text-blue-600 mt-0.5 flex items-center gap-1" data-testid={`future-price-${fp.id}`}>
                     <Calendar className="h-3 w-3" />
-                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(fp.priceCents)} {unitLabel}
+                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(displayPrice(fp.priceCents))} {unitLabel}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -553,7 +558,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                   </div>
                 ) : (
                   <>
-                    <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(effectivePrice)}</span>
+                    <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice))}</span>
                     <span className="text-xs text-gray-500 ml-0.5">{unitLabel}</span>
                   </>
                 )}
@@ -614,7 +619,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
 
       <div className="px-2 pt-2 space-y-2">
         <p className="text-[11px] text-gray-500">
-          Preise zzgl. MwSt. Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
+          {isSelbstzahler ? "Preise inkl. MwSt." : "Preise zzgl. MwSt."} Klicken Sie auf den Stift, um einen kundenindividuellen Preis zu setzen.
           {" "}Über das Datumsfeld können Sie einen zukünftigen Gültigkeitszeitpunkt festlegen.
           {hasCustomPrices ? " Der Pfeil setzt den Preis auf den Katalogpreis zurück." : ""}
           {" "}In der Preishistorie können Sie Preis, Gültig-ab und Gültig-bis bestehender Einträge nachträglich anpassen.
@@ -662,7 +667,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                             <span className="text-xs text-gray-500">{UNIT_LABELS[p.unitType] || "€"}</span>
                           </div>
                         ) : (
-                          <>{formatCurrency(p.priceCents)} {UNIT_LABELS[p.unitType] || "€"}</>
+                          <>{formatCurrency(displayPrice(p.priceCents))} {UNIT_LABELS[p.unitType] || "€"}</>
                         )}
                       </td>
                       <td className="px-2 py-1.5">
@@ -715,7 +720,8 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                                     toast({ title: "Ungültiger Preis", variant: "destructive" });
                                     return;
                                   }
-                                  const newPriceCents = Math.round(euros * 100);
+                                  const inputCents = Math.round(euros * 100);
+                                  const newPriceCents = netFromInput(inputCents);
                                   updateMutation.mutate({
                                     priceId: p.id,
                                     validFrom: editPriceValidFrom,
@@ -752,7 +758,7 @@ export function PricingSection({ customerId, customerName, onRefresh }: PricingS
                                 setEditingPriceId(p.id);
                                 setEditPriceValidFrom(p.validFrom.substring(0, 10));
                                 setEditPriceValidTo(p.validTo ? p.validTo.substring(0, 10) : "");
-                                setEditPriceAmount((p.priceCents / 100).toFixed(2).replace(".", ","));
+                                setEditPriceAmount((displayPrice(p.priceCents) / 100).toFixed(2).replace(".", ","));
                               }}
                               data-testid={`btn-edit-history-${p.id}`}
                             >
