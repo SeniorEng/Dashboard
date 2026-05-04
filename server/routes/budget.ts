@@ -174,6 +174,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       isHardBlock: false,
       privateCents: 0,
       acceptsPrivatePayment: false,
+      ...(process.env.NODE_ENV === "test" ? { _testBudgetQueriesExecuted: false } : {}),
     });
     return;
   }
@@ -228,6 +229,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     vatCents,
     vatRate: Math.round(weightedVatRate),
     acceptsPrivatePayment,
+    ...(process.env.NODE_ENV === "test" ? { _testBudgetQueriesExecuted: true } : {}),
   });
 }));
 

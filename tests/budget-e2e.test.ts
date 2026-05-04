@@ -1062,3 +1062,105 @@ describe("INT-15: Storno-Netting currentMonthUsedCents (§45b im aktuellen Monat
     expect(monthUsedAfter).toBeGreaterThanOrEqual(0);
   });
 });
+
+
+describe("INT-16: Selbstzahler-Kostenvorschau (cost-estimate)", () => {
+  let scenario: BudgetScenarioHandle;
+
+  beforeAll(async () => {
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-16",
+      billingType: "selbstzahler",
+      acceptsPrivatePayment: true,
+      types: [
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: false, monthlyLimitCents: null },
+        { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await scenario.cleanup();
+  });
+
+  it("INT-16.1 – Selbstzahler-Flag und Brutto-Berechnung bei 60 Min HW", async () => {
+    const today = getTodayDate();
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    expect(res.status).toBe(200);
+    const d = res.data;
+
+    expect(d.isSelbstzahler).toBe(true);
+    expect(d.totalCents).toBeGreaterThan(0);
+    expect(d.vatCents).toBeGreaterThan(0);
+    expect(d.bruttoCents).toBe(d.totalCents + d.vatCents);
+    expect(d.warning).toBeNull();
+    expect(d.isHardBlock).toBe(false);
+    expect(d.privateCents).toBe(0);
+  });
+
+  it("INT-16.2 – Keine Budget-Felder und Budget-Queries übersprungen", async () => {
+    const today = getTodayDate();
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    expect(res.status).toBe(200);
+    const d = res.data;
+
+    expect(d).not.toHaveProperty("availableCents");
+    expect(d).not.toHaveProperty("currentMonthUsedCents");
+    expect(d).not.toHaveProperty("monthlyLimitCents");
+
+    expect(d._testBudgetQueriesExecuted).toBe(false);
+  });
+
+  it("INT-16.3 – 0 Minuten liefert bruttoCents = 0 und Selbstzahler-Shape", async () => {
+    const today = getTodayDate();
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=0&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    expect(res.status).toBe(200);
+    const d = res.data;
+
+    expect(d.isSelbstzahler).toBe(true);
+    expect(d.totalCents).toBe(0);
+    expect(d.bruttoCents).toBe(0);
+    expect(d.vatCents).toBe(0);
+    expect(d.warning).toBeNull();
+    expect(d.isHardBlock).toBe(false);
+  });
+
+  it("INT-16.4 – Selbstzahler-Antwort bei serviceIds-Parametern", async () => {
+    const servicesRes = await apiGet<any[]>("/api/services");
+    expect(servicesRes.status).toBe(200);
+    const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
+    expect(hwService).toBeDefined();
+
+    const today = getTodayDate();
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&serviceIds=${hwService!.id}&serviceDurations=60`
+    );
+    expect(res.status).toBe(200);
+    const d = res.data;
+
+    expect(d.isSelbstzahler).toBe(true);
+    expect(d.totalCents).toBeGreaterThan(0);
+    expect(d.bruttoCents).toBe(d.totalCents + d.vatCents);
+    expect(d.warning).toBeNull();
+    expect(d.isHardBlock).toBe(false);
+    expect(d).not.toHaveProperty("availableCents");
+    expect(d).not.toHaveProperty("currentMonthUsedCents");
+    expect(d).not.toHaveProperty("monthlyLimitCents");
+  });
+
+  it("INT-16.5 – vatRate ist 19 (Standard-MwSt)", async () => {
+    const today = getTodayDate();
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${today}&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    expect(res.status).toBe(200);
+    expect(res.data.vatRate).toBe(19);
+  });
+});
