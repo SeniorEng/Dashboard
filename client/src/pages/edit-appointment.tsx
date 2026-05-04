@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users, UserCheck, Repeat } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users, UserCheck, Repeat, CheckCircle2, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
@@ -33,6 +33,7 @@ import type { FahrtdienstState } from "@/features/appointments/components/fahrtd
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
 import { validateDachPhone, formatPhoneAsYouType } from "@shared/utils/phone";
+import { displayPriceCents } from "@shared/domain/customers";
 import type { Service } from "@shared/schema";
 
 export default function EditAppointment() {
@@ -365,6 +366,49 @@ export default function EditAppointment() {
       hasServices: servicesList.length > 0
     };
   }, [appointment, time, duration, endTime, services, catalogServices]);
+
+  const budgetEstimateParams = useMemo(() => {
+    if (!appointment?.customerId || services.length === 0) return null;
+    const serviceIds = services.map(s => s.serviceId).join(",");
+    const serviceDurations = services.map(s => s.durationMinutes).join(",");
+    if (!serviceIds) return null;
+    const params = new URLSearchParams();
+    params.set("serviceIds", serviceIds);
+    params.set("serviceDurations", serviceDurations);
+    params.set("date", date);
+    return params.toString();
+  }, [appointment?.customerId, services, date]);
+
+  const { data: costEstimate } = useQuery<{
+    totalCents: number;
+    warning: string | null;
+    noPricing?: boolean;
+    availableCents?: number;
+    isHardBlock?: boolean;
+    isSelbstzahler?: boolean;
+    bruttoCents?: number;
+    vatCents?: number;
+    vatRate?: number;
+  }>({
+    queryKey: ["/api/budget", appointment?.customerId, "cost-estimate", budgetEstimateParams],
+    queryFn: async () => {
+      const result = await api.get<{
+        totalCents: number;
+        warning: string | null;
+        noPricing?: boolean;
+        availableCents?: number;
+        isHardBlock?: boolean;
+        isSelbstzahler?: boolean;
+        bruttoCents?: number;
+        vatCents?: number;
+        vatRate?: number;
+      }>(`/budget/${appointment!.customerId}/cost-estimate?${budgetEstimateParams}`);
+      if (!result.success) return { totalCents: 0, warning: null };
+      return result.data;
+    },
+    enabled: !!appointment?.customerId && !!budgetEstimateParams,
+    staleTime: 30_000,
+  });
 
   const updateMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -1088,6 +1132,73 @@ export default function EditAppointment() {
                   totalFormatted={summary.totalFormatted}
                 />
               )}
+
+              {costEstimate?.noPricing && (
+                <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-no-pricing">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-amber-800 font-semibold">Keine Preisvereinbarung</p>
+                    <p className="text-amber-700 text-xs mt-1">Bitte hinterlegen Sie eine Preisvereinbarung für diesen Kunden.</p>
+                  </div>
+                </div>
+              )}
+
+              {costEstimate && !costEstimate.noPricing && costEstimate.totalCents > 0 && (() => {
+                const cost = costEstimate;
+                const isSelbstzahler = cost.isSelbstzahler || appointment?.customer?.billingType === "selbstzahler";
+
+                if (isSelbstzahler) {
+                  const bruttoEuro = ((cost.bruttoCents ?? displayPriceCents(cost.totalCents, "selbstzahler")) / 100).toFixed(2).replace(".", ",");
+                  const vatPct = cost.vatRate ?? 19;
+                  return (
+                    <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm flex items-start gap-3" data-testid="selbstzahler-cost-estimate">
+                      <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-blue-800 font-medium">Kosten: {bruttoEuro} € (inkl. {vatPct} % MwSt.)</p>
+                        <p className="text-blue-600 text-xs mt-1">Privatabrechnung — wird dem Kunden direkt in Rechnung gestellt</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const displayCents = displayPriceCents(cost.totalCents, appointment?.customer?.billingType);
+                const costEuro = (displayCents / 100).toFixed(2).replace(".", ",");
+                const availEuro = cost.availableCents !== undefined ? (cost.availableCents / 100).toFixed(2).replace(".", ",") : null;
+
+                if (cost.isHardBlock) {
+                  return (
+                    <div className="rounded-lg border bg-red-50 border-red-300 p-4 text-sm flex items-start gap-3" data-testid="budget-hard-block">
+                      <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-red-800 font-semibold">Budget reicht nicht</p>
+                        <p className="text-red-700 mt-1">Kosten: {costEuro} € — {availEuro !== null ? `verfügbar: ${availEuro} €` : "kein Budget"}</p>
+                        <p className="text-red-600 text-xs mt-1">{cost.warning}</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (cost.warning) {
+                  return (
+                    <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-amber-800 font-semibold">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
+                        <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="rounded-lg border bg-green-50 border-green-200 p-3 text-sm flex items-start gap-3" data-testid="budget-cost-estimate">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-green-800 font-medium">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           ) : (
             <div className="space-y-4">
