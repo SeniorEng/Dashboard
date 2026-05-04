@@ -170,19 +170,23 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const typeLabel = getInvoiceTypeLabel(data.invoiceType);
   const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt);
   const isStorno = data.invoiceType === "stornorechnung";
+  const isSelbstzahler = data.billingType === "selbstzahler";
+  const vatMultiplier = isSelbstzahler && data.vatRate > 0 ? (1 + data.vatRate / 10000) : 1;
   
   const lineItemsHtml = data.lineItems.map(item => {
     const isKm = item.serviceCode === "travel_km" || item.serviceCode === "customer_km";
     const quantityDisplay = isKm ? `${item.durationMinutes} km` : formatMinutes(item.durationMinutes);
     const unitLabel = isKm ? "/km" : "/Std.";
+    const displayUnitPrice = Math.round(item.unitPriceCents * vatMultiplier);
+    const displayTotal = Math.round(item.totalCents * vatMultiplier);
     return `
     <tr>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(item.unitPriceCents)}${unitLabel}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: ${isStorno ? 'bold; color: #dc2626' : '500'};">${formatCents(item.totalCents)}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayUnitPrice)}${unitLabel}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: ${isStorno ? 'bold; color: #dc2626' : '500'};">${formatCents(displayTotal)}</td>
     </tr>`;
   }).join("");
 
@@ -291,8 +295,8 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
         <th>Uhrzeit</th>
         <th>Leistung</th>
         <th>Dauer</th>
-        <th>Satz</th>
-        <th>Betrag</th>
+        <th>Satz${isSelbstzahler ? " (brutto)" : ""}</th>
+        <th>Betrag${isSelbstzahler ? " (brutto)" : ""}</th>
       </tr>
     </thead>
     <tbody>
@@ -300,10 +304,12 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </tbody>
   </table>
 
+  ${isSelbstzahler ? `<div style="font-size: 9pt; color: #4b5563; margin-bottom: 10px;">Alle Einzelbeträge verstehen sich inkl. ${(data.vatRate / 100).toFixed(0)}% MwSt.</div>` : ""}
+
   <table class="totals">
     <tr><td>Nettobetrag:</td><td>${formatCents(data.netAmountCents)}</td></tr>
     ${data.vatAmountCents !== 0 ? `<tr><td>USt. ${(data.vatRate / 100).toFixed(0)}%:</td><td>${formatCents(data.vatAmountCents)}</td></tr>` : `<tr><td colspan="2" style="font-size: 9pt; color: #1f2937;">Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG</td></tr>`}
-    <tr class="total-row"><td>Gesamtbetrag:</td><td style="color: ${isStorno ? '#dc2626' : 'inherit'};">${formatCents(data.grossAmountCents)}</td></tr>
+    <tr class="total-row"><td>Gesamtbetrag${isSelbstzahler ? " (inkl. MwSt.)" : ""}:</td><td style="color: ${isStorno ? '#dc2626' : 'inherit'};">${formatCents(data.grossAmountCents)}</td></tr>
   </table>
 
   ${billingNote ? `<div class="note">${billingNote}</div>` : ""}
@@ -348,6 +354,8 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 
 export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
+  const isSelbstzahler = data.billingType === "selbstzahler";
+  const vatMultiplier = isSelbstzahler && data.vatRate > 0 ? (1 + data.vatRate / 10000) : 1;
 
   const KM_CODES = ["travel_km", "customer_km"];
   const isKmItem = (item: typeof data.lineItems[0]) => KM_CODES.includes(item.serviceCode || "");
@@ -401,6 +409,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       for (let i = 0; i < group.services.length; i++) {
         const svc = group.services[i];
         const showDateCol = i === 0;
+        const displayUnitPrice = Math.round(svc.unitPriceCents * vatMultiplier);
+        const displayTotal = Math.round(svc.totalCents * vatMultiplier);
         rows.push(`
         <tr>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
@@ -408,12 +418,14 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(svc.serviceDescription)}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 9pt;">${svc.serviceDetails ? escapeHtml(svc.serviceDetails) : ""}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(svc.durationMinutes)}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.unitPriceCents)}/Std.</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(svc.totalCents)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayUnitPrice)}/Std.</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayTotal)}</td>
         </tr>`);
       }
       for (const km of group.kmItems) {
         const kmLabel = km.serviceCode === "customer_km" ? "Fahrten für/mit Kunde" : "Anfahrt";
+        const displayKmUnitPrice = Math.round(km.unitPriceCents * vatMultiplier);
+        const displayKmTotal = Math.round(km.totalCents * vatMultiplier);
         rows.push(`
         <tr>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
@@ -421,8 +433,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(kmLabel)}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${km.durationMinutes} km</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(km.unitPriceCents)}/km</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(km.totalCents)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayKmUnitPrice)}/km</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayKmTotal)}</td>
         </tr>`);
       }
       if (group.notes) {
@@ -508,7 +520,9 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
       const groups = groupByAppointment(sectionItems);
       const tableRowsHtml = renderTableRows(groups);
-      const sectionCents = sectionItems.reduce((sum, item) => sum + item.totalCents, 0);
+      const sectionCents = isSelbstzahler
+        ? sectionItems.reduce((sum, item) => sum + Math.round(item.totalCents * vatMultiplier), 0)
+        : sectionItems.reduce((sum, item) => sum + item.totalCents, 0);
 
       const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
       const sectionEmployeeName = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
@@ -569,14 +583,14 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
             <th>Leistung</th>
             <th>Beschreibung</th>
             <th>Dauer/Km</th>
-            <th>Einzelpreis</th>
-            <th>Betrag</th>
+            <th>Einzelpreis${isSelbstzahler ? " (brutto)" : ""}</th>
+            <th>Betrag${isSelbstzahler ? " (brutto)" : ""}</th>
           </tr>
         </thead>
         <tbody>
           ${tableRowsHtml}
           <tr class="total-row">
-            <td colspan="6">Summe</td>
+            <td colspan="6">Summe${isSelbstzahler ? " (inkl. MwSt.)" : ""}</td>
             <td style="text-align: right; white-space: nowrap;">${formatCents(sectionCents)}</td>
           </tr>
         </tbody>
@@ -594,7 +608,9 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   } else {
     const groups = groupByAppointment(allSorted);
     const tableRowsHtml = renderTableRows(groups);
-    const totalCentsAll = allSorted.reduce((sum, item) => sum + item.totalCents, 0);
+    const totalCentsAll = isSelbstzahler
+      ? data.grossAmountCents
+      : allSorted.reduce((sum, item) => sum + item.totalCents, 0);
 
     const sig = data.signatures && data.signatures.length > 0 ? data.signatures[0] : null;
     const confirmSuffix = getConfirmTextForBillingType(data.billingType);
@@ -608,14 +624,14 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <th>Leistung</th>
           <th>Beschreibung</th>
           <th>Dauer/Km</th>
-          <th>Einzelpreis</th>
-          <th>Betrag</th>
+          <th>Einzelpreis${isSelbstzahler ? " (brutto)" : ""}</th>
+          <th>Betrag${isSelbstzahler ? " (brutto)" : ""}</th>
         </tr>
       </thead>
       <tbody>
         ${tableRowsHtml}
         <tr class="total-row">
-          <td colspan="6">Gesamt</td>
+          <td colspan="6">Gesamt${isSelbstzahler ? " (inkl. MwSt.)" : ""}</td>
           <td style="text-align: right; white-space: nowrap;">${formatCents(totalCentsAll)}</td>
         </tr>
       </tbody>
@@ -623,7 +639,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
     <div style="margin-top: 10px;">
       <table style="width: 300px; margin-left: auto;">
-        <tr><td style="padding: 3px 8px;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
+        <tr><td style="padding: 3px 8px;">Gesamtbetrag${isSelbstzahler ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
       </table>
     </div>
 
@@ -731,7 +747,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   ${hasMultipleLNs ? `
   <div style="margin-top: 30px; border-top: 2px solid #0d9488; padding-top: 10px;">
     <table style="width: 300px; margin-left: auto;">
-      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
+      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag${isSelbstzahler ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
     </table>
   </div>
   ` : ''}

@@ -16,7 +16,10 @@ export interface InvoiceItem {
   billingMonth: number;
   billingYear: number;
   recipientName: string;
+  netAmountCents: number;
+  vatAmountCents: number;
   grossAmountCents: number;
+  vatRate: number | null;
   status: string;
 }
 

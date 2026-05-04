@@ -381,6 +381,9 @@ export default function AdminBilling() {
                             <span>{invoice.recipientName}</span>
                             <span className={`font-medium ${invoice.grossAmountCents < 0 ? "text-red-600" : "text-gray-900"}`}>
                               {formatAmount(invoice.grossAmountCents)}
+                              {invoice.billingType === "selbstzahler" && (
+                                <span className="text-xs text-gray-400 font-normal ml-1">inkl. MwSt.</span>
+                              )}
                             </span>
                           </div>
                         </div>
@@ -501,12 +504,18 @@ export default function AdminBilling() {
                                   <th className="pb-2 pr-3">Uhrzeit</th>
                                   <th className="pb-2 pr-3">Leistung</th>
                                   <th className="pb-2 pr-3 text-right">Dauer</th>
-                                  <th className="pb-2 pr-3 text-right">Betrag</th>
+                                  <th className="pb-2 pr-3 text-right">
+                                    Betrag{expandedDetail.billingType === "selbstzahler" ? " (brutto)" : ""}
+                                  </th>
                                   <th className="pb-2">Mitarbeiter</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {expandedDetail.lineItems.map((item) => (
+                                {expandedDetail.lineItems.map((item) => {
+                                  const displayTotal = expandedDetail.billingType === "selbstzahler"
+                                    ? Math.round(item.totalCents * 1.19)
+                                    : item.totalCents;
+                                  return (
                                   <tr key={item.id} className="border-b last:border-0">
                                     <td className="py-2 pr-3">{formatDate(item.appointmentDate)}</td>
                                     <td className="py-2 pr-3">
@@ -516,16 +525,19 @@ export default function AdminBilling() {
                                     </td>
                                     <td className="py-2 pr-3">{item.serviceDescription}</td>
                                     <td className="py-2 pr-3 text-right">{item.durationMinutes} Min.</td>
-                                    <td className={`py-2 pr-3 text-right ${item.totalCents < 0 ? "text-red-600" : ""}`}>
-                                      {formatAmount(item.totalCents)}
+                                    <td className={`py-2 pr-3 text-right ${displayTotal < 0 ? "text-red-600" : ""}`}>
+                                      {formatAmount(displayTotal)}
                                     </td>
                                     <td className="py-2">{item.employeeName || "-"}</td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                               <tfoot>
                                 <tr className="border-t-2 font-medium">
-                                  <td colSpan={4} className="pt-2 pr-3 text-right">Gesamt:</td>
+                                  <td colSpan={4} className="pt-2 pr-3 text-right">
+                                    Gesamt{expandedDetail.billingType === "selbstzahler" ? " (inkl. MwSt.)" : ""}:
+                                  </td>
                                   <td className={`pt-2 pr-3 text-right ${expandedDetail.grossAmountCents < 0 ? "text-red-600" : ""}`}>
                                     {formatAmount(expandedDetail.grossAmountCents)}
                                   </td>
