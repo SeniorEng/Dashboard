@@ -65,6 +65,7 @@ describe("letterxpress-service", () => {
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.auth.username).toBe("user@example.com");
     expect(body.auth.apikey).toBe("secret-api-key");
+    expect(body.auth.mode).toBe("test");
     expect(body.letter.base64_file).toBe(Buffer.from("hello").toString("base64"));
     expect(body.letter.base64_file2).toBe("");
     expect(body.letter.specification).toEqual({
@@ -104,6 +105,7 @@ describe("letterxpress-service", () => {
     });
 
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.auth.mode).toBe("live");
     expect(body.letter.specification.print).toBe("live");
   });
 
@@ -137,6 +139,8 @@ describe("letterxpress-service", () => {
     expect(result.balance).toBe(12.5);
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain("/getBalance");
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.auth.mode).toBe("test");
   });
 
   it("testLetterxpressConnection returns success=false on missing credentials", async () => {

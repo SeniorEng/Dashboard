@@ -232,7 +232,7 @@ describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toContain("/setJob");
     const lxBody = JSON.parse((init as RequestInit).body as string) as {
-      auth: { username: string; apikey: string };
+      auth: { username: string; apikey: string; mode: string };
       letter: {
         base64_file: string;
         specification: { print: string; color: string; mode: string; ship: string };
@@ -240,6 +240,7 @@ describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
     };
     expect(lxBody.auth.username).toBe("user@example.com");
     expect(lxBody.auth.apikey).toBe("secret-api-key");
+    expect(lxBody.auth.mode).toBe("test");
     expect(lxBody.letter.specification.print).toBe("test");
 
     // Verify the cover letter and document PDF were actually merged into the

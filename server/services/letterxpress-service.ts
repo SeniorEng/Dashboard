@@ -35,6 +35,7 @@ function buildAuth(settings: CompanySettings) {
   return {
     username: settings.letterxpressUsername,
     apikey: settings.letterxpressApiKey,
+    mode: settings.letterxpressTestMode ? "test" : "live",
   };
 }
 
