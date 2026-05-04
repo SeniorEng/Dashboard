@@ -93,8 +93,9 @@ interface PendingReplaceState {
 }
 
 export function PricingSection({ customerId, customerName, billingType, onRefresh }: PricingSectionProps) {
-  const displayPrice = (priceCents: number) => displayPriceCents(priceCents, billingType);
-  const netFromInput = (inputCents: number) => netFromInputCents(inputCents, billingType);
+  const displayPrice = (priceCents: number, vatRate: number = 19) => displayPriceCents(priceCents, billingType, vatRate);
+  const netFromInput = (inputCents: number, vatRate: number = 19) => netFromInputCents(inputCents, billingType, vatRate);
+  const getVatRate = (serviceId: number) => services?.find(s => s.id === serviceId)?.vatRate ?? 19;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
@@ -386,7 +387,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
 
   function startEdit(serviceId: number, currentPriceCents: number) {
     setEditingServiceId(serviceId);
-    setEditPrice((displayPrice(currentPriceCents) / 100).toFixed(2).replace(".", ","));
+    setEditPrice((displayPrice(currentPriceCents, getVatRate(serviceId)) / 100).toFixed(2).replace(".", ","));
     setEditValidFrom("");
   }
 
@@ -398,7 +399,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
       return;
     }
     const inputCents = Math.round(euros * 100);
-    const newPriceCents = netFromInput(inputCents);
+    const newPriceCents = netFromInput(inputCents, getVatRate(serviceId));
     const existingCustomPrice = priceMap.get(serviceId);
     if (!editValidFrom && existingCustomPrice && newPriceCents !== existingCustomPrice.priceCents) {
       editMutation.mutate({
@@ -438,11 +439,11 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                 <div className="mt-3 rounded-md border bg-gray-50 px-3 py-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600">Bisheriger Preis</span>
-                    <span className="font-semibold" data-testid="text-existing-price">{formatCurrency(displayPrice(pendingReplace.existing.priceCents))}</span>
+                    <span className="font-semibold" data-testid="text-existing-price">{formatCurrency(displayPrice(pendingReplace.existing.priceCents, getVatRate(pendingReplace.serviceId)))}</span>
                   </div>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-gray-600">Neuer Preis</span>
-                    <span className="font-semibold text-amber-700" data-testid="text-new-price">{formatCurrency(displayPrice(pendingReplace.priceCents))}</span>
+                    <span className="font-semibold text-amber-700" data-testid="text-new-price">{formatCurrency(displayPrice(pendingReplace.priceCents, getVatRate(pendingReplace.serviceId)))}</span>
                   </div>
                 </div>
                 <div className="mt-3 text-xs text-gray-500">
@@ -510,13 +511,13 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                 </div>
                 {isCustom && (
                   <div className="text-[11px] text-gray-500 mt-0.5">
-                    Katalog: {formatCurrency(displayPrice(service.defaultPriceCents))} {unitLabel}
+                    Katalog: {formatCurrency(displayPrice(service.defaultPriceCents, service.vatRate))} {unitLabel}
                   </div>
                 )}
                 {serviceFuturePrices.map(fp => (
                   <div key={fp.id} className="text-[11px] text-blue-600 mt-0.5 flex items-center gap-1" data-testid={`future-price-${fp.id}`}>
                     <Calendar className="h-3 w-3" />
-                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(displayPrice(fp.priceCents))} {unitLabel}
+                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(displayPrice(fp.priceCents, service.vatRate))} {unitLabel}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -558,7 +559,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                   </div>
                 ) : (
                   <>
-                    <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice))}</span>
+                    <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice, service.vatRate))}</span>
                     <span className="text-xs text-gray-500 ml-0.5">{unitLabel}</span>
                   </>
                 )}
@@ -667,7 +668,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                             <span className="text-xs text-gray-500">{UNIT_LABELS[p.unitType] || "€"}</span>
                           </div>
                         ) : (
-                          <>{formatCurrency(displayPrice(p.priceCents))} {UNIT_LABELS[p.unitType] || "€"}</>
+                          <>{formatCurrency(displayPrice(p.priceCents, getVatRate(p.serviceId)))} {UNIT_LABELS[p.unitType] || "€"}</>
                         )}
                       </td>
                       <td className="px-2 py-1.5">
@@ -721,7 +722,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                                     return;
                                   }
                                   const inputCents = Math.round(euros * 100);
-                                  const newPriceCents = netFromInput(inputCents);
+                                  const newPriceCents = netFromInput(inputCents, getVatRate(p.serviceId));
                                   updateMutation.mutate({
                                     priceId: p.id,
                                     validFrom: editPriceValidFrom,
@@ -758,7 +759,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                                 setEditingPriceId(p.id);
                                 setEditPriceValidFrom(p.validFrom.substring(0, 10));
                                 setEditPriceValidTo(p.validTo ? p.validTo.substring(0, 10) : "");
-                                setEditPriceAmount((displayPrice(p.priceCents) / 100).toFixed(2).replace(".", ","));
+                                setEditPriceAmount((displayPrice(p.priceCents, getVatRate(p.serviceId)) / 100).toFixed(2).replace(".", ","));
                               }}
                               data-testid={`btn-edit-history-${p.id}`}
                             >

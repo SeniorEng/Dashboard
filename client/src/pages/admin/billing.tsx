@@ -512,8 +512,9 @@ export default function AdminBilling() {
                               </thead>
                               <tbody>
                                 {expandedDetail.lineItems.map((item) => {
+                                  const vatMultiplier = 1 + (expandedDetail.vatRate ?? 19) / 100;
                                   const displayTotal = expandedDetail.billingType === "selbstzahler"
-                                    ? Math.round(item.totalCents * 1.19)
+                                    ? Math.round(item.totalCents * vatMultiplier)
                                     : item.totalCents;
                                   return (
                                   <tr key={item.id} className="border-b last:border-0">

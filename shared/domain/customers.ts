@@ -62,12 +62,12 @@ export function getEffectiveTab(activeTab: string, billingType: string | null | 
   return activeTab;
 }
 
-export function displayPriceCents(priceCents: number, billingType: string | null | undefined): number {
-  return billingType === "selbstzahler" ? Math.round(priceCents * 1.19) : priceCents;
+export function displayPriceCents(priceCents: number, billingType: string | null | undefined, vatRate: number = 19): number {
+  return billingType === "selbstzahler" ? Math.round(priceCents * (1 + vatRate / 100)) : priceCents;
 }
 
-export function netFromInputCents(inputCents: number, billingType: string | null | undefined): number {
-  return billingType === "selbstzahler" ? Math.round(inputCents / 1.19) : inputCents;
+export function netFromInputCents(inputCents: number, billingType: string | null | undefined, vatRate: number = 19): number {
+  return billingType === "selbstzahler" ? Math.round(inputCents / (1 + vatRate / 100)) : inputCents;
 }
 
 const DEACTIVATION_REASONS = [

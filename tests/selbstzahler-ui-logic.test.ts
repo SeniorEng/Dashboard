@@ -110,7 +110,7 @@ describe("Selbstzahler UI-Logik", () => {
   });
 
   describe("Brutto-Preisanzeige (displayPriceCents)", () => {
-    it("wendet 1.19x Multiplikator für Selbstzahler an", () => {
+    it("wendet 1.19x Multiplikator für Selbstzahler an (Standard 19%)", () => {
       expect(displayPriceCents(1000, "selbstzahler")).toBe(1190);
     });
 
@@ -137,6 +137,17 @@ describe("Selbstzahler UI-Logik", () => {
     it("behandelt typische Stundensätze korrekt", () => {
       expect(displayPriceCents(3500, "selbstzahler")).toBe(4165);
       expect(displayPriceCents(3500, "pflegekasse_gesetzlich")).toBe(3500);
+    });
+
+    it("verwendet übergebenen vatRate statt Standard 19%", () => {
+      expect(displayPriceCents(1000, "selbstzahler", 16)).toBe(1160);
+      expect(displayPriceCents(1000, "selbstzahler", 7)).toBe(1070);
+      expect(displayPriceCents(1000, "selbstzahler", 0)).toBe(1000);
+    });
+
+    it("ignoriert vatRate für Pflegekasse", () => {
+      expect(displayPriceCents(1000, "pflegekasse_gesetzlich", 16)).toBe(1000);
+      expect(displayPriceCents(1000, "pflegekasse_privat", 7)).toBe(1000);
     });
   });
 
@@ -165,6 +176,18 @@ describe("Selbstzahler UI-Logik", () => {
       const original = 2750;
       const display = displayPriceCents(original, "pflegekasse_gesetzlich");
       const back = netFromInputCents(display, "pflegekasse_gesetzlich");
+      expect(back).toBe(original);
+    });
+
+    it("verwendet übergebenen vatRate statt Standard 19%", () => {
+      expect(netFromInputCents(1160, "selbstzahler", 16)).toBe(1000);
+      expect(netFromInputCents(1070, "selbstzahler", 7)).toBe(1000);
+    });
+
+    it("Roundtrip mit benutzerdefiniertem vatRate", () => {
+      const original = 2750;
+      const brutto = displayPriceCents(original, "selbstzahler", 16);
+      const back = netFromInputCents(brutto, "selbstzahler", 16);
       expect(back).toBe(original);
     });
   });
