@@ -788,6 +788,7 @@ export function useNewAppointmentForm() {
     setKtNotes,
     ktAssignedEmployeeId,
     setKtAssignedEmployeeId,
+    selectedCustomerBillingType: selectedCustomer?.billingType ?? null,
 
     prospectData: effectiveProspectData,
     ebDate,

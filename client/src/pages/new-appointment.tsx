@@ -28,6 +28,7 @@ import { EmployeeAvailability } from "@/features/appointments/components/employe
 import { AddressFields } from "@/pages/admin/components/address-fields";
 import { isDachPhone } from "@shared/schema/common";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
+import { displayPriceCents } from "@shared/domain/customers";
 import type { Prospect } from "@shared/schema";
 import { useLocation } from "wouter";
 import { useUpdateProspect } from "@/features/prospects";
@@ -390,7 +391,10 @@ export default function NewAppointment() {
 
               {form.costEstimate && !form.costEstimate.noPricing && form.costEstimate.totalCents > 0 && (() => {
                 const cost = form.costEstimate;
-                const costEuro = (cost.totalCents / 100).toFixed(2).replace(".", ",");
+                const isSelbstzahler = form.selectedCustomerBillingType === "selbstzahler";
+                const displayCents = displayPriceCents(cost.totalCents, form.selectedCustomerBillingType);
+                const costEuro = (displayCents / 100).toFixed(2).replace(".", ",");
+                const mwstHint = isSelbstzahler ? " (inkl. MwSt.)" : "";
                 const availEuro = cost.availableCents !== undefined ? (cost.availableCents / 100).toFixed(2).replace(".", ",") : null;
 
                 if (cost.isHardBlock) {
@@ -399,7 +403,7 @@ export default function NewAppointment() {
                       <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="text-red-800 font-semibold">Budget reicht nicht</p>
-                        <p className="text-red-700 mt-1">Kosten: {costEuro} € — {availEuro !== null ? `verfügbar: ${availEuro} €` : "kein Budget"}</p>
+                        <p className="text-red-700 mt-1">Kosten: {costEuro} €{mwstHint} — {availEuro !== null ? `verfügbar: ${availEuro} €` : "kein Budget"}</p>
                         <p className="text-red-600 text-xs mt-1">{cost.warning}</p>
                       </div>
                     </div>
@@ -411,7 +415,7 @@ export default function NewAppointment() {
                     <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
                       <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
                       <div>
-                        <p className="text-amber-800 font-semibold">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
+                        <p className="text-amber-800 font-semibold">Kosten: {costEuro} €{mwstHint} {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
                         <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
                       </div>
                     </div>
@@ -422,7 +426,7 @@ export default function NewAppointment() {
                   <div className="rounded-lg border bg-green-50 border-green-200 p-3 text-sm flex items-start gap-3" data-testid="budget-cost-estimate">
                     <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
                     <div>
-                      <p className="text-green-800 font-medium">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
+                      <p className="text-green-800 font-medium">Kosten: {costEuro} €{mwstHint} {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
                     </div>
                   </div>
                 );

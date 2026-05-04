@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { displayPriceCents } from "@shared/domain/customers";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -512,10 +513,7 @@ export default function AdminBilling() {
                               </thead>
                               <tbody>
                                 {expandedDetail.lineItems.map((item) => {
-                                  const vatMultiplier = 1 + (expandedDetail.vatRate ?? 19) / 100;
-                                  const displayTotal = expandedDetail.billingType === "selbstzahler"
-                                    ? Math.round(item.totalCents * vatMultiplier)
-                                    : item.totalCents;
+                                  const displayTotal = displayPriceCents(item.totalCents, expandedDetail.billingType);
                                   return (
                                   <tr key={item.id} className="border-b last:border-0">
                                     <td className="py-2 pr-3">{formatDate(item.appointmentDate)}</td>
