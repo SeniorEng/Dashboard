@@ -421,7 +421,7 @@ export default function TeamWorkloadPage() {
                           </>
                         ) : null}
                       </div>
-                    ) : (
+                    ) : workload.monthlyWorkHours === null ? (
                       <div
                         className="mt-2 flex items-center gap-2 text-xs"
                         data-testid={`workload-soll-missing-${employee.id}`}
@@ -437,6 +437,13 @@ export default function TeamWorkloadPage() {
                         >
                           jetzt ergänzen
                         </Link>
+                      </div>
+                    ) : (
+                      <div
+                        className="mt-2 flex items-center gap-2 text-xs text-gray-500"
+                        data-testid={`workload-soll-na-${employee.id}`}
+                      >
+                        <span>Soll/Ist: n/a (kein Soll hinterlegt)</span>
                       </div>
                     )}
                   </div>

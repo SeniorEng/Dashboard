@@ -831,12 +831,19 @@ export default function AdminUsers() {
                                         </TooltipContent>
                                       </Tooltip>
                                     </>
-                                  ) : (
+                                  ) : wl.monthlyWorkHours === null ? (
                                     <>
                                       <span className="text-gray-300">|</span>
                                       <span className="inline-flex items-center gap-1 text-amber-700" data-testid={`workload-soll-missing-${user.id}`}>
                                         <Info className="h-3 w-3" />
                                         <span className="text-[11px]">Vertragsstunden fehlen</span>
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-gray-300">|</span>
+                                      <span className="text-[11px] text-gray-500" data-testid={`workload-soll-na-${user.id}`}>
+                                        Soll: n/a (kein Soll hinterlegt)
                                       </span>
                                     </>
                                   )}

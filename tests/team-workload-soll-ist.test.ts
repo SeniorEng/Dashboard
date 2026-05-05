@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeSollIst } from "../server/lib/team-workload";
+import { computeSollIst, computeGlobalAvgFromAggregates } from "../server/lib/team-workload";
 
 describe("computeSollIst", () => {
   const baseRow = {
@@ -87,5 +87,33 @@ describe("computeSollIst", () => {
     );
     // 14h frei / 5h pro Kunde = 2.8 → 2 Kunden
     expect(r.moeglicheZusatzKunden).toBe(2);
+  });
+});
+
+describe("computeGlobalAvgFromAggregates", () => {
+  it("liefert 0 wenn keine Kunden-Monate vorhanden sind (keine Datenbasis)", () => {
+    expect(computeGlobalAvgFromAggregates(0, 0)).toBe(0);
+    expect(computeGlobalAvgFromAggregates(12345, 0)).toBe(0);
+  });
+
+  it("teilt Gesamtminuten durch 60 und durch Kunden-Monate", () => {
+    // 30 Kunden-Monate, jeder 10h = 600 min => total 18000 min
+    // Erwartet: 18000 / 60 / 30 = 10
+    expect(computeGlobalAvgFromAggregates(18000, 30)).toBe(10);
+  });
+
+  it("rechnet bei einem Kunden über 3 Monate à 7,5h korrekt: 22,5h / 3 Kunden-Monate = 7,5", () => {
+    const totalMinutes = 3 * 7.5 * 60; // 1350
+    expect(computeGlobalAvgFromAggregates(totalMinutes, 3)).toBe(7.5);
+  });
+
+  it("liefert 0 bei nicht-finiten Werten (defensive)", () => {
+    expect(computeGlobalAvgFromAggregates(Number.NaN, 5)).toBe(0);
+    expect(computeGlobalAvgFromAggregates(100, Number.NaN)).toBe(0);
+    expect(computeGlobalAvgFromAggregates(Number.POSITIVE_INFINITY, 5)).toBe(0);
+  });
+
+  it("ignoriert negative Kunden-Monate (Schutz vor unsauberen Eingaben)", () => {
+    expect(computeGlobalAvgFromAggregates(1000, -1)).toBe(0);
   });
 });

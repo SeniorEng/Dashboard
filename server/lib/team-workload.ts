@@ -71,7 +71,9 @@ export async function loadTeamWorkload(now: Date = new Date()): Promise<Workload
 /**
  * Pure calculation: ergibt Soll-Ist und mögliche Zusatzkunden für eine Workload-Zeile.
  * Edge cases:
- * - monthlyWorkHours null oder <= 0 → alle Kennzahlen null (UI zeigt Hinweis "Vertragsstunden fehlen").
+ * - monthlyWorkHours null → alle Kennzahlen null (UI zeigt Hinweis "Vertragsstunden fehlen").
+ * - monthlyWorkHours <= 0 → alle Kennzahlen null (UI zeigt "n/a", KEIN Hinweis-Badge).
+ *   Die Unterscheidung null vs 0 erfolgt im Frontend anhand von row.monthlyWorkHours.
  * - monthsConsidered 0 → istHours 0, Auslastung null.
  * - globalAvgHoursPerCustomerPerMonth <= 0 → moeglicheZusatzKunden null.
  * - istHours > sollHours → freieStunden 0, moeglicheZusatzKunden 0.
@@ -229,6 +231,20 @@ export function clearGlobalAvgCache(): void {
   globalAvgCache = null;
 }
 
+/**
+ * Pure helper: errechnet aus den SQL-Aggregaten den Ø Stunden je Kunde je Monat.
+ * - customerMonths == 0 → 0 (keine Datenbasis).
+ * - sonst totalMinutes / 60 / customerMonths.
+ * customerMonths kommt aus COUNT(DISTINCT (customer_id, month_start)), d.h.
+ * jeder Kunde zählt pro Monat genau einmal, auch bei mehreren Terminen.
+ */
+export function computeGlobalAvgFromAggregates(totalMinutes: number, customerMonths: number): number {
+  if (!Number.isFinite(totalMinutes) || !Number.isFinite(customerMonths) || customerMonths <= 0) {
+    return 0;
+  }
+  return totalMinutes / 60 / customerMonths;
+}
+
 export async function getGlobalAvgHoursPerCustomerPerMonth(now: Date = new Date()): Promise<number> {
   if (globalAvgCache && globalAvgCache.expiresAt > Date.now()) {
     return globalAvgCache.value;
@@ -264,7 +280,7 @@ export async function getGlobalAvgHoursPerCustomerPerMonth(now: Date = new Date(
   const totalMinutes = Number(row?.total_minutes ?? 0);
   const customerMonths = Number(row?.customer_months ?? 0);
 
-  const avg = customerMonths > 0 ? totalMinutes / 60 / customerMonths : 0;
+  const avg = computeGlobalAvgFromAggregates(totalMinutes, customerMonths);
   globalAvgCache = { value: avg, expiresAt: Date.now() + GLOBAL_AVG_TTL_MS };
   return avg;
 }
