@@ -55,7 +55,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
 
   const alertsQuery = useQuery<AlertItem[]>({
     queryKey: ["statistics-alerts"],
-    queryFn: async () => unwrapResult(await api.get<AlertItem[]>(`/statistics/alerts`)),
+    queryFn: async () => unwrapResult(await api.get<AlertItem[]>(`/statistics/v2/alerts`)),
     staleTime: 120_000,
   });
 
@@ -135,7 +135,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           higherIsBetter
           sparkline={sparkRev}
           sparklineColor="#0d9488"
-          href="/admin/statistics/coming-soon/revenue"
+          href="/admin/statistics/revenue"
           testId="kpi-revenue"
         >
           <div className="flex flex-wrap gap-1" role="tablist" aria-label="Umsatz-Stufe">
@@ -168,7 +168,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           higherIsBetter
           sparkline={sparkCust}
           sparklineColor="#2563eb"
-          href="/admin/statistics/coming-soon/customers"
+          href="/admin/statistics/customers"
           testId="kpi-active-customers"
         />
 
@@ -181,7 +181,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           higherIsBetter
           sparkline={sparkMin}
           sparklineColor="#7c3aed"
-          href="/admin/statistics/coming-soon/hours"
+          href="/admin/statistics/performance"
           testId="kpi-total-minutes"
         >
           <ServiceTypeBreakdown breakdown={cockpit.minutesByServiceType} />
@@ -196,7 +196,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           higherIsBetter
           sparkline={sparkApptsPerCust}
           sparklineColor="#0ea5e9"
-          href="/admin/statistics/coming-soon/appointments-per-customer"
+          href="/admin/statistics/performance"
           testId="kpi-appointments-per-customer"
         />
 
@@ -209,7 +209,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           higherIsBetter
           sparkline={sparkRevPerCust}
           sparklineColor="#16a34a"
-          href="/admin/statistics/coming-soon/revenue-per-customer"
+          href="/admin/statistics/customers"
           testId="kpi-revenue-per-customer"
         />
 

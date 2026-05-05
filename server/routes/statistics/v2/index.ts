@@ -11,9 +11,14 @@ import {
   listRecordsWithoutInvoice,
 } from "../../../storage/statistics/process-health";
 import { getCustomerStats } from "../../../storage/statistics/customers";
-import { getRevenueStats } from "../../../storage/statistics/revenue";
+import {
+  getRevenueStats,
+  listDocumentedWithoutProven,
+  listProvenWithoutInvoiced,
+} from "../../../storage/statistics/revenue";
 import { getPerformanceStats } from "../../../storage/statistics/performance";
 import { getBudgetStats } from "../../../storage/statistics/budgets";
+import { getOperationsAlerts } from "../../../storage/statistics/alerts";
 
 const router = Router();
 
@@ -63,12 +68,26 @@ router.get("/revenue", asyncHandler("Umsatz-Statistiken konnten nicht geladen we
   res.json(await getRevenueStats(resolvePeriod(req.query)));
 }));
 
+router.get("/revenue/gaps/documented-without-proven",
+  asyncHandler("Drill-Down konnte nicht geladen werden", async (req, res) => {
+    res.json(await listDocumentedWithoutProven(resolvePeriod(req.query)));
+  }));
+
+router.get("/revenue/gaps/proven-without-invoiced",
+  asyncHandler("Drill-Down konnte nicht geladen werden", async (req, res) => {
+    res.json(await listProvenWithoutInvoiced(resolvePeriod(req.query)));
+  }));
+
 router.get("/performance", asyncHandler("Leistungs-Statistiken konnten nicht geladen werden", async (req, res) => {
   res.json(await getPerformanceStats(resolvePeriod(req.query)));
 }));
 
 router.get("/budgets", asyncHandler("Budget-Statistiken konnten nicht geladen werden", async (req, res) => {
   res.json(await getBudgetStats(resolvePeriod(req.query)));
+}));
+
+router.get("/alerts", asyncHandler("Handlungsbedarf konnte nicht geladen werden", async (_req, res) => {
+  res.json(await getOperationsAlerts());
 }));
 
 export default router;

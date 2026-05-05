@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
-import type { RevenueStatsResponse } from "@shared/statistics";
+import type { RevenueStatsResponse, RevenueGapRow, PlannedRevenueTotals } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
 
 function perAppointmentCte(p: ResolvedPeriod) {
@@ -62,7 +62,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
   const dFilter = dateFilter(period, sql`a.date::date`);
   const invFilter = billingPeriodFilter(period, sql`i.billing_year`, sql`i.billing_month`);
 
-  const [stagesCur, stagesPrev, stagesYoy, byServiceTypeRow, byEmployeeRow, byCustomerRow, gapsRow, ttdRows, ttiRows, forecast, travelRow, travelByEmpRow] = await Promise.all([
+  const [stagesCur, stagesPrev, stagesYoy, byServiceTypeRow, byEmployeeRow, byCustomerRow, gapsRow, ttdRows, ttiRows, forecast, travelRow, travelByEmpRow, plannedRow] = await Promise.all([
     computeStages(period),
     computeStages(prev),
     computeStages(prevY),
@@ -195,14 +195,18 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
     `),
     db.execute(sql`
       SELECT EXTRACT(MONTH FROM a.date::date)::int AS month,
-        ROUND(AVG(EXTRACT(EPOCH FROM (sra.created_at - a.date::timestamp)) / 86400.0)::numeric, 1) AS avg_days
+        ROUND(AVG(EXTRACT(EPOCH FROM (sra.created_at - a.date::timestamp)) / 86400.0)::numeric, 1) AS avg_days,
+        ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (sra.created_at - a.date::timestamp)) / 86400.0)::numeric, 1) AS median_days,
+        ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (sra.created_at - a.date::timestamp)) / 86400.0)::numeric, 1) AS p90_days
       FROM appointments a JOIN service_record_appointments sra ON sra.appointment_id = a.id
       WHERE a.deleted_at IS NULL AND EXTRACT(YEAR FROM a.date::date) = ${period.year}
       GROUP BY 1 ORDER BY 1
     `),
     db.execute(sql`
       SELECT EXTRACT(MONTH FROM msr.created_at)::int AS month,
-        ROUND(AVG(EXTRACT(EPOCH FROM (i.created_at - msr.created_at)) / 86400.0)::numeric, 1) AS avg_days
+        ROUND(AVG(EXTRACT(EPOCH FROM (i.created_at - msr.created_at)) / 86400.0)::numeric, 1) AS avg_days,
+        ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (i.created_at - msr.created_at)) / 86400.0)::numeric, 1) AS median_days,
+        ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (i.created_at - msr.created_at)) / 86400.0)::numeric, 1) AS p90_days
       FROM monthly_service_records msr
       JOIN invoices i ON i.customer_id = msr.customer_id AND i.billing_year = msr.year AND i.billing_month = msr.month
         AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
@@ -210,13 +214,49 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       GROUP BY 1 ORDER BY 1
     `),
     (async (): Promise<number> => {
-      if (!period.month && !(period.from && period.to)) return 0;
+      // Monatsprognose = laufender Kalendermonat, hochgerechnet auf den ganzen Monat
+      // basierend auf Tages-Run-Rate (already-realized revenue / elapsed days * total days).
+      // Diese Kennzahl ist immer der CURRENT real-world month — unabhängig vom gewählten
+      // Auswahl-Zeitraum (Gesamtjahr, Vorjahr etc.), damit „laufender Monat" stets sichtbar bleibt.
+      const now = new Date();
+      const curYear = now.getFullYear();
+      const curMonth = now.getMonth() + 1;
+      const totalDays = new Date(curYear, curMonth, 0).getDate();
+      const elapsedDays = Math.max(1, Math.min(now.getDate(), totalDays));
       const r = await db.execute(sql`
-        WITH ${perAppointmentCte(period)}
-        SELECT COALESCE(SUM(revenue_cents), 0)::bigint AS forecast FROM per_appt
-        WHERE status IN ('scheduled','completed','documented')
+        WITH per_appt AS (
+          SELECT a.id,
+            SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+              COALESCE(
+                (SELECT csp.price_cents FROM customer_service_prices csp
+                 WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+                   AND csp.deleted_at IS NULL
+                   AND csp.valid_from::date <= a.date::date
+                   AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
+                 ORDER BY csp.valid_from DESC LIMIT 1),
+                s.default_price_cents
+              )
+            ))::bigint AS revenue_cents,
+            a.status, a.date::date AS d
+          FROM appointments a
+          JOIN appointment_services asvc ON asvc.appointment_id = a.id
+          JOIN services s ON s.id = asvc.service_id
+          WHERE a.deleted_at IS NULL AND s.unit_type = 'hours'
+            AND EXTRACT(YEAR FROM a.date::date) = ${curYear}
+            AND EXTRACT(MONTH FROM a.date::date) = ${curMonth}
+          GROUP BY a.id, a.status, a.date
+        )
+        SELECT
+          COALESCE(SUM(CASE WHEN status IN ('completed','documented') THEN revenue_cents END), 0)::bigint AS realized,
+          COALESCE(SUM(CASE WHEN status IN ('scheduled','completed','documented') THEN revenue_cents END), 0)::bigint AS planned_total
+        FROM per_appt
       `);
-      return num((r.rows[0] as Record<string, unknown>)?.forecast);
+      const row = r.rows[0] as Record<string, unknown>;
+      const realized = num(row?.realized);
+      const plannedTotal = num(row?.planned_total);
+      // Hochrechnung = max(realisiert/elapsedDays * totalDays, geplante Termine im Monat).
+      const runRate = Math.round((realized / elapsedDays) * totalDays);
+      return Math.max(runRate, plannedTotal);
     })(),
     db.execute(sql`
       WITH ${perAppointmentCte(period)},
@@ -227,6 +267,40 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
         WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented') ${dFilter}
       )
       SELECT (SELECT r FROM doc_rev) AS revenue, (SELECT c FROM travel_cost) AS travel_cost
+    `),
+    db.execute(sql`
+      WITH per_appt_planned AS (
+        SELECT a.id, a.customer_id,
+          a.duration_promised AS minutes,
+          SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+            COALESCE(
+              (SELECT csp.price_cents FROM customer_service_prices csp
+               WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+                 AND csp.deleted_at IS NULL
+                 AND csp.valid_from::date <= a.date::date
+                 AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
+               ORDER BY csp.valid_from DESC LIMIT 1),
+              s.default_price_cents
+            )
+          ))::bigint AS revenue_cents,
+          SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+            COALESCE(s.employee_rate_cents, 0)
+          ))::bigint AS cost_cents
+        FROM appointments a
+        JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL AND s.unit_type = 'hours'
+          AND a.status IN ('scheduled','completed','documented')
+          ${dFilter}
+        GROUP BY a.id, a.customer_id, a.duration_promised
+      )
+      SELECT
+        COALESCE(SUM(revenue_cents), 0)::bigint AS revenue_cents,
+        COALESCE(SUM(cost_cents), 0)::bigint AS cost_cents,
+        COALESCE(SUM(minutes), 0)::int AS total_minutes,
+        COUNT(*)::int AS appointments,
+        COUNT(DISTINCT customer_id)::int AS customers
+      FROM per_appt_planned
     `),
     db.execute(sql`
       WITH ${perAppointmentCte(period)},
@@ -284,11 +358,28 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
     },
     timeToDocumentDays: ttdRows.rows.map((r: Record<string, unknown>) => ({
       month: num(r.month), avgDays: num(r.avg_days),
+      medianDays: num(r.median_days), p90Days: num(r.p90_days),
     })),
     timeToInvoiceDays: ttiRows.rows.map((r: Record<string, unknown>) => ({
       month: num(r.month), avgDays: num(r.avg_days),
+      medianDays: num(r.median_days), p90Days: num(r.p90_days),
     })),
     monthForecastCents: forecast,
+    planned: ((): PlannedRevenueTotals => {
+      const p = plannedRow.rows[0] as Record<string, unknown> | undefined;
+      const revenueCents = num(p?.revenue_cents);
+      const costCents = num(p?.cost_cents);
+      const marginCents = revenueCents - costCents;
+      return {
+        revenueCents,
+        costCents,
+        marginCents,
+        marginPercent: revenueCents > 0 ? Math.round((marginCents / revenueCents) * 100) : 0,
+        totalMinutes: num(p?.total_minutes),
+        appointments: num(p?.appointments),
+        customers: num(p?.customers),
+      };
+    })(),
     travelCostRatioPct: revenueDoc > 0 ? Math.round((travelCost / revenueDoc) * 100) : 0,
     travelCostRatioByEmployee: travelByEmpRow.rows.map((r: Record<string, unknown>) => {
       const rev = num(r.revenue); const cost = num(r.travel_cost);
@@ -298,4 +389,81 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       };
     }),
   };
+}
+
+function mapGapRow(r: Record<string, unknown>): RevenueGapRow {
+  return {
+    appointmentId: num(r.appointment_id),
+    date: String(r.date ?? ""),
+    customerId: r.customer_id == null ? null : num(r.customer_id),
+    customerName: String(r.customer_name ?? "Unbekannt"),
+    employeeId: r.employee_id == null ? null : num(r.employee_id),
+    employeeName: r.employee_name == null ? null : String(r.employee_name),
+    serviceType: String(r.service_type ?? "sonstige"),
+    revenueCents: num(r.revenue_cents),
+  };
+}
+
+/** Termine, die im Zeitraum dokumentiert wurden, aber keinem Leistungsnachweis (proven) zugeordnet sind. */
+export async function listDocumentedWithoutProven(period: ResolvedPeriod): Promise<RevenueGapRow[]> {
+  const r = await db.execute(sql`
+    WITH ${perAppointmentCte(period)}
+    SELECT p.id AS appointment_id,
+      to_char(p.d, 'YYYY-MM-DD') AS date,
+      p.customer_id,
+      COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.vorname, c.nachname)), ''), c.name) AS customer_name,
+      p.employee_id,
+      u.display_name AS employee_name,
+      p.service_type,
+      p.revenue_cents
+    FROM per_appt p
+    LEFT JOIN customers c ON c.id = p.customer_id
+    LEFT JOIN users u ON u.id = p.employee_id
+    WHERE p.status IN ('completed','documented')
+      AND p.id NOT IN (
+        SELECT sra.appointment_id FROM service_record_appointments sra
+        JOIN monthly_service_records msr ON msr.id = sra.service_record_id
+        WHERE msr.deleted_at IS NULL AND msr.status = 'completed'
+      )
+    ORDER BY p.d DESC, p.id DESC
+    LIMIT 500
+  `);
+  return r.rows.map(mapGapRow as (r: Record<string, unknown>) => RevenueGapRow);
+}
+
+/** Termine in einem abgeschlossenen Leistungsnachweis, die noch nicht in einer Rechnung berechnet wurden. */
+export async function listProvenWithoutInvoiced(period: ResolvedPeriod): Promise<RevenueGapRow[]> {
+  const invFilter = billingPeriodFilter(period, sql`i.billing_year`, sql`i.billing_month`);
+  const r = await db.execute(sql`
+    WITH ${perAppointmentCte(period)},
+    proven AS (
+      SELECT p.* FROM per_appt p
+      WHERE p.id IN (
+        SELECT sra.appointment_id FROM service_record_appointments sra
+        JOIN monthly_service_records msr ON msr.id = sra.service_record_id
+        WHERE msr.deleted_at IS NULL AND msr.status = 'completed'
+      )
+    ),
+    invoiced AS (
+      SELECT DISTINCT li.appointment_id FROM invoice_line_items li
+      JOIN invoices i ON i.id = li.invoice_id
+      WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
+        AND li.appointment_id IS NOT NULL
+    )
+    SELECT p.id AS appointment_id,
+      to_char(p.d, 'YYYY-MM-DD') AS date,
+      p.customer_id,
+      COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.vorname, c.nachname)), ''), c.name) AS customer_name,
+      p.employee_id,
+      u.display_name AS employee_name,
+      p.service_type,
+      p.revenue_cents
+    FROM proven p
+    LEFT JOIN customers c ON c.id = p.customer_id
+    LEFT JOIN users u ON u.id = p.employee_id
+    WHERE p.id NOT IN (SELECT appointment_id FROM invoiced)
+    ORDER BY p.d DESC, p.id DESC
+    LIMIT 500
+  `);
+  return r.rows.map(mapGapRow as (r: Record<string, unknown>) => RevenueGapRow);
 }

@@ -18,29 +18,30 @@ interface MetricMeta {
   description: string;
   /** Whether the period filter affects this drill-down. */
   periodAware: boolean;
-  columns: DrillDownColumn[];
+  columns: DrillDownColumn<ProcessHealthRow>[];
   emptyMessage: string;
+  csvFilename: string;
 }
 
-const NAME_COL: DrillDownColumn = {
+const NAME_COL: DrillDownColumn<ProcessHealthRow> = {
   key: "label",
   label: "Name",
   render: (r) => r.label,
 };
-const DATE_COL: DrillDownColumn = {
+const DATE_COL: DrillDownColumn<ProcessHealthRow> = {
   key: "date",
   label: "Datum",
   render: (r) => r.date ? formatDate(r.date) : null,
   sortBy: (r) => r.date ?? "",
   className: "whitespace-nowrap",
 };
-const EMPLOYEE_COL: DrillDownColumn = {
+const EMPLOYEE_COL: DrillDownColumn<ProcessHealthRow> = {
   key: "employeeName",
   label: "Mitarbeiter",
   render: (r) => r.employeeName ?? null,
   hideOnMobile: true,
 };
-const PERIOD_COL: DrillDownColumn = {
+const PERIOD_COL: DrillDownColumn<ProcessHealthRow> = {
   key: "date",
   label: "Zeitraum",
   render: (r) => r.date ?? null,
@@ -65,6 +66,7 @@ const METRICS: Record<string, MetricMeta> = {
     periodAware: false,
     columns: [NAME_COL],
     emptyMessage: "Alle aktiven Kunden haben einen zugeteilten Mitarbeiter.",
+    csvFilename: "kunden-ohne-mitarbeiter",
   },
   "customers-without-appointments": {
     endpoint: "/statistics/v2/process-health/customers-without-appointments",
@@ -73,6 +75,7 @@ const METRICS: Record<string, MetricMeta> = {
     periodAware: true,
     columns: [NAME_COL, EMPLOYEE_COL, PERIOD_COL],
     emptyMessage: "Alle aktiven Kunden haben mindestens einen Termin im Zeitraum.",
+    csvFilename: "kunden-ohne-termine",
   },
   "undocumented-appointments": {
     endpoint: "/statistics/v2/process-health/undocumented-appointments",
@@ -81,6 +84,7 @@ const METRICS: Record<string, MetricMeta> = {
     periodAware: false,
     columns: [NAME_COL, DATE_COL, EMPLOYEE_COL],
     emptyMessage: "Keine offenen Termine aus dem Vormonat oder davor.",
+    csvFilename: "nicht-dokumentierte-termine",
   },
   "appointments-without-record": {
     endpoint: "/statistics/v2/process-health/appointments-without-record",
@@ -89,6 +93,7 @@ const METRICS: Record<string, MetricMeta> = {
     periodAware: true,
     columns: [NAME_COL, DATE_COL, EMPLOYEE_COL],
     emptyMessage: "Alle dokumentierten Termine sind einem Leistungsnachweis zugeordnet.",
+    csvFilename: "termine-ohne-leistungsnachweis",
   },
   "records-without-invoice": {
     endpoint: "/statistics/v2/process-health/records-without-invoice",
@@ -97,6 +102,7 @@ const METRICS: Record<string, MetricMeta> = {
     periodAware: true,
     columns: [NAME_COL, EMPLOYEE_COL, PERIOD_COL],
     emptyMessage: "Alle abgeschlossenen Nachweise sind abgerechnet.",
+    csvFilename: "leistungsnachweise-ohne-rechnung",
   },
 };
 
@@ -203,11 +209,14 @@ export default function ProcessHealthDetail() {
             </div>
           )}
           {query.data && (
-            <DrillDownTable
+            <DrillDownTable<ProcessHealthRow>
               rows={query.data}
               columns={meta.columns}
+              getRowId={(r) => r.id}
+              getRowLink={(r) => r.link}
               emptyMessage={meta.emptyMessage}
               testId={`drill-${metricKey}`}
+              csvFilename={meta.csvFilename}
             />
           )}
         </CardContent>

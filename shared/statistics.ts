@@ -105,9 +105,30 @@ export interface CustomerFunnel {
   terminated: number;
 }
 
+export interface FunnelConversionRates {
+  /** Anteil Interessent → In Beratung (in %). */
+  prospectToConsultationPct: number;
+  /** Anteil In Beratung → Aktiv (in %). */
+  consultationToActivePct: number;
+  /** Aktiv-Anteil von allen jemals aktiven Kunden (Aktiv / (Aktiv + Inaktiv + Gekündigt)). */
+  retentionPct: number;
+}
+
+export interface ProjectedGrowthRange {
+  /** Punkt-Schätzung (planned * Conversion-Rate). */
+  point: number;
+  /** Untere Grenze 95%-Wilson-Konfidenz. */
+  lower: number;
+  /** Obere Grenze 95%-Wilson-Konfidenz. */
+  upper: number;
+  /** Anzahl historischer Erstberatungen (Sample-Größe). */
+  sampleSize: number;
+}
+
 export interface CustomerStatsResponse {
   period: StatisticsPeriod;
   funnel: CustomerFunnel;
+  funnelConversionRates: FunnelConversionRates;
   activeCustomers: KpiValue;
   conversionRatePct: KpiValue;
   avgDaysConsultationToFirstAppointment: number | null;
@@ -117,6 +138,7 @@ export interface CustomerStatsResponse {
   pflegegradMix: { pflegegrad: number | null; count: number; revenueCents: number }[];
   plannedConsultations: number;
   projectedNewCustomers: number;
+  projectedNewCustomersRange: ProjectedGrowthRange;
   topCustomersByRevenue: { id: number; name: string; revenueCents: number }[];
   unusedBudgetCustomers: { id: number; name: string; remainingCents: number; remainingPct: number }[];
 }
@@ -127,6 +149,8 @@ export interface ChurnRiskCustomer {
   apptsLast30: number;
   apptsBaselineMonthly: number;
   riskScore: number;
+  /** Klartext-Begründung warum dieser Kunde im Frühwarn-Score steht. */
+  reason: string;
 }
 
 export interface RevenueByDimensionRow {
@@ -150,11 +174,36 @@ export interface RevenueStatsResponse {
     provenMinusInvoicedCents: number;
     provenMinusInvoicedCount: number;
   };
-  timeToDocumentDays: { month: number; avgDays: number }[];
-  timeToInvoiceDays: { month: number; avgDays: number }[];
+  timeToDocumentDays: { month: number; avgDays: number; medianDays: number; p90Days: number }[];
+  timeToInvoiceDays: { month: number; avgDays: number; medianDays: number; p90Days: number }[];
   monthForecastCents: number;
+  /** Geplante Erlöse / Kosten / Marge / Stunden / Termine im Auswahl-Zeitraum
+   *  (Stand: alle nicht-stornierten Termine, unabhängig vom Status — also
+   *  inkl. künftiger scheduled-Termine). Migriert aus dem alten Planung-Tab. */
+  planned: PlannedRevenueTotals;
   travelCostRatioPct: number;
   travelCostRatioByEmployee: { employeeId: number; employeeName: string; ratioPct: number }[];
+}
+
+export interface PlannedRevenueTotals {
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  marginPercent: number;
+  totalMinutes: number;
+  appointments: number;
+  customers: number;
+}
+
+export interface RevenueGapRow {
+  appointmentId: number;
+  date: string;
+  customerId: number | null;
+  customerName: string;
+  employeeId: number | null;
+  employeeName: string | null;
+  serviceType: string;
+  revenueCents: number;
 }
 
 export interface PerformanceStatsResponse {
@@ -170,6 +219,40 @@ export interface PerformanceStatsResponse {
     sickVacationPct: number;
   };
   revenuePerHour: { totalCentsPerHour: KpiValue; byEmployee: { employeeId: number; employeeName: string; centsPerHour: number }[] };
+  /** Deckungsbeitrag pro Mitarbeiter + Kalkulationsgrundlage (HW/AB Erlös vs.
+   *  Mitarbeiterkosten je Stunde). Migriert aus dem alten Team-Tab. */
+  profitability: ProfitabilityBreakdown;
+}
+
+export interface ProfitabilityEmployeeRow {
+  employeeId: number;
+  employeeName: string;
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  marginPercent: number;
+  totalMinutes: number;
+  appointments: number;
+}
+
+export interface ServicePriceCalculationRow {
+  code: string;
+  label: string;
+  priceCents: number;
+  rateCents: number;
+  marginCents: number;
+  marginPercent: number;
+}
+
+export interface ProfitabilityBreakdown {
+  totals: {
+    revenueCents: number;
+    costCents: number;
+    marginCents: number;
+    marginPercent: number;
+  };
+  byEmployee: ProfitabilityEmployeeRow[];
+  servicePrices: ServicePriceCalculationRow[];
 }
 
 export interface BudgetPotRow {

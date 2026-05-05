@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
-import type { PerformanceStatsResponse } from "@shared/statistics";
+import type { PerformanceStatsResponse, ProfitabilityBreakdown } from "@shared/statistics";
 import { buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
 
 interface UtilizationCounts { productive: number; overhead: number; sickVac: number; revenue: number; minutes: number; }
@@ -55,7 +55,7 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
   const prevY = previousYearPeriod(period);
   const dFilter = dateFilter(period, sql`a.date::date`);
 
-  const [minutesByMonthRow, avgDurationRow, revPerHourRow, cur, pre, yoy] = await Promise.all([
+  const [minutesByMonthRow, avgDurationRow, revPerHourRow, profitabilityRow, servicePricesRow, cur, pre, yoy] = await Promise.all([
     db.execute(sql`
       SELECT g.m AS month,
         COALESCE(SUM(CASE WHEN a.appointment_type != 'Erstberatung' AND a.service_type = 'hauswirtschaft' THEN a.duration_promised END), 0)::int AS hw,
@@ -108,6 +108,52 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
       HAVING COALESCE(SUM(pa.minutes), 0) > 0
       ORDER BY revenue DESC
     `),
+    db.execute(sql`
+      WITH per_appt AS (
+        SELECT COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
+          a.duration_promised AS minutes,
+          SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+            COALESCE(
+              (SELECT csp.price_cents FROM customer_service_prices csp
+               WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+                 AND csp.deleted_at IS NULL
+                 AND csp.valid_from::date <= a.date::date
+                 AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
+               ORDER BY csp.valid_from DESC LIMIT 1),
+              s.default_price_cents
+            )
+          ))::bigint AS revenue_cents,
+          SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+            COALESCE(s.employee_rate_cents, 0)
+          ))::bigint AS cost_cents,
+          a.id AS appt_id
+        FROM appointments a
+        JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented') AND s.unit_type = 'hours'
+          ${dFilter}
+        GROUP BY a.id, a.performed_by_employee_id, a.assigned_employee_id, a.duration_promised
+      )
+      SELECT u.id AS employee_id, u.display_name AS employee_name,
+        COALESCE(SUM(pa.revenue_cents), 0)::bigint AS revenue_cents,
+        COALESCE(SUM(pa.cost_cents), 0)::bigint AS cost_cents,
+        COALESCE(SUM(pa.minutes), 0)::int AS minutes,
+        COUNT(pa.appt_id)::int AS appointments
+      FROM users u LEFT JOIN per_appt pa ON pa.employee_id = u.id
+      WHERE u.is_active = true AND u.is_anonymized = false
+      GROUP BY u.id, u.display_name
+      HAVING COALESCE(SUM(pa.minutes), 0) > 0
+      ORDER BY (COALESCE(SUM(pa.revenue_cents), 0) - COALESCE(SUM(pa.cost_cents), 0)) DESC
+    `),
+    db.execute(sql`
+      SELECT s.code, s.name AS label,
+        COALESCE(s.default_price_cents, 0)::bigint AS price_cents,
+        COALESCE(s.employee_rate_cents, 0)::bigint AS rate_cents
+      FROM services s
+      WHERE s.code IN ('hauswirtschaft','alltagsbegleitung','erstberatung')
+        AND s.unit_type = 'hours'
+      ORDER BY CASE s.code WHEN 'hauswirtschaft' THEN 1 WHEN 'alltagsbegleitung' THEN 2 ELSE 3 END
+    `),
     utilizationAndRevenue(period),
     utilizationAndRevenue(prev),
     utilizationAndRevenue(prevY),
@@ -147,5 +193,48 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
         };
       }),
     },
+    profitability: ((): ProfitabilityBreakdown => {
+      const byEmployee = profitabilityRow.rows.map((r: Record<string, unknown>) => {
+        const revenueCents = num(r.revenue_cents);
+        const costCents = num(r.cost_cents);
+        const marginCents = revenueCents - costCents;
+        return {
+          employeeId: num(r.employee_id),
+          employeeName: String(r.employee_name ?? ""),
+          revenueCents,
+          costCents,
+          marginCents,
+          marginPercent: revenueCents > 0 ? Math.round((marginCents / revenueCents) * 100) : 0,
+          totalMinutes: num(r.minutes),
+          appointments: num(r.appointments),
+        };
+      });
+      const totalRevenueCents = byEmployee.reduce((s, e) => s + e.revenueCents, 0);
+      const totalCostCents = byEmployee.reduce((s, e) => s + e.costCents, 0);
+      const totalMarginCents = totalRevenueCents - totalCostCents;
+      const servicePrices = servicePricesRow.rows.map((r: Record<string, unknown>) => {
+        const priceCents = num(r.price_cents);
+        const rateCents = num(r.rate_cents);
+        const marginCents = priceCents - rateCents;
+        return {
+          code: String(r.code ?? ""),
+          label: String(r.label ?? r.code ?? ""),
+          priceCents,
+          rateCents,
+          marginCents,
+          marginPercent: priceCents > 0 ? Math.round((marginCents / priceCents) * 100) : 0,
+        };
+      });
+      return {
+        totals: {
+          revenueCents: totalRevenueCents,
+          costCents: totalCostCents,
+          marginCents: totalMarginCents,
+          marginPercent: totalRevenueCents > 0 ? Math.round((totalMarginCents / totalRevenueCents) * 100) : 0,
+        },
+        byEmployee,
+        servicePrices,
+      };
+    })(),
   };
 }

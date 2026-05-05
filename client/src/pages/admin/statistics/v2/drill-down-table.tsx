@@ -3,35 +3,48 @@ import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ChevronUp, ChevronDown, ChevronsUpDown, ChevronRight, Search } from "lucide-react";
-import type { ProcessHealthRow } from "@shared/statistics";
+import { ChevronUp, ChevronDown, ChevronsUpDown, ChevronRight, Search, Download } from "lucide-react";
+import { exportToCsv, type CsvColumn } from "../helpers";
 
-export interface DrillDownColumn {
-  key: keyof ProcessHealthRow | string;
+export interface DrillDownColumn<T> {
+  key: string;
   label: string;
-  /** Returns the cell value to display. */
-  render: (row: ProcessHealthRow) => string | null;
+  /** Returns the cell value to display (string for tables; number is auto-stringified). */
+  render: (row: T) => string | number | null;
   /** Sort key extractor; defaults to render(). */
-  sortBy?: (row: ProcessHealthRow) => string | number;
+  sortBy?: (row: T) => string | number;
+  /** CSV-only value extractor; defaults to render(). Useful for raw numbers. */
+  csvValue?: (row: T) => string | number | null | undefined;
   className?: string;
   hideOnMobile?: boolean;
+  /** Right-align numeric cells. */
+  align?: "left" | "right";
 }
 
-interface DrillDownTableProps {
-  rows: ProcessHealthRow[];
-  columns: DrillDownColumn[];
+interface DrillDownTableProps<T> {
+  rows: T[];
+  columns: DrillDownColumn<T>[];
+  /** Stable row id used as React key and in test ids. */
+  getRowId: (row: T) => string | number;
+  /** Optional row link (renders chevron + makes mobile card clickable). */
+  getRowLink?: (row: T) => string | null | undefined;
   pageSize?: number;
   emptyMessage?: string;
   testId: string;
+  /** When set, renders a "CSV exportieren" button. */
+  csvFilename?: string;
 }
 
-export function DrillDownTable({
+export function DrillDownTable<T>({
   rows,
   columns,
+  getRowId,
+  getRowLink,
   pageSize = 50,
-  emptyMessage = "Alles sauber — keine offenen Punkte.",
+  emptyMessage = "Keine Daten vorhanden.",
   testId,
-}: DrillDownTableProps) {
+  csvFilename,
+}: DrillDownTableProps<T>) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -50,9 +63,9 @@ export function DrillDownTable({
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
-    const col = columns.find((c) => String(c.key) === sortKey);
+    const col = columns.find((c) => c.key === sortKey);
     if (!col) return filtered;
-    const extractor = col.sortBy ?? ((r: ProcessHealthRow) => col.render(r) ?? "");
+    const extractor = col.sortBy ?? ((r: T) => col.render(r) ?? "");
     const arr = [...filtered];
     arr.sort((a, b) => {
       const va = extractor(a);
@@ -81,6 +94,15 @@ export function DrillDownTable({
     setPage(0);
   }
 
+  function handleExport() {
+    if (!csvFilename) return;
+    const csvCols: CsvColumn<T>[] = columns.map((c) => ({
+      label: c.label,
+      value: c.csvValue ?? ((r) => c.render(r)),
+    }));
+    exportToCsv(csvFilename, csvCols, sorted);
+  }
+
   return (
     <div className="space-y-3" data-testid={testId}>
       <div className="flex items-center gap-2 flex-wrap">
@@ -97,6 +119,18 @@ export function DrillDownTable({
         <span className="text-xs text-muted-foreground" data-testid={`${testId}-count`}>
           {sorted.length} {sorted.length === 1 ? "Eintrag" : "Einträge"}
         </span>
+        {csvFilename && sorted.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-8 text-xs"
+            onClick={handleExport}
+            data-testid={`${testId}-export-csv`}
+          >
+            <Download className="w-3.5 h-3.5 mr-1" />
+            CSV exportieren
+          </Button>
+        )}
       </div>
 
       {pageRows.length === 0 ? (
@@ -107,24 +141,23 @@ export function DrillDownTable({
         </Card>
       ) : (
         <>
-          {/* Desktop / tablet table */}
           <div className="hidden md:block rounded-md border overflow-hidden bg-white">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-xs">
                 <tr>
                   {columns.map((c) => (
                     <th
-                      key={String(c.key)}
-                      className={`text-left font-medium text-muted-foreground px-3 py-2 ${c.hideOnMobile ? "hidden lg:table-cell" : ""}`}
+                      key={c.key}
+                      className={`font-medium text-muted-foreground px-3 py-2 ${c.align === "right" ? "text-right" : "text-left"} ${c.hideOnMobile ? "hidden lg:table-cell" : ""}`}
                     >
                       <button
                         type="button"
                         className="inline-flex items-center gap-1 hover:text-foreground"
-                        onClick={() => toggleSort(String(c.key))}
+                        onClick={() => toggleSort(c.key)}
                         data-testid={`${testId}-sort-${c.key}`}
                       >
                         {c.label}
-                        {sortKey === String(c.key) ? (
+                        {sortKey === c.key ? (
                           sortDir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
                         ) : (
                           <ChevronsUpDown className="w-3 h-3 opacity-40" />
@@ -132,69 +165,80 @@ export function DrillDownTable({
                       </button>
                     </th>
                   ))}
-                  <th className="px-3 py-2 w-10" />
+                  {getRowLink && <th className="px-3 py-2 w-10" />}
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-t hover:bg-muted/20 transition-colors"
-                    data-testid={`${testId}-row-${row.id}`}
-                  >
-                    {columns.map((c) => (
-                      <td
-                        key={String(c.key)}
-                        className={`px-3 py-2 ${c.className ?? ""} ${c.hideOnMobile ? "hidden lg:table-cell" : ""}`}
-                      >
-                        {c.render(row) ?? <span className="text-muted-foreground">—</span>}
-                      </td>
-                    ))}
-                    <td className="px-3 py-2 text-right">
-                      {row.link && (
-                        <Link href={row.link} data-testid={`${testId}-row-${row.id}-link`}>
-                          <Button variant="ghost" size="sm" className="h-7 px-2">
-                            <ChevronRight className="w-4 h-4" />
-                          </Button>
-                        </Link>
+                {pageRows.map((row) => {
+                  const id = getRowId(row);
+                  const link = getRowLink?.(row);
+                  return (
+                    <tr
+                      key={id}
+                      className="border-t hover:bg-muted/20 transition-colors"
+                      data-testid={`${testId}-row-${id}`}
+                    >
+                      {columns.map((c) => (
+                        <td
+                          key={c.key}
+                          className={`px-3 py-2 ${c.align === "right" ? "text-right tabular-nums" : ""} ${c.className ?? ""} ${c.hideOnMobile ? "hidden lg:table-cell" : ""}`}
+                        >
+                          {c.render(row) ?? <span className="text-muted-foreground">—</span>}
+                        </td>
+                      ))}
+                      {getRowLink && (
+                        <td className="px-3 py-2 text-right">
+                          {link && (
+                            <Link href={link} data-testid={`${testId}-row-${id}-link`}>
+                              <Button variant="ghost" size="sm" className="h-7 px-2">
+                                <ChevronRight className="w-4 h-4" />
+                              </Button>
+                            </Link>
+                          )}
+                        </td>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {/* Mobile card list */}
           <div className="md:hidden space-y-2">
-            {pageRows.map((row) => (
-              <Link
-                key={row.id}
-                href={row.link ?? "#"}
-                data-testid={`${testId}-card-${row.id}`}
-                className="block"
-              >
+            {pageRows.map((row) => {
+              const id = getRowId(row);
+              const link = getRowLink?.(row);
+              const firstCol = columns[0];
+              const restCols = columns.slice(1);
+              const inner = (
                 <Card className="hover:shadow-sm transition-shadow">
                   <CardContent className="p-3 flex items-start gap-2">
                     <div className="flex-1 min-w-0 space-y-1">
-                      <div className="font-medium text-sm truncate">{row.label}</div>
+                      <div className="font-medium text-sm truncate">{firstCol.render(row) ?? "—"}</div>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                        {columns.slice(1).map((c) => {
+                        {restCols.map((c) => {
                           const v = c.render(row);
-                          if (!v) return null;
+                          if (v == null || v === "") return null;
                           return (
-                            <span key={String(c.key)}>
+                            <span key={c.key}>
                               <span className="text-muted-foreground/70">{c.label}:</span> {v}
                             </span>
                           );
                         })}
                       </div>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                    {link && <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />}
                   </CardContent>
                 </Card>
-              </Link>
-            ))}
+              );
+              return link ? (
+                <Link key={id} href={link} data-testid={`${testId}-card-${id}`} className="block">
+                  {inner}
+                </Link>
+              ) : (
+                <div key={id} data-testid={`${testId}-card-${id}`}>{inner}</div>
+              );
+            })}
           </div>
 
           {totalPages > 1 && (

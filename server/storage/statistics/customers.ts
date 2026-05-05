@@ -181,14 +181,33 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
   const f = funnelRow.rows[0] as Record<string, unknown>;
   const planned = num((plannedRow.rows[0] as Record<string, unknown>)?.planned);
 
+  // Sample size for the conversion rate = total Erstberatungen in the (full-year) period.
+  const sampleRow = await db.execute(sql`
+    SELECT COUNT(DISTINCT a.customer_id)::int AS n
+    FROM appointments a
+    WHERE a.deleted_at IS NULL AND a.appointment_type = 'Erstberatung'
+      AND a.status IN ('completed','documented')
+      AND EXTRACT(YEAR FROM a.date::date) = ${period.year}
+  `);
+  const sampleSize = num((sampleRow.rows[0] as Record<string, unknown>)?.n);
+  const range = wilsonProjection(planned, curConv.pct / 100, sampleSize);
+
+  const prospect = num(f.prospect);
+  const inConsultation = num(f.in_consultation);
+  const active = num(f.active);
+  const inactive = num(f.inactive);
+  const terminated = num(f.terminated);
+  const everActive = active + inactive + terminated;
+
   return {
     period: periodToResponse(period),
-    funnel: {
-      prospect: num(f.prospect),
-      inConsultation: num(f.in_consultation),
-      active: num(f.active),
-      inactive: num(f.inactive),
-      terminated: num(f.terminated),
+    funnel: { prospect, inConsultation, active, inactive, terminated },
+    funnelConversionRates: {
+      prospectToConsultationPct: prospect + inConsultation > 0
+        ? Math.round((inConsultation / (prospect + inConsultation)) * 100) : 0,
+      consultationToActivePct: inConsultation + active > 0
+        ? Math.round((active / (inConsultation + active)) * 100) : 0,
+      retentionPct: everActive > 0 ? Math.round((active / everActive) * 100) : 0,
     },
     activeCustomers: buildKpi(curActive, prevActive, yoyActive),
     conversionRatePct: buildKpi(curConv.pct, prevConv.pct, yoyConv.pct),
@@ -199,17 +218,31 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
     cancellationRatePct: cancellationRow.rows.map((r: Record<string, unknown>) => ({
       month: num(r.month), ratePct: num(r.rate_pct),
     })),
-    churnEarlyWarning: churnRows.rows.map((r: Record<string, unknown>) => ({
-      id: num(r.id), name: String(r.name ?? "Unbekannt"),
-      apptsLast30: num(r.appts_last_30), apptsBaselineMonthly: num(r.baseline_monthly),
-      riskScore: num(r.risk_score),
-    })),
+    churnEarlyWarning: churnRows.rows.map((r: Record<string, unknown>) => {
+      const last30 = num(r.appts_last_30);
+      const baseline = num(r.baseline_monthly);
+      const ratio = baseline > 0 ? last30 / baseline : 0;
+      let reason: string;
+      if (last30 === 0) {
+        reason = `Keine Termine in den letzten 30 Tagen (Schnitt sonst ${baseline.toLocaleString("de-DE", { maximumFractionDigits: 1 })}/Monat).`;
+      } else if (ratio < 0.3) {
+        reason = `Termine massiv eingebrochen: ${last30} statt ø ${baseline.toLocaleString("de-DE", { maximumFractionDigits: 1 })}/Monat.`;
+      } else {
+        reason = `Termine rückläufig: ${last30} statt ø ${baseline.toLocaleString("de-DE", { maximumFractionDigits: 1 })}/Monat.`;
+      }
+      return {
+        id: num(r.id), name: String(r.name ?? "Unbekannt"),
+        apptsLast30: last30, apptsBaselineMonthly: baseline,
+        riskScore: num(r.risk_score), reason,
+      };
+    }),
     pflegegradMix: pflegegradRows.rows.map((r: Record<string, unknown>) => ({
       pflegegrad: r.pflegegrad == null ? null : num(r.pflegegrad),
       count: num(r.count), revenueCents: num(r.revenue_cents),
     })),
     plannedConsultations: planned,
-    projectedNewCustomers: Math.round(planned * (curConv.pct / 100)),
+    projectedNewCustomers: range.point,
+    projectedNewCustomersRange: range,
     topCustomersByRevenue: topCustomersRows.rows.map((r: Record<string, unknown>) => ({
       id: num(r.id), name: String(r.name ?? "Unbekannt"), revenueCents: num(r.revenue_cents),
     })),
@@ -222,5 +255,29 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
         remainingPct: allocated > 0 ? Math.round((remaining / allocated) * 100) : 0,
       };
     }),
+  };
+}
+
+/**
+ * Berechnet die Prognose neuer Kunden + 95%-Wilson-Konfidenz-Intervall.
+ * planned = geplante Erstberatungen, p = beobachtete Conversion-Rate (0..1), n = Stichprobengröße.
+ */
+function wilsonProjection(planned: number, p: number, n: number) {
+  const point = Math.round(planned * p);
+  if (n <= 0 || planned <= 0) {
+    return { point, lower: point, upper: point, sampleSize: n };
+  }
+  const z = 1.96;
+  const z2 = z * z;
+  const denom = 1 + z2 / n;
+  const center = (p + z2 / (2 * n)) / denom;
+  const margin = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
+  const lower = Math.max(0, center - margin);
+  const upper = Math.min(1, center + margin);
+  return {
+    point,
+    lower: Math.round(planned * lower),
+    upper: Math.round(planned * upper),
+    sampleSize: n,
   };
 }

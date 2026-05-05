@@ -46,7 +46,10 @@ const AdminBirthdayCards = lazy(() => import("@/pages/admin/birthday-cards"));
 const AdminStatistics = lazy(() => import("@/pages/admin/statistics"));
 const AdminStatisticsProcessHealth = lazy(() => import("@/pages/admin/statistics/v2/process-health-page"));
 const AdminStatisticsProcessHealthDetail = lazy(() => import("@/pages/admin/statistics/v2/process-health-detail"));
-const AdminStatisticsComingSoon = lazy(() => import("@/pages/admin/statistics/v2/coming-soon"));
+const AdminStatisticsCustomers = lazy(() => import("@/pages/admin/statistics/v2/customers-page"));
+const AdminStatisticsRevenue = lazy(() => import("@/pages/admin/statistics/v2/revenue-page"));
+const AdminStatisticsPerformance = lazy(() => import("@/pages/admin/statistics/v2/performance-page"));
+const AdminStatisticsBudgets = lazy(() => import("@/pages/admin/statistics/v2/budgets-page"));
 const AdminBilling = lazy(() => import("@/pages/admin/billing"));
 const AdminHoursOverview = lazy(() => import("@/pages/admin/lexware-export"));
 const AdminProspects = lazy(() => import("@/pages/admin/prospects"));
@@ -261,8 +264,17 @@ function Router() {
       <Route path="/admin/statistics/process-health">
         <AdminRoute component={AdminStatisticsProcessHealth} />
       </Route>
-      <Route path="/admin/statistics/coming-soon/:area">
-        <AdminRoute component={AdminStatisticsComingSoon} />
+      <Route path="/admin/statistics/customers">
+        <AdminRoute component={AdminStatisticsCustomers} />
+      </Route>
+      <Route path="/admin/statistics/revenue">
+        <AdminRoute component={AdminStatisticsRevenue} />
+      </Route>
+      <Route path="/admin/statistics/performance">
+        <AdminRoute component={AdminStatisticsPerformance} />
+      </Route>
+      <Route path="/admin/statistics/budgets">
+        <AdminRoute component={AdminStatisticsBudgets} />
       </Route>
       <Route path="/admin/statistics">
         <AdminRoute component={AdminStatistics} />
