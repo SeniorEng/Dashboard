@@ -40,6 +40,7 @@ export default function TeamWorkloadPage() {
         backup2Count: 0,
         avgMonthlyHwMinutes: 0,
         avgMonthlyAllMinutes: 0,
+        monthsConsidered: 0,
       },
     }));
     withWorkload.sort((a, b) => {
@@ -121,6 +122,8 @@ export default function TeamWorkloadPage() {
               workload.primaryCount + workload.backupCount + workload.backup2Count;
             const hwHours = Math.round((workload.avgMonthlyHwMinutes / 60) * 10) / 10;
             const allHours = Math.round((workload.avgMonthlyAllMinutes / 60) * 10) / 10;
+            const monthsConsidered = Math.round(workload.monthsConsidered * 10) / 10;
+            const monthsLabel = `Ø über ${monthsConsidered.toLocaleString("de-DE", { maximumFractionDigits: 1 })} von 3 Monaten`;
             return (
               <Card key={employee.id} data-testid={`card-team-workload-${employee.id}`}>
                 <CardContent className="p-4">
@@ -217,6 +220,9 @@ export default function TeamWorkloadPage() {
                               {allHours}h
                             </span>
                             <span className="text-gray-500">ALL</span>
+                            <span className="text-gray-400" data-testid={`workload-months-${employee.id}`}>
+                              ({monthsLabel})
+                            </span>
                             <Info className="h-3 w-3 text-gray-400 ml-0.5" />
                           </span>
                         </TooltipTrigger>
@@ -225,7 +231,10 @@ export default function TeamWorkloadPage() {
                             <div><strong>HW</strong> = Hauswirtschaft</div>
                             <div><strong>ALL</strong> = Alltagsbegleitung</div>
                             <div className="text-[10px] opacity-80 mt-1">
-                              Ø der letzten 3 abgeschlossenen Monate
+                              Ø der letzten 3 abgeschlossenen Monate, normalisiert auf tatsächlich
+                              verfügbare Arbeitstage. Tage mit Urlaub oder Krankheit sowie Tage vor
+                              dem Eintrittsdatum werden herausgerechnet, damit Abwesenheiten die
+                              Auslastung nicht künstlich senken.
                             </div>
                           </div>
                         </TooltipContent>

@@ -18,6 +18,7 @@ import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
 import { db } from "../../lib/db";
+import { loadTeamWorkload } from "../../lib/team-workload";
 import { eq, and, isNull, inArray, sql, asc } from "drizzle-orm";
 import { z } from "zod";
 
@@ -569,78 +570,18 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
 }));
 
 router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht geladen werden", async (_req: Request, res: Response) => {
-  const now = new Date();
-  const windowEnd = new Date(now.getFullYear(), now.getMonth(), 1);
-  const windowStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-  const windowStartStr = `${windowStart.getFullYear()}-${String(windowStart.getMonth() + 1).padStart(2, "0")}-01`;
-  const windowEndStr = `${windowEnd.getFullYear()}-${String(windowEnd.getMonth() + 1).padStart(2, "0")}-01`;
-
-  const result = await db.execute(sql`
-    WITH active_employees AS (
-      SELECT id FROM users WHERE is_active = true AND is_anonymized = false
-    ),
-    customer_counts AS (
-      SELECT
-        ae.id AS employee_id,
-        COUNT(DISTINCT CASE WHEN c.primary_employee_id = ae.id THEN c.id END)::int AS hv_count,
-        COUNT(DISTINCT CASE WHEN c.backup_employee_id = ae.id THEN c.id END)::int AS v1_count,
-        COUNT(DISTINCT CASE WHEN c.backup_employee_id_2 = ae.id THEN c.id END)::int AS v2_count
-      FROM active_employees ae
-      LEFT JOIN customers c ON (
-        c.deleted_at IS NULL
-        AND c.status = 'aktiv'
-        AND (c.primary_employee_id = ae.id OR c.backup_employee_id = ae.id OR c.backup_employee_id_2 = ae.id)
-      )
-      GROUP BY ae.id
-    ),
-    period_hours AS (
-      SELECT
-        COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
-        s.lohnart_kategorie,
-        SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes))::numeric AS total_minutes
-      FROM appointments a
-      JOIN appointment_services asvc ON asvc.appointment_id = a.id
-      JOIN services s ON s.id = asvc.service_id
-      WHERE a.deleted_at IS NULL
-        AND a.status IN ('completed', 'documented')
-        AND a.date::date >= ${windowStartStr}::date
-        AND a.date::date < ${windowEndStr}::date
-        AND s.unit_type = 'hours'
-        AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IN (SELECT id FROM active_employees)
-      GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id), s.lohnart_kategorie
-    ),
-    avg_minutes AS (
-      SELECT
-        ae.id AS employee_id,
-        ROUND(COALESCE(SUM(CASE WHEN ph.lohnart_kategorie = 'hauswirtschaft' THEN ph.total_minutes END) / 3.0, 0))::int AS avg_hw_minutes,
-        ROUND(COALESCE(SUM(CASE WHEN ph.lohnart_kategorie = 'alltagsbegleitung' THEN ph.total_minutes END) / 3.0, 0))::int AS avg_all_minutes
-      FROM active_employees ae
-      LEFT JOIN period_hours ph ON ph.employee_id = ae.id
-      GROUP BY ae.id
-    )
-    SELECT
-      cc.employee_id AS "employeeId",
-      cc.hv_count AS "primaryCount",
-      cc.v1_count AS "backupCount",
-      cc.v2_count AS "backup2Count",
-      am.avg_hw_minutes AS "avgMonthlyHwMinutes",
-      am.avg_all_minutes AS "avgMonthlyAllMinutes"
-    FROM customer_counts cc
-    JOIN avg_minutes am ON am.employee_id = cc.employee_id
-  `);
-
-  const workloadMap: Record<number, { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number }> = {};
-  for (const row of result.rows) {
-    const r = row as Record<string, unknown>;
-    workloadMap[Number(r.employeeId)] = {
-      primaryCount: Number(r.primaryCount),
-      backupCount: Number(r.backupCount),
-      backup2Count: Number(r.backup2Count),
-      avgMonthlyHwMinutes: Number(r.avgMonthlyHwMinutes),
-      avgMonthlyAllMinutes: Number(r.avgMonthlyAllMinutes),
+  const rows = await loadTeamWorkload();
+  const workloadMap: Record<number, { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number; monthsConsidered: number }> = {};
+  for (const r of rows) {
+    workloadMap[r.employeeId] = {
+      primaryCount: r.primaryCount,
+      backupCount: r.backupCount,
+      backup2Count: r.backup2Count,
+      avgMonthlyHwMinutes: r.avgMonthlyHwMinutes,
+      avgMonthlyAllMinutes: r.avgMonthlyAllMinutes,
+      monthsConsidered: r.monthsConsidered,
     };
   }
-
   res.json(workloadMap);
 }));
 

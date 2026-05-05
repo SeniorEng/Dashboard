@@ -18,6 +18,7 @@ export interface TeamWorkloadEntry {
   backup2Count: number;
   avgMonthlyHwMinutes: number;
   avgMonthlyAllMinutes: number;
+  monthsConsidered: number;
 }
 
 export interface TeamWorkloadResponse {

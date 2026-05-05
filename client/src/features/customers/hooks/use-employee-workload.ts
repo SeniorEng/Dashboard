@@ -7,6 +7,7 @@ export interface EmployeeWorkload {
   backup2Count: number;
   avgMonthlyHwMinutes: number;
   avgMonthlyAllMinutes: number;
+  monthsConsidered: number;
 }
 
 export type EmployeeWorkloadMap = Record<number, EmployeeWorkload>;

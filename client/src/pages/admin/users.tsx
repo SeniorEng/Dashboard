@@ -712,6 +712,8 @@ export default function AdminUsers() {
                               const totalCustomers = wl.primaryCount + wl.backupCount + wl.backup2Count;
                               const hwHours = Math.round(wl.avgMonthlyHwMinutes / 60 * 10) / 10;
                               const allHours = Math.round(wl.avgMonthlyAllMinutes / 60 * 10) / 10;
+                              const monthsConsidered = Math.round(wl.monthsConsidered * 10) / 10;
+                              const monthsLabel = `Ø über ${monthsConsidered.toLocaleString("de-DE", { maximumFractionDigits: 1 })} von 3 Monaten`;
                               return (
                                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600" data-testid={`workload-stats-${user.id}`}>
                                   <Tooltip>
@@ -748,6 +750,7 @@ export default function AdminUsers() {
                                         <span className="text-gray-500">·</span>
                                         <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
                                         <span className="text-gray-500">ALL</span>
+                                        <span className="text-gray-400" data-testid={`workload-months-${user.id}`}>({monthsLabel})</span>
                                         <Info className="h-3 w-3 text-gray-400 ml-0.5" />
                                       </span>
                                     </TooltipTrigger>
@@ -756,7 +759,11 @@ export default function AdminUsers() {
                                         <div><strong>HW</strong> = Hauswirtschaft</div>
                                         <div><strong>ALL</strong> = Alltagsbegleitung</div>
                                         <div className="text-[10px] opacity-80 mt-1">
-                                          Ø der letzten 3 abgeschlossenen Monate
+                                          Ø der letzten 3 abgeschlossenen Monate, normalisiert auf
+                                          tatsächlich verfügbare Arbeitstage. Tage mit Urlaub oder
+                                          Krankheit sowie Tage vor dem Eintrittsdatum werden
+                                          herausgerechnet, damit Abwesenheiten die Auslastung nicht
+                                          künstlich senken.
                                         </div>
                                       </div>
                                     </TooltipContent>
