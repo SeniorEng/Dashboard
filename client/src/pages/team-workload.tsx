@@ -13,61 +13,12 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Loader2, Users, Calendar, Search, Info, AlertCircle } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { useTeamWorkload, type TeamWorkloadEntry } from "@/features/team/use-team-workload";
+import { useTeamWorkload } from "@/features/team/use-team-workload";
+import {
+  selectTeamWorkloadViewState,
+  type SortKey,
+} from "@/features/team/team-workload-view";
 import { ROLE_LABELS, AVAILABLE_ROLES, formatPhoneForDisplay } from "@/pages/admin/components/user-types";
-
-type SortKey =
-  | "hv-desc"
-  | "hv-asc"
-  | "name-asc"
-  | "auslastung-desc"
-  | "auslastung-asc"
-  | "freie-kunden-desc";
-
-function emptyEntry(): TeamWorkloadEntry {
-  return {
-    primaryCount: 0,
-    backupCount: 0,
-    backup2Count: 0,
-    avgMonthlyHwMinutes: 0,
-    avgMonthlyAllMinutes: 0,
-    monthsConsidered: 0,
-    monthlyWorkHours: null,
-    employmentType: "sozialversicherungspflichtig",
-  };
-}
-
-interface SollIstView {
-  sollHours: number | null;
-  istHours: number;
-  auslastungPct: number | null;
-  freieStunden: number | null;
-  moeglicheZusatzKunden: number | null;
-}
-
-function deriveSollIst(wl: TeamWorkloadEntry, globalAvg: number): SollIstView {
-  const istHoursRaw = (wl.avgMonthlyHwMinutes + wl.avgMonthlyAllMinutes) / 60;
-  const sollHours = wl.monthlyWorkHours;
-  if (sollHours === null || sollHours <= 0) {
-    return { sollHours: null, istHours: istHoursRaw, auslastungPct: null, freieStunden: null, moeglicheZusatzKunden: null };
-  }
-  // Spiegel der Backend-Logik computeSollIst (server/lib/team-workload.ts):
-  // Bei monthsConsidered <= 0 (z.B. komplett im Urlaub) bleiben istHours 0
-  // und Zusatzkunden null, weil keine belastbare Datenbasis existiert.
-  if (wl.monthsConsidered <= 0) {
-    return { sollHours, istHours: 0, auslastungPct: null, freieStunden: sollHours, moeglicheZusatzKunden: null };
-  }
-  const auslastungPct = (istHoursRaw / sollHours) * 100;
-  const freieStunden = Math.max(0, sollHours - istHoursRaw);
-  const moeglicheZusatzKunden = globalAvg > 0 ? Math.floor(freieStunden / globalAvg) : null;
-  return { sollHours, istHours: istHoursRaw, auslastungPct, freieStunden, moeglicheZusatzKunden };
-}
-
-function safeName(emp: { displayName: string | null; vorname: string | null; nachname: string | null }): string {
-  if (emp.displayName && emp.displayName.trim()) return emp.displayName;
-  const combined = `${emp.vorname ?? ""} ${emp.nachname ?? ""}`.trim();
-  return combined || "Unbenannt";
-}
 
 export default function TeamWorkloadPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useTeamWorkload();
@@ -77,52 +28,19 @@ export default function TeamWorkloadPage() {
 
   const globalAvg = data?.globalAvgHoursPerCustomerPerMonth ?? 0;
 
-  const rows = useMemo(() => {
-    if (!data || !Array.isArray(data.employees)) return [];
-    const workloadMap = data.workload ?? {};
-    const q = searchQuery.trim().toLowerCase();
-    const filtered = data.employees.filter((emp) => {
-      if (!emp.isActive) return false;
-      const empRoles = Array.isArray(emp.roles) ? emp.roles : [];
-      if (roleFilter !== "alle" && !empRoles.includes(roleFilter)) return false;
-      if (q && !safeName(emp).toLowerCase().includes(q)) return false;
-      return true;
-    });
-    const withWorkload = filtered.map((emp) => {
-      const workload = workloadMap[emp.id] ?? emptyEntry();
-      const sollIst = deriveSollIst(workload, globalAvg);
-      return { employee: { ...emp, displayName: safeName(emp), roles: Array.isArray(emp.roles) ? emp.roles : [] }, workload, sollIst };
-    });
-    withWorkload.sort((a, b) => {
-      switch (sortKey) {
-        case "name-asc":
-          return (a.employee.displayName ?? "").localeCompare(b.employee.displayName ?? "", "de");
-        case "hv-asc":
-          return a.workload.primaryCount - b.workload.primaryCount;
-        case "hv-desc":
-          return b.workload.primaryCount - a.workload.primaryCount;
-        case "auslastung-desc": {
-          const av = a.sollIst.auslastungPct ?? -1;
-          const bv = b.sollIst.auslastungPct ?? -1;
-          return bv - av;
-        }
-        case "auslastung-asc": {
-          // Mitarbeiter ohne Soll-Ist (null) ans Ende stellen, damit "wer kann noch?" sinnvoll wird.
-          const av = a.sollIst.auslastungPct ?? Number.POSITIVE_INFINITY;
-          const bv = b.sollIst.auslastungPct ?? Number.POSITIVE_INFINITY;
-          return av - bv;
-        }
-        case "freie-kunden-desc": {
-          const av = a.sollIst.moeglicheZusatzKunden ?? -1;
-          const bv = b.sollIst.moeglicheZusatzKunden ?? -1;
-          return bv - av;
-        }
-        default:
-          return 0;
-      }
-    });
-    return withWorkload;
-  }, [data, searchQuery, roleFilter, sortKey, globalAvg]);
+  const { state: viewState, rows } = useMemo(
+    () =>
+      selectTeamWorkloadViewState({
+        data,
+        isLoading,
+        isError,
+        error,
+        searchQuery,
+        roleFilter,
+        sortKey,
+      }),
+    [data, isLoading, isError, error, searchQuery, roleFilter, sortKey],
+  );
 
   return (
     <Layout>
@@ -199,11 +117,11 @@ export default function TeamWorkloadPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {viewState.kind === "loading" ? (
         <div className="flex justify-center py-12">
           <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
         </div>
-      ) : isError ? (
+      ) : viewState.kind === "error" ? (
         <div
           className="flex flex-col items-center gap-3 py-12 text-center"
           data-testid="text-team-workload-error"
@@ -213,7 +131,7 @@ export default function TeamWorkloadPage() {
             Team-Auslastung konnte nicht geladen werden.
           </div>
           <div className="text-xs text-gray-500 max-w-md" data-testid="text-team-workload-error-detail">
-            {error instanceof Error && error.message ? error.message : "Bitte erneut versuchen oder die Seite neu laden."}
+            {viewState.message}
           </div>
           <button
             type="button"
@@ -225,11 +143,13 @@ export default function TeamWorkloadPage() {
             {isFetching ? "Lädt…" : "Erneut versuchen"}
           </button>
         </div>
-      ) : rows.length === 0 ? (
+      ) : viewState.kind === "empty-no-employees" ? (
         <div className="text-center py-12 text-gray-500" data-testid="text-team-workload-empty">
-          {Array.isArray(data?.employees) && data!.employees.length > 0
-            ? "Keine Mitarbeiter passen zu den aktuellen Filtern"
-            : "Keine Mitarbeiter gefunden"}
+          Keine Mitarbeiter gefunden
+        </div>
+      ) : viewState.kind === "empty-filtered" ? (
+        <div className="text-center py-12 text-gray-500" data-testid="text-team-workload-empty">
+          Keine Mitarbeiter passen zu den aktuellen Filtern
         </div>
       ) : (
         <div className="flex flex-col gap-3">
