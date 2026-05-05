@@ -84,6 +84,10 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
         <div className="flex items-stretch">
           {isSubstitute ? (
             <div className="w-1.5 bg-muted-foreground/30" />
+          ) : appointment.isFahrtdienst ? (
+            <div className="w-2 bg-blue-500" data-testid={`stripe-fahrtdienst-${appointment.id}`} />
+          ) : serviceInfo.hasErstberatung ? (
+            <div className="w-2 bg-purple-500" data-testid={`stripe-erstberatung-${appointment.id}`} />
           ) : serviceInfo.hasBoth ? (
             <div className="w-1.5 flex flex-col overflow-hidden">
               <div className="flex-1 bg-amber-500" />
@@ -121,12 +125,26 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
                 {format(parseISO(appointment.date), "EEEE, d. MMM", { locale: de })}
               </div>
             )}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <h3 className="font-semibold text-sm text-foreground truncate">
                 {appointment.customer?.name}
               </h3>
               {appointment.isFahrtdienst && (
-                <Car className="w-3 h-3 text-primary/60 shrink-0" data-testid={`icon-fahrtdienst-${appointment.id}`} />
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-700 text-[10px] font-bold uppercase tracking-wide shrink-0"
+                  data-testid={`pill-fahrtdienst-${appointment.id}`}
+                >
+                  <Car className="w-3 h-3" />
+                  Fahrdienst
+                </span>
+              )}
+              {!appointment.isFahrtdienst && serviceInfo.hasErstberatung && (
+                <span
+                  className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700 text-[10px] font-bold uppercase tracking-wide shrink-0"
+                  data-testid={`pill-erstberatung-${appointment.id}`}
+                >
+                  Erstberatung
+                </span>
               )}
               {appointment.seriesId && (
                 <Repeat className="w-3 h-3 text-primary/60 shrink-0" data-testid={`icon-series-${appointment.id}`} />
@@ -151,9 +169,11 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
                 <span className="truncate">{appointment.assignedEmployeeName}</span>
               </div>
             )}
-            <div className="text-[11px] text-muted-foreground/70 mt-0.5">
-              {serviceInfo.label}
-            </div>
+            {!serviceInfo.hasErstberatung && serviceInfo.label !== "Kundentermin" && (
+              <div className="text-[11px] text-muted-foreground/70 mt-0.5">
+                {serviceInfo.label}
+              </div>
+            )}
           </div>
 
           {!isSubstitute && (() => {
