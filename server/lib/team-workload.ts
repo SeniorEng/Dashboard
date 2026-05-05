@@ -3,6 +3,14 @@ import { db } from "./db";
 
 export type EmploymentType = "minijobber" | "sozialversicherungspflichtig";
 
+export type AssignmentRole = "HV" | "V1" | "V2";
+
+export interface CustomerAssignment {
+  id: number;
+  name: string;
+  role: AssignmentRole;
+}
+
 export interface WorkloadRow {
   employeeId: number;
   primaryCount: number;
@@ -13,6 +21,7 @@ export interface WorkloadRow {
   monthsConsidered: number;
   monthlyWorkHours: number | null;
   employmentType: EmploymentType;
+  assignments: CustomerAssignment[];
 }
 
 export interface SollIstResult {
@@ -54,6 +63,21 @@ export async function loadTeamWorkload(now: Date = new Date()): Promise<Workload
     const r = row as Record<string, unknown>;
     const empType = String(r.employmentType ?? "sozialversicherungspflichtig");
     const monthly = r.monthlyWorkHours;
+    const rawAssignments = r.assignments;
+    let assignments: CustomerAssignment[] = [];
+    if (Array.isArray(rawAssignments)) {
+      assignments = rawAssignments
+        .map((a): CustomerAssignment | null => {
+          if (!a || typeof a !== "object") return null;
+          const obj = a as Record<string, unknown>;
+          const id = Number(obj.id);
+          const name = String(obj.name ?? "").trim();
+          const role = obj.role === "HV" || obj.role === "V1" || obj.role === "V2" ? obj.role : null;
+          if (!Number.isFinite(id) || id <= 0 || !role) return null;
+          return { id, name: name || `Kunde #${id}`, role };
+        })
+        .filter((a): a is CustomerAssignment => a !== null);
+    }
     return {
       employeeId: Number(r.employeeId),
       primaryCount: Number(r.primaryCount),
@@ -64,6 +88,7 @@ export async function loadTeamWorkload(now: Date = new Date()): Promise<Workload
       monthsConsidered: Number(r.monthsConsidered),
       monthlyWorkHours: monthly === null || monthly === undefined ? null : Number(monthly),
       employmentType: (empType === "minijobber" ? "minijobber" : "sozialversicherungspflichtig"),
+      assignments,
     };
   });
 }
@@ -129,6 +154,44 @@ function workloadSql(params: {
         AND c.status = 'aktiv'
         AND (c.primary_employee_id = ae.id OR c.backup_employee_id = ae.id OR c.backup_employee_id_2 = ae.id)
       )
+      GROUP BY ae.id
+    ),
+    customer_assignments AS (
+      SELECT ae.id AS employee_id, c.id AS customer_id,
+        TRIM(BOTH FROM (COALESCE(c.vorname,'') || ' ' || COALESCE(c.nachname,''))) AS name,
+        'HV'::text AS role
+      FROM active_employees ae
+      JOIN customers c ON c.primary_employee_id = ae.id
+      WHERE c.deleted_at IS NULL AND c.status = 'aktiv'
+      UNION ALL
+      SELECT ae.id, c.id,
+        TRIM(BOTH FROM (COALESCE(c.vorname,'') || ' ' || COALESCE(c.nachname,''))),
+        'V1'::text
+      FROM active_employees ae
+      JOIN customers c ON c.backup_employee_id = ae.id
+      WHERE c.deleted_at IS NULL AND c.status = 'aktiv'
+      UNION ALL
+      SELECT ae.id, c.id,
+        TRIM(BOTH FROM (COALESCE(c.vorname,'') || ' ' || COALESCE(c.nachname,''))),
+        'V2'::text
+      FROM active_employees ae
+      JOIN customers c ON c.backup_employee_id_2 = ae.id
+      WHERE c.deleted_at IS NULL AND c.status = 'aktiv'
+    ),
+    customer_assignments_agg AS (
+      SELECT
+        ae.id AS employee_id,
+        COALESCE(
+          json_agg(
+            json_build_object('id', ca.customer_id, 'name', ca.name, 'role', ca.role)
+            ORDER BY
+              CASE ca.role WHEN 'HV' THEN 0 WHEN 'V1' THEN 1 WHEN 'V2' THEN 2 ELSE 3 END,
+              ca.name
+          ) FILTER (WHERE ca.customer_id IS NOT NULL),
+          '[]'::json
+        ) AS assignments
+      FROM active_employees ae
+      LEFT JOIN customer_assignments ca ON ca.employee_id = ae.id
       GROUP BY ae.id
     ),
     period_hours AS (
@@ -213,10 +276,12 @@ function workloadSql(params: {
       am.avg_all_minutes AS "avgMonthlyAllMinutes",
       am.months_considered AS "monthsConsidered",
       ae.monthly_work_hours AS "monthlyWorkHours",
-      ae.employment_type AS "employmentType"
+      ae.employment_type AS "employmentType",
+      caa.assignments AS "assignments"
     FROM customer_counts cc
     JOIN avg_minutes am ON am.employee_id = cc.employee_id
     JOIN active_employees ae ON ae.id = cc.employee_id
+    LEFT JOIN customer_assignments_agg caa ON caa.employee_id = cc.employee_id
   `;
 }
 

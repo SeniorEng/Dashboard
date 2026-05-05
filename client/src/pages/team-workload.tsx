@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Loader2, Users, Calendar, Search, Info, AlertCircle } from "lucide-react";
+import { Loader2, Users, Calendar, Search, Info, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useTeamWorkload } from "@/features/team/use-team-workload";
 import {
@@ -25,6 +25,16 @@ export default function TeamWorkloadPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("alle");
   const [sortKey, setSortKey] = useState<SortKey>("auslastung-desc");
+  const [expandedEmployeeIds, setExpandedEmployeeIds] = useState<Set<number>>(new Set());
+
+  const toggleExpanded = (employeeId: number) => {
+    setExpandedEmployeeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId);
+      else next.add(employeeId);
+      return next;
+    });
+  };
 
   const globalAvg = data?.globalAvgHoursPerCustomerPerMonth ?? 0;
 
@@ -396,6 +406,69 @@ export default function TeamWorkloadPage() {
                         data-testid={`workload-soll-na-${employee.id}`}
                       >
                         <span>Soll/Ist: n/a (kein Soll hinterlegt)</span>
+                      </div>
+                    )}
+
+                    {workload.assignments.length > 0 && (
+                      <div className="mt-3 border-t pt-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(employee.id)}
+                          className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900"
+                          data-testid={`button-toggle-customers-${employee.id}`}
+                          aria-expanded={expandedEmployeeIds.has(employee.id)}
+                        >
+                          {expandedEmployeeIds.has(employee.id) ? (
+                            <ChevronDown className="h-3 w-3" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3" />
+                          )}
+                          {expandedEmployeeIds.has(employee.id) ? "Kunden ausblenden" : "Kunden anzeigen"}
+                          <span className="text-gray-400">({workload.assignments.length})</span>
+                        </button>
+
+                        {expandedEmployeeIds.has(employee.id) && (
+                          <div
+                            className="mt-2 space-y-2"
+                            data-testid={`list-customers-${employee.id}`}
+                          >
+                            {(["HV", "V1", "V2"] as const).map((role) => {
+                              const items = workload.assignments.filter((a) => a.role === role);
+                              if (items.length === 0) return null;
+                              const roleColor =
+                                role === "HV"
+                                  ? "text-teal-700 bg-teal-50"
+                                  : role === "V1"
+                                    ? "text-blue-700 bg-blue-50"
+                                    : "text-purple-700 bg-purple-50";
+                              return (
+                                <div key={role} data-testid={`list-customers-${role.toLowerCase()}-${employee.id}`}>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${roleColor}`}>
+                                      {role}
+                                    </span>
+                                    <span className="text-[10px] text-gray-500">
+                                      {items.length} {items.length === 1 ? "Kunde" : "Kunden"}
+                                    </span>
+                                  </div>
+                                  <ul className="flex flex-wrap gap-x-3 gap-y-1 pl-1">
+                                    {items.map((c) => (
+                                      <li key={`${role}-${c.id}`}>
+                                        <Link
+                                          href={`/admin/customers/${c.id}`}
+                                          className="text-xs text-primary hover:underline"
+                                          data-testid={`link-customer-${employee.id}-${c.id}`}
+                                        >
+                                          {c.name}
+                                        </Link>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

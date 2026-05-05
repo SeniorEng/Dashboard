@@ -39,6 +39,7 @@ router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werde
     monthsConsidered: number;
     monthlyWorkHours: number | null;
     employmentType: "minijobber" | "sozialversicherungspflichtig";
+    assignments: { id: number; name: string; role: "HV" | "V1" | "V2" }[];
   }> = {};
   for (const r of workloadRows) {
     workload[r.employeeId] = {
@@ -50,6 +51,7 @@ router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werde
       monthsConsidered: r.monthsConsidered,
       monthlyWorkHours: r.monthlyWorkHours,
       employmentType: r.employmentType,
+      assignments: r.assignments,
     };
   }
 

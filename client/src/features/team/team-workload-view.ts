@@ -43,6 +43,7 @@ export function emptyEntry(): TeamWorkloadEntry {
     monthsConsidered: 0,
     monthlyWorkHours: null,
     employmentType: "sozialversicherungspflichtig",
+    assignments: [],
   };
 }
 

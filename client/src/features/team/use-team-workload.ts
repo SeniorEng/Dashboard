@@ -14,6 +14,14 @@ export interface TeamWorkloadEmployee {
 
 export type EmploymentType = "minijobber" | "sozialversicherungspflichtig";
 
+export type AssignmentRole = "HV" | "V1" | "V2";
+
+export interface CustomerAssignment {
+  id: number;
+  name: string;
+  role: AssignmentRole;
+}
+
 export interface TeamWorkloadEntry {
   primaryCount: number;
   backupCount: number;
@@ -23,6 +31,7 @@ export interface TeamWorkloadEntry {
   monthsConsidered: number;
   monthlyWorkHours: number | null;
   employmentType: EmploymentType;
+  assignments: CustomerAssignment[];
 }
 
 export interface TeamWorkloadResponse {
