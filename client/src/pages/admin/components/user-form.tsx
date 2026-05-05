@@ -82,6 +82,9 @@ export function UserForm({
     if (value === "minijobber") {
       setWeeklyWorkDays("2");
       updateVacationFromWorkDays(2);
+      if (!monthlyWorkHours) {
+        setMonthlyWorkHours("40");
+      }
     } else {
       setWeeklyWorkDays("5");
       updateVacationFromWorkDays(5);
@@ -328,23 +331,23 @@ export function UserForm({
             </div>
           </div>
 
-          {employmentType !== "minijobber" && (
-            <div className="space-y-2">
-              <Label htmlFor="monthlyWorkHours">Monatsarbeitszeit (Stunden)</Label>
-              <Input
-                id="monthlyWorkHours"
-                type="number"
-                min="1"
-                max="300"
-                step="0.5"
-                value={monthlyWorkHours}
-                onChange={(e) => setMonthlyWorkHours(e.target.value)}
-                placeholder="z.B. 120"
-                data-testid="input-monthly-work-hours"
-              />
-              <p className="text-xs text-gray-500">Vertraglich vereinbarte monatliche Arbeitszeit (für Feiertagsberechnung)</p>
-            </div>
-          )}
+          <div className="space-y-2">
+            <Label htmlFor="monthlyWorkHours">Monatsarbeitszeit (Stunden)</Label>
+            <Input
+              id="monthlyWorkHours"
+              type="number"
+              min="1"
+              max="300"
+              step="0.5"
+              value={monthlyWorkHours}
+              onChange={(e) => setMonthlyWorkHours(e.target.value)}
+              placeholder={employmentType === "minijobber" ? "z.B. 40" : "z.B. 120"}
+              data-testid="input-monthly-work-hours"
+            />
+            <p className="text-xs text-gray-500">
+              Vertraglich vereinbarte monatliche Arbeitszeit (für Feiertagsberechnung und Team-Auslastung)
+            </p>
+          </div>
 
           <div className="flex items-center space-x-2">
             <Checkbox
