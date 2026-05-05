@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
-import type { ProcessHealthRow, ProcessHealthSummary } from "@shared/statistics";
+import type { ProcessHealthRow, ProcessHealthSummary, SparklinePoint } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, getHealthThresholds, num, periodToResponse, previousPeriod, previousYearPeriod, scoreFor, type ResolvedPeriod } from "./common";
 
 interface PeriodCounts {
@@ -64,19 +64,83 @@ async function undocumentedCount(): Promise<number> {
   return num((r.rows[0] as Record<string, unknown>).c);
 }
 
+interface MonthlySparkRow {
+  month: number;
+  woAppts: number;
+  undoc: number;
+  woRecord: number;
+  recordsWoInvoice: number;
+}
+
+async function monthlySparkRows(year: number): Promise<MonthlySparkRow[]> {
+  const r = await db.execute(sql`
+    SELECT g.m AS month,
+      COALESCE((SELECT COUNT(*)::int FROM customers c
+        WHERE c.status = 'aktiv' AND c.deleted_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM appointments a
+            WHERE a.customer_id = c.id AND a.deleted_at IS NULL AND a.status != 'cancelled'
+              AND EXTRACT(YEAR FROM a.date::date) = ${year}
+              AND EXTRACT(MONTH FROM a.date::date) = g.m
+          )), 0)::int AS wo_appts,
+      COALESCE((SELECT COUNT(*)::int FROM appointments a
+        WHERE a.deleted_at IS NULL AND a.status = 'completed'
+          AND EXTRACT(YEAR FROM a.date::date) = ${year}
+          AND EXTRACT(MONTH FROM a.date::date) = g.m), 0)::int AS undoc,
+      COALESCE((SELECT COUNT(*)::int FROM appointments a
+        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+          AND EXTRACT(YEAR FROM a.date::date) = ${year}
+          AND EXTRACT(MONTH FROM a.date::date) = g.m
+          AND NOT EXISTS (SELECT 1 FROM service_record_appointments sra WHERE sra.appointment_id = a.id)
+        ), 0)::int AS wo_record,
+      COALESCE((SELECT COUNT(DISTINCT msr.id)::int FROM monthly_service_records msr
+        WHERE msr.deleted_at IS NULL AND msr.status = 'completed'
+          AND msr.year = ${year} AND msr.month = g.m
+          AND NOT EXISTS (
+            SELECT 1 FROM invoices i
+            WHERE i.customer_id = msr.customer_id AND i.billing_year = msr.year AND i.billing_month = msr.month
+              AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+          )), 0)::int AS records_wo_inv
+    FROM generate_series(1, 12) AS g(m)
+    ORDER BY g.m
+  `);
+  return r.rows.map((row: Record<string, unknown>) => ({
+    month: num(row.month),
+    woAppts: num(row.wo_appts),
+    undoc: num(row.undoc),
+    woRecord: num(row.wo_record),
+    recordsWoInvoice: num(row.records_wo_inv),
+  }));
+}
+
+function pointsFor(year: number, rows: MonthlySparkRow[], pick: (r: MonthlySparkRow) => number): SparklinePoint[] {
+  return rows.map((r) => ({
+    period: `${year}-${String(r.month).padStart(2, "0")}`,
+    value: pick(r),
+  }));
+}
+
 export async function getProcessHealthSummary(period: ResolvedPeriod): Promise<ProcessHealthSummary> {
   const prev = previousPeriod(period);
   const prevY = previousYearPeriod(period);
-  const [cur, pre, yoy, undoc] = await Promise.all([
+  const [cur, pre, yoy, undoc, monthly] = await Promise.all([
     periodCounts(period),
     periodCounts(prev),
     periodCounts(prevY),
     undocumentedCount(),
+    monthlySparkRows(period.year),
   ]);
   const total = cur.woEmployee + cur.woAppointments + undoc + cur.woRecord + cur.recordsWoInvoice;
   const totalPrev = pre.woEmployee + pre.woAppointments + undoc + pre.woRecord + pre.recordsWoInvoice;
   const totalYoy = yoy.woEmployee + yoy.woAppointments + undoc + yoy.woRecord + yoy.recordsWoInvoice;
   const thresholds = getHealthThresholds();
+
+  // "Customers without employee" is a snapshot (no historical tracking).
+  // Emit a flat 12-month series at current value so the sparkline renders consistently.
+  const woEmployeeFlat: SparklinePoint[] = Array.from({ length: 12 }, (_, i) => ({
+    period: `${period.year}-${String(i + 1).padStart(2, "0")}`,
+    value: cur.woEmployee,
+  }));
 
   return {
     period: periodToResponse(period),
@@ -89,6 +153,13 @@ export async function getProcessHealthSummary(period: ResolvedPeriod): Promise<P
     total: buildKpi(total, totalPrev, totalYoy),
     healthScore: scoreFor(total, thresholds),
     thresholds,
+    sparklines: {
+      customersWithoutEmployee: woEmployeeFlat,
+      customersWithoutAppointments: pointsFor(period.year, monthly, (r) => r.woAppts),
+      undocumentedAppointments: pointsFor(period.year, monthly, (r) => r.undoc),
+      appointmentsWithoutRecord: pointsFor(period.year, monthly, (r) => r.woRecord),
+      recordsWithoutInvoice: pointsFor(period.year, monthly, (r) => r.recordsWoInvoice),
+    },
   };
 }
 
@@ -153,7 +224,7 @@ export async function listUndocumentedAppointments(): Promise<ProcessHealthRow[]
     label: String(row.label ?? "Termin"),
     date: row.date ? String(row.date) : null,
     employeeName: row.employee_name ? String(row.employee_name) : null,
-    link: `/appointments/${num(row.id)}`,
+    link: `/appointment/${num(row.id)}`,
   }));
 }
 
@@ -176,7 +247,7 @@ export async function listAppointmentsWithoutRecord(p: ResolvedPeriod): Promise<
     label: String(row.label ?? "Termin"),
     date: row.date ? String(row.date) : null,
     employeeName: row.employee_name ? String(row.employee_name) : null,
-    link: `/appointments/${num(row.id)}`,
+    link: `/appointment/${num(row.id)}`,
   }));
 }
 

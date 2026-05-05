@@ -44,6 +44,9 @@ const AdminDocumentTemplates = lazy(() => import("@/pages/admin/document-templat
 const AdminAuditLog = lazy(() => import("@/pages/admin/audit-log"));
 const AdminBirthdayCards = lazy(() => import("@/pages/admin/birthday-cards"));
 const AdminStatistics = lazy(() => import("@/pages/admin/statistics"));
+const AdminStatisticsProcessHealth = lazy(() => import("@/pages/admin/statistics/v2/process-health-page"));
+const AdminStatisticsProcessHealthDetail = lazy(() => import("@/pages/admin/statistics/v2/process-health-detail"));
+const AdminStatisticsComingSoon = lazy(() => import("@/pages/admin/statistics/v2/coming-soon"));
 const AdminBilling = lazy(() => import("@/pages/admin/billing"));
 const AdminHoursOverview = lazy(() => import("@/pages/admin/lexware-export"));
 const AdminProspects = lazy(() => import("@/pages/admin/prospects"));
@@ -251,6 +254,15 @@ function Router() {
       </Route>
       <Route path="/admin/birthday-cards">
         <AdminRoute component={AdminBirthdayCards} />
+      </Route>
+      <Route path="/admin/statistics/process-health/:metric">
+        <AdminRoute component={AdminStatisticsProcessHealthDetail} />
+      </Route>
+      <Route path="/admin/statistics/process-health">
+        <AdminRoute component={AdminStatisticsProcessHealth} />
+      </Route>
+      <Route path="/admin/statistics/coming-soon/:area">
+        <AdminRoute component={AdminStatisticsComingSoon} />
       </Route>
       <Route path="/admin/statistics">
         <AdminRoute component={AdminStatistics} />

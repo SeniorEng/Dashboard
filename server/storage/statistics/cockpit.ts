@@ -106,9 +106,15 @@ async function sparklines(year: number) {
         AND EXTRACT(YEAR FROM a.date::date) = ${year}
       GROUP BY EXTRACT(MONTH FROM a.date::date), a.id
     ),
-    monthly AS (SELECT m, SUM(revenue_cents)::bigint AS revenue_cents FROM per_appt GROUP BY m)
+    monthly AS (
+      SELECT m,
+        SUM(revenue_cents)::bigint AS revenue_cents,
+        COUNT(DISTINCT id)::int AS appt_count
+      FROM per_appt GROUP BY m
+    )
     SELECT g.m AS month,
       COALESCE(monthly.revenue_cents, 0)::bigint AS revenue_cents,
+      COALESCE(monthly.appt_count, 0)::int AS appt_count,
       COALESCE((
         SELECT COUNT(DISTINCT a.customer_id)::int
         FROM appointments a
@@ -116,6 +122,13 @@ async function sparklines(year: number) {
           AND EXTRACT(YEAR FROM a.date::date) = ${year}
           AND EXTRACT(MONTH FROM a.date::date) = g.m
       ), 0) AS active_customers,
+      COALESCE((
+        SELECT COUNT(DISTINCT a.customer_id)::int
+        FROM appointments a
+        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+          AND EXTRACT(YEAR FROM a.date::date) = ${year}
+          AND EXTRACT(MONTH FROM a.date::date) = g.m
+      ), 0) AS done_customers,
       COALESCE((
         SELECT SUM(a.duration_promised)::int FROM appointments a
         WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
@@ -126,12 +139,19 @@ async function sparklines(year: number) {
     LEFT JOIN monthly ON monthly.m = g.m
     ORDER BY g.m
   `);
-  return r.rows.map((row: Record<string, unknown>) => ({
-    period: `${year}-${String(num(row.month)).padStart(2, "0")}`,
-    revenue: num(row.revenue_cents),
-    active: num(row.active_customers),
-    minutes: num(row.total_minutes),
-  }));
+  return r.rows.map((row: Record<string, unknown>) => {
+    const apptCount = num(row.appt_count);
+    const doneCust = num(row.done_customers);
+    const revenue = num(row.revenue_cents);
+    return {
+      period: `${year}-${String(num(row.month)).padStart(2, "0")}`,
+      revenue,
+      active: num(row.active_customers),
+      minutes: num(row.total_minutes),
+      apptsPerCustomer: doneCust > 0 ? Math.round((apptCount / doneCust) * 10) / 10 : 0,
+      revenuePerCustomer: doneCust > 0 ? Math.round(revenue / doneCust) : 0,
+    };
+  });
 }
 
 export async function getCockpit(period: ResolvedPeriod): Promise<CockpitResponse> {
@@ -178,6 +198,8 @@ export async function getCockpit(period: ResolvedPeriod): Promise<CockpitRespons
       revenueDocumented: spark.map((s) => ({ period: s.period, value: s.revenue })),
       activeCustomers: spark.map((s) => ({ period: s.period, value: s.active })),
       totalMinutes: spark.map((s) => ({ period: s.period, value: s.minutes })),
+      appointmentsPerCustomer: spark.map((s) => ({ period: s.period, value: s.apptsPerCustomer })),
+      revenuePerCustomer: spark.map((s) => ({ period: s.period, value: s.revenuePerCustomer })),
     },
   };
 }

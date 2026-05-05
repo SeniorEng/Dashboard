@@ -59,6 +59,8 @@ export interface CockpitResponse {
     revenueDocumented: SparklinePoint[];
     activeCustomers: SparklinePoint[];
     totalMinutes: SparklinePoint[];
+    appointmentsPerCustomer: SparklinePoint[];
+    revenuePerCustomer: SparklinePoint[];
   };
 }
 
@@ -79,6 +81,13 @@ export interface ProcessHealthSummary {
   total: KpiValue;
   healthScore: HealthScore;
   thresholds: HealthThresholds;
+  sparklines: {
+    customersWithoutEmployee: SparklinePoint[];
+    customersWithoutAppointments: SparklinePoint[];
+    undocumentedAppointments: SparklinePoint[];
+    appointmentsWithoutRecord: SparklinePoint[];
+    recordsWithoutInvoice: SparklinePoint[];
+  };
 }
 
 export interface ProcessHealthRow extends DrillDownRow {
