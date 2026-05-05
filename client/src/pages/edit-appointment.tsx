@@ -21,19 +21,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users, UserCheck, Repeat, CheckCircle2, XCircle } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, AlertTriangle, Home, Users, UserCheck, Repeat } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
-import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstDetails, shouldResetFahrtdienst } from "@/features/appointments";
+import { useAppointment, useCustomerList, ServiceSelector, AppointmentSummary, FahrtdienstDetails, CostEstimatePreview, shouldResetFahrtdienst } from "@/features/appointments";
 import { useActiveEmployees, useAdminEmployees } from "@/features/appointments/hooks/use-active-employees";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import type { FahrtdienstState } from "@/features/appointments/components/fahrtdienst-panel";
 import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDisplay } from "@shared/utils/datetime";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
 import { validateDachPhone, formatPhoneAsYouType } from "@shared/utils/phone";
-import { displayPriceCents } from "@shared/domain/customers";
 import type { Service } from "@shared/schema";
 
 export default function EditAppointment() {
@@ -1133,72 +1132,10 @@ export default function EditAppointment() {
                 />
               )}
 
-              {costEstimate?.noPricing && (
-                <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-no-pricing">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-amber-800 font-semibold">Keine Preisvereinbarung</p>
-                    <p className="text-amber-700 text-xs mt-1">Bitte hinterlegen Sie eine Preisvereinbarung für diesen Kunden.</p>
-                  </div>
-                </div>
-              )}
-
-              {costEstimate && !costEstimate.noPricing && costEstimate.totalCents > 0 && (() => {
-                const cost = costEstimate;
-                const isSelbstzahler = cost.isSelbstzahler || appointment?.customer?.billingType === "selbstzahler";
-
-                if (isSelbstzahler) {
-                  const bruttoEuro = ((cost.bruttoCents ?? displayPriceCents(cost.totalCents, "selbstzahler")) / 100).toFixed(2).replace(".", ",");
-                  const vatPct = cost.vatRate ?? 19;
-                  return (
-                    <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm flex items-start gap-3" data-testid="selbstzahler-cost-estimate">
-                      <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-blue-800 font-medium">Kosten: {bruttoEuro} € (inkl. {vatPct} % MwSt.)</p>
-                        <p className="text-blue-600 text-xs mt-1">Privatabrechnung — wird dem Kunden direkt in Rechnung gestellt</p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const displayCents = displayPriceCents(cost.totalCents, appointment?.customer?.billingType);
-                const costEuro = (displayCents / 100).toFixed(2).replace(".", ",");
-                const availEuro = cost.availableCents !== undefined ? (cost.availableCents / 100).toFixed(2).replace(".", ",") : null;
-
-                if (cost.isHardBlock) {
-                  return (
-                    <div className="rounded-lg border bg-red-50 border-red-300 p-4 text-sm flex items-start gap-3" data-testid="budget-hard-block">
-                      <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-red-800 font-semibold">Budget reicht nicht</p>
-                        <p className="text-red-700 mt-1">Kosten: {costEuro} € — {availEuro !== null ? `verfügbar: ${availEuro} €` : "kein Budget"}</p>
-                        <p className="text-red-600 text-xs mt-1">{cost.warning}</p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (cost.warning) {
-                  return (
-                    <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
-                      <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-amber-800 font-semibold">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
-                        <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="rounded-lg border bg-green-50 border-green-200 p-3 text-sm flex items-start gap-3" data-testid="budget-cost-estimate">
-                    <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-green-800 font-medium">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
-                    </div>
-                  </div>
-                );
-              })()}
+              <CostEstimatePreview
+                costEstimate={costEstimate}
+                billingType={appointment?.customer?.billingType}
+              />
             </div>
           ) : (
             <div className="space-y-4">

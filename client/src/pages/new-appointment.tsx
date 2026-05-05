@@ -19,16 +19,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, CheckCircle2, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail, Repeat, Search } from "lucide-react";
+import { ChevronLeft, Loader2, Calendar, Clock, User, Plus, Users, AlertTriangle, XCircle, Copy, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail, Repeat, Search } from "lucide-react";
 import { WEEKDAYS, type Weekday } from "@shared/schema/appointments";
 import { WEEKDAY_LABELS, formatWeekdays } from "@/features/appointments/hooks/use-appointment-series";
 import { iconSize, componentStyles } from "@/design-system";
-import { useNewAppointmentForm, ServiceSelector, AppointmentSummary, FahrtdienstDetails } from "@/features/appointments";
+import { useNewAppointmentForm, ServiceSelector, AppointmentSummary, FahrtdienstDetails, CostEstimatePreview } from "@/features/appointments";
 import { EmployeeAvailability } from "@/features/appointments/components/employee-availability";
 import { AddressFields } from "@/pages/admin/components/address-fields";
 import { isDachPhone } from "@shared/schema/common";
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
-import { displayPriceCents } from "@shared/domain/customers";
 import type { Prospect } from "@shared/schema";
 import { useLocation } from "wouter";
 import { useUpdateProspect } from "@/features/prospects";
@@ -379,72 +378,10 @@ export default function NewAppointment() {
                 />
               )}
 
-              {form.costEstimate?.noPricing && (
-                <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-no-pricing">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-amber-800 font-semibold">Keine Preisvereinbarung</p>
-                    <p className="text-amber-700 text-xs mt-1">Bitte hinterlegen Sie eine Preisvereinbarung für diesen Kunden.</p>
-                  </div>
-                </div>
-              )}
-
-              {form.costEstimate && !form.costEstimate.noPricing && form.costEstimate.totalCents > 0 && (() => {
-                const cost = form.costEstimate;
-                const isSelbstzahler = cost.isSelbstzahler || form.selectedCustomerBillingType === "selbstzahler";
-
-                if (isSelbstzahler) {
-                  const bruttoEuro = ((cost.bruttoCents ?? displayPriceCents(cost.totalCents, "selbstzahler")) / 100).toFixed(2).replace(".", ",");
-                  const vatPct = cost.vatRate ?? 19;
-                  return (
-                    <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm flex items-start gap-3" data-testid="selbstzahler-cost-estimate">
-                      <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-blue-800 font-medium">Kosten: {bruttoEuro} € (inkl. {vatPct} % MwSt.)</p>
-                        <p className="text-blue-600 text-xs mt-1">Privatabrechnung — wird dem Kunden direkt in Rechnung gestellt</p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const displayCents = displayPriceCents(cost.totalCents, form.selectedCustomerBillingType);
-                const costEuro = (displayCents / 100).toFixed(2).replace(".", ",");
-                const availEuro = cost.availableCents !== undefined ? (cost.availableCents / 100).toFixed(2).replace(".", ",") : null;
-
-                if (cost.isHardBlock) {
-                  return (
-                    <div className="rounded-lg border bg-red-50 border-red-300 p-4 text-sm flex items-start gap-3" data-testid="budget-hard-block">
-                      <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-red-800 font-semibold">Budget reicht nicht</p>
-                        <p className="text-red-700 mt-1">Kosten: {costEuro} € — {availEuro !== null ? `verfügbar: ${availEuro} €` : "kein Budget"}</p>
-                        <p className="text-red-600 text-xs mt-1">{cost.warning}</p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (cost.warning) {
-                  return (
-                    <div className="rounded-lg border bg-amber-50 border-amber-200 p-4 text-sm flex items-start gap-3" data-testid="budget-warning">
-                      <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-amber-800 font-semibold">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
-                        <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="rounded-lg border bg-green-50 border-green-200 p-3 text-sm flex items-start gap-3" data-testid="budget-cost-estimate">
-                    <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-green-800 font-medium">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
-                    </div>
-                  </div>
-                );
-              })()}
+              <CostEstimatePreview
+                costEstimate={form.costEstimate}
+                billingType={form.selectedCustomerBillingType}
+              />
 
               {/* Series Toggle */}
               {!form.copyFromId && (
