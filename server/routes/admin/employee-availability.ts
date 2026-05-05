@@ -18,7 +18,7 @@ import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
 import { db } from "../../lib/db";
-import { loadTeamWorkload } from "../../lib/team-workload";
+import { loadTeamWorkload, getGlobalAvgHoursPerCustomerPerMonth } from "../../lib/team-workload";
 import { eq, and, isNull, inArray, sql, asc } from "drizzle-orm";
 import { z } from "zod";
 
@@ -570,8 +570,11 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
 }));
 
 router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht geladen werden", async (_req: Request, res: Response) => {
-  const rows = await loadTeamWorkload();
-  const workloadMap: Record<number, { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number; monthsConsidered: number }> = {};
+  const [rows, globalAvgHoursPerCustomerPerMonth] = await Promise.all([
+    loadTeamWorkload(),
+    getGlobalAvgHoursPerCustomerPerMonth(),
+  ]);
+  const workloadMap: Record<number, { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number; monthsConsidered: number; monthlyWorkHours: number | null; employmentType: "minijobber" | "sozialversicherungspflichtig" }> = {};
   for (const r of rows) {
     workloadMap[r.employeeId] = {
       primaryCount: r.primaryCount,
@@ -580,9 +583,11 @@ router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht g
       avgMonthlyHwMinutes: r.avgMonthlyHwMinutes,
       avgMonthlyAllMinutes: r.avgMonthlyAllMinutes,
       monthsConsidered: r.monthsConsidered,
+      monthlyWorkHours: r.monthlyWorkHours,
+      employmentType: r.employmentType,
     };
   }
-  res.json(workloadMap);
+  res.json({ workload: workloadMap, globalAvgHoursPerCustomerPerMonth });
 }));
 
 export default router;

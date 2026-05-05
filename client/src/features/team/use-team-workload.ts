@@ -12,6 +12,8 @@ export interface TeamWorkloadEmployee {
   isTeamLead: boolean;
 }
 
+export type EmploymentType = "minijobber" | "sozialversicherungspflichtig";
+
 export interface TeamWorkloadEntry {
   primaryCount: number;
   backupCount: number;
@@ -19,11 +21,14 @@ export interface TeamWorkloadEntry {
   avgMonthlyHwMinutes: number;
   avgMonthlyAllMinutes: number;
   monthsConsidered: number;
+  monthlyWorkHours: number | null;
+  employmentType: EmploymentType;
 }
 
 export interface TeamWorkloadResponse {
   employees: TeamWorkloadEmployee[];
   workload: Record<number, TeamWorkloadEntry>;
+  globalAvgHoursPerCustomerPerMonth: number;
 }
 
 export function useTeamWorkload(options?: { enabled?: boolean }) {

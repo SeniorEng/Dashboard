@@ -3,7 +3,7 @@ import { asyncHandler } from "../lib/errors";
 import { authService } from "../services/auth";
 import { sanitizeUser } from "../utils/sanitize-user";
 import { isTeamLead } from "../lib/team-lead";
-import { loadTeamWorkload } from "../lib/team-workload";
+import { loadTeamWorkload, getGlobalAvgHoursPerCustomerPerMonth } from "../lib/team-workload";
 
 const router = Router();
 
@@ -24,9 +24,10 @@ function requireAdminOrTeamLead(req: Request, res: Response, next: NextFunction)
 router.use(requireAdminOrTeamLead);
 
 router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werden", async (_req: Request, res: Response) => {
-  const [employees, workloadRows] = await Promise.all([
+  const [employees, workloadRows, globalAvgHoursPerCustomerPerMonth] = await Promise.all([
     authService.getActiveEmployees(),
     loadTeamWorkload(),
+    getGlobalAvgHoursPerCustomerPerMonth(),
   ]);
 
   const workload: Record<number, {
@@ -36,6 +37,8 @@ router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werde
     avgMonthlyHwMinutes: number;
     avgMonthlyAllMinutes: number;
     monthsConsidered: number;
+    monthlyWorkHours: number | null;
+    employmentType: "minijobber" | "sozialversicherungspflichtig";
   }> = {};
   for (const r of workloadRows) {
     workload[r.employeeId] = {
@@ -45,6 +48,8 @@ router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werde
       avgMonthlyHwMinutes: r.avgMonthlyHwMinutes,
       avgMonthlyAllMinutes: r.avgMonthlyAllMinutes,
       monthsConsidered: r.monthsConsidered,
+      monthlyWorkHours: r.monthlyWorkHours,
+      employmentType: r.employmentType,
     };
   }
 
@@ -62,7 +67,7 @@ router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werde
     };
   });
 
-  res.json({ employees: safeEmployees, workload });
+  res.json({ employees: safeEmployees, workload, globalAvgHoursPerCustomerPerMonth });
 }));
 
 export default router;

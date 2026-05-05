@@ -1,6 +1,8 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "./db";
 
+export type EmploymentType = "minijobber" | "sozialversicherungspflichtig";
+
 export interface WorkloadRow {
   employeeId: number;
   primaryCount: number;
@@ -9,29 +11,49 @@ export interface WorkloadRow {
   avgMonthlyHwMinutes: number;
   avgMonthlyAllMinutes: number;
   monthsConsidered: number;
+  monthlyWorkHours: number | null;
+  employmentType: EmploymentType;
+}
+
+export interface SollIstResult {
+  istHours: number;
+  auslastungPct: number | null;
+  freieStunden: number | null;
+  moeglicheZusatzKunden: number | null;
 }
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-export async function loadTeamWorkload(now: Date = new Date()): Promise<WorkloadRow[]> {
+function buildMonthWindow(now: Date): {
+  windowStartStr: string;
+  windowEndStr: string;
+  monthStarts: [string, string, string];
+} {
   const windowEnd = new Date(now.getFullYear(), now.getMonth(), 1);
   const windowStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
   const windowStartStr = `${windowStart.getFullYear()}-${pad2(windowStart.getMonth() + 1)}-01`;
   const windowEndStr = `${windowEnd.getFullYear()}-${pad2(windowEnd.getMonth() + 1)}-01`;
-  const month0Start = windowStartStr;
-  const month1Start = `${new Date(windowStart.getFullYear(), windowStart.getMonth() + 1, 1).getFullYear()}-${pad2(new Date(windowStart.getFullYear(), windowStart.getMonth() + 1, 1).getMonth() + 1)}-01`;
-  const month2Start = `${new Date(windowStart.getFullYear(), windowStart.getMonth() + 2, 1).getFullYear()}-${pad2(new Date(windowStart.getFullYear(), windowStart.getMonth() + 2, 1).getMonth() + 1)}-01`;
-
-  const result = await db.execute(workloadSql({
+  const m1 = new Date(windowStart.getFullYear(), windowStart.getMonth() + 1, 1);
+  const m2 = new Date(windowStart.getFullYear(), windowStart.getMonth() + 2, 1);
+  const month1Start = `${m1.getFullYear()}-${pad2(m1.getMonth() + 1)}-01`;
+  const month2Start = `${m2.getFullYear()}-${pad2(m2.getMonth() + 1)}-01`;
+  return {
     windowStartStr,
     windowEndStr,
-    monthStarts: [month0Start, month1Start, month2Start],
-  }));
+    monthStarts: [windowStartStr, month1Start, month2Start],
+  };
+}
+
+export async function loadTeamWorkload(now: Date = new Date()): Promise<WorkloadRow[]> {
+  const window = buildMonthWindow(now);
+  const result = await db.execute(workloadSql(window));
 
   return result.rows.map((row) => {
     const r = row as Record<string, unknown>;
+    const empType = String(r.employmentType ?? "sozialversicherungspflichtig");
+    const monthly = r.monthlyWorkHours;
     return {
       employeeId: Number(r.employeeId),
       primaryCount: Number(r.primaryCount),
@@ -40,8 +62,45 @@ export async function loadTeamWorkload(now: Date = new Date()): Promise<Workload
       avgMonthlyHwMinutes: Number(r.avgMonthlyHwMinutes),
       avgMonthlyAllMinutes: Number(r.avgMonthlyAllMinutes),
       monthsConsidered: Number(r.monthsConsidered),
+      monthlyWorkHours: monthly === null || monthly === undefined ? null : Number(monthly),
+      employmentType: (empType === "minijobber" ? "minijobber" : "sozialversicherungspflichtig"),
     };
   });
+}
+
+/**
+ * Pure calculation: ergibt Soll-Ist und mögliche Zusatzkunden für eine Workload-Zeile.
+ * Edge cases:
+ * - monthlyWorkHours null oder <= 0 → alle Kennzahlen null (UI zeigt Hinweis "Vertragsstunden fehlen").
+ * - monthsConsidered 0 → istHours 0, Auslastung null.
+ * - globalAvgHoursPerCustomerPerMonth <= 0 → moeglicheZusatzKunden null.
+ * - istHours > sollHours → freieStunden 0, moeglicheZusatzKunden 0.
+ */
+export function computeSollIst(
+  row: Pick<WorkloadRow, "avgMonthlyHwMinutes" | "avgMonthlyAllMinutes" | "monthsConsidered" | "monthlyWorkHours">,
+  globalAvgHoursPerCustomerPerMonth: number,
+): SollIstResult {
+  const istHours = (row.avgMonthlyHwMinutes + row.avgMonthlyAllMinutes) / 60;
+
+  if (row.monthlyWorkHours === null || row.monthlyWorkHours <= 0) {
+    return { istHours, auslastungPct: null, freieStunden: null, moeglicheZusatzKunden: null };
+  }
+  if (row.monthsConsidered <= 0) {
+    return { istHours: 0, auslastungPct: null, freieStunden: row.monthlyWorkHours, moeglicheZusatzKunden: null };
+  }
+
+  const sollHours = row.monthlyWorkHours;
+  const auslastungPct = (istHours / sollHours) * 100;
+  const freieStunden = Math.max(0, sollHours - istHours);
+
+  let moeglicheZusatzKunden: number | null;
+  if (globalAvgHoursPerCustomerPerMonth <= 0) {
+    moeglicheZusatzKunden = null;
+  } else {
+    moeglicheZusatzKunden = Math.floor(freieStunden / globalAvgHoursPerCustomerPerMonth);
+  }
+
+  return { istHours, auslastungPct, freieStunden, moeglicheZusatzKunden };
 }
 
 function workloadSql(params: {
@@ -52,7 +111,9 @@ function workloadSql(params: {
   const { windowStartStr, windowEndStr, monthStarts } = params;
   return sql`
     WITH active_employees AS (
-      SELECT id, eintrittsdatum FROM users WHERE is_active = true AND is_anonymized = false
+      SELECT id, eintrittsdatum, monthly_work_hours, employment_type
+      FROM users
+      WHERE is_active = true AND is_anonymized = false
     ),
     customer_counts AS (
       SELECT
@@ -148,8 +209,62 @@ function workloadSql(params: {
       cc.v2_count AS "backup2Count",
       am.avg_hw_minutes AS "avgMonthlyHwMinutes",
       am.avg_all_minutes AS "avgMonthlyAllMinutes",
-      am.months_considered AS "monthsConsidered"
+      am.months_considered AS "monthsConsidered",
+      ae.monthly_work_hours AS "monthlyWorkHours",
+      ae.employment_type AS "employmentType"
     FROM customer_counts cc
     JOIN avg_minutes am ON am.employee_id = cc.employee_id
+    JOIN active_employees ae ON ae.id = cc.employee_id
   `;
+}
+
+// ---------------------------------------------------------------------------
+// Globale Referenz: Ø Stunden je Kunde je Monat (letzte 3 abgeschlossene Monate)
+// ---------------------------------------------------------------------------
+
+const GLOBAL_AVG_TTL_MS = 5 * 60 * 1000;
+let globalAvgCache: { value: number; expiresAt: number } | null = null;
+
+export function clearGlobalAvgCache(): void {
+  globalAvgCache = null;
+}
+
+export async function getGlobalAvgHoursPerCustomerPerMonth(now: Date = new Date()): Promise<number> {
+  if (globalAvgCache && globalAvgCache.expiresAt > Date.now()) {
+    return globalAvgCache.value;
+  }
+
+  const { windowStartStr, windowEndStr } = buildMonthWindow(now);
+  const result = await db.execute(sql`
+    WITH appointment_minutes AS (
+      SELECT
+        a.customer_id,
+        DATE_TRUNC('month', a.date::date)::date AS month_start,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)::numeric AS minutes
+      FROM appointments a
+      JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      JOIN services s ON s.id = asvc.service_id
+      JOIN customers c ON c.id = a.customer_id
+      WHERE a.deleted_at IS NULL
+        AND a.status IN ('completed', 'documented')
+        AND a.date::date >= ${windowStartStr}::date
+        AND a.date::date < ${windowEndStr}::date
+        AND s.unit_type = 'hours'
+        AND c.deleted_at IS NULL
+        AND c.status = 'aktiv'
+        AND a.customer_id IS NOT NULL
+    )
+    SELECT
+      COALESCE(SUM(minutes), 0)::numeric AS total_minutes,
+      COUNT(DISTINCT (customer_id, month_start))::int AS customer_months
+    FROM appointment_minutes
+  `);
+
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  const totalMinutes = Number(row?.total_minutes ?? 0);
+  const customerMonths = Number(row?.customer_months ?? 0);
+
+  const avg = customerMonths > 0 ? totalMinutes / 60 / customerMonths : 0;
+  globalAvgCache = { value: avg, expiresAt: Date.now() + GLOBAL_AVG_TTL_MS };
+  return avg;
 }

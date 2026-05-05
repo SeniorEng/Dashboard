@@ -707,13 +707,30 @@ export default function AdminUsers() {
                                 <span className="text-sm text-gray-500 italic">Keine zugewiesen</span>
                               )}
                             </div>
-                            {workloadData && workloadData[user.id] && (() => {
-                              const wl = workloadData[user.id];
+                            {workloadData && workloadData.workload[user.id] && (() => {
+                              const wl = workloadData.workload[user.id];
+                              const globalAvg = workloadData.globalAvgHoursPerCustomerPerMonth;
                               const totalCustomers = wl.primaryCount + wl.backupCount + wl.backup2Count;
                               const hwHours = Math.round(wl.avgMonthlyHwMinutes / 60 * 10) / 10;
                               const allHours = Math.round(wl.avgMonthlyAllMinutes / 60 * 10) / 10;
+                              const istHours = hwHours + allHours;
                               const monthsConsidered = Math.round(wl.monthsConsidered * 10) / 10;
                               const monthsLabel = `Ø über ${monthsConsidered.toLocaleString("de-DE", { maximumFractionDigits: 1 })} von 3 Monaten`;
+                              const sollHours = wl.monthlyWorkHours;
+                              const hasSoll = sollHours !== null && sollHours > 0;
+                              // Spiegel von computeSollIst (server/lib/team-workload.ts):
+                              // ohne monthsConsidered > 0 keine belastbare Datenbasis,
+                              // also Auslastung & Zusatzkunden = null. freieStunden = soll.
+                              const hasIstBasis = hasSoll && wl.monthsConsidered > 0;
+                              const auslastungPct = hasIstBasis
+                                ? Math.round((istHours / sollHours!) * 100)
+                                : null;
+                              const freieStunden = hasSoll
+                                ? (hasIstBasis ? Math.max(0, sollHours! - istHours) : sollHours!)
+                                : null;
+                              const moeglicheZusatzKunden = hasIstBasis && globalAvg > 0
+                                ? Math.floor(freieStunden! / globalAvg)
+                                : null;
                               return (
                                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600" data-testid={`workload-stats-${user.id}`}>
                                   <Tooltip>
@@ -768,6 +785,61 @@ export default function AdminUsers() {
                                       </div>
                                     </TooltipContent>
                                   </Tooltip>
+                                  {hasSoll ? (
+                                    <>
+                                      <span className="text-gray-300">|</span>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <span className="inline-flex items-center gap-1 cursor-help" data-testid={`workload-sollist-trigger-${user.id}`}>
+                                            <span className="text-gray-500">Soll</span>
+                                            <span className="font-medium" data-testid={`workload-soll-${user.id}`}>{sollHours}h</span>
+                                            {auslastungPct !== null && (
+                                              <>
+                                                <span className="text-gray-500">·</span>
+                                                <span
+                                                  className={`font-medium ${auslastungPct >= 100 ? "text-red-600" : auslastungPct >= 85 ? "text-amber-600" : "text-teal-700"}`}
+                                                  data-testid={`workload-auslastung-${user.id}`}
+                                                >
+                                                  {auslastungPct}%
+                                                </span>
+                                              </>
+                                            )}
+                                            {moeglicheZusatzKunden !== null && (
+                                              <>
+                                                <span className="text-gray-500">·</span>
+                                                <span className="text-gray-700" data-testid={`workload-zusatzkunden-${user.id}`}>
+                                                  +{moeglicheZusatzKunden} mögl. Kunden
+                                                </span>
+                                              </>
+                                            )}
+                                            <Info className="h-3 w-3 text-gray-400 ml-0.5" />
+                                          </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent className="max-w-xs">
+                                          <div className="space-y-0.5 text-[11px]">
+                                            <div><strong>Soll</strong> = vertragliche Stunden/Monat ({sollHours}h)</div>
+                                            <div><strong>Ist</strong> = Ø HW + Alltagsbegleitung der letzten 3 Monate ({istHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h)</div>
+                                            {freieStunden !== null && (
+                                              <div><strong>Freie Stunden</strong>: {freieStunden.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h</div>
+                                            )}
+                                            {globalAvg > 0 && (
+                                              <div className="opacity-80 mt-1">
+                                                Mögl. weitere Kunden = freie Stunden ÷ Ø {globalAvg.toLocaleString("de-DE", { maximumFractionDigits: 2 })} h pro Kunde/Monat (global, letzte 3 Monate).
+                                              </div>
+                                            )}
+                                          </div>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-gray-300">|</span>
+                                      <span className="inline-flex items-center gap-1 text-amber-700" data-testid={`workload-soll-missing-${user.id}`}>
+                                        <Info className="h-3 w-3" />
+                                        <span className="text-[11px]">Vertragsstunden fehlen</span>
+                                      </span>
+                                    </>
+                                  )}
                                 </div>
                               );
                             })()}
