@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Users, Calendar, Search, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, Search, AlertCircle, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useTeamWorkload } from "@/features/team/use-team-workload";
 import {
@@ -179,12 +179,15 @@ export default function TeamWorkloadPage() {
                 data-testid={`card-team-workload-${employee.id}`}
               >
                 <CardContent className="p-4">
-                  <div className="flex items-center gap-2 flex-wrap mb-3">
-                    <span className="font-semibold text-gray-900" data-testid={`text-team-workload-name-${employee.id}`}>
+                  {/* Header: Name + Phone + Pills */}
+                  <div className="mb-4">
+                    <div
+                      className="font-semibold text-gray-900 text-base leading-tight"
+                      data-testid={`text-team-workload-name-${employee.id}`}
+                    >
                       {employee.displayName}
-                    </span>
-                    <span className="text-gray-500">·</span>
-                    <span className="text-sm text-gray-500">
+                    </div>
+                    <div className="text-sm text-gray-500 mt-0.5">
                       {employee.telefon ? (
                         <a
                           href={`tel:${employee.telefon}`}
@@ -196,55 +199,123 @@ export default function TeamWorkloadPage() {
                       ) : (
                         "–"
                       )}
-                    </span>
-                    {employee.isTeamLead && (
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {overloaded && (
+                        <span
+                          className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border border-red-200 bg-red-50 text-red-700 font-medium"
+                          data-testid={`badge-team-workload-overloaded-${employee.id}`}
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          Überlastet
+                        </span>
+                      )}
+                      {employee.isTeamLead && (
+                        <span
+                          className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border border-gray-200 bg-white text-gray-700 font-medium"
+                          data-testid={`badge-team-workload-lead-${employee.id}`}
+                        >
+                          Teamleitung
+                        </span>
+                      )}
                       <span
-                        className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700"
-                        data-testid={`badge-team-workload-lead-${employee.id}`}
+                        className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border border-gray-200 bg-white text-gray-700 font-medium"
+                        data-testid={`badge-team-workload-employment-${employee.id}`}
                       >
-                        Teamleitung
+                        {employmentLabel}
                       </span>
-                    )}
-                    <span
-                      className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700"
-                      data-testid={`badge-team-workload-employment-${employee.id}`}
-                    >
-                      {employmentLabel}
-                    </span>
-                    {overloaded && (
-                      <span
-                        className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700"
-                        data-testid={`badge-team-workload-overloaded-${employee.id}`}
-                      >
-                        überlastet
-                      </span>
-                    )}
+                    </div>
                   </div>
 
-                  <div>
-                    <div className="text-xs text-gray-500 mb-1">Tätigkeitsbereiche</div>
-                    <div className="flex flex-wrap gap-x-3 gap-y-1" data-testid={`text-team-workload-roles-${employee.id}`}>
-                      {employee.roles.map((role) => (
-                        <span key={role} className="text-sm text-gray-700">
-                          {ROLE_LABELS[role] || role}
+                  {/* Hero: Auslastung % + Progress Bar */}
+                  {sollIst.sollHours !== null && auslastungPctRounded !== null ? (
+                    <div className="mb-4" data-testid={`workload-sollist-${employee.id}`}>
+                      <div className="flex items-baseline gap-2">
+                        <span
+                          className={`text-3xl font-bold ${overloaded ? "text-red-600" : auslastungPctRounded >= 85 ? "text-amber-600" : "text-teal-700"}`}
+                          data-testid={`workload-auslastung-${employee.id}`}
+                        >
+                          {auslastungPctRounded}%
                         </span>
-                      ))}
-                      {employee.roles.length === 0 && (
-                        <span className="text-sm text-gray-500 italic">Keine zugewiesen</span>
-                      )}
+                        <span className="text-xs uppercase tracking-wide text-gray-500 font-medium">
+                          Auslastung
+                        </span>
+                      </div>
+                      {/* Progress bar with 100% marker */}
+                      <div className="relative mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div
+                          className={`h-full ${overloaded ? "bg-red-500" : auslastungPctRounded >= 85 ? "bg-amber-500" : "bg-teal-600"}`}
+                          style={{ width: `${Math.min(auslastungPctRounded, 100)}%` }}
+                        />
+                        {overloaded && (
+                          <div
+                            className="absolute top-0 h-full w-0.5 bg-gray-900"
+                            style={{ left: `${Math.min((100 / auslastungPctRounded) * 100, 100)}%` }}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-gray-700 gap-2 flex-wrap">
+                        <span>
+                          <span className="font-medium" data-testid={`workload-ist-${employee.id}`}>
+                            {sollIst.istHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })} h
+                          </span>{" "}
+                          <span className="text-gray-500">Ist</span>
+                        </span>
+                        <span className="text-gray-500 uppercase tracking-wide text-[11px]">
+                          Soll <span className="font-medium text-gray-700" data-testid={`workload-soll-${employee.id}`}>{sollIst.sollHours} h</span>
+                        </span>
+                        {sollIst.freieStunden !== null && (
+                          <span
+                            className={`font-medium ${overloaded ? "text-red-600" : "text-teal-700"}`}
+                            data-testid={`workload-freie-stunden-${employee.id}`}
+                          >
+                            {overloaded
+                              ? `+${Math.abs(sollIst.freieStunden).toLocaleString("de-DE", { maximumFractionDigits: 1 })} h über`
+                              : `${sollIst.freieStunden.toLocaleString("de-DE", { maximumFractionDigits: 1 })} h frei`}
+                          </span>
+                        )}
+                      </div>
                     </div>
-
+                  ) : workload.monthlyWorkHours === null ? (
                     <div
-                      className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600"
-                      data-testid={`workload-stats-${employee.id}`}
+                      className="mb-4 flex items-center gap-2 text-xs"
+                      data-testid={`workload-soll-missing-${employee.id}`}
                     >
-                      <span className="inline-flex items-center gap-1">
-                        <Users className="h-3 w-3" />
-                        <span className="font-medium" data-testid={`workload-total-${employee.id}`}>
-                          {totalCustomers} Kunden
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                        <AlertCircle className="h-3 w-3" />
+                        Vertragsstunden fehlen
+                      </span>
+                      <Link
+                        href={`/admin/users?edit=${employee.id}`}
+                        className="text-primary hover:underline"
+                        data-testid={`link-edit-employee-${employee.id}`}
+                      >
+                        jetzt ergänzen
+                      </Link>
+                    </div>
+                  ) : (
+                    <div
+                      className="mb-4 text-xs text-gray-500"
+                      data-testid={`workload-soll-na-${employee.id}`}
+                    >
+                      Soll/Ist: n/a (kein Soll hinterlegt)
+                    </div>
+                  )}
+
+                  {/* Key-Value Stats */}
+                  <div
+                    className="space-y-1.5 text-sm"
+                    data-testid={`workload-stats-${employee.id}`}
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-gray-600">Kunden gesamt</span>
+                      <span className="text-right">
+                        <span className="font-semibold text-gray-900" data-testid={`workload-total-${employee.id}`}>
+                          {totalCustomers}
                         </span>
-                        <span className="text-gray-500">
-                          (
+                        <span className="text-gray-500 text-xs">
+                          {" · "}
                           <span className="text-teal-700" data-testid={`workload-hv-${employee.id}`}>
                             {workload.primaryCount} HV
                           </span>
@@ -256,107 +327,74 @@ export default function TeamWorkloadPage() {
                           <span className="text-purple-600" data-testid={`workload-v2-${employee.id}`}>
                             {workload.backup2Count} V2
                           </span>
-                          )
-                        </span>
-                      </span>
-                      <span className="text-gray-300">|</span>
-                      <span className="inline-flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        <span>Ø</span>
-                        <span className="font-medium" data-testid={`workload-hw-hours-${employee.id}`}>
-                          {hwHours}h
-                        </span>
-                        <span className="text-gray-500">HW</span>
-                        <span className="text-gray-500">·</span>
-                        <span className="font-medium" data-testid={`workload-all-hours-${employee.id}`}>
-                          {allHours}h
-                        </span>
-                        <span className="text-gray-500">ALL</span>
-                        <span className="text-gray-400" data-testid={`workload-months-${employee.id}`}>
-                          ({monthsLabel})
                         </span>
                       </span>
                     </div>
-
-                    {sollIst.sollHours !== null ? (
-                      <div
-                        className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
-                        data-testid={`workload-sollist-${employee.id}`}
-                      >
-                        <span className="inline-flex items-center gap-1 text-gray-700">
-                          <span className="text-gray-500">Soll/Ist:</span>
-                          <span className="font-medium" data-testid={`workload-soll-${employee.id}`}>
-                            {sollIst.sollHours}h
-                          </span>
-                          <span className="text-gray-500">/</span>
-                          <span className="font-medium" data-testid={`workload-ist-${employee.id}`}>
-                            {sollIst.istHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h
-                          </span>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-gray-600">Ø Stunden / Monat</span>
+                      <span className="text-right">
+                        <span className="font-semibold text-gray-900" data-testid={`workload-hw-hours-${employee.id}`}>
+                          {hwHours} h
                         </span>
-                        <span className="text-gray-300">|</span>
-                        {auslastungPctRounded !== null ? (
-                          <span
-                            className={`font-medium ${overloaded ? "text-red-600" : auslastungPctRounded >= 85 ? "text-amber-600" : "text-teal-700"}`}
-                            data-testid={`workload-auslastung-${employee.id}`}
-                          >
-                            {auslastungPctRounded}% ausgelastet
-                          </span>
-                        ) : (
-                          <span className="text-gray-500" data-testid={`workload-auslastung-na-${employee.id}`}>
-                            Auslastung n/a
-                          </span>
-                        )}
-                        <span className="text-gray-300">|</span>
-                        <span className="text-gray-700" data-testid={`workload-freie-stunden-${employee.id}`}>
-                          {sollIst.freieStunden !== null
-                            ? `${sollIst.freieStunden.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h frei`
-                            : "–"}
+                        <span className="text-gray-500 text-xs"> HW · </span>
+                        <span className="font-semibold text-gray-900" data-testid={`workload-all-hours-${employee.id}`}>
+                          {allHours} h
                         </span>
-                        {sollIst.moeglicheZusatzKunden !== null ? (
-                          <>
-                            <span className="text-gray-300">|</span>
-                            <span
-                              className="font-medium text-emerald-700"
-                              data-testid={`workload-zusatzkunden-${employee.id}`}
-                            >
-                              +{sollIst.moeglicheZusatzKunden} mögl. Kunden
-                            </span>
-                          </>
-                        ) : globalAvg <= 0 ? (
-                          <>
-                            <span className="text-gray-300">|</span>
-                            <span className="text-gray-500" data-testid={`workload-zusatzkunden-na-${employee.id}`}>
-                              Zusatzkunden n/a
-                            </span>
-                          </>
-                        ) : null}
-                      </div>
-                    ) : workload.monthlyWorkHours === null ? (
-                      <div
-                        className="mt-2 flex items-center gap-2 text-xs"
-                        data-testid={`workload-soll-missing-${employee.id}`}
-                      >
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                          <AlertCircle className="h-3 w-3" />
-                          Vertragsstunden fehlen
-                        </span>
-                        <Link
-                          href={`/admin/users?edit=${employee.id}`}
-                          className="text-primary hover:underline"
-                          data-testid={`link-edit-employee-${employee.id}`}
+                        <span className="text-gray-500 text-xs"> Allt.</span>
+                      </span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3" data-testid={`workload-months-${employee.id}`}>
+                      <span className="text-gray-600">Berechnungs-Basis</span>
+                      <span className="text-xs text-gray-500">{monthsLabel}</span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-gray-600">Freie Kapazität</span>
+                      {sollIst.moeglicheZusatzKunden !== null && sollIst.moeglicheZusatzKunden > 0 ? (
+                        <span
+                          className="font-semibold text-emerald-700"
+                          data-testid={`workload-zusatzkunden-${employee.id}`}
                         >
-                          jetzt ergänzen
-                        </Link>
-                      </div>
-                    ) : (
-                      <div
-                        className="mt-2 flex items-center gap-2 text-xs text-gray-500"
-                        data-testid={`workload-soll-na-${employee.id}`}
-                      >
-                        <span>Soll/Ist: n/a (kein Soll hinterlegt)</span>
-                      </div>
-                    )}
+                          +{sollIst.moeglicheZusatzKunden} mögl. Kunden
+                        </span>
+                      ) : sollIst.moeglicheZusatzKunden === 0 ? (
+                        <span
+                          className="font-semibold text-red-600"
+                          data-testid={`workload-zusatzkunden-${employee.id}`}
+                        >
+                          Keine
+                        </span>
+                      ) : (
+                        <span
+                          className="text-gray-500 text-xs"
+                          data-testid={`workload-zusatzkunden-na-${employee.id}`}
+                        >
+                          n/a
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
+                  {/* Tätigkeitsbereiche als Pills */}
+                  <div className="mt-4">
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500 font-medium mb-1.5">
+                      Tätigkeitsbereiche
+                    </div>
+                    <div className="flex flex-wrap gap-1.5" data-testid={`text-team-workload-roles-${employee.id}`}>
+                      {employee.roles.map((role) => (
+                        <span
+                          key={role}
+                          className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700"
+                        >
+                          {ROLE_LABELS[role] || role}
+                        </span>
+                      ))}
+                      {employee.roles.length === 0 && (
+                        <span className="text-xs text-gray-500 italic">Keine zugewiesen</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
                     {workload.assignments.length > 0 && (
                       <div className="mt-3 border-t pt-2">
                         <button
