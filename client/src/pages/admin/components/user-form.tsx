@@ -193,7 +193,7 @@ export function UserForm({
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Persönliche Daten</h3>
           
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="vorname">Vorname *</Label>
               <Input
@@ -366,8 +366,8 @@ export function UserForm({
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Adresse</h3>
           
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="col-span-3 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="sm:col-span-3 space-y-2">
               <Label htmlFor="strasse">Straße</Label>
               <AddressAutocomplete
                 id="strasse"
