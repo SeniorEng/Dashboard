@@ -107,7 +107,7 @@ describe("Task #365 — team-workload monthsConsidered", () => {
     // Wir verwenden raw SQL, damit das Insert nicht an Drizzle/DB-Schema-Drift
     // (z. B. nicht-existierender Spalten wie rechnung_an_kunde) scheitert.
     const custResult = await db.execute<{ id: number }>(
-      sql`INSERT INTO customers (name, address) VALUES (${`T365 HW ${Date.now()}`}, ${"Teststraße 1, 10115 Berlin"}) RETURNING id`,
+      sql`INSERT INTO customers (name, address, primary_employee_id) VALUES (${`T365 HW ${Date.now()}`}, ${"Teststraße 1, 10115 Berlin"}, ${emp.id}) RETURNING id`,
     );
     const cust = { id: Number((custResult.rows[0] as { id: number }).id) };
     createdCustomerIds.push(cust.id);

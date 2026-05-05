@@ -303,6 +303,11 @@ export default function TeamWorkloadPage() {
                               dem Eintrittsdatum werden herausgerechnet, damit Abwesenheiten die
                               Auslastung nicht künstlich senken.
                             </div>
+                            <div className="text-[10px] opacity-80 mt-1">
+                              Es zählen <strong>nur Termine bei HV-Kunden</strong>, die der
+                              Mitarbeiter selbst durchgeführt hat. Vertretungs-Einsätze für andere
+                              Mitarbeiter fließen nicht in die Auslastung ein.
+                            </div>
                           </div>
                         </TooltipContent>
                       </Tooltip>
@@ -331,7 +336,7 @@ export default function TeamWorkloadPage() {
                             <div className="text-[11px]">
                               <strong>Soll</strong> = vertragliche Stunden/Monat aus dem Mitarbeiter-Profil.
                               <br />
-                              <strong>Ist</strong> = Ø Hauswirtschaft + Alltagsbegleitung der letzten 3 Monate.
+                              <strong>Ist</strong> = Ø Hauswirtschaft + Alltagsbegleitung der letzten 3 Monate, nur Termine bei eigenen HV-Kunden.
                             </div>
                           </TooltipContent>
                         </Tooltip>

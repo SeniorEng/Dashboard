@@ -195,6 +195,11 @@ function workloadSql(params: {
       GROUP BY ae.id
     ),
     period_hours AS (
+      -- Ist-Stunden eines Mitarbeiters zählen NUR, wenn er den Termin selbst
+      -- durchgeführt hat UND Hauptverantwortlicher des Kunden ist. Vertretungs-
+      -- Einsätze (er springt für jemand anderen ein) fließen bewusst NICHT in
+      -- seine Auslastung ein, weil sie kein Stamm-Aufwand sind, sondern
+      -- Aushilfen, die nur greifen, wenn der eigentliche HV nicht kann.
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
         s.lohnart_kategorie,
@@ -202,11 +207,13 @@ function workloadSql(params: {
       FROM appointments a
       JOIN appointment_services asvc ON asvc.appointment_id = a.id
       JOIN services s ON s.id = asvc.service_id
+      JOIN customers c ON c.id = a.customer_id
       WHERE a.deleted_at IS NULL
         AND a.status IN ('completed', 'documented')
         AND a.date::date >= ${windowStartStr}::date
         AND a.date::date < ${windowEndStr}::date
         AND s.unit_type = 'hours'
+        AND c.primary_employee_id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
         AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IN (SELECT id FROM active_employees)
       GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id), s.lohnart_kategorie
     ),
