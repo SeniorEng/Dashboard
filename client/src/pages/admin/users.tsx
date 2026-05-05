@@ -47,8 +47,17 @@ import {
   AlertTriangle,
   Palmtree,
   Info,
+  MoreHorizontal,
+  ArrowDownUp,
 } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api, unwrapResult } from "@/lib/api/client";
 import {
   UserData,
@@ -74,6 +83,55 @@ import {
 } from "@/components/ui/select";
 
 type StatusFilter = "aktiv" | "inaktiv" | "alle";
+type WorkloadFilter = "alle" | "ueberlastet" | "kapazitaet";
+type SortBy = "name" | "auslastung-desc" | "auslastung-asc";
+
+interface WorkloadMetrics {
+  totalCustomers: number;
+  istHours: number;
+  sollHours: number | null;
+  hasSoll: boolean;
+  hasIstBasis: boolean;
+  auslastungPct: number | null;
+  freieStunden: number | null;
+  freieKunden: number | null;
+  isOverloaded: boolean;
+  hasFreeCapacity: boolean;
+}
+
+function computeWorkloadMetrics(
+  wl: { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number; monthsConsidered: number; monthlyWorkHours: number | null } | undefined,
+  globalAvg: number,
+): WorkloadMetrics | null {
+  if (!wl) return null;
+  const totalCustomers = wl.primaryCount + wl.backupCount + wl.backup2Count;
+  const hwHours = wl.avgMonthlyHwMinutes / 60;
+  const allHours = wl.avgMonthlyAllMinutes / 60;
+  const istHours = Math.round((hwHours + allHours) * 10) / 10;
+  const sollHours = wl.monthlyWorkHours;
+  const hasSoll = sollHours !== null && sollHours > 0;
+  const hasIstBasis = hasSoll && wl.monthsConsidered > 0;
+  const auslastungPct = hasIstBasis ? Math.round((istHours / sollHours!) * 100) : null;
+  const freieStunden = hasSoll
+    ? hasIstBasis
+      ? Math.max(0, sollHours! - istHours)
+      : sollHours!
+    : null;
+  const freieKunden =
+    hasIstBasis && globalAvg > 0 ? Math.floor(freieStunden! / globalAvg) : null;
+  return {
+    totalCustomers,
+    istHours,
+    sollHours,
+    hasSoll,
+    hasIstBasis,
+    auslastungPct,
+    freieStunden,
+    freieKunden,
+    isOverloaded: auslastungPct !== null && auslastungPct > 100,
+    hasFreeCapacity: auslastungPct !== null && auslastungPct < 85,
+  };
+}
 
 function AdminPermissionsSection({ userId }: { userId: number }) {
   const queryClient = useQueryClient();
@@ -415,6 +473,8 @@ export default function AdminUsers() {
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("aktiv");
   const [roleFilter, setRoleFilter] = useState<string>("alle");
+  const [workloadFilter, setWorkloadFilter] = useState<WorkloadFilter>("alle");
+  const [sortBy, setSortBy] = useState<SortBy>("name");
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data: users, isLoading } = useQuery<UserData[]>({
@@ -539,12 +599,46 @@ export default function AdminUsers() {
     },
   });
 
+  const globalAvg = workloadData?.globalAvgHoursPerCustomerPerMonth ?? 0;
+
+  const userMetrics = useMemo(() => {
+    const map = new Map<number, WorkloadMetrics | null>();
+    if (!users || !workloadData) return map;
+    for (const u of users) {
+      map.set(u.id, computeWorkloadMetrics(workloadData.workload[u.id], globalAvg));
+    }
+    return map;
+  }, [users, workloadData, globalAvg]);
+
+  const counts = useMemo(() => {
+    if (!users) return { alle: 0, ueberlastet: 0, kapazitaet: 0 };
+    let ueberlastet = 0;
+    let kapazitaet = 0;
+    for (const u of users) {
+      if (!u.isActive || u.isAnonymized) continue;
+      const m = userMetrics.get(u.id);
+      if (m?.isOverloaded) ueberlastet++;
+      if (m?.hasFreeCapacity) kapazitaet++;
+    }
+    return {
+      alle: users.filter((u) => u.isActive && !u.isAnonymized).length,
+      ueberlastet,
+      kapazitaet,
+    };
+  }, [users, userMetrics]);
+
   const filteredUsers = useMemo(() => {
     if (!users) return [];
-    return users.filter((user) => {
+    const filtered = users.filter((user) => {
       if (statusFilter === "aktiv" && !user.isActive) return false;
       if (statusFilter === "inaktiv" && user.isActive) return false;
       if (roleFilter !== "alle" && !user.roles.includes(roleFilter)) return false;
+      if (workloadFilter !== "alle") {
+        if (user.isAnonymized || !user.isActive) return false;
+        const m = userMetrics.get(user.id);
+        if (workloadFilter === "ueberlastet" && !m?.isOverloaded) return false;
+        if (workloadFilter === "kapazitaet" && !m?.hasFreeCapacity) return false;
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const nameMatch = user.displayName.toLowerCase().includes(q);
@@ -553,7 +647,23 @@ export default function AdminUsers() {
       }
       return true;
     });
-  }, [users, statusFilter, roleFilter, searchQuery]);
+
+    const sorted = [...filtered];
+    if (sortBy === "name") {
+      sorted.sort((a, b) => a.displayName.localeCompare(b.displayName, "de"));
+    } else {
+      const dir = sortBy === "auslastung-desc" ? -1 : 1;
+      sorted.sort((a, b) => {
+        const av = userMetrics.get(a.id)?.auslastungPct;
+        const bv = userMetrics.get(b.id)?.auslastungPct;
+        if (av == null && bv == null) return a.displayName.localeCompare(b.displayName, "de");
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (av - bv) * dir;
+      });
+    }
+    return sorted;
+  }, [users, statusFilter, roleFilter, workloadFilter, searchQuery, sortBy, userMetrics]);
 
   const handleCreateSubmit = (data: UserFormData & { password?: string }) => {
     createMutation.mutate(data as UserFormData & { password: string });
@@ -604,34 +714,76 @@ export default function AdminUsers() {
                 data-testid="input-search-users"
               />
             </div>
+
             <div className="flex gap-2 flex-wrap">
-              <div className="flex rounded-lg border border-gray-200 bg-white overflow-hidden">
-                {(["aktiv", "inaktiv", "alle"] as StatusFilter[]).map((status) => (
+              {([
+                { key: "alle" as WorkloadFilter, label: "Alle", count: counts.alle, icon: null, activeClass: "bg-gray-900 text-white", countClass: "bg-gray-700 text-white" },
+                { key: "ueberlastet" as WorkloadFilter, label: "Überlastet", count: counts.ueberlastet, icon: <AlertTriangle className="h-3.5 w-3.5" />, activeClass: "bg-red-50 text-red-700 border-red-200", countClass: "bg-red-100 text-red-700" },
+                { key: "kapazitaet" as WorkloadFilter, label: "Kapazität frei", count: counts.kapazitaet, icon: null, activeClass: "bg-emerald-50 text-emerald-700 border-emerald-200", countClass: "bg-emerald-100 text-emerald-700" },
+              ]).map((p) => {
+                const active = workloadFilter === p.key;
+                return (
                   <button
-                    key={status}
-                    onClick={() => setStatusFilter(status)}
-                    className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                      statusFilter === status
-                        ? "bg-teal-600 text-white"
-                        : "text-gray-600 hover:bg-gray-50"
+                    key={p.key}
+                    onClick={() => setWorkloadFilter(p.key)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                      active ? p.activeClass : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
                     }`}
-                    data-testid={`filter-status-${status}`}
+                    data-testid={`pill-workload-${p.key}`}
                   >
-                    {status === "aktiv" ? "Aktiv" : status === "inaktiv" ? "Inaktiv" : "Alle"}
+                    {p.icon}
+                    <span>{p.label}</span>
+                    <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-semibold ${
+                      active ? p.countClass : "bg-gray-100 text-gray-700"
+                    }`}>
+                      {p.count}
+                    </span>
                   </button>
-                ))}
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2 flex-wrap items-center justify-between">
+              <div className="flex gap-2 flex-wrap">
+                <div className="flex rounded-full border border-gray-200 bg-white overflow-hidden text-sm">
+                  {(["aktiv", "inaktiv", "alle"] as StatusFilter[]).map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => setStatusFilter(status)}
+                      className={`px-3 py-1.5 font-medium transition-colors ${
+                        statusFilter === status
+                          ? "bg-teal-600 text-white"
+                          : "text-gray-600 hover:bg-gray-50"
+                      }`}
+                      data-testid={`filter-status-${status}`}
+                    >
+                      {status === "aktiv" ? "Aktiv" : status === "inaktiv" ? "Inaktiv" : "Alle"}
+                    </button>
+                  ))}
+                </div>
+                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                  <SelectTrigger className="h-9 rounded-full bg-white text-sm w-auto gap-1" data-testid="filter-role">
+                    <SelectValue placeholder="Alle Bereiche" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="alle">Alle Bereiche</SelectItem>
+                    {AVAILABLE_ROLES.map((role) => (
+                      <SelectItem key={role} value={role}>{ROLE_LABELS[role]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-700"
-                data-testid="filter-role"
-              >
-                <option value="alle">Alle Bereiche</option>
-                {AVAILABLE_ROLES.map((role) => (
-                  <option key={role} value={role}>{ROLE_LABELS[role]}</option>
-                ))}
-              </select>
+              <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
+                <SelectTrigger className="h-9 rounded-full bg-white text-sm w-auto gap-1" data-testid="filter-sort">
+                  <ArrowDownUp className="h-3.5 w-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name (A–Z)</SelectItem>
+                  <SelectItem value="auslastung-desc">Auslastung (hoch → niedrig)</SelectItem>
+                  <SelectItem value="auslastung-asc">Auslastung (niedrig → hoch)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -645,322 +797,244 @@ export default function AdminUsers() {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {filteredUsers.map((user) => (
-                <Card
-                  key={user.id}
-                  data-testid={`card-user-${user.id}`}
-                  className={user.isAnonymized ? "opacity-60" : !user.isActive ? "opacity-80" : ""}
-                >
-                  <CardContent className="p-0">
-                    <div className="flex">
-                      <div className="flex-1 p-4">
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`font-semibold ${user.isAnonymized ? "text-gray-500 italic" : "text-gray-900"}`}>
-                                {user.displayName}
+              {filteredUsers.map((user) => {
+                const m = userMetrics.get(user.id);
+                const roleTag = user.isAdmin
+                  ? { label: "ADMIN", cls: "text-teal-700" }
+                  : user.isTeamLead
+                  ? { label: "TEAMLEITUNG", cls: "text-indigo-700" }
+                  : { label: "MITARBEITER", cls: "text-gray-500" };
+                const visibleRoles = user.roles.slice(0, 2);
+                const moreRoles = user.roles.length - visibleRoles.length;
+                const barWidth = m?.auslastungPct != null ? Math.min(m.auslastungPct, 150) / 1.5 : 0;
+                const barColor =
+                  m?.auslastungPct == null
+                    ? "bg-gray-300"
+                    : m.auslastungPct > 100
+                    ? "bg-red-500"
+                    : m.auslastungPct >= 85
+                    ? "bg-amber-500"
+                    : "bg-emerald-500";
+                const pctColor =
+                  m?.auslastungPct == null
+                    ? "text-gray-400"
+                    : m.auslastungPct > 100
+                    ? "text-red-600"
+                    : m.auslastungPct >= 85
+                    ? "text-amber-600"
+                    : "text-emerald-600";
+
+                return (
+                  <Card
+                    key={user.id}
+                    data-testid={`card-user-${user.id}`}
+                    className={`rounded-2xl border-gray-200 ${user.isAnonymized ? "opacity-60" : !user.isActive ? "opacity-80" : ""}`}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="min-w-0 flex-1">
+                          <div className={`text-base font-bold leading-tight ${user.isAnonymized ? "text-gray-500 italic" : "text-gray-900"}`}>
+                            {user.displayName}
+                          </div>
+                          {!user.isAnonymized && (
+                            <div className="mt-0.5 flex items-center gap-2 text-xs">
+                              <span className={`font-semibold tracking-wide ${roleTag.cls}`}>{roleTag.label}</span>
+                              <span className="text-gray-400">·</span>
+                              {user.telefon ? (
+                                <a href={`tel:${user.telefon}`} className="text-gray-600 hover:text-primary">
+                                  {formatPhoneForDisplay(user.telefon)}
+                                </a>
+                              ) : (
+                                <span className="text-gray-400">–</span>
+                              )}
+                              {!user.isActive && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-semibold uppercase tracking-wide">
+                                  Inaktiv
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {user.isAnonymized && (
+                            <div className="mt-0.5 text-xs">
+                              <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 text-[10px] font-semibold uppercase tracking-wide">
+                                Anonymisiert
                               </span>
-                              {!user.isAnonymized && (
+                            </div>
+                          )}
+                        </div>
+
+                        {!user.isAnonymized && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full border border-gray-200 text-gray-500 shrink-0"
+                                data-testid={`button-actions-${user.id}`}
+                                aria-label="Aktionen"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                              <DropdownMenuLabel>Aktionen</DropdownMenuLabel>
+                              <DropdownMenuItem
+                                onClick={() => setEditingUserId(user.id)}
+                                data-testid={`button-edit-user-${user.id}`}
+                              >
+                                <Pencil className="h-4 w-4 mr-2 text-gray-600" />
+                                Bearbeiten
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setResetPasswordUser(user)}
+                                data-testid={`button-reset-password-${user.id}`}
+                              >
+                                <Key className="h-4 w-4 mr-2 text-gray-600" />
+                                Passwort zurücksetzen
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => resendWelcomeMutation.mutate(user.id)}
+                                disabled={resendWelcomeMutation.isPending}
+                                data-testid={`button-resend-welcome-${user.id}`}
+                              >
+                                <Mail className="h-4 w-4 mr-2 text-gray-600" />
+                                Willkommens-E-Mail senden
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setHandoverUser(user)}
+                                data-testid={`button-handover-${user.id}`}
+                              >
+                                <ArrowRightLeft className="h-4 w-4 mr-2 text-teal-600" />
+                                Kunden &amp; Termine übergeben
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  toggleActiveMutation.mutate({ id: user.id, activate: !user.isActive })
+                                }
+                                data-testid={`button-toggle-active-${user.id}`}
+                              >
+                                {user.isActive ? (
+                                  <>
+                                    <UserX className="h-4 w-4 mr-2 text-red-500" />
+                                    Deaktivieren
+                                  </>
+                                ) : (
+                                  <>
+                                    <UserCheck className="h-4 w-4 mr-2 text-green-500" />
+                                    Aktivieren
+                                  </>
+                                )}
+                              </DropdownMenuItem>
+                              {!user.isActive && (
+                                <DropdownMenuItem
+                                  onClick={() => setAnonymizingUser(user)}
+                                  data-testid={`button-anonymize-user-${user.id}`}
+                                  className="text-purple-600 focus:text-purple-700"
+                                >
+                                  <ShieldOff className="h-4 w-4 mr-2" />
+                                  DSGVO-Anonymisierung
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
+
+                      {!user.isAnonymized && m && m.hasSoll && (
+                        <div className="mt-3" data-testid={`workload-stats-${user.id}`}>
+                          <div className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
+                            <div
+                              className={`h-full ${barColor} transition-all`}
+                              style={{ width: `${barWidth}%` }}
+                              data-testid={`workload-bar-${user.id}`}
+                            />
+                            <div
+                              className="absolute top-0 bottom-0 w-px bg-gray-300"
+                              style={{ left: `${100 / 1.5}%` }}
+                            />
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-1.5 text-gray-700 flex-wrap">
+                              <span className="font-semibold" data-testid={`workload-total-${user.id}`}>
+                                {m.totalCustomers} Kunden
+                              </span>
+                              <span className="text-gray-400">·</span>
+                              <span className="text-gray-500">Soll</span>
+                              <span className="font-semibold" data-testid={`workload-soll-${user.id}`}>
+                                {m.sollHours}h
+                              </span>
+                              {m.hasIstBasis && m.auslastungPct !== null && m.auslastungPct > 100 && (
                                 <>
-                                  <span className="text-gray-500">·</span>
-                                  <span className="text-sm text-gray-500">
-                                    {user.telefon ? <a href={`tel:${user.telefon}`} className="text-primary hover:underline">{formatPhoneForDisplay(user.telefon)}</a> : '–'}
+                                  <span className="text-gray-400">·</span>
+                                  <span className="text-red-600 font-semibold" data-testid={`workload-over-${user.id}`}>
+                                    +{(m.istHours - m.sollHours!).toLocaleString("de-DE", { maximumFractionDigits: 1 })} h über
+                                  </span>
+                                </>
+                              )}
+                              {m.freieKunden !== null && m.freieKunden > 0 && (
+                                <>
+                                  <span className="text-gray-400">·</span>
+                                  <span className="text-emerald-600 font-semibold" data-testid={`workload-zusatzkunden-${user.id}`}>
+                                    +{m.freieKunden} mögliche Kunden
                                   </span>
                                 </>
                               )}
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {user.isAnonymized && (
-                              <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-600">
-                                Anonymisiert
-                              </span>
-                            )}
-                            {!user.isActive && !user.isAnonymized && (
-                              <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">
-                                Inaktiv
-                              </span>
-                            )}
-                            <span className={`text-xs px-2 py-0.5 rounded ${user.isAdmin ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'}`}>
-                              {user.isAdmin ? 'Admin' : 'Mitarbeiter'}
+                            <span
+                              className={`font-bold ${pctColor}`}
+                              data-testid={`workload-auslastung-${user.id}`}
+                            >
+                              {m.auslastungPct !== null ? `${m.auslastungPct}%` : "—"}
                             </span>
-                            {user.isTeamLead && !user.isAdmin && (
-                              <span
-                                className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700"
-                                data-testid={`badge-team-lead-${user.id}`}
-                              >
-                                Teamleiter
-                              </span>
-                            )}
                           </div>
                         </div>
-                        {!user.isAnonymized && (
-                          <div>
-                            <div className="text-xs text-gray-500 mb-1">Tätigkeitsbereiche</div>
-                            <div className="flex flex-wrap gap-x-3 gap-y-1">
-                              {user.roles.map((role) => (
-                                <span key={role} className="text-sm text-gray-700">
-                                  {ROLE_LABELS[role] || role}
-                                </span>
-                              ))}
-                              {user.roles.length === 0 && (
-                                <span className="text-sm text-gray-500 italic">Keine zugewiesen</span>
-                              )}
-                            </div>
-                            {workloadData && workloadData.workload[user.id] && (() => {
-                              const wl = workloadData.workload[user.id];
-                              const globalAvg = workloadData.globalAvgHoursPerCustomerPerMonth;
-                              const totalCustomers = wl.primaryCount + wl.backupCount + wl.backup2Count;
-                              const hwHours = Math.round(wl.avgMonthlyHwMinutes / 60 * 10) / 10;
-                              const allHours = Math.round(wl.avgMonthlyAllMinutes / 60 * 10) / 10;
-                              const istHours = hwHours + allHours;
-                              const monthsConsidered = Math.round(wl.monthsConsidered * 10) / 10;
-                              const monthsLabel = `Ø über ${monthsConsidered.toLocaleString("de-DE", { maximumFractionDigits: 1 })} von 3 Monaten`;
-                              const sollHours = wl.monthlyWorkHours;
-                              const hasSoll = sollHours !== null && sollHours > 0;
-                              // Spiegel von computeSollIst (server/lib/team-workload.ts):
-                              // ohne monthsConsidered > 0 keine belastbare Datenbasis,
-                              // also Auslastung & Zusatzkunden = null. freieStunden = soll.
-                              const hasIstBasis = hasSoll && wl.monthsConsidered > 0;
-                              const auslastungPct = hasIstBasis
-                                ? Math.round((istHours / sollHours!) * 100)
-                                : null;
-                              const freieStunden = hasSoll
-                                ? (hasIstBasis ? Math.max(0, sollHours! - istHours) : sollHours!)
-                                : null;
-                              const moeglicheZusatzKunden = hasIstBasis && globalAvg > 0
-                                ? Math.floor(freieStunden! / globalAvg)
-                                : null;
-                              return (
-                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600" data-testid={`workload-stats-${user.id}`}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="inline-flex items-center gap-1 cursor-help" data-testid={`workload-customers-trigger-${user.id}`}>
-                                        <Users className="h-3 w-3" />
-                                        <span className="font-medium" data-testid={`workload-total-${user.id}`}>{totalCustomers} Kunden</span>
-                                        <span className="text-gray-500">
-                                          (<span className="text-teal-700" data-testid={`workload-hv-${user.id}`}>{wl.primaryCount} HV</span>
-                                          {" · "}
-                                          <span className="text-blue-600" data-testid={`workload-v1-${user.id}`}>{wl.backupCount} V1</span>
-                                          {" · "}
-                                          <span className="text-purple-600" data-testid={`workload-v2-${user.id}`}>{wl.backup2Count} V2</span>)
-                                        </span>
-                                        <Info className="h-3 w-3 text-gray-400 ml-0.5" />
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="max-w-xs">
-                                      <div className="space-y-0.5">
-                                        <div><strong>HV</strong> = Hauptverantwortliche</div>
-                                        <div><strong>V1</strong> = Vertretung 1</div>
-                                        <div><strong>V2</strong> = Vertretung 2</div>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                  <span className="text-gray-300">|</span>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="inline-flex items-center gap-1 cursor-help" data-testid={`workload-hours-trigger-${user.id}`}>
-                                        <Calendar className="h-3 w-3" />
-                                        <span>Ø</span>
-                                        <span className="font-medium" data-testid={`workload-hw-hours-${user.id}`}>{hwHours}h</span>
-                                        <span className="text-gray-500">HW</span>
-                                        <span className="text-gray-500">·</span>
-                                        <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
-                                        <span className="text-gray-500">ALL</span>
-                                        <span className="text-gray-400" data-testid={`workload-months-${user.id}`}>({monthsLabel})</span>
-                                        <Info className="h-3 w-3 text-gray-400 ml-0.5" />
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="max-w-xs">
-                                      <div className="space-y-0.5">
-                                        <div><strong>HW</strong> = Hauswirtschaft</div>
-                                        <div><strong>ALL</strong> = Alltagsbegleitung</div>
-                                        <div className="text-[10px] opacity-80 mt-1">
-                                          Ø der letzten 3 abgeschlossenen Monate, normalisiert auf
-                                          tatsächlich verfügbare Arbeitstage. Tage mit Urlaub oder
-                                          Krankheit sowie Tage vor dem Eintrittsdatum werden
-                                          herausgerechnet, damit Abwesenheiten die Auslastung nicht
-                                          künstlich senken.
-                                        </div>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                  {hasSoll ? (
-                                    <>
-                                      <span className="text-gray-300">|</span>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <span className="inline-flex items-center gap-1 cursor-help" data-testid={`workload-sollist-trigger-${user.id}`}>
-                                            <span className="text-gray-500">Soll</span>
-                                            <span className="font-medium" data-testid={`workload-soll-${user.id}`}>{sollHours}h</span>
-                                            {auslastungPct !== null && (
-                                              <>
-                                                <span className="text-gray-500">·</span>
-                                                <span
-                                                  className={`font-medium ${auslastungPct >= 100 ? "text-red-600" : auslastungPct >= 85 ? "text-amber-600" : "text-teal-700"}`}
-                                                  data-testid={`workload-auslastung-${user.id}`}
-                                                >
-                                                  {auslastungPct}%
-                                                </span>
-                                              </>
-                                            )}
-                                            {moeglicheZusatzKunden !== null && (
-                                              <>
-                                                <span className="text-gray-500">·</span>
-                                                <span className="text-gray-700" data-testid={`workload-zusatzkunden-${user.id}`}>
-                                                  +{moeglicheZusatzKunden} mögl. Kunden
-                                                </span>
-                                              </>
-                                            )}
-                                            <Info className="h-3 w-3 text-gray-400 ml-0.5" />
-                                          </span>
-                                        </TooltipTrigger>
-                                        <TooltipContent className="max-w-xs">
-                                          <div className="space-y-0.5 text-[11px]">
-                                            <div><strong>Soll</strong> = vertragliche Stunden/Monat ({sollHours}h)</div>
-                                            <div><strong>Ist</strong> = Ø HW + Alltagsbegleitung der letzten 3 Monate ({istHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h)</div>
-                                            {freieStunden !== null && (
-                                              <div><strong>Freie Stunden</strong>: {freieStunden.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h</div>
-                                            )}
-                                            {globalAvg > 0 && (
-                                              <div className="opacity-80 mt-1">
-                                                Mögl. weitere Kunden = freie Stunden ÷ Ø {globalAvg.toLocaleString("de-DE", { maximumFractionDigits: 2 })} h pro Kunde/Monat (global, letzte 3 Monate).
-                                              </div>
-                                            )}
-                                          </div>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    </>
-                                  ) : wl.monthlyWorkHours === null ? (
-                                    <>
-                                      <span className="text-gray-300">|</span>
-                                      <span className="inline-flex items-center gap-1 text-amber-700" data-testid={`workload-soll-missing-${user.id}`}>
-                                        <Info className="h-3 w-3" />
-                                        <span className="text-[11px]">Vertragsstunden fehlen</span>
-                                      </span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="text-gray-300">|</span>
-                                      <span className="text-[11px] text-gray-500" data-testid={`workload-soll-na-${user.id}`}>
-                                        Soll: n/a (kein Soll hinterlegt)
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                            {vacationData && vacationData[user.id] && (() => {
-                              const vac = vacationData[user.id];
-                              const totalAvailable = vac.totalDays + vac.carryOverDays;
-                              return (
-                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600" data-testid={`vacation-stats-${user.id}`}>
-                                  <span className="inline-flex items-center gap-1 cursor-default">
-                                    <Palmtree className="h-3 w-3" />
-                                    <span className={`font-medium ${vac.remainingDays <= 0 ? 'text-red-600' : vac.remainingDays <= 3 ? 'text-amber-600' : 'text-teal-700'}`} data-testid={`vacation-remaining-${user.id}`}>
-                                      {formatVacationDays(vac.remainingDays)} Tage übrig
-                                    </span>
-                                    <span className="text-gray-500">
-                                      (von {formatVacationDays(totalAvailable)}{vac.carryOverDays > 0 ? ` inkl. ${formatVacationDays(vac.carryOverDays)} Übertrag` : ''})
-                                    </span>
-                                  </span>
-                                  <span className="text-gray-300">|</span>
-                                  <span className="text-gray-500" data-testid={`vacation-used-${user.id}`}>
-                                    {vac.usedDays} genommen{vac.plannedDays > 0 ? ` · ${vac.plannedDays} geplant` : ''}
-                                  </span>
-                                  {vac.sickDays > 0 && (
-                                    <>
-                                      <span className="text-gray-300">|</span>
-                                      <span className="text-red-500" data-testid={`vacation-sick-${user.id}`}>
-                                        {vac.sickDays} krank
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
-                      
-                      {!user.isAnonymized && (
-                        <div className="flex flex-col justify-center gap-1 px-3 bg-gray-50 border-l border-gray-100">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => setEditingUserId(user.id)}
-                            data-testid={`button-edit-user-${user.id}`}
-                          >
-                            <Pencil className={`${iconSize.sm} text-gray-600`} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => setResetPasswordUser(user)}
-                            data-testid={`button-reset-password-${user.id}`}
-                            title="Passwort zurücksetzen"
-                          >
-                            <Key className={`${iconSize.sm} text-gray-600`} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => resendWelcomeMutation.mutate(user.id)}
-                            disabled={resendWelcomeMutation.isPending}
-                            data-testid={`button-resend-welcome-${user.id}`}
-                            title="Willkommens-E-Mail erneut senden"
-                          >
-                            <Mail className={`${iconSize.sm} text-gray-600`} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => setHandoverUser(user)}
-                            data-testid={`button-handover-${user.id}`}
-                            title="Kunden & Termine übergeben"
-                          >
-                            <ArrowRightLeft className={`${iconSize.sm} text-teal-600`} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() =>
-                              toggleActiveMutation.mutate({
-                                id: user.id,
-                                activate: !user.isActive,
-                              })
-                            }
-                            data-testid={`button-toggle-active-${user.id}`}
-                          >
-                            {user.isActive ? (
-                              <UserX className={`${iconSize.sm} text-red-500`} />
-                            ) : (
-                              <UserCheck className={`${iconSize.sm} text-green-500`} />
-                            )}
-                          </Button>
-                          {!user.isActive && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => setAnonymizingUser(user)}
-                              data-testid={`button-anonymize-user-${user.id}`}
-                              title="DSGVO-Anonymisierung"
+                      )}
+
+                      {!user.isAnonymized && !user.isAdmin && workloadData && m && !m.hasSoll && (
+                        <div className="mt-3 inline-flex items-center gap-1.5 text-xs text-amber-700" data-testid={`workload-soll-missing-${user.id}`}>
+                          <Info className="h-3.5 w-3.5" />
+                          <span>Vertragsstunden fehlen</span>
+                        </div>
+                      )}
+
+                      {!user.isAnonymized && user.roles.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {visibleRoles.map((role) => (
+                            <span
+                              key={role}
+                              className="inline-flex items-center px-2.5 py-1 rounded-md bg-gray-100 text-gray-700 text-xs font-medium"
                             >
-                              <ShieldOff className={`${iconSize.sm} text-purple-500`} />
-                            </Button>
+                              {ROLE_LABELS[role] || role}
+                            </span>
+                          ))}
+                          {moreRoles > 0 && (
+                            <span
+                              className="inline-flex items-center px-2.5 py-1 rounded-md border border-dashed border-gray-300 text-gray-500 text-xs"
+                              title={user.roles.slice(2).map((r) => ROLE_LABELS[r] || r).join(", ")}
+                            >
+                              +{moreRoles} mehr
+                            </span>
                           )}
                         </div>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+
+                      {!user.isAnonymized && vacationData && vacationData[user.id] && (() => {
+                        const vac = vacationData[user.id];
+                        return (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500" data-testid={`vacation-stats-${user.id}`}>
+                            <Palmtree className="h-3 w-3" />
+                            <span className={`font-medium ${vac.remainingDays <= 0 ? 'text-red-600' : vac.remainingDays <= 3 ? 'text-amber-600' : 'text-emerald-700'}`} data-testid={`vacation-remaining-${user.id}`}>
+                              {formatVacationDays(vac.remainingDays)} Tage übrig
+                            </span>
+                            <span>· {vac.usedDays} genommen{vac.plannedDays > 0 ? ` · ${vac.plannedDays} geplant` : ''}{vac.sickDays > 0 ? ` · ${vac.sickDays} krank` : ''}</span>
+                          </div>
+                        );
+                      })()}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
 
