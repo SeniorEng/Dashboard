@@ -1,0 +1,104 @@
+
+======================================================================
+Cleanup Test-Daten — Modus: APPLY (scharf), Scope: services
+======================================================================
+Sicherheits-Checks ok. DB-Host: helium, Modus: APPLY (scharf)
+
+======================================================================
+Sanity-Check: Liste der echten (whitelist) Entitäten
+======================================================================
+
+Echte Mitarbeiter (17):
+   #1  Degenkolb            <alrikdegenkolb@seniorenengel-alltagsbegleitung.de>
+   #5  Wächtler             <franzi.aicher@gmail.com>
+   #6  Fiebag               <chissy2011@googlemail.com>
+   #8  Testuser             <e2e-test@seniorenengel.test>
+   #9  Degenkolb            <alrikdegenkolb@gmx.de>
+   #10  Richter              <richtermanuela29@gmail.com>
+   #11  Ullmann              <ursel090520049@gmail.com>
+   #12  Ahnert               <uteahnert2910@gmail.com>
+   #13  Klitzsch             <janetklitzsch8@gmail.com>
+   #14  Ali                  <elalinaji10@gmail.com>
+   #15  Schäfer              <odinjafee@gmail.com>
+   #16  Geitner              <monique.geitner@web.de>
+   #17  Heidel               <yvonne.heidel86@googlemail.com>
+   #18  Fiebag               <marcel231084@gmail.com>
+   #19  Panther              <celina.panther@ehem.seniorenengel.de>
+   #20  Luzyna               <doreen.luzyna@ehem.seniorenengel.de>
+   #20577  Test_2               <test@test.de>
+
+Echte Services (5):
+   #15  hauswirtschaft  Hauswirtschaft
+   #16  alltagsbegleitung Alltagsbegleitung
+   #17  travel_km       Anfahrtskilometer
+   #18  customer_km     Kundenkilometer
+   #19  erstberatung    Erstberatung
+
+Echte Kunden (777 gesamt, erste 20):
+   #39  Rosemarie Schröder
+   #42  Mac Macj
+   #44  Alrik Degenkolb
+   #49  Rita Brautzsch
+   #50  Wolfgang Nagler
+   #51  Ingrid Haufe
+   #52  Lothar Haufe
+   #53  Dieter Berghold
+   #54  Elke Berghold
+   #55  Christian Jungnickel
+   #56  Dieter Kraft
+   #57  Helga Dienelt
+   #58  Martin Schmidt
+   #59  Lothar Krawalski
+   #60  Rita Neubert
+   #61  Hella Reißig
+   #62  Rita Nitschke
+   #63  Matthias Roß
+   #64  Gudrun Hentschel
+   #65  Egon Bochmann
+   … plus 757 weitere
+
+[VOR Cleanup] Whitelist-Counts (echte Daten, dürfen nicht abnehmen):
+   echte Kunden:                              777
+   echte Interessenten:                       1
+   echte Mitarbeiter:                         17
+   echte Services:                            5
+   Rechnungen echter Kunden:                  5
+   weich-gelöschte Termine echter Kunden:     11837
+   weich-gelöschte Zeit-Einträge echter User: 30647
+   Termin-Serien echter Kunden:               2283
+   Monats-LN echter Kunden:                   955
+   Zuweisungs-Historie echter Kunden:         216
+
+[VOR Cleanup] Test-Entitäten:
+   Test-Kunden:       56
+   Test-Interessenten:4346
+   Test-Mitarbeiter:  12090
+   Test-Services:     582
+
+======================================================================
+Phase 3: Test-Services (nur unreferenzierte hart löschen)
+======================================================================
+Gefunden: 582 Test-Services
+  davon in Terminen referenziert: 0 (Fallback: is_active=false statt löschen)
+  davon hart löschbar:            582 (CASCADE räumt Preis-Overrides auf)
+Phase 3 fertig: 582 Services gelöscht, 0 deaktiviert.
+
+[NACH Cleanup] Whitelist-Counts (echte Daten, dürfen nicht abnehmen):
+   echte Kunden:                              777
+   echte Interessenten:                       1
+   echte Mitarbeiter:                         17
+   echte Services:                            5
+   Rechnungen echter Kunden:                  5
+   weich-gelöschte Termine echter Kunden:     11837
+   weich-gelöschte Zeit-Einträge echter User: 30647
+   Termin-Serien echter Kunden:               2283
+   Monats-LN echter Kunden:                   955
+   Zuweisungs-Historie echter Kunden:         216
+
+Whitelist-Verifikation OK: alle echten Daten unverändert.
+
+[NACH Cleanup] Test-Entitäten:
+   Test-Kunden:       56 → 56
+   Test-Interessenten:4346 → 4346
+   Test-Mitarbeiter:  12090 → 12090
+   Test-Services:     582 → 0
