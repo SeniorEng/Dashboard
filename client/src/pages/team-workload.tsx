@@ -10,8 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Loader2, Users, Calendar, Search, Info, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, Users, Calendar, Search, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useTeamWorkload } from "@/features/team/use-team-workload";
 import {
@@ -239,78 +238,44 @@ export default function TeamWorkloadPage() {
                       className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600"
                       data-testid={`workload-stats-${employee.id}`}
                     >
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="inline-flex items-center gap-1 cursor-help">
-                            <Users className="h-3 w-3" />
-                            <span className="font-medium" data-testid={`workload-total-${employee.id}`}>
-                              {totalCustomers} Kunden
-                            </span>
-                            <span className="text-gray-500">
-                              (
-                              <span className="text-teal-700" data-testid={`workload-hv-${employee.id}`}>
-                                {workload.primaryCount} HV
-                              </span>
-                              {" · "}
-                              <span className="text-blue-600" data-testid={`workload-v1-${employee.id}`}>
-                                {workload.backupCount} V1
-                              </span>
-                              {" · "}
-                              <span className="text-purple-600" data-testid={`workload-v2-${employee.id}`}>
-                                {workload.backup2Count} V2
-                              </span>
-                              )
-                            </span>
-                            <Info className="h-3 w-3 text-gray-400 ml-0.5" />
+                      <span className="inline-flex items-center gap-1">
+                        <Users className="h-3 w-3" />
+                        <span className="font-medium" data-testid={`workload-total-${employee.id}`}>
+                          {totalCustomers} Kunden
+                        </span>
+                        <span className="text-gray-500">
+                          (
+                          <span className="text-teal-700" data-testid={`workload-hv-${employee.id}`}>
+                            {workload.primaryCount} HV
                           </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          <div className="space-y-0.5">
-                            <div><strong>HV</strong> = Hauptverantwortliche</div>
-                            <div><strong>V1</strong> = Vertretung 1</div>
-                            <div><strong>V2</strong> = Vertretung 2</div>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
+                          {" · "}
+                          <span className="text-blue-600" data-testid={`workload-v1-${employee.id}`}>
+                            {workload.backupCount} V1
+                          </span>
+                          {" · "}
+                          <span className="text-purple-600" data-testid={`workload-v2-${employee.id}`}>
+                            {workload.backup2Count} V2
+                          </span>
+                          )
+                        </span>
+                      </span>
                       <span className="text-gray-300">|</span>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="inline-flex items-center gap-1 cursor-help">
-                            <Calendar className="h-3 w-3" />
-                            <span>Ø</span>
-                            <span className="font-medium" data-testid={`workload-hw-hours-${employee.id}`}>
-                              {hwHours}h
-                            </span>
-                            <span className="text-gray-500">HW</span>
-                            <span className="text-gray-500">·</span>
-                            <span className="font-medium" data-testid={`workload-all-hours-${employee.id}`}>
-                              {allHours}h
-                            </span>
-                            <span className="text-gray-500">ALL</span>
-                            <span className="text-gray-400" data-testid={`workload-months-${employee.id}`}>
-                              ({monthsLabel})
-                            </span>
-                            <Info className="h-3 w-3 text-gray-400 ml-0.5" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          <div className="space-y-0.5">
-                            <div><strong>HW</strong> = Hauswirtschaft</div>
-                            <div><strong>ALL</strong> = Alltagsbegleitung</div>
-                            <div className="text-[10px] opacity-80 mt-1">
-                              Ø der letzten 3 abgeschlossenen Monate, normalisiert auf tatsächlich
-                              verfügbare Arbeitstage. Tage mit Urlaub oder Krankheit sowie Tage vor
-                              dem Eintrittsdatum werden herausgerechnet, damit Abwesenheiten die
-                              Auslastung nicht künstlich senken.
-                            </div>
-                            <div className="text-[10px] opacity-80 mt-1">
-                              Es zählen <strong>nur Termine bei HV-Kunden</strong>, die der
-                              Mitarbeiter selbst durchgeführt hat. Vertretungs-Einsätze für andere
-                              Mitarbeiter fließen nicht in die Auslastung ein.
-                            </div>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
+                      <span className="inline-flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        <span>Ø</span>
+                        <span className="font-medium" data-testid={`workload-hw-hours-${employee.id}`}>
+                          {hwHours}h
+                        </span>
+                        <span className="text-gray-500">HW</span>
+                        <span className="text-gray-500">·</span>
+                        <span className="font-medium" data-testid={`workload-all-hours-${employee.id}`}>
+                          {allHours}h
+                        </span>
+                        <span className="text-gray-500">ALL</span>
+                        <span className="text-gray-400" data-testid={`workload-months-${employee.id}`}>
+                          ({monthsLabel})
+                        </span>
+                      </span>
                     </div>
 
                     {sollIst.sollHours !== null ? (
@@ -318,28 +283,16 @@ export default function TeamWorkloadPage() {
                         className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
                         data-testid={`workload-sollist-${employee.id}`}
                       >
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex items-center gap-1 cursor-help text-gray-700">
-                              <span className="text-gray-500">Soll/Ist:</span>
-                              <span className="font-medium" data-testid={`workload-soll-${employee.id}`}>
-                                {sollIst.sollHours}h
-                              </span>
-                              <span className="text-gray-500">/</span>
-                              <span className="font-medium" data-testid={`workload-ist-${employee.id}`}>
-                                {sollIst.istHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h
-                              </span>
-                              <Info className="h-3 w-3 text-gray-400 ml-0.5" />
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs">
-                            <div className="text-[11px]">
-                              <strong>Soll</strong> = vertragliche Stunden/Monat aus dem Mitarbeiter-Profil.
-                              <br />
-                              <strong>Ist</strong> = Ø Hauswirtschaft + Alltagsbegleitung der letzten 3 Monate, nur Termine bei eigenen HV-Kunden.
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
+                        <span className="inline-flex items-center gap-1 text-gray-700">
+                          <span className="text-gray-500">Soll/Ist:</span>
+                          <span className="font-medium" data-testid={`workload-soll-${employee.id}`}>
+                            {sollIst.sollHours}h
+                          </span>
+                          <span className="text-gray-500">/</span>
+                          <span className="font-medium" data-testid={`workload-ist-${employee.id}`}>
+                            {sollIst.istHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })}h
+                          </span>
+                        </span>
                         <span className="text-gray-300">|</span>
                         {auslastungPctRounded !== null ? (
                           <span
@@ -362,22 +315,12 @@ export default function TeamWorkloadPage() {
                         {sollIst.moeglicheZusatzKunden !== null ? (
                           <>
                             <span className="text-gray-300">|</span>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span
-                                  className="inline-flex items-center gap-1 cursor-help font-medium text-emerald-700"
-                                  data-testid={`workload-zusatzkunden-${employee.id}`}
-                                >
-                                  +{sollIst.moeglicheZusatzKunden} mögl. Kunden
-                                  <Info className="h-3 w-3 text-gray-400 ml-0.5" />
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-xs">
-                                <div className="text-[11px]">
-                                  Freie Stunden ÷ Ø {globalAvg.toLocaleString("de-DE", { maximumFractionDigits: 2 })} h pro Kunde/Monat (global, letzte 3 Monate), abgerundet.
-                                </div>
-                              </TooltipContent>
-                            </Tooltip>
+                            <span
+                              className="font-medium text-emerald-700"
+                              data-testid={`workload-zusatzkunden-${employee.id}`}
+                            >
+                              +{sollIst.moeglicheZusatzKunden} mögl. Kunden
+                            </span>
                           </>
                         ) : globalAvg <= 0 ? (
                           <>
