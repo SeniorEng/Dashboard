@@ -7,10 +7,12 @@ import { sql } from "drizzle-orm";
 import revenueRouter from "./statistics/revenue";
 import operationsRouter from "./statistics/operations";
 import customersRouter from "./statistics/customers";
+import v2Router from "./statistics/v2";
 
 const router = Router();
 router.use(requireAuth);
 
+router.use("/v2", v2Router);
 router.use("/", revenueRouter);
 router.use("/", operationsRouter);
 router.use("/", customersRouter);
