@@ -45,6 +45,7 @@ export const customers = pgTable("customers", {
   billingType: text("billing_type").notNull().default("pflegekasse_gesetzlich"), // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler
   beihilfeBerechtigt: boolean("beihilfe_berechtigt").notNull().default(false),
   acceptsPrivatePayment: boolean("accepts_private_payment").notNull().default(false),
+  rechnungAnKunde: boolean("rechnung_an_kunde").notNull().default(false),
   // Deactivation tracking
   documentDeliveryMethod: text("document_delivery_method").notNull().default("email"),
   receivesMonthlyInvoice: boolean("receives_monthly_invoice").notNull().default(false),

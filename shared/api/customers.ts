@@ -22,6 +22,7 @@ export interface CustomerListItem {
   matchedRole?: "primary" | "backup" | "backup2";
   hasActiveContract: boolean;
   hasBetreuer: boolean;
+  rechnungAnKunde: boolean;
   createdAt: string;
 }
 
@@ -149,6 +150,7 @@ export interface CreateCustomerRequest {
   haustierDetails?: string;
   personenbefoerderungGewuenscht?: boolean;
   acceptsPrivatePayment?: boolean;
+  rechnungAnKunde?: boolean;
   documentDeliveryMethod?: "email" | "post";
   receivesMonthlyInvoice?: boolean;
   billingType?: "pflegekasse_gesetzlich" | "pflegekasse_privat" | "selbstzahler";

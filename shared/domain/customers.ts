@@ -36,6 +36,25 @@ export function isSelbstzahlerCustomer(billingType: BillingType | ""): boolean {
   return billingType === "selbstzahler";
 }
 
+/**
+ * Bestimmt, ob die Rechnung effektiv an den Kunden adressiert ist
+ * (Layout/Empfänger/Zahlung wie pflegekasse_privat).
+ *
+ * - `pflegekasse_privat`: Immer an den Kunden, der reicht selbst bei
+ *   seiner privaten Pflegekasse zur Erstattung ein.
+ * - `pflegekasse_gesetzlich` + `rechnungAnKunde`: Kostenerstattungsverfahren —
+ *   Kunde zahlt selbst und reicht bei seiner gesetzlichen Pflegekasse
+ *   zur Erstattung ein. Statistisch bleibt er gesetzlich versichert.
+ */
+export function invoiceGoesToCustomer(
+  billingType: string | null | undefined,
+  rechnungAnKunde: boolean | null | undefined,
+): boolean {
+  if (billingType === "pflegekasse_privat") return true;
+  if (billingType === "pflegekasse_gesetzlich" && !!rechnungAnKunde) return true;
+  return false;
+}
+
 
 export function needsBudgetData(billingType: BillingType | ""): boolean {
   return isPflegekasseCustomer(billingType);

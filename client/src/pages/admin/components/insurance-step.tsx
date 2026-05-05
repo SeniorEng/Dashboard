@@ -206,6 +206,26 @@ export function InsuranceStep({
                     </Label>
                   </div>
                 )}
+
+                {formData.billingType === "pflegekasse_gesetzlich" && (
+                  <div className="flex items-start gap-3 py-2">
+                    <Checkbox
+                      id="rechnungAnKunde"
+                      checked={formData.rechnungAnKunde}
+                      onCheckedChange={(checked) => onChange("rechnungAnKunde", !!checked)}
+                      data-testid="checkbox-rechnung-an-kunde"
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <Label htmlFor="rechnungAnKunde" className="cursor-pointer">
+                        Kostenerstattungsverfahren (Rechnung an Kunden)
+                      </Label>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Kunde zahlt selbst und reicht die Rechnung bei seiner gesetzlichen Pflegekasse zur Erstattung ein.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </>
             );
           })()}

@@ -364,6 +364,8 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
 
       const isPrivatBilling = invoice.billingType === "pflegekasse_privat";
       const isBeihilfe = isPrivatBilling && cust[0].beihilfeBerechtigt;
+      const isKostenerstattung = invoice.billingType === "pflegekasse_gesetzlich" && cust[0].rechnungAnKunde;
+      const sendToCustomer = isPrivatBilling || isKostenerstattung;
 
       const insHist = await db.select({
         providerId: customerInsuranceHistory.insuranceProviderId,
@@ -384,7 +386,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       let recipientName = "";
       let hasParagraph39 = false;
 
-      if (isPrivatBilling) {
+      if (sendToCustomer) {
         if (!cust[0].email) {
           results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: "Keine E-Mail beim Kunden hinterlegt" });
           continue;
@@ -411,7 +413,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       }
 
       if (!recipientEmail) {
-        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: isPrivatBilling ? "Keine E-Mail beim Kunden" : "Keine E-Mail bei Pflegekasse" });
+        results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: sendToCustomer ? "Keine E-Mail beim Kunden" : "Keine E-Mail bei Pflegekasse" });
         continue;
       }
 
@@ -420,6 +422,14 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       const pdfData = buildPdfData(invoice, lineItems, companySettings);
       if (cust[0].geburtsdatum) pdfData.customerGeburtsdatum = cust[0].geburtsdatum;
       if (isBeihilfe) pdfData.beihilfeBerechtigt = true;
+      if (isKostenerstattung) {
+        pdfData.rechnungAnKunde = true;
+        const customerFullName = [cust[0].vorname, cust[0].nachname].filter(Boolean).join(" ") || cust[0].name;
+        const customerAddr = [cust[0].strasse, cust[0].nr].filter(Boolean).join(" ") +
+          (cust[0].plz || cust[0].stadt ? `\n${cust[0].plz || ""} ${cust[0].stadt || ""}` : "");
+        pdfData.recipientName = customerFullName;
+        pdfData.recipientAddress = customerAddr || pdfData.recipientAddress;
+      }
 
       const invoiceHtml = generateInvoiceHtml(pdfData);
       const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
@@ -456,12 +466,13 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
 
       const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear} — ${companyName}`;
       let bodyContent = "";
-      if (isPrivatBilling) {
+      if (sendToCustomer) {
         bodyContent = `
           <p>Sehr geehrte/r ${cust[0].vorname || ""} ${cust[0].nachname || ""},</p>
           <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
           für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
           ${isBeihilfe ? `<p><strong>Hinweis:</strong> Anbei erhalten Sie Ihre Rechnung und den Leistungsnachweis in doppelter Ausfertigung — bitte reichen Sie je ein Exemplar bei Ihrer privaten Pflegekasse und Ihrer Beihilfestelle ein.</p>` : ""}
+          ${isKostenerstattung ? `<p><strong>Hinweis:</strong> Bitte begleichen Sie die Rechnung und reichen Sie diese zusammen mit dem Leistungsnachweis im Rahmen des Kostenerstattungsverfahrens bei Ihrer Pflegekasse zur Erstattung des Entlastungsbetrags nach § 45b SGB XI ein.</p>` : ""}
           <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
           <p>Mit freundlichen Grüßen<br/>${companyName}</p>
         `;
@@ -863,7 +874,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         let insuranceIkNummer: string | null = "";
         let versichertennummer: string | null = "";
 
-        if (billingType === "pflegekasse_gesetzlich" && insuranceInfo) {
+        if (billingType === "pflegekasse_gesetzlich" && insuranceInfo && !customer.rechnungAnKunde) {
           kasseRecipientName = insuranceInfo.empfaenger || insuranceInfo.providerName;
           insuranceProviderName = insuranceInfo.providerName;
           insuranceIkNummer = insuranceInfo.ikNummer;
@@ -1030,7 +1041,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   let insuranceIkNummer: string | null = "";
   let versichertennummer: string | null = "";
 
-  if (billingType === "pflegekasse_gesetzlich") {
+  if (billingType === "pflegekasse_gesetzlich" && !customer.rechnungAnKunde) {
     if (insuranceInfo) {
       const ins = insuranceInfo;
       recipientName = ins.empfaenger || ins.providerName;
@@ -1057,7 +1068,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     recipientName = customerName;
     recipientAddress = customerAddress;
 
-    if (billingType === "pflegekasse_privat" && insuranceInfo) {
+    if ((billingType === "pflegekasse_privat" || billingType === "pflegekasse_gesetzlich") && insuranceInfo) {
       insuranceProviderName = insuranceInfo.providerName;
       insuranceIkNummer = insuranceInfo.ikNummer;
       versichertennummer = insuranceInfo.versichertennummer;
@@ -1484,13 +1495,32 @@ async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySe
   const customerForInv = await db.select({
     geburtsdatum: customersTable.geburtsdatum,
     beihilfeBerechtigt: customersTable.beihilfeBerechtigt,
+    rechnungAnKunde: customersTable.rechnungAnKunde,
+    name: customersTable.name,
+    vorname: customersTable.vorname,
+    nachname: customersTable.nachname,
+    strasse: customersTable.strasse,
+    nr: customersTable.nr,
+    plz: customersTable.plz,
+    stadt: customersTable.stadt,
   })
     .from(customersTable)
     .where(eq(customersTable.id, invoice.customerId))
     .limit(1);
+  const isCustomerInvoice = invoice.billingType === "pflegekasse_privat"
+    || (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0]?.rechnungAnKunde === true);
   if (customerForInv.length > 0) {
     if (customerForInv[0].geburtsdatum) pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
     if (customerForInv[0].beihilfeBerechtigt) pdfData.beihilfeBerechtigt = true;
+    if (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0].rechnungAnKunde) {
+      pdfData.rechnungAnKunde = true;
+      const c = customerForInv[0];
+      const fullName = [c.vorname, c.nachname].filter(Boolean).join(" ") || c.name;
+      const addr = [c.strasse, c.nr].filter(Boolean).join(" ") +
+        (c.plz || c.stadt ? `\n${c.plz || ""} ${c.stadt || ""}` : "");
+      pdfData.recipientName = fullName;
+      pdfData.recipientAddress = addr || pdfData.recipientAddress;
+    }
   }
 
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
@@ -1500,7 +1530,7 @@ async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySe
   const { buffer } = await generatePdf(html);
   const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
 
-  if (invoice.billingType === "pflegekasse_privat") {
+  if (isCustomerInvoice) {
     await enrichPdfDataWithSignatures(pdfData, invoice);
     const lnHtml = generateLeistungsnachweisHtml(pdfData);
     const { buffer: lnPdf } = await generatePdf(lnHtml);
@@ -1583,16 +1613,38 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
-  const customerForInv = await db.select({ geburtsdatum: customersTable.geburtsdatum, beihilfeBerechtigt: customersTable.beihilfeBerechtigt })
+  const customerForInv = await db.select({
+    geburtsdatum: customersTable.geburtsdatum,
+    beihilfeBerechtigt: customersTable.beihilfeBerechtigt,
+    rechnungAnKunde: customersTable.rechnungAnKunde,
+    name: customersTable.name,
+    vorname: customersTable.vorname,
+    nachname: customersTable.nachname,
+    strasse: customersTable.strasse,
+    nr: customersTable.nr,
+    plz: customersTable.plz,
+    stadt: customersTable.stadt,
+  })
     .from(customersTable)
     .where(eq(customersTable.id, invoice.customerId))
     .limit(1);
+  const isCustomerInvoice = invoice.billingType === "pflegekasse_privat"
+    || (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0]?.rechnungAnKunde === true);
   if (customerForInv.length > 0) {
     if (customerForInv[0].geburtsdatum) {
       pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
     }
     if (customerForInv[0].beihilfeBerechtigt) {
       pdfData.beihilfeBerechtigt = true;
+    }
+    if (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0].rechnungAnKunde) {
+      pdfData.rechnungAnKunde = true;
+      const c = customerForInv[0];
+      const fullName = [c.vorname, c.nachname].filter(Boolean).join(" ") || c.name;
+      const addr = [c.strasse, c.nr].filter(Boolean).join(" ") +
+        (c.plz || c.stadt ? `\n${c.plz || ""} ${c.stadt || ""}` : "");
+      pdfData.recipientName = fullName;
+      pdfData.recipientAddress = addr || pdfData.recipientAddress;
     }
   }
 
@@ -1602,7 +1654,7 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
   const { embedZugferdXml } = await import("../lib/zugferd");
   const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
 
-  if (invoice.billingType === "pflegekasse_privat") {
+  if (isCustomerInvoice) {
     const { generateLeistungsnachweisHtml } = await import("../lib/pdf-generator");
     await enrichPdfDataWithSignatures(pdfData, invoice);
     const lnHtml = generateLeistungsnachweisHtml(pdfData);
@@ -1648,12 +1700,18 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
-  const customerForLN = await db.select({ geburtsdatum: customersTable.geburtsdatum })
+  const customerForLN = await db.select({
+    geburtsdatum: customersTable.geburtsdatum,
+    rechnungAnKunde: customersTable.rechnungAnKunde,
+  })
     .from(customersTable)
     .where(eq(customersTable.id, invoice.customerId))
     .limit(1);
-  if (customerForLN.length > 0 && customerForLN[0].geburtsdatum) {
-    pdfData.customerGeburtsdatum = customerForLN[0].geburtsdatum;
+  if (customerForLN.length > 0) {
+    if (customerForLN[0].geburtsdatum) pdfData.customerGeburtsdatum = customerForLN[0].geburtsdatum;
+    if (invoice.billingType === "pflegekasse_gesetzlich" && customerForLN[0].rechnungAnKunde) {
+      pdfData.rechnungAnKunde = true;
+    }
   }
 
   await enrichPdfDataWithSignatures(pdfData, invoice);
@@ -1686,6 +1744,9 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     throw badRequest("Nur Rechnungen an Pflegekassen können über diese Funktion versendet werden.");
   }
 
+  // _customer_ (cust) wird unten aus DB gelesen; rechnungAnKunde-Auswertung
+  // erfolgt erst nach dem Customer-Lookup.
+
   // T06/BL-16: Hard-Block — Versand nur möglich, wenn für den
   // Abrechnungs-Zeitraum mindestens ein Leistungsnachweis vollständig
   // (employee + customer) signiert ist. Ohne Signaturen ist die Rechnung
@@ -1712,6 +1773,8 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
   const isPrivatBilling = invoice.billingType === "pflegekasse_privat";
   const isBeihilfe = isPrivatBilling && cust.beihilfeBerechtigt;
+  const isKostenerstattung = invoice.billingType === "pflegekasse_gesetzlich" && cust.rechnungAnKunde;
+  const sendToCustomer = isPrivatBilling || isKostenerstattung;
 
   const insHistory = await db.select({
     providerId: customerInsuranceHistory.insuranceProviderId,
@@ -1732,7 +1795,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   let recipientDisplayName = "";
   let hasParagraph39 = false;
 
-  if (isPrivatBilling) {
+  if (sendToCustomer) {
     if (!cust.email) throw badRequest("Keine E-Mail-Adresse beim Kunden hinterlegt.");
     recipientEmail = cust.email;
     recipientDisplayName = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
@@ -1762,7 +1825,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   }
 
   if (!recipientEmail) {
-    throw badRequest(isPrivatBilling ? "Keine E-Mail-Adresse beim Kunden hinterlegt." : "Keine E-Mail-Adresse bei der Pflegekasse hinterlegt.");
+    throw badRequest(sendToCustomer ? "Keine E-Mail-Adresse beim Kunden hinterlegt." : "Keine E-Mail-Adresse bei der Pflegekasse hinterlegt.");
   }
 
   const lineItems = await storage.getInvoiceLineItems(id);
@@ -1775,6 +1838,14 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
   if (cust.geburtsdatum) pdfData.customerGeburtsdatum = cust.geburtsdatum;
   if (isBeihilfe) pdfData.beihilfeBerechtigt = true;
+  if (isKostenerstattung) {
+    pdfData.rechnungAnKunde = true;
+    const customerFullNameForPdf = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
+    const customerAddrForPdf = [cust.strasse, cust.nr].filter(Boolean).join(" ") +
+      (cust.plz || cust.stadt ? `\n${cust.plz || ""} ${cust.stadt || ""}` : "");
+    pdfData.recipientName = customerFullNameForPdf;
+    pdfData.recipientAddress = customerAddrForPdf || pdfData.recipientAddress;
+  }
 
   const invoiceHtml = generateInvoiceHtml(pdfData);
   const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
@@ -1818,12 +1889,13 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
 
   const subject = `Rechnung ${invoice.invoiceNumber} — ${customerFullName}${versNr ? ` (${versNr})` : ""} — ${monthName} ${invoice.billingYear} — ${companyName}`;
   let bodyContent = "";
-  if (isPrivatBilling) {
+  if (sendToCustomer) {
     bodyContent = `
       <p>Sehr geehrte/r ${cust.vorname || ""} ${cust.nachname || ""},</p>
       <p>anbei erhalten Sie die Rechnung <strong>${invoice.invoiceNumber}</strong> sowie den zugehörigen Leistungsnachweis
       für den Leistungszeitraum <strong>${monthName} ${invoice.billingYear}</strong>.</p>
       ${isBeihilfe ? `<p><strong>Hinweis:</strong> Anbei erhalten Sie Ihre Rechnung und den Leistungsnachweis in doppelter Ausfertigung — bitte reichen Sie je ein Exemplar bei Ihrer privaten Pflegekasse und Ihrer Beihilfestelle ein.</p>` : ""}
+      ${isKostenerstattung ? `<p><strong>Hinweis:</strong> Bitte begleichen Sie die Rechnung und reichen Sie diese zusammen mit dem Leistungsnachweis im Rahmen des Kostenerstattungsverfahrens bei Ihrer Pflegekasse zur Erstattung des Entlastungsbetrags nach § 45b SGB XI ein.</p>` : ""}
       <p>Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.</p>
       <p>Mit freundlichen Grüßen<br/>${companyName}</p>
     `;
@@ -1886,7 +1958,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     customerId: invoice.customerId,
     insuranceProviderId: provider.length ? provider[0].id : null,
     insuranceProviderName: recipientDisplayName,
-    hasParagraph39, isPrivatBilling, isBeihilfe,
+    hasParagraph39, isPrivatBilling, isBeihilfe, isKostenerstattung,
   }, req.ip);
 
   const results: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean; letterxpressLetterId?: string }[] = [

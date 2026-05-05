@@ -510,6 +510,9 @@ export default function AdminCustomers() {
                       {customer.billingType && (
                         <StatusBadge type="billingType" value={customer.billingType} data-testid={`badge-billingtype-${customer.id}`} />
                       )}
+                      {customer.rechnungAnKunde && customer.billingType === "pflegekasse_gesetzlich" && (
+                        <StatusBadge type="info" value="Kostenerstattung" data-testid={`badge-kostenerstattung-${customer.id}`} />
+                      )}
                       {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                         <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
                       )}

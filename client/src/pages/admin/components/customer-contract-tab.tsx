@@ -88,6 +88,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   const [personenbefoerderungGewuenscht, setPersonenbefoerderungGewuenscht] = useState(false);
   const [acceptsPrivatePayment, setAcceptsPrivatePayment] = useState(false);
   const [beihilfeBerechtigt, setBeihilfeBerechtigt] = useState(false);
+  const [rechnungAnKunde, setRechnungAnKunde] = useState(false);
 
   const [creatingContract, setCreatingContract] = useState(false);
   const [newContractStart, setNewContractStart] = useState("");
@@ -133,6 +134,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     } else if (section === "abrechnung") {
       setAcceptsPrivatePayment(customer.acceptsPrivatePayment ?? false);
       setBeihilfeBerechtigt(customer.beihilfeBerechtigt ?? false);
+      setRechnungAnKunde(customer.rechnungAnKunde ?? false);
     }
     setEditingSection(section);
   };
@@ -163,8 +165,9 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
     if (editingSection !== "abrechnung") return false;
     if (acceptsPrivatePayment !== (customer.acceptsPrivatePayment ?? false)) return true;
     if (customer.billingType === "pflegekasse_privat" && beihilfeBerechtigt !== (customer.beihilfeBerechtigt ?? false)) return true;
+    if (customer.billingType === "pflegekasse_gesetzlich" && rechnungAnKunde !== (customer.rechnungAnKunde ?? false)) return true;
     return false;
-  }, [editingSection, acceptsPrivatePayment, beihilfeBerechtigt, customer.acceptsPrivatePayment, customer.beihilfeBerechtigt, customer.billingType]);
+  }, [editingSection, acceptsPrivatePayment, beihilfeBerechtigt, rechnungAnKunde, customer.acceptsPrivatePayment, customer.beihilfeBerechtigt, customer.rechnungAnKunde, customer.billingType]);
 
   const invalidateCustomer = () => {
     invalidateRelated(queryClient, "customers");
@@ -274,10 +277,11 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   });
 
   const saveAbrechnung = useMutation({
-    mutationFn: async (data: { acceptsPrivatePayment: boolean; beihilfeBerechtigt: boolean }) => {
+    mutationFn: async (data: { acceptsPrivatePayment: boolean; beihilfeBerechtigt: boolean; rechnungAnKunde: boolean }) => {
       const result = await api.patch(`/admin/customers/${customerId}`, {
         acceptsPrivatePayment: data.acceptsPrivatePayment,
         beihilfeBerechtigt: data.beihilfeBerechtigt,
+        rechnungAnKunde: data.rechnungAnKunde,
       });
       return unwrapResult(result);
     },
@@ -708,10 +712,24 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 />
               </div>
             )}
+            {customer.billingType === "pflegekasse_gesetzlich" && (
+              <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                <div className="space-y-0.5">
+                  <Label htmlFor="rechnungAnKunde" className="cursor-pointer">Kostenerstattungsverfahren</Label>
+                  <p className="text-xs text-gray-500">Rechnung an den Kunden adressieren — Kunde zahlt selbst und reicht bei seiner gesetzlichen Pflegekasse zur Erstattung ein.</p>
+                </div>
+                <Switch
+                  id="rechnungAnKunde"
+                  checked={rechnungAnKunde}
+                  onCheckedChange={setRechnungAnKunde}
+                  data-testid="switch-rechnung-an-kunde"
+                />
+              </div>
+            )}
             <div className="flex items-center gap-2 pt-3">
               <Button
                 className={componentStyles.btnPrimary}
-                onClick={() => saveAbrechnung.mutate({ acceptsPrivatePayment, beihilfeBerechtigt })}
+                onClick={() => saveAbrechnung.mutate({ acceptsPrivatePayment, beihilfeBerechtigt, rechnungAnKunde })}
                 disabled={saveAbrechnung.isPending || !hasAbrechnungChanges}
                 title={!saveAbrechnung.isPending && !hasAbrechnungChanges ? "Keine Änderungen zu speichern" : undefined}
                 data-testid="button-save-abrechnung"
@@ -749,6 +767,15 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 <StatusBadge
                   type={customer.beihilfeBerechtigt ? "activity" : "info"}
                   value={customer.beihilfeBerechtigt ? "Ja" : "Nein"}
+                />
+              </div>
+            )}
+            {customer.billingType === "pflegekasse_gesetzlich" && (
+              <div className="flex items-center gap-2" data-testid="text-rechnung-an-kunde">
+                <p className="text-sm text-gray-700">Kostenerstattungsverfahren:</p>
+                <StatusBadge
+                  type={customer.rechnungAnKunde ? "activity" : "info"}
+                  value={customer.rechnungAnKunde ? "Ja" : "Nein"}
                 />
               </div>
             )}

@@ -249,6 +249,7 @@ class CustomerManagementStorage {
         stadt: customers.stadt,
         status: customers.status,
         billingType: customers.billingType,
+        rechnungAnKunde: customers.rechnungAnKunde,
         createdAt: customers.createdAt,
         primaryEmployeeId: customers.primaryEmployeeId,
         backupEmployeeId: customers.backupEmployeeId,
@@ -327,6 +328,7 @@ class CustomerManagementStorage {
         stadt: r.stadt,
         status: r.status,
         billingType: r.billingType,
+        rechnungAnKunde: r.rechnungAnKunde,
         primaryEmployee: r.primaryEmployeeId && r.primaryEmployeeName 
           ? { id: r.primaryEmployeeId, displayName: r.primaryEmployeeName }
           : null,
@@ -431,6 +433,7 @@ class CustomerManagementStorage {
     haustierVorhanden: boolean;
     haustierDetails: string | null;
     acceptsPrivatePayment: boolean;
+    rechnungAnKunde: boolean;
     personenbefoerderungGewuenscht: boolean;
     documentDeliveryMethod: string;
     inaktivAb: string | null;

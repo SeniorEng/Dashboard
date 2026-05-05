@@ -238,6 +238,15 @@ CareConnect is a full-stack, mobile-first web application designed to streamline
   - **H4 drizzle-orm 0.39.3 HIGH-CVE** (GHSA-gpj5-g38j-94v9, SQL-Injection via `sql.identifier`): grep zeigt **kein** ausnutzbarer Codepfad (kein `sql.identifier()`/`sql.raw()` mit User-Input), aber Defense-in-Depth-Upgrade auf 0.45.x empfohlen. **BEHOBEN in Task #181** (24.04.2026): drizzle-orm 0.39.3 → 0.45.2; zusätzlich xlsx → exceljs (GHSA-4r6h-8v6p-xvw6 + GHSA-5pgg-2g8v-p4x9), postcss → 8.5.10 (GHSA-qx2v-qp2m-jg93), npm overrides für `@tootallnate/once`/`http-proxy-agent`. Resultat: 0 HIGH/0 CRITICAL, alle 541 Tests grün.
 - **Bestätigt sauber**: Globale CSRF-Middleware (`server/routes/index.ts:94`), CSP via helmet, `requireAuth`/`requireAdmin`/`requireSuperAdmin` konsistent, Test-Cleanup mit Prod-Guard, Geocoding-Background-Job idempotent + dedupliziert, Graceful Shutdown korrekt.
 
+## Kostenerstattung für gesetzlich Versicherte (Task #357 — 2026-05-05)
+- **Ziel**: Gesetzlich versicherte Pflegekassen-Kunden können selbst zahlen und die Rechnung anschließend zur Kostenerstattung bei ihrer Kasse einreichen.
+- **Schema**: Neues Boolean-Feld `customers.rechnungAnKunde` (default `false`). Kein neues Invoice-Feld — die Empfängerwahl wird per Kunden-Lookup zur Laufzeit aufgelöst (Pattern wie `beihilfeBerechtigt`). `npm run db:push --force` angewandt.
+- **Helper**: `invoiceGoesToCustomer = billingType === 'pflegekasse_privat' || (billingType === 'pflegekasse_gesetzlich' && rechnungAnKunde)`. Implementiert in `server/lib/pdf-generator.ts` (`isCustomerAddressedInvoice`) und in `server/routes/billing.ts` (Send-Routen, generate-invoice).
+- **PDF-Layout**: Bei Kostenerstattung verwendet die Rechnung den Privat-Layout (Empfänger=Kunde, Bankverbindung des Pflegedienstes, MwSt-frei, deutscher Hinweistext), Abtretungserklärung im Leistungsnachweis wird unterdrückt.
+- **Send-Logik**: `/send` und `/send-batch` schicken die PDF an die Kunden-Email statt an die Pflegekasse, audit-Eintrag mit `rechnungAnKunde=true`. Email-Body enthält Kostenerstattungs-Hinweis.
+- **Statistik**: Kunde bleibt `pflegekasse_gesetzlich` (Stats unverändert) — Selbstzahler-Statistik wird nicht beeinflusst.
+- **UI**: Wizard `insurance-step.tsx` und `customer-contract-tab.tsx` haben Switch "Rechnung an Kunde (Kostenerstattung)" (nur wenn gesetzlich). Kundenliste zeigt `Kostenerstattung`-Badge (StatusBadge type=info).
+
 ## External Dependencies
 - **Database**: PostgreSQL (via Neon serverless)
 - **Frontend Libraries**: React, TypeScript, Vite, Wouter, `shadcn/ui`, Radix UI, Tailwind CSS v4, TanStack Query, Zod.

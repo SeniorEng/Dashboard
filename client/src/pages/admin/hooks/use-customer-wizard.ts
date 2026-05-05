@@ -79,6 +79,7 @@ function createInitialFormData(): CustomerFormData {
     documentDeliveryMethod: "email",
     receivesMonthlyInvoice: false,
     acceptsPrivatePayment: false,
+    rechnungAnKunde: false,
     vorjahrVerbraucht45b: "",
     uebertrag45b: "0",
   };
@@ -374,6 +375,7 @@ export function useCustomerWizard() {
       haustierDetails: formData.haustierVorhanden ? (formData.haustierDetails.trim() || undefined) : undefined,
       personenbefoerderungGewuenscht: formData.personenbefoerderungGewuenscht,
       acceptsPrivatePayment: formData.acceptsPrivatePayment,
+      rechnungAnKunde: formData.billingType === "pflegekasse_gesetzlich" ? formData.rechnungAnKunde : false,
       beihilfeBerechtigt: formData.billingType === "pflegekasse_privat" ? formData.beihilfeBerechtigt : false,
       documentDeliveryMethod: formData.documentDeliveryMethod,
       receivesMonthlyInvoice: formData.receivesMonthlyInvoice,

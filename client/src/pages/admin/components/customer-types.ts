@@ -58,6 +58,7 @@ export interface CustomerFormData {
   documentDeliveryMethod: "email" | "post";
   receivesMonthlyInvoice: boolean;
   acceptsPrivatePayment: boolean;
+  rechnungAnKunde: boolean;
   vorjahrVerbraucht45b: string;
   uebertrag45b: string;
 }

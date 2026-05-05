@@ -68,6 +68,12 @@ export interface InvoicePdfData {
   // Beihilfe
   beihilfeBerechtigt?: boolean;
 
+  // Kostenerstattungsverfahren — gesetzlich versicherter Kunde zahlt selbst
+  // und reicht die Rechnung bei der Pflegekasse zur Erstattung ein.
+  // Wirkung: Layout/Empfänger/Zahlung wie pflegekasse_privat, aber mit
+  // angepasster Kostenerstattungs-Formulierung.
+  rechnungAnKunde?: boolean;
+
   // Employee qualifications (for Leistungsnachweis header)
   employeeQualifications?: Map<string, string>;
   
@@ -122,17 +128,30 @@ function getInvoiceTypeLabel(type: string): string {
   }
 }
 
-function getBillingTypeNote(billingType: string, insuranceProviderName: string | null, beihilfeBerechtigt?: boolean): string {
+function getBillingTypeNote(billingType: string, insuranceProviderName: string | null, beihilfeBerechtigt?: boolean, rechnungAnKunde?: boolean): string {
+  // Im Kostenerstattungsverfahren (gesetzlich + rechnungAnKunde) wird
+  // dieselbe Hinweisformulierung wie bei pflegekasse_privat verwendet.
+  if (isCustomerAddressedInvoice(billingType, rechnungAnKunde)) {
+    return `Zur Erstattung bei Ihrer Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. Abrechnung des Entlastungsbetrags nach § 45b SGB XI.${beihilfeBerechtigt ? " Diese Rechnung wurde in doppelter Ausfertigung erstellt — für Ihre Pflegekasse und Ihre Beihilfestelle." : ""}`;
+  }
   switch (billingType) {
     case "pflegekasse_gesetzlich":
       return `Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI.`;
-    case "pflegekasse_privat":
-      return `Zur Erstattung bei Ihrer privaten Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. Abrechnung des Entlastungsbetrags nach § 45b SGB XI.${beihilfeBerechtigt ? " Diese Rechnung wurde in doppelter Ausfertigung erstellt — für Ihre private Pflegekasse und Ihre Beihilfestelle." : ""}`;
     case "selbstzahler":
       return "";
     default:
       return "";
   }
+}
+
+/**
+ * Liefert true, wenn die Rechnung effektiv an den Kunden adressiert ist
+ * (Layout/Empfänger/Zahlung wie pflegekasse_privat).
+ */
+function isCustomerAddressedInvoice(billingType: string, rechnungAnKunde?: boolean): boolean {
+  if (billingType === "pflegekasse_privat") return true;
+  if (billingType === "pflegekasse_gesetzlich" && rechnungAnKunde) return true;
+  return false;
 }
 
 function getBudgettopfLabel(billingType: string): string {
@@ -148,12 +167,15 @@ function getBudgettopfLabel(billingType: string): string {
   }
 }
 
-function getConfirmTextForBillingType(billingType: string): string {
+function getConfirmTextForBillingType(billingType: string, rechnungAnKunde?: boolean): string {
+  // Kostenerstattungsverfahren erhält dieselbe Bestätigungsformulierung
+  // wie pflegekasse_privat.
+  if (isCustomerAddressedInvoice(billingType, rechnungAnKunde)) {
+    return "und zur Erstattung des Entlastungsbetrags nach § 45b SGB XI bei der zuständigen Pflegekasse eingereicht werden dürfen";
+  }
   switch (billingType) {
     case "pflegekasse_gesetzlich":
       return "und zur Abrechnung des Entlastungsbetrags nach § 45b SGB XI bei der zuständigen Pflegekasse eingereicht werden dürfen";
-    case "pflegekasse_privat":
-      return "und zur Erstattung des Entlastungsbetrags nach § 45b SGB XI bei der zuständigen privaten Pflegekasse eingereicht werden dürfen";
     case "selbstzahler":
       return "";
     default:
@@ -166,9 +188,10 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const invoiceDate = data.invoiceDate || `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
   const typeLabel = getInvoiceTypeLabel(data.invoiceType);
-  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt);
+  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt, data.rechnungAnKunde);
   const isStorno = data.invoiceType === "stornorechnung";
   const isSelbstzahler = data.billingType === "selbstzahler";
+  const isCustomerInvoice = isCustomerAddressedInvoice(data.billingType, data.rechnungAnKunde);
   const vatMultiplier = isSelbstzahler && data.vatRate > 0 ? (1 + data.vatRate / 10000) : 1;
   
   const lineItemsHtml = data.lineItems.map(item => {
@@ -236,7 +259,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </div>
   </div>
 
-  ${data.billingType === "pflegekasse_gesetzlich" ? `
+  ${data.billingType === "pflegekasse_gesetzlich" && !data.rechnungAnKunde ? `
   <div style="display: flex; gap: 30px; margin-bottom: 20px;">
     <div class="recipient" style="flex: 1; margin-bottom: 0;">
       <div class="recipient-label">Rechnungsempfänger:</div>
@@ -252,7 +275,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
     </div>
   </div>
-  ` : data.billingType === "pflegekasse_privat" ? `
+  ` : isCustomerInvoice ? `
   <div class="recipient">
     <div class="recipient-label">Rechnungsempfänger:</div>
     <strong>${escapeHtml(data.recipientName)}</strong>
@@ -311,7 +334,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 
   ${billingNote ? `<div class="note">${billingNote}</div>` : ""}
 
-  ${data.billingType === "selbstzahler" || data.billingType === "pflegekasse_privat" ? `
+  ${isSelbstzahler || isCustomerInvoice ? `
   <div style="margin-top: 20px; font-size: 9pt;">
     <p>Bitte überweisen Sie den Betrag innerhalb von 14 Tagen auf folgendes Konto:</p>
     <table style="margin-top: 5px;">
@@ -319,7 +342,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       <tr><td style="color: #1f2937; padding-right: 10px;">BIC:</td><td style="color: #111827;">${escapeHtml(data.bic)}</td></tr>
       <tr><td style="color: #1f2937; padding-right: 10px;">Bank:</td><td style="color: #111827;">${escapeHtml(data.bankName)}</td></tr>
     </table>
-    ${data.billingType === "pflegekasse_privat" ? `<p style="margin-top: 8px; color: #4b5563;">Diese Rechnung können Sie zusammen mit dem beigefügten Leistungsnachweis bei Ihrer privaten Pflegekasse zur Erstattung einreichen.</p>` : ""}
+    ${isCustomerInvoice ? `<p style="margin-top: 8px; color: #4b5563;">Diese Rechnung können Sie zusammen mit dem beigefügten Leistungsnachweis bei Ihrer Pflegekasse zur Erstattung einreichen.</p>` : ""}
   </div>
   ` : `
   <div style="margin-top: 20px; font-size: 9pt;">
@@ -448,6 +471,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
   function renderAbtretungserklaerung(): string {
     if (data.billingType === "selbstzahler") return "";
+    // Im Kostenerstattungsverfahren zahlt der Kunde selbst und tritt
+    // gerade NICHT an den Leistungserbringer ab — Abtretungserklärung
+    // wäre inhaltlich falsch.
+    if (isCustomerAddressedInvoice(data.billingType, data.rechnungAnKunde) && data.billingType !== "pflegekasse_privat") return "";
     return `
     <div style="margin-top: 20px; padding: 10px; background: #fefce8; border: 1px solid #fde68a; border-radius: 4px; font-size: 9pt; color: #92400e;">
       <div style="font-weight: 600; margin-bottom: 4px;">Abtretungserklärung (§ 398 BGB)</div>
@@ -505,7 +532,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
   if (hasMultipleLNs && data.signatures) {
     const sections: string[] = [];
-    const confirmSuffix = getConfirmTextForBillingType(data.billingType);
+    const confirmSuffix = getConfirmTextForBillingType(data.billingType, data.rechnungAnKunde);
     const confirmText = `Ich bestätige hiermit, dass die aufgeführten Leistungen wie oben beschrieben erbracht wurden${confirmSuffix ? " " + confirmSuffix : ""}.`;
 
     for (let idx = 0; idx < data.signatures.length; idx++) {
@@ -609,7 +636,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       : allSorted.reduce((sum, item) => sum + item.totalCents, 0);
 
     const sig = data.signatures && data.signatures.length > 0 ? data.signatures[0] : null;
-    const confirmSuffix = getConfirmTextForBillingType(data.billingType);
+    const confirmSuffix = getConfirmTextForBillingType(data.billingType, data.rechnungAnKunde);
 
     sectionsHtml = `
     <table class="items">
