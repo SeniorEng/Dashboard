@@ -63,8 +63,14 @@ function deriveSollIst(wl: TeamWorkloadEntry, globalAvg: number): SollIstView {
   return { sollHours, istHours: istHoursRaw, auslastungPct, freieStunden, moeglicheZusatzKunden };
 }
 
+function safeName(emp: { displayName: string | null; vorname: string | null; nachname: string | null }): string {
+  if (emp.displayName && emp.displayName.trim()) return emp.displayName;
+  const combined = `${emp.vorname ?? ""} ${emp.nachname ?? ""}`.trim();
+  return combined || "Unbenannt";
+}
+
 export default function TeamWorkloadPage() {
-  const { data, isLoading } = useTeamWorkload();
+  const { data, isLoading, isError, error, refetch, isFetching } = useTeamWorkload();
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("alle");
   const [sortKey, setSortKey] = useState<SortKey>("auslastung-desc");
@@ -72,23 +78,25 @@ export default function TeamWorkloadPage() {
   const globalAvg = data?.globalAvgHoursPerCustomerPerMonth ?? 0;
 
   const rows = useMemo(() => {
-    if (!data) return [];
+    if (!data || !Array.isArray(data.employees)) return [];
+    const workloadMap = data.workload ?? {};
     const q = searchQuery.trim().toLowerCase();
     const filtered = data.employees.filter((emp) => {
       if (!emp.isActive) return false;
-      if (roleFilter !== "alle" && !emp.roles.includes(roleFilter)) return false;
-      if (q && !emp.displayName.toLowerCase().includes(q)) return false;
+      const empRoles = Array.isArray(emp.roles) ? emp.roles : [];
+      if (roleFilter !== "alle" && !empRoles.includes(roleFilter)) return false;
+      if (q && !safeName(emp).toLowerCase().includes(q)) return false;
       return true;
     });
     const withWorkload = filtered.map((emp) => {
-      const workload = data.workload[emp.id] ?? emptyEntry();
+      const workload = workloadMap[emp.id] ?? emptyEntry();
       const sollIst = deriveSollIst(workload, globalAvg);
-      return { employee: emp, workload, sollIst };
+      return { employee: { ...emp, displayName: safeName(emp), roles: Array.isArray(emp.roles) ? emp.roles : [] }, workload, sollIst };
     });
     withWorkload.sort((a, b) => {
       switch (sortKey) {
         case "name-asc":
-          return a.employee.displayName.localeCompare(b.employee.displayName, "de");
+          return (a.employee.displayName ?? "").localeCompare(b.employee.displayName ?? "", "de");
         case "hv-asc":
           return a.workload.primaryCount - b.workload.primaryCount;
         case "hv-desc":
@@ -195,9 +203,33 @@ export default function TeamWorkloadPage() {
         <div className="flex justify-center py-12">
           <Loader2 className={`${iconSize.xl} animate-spin text-teal-600`} />
         </div>
+      ) : isError ? (
+        <div
+          className="flex flex-col items-center gap-3 py-12 text-center"
+          data-testid="text-team-workload-error"
+        >
+          <AlertCircle className={`${iconSize.lg} text-red-600`} />
+          <div className="text-sm text-gray-700">
+            Team-Auslastung konnte nicht geladen werden.
+          </div>
+          <div className="text-xs text-gray-500 max-w-md" data-testid="text-team-workload-error-detail">
+            {error instanceof Error && error.message ? error.message : "Bitte erneut versuchen oder die Seite neu laden."}
+          </div>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="text-sm px-3 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-60"
+            data-testid="button-team-workload-retry"
+          >
+            {isFetching ? "Lädt…" : "Erneut versuchen"}
+          </button>
+        </div>
       ) : rows.length === 0 ? (
         <div className="text-center py-12 text-gray-500" data-testid="text-team-workload-empty">
-          Keine Mitarbeiter gefunden
+          {Array.isArray(data?.employees) && data!.employees.length > 0
+            ? "Keine Mitarbeiter passen zu den aktuellen Filtern"
+            : "Keine Mitarbeiter gefunden"}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
