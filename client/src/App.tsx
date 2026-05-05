@@ -69,6 +69,7 @@ const ServiceRecordsPage = lazy(() => import("@/pages/service-records"));
 const ServiceRecordDetailPage = lazy(() => import("@/pages/service-record-detail"));
 const ProfilePage = lazy(() => import("@/pages/profile"));
 const HelpPage = lazy(() => import("@/pages/help"));
+const TeamWorkloadPage = lazy(() => import("@/pages/team-workload"));
 const PublicSigningPage = lazy(() => import("@/pages/public-signing"));
 
 function PageLoader() {
@@ -209,6 +210,9 @@ function Router() {
       </Route>
       <Route path="/help">
         <ProtectedRoute component={HelpPage} />
+      </Route>
+      <Route path="/team-auslastung">
+        <AdminOrTeamLeadRoute component={TeamWorkloadPage} />
       </Route>
       <Route path="/admin">
         <AdminRoute component={AdminDashboard} />

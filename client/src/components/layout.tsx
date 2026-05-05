@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle, Gauge } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
@@ -388,6 +388,12 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                   <Settings className="mr-2 h-4 w-4" />
                   Mein Profil
                 </DropdownMenuItem>
+                {hasAdminScope && (
+                  <DropdownMenuItem onClick={() => navigate("/team-auslastung")} data-testid="menu-team-workload">
+                    <Gauge className="mr-2 h-4 w-4 text-teal-600" />
+                    Team-Auslastung
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => navigate("/help")} data-testid="menu-help">
                   <HelpCircle className="mr-2 h-4 w-4" />
                   Hilfe
@@ -437,7 +443,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
             <div className="container mx-auto px-4">
               <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
                 {hasAdminScope && (
-                  <div className="flex items-center mr-2 shrink-0">
+                  <div className="flex items-center mr-2 shrink-0 gap-1">
                     <button
                       onClick={() => navigate(isAdmin ? "/admin" : "/admin/planned-consultations")}
                       className={`px-3 py-2 text-xs font-semibold rounded-md transition-colors ${
@@ -448,6 +454,18 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                       data-testid="nav-desktop-toggle-admin"
                     >
                       Admin
+                    </button>
+                    <button
+                      onClick={() => navigate("/team-auslastung")}
+                      className={`px-3 py-2 text-xs font-semibold rounded-md transition-colors inline-flex items-center gap-1 ${
+                        location === "/team-auslastung"
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                      }`}
+                      data-testid="nav-desktop-team-workload"
+                    >
+                      <Gauge className="w-3.5 h-3.5" />
+                      Team-Auslastung
                     </button>
                     <div className="w-px h-6 bg-border/60 ml-2" />
                   </div>

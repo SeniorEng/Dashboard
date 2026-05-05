@@ -22,6 +22,7 @@ import notificationsRouter from "./notifications";
 import whatsappRouter from "./whatsapp";
 import prospectsRouter from "./prospects";
 import appointmentSeriesRouter from "./appointment-series";
+import teamRouter from "./team";
 import { csrfProtection, csrfTokenHandler } from "../middleware/csrf";
 import { authMiddleware, requireAuth } from "../middleware/auth";
 import { cacheHeaders } from "../middleware/cache-headers";
@@ -94,6 +95,7 @@ router.use("/auth", authRouter);
 router.use(csrfProtection);
 
 router.use("/admin", adminRouter);
+router.use("/team", teamRouter);
 
 router.get("/insurance-providers", requireAuth, asyncHandler("Pflegekassen konnten nicht geladen werden", async (req, res) => {
   const activeOnly = req.query.all !== "true";

@@ -46,7 +46,9 @@ import {
   Calendar,
   AlertTriangle,
   Palmtree,
+  Info,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api, unwrapResult } from "@/lib/api/client";
 import {
   UserData,
@@ -712,27 +714,53 @@ export default function AdminUsers() {
                               const allHours = Math.round(wl.avgMonthlyAllMinutes / 60 * 10) / 10;
                               return (
                                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600" data-testid={`workload-stats-${user.id}`}>
-                                  <span className="inline-flex items-center gap-1 cursor-default">
-                                    <Users className="h-3 w-3" />
-                                    <span className="font-medium" data-testid={`workload-total-${user.id}`}>{totalCustomers} Kunden</span>
-                                    <span className="text-gray-500">
-                                      (<span className="text-teal-700" data-testid={`workload-hv-${user.id}`}>{wl.primaryCount} HV</span>
-                                      {" · "}
-                                      <span className="text-blue-600" data-testid={`workload-v1-${user.id}`}>{wl.backupCount} V1</span>
-                                      {" · "}
-                                      <span className="text-purple-600" data-testid={`workload-v2-${user.id}`}>{wl.backup2Count} V2</span>)
-                                    </span>
-                                  </span>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="inline-flex items-center gap-1 cursor-help" data-testid={`workload-customers-trigger-${user.id}`}>
+                                        <Users className="h-3 w-3" />
+                                        <span className="font-medium" data-testid={`workload-total-${user.id}`}>{totalCustomers} Kunden</span>
+                                        <span className="text-gray-500">
+                                          (<span className="text-teal-700" data-testid={`workload-hv-${user.id}`}>{wl.primaryCount} HV</span>
+                                          {" · "}
+                                          <span className="text-blue-600" data-testid={`workload-v1-${user.id}`}>{wl.backupCount} V1</span>
+                                          {" · "}
+                                          <span className="text-purple-600" data-testid={`workload-v2-${user.id}`}>{wl.backup2Count} V2</span>)
+                                        </span>
+                                        <Info className="h-3 w-3 text-gray-400 ml-0.5" />
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      <div className="space-y-0.5">
+                                        <div><strong>HV</strong> = Hauptverantwortliche</div>
+                                        <div><strong>V1</strong> = Vertretung 1</div>
+                                        <div><strong>V2</strong> = Vertretung 2</div>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
                                   <span className="text-gray-300">|</span>
-                                  <span className="inline-flex items-center gap-1 cursor-default">
-                                    <Calendar className="h-3 w-3" />
-                                    <span>Ø</span>
-                                    <span className="font-medium" data-testid={`workload-hw-hours-${user.id}`}>{hwHours}h</span>
-                                    <span className="text-gray-500">HW</span>
-                                    <span className="text-gray-500">·</span>
-                                    <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
-                                    <span className="text-gray-500">ALL</span>
-                                  </span>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="inline-flex items-center gap-1 cursor-help" data-testid={`workload-hours-trigger-${user.id}`}>
+                                        <Calendar className="h-3 w-3" />
+                                        <span>Ø</span>
+                                        <span className="font-medium" data-testid={`workload-hw-hours-${user.id}`}>{hwHours}h</span>
+                                        <span className="text-gray-500">HW</span>
+                                        <span className="text-gray-500">·</span>
+                                        <span className="font-medium" data-testid={`workload-all-hours-${user.id}`}>{allHours}h</span>
+                                        <span className="text-gray-500">ALL</span>
+                                        <Info className="h-3 w-3 text-gray-400 ml-0.5" />
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      <div className="space-y-0.5">
+                                        <div><strong>HW</strong> = Hauswirtschaft</div>
+                                        <div><strong>ALL</strong> = Alltagsbegleitung</div>
+                                        <div className="text-[10px] opacity-80 mt-1">
+                                          Ø der letzten 3 abgeschlossenen Monate
+                                        </div>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
                                 </div>
                               );
                             })()}
