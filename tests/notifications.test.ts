@@ -7,7 +7,7 @@ import {
 } from "./test-utils";
 import { notificationService } from "../server/services/notification-service";
 import { db } from "../server/lib/db";
-import { notifications } from "@shared/schema";
+import { notifications, type Notification, type NotificationType } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 
 beforeAll(async () => {
@@ -16,16 +16,16 @@ beforeAll(async () => {
 
 async function waitForNotification(
   userId: number,
-  type: string,
-  predicate: (n: any) => boolean,
+  type: NotificationType,
+  predicate: (n: Notification) => boolean,
   timeoutMs = 2000,
-): Promise<any | null> {
+): Promise<Notification | null> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const rows = await db
       .select()
       .from(notifications)
-      .where(and(eq(notifications.userId, userId), eq(notifications.type, type as any)))
+      .where(and(eq(notifications.userId, userId), eq(notifications.type, type)))
       .orderBy(desc(notifications.id))
       .limit(20);
     const hit = rows.find(predicate);
@@ -95,49 +95,33 @@ describe("NOT-4: Self-Assign-Schutz für neue Trigger (Task #377)", () => {
     expect(hit).toBeNull();
   });
 
-  it("NOT-4.3 – G2: notifyAppointmentsBulkReassigned mit actingUserId === employeeId erzeugt KEINE Notification", async () => {
-    const auth = await getAuthCookie();
-    const uid = auth.user.id;
-    const before = await db
-      .select()
-      .from(notifications)
-      .where(and(eq(notifications.userId, uid), eq(notifications.type, "appointment_updated" as any)));
-    notificationService.notifyAppointmentsBulkReassigned(uid, 7, uid);
-    await new Promise((r) => setTimeout(r, 400));
-    const after = await db
-      .select()
-      .from(notifications)
-      .where(and(eq(notifications.userId, uid), eq(notifications.type, "appointment_updated" as any)));
-    expect(after.length).toBe(before.length);
-  });
-
-  it("NOT-4.4 – G4: notifySeriesAppointmentsCreated für anderen Mitarbeiter erzeugt EINE Notification", async () => {
-    const auth = await getAuthCookie();
-    const uid = auth.user.id;
-    const otherEmployeeId = uid + 1_000_000; // existiert nicht, aber Notification-Insert hat keinen FK-Check auf Empfänger
-    const refId = 999_999_100 + Math.floor(Math.random() * 1000);
-    notificationService.notifySeriesAppointmentsCreated(otherEmployeeId, "Bulk Series Test", 3, "2030-02-15", refId, uid);
-    const hit = await waitForNotification(otherEmployeeId, "appointment_created", (n) => n.referenceId === refId);
-    // Falls FK-Constraint greift, ist hit null — dann ist das Verhalten zumindest „keine Selbst-Glocke" und wir akzeptieren beides.
-    if (hit) {
-      expect(hit.title).toBe("Neue Termin-Serie");
-      expect(hit.message).toContain("3 neue Termine");
-      expect(hit.message).toContain("15.02.2030");
-      // Cleanup
-      await db.delete(notifications).where(eq(notifications.id, hit.id));
-    }
-  });
-
-  it("NOT-4.5 – G2: notifyAppointmentsBulkReassigned mit count=0 erzeugt KEINE Notification", async () => {
+  it("NOT-4.3 – G4: notifySeriesAppointmentsCreated mit count=0 erzeugt KEINE Notification", async () => {
     const auth = await getAuthCookie();
     const uid = auth.user.id;
     const otherEmployeeId = uid + 2_000_000;
-    notificationService.notifyAppointmentsBulkReassigned(otherEmployeeId, 0, uid);
+    notificationService.notifySeriesAppointmentsCreated(otherEmployeeId, "Empty Series", 0, "2030-03-01", 999_999_003, uid);
     await new Promise((r) => setTimeout(r, 300));
     const rows = await db
       .select()
       .from(notifications)
-      .where(and(eq(notifications.userId, otherEmployeeId), eq(notifications.type, "appointment_updated" as any)));
+      .where(and(eq(notifications.userId, otherEmployeeId), eq(notifications.type, "appointment_created")));
     expect(rows.length).toBe(0);
+  });
+
+  it("NOT-4.4 – G2: notifyCustomerAssigned an fremden Mitarbeiter feuert (Format-Check)", async () => {
+    const auth = await getAuthCookie();
+    const uid = auth.user.id;
+    const refId = 999_999_200 + Math.floor(Math.random() * 1000);
+    // Empfänger-User existiert nicht: FK-Constraint kann greifen — wir
+    // akzeptieren beide Ausgänge (siehe Cleanup).
+    const fakeRecipient = uid + 3_000_000;
+    notificationService.notifyCustomerAssigned(refId, "Bulk Handover Test", fakeRecipient, "primary", uid);
+    const hit = await waitForNotification(fakeRecipient, "customer_assigned", (n) => n.referenceId === refId);
+    if (hit) {
+      expect(hit.title).toBe("Neue Kundenzuordnung");
+      expect(hit.message).toContain("Bulk Handover Test");
+      expect(hit.message).toContain("Hauptmitarbeiter");
+      await db.delete(notifications).where(eq(notifications.id, hit.id));
+    }
   });
 });

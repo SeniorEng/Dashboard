@@ -588,13 +588,6 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
     }
   }
 
-  // Eine zusammenfassende Notification für übernommene zukünftige Termine
-  if (counts.appointmentCount > 0) {
-    notificationService.notifyAppointmentsBulkReassigned(
-      targetEmployeeId, counts.appointmentCount, changedByUserId ?? undefined,
-    );
-  }
-
   res.json({
     message: "Übergabe erfolgreich durchgeführt",
     ...counts,

@@ -903,8 +903,6 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
 
   if (updated) {
     const newEmployeeId = updated.assignedEmployeeId || updated.performedByEmployeeId;
-    const oldEmployeeId = existingAppointment.assignedEmployeeId || existingAppointment.performedByEmployeeId;
-    const isReassignment = newEmployeeId !== oldEmployeeId;
     const hasSchedulingChange = validatedData.date !== undefined
       || validatedData.scheduledStart !== undefined
       || validatedData.scheduledEnd !== undefined
@@ -916,7 +914,6 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     if (newEmployeeId && updated.customerId && hasSchedulingChange && newEmployeeId !== req.user!.id) {
       const customer = await storage.getCustomer(updated.customerId);
       const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Unbekannt";
-      void isReassignment;
       notificationService.notifyAppointmentUpdated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
     }
   }

@@ -167,24 +167,6 @@ export const notificationService = {
     });
   },
 
-  notifyAppointmentsBulkReassigned(
-    employeeId: number,
-    count: number,
-    actingUserId?: number
-  ) {
-    if (actingUserId !== undefined && actingUserId === employeeId) return;
-    if (count <= 0) return;
-    fireAndForget(async () => {
-      await createNotification({
-        userId: employeeId,
-        type: "appointment_updated",
-        title: "Termine übernommen",
-        message: `${count} zukünftige Termine wurden Dir im Rahmen einer Übergabe zugewiesen.`,
-        referenceType: "appointment",
-      });
-    });
-  },
-
   notifyAppointmentCreated(
     appointmentId: number,
     customerName: string,
