@@ -220,26 +220,26 @@ function TimeEntryCard({
         </div>
       </div>
       {canModify && (
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0">
+        <div className="flex items-center gap-0.5 shrink-0 ml-2">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="h-11 w-11"
             onClick={() => onEdit(entry)}
             aria-label="Bearbeiten"
             data-testid={`button-edit-entry-${entry.id}`}
           >
-            <Pencil className="h-3.5 w-3.5" />
+            <Pencil className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+            className="h-11 w-11 text-red-600 hover:text-red-700 hover:bg-red-50"
             onClick={() => onDelete(entry)}
             aria-label="Löschen"
             data-testid={`button-delete-entry-${entry.id}`}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       )}
