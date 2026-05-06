@@ -294,12 +294,25 @@ export default function TeamWorkloadPage() {
                         jetzt ergänzen
                       </Link>
                     </div>
+                  ) : workload.monthlyWorkHours > 0 ? (
+                    <div
+                      className="mb-4 flex items-baseline gap-2 text-sm flex-wrap"
+                      data-testid={`workload-soll-no-ist-${employee.id}`}
+                    >
+                      <span className="text-gray-500 uppercase tracking-wide text-[11px]">Soll</span>
+                      <span className="font-semibold text-gray-900" data-testid={`workload-soll-${employee.id}`}>
+                        {workload.monthlyWorkHours} h
+                      </span>
+                      <span className="text-gray-400">·</span>
+                      <span className="text-gray-500 uppercase tracking-wide text-[11px]">Ist</span>
+                      <span className="text-gray-500 italic">noch keine Daten erfasst</span>
+                    </div>
                   ) : (
                     <div
                       className="mb-4 text-xs text-gray-500"
-                      data-testid={`workload-soll-na-${employee.id}`}
+                      data-testid={`workload-soll-zero-${employee.id}`}
                     >
-                      Soll/Ist: n/a (kein Soll hinterlegt)
+                      Soll/Ist: n/a (Vertragsstunden = 0)
                     </div>
                   )}
 
@@ -309,10 +322,10 @@ export default function TeamWorkloadPage() {
                     data-testid={`workload-stats-${employee.id}`}
                   >
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-gray-600">Kunden gesamt</span>
+                      <span className="text-gray-600">Hauptverantwortlich</span>
                       <span className="text-right">
-                        <span className="font-semibold text-gray-900" data-testid={`workload-total-${employee.id}`}>
-                          {totalCustomers}
+                        <span className="font-semibold text-gray-900" data-testid={`workload-hv-primary-${employee.id}`}>
+                          {workload.primaryCount}
                         </span>
                         <span className="text-gray-500 text-xs">
                           {" · "}
@@ -326,6 +339,10 @@ export default function TeamWorkloadPage() {
                           {" · "}
                           <span className="text-purple-600" data-testid={`workload-v2-${employee.id}`}>
                             {workload.backup2Count} V2
+                          </span>
+                          {" · "}
+                          <span className="text-gray-500" data-testid={`workload-total-${employee.id}`}>
+                            {totalCustomers} ges.
                           </span>
                         </span>
                       </span>

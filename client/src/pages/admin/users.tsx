@@ -88,6 +88,7 @@ type SortBy = "name" | "auslastung-desc" | "auslastung-asc";
 
 interface WorkloadMetrics {
   totalCustomers: number;
+  primaryCount: number;
   istHours: number;
   sollHours: number | null;
   hasSoll: boolean;
@@ -121,6 +122,7 @@ function computeWorkloadMetrics(
     hasIstBasis && globalAvg > 0 ? Math.floor(freieStunden! / globalAvg) : null;
   return {
     totalCustomers,
+    primaryCount: wl.primaryCount,
     istHours,
     sollHours,
     hasSoll,
@@ -956,8 +958,8 @@ export default function AdminUsers() {
                           </div>
                           <div className="mt-1.5 flex items-center justify-between text-sm">
                             <div className="flex items-center gap-1.5 text-gray-700 flex-wrap">
-                              <span className="font-semibold" data-testid={`workload-total-${user.id}`}>
-                                {m.totalCustomers} Kunden
+                              <span className="font-semibold" data-testid={`workload-hv-primary-${user.id}`}>
+                                {m.primaryCount} Kunden
                               </span>
                               <span className="text-gray-400">·</span>
                               <span className="text-gray-500">Soll</span>
