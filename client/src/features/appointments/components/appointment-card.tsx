@@ -85,9 +85,9 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
           {isSubstitute ? (
             <div className="w-1.5 bg-muted-foreground/30" />
           ) : appointment.isFahrtdienst ? (
-            <div className="w-2 bg-blue-500" data-testid={`stripe-fahrtdienst-${appointment.id}`} />
+            <div className="w-1.5 bg-blue-500" data-testid={`stripe-fahrtdienst-${appointment.id}`} />
           ) : serviceInfo.hasErstberatung ? (
-            <div className="w-2 bg-purple-500" data-testid={`stripe-erstberatung-${appointment.id}`} />
+            <div className="w-1.5 bg-purple-500" data-testid={`stripe-erstberatung-${appointment.id}`} />
           ) : serviceInfo.hasBoth ? (
             <div className="w-1.5 flex flex-col overflow-hidden">
               <div className="flex-1 bg-amber-500" />
