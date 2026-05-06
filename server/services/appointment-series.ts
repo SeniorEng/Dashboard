@@ -172,12 +172,14 @@ export async function createSeriesAppointments(
   validDates: string[],
   createdByUserId: number,
   tx?: DbOrTx,
-): Promise<number> {
+): Promise<{ count: number; firstAppointmentId: number | null; firstDate: string | null }> {
   const client = tx || db;
   const totalDuration = input.services.reduce((sum, s) => sum + s.durationMinutes, 0);
   const scheduledEnd = addMinutesToTimeHHMMSS(input.scheduledStart, totalDuration);
 
   let created = 0;
+  let firstAppointmentId: number | null = null;
+  let firstDate: string | null = null;
 
   for (const dateStr of validDates) {
     const appointmentData = {
@@ -207,8 +209,12 @@ export async function createSeriesAppointments(
       );
     }
 
+    if (firstAppointmentId === null) {
+      firstAppointmentId = appointment.id;
+      firstDate = dateStr;
+    }
     created++;
   }
 
-  return created;
+  return { count: created, firstAppointmentId, firstDate };
 }

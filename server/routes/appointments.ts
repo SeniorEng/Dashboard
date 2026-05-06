@@ -903,10 +903,26 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
 
   if (updated) {
     const newEmployeeId = updated.assignedEmployeeId || updated.performedByEmployeeId;
-    if (newEmployeeId && updated.customerId) {
+    const oldEmployeeId = existingAppointment.assignedEmployeeId || existingAppointment.performedByEmployeeId;
+    const isReassignment = newEmployeeId !== oldEmployeeId;
+    const hasSchedulingChange = validatedData.date !== undefined
+      || validatedData.scheduledStart !== undefined
+      || validatedData.scheduledEnd !== undefined
+      || validatedData.durationPromised !== undefined
+      || validatedData.assignedEmployeeId !== undefined;
+
+    // Nur bei tatsächlich relevanten Änderungen (Datum/Zeit/Mitarbeiter)
+    // benachrichtigen — und nie sich selbst (Self-Assign-Schutz).
+    if (newEmployeeId && updated.customerId && hasSchedulingChange && newEmployeeId !== req.user!.id) {
       const customer = await storage.getCustomer(updated.customerId);
       const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Unbekannt";
-      notificationService.notifyAppointmentUpdated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
+      if (isReassignment) {
+        // Bei Mitarbeiter-Wechsel: neuer Zuständiger erhält die Standard
+        // „Neuer Termin"-Benachrichtigung statt „Termin geändert".
+        notificationService.notifyAppointmentCreated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
+      } else {
+        notificationService.notifyAppointmentUpdated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
+      }
     }
   }
 

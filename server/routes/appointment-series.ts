@@ -9,6 +9,7 @@ import { validateSeriesDates, createSeriesAppointments } from "../services/appoi
 import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { notificationService } from "../services/notification-service";
 import { todayISO, addMinutesToTimeHHMMSS, isWeekend, parseLocalDate } from "@shared/utils/datetime";
 import { appointmentService } from "../services/appointments";
 import { db } from "../lib/db";
@@ -157,7 +158,7 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
       status: "active",
     }, tx);
 
-    const createdCount = await createSeriesAppointments(
+    const createResult = await createSeriesAppointments(
       series.id,
       input,
       validation.validDates,
@@ -165,8 +166,24 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
       tx,
     );
 
-    return { series, createdCount };
+    return { series, createResult };
   });
+
+  if (
+    result.createResult.count > 0
+    && result.createResult.firstAppointmentId !== null
+    && result.createResult.firstDate !== null
+  ) {
+    const customerName = `${customer.vorname} ${customer.nachname}`;
+    notificationService.notifySeriesAppointmentsCreated(
+      input.assignedEmployeeId,
+      customerName,
+      result.createResult.count,
+      result.createResult.firstDate,
+      result.createResult.firstAppointmentId,
+      user.id,
+    );
+  }
 
   let _budgetWarning: string | undefined;
   try {
@@ -181,7 +198,7 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
 
   res.status(201).json({
     series: result.series,
-    createdAppointments: result.createdCount,
+    createdAppointments: result.createResult.count,
     skippedDates: validation.dates.filter(d => d.skipped),
     conflicts: validation.conflicts,
     _budgetWarning,
@@ -565,11 +582,11 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
     });
   }
 
-  let createdCount: number;
+  let createResult: { count: number; firstAppointmentId: number | null; firstDate: string | null };
   let _budgetWarning: string | undefined;
 
   await db.transaction(async (tx) => {
-    createdCount = await createSeriesAppointments(
+    createResult = await createSeriesAppointments(
       series.id,
       input,
       validation.validDates,
@@ -578,6 +595,25 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
     );
     await seriesStorage.updateSeries(id, { endDate: newEndDate }, tx);
   });
+
+  if (
+    createResult!.count > 0
+    && createResult!.firstAppointmentId !== null
+    && createResult!.firstDate !== null
+  ) {
+    const customer = await storage.getCustomer(series.customerId);
+    if (customer) {
+      const customerName = `${customer.vorname} ${customer.nachname}`;
+      notificationService.notifySeriesAppointmentsCreated(
+        series.assignedEmployeeId,
+        customerName,
+        createResult!.count,
+        createResult!.firstDate,
+        createResult!.firstAppointmentId,
+        user.id,
+      );
+    }
+  }
 
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(series.customerId);
@@ -590,7 +626,7 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
   }
 
   res.json({
-    createdAppointments: createdCount!,
+    createdAppointments: createResult!.count,
     newEndDate,
     skippedDates: validation.dates.filter(d => d.skipped),
     conflicts: validation.conflicts,

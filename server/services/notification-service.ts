@@ -115,8 +115,10 @@ export const notificationService = {
     customerId: number,
     customerName: string,
     employeeId: number,
-    role: "primary" | "backup" | "backup2"
+    role: "primary" | "backup" | "backup2",
+    actingUserId?: number
   ) {
+    if (actingUserId !== undefined && actingUserId === employeeId) return;
     const roleLabel = role === "primary" ? "Hauptmitarbeiter/in" : role === "backup2" ? "2. Vertretung" : "Vertretung";
     fireAndForget(async () => {
       await createNotification({
@@ -131,6 +133,54 @@ export const notificationService = {
       await dispatchWhatsApp("customer_assigned", employeeId, {
         customerName,
         customerId,
+      });
+    });
+  },
+
+  notifySeriesAppointmentsCreated(
+    employeeId: number,
+    customerName: string,
+    count: number,
+    firstDate: string,
+    firstAppointmentId: number,
+    actingUserId?: number
+  ) {
+    if (actingUserId !== undefined && actingUserId === employeeId) return;
+    if (count <= 0) return;
+    const [year, month, day] = firstDate.split("-");
+    const formatted = `${day}.${month}.${year}`;
+    fireAndForget(async () => {
+      await createNotification({
+        userId: employeeId,
+        type: "appointment_created",
+        title: "Neue Termin-Serie",
+        message: `${count} neue Termine ab ${formatted} für ${customerName}.`,
+        referenceId: firstAppointmentId,
+        referenceType: "appointment",
+      });
+
+      await dispatchWhatsApp("appointment_created", employeeId, {
+        customerName,
+        appointmentDate: formatted,
+        appointmentId: firstAppointmentId,
+      }, actingUserId);
+    });
+  },
+
+  notifyAppointmentsBulkReassigned(
+    employeeId: number,
+    count: number,
+    actingUserId?: number
+  ) {
+    if (actingUserId !== undefined && actingUserId === employeeId) return;
+    if (count <= 0) return;
+    fireAndForget(async () => {
+      await createNotification({
+        userId: employeeId,
+        type: "appointment_updated",
+        title: "Termine übernommen",
+        message: `${count} zukünftige Termine wurden Dir im Rahmen einer Übergabe zugewiesen.`,
+        referenceType: "appointment",
       });
     });
   },

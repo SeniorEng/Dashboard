@@ -17,6 +17,8 @@ import { loadEmployeesWeeklyAvailability, buildDateRange } from "../../services/
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
+import { notificationService } from "../../services/notification-service";
+import { storage } from "../../storage";
 import { db } from "../../lib/db";
 import { loadTeamWorkload, getGlobalAvgHoursPerCustomerPerMonth } from "../../lib/team-workload";
 import { eq, and, isNull, inArray, sql, asc } from "drizzle-orm";
@@ -396,6 +398,8 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
   const today = todayISO();
   const changedByUserId = req.user?.id ?? null;
 
+  const notifiedCustomers: Array<{ customerId: number; role: "primary" | "backup" | "backup2" }> = [];
+
   const counts = await db.transaction(async (tx) => {
     const affectedPrimary = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
       .from(customers)
@@ -441,6 +445,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
         updateData.backupEmployeeId2 = null;
       }
       await tx.update(customers).set(updateData).where(eq(customers.id, cust.id));
+      notifiedCustomers.push({ customerId: cust.id, role: "primary" });
     }
 
     const affectedBackup = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
@@ -488,6 +493,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
         updateData.backupEmployeeId2 = null;
       }
       await tx.update(customers).set(updateData).where(eq(customers.id, cust.id));
+      notifiedCustomers.push({ customerId: cust.id, role: "backup" });
     }
 
     const affectedBackup2 = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId })
@@ -523,6 +529,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
         changedByUserId,
       });
       await tx.update(customers).set({ backupEmployeeId2: targetEmployeeId }).where(eq(customers.id, cust.id));
+      notifiedCustomers.push({ customerId: cust.id, role: "backup2" });
     }
 
     const appointmentResult = await tx.execute(sql`
@@ -562,6 +569,31 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
   );
 
   log(`Employee handover: ${sourceEmployee.displayName} → ${targetEmployee.displayName} (${counts.primaryCount} primary, ${counts.backupCount} backup, ${counts.backup2Count} backup2, ${counts.appointmentCount} appointments)`);
+
+  // Pro übertragenem Kunden eine Notification an den Ziel-Mitarbeiter
+  // (mit Self-Assign-Schutz via actingUserId).
+  if (notifiedCustomers.length > 0) {
+    const uniqueIds = Array.from(new Set(notifiedCustomers.map(n => n.customerId)));
+    const customerNames = new Map<number, string>();
+    for (const cid of uniqueIds) {
+      const c = await storage.getCustomer(cid);
+      if (c) customerNames.set(cid, `${c.vorname} ${c.nachname}`);
+    }
+    for (const { customerId, role } of notifiedCustomers) {
+      const name = customerNames.get(customerId);
+      if (!name) continue;
+      notificationService.notifyCustomerAssigned(
+        customerId, name, targetEmployeeId, role, changedByUserId ?? undefined,
+      );
+    }
+  }
+
+  // Eine zusammenfassende Notification für übernommene zukünftige Termine
+  if (counts.appointmentCount > 0) {
+    notificationService.notifyAppointmentsBulkReassigned(
+      targetEmployeeId, counts.appointmentCount, changedByUserId ?? undefined,
+    );
+  }
 
   res.json({
     message: "Übergabe erfolgreich durchgeführt",
