@@ -3,6 +3,7 @@ import { storage } from "../../storage";
 import { customerManagementStorage } from "../../storage/customer-management";
 import { birthdaysCache } from "../../services/cache";
 import { auditService } from "../../services/audit";
+import { notificationService } from "../../services/notification-service";
 import { geocodeCustomer } from "../../services/geocoding";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/customers";
@@ -223,6 +224,9 @@ const simpleCreateCustomerSchema = z.object({
   // mit `skipDuplicateCheck=true` und einem zusätzlichen 10-Min-Treffer
   // ausgewertet (Task #376).
   acknowledgeRecentDuplicate: z.boolean().optional(),
+  primaryEmployeeId: z.number().int().positive().optional().nullable(),
+  backupEmployeeId: z.number().int().positive().optional().nullable(),
+  backupEmployeeId2: z.number().int().positive().optional().nullable(),
 });
 
 const IDEM_HEADER = "idempotency-key";
@@ -375,6 +379,22 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   });
 
   birthdaysCache.invalidateAll();
+
+  // Notification an zugewiesene Mitarbeiter feuern, wenn beim Anlegen
+  // bereits primary/backup/backup2 gesetzt wurden (G1). Self-Assign-Schutz
+  // via actingUserId — wer sich selbst zuweist, bekommt keine Glocke.
+  {
+    const customerName = `${data.vorname} ${data.nachname}`;
+    if (data.primaryEmployeeId) {
+      notificationService.notifyCustomerAssigned(customer.id, customerName, data.primaryEmployeeId, "primary", userId);
+    }
+    if (data.backupEmployeeId) {
+      notificationService.notifyCustomerAssigned(customer.id, customerName, data.backupEmployeeId, "backup", userId);
+    }
+    if (data.backupEmployeeId2) {
+      notificationService.notifyCustomerAssigned(customer.id, customerName, data.backupEmployeeId2, "backup2", userId);
+    }
+  }
 
   auditService.customerCreated(userId, customer.id, {
     customerName: `${data.vorname} ${data.nachname}`,

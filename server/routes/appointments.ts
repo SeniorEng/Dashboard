@@ -916,13 +916,8 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     if (newEmployeeId && updated.customerId && hasSchedulingChange && newEmployeeId !== req.user!.id) {
       const customer = await storage.getCustomer(updated.customerId);
       const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Unbekannt";
-      if (isReassignment) {
-        // Bei Mitarbeiter-Wechsel: neuer Zuständiger erhält die Standard
-        // „Neuer Termin"-Benachrichtigung statt „Termin geändert".
-        notificationService.notifyAppointmentCreated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
-      } else {
-        notificationService.notifyAppointmentUpdated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
-      }
+      void isReassignment;
+      notificationService.notifyAppointmentUpdated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
     }
   }
 

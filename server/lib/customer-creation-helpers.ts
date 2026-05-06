@@ -28,6 +28,9 @@ interface CustomerBaseFields {
   receivesMonthlyInvoice?: boolean;
   documentDeliveryMethod?: string;
   billingType: string;
+  primaryEmployeeId?: number | null;
+  backupEmployeeId?: number | null;
+  backupEmployeeId2?: number | null;
 }
 
 export function buildCustomerInsertData(data: CustomerBaseFields, createdByUserId: number): InsertCustomer {
@@ -56,6 +59,9 @@ export function buildCustomerInsertData(data: CustomerBaseFields, createdByUserI
     receivesMonthlyInvoice: data.receivesMonthlyInvoice ?? false,
     billingType: data.billingType,
     createdByUserId,
+    primaryEmployeeId: data.primaryEmployeeId ?? null,
+    backupEmployeeId: data.backupEmployeeId ?? null,
+    backupEmployeeId2: data.backupEmployeeId2 ?? null,
   };
 }
 
