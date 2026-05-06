@@ -241,5 +241,10 @@ function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["custome
     latitude: null,
     longitude: null,
     receivesMonthlyInvoice: false,
+    setupSignaturesPending: false,
+    setupDocumentsPending: false,
+    setupBudgetsPending: false,
+    setupDeliveryPending: false,
+    setupPendingPayloads: null,
   };
 }

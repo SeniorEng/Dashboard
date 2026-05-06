@@ -70,6 +70,114 @@ interface CustomerListItem {
   address: string;
 }
 
+interface SetupPendingCustomerLike {
+  id: number;
+  setupSignaturesPending?: boolean | null;
+  setupDocumentsPending?: boolean | null;
+  setupBudgetsPending?: boolean | null;
+  setupDeliveryPending?: boolean | null;
+  setupPendingPayloads?: Record<string, unknown> | null;
+}
+
+const PENDING_STEP_LABELS: Record<string, string> = {
+  signatures: "Unterschriften",
+  documents: "Hochgeladene Dokumente",
+  budgets: "Startbudgets",
+  delivery: "Dokumentenversand",
+};
+
+function SetupPendingBanner({ customer, onRefresh }: { customer: SetupPendingCustomerLike; onRefresh: () => void }) {
+  const { toast } = useToast();
+  const [retrying, setRetrying] = useState<Record<string, boolean>>({});
+
+  const pending: Array<{ step: string; label: string }> = [];
+  if (customer.setupSignaturesPending) pending.push({ step: "signatures", label: PENDING_STEP_LABELS.signatures });
+  if (customer.setupDocumentsPending) pending.push({ step: "documents", label: PENDING_STEP_LABELS.documents });
+  if (customer.setupBudgetsPending) pending.push({ step: "budgets", label: PENDING_STEP_LABELS.budgets });
+  if (customer.setupDeliveryPending) pending.push({ step: "delivery", label: PENDING_STEP_LABELS.delivery });
+
+  if (pending.length === 0) return null;
+
+  const handleRetry = async (step: string, label: string) => {
+    const payloads = (customer.setupPendingPayloads || {}) as Record<string, unknown>;
+    const stepPayload = payloads[step] as Record<string, unknown> | undefined;
+    if (!stepPayload) {
+      toast({ title: "Keine Daten gefunden", description: `Für ${label} liegen keine wiederholbaren Daten vor.`, variant: "destructive" });
+      return;
+    }
+    setRetrying(prev => ({ ...prev, [step]: true }));
+    try {
+      let result;
+      if (step === "signatures") {
+        const items = (stepPayload.items as Array<{ templateSlug: string; customerSignatureData: string }>) || [];
+        result = await api.post(`/customers/${customer.id}/signatures`, { signatures: items, signingLocation: stepPayload.signingLocation ?? null });
+      } else if (step === "documents") {
+        const items = (stepPayload.items as Array<{ documentTypeId: number; fileName: string; objectPath: string }>) || [];
+        let lastResult;
+        for (const d of items) {
+          lastResult = await api.post(`/customers/${customer.id}/documents`, d);
+          if (!lastResult.success) break;
+        }
+        result = lastResult;
+      } else if (step === "budgets") {
+        const items = (stepPayload.items as Array<{ budgetType: string; currentYearAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }>) || [];
+        let lastResult;
+        for (const b of items) {
+          lastResult = await api.post(`/budget/${customer.id}/initial-budget`, b);
+          if (!lastResult.success) break;
+        }
+        result = lastResult;
+      } else if (step === "delivery") {
+        result = await api.post(`/admin/document-delivery/send-for-customer/${customer.id}`, {});
+      }
+      if (!result || !result.success) {
+        toast({ title: `${label} fehlgeschlagen`, description: result?.error.message || "Bitte erneut versuchen.", variant: "destructive" });
+        return;
+      }
+      // Erfolg → Pending-Flag serverseitig löschen.
+      await api.post(`/admin/customers/${customer.id}/setup-pending/${step}/clear`, {});
+      toast({ title: `${label} nachgeholt` });
+      onRefresh();
+    } catch (err) {
+      toast({ title: `${label} fehlgeschlagen`, description: err instanceof Error ? err.message : "Unbekannter Fehler", variant: "destructive" });
+    } finally {
+      setRetrying(prev => ({ ...prev, [step]: false }));
+    }
+  };
+
+  return (
+    <SectionCard className="mb-4 border-amber-300 bg-amber-50" data-testid="banner-setup-pending">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className={`${iconSize.md} text-amber-600 mt-0.5 shrink-0`} />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-amber-900 mb-1">
+            Einige Folgeschritte aus der Kundenanlage sind nicht abgeschlossen.
+          </p>
+          <p className="text-xs text-amber-800 mb-3">
+            Bitte wiederhole die folgenden Schritte oder trage die Daten manuell nach.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {pending.map(p => (
+              <Button
+                key={p.step}
+                size="sm"
+                variant="outline"
+                className="border-amber-400 bg-white hover:bg-amber-100"
+                disabled={!!retrying[p.step]}
+                onClick={() => handleRetry(p.step, p.label)}
+                data-testid={`button-retry-${p.step}`}
+              >
+                {retrying[p.step] ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
+                {p.label} erneut versuchen
+              </Button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 function BackfillSection({ customerId, onRefresh }: { customerId: number; onRefresh: () => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -439,6 +547,8 @@ export default function AdminCustomerDetail() {
             }
             actions={undefined}
           />
+
+          <SetupPendingBanner customer={customer as unknown as SetupPendingCustomerLike} onRefresh={refetch} />
 
           {customer.status === "aktiv" && customer.inaktivAb && (
             <SectionCard className="mb-4 border-blue-200 bg-blue-50">

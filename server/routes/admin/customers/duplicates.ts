@@ -57,6 +57,7 @@ router.post(
         WHERE c.deleted_at IS NULL
           AND c.merged_into_customer_id IS NULL
           AND c.is_anonymized = false
+          AND c.status = 'aktiv'
       ),
       dup_keys AS (
         SELECT norm_key

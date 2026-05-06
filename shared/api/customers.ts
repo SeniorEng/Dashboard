@@ -134,6 +134,11 @@ export interface CustomerDetail extends Customer {
 }
 
 export interface CreateCustomerRequest {
+  // Wenn gesetzt, wird der Server-Duplicate-Check übersprungen.
+  skipDuplicateCheck?: boolean;
+  // Bestätigt einen Treffer im 10-Min-Fenster (nur in Kombination mit
+  // `skipDuplicateCheck=true`). Siehe Task #376.
+  acknowledgeRecentDuplicate?: boolean;
   vorname: string;
   nachname: string;
   telefon?: string;

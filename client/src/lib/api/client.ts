@@ -46,18 +46,24 @@ export interface ApiErrorInfo {
   code: string;
   message: string;
   details?: Record<string, unknown>;
+  // HTTP-Status der fehlgeschlagenen Antwort. Wird von `parseErrorResponse`
+  // gesetzt und ist im Frontend nötig, um z.B. 5xx-spezifische Hinweise
+  // anzuzeigen (Task #376 Schritt 4).
+  status?: number;
 }
 
 // Custom error class that preserves full error info
 export class ApiError extends Error {
   code: string;
   details?: Record<string, unknown>;
+  status?: number;
 
   constructor(info: ApiErrorInfo) {
     super(info.message);
     this.name = 'ApiError';
     this.code = info.code;
     this.details = info.details;
+    this.status = info.status;
   }
 }
 
@@ -125,11 +131,13 @@ async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
       code: data.code || data.error || 'API_ERROR',
       message,
       details: Object.keys(details).length > 0 ? details : undefined,
+      status: response.status,
     };
   } catch {
     return {
       code: 'NETWORK_ERROR',
       message: `HTTP ${response.status}: ${response.statusText}`,
+      status: response.status,
     };
   }
 }
@@ -224,7 +232,7 @@ async function apiRequest<TResponse, TBody = unknown>(
         if (attempt < retries && isRetryableError(null, error)) {
           lastError = {
             code: 'NETWORK_ERROR',
-            message: 'Netzwerkfehler: Bitte prüfen Sie Ihre Internetverbindung',
+            message: 'Netzwerkfehler. Bitte Internetverbindung prüfen und erneut versuchen.',
           };
           await delay(RETRY_DELAY_MS * Math.pow(2, attempt));
           continue;
@@ -234,7 +242,7 @@ async function apiRequest<TResponse, TBody = unknown>(
           success: false,
           error: {
             code: 'NETWORK_ERROR',
-            message: 'Netzwerkfehler: Bitte prüfen Sie Ihre Internetverbindung',
+            message: 'Netzwerkfehler. Bitte Internetverbindung prüfen und erneut versuchen.',
           },
         };
       }
@@ -266,8 +274,17 @@ export const api = {
   get: <T>(endpoint: string, signal?: AbortSignal) =>
     apiRequest<T>(endpoint, { method: 'GET', signal }),
 
-  post: <T, B = unknown>(endpoint: string, body: B, signal?: AbortSignal) =>
-    apiRequest<T, B>(endpoint, { method: 'POST', body, signal }),
+  post: <T, B = unknown>(
+    endpoint: string,
+    body: B,
+    opts?: AbortSignal | { signal?: AbortSignal; headers?: Record<string, string> },
+  ) => {
+    if (opts && typeof (opts as AbortSignal).aborted === 'boolean') {
+      return apiRequest<T, B>(endpoint, { method: 'POST', body, signal: opts as AbortSignal });
+    }
+    const o = (opts as { signal?: AbortSignal; headers?: Record<string, string> } | undefined) || {};
+    return apiRequest<T, B>(endpoint, { method: 'POST', body, signal: o.signal, headers: o.headers });
+  },
 
   postFormData: async <T>(endpoint: string, formData: FormData, signal?: AbortSignal): Promise<ApiResult<T>> => {
     const csrfToken = await ensureCsrfToken();

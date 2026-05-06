@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, boolean, real, index, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, real, index, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema, internationalPhoneTransformSchema, internationalEmailSchema } from "./common";
@@ -62,6 +62,15 @@ export const customers = pgTable("customers", {
   anonymizedAt: timestamp("anonymized_at"),
   latitude: real("latitude"),
   longitude: real("longitude"),
+  // Setup-Folgeschritte aus dem Wizard (Task #376). Werden gesetzt, wenn
+  // ein optionaler Folgeschritt nach erfolgreicher Customer-Anlage
+  // fehlschlägt. Banner auf der Kundenseite bietet "Erneut versuchen".
+  setupSignaturesPending: boolean("setup_signatures_pending").notNull().default(false),
+  setupDocumentsPending: boolean("setup_documents_pending").notNull().default(false),
+  setupBudgetsPending: boolean("setup_budgets_pending").notNull().default(false),
+  setupDeliveryPending: boolean("setup_delivery_pending").notNull().default(false),
+  // Roh-Payload pro Schritt für die Wiederholung (signatures: [...] usw.).
+  setupPendingPayloads: jsonb("setup_pending_payloads"),
 }, (table) => [
   index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
   index("customers_backup_employee_id_idx").on(table.backupEmployeeId),

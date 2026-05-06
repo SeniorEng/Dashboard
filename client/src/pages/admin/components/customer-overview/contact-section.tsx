@@ -153,6 +153,7 @@ export function ContactSection({ customer, customerId, editingSection, setEditin
         void submitStammdaten(true);
       }}
       onCancel={() => setDuplicateWarning(null)}
+      onOpenExisting={() => setDuplicateWarning(null)}
     />
     <SectionCard
       title="Kontaktdaten"

@@ -9,6 +9,7 @@ import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/cu
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { findCustomerDuplicates } from "../../lib/duplicate-check";
 import { readTestFaults } from "../../lib/test-fault-injector";
+import { hashPayload, reserveIdempotencyKey, finalizeIdempotencyReservation, releaseIdempotencyReservation, findRecentDuplicates } from "../../lib/idempotency";
 import { 
   versichertennummerSchema,
   customers,
@@ -216,10 +217,67 @@ const simpleCreateCustomerSchema = z.object({
     })).optional(),
   }).optional(),
   skipDuplicateCheck: z.boolean().optional(),
+  // Bestätigung des Wizard-Anwenders, dass er trotz Treffer in den
+  // letzten 10 Minuten (gleicher Vor-/Nachname/optional Geburtsdatum)
+  // wirklich einen weiteren Kunden anlegen will. Wird nur in Verbindung
+  // mit `skipDuplicateCheck=true` und einem zusätzlichen 10-Min-Treffer
+  // ausgewertet (Task #376).
+  acknowledgeRecentDuplicate: z.boolean().optional(),
 });
+
+const IDEM_HEADER = "idempotency-key";
 
 router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", async (req: Request, res: Response) => {
   const data = simpleCreateCustomerSchema.parse(req.body);
+  let _idemFinalized = false;
+  let _idemReservationToRelease: number | null = null;
+  const releaseIfNeeded = async () => {
+    if (!_idemFinalized && _idemReservationToRelease !== null) {
+      await releaseIdempotencyReservation(_idemReservationToRelease);
+      _idemReservationToRelease = null;
+    }
+  };
+  try {
+
+  // Idempotency-Key: gleiche Kombination (Header + Payload-Hash) gibt den
+  // bereits angelegten Kunden zurück. Abweichender Payload bei gleichem
+  // Key liefert 409 IDEMPOTENCY_KEY_REUSED. TTL 24 h.
+  const idempotencyKey = (req.header(IDEM_HEADER) || "").trim() || null;
+  const payloadHash = idempotencyKey ? hashPayload({ ...data, _userId: req.user!.id }) : null;
+  let idempotencyReservationId: number | null = null;
+  if (idempotencyKey && payloadHash) {
+    const reservation = await reserveIdempotencyKey(idempotencyKey, payloadHash, req.user!.id);
+    if (reservation.status === "conflict") {
+      res.status(409).json({
+        error: "IDEMPOTENCY_KEY_REUSED",
+        code: "IDEMPOTENCY_KEY_REUSED",
+        message: "Idempotency-Key wurde bereits mit einem anderen Datensatz verwendet.",
+      });
+      return;
+    }
+    if (reservation.status === "in_progress") {
+      // Gleicher Key+Payload, aber Erstrequest noch in Bearbeitung.
+      // 425 Too Early signalisiert „bitte erneut versuchen". Der Wizard
+      // behandelt das wie Netzwerk-/Timeout-Fehler (retry-safe).
+      res.status(425).json({
+        error: "IDEMPOTENCY_IN_PROGRESS",
+        code: "IDEMPOTENCY_IN_PROGRESS",
+        message: "Erstanfrage wird noch verarbeitet. Bitte gleich erneut speichern.",
+      });
+      return;
+    }
+    if (reservation.status === "hit") {
+      const existing = await storage.getCustomer(reservation.customerId);
+      if (existing) {
+        res.status(200).json({ ...existing, idempotent: true });
+        return;
+      }
+    }
+    if (reservation.status === "reserved") {
+      idempotencyReservationId = reservation.reservationId;
+      _idemReservationToRelease = reservation.reservationId;
+    }
+  }
 
   if (!data.skipDuplicateCheck) {
     const duplicates = await findCustomerDuplicates(data.vorname, data.nachname, data.geburtsdatum);
@@ -229,6 +287,21 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
         code: "DUPLICATE_WARNING",
         message: `Es existiert bereits ${duplicates.length === 1 ? "ein Kunde" : `${duplicates.length} Kunden`} mit gleichem Namen. Zum Anlegen "skipDuplicateCheck" setzen.`,
         details: { duplicates },
+      });
+      return;
+    }
+  } else if (!data.acknowledgeRecentDuplicate) {
+    // Zusätzliche Server-Heuristik: Selbst wenn der Client die
+    // Duplicate-Prüfung bewusst überspringt, halten wir bei Treffern in
+    // den letzten 10 Minuten an und verlangen `acknowledgeRecentDuplicate`.
+    // Schützt gegen Doppelklicks/Double-Submits aus dem Wizard.
+    const recents = await findRecentDuplicates(data.vorname, data.nachname, data.geburtsdatum);
+    if (recents.length > 0) {
+      res.status(409).json({
+        error: "RECENT_DUPLICATE_WARNING",
+        code: "RECENT_DUPLICATE_WARNING",
+        message: `In den letzten 10 Minuten wurde bereits ein Kunde mit gleichem Namen angelegt. Zum erneuten Anlegen "acknowledgeRecentDuplicate" setzen.`,
+        details: { duplicates: recents.map(r => ({ id: r.id, vorname: r.vorname, nachname: r.nachname, createdAt: r.createdAt.toISOString(), ageMs: r.ageMs })) },
       });
       return;
     }
@@ -322,7 +395,141 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     billingType: data.billingType,
     generatedByUserId: userId,
   }).catch(err => console.error("[info-docs] Background info doc generation failed:", err));
+
+  if (idempotencyReservationId !== null) {
+    await finalizeIdempotencyReservation(idempotencyReservationId, customer.id).catch(err => {
+      console.warn("[idempotency] Failed to finalize reservation:", err);
+    });
+    _idemFinalized = true;
+    _idemReservationToRelease = null;
+  }
+
   res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
+  } finally {
+    // Wenn der Handler ohne Finalize endet (z.B. 409 DUPLICATE_WARNING,
+    // Validation-Error, Throw nach Reservierung), geben wir den Key wieder
+    // frei, damit der Client mit korrigiertem Payload erneut anlegen kann
+    // ohne IDEMPOTENCY_KEY_REUSED zu sehen.
+    await releaseIfNeeded().catch(() => undefined);
+  }
+}));
+
+// ============================================================
+// Setup-Pending: Banner & Retry für Wizard-Folgeschritte (Task #376)
+// ============================================================
+
+const setupPendingBodySchema = z.object({
+  signatures: z.object({
+    items: z.array(z.object({
+      templateSlug: z.string(),
+      customerSignatureData: z.string(),
+    })),
+    signingLocation: z.string().nullable().optional(),
+  }).optional(),
+  documents: z.object({
+    items: z.array(z.object({
+      documentTypeId: z.number(),
+      fileName: z.string(),
+      objectPath: z.string(),
+    })),
+  }).optional(),
+  budgets: z.object({
+    items: z.array(z.object({
+      budgetType: z.string(),
+      currentYearAmountCents: z.number(),
+      carryoverAmountCents: z.number(),
+      budgetStartDate: z.string(),
+    })),
+  }).optional(),
+  delivery: z.object({
+    method: z.string(),
+  }).optional(),
+});
+
+router.post("/customers/:id/setup-pending", asyncHandler("Setup-Status konnte nicht gespeichert werden", async (req: Request, res: Response) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const body = setupPendingBodySchema.parse(req.body);
+
+  const existing = await storage.getCustomer(id);
+  if (!existing) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+  // Berechtigt sind: Admins, der Anlegende sowie zugewiesene Mitarbeiter
+  // (primary/backup/backup2). Damit kann z.B. ein Kollege/eine Kollegin den
+  // Folgeschritt direkt vom Kundenprofil aus wiederholen, statt am Banner zu
+  // hängen, wenn der ursprüngliche Anlegende nicht greifbar ist.
+  const uid = req.user!.id;
+  const allowed =
+    req.user!.isAdmin ||
+    existing.createdByUserId === uid ||
+    existing.primaryEmployeeId === uid ||
+    existing.backupEmployeeId === uid ||
+    existing.backupEmployeeId2 === uid;
+  if (!allowed) {
+    res.status(403).json({ error: "FORBIDDEN", message: "Keine Berechtigung" });
+    return;
+  }
+
+  await db.update(customers).set({
+    setupSignaturesPending: !!body.signatures,
+    setupDocumentsPending: !!body.documents,
+    setupBudgetsPending: !!body.budgets,
+    setupDeliveryPending: !!body.delivery,
+    setupPendingPayloads: body as unknown as Record<string, unknown>,
+    updatedAt: new Date(),
+  }).where(eq(customers.id, id));
+
+  res.json({ success: true });
+}));
+
+// Wird vom Banner aufgerufen, NACHDEM der jeweilige Folgeschritt
+// erfolgreich über die bestehenden Endpunkte (z.B. POST /customers/:id/
+// signatures) wiederholt wurde. Entfernt das Pending-Flag und den
+// gespeicherten Payload-Block für diesen Schritt. Damit bleibt die
+// Retry-Logik vollständig im Frontend (Wiederverwendung der existierenden
+// Endpunkte) und der Server muss nur den Status pflegen.
+router.post("/customers/:id/setup-pending/:step/clear", asyncHandler("Status konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const step = req.params.step;
+  const flagField =
+    step === "signatures" ? "setupSignaturesPending" :
+    step === "documents" ? "setupDocumentsPending" :
+    step === "budgets" ? "setupBudgetsPending" :
+    step === "delivery" ? "setupDeliveryPending" :
+    null;
+  if (!flagField) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Unbekannter Schritt" });
+    return;
+  }
+  const existing = await storage.getCustomer(id);
+  if (!existing) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+  // Authz konsistent mit POST /setup-pending: Admins, Anlegende und
+  // zugewiesene Mitarbeiter (primary/backup/backup2). Siehe Kommentar oben.
+  const uid = req.user!.id;
+  const allowed =
+    req.user!.isAdmin ||
+    existing.createdByUserId === uid ||
+    existing.primaryEmployeeId === uid ||
+    existing.backupEmployeeId === uid ||
+    existing.backupEmployeeId2 === uid;
+  if (!allowed) {
+    res.status(403).json({ error: "FORBIDDEN", message: "Keine Berechtigung" });
+    return;
+  }
+  const payloads = { ...((existing.setupPendingPayloads || {}) as Record<string, unknown>) };
+  delete payloads[step];
+  await db.update(customers).set({
+    [flagField]: false,
+    setupPendingPayloads: Object.keys(payloads).length > 0 ? payloads : null,
+    updatedAt: new Date(),
+  }).where(eq(customers.id, id));
+  res.json({ success: true });
 }));
 
 const VALID_CUSTOMER_STATUSES = ["aktiv", "inaktiv"] as const;

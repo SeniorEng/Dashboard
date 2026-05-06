@@ -29,6 +29,7 @@ export default function AdminCustomerNew() {
         duplicateWarning={wizard.duplicateWarning}
         onContinue={wizard.handleDuplicateContinue}
         onCancel={wizard.handleDuplicateCancel}
+        onOpenExisting={wizard.handleDuplicateOpenExisting}
       />
 
       <div className="flex items-center gap-4 mb-6">

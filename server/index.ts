@@ -158,6 +158,15 @@ async function runStartupTasks() {
       log(`Spaltentyp-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Stellt Idempotency-Tabelle und setup_*_pending-Spalten in jeder Umgebung
+    // sicher (auch wenn `drizzle-kit push` nicht gelaufen ist). Idempotente DDL.
+    const { ensureCustomerIdempotencySchema } = await import("./startup/ensure-customer-idempotency-schema");
+    try {
+      await ensureCustomerIdempotencySchema();
+    } catch (err) {
+      log(`Idempotency-Schema-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { serviceCatalogStorage } = await import("./storage/service-catalog");
     await serviceCatalogStorage.ensureSystemServices();
 

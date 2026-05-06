@@ -21,3 +21,4 @@ export * from "./prospects";
 export * from "./notifications";
 export * from "./qonto";
 export * from "./whatsapp";
+export * from "./idempotency";

@@ -11,6 +11,7 @@ interface DuplicateCustomer {
   strasse: string | null;
   nr: string | null;
   status: string;
+  createdAt: Date;
 }
 
 export async function findCustomerDuplicates(
@@ -44,6 +45,7 @@ export async function findCustomerDuplicates(
     strasse: customers.strasse,
     nr: customers.nr,
     status: customers.status,
+    createdAt: customers.createdAt,
   })
     .from(customers)
     .where(and(...conditions))

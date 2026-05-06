@@ -10,11 +10,22 @@ import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@sh
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
 import { validateVersichertennummerFor } from "@shared/schema/common";
 import type { WizardUploadedDoc } from "../components/signatures-step";
+import type { DuplicateDialogEntry } from "../components/wizard-dialogs";
 
 const DRAFT_KEY = "careconnect_customer_draft";
 const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-function loadDraft(): { formData: CustomerFormData; currentStep: number; timestamp: string } | null {
+function generateIdempotencyKey(): string {
+  // Bevorzugt crypto.randomUUID(); Fallback nur, falls nicht vorhanden.
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch { /* ignore */ }
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function loadDraft(): { formData: CustomerFormData; currentStep: number; timestamp: string; idempotencyKey?: string } | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
@@ -97,8 +108,16 @@ export function useCustomerWizard() {
   const uploadedDocumentsRef = useRef<WizardUploadedDoc[]>([]);
   const signingLocationRef = useRef<string | null>(null);
   const [draftDialog, setDraftDialog] = useState<{ timestamp: string } | null>(null);
-  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> } | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: DuplicateDialogEntry[] } | null>(null);
   const duplicateCheckedRef = useRef(false);
+  // acknowledgeRecentDuplicate wird gesetzt, wenn der Server explizit
+  // RECENT_DUPLICATE_WARNING (10-Min-Fenster) zurückgibt und der Anwender
+  // den Dialog mit "Trotzdem neu anlegen" bestätigt.
+  const acknowledgeRecentDuplicateRef = useRef(false);
+  // Idempotency-Key bleibt für die gesamte Wizard-Sitzung stabil, damit
+  // nach verlorener Antwort/Reload/Doppelklick der Server denselben Kunden
+  // zurückliefert und nicht erneut anlegt. Wird im Draft persistiert.
+  const idempotencyKeyRef = useRef<string>(generateIdempotencyKey());
   const createdRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRestoringRef = useRef(false);
@@ -122,6 +141,11 @@ export function useCustomerWizard() {
       const targetStep = Math.max(1, clampedStep);
       setCurrentStep(targetStep);
       setDraftDialog(null);
+      // Idempotency-Key aus dem Draft übernehmen, sonst würde ein neuer
+      // Submit nach Reload als "echter neuer Kunde" gewertet.
+      if (draft.idempotencyKey) {
+        idempotencyKeyRef.current = draft.idempotencyKey;
+      }
       setTimeout(() => {
         draftRestoringRef.current = false;
       }, 600);
@@ -150,6 +174,7 @@ export function useCustomerWizard() {
           formData,
           currentStep,
           timestamp: new Date().toISOString(),
+          idempotencyKey: idempotencyKeyRef.current,
         }));
       }
     }, 500);
@@ -384,9 +409,13 @@ export function useCustomerWizard() {
       budgets: isPflegekasse ? budgets : undefined,
       contract,
       skipDuplicateCheck: duplicateCheckedRef.current || forceSkipDuplicate,
+      acknowledgeRecentDuplicate: acknowledgeRecentDuplicateRef.current,
+      __idempotencyKey: idempotencyKeyRef.current,
     };
 
     const warnings: string[] = [];
+    // Pending-Payloads für Folgeschritte (Banner + Retry auf Kundenseite).
+    const pendingPayload: { signatures?: unknown; documents?: unknown; budgets?: unknown; delivery?: unknown } = {};
     createMutation.mutate(payload, {
       onSuccess: async (customer) => {
         createdRef.current = true;
@@ -421,6 +450,13 @@ export function useCustomerWizard() {
           } catch (sigError) {
             console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);
             warnings.push("Unterschriften konnten nicht gespeichert werden");
+            pendingPayload.signatures = {
+              items: signedSlugs.map(([slug, signatureData]) => ({
+                templateSlug: slug,
+                customerSignatureData: signatureData,
+              })),
+              signingLocation: signingLocationRef.current,
+            };
           }
         }
 
@@ -437,6 +473,13 @@ export function useCustomerWizard() {
           } catch (docError) {
             console.error("Dokument-Upload-Speicherung fehlgeschlagen:", docError);
             warnings.push("Hochgeladene Dokumente konnten nicht gespeichert werden");
+            pendingPayload.documents = {
+              items: uploadsSnapshot.map(d => ({
+                documentTypeId: d.documentTypeId,
+                fileName: d.fileName,
+                objectPath: d.objectPath,
+              })),
+            };
           }
         }
 
@@ -446,6 +489,7 @@ export function useCustomerWizard() {
           } catch (deliveryError) {
             console.error("Dokumentenversand fehlgeschlagen:", deliveryError);
             warnings.push("Dokumentenversand konnte nicht ausgelöst werden");
+            pendingPayload.delivery = { method: formData.documentDeliveryMethod };
           }
         }
 
@@ -461,9 +505,14 @@ export function useCustomerWizard() {
             umwandlung_45a: "§45a Umwandlungsanspruch",
             ersatzpflege_39_42a: "§39/§42a Verhinderungspflege",
           };
+          const failedBudgetItems: Array<{ budgetType: string; currentYearAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }> = [];
           for (const bt of budgetTypes) {
+            const carryover = bt.type === "entlastungsbetrag_45b" ? (carryoverAmount || 0) : 0;
+            const trackFailure = () => {
+              warnings.push(`Startbudget für ${typeLabels[bt.type] || bt.type} konnte nicht gespeichert werden — bitte manuell unter Budget-Einstellungen nachtragen`);
+              failedBudgetItems.push({ budgetType: bt.type, currentYearAmountCents: bt.cents, carryoverAmountCents: carryover, budgetStartDate: budgetStart });
+            };
             try {
-              const carryover = bt.type === "entlastungsbetrag_45b" ? (carryoverAmount || 0) : 0;
               const result = await api.post(`/budget/${customer.id}/initial-budget`, {
                 budgetType: bt.type,
                 currentYearAmountCents: bt.cents,
@@ -472,14 +521,26 @@ export function useCustomerWizard() {
               });
               if (!result.success) {
                 console.error(`Budget-Initialisierung (${bt.type}) fehlgeschlagen:`, result.error);
-                warnings.push(`Startbudget für ${typeLabels[bt.type] || bt.type} konnte nicht gespeichert werden — bitte manuell unter Budget-Einstellungen nachtragen`);
+                trackFailure();
               }
             } catch (budgetErr) {
               console.error(`Budget-Initialisierung (${bt.type}) fehlgeschlagen:`, budgetErr);
-              warnings.push(`Startbudget für ${typeLabels[bt.type] || bt.type} konnte nicht gespeichert werden — bitte manuell unter Budget-Einstellungen nachtragen`);
+              trackFailure();
             }
           }
+          if (failedBudgetItems.length > 0) {
+            pendingPayload.budgets = { items: failedBudgetItems };
+          }
+        }
 
+        // Pending-Status auf dem Server hinterlegen, damit das Banner auf
+        // der Kundenseite gezielt anzeigen kann, was wiederholt werden muss.
+        if (Object.keys(pendingPayload).length > 0) {
+          try {
+            await api.post(`/admin/customers/${customer.id}/setup-pending`, pendingPayload);
+          } catch (err) {
+            console.warn("Pending-Status konnte nicht gespeichert werden:", err);
+          }
         }
 
         if (warnings.length > 0) {
@@ -490,12 +551,50 @@ export function useCustomerWizard() {
         setLocation(`/admin/customers/${customer.id}`);
       },
       onError: (error: Error) => {
-        if (error instanceof ApiError && error.code === "DUPLICATE_WARNING") {
-          const dups = (error.details?.duplicates as Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> | undefined) || [];
-          if (dups.length > 0) {
-            setDuplicateWarning({ duplicates: dups });
+        if (error instanceof ApiError) {
+          if (error.code === "DUPLICATE_WARNING" || error.code === "RECENT_DUPLICATE_WARNING") {
+            const dups = (error.details?.duplicates as Array<DuplicateDialogEntry> | undefined) || [];
+            if (dups.length > 0) {
+              setDuplicateWarning({ duplicates: dups });
+              return;
+            }
+          }
+          if (error.code === "IDEMPOTENCY_KEY_REUSED") {
+            toast({
+              title: "Anlage nicht möglich",
+              description: "Die Daten haben sich seit dem letzten Versuch geändert. Bitte Seite neu laden und erneut anlegen.",
+              variant: "destructive",
+            });
             return;
           }
+          if (error.code === "IDEMPOTENCY_IN_PROGRESS") {
+            // Erstrequest läuft noch — fachlich identisch zu Netzwerk-/
+            // Timeout-Retry: der Server schützt gegen Doppelanlage.
+            toast({
+              title: "Wird noch gespeichert",
+              description: "Die vorige Anfrage läuft noch. Bitte gleich erneut speichern — der Vorgang ist gegen Doppelanlage geschützt.",
+              variant: "destructive",
+            });
+            return;
+          }
+          if (error.code === "NETWORK_ERROR") {
+            toast({
+              title: "Netzwerkfehler",
+              description: "Verbindung zum Server fehlgeschlagen. Bitte Internetverbindung prüfen und erneut versuchen — der Vorgang ist gegen Doppelanlage geschützt.",
+              variant: "destructive",
+            });
+            return;
+          }
+        }
+        // 5xx und andere unerwartete Fehler: klare Botschaft + Hinweis auf Retry-Sicherheit.
+        const status = error instanceof ApiError ? error.status : undefined;
+        if (typeof status === "number" && status >= 500) {
+          toast({
+            title: "Serverfehler",
+            description: "Der Server konnte die Anlage nicht verarbeiten. Bitte erneut versuchen — der Vorgang ist gegen Doppelanlage geschützt.",
+            variant: "destructive",
+          });
+          return;
         }
         toast({ title: "Fehler", description: error.message, variant: "destructive" });
       },
@@ -674,7 +773,12 @@ export function useCustomerWizard() {
         } finally {
           setDuplicateChecking(false);
         }
-        duplicateCheckedRef.current = true;
+        // duplicateCheckedRef wird NICHT mehr automatisch nach erfolgreichem
+        // Duplicate-Check gesetzt. Nur ein expliziter Klick auf "Trotzdem
+        // neu anlegen" im DuplicateDialog (-> handleDuplicateContinue) darf
+        // skipDuplicateCheck im Submit-Payload aktivieren. Damit ist der
+        // Server-Duplikat-Check beim finalen Submit weiterhin aktiv, falls
+        // sich Vor-/Nachname/Geburtsdatum nach diesem Schritt noch ändern.
       }
     }
 
@@ -717,6 +821,7 @@ export function useCustomerWizard() {
 
   const handleDuplicateContinue = useCallback(() => {
     duplicateCheckedRef.current = true;
+    acknowledgeRecentDuplicateRef.current = true;
     setDuplicateWarning(null);
     if (currentStep < steps.length - 1) {
       goToStep(currentStep + 1);
@@ -724,6 +829,31 @@ export function useCustomerWizard() {
       handleCreate(true);
     }
   }, [currentStep, steps.length, goToStep]);
+
+  const handleDuplicateOpenExisting = useCallback((id: number) => {
+    // Bestätigung vor Verwerfen des Wizard-Entwurfs (Task #376):
+    // Sobald Eingaben gemacht wurden, könnte der Nutzer ungewollt Daten
+    // verlieren. Bei leerem Formular ohne Rückfrage navigieren.
+    const hasDraftContent =
+      !!formData.vorname?.trim() ||
+      !!formData.nachname?.trim() ||
+      !!formData.geburtsdatum ||
+      !!formData.strasse?.trim() ||
+      !!formData.plz?.trim() ||
+      !!formData.stadt?.trim() ||
+      (Array.isArray(formData.contacts) && formData.contacts.length > 0);
+    if (hasDraftContent) {
+      const ok = typeof window !== "undefined"
+        ? window.confirm(
+            "Wenn du den bestehenden Kunden öffnest, wird der aktuelle Entwurf verworfen. Fortfahren?",
+          )
+        : true;
+      if (!ok) return;
+    }
+    setDuplicateWarning(null);
+    clearDraft();
+    setLocation(`/admin/customers/${id}`);
+  }, [formData, setLocation]);
 
   const handleDuplicateCancel = useCallback(() => {
     setDuplicateWarning(null);
@@ -772,5 +902,6 @@ export function useCustomerWizard() {
     discardDraft,
     handleDuplicateContinue,
     handleDuplicateCancel,
+    handleDuplicateOpenExisting,
   };
 }

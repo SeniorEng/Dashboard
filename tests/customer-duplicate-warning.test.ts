@@ -94,7 +94,7 @@ describe("DUP-1: POST /api/admin/customers Duplikat-Warnung", () => {
     expect(res.data.code).toBe("DUPLICATE_WARNING");
   });
 
-  it("DUP-1.4 – Mit skipDuplicateCheck: true wird Kunde trotz Duplikat angelegt", async () => {
+  it("DUP-1.4 – Mit skipDuplicateCheck + acknowledgeRecentDuplicate wird Kunde trotz Duplikat angelegt", async () => {
     const res = await apiPost<any>(
       "/api/admin/customers",
       customerPayload({
@@ -102,6 +102,8 @@ describe("DUP-1: POST /api/admin/customers Duplikat-Warnung", () => {
         nachname: baseNachname,
         geburtsdatum: baseGeburtsdatum,
         skipDuplicateCheck: true,
+        // Task #376: Server verlangt zusätzlich Bestätigung im 10-Min-Fenster.
+        acknowledgeRecentDuplicate: true,
       }),
     );
     expect(res.status).toBe(201);

@@ -56,13 +56,45 @@ export function DraftDialog({ draftDialog, onRestore, onDiscard }: DraftDialogPr
   );
 }
 
+export interface DuplicateDialogEntry {
+  id: number;
+  vorname: string | null;
+  nachname: string | null;
+  geburtsdatum?: string | null;
+  stadt?: string | null;
+  strasse?: string | null;
+  nr?: string | null;
+  status?: string | null;
+  createdAt?: string | null;
+  ageMs?: number | null;
+}
+
 interface DuplicateDialogProps {
-  duplicateWarning: { duplicates: Array<{ id: number; vorname: string; nachname: string; geburtsdatum: string | null; stadt: string | null; strasse: string | null; nr: string | null; status: string | null }> } | null;
+  duplicateWarning: { duplicates: DuplicateDialogEntry[] } | null;
+  onOpenExisting: (id: number) => void;
   onContinue: () => void;
   onCancel: () => void;
 }
 
-export function DuplicateDialog({ duplicateWarning, onContinue, onCancel }: DuplicateDialogProps) {
+function formatAge(input: { createdAt?: string | null; ageMs?: number | null }): string | null {
+  let ms: number | null = null;
+  if (typeof input.ageMs === "number" && input.ageMs >= 0) ms = input.ageMs;
+  else if (input.createdAt) {
+    const t = new Date(input.createdAt).getTime();
+    if (!Number.isNaN(t)) ms = Date.now() - t;
+  }
+  if (ms === null) return null;
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return "vor wenigen Sekunden angelegt";
+  if (minutes < 60) return `vor ${minutes} Min angelegt`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `vor ${hours} Std angelegt`;
+  const days = Math.floor(hours / 24);
+  return `vor ${days} Tagen angelegt`;
+}
+
+export function DuplicateDialog({ duplicateWarning, onOpenExisting, onContinue, onCancel }: DuplicateDialogProps) {
+  const first = duplicateWarning?.duplicates[0];
   return (
     <AlertDialog open={!!duplicateWarning} onOpenChange={() => onCancel()}>
       <AlertDialogContent>
@@ -74,29 +106,51 @@ export function DuplicateDialog({ duplicateWarning, onContinue, onCancel }: Dupl
           <AlertDialogDescription asChild>
             <div>
               <p className="mb-3">
-                Es gibt bereits {duplicateWarning?.duplicates.length === 1 ? "einen Kunden" : `${duplicateWarning?.duplicates.length} Kunden`} mit gleichem Namen{duplicateWarning?.duplicates[0]?.geburtsdatum ? " und Geburtsdatum" : ""}:
+                Es gibt bereits {duplicateWarning?.duplicates.length === 1 ? "einen Kunden" : `${duplicateWarning?.duplicates.length} Kunden`} mit gleichem Namen{first?.geburtsdatum ? " und Geburtsdatum" : ""}:
               </p>
               <div className="space-y-2 mb-3">
-                {duplicateWarning?.duplicates.map((d) => (
-                  <div key={d.id} className="p-2 bg-muted rounded-md text-sm">
-                    <span className="font-medium">{d.nachname}, {d.vorname}</span>
-                    {d.geburtsdatum && <span className="ml-2 text-muted-foreground">geb. {d.geburtsdatum}</span>}
-                    {d.stadt && <span className="ml-2 text-muted-foreground">{d.strasse} {d.nr}, {d.stadt}</span>}
-                    {d.status && <span className="ml-2 text-muted-foreground">({d.status})</span>}
-                  </div>
-                ))}
+                {duplicateWarning?.duplicates.map((d) => {
+                  const age = formatAge(d);
+                  return (
+                    <div key={d.id} className="p-2 bg-muted rounded-md text-sm" data-testid={`duplicate-entry-${d.id}`}>
+                      <div>
+                        <span className="font-medium">{d.nachname}, {d.vorname}</span>
+                        {d.geburtsdatum && <span className="ml-2 text-muted-foreground">geb. {d.geburtsdatum}</span>}
+                        {d.stadt && <span className="ml-2 text-muted-foreground">{d.strasse} {d.nr}, {d.stadt}</span>}
+                        {d.status && <span className="ml-2 text-muted-foreground">({d.status})</span>}
+                      </div>
+                      {age && <div className="text-xs text-muted-foreground mt-1" data-testid={`duplicate-age-${d.id}`}>{age}</div>}
+                    </div>
+                  );
+                })}
               </div>
-              <p>Möchtest du den Kunden trotzdem anlegen?</p>
+              <p className="text-sm text-muted-foreground">
+                Wir empfehlen den bestehenden Kunden zu öffnen statt einen weiteren anzulegen.
+              </p>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="flex-col-reverse sm:flex-row sm:justify-between gap-2">
           <AlertDialogCancel onClick={onCancel} data-testid="button-cancel-duplicate">
             Abbrechen
           </AlertDialogCancel>
-          <AlertDialogAction onClick={onContinue} data-testid="button-confirm-duplicate">
-            Trotzdem fortfahren
-          </AlertDialogAction>
+          <div className="flex flex-col-reverse sm:flex-row gap-2">
+            <AlertDialogAction
+              onClick={onContinue}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-duplicate"
+            >
+              Trotzdem neu anlegen
+            </AlertDialogAction>
+            {first && (
+              <AlertDialogAction
+                onClick={() => onOpenExisting(first.id)}
+                data-testid="button-open-existing-duplicate"
+              >
+                Bestehenden Kunden öffnen
+              </AlertDialogAction>
+            )}
+          </div>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

@@ -96,17 +96,22 @@ export function useCreateCustomer() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async (data: CreateCustomerRequest) => {
-      const result = await api.post<{ id: number }>("/admin/customers", data);
+    mutationFn: async (data: CreateCustomerRequest & { __idempotencyKey?: string }) => {
+      const { __idempotencyKey, ...payload } = data;
+      const headers = __idempotencyKey ? { "Idempotency-Key": __idempotencyKey } : undefined;
+      const result = await api.post<{ id: number }>("/admin/customers", payload, { headers });
       return unwrapResult(result);
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "customers");
-      toast({ title: "Erfolg", description: "Kunde wurde angelegt" });
+      // Erfolgs-Toast wird vom Wizard-Hook mit Hinweisen (Pending-Folgeschritte)
+      // gesteuert. Hier kein Standard-Toast mehr, sonst doppelte Meldungen.
     },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
+    // Kein generischer Fehler-Toast: Der Wizard-Hook differenziert bewusst
+    // zwischen DUPLICATE_WARNING / RECENT_DUPLICATE_WARNING / IDEMPOTENCY_KEY_REUSED
+    // / NETWORK_ERROR / 5xx und zeigt jeweils eine spezifische Meldung mit
+    // Retry-Hinweis (Task #376). Ein zusätzlicher generischer Toast würde
+    // die spezifische Meldung verdecken bzw. doppeln.
   });
 }
 
