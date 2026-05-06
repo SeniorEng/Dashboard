@@ -1030,8 +1030,8 @@ router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvor
   }
   
   const user = req.user!;
-  const employeeId = user.isAdmin ? undefined : user.id;
-  const sameDayAppointments = await storage.getAppointmentsWithCustomers(appointment.date, undefined, employeeId);
+  const targetEmployeeId = appointment.assignedEmployeeId ?? appointment.performedByEmployeeId ?? user.id;
+  const sameDayAppointments = await storage.getAppointmentsWithCustomers(appointment.date, undefined, targetEmployeeId);
   
   const appointmentsWithNames = sameDayAppointments.map(apt => ({
     ...apt,
@@ -1092,6 +1092,19 @@ router.get("/:id/route-calculation", asyncHandler("Fehler bei der Routenberechnu
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
 
+  let prevAppointment: Awaited<ReturnType<typeof storage.getAppointmentWithCustomer>> | null = null;
+  if (originType === "appointment" && fromAppointmentId) {
+    prevAppointment = await storage.getAppointmentWithCustomer(fromAppointmentId);
+    if (!prevAppointment) {
+      return sendBadRequest(res, "Ungültiger Vorgänger-Termin");
+    }
+    const targetEmployeeId = appointment.assignedEmployeeId ?? appointment.performedByEmployeeId;
+    const prevEmployeeId = prevAppointment.assignedEmployeeId ?? prevAppointment.performedByEmployeeId;
+    if (!targetEmployeeId || !prevEmployeeId || targetEmployeeId !== prevEmployeeId) {
+      return sendBadRequest(res, "Vorgänger-Termin gehört nicht zur zuständigen Mitarbeiterin");
+    }
+  }
+
   const destCustomer = appointment.customer;
   if (!destCustomer?.latitude || !destCustomer?.longitude) {
     return res.json({ suggestedKilometers: null, suggestedMinutes: null });
@@ -1109,9 +1122,8 @@ router.get("/:id/route-calculation", asyncHandler("Fehler bei der Routenberechnu
         suggestedMinutes = route.durationMinutes;
       }
     }
-  } else if (originType === "appointment" && fromAppointmentId) {
-    const prevAppointment = await storage.getAppointmentWithCustomer(fromAppointmentId);
-    const prevCustomer = prevAppointment?.customer;
+  } else if (originType === "appointment" && prevAppointment) {
+    const prevCustomer = prevAppointment.customer;
     if (prevCustomer?.latitude && prevCustomer?.longitude) {
       const route = await calculateRoute(prevCustomer.latitude, prevCustomer.longitude, destCustomer.latitude, destCustomer.longitude);
       if (route) {
