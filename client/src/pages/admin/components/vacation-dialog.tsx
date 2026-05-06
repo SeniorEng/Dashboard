@@ -6,6 +6,21 @@ import { Loader2 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { VacationSummary } from "@/lib/api/types";
 import { formatVacationDays } from "@/lib/utils";
+import { useMemo } from "react";
+import {
+  simulateAnnualEntitlementWithPatch,
+  summarizeMonthlyBreakdown,
+} from "@shared/domain/vacation";
+
+const MONTH_SHORT = [
+  "Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+  "Jul", "Aug", "Sep", "Okt", "Nov", "Dez",
+];
+
+function formatSegment(from: number, to: number): string {
+  if (from === to) return MONTH_SHORT[from - 1];
+  return `${MONTH_SHORT[from - 1]}–${MONTH_SHORT[to - 1]}`;
+}
 
 interface VacationDialogProps {
   open: boolean;
@@ -38,6 +53,30 @@ export function VacationDialog({
   onCancel,
   isSaving,
 }: VacationDialogProps) {
+  const preview = useMemo(() => {
+    if (!vacation) return null;
+    const parsed = parseInt(vacationDays);
+    const value = Number.isFinite(parsed) ? parsed : vacation.configuredAnnualDays;
+    const now = new Date();
+    const isCurrentYear = year === now.getFullYear();
+    const patchMonth = isCurrentYear ? now.getMonth() + 1 : 1;
+    const sim = simulateAnnualEntitlementWithPatch(
+      vacation.entitlementHistory ?? [],
+      vacation.eintrittsdatum ?? null,
+      year,
+      patchMonth,
+      value,
+      value,
+    );
+    const breakdown = summarizeMonthlyBreakdown(
+      sim.history,
+      vacation.eintrittsdatum ?? null,
+      year,
+      value,
+    );
+    return { entitlement: sim.entitlement, breakdown, patchMonth };
+  }, [vacation, vacationDays, year]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -85,6 +124,9 @@ export function VacationDialog({
                   max={365}
                   data-testid="input-total-days"
                 />
+                <p className="text-xs text-gray-500">
+                  Neuer Jahreswert ab dem laufenden Monat. Vormonate behalten ihren bisherigen Wert.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="carryOverDays">Resturlaub Vorjahr</Label>
@@ -99,6 +141,27 @@ export function VacationDialog({
                 />
               </div>
             </div>
+
+            {preview && vacation && (
+              <div className="p-3 rounded-lg border border-teal-200 bg-teal-50 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-700">Anspruch {year} nach Speichern:</span>
+                  <span className="font-semibold text-teal-800" data-testid="text-vacation-entitlement-preview">
+                    {formatVacationDays(preview.entitlement)} Tage
+                  </span>
+                </div>
+                {preview.breakdown.length > 0 && (
+                  <p className="text-xs text-gray-600" data-testid="text-vacation-breakdown">
+                    {preview.breakdown
+                      .map((s) => `${formatSegment(s.fromMonth, s.toMonth)}: ${s.daysPerYear} Tage/Jahr`)
+                      .join(" · ")}
+                    {vacation.carryOverDays > 0 && (
+                      <> · zzgl. Übertrag Vorjahr {formatVacationDays(vacation.carryOverDays)} Tage</>
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-4">
               <Button variant="outline" onClick={onCancel}>

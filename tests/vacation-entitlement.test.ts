@@ -189,6 +189,81 @@ describe("VAC-PRO API: Patch + Vacation Summary + Carryover Sync", () => {
     }
   });
 
+  it("VAC-PRO-9 — Vacation Summary liefert configuredAnnualDays + entitlementHistory + monthlyBreakdown getrennt vom anteiligen totalDays", async () => {
+    const emp = await createTestEmployee({ nachnamePrefix: "VacPro9" });
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+
+    // Reset
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp.id));
+
+    // Alter Wert ab Januar: 12 Tage/Jahr
+    await db.insert(vacationEntitlementHistory).values({
+      userId: emp.id,
+      validFromYear: currentYear,
+      validFromMonth: 1,
+      daysPerYear: 12,
+      createdBy: null,
+    });
+
+    // Patch auf 8 Tage → erzeugt History-Eintrag (currentYear, currentMonth, 8)
+    const patchRes = await apiPatch(`/api/admin/users/${emp.id}`, {
+      vacationDaysPerYear: 8,
+    });
+    expect(patchRes.status).toBe(200);
+
+    const summaryRes = await apiGet<any>(
+      `/api/admin/time-entries/vacation-summary/${emp.id}/${currentYear}`,
+    );
+    expect(summaryRes.status).toBe(200);
+
+    // configuredAnnualDays MUSS dem aktuellen users.vacationDaysPerYear (=8)
+    // entsprechen, NICHT dem berechneten anteiligen totalDays.
+    expect(summaryRes.data.configuredAnnualDays).toBe(8);
+
+    // Erwarteter anteiliger Anspruch
+    const monthsOld = currentMonth - 1;
+    const monthsNew = 12 - monthsOld;
+    const expected = Math.round((monthsOld * 12 / 12 + monthsNew * 8 / 12) * 100) / 100;
+    expect(summaryRes.data.totalDays).toBe(expected);
+
+    // entitlementHistory enthält beide Einträge
+    expect(Array.isArray(summaryRes.data.entitlementHistory)).toBe(true);
+    expect(summaryRes.data.entitlementHistory.length).toBeGreaterThanOrEqual(2);
+    const lastEntry = summaryRes.data.entitlementHistory.find(
+      (h: any) => h.validFromYear === currentYear && h.validFromMonth === currentMonth,
+    );
+    expect(lastEntry?.daysPerYear).toBe(8);
+
+    // monthlyBreakdown: vor currentMonth = 12, ab currentMonth = 8.
+    // Wenn der Patch im Januar passiert, gibt es nur ein Segment.
+    const breakdown = summaryRes.data.monthlyBreakdown as Array<{
+      fromMonth: number;
+      toMonth: number;
+      daysPerYear: number;
+    }>;
+    expect(Array.isArray(breakdown)).toBe(true);
+    if (currentMonth === 1) {
+      expect(breakdown.length).toBe(1);
+      expect(breakdown[0].daysPerYear).toBe(8);
+    } else {
+      expect(breakdown.length).toBe(2);
+      expect(breakdown[0].fromMonth).toBe(1);
+      expect(breakdown[0].toMonth).toBe(currentMonth - 1);
+      expect(breakdown[0].daysPerYear).toBe(12);
+      expect(breakdown[1].fromMonth).toBe(currentMonth);
+      expect(breakdown[1].toMonth).toBe(12);
+      expect(breakdown[1].daysPerYear).toBe(8);
+    }
+
+    // eintrittsdatum-Feld ist im Response vorhanden (kann null sein).
+    expect("eintrittsdatum" in summaryRes.data).toBe(true);
+  });
+
   it("VAC-PRO-8 — Zwei Patches im selben Monat erzeugen nur einen History-Eintrag (letzter Wert gewinnt)", async () => {
     const emp = await createTestEmployee({ nachnamePrefix: "VacPro8" });
     const now = new Date();

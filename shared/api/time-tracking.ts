@@ -47,9 +47,33 @@ export interface CreateTimeEntryRequest {
 
 export interface UpdateTimeEntryRequest extends Partial<CreateTimeEntryRequest> {}
 
+export interface VacationEntitlementHistoryItem {
+  validFromYear: number;
+  validFromMonth: number;
+  daysPerYear: number;
+}
+
+export interface VacationMonthlyBreakdownItem {
+  fromMonth: number;
+  toMonth: number;
+  daysPerYear: number;
+}
+
 export interface VacationSummary {
   year: number;
+  /** Berechneter, anteiliger Jahresanspruch für `year`. */
   totalDays: number;
+  /**
+   * Aktuell konfigurierter Jahreswert (= `users.vacationDaysPerYear`,
+   * gilt ab dem laufenden Monat).
+   */
+  configuredAnnualDays: number;
+  /** Eintrittsdatum (für Live-Vorschau im Frontend benötigt). */
+  eintrittsdatum: string | null;
+  /** Wirksame History-Einträge des Mitarbeiters (Live-Vorschau). */
+  entitlementHistory: VacationEntitlementHistoryItem[];
+  /** Aufschlüsselung der Monats-Segmente für `year`. */
+  monthlyBreakdown: VacationMonthlyBreakdownItem[];
   carryOverDays: number;
   usedDays: number;
   plannedDays: number;

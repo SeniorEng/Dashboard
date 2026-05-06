@@ -321,7 +321,9 @@ export default function AdminTimeEntries() {
 
   useEffect(() => {
     if (selectedUserVacation) {
-      setVacationDays(selectedUserVacation.totalDays.toString());
+      // Eingabefeld zeigt den aktuell konfigurierten Jahreswert (gilt ab dem
+      // laufenden Monat) — nicht den daraus berechneten anteiligen Anspruch.
+      setVacationDays(selectedUserVacation.configuredAnnualDays.toString());
       setCarryOverDays(selectedUserVacation.carryOverDays.toString());
     }
   }, [selectedUserVacation]);

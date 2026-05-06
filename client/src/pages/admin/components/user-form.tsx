@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,8 +22,26 @@ import {
   formatPhoneForDisplay,
   validateDachPhone,
 } from "./user-types";
-import { calculateVacationEntitlementByWorkDays } from "@shared/domain/vacation";
+import {
+  calculateVacationEntitlementByWorkDays,
+  simulateAnnualEntitlementWithPatch,
+  summarizeMonthlyBreakdown,
+} from "@shared/domain/vacation";
 import { useAuth } from "@/hooks/use-auth";
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api";
+import type { VacationSummary } from "@/lib/api/types";
+import { formatVacationDays } from "@/lib/utils";
+
+const MONTH_SHORT = [
+  "Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+  "Jul", "Aug", "Sep", "Okt", "Nov", "Dez",
+];
+
+function formatSegment(from: number, to: number): string {
+  if (from === to) return MONTH_SHORT[from - 1];
+  return `${MONTH_SHORT[from - 1]}–${MONTH_SHORT[to - 1]}`;
+}
 
 export function UserForm({
   mode,
@@ -71,6 +89,51 @@ export function UserForm({
   const [carryOverDaysTouched, setCarryOverDaysTouched] = useState(false);
   const [roles, setRoles] = useState<string[]>(user?.roles ?? []);
   const [whatsappEnabled, setWhatsappEnabled] = useState(user?.whatsappEnabled ?? false);
+
+  const { data: vacationSummary } = useQuery<VacationSummary | null>({
+    queryKey: ["admin", "vacation-summary", user?.id, new Date().getFullYear()],
+    queryFn: async ({ signal }) => {
+      if (!user?.id) return null;
+      const year = new Date().getFullYear();
+      const result = await api.get<VacationSummary>(
+        `/admin/time-entries/vacation-summary/${user.id}/${year}`,
+        signal,
+      );
+      return unwrapResult(result);
+    },
+    enabled: mode === "edit" && !!user?.id,
+    staleTime: 30_000,
+  });
+
+  const entitlementPreview = useMemo(() => {
+    if (mode !== "edit" || !vacationSummary) return null;
+    const parsed = parseInt(vacationDaysPerYear);
+    const value = Number.isFinite(parsed) ? parsed : vacationSummary.configuredAnnualDays;
+    const now = new Date();
+    const year = vacationSummary.year;
+    const isCurrentYear = year === now.getFullYear();
+    const patchMonth = isCurrentYear ? now.getMonth() + 1 : 1;
+    const sim = simulateAnnualEntitlementWithPatch(
+      vacationSummary.entitlementHistory ?? [],
+      vacationSummary.eintrittsdatum ?? eintrittsdatum ?? null,
+      year,
+      patchMonth,
+      value,
+      value,
+    );
+    const breakdown = summarizeMonthlyBreakdown(
+      sim.history,
+      vacationSummary.eintrittsdatum ?? eintrittsdatum ?? null,
+      year,
+      value,
+    );
+    return {
+      year,
+      entitlement: sim.entitlement,
+      breakdown,
+      carryOverDays: vacationSummary.carryOverDays ?? 0,
+    };
+  }, [mode, vacationSummary, vacationDaysPerYear, eintrittsdatum]);
 
   const updateVacationFromWorkDays = (days: number) => {
     const vacation = calculateVacationEntitlementByWorkDays(days);
@@ -277,7 +340,7 @@ export function UserForm({
               <p className="text-xs text-gray-500">Urlaubsanspruch auf 12 Monate</p>
               {mode === "edit" && (
                 <p className="text-xs text-gray-500" data-testid="text-vacation-prorata-hint">
-                  Änderungen wirken anteilig ab dem aktuellen Monat. Monate vor der Änderung behalten den bisherigen Wert.
+                  Neuer Jahreswert gilt ab dem laufenden Monat. Vormonate behalten ihren bisherigen Wert. Daraus ergibt sich der Anspruch unten.
                 </p>
               )}
             </div>
@@ -298,6 +361,27 @@ export function UserForm({
               </div>
             )}
           </div>
+          {mode === "edit" && entitlementPreview && (
+            <div className="p-3 rounded-lg border border-teal-200 bg-teal-50 space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">Anspruch {entitlementPreview.year}:</span>
+                <span className="font-semibold text-teal-800" data-testid="text-user-vacation-entitlement-preview">
+                  {formatVacationDays(entitlementPreview.entitlement)} Tage
+                </span>
+              </div>
+              {entitlementPreview.breakdown.length > 0 && (
+                <p className="text-xs text-gray-600" data-testid="text-user-vacation-breakdown">
+                  {entitlementPreview.breakdown
+                    .map((s) => `${formatSegment(s.fromMonth, s.toMonth)}: ${s.daysPerYear} Tage/Jahr`)
+                    .join(" · ")}
+                  {entitlementPreview.carryOverDays > 0 && (
+                    <> · zzgl. Übertrag Vorjahr {formatVacationDays(entitlementPreview.carryOverDays)} Tage</>
+                  )}
+                </p>
+              )}
+              <p className="text-[11px] text-gray-500">anteilig aus Vormonaten und neuem Wert</p>
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">

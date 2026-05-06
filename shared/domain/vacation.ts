@@ -129,3 +129,103 @@ export function calculateAnnualEntitlementWithHistory(
 
   return Math.round(sum * 100) / 100;
 }
+
+export interface VacationMonthlyBreakdownSegment {
+  fromMonth: number; // 1-12
+  toMonth: number;   // 1-12 (inclusive)
+  daysPerYear: number;
+}
+
+/**
+ * Liefert die wirksamen Monats-Segmente eines Jahres als kompakte
+ * Aufschlüsselung (z. B. „Jan–Apr: 12 Tage/Jahr · Mai–Dez: 8 Tage/Jahr").
+ * Monate vor dem Eintrittsmonat werden ausgelassen.
+ */
+export function summarizeMonthlyBreakdown(
+  history: VacationEntitlementHistoryEntry[],
+  eintrittsdatum: string | null,
+  year: number,
+  fallbackDaysPerYear: number,
+): VacationMonthlyBreakdownSegment[] {
+  let entryYear: number | null = null;
+  let entryMonth: number | null = null;
+  if (eintrittsdatum) {
+    const start = parseLocalDate(eintrittsdatum);
+    entryYear = start.getFullYear();
+    entryMonth = start.getMonth() + 1;
+    if (year < entryYear) return [];
+  }
+
+  const sorted = [...history].sort((a, b) => {
+    const ka = a.validFromYear * 100 + a.validFromMonth;
+    const kb = b.validFromYear * 100 + b.validFromMonth;
+    return ka - kb;
+  });
+
+  // Wert zum Jahresanfang (oder fallback)
+  let activeDays: number = sorted.length > 0 ? sorted[0].daysPerYear : fallbackDaysPerYear;
+  for (const h of sorted) {
+    const hKey = h.validFromYear * 100 + h.validFromMonth;
+    const yearStartKey = year * 100 + 1;
+    if (hKey <= yearStartKey) activeDays = h.daysPerYear;
+  }
+
+  const segments: VacationMonthlyBreakdownSegment[] = [];
+  let segStart: number | null = null;
+  let segDays: number = activeDays;
+
+  for (let month = 1; month <= 12; month++) {
+    for (const h of sorted) {
+      if (h.validFromYear === year && h.validFromMonth === month) {
+        activeDays = h.daysPerYear;
+      }
+    }
+
+    if (entryYear !== null && entryMonth !== null && year === entryYear && month < entryMonth) {
+      continue;
+    }
+
+    if (segStart === null) {
+      segStart = month;
+      segDays = activeDays;
+    } else if (activeDays !== segDays) {
+      segments.push({ fromMonth: segStart, toMonth: month - 1, daysPerYear: segDays });
+      segStart = month;
+      segDays = activeDays;
+    }
+  }
+  if (segStart !== null) {
+    segments.push({ fromMonth: segStart, toMonth: 12, daysPerYear: segDays });
+  }
+  return segments;
+}
+
+/**
+ * Simuliert das Ergebnis eines Patches: nimmt die bestehende History und
+ * setzt/überschreibt einen Eintrag für (year, month) mit `daysPerYear`. Damit
+ * kann das Frontend live anzeigen, was nach dem Speichern herauskommt.
+ */
+export function simulateAnnualEntitlementWithPatch(
+  history: VacationEntitlementHistoryEntry[],
+  eintrittsdatum: string | null,
+  year: number,
+  patchMonth: number,
+  patchDaysPerYear: number,
+  fallbackDaysPerYear: number,
+): { entitlement: number; history: VacationEntitlementHistoryEntry[] } {
+  const next = history.filter(
+    (h) => !(h.validFromYear === year && h.validFromMonth === patchMonth),
+  );
+  next.push({
+    validFromYear: year,
+    validFromMonth: patchMonth,
+    daysPerYear: patchDaysPerYear,
+  });
+  const entitlement = calculateAnnualEntitlementWithHistory(
+    next,
+    eintrittsdatum,
+    year,
+    fallbackDaysPerYear,
+  );
+  return { entitlement, history: next };
+}

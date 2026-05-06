@@ -35,6 +35,7 @@ interface TimeOverview {
 
 interface VacationSummary {
   totalDays: number;
+  configuredAnnualDays?: number;
   carryOverDays: number;
   remainingDays: number;
   usedDays: number;

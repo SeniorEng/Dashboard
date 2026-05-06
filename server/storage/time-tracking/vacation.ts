@@ -14,6 +14,7 @@ import {
   getVacationEntitlement,
   calculateCarryOverDays,
   calculateAnnualEntitlementWithHistory,
+  summarizeMonthlyBreakdown,
   type VacationEntitlementHistoryEntry,
 } from "@shared/domain/vacation";
 import { todayISO } from "@shared/utils/datetime";
@@ -260,9 +261,21 @@ export async function getVacationSummary(
   const totalAvailable = entitlement + carryOverDays;
   const remainingDays = Math.round((totalAvailable - usedDays - plannedDays) * 100) / 100;
 
+  const historyEntries = toHistoryEntries(history);
+  const monthlyBreakdown = summarizeMonthlyBreakdown(
+    historyEntries,
+    eintrittsdatum,
+    year,
+    vacationDaysPerYear,
+  );
+
   return {
     year,
     totalDays: Math.round(entitlement * 100) / 100,
+    configuredAnnualDays: vacationDaysPerYear,
+    eintrittsdatum,
+    entitlementHistory: historyEntries,
+    monthlyBreakdown,
     carryOverDays,
     usedDays,
     plannedDays,
