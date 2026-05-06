@@ -108,3 +108,9 @@ id = "8lNbbsTHiujP7eehxIVxN"
 uri = "file://LN_Privatrechnung_RE-2026-0008.pdf"
 type = "pdf"
 title = "Leistungsnachweis zur Privatrechnung RE-2026-0008"
+
+[[outputs]]
+id = "2jEZPy3MDs_6XJ17tWL3x"
+uri = "file://exports/kunden-produktion.xlsx"
+type = "table"
+title = "Kundenliste Produktion (132 Kunden)"
