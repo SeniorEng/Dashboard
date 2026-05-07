@@ -114,3 +114,21 @@ id = "2jEZPy3MDs_6XJ17tWL3x"
 uri = "file://exports/kunden-produktion.xlsx"
 type = "table"
 title = "Kundenliste Produktion (132 Kunden)"
+
+[[outputs]]
+id = "-fv9ulWj8HGjRb31gb57t"
+uri = "file://client/public/sounds/options/option1-classic.mp3"
+type = "audio"
+title = "Option 1 — Classic (1000 Hz, klarer Ping)"
+
+[[outputs]]
+id = "QZ2VuzmxvFdgALp1ZtwtS"
+uri = "file://client/public/sounds/options/option2-soft.mp3"
+type = "audio"
+title = "Option 2 — Soft (660 Hz, weicher Ton)"
+
+[[outputs]]
+id = "Mg9zfus40rai2TTGaAN-z"
+uri = "file://client/public/sounds/options/option3-twotone.mp3"
+type = "audio"
+title = "Option 3 — Two-Tone Ding (880 → 1320 Hz)"
