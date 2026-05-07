@@ -8,7 +8,7 @@ import { Euro, TrendingUp, Calendar, Receipt, FileCheck, Truck, AlertCircle, Cal
 import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import type { RevenueStatsResponse, RevenueByDimensionRow, RevenueGapRow } from "@shared/statistics";
-import { cents, hours } from "../helpers";
+import { cents, hours, compareLabel, pickDelta, fmtCentsDelta } from "../helpers";
 import { StatsPageShell, StatsLoading, StatsError, buildPeriodQs } from "./page-shell";
 import { DrillDownTable } from "./drill-down-table";
 
@@ -45,7 +45,7 @@ export default function RevenuePage() {
       icon={<Euro className="w-6 h-6" />}
       testId="revenue-dashboard"
     >
-      {({ qs, year }) => <RevenueContent qs={qs} year={year} />}
+      {({ qs, year, month }) => <RevenueContent qs={qs} year={year} month={month} />}
     </StatsPageShell>
   );
 }
@@ -53,12 +53,12 @@ export default function RevenuePage() {
 export function RevenueSection({ selectedYear, selectedMonth }: { selectedYear: number; selectedMonth: string }) {
   return (
     <div data-testid="revenue-dashboard">
-      <RevenueContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} />
+      <RevenueContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} month={selectedMonth} />
     </div>
   );
 }
 
-function RevenueContent({ qs, year }: { qs: string; year: number }) {
+function RevenueContent({ qs, year, month }: { qs: string; year: number; month: string }) {
   const [openGap, setOpenGap] = useState<GapKind | null>(null);
   const query = useQuery<RevenueStatsResponse>({
     queryKey: ["statistics-v2-revenue", qs],
@@ -86,8 +86,9 @@ function RevenueContent({ qs, year }: { qs: string; year: number }) {
             title={s.label}
             icon={s.icon}
             value={cents(s.kpi.current)}
-            delta={{ abs: s.kpi.deltaAbs, pct: s.kpi.deltaPct }}
-            deltaLabel="vs. Vormonat"
+            delta={pickDelta(month, s.kpi)}
+            formatDeltaAbs={fmtCentsDelta}
+            deltaLabel={compareLabel(month)}
             higherIsBetter
             sparklineColor={s.color}
             testId={`kpi-stage-${s.key}`}

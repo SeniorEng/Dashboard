@@ -6,7 +6,7 @@ import { KpiTile } from "@/components/charts";
 import { PiggyBank, Wallet } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import type { BudgetStatsResponse, BudgetPotRow } from "@shared/statistics";
-import { cents } from "../helpers";
+import { cents, compareLabel, pickDelta, fmtCentsDelta } from "../helpers";
 import { StatsPageShell, StatsLoading, StatsError, buildPeriodQs } from "./page-shell";
 import { DrillDownTable } from "./drill-down-table";
 
@@ -32,7 +32,7 @@ export default function BudgetsPage() {
       icon={<PiggyBank className="w-6 h-6" />}
       testId="budgets-dashboard"
     >
-      {({ qs, year }) => <BudgetsContent qs={qs} year={year} />}
+      {({ qs, year, month }) => <BudgetsContent qs={qs} year={year} month={month} />}
     </StatsPageShell>
   );
 }
@@ -40,12 +40,12 @@ export default function BudgetsPage() {
 export function BudgetsSection({ selectedYear, selectedMonth }: { selectedYear: number; selectedMonth: string }) {
   return (
     <div data-testid="budgets-dashboard">
-      <BudgetsContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} />
+      <BudgetsContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} month={selectedMonth} />
     </div>
   );
 }
 
-function BudgetsContent({ qs, year }: { qs: string; year: number }) {
+function BudgetsContent({ qs, year, month }: { qs: string; year: number; month: string }) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [potFilter, setPotFilter] = useState<string>("all");
 
@@ -79,8 +79,9 @@ function BudgetsContent({ qs, year }: { qs: string; year: number }) {
           title="Bewilligt gesamt"
           icon={<Wallet className="w-5 h-5" />}
           value={cents(data.totalAllocatedCents.current)}
-          delta={{ abs: data.totalAllocatedCents.deltaAbs, pct: data.totalAllocatedCents.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(month, data.totalAllocatedCents)}
+          formatDeltaAbs={fmtCentsDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter
           testId="kpi-budget-allocated"
         />
@@ -88,8 +89,9 @@ function BudgetsContent({ qs, year }: { qs: string; year: number }) {
           title="Genutzt gesamt"
           icon={<PiggyBank className="w-5 h-5" />}
           value={cents(data.totalUsedCents.current)}
-          delta={{ abs: data.totalUsedCents.deltaAbs, pct: data.totalUsedCents.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(month, data.totalUsedCents)}
+          formatDeltaAbs={fmtCentsDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter
           testId="kpi-budget-used"
         />

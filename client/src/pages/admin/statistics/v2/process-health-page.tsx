@@ -13,14 +13,15 @@ import {
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
-import type { ProcessHealthSummary, SparklinePoint } from "@shared/statistics";
+import type { ProcessHealthSummary, SparklinePoint, KpiValue } from "@shared/statistics";
+import { compareLabel, pickDelta, fmtIntDelta } from "../helpers";
 
 interface MetricConfig {
   key: string;
   title: string;
   description: string;
   icon: React.ReactNode;
-  pickValue: (s: ProcessHealthSummary) => { current: number; deltaAbs: number | null; deltaPct: number | null };
+  pickValue: (s: ProcessHealthSummary) => KpiValue;
   pickSparkline: (s: ProcessHealthSummary) => SparklinePoint[];
   detailPath: string;
   /** Pass period params to the drill-down (some are independent of period). */
@@ -34,7 +35,7 @@ const METRICS: MetricConfig[] = [
     title: "Kunden ohne zugeteilten Mitarbeiter",
     description: "Aktive Kunden, die noch keinen Hauptbetreuer haben.",
     icon: <UserX className="w-5 h-5" />,
-    pickValue: (s) => ({ current: s.customersWithoutEmployee.current, deltaAbs: s.customersWithoutEmployee.deltaAbs, deltaPct: s.customersWithoutEmployee.deltaPct }),
+    pickValue: (s) => s.customersWithoutEmployee,
     pickSparkline: (s) => s.sparklines.customersWithoutEmployee,
     detailPath: "/admin/statistics/process-health/customers-without-employee",
     periodAware: false,
@@ -45,7 +46,7 @@ const METRICS: MetricConfig[] = [
     title: "Aktive Kunden ohne Termine",
     description: "Aktive Kunden ohne Termine im gewählten Zeitraum.",
     icon: <CalendarOff className="w-5 h-5" />,
-    pickValue: (s) => ({ current: s.customersWithoutAppointments.current, deltaAbs: s.customersWithoutAppointments.deltaAbs, deltaPct: s.customersWithoutAppointments.deltaPct }),
+    pickValue: (s) => s.customersWithoutAppointments,
     pickSparkline: (s) => s.sparklines.customersWithoutAppointments,
     detailPath: "/admin/statistics/process-health/customers-without-appointments",
     periodAware: true,
@@ -56,7 +57,7 @@ const METRICS: MetricConfig[] = [
     title: "Nicht dokumentierte Termine",
     description: "Termine aus dem Vormonat oder älter ohne Dokumentation.",
     icon: <FileWarning className="w-5 h-5" />,
-    pickValue: (s) => ({ current: s.undocumentedAppointments.current, deltaAbs: s.undocumentedAppointments.deltaAbs, deltaPct: s.undocumentedAppointments.deltaPct }),
+    pickValue: (s) => s.undocumentedAppointments,
     pickSparkline: (s) => s.sparklines.undocumentedAppointments,
     detailPath: "/admin/statistics/process-health/undocumented-appointments",
     periodAware: false,
@@ -67,7 +68,7 @@ const METRICS: MetricConfig[] = [
     title: "Termine ohne Leistungsnachweis",
     description: "Dokumentierte Termine ohne Zuordnung zu einem Nachweis.",
     icon: <FileX className="w-5 h-5" />,
-    pickValue: (s) => ({ current: s.appointmentsWithoutRecord.current, deltaAbs: s.appointmentsWithoutRecord.deltaAbs, deltaPct: s.appointmentsWithoutRecord.deltaPct }),
+    pickValue: (s) => s.appointmentsWithoutRecord,
     pickSparkline: (s) => s.sparklines.appointmentsWithoutRecord,
     detailPath: "/admin/statistics/process-health/appointments-without-record",
     periodAware: true,
@@ -78,7 +79,7 @@ const METRICS: MetricConfig[] = [
     title: "Leistungsnachweise ohne Rechnung",
     description: "Abgeschlossene Leistungsnachweise, die noch nicht abgerechnet wurden.",
     icon: <ReceiptText className="w-5 h-5" />,
-    pickValue: (s) => ({ current: s.recordsWithoutInvoice.current, deltaAbs: s.recordsWithoutInvoice.deltaAbs, deltaPct: s.recordsWithoutInvoice.deltaPct }),
+    pickValue: (s) => s.recordsWithoutInvoice,
     pickSparkline: (s) => s.sparklines.recordsWithoutInvoice,
     detailPath: "/admin/statistics/process-health/records-without-invoice",
     periodAware: true,
@@ -150,9 +151,10 @@ export function ProcessHealthSection({ selectedYear, selectedMonth }: ProcessHea
               key={m.key}
               title={m.title}
               icon={m.icon}
-              value={String(v.current)}
-              delta={{ abs: v.deltaAbs, pct: v.deltaPct }}
-              deltaLabel="vs. Vormonat"
+              value={v.current.toLocaleString("de-DE")}
+              delta={pickDelta(selectedMonth, v)}
+              formatDeltaAbs={fmtIntDelta}
+              deltaLabel={compareLabel(selectedMonth)}
               higherIsBetter={false}
               sparkline={sparkValues}
               sparklineColor={m.sparklineColor}

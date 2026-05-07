@@ -5,7 +5,7 @@ import { Activity, Clock, TrendingUp, Briefcase, Heart, PiggyBank, Calculator } 
 import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import type { PerformanceStatsResponse } from "@shared/statistics";
-import { cents, hours } from "../helpers";
+import { cents, hours, compareLabel, pickDelta, fmtCentsDelta, fmtHoursDelta } from "../helpers";
 import { StatsPageShell, StatsLoading, StatsError, buildPeriodQs } from "./page-shell";
 import { DrillDownTable } from "./drill-down-table";
 
@@ -30,7 +30,7 @@ export default function PerformancePage() {
       icon={<Activity className="w-6 h-6" />}
       testId="performance-dashboard"
     >
-      {({ qs, year }) => <PerformanceContent qs={qs} year={year} />}
+      {({ qs, year, month }) => <PerformanceContent qs={qs} year={year} month={month} />}
     </StatsPageShell>
   );
 }
@@ -38,12 +38,12 @@ export default function PerformancePage() {
 export function PerformanceSection({ selectedYear, selectedMonth }: { selectedYear: number; selectedMonth: string }) {
   return (
     <div data-testid="performance-dashboard">
-      <PerformanceContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} />
+      <PerformanceContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} month={selectedMonth} />
     </div>
   );
 }
 
-function PerformanceContent({ qs, year }: { qs: string; year: number }) {
+function PerformanceContent({ qs, year, month }: { qs: string; year: number; month: string }) {
   const query = useQuery<PerformanceStatsResponse>({
     queryKey: ["statistics-v2-performance", qs],
     queryFn: async () => unwrapResult(await api.get<PerformanceStatsResponse>(`/statistics/v2/performance?${qs}`)),
@@ -63,8 +63,9 @@ function PerformanceContent({ qs, year }: { qs: string; year: number }) {
           icon={<Clock className="w-5 h-5" />}
           value={hours(data.utilization.productiveMinutes.current)}
           subValue={`${data.utilization.productivePct}%`}
-          delta={{ abs: data.utilization.productiveMinutes.deltaAbs, pct: data.utilization.productiveMinutes.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(month, data.utilization.productiveMinutes)}
+          formatDeltaAbs={fmtHoursDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter
           testId="kpi-productive"
         />
@@ -73,8 +74,9 @@ function PerformanceContent({ qs, year }: { qs: string; year: number }) {
           icon={<Briefcase className="w-5 h-5" />}
           value={hours(data.utilization.overheadMinutes.current)}
           subValue={`${data.utilization.overheadPct}%`}
-          delta={{ abs: data.utilization.overheadMinutes.deltaAbs, pct: data.utilization.overheadMinutes.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(month, data.utilization.overheadMinutes)}
+          formatDeltaAbs={fmtHoursDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter={false}
           testId="kpi-overhead"
         />
@@ -83,8 +85,9 @@ function PerformanceContent({ qs, year }: { qs: string; year: number }) {
           icon={<Heart className="w-5 h-5" />}
           value={hours(data.utilization.sickVacationMinutes.current)}
           subValue={`${data.utilization.sickVacationPct}%`}
-          delta={{ abs: data.utilization.sickVacationMinutes.deltaAbs, pct: data.utilization.sickVacationMinutes.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(month, data.utilization.sickVacationMinutes)}
+          formatDeltaAbs={fmtHoursDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter={false}
           testId="kpi-sick-vacation"
         />
@@ -92,8 +95,9 @@ function PerformanceContent({ qs, year }: { qs: string; year: number }) {
           title="Ø Erlös/Stunde"
           icon={<TrendingUp className="w-5 h-5" />}
           value={cents(data.revenuePerHour.totalCentsPerHour.current)}
-          delta={{ abs: data.revenuePerHour.totalCentsPerHour.deltaAbs, pct: data.revenuePerHour.totalCentsPerHour.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(month, data.revenuePerHour.totalCentsPerHour)}
+          formatDeltaAbs={fmtCentsDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter
           testId="kpi-revenue-per-hour"
         />

@@ -5,7 +5,7 @@ import { Users, UserPlus, UserMinus, AlertTriangle, TrendingUp, PiggyBank, Calen
 import { api, unwrapResult } from "@/lib/api/client";
 import { MONTH_NAMES } from "@/features/time-tracking/constants";
 import type { CustomerStatsResponse, ChurnRiskCustomer } from "@shared/statistics";
-import { cents } from "../helpers";
+import { cents, compareLabel, pickDelta, fmtIntDelta, fmtPctPointDelta } from "../helpers";
 import { StatsPageShell, StatsLoading, StatsError, buildPeriodQs } from "./page-shell";
 import { DrillDownTable } from "./drill-down-table";
 
@@ -24,7 +24,7 @@ export default function CustomersPage() {
       icon={<Users className="w-6 h-6" />}
       testId="customers-dashboard"
     >
-      {({ qs, year }) => <CustomersContent qs={qs} year={year} />}
+      {({ qs, year, month }) => <CustomersContent qs={qs} year={year} month={month} />}
     </StatsPageShell>
   );
 }
@@ -32,12 +32,12 @@ export default function CustomersPage() {
 export function CustomersSection({ selectedYear, selectedMonth }: { selectedYear: number; selectedMonth: string }) {
   return (
     <div data-testid="customers-dashboard">
-      <CustomersContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} />
+      <CustomersContent qs={buildPeriodQs(selectedYear, selectedMonth)} year={selectedYear} month={selectedMonth} />
     </div>
   );
 }
 
-function CustomersContent({ qs, year }: { qs: string; year: number }) {
+function CustomersContent({ qs, year, month }: { qs: string; year: number; month: string }) {
   const query = useQuery<CustomerStatsResponse>({
     queryKey: ["statistics-v2-customers", qs],
     queryFn: async () => unwrapResult(await api.get<CustomerStatsResponse>(`/statistics/v2/customers?${qs}`)),
@@ -55,9 +55,10 @@ function CustomersContent({ qs, year }: { qs: string; year: number }) {
         <KpiTile
           title="Aktive Kunden"
           icon={<Users className="w-5 h-5" />}
-          value={String(data.activeCustomers.current)}
-          delta={{ abs: data.activeCustomers.deltaAbs, pct: data.activeCustomers.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          value={data.activeCustomers.current.toLocaleString("de-DE")}
+          delta={pickDelta(month, data.activeCustomers)}
+          formatDeltaAbs={fmtIntDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter
           testId="kpi-active-customers"
         />
@@ -65,8 +66,9 @@ function CustomersContent({ qs, year }: { qs: string; year: number }) {
           title="Conversion-Rate"
           icon={<TrendingUp className="w-5 h-5" />}
           value={`${data.conversionRatePct.current}%`}
-          delta={{ abs: data.conversionRatePct.deltaAbs, pct: data.conversionRatePct.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(month, data.conversionRatePct)}
+          formatDeltaAbs={fmtPctPointDelta}
+          deltaLabel={compareLabel(month)}
           higherIsBetter
           testId="kpi-conversion-rate"
         />
