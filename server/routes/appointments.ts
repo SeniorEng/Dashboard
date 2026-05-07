@@ -903,6 +903,7 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
 
   if (updated) {
     const newEmployeeId = updated.assignedEmployeeId || updated.performedByEmployeeId;
+    const oldEmployeeIdForNotify = existingAppointment.assignedEmployeeId || existingAppointment.performedByEmployeeId;
     const hasSchedulingChange = validatedData.date !== undefined
       || validatedData.scheduledStart !== undefined
       || validatedData.scheduledEnd !== undefined
@@ -915,6 +916,21 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       const customer = await storage.getCustomer(updated.customerId);
       const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Unbekannt";
       notificationService.notifyAppointmentUpdated(id, customerName, updated.date || "", newEmployeeId, req.user!.id);
+    }
+
+    // Wechsel des zugewiesenen Mitarbeiters: alten Mitarbeiter informieren,
+    // dass ihm der Termin entzogen wurde (Self-Assign-Schutz beachten).
+    if (
+      validatedData.assignedEmployeeId !== undefined
+      && oldEmployeeIdForNotify
+      && oldEmployeeIdForNotify !== newEmployeeId
+      && oldEmployeeIdForNotify !== req.user!.id
+      && updated.customerId
+    ) {
+      const customer = await storage.getCustomer(updated.customerId);
+      const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Unbekannt";
+      const revokedDate = existingAppointment.date || updated.date || "";
+      notificationService.notifyAppointmentRevoked(id, customerName, revokedDate, oldEmployeeIdForNotify, req.user!.id);
     }
   }
 

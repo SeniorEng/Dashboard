@@ -8,6 +8,7 @@ export const NOTIFICATION_TYPES = [
   "customer_assigned",
   "appointment_created",
   "appointment_updated",
+  "appointment_revoked",
   "task_assigned",
   "birthday_reminder",
 ] as const;

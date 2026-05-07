@@ -6,7 +6,30 @@ import {
   getAuthCookie,
   createTestCustomer,
   cleanupCustomer,
+  createTestEmployee,
+  assignEmployeeToCustomer,
+  deactivateTestEmployee,
+  getFutureDate,
 } from "./test-utils";
+
+async function getOrCreateAnyService(): Promise<{ id: number }> {
+  const list = await apiGet<any[]>("/api/services");
+  if (list.status === 200 && Array.isArray(list.data) && list.data.length > 0) {
+    const active = list.data.find((s: any) => s.isActive !== false) || list.data[0];
+    return { id: active.id as number };
+  }
+  const created = await apiPost<any>("/api/services", {
+    name: `revoke_test_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    unitType: "hour",
+    defaultPriceCents: 3500,
+    isActive: true,
+    minDurationMinutes: 15,
+  });
+  if (created.status !== 201 && created.status !== 200) {
+    throw new Error(`getOrCreateAnyService failed: ${created.status} ${JSON.stringify(created.data)}`);
+  }
+  return { id: created.data.id as number };
+}
 import { notificationService } from "../server/services/notification-service";
 import { db } from "../server/lib/db";
 import { notifications, type Notification, type NotificationType } from "@shared/schema";
@@ -160,5 +183,111 @@ describe("NOT-5: Self-Assign-Schutz für PATCH /admin/customers/:id/assign", () 
       500,
     );
     expect(hit).toBeNull();
+  });
+});
+
+// Task #386: Wechsel des assignedEmployeeId muss den alten Mitarbeiter
+// per "Termin entzogen"-Notification informieren (Self-Assign-Schutz analog
+// zu den anderen Triggern).
+describe("NOT-6: appointment_revoked-Notification bei Mitarbeiter-Wechsel (Task #386)", () => {
+  let customerId: number | null = null;
+  let oldEmployeeId: number | null = null;
+  let newEmployeeId: number | null = null;
+
+  afterAll(async () => {
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(oldEmployeeId);
+    await deactivateTestEmployee(newEmployeeId);
+  });
+
+  it("NOT-6.1 – PATCH mit Mitarbeiter-Wechsel feuert appointment_revoked an alten Mitarbeiter", async () => {
+    const auth = await getAuthCookie();
+    const oldEmp = await createTestEmployee({ nachnamePrefix: "RevokeOld" });
+    const newEmp = await createTestEmployee({ nachnamePrefix: "RevokeNew" });
+    oldEmployeeId = oldEmp.id;
+    newEmployeeId = newEmp.id;
+
+    const customer = await createTestCustomer();
+    customerId = customer.id as number;
+    await assignEmployeeToCustomer(customerId, oldEmp.id);
+
+    const service = await getOrCreateAnyService();
+    const date = getFutureDate(14);
+    const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId,
+      date,
+      scheduledStart: "10:00",
+      services: [{ serviceId: service.id, durationMinutes: 60 }],
+      assignedEmployeeId: oldEmp.id,
+    });
+    expect(apptRes.status).toBe(201);
+    const appointmentId = apptRes.data.id as number;
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${appointmentId}`, {
+      assignedEmployeeId: newEmp.id,
+    });
+    expect(patchRes.status).toBe(200);
+
+    const hit = await waitForNotification(
+      oldEmp.id,
+      "appointment_revoked",
+      (n) => n.referenceId === appointmentId,
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.title).toBe("Termin entzogen");
+    expect(hit!.message).toContain("entzogen");
+    const [y, m, d] = date.split("-");
+    expect(hit!.message).toContain(`${d}.${m}.${y}`);
+    expect(hit!.referenceType).toBe("appointment");
+
+    // Sicherstellen, dass der Acting-User (nicht der alte/neue Mitarbeiter)
+    // KEINE Self-Notification bekommt.
+    const selfHit = await waitForNotification(
+      auth.user.id,
+      "appointment_revoked",
+      (n) => n.referenceId === appointmentId,
+      300,
+    );
+    expect(selfHit).toBeNull();
+  });
+
+  it("NOT-6.2 – Self-Assign-Schutz: Wechsel auf Acting-User selbst erzeugt KEINE Self-Notification", async () => {
+    const auth = await getAuthCookie();
+    const otherEmp = await createTestEmployee({ nachnamePrefix: "RevokeSelf" });
+
+    const customer = await createTestCustomer();
+    const cId = customer.id as number;
+    try {
+      await assignEmployeeToCustomer(cId, auth.user.id);
+
+      const service = await getOrCreateAnyService();
+      const date = getFutureDate(15);
+      const apptRes = await apiPost<any>("/api/appointments/kundentermin", {
+        customerId: cId,
+        date,
+        scheduledStart: "11:00",
+        services: [{ serviceId: service.id, durationMinutes: 60 }],
+        assignedEmployeeId: auth.user.id,
+      });
+      expect(apptRes.status).toBe(201);
+      const appointmentId = apptRes.data.id as number;
+
+      // Acting-User entzieht sich den Termin selbst → keine Revoke-Notification
+      const patchRes = await apiPatch<any>(`/api/appointments/${appointmentId}`, {
+        assignedEmployeeId: otherEmp.id,
+      });
+      expect(patchRes.status).toBe(200);
+
+      const hit = await waitForNotification(
+        auth.user.id,
+        "appointment_revoked",
+        (n) => n.referenceId === appointmentId,
+        500,
+      );
+      expect(hit).toBeNull();
+    } finally {
+      await cleanupCustomer(cId);
+      await deactivateTestEmployee(otherEmp.id);
+    }
   });
 });

@@ -221,6 +221,28 @@ export const notificationService = {
     });
   },
 
+  notifyAppointmentRevoked(
+    appointmentId: number,
+    customerName: string,
+    date: string,
+    employeeId: number,
+    actingUserId?: number
+  ) {
+    if (actingUserId && actingUserId === employeeId) return;
+    const [year, month, day] = date.split("-");
+    const formatted = `${day}.${month}.${year}`;
+    fireAndForget(async () => {
+      await createNotification({
+        userId: employeeId,
+        type: "appointment_revoked",
+        title: "Termin entzogen",
+        message: `Termin am ${formatted} für ${customerName} wurde dir entzogen.`,
+        referenceId: appointmentId,
+        referenceType: "appointment",
+      });
+    });
+  },
+
   notifyTaskAssigned(
     taskId: number,
     taskTitle: string,
