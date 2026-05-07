@@ -102,14 +102,15 @@ router.patch("/customers/:id/assign", asyncHandler("Zuordnung konnte nicht aktua
   birthdaysCache.invalidateAll();
 
   const customerName = `${customer.vorname} ${customer.nachname}`;
+  const actingUserId = req.user?.id;
   if (primaryEmployeeId && primaryEmployeeId !== oldPrimary) {
-    notificationService.notifyCustomerAssigned(id, customerName, primaryEmployeeId, "primary");
+    notificationService.notifyCustomerAssigned(id, customerName, primaryEmployeeId, "primary", actingUserId);
   }
   if (backupEmployeeId && backupEmployeeId !== oldBackup) {
-    notificationService.notifyCustomerAssigned(id, customerName, backupEmployeeId, "backup");
+    notificationService.notifyCustomerAssigned(id, customerName, backupEmployeeId, "backup", actingUserId);
   }
   if (backupEmployeeId2 && backupEmployeeId2 !== oldBackup2) {
-    notificationService.notifyCustomerAssigned(id, customerName, backupEmployeeId2, "backup2");
+    notificationService.notifyCustomerAssigned(id, customerName, backupEmployeeId2, "backup2", actingUserId);
   }
   
   res.json(updatedCustomer);

@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
   apiPost,
   apiPatch,
   getAuthCookie,
+  createTestCustomer,
+  cleanupCustomer,
 } from "./test-utils";
 import { notificationService } from "../server/services/notification-service";
 import { db } from "../server/lib/db";
@@ -123,5 +125,40 @@ describe("NOT-4: Self-Assign-Schutz für neue Trigger (Task #377)", () => {
       expect(hit.message).toContain("Hauptmitarbeiter");
       await db.delete(notifications).where(eq(notifications.id, hit.id));
     }
+  });
+});
+
+// Regression-Schutz für die Assign-Route (Task #383, Nacharbeit zu #377):
+// PATCH /admin/customers/:id/assign muss actingUserId an
+// notifyCustomerAssigned übergeben, sonst greift der Self-Assign-Schutz nicht.
+describe("NOT-5: Self-Assign-Schutz für PATCH /admin/customers/:id/assign", () => {
+  let createdCustomerId: number | null = null;
+
+  afterAll(async () => {
+    await cleanupCustomer(createdCustomerId);
+  });
+
+  it("NOT-5.1 – Self-Assign über Assign-Endpoint erzeugt KEINE customer_assigned-Notification", async () => {
+    const auth = await getAuthCookie();
+    const uid = auth.user.id;
+
+    const customer = await createTestCustomer();
+    createdCustomerId = customer.id as number;
+
+    const res = await apiPatch<any>(`/api/admin/customers/${createdCustomerId}/assign`, {
+      primaryEmployeeId: uid,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(res.status).toBe(200);
+
+    await new Promise((r) => setTimeout(r, 400));
+    const hit = await waitForNotification(
+      uid,
+      "customer_assigned",
+      (n) => n.referenceId === createdCustomerId,
+      500,
+    );
+    expect(hit).toBeNull();
   });
 });
