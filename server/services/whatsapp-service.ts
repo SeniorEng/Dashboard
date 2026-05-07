@@ -3,6 +3,7 @@ import type { MessageListInstanceCreateOptions } from "twilio/lib/rest/api/v2010
 import { db } from "../lib/db";
 import { whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
 import { storage } from "../storage";
+import { normalizePhone } from "@shared/utils/phone";
 
 interface SendTemplateOptions {
   phoneNumber: string;
@@ -24,6 +25,20 @@ export type TwilioRequestPayload = MessageListInstanceCreateOptions;
 function withWhatsAppPrefix(phone: string): string {
   const trimmed = phone.trim();
   return trimmed.startsWith("whatsapp:") ? trimmed : `whatsapp:${trimmed}`;
+}
+
+/**
+ * Normalisiert eine Empfängernummer in das von Twilio erwartete `whatsapp:+E164`-Format.
+ * Akzeptiert sowohl bereits präfixierte Nummern (`whatsapp:+49…`) als auch lokale DACH-
+ * Eingaben (z. B. `017…`). Liefert `null`, wenn keine valide DE/AT/CH-Nummer erkannt wird.
+ */
+export function normalizeWhatsAppRecipient(phone: string): string | null {
+  if (!phone) return null;
+  const trimmed = phone.trim();
+  const raw = trimmed.startsWith("whatsapp:") ? trimmed.slice("whatsapp:".length) : trimmed;
+  const e164 = normalizePhone(raw);
+  if (!e164) return null;
+  return `whatsapp:${e164}`;
 }
 
 export function buildTwilioRequest(
@@ -66,7 +81,17 @@ class WhatsAppService {
       return { success: false, error: "WhatsApp ist nicht konfiguriert" };
     }
 
-    const payload = buildTwilioRequest(options, config);
+    const normalized = normalizeWhatsAppRecipient(options.phoneNumber);
+    if (!normalized) {
+      const errorMsg = `Ungültige Empfänger-Telefonnummer (DACH/E.164 erwartet): ${options.phoneNumber}`;
+      console.error("[WhatsApp]", errorMsg);
+      return { success: false, error: errorMsg };
+    }
+
+    const payload = buildTwilioRequest(
+      { ...options, phoneNumber: normalized },
+      config,
+    );
 
     try {
       const client = twilio(config.accountSid, config.authToken);

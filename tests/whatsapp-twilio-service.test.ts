@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildTwilioRequest,
   resolveTwilioConfigFromSettings,
+  normalizeWhatsAppRecipient,
 } from "../server/services/whatsapp-service";
 
 const ENV_SID = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
@@ -131,6 +132,20 @@ describe("WhatsApp Twilio Service – Request-Payload", () => {
     );
     expect(payload.messagingServiceSid).toBe("MGabcdefabcdefabcdefabcdefabcdef00");
     expect(payload.from).toBeUndefined();
+  });
+
+  it("normalisiert lokale DE-Eingaben (z. B. 0170…) zu whatsapp:+E164", () => {
+    expect(normalizeWhatsAppRecipient("0170 1234567")).toBe("whatsapp:+491701234567");
+    expect(normalizeWhatsAppRecipient("+491701234567")).toBe("whatsapp:+491701234567");
+    expect(normalizeWhatsAppRecipient("whatsapp:+491701234567")).toBe(
+      "whatsapp:+491701234567",
+    );
+  });
+
+  it("liefert null bei nicht-DACH oder ungültigen Nummern", () => {
+    expect(normalizeWhatsAppRecipient("not-a-number")).toBeNull();
+    expect(normalizeWhatsAppRecipient("")).toBeNull();
+    expect(normalizeWhatsAppRecipient("+15551234567")).toBeNull();
   });
 
   it("lässt contentVariables weg, wenn keine Parameter übergeben werden", () => {
