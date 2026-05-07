@@ -27,6 +27,7 @@ import {
   simulateAnnualEntitlementWithPatch,
   summarizeMonthlyBreakdown,
 } from "@shared/domain/vacation";
+import { parseLocalDate } from "@shared/utils/datetime";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
@@ -106,32 +107,65 @@ export function UserForm({
   });
 
   const entitlementPreview = useMemo(() => {
-    if (mode !== "edit" || !vacationSummary) return null;
     const parsed = parseInt(vacationDaysPerYear);
-    const value = Number.isFinite(parsed) ? parsed : vacationSummary.configuredAnnualDays;
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+
+    if (mode === "edit") {
+      if (!vacationSummary) return null;
+      const value = parsed;
+      const now = new Date();
+      const year = vacationSummary.year;
+      const isCurrentYear = year === now.getFullYear();
+      const patchMonth = isCurrentYear ? now.getMonth() + 1 : 1;
+      const sim = simulateAnnualEntitlementWithPatch(
+        vacationSummary.entitlementHistory ?? [],
+        vacationSummary.eintrittsdatum ?? eintrittsdatum ?? null,
+        year,
+        patchMonth,
+        value,
+        value,
+      );
+      const breakdown = summarizeMonthlyBreakdown(
+        sim.history,
+        vacationSummary.eintrittsdatum ?? eintrittsdatum ?? null,
+        year,
+        value,
+      );
+      return {
+        year,
+        entitlement: sim.entitlement,
+        breakdown,
+        carryOverDays: vacationSummary.carryOverDays ?? 0,
+      };
+    }
+
+    // create mode: rein clientseitige Vorschau, ohne Server-Daten
     const now = new Date();
-    const year = vacationSummary.year;
-    const isCurrentYear = year === now.getFullYear();
-    const patchMonth = isCurrentYear ? now.getMonth() + 1 : 1;
+    const currentYear = now.getFullYear();
+    let year = currentYear;
+    if (eintrittsdatum) {
+      const entryYear = parseLocalDate(eintrittsdatum).getFullYear();
+      if (entryYear > currentYear) year = entryYear;
+    }
     const sim = simulateAnnualEntitlementWithPatch(
-      vacationSummary.entitlementHistory ?? [],
-      vacationSummary.eintrittsdatum ?? eintrittsdatum ?? null,
+      [],
+      eintrittsdatum || null,
       year,
-      patchMonth,
-      value,
-      value,
+      1,
+      parsed,
+      parsed,
     );
     const breakdown = summarizeMonthlyBreakdown(
       sim.history,
-      vacationSummary.eintrittsdatum ?? eintrittsdatum ?? null,
+      eintrittsdatum || null,
       year,
-      value,
+      parsed,
     );
     return {
       year,
       entitlement: sim.entitlement,
       breakdown,
-      carryOverDays: vacationSummary.carryOverDays ?? 0,
+      carryOverDays: 0,
     };
   }, [mode, vacationSummary, vacationDaysPerYear, eintrittsdatum]);
 
@@ -361,7 +395,7 @@ export function UserForm({
               </div>
             )}
           </div>
-          {mode === "edit" && entitlementPreview && (
+          {entitlementPreview && (
             <div className="p-3 rounded-lg border border-teal-200 bg-teal-50 space-y-1">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-700">Anspruch {entitlementPreview.year}:</span>
