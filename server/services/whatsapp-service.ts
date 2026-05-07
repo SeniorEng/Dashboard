@@ -1,16 +1,7 @@
+import twilio from "twilio";
 import { db } from "../lib/db";
 import { whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
 import { storage } from "../storage";
-
-const META_API_VERSION = "v21.0";
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
-
-interface TemplateComponent {
-  type: "body" | "button";
-  sub_type?: "url";
-  index?: number;
-  parameters: Array<{ type: "text"; text: string }>;
-}
 
 interface SendTemplateOptions {
   phoneNumber: string;
@@ -20,82 +11,75 @@ interface SendTemplateOptions {
   buttonUrl?: string;
 }
 
-interface MetaTemplate {
-  name: string;
-  status: string;
-  language: string;
-  category: string;
-  id: string;
+interface ResolvedTwilioConfig {
+  accountSid: string;
+  authToken: string;
+  from?: string;
+  messagingServiceSid?: string;
 }
 
-interface MetaSendResponse {
-  messaging_product: string;
-  contacts: Array<{ input: string; wa_id: string }>;
-  messages: Array<{ id: string }>;
+interface TwilioRequestPayload {
+  to: string;
+  contentSid: string;
+  contentVariables?: string;
+  from?: string;
+  messagingServiceSid?: string;
+}
+
+function withWhatsAppPrefix(phone: string): string {
+  const trimmed = phone.trim();
+  return trimmed.startsWith("whatsapp:") ? trimmed : `whatsapp:${trimmed}`;
+}
+
+export function buildTwilioRequest(
+  options: SendTemplateOptions,
+  config: ResolvedTwilioConfig,
+): TwilioRequestPayload {
+  const variables: Record<string, string> = {};
+  (options.templateParams ?? []).forEach((value, index) => {
+    variables[String(index + 1)] = value;
+  });
+  if (options.buttonUrl) {
+    const nextIndex = (options.templateParams?.length ?? 0) + 1;
+    variables[String(nextIndex)] = options.buttonUrl;
+  }
+
+  const payload: TwilioRequestPayload = {
+    to: withWhatsAppPrefix(options.phoneNumber),
+    contentSid: options.templateName,
+  };
+
+  if (Object.keys(variables).length > 0) {
+    payload.contentVariables = JSON.stringify(variables);
+  }
+
+  if (config.messagingServiceSid) {
+    payload.messagingServiceSid = config.messagingServiceSid;
+  } else if (config.from) {
+    payload.from = withWhatsAppPrefix(config.from);
+  }
+
+  return payload;
 }
 
 class WhatsAppService {
-  async sendTemplateMessage(options: SendTemplateOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    const { phoneNumber, templateName, templateParams = [], language = "de", buttonUrl } = options;
-
+  async sendTemplateMessage(
+    options: SendTemplateOptions,
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const config = await this.getConfig();
     if (!config) {
       return { success: false, error: "WhatsApp ist nicht konfiguriert" };
     }
 
-    const components: TemplateComponent[] = [];
-
-    if (templateParams.length > 0) {
-      components.push({
-        type: "body",
-        parameters: templateParams.map((text) => ({ type: "text" as const, text })),
-      });
-    }
-
-    if (buttonUrl) {
-      components.push({
-        type: "button",
-        sub_type: "url",
-        index: 0,
-        parameters: [{ type: "text" as const, text: buttonUrl }],
-      });
-    }
-
-    const body: Record<string, unknown> = {
-      messaging_product: "whatsapp",
-      to: phoneNumber,
-      type: "template",
-      template: {
-        name: templateName,
-        language: { code: language },
-        ...(components.length > 0 ? { components } : {}),
-      },
-    };
+    const payload = buildTwilioRequest(options, config);
 
     try {
-      const response = await fetch(`${META_API_BASE}/${config.whatsappPhoneNumberId}/messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.whatsappAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMsg = (errorData as any)?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
-        console.error("[WhatsApp] API-Fehler:", errorMsg);
-        return { success: false, error: errorMsg };
-      }
-
-      const data = (await response.json()) as MetaSendResponse;
-      const messageId = data.messages?.[0]?.id;
-      return { success: true, messageId };
+      const client = twilio(config.accountSid, config.authToken);
+      const message = await client.messages.create(payload as any);
+      return { success: true, messageId: message.sid };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unbekannter Fehler beim Senden";
-      console.error("[WhatsApp] Sende-Fehler:", errorMsg);
+      console.error("[WhatsApp] Twilio-Sende-Fehler:", errorMsg);
       return { success: false, error: errorMsg };
     }
   }
@@ -103,7 +87,7 @@ class WhatsAppService {
   async sendAndLog(
     userId: number,
     eventType: string,
-    options: SendTemplateOptions
+    options: SendTemplateOptions,
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const result = await this.sendTemplateMessage(options);
 
@@ -126,56 +110,39 @@ class WhatsAppService {
     return result;
   }
 
-  async getTemplates(): Promise<MetaTemplate[]> {
-    const config = await this.getConfig();
-    if (!config) {
-      throw new Error("WhatsApp ist nicht konfiguriert");
-    }
-
-    try {
-      const response = await fetch(
-        `${META_API_BASE}/${config.whatsappBusinessAccountId}/message_templates`,
-        {
-          headers: {
-            Authorization: `Bearer ${config.whatsappAccessToken}`,
-          },
-          signal: AbortSignal.timeout(15000),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMsg = (errorData as any)?.error?.message || `HTTP ${response.status}`;
-        throw new Error(`Meta API Fehler: ${errorMsg}`);
-      }
-
-      const data = (await response.json()) as { data: MetaTemplate[] };
-      return data.data || [];
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith("Meta API Fehler:")) {
-        throw err;
-      }
-      throw new Error(`Fehler beim Abrufen der Templates: ${err instanceof Error ? err.message : "Unbekannt"}`);
-    }
-  }
-
-  async sendTestMessage(phoneNumber: string, actingUserId: number): Promise<{ success: boolean; error?: string }> {
+  async sendTestMessage(
+    phoneNumber: string,
+    actingUserId: number,
+  ): Promise<{ success: boolean; error?: string }> {
     const config = await this.getConfig();
     if (!config) {
       return { success: false, error: "WhatsApp ist nicht konfiguriert" };
     }
 
+    const { getEnabledRuleByEvent, getWhatsAppNotificationRules } = await import("../storage/whatsapp");
+    const allRules = await getWhatsAppNotificationRules();
+    const candidate =
+      (await getEnabledRuleByEvent("appointment_reminder")) ??
+      allRules.find((r) => r.templateName && r.templateName.startsWith("HX"));
+
+    if (!candidate || !candidate.templateName) {
+      return {
+        success: false,
+        error:
+          "Keine Twilio Content SID für Testnachricht vorhanden. Bitte zuerst eine Benachrichtigungsregel mit gültiger Content SID konfigurieren.",
+      };
+    }
+
     const result = await this.sendTemplateMessage({
       phoneNumber,
-      templateName: "hello_world",
-      language: "en_US",
+      templateName: candidate.templateName,
     });
 
     try {
       await db.insert(whatsappMessageLog).values({
         userId: actingUserId,
         eventType: "test",
-        templateName: "hello_world",
+        templateName: candidate.templateName,
         phoneNumber,
         status: result.success ? "sent" : "failed",
         errorMessage: result.error || null,
@@ -200,18 +167,37 @@ class WhatsAppService {
     return `${baseUrl}${path}`;
   }
 
-  private async getConfig(): Promise<CompanySettings | null> {
+  private async getConfig(): Promise<ResolvedTwilioConfig | null> {
     const settings = await storage.getCompanySettings();
-    if (
-      !settings.whatsappEnabled ||
-      !settings.whatsappAccessToken ||
-      !settings.whatsappPhoneNumberId
-    ) {
-      return null;
-    }
-
-    return settings;
+    return resolveTwilioConfigFromSettings(settings);
   }
+}
+
+export function resolveTwilioConfigFromSettings(
+  settings: Pick<
+    CompanySettings,
+    "whatsappEnabled" | "whatsappFromOrService" | "whatsappAccessToken"
+  >,
+): ResolvedTwilioConfig | null {
+  if (!settings.whatsappEnabled) return null;
+
+  const fromOrService = settings.whatsappFromOrService?.trim();
+  if (!fromOrService) return null;
+
+  const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
+  const authToken = settings.whatsappAccessToken?.trim() || process.env.TWILIO_AUTH_TOKEN?.trim();
+
+  if (!accountSid || !authToken) return null;
+
+  const isMessagingService = fromOrService.startsWith("MG");
+
+  return {
+    accountSid,
+    authToken,
+    ...(isMessagingService
+      ? { messagingServiceSid: fromOrService }
+      : { from: fromOrService }),
+  };
 }
 
 export const whatsAppService = new WhatsAppService();

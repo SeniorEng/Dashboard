@@ -3,7 +3,7 @@ import { asyncHandler, badRequest } from "../../lib/errors";
 import { z } from "zod";
 import { storage } from "../../storage";
 import { getCachedCompanySettings, companySettingsCache } from "../../services/cache";
-import { whatsAppService } from "../../services/whatsapp-service";
+import { whatsAppService, resolveTwilioConfigFromSettings } from "../../services/whatsapp-service";
 import {
   updateWhatsAppConfigSchema,
   updateWhatsAppRulesSchema,
@@ -16,16 +16,28 @@ import {
 
 const router = Router();
 
+function isFullyConfigured(settings: {
+  whatsappEnabled: boolean;
+  whatsappFromOrService: string | null;
+  whatsappAccessToken: string | null;
+}): boolean {
+  return resolveTwilioConfigFromSettings(settings) !== null;
+}
+
 router.get("/config", asyncHandler("WhatsApp-Konfiguration konnte nicht geladen werden", async (_req, res) => {
   const settings = await getCachedCompanySettings();
   res.json({
     whatsappEnabled: settings?.whatsappEnabled ?? false,
-    whatsappPhoneNumberId: settings?.whatsappPhoneNumberId ?? null,
-    whatsappBusinessAccountId: settings?.whatsappBusinessAccountId ?? null,
+    whatsappFromOrService: settings?.whatsappFromOrService ?? null,
     whatsappAccessToken: settings?.whatsappAccessToken
       ? "••••" + settings.whatsappAccessToken.slice(-4)
       : null,
-    configured: !!(settings?.whatsappAccessToken && settings?.whatsappPhoneNumberId && settings?.whatsappEnabled),
+    twilioEnvConfigured: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+    configured: isFullyConfigured({
+      whatsappEnabled: settings?.whatsappEnabled ?? false,
+      whatsappFromOrService: settings?.whatsappFromOrService ?? null,
+      whatsappAccessToken: settings?.whatsappAccessToken ?? null,
+    }),
   });
 }));
 
@@ -36,12 +48,16 @@ router.put("/config", asyncHandler("WhatsApp-Konfiguration konnte nicht gespeich
   companySettingsCache.invalidate();
   res.json({
     whatsappEnabled: updated.whatsappEnabled,
-    whatsappPhoneNumberId: updated.whatsappPhoneNumberId ?? null,
-    whatsappBusinessAccountId: updated.whatsappBusinessAccountId ?? null,
+    whatsappFromOrService: updated.whatsappFromOrService ?? null,
     whatsappAccessToken: updated.whatsappAccessToken
       ? "••••" + updated.whatsappAccessToken.slice(-4)
       : null,
-    configured: !!(updated.whatsappAccessToken && updated.whatsappPhoneNumberId && updated.whatsappEnabled),
+    twilioEnvConfigured: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+    configured: isFullyConfigured({
+      whatsappEnabled: updated.whatsappEnabled,
+      whatsappFromOrService: updated.whatsappFromOrService ?? null,
+      whatsappAccessToken: updated.whatsappAccessToken ?? null,
+    }),
   });
 }));
 
@@ -54,7 +70,7 @@ router.post("/test", asyncHandler("Testnachricht konnte nicht gesendet werden", 
 
   const configured = await whatsAppService.isConfigured();
   if (!configured) {
-    throw badRequest("WhatsApp ist nicht konfiguriert. Bitte zuerst die API-Zugangsdaten eingeben und aktivieren.");
+    throw badRequest("WhatsApp ist nicht konfiguriert. Bitte zuerst den Twilio-Sender eingeben und aktivieren.");
   }
 
   const result = await whatsAppService.sendTestMessage(phoneNumber, req.user!.id);
@@ -63,16 +79,6 @@ router.post("/test", asyncHandler("Testnachricht konnte nicht gesendet werden", 
     return;
   }
   res.json({ success: true });
-}));
-
-router.get("/templates", asyncHandler("Templates konnten nicht geladen werden", async (_req, res) => {
-  const configured = await whatsAppService.isConfigured();
-  if (!configured) {
-    throw badRequest("WhatsApp ist nicht konfiguriert");
-  }
-
-  const templates = await whatsAppService.getTemplates();
-  res.json(templates);
 }));
 
 router.get("/rules", asyncHandler("Benachrichtigungsregeln konnten nicht geladen werden", async (_req, res) => {

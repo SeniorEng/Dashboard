@@ -99,10 +99,24 @@ export const insertWhatsAppMessageLogSchema = createInsertSchema(whatsappMessage
 export type WhatsAppMessageLog = typeof whatsappMessageLog.$inferSelect;
 export type InsertWhatsAppMessageLog = z.infer<typeof insertWhatsAppMessageLogSchema>;
 
+// Twilio Content SID Format: HX gefolgt von 32 Hex-Zeichen
+export const TWILIO_CONTENT_SID_PATTERN = /^HX[a-fA-F0-9]{32}$/;
+
+// Twilio WhatsApp Sender: entweder "whatsapp:+E164" / "+E164" oder eine Messaging-Service-SID (MG...)
+const TWILIO_FROM_PATTERN = /^(?:MG[a-zA-Z0-9]{32}|whatsapp:\+[1-9]\d{6,14}|\+[1-9]\d{6,14})$/;
+
 export const updateWhatsAppConfigSchema = z.object({
+  // Twilio-Sender: WhatsApp-Nummer (E.164) ODER Messaging-Service-SID (MG…)
+  whatsappFromOrService: z
+    .string()
+    .nullable()
+    .optional()
+    .refine(
+      (v) => v == null || v === "" || TWILIO_FROM_PATTERN.test(v),
+      "Ungültiger Twilio-Sender. Erwartet: +49… (E.164) oder Messaging-Service-SID (MG…)",
+    ),
+  // Optionaler Override für den Twilio-Auth-Token (falls leer wird process.env.TWILIO_AUTH_TOKEN genutzt)
   whatsappAccessToken: z.string().nullable().optional(),
-  whatsappPhoneNumberId: z.string().nullable().optional(),
-  whatsappBusinessAccountId: z.string().nullable().optional(),
   whatsappEnabled: z.boolean().optional(),
 });
 export type UpdateWhatsAppConfig = z.infer<typeof updateWhatsAppConfigSchema>;
@@ -117,7 +131,24 @@ export const updateWhatsAppRulesSchema = z.object({
   rules: z.array(z.object({
     id: z.number(),
     enabled: z.boolean(),
-    templateName: z.string().min(1, "Template-Name ist erforderlich"),
-  })),
+    // Twilio Content SID (HX…), oder leer für „noch nicht konfiguriert".
+    // Aktivierte Regeln müssen eine gültige SID haben (Cross-Field-Check unten).
+    templateName: z
+      .string()
+      .refine(
+        (v) => v === "" || TWILIO_CONTENT_SID_PATTERN.test(v),
+        "Twilio Content SID muss mit HX beginnen und 34 Zeichen lang sein",
+      ),
+  })).superRefine((rules, ctx) => {
+    rules.forEach((rule, index) => {
+      if (rule.enabled && rule.templateName === "") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, "templateName"],
+          message: "Aktivierte Regeln benötigen eine Twilio Content SID (HX…)",
+        });
+      }
+    });
+  }),
 });
 export type UpdateWhatsAppRulesInput = z.infer<typeof updateWhatsAppRulesSchema>;

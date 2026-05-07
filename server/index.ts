@@ -214,6 +214,13 @@ async function runStartupTasks() {
       log(`WhatsApp-Regeln-Seed fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateWhatsAppToTwilio } = await import("./startup/migrate-whatsapp-twilio");
+    try {
+      await migrateWhatsAppToTwilio();
+    } catch (err) {
+      log(`WhatsApp-Twilio-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
     try {
       await migrateErstberatungCustomers();

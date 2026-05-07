@@ -7,7 +7,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Build**: `npm run build`
 - **Typecheck**: `npm run check`
 - **DB Push**: `drizzle-kit push:pg`
-- **Required Env Vars**: `DATABASE_URL`, `ENCRYPTION_KEY` (64-char hex), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `QONTO_SECRET_KEY`, `QONTO_LOGIN`, `LETTEREXPRESS_API_KEY`, `WHATSAPP_ACCESS_TOKEN`, `NODE_ENV`.
+- **Required Env Vars**: `DATABASE_URL`, `ENCRYPTION_KEY` (64-char hex), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `QONTO_SECRET_KEY`, `QONTO_LOGIN`, `LETTEREXPRESS_API_KEY`, `NODE_ENV`. (WhatsApp läuft ebenfalls über die Twilio-Credentials; Meta-Cloud-API-Token werden nicht mehr benötigt.)
 
 ## Stack
 - **Frontend**: React 19, TypeScript, Vite, Wouter, `shadcn/ui`, Tailwind CSS v4, TanStack Query
@@ -61,6 +61,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Company Settings Encryption**: API secrets in `company_settings` are AES-256-GCM encrypted at-rest. `ENCRYPTION_KEY` env var is required for encryption/decryption. Graceful fallback if not present, but secrets will be stored/read unencrypted.
 - **Test Data Hygiene**: Test cleanup scripts exist but require careful execution (e.g., `--apply` flag, hostname guard). Do not run cleanup scripts directly on production.
 - **Legacy Schema Fields**: Several fields and tables are marked as "legacy" but are still actively used for migration paths or specific functionalities. Do not remove them without thorough dependency checks.
+- **WhatsApp-Provider = Twilio**: Versand erfolgt ausschließlich über die Twilio WhatsApp Content API (`twilio` SDK, `client.messages.create({ contentSid, contentVariables })`). Die `templateName`-Spalte in `whatsapp_notification_rules` enthält Twilio Content SIDs (`HX…`), nicht mehr Meta-Template-Namen. Die DB-Spalten `whatsapp_phone_number_id` und `whatsapp_business_account_id` sind veraltet (durch Startup-Migration auf NULL gesetzt) und werden nicht mehr gelesen — bleiben aber zur Vermeidung destruktiver Drizzle-Push-Warnungen erhalten. `whatsapp_access_token` dient jetzt als optionaler Override für `TWILIO_AUTH_TOKEN`.
 
 ## Pointers
 - **Audit Methodology**: `.agents/skills/deep-analysis/SKILL.md`

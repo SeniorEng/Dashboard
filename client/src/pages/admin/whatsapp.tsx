@@ -25,9 +25,9 @@ import {
 
 interface WhatsAppConfig {
   whatsappEnabled: boolean;
-  whatsappPhoneNumberId: string | null;
-  whatsappBusinessAccountId: string | null;
+  whatsappFromOrService: string | null;
   whatsappAccessToken: string | null;
+  twilioEnvConfigured: boolean;
   configured: boolean;
 }
 
@@ -95,15 +95,13 @@ function ConfigTab() {
   });
 
   const [accessToken, setAccessToken] = useState("");
-  const [phoneNumberId, setPhoneNumberId] = useState("");
-  const [businessAccountId, setBusinessAccountId] = useState("");
+  const [fromOrService, setFromOrService] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [initialized, setInitialized] = useState(false);
 
   if (config && !initialized) {
-    setPhoneNumberId(config.whatsappPhoneNumberId ?? "");
-    setBusinessAccountId(config.whatsappBusinessAccountId ?? "");
+    setFromOrService(config.whatsappFromOrService ?? "");
     setEnabled(config.whatsappEnabled);
     setInitialized(true);
   }
@@ -111,8 +109,7 @@ function ConfigTab() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload: Record<string, unknown> = {
-        whatsappPhoneNumberId: phoneNumberId || null,
-        whatsappBusinessAccountId: businessAccountId || null,
+        whatsappFromOrService: fromOrService.trim() || null,
         whatsappEnabled: enabled,
       };
       if (accessToken) {
@@ -183,8 +180,18 @@ function ConfigTab() {
               <XCircle className={`${iconSize.sm} text-amber-600 shrink-0 mt-0.5`} />
               <div>
                 <p className="text-sm font-medium text-amber-800">Nicht konfiguriert</p>
-                <p className="text-xs text-amber-700 mt-1">Bitte geben Sie die API-Zugangsdaten ein und aktivieren Sie WhatsApp.</p>
+                <p className="text-xs text-amber-700 mt-1">
+                  Bitte den Twilio-Sender eintragen, WhatsApp aktivieren und sicherstellen, dass die Twilio-Credentials in den Umgebungsvariablen gesetzt sind.
+                </p>
               </div>
+            </div>
+          )}
+          {config && !config.twilioEnvConfigured && (
+            <div className="mt-3 flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg" data-testid="status-env-missing">
+              <XCircle className={`${iconSize.sm} text-red-600 shrink-0 mt-0.5`} />
+              <p className="text-xs text-red-800">
+                <strong>TWILIO_ACCOUNT_SID</strong> und/oder <strong>TWILIO_AUTH_TOKEN</strong> fehlen in den Umgebungsvariablen. Diese werden für den Versand benötigt.
+              </p>
             </div>
           )}
         </CardContent>
@@ -192,45 +199,40 @@ function ConfigTab() {
 
       <Card data-testid="card-whatsapp-credentials">
         <CardHeader>
-          <CardTitle className="text-base">API-Zugangsdaten</CardTitle>
-          <CardDescription>Meta Cloud API Konfiguration für WhatsApp Business</CardDescription>
+          <CardTitle className="text-base">Twilio WhatsApp-Konfiguration</CardTitle>
+          <CardDescription>
+            Versand über Twilio WhatsApp Content API. Die Twilio-Credentials (Account SID, Auth Token) werden global aus den Umgebungsvariablen gelesen.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="accessToken">Access Token</Label>
+            <Label htmlFor="fromOrService">Twilio-Sender</Label>
+            <Input
+              id="fromOrService"
+              value={fromOrService}
+              onChange={(e) => setFromOrService(e.target.value)}
+              placeholder="+4915112345678 oder MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              data-testid="input-from-or-service"
+            />
+            <p className="text-xs text-gray-500">
+              Entweder die in Twilio registrierte WhatsApp-Nummer im E.164-Format (z. B. <code>+4915112345678</code>) oder eine Messaging-Service-SID (<code>MG…</code>).
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="accessToken">Twilio Auth Token (optional, Override)</Label>
             <Input
               id="accessToken"
               type="password"
               value={accessToken}
               onChange={(e) => setAccessToken(e.target.value)}
-              placeholder={config?.whatsappAccessToken ? "••••••••" : "Token eingeben"}
+              placeholder={config?.whatsappAccessToken ? "••••••••" : "Leer lassen für Umgebungsvariable"}
               data-testid="input-access-token"
             />
-            {config?.whatsappAccessToken && (
-              <p className="text-xs text-gray-500">Gespeichert: {config.whatsappAccessToken}</p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="phoneNumberId">Phone Number ID</Label>
-            <Input
-              id="phoneNumberId"
-              value={phoneNumberId}
-              onChange={(e) => setPhoneNumberId(e.target.value)}
-              placeholder="z.B. 123456789012345"
-              data-testid="input-phone-number-id"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="businessAccountId">Business Account ID</Label>
-            <Input
-              id="businessAccountId"
-              value={businessAccountId}
-              onChange={(e) => setBusinessAccountId(e.target.value)}
-              placeholder="z.B. 123456789012345"
-              data-testid="input-business-account-id"
-            />
+            <p className="text-xs text-gray-500">
+              Nur ausfüllen, wenn ein abweichender Auth Token statt <code>TWILIO_AUTH_TOKEN</code> aus den Umgebungsvariablen verwendet werden soll.
+              {config?.whatsappAccessToken && <> Aktuell hinterlegt: {config.whatsappAccessToken}</>}
+            </p>
           </div>
 
           <div className="flex items-center gap-3 pt-2">
@@ -386,14 +388,17 @@ function RulesTab() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs text-gray-600">Template-Name</Label>
+                    <Label className="text-xs text-gray-600">Twilio Content SID</Label>
                     <Input
                       value={local?.templateName ?? rule.templateName}
-                      onChange={(e) => updateRule(rule.id, "templateName", e.target.value)}
-                      placeholder="Meta Template-Name"
-                      className="max-w-sm"
+                      onChange={(e) => updateRule(rule.id, "templateName", e.target.value.trim())}
+                      placeholder="HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      className="max-w-sm font-mono"
                       data-testid={`input-template-${rule.eventType}`}
                     />
+                    <p className="text-xs text-gray-500">
+                      Aus der Twilio Console (Content Template Builder). Format: <code>HX</code> + 32 Hex-Zeichen.
+                    </p>
                   </div>
 
                   <div className="text-xs text-gray-500" data-testid={`text-deeplink-${rule.eventType}`}>
@@ -509,8 +514,8 @@ function LogTab() {
                         An: {entry.phoneNumber}
                         {entry.userName && <> — {entry.userName}</>}
                       </p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        Template: {entry.templateName}
+                      <p className="text-xs text-gray-500 mt-0.5 font-mono">
+                        Content SID: {entry.templateName || "—"}
                       </p>
                       {entry.errorMessage && (
                         <p className="text-xs text-red-600 mt-1" data-testid={`text-error-${entry.id}`}>
