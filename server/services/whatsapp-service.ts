@@ -1,4 +1,5 @@
 import twilio from "twilio";
+import type { MessageListInstanceCreateOptions } from "twilio/lib/rest/api/v2010/account/message";
 import { db } from "../lib/db";
 import { whatsappMessageLog, type InsertWhatsAppMessageLog, type CompanySettings } from "@shared/schema";
 import { storage } from "../storage";
@@ -18,13 +19,7 @@ interface ResolvedTwilioConfig {
   messagingServiceSid?: string;
 }
 
-interface TwilioRequestPayload {
-  to: string;
-  contentSid: string;
-  contentVariables?: string;
-  from?: string;
-  messagingServiceSid?: string;
-}
+export type TwilioRequestPayload = MessageListInstanceCreateOptions;
 
 function withWhatsAppPrefix(phone: string): string {
   const trimmed = phone.trim();
@@ -75,7 +70,7 @@ class WhatsAppService {
 
     try {
       const client = twilio(config.accountSid, config.authToken);
-      const message = await client.messages.create(payload as any);
+      const message = await client.messages.create(payload);
       return { success: true, messageId: message.sid };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unbekannter Fehler beim Senden";

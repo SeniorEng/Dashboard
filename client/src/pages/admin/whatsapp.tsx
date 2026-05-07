@@ -106,6 +106,8 @@ function ConfigTab() {
     setInitialized(true);
   }
 
+  const [clearAccessToken, setClearAccessToken] = useState(false);
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload: Record<string, unknown> = {
@@ -114,12 +116,15 @@ function ConfigTab() {
       };
       if (accessToken) {
         payload.whatsappAccessToken = accessToken;
+      } else if (clearAccessToken) {
+        payload.whatsappAccessToken = null;
       }
       return unwrapResult(await api.put<WhatsAppConfig>("/admin/whatsapp/config", payload));
     },
     onSuccess: (data) => {
       queryClient.setQueryData(["whatsapp", "config"], data);
       setAccessToken("");
+      setClearAccessToken(false);
       toast({ title: "WhatsApp-Konfiguration gespeichert" });
     },
     onError: (error: Error) => {
@@ -233,6 +238,21 @@ function ConfigTab() {
               Nur ausfüllen, wenn ein abweichender Auth Token statt <code>TWILIO_AUTH_TOKEN</code> aus den Umgebungsvariablen verwendet werden soll.
               {config?.whatsappAccessToken && <> Aktuell hinterlegt: {config.whatsappAccessToken}</>}
             </p>
+            {config?.whatsappAccessToken && (
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  id="clearAccessToken"
+                  type="checkbox"
+                  checked={clearAccessToken}
+                  onChange={(e) => setClearAccessToken(e.target.checked)}
+                  className="rounded border-gray-300"
+                  data-testid="checkbox-clear-access-token"
+                />
+                <Label htmlFor="clearAccessToken" className="text-xs font-normal cursor-pointer">
+                  Hinterlegten Override-Token entfernen und wieder Umgebungsvariable nutzen
+                </Label>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3 pt-2">
@@ -516,6 +536,12 @@ function LogTab() {
                       </p>
                       <p className="text-xs text-gray-500 mt-0.5 font-mono">
                         Content SID: {entry.templateName || "—"}
+                      </p>
+                      <p
+                        className="text-xs text-gray-500 mt-0.5 font-mono"
+                        data-testid={`text-message-sid-${entry.id}`}
+                      >
+                        Twilio Message-SID: {entry.metaMessageId || "—"}
                       </p>
                       {entry.errorMessage && (
                         <p className="text-xs text-red-600 mt-1" data-testid={`text-error-${entry.id}`}>
