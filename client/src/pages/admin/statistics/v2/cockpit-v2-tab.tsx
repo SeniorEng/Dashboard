@@ -101,6 +101,22 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
   const health = healthQuery.data;
   const alerts = alertsQuery.data ?? [];
 
+  const isYear = selectedMonth === "all";
+  const compareLabel = isYear ? "vs. Vorjahr" : "vs. Vormonat";
+
+  const pickDelta = (kpi: { deltaAbs: number | null; deltaPct: number | null; deltaYearAbs: number | null; deltaYearPct: number | null }) =>
+    isYear
+      ? { abs: kpi.deltaYearAbs, pct: kpi.deltaYearPct }
+      : { abs: kpi.deltaAbs, pct: kpi.deltaPct };
+
+  const fmtCentsDelta = (abs: number) => `${abs > 0 ? "+" : ""}${cents(abs)}`;
+  const fmtHoursDelta = (abs: number) => {
+    const sign = abs > 0 ? "+" : abs < 0 ? "-" : "";
+    return `${sign}${hours(Math.abs(abs))}`;
+  };
+  const fmtIntDelta = (abs: number) => `${abs > 0 ? "+" : ""}${abs.toLocaleString("de-DE")}`;
+  const fmtDecimalDelta = (abs: number) => `${abs > 0 ? "+" : ""}${abs.toLocaleString("de-DE", { maximumFractionDigits: 1 })}`;
+
   const stageKpi = cockpit.revenueByStage[stage];
   const sparkRev = cockpit.sparklines.revenueDocumented.map((p) => p.value);
   const sparkCust = cockpit.sparklines.activeCustomers.map((p) => p.value);
@@ -130,8 +146,9 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           title="Gesamtumsatz"
           icon={<Euro className="w-5 h-5" />}
           value={cents(stageKpi.current)}
-          delta={{ abs: stageKpi.deltaAbs, pct: stageKpi.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(stageKpi)}
+          formatDeltaAbs={fmtCentsDelta}
+          deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkRev}
           sparklineColor="#0d9488"
@@ -161,10 +178,11 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
         <KpiTile
           title="Aktive Kunden"
           icon={<Users className="w-5 h-5" />}
-          value={String(cockpit.activeCustomers.current)}
-          subValue={`Netto ${cockpit.netCustomerGrowth.current >= 0 ? "+" : ""}${cockpit.netCustomerGrowth.current} im Monat`}
-          delta={{ abs: cockpit.activeCustomers.deltaAbs, pct: cockpit.activeCustomers.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          value={cockpit.activeCustomers.current.toLocaleString("de-DE")}
+          subValue={`Netto ${cockpit.netCustomerGrowth.current >= 0 ? "+" : ""}${cockpit.netCustomerGrowth.current.toLocaleString("de-DE")} ${isYear ? "im Jahr" : "im Monat"}`}
+          delta={pickDelta(cockpit.activeCustomers)}
+          formatDeltaAbs={fmtIntDelta}
+          deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkCust}
           sparklineColor="#2563eb"
@@ -176,8 +194,9 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           title="Geleistete Stunden"
           icon={<Clock className="w-5 h-5" />}
           value={hours(cockpit.totalMinutes.current)}
-          delta={{ abs: cockpit.totalMinutes.deltaAbs, pct: cockpit.totalMinutes.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(cockpit.totalMinutes)}
+          formatDeltaAbs={fmtHoursDelta}
+          deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkMin}
           sparklineColor="#7c3aed"
@@ -191,8 +210,9 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           title="Ø Termine je Kunde"
           icon={<CalendarCheck className="w-5 h-5" />}
           value={cockpit.appointmentsPerCustomer.current.toLocaleString("de-DE", { maximumFractionDigits: 1 })}
-          delta={{ abs: cockpit.appointmentsPerCustomer.deltaAbs, pct: cockpit.appointmentsPerCustomer.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(cockpit.appointmentsPerCustomer)}
+          formatDeltaAbs={fmtDecimalDelta}
+          deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkApptsPerCust}
           sparklineColor="#0ea5e9"
@@ -204,8 +224,9 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           title="Ø Umsatz je Kunde"
           icon={<TrendingUp className="w-5 h-5" />}
           value={cents(cockpit.revenuePerCustomer.current)}
-          delta={{ abs: cockpit.revenuePerCustomer.deltaAbs, pct: cockpit.revenuePerCustomer.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(cockpit.revenuePerCustomer)}
+          formatDeltaAbs={fmtCentsDelta}
+          deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkRevPerCust}
           sparklineColor="#16a34a"
@@ -216,10 +237,11 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
         <KpiTile
           title="Prozess-Gesundheit"
           icon={<Activity className="w-5 h-5" />}
-          value={String(health.total.current)}
+          value={health.total.current.toLocaleString("de-DE")}
           subValue="offene Punkte gesamt"
-          delta={{ abs: health.total.deltaAbs, pct: health.total.deltaPct }}
-          deltaLabel="vs. Vormonat"
+          delta={pickDelta(health.total)}
+          formatDeltaAbs={fmtIntDelta}
+          deltaLabel={compareLabel}
           higherIsBetter={false}
           badge={hbsBadge}
           sparkline={sparkHealth}

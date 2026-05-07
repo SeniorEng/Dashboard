@@ -10,6 +10,10 @@ interface KpiTileProps {
   value: string;
   subValue?: string;
   delta?: { abs: number | null; pct: number | null };
+  /** Optional formatter for the absolute delta value. Receives the raw (possibly negative) number
+   *  and must return a fully formatted, signed string (e.g. "+25.093,70 €" or "-3").
+   *  Defaults to `de-DE` thousands separator with a leading "+" for positive values. */
+  formatDeltaAbs?: (abs: number) => string;
   deltaLabel?: string;
   /** Higher is better (true) or lower is better (false). Affects coloring of trend arrow. */
   higherIsBetter?: boolean;
@@ -35,6 +39,7 @@ export function KpiTile({
   value,
   subValue,
   delta,
+  formatDeltaAbs,
   deltaLabel = "Vormonat",
   higherIsBetter = true,
   sparkline,
@@ -84,7 +89,9 @@ export function KpiTile({
                   ? <ArrowDownRight className="w-3.5 h-3.5" />
                   : <Minus className="w-3.5 h-3.5" />}
                 <span className="font-medium">
-                  {delta.abs > 0 ? "+" : ""}{delta.abs}
+                  {formatDeltaAbs
+                    ? formatDeltaAbs(delta.abs)
+                    : `${delta.abs > 0 ? "+" : ""}${delta.abs.toLocaleString("de-DE")}`}
                   {delta.pct !== null && ` (${delta.pct > 0 ? "+" : ""}${delta.pct}%)`}
                 </span>
                 <span className="text-muted-foreground ml-1">{deltaLabel}</span>
