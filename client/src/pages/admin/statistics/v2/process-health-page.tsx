@@ -145,7 +145,13 @@ export function ProcessHealthSection({ selectedYear, selectedMonth }: ProcessHea
           const v = m.pickValue(data);
           const detailHref = m.periodAware ? `${m.detailPath}?${qs}` : m.detailPath;
           const isClean = v.current === 0;
-          const sparkValues = m.pickSparkline(data).map((p) => p.value);
+          const sparkPoints = m.pickSparkline(data);
+          const sparkValues = sparkPoints.map((p) => p.value);
+          // The "customers without employee" series is a snapshot/flat repeat
+          // and shouldn't be labelled with a month axis.
+          const sparkPeriods = m.key === "customers-without-employee"
+            ? undefined
+            : sparkPoints.map((p) => p.period);
           return (
             <KpiTile
               key={m.key}
@@ -157,6 +163,7 @@ export function ProcessHealthSection({ selectedYear, selectedMonth }: ProcessHea
               deltaLabel={compareLabel(selectedMonth)}
               higherIsBetter={false}
               sparkline={sparkValues}
+              sparklinePeriods={sparkPeriods}
               sparklineColor={m.sparklineColor}
               testId={`ph-card-${m.key}`}
               badge={isClean ? { label: "Sauber", className: "bg-emerald-100 text-emerald-800" } : { label: "Offen", className: "bg-amber-100 text-amber-800" }}

@@ -183,6 +183,12 @@ export interface RevenueStatsResponse {
   planned: PlannedRevenueTotals;
   travelCostRatioPct: number;
   travelCostRatioByEmployee: { employeeId: number; employeeName: string; ratioPct: number }[];
+  sparklines: {
+    planned: SparklinePoint[];
+    documented: SparklinePoint[];
+    proven: SparklinePoint[];
+    invoiced: SparklinePoint[];
+  };
 }
 
 export interface PlannedRevenueTotals {

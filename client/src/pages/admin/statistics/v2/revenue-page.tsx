@@ -70,11 +70,12 @@ function RevenueContent({ qs, year, month }: { qs: string; year: number; month: 
   if (query.isError || !query.data) return <StatsError testId="revenue-error" />;
 
   const data = query.data;
+  const stagePeriods = data.sparklines.planned.map((p) => p.period);
   const stages = [
-    { key: "planned", label: "Geplant", icon: <Calendar className="w-5 h-5" />, kpi: data.byStage.planned, color: "#0ea5e9" },
-    { key: "documented", label: "Dokumentiert", icon: <FileCheck className="w-5 h-5" />, kpi: data.byStage.documented, color: "#0d9488" },
-    { key: "proven", label: "Nachgewiesen", icon: <FileCheck className="w-5 h-5" />, kpi: data.byStage.proven, color: "#7c3aed" },
-    { key: "invoiced", label: "Berechnet", icon: <Receipt className="w-5 h-5" />, kpi: data.byStage.invoiced, color: "#16a34a" },
+    { key: "planned", label: "Geplant", icon: <Calendar className="w-5 h-5" />, kpi: data.byStage.planned, color: "#0ea5e9", spark: data.sparklines.planned.map((p) => p.value) },
+    { key: "documented", label: "Dokumentiert", icon: <FileCheck className="w-5 h-5" />, kpi: data.byStage.documented, color: "#0d9488", spark: data.sparklines.documented.map((p) => p.value) },
+    { key: "proven", label: "Nachgewiesen", icon: <FileCheck className="w-5 h-5" />, kpi: data.byStage.proven, color: "#7c3aed", spark: data.sparklines.proven.map((p) => p.value) },
+    { key: "invoiced", label: "Berechnet", icon: <Receipt className="w-5 h-5" />, kpi: data.byStage.invoiced, color: "#16a34a", spark: data.sparklines.invoiced.map((p) => p.value) },
   ] as const;
 
   return (
@@ -90,6 +91,8 @@ function RevenueContent({ qs, year, month }: { qs: string; year: number; month: 
             formatDeltaAbs={fmtCentsDelta}
             deltaLabel={compareLabel(month)}
             higherIsBetter
+            sparkline={s.spark}
+            sparklinePeriods={stagePeriods}
             sparklineColor={s.color}
             testId={`kpi-stage-${s.key}`}
           />

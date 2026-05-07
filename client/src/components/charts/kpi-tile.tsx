@@ -18,6 +18,7 @@ interface KpiTileProps {
   /** Higher is better (true) or lower is better (false). Affects coloring of trend arrow. */
   higherIsBetter?: boolean;
   sparkline?: number[];
+  sparklinePeriods?: string[];
   sparklineColor?: string;
   href?: string;
   testId: string;
@@ -43,6 +44,7 @@ export function KpiTile({
   deltaLabel = "Vormonat",
   higherIsBetter = true,
   sparkline,
+  sparklinePeriods,
   sparklineColor = "#0d9488",
   href,
   testId,
@@ -105,7 +107,12 @@ export function KpiTile({
           </div>
           {sparkline && sparkline.length > 0 && (
             <div className="shrink-0" style={{ color: sparklineColor }}>
-              <Sparkline values={sparkline} testId={`${testId}-sparkline`} color={sparklineColor} />
+              <Sparkline
+                values={sparkline}
+                periods={sparklinePeriods}
+                testId={`${testId}-sparkline`}
+                color={sparklineColor}
+              />
             </div>
           )}
         </div>

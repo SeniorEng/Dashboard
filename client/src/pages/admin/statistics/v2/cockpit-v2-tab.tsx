@@ -119,10 +119,15 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
 
   const stageKpi = cockpit.revenueByStage[stage];
   const sparkRev = cockpit.sparklines.revenueDocumented.map((p) => p.value);
+  const sparkRevPeriods = cockpit.sparklines.revenueDocumented.map((p) => p.period);
   const sparkCust = cockpit.sparklines.activeCustomers.map((p) => p.value);
+  const sparkCustPeriods = cockpit.sparklines.activeCustomers.map((p) => p.period);
   const sparkMin = cockpit.sparklines.totalMinutes.map((p) => p.value);
+  const sparkMinPeriods = cockpit.sparklines.totalMinutes.map((p) => p.period);
   const sparkApptsPerCust = cockpit.sparklines.appointmentsPerCustomer.map((p) => p.value);
+  const sparkApptsPerCustPeriods = cockpit.sparklines.appointmentsPerCustomer.map((p) => p.period);
   const sparkRevPerCust = cockpit.sparklines.revenuePerCustomer.map((p) => p.value);
+  const sparkRevPerCustPeriods = cockpit.sparklines.revenuePerCustomer.map((p) => p.period);
   // Process-health total per month: sum of the five per-metric series.
   const phSeries = health.sparklines;
   const sparkHealth = Array.from({ length: 12 }, (_, i) =>
@@ -132,6 +137,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
     (phSeries.appointmentsWithoutRecord[i]?.value ?? 0) +
     (phSeries.recordsWithoutInvoice[i]?.value ?? 0)
   );
+  const sparkHealthPeriods = phSeries.customersWithoutAppointments.map((p) => p.period);
 
   const hbsBadge = health.healthScore === "rot"
     ? { label: "Kritisch", className: "bg-red-100 text-red-800" }
@@ -151,6 +157,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkRev}
+          sparklinePeriods={sparkRevPeriods}
           sparklineColor="#0d9488"
           href="/admin/statistics/revenue"
           testId="kpi-revenue"
@@ -185,6 +192,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkCust}
+          sparklinePeriods={sparkCustPeriods}
           sparklineColor="#2563eb"
           href="/admin/statistics/customers"
           testId="kpi-active-customers"
@@ -199,6 +207,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkMin}
+          sparklinePeriods={sparkMinPeriods}
           sparklineColor="#7c3aed"
           href="/admin/statistics/performance"
           testId="kpi-total-minutes"
@@ -215,6 +224,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkApptsPerCust}
+          sparklinePeriods={sparkApptsPerCustPeriods}
           sparklineColor="#0ea5e9"
           href="/admin/statistics/performance"
           testId="kpi-appointments-per-customer"
@@ -229,6 +239,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           deltaLabel={compareLabel}
           higherIsBetter
           sparkline={sparkRevPerCust}
+          sparklinePeriods={sparkRevPerCustPeriods}
           sparklineColor="#16a34a"
           href="/admin/statistics/customers"
           testId="kpi-revenue-per-customer"
@@ -245,6 +256,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           higherIsBetter={false}
           badge={hbsBadge}
           sparkline={sparkHealth}
+          sparklinePeriods={sparkHealthPeriods}
           sparklineColor="#dc2626"
           href="/admin/statistics/process-health"
           testId="kpi-process-health"

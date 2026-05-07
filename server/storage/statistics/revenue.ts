@@ -56,13 +56,72 @@ async function computeStages(p: ResolvedPeriod) {
   return { planned: num(row.planned), documented: num(row.documented), proven: num(row.proven), invoiced: num(inv0.invoiced) };
 }
 
+async function stageSparklines(year: number) {
+  const r = await db.execute(sql`
+    WITH per_appt AS (
+      SELECT EXTRACT(MONTH FROM a.date::date)::int AS m, a.id, a.status,
+        SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+          COALESCE(
+            (SELECT csp.price_cents FROM customer_service_prices csp
+             WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+               AND csp.deleted_at IS NULL
+               AND csp.valid_from::date <= a.date::date
+               AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
+             ORDER BY csp.valid_from DESC LIMIT 1),
+            s.default_price_cents
+          )
+        ))::bigint AS revenue_cents
+      FROM appointments a
+      JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      JOIN services s ON s.id = asvc.service_id
+      WHERE a.deleted_at IS NULL AND s.unit_type = 'hours'
+        AND EXTRACT(YEAR FROM a.date::date) = ${year}
+      GROUP BY EXTRACT(MONTH FROM a.date::date), a.id, a.status
+    ),
+    monthly AS (
+      SELECT m,
+        COALESCE(SUM(CASE WHEN status IN ('scheduled','completed','documented') THEN revenue_cents END), 0)::bigint AS planned,
+        COALESCE(SUM(CASE WHEN status IN ('completed','documented') THEN revenue_cents END), 0)::bigint AS documented,
+        COALESCE(SUM(CASE WHEN id IN (
+          SELECT sra.appointment_id FROM service_record_appointments sra
+          JOIN monthly_service_records msr ON msr.id = sra.service_record_id
+          WHERE msr.deleted_at IS NULL AND msr.status = 'completed'
+        ) THEN revenue_cents END), 0)::bigint AS proven
+      FROM per_appt GROUP BY m
+    ),
+    invoiced AS (
+      SELECT i.billing_month AS m, COALESCE(SUM(li.total_cents), 0)::bigint AS invoiced
+      FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
+      WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+        AND i.billing_year = ${year}
+      GROUP BY i.billing_month
+    )
+    SELECT g.m AS month,
+      COALESCE(monthly.planned, 0)::bigint AS planned,
+      COALESCE(monthly.documented, 0)::bigint AS documented,
+      COALESCE(monthly.proven, 0)::bigint AS proven,
+      COALESCE(invoiced.invoiced, 0)::bigint AS invoiced
+    FROM generate_series(1, 12) AS g(m)
+    LEFT JOIN monthly ON monthly.m = g.m
+    LEFT JOIN invoiced ON invoiced.m = g.m
+    ORDER BY g.m
+  `);
+  return r.rows.map((row: Record<string, unknown>) => ({
+    period: `${year}-${String(num(row.month)).padStart(2, "0")}`,
+    planned: num(row.planned),
+    documented: num(row.documented),
+    proven: num(row.proven),
+    invoiced: num(row.invoiced),
+  }));
+}
+
 export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueStatsResponse> {
   const prev = previousPeriod(period);
   const prevY = previousYearPeriod(period);
   const dFilter = dateFilter(period, sql`a.date::date`);
   const invFilter = billingPeriodFilter(period, sql`i.billing_year`, sql`i.billing_month`);
 
-  const [stagesCur, stagesPrev, stagesYoy, byServiceTypeRow, byEmployeeRow, byCustomerRow, gapsRow, ttdRows, ttiRows, forecast, travelRow, travelByEmpRow, plannedRow] = await Promise.all([
+  const [stagesCur, stagesPrev, stagesYoy, byServiceTypeRow, byEmployeeRow, byCustomerRow, gapsRow, ttdRows, ttiRows, forecast, travelRow, travelByEmpRow, plannedRow, sparkRows] = await Promise.all([
     computeStages(period),
     computeStages(prev),
     computeStages(prevY),
@@ -320,6 +379,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       FROM users u LEFT JOIN doc_by_emp d ON d.employee_id = u.id LEFT JOIN tc_by_emp t ON t.employee_id = u.id
       WHERE u.is_active = true AND u.is_anonymized = false AND COALESCE(d.revenue, 0) > 0
     `),
+    stageSparklines(period.year),
   ]);
 
   const gaps = gapsRow.rows[0] as Record<string, unknown>;
@@ -388,6 +448,12 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
         ratioPct: rev > 0 ? Math.round((cost / rev) * 100) : 0,
       };
     }),
+    sparklines: {
+      planned: sparkRows.map((s) => ({ period: s.period, value: s.planned })),
+      documented: sparkRows.map((s) => ({ period: s.period, value: s.documented })),
+      proven: sparkRows.map((s) => ({ period: s.period, value: s.proven })),
+      invoiced: sparkRows.map((s) => ({ period: s.period, value: s.invoiced })),
+    },
   };
 }
 
