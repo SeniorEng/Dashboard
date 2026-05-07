@@ -22,7 +22,7 @@ export interface SparklinePoint {
   value: number;
 }
 
-export interface DrillDownRow {
+interface DrillDownRow {
   id: number;
   label: string;
   date?: string | null;
@@ -32,7 +32,7 @@ export interface DrillDownRow {
 
 export type RevenueStage = "planned" | "documented" | "proven" | "invoiced";
 
-export interface RevenueStageBreakdown {
+interface RevenueStageBreakdown {
   planned: KpiValue;
   documented: KpiValue;
   proven: KpiValue;
@@ -97,7 +97,7 @@ export interface ProcessHealthRow extends DrillDownRow {
   invoiceId?: number | null;
 }
 
-export interface CustomerFunnel {
+interface CustomerFunnel {
   prospect: number;
   inConsultation: number;
   active: number;
@@ -105,7 +105,7 @@ export interface CustomerFunnel {
   terminated: number;
 }
 
-export interface FunnelConversionRates {
+interface FunnelConversionRates {
   /** Anteil Interessent → In Beratung (in %). */
   prospectToConsultationPct: number;
   /** Anteil In Beratung → Aktiv (in %). */
@@ -114,7 +114,7 @@ export interface FunnelConversionRates {
   retentionPct: number;
 }
 
-export interface ProjectedGrowthRange {
+interface ProjectedGrowthRange {
   /** Punkt-Schätzung (planned * Conversion-Rate). */
   point: number;
   /** Untere Grenze 95%-Wilson-Konfidenz. */
@@ -224,7 +224,7 @@ export interface PerformanceStatsResponse {
   profitability: ProfitabilityBreakdown;
 }
 
-export interface ProfitabilityEmployeeRow {
+interface ProfitabilityEmployeeRow {
   employeeId: number;
   employeeName: string;
   revenueCents: number;
@@ -235,7 +235,7 @@ export interface ProfitabilityEmployeeRow {
   appointments: number;
 }
 
-export interface ServicePriceCalculationRow {
+interface ServicePriceCalculationRow {
   code: string;
   label: string;
   priceCents: number;

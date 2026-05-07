@@ -9,29 +9,11 @@ export function hashPayload(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-export interface IdempotencyHit {
-  status: "hit";
-  customerId: number;
-}
-
-export interface IdempotencyReserved {
-  status: "reserved";
-  reservationId: number;
-}
-
-export interface IdempotencyConflict {
-  status: "conflict";
-}
-
-export interface IdempotencyInProgress {
-  status: "in_progress";
-}
-
 export type IdempotencyReservation =
-  | IdempotencyHit
-  | IdempotencyReserved
-  | IdempotencyConflict
-  | IdempotencyInProgress;
+  | { status: "hit"; customerId: number }
+  | { status: "reserved"; reservationId: number }
+  | { status: "conflict" }
+  | { status: "in_progress" };
 
 const RESERVATION_POLL_INTERVAL_MS = 100;
 const RESERVATION_POLL_MAX_MS = 5000;

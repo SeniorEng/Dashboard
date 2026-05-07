@@ -6,7 +6,7 @@ interface SparklineProps {
   testId?: string;
 }
 
-export function Sparkline({ values, width = 96, height = 28, color = "currentColor", testId }: SparklineProps) {
+function Sparkline({ values, width = 96, height = 28, color = "currentColor", testId }: SparklineProps) {
   if (!values || values.length === 0) {
     return <div className="text-xs text-muted-foreground" style={{ width, height }} data-testid={testId}>—</div>;
   }
@@ -36,3 +36,4 @@ export function Sparkline({ values, width = 96, height = 28, color = "currentCol
     </svg>
   );
 }
+export { Sparkline };

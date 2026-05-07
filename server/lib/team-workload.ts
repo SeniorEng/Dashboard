@@ -1,11 +1,11 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "./db";
 
-export type EmploymentType = "minijobber" | "sozialversicherungspflichtig";
+type EmploymentType = "minijobber" | "sozialversicherungspflichtig";
 
-export type AssignmentRole = "HV" | "V1" | "V2";
+type AssignmentRole = "HV" | "V1" | "V2";
 
-export interface CustomerAssignment {
+interface CustomerAssignment {
   id: number;
   name: string;
   role: AssignmentRole;
