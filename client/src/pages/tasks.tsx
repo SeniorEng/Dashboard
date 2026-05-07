@@ -10,7 +10,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Loader2, AlertCircle, Coffee, FileSignature, CalendarCheck } from "lucide-react";
 import { Link } from "wouter";
-import { NotificationList } from "@/features/notifications/notification-list";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
@@ -199,10 +198,6 @@ export default function TasksPage() {
               </DialogContent>
             </Dialog>
           </div>
-        </div>
-
-        <div className="mb-4">
-          <NotificationList />
         </div>
 
         {totalSystemHints > 0 && (

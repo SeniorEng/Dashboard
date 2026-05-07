@@ -13,9 +13,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, Bell, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle, Gauge } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle, Gauge } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
+import { NotificationBell } from "@/components/notification-bell";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { useActiveEmployees } from "@/features/appointments/hooks/use-active-employees";
 
@@ -246,19 +247,9 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
 
   const hasBadge = badgeCount > 0 || notificationUnreadCount > 0;
   const hasBirthdayBadge = birthdayCount > 0;
-
-  useEffect(() => {
-    if (notificationUnreadCount > 0 && isAuthenticated) {
-      const key = "careconnect_notification_shown";
-      if (!sessionStorage.getItem(key)) {
-        sessionStorage.setItem(key, "1");
-        toast({
-          title: `${notificationUnreadCount} neue Benachrichtigung${notificationUnreadCount > 1 ? "en" : ""}`,
-          description: "Tippe auf Aufgaben, um sie zu sehen.",
-        });
-      }
-    }
-  }, [notificationUnreadCount, isAuthenticated]);
+  // Hinweis: Der frühere Session-Toast „N neue Benachrichtigungen" entfällt,
+  // weil die Header-Bell mit Zähler, Wackel-Animation, Tab-Titel-Präfix und
+  // Favicon-Punkt die Sichtbarkeit dauerhaft sicherstellt (Task #378).
 
   const { data: companySettings } = useQuery<{ logoUrl?: string | null }>({
     queryKey: ["company-settings"],
@@ -341,7 +332,9 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
           {isAuthenticated && <GlobalSearch />}
           
           {isAuthenticated && user ? (
-            <DropdownMenu>
+            <div className="flex items-center gap-1">
+              <NotificationBell />
+              <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 hover:opacity-80 transition-opacity focus:outline-none" data-testid="button-user-menu">
                   <div className="hidden md:flex text-sm text-muted-foreground">
@@ -428,6 +421,7 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </div>
           ) : (
             <div className="flex items-center gap-4">
               <Link href="/login" className="text-sm text-primary hover:underline">

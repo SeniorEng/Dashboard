@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -11,7 +12,11 @@ export function useNotifications() {
       const result = await api.get<Notification[]>("/notifications");
       return unwrapResult(result);
     },
-    staleTime: 30000,
+    staleTime: 15000,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }
 
@@ -22,9 +27,30 @@ export function useUnreadCount() {
       const result = await api.get<{ count: number }>("/notifications/unread-count");
       return unwrapResult(result).count;
     },
-    refetchInterval: 60000,
-    staleTime: 15000,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 10000,
   });
+}
+
+/**
+ * Triggers an immediate refetch of notification queries when the tab becomes
+ * visible again. Acceptance criterion AC5 (≤500 ms after tab focus).
+ */
+export function useNotificationVisibilityRefetch() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handler = () => {
+      if (document.visibilityState === "visible") {
+        void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      }
+    };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, [queryClient]);
 }
 
 export function useMarkAsRead() {
