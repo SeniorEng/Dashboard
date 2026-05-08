@@ -228,8 +228,7 @@ class AppointmentService {
       updates.date !== undefined || 
       updates.scheduledStart !== undefined || 
       updates.scheduledEnd !== undefined || 
-      updates.durationPromised !== undefined || 
-      updates.serviceType !== undefined;
+      updates.durationPromised !== undefined;
     
     if (hasSchedulingChanges) {
       if (currentStatus !== "scheduled" || targetStatus !== "scheduled") {

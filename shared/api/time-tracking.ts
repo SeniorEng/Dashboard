@@ -90,6 +90,11 @@ interface AppointmentServiceBreakdown {
 export interface AppointmentWithCustomerName extends Appointment {
   customerName: string;
   services?: AppointmentServiceBreakdown[];
+  /**
+   * Abgeleitetes Label aus `appointment_services` + `services.lohnart_kategorie`.
+   * Siehe Hinweis bei `AppointmentWithCustomer.serviceType`.
+   */
+  serviceType: string | null;
 }
 
 export interface ServiceHoursSummary {

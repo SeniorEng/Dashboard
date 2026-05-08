@@ -40,6 +40,24 @@ export function employeeWorkedAppointmentsFilter(userId: number): SQL {
 
 const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
 
+// Derived from appointment_services + services.lohnart_kategorie. Returns the
+// human-readable label that the frontend (`getCardServiceInfoFromAppointment`,
+// employee-time-card, day-detail-panel) historically read from the now-deprecated
+// `appointments.service_type` column.
+const derivedServiceType = sqlBuilder<string | null>`(
+  SELECT CASE
+    WHEN BOOL_OR(s.lohnart_kategorie = 'hauswirtschaft')
+     AND BOOL_OR(s.lohnart_kategorie = 'alltagsbegleitung')
+      THEN 'Hauswirtschaft & Alltagsbegleitung'
+    WHEN BOOL_OR(s.lohnart_kategorie = 'hauswirtschaft') THEN 'Hauswirtschaft'
+    WHEN BOOL_OR(s.lohnart_kategorie = 'alltagsbegleitung') THEN 'Alltagsbegleitung'
+    ELSE NULL
+  END
+  FROM appointment_services asvc
+  JOIN services s ON s.id = asvc.service_id
+  WHERE asvc.appointment_id = ${appointments.id}
+)`.as("service_type");
+
 export const appointmentWithCustomerSelectFields = {
   id: appointments.id,
   customerId: appointments.customerId,
@@ -47,7 +65,7 @@ export const appointmentWithCustomerSelectFields = {
   createdByUserId: appointments.createdByUserId,
   assignedEmployeeId: appointments.assignedEmployeeId,
   appointmentType: appointments.appointmentType,
-  serviceType: appointments.serviceType,
+  serviceType: derivedServiceType,
   date: appointments.date,
   scheduledStart: appointments.scheduledStart,
   scheduledEnd: appointments.scheduledEnd,

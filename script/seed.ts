@@ -48,7 +48,6 @@ async function seed() {
     {
       customerId: insertedCustomers[0].id,
       appointmentType: "Kundentermin",
-      serviceType: "Alltagsbegleitung",
       date: today,
       time: "09:00",
       scheduledStart: "09:00",
@@ -59,18 +58,16 @@ async function seed() {
     {
       customerId: insertedCustomers[1].id,
       appointmentType: "Kundentermin",
-      serviceType: "Hauswirtschaft",
       date: today,
       time: "10:30",
       scheduledStart: "10:30",
       durationPromised: 60,
       status: "scheduled"
     },
-    // Erstberatung (scheduled) - no service type
+    // Erstberatung (scheduled)
     {
       customerId: insertedCustomers[2].id,
       appointmentType: "Erstberatung",
-      serviceType: null,
       date: today,
       time: "13:00",
       scheduledStart: "13:00",
@@ -81,18 +78,16 @@ async function seed() {
     {
       customerId: insertedCustomers[1].id,
       appointmentType: "Kundentermin",
-      serviceType: "Alltagsbegleitung",
       date: today,
       time: "15:00",
       scheduledStart: "15:00",
       durationPromised: 45,
       status: "scheduled"
     },
-    // Erstberatung (completed) - no service type
+    // Erstberatung (completed)
     {
       customerId: insertedCustomers[3].id,
       appointmentType: "Erstberatung",
-      serviceType: null,
       date: today,
       time: "16:30",
       scheduledStart: "16:30",

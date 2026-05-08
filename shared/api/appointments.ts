@@ -6,6 +6,14 @@ export interface AppointmentWithCustomer extends Appointment {
   isLocked?: boolean;
   isMonthClosed?: boolean;
   lockedReason?: string;
+  /**
+   * Abgeleitetes Label aus `appointment_services` + `services.lohnart_kategorie`
+   * (z.B. "Hauswirtschaft", "Alltagsbegleitung",
+   * "Hauswirtschaft & Alltagsbegleitung"). Ersetzt die mit Task #396 entfernte
+   * Spalte `appointments.service_type` und wird ausschließlich serverseitig
+   * via SQL berechnet (siehe `server/storage/appointment-helpers.ts`).
+   */
+  serviceType: string | null;
 }
 
 interface CoverageUncoveredCustomer {

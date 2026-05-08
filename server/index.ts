@@ -173,8 +173,10 @@ async function runStartupTasks() {
     const { documentStorage } = await import("./storage/documents");
     await documentStorage.ensureCustomerDocumentTypes();
 
-    const { backfillAppointmentServices } = await import("./startup/backfill-appointment-services");
-    await backfillAppointmentServices();
+    // Entfernt die deprecated Spalte appointments.service_type endgültig.
+    // Idempotent (DROP COLUMN IF EXISTS) — beim nächsten Boot ein No-Op.
+    const { dropAppointmentsServiceTypeColumn } = await import("./startup/drop-appointments-service-type");
+    await dropAppointmentsServiceTypeColumn();
 
     const { encryptExistingSecrets } = await import("./startup/encrypt-company-secrets");
     try {

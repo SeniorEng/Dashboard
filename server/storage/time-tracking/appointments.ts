@@ -10,6 +10,22 @@ import type { AppointmentWithCustomerName } from "@shared/api";
 import { db } from "../../lib/db";
 import { employeeVisibleAppointmentsFilter } from "../appointment-helpers";
 
+// Abgeleitetes Service-Type-Label aus appointment_services + services.lohnart_kategorie.
+// Ersetzt die mit Task #396 entfernte Spalte appointments.service_type.
+const derivedServiceTypeSql = sqlBuilder<string | null>`(
+  SELECT CASE
+    WHEN BOOL_OR(s.lohnart_kategorie = 'hauswirtschaft')
+     AND BOOL_OR(s.lohnart_kategorie = 'alltagsbegleitung')
+      THEN 'Hauswirtschaft & Alltagsbegleitung'
+    WHEN BOOL_OR(s.lohnart_kategorie = 'hauswirtschaft') THEN 'Hauswirtschaft'
+    WHEN BOOL_OR(s.lohnart_kategorie = 'alltagsbegleitung') THEN 'Alltagsbegleitung'
+    ELSE NULL
+  END
+  FROM appointment_services asvc
+  JOIN services s ON s.id = asvc.service_id
+  WHERE asvc.appointment_id = ${appointments.id}
+)`.as('service_type');
+
 export async function getEmployeeAppointments(
   userId: number,
   startDate: string,
@@ -18,6 +34,7 @@ export async function getEmployeeAppointments(
   const results = await db
     .select({
       ...getTableColumns(appointments),
+      serviceType: derivedServiceTypeSql,
       customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name}, ${prospects.vorname} || ' ' || ${prospects.nachname}, '')`.as('customer_name'),
     })
     .from(appointments)
@@ -55,6 +72,7 @@ export async function getAllAppointmentsInRange(
   const results = await db
     .select({
       ...getTableColumns(appointments),
+      serviceType: derivedServiceTypeSql,
       customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name}, ${prospects.vorname} || ' ' || ${prospects.nachname}, '')`.as('customer_name'),
     })
     .from(appointments)

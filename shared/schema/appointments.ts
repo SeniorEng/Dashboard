@@ -93,7 +93,10 @@ export const appointments = pgTable("appointments", {
   assignedEmployeeId: integer("assigned_employee_id").references(() => users.id),
   performedByEmployeeId: integer("performed_by_employee_id").references(() => users.id),
   appointmentType: text("appointment_type").notNull(),
-  serviceType: text("service_type"), // Legacy: replaced by appointment_services junction table
+  // Hinweis: Die frühere Spalte `service_type` wurde entfernt. Die Kategorie
+  // eines Termins ergibt sich ausschließlich aus `appointment_services` +
+  // `services.lohnart_kategorie`. Drop-Migration:
+  // `server/startup/drop-appointments-service-type.ts`.
   date: date("date").notNull(),
   // Scheduled times (planned appointment slot)
   scheduledStart: time("scheduled_start").notNull(),

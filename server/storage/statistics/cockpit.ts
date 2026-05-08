@@ -56,15 +56,34 @@ async function computeRevenueStages(p: ResolvedPeriod) {
 
 async function computeMinutesByServiceType(p: ResolvedPeriod): Promise<ServiceTypeMinutesBreakdown> {
   const dFilter = dateFilter(p, sql`a.date::date`);
+  // Category derived from appointment_services + services.lohnart_kategorie.
+  // DISTINCT ON picks one category per appointment (preferring HW/AB over 'sonstige')
+  // so duration_promised is not double-counted when an appointment has multiple services.
   const r = await db.execute(sql`
+    WITH appt_category AS (
+      SELECT DISTINCT ON (a.id)
+        a.id,
+        a.duration_promised,
+        CASE
+          WHEN a.appointment_type = 'Erstberatung' THEN 'erstberatung'
+          WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN s.lohnart_kategorie
+          ELSE 'sonstige'
+        END AS category
+      FROM appointments a
+      LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      LEFT JOIN services s ON s.id = asvc.service_id
+      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+        ${dFilter}
+      ORDER BY a.id,
+        CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+    )
     SELECT
-      COALESCE(SUM(CASE WHEN a.appointment_type = 'Erstberatung' THEN a.duration_promised END), 0)::int AS eb,
-      COALESCE(SUM(CASE WHEN a.appointment_type != 'Erstberatung' AND a.service_type = 'hauswirtschaft' THEN a.duration_promised END), 0)::int AS hw,
-      COALESCE(SUM(CASE WHEN a.appointment_type != 'Erstberatung' AND a.service_type = 'alltagsbegleitung' THEN a.duration_promised END), 0)::int AS ab,
-      COALESCE(SUM(CASE WHEN a.appointment_type != 'Erstberatung' AND (a.service_type IS NULL OR a.service_type NOT IN ('hauswirtschaft','alltagsbegleitung')) THEN a.duration_promised END), 0)::int AS other
-    FROM appointments a
-    WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
-      ${dFilter}
+      COALESCE(SUM(CASE WHEN category = 'erstberatung' THEN duration_promised END), 0)::int AS eb,
+      COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN duration_promised END), 0)::int AS hw,
+      COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN duration_promised END), 0)::int AS ab,
+      COALESCE(SUM(CASE WHEN category = 'sonstige' THEN duration_promised END), 0)::int AS other
+    FROM appt_category
   `);
   const row = r.rows[0] as Record<string, unknown>;
   return { hauswirtschaft: num(row.hw), alltagsbegleitung: num(row.ab), erstberatung: num(row.eb), sonstige: num(row.other) };

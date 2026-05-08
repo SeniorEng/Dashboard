@@ -5,11 +5,13 @@ import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previ
 
 function perAppointmentCte(p: ResolvedPeriod) {
   const dFilter = dateFilter(p, sql`a.date::date`);
+  // service_type derived from services.lohnart_kategorie via appointment_services.
+  // DISTINCT ON picks one category per appointment (preferring HW/AB over 'sonstige')
+  // so revenue is not split across multiple categories when an appointment has multiple services.
   return sql`
-    per_appt AS (
+    appt_revenue AS (
       SELECT a.id, a.customer_id,
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
-        COALESCE(a.service_type, 'sonstige') AS service_type,
         a.appointment_type, a.status, a.date::date AS d,
         SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
           COALESCE(
@@ -27,7 +29,27 @@ function perAppointmentCte(p: ResolvedPeriod) {
       JOIN services s ON s.id = asvc.service_id
       WHERE a.deleted_at IS NULL AND s.unit_type = 'hours'
         ${dFilter}
-      GROUP BY a.id, a.customer_id, a.performed_by_employee_id, a.assigned_employee_id, a.service_type, a.appointment_type, a.status, a.date
+      GROUP BY a.id, a.customer_id, a.performed_by_employee_id, a.assigned_employee_id, a.appointment_type, a.status, a.date
+    ),
+    appt_service_type AS (
+      SELECT DISTINCT ON (a.id)
+        a.id,
+        CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
+             THEN s.lohnart_kategorie ELSE 'sonstige' END AS service_type
+      FROM appointments a
+      LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      LEFT JOIN services s ON s.id = asvc.service_id
+      WHERE a.deleted_at IS NULL ${dFilter}
+      ORDER BY a.id,
+        CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+    ),
+    per_appt AS (
+      SELECT ar.id, ar.customer_id, ar.employee_id,
+        COALESCE(ast.service_type, 'sonstige') AS service_type,
+        ar.appointment_type, ar.status, ar.d, ar.revenue_cents
+      FROM appt_revenue ar
+      LEFT JOIN appt_service_type ast ON ast.id = ar.id
     )
   `;
 }
@@ -145,13 +167,27 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
           ) THEN revenue_cents END), 0)::bigint AS proven
         FROM svc_appt GROUP BY service_type
       ),
+      inv_appt_service_type AS (
+        SELECT DISTINCT ON (a.id)
+          a.id,
+          CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
+               THEN s.lohnart_kategorie ELSE 'sonstige' END AS service_type
+        FROM appointments a
+        LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        LEFT JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL
+        ORDER BY a.id,
+          CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+          COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+      ),
       inv_by_svc AS (
         SELECT CASE WHEN a.appointment_type = 'Erstberatung' THEN 'erstberatung'
-                    ELSE COALESCE(a.service_type, 'sonstige') END AS service_type,
+                    ELSE COALESCE(iast.service_type, 'sonstige') END AS service_type,
           COALESCE(SUM(li.total_cents), 0)::bigint AS invoiced
         FROM invoice_line_items li
         JOIN invoices i ON i.id = li.invoice_id
         JOIN appointments a ON a.id = li.appointment_id
+        LEFT JOIN inv_appt_service_type iast ON iast.id = a.id
         WHERE i.status != 'storniert' AND i.invoice_type != 'stornorechnung' ${invFilter}
         GROUP BY 1
       )

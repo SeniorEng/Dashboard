@@ -7,9 +7,9 @@ import { resolvePeriod } from "../server/storage/statistics/common";
 
 /**
  * Task #391 — „Geleistete Stunden je Monat" muss die Kategorie aus
- * appointment_services → services.lohnart_kategorie ableiten, nicht aus der
- * Legacy-Spalte appointments.service_type. Sonst landen alle importierten
- * Termine fälschlich im Bucket „Sonstige".
+ * appointment_services → services.lohnart_kategorie ableiten. Die frühere
+ * Legacy-Spalte appointments.service_type wurde mit Task #396 entfernt;
+ * Junction ist alleinige Source of Truth.
  */
 describe("Task #391 — Performance: lohnart_kategorie aus Junction", () => {
   const testYear = 2031;
@@ -54,7 +54,6 @@ describe("Task #391 — Performance: lohnart_kategorie aus Junction", () => {
     customerId: number;
     date: string;
     durationMinutes: number;
-    serviceType: string | null; // legacy column
     junctionServiceId: number | null;
   }): Promise<number> {
     const rows = await db.execute(sql`
@@ -62,12 +61,12 @@ describe("Task #391 — Performance: lohnart_kategorie aus Junction", () => {
         customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
         appointment_type, date, scheduled_start, scheduled_end, duration_promised,
         status, actual_start, actual_end, travel_origin_type, travel_kilometers,
-        travel_minutes, customer_kilometers, service_type, signed_at, signed_by_user_id
+        travel_minutes, customer_kilometers, signed_at, signed_by_user_id
       ) VALUES (
         ${opts.customerId}, ${userId}, ${userId}, ${userId},
         'Kundentermin', ${opts.date}, '09:00', '10:00', ${opts.durationMinutes},
         'completed', '09:00', '10:00', 'home', 0,
-        0, 0, ${opts.serviceType}, NOW(), ${userId}
+        0, 0, NOW(), ${userId}
       )
       RETURNING id
     `).then((r) => r.rows as Array<{ id: number }>);
@@ -87,40 +86,36 @@ describe("Task #391 — Performance: lohnart_kategorie aus Junction", () => {
     const cid = customer.id as number;
     customerIds.push(cid);
 
-    // (a) Manueller Termin: Legacy-Spalte gesetzt + passende Junction-Zeile
+    // (a) Manueller Termin: Junction-Zeile HW
     await insertAppt({
       customerId: cid,
       date: `${testYear}-01-15`,
       durationMinutes: 60,
-      serviceType: "hauswirtschaft",
       junctionServiceId: hwServiceId,
     });
 
-    // (b) Importierter Termin: NUR Junction-Zeile, Legacy-Spalte leer
+    // (b) Importierter Termin: Junction-Zeile HW
     await insertAppt({
       customerId: cid,
       date: `${testYear}-02-15`,
       durationMinutes: 90,
-      serviceType: null,
       junctionServiceId: hwServiceId,
     });
 
-    // (c) Alltagsbegleitung importiert (Junction-only)
+    // (c) Alltagsbegleitung importiert (Junction)
     await insertAppt({
       customerId: cid,
       date: `${testYear}-03-15`,
       durationMinutes: 120,
-      serviceType: null,
       junctionServiceId: abServiceId,
     });
 
-    // (d) Alttermin nur mit Legacy-Spalte, KEINE Junction-Zeile
+    // (d) Termin OHNE Junction-Zeile
     //     → muss strikt in „Sonstige" landen (Junction ist Source of Truth).
     await insertAppt({
       customerId: cid,
       date: `${testYear}-04-15`,
       durationMinutes: 45,
-      serviceType: "hauswirtschaft",
       junctionServiceId: null,
     });
 
@@ -132,7 +127,6 @@ describe("Task #391 — Performance: lohnart_kategorie aus Junction", () => {
       customerId: cid,
       date: `${testYear}-05-15`,
       durationMinutes: 75,
-      serviceType: null,
       junctionServiceId: hwServiceId,
     });
     await db.execute(sql`

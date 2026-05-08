@@ -105,7 +105,6 @@ router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", a
     id: appointments.id,
     customerId: appointments.customerId,
     date: appointments.date,
-    serviceType: appointments.serviceType,
     actualStart: appointments.actualStart,
     actualEnd: appointments.actualEnd,
     signatureData: appointments.signatureData,
@@ -159,11 +158,10 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     conditions.push(lte(appointments.date, data.dateTo));
   }
 
-  const appointmentsWithoutBudget = await db.select({
+  const apptRows = await db.select({
     id: appointments.id,
     customerId: appointments.customerId,
     date: appointments.date,
-    serviceType: appointments.serviceType,
     actualStart: appointments.actualStart,
     actualEnd: appointments.actualEnd,
     travelKilometers: appointments.travelKilometers,
@@ -173,6 +171,31 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
   .from(appointments)
   .where(and(...conditions))
   .orderBy(appointments.date);
+
+  // Resolve dominant lohnart_kategorie per appointment via appointment_services.
+  const apptIds = apptRows.map((a) => a.id);
+  const categoryByAppt = new Map<number, "hauswirtschaft" | "alltagsbegleitung" | null>();
+  if (apptIds.length > 0) {
+    const catRows = await db.execute(sql`
+      SELECT DISTINCT ON (asvc.appointment_id)
+        asvc.appointment_id AS id,
+        s.lohnart_kategorie AS category
+      FROM appointment_services asvc
+      JOIN services s ON s.id = asvc.service_id
+      WHERE asvc.appointment_id IN (${sql.join(apptIds.map((id) => sql`${id}`), sql`, `)})
+      ORDER BY asvc.appointment_id,
+        CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+    `);
+    for (const r of catRows.rows as Array<{ id: number; category: string | null }>) {
+      const cat = r.category === "hauswirtschaft" || r.category === "alltagsbegleitung" ? r.category : null;
+      categoryByAppt.set(Number(r.id), cat);
+    }
+  }
+  const appointmentsWithoutBudget = apptRows.map((a) => ({
+    ...a,
+    serviceCategory: categoryByAppt.get(a.id) ?? null,
+  }));
 
   const results: Array<{ appointmentId: number; customerId: number; date: string; status: string; error?: string }> = [];
   const systemSignatureText = "SYSTEMGENERIERT";
@@ -188,8 +211,8 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
       continue;
     }
 
-    const hwMinutes = appt.serviceType === "hauswirtschaft" ? durationMinutes : 0;
-    const abMinutes = appt.serviceType === "alltagsbegleitung" ? durationMinutes : 0;
+    const hwMinutes = appt.serviceCategory === "hauswirtschaft" ? durationMinutes : 0;
+    const abMinutes = appt.serviceCategory === "alltagsbegleitung" ? durationMinutes : 0;
     const travelKm = appt.travelKilometers || 0;
     const customerKm = appt.customerKilometers || 0;
 
