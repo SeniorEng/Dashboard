@@ -9,7 +9,7 @@ import {
   prospects,
 } from "@shared/schema";
 import { prospectStorage } from "../storage/prospects";
-import { appointmentService } from "../services/appointments";
+import { appointmentService, syncAppointmentServicesAndDuration } from "../services/appointments";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
@@ -586,11 +586,13 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
   }
   
-  const appointment = await storage.createAppointment(appointmentData);
-
-  if (serviceEntries.length > 0) {
-    await storage.createAppointmentServices(appointment.id, serviceEntries);
-  }
+  const appointment = await db.transaction(async (tx) => {
+    const created = await storage.createAppointment(appointmentData, tx);
+    if (serviceEntries.length > 0) {
+      await storage.createAppointmentServices(created.id, serviceEntries, tx);
+    }
+    return created;
+  });
 
   await auditService.appointmentCreated(
     user.id,
@@ -708,6 +710,8 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
     return sendConflict(res, "Mitarbeiter blockiert", erstberatungBlockerConflict);
   }
 
+  const erstberatungService = await serviceCatalogStorage.getServiceByCode("erstberatung");
+
   const result = await db.transaction(async (tx) => {
     const [appointment] = await tx.insert(appointments).values({
       prospectId: validatedData.prospectId,
@@ -726,16 +730,16 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
       .set({ status: "erstberatung_vereinbart", updatedAt: new Date() })
       .where(eq(prospects.id, validatedData.prospectId));
 
+    if (erstberatungService) {
+      await storage.createAppointmentServices(
+        appointment.id,
+        [{ serviceId: erstberatungService.id, plannedDurationMinutes: validatedData.erstberatungDauer }],
+        tx,
+      );
+    }
+
     return appointment;
   });
-
-  const erstberatungService = await serviceCatalogStorage.getServiceByCode("erstberatung");
-  if (erstberatungService) {
-    await storage.createAppointmentServices(result.id, [{
-      serviceId: erstberatungService.id,
-      plannedDurationMinutes: validatedData.erstberatungDauer,
-    }]);
-  }
 
   await prospectStorage.addNote({
     prospectId: validatedData.prospectId,
@@ -797,7 +801,39 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   }
 
   const validatedData = updateAppointmentSchema.parse(req.body);
-  
+
+  let validatedServicesPayload: { serviceId: number; plannedDurationMinutes: number }[] | undefined;
+  if (req.body.services !== undefined) {
+    if (!Array.isArray(req.body.services)) {
+      return sendBadRequest(res, "Das Feld 'services' muss eine Liste sein.");
+    }
+    const servicesSchema = z.array(z.object({
+      serviceId: z.number().int().positive(),
+      plannedDurationMinutes: z.number().int().positive(),
+    }));
+    const parsed = servicesSchema.safeParse(req.body.services);
+    if (!parsed.success) {
+      return sendBadRequest(res, "Ungültige Service-Zeilen — jede Zeile braucht eine positive serviceId und plannedDurationMinutes.");
+    }
+    validatedServicesPayload = parsed.data;
+
+    const servicesSum = parsed.data.reduce((s, sv) => s + sv.plannedDurationMinutes, 0);
+    if (validatedData.durationPromised != null) {
+      if (servicesSum !== validatedData.durationPromised) {
+        return sendBadRequest(
+          res,
+          `Die geplante Termin-Dauer (${validatedData.durationPromised} Min) weicht von der Summe der Service-Minuten (${servicesSum} Min) ab. Bitte beide Werte konsistent setzen oder nur einen Wert ändern.`,
+        );
+      }
+    } else if (servicesSum !== existingAppointment.durationPromised) {
+      // Service-Änderungen, die die Gesamtdauer verschieben, sind eine
+      // implizite Scheduling-Änderung. Wir tragen die neue Dauer in die
+      // validierten Daten ein, damit `validateSchedulingChanges` sie sieht
+      // und auf nicht-`scheduled` Termine korrekt mit 403 antwortet.
+      validatedData.durationPromised = servicesSum;
+    }
+  }
+
   if (validatedData.date && isWeekend(validatedData.date)) {
     return sendBadRequest(res, "Termine können nicht auf Samstage oder Sonntage verschoben werden.");
   }
@@ -870,20 +906,30 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     }
   }
 
-  const updated = await storage.updateAppointment(id, validatedData);
+  const updated = await db.transaction(async (tx) => {
+    const sync = await syncAppointmentServicesAndDuration(
+      id,
+      {
+        durationPromised: validatedData.durationPromised,
+        services: validatedServicesPayload,
+      },
+      tx,
+    );
+
+    const dataForUpdate: Record<string, unknown> = { ...validatedData };
+    if (sync.effectiveDurationPromised != null) {
+      dataForUpdate.durationPromised = sync.effectiveDurationPromised;
+    }
+
+    if (Object.keys(dataForUpdate).length === 0) {
+      return existingAppointment;
+    }
+
+    return await storage.updateAppointment(id, dataForUpdate as typeof validatedData, tx);
+  });
+
   if (!updated) {
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
-  }
-  
-  if (req.body.services && Array.isArray(req.body.services)) {
-    const serviceSchema = z.array(z.object({
-      serviceId: z.number().int().positive(),
-      plannedDurationMinutes: z.number().int().positive(),
-    }));
-    const services = serviceSchema.safeParse(req.body.services);
-    if (services.success) {
-      await storage.replaceAppointmentServices(id, services.data);
-    }
   }
 
   const changedFields = Object.keys(validatedData).filter(k => (validatedData as Record<string, unknown>)[k] !== undefined);

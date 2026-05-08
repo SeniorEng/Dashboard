@@ -252,6 +252,13 @@ async function runStartupTasks() {
       log(`Schulung/Besprechung-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { syncAppointmentServiceDurations } = await import("./startup/sync-appointment-service-durations");
+    try {
+      await syncAppointmentServiceDurations();
+    } catch (err) {
+      log(`Termin-Service-Drift-Korrektur fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { syncAllBudgetAllocations } = await import("./startup/sync-budget-allocations");
     try {
       const synced = await syncAllBudgetAllocations();

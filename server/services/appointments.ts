@@ -9,6 +9,159 @@ import {
   canEditNotes,
   type AppointmentStatus
 } from "@shared/types";
+import { db, type DbOrTx } from "../lib/db";
+import { badRequest } from "../lib/errors";
+import { eq } from "drizzle-orm";
+
+export interface ServiceLineDuration {
+  serviceId: number;
+  plannedDurationMinutes: number;
+}
+
+/**
+ * Pure: Skaliert die Service-Zeilen so, dass deren Summe exakt `newTotal`
+ * ergibt. Garantien:
+ *
+ * - `newTotal < 0` wird wie `0` behandelt.
+ * - Summe der Rückgabe == `newTotal` (modulo Integer-Arithmetik).
+ * - Keine Zeile bekommt einen negativen Wert.
+ * - Falls `newTotal >= services.length`, bekommt jede Zeile mind. 1 Minute.
+ * - Falls `newTotal < services.length`, dürfen einzelne Zeilen 0 Minuten
+ *   werden (sonst wäre die Summen-Invariante nicht haltbar).
+ *
+ * Bei einer einzigen Zeile 1:1, bei mehreren proportional verteilt;
+ * Restminuten landen auf der größten Zeile.
+ */
+export function scaleServiceDurations(
+  services: ReadonlyArray<ServiceLineDuration>,
+  newTotal: number,
+): ServiceLineDuration[] {
+  if (services.length === 0) return [];
+  const target = Math.max(0, Math.floor(newTotal));
+  if (services.length === 1) {
+    return [{ serviceId: services[0].serviceId, plannedDurationMinutes: target }];
+  }
+  if (target === 0) {
+    return services.map(s => ({ serviceId: s.serviceId, plannedDurationMinutes: 0 }));
+  }
+
+  const minPerLine = target >= services.length ? 1 : 0;
+  const oldTotal = services.reduce((sum, s) => sum + Math.max(0, s.plannedDurationMinutes), 0);
+
+  const scaled: ServiceLineDuration[] = oldTotal === 0
+    ? services.map((s) => ({ serviceId: s.serviceId, plannedDurationMinutes: Math.floor(target / services.length) }))
+    : services.map((s) => ({
+        serviceId: s.serviceId,
+        plannedDurationMinutes: Math.max(
+          minPerLine,
+          Math.round((Math.max(0, s.plannedDurationMinutes) / oldTotal) * target),
+        ),
+      }));
+
+  // Differenz zwischen Soll-Summe und Ist-Summe auf die größte Zeile buchen.
+  let largestIdx = 0;
+  for (let i = 1; i < scaled.length; i++) {
+    if (scaled[i].plannedDurationMinutes > scaled[largestIdx].plannedDurationMinutes) largestIdx = i;
+  }
+  const currentSum = scaled.reduce((sum, s) => sum + s.plannedDurationMinutes, 0);
+  scaled[largestIdx].plannedDurationMinutes += target - currentSum;
+
+  // Sollte die größte Zeile dadurch unter den Mindestwert fallen, gleichen
+  // wir iterativ aus den größten anderen Zeilen aus, ohne einen negativen
+  // Wert entstehen zu lassen.
+  while (scaled[largestIdx].plannedDurationMinutes < minPerLine) {
+    const deficit = minPerLine - scaled[largestIdx].plannedDurationMinutes;
+    let donorIdx = -1;
+    for (let i = 0; i < scaled.length; i++) {
+      if (i === largestIdx) continue;
+      if (scaled[i].plannedDurationMinutes > minPerLine) {
+        if (donorIdx === -1 || scaled[i].plannedDurationMinutes > scaled[donorIdx].plannedDurationMinutes) {
+          donorIdx = i;
+        }
+      }
+    }
+    if (donorIdx === -1) break;
+    const take = Math.min(deficit, scaled[donorIdx].plannedDurationMinutes - minPerLine);
+    if (take <= 0) break;
+    scaled[donorIdx].plannedDurationMinutes -= take;
+    scaled[largestIdx].plannedDurationMinutes += take;
+  }
+  if (scaled[largestIdx].plannedDurationMinutes < 0) scaled[largestIdx].plannedDurationMinutes = 0;
+  return scaled;
+}
+
+/**
+ * Hält `appointments.duration_promised` und die Summe der
+ * `appointment_services.planned_duration_minutes` konsistent. Aufrufkontext:
+ *
+ * - Wird ein neues `services`-Array übergeben → Zeilen werden ersetzt und
+ *   `durationPromised` ergibt sich aus deren Summe.
+ * - Wird nur eine neue `durationPromised` übergeben → bestehende Service-Zeilen
+ *   werden auf die neue Gesamtdauer skaliert.
+ * - Werden beide übergeben und passen die Summen nicht zusammen → 400.
+ *
+ * Gibt die effektive `durationPromised` zurück (oder `null`, wenn weder
+ * Dauer noch Services geändert wurden — Caller muss dann nichts updaten).
+ */
+export async function syncAppointmentServicesAndDuration(
+  appointmentId: number,
+  input: { durationPromised?: number | null; services?: ServiceLineDuration[] },
+  tx: DbOrTx = db,
+): Promise<{ effectiveDurationPromised: number | null }> {
+  const { appointmentServices } = await import("@shared/schema");
+
+  const hasServices = Array.isArray(input.services);
+  const hasDuration = input.durationPromised != null;
+
+  if (hasServices && hasDuration) {
+    const sum = input.services!.reduce((s, sv) => s + sv.plannedDurationMinutes, 0);
+    if (sum !== input.durationPromised) {
+      throw badRequest(
+        `Die geplante Termin-Dauer (${input.durationPromised} Min) weicht von der Summe der Service-Minuten (${sum} Min) ab. Bitte beide Werte konsistent setzen oder nur einen Wert ändern.`,
+      );
+    }
+  }
+
+  if (hasServices) {
+    const services = input.services!;
+    await tx.delete(appointmentServices).where(eq(appointmentServices.appointmentId, appointmentId));
+    if (services.length > 0) {
+      await tx.insert(appointmentServices).values(services.map((s) => ({
+        appointmentId,
+        serviceId: s.serviceId,
+        plannedDurationMinutes: s.plannedDurationMinutes,
+      })));
+    }
+    const total = services.reduce((s, sv) => s + sv.plannedDurationMinutes, 0);
+    return { effectiveDurationPromised: total };
+  }
+
+  if (hasDuration) {
+    const existing = await tx
+      .select({
+        serviceId: appointmentServices.serviceId,
+        plannedDurationMinutes: appointmentServices.plannedDurationMinutes,
+      })
+      .from(appointmentServices)
+      .where(eq(appointmentServices.appointmentId, appointmentId));
+
+    if (existing.length > 0) {
+      const currentSum = existing.reduce((s, sv) => s + sv.plannedDurationMinutes, 0);
+      if (currentSum !== input.durationPromised) {
+        const scaled = scaleServiceDurations(existing, input.durationPromised!);
+        await tx.delete(appointmentServices).where(eq(appointmentServices.appointmentId, appointmentId));
+        await tx.insert(appointmentServices).values(scaled.map((s) => ({
+          appointmentId,
+          serviceId: s.serviceId,
+          plannedDurationMinutes: s.plannedDurationMinutes,
+        })));
+      }
+    }
+    return { effectiveDurationPromised: input.durationPromised! };
+  }
+
+  return { effectiveDurationPromised: null };
+}
 
 /**
  * Minimal storage interface for AppointmentService

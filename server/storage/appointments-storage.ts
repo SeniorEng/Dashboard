@@ -97,11 +97,12 @@ export async function getAppointmentCountsByDates(dates: string[], customerIds?:
   return counts;
 }
 
-export async function createAppointment(appointment: InsertAppointment): Promise<Appointment> {
+export async function createAppointment(appointment: InsertAppointment, tx?: DbOrTx): Promise<Appointment> {
   if (appointment.customerId == null && appointment.prospectId == null) {
     throw badRequest(APPOINTMENT_PERSON_REQUIRED_MESSAGE);
   }
-  const result = await db.insert(appointments).values(appointment).returning();
+  const client = tx || db;
+  const result = await client.insert(appointments).values(appointment).returning();
   if (appointment.assignedEmployeeId) {
     customerIdsCache.invalidateForEmployee(appointment.assignedEmployeeId);
   }
@@ -322,10 +323,15 @@ export async function getBatchAppointmentServices(appointmentIds: number[]): Pro
   return grouped;
 }
 
-export async function createAppointmentServices(appointmentId: number, services: { serviceId: number; plannedDurationMinutes: number }[]): Promise<void> {
+export async function createAppointmentServices(
+  appointmentId: number,
+  services: { serviceId: number; plannedDurationMinutes: number }[],
+  tx?: DbOrTx,
+): Promise<void> {
   if (services.length === 0) return;
   const { appointmentServices } = await import("@shared/schema");
-  await db.insert(appointmentServices).values(
+  const client = tx || db;
+  await client.insert(appointmentServices).values(
     services.map(entry => ({
       appointmentId,
       serviceId: entry.serviceId,
