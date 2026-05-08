@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 import { auditService } from "../services/audit";
 import { syncAppointmentServicesAndDuration } from "../services/appointments";
+import { serviceCatalogStorage } from "../storage/service-catalog";
 import { users } from "@shared/schema";
 import { asc, eq } from "drizzle-orm";
 
@@ -12,6 +13,14 @@ interface DriftRow {
   status: string;
   duration_promised: number;
   service_sum: number;
+}
+
+interface OrphanRow {
+  appointment_id: number;
+  customer_id: number | null;
+  status: string;
+  duration_promised: number;
+  appointment_type: string;
 }
 
 /**
@@ -43,14 +52,17 @@ export async function syncAppointmentServiceDurations(): Promise<void> {
   `);
 
   // Zusätzlich: Termine ganz ohne Service-Zeilen, deren `duration_promised`
-  // > 0 ist. Diese können wir nicht automatisch reparieren (uns fehlt die
-  // Service-Kategorie), schreiben aber pro Treffer einen Audit-Eintrag,
-  // damit die Drift sichtbar bleibt.
+  // > 0 ist. Für Termintypen mit eindeutigem Default-Mapping (siehe
+  // `APPOINTMENT_TYPE_TO_SERVICE_CODE` weiter unten) wird automatisch eine
+  // Service-Zeile mit der vollen Dauer angelegt. Für unbekannte Typen oder
+  // GoBD-gesperrte Status bleibt der Termin unverändert und wird nur
+  // audit-protokolliert, damit die Drift sichtbar bleibt.
   const orphanRes = await db.execute(sql`
     SELECT a.id AS appointment_id,
            a.customer_id,
            a.status,
-           a.duration_promised
+           a.duration_promised,
+           a.appointment_type
     FROM appointments a
     LEFT JOIN appointment_services s ON s.appointment_id = a.id
     WHERE a.deleted_at IS NULL
@@ -60,7 +72,7 @@ export async function syncAppointmentServiceDurations(): Promise<void> {
   `);
 
   const rows = driftRes.rows as unknown as DriftRow[];
-  const orphanRows = orphanRes.rows as unknown as Array<Omit<DriftRow, "service_sum">>;
+  const orphanRows = orphanRes.rows as unknown as OrphanRow[];
   if (rows.length === 0 && orphanRows.length === 0) return;
 
   log(
@@ -161,9 +173,107 @@ export async function syncAppointmentServiceDurations(): Promise<void> {
     }
   }
 
+  // Default-Service-Auflösung für Orphans. Strenge Whitelist: nur fachlich
+  // bestätigte 1:1-Mappings dürfen automatisch eine Service-Zeile schreiben.
+  // - "Erstberatung" -> Service mit Code "erstberatung" (1:1, eindeutig).
+  // - "Kundentermin" -> Service mit Code "hauswirtschaft" (Standard-Kategorie
+  //   für reguläre Pflegetermine; alle Default-Anlagepfade verwenden ebenfalls
+  //   diese Kategorie).
+  // Alle anderen `appointment_type`-Werte (Legacy, Sonder-, Importtypen) gelten
+  // als nicht sicher ableitbar und werden ausschließlich audit-protokolliert.
+  const [erstberatungSvc, hauswirtschaftSvc] = await Promise.all([
+    serviceCatalogStorage.getServiceByCode("erstberatung").catch(() => null),
+    serviceCatalogStorage.getServiceByCode("hauswirtschaft").catch(() => null),
+  ]);
+
+  const APPOINTMENT_TYPE_TO_SERVICE_CODE: Record<string, "erstberatung" | "hauswirtschaft"> = {
+    erstberatung: "erstberatung",
+    kundentermin: "hauswirtschaft",
+  };
+
+  const resolveDefaultServiceId = (
+    appointmentType: string,
+  ): { serviceId: number | null; mapped: boolean } => {
+    const t = (appointmentType ?? "").trim().toLowerCase();
+    const code = APPOINTMENT_TYPE_TO_SERVICE_CODE[t];
+    if (!code) return { serviceId: null, mapped: false };
+    const svc = code === "erstberatung" ? erstberatungSvc : hauswirtschaftSvc;
+    return { serviceId: svc?.id ?? null, mapped: true };
+  };
+
+  let orphanFixed = 0;
+  let orphanReported = 0;
+
   for (const row of orphanRows) {
+    const isLocked = gobdLocked.has(row.status);
+    const resolved = isLocked
+      ? { serviceId: null as number | null, mapped: false }
+      : resolveDefaultServiceId(row.appointment_type);
+    const defaultServiceId = resolved.serviceId;
+
+    if (defaultServiceId != null) {
+      try {
+        await db.transaction(async (tx) => {
+          await syncAppointmentServicesAndDuration(
+            row.appointment_id,
+            {
+              services: [{
+                serviceId: defaultServiceId,
+                plannedDurationMinutes: row.duration_promised,
+              }],
+            },
+            tx,
+          );
+        });
+        if (actorId != null) {
+          try {
+            await auditService.log(
+              actorId,
+              "appointment_updated",
+              "appointment",
+              row.appointment_id,
+              {
+                customerId: row.customer_id ?? 0,
+                changedFields: ["appointmentServices"],
+                reason: "service_line_backfilled",
+                durationPromised: row.duration_promised,
+                appointmentType: row.appointment_type,
+                serviceId: defaultServiceId,
+              },
+              undefined,
+            );
+          } catch {
+            // Audit best-effort; Datenkorrektur war erfolgreich
+          }
+        }
+        log(
+          `Termin-Service-Drift: Termin ${row.appointment_id} (${row.appointment_type}) ohne Service-Zeile mit Default-Service ${defaultServiceId} (${row.duration_promised} Min) repariert`,
+          "startup",
+        );
+        orphanFixed++;
+      } catch (err) {
+        log(
+          `Termin-Service-Drift: Backfill für Termin ${row.appointment_id} fehlgeschlagen: ${err}`,
+          "startup",
+        );
+      }
+      continue;
+    }
+
+    let auditReason: string;
+    let reasonSuffix: string;
+    if (isLocked) {
+      auditReason = "service_lines_missing";
+      reasonSuffix = "GoBD-geschützt";
+    } else if (!resolved.mapped) {
+      auditReason = "service_lines_missing_unmapped_type";
+      reasonSuffix = `Termintyp '${row.appointment_type}' ist nicht eindeutig auf einen Default-Service abbildbar`;
+    } else {
+      auditReason = "service_lines_missing";
+      reasonSuffix = `Default-Service für Termintyp '${row.appointment_type}' fehlt im Service-Katalog`;
+    }
     log(
-      `Termin-Service-Drift: Termin ${row.appointment_id} hat duration_promised=${row.duration_promised}, aber keine Service-Zeilen — manuelle Klärung nötig`,
+      `Termin-Service-Drift: Termin ${row.appointment_id} hat duration_promised=${row.duration_promised}, aber keine Service-Zeilen — manuelle Klärung nötig (${reasonSuffix})`,
       "startup",
     );
     if (actorId != null) {
@@ -176,9 +286,12 @@ export async function syncAppointmentServiceDurations(): Promise<void> {
           {
             customerId: row.customer_id ?? 0,
             changedFields: [],
-            reason: "service_lines_missing",
+            reason: auditReason,
             durationPromised: row.duration_promised,
             status: row.status,
+            appointmentType: row.appointment_type,
+            gobdLocked: isLocked,
+            mappedType: resolved.mapped,
           },
           undefined,
         );
@@ -186,10 +299,11 @@ export async function syncAppointmentServiceDurations(): Promise<void> {
         log(`Termin-Service-Drift: Audit-Eintrag für Termin ${row.appointment_id} (orphan) fehlgeschlagen: ${err}`, "startup");
       }
     }
+    orphanReported++;
   }
 
   log(
-    `Termin-Service-Drift: ${fixed} korrigiert, ${auditedOnly} abgeschlossene Termine nur audit-protokolliert, ${orphanRows.length} ohne Service-Zeilen gemeldet`,
+    `Termin-Service-Drift: ${fixed} korrigiert, ${auditedOnly} abgeschlossene Termine nur audit-protokolliert, ${orphanFixed} ohne Service-Zeilen mit Default-Service repariert, ${orphanReported} ohne Service-Zeilen gemeldet`,
     "startup",
   );
 }
