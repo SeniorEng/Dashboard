@@ -130,6 +130,44 @@ describe("DUP-1: POST /api/admin/customers Duplikat-Warnung", () => {
     createdCustomerIds.push(res.data.id);
   });
 
+  it("DUP-1.7 – Versichertennummer-Kollision (Task #403): zweiter Kunde mit gleicher VNR liefert 409 VERSICHERTENNUMMER_DUPLICATE", async () => {
+    const sharedVnr = "B" + String(Math.floor(100000000 + Math.random() * 900000000));
+    const first = await apiPost<any>(
+      "/api/admin/customers",
+      customerPayload({
+        vorname: "QS-VNR-A",
+        nachname: "VnrFirst-" + uniqueId(),
+        insurance: { providerId: insuranceProviderId, versichertennummer: sharedVnr, validFrom: "2024-01-01" },
+      }),
+    );
+    expect(first.status).toBe(201);
+    createdCustomerIds.push(first.data.id);
+
+    const checkRes = await apiGet<any>(
+      `/api/admin/customers/check-duplicate?versichertennummer=${encodeURIComponent(sharedVnr)}`,
+    );
+    expect(checkRes.status).toBe(200);
+    expect(Array.isArray(checkRes.data.versichertennummerDuplicates)).toBe(true);
+    expect(checkRes.data.versichertennummerDuplicates.length).toBeGreaterThan(0);
+    expect(checkRes.data.versichertennummerDuplicates[0].versichertennummer.toUpperCase()).toBe(sharedVnr.toUpperCase());
+
+    const second = await apiPost<any>(
+      "/api/admin/customers",
+      customerPayload({
+        vorname: "QS-VNR-B",
+        nachname: "VnrSecond-" + uniqueId(),
+        insurance: { providerId: insuranceProviderId, versichertennummer: sharedVnr, validFrom: "2024-01-01" },
+      }),
+    );
+    expect(second.status).toBe(409);
+    expect(second.data).toMatchObject({
+      error: "VERSICHERTENNUMMER_DUPLICATE",
+      code: "VERSICHERTENNUMMER_DUPLICATE",
+    });
+    expect(Array.isArray(second.data.details?.versichertennummerDuplicates)).toBe(true);
+    expect(second.data.details.versichertennummerDuplicates.length).toBeGreaterThan(0);
+  });
+
   it("DUP-1.6 – deletedAt-Filter: Soft-gelöschter Kunde löst keine Warnung mehr aus", async () => {
     const targetNachname = "Soft-Del-Test-" + uniqueId();
     const createRes = await apiPost<any>(

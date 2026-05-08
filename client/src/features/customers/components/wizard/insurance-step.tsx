@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useCreateInsuranceProvider } from "@/features/customers";
 import type { InsuranceProviderFormData } from "@/features/customers";
-import { Loader2, Check, Plus, X, ShieldCheck } from "lucide-react";
+import { Loader2, Check, Plus, X, ShieldCheck, AlertTriangle } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CustomerFormData, SelectOption } from "./customer-types";
@@ -69,6 +71,35 @@ export function InsuranceStep({
   const createProviderMutation = useCreateInsuranceProvider();
   const [showNewProviderForm, setShowNewProviderForm] = useState(false);
   const [newProvider, setNewProvider] = useState<InsuranceProviderFormData>({ ...EMPTY_PROVIDER });
+
+  // Versichertennummer-Duplicate-Check (Task #403): debounced Lookup
+  // gegen /admin/customers/check-duplicate. Zeigt einen Inline-Hinweis,
+  // wenn die eingegebene VNR bereits einem aktiven Kunden zugewiesen ist.
+  // Der Server blockt das Anlegen zusätzlich beim finalen Submit.
+  const [debouncedVnr, setDebouncedVnr] = useState("");
+  useEffect(() => {
+    const v = formData.versichertennummer.trim();
+    if (v.length < 3) {
+      setDebouncedVnr("");
+      return;
+    }
+    const t = setTimeout(() => setDebouncedVnr(v), 400);
+    return () => clearTimeout(t);
+  }, [formData.versichertennummer]);
+
+  type VnrDuplicate = { id: number; vorname: string | null; nachname: string | null; stadt: string | null; status: string; versichertennummer: string };
+  const { data: vnrDupData } = useQuery<{ versichertennummerDuplicates: VnrDuplicate[] }>({
+    queryKey: ["customers", "check-duplicate-vnr", debouncedVnr],
+    enabled: debouncedVnr.length >= 3,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const res = await api.get<{ versichertennummerDuplicates: VnrDuplicate[] }>(
+        `/admin/customers/check-duplicate?versichertennummer=${encodeURIComponent(debouncedVnr)}`
+      );
+      return unwrapResult(res);
+    },
+  });
+  const vnrDuplicates = vnrDupData?.versichertennummerDuplicates ?? [];
 
   const handleNewProviderChange = (field: keyof InsuranceProviderFormData, value: string | boolean) => {
     setNewProvider((prev) => ({ ...prev, [field]: value }));
@@ -191,6 +222,22 @@ export function InsuranceStep({
                       ? "Vertragsnummer Ihrer privaten Pflegekasse (3–20 Zeichen, z.B. 6163938.1)"
                       : "Format: Buchstabe + 9 Ziffern (z.B. A123456789)"}
                   </p>
+                  {vnrDuplicates.length > 0 && (
+                    <div
+                      className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm"
+                      data-testid="warning-versichertennummer-duplicate"
+                    >
+                      <AlertTriangle className={`${iconSize.sm} mt-0.5 shrink-0 text-amber-600`} />
+                      <div className="min-w-0">
+                        <p className="font-medium">Versichertennummer bereits vergeben</p>
+                        <p className="text-xs mt-0.5">
+                          {vnrDuplicates
+                            .map(d => `${d.vorname ?? ""} ${d.nachname ?? ""}`.trim() + (d.stadt ? ` (${d.stadt})` : ""))
+                            .join(", ")}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {formData.billingType === "pflegekasse_privat" && (

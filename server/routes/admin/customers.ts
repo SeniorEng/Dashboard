@@ -8,7 +8,7 @@ import { geocodeCustomer } from "../../services/geocoding";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/customers";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
-import { findCustomerDuplicates } from "../../lib/duplicate-check";
+import { findCustomerDuplicates, findCustomerByVersichertennummer } from "../../lib/duplicate-check";
 import { readTestFaults } from "../../lib/test-fault-injector";
 import { hashPayload, reserveIdempotencyKey, finalizeIdempotencyReservation, releaseIdempotencyReservation, findRecentDuplicates } from "../../lib/idempotency";
 import { 
@@ -46,14 +46,22 @@ router.get("/customers/check-duplicate", asyncHandler("Duplikatprüfung fehlgesc
   const vorname = String(req.query.vorname || "").trim();
   const nachname = String(req.query.nachname || "").trim();
   const geburtsdatum = req.query.geburtsdatum ? String(req.query.geburtsdatum).trim() : null;
+  const versichertennummer = req.query.versichertennummer ? String(req.query.versichertennummer).trim() : "";
 
-  if (!vorname || !nachname) {
-    res.json({ duplicates: [] });
-    return;
-  }
+  // Versichertennummer (Task #403): zusätzlicher Pre-Check vom Insurance-
+  // Step. Der Wizard ruft den Endpunkt einmal mit Name (Personal-Step) und
+  // einmal nur mit `versichertennummer` auf. Die zwei Treffer-Listen sind
+  // bewusst getrennt, damit die UI für jeden Step eine eigene Meldung
+  // zeigen kann (Name-Dialog vs. Inline-Hinweis am VNR-Feld).
+  const duplicates = vorname && nachname
+    ? await findCustomerDuplicates(vorname, nachname, geburtsdatum)
+    : [];
 
-  const duplicates = await findCustomerDuplicates(vorname, nachname, geburtsdatum);
-  res.json({ duplicates });
+  const versichertennummerDuplicates = versichertennummer
+    ? await findCustomerByVersichertennummer(versichertennummer)
+    : [];
+
+  res.json({ duplicates, versichertennummerDuplicates });
 }));
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
@@ -321,6 +329,25 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     if (!result.ok) {
       res.status(400).json({ error: "VALIDATION_ERROR", message: result.message });
       return;
+    }
+
+    // Versichertennummer-Kollision (Task #403): Datenintegritätsprüfung —
+    // dieselbe aktuelle VNR (validTo IS NULL) darf nicht doppelt vergeben
+    // sein. Wenn der Wizard-Anwender bewusst trotz Treffer anlegen will
+    // (Sonderfall, z.B. Datenkorrektur eines historischen Eintrags),
+    // schaltet `skipDuplicateCheck=true` analog zur Namensprüfung den
+    // Block ab — der Inline-Hinweis am VNR-Feld bleibt aber sichtbar.
+    if (!data.skipDuplicateCheck) {
+      const vnrDuplicates = await findCustomerByVersichertennummer(vnr);
+      if (vnrDuplicates.length > 0) {
+        res.status(409).json({
+          error: "VERSICHERTENNUMMER_DUPLICATE",
+          code: "VERSICHERTENNUMMER_DUPLICATE",
+          message: `Versichertennummer ist bereits einem aktiven Kunden zugewiesen: ${vnrDuplicates.map(d => `${d.vorname ?? ""} ${d.nachname ?? ""}`.trim()).join(", ")}`,
+          details: { versichertennummerDuplicates: vnrDuplicates },
+        });
+        return;
+      }
     }
   }
 

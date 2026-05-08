@@ -105,7 +105,9 @@ describe("KV-0: CRUD-Grundfunktionen", () => {
       pflegegradSeit: "2024-01-01",
       insurance: {
         providerId: insuranceProviderId,
-        versichertennummer: "A123456789",
+        // Task #403: Eindeutige VNR pro Lauf, damit der neue Kollisions-
+        // Check (POST /admin/customers) nicht in 409 läuft.
+        versichertennummer: "A" + String(Math.floor(100000000 + Math.random() * 900000000)),
         validFrom: "2024-01-01",
       },
       contacts: [{
@@ -241,7 +243,8 @@ describe("KV-3: Versichertennummer-Validierung", () => {
     const res = await apiPost<any>("/api/admin/customers", validCustomerPayload({
       insurance: {
         providerId: insuranceProviderId,
-        versichertennummer: "B123456789",
+        // Task #403: eindeutige VNR pro Lauf (Kollisions-Check).
+        versichertennummer: "B" + String(Math.floor(100000000 + Math.random() * 900000000)),
         validFrom: "2024-01-01",
       },
     }));
@@ -276,7 +279,7 @@ describe("KV-3: Versichertennummer-Validierung", () => {
       billingType: "pflegekasse_privat",
       insurance: {
         providerId: insuranceProviderId,
-        versichertennummer: "PKV-2024-12345",
+        versichertennummer: "PKV-" + Math.random().toString(36).slice(2, 10),
         validFrom: "2024-01-01",
       },
     }));
@@ -289,7 +292,7 @@ describe("KV-3: Versichertennummer-Validierung", () => {
       billingType: "pflegekasse_privat",
       insurance: {
         providerId: insuranceProviderId,
-        versichertennummer: "1234567/01",
+        versichertennummer: String(Math.floor(1000000 + Math.random() * 9000000)) + "/01",
         validFrom: "2024-01-01",
       },
     }));
@@ -314,7 +317,7 @@ describe("KV-3: Versichertennummer-Validierung", () => {
       billingType: "pflegekasse_privat",
       insurance: {
         providerId: insuranceProviderId,
-        versichertennummer: "PKV-START-001",
+        versichertennummer: "PKV-S-" + Math.random().toString(36).slice(2, 10),
         validFrom: "2024-01-01",
       },
     }));
@@ -324,7 +327,7 @@ describe("KV-3: Versichertennummer-Validierung", () => {
 
     const updateRes = await apiPost<any>(`/api/admin/customers/${customerId}/insurance`, {
       insuranceProviderId,
-      versichertennummer: "PKV-NEU/2024-77",
+      versichertennummer: "PKV-N/" + Math.random().toString(36).slice(2, 10),
       validFrom: "2025-01-01",
     });
     expect(updateRes.status, `Expected 201, got ${updateRes.status}: ${JSON.stringify(updateRes.data)}`).toBe(201);
@@ -359,7 +362,7 @@ describe("KV-3: Versichertennummer-Validierung", () => {
       billingType: "pflegekasse_gesetzlich",
       insurance: {
         providerId: privateProviderId,
-        versichertennummer: "PKV-NEU-2026/01",
+        versichertennummer: "PKV-26/" + Math.random().toString(36).slice(2, 10),
         validFrom: "2024-01-01",
       },
     }));

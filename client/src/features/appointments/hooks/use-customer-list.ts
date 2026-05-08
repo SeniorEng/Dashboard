@@ -4,6 +4,10 @@ import type { Customer } from "@shared/schema";
 
 export type CustomerWithAccess = Customer & {
   isCurrentlyAssigned?: boolean;
+  // Aktuelle Versichertennummer (Task #403): Backend liefert die Nummer
+  // aus customer_insurance_history mit validTo IS NULL, damit der mobile
+  // Filter clientseitig auch nach VNR suchen kann.
+  versichertennummer?: string | null;
 };
 
 export function useCustomerList(status?: string) {

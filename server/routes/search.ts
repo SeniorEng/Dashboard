@@ -11,6 +11,7 @@ interface SearchResult {
   id: number;
   title: string;
   subtitle: string;
+  hint?: string;
   href: string;
 }
 
@@ -50,6 +51,10 @@ searchRouter.get("/", asyncHandler("Suche fehlgeschlagen", async (req: Request, 
       id: customer.id,
       title: customer.name || `${customer.vorname} ${customer.nachname}`,
       subtitle: customer.address || `${customer.strasse} ${customer.nr}, ${customer.plz} ${customer.stadt}`,
+      // Treffer-Hinweis (Task #403): wenn die Suche per Versichertennummer
+      // gefunden hat, zeigen wir die Nummer als Sub-Hint, damit klar ist,
+      // warum dieser Kunde im Ergebnis steht.
+      hint: customer.matchedVersichertennummer ? `Vers.-Nr.: ${customer.matchedVersichertennummer}` : undefined,
       href: `/customer/${customer.id}`
     });
   }

@@ -299,7 +299,7 @@ export default function AdminCustomers() {
             <div className="flex-1 relative">
               <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${iconSize.sm} text-gray-500`} />
               <Input
-                placeholder="Name, Telefon oder Adresse suchen..."
+                placeholder="Name, Telefon, Adresse oder Versichertennummer suchen..."
                 value={searchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
                 className="pl-10"

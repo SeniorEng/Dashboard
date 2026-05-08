@@ -31,7 +31,7 @@ import {
   users,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { eq, and, isNull, isNotNull, desc, asc, count, or, ilike, sql as sqlBuilder } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, desc, asc, count, or, ilike, exists, sql as sqlBuilder } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { customerIdsCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
@@ -141,7 +141,22 @@ class CustomerManagementStorage {
           ilike(customers.email, searchTerm),
           ilike(customers.telefon, searchTerm),
           ilike(customers.strasse, searchTerm),
-          ilike(customers.stadt, searchTerm)
+          ilike(customers.stadt, searchTerm),
+          // Versichertennummer (Task #403): nur aktuelle Versicherung
+          // (validTo IS NULL) — historische VNRs dürfen die Trefferliste
+          // nicht künstlich aufblähen.
+          exists(
+            db
+              .select({ id: customerInsuranceHistory.id })
+              .from(customerInsuranceHistory)
+              .where(
+                and(
+                  eq(customerInsuranceHistory.customerId, customers.id),
+                  isNull(customerInsuranceHistory.validTo),
+                  ilike(customerInsuranceHistory.versichertennummer, searchTerm),
+                ),
+              ),
+          ),
         )
       );
     }

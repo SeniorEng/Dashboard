@@ -37,6 +37,7 @@ interface SearchResult {
   id: number;
   title: string;
   subtitle: string;
+  hint?: string;
   href: string;
 }
 
@@ -139,6 +140,11 @@ function GlobalSearch() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{result.title}</div>
                     <div className="text-xs text-muted-foreground truncate">{result.subtitle}</div>
+                    {result.hint && (
+                      <div className="text-xs text-primary/80 truncate" data-testid={`search-result-hint-${result.type}-${result.id}`}>
+                        {result.hint}
+                      </div>
+                    )}
                   </div>
                 </button>
               ))}

@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { customers } from "@shared/schema";
+import { customers, customerInsuranceHistory } from "@shared/schema";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 
 interface DuplicateCustomer {
@@ -12,6 +12,48 @@ interface DuplicateCustomer {
   nr: string | null;
   status: string;
   createdAt: Date;
+}
+
+export interface VersichertennummerDuplicateCustomer {
+  id: number;
+  vorname: string | null;
+  nachname: string | null;
+  geburtsdatum: string | null;
+  stadt: string | null;
+  status: string;
+  versichertennummer: string;
+}
+
+export async function findCustomerByVersichertennummer(
+  versichertennummer: string,
+  excludeId?: number,
+): Promise<VersichertennummerDuplicateCustomer[]> {
+  const v = versichertennummer.trim();
+  if (!v) return [];
+
+  const conditions = [
+    sql`UPPER(${customerInsuranceHistory.versichertennummer}) = UPPER(${v})`,
+    isNull(customerInsuranceHistory.validTo),
+    isNull(customers.deletedAt),
+  ];
+  if (excludeId !== undefined) {
+    conditions.push(ne(customers.id, excludeId));
+  }
+
+  return db
+    .select({
+      id: customers.id,
+      vorname: customers.vorname,
+      nachname: customers.nachname,
+      geburtsdatum: customers.geburtsdatum,
+      stadt: customers.stadt,
+      status: customers.status,
+      versichertennummer: customerInsuranceHistory.versichertennummer,
+    })
+    .from(customerInsuranceHistory)
+    .innerJoin(customers, eq(customers.id, customerInsuranceHistory.customerId))
+    .where(and(...conditions))
+    .limit(5);
 }
 
 export async function findCustomerDuplicates(

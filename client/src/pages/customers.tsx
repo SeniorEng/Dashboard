@@ -89,7 +89,11 @@ export default function CustomersPage() {
       const fullName = customer.name.toLowerCase();
       const address = formatAddress(customer).toLowerCase();
       const phone = customer.telefon?.toLowerCase() || "";
-      return fullName.includes(query) || address.includes(query) || phone.includes(query);
+      // Versichertennummer (Task #403): wird vom Backend als optionales
+      // Feld pro Kunde mitgeliefert (aktuelle Versicherung mit
+      // validTo IS NULL). Suche ist case-insensitiv per Substring.
+      const vnr = customer.versichertennummer?.toLowerCase() || "";
+      return fullName.includes(query) || address.includes(query) || phone.includes(query) || vnr.includes(query);
     });
   }, [customers, searchQuery]);
 
@@ -175,7 +179,7 @@ export default function CustomersPage() {
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${iconSize.sm} text-muted-foreground`} />
             <Input
               type="text"
-              placeholder="Name, Adresse oder Telefon suchen..."
+              placeholder="Name, Adresse, Telefon oder Versichertennummer suchen..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
