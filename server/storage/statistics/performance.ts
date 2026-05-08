@@ -57,25 +57,57 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
 
   const [minutesByMonthRow, avgDurationRow, revPerHourRow, profitabilityRow, servicePricesRow, cur, pre, yoy] = await Promise.all([
     db.execute(sql`
+      WITH appt_category AS (
+        SELECT DISTINCT ON (a.id)
+          a.id,
+          a.date,
+          a.duration_promised,
+          CASE
+            WHEN a.appointment_type = 'Erstberatung' THEN 'erstberatung'
+            WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN s.lohnart_kategorie
+            ELSE 'sonstige'
+          END AS category
+        FROM appointments a
+        LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        LEFT JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+          AND EXTRACT(YEAR FROM a.date::date) = ${period.year}
+        ORDER BY a.id,
+          CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+          COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+      )
       SELECT g.m AS month,
-        COALESCE(SUM(CASE WHEN a.appointment_type != 'Erstberatung' AND a.service_type = 'hauswirtschaft' THEN a.duration_promised END), 0)::int AS hw,
-        COALESCE(SUM(CASE WHEN a.appointment_type != 'Erstberatung' AND a.service_type = 'alltagsbegleitung' THEN a.duration_promised END), 0)::int AS ab,
-        COALESCE(SUM(CASE WHEN a.appointment_type = 'Erstberatung' THEN a.duration_promised END), 0)::int AS eb,
-        COALESCE(SUM(CASE WHEN a.appointment_type != 'Erstberatung' AND (a.service_type IS NULL OR a.service_type NOT IN ('hauswirtschaft','alltagsbegleitung')) THEN a.duration_promised END), 0)::int AS other
+        COALESCE(SUM(CASE WHEN ac.category = 'hauswirtschaft' THEN ac.duration_promised END), 0)::int AS hw,
+        COALESCE(SUM(CASE WHEN ac.category = 'alltagsbegleitung' THEN ac.duration_promised END), 0)::int AS ab,
+        COALESCE(SUM(CASE WHEN ac.category = 'erstberatung' THEN ac.duration_promised END), 0)::int AS eb,
+        COALESCE(SUM(CASE WHEN ac.category = 'sonstige' THEN ac.duration_promised END), 0)::int AS other
       FROM generate_series(1, 12) AS g(m)
-      LEFT JOIN appointments a ON EXTRACT(MONTH FROM a.date::date) = g.m
-        AND a.deleted_at IS NULL AND a.status IN ('completed','documented')
-        AND EXTRACT(YEAR FROM a.date::date) = ${period.year}
+      LEFT JOIN appt_category ac ON EXTRACT(MONTH FROM ac.date::date) = g.m
       GROUP BY g.m ORDER BY g.m
     `),
     db.execute(sql`
-      SELECT COALESCE(a.service_type, 'sonstige') AS service_type,
-        ROUND(AVG(a.duration_promised)::numeric, 0)::int AS avg_minutes
-      FROM appointments a
-      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
-        AND a.appointment_type != 'Erstberatung'
-        ${dFilter}
-      GROUP BY 1
+      WITH appt_category AS (
+        SELECT DISTINCT ON (a.id)
+          a.id,
+          a.duration_promised,
+          CASE
+            WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN s.lohnart_kategorie
+            ELSE 'sonstige'
+          END AS service_type
+        FROM appointments a
+        LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        LEFT JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+          AND a.appointment_type != 'Erstberatung'
+          ${dFilter}
+        ORDER BY a.id,
+          CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+          COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+      )
+      SELECT service_type,
+        ROUND(AVG(duration_promised)::numeric, 0)::int AS avg_minutes
+      FROM appt_category
+      GROUP BY service_type
     `),
     db.execute(sql`
       WITH per_appt AS (
