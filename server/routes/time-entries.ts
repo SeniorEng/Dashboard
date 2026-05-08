@@ -234,7 +234,7 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
       return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
     }
 
-    if (!req.user!.isAdmin) {
+    if (!req.user!.isSuperAdmin) {
       const checkedMonths = new Map<string, boolean>();
       for (const dateStr of weekdayDates) {
         const monthKey = dateStr.substring(0, 7);
@@ -243,7 +243,7 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
         }
         if (checkedMonths.get(monthKey)) {
           return res.status(403).json({ 
-            error: `Der Monat für ${dateStr.split('-').reverse().join('.')} ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen.` 
+            error: `Der Monat für ${dateStr.split('-').reverse().join('.')} ist bereits abgeschlossen. Nur die Geschäftsführung kann Änderungen vornehmen.` 
           });
         }
       }
@@ -304,8 +304,8 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   }
   
   // Check month closing for single day
-  if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(userId, validatedData.entryDate)) {
-    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
+  if (!req.user!.isSuperAdmin && await timeTrackingStorage.isMonthClosed(userId, validatedData.entryDate)) {
+    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur die Geschäftsführung kann Änderungen vornehmen." });
   }
   
   // Single day entry - block weekends
@@ -382,8 +382,8 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
   }
   
   // Month closing lock
-  if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
-    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
+  if (!req.user!.isSuperAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
+    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur die Geschäftsführung kann Änderungen vornehmen." });
   }
   
   const validatedData = updateTimeEntrySchema.parse(req.body);
@@ -496,8 +496,8 @@ router.delete("/:id", asyncHandler("Zeiteintrag konnte nicht gelöscht werden", 
   }
   
   // Month closing lock
-  if (!req.user!.isAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
-    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur ein Admin kann Änderungen vornehmen." });
+  if (!req.user!.isSuperAdmin && await timeTrackingStorage.isMonthClosed(existing.userId, existing.entryDate)) {
+    return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur die Geschäftsführung kann Änderungen vornehmen." });
   }
   
   await timeTrackingStorage.deleteTimeEntry(entryId);

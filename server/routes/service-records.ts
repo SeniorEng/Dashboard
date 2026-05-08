@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
 import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments, invoiceLineItems, invoices as invoicesTable } from "@shared/schema";
-import { asyncHandler, sendForbidden, sendNotFound, sendConflict } from "../lib/errors";
+import { asyncHandler, sendForbidden, sendNotFound, sendConflict, sendBadRequest } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
@@ -10,6 +10,20 @@ import { db } from "../lib/db";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { getPrimaryCustomerIds } from "../storage/customers-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { timeTrackingStorage } from "../storage/time-tracking";
+
+async function ensureMonthOpenForRecord(
+  record: { employeeId: number; year: number; month: number },
+  user: { isSuperAdmin?: boolean | null },
+): Promise<string | null> {
+  if (user.isSuperAdmin) return null;
+  const dateInMonth = `${record.year}-${String(record.month).padStart(2, "0")}-15`;
+  const closed = await timeTrackingStorage.isMonthClosed(record.employeeId, dateInMonth);
+  if (closed) {
+    return "Der Monat ist bereits abgeschlossen. Nur die Geschäftsführung kann Änderungen vornehmen.";
+  }
+  return null;
+}
 
 const router = Router();
 
@@ -219,7 +233,17 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   
   const { customerId, year, month } = parsed.data;
   const effectiveEmployeeId = req.user!.isAdmin ? parsed.data.employeeId : userId;
-  
+
+  if (!req.user!.isSuperAdmin) {
+    const monthEndIso = `${year}-${String(month).padStart(2, "0")}-${new Date(year, month, 0).getDate()}`;
+    if (await timeTrackingStorage.isMonthClosed(effectiveEmployeeId, monthEndIso)) {
+      return res.status(403).json({
+        error: "MONTH_CLOSED",
+        message: "Der Monat ist bereits abgeschlossen. Leistungsnachweise können nur noch von der Geschäftsführung erstellt werden.",
+      });
+    }
+  }
+
   const hasAccess = await canAccessCustomer(
     userId,
     req.user!.isAdmin,
@@ -348,7 +372,16 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   const month = appointmentDate.getMonth() + 1;
   
   const appointmentEmployeeId = appointment.performedByEmployeeId || appointment.assignedEmployeeId || userId;
-  
+
+  if (!req.user!.isSuperAdmin) {
+    if (await timeTrackingStorage.isMonthClosed(appointmentEmployeeId, appointment.date as string)) {
+      return res.status(403).json({
+        error: "MONTH_CLOSED",
+        message: "Der Monat ist bereits abgeschlossen. Leistungsnachweise können nur noch von der Geschäftsführung erstellt werden.",
+      });
+    }
+  }
+
   const record = await db.transaction(async (tx) => {
     const rec = await storage.createServiceRecord({
       customerId,
@@ -430,6 +463,14 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
       error: "FORBIDDEN",
       message: "Nur der zugeordnete Mitarbeiter darf diesen Leistungsnachweis unterschreiben",
     });
+  }
+
+  const lockMsg = await ensureMonthOpenForRecord(
+    { employeeId: existingRecord.employeeId, year: existingRecord.year, month: existingRecord.month },
+    req.user!,
+  );
+  if (lockMsg) {
+    return sendForbidden(res, "MONTH_CLOSED", lockMsg);
   }
 
   const parsed = signServiceRecordSchema.safeParse(req.body);
@@ -528,6 +569,14 @@ router.delete("/:id", requireAuth, asyncHandler("Leistungsnachweis konnte nicht 
   const isOwner = record.employeeId === req.user!.id;
   if (!req.user!.isAdmin && !isOwner) {
     return sendForbidden(res, "FORBIDDEN", "Sie können nur Ihre eigenen Leistungsnachweise löschen.");
+  }
+
+  const lockMsg = await ensureMonthOpenForRecord(
+    { employeeId: record.employeeId, year: record.year, month: record.month },
+    req.user!,
+  );
+  if (lockMsg) {
+    return sendForbidden(res, "MONTH_CLOSED", lockMsg);
   }
 
   let linkedAppointmentIds: number[];

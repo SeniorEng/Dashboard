@@ -44,6 +44,7 @@ const statusLabels: Record<string, string> = {
   documenting: "Dokumentation",
   completed: "Abgeschlossen",
   cancelled: "Abgesagt",
+  expired_unsigned: "Nicht abgerechnet",
 };
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -52,6 +53,7 @@ const statusIcons: Record<string, React.ReactNode> = {
   documenting: <FileText className="h-3 w-3" />,
   completed: <CheckCircle2 className="h-3 w-3" />,
   cancelled: <XCircle className="h-3 w-3" />,
+  expired_unsigned: <XCircle className="h-3 w-3" />,
 };
 
 const serviceLabels: Record<string, string> = {

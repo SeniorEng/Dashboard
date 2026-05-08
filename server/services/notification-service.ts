@@ -21,6 +21,9 @@ interface WhatsAppContext {
   firstAppointmentTime?: string;
   age?: number;
   birthdayPersonName?: string;
+  openCount?: number;
+  cutoffDate?: string;
+  cutoffTime?: string;
 }
 
 function buildDeepLink(eventType: WhatsAppEventType, context: WhatsAppContext): string {
@@ -61,7 +64,11 @@ function buildTemplateParams(eventType: WhatsAppEventType, context: WhatsAppCont
     case "birthday_reminder":
       return [context.birthdayPersonName || "", String(context.age || 0)];
     case "month_close_reminder":
-      return [];
+      return [
+        String(context.openCount || 0),
+        context.cutoffDate || "",
+        context.cutoffTime || "23:00",
+      ];
     default:
       return [];
   }

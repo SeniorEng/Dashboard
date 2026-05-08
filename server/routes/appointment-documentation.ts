@@ -32,10 +32,10 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     throw forbidden("APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
 
-  if (!req.user!.isAdmin && appointment.date) {
+  if (!req.user!.isSuperAdmin && appointment.date) {
     const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
     if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      throw forbidden("MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Dokumentations-Änderungen sind nur noch durch einen Admin möglich.");
+      throw forbidden("MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Dokumentations-Änderungen sind nur noch durch die Geschäftsführung möglich.");
     }
   }
 

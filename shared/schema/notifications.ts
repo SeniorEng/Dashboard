@@ -11,6 +11,7 @@ export const NOTIFICATION_TYPES = [
   "appointment_revoked",
   "task_assigned",
   "birthday_reminder",
+  "month_close_reminder",
 ] as const;
 export type NotificationType = typeof NOTIFICATION_TYPES[number];
 

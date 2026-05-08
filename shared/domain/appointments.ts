@@ -5,7 +5,7 @@ import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils
 // TYPES
 // ============================================
 
-export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled";
+export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled" | "expired_unsigned";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 
@@ -20,6 +20,7 @@ const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "documenting": 2,
   "completed": 3,
   "cancelled": 4,
+  "expired_unsigned": 5,
 };
 
 export const STATUS_LABELS: Record<AppointmentStatus, string> = {
@@ -28,6 +29,7 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
   "documenting": "Dokumentation",
   "completed": "Abgeschlossen",
   "cancelled": "Storniert",
+  "expired_unsigned": "Nicht abgerechnet",
 };
 
 // ============================================
@@ -150,6 +152,7 @@ export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
   "scheduled": 2,
   "completed": 3,
   "cancelled": 4,
+  "expired_unsigned": 5,
 };
 
 

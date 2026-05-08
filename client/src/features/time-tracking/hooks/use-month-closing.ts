@@ -95,10 +95,10 @@ export function useAdminReopenMonth() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async ({ userId, year, month }: { userId: number; year: number; month: number }) => {
+    mutationFn: async ({ userId, year, month, reason }: { userId: number; year: number; month: number; reason: string }) => {
       const result = await api.post<{ message: string }>(
         "/time-entries/reopen-month",
-        { userId, year, month }
+        { userId, year, month, reason }
       );
       return unwrapResult(result);
     },

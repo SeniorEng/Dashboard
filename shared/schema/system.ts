@@ -51,10 +51,19 @@ export const closeMonthSchema = z.object({
 
 export type CloseMonthInput = z.infer<typeof closeMonthSchema>;
 
+export const adminCloseMonthSchema = z.object({
+  year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
+  month: z.number().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
+  userId: z.number().int().positive("Benutzer-ID ist erforderlich"),
+});
+
+export type AdminCloseMonthInput = z.infer<typeof adminCloseMonthSchema>;
+
 export const reopenMonthSchema = z.object({
   year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
   month: z.number().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
   userId: z.number().int().positive("Benutzer-ID ist erforderlich"),
+  reason: z.string().trim().min(10, "Bitte gib mindestens 10 Zeichen Begründung an").max(500, "Maximal 500 Zeichen"),
 });
 
 export type ReopenMonthInput = z.infer<typeof reopenMonthSchema>;

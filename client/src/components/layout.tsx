@@ -17,6 +17,7 @@ import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, Fil
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
 import { NotificationBell } from "@/components/notification-bell";
+import { MonthCloseBanner } from "@/components/month-close-banner";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { useActiveEmployees } from "@/features/appointments/hooks/use-active-employees";
 
@@ -506,6 +507,8 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
           </nav>
         )}
       </header>
+
+      <MonthCloseBanner />
 
       {/* Main Content */}
       <main className={`container mx-auto px-4 py-6 ${layoutVariants[variant]}`}>

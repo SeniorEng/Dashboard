@@ -388,6 +388,10 @@ async function runStartupTasks() {
 
   const { startCallSchedulerPoller } = await import("./services/call-scheduler");
   startCallSchedulerPoller();
+
+  const { startMonthCloseScheduler } = await import("./services/month-close-scheduler");
+  const monthCloseScheduler = startMonthCloseScheduler();
+  intervals.push(monthCloseScheduler.interval);
 }
 
 async function gracefulShutdown(signal: string) {

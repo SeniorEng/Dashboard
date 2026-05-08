@@ -25,10 +25,14 @@ async function checkSeriesAccess(
   return series.assignedEmployeeId === user.id;
 }
 
+function canBypassMonthClose(user: { isSuperAdmin?: boolean | null }): boolean {
+  return !!user.isSuperAdmin;
+}
+
 async function collectEligibleFutureIds(
   seriesId: number,
   fromDate: string,
-  options?: { includeExceptions?: boolean },
+  options?: { includeExceptions?: boolean; bypassMonthClose?: boolean },
 ): Promise<number[]> {
   const futureAppointments = await seriesStorage.getFutureSeriesAppointments(seriesId, fromDate, options);
   const eligibleIds: number[] = [];
@@ -37,7 +41,7 @@ async function collectEligibleFutureIds(
     if (apt.status === "completed") continue;
 
     const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId) {
+    if (employeeId && !options?.bypassMonthClose) {
       const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
       if (monthClosed) continue;
     }
@@ -284,7 +288,10 @@ router.delete("/:id", asyncHandler("Serie konnte nicht beendet werden", async (r
   }
 
   const today = todayISO();
-  const eligibleIds = await collectEligibleFutureIds(id, today, { includeExceptions: true });
+  const eligibleIds = await collectEligibleFutureIds(id, today, {
+    includeExceptions: true,
+    bypassMonthClose: canBypassMonthClose(user),
+  });
 
   await db.transaction(async (tx) => {
     await seriesStorage.bulkCancelSeriesAppointments(eligibleIds, tx);
@@ -421,7 +428,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     if (apt.status === "completed") continue;
 
     const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId) {
+    if (employeeId && !canBypassMonthClose(user)) {
       const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
       if (monthClosed) continue;
     }
@@ -506,7 +513,10 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
 
   const today = todayISO();
   const fromDate = mode === "all_future" ? today : appointment.date;
-  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate, { includeExceptions });
+  const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate, {
+    includeExceptions,
+    bypassMonthClose: canBypassMonthClose(user),
+  });
 
   const count = await seriesStorage.bulkCancelSeriesAppointments(eligibleIds);
 
@@ -677,7 +687,7 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
     }
 
     const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId) {
+    if (employeeId && !canBypassMonthClose(user)) {
       const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
       if (monthClosed) {
         skippedCount.monthClosed++;

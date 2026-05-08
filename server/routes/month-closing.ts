@@ -1,9 +1,9 @@
 import { Router } from "express";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import { requireAuth, requireAdmin, requireSuperAdmin } from "../middleware/auth";
 import { asyncHandler, badRequest } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { reopenMonthSchema } from "@shared/schema";
+import { reopenMonthSchema, adminCloseMonthSchema } from "@shared/schema";
 import { auditService } from "../services/audit";
 import { generateAutoBreaksForMonth, insertAutoBreaks, previewAutoBreaksForMonth, removeAutoBreaksForMonth } from "../services/auto-breaks";
 import { STATUS_LABELS } from "@shared/domain/appointments";
@@ -110,8 +110,8 @@ router.get("/month-closing/:year/:month/preview", asyncHandler("Vorschau konnte 
   res.json({ autoBreaks });
 }));
 
-router.post("/admin/close-month", requireAdmin, asyncHandler("Admin-Monatsabschluss fehlgeschlagen", async (req, res) => {
-  const parsed = reopenMonthSchema.safeParse(req.body);
+router.post("/admin/close-month", requireSuperAdmin, asyncHandler("Admin-Monatsabschluss fehlgeschlagen", async (req, res) => {
+  const parsed = adminCloseMonthSchema.safeParse(req.body);
   if (!parsed.success) {
     throw badRequest("Ungültige Eingabe: year, month und userId erforderlich");
   }
@@ -162,7 +162,7 @@ const batchCloseSchema = z.object({
   month: z.number().min(1).max(12),
 });
 
-router.post("/admin/batch-close-month", requireAdmin, asyncHandler("Batch-Monatsabschluss fehlgeschlagen", async (req, res) => {
+router.post("/admin/batch-close-month", requireSuperAdmin, asyncHandler("Batch-Monatsabschluss fehlgeschlagen", async (req, res) => {
   const parsed = batchCloseSchema.safeParse(req.body);
   if (!parsed.success) {
     throw badRequest("Ungültige Eingabe: year und month erforderlich");
@@ -214,13 +214,13 @@ router.post("/admin/batch-close-month", requireAdmin, asyncHandler("Batch-Monats
   });
 }));
 
-router.post("/reopen-month", requireAdmin, asyncHandler("Monat konnte nicht wieder geöffnet werden", async (req, res) => {
+router.post("/reopen-month", requireSuperAdmin, asyncHandler("Monat konnte nicht wieder geöffnet werden", async (req, res) => {
   const parsed = reopenMonthSchema.safeParse(req.body);
   if (!parsed.success) {
-    throw badRequest("Ungültige Eingabe: year, month und userId erforderlich");
+    throw badRequest(parsed.error.errors[0]?.message ?? "Ungültige Eingabe: year, month, userId und reason erforderlich");
   }
 
-  const { year, month, userId: targetUserId } = parsed.data;
+  const { year, month, userId: targetUserId, reason } = parsed.data;
 
   const existing = await timeTrackingStorage.getMonthClosing(targetUserId, year, month);
   if (!existing || existing.reopenedAt) {
@@ -236,9 +236,26 @@ router.post("/reopen-month", requireAdmin, asyncHandler("Monat konnte nicht wied
     year,
     month,
     targetUserId,
+    reason,
   }, req.ip);
 
   res.json({ message: `Monat ${month}/${year} wieder geöffnet` });
+}));
+
+router.get("/month-close/banner", asyncHandler("Banner-Status konnte nicht geladen werden", async (req, res) => {
+  const { getMonthCloseBanner } = await import("../services/month-close-scheduler");
+  const banner = await getMonthCloseBanner(req.user!.id);
+  res.json({ banner });
+}));
+
+router.get("/month-close/cutoff/:year/:month", asyncHandler("Cutoff konnte nicht berechnet werden", async (req, res) => {
+  const year = requireIntParam(req.params.year, res);
+  const month = requireIntParam(req.params.month, res);
+  if (year === null || month === null) return;
+  if (month < 1 || month > 12) throw badRequest("Ungültiges Jahr oder Monat");
+  const { computeMonthCloseCutoff } = await import("@shared/utils/month-close-cutoff");
+  const cutoff = computeMonthCloseCutoff(year, month);
+  res.json({ year, month, cutoff });
 }));
 
 export default router;

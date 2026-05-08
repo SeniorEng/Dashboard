@@ -14,10 +14,14 @@ import {
   type AdminEmployeeReadiness,
 } from "@/features/time-tracking/hooks/use-month-closing";
 import { iconSize, componentStyles } from "@/design-system";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/hooks/use-auth";
 import {
   ArrowLeft, Lock, Unlock, Loader2, CheckCircle2, AlertTriangle,
-  ChevronDown, CalendarX, PenLine, Users,
+  ChevronDown, CalendarX, PenLine, Users, CalendarClock,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api/client";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +61,7 @@ function EmployeeRow({
   onReopen,
   isClosing,
   isReopening,
+  isSuperAdmin,
 }: {
   emp: AdminEmployeeReadiness;
   year: number;
@@ -65,6 +70,7 @@ function EmployeeRow({
   onReopen: (emp: AdminEmployeeReadiness) => void;
   isClosing: boolean;
   isReopening: boolean;
+  isSuperAdmin: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasBlockers = !emp.isClosed && !emp.ready;
@@ -87,7 +93,7 @@ function EmployeeRow({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {!emp.isClosed && emp.ready && (
+          {!emp.isClosed && emp.ready && isSuperAdmin && (
             <Button
               size="sm"
               variant="outline"
@@ -95,12 +101,13 @@ function EmployeeRow({
               onClick={(e) => { e.stopPropagation(); onClose(emp); }}
               disabled={isClosing}
               data-testid={`button-close-${emp.userId}`}
+              title="Manueller Notabschluss (Geschäftsführung)"
             >
               {isClosing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Lock className="h-3 w-3 mr-1" />}
-              Abschließen
+              Manuell abschließen
             </Button>
           )}
-          {emp.isClosed && (
+          {emp.isClosed && isSuperAdmin && (
             <Button
               size="sm"
               variant="outline"
@@ -187,6 +194,19 @@ export default function AdminMonthClosing() {
   const [batchCloseConfirm, setBatchCloseConfirm] = useState(false);
   const [closeTarget, setCloseTarget] = useState<AdminEmployeeReadiness | null>(null);
   const [reopenTarget, setReopenTarget] = useState<AdminEmployeeReadiness | null>(null);
+  const [reopenReason, setReopenReason] = useState("");
+  const { user } = useAuth();
+  const isSuperAdmin = !!user?.isSuperAdmin;
+
+  const cutoffYear = selectedMonth === 12 ? selectedYear + 1 : selectedYear;
+  const cutoffMonth = selectedMonth === 12 ? 1 : selectedMonth + 1;
+  const { data: cutoffData } = useQuery<{ cutoff: string; year: number; month: number }>({
+    queryKey: ["month-close-cutoff", cutoffYear, cutoffMonth, selectedYear, selectedMonth],
+    queryFn: async () => {
+      const r = await api.get<{ cutoff: string; year: number; month: number }>(`/time-entries/month-close/cutoff/${selectedYear}/${selectedMonth}`);
+      return unwrapResult(r);
+    },
+  });
 
   const { data, isLoading, isRefetching } = useAdminMonthClosingReadiness(selectedYear, selectedMonth);
   const closeMutation = useAdminCloseMonth();
@@ -243,12 +263,17 @@ export default function AdminMonthClosing() {
 
   const handleConfirmReopen = () => {
     if (!reopenTarget) return;
+    if (reopenReason.trim().length < 10) {
+      toast({ title: "Begründung erforderlich", description: "Bitte gib mindestens 10 Zeichen Begründung an.", variant: "destructive" });
+      return;
+    }
     reopenMutation.mutate(
-      { userId: reopenTarget.userId, year: selectedYear, month: selectedMonth },
+      { userId: reopenTarget.userId, year: selectedYear, month: selectedMonth, reason: reopenReason.trim() },
       {
         onSuccess: () => {
           toast({ title: `${monthName} ${selectedYear} für ${reopenTarget.displayName} wieder geöffnet` });
           setReopenTarget(null);
+          setReopenReason("");
         },
         onError: (error: Error) => {
           toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -310,22 +335,38 @@ export default function AdminMonthClosing() {
           </SelectContent>
         </Select>
 
-        {stats.ready > 0 && (
+        {stats.ready > 0 && isSuperAdmin && (
           <Button
             className="bg-teal-600 hover:bg-teal-700 ml-auto"
             onClick={() => setBatchCloseConfirm(true)}
             disabled={batchCloseMutation.isPending}
             data-testid="button-batch-close"
+            title="Manueller Notabschluss aller Bereiten (Geschäftsführung)"
           >
             {batchCloseMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
             ) : (
               <Lock className="h-4 w-4 mr-2" />
             )}
-            Alle bereit abschließen ({stats.ready})
+            Alle bereit manuell abschließen ({stats.ready})
           </Button>
         )}
       </div>
+
+      {cutoffData?.cutoff && (
+        <Card className="mb-4 border-teal-200 bg-teal-50/50" data-testid="card-cutoff-info">
+          <CardContent className="p-4 flex items-center gap-3">
+            <CalendarClock className="h-5 w-5 text-teal-600 shrink-0" />
+            <div className="text-sm text-gray-700">
+              Automatischer Monatsabschluss am{" "}
+              <span className="font-semibold text-teal-700" data-testid="text-cutoff-date">
+                {cutoffData.cutoff.split("-").reverse().join(".")}
+              </span>{" "}
+              um 23:00 Uhr. Reminder gehen am T-3, T-1 und am Cutoff-Tag raus.
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600 mb-4">
         <span><span className="font-semibold text-gray-900" data-testid="text-stats-total">{stats.total}</span> Mitarbeiter</span>
@@ -366,6 +407,7 @@ export default function AdminMonthClosing() {
               onReopen={handleReopen}
               isClosing={closeMutation.isPending && closeMutation.variables?.userId === emp.userId}
               isReopening={reopenMutation.isPending && reopenMutation.variables?.userId === emp.userId}
+              isSuperAdmin={isSuperAdmin}
             />
           ))}
         </div>
@@ -424,22 +466,37 @@ export default function AdminMonthClosing() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!reopenTarget} onOpenChange={(open) => !open && setReopenTarget(null)}>
+      <AlertDialog open={!!reopenTarget} onOpenChange={(open) => { if (!open) { setReopenTarget(null); setReopenReason(""); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Monat wiedereröffnen?</AlertDialogTitle>
             <AlertDialogDescription>
               Der {monthName} {selectedYear} für{" "}
               <span className="font-medium">{reopenTarget?.displayName}</span> wird wieder geöffnet.
-              Automatische Pausen werden entfernt.
+              Automatische Pausen werden entfernt. Diese Aktion wird im Audit-Log dokumentiert.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="py-2">
+            <label htmlFor="reopen-reason" className="text-sm font-medium text-gray-700 mb-1 block">
+              Begründung (Pflichtfeld)
+            </label>
+            <Textarea
+              id="reopen-reason"
+              value={reopenReason}
+              onChange={(e) => setReopenReason(e.target.value)}
+              placeholder="z.B. Korrektur eines fehlenden Zeiteintrags nach Absprache mit dem Mitarbeiter"
+              rows={3}
+              maxLength={500}
+              data-testid="input-reopen-reason"
+            />
+            <div className="text-xs text-gray-500 mt-1">{reopenReason.length}/500 Zeichen</div>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Abbrechen</AlertDialogCancel>
             <AlertDialogAction
               className="bg-amber-600 hover:bg-amber-700"
               onClick={handleConfirmReopen}
-              disabled={reopenMutation.isPending}
+              disabled={reopenMutation.isPending || reopenReason.trim().length < 10 || !isSuperAdmin}
               data-testid="button-confirm-reopen"
             >
               {reopenMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Unlock className="h-4 w-4 mr-2" />}

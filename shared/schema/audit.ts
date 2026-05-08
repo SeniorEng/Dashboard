@@ -59,6 +59,9 @@ export const AUDIT_ACTIONS = [
   "user_team_lead_set",
   "user_team_lead_unset",
   "customer_price_history_consolidated",
+  "month_auto_closed",
+  "appointment_expired_unsigned",
+  "month_close_reminder_sent",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

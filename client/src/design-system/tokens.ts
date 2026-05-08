@@ -52,6 +52,12 @@ export const colors = {
       border: 'border-gray-200',
       icon: 'text-gray-400',
     },
+    expired_unsigned: {
+      bg: 'bg-rose-50',
+      text: 'text-rose-700',
+      border: 'border-rose-200',
+      icon: 'text-rose-500',
+    },
   },
   
   // Service type colors
@@ -230,6 +236,7 @@ export function getStatusColors(status: string): StatusColorSet {
     documenting: colors.status.documenting,
     completed: colors.status.completed,
     cancelled: colors.status.cancelled,
+    expired_unsigned: colors.status.expired_unsigned,
   };
   return statusMap[status] || colors.status.scheduled;
 }

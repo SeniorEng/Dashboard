@@ -490,6 +490,13 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     return sendNotFound(res, "Kunde nicht gefunden.");
   }
 
+  if (!user.isSuperAdmin) {
+    const checkEmpId = validatedData.assignedEmployeeId || user.id;
+    if (await timeTrackingStorage.isMonthClosed(checkEmpId, validatedData.date)) {
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Neue Termine in diesem Zeitraum sind nur noch durch die Geschäftsführung möglich.");
+    }
+  }
+
   const currentContract = await customerManagementStorage.getCustomerCurrentContract(validatedData.customerId);
   if (currentContract?.contractEnd && validatedData.date > currentContract.contractEnd) {
     const endFormatted = currentContract.contractEnd.split("-").reverse().join(".");
@@ -682,6 +689,12 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
     assignedEmployeeId = user.id;
   }
 
+  if (!user.isSuperAdmin) {
+    if (await timeTrackingStorage.isMonthClosed(assignedEmployeeId, validatedData.date)) {
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Neue Termine in diesem Zeitraum sind nur noch durch die Geschäftsführung möglich.");
+    }
+  }
+
   const scheduledEnd = addMinutesToTimeHHMMSS(validatedData.scheduledStart, validatedData.erstberatungDauer);
 
   const overlapResult = await appointmentService.checkOverlap(
@@ -784,10 +797,10 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     }
   }
 
-  if (!req.user!.isAdmin && existingAppointment.date) {
+  if (!req.user!.isSuperAdmin && existingAppointment.date) {
     const employeeId = existingAppointment.assignedEmployeeId || existingAppointment.performedByEmployeeId;
     if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, existingAppointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch einen Admin möglich.");
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch die Geschäftsführung möglich.");
     }
   }
   
@@ -1021,10 +1034,10 @@ router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async 
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
 
-  if (!req.user!.isAdmin && appointment.date) {
+  if (!req.user!.isSuperAdmin && appointment.date) {
     const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
     if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch einen Admin möglich.");
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch die Geschäftsführung möglich.");
     }
   }
   
@@ -1056,10 +1069,10 @@ router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (r
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
 
-  if (!req.user!.isAdmin && appointment.date) {
+  if (!req.user!.isSuperAdmin && appointment.date) {
     const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
     if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch einen Admin möglich.");
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch die Geschäftsführung möglich.");
     }
   }
   
@@ -1218,10 +1231,10 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
   }
 
-  if (!req.user!.isAdmin && appointment.date) {
+  if (!req.user!.isSuperAdmin && appointment.date) {
     const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
     if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Änderungen sind nur noch durch einen Admin möglich.");
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Änderungen sind nur noch durch die Geschäftsführung möglich.");
     }
   }
 
@@ -1303,7 +1316,14 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   }
 
   const isCompleted = appointment.status === "completed";
-  
+
+  if (!user.isSuperAdmin && appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
+      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Löschungen sind nur noch durch die Geschäftsführung möglich.");
+    }
+  }
+
   const isLocked = await storage.isAppointmentLocked(id);
   if (isLocked && !isAdmin) {
     return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht gelöscht werden.");
