@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,7 +135,7 @@ export default function AdminUsers() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      invalidateRelated(queryClient, "admin-users");
       setIsCreateOpen(false);
       toast({ title: "Benutzer erstellt" });
     },
@@ -149,7 +150,9 @@ export default function AdminUsers() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      invalidateRelated(queryClient, "admin-users");
+      // invalidate-direct-allowed: vacation-summaries not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: ["admin", "vacation-summaries"] });
       setEditingUserId(null);
       toast({ title: "Benutzer aktualisiert" });
@@ -166,7 +169,7 @@ export default function AdminUsers() {
       return unwrapResult(result);
     },
     onSuccess: (_, { activate }) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      invalidateRelated(queryClient, "admin-users");
       toast({ title: activate ? "Benutzer aktiviert" : "Benutzer deaktiviert" });
     },
     onError: (error: Error) => {
@@ -207,7 +210,7 @@ export default function AdminUsers() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      invalidateRelated(queryClient, "admin-users");
       toast({ title: "Benutzer gelöscht" });
     },
     onError: (error: Error) => {
@@ -221,7 +224,7 @@ export default function AdminUsers() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      invalidateRelated(queryClient, "admin-users");
       setAnonymizingUser(null);
       toast({ title: "Mitarbeiter anonymisiert", description: "Persönliche Daten wurden DSGVO-konform entfernt." });
     },

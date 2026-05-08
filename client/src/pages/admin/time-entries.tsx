@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -139,8 +140,7 @@ export default function AdminTimeEntries() {
   });
 
   const invalidateAll = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["admin-time-entries"] });
-    queryClient.invalidateQueries({ queryKey: ["admin-month-closings"] });
+    invalidateRelated(queryClient, "admin-time-entries");
   }, [queryClient]);
 
   const updateVacationMutation = useMutation({
@@ -150,7 +150,7 @@ export default function AdminTimeEntries() {
     },
     onSuccess: () => {
       toast({ title: "Urlaubskontingent aktualisiert" });
-      queryClient.invalidateQueries({ queryKey: ["admin-vacation-summary"] });
+      invalidateRelated(queryClient, "admin-time-entries");
       setShowVacationDialog(false);
       setVacationEditUser(null);
     },

@@ -65,6 +65,8 @@ export function useDocumentAppointment(id: number) {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "appointments");
+      // invalidate-direct-allowed: appointment-scoped services key not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
       toast({ title: "Erfolg", description: "Termin wurde dokumentiert" });
     },

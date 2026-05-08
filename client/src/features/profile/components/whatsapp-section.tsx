@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { validateDachPhone } from "@shared/utils/phone";
 import { Phone, MessageCircle, Loader2, Save } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -42,7 +43,7 @@ export function WhatsAppSection() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-preferences"] });
+      invalidateRelated(queryClient, "whatsapp", "profile");
       toast({ title: "WhatsApp-Einstellungen gespeichert" });
     },
     onError: (error: Error) => {
@@ -67,7 +68,7 @@ export function WhatsAppSection() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-preferences"] });
+      invalidateRelated(queryClient, "whatsapp", "profile");
       toast({ title: "WhatsApp-Nummer gespeichert" });
     },
     onError: (error: Error) => {

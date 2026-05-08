@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { formatPhoneAsYouType, validateDachPhone } from "@shared/utils/phone";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -342,7 +343,7 @@ function RulesTab() {
       return unwrapResult(await api.put<WhatsAppNotificationRule[]>("/admin/whatsapp/rules", { rules: rulesPayload }));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp", "rules"] });
+      invalidateRelated(queryClient, "whatsapp");
       setRulesInitialized(false);
       toast({ title: "Benachrichtigungsregeln gespeichert" });
     },

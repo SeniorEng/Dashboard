@@ -3,6 +3,7 @@ import { SectionCard } from "@/components/patterns";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { FileText, Upload, Loader2 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { DocumentType, EmployeeDocument } from "@shared/schema";
@@ -45,7 +46,7 @@ export function DocumentsSection({ employeeId: _employeeId }: { employeeId: numb
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile-documents"] });
+      invalidateRelated(queryClient, "profile");
       toast({ title: "Dokument hochgeladen" });
     },
     onError: (error: Error) => {

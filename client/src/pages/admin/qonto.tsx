@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -184,7 +185,7 @@ function StatusTab({ status, isLoading }: { status?: QontoStatus; isLoading: boo
     mutationFn: async () => unwrapResult(await api.post<{ synced: number }>("/admin/qonto/sync", {})),
     onSuccess: (data) => {
       toast({ title: `${data.synced} Transaktionen synchronisiert` });
-      queryClient.invalidateQueries({ queryKey: ["qonto"] });
+      invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -304,8 +305,7 @@ function TransactionsTab({
     onSuccess: () => {
       toast({ title: "Zuordnung gespeichert" });
       setMatchingTxId(null);
-      queryClient.invalidateQueries({ queryKey: ["qonto"] });
-      queryClient.invalidateQueries({ queryKey: ["billing"] });
+      invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -317,8 +317,7 @@ function TransactionsTab({
       unwrapResult(await api.delete(`/admin/qonto/transactions/${txId}/match`)),
     onSuccess: () => {
       toast({ title: "Zuordnung aufgehoben" });
-      queryClient.invalidateQueries({ queryKey: ["qonto"] });
-      queryClient.invalidateQueries({ queryKey: ["billing"] });
+      invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -329,8 +328,7 @@ function TransactionsTab({
     mutationFn: async () => unwrapResult(await api.post<{ matched: number; skipped: number }>("/admin/qonto/auto-match", {})),
     onSuccess: (data) => {
       toast({ title: `Auto-Abgleich: ${data.matched} zugeordnet, ${data.skipped} ohne Treffer` });
-      queryClient.invalidateQueries({ queryKey: ["qonto"] });
-      queryClient.invalidateQueries({ queryKey: ["billing"] });
+      invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -347,7 +345,7 @@ function TransactionsTab({
       if (data.updated > 0) parts.push(`${data.updated} aktualisiert`);
       if (data.skipped > 0) parts.push(`${data.skipped} übersprungen`);
       toast({ title: `CSV-Import: ${parts.join(", ")}` });
-      queryClient.invalidateQueries({ queryKey: ["qonto"] });
+      invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler beim CSV-Import", description: error.message, variant: "destructive" });
@@ -560,7 +558,7 @@ function AdvicesTab() {
         ? `Avis gespeichert — ${result.matched} Rechnungen zugeordnet`
         : "Zahlungsavis gespeichert";
       toast({ title: msg });
-      queryClient.invalidateQueries({ queryKey: ["qonto", "payment-advices"] });
+      invalidateRelated(queryClient, "qonto");
       setNotes("");
     },
     onError: (error: Error) => {
@@ -573,7 +571,7 @@ function AdvicesTab() {
       unwrapResult(await api.delete(`/admin/qonto/payment-advices/${id}`)),
     onSuccess: () => {
       toast({ title: "Zahlungsavis gelöscht" });
-      queryClient.invalidateQueries({ queryKey: ["qonto", "payment-advices"] });
+      invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });

@@ -10,7 +10,8 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts"
+    "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
+    "lint": "eslint client/src --max-warnings 0"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
@@ -89,7 +90,9 @@
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
     "vite": "^7.1.9",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "eslint": "^9.39.4",
+    "@typescript-eslint/parser": "^8.59.2"
   },
   "overrides": {
     "@tootallnate/once": "^3.0.1",

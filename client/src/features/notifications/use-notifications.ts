@@ -45,7 +45,7 @@ export function useNotificationVisibilityRefetch() {
     if (typeof document === "undefined") return;
     const handler = () => {
       if (document.visibilityState === "visible") {
-        void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        invalidateRelated(queryClient, "notifications");
       }
     };
     document.addEventListener("visibilitychange", handler);

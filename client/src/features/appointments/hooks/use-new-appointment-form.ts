@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, canCreateErstberatung } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -636,7 +637,7 @@ export function useNewAppointmentForm() {
       assignedEmployeeId: canChangeAssignment && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
     }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ["/admin/employees/availability"] });
+        invalidateRelated(queryClient, "appointments");
         toast({ title: "Erstberatung erstellt", description: "Die Erstberatung wurde erfolgreich angelegt." });
         setLocation(ebDate ? `/?date=${ebDate}` : "/");
       },
@@ -717,7 +718,7 @@ export function useNewAppointmentForm() {
         if (cancelled) return;
         const data = unwrapResult(result);
         setGeocodedCoords({ customerId: ktCustomerId, lat: data.latitude, lng: data.longitude });
-        queryClient.invalidateQueries({ queryKey: ["customers"] });
+        invalidateRelated(queryClient, "customers");
       })
       .catch((err: Error) => {
         if (cancelled) return;

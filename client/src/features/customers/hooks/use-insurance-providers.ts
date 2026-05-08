@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import type { InsuranceProviderItem } from "@/lib/api/types";
@@ -59,7 +60,7 @@ export function useCreateInsuranceProvider() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: insuranceProviderKeys.all });
+      invalidateRelated(queryClient, "insurance-providers");
       toast({ title: "Erfolg", description: "Pflegekasse wurde angelegt" });
     },
     onError: (error: Error) => {
@@ -81,7 +82,7 @@ export function useUpdateInsuranceProvider() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: insuranceProviderKeys.all });
+      invalidateRelated(queryClient, "insurance-providers");
       toast({ title: "Erfolg", description: "Pflegekasse wurde aktualisiert" });
     },
     onError: (error: Error) => {

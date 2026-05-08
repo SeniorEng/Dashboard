@@ -15,7 +15,20 @@ type Domain =
   | "employee-proofs"
   | "customer-service-prices"
   | "customer-insurance"
-  | "customer-documents";
+  | "customer-documents"
+  | "profile"
+  | "whatsapp"
+  | "admin-users"
+  | "admin-time-entries"
+  | "billing"
+  | "qonto"
+  | "services"
+  | "document-types"
+  | "document-templates"
+  | "birthday-cards"
+  | "pending-proofs"
+  | "contact-migration"
+  | "insurance-providers";
 
 const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   appointments: [
@@ -24,6 +37,7 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["appointment-coverage"],
     ["/api/appointments"],
     ["search"],
+    ["/admin/employees/availability"],
   ],
   "time-entries": [
     ["time-entries"],
@@ -47,6 +61,9 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["customer"],
     ["customer-details"],
     ["search"],
+    ["admin", "customers"],
+    ["admin-customers"],
+    ["admin-customers-duplicates"],
   ],
   budget: [
     ["budget-overview"],
@@ -94,6 +111,59 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["admin", "customers"],
     ["customers"],
   ],
+  profile: [
+    ["profile"],
+    ["user"],
+    ["profile-proofs"],
+    ["profile-documents"],
+    ["whatsapp-preferences"],
+  ],
+  whatsapp: [
+    ["whatsapp", "rules"],
+    ["whatsapp"],
+  ],
+  "admin-users": [
+    ["admin", "users"],
+    ["admin", "vacation-summaries"],
+  ],
+  "admin-time-entries": [
+    ["admin-time-entries"],
+    ["admin-month-closings"],
+    ["admin-vacation-summary"],
+  ],
+  billing: [
+    ["billing"],
+    ["billing-invoices"],
+    ["billing-invoice-detail"],
+    ["billing-delivery-history"],
+  ],
+  qonto: [
+    ["qonto"],
+  ],
+  services: [
+    ["/api/services/all"],
+    ["/api/services"],
+    ["services"],
+  ],
+  "document-types": [
+    ["admin", "document-types"],
+    ["admin", "document-type-triggers"],
+  ],
+  "document-templates": [
+    ["admin", "document-templates"],
+  ],
+  "birthday-cards": [
+    ["birthday-cards"],
+  ],
+  "pending-proofs": [
+    ["admin", "pending-proofs"],
+  ],
+  "contact-migration": [
+    ["admin", "contact-migration", "legacy"],
+  ],
+  "insurance-providers": [
+    ["insurance-providers"],
+  ],
 };
 
 const RELATED_DOMAINS: Record<Domain, Domain[]> = {
@@ -112,6 +182,19 @@ const RELATED_DOMAINS: Record<Domain, Domain[]> = {
   "customer-service-prices": [],
   "customer-insurance": ["customers"],
   "customer-documents": [],
+  profile: ["auth"],
+  whatsapp: [],
+  "admin-users": [],
+  "admin-time-entries": [],
+  billing: ["qonto"],
+  qonto: ["billing"],
+  services: [],
+  "document-types": [],
+  "document-templates": [],
+  "birthday-cards": [],
+  "pending-proofs": ["employee-proofs"],
+  "contact-migration": ["customers"],
+  "insurance-providers": [],
 };
 
 export function invalidateRelated(

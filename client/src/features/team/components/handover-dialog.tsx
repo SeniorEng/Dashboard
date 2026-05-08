@@ -6,6 +6,7 @@ import { DialogContent } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize } from "@/design-system";
 import { Loader2, AlertTriangle, ArrowRightLeft, Calendar, Users } from "lucide-react";
 import type { UserData } from "./user-types";
@@ -54,9 +55,7 @@ export function HandoverDialog({ user, allUsers, onClose }: { user: UserData; al
       return unwrapResult(result);
     },
     onSuccess: (data: HandoverResult) => {
-      queryClient.invalidateQueries({ queryKey: ["admin"] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      invalidateRelated(queryClient, "admin-users", "customers", "appointments");
       const total = (data.primaryCount || 0) + (data.backupCount || 0) + (data.backup2Count || 0);
       toast({
         title: "Übergabe erfolgreich",

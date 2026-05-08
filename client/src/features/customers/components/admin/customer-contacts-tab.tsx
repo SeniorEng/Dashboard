@@ -129,6 +129,8 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      // invalidate-direct-allowed: customer-scoped contacts query key not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: contactsQueryKey });
       setIsAdding(false);
       setForm(EMPTY_FORM);
@@ -157,6 +159,8 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      // invalidate-direct-allowed: customer-scoped contacts query key not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: contactsQueryKey });
       setEditingId(null);
       setForm(EMPTY_FORM);
@@ -174,6 +178,8 @@ export function CustomerContactsTab({ customerId, initialContacts }: Props) {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      // invalidate-direct-allowed: customer-scoped contacts query key not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: contactsQueryKey });
       setDeleteConfirmId(null);
       toast({ title: "Kontakt entfernt" });

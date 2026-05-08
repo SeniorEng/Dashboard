@@ -3,6 +3,7 @@ import { SectionCard } from "@/components/patterns";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { PawPrint } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { ProfileData } from "../types";
@@ -17,8 +18,7 @@ export function PetAcceptanceSection({ profile }: { profile: ProfileData }) {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
-      queryClient.invalidateQueries({ queryKey: ["user"] });
+      invalidateRelated(queryClient, "profile");
       toast({ title: "Einstellung gespeichert" });
     },
     onError: (error: Error) => {

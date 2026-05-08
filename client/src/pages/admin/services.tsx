@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -124,7 +125,7 @@ export default function AdminServices() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/services/all"] });
+      invalidateRelated(queryClient, "services");
       toast({ title: "Erfolg", description: "Leistung wurde erstellt" });
     },
     onError: (error: Error) => {
@@ -138,7 +139,7 @@ export default function AdminServices() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/services/all"] });
+      invalidateRelated(queryClient, "services");
       toast({ title: "Erfolg", description: "Leistung wurde aktualisiert" });
     },
     onError: (error: Error) => {
@@ -217,8 +218,7 @@ export default function AdminServices() {
           failed.push(u.name);
         }
       }
-      await queryClient.invalidateQueries({ queryKey: ["/api/services/all"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/services"] });
+      invalidateRelated(queryClient, "services");
       if (failed.length === 0) {
         toast({ title: "Standardpreise aktualisiert", description: `${okCount} Dienstleistung(en) angepasst.` });
         setBulkOpen(false);

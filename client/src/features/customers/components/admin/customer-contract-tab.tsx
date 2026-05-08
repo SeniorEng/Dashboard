@@ -171,6 +171,8 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
 
   const invalidateCustomer = () => {
     invalidateRelated(queryClient, "customers");
+    // invalidate-direct-allowed: customer-scoped readiness key not covered by a domain
+    // eslint-disable-next-line no-restricted-syntax
     queryClient.invalidateQueries({ queryKey: ["deactivation-readiness", customerId] });
   };
 

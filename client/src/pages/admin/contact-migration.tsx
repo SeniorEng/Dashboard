@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,7 @@ export default function ContactMigrationPage() {
       return unwrapResult(result);
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "contact-migration", "legacy"] });
+      invalidateRelated(queryClient, "contact-migration");
       setSelections((prev) => {
         const next = { ...prev };
         delete next[variables.id];
@@ -80,12 +81,12 @@ export default function ContactMigrationPage() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "contact-migration", "legacy"] });
+      invalidateRelated(queryClient, "contact-migration");
       setSelections({});
       toast({ title: "Alle ausgewählten Kontakte migriert" });
     },
     onError: (error: Error) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "contact-migration", "legacy"] });
+      invalidateRelated(queryClient, "contact-migration");
       toast({ title: "Fehler bei Migration", description: error.message, variant: "destructive" });
     },
   });

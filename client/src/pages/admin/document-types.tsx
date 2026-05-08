@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -394,7 +395,7 @@ export function DocumentTypesContent() {
           triggers: triggers.map((t, i) => ({ ...t, sortOrder: i })),
         });
       }
-      queryClient.invalidateQueries({ queryKey: ["admin", "document-types"] });
+      invalidateRelated(queryClient, "document-types");
       setIsCreateOpen(false);
       setFormData(emptyForm);
       setTriggers([]);
@@ -416,8 +417,7 @@ export function DocumentTypesContent() {
       return unwrapResult(docResult);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "document-types"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "document-type-triggers"] });
+      invalidateRelated(queryClient, "document-types");
       setEditingType(null);
       setFormData(emptyForm);
       setTriggers([]);

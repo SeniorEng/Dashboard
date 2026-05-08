@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatPhoneForDisplay, validateDachPhone } from "@shared/utils/phone";
 import { formatAddress } from "@shared/utils/format";
 import { User as UserIcon, Phone, MapPin, Mail, Loader2, Save } from "lucide-react";
@@ -52,8 +53,7 @@ export function PersonalDataSection({ profile }: { profile: ProfileData }) {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
-      queryClient.invalidateQueries({ queryKey: ["user"] });
+      invalidateRelated(queryClient, "profile");
       setIsEditing(false);
       toast({ title: "Profil aktualisiert", description: "Ihre Daten wurden gespeichert." });
     },

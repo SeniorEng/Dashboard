@@ -36,6 +36,8 @@ export function AdminPermissionsSection({ userId }: { userId: number }) {
       return unwrapResult(result);
     },
     onSuccess: () => {
+      // invalidate-direct-allowed: record-id-scoped permissions key, no domain coverage
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: ["admin", "users", userId, "permissions"] });
       toast({ title: "Berechtigungen gespeichert" });
     },

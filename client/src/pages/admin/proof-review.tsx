@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,7 +64,7 @@ function ProofReviewContent() {
     mutationFn: async ({ proofId, approved, rejectionReason }: { proofId: number; approved: boolean; rejectionReason?: string }) =>
       unwrapResult(await api.patch(`/admin/proofs/${proofId}/review`, { approved, rejectionReason })),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "pending-proofs"] });
+      invalidateRelated(queryClient, "pending-proofs");
       toast({ title: variables.approved ? "Nachweis freigegeben" : "Nachweis abgelehnt" });
       setRejectingProof(null);
       setRejectionReason("");

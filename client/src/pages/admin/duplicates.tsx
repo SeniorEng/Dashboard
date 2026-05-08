@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -268,8 +269,7 @@ export default function AdminDuplicates() {
     onSuccess: (data) => {
       setPendingMerge(null);
       setResultDialog(data);
-      queryClient.invalidateQueries({ queryKey: ["admin-customers-duplicates"] });
-      queryClient.invalidateQueries({ queryKey: ["admin-customers"] });
+      invalidateRelated(queryClient, "customers");
       toast({ title: "Erfolgreich zusammengeführt", description: `Kunde #${data.sourceCustomerId} → #${data.targetCustomerId}` });
     },
     onError: (err) => {

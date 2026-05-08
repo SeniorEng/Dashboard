@@ -33,7 +33,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 
 ## Architecture decisions
 - **Mobile-First & Accessibility**: Responsive design with `shadcn/ui` (Radix UI primitives), touch-optimized. UI components use `fixed inset-0 flex items-center justify-center` for dialogs/overlays for sharp text rendering.
-- **Strict Data Consistency**: Centralized TanStack Query invalidation via `invalidateRelated()` to maintain cross-domain consistency. All mutations must use this.
+- **Strict Data Consistency**: Centralized TanStack Query invalidation via `invalidateRelated()` (`@/lib/query-invalidation`) to maintain cross-domain consistency. All mutation `onSuccess` handlers must use this helper instead of calling `queryClient.invalidateQueries()` directly. Legitimate exceptions (e.g. record-id-scoped keys not covered by a domain) must be marked with a `// invalidate-direct-allowed: <reason>` comment on the line above. The discipline is enforced by `tests/query-invalidation-discipline.test.ts`.
 - **GoBD Compliance**: Extensive use of soft-deletes, historization, audit logging for all critical operations (budget mutations, customer changes), server-side PDF generation with integrity hashing.
 - **Centralized Logic**: Key functionalities like phone/address formatting, error handling, logging, and access control are centralized in shared utilities or middleware for consistency and maintainability.
 - **Budgeting System**: Three-pot budget ledger with cascading allocation, FIFO for §45b, and a virtual auto-renewal model for §45b to avoid materializing monthly allocations as DB rows. Concurrent budget consumption is serialized.

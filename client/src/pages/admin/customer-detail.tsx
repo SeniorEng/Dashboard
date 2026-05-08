@@ -185,8 +185,7 @@ export default function AdminCustomerDetail() {
         description: `"${customer.name}" wurde dauerhaft entfernt.`,
       });
       queryClient.removeQueries({ queryKey: ["customer", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
+      invalidateRelated(queryClient, "customers");
       setHardDeleteDialogOpen(false);
       setLocation("/admin/customers");
     } catch (e) {
@@ -207,7 +206,11 @@ export default function AdminCustomerDetail() {
     },
     onSuccess: () => {
       invalidateRelated(queryClient, "customers");
+      // invalidate-direct-allowed: customer-scoped readiness keys not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: ["conversion-readiness", customerId] });
+      // invalidate-direct-allowed: customer-scoped readiness keys not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: ["deactivation-readiness", customerId] });
       toast({ title: "Kundenstatus aktualisiert" });
       setShowDeactivateDialog(false);

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -67,7 +68,7 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
       });
       unwrapResult(result);
       toast({ title: "Mitarbeiterzuordnung gespeichert" });
-      await queryClient.invalidateQueries({ queryKey: ["customer", customerId] });
+      invalidateRelated(queryClient, "customers");
       setEditing(false);
     } catch (error: unknown) {
       toast({

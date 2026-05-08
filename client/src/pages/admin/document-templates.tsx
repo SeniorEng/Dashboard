@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useRef } from "react";
 import DOMPurify from "dompurify";
 import { Link } from "wouter";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import { Card, CardContent } from "@/components/ui/card";
@@ -213,7 +214,7 @@ export function DocumentTemplatesContent() {
       return unwrapResult(result) as TemplateData;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "document-templates"] });
+      invalidateRelated(queryClient, "document-templates");
       handleClose();
       toast({ title: "Vorlage erstellt" });
     },
@@ -228,7 +229,7 @@ export function DocumentTemplatesContent() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "document-templates"] });
+      invalidateRelated(queryClient, "document-templates");
       handleClose();
       toast({ title: "Vorlage aktualisiert" });
     },

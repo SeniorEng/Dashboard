@@ -156,6 +156,8 @@ export function BackfillSection({ customerId, onRefresh }: { customerId: number;
       const data = unwrapResult(res) as { total: number; created: number; skipped: number; errors: number };
       setResult(data);
       invalidateRelated(queryClient, "budget");
+      // invalidate-direct-allowed: record-id-scoped backfill-preview key
+      // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: ["backfill-preview", customerId] });
       onRefresh();
       if (data.errors > 0 && data.created > 0) {

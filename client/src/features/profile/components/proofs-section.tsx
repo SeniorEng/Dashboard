@@ -3,6 +3,7 @@ import { SectionCard } from "@/components/patterns";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { GraduationCap, CheckCircle2, Clock, XCircle, Upload, Loader2 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { ProofItem } from "../types";
@@ -28,7 +29,7 @@ export function ProofsSection() {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile-proofs"] });
+      invalidateRelated(queryClient, "profile");
       toast({ title: "Nachweis hochgeladen" });
     },
     onError: (error: Error) => {

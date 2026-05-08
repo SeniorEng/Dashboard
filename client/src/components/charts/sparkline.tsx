@@ -160,4 +160,3 @@ export function Sparkline({ values, periods, width, height = 28, color = "curren
     </div>
   );
 }
-export { Sparkline };

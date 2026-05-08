@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -168,7 +169,7 @@ export default function AdminBilling() {
       } else {
         toast({ title: "Rechnung erstellt" });
       }
-      queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
+      invalidateRelated(queryClient, "billing");
       setDialogOpen(false);
       setSelectedCustomerId("");
     },
@@ -184,8 +185,7 @@ export default function AdminBilling() {
     },
     onSuccess: () => {
       toast({ title: "Status aktualisiert" });
-      queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["billing-invoice-detail"] });
+      invalidateRelated(queryClient, "billing");
       setStornoTarget(null);
     },
     onError: (error: Error) => {
@@ -201,8 +201,7 @@ export default function AdminBilling() {
     },
     onSuccess: (data: SendResponse) => {
       toast({ title: "Rechnung versendet", description: data.message || "E-Mail wurde erfolgreich gesendet" });
-      queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["billing-delivery-history"] });
+      invalidateRelated(queryClient, "billing");
       setSendingInvoiceId(null);
     },
     onError: (error: Error) => {
@@ -223,8 +222,7 @@ export default function AdminBilling() {
         title: `Stapelversand abgeschlossen`,
         description: `${summary.sent} versendet, ${summary.errors} Fehler, ${summary.skipped} übersprungen`,
       });
-      queryClient.invalidateQueries({ queryKey: ["billing-invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["billing-delivery-history"] });
+      invalidateRelated(queryClient, "billing");
       setBatchSending(false);
     },
     onError: (error: Error) => {

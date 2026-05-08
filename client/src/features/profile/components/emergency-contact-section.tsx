@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatPhoneForDisplay, validateDachPhone } from "@shared/utils/phone";
 import { User as UserIcon, Phone, Heart, AlertTriangle, Loader2, Save } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -41,7 +42,7 @@ export function EmergencyContactSection({ profile }: { profile: ProfileData }) {
       return unwrapResult(result);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      invalidateRelated(queryClient, "profile");
       setIsEditing(false);
       toast({ title: "Notfallkontakt aktualisiert" });
     },
