@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateRelated } from "@/lib/query-invalidation";
-import { ContactSection } from "./customer-overview/contact-section";
-import { EmployeeSection } from "./customer-overview/employee-section";
-import { CareLevelSection } from "./customer-overview/care-level-section";
-import { MedicalSection, SpecialFeaturesSection, DocumentDeliverySection } from "./customer-overview/details-sections";
+import { ContactSection } from "../admin-overview/contact-section";
+import { EmployeeSection } from "../admin-overview/employee-section";
+import { CareLevelSection } from "../admin-overview/care-level-section";
+import { MedicalSection, SpecialFeaturesSection, DocumentDeliverySection } from "../admin-overview/details-sections";
 import { isPflegekasseCustomer } from "@shared/domain/customers";
 import type { CustomerDetail } from "@/lib/api/types";
 

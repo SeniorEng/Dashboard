@@ -5,12 +5,12 @@ import { useInsuranceProviders, useCreateCustomer } from "@/features/customers";
 import { api, ApiError } from "@/lib/api";
 import { validateDachPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
-import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/customer-types";
+import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/wizard/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
 import { validateVersichertennummerFor } from "@shared/schema/common";
-import type { WizardUploadedDoc } from "../components/signatures-step";
-import type { DuplicateDialogEntry } from "../components/wizard-dialogs";
+import type { WizardUploadedDoc } from "../components/wizard/signatures-step";
+import type { DuplicateDialogEntry } from "../components/wizard/wizard-dialogs";
 
 const DRAFT_KEY = "careconnect_customer_draft";
 const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;

@@ -10,9 +10,9 @@ import {
   Check,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { DraftDialog, DuplicateDialog } from "./components/wizard-dialogs";
-import { WizardStepRenderer } from "./components/wizard-step-renderer";
-import { useCustomerWizard } from "./hooks/use-customer-wizard";
+import { DraftDialog, DuplicateDialog } from "@/features/customers/components/wizard/wizard-dialogs";
+import { WizardStepRenderer } from "@/features/customers/components/wizard/wizard-step-renderer";
+import { useCustomerWizard } from "@/features/customers/hooks/use-customer-wizard";
 
 export default function AdminCustomerNew() {
   const wizard = useCustomerWizard();

@@ -6,7 +6,7 @@ import { useEmployees } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
 import { iconSize } from "@/design-system";
-import { EmployeeMatching } from "../employee-matching";
+import { EmployeeMatching } from "../admin/employee-matching";
 import { EditButton, SaveCancelButtons } from "./section-helpers";
 import { Users } from "lucide-react";
 import type { SectionProps } from "./types";

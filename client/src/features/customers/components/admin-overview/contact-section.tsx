@@ -11,9 +11,9 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult, ApiError } from "@/lib/api";
 import { iconSize } from "@/design-system";
-import { AddressFields } from "../address-fields";
+import { AddressFields } from "../wizard/address-fields";
 import { EditButton, SaveCancelButtons } from "./section-helpers";
-import { DuplicateDialog } from "../wizard-dialogs";
+import { DuplicateDialog } from "../wizard/wizard-dialogs";
 import { User2, MapPin, Phone, Mail, Calendar } from "lucide-react";
 import type { SectionProps } from "./types";
 

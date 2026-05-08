@@ -1,0 +1,10 @@
+export type { ProfileData, WhatsAppPrefs, ProofItem } from "./types";
+export { InfoRow } from "./components/info-row";
+export { PersonalDataSection } from "./components/personal-data-section";
+export { EmergencyContactSection } from "./components/emergency-contact-section";
+export { PetAcceptanceSection } from "./components/pet-acceptance-section";
+export { WhatsAppSection } from "./components/whatsapp-section";
+export { BrowserNotificationsSection } from "./components/browser-notifications-section";
+export { PasswordSection } from "./components/password-section";
+export { ProofsSection } from "./components/proofs-section";
+export { DocumentsSection } from "./components/documents-section";

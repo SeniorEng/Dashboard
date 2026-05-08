@@ -26,8 +26,8 @@ import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
 import { useTimeEntryForm } from "@/features/time-tracking/hooks/use-time-entry-form";
 import { useTimeEntryConflict } from "@/features/time-tracking/hooks/use-time-entry-conflict";
-import { EmployeeTimeCard } from "./components/employee-time-card";
-import { VacationDialog } from "./components/vacation-dialog";
+import { EmployeeTimeCard } from "@/features/team/components/employee-time-card";
+import { VacationDialog } from "@/features/team/components/vacation-dialog";
 
 type AdminAppointment = AppointmentWithCustomerName;
 

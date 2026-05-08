@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CustomerFormData } from "./customer-types";
-import { EmployeeMatching } from "./employee-matching";
+import { EmployeeMatching } from "../admin/employee-matching";
 import { UserCheck, UserPlus, Sparkles } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api";

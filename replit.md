@@ -66,6 +66,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 ## Pointers
 - **Audit Methodology**: `.agents/skills/deep-analysis/SKILL.md`
 - **Error Handling Conventions**: `.agents/skills/error-handling-audit/SKILL.md`
+- **Page-Size Guideline**: `docs/page-size-guideline.md` (≤500 LOC soft, 800 LOC hard limit; pages are thin wrappers, domain code lives in `client/src/features/<domain>/`)
 - **Pre-Publish Backup Runbook**: `docs/pre-publish-backup-runbook.md`
 - **Test Coverage Matrix**: `tests/README.md`
 - **Deployment Log**: `docs/deployment-log.md`

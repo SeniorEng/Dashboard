@@ -1,10 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { iconSize } from "@/design-system";
-import { invalidateRelated } from "@/lib/query-invalidation";
 import {
   Select,
   SelectContent,
@@ -30,26 +29,26 @@ import {
   ChevronRight,
   FileText,
   Download,
-  Camera,
-  X,
+  Clock,
   FolderOpen,
   History,
   Trash2,
-  Pen,
+  Camera,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
+import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { useUpload } from "@/hooks/use-upload";
-import { useFileSelection } from "@/features/customers/hooks/use-file-selection";
-import { ReviewBadge, getReviewStatus } from "./review-badge";
-import { DigitalDocumentFlow } from "./digital-document-flow";
+import { ReviewBadge, getReviewStatus } from "@/features/customers/components/review-badge";
+import { DigitalDocumentFlow } from "@/features/customers/components/admin/digital-document-flow-admin";
+import { Pen } from "lucide-react";
 
 interface DocumentTypeData {
   id: number;
   name: string;
   description: string | null;
-  targetType: string;
   reviewIntervalMonths: number | null;
   reminderLeadTimeDays: number | null;
   isActive: boolean;
@@ -57,7 +56,7 @@ interface DocumentTypeData {
 
 interface DocumentFileData {
   id: number;
-  customerId: number;
+  employeeId: number;
   documentTypeId: number;
   fileName: string;
   objectPath: string;
@@ -74,7 +73,6 @@ interface BatchData {
   batchId: string;
   batchLabel: string | null;
   uploadedAt: string;
-  documentDate: string | null;
   files: DocumentFileData[];
 }
 
@@ -86,7 +84,7 @@ interface GroupedDocData {
 
 interface GeneratedDocumentData {
   id: number;
-  customerId: number | null;
+  employeeId: number | null;
   templateId: number;
   templateVersion: number;
   documentTypeId: number | null;
@@ -97,11 +95,12 @@ interface GeneratedDocumentData {
   signedAt: string | null;
   integrityHash: string | null;
   generatedAt: string;
+  signingStatus: string | null;
 }
 
 type DeleteTarget = { type: "file"; id: number; fileName: string } | { type: "batch"; batchId: string; fileCount: number };
 
-export function CustomerDocumentsSection({ customerId, customerName }: { customerId: number; customerName: string }) {
+export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false }: { employeeId: number; userName: string; isAdmin?: boolean }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -112,29 +111,31 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [documentDate, setDocumentDate] = useState("");
   const [expandedTypes, setExpandedTypes] = useState<Set<number>>(new Set());
   const [showArchive, setShowArchive] = useState<number | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [filePreviews, setFilePreviews] = useState<{ file: File; preview?: string }[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const { selectedFiles, filePreviews, cameraInputRef, addFiles, removeFile, clearAllFiles, openCamera, onCameraFileChange } = useFileSelection();
 
   const { data: groupedDocs, isLoading: docsLoading } = useQuery<GroupedDocData[]>({
-    queryKey: ["admin", "customers", customerId, "documents", "grouped"],
+    queryKey: ["admin", "employees", employeeId, "documents", "grouped"],
     queryFn: async () => {
-      const result = await api.get<GroupedDocData[]>(`/admin/customers/${customerId}/documents?grouped=true`);
+      const result = await api.get<GroupedDocData[]>(`/admin/employees/${employeeId}/documents?grouped=true`);
       return unwrapResult(result);
     },
   });
 
   const { data: docTypes } = useQuery<DocumentTypeData[]>({
-    queryKey: ["admin", "document-types", "customer"],
+    queryKey: ["admin", "document-types", "employee"],
     queryFn: async () => {
-      const result = await api.get<DocumentTypeData[]>("/admin/document-types?targetType=customer");
+      const result = await api.get<DocumentTypeData[]>("/admin/document-types?targetType=employee");
       return unwrapResult(result);
     },
   });
 
   const { data: generatedDocs } = useQuery<GeneratedDocumentData[]>({
-    queryKey: ["admin", "customers", customerId, "generated-documents"],
+    queryKey: ["admin", "employees", employeeId, "generated-documents"],
     queryFn: async () => {
-      const result = await api.get<GeneratedDocumentData[]>(`/admin/customers/${customerId}/generated-documents`);
+      const result = await api.get<GeneratedDocumentData[]>(`/admin/employees/${employeeId}/generated-documents`);
       return unwrapResult(result);
     },
   });
@@ -145,9 +146,46 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     },
   });
 
+  const addFiles = useCallback((newFiles: File[]) => {
+    setSelectedFiles(prev => [...prev, ...newFiles]);
+    const newPreviews = newFiles.map(file => {
+      const isImage = file.type.startsWith("image/");
+      return {
+        file,
+        preview: isImage ? URL.createObjectURL(file) : undefined,
+      };
+    });
+    setFilePreviews(prev => [...prev, ...newPreviews]);
+  }, []);
+
+  const removeFile = useCallback((index: number) => {
+    setFilePreviews(prev => {
+      const removed = prev[index];
+      if (removed?.preview) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== index);
+    });
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const clearAllFiles = useCallback(() => {
+    filePreviews.forEach(p => { if (p.preview) URL.revokeObjectURL(p.preview); });
+    setFilePreviews([]);
+    setSelectedFiles([]);
+  }, [filePreviews]);
+
+  const handleCameraCapture = useCallback(() => {
+    cameraInputRef.current?.click();
+  }, []);
+
+  const onCameraFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) addFiles(files);
+    e.target.value = "";
+  }, [addFiles]);
+
   const saveMutation = useMutation({
     mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }) => {
-      const result = await api.post(`/admin/customers/${customerId}/documents`, data);
+      const result = await api.post(`/admin/employees/${employeeId}/documents`, data);
       return unwrapResult(result);
     },
     onError: (error: Error) => {
@@ -157,11 +195,11 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
 
   const deleteFileMutation = useMutation({
     mutationFn: async (documentId: number) => {
-      const result = await api.delete(`/admin/customers/${customerId}/documents/${documentId}`);
+      const result = await api.delete(`/admin/employees/${employeeId}/documents/${documentId}`);
       return unwrapResult(result);
     },
     onSuccess: () => {
-      invalidateRelated(queryClient, "customer-documents");
+      invalidateRelated(queryClient, "employee-documents");
       toast({ title: "Dokument gelöscht" });
     },
     onError: (error: Error) => {
@@ -171,11 +209,11 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
 
   const deleteBatchMutation = useMutation({
     mutationFn: async (batchId: string) => {
-      const result = await api.delete(`/admin/customers/${customerId}/documents/batch/${batchId}`);
+      const result = await api.delete(`/admin/employees/${employeeId}/documents/batch/${batchId}`);
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "customer-documents");
+    onSuccess: (_data, _batchId) => {
+      invalidateRelated(queryClient, "employee-documents");
       toast({ title: "Upload gelöscht" });
     },
     onError: (error: Error) => {
@@ -215,16 +253,15 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       });
     }
 
-    invalidateRelated(queryClient, "customer-documents");
-    const count = selectedFiles.length;
+    invalidateRelated(queryClient, "employee-documents");
     setIsUploadOpen(false);
     setSelectedDocTypeId("");
     setBatchLabel("");
     setNotes("");
     setDocumentDate("");
     clearAllFiles();
-    toast({ title: count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
-  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, documentDate, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
+    toast({ title: selectedFiles.length > 1 ? `${selectedFiles.length} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
+  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, documentDate, uploadFile, saveMutation, queryClient, employeeId, toast, clearAllFiles]);
 
   const toggleType = (typeId: number) => {
     setExpandedTypes(prev => {
@@ -240,7 +277,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
 
   const availableDocTypes = (docTypes?.filter(dt => dt.isActive) || []).sort((a, b) => a.name.localeCompare(b.name, "de"));
   const isSubmitting = isUploading || saveMutation.isPending;
-  const isDeleting = deleteFileMutation.isPending || deleteBatchMutation.isPending;
 
   const getBestReviewStatus = (batches: BatchData[]) => {
     let worstStatus: "ok" | "warning" | "overdue" | null = null;
@@ -255,8 +291,10 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     return worstStatus;
   };
 
+  const isDeleting = deleteFileMutation.isPending || deleteBatchMutation.isPending;
+
   return (
-    <div>
+    <div className="mt-6 pt-6 border-t">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
           <FileCheck2 className={iconSize.sm} />
@@ -267,7 +305,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             variant="outline"
             size="sm"
             onClick={() => setIsDigitalFlowOpen(true)}
-            data-testid="button-digital-document"
+            data-testid="button-digital-employee-document"
           >
             <Pen className={`${iconSize.sm} mr-1`} />
             <span className="hidden sm:inline">Digital erstellen</span>
@@ -277,7 +315,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             variant="outline"
             size="sm"
             onClick={() => setIsUploadOpen(!isUploadOpen)}
-            data-testid="button-upload-customer-document"
+            data-testid="button-upload-document"
           >
             <Upload className={`${iconSize.sm} mr-1`} />
             <span className="hidden sm:inline">Hochladen</span>
@@ -292,7 +330,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             <div className="space-y-2">
               <Label>Dokumententyp *</Label>
               <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
-                <SelectTrigger data-testid="select-customer-doc-type">
+                <SelectTrigger data-testid="select-doc-type">
                   <SelectValue placeholder="Typ auswählen..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -311,9 +349,9 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
               <Input
                 value={batchLabel}
                 onChange={(e) => setBatchLabel(e.target.value)}
-                placeholder="z.B. Pflegevertrag, Vollmacht"
+                placeholder="z.B. Minijob-Vertrag, Midijob-Vertrag"
                 className="text-base"
-                data-testid="input-customer-batch-label"
+                data-testid="input-batch-label"
               />
               <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
             </div>
@@ -327,7 +365,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 value={documentDate}
                 onChange={(e) => setDocumentDate(e.target.value)}
                 className="text-base"
-                data-testid="input-customer-document-date"
+                data-testid="input-document-date"
               />
             </div>
             <div className="space-y-2">
@@ -337,7 +375,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="z.B. Gültig bis 2026"
                 className="text-base"
-                data-testid="input-customer-document-notes"
+                data-testid="input-document-notes"
               />
             </div>
           </div>
@@ -352,7 +390,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                   multiple
                   onChange={(e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ""; }}
                   className="hidden"
-                  data-testid="input-customer-document-file"
+                  data-testid="input-document-file"
                 />
                 <div className="flex items-center justify-center gap-2 h-10 px-3 rounded-md border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors">
                   <Upload className="h-4 w-4" />
@@ -362,9 +400,9 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
               <Button
                 type="button"
                 variant="outline"
-                onClick={openCamera}
+                onClick={handleCameraCapture}
                 className="flex items-center gap-2"
-                data-testid="button-camera-capture"
+                data-testid="button-employee-camera-capture"
               >
                 <Camera className="h-4 w-4" />
                 Foto
@@ -376,7 +414,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 capture="environment"
                 onChange={onCameraFileChange}
                 className="hidden"
-                data-testid="input-camera-capture"
+                data-testid="input-employee-camera-capture"
               />
             </div>
             <p className="text-[11px] text-gray-500">PDF, Bild oder Word-Dokument (max. 10 MB je Datei). Mehrere Fotos/Dateien möglich.</p>
@@ -391,7 +429,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                     type="button"
                     onClick={clearAllFiles}
                     className="text-xs text-gray-500 hover:text-red-500 transition-colors"
-                    data-testid="button-clear-all-files"
+                    data-testid="button-employee-clear-all-files"
                   >
                     Alle entfernen
                   </button>
@@ -403,8 +441,6 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         <img
                           src={item.preview}
                           alt={item.file.name}
-                          width={200}
-                          height={80}
                           className="w-full h-20 object-cover"
                         />
                       ) : (
@@ -417,7 +453,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         type="button"
                         onClick={() => removeFile(idx)}
                         className="absolute top-1 right-1 h-5 w-5 rounded-full bg-black/50 flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                        data-testid={`button-remove-file-${idx}`}
+                        data-testid={`button-employee-remove-file-${idx}`}
                       >
                         <X className="h-3 w-3 text-white" />
                       </button>
@@ -433,7 +469,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             <Button
               onClick={handleUpload}
               disabled={isSubmitting || selectedFiles.length === 0 || !selectedDocTypeId}
-              data-testid="button-submit-customer-document"
+              data-testid="button-submit-document"
             >
               {isSubmitting ? (
                 <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hinzugefügt...</>
@@ -459,11 +495,11 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             const borderClass = reviewStatus === "overdue" ? "border-red-200" : reviewStatus === "warning" ? "border-amber-200" : "border-gray-100";
 
             return (
-              <div key={group.documentType.id} className={`bg-white border rounded-lg ${borderClass}`} data-testid={`customer-doctype-group-${group.documentType.id}`}>
+              <div key={group.documentType.id} className={`bg-white border rounded-lg ${borderClass}`} data-testid={`doctype-group-${group.documentType.id}`}>
                 <button
                   onClick={() => toggleType(group.documentType.id)}
                   className="w-full p-3 flex items-center justify-between gap-2 text-left hover:bg-gray-50 rounded-lg transition-colors"
-                  data-testid={`button-toggle-customer-doctype-${group.documentType.id}`}
+                  data-testid={`button-toggle-doctype-${group.documentType.id}`}
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <FolderOpen className={`${iconSize.sm} text-teal-600 shrink-0`} />
@@ -489,11 +525,11 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 {isExpanded && (
                   <div className="px-3 pb-3 space-y-2">
                     {group.currentBatches.map((batch) => (
-                      <div key={batch.batchId} className="ml-2 pl-3 border-l-2 border-teal-100" data-testid={`customer-batch-${batch.batchId}`}>
+                      <div key={batch.batchId} className="ml-2 pl-3 border-l-2 border-teal-100" data-testid={`batch-${batch.batchId}`}>
                         <div className="flex items-center gap-2 mb-1.5">
                           <span className="text-xs text-gray-500">
-                            {batch.documentDate
-                              ? `Dok. vom ${formatDateForDisplay(batch.documentDate)}`
+                            {batch.files[0]?.documentDate
+                              ? `Dok. vom ${formatDateForDisplay(batch.files[0].documentDate)}`
                               : formatDateForDisplay(batch.uploadedAt.split("T")[0])}
                           </span>
                           {batch.batchLabel && (
@@ -502,12 +538,12 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                           {batch.files.length > 1 && (
                             <span className="text-xs text-gray-500">{batch.files.length} Dateien</span>
                           )}
-                          {batch.files.length > 1 && (
+                          {isAdmin && batch.files.length > 1 && (
                             <button
                               onClick={() => setDeleteTarget({ type: "batch", batchId: batch.batchId, fileCount: batch.files.length })}
                               className="ml-auto text-gray-300 hover:text-red-500 transition-colors"
                               disabled={isDeleting}
-                              data-testid={`button-delete-customer-batch-${batch.batchId}`}
+                              data-testid={`button-delete-batch-${batch.batchId}`}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -515,7 +551,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         </div>
                         <div className="space-y-1">
                           {batch.files.map((file) => (
-                            <div key={file.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-gray-50" data-testid={`customer-doc-${file.id}`}>
+                            <div key={file.id} className="flex items-center justify-between gap-2 py-1 px-2 rounded hover:bg-gray-50" data-testid={`doc-${file.id}`}>
                               <div className="flex items-center gap-2 flex-1 min-w-0">
                                 <FileText className="h-3.5 w-3.5 text-gray-500 shrink-0" />
                                 <span className="text-xs text-gray-700 truncate">{file.fileName}</span>
@@ -526,18 +562,20 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-gray-100"
-                                  data-testid={`button-download-customer-doc-${file.id}`}
+                                  data-testid={`button-download-doc-${file.id}`}
                                 >
                                   <Download className="h-3.5 w-3.5 text-gray-500" />
                                 </a>
-                                <button
-                                  onClick={() => setDeleteTarget({ type: "file", id: file.id, fileName: file.fileName })}
-                                  className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors"
-                                  disabled={isDeleting}
-                                  data-testid={`button-delete-customer-doc-${file.id}`}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => setDeleteTarget({ type: "file", id: file.id, fileName: file.fileName })}
+                                    className="inline-flex items-center justify-center h-7 w-7 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors"
+                                    disabled={isDeleting}
+                                    data-testid={`button-delete-doc-${file.id}`}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -548,12 +586,12 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                       </div>
                     ))}
 
-                    {group.archivedBatches.length > 0 && (
+                    {isAdmin && group.archivedBatches.length > 0 && (
                       <div className="ml-2">
                         <button
                           onClick={() => setShowArchive(showArchive === group.documentType.id ? null : group.documentType.id)}
                           className="text-xs text-gray-500 hover:text-gray-600 flex items-center gap-1 mt-1"
-                          data-testid={`button-customer-archive-${group.documentType.id}`}
+                          data-testid={`button-archive-${group.documentType.id}`}
                         >
                           <History className="h-3 w-3" />
                           {group.archivedBatches.length} ältere{group.archivedBatches.length === 1 ? "r Upload" : " Uploads"}
@@ -562,12 +600,10 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         {showArchive === group.documentType.id && (
                           <div className="mt-2 space-y-2">
                             {group.archivedBatches.map((batch) => (
-                              <div key={batch.batchId} className="pl-3 border-l-2 border-gray-200 opacity-60" data-testid={`customer-archived-batch-${batch.batchId}`}>
+                              <div key={batch.batchId} className="pl-3 border-l-2 border-gray-200 opacity-60" data-testid={`archived-batch-${batch.batchId}`}>
                                 <div className="flex items-center gap-2 mb-1">
                                   <span className="text-xs text-gray-500">
-                                    {batch.documentDate
-                                      ? `Dok. vom ${formatDateForDisplay(batch.documentDate)}`
-                                      : formatDateForDisplay(batch.uploadedAt.split("T")[0])}
+                                    {formatDateForDisplay(batch.uploadedAt.split("T")[0])}
                                   </span>
                                   {batch.batchLabel && (
                                     <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{batch.batchLabel}</span>
@@ -627,13 +663,15 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         <span className="text-xs text-gray-500">
                           Erstellt: {formatDateForDisplay(doc.generatedAt.split("T")[0])}
                         </span>
-                        {doc.customerSignatureData && (
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">Kd. unterschrieben</span>
-                        )}
-                        {doc.employeeSignatureData && (
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">MA unterschrieben</span>
-                        )}
-                        {doc.integrityHash && (
+                        {doc.signingStatus === "pending_employee_signature" ? (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            Warte auf Unterschrift
+                          </span>
+                        ) : doc.employeeSignatureData ? (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">Unterschrieben</span>
+                        ) : null}
+                        {doc.integrityHash && doc.signingStatus !== "pending_employee_signature" && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700">Verifiziert</span>
                         )}
                       </div>
@@ -658,12 +696,12 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
       <DigitalDocumentFlow
         open={isDigitalFlowOpen}
         onOpenChange={setIsDigitalFlowOpen}
-        customerId={customerId}
-        targetName={customerName}
-        targetType="customer"
+        employeeId={employeeId}
+        targetName={userName}
+        targetType="employee"
         context="bestandskunde"
         onComplete={() => {
-          invalidateRelated(queryClient, "customer-documents");
+          invalidateRelated(queryClient, "employee-documents");
         }}
       />
 
@@ -684,7 +722,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
             <AlertDialogAction
               onClick={handleConfirmDelete}
               className="bg-red-600 hover:bg-red-700 text-white"
-              data-testid="button-confirm-delete-customer"
+              data-testid="button-confirm-delete"
             >
               Löschen
             </AlertDialogAction>

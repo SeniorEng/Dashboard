@@ -17,7 +17,7 @@ import {
   selectTeamWorkloadViewState,
   type SortKey,
 } from "@/features/team/team-workload-view";
-import { ROLE_LABELS, AVAILABLE_ROLES, formatPhoneForDisplay } from "@/pages/admin/components/user-types";
+import { ROLE_LABELS, AVAILABLE_ROLES, formatPhoneForDisplay } from "@/features/team/components/user-types";
 
 export default function TeamWorkloadPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useTeamWorkload();
