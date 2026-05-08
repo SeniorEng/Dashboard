@@ -9,6 +9,7 @@ import {
   createTestEmployee,
   deactivateTestEmployee,
 } from "./test-utils";
+import { addMinutesToTimeHHMMSS as addMinutesToHHMMSS } from "@shared/utils/datetime";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testCustomerId: number;
@@ -139,6 +140,26 @@ describe("Termin-Dauer ↔ Service-Zeilen Konsistenz (Marcel-Bug)", () => {
     const svcRes = await apiGet<any[]>(`/api/appointments/${apptId}/services`);
     const sum = svcRes.data.reduce((s, sv: any) => s + (sv.plannedDurationMinutes || 0), 0);
     expect(sum).toBe(75);
+  });
+
+  it("PATCH services allein zieht scheduledEnd automatisch nach (scheduledStart + neue Dauer)", async () => {
+    const apptId = await findFreeSlot([{ serviceId: hwServiceId, durationMinutes: 30 }]);
+
+    const beforeRes = await apiGet<any>(`/api/appointments/${apptId}`);
+    const start: string = beforeRes.data.scheduledStart;
+    expect(beforeRes.data.scheduledEnd).toBe(addMinutesToHHMMSS(start, 30));
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${apptId}`, {
+      services: [
+        { serviceId: hwServiceId, plannedDurationMinutes: 45 },
+        { serviceId: abServiceId, plannedDurationMinutes: 30 },
+      ],
+    });
+    expect(patchRes.status).toBe(200);
+
+    const fetchRes = await apiGet<any>(`/api/appointments/${apptId}`);
+    expect(fetchRes.data.durationPromised).toBe(75);
+    expect(fetchRes.data.scheduledEnd).toBe(addMinutesToHHMMSS(start, 75));
   });
 
   it("PATCH services allein auf in-progress Termin wird mit 403 abgelehnt (kein Scheduling-Bypass)", async () => {

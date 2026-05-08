@@ -845,6 +845,17 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       // und auf nicht-`scheduled` Termine korrekt mit 403 antwortet.
       validatedData.durationPromised = servicesSum;
     }
+
+    // Wenn die Service-Summe die Gesamtdauer verschiebt und der Aufrufer
+    // kein explizites scheduledEnd mitliefert, ziehen wir scheduledEnd
+    // automatisch nach (scheduledStart + neue Dauer). So bleiben Kalender-
+    // und Überlappungs-Anzeigen konsistent mit der neuen Dauer.
+    if (validatedData.scheduledEnd === undefined && servicesSum !== existingAppointment.durationPromised) {
+      const startForEnd = validatedData.scheduledStart ?? existingAppointment.scheduledStart;
+      if (startForEnd) {
+        validatedData.scheduledEnd = addMinutesToTimeHHMMSS(startForEnd, servicesSum);
+      }
+    }
   }
 
   if (validatedData.date && isWeekend(validatedData.date)) {
