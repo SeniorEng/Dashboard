@@ -162,6 +162,23 @@ describe("Termin-Dauer ↔ Service-Zeilen Konsistenz (Marcel-Bug)", () => {
     expect(fetchRes.data.scheduledEnd).toBe(addMinutesToHHMMSS(start, 75));
   });
 
+  it("PATCH durationPromised allein zieht scheduledEnd automatisch nach (scheduledStart + neue Dauer)", async () => {
+    const apptId = await findFreeSlot([{ serviceId: hwServiceId, durationMinutes: 30 }]);
+
+    const beforeRes = await apiGet<any>(`/api/appointments/${apptId}`);
+    const start: string = beforeRes.data.scheduledStart;
+    expect(beforeRes.data.scheduledEnd).toBe(addMinutesToHHMMSS(start, 30));
+
+    const patchRes = await apiPatch<any>(`/api/appointments/${apptId}`, {
+      durationPromised: 75,
+    });
+    expect(patchRes.status).toBe(200);
+
+    const fetchRes = await apiGet<any>(`/api/appointments/${apptId}`);
+    expect(fetchRes.data.durationPromised).toBe(75);
+    expect(fetchRes.data.scheduledEnd).toBe(addMinutesToHHMMSS(start, 75));
+  });
+
   it("PATCH services allein auf in-progress Termin wird mit 403 abgelehnt (kein Scheduling-Bypass)", async () => {
     const apptId = await findFreeSlot(
       [{ serviceId: hwServiceId, durationMinutes: 30 }],

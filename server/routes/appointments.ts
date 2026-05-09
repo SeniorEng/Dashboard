@@ -856,6 +856,20 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
         validatedData.scheduledEnd = addMinutesToTimeHHMMSS(startForEnd, servicesSum);
       }
     }
+  } else if (
+    validatedData.durationPromised != null
+    && validatedData.scheduledEnd === undefined
+    && validatedData.durationPromised !== existingAppointment.durationPromised
+  ) {
+    // Wird die Gesamtdauer direkt geändert (ohne services-Array und ohne
+    // explizites scheduledEnd), ziehen wir scheduledEnd analog zum
+    // services-Pfad nach. Sonst bleiben Dauer und End-Zeit inkonsistent,
+    // obwohl `syncAppointmentServicesAndDuration` die Service-Zeilen auf
+    // die neue Dauer skaliert.
+    const startForEnd = validatedData.scheduledStart ?? existingAppointment.scheduledStart;
+    if (startForEnd) {
+      validatedData.scheduledEnd = addMinutesToTimeHHMMSS(startForEnd, validatedData.durationPromised);
+    }
   }
 
   if (validatedData.date && isWeekend(validatedData.date)) {
