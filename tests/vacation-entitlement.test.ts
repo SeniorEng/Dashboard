@@ -431,3 +431,31 @@ describe("VAC-PRO Allowance-First Snapshot (Task #413)", () => {
     expect(res.data.eintrittsdatum).toBe(julyEintritt);
   });
 });
+
+// ---------- Allowance-Anlage beim Erstellen neuer Mitarbeiter (Task #414) ----------
+
+describe("VAC-PRO Allowance-Anlage beim Mitarbeiter-Create (Task #414)", () => {
+  afterAll(async () => {
+    await runCleanup();
+  });
+
+  it("Beim Erstellen eines aktiven Mitarbeiters wird automatisch ein Allowance-Eintrag für das aktuelle Jahr angelegt", async () => {
+    const emp = await createTestEmployee({ nachnamePrefix: "VacAllowCreate" });
+    const currentYear = new Date().getFullYear();
+
+    const allowances = await db.select()
+      .from(employeeVacationAllowance)
+      .where(
+        and(
+          eq(employeeVacationAllowance.userId, emp.id),
+          eq(employeeVacationAllowance.year, currentYear),
+        ),
+      );
+    expect(allowances.length).toBe(1);
+    const a = allowances[0];
+    // createTestEmployee setzt eintrittsdatum=2024-01-01 → ganzes Jahr → 30
+    // (default vacationDaysPerYear). Carry-Over startet bei 0.
+    expect(Number(a.totalDays)).toBe(30);
+    expect(a.carryOverDays).toBe(0);
+  });
+});

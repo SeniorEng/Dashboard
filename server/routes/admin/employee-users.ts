@@ -171,6 +171,35 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
   usersCache.invalidateAll();
   birthdaysCache.invalidateAll();
 
+  // Lege direkt einen `employeeVacationAllowance`-Eintrag für das aktuelle
+  // Jahr an, damit die Urlaubs-Übersicht (Task #413) sofort den schnellen
+  // Pfad nutzen kann und nicht erst auf den nächtlichen
+  // `syncVacationCarryover`-Job oder den ersten Patch von
+  // `vacationDaysPerYear` warten muss.
+  if (user.isActive) {
+    try {
+      const { timeTrackingStorage } = await import("../../storage/time-tracking");
+      const currentYear = new Date().getFullYear();
+      const vacDays = user.vacationDaysPerYear ?? 30;
+      const eintritt = user.eintrittsdatum ?? null;
+      const totalDays = timeTrackingStorage.computeAnnualEntitlement(
+        [],
+        vacDays,
+        eintritt,
+        currentYear,
+      );
+      await timeTrackingStorage.setVacationAllowance({
+        userId: user.id,
+        year: currentYear,
+        totalDays,
+        carryOverDays: 0,
+      });
+    } catch (allowanceError) {
+      const msg = allowanceError instanceof Error ? allowanceError.message : String(allowanceError);
+      console.error("[vacation] Initiale Allowance konnte nicht angelegt werden:", msg);
+    }
+  }
+
   try {
     const companySettings = await getCachedCompanySettings();
     if (companySettings.smtpHost && companySettings.smtpUser) {
