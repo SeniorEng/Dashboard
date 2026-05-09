@@ -299,3 +299,135 @@ describe("VAC-PRO API: Patch + Vacation Summary + Carryover Sync", () => {
     expect(rows[0].daysPerYear).toBe(22);
   });
 });
+
+// ---------- Allowance-First Refactor Snapshot-/Vergleichstests (Task #413) ----------
+//
+// Diese Tests verriegeln das beobachtbare Verhalten von `getVacationSummary`
+// für die Refactor-Matrix:
+//   (a) Allowance-Eintrag für aktuelles Jahr vorhanden
+//   (b) Kein Allowance-Eintrag → Fallback auf Default/History
+//   (c) Carry-Over aus Vorjahr (über Allowance) wird gelesen
+//   (d) Unterjähriger Eintritt (pro-rata)
+//
+// Sie wurden VOR der Umstellung geschrieben (siehe Task-Spec) und müssen
+// nach der Umstellung unverändert grün bleiben.
+
+describe("VAC-PRO Allowance-First Snapshot (Task #413)", () => {
+  afterAll(async () => {
+    await runCleanup();
+  });
+
+  it("(a) Allowance-Eintrag für aktuelles Jahr ist autoritativ", async () => {
+    const emp = await createTestEmployee({ nachnamePrefix: "VacAllowA" });
+    const currentYear = new Date().getFullYear();
+
+    // Sauberer Zustand: weder History noch Allowance.
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp.id));
+
+    // Allowance setzen — bewusst von users.vacationDaysPerYear (30) abweichend.
+    await db.insert(employeeVacationAllowance).values({
+      userId: emp.id,
+      year: currentYear,
+      totalDays: "21.50",
+      carryOverDays: 4,
+      notes: null,
+    });
+
+    const res = await apiGet<any>(
+      `/api/admin/time-entries/vacation-summary/${emp.id}/${currentYear}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.data.totalDays).toBe(21.5);
+    // calculateCarryOverDays setzt nach 1.4. auf 0; vorher bleibt 4.
+    const today = new Date();
+    const expiry = new Date(currentYear, 3, 1);
+    expect(res.data.carryOverDays).toBe(today < expiry ? 4 : 0);
+    // configuredAnnualDays bleibt der users-Wert (Spec VAC-PRO-9).
+    expect(res.data.configuredAnnualDays).toBe(30);
+  });
+
+  it("(b) Kein Allowance-Eintrag → Fallback auf users.vacationDaysPerYear", async () => {
+    const emp = await createTestEmployee({ nachnamePrefix: "VacAllowB" });
+    const currentYear = new Date().getFullYear();
+
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp.id));
+
+    const res = await apiGet<any>(
+      `/api/admin/time-entries/vacation-summary/${emp.id}/${currentYear}`,
+    );
+    expect(res.status).toBe(200);
+    // Eintritt 2024-01-01 → ganzes Jahr → voller Anspruch (30 default).
+    expect(res.data.totalDays).toBe(30);
+    expect(res.data.carryOverDays).toBe(0);
+    expect(res.data.configuredAnnualDays).toBe(30);
+  });
+
+  it("(c) Carry-Over aus Vorjahres-Allowance wird übernommen (vor 1.4.)", async () => {
+    const emp = await createTestEmployee({ nachnamePrefix: "VacAllowC" });
+    const currentYear = new Date().getFullYear();
+
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp.id));
+
+    // Aktueller Jahres-Allowance enthält bereits den Carry-Over (so wie
+    // sync-vacation-carryover das schreibt).
+    await db.insert(employeeVacationAllowance).values({
+      userId: emp.id,
+      year: currentYear,
+      totalDays: "30.00",
+      carryOverDays: 7,
+      notes: "Übertrag aus Vorjahr",
+    });
+
+    const res = await apiGet<any>(
+      `/api/admin/time-entries/vacation-summary/${emp.id}/${currentYear}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.data.totalDays).toBe(30);
+    // Carry-Over wird nach 1.4. auf 0 gesetzt (calculateCarryOverDays).
+    const today = new Date();
+    const expiry = new Date(currentYear, 3, 1);
+    if (today < expiry) {
+      expect(res.data.carryOverDays).toBe(7);
+      expect(res.data.remainingDays).toBe(37);
+    } else {
+      expect(res.data.carryOverDays).toBe(0);
+      expect(res.data.remainingDays).toBe(30);
+    }
+  });
+
+  it("(d) Unterjähriger Eintritt → pro-rata (kein Allowance-Eintrag)", async () => {
+    const emp = await createTestEmployee({ nachnamePrefix: "VacAllowD" });
+    const currentYear = new Date().getFullYear();
+
+    // Eintrittsdatum auf 1. Juli des aktuellen Jahres setzen (6 Monate Anspruch).
+    const julyEintritt = `${currentYear}-07-01`;
+    const patchRes = await apiPatch(`/api/admin/users/${emp.id}`, {
+      eintrittsdatum: julyEintritt,
+    });
+    expect(patchRes.status).toBe(200);
+
+    // Sicherstellen, dass weder History noch Allowance bestehen, damit der
+    // Fallback-Pfad messbar ist.
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp.id));
+
+    const res = await apiGet<any>(
+      `/api/admin/time-entries/vacation-summary/${emp.id}/${currentYear}`,
+    );
+    expect(res.status).toBe(200);
+    // getVacationEntitlement: Math.ceil(30/12 * 6) = 15.
+    expect(res.data.totalDays).toBe(15);
+    expect(res.data.eintrittsdatum).toBe(julyEintritt);
+  });
+});

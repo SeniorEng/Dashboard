@@ -175,13 +175,18 @@ export async function getVacationSummary(
   const endDate = `${year}-12-31`;
   const today = todayISO();
 
-  const [userResult, allowanceResult, prevAllowanceResult, absenceEntries, prevYearAbsence, history] = await Promise.all([
+  // `employeeVacationAllowance` ist die autoritative Quelle für Jahres-Anspruch
+  // und Carry-Over (wird beim Patchen von `vacationDaysPerYear` und durch den
+  // Startup-Job `syncVacationCarryover` synchron mit der History gepflegt).
+  // Die History wird hier nur noch für die Antwortfelder
+  // `entitlementHistory` und `monthlyBreakdown` sowie als Fallback für
+  // Mitarbeiter ohne Allowance-Eintrag geladen.
+  const [userResult, allowanceResult, absenceEntries, history] = await Promise.all([
     db.select({
       eintrittsdatum: users.eintrittsdatum,
       vacationDaysPerYear: users.vacationDaysPerYear,
     }).from(users).where(eq(users.id, userId)).then(r => r[0]),
     getVacationAllowance(userId, year),
-    getVacationAllowance(userId, year - 1),
     db.select({
       entryType: employeeTimeEntries.entryType,
       entryDate: employeeTimeEntries.entryDate,
@@ -196,50 +201,35 @@ export async function getVacationSummary(
           isNull(employeeTimeEntries.deletedAt),
         ),
       ),
-    db.select({
-      entryType: employeeTimeEntries.entryType,
-      entryDate: employeeTimeEntries.entryDate,
-    })
-      .from(employeeTimeEntries)
-      .where(
-        and(
-          eq(employeeTimeEntries.userId, userId),
-          eq(employeeTimeEntries.entryType, 'urlaub'),
-          gte(employeeTimeEntries.entryDate, `${year - 1}-01-01`),
-          lte(employeeTimeEntries.entryDate, `${year - 1}-12-31`),
-          isNull(employeeTimeEntries.deletedAt),
-        ),
-      ),
     getVacationEntitlementHistoryForUser(userId),
   ]);
 
   const vacationDaysPerYear = userResult?.vacationDaysPerYear ?? 30;
   const eintrittsdatum = userResult?.eintrittsdatum ?? null;
 
-  // Wenn History existiert, ist der History-basierte anteilige Anspruch die
-  // autoritative Quelle (auch wenn ein älterer Allowance-Cache abweicht).
-  const entitlement: number = history.length > 0
-    ? computeAnnualEntitlement(history, vacationDaysPerYear, eintrittsdatum, year)
-    : (allowanceResult
-        ? Number(allowanceResult.totalDays)
-        : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year));
+  let entitlement: number;
+  let rawCarryOver: number;
 
-  let prevYearUsed = 0;
-  for (const entry of prevYearAbsence) {
-    if (entry.entryType === 'urlaub') prevYearUsed++;
+  if (allowanceResult) {
+    // Schneller Standardpfad: Allowance ist autoritativ.
+    entitlement = Number(allowanceResult.totalDays);
+    rawCarryOver = allowanceResult.carryOverDays;
+  } else {
+    // Legacy-Fallback: kein Allowance-Eintrag (z.B. neuer Mitarbeiter, bei dem
+    // `syncVacationCarryover` noch nicht lief). Anspruch und Carry-Over werden
+    // wie bisher aus History bzw. Vorjahres-Buchungen rekonstruiert.
+    const fallback = await computeFallbackEntitlementAndCarryOver(
+      userId,
+      year,
+      today,
+      history,
+      vacationDaysPerYear,
+      eintrittsdatum,
+    );
+    entitlement = fallback.entitlement;
+    rawCarryOver = fallback.rawCarryOver;
   }
 
-  const prevEntitlement: number = history.length > 0
-    ? computeAnnualEntitlement(history, vacationDaysPerYear, eintrittsdatum, year - 1)
-      + (prevAllowanceResult?.carryOverDays ?? 0)
-    : (prevAllowanceResult
-        ? Number(prevAllowanceResult.totalDays) + prevAllowanceResult.carryOverDays
-        : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year - 1));
-
-  const unusedFromPrevYear = Math.max(0, prevEntitlement - prevYearUsed);
-  const rawCarryOver = allowanceResult
-    ? allowanceResult.carryOverDays
-    : calculateCarryOverDays(unusedFromPrevYear, year, today);
   const carryOverDays = calculateCarryOverDays(rawCarryOver, year, today);
 
   let usedDays = 0;
@@ -282,4 +272,59 @@ export async function getVacationSummary(
     remainingDays,
     sickDays,
   };
+}
+
+/**
+ * Legacy-Fallback (Task #413): rekonstruiert Jahres-Anspruch + Carry-Over
+ * aus History und Vorjahres-Buchungen. Wird nur genutzt, wenn kein
+ * `employeeVacationAllowance`-Eintrag für `year` existiert. Im Normalbetrieb
+ * sorgt `syncVacationCarryover` (server/startup/sync-vacation-carryover.ts)
+ * dafür, dass dieser Pfad nicht erreicht wird.
+ */
+async function computeFallbackEntitlementAndCarryOver(
+  userId: number,
+  year: number,
+  today: string,
+  history: VacationEntitlementHistory[],
+  vacationDaysPerYear: number,
+  eintrittsdatum: string | null,
+): Promise<{ entitlement: number; rawCarryOver: number }> {
+  const [prevAllowanceResult, prevYearAbsence] = await Promise.all([
+    getVacationAllowance(userId, year - 1),
+    db.select({
+      entryType: employeeTimeEntries.entryType,
+      entryDate: employeeTimeEntries.entryDate,
+    })
+      .from(employeeTimeEntries)
+      .where(
+        and(
+          eq(employeeTimeEntries.userId, userId),
+          eq(employeeTimeEntries.entryType, 'urlaub'),
+          gte(employeeTimeEntries.entryDate, `${year - 1}-01-01`),
+          lte(employeeTimeEntries.entryDate, `${year - 1}-12-31`),
+          isNull(employeeTimeEntries.deletedAt),
+        ),
+      ),
+  ]);
+
+  const entitlement = history.length > 0
+    ? computeAnnualEntitlement(history, vacationDaysPerYear, eintrittsdatum, year)
+    : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year);
+
+  let prevYearUsed = 0;
+  for (const entry of prevYearAbsence) {
+    if (entry.entryType === 'urlaub') prevYearUsed++;
+  }
+
+  const prevEntitlement = history.length > 0
+    ? computeAnnualEntitlement(history, vacationDaysPerYear, eintrittsdatum, year - 1)
+      + (prevAllowanceResult?.carryOverDays ?? 0)
+    : (prevAllowanceResult
+        ? Number(prevAllowanceResult.totalDays) + prevAllowanceResult.carryOverDays
+        : getVacationEntitlement(vacationDaysPerYear, eintrittsdatum, year - 1));
+
+  const unusedFromPrevYear = Math.max(0, prevEntitlement - prevYearUsed);
+  const rawCarryOver = calculateCarryOverDays(unusedFromPrevYear, year, today);
+
+  return { entitlement, rawCarryOver };
 }
