@@ -12,6 +12,11 @@ import {
   createTestEmployee,
   runCleanup,
 } from "./test-utils";
+import {
+  computeAnnualEntitlement,
+  getVacationEntitlementHistoryForUser,
+  getVacationAllowance,
+} from "../server/storage/time-tracking/vacation";
 
 // ---------- Pure helper tests (VAC-PRO-1 .. VAC-PRO-5) ----------
 
@@ -402,6 +407,127 @@ describe("VAC-PRO Allowance-First Snapshot (Task #413)", () => {
       expect(res.data.carryOverDays).toBe(0);
       expect(res.data.remainingDays).toBe(30);
     }
+  });
+
+  it("VAC-CACHE-CONSISTENCY — Allowance-Cache und History-Berechnung laufen niemals auseinander", async () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+
+    async function expectCacheMatchesHistory(
+      userId: number,
+      vacDays: number,
+      eintritt: string | null,
+      year: number,
+      label: string,
+    ) {
+      const history = await getVacationEntitlementHistoryForUser(userId);
+      const allowance = await getVacationAllowance(userId, year);
+      const expected = computeAnnualEntitlement(history, vacDays, eintritt, year);
+      const expectedRounded = Math.round(expected * 100) / 100;
+      expect(allowance, `${label}: allowance fehlt`).toBeDefined();
+      const cached = Number(allowance!.totalDays);
+      const cachedRounded = Math.round(cached * 100) / 100;
+      expect(cachedRounded, `${label}: cache≠history`).toBe(expectedRounded);
+    }
+
+    // --- Szenario 1: Patch im laufenden Monat ---
+    const emp1 = await createTestEmployee({ nachnamePrefix: "VacCache1" });
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp1.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp1.id));
+    // Seed History: ganzes Jahr 30 Tage gültig.
+    await db.insert(vacationEntitlementHistory).values({
+      userId: emp1.id,
+      validFromYear: currentYear,
+      validFromMonth: 1,
+      daysPerYear: 30,
+      createdBy: null,
+    });
+
+    const patch1 = await apiPatch(`/api/admin/users/${emp1.id}`, {
+      vacationDaysPerYear: 18,
+    });
+    expect(patch1.status).toBe(200);
+    await expectCacheMatchesHistory(emp1.id, 18, "2024-01-01", currentYear, "Szenario 1 nach Patch");
+
+    // --- Szenario 2: Mehrere Patches im selben Monat ---
+    const emp2 = await createTestEmployee({ nachnamePrefix: "VacCache2" });
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp2.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp2.id));
+    await db.insert(vacationEntitlementHistory).values({
+      userId: emp2.id,
+      validFromYear: currentYear,
+      validFromMonth: 1,
+      daysPerYear: 24,
+      createdBy: null,
+    });
+
+    for (const next of [20, 26, 12]) {
+      const r = await apiPatch(`/api/admin/users/${emp2.id}`, { vacationDaysPerYear: next });
+      expect(r.status).toBe(200);
+      await expectCacheMatchesHistory(emp2.id, next, "2024-01-01", currentYear, `Szenario 2 nach Patch ${next}`);
+    }
+
+    // --- Szenario 3: Patch nach unterjährigem Eintritt ---
+    const emp3 = await createTestEmployee({ nachnamePrefix: "VacCache3" });
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp3.id));
+    await db.delete(employeeVacationAllowance)
+      .where(eq(employeeVacationAllowance.userId, emp3.id));
+
+    // Eintrittsdatum auf Mitte des aktuellen Jahres setzen (oder, falls wir
+    // vor Juni laufen, auf den Folgemonat — Hauptsache `validFromMonth`
+    // liegt nach dem aktuellen Monat ist nicht möglich, also wählen wir
+    // einen Monat ≤ currentMonth).
+    const eintrittMonth = Math.min(currentMonth, 7);
+    const eintritt3 = `${currentYear}-${String(eintrittMonth).padStart(2, "0")}-01`;
+    const patchEintritt = await apiPatch(`/api/admin/users/${emp3.id}`, {
+      eintrittsdatum: eintritt3,
+    });
+    expect(patchEintritt.status).toBe(200);
+
+    // History soll aus dem Eintrittsmonat heraus gepflegt sein.
+    await db.delete(vacationEntitlementHistory)
+      .where(eq(vacationEntitlementHistory.userId, emp3.id));
+    await db.insert(vacationEntitlementHistory).values({
+      userId: emp3.id,
+      validFromYear: currentYear,
+      validFromMonth: eintrittMonth,
+      daysPerYear: 30,
+      createdBy: null,
+    });
+
+    const patch3 = await apiPatch(`/api/admin/users/${emp3.id}`, { vacationDaysPerYear: 21 });
+    expect(patch3.status).toBe(200);
+    await expectCacheMatchesHistory(emp3.id, 21, eintritt3, currentYear, "Szenario 3 nach Patch");
+
+    // --- Konsistenz nach syncVacationCarryover ---
+    // Allowance für aktuelles Jahr löschen, Sync neu laufen lassen, dann
+    // muss totalDays wieder dem History-Resultat entsprechen.
+    const { syncVacationCarryover } = await import(
+      "../server/startup/sync-vacation-carryover"
+    );
+    for (const emp of [
+      { id: emp1.id, vac: 18, eintritt: "2024-01-01" as string | null },
+      { id: emp2.id, vac: 12, eintritt: "2024-01-01" as string | null },
+      { id: emp3.id, vac: 21, eintritt: eintritt3 as string | null },
+    ]) {
+      await db.delete(employeeVacationAllowance)
+        .where(
+          and(
+            eq(employeeVacationAllowance.userId, emp.id),
+            eq(employeeVacationAllowance.year, currentYear),
+          ),
+        );
+    }
+    await syncVacationCarryover();
+    await expectCacheMatchesHistory(emp1.id, 18, "2024-01-01", currentYear, "Sync emp1");
+    await expectCacheMatchesHistory(emp2.id, 12, "2024-01-01", currentYear, "Sync emp2");
+    await expectCacheMatchesHistory(emp3.id, 21, eintritt3, currentYear, "Sync emp3");
   });
 
   it("(d) Unterjähriger Eintritt → pro-rata (kein Allowance-Eintrag)", async () => {
