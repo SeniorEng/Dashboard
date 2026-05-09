@@ -740,7 +740,8 @@ describe("TE-BIZ-13: Monatsübersicht", () => {
       const pageRes = await apiGet<any>(`/api/time-entries/page-data/${year}/${month}`);
       expect(pageRes.status).toBe(200);
 
-      const appts: any[] = pageRes.data?.overview?.appointments ?? [];
+      const apptsByDate: Record<string, any[]> = pageRes.data?.overview?.appointments ?? {};
+      const appts: any[] = Object.values(apptsByDate).flat();
       const found = appts.find((a) => a.id === apptId);
       expect(found, "Prospect-Erstberatung muss in Monatsübersicht erscheinen").toBeDefined();
       expect(found.customerName).toContain("ProspectTime_");

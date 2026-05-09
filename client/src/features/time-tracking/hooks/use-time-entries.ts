@@ -9,12 +9,11 @@ import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
-import type { 
-  TimeEntry, 
-  CreateTimeEntryRequest, 
+import type {
+  TimeEntry,
+  CreateTimeEntryRequest,
   UpdateTimeEntryRequest,
   TimeOverviewData,
-  TimesPageData 
 } from "@/lib/api/types";
 
 const timeEntryKeys = {
@@ -150,23 +149,6 @@ function useTimeOverview(year: number, month: number) {
     queryKey: [...timeEntryKeys.overview(year, month), { viewAsEmployeeId }],
     queryFn: async ({ signal }) => {
       const result = await api.get<TimeOverviewData>(appendViewAs(`/time-entries/overview/${year}/${month}`, viewAsEmployeeId), signal);
-      return unwrapResult(result);
-    },
-    enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,
-    staleTime: 30000,
-  });
-}
-
-/**
- * Fetch all page data for My Times in a single API call
- * Combines: overview + vacation-summary + open-tasks
- */
-export function useTimesPageData(year: number, month: number) {
-  const { viewAsEmployeeId } = useViewAsEmployee();
-  return useQuery({
-    queryKey: [...timeEntryKeys.all, "page-data", { year, month, viewAsEmployeeId }] as const,
-    queryFn: async ({ signal }) => {
-      const result = await api.get<TimesPageData>(appendViewAs(`/time-entries/page-data/${year}/${month}`, viewAsEmployeeId), signal);
       return unwrapResult(result);
     },
     enabled: year >= 2020 && year <= 2100 && month >= 1 && month <= 12,

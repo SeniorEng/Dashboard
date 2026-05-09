@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ArrowLeft, Calendar, Loader2, Trash2, Lock, ExternalLink } from "lucide-react";
-import type { TimeEntryType, TimeEntryWithUser, VacationSummary, TimeEntry, AppointmentWithCustomerName } from "@/lib/api/types";
+import type { TimeEntryType, TimeEntryWithUser, VacationSummary, TimeEntry, AppointmentWithCustomerName, AdminTimeTrackingOverview } from "@/lib/api/types";
 import { TIME_ENTRY_TYPE_CONFIG } from "@/features/time-tracking/constants";
 import { TimeEntryDialog } from "@/features/time-tracking/components/time-entry-dialog";
 import { useTimeEntryForm } from "@/features/time-tracking/hooks/use-time-entry-form";
@@ -31,6 +31,12 @@ import { EmployeeTimeCard } from "@/features/team/components/employee-time-card"
 import { VacationDialog } from "@/features/team/components/vacation-dialog";
 
 type AdminAppointment = AppointmentWithCustomerName;
+
+type ActiveAction =
+  | { type: "create"; user: { id: number; name: string } }
+  | { type: "edit"; entry: TimeEntryWithUser }
+  | { type: "delete"; target: { id: number; label: string } }
+  | null;
 
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -49,12 +55,15 @@ export default function AdminTimeEntries() {
   const [vacationEditUser, setVacationEditUser] = useState<{ id: number; name: string } | null>(null);
   const [vacationDays, setVacationDays] = useState("30");
   const [carryOverDays, setCarryOverDays] = useState("0");
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; label: string } | null>(null);
 
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [createForUser, setCreateForUser] = useState<{ id: number; name: string } | null>(null);
-  const [showEditDialog, setShowEditDialog] = useState(false);
-  const [editEntry, setEditEntry] = useState<TimeEntryWithUser | null>(null);
+  // Single state for create / edit / delete dialogs (replaces 5 separate useState).
+  const [activeAction, setActiveAction] = useState<ActiveAction>(null);
+  const createForUser = activeAction?.type === "create" ? activeAction.user : null;
+  const editEntry = activeAction?.type === "edit" ? activeAction.entry : null;
+  const deleteTarget = activeAction?.type === "delete" ? activeAction.target : null;
+  const showCreateDialog = activeAction?.type === "create";
+  const showEditDialog = activeAction?.type === "edit";
+  const closeAction = useCallback(() => setActiveAction(null), []);
 
   const createForm = useTimeEntryForm();
   const editForm = useTimeEntryForm();
@@ -77,53 +86,26 @@ export default function AdminTimeEntries() {
     })).sort((a, b) => a.label.localeCompare(b.label, "de")) || []),
   ], [employees]);
 
-  const isApptFilter = selectedEntryType.startsWith("appt_");
-  const activeEntryType = isApptFilter ? "all" : selectedEntryType;
-
-  const { data: entries, isLoading } = useQuery({
-    queryKey: ["admin-time-entries", selectedYear, selectedMonth, selectedUserId, activeEntryType],
+  const { data: overviewData, isLoading } = useQuery({
+    queryKey: ["admin-time-entries", "overview", selectedYear, selectedMonth, selectedUserId, selectedEntryType],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       if (selectedUserId !== "all") params.set("userId", selectedUserId);
-      if (activeEntryType !== "all") params.set("entryType", activeEntryType);
-      
-      const result = await api.get<TimeEntryWithUser[]>(`/admin/time-entries?${params.toString()}`, signal);
+      if (selectedEntryType !== "all") params.set("entryType", selectedEntryType);
+
+      const result = await api.get<AdminTimeTrackingOverview>(
+        `/admin/time-tracking-overview?${params.toString()}`,
+        signal,
+      );
       return unwrapResult(result);
     },
     staleTime: 30_000,
   });
 
-  const { data: appointmentsData } = useQuery({
-    queryKey: ["admin-employee-appointments", selectedYear, selectedMonth, selectedUserId],
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("year", selectedYear.toString());
-      params.set("month", selectedMonth.toString());
-      if (selectedUserId !== "all") params.set("userId", selectedUserId);
-      const result = await api.get<AdminAppointment[]>(`/admin/employee-appointments?${params.toString()}`, signal);
-      return unwrapResult(result);
-    },
-    staleTime: 30_000,
-  });
-
-  const appointmentsByEmployeeId = useMemo(() => {
-    if (!appointmentsData) return {} as Record<number, AdminAppointment[]>;
-    if (!isApptFilter && selectedEntryType !== "all") return {} as Record<number, AdminAppointment[]>;
-    const apptTypeFilter = selectedEntryType === "appt_erstberatung" ? "Erstberatung"
-      : selectedEntryType === "appt_kundentermin" ? "Kundentermin"
-      : null;
-    const map: Record<number, AdminAppointment[]> = {};
-    for (const appt of appointmentsData) {
-      const empId = appt.assignedEmployeeId;
-      if (empId == null) continue;
-      if (apptTypeFilter && appt.appointmentType !== apptTypeFilter) continue;
-      if (!map[empId]) map[empId] = [];
-      map[empId].push(appt);
-    }
-    return map;
-  }, [appointmentsData, selectedEntryType, isApptFilter]);
+  const entriesByEmployeeId = overviewData?.entriesByEmployeeId ?? {};
+  const appointmentsByEmployeeId = overviewData?.appointmentsByEmployeeId ?? {};
 
   const { data: selectedUserVacation, isLoading: vacationLoading } = useQuery({
     queryKey: ["admin-vacation-summary", vacationEditUser?.id, selectedYear],
@@ -199,8 +181,7 @@ export default function AdminTimeEntries() {
     onSuccess: () => {
       toast({ title: "Zeiteintrag erstellt" });
       invalidateAll();
-      setShowCreateDialog(false);
-      setCreateForUser(null);
+      closeAction();
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -215,8 +196,7 @@ export default function AdminTimeEntries() {
     onSuccess: () => {
       toast({ title: "Zeiteintrag aktualisiert" });
       invalidateAll();
-      setShowEditDialog(false);
-      setEditEntry(null);
+      closeAction();
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -231,37 +211,30 @@ export default function AdminTimeEntries() {
     onSuccess: () => {
       toast({ title: "Zeiteintrag gelöscht" });
       invalidateAll();
-      setDeleteTarget(null);
+      closeAction();
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
 
-  const entriesByEmployeeId = useMemo(() => {
-    if (!entries || isApptFilter) return {} as Record<number, TimeEntryWithUser[]>;
-    return entries.reduce((acc, entry) => {
-      const key = entry.userId;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(entry);
-      return acc;
-    }, {} as Record<number, TimeEntryWithUser[]>);
-  }, [entries, isApptFilter]);
-
   const stats = useMemo(() => {
     const base = { vacation: 0, sick: 0, other: 0, total: 0, appointments: 0 };
-    if (entries && !isApptFilter) {
-      for (const entry of entries) {
+    const entryLists: TimeEntryWithUser[][] = Object.values(entriesByEmployeeId);
+    for (const list of entryLists) {
+      for (const entry of list) {
         base.total++;
         if (entry.entryType === "urlaub") base.vacation++;
         else if (entry.entryType === "krankheit") base.sick++;
         else base.other++;
       }
     }
-    const apptList = Object.values(appointmentsByEmployeeId).flat();
-    base.appointments = apptList.length;
+    const apptLists: AdminAppointment[][] = Object.values(appointmentsByEmployeeId);
+    for (const list of apptLists) {
+      base.appointments += list.length;
+    }
     return base;
-  }, [entries, appointmentsByEmployeeId, isApptFilter]);
+  }, [entriesByEmployeeId, appointmentsByEmployeeId]);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -285,9 +258,8 @@ export default function AdminTimeEntries() {
 
   const handleOpenCreate = useCallback((userId: number, userName: string) => {
     const monthStr = String(selectedMonth).padStart(2, "0");
-    setCreateForUser({ id: userId, name: userName });
     createForm.reset({ entryDate: `${selectedYear}-${monthStr}-01` });
-    setShowCreateDialog(true);
+    setActiveAction({ type: "create", user: { id: userId, name: userName } });
   }, [createForm, selectedYear, selectedMonth]);
 
   const handleCreate = useCallback(() => {
@@ -297,7 +269,6 @@ export default function AdminTimeEntries() {
   }, [createForm, createForUser, createMutation]);
 
   const handleOpenEdit = useCallback((entry: TimeEntryWithUser) => {
-    setEditEntry(entry);
     editForm.reset({
       entryType: entry.entryType as TimeEntryType,
       entryDate: entry.entryDate,
@@ -306,7 +277,7 @@ export default function AdminTimeEntries() {
       isFullDay: entry.isFullDay,
       notes: entry.notes || "",
     });
-    setShowEditDialog(true);
+    setActiveAction({ type: "edit", entry });
   }, [editForm]);
 
   const handleUpdate = useCallback(() => {
@@ -316,7 +287,7 @@ export default function AdminTimeEntries() {
   }, [editForm, editEntry, updateMutation]);
 
   const handleDeleteEntry = useCallback((id: number, label: string) => {
-    setDeleteTarget({ id, label });
+    setActiveAction({ type: "delete", target: { id, label } });
   }, []);
 
   useEffect(() => {
@@ -492,10 +463,7 @@ export default function AdminTimeEntries() {
 
           <TimeEntryDialog
             open={showCreateDialog}
-            onOpenChange={(open) => {
-              setShowCreateDialog(open);
-              if (!open) setCreateForUser(null);
-            }}
+            onOpenChange={(open) => { if (!open) closeAction(); }}
             title={`Eintrag für ${createForUser?.name || "Mitarbeiter"}`}
             formState={createForm.formState}
             onFieldChange={createForm.updateField}
@@ -510,10 +478,7 @@ export default function AdminTimeEntries() {
 
           <TimeEntryDialog
             open={showEditDialog}
-            onOpenChange={(open) => {
-              setShowEditDialog(open);
-              if (!open) setEditEntry(null);
-            }}
+            onOpenChange={(open) => { if (!open) closeAction(); }}
             title={`Eintrag bearbeiten – ${editEntry?.user.displayName || ""}`}
             formState={editForm.formState}
             onFieldChange={editForm.updateField}
@@ -526,7 +491,7 @@ export default function AdminTimeEntries() {
             testIdPrefix="admin-edit"
           />
 
-          <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeAction(); }}>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Eintrag löschen?</AlertDialogTitle>

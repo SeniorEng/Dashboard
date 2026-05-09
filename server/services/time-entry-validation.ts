@@ -44,7 +44,7 @@ export async function checkTimeConflicts(
   const dayAppointments = await storage.getAppointmentsForDay(userId, date);
   const activeAppointments = dayAppointments.filter(a => a.status !== 'cancelled');
 
-  const allDayEntries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
+  const allDayEntries = await timeTrackingStorage.getTimeEntries(userId, { date });
   const otherEntries = allDayEntries
     .filter(e => e.id !== excludeEntryId)
     .filter(e => e.entryType !== "verfuegbar" && e.entryType !== "blocker");

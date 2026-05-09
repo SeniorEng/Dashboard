@@ -22,8 +22,9 @@ import { formatDateISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import { employeeVisibleAppointmentsFilter } from "../appointment-helpers";
 import { monthDateRange, type TimeOverviewFilters } from "./shared";
-import { getEmployeeAppointments } from "./appointments";
-import { getTimeEntries } from "./entries";
+import { getAllAppointmentsInRange, getEmployeeAppointments } from "./appointments";
+import { getAllTimeEntries, getTimeEntries } from "./entries";
+import type { AdminTimeTrackingOverview } from "@shared/api";
 
 export async function getTimeOverview(
   userId: number,
@@ -162,9 +163,17 @@ export async function getTimeOverview(
     }
   }
 
-  const enrichedAppointments = employeeAppointments.map(appt => {
+  type EnrichedAppointment = typeof employeeAppointments[number] & {
+    services: Array<{
+      serviceCode: string | null;
+      plannedDurationMinutes: number;
+      actualDurationMinutes: number | null;
+    }>;
+  };
+  const apptsByDate: Record<string, EnrichedAppointment[]> = {};
+  for (const appt of employeeAppointments) {
     const apptServices = servicesByAppointment.get(appt.id) || [];
-    return {
+    const enriched = {
       ...appt,
       services: apptServices.map(s => ({
         serviceCode: s.serviceCode,
@@ -172,7 +181,13 @@ export async function getTimeOverview(
         actualDurationMinutes: s.actualDurationMinutes,
       })),
     };
-  });
+    (apptsByDate[appt.date] ||= []).push(enriched);
+  }
+
+  const otherEntriesByDate: Record<string, typeof timeEntries> = {};
+  for (const entry of timeEntries) {
+    (otherEntriesByDate[entry.entryDate] ||= []).push(entry);
+  }
 
   return {
     period: { year, month },
@@ -183,8 +198,8 @@ export async function getTimeOverview(
     completedTravel,
     plannedTravel,
     timeEntries: timeEntrySummary,
-    appointments: enrichedAppointments,
-    otherEntries: timeEntries,
+    appointments: apptsByDate,
+    otherEntries: otherEntriesByDate,
   };
 }
 
@@ -275,4 +290,92 @@ export async function getOpenTasks(userId: number): Promise<OpenTasksSummary> {
   return {
     daysWithMissingBreaks,
   };
+}
+
+export interface AdminTimeTrackingOverviewFilters {
+  year: number;
+  month: number;
+  userId?: number;
+  /**
+   * Either `"all"`, eine `TimeEntryType`, oder `appt_erstberatung` /
+   * `appt_kundentermin` für reine Termin-Filterung. Undefined = alles.
+   */
+  entryType?: string;
+}
+
+/**
+ * Kombiniertes Datenfeed für die Admin-Zeiterfassungsseite: Time-Entries und
+ * Termine pro Mitarbeiter, bereits server-seitig nach `userId` gruppiert. Die
+ * UI muss daher keine zwei parallelen Queries mehr ausführen oder selbst
+ * gruppieren.
+ */
+export async function getAdminTimeTrackingOverview(
+  filters: AdminTimeTrackingOverviewFilters,
+): Promise<AdminTimeTrackingOverview> {
+  const { year, month, userId, entryType } = filters;
+  const isApptFilter = !!entryType && entryType.startsWith("appt_");
+  const hasEntryTypeFilter = !!entryType && entryType !== "all";
+
+  const monthStr = String(month).padStart(2, "0");
+  const startDate = `${year}-${monthStr}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${monthStr}-${lastDay}`;
+
+  const entries = isApptFilter
+    ? []
+    : await getAllTimeEntries({
+        year,
+        month,
+        userId,
+        entryType: hasEntryTypeFilter ? entryType : undefined,
+      });
+
+  const showAppointments = !hasEntryTypeFilter || isApptFilter;
+  let rawAppts: Awaited<ReturnType<typeof getAllAppointmentsInRange>> = [];
+  if (showAppointments) {
+    rawAppts = userId !== undefined
+      ? await getEmployeeAppointments(userId, startDate, endDate)
+      : await getAllAppointmentsInRange(startDate, endDate);
+  }
+
+  const apptTypeFilter = entryType === "appt_erstberatung"
+    ? "Erstberatung"
+    : entryType === "appt_kundentermin"
+      ? "Kundentermin"
+      : null;
+
+  const apptsFiltered = apptTypeFilter
+    ? rawAppts.filter(a => a.appointmentType === apptTypeFilter)
+    : rawAppts;
+
+  const apptIds = apptsFiltered.map(a => a.id);
+  const servicesByAppt = apptIds.length > 0
+    ? await (await import("./appointments")).getAppointmentServiceDetailsByAppointmentIds(apptIds)
+    : new Map<number, never[]>();
+
+  const entriesByEmployeeId: Record<number, typeof entries> = {};
+  for (const entry of entries) {
+    (entriesByEmployeeId[entry.userId] ||= []).push(entry);
+  }
+
+  type EnrichedAppt = typeof apptsFiltered[number] & {
+    appointmentServiceDetails: ReturnType<Map<number, never[]>['get']>;
+  };
+  const appointmentsByEmployeeId: Record<number, EnrichedAppt[]> = {};
+  for (const appt of apptsFiltered) {
+    const empId = appt.assignedEmployeeId;
+    if (empId == null) continue;
+    const enriched = {
+      ...appt,
+      appointmentServiceDetails: servicesByAppt.get(appt.id) || [],
+    } as EnrichedAppt;
+    (appointmentsByEmployeeId[empId] ||= []).push(enriched);
+  }
+
+  // Cast: storage returns Date objects which become ISO strings after JSON
+  // serialization (matches the AdminTimeTrackingOverview API contract).
+  return {
+    entriesByEmployeeId,
+    appointmentsByEmployeeId,
+  } as unknown as AdminTimeTrackingOverview;
 }

@@ -66,7 +66,7 @@ router.get("/by-date/:date", asyncHandler("Zeiteinträge konnten nicht geladen w
     return res.status(400).json({ error: "Ungültiges Datum" });
   }
 
-  const entries = await timeTrackingStorage.getTimeEntriesForDate(userId, date);
+  const entries = await timeTrackingStorage.getTimeEntries(userId, { date });
   res.json(entries);
 }));
 

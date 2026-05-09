@@ -53,7 +53,7 @@ async function checkEmployeeBlocker(
   startTime: string,
   endTime: string
 ): Promise<string | null> {
-  const blockerEntries = await timeTrackingStorage.getTimeEntriesForDate(employeeId, date);
+  const blockerEntries = await timeTrackingStorage.getTimeEntries(employeeId, { date });
   const blockers = blockerEntries.filter(e => e.entryType === "blocker" && !e.deletedAt);
 
   for (const blocker of blockers) {

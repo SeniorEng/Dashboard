@@ -32,21 +32,6 @@ export async function getTimeEntry(id: number): Promise<EmployeeTimeEntry | unde
   return results[0];
 }
 
-export async function getTimeEntriesForDate(
-  userId: number,
-  date: string,
-): Promise<EmployeeTimeEntry[]> {
-  return db
-    .select()
-    .from(employeeTimeEntries)
-    .where(and(
-      eq(employeeTimeEntries.userId, userId),
-      eq(employeeTimeEntries.entryDate, date),
-      isNull(employeeTimeEntries.deletedAt),
-    ))
-    .orderBy(employeeTimeEntries.startTime);
-}
-
 export async function createTimeEntry(
   userId: number,
   data: InsertTimeEntry,

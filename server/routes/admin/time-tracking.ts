@@ -10,6 +10,23 @@ const router = Router();
 // TIME TRACKING (Admin)
 // ============================================
 
+// Combined feed: time entries + appointments grouped by employee. Replaces the
+// two parallel client queries (/admin/time-entries + /admin/employee-appointments).
+router.get("/time-tracking-overview", asyncHandler("Zeitübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const { year, month, userId, entryType } = req.query;
+  if (!year || !month) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Jahr und Monat sind erforderlich" });
+    return;
+  }
+  const data = await timeTrackingStorage.getAdminTimeTrackingOverview({
+    year: parseInt(year as string),
+    month: parseInt(month as string),
+    userId: userId && userId !== "all" ? parseInt(userId as string) : undefined,
+    entryType: entryType as string | undefined,
+  });
+  res.json(data);
+}));
+
 router.get("/time-entries", asyncHandler("Zeiteinträge konnten nicht geladen werden", async (req: Request, res: Response) => {
   const { year, month, userId, entryType } = req.query;
   

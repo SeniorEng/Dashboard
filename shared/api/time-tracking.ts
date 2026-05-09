@@ -128,8 +128,20 @@ export interface TimeOverviewData {
   completedTravel?: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
   plannedTravel?: Pick<TravelSummary, 'totalKilometers' | 'customerKilometers' | 'totalMinutes'>;
   timeEntries: TimeEntrySummary;
-  appointments: AppointmentWithCustomerName[];
-  otherEntries: EmployeeTimeEntry[];
+  /**
+   * Termine gruppiert nach Termin-Datum (`appointments.date` als ISO-String).
+   * Server-seitige Gruppierung erspart dem Client einen `group-by-date`-Schritt.
+   */
+  appointments: Record<string, AppointmentWithCustomerName[]>;
+  /**
+   * Sonstige Zeit-Einträge (Pause, Urlaub, …) gruppiert nach `entryDate`.
+   */
+  otherEntries: Record<string, EmployeeTimeEntry[]>;
+}
+
+export interface AdminTimeTrackingOverview {
+  entriesByEmployeeId: Record<number, TimeEntryWithUser[]>;
+  appointmentsByEmployeeId: Record<number, AppointmentWithCustomerName[]>;
 }
 
 export interface TimesPageData {

@@ -5,6 +5,8 @@ export interface TimeEntryFilters {
   year?: number;
   month?: number;
   entryType?: string;
+  /** Optional ISO date (YYYY-MM-DD) — restricts to a single day. */
+  date?: string;
 }
 
 export interface TimeOverviewFilters {
@@ -23,7 +25,9 @@ export function buildTimeEntryFilterConditions(filters?: TimeEntryFilters & { us
     conditions.push(eq(employeeTimeEntries.userId, filters.userId));
   }
 
-  if (filters?.year && filters?.month) {
+  if (filters?.date) {
+    conditions.push(eq(employeeTimeEntries.entryDate, filters.date));
+  } else if (filters?.year && filters?.month) {
     const monthStr = filters.month.toString().padStart(2, '0');
     const startDate = `${filters.year}-${monthStr}-01`;
     const lastDay = new Date(filters.year, filters.month, 0).getDate();

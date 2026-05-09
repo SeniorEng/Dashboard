@@ -1,13 +1,15 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useSearch, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
+import { api, unwrapResult } from "@/lib/api";
 import {
-  useTimesPageData,
   useDeleteTimeEntry,
   useUpdateTimeEntry,
   useTimeEntryConflict,
@@ -22,7 +24,7 @@ import {
   MONTH_NAMES,
   type DayTimeEntry,
 } from "@/features/time-tracking";
-import type { TimeEntryType } from "@/lib/api/types";
+import type { TimeEntryType, TimesPageData } from "@/lib/api/types";
 import { todayISO } from "@shared/utils/datetime";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -57,7 +59,18 @@ export default function MyTimes() {
 
   const [showEditDialog, setShowEditDialog] = useState(false);
 
-  const { data: pageData, isLoading } = useTimesPageData(selectedYear, selectedMonth);
+  const { viewAsEmployeeId } = useViewAsEmployee();
+  const { data: pageData, isLoading } = useQuery({
+    queryKey: ["time-entries", "page-data", { year: selectedYear, month: selectedMonth, viewAsEmployeeId }] as const,
+    queryFn: async ({ signal }) => {
+      const base = `/time-entries/page-data/${selectedYear}/${selectedMonth}`;
+      const endpoint = viewAsEmployeeId ? `${base}?viewAsEmployeeId=${viewAsEmployeeId}` : base;
+      const result = await api.get<TimesPageData>(endpoint, signal);
+      return unwrapResult(result);
+    },
+    enabled: selectedYear >= 2020 && selectedYear <= 2100 && selectedMonth >= 1 && selectedMonth <= 12,
+    staleTime: 30000,
+  });
   const { data: closingData } = useMonthClosingStatus(selectedYear, selectedMonth);
   const timeOverview = pageData?.overview;
   const vacationSummary = pageData?.vacationSummary;
@@ -85,26 +98,8 @@ export default function MyTimes() {
     [daysWithMissingBreaks]
   );
 
-  const entries = timeOverview?.otherEntries;
-  const appointments = timeOverview?.appointments;
-
-  const entriesByDate = useMemo(() => {
-    if (!entries) return {};
-    return entries.reduce((acc, entry) => {
-      if (!acc[entry.entryDate]) acc[entry.entryDate] = [];
-      acc[entry.entryDate].push(entry);
-      return acc;
-    }, {} as Record<string, typeof entries>);
-  }, [entries]);
-
-  const appointmentsByDate = useMemo(() => {
-    if (!appointments) return {};
-    return appointments.reduce((acc, appt) => {
-      if (!acc[appt.date]) acc[appt.date] = [];
-      acc[appt.date].push(appt);
-      return acc;
-    }, {} as Record<string, typeof appointments>);
-  }, [appointments]);
+  const entriesByDate = timeOverview?.otherEntries ?? {};
+  const appointmentsByDate = timeOverview?.appointments ?? {};
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();

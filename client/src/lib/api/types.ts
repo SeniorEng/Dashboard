@@ -23,4 +23,5 @@ export type {
   AppointmentWithCustomerName,
   TimeOverviewData,
   TimesPageData,
+  AdminTimeTrackingOverview,
 } from "@shared/api";

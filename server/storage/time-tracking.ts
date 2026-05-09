@@ -75,7 +75,6 @@ export const timeTrackingStorage = {
   // entries
   getTimeEntries: entriesModule.getTimeEntries,
   getTimeEntry: entriesModule.getTimeEntry,
-  getTimeEntriesForDate: entriesModule.getTimeEntriesForDate,
   createTimeEntry: entriesModule.createTimeEntry,
   createTimeEntriesForDates: entriesModule.createTimeEntriesForDates,
   collectWeekdayDates: entriesModule.collectWeekdayDates,
@@ -99,6 +98,7 @@ export const timeTrackingStorage = {
 
   // overview
   getTimeOverview: overviewModule.getTimeOverview,
+  getAdminTimeTrackingOverview: overviewModule.getAdminTimeTrackingOverview,
   getOpenTasks: overviewModule.getOpenTasks,
 
   // month closing
