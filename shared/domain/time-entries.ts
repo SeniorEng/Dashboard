@@ -53,6 +53,46 @@ export function getAppointmentEndMinutes(appt: {
 
 export const FULL_DAY_ENTRY_TYPES = ["urlaub", "krankheit"] as const;
 
+const TIME_HHMM_REGEX = /^\d{2}:\d{2}(:\d{2})?$/;
+
+export type TimeRangeValidation =
+  | { ok: true }
+  | { ok: false; reason: "invalid_format" | "end_before_start"; message: string };
+
+/**
+ * Reine Validierung eines optionalen Zeit-Bereichs (HH:MM bzw. HH:MM:SS).
+ *
+ * - Fehlende Werte gelten als gültig (es gibt nichts zu prüfen — Pflichtfelder
+ *   werden an anderer Stelle erzwungen).
+ * - Fehlerhaftes Format und „Ende ≤ Start" liefern eine deutsche Meldung,
+ *   identisch zu den bisherigen Inline-Checks im Hook und Server.
+ */
+export function validateTimeRange(args: {
+  startTime?: string | null;
+  endTime?: string | null;
+}): TimeRangeValidation {
+  const { startTime, endTime } = args;
+  if (!startTime || !endTime) return { ok: true };
+
+  if (!TIME_HHMM_REGEX.test(startTime) || !TIME_HHMM_REGEX.test(endTime)) {
+    return {
+      ok: false,
+      reason: "invalid_format",
+      message: "Ungültiges Zeitformat (HH:MM erwartet)",
+    };
+  }
+
+  if (endTime <= startTime) {
+    return {
+      ok: false,
+      reason: "end_before_start",
+      message: "Die Endzeit muss nach der Startzeit liegen",
+    };
+  }
+
+  return { ok: true };
+}
+
 const ENTRY_TYPES_WITHOUT_KILOMETERS = ["pause", "verfuegbar", "blocker"] as const;
 
 export function entryTypeSupportsKilometers(entryType: string, isFullDay: boolean): boolean {

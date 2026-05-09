@@ -13,6 +13,7 @@ import {
   getAppointmentEndMinutes,
   getEntryTypeLabel,
   timeRangesOverlap,
+  validateTimeRange,
 } from "@shared/domain/time-entries";
 import { timeToMinutes } from "@shared/utils/datetime";
 
@@ -73,12 +74,13 @@ export async function checkTimeConflicts(
     return null;
   }
 
+  const rangeCheck = validateTimeRange({ startTime, endTime });
+  if (!rangeCheck.ok) {
+    return rangeCheck.message;
+  }
+
   const newStart = timeToMinutes(startTime);
   const newEnd = timeToMinutes(endTime);
-
-  if (newEnd <= newStart) {
-    return "Die Endzeit muss nach der Startzeit liegen";
-  }
 
   for (const appt of activeAppointments) {
     const apptStart = timeToMinutes(appt.scheduledStart);
