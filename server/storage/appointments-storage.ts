@@ -360,9 +360,29 @@ export async function replaceAppointmentServices(appointmentId: number, services
 export async function updateAppointmentServiceDocumentation(appointmentId: number, serviceUpdates: { serviceId: number; actualDurationMinutes: number; details?: string | null }[], tx?: DbOrTx): Promise<void> {
   if (serviceUpdates.length === 0) return;
   const { appointmentServices } = await import("@shared/schema");
-  const { eq, and } = await import("drizzle-orm");
+  const { eq, and, notInArray } = await import("drizzle-orm");
+
   const runUpdates = async (client: DbOrTx) => {
-    await Promise.all(serviceUpdates.map(su =>
+    // Bestehende Service-Zeilen laden, um zwischen Update und Insert zu
+    // unterscheiden. Hintergrund: Bei der Korrektur eines bereits
+    // dokumentierten Termins (über „Dokumentation korrigieren") kann der
+    // Admin einen Service durch einen anderen ersetzen
+    // (z. B. Hauswirtschaft → Alltagsbegleitung). Ein reines UPDATE per
+    // (appointmentId, serviceId) würde dann 0 Zeilen treffen, der alte
+    // Service bliebe unverändert stehen und der neue Service würde nie
+    // gespeichert. Deshalb diff-basiert: Vorhandene Zeilen aktualisieren,
+    // neue Services einfügen, weggefallene Services entfernen.
+    const existing = await client
+      .select({ serviceId: appointmentServices.serviceId })
+      .from(appointmentServices)
+      .where(eq(appointmentServices.appointmentId, appointmentId));
+    const existingServiceIds = new Set(existing.map(e => e.serviceId));
+    const submittedServiceIds = serviceUpdates.map(su => su.serviceId);
+
+    const toInsert = serviceUpdates.filter(su => !existingServiceIds.has(su.serviceId));
+    const toUpdate = serviceUpdates.filter(su => existingServiceIds.has(su.serviceId));
+
+    await Promise.all(toUpdate.map(su =>
       client.update(appointmentServices)
         .set({
           actualDurationMinutes: su.actualDurationMinutes,
@@ -375,6 +395,49 @@ export async function updateAppointmentServiceDocumentation(appointmentId: numbe
           )
         )
     ));
+
+    if (toInsert.length > 0) {
+      // Neu eingefügte Service-Zeilen entstehen ausschließlich bei
+      // Korrekturen. Da das Frontend keinen separaten geplanten Wert
+      // mitschickt, übernehmen wir die tatsächliche Dauer auch als
+      // geplante Dauer, damit `appointment_services.planned_duration_minutes`
+      // (NOT NULL) konsistent bleibt und die Summe der Planminuten zum
+      // neuen `appointments.duration_promised` passt.
+      await client.insert(appointmentServices).values(toInsert.map(su => ({
+        appointmentId,
+        serviceId: su.serviceId,
+        plannedDurationMinutes: su.actualDurationMinutes,
+        actualDurationMinutes: su.actualDurationMinutes,
+        details: su.details ?? null,
+      })));
+    }
+
+    // Service-Zeilen entfernen, die in der Korrektur nicht mehr enthalten
+    // sind (z. B. Hauswirtschaft wurde komplett durch Alltagsbegleitung
+    // ersetzt). Cascade-Effekte gibt es hier nicht, weil
+    // `appointment_services` keine abgeleiteten Buchungen hält — die
+    // Budget-Reverse-Logik läuft separat im Reopen-Endpoint.
+    await client.delete(appointmentServices).where(
+      and(
+        eq(appointmentServices.appointmentId, appointmentId),
+        notInArray(appointmentServices.serviceId, submittedServiceIds),
+      )
+    );
+
+    // `appointments.duration_promised` an die neue Service-Konstellation
+    // angleichen, damit Planungs-Sicht (Summe Planminuten) und
+    // Termin-Header konsistent bleiben. Bei Korrekturen, die keinen Service
+    // austauschen, ändert sich der Wert in der Praxis nicht.
+    const rows = await client
+      .select({ planned: appointmentServices.plannedDurationMinutes })
+      .from(appointmentServices)
+      .where(eq(appointmentServices.appointmentId, appointmentId));
+    const newPlannedTotal = rows.reduce((sum, r) => sum + (r.planned ?? 0), 0);
+    if (newPlannedTotal > 0) {
+      await client.update(appointments)
+        .set({ durationPromised: newPlannedTotal })
+        .where(eq(appointments.id, appointmentId));
+    }
   };
   if (tx) {
     await runUpdates(tx);
