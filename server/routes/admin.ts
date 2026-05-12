@@ -86,6 +86,7 @@ const ROUTE_PERMISSION_MAP: Record<string, AdminPermissionKey> = {
 const READ_PERMISSION_FALLBACKS: Partial<Record<AdminPermissionKey, AdminPermissionKey[]>> = {
   insurance_providers: ["customers"],
   services: ["customers", "billing"],
+  documents: ["customers"],
 };
 
 router.use(async (req: Request, res: Response, next) => {

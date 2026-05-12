@@ -296,12 +296,18 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                   <SelectValue placeholder="Typ auswählen..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableDocTypes.map(dt => (
-                    <SelectItem key={dt.id} value={dt.id.toString()}>
-                      {dt.name}
-                      {dt.reviewIntervalMonths ? ` (alle ${dt.reviewIntervalMonths} Mon.)` : ""}
-                    </SelectItem>
-                  ))}
+                  {availableDocTypes.length === 0 ? (
+                    <div className="px-2 py-3 text-xs text-gray-500" data-testid="text-no-doc-types">
+                      Keine Dokumententypen verfügbar. Bitte einen Admin kontaktieren.
+                    </div>
+                  ) : (
+                    availableDocTypes.map(dt => (
+                      <SelectItem key={dt.id} value={dt.id.toString()}>
+                        {dt.name}
+                        {dt.reviewIntervalMonths ? ` (alle ${dt.reviewIntervalMonths} Mon.)` : ""}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
