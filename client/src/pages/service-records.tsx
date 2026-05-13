@@ -21,6 +21,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -60,6 +61,7 @@ export default function ServiceRecordsPage() {
   const currentDate = new Date();
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
+  const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
   const searchString = useSearch();
@@ -174,7 +176,21 @@ export default function ServiceRecordsPage() {
     );
   }
 
-  const pendingCount = pendingRecords?.length || 0;
+  const visiblePendingRecords = (pendingRecords ?? []).filter(
+    (r) => !(r.year === selectedYear && r.month === selectedMonth),
+  );
+  const showPendingBanner = visiblePendingRecords.length > 0;
+  const singlePendingRecord = visiblePendingRecords.length === 1 ? visiblePendingRecords[0] : null;
+
+  const handleBannerClick = () => {
+    if (singlePendingRecord) {
+      setSelectedYear(singlePendingRecord.year);
+      setSelectedMonth(singlePendingRecord.month);
+      navigate(`/service-records/${singlePendingRecord.id}`);
+    } else {
+      setPendingSheetOpen(true);
+    }
+  };
 
   return (
     <Layout>
@@ -196,21 +212,52 @@ export default function ServiceRecordsPage() {
         </div>
       </div>
 
-      {pendingCount > 0 && pendingRecords && (
+      {showPendingBanner && (
         <div
           className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors"
           data-testid="banner-pending"
-          onClick={() => navigate(`/service-records/${pendingRecords[0].id}`)}
+          onClick={handleBannerClick}
         >
           <div className="flex items-center gap-2 text-amber-800">
             <AlertCircle className={iconSize.sm} />
-            <span className="text-sm font-medium">
-              {pendingCount} {pendingCount === 1 ? "Leistungsnachweis benötigt" : "Leistungsnachweise benötigen"} noch Unterschriften
+            <span className="text-sm font-medium flex-1">
+              {singlePendingRecord ? (
+                <>
+                  1 Leistungsnachweis offen –{" "}
+                  <PendingBannerLabel record={singlePendingRecord} />
+                </>
+              ) : (
+                <>
+                  {visiblePendingRecords.length} Leistungsnachweise benötigen noch Unterschriften
+                </>
+              )}
             </span>
             <ChevronRight className={`${iconSize.sm} ml-auto`} />
           </div>
         </div>
       )}
+
+      <Sheet open={pendingSheetOpen} onOpenChange={setPendingSheetOpen}>
+        <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto" data-testid="sheet-pending-list">
+          <SheetHeader>
+            <SheetTitle>Offene Leistungsnachweise</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 flex flex-col gap-2">
+            {visiblePendingRecords.map((record) => (
+              <PendingListItem
+                key={record.id}
+                record={record}
+                onSelect={() => {
+                  setSelectedYear(record.year);
+                  setSelectedMonth(record.month);
+                  setPendingSheetOpen(false);
+                  navigate(`/service-records/${record.id}`);
+                }}
+              />
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <div className="flex gap-3 mb-6">
         <Select
@@ -274,96 +321,164 @@ export default function ServiceRecordsPage() {
       )}
 
       {/* Customer detail view */}
-      {customerId && periodCheck && (
-        <>
-          {/* Show existing records (both single and monthly) */}
-          {records && records.length > 0 && (
-            <div className="flex flex-col gap-3">
-              {records.map((record) => (
-                <ServiceRecordCard key={record.id} record={record} />
-              ))}
-            </div>
-          )}
+      {customerId && periodCheck && (() => {
+        const hasRecords = !!(records && records.length > 0);
+        const hasUndocumented = periodCheck.undocumentedCount > 0;
+        const hasAnyAppointments = periodCheck.documentedCount > 0 || periodCheck.undocumentedCount > 0;
+        const showEmptyState = !hasRecords && !hasAnyAppointments;
 
-          {/* Show create monthly button when possible (even if single LNs exist) */}
-          {periodCheck.canCreateRecord ? (
-            <Card>
-              <CardContent className="py-6">
-                <div className="text-center space-y-4">
-                  <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-                    <Check className={`${iconSize.lg} text-green-600`} />
-                  </div>
-                  <div>
-                    <p className="font-medium text-green-700">
-                      {periodCheck.uncoveredDocumentedCount} {periodCheck.uncoveredDocumentedCount === 1 ? "Termin" : "Termine"} bereit für Leistungsnachweis
-                    </p>
-                    {(periodCheck.coveredBySingleCount > 0 || periodCheck.coveredByMonthlyCount > 0) && (
-                      <p className="text-sm text-blue-600 mt-1">
-                        {periodCheck.coveredBySingleCount > 0 && `${periodCheck.coveredBySingleCount} in Einzeltermin-LN`}
-                        {periodCheck.coveredBySingleCount > 0 && periodCheck.coveredByMonthlyCount > 0 && ", "}
-                        {periodCheck.coveredByMonthlyCount > 0 && `${periodCheck.coveredByMonthlyCount} in monatlichem LN`}
+        return (
+          <div className="flex flex-col gap-3">
+            {/* Show existing records (both single and monthly) */}
+            {hasRecords && (
+              <div className="flex flex-col gap-3">
+                {records!.map((record) => (
+                  <ServiceRecordCard key={record.id} record={record} />
+                ))}
+              </div>
+            )}
+
+            {/* Open appointments warning - independent of existing records */}
+            {hasUndocumented && (
+              <Card className="border-amber-200 bg-amber-50/50">
+                <CardContent className="py-6">
+                  <div className="text-center space-y-4">
+                    <div className="mx-auto w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
+                      <AlertCircle className={`${iconSize.lg} text-amber-600`} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-amber-700">
+                        {periodCheck.undocumentedCount} {periodCheck.undocumentedCount === 1 ? "Termin" : "Termine"} noch offen
                       </p>
-                    )}
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Sie können einen monatlichen Leistungsnachweis für die verbleibenden {periodCheck.uncoveredDocumentedCount} Termine erstellen.
-                    </p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Dokumentieren Sie alle Termine, um den Leistungsnachweis zu erstellen.
+                      </p>
+                    </div>
+                    <Link href={`/customer/${customerId}?filter=undocumented`}>
+                      <Button variant="outline" className="w-full sm:w-auto" data-testid="button-to-appointments">
+                        Offene Termine anzeigen
+                      </Button>
+                    </Link>
                   </div>
-                  <Button
-                    onClick={() => createRecordMutation.mutate()}
-                    disabled={createRecordMutation.isPending}
-                    size="lg"
-                    className="w-full sm:w-auto"
-                    data-testid="button-create-record"
-                  >
-                    {createRecordMutation.isPending ? (
-                      <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
-                    ) : (
-                      <Plus className={`${iconSize.sm} mr-2`} />
-                    )}
-                    Monatlichen Leistungsnachweis erstellen
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ) : !(records && records.length > 0) && periodCheck.undocumentedCount > 0 ? (
-            /* Case 3: Appointments still open - show warning */
-            <Card className="border-amber-200 bg-amber-50/50">
-              <CardContent className="py-6">
-                <div className="text-center space-y-4">
-                  <div className="mx-auto w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
-                    <AlertCircle className={`${iconSize.lg} text-amber-600`} />
-                  </div>
-                  <div>
-                    <p className="font-medium text-amber-700">
-                      {periodCheck.undocumentedCount} {periodCheck.undocumentedCount === 1 ? "Termin" : "Termine"} noch offen
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Dokumentieren Sie alle Termine, um den Leistungsnachweis zu erstellen.
-                    </p>
-                  </div>
-                  <Link href={`/customer/${customerId}?filter=undocumented`}>
-                    <Button variant="outline" className="w-full sm:w-auto" data-testid="button-to-appointments">
-                      Offene Termine anzeigen
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Create monthly LN block when possible */}
+            {periodCheck.canCreateRecord && (
+              <Card>
+                <CardContent className="py-6">
+                  <div className="text-center space-y-4">
+                    <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                      <Check className={`${iconSize.lg} text-green-600`} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-green-700">
+                        {periodCheck.uncoveredDocumentedCount} {periodCheck.uncoveredDocumentedCount === 1 ? "Termin" : "Termine"} bereit für Leistungsnachweis
+                      </p>
+                      {(periodCheck.coveredBySingleCount > 0 || periodCheck.coveredByMonthlyCount > 0) && (
+                        <p className="text-sm text-blue-600 mt-1">
+                          {periodCheck.coveredBySingleCount > 0 && `${periodCheck.coveredBySingleCount} in Einzeltermin-LN`}
+                          {periodCheck.coveredBySingleCount > 0 && periodCheck.coveredByMonthlyCount > 0 && ", "}
+                          {periodCheck.coveredByMonthlyCount > 0 && `${periodCheck.coveredByMonthlyCount} in monatlichem LN`}
+                        </p>
+                      )}
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Sie können einen monatlichen Leistungsnachweis für die verbleibenden {periodCheck.uncoveredDocumentedCount} Termine erstellen.
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => createRecordMutation.mutate()}
+                      disabled={createRecordMutation.isPending}
+                      size="lg"
+                      className="w-full sm:w-auto"
+                      data-testid="button-create-record"
+                    >
+                      {createRecordMutation.isPending ? (
+                        <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
+                      ) : (
+                        <Plus className={`${iconSize.sm} mr-2`} />
+                      )}
+                      Monatlichen Leistungsnachweis erstellen
                     </Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            /* Case 4: No appointments at all */
-            <Card className="border-dashed">
-              <CardContent className="py-10">
-                <EmptyState
-                  icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
-                  title={`Keine Termine für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
-                  description="Es wurden keine Termine für diesen Kunden in diesem Monat geplant."
-                />
-              </CardContent>
-            </Card>
-          )}
-        </>
-      )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Empty state only when nothing exists */}
+            {showEmptyState && (
+              <Card className="border-dashed">
+                <CardContent className="py-10">
+                  <EmptyState
+                    icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
+                    title={`Keine Termine für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+                    description="Es wurden keine Termine für diesen Kunden in diesem Monat geplant."
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
     </Layout>
+  );
+}
+
+function PendingBannerLabel({ record }: { record: MonthlyServiceRecord }) {
+  const { data: customer } = useQuery<Customer>({
+    queryKey: ["customer", record.customerId],
+    queryFn: async () => {
+      const result = await api.get<Customer>(`/customers/${record.customerId}`);
+      return unwrapResult(result);
+    },
+  });
+  const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Kunde";
+  return (
+    <span data-testid="banner-pending-label">
+      {customerName}, {MONTH_NAMES[record.month - 1]} {record.year}
+    </span>
+  );
+}
+
+function PendingListItem({ record, onSelect }: { record: MonthlyServiceRecord; onSelect: () => void }) {
+  const { data: customer } = useQuery<Customer>({
+    queryKey: ["customer", record.customerId],
+    queryFn: async () => {
+      const result = await api.get<Customer>(`/customers/${record.customerId}`);
+      return unwrapResult(result);
+    },
+  });
+  const customerName = customer ? `${customer.vorname} ${customer.nachname}` : "Kunde laden...";
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="text-left"
+      data-testid={`item-pending-${record.id}`}
+    >
+      <Card className="hover:bg-muted/50 transition-colors">
+        <CardContent className="p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <User className={`${iconSize.sm} text-muted-foreground`} />
+                <span className="font-medium truncate">{customerName}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Calendar className={iconSize.xs} />
+                <span>{MONTH_NAMES[record.month - 1]} {record.year}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <StatusBadge type="record" value={record.status} />
+              <ChevronRight className={`${iconSize.sm} text-muted-foreground`} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </button>
   );
 }
 
