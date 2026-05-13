@@ -162,16 +162,16 @@ const BIRTHDAYS_CACHE_TTL = 60 * 60 * 1000;
 class BirthdaysCacheService {
   private cache = new SimpleCache<BirthdayEntry[]>(BIRTHDAYS_CACHE_TTL);
 
-  private getKey(userId: number, isAdmin: boolean, horizonDays: number): string {
-    return `birthdays:${isAdmin ? 'admin' : userId}:${horizonDays}`;
+  private getKey(userId: number, isAdmin: boolean, horizonDays: number, includePastDays: number = 0): string {
+    return `birthdays:${isAdmin ? 'admin' : userId}:${horizonDays}:p${includePastDays}`;
   }
 
-  get(userId: number, isAdmin: boolean, horizonDays: number): BirthdayEntry[] | undefined {
-    return this.cache.get(this.getKey(userId, isAdmin, horizonDays));
+  get(userId: number, isAdmin: boolean, horizonDays: number, includePastDays: number = 0): BirthdayEntry[] | undefined {
+    return this.cache.get(this.getKey(userId, isAdmin, horizonDays, includePastDays));
   }
 
-  set(userId: number, isAdmin: boolean, horizonDays: number, birthdays: BirthdayEntry[]): void {
-    this.cache.set(this.getKey(userId, isAdmin, horizonDays), birthdays);
+  set(userId: number, isAdmin: boolean, horizonDays: number, birthdays: BirthdayEntry[], includePastDays: number = 0): void {
+    this.cache.set(this.getKey(userId, isAdmin, horizonDays, includePastDays), birthdays);
   }
 
   invalidateAll(): void {

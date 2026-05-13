@@ -11,6 +11,13 @@ import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
 import type { BirthdayEntry } from "@shared/types";
+import {
+  getBirthdayYear,
+  getDaysLabel,
+  getDaysColor,
+  compareBirthdays,
+  computeBirthdayStats,
+} from "@/features/birthdays/lib/birthday-display";
 
 interface CardRecord {
   id: number;
@@ -22,12 +29,8 @@ interface CardRecord {
   notes: string | null;
 }
 
-function getBirthdayYear(entry: BirthdayEntry): number {
-  const today = new Date();
-  const nextBirthday = new Date(today);
-  nextBirthday.setDate(today.getDate() + entry.daysUntil);
-  return nextBirthday.getFullYear();
-}
+const BIRTHDAYS_HORIZON_DAYS = 365;
+const BIRTHDAYS_INCLUDE_PAST_DAYS = 365;
 
 export default function AdminBirthdayCards() {
   const currentYear = new Date().getFullYear();
@@ -37,9 +40,11 @@ export default function AdminBirthdayCards() {
   const { toast } = useToast();
 
   const { data: birthdays = [], isLoading: loadingBirthdays } = useQuery<BirthdayEntry[]>({
-    queryKey: ["birthdays", 365],
+    queryKey: ["birthdays", BIRTHDAYS_HORIZON_DAYS, BIRTHDAYS_INCLUDE_PAST_DAYS],
     queryFn: async () => {
-      const result = await api.get<BirthdayEntry[]>("/birthdays?days=365");
+      const result = await api.get<BirthdayEntry[]>(
+        `/birthdays?days=${BIRTHDAYS_HORIZON_DAYS}&includePast=${BIRTHDAYS_INCLUDE_PAST_DAYS}`,
+      );
       return unwrapResult(result);
     },
   });
@@ -108,7 +113,7 @@ export default function AdminBirthdayCards() {
       };
     })
     .filter(b => b.birthdayYear === selectedYear)
-    .sort((a, b) => a.daysUntil - b.daysUntil);
+    .sort(compareBirthdays);
   }, [birthdays, cardStatusMap, selectedYear]);
 
   const filteredBirthdays = useMemo(() => {
@@ -117,13 +122,7 @@ export default function AdminBirthdayCards() {
     return enrichedBirthdays;
   }, [enrichedBirthdays, filter]);
 
-  const stats = useMemo(() => {
-    const total = enrichedBirthdays.length;
-    const sent = enrichedBirthdays.filter(b => b.cardSent).length;
-    const upcoming = enrichedBirthdays.filter(b => b.daysUntil <= 30).length;
-    const urgent = enrichedBirthdays.filter(b => b.daysUntil <= 7 && !b.cardSent).length;
-    return { total, sent, pending: total - sent, upcoming, urgent };
-  }, [enrichedBirthdays]);
+  const stats = useMemo(() => computeBirthdayStats(enrichedBirthdays), [enrichedBirthdays]);
 
   const isLoading = loadingBirthdays || loadingCards1 || loadingCards2 || loadingCards3;
 
@@ -139,20 +138,6 @@ export default function AdminBirthdayCards() {
   function formatDate(dateStr: string) {
     const [y, m, d] = dateStr.split("-");
     return `${d}.${m}.${y}`;
-  }
-
-  function getDaysLabel(days: number) {
-    if (days === 0) return "Heute";
-    if (days === 1) return "Morgen";
-    return `in ${days} Tagen`;
-  }
-
-  function getDaysColor(days: number, cardSent: boolean) {
-    if (cardSent) return "text-green-600";
-    if (days <= 3) return "text-red-600 font-semibold";
-    if (days <= 7) return "text-orange-600 font-medium";
-    if (days <= 14) return "text-amber-600";
-    return "text-muted-foreground";
   }
 
   return (
@@ -173,17 +158,23 @@ export default function AdminBirthdayCards() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <Card data-testid="stat-upcoming">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          <Card data-testid="stat-overdue">
             <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-teal-600">{stats.upcoming}</div>
-              <div className="text-xs text-muted-foreground">Nächste 30 Tage</div>
+              <div className="text-2xl font-bold text-red-700">{stats.overdue}</div>
+              <div className="text-xs text-muted-foreground">Überfällig</div>
             </CardContent>
           </Card>
           <Card data-testid="stat-urgent">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-red-600">{stats.urgent}</div>
               <div className="text-xs text-muted-foreground">Dringend (7 Tage)</div>
+            </CardContent>
+          </Card>
+          <Card data-testid="stat-upcoming">
+            <CardContent className="p-4 text-center">
+              <div className="text-2xl font-bold text-teal-600">{stats.upcoming}</div>
+              <div className="text-xs text-muted-foreground">Nächste 30 Tage</div>
             </CardContent>
           </Card>
           <Card data-testid="stat-sent">
@@ -252,13 +243,27 @@ export default function AdminBirthdayCards() {
             {filteredBirthdays.map(entry => (
               <Card
                 key={`${entry.type}-${entry.id}`}
-                className={`transition-colors ${entry.cardSent ? "bg-green-50/50 border-green-200" : entry.daysUntil <= 7 ? "bg-red-50/30 border-red-200" : ""}`}
+                className={`transition-colors ${
+                  entry.cardSent
+                    ? "bg-green-50/50 border-green-200"
+                    : entry.daysUntil < 0
+                      ? "bg-red-100/40 border-red-300"
+                      : entry.daysUntil <= 7
+                        ? "bg-red-50/30 border-red-200"
+                        : ""
+                }`}
                 data-testid={`card-${entry.type}-${entry.id}`}
               >
                 <CardContent className="p-4 flex items-center gap-4">
                   <div className="relative shrink-0">
                     <span className={`block w-2.5 h-2.5 rounded-full ${
-                      entry.cardSent ? "bg-green-500" : entry.daysUntil <= 7 ? "bg-red-500" : "bg-orange-400"
+                      entry.cardSent
+                        ? "bg-green-500"
+                        : entry.daysUntil < 0
+                          ? "bg-red-700"
+                          : entry.daysUntil <= 7
+                            ? "bg-red-500"
+                            : "bg-orange-400"
                     }`} />
                   </div>
 

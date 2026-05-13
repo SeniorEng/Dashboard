@@ -12,6 +12,37 @@ router.use(requireAuth);
 
 const MAX_HORIZON_DAYS = 365;
 const DEFAULT_HORIZON_DAYS = 30;
+const MAX_INCLUDE_PAST_DAYS = 365;
+
+/**
+ * Liefert die Anzahl Tage bis zum Geburtstag — kann negativ sein, wenn der
+ * Geburtstag innerhalb der letzten `includePastDays` Tage war.
+ *
+ * - Liegt der Geburtstag dieses Jahres in den letzten `includePastDays` Tagen,
+ *   wird ein negativer Wert (z.B. -3 für „vor 3 Tagen") zurückgegeben.
+ * - Sonst wird die normale Vorwärts-Semantik von `calculateDaysUntilBirthday`
+ *   genutzt, inkl. Jahresrollover und Schalttag-Behandlung. So bleiben
+ *   Geburtstage am Jahresende/-anfang korrekt sichtbar.
+ */
+export function daysUntilBirthdayWithPast(birthDate: string, includePastDays: number): number {
+  const forward = calculateDaysUntilBirthday(birthDate);
+  if (includePastDays > 0) {
+    const today = parseLocalDate(todayISO());
+    const birth = parseLocalDate(birthDate);
+    const thisYearBirthday = new Date(today.getFullYear(), birth.getMonth(), birth.getDate());
+    const diffThisYear = Math.round(
+      (thisYearBirthday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+    );
+    // Nur als überfällig melden, wenn der diesjährige Geburtstag bereits
+    // vorbei ist UND näher zurückliegt als der nächste Geburtstag in der
+    // Zukunft. So bleiben Geburtstage am Jahreswechsel (z.B. Jan 5 am
+    // 20. Dez = +16) korrekt vorwärts gerichtet.
+    if (diffThisYear < 0 && -diffThisYear <= includePastDays && -diffThisYear < forward) {
+      return diffThisYear;
+    }
+  }
+  return forward;
+}
 
 function buildAddress(strasse: string | null, hausnummer: string | null, plz: string | null, stadt: string | null): string | undefined {
   const streetPart = [strasse, hausnummer].filter(Boolean).join(" ");
@@ -78,7 +109,9 @@ function calculateAge(birthDate: string): number {
 
 function calculateUpcomingAge(birthDate: string, daysUntil: number): number {
   const baseAge = calculateAge(birthDate);
-  return daysUntil === 0 ? baseAge : baseAge + 1;
+  // Überfällig (negativ) oder heute: aktueller Lebensjahr-Stand.
+  // In der Zukunft: nächstes Lebensjahr.
+  return daysUntil <= 0 ? baseAge : baseAge + 1;
 }
 
 router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (req: Request, res: Response) => {
@@ -88,13 +121,27 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
     ? DEFAULT_HORIZON_DAYS
     : Math.min(Math.max(1, rawDays), MAX_HORIZON_DAYS);
 
-  const cached = birthdaysCache.get(user.id, user.isAdmin, horizonDays);
+  const rawPast = parseInt(req.query.includePast as string);
+  const includePastDays = isNaN(rawPast)
+    ? 0
+    : Math.min(Math.max(0, rawPast), MAX_INCLUDE_PAST_DAYS);
+
+  const cached = birthdaysCache.get(user.id, user.isAdmin, horizonDays, includePastDays);
   if (cached) {
     res.json(cached);
     return;
   }
 
   const birthdays: BirthdayEntry[] = [];
+
+  const pushIfInWindow = (
+    daysUntil: number,
+    entry: () => BirthdayEntry,
+  ) => {
+    if (daysUntil > horizonDays) return;
+    if (daysUntil < -includePastDays) return;
+    birthdays.push(entry());
+  };
 
   if (user.isAdmin) {
     const [activeEmployees, activeCustomers] = await Promise.all([
@@ -103,52 +150,44 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
     ]);
 
     for (const emp of activeEmployees) {
-      if (emp.geburtsdatum) {
-        const daysUntil = calculateDaysUntilBirthday(emp.geburtsdatum);
-        if (daysUntil <= horizonDays) {
-          birthdays.push({
-            id: emp.id,
-            type: "employee",
-            name: emp.displayName,
-            geburtsdatum: emp.geburtsdatum,
-            daysUntil,
-            age: calculateUpcomingAge(emp.geburtsdatum, daysUntil),
-            address: buildAddress(emp.strasse, emp.hausnummer, emp.plz, emp.stadt),
-          });
-        }
-      }
+      if (!emp.geburtsdatum) continue;
+      const daysUntil = daysUntilBirthdayWithPast(emp.geburtsdatum, includePastDays);
+      pushIfInWindow(daysUntil, () => ({
+        id: emp.id,
+        type: "employee",
+        name: emp.displayName,
+        geburtsdatum: emp.geburtsdatum!,
+        daysUntil: daysUntil!,
+        age: calculateUpcomingAge(emp.geburtsdatum!, daysUntil!),
+        address: buildAddress(emp.strasse, emp.hausnummer, emp.plz, emp.stadt),
+      }));
     }
 
     for (const cust of activeCustomers) {
-      if (cust.geburtsdatum) {
-        const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
-        if (daysUntil <= horizonDays) {
-          birthdays.push({
-            id: cust.id,
-            type: "customer",
-            name: cust.name,
-            geburtsdatum: cust.geburtsdatum,
-            daysUntil,
-            age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
-            address: buildAddress(cust.strasse, cust.hausnummer, cust.plz, cust.stadt),
-          });
-        }
-      }
+      if (!cust.geburtsdatum) continue;
+      const daysUntil = daysUntilBirthdayWithPast(cust.geburtsdatum, includePastDays);
+      pushIfInWindow(daysUntil, () => ({
+        id: cust.id,
+        type: "customer",
+        name: cust.name,
+        geburtsdatum: cust.geburtsdatum!,
+        daysUntil: daysUntil!,
+        age: calculateUpcomingAge(cust.geburtsdatum!, daysUntil!),
+        address: buildAddress(cust.strasse, cust.hausnummer, cust.plz, cust.stadt),
+      }));
     }
   } else {
     const myBirthday = user.geburtsdatum;
     if (myBirthday) {
-      const daysUntil = calculateDaysUntilBirthday(myBirthday);
-      if (daysUntil <= horizonDays) {
-        birthdays.push({
-          id: user.id,
-          type: "employee",
-          name: user.displayName,
-          geburtsdatum: myBirthday,
-          daysUntil,
-          age: calculateUpcomingAge(myBirthday, daysUntil),
-        });
-      }
+      const daysUntil = daysUntilBirthdayWithPast(myBirthday, includePastDays);
+      pushIfInWindow(daysUntil, () => ({
+        id: user.id,
+        type: "employee",
+        name: user.displayName,
+        geburtsdatum: myBirthday,
+        daysUntil: daysUntil!,
+        age: calculateUpcomingAge(myBirthday, daysUntil!),
+      }));
     }
 
     const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
@@ -157,27 +196,24 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
       const assignedCustomers = await storage.getCustomersByIds(assignedCustomerIds);
 
       for (const cust of assignedCustomers) {
-        if (cust.geburtsdatum) {
-          const daysUntil = calculateDaysUntilBirthday(cust.geburtsdatum);
-          if (daysUntil <= horizonDays) {
-            birthdays.push({
-              id: cust.id,
-              type: "customer",
-              name: cust.name,
-              geburtsdatum: cust.geburtsdatum,
-              daysUntil,
-              age: calculateUpcomingAge(cust.geburtsdatum, daysUntil),
-              address: buildAddress(cust.strasse, cust.nr, cust.plz, cust.stadt),
-            });
-          }
-        }
+        if (!cust.geburtsdatum) continue;
+        const daysUntil = daysUntilBirthdayWithPast(cust.geburtsdatum, includePastDays);
+        pushIfInWindow(daysUntil, () => ({
+          id: cust.id,
+          type: "customer",
+          name: cust.name,
+          geburtsdatum: cust.geburtsdatum!,
+          daysUntil: daysUntil!,
+          age: calculateUpcomingAge(cust.geburtsdatum!, daysUntil!),
+          address: buildAddress(cust.strasse, cust.nr, cust.plz, cust.stadt),
+        }));
       }
     }
   }
 
   birthdays.sort((a, b) => a.daysUntil - b.daysUntil);
 
-  birthdaysCache.set(user.id, user.isAdmin, horizonDays, birthdays);
+  birthdaysCache.set(user.id, user.isAdmin, horizonDays, birthdays, includePastDays);
 
   res.json(birthdays);
 }));
