@@ -134,6 +134,30 @@ describe("Task #423 — §45b Monats-Cap: Anzeige == Buchung", () => {
     expect(res.data.availableCents).toBeLessThan(res.data.totalCents);
   });
 
+  it("Cost-Estimate für Folgemonat unterdrückt Cap-Hard-Block (Cap betrifft nur aktuellen Monat)", async () => {
+    // Aktueller Monats-Cap ist mit dem gebuchten Termin nahezu erschöpft
+    // (Cap-Rest ~1200 ct). Eine Anfrage für einen Termin im NÄCHSTEN Monat
+    // darf NICHT als Hard-Block zurückkommen — der Cap bezieht sich auf den
+    // jeweiligen Termin-Monat, im Folgemonat ist noch kein Verbrauch da.
+    const next = new Date();
+    next.setDate(15);
+    next.setMonth(next.getMonth() + 1);
+    const nextMonthDate = next.toISOString().slice(0, 10);
+
+    const res = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${nextMonthDate}` +
+      `&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    expect(res.status).toBe(200);
+    expect(res.data.totalCents).toBeGreaterThan(0);
+    // Cap = 5000 ct, 60min HW kostet ~3800 ct → passt in den Folgemonats-Cap.
+    expect(res.data.isHardBlock).toBe(false);
+    // Warning darf KEINEN Cap-Hinweis enthalten (oder gar kein Warning).
+    if (res.data.warning) {
+      expect(res.data.warning).not.toContain("Monats-Cap");
+    }
+  });
+
   it("Consumption-Engine-Vorab-Check verwendet denselben Cap-Wert", async () => {
     // Indirekter Nachweis: weil cost-estimate jetzt isHardBlock=true zurückgibt,
     // würde die UI das Speichern/Dokumentieren bereits unterbinden. Die

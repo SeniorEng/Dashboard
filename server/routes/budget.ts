@@ -199,17 +199,37 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   // Task #423: Für §45b den Monats-Cap respektieren — `currentMonthAvailableCents`
   // ist bei gesetztem `monthlyLimitCents` < `availableCents` und entscheidet, was
   // im laufenden Monat tatsächlich gebucht werden kann.
-  const available45bForMonth = enabledMap.entlastungsbetrag_45b ? summary45b.currentMonthAvailableCents : 0;
+  //
+  // ABER: `currentMonthAvailableCents` und `currentMonthUsedCents` beziehen sich
+  // auf den HEUTIGEN Monat. Wenn der angefragte Termin in einem anderen Monat
+  // liegt, ist der heutige Cap-Verbrauch irrelevant. Für Folgemonate fällt die
+  // Schätzung auf `min(availableCents, monthlyLimitCents)` zurück (es ist noch
+  // nichts in dem Monat gebucht; die echte Engine prüft beim Speichern erneut
+  // gegen den dann tatsächlichen Monatsverbrauch).
+  const queriedMonth = (date ?? todayISO()).slice(0, 7);
+  const currentMonth = todayISO().slice(0, 7);
+  const dateIsCurrentMonth = queriedMonth === currentMonth;
+
+  function available45bForQueriedMonth(): number {
+    if (!enabledMap.entlastungsbetrag_45b) return 0;
+    if (dateIsCurrentMonth) return summary45b.currentMonthAvailableCents;
+    if (summary45b.monthlyLimitCents == null) return summary45b.availableCents;
+    return Math.min(summary45b.availableCents, summary45b.monthlyLimitCents);
+  }
+
+  const available45bForMonth = available45bForQueriedMonth();
   const totalAvailable =
     available45bForMonth +
     (enabledMap.umwandlung_45a ? summary45a.currentMonthAvailableCents : 0) +
     (enabledMap.ersatzpflege_39_42a ? summary39_42a.currentYearAvailableCents : 0);
 
   // Engpass-Diagnose: Liegt der Mangel am Monats-Cap (Topf hätte noch
-  // Geld, aber Cap erreicht)?
+  // Geld, aber Cap erreicht)? Nur für den aktuellen Monat verlässlich
+  // beantwortbar — für Folgemonate kennen wir den dortigen Verbrauch nicht.
   const monthlyCapIsBottleneck =
     enabledMap.entlastungsbetrag_45b &&
     summary45b.monthlyLimitCents != null &&
+    dateIsCurrentMonth &&
     summary45b.availableCents > summary45b.currentMonthAvailableCents;
 
   let warning: string | null = null;
