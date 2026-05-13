@@ -64,7 +64,13 @@ export async function calculateAppointmentCost(params: {
   };
 }
 
-export async function getPlannedCostCents(customerId: number): Promise<number> {
+export async function getPlannedCostCents(
+  customerId: number,
+  opts: { monthPrefix?: string } = {},
+): Promise<number> {
+  const monthFilter = opts.monthPrefix
+    ? sql`AND to_char(a.date, 'YYYY-MM') = ${opts.monthPrefix}`
+    : sql``;
   const rows = await db.execute(sql`
     SELECT 
       a.id AS "appointmentId",
@@ -80,6 +86,7 @@ export async function getPlannedCostCents(customerId: number): Promise<number> {
       AND a.appointment_type = 'Kundentermin'
       AND a.status IN ('scheduled', 'in_progress', 'documenting')
       AND a.deleted_at IS NULL
+      ${monthFilter}
   `);
 
   if (rows.rows.length === 0) {

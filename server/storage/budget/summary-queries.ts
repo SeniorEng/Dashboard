@@ -180,7 +180,11 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   const currentMonthUsedCents = Math.max(0, currentMonthConsumption - currentMonthReversals);
 
   const availableCents = totalAllocatedCents - netUsedCents;
-  const plannedCents = await getPlannedCostCents(customerId);
+  const currentMonthPrefix = today.slice(0, 7);
+  const [plannedCents, currentMonthPlannedCents] = await Promise.all([
+    getPlannedCostCents(customerId),
+    getPlannedCostCents(customerId, { monthPrefix: currentMonthPrefix }),
+  ]);
 
   const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
   const isCurrentlyActive = !s45b
@@ -189,10 +193,8 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
 
   const monthlyLimitCents = await getEffectiveMonthlyLimitCents(customerId, typeSettings, preferences);
 
-  // Task #423: gleiche Cap-Mathe wie `computeCapSlot` / `createCascadeConsumption`,
-  // damit Anzeige (`currentMonthAvailableCents`) und tatsächliche Buchung
-  // niemals auseinanderlaufen können. Ohne Cap wird der Wert auf den
-  // gesamten Topf-Rest reduziert.
+  // Cap-Mathe gleich wie computeCapSlot / createCascadeConsumption, damit
+  // Anzeige und Buchung nicht auseinanderlaufen.
   const monthlyCapAvailableCents = monthlyLimitCents != null
     ? Math.max(0, monthlyLimitCents + carryoverCents - currentMonthUsedCents)
     : Number.POSITIVE_INFINITY;
@@ -210,6 +212,7 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     currentYearAllocatedCents,
     monthlyLimitCents,
     currentMonthUsedCents,
+    currentMonthPlannedCents: isCurrentlyActive ? currentMonthPlannedCents : 0,
     currentMonthAvailableCents: isCurrentlyActive ? Math.max(0, currentMonthAvailableRaw) : 0,
     isCurrentlyActive,
   };

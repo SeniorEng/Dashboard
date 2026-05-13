@@ -14,17 +14,11 @@ export interface BudgetSummary {
   currentYearAllocatedCents: number;
   monthlyLimitCents: number | null;
   currentMonthUsedCents: number;
+  /** Geplante (scheduled/in_progress/documenting) Kosten im laufenden Monat. */
+  currentMonthPlannedCents: number;
   /**
-   * Tatsächlich im laufenden Kalendermonat noch buchbar.
-   *
-   * Ohne `monthlyLimitCents`: identisch zu `availableCents` (kein Cap aktiv).
-   * Mit `monthlyLimitCents` gesetzt: `max(0, monthlyLimit + carryover - currentMonthUsed)`,
-   * gedeckelt durch `availableCents` (kann nie mehr buchbar sein als der gesamte Topf hergibt).
-   *
-   * Single source of truth für "wieviel kann jetzt im aktuellen Monat noch
-   * verbraucht werden?" — verwendet von Cost-Estimate und vom
-   * `createCascadeConsumption`-Vorab-Check, damit Anzeige und Buchung
-   * niemals auseinanderlaufen (siehe Task #423).
+   * Im laufenden Monat noch buchbar, unter Berücksichtigung des Monats-Caps.
+   * Ohne Cap = `availableCents`; mit Cap = `min(availableCents, monthlyLimit + carryover - currentMonthUsed)`.
    */
   currentMonthAvailableCents: number;
   isCurrentlyActive: boolean;

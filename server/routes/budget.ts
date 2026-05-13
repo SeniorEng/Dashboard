@@ -196,19 +196,10 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     enabledMap[s.budgetType] = s.enabled;
   }
 
-  // Task #423: Für §45b den Monats-Cap respektieren — `currentMonthAvailableCents`
-  // ist bei gesetztem `monthlyLimitCents` < `availableCents` und entscheidet, was
-  // im laufenden Monat tatsächlich gebucht werden kann.
-  //
-  // ABER: `currentMonthAvailableCents` und `currentMonthUsedCents` beziehen sich
-  // auf den HEUTIGEN Monat. Wenn der angefragte Termin in einem anderen Monat
-  // liegt, ist der heutige Cap-Verbrauch irrelevant. Für Folgemonate fällt die
-  // Schätzung auf `min(availableCents, monthlyLimitCents)` zurück (es ist noch
-  // nichts in dem Monat gebucht; die echte Engine prüft beim Speichern erneut
-  // gegen den dann tatsächlichen Monatsverbrauch).
-  const queriedMonth = (date ?? todayISO()).slice(0, 7);
-  const currentMonth = todayISO().slice(0, 7);
-  const dateIsCurrentMonth = queriedMonth === currentMonth;
+  // §45b Cap-aware: für den aktuellen Monat currentMonthAvailableCents,
+  // für andere Monate min(availableCents, monthlyLimitCents) als Best-Effort
+  // (heutiger Cap-Verbrauch gilt dort nicht).
+  const dateIsCurrentMonth = (date ?? todayISO()).slice(0, 7) === todayISO().slice(0, 7);
 
   function available45bForQueriedMonth(): number {
     if (!enabledMap.entlastungsbetrag_45b) return 0;
@@ -223,9 +214,8 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     (enabledMap.umwandlung_45a ? summary45a.currentMonthAvailableCents : 0) +
     (enabledMap.ersatzpflege_39_42a ? summary39_42a.currentYearAvailableCents : 0);
 
-  // Engpass-Diagnose: Liegt der Mangel am Monats-Cap (Topf hätte noch
-  // Geld, aber Cap erreicht)? Nur für den aktuellen Monat verlässlich
-  // beantwortbar — für Folgemonate kennen wir den dortigen Verbrauch nicht.
+  // Cap-Engpass nur für den aktuellen Monat verlässlich; bei Folgemonaten
+  // kennen wir den dortigen Verbrauch nicht.
   const monthlyCapIsBottleneck =
     enabledMap.entlastungsbetrag_45b &&
     summary45b.monthlyLimitCents != null &&
@@ -243,8 +233,6 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
     let reason = "";
     if (monthlyCapIsBottleneck) {
-      // Monatslabel aus dem angefragten ?date= ableiten (nicht aus heute),
-      // damit die Anzeige zum tatsächlich geprüften Termindatum passt.
       const [y, m] = (date ?? todayISO()).split("-");
       const remainingEuro = (summary45b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",");
       const reachedZero = summary45b.currentMonthAvailableCents <= 0;
