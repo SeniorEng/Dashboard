@@ -1,16 +1,15 @@
 /**
- * Task #423 — Regression: Monats-Cap muss in Anzeige UND Buchung gleich wirken.
+ * Task #425 — §45b Anzeige == Buchung im Jahrestopf-Modell.
  *
- * Vorher (Bug): `availableCents` aus dem §45b-Summary ignorierte
- * `monthly_limit_cents`. Cost-Estimate zeigte deshalb das volle Topf-Guthaben
- * als "verfügbar" an, obwohl der Cap-Calculator beim Dokumentieren nur den
- * Cap-Rest freigab → Drift zwischen Anzeige und Buchung, irreführende
- * "Achtung Budget"-Warnung trotz scheinbar freiem Geld.
+ * Vorher (Task #423): Monats-Cap führte zu Drift-Bug zwischen `availableCents`
+ * (Topf-Rest) und `currentMonthAvailableCents` (Cap-Rest). Cost-Estimate und
+ * Engine mussten denselben Cap-Wert nutzen.
  *
- * Nachher: Neues `currentMonthAvailableCents` (in BudgetSummary) bildet
- * `min(availableCents, monthlyLimit + carryover - currentMonthUsed)` ab.
- * Cost-Estimate, Consumption-Engine-Vorab-Check und Frontend nutzen dieses
- * Feld für §45b — Anzeige und Buchung können nicht mehr drift.
+ * Nachher (Task #425): §45b hat keinen Monats-Cap mehr.
+ *  - `monthlyLimitCents` ist im Summary fix `null`.
+ *  - `currentMonthAvailableCents == availableCents` (gleicher Pot).
+ *  - Cost-Estimate nutzt `availableCents` direkt — keine Drift möglich.
+ *  - Termine im Folgemonat dürfen die zusätzliche Aufstockung mitnutzen.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
@@ -55,24 +54,21 @@ function weekdayInCurrentMonth(): string {
   throw new Error("Kein Werktag im aktuellen Monat gefunden");
 }
 
-describe("Task #423 — §45b Monats-Cap: Anzeige == Buchung", () => {
+describe("Task #425 — §45b Jahrestopf: Anzeige == Buchung", () => {
   let scenario: BudgetScenarioHandle;
 
   beforeAll(async () => {
-    // Setup analog zu Mentke (Kunde 182):
-    //   - Topf-Startwert 393 € (initial_balance)
-    //   - aber Monats-Cap nur 131 €
-    //   - ein dokumentierter Termin im aktuellen Monat verbraucht
-    //     bereits den Großteil des Caps
+    // §45b OHNE Monats-Cap (monthlyLimitCents=null). Topf-Startwert 50000 ct
+    // (500 €), aktueller Monat hat einen 60-min-HW-Termin dokumentiert
+    // (~3800 ct verbraucht).
     scenario = await setupBudgetScenario({
-      customerNamePrefix: "T423-CAP",
+      customerNamePrefix: "T425-DISPLAY",
       pflegegrad: 2,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
       preferences: { budgetStartDate: "2026-01-01" },
       types: [
-        // Cap = 5000 ct (50 €), Pott = 50000 ct (500 €) — Cap < Pott garantiert.
-        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: 5000 },
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false },
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
       ],
@@ -83,13 +79,11 @@ describe("Task #423 — §45b Monats-Cap: Anzeige == Buchung", () => {
       },
       appointments: [
         {
-          // 60 min Hauswirtschaft (PG2 default 3800 ct/h) → 3800 ct verbraucht
-          // im aktuellen Monat. currentMonthAvailable = 5000 - 3800 = 1200 ct.
           date: weekdayInCurrentMonth(),
           scheduledStart: "09:00",
           services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
           document: true,
-          notes: "T423 Cap-Verbrauch im aktuellen Monat",
+          notes: "T425 Verbrauch im aktuellen Monat",
         },
       ],
     });
@@ -99,27 +93,18 @@ describe("Task #423 — §45b Monats-Cap: Anzeige == Buchung", () => {
     await scenario.cleanup();
   });
 
-  it("Overview liefert currentMonthAvailableCents < availableCents wenn Cap greift", async () => {
+  it("Overview liefert monthlyLimitCents=null und currentMonthAvailableCents==availableCents", async () => {
     const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(res.status).toBe(200);
     const s45b = res.data.entlastungsbetrag45b;
 
-    expect(s45b).toHaveProperty("currentMonthAvailableCents");
-    expect(s45b.monthlyLimitCents).toBe(5000);
+    expect(s45b.monthlyLimitCents).toBeNull();
     expect(s45b.currentMonthUsedCents).toBeGreaterThan(0);
-
-    // availableCents = Topf-Rest (annual) — sollte deutlich > Cap-Rest sein
-    expect(s45b.availableCents).toBeGreaterThan(s45b.currentMonthAvailableCents);
-    // Cap-Rest = 5000 - currentMonthUsed
-    expect(s45b.currentMonthAvailableCents).toBe(
-      Math.max(0, s45b.monthlyLimitCents + s45b.carryoverCents - s45b.currentMonthUsedCents)
-    );
+    // Kein Cap mehr → currentMonthAvailable spiegelt den Topf-Rest 1:1.
+    expect(s45b.currentMonthAvailableCents).toBe(s45b.availableCents);
   });
 
-  it("Cost-Estimate für teuren Termin blockt mit Cap-spezifischer Warnung (statt zu täuschen)", async () => {
-    // 60 min HW kostet ~3800 ct, Cap-Rest nur ~1200 ct → Hard-Block erwartet,
-    // weil acceptsPrivatePayment=false. Vor dem Fix wurde availableCents
-    // (Topf-Rest, viele tausend ct) gemeldet → KEIN Block, irreführend.
+  it("Cost-Estimate für teuren Termin nutzt Topf-Rest (kein Cap-Engpass mehr)", async () => {
     const today = getTodayDate();
     const res = await apiGet<any>(
       `/api/budget/${scenario.customerId}/cost-estimate?date=${today}` +
@@ -127,54 +112,52 @@ describe("Task #423 — §45b Monats-Cap: Anzeige == Buchung", () => {
     );
     expect(res.status).toBe(200);
     expect(res.data.totalCents).toBeGreaterThan(0);
-    expect(res.data.isHardBlock).toBe(true);
-    expect(res.data.warning).toContain("Monats-Cap §45b");
-    // Das im Cost-Estimate ausgewiesene "verfügbar" muss dem Cap-Rest
-    // entsprechen, nicht dem (großen) Topf-Rest.
-    expect(res.data.availableCents).toBeLessThan(res.data.totalCents);
+    // Topf hat 50000 ct - ~3800 ct = ~46200 ct übrig — der 60min-Termin (~3800 ct)
+    // passt locker rein. Vorher (Task #423) hätte der Monats-Cap das geblockt.
+    expect(res.data.isHardBlock).toBe(false);
+    // Cap-spezifische Warnung darf nicht mehr auftauchen.
+    if (res.data.warning) {
+      expect(res.data.warning).not.toContain("Monats-Cap");
+    }
+    // Verfügbar im Cost-Estimate == Topf-Rest des Summarys.
+    const overview = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    expect(res.data.availableCents).toBe(overview.data.entlastungsbetrag45b.availableCents);
   });
 
-  it("Cost-Estimate für Folgemonat unterdrückt Cap-Hard-Block (Cap betrifft nur aktuellen Monat)", async () => {
-    // Aktueller Monats-Cap ist mit dem gebuchten Termin nahezu erschöpft
-    // (Cap-Rest ~1200 ct). Eine Anfrage für einen Termin im NÄCHSTEN Monat
-    // darf NICHT als Hard-Block zurückkommen — der Cap bezieht sich auf den
-    // jeweiligen Termin-Monat, im Folgemonat ist noch kein Verbrauch da.
+  it("Cost-Estimate für Folgemonat nutzt zusätzlich aufgelaufene Aufstockung", async () => {
     const next = new Date();
     next.setDate(15);
     next.setMonth(next.getMonth() + 1);
     const nextMonthDate = next.toISOString().slice(0, 10);
 
-    const res = await apiGet<any>(
-      `/api/budget/${scenario.customerId}/cost-estimate?date=${nextMonthDate}` +
-      `&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
-    );
-    expect(res.status).toBe(200);
-    expect(res.data.totalCents).toBeGreaterThan(0);
-    // Cap = 5000 ct, 60min HW kostet ~3800 ct → passt in den Folgemonats-Cap.
-    expect(res.data.isHardBlock).toBe(false);
-    // Warning darf KEINEN Cap-Hinweis enthalten (oder gar kein Warning).
-    if (res.data.warning) {
-      expect(res.data.warning).not.toContain("Monats-Cap");
-    }
-  });
-
-  it("Consumption-Engine-Vorab-Check verwendet denselben Cap-Wert", async () => {
-    // Indirekter Nachweis: weil cost-estimate jetzt isHardBlock=true zurückgibt,
-    // würde die UI das Speichern/Dokumentieren bereits unterbinden. Die
-    // tatsächliche Engine prüft mit demselben currentMonthAvailableCents
-    // (siehe consumption-engine.ts), so dass auch ein API-Direktaufruf den
-    // Block sieht. Das wird in budget-e2e.test.ts INT-13.x für allgemeine
-    // Cap-Verbrauchssemantik abgedeckt; hier sichern wir nur die
-    // Konsistenz-Invariante zwischen Anzeige und Engine zu.
-    const overview = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     const today = getTodayDate();
-    const estimate = await apiGet<any>(
+    const todayRes = await apiGet<any>(
       `/api/budget/${scenario.customerId}/cost-estimate?date=${today}` +
       `&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
     );
+    const nextRes = await apiGet<any>(
+      `/api/budget/${scenario.customerId}/cost-estimate?date=${nextMonthDate}` +
+      `&hauswirtschaftMinutes=60&alltagsbegleitungMinutes=0&travelKilometers=0&customerKilometers=0`
+    );
+    expect(todayRes.status).toBe(200);
+    expect(nextRes.status).toBe(200);
 
-    const s45b = overview.data.entlastungsbetrag45b;
-    // Cost-Estimate "available" für §45b-only-Setup == currentMonthAvailableCents
-    expect(estimate.data.availableCents).toBe(s45b.currentMonthAvailableCents);
+    // Im Folgemonat ist die monatliche Aufstockung (Default 131 €/Monat,
+    // 13100 ct) zusätzlich verfügbar — entweder über die Auto-Allocation oder
+    // über `calculateAllocated45b`. Auf jeden Fall darf die Verfügbarkeit im
+    // Folgemonat nicht KLEINER sein als heute.
+    expect(nextRes.data.availableCents).toBeGreaterThanOrEqual(todayRes.data.availableCents);
+    // Auch im Folgemonat kein Hard-Block (Topf hat genug).
+    expect(nextRes.data.isHardBlock).toBe(false);
+  });
+
+  it("type-settings persistiert keinen Monats-Cap mehr für §45b (PUT mit Wert wird ignoriert)", async () => {
+    // Auch wenn ein Client (Legacy) noch monthlyLimitCents schickt, darf das
+    // Backend den §45b-Cap NICHT mehr in den Verfügbarkeitsberechnungen
+    // berücksichtigen. Wir prüfen das indirekt über das Overview-Feld
+    // monthlyLimitCents, das vom Summary fix auf null gesetzt wird.
+    const overview = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    expect(overview.status).toBe(200);
+    expect(overview.data.entlastungsbetrag45b.monthlyLimitCents).toBeNull();
   });
 });

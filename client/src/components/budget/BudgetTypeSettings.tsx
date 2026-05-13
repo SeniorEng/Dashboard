@@ -187,8 +187,10 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     setHasChanges(true);
   };
 
+  // §45b ist seit Task #425 ein Jahrestopf mit monatlicher Aufstockung
+  // (kein Monats-Cap mehr). Daher nur noch §45a hat hier ein Monatslimit.
   const isMonthlyBudget = (budgetType: string) =>
-    budgetType === "entlastungsbetrag_45b" || budgetType === "umwandlung_45a";
+    budgetType === "umwandlung_45a";
 
   const isYearlyBudget = (budgetType: string) =>
     budgetType === "ersatzpflege_39_42a";
@@ -282,6 +284,12 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                       {getMaxHint(setting.budgetType) && (
                         <p className="text-[11px] text-gray-500 mt-0.5">{getMaxHint(setting.budgetType)}</p>
                       )}
+                    </div>
+                  )}
+
+                  {setting.budgetType === "entlastungsbetrag_45b" && (
+                    <div className="rounded-md bg-blue-50 border border-blue-100 px-2 py-1.5 text-[11px] text-blue-800" data-testid={`info-45b-yearly-pot-${setting.budgetType}`}>
+                      §45b ist ein Jahrestopf mit monatlicher Aufstockung (131&nbsp;€/Monat, gesetzl. Max). Es gibt keinen Monats-Cap — verfügbar ist immer der bis zum Termindatum aufgelaufene Betrag minus bereits gebuchter Beträge.
                     </div>
                   )}
 

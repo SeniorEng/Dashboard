@@ -12,15 +12,10 @@ import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-stora
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getPlannedCostCents } from "./appointment-cost-calculator";
 
-async function getEffectiveMonthlyLimitCents(customerId: number, _typeSettings?: CustomerBudgetTypeSetting[], _preferences?: CustomerBudgetPreferences | undefined): Promise<number | null> {
-  const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId);
-  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-  if (s45b?.monthlyLimitCents != null) {
-    return s45b.monthlyLimitCents;
-  }
-  const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
-  return preferences?.monthlyLimitCents ?? null;
-}
+// Hinweis (Task #425): §45b kennt seit der Umstellung auf das Jahrestopf-Modell
+// keinen Monats-Cap mehr. monthlyLimitCents wird im Summary fix auf `null`
+// gesetzt; der Spaltenwert in `customer_budget_type_settings` wird durch eine
+// Startup-Migration auf NULL zurückgeführt und vom UI nicht mehr gesetzt.
 
 export async function getTotalCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
   const d = _tx ?? db;
@@ -191,14 +186,12 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     ? true
     : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
 
-  const monthlyLimitCents = await getEffectiveMonthlyLimitCents(customerId, typeSettings, preferences);
-
-  // Cap-Mathe gleich wie computeCapSlot / createCascadeConsumption, damit
-  // Anzeige und Buchung nicht auseinanderlaufen.
-  const monthlyCapAvailableCents = monthlyLimitCents != null
-    ? Math.max(0, monthlyLimitCents + carryoverCents - currentMonthUsedCents)
-    : Number.POSITIVE_INFINITY;
-  const currentMonthAvailableRaw = Math.min(availableCents, monthlyCapAvailableCents);
+  // §45b ist ein Jahrestopf — kein Monats-Cap mehr (Task #425). Die "Verfügbar
+  // diesen Monat"-Anzeige entspricht somit der gesamten zum Stichtag
+  // aufgelaufenen Verfügbarkeit, da die monatliche Aufstockung ohnehin in
+  // calculateAllocated45b nur bis "heute" zählt.
+  const monthlyLimitCents = null;
+  const currentMonthAvailableRaw = availableCents;
 
   return {
     customerId,

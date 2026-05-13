@@ -362,6 +362,17 @@ async function configureLowBudgetPV(
       { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
     ],
   });
+  // Task #425: §45b ist ein Jahrestopf. Damit die Tests weiterhin den Split
+  // erzwingen (wenig Budget bei viel Termin), setzen wir budgetStartDate auf
+  // den 1. des aktuellen Monats — dann hat sich genau 1 × monthlyLimitCents
+  // aufgestockt und der Topf ist mit hoher Wahrscheinlichkeit erschöpft.
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  await apiPut(`/api/budget/${customerId}/preferences`, {
+    budgetStartDate: monthStart,
+    monthlyLimitCents: null,
+    notes: null,
+  });
 }
 
 // ---------- Lifecycle ----------

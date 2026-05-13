@@ -278,12 +278,13 @@ describe("Budget Property-Tests (P1–P5)", () => {
             customerNamePrefix: "PROP-P3",
             pflegegrad: 3,
             acceptsPrivatePayment: true,
-            // §45b mit Cap = sum45b limitiert die Konsumtion exakt auf die
-            // injizierten manual_adjustments → Cascade nach §45a fängt den Rest.
-            // Kein budgetStartDate=2099 hier, sonst wäre auch §45a deaktiviert
-            // (calculateAllocated45a iteriert ab budgetStartDate).
+            // Task #425: §45b ist ein Jahrestopf ohne Monats-Cap.
+            // monthlyLimitCents=0 deaktiviert die monatliche Aufstockung
+            // komplett — die §45b-Verfügbarkeit ergibt sich dann ausschließlich
+            // aus den unten injizierten manual_adjustments (Summe = sum45b).
+            // §45a behält seinen Monats-Cap (cap45a) und fängt den Überlauf.
             types: [
-              { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: sum45b },
+              { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: 0 },
               { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: cap45a },
               { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
             ],

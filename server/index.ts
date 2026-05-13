@@ -223,6 +223,13 @@ async function runStartupTasks() {
       log(`WhatsApp-Twilio-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { clear45bMonthlyLimits } = await import("./startup/clear-45b-monthly-limits");
+    try {
+      await clear45bMonthlyLimits();
+    } catch (err) {
+      log(`§45b-Monatslimit-Bereinigung fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
     try {
       await migrateErstberatungCustomers();

@@ -167,25 +167,37 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
 
               {isEnabled && (
                 <div className="space-y-2 ml-7">
-                  <Label htmlFor={fieldMap[budgetType]}>
-                    Betrag ({unitMap[budgetType]})
-                  </Label>
-                  <Input
-                    id={fieldMap[budgetType]}
-                    type="number"
-                    step="0.01"
-                    value={valueMap[budgetType]}
-                    onChange={(e) => onChange(fieldMap[budgetType], e.target.value)}
-                    disabled={is45aDisabled}
-                    data-testid={`input-budget-${budgetType}`}
-                  />
-                  <p className="text-xs text-gray-500">{BUDGET_HINTS[budgetType]}</p>
+                  {/* §45b ist seit Task #425 ein Jahrestopf mit monatlicher
+                      Aufstockung — kein Monats-Cap mehr. Daher kein
+                      Eurobetrag-Input für §45b. */}
+                  {budgetType !== "entlastungsbetrag_45b" && (
+                    <>
+                      <Label htmlFor={fieldMap[budgetType]}>
+                        Betrag ({unitMap[budgetType]})
+                      </Label>
+                      <Input
+                        id={fieldMap[budgetType]}
+                        type="number"
+                        step="0.01"
+                        value={valueMap[budgetType]}
+                        onChange={(e) => onChange(fieldMap[budgetType], e.target.value)}
+                        disabled={is45aDisabled}
+                        data-testid={`input-budget-${budgetType}`}
+                      />
+                      <p className="text-xs text-gray-500">{BUDGET_HINTS[budgetType]}</p>
+                    </>
+                  )}
+                  {budgetType === "entlastungsbetrag_45b" && (
+                    <p className="text-xs text-gray-700" data-testid="info-45b-yearly-pot">
+                      §45b ist ein Jahrestopf mit monatlicher Aufstockung von 131&nbsp;€/Monat (gesetzl. Maximum). Es gibt keinen Monats-Cap — verfügbar ist immer der bis zum Termindatum aufgelaufene Betrag minus bereits gebuchter Beträge. Den nicht verbrauchten Vorjahresanteil kannst du unten als Übertrag erfassen.
+                    </p>
+                  )}
                   {budgetType === "umwandlung_45a" && pflegegrad && pflegegrad >= 2 && (
                     <p className="text-xs text-purple-600" data-testid="text-max-pflegesachleistungen">
                       Maximal: {(BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad] ?? 0) / 100} € für Pflegegrad {pflegegrad}
                     </p>
                   )}
-                  {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
+                  {error && budgetType !== "entlastungsbetrag_45b" && <p className="text-xs text-red-600 font-medium">{error}</p>}
                   {is45aDisabled && (
                     <p className="text-xs text-amber-600">Erst ab Pflegegrad 2 verfügbar</p>
                   )}

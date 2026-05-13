@@ -181,10 +181,17 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     return;
   }
 
+  // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Verfügbar = bis
+  // zum Termindatum (`date`) aufgelaufene Allocation minus bereits gebuchter
+  // Beträge — same-source-of-truth wie der Buchungspfad
+  // (`getAvailableForDate` → `consumption-engine`). Damit driftet die
+  // Kostenschätzung NICHT mehr von der späteren Buchung im selben oder einem
+  // zurückliegenden/zukünftigen Monat.
+  const { getAvailableForDate } = await import("../storage/budget/import-availability");
+  const dateAware = await getAvailableForDate(customerId, date);
+
   const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
   const summary45b = summaries.entlastungsbetrag45b;
-  const summary45a = summaries.umwandlung45a;
-  const summary39_42a = summaries.ersatzpflege39_42a;
 
   const typeSettings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
   const enabledMap: Record<string, boolean> = {
@@ -196,31 +203,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     enabledMap[s.budgetType] = s.enabled;
   }
 
-  // §45b Cap-aware: für den aktuellen Monat currentMonthAvailableCents,
-  // für andere Monate min(availableCents, monthlyLimitCents) als Best-Effort
-  // (heutiger Cap-Verbrauch gilt dort nicht).
-  const dateIsCurrentMonth = (date ?? todayISO()).slice(0, 7) === todayISO().slice(0, 7);
-
-  function available45bForQueriedMonth(): number {
-    if (!enabledMap.entlastungsbetrag_45b) return 0;
-    if (dateIsCurrentMonth) return summary45b.currentMonthAvailableCents;
-    if (summary45b.monthlyLimitCents == null) return summary45b.availableCents;
-    return Math.min(summary45b.availableCents, summary45b.monthlyLimitCents);
-  }
-
-  const available45bForMonth = available45bForQueriedMonth();
-  const totalAvailable =
-    available45bForMonth +
-    (enabledMap.umwandlung_45a ? summary45a.currentMonthAvailableCents : 0) +
-    (enabledMap.ersatzpflege_39_42a ? summary39_42a.currentYearAvailableCents : 0);
-
-  // Cap-Engpass nur für den aktuellen Monat verlässlich; bei Folgemonaten
-  // kennen wir den dortigen Verbrauch nicht.
-  const monthlyCapIsBottleneck =
-    enabledMap.entlastungsbetrag_45b &&
-    summary45b.monthlyLimitCents != null &&
-    dateIsCurrentMonth &&
-    summary45b.availableCents > summary45b.currentMonthAvailableCents;
+  const totalAvailable = dateAware.totalCents;
 
   let warning: string | null = null;
   let isHardBlock = false;
@@ -231,22 +214,12 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     const shortfall = totalCostCents - totalAvailable;
     const shortfallEuro = (shortfall / 100).toFixed(2).replace(".", ",");
 
-    let reason = "";
-    if (monthlyCapIsBottleneck) {
-      const [y, m] = (date ?? todayISO()).split("-");
-      const remainingEuro = (summary45b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",");
-      const reachedZero = summary45b.currentMonthAvailableCents <= 0;
-      reason = reachedZero
-        ? ` Monats-Cap §45b in ${m}/${y} erreicht — keine weiteren Buchungen im laufenden Monat möglich.`
-        : ` Durch Monats-Cap §45b in ${m}/${y} begrenzt — noch ${remainingEuro} € buchbar.`;
-    }
-
     if (acceptsPrivatePayment) {
       privateCents = shortfall;
       vatCents = Math.round(shortfall * (weightedVatRate / 100));
-      warning = `Budget reicht nicht — ${shortfallEuro} € werden privat berechnet.${reason}`;
+      warning = `Budget reicht nicht — ${shortfallEuro} € werden privat berechnet.`;
     } else {
-      warning = `Budget reicht nicht — es fehlen ${shortfallEuro} €.${reason}`;
+      warning = `Budget reicht nicht — es fehlen ${shortfallEuro} €.`;
       isHardBlock = true;
     }
   }

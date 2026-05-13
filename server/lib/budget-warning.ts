@@ -1,19 +1,22 @@
-import { todayISO } from "@shared/utils/datetime";
 import type { BudgetSummary } from "../storage/budget/types";
 
 export interface BuildBudgetWarningOptions {
   /**
-   * Datum(e) der gerade angelegten Termine (`YYYY-MM-DD`). Cap-Hinweis
-   * wird nur ausgegeben, wenn mind. ein Termin im laufenden Monat liegt
-   * (Cap betrifft nur den aktuellen Monat). Fehlt das Feld, fällt die
-   * Auswertung konservativ auf "Cap-Hinweis ausgeben" zurück.
+   * Datum(e) der gerade angelegten Termine (`YYYY-MM-DD`). Wird nicht mehr
+   * für den (entfallenen) §45b-Monats-Cap, sondern nur für zukünftige
+   * Erweiterungen reserviert.
    */
   appointmentDates?: readonly string[];
 }
 
+/**
+ * §45b ist seit Task #425 ein Jahrestopf mit monatlicher Aufstockung
+ * (kein Monats-Cap mehr). Übrig bleibt nur die Pot-Erschöpfungs-Warnung
+ * `availableAfterPlannedCents < 0`.
+ */
 export function buildBudgetWarning(
   summary: BudgetSummary,
-  opts: BuildBudgetWarningOptions = {},
+  _opts: BuildBudgetWarningOptions = {},
 ): string | null {
   const parts: string[] = [];
 
@@ -22,33 +25,6 @@ export function buildBudgetWarning(
       .toFixed(2)
       .replace(".", ",");
     parts.push(`Geplante Termine übersteigen §45b um ${overEuro} €.`);
-  }
-
-  if (summary.monthlyLimitCents != null) {
-    const today = todayISO();
-    const [y, m] = today.split("-");
-    const currentMonthPrefix = `${y}-${m}`;
-    const dates = opts.appointmentDates;
-    const affectsCurrentMonth =
-      dates === undefined || dates.some((d) => d.startsWith(currentMonthPrefix));
-
-    if (affectsCurrentMonth) {
-      const capShortfall = summary.currentMonthPlannedCents - summary.currentMonthAvailableCents;
-      if (capShortfall > 0) {
-        const capRemainingEuro = (summary.currentMonthAvailableCents / 100)
-          .toFixed(2)
-          .replace(".", ",");
-        if (summary.currentMonthAvailableCents <= 0) {
-          parts.push(
-            `Monats-Cap §45b in ${m}/${y} erreicht — keine weiteren Buchungen im laufenden Monat möglich.`,
-          );
-        } else {
-          parts.push(
-            `Monats-Cap §45b in ${m}/${y} reicht nicht für alle geplanten Termine — noch ${capRemainingEuro} € buchbar.`,
-          );
-        }
-      }
-    }
   }
 
   return parts.length > 0 ? `Achtung: ${parts.join(" ")}` : null;

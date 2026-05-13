@@ -13,8 +13,8 @@ import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
-import { getAllBudgetSummaries } from "./summary-queries";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
+import { getAvailableForDate } from "./import-availability";
 
 type ConsumptionParams = {
   appointmentId?: number;
@@ -90,8 +90,10 @@ export async function consumeFifo(
       asc(budgetAllocations.id)
     );
 
-  const allocationAsOfDate = budgetType === "entlastungsbetrag_45b" ? todayISO() : today;
-  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: allocationAsOfDate }, _tx);
+  // §45b ist seit Task #425 ein Jahrestopf: Verfügbarkeit = bis zum
+  // transactionDate aufgelaufene Allocation. Vor #425 wurde todayISO()
+  // genommen, was Vormonats-Buchungen fälschlich künstlich erweitert hätte.
+  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx);
 
   if (totalAllocated <= 0 && specialAllocations.length === 0) {
     return { consumedCents: 0, transactions: [], remainingCents: amountCents };
@@ -140,6 +142,11 @@ export async function consumeFifo(
     const txDate = parseLocalDate(today);
     txDateFilters.push(gte(budgetTransactions.transactionDate, `${txDate.getFullYear()}-01-01`));
     txDateFilters.push(lte(budgetTransactions.transactionDate, `${txDate.getFullYear()}-12-31`));
+  } else if (budgetType === "entlastungsbetrag_45b") {
+    // §45b Jahrestopf (Task #425): nur Konsumtionen bis zum transactionDate
+    // gegen die bis dahin aufgelaufene Allocation rechnen, damit spätere
+    // Buchungen nicht die Verfügbarkeit für ein früheres Datum reduzieren.
+    txDateFilters.push(lte(budgetTransactions.transactionDate, today));
   }
 
   const totalConsumedResult = await d.select({
@@ -301,8 +308,11 @@ export async function createCascadeConsumption(params: {
 
       let maxConsumable = remaining;
 
+      // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Die FIFO-
+      // Konsumtion wird nur durch die bis zum transactionDate aufgelaufene
+      // Allocation (siehe calculateAllocated45b) begrenzt — kein zusätzlicher
+      // Window-Cap mehr.
       const isCappedBudget =
-        pot.budgetType === "entlastungsbetrag_45b" ||
         pot.budgetType === "umwandlung_45a" ||
         pot.budgetType === "ersatzpflege_39_42a";
       const hasCap =
@@ -422,39 +432,17 @@ export async function createConsumptionTransaction(params: {
     }
 
     if (!acceptsPrivatePayment) {
-      const summaries = await getAllBudgetSummaries(params.customerId);
-      const typeSettings = await getBudgetTypeSettings(params.customerId);
-
-      // Cap-aware Vorabprüfung; Per-Datum-Erzwingung übernimmt computeCapSlot
-      // in der Cascade. currentMonthAvailableCents ist auf den heutigen Monat
-      // berechnet — für Termine in anderen Monaten auf availableCents
-      // (begrenzt durch monthlyLimit) zurückfallen, sonst blockieren wir
-      // Vormonats-Nachträge fälschlich.
-      const txnIsCurrentMonth = params.transactionDate.startsWith(todayISO().slice(0, 7));
-      const cap45b = summaries.entlastungsbetrag45b.monthlyLimitCents;
-      let total45b = txnIsCurrentMonth
-        ? summaries.entlastungsbetrag45b.currentMonthAvailableCents
-        : (cap45b == null
-            ? summaries.entlastungsbetrag45b.availableCents
-            : Math.min(summaries.entlastungsbetrag45b.availableCents, cap45b));
-      // §45a hat im Summary keinen Annual-View; für andere Monate mit dem
-      // vollen Monatsbudget rechnen (Best-Effort).
-      let total45a = txnIsCurrentMonth
-        ? summaries.umwandlung45a.currentMonthAvailableCents
-        : summaries.umwandlung45a.monthlyBudgetCents;
-      let total39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
-
-      if (typeSettings.length > 0) {
-        const settingsMap = new Map(typeSettings.map(s => [s.budgetType, s]));
-        const s45b = settingsMap.get("entlastungsbetrag_45b");
-        if (s45b && !s45b.enabled) total45b = 0;
-        const s45a = settingsMap.get("umwandlung_45a");
-        if (s45a && !s45a.enabled) total45a = 0;
-        const s39 = settingsMap.get("ersatzpflege_39_42a");
-        if (s39 && !s39.enabled) total39_42a = 0;
-      }
-
-      const totalAvailable = total45a + total45b + total39_42a;
+      // Date-aware Vorabprüfung: §45b nutzt die bis zum transactionDate
+      // aufgelaufene Allocation minus bereits gebuchter Beträge bis dahin
+      // (Task #425). §45a/§39 nutzen ihren jeweiligen Window-Cap relativ
+      // zum transactionDate. getAvailableForDate berücksichtigt
+      // enabled/validFrom/validTo bereits.
+      const availability = await getAvailableForDate(
+        params.customerId,
+        params.transactionDate,
+        tx,
+      );
+      const totalAvailable = availability.totalCents;
 
       if (costs.totalCents > totalAvailable) {
         const shortfall = costs.totalCents - totalAvailable;

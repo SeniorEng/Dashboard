@@ -261,9 +261,8 @@ function BudgetPot45b({
     ? Math.min(100 - usagePercent, (data.plannedCents / data.totalAllocatedCents) * 100)
     : 0;
 
-  const monthlyUsagePercent = data.monthlyLimitCents
-    ? Math.min(100, (data.currentMonthUsedCents / data.monthlyLimitCents) * 100)
-    : 0;
+  // §45b hat seit Task #425 keinen Monats-Cap mehr — die ehemalige
+  // monthlyUsagePercent-Berechnung entfällt zusammen mit der Monatslimit-Kachel.
 
   const hasPlanned = data.plannedCents > 0;
   const budgetExceeded = data.availableAfterPlannedCents < 0;
@@ -370,25 +369,11 @@ function BudgetPot45b({
         </Card>
       )}
 
-      {data.monthlyLimitCents ? (
-        <Card className="bg-purple-50 border-purple-100">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-gray-700">Monatslimit</p>
-              <Badge variant={monthlyUsagePercent > 80 ? "destructive" : "secondary"}>
-                {monthlyUsagePercent.toFixed(0)}%
-              </Badge>
-            </div>
-            <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden" role="progressbar" data-testid="progress-45b-monthly">
-              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, monthlyUsagePercent))}%` }} />
-            </div>
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>{formatCurrency(data.currentMonthUsedCents)} diesen Monat</span>
-              <span>Limit: {formatCurrency(data.monthlyLimitCents)}</span>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+      {/* §45b ist seit Task #425 ein Jahrestopf mit monatlicher Aufstockung
+          (kein Monats-Cap mehr). Die Monatslimit-Kachel entfällt — verfügbar
+          ist immer der bis zum Termindatum aufgelaufene Betrag minus bereits
+          gebuchter Beträge. data.monthlyLimitCents wird vom Backend für §45b
+          stets als null geliefert. */}
 
       <TransactionList
         customerId={customerId}

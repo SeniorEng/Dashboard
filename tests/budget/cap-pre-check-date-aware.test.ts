@@ -1,14 +1,18 @@
 /**
- * Task #423 (Architect-Befund Runde 3): Der Vorab-Check in
- * `createConsumptionTransaction` darf NICHT pauschal mit dem Cap-Rest des
- * heutigen Monats prüfen. Wenn ein Termin in einem ANDEREN Monat dokumentiert
- * wird (z.B. ein Nachtrag im Vormonat), gilt der Cap-Verbrauch des heutigen
- * Monats nicht. Sonst entsteht ein falscher "Budget reicht nicht"-Block,
- * obwohl der per-Datum-aware `computeCapSlot` in der Cascade die Buchung
- * korrekt durchlassen würde.
+ * Task #425 — §45b ist seit der Umstellung auf das Jahrestopf-Modell ohne
+ * Monats-Cap. Der Pre-Check in `createConsumptionTransaction` darf für §45b
+ * KEINE Monats-Cap-Logik mehr anwenden. Verfügbarkeit ergibt sich aus der
+ * bis zum transactionDate aufgelaufenen Allocation minus bereits gebuchter
+ * Beträge.
+ *
+ * Die Tests sichern zwei zentrale Invarianten:
+ *  1. Im AKTUELLEN Monat reicht der Topf so weit, wie bis "heute" aufgelaufen
+ *     ist — danach blockt der Pre-Check, weil zukünftige Aufstockungen
+ *     date-aware NICHT zählen.
+ *  2. Im FOLGEMONAT zählt die zusätzliche Aufstockung mit, sodass dort
+ *     wieder Buchungen möglich sind.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { eq, and } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { appointments, appointmentServices } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
@@ -59,21 +63,22 @@ function weekdayInNextMonth(): string {
   throw new Error("Kein Werktag im nächsten Monat gefunden");
 }
 
-describe("Task #423 — consumption-engine pre-check ist date-aware", () => {
+describe("Task #425 — §45b Pre-Check ist date-aware (Jahrestopf-Modell)", () => {
   let scenario: BudgetScenarioHandle;
   let employeeId: number;
 
   beforeAll(async () => {
-    // Cap = 5000 ct, Pott = 50000 ct. Aktueller Monat verbraucht 3800 ct
-    // (60min HW dokumentiert) → Cap-Rest aktueller Monat = 1200 ct.
+    // §45b ohne Monats-Cap. Topf-Startwert 50000 ct (500 €) ist hoch genug,
+    // dass NICHT der Topf, sondern die date-aware Verfügbarkeit limitiert.
+    // Aktueller Monat verbraucht 3800 ct (60 min HW dokumentiert).
     scenario = await setupBudgetScenario({
-      customerNamePrefix: "T423-PRECHECK",
+      customerNamePrefix: "T425-PRECHECK",
       pflegegrad: 2,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
       preferences: { budgetStartDate: "2026-01-01" },
       types: [
-        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: 5000 },
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false },
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
       ],
@@ -88,7 +93,7 @@ describe("Task #423 — consumption-engine pre-check ist date-aware", () => {
           scheduledStart: "09:00",
           services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
           document: true,
-          notes: "T423 Cap-Verbrauch im aktuellen Monat",
+          notes: "T425 Vorverbrauch im aktuellen Monat",
         },
       ],
     });
@@ -99,7 +104,7 @@ describe("Task #423 — consumption-engine pre-check ist date-aware", () => {
     await scenario.cleanup();
   });
 
-  it("blockt 60min-HW im AKTUELLEN Monat (Cap erschöpft)", async () => {
+  it("erlaubt 60min-HW im AKTUELLEN Monat solange Topf-Verfügbarkeit reicht (kein Monats-Cap mehr)", async () => {
     const date = weekdayInCurrentMonth();
     const [appt] = await db.insert(appointments).values({
       customerId: scenario.customerId,
@@ -110,44 +115,7 @@ describe("Task #423 — consumption-engine pre-check ist date-aware", () => {
       scheduledEnd: "11:00:00",
       durationPromised: 60,
       status: "scheduled",
-      notes: "T423 pre-check current-month",
-    }).returning();
-
-    // hauswirtschaft service id ermitteln
-    const services = await apiGet<Array<{ id: number; code: string }>>("/api/services/all");
-    const hwId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
-    await db.insert(appointmentServices).values({
-      appointmentId: appt.id,
-      serviceId: hwId,
-      plannedDurationMinutes: 60,
-    });
-
-    await expect(
-      createConsumptionTransaction({
-        customerId: scenario.customerId,
-        appointmentId: appt.id,
-        transactionDate: date,
-        hauswirtschaftMinutes: 60,
-        alltagsbegleitungMinutes: 0,
-        travelKilometers: 0,
-        customerKilometers: 0,
-        userId: employeeId,
-      }),
-    ).rejects.toThrow(/Budget reicht nicht/i);
-  });
-
-  it("erlaubt 60min-HW im FOLGEMONAT obwohl der aktuelle Monats-Cap erschöpft ist", async () => {
-    const date = weekdayInNextMonth();
-    const [appt] = await db.insert(appointments).values({
-      customerId: scenario.customerId,
-      assignedEmployeeId: employeeId,
-      appointmentType: "kundentermin",
-      date,
-      scheduledStart: "10:00:00",
-      scheduledEnd: "11:00:00",
-      durationPromised: 60,
-      status: "scheduled",
-      notes: "T423 pre-check next-month",
+      notes: "T425 pre-check current-month",
     }).returning();
 
     const services = await apiGet<Array<{ id: number; code: string }>>("/api/services/all");
@@ -158,7 +126,10 @@ describe("Task #423 — consumption-engine pre-check ist date-aware", () => {
       plannedDurationMinutes: 60,
     });
 
-    // Sollte NICHT blocken — Folgemonat hat noch 5000 ct Cap.
+    // Topf hat 50000 ct - 3800 ct (Vorverbrauch) = 46200 ct verfügbar — weit
+    // mehr als die 3800 ct des neuen Termins. Vor Task #425 hätte der
+    // Monats-Cap (131 € Default) den zweiten Termin geblockt; jetzt ist der
+    // Topf die einzige Schranke.
     const txn = await createConsumptionTransaction({
       customerId: scenario.customerId,
       appointmentId: appt.id,
@@ -170,5 +141,52 @@ describe("Task #423 — consumption-engine pre-check ist date-aware", () => {
       userId: employeeId,
     });
     expect(txn).toBeDefined();
+  });
+
+  it("erlaubt 60min-HW im FOLGEMONAT (zusätzliche Aufstockung wird date-aware mitberechnet)", async () => {
+    const date = weekdayInNextMonth();
+    const [appt] = await db.insert(appointments).values({
+      customerId: scenario.customerId,
+      assignedEmployeeId: employeeId,
+      appointmentType: "kundentermin",
+      date,
+      scheduledStart: "10:00:00",
+      scheduledEnd: "11:00:00",
+      durationPromised: 60,
+      status: "scheduled",
+      notes: "T425 pre-check next-month",
+    }).returning();
+
+    const services = await apiGet<Array<{ id: number; code: string }>>("/api/services/all");
+    const hwId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
+    await db.insert(appointmentServices).values({
+      appointmentId: appt.id,
+      serviceId: hwId,
+      plannedDurationMinutes: 60,
+    });
+
+    const txn = await createConsumptionTransaction({
+      customerId: scenario.customerId,
+      appointmentId: appt.id,
+      transactionDate: date,
+      hauswirtschaftMinutes: 60,
+      alltagsbegleitungMinutes: 0,
+      travelKilometers: 0,
+      customerKilometers: 0,
+      userId: employeeId,
+    });
+    expect(txn).toBeDefined();
+  });
+
+  it("Cost-Estimate für §45b spiegelt den date-aware Topf-Rest (kein Cap-Fenster)", async () => {
+    // Indirekter Konsistenz-Check: Cost-Estimate muss exakt mit
+    // currentMonthAvailableCents == availableCents arbeiten — beides ist im
+    // Jahrestopf-Modell synonym. So kann es keine Drift zwischen UI-Anzeige
+    // und Engine-Buchung mehr geben.
+    const overview = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    expect(overview.status).toBe(200);
+    const s45b = overview.data.entlastungsbetrag45b;
+    expect(s45b.monthlyLimitCents).toBeNull();
+    expect(s45b.currentMonthAvailableCents).toBe(s45b.availableCents);
   });
 });

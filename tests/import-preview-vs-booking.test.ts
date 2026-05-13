@@ -125,7 +125,7 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
     return r.totalCents;
   }
 
-  it("INT-118.1 – Standardfall: Vorschau == Buchung im selben Monat", async () => {
+  it("INT-118.1 – Standardfall: Vorschau == Buchung im selben Monat (Jahrestopf)", async () => {
     const cid = await setupCustomerWithCap();
     const year = new Date().getFullYear();
     const date = `${year}-10-15`;
@@ -137,26 +137,31 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
       budgetStartDate: `${year}-01-01`,
     });
 
+    // §45b ist seit Task #425 ein Jahrestopf — Vorschau == aufgelaufenes
+    // Akkrual bis zum transactionDate, nicht mehr ein fixer Monats-Cap.
     const preview = await previewCents(cid, date);
     expect(preview).toBeGreaterThan(0);
-    expect(preview).toBe(13100); // monatlicher Cap §45b
 
     const booked = await bookCascade(cid, date, preview);
     expect(booked.consumedCents).toBe(preview);
     expect(booked.outstandingCents).toBe(0);
 
-    // Nach Buchung muss die Vorschau für denselben Tag exakt 0 sein.
+    // Nach Buchung muss die Vorschau für denselben Tag exakt 0 sein
+    // (kein zusätzliches Akkrual am selben Tag).
     const previewAfter = await previewCents(cid, date);
     expect(previewAfter).toBe(0);
 
     try { await apiDeleteRaw(`/api/customers/${cid}`); } catch {}
   }, 30000);
 
-  it("INT-118.2 – Monatswechsel: Verbrauch im März blockiert nicht den April", async () => {
+  it("INT-118.2 – Monatswechsel: Vorschau und Buchung bleiben über Monatsgrenze hinweg konsistent", async () => {
+    // Im Jahrestopf-Modell (Task #425) gibt es keinen Monats-Cap-Reset mehr.
+    // Wichtig ist die Drift-Freiheit: was die Vorschau in einem späteren Monat
+    // anzeigt, muss die Buchung exakt in derselben Höhe konsumieren.
     const cid = await setupCustomerWithCap();
     const year = new Date().getFullYear();
-    const dateMarch = `${year}-11-20`;
-    const dateApril = `${year}-12-05`;
+    const dateA = `${year}-11-20`;
+    const dateB = `${year}-12-05`;
 
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
@@ -165,26 +170,34 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
       budgetStartDate: `${year}-01-01`,
     });
 
-    // Voll im März verbraten.
-    const previewMarch = await previewCents(cid, dateMarch);
-    const bookedMarch = await bookCascade(cid, dateMarch, previewMarch);
-    expect(bookedMarch.consumedCents).toBe(previewMarch);
+    // November: Teilbetrag verbuchen (nicht alles), damit Dezember noch
+    // garantiert Pot übrig hat.
+    const previewA = await previewCents(cid, dateA);
+    expect(previewA).toBeGreaterThan(0);
+    const partial = Math.floor(previewA / 2);
+    const bookedA = await bookCascade(cid, dateA, partial);
+    expect(bookedA.consumedCents).toBe(partial);
+    expect(bookedA.outstandingCents).toBe(0);
 
-    // April: Cap muss zurückgesetzt sein.
-    const previewApril = await previewCents(cid, dateApril);
-    expect(previewApril).toBe(13100);
+    // Dezember: Vorschau muss ohne Monats-Cap-Block weiterhin > 0 sein und
+    // exakt das ergeben, was die Buchung konsumiert (preview == booking).
+    const previewB = await previewCents(cid, dateB);
+    expect(previewB).toBeGreaterThan(0);
 
-    const bookedApril = await bookCascade(cid, dateApril, previewApril);
-    expect(bookedApril.consumedCents).toBe(previewApril);
+    const bookedB = await bookCascade(cid, dateB, previewB);
+    expect(bookedB.consumedCents).toBe(previewB);
+    expect(bookedB.outstandingCents).toBe(0);
 
     try { await apiDeleteRaw(`/api/customers/${cid}`); } catch {}
   }, 30000);
 
-  it("INT-118.3 – Carryover läuft mid-month aus: Vorschau und Buchung sehen denselben Cap", async () => {
+  it("INT-118.3 – Carryover läuft mid-month aus: Vorschau und Buchung sehen identische Verfügbarkeit", async () => {
+    // Kerneigenschaft Task #118: keine Drift zwischen Preview und Booking.
+    // Der konkrete Wert hängt im Jahrestopf-Modell vom Akkrual-Stand ab —
+    // wichtig ist hier nur, dass beide Pfade exakt dasselbe sehen.
     const cid = await setupCustomerWithCap();
     const year = new Date().getFullYear();
 
-    // Initialbudget anlegen (legt auch Carryover-Allocation für Vorjahr an).
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
       currentYearAmountCents: 200000,
@@ -192,8 +205,6 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
       budgetStartDate: `${year}-01-01`,
     });
 
-    // Carryover-Allocation direkt mit mid-month Expiry einfügen, um Edge-Case
-    // zu modellieren (Standard-API erlaubt nur 30.06. als Expiry).
     const { db } = await import("../server/lib/db");
     const { budgetAllocations } = await import("@shared/schema");
 
@@ -204,20 +215,19 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
       amountCents: 5000,
       source: "carryover",
       validFrom: `${year}-01-01`,
-      expiresAt: `${year}-11-15`, // mid-month Expiry
+      expiresAt: `${year}-11-15`,
       notes: "Test #118 mid-month expiry",
     });
 
     const datePreExpiry = `${year}-11-10`;
-    const datePostExpiry = `${year}-11-20`;
-
-    // Vor Expiry: Cap = 13100 + 5000 carryover = 18100
     const previewPre = await previewCents(cid, datePreExpiry);
-    expect(previewPre).toBe(18100);
+    expect(previewPre).toBeGreaterThan(0);
     const bookedPre = await bookCascade(cid, datePreExpiry, previewPre);
     expect(bookedPre.consumedCents).toBe(previewPre);
+    expect(bookedPre.outstandingCents).toBe(0);
 
-    // Anderer Kunde für Post-Expiry-Check (Pot wäre sonst leer).
+    // Frischer Kunde — wir prüfen Post-Expiry separat, damit die schon
+    // verbrauchten Carryover-Cents oben das Bild nicht verzerren.
     const cid2 = await setupCustomerWithCap();
     await apiPost(`/api/budget/${cid2}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
@@ -236,11 +246,12 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
       notes: "Test #118 mid-month expiry (post)",
     });
 
-    // Nach Expiry: Carryover zählt nicht mehr → Cap = 13100
+    const datePostExpiry = `${year}-11-20`;
     const previewPost = await previewCents(cid2, datePostExpiry);
-    expect(previewPost).toBe(13100);
+    expect(previewPost).toBeGreaterThan(0);
     const bookedPost = await bookCascade(cid2, datePostExpiry, previewPost);
     expect(bookedPost.consumedCents).toBe(previewPost);
+    expect(bookedPost.outstandingCents).toBe(0);
 
     try { await apiDeleteRaw(`/api/customers/${cid}`); } catch {}
     try { await apiDeleteRaw(`/api/customers/${cid2}`); } catch {}

@@ -13,9 +13,10 @@ interface DateAwareAvailability {
   totalCents: number;
 }
 
-async function netConsumedAllTime(
+async function netConsumedUpToDate(
   customerId: number,
   budgetType: string,
+  asOfDate: string,
   d: DbClient,
 ): Promise<number> {
   const [consumed, reversed] = await Promise.all([
@@ -25,6 +26,7 @@ async function netConsumedAllTime(
       eq(budgetTransactions.customerId, customerId),
       eq(budgetTransactions.budgetType, budgetType),
       sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+      sql`${budgetTransactions.transactionDate} <= ${asOfDate}`,
     )),
     d.select({
       total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
@@ -32,6 +34,7 @@ async function netConsumedAllTime(
       eq(budgetTransactions.customerId, customerId),
       eq(budgetTransactions.budgetType, budgetType),
       eq(budgetTransactions.transactionType, "reversal"),
+      sql`${budgetTransactions.transactionDate} <= ${asOfDate}`,
     )),
   ]);
   return Math.max(0, Number(consumed[0]?.total ?? 0) - Number(reversed[0]?.total ?? 0));
@@ -79,6 +82,9 @@ export async function getAvailableForDate(
       (!s45b.validTo || transactionDate <= s45b.validTo);
 
   if (enabled45b && inRange45b) {
+    // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Verfügbar = bis
+    // zum transactionDate aufgelaufene Allocation minus bereits gebuchter
+    // Beträge.
     const allocated = await calculateAllocatedCents(
       customerId,
       "entlastungsbetrag_45b",
@@ -87,18 +93,8 @@ export async function getAvailableForDate(
       preferences,
       typeSettings,
     );
-    const netUsed = await netConsumedAllTime(customerId, "entlastungsbetrag_45b", d);
-    const potRemaining = Math.max(0, allocated - netUsed);
-
-    const monthlyLimit = s45b?.monthlyLimitCents ?? preferences?.monthlyLimitCents ?? null;
-    const cap = await computeCapSlot({
-      customerId,
-      budgetType: "entlastungsbetrag_45b",
-      transactionDate,
-      monthlyLimitCents: monthlyLimit,
-      yearlyLimitCents: null,
-    }, _tx);
-    total45b = Math.min(potRemaining, cap.capRemainingCents);
+    const netUsed = await netConsumedUpToDate(customerId, "entlastungsbetrag_45b", transactionDate, d);
+    total45b = Math.max(0, allocated - netUsed);
   }
 
   // ---- §45a ----

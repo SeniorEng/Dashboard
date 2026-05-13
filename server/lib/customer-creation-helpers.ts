@@ -188,7 +188,10 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
     if (input.useLedgerBudgets) {
       const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
       if (input.budgets.entlastungsbetrag45b > 0) {
-        typeSettings.push({ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: input.budgets.entlastungsbetrag45b });
+        // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Der vom
+        // Wizard gesendete Eurobetrag dient nur noch als Enable-Signal —
+        // monthlyLimitCents bleibt explizit null.
+        typeSettings.push({ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null });
       }
       if (input.budgets.pflegesachleistungen36 > 0) {
         typeSettings.push({ budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: input.budgets.pflegesachleistungen36 });
