@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle, Gauge } from "lucide-react";
+import { Shield, LogOut, Search, X, User as UserIcon, Calendar, CheckSquare, FileSignature, Settings, Clock, Users, BookOpen, CalendarPlus, UserPlus, WifiOff, Eye, ChevronDown, HelpCircle, Gauge, Contact2, Gift, CalendarCheck, Zap } from "lucide-react";
 import { type LayoutVariant, layoutVariants, colors } from "@/design-system";
 import { useUnreadCount } from "@/features/notifications/use-notifications";
 import { NotificationBell } from "@/components/notification-bell";
@@ -246,9 +246,65 @@ function OfflineBanner() {
   );
 }
 
+interface AdminShortcut {
+  href: string;
+  label: string;
+  shortLabel?: string;
+  icon: typeof Contact2;
+  testId: string;
+  permissionKey: string;
+  match: (loc: string) => boolean;
+}
+
+const ADMIN_SHORTCUTS: AdminShortcut[] = [
+  {
+    href: "/admin/customers",
+    label: "Kundenverwaltung",
+    shortLabel: "Kunden",
+    icon: Contact2,
+    testId: "customers",
+    permissionKey: "customers",
+    match: (loc) => loc === "/admin/customers" || loc.startsWith("/admin/customers/"),
+  },
+  {
+    href: "/admin/prospects",
+    label: "Interessenten",
+    icon: UserPlus,
+    testId: "prospects",
+    permissionKey: "prospects",
+    match: (loc) => loc.startsWith("/admin/prospects"),
+  },
+  {
+    href: "/admin/birthday-cards",
+    label: "Geburtstage",
+    icon: Gift,
+    testId: "birthdays",
+    permissionKey: "birthday_cards",
+    match: (loc) => loc.startsWith("/admin/birthday-cards"),
+  },
+  {
+    href: "/admin/availability",
+    label: "Verfügbarkeiten",
+    shortLabel: "Verfügbar.",
+    icon: CalendarCheck,
+    testId: "availability",
+    permissionKey: "users",
+    match: (loc) => loc.startsWith("/admin/availability"),
+  },
+  {
+    href: "/admin/users",
+    label: "Benutzerverwaltung",
+    shortLabel: "Benutzer",
+    icon: Users,
+    testId: "users",
+    permissionKey: "users",
+    match: (loc) => loc.startsWith("/admin/users"),
+  },
+];
+
 export function Layout({ children, variant = 'default' }: { children: React.ReactNode; variant?: LayoutVariant }) {
   const [location, navigate] = useLocation();
-  const { user, logout, isAuthenticated, badgeCount, birthdayCount } = useAuth();
+  const { user, logout, isAuthenticated, badgeCount, birthdayCount, hasAdminPermission } = useAuth();
   const { data: notificationUnreadCount = 0 } = useUnreadCount();
   const { toast } = useToast();
 
@@ -302,6 +358,9 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
 
   const isAdmin = user?.isAdmin ?? false;
   const isTeamLead = user?.isTeamLead ?? false;
+  const visibleAdminShortcuts = isAdmin
+    ? ADMIN_SHORTCUTS.filter((s) => hasAdminPermission(s.permissionKey))
+    : [];
   // Teamleitungen besitzen firmenweite Admin-Sicht und dürfen Termin- und
   // Erstberatungs-Workflows bedienen. Admin-Toggle, Schnell-Aktionen für
   // Termin/Interessent und der „View as Employee"-Selector werden deshalb
@@ -357,6 +416,31 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                   <p className="text-sm font-medium">{user.displayName}</p>
                   <p className="text-xs text-muted-foreground">{user.email}</p>
                 </div>
+                {visibleAdminShortcuts.length > 0 && (
+                  <div className="md:hidden">
+                    <DropdownMenuSeparator />
+                    <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Schnellzugriff
+                    </div>
+                    {visibleAdminShortcuts.map((s) => {
+                      const Icon = s.icon;
+                      const isActive = s.match(location);
+                      return (
+                        <DropdownMenuItem
+                          key={s.href}
+                          onClick={() => navigate(s.href)}
+                          data-testid={`menu-shortcut-${s.testId}`}
+                          aria-label={s.label}
+                          aria-current={isActive ? "page" : undefined}
+                          className={isActive ? "bg-primary/10 text-primary" : undefined}
+                        >
+                          <Icon className="mr-2 h-4 w-4 text-teal-600" />
+                          {s.label}
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </div>
+                )}
                 {hasAdminScope && (
                   <>
                     <DropdownMenuSeparator />
@@ -502,6 +586,46 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                     <ViewAsEmployeeSelector />
                   </>
                 )}
+              </div>
+            </div>
+          </nav>
+        )}
+
+        {/* Admin Quick-Access Shortcut Bar (Desktop, Admin only) */}
+        {isAuthenticated && user && visibleAdminShortcuts.length > 0 && (
+          <nav
+            className="hidden md:block border-t border-border/30 bg-primary/5"
+            aria-label="Admin-Schnellzugriff"
+            data-testid="nav-admin-shortcuts"
+          >
+            <div className="container mx-auto px-4">
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-1.5">
+                <div className="flex items-center gap-1.5 pr-2 mr-1 border-r border-border/40 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Zap className="w-3.5 h-3.5" />
+                  Schnellzugriff
+                </div>
+                {visibleAdminShortcuts.map((s) => {
+                  const Icon = s.icon;
+                  const isActive = s.match(location);
+                  return (
+                    <Link
+                      key={s.href}
+                      href={s.href}
+                      aria-label={s.label}
+                      aria-current={isActive ? "page" : undefined}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition-colors shrink-0 ${
+                        isActive
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:text-foreground hover:bg-white"
+                      }`}
+                      data-testid={`link-shortcut-${s.testId}`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span className="hidden lg:inline">{s.label}</span>
+                      <span className="lg:hidden">{s.shortLabel ?? s.label}</span>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           </nav>
