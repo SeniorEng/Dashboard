@@ -28,8 +28,8 @@ export function daysUntilBirthdayWithPast(birthDate: string, includePastDays: nu
   const forward = calculateDaysUntilBirthday(birthDate);
   if (includePastDays > 0) {
     const today = parseLocalDate(todayISO());
-    const birth = parseLocalDate(birthDate);
-    const thisYearBirthday = new Date(today.getFullYear(), birth.getMonth(), birth.getDate());
+    // Schalttag-konforme Berechnung des Geburtstags in diesem Kalenderjahr
+    const thisYearBirthday = getBirthdayOccurrenceInYear(birthDate, today.getFullYear());
     const diffThisYear = Math.round(
       (thisYearBirthday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
     );
@@ -51,45 +51,48 @@ function buildAddress(strasse: string | null, hausnummer: string | null, plz: st
   return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
-export function calculateDaysUntilBirthday(birthDate: string): number {
-  const todayStr = todayISO();
-  const today = parseLocalDate(todayStr);
-
+/**
+ * Liefert den tatsächlichen Geburtstag in einem konkreten Kalenderjahr.
+ * Schalttag-Babys (29.02.) feiern in Nicht-Schaltjahren am 28.02.
+ */
+function getBirthdayOccurrenceInYear(birthDate: string, year: number): Date {
   const birth = parseLocalDate(birthDate);
   const birthMonth = birth.getMonth();
   const birthDay = birth.getDate();
+  const isLeapDayBaby = birthMonth === 1 && birthDay === 29;
 
-  const originalDate = new Date(birth.getFullYear(), birthMonth, birthDay);
-  const wasLeapDayBaby = birthMonth === 1 && birthDay === 29 &&
-    originalDate.getMonth() === 1 && originalDate.getDate() === 29;
-
-  let thisYearBirthday: Date;
-  if (wasLeapDayBaby) {
-    const candidate = new Date(today.getFullYear(), 1, 29);
+  if (isLeapDayBaby) {
+    const candidate = new Date(year, 1, 29);
     if (candidate.getMonth() === 1 && candidate.getDate() === 29) {
-      thisYearBirthday = candidate;
-    } else {
-      thisYearBirthday = new Date(today.getFullYear(), 1, 28);
+      return candidate;
     }
-  } else {
-    thisYearBirthday = new Date(today.getFullYear(), birthMonth, birthDay);
+    return new Date(year, 1, 28);
   }
+  return new Date(year, birthMonth, birthDay);
+}
 
-  if (thisYearBirthday < today) {
-    if (wasLeapDayBaby) {
-      let nextYear = today.getFullYear() + 1;
-      let candidate = new Date(nextYear, 1, 29);
+export function calculateDaysUntilBirthday(birthDate: string): number {
+  const today = parseLocalDate(todayISO());
+  const birth = parseLocalDate(birthDate);
+  const isLeapDayBaby = birth.getMonth() === 1 && birth.getDate() === 29;
+
+  let occurrence = getBirthdayOccurrenceInYear(birthDate, today.getFullYear());
+
+  if (occurrence < today) {
+    if (isLeapDayBaby) {
+      let year = today.getFullYear() + 1;
+      let candidate = new Date(year, 1, 29);
       while (!(candidate.getMonth() === 1 && candidate.getDate() === 29)) {
-        nextYear++;
-        candidate = new Date(nextYear, 1, 29);
+        year++;
+        candidate = new Date(year, 1, 29);
       }
-      thisYearBirthday = candidate;
+      occurrence = candidate;
     } else {
-      thisYearBirthday.setFullYear(today.getFullYear() + 1);
+      occurrence = getBirthdayOccurrenceInYear(birthDate, today.getFullYear() + 1);
     }
   }
 
-  const diffTime = thisYearBirthday.getTime() - today.getTime();
+  const diffTime = occurrence.getTime() - today.getTime();
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
 
