@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatVacationDays } from "@/lib/utils";
+import { WorkloadBarTooltip, WorkloadInfoTooltip } from "@/features/team/components/workload-info-tooltip";
 import {
   Dialog,
   DialogContent,
@@ -577,17 +578,19 @@ export default function AdminUsers() {
 
                       {!user.isAnonymized && m && m.hasSoll && (
                         <div className="mt-3" data-testid={`workload-stats-${user.id}`}>
-                          <div className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
-                            <div
-                              className={`h-full ${barColor} transition-all`}
-                              style={{ width: `${barWidth}%` }}
-                              data-testid={`workload-bar-${user.id}`}
-                            />
-                            <div
-                              className="absolute top-0 bottom-0 w-px bg-gray-300"
-                              style={{ left: `${100 / 1.5}%` }}
-                            />
-                          </div>
+                          <WorkloadBarTooltip>
+                            <div className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
+                              <div
+                                className={`h-full ${barColor} transition-all`}
+                                style={{ width: `${barWidth}%` }}
+                                data-testid={`workload-bar-${user.id}`}
+                              />
+                              <div
+                                className="absolute top-0 bottom-0 w-px bg-gray-300"
+                                style={{ left: `${100 / 1.5}%` }}
+                              />
+                            </div>
+                          </WorkloadBarTooltip>
                           <div className="mt-1.5 flex items-center justify-between text-sm">
                             <div className="flex items-center gap-1.5 text-gray-700 flex-wrap">
                               <span className="font-semibold" data-testid={`workload-hv-primary-${user.id}`}>
@@ -595,6 +598,7 @@ export default function AdminUsers() {
                               </span>
                               <span className="text-gray-400">·</span>
                               <span className="text-gray-500">Soll</span>
+                              <WorkloadInfoTooltip testId={`tooltip-workload-info-${user.id}`} />
                               <span className="font-semibold" data-testid={`workload-soll-${user.id}`}>
                                 {m.sollHours}h
                               </span>

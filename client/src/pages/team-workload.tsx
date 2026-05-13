@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, Search, AlertCircle, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { WorkloadBarTooltip, WorkloadInfoTooltip } from "@/features/team/components/workload-info-tooltip";
 import { iconSize, componentStyles } from "@/design-system";
 import { useTeamWorkload } from "@/features/team/use-team-workload";
 import {
@@ -242,25 +243,28 @@ export default function TeamWorkloadPage() {
                         </span>
                       </div>
                       {/* Progress bar with 100% marker */}
-                      <div className="relative mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
-                        <div
-                          className={`h-full ${overloaded ? "bg-red-500" : auslastungPctRounded >= 85 ? "bg-amber-500" : "bg-teal-600"}`}
-                          style={{ width: `${Math.min(auslastungPctRounded, 100)}%` }}
-                        />
-                        {overloaded && (
+                      <WorkloadBarTooltip>
+                        <div className="relative mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
                           <div
-                            className="absolute top-0 h-full w-0.5 bg-gray-900"
-                            style={{ left: `${Math.min((100 / auslastungPctRounded) * 100, 100)}%` }}
-                            aria-hidden="true"
+                            className={`h-full ${overloaded ? "bg-red-500" : auslastungPctRounded >= 85 ? "bg-amber-500" : "bg-teal-600"}`}
+                            style={{ width: `${Math.min(auslastungPctRounded, 100)}%` }}
                           />
-                        )}
-                      </div>
+                          {overloaded && (
+                            <div
+                              className="absolute top-0 h-full w-0.5 bg-gray-900"
+                              style={{ left: `${Math.min((100 / auslastungPctRounded) * 100, 100)}%` }}
+                              aria-hidden="true"
+                            />
+                          )}
+                        </div>
+                      </WorkloadBarTooltip>
                       <div className="mt-2 flex items-center justify-between text-xs text-gray-700 gap-2 flex-wrap">
-                        <span>
+                        <span className="inline-flex items-center gap-1">
                           <span className="font-medium" data-testid={`workload-ist-${employee.id}`}>
                             {sollIst.istHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })} h
                           </span>{" "}
                           <span className="text-gray-500">Ist</span>
+                          <WorkloadInfoTooltip testId={`tooltip-workload-info-${employee.id}`} />
                         </span>
                         <span className="text-gray-500 uppercase tracking-wide text-[11px]">
                           Soll <span className="font-medium text-gray-700" data-testid={`workload-soll-${employee.id}`}>{sollIst.sollHours} h</span>
