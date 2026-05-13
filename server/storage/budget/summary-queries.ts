@@ -187,6 +187,17 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     ? true
     : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
 
+  const monthlyLimitCents = await getEffectiveMonthlyLimitCents(customerId, typeSettings, preferences);
+
+  // Task #423: gleiche Cap-Mathe wie `computeCapSlot` / `createCascadeConsumption`,
+  // damit Anzeige (`currentMonthAvailableCents`) und tatsächliche Buchung
+  // niemals auseinanderlaufen können. Ohne Cap wird der Wert auf den
+  // gesamten Topf-Rest reduziert.
+  const monthlyCapAvailableCents = monthlyLimitCents != null
+    ? Math.max(0, monthlyLimitCents + carryoverCents - currentMonthUsedCents)
+    : Number.POSITIVE_INFINITY;
+  const currentMonthAvailableRaw = Math.min(availableCents, monthlyCapAvailableCents);
+
   return {
     customerId,
     totalAllocatedCents,
@@ -197,8 +208,9 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     carryoverCents,
     carryoverExpiresAt,
     currentYearAllocatedCents,
-    monthlyLimitCents: await getEffectiveMonthlyLimitCents(customerId, typeSettings, preferences),
+    monthlyLimitCents,
     currentMonthUsedCents,
+    currentMonthAvailableCents: isCurrentlyActive ? Math.max(0, currentMonthAvailableRaw) : 0,
     isCurrentlyActive,
   };
 }

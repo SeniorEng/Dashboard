@@ -196,10 +196,21 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     enabledMap[s.budgetType] = s.enabled;
   }
 
+  // Task #423: Für §45b den Monats-Cap respektieren — `currentMonthAvailableCents`
+  // ist bei gesetztem `monthlyLimitCents` < `availableCents` und entscheidet, was
+  // im laufenden Monat tatsächlich gebucht werden kann.
+  const available45bForMonth = enabledMap.entlastungsbetrag_45b ? summary45b.currentMonthAvailableCents : 0;
   const totalAvailable =
-    (enabledMap.entlastungsbetrag_45b ? summary45b.availableCents : 0) +
+    available45bForMonth +
     (enabledMap.umwandlung_45a ? summary45a.currentMonthAvailableCents : 0) +
     (enabledMap.ersatzpflege_39_42a ? summary39_42a.currentYearAvailableCents : 0);
+
+  // Engpass-Diagnose: Liegt der Mangel am Monats-Cap (Topf hätte noch
+  // Geld, aber Cap erreicht)?
+  const monthlyCapIsBottleneck =
+    enabledMap.entlastungsbetrag_45b &&
+    summary45b.monthlyLimitCents != null &&
+    summary45b.availableCents > summary45b.currentMonthAvailableCents;
 
   let warning: string | null = null;
   let isHardBlock = false;
@@ -210,12 +221,20 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     const shortfall = totalCostCents - totalAvailable;
     const shortfallEuro = (shortfall / 100).toFixed(2).replace(".", ",");
 
+    let reason = "";
+    if (monthlyCapIsBottleneck) {
+      const today = todayISO();
+      const [y, m] = today.split("-");
+      const remainingEuro = (summary45b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",");
+      reason = ` Monats-Cap §45b in ${m}/${y} erreicht — noch ${remainingEuro} € buchbar.`;
+    }
+
     if (acceptsPrivatePayment) {
       privateCents = shortfall;
       vatCents = Math.round(shortfall * (weightedVatRate / 100));
-      warning = `Budget reicht nicht — ${shortfallEuro} € werden privat berechnet.`;
+      warning = `Budget reicht nicht — ${shortfallEuro} € werden privat berechnet.${reason}`;
     } else {
-      warning = `Budget reicht nicht — es fehlen ${shortfallEuro} €.`;
+      warning = `Budget reicht nicht — es fehlen ${shortfallEuro} €.${reason}`;
       isHardBlock = true;
     }
   }
@@ -249,6 +268,7 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
       plannedCents: s45b.plannedCents,
       availableAfterPlannedCents: s45b.availableAfterPlannedCents,
       currentMonthUsedCents: s45b.currentMonthUsedCents,
+      currentMonthAvailableCents: s45b.currentMonthAvailableCents,
       monthlyLimitCents: s45b.monthlyLimitCents,
       carryoverCents: s45b.carryoverCents,
       carryoverExpiresAt: s45b.carryoverExpiresAt,

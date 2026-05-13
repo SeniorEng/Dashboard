@@ -75,6 +75,7 @@ export default function CustomerDetailPage() {
       totalUsedCents: number;
       availableCents: number;
       currentMonthUsedCents: number;
+      currentMonthAvailableCents: number;
       monthlyLimitCents: number | null;
     };
     umwandlung45a: { 
@@ -100,6 +101,7 @@ export default function CustomerDetailPage() {
           totalUsedCents: number;
           availableCents: number;
           currentMonthUsedCents: number;
+          currentMonthAvailableCents: number;
           monthlyLimitCents: number | null;
         };
         umwandlung45a: { 
@@ -397,7 +399,7 @@ export default function CustomerDetailPage() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">§45b Entlastungsbetrag</span>
                         <span className="text-sm text-muted-foreground">
-                          {(b.availableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
+                          {(b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
                         </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 mb-1">

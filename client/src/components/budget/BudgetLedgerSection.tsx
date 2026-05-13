@@ -25,6 +25,7 @@ interface BudgetOverview {
     plannedCents: number;
     availableAfterPlannedCents: number;
     currentMonthUsedCents: number;
+    currentMonthAvailableCents: number;
     monthlyLimitCents: number | null;
     carryoverCents: number;
     carryoverExpiresAt: string | null;
@@ -296,7 +297,7 @@ function BudgetPot45b({
               <Euro className={`${iconSize.sm} ${budgetExceeded ? "text-red-600" : "text-green-600"}`} />
             </div>
             <p className={`text-2xl font-bold mt-1 ${budgetExceeded ? "text-red-700" : "text-green-700"}`} data-testid="text-45b-available">
-              {formatCurrency(hasPlanned ? data.availableAfterPlannedCents : data.availableCents)}
+              {formatCurrency(hasPlanned ? Math.min(data.availableAfterPlannedCents, data.currentMonthAvailableCents) : Math.min(data.availableCents, data.currentMonthAvailableCents))}
             </p>
             <div className="mt-2 h-2 w-full rounded-full bg-gray-200 overflow-hidden flex" role="progressbar" data-testid="progress-45b-available">
               <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(0, usagePercent)}%` }} />

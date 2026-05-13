@@ -33,6 +33,7 @@ import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { buildBudgetWarning } from "../lib/budget-warning";
 import type { Response } from "express";
 import type { CoverageCheckResponse } from "@shared/api";
 import appointmentDocumentationRouter from "./appointment-documentation";
@@ -621,9 +622,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(validatedData.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(validatedData.customerId);
-    if (budgetSummary.availableAfterPlannedCents < 0) {
-      _warning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
-    }
+    _warning = buildBudgetWarning(budgetSummary) ?? undefined;
   } catch (err) {
     console.warn("[appointments] Budget-Warnung fehlgeschlagen:", err);
   }

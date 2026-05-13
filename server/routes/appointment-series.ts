@@ -9,6 +9,7 @@ import { validateSeriesDates, createSeriesAppointments } from "../services/appoi
 import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { buildBudgetWarning } from "../lib/budget-warning";
 import { notificationService } from "../services/notification-service";
 import { todayISO, addMinutesToTimeHHMMSS, isWeekend, parseLocalDate } from "@shared/utils/datetime";
 import { appointmentService } from "../services/appointments";
@@ -193,9 +194,7 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(input.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(input.customerId);
-    if (budgetSummary.availableAfterPlannedCents < 0) {
-      _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
-    }
+    _budgetWarning = buildBudgetWarning(budgetSummary) ?? undefined;
   } catch (err) {
     console.warn("[appointment-series] Budget-Warnung fehlgeschlagen:", err);
   }
@@ -628,9 +627,7 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(series.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(series.customerId);
-    if (budgetSummary.availableAfterPlannedCents < 0) {
-      _budgetWarning = "Achtung: Das Budget dieses Kunden reicht möglicherweise nicht für alle geplanten Termine.";
-    }
+    _budgetWarning = buildBudgetWarning(budgetSummary) ?? undefined;
   } catch (err) {
     console.warn("[appointment-series] Budget-Warnung fehlgeschlagen:", err);
   }

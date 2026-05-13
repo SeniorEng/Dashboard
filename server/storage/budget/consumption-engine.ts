@@ -425,7 +425,9 @@ export async function createConsumptionTransaction(params: {
       const summaries = await getAllBudgetSummaries(params.customerId);
       const typeSettings = await getBudgetTypeSettings(params.customerId);
 
-      let total45b = summaries.entlastungsbetrag45b.availableCents;
+      // Task #423: Monats-Cap respektieren — `currentMonthAvailableCents` ist
+      // bei gesetztem `monthlyLimitCents` < `availableCents`, sonst gleich.
+      let total45b = summaries.entlastungsbetrag45b.currentMonthAvailableCents;
       let total45a = summaries.umwandlung45a.currentMonthAvailableCents;
       let total39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
 

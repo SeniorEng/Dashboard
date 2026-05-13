@@ -241,5 +241,7 @@ export interface BudgetSummary {
   currentYearAllocatedCents: number;
   monthlyLimitCents: number | null;
   currentMonthUsedCents: number;
+  /** Im laufenden Kalendermonat noch buchbar (Cap- und Topf-aware). Siehe BudgetSummary in `server/storage/budget/types.ts`. */
+  currentMonthAvailableCents: number;
   isCurrentlyActive: boolean;
 }
