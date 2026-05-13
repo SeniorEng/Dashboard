@@ -427,8 +427,29 @@ export async function createConsumptionTransaction(params: {
 
       // Task #423: Monats-Cap respektieren — `currentMonthAvailableCents` ist
       // bei gesetztem `monthlyLimitCents` < `availableCents`, sonst gleich.
-      let total45b = summaries.entlastungsbetrag45b.currentMonthAvailableCents;
-      let total45a = summaries.umwandlung45a.currentMonthAvailableCents;
+      //
+      // ABER: `currentMonthAvailableCents` ist immer für den HEUTIGEN Monat
+      // berechnet. Bei Termin-Dokumentation für einen anderen Monat
+      // (z.B. Nachträge im Vormonat) würde diese Vorabprüfung fälschlich
+      // blockieren, obwohl `createCascadeConsumption` mit dem korrekten
+      // `transactionDate` arbeitet. Daher: nur clampen, wenn der Termin im
+      // aktuellen Monat liegt; sonst auf `availableCents` (ggf. begrenzt
+      // durch `monthlyLimitCents` als Best-Effort) zurückfallen. Die
+      // Per-Datum-Cap-Erzwingung übernimmt `computeCapSlot` in der Cascade.
+      const currentMonthPrefix = todayISO().slice(0, 7);
+      const txnIsCurrentMonth = params.transactionDate.startsWith(currentMonthPrefix);
+      const cap45b = summaries.entlastungsbetrag45b.monthlyLimitCents;
+      let total45b = txnIsCurrentMonth
+        ? summaries.entlastungsbetrag45b.currentMonthAvailableCents
+        : (cap45b == null
+            ? summaries.entlastungsbetrag45b.availableCents
+            : Math.min(summaries.entlastungsbetrag45b.availableCents, cap45b));
+      // §45a hat im Summary keinen Annual-View — für andere Monate mit dem
+      // vollen Monatsbudget rechnen (Best-Effort; die Cascade prüft per
+      // transactionDate den tatsächlichen Verbrauch nach).
+      let total45a = txnIsCurrentMonth
+        ? summaries.umwandlung45a.currentMonthAvailableCents
+        : summaries.umwandlung45a.monthlyBudgetCents;
       let total39_42a = summaries.ersatzpflege39_42a.currentYearAvailableCents;
 
       if (typeSettings.length > 0) {
