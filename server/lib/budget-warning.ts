@@ -13,10 +13,26 @@ import type { BudgetSummary } from "../storage/budget/types";
  *      "Geplante Termine übersteigen §45b um X €."
  *  - Monats-Cap-Engpass (`currentMonthAvailableCents <= 0` bei gesetztem Cap):
  *      "Monats-Cap §45b in MM/YYYY erreicht — keine weiteren Buchungen möglich."
+ *      Wird NUR ausgegeben, wenn mindestens einer der angelegten Termine im
+ *      laufenden Monat liegt — der Summary-Wert beschreibt immer den aktuellen
+ *      Monat, daher ist die Cap-Aussage für reine Folgemonate irrelevant.
  *  - Beides gleichzeitig → beide Sätze, getrennt durch Leerzeichen.
  *  - Kein Engpass → `null` (kein Warnbanner).
  */
-export function buildBudgetWarning(summary: BudgetSummary): string | null {
+export interface BuildBudgetWarningOptions {
+  /**
+   * Datum(e) der gerade angelegten Termine im Format `YYYY-MM-DD`. Wird nur
+   * für die Cap-Auswertung benötigt: liegt kein Termin im laufenden Monat,
+   * wird der Cap-Hinweis unterdrückt (Cap betrifft nur den aktuellen Monat).
+   * Wenn das Feld fehlt, wird der Cap-Hinweis konservativ gefeuert.
+   */
+  appointmentDates?: readonly string[];
+}
+
+export function buildBudgetWarning(
+  summary: BudgetSummary,
+  opts: BuildBudgetWarningOptions = {},
+): string | null {
   const parts: string[] = [];
 
   if (summary.availableAfterPlannedCents < 0) {
@@ -29,9 +45,15 @@ export function buildBudgetWarning(summary: BudgetSummary): string | null {
   if (summary.monthlyLimitCents != null && summary.currentMonthAvailableCents <= 0) {
     const today = todayISO();
     const [y, m] = today.split("-");
-    parts.push(
-      `Monats-Cap §45b in ${m}/${y} erreicht — keine weiteren Buchungen im laufenden Monat möglich.`
-    );
+    const currentMonthPrefix = `${y}-${m}`;
+    const dates = opts.appointmentDates;
+    const affectsCurrentMonth =
+      dates === undefined || dates.some((d) => d.startsWith(currentMonthPrefix));
+    if (affectsCurrentMonth) {
+      parts.push(
+        `Monats-Cap §45b in ${m}/${y} erreicht — keine weiteren Buchungen im laufenden Monat möglich.`,
+      );
+    }
   }
 
   return parts.length > 0 ? `Achtung: ${parts.join(" ")}` : null;

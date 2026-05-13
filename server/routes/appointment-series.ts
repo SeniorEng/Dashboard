@@ -194,7 +194,9 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(input.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(input.customerId);
-    _budgetWarning = buildBudgetWarning(budgetSummary) ?? undefined;
+    _budgetWarning = buildBudgetWarning(budgetSummary, {
+      appointmentDates: validation.validDates,
+    }) ?? undefined;
   } catch (err) {
     console.warn("[appointment-series] Budget-Warnung fehlgeschlagen:", err);
   }
@@ -627,7 +629,9 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(series.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(series.customerId);
-    _budgetWarning = buildBudgetWarning(budgetSummary) ?? undefined;
+    _budgetWarning = buildBudgetWarning(budgetSummary, {
+      appointmentDates: validation.validDates,
+    }) ?? undefined;
   } catch (err) {
     console.warn("[appointment-series] Budget-Warnung fehlgeschlagen:", err);
   }

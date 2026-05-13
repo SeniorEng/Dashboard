@@ -622,7 +622,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(validatedData.customerId);
     const budgetSummary = await budgetLedgerStorage.getBudgetSummary(validatedData.customerId);
-    _warning = buildBudgetWarning(budgetSummary) ?? undefined;
+    _warning = buildBudgetWarning(budgetSummary, { appointmentDates: [validatedData.date] }) ?? undefined;
   } catch (err) {
     console.warn("[appointments] Budget-Warnung fehlgeschlagen:", err);
   }

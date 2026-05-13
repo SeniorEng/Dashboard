@@ -223,10 +223,14 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
     let reason = "";
     if (monthlyCapIsBottleneck) {
-      const today = todayISO();
-      const [y, m] = today.split("-");
+      // Monatslabel aus dem angefragten ?date= ableiten (nicht aus heute),
+      // damit die Anzeige zum tatsächlich geprüften Termindatum passt.
+      const [y, m] = (date ?? todayISO()).split("-");
       const remainingEuro = (summary45b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",");
-      reason = ` Monats-Cap §45b in ${m}/${y} erreicht — noch ${remainingEuro} € buchbar.`;
+      const reachedZero = summary45b.currentMonthAvailableCents <= 0;
+      reason = reachedZero
+        ? ` Monats-Cap §45b in ${m}/${y} erreicht — keine weiteren Buchungen im laufenden Monat möglich.`
+        : ` Durch Monats-Cap §45b in ${m}/${y} begrenzt — noch ${remainingEuro} € buchbar.`;
     }
 
     if (acceptsPrivatePayment) {
