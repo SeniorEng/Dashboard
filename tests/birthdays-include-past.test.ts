@@ -79,3 +79,57 @@ describe("daysUntilBirthdayWithPast: Schalttag (29. Februar)", () => {
     expect(result).toBeGreaterThan(0);
   });
 });
+
+describe("daysUntilBirthdayWithPast: createdAt-Filter (Task #430)", () => {
+  beforeEach(() => {
+    freezeTime("2026-05-13T12:00:00");
+  });
+  afterEach(() => {
+    thawTime();
+  });
+
+  it("(a) Geburtstag dieses Jahres lag VOR createdAt → rollt ins nächste Jahr (nicht überfällig)", () => {
+    // Person am 04.04.2026 angelegt, Geburtstag 01.01. → 01.01.2026 lag vor Anlegedatum
+    const createdAt = new Date(2026, 3, 4); // 04.04.2026
+    const result = daysUntilBirthdayWithPast("1950-01-01", 365, createdAt);
+    expect(result).toBeGreaterThan(0);
+    // Forward-Wert: bis 01.01.2027
+    expect(result).toBeGreaterThan(200);
+  });
+
+  it("(b) Geburtstag NACH createdAt im selben Jahr → unverändert überfällig", () => {
+    // Person am 01.04.2026 angelegt, Geburtstag 12.05. → 12.05.2026 lag nach Anlegedatum
+    const createdAt = new Date(2026, 3, 1);
+    const result = daysUntilBirthdayWithPast("1950-05-12", 365, createdAt);
+    expect(result).toBe(-1);
+  });
+
+  it("(c) createdAt liegt in einem Vorjahr → unverändert überfällig erlaubt", () => {
+    const createdAt = new Date(2024, 6, 15); // 15.07.2024
+    const result = daysUntilBirthdayWithPast("1950-01-01", 365, createdAt);
+    expect(result).toBe(-132);
+  });
+
+  it("(c2) Ohne createdAt-Parameter → unverändert (Backwards-Compatibility)", () => {
+    expect(daysUntilBirthdayWithPast("1950-01-01", 365)).toBe(-132);
+  });
+
+  it("(d) 29.02.-Geburtstag, createdAt im März (nach 28.02.) → keine Rückmeldung als überfällig", () => {
+    // 2026 ist kein Schaltjahr → 29.02. fällt auf 28.02.2026
+    // createdAt = 05.03.2026 → 28.02.2026 lag vor Anlegedatum
+    const createdAt = new Date(2026, 2, 5); // 05.03.2026
+    const result = daysUntilBirthdayWithPast("1948-02-29", 365, createdAt);
+    expect(result).toBeGreaterThan(0);
+  });
+
+  it("createdAt als ISO-String wird ebenfalls korrekt verarbeitet", () => {
+    const result = daysUntilBirthdayWithPast("1950-01-01", 365, "2026-04-04");
+    expect(result).toBeGreaterThan(200);
+  });
+
+  it("createdAt = heute → Geburtstag, der heute war, gilt nicht als überfällig (war vor Anlegung möglich)", () => {
+    // Edge-Case: Person heute (13.05.2026) angelegt, Geburtstag heute (13.05.) → diff = 0, nicht überfällig sowieso
+    const createdAt = new Date(2026, 4, 13);
+    expect(daysUntilBirthdayWithPast("1950-05-13", 365, createdAt)).toBe(0);
+  });
+});

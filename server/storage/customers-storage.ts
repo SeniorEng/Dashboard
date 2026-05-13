@@ -197,7 +197,7 @@ export async function getCustomersByIds(ids: number[]): Promise<Customer[]> {
   return await db.select().from(customers).where(inArray(customers.id, ids));
 }
 
-export async function getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null }[]> {
+export async function getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; createdAt: Date }[]> {
   return await db
     .select({
       id: users.id,
@@ -207,6 +207,7 @@ export async function getActiveEmployeesWithBirthday(): Promise<{ id: number; di
       hausnummer: users.hausnummer,
       plz: users.plz,
       stadt: users.stadt,
+      createdAt: users.createdAt,
     })
     .from(users)
     .where(and(
@@ -215,7 +216,7 @@ export async function getActiveEmployeesWithBirthday(): Promise<{ id: number; di
     ));
 }
 
-export async function getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null }[]> {
+export async function getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null; createdAt: Date }[]> {
   return await db
     .select({
       id: customers.id,
@@ -228,6 +229,7 @@ export async function getActiveCustomersWithBirthday(): Promise<{ id: number; na
       primaryEmployeeId: customers.primaryEmployeeId,
       backupEmployeeId: customers.backupEmployeeId,
       backupEmployeeId2: customers.backupEmployeeId2,
+      createdAt: customers.createdAt,
     })
     .from(customers)
     .where(and(isNotNull(customers.geburtsdatum), isNull(customers.deletedAt)));

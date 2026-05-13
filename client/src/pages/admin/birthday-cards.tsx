@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Gift, Check } from "lucide-react";
+import { ArrowLeft, Loader2, Gift, Check, CalendarClock } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
@@ -124,6 +124,22 @@ export default function AdminBirthdayCards() {
 
   const stats = useMemo(() => computeBirthdayStats(enrichedBirthdays), [enrichedBirthdays]);
 
+  const nextYearCount = useMemo(() => {
+    return birthdays.filter(b => getBirthdayYear(b) === currentYear + 1).length;
+  }, [birthdays, currentYear]);
+
+  const showYearEndHint = useMemo(() => {
+    if (selectedYear !== currentYear) return false;
+    if (nextYearCount === 0) return false;
+    const today = new Date();
+    const month = today.getMonth(); // 0-indexed: 11 = Dezember, 0 = Januar
+    const day = today.getDate();
+    // Fenster: 15.12. – 15.01.
+    if (month === 11 && day >= 15) return true;
+    if (month === 0 && day <= 15) return true;
+    return false;
+  }, [selectedYear, currentYear, nextYearCount]);
+
   const isLoading = loadingBirthdays || loadingCards1 || loadingCards2 || loadingCards3;
 
   function handleToggle(entry: BirthdayEntry & { cardSent: boolean; birthdayYear: number }) {
@@ -190,6 +206,27 @@ export default function AdminBirthdayCards() {
             </CardContent>
           </Card>
         </div>
+
+        {showYearEndHint && (
+          <Card className="mb-4 border-teal-200 bg-teal-50/50" data-testid="banner-next-year-hint">
+            <CardContent className="p-4 flex items-center gap-3">
+              <CalendarClock className={`${iconSize.md} text-teal-700 shrink-0`} />
+              <div className="flex-1 text-sm">
+                Im Jahr <span className="font-semibold">{currentYear + 1}</span> stehen
+                bereits <span className="font-semibold" data-testid="text-next-year-count">{nextYearCount}</span> weitere
+                Geburtstage an.
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedYear(currentYear + 1)}
+                data-testid="button-switch-next-year"
+              >
+                Zu {currentYear + 1} wechseln
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <Select value={String(selectedYear)} onValueChange={v => setSelectedYear(Number(v))}>

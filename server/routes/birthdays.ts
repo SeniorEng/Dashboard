@@ -24,7 +24,11 @@ const MAX_INCLUDE_PAST_DAYS = 365;
  *   genutzt, inkl. Jahresrollover und Schalttag-Behandlung. So bleiben
  *   Geburtstage am Jahresende/-anfang korrekt sichtbar.
  */
-export function daysUntilBirthdayWithPast(birthDate: string, includePastDays: number): number {
+export function daysUntilBirthdayWithPast(
+  birthDate: string,
+  includePastDays: number,
+  createdAt?: Date | string | null,
+): number {
   const forward = calculateDaysUntilBirthday(birthDate);
   if (includePastDays > 0) {
     const today = parseLocalDate(todayISO());
@@ -38,6 +42,17 @@ export function daysUntilBirthdayWithPast(birthDate: string, includePastDays: nu
     // Zukunft. So bleiben Geburtstage am Jahreswechsel (z.B. Jan 5 am
     // 20. Dez = +16) korrekt vorwärts gerichtet.
     if (diffThisYear < 0 && -diffThisYear <= includePastDays && -diffThisYear < forward) {
+      // Task #430: Lag der diesjährige Geburtstag _vor_ dem Anlegedatum
+      // (Person war zu dem Zeitpunkt noch nicht im System), nicht als
+      // überfällig melden — erst im Folgejahr listen.
+      if (createdAt) {
+        const created = typeof createdAt === "string"
+          ? parseLocalDate(createdAt)
+          : new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate());
+        if (thisYearBirthday < created) {
+          return forward;
+        }
+      }
       return diffThisYear;
     }
   }
@@ -154,7 +169,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
 
     for (const emp of activeEmployees) {
       if (!emp.geburtsdatum) continue;
-      const daysUntil = daysUntilBirthdayWithPast(emp.geburtsdatum, includePastDays);
+      const daysUntil = daysUntilBirthdayWithPast(emp.geburtsdatum, includePastDays, emp.createdAt);
       pushIfInWindow(daysUntil, () => ({
         id: emp.id,
         type: "employee",
@@ -168,7 +183,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
 
     for (const cust of activeCustomers) {
       if (!cust.geburtsdatum) continue;
-      const daysUntil = daysUntilBirthdayWithPast(cust.geburtsdatum, includePastDays);
+      const daysUntil = daysUntilBirthdayWithPast(cust.geburtsdatum, includePastDays, cust.createdAt);
       pushIfInWindow(daysUntil, () => ({
         id: cust.id,
         type: "customer",
@@ -182,7 +197,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
   } else {
     const myBirthday = user.geburtsdatum;
     if (myBirthday) {
-      const daysUntil = daysUntilBirthdayWithPast(myBirthday, includePastDays);
+      const daysUntil = daysUntilBirthdayWithPast(myBirthday, includePastDays, user.createdAt);
       pushIfInWindow(daysUntil, () => ({
         id: user.id,
         type: "employee",
@@ -200,7 +215,7 @@ router.get("/", asyncHandler("Geburtstage konnten nicht geladen werden", async (
 
       for (const cust of assignedCustomers) {
         if (!cust.geburtsdatum) continue;
-        const daysUntil = daysUntilBirthdayWithPast(cust.geburtsdatum, includePastDays);
+        const daysUntil = daysUntilBirthdayWithPast(cust.geburtsdatum, includePastDays, cust.createdAt);
         pushIfInWindow(daysUntil, () => ({
           id: cust.id,
           type: "customer",
