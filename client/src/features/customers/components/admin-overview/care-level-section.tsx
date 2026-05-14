@@ -82,7 +82,13 @@ export function CareLevelSection({ customer, customerId, editingSection, setEdit
                   </SelectTrigger>
                   <SelectContent>
                     {PFLEGEGRAD_SELECT_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      <SelectItem
+                        key={opt.value}
+                        value={opt.value}
+                        data-testid={`select-new-pflegegrad-option-${opt.value}`}
+                      >
+                        {opt.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

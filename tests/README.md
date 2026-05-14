@@ -171,6 +171,93 @@ Die Helfer rufen den nur unter `NODE_ENV=test` registrierten Endpoint
 `GET /api/test/outbox` bzw. `DELETE /api/test/outbox` auf. In Dev/Production
 sind diese Routen nicht eingehängt.
 
+## E2E Smoke-Suite (Playwright, Edit-Persistence Round-Trips)
+
+Für die zehn wichtigsten Bearbeitungsformulare prüft eine Playwright-Suite den
+Round-Trip „Wert ändern → speichern → vollständiger Reload → Wert muss
+persistiert sein". Damit fangen wir die ganze Bug-Klasse „klicke speichern,
+nach dem Reload ist der alte Wert wieder da" automatisiert ab (Task #428).
+
+**Aufruf:**
+
+```bash
+# Server muss laufen (Workflow „Start application").
+TEST_USER_EMAIL='admin@…' TEST_USER_PASSWORD='passwort' npm run test:e2e:smoke
+```
+
+Ohne `TEST_USER_EMAIL` / `TEST_USER_PASSWORD` werden alle Smoke-Tests
+übersprungen, damit CI-Läufe ohne Secrets nicht rot werden.
+
+**Abdeckung (`e2e/smoke/edit-persistence.spec.ts`):**
+
+1. Kunde — Adresse
+2. Kunde — Pflegegrad
+3. Kunde — Notfallkontakt anlegen
+4. Mitarbeiter — Stammdaten (Telefon)
+5. Mitarbeiter — Verfügbarkeit (Wochenstunden)
+6. Termin — Zeit **+ Mitarbeiter-Wechsel** (zwei Felder im selben Save,
+   `assignedEmployeeId` wird per API verifiziert)
+7. Termin dokumentieren — Service-Detail (Schritt 1) **und** Travel-Notiz
+   (Schritt 2): Wizard wird komplett durchlaufen, beide Werte werden nach
+   Re-Navigation per Server-API als persistiert geprüft
+8. Lead — Status + Notiz (Notiz-Persistenz über `[data-testid^='note-']`,
+   Status zusätzlich per API)
+9. Budget-Einstellungen — §45a Monats-Cap **und** §39/§42a-Jahrestopf
+   (zwei unterschiedliche Pötte in einem Save, beide werden nach Reload
+   geprüft)
+10. Firmenstammdaten — Telefon (idempotent: Originalwert wird im `finally`
+    wiederhergestellt)
+
+**Architektur-Constraint:** Jeder Test erzwingt nach dem Save ein
+`page.reload()` oder eine Re-Navigation. Frontend-State allein zählt nicht.
+
+**CI-Anbindung:** Die Suite läuft über den dedizierten Workflow `e2e-smoke`
+(`npm run test:e2e:smoke`). Voraussetzungen:
+
+- `TEST_USER_EMAIL` + `TEST_USER_PASSWORD_INTERNAL` (Login-Credentials des
+  Test-Admin-Accounts).
+- App muss auf `http://localhost:5000` laufen (Workflow `Start application`).
+- Chromium aus dem Nix-Store wird automatisch via
+  `playwright.config.ts` gepickt (`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`
+  überschreibt den Default).
+
+**Neues Bearbeitungsformular?** Pflicht: einen Round-Trip-Test ergänzen.
+Helper-Übersicht (`e2e/helpers/round-trip.ts`):
+
+- `expectFieldPersisted` (alias `fillAndExpectPersisted`) — Inputs, Textareas,
+  Date-Picker (alles, was `.fill()` unterstützt).
+- `selectAndExpectPersisted` — Radix `<Select>` mit Trigger- und
+  Option-Testid (siehe Pattern `select-foo` + `select-foo-option-${value}`).
+- `toggleAndExpectPersisted` — Switch/Checkbox via `data-testid`,
+  prüft `data-state` nach Reload.
+- `clickSaveAndWait` — Low-Level-Bauteil für Custom-Flows (Wizards etc.),
+  matcht das tatsächliche Save-Endpoint per `expectSave`.
+
+Beispiel — Inputs in zwei Zeilen:
+
+```ts
+import { expectFieldPersisted } from "../helpers/round-trip";
+
+await expectFieldPersisted({
+  page,
+  openUrl: `/admin/customers/${customer.id}`,
+  prepareEdit: async (p) =>
+    p.locator("[data-testid='button-edit-kontakt']").click(),
+  fieldTestId: "input-strasse",
+  newValue: "Neue Straße 42",
+  saveTestId: "button-save-kontakt",
+  // Strongly recommended: matche das echte Save-Endpoint, damit Hintergrund-
+  // Requests (z.B. ein paralleler Refetch) nicht fälschlich den Save „erfüllen".
+  expectSave: { url: `/api/admin/customers/${customer.id}`, methods: ["PATCH"] },
+  expectVisibleAfter: "link-address",
+});
+```
+
+Setup-Helper (`e2e/helpers/test-data.ts`) legen Kunden/Mitarbeiter/Termine/
+Leads via API an, damit jeder Test seinen eigenen ephemeren Datenbestand hat.
+Auth läuft über `loginApiSession()` (`e2e/helpers/auth.ts`) und überträgt die
+Cookies auf den Browser-Context.
+
 ## Test-Datenisolation
 
 Damit Test-Suites unabhängig voneinander und reihenfolge-stabil laufen, gilt

@@ -71,6 +71,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Pre-Publish Backup Runbook**: `docs/pre-publish-backup-runbook.md`
 - **Test Coverage Matrix**: `tests/README.md`
 - **Drift-Detektoren "Anzeige vs. Buchung"** (Task #427): `tests/helpers/equality-check.ts` plus `tests/equality/*` (5 Hotspots: §45b-Cap, Pflegegrad-Preise, Reisekosten, Pro-Rata-Urlaub, Monatsabschluss-Cutoff) und `tests/architecture/calculations-in-shared.test.ts` (verhindert neue `calculate*`/`compute*`-Funktionen außerhalb `shared/domain/`).
+- **E2E Edit-Persistence Smoke-Suite**: `e2e/smoke/edit-persistence.spec.ts` (Playwright, `npm run test:e2e:smoke`). Jedes neue Bearbeitungsformular braucht einen Round-Trip-Test über `expectFieldPersisted` (`e2e/helpers/round-trip.ts`). Pflicht: nach dem Save vollständiger `page.reload()`, sonst wird nur Frontend-State getestet.
 - **Deployment Log**: `docs/deployment-log.md`
 - **Knip Configuration**: `knip.json` (for dead code detection)
 - **Tailwind Config**: `tailwind.config.ts`

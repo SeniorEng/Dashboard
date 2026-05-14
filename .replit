@@ -33,7 +33,15 @@ args = "Start application"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
+args = "typecheck"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
 args = "test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "e2e-smoke"
 
 [[workflows.workflow]]
 name = "Start application"
@@ -48,15 +56,37 @@ waitForPort = 5000
 outputType = "webview"
 
 [[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run check"
+
+[[workflows.workflow]]
 name = "test"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run check && npx vitest run"
+args = "npx vitest run"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "e2e-smoke"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run test:e2e:smoke"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 mockupState = "FULLSTACK"

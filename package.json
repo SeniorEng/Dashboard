@@ -11,7 +11,9 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
-    "lint": "eslint client/src --max-warnings 0"
+    "lint": "eslint client/src --max-warnings 0",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
