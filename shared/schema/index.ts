@@ -1,4 +1,5 @@
 export * from "./common";
+export * from "./encrypted-columns";
 export * from "./users";
 export * from "./customers";
 export * from "./insurance";

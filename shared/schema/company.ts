@@ -1,6 +1,7 @@
 import { pgTable, text, integer, serial, boolean, real, index } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp, optionalGermanPhoneSchema, optionalInternationalPhoneSchema } from "./common";
+import { encryptedText } from "./encrypted-columns";
 import { users } from "./users";
 import { customers } from "./customers";
 import { generatedDocuments } from "./documents";
@@ -31,24 +32,24 @@ export const companySettings = pgTable("company_settings", {
   smtpHost: text("smtp_host"),
   smtpPort: text("smtp_port"),
   smtpUser: text("smtp_user"),
-  smtpPass: text("smtp_pass"),
+  smtpPass: encryptedText("smtp_pass"),
   smtpFromEmail: text("smtp_from_email"),
   smtpFromName: text("smtp_from_name"),
   smtpSecure: boolean("smtp_secure").notNull().default(false),
   letterxpressUsername: text("letterxpress_username"),
-  letterxpressApiKey: text("letterxpress_api_key"),
+  letterxpressApiKey: encryptedText("letterxpress_api_key"),
   minijobEarningsLimitCents: integer("minijob_earnings_limit_cents").notNull().default(55600),
   letterxpressTestMode: boolean("letterxpress_test_mode").notNull().default(false),
   qontoLogin: text("qonto_login"),
-  qontoSecretKey: text("qonto_secret_key"),
+  qontoSecretKey: encryptedText("qonto_secret_key"),
   qontoIban: text("qonto_iban"),
-  whatsappAccessToken: text("whatsapp_access_token"),
+  whatsappAccessToken: encryptedText("whatsapp_access_token"),
   whatsappPhoneNumberId: text("whatsapp_phone_number_id"),
   whatsappBusinessAccountId: text("whatsapp_business_account_id"),
   whatsappFromOrService: text("whatsapp_from_or_service"),
   whatsappEnabled: boolean("whatsapp_enabled").notNull().default(false),
   twilioAccountSid: text("twilio_account_sid"),
-  twilioAuthToken: text("twilio_auth_token"),
+  twilioAuthToken: encryptedText("twilio_auth_token"),
   twilioPhoneNumber: text("twilio_phone_number"),
   leadCallBridgePhone: text("lead_call_bridge_phone"),
   leadCallBridgeEnabled: boolean("lead_call_bridge_enabled").notNull().default(false),

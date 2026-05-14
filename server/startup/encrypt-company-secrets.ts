@@ -1,11 +1,7 @@
 import { db } from "../lib/db";
 import { encryptSecret, isEncrypted, isEncryptionConfigured } from "../lib/crypto";
 import { log } from "../lib/log";
-
-const SENSITIVE_FIELDS = [
-  "smtp_pass", "letterxpress_api_key",
-  "qonto_secret_key", "whatsapp_access_token", "twilio_auth_token",
-];
+import { getSensitivePropsForTable } from "../lib/encrypted-row";
 
 export async function encryptExistingSecrets(): Promise<void> {
   if (!isEncryptionConfigured()) {
@@ -18,13 +14,13 @@ export async function encryptExistingSecrets(): Promise<void> {
   if (rows.length === 0) return;
 
   const row = rows[0] as Record<string, unknown>;
+  const sensitiveProps = getSensitivePropsForTable(companySettings);
   const updates: Record<string, string> = {};
 
-  for (const dbCol of SENSITIVE_FIELDS) {
-    const camelKey = dbCol.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-    const val = row[camelKey];
+  for (const prop of sensitiveProps) {
+    const val = row[prop];
     if (typeof val === "string" && val && !isEncrypted(val)) {
-      updates[camelKey] = encryptSecret(val);
+      updates[prop] = encryptSecret(val);
     }
   }
 

@@ -16,38 +16,7 @@ import {
 import type { AppointmentWithCustomer } from "@shared/types";
 import { eq } from "drizzle-orm";
 import { db } from "./lib/db";
-import { encryptSecret, decryptSecret, isEncryptionConfigured } from "./lib/crypto";
-
-const SENSITIVE_COMPANY_FIELDS = [
-  "smtpPass", "letterxpressApiKey",
-  "qontoSecretKey", "whatsappAccessToken", "twilioAuthToken",
-] as const;
-
-function decryptCompanySecrets<T extends Record<string, unknown>>(settings: T): T {
-  if (!isEncryptionConfigured()) return settings;
-  const result = { ...settings };
-  for (const field of SENSITIVE_COMPANY_FIELDS) {
-    const val = result[field];
-    if (typeof val === "string" && val) {
-      (result as Record<string, unknown>)[field] = decryptSecret(val);
-    }
-  }
-  return result;
-}
-
-function encryptCompanySecrets<T extends Record<string, unknown>>(data: T): T {
-  if (!isEncryptionConfigured()) return data;
-  const result = { ...data };
-  for (const field of SENSITIVE_COMPANY_FIELDS) {
-    if (field in result) {
-      const val = result[field];
-      if (typeof val === "string" && val) {
-        (result as Record<string, unknown>)[field] = encryptSecret(val);
-      }
-    }
-  }
-  return result;
-}
+import { decryptRow, encryptRow } from "./lib/encrypted-row";
 
 import * as customersStorage from "./storage/customers-storage";
 import * as appointmentsStorage from "./storage/appointments-storage";
@@ -301,7 +270,7 @@ class DatabaseStorage implements IStorage {
     const raw = existing.length > 0
       ? existing[0]
       : (await db.insert(companySettings).values({}).returning())[0];
-    const result = decryptCompanySecrets(raw);
+    const result = decryptRow(companySettings, raw);
     this.companySettingsCache = {
       data: result,
       expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
@@ -312,11 +281,11 @@ class DatabaseStorage implements IStorage {
   async updateCompanySettings(data: Partial<CompanySettings>, userId: number): Promise<CompanySettings> {
     this.companySettingsCache = null;
     const { companySettings } = await import("@shared/schema");
-    const encryptedData = encryptCompanySecrets(data);
+    const encryptedData = encryptRow(companySettings, data);
     const existing = await db.select().from(companySettings).limit(1);
     if (existing.length === 0) {
       const [created] = await db.insert(companySettings).values({ ...encryptedData, updatedByUserId: userId }).returning();
-      const decrypted = decryptCompanySecrets(created);
+      const decrypted = decryptRow(companySettings, created);
       this.companySettingsCache = {
         data: decrypted,
         expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
@@ -328,7 +297,7 @@ class DatabaseStorage implements IStorage {
       .set({ ...encryptedData, updatedAt: new Date(), updatedByUserId: userId })
       .where(eq(companySettings.id, existing[0].id))
       .returning();
-    const decrypted = decryptCompanySecrets(updated);
+    const decrypted = decryptRow(companySettings, updated);
     this.companySettingsCache = {
       data: decrypted,
       expiresAt: Date.now() + DatabaseStorage.COMPANY_SETTINGS_TTL_MS,
