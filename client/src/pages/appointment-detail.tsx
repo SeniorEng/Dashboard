@@ -32,9 +32,9 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { 
   formatDuration, 
-  canModifyAppointment,
   type AppointmentStatus
 } from "@shared/types";
+import { useAppointmentPolicy } from "@/features/appointments/use-appointment-policy";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 
@@ -190,7 +190,15 @@ export default function AppointmentDetail() {
     );
   }
 
-  const canModify = canModifyAppointment(appointment.status as AppointmentStatus);
+  // Berechtigungen kommen aus shared/policies/appointments — identisch zum Backend.
+  // Per-Action-Gating: jede Schaltfläche prüft ihre eigene Policy-Entscheidung,
+  // damit z. B. ein Teamleiter, der editieren aber nicht löschen darf, den
+  // Bearbeiten-Button trotzdem sieht.
+  const policy = useAppointmentPolicy(user, appointment);
+  const canEdit = policy?.edit.allowed ?? false;
+  const canDelete = policy?.delete.allowed ?? false;
+  const canDocument = policy?.document.allowed ?? false;
+  const canReopen = policy?.reopen.allowed ?? false;
   const isErstberatung = appointment.appointmentType === "Erstberatung";
 
   const services = appointmentServices || [];
@@ -579,13 +587,14 @@ export default function AppointmentDetail() {
         </SectionCard>
       )}
 
-      {appointment.status !== "completed" && (
+      {canDocument && (
         <div className="mt-6">
-          <Button 
+          <Button
             className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={() => setLocation(`/document-appointment/${appointment.id}`)}
             data-testid="button-document"
+            title={policy?.document.allowed ? undefined : policy?.document.reason}
           >
             <FileText className={`${iconSize.sm} mr-2`} />
             Jetzt dokumentieren
@@ -609,7 +618,7 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {isCompleted && !appointment.isLocked && (!appointment.isMonthClosed || user?.isAdmin) && (
+      {isCompleted && canReopen && (
         <div className="mt-6">
           <Button 
             variant="outline"
@@ -624,36 +633,42 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {canModify && (
+      {(canEdit || canDelete) && (
         <div className="flex gap-3 mt-6">
-          <Button 
-            variant="outline" 
-            className="flex-1"
-            onClick={() => setLocation(`/edit-appointment/${appointment.id}`)}
-            data-testid="button-edit"
-          >
-            <Pencil className={`${iconSize.sm} mr-2`} />
-            Bearbeiten
-          </Button>
-          <Button 
-            variant="outline" 
-            className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => {
-              if (seriesId) {
-                setShowSeriesDeleteDialog(true);
-              } else {
-                setShowDeleteDialog(true);
-              }
-            }}
-            data-testid="button-delete"
-          >
-            <Trash2 className={`${iconSize.sm} mr-2`} />
-            Löschen
-          </Button>
+          {canEdit && (
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setLocation(`/edit-appointment/${appointment.id}`)}
+              data-testid="button-edit"
+              title={policy?.edit.reason}
+            >
+              <Pencil className={`${iconSize.sm} mr-2`} />
+              Bearbeiten
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              variant="outline"
+              className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => {
+                if (seriesId) {
+                  setShowSeriesDeleteDialog(true);
+                } else {
+                  setShowDeleteDialog(true);
+                }
+              }}
+              data-testid="button-delete"
+              title={policy?.delete.reason}
+            >
+              <Trash2 className={`${iconSize.sm} mr-2`} />
+              Löschen
+            </Button>
+          )}
         </div>
       )}
 
-      {isCompleted && user?.isAdmin && (
+      {isCompleted && canDelete && (
         <div className="mt-6">
           <Button
             variant="outline"

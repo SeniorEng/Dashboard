@@ -45,8 +45,78 @@ import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers, users, userRoles } from "@shared/schema";
 import { customerContracts } from "@shared/schema/contracts";
 import { eq, and, or, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
+import {
+  canViewAppointment,
+  canCreateAppointment as policyCanCreate,
+  canEditAppointment as policyCanEdit,
+  canDeleteAppointment as policyCanDelete,
+  canDocumentAppointment as policyCanDocument,
+  canReopenAppointment as policyCanReopen,
+  type PolicyUser,
+  type PolicyAppointment,
+} from "@shared/policies/appointments";
+import type { AppointmentStatus } from "@shared/domain/appointments";
 
 const router = Router();
+
+/**
+ * Adapter: Express-User → PolicyUser.
+ * Admin/SuperAdmin sind absichtlich KEINE Teamleitungen (vgl. server/lib/team-lead.ts).
+ */
+function toPolicyUser(user: {
+  id: number;
+  isAdmin: boolean;
+  isSuperAdmin?: boolean | null;
+  isTeamLead?: boolean | null;
+  isActive?: boolean | null;
+  isAnonymized?: boolean | null;
+  roles?: readonly string[];
+}): PolicyUser {
+  const adminLike = !!user.isAdmin || !!user.isSuperAdmin;
+  return {
+    id: user.id,
+    isAdmin: !!user.isAdmin,
+    isSuperAdmin: !!user.isSuperAdmin,
+    isTeamLead: !adminLike && !user.isAnonymized && !!user.isTeamLead,
+    isActive: user.isActive !== false,
+    roles: user.roles ?? [],
+  };
+}
+
+/** Adapter: DB-Termin → PolicyAppointment. */
+function toPolicyAppointment(
+  appt: {
+    assignedEmployeeId: number | null;
+    performedByEmployeeId: number | null;
+    customerId: number | null;
+    prospectId?: number | null;
+    status: string;
+    date: string;
+    appointmentType?: string | null;
+    actualStart?: string | null;
+    actualEnd?: string | null;
+    signatureData?: string | null;
+  },
+  flags: { isLocked: boolean; isMonthClosed: boolean },
+): PolicyAppointment {
+  const status = appt.status as AppointmentStatus;
+  const isStarted = !!appt.actualStart || !!appt.actualEnd || status !== "scheduled";
+  return {
+    assignedEmployeeId: appt.assignedEmployeeId,
+    performedByEmployeeId: appt.performedByEmployeeId,
+    customerId: appt.customerId,
+    prospectId: appt.prospectId ?? null,
+    status,
+    date: appt.date,
+    appointmentType: appt.appointmentType ?? null,
+    isStarted,
+    isLocked: flags.isLocked,
+    isMonthClosed: flags.isMonthClosed,
+    hasSignature: !!appt.signatureData,
+  };
+}
+
+export { toPolicyUser, toPolicyAppointment };
 
 async function checkEmployeeBlocker(
   employeeId: number,
@@ -83,33 +153,58 @@ function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
 }
 
 async function checkCustomerAccess(
-  user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean },
+  user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean; isAnonymized?: boolean; roles?: readonly string[] },
   customerId: number | null,
   res: Response,
   appointmentEmployeeIds?: { assignedEmployeeId?: number | null; performedByEmployeeId?: number | null }
 ): Promise<boolean> {
-  // Teamleiter besitzen firmenweit dieselbe Sicht wie Admins (flacher Marker).
-  if (user.isAdmin || isTeamLead(user as Parameters<typeof isTeamLead>[0])) return true;
-
-  if (customerId === null) {
-    if (appointmentEmployeeIds &&
-        (appointmentEmployeeIds.assignedEmployeeId === user.id ||
-         appointmentEmployeeIds.performedByEmployeeId === user.id)) {
-      return true;
-    }
-    sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
-    return false;
+  // Sicht-Policy: shared/policies/appointments.canViewAppointment.
+  // Hier zusätzlich der DB-Lookup für Kundenzuordnung (Policy bleibt pur).
+  const policyUser = toPolicyUser(user);
+  let isAssignedToCustomer = false;
+  if (customerId !== null && !policyUser.isAdmin && !policyUser.isSuperAdmin && !policyUser.isTeamLead) {
+    const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
+    isAssignedToCustomer = assignedCustomerIds.includes(customerId);
   }
-  const assignedCustomerIds = await storage.getAssignedCustomerIds(user.id);
-  if (assignedCustomerIds.includes(customerId)) return true;
-
-  sendForbidden(res, "ACCESS_DENIED", "Sie haben keinen Zugriff auf diesen Termin.");
+  const decision = canViewAppointment(
+    policyUser,
+    {
+      assignedEmployeeId: appointmentEmployeeIds?.assignedEmployeeId ?? null,
+      performedByEmployeeId: appointmentEmployeeIds?.performedByEmployeeId ?? null,
+      customerId,
+      status: "scheduled",
+      date: "1970-01-01",
+      isStarted: false,
+      isLocked: false,
+      isMonthClosed: false,
+      hasSignature: false,
+    },
+    { isAssignedToCustomer },
+  );
+  if (decision.allowed) return true;
+  sendForbidden(res, "ACCESS_DENIED", decision.reason);
   return false;
 }
 
-export async function checkAppointmentWriteAccess(user: { id: number; isAdmin: boolean }, appointment: { assignedEmployeeId: number | null; customerId: number | null }, res: Response): Promise<boolean> {
-  if (user.isAdmin) return true;
-  if (appointment.assignedEmployeeId !== user.id) {
+/**
+ * Schreibrecht für Termin-Mutationen, die nur dem durchführenden
+ * Mitarbeiter (oder Admin) erlaubt sind: start/end/reopen/document.
+ * Delegiert an `canDocumentAppointment` ohne Lock/Monatsabschluss-Flags
+ * (die werden weiterhin in den Routen separat geprüft mit den frischen DB-Werten).
+ */
+export async function checkAppointmentWriteAccess(
+  user: { id: number; isAdmin: boolean; isSuperAdmin?: boolean | null; isTeamLead?: boolean | null; isActive?: boolean | null; isAnonymized?: boolean | null; roles?: readonly string[] },
+  appointment: { assignedEmployeeId: number | null; performedByEmployeeId?: number | null; customerId: number | null },
+  res: Response,
+): Promise<boolean> {
+  const policyUser = toPolicyUser(user);
+  // Wer-Frage: Admin oder zugewiesener Mitarbeiter (Teamleiter NICHT —
+  // dokumentieren ist eine persönliche Tätigkeit und darf nicht im Namen
+  // anderer durchgeführt werden).
+  const adminLike = policyUser.isAdmin || policyUser.isSuperAdmin;
+  const isAssigned = appointment.assignedEmployeeId === user.id
+    || appointment.performedByEmployeeId === user.id;
+  if (!adminLike && !isAssigned) {
     sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
     return false;
   }
@@ -123,14 +218,16 @@ export async function checkAppointmentWriteAccess(user: { id: number; isAdmin: b
  * an die jeweiligen Sperren (gestartet, locked, Monat geschlossen) gebunden.
  */
 async function checkAppointmentReassignAccess(
-  user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean },
+  user: { id: number; isAdmin: boolean; isActive?: boolean; isTeamLead?: boolean; isSuperAdmin?: boolean; isAnonymized?: boolean; roles?: readonly string[] },
   appointment: { assignedEmployeeId: number | null; performedByEmployeeId?: number | null; customerId: number | null },
   res: Response,
 ): Promise<boolean> {
-  if (user.isAdmin) return true;
-  if (isTeamLead(user as Parameters<typeof isTeamLead>[0])) return true;
-  if (appointment.assignedEmployeeId === user.id) return true;
-
+  const policyUser = toPolicyUser(user);
+  const adminLike = policyUser.isAdmin || policyUser.isSuperAdmin;
+  const lead = policyUser.isTeamLead;
+  const isAssigned = appointment.assignedEmployeeId === user.id
+    || appointment.performedByEmployeeId === user.id;
+  if (adminLike || lead || isAssigned) return true;
   sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
   return false;
 }
@@ -472,30 +569,36 @@ router.get("/:id", asyncHandler(ErrorMessages.fetchAppointmentFailed, async (req
 router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed, async (req, res) => {
   const validatedData = insertKundenterminSchema.parse(req.body);
   const user = req.user!;
-  
-  if (isWeekend(validatedData.date)) {
-    return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
-  }
 
-  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
-  let _warning: string | undefined;
-  if (farPastDate) {
-    if (!user.isAdmin) {
-      return sendBadRequest(res, "Termine können nicht mehr als 3 Monate in der Vergangenheit erstellt werden.");
-    }
-    _warning = "Achtung: Dieser Termin liegt mehr als 3 Monate in der Vergangenheit.";
-  }
-  
   const customer = await storage.getCustomer(validatedData.customerId);
   if (!customer) {
     return sendNotFound(res, "Kunde nicht gefunden.");
   }
 
-  if (!user.isSuperAdmin) {
-    const checkEmpId = validatedData.assignedEmployeeId || user.id;
-    if (await timeTrackingStorage.isMonthClosed(checkEmpId, validatedData.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Neue Termine in diesem Zeitraum sind nur noch durch die Geschäftsführung möglich.");
-    }
+  // Wer wird der Termin zugeordnet? Brauchen wir vorab für isMonthClosed-Check.
+  const forOtherEmployee = !!(validatedData.assignedEmployeeId
+    && validatedData.assignedEmployeeId !== user.id);
+  const checkEmpId = validatedData.assignedEmployeeId || user.id;
+  const monthClosed = await timeTrackingStorage.isMonthClosed(checkEmpId, validatedData.date);
+  const isAssignedToCustomer = (await storage.getCurrentlyAssignedCustomerIds(user.id))
+    .includes(validatedData.customerId);
+
+  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
+  const decision = policyCanCreate(toPolicyUser(user), {
+    date: validatedData.date,
+    isWeekend: isWeekend(validatedData.date),
+    isHoliday: false,
+    isFarPast: farPastDate,
+    isMonthClosed: monthClosed,
+    appointmentType: "Kundentermin",
+    isAssignedToCustomer,
+    forOtherEmployee,
+  });
+  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED", { kind: "create" });
+
+  let _warning: string | undefined;
+  if (farPastDate && (user.isAdmin || user.isSuperAdmin)) {
+    _warning = "Achtung: Dieser Termin liegt mehr als 3 Monate in der Vergangenheit.";
   }
 
   const currentContract = await customerManagementStorage.getCustomerCurrentContract(validatedData.customerId);
@@ -505,9 +608,6 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   }
 
   let assignedEmployeeId: number;
-  // Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker) und dürfen
-  // Termine im Namen jedes aktiven Mitarbeiters anlegen — unabhängig davon,
-  // ob der Mitarbeiter dem Kunden bereits zugeordnet ist.
   if (user.isAdmin || isTeamLead(user)) {
     if (!validatedData.assignedEmployeeId) {
       return sendBadRequest(res, "Bitte wählen Sie einen Mitarbeiter für diesen Termin aus.");
@@ -527,11 +627,6 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     }
   } else {
     assignedEmployeeId = user.id;
-    
-    const currentCustomerIds = await storage.getCurrentlyAssignedCustomerIds(user.id);
-    if (!currentCustomerIds.includes(validatedData.customerId)) {
-      return sendForbidden(res, "NOT_ASSIGNED", "Sie sind diesem Kunden nicht mehr zugeordnet und können keine neuen Termine erstellen.");
-    }
   }
   
   const serviceIds = validatedData.services.map(s => s.serviceId);
@@ -634,22 +729,28 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
   const validatedData = insertProspectErstberatungSchema.parse(req.body);
   const user = req.user!;
 
-  if (isWeekend(validatedData.date)) {
-    return sendBadRequest(res, "Termine können nicht an Samstagen oder Sonntagen erstellt werden.");
-  }
-
-  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
-  let _warning: string | undefined;
-  if (farPastDate) {
-    if (!user.isAdmin) {
-      return sendBadRequest(res, "Termine können nicht mehr als 3 Monate in der Vergangenheit erstellt werden.");
-    }
-    _warning = "Achtung: Dieser Termin liegt mehr als 3 Monate in der Vergangenheit.";
-  }
-
   const prospect = await prospectStorage.getById(validatedData.prospectId);
   if (!prospect) {
     return sendNotFound(res, "Interessent nicht gefunden");
+  }
+
+  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
+  const checkEmpForMonth = validatedData.assignedEmployeeId || user.id;
+  const monthClosedErst = await timeTrackingStorage.isMonthClosed(checkEmpForMonth, validatedData.date);
+  const erstDecision = policyCanCreate(toPolicyUser(user), {
+    date: validatedData.date,
+    isWeekend: isWeekend(validatedData.date),
+    isHoliday: false,
+    isFarPast: farPastDate,
+    isMonthClosed: monthClosedErst,
+    appointmentType: "Erstberatung",
+    forOtherEmployee: !!(validatedData.assignedEmployeeId && validatedData.assignedEmployeeId !== user.id),
+  });
+  if (!erstDecision.allowed) return denyByPolicy(res, erstDecision, "ACCESS_DENIED", { kind: "create" });
+
+  let _warning: string | undefined;
+  if (farPastDate && (user.isAdmin || user.isSuperAdmin)) {
+    _warning = "Achtung: Dieser Termin liegt mehr als 3 Monate in der Vergangenheit.";
   }
 
   let assignedEmployeeId: number;
@@ -686,12 +787,6 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
     }
   } else {
     assignedEmployeeId = user.id;
-  }
-
-  if (!user.isSuperAdmin) {
-    if (await timeTrackingStorage.isMonthClosed(assignedEmployeeId, validatedData.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Neue Termine in diesem Zeitraum sind nur noch durch die Geschäftsführung möglich.");
-    }
   }
 
   const scheduledEnd = addMinutesToTimeHHMMSS(validatedData.scheduledStart, validatedData.erstberatungDauer);
@@ -771,36 +866,27 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
 router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  
+
   const existingAppointment = await storage.getAppointment(id);
   if (!existingAppointment) {
     return sendNotFound(res, ErrorMessages.appointmentNotFound);
   }
-  
-  if (!await checkAppointmentReassignAccess(req.user!, existingAppointment, res)) return;
-  
-  const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked) {
-    // K8: Whitelist `notes` darf weiterhin geändert werden; alle anderen
-    // Felder brechen die Abrechnungs-Konsistenz und liefern 409 Conflict.
-    const PATCH_LOCK_WHITELIST = new Set(["notes"]);
-    const bodyKeys = Object.keys(req.body || {});
-    const hasProtectedChange = bodyKeys.length === 0
-      || bodyKeys.some((k) => !PATCH_LOCK_WHITELIST.has(k));
-    if (hasProtectedChange) {
-      return sendConflict(
-        res,
-        "APPOINTMENT_LOCKED",
-        "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises. Geschützte Felder können nicht mehr geändert werden — bitte stornieren Sie die zugehörige Rechnung.",
-      );
-    }
-  }
 
-  if (!req.user!.isSuperAdmin && existingAppointment.date) {
-    const employeeId = existingAppointment.assignedEmployeeId || existingAppointment.performedByEmployeeId;
-    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, existingAppointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch die Geschäftsführung möglich.");
+  // K8: Whitelist `notes` darf auch im Lock geändert werden; das wird über
+  // `notesOnly` an die Policy weitergegeben.
+  const PATCH_LOCK_WHITELIST = new Set(["notes"]);
+  const bodyKeys = Object.keys(req.body || {});
+  const notesOnly = bodyKeys.length > 0 && bodyKeys.every((k) => PATCH_LOCK_WHITELIST.has(k));
+
+  const flags = await loadPolicyFlags(id, existingAppointment);
+  const policyAppt = toPolicyAppointment(existingAppointment, flags);
+  const decision = policyCanEdit(toPolicyUser(req.user!), policyAppt, { notesOnly });
+  if (!decision.allowed) {
+    // Lock-Verstoß bleibt 409 Conflict, alles andere 403.
+    if (flags.isLocked && !notesOnly) {
+      return sendConflict(res, "APPOINTMENT_LOCKED", decision.reason);
     }
+    return denyByPolicy(res, decision, "ACCESS_DENIED");
   }
   
   if (existingAppointment.signatureData) {
@@ -1042,64 +1128,78 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   res.json(updated);
 }));
 
+/**
+ * Lädt die Policy-Flags (isLocked, isMonthClosed) für einen Termin.
+ * Zentralisiert die zwei DB-Lookups, die jede Mutation braucht, damit
+ * die Policy mit konsistenten Werten entscheiden kann.
+ */
+async function loadPolicyFlags(appointmentId: number, appt: { date: string; assignedEmployeeId: number | null; performedByEmployeeId: number | null }): Promise<{ isLocked: boolean; isMonthClosed: boolean }> {
+  const isLocked = await storage.isAppointmentLocked(appointmentId);
+  let isMonthClosed = false;
+  const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
+  if (employeeId && appt.date) {
+    isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeId, appt.date);
+  }
+  return { isLocked, isMonthClosed };
+}
+
+function denyByPolicy(
+  res: Response,
+  decision: { allowed: false; reason: string },
+  fallbackCode: string,
+  opts: { kind?: "create" | "default" } = {},
+): void {
+  // Map Policy-Reason auf einen stabilen Error-Code für die UI.
+  // Reihenfolge wichtig: spezifischere Treffer zuerst (z. B. „abgeschlossener Termin“
+  // vs. „abgeschlossener Monat“).
+  const reason = decision.reason;
+  let code = fallbackCode;
+  // CREATE-Verstöße sind Eingabevalidierung → 400 Bad Request
+  if (opts.kind === "create" && /Samstag|Sonntag|Feiertag|3 Monate/i.test(reason)) {
+    return sendBadRequest(res, reason);
+  }
+  if (/gestartete?|gestartet sind/i.test(reason)) code = "APPOINTMENT_STARTED";
+  else if (/Lock|gesperrt|Leistungsnachweis/i.test(reason)) code = "APPOINTMENT_LOCKED";
+  else if (/Monat ist bereits abgeschlossen|Monatsabschluss|Geschäftsführung/i.test(reason)) code = "MONTH_CLOSED";
+  else if (/zugewiesen|Zugriff|deaktiviert|Rolle|Erstberater/i.test(reason)) code = "ACCESS_DENIED";
+  else if (/Status|abgeschlossen|stornier|abgelaufen/i.test(reason)) code = "INVALID_STATUS";
+  sendForbidden(res, code, reason);
+}
+
 router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  
-  const appointment = await storage.getAppointment(id);
-  if (!appointment) {
-    return sendNotFound(res, ErrorMessages.appointmentNotFound);
-  }
-  
-  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
-  
-  const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked) {
-    return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
-  }
 
-  if (!req.user!.isSuperAdmin && appointment.date) {
-    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
-    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch die Geschäftsführung möglich.");
-    }
-  }
-  
+  const appointment = await storage.getAppointment(id);
+  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
+
+  const flags = await loadPolicyFlags(id, appointment);
+  const policyAppt = toPolicyAppointment(appointment, flags);
+  const decision = policyCanDocument(toPolicyUser(req.user!), policyAppt);
+  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
   if (appointment.status !== "scheduled") {
     return sendForbidden(res, "INVALID_STATUS", "Nur geplante Termine können gestartet werden");
   }
-  
+
   const updatedAppointment = await storage.updateAppointment(id, {
     status: "in-progress",
     actualStart: currentTimeHHMMSS(),
   });
-  
+
   res.json(updatedAppointment);
 }));
 
 router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  
-  const appointment = await storage.getAppointment(id);
-  if (!appointment) {
-    return sendNotFound(res, ErrorMessages.appointmentNotFound);
-  }
-  
-  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
-  
-  const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked) {
-    return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
-  }
 
-  if (!req.user!.isSuperAdmin && appointment.date) {
-    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
-    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Änderungen sind nur noch durch die Geschäftsführung möglich.");
-    }
-  }
-  
+  const appointment = await storage.getAppointment(id);
+  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
+
+  const flags = await loadPolicyFlags(id, appointment);
+  const policyAppt = toPolicyAppointment(appointment, flags);
+  const decision = policyCanDocument(toPolicyUser(req.user!), policyAppt);
+  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
   if (appointment.status !== "in-progress") {
     return sendForbidden(res, "INVALID_STATUS", "Nur laufende Termine können beendet werden");
   }
@@ -1240,27 +1340,12 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
   if (id === null) return;
 
   const appointment = await storage.getAppointment(id);
-  if (!appointment) {
-    return sendNotFound(res, ErrorMessages.appointmentNotFound);
-  }
+  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
 
-  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
-
-  if (appointment.status !== "completed") {
-    return sendForbidden(res, "INVALID_STATUS", "Nur abgeschlossene Termine können zur Korrektur geöffnet werden.");
-  }
-
-  const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked) {
-    return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
-  }
-
-  if (!req.user!.isSuperAdmin && appointment.date) {
-    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
-    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Änderungen sind nur noch durch die Geschäftsführung möglich.");
-    }
-  }
+  const flags = await loadPolicyFlags(id, appointment);
+  const policyAppt = toPolicyAppointment(appointment, flags);
+  const decision = policyCanReopen(toPolicyUser(req.user!), policyAppt);
+  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
 
   const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
 
@@ -1313,52 +1398,27 @@ router.use(appointmentDocumentationRouter);
 router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  
+
   const appointment = await storage.getAppointment(id);
-  if (!appointment) {
-    return sendNotFound(res, ErrorMessages.appointmentNotFound);
-  }
-  
+  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
+
   const user = req.user!;
   const isAdmin = user.isAdmin;
-  const lead = isTeamLead(user);
-  const isAssigned = appointment.assignedEmployeeId === user.id;
-  // Termin gilt als „gestartet", sobald eine tatsächliche Start- oder Endzeit
-  // erfasst wurde oder der Status nicht mehr „scheduled" ist.
-  const isStarted = Boolean(appointment.actualStart) || Boolean(appointment.actualEnd) || appointment.status !== "scheduled";
+
+  const flags = await loadPolicyFlags(id, appointment);
+  const policyAppt = toPolicyAppointment(appointment, flags);
+  const decision = policyCanDelete(toPolicyUser(user), policyAppt);
+  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
 
   if (!isAdmin) {
-    if (lead) {
-      // Teamleiter dürfen firmenweit löschen, aber nur Termine, die noch nicht
-      // gestartet sind (gestartete/abgeschlossene Termine bleiben gesperrt).
-      if (isStarted) {
-        return sendForbidden(res, "APPOINTMENT_STARTED", "Bereits gestartete oder abgeschlossene Termine können nicht mehr gelöscht werden.");
-      }
-    } else if (!isAssigned) {
-      return sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
-    }
-  }
-
-  const isCompleted = appointment.status === "completed";
-
-  if (!user.isSuperAdmin && appointment.date) {
-    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
-    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      return sendForbidden(res, "MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Termin-Löschungen sind nur noch durch die Geschäftsführung möglich.");
-    }
-  }
-
-  const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked && !isAdmin) {
-    return sendForbidden(res, "APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht gelöscht werden.");
-  }
-  
-  if (!isAdmin) {
+    // Zusätzliche Service-seitige Validierung (z. B. Folgekosten-Sperren).
     const canDelete = appointmentService.canDeleteAppointment(appointment);
     if (!canDelete.valid) {
       return sendForbidden(res, canDelete.error!, canDelete.message!);
     }
   }
+  const isLocked = flags.isLocked;
+  const isCompleted = appointment.status === "completed";
   
   const ip = req.ip || req.socket.remoteAddress;
 

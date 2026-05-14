@@ -14,20 +14,71 @@ import { notificationService } from "../services/notification-service";
 import { todayISO, addMinutesToTimeHHMMSS, isWeekend, parseLocalDate } from "@shared/utils/datetime";
 import { appointmentService } from "../services/appointments";
 import { db } from "../lib/db";
+import {
+  canCreateAppointment as policyCanCreateAppointment,
+  canEditAppointment as policyCanEditAppointment,
+  canDeleteAppointment as policyCanDeleteAppointment,
+  canOverrideClosedMonth as policyCanOverrideClosedMonth,
+  type PolicyAppointment,
+  type PolicyUser,
+} from "@shared/policies/appointments";
+import { isTeamLead } from "../lib/team-lead";
+import { isHoliday } from "@shared/utils/holidays";
 
 const router = Router();
 router.use(requireAuth);
 
-async function checkSeriesAccess(
-  user: { id: number; isAdmin: boolean },
-  series: { assignedEmployeeId: number; customerId: number },
-): Promise<boolean> {
-  if (user.isAdmin) return true;
-  return series.assignedEmployeeId === user.id;
+function toSeriesPolicyUser(user: {
+  id: number;
+  isAdmin: boolean;
+  isSuperAdmin?: boolean | null;
+  isActive?: boolean | null;
+  isTeamLead?: boolean | null;
+  isAnonymized?: boolean | null;
+  roles?: readonly string[];
+}): PolicyUser {
+  const adminLike = !!user.isAdmin || !!user.isSuperAdmin;
+  return {
+    id: user.id,
+    isAdmin: !!user.isAdmin,
+    isSuperAdmin: !!user.isSuperAdmin,
+    isTeamLead: !adminLike && isTeamLead(user as Parameters<typeof isTeamLead>[0]),
+    isActive: user.isActive !== false,
+    roles: user.roles ?? [],
+  };
 }
 
-function canBypassMonthClose(user: { isSuperAdmin?: boolean | null }): boolean {
-  return !!user.isSuperAdmin;
+/**
+ * Snapshot eines hypothetischen Serien-Termins (offen, kein Lock, kein
+ * Monatsabschluss) — wird an action-spezifische Policies übergeben.
+ * Echte Lock/Monatsabschluss-Flags werden pro tatsächlichem Termin in
+ * `collectEligibleFutureIds`/Schleifen geprüft.
+ */
+function seriesSnapshot(series: { assignedEmployeeId: number; customerId: number }): PolicyAppointment {
+  return {
+    assignedEmployeeId: series.assignedEmployeeId,
+    performedByEmployeeId: series.assignedEmployeeId,
+    customerId: series.customerId,
+    status: "scheduled",
+    date: "2099-01-01",
+    appointmentType: "Kundentermin",
+    isStarted: false,
+    isLocked: false,
+    isMonthClosed: false,
+    hasSignature: false,
+  };
+}
+
+function canEditSeries(user: PolicyUser, series: { assignedEmployeeId: number; customerId: number }): boolean {
+  return policyCanEditAppointment(user, seriesSnapshot(series)).allowed;
+}
+
+function canDeleteSeries(user: PolicyUser, series: { assignedEmployeeId: number; customerId: number }): boolean {
+  return policyCanDeleteAppointment(user, seriesSnapshot(series)).allowed;
+}
+
+function canBypassMonthClose(user: PolicyUser): boolean {
+  return policyCanOverrideClosedMonth(user).allowed;
 }
 
 async function collectEligibleFutureIds(
@@ -72,13 +123,29 @@ async function parseAndValidateSeriesInput(req: Request, res: Response) {
   const customer = await storage.getCustomer(input.customerId);
   if (!customer) { sendNotFound(res, "Kunde nicht gefunden."); return null; }
 
-  if (!user.isAdmin) {
+  const policyUser = toSeriesPolicyUser(user);
+  let isAssignedToCustomer = false;
+  if (!policyUser.isAdmin && !policyUser.isSuperAdmin && !policyUser.isTeamLead) {
     input.assignedEmployeeId = user.id;
     const assignedIds = await storage.getCurrentlyAssignedCustomerIds(user.id);
-    if (!assignedIds.includes(input.customerId)) {
-      sendForbidden(res, "NOT_ASSIGNED", "Sie sind diesem Kunden nicht zugeordnet.");
-      return null;
-    }
+    isAssignedToCustomer = assignedIds.includes(input.customerId);
+  }
+
+  // Wer-Frage über zentrale Create-Policy. Datums-/Monatsabschluss-Checks pro
+  // tatsächlichem Termin in `validateSeriesDates`/`createSeriesAppointments`.
+  const createDecision = policyCanCreateAppointment(policyUser, {
+    date: input.startDate,
+    isWeekend: false,
+    isHoliday: false,
+    isFarPast: false,
+    isMonthClosed: false,
+    appointmentType: "Kundentermin",
+    isAssignedToCustomer,
+    forOtherEmployee: input.assignedEmployeeId !== user.id,
+  });
+  if (!createDecision.allowed) {
+    sendForbidden(res, "ACCESS_DENIED", createDecision.reason);
+    return null;
   }
 
   return { input, customer };
@@ -218,7 +285,7 @@ router.get("/:id", asyncHandler("Serie konnte nicht geladen werden", async (req,
   const series = await seriesStorage.getSeriesWithCustomer(id);
   if (!series) return sendNotFound(res, "Serie nicht gefunden.");
 
-  if (!(await checkSeriesAccess(user, series))) {
+  if (!canEditSeries(toSeriesPolicyUser(user), series)) {
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff auf diese Serie.");
   }
 
@@ -259,7 +326,7 @@ router.patch("/:id", asyncHandler("Serie konnte nicht aktualisiert werden", asyn
   const series = await seriesStorage.getSeries(id);
   if (!series) return sendNotFound(res, "Serie nicht gefunden.");
 
-  if (!(await checkSeriesAccess(user, series))) {
+  if (!canEditSeries(toSeriesPolicyUser(user), series)) {
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff auf diese Serie.");
   }
 
@@ -280,7 +347,7 @@ router.delete("/:id", asyncHandler("Serie konnte nicht beendet werden", async (r
   const series = await seriesStorage.getSeries(id);
   if (!series) return sendNotFound(res, "Serie nicht gefunden.");
 
-  if (!(await checkSeriesAccess(user, series))) {
+  if (!canDeleteSeries(toSeriesPolicyUser(user), series)) {
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff auf diese Serie.");
   }
 
@@ -291,7 +358,7 @@ router.delete("/:id", asyncHandler("Serie konnte nicht beendet werden", async (r
   const today = todayISO();
   const eligibleIds = await collectEligibleFutureIds(id, today, {
     includeExceptions: true,
-    bypassMonthClose: canBypassMonthClose(user),
+    bypassMonthClose: canBypassMonthClose(toSeriesPolicyUser(user)),
   });
 
   await db.transaction(async (tx) => {
@@ -324,7 +391,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
   const series = await seriesStorage.getSeries(seriesId);
   if (!series) return sendNotFound(res, "Serie nicht gefunden.");
 
-  if (!(await checkSeriesAccess(user, series))) {
+  if (!canEditSeries(toSeriesPolicyUser(user), series)) {
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff.");
   }
 
@@ -429,7 +496,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     if (apt.status === "completed") continue;
 
     const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId && !canBypassMonthClose(user)) {
+    if (employeeId && !canBypassMonthClose(toSeriesPolicyUser(user))) {
       const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
       if (monthClosed) continue;
     }
@@ -486,7 +553,7 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
   const series = await seriesStorage.getSeries(seriesId);
   if (!series) return sendNotFound(res, "Serie nicht gefunden.");
 
-  if (!(await checkSeriesAccess(user, series))) {
+  if (!canEditSeries(toSeriesPolicyUser(user), series)) {
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff.");
   }
 
@@ -516,7 +583,7 @@ router.post("/:seriesId/appointments/:appointmentId/cancel", asyncHandler("Serie
   const fromDate = mode === "all_future" ? today : appointment.date;
   const eligibleIds = await collectEligibleFutureIds(seriesId, fromDate, {
     includeExceptions,
-    bypassMonthClose: canBypassMonthClose(user),
+    bypassMonthClose: canBypassMonthClose(toSeriesPolicyUser(user)),
   });
 
   const count = await seriesStorage.bulkCancelSeriesAppointments(eligibleIds);
@@ -536,7 +603,7 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
   const series = await seriesStorage.getSeries(id);
   if (!series) return sendNotFound(res, "Serie nicht gefunden.");
 
-  if (!(await checkSeriesAccess(user, series))) {
+  if (!canEditSeries(toSeriesPolicyUser(user), series)) {
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff.");
   }
 
@@ -653,7 +720,7 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
   const series = await seriesStorage.getSeries(id);
   if (!series) return sendNotFound(res, "Serie nicht gefunden.");
 
-  if (!(await checkSeriesAccess(user, series))) {
+  if (!canEditSeries(toSeriesPolicyUser(user), series)) {
     return sendForbidden(res, "ACCESS_DENIED", "Kein Zugriff.");
   }
 
@@ -688,7 +755,7 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
     }
 
     const employeeId = apt.assignedEmployeeId || apt.performedByEmployeeId;
-    if (employeeId && !canBypassMonthClose(user)) {
+    if (employeeId && !canBypassMonthClose(toSeriesPolicyUser(user))) {
       const monthClosed = await timeTrackingStorage.isMonthClosed(employeeId, apt.date);
       if (monthClosed) {
         skippedCount.monthClosed++;

@@ -8,10 +8,11 @@ import { computeDataHash } from "../services/signature-integrity";
 import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { requireAuth } from "../middleware/auth";
-import { checkAppointmentWriteAccess } from "./appointments";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { db } from "../lib/db";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
+import { canDocumentAppointment as policyCanDocument } from "@shared/policies/appointments";
+import { toPolicyAppointment, toPolicyUser } from "./appointments";
 
 const router = Router();
 router.use(requireAuth);
@@ -25,18 +26,26 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     throw notFound(ErrorMessages.appointmentNotFound);
   }
 
-  if (!await checkAppointmentWriteAccess(req.user!, appointment, res)) return;
-
+  // Zentrale Policy: Lock, Monatsabschluss, Rolle/Zuweisung, Status — alles
+  // wird in shared/policies/appointments.ts entschieden.
   const isLocked = await storage.isAppointmentLocked(id);
-  if (isLocked) {
-    throw forbidden("APPOINTMENT_LOCKED", "Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");
+  let isMonthClosed = false;
+  const employeeIdForMonth = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+  if (employeeIdForMonth && appointment.date) {
+    isMonthClosed = await timeTrackingStorage.isMonthClosed(employeeIdForMonth, appointment.date);
   }
-
-  if (!req.user!.isSuperAdmin && appointment.date) {
-    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
-    if (employeeId && await timeTrackingStorage.isMonthClosed(employeeId, appointment.date)) {
-      throw forbidden("MONTH_CLOSED", "Der Monat ist bereits abgeschlossen. Dokumentations-Änderungen sind nur noch durch die Geschäftsführung möglich.");
+  const decision = policyCanDocument(
+    toPolicyUser(req.user!),
+    toPolicyAppointment(appointment, { isLocked, isMonthClosed }),
+  );
+  if (!decision.allowed) {
+    if (isLocked) {
+      throw forbidden("APPOINTMENT_LOCKED", decision.reason);
     }
+    if (isMonthClosed) {
+      throw forbidden("MONTH_CLOSED", decision.reason);
+    }
+    throw forbidden("ACCESS_DENIED", decision.reason);
   }
 
   if (appointment.signatureData && req.body.signatureData) {
