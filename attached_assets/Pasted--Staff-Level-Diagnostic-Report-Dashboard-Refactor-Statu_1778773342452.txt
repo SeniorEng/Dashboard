@@ -1,0 +1,379 @@
+# Staff-Level Diagnostic Report — Dashboard Refactor
+
+> Status: **FINAL** — covers frontend, backend, and integration/compliance findings.
+
+## Context
+
+The Dashboard app (React 19 + Vite + TanStack Query frontend; Express + Drizzle + Zod backend; Neon Postgres) has matured to the point where **business-logic sprawl, schema duplication, and inconsistent cross-cutting concerns (soft-delete, audit, query invalidation) are becoming a tax on every change**. Knip already handles unused-export hygiene, so this review focuses on:
+
+1. DRY violations across the Drizzle ↔ Zod ↔ TS ↔ react-hook-form chain
+2. State / query complexity (TanStack Query + the custom `invalidateRelated()` graph)
+3. Architectural anti-patterns — business logic leaking into Express route handlers
+4. GoBD-compliance fragility — soft-deletes, audit logs, history tables, PDF integrity hashes, secret encryption
+
+The goal is a prioritized diagnostic, not a rewrite — each item has a precise file:line citation, an explanation of the flaw, and a step-by-step refactor that **explicitly preserves GoBD constraints**.
+
+---
+
+## Repository Map
+
+```
+client/src/
+  App.tsx              router + auth gates (Wouter)
+  pages/               top-level routes + admin/*
+  features/            domain UI (appointments, customers, time-tracking, prospects)
+  components/{ui,patterns,auth,budget,charts}
+  hooks/               use-auth, use-view-as-employee, use-toast, …
+  lib/                 api/, queryClient, query-invalidation, utils
+  design-system/       tokens, componentStyles, iconSize
+
+server/
+  index.ts             Express setup, middleware, error handlers
+  routes.ts            route registration
+  routes/*.ts          23 route files — billing 1,738 LOC, appointments 1,255 LOC, budget 893 LOC
+  services/*.ts        36 service files — appointment-import 724, auth 675, email-parser 561
+  storage/*.ts         DB transactions / repository layer (underused)
+  lib/                 crypto, db, pdf, errors, params, signature-integrity, zugferd
+  middleware/          auth, csrf, cache-headers
+
+shared/
+  schema/*.ts          22 Drizzle table files (re-exported via schema/index.ts)
+  api/*.ts             pagination + contract types
+  domain/*.ts          appointments, customers, time-entries, vacations
+  utils/*.ts           formatting, German Zod errors, phone validation
+```
+
+---
+
+## 1. TypeScript ↔ Zod ↔ Drizzle Synergy (DRY Violations)
+
+### 1.1 — Hand-written Zod schemas drift from Drizzle tables  **[High]**
+**Files**: `shared/schema/customers.ts:200-210`, plus `insertCustomerContactSchema`, `insertCareLevelHistorySchema`, `insertNeedsAssessmentSchema`.
+
+The pattern starts well — `createInsertSchema(customers).omit({ id: true }).extend({ telefon: optionalGermanPhoneSchema })` — then degenerates: contact / care-level / needs-assessment schemas are **fully hand-rolled `z.object({...})`** that mirror the Drizzle table by hand. A column rename or `notNull()` change in the table will silently desync the validator.
+
+**Why flawed**: drizzle-zod exists precisely to derive these. Hand-rolled mirrors are a maintenance tax and a compliance risk (a wrong nullability assumption can let `null` reach an audit field).
+
+**Refactor**
+1. For every `insert*Schema` not derived from `createInsertSchema`, replace with `createInsertSchema(table).omit({...}).extend({...validator overrides only...})`.
+2. Add a lint rule / unit test that asserts every table in `shared/schema/index.ts` has a paired `createInsertSchema` export.
+3. Export response/select DTOs alongside (see §1.3).
+4. **GoBD note**: derivation must NOT include `deletedAt`, `createdAt`, audit fields in insert schemas — explicitly `.omit()` them so they cannot be client-set.
+
+### 1.2 — Per-route inline Zod schemas duplicating shared shapes  **[Med]**
+**Files**: `server/routes/appointments.ts:198-240` (`employeeUpdateCustomerSchema`), `server/routes/billing.ts:45-58` (`createInvoiceSchema`, `updateInvoiceStatusSchema`).
+
+Routes redefine "create invoice" / "update customer" locally instead of importing from `shared/schema`. Each becomes a second source of truth.
+
+**Refactor**: move every route-local Zod schema into `shared/schema/<domain>.ts` as `*RouteSchema` exports; routes import them. If a route needs a subset, derive via `.pick()` / `.omit()` — never re-author the field list.
+
+### 1.3 — Frontend redeclares server response shapes as local `interface`  **[High]**
+**Files**: `client/src/pages/admin/customer-detail.tsx:66-71`, `client/src/pages/prospect-convert.tsx:41-52` (ProspectData, EmployeeOption, InsuranceProviderOption), and 5+ more pages.
+
+`@shared/schema` only exports Drizzle inference types (`AppointmentSeries`) and insert validators. **Response DTOs are not exported**, so each page re-declares its API response shape inline. Backend change ≠ frontend type error.
+
+**Refactor**
+1. Create `shared/api/dto/<domain>.ts` per domain. Define response shapes once, as Zod schemas (`prospectDetailResponse = z.object({...})`).
+2. Export `type ProspectDetailResponse = z.infer<typeof prospectDetailResponse>` for FE consumption.
+3. BE handlers `.parse()` outbound responses through the same schema in dev (gate with `NODE_ENV !== "production"` to avoid prod overhead). This catches drift at the only place it matters — the wire.
+4. Delete the in-page `interface` declarations.
+
+### 1.4 — Form state via raw `useState` instead of `useForm + zodResolver`  **[Med]**
+**Files**: `client/src/pages/prospect-convert.tsx:119-152` (35+ `useState` calls), `client/src/pages/edit-appointment.tsx:85-125` (12 `useState` + 4 `useEffect`).
+
+These pages reimplement forms with primitive state. They get no client-side validation, no schema reuse with the server, and a render-storm on hydration (§2.4).
+
+**Refactor**
+1. Import the route's Zod schema (from §1.2 refactor) into the page.
+2. `useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) })`.
+3. Replace `useState` blocks with `register`/`Controller`; `useEffect` hydration becomes a single `reset(serverData)` call.
+4. **GoBD note**: forms touching customers/invoices keep the existing server-side validation as the source of truth — client validation is UX only.
+
+---
+
+## 2. State Management & Query Over-Complexity
+
+### 2.1 — `invalidateRelated()` graph is hardcoded and unverifiable  **[High]**
+**File**: `client/src/lib/query-invalidation.ts:99-115` (`RELATED_DOMAINS`).
+
+`appointments` cascades to 6+ domains (`time-entries`, `service-records`, `budget`, `customers`, …). The graph is hand-maintained and has **no automated check** that backend mutations match. Add a new appointment→notifications relationship server-side and the frontend silently serves stale data.
+
+**Refactor**
+1. Move the graph to `shared/api/invalidation.ts` so server and client share it.
+2. Each route exports the domain it mutates; a small build-time script (or test) asserts every mutating endpoint has a corresponding domain key.
+3. Long-term: have the server return an `X-Invalidate: prospects,customers` header from mutations; the client's `queryClient` invalidates exactly what was changed. This makes the graph self-describing per request and replaces the static map.
+
+### 2.2 — Dual invalidation: `invalidateRelated()` AND ad-hoc `invalidateQueries()`  **[Med]**
+**Files**: `client/src/pages/prospect-convert.tsx:328-330`, `:269-270`.
+
+Mutations call the centralized helper, then re-invalidate the same key by hand. Either the helper is insufficient (then fix it) or the manual call is dead weight.
+
+**Refactor**: audit each call site; if a manual invalidate is needed, add it to `RELATED_DOMAINS` (or the per-request header in §2.1). Remove the parallel paths.
+
+### 2.3 — Zero optimistic updates across mutations  **[Med]**
+**Files**: `client/src/pages/appointment-detail.tsx:53-68`, `client/src/pages/prospect-convert.tsx:262-283`, `client/src/components/budget/PflegegradBudgetSection.tsx:40-52`.
+
+Every mutation is `onSuccess: invalidate → full refetch`. For wizard/convert flows that touch 200ms+ endpoints this is felt UX.
+
+**Refactor**
+1. Introduce a thin `useOptimisticMutation` helper wrapping `useMutation` with `onMutate`/`onError` rollback boilerplate.
+2. Apply to the **safe-to-rollback** mutations first: budget adjustments, status toggles, notes. Skip mutations that trigger audit-log side-effects on the server until §3.x patterns land.
+
+### 2.4 — Render-storm on hydration in wizard pages  **[High]**
+**File**: `client/src/pages/prospect-convert.tsx:158-212`.
+
+Two `useEffect` hooks set 30+ pieces of state sequentially when `prospect`/`openOffer` resolve. Each `setState` is a render.
+
+**Refactor**: collapse into `reset()` of a single `useForm` (see §1.4) or a single `useReducer({type: "HYDRATE", payload})`. One render instead of 30+.
+
+### 2.5 — `edit-appointment.tsx` monolith (1,269 LOC, 35 hooks)  **[Med]**
+**File**: `client/src/pages/edit-appointment.tsx`.
+
+Mixes appointment form, service selector, fahrtdienst panel, and geocoding side-effects. The `useEffect` at :223 resets fahrtdienst state when a computed `useMemo` flips — a re-render cascade risk.
+
+**Refactor**: split into `<AppointmentForm>`, `<ServiceSelector>`, `<FahrtdienstPanel>`. Lift only the truly cross-cutting state via `useForm` context. Geocoding becomes a `useQuery` keyed on the address tuple (with `enabled`), not a `useEffect`.
+
+### 2.6 — React 19 features unused  **[Low]**
+No `use()`, `useOptimistic`, `useTransition`, or Actions anywhere. Not urgent, but `useTransition` around the wizard step changes and `useOptimistic` for the toggles in §2.3 are low-effort wins.
+
+### 2.7 — Auth/role guards duplicated  **[Low]**
+**Files**: `client/src/App.tsx:77-120` (`ProtectedRoute`, `AdminRoute`), inline role checks at `edit-appointment.tsx:42,52` and `appointment-detail.tsx:45,48`.
+
+**Refactor**: collapse to `<AuthGuard roles={['admin','erstberatung']}>`. Centralize role name constants in `shared/domain/roles.ts` so renames are typed.
+
+---
+
+## 3. Architectural Anti-Patterns & Business Logic Sprawl
+
+### 3.1 — `routes/billing.ts` is a 1,738-LOC god route  **[High]**
+**File**: `server/routes/billing.ts`.
+
+A single file owns invoice CRUD, PDF generation, ZUGFeRD embed, email send, line-item pricing, KM/VAT math, dynamic customer-price lookup, invoice numbering transactions, and delivery dispatch (email/ePost/print). `POST /send-batch` (lines 316-350) calls `generatePdf()`, `embedZugferd()`, `sendEmail()`, `resolveLogoToDataUrl()` inline — and imports `sendEmail` *inside the handler loop* (line 333).
+
+**Refactor (incremental, GoBD-safe)**
+1. **Move pure pricing math first** — `computeInvoiceLines(customer, services, period) → InvoiceLine[]` into `shared/domain/billing/pricing.ts`. No DB, no I/O. Easy to unit test. **No GoBD surface touched.**
+2. **Extract `InvoiceService`** in `server/services/billing/invoice-service.ts` with `create`, `issue`, `cancel` (NOT delete — soft-delete only).
+3. **Extract `InvoiceDeliveryService`** that takes `{invoice, pdf}` and dispatches by method. Adding a delivery method becomes a strategy registration, not an `if/else` in a route.
+4. **Module-level imports** for `sendEmail`, `embedZugferd`, etc. — kill the dynamic `await import()` inside handlers (line 333 billing.ts, line 332 zugferd lazy load).
+5. **GoBD checks during extraction**:
+   - `pdfHash` / `leistungsnachweisHash` must be computed by the service and persisted in the same transaction as the invoice row.
+   - `auditService.invoiceIssued()` must fire after commit (the existing post-commit note at billing.ts:356 is correct; preserve it).
+   - The service must use the soft-delete helper from §4.1 (no hard `.delete()`).
+
+### 3.2 — `routes/appointments.ts` (1,255 LOC) — service layer exists but bypassed  **[High]**
+**Files**: `server/routes/appointments.ts`, `server/services/appointments.ts:83-120` (AppointmentService).
+
+`AppointmentService` defines overlap-check, documentation-validate, etc., but the route hand-rolls customer access checks (84-100), blocker validation (50-74), coverage calculations (155-292), and creates appointments inline with series exceptions, geocoding, doctor-address parsing, duplicate detection.
+
+**Refactor**: identify each inline block, move it to `AppointmentService` as a named method, have the route delegate. The "customer access" check in particular is multi-tenant security — it should be a `requireCustomerAccess(req, customerId)` middleware so it cannot be forgotten on new endpoints.
+
+### 3.3 — Audit calls scattered, not transactional  **[High]**
+**File**: `server/services/audit.ts:8-100`; 15+ route files call `auditService.*` manually. Code comment at `billing.ts:356`: *"Audit nach Commit, weil auditService nicht tx-aware ist."*
+
+**Why flawed**: post-commit audit means a crash between commit and audit write produces an unaudited mutation — a direct GoBD violation. "Manual call per route" means a new endpoint can silently ship without an audit entry.
+
+**Refactor (GoBD-critical)**
+1. Make `auditService.log()` transaction-aware: accept an optional `tx` param and use it. Write the audit row in the **same** transaction as the mutation.
+2. Introduce a `withAudit(tx, {action, entity, before, after}, fn)` wrapper that performs the mutation and audit atomically. Routes call this instead of free-form audit.
+3. Add a unit/integration test that fails CI if any `POST/PUT/PATCH/DELETE` route handler does not invoke `withAudit` (or an allow-listed exemption).
+4. **Migration safety**: do this per-domain. Start with `billing` (highest compliance value), then `customers`, then `appointments`. Keep the old `auditService.log()` working as a thin shim during migration.
+
+### 3.4 — Storage / repository layer exists but is underused  **[Med]**
+**Files**: `server/storage/*.ts`.
+
+Routes import `db` directly and write SQL/Drizzle inline. Repository methods exist for some entities but not all.
+
+**Refactor**: rule that **no route handler imports `db` directly** — only services do. Routes import services. Add an ESLint rule to enforce.
+
+### 3.5 — `asyncHandler` adoption inconsistent  **[Low]**
+**File**: `server/routes/appointments.ts:480-550`.
+
+Some handlers use `asyncHandler`, others hand-roll try/catch with 422/500 paths. Inconsistent error shape on the wire.
+
+**Refactor**: standardize on `asyncHandler` + a typed `AppError` hierarchy (`NotFoundError`, `ValidationError`, `ForbiddenError`) caught by a single error middleware that produces the wire format.
+
+---
+
+## 4. GoBD Compliance Safety Net
+
+> Each refactor in §1–§3 must preserve these invariants. The items below are also bugs/risks in their own right.
+
+### 4.1 — Soft-delete filter is per-query and easy to forget  **[High]**
+**Files**: `shared/schema/customers.ts:59`, `shared/schema/appointments.ts:132`, +15 tables. Forgotten in:
+- `server/routes/index.ts:361` — `from(customers).where(eq(customers.id, id))` — **no `isNull(deletedAt)`**
+- `server/routes/admin/customers/assignments.ts:328-337` — three customer queries, none filter deleted
+- `server/routes/admin/customer-availability.ts:331,334,337,400,446,493` — six queries, none filter
+
+**Why flawed**: soft-deleted customers leak into UI/admin lists → GoBD violation (deleted records visible in operational views) and data-leak risk.
+
+**Refactor**
+1. Add `activeOnly(table)` helper in `server/lib/db-helpers.ts` returning the `isNull(table.deletedAt)` predicate.
+2. Add a thin repository per soft-deletable table that auto-applies it (`customerRepo.find`, `customerRepo.findIncludingDeleted` for explicit opt-in).
+3. ESLint rule: forbid raw `db.select().from(customers)` in `server/routes/**` — must go through repo.
+4. Regression test: snapshot the list of routes that query soft-deletable tables; CI fails on new untracked usage.
+5. **Compliance**: never substitute `.delete()` for the soft-delete update — keep `deletedAt = now(), deletedBy = userId` as the only path, and ensure the §3.3 audit wrapper records the soft-delete.
+
+### 4.2 — History tables written by hand per route  **[Med]**
+**Tables**: `customer_care_level_history`, `customer_assignment_history`, `customerInsuranceHistory`, `employeeCompensationHistory`, `vacationEntitlementHistory`. Writes are explicit per route (e.g., `customers.ts:150+`).
+
+**Refactor**: pair each versioned column-set with a `recordHistory(tx, entity, before, after)` helper invoked inside the §3.3 `withAudit` wrapper. A forgotten history write becomes impossible if mutation goes through the wrapper.
+
+### 4.3 — Hashing & encryption already centralized — preserve  **[OK]**
+- `server/lib/signature-integrity.ts:1-5` — SHA-256 `computeDataHash()` centralized.
+- `server/lib/crypto.ts:3` — AES-256-GCM with `enc:` prefix; used in `startup/encrypt-company-secrets.ts` for Twilio / Qonto / WhatsApp / SMTP credentials.
+- Invoice PDFs persist `pdfHash` and `leistungsnachweisHash` in `shared/schema/billing.ts`.
+
+**Action**: when extracting `InvoiceService` (§3.1), ensure `pdfHash` is computed and stored in the **same transaction** as the invoice — do not move PDF generation to a post-commit step.
+
+### 4.4 — Twilio webhook signature validation duplicated; prospect data exposed in callback URLs  **[High]**
+**Files**: `server/routes/webhook-twilio.ts:9-30, 34, 86`, `server/services/twilio-call-bridge.ts:47-97`.
+
+`validateTwilioSignature()` is re-declared inline in two routes (`/gather`, `/status`). Worse — `escapeXml()` is independently defined in both `webhook-twilio.ts` and `twilio-call-bridge.ts`; if one drifts, an XML-injection slip is silent. **Most critical**: `initiateLeadCallBridge` (lines 69-75) embeds prospect ID and phone in callback URL query params with no CSRF nonce. A leaked webhook URL becomes a prospect-data oracle. Failed prospect notes (`safeAddNote`, lines 99-109) are swallowed with no audit entry.
+
+**Refactor**
+1. Extract `verifyTwilioSignature` into `server/middleware/twilio-auth.ts`; mount via `router.use(verifyTwilioSignature)` on all Twilio webhook routes.
+2. Move `escapeXml` into `server/lib/xml.ts`; remove the two local copies.
+3. Replace plaintext prospect id in callback URL with a short-lived HMAC token (signed `{prospectId, exp}`). The webhook validates and resolves the prospect server-side.
+4. On note-insertion failure inside the call bridge, write an `auditService.callBridgeFailed({prospectId, reason})` entry instead of console-logging.
+
+### 4.5 — Qonto auto-match mutates invoice payment state with **zero** audit  **[CRITICAL — GoBD]**
+**Files**: `server/routes/admin/qonto.ts:49-94`, `server/services/qonto.ts:165-226` (especially `:212-217`).
+
+`autoMatch()` runs `db.update(invoices).set({ status: "bezahlt", paidAt: ... })` directly — three routes (manual match, unmatch, auto-match) transition invoices to `bezahlt`/back **without a single `auditService.log` call**. There is also no transaction wrapper around `autoMatch`, so concurrent matches on the same invoice race.
+
+**This is the single highest-impact finding in the report — financial state changes are silent.**
+
+**Refactor (sequence matters)**
+1. Wrap `autoMatch()`, manual-match, and unmatch in `db.transaction(async tx => …)`.
+2. Inside each transaction, after the `update`, write `auditService.invoicePaymentReconciled({invoiceId, qontoTransactionId, matchedBy: "auto"|"manual", confidence})` using the **transaction-aware** audit from §3.3. Same tx — no post-commit gap.
+3. Add an idempotency key on `(qontoTransactionId, invoiceId)` so retried matches do not double-write.
+4. Add a regression test: assert that for every entry in `qontoMatches`, an `audit_log` row exists with matching `(entity_id, action)`.
+
+### 4.6 — Qonto sync has no scheduler, no retry, no transaction boundary  **[Med]**
+**Files**: `server/services/qonto.ts:112-163`, `server/routes/admin/qonto.ts:100-118`.
+
+`syncTransactions()` is manual-only (admin POST). Mid-pagination failures persist partial state with no rollback. CSV import (admin/qonto.ts:100-118) calls `upsertTransaction()` in a loop without a single transaction; mid-loop failure leaves orphan rows.
+
+**Refactor**: wrap each sync page and the CSV import in a transaction; record `qonto_sync_runs` with `{startedAt, endedAt, page, status, error}` so a failed run is a first-class entity that can be retried/resumed. Decision required from the user: introduce a background scheduler (BullMQ, pg-boss) or keep manual triggers — see Open Questions.
+
+### 4.7 — Qonto credentials may leak via error traces  **[Med]**
+**File**: `server/services/qonto.ts:52-80`.
+
+Decrypted `qontoLogin`/`qontoSecretKey` are placed into HTTP Basic Auth headers, but axios/fetch error objects can serialize request config including headers. No redaction in the error path.
+
+**Refactor**: wrap Qonto HTTP calls in a thin client (`server/lib/qonto-client.ts`) whose error transformer strips `authorization`, `cookie`, and request body before re-throwing. Standard pattern; apply to Twilio and SMTP error paths too.
+
+### 4.8 — ZUGFeRD XML is transient; recomputed every render  **[High — GoBD]**
+**Files**: `server/lib/zugferd.ts:314-374, 376-403`, `server/services/pdf-generator.ts:34-62`, `server/services/document-pdf.ts:86-122`.
+
+Three compounding problems:
+
+- **`generateZugferdXml()` returns the XML string but never persists it.** If embedding fails or a future re-render uses a changed schema, the audited XML (which is the *legally binding* e-invoice content) cannot be reproduced bit-exact.
+- **`generatePdfFromHtml()` computes `integrityHash` (SHA-256 of buffer) but does not store it.** It returns the hash to the caller; whether it is persisted to the invoice row depends on the caller remembering. `document-pdf.ts:118-122` stores the hash only as **object-storage metadata**, not in the relational DB — desync risk if a storage migration drops metadata.
+- **Validation runs three times per render** (`zugferd.ts:323-327, 332-341, 344-348, 360-367`) and PDF/A conformance is checked via `pdfStr.includes("pdfaid")` (line 360) — a substring search on a binary that should be parsed.
+
+**Refactor (GoBD-critical, must precede §3.1 InvoiceService extraction)**
+1. Persist the XML: add `zugferdXml: text("zugferd_xml")` to the invoice table; store on first render in the same transaction as the invoice/PDF row.
+2. Persist the integrity hash to **both** the invoice row (`pdfHash` already exists in `shared/schema/billing.ts`) and object-storage metadata. The DB is the source of truth; storage metadata is the cross-check.
+3. Move PDF/A conformance check from `includes("pdfaid")` to a real metadata parse (use `pdf-lib` to read the XMP block — already a transitive dep).
+4. Collapse the triple validation into one `validateZugferd(xml)` returning a discriminated `{ok:true} | {ok:false, errors}`. Render path calls it once.
+5. **GoBD verification**: re-rendering an issued invoice must produce byte-identical PDF + XML, or refuse to render. Add a `verifyInvoiceIntegrity(invoiceId)` job that pulls stored XML + stored hash + re-renders and compares — wired to the existing audit pipeline.
+
+### 4.9 — Customer hard-delete cascades without per-child audit  **[High — GoBD]**
+**File**: `server/routes/admin/customers/workflows.ts:537`, `server/services/audit.ts:165-179`.
+
+`tx.delete(customers).where(eq(customers.id, id))` lets FK cascade remove appointments/invoices/service-records. The audit row records the customer snapshot, but **no individual audit entry per cascaded child**. Reconstruction of "what was deleted at 14:32 on 2026-05-13" is impossible.
+
+**Refactor**: replace cascade with an explicit deletion routine inside the existing transaction. For each child table:
+1. Soft-delete the child rows (set `deletedAt`, `deletedBy`).
+2. Write an audit entry per child with a `parentDeletionId` linking to the parent customer-delete audit row.
+3. **Only then** soft-delete the customer.
+
+Hard-delete of customers should be retained only as an admin escape hatch with `hardDelete: true` flag and a compliance officer signoff field; the default deletion path is fully soft.
+
+### 4.10 — Encryption coverage relies on a manually maintained allow-list  **[High]**
+**File**: `server/storage.ts:21-24` (`SENSITIVE_COMPANY_FIELDS` array).
+
+New secret fields added to `company_settings` are plaintext unless a developer remembers to add the column name to the array.
+
+**Refactor**: invert the model. Mark sensitive columns via Drizzle column metadata (e.g., a `.$type<Encrypted<string>>()` brand or a small registry built from schema introspection), and have the storage layer auto-encrypt any column annotated as sensitive. Add a CI test that fails if a column name matching `/secret|token|password|key/i` is not annotated.
+
+### 4.11 — `ZUGFeRD` & `Audit` not part of one atomic operation in storno  **[Med]**
+**File**: `server/routes/billing.ts:1081-1180`.
+
+Invoice storno commits, then audit is logged post-commit (line 1171-1179). If the audit insert fails, the storno is already visible — a GoBD-visible "phantom mutation".
+
+**Refactor**: same fix as §3.3 — transaction-aware `withAudit`. This finding is one of several reinforcing why §3.3 is a top-priority item.
+
+---
+
+## Suggested Refactor Order
+
+Three tiers. **Tier A is compliance-critical and must land before further refactors that touch the same files**, because subsequent extractions can mask the underlying gaps.
+
+### Tier A — Compliance-critical (do first)
+
+| # | Refactor | Files Touched | Why first |
+|---|----------|--------------|-----------|
+| A1 | **Transaction-aware `withAudit` wrapper** (§3.3, §4.11) | `server/services/audit.ts`, one pilot domain | Eliminates the post-commit audit gap exploited by every downstream finding |
+| A2 | **Audit + transaction wrap for Qonto match/unmatch/auto-match** (§4.5) | `server/routes/admin/qonto.ts`, `server/services/qonto.ts` | Closes the most egregious GoBD gap: silent invoice payment-state changes |
+| A3 | **Persist ZUGFeRD XML and PDF integrity hash in the invoice row** (§4.8) | `shared/schema/billing.ts` (migration), `server/lib/zugferd.ts`, `server/services/pdf-generator.ts` | Currently the legally-binding XML is transient |
+| A4 | **Centralized soft-delete repo + ESLint rule** (§4.1) | `server/lib/db-helpers.ts`, repos, `.eslintrc` | Stops bleeding new soft-delete bypasses while other refactors land |
+| A5 | **Per-child audit on customer hard-delete** (§4.9) | `server/routes/admin/customers/workflows.ts` | Cascade currently destroys forensic trail |
+| A6 | **Auto-encryption based on schema annotation** (§4.10) | `server/storage.ts`, `shared/schema/*.ts` | New secret columns currently leak in plaintext by default |
+| A7 | **HMAC-signed Twilio callback URLs + signature middleware** (§4.4) | `server/middleware/twilio-auth.ts` (new), `webhook-twilio.ts`, `twilio-call-bridge.ts` | Webhook URLs are public; current params expose prospect data |
+
+### Tier B — High-value cleanup (do after Tier A in any order)
+
+| # | Refactor | Files Touched | Notes |
+|---|----------|--------------|-------|
+| B1 | Derive remaining Zod schemas from Drizzle (§1.1) | `shared/schema/*.ts` | Type safety; no runtime risk |
+| B2 | Export response DTOs; delete frontend `interface` redeclarations (§1.3) | `shared/api/dto/*.ts`, ~10 pages | Single source of truth wire ↔ UI |
+| B3 | Migrate wizard pages to `useForm + zodResolver` (§1.4, §2.4) | `prospect-convert.tsx`, `edit-appointment.tsx` | Kills render-storms |
+| B4 | Extract pure pricing math (§3.1 step 1) | `shared/domain/billing/pricing.ts` (new) | Pure function, fully unit-testable, no GoBD surface |
+| B5 | Extract `InvoiceService` + `InvoiceDeliveryService` (§3.1) | `server/services/billing/*` | **Depends on A1 + A3** — do not extract before audit/hash persistence is in place |
+| B6 | Move appointment business logic into `AppointmentService` (§3.2) | `server/services/appointments.ts`, `routes/appointments.ts` | Depends on A1 |
+| B7 | Qonto sync run-table + per-page transaction (§4.6) | `server/services/qonto.ts` | Idempotent resumable sync |
+| B8 | Centralize webhook/HTTP error redaction (§4.7) | `server/lib/qonto-client.ts` (new), apply pattern to Twilio/SMTP | |
+| B9 | Collapse ZUGFeRD triple validation + replace `includes("pdfaid")` PDF/A check (§4.8 steps 3–4) | `server/lib/zugferd.ts` | |
+
+### Tier C — Polish (do as opportunity allows)
+
+| # | Refactor | Files Touched |
+|---|----------|--------------|
+| C1 | Server-driven `X-Invalidate` header replaces hardcoded `RELATED_DOMAINS` (§2.1) | route layer + `query-invalidation.ts` |
+| C2 | Remove dual invalidation (§2.2) | call sites in `client/src/pages/*` |
+| C3 | `useOptimisticMutation` helper for safe toggles (§2.3) | `client/src/lib/hooks/` |
+| C4 | Auth/role guards consolidated, role names typed (§2.7) | `client/src/App.tsx`, `shared/domain/roles.ts` |
+| C5 | `asyncHandler` + `AppError` hierarchy (§3.5) | `server/middleware/`, all routes |
+| C6 | ESLint rule: routes never import `db` (§3.4) | repo lint config |
+
+---
+
+## Verification
+
+For each refactor:
+
+1. **Type-check & build**: `npm run typecheck && npm run build` (covers Drizzle/Zod inference).
+2. **Drizzle schema parity test** (new): for every soft-deletable table, assert there's a repo whose `find*` methods include `isNull(deletedAt)`. CI grep gate: forbid `db.delete(` outside `server/services/*/hard-delete.ts`.
+3. **Audit coverage test** (new): boot Express in a test, hit every mutating route (`POST|PUT|PATCH|DELETE`) with a stubbed user, assert an `audit_log` row exists with the matching `entityId` post-request. Specifically asserts the Qonto match/unmatch/auto-match routes write audit rows after A2 lands.
+4. **Invoice integrity round-trip** (new, A3): issue invoice → fetch `zugferdXml` and `pdfHash` from DB → re-render → assert byte-equal XML and matching SHA-256. Run nightly against last 30 days of invoices.
+5. **Encryption coverage test** (A6): scan `shared/schema/**` for columns matching `/secret|token|password|key/i` and assert each is annotated as sensitive; fail otherwise.
+6. **Twilio webhook fuzz** (A7): send signed and unsigned requests with tampered query params; assert middleware rejects unsigned and HMAC-mismatch cases before reaching the handler.
+7. **Manual end-to-end for compliance paths**:
+   - Issue an invoice → confirm `pdfHash`, `zugferdXml`, `auditLog`, `customerServicePrices` snapshot all written in **one** transaction (single statement timestamp in DB).
+   - Auto-match a Qonto transaction → confirm `invoice.status` flipped and **same** transaction wrote an `audit_log` entry.
+   - Soft-delete a customer → confirm absent from list endpoints, present via explicit "including deleted" admin view, audit entry recorded, history rows intact.
+   - Convert a prospect → confirm history tables written, `invalidateRelated` cascade still updates dashboard counts.
+8. **Frontend smoke**: dev server + `useOptimistic` happy/rollback paths for budget toggles; wizard hydration (`prospect-convert`) re-renders **once** after `reset()` instead of 30+ times.
+
+---
+
+## Open Questions for the User
+
+These need a decision before Tier A can be sequenced.
+
+1. **Qonto scheduling** — Tier B7 assumes a background job runner. Do you already have BullMQ / pg-boss / similar, or should sync stay manual-only for now?
+2. **Customer hard-delete policy** — Tier A5 proposes making hard-delete an explicit admin escape hatch. Is there a current legal use case for hard-deleting a customer (vs. always-soft + retention sweep), or can we make soft-delete the only path?
+3. **Pilot domain for `withAudit`** — A1 lands the wrapper plus migration of *one* domain first. Recommend **billing** (highest compliance value, smallest blast radius once A3 also lands). Confirm or pick another.
+4. **Frontend DTO generation** — for §1.3, prefer (a) hand-written shared Zod DTOs, or (b) introduce a code-gen tool (e.g., `ts-rest`, `zodios`, OpenAPI) on the way? (a) is faster; (b) is the long-term answer.
