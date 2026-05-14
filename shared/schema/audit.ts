@@ -20,6 +20,7 @@ export const AUDIT_ACTIONS = [
   "customer_contract_updated",
   "invoice_created",
   "invoice_cancelled",
+  "invoice_status_changed",
   "time_entry_created",
   "time_entry_updated",
   "time_entry_deleted",

@@ -42,6 +42,8 @@ import {
   getInvoiceForUpdateTx,
 } from "../storage/billing-storage";
 import { auditService } from "../services/audit";
+import { withAudit } from "../lib/with-audit";
+import { readTestFaults } from "../lib/test-fault-injector";
 import { deliveryStorage } from "../storage/deliveries";
 import type { InvoicePdfData } from "../lib/pdf-generator";
 import { getCachedCompanySettings } from "../services/cache";
@@ -501,7 +503,26 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
           ],
         });
 
-        await storage.updateInvoiceStatus(invoiceId, "versendet", req.user!.id);
+        await withAudit(async (tx, audit) => {
+          await updateInvoiceStatusTx(tx, invoiceId, "versendet", req.user!.id);
+          audit.record({
+            userId: req.user!.id,
+            action: "invoice_sent",
+            entityType: "invoice",
+            entityId: invoiceId,
+            metadata: {
+              invoiceNumber: invoice.invoiceNumber,
+              recipientEmail,
+              customerId: invoice.customerId,
+              insuranceProviderId: prov.length ? prov[0].id : null,
+              hasParagraph39,
+              batchSend: true,
+              isPrivatBilling,
+              isBeihilfe,
+            },
+            ipAddress: req.ip,
+          });
+        }, { faults: readTestFaults(req) });
 
         await deliveryStorage.createDelivery({
           customerId: invoice.customerId,
@@ -530,11 +551,6 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
         results.push({ invoiceId, invoiceNumber: invoice.invoiceNumber, status: "error", error: errMsg });
         continue;
       }
-
-      await auditService.log(req.user!.id, "invoice_sent", "invoice", invoiceId, {
-        invoiceNumber: invoice.invoiceNumber, recipientEmail, customerId: invoice.customerId,
-        insuranceProviderId: prov.length ? prov[0].id : null, hasParagraph39, batchSend: true, isPrivatBilling, isBeihilfe,
-      }, req.ip);
 
       if (cust[0].receivesMonthlyInvoice) {
         const deliveryMethod = cust[0].documentDeliveryMethod || "email";
@@ -862,10 +878,8 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
       const { kasseItems, privateItems } = splitLineItemsByBudget(allLineItems, budgetSplit);
 
       const createdInvoices: Invoice[] = [];
-      type AuditEntry = { invoiceId: number; payload: Record<string, unknown> };
-      const pendingAudits: AuditEntry[] = [];
 
-      const splitResult = await db.transaction(async (tx) => {
+      const splitResult = await withAudit(async (tx, audit) => {
       if (kasseItems.length > 0) {
         const kasseNetCents = kasseItems.reduce((sum, i) => sum + i.totalCents, 0);
         let kasseRecipientName = "";
@@ -929,9 +943,12 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         const kasseInvoice = await createInvoiceTx(tx, kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(kasseInvoice);
 
-        pendingAudits.push({
-          invoiceId: kasseInvoice.id,
-          payload: {
+        audit.record({
+          userId: req.user!.id,
+          action: "invoice_created",
+          entityType: "invoice",
+          entityId: kasseInvoice.id,
+          metadata: {
             invoiceNumber: kasseInvoiceNumber,
             customerId,
             billingType,
@@ -942,6 +959,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
             lineItemCount: kasseItems.length,
             splitType: "kasse",
           },
+          ipAddress: req.ip,
         });
       }
 
@@ -984,9 +1002,12 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         const privateInvoice = await createInvoiceTx(tx, privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
         createdInvoices.push(privateInvoice);
 
-        pendingAudits.push({
-          invoiceId: privateInvoice.id,
-          payload: {
+        audit.record({
+          userId: req.user!.id,
+          action: "invoice_created",
+          entityType: "invoice",
+          entityId: privateInvoice.id,
+          metadata: {
             invoiceNumber: privateInvoiceNumber,
             customerId,
             billingType: "selbstzahler",
@@ -997,16 +1018,12 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
             lineItemCount: privateItems.length,
             splitType: "privat",
           },
+          ipAddress: req.ip,
         });
       }
 
         return createdInvoices;
-      });
-
-      // Audit nach Commit, weil auditService nicht tx-aware ist.
-      for (const entry of pendingAudits) {
-        await auditService.log(req.user!.id, "invoice_created", "invoice", entry.invoiceId, entry.payload, req.ip);
-      }
+      }, { faults: readTestFaults(req) });
 
       // T01/PDF-Hash: PDF deterministisch erzeugen und persistieren, damit
       // die /pdf-Bytes hashstabil ausgeliefert werden.
@@ -1078,7 +1095,7 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
   let invoice: Invoice;
   let invoiceNumber: string;
   try {
-    ({ invoice, invoiceNumber } = await db.transaction(async (tx) => {
+    ({ invoice, invoiceNumber } = await withAudit(async (tx, audit) => {
       const number = await getNextInvoiceNumberTx(tx, billingYear);
       const invoiceData = {
         invoiceNumber: number,
@@ -1102,8 +1119,25 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
         referencedStornoInvoiceIds: stornoRefsForInsert,
       };
       const created = await createInvoiceTx(tx, invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_created",
+        entityType: "invoice",
+        entityId: created.id,
+        metadata: {
+          invoiceNumber: number,
+          customerId,
+          billingType,
+          invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+          billingMonth,
+          billingYear,
+          grossAmountCents: totalNetCents + totalVatCents,
+          lineItemCount: lineItems.length,
+        },
+        ipAddress: req.ip,
+      });
       return { invoice: created, invoiceNumber: number };
-    }));
+    }, { faults: readTestFaults(req) }));
   } catch (err) {
     console.error("[billing/generate] Invoice insert failed.", {
       customerId,
@@ -1120,17 +1154,6 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     });
     throw err;
   }
-
-  await auditService.log(req.user!.id, "invoice_created", "invoice", invoice.id, {
-    invoiceNumber,
-    customerId,
-    billingType,
-    invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
-    billingMonth,
-    billingYear,
-    grossAmountCents: totalNetCents + totalVatCents,
-    lineItemCount: lineItems.length,
-  }, req.ip);
 
   // T01/PDF-Hash: PDF deterministisch erzeugen und persistieren.
   try {
@@ -1174,7 +1197,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       throw badRequest("Stornorechnungen können nicht erneut storniert werden.");
     }
 
-    const { stornoInvoice, invoiceNumber, updatedOriginal } = await db.transaction(async (tx) => {
+    const { stornoInvoice, invoiceNumber, updatedOriginal } = await withAudit(async (tx, audit) => {
       // Re-Read mit FOR UPDATE: serialisiert parallele Stornos derselben
       // Originalrechnung. Ohne Lock würden zwei PATCHs den alten Status sehen
       // und beide eine Stornorechnung erzeugen.
@@ -1302,23 +1325,45 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
         }
       }
 
-      return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
-    });
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_cancelled",
+        entityType: "invoice",
+        entityId: id,
+        metadata: {
+          originalInvoiceNumber: locked.invoiceNumber,
+          stornoInvoiceId: created.id,
+          stornoInvoiceNumber: number,
+          customerId: locked.customerId,
+          grossAmountCents: locked.grossAmountCents,
+          oldStatus: currentStatus,
+          newStatus: status,
+        },
+        ipAddress: req.ip,
+      });
 
-    // Audit nach Commit, weil auditService nicht tx-aware ist.
-    await auditService.log(req.user!.id, "invoice_cancelled", "invoice", id, {
-      originalInvoiceNumber: invoice.invoiceNumber,
-      stornoInvoiceId: stornoInvoice.id,
-      stornoInvoiceNumber: invoiceNumber,
-      customerId: invoice.customerId,
-      grossAmountCents: invoice.grossAmountCents,
-      oldStatus: currentStatus,
-      newStatus: status,
-    }, req.ip);
+      return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
+    }, { faults: readTestFaults(req) });
 
     updated = updatedOriginal;
   } else {
-    updated = await storage.updateInvoiceStatus(id, status, req.user!.id);
+    updated = await withAudit(async (tx, audit) => {
+      const u = await updateInvoiceStatusTx(tx, id, status, req.user!.id);
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_status_changed",
+        entityType: "invoice",
+        entityId: id,
+        metadata: {
+          invoiceNumber: invoice.invoiceNumber,
+          customerId: invoice.customerId,
+          oldStatus: currentStatus,
+          newStatus: status,
+        },
+        ipAddress: req.ip,
+      });
+      return u;
+    }, { faults: readTestFaults(req) });
   }
 
   res.json(updated);
@@ -1939,7 +1984,25 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     throw sendErr;
   }
 
-  const updated = await storage.updateInvoiceStatus(id, "versendet", req.user!.id);
+  const updated = await withAudit(async (tx, audit) => {
+    const u = await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
+    audit.record({
+      userId: req.user!.id,
+      action: "invoice_sent",
+      entityType: "invoice",
+      entityId: id,
+      metadata: {
+        invoiceNumber: invoice.invoiceNumber,
+        recipientEmail,
+        customerId: invoice.customerId,
+        insuranceProviderId: provider.length ? provider[0].id : null,
+        insuranceProviderName: recipientDisplayName,
+        hasParagraph39, isPrivatBilling, isBeihilfe, isKostenerstattung,
+      },
+      ipAddress: req.ip,
+    });
+    return u;
+  }, { faults: readTestFaults(req) });
 
   await deliveryStorage.createDelivery({
     customerId: invoice.customerId,
@@ -1951,15 +2014,6 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     sentAt: new Date(),
     createdByUserId: req.user!.id,
   });
-
-  await auditService.log(req.user!.id, "invoice_sent", "invoice", id, {
-    invoiceNumber: invoice.invoiceNumber,
-    recipientEmail,
-    customerId: invoice.customerId,
-    insuranceProviderId: provider.length ? provider[0].id : null,
-    insuranceProviderName: recipientDisplayName,
-    hasParagraph39, isPrivatBilling, isBeihilfe, isKostenerstattung,
-  }, req.ip);
 
   const results: { invoiceId: number; status: string; recipientEmail: string; customerCopy?: boolean; letterxpressLetterId?: string }[] = [
     { invoiceId: id, status: "sent", recipientEmail },

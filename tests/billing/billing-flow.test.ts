@@ -598,9 +598,12 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
       path.resolve(__dirname, "../../server/routes/billing.ts"),
       "utf8",
     );
+    // Atomarität: entweder direkter `db.transaction(...)` oder der
+    // `withAudit(...)`-Wrapper (Task #444), der intern `db.transaction`
+    // öffnet und Mutation + Audit-Insert atomar bündelt.
     expect(
-      /\bdb\.transaction\s*\(/.test(billingSource),
-      "billing.ts muss `db.transaction(` für atomare Split-Erzeugung verwenden",
+      /\bdb\.transaction\s*\(/.test(billingSource) || /\bwithAudit\s*\(/.test(billingSource),
+      "billing.ts muss `db.transaction(` oder `withAudit(` für atomare Split-Erzeugung verwenden",
     ).toBe(true);
 
     // Verhaltens-Sanity-Check: Erfolgreiche Split-Erzeugung → exakt 2 Rechnungen.

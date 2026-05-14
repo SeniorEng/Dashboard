@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { auditLog, type AuditAction, type AuditEntityType, type AuditLogFilter } from "@shared/schema";
 import type { ActorRole } from "../lib/team-lead";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
@@ -6,23 +6,41 @@ import { users } from "@shared/schema";
 import { parseLocalDate } from "@shared/utils/datetime";
 
 class AuditService {
+  /**
+   * Schreibt einen Audit-Log-Eintrag.
+   *
+   * Bei Aufruf ohne `exec` (Legacy-Pfad) werden Fehler geschluckt und nur
+   * geloggt — sonst würde ein gestörter Audit-Insert nachgelagerte
+   * Logik in nicht-transaktionalen Callern killen.
+   *
+   * Bei Aufruf mit `exec = tx` (transaktions-bewusster Pfad, siehe
+   * `withAudit`) MÜSSEN Fehler propagieren, damit die umschließende
+   * Transaktion zurückrollt. Sonst wäre die Mutation comitted ohne
+   * Audit-Eintrag — GoBD-Verstoß.
+   */
   async log(
     userId: number,
     action: AuditAction,
     entityType: AuditEntityType,
     entityId: number,
     metadata?: Record<string, unknown>,
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
+    const values = {
+      userId,
+      action,
+      entityType,
+      entityId,
+      metadata: metadata ?? null,
+      ipAddress: ipAddress ?? null,
+    };
+    if (exec) {
+      await exec.insert(auditLog).values(values);
+      return;
+    }
     try {
-      await db.insert(auditLog).values({
-        userId,
-        action,
-        entityType,
-        entityId,
-        metadata: metadata ?? null,
-        ipAddress: ipAddress ?? null,
-      });
+      await db.insert(auditLog).values(values);
     } catch (error) {
       console.error("[AuditService] Failed to write audit log:", error);
     }
@@ -32,27 +50,30 @@ class AuditService {
     userId: number,
     appointmentId: number,
     metadata: { customerId: number; hasSignature: boolean; performedByEmployeeId?: number | null },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "documentation_submitted", "appointment", appointmentId, metadata, ipAddress);
+    await this.log(userId, "documentation_submitted", "appointment", appointmentId, metadata, ipAddress, exec);
   }
 
   async signatureAdded(
     userId: number,
     appointmentId: number,
     metadata: { customerId: number; signatureHash?: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "documentation_signature_added", "appointment", appointmentId, metadata, ipAddress);
+    await this.log(userId, "documentation_signature_added", "appointment", appointmentId, metadata, ipAddress, exec);
   }
 
   async serviceRecordCreated(
     userId: number,
     serviceRecordId: number,
     metadata: { customerId: number; year: number; month: number; appointmentCount: number; recordType?: string; appointmentId?: number },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "service_record_created", "service_record", serviceRecordId, metadata, ipAddress);
+    await this.log(userId, "service_record_created", "service_record", serviceRecordId, metadata, ipAddress, exec);
   }
 
   async serviceRecordSigned(
@@ -60,106 +81,118 @@ class AuditService {
     serviceRecordId: number,
     signerType: "employee" | "customer",
     metadata: { customerId: number; signatureHash?: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
     const action = signerType === "employee" ? "service_record_signed_employee" : "service_record_signed_customer";
-    await this.log(userId, action, "service_record", serviceRecordId, metadata, ipAddress);
+    await this.log(userId, action, "service_record", serviceRecordId, metadata, ipAddress, exec);
   }
 
   async serviceRecordRevoked(
     userId: number,
     serviceRecordId: number,
     metadata: { customerId: number; reason?: string; previousStatus: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "service_record_revoked", "service_record", serviceRecordId, metadata, ipAddress);
+    await this.log(userId, "service_record_revoked", "service_record", serviceRecordId, metadata, ipAddress, exec);
   }
 
   async appointmentRevoked(
     userId: number,
     appointmentId: number,
     metadata: { customerId: number; reason?: string; previousStatus: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "appointment_revoked", "appointment", appointmentId, metadata, ipAddress);
+    await this.log(userId, "appointment_revoked", "appointment", appointmentId, metadata, ipAddress, exec);
   }
 
   async appointmentUpdated(
     userId: number,
     appointmentId: number,
     metadata: { customerId: number; changedFields: string[]; actor?: { role: ActorRole } },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "appointment_updated", "appointment", appointmentId, metadata, ipAddress);
+    await this.log(userId, "appointment_updated", "appointment", appointmentId, metadata, ipAddress, exec);
   }
 
   async appointmentCreated(
     userId: number,
     appointmentId: number,
     metadata: { customerId: number; assignedEmployeeId: number; date: string; actor?: { role: ActorRole } },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "appointment_created", "appointment", appointmentId, metadata, ipAddress);
+    await this.log(userId, "appointment_created", "appointment", appointmentId, metadata, ipAddress, exec);
   }
 
   async appointmentDeleted(
     userId: number,
     appointmentId: number,
     metadata: { customerId: number; date: string; status: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "appointment_deleted", "appointment", appointmentId, metadata, ipAddress);
+    await this.log(userId, "appointment_deleted", "appointment", appointmentId, metadata, ipAddress, exec);
   }
 
   async customerUpdated(
     userId: number,
     customerId: number,
     metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown>; actor?: { role: ActorRole } },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "customer_updated", "customer", customerId, metadata, ipAddress);
+    await this.log(userId, "customer_updated", "customer", customerId, metadata, ipAddress, exec);
   }
 
   async customerCareLevelChanged(
     userId: number,
     customerId: number,
     metadata: { oldPflegegrad: number | null; newPflegegrad: number; seitDatum: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "customer_care_level_changed", "customer", customerId, metadata, ipAddress);
+    await this.log(userId, "customer_care_level_changed", "customer", customerId, metadata, ipAddress, exec);
   }
 
   async loginSuccess(
     userId: number,
     metadata: { email: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "login_success", "user", userId, metadata, ipAddress);
+    await this.log(userId, "login_success", "user", userId, metadata, ipAddress, exec);
   }
 
   async loginFailed(
     userId: number,
     metadata: { email: string; reason: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "login_failed", "user", userId, metadata, ipAddress);
+    await this.log(userId, "login_failed", "user", userId, metadata, ipAddress, exec);
   }
 
   async passwordChanged(
     userId: number,
     metadata: { method: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "password_changed", "user", userId, metadata, ipAddress);
+    await this.log(userId, "password_changed", "user", userId, metadata, ipAddress, exec);
   }
 
   async customerCreated(
     userId: number,
     customerId: number,
     metadata: { customerName: string; billingType: string },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "customer_created", "customer", customerId, metadata, ipAddress);
+    await this.log(userId, "customer_created", "customer", customerId, metadata, ipAddress, exec);
   }
 
   async customerHardDeleted(
@@ -173,18 +206,20 @@ class AuditService {
       createdAt: string | null;
       reason: string;
     },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "customer_hard_deleted", "customer", customerId, metadata, ipAddress);
+    await this.log(userId, "customer_hard_deleted", "customer", customerId, metadata, ipAddress, exec);
   }
 
   async customerContractUpdated(
     userId: number,
     customerId: number,
     metadata: { changedFields: string[]; oldValues: Record<string, unknown>; newValues: Record<string, unknown> },
-    ipAddress?: string
+    ipAddress?: string,
+    exec?: DbOrTx,
   ): Promise<void> {
-    await this.log(userId, "customer_contract_updated", "customer", customerId, metadata, ipAddress);
+    await this.log(userId, "customer_contract_updated", "customer", customerId, metadata, ipAddress, exec);
   }
 
   async getEntries(filter: AuditLogFilter): Promise<{ entries: Array<{
