@@ -49,6 +49,32 @@ npx vitest run tests/customers.test.ts
 | `public-signing.test.ts` | Digitale Unterschrift | Token-Validierung, Signatur (öffentlich) | 4 |
 | `statistics.test.ts` | Statistik/Cockpit | Overview, Trends, Budget, Margen | 6 |
 
+## Drift-Detektoren "Anzeige vs. Buchung" (Task #427)
+
+Equality-Suite, die für 5 Hotspots prüft, dass der Read-Pfad (was die UI
+anzeigt) bit-identisch zum Write-Pfad (was tatsächlich gebucht wird)
+rechnet. Nutzt die Harness `tests/helpers/equality-check.ts`
+(`assertDisplayEqualsBooking`).
+
+| Datei | Hotspot | Read | Write |
+|-------|---------|------|-------|
+| `tests/equality/45b-cap.test.ts` | §45b Monats-Cap | `cost-estimate.availableCents` | `computeCapSlot.capRemainingCents` |
+| `tests/equality/pflegegrad-pricing.test.ts` | Pflegegrad-Preise | `cost-estimate.totalCents` | `calculateAppointmentCost` (Doku-Pfad) |
+| `tests/equality/travel-cost.test.ts` | Reisekosten | `cost-estimate.totalCents` (mit km) | `calculateAppointmentCost` |
+| `tests/equality/pro-rata-vacation.test.ts` | Pro-Rata-Urlaub | `vacation-summary.entitlement` | `calculateAnnualEntitlementWithHistory` |
+| `tests/equality/month-close-cutoff.test.ts` | Monatsabschluss-Cutoff | `month-close/cutoff/:y/:m` + Banner | `computeMonthCloseCutoff` / `daysUntilCutoff` |
+
+Zusätzlich:
+- `tests/budget/properties-display-vs-booking.test.ts` — fast-check-Property
+  „Anzeige ≥ tatsächlich gebucht" für §45b (10 Runs, seed=42 aus
+  `tests/setup.ts`).
+- `tests/architecture/calculations-in-shared.test.ts` — Architektur-Schranke,
+  die neue `calculate*`/`compute*`-Funktionen für die fünf Hotspot-Kategorien
+  außerhalb von `shared/domain/` (bzw. der Allowlist) blockiert.
+
+Die Original-§45b-Suite `tests/budget/monthly-cap-display-vs-booking.test.ts`
+bleibt als ausführliche Regressions-Suite bestehen.
+
 ## Regressions-Guard
 
 Die Tests dienen als automatische Regressions-Prüfung. Bei jeder Änderung an der API:

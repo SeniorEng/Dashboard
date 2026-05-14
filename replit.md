@@ -70,6 +70,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Page-Size Guideline**: `docs/page-size-guideline.md` (≤500 LOC soft, 800 LOC hard limit; pages are thin wrappers, domain code lives in `client/src/features/<domain>/`)
 - **Pre-Publish Backup Runbook**: `docs/pre-publish-backup-runbook.md`
 - **Test Coverage Matrix**: `tests/README.md`
+- **Drift-Detektoren "Anzeige vs. Buchung"** (Task #427): `tests/helpers/equality-check.ts` plus `tests/equality/*` (5 Hotspots: §45b-Cap, Pflegegrad-Preise, Reisekosten, Pro-Rata-Urlaub, Monatsabschluss-Cutoff) und `tests/architecture/calculations-in-shared.test.ts` (verhindert neue `calculate*`/`compute*`-Funktionen außerhalb `shared/domain/`).
 - **Deployment Log**: `docs/deployment-log.md`
 - **Knip Configuration**: `knip.json` (for dead code detection)
 - **Tailwind Config**: `tailwind.config.ts`
