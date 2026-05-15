@@ -411,7 +411,7 @@ export default function AppointmentDetail() {
           {(hasAnyService || (isCompleted && hasAnyDocumentedService)) && (
             <>
               {isCompleted && hasAnyDocumentedService && (
-                <div className="flex items-center justify-between pt-2 pb-1">
+                <div className="hidden sm:flex items-center justify-between pt-2 pb-1">
                   <span className="flex-1" />
                   <span className="w-24 text-right text-xs text-muted-foreground uppercase tracking-wide whitespace-nowrap">Geplant</span>
                   <span className="w-24 text-right text-xs font-semibold text-primary uppercase tracking-wide whitespace-nowrap">Ist</span>
@@ -426,25 +426,27 @@ export default function AppointmentDetail() {
                 const plannedMins = service.plannedDurationMinutes || 0;
                 const actualMins = service.actualDurationMinutes || 0;
                 const hasDifference = hasDocumented && plannedMins !== actualMins;
-                
+
                 return (
                   <div key={service.id} className="py-2 border-b border-border/50">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${getServiceColors(serviceColorKey).bg}`} />
-                        <span>{service.serviceName}</span>
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${getServiceColors(serviceColorKey).bg}`} />
+                        <span className="truncate">{service.serviceName}</span>
                       </div>
                       {isCompleted && hasDocumented ? (
-                        <div className="flex items-center gap-1">
-                          <span className="w-24 text-right text-muted-foreground text-sm whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-3 pl-4 sm:pl-0 sm:gap-1">
+                          <span className="text-sm text-muted-foreground whitespace-nowrap sm:w-24 sm:text-right" data-testid={`text-service-planned-${service.id}`}>
+                            <span className="sm:hidden text-[10px] uppercase tracking-wide mr-1.5">Plan</span>
                             {plannedMins ? formatDuration(plannedMins) : "—"}
                           </span>
-                          <span className={`w-24 text-right font-semibold whitespace-nowrap ${hasDifference ? "text-amber-600" : "text-primary"}`}>
+                          <span className={`font-semibold whitespace-nowrap sm:w-24 sm:text-right ${hasDifference ? "text-amber-600" : "text-primary"}`} data-testid={`text-service-actual-${service.id}`}>
+                            <span className="sm:hidden text-[10px] text-muted-foreground uppercase tracking-wide mr-1.5">Ist</span>
                             {formatDuration(actualMins)}
                           </span>
                         </div>
                       ) : (
-                        <span className="text-muted-foreground">
+                        <span className="text-muted-foreground pl-4 sm:pl-0 text-right whitespace-nowrap">
                           {service.plannedDurationMinutes ? formatDuration(service.plannedDurationMinutes) : "—"}
                         </span>
                       )}
@@ -463,19 +465,21 @@ export default function AppointmentDetail() {
                 const totalActual = services.reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
                 const hasTotalDifference = isCompleted && hasAnyDocumentedService && totalPlanned !== totalActual;
                 return (
-                  <div className="flex items-center justify-between py-2 pt-2 border-t border-border">
+                  <div className="flex flex-col gap-1 py-2 pt-2 border-t border-border sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                     <span className="font-medium">Gesamt</span>
                     {isCompleted && hasAnyDocumentedService ? (
-                      <div className="flex items-center gap-1">
-                        <span className="w-24 text-right text-muted-foreground text-sm whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-3 sm:gap-1">
+                        <span className="text-sm text-muted-foreground whitespace-nowrap sm:w-24 sm:text-right" data-testid="text-total-planned">
+                          <span className="sm:hidden text-[10px] uppercase tracking-wide mr-1.5">Plan</span>
                           {formatDuration(totalPlanned)}
                         </span>
-                        <span className={`w-24 text-right font-semibold whitespace-nowrap ${hasTotalDifference ? "text-amber-600" : "text-primary"}`}>
+                        <span className={`font-semibold whitespace-nowrap sm:w-24 sm:text-right ${hasTotalDifference ? "text-amber-600" : "text-primary"}`} data-testid="text-total-actual">
+                          <span className="sm:hidden text-[10px] text-muted-foreground uppercase tracking-wide mr-1.5">Ist</span>
                           {formatDuration(totalActual)}
                         </span>
                       </div>
                     ) : (
-                      <span className="font-medium">
+                      <span className="font-medium text-right whitespace-nowrap">
                         {formatDuration(totalPlanned)}
                       </span>
                     )}
