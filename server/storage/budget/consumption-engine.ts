@@ -278,6 +278,17 @@ export async function createCascadeConsumption(params: {
   skipExistingCheck?: boolean;
 }, outerTx?: DbClient): Promise<CascadeResult> {
   const doWork = async (tx: DbClient) => {
+    // Pro-Kunde-Advisory-Lock (Task #494): serialisiert ALLE Einstiegspunkte
+    // in die Cascade-Konsumtion (inkl. direkter Aufrufe aus
+    // `rebookDisabledBudgetTransactions`/`rebookSingleTransaction`) gegen
+    // parallele Massen-Umbuchungen. Reentrant innerhalb derselben
+    // Transaktion, daher unschädlich, wenn der äußere Aufrufer
+    // (createConsumptionTransaction / rebook-storage) den Lock bereits
+    // gehalten hat — der xact-Lock wird ohnehin am Commit/Rollback freigegeben.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${params.customerId}::text))`
+    );
+
     if (!params.skipExistingCheck) {
       const existingTransaction = await getTransactionByAppointmentId(params.appointmentId, tx);
       if (existingTransaction) {
