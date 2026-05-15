@@ -20,6 +20,7 @@ import { auditService } from "../../services/audit";
 import { notificationService } from "../../services/notification-service";
 import { storage } from "../../storage";
 import { db } from "../../lib/db";
+import { employeeTimeEntriesRepo, appointmentsRepo, customersRepo } from "../../repos";
 import { loadTeamWorkload, getGlobalAvgHoursPerCustomerPerMonth } from "../../lib/team-workload";
 import { eq, and, isNull, inArray, sql, asc } from "drizzle-orm";
 import { z } from "zod";
@@ -174,33 +175,31 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
       eq(users.isActive, true)
     )),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       startTime: employeeTimeEntries.startTime,
       endTime: employeeTimeEntries.endTime,
     })
-    .from(employeeTimeEntries)
     .where(and(
       inArray(employeeTimeEntries.userId, employeeIds),
       eq(employeeTimeEntries.entryDate, date),
       eq(employeeTimeEntries.entryType, "verfuegbar"),
-      isNull(employeeTimeEntries.deletedAt)
+      employeeTimeEntriesRepo.activeOnly()
     ))
     .orderBy(asc(employeeTimeEntries.startTime)),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       entryType: employeeTimeEntries.entryType,
     })
-    .from(employeeTimeEntries)
     .where(and(
       inArray(employeeTimeEntries.userId, employeeIds),
       eq(employeeTimeEntries.entryDate, date),
       inArray(employeeTimeEntries.entryType, ["urlaub", "krankheit"]),
-      isNull(employeeTimeEntries.deletedAt)
+      employeeTimeEntriesRepo.activeOnly()
     )),
 
-    db.select({
+    appointmentsRepo.selectColumnsFrom({
       assignedEmployeeId: appointments.assignedEmployeeId,
       scheduledStart: appointments.scheduledStart,
       scheduledEnd: appointments.scheduledEnd,
@@ -212,42 +211,39 @@ router.get("/employees/availability", asyncHandler("Verfügbarkeiten konnten nic
         'Erstberatung'
       )`.as("customer_name"),
     })
-    .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(
       inArray(appointments.assignedEmployeeId, employeeIds),
       eq(appointments.date, date),
-      isNull(appointments.deletedAt),
+      appointmentsRepo.activeOnly(),
       sql`${appointments.status} != 'cancelled'`
     ))
     .orderBy(asc(appointments.scheduledStart)),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       startTime: employeeTimeEntries.startTime,
       endTime: employeeTimeEntries.endTime,
     })
-    .from(employeeTimeEntries)
     .where(and(
       inArray(employeeTimeEntries.userId, employeeIds),
       eq(employeeTimeEntries.entryDate, date),
       inArray(employeeTimeEntries.entryType, ["arbeitszeit", "pause", "fahrt"]),
-      isNull(employeeTimeEntries.deletedAt)
+      employeeTimeEntriesRepo.activeOnly()
     )),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       startTime: employeeTimeEntries.startTime,
       endTime: employeeTimeEntries.endTime,
       isFullDay: employeeTimeEntries.isFullDay,
     })
-    .from(employeeTimeEntries)
     .where(and(
       inArray(employeeTimeEntries.userId, employeeIds),
       eq(employeeTimeEntries.entryDate, date),
       eq(employeeTimeEntries.entryType, "blocker"),
-      isNull(employeeTimeEntries.deletedAt)
+      employeeTimeEntriesRepo.activeOnly()
     )),
   ]);
 
@@ -330,15 +326,12 @@ router.get("/employees/:id/handover-preview", asyncHandler("Übergabe-Vorschau k
   const today = todayISO();
 
   const [primaryCustomers, backupCustomers, backup2Customers, futureAppointments] = await Promise.all([
-    db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
-      .from(customers)
-      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt))),
-    db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
-      .from(customers)
-      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt))),
-    db.select({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
-      .from(customers)
-      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt))),
+    customersRepo.selectColumnsFrom({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
+      .where(and(eq(customers.primaryEmployeeId, sourceId), customersRepo.activeOnly())),
+    customersRepo.selectColumnsFrom({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
+      .where(and(eq(customers.backupEmployeeId, sourceId), customersRepo.activeOnly())),
+    customersRepo.selectColumnsFrom({ id: customers.id, name: customers.name, vorname: customers.vorname, nachname: customers.nachname })
+      .where(and(eq(customers.backupEmployeeId2, sourceId), customersRepo.activeOnly())),
     db.execute(sql`
       SELECT a.id, a.date, a.scheduled_start AS "startTime", a.scheduled_end AS "endTime",
              c.name AS "customerName", c.vorname AS "customerVorname", c.nachname AS "customerNachname"
@@ -401,9 +394,8 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
   const notifiedCustomers: Array<{ customerId: number; role: "primary" | "backup" | "backup2" }> = [];
 
   const counts = await db.transaction(async (tx) => {
-    const affectedPrimary = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
-      .from(customers)
-      .where(and(eq(customers.primaryEmployeeId, sourceId), isNull(customers.deletedAt)));
+    const affectedPrimary = await customersRepo.selectColumnsFrom({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 }, tx)
+      .where(and(eq(customers.primaryEmployeeId, sourceId), customersRepo.activeOnly()));
 
     for (const cust of affectedPrimary) {
       await tx.update(customerAssignmentHistory)
@@ -448,9 +440,8 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
       notifiedCustomers.push({ customerId: cust.id, role: "primary" });
     }
 
-    const affectedBackup = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 })
-      .from(customers)
-      .where(and(eq(customers.backupEmployeeId, sourceId), isNull(customers.deletedAt)));
+    const affectedBackup = await customersRepo.selectColumnsFrom({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId2: customers.backupEmployeeId2 }, tx)
+      .where(and(eq(customers.backupEmployeeId, sourceId), customersRepo.activeOnly()));
 
     for (const cust of affectedBackup) {
       if (cust.primaryEmployeeId === targetEmployeeId) {
@@ -496,9 +487,8 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
       notifiedCustomers.push({ customerId: cust.id, role: "backup" });
     }
 
-    const affectedBackup2 = await tx.select({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId })
-      .from(customers)
-      .where(and(eq(customers.backupEmployeeId2, sourceId), isNull(customers.deletedAt)));
+    const affectedBackup2 = await customersRepo.selectColumnsFrom({ id: customers.id, primaryEmployeeId: customers.primaryEmployeeId, backupEmployeeId: customers.backupEmployeeId }, tx)
+      .where(and(eq(customers.backupEmployeeId2, sourceId), customersRepo.activeOnly()));
 
     for (const cust of affectedBackup2) {
       if (cust.primaryEmployeeId === targetEmployeeId || cust.backupEmployeeId === targetEmployeeId) {

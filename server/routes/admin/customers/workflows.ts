@@ -23,6 +23,7 @@ import {
 } from "@shared/schema";
 import { requireSuperAdmin } from "../../../middleware/auth";
 import { db } from "../../../lib/db";
+import { appointmentsRepo, monthlyServiceRecordsRepo, customersRepo, prospectsRepo, tasksRepo } from "../../../repos";
 import { eq, and, sql, isNull, gte, lte, ne, inArray } from "drizzle-orm";
 
 const router = Router();
@@ -47,12 +48,11 @@ router.post("/customers/:id/anonymize", asyncHandler("Kunde konnte nicht anonymi
     return;
   }
 
-  const openAppts = await db.select({ id: appointments.id })
-    .from(appointments)
+  const openAppts = await appointmentsRepo.selectColumnsFrom({ id: appointments.id })
     .where(and(
       eq(appointments.customerId, id),
+      appointmentsRepo.activeOnly(),
       sql`${appointments.status} NOT IN ('completed', 'cancelled')`,
-      isNull(appointments.deletedAt)
     ));
 
   if (openAppts.length > 0) {
@@ -154,32 +154,30 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
   const contractEnd = currentContract.contractEnd;
   const today = todayISO();
 
-  const allAppointments = await db.select({
+  const allAppointments = await appointmentsRepo.selectColumnsFrom({
     id: appointments.id,
     date: appointments.date,
     status: appointments.status,
   })
-    .from(appointments)
     .where(and(
       eq(appointments.customerId, id),
       lte(appointments.date, contractEnd),
-      isNull(appointments.deletedAt),
+      appointmentsRepo.activeOnly(),
       ne(appointments.status, "cancelled"),
     ));
 
   const undocumented = allAppointments.filter(a => a.status !== "completed");
   const allDocumented = undocumented.length === 0;
 
-  const futureAppointments = await db.select({
+  const futureAppointments = await appointmentsRepo.selectColumnsFrom({
     id: appointments.id,
     date: appointments.date,
     status: appointments.status,
   })
-    .from(appointments)
     .where(and(
       eq(appointments.customerId, id),
       sql`${appointments.date} > ${contractEnd}`,
-      isNull(appointments.deletedAt),
+      appointmentsRepo.activeOnly(),
       ne(appointments.status, "cancelled"),
     ));
 
@@ -193,13 +191,12 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
   const serviceRecordChecks: Array<{ year: number; month: number; hasRecord: boolean }> = [];
   for (const ym of months) {
     const [y, m] = ym.split("-").map(Number);
-    const records = await db.select({ id: monthlyServiceRecords.id, status: monthlyServiceRecords.status })
-      .from(monthlyServiceRecords)
+    const records = await monthlyServiceRecordsRepo.selectColumnsFrom({ id: monthlyServiceRecords.id, status: monthlyServiceRecords.status })
       .where(and(
         eq(monthlyServiceRecords.customerId, id),
         eq(monthlyServiceRecords.year, y),
         eq(monthlyServiceRecords.month, m),
-        isNull(monthlyServiceRecords.deletedAt),
+        monthlyServiceRecordsRepo.activeOnly(),
       ));
     serviceRecordChecks.push({
       year: y,
@@ -316,12 +313,11 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     return;
   }
 
-  const appointmentsBeforeEnd = await db.select({ id: appointments.id, date: appointments.date, status: appointments.status })
-    .from(appointments)
+  const appointmentsBeforeEnd = await appointmentsRepo.selectColumnsFrom({ id: appointments.id, date: appointments.date, status: appointments.status })
     .where(and(
       eq(appointments.customerId, id),
       lte(appointments.date, contractEnd),
-      isNull(appointments.deletedAt),
+      appointmentsRepo.activeOnly(),
       ne(appointments.status, "cancelled"),
     ));
   const undocumented = appointmentsBeforeEnd.filter(a => a.status !== "completed");
@@ -339,13 +335,12 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
 
   for (const ym of months) {
     const [y, m] = ym.split("-").map(Number);
-    const records = await db.select({ id: monthlyServiceRecords.id })
-      .from(monthlyServiceRecords)
+    const records = await monthlyServiceRecordsRepo.selectColumnsFrom({ id: monthlyServiceRecords.id })
       .where(and(
         eq(monthlyServiceRecords.customerId, id),
         eq(monthlyServiceRecords.year, y),
         eq(monthlyServiceRecords.month, m),
-        isNull(monthlyServiceRecords.deletedAt),
+        monthlyServiceRecordsRepo.activeOnly(),
       ))
       .limit(1);
     if (records.length === 0) {
@@ -414,35 +409,25 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
 type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function computeHardDeleteReadiness(id: number, executor: DbExecutor = db) {
-  const [apptRows] = await executor
-    .select({ c: sql<number>`count(*)::int` })
-    .from(appointments)
-    .where(eq(appointments.customerId, id));
+  const [apptRows] = await appointmentsRepo.selectColumnsFrom({ c: sql<number>`count(*)::int` }, executor)
+    .where(and(eq(appointments.customerId, id), appointmentsRepo.activeOnly()));
 
-  const [serviceRows] = await executor
-    .select({ c: sql<number>`count(*)::int` })
-    .from(monthlyServiceRecords)
-    .where(eq(monthlyServiceRecords.customerId, id));
+  const [serviceRows] = await monthlyServiceRecordsRepo.selectColumnsFrom({ c: sql<number>`count(*)::int` }, executor)
+    .where(and(eq(monthlyServiceRecords.customerId, id), monthlyServiceRecordsRepo.activeOnly()));
 
   const [invoiceRows] = await executor
     .select({ c: sql<number>`count(*)::int` })
     .from(invoicesTable)
     .where(eq(invoicesTable.customerId, id));
 
-  const [mergeRows] = await executor
-    .select({ c: sql<number>`count(*)::int` })
-    .from(customers)
-    .where(eq(customers.mergedIntoCustomerId, id));
+  const [mergeRows] = await customersRepo.selectColumnsFrom({ c: sql<number>`count(*)::int` }, executor)
+    .where(and(eq(customers.mergedIntoCustomerId, id), customersRepo.activeOnly()));
 
-  const [prospectRows] = await executor
-    .select({ c: sql<number>`count(*)::int` })
-    .from(prospects)
-    .where(eq(prospects.convertedCustomerId, id));
+  const [prospectRows] = await prospectsRepo.selectColumnsFrom({ c: sql<number>`count(*)::int` }, executor)
+    .where(and(eq(prospects.convertedCustomerId, id), prospectsRepo.activeOnly()));
 
-  const [taskRows] = await executor
-    .select({ c: sql<number>`count(*)::int` })
-    .from(tasks)
-    .where(and(eq(tasks.customerId, id), isNull(tasks.deletedAt)));
+  const [taskRows] = await tasksRepo.selectColumnsFrom({ c: sql<number>`count(*)::int` }, executor)
+    .where(and(eq(tasks.customerId, id), tasksRepo.activeOnly()));
 
   const checks = [
     { key: "noAppointments", label: "Keine Termine vorhanden", count: apptRows.c, met: apptRows.c === 0 },

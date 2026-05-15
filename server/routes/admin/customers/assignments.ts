@@ -15,7 +15,8 @@ import {
   appointments,
 } from "@shared/schema";
 import { db } from "../../../lib/db";
-import { eq, and, sql, gte, isNull, count } from "drizzle-orm";
+import { customersRepo, appointmentsRepo } from "../../../repos";
+import { eq, and, sql, gte, count } from "drizzle-orm";
 
 const router = Router();
 
@@ -160,25 +161,24 @@ async function matchEmployees(criteria: MatchCriteria, excludeEmployeeIds: numbe
     db.select({ userId: userRoles.userId, role: userRoles.role })
     .from(userRoles),
 
-    db.select({
+    customersRepo.selectColumnsFrom({
       employeeId: customers.primaryEmployeeId,
       count: count(),
     })
-    .from(customers)
     .where(and(
       eq(customers.status, "aktiv"),
-      isNull(customers.deletedAt),
+      customersRepo.activeOnly(),
       sql`${customers.primaryEmployeeId} IS NOT NULL`
     ))
     .groupBy(customers.primaryEmployeeId),
 
-    db.select({
+    appointmentsRepo.selectColumnsFrom({
       employeeId: appointments.assignedEmployeeId,
       count: count(),
     })
-    .from(appointments)
     .where(and(
       gte(appointments.date, threeMonthsAgoStr),
+      appointmentsRepo.activeOnly(),
       sql`${appointments.assignedEmployeeId} IS NOT NULL`
     ))
     .groupBy(appointments.assignedEmployeeId),
@@ -324,11 +324,7 @@ router.get("/customers/:id/match-employees", asyncHandler("Matching konnte nicht
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
 
-  const customer = await db
-    .select()
-    .from(customers)
-    .where(eq(customers.id, id))
-    .then(r => r[0]);
+  const customer = await customersRepo.findById(id);
 
   if (!customer) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });

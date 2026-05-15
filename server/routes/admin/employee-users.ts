@@ -23,6 +23,7 @@ import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
 import { geocodeEmployee } from "../../services/geocoding";
 import { db } from "../../lib/db";
+import { appointmentsRepo } from "../../repos";
 import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { sendEmail, buildWelcomeEmailHtml } from "../../services/email-service";
@@ -668,15 +669,14 @@ router.post("/users/:id/anonymize", asyncHandler("Mitarbeiter konnte nicht anony
     return;
   }
 
-  const openAppointments = await db.select({ id: appointments.id })
-    .from(appointments)
+  const openAppointments = await appointmentsRepo.selectColumnsFrom({ id: appointments.id })
     .where(and(
       or(
         eq(appointments.assignedEmployeeId, id),
         eq(appointments.performedByEmployeeId, id)
       ),
       ne(appointments.status, "completed"),
-      isNull(appointments.deletedAt)
+      appointmentsRepo.activeOnly()
     ));
 
   if (openAppointments.length > 0) {

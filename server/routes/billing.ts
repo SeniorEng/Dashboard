@@ -34,6 +34,7 @@ import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
+import { monthlyServiceRecordsRepo, appointmentsRepo, customerServicePricesRepo } from "../repos";
 import {
   getNextInvoiceNumberTx,
   createInvoiceTx,
@@ -83,13 +84,12 @@ async function getAlreadyInvoicedAppointmentIds(customerId: number, billingYear:
 }
 
 async function getServiceRecordsForPeriod(customerId: number, year: number, month: number) {
-  return db.select()
-    .from(monthlyServiceRecords)
+  return monthlyServiceRecordsRepo.selectFrom()
     .where(and(
       eq(monthlyServiceRecords.customerId, customerId),
       eq(monthlyServiceRecords.year, year),
       eq(monthlyServiceRecords.month, month),
-      isNull(monthlyServiceRecords.deletedAt)
+      monthlyServiceRecordsRepo.activeOnly()
     ));
 }
 
@@ -105,9 +105,8 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
   if (apptIds.length === 0) return { lineItems: [], totalNetCents: 0, totalVatCents: 0 };
   const isVatExempt = billingType && billingType !== "selbstzahler";
 
-  const appts = await db.select()
-    .from(appointments)
-    .where(and(inArray(appointments.id, apptIds), isNull(appointments.deletedAt)));
+  const appts = await appointmentsRepo.selectFrom()
+    .where(and(inArray(appointments.id, apptIds), appointmentsRepo.activeOnly()));
 
   const serviceBreakdown = await db.select({
     appointmentId: appointmentServicesTable.appointmentId,
@@ -127,17 +126,16 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
   const resolvedCustomerId = customerId ?? appts[0]?.customerId;
   let allCustomerPrices: { id: number; serviceId: number; priceCents: number; validFrom: Date | null; validTo: Date | null }[] = [];
   if (resolvedCustomerId) {
-    allCustomerPrices = await db.select({
+    allCustomerPrices = await customerServicePricesRepo.selectColumnsFrom({
       id: customerServicePrices.id,
       serviceId: customerServicePrices.serviceId,
       priceCents: customerServicePrices.priceCents,
       validFrom: customerServicePrices.validFrom,
       validTo: customerServicePrices.validTo,
     })
-    .from(customerServicePrices)
     .where(and(
       eq(customerServicePrices.customerId, resolvedCustomerId),
-      isNull(customerServicePrices.deletedAt),
+      customerServicePricesRepo.activeOnly(),
     ));
   }
 
@@ -286,10 +284,9 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     throw badRequest("Monat und Jahr sind erforderlich.");
   }
 
-  const signedRecords = await db.select({
+  const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
     customerId: monthlyServiceRecords.customerId,
   })
-    .from(monthlyServiceRecords)
     .where(and(
       eq(monthlyServiceRecords.year, year),
       eq(monthlyServiceRecords.month, month),
@@ -297,7 +294,7 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
         eq(monthlyServiceRecords.status, "completed"),
         eq(monthlyServiceRecords.status, "employee_signed")
       ),
-      isNull(monthlyServiceRecords.deletedAt)
+      monthlyServiceRecordsRepo.activeOnly()
     ));
 
   const uniqueCustomerIds = Array.from(new Set(signedRecords.map(r => r.customerId)));
@@ -1262,15 +1259,14 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       // dokumentierte Termine bleibt der LN bestehen, sodass BF-5.3
       // (reine Re-Abrechnung derselben Termine) weiterhin ohne neuen LN
       // erfolgen kann.
-      const periodSrRows = await tx.select({
+      const periodSrRows = await monthlyServiceRecordsRepo.selectColumnsFrom({
         id: monthlyServiceRecords.id,
-      })
-        .from(monthlyServiceRecords)
+      }, tx)
         .where(and(
           eq(monthlyServiceRecords.customerId, locked.customerId),
           eq(monthlyServiceRecords.year, locked.billingYear),
           eq(monthlyServiceRecords.month, locked.billingMonth),
-          isNull(monthlyServiceRecords.deletedAt),
+          monthlyServiceRecordsRepo.activeOnly(),
         ));
       if (periodSrRows.length > 0) {
         const srIds = periodSrRows.map(r => r.id);
@@ -1285,12 +1281,11 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
         const nextMonth = locked.billingMonth === 12 ? 1 : locked.billingMonth + 1;
         const nextYear = locked.billingMonth === 12 ? locked.billingYear + 1 : locked.billingYear;
         const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
-        const documentedAppts = await tx.select({ id: appointments.id })
-          .from(appointments)
+        const documentedAppts = await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, tx)
           .where(and(
             eq(appointments.customerId, locked.customerId),
             eq(appointments.status, 'completed'),
-            isNull(appointments.deletedAt),
+            appointmentsRepo.activeOnly(),
             gte(appointments.date, periodStartStr),
             lt(appointments.date, periodEndStr),
           ));
@@ -1424,7 +1419,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
 }
 
 async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Invoice): Promise<void> {
-  const serviceRecords = await db.select({
+  const serviceRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
     id: monthlyServiceRecords.id,
     employeeSignatureData: monthlyServiceRecords.employeeSignatureData,
     employeeSignedAt: monthlyServiceRecords.employeeSignedAt,
@@ -1434,12 +1429,11 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
     status: monthlyServiceRecords.status,
     recordType: monthlyServiceRecords.recordType,
   })
-    .from(monthlyServiceRecords)
     .where(and(
       eq(monthlyServiceRecords.customerId, invoice.customerId),
       eq(monthlyServiceRecords.year, invoice.billingYear),
       eq(monthlyServiceRecords.month, invoice.billingMonth),
-      isNull(monthlyServiceRecords.deletedAt)
+      monthlyServiceRecordsRepo.activeOnly()
     ));
 
   const signedRecords = serviceRecords.filter(r =>
@@ -1813,13 +1807,12 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   // (employee + customer) signiert ist. Ohne Signaturen ist die Rechnung
   // gegenüber Kasse/Kunde nicht beweisbar — wir lehnen den Versand ab,
   // statt unsigniert zu versenden.
-  const signedSrCount = await db.select({ id: monthlyServiceRecords.id })
-    .from(monthlyServiceRecords)
+  const signedSrCount = await monthlyServiceRecordsRepo.selectColumnsFrom({ id: monthlyServiceRecords.id })
     .where(and(
       eq(monthlyServiceRecords.customerId, invoice.customerId),
       eq(monthlyServiceRecords.year, invoice.billingYear),
       eq(monthlyServiceRecords.month, invoice.billingMonth),
-      isNull(monthlyServiceRecords.deletedAt),
+      monthlyServiceRecordsRepo.activeOnly(),
       inArray(monthlyServiceRecords.status, ["completed", "employee_signed"]),
     ));
   if (signedSrCount.length === 0) {

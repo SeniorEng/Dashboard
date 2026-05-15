@@ -44,6 +44,7 @@ import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
 import { customers, users, userRoles } from "@shared/schema";
 import { customerContracts } from "@shared/schema/contracts";
+import { customersRepo, appointmentsRepo } from "../repos";
 import { eq, and, or, inArray, gte, lte, ne, isNull, sql } from "drizzle-orm";
 import {
   canViewAppointment,
@@ -265,18 +266,17 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
 
   const monthNames = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
-  const assignedCustomers = await db.select({
+  const assignedCustomers = await customersRepo.selectColumnsFrom({
     id: customers.id,
     name: customers.name,
     primaryEmployeeId: customers.primaryEmployeeId,
     backupEmployeeId: customers.backupEmployeeId,
     backupEmployeeId2: customers.backupEmployeeId2,
   })
-  .from(customers)
   .where(
     and(
       eq(customers.status, "aktiv"),
-      isNull(customers.deletedAt),
+      customersRepo.activeOnly(),
       or(
         eq(customers.primaryEmployeeId, effectiveEmployeeId),
         eq(customers.backupEmployeeId, effectiveEmployeeId),
@@ -326,26 +326,24 @@ router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckun
   }
 
   const [currentMonthAppts, nextMonthAppts] = await Promise.all([
-    db.select({ customerId: appointments.customerId })
-      .from(appointments)
+    appointmentsRepo.selectColumnsFrom({ customerId: appointments.customerId })
       .where(
         and(
           inArray(appointments.customerId, customerIds),
           gte(appointments.date, currentMonthStart),
           lte(appointments.date, currentMonthEnd),
           ne(appointments.status, "cancelled"),
-          isNull(appointments.deletedAt),
+          appointmentsRepo.activeOnly(),
         )
       ),
-    db.select({ customerId: appointments.customerId })
-      .from(appointments)
+    appointmentsRepo.selectColumnsFrom({ customerId: appointments.customerId })
       .where(
         and(
           inArray(appointments.customerId, customerIds),
           gte(appointments.date, nextMonthStart),
           lte(appointments.date, nextMonthEnd),
           ne(appointments.status, "cancelled"),
-          isNull(appointments.deletedAt),
+          appointmentsRepo.activeOnly(),
         )
       ),
   ]);

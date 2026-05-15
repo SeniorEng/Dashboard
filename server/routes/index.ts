@@ -348,11 +348,11 @@ router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fe
     }
   }
 
-  const { db } = await import("../lib/db");
   const { customers } = await import("@shared/schema/customers");
-  const { eq } = await import("drizzle-orm");
+  const { eq, and } = await import("drizzle-orm");
+  const { customersRepo } = await import("../repos");
 
-  const [customer] = await db.select({
+  const [customer] = await customersRepo.selectColumnsFrom({
     id: customers.id,
     latitude: customers.latitude,
     longitude: customers.longitude,
@@ -360,7 +360,7 @@ router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fe
     nr: customers.nr,
     plz: customers.plz,
     stadt: customers.stadt,
-  }).from(customers).where(eq(customers.id, id));
+  }).where(and(eq(customers.id, id), customersRepo.activeOnly()));
 
   if (!customer) return res.status(404).json({ error: "Kunde nicht gefunden" });
 
@@ -379,6 +379,7 @@ router.post("/customers/:id/geocode", requireAuth, asyncHandler("Geocodierung fe
     return res.status(422).json({ error: "Adresse konnte nicht aufgelöst werden. Bitte Kundenadresse prüfen." });
   }
 
+  const { db } = await import("../lib/db");
   await db.update(customers)
     .set({ latitude: result.latitude, longitude: result.longitude })
     .where(eq(customers.id, id));

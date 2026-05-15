@@ -4,6 +4,7 @@ import { inArray, eq, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
 import { requireSuperAdmin } from "../../middleware/auth";
 import { db } from "../../lib/db";
+import { appointmentsRepo } from "../../repos";
 import { customers } from "@shared/schema";
 import { appointments, appointmentSeries } from "@shared/schema";
 import { invoices, invoiceLineItems } from "@shared/schema";
@@ -33,9 +34,12 @@ async function purgeCustomerCascade(id: number): Promise<void> {
       .set({ mergedIntoCustomerId: null })
       .where(eq(customers.mergedIntoCustomerId, id));
 
-    const apptIdsRows = await tx
-      .select({ id: appointments.id })
-      .from(appointments)
+    // Hard-delete unten (Zeile 70) löscht ALLE Appointments dieses Kunden,
+    // inkl. bereits soft-gelöschter. FK-Refs auf budgetTransactions.appointmentId
+    // und appointments.travelFromAppointmentId müssen daher auch für
+    // soft-gelöschte Zeilen aufgeräumt werden — `activeOnly()` würde diese
+    // ausschließen und FK-Konflikte beim Hard-Delete provozieren.
+    const apptIdsRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, tx)
       .where(eq(appointments.customerId, id));
     const apptIds = apptIdsRows.map(r => r.id);
 
@@ -176,14 +180,12 @@ router.post(
         .returning({ id: employeeTimeEntries.id });
       timeEntriesDeleted = teResult.length;
 
-      const apptIdsRows = await tx
-        .select({ id: appointments.id })
-        .from(appointments)
+      const apptIdsRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, tx)
         .where(and(
           eq(appointments.assignedEmployeeId, userId),
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
-          isNull(appointments.deletedAt),
+          appointmentsRepo.activeOnly(),
         ));
       const apptIds = apptIdsRows.map(r => r.id);
 

@@ -392,13 +392,13 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
   const userId = req.user?.id;
   const { db: database } = await import("../lib/db");
   const { budgetAllocations } = await import("@shared/schema");
-  const { eq, and, or, isNull } = await import("drizzle-orm");
-  const existing = await database.select()
-    .from(budgetAllocations)
+  const { eq, and, or } = await import("drizzle-orm");
+  const { budgetAllocationsRepo } = await import("../repos");
+  const existing = await budgetAllocationsRepo.selectFrom(database)
     .where(and(
       eq(budgetAllocations.id, allocationId),
       eq(budgetAllocations.customerId, customerId),
-      isNull(budgetAllocations.deletedAt),
+      budgetAllocationsRepo.activeOnly(),
       or(
         eq(budgetAllocations.source, "initial_balance"),
         eq(budgetAllocations.source, "carryover"),

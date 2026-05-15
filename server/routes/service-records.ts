@@ -7,6 +7,7 @@ import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { db } from "../lib/db";
+import { appointmentsRepo } from "../repos";
 import { eq, and, isNull, ne, inArray } from "drizzle-orm";
 import { getPrimaryCustomerIds } from "../storage/customers-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
@@ -338,12 +339,11 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
     });
   }
   
-  const [appointment] = await db.select()
-    .from(appointments)
+  const [appointment] = await appointmentsRepo.selectFrom()
     .where(and(
       eq(appointments.id, appointmentId),
       eq(appointments.customerId, customerId),
-      isNull(appointments.deletedAt)
+      appointmentsRepo.activeOnly()
     ))
     .limit(1);
   
@@ -411,9 +411,8 @@ router.get("/for-appointment/:appointmentId", requireAuth, asyncHandler("Leistun
   const appointmentId = requireIntParam(req.params.appointmentId, res);
   if (appointmentId === null) return;
 
-  const [appointment] = await db.select()
-    .from(appointments)
-    .where(and(eq(appointments.id, appointmentId), isNull(appointments.deletedAt)))
+  const [appointment] = await appointmentsRepo.selectFrom()
+    .where(and(eq(appointments.id, appointmentId), appointmentsRepo.activeOnly()))
     .limit(1);
   
   if (!appointment) {

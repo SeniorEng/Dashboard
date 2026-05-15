@@ -1,0 +1,52 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pro Routen-Datei sind nur Repo-vermittelte Reads für soft-deletable Tabellen registriert 1`] = `
+{
+  "server/routes/admin/customers/assignments.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+  ],
+  "server/routes/admin/customers/budgets.ts": [
+    "appointmentsRepo",
+  ],
+  "server/routes/admin/customers/workflows.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+    "monthlyServiceRecordsRepo",
+    "prospectsRepo",
+    "tasksRepo",
+  ],
+  "server/routes/admin/employee-availability.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+    "employeeTimeEntriesRepo",
+  ],
+  "server/routes/admin/employee-users.ts": [
+    "appointmentsRepo",
+  ],
+  "server/routes/admin/lexware-export.ts": [
+    "employeeTimeEntriesRepo",
+  ],
+  "server/routes/admin/test-cleanup.ts": [
+    "appointmentsRepo",
+  ],
+  "server/routes/appointments.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+  ],
+  "server/routes/billing.ts": [
+    "appointmentsRepo",
+    "customerServicePricesRepo",
+    "monthlyServiceRecordsRepo",
+  ],
+  "server/routes/budget.ts": [
+    "budgetAllocationsRepo",
+  ],
+  "server/routes/index.ts": [
+    "customersRepo",
+  ],
+  "server/routes/service-records.ts": [
+    "appointmentsRepo",
+  ],
+}
+`;

@@ -13,6 +13,7 @@ import {
   appointments,
 } from "@shared/schema";
 import { db } from "../../../lib/db";
+import { appointmentsRepo } from "../../../repos";
 import { eq, and, sql, gte, lte, isNull, isNotNull } from "drizzle-orm";
 
 const router = Router();
@@ -101,7 +102,7 @@ router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", a
     conditions.push(lte(appointments.date, dateTo));
   }
 
-  const appointmentsWithoutBudget = await db.select({
+  const appointmentsWithoutBudget = await appointmentsRepo.selectColumnsFrom({
     id: appointments.id,
     customerId: appointments.customerId,
     date: appointments.date,
@@ -109,7 +110,6 @@ router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", a
     actualEnd: appointments.actualEnd,
     signatureData: appointments.signatureData,
   })
-  .from(appointments)
   .where(and(...conditions))
   .orderBy(appointments.date);
 
@@ -158,7 +158,7 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     conditions.push(lte(appointments.date, data.dateTo));
   }
 
-  const apptRows = await db.select({
+  const apptRows = await appointmentsRepo.selectColumnsFrom({
     id: appointments.id,
     customerId: appointments.customerId,
     date: appointments.date,
@@ -168,7 +168,6 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     customerKilometers: appointments.customerKilometers,
     signatureData: appointments.signatureData,
   })
-  .from(appointments)
   .where(and(...conditions))
   .orderBy(appointments.date);
 

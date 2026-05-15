@@ -4,6 +4,7 @@ import { users, employeeCompensationHistory } from "@shared/schema/users";
 import { companySettings } from "@shared/schema/company";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
 import { and, gte, lte, sql, inArray, eq, isNull } from "drizzle-orm";
+import { employeeTimeEntriesRepo } from "../../repos";
 import { asyncHandler } from "../../lib/errors";
 import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
@@ -195,19 +196,19 @@ async function getMonthlyHoursBatch(
     bucket.anfahrt += Number(row.total_travel_minutes) || 0;
   }
 
-  const timeEntries = await db.select({
+  const timeEntries = await employeeTimeEntriesRepo.selectColumnsFrom({
     userId: employeeTimeEntries.userId,
     entryType: employeeTimeEntries.entryType,
     entryDate: employeeTimeEntries.entryDate,
     durationMinutes: employeeTimeEntries.durationMinutes,
     startTime: employeeTimeEntries.startTime,
     endTime: employeeTimeEntries.endTime,
-  }).from(employeeTimeEntries).where(
+  }).where(
     and(
       inArray(employeeTimeEntries.userId, employeeIds),
       gte(employeeTimeEntries.entryDate, startDate),
       lte(employeeTimeEntries.entryDate, endDate),
-      isNull(employeeTimeEntries.deletedAt)
+      employeeTimeEntriesRepo.activeOnly()
     )
   );
 
@@ -340,16 +341,16 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     customerKmByEmployee[row.employee_id] = Number(row.customer_km) || 0;
   }
 
-  const timeEntries = await db.select({
+  const timeEntries = await employeeTimeEntriesRepo.selectColumnsFrom({
     userId: employeeTimeEntries.userId,
     entryType: employeeTimeEntries.entryType,
     kilometers: employeeTimeEntries.kilometers,
-  }).from(employeeTimeEntries).where(
+  }).where(
     and(
       inArray(employeeTimeEntries.userId, employeeIds),
       gte(employeeTimeEntries.entryDate, startDate),
       lte(employeeTimeEntries.entryDate, endDate),
-      isNull(employeeTimeEntries.deletedAt)
+      employeeTimeEntriesRepo.activeOnly()
     )
   );
 
