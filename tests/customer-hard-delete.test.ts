@@ -26,7 +26,15 @@ afterAll(async () => {
   }
 });
 
-async function deleteCustomerWithBody(id: number, body: { reason: string; confirmName: string }) {
+async function deleteCustomerWithBody(
+  id: number,
+  body: {
+    reason: string;
+    confirmName: string;
+    hardDelete?: boolean;
+    complianceOfficerSignoff?: string;
+  },
+) {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetch(`${BASE_URL}/api/admin/customers/${id}`, {
     method: "DELETE",
@@ -92,7 +100,7 @@ describe("KV-25: Hard-Delete Karteileichen (SuperAdmin)", () => {
     expect(res.data?.message).toContain("Name");
   });
 
-  it("KV-25.6 – Readiness blockiert bei vorhandener offener Aufgabe; DELETE liefert 409", async () => {
+  it("KV-25.6 – hardDelete=true mit vorhandener Aufgabe wird mit 409 (Readiness) blockiert", async () => {
     const c = await createTestCustomer({
       vorname: "Karteileiche",
       nachname: "WithTask-" + uniqueId(),
@@ -111,13 +119,12 @@ describe("KV-25: Hard-Delete Karteileichen (SuperAdmin)", () => {
     );
     expect(readiness.status).toBe(200);
     expect(readiness.data.ready).toBe(false);
-    const tasksCheck = readiness.data.checks.find((x) => x.key === "noTasks");
-    expect(tasksCheck?.met).toBe(false);
-    expect(tasksCheck?.count).toBeGreaterThanOrEqual(1);
 
     const delRes = await deleteCustomerWithBody(c.id, {
       reason: "Versuch trotz offener Aufgabe",
       confirmName: c.name,
+      hardDelete: true,
+      complianceOfficerSignoff: "Compliance-Freigabe für Audit-Test #448",
     });
     expect(delRes.status).toBe(409);
     expect(delRes.data?.details?.checks?.find((x: { key: string }) => x.key === "noTasks")?.met).toBe(false);
@@ -126,20 +133,18 @@ describe("KV-25: Hard-Delete Karteileichen (SuperAdmin)", () => {
     await apiDelete(`/api/tasks/${taskRes.data.id}`);
   });
 
-  it("KV-25.7 – Race: Aufgabe wird zwischen Readiness und DELETE angelegt → 409, Kunde bleibt erhalten", async () => {
+  it("KV-25.7 – Race (hardDelete=true): Aufgabe wird zwischen Readiness und DELETE angelegt → 409", async () => {
     const c = await createTestCustomer({
       vorname: "Karteileiche",
       nachname: "Race-" + uniqueId(),
     }) as { id: number; name: string };
     trackedIds.push(c.id);
 
-    // 1. Readiness ist OK
     const readiness = await apiGet<{ ready: boolean }>(
       `/api/admin/customers/${c.id}/hard-delete-readiness`
     );
     expect(readiness.data.ready).toBe(true);
 
-    // 2. Race-Konflikt simulieren: vor dem DELETE eine Aufgabe anlegen
     const taskRes = await apiPost<{ id: number }>("/api/tasks", {
       title: `Race-Insert ${uniqueId()}`,
       priority: "low",
@@ -147,26 +152,26 @@ describe("KV-25: Hard-Delete Karteileichen (SuperAdmin)", () => {
     });
     expect(taskRes.status).toBe(201);
 
-    // 3. DELETE muss durch Recheck-in-Transaktion + FOR UPDATE 409 liefern
     const delRes = await deleteCustomerWithBody(c.id, {
       reason: "Race-Test",
       confirmName: c.name,
+      hardDelete: true,
+      complianceOfficerSignoff: "Compliance-Freigabe für Audit-Test #448",
     });
     expect(delRes.status).toBe(409);
 
-    // 4. Kunde existiert noch
     const stillThere = await apiGet(`/api/admin/customers/${c.id}/hard-delete-readiness`);
     expect(stillThere.status).toBe(200);
 
-    // Cleanup
     await apiDelete(`/api/tasks/${taskRes.data.id}`);
   });
 
-  it("KV-25.5 – Erfolgsfall: leerer Kunde wird gelöscht und Audit-Eintrag geschrieben", async () => {
+  it("KV-25.5 – Default-Pfad (soft): leerer Kunde wird gelöscht und Audit-Eintrag geschrieben", async () => {
     const c = await createTestCustomer({
       vorname: "Karteileiche",
       nachname: "Success-" + uniqueId(),
     }) as { id: number; name: string };
+    trackedIds.push(c.id);
 
     const res = await deleteCustomerWithBody(c.id, {
       reason: "Doppel-Anlage, nie genutzt",
@@ -174,17 +179,78 @@ describe("KV-25: Hard-Delete Karteileichen (SuperAdmin)", () => {
     });
     expect(res.status).toBe(200);
     expect(res.data?.success).toBe(true);
-
-    const after = await apiGet(`/api/admin/customers/${c.id}/hard-delete-readiness`);
-    expect(after.status).toBe(404);
+    expect(res.data?.audit?.parentDeletionId).toBeGreaterThan(0);
 
     const auditRes = await apiGet<{ entries: Array<{ action: string; entityId: number; metadata: Record<string, unknown> }> }>(
-      `/api/admin/audit-log?action=customer_hard_deleted&entityType=customer`
+      `/api/admin/audit-log?action=customer_soft_deleted&entityType=customer`
     );
     expect(auditRes.status).toBe(200);
     const entry = auditRes.data.entries.find((e) => e.entityId === c.id);
     expect(entry).toBeTruthy();
     expect(entry?.metadata?.customerName).toBe(c.name);
     expect(entry?.metadata?.reason).toBe("Doppel-Anlage, nie genutzt");
+    expect(entry?.metadata?.hardDelete).toBe(false);
+  });
+
+  it("KV-25.8 – Default-Pfad: Kunde mit Aufgabe wird soft-gelöscht und schreibt Per-Child-Audit mit parentDeletionId", async () => {
+    const c = await createTestCustomer({
+      vorname: "Karteileiche",
+      nachname: "Cascade-" + uniqueId(),
+    }) as { id: number; name: string };
+
+    const taskRes = await apiPost<{ id: number }>("/api/tasks", {
+      title: `Cascade-Audit-Test ${uniqueId()}`,
+      priority: "low",
+      customerId: c.id,
+    });
+    expect(taskRes.status).toBe(201);
+
+    const res = await deleteCustomerWithBody(c.id, {
+      reason: "Soft-Cascade-Audit-Test",
+      confirmName: c.name,
+    });
+    expect(res.status).toBe(200);
+    expect(res.data?.success).toBe(true);
+    expect(res.data?.audit?.parentDeletionId).toBeGreaterThan(0);
+    expect(res.data?.audit?.childAudits).toBeGreaterThanOrEqual(1);
+    expect(res.data?.audit?.perTable?.tasks).toBeGreaterThanOrEqual(1);
+
+    const parentDeletionId = res.data?.audit?.parentDeletionId as number;
+
+    // Pro Child muss ein Audit-Eintrag mit parentDeletionId existieren.
+    const childAuditRes = await apiGet<{ entries: Array<{ id: number; action: string; entityType: string; entityId: number; metadata: Record<string, unknown> }> }>(
+      `/api/admin/audit-log?action=customer_child_soft_deleted`
+    );
+    expect(childAuditRes.status).toBe(200);
+    const childEntries = childAuditRes.data.entries.filter(
+      (e) => (e.metadata?.customerId as number | undefined) === c.id,
+    );
+    expect(childEntries.length).toBeGreaterThanOrEqual(1);
+    const taskChildAudit = childEntries.find((e) => e.metadata?.childTable === "tasks");
+    expect(taskChildAudit).toBeTruthy();
+    expect(taskChildAudit?.entityId).toBe(taskRes.data.id);
+  });
+
+  it("KV-25.9 – Hard-Delete erfordert Compliance-Officer-Signoff (≥10 Zeichen)", async () => {
+    const c = await createTestCustomer({
+      vorname: "Karteileiche",
+      nachname: "Signoff-" + uniqueId(),
+    }) as { id: number; name: string };
+    trackedIds.push(c.id);
+
+    const tooShort = await deleteCustomerWithBody(c.id, {
+      reason: "Hard-Delete-Eskalation",
+      confirmName: c.name,
+      hardDelete: true,
+      complianceOfficerSignoff: "kurz",
+    });
+    expect(tooShort.status).toBe(400);
+
+    const missing = await deleteCustomerWithBody(c.id, {
+      reason: "Hard-Delete-Eskalation",
+      confirmName: c.name,
+      hardDelete: true,
+    });
+    expect(missing.status).toBe(400);
   });
 });

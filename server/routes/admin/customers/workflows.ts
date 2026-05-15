@@ -24,6 +24,7 @@ import {
 import { requireSuperAdmin } from "../../../middleware/auth";
 import { db } from "../../../lib/db";
 import { appointmentsRepo, monthlyServiceRecordsRepo, customersRepo, prospectsRepo, tasksRepo } from "../../../repos";
+import { softDeleteCustomerWithCascade } from "../../../services/customer-deletion-service";
 import { eq, and, sql, isNull, gte, lte, ne, inArray } from "drizzle-orm";
 
 const router = Router();
@@ -462,7 +463,18 @@ router.get(
 const hardDeleteSchema = z.object({
   reason: z.string().min(5, "Grund muss mindestens 5 Zeichen lang sein").max(1000, "Grund darf maximal 1000 Zeichen haben"),
   confirmName: z.string().min(1, "Bitte den Kundennamen zur Bestätigung eingeben"),
-});
+  // Task #448: Default-Pfad ist soft (Kunde + Children werden soft-gelöscht und
+  // pro Child ein Audit-Eintrag mit parentDeletionId geschrieben). Echter
+  // Hard-Delete bleibt nur als Admin-Eskalation hinter Flag + Compliance-Signoff.
+  hardDelete: z.boolean().optional().default(false),
+  complianceOfficerSignoff: z.string().max(1000, "Begründung darf maximal 1000 Zeichen haben").optional(),
+}).refine(
+  (data) => !data.hardDelete || (data.complianceOfficerSignoff?.trim().length ?? 0) >= 10,
+  {
+    message: "Compliance-Officer-Signoff (≥10 Zeichen) ist für echten Hard-Delete erforderlich",
+    path: ["complianceOfficerSignoff"],
+  },
+);
 
 router.delete(
   "/customers/:id",
@@ -471,7 +483,7 @@ router.delete(
     const id = requireIntParam(req.params.id, res);
     if (id === null) return;
 
-    const { reason, confirmName } = hardDeleteSchema.parse(req.body);
+    const { reason, confirmName, hardDelete, complianceOfficerSignoff } = hardDeleteSchema.parse(req.body);
 
     const customer = await storage.getCustomer(id);
     if (!customer) {
@@ -493,33 +505,65 @@ router.delete(
       nachname: customer.nachname,
       geburtsdatum: customer.geburtsdatum,
       createdAt: customer.createdAt ? customer.createdAt.toISOString() : null,
-      reason,
     };
 
-    let conflict: { ready: boolean; checks: Array<{ key: string; label: string; count: number; met: boolean }> } | null = null;
+    // Task #448:
+    //   - Default-Pfad (`hardDelete=false`): Soft-Cascade-Routine soft-löscht
+    //     Kunden + alle abhängigen Datensätze, schreibt pro Child einen Audit-
+    //     Eintrag mit `parentDeletionId`. Kein 409 wegen offener Daten — die
+    //     Soft-Löschung kann immer ausgeführt werden.
+    //   - Hard-Delete (`hardDelete=true`): zusätzlich Compliance-Officer-Signoff
+    //     erforderlich. Erst Soft-Cascade (für vollständige Audit-Spur), danach
+    //     `tx.delete(customers)` für die echte Entfernung; FK-Cascade räumt
+    //     Resttabellen ohne `deletedAt` (z.B. customer_contacts) auf.
+    type CascadeResult = Awaited<ReturnType<typeof softDeleteCustomerWithCascade>>;
+    type TxResult =
+      | { kind: "conflict"; conflict: { ready: boolean; checks: Array<{ key: string; label: string; count: number; met: boolean }> } }
+      | { kind: "ok"; cascade: CascadeResult };
+    let txOutcome: TxResult | null = null;
     let fkConflict = false;
 
     try {
-      await db.transaction(async (tx) => {
-        // Lock the customer row to serialize concurrent hard-deletes / writes
+      txOutcome = await db.transaction(async (tx): Promise<TxResult> => {
+        // Lock the customer row to serialize concurrent deletes / writes
         // against this customer for the duration of the transaction.
         const lockResult = await tx.execute(
           sql`SELECT id FROM customers WHERE id = ${id} FOR UPDATE`
         );
         if (lockResult.rows.length === 0) {
-          conflict = { ready: false, checks: [] };
-          return;
+          return { kind: "conflict", conflict: { ready: false, checks: [] } };
         }
-        // Recheck readiness *inside* the transaction using `tx`, so the counts
-        // reflect the locked snapshot. Concurrent inserts into operative tables
-        // either committed before (and will be seen here) or after (and will
-        // hit the FK constraint, since we're about to delete the customer row).
-        const recheck = await computeHardDeleteReadiness(id, tx);
-        if (!recheck.ready) {
-          conflict = recheck;
-          return;
+
+        if (hardDelete) {
+          // Readiness-Recheck nur für echten Hard-Delete: FK-Cascades dürfen
+          // hier keine operativen Daten zerstören (Termine/Rechnungen etc.).
+          const recheck = await computeHardDeleteReadiness(id, tx);
+          if (!recheck.ready) {
+            return { kind: "conflict", conflict: recheck };
+          }
         }
-        await tx.delete(customers).where(eq(customers.id, id));
+
+        const cascade = await softDeleteCustomerWithCascade({
+          tx,
+          customerId: id,
+          userId: req.user!.id,
+          ipAddress: req.ip,
+          reason,
+          snapshot,
+          hardDelete,
+          complianceOfficerSignoff: complianceOfficerSignoff ?? null,
+        });
+
+        if (hardDelete) {
+          // Echte SQL-Löschung — FK-Cascade entfernt Resttabellen ohne
+          // `deletedAt` (customer_contacts, customer_needs_assessments,
+          // customer_assignment_history, customer_insurance_history,
+          // customer_budget_preferences, …). Audit-Spur ist über
+          // `softDeleteCustomerWithCascade` bereits persistiert.
+          await tx.delete(customers).where(eq(customers.id, id));
+        }
+
+        return { kind: "ok", cascade };
       });
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -530,11 +574,11 @@ router.delete(
       }
     }
 
-    if (conflict) {
+    if (txOutcome?.kind === "conflict") {
       res.status(409).json({
         error: "CONFLICT",
-        message: "Kunde hat zwischenzeitlich operative Daten erhalten — Löschen nicht möglich.",
-        details: conflict,
+        message: "Kunde hat zwischenzeitlich operative Daten erhalten — Hard-Delete nicht möglich.",
+        details: txOutcome.conflict,
       });
       return;
     }
@@ -547,11 +591,18 @@ router.delete(
       return;
     }
 
-    await auditService.customerHardDeleted(req.user!.id, id, snapshot, req.ip);
-
     birthdaysCache.invalidateAll();
 
-    res.json({ success: true, message: `Kunde "${customer.name}" wurde gelöscht` });
+    const cascade = txOutcome?.kind === "ok" ? txOutcome.cascade : null;
+    res.json({
+      success: true,
+      message: hardDelete
+        ? `Kunde "${customer.name}" wurde dauerhaft gelöscht`
+        : `Kunde "${customer.name}" wurde gelöscht`,
+      audit: cascade
+        ? { parentDeletionId: cascade.parentAuditId, childAudits: cascade.childAudits, perTable: cascade.perTable }
+        : null,
+    });
   })
 );
 

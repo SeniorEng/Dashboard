@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, jsonb, index, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { users } from "./users";
@@ -71,6 +71,8 @@ export const AUDIT_ACTIONS = [
   "budget_type_settings_transition",
   "invoice_integrity_verified",
   "invoice_integrity_drift",
+  "customer_soft_deleted",
+  "customer_child_soft_deleted",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -98,6 +100,12 @@ export const auditLog = pgTable("audit_log", {
   entityId: integer("entity_id").notNull(),
   metadata: jsonb("metadata"),
   ipAddress: text("ip_address"),
+  // Per-Child-Audit-Verkettung: zeigt auf das Parent-Delete-Audit, wenn dieser
+  // Eintrag im Rahmen einer kaskadierenden Lösch-Routine (z.B. Kunde mit
+  // Termin/Rechnung/Service-Record) entstanden ist. NULL für alle nicht-
+  // kaskadierten Einträge. Forensische Frage „was wurde am 14:32 gelöscht?"
+  // lässt sich damit per Self-Join auf `parent_deletion_id` rekonstruieren.
+  parentDeletionId: integer("parent_deletion_id").references((): AnyPgColumn => auditLog.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   index("audit_log_entity_idx").on(table.entityType, table.entityId),
@@ -105,6 +113,7 @@ export const auditLog = pgTable("audit_log", {
   index("audit_log_action_idx").on(table.action),
   index("audit_log_created_at_idx").on(table.createdAt),
   index("audit_log_metadata_idx").using("gin", table.metadata),
+  index("audit_log_parent_deletion_idx").on(table.parentDeletionId),
 ]);
 
 export type AuditLogEntry = typeof auditLog.$inferSelect;

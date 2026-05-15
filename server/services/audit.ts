@@ -26,7 +26,8 @@ class AuditService {
     metadata?: Record<string, unknown>,
     ipAddress?: string,
     exec?: DbOrTx,
-  ): Promise<void> {
+    parentDeletionId?: number | null,
+  ): Promise<number | null> {
     const values = {
       userId,
       action,
@@ -34,15 +35,18 @@ class AuditService {
       entityId,
       metadata: metadata ?? null,
       ipAddress: ipAddress ?? null,
+      parentDeletionId: parentDeletionId ?? null,
     };
     if (exec) {
-      await exec.insert(auditLog).values(values);
-      return;
+      const [row] = await exec.insert(auditLog).values(values).returning({ id: auditLog.id });
+      return row?.id ?? null;
     }
     try {
-      await db.insert(auditLog).values(values);
+      const [row] = await db.insert(auditLog).values(values).returning({ id: auditLog.id });
+      return row?.id ?? null;
     } catch (error) {
       console.error("[AuditService] Failed to write audit log:", error);
+      return null;
     }
   }
 

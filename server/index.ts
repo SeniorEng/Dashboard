@@ -167,6 +167,13 @@ async function runStartupTasks() {
       log(`Idempotency-Schema-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { ensureAuditParentDeletionColumn } = await import("./startup/ensure-audit-parent-deletion");
+    try {
+      await ensureAuditParentDeletionColumn();
+    } catch (err) {
+      log(`Audit-ParentDeletion-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { ensureQontoMatchIdempotency } = await import("./startup/ensure-qonto-match-idempotency");
     try {
       await ensureQontoMatchIdempotency();
