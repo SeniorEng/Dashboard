@@ -155,7 +155,8 @@ export function BackfillSection({ customerId, onRefresh }: { customerId: number;
       const res = await api.post("/admin/budget/backfill-transactions", { customerId, dateFrom: backfillDateFrom, dateTo: backfillDateTo });
       const data = unwrapResult(res) as { total: number; created: number; skipped: number; errors: number };
       setResult(data);
-      invalidateRelated(queryClient, "budget");
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
       // invalidate-direct-allowed: record-id-scoped backfill-preview key
       // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: ["backfill-preview", customerId] });

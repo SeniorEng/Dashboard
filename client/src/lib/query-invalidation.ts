@@ -70,6 +70,8 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["budget-type-settings"],
     ["budget-transactions"],
     ["initial-balances"],
+    ["budget-rebook-preview"],
+    ["budget-cost-estimate"],
   ],
   notifications: [
     ["notifications"],
@@ -197,35 +199,85 @@ const RELATED_DOMAINS: Record<Domain, Domain[]> = {
   "insurance-providers": [],
 };
 
+/**
+ * Domains whose query keys follow the `[domain-key, customerId, ...rest]`
+ * structure. When `invalidateRelated` receives `{ customerId }`, only these
+ * domains have the scope appended to their keys; other domains keep their
+ * broad invalidation.
+ */
+const CUSTOMER_SCOPED_DOMAINS: ReadonlySet<Domain> = new Set<Domain>([
+  "budget",
+]);
+
+export type InvalidateOptions = { customerId?: number };
+
+/**
+ * Invalidate TanStack Query caches for one or more domains, plus their
+ * directly related domains.
+ *
+ * IMPORTANT: `RELATED_DOMAINS` is intentionally **non-transitive**. If
+ * domain A relates to B and B relates to C, calling `invalidateRelated(qc, "A")`
+ * will NOT invalidate C. Every caller must list every domain it actually
+ * touches. This keeps the fan-out predictable and avoids accidental cascades
+ * (e.g. an appointment mutation should not invalidate billing just because
+ * billing happens to relate to appointments downstream).
+ *
+ * Optional scope: pass `{ customerId }` as the last argument to restrict
+ * invalidation of `CUSTOMER_SCOPED_DOMAINS` (currently: `budget`) to a single
+ * customer's keys (`["budget-overview", customerId]` instead of the broad
+ * `["budget-overview"]` prefix). Non-scoped domains still get broad
+ * invalidation.
+ *
+ *   invalidateRelated(qc, "budget", { customerId: 42 });
+ *   invalidateRelated(qc, "customers", "budget", { customerId: 42 });
+ */
+type InvalidateArg = Domain | InvalidateOptions;
+
 export function invalidateRelated(
   queryClient: QueryClient,
-  ...domains: Domain[]
+  ...args: InvalidateArg[]
 ): void {
-  const toInvalidate = new Set<string>();
+  const domains: Domain[] = [];
+  let options: InvalidateOptions = {};
+  for (const arg of args) {
+    if (typeof arg === "string") {
+      domains.push(arg);
+    } else if (arg && typeof arg === "object") {
+      options = { ...options, ...arg };
+    }
+  }
+
+  type Entry = { key: string[]; domain: Domain };
+  const toInvalidate = new Map<string, Entry>();
+
+  const addKeysFor = (domain: Domain) => {
+    const keys = DOMAIN_QUERY_KEYS[domain];
+    if (!keys) return;
+    for (const key of keys) {
+      toInvalidate.set(`${domain}:${JSON.stringify(key)}`, { key, domain });
+    }
+  };
 
   for (const domain of domains) {
-    const keys = DOMAIN_QUERY_KEYS[domain];
-    if (keys) {
-      for (const key of keys) {
-        toInvalidate.add(JSON.stringify(key));
-      }
-    }
-
+    addKeysFor(domain);
     const related = RELATED_DOMAINS[domain];
     if (related) {
       for (const relDomain of related) {
-        const relKeys = DOMAIN_QUERY_KEYS[relDomain];
-        if (relKeys) {
-          for (const key of relKeys) {
-            toInvalidate.add(JSON.stringify(key));
-          }
-        }
+        addKeysFor(relDomain);
       }
     }
   }
 
-  for (const keyStr of toInvalidate) {
-    const queryKey = JSON.parse(keyStr);
-    queryClient.invalidateQueries({ queryKey });
+  for (const { key, domain } of toInvalidate.values()) {
+    if (
+      options.customerId !== undefined &&
+      CUSTOMER_SCOPED_DOMAINS.has(domain)
+    ) {
+      queryClient.invalidateQueries({
+        queryKey: [...key, options.customerId],
+      });
+    } else {
+      queryClient.invalidateQueries({ queryKey: key });
+    }
   }
 }

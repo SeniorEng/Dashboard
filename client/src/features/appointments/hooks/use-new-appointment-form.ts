@@ -315,7 +315,7 @@ export function useNewAppointmentForm() {
     vatCents?: number;
     vatRate?: number;
   }>({
-    queryKey: ["/api/budget", ktCustomerId, "cost-estimate", budgetEstimateParams],
+    queryKey: ["budget-cost-estimate", ktCustomerId ? parseInt(ktCustomerId) : 0, budgetEstimateParams],
     queryFn: async () => {
       const result = await api.get<{
         totalCents: number;
@@ -637,7 +637,6 @@ export function useNewAppointmentForm() {
       assignedEmployeeId: canChangeAssignment && ebAssignedEmployeeId ? parseInt(ebAssignedEmployeeId) : undefined,
     }, {
       onSuccess: () => {
-        invalidateRelated(queryClient, "appointments");
         toast({ title: "Erstberatung erstellt", description: "Die Erstberatung wurde erfolgreich angelegt." });
         setLocation(ebDate ? `/?date=${ebDate}` : "/");
       },

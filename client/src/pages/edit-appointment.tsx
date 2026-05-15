@@ -389,7 +389,7 @@ export default function EditAppointment() {
     vatCents?: number;
     vatRate?: number;
   }>({
-    queryKey: ["/api/budget", appointment?.customerId, "cost-estimate", budgetEstimateParams],
+    queryKey: ["budget-cost-estimate", appointment?.customerId, budgetEstimateParams],
     queryFn: async () => {
       const result = await api.get<{
         totalCents: number;
@@ -414,8 +414,16 @@ export default function EditAppointment() {
       const result = await api.patch(`/appointments/${id}`, data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
+    onSuccess: async () => {
+      const customerId = appointment?.customerId;
+      if (typeof customerId === "number" && customerId > 0) {
+        await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      }
+      invalidateRelated(
+        queryClient,
+        "appointments",
+        ...(typeof customerId === "number" && customerId > 0 ? [{ customerId }] : []),
+      );
       toast({ title: "Termin aktualisiert", description: "Die Änderungen wurden gespeichert." });
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
     },
@@ -451,8 +459,17 @@ export default function EditAppointment() {
       });
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "appointments", "appointment-series");
+    onSuccess: async () => {
+      const customerId = appointment?.customerId;
+      if (typeof customerId === "number" && customerId > 0) {
+        await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      }
+      invalidateRelated(
+        queryClient,
+        "appointments",
+        "appointment-series",
+        ...(typeof customerId === "number" && customerId > 0 ? [{ customerId }] : []),
+      );
       toast({ title: "Serientermine aktualisiert" });
       setShowSeriesEditDialog(false);
       setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");

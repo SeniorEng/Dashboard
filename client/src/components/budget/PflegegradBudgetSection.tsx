@@ -41,9 +41,10 @@ export function PflegegradBudgetSection({ customerId, pflegegrad, careLevelHisto
     mutationFn: async (data: { pflegegrad: number; validFrom: string }) => {
       return unwrapResult(await api.post(`/admin/customers/${customerId}/care-level`, data));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "customers", "budget", { customerId });
       toast({ title: "Pflegegrad aktualisiert", description: "Der Pflegegrad wurde mit Historisierung gespeichert." });
-      invalidateRelated(queryClient, "customers", "budget");
       setEditing(false);
     },
     onError: (error: Error) => {

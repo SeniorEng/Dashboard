@@ -103,8 +103,17 @@ export function useCreateAppointmentSeries() {
       const result = await api.post<SeriesCreateResponse>("/appointment-series", data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "appointments", "appointment-series");
+    onSuccess: async (_data, variables) => {
+      const customerId = variables?.customerId;
+      if (typeof customerId === "number" && customerId > 0) {
+        await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      }
+      invalidateRelated(
+        queryClient,
+        "appointments",
+        "appointment-series",
+        ...(typeof customerId === "number" && customerId > 0 ? [{ customerId }] : []),
+      );
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message || "Terminserie konnte nicht erstellt werden", variant: "destructive" });

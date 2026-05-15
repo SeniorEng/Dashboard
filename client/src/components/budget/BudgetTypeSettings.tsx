@@ -146,9 +146,10 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
         settings: settingsPayload,
       }));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
       toast({ title: "Budget-Einstellungen gespeichert" });
-      invalidateRelated(queryClient, "budget");
       setHasChanges(false);
     },
     onError: (error: Error) => {
@@ -435,9 +436,10 @@ function RebookSection({ customerId }: { customerId: number }) {
     mutationFn: async () => {
       return unwrapResult(await api.post<RebookResult>(`/budget/${customerId}/rebook`, {}));
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
       setShowDialog(false);
-      invalidateRelated(queryClient, "budget");
       if (result.errors.length > 0) {
         toast({
           variant: "destructive",
@@ -585,10 +587,11 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
         validFrom: month,
       }));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
       toast({ title: "Startwert gespeichert" });
       setAmount("");
-      invalidateRelated(queryClient, "budget");
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });
@@ -599,10 +602,11 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
     mutationFn: async (allocationId: number) => {
       return unwrapResult(await api.delete(`/budget/${customerId}/initial-balance/${allocationId}`));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
       toast({ title: "Startwert gelöscht" });
       setDeleteConfirmId(null);
-      invalidateRelated(queryClient, "budget");
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Fehler", description: error.message });

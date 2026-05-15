@@ -18,6 +18,14 @@ interface RouteCalculationResult {
   suggestedMinutes: number | null;
 }
 
+function extractCustomerId(data: unknown, fallback?: unknown): number | undefined {
+  const fromData = (data as { customerId?: unknown })?.customerId;
+  const id = typeof fromData === "number" ? fromData : Number(fromData);
+  if (Number.isFinite(id) && id > 0) return id;
+  const fallbackId = typeof fallback === "number" ? fallback : Number(fallback);
+  return Number.isFinite(fallbackId) && fallbackId > 0 ? fallbackId : undefined;
+}
+
 export function useCreateKundentermin() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -26,8 +34,12 @@ export function useCreateKundentermin() {
       const result = await api.post("/appointments/kundentermin", data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
+    onSuccess: async (data, variables) => {
+      const customerId = extractCustomerId(data, variables?.customerId);
+      if (customerId !== undefined) {
+        await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      }
+      invalidateRelated(queryClient, "appointments", ...(customerId !== undefined ? [{ customerId }] : []));
       toast({ title: "Erfolg", description: "Termin wurde erstellt" });
     },
     onError: (error: Error) => {
@@ -44,8 +56,12 @@ export function useCreateErstberatung() {
       const result = await api.post("/appointments/prospect-erstberatung", data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
+    onSuccess: async (data) => {
+      const customerId = extractCustomerId(data);
+      if (customerId !== undefined) {
+        await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      }
+      invalidateRelated(queryClient, "appointments", ...(customerId !== undefined ? [{ customerId }] : []));
       invalidateRelated(queryClient, "prospects");
       toast({ title: "Erfolg", description: "Erstberatung wurde erstellt" });
     },
@@ -63,8 +79,12 @@ export function useDocumentAppointment(id: number) {
       const result = await api.post(`/appointments/${id}/document`, data);
       return unwrapResult(result);
     },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "appointments");
+    onSuccess: async (data) => {
+      const customerId = extractCustomerId(data);
+      if (customerId !== undefined) {
+        await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      }
+      invalidateRelated(queryClient, "appointments", ...(customerId !== undefined ? [{ customerId }] : []));
       // invalidate-direct-allowed: appointment-scoped services key not covered by a domain
       // eslint-disable-next-line no-restricted-syntax
       queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });

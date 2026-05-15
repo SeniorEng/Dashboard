@@ -131,7 +131,7 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
     }));
 
   const handleRefresh = () => {
-    invalidateRelated(queryClient, "budget");
+    invalidateRelated(queryClient, "budget", { customerId });
     onRefresh?.();
   };
 
@@ -249,7 +249,7 @@ function BudgetPot45b({
   });
 
   const handleRefresh = () => {
-    invalidateRelated(queryClient, "budget");
+    invalidateRelated(queryClient, "budget", { customerId });
     onRefresh();
   };
 
@@ -408,7 +408,7 @@ function BudgetPot45a({
   });
 
   const handleRefresh = () => {
-    invalidateRelated(queryClient, "budget");
+    invalidateRelated(queryClient, "budget", { customerId });
     onRefresh();
   };
 
@@ -494,7 +494,7 @@ function BudgetPot39_42a({
   });
 
   const handleRefresh = () => {
-    invalidateRelated(queryClient, "budget");
+    invalidateRelated(queryClient, "budget", { customerId });
     onRefresh();
   };
 
@@ -586,9 +586,10 @@ function TransactionList({
         targetBudgetType: target,
       }));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
       toast({ title: "Umbuchung erfolgreich" });
-      invalidateRelated(queryClient, "budget");
       setRebookTx(null);
       setTargetBudgetType("");
       onRefresh();
@@ -774,9 +775,10 @@ function ManualAdjustmentForm({ customerId, budgetType, onSuccess }: { customerI
     mutationFn: async (data: { amountCents: number; notes: string; budgetType: string }) => {
       return unwrapResult(await api.post(`/budget/${customerId}/manual-adjustment`, data));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
       toast({ title: "Korrektur erfolgreich gespeichert" });
-      invalidateRelated(queryClient, "budget");
       onSuccess();
     },
     onError: (error) => {
