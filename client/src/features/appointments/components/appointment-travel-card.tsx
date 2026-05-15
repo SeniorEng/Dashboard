@@ -30,7 +30,7 @@ export function AppointmentTravelCard({ appointment }: Props) {
         <div className="flex items-center justify-between py-1">
           <div className="flex items-center gap-2">
             <Car className={`${iconSize.xs} text-muted-foreground`} />
-            <span className="text-muted-foreground">Anfahrt</span>
+            <span className="text-muted-foreground">Anfahrt zum Kunden</span>
           </div>
           <span>{formatKm(appointment.travelKilometers)} km</span>
         </div>
@@ -39,7 +39,7 @@ export function AppointmentTravelCard({ appointment }: Props) {
           <div className="flex items-center justify-between py-1">
             <div className="flex items-center gap-2">
               <Car className={`${iconSize.xs} text-muted-foreground`} />
-              <span className="text-muted-foreground">Km für/mit Kunde</span>
+              <span className="text-muted-foreground">Fahrten während des Termins</span>
             </div>
             <span>{formatKm(appointment.customerKilometers)} km</span>
           </div>
