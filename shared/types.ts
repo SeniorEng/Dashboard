@@ -37,6 +37,7 @@ export {
   isValidStatusTransition,
   canModifyAppointment,
   canEditNotes,
+  isDocumentationOverdue,
 } from "./domain/appointments";
 
 // ============================================

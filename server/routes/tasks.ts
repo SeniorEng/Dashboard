@@ -16,7 +16,7 @@ import {
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, currentTimeHHMMSS } from "@shared/utils/datetime";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
@@ -62,7 +62,7 @@ router.get("/badge-count", requireAuth, asyncHandler("Badge-Anzahl konnte nicht 
 
   const [userTaskCount, undocumentedAppts, openTasks, pendingRecords, monthClosing] = await Promise.all([
     getOpenTaskCount(userId),
-    (customerIds && customerIds.length === 0) ? Promise.resolve(0) : storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
+    (customerIds && customerIds.length === 0) ? Promise.resolve(0) : storage.getUndocumentedAppointments(today, customerIds, undefined, undefined, currentTimeHHMMSS().slice(0, 5)).then(a => a.length),
     timeTrackingStorage.getOpenTasks(userId).then(t => t.daysWithMissingBreaks?.length || 0),
     storage.getPendingServiceRecords(userId).then(r => r.length),
     timeTrackingStorage.getMonthClosing(userId, prevYear, prevMonth),

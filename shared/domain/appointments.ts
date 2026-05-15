@@ -147,6 +147,61 @@ export function canModifyAppointment(status: AppointmentStatus): boolean {
   return status !== "completed" && status !== "customer_no_show";
 }
 
+// ============================================
+// "DOKU UNVOLLSTÄNDIG" — ABLEITUNG
+// ============================================
+//
+// Ein Termin gilt als „Doku unvollständig" und wird in Termin-Listen
+// gelb markiert, wenn er entweder
+//   1) im Status `documenting` hängt (Mitarbeiter hat angefangen, aber
+//      nicht abgeschlossen) — unabhängig vom Datum, ODER
+//   2) im Status `scheduled` geblieben ist UND das geplante Termin-Ende
+//      bereits in der Vergangenheit liegt.
+//
+// Bewusst NICHT als „Doku unvollständig" gelten: `in-progress`
+// (läuft gerade, regulär), `completed`, `cancelled`, `expired_unsigned`,
+// `customer_no_show`.
+
+function formatLocalIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatLocalTime(d: Date): string {
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+export function isDocumentationOverdue(
+  appointment: {
+    status: AppointmentStatus | string;
+    date: string;
+    scheduledStart?: string | null;
+    scheduledEnd?: string | null;
+    durationPromised?: number | null;
+  },
+  now: Date = new Date(),
+): boolean {
+  if (appointment.status === "documenting") return true;
+  if (appointment.status !== "scheduled") return false;
+  if (!appointment.date) return false;
+
+  const todayIso = formatLocalIsoDate(now);
+  if (appointment.date < todayIso) return true;
+  if (appointment.date > todayIso) return false;
+
+  // Heute: nur überfällig, wenn das geplante Ende bereits passiert ist.
+  let end: string | null = appointment.scheduledEnd ? appointment.scheduledEnd.slice(0, 5) : null;
+  if (!end && appointment.scheduledStart && appointment.durationPromised) {
+    end = addMinutesToTime(appointment.scheduledStart, appointment.durationPromised).slice(0, 5);
+  }
+  if (!end) return false;
+  return end < formatLocalTime(now);
+}
+
 
 export function canEditNotes(status: AppointmentStatus): boolean {
   return status === "scheduled" || status === "documenting";

@@ -91,7 +91,7 @@ export interface IStorage {
     options?: PaginationOptions
   ): Promise<PaginatedResult<AppointmentWithCustomer>>;
   getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined>;
-  getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<AppointmentWithCustomer[]>;
+  getUndocumentedAppointments(today: string, customerIds?: number[], employeeId?: number, assignedOnly?: boolean, nowTime?: string): Promise<AppointmentWithCustomer[]>;
   getPlannedConsultations(filter: "overdue" | "upcoming" | "all", today: string): Promise<AppointmentWithCustomer[]>;
   
   // Get appointments for a specific employee on a specific day

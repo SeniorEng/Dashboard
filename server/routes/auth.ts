@@ -26,7 +26,7 @@ import { sendEmail, buildPasswordResetEmailHtml } from "../services/email-servic
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { birthdaysCache, getCachedCompanySettings } from "../services/cache";
 import { ensureEmployeeGeocoded } from "../services/geocoding";
-import { todayISO } from "@shared/utils/datetime";
+import { todayISO, currentTimeHHMMSS } from "@shared/utils/datetime";
 import { calculateDaysUntilBirthday } from "./birthdays";
 
 const router = Router();
@@ -113,7 +113,7 @@ router.get("/me", asyncHandler("Benutzerinformationen konnten nicht geladen werd
         const customerIds = isAdmin ? undefined : await storage.getAssignedCustomerIds(userId);
         const [userTaskCount, undocumentedAppts, openTasks, pendingRecords] = await Promise.all([
           getOpenTaskCount(userId),
-          (customerIds && customerIds.length === 0) ? Promise.resolve(0) : storage.getUndocumentedAppointments(today, customerIds).then(a => a.length),
+          (customerIds && customerIds.length === 0) ? Promise.resolve(0) : storage.getUndocumentedAppointments(today, customerIds, undefined, undefined, currentTimeHHMMSS().slice(0, 5)).then(a => a.length),
           timeTrackingStorage.getOpenTasks(userId).then(t => t.daysWithMissingBreaks?.length || 0),
           storage.getPendingServiceRecords(userId).then(r => r.length),
         ]);

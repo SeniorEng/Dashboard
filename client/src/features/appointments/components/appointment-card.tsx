@@ -2,12 +2,12 @@ import { memo, useCallback, useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
-import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Repeat, Car } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Repeat, Car, AlertCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { useAuth } from "@/hooks/use-auth";
-import { getCardServiceInfoFromAppointment } from "@shared/types";
+import { getCardServiceInfoFromAppointment, isDocumentationOverdue } from "@shared/types";
 import { api, unwrapResult } from "@/lib/api";
 import { formatTimeSlot, getEndTime } from "../utils";
 
@@ -38,6 +38,11 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
   const serviceInfo = useMemo(() => 
     getCardServiceInfoFromAppointment(appointment),
     [appointment.appointmentType, appointment.serviceType, appointment.durationPromised, appointment.status]
+  );
+
+  const isOverdueDoc = useMemo(
+    () => isDocumentationOverdue(appointment),
+    [appointment.status, appointment.date, appointment.scheduledStart, appointment.scheduledEnd, appointment.durationPromised],
   );
 
   const handlePrefetch = useCallback(() => {
@@ -84,6 +89,8 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
         <div className="flex items-stretch">
           {isSubstitute ? (
             <div className="w-1.5 bg-muted-foreground/30" />
+          ) : isOverdueDoc ? (
+            <div className="w-1.5 bg-amber-400" data-testid={`stripe-doku-unvollstaendig-${appointment.id}`} />
           ) : appointment.isFahrtdienst ? (
             <div className="w-1.5 bg-blue-500" data-testid={`stripe-fahrtdienst-${appointment.id}`} />
           ) : serviceInfo.hasErstberatung ? (
@@ -148,6 +155,15 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
               )}
               {appointment.seriesId && (
                 <Repeat className="w-3 h-3 text-primary/60 shrink-0" data-testid={`icon-series-${appointment.id}`} />
+              )}
+              {isOverdueDoc && !isSubstitute && (
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wide shrink-0"
+                  data-testid={`pill-doku-unvollstaendig-${appointment.id}`}
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  Doku unvollständig
+                </span>
               )}
               {getStatusIcon(appointment.status)}
             </div>

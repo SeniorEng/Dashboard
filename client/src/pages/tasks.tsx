@@ -213,8 +213,8 @@ export default function TasksPage() {
                   data-testid="banner-undocumented"
                 >
                   <AlertCircle className={`${iconSize.sm} shrink-0`} />
-                  <span className="text-sm font-medium">
-                    {undocumentedCount} {undocumentedCount === 1 ? "offene Dokumentation" : "offene Dokumentationen"}
+                  <span className="text-sm font-medium" data-testid="text-doku-unvollstaendig-count">
+                    Doku unvollständig: {undocumentedCount}
                   </span>
                 </div>
               </Link>

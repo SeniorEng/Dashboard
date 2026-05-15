@@ -491,7 +491,8 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
     employeeId = user.id;
   }
 
-  const appointments = await storage.getUndocumentedAppointments(today, customerIds, employeeId, assignedOnlyUndoc);
+  const nowTime = currentTimeHHMMSS().slice(0, 5);
+  const appointments = await storage.getUndocumentedAppointments(today, customerIds, employeeId, assignedOnlyUndoc, nowTime);
   
   res.json(appointments);
 }));

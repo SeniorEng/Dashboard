@@ -202,11 +202,45 @@ export async function getAppointmentWithCustomer(id: number): Promise<Appointmen
   return mapAppointmentRow(results[0]);
 }
 
-export async function getUndocumentedAppointments(beforeDate: string, customerIds?: number[], employeeId?: number | number[], assignedOnly?: boolean): Promise<AppointmentWithCustomer[]> {
+/**
+ * Liefert alle Termine, die als „Doku unvollständig" gelten — exakt nach
+ * derselben Logik wie `isDocumentationOverdue` in `shared/domain/appointments`:
+ *
+ *   1) Status = 'documenting' (egal welches Datum) — Mitarbeiter hat
+ *      angefangen zu dokumentieren, aber nicht abgeschlossen.
+ *   2) Status = 'scheduled' UND (date < today  ODER  date = today und
+ *      das geplante Ende liegt vor `nowTime`).
+ *
+ * Nicht enthalten sind: completed, cancelled, expired_unsigned,
+ * customer_no_show, in-progress.
+ *
+ * @param today    Heutiges Datum in Berlin-Zeit als ISO-String (YYYY-MM-DD).
+ * @param nowTime  Aktuelle Uhrzeit in Berlin-Zeit als HH:MM-String.
+ *                 Default "23:59" — d. h. wenn ein Aufrufer die Uhrzeit
+ *                 nicht angibt, gelten heutige Termine erst nach Tagesende
+ *                 als überfällig (konservativ, vermeidet doppeltes Zählen).
+ */
+export async function getUndocumentedAppointments(
+  today: string,
+  customerIds?: number[],
+  employeeId?: number | number[],
+  assignedOnly?: boolean,
+  nowTime: string = "23:59",
+): Promise<AppointmentWithCustomer[]> {
+  const overdueSameDay = sqlBuilder`COALESCE(${appointments.scheduledEnd}, ${appointments.scheduledStart} + make_interval(mins => ${appointments.durationPromised})) < ${nowTime}::time`;
+
   const conditions = [
-    lt(appointments.date, beforeDate),
-    ne(appointments.status, "completed"),
-    isNull(appointments.deletedAt)
+    isNull(appointments.deletedAt),
+    or(
+      eq(appointments.status, "documenting"),
+      and(
+        eq(appointments.status, "scheduled"),
+        or(
+          lt(appointments.date, today),
+          and(eq(appointments.date, today), overdueSameDay),
+        ),
+      ),
+    )!,
   ];
 
   const employeeCondition = buildEmployeeCondition(employeeId, assignedOnly);
