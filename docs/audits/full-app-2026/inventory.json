@@ -1,0 +1,3225 @@
+{
+  "generatedAt": "2026-05-15",
+  "totalFiles": 521,
+  "totalLoc": 116282,
+  "byDomain": {
+    "billing": {
+      "files": 12,
+      "loc": 4538,
+      "risk": "HOCH"
+    },
+    "appointment": {
+      "files": 51,
+      "loc": 14346,
+      "risk": "HOCH"
+    },
+    "budget": {
+      "files": 24,
+      "loc": 7033,
+      "risk": "HOCH"
+    },
+    "customer": {
+      "files": 83,
+      "loc": 22988,
+      "risk": "HOCH"
+    },
+    "documents": {
+      "files": 29,
+      "loc": 9747,
+      "risk": "HOCH"
+    },
+    "settings": {
+      "files": 39,
+      "loc": 8012,
+      "risk": "MITTEL"
+    },
+    "statistics": {
+      "files": 21,
+      "loc": 5557,
+      "risk": "MITTEL"
+    },
+    "other": {
+      "files": 78,
+      "loc": 12738,
+      "risk": "NIEDRIG"
+    },
+    "profile": {
+      "files": 23,
+      "loc": 4298,
+      "risk": "MITTEL"
+    },
+    "devops": {
+      "files": 8,
+      "loc": 2632,
+      "risk": "MITTEL"
+    },
+    "layout-ui": {
+      "files": 31,
+      "loc": 3787,
+      "risk": "NIEDRIG"
+    },
+    "auth": {
+      "files": 14,
+      "loc": 2842,
+      "risk": "HOCH"
+    },
+    "prospects": {
+      "files": 18,
+      "loc": 3505,
+      "risk": "MITTEL"
+    },
+    "compliance": {
+      "files": 15,
+      "loc": 3108,
+      "risk": "HOCH"
+    },
+    "time-tracking": {
+      "files": 31,
+      "loc": 5820,
+      "risk": "HOCH"
+    },
+    "notifications": {
+      "files": 21,
+      "loc": 3501,
+      "risk": "MITTEL"
+    },
+    "shared-foundation": {
+      "files": 22,
+      "loc": 1748,
+      "risk": "HOCH"
+    },
+    "search": {
+      "files": 1,
+      "loc": 82,
+      "risk": "MITTEL"
+    }
+  },
+  "files": [
+    {
+      "path": "server/routes/billing.ts",
+      "loc": 2131,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/appointments.ts",
+      "loc": 1485,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/edit-appointment.tsx",
+      "loc": 1349,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget/allocation-storage.ts",
+      "loc": 976,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/budget.ts",
+      "loc": 936,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/hooks/use-customer-wizard.ts",
+      "loc": 908,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-new-appointment-form.ts",
+      "loc": 893,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/document-types.tsx",
+      "loc": 890,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/qonto.tsx",
+      "loc": 883,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/dashboard.tsx",
+      "loc": 879,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/budget/BudgetLedgerSection.tsx",
+      "loc": 854,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/budget/BudgetTypeSettings.tsx",
+      "loc": 845,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/services.tsx",
+      "loc": 843,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-pricing-section.tsx",
+      "loc": 841,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/documents.ts",
+      "loc": 835,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/settings.tsx",
+      "loc": 833,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-contract-tab.tsx",
+      "loc": 805,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/pdf-generator.ts",
+      "loc": 800,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/appointment-series.ts",
+      "loc": 787,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/employee-users.ts",
+      "loc": 760,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/users.tsx",
+      "loc": 755,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/admin/customers.ts",
+      "loc": 742,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/document-templates.tsx",
+      "loc": 739,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/customer-detail.tsx",
+      "loc": 734,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/employee-documents-section.tsx",
+      "loc": 734,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/insurance-providers.tsx",
+      "loc": 731,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/billing.tsx",
+      "loc": 727,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/appointment-import.ts",
+      "loc": 717,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-documents-section-admin.tsx",
+      "loc": 702,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/customers.tsx",
+      "loc": 686,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/user-form.tsx",
+      "loc": 686,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/customer-detail.tsx",
+      "loc": 682,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/scripts/cleanup-test-data.ts",
+      "loc": 679,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/layout.tsx",
+      "loc": 677,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/auth.ts",
+      "loc": 675,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/prospects/components/prospect-detail-sheet.tsx",
+      "loc": 672,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/customer-management.ts",
+      "loc": 664,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/service-records.ts",
+      "loc": 644,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/customer-documents-section.tsx",
+      "loc": 633,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/employee-availability.ts",
+      "loc": 609,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/admin/customers/workflows.ts",
+      "loc": 609,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/signatures-step.tsx",
+      "loc": 601,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/service-records.tsx",
+      "loc": 600,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/appointments.ts",
+      "loc": 598,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/whatsapp.tsx",
+      "loc": 591,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/customers/service-prices.ts",
+      "loc": 590,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/month-close-scheduler.ts",
+      "loc": 584,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/statistics/revenue.ts",
+      "loc": 571,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/digital-document-flow-admin.tsx",
+      "loc": 562,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/email-parser.ts",
+      "loc": 561,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/insurance-step.tsx",
+      "loc": 556,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/import-appointments.tsx",
+      "loc": 554,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget/consumption-engine.ts",
+      "loc": 551,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/time-entries.tsx",
+      "loc": 543,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/service-records-storage.ts",
+      "loc": 543,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/new-appointment-erstberatung-tab.tsx",
+      "loc": 532,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-contacts-tab.tsx",
+      "loc": 527,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/time-entries.ts",
+      "loc": 523,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/month-closing.tsx",
+      "loc": 510,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/help.tsx",
+      "loc": 499,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/admin/documents.ts",
+      "loc": 493,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/digital-document-flow.tsx",
+      "loc": 491,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/team-workload.tsx",
+      "loc": 490,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/service-record-detail.tsx",
+      "loc": 486,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/test-cleanup.ts",
+      "loc": 480,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/index.ts",
+      "loc": 477,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/document-appointment.tsx",
+      "loc": 465,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/template-engine.ts",
+      "loc": 457,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/appointment-detail.tsx",
+      "loc": 456,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/lexware-export.ts",
+      "loc": 450,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/scripts/reconcile-trimmed-imports.ts",
+      "loc": 447,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/appointments-storage.ts",
+      "loc": 441,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/customers.tsx",
+      "loc": 440,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/duplicates.tsx",
+      "loc": 437,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/admin/availability.tsx",
+      "loc": 435,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/tasks.ts",
+      "loc": 434,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/zugferd.ts",
+      "loc": 431,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/cockpit-v2-tab.tsx",
+      "loc": 430,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/auth.ts",
+      "loc": 414,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/customers.ts",
+      "loc": 408,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/employee-document-requirements-section.tsx",
+      "loc": 407,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/hooks/use-customer-detail-form.ts",
+      "loc": 398,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/budgets-contract-step.tsx",
+      "loc": 397,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/index.ts",
+      "loc": 390,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/revenue-page.tsx",
+      "loc": 386,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/customers/assignments.ts",
+      "loc": 385,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/tasks/components.tsx",
+      "loc": 384,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/components/fahrtdienst-panel.tsx",
+      "loc": 380,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/time-tracking/overview.ts",
+      "loc": 380,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/App.tsx",
+      "loc": 372,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/day-detail-panel.tsx",
+      "loc": 371,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/date-picker.tsx",
+      "loc": 361,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-insurance-tab.tsx",
+      "loc": 361,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/lib/api/client.ts",
+      "loc": 360,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/time-tracking/month-closing.ts",
+      "loc": 360,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/qonto.ts",
+      "loc": 359,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/audit.ts",
+      "loc": 359,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/birthday-cards.tsx",
+      "loc": 358,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/team-workload.ts",
+      "loc": 358,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/budget/rebook-storage.ts",
+      "loc": 351,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/dashboard.tsx",
+      "loc": 345,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/settings/lead-auto-reply-card.tsx",
+      "loc": 345,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/customers/duplicates.ts",
+      "loc": 341,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/utils/datetime.ts",
+      "loc": 338,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/documents.ts",
+      "loc": 338,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/customer-emergency-section.tsx",
+      "loc": 334,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget/summary-queries.ts",
+      "loc": 333,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/tasks.tsx",
+      "loc": 331,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/time-tracking/vacation.ts",
+      "loc": 329,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/customers-storage.ts",
+      "loc": 327,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/policies/appointments.ts",
+      "loc": 327,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-documentation-form.ts",
+      "loc": 325,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/audit-log.tsx",
+      "loc": 324,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/seed-pkv-providers.ts",
+      "loc": 324,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/middleware/auth.ts",
+      "loc": 322,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin-overview/contact-section.tsx",
+      "loc": 319,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/auto-breaks.ts",
+      "loc": 318,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/document-pdf.ts",
+      "loc": 315,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/signature-pad.tsx",
+      "loc": 310,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage.ts",
+      "loc": 309,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/startup/sync-appointment-service-durations.ts",
+      "loc": 309,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/lexware-export.tsx",
+      "loc": 308,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/notification-service.ts",
+      "loc": 304,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/repos/index.ts",
+      "loc": 303,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/admin/appointment-series.tsx",
+      "loc": 302,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/replit_integrations/object_storage/objectStorage.ts",
+      "loc": 300,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/my-times.tsx",
+      "loc": 299,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/admin-overview/details-sections.tsx",
+      "loc": 294,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/new-appointment-kundentermin-tab.tsx",
+      "loc": 293,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/employee-availability.ts",
+      "loc": 293,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/time-overview-summary.tsx",
+      "loc": 291,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/scripts/cleanup-duplicate-service-prices.ts",
+      "loc": 291,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/customer-creation-helpers.ts",
+      "loc": 290,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/appointments.ts",
+      "loc": 289,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/patterns/status-badge.tsx",
+      "loc": 288,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/lib/query-invalidation.ts",
+      "loc": 283,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/statistics/customers.ts",
+      "loc": 283,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/customers.ts",
+      "loc": 283,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/prospects.ts",
+      "loc": 282,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/statistics.ts",
+      "loc": 282,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/qonto.ts",
+      "loc": 281,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/statistics/process-health.ts",
+      "loc": 279,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/domain/appointments.ts",
+      "loc": 278,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/drill-down-table.tsx",
+      "loc": 275,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/customers/budgets.ts",
+      "loc": 272,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/cache.ts",
+      "loc": 272,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/budget/preferences-storage.ts",
+      "loc": 272,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/statistics/performance.ts",
+      "loc": 272,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/customers-page.tsx",
+      "loc": 271,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-detail-sections.tsx",
+      "loc": 271,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/time-entry-dialog.tsx",
+      "loc": 270,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/appointment-helpers.ts",
+      "loc": 268,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/email-service.ts",
+      "loc": 263,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/users.ts",
+      "loc": 263,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/design-system/tokens.ts",
+      "loc": 262,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/month-closing.ts",
+      "loc": 261,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/call-scheduler.ts",
+      "loc": 261,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/document-delivery.ts",
+      "loc": 261,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/avis-parser.ts",
+      "loc": 258,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/budget.ts",
+      "loc": 258,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/process-health-page.tsx",
+      "loc": 257,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-appointment-series.ts",
+      "loc": 255,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/qonto.ts",
+      "loc": 255,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/customers/components/customer-timeline.tsx",
+      "loc": 254,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/tasks.ts",
+      "loc": 251,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/performance-page.tsx",
+      "loc": 249,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/contact-migration.tsx",
+      "loc": 248,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/customer-contact-section.tsx",
+      "loc": 247,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/birthdays.ts",
+      "loc": 239,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/settings/company-details-form.tsx",
+      "loc": 237,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/prospects.tsx",
+      "loc": 233,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/settings/logo-upload.tsx",
+      "loc": 233,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/domain/vacation.ts",
+      "loc": 231,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/calendar-grid.tsx",
+      "loc": 230,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/employee-time-card.tsx",
+      "loc": 229,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/proof-review.tsx",
+      "loc": 228,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/employee-matching.tsx",
+      "loc": 228,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/process-health-detail.tsx",
+      "loc": 226,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/customer-deletion-service.ts",
+      "loc": 226,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/audit.ts",
+      "loc": 225,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/statistics/cockpit.ts",
+      "loc": 224,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/team/components/handover-dialog.tsx",
+      "loc": 223,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/whatsapp-service.ts",
+      "loc": 223,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/service-catalog.ts",
+      "loc": 223,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/geocoding.ts",
+      "loc": 222,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/error-boundary.tsx",
+      "loc": 221,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/appointment-series.ts",
+      "loc": 220,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-card.tsx",
+      "loc": 219,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/calendar.tsx",
+      "loc": 218,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/reset-password.tsx",
+      "loc": 215,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/address-autocomplete.tsx",
+      "loc": 214,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-time-services-card.tsx",
+      "loc": 214,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/import-pflegekassen.ts",
+      "loc": 214,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/budget/PflegegradBudgetSection.tsx",
+      "loc": 213,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/customer-assignment-section.tsx",
+      "loc": 213,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/components/personal-data-section.tsx",
+      "loc": 212,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/notifications/notification-list.tsx",
+      "loc": 211,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/appointment-documentation.ts",
+      "loc": 211,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/errors.ts",
+      "loc": 209,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/new-appointment.tsx",
+      "loc": 207,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/settings/letterxpress-settings.tsx",
+      "loc": 207,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/lead-auto-reply.ts",
+      "loc": 204,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/hooks/use-auth.tsx",
+      "loc": 203,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/customer-medical-section.tsx",
+      "loc": 203,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/prospects.ts",
+      "loc": 203,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/dropdown-menu.tsx",
+      "loc": 202,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/public-signing.tsx",
+      "loc": 201,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin-overview/care-level-section.tsx",
+      "loc": 200,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/service-selector.tsx",
+      "loc": 199,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/onboarding-dialog.tsx",
+      "loc": 197,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/admin/settings/smtp-settings.tsx",
+      "loc": 197,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/api/customers.ts",
+      "loc": 194,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/team-workload-view.ts",
+      "loc": 193,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/prospects.ts",
+      "loc": 192,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/hooks/use-toast.ts",
+      "loc": 191,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/budgets-page.tsx",
+      "loc": 190,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/customers/documents.ts",
+      "loc": 190,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/contacts-step.tsx",
+      "loc": 188,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/vacation-dialog.tsx",
+      "loc": 188,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/budgets.ts",
+      "loc": 187,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/qonto-csv-parser.ts",
+      "loc": 182,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/replit_integrations/object_storage/objectAcl.ts",
+      "loc": 181,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/prospects/hooks/use-prospects.ts",
+      "loc": 179,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/hooks/use-browser-notifications.ts",
+      "loc": 177,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/time-tracking/entries.ts",
+      "loc": 177,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/matching-step.tsx",
+      "loc": 176,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/customers/contracts.ts",
+      "loc": 176,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/common.ts",
+      "loc": 176,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/login.tsx",
+      "loc": 175,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/searchable-select.tsx",
+      "loc": 174,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/time-tracking/hooks/use-time-entries.ts",
+      "loc": 173,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/public-signing.ts",
+      "loc": 172,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/cover-letter.ts",
+      "loc": 172,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/components/employee-availability.tsx",
+      "loc": 171,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/letterxpress-service.ts",
+      "loc": 171,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/appointment-series-storage.ts",
+      "loc": 171,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/hooks/use-time-entry-form.ts",
+      "loc": 170,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/statistics/common.ts",
+      "loc": 170,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/budget/cap-calculator.ts",
+      "loc": 169,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/twilio-call-bridge.ts",
+      "loc": 168,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/customers/components/admin-overview/employee-section.tsx",
+      "loc": 166,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/scripts/cleanup-duplicate-carryovers.ts",
+      "loc": 166,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/budget/import-availability.ts",
+      "loc": 164,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/setup.tsx",
+      "loc": 163,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/profile.ts",
+      "loc": 163,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/charts/sparkline.tsx",
+      "loc": 162,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/ui/select.tsx",
+      "loc": 161,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/personal-data-step.tsx",
+      "loc": 161,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/whatsapp.ts",
+      "loc": 160,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/session-timeout-warning.tsx",
+      "loc": 158,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/wizard-dialogs.tsx",
+      "loc": 158,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/scripts/cleanup-orphan-appointments.ts",
+      "loc": 158,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/api/time-tracking.ts",
+      "loc": 158,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/patterns/responsive-tabs.tsx",
+      "loc": 157,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/forgot-password.tsx",
+      "loc": 157,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/document-trigger-engine.ts",
+      "loc": 157,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/idempotency.ts",
+      "loc": 157,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/statistics/alerts.ts",
+      "loc": 156,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/domain/customers.ts",
+      "loc": 156,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin.ts",
+      "loc": 155,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/travel-time.ts",
+      "loc": 155,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/hooks/use-customers.ts",
+      "loc": 154,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/whatsapp.ts",
+      "loc": 154,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/command.tsx",
+      "loc": 153,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/admin/customer-new.tsx",
+      "loc": 152,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/import-appointments.ts",
+      "loc": 152,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/company.ts",
+      "loc": 151,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/middleware/object-storage-auth.ts",
+      "loc": 149,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/travel-documentation.tsx",
+      "loc": 148,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/time-entries.ts",
+      "loc": 148,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/components/emergency-contact-section.tsx",
+      "loc": 146,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/notification-bell.tsx",
+      "loc": 144,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/alert-dialog.tsx",
+      "loc": 142,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/budget/appointment-cost-calculator.ts",
+      "loc": 142,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/migrate-erstberatung-customers.ts",
+      "loc": 142,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/components/whatsapp-section.tsx",
+      "loc": 140,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/billing-storage.ts",
+      "loc": 139,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/sheet.tsx",
+      "loc": 138,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/hooks/use-upload.ts",
+      "loc": 138,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/charts/kpi-tile.tsx",
+      "loc": 134,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/time-tracking/appointments.ts",
+      "loc": 134,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/audit.ts",
+      "loc": 134,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/hooks/use-month-closing.ts",
+      "loc": 133,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/prospects/components/create-prospect-sheet.tsx",
+      "loc": 133,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/whatsapp-reminder-scheduler.ts",
+      "loc": 133,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/customer-mgmt/insurance.ts",
+      "loc": 133,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/invoice-integrity-verifier.ts",
+      "loc": 129,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/admin-permissions-section.tsx",
+      "loc": 128,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/toast.tsx",
+      "loc": 127,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-appointment-mutations.ts",
+      "loc": 127,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/delivery-step.tsx",
+      "loc": 127,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/components/proofs-section.tsx",
+      "loc": 127,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/document-delivery.ts",
+      "loc": 127,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/sync-vacation-carryover.ts",
+      "loc": 127,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/document-triggers.ts",
+      "loc": 127,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/customer-mgmt/care-level.ts",
+      "loc": 126,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/dialog.tsx",
+      "loc": 125,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/profile/components/documents-section.tsx",
+      "loc": 124,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/insurance.ts",
+      "loc": 124,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/tasks/use-tasks.ts",
+      "loc": 122,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/customer-mgmt/contracts.ts",
+      "loc": 122,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/whatsapp.ts",
+      "loc": 121,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/document-review.ts",
+      "loc": 121,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/time-tracking.ts",
+      "loc": 121,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/wizard-step-renderer.tsx",
+      "loc": 120,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/prospects.ts",
+      "loc": 120,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/customers/details.ts",
+      "loc": 119,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/planned-consultations.tsx",
+      "loc": 118,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/customer-types.ts",
+      "loc": 118,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/drawer.tsx",
+      "loc": 116,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/time-entry-validation.ts",
+      "loc": 115,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/time-tracking.ts",
+      "loc": 113,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/components/password-section.tsx",
+      "loc": 111,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget/transaction-storage.ts",
+      "loc": 110,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/contracts.ts",
+      "loc": 109,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/v2/page-shell.tsx",
+      "loc": 108,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/clear-45b-monthly-limits.ts",
+      "loc": 107,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/statistics/helpers.ts",
+      "loc": 106,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/webhook-twilio.ts",
+      "loc": 106,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/utils/month-close-cutoff.ts",
+      "loc": 106,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/statistics.tsx",
+      "loc": 104,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/prospect-customer-matching.ts",
+      "loc": 104,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget-ledger.ts",
+      "loc": 103,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/billing.ts",
+      "loc": 103,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/insurance-providers.ts",
+      "loc": 102,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/qonto.ts",
+      "loc": 101,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/month-close-banner.tsx",
+      "loc": 100,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/webhook.ts",
+      "loc": 100,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/statistics/budgets.ts",
+      "loc": 100,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/qualifications.ts",
+      "loc": 100,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/hooks/use-time-entry-conflict.ts",
+      "loc": 98,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/utils/phone.ts",
+      "loc": 98,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/month-closing-section.tsx",
+      "loc": 97,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/lib/month-closing-message.ts",
+      "loc": 97,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/use-appointment-policy.ts",
+      "loc": 96,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/utils/money.ts",
+      "loc": 96,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/service-records.ts",
+      "loc": 96,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/customers/contacts.ts",
+      "loc": 95,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/duplicate-check.ts",
+      "loc": 95,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/components/cost-estimate-preview.tsx",
+      "loc": 93,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/statistics/v2/index.ts",
+      "loc": 93,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/backfill-budget-historization.ts",
+      "loc": 93,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/scripts/fix-customer-182-budget-cap.ts",
+      "loc": 93,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/hooks/use-insurance-providers.ts",
+      "loc": 92,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/customer-pets-section.tsx",
+      "loc": 92,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/twilio-callback-token.ts",
+      "loc": 92,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/notifications/use-notifications.ts",
+      "loc": 91,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/time-tracking.ts",
+      "loc": 91,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/services.ts",
+      "loc": 91,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-series-delete-dialog.tsx",
+      "loc": 89,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/with-audit.ts",
+      "loc": 89,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/birthday-notification-checker.ts",
+      "loc": 88,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/hooks/use-view-as-employee.tsx",
+      "loc": 87,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/birthday-cards.ts",
+      "loc": 87,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/team/components/reset-password-form.tsx",
+      "loc": 86,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/workload-info-tooltip.tsx",
+      "loc": 86,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/profile/components/browser-notifications-section.tsx",
+      "loc": 86,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/address-fields.tsx",
+      "loc": 83,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-appointments.ts",
+      "loc": 82,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/search.ts",
+      "loc": 82,
+      "domain": "search",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/lib/favicon-badge.ts",
+      "loc": 81,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-customer-header.tsx",
+      "loc": 81,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/birthdays/lib/birthday-display.ts",
+      "loc": 79,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/params.ts",
+      "loc": 79,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/utils/holidays.ts",
+      "loc": 79,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/company.ts",
+      "loc": 78,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/middleware/csrf.ts",
+      "loc": 78,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/utils/zod-german.ts",
+      "loc": 77,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/card.tsx",
+      "loc": 76,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/customer-type-step.tsx",
+      "loc": 76,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/team.ts",
+      "loc": 75,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/team/components/user-types.ts",
+      "loc": 74,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/seed-initial-vacation-history.ts",
+      "loc": 74,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/undocumented-appointments.tsx",
+      "loc": 73,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/utils/format.ts",
+      "loc": 71,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/api/billing.ts",
+      "loc": 71,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/components/employee-service-rates.tsx",
+      "loc": 70,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/contact-migration.ts",
+      "loc": 69,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/pdf-generator.ts",
+      "loc": 69,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/system.ts",
+      "loc": 69,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/services.ts",
+      "loc": 68,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/patterns/page-header.tsx",
+      "loc": 67,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/services/budget-renewal-checker.ts",
+      "loc": 67,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/missing-breaks-banner.tsx",
+      "loc": 66,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/notifications.ts",
+      "loc": 66,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/customer-mgmt/contacts.ts",
+      "loc": 66,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/button.tsx",
+      "loc": 65,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/utils.ts",
+      "loc": 65,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/hooks/use-file-selection.ts",
+      "loc": 65,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin-overview/section-helpers.tsx",
+      "loc": 64,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/crypto.ts",
+      "loc": 63,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/schema/tasks.ts",
+      "loc": 62,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/profile.tsx",
+      "loc": 61,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/patterns/data-list.tsx",
+      "loc": 60,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/time-tracking/shared.ts",
+      "loc": 60,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/alert.tsx",
+      "loc": 59,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/auth/auth-layout.tsx",
+      "loc": 59,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-travel-card.tsx",
+      "loc": 59,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/vite.ts",
+      "loc": 58,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/storage/budget/types.ts",
+      "loc": 58,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/patterns/section-card.tsx",
+      "loc": 57,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/patterns/error-state.tsx",
+      "loc": 54,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/ui/tabs.tsx",
+      "loc": 53,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-service-record-card.tsx",
+      "loc": 53,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/team/use-team-workload.ts",
+      "loc": 53,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/notifications.ts",
+      "loc": 52,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-summary.tsx",
+      "loc": 50,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/logo-resolver.ts",
+      "loc": 50,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/time-tracking/constants.ts",
+      "loc": 49,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/deliveries.ts",
+      "loc": 49,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/types.ts",
+      "loc": 49,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/team/components/workload-metrics.ts",
+      "loc": 48,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/customer-mgmt/budgets.ts",
+      "loc": 48,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/documents.tsx",
+      "loc": 47,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-overview-tab.tsx",
+      "loc": 47,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/admin-permissions.ts",
+      "loc": 47,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/replit_integrations/object_storage/routes.ts",
+      "loc": 47,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/profile/components/pet-acceptance-section.tsx",
+      "loc": 45,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/encrypted-row.ts",
+      "loc": 45,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/ensure-customer-idempotency-schema.ts",
+      "loc": 45,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/settings/types.ts",
+      "loc": 44,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/badge.tsx",
+      "loc": 43,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/patterns/empty-state.tsx",
+      "loc": 43,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes.ts",
+      "loc": 43,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/ui/radio-group.tsx",
+      "loc": 42,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/notifications.ts",
+      "loc": 41,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-appointment-coverage.ts",
+      "loc": 40,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/documents/document-preview.tsx",
+      "loc": 40,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/middleware/twilio-auth.ts",
+      "loc": 40,
+      "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/routing.ts",
+      "loc": 39,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/lib/team-lead.ts",
+      "loc": 39,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/middleware/cache-headers.ts",
+      "loc": 39,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/startup/migrate-budget-sources.ts",
+      "loc": 39,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/lib/queryClient.ts",
+      "loc": 38,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/review-badge.tsx",
+      "loc": 38,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/types.ts",
+      "loc": 38,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/ensure-audit-parent-deletion.ts",
+      "loc": 38,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/hooks/use-employee-workload.ts",
+      "loc": 37,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/migrate-whatsapp-twilio.ts",
+      "loc": 37,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/api/appointments.ts",
+      "loc": 36,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/encrypt-company-secrets.ts",
+      "loc": 35,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/documents/types.ts",
+      "loc": 34,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/migrate-schulung-besprechung-to-sonstiges.ts",
+      "loc": 34,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/toaster.tsx",
+      "loc": 33,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/startup/seed-whatsapp-rules.ts",
+      "loc": 33,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/tooltip.tsx",
+      "loc": 32,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/components/ui/popover.tsx",
+      "loc": 32,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/hooks/use-document-title-badge.ts",
+      "loc": 32,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-active-employees.ts",
+      "loc": 32,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/lib/public-branding.ts",
+      "loc": 30,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/lib/test-fault-injector.ts",
+      "loc": 30,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/lib/budget-warning.ts",
+      "loc": 30,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/drop-appointments-service-type.ts",
+      "loc": 30,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/checkbox.tsx",
+      "loc": 29,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/schema/idempotency.ts",
+      "loc": 29,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/hooks/use-employees.ts",
+      "loc": 28,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/whatsapp.ts",
+      "loc": 28,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/ensure-qonto-match-idempotency.ts",
+      "loc": 28,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/switch.tsx",
+      "loc": 27,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/lib/api/types.ts",
+      "loc": 27,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/appointments/components/performed-by-selector.tsx",
+      "loc": 27,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/prospects/components/pipeline-stats.tsx",
+      "loc": 27,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/sync-budget-allocations.ts",
+      "loc": 27,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/fix-invoice-line-item-types.ts",
+      "loc": 27,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/birthday-cards.ts",
+      "loc": 27,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/ui/label.tsx",
+      "loc": 26,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/routes/settings.ts",
+      "loc": 26,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/db.ts",
+      "loc": 26,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/startup/migrate-prospect-statuses.ts",
+      "loc": 26,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/input.tsx",
+      "loc": 25,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/hooks/index.ts",
+      "loc": 25,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/index.ts",
+      "loc": 25,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-customer-list.ts",
+      "loc": 24,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/db-helpers.ts",
+      "loc": 24,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/api/insurance.ts",
+      "loc": 24,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/index.ts",
+      "loc": 23,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/components/info-row.tsx",
+      "loc": 23,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/ui/textarea.tsx",
+      "loc": 22,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/not-found.tsx",
+      "loc": 22,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/static.ts",
+      "loc": 22,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/prospects/components/prospect-status-constants.ts",
+      "loc": 21,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/with-timeout.ts",
+      "loc": 21,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/replit_integrations/object_storage/index.ts",
+      "loc": 21,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/api/pagination.ts",
+      "loc": 21,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/hooks/use-vacation-summaries.ts",
+      "loc": 20,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/hooks/use-mobile.tsx",
+      "loc": 19,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/schema/customer-full.ts",
+      "loc": 18,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/index.ts",
+      "loc": 17,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/holidays.ts",
+      "loc": 16,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/encrypted-columns.ts",
+      "loc": 16,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/test-outbox.ts",
+      "loc": 15,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/lib/xml.ts",
+      "loc": 15,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/lib/api/index.ts",
+      "loc": 13,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/api/employees.ts",
+      "loc": 13,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/index.ts",
+      "loc": 12,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/object-storage-helpers.ts",
+      "loc": 12,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/components/admin-overview/types.ts",
+      "loc": 11,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/statistics.ts",
+      "loc": 11,
+      "domain": "statistics",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/migrate-invoice-storno-refs.ts",
+      "loc": 11,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/migrate-invoice-zugferd-xml.ts",
+      "loc": 11,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/api/birthdays.ts",
+      "loc": 11,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/profile/index.ts",
+      "loc": 10,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/admin/employees.ts",
+      "loc": 10,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/lib/log.ts",
+      "loc": 10,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/api/labor-law.ts",
+      "loc": 10,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/prospects/components/status-badge.tsx",
+      "loc": 9,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/api/index.ts",
+      "loc": 9,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/patterns/index.ts",
+      "loc": 8,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/lib/utils.ts",
+      "loc": 8,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/customers/index.ts",
+      "loc": 7,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/design-system/index.ts",
+      "loc": 7,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "server/utils/sanitize-user.ts",
+      "loc": 6,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/main.tsx",
+      "loc": 5,
+      "domain": "other",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/pages/birthdays.tsx",
+      "loc": 5,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/signature-integrity.ts",
+      "loc": 5,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/index.ts",
+      "loc": 3,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/tasks/index.ts",
+      "loc": 2,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/components/charts/index.ts",
+      "loc": 1,
+      "domain": "layout-ui",
+      "risk": "NIEDRIG"
+    },
+    {
+      "path": "client/src/features/tasks/task-list.ts",
+      "loc": 1,
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/prospects/index.ts",
+      "loc": 1,
+      "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema.ts",
+      "loc": 1,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    }
+  ]
+}
