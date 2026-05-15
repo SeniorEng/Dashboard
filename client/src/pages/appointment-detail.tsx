@@ -413,8 +413,8 @@ export default function AppointmentDetail() {
               {isCompleted && hasAnyDocumentedService && (
                 <div className="flex items-center justify-between pt-2 pb-1">
                   <span className="flex-1" />
-                  <span className="w-20 text-right text-xs text-muted-foreground uppercase tracking-wide">Geplant</span>
-                  <span className="w-20 text-right text-xs font-semibold text-primary uppercase tracking-wide">Ist</span>
+                  <span className="w-24 text-right text-xs text-muted-foreground uppercase tracking-wide whitespace-nowrap">Geplant</span>
+                  <span className="w-24 text-right text-xs font-semibold text-primary uppercase tracking-wide whitespace-nowrap">Ist</span>
                 </div>
               )}
 
@@ -436,10 +436,10 @@ export default function AppointmentDetail() {
                       </div>
                       {isCompleted && hasDocumented ? (
                         <div className="flex items-center gap-1">
-                          <span className="w-20 text-right text-muted-foreground text-sm">
+                          <span className="w-24 text-right text-muted-foreground text-sm whitespace-nowrap">
                             {plannedMins ? formatDuration(plannedMins) : "—"}
                           </span>
-                          <span className={`w-20 text-right font-semibold ${hasDifference ? "text-amber-600" : "text-primary"}`}>
+                          <span className={`w-24 text-right font-semibold whitespace-nowrap ${hasDifference ? "text-amber-600" : "text-primary"}`}>
                             {formatDuration(actualMins)}
                           </span>
                         </div>
@@ -467,10 +467,10 @@ export default function AppointmentDetail() {
                     <span className="font-medium">Gesamt</span>
                     {isCompleted && hasAnyDocumentedService ? (
                       <div className="flex items-center gap-1">
-                        <span className="w-20 text-right text-muted-foreground text-sm">
+                        <span className="w-24 text-right text-muted-foreground text-sm whitespace-nowrap">
                           {formatDuration(totalPlanned)}
                         </span>
-                        <span className={`w-20 text-right font-semibold ${hasTotalDifference ? "text-amber-600" : "text-primary"}`}>
+                        <span className={`w-24 text-right font-semibold whitespace-nowrap ${hasTotalDifference ? "text-amber-600" : "text-primary"}`}>
                           {formatDuration(totalActual)}
                         </span>
                       </div>
@@ -556,7 +556,7 @@ export default function AppointmentDetail() {
           className="mb-4"
         >
           {existingServiceRecord ? (
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <StatusBadge
                 type="record"
                 value={existingServiceRecord.status}
@@ -565,8 +565,9 @@ export default function AppointmentDetail() {
               <Link
                 href={`/service-records/${existingServiceRecord.id}`}
                 data-testid="link-service-record"
+                className="w-full sm:w-auto"
               >
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="w-full sm:w-auto whitespace-normal text-left">
                   {existingServiceRecord.status === "pending" ? "Leistungsnachweis unterschreiben" : "Leistungsnachweis anzeigen"}
                   <ArrowRight className={`${iconSize.sm} ml-1`} />
                 </Button>
