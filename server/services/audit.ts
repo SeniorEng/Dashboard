@@ -242,6 +242,32 @@ class AuditService {
     await this.log(userId, "invoice_payment_unreconciled", "invoice", invoiceId, metadata, ipAddress, exec);
   }
 
+  async callBridgeFailed(
+    prospectId: number,
+    metadata: { reason: string; stage: "add_note" | "initiate_call" | "validate_phone" },
+    ipAddress?: string,
+    exec?: DbOrTx,
+  ): Promise<void> {
+    // Kein eingeloggter Benutzer beim automatischen Anruf — wir nehmen den
+    // ersten aktiven (Super-)Admin als System-Actor, damit die FK auf users
+    // erfüllt ist. Findet sich niemand, loggen wir nur in die Konsole.
+    const actor = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.isActive, true))
+      .orderBy(users.id)
+      .limit(1);
+    const userId = actor[0]?.id;
+    if (!userId) {
+      console.error(
+        "[AuditService] callBridgeFailed: kein aktiver Benutzer als System-Actor gefunden",
+        { prospectId, ...metadata },
+      );
+      return;
+    }
+    await this.log(userId, "call_bridge_failed", "prospect", prospectId, metadata, ipAddress, exec);
+  }
+
   async customerContractUpdated(
     userId: number,
     customerId: number,

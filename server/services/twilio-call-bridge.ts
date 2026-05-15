@@ -4,6 +4,9 @@ import { prospectStorage } from "../storage/prospects";
 import { validateDachPhone } from "@shared/utils/phone";
 import { withTimeout } from "../lib/with-timeout";
 import { log } from "../lib/log";
+import { escapeXml } from "../lib/xml";
+import { signCallbackToken } from "../lib/twilio-callback-token";
+import { auditService } from "./audit";
 
 interface CallBridgeParams {
   prospectId: number;
@@ -57,7 +60,7 @@ export async function initiateLeadCallBridge(params: CallBridgeParams & { throwO
   if (!phoneResult.valid) {
     const errorMsg = `Telefonnummer ungültig (${leadPhone})`;
     log(`Invalid lead phone for prospect ${prospectId}: ${phoneResult.error}`, "twilio-bridge");
-    await safeAddNote(prospectId, `Automatischer Anruf nicht möglich: ${errorMsg}`, "notiz");
+    await safeAddNote(prospectId, `Automatischer Anruf nicht möglich: ${errorMsg}`, "notiz", "validate_phone");
     if (throwOnError) throw new Error(errorMsg);
     return;
   }
@@ -65,10 +68,14 @@ export async function initiateLeadCallBridge(params: CallBridgeParams & { throwO
   const normalizedLeadPhone = phoneResult.normalized;
   const client = twilio(config.accountSid, config.authToken);
   const baseUrl = buildCallbackBaseUrl();
+  // HMAC-Token statt Klartext-prospectId in der Callback-URL: eine geleakte
+  // URL ist nur bis exp gültig und kann nicht auf andere Prospects umgebogen
+  // werden (Task #450).
+  const callbackToken = signCallbackToken({ prospectId });
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather numDigits="1" action="${baseUrl}/api/webhook/twilio/gather?prospectId=${prospectId}&amp;leadPhone=${encodeURIComponent(normalizedLeadPhone)}&amp;twilioPhone=${encodeURIComponent(config.twilioPhone)}" method="POST" timeout="15">
+  <Gather numDigits="1" action="${baseUrl}/api/webhook/twilio/gather?t=${encodeURIComponent(callbackToken)}&amp;leadPhone=${encodeURIComponent(normalizedLeadPhone)}&amp;twilioPhone=${encodeURIComponent(config.twilioPhone)}" method="POST" timeout="15">
     <Say language="de-DE">Neuer Lead: ${escapeXml(leadName)}. Quelle: ${escapeXml(quelle || "unbekannt")}. Drücken Sie 1 zum Verbinden.</Say>
   </Gather>
   <Say language="de-DE">Keine Eingabe erkannt. Auf Wiedersehen.</Say>
@@ -79,24 +86,30 @@ export async function initiateLeadCallBridge(params: CallBridgeParams & { throwO
       to: config.bridgePhone,
       from: config.twilioPhone,
       twiml,
-      statusCallback: `${baseUrl}/api/webhook/twilio/status?prospectId=${prospectId}`,
+      statusCallback: `${baseUrl}/api/webhook/twilio/status?t=${encodeURIComponent(callbackToken)}`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
     });
 
     log(`Call initiated for prospect ${prospectId}: SID=${call.sid}`, "twilio-bridge");
 
-    await safeAddNote(prospectId, `Automatischer Anruf gestartet (${leadName}, Tel: ${phoneResult.formatted})`, "anruf");
+    await safeAddNote(prospectId, `Automatischer Anruf gestartet (${leadName}, Tel: ${phoneResult.formatted})`, "anruf", "add_note");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[twilio-bridge] Failed to initiate call for prospect ${prospectId}: ${msg}`);
 
-    await safeAddNote(prospectId, `Automatischer Anruf fehlgeschlagen: ${msg}`, "notiz");
+    await safeAddNote(prospectId, `Automatischer Anruf fehlgeschlagen: ${msg}`, "notiz", "initiate_call");
+    await recordCallBridgeFailure(prospectId, msg, "initiate_call");
     if (throwOnError) throw err;
   }
 }
 
-async function safeAddNote(prospectId: number, noteText: string, noteType: "email" | "notiz" | "anruf" | "statuswechsel"): Promise<void> {
+async function safeAddNote(
+  prospectId: number,
+  noteText: string,
+  noteType: "email" | "notiz" | "anruf" | "statuswechsel",
+  stage: "add_note" | "initiate_call" | "validate_phone",
+): Promise<void> {
   try {
     await withTimeout(
       () => prospectStorage.addNote({ prospectId, noteText, noteType }),
@@ -104,7 +117,26 @@ async function safeAddNote(prospectId: number, noteText: string, noteType: "emai
       `twilioBridge addNote (prospect ${prospectId})`
     );
   } catch (err) {
-    console.error(`[twilio-bridge] Failed to save note for prospect ${prospectId}:`, err instanceof Error ? err.message : err);
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`[twilio-bridge] Failed to save note for prospect ${prospectId}:`, reason);
+    // Note-Insert-Failures werden als Compliance-Event auditiert, statt nur
+    // in der Konsole zu verstummen (Task #450).
+    await recordCallBridgeFailure(prospectId, reason, stage);
+  }
+}
+
+async function recordCallBridgeFailure(
+  prospectId: number,
+  reason: string,
+  stage: "add_note" | "initiate_call" | "validate_phone",
+): Promise<void> {
+  try {
+    await auditService.callBridgeFailed(prospectId, { reason, stage });
+  } catch (auditErr) {
+    console.error(
+      `[twilio-bridge] Failed to write call_bridge_failed audit for prospect ${prospectId}:`,
+      auditErr instanceof Error ? auditErr.message : auditErr,
+    );
   }
 }
 
@@ -133,13 +165,4 @@ export async function initiateTestCall(): Promise<{ success: boolean; message: s
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, message: `Twilio-Fehler: ${msg}` };
   }
-}
-
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
 }

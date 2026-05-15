@@ -1,42 +1,30 @@
 import { Router, Request, Response } from "express";
-import twilio from "twilio";
 import { prospectStorage } from "../storage/prospects";
-import { storage } from "../storage";
-import { getCachedCompanySettings } from "../services/cache";
+import { escapeXml } from "../lib/xml";
+import { verifyTwilioSignature } from "../middleware/twilio-auth";
+import { verifyCallbackToken } from "../lib/twilio-callback-token";
 
 const router = Router();
 
-async function validateTwilioSignature(req: Request, res: Response): Promise<boolean> {
-  const settings = await getCachedCompanySettings();
-  if (!settings?.twilioAuthToken) {
-    console.error("[twilio-webhook] No Twilio auth token configured");
-    res.status(403).send("Forbidden");
-    return false;
+// Signatur-Prüfung als Middleware: ein zentraler Mount stellt sicher, dass
+// keine neue Webhook-Route den Check vergessen kann (Task #450).
+router.use(verifyTwilioSignature);
+
+function resolveProspectId(req: Request): number | null {
+  const result = verifyCallbackToken(req.query.t as string | undefined);
+  if (result.ok && typeof result.prospectId === "number") return result.prospectId;
+  if (!result.ok) {
+    console.error(`[twilio-webhook] Token-Prüfung fehlgeschlagen: ${result.reason}`);
   }
-  const twilioSignature = req.headers["x-twilio-signature"] as string;
-  if (!twilioSignature) {
-    console.error("[twilio-webhook] Missing X-Twilio-Signature header");
-    res.status(403).send("Forbidden");
-    return false;
-  }
-  const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-  const url = `${protocol}://${req.get("host")}${req.originalUrl}`;
-  if (!twilio.validateRequest(settings.twilioAuthToken, twilioSignature, url, req.body)) {
-    console.error("[twilio-webhook] Invalid Twilio signature");
-    res.status(403).send("Forbidden");
-    return false;
-  }
-  return true;
+  return null;
 }
 
 router.post("/gather", async (req: Request, res: Response) => {
   try {
-    if (!(await validateTwilioSignature(req, res))) return;
-
     const { Digits } = req.body;
-    const prospectId = parseInt(req.query.prospectId as string, 10);
-    const leadPhone = decodeURIComponent(req.query.leadPhone as string);
-    const twilioPhone = decodeURIComponent(req.query.twilioPhone as string);
+    const prospectId = resolveProspectId(req);
+    const leadPhone = typeof req.query.leadPhone === "string" ? decodeURIComponent(req.query.leadPhone) : "";
+    const twilioPhone = typeof req.query.twilioPhone === "string" ? decodeURIComponent(req.query.twilioPhone) : "";
 
     res.set("Content-Type", "text/xml");
 
@@ -49,7 +37,7 @@ router.post("/gather", async (req: Request, res: Response) => {
   </Dial>
 </Response>`;
 
-      if (!isNaN(prospectId)) {
+      if (prospectId !== null) {
         prospectStorage.addNote({
           prospectId,
           noteText: "Mitarbeiter hat Taste 1 gedrückt — Verbindung zum Lead wird hergestellt",
@@ -64,7 +52,7 @@ router.post("/gather", async (req: Request, res: Response) => {
   <Say language="de-DE">Keine gültige Eingabe. Auf Wiedersehen.</Say>
 </Response>`;
 
-      if (!isNaN(prospectId)) {
+      if (prospectId !== null) {
         prospectStorage.addNote({
           prospectId,
           noteText: `Mitarbeiter hat Taste ${Digits || "keine"} gedrückt — Verbindung nicht hergestellt`,
@@ -83,12 +71,10 @@ router.post("/gather", async (req: Request, res: Response) => {
 
 router.post("/status", async (req: Request, res: Response) => {
   try {
-    if (!(await validateTwilioSignature(req, res))) return;
-
-    const prospectId = parseInt(req.query.prospectId as string, 10);
+    const prospectId = resolveProspectId(req);
     const { CallStatus, CallDuration } = req.body;
 
-    if (!isNaN(prospectId) && CallStatus) {
+    if (prospectId !== null && CallStatus) {
       const statusMap: Record<string, string> = {
         completed: "Anruf abgeschlossen",
         busy: "Mitarbeiter besetzt",
@@ -116,14 +102,5 @@ router.post("/status", async (req: Request, res: Response) => {
     res.status(200).send("OK");
   }
 });
-
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
 
 export default router;
