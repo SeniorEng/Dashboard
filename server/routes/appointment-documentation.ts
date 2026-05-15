@@ -7,7 +7,7 @@ import { auditService } from "../services/audit";
 import { computeDataHash } from "../services/signature-integrity";
 import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireAdmin } from "../middleware/auth";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { db } from "../lib/db";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
@@ -15,7 +15,8 @@ import { canDocumentAppointment as policyCanDocument } from "@shared/policies/ap
 import { toPolicyAppointment, toPolicyUser } from "./appointments";
 import { formatEuroDE } from "@shared/utils/money";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
-import { formatTimeHHMMSS } from "@shared/utils/datetime";
+import { formatTimeHHMMSS, todayISO } from "@shared/utils/datetime";
+import { diagnoseDocumentation } from "@shared/domain/documentation-diagnostics";
 import { eq } from "drizzle-orm";
 import { serviceCatalogStorage } from "../storage/service-catalog";
 
@@ -438,6 +439,95 @@ router.post("/:id/document-no-show", asyncHandler("Fehler beim Speichern der Ver
       policyType,
       billable: charge.totalCents > 0,
     },
+  });
+}));
+
+// ============================================
+// DOKU-DIAGNOSE (Task #489)
+// ============================================
+// Read-only Admin-Endpoint, der für einen Termin bündelt:
+//  - Status & Zeitfelder (actualStart/actualEnd)
+//  - Signatur-Felder (data/hash/signedAt/signedByUserId)
+//  - dokumentierte Services (Anzahl + Liste)
+//  - letzte Audit-Log-Einträge zu diesem Termin
+//  - eine heuristische Bewertung in Deutsch (siehe
+//    shared/domain/documentation-diagnostics.ts)
+router.get("/:id/diagnose", requireAdmin, asyncHandler("Diagnose konnte nicht geladen werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const appointment = await storage.getAppointment(id);
+  if (!appointment) {
+    throw notFound(ErrorMessages.appointmentNotFound);
+  }
+
+  const services = await storage.getAppointmentServices(id);
+  const documentedServicesCount = services.filter(s => (s.actualDurationMinutes ?? 0) > 0).length;
+
+  // Audit-Einträge für diesen Termin (chronologisch absteigend, max. 20)
+  // — read-only über die bestehende Audit-Service-Layer (KEINE eigene
+  // Drizzle-Query in der Route).
+  const { entries: auditRows } = await auditService.getEntries({
+    entityType: "appointment",
+    entityId: id,
+    limit: 20,
+    offset: 0,
+  });
+
+  const lastActivityAt = auditRows[0]?.createdAt
+    ? auditRows[0].createdAt.toISOString()
+    : null;
+
+  const diagnosis = diagnoseDocumentation({
+    status: appointment.status as Parameters<typeof diagnoseDocumentation>[0]["status"],
+    date: appointment.date,
+    today: todayISO(),
+    actualStart: appointment.actualStart ?? null,
+    actualEnd: appointment.actualEnd ?? null,
+    hasSignatureData: !!appointment.signatureData,
+    documentedServicesCount,
+    lastActivityAt,
+  });
+
+  res.json({
+    appointmentId: id,
+    status: appointment.status,
+    date: appointment.date,
+    scheduledStart: appointment.scheduledStart,
+    scheduledEnd: appointment.scheduledEnd,
+    actualStart: appointment.actualStart,
+    actualEnd: appointment.actualEnd,
+    assignedEmployeeId: appointment.assignedEmployeeId,
+    performedByEmployeeId: appointment.performedByEmployeeId,
+    signature: {
+      hasSignatureData: !!appointment.signatureData,
+      signatureHash: appointment.signatureHash,
+      signedAt: appointment.signedAt,
+      signedByUserId: appointment.signedByUserId,
+    },
+    travel: {
+      travelKilometers: appointment.travelKilometers,
+      travelMinutes: appointment.travelMinutes,
+      customerKilometers: appointment.customerKilometers,
+    },
+    services: services.map(s => ({
+      id: s.id,
+      serviceName: s.serviceName,
+      serviceCode: s.serviceCode,
+      plannedDurationMinutes: s.plannedDurationMinutes,
+      actualDurationMinutes: s.actualDurationMinutes,
+      details: s.details,
+    })),
+    documentedServicesCount,
+    auditEntries: auditRows.map(r => ({
+      id: r.id,
+      action: r.action,
+      userId: r.userId,
+      userName: r.userName,
+      createdAt: r.createdAt,
+      metadata: r.metadata,
+    })),
+    diagnosis,
   });
 }));
 

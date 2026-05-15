@@ -10,3 +10,4 @@ export { AppointmentTravelCard } from "./appointment-travel-card";
 export { AppointmentServiceRecordCard } from "./appointment-service-record-card";
 export { AppointmentSeriesDeleteDialog } from "./appointment-series-delete-dialog";
 export { AppointmentCustomerHeader } from "./appointment-customer-header";
+export { AppointmentDocumentationDiagnosis } from "./appointment-documentation-diagnosis";

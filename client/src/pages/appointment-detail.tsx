@@ -30,6 +30,7 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useAppointmentPolicy } from "@/features/appointments/use-appointment-policy";
 import {
+  AppointmentDocumentationDiagnosis,
   AppointmentTimeServicesCard,
   AppointmentTravelCard,
   AppointmentServiceRecordCard,
@@ -255,6 +256,19 @@ export default function AppointmentDetail() {
       />
 
       {isCompleted && <AppointmentTravelCard appointment={appointment} />}
+
+      {user?.isAdmin && (() => {
+        const isPastScheduled =
+          appointment.status === "scheduled" &&
+          appointment.date < new Date().toISOString().slice(0, 10);
+        const showDiagnose =
+          appointment.status === "documenting" ||
+          appointment.status === "expired_unsigned" ||
+          isPastScheduled;
+        return showDiagnose ? (
+          <AppointmentDocumentationDiagnosis appointmentId={appointment.id} />
+        ) : null;
+      })()}
 
       {appointment.notes && (
         <SectionCard title="Notizen" className="mb-4">
