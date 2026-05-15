@@ -395,6 +395,17 @@ router.patch("/users/:id", asyncHandler("Benutzer konnte nicht aktualisiert werd
   // ---------- /Teamleiter-Audit ----------
 
   if (roles !== undefined) {
+    // Defense-in-depth: Nur Hauptadministratoren dürfen Rollen
+    // privilegierter Accounts (Admin/SuperAdmin) ändern. `denyIfPrivilegedTarget`
+    // oben blockiert das bereits — diese zusätzliche Prüfung schützt den
+    // Pfad, falls die obige Logik je überarbeitet wird.
+    if (!req.user!.isSuperAdmin && isPrivilegedTarget(currentUserBefore)) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Nur der Hauptadministrator kann Rollen von Administrator-Accounts ändern",
+      });
+      return;
+    }
     await authService.setUserRoles(id, roles);
   }
 

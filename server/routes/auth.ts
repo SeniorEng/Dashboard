@@ -43,6 +43,8 @@ router.post("/login", asyncHandler("Anmeldung fehlgeschlagen", async (req: Reque
   }
 
   const { email, password } = result.data;
+  const preExistingSessionToken = req.cookies?.careconnect_session;
+
   const loginResult = await authService.login(email, password);
 
   if (!loginResult) {
@@ -51,6 +53,15 @@ router.post("/login", asyncHandler("Anmeldung fehlgeschlagen", async (req: Reque
       message: "E-Mail-Adresse oder Passwort ist falsch",
     });
     return;
+  }
+
+  // Session-Fixation-Defense: nach erfolgreichem Credential-Check eine
+  // eventuell vom Client mitgeschickte alte Session serverseitig
+  // invalidieren und anschließend frische Session- + CSRF-Cookies
+  // ausstellen. Das alte Token (z.B. vom Angreifer untergeschoben) bleibt
+  // damit nicht mehr verwendbar.
+  if (preExistingSessionToken) {
+    await authService.logout(preExistingSessionToken);
   }
 
   setSessionCookie(res, loginResult.token);

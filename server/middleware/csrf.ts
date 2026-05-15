@@ -46,8 +46,9 @@ export function csrfProtection(
   const headerToken = req.headers[CSRF_HEADER_NAME] as string | undefined;
 
   if (!cookieToken) {
-    const newToken = generateCsrfToken();
-    setCsrfCookie(res, newToken);
+    // Token-Fixation-Defense: KEIN neuer CSRF-Cookie wird hier gesetzt.
+    // Cookies werden ausschließlich auf safe-method-Requests (GET /api/auth/me,
+    // GET /api/auth/csrf-token) und beim erfolgreichen Login ausgestellt.
     res.status(403).json({
       error: "CSRF_TOKEN_MISSING",
       message: "CSRF-Token fehlt. Bitte laden Sie die Seite neu.",
