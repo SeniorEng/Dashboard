@@ -65,6 +65,7 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     await page.goto(`/admin/customers/${customer.id}`, { waitUntil: "domcontentloaded" });
     await page.locator("[data-testid='button-edit-pflegegrad']").click();
 
+    // Admin-Overview verwendet CareLevelSection mit Select-Testid `select-new-pflegegrad`.
     const trigger = page.locator("[data-testid='select-new-pflegegrad']");
     await expect(trigger).toBeVisible({ timeout: 10000 });
     await trigger.click();
@@ -72,22 +73,16 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       .locator("[data-testid='select-new-pflegegrad-option-4']")
       .click();
 
-    // DatePicker ist ein Button-Trigger + Popover-Calendar — kein Input.
-    await page.locator("[data-testid='input-pflegegrad-seit']").click();
-    const today = new Date();
-    await page
-      .locator("[role='dialog'], [data-radix-popper-content-wrapper]")
-      .getByRole("gridcell", { name: String(today.getDate()), exact: true })
-      .first()
-      .click();
+    // DatePicker (Popover) wird mit `todayISO()` vorbelegt — keine Datum-Auswahl nötig.
 
     await clickSaveAndWait(page, { url: `/api/admin/customers/${customer.id}/care-level`, methods: ["POST"] }, "button-save-pflegegrad");
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    // Pflegegrad-Anzeige (StatusBadge in card-pflegegrad).
-    const badge = page.locator("[data-testid='badge-pflegegrad']");
-    await expect(badge).toBeVisible({ timeout: 10000 });
-    await expect(badge).toContainText(/Pflegegrad\s*4|PG\s*4/);
+    // Persistenz per API verifizieren — Admin-Overview rendert StatusBadge ohne stabile Testid.
+    const refetched = await session.api
+      .get(`/api/admin/customers/${customer.id}/details`)
+      .then((r) => (r.ok() ? r.json() : null));
+    expect(refetched?.pflegegrad, `Pflegegrad nicht persistiert für Kunde ${customer.id}`).toBe(4);
   });
 
   // ---------- 3. Customer edit — Kontaktperson hinzufügen ----------
@@ -124,8 +119,12 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
 
     const openEditDialog = async () => {
       const card = page.locator(`[data-testid='card-user-${emp.id}']`);
-      await card.scrollIntoViewIfNeeded();
-      await expect(card).toBeVisible({ timeout: 10000 });
+      // Erst sicherstellen, dass die Karte gemountet ist — sonst läuft der
+      // anschliessende Action-Click in einen Re-Render-Race.
+      await expect(card).toBeVisible({ timeout: 15000 });
+      // Click-fähigkeit von Playwright erzwingt Scroll-into-view automatisch
+      // und respektiert pointer-events; das ersetzt den vorher best-effort
+      // gehaltenen scrollIntoView-Aufruf und maskiert keine Fehler mehr.
       await page.locator(`[data-testid='button-actions-${emp.id}']`).click();
       await page.locator(`[data-testid='button-edit-user-${emp.id}']`).click();
     };
@@ -167,8 +166,9 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
 
     const openEditDialog = async () => {
       const card = page.locator(`[data-testid='card-user-${emp.id}']`);
-      await card.scrollIntoViewIfNeeded();
-      await expect(card).toBeVisible({ timeout: 10000 });
+      await expect(card).toBeVisible({ timeout: 15000 });
+      // Kein expliziter scrollIntoView — Playwrights `.click()` führt das
+      // deterministisch selbst aus und schluckt keine Fehler.
       await page.locator(`[data-testid='button-actions-${emp.id}']`).click();
       await page.locator(`[data-testid='button-edit-user-${emp.id}']`).click();
     };
@@ -258,12 +258,17 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       await page.goto(`/document-appointment/${appt.id}`, {
         waitUntil: "domcontentloaded",
       });
+      // Wizard-Step-1 wird clientseitig hydratisiert — auf NetworkIdle warten,
+      // damit der Hauswirtschafts-Service-Block fertig gerendert ist, bevor
+      // wir auf das Detail-Feld zugreifen (Task #453: vorher gelegentlich
+      // "locator not visible" bei sehr schnellem Hydration-Pfad).
+      await page.waitForLoadState("networkidle", { timeout: 10000 });
 
       // Schritt 1: Service-Detail-Feld füllen.
       const serviceDetail = page.locator(
         "[data-testid='input-details-hauswirtschaft']",
       );
-      await expect(serviceDetail).toBeVisible({ timeout: 10000 });
+      await expect(serviceDetail).toBeVisible({ timeout: 15000 });
       await serviceDetail.fill(docNote);
       await page.locator("[data-testid='button-next']").click();
 

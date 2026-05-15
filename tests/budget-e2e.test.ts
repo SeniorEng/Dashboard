@@ -475,9 +475,22 @@ describe("INT-7: Doppelbuchungsschutz", () => {
     await scenario.cleanup();
   });
 
+  // Task #453: dieser Test wurde zuvor als flaky gemeldet. Ursache war eine
+  // Voraussetzungs-Unschärfe — wenn das Setup-Szenario den Termin nicht sauber
+  // auf status='completed' brachte, lieferte der Re-Doku-Endpunkt nicht
+  // ALREADY_COMPLETED, sondern einen anderen Validierungsfehler. Wir hängen
+  // jetzt eine explizite Vorbedingung an, damit ein Setup-Drift sofort sichtbar
+  // wird statt sich als "wrong error code" zu maskieren.
   it("INT-7.1 – Zweite Dokumentation desselben Termins wird abgelehnt (ALREADY_COMPLETED)", async () => {
     const apptId = scenario.appointmentIds[0];
     expect(apptId).toBeGreaterThan(0);
+
+    // Vorbedingung: Termin muss bereits 'completed' sein, sonst testen wir den
+    // falschen Pfad. Falls das Szenario hier driftet, schlagen wir mit klarer
+    // Botschaft fehl statt mit einem irreführenden 4xx-Mismatch weiter unten.
+    const apptRes = await apiGet<{ status?: string }>(`/api/appointments/${apptId}`);
+    expect(apptRes.status, "Termin-GET vor Re-Doku muss 200 liefern").toBe(200);
+    expect(apptRes.data.status, "INT-7.1 setzt voraus, dass der Termin bereits completed ist").toBe("completed");
 
     const servicesRes = await apiGet<any[]>("/api/services");
     const hwService = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
