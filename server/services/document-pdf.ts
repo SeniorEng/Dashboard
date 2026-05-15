@@ -1,13 +1,62 @@
 import crypto from "crypto";
+import path from "path";
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
 import { generatePdfFromHtml } from "./pdf-generator";
-import { renderTemplate, buildPlaceholders, wrapInPrintableHtml } from "./template-engine";
+import { renderTemplate, buildPlaceholders, wrapInPrintableHtml, escapeHtml } from "./template-engine";
 import { documentStorage } from "../storage/documents";
 import { computeDataHash } from "./signature-integrity";
 import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import type { DocumentTemplate } from "@shared/schema";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
+import { badRequest } from "../lib/errors";
 import type { Request, Response } from "express";
+
+const RESERVED_RAW_HTML_PLACEHOLDERS = ["customer_signature", "employee_signature", "company_logo"] as const;
+
+export function stripReservedRawHtmlPlaceholders(
+  overrides: Record<string, string> | undefined
+): Record<string, string> {
+  const result: Record<string, string> = { ...(overrides ?? {}) };
+  for (const reserved of RESERVED_RAW_HTML_PLACEHOLDERS) {
+    if (reserved in result) {
+      delete result[reserved];
+    }
+  }
+  return result;
+}
+
+const SIGNATURE_DATA_URL_RE = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/;
+
+function isValidSignatureDataUrl(value: string): boolean {
+  if (value.length > 5 * 1024 * 1024) return false;
+  const match = SIGNATURE_DATA_URL_RE.exec(value);
+  if (!match) return false;
+  const [, mime, b64] = match;
+  let decoded: Buffer;
+  try {
+    decoded = Buffer.from(b64, "base64");
+  } catch {
+    return false;
+  }
+  if (decoded.length === 0) return false;
+  if (mime === "png") {
+    return decoded.length >= 8 &&
+      decoded[0] === 0x89 && decoded[1] === 0x50 && decoded[2] === 0x4e && decoded[3] === 0x47 &&
+      decoded[4] === 0x0d && decoded[5] === 0x0a && decoded[6] === 0x1a && decoded[7] === 0x0a;
+  }
+  if (mime === "jpeg") {
+    return decoded.length >= 3 && decoded[0] === 0xff && decoded[1] === 0xd8 && decoded[2] === 0xff;
+  }
+  return false;
+}
+
+export function buildSignatureImg(value: string, alt: string, maxHeightPx: number): string {
+  const safeAlt = escapeHtml(alt);
+  if (!isValidSignatureDataUrl(value)) {
+    return escapeHtml(value);
+  }
+  return `<img src="${value}" alt="${safeAlt}" style="max-height:${maxHeightPx}px;" />`;
+}
 
 function buildAuditStamp(options: {
   signingIp?: string | null;
@@ -63,12 +112,12 @@ export async function generateAndStorePdf(options: {
 }> {
   const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, generatedByUserId, signingStatus = "complete", signingIp, signingLocation } = options;
 
-  const overrides: Record<string, string> = { ...placeholderOverrides };
+  const overrides = stripReservedRawHtmlPlaceholders(placeholderOverrides);
   if (customerSignatureData) {
-    overrides.customer_signature = `<img src="${customerSignatureData}" alt="Kundenunterschrift" style="max-height:240px;" />`;
+    overrides.customer_signature = buildSignatureImg(customerSignatureData, "Kundenunterschrift", 240);
   }
   if (employeeSignatureData) {
-    overrides.employee_signature = `<img src="${employeeSignatureData}" alt="Mitarbeiterunterschrift" style="max-height:60px;" />`;
+    overrides.employee_signature = buildSignatureImg(employeeSignatureData, "Mitarbeiterunterschrift", 60);
   }
 
   let placeholders: Record<string, string>;
@@ -165,7 +214,7 @@ export async function regeneratePdfWithSignature(
 ): Promise<{ objectPath: string; fileName: string; integrityHash: string }> {
   if (!doc.renderedHtml) throw new Error("Kein gerendertetes HTML vorhanden");
 
-  const sigHtml = `<img src="${employeeSignatureData}" alt="Mitarbeiterunterschrift" style="max-height:60px;" />`;
+  const sigHtml = buildSignatureImg(employeeSignatureData, "Mitarbeiterunterschrift", 60);
   let updatedHtml = doc.renderedHtml;
   if (updatedHtml.includes("{{employee_signature}}")) {
     updatedHtml = updatedHtml.replace(/\{\{employee_signature\}\}/g, sigHtml);
@@ -258,7 +307,14 @@ export async function generateInfoDocumentPdfs(options: {
 export async function getDocumentPdfBuffer(objectPath: string): Promise<Buffer> {
   let fullPath: string;
   if (objectPath.startsWith("/objects/")) {
-    const entityId = objectPath.slice("/objects/".length);
+    const normalized = path.posix.normalize(objectPath);
+    if (!normalized.startsWith("/objects/") || normalized.includes("..")) {
+      throw badRequest("Ungültiger Objekt-Pfad");
+    }
+    const entityId = normalized.slice("/objects/".length);
+    if (!entityId || entityId.startsWith("/")) {
+      throw badRequest("Ungültiger Objekt-Pfad");
+    }
     let entityDir = getPrivateDir();
     if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
     fullPath = `${entityDir}${entityId}`;
