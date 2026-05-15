@@ -203,6 +203,45 @@ export function isDocumentationOverdue(
 }
 
 
+export type DocumentationAgeBucket = "overdue" | "this-week" | "today";
+
+export const DOCUMENTATION_AGE_BUCKET_LABELS: Record<DocumentationAgeBucket, string> = {
+  "overdue": "Älter als 7 Tage",
+  "this-week": "Diese Woche",
+  "today": "Heute",
+};
+
+export const DOCUMENTATION_AGE_BUCKET_ORDER: DocumentationAgeBucket[] = ["overdue", "this-week", "today"];
+
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function parseLocalDate(iso: string): Date {
+  const [y, m, day] = iso.split("-").map((n) => parseInt(n, 10));
+  return new Date(y, (m || 1) - 1, day || 1);
+}
+
+export function daysOverdue(
+  appointment: { date: string },
+  now: Date = new Date(),
+): number {
+  const today = startOfLocalDay(now);
+  const apt = startOfLocalDay(parseLocalDate(appointment.date));
+  const ms = today.getTime() - apt.getTime();
+  return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
+export function getDocumentationAgeBucket(
+  appointment: { date: string },
+  now: Date = new Date(),
+): DocumentationAgeBucket {
+  const days = daysOverdue(appointment, now);
+  if (days > 7) return "overdue";
+  if (days >= 1) return "this-week";
+  return "today";
+}
+
 export function canEditNotes(status: AppointmentStatus): boolean {
   return status === "scheduled" || status === "documenting";
 }
