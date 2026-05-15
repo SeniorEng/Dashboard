@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { formatEuroDE } from "@shared/utils/money";
 import { displayPriceCents } from "@shared/domain/customers";
 
 export type CostEstimate = {
@@ -39,13 +40,13 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
   const isSelbstzahler = cost.isSelbstzahler || billingType === "selbstzahler";
 
   if (isSelbstzahler) {
-    const bruttoEuro = ((cost.bruttoCents ?? displayPriceCents(cost.totalCents, "selbstzahler")) / 100).toFixed(2).replace(".", ",");
+    const bruttoEuro = formatEuroDE(cost.bruttoCents ?? displayPriceCents(cost.totalCents, "selbstzahler"));
     const vatPct = cost.vatRate ?? 19;
     return (
       <div className="rounded-lg border bg-blue-50 border-blue-200 p-3 text-sm flex items-start gap-3" data-testid="selbstzahler-cost-estimate">
         <CheckCircle2 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
         <div>
-          <p className="text-blue-800 font-medium">Kosten: {bruttoEuro} € (inkl. {vatPct} % MwSt.)</p>
+          <p className="text-blue-800 font-medium">Kosten: {bruttoEuro} (inkl. {vatPct} % MwSt.)</p>
           <p className="text-blue-600 text-xs mt-1">Privatabrechnung — wird dem Kunden direkt in Rechnung gestellt</p>
         </div>
       </div>
@@ -53,8 +54,8 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
   }
 
   const displayCents = displayPriceCents(cost.totalCents, billingType);
-  const costEuro = (displayCents / 100).toFixed(2).replace(".", ",");
-  const availEuro = cost.availableCents !== undefined ? (cost.availableCents / 100).toFixed(2).replace(".", ",") : null;
+  const costEuro = formatEuroDE(displayCents, { withCurrency: false });
+  const availEuro = cost.availableCents !== undefined ? formatEuroDE(cost.availableCents, { withCurrency: false }) : null;
 
   if (cost.isHardBlock) {
     return (

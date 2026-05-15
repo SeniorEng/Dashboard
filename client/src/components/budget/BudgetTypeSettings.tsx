@@ -12,6 +12,7 @@ import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDG
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
+import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { todayISO } from "@shared/utils/datetime";
 
 interface BudgetTypeSetting {
@@ -68,17 +69,17 @@ function formatMonthYear(dateStr: string): string {
   return `${monthLabel} ${parts[0]}`;
 }
 
+// Task #441 — Re-Exports auf den zentralen Money-Helper.
+// Keine eigene Parsing/Formatting-Logik mehr; alle Komponenten teilen
+// `parseEuroDE` / `formatEuroDE` (mit `withCurrency: false` für reines
+// Input-Feld-Format ohne "€"-Suffix).
 function euroStringToCents(value: string): number | null {
-  if (!value || value.trim() === "") return null;
-  const normalized = value.replace(",", ".");
-  const parsed = parseFloat(normalized);
-  if (isNaN(parsed)) return null;
-  return Math.round(parsed * 100);
+  return parseEuroDE(value);
 }
 
 function centsToEuroString(cents: number | null): string {
   if (cents === null) return "";
-  return (cents / 100).toFixed(2).replace(".", ",");
+  return formatEuroDE(cents, { withCurrency: false });
 }
 
 function isValidEuroInput(value: string): boolean {
@@ -196,16 +197,18 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
   const isYearlyBudget = (budgetType: string) =>
     budgetType === "ersatzpflege_39_42a";
 
+  const formatMaxEuro = (cents: number) => formatEuroDE(cents).replace(/,00\s*€/, " €");
+
   const getMaxHint = (budgetType: string): string | null => {
     if (budgetType === "entlastungsbetrag_45b") {
-      return `Gesetzl. Max: ${(BUDGET_45B_MAX_MONTHLY_CENTS / 100).toFixed(0)} €/Monat`;
+      return `Gesetzl. Max: ${formatMaxEuro(BUDGET_45B_MAX_MONTHLY_CENTS)}/Monat`;
     }
     if (budgetType === "umwandlung_45a" && pflegegrad) {
       const maxCents = BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad] ?? 0;
-      return maxCents > 0 ? `Gesetzl. Max: ${(maxCents / 100).toFixed(0)} €/Monat (PG ${pflegegrad})` : null;
+      return maxCents > 0 ? `Gesetzl. Max: ${formatMaxEuro(maxCents)}/Monat (PG ${pflegegrad})` : null;
     }
     if (budgetType === "ersatzpflege_39_42a") {
-      return `Gesetzl. Max: ${(BUDGET_39_42A_MAX_YEARLY_CENTS / 100).toFixed(0)} €/Jahr`;
+      return `Gesetzl. Max: ${formatMaxEuro(BUDGET_39_42A_MAX_YEARLY_CENTS)}/Jahr`;
     }
     return null;
   };

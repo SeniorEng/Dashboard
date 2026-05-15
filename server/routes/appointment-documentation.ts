@@ -13,6 +13,7 @@ import { db } from "../lib/db";
 import { checkAndRecalcDailyAutoBreak } from "../services/auto-breaks";
 import { canDocumentAppointment as policyCanDocument } from "@shared/policies/appointments";
 import { toPolicyAppointment, toPolicyUser } from "./appointments";
+import { formatEuroDE } from "@shared/utils/money";
 
 const router = Router();
 router.use(requireAuth);
@@ -119,8 +120,8 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
         try {
           const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId!);
           if (summary.monthlyLimitCents !== null && summary.currentMonthUsedCents > summary.monthlyLimitCents) {
-            const overEuro = ((summary.currentMonthUsedCents - summary.monthlyLimitCents) / 100).toFixed(2).replace(".", ",");
-            budgetWarning = `Monatslimit überschritten — ${overEuro} € über dem Limit.`;
+            const overEuro = formatEuroDE(summary.currentMonthUsedCents - summary.monthlyLimitCents);
+            budgetWarning = `Monatslimit überschritten — ${overEuro} über dem Limit.`;
           }
         } catch (warnErr) {
           console.warn("[appointment-documentation] Budget-Limit-Prüfung fehlgeschlagen:", warnErr);

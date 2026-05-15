@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatEuroDE } from "@shared/utils/money";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -86,7 +87,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 function formatAmount(cents: number): string {
-  return (cents / 100).toFixed(2).replace(".", ",") + " €";
+  return formatEuroDE(cents);
 }
 
 function formatDate(dateStr: string): string {

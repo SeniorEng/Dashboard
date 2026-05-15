@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Clock, AlertTriangle } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
+import { formatEuroDE } from "@shared/utils/money";
 
 interface EmployeeSummaryRow {
   employeeId: number;
@@ -49,12 +50,13 @@ const MONTHS = [
 
 function formatHours(hours: number): string {
   if (hours === 0) return "–";
+  // money-arithmetic-allowed: hours sind keine Cents, identisches DE-Zahl-Format aber kein €-Helper.
   return hours.toFixed(2).replace(".", ",");
 }
 
 function formatEuro(cents: number): string {
   if (cents === 0) return "–";
-  return (cents / 100).toFixed(2).replace(".", ",") + " €";
+  return formatEuroDE(cents);
 }
 
 function formatKm(km: number): string {

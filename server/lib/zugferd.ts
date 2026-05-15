@@ -1,6 +1,7 @@
 import type { InvoicePdfData } from "./pdf-generator";
 import { log } from "./log";
 import { parseLocalDate, parseTimestamp } from "@shared/utils/datetime";
+import { centsToEuroNumber } from "@shared/utils/money";
 
 interface ZugferdInvoice {
   toXML(): Promise<string>;
@@ -45,7 +46,9 @@ function parseDateString(dateStr: string): Date {
 }
 
 function centsToDecimal(cents: number): string {
-  return (cents / 100).toFixed(2);
+  // ZUGFeRD/XRechnung verlangt englisches Dezimalformat ("125.50"), daher
+  // direkt `centsToEuroNumber`+`toFixed(2)` statt `formatEuroDE` (de-DE).
+  return centsToEuroNumber(cents).toFixed(2);
 }
 
 function parseAddress(raw: string | null): { line1?: string; postCode?: string; city?: string } {

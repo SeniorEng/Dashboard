@@ -1,9 +1,10 @@
-import { budgetTransactions } from "@shared/schema";
+import { budgetTransactions, customers } from "@shared/schema";
 import { eq, and, sql, lte, gte } from "drizzle-orm";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { getTotalCarryoverCents } from "./summary-queries";
+import { clampToStatutoryMax } from "@shared/domain/budgets";
 
 type MonthlyBudgetType = "entlastungsbetrag_45b" | "umwandlung_45a";
 type YearlyBudgetType = "ersatzpflege_39_42a";
@@ -123,10 +124,33 @@ export async function computeCapSlot(
     );
   }
 
+  // Task #441 — Statutorische Obergrenze (Single Source of Truth).
+  // Der Storage-Layer / Migrationen können theoretisch einen Limit-Wert in
+  // `customer_budget_type_settings` halten, der über dem gesetzlichen Maximum
+  // liegt (z.B. fehlerhafter Backfill, manueller SQL-Eingriff). Damit Anzeige
+  // und Buchung nie über §45b/§45a/§39-Maxima rechnen, klemmen wir IMMER
+  // unmittelbar vor der Cap-Mathematik gegen das Gesetz. Für §45a holen wir
+  // dafür den aktuellen Pflegegrad des Kunden.
+  let pflegegrad: number | null = null;
+  if (input.budgetType === "umwandlung_45a") {
+    const d = tx ?? db;
+    const [row] = await d.select({ pflegegrad: customers.pflegegrad })
+      .from(customers)
+      .where(eq(customers.id, input.customerId))
+      .limit(1);
+    pflegegrad = row?.pflegegrad ?? null;
+  }
+  const clamped = clampToStatutoryMax({
+    budgetType: input.budgetType,
+    monthlyLimitCents: input.monthlyLimitCents,
+    yearlyLimitCents: input.yearlyLimitCents,
+    pflegegrad,
+  });
+
   let capRemainingCents = Number.POSITIVE_INFINITY;
   if (isYearly) {
-    if (input.yearlyLimitCents !== null) {
-      capRemainingCents = Math.max(0, input.yearlyLimitCents - netUsedInWindowCents);
+    if (clamped.yearlyLimitCents !== null) {
+      capRemainingCents = Math.max(0, clamped.yearlyLimitCents - netUsedInWindowCents);
     }
   } else if (input.budgetType === "entlastungsbetrag_45b") {
     // §45b ist ein Jahrestopf mit monatlicher Aufstockung — KEIN Monats-Cap.
@@ -135,8 +159,8 @@ export async function computeCapSlot(
     // calculateAllocated45b und summary-queries.getBudgetSummary).
     capRemainingCents = Number.POSITIVE_INFINITY;
   } else {
-    if (input.monthlyLimitCents !== null) {
-      const effectiveLimit = input.monthlyLimitCents + carryoverCents;
+    if (clamped.monthlyLimitCents !== null) {
+      const effectiveLimit = clamped.monthlyLimitCents + carryoverCents;
       capRemainingCents = Math.max(0, effectiveLimit - netUsedInWindowCents);
     }
   }

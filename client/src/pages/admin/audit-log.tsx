@@ -12,6 +12,7 @@ import { ArrowLeft, Loader2, Shield, ChevronLeft, ChevronRight, Layers, X } from
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { parseTimestamp } from "@shared/utils/datetime";
+import { formatEuroDE } from "@shared/utils/money";
 
 const ACTION_LABELS: Record<string, string> = {
   documentation_submitted: "Dokumentation eingereicht",
@@ -128,7 +129,7 @@ export default function AdminAuditLog() {
       if (typeof m.serviceName === "string") parts.push(`Service: ${m.serviceName}`);
       if (typeof m.validFrom === "string") parts.push(`Stichtag: ${m.validFrom}`);
       if (typeof m.oldPriceCents === "number" && typeof m.newPriceCents === "number") {
-        const fmt = (c: number) => `${(c / 100).toFixed(2).replace(".", ",")} €`;
+        const fmt = (c: number) => formatEuroDE(c);
         parts.push(`${fmt(m.oldPriceCents as number)} → ${fmt(m.newPriceCents as number)}`);
       }
     }

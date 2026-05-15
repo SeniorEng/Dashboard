@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
+import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -434,13 +435,16 @@ export default function AdminSettings() {
 
   useEffect(() => {
     if (companyData?.minijobEarningsLimitCents != null) {
-      setMinijobLimit(String(companyData.minijobEarningsLimitCents / 100));
+      setMinijobLimit(formatEuroDE(companyData.minijobEarningsLimitCents, { withCurrency: false }));
     }
   }, [companyData?.minijobEarningsLimitCents]);
 
   const minijobLimitMutation = useMutation({
     mutationFn: async (limitEuro: string) => {
-      const cents = Math.round(parseFloat(limitEuro) * 100);
+      const cents = parseEuroDE(limitEuro);
+      if (cents === null) {
+        throw new Error("Ungültiger Betrag");
+      }
       const result = await api.patch<CompanySettings>("/company-settings", { minijobEarningsLimitCents: cents });
       return unwrapResult(result);
     },

@@ -11,6 +11,7 @@ import type { DbClient } from "./types";
 import { getActiveBudgetTypeSettings, getBudgetTypeSettings } from "./preferences-storage";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
+import { formatEuroDE } from "@shared/utils/money";
 
 export async function rebookSingleTransaction(
   customerId: number,
@@ -114,7 +115,7 @@ export async function rebookSingleTransaction(
     );
 
     if (fifoResult.consumedCents < absAmount) {
-      throw new Error(`Ziel-Topf hat nicht genug Budget. Verfügbar: ${(fifoResult.consumedCents / 100).toFixed(2)} €, benötigt: ${(absAmount / 100).toFixed(2)} €`);
+      throw new Error(`Ziel-Topf hat nicht genug Budget. Verfügbar: ${formatEuroDE(fifoResult.consumedCents)}, benötigt: ${formatEuroDE(absAmount)}`);
     }
 
     return {
@@ -325,7 +326,7 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
 
           if (cascadeResult.outstandingCents > 0) {
             throw new Error(
-              `Ziel-Budget reicht nicht aus. ${(cascadeResult.outstandingCents / 100).toFixed(2)} € konnten nicht gebucht werden.`
+              `Ziel-Budget reicht nicht aus. ${formatEuroDE(cascadeResult.outstandingCents)} konnten nicht gebucht werden.`
             );
           }
 

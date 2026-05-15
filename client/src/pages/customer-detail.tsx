@@ -26,6 +26,7 @@ import { CustomerDocumentsSection } from "@/features/customers/components/custom
 import { useCustomerDetailForm } from "@/features/customers/hooks/use-customer-detail-form";
 import { api, unwrapResult } from "@/lib/api/client";
 import { todayISO } from "@shared/utils/datetime";
+import { formatEuroDE } from "@shared/utils/money";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import type { Customer, CustomerContact } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -399,7 +400,7 @@ export default function CustomerDetailPage() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">§45b Entlastungsbetrag</span>
                         <span className="text-sm text-muted-foreground">
-                          {(b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
+                          {formatEuroDE(b.currentMonthAvailableCents)} verfügbar
                         </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 mb-1">
@@ -409,8 +410,8 @@ export default function CustomerDetailPage() {
                         />
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{(b.totalUsedCents / 100).toFixed(2).replace(".", ",")} € von {(b.totalAllocatedCents / 100).toFixed(2).replace(".", ",")} € verbraucht</span>
-                        <span>Monat: {(b.currentMonthUsedCents / 100).toFixed(2).replace(".", ",")} €</span>
+                        <span>{formatEuroDE(b.totalUsedCents)} von {formatEuroDE(b.totalAllocatedCents)} verbraucht</span>
+                        <span>Monat: {formatEuroDE(b.currentMonthUsedCents)}</span>
                       </div>
                     </div>
                   );
@@ -424,7 +425,7 @@ export default function CustomerDetailPage() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">§45a Umwandlungsanspruch</span>
                         <span className="text-sm text-muted-foreground">
-                          {(b.currentMonthAvailableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
+                          {formatEuroDE(b.currentMonthAvailableCents)} verfügbar
                         </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 mb-1">
@@ -434,7 +435,7 @@ export default function CustomerDetailPage() {
                         />
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{(b.currentMonthUsedCents / 100).toFixed(2).replace(".", ",")} € von {(b.currentMonthAllocatedCents / 100).toFixed(2).replace(".", ",")} € verbraucht</span>
+                        <span>{formatEuroDE(b.currentMonthUsedCents)} von {formatEuroDE(b.currentMonthAllocatedCents)} verbraucht</span>
                         <span>nur aktueller Monat</span>
                       </div>
                     </div>
@@ -449,7 +450,7 @@ export default function CustomerDetailPage() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">§39/§42a Gemeinsamer Jahresbetrag</span>
                         <span className="text-sm text-muted-foreground">
-                          {(b.currentYearAvailableCents / 100).toFixed(2).replace(".", ",")} € verfügbar
+                          {formatEuroDE(b.currentYearAvailableCents)} verfügbar
                         </span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2 mb-1">
@@ -459,7 +460,7 @@ export default function CustomerDetailPage() {
                         />
                       </div>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{(b.currentYearUsedCents / 100).toFixed(2).replace(".", ",")} € von {(b.currentYearAllocatedCents / 100).toFixed(2).replace(".", ",")} € verbraucht</span>
+                        <span>{formatEuroDE(b.currentYearUsedCents)} von {formatEuroDE(b.currentYearAllocatedCents)} verbraucht</span>
                         <span>Jahresbudget</span>
                       </div>
                     </div>

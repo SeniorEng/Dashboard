@@ -5,6 +5,7 @@ import { useInsuranceProviders, useCreateCustomer } from "@/features/customers";
 import { api, ApiError } from "@/lib/api";
 import { validateDachPhone, formatPhoneAsYouType, normalizePhone } from "@shared/utils/phone";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
+import { centsToEuroNumber } from "@shared/utils/money";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/wizard/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
@@ -641,7 +642,7 @@ export function useCustomerWizard() {
         const maxCents = BUDGET_45A_MAX_BY_PFLEGEGRAD[pg] ?? 0;
         const currentValue = parseFloat(prev.pflegesachleistungen36);
         if (!currentValue || currentValue === 0) {
-          newData.pflegesachleistungen36 = (maxCents / 100).toString();
+          newData.pflegesachleistungen36 = centsToEuroNumber(maxCents).toString();
         }
       }
       if (field === "vorjahrVerbraucht45b" || (field === "pflegegradSeit" && prev.vorjahrVerbraucht45b !== "")) {

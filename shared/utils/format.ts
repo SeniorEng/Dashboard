@@ -21,20 +21,14 @@
  * formatCurrency(-500) → "-5,00 €"
  */
 export function formatCurrency(cents: number, options?: { showSign?: boolean }): string {
-  const euros = cents / 100;
-  const formatted = euros.toLocaleString("de-DE", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  
-  if (options?.showSign && cents > 0) {
-    return `+${formatted}`;
-  }
-  
-  return formatted;
+  // Re-export-Shim auf den zentralen Money-Helper (Task #441).
+  // Bitte direkt `formatEuroDE` aus `@shared/utils/money` verwenden — dieser
+  // Wrapper bleibt für Bestandscode erhalten.
+  return formatEuroDE(cents, options);
 }
+
+export { formatEuroDE, parseEuroDE, centsToEuroNumber } from "./money";
+import { formatEuroDE } from "./money";
 
 export function formatKm(km: number | string | null | undefined): string {
   return Number(km ?? 0).toFixed(1).replace(".", ",");

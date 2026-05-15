@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@shared/utils/format";
+import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { displayPriceCents, netFromInputCents } from "@shared/domain/customers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -387,18 +388,16 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
 
   function startEdit(serviceId: number, currentPriceCents: number) {
     setEditingServiceId(serviceId);
-    setEditPrice((displayPrice(currentPriceCents, getVatRate(serviceId)) / 100).toFixed(2).replace(".", ","));
+    setEditPrice(formatEuroDE(displayPrice(currentPriceCents, getVatRate(serviceId)), { withCurrency: false }));
     setEditValidFrom("");
   }
 
   function handleSave(serviceId: number) {
-    const normalized = editPrice.replace(",", ".");
-    const euros = parseFloat(normalized);
-    if (isNaN(euros) || euros < 0) {
+    const inputCents = parseEuroDE(editPrice);
+    if (inputCents === null || inputCents < 0) {
       toast({ title: "Ungültiger Preis", variant: "destructive" });
       return;
     }
-    const inputCents = Math.round(euros * 100);
     const newPriceCents = netFromInput(inputCents, getVatRate(serviceId));
     const existingCustomPrice = priceMap.get(serviceId);
     if (!editValidFrom && existingCustomPrice && newPriceCents !== existingCustomPrice.priceCents) {
@@ -715,13 +714,11 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                                     toast({ title: "Gültig-bis-Datum darf nicht vor Gültig-ab-Datum liegen", variant: "destructive" });
                                     return;
                                   }
-                                  const normalized = editPriceAmount.replace(",", ".");
-                                  const euros = parseFloat(normalized);
-                                  if (isNaN(euros) || euros <= 0) {
+                                  const inputCents = parseEuroDE(editPriceAmount);
+                                  if (inputCents === null || inputCents <= 0) {
                                     toast({ title: "Ungültiger Preis", variant: "destructive" });
                                     return;
                                   }
-                                  const inputCents = Math.round(euros * 100);
                                   const newPriceCents = netFromInput(inputCents, getVatRate(p.serviceId));
                                   updateMutation.mutate({
                                     priceId: p.id,
@@ -759,7 +756,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                                 setEditingPriceId(p.id);
                                 setEditPriceValidFrom(p.validFrom.substring(0, 10));
                                 setEditPriceValidTo(p.validTo ? p.validTo.substring(0, 10) : "");
-                                setEditPriceAmount((displayPrice(p.priceCents, getVatRate(p.serviceId)) / 100).toFixed(2).replace(".", ","));
+                                setEditPriceAmount(formatEuroDE(displayPrice(p.priceCents, getVatRate(p.serviceId)), { withCurrency: false }));
                               }}
                               data-testid={`btn-edit-history-${p.id}`}
                             >

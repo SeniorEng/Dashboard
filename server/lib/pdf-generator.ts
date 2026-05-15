@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getBrowser } from "../services/pdf-generator";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
+import { formatEuroDE } from "@shared/utils/money";
 
 export interface InvoicePdfData {
   // Company data
@@ -91,9 +92,7 @@ export interface InvoicePdfData {
 }
 
 function formatCents(cents: number): string {
-  const abs = Math.abs(cents);
-  const sign = cents < 0 ? "-" : "";
-  return `${sign}${(abs / 100).toFixed(2).replace(".", ",")} €`;
+  return formatEuroDE(cents);
 }
 
 function escapeHtml(str: string): string {

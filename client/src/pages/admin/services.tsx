@@ -28,6 +28,7 @@ import { ArrowLeft, Plus, Pencil, Loader2, ClipboardList, Calculator } from "luc
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatCurrency } from "@shared/utils/format";
+import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import type { InsertService } from "@shared/schema";
 import { SERVICE_UNIT_TYPES } from "@shared/schema";
 import { BUDGET_TYPES, BUDGET_TYPE_LABELS } from "@shared/domain/budgets";
@@ -65,7 +66,7 @@ const UNIT_SUFFIX: Record<string, string> = {
 };
 
 function formatPrice(cents: number): string {
-  return (cents / 100).toFixed(2).replace(".", ",");
+  return formatEuroDE(cents, { withCurrency: false });
 }
 
 interface ServiceFormData {
@@ -191,12 +192,11 @@ export default function AdminServices() {
       if (!s.isBillable || !s.isActive) continue;
       const raw = bulkPrices[s.id];
       if (raw === undefined || raw === "") continue;
-      const euros = parseFloat(raw.replace(",", "."));
-      if (isNaN(euros) || euros < 0) {
+      const newCents = parseEuroDE(raw);
+      if (newCents === null || newCents < 0) {
         toast({ title: `Ungültiger Preis für ${s.name}`, variant: "destructive" });
         return;
       }
-      const newCents = Math.round(euros * 100);
       if (newCents !== s.defaultPriceCents) {
         updates.push({ id: s.id, name: s.name, oldCents: s.defaultPriceCents, newCents });
       }
@@ -378,9 +378,9 @@ export default function AdminServices() {
       .some(s => {
         const raw = bulkPrices[s.id];
         if (raw === undefined || raw === "") return false;
-        const euros = parseFloat(raw.replace(",", "."));
-        if (isNaN(euros) || euros < 0) return false;
-        return Math.round(euros * 100) !== s.defaultPriceCents;
+        const newCents = parseEuroDE(raw);
+        if (newCents === null || newCents < 0) return false;
+        return newCents !== s.defaultPriceCents;
       });
   }, [services, bulkPrices]);
 

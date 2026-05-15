@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { BUDGET_TYPES } from "@shared/domain/budgets";
+import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 
 const router = Router();
@@ -212,14 +213,14 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
   if (totalCostCents > totalAvailable) {
     const shortfall = totalCostCents - totalAvailable;
-    const shortfallEuro = (shortfall / 100).toFixed(2).replace(".", ",");
+    const shortfallEuro = formatEuroDE(shortfall);
 
     if (acceptsPrivatePayment) {
       privateCents = shortfall;
       vatCents = Math.round(shortfall * (weightedVatRate / 100));
-      warning = `Budget reicht nicht — ${shortfallEuro} € werden privat berechnet.`;
+      warning = `Budget reicht nicht — ${shortfallEuro} werden privat berechnet.`;
     } else {
-      warning = `Budget reicht nicht — es fehlen ${shortfallEuro} €.`;
+      warning = `Budget reicht nicht — es fehlen ${shortfallEuro}.`;
       isHardBlock = true;
     }
   }
@@ -875,7 +876,7 @@ router.post("/admin/repair-orphaned-transactions", requireAdmin, asyncHandler("B
       appointmentId: oc.appointmentId,
       customerId: oc.customerId,
       amountCents: oc.amountCents,
-      euroAmount: (Math.abs(oc.amountCents) / 100).toFixed(2),
+      euroAmount: centsToEuroNumber(Math.abs(oc.amountCents)).toFixed(2),
       transactionDate: oc.transactionDate,
       budgetType: oc.budgetType,
     })),

@@ -11,6 +11,7 @@ import {
 import { eq, and, sql, lte, gte, isNull, isNotNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
+import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { getBudgetPreferences, getBudgetTypeSettings, getActiveBudgetTypeSettings } from "./preferences-storage";
@@ -879,7 +880,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
       source: "carryover",
       validFrom: `${targetYear}-01-01`,
       expiresAt: `${targetYear}-06-30`,
-      notes: `Übertrag aus ${year}: ${(unused / 100).toFixed(2)} € (verfällt 30.06.${targetYear})`,
+      notes: `Übertrag aus ${year}: ${formatEuroDE(unused)} (verfällt 30.06.${targetYear})`,
     }).onConflictDoNothing().returning();
 
     if (result[0]) created.push(result[0]);
@@ -970,7 +971,7 @@ export async function processExpiredCarryover(customerId: number, _tx?: DbClient
       transactionType: "write_off",
       amountCents: -remaining,
       allocationId: allocation.id,
-      notes: `Verfallenes Guthaben aus ${allocation.year}: ${(remaining / 100).toFixed(2)} € (Frist ${allocation.expiresAt})`,
+      notes: `Verfallenes Guthaben aus ${allocation.year}: ${formatEuroDE(remaining)} (Frist ${allocation.expiresAt})`,
     }).onConflictDoNothing().returning();
 
     if (writeOff[0]) created.push(writeOff[0]);

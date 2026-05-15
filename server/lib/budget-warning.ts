@@ -1,4 +1,5 @@
 import type { BudgetSummary } from "../storage/budget/types";
+import { formatEuroDE } from "@shared/utils/money";
 
 export interface BuildBudgetWarningOptions {
   /**
@@ -21,10 +22,8 @@ export function buildBudgetWarning(
   const parts: string[] = [];
 
   if (summary.availableAfterPlannedCents < 0) {
-    const overEuro = (Math.abs(summary.availableAfterPlannedCents) / 100)
-      .toFixed(2)
-      .replace(".", ",");
-    parts.push(`Geplante Termine übersteigen §45b um ${overEuro} €.`);
+    const overEuro = formatEuroDE(Math.abs(summary.availableAfterPlannedCents));
+    parts.push(`Geplante Termine übersteigen §45b um ${overEuro}.`);
   }
 
   return parts.length > 0 ? `Achtung: ${parts.join(" ")}` : null;

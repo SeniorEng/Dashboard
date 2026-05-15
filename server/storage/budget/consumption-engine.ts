@@ -15,6 +15,8 @@ import { getBudgetPreferences, getActiveBudgetTypeSettings } from "./preferences
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { getAvailableForDate } from "./import-availability";
+import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
+import { formatEuroDE } from "@shared/utils/money";
 
 type ConsumptionParams = {
   appointmentId?: number;
@@ -39,6 +41,40 @@ function buildConsumptionTxData(
   ratio: number,
   params?: ConsumptionParams,
 ): typeof budgetTransactions.$inferInsert {
+  const hwSrc = params?.hauswirtschaftCents;
+  const abSrc = params?.alltagsbegleitungCents;
+  const tvSrc = params?.travelCents;
+  const ckSrc = params?.customerKilometersCents;
+
+  let hwCents = hwSrc != null ? Math.round(hwSrc * ratio) : null;
+  let abCents = abSrc != null ? Math.round(abSrc * ratio) : null;
+  let tvCents = tvSrc != null ? Math.round(tvSrc * ratio) : null;
+  let ckCents = ckSrc != null ? Math.round(ckSrc * ratio) : null;
+
+  // Task #441 — Subtract-last gegen Rundungsdrift.
+  // Bei ratiometrischer Aufteilung (FIFO-Split / Cap-Limit) wird jeder Leg-
+  // Posten unabhängig gerundet; in Summe driftet das um bis zu 1 Cent pro
+  // Leg, d.h. `Σlegs` kann von `|amountCents|` abweichen. Statistik-,
+  // Lexware- und Anzeige-Auswertungen summieren jedoch die Bein-Spalten und
+  // erwarten exakt den gebuchten Betrag. Wir setzen daher die letzte gesetzte
+  // Spalte (Customer-KM-Cents zuerst, dann Travel, Alltag, Hauswirtschaft) als
+  // Residuum, sodass `hwCents + abCents + tvCents + ckCents === |amountCents|`.
+  // Bedingung: mindestens eine Leg-Quelle ist gesetzt. Cascade-Folgetöpfe
+  // ohne Leg-Daten (nur appointmentId/userId) bleiben unverändert null.
+  if (hwCents != null || abCents != null || tvCents != null || ckCents != null) {
+    const consumedAbs = Math.abs(amountCents);
+    const sumOf = (a: number | null) => a ?? 0;
+    if (ckCents != null) {
+      ckCents = consumedAbs - sumOf(hwCents) - sumOf(abCents) - sumOf(tvCents);
+    } else if (tvCents != null) {
+      tvCents = consumedAbs - sumOf(hwCents) - sumOf(abCents);
+    } else if (abCents != null) {
+      abCents = consumedAbs - sumOf(hwCents);
+    } else if (hwCents != null) {
+      hwCents = consumedAbs;
+    }
+  }
+
   return {
     customerId,
     budgetType,
@@ -50,13 +86,13 @@ function buildConsumptionTxData(
     notes: params?.notes ?? null,
     createdByUserId: params?.userId,
     hauswirtschaftMinutes: params?.hauswirtschaftMinutes != null ? Math.round(params.hauswirtschaftMinutes * ratio) : null,
-    hauswirtschaftCents: params?.hauswirtschaftCents != null ? Math.round(params.hauswirtschaftCents * ratio) : null,
+    hauswirtschaftCents: hwCents,
     alltagsbegleitungMinutes: params?.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null,
-    alltagsbegleitungCents: params?.alltagsbegleitungCents != null ? Math.round(params.alltagsbegleitungCents * ratio) : null,
+    alltagsbegleitungCents: abCents,
     travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio) : null,
-    travelCents: params?.travelCents != null ? Math.round(params.travelCents * ratio) : null,
+    travelCents: tvCents,
     customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio) : null,
-    customerKilometersCents: params?.customerKilometersCents != null ? Math.round(params.customerKilometersCents * ratio) : null,
+    customerKilometersCents: ckCents,
   };
 }
 
@@ -255,11 +291,11 @@ export async function createCascadeConsumption(params: {
 
     await syncCarryoverAndExpiry(params.customerId, tx);
 
-    const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> = [
-      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null },
-      { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null },
-      { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null },
-    ];
+    // Task #441 — Single Source of Truth aus `shared/domain/budgets`.
+    // Keine hardcoded Reihenfolge mehr — alle Aufrufer (Cascade, Preview,
+    // Reset-Flows) lesen aus `DEFAULT_BUDGET_POT_ORDER`.
+    const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> =
+      DEFAULT_BUDGET_POT_ORDER.map(d => ({ ...d, monthlyLimitCents: null }));
 
     let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }>;
 
@@ -452,9 +488,8 @@ export async function createConsumptionTransaction(params: {
 
       if (costs.totalCents > totalAvailable) {
         const shortfall = costs.totalCents - totalAvailable;
-        const shortfallEuro = (shortfall / 100).toFixed(2).replace(".", ",");
         throw new Error(
-          `Budget reicht nicht — es fehlen ${shortfallEuro} €. Kunde akzeptiert keine Privatzahlung.`
+          `Budget reicht nicht — es fehlen ${formatEuroDE(shortfall)}. Kunde akzeptiert keine Privatzahlung.`
         );
       }
     }
@@ -498,13 +533,12 @@ export async function createConsumptionTransaction(params: {
           customerKilometers: Math.round(params.customerKilometers * privateRatio * 10) / 10,
           customerKilometersCents: ckCents,
           createdByUserId: params.userId,
-          notes: `Privatzahlung: ${(cascadeResult.outstandingCents / 100).toFixed(2)} €`,
+          notes: `Privatzahlung: ${formatEuroDE(cascadeResult.outstandingCents)}`,
         }).returning();
         return cascadeResult.transactions[0] ?? privateTransaction;
       }
-      const shortfallEuro = (cascadeResult.outstandingCents / 100).toFixed(2).replace(".", ",");
       throw new Error(
-        `Budget reicht nicht — es fehlen ${shortfallEuro} €. Kunde akzeptiert keine Privatzahlung.`
+        `Budget reicht nicht — es fehlen ${formatEuroDE(cascadeResult.outstandingCents)}. Kunde akzeptiert keine Privatzahlung.`
       );
     }
 

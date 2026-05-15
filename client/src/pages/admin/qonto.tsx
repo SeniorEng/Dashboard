@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
+import { formatEuroDE } from "@shared/utils/money";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -108,7 +109,7 @@ interface PaymentAdvice {
 type Tab = "status" | "transactions" | "advices";
 
 function formatCents(cents: number): string {
-  return (cents / 100).toFixed(2).replace(".", ",") + " €";
+  return formatEuroDE(cents);
 }
 
 function formatDate(iso: string): string {

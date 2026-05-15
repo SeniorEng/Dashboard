@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { CustomerFormData, BudgetTypeSettingForm, PFLEGEGRAD_OPTIONS } from "./customer-types";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { centsToEuroNumber } from "@shared/utils/money";
 import { 
   BUDGET_45B_MAX_MONTHLY_CENTS, 
   BUDGET_45A_MAX_BY_PFLEGEGRAD, 
@@ -372,7 +373,7 @@ export function ContractStep({ formData, onChange, showGrossPrices = false }: Co
           <div className="space-y-2">
             {activeServices.map(service => {
               const unitLabel = service.unitType === "hours" ? "€/Std." : service.unitType === "kilometers" ? "€/km" : "€ pauschal";
-              const netPrice = service.defaultPriceCents / 100;
+              const netPrice = centsToEuroNumber(service.defaultPriceCents);
               const displayPrice = showGrossPrices
                 ? netPrice * (1 + (service.vatRate || 0) / 100)
                 : netPrice;
