@@ -17,6 +17,7 @@ import {
   type AuditEntityType,
 } from "@shared/schema";
 import { auditService } from "./audit";
+import { prospectsRepo } from "../repos";
 
 /**
  * Task #448: Customer-Hard-Delete: Per-Child-Audit + Soft-Default
@@ -191,9 +192,9 @@ export async function softDeleteCustomerWithCascade(args: {
 
   // Prospect-Backreferenzen (convertedCustomerId) — nur Audit-Spur.
   {
-    const rows = await tx.select({ id: prospects.id })
-      .from(prospects)
-      .where(eq(prospects.convertedCustomerId, customerId));
+    const rows = await prospectsRepo
+      .selectColumnsFrom({ id: prospects.id }, tx)
+      .where(and(eq(prospects.convertedCustomerId, customerId), prospectsRepo.activeOnly()));
     targets.push({ table: "prospects", action: "customer_child_soft_deleted", entityType: "prospect", ids: rows.map(r => r.id) });
   }
 

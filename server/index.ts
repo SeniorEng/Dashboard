@@ -265,6 +265,13 @@ async function runStartupTasks() {
       log(`Erstberatung-Kunden-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { ensureErstberatungProspectLinkConstraint } = await import("./startup/ensure-erstberatung-prospect-link");
+    try {
+      await ensureErstberatungProspectLinkConstraint();
+    } catch (err) {
+      log(`Erstberatung-Prospect-Link-Constraint fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateProspectStatuses } = await import("./startup/migrate-prospect-statuses");
     try {
       await migrateProspectStatuses();

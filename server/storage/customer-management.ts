@@ -481,13 +481,14 @@ class CustomerManagementStorage {
     
     const oldCustomer = existing[0];
 
-    // Task #512: Verhindere, dass ein Kunde per Update in den Status
+    // Task #510/#512: Verhindere, dass ein Kunde per Update in den Status
     // 'erstberatung' gesetzt wird, ohne dass eine Prospect-Verknüpfung
     // existiert (würde sonst denselben Waisen-Effekt erzeugen wie bei der
     // Anlage).
     if (data.status === "erstberatung") {
       assertErstberatungHasProspectLink(data.status, oldCustomer.convertedFromProspectId);
     }
+
 
     if (data.vorname !== undefined || data.nachname !== undefined) {
       const newVorname = data.vorname ?? oldCustomer.vorname ?? '';
@@ -686,6 +687,9 @@ class CustomerManagementStorage {
   }
 
   async createCustomerDirect(customerData: InsertCustomer, tx?: DbOrTx) {
+    // Task #510/#512 — Karteileichen-Prävention: Status 'erstberatung' ist nur
+    // erlaubt, wenn ein Prospect-Bezug gesetzt ist. Defense-in-depth zusätzlich
+    // zum DB-CHECK-Constraint (siehe `startup/ensure-erstberatung-prospect-link.ts`).
     assertErstberatungHasProspectLink(customerData.status, customerData.convertedFromProspectId);
     const executor = tx ?? db;
     const [customer] = await executor.insert(customers).values(customerData).returning();
