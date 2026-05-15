@@ -5,7 +5,7 @@ import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils
 // TYPES
 // ============================================
 
-export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled" | "expired_unsigned";
+export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled" | "expired_unsigned" | "customer_no_show";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 
@@ -21,6 +21,7 @@ const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "completed": 3,
   "cancelled": 4,
   "expired_unsigned": 5,
+  "customer_no_show": 6,
 };
 
 export const STATUS_LABELS: Record<AppointmentStatus, string> = {
@@ -30,6 +31,7 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
   "completed": "Abgeschlossen",
   "cancelled": "Storniert",
   "expired_unsigned": "Nicht abgerechnet",
+  "customer_no_show": "Kunde nicht angetroffen",
 };
 
 // ============================================
@@ -121,12 +123,16 @@ interface CardServiceInfo extends ServiceInfo {
 }
 
 const ALLOWED_CANCELLATION_SOURCES: AppointmentStatus[] = ["scheduled", "in-progress"];
+const ALLOWED_NO_SHOW_SOURCES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting"];
 
 export function isValidStatusTransition(
   currentStatus: AppointmentStatus,
   targetStatus: AppointmentStatus
 ): boolean {
   if (targetStatus === "cancelled" && ALLOWED_CANCELLATION_SOURCES.includes(currentStatus)) {
+    return true;
+  }
+  if (targetStatus === "customer_no_show" && ALLOWED_NO_SHOW_SOURCES.includes(currentStatus)) {
     return true;
   }
   if (currentStatus === "completed" && targetStatus === "documenting") {
@@ -138,7 +144,7 @@ export function isValidStatusTransition(
 }
 
 export function canModifyAppointment(status: AppointmentStatus): boolean {
-  return status !== "completed";
+  return status !== "completed" && status !== "customer_no_show";
 }
 
 
@@ -153,6 +159,7 @@ export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
   "completed": 3,
   "cancelled": 4,
   "expired_unsigned": 5,
+  "customer_no_show": 6,
 };
 
 

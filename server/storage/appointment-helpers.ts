@@ -185,6 +185,13 @@ export function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unkn
     doctorLongitude: (row.doctorLongitude as number | null) ?? null,
     estimatedTravelMinutes: (row.estimatedTravelMinutes as number | null) ?? null,
     travelBufferMinutes: (row.travelBufferMinutes as number | null) ?? null,
+    noShowReason: (row.noShowReason as string | null) ?? null,
+    noShowReasonText: (row.noShowReasonText as string | null) ?? null,
+    noShowWaitMinutes: (row.noShowWaitMinutes as number | null) ?? null,
+    noShowKilometers: (row.noShowKilometers as number | null) ?? null,
+    noShowNotes: (row.noShowNotes as string | null) ?? null,
+    noShowChargeSuppressed: (row.noShowChargeSuppressed as boolean | null) ?? false,
+    noShowChargeSuppressionReason: (row.noShowChargeSuppressionReason as string | null) ?? null,
     assignedEmployeeName: (row.assignedEmployeeName as string | null) ?? null,
     customer: (row.customer as { id?: number })?.id
       ? row.customer as AppointmentWithCustomer["customer"]
@@ -264,5 +271,9 @@ function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["custome
     setupBudgetsPending: false,
     setupDeliveryPending: false,
     setupPendingPayloads: null,
+    cancellationPolicyType: "none",
+    cancellationFlatCents: null,
+    cancellationHourlyRateCents: null,
+    cancellationKmRateCents: null,
   };
 }

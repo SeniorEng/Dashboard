@@ -84,6 +84,16 @@ export async function getTimeOverview(
   const completedTravel = { totalKilometers: 0, customerKilometers: 0, totalMinutes: 0 };
   const plannedTravel = { totalKilometers: 0, customerKilometers: 0, totalMinutes: 0 };
 
+  // Task #485 — Leerfahrten (customer_no_show): MA war vor Ort, hat aber keine
+  // Leistung erbracht. Wird separat aggregiert, damit die "echten" Service-
+  // Stunden nicht durch No-Shows verwässert werden.
+  const leerfahrten = {
+    count: 0,
+    plannedMinutes: 0,
+    waitMinutes: 0,
+    kilometers: 0,
+  };
+
   const servicesByAppointment = new Map<number, typeof serviceBreakdown>();
   for (const svc of serviceBreakdown) {
     if (!servicesByAppointment.has(svc.appointmentId)) {
@@ -94,6 +104,17 @@ export async function getTimeOverview(
 
   for (const appt of employeeAppointments) {
     if (appt.status === 'cancelled') continue;
+    if (appt.status === 'customer_no_show') {
+      // No-Show: keine erbrachten Service-Minuten, aber Anfahrt & Wartezeit
+      // werden für die "Leerfahrten"-Kachel aggregiert. MA-Lohn wird über
+      // die geplante Dauer (durationPromised) abgerechnet — siehe Lohnart
+      // `leerfahrt` im Service-Katalog (Task #485).
+      leerfahrten.count++;
+      leerfahrten.plannedMinutes += appt.durationPromised || 0;
+      leerfahrten.waitMinutes += appt.noShowWaitMinutes || 0;
+      leerfahrten.kilometers += appt.travelKilometers || 0;
+      continue;
+    }
     const apptServices = servicesByAppointment.get(appt.id) || [];
     const isDone = appt.status === 'completed';
     const targetHours = isDone ? completedServiceHours : plannedServiceHours;
@@ -201,7 +222,8 @@ export async function getTimeOverview(
     timeEntries: timeEntrySummary,
     appointments: apptsByDate,
     otherEntries: otherEntriesByDate,
-  };
+    leerfahrten,
+  } as TimeOverviewData;
 }
 
 export async function getOpenTasks(userId: number): Promise<OpenTasksSummary> {

@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, time, date, boolean, index, real, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, time, date, boolean, index, real, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { isNull } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -131,6 +131,21 @@ export const appointments = pgTable("appointments", {
   travelBufferMinutes: integer("travel_buffer_minutes"),
   seriesId: integer("series_id").references(() => appointmentSeries.id, { onDelete: "set null" }),
   isSeriesException: boolean("is_series_exception").notNull().default(false),
+  // ============================================
+  // CUSTOMER NO-SHOW FIELDS (Task #485)
+  // ============================================
+  // Status == 'customer_no_show' setzt: MA wird voll bezahlt (Annahmeverzug,
+  // §615 BGB analog), Kunde wird ggf. privat berechnet ("Vergebliche Anfahrt"),
+  // §45b/Pflegekasse-Budget wird NICHT verbraucht.
+  noShowReason: text("no_show_reason"), // nicht_angetroffen | kurzfristig_abgesagt | krankenhaus | sonstiges
+  noShowReasonText: text("no_show_reason_text"),
+  noShowWaitMinutes: integer("no_show_wait_minutes"),
+  noShowKilometers: real("no_show_kilometers"),
+  noShowNotes: text("no_show_notes"),
+  // Wenn true: keine Privatrechnung ("Vergebliche Anfahrt") erzeugen.
+  // suppressionReason ist dann Pflicht und wird im Audit-Log protokolliert.
+  noShowChargeSuppressed: boolean("no_show_charge_suppressed").notNull().default(false),
+  noShowChargeSuppressionReason: text("no_show_charge_suppression_reason"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),
 }, (table) => [
@@ -281,6 +296,59 @@ export const documentAppointmentSchema = z.object({
 
 export type DocumentAppointment = z.infer<typeof documentAppointmentSchema>;
 export type DocumentKundentermin = DocumentAppointment;
+
+// ============================================
+// CUSTOMER NO-SHOW SCHEMA (Task #485)
+// ============================================
+
+export const NO_SHOW_REASONS = [
+  "nicht_angetroffen",
+  "kurzfristig_abgesagt",
+  "krankenhaus",
+  "sonstiges",
+] as const;
+export type NoShowReason = typeof NO_SHOW_REASONS[number];
+
+export const NO_SHOW_REASON_LABELS: Record<NoShowReason, string> = {
+  nicht_angetroffen: "Kunde nicht angetroffen",
+  kurzfristig_abgesagt: "Kunde hat kurzfristig abgesagt",
+  krankenhaus: "Kunde im Krankenhaus / verstorben",
+  sonstiges: "Sonstiges (Grund eintragen)",
+};
+
+export const documentNoShowSchema = z.object({
+  performedByEmployeeId: z.number().nullable().optional(),
+  actualStart: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat (HH:MM erwartet)"),
+  travelOriginType: z.enum(["home", "appointment"]),
+  travelFromAppointmentId: z.number().nullable().optional(),
+  travelKilometers: z.number().min(0, "Kilometer müssen positiv sein").max(500, "Maximal 500 km Anfahrt"),
+  travelMinutes: z.number().min(0).max(480).nullable().optional(),
+  noShowReason: z.enum(NO_SHOW_REASONS),
+  noShowReasonText: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
+  noShowWaitMinutes: z.number().int().min(0, "Wartezeit darf nicht negativ sein").max(240, "Maximal 240 Minuten Wartezeit").default(10),
+  noShowNotes: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
+  // Privatrechnung erzeugen oder unterdrücken? Bei Suppression ist eine
+  // Begründung Pflicht (≥10 Zeichen), wird ins Audit-Log geschrieben.
+  noShowChargeSuppressed: z.boolean().default(false),
+  noShowChargeSuppressionReason: z.string().max(500).optional().nullable(),
+}).superRefine((data, ctx) => {
+  if (data.noShowReason === "sonstiges" && !(data.noShowReasonText && data.noShowReasonText.trim().length > 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Bei Grund 'Sonstiges' ist eine kurze Beschreibung erforderlich.",
+      path: ["noShowReasonText"],
+    });
+  }
+  if (data.noShowChargeSuppressed && !(data.noShowChargeSuppressionReason && data.noShowChargeSuppressionReason.trim().length >= 10)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Bitte begründen Sie die Kulanz (mindestens 10 Zeichen).",
+      path: ["noShowChargeSuppressionReason"],
+    });
+  }
+});
+
+export type DocumentNoShow = z.infer<typeof documentNoShowSchema>;
 
 export type Appointment = typeof appointments.$inferSelect;
 export type InsertAppointment = z.infer<typeof baseAppointmentSchema>;

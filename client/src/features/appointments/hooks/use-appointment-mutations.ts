@@ -96,6 +96,36 @@ export function useDocumentAppointment(id: number) {
   });
 }
 
+/**
+ * Task #485 — Customer-No-Show Mutation: schreibt den Termin auf Status
+ * `customer_no_show`, ohne §45b-Budget zu verbrauchen. Antwort enthält
+ * `noShowCharge` (Vorschau, was dem Kunden privat berechnet wird).
+ */
+export function useDocumentNoShow(id: number) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      const result = await api.post(`/appointments/${id}/document-no-show`, data);
+      return unwrapResult(result);
+    },
+    onSuccess: async (data) => {
+      const customerId = extractCustomerId(data);
+      if (customerId !== undefined) {
+        await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      }
+      invalidateRelated(queryClient, "appointments", ...(customerId !== undefined ? [{ customerId }] : []));
+      // invalidate-direct-allowed: appointment-scoped services key not covered by a domain
+      // eslint-disable-next-line no-restricted-syntax
+      queryClient.invalidateQueries({ queryKey: [`/api/appointments/${id}/services`] });
+      toast({ title: "Gespeichert", description: "Vergebliche Anfahrt wurde dokumentiert." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
 export function useTravelSuggestion(appointmentId: number) {
   return useQuery<TravelSuggestion>({
     queryKey: [QUERY_KEY, appointmentId, "travel-suggestion"],

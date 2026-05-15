@@ -521,7 +521,7 @@ class AppointmentService {
     appointment: Appointment,
     input: DocumentationInput
   ): ValidationResult {
-    if (appointment.status === "completed") {
+    if (appointment.status === "completed" || appointment.status === "customer_no_show") {
       return { valid: false, error: "ALREADY_COMPLETED", message: "Dieser Termin wurde bereits dokumentiert" };
     }
 

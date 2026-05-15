@@ -31,6 +31,12 @@ interface TimeOverview {
     vertriebMinutes?: number;
     sonstigesMinutes?: number;
   };
+  leerfahrten?: {
+    count: number;
+    plannedMinutes: number;
+    waitMinutes: number;
+    kilometers: number;
+  };
 }
 
 interface VacationSummary {
@@ -135,7 +141,12 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
   const timeEntryKm = timeOverview?.travel?.timeEntryKilometers || 0;
   const completedTravelKm = timeOverview?.completedTravel?.totalKilometers || 0;
   const completedCustomerKm = timeOverview?.completedTravel?.customerKilometers || 0;
-  const totalKm = completedTravelKm + completedCustomerKm + timeEntryKm;
+  const leerfahrten = timeOverview?.leerfahrten;
+  const leerfahrtenKm = leerfahrten?.kilometers || 0;
+  const leerfahrtenWaitMin = leerfahrten?.waitMinutes || 0;
+  const leerfahrtenPlannedMin = leerfahrten?.plannedMinutes || 0;
+  const leerfahrtenCount = leerfahrten?.count || 0;
+  const totalKm = completedTravelKm + completedCustomerKm + timeEntryKm + leerfahrtenKm;
 
   return (
     <div className="flex flex-col gap-4 mb-6">
@@ -183,6 +194,22 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
                 <td className="py-0.5 text-right font-semibold" data-testid="text-sonstiges-hours">{formatMinutesToHours(sonstigesMinutes)}</td>
                 {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3"></td>}
               </tr>
+              {leerfahrtenCount > 0 && (
+                <tr>
+                  <td className="py-0.5 text-gray-600">
+                    Leerfahrten ({leerfahrtenCount})
+                    {leerfahrtenWaitMin > 0 && (
+                      <span className="text-xs text-gray-500 ml-1">
+                        (+ {formatMinutesToHours(leerfahrtenWaitMin)} Wartezeit, Kundenrechnung)
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-0.5 text-right font-semibold text-amber-700" data-testid="text-leerfahrten-hours">
+                    {formatMinutesToHours(leerfahrtenPlannedMin)}
+                  </td>
+                  {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3"></td>}
+                </tr>
+              )}
             </tbody>
             <tfoot>
               {hasPlanned ? (
@@ -237,6 +264,14 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
           <SummaryRow label="Anfahrt" value={`${formatKm(completedTravelKm)} km`} color="text-gray-700" testId="text-anfahrt-km" />
           <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-gray-700" testId="text-customer-km" />
           <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-700" testId="text-time-entry-km" />
+          {leerfahrtenCount > 0 && (
+            <SummaryRow
+              label={`Leerfahrten (${leerfahrtenCount})`}
+              value={`${formatKm(leerfahrtenKm)} km`}
+              color="text-amber-700"
+              testId="text-leerfahrten-km"
+            />
+          )}
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
             <span className="text-sm font-medium text-gray-700">Gesamt</span>
             <span className="font-bold text-gray-900" data-testid="text-total-km">

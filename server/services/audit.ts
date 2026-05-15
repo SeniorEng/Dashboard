@@ -60,6 +60,27 @@ class AuditService {
     await this.log(userId, "documentation_submitted", "appointment", appointmentId, metadata, ipAddress, exec);
   }
 
+  async appointmentNoShowDocumented(
+    userId: number,
+    appointmentId: number,
+    metadata: {
+      customerId: number;
+      reason: string;
+      reasonText?: string | null;
+      waitMinutes: number;
+      kilometers: number;
+      chargeCents: number;
+      chargeSuppressed?: boolean;
+      chargeSuppressionReason?: string | null;
+      policyType: string;
+      performedByEmployeeId?: number | null;
+    },
+    ipAddress?: string,
+    exec?: DbOrTx,
+  ): Promise<void> {
+    await this.log(userId, "appointment_no_show_documented", "appointment", appointmentId, metadata, ipAddress, exec);
+  }
+
   async signatureAdded(
     userId: number,
     appointmentId: number,

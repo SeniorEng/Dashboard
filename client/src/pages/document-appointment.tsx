@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   ChevronLeft, ChevronRight, Loader2, Clock, 
-  Users, Check, AlertCircle, X, Plus, User
+  Users, Check, AlertCircle, X, Plus, User, UserX
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useDocumentationForm, type ServiceFormData, type DocumentationFormData, PerformedBySelector, TravelDocumentation } from "@/features/appointments";
@@ -323,6 +323,19 @@ export default function DocumentAppointment() {
             Weiter
             <ChevronRight className={`${iconSize.sm} ml-2`} />
           </Button>
+
+          {appointment?.customerId && (
+            <Button
+              variant="outline"
+              className="w-full border-amber-300 text-amber-800 hover:bg-amber-50"
+              size="lg"
+              onClick={() => setLocation(`/document-appointment/${id}/no-show`)}
+              data-testid="button-noshow"
+            >
+              <UserX className={`${iconSize.sm} mr-2`} />
+              Kunde nicht angetroffen / abgesagt
+            </Button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

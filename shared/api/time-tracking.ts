@@ -137,6 +137,17 @@ export interface TimeOverviewData {
    * Sonstige Zeit-Einträge (Pause, Urlaub, …) gruppiert nach `entryDate`.
    */
   otherEntries: Record<string, EmployeeTimeEntry[]>;
+  /**
+   * Task #485 — Leerfahrten-Kachel: aggregierte Kennzahlen für Termine mit
+   * Status `customer_no_show` (Kunde nicht angetroffen / abgesagt). Werden
+   * separat von den echten Service-Stunden ausgewiesen.
+   */
+  leerfahrten?: {
+    count: number;
+    plannedMinutes: number;
+    waitMinutes: number;
+    kilometers: number;
+  };
 }
 
 export interface AdminTimeTrackingOverview {

@@ -23,6 +23,7 @@ const AppointmentDetail = lazy(() => import("@/pages/appointment-detail"));
 const NewAppointment = lazy(() => import("@/pages/new-appointment"));
 const EditAppointment = lazy(() => import("@/pages/edit-appointment"));
 const DocumentAppointment = lazy(() => import("@/pages/document-appointment"));
+const DocumentAppointmentNoShow = lazy(() => import("@/pages/document-appointment-no-show"));
 const Customers = lazy(() => import("@/pages/customers"));
 const MyTimes = lazy(() => import("@/pages/my-times"));
 const Birthdays = lazy(() => import("@/pages/birthdays"));
@@ -201,6 +202,9 @@ function Router() {
       </Route>
       <Route path="/edit-appointment/:id">
         <ProtectedRoute component={EditAppointment} />
+      </Route>
+      <Route path="/document-appointment/:id/no-show">
+        <ProtectedRoute component={DocumentAppointmentNoShow} />
       </Route>
       <Route path="/document-appointment/:id">
         <ProtectedRoute component={DocumentAppointment} />

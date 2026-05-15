@@ -48,7 +48,7 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        notInArray(appointments.status, ["completed", "cancelled"]),
+        notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
       ),
     )
     .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
@@ -92,7 +92,7 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        inArray(appointments.status, ["completed", "cancelled"]),
+        inArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
       ),
     );
 
@@ -145,7 +145,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
-          notInArray(appointments.status, ["completed", "cancelled"]),
+          notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
           or(
             inArray(appointments.assignedEmployeeId, employeeIds),
             and(
@@ -217,7 +217,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
-          inArray(appointments.status, ["completed", "cancelled"]),
+          inArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
           or(
             inArray(appointments.assignedEmployeeId, employeeIds),
             and(

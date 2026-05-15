@@ -3,6 +3,7 @@ import { requireAuth, requireAdmin } from "../middleware/auth";
 import { asyncHandler, badRequest, notFound } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
+import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import {
   createInvoiceSchema,
   updateInvoiceStatusSchema,
@@ -108,6 +109,29 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
   const appts = await appointmentsRepo.selectFrom()
     .where(and(inArray(appointments.id, apptIds), appointmentsRepo.activeOnly()));
 
+  // Task #485: Cancellation-Policy nur für Selbstzahler.
+  let cancellationPolicy: {
+    type: string;
+    flatCents: number | null;
+    hourlyRateCents: number | null;
+    kmRateCents: number | null;
+  } | null = null;
+  if (customerId && billingType === "selbstzahler") {
+    const polRow = await db
+      .select({
+        type: customersTable.cancellationPolicyType,
+        flatCents: customersTable.cancellationFlatCents,
+        hourlyRateCents: customersTable.cancellationHourlyRateCents,
+        kmRateCents: customersTable.cancellationKmRateCents,
+      })
+      .from(customersTable)
+      .where(eq(customersTable.id, customerId))
+      .limit(1);
+    if (polRow.length > 0) {
+      cancellationPolicy = polRow[0];
+    }
+  }
+
   const serviceBreakdown = await db.select({
     appointmentId: appointmentServicesTable.appointmentId,
     serviceId: appointmentServicesTable.serviceId,
@@ -183,7 +207,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     vatRate: servicesTable.vatRate,
   })
   .from(servicesTable)
-  .where(inArray(servicesTable.code, ["travel_km", "customer_km"]));
+  .where(inArray(servicesTable.code, ["travel_km", "customer_km", "hauswirtschaft"]));
   const kmServiceMap = new Map(kmServiceRows.map(s => [s.code, s]));
 
   const lineItems: BuildLineItem[] = [];
@@ -197,6 +221,57 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
     const employeeId = appt.assignedEmployeeId || appt.performedByEmployeeId;
     const emp = employeeId ? employeeMap.get(employeeId) : undefined;
     const employeeName = emp?.displayName || "";
+
+    // Task #485 — Customer No-Show: keine Service-Posten; ggf. "Vergebliche Anfahrt"-Posten für Selbstzahler.
+    if (appt.status === "customer_no_show") {
+      // Wenn der Sachbearbeiter die Privatrechnung explizit unterdrückt hat
+      // (Kulanz mit Begründung), wird kein Line-Item erzeugt.
+      if (appt.noShowChargeSuppressed) {
+        continue;
+      }
+      if (cancellationPolicy && cancellationPolicy.type !== "none") {
+        // Fallback-Sätze aus globalem Service-Katalog (gleiche Quelle wie
+        // die Doc-Endpoint-Vorschau — verhindert Preview-vs-Booking-Drift).
+        const travelKmSvc = kmServiceMap.get("travel_km");
+        const hwSvc = kmServiceMap.get("hauswirtschaft");
+        const charge = computeNoShowCharge(
+          {
+            type: cancellationPolicy.type as CancellationPolicyType,
+            flatCents: cancellationPolicy.flatCents,
+            hourlyRateCents: cancellationPolicy.hourlyRateCents,
+            kmRateCents: cancellationPolicy.kmRateCents,
+          },
+          {
+            travelKilometers: appt.noShowKilometers ?? appt.travelKilometers ?? 0,
+            waitMinutes: appt.noShowWaitMinutes ?? 0,
+          },
+          {
+            kmRateCents: travelKmSvc?.defaultPriceCents ?? null,
+            hourlyRateCents: hwSvc?.defaultPriceCents ?? null,
+          },
+        );
+        if (charge.totalCents > 0) {
+          // VAT 0: Schadensersatz-/Ausfallleistung, kein Leistungsaustausch.
+          const dateLabel = formatDateForDisplay(appt.date);
+          lineItems.push({
+            appointmentId: appt.id,
+            appointmentDate: appt.date,
+            serviceDescription: `Vergebliche Anfahrt am ${dateLabel}`,
+            serviceCode: "no_show_charge",
+            startTime: appt.actualStart || appt.scheduledStart,
+            endTime: null,
+            durationMinutes: appt.noShowWaitMinutes ?? 0,
+            unitPriceCents: charge.totalCents,
+            totalCents: charge.totalCents,
+            employeeName,
+            appointmentNotes: appt.noShowNotes || null,
+            serviceDetails: null,
+          });
+          totalNetCents += charge.totalCents;
+        }
+      }
+      continue;
+    }
 
     for (const svc of apptServices) {
       const durationMinutes = Math.round(svc.actualDurationMinutes ?? svc.plannedDurationMinutes ?? 0);

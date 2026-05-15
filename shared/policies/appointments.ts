@@ -264,6 +264,9 @@ export function canDocumentAppointment(
   if (appt.status === "completed") {
     return deny("Der Termin ist bereits abgeschlossen.");
   }
+  if (appt.status === "customer_no_show") {
+    return deny("Der Termin wurde als Kunden-No-Show dokumentiert und kann nicht mehr regulär dokumentiert werden.");
+  }
   if (appt.status === "cancelled" || appt.status === "expired_unsigned") {
     return deny("Stornierte oder abgelaufene Termine können nicht dokumentiert werden.");
   }

@@ -71,6 +71,18 @@ export const customers = pgTable("customers", {
   setupDeliveryPending: boolean("setup_delivery_pending").notNull().default(false),
   // Roh-Payload pro Schritt für die Wiederholung (signatures: [...] usw.).
   setupPendingPayloads: jsonb("setup_pending_payloads"),
+  // ============================================
+  // CANCELLATION POLICY (Task #485 — Customer No-Show)
+  // ============================================
+  // Was darf bei einem Kunden-No-Show privat berechnet werden?
+  //   - "none"               → nichts berechnen (Kunde wird kulant behandelt)
+  //   - "flat_amount"        → pauschaler Betrag in cancellationFlatCents
+  //   - "travel_plus_wait"   → Anfahrtskilometer * km-Satz + Wartezeit (h) * Stundensatz
+  // Die Sätze sind kundenspezifisch (Standard fällt zentral auf den Service-Katalog zurück).
+  cancellationPolicyType: text("cancellation_policy_type").notNull().default("none"),
+  cancellationFlatCents: integer("cancellation_flat_cents"),
+  cancellationHourlyRateCents: integer("cancellation_hourly_rate_cents"),
+  cancellationKmRateCents: integer("cancellation_km_rate_cents"),
 }, (table) => [
   index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
   index("customers_backup_employee_id_idx").on(table.backupEmployeeId),
