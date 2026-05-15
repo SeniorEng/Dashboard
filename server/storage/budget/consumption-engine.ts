@@ -11,7 +11,7 @@ import { db } from "../../lib/db";
 import type { DbClient, CascadeResult } from "./types";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
-import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
+import { getBudgetPreferences, getActiveBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { getAvailableForDate } from "./import-availability";
@@ -93,7 +93,11 @@ export async function consumeFifo(
   // §45b ist seit Task #425 ein Jahrestopf: Verfügbarkeit = bis zum
   // transactionDate aufgelaufene Allocation. Vor #425 wurde todayISO()
   // genommen, was Vormonats-Buchungen fälschlich künstlich erweitert hätte.
-  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx);
+  // Task #440: Topf-Einstellungen aus Sicht von `transactionDate` laden
+  // (append-only Historisierung), damit Buchungen NIE die heutige Konfiguration
+  // für ein historisches Datum verwenden.
+  const historicalTypeSettings = await getActiveBudgetTypeSettings(customerId, today, _tx);
+  const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx, undefined, historicalTypeSettings);
 
   if (totalAllocated <= 0 && specialAllocations.length === 0) {
     return { consumedCents: 0, transactions: [], remainingCents: amountCents };
@@ -245,7 +249,9 @@ export async function createCascadeConsumption(params: {
       }
     }
 
-    const typeSettings = await getBudgetTypeSettings(params.customerId, tx);
+    // GoBD-Historisierung (Task #440): die Konfiguration, die zum
+    // transactionDate gültig war, entscheidet — nicht die aktuelle.
+    const typeSettings = await getActiveBudgetTypeSettings(params.customerId, params.transactionDate, tx);
 
     await syncCarryoverAndExpiry(params.customerId, tx);
 

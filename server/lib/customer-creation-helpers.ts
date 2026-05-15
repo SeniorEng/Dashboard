@@ -204,7 +204,7 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
       // monatliche Auto-Allokation noch Carryover korrekt berechnen.
       if (typeSettings.length > 0) {
         maybeFail("budget_settings", testFaults);
-        await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, typeSettings, tx);
+        await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, typeSettings, tx, userId);
       }
 
       // Soft: Carryover-Sync. Best-Effort — bei Fehler weiter, aber als

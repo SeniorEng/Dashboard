@@ -8,7 +8,7 @@ import {
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
-import { getBudgetTypeSettings } from "./preferences-storage";
+import { getActiveBudgetTypeSettings, getBudgetTypeSettings } from "./preferences-storage";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 
@@ -43,7 +43,9 @@ export async function rebookSingleTransaction(
       throw new Error("Ziel-Topf ist gleich dem aktuellen Topf");
     }
 
-    const typeSettings = await getBudgetTypeSettings(customerId, tx);
+    // Historisierungs-aware (Task #440): die zum ursprünglichen Buchungsdatum
+    // gültige Topf-Konfiguration entscheidet, ob die Umbuchung erlaubt ist.
+    const typeSettings = await getActiveBudgetTypeSettings(customerId, original.transactionDate, tx);
     const targetSetting = typeSettings.find(s => s.budgetType === targetBudgetType);
     if (!targetSetting || !targetSetting.enabled) {
       throw new Error("Ziel-Topf ist nicht aktiviert");

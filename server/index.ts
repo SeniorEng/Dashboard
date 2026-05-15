@@ -237,6 +237,13 @@ async function runStartupTasks() {
       log(`§45b-Monatslimit-Bereinigung fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { backfillBudgetHistorization } = await import("./startup/backfill-budget-historization");
+    try {
+      await backfillBudgetHistorization();
+    } catch (err) {
+      log(`Budget-Historisierung-Backfill fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
     try {
       await migrateErstberatungCustomers();

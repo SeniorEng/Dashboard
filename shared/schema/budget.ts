@@ -64,7 +64,13 @@ export const budgetAllocations = pgTable("budget_allocations", {
   index("budget_allocations_customer_year_idx").on(table.customerId, table.year),
   index("budget_allocations_expires_idx").on(table.expiresAt),
   index("budget_allocations_fifo_idx").on(table.customerId, table.budgetType, table.validFrom),
-  uniqueIndex("budget_allocations_auto_unique_idx").on(table.customerId, table.budgetType, table.year, table.month, table.source),
+  // Partial UNIQUE (Task #440): nur lebende Zeilen (deleted_at IS NULL) dürfen
+  // pro (customer, budgetType, year, month, source) eindeutig sein. So können
+  // soft-gelöschte Vorgänger-Allokationen GoBD-konform erhalten bleiben, ohne
+  // die Wiederanlage zu blockieren — kein "deletedAt=null"-Resurrect mehr.
+  uniqueIndex("budget_allocations_auto_unique_idx")
+    .on(table.customerId, table.budgetType, table.year, table.month, table.source)
+    .where(sql`deleted_at IS NULL`),
 ]);
 
 // Budget transaction types
@@ -148,7 +154,12 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
-  uniqueIndex("customer_budget_type_settings_unique_idx").on(table.customerId, table.budgetType),
+  // Partial UNIQUE (Task #440): pro Kunde+BudgetType darf nur eine offene Zeile
+  // (validTo IS NULL) existieren. Historisierte (geschlossene) Zeilen behalten
+  // ihre Historie ohne Unique-Konflikt — GoBD-konformer Append-only-Pfad.
+  uniqueIndex("customer_budget_type_settings_unique_idx")
+    .on(table.customerId, table.budgetType)
+    .where(sql`valid_to IS NULL`),
   index("customer_budget_type_settings_customer_idx").on(table.customerId),
 ]);
 

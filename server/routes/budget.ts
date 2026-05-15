@@ -417,6 +417,19 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
 
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;
+    // Task #440: Konsistente GoBD-Taxonomie — alle Soft-Deletes auf
+    // `budget_allocations` erzeugen zusätzlich einen `budget_allocation_soft_deleted`-
+    // Eintrag (analog zu allocation-storage.ts), sodass forensische Queries
+    // gegen den gemeinsamen Action-Namen filtern können. Das fachliche
+    // `initial_balance_deleted` bleibt für die Domänensicht erhalten.
+    await auditService.log(userId, "budget_allocation_soft_deleted", "budget", customerId, {
+      customerId,
+      allocationId,
+      amountCents: existing[0].amountCents,
+      budgetType: existing[0].budgetType,
+      source: existing[0].source,
+      reason: "initial_balance_deleted",
+    }, ip);
     await auditService.log(userId, "initial_balance_deleted", "budget", customerId, {
       customerId,
       allocationId,
@@ -464,7 +477,9 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   }
 
   const userId = req.user?.id;
-  const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings);
+  // userId an Storage durchreichen, damit jede Settings-Transition GoBD-konform
+  // ein `budget_type_settings_transition`-Audit-Log mit Akteur bekommt (Task #440).
+  const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings, undefined, userId);
 
   await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
 

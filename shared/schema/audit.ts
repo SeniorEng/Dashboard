@@ -66,6 +66,9 @@ export const AUDIT_ACTIONS = [
   "invoice_payment_reconciled",
   "invoice_payment_unreconciled",
   "call_bridge_failed",
+  "budget_allocation_resurrected",
+  "budget_allocation_soft_deleted",
+  "budget_type_settings_transition",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

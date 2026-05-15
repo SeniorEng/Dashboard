@@ -13,7 +13,8 @@ import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/dat
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
-import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
+import { getBudgetPreferences, getBudgetTypeSettings, getActiveBudgetTypeSettings } from "./preferences-storage";
+import { auditService } from "../../services/audit";
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
@@ -76,18 +77,49 @@ export async function upsertInitialBalanceAllocation(
       await db.update(budgetAllocations)
         .set({ deletedAt: new Date() })
         .where(eq(budgetAllocations.id, active[i].id));
+      if (userId != null) {
+        await auditService.log(userId, "budget_allocation_soft_deleted", "budget", params.customerId, {
+          customerId: params.customerId,
+          budgetType: params.budgetType,
+          allocationId: active[i].id,
+          reason: "GoBD: Duplikat-Bereinigung bei upsertInitialBalanceAllocation",
+          keptAllocationId: active[0].id,
+        });
+      }
     }
   } else if (deleted.length > 0) {
-    await db.update(budgetAllocations)
-      .set({
-        amountCents: params.amountCents,
+    // GoBD (Task #440): soft-gelöschte Allokationen werden NICHT wiederbelebt
+    // (kein `deletedAt = null`). Stattdessen wird eine frische Zeile angelegt;
+    // die alte Soft-Delete-Historie bleibt unverändert nachvollziehbar. Der
+    // partielle UNIQUE-Index `budget_allocations_auto_unique_idx`
+    // (`WHERE deleted_at IS NULL`) lässt die Neuanlage zu.
+    const inserted = await db.insert(budgetAllocations)
+      .values({
+        customerId: params.customerId,
+        budgetType: params.budgetType,
+        year: params.year,
         month: params.month,
+        amountCents: params.amountCents,
+        source: "initial_balance",
         validFrom: params.validFrom,
         expiresAt: params.expiresAt,
         notes: params.notes ?? null,
-        deletedAt: null,
+        createdByUserId: userId,
       })
-      .where(eq(budgetAllocations.id, deleted[0].id));
+      .returning({ id: budgetAllocations.id });
+
+    if (userId != null) {
+      await auditService.log(userId, "budget_allocation_resurrected", "budget", params.customerId, {
+        customerId: params.customerId,
+        budgetType: params.budgetType,
+        year: params.year,
+        month: params.month,
+        amountCents: params.amountCents,
+        replacedSoftDeletedAllocationId: deleted[0].id,
+        newAllocationId: inserted[0]?.id ?? null,
+        reason: "GoBD: Ersatz-Insert statt Resurrect der soft-gelöschten initial_balance-Allokation",
+      });
+    }
   } else {
     await db.insert(budgetAllocations)
       .values({
