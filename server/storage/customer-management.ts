@@ -36,6 +36,29 @@ import { alias } from "drizzle-orm/pg-core";
 import { customerIdsCache } from "../services/cache";
 import { todayISO } from "@shared/utils/datetime";
 import { db, type DbOrTx } from "../lib/db";
+import { AppError } from "../lib/errors";
+
+/**
+ * Invariante (Task #512): Ein Kunde mit `status='erstberatung'` MUSS
+ * zwingend über `convertedFromProspectId` an einen Lead/Prospect gebunden
+ * sein. Andernfalls entstehen „Waisen-Kunden", die in der Erstberatungs-
+ * Übersicht und in den Conversion-Statistiken Lärm erzeugen (siehe
+ * `docs/erstberatung-prod-analysis.md`). Wir blocken den Schreibvorgang
+ * hart am Storage-Layer, damit alle Aufrufer (Routes, Migrationen, Tests)
+ * gegen dieselbe Regel laufen.
+ */
+export function assertErstberatungHasProspectLink(
+  status: string | null | undefined,
+  convertedFromProspectId: number | null | undefined,
+): void {
+  if (status === "erstberatung" && (convertedFromProspectId === null || convertedFromProspectId === undefined)) {
+    throw new AppError(
+      400,
+      "ERSTBERATUNG_REQUIRES_PROSPECT",
+      "Kunden im Status 'Erstberatung' müssen mit einem Interessenten verknüpft sein.",
+    );
+  }
+}
 
 import * as insuranceModule from "./customer-mgmt/insurance";
 import * as contactsModule from "./customer-mgmt/contacts";
@@ -457,7 +480,15 @@ class CustomerManagementStorage {
     if (existing.length === 0) return undefined;
     
     const oldCustomer = existing[0];
-    
+
+    // Task #512: Verhindere, dass ein Kunde per Update in den Status
+    // 'erstberatung' gesetzt wird, ohne dass eine Prospect-Verknüpfung
+    // existiert (würde sonst denselben Waisen-Effekt erzeugen wie bei der
+    // Anlage).
+    if (data.status === "erstberatung") {
+      assertErstberatungHasProspectLink(data.status, oldCustomer.convertedFromProspectId);
+    }
+
     if (data.vorname !== undefined || data.nachname !== undefined) {
       const newVorname = data.vorname ?? oldCustomer.vorname ?? '';
       const newNachname = data.nachname ?? oldCustomer.nachname ?? '';
@@ -655,6 +686,7 @@ class CustomerManagementStorage {
   }
 
   async createCustomerDirect(customerData: InsertCustomer, tx?: DbOrTx) {
+    assertErstberatungHasProspectLink(customerData.status, customerData.convertedFromProspectId);
     const executor = tx ?? db;
     const [customer] = await executor.insert(customers).values(customerData).returning();
     return customer;

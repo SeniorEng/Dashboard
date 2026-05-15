@@ -77,6 +77,13 @@ export async function getCustomer(id: number): Promise<Customer | undefined> {
 }
 
 export async function createCustomer(customer: InsertCustomer): Promise<Customer> {
+  // Task #512: Defense-in-depth — gleiche Invariante wie in
+  // customerManagementStorage.createCustomerDirect (Erstberatung-Kunden
+  // brauchen Prospect-Link). Wir importieren den Helper inline statt
+  // top-level, um Circular-Imports zwischen customers-storage und
+  // customer-management zu vermeiden.
+  const { assertErstberatungHasProspectLink } = await import("./customer-management");
+  assertErstberatungHasProspectLink(customer.status, customer.convertedFromProspectId);
   const result = await db.insert(customers).values(customer).returning();
   const created = result[0];
   customerIdsCache.invalidateForCustomer(created.primaryEmployeeId, created.backupEmployeeId, created.backupEmployeeId2);
