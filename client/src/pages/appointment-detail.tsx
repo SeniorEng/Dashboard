@@ -1,15 +1,14 @@
 import { useState, useCallback } from "react";
-import { formatKm } from "@/lib/utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment } from "@/features/appointments";
 import { useDeleteAppointment } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
-import { SectionCard } from "@/components/patterns/section-card";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { iconSize, componentStyles, getServiceColors } from "@/design-system";
-import { 
+import { SectionCard } from "@/components/patterns/section-card";
+import { iconSize, componentStyles } from "@/design-system";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -19,9 +18,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { 
-  MapPin, Calendar, FileText, ChevronLeft, Loader2, 
-  Pencil, Trash2, AlertTriangle, Phone, Car, Home, ArrowRight, UserPlus, RotateCcw, Copy, Repeat
+import {
+  FileText, ChevronLeft, Loader2,
+  Pencil, Trash2, AlertTriangle, RotateCcw, Copy, Repeat, ArrowRight,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
@@ -29,14 +28,25 @@ import { useAppointmentSeriesDetail, formatSeriesInfo } from "@/features/appoint
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
-import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
-import { 
-  formatDuration, 
-  type AppointmentStatus
-} from "@shared/types";
 import { useAppointmentPolicy } from "@/features/appointments/use-appointment-policy";
-import { formatPhoneForDisplay } from "@shared/utils/phone";
-import { formatDateForDisplay } from "@shared/utils/datetime";
+import {
+  AppointmentTimeServicesCard,
+  AppointmentTravelCard,
+  AppointmentServiceRecordCard,
+  AppointmentSeriesDeleteDialog,
+  AppointmentCustomerHeader,
+} from "@/features/appointments/components";
+
+type AppointmentService = {
+  id: number;
+  serviceId: number;
+  serviceName: string;
+  serviceCode: string;
+  serviceUnitType: string;
+  plannedDurationMinutes: number;
+  actualDurationMinutes: number | null;
+  details: string | null;
+};
 
 export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");
@@ -49,6 +59,7 @@ export default function AppointmentDetail() {
 
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [showSeriesDeleteDialog, setShowSeriesDeleteDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const reopenMutation = useMutation({
     mutationFn: async () => {
@@ -66,7 +77,7 @@ export default function AppointmentDetail() {
       setShowReopenDialog(false);
     },
   });
-  
+
   const { data: appointment, isLoading } = useAppointment(id);
 
   // Hook MUSS vor den frühen Returns weiter unten stehen (React-Rules-of-Hooks):
@@ -120,34 +131,16 @@ export default function AppointmentDetail() {
     },
   });
 
-  const { data: appointmentServices } = useQuery<Array<{ 
-    id: number;
-    serviceId: number; 
-    serviceName: string;
-    serviceCode: string;
-    serviceUnitType: string;
-    plannedDurationMinutes: number; 
-    actualDurationMinutes: number | null; 
-    details: string | null;
-  }>>({
+  const { data: appointmentServices } = useQuery<AppointmentService[]>({
     queryKey: [`/api/appointments/${id}/services`],
     queryFn: async () => {
-      const result = await api.get<Array<{ 
-        id: number;
-        serviceId: number; 
-        serviceName: string;
-        serviceCode: string;
-        serviceUnitType: string;
-        plannedDurationMinutes: number; 
-        actualDurationMinutes: number | null; 
-        details: string | null;
-      }>>(`/appointments/${id}/services`);
+      const result = await api.get<AppointmentService[]>(`/appointments/${id}/services`);
       return unwrapResult(result);
     },
     enabled: !!id && !!appointment,
   });
+
   const deleteMutation = useDeleteAppointment();
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const handleDelete = useCallback(async () => {
     try {
@@ -166,7 +159,7 @@ export default function AppointmentDetail() {
       });
     }
     setShowDeleteDialog(false);
-  }, [deleteMutation, id, toast, setLocation]);
+  }, [deleteMutation, id, toast, setLocation, appointment?.date]);
 
   if (isLoading) {
     return (
@@ -206,17 +199,15 @@ export default function AppointmentDetail() {
   const isErstberatung = appointment.appointmentType === "Erstberatung";
 
   const services = appointmentServices || [];
-  const hasAnyService = services.length > 0;
-  const hasAnyDocumentedService = services.some(s => s.actualDurationMinutes !== null && s.actualDurationMinutes > 0);
   const isCompleted = appointment.status === "completed";
 
   return (
     <Layout>
       <div className="mb-6">
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="pl-0 text-muted-foreground hover:text-foreground mb-4" 
+        <Button
+          variant="ghost"
+          size="sm"
+          className="pl-0 text-muted-foreground hover:text-foreground mb-4"
           onClick={() => setLocation(appointment?.date ? `/?date=${appointment.date}` : "/")}
           data-testid="button-back"
         >
@@ -227,68 +218,12 @@ export default function AppointmentDetail() {
           <StatusBadge type="status" value={appointment.status} />
         </div>
 
-        {appointment.customer && (
-          <div className="mb-6">
-            <h1 className={componentStyles.pageTitle} data-testid="text-customer-name">
-              {appointment.customerId ? (
-                <Link
-                  href={user?.isAdmin ? `/admin/customers/${appointment.customerId}` : `/customer/${appointment.customerId}`}
-                  className="underline decoration-primary/30 underline-offset-4 hover:decoration-primary transition-colors"
-                  data-testid="link-customer-detail"
-                >
-                  {appointment.customer.name}
-                </Link>
-              ) : appointment.prospectId && user?.isAdmin ? (
-                <Link
-                  href={`/admin/prospects/${appointment.prospectId}`}
-                  className="underline decoration-primary/30 underline-offset-4 hover:decoration-primary transition-colors"
-                  data-testid="link-prospect-detail"
-                >
-                  {appointment.customer.name}
-                </Link>
-              ) : (
-                <span data-testid="text-prospect-name">{appointment.customer.name}</span>
-              )}
-            </h1>
-            <div className="flex items-center text-muted-foreground text-sm mt-2">
-              <MapPin className={`${iconSize.sm} mr-1.5 text-primary shrink-0`} />
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(appointment.customer.address)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-primary hover:underline"
-                data-testid="link-customer-address"
-              >
-                {appointment.customer.address}
-              </a>
-            </div>
-            {appointment.customer.telefon && (
-              <div className="flex items-center text-muted-foreground text-sm mt-1">
-                <Phone className={`${iconSize.sm} mr-1.5 text-primary shrink-0`} />
-                <a href={`tel:${appointment.customer.telefon}`} className="hover:text-primary">
-                  {formatPhoneForDisplay(appointment.customer.telefon)}
-                </a>
-              </div>
-            )}
-          </div>
-        )}
-
-        {isErstberatung && (appointment as any).prospectId && canConvert && (
-          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg" data-testid="card-prospect-link">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <UserPlus className={`${iconSize.sm} text-blue-600`} />
-                <span className="text-sm font-medium text-blue-700">Verknüpft mit Interessent</span>
-              </div>
-              <Link href={`/admin/prospects?id=${(appointment as any).prospectId}`}>
-                <Button size="sm" variant="outline" className="text-blue-700 border-blue-300" data-testid="button-view-prospect">
-                  Zum Interessent
-                  <ArrowRight className={`${iconSize.sm} ml-1`} />
-                </Button>
-              </Link>
-            </div>
-          </div>
-        )}
+        <AppointmentCustomerHeader
+          appointment={appointment}
+          isAdmin={!!user?.isAdmin}
+          isErstberatung={isErstberatung}
+          canConvert={!!canConvert}
+        />
       </div>
 
       {seriesId && seriesDetail && (
@@ -296,9 +231,7 @@ export default function AppointmentDetail() {
           <div className="flex items-center gap-2">
             <Repeat className={`${iconSize.sm} text-primary`} />
             <div className="flex-1 min-w-0">
-              <span className="text-sm font-medium text-primary">
-                Teil einer Serie
-              </span>
+              <span className="text-sm font-medium text-primary">Teil einer Serie</span>
               <span className="text-sm text-muted-foreground ml-2">
                 {formatSeriesInfo(seriesDetail.series)}
               </span>
@@ -314,240 +247,14 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      <SectionCard
-        title={isCompleted ? "Termin & Leistungen" : "Terminübersicht"}
-        icon={<Calendar className={iconSize.sm} />}
-        className="mb-4"
-      >
-        <div className="space-y-3">
-          <div className="flex items-center justify-between py-2 border-b border-border/50">
-            <span className="text-muted-foreground">Datum</span>
-            <span className="font-medium">
-              {formatDateForDisplay(appointment.date, { 
-                weekday: "long", 
-                day: "numeric", 
-                month: "long", 
-                year: "numeric" 
-              })}
-            </span>
-          </div>
-          
-          {isCompleted && hasAnyDocumentedService && appointment.actualStart ? (
-            <div className="py-2 border-b border-border/50">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Uhrzeit (geplant)</span>
-                <span className="text-muted-foreground text-sm">
-                  {formatTimeSlot(appointment.scheduledStart)} - {getEndTime(appointment)} Uhr
-                </span>
-              </div>
-              <div className="flex items-center justify-between mt-1">
-                <span className="text-muted-foreground">Uhrzeit (tatsächlich)</span>
-                <span className="font-medium text-primary">
-                  {formatTimeSlot(appointment.actualStart)}
-                  {appointment.actualEnd ? ` - ${formatTimeSlot(appointment.actualEnd)} Uhr` : ""}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between py-2 border-b border-border/50">
-              <span className="text-muted-foreground">Uhrzeit</span>
-              <span className="font-medium">
-                {formatTimeSlot(appointment.scheduledStart)} - {getEndTime(appointment)} Uhr
-              </span>
-            </div>
-          )}
+      <AppointmentTimeServicesCard
+        appointment={appointment}
+        services={services}
+        isCompleted={isCompleted}
+        isErstberatung={isErstberatung}
+      />
 
-          <div className="flex items-center justify-between py-2 border-b border-border/50">
-            <span className="text-muted-foreground">Art</span>
-            <span className="font-medium">
-              {isErstberatung ? "Erstberatung" : appointment.isFahrtdienst ? (
-                <span className="flex items-center gap-1.5">
-                  <Car className="h-3.5 w-3.5 text-primary" />
-                  Fahrtdienst
-                </span>
-              ) : "Kundentermin"}
-            </span>
-          </div>
-
-          {appointment.isFahrtdienst && appointment.doctorAppointmentTime && (
-            <div className="py-2 border-b border-border/50 space-y-1.5" data-testid="panel-fahrtdienst-detail">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-sm flex items-center gap-1">
-                  <Car className="h-3.5 w-3.5" /> Abholzeit
-                </span>
-                <span className="font-medium text-primary">
-                  {formatTimeSlot(appointment.scheduledStart)} Uhr
-                </span>
-              </div>
-              {appointment.estimatedTravelMinutes != null && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Fahrtzeit</span>
-                  <span>~{appointment.estimatedTravelMinutes} Min.</span>
-                </div>
-              )}
-              {appointment.travelBufferMinutes != null && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Puffer</span>
-                  <span>+{appointment.travelBufferMinutes} Min.</span>
-                </div>
-              )}
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-sm">Arzt-Termin</span>
-                <span className="font-medium">
-                  {formatTimeSlot(appointment.doctorAppointmentTime)} Uhr
-                </span>
-              </div>
-              {appointment.doctorName && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Arzt/Praxis</span>
-                  <span>{appointment.doctorName}</span>
-                </div>
-              )}
-              {appointment.doctorStrasse && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Adresse</span>
-                  <span>{[appointment.doctorStrasse, appointment.doctorNr].filter(Boolean).join(" ")}, {appointment.doctorPlz} {appointment.doctorStadt}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {(hasAnyService || (isCompleted && hasAnyDocumentedService)) && (
-            <>
-              {isCompleted && hasAnyDocumentedService && (
-                <div className="hidden sm:flex items-center justify-between pt-2 pb-1">
-                  <span className="flex-1" />
-                  <span className="w-24 text-right text-xs text-muted-foreground uppercase tracking-wide whitespace-nowrap">Geplant</span>
-                  <span className="w-24 text-right text-xs font-semibold text-primary uppercase tracking-wide whitespace-nowrap">Ist</span>
-                </div>
-              )}
-
-              {services.map((service) => {
-                const hasDocumented = service.actualDurationMinutes !== null && service.actualDurationMinutes > 0;
-                const serviceColorKey = service.serviceCode as string;
-                if (!service.plannedDurationMinutes && !(isCompleted && hasDocumented)) return null;
-
-                const plannedMins = service.plannedDurationMinutes || 0;
-                const actualMins = service.actualDurationMinutes || 0;
-                const hasDifference = hasDocumented && plannedMins !== actualMins;
-
-                return (
-                  <div key={service.id} className="py-2 border-b border-border/50">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${getServiceColors(serviceColorKey).bg}`} />
-                        <span className="truncate">{service.serviceName}</span>
-                      </div>
-                      {isCompleted && hasDocumented ? (
-                        <div className="flex items-center justify-end gap-3 pl-4 sm:pl-0 sm:gap-1">
-                          <span className="text-sm text-muted-foreground whitespace-nowrap sm:w-24 sm:text-right" data-testid={`text-service-planned-${service.id}`}>
-                            <span className="sm:hidden text-[10px] uppercase tracking-wide mr-1.5">Plan</span>
-                            {plannedMins ? formatDuration(plannedMins) : "—"}
-                          </span>
-                          <span className={`font-semibold whitespace-nowrap sm:w-24 sm:text-right ${hasDifference ? "text-amber-600" : "text-primary"}`} data-testid={`text-service-actual-${service.id}`}>
-                            <span className="sm:hidden text-[10px] text-muted-foreground uppercase tracking-wide mr-1.5">Ist</span>
-                            {formatDuration(actualMins)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground pl-4 sm:pl-0 text-right whitespace-nowrap">
-                          {service.plannedDurationMinutes ? formatDuration(service.plannedDurationMinutes) : "—"}
-                        </span>
-                      )}
-                    </div>
-                    {isCompleted && service.details && (
-                      <p className="text-sm text-muted-foreground mt-1 ml-4">
-                        {service.details}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-
-              {(() => {
-                const totalPlanned = appointment.durationPromised || 0;
-                const totalActual = services.reduce((sum, s) => sum + (s.actualDurationMinutes || 0), 0);
-                const hasTotalDifference = isCompleted && hasAnyDocumentedService && totalPlanned !== totalActual;
-                return (
-                  <div className="flex flex-col gap-1 py-2 pt-2 border-t border-border sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                    <span className="font-medium">Gesamt</span>
-                    {isCompleted && hasAnyDocumentedService ? (
-                      <div className="flex items-center justify-end gap-3 sm:gap-1">
-                        <span className="text-sm text-muted-foreground whitespace-nowrap sm:w-24 sm:text-right" data-testid="text-total-planned">
-                          <span className="sm:hidden text-[10px] uppercase tracking-wide mr-1.5">Plan</span>
-                          {formatDuration(totalPlanned)}
-                        </span>
-                        <span className={`font-semibold whitespace-nowrap sm:w-24 sm:text-right ${hasTotalDifference ? "text-amber-600" : "text-primary"}`} data-testid="text-total-actual">
-                          <span className="sm:hidden text-[10px] text-muted-foreground uppercase tracking-wide mr-1.5">Ist</span>
-                          {formatDuration(totalActual)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="font-medium text-right whitespace-nowrap">
-                        {formatDuration(totalPlanned)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-            </>
-          )}
-        </div>
-      </SectionCard>
-
-      {isCompleted && (
-        <SectionCard
-          title="Fahrt"
-          icon={<Car className={iconSize.sm} />}
-          className="mb-4"
-        >
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between py-1">
-              <div className="flex items-center gap-2">
-                {appointment.travelOriginType === "home" ? (
-                  <Home className={`${iconSize.xs} text-muted-foreground`} />
-                ) : (
-                  <ArrowRight className={`${iconSize.xs} text-muted-foreground`} />
-                )}
-                <span className="text-muted-foreground">
-                  {appointment.travelOriginType === "home" ? "Von zu Hause" : "Vom vorherigen Kunden"}
-                </span>
-              </div>
-              {appointment.travelOriginType === "appointment" && appointment.travelMinutes && (
-                <span>{appointment.travelMinutes} Min.</span>
-              )}
-            </div>
-            
-            <div className="flex items-center justify-between py-1">
-              <div className="flex items-center gap-2">
-                <Car className={`${iconSize.xs} text-muted-foreground`} />
-                <span className="text-muted-foreground">Anfahrt</span>
-              </div>
-              <span>{formatKm(appointment.travelKilometers)} km</span>
-            </div>
-            
-            {appointment.customerKilometers != null && appointment.customerKilometers > 0 && (
-              <div className="flex items-center justify-between py-1">
-                <div className="flex items-center gap-2">
-                  <Car className={`${iconSize.xs} text-muted-foreground`} />
-                  <span className="text-muted-foreground">Km für/mit Kunde</span>
-                </div>
-                <span>{formatKm(appointment.customerKilometers)} km</span>
-              </div>
-            )}
-            
-            {((appointment.travelKilometers || 0) + (appointment.customerKilometers || 0)) > 0 && (
-              <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                <span className="font-medium">Gesamt</span>
-                <span className="font-medium">
-                  {formatKm((appointment.travelKilometers || 0) + (appointment.customerKilometers || 0))} km
-                </span>
-              </div>
-            )}
-          </div>
-        </SectionCard>
-      )}
-
+      {isCompleted && <AppointmentTravelCard appointment={appointment} />}
 
       {appointment.notes && (
         <SectionCard title="Notizen" className="mb-4">
@@ -558,42 +265,17 @@ export default function AppointmentDetail() {
       )}
 
       {isCompleted && !isLoadingServiceRecord && (
-        <SectionCard
-          title="Leistungsnachweis"
-          icon={<FileText className={iconSize.sm} />}
-          className="mb-4"
-        >
-          {existingServiceRecord ? (
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <StatusBadge
-                type="record"
-                value={existingServiceRecord.status}
-                data-testid="badge-service-record-status"
-              />
-              <Link
-                href={`/service-records/${existingServiceRecord.id}`}
-                data-testid="link-service-record"
-                className="w-full sm:w-auto"
-              >
-                <Button variant="outline" size="sm" className="w-full sm:w-auto whitespace-normal text-left">
-                  {existingServiceRecord.status === "pending" ? "Leistungsnachweis unterschreiben" : "Leistungsnachweis anzeigen"}
-                  <ArrowRight className={`${iconSize.sm} ml-1`} />
-                </Button>
-              </Link>
-            </div>
-          ) : (
-            <Button
-              className={`w-full ${componentStyles.btnPrimary}`}
-              onClick={() => appointment.customerId && createServiceRecordMutation.mutate({ customerId: appointment.customerId, appointmentId: appointment.id })}
-              disabled={createServiceRecordMutation.isPending}
-              data-testid="button-create-service-record"
-            >
-              {createServiceRecordMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              <FileText className={`${iconSize.sm} mr-2`} />
-              Leistungsnachweis erstellen
-            </Button>
-          )}
-        </SectionCard>
+        <AppointmentServiceRecordCard
+          existingServiceRecord={existingServiceRecord}
+          onCreate={() =>
+            appointment.customerId &&
+            createServiceRecordMutation.mutate({
+              customerId: appointment.customerId,
+              appointmentId: appointment.id,
+            })
+          }
+          isCreating={createServiceRecordMutation.isPending}
+        />
       )}
 
       {canDocument && (
@@ -629,7 +311,7 @@ export default function AppointmentDetail() {
 
       {isCompleted && canReopen && (
         <div className="mt-6">
-          <Button 
+          <Button
             variant="outline"
             className="w-full"
             size="lg"
@@ -692,7 +374,7 @@ export default function AppointmentDetail() {
       )}
 
       <div className="mt-4">
-        <Button 
+        <Button
           variant="outline"
           className="w-full"
           onClick={() => setLocation(`/new-appointment?copyFrom=${appointment.id}`)}
@@ -702,7 +384,6 @@ export default function AppointmentDetail() {
           Termin kopieren
         </Button>
       </div>
-
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
@@ -729,7 +410,7 @@ export default function AppointmentDetail() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={handleDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
@@ -752,7 +433,7 @@ export default function AppointmentDetail() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={() => reopenMutation.mutate()}
               disabled={reopenMutation.isPending}
             >
@@ -763,76 +444,13 @@ export default function AppointmentDetail() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={showSeriesDeleteDialog} onOpenChange={setShowSeriesDeleteDialog}>
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <Repeat className={`${iconSize.md} text-destructive`} />
-              Serientermin absagen
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="text-sm text-muted-foreground">
-                Dieser Termin gehört zu einer Serie. Welche Termine möchten Sie absagen?
-                {appointment?.status === "completed" && (
-                  <span className="block mt-2 text-amber-600 font-medium">
-                    Dieser Termin ist bereits dokumentiert und kann nicht einzeln abgesagt werden. Sie können aber alle zukünftigen Termine der Serie absagen.
-                  </span>
-                )}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-3 py-2">
-            <button
-              onClick={() => {
-                seriesCancelMutation.mutate({ mode: "single" });
-              }}
-              disabled={seriesCancelMutation.isPending || appointment?.status === "completed"}
-              className="w-full p-4 rounded-lg border-2 text-left hover:border-destructive/50 hover:bg-destructive/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              data-testid="button-series-delete-single"
-            >
-              <span className="font-semibold text-sm">Nur diesen Termin absagen</span>
-              <span className="block text-xs text-muted-foreground mt-1">
-                Alle anderen Serientermine bleiben bestehen
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                seriesCancelMutation.mutate({ mode: "this_and_future" });
-              }}
-              disabled={seriesCancelMutation.isPending}
-              className="w-full p-4 rounded-lg border-2 text-left hover:border-destructive/50 hover:bg-destructive/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              data-testid="button-series-delete-this-and-future"
-            >
-              <span className="font-semibold text-sm">Diesen und alle folgenden absagen</span>
-              <span className="block text-xs text-muted-foreground mt-1">
-                Ab diesem Termin werden alle zukünftigen Termine abgesagt
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                seriesCancelMutation.mutate({ mode: "all_future" });
-              }}
-              disabled={seriesCancelMutation.isPending}
-              className="w-full p-4 rounded-lg border-2 text-left hover:border-destructive/50 hover:bg-destructive/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              data-testid="button-series-delete-all-future"
-            >
-              <span className="font-semibold text-sm">Alle zukünftigen Termine absagen</span>
-              <span className="block text-xs text-muted-foreground mt-1">
-                Die gesamte Serie wird ab heute beendet
-              </span>
-            </button>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={seriesCancelMutation.isPending}>Abbrechen</AlertDialogCancel>
-          </AlertDialogFooter>
-          {seriesCancelMutation.isPending && (
-            <div className="flex items-center justify-center py-2">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          )}
-        </AlertDialogContent>
-      </AlertDialog>
-
+      <AppointmentSeriesDeleteDialog
+        open={showSeriesDeleteDialog}
+        onOpenChange={setShowSeriesDeleteDialog}
+        isCompleted={appointment?.status === "completed"}
+        isPending={seriesCancelMutation.isPending}
+        onChoose={(mode) => seriesCancelMutation.mutate({ mode })}
+      />
     </Layout>
   );
 }
