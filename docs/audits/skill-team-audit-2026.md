@@ -144,7 +144,7 @@ Diese werden in einem separaten Vorschlags-Block (PROPOSED) zur Freigabe vorgele
 | 4 | **Neuer Skill `observability-audit`** (L4) — structured logs, SLO/SLI, MTTR | NEW | neu | M |
 | 5 | **Neuer Skill `accessibility-wcag22-audit`** (L1) — vertieft WCAG 2.2 AA + BFSG-Bereitschaft | NEW | neu | M |
 | 6 | **SHARPEN `security-audit`** — ASVS-5.0-Refresh, SBOM/License-Scan, Cross-Ref zu `ai-security-audit` | SHARPEN | security-audit | S |
-| 7 | **SHARPEN `database-audit`** — Cat 10 "Security" entfernen + Verweis | SHARPEN | database-audit | S |
+| 7 | **SHARPEN `database-audit`** — Cat 11 "Security" entfernen + Verweis | SHARPEN | database-audit | S |
 | 8 | **SHARPEN `team-orchestration`** — Roster, Risikomatrix, Quick-Flow um neue Skills erweitern; Konflikt-Hierarchie überarbeiten | SHARPEN | team-orchestration | S |
 | 9 | **SHARPEN `ui-ux-audit` + `error-handling-audit`** — Klare Abgrenzung Cat-2/Cat-3, gegenseitige Cross-Refs | SHARPEN | beide | S |
 | 10 | **Optional: NEW `i18n-terminology-audit`** (L3) — Pflege-Glossar als Quelle der Wahrheit | NEW | neu | S |
