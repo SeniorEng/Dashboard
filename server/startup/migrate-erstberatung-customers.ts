@@ -38,6 +38,69 @@ async function ensureCheckConstraint(): Promise<void> {
   log("CHECK-Constraint für appointments (prospect_id OR customer_id) hinzugefügt", "startup");
 }
 
+async function createSyntheticProspectForOrphan(customerId: number): Promise<number | null> {
+  const customerRows = await db.execute(sql`
+    SELECT id, name, vorname, nachname, email, telefon, festnetz,
+           strasse, nr, plz, stadt, pflegegrad, created_at
+    FROM customers
+    WHERE id = ${customerId}
+    LIMIT 1
+  `);
+  const row = (customerRows.rows as Array<{
+    id: number;
+    name: string;
+    vorname: string | null;
+    nachname: string | null;
+    email: string | null;
+    telefon: string | null;
+    festnetz: string | null;
+    strasse: string | null;
+    nr: string | null;
+    plz: string | null;
+    stadt: string | null;
+    pflegegrad: number | null;
+  }>)[0];
+  if (!row) {
+    return null;
+  }
+
+  let vorname = (row.vorname ?? "").trim();
+  let nachname = (row.nachname ?? "").trim();
+  if (!vorname || !nachname) {
+    const parts = (row.name ?? "").trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      vorname = vorname || parts.slice(0, -1).join(" ");
+      nachname = nachname || parts[parts.length - 1];
+    } else if (parts.length === 1) {
+      vorname = vorname || parts[0];
+      nachname = nachname || "(unbekannt)";
+    } else {
+      vorname = vorname || "(unbekannt)";
+      nachname = nachname || "(unbekannt)";
+    }
+  }
+
+  const telefon = row.telefon ?? row.festnetz ?? null;
+  const plz = row.plz && /^\d{5}$/.test(row.plz) ? row.plz : null;
+
+  const inserted = await db.execute(sql`
+    INSERT INTO prospects (
+      vorname, nachname, telefon, email,
+      strasse, nr, plz, stadt, pflegegrad,
+      status, quelle, quelle_details
+    ) VALUES (
+      ${vorname}, ${nachname}, ${telefon}, ${row.email},
+      ${row.strasse}, ${row.nr}, ${plz}, ${row.stadt}, ${row.pflegegrad},
+      'erstberatung_durchgeführt',
+      'migration_orphan_customer',
+      ${`Synthetisch erzeugt aus Waisen-Kunde #${customerId} (Task #509)`}
+    )
+    RETURNING id
+  `);
+  const newId = (inserted.rows as Array<{ id: number }>)[0]?.id;
+  return typeof newId === "number" ? newId : null;
+}
+
 export async function migrateErstberatungCustomers(): Promise<void> {
   await ensureCheckConstraint();
 
@@ -79,8 +142,16 @@ export async function migrateErstberatungCustomers(): Promise<void> {
     }
 
     if (!prospectId) {
-      warnings.push(`Kunde ${customer.id} (${customer.name}) hat keinen verknüpften Prospect — übersprungen`);
-      continue;
+      const synthetic = await createSyntheticProspectForOrphan(customer.id);
+      if (!synthetic) {
+        warnings.push(`Kunde ${customer.id} (${customer.name}) hat keinen verknüpften Prospect und konnte nicht synthetisch erzeugt werden — übersprungen`);
+        continue;
+      }
+      prospectId = synthetic;
+      log(
+        `Erstberatung-Migration: Synthetischer Prospect ${prospectId} für Waisen-Kunde ${customer.id} (${customer.name}) angelegt`,
+        "startup"
+      );
     }
 
     customerProspectPairs.push({
