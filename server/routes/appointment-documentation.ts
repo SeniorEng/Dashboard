@@ -27,6 +27,16 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     throw notFound(ErrorMessages.appointmentNotFound);
   }
 
+  // Doppelbuchungs-Schutz VOR der Policy: Wenn der Termin schon einmal
+  // dokumentiert wurde (Status `completed` ODER eine Signatur liegt vor),
+  // antworten wir mit dem dedizierten `ALREADY_COMPLETED`-Code, damit der
+  // Client den Spezialfall sauber unterscheiden kann. Sonst würde
+  // `policyCanDocument` einen abgeschlossenen Termin als nicht editierbar
+  // einstufen und mit dem generischen `ACCESS_DENIED` antworten.
+  if (appointment.status === "completed" || appointment.signatureData) {
+    throw forbidden("ALREADY_COMPLETED", "Dieser Termin wurde bereits dokumentiert");
+  }
+
   // Zentrale Policy: Lock, Monatsabschluss, Rolle/Zuweisung, Status — alles
   // wird in shared/policies/appointments.ts entschieden.
   const isLocked = await storage.isAppointmentLocked(id);

@@ -49,7 +49,10 @@ describe("buildBudgetWarning (Task #425 — §45b Jahrestopf)", () => {
   it("warnt bei Topf-Erschöpfung (availableAfterPlannedCents < 0)", () => {
     const w = buildBudgetWarning(summary({ availableAfterPlannedCents: -2500 }));
     expect(w).toContain("übersteigen §45b");
-    expect(w).toContain("25,00 €");
+    // `Intl.NumberFormat("de-DE", { style: "currency" })` trennt Zahl und €
+    // mit einem NARROW NO-BREAK SPACE (U+202F); Test akzeptiert auch
+    // gewöhnlichen Space / NBSP, falls die Runtime das mal anders normalisiert.
+    expect(w).toMatch(/25,00[\s\u202F\u00A0]€/);
   });
 
   it("erzeugt KEINE Cap-Warnung mehr, auch wenn currentMonth-Felder knapp sind", () => {

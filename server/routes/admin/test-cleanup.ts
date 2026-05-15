@@ -78,6 +78,30 @@ async function purgeCustomerCascade(id: number): Promise<void> {
   });
 }
 
+const backdateSchema = z.object({
+  customerId: z.number().int().positive(),
+  createdAt: z.string().min(8),
+});
+
+router.post(
+  "/test-cleanup/backdate-customer-created-at",
+  requireSuperAdmin,
+  asyncHandler("Backdate fehlgeschlagen", async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === "production") {
+      res.status(403).json({ error: "FORBIDDEN", message: "Test-Cleanup ist in Produktion deaktiviert" });
+      return;
+    }
+    const { customerId, createdAt } = backdateSchema.parse(req.body);
+    const parsed = new Date(createdAt);
+    if (Number.isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "INVALID_DATE", message: "createdAt ist kein gültiges Datum" });
+      return;
+    }
+    await db.update(customers).set({ createdAt: parsed }).where(eq(customers.id, customerId));
+    res.json({ ok: true });
+  }),
+);
+
 router.post(
   "/test-cleanup/purge-customers",
   requireSuperAdmin,

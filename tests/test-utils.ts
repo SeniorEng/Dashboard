@@ -359,7 +359,10 @@ export async function deactivateTestEmployee(id: number | null | undefined): Pro
   } catch {}
 }
 
-export async function createTestCustomer(overrides: Record<string, unknown> = {}): Promise<{ id: number; [key: string]: unknown }> {
+export async function createTestCustomer(
+  overrides: Record<string, unknown> & { createdAtOverride?: string | Date } = {},
+): Promise<{ id: number; [key: string]: unknown }> {
+  const { createdAtOverride, ...rest } = overrides;
   const payload = {
     vorname: "Test",
     nachname: `Auto_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
@@ -373,10 +376,22 @@ export async function createTestCustomer(overrides: Record<string, unknown> = {}
     pflegegrad: 3,
     pflegegradSeit: "2024-01-01",
     acceptsPrivatePayment: true,
-    ...overrides,
+    ...rest,
   };
   const res = await apiPost<any>("/api/admin/customers", payload);
   if (res.status !== 201) throw new Error(`createTestCustomer failed: ${res.status} ${JSON.stringify(res.data)}`);
+  // Optional: backdate `createdAt` so that tests for the past-birthday window
+  // (Task #430-Guard) can see a customer whose this-year birthday is before
+  // their "created" date without changing production behaviour.
+  if (createdAtOverride && res.data?.id) {
+    const iso = typeof createdAtOverride === "string"
+      ? createdAtOverride
+      : createdAtOverride.toISOString();
+    await apiPost(`/api/admin/test-cleanup/backdate-customer-created-at`, {
+      customerId: res.data.id,
+      createdAt: iso,
+    });
+  }
   return res.data;
 }
 

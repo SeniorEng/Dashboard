@@ -18,9 +18,12 @@ export async function getServiceIdByCode(
     if (!r.ok()) throw new Error(`GET /api/services failed: ${r.status()}`);
     serviceCache = (await r.json()) as ServiceCatalogEntry[];
   }
-  const match = serviceCache.find(
-    (s) => s.code === code || s.lohnartKategorie === code,
-  );
+  // WICHTIG: nur exakt nach `code` matchen — `lohnartKategorie` würde auch
+  // Auto-Test-Services (`auto_test_xxx` mit Kategorie `hauswirtschaft`) zurück-
+  // liefern, deren `serviceCode` dann nicht "hauswirtschaft" ist und in
+  // `useDocumentationForm` durch den Default-Branch fällt → der Locator
+  // `input-details-hauswirtschaft` existiert dann nicht.
+  const match = serviceCache.find((s) => s.code === code);
   if (!match) {
     throw new Error(
       `getServiceIdByCode("${code}"): not found in service catalog`,

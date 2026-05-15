@@ -23,9 +23,14 @@ describe("GET /api/birthdays — includePast Query-Param", () => {
 
   beforeAll(async () => {
     await getAuthCookie();
+    // `createdAt` muss VOR dem diesjährigen Geburtstag liegen, sonst greift
+    // der Task-#430-Guard (`thisYearBirthday < createdAt → forward`).
+    const backdated = new Date();
+    backdated.setDate(backdated.getDate() - 30);
     const created = await createTestCustomer({
       vorname: "Geburtstags-Test",
       geburtsdatum: yesterday,
+      createdAtOverride: backdated,
     });
     customerId = created.id as number;
   });
