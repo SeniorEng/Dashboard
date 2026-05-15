@@ -300,6 +300,120 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     }
   });
 
+  // ---------- 7b. Termin dokumentieren — Anfahrt-km + Kunden-km im selben Schritt ----------
+  // Task #467: schützt davor, dass die beiden Kilometer-Felder versehentlich
+  // wieder in unterschiedliche Schritte rutschen oder der Ja/Nein-Toggle bricht.
+  test("Termin dokumentieren — Anfahrt-km + Kunden-km landen im selben Schritt (Ja)", async ({ page }) => {
+    const customer = await createCustomer(session);
+    const employee = await createEmployee(session);
+    await assignEmployee(session, customer.id, employee.id);
+    const appt = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: employee.id,
+    });
+
+    try {
+      await page.goto(`/document-appointment/${appt.id}`, {
+        waitUntil: "domcontentloaded",
+      });
+
+      // Schritt 1: Pflicht-Servicedetail füllen, damit "Weiter" nicht blockt.
+      const serviceDetail = page.locator(
+        "[data-testid='input-details-hauswirtschaft']",
+      );
+      await expect(serviceDetail).toBeVisible({ timeout: 10000 });
+      await serviceDetail.fill("Kilometer-Smoketest");
+      await page.locator("[data-testid='button-next']").click();
+
+      // Schritt 2: BEIDE Kilometer-Eingaben müssen hier sichtbar sein.
+      const travelKm = page.locator("[data-testid='input-kilometers']");
+      await expect(travelKm).toBeVisible({ timeout: 10000 });
+      await travelKm.fill("12");
+
+      // Toggle aktivieren — Kunden-km-Input erscheint erst danach, aber
+      // weiterhin im SELBEN Schritt 2.
+      await page.locator("[data-testid='radio-customer-travel-yes']").click();
+      const customerKm = page.locator("[data-testid='input-customer-kilometers']");
+      await expect(customerKm).toBeVisible({ timeout: 10000 });
+      await customerKm.fill("7");
+
+      await clickSaveAndWait(
+        page,
+        { url: `/api/appointments/${appt.id}/document`, methods: ["POST"] },
+        "button-submit",
+      );
+
+      // Vollständiger Reload (gemäß Task-Vorgabe), dann API-Verifikation
+      // — dokumentierte Termine rendern keinen Wizard mehr, daher prüfen
+      // wir die Persistenz beider km-Werte über die Appointment-API.
+      await page.reload({ waitUntil: "domcontentloaded" });
+
+      const apptAfter = (await session.api
+        .get(`/api/appointments/${appt.id}`)
+        .then((r) => r.json())) as {
+        travelKilometers?: number | null;
+        customerKilometers?: number | null;
+      };
+      expect(apptAfter.travelKilometers ?? 0).toBeCloseTo(12, 3);
+      expect(apptAfter.customerKilometers ?? 0).toBeCloseTo(7, 3);
+    } finally {
+      await deactivateEmployee(session, employee.id);
+    }
+  });
+
+  test("Termin dokumentieren — Kunden-km bleibt 0 bei Toggle 'Nein'", async ({ page }) => {
+    const customer = await createCustomer(session);
+    const employee = await createEmployee(session);
+    await assignEmployee(session, customer.id, employee.id);
+    const appt = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: employee.id,
+    });
+
+    try {
+      await page.goto(`/document-appointment/${appt.id}`, {
+        waitUntil: "domcontentloaded",
+      });
+
+      const serviceDetail = page.locator(
+        "[data-testid='input-details-hauswirtschaft']",
+      );
+      await expect(serviceDetail).toBeVisible({ timeout: 10000 });
+      await serviceDetail.fill("Kilometer-Smoketest-Nein");
+      await page.locator("[data-testid='button-next']").click();
+
+      const travelKm = page.locator("[data-testid='input-kilometers']");
+      await expect(travelKm).toBeVisible({ timeout: 10000 });
+      await travelKm.fill("5");
+
+      // Toggle bleibt auf "Nein" — Kunden-km-Input darf nicht sichtbar sein
+      // (entweder nicht im DOM oder ausgeblendet — beides ist akzeptabel).
+      const customerKm = page.locator("[data-testid='input-customer-kilometers']");
+      await expect(customerKm).not.toBeVisible();
+
+      await clickSaveAndWait(
+        page,
+        { url: `/api/appointments/${appt.id}/document`, methods: ["POST"] },
+        "button-submit",
+      );
+
+      // Vollständiger Reload (gemäß Task-Vorgabe) vor API-Verifikation.
+      await page.reload({ waitUntil: "domcontentloaded" });
+
+      const apptAfter = (await session.api
+        .get(`/api/appointments/${appt.id}`)
+        .then((r) => r.json())) as {
+        travelKilometers?: number | null;
+        customerKilometers?: number | null;
+      };
+      expect(apptAfter.travelKilometers ?? 0).toBeCloseTo(5, 3);
+      // Kunden-km muss 0 oder null sein.
+      expect(apptAfter.customerKilometers ?? 0).toBe(0);
+    } finally {
+      await deactivateEmployee(session, employee.id);
+    }
+  });
+
   // ---------- 8. Lead bearbeiten — Status + Notiz ----------
   test("Lead bearbeiten — Status + Notiz persistieren nach Reload", async ({ page }) => {
     const prospect = await createProspect(session);
