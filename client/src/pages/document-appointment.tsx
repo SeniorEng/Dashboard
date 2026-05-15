@@ -1,13 +1,15 @@
+import { useEffect, useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   ChevronLeft, ChevronRight, Loader2, Clock, 
-  Car, Check, AlertCircle, X, Plus, User
+  Users, Check, AlertCircle, X, Plus, User
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useDocumentationForm, type ServiceFormData, type DocumentationFormData, PerformedBySelector, TravelDocumentation } from "@/features/appointments";
@@ -34,6 +36,28 @@ export default function DocumentAppointment() {
     travelSuggestion,
     handleTravelOriginChange,
   } = useDocumentationForm(id);
+
+  const customerTravelEligible = formData.services.some(
+    s => s.serviceType === "Hauswirtschaft" || s.serviceType === "Alltagsbegleitung"
+  );
+  const [hasCustomerTravel, setHasCustomerTravel] = useState<"yes" | "no">("no");
+  const [customerTravelInit, setCustomerTravelInit] = useState(false);
+  useEffect(() => {
+    if (!customerTravelInit && formData.services.length > 0) {
+      setHasCustomerTravel(formData.customerKilometers > 0 ? "yes" : "no");
+      setCustomerTravelInit(true);
+    }
+  }, [customerTravelInit, formData.services.length, formData.customerKilometers]);
+
+  const handleCustomerTravelToggle = (value: "yes" | "no") => {
+    setHasCustomerTravel(value);
+    if (value === "no") {
+      setFormData(prev => ({ ...prev, customerKilometers: 0 }));
+    }
+  };
+
+  const totalServiceMinutes = formData.services.reduce((sum, s) => sum + (s.actualDuration || 0), 0);
+  const showCustomerTravelBlock = customerTravelEligible;
 
   if (appointmentLoading) {
     return (
@@ -290,44 +314,6 @@ export default function DocumentAppointment() {
             </CardContent>
           </Card>
 
-          {formData.services.some(s => s.serviceType === "Hauswirtschaft" || s.serviceType === "Alltagsbegleitung") && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Car className={`${iconSize.md} text-primary`} />
-                  Fahrten für/mit Kunde
-                </CardTitle>
-                <CardDescription>
-                  z.B. Arztbesuch, Einkauf, Behördengang
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <Label htmlFor="customerKilometers">Gefahrene Kilometer</Label>
-                  <div className="relative">
-                    <Input
-                      id="customerKilometers"
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={formData.customerKilometers || ""}
-                      onChange={(e) => setFormData(prev => ({
-                        ...prev,
-                        customerKilometers: parseFloat(e.target.value) || 0,
-                      }))}
-                      placeholder="0"
-                      className="pr-12"
-                      data-testid="input-customer-kilometers"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                      km
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          
           <Button 
             className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
@@ -353,7 +339,106 @@ export default function DocumentAppointment() {
             suggestedKilometers={travelSuggestion?.suggestedKilometers ?? null}
             suggestedMinutes={travelSuggestion?.suggestedMinutes ?? null}
           />
-          
+
+          {showCustomerTravelBlock && (
+            <Card className="border-l-4 border-l-amber-500">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Users className={`${iconSize.md} text-amber-600`} />
+                  Fahrten während des Termins
+                </CardTitle>
+                <CardDescription>
+                  Sind Sie <strong>mit</strong> dem Kunden unterwegs gewesen? z.B. Arztbesuch, Einkauf, Behördengang.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <RadioGroup
+                  value={hasCustomerTravel}
+                  onValueChange={(v) => handleCustomerTravelToggle(v as "yes" | "no")}
+                  className="space-y-2"
+                >
+                  <div className={`flex items-center space-x-3 p-3 rounded-lg border ${hasCustomerTravel === "no" ? "border-amber-500 bg-amber-50" : "border-border"}`}>
+                    <RadioGroupItem value="no" id="customer-travel-no" data-testid="radio-customer-travel-no" />
+                    <Label htmlFor="customer-travel-no" className="cursor-pointer flex-1 font-medium">
+                      Nein, keine Fahrten mit dem Kunden
+                    </Label>
+                  </div>
+                  <div className={`flex items-center space-x-3 p-3 rounded-lg border ${hasCustomerTravel === "yes" ? "border-amber-500 bg-amber-50" : "border-border"}`}>
+                    <RadioGroupItem value="yes" id="customer-travel-yes" data-testid="radio-customer-travel-yes" />
+                    <Label htmlFor="customer-travel-yes" className="cursor-pointer flex-1 font-medium">
+                      Ja, ich bin mit dem Kunden unterwegs gewesen
+                    </Label>
+                  </div>
+                </RadioGroup>
+
+                {hasCustomerTravel === "yes" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="customerKilometers">Gefahrene Kilometer mit dem Kunden</Label>
+                    <div className="relative">
+                      <Input
+                        id="customerKilometers"
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={formData.customerKilometers || ""}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          customerKilometers: parseFloat(e.target.value) || 0,
+                        }))}
+                        placeholder="0"
+                        className="pr-12"
+                        data-testid="input-customer-kilometers"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                        km
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      z.B. Arztbesuch, Einkauf, Behördengang — Strecken, die Sie <strong>während</strong> des Termins gemeinsam mit dem Kunden gefahren sind.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-muted/40" data-testid="card-summary">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Zusammenfassung</CardTitle>
+              <CardDescription>
+                Bitte prüfen Sie die Eingaben, bevor Sie abschließen.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {formData.services.map((s, i) => (
+                <div key={i} className="flex justify-between" data-testid={`summary-service-${s.serviceType.toLowerCase()}`}>
+                  <span className="text-muted-foreground">{s.serviceType}</span>
+                  <span className="font-medium">{formatDuration(s.actualDuration)}</span>
+                </div>
+              ))}
+              {totalServiceMinutes > 0 && (
+                <div className="flex justify-between pt-2 border-t">
+                  <span className="text-muted-foreground">Gesamt-Dauer</span>
+                  <span className="font-medium" data-testid="summary-total-duration">{formatDuration(totalServiceMinutes)}</span>
+                </div>
+              )}
+              <div className={`flex justify-between pt-2 border-t ${formData.travelKilometers > 0 ? "" : "text-muted-foreground/60"}`}>
+                <span>Anfahrt zum Kunden</span>
+                <span data-testid="summary-travel-km">
+                  {formData.travelKilometers > 0 ? `${formData.travelKilometers} km` : "keine"}
+                </span>
+              </div>
+              {showCustomerTravelBlock && (
+                <div className={`flex justify-between ${formData.customerKilometers > 0 ? "" : "text-muted-foreground/60"}`}>
+                  <span>Fahrten mit dem Kunden</span>
+                  <span data-testid="summary-customer-km">
+                    {formData.customerKilometers > 0 ? `${formData.customerKilometers} km` : "keine"}
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Button 
             className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"

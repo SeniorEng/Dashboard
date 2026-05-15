@@ -91,6 +91,7 @@ export function useDocumentationForm(id: number) {
           actualDuration: as.actualDurationMinutes ?? as.plannedDurationMinutes,
           details: as.details ?? "",
         })),
+        customerKilometers: appointment.customerKilometers ?? 0,
         notes: appointment.notes ?? "",
       }));
 

@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Car, Home, MapPin, Navigation } from "lucide-react";
+import { Home, MapPin, Navigation, ArrowRightToLine } from "lucide-react";
 import { iconSize } from "@/design-system";
 
 interface TravelDocumentationProps {
@@ -36,14 +36,14 @@ export function TravelDocumentation({
   const hasRouteSuggestion = suggestedKilometers != null && suggestedKilometers > 0;
 
   return (
-    <Card>
+    <Card className="border-l-4 border-l-primary">
       <CardHeader className="pb-3">
         <CardTitle className="text-lg flex items-center gap-2">
-          <Car className={`${iconSize.md} text-primary`} />
-          Anfahrt dokumentieren
+          <ArrowRightToLine className={`${iconSize.md} text-primary`} />
+          Anfahrt zum Kunden
         </CardTitle>
         <CardDescription>
-          Woher kamen Sie zu diesem Termin?
+          Strecke <strong>vor</strong> dem Termin — von wo sind Sie zum Kunden gefahren?
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -90,7 +90,7 @@ export function TravelDocumentation({
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="kilometers">Gefahrene Kilometer (Anfahrt)</Label>
+            <Label htmlFor="kilometers">Anfahrtskilometer (zum Termin hin)</Label>
             <div className="relative">
               <Input
                 id="kilometers"

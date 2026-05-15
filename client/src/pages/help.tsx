@@ -200,22 +200,30 @@ const helpSections: HelpSection[] = [
           <li>Tippen Sie auf den <strong>„Dokumentieren"</strong>-Button.</li>
           <li><strong>Schritt 1 — Leistungen:</strong>
             <ul className="list-disc list-inside ml-4 mt-1">
-              <li>Für jede geplante Leistung: Geben Sie die <strong>tatsächliche Dauer</strong> in Minuten ein.</li>
-              <li>Optional: Fügen Sie <strong>Details</strong> hinzu (z.B. was konkret gemacht wurde).</li>
+              <li>Geben Sie die <strong>tatsächliche Startzeit</strong> ein.</li>
+              <li>Für jede geplante Leistung: Geben Sie die <strong>tatsächliche Dauer</strong> und <strong>Details</strong> ein.</li>
               <li>Falls eine zusätzliche Leistung erbracht wurde, tippen Sie auf <strong>„+ Leistung hinzufügen"</strong>.</li>
               <li>Falls ein anderer Mitarbeiter den Termin durchgeführt hat (Vertretung), wählen Sie diesen unter <strong>„Durchgeführt von"</strong> aus.</li>
             </ul>
           </li>
           <li>Tippen Sie auf <strong>„Weiter"</strong>.</li>
-          <li><strong>Schritt 2 — Fahrt & Abschluss:</strong>
+          <li><strong>Schritt 2 — Fahrten & Abschluss:</strong> Hier werden <strong>beide</strong> Kilometer-Angaben gesammelt — bitte nicht doppelt eintragen!
             <ul className="list-disc list-inside ml-4 mt-1">
-              <li>Geben Sie die <strong>tatsächliche Startzeit</strong> und <strong>Endzeit</strong> ein.</li>
-              <li>Wählen Sie den <strong>Startpunkt der Fahrt</strong> (von zu Hause oder vom vorherigen Kunden).</li>
-              <li>Geben Sie die <strong>Anfahrtskilometer</strong> ein.</li>
-              <li>Optional: Geben Sie <strong>Kilometer mit/für den Kunden</strong> ein (z.B. Begleitfahrten).</li>
+              <li><strong>Anfahrt zum Kunden</strong> (Pflicht): Strecke <em>vor</em> dem Termin. Wählen Sie „Von zu Hause" oder „Vom vorherigen Kunden" und tragen Sie die Anfahrtskilometer ein. Bei „Vom vorherigen Kunden" zusätzlich die Fahrzeit.</li>
+              <li><strong>Fahrten während des Termins</strong> (optional): Nur wenn Sie <em>mit</em> dem Kunden unterwegs waren (z.B. Arztbesuch, Einkauf, Behördengang). Standard ist „Nein, keine Fahrten mit dem Kunden". Erst nach Auswahl von „Ja, ich bin mit dem Kunden unterwegs gewesen" erscheint das Kilometer-Feld.</li>
+              <li>Optional: <strong>Notizen</strong> zum Termin.</li>
+              <li>Prüfen Sie die <strong>Zusammenfassung</strong> über dem Abschluss-Button (Services, Anfahrt-km, Fahrten-mit-Kunde-km), um Doppel-Eingaben zu vermeiden.</li>
             </ul>
           </li>
           <li>Tippen Sie auf <strong>„Dokumentation abschließen"</strong>.</li>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 mt-3 not-italic">
+            <p className="font-medium">Unterschied der zwei Kilometer-Felder:</p>
+            <ul className="list-disc list-inside space-y-1 mt-1">
+              <li><strong>Anfahrt zum Kunden</strong> = Strecke <em>zum</em> Termin hin (Fahrtkosten-Erstattung für Sie).</li>
+              <li><strong>Fahrten während des Termins</strong> = Strecken, die Sie <em>gemeinsam mit</em> dem Kunden gefahren sind (Teil der Leistung am Kunden). Bitte nicht denselben Wert in beide Felder eintragen.</li>
+            </ul>
+          </div>
         </ol>
 
         <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-800">
