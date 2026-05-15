@@ -766,73 +766,104 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     allAllocations.filter(a => a.source === "initial_balance").map(a => a.year)
   );
 
-  for (const year of years) {
-    if (year >= curYear) continue;
+  // Bulk-Vorberechnung (Task #442): statt pro Jahr vier separate SUM-Queries
+  // abzusetzen, sammeln wir alle relevanten Allocation-IDs sowie den Jahres-
+  // bereich einmal vorab und feuern höchstens zwei aggregierte Queries.
+  const yearsToProcess = years.filter(y =>
+    y < curYear && !existingCarryoverYears.has(y + 1) && !yearsWithInitialBalance.has(y)
+  );
+
+  const linkedIdsByYear = new Map<number, number[]>();
+  const allLinkedIdsSet = new Set<number>();
+  for (const year of yearsToProcess) {
+    const specialIds = allAllocations
+      .filter(a => a.year === year && a.source !== "carryover")
+      .map(a => a.id);
+    const carryoverIds = carryoverAllocations
+      .filter(a => a.year === year)
+      .map(a => a.id);
+    const ids = [...specialIds, ...carryoverIds];
+    linkedIdsByYear.set(year, ids);
+    for (const id of ids) allLinkedIdsSet.add(id);
+  }
+  const allLinkedIds = Array.from(allLinkedIdsSet);
+
+  const linkedConsumptionByAlloc = new Map<number, number>();
+  const linkedReversalByAlloc = new Map<number, number>();
+  if (allLinkedIds.length > 0) {
+    const linkedRows = await d.select({
+      allocationId: budgetTransactions.allocationId,
+      transactionType: budgetTransactions.transactionType,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off', 'reversal')`,
+      inArray(budgetTransactions.allocationId, allLinkedIds)
+    )).groupBy(budgetTransactions.allocationId, budgetTransactions.transactionType);
+
+    for (const row of linkedRows) {
+      if (row.allocationId == null) continue;
+      const total = Number(row.total ?? 0);
+      if (row.transactionType === "reversal") {
+        linkedReversalByAlloc.set(row.allocationId, (linkedReversalByAlloc.get(row.allocationId) ?? 0) + total);
+      } else {
+        linkedConsumptionByAlloc.set(row.allocationId, (linkedConsumptionByAlloc.get(row.allocationId) ?? 0) + total);
+      }
+    }
+  }
+
+  const unlinkedConsumptionByYear = new Map<number, number>();
+  const unlinkedReversalByYear = new Map<number, number>();
+  if (yearsToProcess.length > 0) {
+    const firstYear = Math.min(...yearsToProcess);
+    const lastYear = Math.max(...yearsToProcess);
+    const unlinkedRows = await d.select({
+      year: sql<number>`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})::int`,
+      transactionType: budgetTransactions.transactionType,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off', 'reversal')`,
+      isNull(budgetTransactions.allocationId),
+      gte(budgetTransactions.transactionDate, `${firstYear}-01-01`),
+      lte(budgetTransactions.transactionDate, `${lastYear}-12-31`)
+    )).groupBy(
+      sql`EXTRACT(YEAR FROM ${budgetTransactions.transactionDate})`,
+      budgetTransactions.transactionType
+    );
+
+    for (const row of unlinkedRows) {
+      const y = Number(row.year);
+      const total = Number(row.total ?? 0);
+      if (row.transactionType === "reversal") {
+        unlinkedReversalByYear.set(y, (unlinkedReversalByYear.get(y) ?? 0) + total);
+      } else {
+        unlinkedConsumptionByYear.set(y, (unlinkedConsumptionByYear.get(y) ?? 0) + total);
+      }
+    }
+  }
+
+  for (const year of yearsToProcess) {
     const targetYear = year + 1;
-    if (existingCarryoverYears.has(targetYear)) continue;
-    if (yearsWithInitialBalance.has(year)) continue;
 
     const yearAllocatedCents = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year }, _tx, preferences, typeSettings);
 
     const carryoverIntoThisYear = carryoverAllocations.filter(a => a.year === year);
     const totalCarryoverIn = carryoverIntoThisYear.reduce((sum, a) => sum + a.amountCents, 0);
 
-    const carryoverIds = carryoverIntoThisYear.map(a => a.id);
+    const linkedIds = linkedIdsByYear.get(year) ?? [];
 
-    const yearStart = `${year}-01-01`;
-    const yearEnd = `${year}-12-31`;
+    let linkedConsumed = 0;
+    let linkedReversed = 0;
+    for (const id of linkedIds) {
+      linkedConsumed += linkedConsumptionByAlloc.get(id) ?? 0;
+      linkedReversed += linkedReversalByAlloc.get(id) ?? 0;
+    }
 
-    const specialIds = allAllocations
-      .filter(a => a.year === year && a.source !== "carryover")
-      .map(a => a.id);
-    const allLinkedIds = [...specialIds, ...carryoverIds];
-
-    const linkedConsumption = allLinkedIds.length > 0
-      ? await d.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        }).from(budgetTransactions).where(and(
-          eq(budgetTransactions.customerId, customerId),
-          eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-          sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-          inArray(budgetTransactions.allocationId, allLinkedIds)
-        ))
-      : [{ total: 0 }];
-
-    const linkedReversals = allLinkedIds.length > 0
-      ? await d.select({
-          total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-        }).from(budgetTransactions).where(and(
-          eq(budgetTransactions.customerId, customerId),
-          eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-          eq(budgetTransactions.transactionType, "reversal"),
-          inArray(budgetTransactions.allocationId, allLinkedIds)
-        ))
-      : [{ total: 0 }];
-
-    const unlinkedConsumption = await d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
-      isNull(budgetTransactions.allocationId),
-      gte(budgetTransactions.transactionDate, yearStart),
-      lte(budgetTransactions.transactionDate, yearEnd)
-    ));
-
-    const unlinkedReversals = await d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-      eq(budgetTransactions.transactionType, "reversal"),
-      isNull(budgetTransactions.allocationId),
-      gte(budgetTransactions.transactionDate, yearStart),
-      lte(budgetTransactions.transactionDate, yearEnd)
-    ));
-
-    const totalConsumed = Number(linkedConsumption[0]?.total ?? 0) + Number(unlinkedConsumption[0]?.total ?? 0);
-    const totalReversed = Number(linkedReversals[0]?.total ?? 0) + Number(unlinkedReversals[0]?.total ?? 0);
+    const totalConsumed = linkedConsumed + (unlinkedConsumptionByYear.get(year) ?? 0);
+    const totalReversed = linkedReversed + (unlinkedReversalByYear.get(year) ?? 0);
     const netConsumed = Math.max(0, totalConsumed - totalReversed);
     const totalPool = yearAllocatedCents + totalCarryoverIn;
     const unused = Math.max(0, totalPool - netConsumed);
@@ -889,29 +920,40 @@ export async function processExpiredCarryover(customerId: number, _tx?: DbClient
 
   const created: import("@shared/schema").BudgetTransaction[] = [];
 
+  // Bulk-Aggregat (Task #442): eine GROUP-BY-Query über alle abgelaufenen
+  // Allokationen statt 2N pro-Allocation-SUMs. Map-Lookup in der Schleife.
+  const expiredIds = expiredAllocations.map(a => a.id);
+  const consumedByAlloc = new Map<number, number>();
+  const reversedByAlloc = new Map<number, number>();
+  if (expiredIds.length > 0) {
+    const totals = await d.select({
+      allocationId: budgetTransactions.allocationId,
+      transactionType: budgetTransactions.transactionType,
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    })
+      .from(budgetTransactions)
+      .where(and(
+        inArray(budgetTransactions.allocationId, expiredIds),
+        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off', 'reversal')`
+      ))
+      .groupBy(budgetTransactions.allocationId, budgetTransactions.transactionType);
+
+    for (const row of totals) {
+      if (row.allocationId == null) continue;
+      const t = Number(row.total ?? 0);
+      if (row.transactionType === "reversal") {
+        reversedByAlloc.set(row.allocationId, (reversedByAlloc.get(row.allocationId) ?? 0) + t);
+      } else {
+        consumedByAlloc.set(row.allocationId, (consumedByAlloc.get(row.allocationId) ?? 0) + t);
+      }
+    }
+  }
+
   for (const allocation of expiredAllocations) {
     if (writtenOffAllocationIds.has(allocation.id)) continue;
 
-    const consumedFromAllocation = await d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    })
-      .from(budgetTransactions)
-      .where(and(
-        eq(budgetTransactions.allocationId, allocation.id),
-        sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`
-      ));
-
-    const reversedFromAllocation = await d.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    })
-      .from(budgetTransactions)
-      .where(and(
-        eq(budgetTransactions.allocationId, allocation.id),
-        eq(budgetTransactions.transactionType, "reversal")
-      ));
-
-    const consumed = Number(consumedFromAllocation[0]?.total ?? 0);
-    const reversed = Number(reversedFromAllocation[0]?.total ?? 0);
+    const consumed = consumedByAlloc.get(allocation.id) ?? 0;
+    const reversed = reversedByAlloc.get(allocation.id) ?? 0;
     const remaining = allocation.amountCents - Math.max(0, consumed - reversed);
 
     if (remaining <= 0) continue;
