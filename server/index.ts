@@ -216,6 +216,13 @@ async function runStartupTasks() {
       log(`Invoice-Storno-Refs-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateInvoiceZugferdXml } = await import("./startup/migrate-invoice-zugferd-xml");
+    try {
+      await migrateInvoiceZugferdXml();
+    } catch (err) {
+      log(`Invoice-ZUGFeRD-XML-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();
@@ -413,6 +420,20 @@ async function runStartupTasks() {
   const { startMonthCloseScheduler } = await import("./services/month-close-scheduler");
   const monthCloseScheduler = startMonthCloseScheduler();
   intervals.push(monthCloseScheduler.interval);
+
+  // Tier-A3: Nächtlicher Integrity-Check der letzten 30 Tage Rechnungen.
+  // Re-rendert PDF + XML und gleicht gegen persistierten pdfHash/zugferdXml
+  // ab, dokumentiert Drift im Audit-Log.
+  const { verifyRecentInvoiceIntegrity } = await import("./services/invoice-integrity-verifier");
+  const runInvoiceIntegrityCheck = async () => {
+    try {
+      await verifyRecentInvoiceIntegrity(30);
+    } catch (e) {
+      console.error("Fehler bei Invoice-Integrity-Check:", e);
+    }
+  };
+  timeouts.push(setTimeout(runInvoiceIntegrityCheck, 15 * 60 * 1000));
+  intervals.push(setInterval(runInvoiceIntegrityCheck, 24 * 60 * 60 * 1000));
 }
 
 async function gracefulShutdown(signal: string) {

@@ -48,6 +48,7 @@ export const invoices = pgTable("invoices", {
   referencedStornoInvoiceIds: integer("referenced_storno_invoice_ids").array(),
   pdfPath: text("pdf_path"),
   pdfHash: text("pdf_hash"),
+  zugferdXml: text("zugferd_xml"),
   leistungsnachweisPath: text("leistungsnachweis_path"),
   leistungsnachweisHash: text("leistungsnachweis_hash"),
   sentAt: timestamp("sent_at"),

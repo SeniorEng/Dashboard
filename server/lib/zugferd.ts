@@ -270,11 +270,18 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
   return result;
 }
 
-function validateXmlStructure(xml: string | null | undefined): string[] {
+export type ValidateZugferdResult = { ok: true } | { ok: false; errors: string[] };
+
+/**
+ * Konsolidierte XML-Validierung für ZUGFeRD/Factur-X. Ersetzt die früher
+ * an drei Stellen verstreuten Strict-Checks und die Substring-Heuristik in
+ * der PDF-Konformitätsprüfung.
+ */
+export function validateZugferd(xml: string | null | undefined): ValidateZugferdResult {
   const errors: string[] = [];
   if (!xml) {
     errors.push("XML ist leer");
-    return errors;
+    return { ok: false, errors };
   }
   const requiredElements = [
     "CrossIndustryInvoice",
@@ -291,7 +298,30 @@ function validateXmlStructure(xml: string | null | undefined): string[] {
       errors.push(`Pflicht-Element fehlt: ${el}`);
     }
   }
-  return errors;
+  return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
+/**
+ * PDF/A-Konformitätsprüfung über echten XMP-Metadata-Block (statt
+ * Substring-Suche im rohen PDF-Bytestream). Liest den Metadata-Stream
+ * aus dem PDF-Katalog und prüft, ob ein `pdfaid`-XMP-Block vorhanden ist.
+ */
+async function readPdfAXmp(pdfBytes: Buffer): Promise<{ hasPdfA: boolean; xmp: string | null }> {
+  try {
+    const { PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } = await import("pdf-lib");
+    const pdfDoc = await PDFDocument.load(pdfBytes, { updateMetadata: false });
+    const metadataRef = pdfDoc.catalog.get(PDFName.of("Metadata"));
+    if (!metadataRef) return { hasPdfA: false, xmp: null };
+    const stream = pdfDoc.context.lookup(metadataRef);
+    if (!(stream instanceof PDFRawStream)) return { hasPdfA: false, xmp: null };
+    const decoded = decodePDFRawStream(stream).decode();
+    const xmp = Buffer.from(decoded).toString("utf8");
+    const hasPdfA = /pdfaid\s*:\s*part/.test(xmp);
+    return { hasPdfA, xmp };
+  } catch (err) {
+    log(`PDF/A-XMP-Parse fehlgeschlagen: ${err}`, "ZUGFeRD");
+    return { hasPdfA: false, xmp: null };
+  }
 }
 
 function validateZugferdData(data: ZugferdInvoiceData, pdfData: InvoicePdfData): string[] {
@@ -311,43 +341,54 @@ function validateZugferdData(data: ZugferdInvoiceData, pdfData: InvoicePdfData):
   return errors;
 }
 
+async function buildZugferdInvoice(data: InvoicePdfData): Promise<
+  | { ok: true; xml: string; invoice: ZugferdInvoice; usedStrictMode: boolean }
+  | { ok: false; errors: string[] }
+> {
+  const { zugferd, BASIC } = await loadZugferd();
+  const zugferdData = buildZugferdData(data);
+
+  const dataErrors = validateZugferdData(zugferdData, data);
+  if (dataErrors.length > 0) return { ok: false, errors: dataErrors };
+
+  let invoice: ZugferdInvoice;
+  let usedStrictMode = false;
+  try {
+    const strictInvoicer = zugferd({ profile: BASIC, strict: true });
+    invoice = strictInvoicer.create(zugferdData);
+    await invoice.toXML();
+    usedStrictMode = true;
+  } catch {
+    const invoicer = zugferd({ profile: BASIC, strict: false });
+    invoice = invoicer.create(zugferdData);
+  }
+
+  const xml = await invoice.toXML();
+  const result = validateZugferd(xml);
+  if (!result.ok) return { ok: false, errors: result.errors };
+
+  return { ok: true, xml, invoice, usedStrictMode };
+}
+
+export interface EmbedZugferdResult {
+  /** Das PDF mit eingebetteter ZUGFeRD-XML (PDF/A-3) bzw. Standard-PDF als Fallback. */
+  pdf: Buffer;
+  /** Das tatsächlich eingebettete XML, oder null wenn nur das Standard-PDF zurückgegeben wurde. */
+  xml: string | null;
+}
+
 export async function embedZugferdXml(
   pdfBuffer: Buffer,
   data: InvoicePdfData
-): Promise<Buffer> {
+): Promise<EmbedZugferdResult> {
   try {
-    const { zugferd, BASIC } = await loadZugferd();
-
-    const zugferdData = buildZugferdData(data);
-
-    const validationErrors = validateZugferdData(zugferdData, data);
-    if (validationErrors.length > 0) {
-      log(`Validierungsfehler, verwende Standard-PDF: ${validationErrors.join("; ")}`, "ZUGFeRD");
-      return pdfBuffer;
+    const built = await buildZugferdInvoice(data);
+    if (!built.ok) {
+      log(`Validierungsfehler, verwende Standard-PDF: ${built.errors.join("; ")}`, "ZUGFeRD");
+      return { pdf: pdfBuffer, xml: null };
     }
 
-    let invoice: ZugferdInvoice;
-    let usedStrictMode = false;
-    try {
-      const strictInvoicer = zugferd({ profile: BASIC, strict: true });
-      invoice = strictInvoicer.create(zugferdData);
-      await invoice.toXML();
-      usedStrictMode = true;
-      log("XSD-Validierung (strict) erfolgreich", "ZUGFeRD");
-    } catch (strictErr) {
-      log("XSD-Validierung nicht verfügbar (Java/xsd-schema-validator fehlt), verwende Strukturvalidierung", "ZUGFeRD");
-      const invoicer = zugferd({ profile: BASIC, strict: false });
-      invoice = invoicer.create(zugferdData);
-    }
-
-    const xml = await invoice.toXML();
-    const xmlErrors = validateXmlStructure(xml);
-    if (xmlErrors.length > 0) {
-      log(`XML-Strukturfehler, verwende Standard-PDF: ${xmlErrors.join("; ")}`, "ZUGFeRD");
-      return pdfBuffer;
-    }
-
-    const resultPdf = await invoice.embedInPdf(pdfBuffer, {
+    const resultPdf = await built.invoice.embedInPdf(pdfBuffer, {
       metadata: {
         title: `Rechnung ${data.invoiceNumber}`,
         author: data.companyName,
@@ -356,46 +397,30 @@ export async function embedZugferdXml(
     });
 
     const pdfResult = Buffer.from(resultPdf);
-    const pdfStr = pdfResult.toString("latin1");
-    const hasPdfA = pdfStr.includes("pdfaid") || pdfStr.includes("PDF/A");
+    const { hasPdfA } = await readPdfAXmp(pdfResult);
     const hasXml = pdfResult.includes(Buffer.from("factur-x.xml"));
-    log(`PDF eingebettet für ${data.invoiceNumber} | strict=${usedStrictMode} | PDF/A-Marker=${hasPdfA} | XML=${hasXml}`, "ZUGFeRD");
+    log(`PDF eingebettet für ${data.invoiceNumber} | strict=${built.usedStrictMode} | PDF/A=${hasPdfA} | XML=${hasXml}`, "ZUGFeRD");
 
     if (!hasPdfA || !hasXml) {
       log(`Konformitätsprüfung fehlgeschlagen (PDF/A=${hasPdfA}, XML=${hasXml}), verwende Standard-PDF`, "ZUGFeRD");
-      return pdfBuffer;
+      return { pdf: pdfBuffer, xml: null };
     }
 
-    return pdfResult;
+    return { pdf: pdfResult, xml: built.xml };
   } catch (err) {
     log(`Fehler beim Einbetten der XML-Daten, verwende Standard-PDF: ${err}`, "ZUGFeRD");
-    return pdfBuffer;
+    return { pdf: pdfBuffer, xml: null };
   }
 }
 
 export async function generateZugferdXml(data: InvoicePdfData): Promise<string | null> {
   try {
-    const { zugferd, BASIC } = await loadZugferd();
-
-    const zugferdData = buildZugferdData(data);
-
-    const validationErrors = validateZugferdData(zugferdData, data);
-    if (validationErrors.length > 0) {
-      log(`Validierungsfehler: ${validationErrors.join("; ")}`, "ZUGFeRD");
+    const built = await buildZugferdInvoice(data);
+    if (!built.ok) {
+      log(`Validierungsfehler: ${built.errors.join("; ")}`, "ZUGFeRD");
       return null;
     }
-
-    const invoicer = zugferd({ profile: BASIC, strict: false });
-    const invoice = invoicer.create(zugferdData);
-
-    const xml = await invoice.toXML();
-    const xmlErrors = validateXmlStructure(xml);
-    if (xmlErrors.length > 0) {
-      log(`XML-Strukturfehler: ${xmlErrors.join("; ")}`, "ZUGFeRD");
-      return null;
-    }
-
-    return xml;
+    return built.xml;
   } catch (err) {
     log(`Fehler beim Generieren der XML-Daten: ${err}`, "ZUGFeRD");
     return null;

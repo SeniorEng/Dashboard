@@ -435,7 +435,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
 
       const invoiceHtml = generateInvoiceHtml(pdfData);
       const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
-      const zugferdBuffer = await embedZugferdXml(invoicePdf, pdfData);
+      const { pdf: zugferdBuffer } = await embedZugferdXml(invoicePdf, pdfData);
 
       const lnHtml = generateLeistungsnachweisHtml(pdfData);
       const { buffer: lnPdf } = await generatePdf(lnHtml);
@@ -1533,7 +1533,11 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
 // speichert sie in Object Storage und persistiert pdfPath + pdfHash.
 // Wird nach jeder /generate-Invoice-Erstellung aufgerufen, damit /pdf später
 // hashstabile Bytes ausliefert.
-async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<Buffer> {
+//
+// Tier-A3: Liefert zusätzlich die ZUGFeRD-XML, die in `embedZugferdXml`
+// generiert wurde, sodass `persistInvoicePdf` sie als rechtsverbindlichen
+// E-Rechnungs-Inhalt in der Invoice-Zeile speichern kann.
+export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; xml: string | null }> {
   const lineItems = await storage.getInvoiceLineItems(invoice.id);
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
@@ -1573,7 +1577,7 @@ async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySe
 
   const html = generateInvoiceHtml(pdfData);
   const { buffer } = await generatePdf(html);
-  const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
+  const { pdf: zugferdBuffer, xml: zugferdXml } = await embedZugferdXml(buffer, pdfData);
 
   if (isCustomerInvoice) {
     await enrichPdfDataWithSignatures(pdfData, invoice);
@@ -1594,18 +1598,18 @@ async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySe
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
       lp2.forEach((p) => merged.addPage(p));
     }
-    return Buffer.from(await merged.save());
+    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml };
   }
-  return zugferdBuffer;
+  return { pdf: zugferdBuffer, xml: zugferdXml };
 }
 
-async function persistInvoicePdf(invoiceId: number): Promise<void> {
+export async function persistInvoicePdf(invoiceId: number): Promise<void> {
   const invoice = await storage.getInvoice(invoiceId);
   if (!invoice) return;
   const companySettings = await getCachedCompanySettings();
   if (!companySettings) return;
 
-  const pdfBytes = await buildInvoicePdfBytes(invoice, companySettings);
+  const { pdf: pdfBytes, xml: zugferdXml } = await buildInvoicePdfBytes(invoice, companySettings);
   const pdfHash = computeDataHash(pdfBytes as unknown as string);
 
   const fileName = `invoices/${invoice.invoiceNumber.replace(/[^a-z0-9_-]/gi, "_")}.pdf`;
@@ -1616,8 +1620,20 @@ async function persistInvoicePdf(invoiceId: number): Promise<void> {
     metadata: { invoiceNumber: invoice.invoiceNumber, pdfHash },
   });
 
+  // Tier-A3: XML wird nur beim ersten Schreiben gespeichert (GoBD-Immutabilität).
+  // Spätere Re-Renders dürfen den rechtsverbindlichen Inhalt NICHT überschreiben —
+  // der Integrity-Verifier vergleicht später diesen Snapshot mit Re-Renders, um
+  // Drift sichtbar zu machen.
+  const updateData: { pdfPath: string; pdfHash: string; zugferdXml?: string } = {
+    pdfPath: `/objects/${fileName}`,
+    pdfHash,
+  };
+  if (zugferdXml && !invoice.zugferdXml) {
+    updateData.zugferdXml = zugferdXml;
+  }
+
   await db.update(invoicesTable)
-    .set({ pdfPath: `/objects/${fileName}`, pdfHash })
+    .set(updateData)
     .where(eq(invoicesTable.id, invoiceId));
 }
 
@@ -1697,7 +1713,7 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
   const { buffer } = await generatePdf(html);
   
   const { embedZugferdXml } = await import("../lib/zugferd");
-  const zugferdBuffer = await embedZugferdXml(buffer, pdfData);
+  const { pdf: zugferdBuffer } = await embedZugferdXml(buffer, pdfData);
 
   if (isCustomerInvoice) {
     const { generateLeistungsnachweisHtml } = await import("../lib/pdf-generator");
@@ -1896,7 +1912,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
 
   const { embedZugferdXml } = await import("../lib/zugferd");
-  const zugferdBuffer = await embedZugferdXml(invoicePdf, pdfData);
+  const { pdf: zugferdBuffer } = await embedZugferdXml(invoicePdf, pdfData);
 
   const lnHtml = generateLeistungsnachweisHtml(pdfData);
   const { buffer: lnPdf } = await generatePdf(lnHtml);
