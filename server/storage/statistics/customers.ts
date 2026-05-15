@@ -54,12 +54,18 @@ export async function getCustomerStats(period: ResolvedPeriod): Promise<Customer
   const [funnelRow, monthlyRow, cancellationRow, churnRows, pflegegradRows, plannedRow, topCustomersRows, unusedBudgetRows, curActive, prevActive, yoyActive, curConv, prevConv, yoyConv] = await Promise.all([
     db.execute(sql`
       SELECT
-        COUNT(*) FILTER (WHERE status = 'interessent' AND deleted_at IS NULL)::int AS prospect,
-        COUNT(*) FILTER (WHERE status = 'erstberatung' AND deleted_at IS NULL)::int AS in_consultation,
-        COUNT(*) FILTER (WHERE status = 'aktiv' AND deleted_at IS NULL)::int AS active,
-        COUNT(*) FILTER (WHERE status = 'inaktiv' AND deleted_at IS NULL)::int AS inactive,
-        COUNT(*) FILTER (WHERE status = 'gekuendigt' AND deleted_at IS NULL)::int AS terminated
-      FROM customers
+        (SELECT COUNT(*) FROM prospects
+          WHERE deleted_at IS NULL
+            AND status IN ('neu','kontaktiert','wiedervorlage','qualifiziert'))::int AS prospect,
+        (SELECT COUNT(*) FROM prospects
+          WHERE deleted_at IS NULL
+            AND status IN ('erstberatung_vereinbart','erstberatung_durchgeführt'))::int AS in_consultation,
+        (SELECT COUNT(*) FILTER (WHERE status = 'aktiv' AND deleted_at IS NULL)
+           FROM customers)::int AS active,
+        (SELECT COUNT(*) FILTER (WHERE status = 'inaktiv' AND deleted_at IS NULL)
+           FROM customers)::int AS inactive,
+        (SELECT COUNT(*) FILTER (WHERE status = 'gekuendigt' AND deleted_at IS NULL)
+           FROM customers)::int AS terminated
     `),
     db.execute(sql`
       SELECT m.month::int AS month,

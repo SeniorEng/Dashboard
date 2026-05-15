@@ -247,7 +247,7 @@ function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["custome
     vorerkrankungen: null,
     haustierVorhanden: false,
     haustierDetails: null,
-    status: "erstberatung",
+    status: "aktiv",
     inaktivAb: null,
     personenbefoerderungGewuenscht: false,
     billingType: "pflegekasse_gesetzlich",

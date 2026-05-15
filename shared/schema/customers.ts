@@ -36,7 +36,10 @@ export const customers = pgTable("customers", {
   // Pet info (for employee-customer matching)
   haustierVorhanden: boolean("haustier_vorhanden").notNull().default(false),
   haustierDetails: text("haustier_details"),
-  // Customer status: erstberatung (initial consultation), aktiv (active customer), inaktiv (deactivated)
+  // Customer status: aktiv (active customer), inaktiv (deactivated), gekuendigt (terminated).
+  // Hinweis: Die frühere Stufe "erstberatung" gehört konzeptionell zu `prospects` und
+  // wird nicht mehr für neue Kunden gesetzt (Task #513). Altdaten werden durch
+  // `migrate-erstberatung-customers.ts` in synthetische Prospects umgehängt.
   status: text("status").notNull().default("aktiv"),
   // Date from which the customer is inactive (inclusive). After this date, no new appointments can be created.
   inaktivAb: text("inaktiv_ab"),
