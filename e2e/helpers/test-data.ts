@@ -209,6 +209,53 @@ export async function createAppointment(
   };
 }
 
+export async function documentAppointment(
+  session: ApiSession,
+  appointmentId: number,
+  opts: { serviceId: number; actualDurationMinutes?: number; actualStart?: string } = {
+    serviceId: 0,
+  },
+): Promise<void> {
+  const { status, data } = await apiPost<unknown>(
+    session,
+    `/api/appointments/${appointmentId}/document`,
+    {
+      actualStart: opts.actualStart ?? "10:00",
+      travelOriginType: "home",
+      travelKilometers: 5,
+      services: [
+        {
+          serviceId: opts.serviceId,
+          actualDurationMinutes: opts.actualDurationMinutes ?? 60,
+          details: "Smoke-Test",
+        },
+      ],
+    },
+  );
+  if (status !== 200 && status !== 201) {
+    throw new Error(
+      `documentAppointment failed: ${status} ${JSON.stringify(data)}`,
+    );
+  }
+}
+
+export async function createSingleServiceRecord(
+  session: ApiSession,
+  opts: { customerId: number; appointmentId: number },
+): Promise<{ id: number }> {
+  const { status, data } = await apiPost<unknown>(
+    session,
+    "/api/service-records/single",
+    { customerId: opts.customerId, appointmentId: opts.appointmentId },
+  );
+  if (status !== 201 && status !== 200) {
+    throw new Error(
+      `createSingleServiceRecord failed: ${status} ${JSON.stringify(data)}`,
+    );
+  }
+  return { id: idFrom(data, "createSingleServiceRecord") };
+}
+
 export interface TestProspect {
   id: number;
   vorname: string;
