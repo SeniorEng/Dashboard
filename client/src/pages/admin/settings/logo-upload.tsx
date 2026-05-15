@@ -19,57 +19,55 @@ export function LogoUploadCard({ companyData }: LogoUploadCardProps) {
   const [logoUploading, setLogoUploading] = useState(false);
   const [pdfLogoUploading, setPdfLogoUploading] = useState(false);
 
-  const createLogoUploadMutation = (field: "logoUrl" | "pdfLogoUrl", setUploading: (v: boolean) => void, label: string) =>
-    useMutation({
-      mutationFn: async (file: File) => {
-        setUploading(true);
-        const uploadRes = await api.post<{ uploadURL: string; objectPath: string; metadata: { name: string } }>(
-          "/uploads/request-url",
-          { name: file.name, size: file.size, contentType: file.type }
-        );
-        const uploadData = unwrapResult(uploadRes);
+  const buildUploadOptions = (field: "logoUrl" | "pdfLogoUrl", setUploading: (v: boolean) => void, label: string) => ({
+    mutationFn: async (file: File) => {
+      setUploading(true);
+      const uploadRes = await api.post<{ uploadURL: string; objectPath: string; metadata: { name: string } }>(
+        "/uploads/request-url",
+        { name: file.name, size: file.size, contentType: file.type }
+      );
+      const uploadData = unwrapResult(uploadRes);
 
-        await fetch(uploadData.uploadURL, {
-          method: "PUT",
-          body: file,
-          headers: { "Content-Type": file.type },
-        });
+      await fetch(uploadData.uploadURL, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
+      });
 
-        const result = await api.patch<CompanySettings>("/company-settings", {
-          [field]: uploadData.objectPath,
-        });
-        return unwrapResult(result);
-      },
-      onSuccess: (data) => {
-        queryClient.setQueryData(["company-settings"], data);
-        toast({ title: `${label} hochgeladen` });
-        setUploading(false);
-      },
-      onError: (error: Error) => {
-        toast({ title: `Fehler beim ${label}-Upload`, description: error.message, variant: "destructive" });
-        setUploading(false);
-      },
-    });
+      const result = await api.patch<CompanySettings>("/company-settings", {
+        [field]: uploadData.objectPath,
+      });
+      return unwrapResult(result);
+    },
+    onSuccess: (data: CompanySettings) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: `${label} hochgeladen` });
+      setUploading(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: `Fehler beim ${label}-Upload`, description: error.message, variant: "destructive" });
+      setUploading(false);
+    },
+  });
 
-  const createLogoDeleteMutation = (field: "logoUrl" | "pdfLogoUrl", label: string) =>
-    useMutation({
-      mutationFn: async () => {
-        const result = await api.patch<CompanySettings>("/company-settings", { [field]: null });
-        return unwrapResult(result);
-      },
-      onSuccess: (data) => {
-        queryClient.setQueryData(["company-settings"], data);
-        toast({ title: `${label} entfernt` });
-      },
-      onError: (error: Error) => {
-        toast({ title: "Fehler", description: error.message, variant: "destructive" });
-      },
-    });
+  const buildDeleteOptions = (field: "logoUrl" | "pdfLogoUrl", label: string) => ({
+    mutationFn: async () => {
+      const result = await api.patch<CompanySettings>("/company-settings", { [field]: null });
+      return unwrapResult(result);
+    },
+    onSuccess: (data: CompanySettings) => {
+      queryClient.setQueryData(["company-settings"], data);
+      toast({ title: `${label} entfernt` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
 
-  const logoUploadMutation = createLogoUploadMutation("logoUrl", setLogoUploading, "App-Logo");
-  const logoDeleteMutation = createLogoDeleteMutation("logoUrl", "App-Logo");
-  const pdfLogoUploadMutation = createLogoUploadMutation("pdfLogoUrl", setPdfLogoUploading, "Dokumenten-Logo");
-  const pdfLogoDeleteMutation = createLogoDeleteMutation("pdfLogoUrl", "Dokumenten-Logo");
+  const logoUploadMutation = useMutation(buildUploadOptions("logoUrl", setLogoUploading, "App-Logo"));
+  const logoDeleteMutation = useMutation(buildDeleteOptions("logoUrl", "App-Logo"));
+  const pdfLogoUploadMutation = useMutation(buildUploadOptions("pdfLogoUrl", setPdfLogoUploading, "Dokumenten-Logo"));
+  const pdfLogoDeleteMutation = useMutation(buildDeleteOptions("pdfLogoUrl", "Dokumenten-Logo"));
 
   const handleLogoFileSelect = (e: React.ChangeEvent<HTMLInputElement>, mutation: typeof logoUploadMutation) => {
     const file = e.target.files?.[0];
