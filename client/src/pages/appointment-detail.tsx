@@ -69,6 +69,10 @@ export default function AppointmentDetail() {
   
   const { data: appointment, isLoading } = useAppointment(id);
 
+  // Hook MUSS vor den frühen Returns weiter unten stehen (React-Rules-of-Hooks):
+  // bei isLoading→appointment-Wechsel würde sich sonst die Hook-Anzahl ändern.
+  const policy = useAppointmentPolicy(user, appointment);
+
   const seriesId = appointment?.seriesId ?? undefined;
   const { data: seriesDetail } = useAppointmentSeriesDetail(seriesId ?? 0);
 
@@ -193,8 +197,8 @@ export default function AppointmentDetail() {
   // Berechtigungen kommen aus shared/policies/appointments — identisch zum Backend.
   // Per-Action-Gating: jede Schaltfläche prüft ihre eigene Policy-Entscheidung,
   // damit z. B. ein Teamleiter, der editieren aber nicht löschen darf, den
-  // Bearbeiten-Button trotzdem sieht.
-  const policy = useAppointmentPolicy(user, appointment);
+  // Bearbeiten-Button trotzdem sieht. `policy` wurde oben (vor den frühen
+  // Returns) berechnet, um Rules-of-Hooks einzuhalten.
   const canEdit = policy?.edit.allowed ?? false;
   const canDelete = policy?.delete.allowed ?? false;
   const canDocument = policy?.document.allowed ?? false;
