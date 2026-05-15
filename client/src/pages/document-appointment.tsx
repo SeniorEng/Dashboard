@@ -35,7 +35,14 @@ export default function DocumentAppointment() {
     handleNext, handleSubmit,
     travelSuggestion,
     handleTravelOriginChange,
+    submitState,
+    submitError,
+    retrySubmit,
+    dismissSubmitError,
   } = useDocumentationForm(id);
+
+  const isSubmitting = submitState === "submitting" || documentMutation.isPending;
+  const isSubmitted = submitState === "success";
 
   const customerTravelEligible = formData.services.some(
     s => s.serviceType === "Hauswirtschaft" || s.serviceType === "Alltagsbegleitung"
@@ -452,17 +459,90 @@ export default function DocumentAppointment() {
             </CardContent>
           </Card>
 
-          <Button 
+          {submitError && (
+            <Card
+              className="border-destructive bg-destructive/5"
+              data-testid="banner-submit-error"
+              role="alert"
+            >
+              <CardContent className="pt-4 pb-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className={`${iconSize.md} text-destructive shrink-0 mt-0.5`} />
+                  <div className="flex-1">
+                    <p className="font-medium text-destructive" data-testid="text-submit-error-title">
+                      Dokumentation nicht gespeichert
+                    </p>
+                    <p className="text-sm text-destructive/90 mt-1" data-testid="text-submit-error-message">
+                      {submitError.message}
+                    </p>
+                  </div>
+                </div>
+                {submitError.canRetry && (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      variant="default"
+                      className="flex-1"
+                      onClick={retrySubmit}
+                      disabled={isSubmitting}
+                      data-testid="button-retry-submit"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                          Wird erneut gespeichert...
+                        </>
+                      ) : (
+                        <>
+                          <Check className={`${iconSize.sm} mr-2`} />
+                          Erneut speichern
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={dismissSubmitError}
+                      disabled={isSubmitting}
+                      data-testid="button-dismiss-submit-error"
+                    >
+                      Schließen
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {isSubmitted && (
+            <Card
+              className="border-green-300 bg-green-50"
+              data-testid="banner-submit-success"
+              role="status"
+            >
+              <CardContent className="pt-4 pb-4 flex items-center gap-3">
+                <Check className={`${iconSize.md} text-green-700`} />
+                <p className="font-medium text-green-800" data-testid="text-submit-success">
+                  Dokumentation gespeichert
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Button
             className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={handleSubmit}
-            disabled={documentMutation.isPending}
+            disabled={isSubmitting || isSubmitted || submitError?.isAlreadyCompleted || submitError?.isSignatureLocked}
             data-testid="button-submit"
           >
-            {documentMutation.isPending ? (
+            {isSubmitting ? (
               <>
                 <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
                 Wird gespeichert...
+              </>
+            ) : isSubmitted ? (
+              <>
+                <Check className={`${iconSize.sm} mr-2`} />
+                Gespeichert
               </>
             ) : (
               <>

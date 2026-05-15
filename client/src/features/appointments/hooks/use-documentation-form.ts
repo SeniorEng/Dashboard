@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
+import { mapSubmitError, type SubmitErrorView } from "@/features/appointments/lib/map-submit-error";
 import { useAppointment } from "./use-appointments";
 import { useDocumentAppointment, useTravelSuggestion, useRouteCalculation } from "./use-appointment-mutations";
 import type { TravelOriginType, ServiceType } from "@shared/types";
@@ -51,7 +52,20 @@ export function useDocumentationForm(id: number) {
 
   const { data: appointment, isLoading: appointmentLoading } = useAppointment(id);
   const { data: travelSuggestion } = useTravelSuggestion(id);
-  const documentMutation = useDocumentAppointment(id);
+
+  const [retryAttempts, setRetryAttempts] = useState(0);
+  const documentMutation = useDocumentAppointment(id, {
+    onRetry: (info) => {
+      setRetryAttempts(info.attempt);
+      toast({
+        title: "Verbindung instabil",
+        description:
+          info.reason === "server_error"
+            ? `Server antwortet noch nicht — Versuch ${info.attempt + 1} läuft.`
+            : `Netzwerkproblem — Versuch ${info.attempt + 1} läuft.`,
+      });
+    },
+  });
 
   const { data: appointmentServicesData } = useQuery<Array<{ serviceId: number; serviceCode: string; plannedDurationMinutes: number; actualDurationMinutes: number | null; details: string | null }>>({
     queryKey: [`/api/appointments/${id}/services`],
@@ -238,6 +252,56 @@ export function useDocumentationForm(id: number) {
     setStep(2);
   }, [formData.services, toast]);
 
+  // ---- Submit state machine (#490) -----------------------------------
+  // idle      → noch nichts versucht
+  // submitting → Mutation läuft (inkl. transient-Retries unter der Haube)
+  // success   → Server hat das `completed` quittiert
+  // error     → Endgültig fehlgeschlagen, Benutzer sieht persistenten Banner
+  type SubmitState = "idle" | "submitting" | "success" | "error";
+  const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [submitError, setSubmitError] = useState<SubmitErrorView | null>(null);
+  const lastPayloadRef = useRef<Record<string, unknown> | null>(null);
+
+  // Beide finalen Fehlerfälle (ALREADY_COMPLETED, SIGNATURE_LOCKED) und der
+  // Erfolg landen am selben Ziel: zurück zur Tagesübersicht des Termin-Datums.
+  const navigateBackToOverview = useCallback(() => {
+    setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
+  }, [appointment?.date, setLocation]);
+
+  const performSubmit = useCallback((payload: Record<string, unknown>) => {
+    setSubmitState("submitting");
+    setSubmitError(null);
+    setRetryAttempts(0);
+    lastPayloadRef.current = payload;
+
+    documentMutation.mutate(payload, {
+      onSuccess: () => {
+        setSubmitState("success");
+        toast({
+          title: "Dokumentation gespeichert",
+          description: "Der Termin wurde erfolgreich dokumentiert.",
+        });
+        // Kurzer Erfolgs-Banner sichtbar lassen, dann zurück zur Tagesübersicht.
+        setTimeout(() => {
+          navigateBackToOverview();
+        }, 800);
+      },
+      onError: (error: Error) => {
+        const view = mapSubmitError(error);
+        setSubmitState("error");
+        setSubmitError(view);
+        // ALREADY_COMPLETED + SIGNATURE_LOCKED: kurze Lesezeit für den Banner,
+        // dann automatisch zurück zur Tagesübersicht — der Termin ist serverseitig
+        // bereits final und im Formular kann der Nutzer nichts mehr tun.
+        if (view.shouldNavigateBack) {
+          setTimeout(() => {
+            navigateBackToOverview();
+          }, 1500);
+        }
+      },
+    });
+  }, [documentMutation, toast, navigateBackToOverview]);
+
   const handleSubmit = useCallback(() => {
     if (formData.travelKilometers === null || formData.travelKilometers === undefined || formData.travelKilometers < 0) {
       toast({
@@ -291,23 +355,23 @@ export function useDocumentationForm(id: number) {
       payload.customerKilometers = formData.customerKilometers;
     }
 
-    documentMutation.mutate(payload, {
-      onSuccess: () => {
-        toast({
-          title: "Dokumentation abgeschlossen",
-          description: "Der Termin wurde erfolgreich dokumentiert.",
-        });
-        setLocation(appointment?.date ? `/?date=${appointment.date}` : "/");
-      },
-      onError: (error: Error) => {
-        toast({
-          title: "Fehler",
-          description: error.message,
-          variant: "destructive",
-        });
-      },
-    });
-  }, [formData, documentMutation, toast, setLocation]);
+    performSubmit(payload);
+  }, [formData, toast, performSubmit]);
+
+  const retrySubmit = useCallback(() => {
+    const payload = lastPayloadRef.current;
+    if (!payload) {
+      // Defensive: ohne vorherigen Submit gibt es nichts zu wiederholen.
+      handleSubmit();
+      return;
+    }
+    performSubmit(payload);
+  }, [handleSubmit, performSubmit]);
+
+  const dismissSubmitError = useCallback(() => {
+    setSubmitError(null);
+    setSubmitState("idle");
+  }, []);
 
   return {
     step, setStep,
@@ -321,5 +385,10 @@ export function useDocumentationForm(id: number) {
     handleNext, handleSubmit,
     travelSuggestion,
     handleTravelOriginChange,
+    submitState,
+    submitError,
+    retrySubmit,
+    dismissSubmitError,
+    retryAttempts,
   };
 }

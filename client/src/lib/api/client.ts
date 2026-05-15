@@ -127,6 +127,13 @@ async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
     const details: Record<string, unknown> = { ...(data.details || {}) };
     if (data.conflicts) details.conflicts = data.conflicts;
     if (data.dates) details.dates = data.dates;
+    // Preserve the more specific sub-error code (e.g. "ALREADY_COMPLETED",
+    // "SIGNATURE_LOCKED") next to the umbrella `code` ("FORBIDDEN"). The
+    // server sends both, but historically only `code` was exposed, which
+    // hid the actionable specifics from the client.
+    if (typeof data.error === 'string' && data.error && data.error !== data.code) {
+      details.errorCode = data.error;
+    }
     return {
       code: data.code || data.error || 'API_ERROR',
       message,

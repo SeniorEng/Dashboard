@@ -152,10 +152,26 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     }
 
     const ip = req.ip || req.socket.remoteAddress;
+    // #490: Mobile-Doku-Resilienz — der Client darf den Submit bei flackerndem
+    // LTE bis zu 3× wiederholen (Header `X-Submit-Attempt`). Wenn ein Versuch
+    // > 1 erfolgreich war, halten wir das im Audit-Log fest, damit Auswertungen
+    // sehen können, wie oft Retries die Dokumentation gerettet haben.
+    const attemptHeader = req.header("x-submit-attempt");
+    const submitAttempt = attemptHeader ? Math.max(1, parseInt(attemptHeader, 10) || 1) : 1;
+    if (submitAttempt > 1) {
+      console.info(
+        `[appointment-documentation] Submit erfolgreich nach Retry — appointmentId=${id}, attempt=${submitAttempt}, userId=${req.user!.id}`,
+      );
+    }
     await auditService.documentationSubmitted(
       req.user!.id,
       id,
-      { customerId: appointment.customerId!, hasSignature, performedByEmployeeId: (updateData as Record<string, unknown>).performedByEmployeeId as number | null },
+      {
+        customerId: appointment.customerId!,
+        hasSignature,
+        performedByEmployeeId: (updateData as Record<string, unknown>).performedByEmployeeId as number | null,
+        submitAttempt,
+      },
       ip
     );
     if (hasSignature) {

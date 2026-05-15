@@ -53,7 +53,7 @@ class AuditService {
   async documentationSubmitted(
     userId: number,
     appointmentId: number,
-    metadata: { customerId: number; hasSignature: boolean; performedByEmployeeId?: number | null },
+    metadata: { customerId: number; hasSignature: boolean; performedByEmployeeId?: number | null; submitAttempt?: number },
     ipAddress?: string,
     exec?: DbOrTx,
   ): Promise<void> {
