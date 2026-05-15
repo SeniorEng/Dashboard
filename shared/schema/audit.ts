@@ -63,6 +63,8 @@ export const AUDIT_ACTIONS = [
   "month_auto_closed",
   "appointment_expired_unsigned",
   "month_close_reminder_sent",
+  "invoice_payment_reconciled",
+  "invoice_payment_unreconciled",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

@@ -8,8 +8,10 @@ import { parseAvisCsv } from "../../services/avis-parser";
 import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
 import { db } from "../../lib/db";
-import { invoices } from "@shared/schema";
-import { eq, and, ilike } from "drizzle-orm";
+import { invoices, qontoTransactions } from "@shared/schema";
+import { eq, and, ilike, isNull } from "drizzle-orm";
+import { withAudit } from "../../lib/with-audit";
+import { readTestFaults } from "../../lib/test-fault-injector";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -55,15 +57,57 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
 
   const { invoiceId } = matchSchema.parse(req.body);
 
-  const updated = await db.transaction(async (dbTx) => {
-    const matched = await qontoStorage.updateTransactionMatch(id, invoiceId, "manual", dbTx);
+  // Idempotenz: gleiche Transaktion bereits auf dieselbe Rechnung
+  // gematcht → no-op, keine doppelte Audit-Zeile.
+  if (tx.matchedInvoiceId === invoiceId) {
+    res.json(tx);
+    return;
+  }
 
-    await dbTx.update(invoices)
+  if (tx.matchedInvoiceId && tx.matchedInvoiceId !== invoiceId) {
+    throw badRequest("Transaktion ist bereits einer anderen Rechnung zugeordnet. Bitte zuerst Zuordnung aufheben.");
+  }
+
+  const updated = await withAudit(async (dbTx, audit) => {
+    // Geguarded gegen parallele Matches auf dieselbe Transaktion.
+    const matchUpdate = await dbTx.update(qontoTransactions)
+      .set({ matchedInvoiceId: invoiceId, matchConfidence: "manual" })
+      .where(and(
+        eq(qontoTransactions.id, id),
+        isNull(qontoTransactions.matchedInvoiceId),
+      ))
+      .returning();
+
+    if (matchUpdate.length === 0) {
+      throw badRequest("Transaktion wurde zwischenzeitlich einer anderen Rechnung zugeordnet.");
+    }
+
+    const invoiceUpdate = await dbTx.update(invoices)
       .set({ status: "bezahlt", paidAt: tx.emittedAt })
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")));
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")))
+      .returning({ id: invoices.id });
 
-    return matched;
-  });
+    if (invoiceUpdate.length === 0) {
+      throw badRequest("Rechnung ist nicht im Status 'versendet' und kann nicht abgeglichen werden.");
+    }
+
+    audit.record({
+      userId: req.user!.id,
+      action: "invoice_payment_reconciled",
+      entityType: "invoice",
+      entityId: invoiceId,
+      metadata: {
+        qontoTransactionId: id,
+        qontoTransactionExternalId: tx.qontoTransactionId,
+        matchedBy: "manual",
+        confidence: "manual",
+        amountCents: tx.amountCents,
+      },
+      ipAddress: req.ip,
+    });
+
+    return matchUpdate[0];
+  }, { faults: readTestFaults(req) });
 
   res.json(updated);
 }));
@@ -75,21 +119,53 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
   const tx = await qontoStorage.getTransaction(id);
   if (!tx) throw notFound("Transaktion nicht gefunden");
 
-  const updated = await db.transaction(async (dbTx) => {
-    if (tx.matchedInvoiceId) {
-      await dbTx.update(invoices)
-        .set({ status: "versendet", paidAt: null })
-        .where(eq(invoices.id, tx.matchedInvoiceId));
+  // Idempotenz: nichts zu lösen → no-op.
+  if (!tx.matchedInvoiceId) {
+    res.json(tx);
+    return;
+  }
+
+  const previousInvoiceId = tx.matchedInvoiceId;
+  const previousConfidence = tx.matchConfidence;
+
+  const updated = await withAudit(async (dbTx, audit) => {
+    const unmatchUpdate = await dbTx.update(qontoTransactions)
+      .set({ matchedInvoiceId: null, matchConfidence: null })
+      .where(and(
+        eq(qontoTransactions.id, id),
+        eq(qontoTransactions.matchedInvoiceId, previousInvoiceId),
+      ))
+      .returning();
+
+    if (unmatchUpdate.length === 0) {
+      throw badRequest("Zuordnung wurde zwischenzeitlich verändert.");
     }
 
-    return await qontoStorage.updateTransactionMatch(id, null, null, dbTx);
-  });
+    await dbTx.update(invoices)
+      .set({ status: "versendet", paidAt: null })
+      .where(eq(invoices.id, previousInvoiceId));
+
+    audit.record({
+      userId: req.user!.id,
+      action: "invoice_payment_unreconciled",
+      entityType: "invoice",
+      entityId: previousInvoiceId,
+      metadata: {
+        qontoTransactionId: id,
+        qontoTransactionExternalId: tx.qontoTransactionId,
+        previousConfidence,
+      },
+      ipAddress: req.ip,
+    });
+
+    return unmatchUpdate[0];
+  }, { faults: readTestFaults(req) });
 
   res.json(updated);
 }));
 
-router.post("/auto-match", asyncHandler("Auto-Abgleich fehlgeschlagen", async (_req, res) => {
-  const result = await qontoService.autoMatch();
+router.post("/auto-match", asyncHandler("Auto-Abgleich fehlgeschlagen", async (req, res) => {
+  const result = await qontoService.autoMatch(req.user!.id, req.ip);
   res.json(result);
 }));
 

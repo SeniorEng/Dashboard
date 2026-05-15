@@ -1,8 +1,9 @@
 import { storage } from "../storage";
 import { qontoStorage } from "../storage/qonto";
-import { invoices } from "@shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { invoices, qontoTransactions } from "@shared/schema";
+import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
+import { withAudit } from "../lib/with-audit";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -162,7 +163,7 @@ class QontoService {
     return { synced: totalSynced, total: totalFetched };
   }
 
-  async autoMatch(): Promise<{ matched: number; skipped: number }> {
+  async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number }> {
     const unmatched = await qontoStorage.getUnmatchedTransactions();
 
     const openInvoices = await db.select()
@@ -181,8 +182,8 @@ class QontoService {
     let matched = 0;
     let skipped = 0;
 
-    for (const tx of unmatched) {
-      const searchText = [tx.reference, tx.label, tx.counterpartyName]
+    for (const qtx of unmatched) {
+      const searchText = [qtx.reference, qtx.label, qtx.counterpartyName]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -191,7 +192,7 @@ class QontoService {
 
       for (const [num, inv] of Array.from(invoiceByNumber.entries())) {
         if (searchText.includes(num)) {
-          if (Math.abs(tx.amountCents) === inv.grossAmountCents) {
+          if (Math.abs(qtx.amountCents) === inv.grossAmountCents) {
             bestMatch = { invoiceId: inv.id, confidence: "auto_exact" };
             break;
           }
@@ -200,26 +201,77 @@ class QontoService {
       }
 
       if (!bestMatch) {
-        const amountMatches = invoiceByAmount.get(Math.abs(tx.amountCents));
+        const amountMatches = invoiceByAmount.get(Math.abs(qtx.amountCents));
         if (amountMatches && amountMatches.length === 1) {
           bestMatch = { invoiceId: amountMatches[0].id, confidence: "auto_amount" };
         }
       }
 
-      if (bestMatch) {
-        await qontoStorage.updateTransactionMatch(tx.id, bestMatch.invoiceId, bestMatch.confidence);
-
-        await db.update(invoices)
-          .set({ status: "bezahlt", paidAt: tx.emittedAt })
-          .where(and(
-            eq(invoices.id, bestMatch.invoiceId),
-            eq(invoices.status, "versendet")
-          ));
-
-        matched++;
-      } else {
+      if (!bestMatch) {
         skipped++;
+        continue;
       }
+
+      const match = bestMatch;
+
+      // Pro Match komplett transaktional: Match-Update mit Guard
+      // (matched_invoice_id IS NULL), Invoice-Status-Update mit Guard
+      // (status='versendet'), Audit-Log in derselben Transaktion.
+      // Wenn ein parallel laufender autoMatch oder manueller Match die
+      // Transaktion bereits gebunden hat, springt das geguarded Update
+      // auf 0 Zeilen — kein Status-Wechsel, kein Audit (Idempotenz).
+      const didMatch = await withAudit(async (dbTx, audit) => {
+        const matchUpdate = await dbTx.update(qontoTransactions)
+          .set({ matchedInvoiceId: match.invoiceId, matchConfidence: match.confidence })
+          .where(and(
+            eq(qontoTransactions.id, qtx.id),
+            isNull(qontoTransactions.matchedInvoiceId),
+          ))
+          .returning({ id: qontoTransactions.id });
+
+        if (matchUpdate.length === 0) {
+          return false;
+        }
+
+        const invoiceUpdate = await dbTx.update(invoices)
+          .set({ status: "bezahlt", paidAt: qtx.emittedAt })
+          .where(and(
+            eq(invoices.id, match.invoiceId),
+            eq(invoices.status, "versendet"),
+          ))
+          .returning({ id: invoices.id });
+
+        if (invoiceUpdate.length === 0) {
+          // Invoice wurde parallel storniert/bereits bezahlt — Tx
+          // zurückrollen, damit der Match nicht ohne Status-Wechsel
+          // committed wird (Audit-Konsistenz).
+          throw new Error("INVOICE_STATUS_CHANGED");
+        }
+
+        audit.record({
+          userId,
+          action: "invoice_payment_reconciled",
+          entityType: "invoice",
+          entityId: match.invoiceId,
+          metadata: {
+            qontoTransactionId: qtx.id,
+            qontoTransactionExternalId: qtx.qontoTransactionId,
+            matchedBy: "auto",
+            confidence: match.confidence,
+            amountCents: qtx.amountCents,
+          },
+          ipAddress,
+        });
+
+        return true;
+      }).catch((err: unknown) => {
+        if (err instanceof Error && err.message === "INVOICE_STATUS_CHANGED") {
+          return false;
+        }
+        throw err;
+      });
+
+      if (didMatch) matched++; else skipped++;
     }
 
     return { matched, skipped };

@@ -1,5 +1,6 @@
-import { pgTable, text, integer, serial, index, jsonb, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, index, uniqueIndex, jsonb, unique } from "drizzle-orm/pg-core";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { timestamp } from "./common";
 import { invoices } from "./billing";
@@ -26,6 +27,13 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   index("qonto_transactions_emitted_at_idx").on(table.emittedAt),
   index("qonto_transactions_matched_invoice_idx").on(table.matchedInvoiceId),
   index("qonto_transactions_side_idx").on(table.side),
+  // Idempotenz: pro Rechnung darf höchstens eine Qonto-Transaktion
+  // gematcht sein. Verhindert, dass parallele Match-Aufrufe denselben
+  // (qontoTransactionId, invoiceId)-Match doppelt anlegen oder zwei
+  // verschiedene Transaktionen sich auf dieselbe Rechnung legen.
+  uniqueIndex("qonto_transactions_matched_invoice_unique_idx")
+    .on(table.matchedInvoiceId)
+    .where(sql`matched_invoice_id IS NOT NULL`),
 ]);
 
 export const paymentAdvices = pgTable("payment_advices", {

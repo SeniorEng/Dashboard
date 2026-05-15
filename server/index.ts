@@ -167,6 +167,13 @@ async function runStartupTasks() {
       log(`Idempotency-Schema-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { ensureQontoMatchIdempotency } = await import("./startup/ensure-qonto-match-idempotency");
+    try {
+      await ensureQontoMatchIdempotency();
+    } catch (err) {
+      log(`Qonto-Match-Idempotenz-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { serviceCatalogStorage } = await import("./storage/service-catalog");
     await serviceCatalogStorage.ensureSystemServices();
 

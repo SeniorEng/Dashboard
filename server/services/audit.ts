@@ -212,6 +212,36 @@ class AuditService {
     await this.log(userId, "customer_hard_deleted", "customer", customerId, metadata, ipAddress, exec);
   }
 
+  async invoicePaymentReconciled(
+    userId: number,
+    invoiceId: number,
+    metadata: {
+      qontoTransactionId: number;
+      qontoTransactionExternalId?: string;
+      matchedBy: "auto" | "manual";
+      confidence: string;
+      amountCents?: number;
+    },
+    ipAddress?: string,
+    exec?: DbOrTx,
+  ): Promise<void> {
+    await this.log(userId, "invoice_payment_reconciled", "invoice", invoiceId, metadata, ipAddress, exec);
+  }
+
+  async invoicePaymentUnreconciled(
+    userId: number,
+    invoiceId: number,
+    metadata: {
+      qontoTransactionId: number;
+      qontoTransactionExternalId?: string;
+      previousConfidence: string | null;
+    },
+    ipAddress?: string,
+    exec?: DbOrTx,
+  ): Promise<void> {
+    await this.log(userId, "invoice_payment_unreconciled", "invoice", invoiceId, metadata, ipAddress, exec);
+  }
+
   async customerContractUpdated(
     userId: number,
     customerId: number,
