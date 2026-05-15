@@ -21,6 +21,7 @@ import { notificationService } from "./notification-service";
 import { storage } from "../storage";
 import { sendEmail, buildEmailLayout } from "./email-service";
 import { ensureMonthClosingTask, completeMonthClosingTask } from "../storage/tasks";
+import { appointmentsRepo, employeeTimeEntriesRepo } from "../repos";
 
 const POLL_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
@@ -105,12 +106,10 @@ async function getEmployeesWithMonthBlockers(year: number, month: number): Promi
     ),
   );
 
-  const openRows = await db
-    .select({
+  const openRows = await appointmentsRepo.selectColumnsFrom({
       employeeId: sqlBuilder<number>`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`,
       count: sqlBuilder<number>`COUNT(*)::int`,
-    })
-    .from(appointments)
+    }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(
@@ -123,12 +122,10 @@ async function getEmployeesWithMonthBlockers(year: number, month: number): Promi
     )
     .groupBy(sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`);
 
-  const unsignedRows = await db
-    .select({
+  const unsignedRows = await appointmentsRepo.selectColumnsFrom({
       employeeId: sqlBuilder<number>`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`,
       count: sqlBuilder<number>`COUNT(*)::int`,
-    })
-    .from(appointments)
+    }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(
@@ -238,9 +235,7 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
   let closedCount = 0;
 
   for (const emp of activeEmployees) {
-    const [hasTimeEntry] = await db
-      .select({ count: sqlBuilder<number>`COUNT(*)::int` })
-      .from(employeeTimeEntries)
+    const [hasTimeEntry] = await employeeTimeEntriesRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
       .where(
         and(
           eq(employeeTimeEntries.userId, emp.id),
@@ -254,9 +249,7 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
     // Termin auf einem Kunden mit dieser Person als Primärbetreuung. Damit
     // ist die Attribution konsistent mit Reminder-/Banner-Aggregation
     // (assigned ∪ primary-fallback).
-    const [hasAppointment] = await db
-      .select({ count: sqlBuilder<number>`COUNT(*)::int` })
-      .from(appointments)
+    const [hasAppointment] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
@@ -477,9 +470,7 @@ export async function getMonthCloseBanner(userId: number): Promise<{
     ),
   );
 
-  const [openCount] = await db
-    .select({ count: sqlBuilder<number>`COUNT(*)::int` })
-    .from(appointments)
+  const [openCount] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(
@@ -491,9 +482,7 @@ export async function getMonthCloseBanner(userId: number): Promise<{
       ),
     );
 
-  const [unsignedCount] = await db
-    .select({ count: sqlBuilder<number>`COUNT(*)::int` })
-    .from(appointments)
+  const [unsignedCount] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(
@@ -506,9 +495,7 @@ export async function getMonthCloseBanner(userId: number): Promise<{
       ),
     );
 
-  const [expiredCount] = await db
-    .select({ count: sqlBuilder<number>`COUNT(*)::int` })
-    .from(appointments)
+  const [expiredCount] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(

@@ -50,8 +50,8 @@ export const customersRepo = {
     const rows = await tx.select().from(customers).where(eq(customers.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(customers),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(customers),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(customers),
 };
 
@@ -69,8 +69,8 @@ export const appointmentsRepo = {
     const rows = await tx.select().from(appointments).where(eq(appointments.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(appointments),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(appointments),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(appointments),
 };
 
@@ -88,8 +88,8 @@ export const prospectsRepo = {
     const rows = await tx.select().from(prospects).where(eq(prospects.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(prospects),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(prospects),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(prospects),
 };
 
@@ -107,8 +107,8 @@ export const customerServicePricesRepo = {
     const rows = await tx.select().from(customerServicePrices).where(eq(customerServicePrices.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(customerServicePrices),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(customerServicePrices),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(customerServicePrices),
 };
 
@@ -126,8 +126,8 @@ export const employeeTimeEntriesRepo = {
     const rows = await tx.select().from(employeeTimeEntries).where(eq(employeeTimeEntries.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(employeeTimeEntries),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(employeeTimeEntries),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(employeeTimeEntries),
 };
 
@@ -145,8 +145,8 @@ export const employeeDocumentsRepo = {
     const rows = await tx.select().from(employeeDocuments).where(eq(employeeDocuments.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(employeeDocuments),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(employeeDocuments),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(employeeDocuments),
 };
 
@@ -164,8 +164,8 @@ export const customerDocumentsRepo = {
     const rows = await tx.select().from(customerDocuments).where(eq(customerDocuments.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(customerDocuments),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(customerDocuments),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(customerDocuments),
 };
 
@@ -183,8 +183,8 @@ export const monthlyServiceRecordsRepo = {
     const rows = await tx.select().from(monthlyServiceRecords).where(eq(monthlyServiceRecords.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(monthlyServiceRecords),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(monthlyServiceRecords),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(monthlyServiceRecords),
 };
 
@@ -202,8 +202,8 @@ export const tasksRepo = {
     const rows = await tx.select().from(tasks).where(eq(tasks.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(tasks),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(tasks),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(tasks),
 };
 
@@ -221,8 +221,8 @@ export const paymentAdvicesRepo = {
     const rows = await tx.select().from(paymentAdvices).where(eq(paymentAdvices.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(paymentAdvices),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(paymentAdvices),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(paymentAdvices),
 };
 
@@ -240,8 +240,8 @@ export const qualificationsRepo = {
     const rows = await tx.select().from(qualifications).where(eq(qualifications.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(qualifications),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(qualifications),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(qualifications),
 };
 
@@ -259,8 +259,8 @@ export const employeeQualificationsRepo = {
     const rows = await tx.select().from(employeeQualifications).where(eq(employeeQualifications.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(employeeQualifications),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(employeeQualifications),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(employeeQualifications),
 };
 
@@ -278,8 +278,8 @@ export const employeeDocumentProofsRepo = {
     const rows = await tx.select().from(employeeDocumentProofs).where(eq(employeeDocumentProofs.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(employeeDocumentProofs),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(employeeDocumentProofs),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(employeeDocumentProofs),
 };
 
@@ -297,7 +297,7 @@ export const budgetAllocationsRepo = {
     const rows = await tx.select().from(budgetAllocations).where(eq(budgetAllocations.id, id)).limit(1);
     return rows[0] ?? null;
   },
-  selectFrom: (tx: DbOrTx = db) => tx.select().from(budgetAllocations),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: DbOrTx = db) =>
+  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(budgetAllocations),
+  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(budgetAllocations),
 };

@@ -50,3 +50,105 @@ exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pr
   ],
 }
 `;
+
+exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) > Snapshot: pro Service-Datei sind nur Repo-vermittelte Reads registriert 1`] = `
+{
+  "server/services/appointment-import.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+  ],
+  "server/services/auto-breaks.ts": [
+    "appointmentsRepo",
+    "employeeTimeEntriesRepo",
+  ],
+  "server/services/document-review.ts": [
+    "tasksRepo",
+  ],
+  "server/services/employee-availability.ts": [
+    "appointmentsRepo",
+    "employeeTimeEntriesRepo",
+  ],
+  "server/services/geocoding.ts": [
+    "customersRepo",
+  ],
+  "server/services/month-close-scheduler.ts": [
+    "appointmentsRepo",
+    "employeeTimeEntriesRepo",
+  ],
+  "server/services/whatsapp-reminder-scheduler.ts": [
+    "appointmentsRepo",
+  ],
+}
+`;
+
+exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) > Snapshot: pro Storage-Datei sind nur Repo-vermittelte Reads registriert 1`] = `
+{
+  "server/storage/appointment-series-storage.ts": [
+    "appointmentsRepo",
+  ],
+  "server/storage/appointments-storage.ts": [
+    "appointmentsRepo",
+  ],
+  "server/storage/budget/allocation-storage.ts": [
+    "budgetAllocationsRepo",
+  ],
+  "server/storage/budget/cap-calculator.ts": [
+    "customersRepo",
+  ],
+  "server/storage/budget/consumption-engine.ts": [
+    "budgetAllocationsRepo",
+    "customersRepo",
+  ],
+  "server/storage/budget/rebook-storage.ts": [
+    "appointmentsRepo",
+  ],
+  "server/storage/budget/summary-queries.ts": [
+    "budgetAllocationsRepo",
+  ],
+  "server/storage/customer-management.ts": [
+    "customersRepo",
+  ],
+  "server/storage/customers-storage.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+  ],
+  "server/storage/documents.ts": [
+    "customerDocumentsRepo",
+    "employeeDocumentProofsRepo",
+    "employeeDocumentsRepo",
+  ],
+  "server/storage/prospects.ts": [
+    "appointmentsRepo",
+    "prospectsRepo",
+  ],
+  "server/storage/qonto.ts": [
+    "paymentAdvicesRepo",
+  ],
+  "server/storage/service-records-storage.ts": [
+    "appointmentsRepo",
+    "customersRepo",
+    "monthlyServiceRecordsRepo",
+  ],
+  "server/storage/tasks.ts": [
+    "customersRepo",
+    "tasksRepo",
+  ],
+  "server/storage/time-tracking/appointments.ts": [
+    "appointmentsRepo",
+  ],
+  "server/storage/time-tracking/entries.ts": [
+    "employeeTimeEntriesRepo",
+  ],
+  "server/storage/time-tracking/month-closing.ts": [
+    "appointmentsRepo",
+    "employeeTimeEntriesRepo",
+  ],
+  "server/storage/time-tracking/overview.ts": [
+    "appointmentsRepo",
+    "employeeTimeEntriesRepo",
+  ],
+  "server/storage/time-tracking/vacation.ts": [
+    "employeeTimeEntriesRepo",
+  ],
+}
+`;

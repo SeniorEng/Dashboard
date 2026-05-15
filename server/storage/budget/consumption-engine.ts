@@ -17,6 +17,7 @@ import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { getAvailableForDate } from "./import-availability";
 import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
 import { formatEuroDE } from "@shared/utils/money";
+import { budgetAllocationsRepo, customersRepo } from "../../repos";
 
 type ConsumptionParams = {
   appointmentId?: number;
@@ -107,8 +108,7 @@ export async function consumeFifo(
   const d = _tx ?? db;
   const today = transactionDate;
 
-  const specialAllocations = await d.select()
-    .from(budgetAllocations)
+  const specialAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
@@ -449,8 +449,7 @@ export async function createConsumptionTransaction(params: {
       date: params.transactionDate,
     });
 
-    const [customer] = await tx.select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
-      .from(customers).where(eq(customers.id, params.customerId)).limit(1);
+    const [customer] = await customersRepo.selectColumnsFrom({ acceptsPrivatePayment: customers.acceptsPrivatePayment }, tx).where(eq(customers.id, params.customerId)).limit(1);
     const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
 
     const hasUsage = costs.totalCents > 0;

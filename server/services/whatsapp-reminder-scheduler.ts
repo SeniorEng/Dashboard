@@ -5,6 +5,7 @@ import { todayISO, addDays } from "@shared/utils/datetime";
 import { getEnabledRuleByEvent, getUsersWithWhatsAppEnabled } from "../storage/whatsapp";
 import { whatsAppService } from "./whatsapp-service";
 import { log } from "../lib/log";
+import { appointmentsRepo } from "../repos";
 
 async function sendDailyAppointmentReminders(): Promise<number> {
   const rule = await getEnabledRuleByEvent("appointment_reminder");
@@ -15,9 +16,7 @@ async function sendDailyAppointmentReminders(): Promise<number> {
 
   const tomorrow = addDays(todayISO(), 1);
 
-  const tomorrowAppointments = await db
-    .select()
-    .from(appointments)
+  const tomorrowAppointments = await appointmentsRepo.selectFrom(db)
     .where(
       and(
         eq(appointments.date, tomorrow),

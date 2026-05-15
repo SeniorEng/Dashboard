@@ -5,6 +5,7 @@ import { users } from "@shared/schema/users";
 import { eq, isNull, and, or, isNotNull } from "drizzle-orm";
 import { log } from "../lib/log";
 import { sessionCache } from "./cache";
+import { customersRepo } from "../repos";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
 const USER_AGENT = "CareConnect/1.0 (care-management-app)";
@@ -80,7 +81,7 @@ export async function geocodeAddress(
 }
 
 export async function geocodeCustomer(customerId: number): Promise<void> {
-  const [customer] = await db.select().from(customers).where(eq(customers.id, customerId));
+  const [customer] = await customersRepo.selectFrom(db).where(eq(customers.id, customerId));
   if (!customer) return;
 
   const result = await geocodeAddress(customer.strasse, customer.nr, customer.plz, customer.stadt);
@@ -161,13 +162,13 @@ export async function geocodeAllMissing(): Promise<void> {
     log("Company address geocoded", "geocoding");
   }
 
-  const customersWithoutCoords = await db.select({
+  const customersWithoutCoords = await customersRepo.selectColumnsFrom({
     id: customers.id,
     strasse: customers.strasse,
     nr: customers.nr,
     plz: customers.plz,
     stadt: customers.stadt,
-  }).from(customers).where(
+  }, db).where(
     and(
       isNull(customers.latitude),
       isNotNull(customers.strasse),

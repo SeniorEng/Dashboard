@@ -12,6 +12,7 @@ import { getActiveBudgetTypeSettings, getBudgetTypeSettings } from "./preference
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 import { formatEuroDE } from "@shared/utils/money";
+import { appointmentsRepo } from "../../repos";
 
 export async function rebookSingleTransaction(
   customerId: number,
@@ -262,12 +263,12 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
           localOldAmountCents += Math.abs(oldTx.amountCents);
         }
 
-        const [appt] = await tx.select({
+        const [appt] = await appointmentsRepo.selectColumnsFrom({
           customerId: appointments.customerId,
           date: appointments.date,
           travelKilometers: appointments.travelKilometers,
           customerKilometers: appointments.customerKilometers,
-        }).from(appointments).where(eq(appointments.id, appointmentId)).limit(1);
+        }, tx).where(eq(appointments.id, appointmentId)).limit(1);
 
         if (!appt) throw new Error(`Termin #${appointmentId} nicht gefunden`);
 

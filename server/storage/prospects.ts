@@ -13,6 +13,7 @@ import {
 import { eq, and, or, ilike, isNull, desc, sql, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { appointmentsRepo, prospectsRepo } from "../repos";
 
 export const prospectStorage = {
   async create(data: InsertProspect): Promise<Prospect> {
@@ -48,17 +49,13 @@ export const prospectStorage = {
       );
     }
 
-    return db
-      .select()
-      .from(prospects)
+    return prospectsRepo.selectFrom(db)
       .where(and(...conditions))
       .orderBy(desc(prospects.createdAt));
   },
 
   async getById(id: number): Promise<Prospect | undefined> {
-    const [prospect] = await db
-      .select()
-      .from(prospects)
+    const [prospect] = await prospectsRepo.selectFrom(db)
       .where(and(eq(prospects.id, id), isNull(prospects.deletedAt)));
     return prospect;
   },
@@ -95,12 +92,10 @@ export const prospectStorage = {
   },
 
   async getStats(): Promise<Record<string, number>> {
-    const rows = await db
-      .select({
+    const rows = await prospectsRepo.selectColumnsFrom({
         status: prospects.status,
         count: sql<number>`count(*)::int`,
-      })
-      .from(prospects)
+      }, db)
       .where(isNull(prospects.deletedAt))
       .groupBy(prospects.status);
 
@@ -125,17 +120,13 @@ export const prospectStorage = {
   },
 
   async getAppointmentData(prospectId: number) {
-    const prospect = await db
-      .select()
-      .from(prospects)
+    const prospect = await prospectsRepo.selectFrom(db)
       .where(and(eq(prospects.id, prospectId), isNull(prospects.deletedAt)))
       .then(rows => rows[0]);
 
     if (!prospect) return null;
 
-    const prospectAppointments = await db
-      .select()
-      .from(appointments)
+    const prospectAppointments = await appointmentsRepo.selectFrom(db)
       .where(and(eq(appointments.prospectId, prospectId), isNull(appointments.deletedAt)));
 
     return { prospect, appointments: prospectAppointments };

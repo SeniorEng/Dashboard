@@ -3,6 +3,7 @@ import { eq, and, desc, asc, ne, sql as sqlBuilder, inArray, count, isNull } fro
 import { alias } from "drizzle-orm/pg-core";
 import { db, type DbOrTx } from "../lib/db";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { customersRepo, tasksRepo } from "../repos";
 
 const creatorUsers = alias(users, "creator_users");
 const assigneeUsers = alias(users, "assignee_users");
@@ -33,9 +34,7 @@ async function enrichTasksWithRelations(taskRows: Task[]): Promise<TaskWithRelat
     : [];
 
   const customersData = customerIds.size > 0
-    ? await db
-        .select({ id: customers.id, vorname: customers.vorname, nachname: customers.nachname })
-        .from(customers)
+    ? await customersRepo.selectColumnsFrom({ id: customers.id, vorname: customers.vorname, nachname: customers.nachname }, db)
         .where(inArray(customers.id, Array.from(customerIds)))
     : [];
 
@@ -59,9 +58,7 @@ async function enrichTasksWithRelations(taskRows: Task[]): Promise<TaskWithRelat
 async function queryTasks(extraConditions: ReturnType<typeof eq>[] = []): Promise<TaskWithRelations[]> {
   const conditions = [isNull(tasks.deletedAt), ...extraConditions];
 
-  const result = await db
-    .select()
-    .from(tasks)
+  const result = await tasksRepo.selectFrom(db)
     .where(and(...conditions))
     .orderBy(
       asc(tasks.status),
@@ -85,9 +82,7 @@ export async function getAllTasks(includeCompleted: boolean = false): Promise<Ta
 }
 
 export async function getTaskById(id: number): Promise<TaskWithRelations | null> {
-  const result = await db
-    .select()
-    .from(tasks)
+  const result = await tasksRepo.selectFrom(db)
     .where(and(eq(tasks.id, id), isNull(tasks.deletedAt)))
     .limit(1);
 
@@ -127,9 +122,7 @@ export async function updateTask(
   userId: number,
   isAdmin: boolean
 ): Promise<Task | null> {
-  const existing = await db
-    .select()
-    .from(tasks)
+  const existing = await tasksRepo.selectFrom(db)
     .where(and(eq(tasks.id, id), isNull(tasks.deletedAt)))
     .limit(1);
 
@@ -177,9 +170,7 @@ export async function deleteTask(
   userId: number,
   isAdmin: boolean
 ): Promise<boolean> {
-  const existing = await db
-    .select()
-    .from(tasks)
+  const existing = await tasksRepo.selectFrom(db)
     .where(and(eq(tasks.id, id), isNull(tasks.deletedAt)))
     .limit(1);
 
@@ -195,9 +186,7 @@ export async function deleteTask(
 }
 
 export async function getOpenTaskCount(userId: number): Promise<number> {
-  const result = await db
-    .select({ count: count() })
-    .from(tasks)
+  const result = await tasksRepo.selectColumnsFrom({ count: count() }, db)
     .where(
       and(
         eq(tasks.assignedToUserId, userId),
@@ -235,9 +224,7 @@ async function findMonthClosingTask(
   txOrDb: DbOrTx = db
 ): Promise<Task | null> {
   const title = getMonthClosingTaskTitle(month, year);
-  const result = await txOrDb
-    .select()
-    .from(tasks)
+  const result = await tasksRepo.selectFrom(txOrDb)
     .where(
       and(
         eq(tasks.assignedToUserId, userId),
@@ -347,9 +334,7 @@ async function findBirthdayTask(
   txOrDb: DbOrTx = db
 ): Promise<Task | null> {
   const marker = getBirthdayTaskMarker(personType, personId, year);
-  const result = await txOrDb
-    .select()
-    .from(tasks)
+  const result = await tasksRepo.selectFrom(txOrDb)
     .where(
       and(
         eq(tasks.assignedToUserId, adminUserId),

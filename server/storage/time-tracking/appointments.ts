@@ -9,6 +9,7 @@ import { services as servicesTable } from "@shared/schema/services";
 import type { AppointmentWithCustomerName } from "@shared/api";
 import { db } from "../../lib/db";
 import { employeeVisibleAppointmentsFilter } from "../appointment-helpers";
+import { appointmentsRepo } from "../../repos";
 
 // Abgeleitetes Service-Type-Label aus appointment_services + services.lohnart_kategorie.
 // Ersetzt die mit Task #396 entfernte Spalte appointments.service_type.
@@ -31,13 +32,11 @@ export async function getEmployeeAppointments(
   startDate: string,
   endDate: string,
 ): Promise<AppointmentWithCustomerName[]> {
-  const results = await db
-    .select({
+  const results = await appointmentsRepo.selectColumnsFrom({
       ...getTableColumns(appointments),
       serviceType: derivedServiceTypeSql,
       customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name}, ${prospects.vorname} || ' ' || ${prospects.nachname}, '')`.as('customer_name'),
-    })
-    .from(appointments)
+    }, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(
@@ -69,13 +68,11 @@ export async function getAllAppointmentsInRange(
   startDate: string,
   endDate: string,
 ): Promise<AppointmentWithCustomerName[]> {
-  const results = await db
-    .select({
+  const results = await appointmentsRepo.selectColumnsFrom({
       ...getTableColumns(appointments),
       serviceType: derivedServiceTypeSql,
       customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name}, ${prospects.vorname} || ' ' || ${prospects.nachname}, '')`.as('customer_name'),
-    })
-    .from(appointments)
+    }, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(

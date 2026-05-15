@@ -11,6 +11,7 @@ import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, Al
 import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getPlannedCostCents } from "./appointment-cost-calculator";
+import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #425): §45b kennt seit der Umstellung auf das Jahrestopf-Modell
 // keinen Monats-Cap mehr. monthlyLimitCents wird im Summary fix auf `null`
@@ -19,10 +20,9 @@ import { getPlannedCostCents } from "./appointment-cost-calculator";
 
 export async function getTotalCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
   const d = _tx ?? db;
-  const carryoverAllocations = await d.select({
+  const carryoverAllocations = await budgetAllocationsRepo.selectColumnsFrom({
     total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
-  })
-    .from(budgetAllocations)
+  }, d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -40,8 +40,7 @@ export async function getTotalCarryoverCents(customerId: number, asOfDate: strin
 
 async function getAvailableCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
   const d = _tx ?? db;
-  const carryoverAllocations = await d.select()
-    .from(budgetAllocations)
+  const carryoverAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -128,10 +127,10 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
       eq(budgetTransactions.budgetType, "entlastungsbetrag_45b")
     )).groupBy(budgetTransactions.transactionType),
 
-    db.select({
+    budgetAllocationsRepo.selectColumnsFrom({
       total: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
       expiresAt: sql<string | null>`MIN(${budgetAllocations.expiresAt})`,
-    }).from(budgetAllocations).where(and(
+    }, db).where(and(
       allocValidWhere,
       eq(budgetAllocations.source, "carryover"),
       sql`${budgetAllocations.expiresAt} IS NOT NULL`

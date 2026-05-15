@@ -5,6 +5,7 @@ import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { getTotalCarryoverCents } from "./summary-queries";
 import { clampToStatutoryMax } from "@shared/domain/budgets";
+import { customersRepo } from "../../repos";
 
 type MonthlyBudgetType = "entlastungsbetrag_45b" | "umwandlung_45a";
 type YearlyBudgetType = "ersatzpflege_39_42a";
@@ -134,8 +135,7 @@ export async function computeCapSlot(
   let pflegegrad: number | null = null;
   if (input.budgetType === "umwandlung_45a") {
     const d = tx ?? db;
-    const [row] = await d.select({ pflegegrad: customers.pflegegrad })
-      .from(customers)
+    const [row] = await customersRepo.selectColumnsFrom({ pflegegrad: customers.pflegegrad }, d)
       .where(eq(customers.id, input.customerId))
       .limit(1);
     pflegegrad = row?.pflegegrad ?? null;

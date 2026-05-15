@@ -9,6 +9,7 @@ import {
 import { eq, and, isNull, gte, ne, inArray, desc, sql } from "drizzle-orm";
 import { db, type DbOrTx } from "../lib/db";
 import { todayISO } from "@shared/utils/datetime";
+import { appointmentsRepo } from "../repos";
 
 export async function createSeries(data: InsertAppointmentSeries, tx?: DbOrTx): Promise<AppointmentSeries> {
   const client = tx || db;
@@ -62,8 +63,7 @@ export async function getAllActiveSeries(): Promise<(SeriesWithCustomerName & { 
   const today = todayISO();
   const results = [];
   for (const r of rows) {
-    const futureCount = await db.select({ id: appointments.id })
-      .from(appointments)
+    const futureCount = await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, db)
       .where(and(
         eq(appointments.seriesId, r.series.id),
         isNull(appointments.deletedAt),
@@ -90,7 +90,7 @@ export async function updateSeries(
 }
 
 export async function getSeriesAppointments(seriesId: number) {
-  return db.select().from(appointments)
+  return appointmentsRepo.selectFrom(db)
     .where(and(
       eq(appointments.seriesId, seriesId),
       isNull(appointments.deletedAt),
@@ -115,7 +115,7 @@ export async function getFutureSeriesAppointments(
     conditions.push(eq(appointments.isSeriesException, false));
   }
 
-  return db.select().from(appointments)
+  return appointmentsRepo.selectFrom(db)
     .where(and(...conditions))
     .orderBy(appointments.date);
 }
@@ -155,8 +155,7 @@ export async function bulkDeleteSeriesAppointments(
 }
 
 export async function countSeriesAppointments(seriesId: number): Promise<{ total: number; future: number; completed: number }> {
-  const all = await db.select({ id: appointments.id, status: appointments.status, date: appointments.date })
-    .from(appointments)
+  const all = await appointmentsRepo.selectColumnsFrom({ id: appointments.id, status: appointments.status, date: appointments.date }, db)
     .where(and(
       eq(appointments.seriesId, seriesId),
       isNull(appointments.deletedAt),

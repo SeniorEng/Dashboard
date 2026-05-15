@@ -3,6 +3,7 @@ import { createTask } from "../storage/tasks";
 import { tasks, users, systemSettings } from "@shared/schema";
 import { db } from "../lib/db";
 import { eq, and, like } from "drizzle-orm";
+import { tasksRepo } from "../repos";
 
 const TASK_PREFIX = "[Dokument]";
 const REVIEW_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -47,9 +48,7 @@ export async function generateDocumentReviewTasks(): Promise<number> {
     const adminTitle = `${TASK_PREFIX} ${doc.documentType.name} von ${doc.employee.displayName} prüfen`;
     const employeeTitle = `${TASK_PREFIX} ${doc.documentType.name} erneut einreichen`;
 
-    const existingAdmin = await db
-      .select({ id: tasks.id })
-      .from(tasks)
+    const existingAdmin = await tasksRepo.selectColumnsFrom({ id: tasks.id }, db)
       .where(
         and(
           like(tasks.title, `${TASK_PREFIX} ${doc.documentType.name} von ${doc.employee.displayName}%`),
@@ -70,9 +69,7 @@ export async function generateDocumentReviewTasks(): Promise<number> {
       tasksCreated++;
     }
 
-    const existingForEmployee = await db
-      .select({ id: tasks.id })
-      .from(tasks)
+    const existingForEmployee = await tasksRepo.selectColumnsFrom({ id: tasks.id }, db)
       .where(
         and(
           like(tasks.title, `${TASK_PREFIX} ${doc.documentType.name} erneut%`),
@@ -97,9 +94,7 @@ export async function generateDocumentReviewTasks(): Promise<number> {
   for (const doc of customerDocs) {
     const adminTitle = `${TASK_PREFIX} ${doc.documentType.name} für ${doc.customer.name} prüfen`;
 
-    const existingAdmin = await db
-      .select({ id: tasks.id })
-      .from(tasks)
+    const existingAdmin = await tasksRepo.selectColumnsFrom({ id: tasks.id }, db)
       .where(
         and(
           like(tasks.title, `${TASK_PREFIX} ${doc.documentType.name} für ${doc.customer.name}%`),

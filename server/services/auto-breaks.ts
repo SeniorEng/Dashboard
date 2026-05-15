@@ -12,6 +12,7 @@ import {
   ARBZG_MAX_DAILY_MINUTES,
 } from "@shared/domain/time-entries";
 import { employeeWorkedAppointmentsFilter } from "../storage/appointment-helpers";
+import { appointmentsRepo, employeeTimeEntriesRepo } from "../repos";
 
 interface AutoBreakResult {
   date: string;
@@ -41,9 +42,7 @@ export async function generateAutoBreaksForMonth(
   const endDate = `${year}-${monthStr}-${lastDay.toString().padStart(2, "0")}`;
 
   const [employeeAppointments, timeEntries] = await Promise.all([
-    db
-      .select()
-      .from(appointments)
+    appointmentsRepo.selectFrom(db)
       .where(
         and(
           employeeWorkedAppointmentsFilter(userId),
@@ -52,9 +51,7 @@ export async function generateAutoBreaksForMonth(
           isNull(appointments.deletedAt)
         )
       ),
-    db
-      .select()
-      .from(employeeTimeEntries)
+    employeeTimeEntriesRepo.selectFrom(db)
       .where(
         and(
           eq(employeeTimeEntries.userId, userId),
@@ -127,9 +124,7 @@ export async function insertAutoBreaks(
   if (breaks.length === 0) return 0;
 
   const allDates = breaks.map((b) => b.date);
-  const existingAutoBreaks = await txOrDb
-    .select({ entryDate: employeeTimeEntries.entryDate })
-    .from(employeeTimeEntries)
+  const existingAutoBreaks = await employeeTimeEntriesRepo.selectColumnsFrom({ entryDate: employeeTimeEntries.entryDate }, txOrDb)
     .where(
       and(
         eq(employeeTimeEntries.userId, userId),
@@ -197,9 +192,7 @@ export async function removeAutoBreaksForMonth(
 
 async function fetchDayData(userId: number, date: string) {
   const [dayAppointments, dayEntries] = await Promise.all([
-    db
-      .select()
-      .from(appointments)
+    appointmentsRepo.selectFrom(db)
       .where(
         and(
           employeeWorkedAppointmentsFilter(userId),
@@ -207,9 +200,7 @@ async function fetchDayData(userId: number, date: string) {
           isNull(appointments.deletedAt)
         )
       ),
-    db
-      .select()
-      .from(employeeTimeEntries)
+    employeeTimeEntriesRepo.selectFrom(db)
       .where(
         and(
           eq(employeeTimeEntries.userId, userId),

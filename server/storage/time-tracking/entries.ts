@@ -9,6 +9,7 @@ import {
 import { isWeekend, parseLocalDate, formatDateISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import { buildTimeEntryFilterConditions, type TimeEntryFilters } from "./shared";
+import { employeeTimeEntriesRepo } from "../../repos";
 
 export async function getTimeEntries(
   userId: number,
@@ -17,17 +18,13 @@ export async function getTimeEntries(
   const conditions = buildTimeEntryFilterConditions({ ...filters, userId });
   conditions.push(isNull(employeeTimeEntries.deletedAt));
 
-  return db
-    .select()
-    .from(employeeTimeEntries)
+  return employeeTimeEntriesRepo.selectFrom(db)
     .where(and(...conditions))
     .orderBy(employeeTimeEntries.entryDate);
 }
 
 export async function getTimeEntry(id: number): Promise<EmployeeTimeEntry | undefined> {
-  const results = await db
-    .select()
-    .from(employeeTimeEntries)
+  const results = await employeeTimeEntriesRepo.selectFrom(db)
     .where(and(eq(employeeTimeEntries.id, id), isNull(employeeTimeEntries.deletedAt)));
   return results[0];
 }
@@ -150,8 +147,7 @@ export async function getAllTimeEntries(
   const conditions = buildTimeEntryFilterConditions(filters);
   conditions.push(isNull(employeeTimeEntries.deletedAt));
 
-  const results = await db
-    .select({
+  const results = await employeeTimeEntriesRepo.selectColumnsFrom({
       id: employeeTimeEntries.id,
       userId: employeeTimeEntries.userId,
       entryType: employeeTimeEntries.entryType,
@@ -169,8 +165,7 @@ export async function getAllTimeEntries(
       user: {
         displayName: users.displayName,
       },
-    })
-    .from(employeeTimeEntries)
+    }, db)
     .leftJoin(users, eq(employeeTimeEntries.userId, users.id))
     .where(and(...conditions))
     .orderBy(employeeTimeEntries.entryDate);

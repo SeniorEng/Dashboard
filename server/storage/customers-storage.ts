@@ -13,6 +13,7 @@ import { customerIdsCache } from "../services/cache";
 import { db } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 import type { SearchOptions } from "../storage";
+import { appointmentsRepo, customersRepo } from "../repos";
 
 export async function getCustomers(options?: { status?: string; search?: string }): Promise<(Customer & { versichertennummer: string | null })[]> {
   const conditions = [isNull(customers.deletedAt)];
@@ -49,7 +50,7 @@ export async function getCustomers(options?: { status?: string; search?: string 
     );
   }
 
-  const rows = await db.select().from(customers).where(and(...conditions)).orderBy(customers.name);
+  const rows = await customersRepo.selectFrom(db).where(and(...conditions)).orderBy(customers.name);
   return await enrichWithCurrentVersichertennummer(rows);
 }
 
@@ -71,7 +72,7 @@ async function enrichWithCurrentVersichertennummer<T extends { id: number }>(
 }
 
 export async function getCustomer(id: number): Promise<Customer | undefined> {
-  const result = await db.select().from(customers).where(eq(customers.id, id));
+  const result = await customersRepo.selectFrom(db).where(eq(customers.id, id));
   return result[0];
 }
 
@@ -96,9 +97,7 @@ export async function deleteCustomer(id: number): Promise<boolean> {
 }
 
 export async function getCurrentlyAssignedCustomerIds(employeeId: number): Promise<number[]> {
-  const result = await db
-    .select({ id: customers.id })
-    .from(customers)
+  const result = await customersRepo.selectColumnsFrom({ id: customers.id }, db)
     .where(
       and(
         isNull(customers.deletedAt),
@@ -114,12 +113,11 @@ export async function getPrimaryCustomerIds(employeeId: number): Promise<number[
     return cached;
   }
 
-  const result = await db
-    .selectDistinct({ id: customers.id })
-    .from(customers)
+  // customers.id ist Primary Key — `.select({id})` ist äquivalent zu `.selectDistinct({id})`.
+  const result = await customersRepo.selectColumnsFrom({ id: customers.id })
     .where(
       and(
-        isNull(customers.deletedAt),
+        customersRepo.activeOnly(),
         eq(customers.primaryEmployeeId, employeeId),
       )
     );
@@ -135,9 +133,7 @@ export async function getAssignedCustomerIds(employeeId: number): Promise<number
     return cached;
   }
 
-  const result = await db
-    .selectDistinct({ id: customers.id })
-    .from(customers)
+  const result = await customersRepo.selectColumnsFrom({ id: customers.id })
     .where(
       and(
         isNull(customers.deletedAt),
@@ -146,8 +142,7 @@ export async function getAssignedCustomerIds(employeeId: number): Promise<number
           eq(customers.backupEmployeeId, employeeId),
           eq(customers.backupEmployeeId2, employeeId),
           inArray(customers.id,
-            db.select({ id: appointments.customerId })
-              .from(appointments)
+            appointmentsRepo.selectColumnsFrom({ id: appointments.customerId }, db)
               .where(
                 and(
                   or(
@@ -171,9 +166,7 @@ export async function getCustomersForEmployee(employeeId: number): Promise<(Cust
   const assignedIds = await getAssignedCustomerIds(employeeId);
   if (assignedIds.length === 0) return [];
 
-  const customerRows = await db
-    .select()
-    .from(customers)
+  const customerRows = await customersRepo.selectFrom(db)
     .where(and(inArray(customers.id, assignedIds), isNull(customers.deletedAt)))
     .orderBy(customers.nachname, customers.vorname);
 
@@ -194,7 +187,7 @@ export async function getCustomersForEmployee(employeeId: number): Promise<(Cust
 
 export async function getCustomersByIds(ids: number[]): Promise<Customer[]> {
   if (ids.length === 0) return [];
-  return await db.select().from(customers).where(inArray(customers.id, ids));
+  return await customersRepo.selectFrom(db).where(inArray(customers.id, ids));
 }
 
 export async function getActiveEmployeesWithBirthday(): Promise<{ id: number; displayName: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; createdAt: Date }[]> {
@@ -217,8 +210,7 @@ export async function getActiveEmployeesWithBirthday(): Promise<{ id: number; di
 }
 
 export async function getActiveCustomersWithBirthday(): Promise<{ id: number; name: string; geburtsdatum: string | null; strasse: string | null; hausnummer: string | null; plz: string | null; stadt: string | null; primaryEmployeeId: number | null; backupEmployeeId: number | null; backupEmployeeId2: number | null; createdAt: Date }[]> {
-  return await db
-    .select({
+  return await customersRepo.selectColumnsFrom({
       id: customers.id,
       name: customers.name,
       geburtsdatum: customers.geburtsdatum,
@@ -230,8 +222,7 @@ export async function getActiveCustomersWithBirthday(): Promise<{ id: number; na
       backupEmployeeId: customers.backupEmployeeId,
       backupEmployeeId2: customers.backupEmployeeId2,
       createdAt: customers.createdAt,
-    })
-    .from(customers)
+    }, db)
     .where(and(isNotNull(customers.geburtsdatum), isNull(customers.deletedAt)));
 }
 
@@ -279,9 +270,7 @@ export async function searchCustomers(options: SearchOptions): Promise<(Customer
 
   conditions.push(isNull(customers.deletedAt));
 
-  const rows = await db
-    .select()
-    .from(customers)
+  const rows = await customersRepo.selectFrom(db)
     .where(and(...conditions))
     .limit(limit);
 
@@ -328,9 +317,7 @@ export async function searchAppointmentsWithCustomers(options: SearchOptions): P
 
   conditions.push(isNull(appointments.deletedAt));
 
-  const results = await db
-    .select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  const results = await appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions))

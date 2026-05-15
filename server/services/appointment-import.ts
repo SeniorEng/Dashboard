@@ -7,6 +7,7 @@ import { storage } from "../storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { getAvailableForDate } from "../storage/budget/import-availability";
 import { isWeekend } from "@shared/utils/datetime";
+import { appointmentsRepo, customersRepo } from "../repos";
 
 interface ImportRow {
   rowIndex: number;
@@ -256,17 +257,14 @@ function normalizeForMatch(s: string): string {
 }
 
 export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
-  const allCustomers = await db
-    .select({ id: customers.id, vorname: customers.vorname, nachname: customers.nachname })
-    .from(customers)
+  const allCustomers = await customersRepo.selectColumnsFrom({ id: customers.id, vorname: customers.vorname, nachname: customers.nachname }, db)
     .orderBy(customers.id);
 
   const allUsers = await db
     .select({ id: users.id, vorname: users.vorname, nachname: users.nachname, displayName: users.displayName })
     .from(users);
 
-  const existingAppts = await db
-    .select({
+  const existingAppts = await appointmentsRepo.selectColumnsFrom({
       id: appointments.id,
       customerId: appointments.customerId,
       date: appointments.date,
@@ -275,8 +273,7 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       travelKilometers: appointments.travelKilometers,
       customerKilometers: appointments.customerKilometers,
       notes: appointments.notes,
-    })
-    .from(appointments)
+    }, db)
     .where(
       and(
         isNull(appointments.deletedAt),
@@ -457,9 +454,7 @@ export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
 
   const privatePaymentMap = new Map<number, boolean>();
   for (const customerId of customerIds) {
-    const [customer] = await db
-      .select({ acceptsPrivatePayment: customers.acceptsPrivatePayment })
-      .from(customers)
+    const [customer] = await customersRepo.selectColumnsFrom({ acceptsPrivatePayment: customers.acceptsPrivatePayment }, db)
       .where(eq(customers.id, customerId))
       .limit(1);
     privatePaymentMap.set(customerId, customer?.acceptsPrivatePayment ?? false);
@@ -649,14 +644,12 @@ export async function createServiceRecordsForImported(userId: number): Promise<{
   created: number;
   errors: { key: string; error: string }[];
 }> {
-  const importedAppts = await db
-    .select({
+  const importedAppts = await appointmentsRepo.selectColumnsFrom({
       id: appointments.id,
       customerId: appointments.customerId,
       performedByEmployeeId: appointments.performedByEmployeeId,
       date: appointments.date,
-    })
-    .from(appointments)
+    }, db)
     .where(
       and(
         sql`${appointments.notes} LIKE 'Import aus Altdaten%'`,

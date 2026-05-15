@@ -25,6 +25,7 @@ import { monthDateRange, type TimeOverviewFilters } from "./shared";
 import { getAllAppointmentsInRange, getEmployeeAppointments } from "./appointments";
 import { getAllTimeEntries, getTimeEntries } from "./entries";
 import type { AdminTimeTrackingOverview } from "@shared/api";
+import { appointmentsRepo, employeeTimeEntriesRepo } from "../../repos";
 
 export async function getTimeOverview(
   userId: number,
@@ -214,12 +215,11 @@ export async function getOpenTasks(userId: number): Promise<OpenTasksSummary> {
   const todayStr = formatDateISO(today);
 
   const [apptDurations, timeEntries] = await Promise.all([
-    db.select({
+    appointmentsRepo.selectColumnsFrom({
       date: appointments.date,
       status: appointments.status,
       durationPromised: appointments.durationPromised,
-    })
-      .from(appointments)
+    }, db)
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
@@ -230,14 +230,13 @@ export async function getOpenTasks(userId: number): Promise<OpenTasksSummary> {
           isNull(appointments.deletedAt),
         ),
       ),
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       entryDate: employeeTimeEntries.entryDate,
       entryType: employeeTimeEntries.entryType,
       durationMinutes: employeeTimeEntries.durationMinutes,
       startTime: employeeTimeEntries.startTime,
       endTime: employeeTimeEntries.endTime,
-    })
-      .from(employeeTimeEntries)
+    }, db)
       .where(
         and(
           eq(employeeTimeEntries.userId, userId),

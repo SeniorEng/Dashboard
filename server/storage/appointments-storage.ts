@@ -13,26 +13,27 @@ import { db, type DbOrTx } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 import type { PaginationOptions } from "../storage";
 import { badRequest } from "../lib/errors";
+import { appointmentsRepo } from "../repos";
 
 const APPOINTMENT_PERSON_REQUIRED_MESSAGE =
   "Ein Termin muss entweder mit einem Kunden oder einem Interessenten verknüpft sein.";
 
 export async function getAppointments(): Promise<Appointment[]> {
-  return await db.select().from(appointments).where(isNull(appointments.deletedAt));
+  return await appointmentsRepo.selectFrom(db).where(isNull(appointments.deletedAt));
 }
 
 export async function getAppointment(id: number): Promise<Appointment | undefined> {
-  const result = await db.select().from(appointments).where(and(eq(appointments.id, id), isNull(appointments.deletedAt)));
+  const result = await appointmentsRepo.selectFrom(db).where(and(eq(appointments.id, id), isNull(appointments.deletedAt)));
   return result[0];
 }
 
 export async function getAppointmentIncludeDeleted(id: number): Promise<Appointment | undefined> {
-  const result = await db.select().from(appointments).where(eq(appointments.id, id));
+  const result = await appointmentsRepo.selectFrom(db).where(eq(appointments.id, id));
   return result[0];
 }
 
 export async function getAppointmentsByDate(date: string): Promise<Appointment[]> {
-  return await db.select().from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
+  return await appointmentsRepo.selectFrom(db).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 }
 
 function buildEmployeeCondition(employeeId: number | number[] | undefined, assignedOnly?: boolean) {
@@ -78,12 +79,10 @@ export async function getAppointmentCountsByDates(dates: string[], customerIds?:
   const conditions = [inArray(appointments.date, dates), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")];
   applyVisibilityFilters(conditions, customerIds, employeeId, assignedOnly);
 
-  const results = await db
-    .select({
+  const results = await appointmentsRepo.selectColumnsFrom({
       date: appointments.date,
       count: count(),
-    })
-    .from(appointments)
+    }, db)
     .where(and(...conditions))
     .groupBy(appointments.date);
 
@@ -118,9 +117,7 @@ export async function updateAppointment(id: number, appointment: UpdateAppointme
   const nullsProspect = prospectKey && appointment.prospectId == null;
 
   if (nullsCustomer || nullsProspect) {
-    const existing = await client
-      .select({ customerId: appointments.customerId, prospectId: appointments.prospectId })
-      .from(appointments)
+    const existing = await appointmentsRepo.selectColumnsFrom({ customerId: appointments.customerId, prospectId: appointments.prospectId }, client)
       .where(eq(appointments.id, id));
     if (existing.length > 0) {
       const finalCustomerId = customerKey ? appointment.customerId : existing[0].customerId;
@@ -155,9 +152,7 @@ export async function getAppointmentsWithCustomers(date?: string, customerIds?: 
 
   applyVisibilityFilters(conditions, customerIds, employeeId, assignedOnly);
 
-  const query = db
-    .select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  const query = appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id));
 
@@ -176,14 +171,12 @@ export async function getAppointmentsWithCustomersPaginated(
   const offset = options?.offset ?? 0;
 
   const countResult = date
-    ? await db.select({ count: count() }).from(appointments).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")))
-    : await db.select({ count: count() }).from(appointments).where(and(isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
+    ? await appointmentsRepo.selectColumnsFrom({ count: count() }, db).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")))
+    : await appointmentsRepo.selectColumnsFrom({ count: count() }, db).where(and(isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 
   const total = Number(countResult[0]?.count ?? 0);
 
-  let query = db
-    .select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  let query = appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .limit(limit)
@@ -199,9 +192,7 @@ export async function getAppointmentsWithCustomersPaginated(
 }
 
 export async function getAppointmentWithCustomer(id: number): Promise<AppointmentWithCustomer | undefined> {
-  const results = await db
-    .select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  const results = await appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(eq(appointments.id, id), isNull(appointments.deletedAt)));
@@ -225,9 +216,7 @@ export async function getUndocumentedAppointments(beforeDate: string, customerId
     conditions.push(inArray(appointments.customerId, customerIds));
   }
 
-  const results = await db
-    .select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  const results = await appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions));
@@ -248,9 +237,7 @@ export async function getPlannedConsultations(filter: "overdue" | "upcoming" | "
     conditions.push(gte(appointments.date, today));
   }
 
-  const results = await db
-    .select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  const results = await appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions))
@@ -260,8 +247,7 @@ export async function getPlannedConsultations(filter: "overdue" | "upcoming" | "
 }
 
 export async function getAppointmentsForDay(employeeId: number, date: string): Promise<AppointmentWithCustomer[]> {
-  const rows = await db.select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  const rows = await appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(

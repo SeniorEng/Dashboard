@@ -29,6 +29,7 @@ import {
   type EmployeeDocumentProof,
 } from "@shared/schema";
 import { db, type DbOrTx } from "../lib/db";
+import { customerDocumentsRepo, employeeDocumentProofsRepo, employeeDocumentsRepo } from "../repos";
 
 function buildDocumentInsertValues(
   data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null },
@@ -223,12 +224,10 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getCurrentDocuments(employeeId: number): Promise<(EmployeeDocument & { documentType: DocumentType })[]> {
-    const docs = await db
-      .select({
+    const docs = await employeeDocumentsRepo.selectColumnsFrom({
         doc: employeeDocuments,
         docType: documentTypes,
-      })
-      .from(employeeDocuments)
+      }, db)
       .innerJoin(documentTypes, eq(employeeDocuments.documentTypeId, documentTypes.id))
       .where(
         and(
@@ -243,12 +242,10 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getGroupedDocuments(employeeId: number): Promise<GroupedDocumentsByType[]> {
-    const docs = await db
-      .select({
+    const docs = await employeeDocumentsRepo.selectColumnsFrom({
         doc: employeeDocuments,
         docType: documentTypes,
-      })
-      .from(employeeDocuments)
+      }, db)
       .innerJoin(documentTypes, eq(employeeDocuments.documentTypeId, documentTypes.id))
       .where(and(eq(employeeDocuments.employeeId, employeeId), isNull(employeeDocuments.deletedAt)))
       .orderBy(asc(documentTypes.name), desc(employeeDocuments.uploadedAt));
@@ -290,9 +287,7 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getDocumentHistory(employeeId: number, documentTypeId: number): Promise<EmployeeDocument[]> {
-    return db
-      .select()
-      .from(employeeDocuments)
+    return employeeDocumentsRepo.selectFrom(db)
       .where(
         and(
           eq(employeeDocuments.employeeId, employeeId),
@@ -310,16 +305,14 @@ class DocumentStorage implements IDocumentStorage {
 
     const { users } = await import("@shared/schema");
     
-    const docs = await db
-      .select({
+    const docs = await employeeDocumentsRepo.selectColumnsFrom({
         doc: employeeDocuments,
         docType: documentTypes,
         employee: {
           id: users.id,
           displayName: users.displayName,
         },
-      })
-      .from(employeeDocuments)
+      }, db)
       .innerJoin(documentTypes, eq(employeeDocuments.documentTypeId, documentTypes.id))
       .innerJoin(users, eq(employeeDocuments.employeeId, users.id))
       .where(
@@ -363,12 +356,10 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]> {
-    const docs = await db
-      .select({
+    const docs = await customerDocumentsRepo.selectColumnsFrom({
         doc: customerDocuments,
         docType: documentTypes,
-      })
-      .from(customerDocuments)
+      }, db)
       .innerJoin(documentTypes, eq(customerDocuments.documentTypeId, documentTypes.id))
       .where(
         and(
@@ -383,12 +374,10 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getGroupedCustomerDocuments(customerId: number): Promise<GroupedDocumentsByType[]> {
-    const docs = await db
-      .select({
+    const docs = await customerDocumentsRepo.selectColumnsFrom({
         doc: customerDocuments,
         docType: documentTypes,
-      })
-      .from(customerDocuments)
+      }, db)
       .innerJoin(documentTypes, eq(customerDocuments.documentTypeId, documentTypes.id))
       .where(and(eq(customerDocuments.customerId, customerId), isNull(customerDocuments.deletedAt)))
       .orderBy(asc(documentTypes.name), desc(customerDocuments.uploadedAt));
@@ -430,9 +419,7 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]> {
-    return db
-      .select()
-      .from(customerDocuments)
+    return customerDocumentsRepo.selectFrom(db)
       .where(
         and(
           eq(customerDocuments.customerId, customerId),
@@ -448,16 +435,14 @@ class DocumentStorage implements IDocumentStorage {
     futureDate.setDate(futureDate.getDate() + leadTimeDays);
     const futureDateStr = formatDateISO(futureDate);
 
-    const docs = await db
-      .select({
+    const docs = await customerDocumentsRepo.selectColumnsFrom({
         doc: customerDocuments,
         docType: documentTypes,
         customer: {
           id: customers.id,
           name: customers.name,
         },
-      })
-      .from(customerDocuments)
+      }, db)
       .innerJoin(documentTypes, eq(customerDocuments.documentTypeId, documentTypes.id))
       .innerJoin(customers, eq(customerDocuments.customerId, customers.id))
       .where(
@@ -772,9 +757,7 @@ class DocumentStorage implements IDocumentStorage {
     }));
   }
   async getEmployeeProofs(employeeId: number) {
-    const results = await db
-      .select(proofBaseSelect)
-      .from(employeeDocumentProofs)
+    const results = await employeeDocumentProofsRepo.selectColumnsFrom(proofBaseSelect, db)
       .innerJoin(documentTypes, eq(employeeDocumentProofs.documentTypeId, documentTypes.id))
       .where(and(eq(employeeDocumentProofs.employeeId, employeeId), isNull(employeeDocumentProofs.deletedAt)))
       .orderBy(asc(documentTypes.name));
@@ -782,7 +765,7 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getProofById(id: number): Promise<EmployeeDocumentProof | null> {
-    const result = await db.select().from(employeeDocumentProofs).where(eq(employeeDocumentProofs.id, id)).limit(1);
+    const result = await employeeDocumentProofsRepo.selectFrom(db).where(eq(employeeDocumentProofs.id, id)).limit(1);
     return result[0] || null;
   }
 
@@ -818,9 +801,7 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getPendingProofCount(employeeId: number): Promise<number> {
-    const results = await db
-      .select({ id: employeeDocumentProofs.id })
-      .from(employeeDocumentProofs)
+    const results = await employeeDocumentProofsRepo.selectColumnsFrom({ id: employeeDocumentProofs.id }, db)
       .where(and(
         eq(employeeDocumentProofs.employeeId, employeeId),
         inArray(employeeDocumentProofs.status, ["pending", "rejected"]),
@@ -830,15 +811,13 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getPendingReviewProofs() {
-    const results = await db
-      .select({
+    const results = await employeeDocumentProofsRepo.selectColumnsFrom({
         ...proofBaseSelect,
         employee: {
           id: users.id,
           displayName: users.displayName,
         },
-      })
-      .from(employeeDocumentProofs)
+      }, db)
       .innerJoin(documentTypes, eq(employeeDocumentProofs.documentTypeId, documentTypes.id))
       .innerJoin(users, eq(employeeDocumentProofs.employeeId, users.id))
       .where(and(eq(employeeDocumentProofs.status, "uploaded"), isNull(employeeDocumentProofs.deletedAt)))
@@ -847,9 +826,7 @@ class DocumentStorage implements IDocumentStorage {
   }
 
   async getUploadedProofCountForAdmin(): Promise<number> {
-    const results = await db
-      .select({ id: employeeDocumentProofs.id })
-      .from(employeeDocumentProofs)
+    const results = await employeeDocumentProofsRepo.selectColumnsFrom({ id: employeeDocumentProofs.id }, db)
       .where(and(eq(employeeDocumentProofs.status, "uploaded"), isNull(employeeDocumentProofs.deletedAt)));
     return results.length;
   }

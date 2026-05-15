@@ -8,6 +8,7 @@ import {
 import { timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { eq, and, isNull, inArray, sql, asc } from "drizzle-orm";
+import { appointmentsRepo, employeeTimeEntriesRepo } from "../repos";
 
 function minutesToHHMM(mins: number): string {
   return minutesToTimeDisplay(((mins % 1440) + 1440) % 1440);
@@ -142,13 +143,12 @@ export async function loadEmployeesWeeklyAvailability(
       .where(and(inArray(users.id, employeeIds), eq(users.isActive, true)))
       .orderBy(asc(users.displayName)),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       entryDate: employeeTimeEntries.entryDate,
       startTime: employeeTimeEntries.startTime,
       endTime: employeeTimeEntries.endTime,
-    })
-      .from(employeeTimeEntries)
+    }, db)
       .where(and(
         inArray(employeeTimeEntries.userId, employeeIds),
         inArray(employeeTimeEntries.entryDate, dates),
@@ -157,12 +157,11 @@ export async function loadEmployeesWeeklyAvailability(
       ))
       .orderBy(asc(employeeTimeEntries.startTime)),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       entryDate: employeeTimeEntries.entryDate,
       entryType: employeeTimeEntries.entryType,
-    })
-      .from(employeeTimeEntries)
+    }, db)
       .where(and(
         inArray(employeeTimeEntries.userId, employeeIds),
         inArray(employeeTimeEntries.entryDate, dates),
@@ -170,7 +169,7 @@ export async function loadEmployeesWeeklyAvailability(
         isNull(employeeTimeEntries.deletedAt),
       )),
 
-    db.select({
+    appointmentsRepo.selectColumnsFrom({
       appointmentId: appointments.id,
       customerId: appointments.customerId,
       assignedEmployeeId: appointments.assignedEmployeeId,
@@ -185,8 +184,7 @@ export async function loadEmployeesWeeklyAvailability(
         'Erstberatung'
       )`.as("customer_name"),
       status: appointments.status,
-    })
-      .from(appointments)
+    }, db)
       .leftJoin(customers, eq(appointments.customerId, customers.id))
       .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
       .where(and(
@@ -197,14 +195,13 @@ export async function loadEmployeesWeeklyAvailability(
       ))
       .orderBy(asc(appointments.scheduledStart)),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       entryDate: employeeTimeEntries.entryDate,
       startTime: employeeTimeEntries.startTime,
       endTime: employeeTimeEntries.endTime,
       entryType: employeeTimeEntries.entryType,
-    })
-      .from(employeeTimeEntries)
+    }, db)
       .where(and(
         inArray(employeeTimeEntries.userId, employeeIds),
         inArray(employeeTimeEntries.entryDate, dates),
@@ -212,14 +209,13 @@ export async function loadEmployeesWeeklyAvailability(
         isNull(employeeTimeEntries.deletedAt),
       )),
 
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       userId: employeeTimeEntries.userId,
       entryDate: employeeTimeEntries.entryDate,
       startTime: employeeTimeEntries.startTime,
       endTime: employeeTimeEntries.endTime,
       isFullDay: employeeTimeEntries.isFullDay,
-    })
-      .from(employeeTimeEntries)
+    }, db)
       .where(and(
         inArray(employeeTimeEntries.userId, employeeIds),
         inArray(employeeTimeEntries.entryDate, dates),

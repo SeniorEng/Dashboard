@@ -19,6 +19,7 @@ function employeeFilter(employeeId: number): SQL {
 }
 import { getAssignedCustomerIds, getPrimaryCustomerIds } from "./customers-storage";
 import type { ServiceRecordOverviewItem } from "../storage";
+import { appointmentsRepo, customersRepo, monthlyServiceRecordsRepo } from "../repos";
 
 export async function getServiceRecordsForEmployee(employeeId: number, year?: number, month?: number, customerId?: number): Promise<MonthlyServiceRecord[]> {
   const primaryCustomerIds = await getPrimaryCustomerIds(employeeId);
@@ -60,22 +61,19 @@ export async function getServiceRecordsForEmployee(employeeId: number, year?: nu
       return [];
     }
   }
-  return await db.select()
-    .from(monthlyServiceRecords)
+  return await monthlyServiceRecordsRepo.selectFrom(db)
     .where(and(...baseConditions))
     .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
 }
 
 export async function getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]> {
-  return await db.select()
-    .from(monthlyServiceRecords)
+  return await monthlyServiceRecordsRepo.selectFrom(db)
     .where(and(eq(monthlyServiceRecords.customerId, customerId), isNull(monthlyServiceRecords.deletedAt)))
     .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
 }
 
 export async function getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined> {
-  const result = await db.select()
-    .from(monthlyServiceRecords)
+  const result = await monthlyServiceRecordsRepo.selectFrom(db)
     .where(and(eq(monthlyServiceRecords.id, id), isNull(monthlyServiceRecords.deletedAt)));
   return result[0];
 }
@@ -91,8 +89,7 @@ export async function getServiceRecordByPeriod(customerId: number, employeeId: n
   if (!isPrimary) {
     conditions.push(eq(monthlyServiceRecords.employeeId, employeeId));
   }
-  const result = await db.select()
-    .from(monthlyServiceRecords)
+  const result = await monthlyServiceRecordsRepo.selectFrom(db)
     .where(and(...conditions));
   return result[0];
 }
@@ -182,8 +179,7 @@ export async function getAppointmentsForServiceRecord(serviceRecordId: number): 
 
   const appointmentIds = linkedAppointments.map(la => la.appointmentId);
 
-  const rows = await db.select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  const rows = await appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(inArray(appointments.id, appointmentIds), isNull(appointments.deletedAt)))
@@ -230,8 +226,7 @@ function getAppointmentsForPeriodBase(
     conditions.push(employeeFilter(employeeId));
   }
 
-  return db.select(appointmentWithCustomerSelectFields)
-    .from(appointments)
+  return appointmentsRepo.selectColumnsFrom(appointmentWithCustomerSelectFields, db)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
     .leftJoin(prospects, eq(appointments.prospectId, prospects.id))
     .where(and(...conditions))
@@ -279,8 +274,7 @@ export async function getPendingServiceRecords(employeeId: number): Promise<Mont
     return [];
   }
 
-  return await db.select()
-    .from(monthlyServiceRecords)
+  return await monthlyServiceRecordsRepo.selectFrom(db)
     .where(and(...conditions))
     .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
 }
@@ -352,15 +346,14 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
     isNull(appointments.deletedAt),
   ];
 
-  const primaryOverview = primaryCustomerIds.length > 0 ? await db.select({
+  const primaryOverview = primaryCustomerIds.length > 0 ? await customersRepo.selectColumnsFrom({
     customerId: customers.id,
     vorname: customers.vorname,
     nachname: customers.nachname,
     documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
     undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
     totalAppointments: sqlBuilder<number>`COUNT(${appointments.id})::int`,
-  })
-    .from(customers)
+  }, db)
     .leftJoin(appointments, and(
       eq(appointments.customerId, customers.id),
       ...dateConditions,
@@ -368,15 +361,14 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
     .where(inArray(customers.id, primaryCustomerIds))
     .groupBy(customers.id, customers.vorname, customers.nachname) : [];
 
-  const backupOverview = backupCustomerIds.length > 0 ? await db.select({
+  const backupOverview = backupCustomerIds.length > 0 ? await customersRepo.selectColumnsFrom({
     customerId: customers.id,
     vorname: customers.vorname,
     nachname: customers.nachname,
     documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
     undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
     totalAppointments: sqlBuilder<number>`COUNT(${appointments.id})::int`,
-  })
-    .from(customers)
+  }, db)
     .leftJoin(appointments, and(
       eq(appointments.customerId, customers.id),
       or(
@@ -396,25 +388,23 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
     isNull(monthlyServiceRecords.deletedAt),
   ];
 
-  const primaryRecords = primaryCustomerIds.length > 0 ? await db.select({
+  const primaryRecords = primaryCustomerIds.length > 0 ? await monthlyServiceRecordsRepo.selectColumnsFrom({
     customerId: monthlyServiceRecords.customerId,
     id: monthlyServiceRecords.id,
     status: monthlyServiceRecords.status,
     recordType: monthlyServiceRecords.recordType,
-  })
-    .from(monthlyServiceRecords)
+  }, db)
     .where(and(
       inArray(monthlyServiceRecords.customerId, primaryCustomerIds),
       ...recordConditions,
     )) : [];
 
-  const backupRecords = backupCustomerIds.length > 0 ? await db.select({
+  const backupRecords = backupCustomerIds.length > 0 ? await monthlyServiceRecordsRepo.selectColumnsFrom({
     customerId: monthlyServiceRecords.customerId,
     id: monthlyServiceRecords.id,
     status: monthlyServiceRecords.status,
     recordType: monthlyServiceRecords.recordType,
-  })
-    .from(monthlyServiceRecords)
+  }, db)
     .where(and(
       eq(monthlyServiceRecords.employeeId, employeeId),
       inArray(monthlyServiceRecords.customerId, backupCustomerIds),
@@ -503,11 +493,10 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
     conditions.push(employeeFilter(employeeId));
   }
 
-  const result = await db.select({
+  const result = await appointmentsRepo.selectColumnsFrom({
     documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
     undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
-  })
-    .from(appointments)
+  }, db)
     .where(and(...conditions));
 
   return {

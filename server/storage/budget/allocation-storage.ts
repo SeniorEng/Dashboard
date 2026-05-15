@@ -16,6 +16,7 @@ import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { getBudgetPreferences, getBudgetTypeSettings, getActiveBudgetTypeSettings } from "./preferences-storage";
 import { auditService } from "../../services/audit";
+import { budgetAllocationsRepo } from "../../repos";
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
@@ -30,8 +31,7 @@ export async function createBudgetAllocation(allocation: InsertBudgetAllocation,
 
 export async function getBudgetAllocations(customerId: number, year?: number): Promise<BudgetAllocation[]> {
   if (year) {
-    return await db.select()
-      .from(budgetAllocations)
+    return await budgetAllocationsRepo.selectFrom(db)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.year, year),
@@ -39,8 +39,7 @@ export async function getBudgetAllocations(customerId: number, year?: number): P
       ))
       .orderBy(asc(budgetAllocations.month), asc(budgetAllocations.validFrom));
   }
-  return await db.select()
-    .from(budgetAllocations)
+  return await budgetAllocationsRepo.selectFrom(db)
     .where(and(eq(budgetAllocations.customerId, customerId), isNull(budgetAllocations.deletedAt)))
     .orderBy(desc(budgetAllocations.year), asc(budgetAllocations.month));
 }
@@ -49,8 +48,7 @@ export async function upsertInitialBalanceAllocation(
   params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string },
   userId?: number
 ): Promise<void> {
-  const allExisting = await db.select({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt })
-    .from(budgetAllocations)
+  const allExisting = await budgetAllocationsRepo.selectColumnsFrom({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt }, db)
     .where(and(
       eq(budgetAllocations.customerId, params.customerId),
       eq(budgetAllocations.budgetType, params.budgetType),
@@ -141,8 +139,7 @@ export async function upsertInitialBalanceAllocation(
 export async function getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]> {
   // Startwert-Historie darf ausschließlich manuelle initial_balance-Einträge enthalten.
   // Carryover-Einträge entstehen automatisch und gehören nicht in die Startwert-Sektion (Task #101).
-  return db.select()
-    .from(budgetAllocations)
+  return budgetAllocationsRepo.selectFrom(db)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
@@ -224,8 +221,7 @@ export async function calculateAllocatedCents(
     calculated = await calculateAllocated39_42a(customerId, opts, d, preferences, typeSettings);
   }
 
-  const manualAdjustments = await d.select()
-    .from(budgetAllocations)
+  const manualAdjustments = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
@@ -317,8 +313,7 @@ async function calculateAllocated45b(
 ): Promise<number> {
   const { year: curYear, month: curMonth } = currentYearAndMonth();
 
-  const existingAllocations = await d.select()
-    .from(budgetAllocations)
+  const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -357,10 +352,10 @@ async function calculateAllocated45b(
   let allocStartYear = startDate.getFullYear();
   let allocStartMonth = startDate.getMonth() + 1;
 
-  const deletedIbEntries = await d.select({
+  const deletedIbEntries = await budgetAllocationsRepo.selectColumnsFrom({
     year: budgetAllocations.year,
     month: budgetAllocations.month,
-  }).from(budgetAllocations)
+  }, d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -497,8 +492,7 @@ async function calculateAllocated45a(
 
   let startDateStr = preferences?.budgetStartDate ?? null;
 
-  const existingAllocations = await d.select()
-    .from(budgetAllocations)
+  const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "umwandlung_45a"),
@@ -613,8 +607,7 @@ async function calculateAllocated39_42a(
   let startDateStr = preferences?.budgetStartDate ?? null;
 
   if (!startDateStr) {
-    const existingAllocations = await d.select()
-      .from(budgetAllocations)
+    const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
       .where(and(
         eq(budgetAllocations.customerId, customerId),
         eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
@@ -644,8 +637,7 @@ async function calculateAllocated39_42a(
     startDateStr = `${curYear}-01-01`;
   }
 
-  const initialBalances = await d.select()
-    .from(budgetAllocations)
+  const initialBalances = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "ersatzpflege_39_42a"),
@@ -699,8 +691,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   const d = _tx ?? db;
   const { year: curYear } = currentYearAndMonth();
 
-  const carryoverAllocations = await d.select()
-    .from(budgetAllocations)
+  const carryoverAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -713,8 +704,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   const preferences = await getBudgetPreferences(customerId, _tx);
   const typeSettings = await getBudgetTypeSettings(customerId, _tx);
 
-  const allAllocations = await d.select()
-    .from(budgetAllocations)
+  const allAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
@@ -893,8 +883,7 @@ export async function processExpiredCarryover(customerId: number, _tx?: DbClient
   const d = _tx ?? db;
   const today = todayISO();
 
-  const expiredAllocations = await d.select()
-    .from(budgetAllocations)
+  const expiredAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),

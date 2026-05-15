@@ -12,6 +12,7 @@ import {
 import { eq, and, isNull, isNotNull, desc, gte, lte, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { paymentAdvicesRepo } from "../repos";
 
 interface PaymentAdviceWithItems extends PaymentAdvice {
   items: PaymentAdviceItem[];
@@ -138,15 +139,13 @@ class QontoStorage {
   }
 
   async findDuplicateAdvice(fileName: string, avisNummer?: string | null, gesamtBetragCents?: number | null, zahlungsDatum?: string | null): Promise<PaymentAdvice | null> {
-    const fileMatch = await db.select()
-      .from(paymentAdvices)
+    const fileMatch = await paymentAdvicesRepo.selectFrom(db)
       .where(and(eq(paymentAdvices.fileName, fileName), isNull(paymentAdvices.deletedAt)))
       .limit(1);
     if (fileMatch.length > 0) return fileMatch[0];
 
     if (avisNummer && gesamtBetragCents != null && zahlungsDatum) {
-      const fieldMatch = await db.select()
-        .from(paymentAdvices)
+      const fieldMatch = await paymentAdvicesRepo.selectFrom(db)
         .where(and(
           eq(paymentAdvices.avisNummer, avisNummer),
           eq(paymentAdvices.gesamtBetragCents, gesamtBetragCents),
@@ -193,8 +192,7 @@ class QontoStorage {
   }
 
   async getPaymentAdvices(): Promise<PaymentAdviceWithItems[]> {
-    const advices = await db.select()
-      .from(paymentAdvices)
+    const advices = await paymentAdvicesRepo.selectFrom(db)
       .where(isNull(paymentAdvices.deletedAt))
       .orderBy(desc(paymentAdvices.uploadedAt));
 
@@ -219,8 +217,7 @@ class QontoStorage {
   }
 
   async getPaymentAdviceById(id: number): Promise<PaymentAdviceWithItems | null> {
-    const [advice] = await db.select()
-      .from(paymentAdvices)
+    const [advice] = await paymentAdvicesRepo.selectFrom(db)
       .where(and(eq(paymentAdvices.id, id), isNull(paymentAdvices.deletedAt)));
 
     if (!advice) return null;

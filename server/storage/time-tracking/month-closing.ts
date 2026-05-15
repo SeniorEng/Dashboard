@@ -9,6 +9,7 @@ import {
 import { db, type DbOrTx } from "../../lib/db";
 import { employeeVisibleAppointmentsFilter } from "../appointment-helpers";
 import { monthDateRange } from "./shared";
+import { appointmentsRepo, employeeTimeEntriesRepo } from "../../repos";
 
 export async function isMonthClosed(userId: number, dateStr: string): Promise<boolean> {
   const [yearStr, monthStr] = dateStr.split("-");
@@ -32,16 +33,14 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
   const { startDate, endDate } = monthDateRange(year, month);
   const employeeFilter = employeeVisibleAppointmentsFilter(userId);
 
-  const openAppointments = await db
-    .select({
+  const openAppointments = await appointmentsRepo.selectColumnsFrom({
       id: appointments.id,
       date: appointments.date,
       scheduledStart: appointments.scheduledStart,
       status: appointments.status,
       customerId: appointments.customerId,
       customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
-    })
-    .from(appointments)
+    }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(
@@ -54,16 +53,14 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
     )
     .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
 
-  const unsignedAppointments = await db
-    .select({
+  const unsignedAppointments = await appointmentsRepo.selectColumnsFrom({
       id: appointments.id,
       date: appointments.date,
       scheduledStart: appointments.scheduledStart,
       status: appointments.status,
       customerId: appointments.customerId,
       customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
-    })
-    .from(appointments)
+    }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(
@@ -77,9 +74,7 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
     )
     .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
 
-  const timeEntryCount = await db
-    .select({ count: count() })
-    .from(employeeTimeEntries)
+  const timeEntryCount = await employeeTimeEntriesRepo.selectColumnsFrom({ count: count() }, db)
     .where(
       and(
         eq(employeeTimeEntries.userId, userId),
@@ -89,9 +84,7 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
       ),
     );
 
-  const completedAppointmentCount = await db
-    .select({ count: count() })
-    .from(appointments)
+  const completedAppointmentCount = await appointmentsRepo.selectColumnsFrom({ count: count() }, db)
     .innerJoin(customers, eq(appointments.customerId, customers.id))
     .where(
       and(
@@ -137,8 +130,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
   const employeeIds = activeEmployees.map(e => e.id);
 
   const [allOpenAppts, allUnsignedAppts, allTimeEntryCounts, allCompletedCounts, allClosings] = await Promise.all([
-    db
-      .select({
+    appointmentsRepo.selectColumnsFrom({
         employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
         id: appointments.id,
         date: appointments.date,
@@ -146,8 +138,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
         status: appointments.status,
         customerId: appointments.customerId,
         customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
-      })
-      .from(appointments)
+      }, db)
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
@@ -170,8 +161,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart)),
 
-    db
-      .select({
+    appointmentsRepo.selectColumnsFrom({
         employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
         id: appointments.id,
         date: appointments.date,
@@ -179,8 +169,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
         status: appointments.status,
         customerId: appointments.customerId,
         customerName: sqlBuilder`COALESCE(${customers.vorname} || ' ' || ${customers.nachname}, ${customers.name})`.as('customer_name'),
-      })
-      .from(appointments)
+      }, db)
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
@@ -204,12 +193,10 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart)),
 
-    db
-      .select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
         userId: employeeTimeEntries.userId,
         count: count(),
-      })
-      .from(employeeTimeEntries)
+      }, db)
       .where(
         and(
           inArray(employeeTimeEntries.userId, employeeIds),
@@ -220,12 +207,10 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
       )
       .groupBy(employeeTimeEntries.userId),
 
-    db
-      .select({
+    appointmentsRepo.selectColumnsFrom({
         employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
         count: count(),
-      })
-      .from(appointments)
+      }, db)
       .innerJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(

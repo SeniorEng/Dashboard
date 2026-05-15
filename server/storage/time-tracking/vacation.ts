@@ -19,6 +19,7 @@ import {
 } from "@shared/domain/vacation";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
+import { employeeTimeEntriesRepo } from "../../repos";
 
 // Drizzles `numeric`-Typ liefert Strings; nach außen geben wir reine Zahlen weiter.
 function normalizeAllowance(row: typeof employeeVacationAllowance.$inferSelect): EmployeeVacationAllowance {
@@ -187,11 +188,10 @@ export async function getVacationSummary(
       vacationDaysPerYear: users.vacationDaysPerYear,
     }).from(users).where(eq(users.id, userId)).then(r => r[0]),
     getVacationAllowance(userId, year),
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       entryType: employeeTimeEntries.entryType,
       entryDate: employeeTimeEntries.entryDate,
-    })
-      .from(employeeTimeEntries)
+    }, db)
       .where(
         and(
           eq(employeeTimeEntries.userId, userId),
@@ -291,11 +291,10 @@ async function computeFallbackEntitlementAndCarryOver(
 ): Promise<{ entitlement: number; rawCarryOver: number }> {
   const [prevAllowanceResult, prevYearAbsence] = await Promise.all([
     getVacationAllowance(userId, year - 1),
-    db.select({
+    employeeTimeEntriesRepo.selectColumnsFrom({
       entryType: employeeTimeEntries.entryType,
       entryDate: employeeTimeEntries.entryDate,
-    })
-      .from(employeeTimeEntries)
+    }, db)
       .where(
         and(
           eq(employeeTimeEntries.userId, userId),

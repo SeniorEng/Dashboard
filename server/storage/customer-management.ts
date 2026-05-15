@@ -61,6 +61,7 @@ interface PaginationOptions {
 }
 
 import type { PaginatedResult } from "@shared/types";
+import { customersRepo } from "../repos";
 
 interface CustomerListItem {
   id: number;
@@ -235,9 +236,7 @@ class CustomerManagementStorage {
     }
     const fullWhereClause = fullConditions.length > 0 ? and(...fullConditions) : undefined;
 
-    let countQueryBuilder = db
-      .select({ count: count() })
-      .from(customers)
+    let countQueryBuilder = customersRepo.selectColumnsFrom({ count: count() }, db)
       .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId));
     if (insuranceSubquery) {
       countQueryBuilder = countQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
@@ -249,8 +248,7 @@ class CustomerManagementStorage {
     const backupUser = alias(users, "backup_user");
     const backupUser2 = alias(users, "backup_user2");
 
-    let dataQueryBuilder = db
-      .select({
+    let dataQueryBuilder = customersRepo.selectColumnsFrom({
         id: customers.id,
         name: customers.name,
         vorname: customers.vorname,
@@ -274,8 +272,7 @@ class CustomerManagementStorage {
         backupEmployee2Name: backupUser2.displayName,
         hasActiveContract: activeContractSubquery.hasContract,
         hasBetreuer: betreuerSubquery.hasBetreuer,
-      })
-      .from(customers)
+      }, db)
       .leftJoin(users, eq(customers.primaryEmployeeId, users.id))
       .leftJoin(backupUser, eq(customers.backupEmployeeId, backupUser.id))
       .leftJoin(backupUser2, eq(customers.backupEmployeeId2, backupUser2.id))
@@ -364,9 +361,7 @@ class CustomerManagementStorage {
   }
 
   async getUnassignedActiveCustomerCount(): Promise<number> {
-    const result = await db
-      .select({ count: count() })
-      .from(customers)
+    const result = await customersRepo.selectColumnsFrom({ count: count() }, db)
       .where(
         and(
           isNull(customers.deletedAt),
@@ -380,7 +375,7 @@ class CustomerManagementStorage {
   }
 
   async getCustomerWithDetails(customerId: number): Promise<CustomerWithDetails | undefined> {
-    const customerResult = await db.select().from(customers).where(eq(customers.id, customerId));
+    const customerResult = await customersRepo.selectFrom(db).where(eq(customers.id, customerId));
     if (customerResult.length === 0) return undefined;
     
     const customer = customerResult[0];
@@ -458,7 +453,7 @@ class CustomerManagementStorage {
     return await db.transaction(async (tx) => {
     const updateData: any = { ...data, updatedAt: new Date() };
     
-    const existing = await tx.select().from(customers).where(eq(customers.id, id)).for("update");
+    const existing = await customersRepo.selectFrom(tx).where(eq(customers.id, id)).for("update");
     if (existing.length === 0) return undefined;
     
     const oldCustomer = existing[0];
@@ -566,7 +561,7 @@ class CustomerManagementStorage {
     const backup2 = backupEmployeeId2 === undefined ? undefined : backupEmployeeId2;
 
     const updated = await db.transaction(async (tx) => {
-      const [existing] = await tx.select().from(customers).where(eq(customers.id, customerId));
+      const [existing] = await customersRepo.selectFrom(tx).where(eq(customers.id, customerId));
 
       if (existing) {
         if (existing.primaryEmployeeId !== primaryEmployeeId) {
