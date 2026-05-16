@@ -265,6 +265,13 @@ async function runStartupTasks() {
       log(`Erstberatung-Kunden-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { cleanupOrphanErstberatungCustomers } = await import("./startup/cleanup-orphan-erstberatung-customers");
+    try {
+      await cleanupOrphanErstberatungCustomers();
+    } catch (err) {
+      log(`Erstberatung-Waisen-Bereinigung fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { ensureErstberatungProspectLinkConstraint } = await import("./startup/ensure-erstberatung-prospect-link");
     try {
       await ensureErstberatungProspectLinkConstraint();
