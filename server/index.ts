@@ -272,12 +272,16 @@ async function runStartupTasks() {
       log(`Erstberatung-Waisen-Bereinigung fehlgeschlagen: ${err}`, "startup");
     }
 
-    const { ensureErstberatungProspectLinkConstraint } = await import("./startup/ensure-erstberatung-prospect-link");
-    try {
-      await ensureErstberatungProspectLinkConstraint();
-    } catch (err) {
-      log(`Erstberatung-Prospect-Link-Constraint fehlgeschlagen: ${err}`, "startup");
-    }
+    // Task #510-Constraint per Startup-DDL deaktiviert: Die Skill
+    // `database/references/database-migrations-on-publish.md` verbietet
+    // Schema-DDL aus dem App-Startup heraus, weil Replit Publishing den
+    // Dev-DB-Diff nach Prod überträgt und an noch-vorhandenen Bestands-
+    // Waisen scheitert (siehe Deploy-Fehler 2026-05-18). Der Schutz vor
+    // neuen Waisen erfolgt jetzt allein über den Storage-Layer-Guard
+    // `assertErstberatungHasProspectLink` (Task #512). Bestehende Waisen
+    // räumt cleanup-orphan-erstberatung-customers beim ersten Prod-Start
+    // auf; das Constraint kann später deklarativ in shared/schema/
+    // customers.ts ergänzt werden, sobald Prod sauber ist.
 
     const { migrateProspectStatuses } = await import("./startup/migrate-prospect-statuses");
     try {
