@@ -188,11 +188,6 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                       <p className="text-xs text-gray-500">{BUDGET_HINTS[budgetType]}</p>
                     </>
                   )}
-                  {budgetType === "entlastungsbetrag_45b" && (
-                    <p className="text-xs text-gray-700" data-testid="info-45b-yearly-pot">
-                      §45b ist ein Jahrestopf mit monatlicher Aufstockung von 131&nbsp;€/Monat (gesetzl. Maximum). Es gibt keinen Monats-Cap — verfügbar ist immer der bis zum Termindatum aufgelaufene Betrag minus bereits gebuchter Beträge. Den nicht verbrauchten Vorjahresanteil kannst du unten als Übertrag erfassen.
-                    </p>
-                  )}
                   {budgetType === "umwandlung_45a" && pflegegrad && pflegegrad >= 2 && (
                     <p className="text-xs text-purple-600" data-testid="text-max-pflegesachleistungen">
                       Maximal: {(BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad] ?? 0) / 100} € für Pflegegrad {pflegegrad}
