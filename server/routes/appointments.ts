@@ -509,12 +509,21 @@ router.get("/undocumented/by-customer", asyncHandler("Fehler beim Laden der offe
   }
   const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string, 10) : undefined;
   const adminScope = user.isAdmin || isTeamLead(user);
+  // Scope-Parität mit /appointments/undocumented:
+  // - Admin/Teamlead ohne viewAs → globale Sicht (kein Employee-Filter); via isPrimary=true erzwungen.
+  // - Admin/Teamlead mit viewAs → Sicht des gewählten Mitarbeiters.
+  // - Mitarbeiter → eigene Sicht (assigned/performed), isPrimary nach Primary-Liste.
   const effectiveEmployeeId = adminScope && viewAsEmployeeId ? viewAsEmployeeId : user.id;
 
   if (!(await checkCustomerAccess(user, customerId, res))) return;
 
-  const primaryIds = await storage.getPrimaryCustomerIds(effectiveEmployeeId);
-  const isPrimary = primaryIds.includes(customerId);
+  let isPrimary: boolean;
+  if (adminScope && !viewAsEmployeeId) {
+    isPrimary = true;
+  } else {
+    const primaryIds = await storage.getPrimaryCustomerIds(effectiveEmployeeId);
+    isPrimary = primaryIds.includes(customerId);
+  }
   const appointments = await storage.getUndocumentedAppointmentsForPeriod(
     customerId,
     effectiveEmployeeId,
