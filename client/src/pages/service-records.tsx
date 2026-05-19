@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/datetime";
+import { computeMonthCloseCutoff, daysUntilCutoff, previousMonth } from "@shared/utils/month-close-cutoff";
 import { Link, useLocation, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
@@ -328,106 +329,17 @@ export default function ServiceRecordsPage() {
       )}
 
       {/* Customer detail view */}
-      {customerId && periodCheck && (() => {
-        const hasRecords = !!(records && records.length > 0);
-        const hasUndocumented = periodCheck.undocumentedCount > 0;
-        const hasAnyAppointments = periodCheck.documentedCount > 0 || periodCheck.undocumentedCount > 0;
-        const showEmptyState = !hasRecords && !hasAnyAppointments;
-
-        return (
-          <div className="flex flex-col gap-3">
-            {/* Show existing records (both single and monthly) */}
-            {hasRecords && (
-              <div className="flex flex-col gap-3">
-                {records!.map((record) => (
-                  <ServiceRecordCard key={record.id} record={record} />
-                ))}
-              </div>
-            )}
-
-            {/* Open appointments warning - independent of existing records */}
-            {hasUndocumented && (
-              <Card className="border-amber-200 bg-amber-50/50">
-                <CardContent className="py-6">
-                  <div className="text-center space-y-4">
-                    <div className="mx-auto w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
-                      <AlertCircle className={`${iconSize.lg} text-amber-600`} />
-                    </div>
-                    <div>
-                      <p className="font-medium text-amber-700">
-                        {periodCheck.undocumentedCount} {periodCheck.undocumentedCount === 1 ? "Termin" : "Termine"} noch offen
-                      </p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Dokumentieren Sie alle Termine, um den Leistungsnachweis zu erstellen.
-                      </p>
-                    </div>
-                    <Link href={`/service-records/open?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`}>
-                      <Button variant="outline" className="w-full sm:w-auto" data-testid="button-to-appointments">
-                        Offene Termine anzeigen
-                      </Button>
-                    </Link>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Create monthly LN block when possible */}
-            {periodCheck.canCreateRecord && (
-              <Card>
-                <CardContent className="py-6">
-                  <div className="text-center space-y-4">
-                    <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-                      <Check className={`${iconSize.lg} text-green-600`} />
-                    </div>
-                    <div>
-                      <p className="font-medium text-green-700">
-                        {periodCheck.uncoveredDocumentedCount} {periodCheck.uncoveredDocumentedCount === 1 ? "Termin" : "Termine"} bereit für Leistungsnachweis
-                      </p>
-                      {(periodCheck.coveredBySingleCount > 0 || periodCheck.coveredByMonthlyCount > 0) && (
-                        <p className="text-sm text-blue-600 mt-1">
-                          {periodCheck.coveredBySingleCount > 0 && `${periodCheck.coveredBySingleCount} in Einzeltermin-LN`}
-                          {periodCheck.coveredBySingleCount > 0 && periodCheck.coveredByMonthlyCount > 0 && ", "}
-                          {periodCheck.coveredByMonthlyCount > 0 && `${periodCheck.coveredByMonthlyCount} in monatlichem LN`}
-                        </p>
-                      )}
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Sie können einen monatlichen Leistungsnachweis für die verbleibenden {periodCheck.uncoveredDocumentedCount} Termine erstellen.
-                      </p>
-                    </div>
-                    <Button
-                      onClick={() => createRecordMutation.mutate()}
-                      disabled={createRecordMutation.isPending}
-                      size="lg"
-                      className="w-full sm:w-auto"
-                      data-testid="button-create-record"
-                    >
-                      {createRecordMutation.isPending ? (
-                        <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
-                      ) : (
-                        <Plus className={`${iconSize.sm} mr-2`} />
-                      )}
-                      Monatlichen Leistungsnachweis erstellen
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Empty state only when nothing exists */}
-            {showEmptyState && (
-              <Card className="border-dashed">
-                <CardContent className="py-10">
-                  <EmptyState
-                    icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
-                    title={`Keine Termine für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
-                    description="Es wurden keine Termine für diesen Kunden in diesem Monat geplant."
-                  />
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        );
-      })()}
+      {customerId && periodCheck && (
+        <CustomerDetailView
+          periodCheck={periodCheck}
+          records={records ?? []}
+          customerId={customerId}
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          onCreateRecord={() => createRecordMutation.mutate()}
+          isCreating={createRecordMutation.isPending}
+        />
+      )}
     </Layout>
   );
 }
@@ -486,6 +398,226 @@ function PendingListItem({ record, onSelect }: { record: MonthlyServiceRecord; o
         </CardContent>
       </Card>
     </button>
+  );
+}
+
+interface CustomerDetailViewProps {
+  periodCheck: PeriodCheckResponse;
+  records: MonthlyServiceRecord[];
+  customerId: number;
+  selectedYear: number;
+  selectedMonth: number;
+  onCreateRecord: () => void;
+  isCreating: boolean;
+}
+
+function getTodayIsoBerlin(): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(new Date());
+}
+
+interface DeadlineInfo {
+  text: string;
+  tone: "muted" | "amber" | "red";
+}
+
+function computeDeadlineInfo(selectedYear: number, selectedMonth: number): DeadlineInfo | null {
+  const today = getTodayIsoBerlin();
+  const prev = previousMonth(today);
+  // Frist-Hinweis nur, wenn der gewählte Monat der Vormonat ist.
+  if (prev.year !== selectedYear || prev.month !== selectedMonth) return null;
+  const cutoff = computeMonthCloseCutoff(selectedYear, selectedMonth);
+  const days = daysUntilCutoff(today, selectedYear, selectedMonth);
+  const cutoffLabel = formatDateForDisplay(cutoff);
+  if (days < 0) {
+    return { text: `Monatsabschluss-Frist überschritten (${cutoffLabel})`, tone: "red" };
+  }
+  if (days === 0) {
+    return { text: `Monatsabschluss heute (${cutoffLabel})`, tone: "red" };
+  }
+  if (days === 1) {
+    return { text: `Monatsabschluss morgen (${cutoffLabel})`, tone: "amber" };
+  }
+  return { text: `Monatsabschluss in ${days} Tagen (${cutoffLabel})`, tone: days <= 3 ? "amber" : "muted" };
+}
+
+function DeadlineHint({ info }: { info: DeadlineInfo }) {
+  const cls =
+    info.tone === "red"
+      ? "text-red-600"
+      : info.tone === "amber"
+      ? "text-amber-700"
+      : "text-muted-foreground";
+  return (
+    <span className={`text-xs ${cls}`} data-testid="text-deadline-hint">
+      {info.text}
+    </span>
+  );
+}
+
+function CustomerDetailView({
+  periodCheck,
+  records,
+  customerId,
+  selectedYear,
+  selectedMonth,
+  onCreateRecord,
+  isCreating,
+}: CustomerDetailViewProps) {
+  const completedRecordsCount = records.filter((r) => r.status === "completed").length;
+  const coveredAppointments = periodCheck.coveredBySingleCount + periodCheck.coveredByMonthlyCount;
+  const readyCount = periodCheck.uncoveredDocumentedCount;
+  const undocumentedCount = periodCheck.undocumentedCount;
+  const hasRecords = records.length > 0;
+  const hasAnyAppointments = periodCheck.documentedCount > 0 || undocumentedCount > 0;
+  const showEmptyState = !hasRecords && !hasAnyAppointments;
+
+  const deadline = computeDeadlineInfo(selectedYear, selectedMonth);
+  const showStatusHeader = completedRecordsCount > 0 || readyCount > 0 || undocumentedCount > 0;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {showStatusHeader && (
+        <Card data-testid="card-status-header">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex flex-col divide-y divide-border">
+              {completedRecordsCount > 0 && (
+                <div
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                  data-testid="status-completed"
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="mt-0.5 shrink-0 w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                      <Check className={`${iconSize.sm} text-green-600`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-green-700" data-testid="text-completed-label">
+                        {completedRecordsCount} {completedRecordsCount === 1 ? "Leistungsnachweis" : "Leistungsnachweise"} abgeschlossen
+                      </p>
+                      {coveredAppointments > 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          {coveredAppointments} {coveredAppointments === 1 ? "Termin" : "Termine"} abgedeckt
+                          {(periodCheck.coveredBySingleCount > 0 || periodCheck.coveredByMonthlyCount > 0) && " ("}
+                          {periodCheck.coveredBySingleCount > 0 && `${periodCheck.coveredBySingleCount} Einzel`}
+                          {periodCheck.coveredBySingleCount > 0 && periodCheck.coveredByMonthlyCount > 0 && ", "}
+                          {periodCheck.coveredByMonthlyCount > 0 && `${periodCheck.coveredByMonthlyCount} monatlich`}
+                          {(periodCheck.coveredBySingleCount > 0 || periodCheck.coveredByMonthlyCount > 0) && ")"}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {readyCount > 0 && (
+                <div
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                  data-testid="status-ready"
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="mt-0.5 shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                      <FileText className={`${iconSize.sm} text-primary`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium" data-testid="text-ready-label">
+                        {readyCount} {readyCount === 1 ? "Termin" : "Termine"} bereit für Leistungsnachweis
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Monatlichen Leistungsnachweis für {readyCount === 1 ? "diesen Termin" : `diese ${readyCount} Termine`} erstellen.
+                      </p>
+                      {deadline && (
+                        <div className="mt-1">
+                          <DeadlineHint info={deadline} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {periodCheck.canCreateRecord && (
+                    <Button
+                      onClick={onCreateRecord}
+                      disabled={isCreating}
+                      className="w-full sm:w-auto shrink-0"
+                      data-testid="button-create-record"
+                    >
+                      {isCreating ? (
+                        <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
+                      ) : (
+                        <Plus className={`${iconSize.sm} mr-2`} />
+                      )}
+                      Monatlichen Leistungsnachweis erstellen
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {undocumentedCount > 0 && (
+                <div
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                  data-testid="status-undocumented"
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="mt-0.5 shrink-0 w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
+                      <AlertCircle className={`${iconSize.sm} text-amber-600`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-amber-700" data-testid="text-undocumented-label">
+                        {undocumentedCount} {undocumentedCount === 1 ? "Termin" : "Termine"} noch nicht dokumentiert
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Termine dokumentieren, damit der Leistungsnachweis erstellt werden kann.
+                      </p>
+                      {deadline && (
+                        <div className="mt-1">
+                          <DeadlineHint info={deadline} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <Link
+                    href={`/service-records/open?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`}
+                    className="w-full sm:w-auto shrink-0"
+                  >
+                    <Button variant="outline" className="w-full sm:w-auto" data-testid="button-to-appointments">
+                      Offene Termine anzeigen
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {hasRecords && (
+        <div className="flex flex-col gap-2" data-testid="section-existing-records">
+          <h2 className="text-sm font-medium text-muted-foreground px-1">
+            Bereits erstellte Leistungsnachweise
+          </h2>
+          <div className="flex flex-col gap-2">
+            {records.map((record) => (
+              <ServiceRecordCard key={record.id} record={record} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showEmptyState && (
+        <Card className="border-dashed">
+          <CardContent className="py-10">
+            <EmptyState
+              icon={<FileText className={`${iconSize["2xl"]} text-muted-foreground/40`} />}
+              title={`Keine Termine für ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+              description="Es wurden keine Termine für diesen Kunden in diesem Monat geplant."
+            />
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 
