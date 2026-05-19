@@ -8,14 +8,20 @@ import { SignaturePad, SignatureDisplay } from "@/components/ui/signature-pad";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { ErrorState } from "@/components/patterns/error-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { 
-  Loader2, Calendar, User, Clock, MapPin, 
+import {
+  Loader2, Calendar, User, Clock, MapPin,
   ChevronRight, Check, AlertCircle, FileText, ArrowLeft, Plus
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { formatDateForDisplay } from "@shared/utils/datetime";
-import { computeMonthCloseCutoff, daysUntilCutoff, previousMonth } from "@shared/utils/month-close-cutoff";
 import { Link, useLocation, useSearch } from "wouter";
+import {
+  OverviewSections,
+  type CustomerOverviewItem,
+} from "@/features/service-records/components/overview-sections";
+import {
+  DeadlineHint,
+  computeDeadlineInfo,
+} from "@/features/service-records/components/deadline-hint";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -33,21 +39,6 @@ interface PeriodCheckResponse {
   coveredBySingleCount: number;
   coveredByMonthlyCount: number;
   uncoveredDocumentedCount: number;
-  canCreateRecord: boolean;
-}
-
-interface CustomerOverviewItem {
-  customerId: number;
-  customerName: string;
-  existingRecord: { id: number; status: string } | null;
-  singleRecords: { id: number; status: string; recordType: string }[];
-  documentedCount: number;
-  undocumentedCount: number;
-  totalAppointments: number;
-  coveredBySingleCount: number;
-  coveredByMonthlyCount: number;
-  uncoveredDocumentedCount: number;
-  status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
   canCreateRecord: boolean;
 }
 
@@ -319,11 +310,12 @@ export default function ServiceRecordsPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="flex flex-col gap-3">
-              {overview.map((item) => (
-                <CustomerOverviewCard key={item.customerId} item={item} selectedYear={selectedYear} selectedMonth={selectedMonth} />
-              ))}
-            </div>
+            <OverviewSections
+              overview={overview}
+              selectedYear={selectedYear}
+              selectedMonth={selectedMonth}
+              monthLabel={`${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+            />
           )}
         </>
       )}
@@ -409,55 +401,6 @@ interface CustomerDetailViewProps {
   selectedMonth: number;
   onCreateRecord: () => void;
   isCreating: boolean;
-}
-
-function getTodayIsoBerlin(): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Berlin",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(new Date());
-}
-
-interface DeadlineInfo {
-  text: string;
-  tone: "muted" | "amber" | "red";
-}
-
-function computeDeadlineInfo(selectedYear: number, selectedMonth: number): DeadlineInfo | null {
-  const today = getTodayIsoBerlin();
-  const prev = previousMonth(today);
-  // Frist-Hinweis nur, wenn der gewählte Monat der Vormonat ist.
-  if (prev.year !== selectedYear || prev.month !== selectedMonth) return null;
-  const cutoff = computeMonthCloseCutoff(selectedYear, selectedMonth);
-  const days = daysUntilCutoff(today, selectedYear, selectedMonth);
-  const cutoffLabel = formatDateForDisplay(cutoff);
-  if (days < 0) {
-    return { text: `Monatsabschluss-Frist überschritten (${cutoffLabel})`, tone: "red" };
-  }
-  if (days === 0) {
-    return { text: `Monatsabschluss heute (${cutoffLabel})`, tone: "red" };
-  }
-  if (days === 1) {
-    return { text: `Monatsabschluss morgen (${cutoffLabel})`, tone: "amber" };
-  }
-  return { text: `Monatsabschluss in ${days} Tagen (${cutoffLabel})`, tone: days <= 3 ? "amber" : "muted" };
-}
-
-function DeadlineHint({ info }: { info: DeadlineInfo }) {
-  const cls =
-    info.tone === "red"
-      ? "text-red-600"
-      : info.tone === "amber"
-      ? "text-amber-700"
-      : "text-muted-foreground";
-  return (
-    <span className={`text-xs ${cls}`} data-testid="text-deadline-hint">
-      {info.text}
-    </span>
-  );
 }
 
 function CustomerDetailView({
@@ -664,113 +607,3 @@ function ServiceRecordCard({ record }: ServiceRecordCardProps) {
   );
 }
 
-interface CustomerOverviewCardProps {
-  item: CustomerOverviewItem;
-  selectedYear: number;
-  selectedMonth: number;
-}
-
-
-function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOverviewCardProps) {
-  const singleRecords = item.singleRecords || [];
-  const deadline = computeDeadlineInfo(selectedYear, selectedMonth);
-  const hasOpenAction = item.undocumentedCount > 0 || item.uncoveredDocumentedCount > 0;
-
-  // Route to the customer action flow whenever any open action exists; only
-  // deep-link to the existing monthly record when nothing is left to do.
-  const href = !hasOpenAction && item.existingRecord
-    ? `/service-records/${item.existingRecord.id}`
-    : `/service-records?customerId=${item.customerId}`;
-
-  const singleRecordsSummary = useMemo(() => {
-    if (singleRecords.length === 0) return null;
-    const pending = singleRecords.filter(r => r.status === "pending").length;
-    const employeeSigned = singleRecords.filter(r => r.status === "employee_signed").length;
-    const completed = singleRecords.filter(r => r.status === "completed").length;
-    const parts: string[] = [];
-    if (pending > 0) parts.push(`${pending} ausstehend`);
-    if (employeeSigned > 0) parts.push(`${employeeSigned} MA unterschrieben`);
-    if (completed > 0) parts.push(`${completed} abgeschlossen`);
-    return `${singleRecords.length} Einzeltermin-LN (${parts.join(", ")})`;
-  }, [singleRecords]);
-
-  const completedSingleCount = singleRecords.filter(r => r.status === "completed").length;
-  const monthlyCompleted = item.existingRecord?.status === "completed" ? 1 : 0;
-  const completedTotal = completedSingleCount + monthlyCompleted;
-
-  const undocumentedTone = deadline?.tone === "red" ? "text-red-600" : "text-amber-700";
-
-  return (
-    <Link href={href}>
-      <Card data-testid={`card-overview-${item.customerId}`}>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-1 min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <User className={`${iconSize.sm} text-muted-foreground`} />
-                <span className="font-medium" data-testid={`text-customer-${item.customerId}`}>
-                  {item.customerName}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                <span className="text-muted-foreground">
-                  {item.totalAppointments} {item.totalAppointments === 1 ? "Termin" : "Termine"}
-                </span>
-                {item.uncoveredDocumentedCount > 0 && (
-                  <span
-                    className="text-primary font-medium"
-                    data-testid={`text-ready-${item.customerId}`}
-                  >
-                    {item.uncoveredDocumentedCount} bereit
-                  </span>
-                )}
-                {item.undocumentedCount > 0 && (
-                  <span
-                    className={undocumentedTone}
-                    data-testid={`text-undocumented-${item.customerId}`}
-                  >
-                    {item.undocumentedCount} offen
-                  </span>
-                )}
-                {!hasOpenAction && completedTotal > 0 && (
-                  <span
-                    className="text-green-700"
-                    data-testid={`text-completed-${item.customerId}`}
-                  >
-                    {completedTotal} abgeschlossen
-                  </span>
-                )}
-                {!hasOpenAction && completedTotal === 0 && item.documentedCount > 0 && (
-                  <span className="text-muted-foreground">
-                    {item.documentedCount} dokumentiert
-                  </span>
-                )}
-              </div>
-              {hasOpenAction && deadline && (
-                <div className="mt-1">
-                  <DeadlineHint info={deadline} />
-                </div>
-              )}
-              <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                {item.existingRecord && (
-                  <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-monthly">
-                    Monatlich
-                  </Badge>
-                )}
-                {singleRecords.length > 0 && (
-                  <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-single">
-                    {singleRecordsSummary}
-                  </Badge>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-3 shrink-0">
-              <StatusBadge type="record" value={item.status} />
-              <ChevronRight className={`${iconSize.sm} text-muted-foreground`} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
