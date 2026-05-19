@@ -62,10 +62,23 @@ function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
       ready.push(it);
       continue;
     }
+    // No open work. If any record is still awaiting signatures
+    // (pending/employee_signed), the customer is handled by the pending
+    // banner and must NOT appear in any section here (otherwise we get the
+    // "Abgeschlossen" mis-label the user complained about).
+    const hasPendingRecord =
+      (it.existingRecord !== null && it.existingRecord.status !== "completed") ||
+      it.singleRecords.some((r) => r.status !== "completed");
+    if (hasPendingRecord) continue;
+
     const hasCompletedRecord =
       it.existingRecord?.status === "completed" ||
       it.singleRecords.some((r) => r.status === "completed");
-    if (it.totalAppointments === 0 && hasCompletedRecord) {
+    // Without a completed record there is nothing to show in the completed
+    // bucket — the customer simply has no relevant activity this month.
+    if (!hasCompletedRecord) continue;
+
+    if (it.totalAppointments === 0) {
       orphans.push(it);
     } else {
       completed.push(it);
