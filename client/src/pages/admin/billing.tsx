@@ -522,7 +522,11 @@ export default function AdminBilling() {
                                         : "-"}
                                     </td>
                                     <td className="py-2 pr-3">{item.serviceDescription}</td>
-                                    <td className="py-2 pr-3 text-right">{item.durationMinutes} Min.</td>
+                                    <td className="py-2 pr-3 text-right">
+                                      {item.serviceCode === "travel_km" || item.serviceCode === "customer_km"
+                                        ? `${item.durationMinutes} km`
+                                        : `${item.durationMinutes} Min.`}
+                                    </td>
                                     <td className={`py-2 pr-3 text-right ${displayTotal < 0 ? "text-red-600" : ""}`}>
                                       {formatAmount(displayTotal)}
                                     </td>

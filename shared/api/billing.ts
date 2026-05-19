@@ -27,6 +27,7 @@ interface InvoiceLineItem {
   id: number;
   appointmentDate: string;
   serviceDescription: string;
+  serviceCode: string | null;
   startTime: string | null;
   endTime: string | null;
   durationMinutes: number;
