@@ -54,6 +54,71 @@ export function MonthCloseBanner() {
     );
   }
 
+  const isOverdue = banner.daysUntilCutoff < 0;
+
+  if (isOverdue) {
+    const overdueDays = Math.abs(banner.daysUntilCutoff);
+    const headline = `Monatsabschluss ${monthLabel} überfällig (Cutoff war ${cutoffDe})`;
+    const hasBlockers = blockerTotal > 0;
+    const hasExpired = banner.expiredCount > 0;
+
+    const detail = hasBlockers ? (
+      <>
+        {banner.openCount > 0 && <span>{banner.openCount} offene Termine</span>}
+        {banner.openCount > 0 && banner.unsignedCount > 0 && <span> · </span>}
+        {banner.unsignedCount > 0 && <span>{banner.unsignedCount} ohne Unterschrift</span>}
+        {hasExpired && (
+          <>
+            {" · "}
+            <span>
+              {banner.expiredCount} Termin{banner.expiredCount === 1 ? "" : "e"} nicht abgerechnet
+            </span>
+          </>
+        )}
+        {" — jetzt erledigen"}
+      </>
+    ) : hasExpired ? (
+      <span>
+        {banner.expiredCount} Termin{banner.expiredCount === 1 ? "" : "e"} nicht abgerechnet
+      </span>
+    ) : (
+      <span>
+        Cutoff vor {overdueDays} Tag{overdueDays === 1 ? "" : "en"} verstrichen — Abschluss steht aus
+      </span>
+    );
+
+    const content = (
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="font-medium">{headline}</div>
+          <div className="text-xs opacity-90">{detail}</div>
+        </div>
+      </div>
+    );
+
+    if (hasBlockers) {
+      return (
+        <Link
+          href="/time-entries"
+          className="block px-4 py-2 border-b text-sm hover:opacity-90 bg-rose-50 border-rose-200 text-rose-800"
+          data-testid="banner-month-close-overdue"
+        >
+          {content}
+        </Link>
+      );
+    }
+
+    return (
+      <div
+        className="px-4 py-2 border-b text-sm bg-rose-50 border-rose-200 text-rose-800"
+        data-testid="banner-month-close-overdue"
+      >
+        {content}
+      </div>
+    );
+  }
+
   const isUrgent = banner.daysUntilCutoff <= 1;
   const headline =
     banner.daysUntilCutoff === 0
@@ -62,6 +127,23 @@ export function MonthCloseBanner() {
 
   // No blockers: still show a calm countdown row so all employees see the cutoff date.
   if (blockerTotal === 0) {
+    if (banner.expiredCount > 0) {
+      return (
+        <div
+          className="bg-teal-50 border-b border-teal-200 px-4 py-2 flex items-center gap-2 text-sm text-teal-800"
+          data-testid="banner-month-close-countdown-expired"
+        >
+          <CalendarClock className="h-4 w-4 shrink-0" />
+          <span>
+            {headline} —{" "}
+            <span className="text-rose-700 font-medium">
+              {banner.expiredCount} Termin{banner.expiredCount === 1 ? "" : "e"} nicht abgerechnet
+            </span>
+          </span>
+        </div>
+      );
+    }
+
     return (
       <div
         className="bg-teal-50 border-b border-teal-200 px-4 py-2 flex items-center gap-2 text-sm text-teal-800"
