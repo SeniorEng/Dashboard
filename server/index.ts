@@ -239,6 +239,14 @@ async function runStartupTasks() {
       log(`Invoice-LN-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #522: Drift-Fingerprint-Spalten sicherstellen.
+    const { ensureInvoiceFingerprintColumns } = await import("./startup/ensure-invoice-fingerprint-columns");
+    try {
+      await ensureInvoiceFingerprintColumns();
+    } catch (err) {
+      log(`Invoice-Fingerprint-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();

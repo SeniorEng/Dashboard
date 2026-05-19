@@ -48,6 +48,10 @@ import { withAudit } from "../lib/with-audit";
 import { readTestFaults } from "../lib/test-fault-injector";
 import { deliveryStorage } from "../storage/deliveries";
 import type { InvoicePdfData } from "../lib/pdf-generator";
+import {
+  computeInvoicePdfFingerprint,
+  computeLeistungsnachweisFingerprint,
+} from "../lib/invoice-pdf-fingerprint";
 import { getCachedCompanySettings } from "../services/cache";
 import { sendInvoiceCopyByPost } from "../services/document-delivery";
 
@@ -743,7 +747,32 @@ router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (r
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
   const lineItems = await storage.getInvoiceLineItems(id);
-  res.json({ ...invoice, lineItems });
+
+  // Task #522: Drift-Indikator — vergleicht den gespeicherten Fingerprint
+  // mit dem Live-Fingerprint aus den aktuellen Stamm-/Termin-/Unterschrifts-
+  // daten. Drift = die zugrundeliegenden Daten wurden NACH der PDF-Erstellung
+  // verändert (Rechnung muss storniert + neu erzeugt werden, GoBD).
+  let pdfDrift = false;
+  let leistungsnachweisDrift = false;
+  if (invoice.pdfDataFingerprint || invoice.leistungsnachweisDataFingerprint) {
+    try {
+      const live = await computeLiveInvoiceFingerprints(invoice);
+      if (invoice.pdfDataFingerprint && live.pdfFingerprint && invoice.pdfDataFingerprint !== live.pdfFingerprint) {
+        pdfDrift = true;
+      }
+      if (
+        invoice.leistungsnachweisDataFingerprint &&
+        live.leistungsnachweisFingerprint &&
+        invoice.leistungsnachweisDataFingerprint !== live.leistungsnachweisFingerprint
+      ) {
+        leistungsnachweisDrift = true;
+      }
+    } catch (err) {
+      console.error(`[billing/${id}] Drift-Check fehlgeschlagen:`, err);
+    }
+  }
+
+  res.json({ ...invoice, lineItems, pdfDrift, leistungsnachweisDrift });
 }));
 
 async function getBudgetSplitForAppointments(customerId: number, apptIds: number[]) {
@@ -1652,7 +1681,7 @@ async function buildInvoicePdfData(invoice: Invoice, companySettings: CompanySet
   return { pdfData, isCustomerInvoice, isPflegekasseInvoice };
 }
 
-export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null }> {
+export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null }> {
   const { pdfData, isCustomerInvoice, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
 
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
@@ -1661,16 +1690,21 @@ export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: Co
   const html = generateInvoiceHtml(pdfData);
   const { buffer } = await generatePdf(html);
   const { pdf: zugferdBuffer, xml: zugferdXml } = await embedZugferdXml(buffer, pdfData);
+  // Task #522: Fingerprint VOR der LN-Signatur-Anreicherung erfassen — der
+  // Invoice-Fingerprint deckt nur die Rechnungs-Inhalte ab.
+  const pdfDataFingerprint = computeInvoicePdfFingerprint(pdfData);
 
   // Task #521: Standalone-LN-PDF wird für ALLE Pflegekassen-Rechnungen
   // mit-erzeugt, damit es analog zum Rechnungs-PDF in Object Storage
   // gecached werden kann (verhindert Re-Render bei jedem /leistungsnachweis-Abruf).
   let leistungsnachweisPdf: Buffer | null = null;
+  let leistungsnachweisDataFingerprint: string | null = null;
   if (isPflegekasseInvoice) {
     await enrichPdfDataWithSignatures(pdfData, invoice);
     const lnHtml = generateLeistungsnachweisHtml(pdfData);
     const { buffer: lnPdfBuf } = await generatePdf(lnHtml);
     leistungsnachweisPdf = lnPdfBuf;
+    leistungsnachweisDataFingerprint = computeLeistungsnachweisFingerprint(pdfData);
   }
 
   if (isCustomerInvoice && leistungsnachweisPdf) {
@@ -1688,22 +1722,45 @@ export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: Co
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
       lp2.forEach((p) => merged.addPage(p));
     }
-    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf };
+    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint };
   }
-  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf };
+  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint };
 }
 
 // Task #521: LN-only Render — wird verwendet, wenn das Rechnungs-PDF bereits
 // rechtsverbindlich in Object Storage liegt (GoBD-Immutabilität!), aber der
 // Leistungsnachweis-Cache noch fehlt (z.B. Bestandsrechnungen vor Task #521).
-async function renderLeistungsnachweisOnly(invoice: Invoice, companySettings: CompanySettings): Promise<Buffer | null> {
+async function renderLeistungsnachweisOnly(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; fingerprint: string } | null> {
   const { pdfData, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
   if (!isPflegekasseInvoice) return null;
   const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   await enrichPdfDataWithSignatures(pdfData, invoice);
   const lnHtml = generateLeistungsnachweisHtml(pdfData);
   const { buffer: lnPdf } = await generatePdf(lnHtml);
-  return lnPdf;
+  return { pdf: lnPdf, fingerprint: computeLeistungsnachweisFingerprint(pdfData) };
+}
+
+/**
+ * Task #522: Berechnet die Live-Fingerprints (Rechnung + Leistungsnachweis)
+ * aus den aktuellen Stamm-/Termin-/Unterschriftsdaten — UNABHÄNGIG vom
+ * gespeicherten Cache. Wird zum Drift-Vergleich aufgerufen.
+ */
+async function computeLiveInvoiceFingerprints(invoice: Invoice): Promise<{
+  pdfFingerprint: string;
+  leistungsnachweisFingerprint: string | null;
+}> {
+  const companySettings = await getCachedCompanySettings();
+  if (!companySettings) {
+    return { pdfFingerprint: "", leistungsnachweisFingerprint: null };
+  }
+  const { pdfData, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
+  const pdfFingerprint = computeInvoicePdfFingerprint(pdfData);
+  let leistungsnachweisFingerprint: string | null = null;
+  if (isPflegekasseInvoice) {
+    await enrichPdfDataWithSignatures(pdfData, invoice);
+    leistungsnachweisFingerprint = computeLeistungsnachweisFingerprint(pdfData);
+  }
+  return { pdfFingerprint, leistungsnachweisFingerprint };
 }
 
 /**
@@ -1734,14 +1791,16 @@ export async function persistInvoicePdf(invoiceId: number): Promise<void> {
   const updateData: {
     pdfPath?: string;
     pdfHash?: string;
+    pdfDataFingerprint?: string;
     zugferdXml?: string;
     leistungsnachweisPath?: string;
     leistungsnachweisHash?: string;
+    leistungsnachweisDataFingerprint?: string;
   } = {};
 
   if (needsInvoicePdf) {
     // Voll-Build (Erstanlage): Invoice + XML + optional LN.
-    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf } =
+    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint } =
       await buildInvoicePdfBytes(invoice, companySettings);
     const pdfHash = computeDataHash(pdfBytes as unknown as string);
     const fileName = `invoices/${safeNumber}.pdf`;
@@ -1753,6 +1812,7 @@ export async function persistInvoicePdf(invoiceId: number): Promise<void> {
     });
     updateData.pdfPath = `/objects/${fileName}`;
     updateData.pdfHash = pdfHash;
+    updateData.pdfDataFingerprint = pdfDataFingerprint;
     // Tier-A3: ZUGFeRD-XML nur beim ersten Schreiben (GoBD-Immutabilität).
     if (zugferdXml && !invoice.zugferdXml) updateData.zugferdXml = zugferdXml;
     if (leistungsnachweisPdf && needsLeistungsnachweis) {
@@ -1766,21 +1826,25 @@ export async function persistInvoicePdf(invoiceId: number): Promise<void> {
       });
       updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
       updateData.leistungsnachweisHash = lnHash;
+      if (leistungsnachweisDataFingerprint) {
+        updateData.leistungsnachweisDataFingerprint = leistungsnachweisDataFingerprint;
+      }
     }
   } else if (needsLeistungsnachweis) {
     // GoBD-sicher: Invoice-PDF bleibt unangetastet, nur LN-PDF wird erzeugt.
-    const lnPdf = await renderLeistungsnachweisOnly(invoice, companySettings);
-    if (lnPdf) {
-      const lnHash = computeDataHash(lnPdf as unknown as string);
+    const ln = await renderLeistungsnachweisOnly(invoice, companySettings);
+    if (ln) {
+      const lnHash = computeDataHash(ln.pdf as unknown as string);
       const lnFileName = `invoices/${safeNumber}-leistungsnachweis.pdf`;
       const lnFullPath = `${getPrivateDir()}/${lnFileName}`;
       const { bucketName: lnBucket, objectName: lnObj } = parseObjectPath(lnFullPath);
-      await objectStorageClient.bucket(lnBucket).file(lnObj).save(lnPdf, {
+      await objectStorageClient.bucket(lnBucket).file(lnObj).save(ln.pdf, {
         contentType: "application/pdf",
         metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
       });
       updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
       updateData.leistungsnachweisHash = lnHash;
+      updateData.leistungsnachweisDataFingerprint = ln.fingerprint;
     }
   }
 
@@ -1825,6 +1889,19 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht erzeugt werden — bitte i
   if (cached) {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+    // Task #522: Drift-Header — wenn die Live-Daten nicht mehr zum
+    // gespeicherten Fingerprint passen, wird das PDF weiterhin GoBD-konform
+    // aus dem Cache ausgeliefert, aber Aufrufer/UI bekommen den Hinweis.
+    if (invoice.pdfDataFingerprint) {
+      try {
+        const live = await computeLiveInvoiceFingerprints(invoice);
+        if (live.pdfFingerprint && live.pdfFingerprint !== invoice.pdfDataFingerprint) {
+          res.setHeader("X-Pdf-Drift", "true");
+        }
+      } catch (err) {
+        console.error(`[billing/pdf] Drift-Check für Rechnung ${id} fehlgeschlagen:`, err);
+      }
+    }
     res.send(cached);
     return;
   }
@@ -1859,6 +1936,20 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   if (cachedLn) {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
+    // Task #522: Drift-Header für den Leistungsnachweis.
+    if (invoice.leistungsnachweisDataFingerprint) {
+      try {
+        const live = await computeLiveInvoiceFingerprints(invoice);
+        if (
+          live.leistungsnachweisFingerprint &&
+          live.leistungsnachweisFingerprint !== invoice.leistungsnachweisDataFingerprint
+        ) {
+          res.setHeader("X-Pdf-Drift", "true");
+        }
+      } catch (err) {
+        console.error(`[billing/leistungsnachweis] Drift-Check für Rechnung ${id} fehlgeschlagen:`, err);
+      }
+    }
     res.send(cachedLn);
     return;
   }

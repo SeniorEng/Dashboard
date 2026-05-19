@@ -53,6 +53,7 @@ import {
   Mail,
   Clock,
   MapPin,
+  AlertTriangle,
 } from "lucide-react";
 
 const MONTH_NAMES = [
@@ -491,6 +492,25 @@ export default function AdminBilling() {
                   {expandedInvoiceId === invoice.id && (
                     <Card className="mt-1 border-l-4 border-l-teal-500">
                       <CardContent className="py-4">
+                        {(expandedDetail?.pdfDrift || expandedDetail?.leistungsnachweisDrift) && (
+                          <div
+                            className="mb-4 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                            data-testid={`pdf-drift-warning-${invoice.id}`}
+                          >
+                            <AlertTriangle className={`${iconSize.sm} mt-0.5 flex-shrink-0 text-amber-600`} />
+                            <div>
+                              <div className="font-medium">PDF entspricht nicht mehr den aktuellen Daten</div>
+                              <div className="text-amber-800">
+                                {expandedDetail.pdfDrift && expandedDetail.leistungsnachweisDrift
+                                  ? "Rechnung und Leistungsnachweis wurden nach der PDF-Erstellung geändert."
+                                  : expandedDetail.pdfDrift
+                                  ? "Die Rechnungsdaten wurden nach der PDF-Erstellung geändert."
+                                  : "Die Leistungsnachweis-Daten (z.B. Unterschriften) wurden nach der PDF-Erstellung geändert."}
+                                {" "}Für eine korrigierte Fassung bitte Storno + Neuerstellung durchführen.
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         {detailLoading ? (
                           <div className="flex items-center justify-center py-4">
                             <Loader2 className={`${iconSize.md} animate-spin text-teal-600`} />

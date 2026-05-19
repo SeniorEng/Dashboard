@@ -37,6 +37,10 @@ interface InvoiceLineItem {
 
 export interface InvoiceDetail extends InvoiceItem {
   lineItems: InvoiceLineItem[];
+  // Task #522: Drift-Indikatoren — true, wenn die Live-Daten nicht mehr zum
+  // Fingerprint des persistierten Rechnungs- bzw. Leistungsnachweis-PDFs passen.
+  pdfDrift?: boolean;
+  leistungsnachweisDrift?: boolean;
 }
 
 export interface DeliveryRecord {

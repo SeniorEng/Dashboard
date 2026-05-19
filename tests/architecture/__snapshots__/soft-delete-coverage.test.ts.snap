@@ -61,6 +61,9 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
     "appointmentsRepo",
     "employeeTimeEntriesRepo",
   ],
+  "server/services/customer-deletion-service.ts": [
+    "prospectsRepo",
+  ],
   "server/services/document-review.ts": [
     "tasksRepo",
   ],

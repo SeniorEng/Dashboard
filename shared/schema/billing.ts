@@ -51,6 +51,12 @@ export const invoices = pgTable("invoices", {
   zugferdXml: text("zugferd_xml"),
   leistungsnachweisPath: text("leistungsnachweis_path"),
   leistungsnachweisHash: text("leistungsnachweis_hash"),
+  // Task #522: Fingerprint der PDF-Eingabedaten (kanonisch serialisiert) zur
+  // Drift-Erkennung. Beim Abruf wird ein Live-Fingerprint berechnet und
+  // verglichen — weicht er ab, wurden Stammdaten/Positionen/Unterschriften
+  // nach der PDF-Erstellung geändert.
+  pdfDataFingerprint: text("pdf_data_fingerprint"),
+  leistungsnachweisDataFingerprint: text("leistungsnachweis_data_fingerprint"),
   sentAt: timestamp("sent_at"),
   paidAt: timestamp("paid_at"),
   storniertAt: timestamp("storniert_at"),
