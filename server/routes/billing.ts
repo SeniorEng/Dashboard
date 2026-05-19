@@ -1606,7 +1606,14 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
 // Tier-A3: Liefert zusätzlich die ZUGFeRD-XML, die in `embedZugferdXml`
 // generiert wurde, sodass `persistInvoicePdf` sie als rechtsverbindlichen
 // E-Rechnungs-Inhalt in der Invoice-Zeile speichern kann.
-export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; xml: string | null }> {
+// Task #521: Baut die PDF-Eingabedaten (pdfData) inkl. Kunden-Anschrift /
+// Beihilfe-/Rechnung-an-Kunde-Logik. Wird sowohl für den Voll-Build als auch
+// für reine LN-Renders verwendet (LN-only verzichtet auf den Invoice-Render).
+async function buildInvoicePdfData(invoice: Invoice, companySettings: CompanySettings): Promise<{
+  pdfData: InvoicePdfData;
+  isCustomerInvoice: boolean;
+  isPflegekasseInvoice: boolean;
+}> {
   const lineItems = await storage.getInvoiceLineItems(invoice.id);
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
@@ -1627,6 +1634,8 @@ export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: Co
     .limit(1);
   const isCustomerInvoice = invoice.billingType === "pflegekasse_privat"
     || (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0]?.rechnungAnKunde === true);
+  const isPflegekasseInvoice = invoice.billingType === "pflegekasse_privat"
+    || invoice.billingType === "pflegekasse_gesetzlich";
   if (customerForInv.length > 0) {
     if (customerForInv[0].geburtsdatum) pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
     if (customerForInv[0].beihilfeBerechtigt) pdfData.beihilfeBerechtigt = true;
@@ -1640,6 +1649,11 @@ export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: Co
       pdfData.recipientAddress = addr || pdfData.recipientAddress;
     }
   }
+  return { pdfData, isCustomerInvoice, isPflegekasseInvoice };
+}
+
+export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null }> {
+  const { pdfData, isCustomerInvoice, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
 
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   const { embedZugferdXml } = await import("../lib/zugferd");
@@ -1648,15 +1662,22 @@ export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: Co
   const { buffer } = await generatePdf(html);
   const { pdf: zugferdBuffer, xml: zugferdXml } = await embedZugferdXml(buffer, pdfData);
 
-  if (isCustomerInvoice) {
+  // Task #521: Standalone-LN-PDF wird für ALLE Pflegekassen-Rechnungen
+  // mit-erzeugt, damit es analog zum Rechnungs-PDF in Object Storage
+  // gecached werden kann (verhindert Re-Render bei jedem /leistungsnachweis-Abruf).
+  let leistungsnachweisPdf: Buffer | null = null;
+  if (isPflegekasseInvoice) {
     await enrichPdfDataWithSignatures(pdfData, invoice);
     const lnHtml = generateLeistungsnachweisHtml(pdfData);
-    const { buffer: lnPdf } = await generatePdf(lnHtml);
+    const { buffer: lnPdfBuf } = await generatePdf(lnHtml);
+    leistungsnachweisPdf = lnPdfBuf;
+  }
 
+  if (isCustomerInvoice && leistungsnachweisPdf) {
     const { PDFDocument } = await import("pdf-lib");
     const merged = await PDFDocument.create();
     const invoiceDoc = await PDFDocument.load(zugferdBuffer);
-    const lnDoc = await PDFDocument.load(lnPdf);
+    const lnDoc = await PDFDocument.load(leistungsnachweisPdf);
     const ip = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
     ip.forEach((p) => merged.addPage(p));
     const lp = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
@@ -1667,48 +1688,119 @@ export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: Co
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
       lp2.forEach((p) => merged.addPage(p));
     }
-    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml };
+    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf };
   }
-  return { pdf: zugferdBuffer, xml: zugferdXml };
+  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf };
 }
 
+// Task #521: LN-only Render — wird verwendet, wenn das Rechnungs-PDF bereits
+// rechtsverbindlich in Object Storage liegt (GoBD-Immutabilität!), aber der
+// Leistungsnachweis-Cache noch fehlt (z.B. Bestandsrechnungen vor Task #521).
+async function renderLeistungsnachweisOnly(invoice: Invoice, companySettings: CompanySettings): Promise<Buffer | null> {
+  const { pdfData, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
+  if (!isPflegekasseInvoice) return null;
+  const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  await enrichPdfDataWithSignatures(pdfData, invoice);
+  const lnHtml = generateLeistungsnachweisHtml(pdfData);
+  const { buffer: lnPdf } = await generatePdf(lnHtml);
+  return lnPdf;
+}
+
+/**
+ * Task #521: persistInvoicePdf ist GoBD-sicher:
+ *   - Wenn die Rechnung bereits ein `pdf_path` hat, wird das Rechnungs-PDF
+ *     (und `pdf_hash`/`zugferd_xml`) NIE überschrieben — auch nicht durch
+ *     Backfill oder Cache-Miss-Hooks. Es wird ausschließlich der fehlende
+ *     Leistungsnachweis nachgereicht (für Pflegekassen-Rechnungen).
+ *   - Wenn die Rechnung noch kein `pdf_path` hat (Erstanlage), wird der
+ *     Voll-Build durchgeführt: Invoice-PDF + ZUGFeRD-XML + (bei Pflegekasse)
+ *     LN-PDF werden gemeinsam erzeugt und gespeichert.
+ *   - Wenn schon alles gecached ist (pflegekasse_privat: pdf+ln, selbstzahler:
+ *     pdf), ist die Funktion ein No-op.
+ */
 export async function persistInvoicePdf(invoiceId: number): Promise<void> {
   const invoice = await storage.getInvoice(invoiceId);
   if (!invoice) return;
   const companySettings = await getCachedCompanySettings();
   if (!companySettings) return;
 
-  const { pdf: pdfBytes, xml: zugferdXml } = await buildInvoicePdfBytes(invoice, companySettings);
-  const pdfHash = computeDataHash(pdfBytes as unknown as string);
+  const isPflegekasseInvoice = invoice.billingType === "pflegekasse_privat"
+    || invoice.billingType === "pflegekasse_gesetzlich";
+  const needsInvoicePdf = !invoice.pdfPath;
+  const needsLeistungsnachweis = isPflegekasseInvoice && !invoice.leistungsnachweisPath;
+  if (!needsInvoicePdf && !needsLeistungsnachweis) return;
 
-  const fileName = `invoices/${invoice.invoiceNumber.replace(/[^a-z0-9_-]/gi, "_")}.pdf`;
-  const fullPath = `${getPrivateDir()}/${fileName}`;
-  const { bucketName, objectName } = parseObjectPath(fullPath);
-  await objectStorageClient.bucket(bucketName).file(objectName).save(pdfBytes, {
-    contentType: "application/pdf",
-    metadata: { invoiceNumber: invoice.invoiceNumber, pdfHash },
-  });
+  const safeNumber = invoice.invoiceNumber.replace(/[^a-z0-9_-]/gi, "_");
+  const updateData: {
+    pdfPath?: string;
+    pdfHash?: string;
+    zugferdXml?: string;
+    leistungsnachweisPath?: string;
+    leistungsnachweisHash?: string;
+  } = {};
 
-  // Tier-A3: XML wird nur beim ersten Schreiben gespeichert (GoBD-Immutabilität).
-  // Spätere Re-Renders dürfen den rechtsverbindlichen Inhalt NICHT überschreiben —
-  // der Integrity-Verifier vergleicht später diesen Snapshot mit Re-Renders, um
-  // Drift sichtbar zu machen.
-  const updateData: { pdfPath: string; pdfHash: string; zugferdXml?: string } = {
-    pdfPath: `/objects/${fileName}`,
-    pdfHash,
-  };
-  if (zugferdXml && !invoice.zugferdXml) {
-    updateData.zugferdXml = zugferdXml;
+  if (needsInvoicePdf) {
+    // Voll-Build (Erstanlage): Invoice + XML + optional LN.
+    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf } =
+      await buildInvoicePdfBytes(invoice, companySettings);
+    const pdfHash = computeDataHash(pdfBytes as unknown as string);
+    const fileName = `invoices/${safeNumber}.pdf`;
+    const fullPath = `${getPrivateDir()}/${fileName}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    await objectStorageClient.bucket(bucketName).file(objectName).save(pdfBytes, {
+      contentType: "application/pdf",
+      metadata: { invoiceNumber: invoice.invoiceNumber, pdfHash },
+    });
+    updateData.pdfPath = `/objects/${fileName}`;
+    updateData.pdfHash = pdfHash;
+    // Tier-A3: ZUGFeRD-XML nur beim ersten Schreiben (GoBD-Immutabilität).
+    if (zugferdXml && !invoice.zugferdXml) updateData.zugferdXml = zugferdXml;
+    if (leistungsnachweisPdf && needsLeistungsnachweis) {
+      const lnHash = computeDataHash(leistungsnachweisPdf as unknown as string);
+      const lnFileName = `invoices/${safeNumber}-leistungsnachweis.pdf`;
+      const lnFullPath = `${getPrivateDir()}/${lnFileName}`;
+      const { bucketName: lnBucket, objectName: lnObj } = parseObjectPath(lnFullPath);
+      await objectStorageClient.bucket(lnBucket).file(lnObj).save(leistungsnachweisPdf, {
+        contentType: "application/pdf",
+        metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
+      });
+      updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
+      updateData.leistungsnachweisHash = lnHash;
+    }
+  } else if (needsLeistungsnachweis) {
+    // GoBD-sicher: Invoice-PDF bleibt unangetastet, nur LN-PDF wird erzeugt.
+    const lnPdf = await renderLeistungsnachweisOnly(invoice, companySettings);
+    if (lnPdf) {
+      const lnHash = computeDataHash(lnPdf as unknown as string);
+      const lnFileName = `invoices/${safeNumber}-leistungsnachweis.pdf`;
+      const lnFullPath = `${getPrivateDir()}/${lnFileName}`;
+      const { bucketName: lnBucket, objectName: lnObj } = parseObjectPath(lnFullPath);
+      await objectStorageClient.bucket(lnBucket).file(lnObj).save(lnPdf, {
+        contentType: "application/pdf",
+        metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
+      });
+      updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
+      updateData.leistungsnachweisHash = lnHash;
+    }
   }
 
+  if (Object.keys(updateData).length === 0) return;
   await db.update(invoicesTable)
     .set(updateData)
     .where(eq(invoicesTable.id, invoiceId));
 }
 
 async function loadInvoicePdfFromStorage(invoice: Invoice): Promise<Buffer | null> {
-  if (!invoice.pdfPath) return null;
-  let entityId = invoice.pdfPath;
+  return loadStoredPdfByPath(invoice.pdfPath);
+}
+
+async function loadLeistungsnachweisPdfFromStorage(invoice: Invoice): Promise<Buffer | null> {
+  return loadStoredPdfByPath(invoice.leistungsnachweisPath ?? null);
+}
+
+async function loadStoredPdfByPath(pdfPath: string | null): Promise<Buffer | null> {
+  if (!pdfPath) return null;
+  let entityId = pdfPath;
   if (entityId.startsWith("/objects/")) entityId = entityId.slice("/objects/".length);
   let entityDir = getPrivateDir();
   if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
@@ -1721,7 +1813,7 @@ async function loadInvoicePdfFromStorage(invoice: Invoice): Promise<Buffer | nul
   return Buffer.from(contents);
 }
 
-router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (req, res) => {
+router.get("/:id/pdf", asyncHandler("PDF konnte nicht erzeugt werden — bitte in wenigen Minuten erneut versuchen oder den Support kontaktieren.", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
   const invoice = await storage.getInvoice(id);
@@ -1737,97 +1829,68 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht generiert werden", async (
     return;
   }
 
-  const lineItems = await storage.getInvoiceLineItems(id);
-  const companySettings = await getCachedCompanySettings();
-  const { generateInvoiceHtml, generatePdf } = await import("../lib/pdf-generator");
-  
-  const pdfData = buildPdfData(invoice, lineItems, companySettings);
-
-  const customerForInv = await db.select({
-    geburtsdatum: customersTable.geburtsdatum,
-    beihilfeBerechtigt: customersTable.beihilfeBerechtigt,
-    rechnungAnKunde: customersTable.rechnungAnKunde,
-    name: customersTable.name,
-    vorname: customersTable.vorname,
-    nachname: customersTable.nachname,
-    strasse: customersTable.strasse,
-    nr: customersTable.nr,
-    plz: customersTable.plz,
-    stadt: customersTable.stadt,
-  })
-    .from(customersTable)
-    .where(eq(customersTable.id, invoice.customerId))
-    .limit(1);
-  const isCustomerInvoice = invoice.billingType === "pflegekasse_privat"
-    || (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0]?.rechnungAnKunde === true);
-  if (customerForInv.length > 0) {
-    if (customerForInv[0].geburtsdatum) {
-      pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
-    }
-    if (customerForInv[0].beihilfeBerechtigt) {
-      pdfData.beihilfeBerechtigt = true;
-    }
-    if (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0].rechnungAnKunde) {
-      pdfData.rechnungAnKunde = true;
-      const c = customerForInv[0];
-      const fullName = [c.vorname, c.nachname].filter(Boolean).join(" ") || c.name;
-      const addr = [c.strasse, c.nr].filter(Boolean).join(" ") +
-        (c.plz || c.stadt ? `\n${c.plz || ""} ${c.stadt || ""}` : "");
-      pdfData.recipientName = fullName;
-      pdfData.recipientAddress = addr || pdfData.recipientAddress;
-    }
+  // Task #521: Legacy-Rechnungen ohne persistiertes PDF — on-demand erzeugen,
+  // persistieren und aus dem Cache ausliefern (Backfill-Effekt).
+  try {
+    await persistInvoicePdf(id);
+  } catch (err) {
+    console.error(`[billing/pdf] PDF-Persistierung für Rechnung ${id} fehlgeschlagen:`, err);
+    throw err;
   }
-
-  const html = generateInvoiceHtml(pdfData);
-  const { buffer } = await generatePdf(html);
-  
-  const { embedZugferdXml } = await import("../lib/zugferd");
-  const { pdf: zugferdBuffer } = await embedZugferdXml(buffer, pdfData);
-
-  if (isCustomerInvoice) {
-    const { generateLeistungsnachweisHtml } = await import("../lib/pdf-generator");
-    await enrichPdfDataWithSignatures(pdfData, invoice);
-    const lnHtml = generateLeistungsnachweisHtml(pdfData);
-    const { buffer: lnPdf } = await generatePdf(lnHtml);
-
-    const { PDFDocument } = await import("pdf-lib");
-    const merged = await PDFDocument.create();
-    const invoiceDoc = await PDFDocument.load(zugferdBuffer);
-    const lnDoc = await PDFDocument.load(lnPdf);
-    const invoicePages = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
-    invoicePages.forEach(p => merged.addPage(p));
-    const lnPages = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
-    lnPages.forEach(p => merged.addPage(p));
-
-    if (pdfData.beihilfeBerechtigt) {
-      const invoicePages2 = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
-      invoicePages2.forEach(p => merged.addPage(p));
-      const lnPages2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
-      lnPages2.forEach(p => merged.addPage(p));
-    }
-
-    const mergedBytes = await merged.save();
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
-    res.send(Buffer.from(mergedBytes));
-  } else {
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
-    res.send(zugferdBuffer);
+  const refreshed = await storage.getInvoice(id);
+  const fresh = refreshed ? await loadInvoicePdfFromStorage(refreshed) : null;
+  if (!fresh) {
+    throw notFound("PDF konnte nicht aus dem Speicher gelesen werden — bitte erneut versuchen.");
   }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+  res.send(fresh);
 }));
 
-router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nicht generiert werden", async (req, res) => {
+router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nicht erzeugt werden — bitte in wenigen Minuten erneut versuchen oder den Support kontaktieren.", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
-  
+
+  // Task #521: Wenn der LN bereits in Object Storage liegt, direkt
+  // ausliefern (kein Puppeteer-Round-Trip).
+  const cachedLn = await loadLeistungsnachweisPdfFromStorage(invoice);
+  if (cachedLn) {
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
+    res.send(cachedLn);
+    return;
+  }
+
+  const isPflegekasseInvoice = invoice.billingType === "pflegekasse_privat"
+    || invoice.billingType === "pflegekasse_gesetzlich";
+
+  // Pflegekassen-Rechnungen: Beim Cache-Miss persistInvoicePdf aufrufen, damit
+  // sowohl Rechnungs-PDF als auch LN-PDF gebackfillt werden, und dann aus dem
+  // Storage ausliefern.
+  if (isPflegekasseInvoice) {
+    try {
+      await persistInvoicePdf(id);
+    } catch (err) {
+      console.error(`[billing/leistungsnachweis] LN-Persistierung für Rechnung ${id} fehlgeschlagen:`, err);
+      throw err;
+    }
+    const refreshed = await storage.getInvoice(id);
+    const fresh = refreshed ? await loadLeistungsnachweisPdfFromStorage(refreshed) : null;
+    if (fresh) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
+      res.send(fresh);
+      return;
+    }
+  }
+
+  // Selbstzahler-Fallback: on-the-fly rendern ohne Persistenz (kein LN-Cache).
   const lineItems = await storage.getInvoiceLineItems(id);
   const companySettings = await getCachedCompanySettings();
   const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
-  
+
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
   const customerForLN = await db.select({
@@ -1848,7 +1911,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
 
   const html = generateLeistungsnachweisHtml(pdfData);
   const { buffer } = await generatePdf(html);
-  
+
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
   res.send(buffer);

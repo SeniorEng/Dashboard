@@ -1,5 +1,6 @@
 import crypto from "crypto";
-import { getBrowser } from "../services/pdf-generator";
+// Task #521: getBrowser/withFreshPage werden lazy via dynamic import in
+// `generatePdf` geladen, damit der ESM-Init nicht den Chromium-Launch antriggert.
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
 
@@ -781,20 +782,19 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 }
 
 export async function generatePdf(html: string): Promise<{ buffer: Buffer; hash: string }> {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-
-  try {
-    await page.setContent(html, { waitUntil: "networkidle0" });
+  // Task #521: nutzt `withFreshPage` für protocolTimeout/Recycling auf
+  // Puppeteer-ProtocolError ("Network.enable timed out") + harten
+  // Render-Timeout statt der bisherigen unbegrenzten Wartezeit.
+  const { withFreshPage } = await import("../services/pdf-generator");
+  const buffer = await withFreshPage(async (page) => {
+    await page.setContent(html, { waitUntil: "networkidle0", timeout: 15000 });
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
       margin: { top: "0", bottom: "0", left: "0", right: "0" },
     });
-    const buffer = Buffer.from(pdfBuffer);
-    const hash = crypto.createHash("sha256").update(buffer).digest("hex");
-    return { buffer, hash };
-  } finally {
-    await page.close();
-  }
+    return Buffer.from(pdfBuffer);
+  });
+  const hash = crypto.createHash("sha256").update(buffer).digest("hex");
+  return { buffer, hash };
 }

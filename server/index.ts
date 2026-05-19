@@ -230,6 +230,15 @@ async function runStartupTasks() {
       log(`Invoice-ZUGFeRD-XML-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #521: stellt die LN-Cache-Spalten (`leistungsnachweis_path` /
+    // `leistungsnachweis_hash`) sicher, bevor der Backfill versucht zu schreiben.
+    const { ensureInvoiceLeistungsnachweisColumns } = await import("./startup/ensure-invoice-leistungsnachweis-columns");
+    try {
+      await ensureInvoiceLeistungsnachweisColumns();
+    } catch (err) {
+      log(`Invoice-LN-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();
@@ -338,6 +347,14 @@ async function runStartupTasks() {
 
     const { geocodeAllMissing } = await import("./services/geocoding");
     geocodeAllMissing().catch(err => log(`Batch-Geocoding-Fehler: ${err}`, "startup"));
+
+    // Task #521: PDF-Backfill nicht blockierend, max. 20 Rechnungen pro Boot.
+    // Läuft async, nachdem der Server bereits Requests bedient.
+    setTimeout(() => {
+      import("./startup/backfill-invoice-pdfs")
+        .then(({ backfillInvoicePdfs }) => backfillInvoicePdfs())
+        .catch((err) => log(`Backfill-Invoice-PDFs-Fehler: ${err}`, "startup"));
+    }, 5_000);
 
     try {
       const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
