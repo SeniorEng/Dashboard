@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
-import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import type { AppointmentWithCustomer } from "@shared/types";
 import type { Customer } from "@shared/schema";
@@ -45,32 +44,28 @@ export default function CustomerUndocumentedAppointmentsPage() {
   });
 
   const { data: appointments, isLoading, error, refetch } = useQuery<AppointmentWithCustomer[]>({
-    queryKey: ["appointments", "customer", customerId, "undocumented", year, month, { viewAsEmployeeId }],
+    queryKey: ["appointments", "undocumented-by-customer", customerId, year, month, { viewAsEmployeeId }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("customerId", String(customerId));
+      params.set("year", String(year));
+      params.set("month", String(month));
       if (viewAsEmployeeId) params.set("viewAsEmployeeId", String(viewAsEmployeeId));
-      const result = await api.get<AppointmentWithCustomer[]>(`/appointments?${params.toString()}`);
+      const result = await api.get<AppointmentWithCustomer[]>(`/appointments/undocumented/by-customer?${params.toString()}`);
       return unwrapResult(result);
     },
     enabled: !!customerId,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
   });
 
   const monthAppointments = useMemo(() => {
     if (!appointments) return [];
-    const monthStr = String(month).padStart(2, "0");
-    const prefix = `${year}-${monthStr}-`;
-    return appointments
-      .filter(
-        (apt) =>
-          apt.date.startsWith(prefix) &&
-          UNDOCUMENTED_STATUSES.includes(apt.status as typeof UNDOCUMENTED_STATUSES[number]),
-      )
-      .sort((a, b) => {
-        if (a.date !== b.date) return a.date.localeCompare(b.date);
-        return (a.scheduledStart || "").localeCompare(b.scheduledStart || "");
-      });
-  }, [appointments, year, month]);
+    return [...appointments].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (a.scheduledStart || "").localeCompare(b.scheduledStart || "");
+    });
+  }, [appointments]);
 
   if (!customerId) {
     return (

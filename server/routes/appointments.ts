@@ -497,6 +497,34 @@ router.get("/undocumented", asyncHandler("Fehler beim Laden der offenen Dokument
   res.json(appointments);
 }));
 
+router.get("/undocumented/by-customer", asyncHandler("Fehler beim Laden der offenen Termine", async (req, res) => {
+  const user = req.user!;
+  const customerId = req.query.customerId ? parseInt(req.query.customerId as string, 10) : NaN;
+  const year = req.query.year ? parseInt(req.query.year as string, 10) : NaN;
+  const month = req.query.month ? parseInt(req.query.month as string, 10) : NaN;
+  if (!Number.isFinite(customerId) || customerId <= 0
+    || !Number.isFinite(year) || year < 2000 || year > 2100
+    || !Number.isFinite(month) || month < 1 || month > 12) {
+    return sendBadRequest(res, "Ungültige Parameter (customerId, year, month erforderlich)");
+  }
+  const viewAsEmployeeId = req.query.viewAsEmployeeId ? parseInt(req.query.viewAsEmployeeId as string, 10) : undefined;
+  const adminScope = user.isAdmin || isTeamLead(user);
+  const effectiveEmployeeId = adminScope && viewAsEmployeeId ? viewAsEmployeeId : user.id;
+
+  if (!(await checkCustomerAccess(user, customerId, res))) return;
+
+  const primaryIds = await storage.getPrimaryCustomerIds(effectiveEmployeeId);
+  const isPrimary = primaryIds.includes(customerId);
+  const appointments = await storage.getUndocumentedAppointmentsForPeriod(
+    customerId,
+    effectiveEmployeeId,
+    year,
+    month,
+    isPrimary,
+  );
+  res.json(appointments);
+}));
+
 router.get("/batch-services", asyncHandler("Fehler beim Laden der Batch-Services", async (req, res) => {
   const user = req.user!;
   const idsParam = req.query.ids as string | undefined;
