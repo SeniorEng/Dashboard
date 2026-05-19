@@ -20,6 +20,8 @@ vi.mock("puppeteer-core", () => ({
 
 type FakePage = {
   close: ReturnType<typeof vi.fn>;
+  setContent?: ReturnType<typeof vi.fn>;
+  pdf?: ReturnType<typeof vi.fn>;
 };
 
 type FakeBrowser = {
@@ -111,6 +113,69 @@ describe("withFreshPage — recovery from ProtocolError (Task #521)", () => {
     expect(launchMock).toHaveBeenCalledTimes(1);
     expect(browser.close).not.toHaveBeenCalled();
     expect(page.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("generatePdfFromHtml — Parallelität / Last (Task #526)", () => {
+  it("liefert bei 10 parallelen Aufrufen pro Aufruf die korrekten Bytes (kein Cross-Render) und schließt alle Pages", async () => {
+    const { generatePdfFromHtml } = await freshModule();
+
+    const allPages: FakePage[] = [];
+
+    const browser = makeBrowser(async () => {
+      // Jede Page merkt sich das zuletzt gesetzte HTML und liefert dieses
+      // beim pdf()-Aufruf zurück — so erkennen wir Cross-Render zwischen
+      // gleichzeitig laufenden Aufrufen sofort.
+      let lastHtml = "";
+      const page: FakePage = {
+        close: vi.fn(async () => {}),
+        setContent: vi.fn(async (html: string) => {
+          lastHtml = html;
+          // Mikro-Yield, damit andere parallel laufende Pages dazwischenfunken
+          // könnten, wenn der Code versehentlich Zustand teilen würde.
+          await new Promise((r) => setTimeout(r, 1));
+        }),
+        pdf: vi.fn(async () => {
+          await new Promise((r) => setTimeout(r, 1));
+          return Buffer.from(`PDF::${lastHtml}`);
+        }),
+      };
+      allPages.push(page);
+      return page;
+    });
+    launchMock.mockResolvedValue(browser);
+
+    const N = 10;
+    const inputs = Array.from({ length: N }, (_, i) =>
+      `<!doctype html><html><body>doc-${i}-${"x".repeat(i + 1)}</body></html>`,
+    );
+
+    const results = await Promise.all(
+      inputs.map((html, i) => generatePdfFromHtml(html, `title-${i}`)),
+    );
+
+    // Jeder Aufruf erhält die Bytes seines eigenen HTML — kein Cross-Render.
+    for (let i = 0; i < N; i++) {
+      expect(results[i].pdfBuffer.toString()).toBe(`PDF::${inputs[i]}`);
+      const expectedHash = (await import("crypto"))
+        .createHash("sha256")
+        .update(Buffer.from(`PDF::${inputs[i]}`))
+        .digest("hex");
+      expect(results[i].integrityHash).toBe(expectedHash);
+    }
+
+    // Eine Page pro Aufruf, kein Sharing.
+    expect(browser.newPage).toHaveBeenCalledTimes(N);
+    expect(allPages).toHaveLength(N);
+
+    // Keine Page-Leaks: jede Page wurde geschlossen.
+    for (const page of allPages) {
+      expect(page.close).toHaveBeenCalledTimes(1);
+    }
+
+    // Browser wurde nur einmal gestartet und nicht verworfen.
+    expect(launchMock).toHaveBeenCalledTimes(1);
+    expect(browser.close).not.toHaveBeenCalled();
   });
 });
 
