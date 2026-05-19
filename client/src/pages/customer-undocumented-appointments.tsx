@@ -9,6 +9,7 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
+import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import type { AppointmentWithCustomer } from "@shared/types";
 import type { Customer } from "@shared/schema";
 
@@ -28,7 +29,8 @@ export default function CustomerUndocumentedAppointmentsPage() {
   const year = yearRaw ? parseInt(yearRaw, 10) : new Date().getFullYear();
   const month = monthRaw ? parseInt(monthRaw, 10) : new Date().getMonth() + 1;
 
-  const backToServiceRecords = `/service-records?customerId=${customerId ?? ""}`;
+  const { viewAsEmployeeId } = useViewAsEmployee();
+  const backToServiceRecords = `/service-records?customerId=${customerId ?? ""}&year=${year}&month=${month}`;
   const fromQuery = encodeURIComponent(
     `/service-records/open?customerId=${customerId ?? ""}&year=${year}&month=${month}`,
   );
@@ -43,9 +45,12 @@ export default function CustomerUndocumentedAppointmentsPage() {
   });
 
   const { data: appointments, isLoading, error, refetch } = useQuery<AppointmentWithCustomer[]>({
-    queryKey: ["appointments", "customer", customerId, "undocumented", year, month],
+    queryKey: ["appointments", "customer", customerId, "undocumented", year, month, { viewAsEmployeeId }],
     queryFn: async () => {
-      const result = await api.get<AppointmentWithCustomer[]>(`/appointments?customerId=${customerId}`);
+      const params = new URLSearchParams();
+      params.set("customerId", String(customerId));
+      if (viewAsEmployeeId) params.set("viewAsEmployeeId", String(viewAsEmployeeId));
+      const result = await api.get<AppointmentWithCustomer[]>(`/appointments?${params.toString()}`);
       return unwrapResult(result);
     },
     enabled: !!customerId,

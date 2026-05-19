@@ -59,8 +59,15 @@ const MONTH_NAMES = [
 export default function ServiceRecordsPage() {
   const { toast } = useToast();
   const currentDate = new Date();
-  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
+  const initialSearch = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const initialYearRaw = initialSearch.get("year");
+  const initialMonthRaw = initialSearch.get("month");
+  const initialYear = initialYearRaw ? parseInt(initialYearRaw, 10) : currentDate.getFullYear();
+  const initialMonth = initialMonthRaw ? parseInt(initialMonthRaw, 10) : currentDate.getMonth() + 1;
+  const [selectedYear, setSelectedYear] = useState(Number.isFinite(initialYear) ? initialYear : currentDate.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(
+    Number.isFinite(initialMonth) && initialMonth >= 1 && initialMonth <= 12 ? initialMonth : currentDate.getMonth() + 1,
+  );
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
