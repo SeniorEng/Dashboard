@@ -672,12 +672,16 @@ interface CustomerOverviewCardProps {
 
 
 function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOverviewCardProps) {
-  const href = item.existingRecord && item.uncoveredDocumentedCount === 0
+  const singleRecords = item.singleRecords || [];
+  const deadline = computeDeadlineInfo(selectedYear, selectedMonth);
+  const hasOpenAction = item.undocumentedCount > 0 || item.uncoveredDocumentedCount > 0;
+
+  // Route to the customer action flow whenever any open action exists; only
+  // deep-link to the existing monthly record when nothing is left to do.
+  const href = !hasOpenAction && item.existingRecord
     ? `/service-records/${item.existingRecord.id}`
     : `/service-records?customerId=${item.customerId}`;
 
-  const singleRecords = item.singleRecords || [];
-  
   const singleRecordsSummary = useMemo(() => {
     if (singleRecords.length === 0) return null;
     const pending = singleRecords.filter(r => r.status === "pending").length;
@@ -689,31 +693,64 @@ function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOve
     if (completed > 0) parts.push(`${completed} abgeschlossen`);
     return `${singleRecords.length} Einzeltermin-LN (${parts.join(", ")})`;
   }, [singleRecords]);
-  
+
+  const completedSingleCount = singleRecords.filter(r => r.status === "completed").length;
+  const monthlyCompleted = item.existingRecord?.status === "completed" ? 1 : 0;
+  const completedTotal = completedSingleCount + monthlyCompleted;
+
+  const undocumentedTone = deadline?.tone === "red" ? "text-red-600" : "text-amber-700";
+
   return (
     <Link href={href}>
       <Card data-testid={`card-overview-${item.customerId}`}>
         <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1 min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <User className={`${iconSize.sm} text-muted-foreground`} />
                 <span className="font-medium" data-testid={`text-customer-${item.customerId}`}>
                   {item.customerName}
                 </span>
               </div>
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span>{item.totalAppointments} {item.totalAppointments === 1 ? "Termin" : "Termine"}</span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <span className="text-muted-foreground">
+                  {item.totalAppointments} {item.totalAppointments === 1 ? "Termin" : "Termine"}
+                </span>
+                {item.uncoveredDocumentedCount > 0 && (
+                  <span
+                    className="text-primary font-medium"
+                    data-testid={`text-ready-${item.customerId}`}
+                  >
+                    {item.uncoveredDocumentedCount} bereit
+                  </span>
+                )}
                 {item.undocumentedCount > 0 && (
-                  <span className="text-red-600">{item.undocumentedCount} offen</span>
+                  <span
+                    className={undocumentedTone}
+                    data-testid={`text-undocumented-${item.customerId}`}
+                  >
+                    {item.undocumentedCount} offen
+                  </span>
                 )}
-                {item.undocumentedCount === 0 && item.uncoveredDocumentedCount > 0 && (
-                  <span className="text-emerald-600">{item.uncoveredDocumentedCount} bereit</span>
+                {!hasOpenAction && completedTotal > 0 && (
+                  <span
+                    className="text-green-700"
+                    data-testid={`text-completed-${item.customerId}`}
+                  >
+                    {completedTotal} abgeschlossen
+                  </span>
                 )}
-                {item.undocumentedCount === 0 && item.uncoveredDocumentedCount === 0 && item.documentedCount > 0 && (
-                  <span className="text-emerald-600">{item.documentedCount} dokumentiert</span>
+                {!hasOpenAction && completedTotal === 0 && item.documentedCount > 0 && (
+                  <span className="text-muted-foreground">
+                    {item.documentedCount} dokumentiert
+                  </span>
                 )}
               </div>
+              {hasOpenAction && deadline && (
+                <div className="mt-1">
+                  <DeadlineHint info={deadline} />
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-1.5 mt-1">
                 {item.existingRecord && (
                   <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-monthly">
@@ -721,13 +758,13 @@ function CustomerOverviewCard({ item, selectedYear, selectedMonth }: CustomerOve
                   </Badge>
                 )}
                 {singleRecords.length > 0 && (
-                  <Badge className="text-xs bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100" data-testid="badge-record-type-single">
+                  <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-single">
                     {singleRecordsSummary}
                   </Badge>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 shrink-0">
               <StatusBadge type="record" value={item.status} />
               <ChevronRight className={`${iconSize.sm} text-muted-foreground`} />
             </div>

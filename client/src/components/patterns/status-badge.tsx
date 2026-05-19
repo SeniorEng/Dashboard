@@ -72,7 +72,7 @@ const recordLabels: Record<string, string> = {
 
 const recordColors: Record<string, BadgeColor> = {
   undocumented: "red",
-  ready: "emerald",
+  ready: "blue",
   pending: "amber",
   employee_signed: "blue",
   completed: "green",
