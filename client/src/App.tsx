@@ -64,6 +64,7 @@ const AdminMonthClosing = lazy(() => import("@/pages/admin/month-closing"));
 const AdminAppointmentSeries = lazy(() => import("@/pages/admin/appointment-series"));
 const AdminPlannedConsultations = lazy(() => import("@/pages/admin/planned-consultations"));
 const UndocumentedAppointments = lazy(() => import("@/pages/undocumented-appointments"));
+const CustomerUndocumentedAppointments = lazy(() => import("@/pages/customer-undocumented-appointments"));
 const CustomerDetail = lazy(() => import("@/pages/customer-detail"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
 const ServiceRecordsPage = lazy(() => import("@/pages/service-records"));
@@ -190,6 +191,9 @@ function Router() {
       </Route>
       <Route path="/service-records">
         <ProtectedRoute component={ServiceRecordsPage} />
+      </Route>
+      <Route path="/service-records/open">
+        <ProtectedRoute component={CustomerUndocumentedAppointments} />
       </Route>
       <Route path="/service-records/:id">
         <ProtectedRoute component={ServiceRecordDetailPage} />

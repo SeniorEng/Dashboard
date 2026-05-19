@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRoute, useLocation } from "wouter";
+import { useRoute, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment } from "@/features/appointments";
 import { useDeleteAppointment } from "@/features/appointments/hooks";
@@ -52,6 +52,9 @@ type AppointmentService = {
 export default function AppointmentDetail() {
   const [, params] = useRoute("/appointment/:id");
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
+  const fromParam = new URLSearchParams(searchString).get("from");
+  const fromUrl = fromParam ? decodeURIComponent(fromParam) : null;
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -209,7 +212,7 @@ export default function AppointmentDetail() {
           variant="ghost"
           size="sm"
           className="pl-0 text-muted-foreground hover:text-foreground mb-4"
-          onClick={() => setLocation(appointment?.date ? `/?date=${appointment.date}` : "/")}
+          onClick={() => setLocation(fromUrl ?? (appointment?.date ? `/?date=${appointment.date}` : "/"))}
           data-testid="button-back"
         >
           <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück

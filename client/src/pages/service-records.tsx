@@ -354,7 +354,7 @@ export default function ServiceRecordsPage() {
                         Dokumentieren Sie alle Termine, um den Leistungsnachweis zu erstellen.
                       </p>
                     </div>
-                    <Link href={`/customer/${customerId}?filter=undocumented`}>
+                    <Link href={`/service-records/open?customerId=${customerId}&year=${selectedYear}&month=${selectedMonth}`}>
                       <Button variant="outline" className="w-full sm:w-auto" data-testid="button-to-appointments">
                         Offene Termine anzeigen
                       </Button>

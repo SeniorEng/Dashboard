@@ -15,6 +15,8 @@ interface AppointmentCardProps {
   appointment: AppointmentWithCustomer;
   showDate?: boolean;
   isSubstitute?: boolean;
+  /** Optionaler Query-String (ohne führendes `?`), der an `/appointment/:id` angehängt wird, z. B. `from=/service-records/open?...`. */
+  linkQuery?: string;
 }
 
 function getStatusIcon(status: string) {
@@ -30,10 +32,13 @@ function getStatusIcon(status: string) {
   }
 }
 
-function AppointmentCardComponent({ appointment, showDate, isSubstitute }: AppointmentCardProps) {
+function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQuery }: AppointmentCardProps) {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const targetUrl = linkQuery
+    ? `/appointment/${appointment.id}?${linkQuery}`
+    : `/appointment/${appointment.id}`;
 
   const serviceInfo = useMemo(() => 
     getCardServiceInfoFromAppointment(appointment),
@@ -57,15 +62,15 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute }: Appoi
   }, [queryClient, appointment.id]);
 
   const handleCardClick = useCallback(() => {
-    navigate(`/appointment/${appointment.id}`);
-  }, [navigate, appointment.id]);
+    navigate(targetUrl);
+  }, [navigate, targetUrl]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      navigate(`/appointment/${appointment.id}`);
+      navigate(targetUrl);
     }
-  }, [navigate, appointment.id]);
+  }, [navigate, targetUrl]);
 
   return (
     <div 
