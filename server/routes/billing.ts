@@ -53,6 +53,7 @@ import {
   computeLeistungsnachweisFingerprint,
 } from "../lib/invoice-pdf-fingerprint";
 import { getCachedCompanySettings } from "../services/cache";
+import { recordPdfCacheSend } from "../lib/pdf-cache-stats";
 import { sendInvoiceCopyByPost } from "../services/document-delivery";
 
 interface BuildLineItem extends Record<string, unknown> {
@@ -2028,6 +2029,7 @@ async function loadOrRenderSendablePdfs(
   pdfData: InvoicePdfData,
   opts: { isCustomerInvoice: boolean; strictZugferd?: boolean },
 ): Promise<{ invoicePdf: Buffer; lnPdf: Buffer; cachedInvoice: boolean; cachedLn: boolean }> {
+  const startedAt = Date.now();
   let invoicePdf: Buffer | null = null;
   if (!opts.isCustomerInvoice) {
     invoicePdf = await loadInvoicePdfFromStorage(invoice);
@@ -2058,6 +2060,19 @@ async function loadOrRenderSendablePdfs(
     // gerade gerenderten Bytes weiter.
     schedulePdfPersistInBackground(invoice.id);
   }
+
+  const durationMs = Date.now() - startedAt;
+  recordPdfCacheSend({
+    invoiceId: invoice.id,
+    cachedInvoice,
+    cachedLn,
+    isCustomerInvoice: opts.isCustomerInvoice,
+    durationMs,
+    at: Date.now(),
+  });
+  console.log(
+    `[billing/pdf-cache] invoice=${invoice.id} isCustomerInvoice=${opts.isCustomerInvoice} cachedInvoice=${cachedInvoice} cachedLeistungsnachweis=${cachedLn} durationMs=${durationMs}`,
+  );
 
   return { invoicePdf, lnPdf, cachedInvoice, cachedLn };
 }

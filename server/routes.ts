@@ -24,6 +24,11 @@ export async function registerRoutes(
         ? { ok: true, version: chromium.version, path: chromium.path }
         : { ok: false, error: chromium.error, path: chromium.path }
       : { ok: null, error: "preflight not yet executed" };
+    // Task #556: PDF-Cache-Hit-Rate über die letzten N Sends im Health-Endpoint
+    // sichtbar machen, damit der Operator schnell sehen kann, ob Task #552
+    // tatsächlich Cache-Hits liefert.
+    const { getPdfCacheStatsSnapshot } = await import("./lib/pdf-cache-stats");
+    const pdfCache = getPdfCacheStatsSnapshot();
     try {
       await db.execute(sql`SELECT 1`);
       res.json({
@@ -31,6 +36,7 @@ export async function registerRoutes(
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         chromium: chromiumStatus,
+        pdfCache,
       });
     } catch (error) {
       res.status(503).json({
@@ -39,6 +45,7 @@ export async function registerRoutes(
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         chromium: chromiumStatus,
+        pdfCache,
       });
     }
   });
