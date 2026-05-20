@@ -2500,6 +2500,127 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
   res.json(updated);
 }));
 
+// Task #534: Typenübergreifender Bulk-Versand. Schließt die Lücke zwischen
+// „Alle an Pflegekassen senden" (Email-Batch, nur gesetzlich) und den
+// einzelnen Per-Row-Aktionen: setzt sequentiell für alle übergebenen
+// Entwurfs-Rechnungen den Status auf „versendet" — Pflegekassen-Entwürfe
+// via Mark-Sent (kein TI-Anschluss → manueller Pfad), Selbstzahler via
+// regulärem Status-Update. Idempotent: bereits versendete/stornierte
+// Rechnungen werden übersprungen, kein neuer Versandweg wird eingeführt.
+router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req, res) => {
+  const parsed = z.object({
+    invoiceIds: z.array(z.number().int().positive()).min(1).max(200),
+  }).safeParse(req.body);
+  if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
+  const { invoiceIds } = parsed.data;
+
+  type ResultStatus = "sent" | "marked_sent" | "skipped" | "error";
+  const results: Array<{
+    invoiceId: number;
+    invoiceNumber: string;
+    customerId: number;
+    billingType: string;
+    status: ResultStatus;
+    message?: string;
+  }> = [];
+
+  for (const invoiceId of invoiceIds) {
+    try {
+      const invoice = await storage.getInvoice(invoiceId);
+      if (!invoice) {
+        results.push({
+          invoiceId,
+          invoiceNumber: "",
+          customerId: 0,
+          billingType: "",
+          status: "skipped",
+          message: "Rechnung nicht gefunden",
+        });
+        continue;
+      }
+
+      if (invoice.status !== "entwurf") {
+        results.push({
+          invoiceId,
+          invoiceNumber: invoice.invoiceNumber,
+          customerId: invoice.customerId,
+          billingType: invoice.billingType,
+          status: "skipped",
+          message: `Status: ${invoice.status}`,
+        });
+        continue;
+      }
+
+      const isPflegekasse = invoice.billingType === "pflegekasse_gesetzlich"
+        || invoice.billingType === "pflegekasse_privat";
+      const isSelbstzahler = invoice.billingType === "selbstzahler";
+
+      if (!isPflegekasse && !isSelbstzahler) {
+        results.push({
+          invoiceId,
+          invoiceNumber: invoice.invoiceNumber,
+          customerId: invoice.customerId,
+          billingType: invoice.billingType,
+          status: "skipped",
+          message: "Unbekannter Rechnungstyp",
+        });
+        continue;
+      }
+
+      await withAudit(async (tx, audit) => {
+        await updateInvoiceStatusTx(tx, invoiceId, "versendet", req.user!.id);
+        await tx.update(invoicesTable)
+          .set({ sentAt: new Date() })
+          .where(eq(invoicesTable.id, invoiceId));
+        audit.record({
+          userId: req.user!.id,
+          action: isPflegekasse ? "invoice_marked_sent_manually" : "invoice_status_changed",
+          entityType: "invoice",
+          entityId: invoiceId,
+          metadata: {
+            invoiceNumber: invoice.invoiceNumber,
+            customerId: invoice.customerId,
+            billingType: invoice.billingType,
+            oldStatus: invoice.status,
+            newStatus: "versendet",
+            source: "bulk_send",
+            ...(isPflegekasse ? { reason: "manual_mark_sent_no_ti" } : {}),
+          },
+          ipAddress: req.ip,
+        });
+      }, { faults: readTestFaults(req) });
+
+      results.push({
+        invoiceId,
+        invoiceNumber: invoice.invoiceNumber,
+        customerId: invoice.customerId,
+        billingType: invoice.billingType,
+        status: isPflegekasse ? "marked_sent" : "sent",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
+      results.push({
+        invoiceId,
+        invoiceNumber: "",
+        customerId: 0,
+        billingType: "",
+        status: "error",
+        message: msg,
+      });
+    }
+  }
+
+  const sent = results.filter(r => r.status === "sent").length;
+  const markedSent = results.filter(r => r.status === "marked_sent").length;
+  const skipped = results.filter(r => r.status === "skipped").length;
+  const errors = results.filter(r => r.status === "error").length;
+
+  res.json({
+    summary: { total: results.length, sent, markedSent, skipped, errors },
+    results,
+  });
+}));
+
 // Task #533: Massenerstellung — erzeugt für alle berechtigten Kunden des
 // gewählten Monats sequenziell eine Rechnung. Idempotent: Kunden mit
 // existierender Nicht-Storno-Rechnung im Monat werden übersprungen.

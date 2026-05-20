@@ -38,6 +38,7 @@ import type {
   GenerateInvoiceResponse as GenerateResponse,
   SendInvoiceResponse as SendResponse,
   BatchSendInvoiceResponse as BatchSendResponse,
+  BulkSendInvoiceResponse,
 } from "@shared/api";
 import {
   ArrowLeft,
@@ -136,6 +137,9 @@ export default function AdminBilling() {
   const [batchSending, setBatchSending] = useState(false);
   const [generateAllOpen, setGenerateAllOpen] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<GenerateAllResponse | null>(null);
+  // Task #534: Bulk-Versand-Dialog (typenübergreifend).
+  const [bulkSendOpen, setBulkSendOpen] = useState(false);
+  const [bulkSendResult, setBulkSendResult] = useState<BulkSendInvoiceResponse | null>(null);
 
   const currentYear = today.getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
@@ -299,12 +303,46 @@ export default function AdminBilling() {
     (inv) => inv.status === "entwurf" && inv.billingType === "pflegekasse_gesetzlich"
   ) || [];
 
+  // Task #534: Alle Entwürfe, die im typenübergreifenden Bulk-Versand
+  // verarbeitet werden — Selbstzahler + beide Pflegekassen-Varianten.
+  const draftBulkInvoices = invoices?.filter(
+    (inv) => inv.status === "entwurf" && (
+      inv.billingType === "selbstzahler"
+      || inv.billingType === "pflegekasse_gesetzlich"
+      || inv.billingType === "pflegekasse_privat"
+    )
+  ) || [];
+
+  const bulkSendMutation = useMutation({
+    mutationFn: async (invoiceIds: number[]) => {
+      const result = await api.post<BulkSendInvoiceResponse>("/billing/send-bulk", { invoiceIds });
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      setBulkSendResult(data);
+      const { summary } = data;
+      toast({
+        title: "Bulk-Versand abgeschlossen",
+        description: `${summary.sent + summary.markedSent} versendet, ${summary.skipped} übersprungen, ${summary.errors} Fehler`,
+      });
+      invalidateRelated(queryClient, "billing");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Bulk-Versand fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
   const handleBatchSend = () => {
     if (draftPflegekasseInvoices.length === 0) {
       toast({ title: "Keine Rechnungen zum Versenden", description: "Es gibt keine Entwurfs-Rechnungen an Pflegekassen.", variant: "destructive" });
       return;
     }
     batchSendMutation.mutate(draftPflegekasseInvoices.map((inv) => inv.id));
+  };
+
+  const handleBulkSend = () => {
+    if (draftBulkInvoices.length === 0) return;
+    bulkSendMutation.mutate(draftBulkInvoices.map((inv) => inv.id));
   };
 
   const handleGenerate = () => {
@@ -388,6 +426,17 @@ export default function AdminBilling() {
                     Viewports um (flex-wrap), Buttons nehmen volle Breite und
                     Beschriftungen sind auf Mobile kürzer (sm:inline-Zusatz). */}
                 <div className="flex flex-wrap justify-end gap-2">
+                  {draftBulkInvoices.length > 0 && (
+                    <Button
+                      variant="outline"
+                      className="text-purple-700 border-purple-200 hover:bg-purple-50 w-full sm:w-auto"
+                      onClick={() => { setBulkSendResult(null); setBulkSendOpen(true); }}
+                      data-testid="button-bulk-send"
+                    >
+                      <Send className={`${iconSize.sm} mr-1`} />
+                      <span className="hidden sm:inline">Alle </span>versenden ({draftBulkInvoices.length})
+                    </Button>
+                  )}
                   {draftPflegekasseInvoices.length > 0 && (
                     <Button
                       variant="outline"
@@ -778,6 +827,143 @@ export default function AdminBilling() {
               </CardContent>
             </Card>
           )}
+
+      {/* Task #534: Bulk-Versand-Dialog mit Fortschritt + Ergebnis-Summary.
+          Pflegekassen-Entwürfe werden als „versendet" markiert (kein TI),
+          Selbstzahler erhalten den Status „versendet". Reuse der bestehenden
+          Pfade (mark-sent / status-update), kein neuer Versandweg. */}
+      <Dialog
+        open={bulkSendOpen}
+        onOpenChange={(open) => {
+          if (bulkSendMutation.isPending) return;
+          setBulkSendOpen(open);
+          if (!open) setBulkSendResult(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Alle Rechnungen versenden</DialogTitle>
+            <DialogDescription>
+              Für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} werden alle Entwürfe sequenziell verarbeitet.
+              Selbstzahler werden auf „versendet" gesetzt, Pflegekassen-Entwürfe manuell als versendet markiert
+              (solange kein TI-Anschluss besteht). Bereits versendete Rechnungen werden übersprungen.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-2 text-sm">
+            <div className="text-gray-700">
+              Zu verarbeitende Entwürfe: <span className="font-medium" data-testid="text-bulk-send-count">{draftBulkInvoices.length}</span>
+            </div>
+
+            {bulkSendMutation.isPending && (
+              <div className="flex items-center gap-2 text-purple-700">
+                <Loader2 className={`${iconSize.sm} animate-spin`} />
+                <span>Versende — bitte nicht schließen ...</span>
+              </div>
+            )}
+
+            {bulkSendResult && (
+              <div
+                className="rounded border border-gray-200 bg-gray-50 px-3 py-2 space-y-2"
+                data-testid="bulk-send-summary"
+              >
+                <div>
+                  <div className="font-medium text-gray-800 mb-1">Ergebnis</div>
+                  <ul className="text-gray-700 space-y-0.5">
+                    <li>
+                      <span className="text-green-700 font-medium">{bulkSendResult.summary.sent}</span> versendet (Selbstzahler)
+                    </li>
+                    <li>
+                      <span className="text-blue-700 font-medium">{bulkSendResult.summary.markedSent}</span> als versendet markiert (Pflegekassen)
+                    </li>
+                    <li>
+                      <span className="text-gray-600 font-medium">{bulkSendResult.summary.skipped}</span> übersprungen
+                    </li>
+                    <li>
+                      <span className={bulkSendResult.summary.errors > 0 ? "text-red-700 font-medium" : "text-gray-600 font-medium"}>
+                        {bulkSendResult.summary.errors}
+                      </span>{" "}
+                      Fehler
+                    </li>
+                  </ul>
+                </div>
+
+                {bulkSendResult.results.length > 0 && (
+                  <div>
+                    <div className="font-medium text-gray-800 mb-1 mt-2">Pro Rechnung</div>
+                    <ul className="max-h-48 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white">
+                      {bulkSendResult.results.map((r) => {
+                        const dotColor =
+                          r.status === "sent" ? "bg-green-500"
+                          : r.status === "marked_sent" ? "bg-blue-500"
+                          : r.status === "skipped" ? "bg-gray-400"
+                          : "bg-red-500";
+                        const labelColor =
+                          r.status === "sent" ? "text-green-700"
+                          : r.status === "marked_sent" ? "text-blue-700"
+                          : r.status === "skipped" ? "text-gray-600"
+                          : "text-red-700";
+                        const labelText =
+                          r.status === "sent" ? "versendet"
+                          : r.status === "marked_sent" ? "als versendet markiert"
+                          : r.status === "skipped" ? "übersprungen"
+                          : "Fehler";
+                        const label = r.invoiceNumber || `Rechnung #${r.invoiceId}`;
+                        return (
+                          <li
+                            key={r.invoiceId}
+                            className="px-2 py-1.5 text-sm flex items-start gap-2"
+                            data-testid={`bulk-send-result-${r.invoiceId}`}
+                          >
+                            <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} aria-hidden="true" />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-baseline gap-x-2">
+                                <span className="font-medium text-gray-800 truncate">{label}</span>
+                                <span className={`text-xs font-medium ${labelColor}`}>{labelText}</span>
+                              </div>
+                              {r.message && (r.status === "error" || r.status === "skipped") && (
+                                <div className="text-xs text-gray-600 mt-0.5 break-words">{r.message}</div>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setBulkSendOpen(false); setBulkSendResult(null); }}
+              disabled={bulkSendMutation.isPending}
+            >
+              Schließen
+            </Button>
+            <Button
+              onClick={handleBulkSend}
+              disabled={bulkSendMutation.isPending || draftBulkInvoices.length === 0 || !!bulkSendResult}
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+              data-testid="button-confirm-bulk-send"
+            >
+              {bulkSendMutation.isPending ? (
+                <>
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  Wird versendet...
+                </>
+              ) : (
+                <>
+                  <Send className={`${iconSize.sm} mr-1`} />
+                  Jetzt versenden
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Task #533: Massenerstellung-Dialog mit Fortschritt + Summary. */}
       <Dialog
