@@ -411,8 +411,8 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
   const companySettings = await getCachedCompanySettings();
   if (!companySettings) throw badRequest("Firmendaten nicht konfiguriert.");
 
-  const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
-  const { embedZugferdXml } = await import("../lib/zugferd");
+  // Task #552: Renderer-Imports werden bei Bedarf in `loadOrRenderSendablePdfs`
+  // nachgeladen — beim Cache-Hit muss Puppeteer nicht angefasst werden.
   const { sendEmail, buildEmailLayout } = await import("../services/email-service");
   const { resolveLogoToDataUrl } = await import("../services/logo-resolver");
   const companyName = companySettings.companyName || "SeniorenEngel";
@@ -509,12 +509,14 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
         pdfData.recipientAddress = customerAddr || pdfData.recipientAddress;
       }
 
-      const invoiceHtml = generateInvoiceHtml(pdfData);
-      const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
-      const { pdf: zugferdBuffer } = await embedZugferdXml(invoicePdf, pdfData);
-
-      const lnHtml = generateLeistungsnachweisHtml(pdfData);
-      const { buffer: lnPdf } = await generatePdf(lnHtml);
+      // Task #552: PDF-Cache (pdfPath / leistungsnachweisPath) zuerst lesen;
+      // on-demand-Render nur bei Cache-Miss. Cache-Miss triggert Hintergrund-
+      // Persist, damit Folge-Sends Cache-Hits sind.
+      const { invoicePdf: zugferdBuffer, lnPdf } = await loadOrRenderSendablePdfs(
+        invoice,
+        pdfData,
+        { isCustomerInvoice: sendToCustomer },
+      );
 
       let finalInvoicePdf: Buffer = zugferdBuffer;
       let finalLnPdf: Buffer = lnPdf;
@@ -1863,7 +1865,24 @@ async function computeLiveInvoiceFingerprints(invoice: Invoice): Promise<{
  *   - Wenn schon alles gecached ist (pflegekasse_privat: pdf+ln, selbstzahler:
  *     pdf), ist die Funktion ein No-op.
  */
-export async function persistInvoicePdf(invoiceId: number): Promise<void> {
+// Task #552: Mutex pro Rechnungs-ID, damit parallele Send-/Mark-Sent-Klicks
+// nicht zweimal gleichzeitig denselben PDF-Render starten. Concurrent-Aufrufer
+// erhalten denselben in-flight-Promise zurück (de-duped). Der Eintrag wird
+// nach Abschluss (auch im Fehlerfall) wieder entfernt, damit ein
+// fehlgeschlagener Render erneut versucht werden kann.
+const persistInvoicePdfInFlight = new Map<number, Promise<void>>();
+
+export function persistInvoicePdf(invoiceId: number): Promise<void> {
+  const existing = persistInvoicePdfInFlight.get(invoiceId);
+  if (existing) return existing;
+  const p = persistInvoicePdfInner(invoiceId).finally(() => {
+    persistInvoicePdfInFlight.delete(invoiceId);
+  });
+  persistInvoicePdfInFlight.set(invoiceId, p);
+  return p;
+}
+
+async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
   const invoice = await storage.getInvoice(invoiceId);
   if (!invoice) return;
   const companySettings = await getCachedCompanySettings();
@@ -1948,6 +1967,60 @@ async function loadInvoicePdfFromStorage(invoice: Invoice): Promise<Buffer | nul
 
 async function loadLeistungsnachweisPdfFromStorage(invoice: Invoice): Promise<Buffer | null> {
   return loadStoredPdfByPath(invoice.leistungsnachweisPath ?? null);
+}
+
+/**
+ * Task #552: Lädt für den Versand-Pfad die standalone Rechnungs- und LN-PDF-
+ * Bytes. Reihenfolge:
+ *   1. Cache-Hit: `pdfPath` (standalone zugferd-Invoice) + `leistungsnachweisPath`
+ *      (standalone LN).
+ *   2. Cache-Miss: Fehlende Teile werden on-demand gerendert und der
+ *      Hintergrund-Persist (mit Mutex) angestoßen, damit der nächste Send
+ *      wieder aus dem Cache liest.
+ *
+ * Wichtig: Für Kunden-Rechnungen (rechnungAnKunde / Beihilfe) enthält
+ * `pdfPath` die GoBD-versiegelte, gemergte Rechnung+LN-Variante — die ist
+ * für den Download (`/:id/pdf`) gedacht, NICHT für den Email-Versand, der
+ * Rechnung und LN als separate Anhänge verschickt. Deshalb wird der
+ * Invoice-Cache-Hit hier nur akzeptiert, wenn die Rechnung NICHT an den
+ * Kunden adressiert ist (Standard-Pflegekassen-Versand). Beihilfe-/
+ * Kostenerstattungs-Duplizierung erfolgt im Aufrufer auf den standalone
+ * Buffers.
+ */
+async function loadOrRenderSendablePdfs(
+  invoice: Invoice,
+  pdfData: InvoicePdfData,
+  opts: { isCustomerInvoice: boolean },
+): Promise<{ invoicePdf: Buffer; lnPdf: Buffer; cachedInvoice: boolean; cachedLn: boolean }> {
+  let invoicePdf: Buffer | null = null;
+  if (!opts.isCustomerInvoice) {
+    invoicePdf = await loadInvoicePdfFromStorage(invoice);
+  }
+  let lnPdf: Buffer | null = await loadLeistungsnachweisPdfFromStorage(invoice);
+  const cachedInvoice = invoicePdf !== null;
+  const cachedLn = lnPdf !== null;
+
+  if (!invoicePdf || !lnPdf) {
+    const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+    if (!invoicePdf) {
+      const { embedZugferdXml } = await import("../lib/zugferd");
+      const invoiceHtml = generateInvoiceHtml(pdfData);
+      const { buffer: rendered } = await generatePdf(invoiceHtml);
+      const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData);
+      invoicePdf = zugferdBuffer;
+    }
+    if (!lnPdf) {
+      const lnHtml = generateLeistungsnachweisHtml(pdfData);
+      const { buffer: rendered } = await generatePdf(lnHtml);
+      lnPdf = rendered;
+    }
+    // Hintergrund-Persist (Mutex-serialisiert): beim nächsten Send hoffentlich
+    // Cache-Hit. Fehler nicht eskalieren — der Send-Flow läuft mit den
+    // gerade gerenderten Bytes weiter.
+    schedulePdfPersistInBackground(invoice.id);
+  }
+
+  return { invoicePdf, lnPdf, cachedInvoice, cachedLn };
 }
 
 async function loadStoredPdfByPath(pdfPath: string | null): Promise<Buffer | null> {
@@ -2209,7 +2282,6 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   const companySettings = await getCachedCompanySettings();
   if (!companySettings) throw badRequest("Firmendaten nicht konfiguriert.");
 
-  const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
   if (cust.geburtsdatum) pdfData.customerGeburtsdatum = cust.geburtsdatum;
@@ -2223,14 +2295,14 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     pdfData.recipientAddress = customerAddrForPdf || pdfData.recipientAddress;
   }
 
-  const invoiceHtml = generateInvoiceHtml(pdfData);
-  const { buffer: invoicePdf } = await generatePdf(invoiceHtml);
-
-  const { embedZugferdXml } = await import("../lib/zugferd");
-  const { pdf: zugferdBuffer } = await embedZugferdXml(invoicePdf, pdfData);
-
-  const lnHtml = generateLeistungsnachweisHtml(pdfData);
-  const { buffer: lnPdf } = await generatePdf(lnHtml);
+  // Task #552: PDF-Cache (pdfPath / leistungsnachweisPath) zuerst lesen;
+  // on-demand-Render nur bei Cache-Miss. Concurrent Send-Klicks werden über
+  // den `persistInvoicePdf`-Mutex serialisiert.
+  const { invoicePdf: zugferdBuffer, lnPdf } = await loadOrRenderSendablePdfs(
+    invoice,
+    pdfData,
+    { isCustomerInvoice: sendToCustomer },
+  );
 
   let finalInvoicePdf: Buffer = zugferdBuffer;
   let finalLnPdf: Buffer = lnPdf;
@@ -2531,6 +2603,13 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
     throw badRequest("Manuelles Markieren ist nur für Pflegekassen-Rechnungen vorgesehen. Selbstzahler-Rechnungen werden über den regulären Versand-Status verwaltet.");
   }
 
+  // Task #552: PDF-Cache nach dem Status-Übergang im Hintergrund versiegeln.
+  // `persistInvoicePdf` ist mutex-serialisiert + idempotent — bei vorhandenem
+  // Cache no-op, sonst läuft der Render asynchron via setImmediate, ohne den
+  // Mark-Sent-Request zu blockieren (mark-sent flippt nur den Status, der
+  // Background-Backfill zieht den GoBD-Snapshot nach).
+  schedulePdfPersistInBackground(id);
+
   const updated = await withAudit(async (tx, audit) => {
     const u = await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
     await tx.update(invoicesTable)
@@ -2623,6 +2702,11 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
         });
         continue;
       }
+
+      // Task #552: PDF-Cache nach dem Bulk-Status-Übergang im Hintergrund
+      // versiegeln — mutex-serialisiert + idempotent. Kein synchrones
+      // Blockieren auf Puppeteer; der Backfill zieht den GoBD-Snapshot nach.
+      schedulePdfPersistInBackground(invoiceId);
 
       await withAudit(async (tx, audit) => {
         await updateInvoiceStatusTx(tx, invoiceId, "versendet", req.user!.id);
