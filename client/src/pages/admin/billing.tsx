@@ -2,7 +2,7 @@ import { useState } from "react";
 import { formatEuroDE } from "@shared/utils/money";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
-import { invalidateRelated } from "@/lib/query-invalidation";
+import { invalidateRelated, refetchWithPoll } from "@/lib/query-invalidation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -212,10 +212,41 @@ export default function AdminBilling() {
       const result = await api.patch(`/billing/${id}/status`, { status });
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: async (_data, variables) => {
       toast({ title: "Status aktualisiert" });
+
+      // Task #543: Beim Stornieren entstehen serverseitig zusätzlich eine
+      // neue Stornorechnung (Status `entwurf`) sowie ggf. eine
+      // Nachberechnung. Damit der Anwender beide Folge-Rechnungen direkt
+      // sieht, setzen wir einen restriktiven Status-Filter defensiv auf
+      // "alle" zurück.
+      const expectMonth = selectedMonth;
+      const expectYear = selectedYear;
+      let nextStatusFilter = statusFilter;
+      if (
+        variables.status === "storniert"
+        && statusFilter !== "alle"
+        && statusFilter !== "entwurf"
+        && statusFilter !== "storniert"
+      ) {
+        nextStatusFilter = "alle";
+        setStatusFilter("alle");
+      }
+
       invalidateRelated(queryClient, "billing");
       setStornoTarget(null);
+
+      // Task #543: Replika-Lag-Schutz — auf Folge-Rechnung (Storno-Entwurf)
+      // bzw. den aktualisierten Status der Original-Rechnung pollen.
+      await refetchWithPoll<InvoiceItem[]>(
+        queryClient,
+        ["billing-invoices", expectYear, expectMonth, nextStatusFilter],
+        (list) => {
+          if (!list) return false;
+          const target = list.find((inv) => inv.id === variables.id);
+          return !!target && target.status === variables.status;
+        },
+      );
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -288,22 +319,17 @@ export default function AdminBilling() {
 
       invalidateRelated(queryClient, "billing");
 
-      // Task #540: Neon-Serverless hat gelegentlich kurze Replika-Lag —
-      // ein einzelner Refetch direkt nach dem Insert kann eine leere
-      // Liste zurückgeben, sodass die UI nach `generate-all` keine neuen
-      // Rechnungen anzeigt. Wir refetchen daher gezielt mit kurzem Polling,
-      // bis mindestens eine der erwarteten Kunden-Rechnungen in der Liste
-      // erscheint (oder das Timeout erreicht ist).
+      // Task #540/#543: Neon-Serverless hat gelegentlich kurze Replika-Lag —
+      // ein einzelner Refetch direkt nach Massen-Mutationen kann eine
+      // veraltete Liste liefern. `refetchWithPoll` refetcht daher gezielt
+      // mit kurzem Polling, bis der erwartete Zustand sichtbar ist (oder
+      // das Timeout erreicht ist).
       if (createdCustomerIds.size > 0) {
-        const queryKey = ["billing-invoices", expectYear, expectMonth, nextStatusFilter];
-        for (let attempt = 0; attempt < 6; attempt++) {
-          await queryClient.refetchQueries({ queryKey, type: "active" });
-          const list = queryClient.getQueryData<InvoiceItem[]>(queryKey);
-          if (list && list.some((inv) => createdCustomerIds.has(inv.customerId))) {
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 400));
-        }
+        await refetchWithPoll<InvoiceItem[]>(
+          queryClient,
+          ["billing-invoices", expectYear, expectMonth, nextStatusFilter],
+          (list) => !!list && list.some((inv) => createdCustomerIds.has(inv.customerId)),
+        );
       }
     },
     onError: (error: Error) => {
@@ -317,14 +343,35 @@ export default function AdminBilling() {
       const result = await api.post<BatchSendResponse>("/billing/send-batch", { invoiceIds });
       return unwrapResult(result);
     },
-    onSuccess: (data: BatchSendResponse) => {
+    onSuccess: async (data: BatchSendResponse) => {
       const { summary } = data;
       toast({
         title: `Stapelversand abgeschlossen`,
         description: `${summary.sent} versendet, ${summary.errors} Fehler, ${summary.skipped} übersprungen`,
       });
+
+      const expectMonth = selectedMonth;
+      const expectYear = selectedYear;
+      const sentIds = new Set(
+        data.results.filter((r) => r.status === "sent").map((r) => r.invoiceId),
+      );
+
       invalidateRelated(queryClient, "billing");
       setBatchSending(false);
+
+      // Task #543: Replika-Lag-Schutz — auf Statuswechsel der versendeten
+      // Rechnungen (`entwurf` -> `versendet`) im aktuell sichtbaren Filter
+      // pollen.
+      if (sentIds.size > 0) {
+        await refetchWithPoll<InvoiceItem[]>(
+          queryClient,
+          ["billing-invoices", expectYear, expectMonth, statusFilter],
+          (list) => {
+            if (!list) return true;
+            return !list.some((inv) => sentIds.has(inv.id) && inv.status === "entwurf");
+          },
+        );
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Stapelversand fehlgeschlagen", description: error.message, variant: "destructive" });
@@ -351,14 +398,37 @@ export default function AdminBilling() {
       const result = await api.post<BulkSendInvoiceResponse>("/billing/send-bulk", { invoiceIds });
       return unwrapResult(result);
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setBulkSendResult(data);
       const { summary } = data;
       toast({
         title: "Bulk-Versand abgeschlossen",
         description: `${summary.sent + summary.markedSent} versendet, ${summary.skipped} übersprungen, ${summary.errors} Fehler`,
       });
+
+      const expectMonth = selectedMonth;
+      const expectYear = selectedYear;
+      const sentIds = new Set(
+        data.results
+          .filter((r) => r.status === "sent" || r.status === "marked_sent")
+          .map((r) => r.invoiceId),
+      );
+
       invalidateRelated(queryClient, "billing");
+
+      // Task #543: Replika-Lag-Schutz — auf Statuswechsel der versendeten
+      // Rechnungen pollen (keine der versendeten IDs darf noch als
+      // `entwurf` in der Liste auftauchen).
+      if (sentIds.size > 0) {
+        await refetchWithPoll<InvoiceItem[]>(
+          queryClient,
+          ["billing-invoices", expectYear, expectMonth, statusFilter],
+          (list) => {
+            if (!list) return true;
+            return !list.some((inv) => sentIds.has(inv.id) && inv.status === "entwurf");
+          },
+        );
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Bulk-Versand fehlgeschlagen", description: error.message, variant: "destructive" });

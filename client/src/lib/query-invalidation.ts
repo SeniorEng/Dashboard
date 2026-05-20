@@ -233,6 +233,36 @@ export type InvalidateOptions = { customerId?: number };
  */
 type InvalidateArg = Domain | InvalidateOptions;
 
+/**
+ * Refetch a single query key until `predicate` returns true, or the polling
+ * budget is exhausted. Use after mass-mutations on Neon serverless, where
+ * read-replica lag can briefly return a stale list directly after a write.
+ *
+ * The first refetch happens immediately; subsequent attempts wait `delayMs`
+ * between calls. Returns `true` once the predicate is satisfied, `false`
+ * after the last attempt. The caller is responsible for invalidating any
+ * related caches (e.g. via `invalidateRelated`) — this helper only drives
+ * the active list query.
+ */
+export async function refetchWithPoll<T>(
+  queryClient: QueryClient,
+  queryKey: readonly unknown[],
+  predicate: (data: T | undefined) => boolean,
+  options: { attempts?: number; delayMs?: number } = {},
+): Promise<boolean> {
+  const attempts = options.attempts ?? 6;
+  const delayMs = options.delayMs ?? 400;
+  for (let i = 0; i < attempts; i++) {
+    await queryClient.refetchQueries({ queryKey: [...queryKey], type: "active" });
+    const data = queryClient.getQueryData<T>([...queryKey]);
+    if (predicate(data)) return true;
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return false;
+}
+
 export function invalidateRelated(
   queryClient: QueryClient,
   ...args: InvalidateArg[]
