@@ -26,6 +26,65 @@ Neueste Einträge oben.
 
 ## Einträge
 
+### Geplant — Operator-Aktion: Rechnungs-PDFs #2 und #3 in Production neu generieren (Task #551)
+
+**Anlass:** Nach dem Deploy von Task #550 (Chromium-Launch-Härtung) müssen die beiden Bestands-Rechnungen #2 und #3 einmalig durch den seit Task #532 vorhandenen Superadmin-Endpoint geschickt werden, falls der bootseitige Auto-Backfill (max. 20 Rechnungen pro Start) diese beiden Datensätze nicht erwischt hat. Dies ist eine **reine Deploy-Zeit-Aktion ohne Code-Änderung**.
+
+**Vorbedingung:** Task #550 ist nach Production deployed und `runChromiumPreflight()` zeigt `ok = true`.
+
+**Auszuführen aus einer Shell mit Production-Zugriff (Superadmin-Session-Cookie nötig):**
+
+```bash
+# 1. Health-Check: Chromium muss in Prod startfähig sein
+curl -sS https://<prod-host>/api/health | jq '.chromium'
+# Erwartet: { "ok": true, ... }
+
+# 2. Superadmin-Cookie setzen (z.B. aus Browser-DevTools kopieren) und Endpoints triggern
+export SID="<superadmin-session-cookie>"
+for ID in 2 3; do
+  echo "--- Rechnung #$ID ---"
+  curl -sS -X POST -b "$SID" https://<prod-host>/api/admin/billing/$ID/regenerate-pdf | jq
+done
+# Erwartet je: HTTP 200, JSON mit success:true, regenerated:true (oder false falls
+# der Auto-Backfill #2/#3 bereits erwischt hat — beides ist akzeptabel).
+
+# 3. End-User-Verifikation: PDFs müssen ausgeliefert werden, kein 500 mehr
+for ID in 2 3; do
+  curl -sS -o /dev/null -w "#$ID pdf: %{http_code} %{content_type}\n" \
+    -b "$SID" https://<prod-host>/api/billing/$ID/pdf
+  curl -sS -o /dev/null -w "#$ID lstg: %{http_code} %{content_type}\n" \
+    -b "$SID" https://<prod-host>/api/billing/$ID/leistungsnachweis
+done
+# Erwartet je: 200 application/pdf
+```
+
+**Done looks like (Akzeptanzkriterien aus Task #551):**
+- [ ] `GET /api/health` zeigt `chromium.ok = true` in Production.
+- [ ] `POST /api/admin/billing/2/regenerate-pdf` → 200.
+- [ ] `POST /api/admin/billing/3/regenerate-pdf` → 200.
+- [ ] `GET /api/billing/2/pdf` → 200 `application/pdf`.
+- [ ] `GET /api/billing/2/leistungsnachweis` → 200 `application/pdf`.
+- [ ] `GET /api/billing/3/pdf` → 200 `application/pdf`.
+- [ ] `GET /api/billing/3/leistungsnachweis` → 200 `application/pdf`.
+
+**Diagnose bei Fehlern:**
+- Wenn `/api/health` `chromium.ok = false` meldet → in der Repl-Shell `npm run chromium:smoke` ausführen, Ring-Buffer-Dump auswerten, ggf. `CHROMIUM_PATH` im Deployment setzen.
+- Wenn `regenerate-pdf` 500 wirft → Server-Logs des Deployments mit `fetch_deployment_logs` (Filter `regenerate-pdf|Chromium|persistInvoicePdf`) prüfen.
+
+**Ausgeführt (vom Operator nach Deploy auszufüllen):**
+- Datum/Uhrzeit (UTC): _________
+- Operator: _________
+- `/api/health → chromium.ok`: _________
+- `POST regenerate-pdf #2` Status: _________ — `regenerated`: _________
+- `POST regenerate-pdf #3` Status: _________ — `regenerated`: _________
+- `GET #2 pdf / leistungsnachweis` Status: _________ / _________
+- `GET #3 pdf / leistungsnachweis` Status: _________ / _________
+- Ergebnis: erfolgreich / Diagnose nötig (Begründung): _________
+
+> Hinweis: Diese Aktion wurde von Task #551 vorbereitet, aber **nicht ausgeführt** — der Replit Task-Agent hat aus dem Build-Sandbox heraus keinen Superadmin-Zugang zur Production-Instanz. Die obigen Schritte sind vom menschlichen Operator nach dem Production-Deploy von Task #550 auszuführen und die Checkliste hier auszufüllen.
+
+---
+
 ### Geplant — Pre-Publish-Backup für Migration `0017_letterxpress_replaces_epost.sql` (Task #303)
 
 **Anlass:** Code-Switch von Deutsche Post E-POST auf LetterXpress (Task #302) ist ausgeliefert. Production-DB hat noch das alte Schema und braucht Migration 0017 beim nächsten Publish.
