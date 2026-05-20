@@ -380,24 +380,57 @@ export interface EmbedZugferdResult {
   xml: string | null;
 }
 
+/**
+ * Task #553: Typisierter Fehler für ZUGFeRD-Einbettungs-Failures im Send-Pfad.
+ * Wird ausschließlich von `embedZugferdXml(..., { strict: true })` geworfen
+ * — der Default-Pfad (Preview/PDF-Anzeige) fällt weiterhin still auf das
+ * Standard-PDF zurück, damit Vorschauen nicht hart brechen.
+ *
+ * Send-Endpoints (Rechnung an Pflegekasse/Kunde) MÜSSEN strict=true verwenden,
+ * damit eine nicht-konforme Rechnung nicht verschickt wird (GoBD/ZUGFeRD-Compliance).
+ */
+export class ZugferdEmbedError extends Error {
+  constructor(public readonly reason: string, public readonly cause?: unknown) {
+    super(`ZUGFeRD-Einbettung fehlgeschlagen: ${reason}`);
+    this.name = "ZugferdEmbedError";
+  }
+}
+
 export async function embedZugferdXml(
   pdfBuffer: Buffer,
-  data: InvoicePdfData
+  data: InvoicePdfData,
+  options?: { strict?: boolean }
 ): Promise<EmbedZugferdResult> {
+  const strict = options?.strict === true;
   try {
     const built = await buildZugferdInvoice(data);
     if (!built.ok) {
-      log(`Validierungsfehler, verwende Standard-PDF: ${built.errors.join("; ")}`, "ZUGFeRD");
+      const reason = `Validierungsfehler: ${built.errors.join("; ")}`;
+      if (strict) {
+        throw new ZugferdEmbedError(reason);
+      }
+      log(`${reason} — verwende Standard-PDF`, "ZUGFeRD");
       return { pdf: pdfBuffer, xml: null };
     }
 
-    const resultPdf = await built.invoice.embedInPdf(pdfBuffer, {
-      metadata: {
-        title: `Rechnung ${data.invoiceNumber}`,
-        author: data.companyName,
-        subject: `Rechnung ${data.invoiceNumber}`,
-      },
-    });
+    let resultPdf: Uint8Array;
+    try {
+      resultPdf = await built.invoice.embedInPdf(pdfBuffer, {
+        metadata: {
+          title: `Rechnung ${data.invoiceNumber}`,
+          author: data.companyName,
+          subject: `Rechnung ${data.invoiceNumber}`,
+        },
+      });
+    } catch (embedErr) {
+      if (strict) {
+        throw new ZugferdEmbedError(
+          `embedInPdf-Aufruf fehlgeschlagen: ${embedErr instanceof Error ? embedErr.message : String(embedErr)}`,
+          embedErr,
+        );
+      }
+      throw embedErr;
+    }
 
     const pdfResult = Buffer.from(resultPdf);
     const { hasPdfA } = await readPdfAXmp(pdfResult);
@@ -405,12 +438,25 @@ export async function embedZugferdXml(
     log(`PDF eingebettet für ${data.invoiceNumber} | strict=${built.usedStrictMode} | PDF/A=${hasPdfA} | XML=${hasXml}`, "ZUGFeRD");
 
     if (!hasPdfA || !hasXml) {
-      log(`Konformitätsprüfung fehlgeschlagen (PDF/A=${hasPdfA}, XML=${hasXml}), verwende Standard-PDF`, "ZUGFeRD");
+      const reason = `Konformitätsprüfung fehlgeschlagen (PDF/A=${hasPdfA}, XML=${hasXml})`;
+      if (strict) {
+        throw new ZugferdEmbedError(reason);
+      }
+      log(`${reason}, verwende Standard-PDF`, "ZUGFeRD");
       return { pdf: pdfBuffer, xml: null };
     }
 
     return { pdf: pdfResult, xml: built.xml };
   } catch (err) {
+    if (err instanceof ZugferdEmbedError) {
+      throw err;
+    }
+    if (strict) {
+      throw new ZugferdEmbedError(
+        err instanceof Error ? err.message : String(err),
+        err,
+      );
+    }
     log(`Fehler beim Einbetten der XML-Daten, verwende Standard-PDF: ${err}`, "ZUGFeRD");
     return { pdf: pdfBuffer, xml: null };
   }

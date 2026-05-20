@@ -77,6 +77,7 @@ export const AUDIT_ACTIONS = [
   "invoice_pdf_manually_regenerated",
   "invoice_marked_sent_manually",
   "invoice_pdf_persist_failed",
+  "invoice_zugferd_embed_failed",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

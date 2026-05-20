@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
-import { asyncHandler, badRequest, notFound } from "../lib/errors";
+import { AppError, asyncHandler, badRequest, notFound } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
@@ -413,6 +413,9 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
 
   // Task #552: Renderer-Imports werden bei Bedarf in `loadOrRenderSendablePdfs`
   // nachgeladen — beim Cache-Hit muss Puppeteer nicht angefasst werden.
+  // Task #553: `ZugferdEmbedError` wird hier eager geladen, damit der
+  // catch-Block unten typisiert prüfen kann.
+  const { ZugferdEmbedError } = await import("../lib/zugferd");
   const { sendEmail, buildEmailLayout } = await import("../services/email-service");
   const { resolveLogoToDataUrl } = await import("../services/logo-resolver");
   const companyName = companySettings.companyName || "SeniorenEngel";
@@ -512,11 +515,44 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
       // Task #552: PDF-Cache (pdfPath / leistungsnachweisPath) zuerst lesen;
       // on-demand-Render nur bei Cache-Miss. Cache-Miss triggert Hintergrund-
       // Persist, damit Folge-Sends Cache-Hits sind.
-      const { invoicePdf: zugferdBuffer, lnPdf } = await loadOrRenderSendablePdfs(
-        invoice,
-        pdfData,
-        { isCustomerInvoice: sendToCustomer },
-      );
+      // Task #553: Strict-Mode im Send-Pfad — beim Cache-Miss-Render wird
+      // ein ZUGFeRD-Embedding-Failure als typisierter Fehler propagiert,
+      // damit keine nicht-konforme Rechnung verschickt wird.
+      let zugferdBuffer: Buffer;
+      let lnPdf: Buffer;
+      try {
+        const rendered = await loadOrRenderSendablePdfs(
+          invoice,
+          pdfData,
+          { isCustomerInvoice: sendToCustomer, strictZugferd: true },
+        );
+        zugferdBuffer = rendered.invoicePdf;
+        lnPdf = rendered.lnPdf;
+      } catch (zugErr) {
+        if (zugErr instanceof ZugferdEmbedError) {
+          await auditService.log(
+            req.user!.id,
+            "invoice_zugferd_embed_failed",
+            "invoice",
+            invoiceId,
+            {
+              invoiceNumber: invoice.invoiceNumber,
+              customerId: invoice.customerId,
+              reason: zugErr.reason.slice(0, 500),
+              batchSend: true,
+            },
+            req.ip,
+          );
+          results.push({
+            invoiceId,
+            invoiceNumber: invoice.invoiceNumber,
+            status: "error",
+            error: `ZUGFeRD-Einbettung fehlgeschlagen: ${zugErr.reason}. Rechnung wurde NICHT versendet.`,
+          });
+          continue;
+        }
+        throw zugErr;
+      }
 
       let finalInvoicePdf: Buffer = zugferdBuffer;
       let finalLnPdf: Buffer = lnPdf;
@@ -1990,7 +2026,7 @@ async function loadLeistungsnachweisPdfFromStorage(invoice: Invoice): Promise<Bu
 async function loadOrRenderSendablePdfs(
   invoice: Invoice,
   pdfData: InvoicePdfData,
-  opts: { isCustomerInvoice: boolean },
+  opts: { isCustomerInvoice: boolean; strictZugferd?: boolean },
 ): Promise<{ invoicePdf: Buffer; lnPdf: Buffer; cachedInvoice: boolean; cachedLn: boolean }> {
   let invoicePdf: Buffer | null = null;
   if (!opts.isCustomerInvoice) {
@@ -2003,10 +2039,13 @@ async function loadOrRenderSendablePdfs(
   if (!invoicePdf || !lnPdf) {
     const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
     if (!invoicePdf) {
+      // Task #553: Im Send-Pfad MUSS Strict-Mode aktiv sein, damit ein
+      // Embedding-Failure als typisierter `ZugferdEmbedError` propagiert
+      // wird statt still ein nicht-konformes PDF zurückzuliefern.
       const { embedZugferdXml } = await import("../lib/zugferd");
       const invoiceHtml = generateInvoiceHtml(pdfData);
       const { buffer: rendered } = await generatePdf(invoiceHtml);
-      const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData);
+      const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData, { strict: opts.strictZugferd === true });
       invoicePdf = zugferdBuffer;
     }
     if (!lnPdf) {
@@ -2298,11 +2337,44 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   // Task #552: PDF-Cache (pdfPath / leistungsnachweisPath) zuerst lesen;
   // on-demand-Render nur bei Cache-Miss. Concurrent Send-Klicks werden über
   // den `persistInvoicePdf`-Mutex serialisiert.
-  const { invoicePdf: zugferdBuffer, lnPdf } = await loadOrRenderSendablePdfs(
-    invoice,
-    pdfData,
-    { isCustomerInvoice: sendToCustomer },
-  );
+  // Task #553: Strict-Mode im Send-Pfad — bei ZUGFeRD-Embedding-Fehler wird
+  // die Rechnung NICHT als nicht-konformes PDF verschickt; stattdessen
+  // Audit-Eintrag + HTTP 500 mit deutscher Fehlermeldung.
+  const { ZugferdEmbedError } = await import("../lib/zugferd");
+  let zugferdBuffer: Buffer;
+  let lnPdf: Buffer;
+  try {
+    const rendered = await loadOrRenderSendablePdfs(
+      invoice,
+      pdfData,
+      { isCustomerInvoice: sendToCustomer, strictZugferd: true },
+    );
+    zugferdBuffer = rendered.invoicePdf;
+    lnPdf = rendered.lnPdf;
+  } catch (zugErr) {
+    if (zugErr instanceof ZugferdEmbedError) {
+      await auditService.log(
+        req.user!.id,
+        "invoice_zugferd_embed_failed",
+        "invoice",
+        id,
+        {
+          invoiceNumber: invoice.invoiceNumber,
+          customerId: invoice.customerId,
+          reason: zugErr.reason.slice(0, 500),
+          batchSend: false,
+        },
+        req.ip,
+      );
+      throw new AppError(
+        500,
+        "SERVER_ERROR",
+        `Rechnung konnte nicht versendet werden: ZUGFeRD-Einbettung fehlgeschlagen (${zugErr.reason}). Aus GoBD-Gründen wird keine nicht-konforme E-Rechnung verschickt — bitte den Support kontaktieren.`,
+        "ZUGFeRD-Einbettung fehlgeschlagen",
+      );
+    }
+    throw zugErr;
+  }
 
   let finalInvoicePdf: Buffer = zugferdBuffer;
   let finalLnPdf: Buffer = lnPdf;
