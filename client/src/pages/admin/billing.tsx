@@ -110,6 +110,18 @@ function getInvoiceCustomerDisplayName(inv: InvoiceItem): string {
   return inv.customerName || "";
 }
 
+// Task #546: PDF-Persistierung läuft im Hintergrund (siehe Task #544). Ist nach
+// PDF_PENDING_THRESHOLD_MS noch kein `pdfPath` gesetzt, gehen wir von einem
+// Fehler aus und zeigen einen roten Hinweis-Badge.
+const PDF_PENDING_THRESHOLD_MS = 5 * 60 * 1000;
+
+function getPdfStatus(invoice: InvoiceItem): "ok" | "pending" | "error" {
+  if (invoice.pdfPath) return "ok";
+  const createdAt = invoice.createdAt ? new Date(invoice.createdAt).getTime() : NaN;
+  if (Number.isNaN(createdAt)) return "pending";
+  return Date.now() - createdAt > PDF_PENDING_THRESHOLD_MS ? "error" : "pending";
+}
+
 function formatSentAt(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -623,6 +635,36 @@ export default function AdminBilling() {
                             <Badge variant="outline" className={STATUS_COLORS[invoice.status] || "bg-gray-100 text-gray-600 border-gray-200"}>
                               {STATUS_LABELS[invoice.status] || invoice.status}
                             </Badge>
+                            {/* Task #546: PDF-Persistierungs-Status sichtbar
+                                machen — wenn der Hintergrund-Render hängt
+                                oder gescheitert ist, sehen Admins das hier
+                                statt es erst beim Drucken zu bemerken. */}
+                            {(() => {
+                              const pdfStatus = getPdfStatus(invoice);
+                              if (pdfStatus === "ok") return null;
+                              if (pdfStatus === "pending") {
+                                return (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-amber-50 text-amber-700 border-amber-200"
+                                    title="Das PDF wird gerade im Hintergrund erstellt."
+                                    data-testid={`badge-pdf-pending-${invoice.id}`}
+                                  >
+                                    PDF ausstehend
+                                  </Badge>
+                                );
+                              }
+                              return (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-red-50 text-red-700 border-red-200"
+                                  title="Das PDF konnte nicht im Hintergrund erstellt werden. Beim nächsten Druck-/Versand-Klick wird ein erneuter Versuch unternommen."
+                                  data-testid={`badge-pdf-error-${invoice.id}`}
+                                >
+                                  PDF-Fehler
+                                </Badge>
+                              );
+                            })()}
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
                             {/* Task #533: Kunde sichtbar — Vor- und Nachname

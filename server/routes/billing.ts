@@ -1280,16 +1280,64 @@ async function generateInvoiceCore(
  * HTTP-Request „Rechnung erstellen" nicht durch einen langsamen Puppeteer-
  * Render-/Launch-Pfad blockiert wird. Fehler werden geloggt; das Rechnungs-
  * PDF wird beim nächsten /pdf- oder /leistungsnachweis-Abruf nachgezogen.
+ *
+ * Task #546: Wiederholt den Persist-Versuch bis zu BACKGROUND_PDF_MAX_ATTEMPTS
+ * mit exponentiellem Backoff. Schlägt der letzte Versuch fehl, wird ein
+ * Audit-Log-Eintrag (`invoice_pdf_persist_failed`) geschrieben, damit
+ * Superadmins fehlerhafte PDFs nicht erst beim nächsten Druckauftrag bemerken.
  */
+const BACKGROUND_PDF_MAX_ATTEMPTS = 3;
+const BACKGROUND_PDF_RETRY_DELAY_MS = 30_000;
+
 function schedulePdfPersistInBackground(invoiceId: number): void {
   setImmediate(() => {
-    persistInvoicePdf(invoiceId).catch((err) => {
+    void runPdfPersistWithRetry(invoiceId);
+  });
+}
+
+async function runPdfPersistWithRetry(invoiceId: number): Promise<void> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= BACKGROUND_PDF_MAX_ATTEMPTS; attempt++) {
+    try {
+      await persistInvoicePdf(invoiceId);
+      return;
+    } catch (err) {
+      lastError = err;
       console.error(
-        `[billing/generate] Hintergrund-PDF-Persistierung für Rechnung ${invoiceId} fehlgeschlagen:`,
+        `[billing/generate] Hintergrund-PDF-Persistierung für Rechnung ${invoiceId} (Versuch ${attempt}/${BACKGROUND_PDF_MAX_ATTEMPTS}) fehlgeschlagen:`,
         err,
       );
-    });
-  });
+      if (attempt < BACKGROUND_PDF_MAX_ATTEMPTS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, BACKGROUND_PDF_RETRY_DELAY_MS * attempt),
+        );
+      }
+    }
+  }
+
+  // Endgültiger Fehlschlag — Audit-Log-Eintrag schreiben, damit die UI
+  // (Badge „PDF-Fehler") und Superadmins die betroffene Rechnung sehen.
+  try {
+    const invoice = await storage.getInvoice(invoiceId);
+    if (!invoice) return;
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    await auditService.log(
+      invoice.createdByUserId ?? 0,
+      "invoice_pdf_persist_failed",
+      "invoice",
+      invoiceId,
+      {
+        invoiceNumber: invoice.invoiceNumber,
+        attempts: BACKGROUND_PDF_MAX_ATTEMPTS,
+        error: message.slice(0, 500),
+      },
+    );
+  } catch (auditErr) {
+    console.error(
+      `[billing/generate] Audit-Log für PDF-Persist-Fehler (Rechnung ${invoiceId}) konnte nicht geschrieben werden:`,
+      auditErr,
+    );
+  }
 }
 
 // Task #533: Dünner HTTP-Wrapper um generateInvoiceCore (siehe oben).

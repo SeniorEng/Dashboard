@@ -29,6 +29,11 @@ export interface InvoiceItem {
   status: string;
   // Task #533: Versanddatum für Listenanzeige (Badge „Versendet seit ...").
   sentAt: string | null;
+  // Task #546: PDF-Persistierungs-Status. `pdfPath` ist NULL solange das
+  // Hintergrund-Rendering läuft (oder fehlgeschlagen ist); `createdAt` dient
+  // dem Frontend zur Unterscheidung zwischen „noch in Arbeit" und „Fehler".
+  pdfPath: string | null;
+  createdAt: string;
 }
 
 interface InvoiceLineItem {
