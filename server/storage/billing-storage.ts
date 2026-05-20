@@ -17,13 +17,20 @@ export async function getInvoices(filters: { year?: number; month?: number; cust
   const results = await db.select({
     invoice: invoices,
     customerName: customers.name,
+    customerVorname: customers.vorname,
+    customerNachname: customers.nachname,
   })
   .from(invoices)
   .innerJoin(customers, eq(invoices.customerId, customers.id))
   .where(conditions.length > 0 ? and(...conditions) : undefined)
   .orderBy(desc(invoices.createdAt));
 
-  return results.map(r => ({ ...r.invoice, customerName: r.customerName }));
+  return results.map(r => ({
+    ...r.invoice,
+    customerName: r.customerName,
+    customerVorname: r.customerVorname,
+    customerNachname: r.customerNachname,
+  }));
 }
 
 export async function getInvoice(id: number): Promise<InvoiceWithCustomer | undefined> {
@@ -32,12 +39,19 @@ export async function getInvoice(id: number): Promise<InvoiceWithCustomer | unde
   const results = await db.select({
     invoice: invoices,
     customerName: customers.name,
+    customerVorname: customers.vorname,
+    customerNachname: customers.nachname,
   })
   .from(invoices)
   .innerJoin(customers, eq(invoices.customerId, customers.id))
   .where(eq(invoices.id, id));
   if (results.length === 0) return undefined;
-  return { ...results[0].invoice, customerName: results[0].customerName };
+  return {
+    ...results[0].invoice,
+    customerName: results[0].customerName,
+    customerVorname: results[0].customerVorname,
+    customerNachname: results[0].customerNachname,
+  };
 }
 
 export async function createInvoiceTx(

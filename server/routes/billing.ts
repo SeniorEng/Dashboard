@@ -902,13 +902,32 @@ async function getInsuranceData(customerId: number) {
   return insuranceData.length > 0 ? insuranceData[0] : null;
 }
 
-router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", async (req, res) => {
-  const parsed = createInvoiceSchema.safeParse(req.body);
-  if (!parsed.success) {
-    throw badRequest(fromError(parsed.error).toString());
-  }
+type GenerateInvoiceResult =
+  | Invoice
+  | { splitInvoices: true; invoices: Invoice[]; message: string };
 
-  const { customerId, billingMonth, billingYear } = parsed.data;
+// Task #533 / Security: Kern-Logik der Rechnungserstellung extrahiert,
+// damit /generate-all die Logik direkt im selben Prozess aufrufen kann.
+// Kein HTTP-Self-Call, kein Forwarden von Session-Cookies, kein
+// Host-Header-SSRF-Risiko. /generate ist nur noch ein dünner Wrapper.
+async function generateInvoiceCore(
+  input: { customerId: number; billingMonth: number; billingYear: number },
+  ctx: { userId: number; ipAddress?: string; testFaults: Set<string> },
+): Promise<GenerateInvoiceResult> {
+  const { customerId, billingMonth, billingYear } = input;
+  // Lokales Shadow-`req`-Objekt, damit der unten kopierte Body unverändert
+  // bleibt (`req.user!.id`, `req.ip`, `readTestFaults(req)` lesen weiterhin).
+  const req = {
+    user: { id: ctx.userId },
+    ip: ctx.ipAddress,
+    headers: {} as Record<string, string | string[] | undefined>,
+  };
+  // Faults sind bereits aus dem echten Request extrahiert — wir stellen
+  // dem Body einen No-Op-Header-Bag zur Verfügung und überschreiben
+  // readTestFaults-Aufrufe-Resultate über `ctx.testFaults` via Closure.
+  const __testFaults = ctx.testFaults;
+  const readTestFaults = (_: unknown): Set<string> => __testFaults;
+  void readTestFaults; // wird unten verwendet
 
   const customer = await storage.getCustomer(customerId);
   if (!customer) throw notFound("Kunde nicht gefunden");
@@ -1140,15 +1159,13 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
       }
 
       if (refreshed.length === 1) {
-        res.json(refreshed[0]);
-      } else {
-        res.json({
-          splitInvoices: true,
-          invoices: refreshed,
-          message: `${refreshed.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
-        });
+        return refreshed[0];
       }
-      return;
+      return {
+        splitInvoices: true as const,
+        invoices: refreshed,
+        message: `${refreshed.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
+      };
     }
   }
 
@@ -1263,7 +1280,21 @@ router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", a
     console.error(`[billing/generate] PDF-Persistierung für Rechnung ${invoice.id} fehlgeschlagen:`, pdfErr);
   }
   const refreshedInvoice = await storage.getInvoice(invoice.id);
-  res.json(refreshedInvoice ?? invoice);
+  return refreshedInvoice ?? invoice;
+}
+
+// Task #533: Dünner HTTP-Wrapper um generateInvoiceCore (siehe oben).
+router.post("/generate", asyncHandler("Rechnung konnte nicht erstellt werden", async (req, res) => {
+  const parsed = createInvoiceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+  const result = await generateInvoiceCore(parsed.data, {
+    userId: req.user!.id,
+    ipAddress: req.ip,
+    testFaults: readTestFaults(req),
+  });
+  res.json(result);
 }));
 
 
@@ -1978,7 +2009,15 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   }
 
   // Selbstzahler-Fallback: on-the-fly rendern ohne Persistenz (kein LN-Cache).
-  const lineItems = await storage.getInvoiceLineItems(id);
+  const buffer = await renderLeistungsnachweisOnTheFly(invoice);
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
+  res.send(buffer);
+}));
+
+async function renderLeistungsnachweisOnTheFly(invoice: Invoice): Promise<Buffer> {
+  const lineItems = await storage.getInvoiceLineItems(invoice.id);
   const companySettings = await getCachedCompanySettings();
   const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
 
@@ -2002,11 +2041,8 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
 
   const html = generateLeistungsnachweisHtml(pdfData);
   const { buffer } = await generatePdf(html);
-
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
-  res.send(buffer);
-}));
+  return buffer;
+}
 
 const MONTH_NAMES_DE = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -2353,6 +2389,202 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
   res.json({
     message: "Rechnung erfolgreich versendet",
     invoice: updated,
+    results,
+  });
+}));
+
+// Task #533: Gebündeltes PDF (Rechnung + Leistungsnachweis) für den Druck.
+// Liefert beide Dokumente in einer PDF-Datei aus, ohne den GoBD-Cache der
+// einzelnen PDFs zu verändern. Falls die PDFs noch nicht persistiert sind,
+// werden sie über den bestehenden Backfill-Pfad erzeugt.
+router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werden — bitte erneut versuchen.", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const invoice = await storage.getInvoice(id);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+
+  let invoicePdf = await loadInvoicePdfFromStorage(invoice);
+  let lnPdf = await loadLeistungsnachweisPdfFromStorage(invoice);
+  const isPflegekasse = invoice.billingType === "pflegekasse_gesetzlich" || invoice.billingType === "pflegekasse_privat";
+
+  if (!invoicePdf || (!lnPdf && isPflegekasse)) {
+    try {
+      await persistInvoicePdf(id);
+    } catch (err) {
+      console.error(`[billing/bundle] PDF-Persistierung für Rechnung ${id} fehlgeschlagen:`, err);
+    }
+    const refreshed = await storage.getInvoice(id);
+    if (refreshed) {
+      invoicePdf = await loadInvoicePdfFromStorage(refreshed) ?? invoicePdf;
+      lnPdf = await loadLeistungsnachweisPdfFromStorage(refreshed) ?? lnPdf;
+    }
+  }
+
+  if (!invoicePdf) {
+    throw notFound("Rechnungs-PDF konnte nicht geladen werden.");
+  }
+
+  // Selbstzahler/Privat ohne LN-Cache: on-the-fly rendern, damit das Bündel
+  // immer Rechnung + Leistungsnachweis enthält (kein Cache-Schreibe-Pfad).
+  // Schlägt das fehl, brechen wir hart ab statt still nur die Rechnung
+  // auszuliefern — sonst druckt der Admin unbemerkt ohne LN.
+  if (!lnPdf) {
+    try {
+      lnPdf = await renderLeistungsnachweisOnTheFly(invoice);
+    } catch (err) {
+      console.error(`[billing/bundle] LN-On-the-fly-Render für Rechnung ${id} fehlgeschlagen:`, err);
+      throw new Error("Leistungsnachweis konnte nicht erzeugt werden — Bündel-Druck nicht möglich. Bitte erneut versuchen oder einzeln drucken.");
+    }
+  }
+
+  const { PDFDocument } = await import("pdf-lib");
+  const merged = await PDFDocument.create();
+  const invoiceDoc = await PDFDocument.load(invoicePdf);
+  const ip = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
+  ip.forEach((p) => merged.addPage(p));
+  if (lnPdf) {
+    const lnDoc = await PDFDocument.load(lnPdf);
+    const lp = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
+    lp.forEach((p) => merged.addPage(p));
+  }
+  const bytes = Buffer.from(await merged.save());
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="Bundle-${invoice.invoiceNumber}.pdf"`);
+  res.send(bytes);
+}));
+
+// Task #533: Manuelles Markieren als „versendet" für Pflegekassen-Rechnungen,
+// solange der TI-Versand fehlt. Audit-Log mit Hinweis auf den manuellen Pfad.
+router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const invoice = await storage.getInvoice(id);
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+
+  if (invoice.status !== "entwurf") {
+    throw badRequest(`Rechnung hat Status "${invoice.status}" — nur Entwürfe können manuell als versendet markiert werden.`);
+  }
+
+  // Task #533: Manuelles Markieren ist explizit ein Workaround, solange der
+  // TI-Anschluss fehlt. Selbstzahler- und Privat-Rechnungen werden bereits
+  // über `/:id/status` (Versand-Buttons) auf „versendet" gesetzt; das hier
+  // ist ausdrücklich Pflegekassen-Versand. Server-seitige Einschränkung,
+  // damit das Endpoint nicht als Generalumgehung benutzt werden kann.
+  if (invoice.billingType !== "pflegekasse_gesetzlich" && invoice.billingType !== "pflegekasse_privat") {
+    throw badRequest("Manuelles Markieren ist nur für Pflegekassen-Rechnungen vorgesehen. Selbstzahler-Rechnungen werden über den regulären Versand-Status verwaltet.");
+  }
+
+  const updated = await withAudit(async (tx, audit) => {
+    const u = await updateInvoiceStatusTx(tx, id, "versendet", req.user!.id);
+    await tx.update(invoicesTable)
+      .set({ sentAt: new Date() })
+      .where(eq(invoicesTable.id, id));
+    audit.record({
+      userId: req.user!.id,
+      action: "invoice_marked_sent_manually",
+      entityType: "invoice",
+      entityId: id,
+      metadata: {
+        invoiceNumber: invoice.invoiceNumber,
+        customerId: invoice.customerId,
+        billingType: invoice.billingType,
+        oldStatus: invoice.status,
+        newStatus: "versendet",
+        reason: "manual_mark_sent_no_ti",
+      },
+      ipAddress: req.ip,
+    });
+    return { ...u, sentAt: new Date() };
+  }, { faults: readTestFaults(req) });
+
+  res.json(updated);
+}));
+
+// Task #533: Massenerstellung — erzeugt für alle berechtigten Kunden des
+// gewählten Monats sequenziell eine Rechnung. Idempotent: Kunden mit
+// existierender Nicht-Storno-Rechnung im Monat werden übersprungen.
+router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", async (req, res) => {
+  const parsed = z.object({
+    billingMonth: z.number().int().min(1).max(12),
+    billingYear: z.number().int().min(2000).max(2100),
+  }).safeParse(req.body);
+  if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
+  const { billingMonth, billingYear } = parsed.data;
+
+  // Berechtigte Kunden = Kunden mit signiertem Leistungsnachweis für den Monat.
+  const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
+    customerId: monthlyServiceRecords.customerId,
+  })
+    .where(and(
+      eq(monthlyServiceRecords.year, billingYear),
+      eq(monthlyServiceRecords.month, billingMonth),
+      or(
+        eq(monthlyServiceRecords.status, "completed"),
+        eq(monthlyServiceRecords.status, "employee_signed"),
+      ),
+      monthlyServiceRecordsRepo.activeOnly(),
+    ));
+  const customerIds = Array.from(new Set(signedRecords.map(r => r.customerId)));
+
+  const results: Array<{
+    customerId: number;
+    status: "created" | "skipped" | "error";
+    invoiceCount?: number;
+    message?: string;
+  }> = [];
+
+  for (const customerId of customerIds) {
+    try {
+      // Idempotenz: existiert bereits eine aktive (nicht stornierte)
+      // Rechnung dieses Monats, überspringen.
+      const existing = await storage.getInvoicesForCustomerMonth(customerId, billingYear, billingMonth);
+      const hasActive = existing.some(inv => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung");
+      if (hasActive) {
+        results.push({ customerId, status: "skipped", message: "Bereits abgerechnet" });
+        continue;
+      }
+
+      // Direkter In-Process-Aufruf der Kern-Logik — kein HTTP-Self-Call,
+      // kein Cookie-Forwarding, kein Host-Header-SSRF-Risiko.
+      try {
+        const result = await generateInvoiceCore(
+          { customerId, billingMonth, billingYear },
+          {
+            userId: req.user!.id,
+            ipAddress: req.ip,
+            testFaults: readTestFaults(req),
+          },
+        );
+        const count = "splitInvoices" in result && result.splitInvoices
+          ? result.invoices.length
+          : 1;
+        results.push({ customerId, status: "created", invoiceCount: count });
+      } catch (innerErr) {
+        const msg = innerErr instanceof Error ? innerErr.message : "Unbekannter Fehler";
+        // „Alle Termine ... bereits abgerechnet" / „Kein Leistungsnachweis"
+        // / „nicht unterschrieben" werden als Skip gewertet, damit die
+        // Massenerstellung idempotent bleibt und nicht jeder Kunde ohne
+        // signierten LN als Fehler zählt.
+        if (msg.includes("bereits abgerechnet")
+            || msg.includes("noch nicht unterschrieben")
+            || msg.includes("Kein Leistungsnachweis")) {
+          results.push({ customerId, status: "skipped", message: msg });
+        } else {
+          results.push({ customerId, status: "error", message: msg });
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
+      results.push({ customerId, status: "error", message: msg });
+    }
+  }
+
+  const created = results.filter(r => r.status === "created").length;
+  const skipped = results.filter(r => r.status === "skipped").length;
+  const errors = results.filter(r => r.status === "error").length;
+
+  res.json({
+    summary: { total: results.length, created, skipped, errors },
     results,
   });
 }));

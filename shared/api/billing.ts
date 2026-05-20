@@ -16,11 +16,19 @@ export interface InvoiceItem {
   billingMonth: number;
   billingYear: number;
   recipientName: string;
+  // Task #533: Kunden-Name (Vor-/Nachname) zusätzlich zur Empfängerzeile —
+  // wird auf der Rechnungs-Karte angezeigt, damit der Kundenbezug auch bei
+  // Pflegekassen-Rechnungen (Empfänger = Kasse) auf den ersten Blick sichtbar ist.
+  customerName: string;
+  customerVorname: string | null;
+  customerNachname: string | null;
   netAmountCents: number;
   vatAmountCents: number;
   grossAmountCents: number;
   vatRate: number | null;
   status: string;
+  // Task #533: Versanddatum für Listenanzeige (Badge „Versendet seit ...").
+  sentAt: string | null;
 }
 
 interface InvoiceLineItem {

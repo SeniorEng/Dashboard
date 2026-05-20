@@ -35,7 +35,12 @@ export interface AppointmentServiceWithDetails {
 }
 
 export interface InvoiceWithCustomer extends Invoice {
+  // Achtung: überschreibt das gleichnamige Invoice-Snapshot-Feld mit dem
+  // aktuellen Kundennamen aus dem JOIN. Vorname/Nachname werden separat
+  // projiziert, damit die UI „Vor- und Nachname" sauber anzeigen kann.
   customerName: string;
+  customerVorname: string | null;
+  customerNachname: string | null;
 }
 
 export interface PaginationOptions {
