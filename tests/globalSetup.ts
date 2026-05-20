@@ -29,24 +29,74 @@ interface Service {
   code?: string | null;
 }
 
+async function waitForServer(): Promise<void> {
+  // Health-Probe gegen /api/health. Notwendig, weil der `test`-Workflow im
+  // Replit-Setup parallel zum `Start application`-Workflow startet — der
+  // App-Server hört zum globalSetup-Start daher noch nicht zwingend auf
+  // Port 5000. Ohne diese Probe failt der erste Login mit `fetch failed`
+  // (ECONNREFUSED), globalSetup gab das früher still auf und alle Suiten
+  // mit `getAuthCookie()` in `beforeAll` wurden als skipped gemeldet.
+  const maxAttempts = 30;
+  const delayMs = 1000;
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(`${BASE_URL}/api/health`);
+      if (res.ok) return;
+      lastError = new Error(`health status ${res.status}`);
+    } catch (e) {
+      lastError = e;
+    }
+    if (attempt === 1 || attempt % 5 === 0) {
+      const msg = lastError instanceof Error ? lastError.message : String(lastError);
+      console.warn(`[globalSetup] Waiting for app server at ${BASE_URL} (attempt ${attempt}/${maxAttempts}): ${msg}`);
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  const msg = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(
+    `[globalSetup] App server at ${BASE_URL} did not become healthy after ${maxAttempts}s. ` +
+    `Stelle sicher, dass der "Start application"-Workflow läuft, bevor "test" gestartet wird. Letzter Fehler: ${msg}`,
+  );
+}
+
 async function loginAndGetAuth(): Promise<AuthInfo> {
   const email = process.env.TEST_USER_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
   const password = process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL;
   if (!password) throw new Error("TEST_USER_PASSWORD not set");
 
+  await waitForServer();
+
   let res: Response | null = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    res = await fetch(`${BASE_URL}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      res = await fetch(`${BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch (e) {
+      // Connection-Error (z.B. ECONNRESET, EAI_AGAIN) — Backoff statt sofort
+      // hart failen, damit Race-Conditions am Server-Start nicht zu still
+      // übersprungenen Suiten führen.
+      lastError = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      const delay = 1500 * Math.pow(2, attempt);
+      console.warn(`[globalSetup] login connection error (${msg}), retry in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
+    }
     if (res.status !== 429) break;
     const delay = 1500 * Math.pow(2, attempt);
     console.warn(`[globalSetup] 429 on login, retry in ${delay}ms`);
     await new Promise((r) => setTimeout(r, delay));
   }
-  if (!res || !res.ok) throw new Error(`Login failed: ${res?.status ?? "no response"}`);
+  if (!res) {
+    const msg = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`[globalSetup] Login failed (connection): ${msg}`);
+  }
+  if (!res.ok) throw new Error(`[globalSetup] Login failed: HTTP ${res.status}`);
 
   const cookies = res.headers.get("set-cookie") || "";
   const csrfMatch = cookies.match(/careconnect_csrf=([^;]+)/);
@@ -128,14 +178,11 @@ export async function setup() {
 
   console.log("[globalSetup] Cleaning stale test data...");
 
-  let auth: AuthInfo;
-  try {
-    auth = await loginAndGetAuth();
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn("[globalSetup] Could not login, skipping cleanup:", msg);
-    return;
-  }
+  // Hart failen statt still „skipping cleanup" loggen: ein nicht erreichbarer
+  // Server oder ein kaputter Login führt sonst dazu, dass jedes `beforeAll`
+  // mit `getAuthCookie()` failt und Vitest die betroffenen Suiten als
+  // „skipped" meldet — der Testlauf sähe grün aus, obwohl nichts gelaufen ist.
+  const auth: AuthInfo = await loginAndGetAuth();
 
   const custRes = await apiGet(auth, "/api/admin/customers?limit=500");
   if (!custRes.ok) {

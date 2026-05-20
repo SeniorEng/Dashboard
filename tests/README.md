@@ -7,6 +7,10 @@ Diese Tests prüfen die Kern-Funktionalität der CareConnect-APIs.
 1. Der Server muss laufen (`npm run dev`)
 2. Ein Test-Benutzer mit Admin-Rechten muss existieren
 
+## Login-Pfad ist kritisch (kein „grün durch Skip")
+
+`tests/globalSetup.ts` loggt sich beim Start mit `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` ein, um stale Test-Daten zu purgen. Jede Integrationssuite ruft in `beforeAll` ebenfalls `getAuthCookie()` auf. Wenn der App-Server beim `test`-Workflow-Start noch nicht auf Port 5000 lauscht (Race mit `Start application` im Replit-Setup), failt das Login mit `fetch failed`. Früher hat `globalSetup` das still mit „skipping cleanup" geloggt und tests/auth-utils sind später beim ersten Test eingestiegen — Resultat: ganze Suiten (insb. Billing) wurden als _skipped_ gemeldet, der Workflow blieb aber grün. Deshalb gilt jetzt: `globalSetup` macht eine Health-Probe gegen `/api/health` (30×1s) und retried Login bei Connection-Errors (6× exponential Backoff). Schlägt beides fehl, wird **hart geworfen** statt geschluckt, damit der Lauf sichtbar rot wird und Skip-Sweeps in Billing-Suiten nicht mehr unbemerkt durchrutschen.
+
 ## Tests ausführen
 
 ```bash
