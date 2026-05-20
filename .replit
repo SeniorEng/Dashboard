@@ -117,4 +117,4 @@ ENCRYPTION_KEY = "16cd865645bc85fca814fa59a9d1e9c4734a9420cf65f8769a70e0eedfd866
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 120000
+timeoutMs = 180000
