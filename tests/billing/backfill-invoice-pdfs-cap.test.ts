@@ -58,6 +58,10 @@ vi.mock("../../server/routes/billing", () => {
 
 vi.mock("../../server/services/pdf-generator", () => ({
   discardBrowser: vi.fn(async () => {}),
+  // Task #544: Backfill prüft beim Start, ob Chromium verfügbar ist.
+  // Im Unit-Test soll der Check immer "ja" zurückgeben.
+  isChromiumAvailable: () => true,
+  ChromiumUnavailableError: class ChromiumUnavailableError extends Error {},
 }));
 
 // Schemaspalten-Identifier reichen aus — der Mock ignoriert die Inhalte.

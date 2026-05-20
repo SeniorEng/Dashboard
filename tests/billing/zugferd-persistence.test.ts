@@ -133,11 +133,18 @@ describe("ZUGFeRD-Persistenz — invoices.zugferd_xml + Integrity-Verifier", () 
     expect(inv?.id, "Rechnung muss erzeugt sein").toBeDefined();
     cleanupInvoiceIds.push(inv.id);
 
-    const [row] = await db
-      .select({ zugferdXml: invoicesTable.zugferdXml, pdfHash: invoicesTable.pdfHash })
-      .from(invoicesTable)
-      .where(eq(invoicesTable.id, inv.id))
-      .limit(1);
+    // Task #544: persistInvoicePdf läuft nach /generate im Hintergrund.
+    // Auf das Erscheinen von zugferd_xml warten (bis 30s).
+    let row: { zugferdXml: string | null; pdfHash: string | null } | undefined;
+    for (let i = 0; i < 60; i++) {
+      [row] = await db
+        .select({ zugferdXml: invoicesTable.zugferdXml, pdfHash: invoicesTable.pdfHash })
+        .from(invoicesTable)
+        .where(eq(invoicesTable.id, inv.id))
+        .limit(1);
+      if (row?.zugferdXml && row?.pdfHash) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
 
     expect(
       row?.zugferdXml,

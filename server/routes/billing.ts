@@ -1145,26 +1145,21 @@ async function generateInvoiceCore(
         return createdInvoices;
       }, { faults: readTestFaults(req) });
 
-      // T01/PDF-Hash: PDF deterministisch erzeugen und persistieren, damit
-      // die /pdf-Bytes hashstabil ausgeliefert werden.
-      const refreshed: Invoice[] = [];
+      // Task #544: PDF-Persistierung ist GoBD-relevant, aber NICHT zeitkritisch
+      // für den HTTP-Response. Wir geben die Rechnungen sofort zurück und
+      // rendern die PDFs im Hintergrund — sonst hängt der "Wird erstellt..."-
+      // Button minutenlang, wenn Puppeteer in einen Timeout läuft.
       for (const inv of splitResult) {
-        try {
-          await persistInvoicePdf(inv.id);
-        } catch (pdfErr) {
-          console.error(`[billing/generate] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, pdfErr);
-        }
-        const reloaded = await storage.getInvoice(inv.id);
-        refreshed.push(reloaded ?? inv);
+        schedulePdfPersistInBackground(inv.id);
       }
 
-      if (refreshed.length === 1) {
-        return refreshed[0];
+      if (splitResult.length === 1) {
+        return splitResult[0];
       }
       return {
         splitInvoices: true as const,
-        invoices: refreshed,
-        message: `${refreshed.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
+        invoices: splitResult,
+        message: `${splitResult.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
       };
     }
   }
@@ -1273,14 +1268,28 @@ async function generateInvoiceCore(
     throw err;
   }
 
-  // T01/PDF-Hash: PDF deterministisch erzeugen und persistieren.
-  try {
-    await persistInvoicePdf(invoice.id);
-  } catch (pdfErr) {
-    console.error(`[billing/generate] PDF-Persistierung für Rechnung ${invoice.id} fehlgeschlagen:`, pdfErr);
-  }
-  const refreshedInvoice = await storage.getInvoice(invoice.id);
-  return refreshedInvoice ?? invoice;
+  // Task #544: PDF im Hintergrund persistieren — der HTTP-Request darf nicht
+  // auf Puppeteer warten. GET /:id/pdf erzeugt das PDF on-demand nach,
+  // falls der Hintergrund-Render noch nicht durch ist.
+  schedulePdfPersistInBackground(invoice.id);
+  return invoice;
+}
+
+/**
+ * Task #544: Feuert `persistInvoicePdf` im Hintergrund (Microtask), damit der
+ * HTTP-Request „Rechnung erstellen" nicht durch einen langsamen Puppeteer-
+ * Render-/Launch-Pfad blockiert wird. Fehler werden geloggt; das Rechnungs-
+ * PDF wird beim nächsten /pdf- oder /leistungsnachweis-Abruf nachgezogen.
+ */
+function schedulePdfPersistInBackground(invoiceId: number): void {
+  setImmediate(() => {
+    persistInvoicePdf(invoiceId).catch((err) => {
+      console.error(
+        `[billing/generate] Hintergrund-PDF-Persistierung für Rechnung ${invoiceId} fehlgeschlagen:`,
+        err,
+      );
+    });
+  });
 }
 
 // Task #533: Dünner HTTP-Wrapper um generateInvoiceCore (siehe oben).

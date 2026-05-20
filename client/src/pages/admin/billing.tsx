@@ -189,8 +189,24 @@ export default function AdminBilling() {
 
   const generateMutation = useMutation({
     mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number }) => {
-      const result = await api.post<GenerateResponse>("/billing/generate", data);
-      return unwrapResult(result);
+      // Task #544: harter Client-Timeout (60s) gegen endlose "Wird erstellt..."-Spinner.
+      // Der Server rendert das PDF inzwischen im Hintergrund, der Request sollte
+      // in < 3s zurückkommen — wenn nicht, ist etwas grundlegend kaputt.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60_000);
+      try {
+        const result = await api.post<GenerateResponse>("/billing/generate", data, controller.signal);
+        return unwrapResult(result);
+      } catch (err) {
+        if (err instanceof Error && (err.name === "AbortError" || (err as { code?: string }).code === "ABORTED")) {
+          throw new Error(
+            "Die Rechnungserstellung dauert ungewöhnlich lange. Bitte später erneut versuchen oder den Support kontaktieren.",
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
     },
     onSuccess: (data: GenerateResponse) => {
       if (data?.splitInvoices) {

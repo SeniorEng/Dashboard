@@ -143,12 +143,18 @@ describe("PDF-Hash — invoices.pdf_hash wird bei Generierung befüllt", () => {
     expect(inv?.id, "Rechnung muss erzeugt sein").toBeDefined();
     cleanupInvoiceIds.push(inv.id);
 
-    // Direkt-DB SELECT auf pdf_hash.
-    const [row] = await db
-      .select({ pdfHash: invoicesTable.pdfHash })
-      .from(invoicesTable)
-      .where(eq(invoicesTable.id, inv.id))
-      .limit(1);
+    // Task #544: persistInvoicePdf läuft nach /generate im Hintergrund.
+    // Auf das Erscheinen des pdf_hash warten (bis 30s).
+    let row: { pdfHash: string | null } | undefined;
+    for (let i = 0; i < 60; i++) {
+      [row] = await db
+        .select({ pdfHash: invoicesTable.pdfHash })
+        .from(invoicesTable)
+        .where(eq(invoicesTable.id, inv.id))
+        .limit(1);
+      if (row?.pdfHash) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
 
     expect(
       row?.pdfHash,

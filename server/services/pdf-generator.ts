@@ -1,8 +1,9 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import crypto from "crypto";
+import { existsSync } from "fs";
+import { execFileSync } from "child_process";
+import os from "os";
 import { wrapInPrintableHtml } from "./template-engine";
-
-const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
 
 // Task #521: harte Timeouts gegen "Network.enable timed out" Hänger.
 // In Produktion zeigte sich: Puppeteer-CDP-Verbindungen können nach längerer
@@ -12,15 +13,103 @@ const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8
 // Render eine frische Instanz hochfährt.
 const BROWSER_PROTOCOL_TIMEOUT_MS = 45_000;
 const PAGE_RENDER_TIMEOUT_MS = 30_000;
+// Task #544: harter Launch-Timeout, damit Puppeteer nicht 30s+ auf eine
+// WS-Endpoint-URL eines nie startenden Prozesses wartet.
+const BROWSER_LAUNCH_TIMEOUT_MS = 20_000;
 
 let browserInstance: Browser | null = null;
 let launchPromise: Promise<Browser> | null = null;
+let resolvedChromiumPath: string | null = null;
+let chromiumResolutionLogged = false;
+
+// Task #544: Chromium-Pfad robust auflösen statt einen konkreten Nix-Store-Hash
+// hart zu pinnen (der Hash ändert sich bei jedem Rebuild des Deployment-Images).
+// Reihenfolge:
+//   1. CHROMIUM_PATH-Env (Override für Deployments)
+//   2. `which chromium` / `which chromium-browser` (Nix shim auf PATH)
+//   3. Bekannte System-Pfade (/usr/bin/...)
+function whichBinary(name: string): string | null {
+  try {
+    const out = execFileSync("which", [name], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (out && existsSync(out)) return out;
+  } catch {
+    /* not found on PATH */
+  }
+  return null;
+}
+
+const FALLBACK_BINARY_PATHS = [
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+];
+
+export function resolveChromiumPath(): string | null {
+  if (resolvedChromiumPath) return resolvedChromiumPath;
+
+  const candidates: Array<{ source: string; path: string | null }> = [];
+  const envPath = process.env.CHROMIUM_PATH;
+  if (envPath) candidates.push({ source: "CHROMIUM_PATH env", path: envPath });
+  candidates.push({ source: "which chromium", path: whichBinary("chromium") });
+  candidates.push({ source: "which chromium-browser", path: whichBinary("chromium-browser") });
+  for (const p of FALLBACK_BINARY_PATHS) {
+    candidates.push({ source: `fallback ${p}`, path: p });
+  }
+
+  for (const c of candidates) {
+    if (c.path && existsSync(c.path)) {
+      resolvedChromiumPath = c.path;
+      if (!chromiumResolutionLogged) {
+        console.log(`[pdf-generator] Chromium gefunden via ${c.source}: ${c.path}`);
+        chromiumResolutionLogged = true;
+      }
+      return resolvedChromiumPath;
+    }
+  }
+
+  if (!chromiumResolutionLogged) {
+    console.error(
+      `[pdf-generator] Chromium NICHT gefunden auf Host ${os.hostname()}. Geprüfte Quellen: ` +
+        candidates.map((c) => `${c.source}=${c.path ?? "—"}`).join("; "),
+    );
+    chromiumResolutionLogged = true;
+  }
+  return null;
+}
+
+/**
+ * Task #544: Health-Check für Chromium-Verfügbarkeit. Wird von Startup-
+ * Backfills aufgerufen, damit sie nicht durch N × 30s-Retries laufen, wenn
+ * Chromium im Deployment-Image gar nicht installiert ist.
+ */
+export function isChromiumAvailable(): boolean {
+  return resolveChromiumPath() !== null;
+}
+
+export class ChromiumUnavailableError extends Error {
+  constructor() {
+    super(
+      "PDF-Engine (Chromium) ist auf diesem Server nicht installiert. " +
+        "Bitte CHROMIUM_PATH setzen oder Chromium über das Deployment-Image bereitstellen.",
+    );
+    this.name = "ChromiumUnavailableError";
+  }
+}
 
 async function launchBrowser(): Promise<Browser> {
-  const browser = await puppeteer.launch({
-    executablePath: CHROMIUM_PATH,
+  const executablePath = resolveChromiumPath();
+  if (!executablePath) {
+    throw new ChromiumUnavailableError();
+  }
+  const launchPromiseInner = puppeteer.launch({
+    executablePath,
     headless: true,
     protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+    timeout: BROWSER_LAUNCH_TIMEOUT_MS,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -31,6 +120,27 @@ async function launchBrowser(): Promise<Browser> {
       "--single-process",
     ],
   });
+  let timer: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          `Chromium-Launch überschritt ${BROWSER_LAUNCH_TIMEOUT_MS}ms (executablePath=${executablePath})`,
+        ),
+      );
+    }, BROWSER_LAUNCH_TIMEOUT_MS + 1_000);
+  });
+  let browser: Browser;
+  try {
+    browser = await Promise.race([launchPromiseInner, timeoutPromise]);
+  } catch (err) {
+    console.error(
+      `[pdf-generator] Browser-Launch fehlgeschlagen (executablePath=${executablePath}): ${err}`,
+    );
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   browser.on("disconnected", () => {
     if (browserInstance === browser) {
       browserInstance = null;
@@ -132,6 +242,11 @@ export async function withFreshPage<T>(fn: (page: Page) => Promise<T>): Promise<
       if (page) {
         try { await page.close(); } catch { /* ignore */ }
         page = null;
+      }
+      // Task #544: Bei fehlendem Chromium nicht retryen — schneller, klarer
+      // Fehler statt minutenlanges Hängen.
+      if (err instanceof ChromiumUnavailableError) {
+        throw err;
       }
       if (isRecoverablePuppeteerError(err) && attempt === 0) {
         await discardBrowser();

@@ -130,17 +130,31 @@ afterAll(async () => {
 
 describe("LN-PDF-Caching — invoices.leistungsnachweis_path/hash werden bei Generierung befüllt", () => {
   it("LNC.1 — pflegekasse_privat: pdfPath + leistungsnachweisPath gesetzt", async () => {
-    const [row] = await db
-      .select({
-        pdfPath: invoicesTable.pdfPath,
-        pdfHash: invoicesTable.pdfHash,
-        leistungsnachweisPath: invoicesTable.leistungsnachweisPath,
-        leistungsnachweisHash: invoicesTable.leistungsnachweisHash,
-        billingType: invoicesTable.billingType,
-      })
-      .from(invoicesTable)
-      .where(eq(invoicesTable.id, invoiceId))
-      .limit(1);
+    // Task #544: persistInvoicePdf läuft nach /generate im Hintergrund.
+    // Auf das Erscheinen von pdf_path + leistungsnachweis_path warten (bis 30s).
+    type LnRow = {
+      pdfPath: string | null;
+      pdfHash: string | null;
+      leistungsnachweisPath: string | null;
+      leistungsnachweisHash: string | null;
+      billingType: string;
+    };
+    let row: LnRow | undefined;
+    for (let i = 0; i < 60; i++) {
+      [row] = await db
+        .select({
+          pdfPath: invoicesTable.pdfPath,
+          pdfHash: invoicesTable.pdfHash,
+          leistungsnachweisPath: invoicesTable.leistungsnachweisPath,
+          leistungsnachweisHash: invoicesTable.leistungsnachweisHash,
+          billingType: invoicesTable.billingType,
+        })
+        .from(invoicesTable)
+        .where(eq(invoicesTable.id, invoiceId))
+        .limit(1);
+      if (row?.pdfPath && row?.leistungsnachweisPath) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
 
     expect(row?.billingType).toBe("pflegekasse_privat");
     expect(row?.pdfPath, "invoices.pdf_path muss nach /generate gesetzt sein").not.toBeNull();

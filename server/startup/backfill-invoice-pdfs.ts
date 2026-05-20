@@ -2,16 +2,16 @@ import { db } from "../lib/db";
 import { invoices as invoicesTable } from "@shared/schema";
 import { and, isNull, or, sql } from "drizzle-orm";
 import { log } from "../lib/log";
+import { ChromiumUnavailableError, isChromiumAvailable } from "../services/pdf-generator";
 
 // Pro Boot maximal so viele Rechnungen backfillen — die PDF-Generierung kostet
 // pro Stück 1-3s Puppeteer-Zeit, der Startup-Schritt darf nicht zum Boot-Bottleneck
 // werden. Beim nächsten Boot werden die nächsten N abgearbeitet.
 const MAX_PER_STARTUP = 20;
 const DELAY_BETWEEN_PDFS_MS = 250;
-// Task #532: Exponentielles Backoff mit längeren Pausen (500ms, 2s, 5s),
-// damit ein hängender Chromium-Prozess zwischen den Versuchen vollständig
-// hochfahren kann. Zwischen den Versuchen wird der Browser verworfen.
-const RETRY_DELAYS_MS = [500, 2_000, 5_000];
+// Task #544: Backoff reduziert auf 2 Versuche — bei einem dauerhaft kaputten
+// Chromium nicht 4×30s pro Rechnung verbrennen.
+const RETRY_DELAYS_MS = [1_000, 3_000];
 
 /**
  * Task #521: Backfill für Rechnungs- und Leistungsnachweis-PDFs in Object Storage.
@@ -26,6 +26,17 @@ const RETRY_DELAYS_MS = [500, 2_000, 5_000];
  * der Fehler geloggt — der Boot bricht NICHT ab.
  */
 export async function backfillInvoicePdfs(): Promise<{ processed: number; failed: number }> {
+  // Task #544: Chromium-Health-Check vor dem Backfill — wenn das Binary im
+  // Deployment-Image fehlt, sparen wir uns N × Retry × 30s Timeout-Hänger.
+  if (!isChromiumAvailable()) {
+    log(
+      "Backfill PDF übersprungen: Chromium auf diesem Host nicht gefunden. " +
+        "CHROMIUM_PATH setzen oder Chromium installieren.",
+      "startup",
+    );
+    return { processed: 0, failed: 0 };
+  }
+
   const rows = await db.select({
     id: invoicesTable.id,
     invoiceNumber: invoicesTable.invoiceNumber,
@@ -61,6 +72,13 @@ export async function backfillInvoicePdfs(): Promise<{ processed: number; failed
         break;
       } catch (err) {
         lastErr = err;
+        // Task #544: Wenn Chromium gar nicht da ist, sofort den ganzen
+        // Backfill abbrechen — kein Sinn, das für weitere Rechnungen
+        // erneut zu versuchen.
+        if (err instanceof ChromiumUnavailableError) {
+          log(`Backfill PDF abgebrochen: ${err.message}`, "startup");
+          return { processed, failed };
+        }
         const isLastAttempt = attempt === RETRY_DELAYS_MS.length;
         if (isLastAttempt) break;
         // Recoverable Puppeteer-Fehler: kurz warten und Browser neu hochfahren lassen.
