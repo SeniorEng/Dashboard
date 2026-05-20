@@ -61,6 +61,8 @@ vi.mock("../../server/services/pdf-generator", () => ({
   // Task #544: Backfill prüft beim Start, ob Chromium verfügbar ist.
   // Im Unit-Test soll der Check immer "ja" zurückgeben.
   isChromiumAvailable: () => true,
+  // Task #550: Backfill prüft zusätzlich, ob Chromium ausführbar ist.
+  runChromiumPreflight: () => ({ ok: true, version: "test", path: "/usr/bin/chromium" }),
   ChromiumUnavailableError: class ChromiumUnavailableError extends Error {},
 }));
 

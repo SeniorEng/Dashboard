@@ -2,7 +2,7 @@ import { db } from "../lib/db";
 import { invoices as invoicesTable } from "@shared/schema";
 import { and, isNull, or, sql } from "drizzle-orm";
 import { log } from "../lib/log";
-import { ChromiumUnavailableError, isChromiumAvailable } from "../services/pdf-generator";
+import { ChromiumUnavailableError, isChromiumAvailable, runChromiumPreflight } from "../services/pdf-generator";
 
 // Pro Boot maximal so viele Rechnungen backfillen — die PDF-Generierung kostet
 // pro Stück 1-3s Puppeteer-Zeit, der Startup-Schritt darf nicht zum Boot-Bottleneck
@@ -32,6 +32,18 @@ export async function backfillInvoicePdfs(): Promise<{ processed: number; failed
     log(
       "Backfill PDF übersprungen: Chromium auf diesem Host nicht gefunden. " +
         "CHROMIUM_PATH setzen oder Chromium installieren.",
+      "startup",
+    );
+    return { processed: 0, failed: 0 };
+  }
+  // Task #550: zusätzlich prüfen, ob das Binary auch ausführbar ist (nicht nur
+  // existiert). Wenn `chromium --version` schon scheitert, hat das Image z.B.
+  // fehlende shared libs — dann gar nicht erst N × 30s Backfill-Retries fahren.
+  const preflight = runChromiumPreflight();
+  if (!preflight.ok) {
+    log(
+      `Backfill PDF übersprungen: Chromium nicht ausführbar (${preflight.error}). ` +
+        "PDF-Engine ist nicht startfähig — bitte Deployment-Image prüfen.",
       "startup",
     );
     return { processed: 0, failed: 0 };

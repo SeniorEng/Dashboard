@@ -22,6 +22,36 @@ let launchPromise: Promise<Browser> | null = null;
 let resolvedChromiumPath: string | null = null;
 let chromiumResolutionLogged = false;
 
+// Task #550: Ring-Buffer für Chromium-stderr/stdout während des Launch-Fensters.
+// Wenn der WS-Endpoint nicht erscheint, brauchen wir den eigentlichen Crash-
+// Grund (Missing-Lib, Segfault, OOM) im Log — nicht nur den generischen
+// Timeout. Wir kapern process.stderr.write/process.stdout.write nur für die
+// Dauer eines Launches und stellen die Originale danach wieder her.
+const CHROMIUM_LOG_BUFFER_MAX_LINES = 200;
+const chromiumLogBuffer: string[] = [];
+
+function appendChromiumLog(chunk: string): void {
+  const text = chunk.replace(/\r/g, "");
+  if (!text) return;
+  const lines = text.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trimEnd();
+    if (!trimmed) continue;
+    chromiumLogBuffer.push(trimmed);
+    if (chromiumLogBuffer.length > CHROMIUM_LOG_BUFFER_MAX_LINES) {
+      chromiumLogBuffer.shift();
+    }
+  }
+}
+
+export function getChromiumLogSnapshot(maxLines = 40): string {
+  return chromiumLogBuffer.slice(-maxLines).join("\n");
+}
+
+export function resetChromiumLogBuffer(): void {
+  chromiumLogBuffer.length = 0;
+}
+
 // Task #544: Chromium-Pfad robust auflösen statt einen konkreten Nix-Store-Hash
 // hart zu pinnen (der Hash ändert sich bei jedem Rebuild des Deployment-Images).
 // Reihenfolge:
@@ -90,14 +120,137 @@ export function isChromiumAvailable(): boolean {
   return resolveChromiumPath() !== null;
 }
 
+// Task #550: Pre-Flight beim Server-Start. Prüft nicht nur Binary-Existenz
+// (das macht resolveChromiumPath), sondern auch, ob das Binary überhaupt
+// ausführbar ist. Verhindert minutenlange Backfill-Retries gegen ein totes
+// Binary (z.B. wegen fehlender shared libs).
+export type ChromiumPreflightResult =
+  | { ok: true; path: string; version: string }
+  | { ok: false; path: string | null; error: string };
+
+let chromiumPreflightResult: ChromiumPreflightResult | null = null;
+
+export function runChromiumPreflight(force = false): ChromiumPreflightResult {
+  if (chromiumPreflightResult && !force) return chromiumPreflightResult;
+  const path = resolveChromiumPath();
+  if (!path) {
+    chromiumPreflightResult = {
+      ok: false,
+      path: null,
+      error: "Chromium-Binary auf diesem Host nicht gefunden",
+    };
+    return chromiumPreflightResult;
+  }
+  try {
+    const out = execFileSync(path, ["--version"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    chromiumPreflightResult = { ok: true, path, version: out };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    chromiumPreflightResult = { ok: false, path, error: message };
+  }
+  return chromiumPreflightResult;
+}
+
+export function getChromiumPreflightResult(): ChromiumPreflightResult | null {
+  return chromiumPreflightResult;
+}
+
 export class ChromiumUnavailableError extends Error {
-  constructor() {
+  constructor(detail?: string) {
     super(
       "PDF-Engine (Chromium) ist auf diesem Server nicht installiert. " +
-        "Bitte CHROMIUM_PATH setzen oder Chromium über das Deployment-Image bereitstellen.",
+        "Bitte CHROMIUM_PATH setzen oder Chromium über das Deployment-Image bereitstellen." +
+        (detail ? ` Details: ${detail}` : ""),
     );
     this.name = "ChromiumUnavailableError";
   }
+}
+
+/**
+ * Task #550: Launch-Args konservativer und per Env steuerbar machen.
+ *
+ * - `--no-zygote` und `--single-process` zusammen sind eine bekannte Crash-
+ *   Quelle in autoscale-Containern unter Memory-Druck. Wir behalten beides
+ *   als getrennt steuerbare Flags und schalten `--single-process` in
+ *   Production standardmäßig AB (Hauptverdacht für die WS-Endpoint-Timeouts
+ *   nach #544).
+ * - `--disable-software-rasterizer`, `--disable-extensions`, `--mute-audio`
+ *   reduzieren unnötige Subsysteme.
+ *
+ * Env-Overrides (akzeptieren "1"/"true"/"0"/"false"):
+ *   PUPPETEER_SINGLE_PROCESS — erzwingt/verbietet `--single-process`
+ *   PUPPETEER_NO_ZYGOTE      — erzwingt/verbietet `--no-zygote`
+ */
+function envFlag(name: string): boolean | null {
+  const v = process.env[name];
+  if (v === undefined || v === "") return null;
+  if (v === "1" || v.toLowerCase() === "true") return true;
+  if (v === "0" || v.toLowerCase() === "false") return false;
+  return null;
+}
+
+export function getLaunchArgs(): string[] {
+  const isProd = process.env.NODE_ENV === "production";
+  const singleProcessOverride = envFlag("PUPPETEER_SINGLE_PROCESS");
+  const noZygoteOverride = envFlag("PUPPETEER_NO_ZYGOTE");
+
+  // Default: in Production OHNE --single-process (Hauptverdacht für #550),
+  // in Dev/Test bleibt das alte Verhalten erhalten, damit der lokale Stack
+  // sich verhält wie vor #544.
+  const useSingleProcess = singleProcessOverride !== null ? singleProcessOverride : !isProd;
+  const useNoZygote = noZygoteOverride !== null ? noZygoteOverride : true;
+
+  const args = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--no-first-run",
+    "--disable-software-rasterizer",
+    "--disable-extensions",
+    "--mute-audio",
+  ];
+  if (useNoZygote) args.push("--no-zygote");
+  if (useSingleProcess) args.push("--single-process");
+  return args;
+}
+
+/**
+ * Task #550: kapert process.stderr.write/process.stdout.write während eines
+ * Launches, sodass Chromium-Output (dumpio: true) parallel in einen Ring-
+ * Buffer geht. Originale werden in `restore()` wiederhergestellt.
+ */
+function capturePuppeteerOutput(): () => void {
+  const origErr = process.stderr.write.bind(process.stderr);
+  const origOut = process.stdout.write.bind(process.stdout);
+  const tap = (orig: typeof origErr) =>
+    function tapped(
+      chunk: string | Uint8Array,
+      encodingOrCb?: BufferEncoding | ((err?: Error | null) => void),
+      cb?: (err?: Error | null) => void,
+    ): boolean {
+      try {
+        const text = typeof chunk === "string"
+          ? chunk
+          : Buffer.from(chunk).toString(
+              typeof encodingOrCb === "string" ? encodingOrCb : "utf8",
+            );
+        appendChromiumLog(text);
+      } catch {
+        /* never break stdout/stderr */
+      }
+      return orig(chunk as any, encodingOrCb as any, cb as any);
+    };
+  (process.stderr as any).write = tap(origErr);
+  (process.stdout as any).write = tap(origOut);
+  return () => {
+    (process.stderr as any).write = origErr;
+    (process.stdout as any).write = origOut;
+  };
 }
 
 async function launchBrowser(): Promise<Browser> {
@@ -105,20 +258,17 @@ async function launchBrowser(): Promise<Browser> {
   if (!executablePath) {
     throw new ChromiumUnavailableError();
   }
+  const args = getLaunchArgs();
+  const restoreOutput = capturePuppeteerOutput();
   const launchPromiseInner = puppeteer.launch({
     executablePath,
     headless: true,
     protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
     timeout: BROWSER_LAUNCH_TIMEOUT_MS,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-zygote",
-      "--single-process",
-    ],
+    // Task #550: dumpio = true, damit Chromium-stderr im Ring-Buffer landet
+    // und beim Launch-Timeout zusammen mit der Fehlermeldung geloggt wird.
+    dumpio: true,
+    args,
   });
   let timer: NodeJS.Timeout | null = null;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -134,12 +284,15 @@ async function launchBrowser(): Promise<Browser> {
   try {
     browser = await Promise.race([launchPromiseInner, timeoutPromise]);
   } catch (err) {
+    const dump = getChromiumLogSnapshot(40);
     console.error(
-      `[pdf-generator] Browser-Launch fehlgeschlagen (executablePath=${executablePath}): ${err}`,
+      `[pdf-generator] Browser-Launch fehlgeschlagen (executablePath=${executablePath}, args=${JSON.stringify(args)}): ${err}` +
+        (dump ? `\n[pdf-generator] Chromium-Output (letzte ${dump.split("\n").length} Zeilen):\n${dump}` : "\n[pdf-generator] Chromium-Output: (leer)"),
     );
     throw err;
   } finally {
     if (timer) clearTimeout(timer);
+    restoreOutput();
   }
   browser.on("disconnected", () => {
     if (browserInstance === browser) {

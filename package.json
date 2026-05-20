@@ -13,7 +13,8 @@
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
     "lint": "eslint client/src server/routes --max-warnings 0",
     "test:e2e": "playwright test",
-    "test:e2e:smoke": "playwright test --grep @smoke"
+    "test:e2e:smoke": "playwright test --grep @smoke",
+    "chromium:smoke": "tsx scripts/smoke-chromium.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

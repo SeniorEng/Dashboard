@@ -14,11 +14,32 @@ export async function registerRoutes(
 ): Promise<Server> {
   
   app.get("/api/health", async (_req, res) => {
+    // Task #550: Chromium-Health im Health-Endpoint exponieren, damit der
+    // Operator beim PDF-Hänger sofort sieht, ob die PDF-Engine startfähig ist
+    // — ohne in die Server-Logs gehen zu müssen.
+    const { getChromiumPreflightResult } = await import("./services/pdf-generator");
+    const chromium = getChromiumPreflightResult();
+    const chromiumStatus = chromium
+      ? chromium.ok
+        ? { ok: true, version: chromium.version, path: chromium.path }
+        : { ok: false, error: chromium.error, path: chromium.path }
+      : { ok: null, error: "preflight not yet executed" };
     try {
       await db.execute(sql`SELECT 1`);
-      res.json({ status: "ok", timestamp: new Date().toISOString(), uptime: process.uptime() });
+      res.json({
+        status: "ok",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        chromium: chromiumStatus,
+      });
     } catch (error) {
-      res.status(503).json({ status: "error", message: "Database unavailable", timestamp: new Date().toISOString(), uptime: process.uptime() });
+      res.status(503).json({
+        status: "error",
+        message: "Database unavailable",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        chromium: chromiumStatus,
+      });
     }
   });
 

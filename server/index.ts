@@ -357,6 +357,25 @@ async function runStartupTasks() {
     const { geocodeAllMissing } = await import("./services/geocoding");
     geocodeAllMissing().catch(err => log(`Batch-Geocoding-Fehler: ${err}`, "startup"));
 
+    // Task #550: Chromium-Pre-Flight EINMAL beim Boot. Prüft Binary +
+    // Ausführbarkeit, damit Backfill/Render nicht in N × 30s-Timeouts gegen
+    // ein totes Binary laufen. Ergebnis landet im /api/health-Endpoint.
+    try {
+      const { runChromiumPreflight } = await import("./services/pdf-generator");
+      const result = runChromiumPreflight();
+      if (result.ok) {
+        log(`Chromium-Pre-Flight OK (${result.version}) @ ${result.path}`, "startup");
+      } else {
+        log(
+          `Chromium-Pre-Flight FEHLGESCHLAGEN @ ${result.path ?? "—"}: ${result.error}. ` +
+            "PDF-Generierung wird in dieser Boot-Phase fehlschlagen.",
+          "startup",
+        );
+      }
+    } catch (err) {
+      log(`Chromium-Pre-Flight Fehler: ${err}`, "startup");
+    }
+
     // Task #521: PDF-Backfill nicht blockierend, max. 20 Rechnungen pro Boot.
     // Läuft async, nachdem der Server bereits Requests bedient.
     setTimeout(() => {
