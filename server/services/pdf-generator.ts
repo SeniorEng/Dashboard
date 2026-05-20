@@ -70,15 +70,34 @@ export async function discardBrowser(): Promise<void> {
   }
 }
 
-function isRecoverablePuppeteerError(err: unknown): boolean {
+export function isRecoverablePuppeteerError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const name = (err as { name?: string }).name ?? "";
   const message = (err as { message?: string }).message ?? "";
   return (
     name === "ProtocolError" ||
     name === "TargetCloseError" ||
-    /Network\.enable|Protocol error|Target closed|Connection closed|Session closed|timed out/i.test(message)
+    // Task #532: "Requesting main frame too early" tritt auf, wenn Chromium
+    // unter --single-process beim ersten setContent() noch keinen Main-Frame
+    // im CDP-FrameTree hat. Browser verwerfen und mit Warmup neu starten.
+    /Network\.enable|Protocol error|Target closed|Connection closed|Session closed|timed out|Requesting main frame too early/i.test(message)
   );
+}
+
+/**
+ * Warmt eine frisch erzeugte Page auf, damit der CDP-FrameTree garantiert
+ * einen Main-Frame enthält, bevor wir `setContent` (oder andere Frame-
+ * abhängige APIs) aufrufen. Verhindert den "Requesting main frame too early"
+ * Race aus Task #532.
+ */
+async function warmupPage(page: Page): Promise<void> {
+  try {
+    await page.goto("about:blank", { waitUntil: "load", timeout: 5_000 });
+  } catch {
+    // Wenn das Warmup selbst scheitert (Browser bereits tot), lassen wir den
+    // eigentlichen Render-Aufruf laufen — der Recovery-Pfad in withFreshPage
+    // verwirft den Browser dann und versucht es nochmal.
+  }
 }
 
 /**
@@ -95,6 +114,8 @@ export async function withFreshPage<T>(fn: (page: Page) => Promise<T>): Promise<
     try {
       const browser = await getBrowser();
       page = await browser.newPage();
+      // Task #532: Frame-Warmup gegen "Requesting main frame too early".
+      await warmupPage(page);
       const runner = fn(page);
       const result = await Promise.race([
         runner,

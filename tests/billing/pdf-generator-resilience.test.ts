@@ -20,6 +20,7 @@ vi.mock("puppeteer-core", () => ({
 
 type FakePage = {
   close: ReturnType<typeof vi.fn>;
+  goto?: ReturnType<typeof vi.fn>;
   setContent?: ReturnType<typeof vi.fn>;
   pdf?: ReturnType<typeof vi.fn>;
 };
@@ -44,7 +45,11 @@ function makeBrowser(newPageImpl: () => Promise<FakePage>): FakeBrowser {
 }
 
 function makePage(): FakePage {
-  return { close: vi.fn(async () => {}) };
+  return {
+    close: vi.fn(async () => {}),
+    // Task #532: Warmup-Aufruf vor setContent — Mock liefert sofort.
+    goto: vi.fn(async () => {}),
+  };
 }
 
 async function freshModule() {
@@ -96,6 +101,50 @@ describe("withFreshPage — recovery from ProtocolError (Task #521)", () => {
     expect(goodPage.close).toHaveBeenCalledTimes(1);
   });
 
+  it("erkennt 'Requesting main frame too early' als recoverable und gelingt im 2. Versuch (Task #532)", async () => {
+    const { withFreshPage } = await freshModule();
+
+    const mainFrameErr = new Error("Requesting main frame too early!");
+
+    // Erste Page wirft beim Render mit dem typischen Chromium-Race-Fehler.
+    const brokenPage = makePage();
+    const brokenBrowser = makeBrowser(async () => brokenPage);
+
+    // Zweite Page (nach Browser-Discard) liefert erfolgreich.
+    const goodPage = makePage();
+    const goodBrowser = makeBrowser(async () => goodPage);
+
+    launchMock
+      .mockResolvedValueOnce(brokenBrowser)
+      .mockResolvedValueOnce(goodBrowser);
+
+    let attempt = 0;
+    const result = await withFreshPage(async (page) => {
+      attempt++;
+      if (attempt === 1) {
+        expect(page).toBe(brokenPage);
+        throw mainFrameErr;
+      }
+      expect(page).toBe(goodPage);
+      return "rendered-ok";
+    });
+
+    expect(result).toBe("rendered-ok");
+    expect(attempt).toBe(2);
+    // Browser #1 wurde verworfen, Browser #2 frisch gestartet.
+    expect(brokenBrowser.close).toHaveBeenCalledTimes(1);
+    expect(launchMock).toHaveBeenCalledTimes(2);
+    // Frame-Warmup wurde auf BEIDEN Pages aufgerufen (about:blank vor setContent).
+    expect(brokenPage.goto).toHaveBeenCalledWith(
+      "about:blank",
+      expect.objectContaining({ waitUntil: "load" }),
+    );
+    expect(goodPage.goto).toHaveBeenCalledWith(
+      "about:blank",
+      expect.objectContaining({ waitUntil: "load" }),
+    );
+  });
+
   it("propagiert nicht-recoverable Fehler ohne Retry", async () => {
     const { withFreshPage } = await freshModule();
 
@@ -129,6 +178,7 @@ describe("generatePdfFromHtml — Parallelität / Last (Task #526)", () => {
       let lastHtml = "";
       const page: FakePage = {
         close: vi.fn(async () => {}),
+        goto: vi.fn(async () => {}),
         setContent: vi.fn(async (html: string) => {
           lastHtml = html;
           // Mikro-Yield, damit andere parallel laufende Pages dazwischenfunken

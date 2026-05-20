@@ -8,8 +8,10 @@ import { log } from "../lib/log";
 // werden. Beim nächsten Boot werden die nächsten N abgearbeitet.
 const MAX_PER_STARTUP = 20;
 const DELAY_BETWEEN_PDFS_MS = 250;
-// Exponentielles Backoff: 500ms, 1s, 2s zwischen den Versuchen pro Rechnung.
-const RETRY_DELAYS_MS = [500, 1_000, 2_000];
+// Task #532: Exponentielles Backoff mit längeren Pausen (500ms, 2s, 5s),
+// damit ein hängender Chromium-Prozess zwischen den Versuchen vollständig
+// hochfahren kann. Zwischen den Versuchen wird der Browser verworfen.
+const RETRY_DELAYS_MS = [500, 2_000, 5_000];
 
 /**
  * Task #521: Backfill für Rechnungs- und Leistungsnachweis-PDFs in Object Storage.

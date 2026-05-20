@@ -20,6 +20,10 @@ import importAppointmentsRouter from "./admin/import-appointments";
 import contactMigrationRouter from "./admin/contact-migration";
 import testCleanupRouter from "./admin/test-cleanup";
 import { initiateTestCall } from "../services/twilio-call-bridge";
+import { persistInvoicePdf } from "./billing";
+import { storage } from "../storage";
+import { auditService } from "../services/audit";
+import { notFound } from "../lib/errors";
 
 const router = Router();
 
@@ -151,5 +155,69 @@ router.post("/twilio/test-call", requireSuperAdmin, asyncHandler("Testanruf fehl
   const result = await initiateTestCall();
   res.json(result);
 }));
+
+// Task #532: Manueller Trigger zum Nachholen fehlender Rechnungs-PDFs
+// (Rechnung + ggf. Leistungsnachweis). Letzte Rettung, wenn der automatische
+// Backfill in Prod eine Rechnung nicht erwischt hat (z.B. wegen wiederholtem
+// Puppeteer-Fehler). Nur für Superadmins.
+//
+// WICHTIG (GoBD): Bereits persistierte PDFs werden NICHT überschrieben —
+// `persistInvoicePdf` ist immutabel. Der Endpoint persistiert ausschließlich
+// fehlende Pfade. Wenn schon alles da ist, antwortet er mit
+// `regenerated: false` und schreibt KEINEN Audit-Eintrag.
+router.post(
+  "/billing/:id/regenerate-pdf",
+  requireSuperAdmin,
+  asyncHandler(
+    "PDF konnte nicht erzeugt werden — bitte erneut versuchen oder den Support kontaktieren.",
+    async (req: Request, res: Response) => {
+      const id = requireIntParam(req.params.id, res);
+      if (id === null) return;
+      const invoice = await storage.getInvoice(id);
+      if (!invoice) throw notFound("Rechnung nicht gefunden");
+
+      const before = {
+        pdfPath: invoice.pdfPath,
+        leistungsnachweisPath: invoice.leistungsnachweisPath,
+      };
+      await persistInvoicePdf(id);
+      const refreshed = await storage.getInvoice(id);
+      const after = {
+        pdfPath: refreshed?.pdfPath ?? null,
+        leistungsnachweisPath: refreshed?.leistungsnachweisPath ?? null,
+      };
+
+      const regenerated =
+        before.pdfPath !== after.pdfPath ||
+        before.leistungsnachweisPath !== after.leistungsnachweisPath;
+
+      if (regenerated) {
+        await auditService.log(
+          req.user!.id,
+          "invoice_pdf_manually_regenerated",
+          "invoice",
+          id,
+          {
+            invoiceNumber: invoice.invoiceNumber,
+            before,
+            after,
+          },
+          req.ip,
+        );
+      }
+
+      res.json({
+        success: true,
+        invoiceNumber: invoice.invoiceNumber,
+        regenerated,
+        pdfPath: after.pdfPath,
+        leistungsnachweisPath: after.leistungsnachweisPath,
+        message: regenerated
+          ? "PDFs wurden nacherzeugt und im Speicher abgelegt."
+          : "Es waren bereits alle PDFs vorhanden — nichts zu tun.",
+      });
+    },
+  ),
+);
 
 export default router;
