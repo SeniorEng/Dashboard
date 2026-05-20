@@ -215,10 +215,10 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
       // Dialog schließen, damit Rechnungs-Karten klickbar sind.
       await page.keyboard.press("Escape");
 
-      // 3) Rechnungen finden — per customerId-Filter, damit wir nicht von
-      //    `billingMonth/Year`-Mismatches abhängig sind. Generate-All schreibt
-      //    auf Neon (serverless), daher kurz pollen, falls die Lese-Replikation
-      //    minimal hinterherläuft.
+      // 3) Rechnungen müssen jetzt in der UI-Liste erscheinen (Task #540 —
+      //    die Generate-All-Mutation pollt nach dem Insert bis die neuen
+      //    Rechnungen in TanStack-Query sichtbar sind, kein API-Bypass mehr
+      //    nötig).
       type InvoiceRow = {
         id: number;
         customerId: number;
@@ -243,31 +243,40 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
       expect(kasseInv!.billingType).toBe("pflegekasse_gesetzlich");
       expect(kasseInv!.status).toBe("entwurf");
 
-      // 4) Bündel-Druck: Endpoint liefert ein PDF (Header-Check).
-      //    Der UI-Bundle-Button ist ein <a target="_blank">; das Popup-Handling
-      //    in Playwright ist deutlich flakiger als ein direkter API-Hit mit
-      //    den Session-Cookies. Wir verifizieren daher die Response direkt.
-      const bundleRes = await session.api.get(`/api/billing/${kasseInv!.id}/bundle`);
+      // Beide Rechnungs-Karten müssen in der UI-Liste sichtbar sein.
+      await expect(
+        page.locator(`[data-testid='invoice-row-${selbInv!.id}']`),
+      ).toBeVisible({ timeout: 15000 });
+      await expect(
+        page.locator(`[data-testid='invoice-row-${kasseInv!.id}']`),
+      ).toBeVisible({ timeout: 15000 });
+
+      // 4) Bündel-Druck via UI-Button: der Button ist ein <a target="_blank">.
+      //    Wir greifen den href ab und holen das PDF mit der Session-API, um
+      //    Popup-Flakiness in Playwright zu vermeiden — der UI-Klick selbst
+      //    ist damit aber verifizierbar (Button existiert + href korrekt).
+      const bundleLink = page.locator(`[data-testid='button-bundle-${kasseInv!.id}']`);
+      await expect(bundleLink).toBeVisible();
+      const bundleHref = await bundleLink.getAttribute("href");
+      expect(bundleHref).toBe(`/api/billing/${kasseInv!.id}/bundle`);
+      const bundleRes = await session.api.get(bundleHref!);
       expect(bundleRes.ok(), `bundle endpoint status=${bundleRes.status()}`).toBeTruthy();
       expect((bundleRes.headers()["content-type"] || "").toLowerCase()).toContain("application/pdf");
       const bundleBytes = await bundleRes.body();
       expect(bundleBytes.length).toBeGreaterThan(100);
       expect(bundleBytes.subarray(0, 4).toString("utf8")).toBe("%PDF");
 
-      // 5) Mark-Sent: Pflegekassen-Entwurf als versendet markieren.
-      //    POST /api/billing/:id/mark-sent — der Pfad ist dasselbe Backend, das
-      //    der UI-Button aufruft (cf. billing.tsx markSentMutation). Wir hitten
-      //    ihn direkt, um nicht von der UI-Liste abhängig zu sein.
-      const markResp = await session.api.post(
-        `/api/billing/${kasseInv!.id}/mark-sent`,
-        {
-          data: {},
-          headers: {
-            "Content-Type": "application/json",
-            "x-csrf-token": session.csrfToken,
-          },
-        },
-      );
+      // 5) Mark-Sent: Pflegekassen-Entwurf via UI-Button als versendet markieren.
+      const markBtn = page.locator(`[data-testid='button-mark-sent-${kasseInv!.id}']`);
+      await expect(markBtn).toBeVisible();
+      const [markResp] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes(`/api/billing/${kasseInv!.id}/mark-sent`)
+            && r.request().method() === "POST",
+          { timeout: 15000 },
+        ),
+        markBtn.click(),
+      ]);
       expect(
         markResp.ok(),
         `mark-sent status=${markResp.status()} ${await markResp.text()}`,

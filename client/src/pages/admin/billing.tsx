@@ -265,13 +265,46 @@ export default function AdminBilling() {
       });
       return unwrapResult(result);
     },
-    onSuccess: (data: GenerateAllResponse) => {
+    onSuccess: async (data: GenerateAllResponse) => {
       setGenerateAllProgress(data);
       toast({
         title: "Massenerstellung abgeschlossen",
         description: `${data.summary.created} erstellt, ${data.summary.skipped} übersprungen, ${data.summary.errors} Fehler`,
       });
+
+      // Task #540: Status-Filter defensiv auf "alle" zurücksetzen, damit
+      // frisch erstellte Entwürfe garantiert sichtbar sind, auch wenn der
+      // Benutzer vorher z.B. "Versendet" gefiltert hatte.
+      const createdCustomerIds = new Set(
+        data.results.filter((r) => r.status === "created").map((r) => r.customerId),
+      );
+      const expectMonth = selectedMonth;
+      const expectYear = selectedYear;
+      let nextStatusFilter = statusFilter;
+      if (createdCustomerIds.size > 0 && statusFilter !== "alle" && statusFilter !== "entwurf") {
+        nextStatusFilter = "alle";
+        setStatusFilter("alle");
+      }
+
       invalidateRelated(queryClient, "billing");
+
+      // Task #540: Neon-Serverless hat gelegentlich kurze Replika-Lag —
+      // ein einzelner Refetch direkt nach dem Insert kann eine leere
+      // Liste zurückgeben, sodass die UI nach `generate-all` keine neuen
+      // Rechnungen anzeigt. Wir refetchen daher gezielt mit kurzem Polling,
+      // bis mindestens eine der erwarteten Kunden-Rechnungen in der Liste
+      // erscheint (oder das Timeout erreicht ist).
+      if (createdCustomerIds.size > 0) {
+        const queryKey = ["billing-invoices", expectYear, expectMonth, nextStatusFilter];
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await queryClient.refetchQueries({ queryKey, type: "active" });
+          const list = queryClient.getQueryData<InvoiceItem[]>(queryKey);
+          if (list && list.some((inv) => createdCustomerIds.has(inv.customerId))) {
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Massenerstellung fehlgeschlagen", description: error.message, variant: "destructive" });
