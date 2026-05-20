@@ -13,7 +13,7 @@ import {
   type EmployeeRole,
   EMPLOYEE_ROLES,
 } from "@shared/schema";
-import { db } from "../lib/db";
+import { db, withDbRetry } from "../lib/db";
 import { sessionCache } from "./cache";
 import { auditService } from "./audit";
 
@@ -372,17 +372,19 @@ class AuthService {
   }
 
   private async getUsersWithRoles(activeOnly?: boolean): Promise<UserWithRoles[]> {
-    const baseQuery = db
-      .select({
-        user: users,
-        roleEntry: userRoles,
-      })
-      .from(users)
-      .leftJoin(userRoles, eq(users.id, userRoles.userId));
-    
-    const results = activeOnly
-      ? await baseQuery.where(and(eq(users.isActive, true), eq(users.isAnonymized, false)))
-      : await baseQuery;
+    const results = await withDbRetry(() => {
+      const baseQuery = db
+        .select({
+          user: users,
+          roleEntry: userRoles,
+        })
+        .from(users)
+        .leftJoin(userRoles, eq(users.id, userRoles.userId));
+
+      return activeOnly
+        ? baseQuery.where(and(eq(users.isActive, true), eq(users.isAnonymized, false)))
+        : baseQuery;
+    }, { label: "getUsersWithRoles" });
 
     const userMap = new Map<number, UserWithRoles>();
     for (const row of results) {

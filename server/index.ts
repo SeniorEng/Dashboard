@@ -10,7 +10,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { errorMiddleware } from "./lib/errors";
-import { pool, db } from "./lib/db";
+import { pool, db, logPoolStats } from "./lib/db";
 import { sql as sqlBuilder } from "drizzle-orm";
 import { closeBrowser } from "./services/pdf-generator";
 const app = express();
@@ -144,6 +144,7 @@ function isNeonDriverBug(message: string): boolean {
     },
     () => {
       log(`serving on port ${port}`);
+      logPoolStats("db");
       runStartupTasks();
     },
   );

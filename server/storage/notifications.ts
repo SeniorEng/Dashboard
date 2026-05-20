@@ -1,6 +1,6 @@
 import { notifications, InsertNotification, Notification } from "@shared/schema";
 import { eq, and, desc, isNull, gte, sql as sqlBuilder } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, withDbRetry } from "../lib/db";
 
 export async function createNotification(data: InsertNotification): Promise<Notification> {
   const result = await db.insert(notifications).values(data).returning();
@@ -8,12 +8,15 @@ export async function createNotification(data: InsertNotification): Promise<Noti
 }
 
 export async function getNotifications(userId: number, limit = 50): Promise<Notification[]> {
-  return db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.userId, userId))
-    .orderBy(desc(notifications.createdAt))
-    .limit(limit);
+  return withDbRetry(() =>
+    db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit),
+    { label: "getNotifications" },
+  );
 }
 
 async function getUnreadNotifications(userId: number): Promise<Notification[]> {
@@ -25,10 +28,14 @@ async function getUnreadNotifications(userId: number): Promise<Notification[]> {
 }
 
 export async function getUnreadCount(userId: number): Promise<number> {
-  const result = await db
-    .select({ count: sqlBuilder<number>`count(*)::int` })
-    .from(notifications)
-    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+  const result = await withDbRetry(
+    () =>
+      db
+        .select({ count: sqlBuilder<number>`count(*)::int` })
+        .from(notifications)
+        .where(and(eq(notifications.userId, userId), isNull(notifications.readAt))),
+    { label: "getUnreadCount" },
+  );
   return result[0]?.count ?? 0;
 }
 

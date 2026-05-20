@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
+import { withDbRetry } from "../lib/db";
 import { 
   updateAppointmentSchema, 
   insertKundenterminSchema,
@@ -751,8 +752,16 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   }
 
   try {
-    await budgetLedgerStorage.syncCarryoverAndExpiry(validatedData.customerId);
-    const budgetSummary = await budgetLedgerStorage.getBudgetSummary(validatedData.customerId);
+    // Retry transiente Connection-Fehler — Budget-Warnung ist idempotenter Read,
+    // soll aber bei einem Neon-Cold-Start nicht lautlos verschwinden (Task #536).
+    await withDbRetry(
+      () => budgetLedgerStorage.syncCarryoverAndExpiry(validatedData.customerId),
+      { label: "syncCarryoverAndExpiry" },
+    );
+    const budgetSummary = await withDbRetry(
+      () => budgetLedgerStorage.getBudgetSummary(validatedData.customerId),
+      { label: "getBudgetSummary" },
+    );
     _warning = buildBudgetWarning(budgetSummary, { appointmentDates: [validatedData.date] }) ?? undefined;
   } catch (err) {
     console.warn("[appointments] Budget-Warnung fehlgeschlagen:", err);
