@@ -534,30 +534,19 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
               </div>
               <div className="text-right w-24">
                 {isEditing ? (
-                  <div className="space-y-1">
-                    <Input
-                      type="text"
-                      value={editPrice}
-                      onChange={e => setEditPrice(e.target.value)}
-                      className="h-7 text-sm text-right w-20"
-                      autoFocus
-                      placeholder="0,00"
-                      onKeyDown={e => {
-                        if (e.key === "Enter") handleSave(service.id);
-                        if (e.key === "Escape") { setEditingServiceId(null); setEditPrice(""); setEditValidFrom(""); }
-                      }}
-                      data-testid={`input-price-${service.id}`}
-                    />
-                    <Input
-                      type="date"
-                      value={editValidFrom}
-                      onChange={e => setEditValidFrom(e.target.value)}
-                      min={getTodayISO()}
-                      className="h-7 text-xs w-40"
-                      placeholder="Gültig ab"
-                      data-testid={`input-valid-from-${service.id}`}
-                    />
-                  </div>
+                  <Input
+                    type="text"
+                    value={editPrice}
+                    onChange={e => setEditPrice(e.target.value)}
+                    className="h-7 text-sm text-right w-20"
+                    autoFocus
+                    placeholder="0,00"
+                    onKeyDown={e => {
+                      if (e.key === "Enter") handleSave(service.id);
+                      if (e.key === "Escape") { setEditingServiceId(null); setEditPrice(""); setEditValidFrom(""); }
+                    }}
+                    data-testid={`input-price-${service.id}`}
+                  />
                 ) : (
                   <>
                     <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice, service.vatRate))}</span>
@@ -624,6 +613,25 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                 )}
               </div>
             </div>
+            {isEditing && (
+              <div className="px-2 pb-2 flex items-center gap-2">
+                <label
+                  className="text-xs text-gray-500 shrink-0"
+                  htmlFor={`input-valid-from-${service.id}`}
+                >
+                  Gültig ab
+                </label>
+                <Input
+                  id={`input-valid-from-${service.id}`}
+                  type="date"
+                  value={editValidFrom}
+                  onChange={e => setEditValidFrom(e.target.value)}
+                  min={getTodayISO()}
+                  className="h-7 text-xs w-44"
+                  data-testid={`input-valid-from-${service.id}`}
+                />
+              </div>
+            )}
           </div>
         );
       })}
