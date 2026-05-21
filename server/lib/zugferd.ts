@@ -399,9 +399,20 @@ export class ZugferdEmbedError extends Error {
 export async function embedZugferdXml(
   pdfBuffer: Buffer,
   data: InvoicePdfData,
-  options?: { strict?: boolean }
+  options?: { strict?: boolean; testFaults?: Set<string> }
 ): Promise<EmbedZugferdResult> {
   const strict = options?.strict === true;
+  // Task #559: Test-Fault-Injection — erlaubt es Integrationstests, einen
+  // ZUGFeRD-Embedding-Fehler im Send-Pfad zu erzwingen, ohne echte Library-
+  // Internals zu mocken. Nur in NODE_ENV=test aktiv (und nur wenn strict=true,
+  // da der Preview-/Non-Strict-Pfad einen Fehler gar nicht propagieren würde).
+  if (
+    process.env.NODE_ENV === "test" &&
+    strict &&
+    options?.testFaults?.has("zugferd_embed")
+  ) {
+    throw new ZugferdEmbedError("Test fault injected: zugferd_embed");
+  }
   try {
     const built = await buildZugferdInvoice(data);
     if (!built.ok) {

@@ -525,7 +525,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
         const rendered = await loadOrRenderSendablePdfs(
           invoice,
           pdfData,
-          { isCustomerInvoice: sendToCustomer, strictZugferd: true },
+          { isCustomerInvoice: sendToCustomer, strictZugferd: true, testFaults: readTestFaults(req) },
         );
         zugferdBuffer = rendered.invoicePdf;
         lnPdf = rendered.lnPdf;
@@ -2027,7 +2027,7 @@ async function loadLeistungsnachweisPdfFromStorage(invoice: Invoice): Promise<Bu
 async function loadOrRenderSendablePdfs(
   invoice: Invoice,
   pdfData: InvoicePdfData,
-  opts: { isCustomerInvoice: boolean; strictZugferd?: boolean },
+  opts: { isCustomerInvoice: boolean; strictZugferd?: boolean; testFaults?: Set<string> },
 ): Promise<{ invoicePdf: Buffer; lnPdf: Buffer; cachedInvoice: boolean; cachedLn: boolean }> {
   const startedAt = Date.now();
   let invoicePdf: Buffer | null = null;
@@ -2047,7 +2047,7 @@ async function loadOrRenderSendablePdfs(
       const { embedZugferdXml } = await import("../lib/zugferd");
       const invoiceHtml = generateInvoiceHtml(pdfData);
       const { buffer: rendered } = await generatePdf(invoiceHtml);
-      const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData, { strict: opts.strictZugferd === true });
+      const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData, { strict: opts.strictZugferd === true, testFaults: opts.testFaults });
       invoicePdf = zugferdBuffer;
     }
     if (!lnPdf) {
@@ -2362,7 +2362,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     const rendered = await loadOrRenderSendablePdfs(
       invoice,
       pdfData,
-      { isCustomerInvoice: sendToCustomer, strictZugferd: true },
+      { isCustomerInvoice: sendToCustomer, strictZugferd: true, testFaults: readTestFaults(req) },
     );
     zugferdBuffer = rendered.invoicePdf;
     lnPdf = rendered.lnPdf;
