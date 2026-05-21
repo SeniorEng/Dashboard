@@ -60,15 +60,15 @@ interface CustomerPrice {
 }
 
 const UNIT_LABELS: Record<string, string> = {
-  hours: "€/Std.",
-  kilometers: "€/km",
-  flat: "€ pauschal",
+  hours: "/Std.",
+  kilometers: "/km",
+  flat: " pauschal",
 };
 
 function formatDateDisplay(dateStr: string | null | undefined): string {
   if (!dateStr || typeof dateStr !== "string") return "—";
   try {
-    const d = parseLocalDate(dateStr);
+    const d = parseLocalDate(dateStr.slice(0, 10));
     if (!d || Number.isNaN(d.getTime())) return "—";
     return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
   } catch {
@@ -512,13 +512,13 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                 </div>
                 {isCustom && (
                   <div className="text-[11px] text-gray-500 mt-0.5">
-                    Katalog: {formatCurrency(displayPrice(service.defaultPriceCents, service.vatRate))} {unitLabel}
+                    Katalog: {formatCurrency(displayPrice(service.defaultPriceCents, service.vatRate))}{unitLabel}
                   </div>
                 )}
                 {serviceFuturePrices.map(fp => (
                   <div key={fp.id} className="text-[11px] text-blue-600 mt-0.5 flex items-center gap-1" data-testid={`future-price-${fp.id}`}>
                     <Calendar className="h-3 w-3" />
-                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(displayPrice(fp.priceCents, service.vatRate))} {unitLabel}
+                    Ab {formatDateDisplay(fp.validFrom)}: {formatCurrency(displayPrice(fp.priceCents, service.vatRate))}{unitLabel}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -550,7 +550,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                 ) : (
                   <>
                     <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice, service.vatRate))}</span>
-                    <span className="text-xs text-gray-500 ml-0.5">{unitLabel}</span>
+                    <span className="text-xs text-gray-500">{unitLabel}</span>
                     {isCustom && customPrice && customPrice.priceCents === 0 && (
                       <span
                         className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium align-middle"
@@ -683,11 +683,11 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                               placeholder="0,00"
                               data-testid={`input-history-price-${p.id}`}
                             />
-                            <span className="text-xs text-gray-500">{UNIT_LABELS[p.unitType] || "€"}</span>
+                            <span className="text-xs text-gray-500">{UNIT_LABELS[p.unitType] || ""}</span>
                           </div>
                         ) : (
                           <span className="inline-flex items-center justify-end gap-1">
-                            <span>{formatCurrency(displayPrice(p.priceCents, getVatRate(p.serviceId)))} {UNIT_LABELS[p.unitType] || "€"}</span>
+                            <span>{formatCurrency(displayPrice(p.priceCents, getVatRate(p.serviceId)))}{UNIT_LABELS[p.unitType] || ""}</span>
                             {p.priceCents === 0 && (
                               <span
                                 className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium"
