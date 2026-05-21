@@ -562,6 +562,15 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                   <>
                     <span className={`text-sm font-semibold ${isCustom ? 'text-amber-700' : ''}`}>{formatCurrency(displayPrice(effectivePrice, service.vatRate))}</span>
                     <span className="text-xs text-gray-500 ml-0.5">{unitLabel}</span>
+                    {isCustom && customPrice && customPrice.priceCents === 0 && (
+                      <span
+                        className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium align-middle"
+                        title="Bewusst auf 0,00 € gesetzt – diese Leistung ist für diesen Kunden kostenlos."
+                        data-testid={`badge-free-${service.id}`}
+                      >
+                        kostenlos
+                      </span>
+                    )}
                   </>
                 )}
               </div>
@@ -669,7 +678,18 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                             <span className="text-xs text-gray-500">{UNIT_LABELS[p.unitType] || "€"}</span>
                           </div>
                         ) : (
-                          <>{formatCurrency(displayPrice(p.priceCents, getVatRate(p.serviceId)))} {UNIT_LABELS[p.unitType] || "€"}</>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            <span>{formatCurrency(displayPrice(p.priceCents, getVatRate(p.serviceId)))} {UNIT_LABELS[p.unitType] || "€"}</span>
+                            {p.priceCents === 0 && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium"
+                                title="Bewusst auf 0,00 € gesetzt – diese Leistung ist für diesen Kunden kostenlos."
+                                data-testid={`badge-free-history-${p.id}`}
+                              >
+                                kostenlos
+                              </span>
+                            )}
+                          </span>
                         )}
                       </td>
                       <td className="px-2 py-1.5">

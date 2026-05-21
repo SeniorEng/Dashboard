@@ -223,11 +223,18 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     const unitLabel = isKm ? "/km" : "/Std.";
     const displayUnitPrice = Math.round(item.unitPriceCents * vatMultiplier);
     const displayTotal = Math.round(item.totalCents * vatMultiplier);
+    // Task #565: 0,00-€-Zeilen als „kostenlos" kennzeichnen, damit unterscheidbar
+    // von versehentlich fehlenden Preisen. Nur für reguläre Rechnungen (nicht Storno,
+    // dort sind negative/0-Beträge erwartetes Verhalten).
+    const isFreeLine = !isStorno && item.unitPriceCents === 0 && item.totalCents === 0;
+    const freeHint = isFreeLine
+      ? `<div style="font-size: 8pt; color: #047857; font-style: italic; margin-top: 2px;">kostenlos</div>`
+      : "";
     return `
     <tr>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}${freeHint}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayUnitPrice)}${unitLabel}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: ${isStorno ? 'bold; color: #dc2626' : '500'};">${formatCents(displayTotal)}</td>
