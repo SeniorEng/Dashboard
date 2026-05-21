@@ -26,8 +26,8 @@ describe("invoice-line-item arithmetic (Task #561)", () => {
       fc.property(
         // 0–500 km mit Float-Präzision (Routing-/GPS-Werte).
         fc.double({ min: 0, max: 500, noNaN: true }),
-        // 1–100 ct/km (deckt 0,35 €/km u.ä. ab).
-        fc.integer({ min: 1, max: 100 }),
+        // 0–100 ct/km — 0 deckt Task #563 (kostenlose Kunden-km) ab.
+        fc.integer({ min: 0, max: 100 }),
         (km, rate) => {
           const q = quantizeKm(km);
           const total = computeKmLineTotalCents(km, rate);
@@ -64,6 +64,11 @@ describe("invoice-line-item arithmetic (Task #561)", () => {
     [2.714, 35, 95, "2,71 km"], // 2,71 × 35 = 94,85 → 95 ct
     [7.514, 35, 263, "7,51 km"], // 7,51 × 35 = 262,85 → 263 ct
     [12.0, 35, 420, "12,00 km"], // 12 × 35 = 420 ct
+    // Task #563: Stückpreis 0 ct/km (kundenspezifisch "gratis") → Summe 0 ct,
+    // Anzeige bleibt aussagekräftig (Menge × 0,00 €/km).
+    [2.714, 0, 0, "2,71 km"],
+    [12.0, 0, 0, "12,00 km"],
+    [0, 0, 0, "0,00 km"],
   ])(
     "RE-2026-0003 Bezug: %f km × %i ct = %i ct, Anzeige %s",
     (km, rate, expectedTotal, expectedDisplay) => {

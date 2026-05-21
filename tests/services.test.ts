@@ -112,6 +112,64 @@ describe("Dienstleistungskatalog", () => {
     });
   });
 
+  describe("Service-Katalog: Preis 0 erlauben, negativ ablehnen (Task #563)", () => {
+    it("erlaubt defaultPriceCents = 0 bei Anlage", async () => {
+      const name = "QS-Test-Service-Zero_" + uniqueId();
+      const { status, data } = await apiPost<any>("/api/services", {
+        name,
+        unitType: "hours",
+        defaultPriceCents: 0,
+        vatRate: 19,
+      });
+      expect(status).toBe(201);
+      expect(data.defaultPriceCents).toBe(0);
+      try {
+        await apiPut(`/api/services/${data.id}`, { isActive: false });
+      } catch {}
+    });
+
+    it("lehnt defaultPriceCents = -1 mit 400 ab", async () => {
+      const name = "QS-Test-Service-Negative_" + uniqueId();
+      const { status } = await apiPost<any>("/api/services", {
+        name,
+        unitType: "hours",
+        defaultPriceCents: -1,
+        vatRate: 19,
+      });
+      expect(status).toBe(400);
+    });
+  });
+
+  describe("Kunden-Sonderpreise mit Preis 0 (Task #563)", () => {
+    it("akzeptiert priceCents=0 (kostenlose Leistung für diesen Kunden)", async () => {
+      await apiPut(`/api/services/${createdServiceId}`, { isActive: true });
+      const customersRes = await apiGet<any[]>("/api/customers");
+      expect(customersRes.status).toBe(200);
+      const custId = customersRes.data[0].id;
+      const futureDate = getFutureDate(120);
+      const { status, data } = await apiPost<any>(
+        `/api/customers/${custId}/service-prices`,
+        { serviceId: createdServiceId, priceCents: 0, validFrom: futureDate },
+      );
+      expect(status).toBe(200);
+      expect(data.priceCents).toBe(0);
+      try {
+        await apiDelete(`/api/customers/${custId}/service-prices/${data.id}`);
+      } catch {}
+    });
+
+    it("lehnt priceCents=-1 mit 400 weiterhin ab", async () => {
+      const customersRes = await apiGet<any[]>("/api/customers");
+      const custId = customersRes.data[0].id;
+      const futureDate = getFutureDate(125);
+      const { status } = await apiPost<any>(
+        `/api/customers/${custId}/service-prices`,
+        { serviceId: createdServiceId, priceCents: -1, validFrom: futureDate },
+      );
+      expect(status).toBe(400);
+    });
+  });
+
   describe("Kunden-Sonderpreise", () => {
     it("sollte einen Sonderpreis für den ersten Kunden anlegen", async () => {
       await apiPut(`/api/services/${createdServiceId}`, { isActive: true });

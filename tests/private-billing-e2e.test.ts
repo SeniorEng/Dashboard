@@ -944,15 +944,29 @@ describe("CP: Kundenspezifische Preise (Custom Pricing)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("CP-8 – Preis mit 0 Cent wird abgelehnt (Zod min(1))", async () => {
+  it("CP-8 – Preis mit 0 Cent wird akzeptiert (kostenlose Leistung, Task #563); negativer Preis wird weiterhin abgelehnt", async () => {
     expect(cpCustomerId).toBeDefined();
-    const today = ymdLocal(new Date());
-    const res = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
+    const future = new Date();
+    future.setDate(future.getDate() + 200);
+    const validFrom = ymdLocal(future);
+
+    const zeroRes = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
       serviceId: abServiceId,
       priceCents: 0,
-      validFrom: today,
+      validFrom,
     });
-    expect(res.status).toBe(400);
+    expect(zeroRes.status).toBe(200);
+    expect(zeroRes.data.priceCents).toBe(0);
+    try {
+      await apiDelete(`/api/customers/${cpCustomerId}/service-prices/${zeroRes.data.id}`);
+    } catch {}
+
+    const negativeRes = await apiPost<any>(`/api/customers/${cpCustomerId}/service-prices`, {
+      serviceId: abServiceId,
+      priceCents: -1,
+      validFrom,
+    });
+    expect(negativeRes.status).toBe(400);
   });
 
   it("CP-9 – Kundenpreis löschen setzt validTo und kein aktiver Preis verbleibt", async () => {

@@ -42,7 +42,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 const updateCustomerServicePriceSchema = z
   .object({
-    priceCents: z.number().int().min(1, "Preis muss mindestens 1 Cent betragen").optional(),
+    priceCents: z.number().int().min(0, "Preis darf nicht negativ sein").optional(),
     validFrom: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein")

@@ -717,7 +717,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                                     return;
                                   }
                                   const inputCents = parseEuroDE(editPriceAmount);
-                                  if (inputCents === null || inputCents <= 0) {
+                                  if (inputCents === null || inputCents < 0) {
                                     toast({ title: "Ungültiger Preis", variant: "destructive" });
                                     return;
                                   }
