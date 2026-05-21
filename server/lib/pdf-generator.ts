@@ -3,6 +3,7 @@ import crypto from "crypto";
 // `generatePdf` geladen, damit der ESM-Init nicht den Chromium-Launch antriggert.
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
+import { renderLineItemQuantity, isKmLineItem, type LineItemQuantityUnit } from "@shared/domain/invoice-line-items";
 
 export interface InvoicePdfData {
   // Company data
@@ -51,6 +52,10 @@ export interface InvoicePdfData {
     serviceDescription: string;
     serviceCode: string | null;
     durationMinutes: number;
+    // Task #561: explizite Menge + Einheit. NULL für historische Zeilen
+    // (vor Migration); Template fällt dann auf `durationMinutes` zurück.
+    quantityRaw?: number | null;
+    quantityUnit?: LineItemQuantityUnit | string | null;
     unitPriceCents: number;
     totalCents: number;
     employeeName: string | null;
@@ -195,8 +200,10 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const vatMultiplier = isSelbstzahler && data.vatRate > 0 ? (1 + data.vatRate / 10000) : 1;
   
   const lineItemsHtml = data.lineItems.map(item => {
-    const isKm = item.serviceCode === "travel_km" || item.serviceCode === "customer_km";
-    const quantityDisplay = isKm ? `${item.durationMinutes} km` : formatMinutes(item.durationMinutes);
+    const isKm = isKmLineItem(item.serviceCode);
+    // Task #561: zentrale Quantity-Anzeige — nutzt `quantityRaw`/`quantityUnit`
+    // wenn vorhanden, sonst Fallback auf `durationMinutes` (historische Zeilen).
+    const quantityDisplay = renderLineItemQuantity(item);
     const unitLabel = isKm ? "/km" : "/Std.";
     const displayUnitPrice = Math.round(item.unitPriceCents * vatMultiplier);
     const displayTotal = Math.round(item.totalCents * vatMultiplier);
@@ -446,13 +453,15 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         const kmLabel = km.serviceCode === "customer_km" ? "Fahrten für/mit Kunde" : "Anfahrt";
         const displayKmUnitPrice = Math.round(km.unitPriceCents * vatMultiplier);
         const displayKmTotal = Math.round(km.totalCents * vatMultiplier);
+        // Task #561: km-Anzeige via Helper — Menge × Satz = Summe konsistent.
+        const kmQuantityDisplay = renderLineItemQuantity(km);
         rows.push(`
         <tr>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(kmLabel)}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${km.durationMinutes} km</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${kmQuantityDisplay}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayKmUnitPrice)}/km</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayKmTotal)}</td>
         </tr>`);

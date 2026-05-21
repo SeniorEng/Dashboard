@@ -4,6 +4,7 @@ import { AppError, asyncHandler, badRequest, notFound } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
+import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
 import {
   createInvoiceSchema,
   updateInvoiceStatusSchema,
@@ -64,6 +65,12 @@ interface BuildLineItem extends Record<string, unknown> {
   startTime: string | null;
   endTime: string | null;
   durationMinutes: number;
+  // Task #561: explizite Menge + Einheit. Für km-Lines trägt
+  // `quantityRaw` die auf 2 Nachkommastellen quantisierten Kilometer
+  // (gleicher Wert für Anzeige UND Berechnung). Für Stunden-Lines
+  // trägt `quantityRaw` die Dezimalstunden (`durationMinutes / 60`).
+  quantityRaw: number;
+  quantityUnit: "hours" | "km";
   unitPriceCents: number;
   totalCents: number;
   employeeName: string;
@@ -258,6 +265,7 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         if (charge.totalCents > 0) {
           // VAT 0: Schadensersatz-/Ausfallleistung, kein Leistungsaustausch.
           const dateLabel = formatDateForDisplay(appt.date);
+          const waitMin = appt.noShowWaitMinutes ?? 0;
           lineItems.push({
             appointmentId: appt.id,
             appointmentDate: appt.date,
@@ -265,7 +273,11 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
             serviceCode: "no_show_charge",
             startTime: appt.actualStart || appt.scheduledStart,
             endTime: null,
-            durationMinutes: appt.noShowWaitMinutes ?? 0,
+            durationMinutes: waitMin,
+            // No-Show-Pauschale wird als 1 "Vorgang" abgebildet (Stunden-Einheit
+            // mit Menge 1, damit Menge × Satz = Summe aufgeht).
+            quantityRaw: 1,
+            quantityUnit: "hours",
             unitPriceCents: charge.totalCents,
             totalCents: charge.totalCents,
             employeeName,
@@ -297,6 +309,11 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         startTime: appt.actualStart || appt.scheduledStart,
         endTime: appt.actualEnd || appt.scheduledEnd,
         durationMinutes,
+        // Task #561: Stunden-Line — Menge in Dezimalstunden. Berechnung
+        // (Math.round((durationMinutes/60) * pricePer60Min)) bleibt unverändert,
+        // damit Bestandsverhalten und Tests stabil sind.
+        quantityRaw: durationMinutes / 60,
+        quantityUnit: "hours",
         unitPriceCents: pricePer60Min,
         totalCents,
         employeeName,
@@ -320,7 +337,12 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
       if (!kmSvc) continue;
       const kmCustomerPrice = getCustomerPrice(kmSvc.id, apptDate);
       const pricePerKm = kmCustomerPrice ?? kmSvc.defaultPriceCents ?? 35;
-      const kmTotalCents = Math.round(kmEntry.km * pricePerKm);
+      // Task #561: GoBD-konforme km-Quantisierung — Anzeige UND Berechnung
+      // verwenden denselben auf 2 Nachkommastellen gerundeten Wert.
+      // Vorher: `Math.round(km * pricePerKm)` mit ungerundetem Float +
+      // `Math.round(km)` als Anzeige → Drift (s. RE-2026-0003).
+      const quantityKm = quantizeKm(kmEntry.km);
+      const kmTotalCents = computeKmLineTotalCents(kmEntry.km, pricePerKm);
       const kmVatBasisPoints = isVatExempt ? 0 : (kmSvc.vatRate || 0);
       const kmVatCents = Math.round(kmTotalCents * kmVatBasisPoints / 10000);
 
@@ -331,7 +353,12 @@ async function buildLineItemsFromAppointments(apptIds: number[], customerId?: nu
         serviceCode: kmEntry.code,
         startTime: appt.actualStart || appt.scheduledStart,
         endTime: appt.actualEnd || appt.scheduledEnd,
-        durationMinutes: Math.round(kmEntry.km),
+        // Backward-Compat: `durationMinutes` ist ein required-NOT-NULL-int
+        // im DB-Schema. Wir tragen den ganzzahligen km-Wert ein (historisches
+        // Verhalten), das PDF-Template liest aber jetzt `quantityRaw`.
+        durationMinutes: Math.round(quantityKm),
+        quantityRaw: quantityKm,
+        quantityUnit: "km",
         unitPriceCents: pricePerKm,
         totalCents: kmTotalCents,
         employeeName,
@@ -1473,6 +1500,11 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
         startTime: item.startTime,
         endTime: item.endTime,
         durationMinutes: item.durationMinutes,
+        // Task #561: Menge/Einheit der Originalrechnung 1:1 übernehmen.
+        // Für historische Original-Lines (vor Task #561) sind beide Felder
+        // NULL — Storno bleibt damit konsistent zur Original-Anzeige.
+        quantityRaw: item.quantityRaw,
+        quantityUnit: item.quantityUnit,
         unitPriceCents: item.unitPriceCents,
         totalCents: -item.totalCents,
         employeeName: item.employeeName,
@@ -1635,6 +1667,10 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
       serviceDescription: item.serviceDescription,
       serviceCode: item.serviceCode || null,
       durationMinutes: item.durationMinutes,
+      // Task #561: neue explizite Menge/Einheit. NULL für historische Zeilen
+      // (PDF-Template fällt dann auf `durationMinutes` zurück).
+      quantityRaw: item.quantityRaw ?? null,
+      quantityUnit: (item.quantityUnit as "hours" | "km" | null) ?? null,
       unitPriceCents: item.unitPriceCents,
       totalCents: item.totalCents,
       employeeName: item.employeeName ?? null,

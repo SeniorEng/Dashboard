@@ -248,6 +248,14 @@ async function runStartupTasks() {
       log(`Invoice-Fingerprint-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #561: explizite Menge + Einheit auf invoice_line_items.
+    const { ensureInvoiceLineItemQuantityColumns } = await import("./startup/ensure-invoice-line-item-quantity-columns");
+    try {
+      await ensureInvoiceLineItemQuantityColumns();
+    } catch (err) {
+      log(`Invoice-Line-Item-Quantity-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();

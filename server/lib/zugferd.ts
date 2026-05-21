@@ -148,7 +148,11 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
   const lineItems = data.lineItems.map((item, index) => {
     const isKm = item.serviceCode === "travel_km" || item.serviceCode === "customer_km";
     const unitCode = isKm ? "KMT" : "HUR";
-    const quantity = isKm ? item.durationMinutes : (item.durationMinutes / 60);
+    // Task #561: bevorzugt `quantityRaw` (Dezimal-km bzw. Dezimalstunden);
+    // Fallback auf `durationMinutes` für historische Zeilen.
+    const quantity = item.quantityRaw != null
+      ? item.quantityRaw
+      : (isKm ? item.durationMinutes : (item.durationMinutes / 60));
     const netPrice = centsToDecimal(item.unitPriceCents);
     const lineTotal = centsToDecimal(item.totalCents);
 

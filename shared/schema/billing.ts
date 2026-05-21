@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, index, unique, date, time, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, serial, index, unique, date, time, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -82,6 +82,11 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   startTime: time("start_time"),
   endTime: time("end_time"),
   durationMinutes: integer("duration_minutes").notNull(),
+  // Task #561: explizite Menge + Einheit. `quantityRaw` ist Dezimal (Stunden
+  // oder Kilometer, je nach `quantityUnit`); historische Zeilen haben hier
+  // NULL und fallen im PDF-Template auf `durationMinutes` zurück.
+  quantityRaw: real("quantity_raw"),
+  quantityUnit: text("quantity_unit"),
   unitPriceCents: integer("unit_price_cents").notNull(),
   totalCents: integer("total_cents").notNull(),
   employeeName: text("employee_name"),

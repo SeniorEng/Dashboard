@@ -26,6 +26,45 @@ Neueste Einträge oben.
 
 ## Einträge
 
+### Geplant — Operator-Aktion: km-Drift in RE-2026-0003 (und ggf. weiteren) korrigieren (Task #561)
+
+**Anlass:** In `server/routes/billing.ts buildLineItemsFromAppointments` wurde
+die Kilometer-Strecke bisher unabhängig gerundet — Anzeige `Math.round(km)`
+(z.B. "3 km"), Berechnung aber auf dem ungerundeten Float (`2,714 × 35 ct =
+95 ct`). Folge: Menge × Satz ≠ Summe auf dem PDF (RE-2026-0003: 2 von 3
+km-Zeilen betroffen, kumulative Drift –0,27 €).
+
+**Fix-Stand:** Ab dem Deploy mit Task #561 verwenden neue Rechnungen
+`shared/domain/invoice-line-items.ts` — die Strecke wird auf 2 NK
+quantisiert und derselbe Wert geht in Display und Total. Die Line-Items
+führen neu `quantity_raw` (Dezimal) + `quantity_unit` (`hours`/`km`); das
+PDF-Template fällt für historische Zeilen auf `durationMinutes` zurück.
+**GoBD: bestehende `invoice_line_items` werden NICHT angefasst.**
+
+**Operator-Schritte (pro betroffener Rechnung):**
+
+1. Audit ausführen, betroffene Rechnungen listen:
+   ```
+   npx tsx scripts/audit-invoice-line-items.ts
+   ```
+   Read-only, hostname-guard. Liefert Rechnungs-Nr., Kunde, Δ pro Zeile.
+2. Pro betroffener Rechnung im Admin-UI **Storno** anlegen
+   (`POST /api/billing/:id/storno`). Die Storno-Rechnung referenziert die
+   Originalzeilen 1:1 mit negativem Betrag — bewusst inkl. der historischen
+   Drift, damit Original + Storno saldieren auf Null.
+3. Neue Rechnung aus denselben Terminen generieren
+   (`POST /api/billing/generate` mit identischem Zeitraum/Kunden-Scope) —
+   der gefixte Code rechnet die km-Lines jetzt konsistent.
+4. Versand der neuen Rechnung erneut anstoßen
+   (`POST /api/billing/:id/send`), Original-Versand bleibt im Audit-Trail.
+5. Nach Aktion erneut `audit-invoice-line-items.ts` laufen lassen — die
+   neu erzeugten Rechnungen dürfen nicht mehr in der Drift-Liste auftauchen.
+
+**Bekannt betroffene Rechnungen (Analyse-Zeitpunkt):** RE-2026-0003 sicher,
+RE-2026-0002 möglich. Endgültige Liste produziert das Audit-Skript.
+
+---
+
 ### Geplant — Operator-Aktion: Rechnungs-PDFs #2 und #3 in Production neu generieren (Task #551)
 
 **Anlass:** Nach dem Deploy von Task #550 (Chromium-Launch-Härtung) müssen die beiden Bestands-Rechnungen #2 und #3 einmalig durch den seit Task #532 vorhandenen Superadmin-Endpoint geschickt werden, falls der bootseitige Auto-Backfill (max. 20 Rechnungen pro Start) diese beiden Datensätze nicht erwischt hat. Dies ist eine **reine Deploy-Zeit-Aktion ohne Code-Änderung**.

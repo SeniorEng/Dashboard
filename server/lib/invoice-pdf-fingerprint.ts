@@ -60,6 +60,11 @@ export function computeInvoicePdfFingerprint(data: InvoicePdfData): string {
       serviceDescription: item.serviceDescription,
       serviceCode: item.serviceCode,
       durationMinutes: item.durationMinutes,
+      // Task #561: explizite Menge + Einheit fließen in den Fingerprint ein,
+      // damit nachträgliche Schema-Anreicherung (Backfill) als Drift erkannt
+      // wird, falls Anzeige-Werte abweichen sollten.
+      quantityRaw: item.quantityRaw ?? null,
+      quantityUnit: item.quantityUnit ?? null,
       unitPriceCents: item.unitPriceCents,
       totalCents: item.totalCents,
       employeeName: item.employeeName,
