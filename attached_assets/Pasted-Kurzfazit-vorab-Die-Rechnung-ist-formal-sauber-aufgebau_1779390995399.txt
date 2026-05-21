@@ -1,0 +1,16 @@
+Kurzfazit vorab: Die Rechnung ist formal sauber aufgebaut und enthält den entscheidenden Baustein, damit das Geld bei Ihnen und nicht bei Frau Krause landet. Für eine reibungslose Dunkelverarbeitung gibt es aber zwei echte Stolpersteine — vor allem zwei Rechenfehler bei den Anfahrtskilometern.
+Damit das Geld Sie erreicht (Ihr Hauptanliegen)
+Entscheidend ist nicht die Rechnung selbst, sondern die Abtretungserklärung. Auf der Rechnung steht korrekt der Satz „Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI." Das ist genau das Signal, das die AOK PLUS braucht, um direkt an den Dienstleister statt an die Versicherte zu zahlen.
+Aber: Die Rechnung allein garantiert das nicht. Die AOK zahlt nur dann auf Ihre IBAN, wenn ihr eine gültige, von Frau Krause unterschriebene Abtretungserklärung vorliegt, die ausdrücklich die Senioren Engel Alltagsbegleitung UG als Empfängerin benennt. Fehlt diese (oder ist sie nicht erfasst), erstattet die Kasse den Betrag der Versicherten — genau das Szenario, das Sie vermeiden wollen. Konkret heißt das: Vergewissern Sie sich, dass der AOK PLUS für Frau Krause eine aktuelle Abtretungserklärung vorliegt. Bei einer neuen Klientin oder der ersten Abrechnung legen Sie die Abtretungserklärung der Rechnung bei. Die IBAN auf der Rechnung (DE34 1001 0123 5736 7761 63 — zweimal genannt, konsistent) muss zu dem Konto passen, das in der Abtretungserklärung benannt bzw. bei der AOK hinterlegt ist.
+Was die Dunkelverarbeitung gefährdet
+Zwei Positionen sind falsch gerechnet:
+
+15.04., 3 km × 0,35 €/km = 1,05 € — auf der Rechnung stehen 0,95 €
+15.04., 8 km × 0,35 €/km = 2,80 € — auf der Rechnung stehen 2,63 €
+
+(Die 12 km mit 4,20 € stimmen.) Korrekt wäre ein Gesamtbetrag von 95,55 € statt 95,28 €. Automatisierte Prüfsysteme rechnen Menge × Einzelpreis nach; solche Abweichungen führen fast immer zum Aussteuern in die manuelle Bearbeitung — die Dunkelverarbeitung scheitert also genau hier. Nebeneffekt: Sie berechnen sich aktuell 0,27 € zu wenig. (Die reine Summenprüfung würde übrigens durchgehen, weil die Endsumme zu den falschen Zeilen passt — die Positionsprüfung fällt aber durch.)
+Zweiter Punkt zum Klären: die Anfahrtskilometer als separate Position. Ob die AOK PLUS Fahrtkosten zusätzlich zum Stundensatz im Rahmen des Entlastungsbetrags akzeptiert, hängt von Ihrer Anerkennung als Angebot zur Unterstützung im Alltag in Sachsen ab. Sind Fahrtkosten nicht Teil Ihres anerkannten Leistungs- und Vergütungskonzepts, können genau diese Zeilen beanstandet werden. Das lohnt sich, einmal grundsätzlich mit der AOK abzustimmen.
+Kleinigkeiten ohne Zahlungsrelevanz
+Die E-Mail-Adresse ist im Kopf mit Bindestrich, in der Fußzeile ohne geschrieben — vereinheitlichen. Der Rechnungsbetrag liegt klar innerhalb des monatlichen Entlastungsbetrags (131 € pro Monat), also kein Budgetproblem.
+Ein Hinweis: Die genauen Dunkelverarbeitungs-Regeln sind kasseninterne Logik — die Rechenfehler und die Abtretungserklärung sind aber die zwei Punkte, an denen es erfahrungsgemäß hängt.
+Wenn Sie möchten, korrigiere ich die beiden Kilometer-Positionen und erstelle Ihnen eine bereinigte PDF-Rechnung mit dem korrekten Gesamtbetrag von 95,55 €. Sagen Sie einfach Bescheid.
