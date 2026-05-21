@@ -65,12 +65,14 @@ const UNIT_LABELS: Record<string, string> = {
   flat: "€ pauschal",
 };
 
-function formatDateDisplay(dateStr: string): string {
+function formatDateDisplay(dateStr: string | null | undefined): string {
+  if (!dateStr || typeof dateStr !== "string") return "—";
   try {
     const d = parseLocalDate(dateStr);
+    if (!d || Number.isNaN(d.getTime())) return "—";
     return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
   } catch {
-    return dateStr;
+    return "—";
   }
 }
 
@@ -551,7 +553,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                       value={editValidFrom}
                       onChange={e => setEditValidFrom(e.target.value)}
                       min={getTodayISO()}
-                      className="h-7 text-xs w-20"
+                      className="h-7 text-xs w-40"
                       placeholder="Gültig ab"
                       data-testid={`input-valid-from-${service.id}`}
                     />
@@ -676,7 +678,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                             type="date"
                             value={editPriceValidFrom}
                             onChange={e => setEditPriceValidFrom(e.target.value)}
-                            className="h-7 text-xs w-32"
+                            className="h-7 text-xs w-40"
                             data-testid={`input-history-valid-from-${p.id}`}
                           />
                         ) : (
@@ -690,7 +692,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
                             value={editPriceValidTo}
                             onChange={e => setEditPriceValidTo(e.target.value)}
                             min={editPriceValidFrom || undefined}
-                            className="h-7 text-xs w-32"
+                            className="h-7 text-xs w-40"
                             data-testid={`input-history-valid-to-${p.id}`}
                           />
                         ) : (
