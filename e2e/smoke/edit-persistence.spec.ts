@@ -13,6 +13,7 @@ import {
   createEmployee,
   createProspect,
   deactivateEmployee,
+  getServiceIdByCode,
 } from "../helpers/test-data";
 import {
   clickSaveAndWait,
@@ -511,6 +512,109 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     );
     await expect(pot39After).toBeVisible();
     await expect(pot39After).toHaveValue(/^1[\.\s]?500(?:[,.]00?)?$/);
+  });
+
+  // ---------- 9b. Service-Katalog: 0,00 € als Kundenpreis (Task #566) ----------
+  // Schützt davor, dass eine zukünftige Frontend-Validator-Regression "0,00"
+  // als Kundenpreis ablehnt. Backend lässt `priceCents: 0` zu (siehe
+  // tests/services.test.ts) — hier prüfen wir den Round-Trip über die UI.
+  test("Kundenpreis 0,00 € für Anfahrtskilometer speichern und nach Reload anzeigen", async ({ page }) => {
+    const customer = await createCustomer(session);
+    const travelKmServiceId = await getServiceIdByCode(session, "travel_km");
+
+    await page.goto(`/admin/customers/${customer.id}?tab=vertrag`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const row = page.locator(`[data-testid='pricing-row-${travelKmServiceId}']`);
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    // Edit-Modus öffnen.
+    await page.locator(`[data-testid='btn-edit-price-${travelKmServiceId}']`).click();
+
+    const priceInput = page.locator(`[data-testid='input-price-${travelKmServiceId}']`);
+    await expect(priceInput).toBeVisible({ timeout: 10000 });
+    await priceInput.fill("0,00");
+
+    await clickSaveAndWait(
+      page,
+      { url: `/api/customers/${customer.id}/service-prices`, methods: ["POST"] },
+      `btn-save-price-${travelKmServiceId}`,
+    );
+
+    // Kein Toast-Fehler (Frontend-Validator-Regression würde einen
+    // "Ungültiger Preis"-Toast werfen, bevor die Mutation feuert).
+    await expect(page.getByText("Ungültiger Preis")).toHaveCount(0);
+
+    // Vollständiger Reload — anschließend muss "0,00" mit Einheit "€/km"
+    // im Pricing-Row sichtbar sein, und der "Kundenpreis"-Badge erscheinen.
+    await page.goto(`/admin/customers/${customer.id}?tab=vertrag`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const rowAfter = page.locator(`[data-testid='pricing-row-${travelKmServiceId}']`);
+    await expect(rowAfter).toBeVisible({ timeout: 15000 });
+    await expect(rowAfter).toContainText("0,00");
+    await expect(rowAfter).toContainText("€/km");
+    await expect(rowAfter).toContainText("Kundenpreis");
+
+    // API-Persistenz zusätzlich absichern.
+    const fetched = (await session.api
+      .get(`/api/customers/${customer.id}/service-prices`)
+      .then((r) => (r.ok() ? r.json() : []))) as Array<{
+      serviceId: number;
+      priceCents: number;
+    }>;
+    const persisted = fetched.find((p) => p.serviceId === travelKmServiceId);
+    expect(persisted?.priceCents).toBe(0);
+  });
+
+  test("Kundenpreis: negative Eingabe (-0,01) wird im UI abgelehnt", async ({ page }) => {
+    const customer = await createCustomer(session);
+    const travelKmServiceId = await getServiceIdByCode(session, "travel_km");
+
+    await page.goto(`/admin/customers/${customer.id}?tab=vertrag`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const row = page.locator(`[data-testid='pricing-row-${travelKmServiceId}']`);
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    await page.locator(`[data-testid='btn-edit-price-${travelKmServiceId}']`).click();
+
+    const priceInput = page.locator(`[data-testid='input-price-${travelKmServiceId}']`);
+    await expect(priceInput).toBeVisible({ timeout: 10000 });
+    await priceInput.fill("-0,01");
+
+    // Speichern anklicken — der Frontend-Validator MUSS dies ablehnen,
+    // ohne dass eine POST-Mutation rausgeht.
+    let postFired = false;
+    const onRequest = (req: import("@playwright/test").Request) => {
+      if (
+        req.method() === "POST"
+        && req.url().includes(`/api/customers/${customer.id}/service-prices`)
+      ) {
+        postFired = true;
+      }
+    };
+    page.on("request", onRequest);
+
+    try {
+      await page.locator(`[data-testid='btn-save-price-${travelKmServiceId}']`).click();
+
+      // Fehler-Toast muss sichtbar werden.
+      await expect(page.getByText("Ungültiger Preis").first()).toBeVisible({
+        timeout: 5000,
+      });
+
+      // Kurzer Puffer, damit eine ggf. fälschlich gefeuerte Mutation noch
+      // sichtbar würde — falls der Validator umgangen wird, fängt die
+      // postFired-Assertion das ab.
+      await page.waitForTimeout(300);
+      expect(postFired, "Negativer Preis darf keine POST-Mutation auslösen").toBe(false);
+    } finally {
+      page.off("request", onRequest);
+    }
   });
 
   // ---------- 10. Firmenstammdaten ----------
