@@ -1,0 +1,65 @@
+Analyse Rechnung RE-2026-0003
+
+Kurzfazit
+
+Inhaltlich ist die Rechnung nahezu vollständig, aber für echte Dunkelverarbeitung als ZUGFeRD-Rechnung nicht geeignet – aus zwei Gründen: (1) ich sehe nur die PDF-Darstellung, kann also nicht prüfen, ob ein konformes Cross-Industry-Invoice-XML im PDF/A-3 eingebettet ist (das ist die eigentliche ZUGFeRD-Voraussetzung), und (2) es gibt konkrete Rechenfehler sowie mehrere fehlende Pflichtfelder. Hinzu kommt: Pflegekassen verarbeiten AUA-Abrechnungen formell über §302 SGB XI EDIFACT, nicht über ZUGFeRD – ZUGFeRD ist hier also bestenfalls Beiwerk zum manuellen Workflow.
+
+Rechenfehler in den Kilometerpauschalen
+
+Das ist der gravierendste Punkt – harte Fehler in den Beträgen:
+
+|Zeile                |km|Satz     |Berechnet |Ausgewiesen|Differenz|
+|---------------------|--|---------|----------|-----------|---------|
+|15.04. (Alltagsbegl.)|3 |0,35 €/km|**1,05 €**|0,95 €     |–0,10 €  |
+|15.04. (Hauswirt.)   |8 |0,35 €/km|**2,80 €**|2,63 €     |–0,17 €  |
+|17.04. (Hauswirt.)   |12|0,35 €/km|4,20 €    |4,20 €     |✓        |
+
+Die effektiven Sätze in Zeile 1 und 2 liegen bei ~0,317 € bzw. ~0,329 € pro km – also nicht 0,35 €. Entweder ist der ausgewiesene Satz falsch, oder die Beträge sind falsch. Bei einer maschinell aus CareConnect generierten Rechnung deutet das auf einen Rundungs- oder Berechnungsbug hin (möglicherweise wird intern mit anderem Satz gerechnet, oder es gibt eine Mindermengen-/Staffellogik, die nicht ausgewiesen ist). Die Summe stimmt zwar in sich, aber das ist GoBD-relevant: Einzelpositionen müssen nachvollziehbar sein.
+
+ZUGFeRD-Konformität (was prüfbar ist)
+
+Ich kann nur den sichtbaren Inhalt gegen die ZUGFeRD-/EN-16931-Felder mappen. Ob ein XML eingebettet ist, müsstest du mit pdftk oder einem ZUGFeRD-Validator (z. B. Konik, Mustang, FeRD-Validator) prüfen. Inhaltlich:
+
+Vorhanden und ZUGFeRD-tauglich:
+
+	•	BT-1 Rechnungsnummer (RE-2026-0003), BT-2 Rechnungsdatum (20.05.2026)
+	•	BT-27/31 Verkäufer mit USt-ID und Steuernummer
+	•	BT-44 ff. Käufer (AOK PLUS mit IK)
+	•	BT-73/74 Leistungszeitraum (April 2026)
+	•	BT-84 ff. Zahlungskonten (IBAN/BIC)
+	•	BT-118/120 Steuerbefreiung mit Rechtsgrundverweis (§4 Nr. 16 UStG)
+	•	BT-106/109/112 Beträge konsistent
+
+Fehlt oder kritisch für Dunkelverarbeitung:
+
+	•	BT-9 Fälligkeitsdatum / Zahlungsziel – fehlt komplett. Für Dunkelverarbeitung ist das praktisch obligatorisch, sonst muss der Sachbearbeiter eingreifen.
+	•	BT-10 Käuferreferenz / Leitweg-ID – fehlt. Für XRechnung an öffentliche Stellen Pflicht; Pflegekassen verlangen das nicht durchgängig, aber viele moderne Eingangsverarbeitungen erwarten ein Aktenzeichen/Vorgangsnummer hier.
+	•	Versichertendaten als strukturierte Referenz – Name, Geb.-Datum, Vers.-Nr. und Pflegegrad stehen nur als Fließtext. In §302 SGB XI EDIFACT sind das eigene Segmente (NAM, KTO, etc.). Für reine ZUGFeRD-Verarbeitung müsste das in IncludedNote mit qualifiziertem SubjectCode oder besser noch als eigene Customer-Referenz.
+	•	Abtretungserklärung-Bezug – die Erwähnung im Fließtext ist gut, aber ohne strukturierte Referenz (Datum/Aktenzeichen der Abtretung) nicht maschinell verwertbar.
+	•	Bankverbindung doppelt (einmal als Fließtext, einmal im Footer) und mit ungewöhnlichem Institut (Olinda/Qonto) – kein Fehler, aber für die Erstverarbeitung bei der AOK ggf. ein Prüf-Trigger.
+
+SGB XI / §45b Konformität
+
+Die rechtliche Grundlage §45b Abs. 1 Satz 3 Nr. 4 SGB XI ist für AUA-Leistungen die korrekte Norm – bitte aber nach dem PUEG/Pflegestudiumstärkungsgesetz und der Neufassung zum 01.07.2025 nochmal gegen den aktuellen Gesetzeswortlaut prüfen, die Nummerierung wurde mit Einführung des §42a (Gemeinsamer Jahresbetrag) teilweise berührt. Inhaltlich:
+
+	•	Pflegegrad 1, Entlastungsbetrag 131 €/Monat – 95,28 € liegen klar im Budget ✓
+	•	Leistungsmonat April 2026, Rechnungsdatum 20.05.2026 – Periodenattribution stimmt, leistungsmonat ≠ Rechnungsmonat, das ist GoBD-konform.
+	•	Stundensätze (42 € Alltagsbegleitung, 38 € Hauswirtschaft) – marktüblich für Sachsen, aber prüfe: liegt der Satz innerhalb deiner Anerkennung als AUA durch die zuständige Landesbehörde (SMS Sachsen)? Bei Überschreitung des anerkannten Höchstsatzes ist die Abtretung anfechtbar.
+	•	Kilometerpauschale 0,35 €/km – als Sachkosten gem. AUA-Anerkennung grundsätzlich erstattungsfähig, sofern explizit Bestandteil deines Konzepts/Preisblatts und in der Abtretungserklärung erfasst.
+	•	30-Min-Einsätze – formal zulässig, aber manche Kassen bemängeln Mindesteinsatzzeiten; bei zwei 30-Min-Terminen am selben Tag mit unterschiedlichen Leistungsarten ist die Dokumentation der Erforderlichkeit wichtig.
+
+Was zusätzlich auf eine §45b-Rechnung gehört (aus Kassenpraxis):
+
+	•	Verweis auf die Anerkennung als AUA durch SMS Sachsen (Aktenzeichen/Datum)
+	•	Leistungsnachweis-Referenz (i. d. R. unterschriebenes Tagesblatt der Versicherten oder digitale Signatur)
+	•	Abtretungsdatum, nicht nur “gemäß Abtretungserklärung”
+
+Für CareConnect: konkreter Fix-Vorschlag
+
+	1.	Rechenbug fixen – Einzelpositionen müssen exakt menge × satz ergeben (zweistellig kaufmännisch gerundet, nicht auf Summenebene normalisiert).
+	2.	Fälligkeitsdatum als Pflichtfeld in den Rechnungsgenerator (z. B. +30 Tage).
+	3.	Strukturierte Referenzfelder ergänzen: AUA-Anerkennung-Az., Abtretungs-Datum/ID, Leistungsnachweis-ID je Einsatz.
+	4.	ZUGFeRD-XML wirklich einbetten – wenn das Ziel Dunkelverarbeitung ist, ist die rendered PDF zweitrangig. Mustang-Library (Java) oder PHP-Mustangproject sind die üblichen Werkzeuge; für Node gibt es node-zugferd.
+	5.	Strategisch: für die Pflegekassen-Schiene parallel den §302-SGB-XI-EDIFACT-Pfad ausbauen – das ist der eigentliche Hebel für Dunkelverarbeitung bei AOK/Barmer & Co. ZUGFeRD bleibt sinnvoll für Selbstzahler/private Pflegekassen.
+
+Soll ich einen XRechnung/ZUGFeRD-XML-Entwurf für genau diese Rechnung skizzieren, oder zuerst die Korrekturlogik für die km-Berechnung in CareConnect anschauen?
