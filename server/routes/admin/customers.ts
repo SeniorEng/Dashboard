@@ -192,6 +192,9 @@ const simpleCreateCustomerSchema = z.object({
   beihilfeBerechtigt: z.boolean().optional(),
   documentDeliveryMethod: z.enum(["email", "post"]).optional(),
   receivesMonthlyInvoice: z.boolean().optional(),
+  // Task #562 — Trägerbezogene Anerkennungs-Daten für ZUGFeRD-Dunkelverarbeitung.
+  auaApprovalRef: z.string().max(100, "Maximal 100 Zeichen").optional().nullable(),
+  auaApprovalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").optional().nullable(),
   insurance: z.object({
     providerId: z.number(),
     versichertennummer: z.string().min(3).max(20),
@@ -609,6 +612,9 @@ const updateCustomerSchema = z.object({
   inaktivAb: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
   deactivationReason: z.string().nullable().optional(),
   deactivationNote: z.string().max(1000, "Maximal 1000 Zeichen erlaubt").nullable().optional(),
+  // Task #562 — Trägerbezogene Anerkennungs-Daten für ZUGFeRD-Dunkelverarbeitung.
+  auaApprovalRef: z.string().max(100, "Maximal 100 Zeichen").nullable().optional(),
+  auaApprovalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datumsformat (YYYY-MM-DD erwartet)").nullable().optional(),
   skipDuplicateCheck: z.boolean().optional(),
 });
 

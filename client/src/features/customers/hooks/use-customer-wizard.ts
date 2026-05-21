@@ -94,6 +94,8 @@ function createInitialFormData(): CustomerFormData {
     rechnungAnKunde: false,
     vorjahrVerbraucht45b: "",
     uebertrag45b: "0",
+    auaApprovalRef: "",
+    auaApprovalDate: "",
   };
 }
 
@@ -409,6 +411,10 @@ export function useCustomerWizard() {
       contacts: contacts.length > 0 ? contacts : undefined,
       budgets: isPflegekasse ? budgets : undefined,
       contract,
+      // Task #562 — AUA-Anerkennung ist trägerbezogen → nur bei Pflegekassen
+      // mitschicken, sonst null lassen.
+      auaApprovalRef: isPflegekasse && formData.auaApprovalRef.trim() ? formData.auaApprovalRef.trim() : undefined,
+      auaApprovalDate: isPflegekasse && formData.auaApprovalDate ? formData.auaApprovalDate : undefined,
       skipDuplicateCheck: duplicateCheckedRef.current || forceSkipDuplicate,
       acknowledgeRecentDuplicate: acknowledgeRecentDuplicateRef.current,
       __idempotencyKey: idempotencyKeyRef.current,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { embedZugferdXml, ZugferdEmbedError } from "../server/lib/zugferd";
+import { embedZugferdXml, generateZugferdXml, ZugferdEmbedError } from "../server/lib/zugferd";
 import type { InvoicePdfData } from "../server/lib/pdf-generator";
 
 function buildPdfData(overrides: Partial<InvoicePdfData> = {}): InvoicePdfData {
@@ -37,6 +37,14 @@ function buildPdfData(overrides: Partial<InvoicePdfData> = {}): InvoicePdfData {
     ],
     appointments: [],
     signatures: [],
+    invoiceDueDate: null,
+    buyerReference: null,
+    auaApprovalRef: null,
+    auaApprovalDate: null,
+    assignmentDeclarationDate: null,
+    assignmentDeclarationRef: null,
+    customerGeburtsdatum: null,
+    pflegegrad: null,
     ...overrides,
   } as unknown as InvoicePdfData;
 }
@@ -101,6 +109,88 @@ describe("Task #554 — embedZugferdXml Default-Pfad (Preview/PDF-Anzeige)", () 
     const result = await embedZugferdXml(pdf, data);
     expect(result.xml).toBeNull();
     expect(result.pdf).toBe(pdf);
+  });
+});
+
+describe("Task #562 — ZUGFeRD-Pflichtfelder im generierten XML", () => {
+  it("schreibt BT-9 Fälligkeitsdatum (paymentTerms.dueDate) in das XML", async () => {
+    const xml = await generateZugferdXml(
+      buildPdfData({
+        invoiceDueDate: "2025-02-14",
+        invoiceType: "pflegekasse_gesetzlich",
+        ikNummer: "123456789",
+        insuranceIkNummer: "987654321",
+        versichertennummer: "A123456789",
+      }),
+    );
+    expect(xml).not.toBeNull();
+    // node-zugferd serialisiert paymentTerms unter
+    // ApplicableHeaderTradeSettlement/SpecifiedTradePaymentTerms/DueDateDateTime.
+    expect(xml).toMatch(/SpecifiedTradePaymentTerms[\s\S]*DueDateDateTime[\s\S]*20250214/);
+  });
+
+  it("schreibt BT-10 BuyerReference, wenn explizit gesetzt", async () => {
+    const xml = await generateZugferdXml(
+      buildPdfData({
+        buyerReference: "AKTE-2025-0042",
+        invoiceType: "pflegekasse_gesetzlich",
+        ikNummer: "123456789",
+      }),
+    );
+    expect(xml).not.toBeNull();
+    expect(xml).toMatch(/<ram:BuyerReference>AKTE-2025-0042<\/ram:BuyerReference>/);
+  });
+
+  it("fällt für Pflegekassen-Rechnungen ohne explizite BuyerReference auf die Versicherten-Nr. zurück", async () => {
+    const xml = await generateZugferdXml(
+      buildPdfData({
+        invoiceType: "pflegekasse_gesetzlich",
+        ikNummer: "123456789",
+        versichertennummer: "X999999999",
+      }),
+    );
+    expect(xml).not.toBeNull();
+    expect(xml).toMatch(/<ram:BuyerReference>X999999999<\/ram:BuyerReference>/);
+  });
+
+  it("schreibt eine IncludedNote mit Versichertendaten (SubjectCode AAK)", async () => {
+    const xml = await generateZugferdXml(
+      buildPdfData({
+        invoiceType: "pflegekasse_gesetzlich",
+        ikNummer: "123456789",
+        versichertennummer: "A123456789",
+        customerGeburtsdatum: "1940-03-15",
+        pflegegrad: 3,
+      }),
+    );
+    expect(xml).not.toBeNull();
+    expect(xml).toMatch(/IncludedNote[\s\S]*Vers\.-Nr\.: A123456789[\s\S]*<ram:SubjectCode>AAK<\/ram:SubjectCode>/);
+  });
+
+  it("schreibt eine IncludedNote mit AUA-Anerkennungs-Az. (SubjectCode REG)", async () => {
+    const xml = await generateZugferdXml(
+      buildPdfData({
+        invoiceType: "pflegekasse_gesetzlich",
+        ikNummer: "123456789",
+        auaApprovalRef: "AUA-2024-12345",
+        auaApprovalDate: "2024-11-04",
+      }),
+    );
+    expect(xml).not.toBeNull();
+    expect(xml).toMatch(/IncludedNote[\s\S]*AUA-2024-12345[\s\S]*<ram:SubjectCode>REG<\/ram:SubjectCode>/);
+  });
+
+  it("schreibt eine IncludedNote für die Abtretungserklärung (SubjectCode REG)", async () => {
+    const xml = await generateZugferdXml(
+      buildPdfData({
+        invoiceType: "pflegekasse_gesetzlich",
+        ikNummer: "123456789",
+        assignmentDeclarationDate: "2024-09-01",
+        assignmentDeclarationRef: "ABT-2024-007",
+      }),
+    );
+    expect(xml).not.toBeNull();
+    expect(xml).toMatch(/IncludedNote[\s\S]*Abtretungserkl[\s\S]*ABT-2024-007[\s\S]*<ram:SubjectCode>REG<\/ram:SubjectCode>/);
   });
 });
 

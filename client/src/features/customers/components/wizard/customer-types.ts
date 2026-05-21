@@ -61,6 +61,11 @@ export interface CustomerFormData {
   rechnungAnKunde: boolean;
   vorjahrVerbraucht45b: string;
   uebertrag45b: string;
+  // Task #562 — Trägerbezogene Anerkennungs-Stammdaten (für ZUGFeRD-Dunkel-
+  // verarbeitung in §45b-Rechnungen). Optional, gilt nur für Pflegekassen-
+  // Kunden.
+  auaApprovalRef: string;
+  auaApprovalDate: string;
 }
 
 export interface SelectOption {

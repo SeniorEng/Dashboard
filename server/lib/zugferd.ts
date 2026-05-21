@@ -72,10 +72,21 @@ function computeServicePeriod(data: InvoicePdfData): { start: Date; end: Date } 
   return { start, end };
 }
 
+interface ZugferdIncludedNote {
+  content: string;
+  subjectCode?: string;
+}
+
 interface ZugferdInvoiceData {
   number: string;
   typeCode: string;
   issueDate: Date;
+  // Task #562 — IncludedNote/BG-1: strukturierte Hinweise (Versichertendaten,
+  // Abtretungserklärung, AUA-Az). SubjectCodes:
+  //   "AAK" = Quality notes (genutzt für Versichertendaten-Block)
+  //   "REG" = Regulatory information (genutzt für Abtretungserklärung +
+  //            AUA-Anerkennung, beides §§-relevant)
+  includedNote?: ZugferdIncludedNote[];
   transaction: {
     tradeAgreement: {
       seller: {
@@ -121,6 +132,10 @@ interface ZugferdInvoiceData {
         exemptionReason?: string;
       }[];
       invoicingPeriod: { startDate: Date; endDate: Date };
+      // Task #562 — BT-9 Fälligkeitsdatum. paymentTerms.dueDate ist im
+      // node-zugferd basic-Profil optional, wird aber für die Dunkel-
+      // verarbeitung durch Pflegekassen/Rechnungseingangs-Systeme erwartet.
+      paymentTerms?: { description?: string; dueDate?: Date };
       monetarySummation: {
         lineTotalAmount: string;
         taxBasisTotalAmount: string;
@@ -187,10 +202,35 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
     };
   });
 
+  // Task #562 — Strukturierte IncludedNotes (BG-1) für Versichertendaten
+  // und Abtretungserklärung / AUA-Anerkennung. Pflegekassen-Eingangs-
+  // systeme können diese SubjectCodes maschinell auswerten, ohne den PDF-
+  // Footer zu parsen.
+  const notes: ZugferdIncludedNote[] = [];
+  if (data.customerName && (data.versichertennummer || data.pflegegrad || data.customerGeburtsdatum)) {
+    const parts: string[] = [`Versicherte/r: ${data.customerName}`];
+    if (data.customerGeburtsdatum) parts.push(`Geb.: ${data.customerGeburtsdatum}`);
+    if (data.versichertennummer) parts.push(`Vers.-Nr.: ${data.versichertennummer}`);
+    if (data.pflegegrad) parts.push(`Pflegegrad: ${data.pflegegrad}`);
+    notes.push({ content: parts.join(" | "), subjectCode: "AAK" });
+  }
+  if (data.auaApprovalRef) {
+    const auaParts: string[] = [`Anerkennungs-Az. (§45b SGB XI): ${data.auaApprovalRef}`];
+    if (data.auaApprovalDate) auaParts.push(`vom ${data.auaApprovalDate}`);
+    notes.push({ content: auaParts.join(" "), subjectCode: "REG" });
+  }
+  if (data.assignmentDeclarationDate || data.assignmentDeclarationRef) {
+    const aakParts: string[] = ["Abtretungserklärung (§ 398 BGB)"];
+    if (data.assignmentDeclarationDate) aakParts.push(`vom ${data.assignmentDeclarationDate}`);
+    if (data.assignmentDeclarationRef) aakParts.push(`Az. ${data.assignmentDeclarationRef}`);
+    notes.push({ content: aakParts.join(" "), subjectCode: "REG" });
+  }
+
   const result: ZugferdInvoiceData = {
     number: data.invoiceNumber,
     typeCode,
     issueDate,
+    ...(notes.length > 0 ? { includedNote: notes } : {}),
     transaction: {
       tradeAgreement: {
         seller: {
@@ -227,7 +267,13 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
             },
           } : {}),
         },
-        ...(data.versichertennummer ? { buyerReference: data.versichertennummer } : {}),
+        // Task #562 — BT-10 Käuferreferenz. Bevorzugt die explizite
+        // `buyerReference` aus der Rechnung; bei Pflegekassen-Rechnungen
+        // ohne expliziten Wert fällt sie auf die Versicherten-Nr. zurück,
+        // damit der Vorgang im Eingangs-System auffindbar bleibt.
+        ...((data.buyerReference ?? data.versichertennummer)
+          ? { buyerReference: (data.buyerReference ?? data.versichertennummer) as string }
+          : {}),
       },
       tradeDelivery: {
         information: {
@@ -260,6 +306,15 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
           startDate: period.start,
           endDate: period.end,
         },
+        // Task #562 — BT-9 Fälligkeitsdatum als paymentTerms.dueDate.
+        ...(data.invoiceDueDate
+          ? {
+              paymentTerms: {
+                description: `Zahlbar bis ${data.invoiceDueDate}`,
+                dueDate: parseDateString(data.invoiceDueDate),
+              },
+            }
+          : {}),
         monetarySummation: {
           lineTotalAmount: centsToDecimal(data.netAmountCents),
           taxBasisTotalAmount: centsToDecimal(data.netAmountCents),

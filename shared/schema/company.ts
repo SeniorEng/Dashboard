@@ -39,6 +39,10 @@ export const companySettings = pgTable("company_settings", {
   letterxpressUsername: text("letterxpress_username"),
   letterxpressApiKey: encryptedText("letterxpress_api_key"),
   minijobEarningsLimitCents: integer("minijob_earnings_limit_cents").notNull().default(55600),
+  // Task #562 — Standard-Fälligkeit in Tagen für neu erzeugte Rechnungen.
+  // Wird beim Insert auf invoices.due_date = issueDate + N Tage angewendet.
+  // Mandant kann hier abweichen; Default 30 entspricht der gängigen Praxis.
+  invoiceDefaultDueDays: integer("invoice_default_due_days").notNull().default(30),
   letterxpressTestMode: boolean("letterxpress_test_mode").notNull().default(false),
   qontoLogin: text("qonto_login"),
   qontoSecretKey: encryptedText("qonto_secret_key"),
@@ -100,6 +104,7 @@ export const updateCompanySettingsSchema = z.object({
   letterxpressUsername: z.string().optional().nullable(),
   letterxpressApiKey: z.string().optional().nullable(),
   minijobEarningsLimitCents: z.number().int().min(0, "Betrag darf nicht negativ sein").optional(),
+  invoiceDefaultDueDays: z.number().int().min(0, "Anzahl Tage darf nicht negativ sein").max(365, "Maximal 365 Tage").optional(),
   letterxpressTestMode: z.boolean().optional(),
   qontoLogin: z.string().optional().nullable(),
   qontoSecretKey: z.string().optional().nullable(),

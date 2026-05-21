@@ -254,6 +254,37 @@ export function InsuranceStep({
                   </div>
                 )}
 
+                {/* Task #562 — Anerkennungs-Aktenzeichen (z.B. SMS Sachsen)
+                    als trägerbezogenes Stammdatum. Optional; wird bei jeder
+                    neu erzeugten §45b-Rechnung in das eingebettete
+                    ZUGFeRD-XML als IncludedNote (SubjectCode "REG")
+                    geschrieben. */}
+                <div className="space-y-2">
+                  <Label htmlFor="auaApprovalRef">Anerkennungs-Az. (optional)</Label>
+                  <Input
+                    id="auaApprovalRef"
+                    value={formData.auaApprovalRef}
+                    onChange={(e) => onChange("auaApprovalRef", e.target.value)}
+                    placeholder="z.B. AUA-2024-12345"
+                    maxLength={100}
+                    data-testid="input-aua-approval-ref"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Trägerbezogenes Aktenzeichen der Anerkennung nach §45b SGB XI. Wird für ZUGFeRD-Dunkelverarbeitung empfohlen.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="auaApprovalDate">Anerkennungs-Datum (optional)</Label>
+                  <Input
+                    id="auaApprovalDate"
+                    type="date"
+                    value={formData.auaApprovalDate}
+                    onChange={(e) => onChange("auaApprovalDate", e.target.value)}
+                    data-testid="input-aua-approval-date"
+                  />
+                </div>
+
                 {formData.billingType === "pflegekasse_gesetzlich" && (
                   <div className="flex items-start gap-3 py-2">
                     <Checkbox

@@ -39,6 +39,18 @@ export const invoices = pgTable("invoices", {
   insuranceIkNummer: text("insurance_ik_nummer"),
   versichertennummer: text("versichertennummer"),
   pflegegrad: integer("pflegegrad"),
+  // Task #562 — ZUGFeRD/EN-16931 Pflichtfelder für Dunkelverarbeitung.
+  // dueDate (BT-9): Fälligkeitsdatum. Beim Insert auf Rechnungsdatum + N
+  // Tage (default 30, konfigurierbar über company_settings.invoice_default_due_days)
+  // gesetzt. Nullable für Bestand (kein Backfill, GoBD).
+  dueDate: date("due_date"),
+  // buyerReference (BT-10): Käuferreferenz/Aktenzeichen. Nullable; Pflegekassen
+  // erhalten beim Insert die Versicherten-Nr. als Fallback.
+  buyerReference: text("buyer_reference"),
+  // Abtretungserklärung (Datum + interne Ref). Wird aus Customer-Stammdaten
+  // beim Insert übernommen, damit historische Rechnungen unverändert bleiben.
+  assignmentDeclarationDate: date("assignment_declaration_date"),
+  assignmentDeclarationRef: text("assignment_declaration_ref"),
   netAmountCents: integer("net_amount_cents").notNull().default(0),
   vatAmountCents: integer("vat_amount_cents").notNull().default(0),
   grossAmountCents: integer("gross_amount_cents").notNull().default(0),

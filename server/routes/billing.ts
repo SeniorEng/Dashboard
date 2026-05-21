@@ -33,7 +33,7 @@ import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
-import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
+import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp, addDays } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customerServicePricesRepo } from "../repos";
@@ -998,6 +998,28 @@ async function generateInvoiceCore(
   const customer = await storage.getCustomer(customerId);
   if (!customer) throw notFound("Kunde nicht gefunden");
 
+  // Task #562 — Fälligkeit (BT-9) wird zentral aus den Firmenstammdaten
+  // abgeleitet (Default 30 Tage, pro Mandant über `company_settings
+  // .invoice_default_due_days` überschreibbar). Wir berechnen sie hier auf
+  // dem Tagesgranulat, damit alle vier Insert-Pfade (Kasse, Privat, Single,
+  // Storno) denselben Wert sehen.
+  const companySettingsForInvoice = await getCachedCompanySettings();
+  const dueDays = companySettingsForInvoice?.invoiceDefaultDueDays ?? 30;
+  const invoiceIssueIso = todayISO();
+  const invoiceDueDateIso = addDays(invoiceIssueIso, dueDays);
+  // Task #562 — Käuferreferenz (BT-10): Pflegekassen-Rechnungen tragen
+  // standardmäßig die Versicherten-Nr. als Aktenzeichen, damit die
+  // Dunkelverarbeitung im Eingangs-System dem Vorgang zugeordnet werden
+  // kann. Selbstzahler haben heute keine eigene Käuferreferenz; das Feld
+  // bleibt nullable und kann später manuell befüllt werden.
+  const insuranceForBuyerRef = await getInsuranceData(customerId);
+  const defaultBuyerReference =
+    (customer.billingType === "pflegekasse_gesetzlich" ||
+      customer.billingType === "pflegekasse_privat") &&
+    insuranceForBuyerRef?.versichertennummer
+      ? insuranceForBuyerRef.versichertennummer
+      : null;
+
   const serviceRecords = await getServiceRecordsForPeriod(customerId, billingYear, billingMonth);
   if (serviceRecords.length === 0) {
     throw badRequest("Kein Leistungsnachweis für diesen Zeitraum vorhanden. Bitte erstellen Sie zuerst einen Leistungsnachweis im Bereich 'Nachweise'.");
@@ -1124,6 +1146,10 @@ async function generateInvoiceCore(
           status: "entwurf",
           notes: "Kassenanteil — Leistungen im Rahmen des verfügbaren Budgets",
           referencedStornoInvoiceIds: stornoRefsForInsert,
+          dueDate: invoiceDueDateIso,
+          buyerReference: defaultBuyerReference,
+          assignmentDeclarationDate: null,
+          assignmentDeclarationRef: null,
         };
 
         const kasseInvoice = await createInvoiceTx(tx, kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
@@ -1183,6 +1209,11 @@ async function generateInvoiceCore(
           status: "entwurf",
           notes: "Privatzahlung — Budget-Überschreitung gem. Vereinbarung",
           referencedStornoInvoiceIds: stornoRefsForInsert,
+          dueDate: invoiceDueDateIso,
+          // Privatanteil: keine Käuferreferenz, da kein Pflegekassen-Vorgang.
+          buyerReference: null,
+          assignmentDeclarationDate: null,
+          assignmentDeclarationRef: null,
         };
 
         const privateInvoice = await createInvoiceTx(tx, privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
@@ -1296,6 +1327,10 @@ async function generateInvoiceCore(
         vatRate: billingType === "selbstzahler" ? 1900 : 0,
         status: "entwurf",
         referencedStornoInvoiceIds: stornoRefsForInsert,
+        dueDate: invoiceDueDateIso,
+        buyerReference: defaultBuyerReference,
+        assignmentDeclarationDate: null,
+        assignmentDeclarationRef: null,
       };
       const created = await createInvoiceTx(tx, invoiceData, lineItems as Record<string, unknown>[], req.user!.id);
       audit.record({
@@ -1468,6 +1503,12 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       const number = await getNextInvoiceNumberTx(tx, locked.billingYear);
       const lineItems = await getInvoiceLineItemsTx(tx, id);
 
+      // Task #562 — Fälligkeit auch für Storno-Inserts (außerhalb von
+      // generateInvoiceCore): companySettings + Default 30 Tage.
+      const stornoCompanySettings = await getCachedCompanySettings();
+      const stornoDueDays = stornoCompanySettings?.invoiceDefaultDueDays ?? 30;
+      const stornoDueDateIso = addDays(todayISO(), stornoDueDays);
+
       const stornoData = {
         invoiceNumber: number,
         customerId: locked.customerId,
@@ -1490,6 +1531,13 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
         // der Versand-Pfad setzt status erst nach erfolgreicher Zustellung.
         status: "entwurf",
         stornierteRechnungId: id,
+        // Task #562 — Storno-Rechnung spiegelt die Pflichtfelder der
+        // Originalrechnung. Fälligkeit wird auf das aktuelle Datum + N Tage
+        // gesetzt, damit eine Storno-Korrektur kein abgelaufenes Ziel trägt.
+        dueDate: stornoDueDateIso,
+        buyerReference: locked.buyerReference ?? null,
+        assignmentDeclarationDate: locked.assignmentDeclarationDate ?? null,
+        assignmentDeclarationRef: locked.assignmentDeclarationRef ?? null,
       };
 
       const stornoLineItems = lineItems.map((item: InvoiceLineItem) => ({
@@ -1646,6 +1694,12 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     geschaeftsfuehrer: companySettings.geschaeftsfuehrer ?? null,
     invoiceNumber: invoice.invoiceNumber,
     invoiceDate: invoice.sentAt ? formatDateForDisplay(formatDateISO(invoice.sentAt)) : formatDateForDisplay(todayISO()),
+    invoiceDueDate: invoice.dueDate ? formatDateForDisplay(invoice.dueDate) : null,
+    buyerReference: invoice.buyerReference ?? null,
+    auaApprovalRef: null,
+    auaApprovalDate: null,
+    assignmentDeclarationDate: invoice.assignmentDeclarationDate ?? null,
+    assignmentDeclarationRef: invoice.assignmentDeclarationRef ?? null,
     invoiceType: invoice.invoiceType,
     billingType: invoice.billingType,
     billingMonth: invoice.billingMonth,
@@ -1820,6 +1874,12 @@ async function buildInvoicePdfData(invoice: Invoice, companySettings: CompanySet
     nr: customersTable.nr,
     plz: customersTable.plz,
     stadt: customersTable.stadt,
+    // Task #562 — AUA-Anerkennung ist Stammdatum am Kunden, kein Rechnungsfeld
+    // (siehe shared/schema/customers.ts). Wir lesen sie hier dazu, damit das
+    // PDF und (über buildZugferdData) auch das ZUGFeRD-XML strukturiert
+    // referenzieren können, ohne die Rechnungs-Zeile aufzublähen.
+    auaApprovalRef: customersTable.auaApprovalRef,
+    auaApprovalDate: customersTable.auaApprovalDate,
   })
     .from(customersTable)
     .where(eq(customersTable.id, invoice.customerId))
@@ -1831,6 +1891,8 @@ async function buildInvoicePdfData(invoice: Invoice, companySettings: CompanySet
   if (customerForInv.length > 0) {
     if (customerForInv[0].geburtsdatum) pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
     if (customerForInv[0].beihilfeBerechtigt) pdfData.beihilfeBerechtigt = true;
+    pdfData.auaApprovalRef = customerForInv[0].auaApprovalRef ?? null;
+    pdfData.auaApprovalDate = customerForInv[0].auaApprovalDate ?? null;
     if (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0].rechnungAnKunde) {
       pdfData.rechnungAnKunde = true;
       const c = customerForInv[0];

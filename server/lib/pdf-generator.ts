@@ -23,6 +23,14 @@ export interface InvoicePdfData {
   // Invoice data
   invoiceNumber: string;
   invoiceDate: string;
+  // Task #562 — Fälligkeitsdatum (BT-9). Im DE-Format (DD.MM.YYYY) zur PDF-
+  // Anzeige; an `embedZugferdXml`/`buildZugferdData` als String — der XML-
+  // Builder parst es zurück über `parseDateString`.
+  invoiceDueDate: string | null;
+  // Task #562 — Käuferreferenz (BT-10). Fällt beim Render auf Versicherten-Nr.
+  // zurück, sodass Pflegekassen-PDFs auch ohne explizites Aktenzeichen
+  // ein dunkelverarbeitbares Feld tragen.
+  buyerReference: string | null;
   invoiceType: string; // rechnung, stornorechnung, nachberechnung
   billingType: string; // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler
   billingMonth: number;
@@ -42,6 +50,14 @@ export interface InvoicePdfData {
   customerName: string;
   customerAddress: string | null;
   customerGeburtsdatum: string | null;
+
+  // Task #562 — Trägerbezogene Anerkennungs-Daten + Abtretungs-Bezug,
+  // strukturiert für ZUGFeRD-Dunkelverarbeitung (Versichertendaten-Block,
+  // Abtretungserklärung-Footer).
+  auaApprovalRef: string | null;
+  auaApprovalDate: string | null;
+  assignmentDeclarationDate: string | null;
+  assignmentDeclarationRef: string | null;
   
   // Line items
   lineItems: {
@@ -280,6 +296,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       ${data.customerGeburtsdatum ? `<br>Geb.: ${formatDate(data.customerGeburtsdatum)}` : ""}
       ${data.versichertennummer ? `<br>Vers.-Nr.: ${escapeHtml(data.versichertennummer)}` : ""}
       ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
+      ${data.auaApprovalRef ? `<br>Anerkennungs-Az.: ${escapeHtml(data.auaApprovalRef)}${data.auaApprovalDate ? ` (${formatDate(data.auaApprovalDate)})` : ""}` : ""}
     </div>
   </div>
   ` : isCustomerInvoice ? `
@@ -295,6 +312,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     ${data.insuranceIkNummer ? `<br>IK-Nr.: ${escapeHtml(data.insuranceIkNummer)}` : ""}
     ${data.versichertennummer ? `<br>Vers.-Nr.: ${escapeHtml(data.versichertennummer)}` : ""}
     ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
+    ${data.auaApprovalRef ? `<br>Anerkennungs-Az.: ${escapeHtml(data.auaApprovalRef)}${data.auaApprovalDate ? ` (${formatDate(data.auaApprovalDate)})` : ""}` : ""}
   </div>
   ` : `
   <div class="recipient">
@@ -309,6 +327,8 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     <table class="meta-table">
       <tr><td>Rechnungsnr.:</td><td><strong>${data.invoiceNumber}</strong></td></tr>
       <tr><td>Rechnungsdatum:</td><td>${invoiceDate}</td></tr>
+      ${data.invoiceDueDate ? `<tr><td>Fällig am:</td><td>${escapeHtml(data.invoiceDueDate)}</td></tr>` : ""}
+      ${data.buyerReference ? `<tr><td>Käuferreferenz:</td><td>${escapeHtml(data.buyerReference)}</td></tr>` : ""}
       <tr><td>Leistungszeitraum:</td><td>${periodLabel}</td></tr>
     </table>
   </div>
@@ -487,7 +507,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     return `
     <div style="margin-top: 20px; padding: 10px; background: #fefce8; border: 1px solid #fde68a; border-radius: 4px; font-size: 9pt; color: #92400e;">
       <div style="font-weight: 600; margin-bottom: 4px;">Abtretungserklärung (§ 398 BGB)</div>
-      Der/Die Leistungsempfänger/in tritt hiermit seinen/ihren Anspruch auf Kostenerstattung gegenüber der Pflegekasse in Höhe des abgerechneten Betrages an ${escapeHtml(data.companyName || "")} ab.${data.ikNummer ? ` IK-Nr.: ${escapeHtml(data.ikNummer)}.` : ""} Die Unterschrift unter dem Leistungsnachweis gilt gleichzeitig als Abtretungserklärung.
+      Der/Die Leistungsempfänger/in tritt hiermit seinen/ihren Anspruch auf Kostenerstattung gegenüber der Pflegekasse in Höhe des abgerechneten Betrages an ${escapeHtml(data.companyName || "")} ab.${data.ikNummer ? ` IK-Nr.: ${escapeHtml(data.ikNummer)}.` : ""}${data.auaApprovalRef ? ` Anerkennungs-Az.: ${escapeHtml(data.auaApprovalRef)}${data.auaApprovalDate ? ` vom ${formatDate(data.auaApprovalDate)}` : ""}.` : ""}${data.assignmentDeclarationDate ? ` Abtretungserklärung vom ${formatDate(data.assignmentDeclarationDate)}${data.assignmentDeclarationRef ? ` (Az. ${escapeHtml(data.assignmentDeclarationRef)})` : ""}.` : ""} Die Unterschrift unter dem Leistungsnachweis gilt gleichzeitig als Abtretungserklärung.
     </div>`;
   }
 

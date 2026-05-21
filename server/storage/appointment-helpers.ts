@@ -245,6 +245,8 @@ function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["custome
     backupEmployeeId: null,
     backupEmployeeId2: null,
     vorerkrankungen: null,
+    auaApprovalRef: null,
+    auaApprovalDate: null,
     haustierVorhanden: false,
     haustierDetails: null,
     status: "aktiv",
