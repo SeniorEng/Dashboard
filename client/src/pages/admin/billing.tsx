@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { displayPriceCents } from "@shared/domain/customers";
+import { renderLineItemQuantity } from "@shared/domain/invoice-line-items";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -897,9 +898,7 @@ export default function AdminBilling() {
                                     </td>
                                     <td className="py-2 pr-3">{item.serviceDescription}</td>
                                     <td className="py-2 pr-3 text-right">
-                                      {item.serviceCode === "travel_km" || item.serviceCode === "customer_km"
-                                        ? `${item.durationMinutes} km`
-                                        : `${item.durationMinutes} Min.`}
+                                      {renderLineItemQuantity(item)}
                                     </td>
                                     <td className={`py-2 pr-3 text-right ${displayTotal < 0 ? "text-red-600" : ""}`}>
                                       {formatAmount(displayTotal)}

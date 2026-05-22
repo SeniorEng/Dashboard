@@ -44,7 +44,14 @@ interface InvoiceLineItem {
   startTime: string | null;
   endTime: string | null;
   durationMinutes: number;
+  // Task #572: Anzeige-Menge + Einheit, damit das Frontend dieselbe Quelle
+  // wie PDF und ZUGFeRD nutzt (verhindert km-Drift „Menge × Satz ≠ Summe").
+  // NULL für historische Zeilen vor Task #561 — der Frontend-Helper
+  // `renderLineItemQuantity` fällt dann auf `durationMinutes` zurück.
+  quantityRaw: number | null;
+  quantityUnit: "hours" | "km" | null;
   totalCents: number;
+  unitPriceCents: number;
   employeeName: string | null;
 }
 

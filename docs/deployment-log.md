@@ -26,6 +26,34 @@ Neueste Einträge oben.
 
 ## Einträge
 
+### 2026-05-21 — Audit Task #572: Folge-Drift in der Admin-Listenansicht behoben
+
+**Anlass:** Externe Review der Beispielrechnung RE-2026-0003 zeigte erneut „Menge × Satz ≠ Summe" auf km-Zeilen (3 km × 0,35 € als 0,95 €, 8 km × 0,35 € als 2,63 €) — obwohl Task #561 den PDF- und ZUGFeRD-Pfad bereits konsolidiert hatte. Ziel des Audits: alle Rechnungs-Render-Pfade durchgehen und feststellen, ob es sich um aktiven Code-Drift oder Altbestand handelt.
+
+**Befund pro Render-Pfad:**
+| Pfad | Datei | Stand vor Audit | Nach Fix |
+|---|---|---|---|
+| HTML-PDF-Render (Rechnung) | `server/lib/pdf-generator.ts` (lineItemsHtml) | nutzt `renderLineItemQuantity` ✓ | unverändert |
+| Leistungsnachweis-PDF | `server/lib/pdf-generator.ts` (`renderTableRows.kmItems`) | nutzt `renderLineItemQuantity` ✓ | unverändert |
+| ZUGFeRD/XRechnung-XML (`BilledQuantity`/`LineTotalAmount`) | `server/lib/zugferd.ts:160-200` | nutzt `quantityRaw`, Fallback auf `durationMinutes` ✓ | unverändert |
+| **Frontend-Listenansicht (Admin-Rechnungsdetail)** | `client/src/pages/admin/billing.tsx:900-902` | **driftet**: zeigte `${item.durationMinutes} km` — nach Task #561 ist `durationMinutes = Math.round(quantizeKm(km))` (Ganzzahl), während `totalCents` aus dem auf 2 NK quantisierten Float gerechnet wird. Genau das ist der vom Review beobachtete Drift. | **gefixt**: nutzt jetzt `renderLineItemQuantity` |
+| Lexware-Export | `server/routes/admin/lexware-export.ts` | aggregiert Roh-km aus `appointments.travel_kilometers`/`customer_kilometers` direkt, keine Rechnungs-Mengen — n/a | unverändert |
+
+**Fix-Details:**
+- `shared/api/billing.ts` — `InvoiceLineItem` (API-Contract) erweitert um `quantityRaw`, `quantityUnit`, `unitPriceCents`. Die Backend-Route (`GET /api/billing/:id`) liefert diese Felder bereits (Storage macht `SELECT *`), das Frontend hatte sie aber nie deklariert und ausgewertet.
+- `client/src/pages/admin/billing.tsx` — km-Mengen werden über `renderLineItemQuantity` aus `shared/domain/invoice-line-items.ts` formatiert (dieselbe Quelle wie PDF und ZUGFeRD). Damit gilt für neue Rechnungen: was im UI als Menge steht, multipliziert mit dem angezeigten Satz, ergibt exakt den persistierten Betrag.
+- `tests/equality/invoice-line-item-arithmetic.test.ts` — neue `renderLineItemQuantity`-Suite mit drei Cases: km-Line mit `quantityRaw` (Drift-Re-Auftritt würde "2,71 km"-Anzeige auf "3 km" zurückfallen lassen → rot), Legacy-Line ohne `quantityRaw` (Fallback erlaubt), Stunden-Line (kein km-Pfad).
+
+**Auswirkung auf bestehende Rechnungen:** Keine. `invoice_line_items` werden nicht verändert (GoBD-Immutabilität). Nur die UI-Anzeige für post-#561-Rechnungen ändert sich von Ganzzahl-km auf 2-NK-km, sodass Menge × Satz = Summe sichtbar konsistent ist.
+
+**Empfehlung für RE-2026-0003 (Beispielrechnung aus dem Review):** Diese Rechnung wurde vor Task #561 erstellt — ihre `invoice_line_items`-Zeilen haben `quantityRaw = NULL` und tragen die historische Drift im persistierten `totalCents`. GoBD untersagt nachträgliches Überschreiben. Korrekturweg: **Storno + Neuanlage** über die Admin-UI (`POST /api/billing/:id/storno`, danach `POST /api/billing/generate` für denselben Zeitraum). Mit dem hier gelandeten Fix wird die Neu-Rechnung sowohl im PDF/ZUGFeRD als auch in der Admin-Listenansicht konsistent rendern. Die operativen Schritte stehen weiterhin im nachfolgenden Eintrag.
+
+**Audit-Stichprobe Bestand:** `scripts/audit-invoice-line-items.ts` ist read-only und identifiziert weiterhin alle historischen Drift-Zeilen — ist im Sandbox nicht gegen die Produktion lauffähig (kein `PROD_DATABASE_URL`-Secret im Task-Agent), muss vom Operator vor dem Storno-Lauf einmal ausgeführt werden, um die Liste der wirklich betroffenen Rechnungen zu bestätigen.
+
+**Durchgeführt von:** Replit Task-Agent (Task #572).
+
+---
+
 ### Geplant — Operator-Aktion: km-Drift in RE-2026-0003 (und ggf. weiteren) korrigieren (Task #561)
 
 **Anlass:** In `server/routes/billing.ts buildLineItemsFromAppointments` wurde

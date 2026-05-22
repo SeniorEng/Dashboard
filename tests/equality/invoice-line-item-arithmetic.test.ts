@@ -18,6 +18,7 @@ import {
   computeKmLineTotalCents,
   formatKmQuantityDisplay,
   quantizeKm,
+  renderLineItemQuantity,
 } from "@shared/domain/invoice-line-items";
 
 describe("invoice-line-item arithmetic (Task #561)", () => {
@@ -79,4 +80,60 @@ describe("invoice-line-item arithmetic (Task #561)", () => {
       expect(Math.round(q * rate)).toBe(expectedTotal);
     },
   );
+
+  /**
+   * Task #572 — Frontend-Render-Pfad (`client/src/pages/admin/billing.tsx`).
+   * Vor dem Fix zeigte das Admin-Frontend für km-Zeilen
+   *   `${item.durationMinutes} km`
+   * — nach Task #561 ist `durationMinutes = Math.round(quantizeKm(km))`,
+   * also wieder eine ganzzahlige Anzeige. `totalCents` wird aber aus dem
+   * quantisierten Float (2 NK) berechnet — Folge: erneute Drift
+   * "Menge × Satz ≠ Summe" in der Listenansicht, exakt wie der externe
+   * Review zu RE-2026-0003 gemeldet hat.
+   *
+   * Fix: `renderLineItemQuantity` bevorzugt `quantityRaw`/`quantityUnit`.
+   * Dieser Test sichert genau diesen Pfad ab.
+   */
+  describe("renderLineItemQuantity — Frontend-Listenansicht (Task #572)", () => {
+    it("km-Line mit quantityRaw: dezimale Anzeige, Menge × Satz = totalCents", () => {
+      const km = quantizeKm(2.714);
+      const totalCents = computeKmLineTotalCents(2.714, 35);
+      const display = renderLineItemQuantity({
+        serviceCode: "travel_km",
+        // `durationMinutes` ist nach #561 die gerundete Ganzzahl — die
+        // Anzeige darf NICHT auf diesen Wert zurückfallen, solange
+        // `quantityRaw` vorhanden ist.
+        durationMinutes: Math.round(km),
+        quantityRaw: km,
+        quantityUnit: "km",
+      });
+      expect(display).toBe("2,71 km");
+      expect(totalCents).toBe(95);
+      // Was der Anwender im UI sieht (Menge) muss zur gespeicherten
+      // Summe passen.
+      expect(Math.round(km * 35)).toBe(totalCents);
+    });
+
+    it("customer_km mit quantityRaw NULL (Legacy): Fallback auf durationMinutes", () => {
+      // Pre-#561-Zeile: nur ganzzahliger km-Wert in `durationMinutes` —
+      // historische Drift bleibt sichtbar (GoBD-Immutabilität).
+      const display = renderLineItemQuantity({
+        serviceCode: "customer_km",
+        durationMinutes: 3,
+        quantityRaw: null,
+        quantityUnit: null,
+      });
+      expect(display).toBe("3,00 km");
+    });
+
+    it("Stunden-Line bleibt Std./Min.", () => {
+      const display = renderLineItemQuantity({
+        serviceCode: "hauswirtschaft",
+        durationMinutes: 90,
+        quantityRaw: 1.5,
+        quantityUnit: "hours",
+      });
+      expect(display).toBe("1 Std. 30 Min.");
+    });
+  });
 });
