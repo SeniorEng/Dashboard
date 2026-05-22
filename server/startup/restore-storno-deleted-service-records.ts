@@ -25,10 +25,10 @@ import { log } from "../lib/log";
  *      Datenbank) wird die Migration komplett übersprungen, statt ohne
  *      Audit-Log Daten zu mutieren.
  */
-const INCIDENT_WINDOW_START = new Date("2026-05-20T00:00:00.000Z");
-const INCIDENT_WINDOW_END = new Date("2026-05-24T23:59:59.999Z");
+export const INCIDENT_WINDOW_START = new Date("2026-05-20T00:00:00.000Z");
+export const INCIDENT_WINDOW_END = new Date("2026-05-24T23:59:59.999Z");
 
-interface ExpectedRecord {
+export interface ExpectedRecord {
   id: number;
   customerId: number;
   year: number;
@@ -38,13 +38,37 @@ interface ExpectedRecord {
 // Abrechnungsperiode der betroffenen LNs ist April 2026 (Storno-Zeitpunkt war
 // am 22.05.2026, das ist `deleted_at`, nicht die Abrechnungsperiode!). Siehe
 // .local/tasks/task-576.md (Verifikations-Tabelle).
-const EXPECTED_RECORDS: ReadonlyArray<ExpectedRecord> = [
+export const EXPECTED_RECORDS: ReadonlyArray<ExpectedRecord> = [
   { id: 8,  customerId: 117, year: 2026, month: 4 }, // Egon Uhlig
   { id: 48, customerId: 108, year: 2026, month: 4 }, // Marvin Schröder
 ];
 
-export async function restoreStornoDeletedServiceRecords(): Promise<void> {
-  const targetIds = EXPECTED_RECORDS.map(r => r.id);
+export interface RestoreResult {
+  restoredIds: number[];
+  skipReason: "no_candidates" | "all_already_restored" | "no_audit_actor" | null;
+}
+
+export interface RestoreOptions {
+  expectedRecords?: ReadonlyArray<ExpectedRecord>;
+  incidentWindow?: { start: Date; end: Date };
+}
+
+/**
+ * Testbare Kern-Implementierung. Nimmt die Sicherheits-Anker (Tupel + Fenster)
+ * per Parameter, damit Tests sie an Test-Fixtures binden können, ohne die
+ * Prod-IDs zu fälschen.
+ */
+export async function restoreServiceRecordsByTuples(
+  opts: RestoreOptions = {},
+): Promise<RestoreResult> {
+  const expected = opts.expectedRecords ?? EXPECTED_RECORDS;
+  const windowStart = opts.incidentWindow?.start ?? INCIDENT_WINDOW_START;
+  const windowEnd = opts.incidentWindow?.end ?? INCIDENT_WINDOW_END;
+  const targetIds = expected.map(r => r.id);
+
+  if (targetIds.length === 0) {
+    return { restoredIds: [], skipReason: "no_candidates" };
+  }
 
   const candidates = await db
     .select({
@@ -63,24 +87,28 @@ export async function restoreStornoDeletedServiceRecords(): Promise<void> {
       eq(monthlyServiceRecords.status, "completed"),
     ));
 
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) {
+    return { restoredIds: [], skipReason: "no_candidates" };
+  }
 
   const eligible = candidates.filter(row => {
-    const expected = EXPECTED_RECORDS.find(e => e.id === row.id);
-    if (!expected) return false;
-    if (expected.customerId !== row.customerId) return false;
+    const exp = expected.find(e => e.id === row.id);
+    if (!exp) return false;
+    if (exp.customerId !== row.customerId) return false;
     // employeeId nur als Schutz, nicht als Show-Stopper: falls Prod-Wert
     // abweicht (z.B. Handover), bleibt customerId + period + status der
     // Anker. Daher hier weich:
-    if (row.year !== expected.year || row.month !== expected.month) return false;
+    if (row.year !== exp.year || row.month !== exp.month) return false;
     if (!row.deletedAt) return false;
-    if (row.deletedAt < INCIDENT_WINDOW_START || row.deletedAt > INCIDENT_WINDOW_END) {
+    if (row.deletedAt < windowStart || row.deletedAt > windowEnd) {
       return false;
     }
     return true;
   });
 
-  if (eligible.length === 0) return;
+  if (eligible.length === 0) {
+    return { restoredIds: [], skipReason: "no_candidates" };
+  }
 
   // One-Shot-Guard: prüfen, ob für eine dieser IDs bereits ein
   // service_record_resurrected-Audit existiert. Wenn ja, hat die
@@ -95,7 +123,9 @@ export async function restoreStornoDeletedServiceRecords(): Promise<void> {
     ));
   const alreadyRestored = new Set(priorAudits.map(a => a.entityId));
   const toRestore = eligible.filter(r => !alreadyRestored.has(r.id));
-  if (toRestore.length === 0) return;
+  if (toRestore.length === 0) {
+    return { restoredIds: [], skipReason: "all_already_restored" };
+  }
 
   // Mandatory Audit: ohne Akteur keine Mutation.
   const [superActor] = await db
@@ -119,9 +149,10 @@ export async function restoreStornoDeletedServiceRecords(): Promise<void> {
       "[restore-storno-deleted-service-records] Kein Super-/Admin-Akteur für Audit-Log gefunden — Migration übersprungen (keine Mutation ohne Audit).",
       "startup",
     );
-    return;
+    return { restoredIds: [], skipReason: "no_audit_actor" };
   }
 
+  const restoredIds: number[] = [];
   for (const row of toRestore) {
     await db.transaction(async (tx) => {
       await tx
@@ -149,16 +180,23 @@ export async function restoreStornoDeletedServiceRecords(): Promise<void> {
             "Task #576 — Korrektur Storno-Side-Effekt T05/K3: LN durch Storno fälschlich soft-gelöscht, Kunde verschwand aus /eligible-customers.",
           migration: "restore-storno-deleted-service-records",
           incidentWindow: {
-            start: INCIDENT_WINDOW_START.toISOString(),
-            end: INCIDENT_WINDOW_END.toISOString(),
+            start: windowStart.toISOString(),
+            end: windowEnd.toISOString(),
           },
         },
       });
     });
 
+    restoredIds.push(row.id);
     log(
       `Leistungsnachweis #${row.id} (Kunde ${row.customerId}, ${row.year}-${String(row.month).padStart(2, "0")}) reaktiviert (Task #576).`,
       "startup",
     );
   }
+
+  return { restoredIds, skipReason: null };
+}
+
+export async function restoreStornoDeletedServiceRecords(): Promise<void> {
+  await restoreServiceRecordsByTuples();
 }
