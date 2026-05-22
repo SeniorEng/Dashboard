@@ -31,14 +31,16 @@ const INCIDENT_WINDOW_END = new Date("2026-05-24T23:59:59.999Z");
 interface ExpectedRecord {
   id: number;
   customerId: number;
-  employeeId: number;
   year: number;
   month: number;
 }
 
+// Abrechnungsperiode der betroffenen LNs ist April 2026 (Storno-Zeitpunkt war
+// am 22.05.2026, das ist `deleted_at`, nicht die Abrechnungsperiode!). Siehe
+// .local/tasks/task-576.md (Verifikations-Tabelle).
 const EXPECTED_RECORDS: ReadonlyArray<ExpectedRecord> = [
-  { id: 8,  customerId: 117, employeeId: 1, year: 2026, month: 5 },
-  { id: 48, customerId: 108, employeeId: 1, year: 2026, month: 5 },
+  { id: 8,  customerId: 117, year: 2026, month: 4 }, // Egon Uhlig
+  { id: 48, customerId: 108, year: 2026, month: 4 }, // Marvin Schröder
 ];
 
 export async function restoreStornoDeletedServiceRecords(): Promise<void> {
