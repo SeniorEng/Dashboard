@@ -1668,6 +1668,13 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
     }, { faults: readTestFaults(req) });
 
+    // Task #577: Storno-PDF im Hintergrund persistieren — analog zum normalen
+    // Rechnungs-Erstanlage-Pfad (siehe generateInvoiceCore / Task #544).
+    // Ohne diesen Aufruf bleibt `pdf_path` der Stornorechnung NULL, was
+    // E-Mail-/E-POST-Versand blockiert. (Prod-IDs 5/6/7/9 sind das Erbe
+    // dieses Defekts und werden via Startup-Migration nachgezogen.)
+    schedulePdfPersistInBackground(stornoInvoice.id);
+
     updated = updatedOriginal;
   } else {
     updated = await withAudit(async (tx, audit) => {

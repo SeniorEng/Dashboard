@@ -1,6 +1,6 @@
 import { db } from "../lib/db";
 import { invoices as invoicesTable } from "@shared/schema";
-import { and, isNull, or, sql } from "drizzle-orm";
+import { and, isNull, ne, or, sql } from "drizzle-orm";
 import { log } from "../lib/log";
 import { ChromiumUnavailableError, isChromiumAvailable, runChromiumPreflight } from "../services/pdf-generator";
 
@@ -57,11 +57,18 @@ export async function backfillInvoicePdfs(): Promise<{ processed: number; failed
     leistungsnachweisPath: invoicesTable.leistungsnachweisPath,
   })
     .from(invoicesTable)
-    .where(or(
-      isNull(invoicesTable.pdfPath),
-      and(
-        isNull(invoicesTable.leistungsnachweisPath),
-        sql`${invoicesTable.billingType} IN ('pflegekasse_privat', 'pflegekasse_gesetzlich')`,
+    .where(and(
+      // Task #577: Storno-Rechnungen werden vom dedizierten
+      // `backfillStornoInvoicePdfs` behandelt — der schreibt zusätzlich pro
+      // betroffener ID einen `invoice_pdf_manually_regenerated`-Audit-Eintrag.
+      // Hier ausschließen, damit kein Race entsteht.
+      ne(invoicesTable.invoiceType, "stornorechnung"),
+      or(
+        isNull(invoicesTable.pdfPath),
+        and(
+          isNull(invoicesTable.leistungsnachweisPath),
+          sql`${invoicesTable.billingType} IN ('pflegekasse_privat', 'pflegekasse_gesetzlich')`,
+        ),
       ),
     ))
     .limit(MAX_PER_STARTUP);

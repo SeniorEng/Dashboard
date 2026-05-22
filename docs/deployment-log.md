@@ -26,6 +26,48 @@ Neueste Einträge oben.
 
 ## Einträge
 
+### 2026-05-22 — Task #577: Storno-Rechnungen ohne PDF nachgenerieren (Prod-IDs 5/6/7/9)
+
+**Symptom (Prod):** Vier Storno-Rechnungen mit `invoice_type = 'stornorechnung'`
+und `pdf_path IS NULL` (IDs 5, 6, 7, 9). `GET /:id/pdf` rendert dank Task #544
+zwar on-demand bei Cache-Miss, aber E-Mail-/E-POST-Versand benötigt einen
+persistierten Pfad in der DB. Während der Analyse zu Task #576 als
+Begleitschaden aufgefallen.
+
+**Root Cause:** Der Storno-Pfad in `PATCH /api/billing/:id/status` →
+`"storniert"` (server/routes/billing.ts ~Z. 1611) ruft `createInvoiceTx` für
+die Stornorechnung auf, hat aber — anders als der reguläre Erstanlage-Pfad
+`generateInvoiceCore` (Task #544) — kein `schedulePdfPersistInBackground`
+hinterher abgesetzt. Folge: `pdf_path` bleibt NULL, bis irgendjemand `/pdf`
+abruft (was den Hintergrund-Persist via `loadOrRenderSendablePdfs` indirekt
+nachzieht). Storno-Rechnungen, die nie heruntergeladen wurden, blieben
+unpersistiert.
+
+**Fix:**
+- `schedulePdfPersistInBackground(stornoInvoice.id)` nach der Storno-
+  Transaktion in `server/routes/billing.ts` ergänzt (analog zu
+  `generateInvoiceCore`). Neue Stornos persistieren ihr PDF ab sofort
+  automatisch im Hintergrund.
+- Neue Startup-Migration `server/startup/backfill-storno-invoice-pdfs.ts`:
+  findet alle Storno-Rechnungen mit `pdf_path IS NULL`, ruft
+  `persistInvoicePdf` mit Retry-Backoff auf und schreibt pro tatsächlich
+  geänderter Rechnung einen `invoice_pdf_manually_regenerated`-Audit-Eintrag
+  (`source: "startup_backfill_storno_pdfs"`, `taskRef: "Task #577"`).
+  Idempotent: bei nächstem Boot leere Ergebnismenge → No-op.
+- In `server/index.ts` 5 s nach Boot eingeplant — VOR dem generischen
+  `backfillInvoicePdfs` (das nun um 20 s verschoben ist und Stornorechnungen
+  ausschließt). Reihenfolge wichtig, damit der Audit-Eintrag pro Storno-ID
+  garantiert geschrieben wird und der generische Job nicht versehentlich
+  zuerst lautlos persistiert.
+- `backfill-invoice-pdfs.ts` exkludiert `invoice_type='stornorechnung'`
+  (Belt-and-Suspenders gegen Race).
+
+**Erwartete Wirkung in Prod:** Beim nächsten Deployment werden die vier
+Bestandsrechnungen 5/6/7/9 in einem Lauf persistiert (≤ 12 s gesamt bei
+3×Puppeteer-Render à 1–3 s) und im Audit-Log mit ihrer Heilung dokumentiert.
+
+**Durchgeführt von:** Replit Task-Agent (Task #577).
+
 ### 2026-05-22 — Task #576: Storno löscht Leistungsnachweis nicht mehr (Kunden-Verschwinde-Bug)
 
 **Symptom (Prod):** Nach Storno einer Rechnung verschwanden zwei Kunden aus dem
