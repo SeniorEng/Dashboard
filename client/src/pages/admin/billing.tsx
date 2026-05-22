@@ -1274,11 +1274,25 @@ export default function AdminBilling() {
                     <SelectValue placeholder="Kunden auswählen..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {customers?.map((c) => (
-                      <SelectItem key={c.id} value={c.id.toString()}>
-                        {getCustomerName(c)}{c.status === "inaktiv" ? " (inaktiv)" : ""}
-                      </SelectItem>
-                    ))}
+                    {customers?.map((c) => {
+                      // Task #576: Partial-Signing-Hinweis im Dropdown.
+                      // Wenn weniger Termine durch einen aktiven LN
+                      // abgedeckt sind als dokumentiert wurden, sieht
+                      // der Admin sofort, dass evtl. ein zweiter LN
+                      // fehlt — und versucht nicht erst, eine Rechnung
+                      // zu generieren, die nur einen Teil enthält.
+                      const partial = c.completedAppointments > 0
+                        && c.coveredAppointments < c.completedAppointments;
+                      return (
+                        <SelectItem key={c.id} value={c.id.toString()}>
+                          {getCustomerName(c)}
+                          {c.status === "inaktiv" ? " (inaktiv)" : ""}
+                          {partial
+                            ? ` — nur ${c.coveredAppointments}/${c.completedAppointments} Termine im LN`
+                            : ""}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               )}

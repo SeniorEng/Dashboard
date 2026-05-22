@@ -26,6 +26,56 @@ Neueste Einträge oben.
 
 ## Einträge
 
+### 2026-05-22 — Task #576: Storno löscht Leistungsnachweis nicht mehr (Kunden-Verschwinde-Bug)
+
+**Symptom (Prod):** Nach Storno einer Rechnung verschwanden zwei Kunden aus dem
+Dropdown „Neue Rechnung erstellen" (`/api/billing/eligible-customers`):
+- Kunde 117 (Egon) — LN #8
+- Kunde 108 (Marvin) — LN #48
+
+Beide LNs hatten `deleted_at IS NOT NULL` mit Zeitstempel exakt zum Storno-
+Vorgang. `eligible-customers` filtert über `activeOnly()` — kein aktiver LN,
+kein Eintrag im Dropdown. Workaround der Admins: Storno rückgängig nicht
+möglich (GoBD), Re-Abrechnung blockiert.
+
+**Root Cause:** `server/routes/billing.ts` (T05/K3-Block, vor Fix Z. 1566–1610)
+hat beim Storno geprüft, ob im Zeitraum dokumentierte Termine existieren, die
+im LN noch nicht erfasst sind (`hasUnlinkedDoc`). Wenn ja, wurde der **gesamte**
+LN soft-gelöscht — angeblich, damit der Mitarbeiter einen neuen mit erweiterter
+Termin-Liste anlegen kann. Tatsächlich führte das bei Partial-Signing (typisch:
+LN für T1 signiert, später T2 dokumentiert, dann T1-Rechnung storniert) zum
+Verlust des bereits signierten LN. Nicht GoBD-konform und Ursache der
+verschwundenen Kunden.
+
+**Fix:**
+- T05/K3-Block ersatzlos entfernt. Re-Abrechnung derselben Termine (BF-5.3)
+  funktioniert weiterhin ohne neuen LN, weil `buildLineItemsFromAppointments`
+  stornierte Termine über `status='storniert'`/`invoiceType='stornorechnung'`
+  ausschließt.
+- `/api/billing/eligible-customers` liefert zusätzlich `completedAppointments`
+  und `coveredAppointments` pro Kunde. Das Dropdown zeigt bei Lücken
+  `— nur N/M Termine im LN` (Partial-Signing-Sichtbarkeit).
+- Neue Audit-Action `service_record_resurrected`.
+- Startup-Migration `server/startup/restore-storno-deleted-service-records.ts`
+  reaktiviert idempotent die zwei Prod-LNs (#8, #48): `deleted_at → NULL` +
+  Audit-Eintrag mit Begründung. Greift nur, solange die Ziel-IDs tatsächlich
+  noch soft-gelöscht sind — beim zweiten Start passiert nichts.
+- Regressionstest: `tests/billing/storno-keeps-ln-active.test.ts`.
+
+**Backfill-SQL (manuell, falls Startup-Migration nicht laufen kann):**
+```sql
+UPDATE monthly_service_records
+SET deleted_at = NULL, updated_at = NOW()
+WHERE id IN (8, 48) AND deleted_at IS NOT NULL;
+```
+
+**Risiko:** keiner — Fix ist ein reines Weglassen des destruktiven Schritts.
+Bestehende Storno-Tests (BF-3.x, BF-5.3, K3) bleiben grün, weil sie entweder
+keinen unverlinkten Termin testen oder die Re-Generierung über stornierte
+Termine ausschließen.
+
+---
+
 ### 2026-05-21 — Audit Task #572: Folge-Drift in der Admin-Listenansicht behoben
 
 **Anlass:** Externe Review der Beispielrechnung RE-2026-0003 zeigte erneut „Menge × Satz ≠ Summe" auf km-Zeilen (3 km × 0,35 € als 0,95 €, 8 km × 0,35 € als 2,63 €) — obwohl Task #561 den PDF- und ZUGFeRD-Pfad bereits konsolidiert hatte. Ziel des Audits: alle Rechnungs-Render-Pfade durchgehen und feststellen, ob es sich um aktiven Code-Drift oder Altbestand handelt.

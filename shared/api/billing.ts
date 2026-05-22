@@ -5,6 +5,14 @@ export interface BillingCustomerItem {
   nachname: string | null;
   billingType: string;
   status: string;
+  // Task #576: Partial-Signing-Sichtbarkeit im „Neue Rechnung
+  // erstellen"-Dropdown. `completedAppointments` = Anzahl dokumentierter
+  // Termine (`status = 'completed'`) im gewählten Monat,
+  // `coveredAppointments` = Anzahl davon, die durch einen aktiven LN
+  // abgedeckt sind. Differenz > 0 deutet auf Partial-Signing hin
+  // (Hinweis im UI, dass evtl. ein zweiter LN nötig ist).
+  completedAppointments: number;
+  coveredAppointments: number;
 }
 
 export interface InvoiceItem {

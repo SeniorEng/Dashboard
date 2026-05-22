@@ -284,6 +284,19 @@ async function runStartupTasks() {
       log(`Budget-Historisierung-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #576: Idempotente Korrektur — durch den entfernten Storno-
+    // Side-Effekt fälschlich soft-gelöschte Leistungsnachweise reaktivieren
+    // (Prod-IDs 8 und 48, 22.05.2026). Greift nur, solange die Ziel-IDs
+    // tatsächlich noch `deleted_at IS NOT NULL` haben.
+    const { restoreStornoDeletedServiceRecords } = await import(
+      "./startup/restore-storno-deleted-service-records"
+    );
+    try {
+      await restoreStornoDeletedServiceRecords();
+    } catch (err) {
+      log(`Storno-LN-Reaktivierung fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
     try {
       await migrateErstberatungCustomers();

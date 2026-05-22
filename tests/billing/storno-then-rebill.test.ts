@@ -199,7 +199,22 @@ describe("K3 — Nachberechnung nach Storno verlinkt Original-Rechnung", () => {
     );
     if (stornoInv) cleanupInvoiceIds.push(stornoInv.id);
 
-    // SR ggf. neu signieren falls nötig (T2 ist nun ebenfalls dokumentiert).
+    // Vor Task #576 hat der Storno den signierten LN automatisch
+    // soft-gelöscht (T05/K3-Block) — `ensureSignedSr` legte dann einen
+    // neuen LN an, der T1 + T2 abdeckte. Mit Task #576 bleibt der LN
+    // bestehen (GoBD-konform), enthält aber nur T1. Damit der K3-Test
+    // weiterhin die Storno-Verlinkung im Re-Rechnungs-Metadaten testen
+    // kann (sein eigentliches Subjekt), löschen wir den alten LN hier
+    // explizit und legen einen neuen mit T1 + T2 an.
+    const srList = await apiGet<any>(`/api/service-records?customerId=${customerId}&year=${year}&month=${month}`);
+    const srRows: any[] = Array.isArray(srList.data) ? srList.data : srList.data?.data || [];
+    for (const sr of srRows) {
+      if (sr.id) await apiDelete(`/api/service-records/${sr.id}`);
+    }
+    // SR-Delete setzt zuvor verlinkte Termine zurück auf `documenting`
+    // (siehe server/routes/service-records.ts:608). Damit wir den LN
+    // neu mit T1 + T2 erstellen können, müssen wir T1 re-dokumentieren.
+    await documentAppointment(t1.id, t1.time);
     await ensureSignedSr(customerId, year, month);
 
     // Erneute Generierung.

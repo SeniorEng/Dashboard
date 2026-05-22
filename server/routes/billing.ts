@@ -30,7 +30,7 @@ import { computeDataHash } from "../services/signature-integrity";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
-import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc } from "drizzle-orm";
+import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp, addDays } from "@shared/utils/datetime";
@@ -392,6 +392,7 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   }
 
   const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
+    id: monthlyServiceRecords.id,
     customerId: monthlyServiceRecords.customerId,
   })
     .where(and(
@@ -410,7 +411,48 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     return res.json([]);
   }
 
-  const eligibleCustomers: BillingCustomerItem[] = await db.select({
+  // Task #576: Partial-Signing-Sichtbarkeit — pro Kunden zählen wir die
+  // im Monat dokumentierten Termine (`completed`) vs. die durch
+  // aktive LNs abgedeckten Termine. Liegt eine Lücke vor, kann das
+  // Frontend einen Hinweis anzeigen ("3 von 5 Terminen erfasst"),
+  // sodass Admins sehen, ob noch ein zweiter LN nötig ist.
+  const mm = String(month).padStart(2, "0");
+  const periodStartStr = `${year}-${mm}-01`;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+
+  const completedRows = await appointmentsRepo.selectColumnsFrom({
+    customerId: appointments.customerId,
+    count: sql<number>`COUNT(*)::int`,
+  })
+    .where(and(
+      inArray(appointments.customerId, uniqueCustomerIds),
+      eq(appointments.status, "completed"),
+      appointmentsRepo.activeOnly(),
+      gte(appointments.date, periodStartStr),
+      lt(appointments.date, periodEndStr),
+    ))
+    .groupBy(appointments.customerId);
+  const completedByCustomer = new Map(completedRows.map(r => [r.customerId, Number(r.count)]));
+
+  const allActiveSrIds = signedRecords.map(r => r.id);
+  const coveredRows = allActiveSrIds.length > 0
+    ? await db.select({
+        customerId: appointments.customerId,
+        count: sql<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
+      })
+        .from(serviceRecordAppointments)
+        .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+        .where(and(
+          inArray(serviceRecordAppointments.serviceRecordId, allActiveSrIds),
+          inArray(appointments.customerId, uniqueCustomerIds),
+        ))
+        .groupBy(appointments.customerId)
+    : [];
+  const coveredByCustomer = new Map(coveredRows.map(r => [r.customerId, Number(r.count)]));
+
+  const customerRows = await db.select({
     id: customersTable.id,
     name: customersTable.name,
     vorname: customersTable.vorname,
@@ -420,6 +462,12 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   })
     .from(customersTable)
     .where(inArray(customersTable.id, uniqueCustomerIds));
+
+  const eligibleCustomers: BillingCustomerItem[] = customerRows.map(c => ({
+    ...c,
+    completedAppointments: completedByCustomer.get(c.id) ?? 0,
+    coveredAppointments: coveredByCustomer.get(c.id) ?? 0,
+  }));
 
   res.json(eligibleCustomers);
 }));
@@ -1563,51 +1611,20 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       const created = await createInvoiceTx(tx, stornoData, stornoLineItems, req.user!.id);
       const original = await updateInvoiceStatusTx(tx, id, status, req.user!.id);
 
-      // T05/K3: Storno setzt den zugehörigen Leistungsnachweis NUR DANN
-      // zurück (soft-delete), wenn im Zeitraum dokumentierte Termine
-      // existieren, die im LN noch nicht erfasst sind. Nur dann ist eine
-      // Nachberechnung mit erweiterter Termin-Liste sinnvoll. Ohne neue
-      // dokumentierte Termine bleibt der LN bestehen, sodass BF-5.3
-      // (reine Re-Abrechnung derselben Termine) weiterhin ohne neuen LN
-      // erfolgen kann.
-      const periodSrRows = await monthlyServiceRecordsRepo.selectColumnsFrom({
-        id: monthlyServiceRecords.id,
-      }, tx)
-        .where(and(
-          eq(monthlyServiceRecords.customerId, locked.customerId),
-          eq(monthlyServiceRecords.year, locked.billingYear),
-          eq(monthlyServiceRecords.month, locked.billingMonth),
-          monthlyServiceRecordsRepo.activeOnly(),
-        ));
-      if (periodSrRows.length > 0) {
-        const srIds = periodSrRows.map(r => r.id);
-        const linkedAppts = await tx.select({
-          appointmentId: serviceRecordAppointments.appointmentId,
-        })
-          .from(serviceRecordAppointments)
-          .where(inArray(serviceRecordAppointments.serviceRecordId, srIds));
-        const linkedIds = new Set(linkedAppts.map(r => r.appointmentId));
-        const mm = String(locked.billingMonth).padStart(2, '0');
-        const periodStartStr = `${locked.billingYear}-${mm}-01`;
-        const nextMonth = locked.billingMonth === 12 ? 1 : locked.billingMonth + 1;
-        const nextYear = locked.billingMonth === 12 ? locked.billingYear + 1 : locked.billingYear;
-        const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
-        const documentedAppts = await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, tx)
-          .where(and(
-            eq(appointments.customerId, locked.customerId),
-            eq(appointments.status, 'completed'),
-            appointmentsRepo.activeOnly(),
-            gte(appointments.date, periodStartStr),
-            lt(appointments.date, periodEndStr),
-          ));
-        const hasUnlinkedDoc = documentedAppts.some(a => !linkedIds.has(a.id));
-        if (hasUnlinkedDoc) {
-          await tx
-            .update(monthlyServiceRecords)
-            .set({ deletedAt: new Date() })
-            .where(inArray(monthlyServiceRecords.id, srIds));
-        }
-      }
+      // Task #576: Storno darf den zugehörigen Leistungsnachweis NIE
+      // soft-löschen. Der frühere T05/K3-Pfad hat bei Partial-Signing
+      // (LN deckt nur N von M dokumentierten Terminen ab) den gesamten LN
+      // entfernt — Folge: der Kunde verschwand aus `/eligible-customers`
+      // (Filter `activeOnly()`), und „Neue Rechnung erstellen" zeigte ihn
+      // nicht mehr an. Re-Abrechnung derselben Termine (BF-5.3) und
+      // Nachberechnung neu hinzukommender Termine sind beide weiterhin
+      // möglich, ohne den LN anzufassen: `buildLineItemsFromAppointments`
+      // schließt stornierte Termine über `status='storniert'` /
+      // `invoiceType='stornorechnung'` aus. Ein evtl. nötiger neuer LN
+      // für zusätzliche dokumentierte Termine wird vom Mitarbeiter
+      // bewusst angelegt — automatischer LN-Reset ist nicht GoBD-konform
+      // und war die Ursache für die verschwundenen Kunden (Prod-IDs
+      // 108/117, 22.05.2026).
 
       // T04/K2: Storno-Reversal — alle §45b/Privat-Budget-Transaktionen der
       // Original-Rechnungs-Termine werden in derselben Transaktion zurückgebucht,
