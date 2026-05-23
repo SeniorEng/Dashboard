@@ -480,11 +480,18 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         const displayKmTotal = Math.round(km.totalCents * vatMultiplier);
         // Task #561: km-Anzeige via Helper — Menge × Satz = Summe konsistent.
         const kmQuantityDisplay = renderLineItemQuantity(km);
+        // Task #584: Anfahrt-Zeilen tragen Datum + Termin-Bezug, damit
+        // Sachbearbeiter die Fahrt eindeutig einem Termin zuordnen können.
+        const kmDate = km.appointmentDate ? formatDate(km.appointmentDate) : "";
+        const kmStartHHMM = km.startTime ? km.startTime.slice(0, 5) : "";
+        const kmDescription = kmStartHHMM
+          ? `${escapeHtml(kmLabel)} – im Zusammenhang mit Termin ${escapeHtml(kmStartHHMM)}`
+          : escapeHtml(kmLabel);
         rows.push(`
         <tr>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${kmDate}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(kmLabel)}</td>
+          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${kmDescription}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${kmQuantityDisplay}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayKmUnitPrice)}/km</td>
