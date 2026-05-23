@@ -22,6 +22,8 @@ import {
   DeadlineHint,
   computeDeadlineInfo,
 } from "@/features/service-records/components/deadline-hint";
+import { PendingBannerSection } from "@/features/service-records/pending-banner-section";
+import { computeVisiblePendingRecords } from "@/features/service-records/pending-banner";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -175,21 +177,12 @@ export default function ServiceRecordsPage() {
     );
   }
 
-  const visiblePendingRecords = (pendingRecords ?? []).filter(
-    (r) => !(r.year === selectedYear && r.month === selectedMonth),
+  const visiblePendingRecords = computeVisiblePendingRecords(
+    pendingRecords,
+    selectedYear,
+    selectedMonth,
+    customerId,
   );
-  const showPendingBanner = visiblePendingRecords.length > 0;
-  const singlePendingRecord = visiblePendingRecords.length === 1 ? visiblePendingRecords[0] : null;
-
-  const handleBannerClick = () => {
-    if (singlePendingRecord) {
-      setSelectedYear(singlePendingRecord.year);
-      setSelectedMonth(singlePendingRecord.month);
-      navigate(`/service-records/${singlePendingRecord.id}`);
-    } else {
-      setPendingSheetOpen(true);
-    }
-  };
 
   return (
     <Layout>
@@ -211,32 +204,21 @@ export default function ServiceRecordsPage() {
         </div>
       </div>
 
-      {showPendingBanner && (
-        <div
-          className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors"
-          data-testid="banner-pending"
-          onClick={handleBannerClick}
-        >
-          <div className="flex items-center gap-2 text-amber-800">
-            <AlertCircle className={iconSize.sm} />
-            <span className="text-sm font-medium flex-1">
-              {singlePendingRecord ? (
-                <>
-                  1 Leistungsnachweis offen –{" "}
-                  <PendingBannerLabel record={singlePendingRecord} />
-                </>
-              ) : (
-                <>
-                  {visiblePendingRecords.length} Leistungsnachweise benötigen noch Unterschriften
-                </>
-              )}
-            </span>
-            <ChevronRight className={`${iconSize.sm} ml-auto`} />
-          </div>
-        </div>
-      )}
+      <PendingBannerSection
+        pendingRecords={pendingRecords}
+        selectedYear={selectedYear}
+        selectedMonth={selectedMonth}
+        customerId={customerId}
+        onSingleClick={(record) => {
+          setSelectedYear(record.year);
+          setSelectedMonth(record.month);
+          navigate(`/service-records/${record.id}`);
+        }}
+        onMultiClick={() => setPendingSheetOpen(true)}
+        renderSingleLabel={(record) => <PendingBannerLabel record={record} />}
+      />
 
-      <Sheet open={pendingSheetOpen} onOpenChange={setPendingSheetOpen}>
+      <Sheet open={!customerId && pendingSheetOpen} onOpenChange={setPendingSheetOpen}>
         <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto" data-testid="sheet-pending-list">
           <SheetHeader>
             <SheetTitle>Offene Leistungsnachweise</SheetTitle>
