@@ -132,15 +132,11 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
           userId: req.user?.id,
         }, tx);
 
-        try {
-          const summary = await budgetLedgerStorage.getBudgetSummary(appointment.customerId!);
-          if (summary.monthlyLimitCents !== null && summary.currentMonthUsedCents > summary.monthlyLimitCents) {
-            const overEuro = formatEuroDE(summary.currentMonthUsedCents - summary.monthlyLimitCents);
-            budgetWarning = `Monatslimit überschritten — ${overEuro} über dem Limit.`;
-          }
-        } catch (warnErr) {
-          console.warn("[appointment-documentation] Budget-Limit-Prüfung fehlgeschlagen:", warnErr);
-        }
+        // Task #603 — §45b ist ein Jahrestopf ohne harten Monats-Cap. Der
+        // konfigurierte "Unser Anteil"-Wert (summary.monthlyLimitCents)
+        // reduziert die monatliche Aufstockung, ist aber KEIN
+        // Überschreitungs-Cap. Eine "Monatslimit überschritten"-Warnung wäre
+        // hier daher irreführend; sie entfällt bewusst.
       } catch (budgetError: unknown) {
         const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";
         if (errorMessage.includes("Preisvereinbarung") || errorMessage.includes("Budget reicht nicht")) {

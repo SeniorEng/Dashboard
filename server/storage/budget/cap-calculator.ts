@@ -153,10 +153,12 @@ export async function computeCapSlot(
       capRemainingCents = Math.max(0, clamped.yearlyLimitCents - netUsedInWindowCents);
     }
   } else if (input.budgetType === "entlastungsbetrag_45b") {
-    // §45b ist ein Jahrestopf mit monatlicher Aufstockung — KEIN Monats-Cap.
-    // Verfügbarkeit ergibt sich allein aus der bis zum Termindatum
-    // aufgelaufenen Allocation minus bereits gebuchter Beträge (siehe
-    // calculateAllocated45b und summary-queries.getBudgetSummary).
+    // §45b ist ein Jahrestopf mit monatlicher Aufstockung — KEIN harter Monats-Cap.
+    // Der per-Kunde konfigurierbare "Unser Anteil"-Wert (Task #603) wirkt nicht
+    // hier (als Buchungs-Cap), sondern reduziert die monatliche Aufstockung in
+    // `calculateAllocated45b`. Der reduzierte Topf zieht damit die Verfügbarkeit
+    // automatisch nach unten — Verfügbarkeit = aufgelaufene Allocation minus
+    // bereits gebuchter Beträge (siehe summary-queries.getBudgetSummary).
     capRemainingCents = Number.POSITIVE_INFINITY;
   } else {
     if (clamped.monthlyLimitCents !== null) {

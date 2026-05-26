@@ -11,7 +11,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
-import { BUDGET_TYPES } from "@shared/domain/budgets";
+import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 
@@ -473,6 +473,16 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   for (const s of result.data.settings) {
     if (s.validFrom && s.validTo && s.validFrom > s.validTo) {
       res.status(400).json({ error: "VALIDATION_ERROR", message: `'Gültig ab' darf nicht nach 'Gültig bis' liegen (${s.budgetType})` });
+      return;
+    }
+    // Task #603 — Per-Kunde konfigurierbarer §45b-Monats-Anteil ist auf das
+    // gesetzliche Maximum (131 €) gedeckelt. Server-seitige Validierung in
+    // Deutsch, damit das Frontend den Fehler 1:1 anzeigen kann.
+    if (s.budgetType === "entlastungsbetrag_45b" && s.monthlyLimitCents != null && s.monthlyLimitCents > BUDGET_45B_MAX_MONTHLY_CENTS) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: `§45b: Unser Anteil darf maximal ${formatEuroDE(BUDGET_45B_MAX_MONTHLY_CENTS)}/Monat betragen (gesetzliches Maximum).`,
+      });
       return;
     }
   }

@@ -6,6 +6,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
+import { clampToStatutoryMax } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
@@ -13,10 +14,11 @@ import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCen
 import { getPlannedCostCents } from "./appointment-cost-calculator";
 import { budgetAllocationsRepo } from "../../repos";
 
-// Hinweis (Task #425): §45b kennt seit der Umstellung auf das Jahrestopf-Modell
-// keinen Monats-Cap mehr. monthlyLimitCents wird im Summary fix auf `null`
-// gesetzt; der Spaltenwert in `customer_budget_type_settings` wird durch eine
-// Startup-Migration auf NULL zurückgeführt und vom UI nicht mehr gesetzt.
+// Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
+// `monthlyLimitCents` im Summary spiegelt den per-Kunde konfigurierbaren
+// "Unser Anteil"-Wert (€/Monat) wider, der die monatliche Aufstockung
+// reduziert. Ist kein Wert konfiguriert, liefert das Summary `null` (entspricht
+// dem gesetzlichen Default 131 €/Monat).
 
 export async function getTotalCarryoverCents(customerId: number, asOfDate: string, _tx?: DbClient): Promise<number> {
   const d = _tx ?? db;
@@ -185,11 +187,23 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     ? true
     : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
 
-  // §45b ist ein Jahrestopf — kein Monats-Cap mehr (Task #425). Die "Verfügbar
-  // diesen Monat"-Anzeige entspricht somit der gesamten zum Stichtag
-  // aufgelaufenen Verfügbarkeit, da die monatliche Aufstockung ohnehin in
+  // §45b ist ein Jahrestopf — kein harter Monats-Cap. Die "Verfügbar diesen
+  // Monat"-Anzeige entspricht der gesamten zum Stichtag aufgelaufenen
+  // Verfügbarkeit, da die monatliche Aufstockung ohnehin in
   // calculateAllocated45b nur bis "heute" zählt.
-  const monthlyLimitCents = null;
+  //
+  // Task #603: `monthlyLimitCents` exponiert jetzt den konfigurierten
+  // "Unser Anteil"-Wert (geclampt gegen §45b-Maximum), damit die UI ihn anzeigen
+  // kann. Er wirkt NICHT als Buchungs-Cap — der reduzierte Pot folgt aus der
+  // reduzierten monatlichen Aufstockung.
+  const monthlyLimitCents = s45b?.monthlyLimitCents != null
+    ? clampToStatutoryMax({
+        budgetType: "entlastungsbetrag_45b",
+        monthlyLimitCents: s45b.monthlyLimitCents,
+        yearlyLimitCents: null,
+        pflegegrad: null,
+      }).monthlyLimitCents
+    : null;
   const currentMonthAvailableRaw = availableCents;
 
   return {

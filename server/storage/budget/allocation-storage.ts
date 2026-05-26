@@ -10,7 +10,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, isNotNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/datetime";
-import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
+import { BUDGET_45B_MAX_MONTHLY_CENTS, clampToStatutoryMax } from "@shared/domain/budgets";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -149,16 +149,41 @@ export async function getInitialBalanceAllocations(customerId: number, budgetTyp
     .orderBy(desc(budgetAllocations.validFrom));
 }
 
-async function getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<number> {
+/**
+ * Liefert den monatlichen §45b-Aufstockungsbetrag in Cent für ein gegebenes Datum.
+ *
+ * Task #603: Der pro-Kunden konfigurierbare "Unser Anteil"-Wert in
+ * `customer_budget_type_settings.monthlyLimitCents` ist KEIN harter Monats-Cap,
+ * sondern reduziert die monatliche Aufstockung des §45b-Jahrestopfs. Ist kein
+ * Wert gesetzt, wird der gesetzliche Default (131 €) verwendet. Werte > 131 €
+ * werden über `clampToStatutoryMax` als Safety-Net abgeschnitten.
+ *
+ * `asOfDate` (optional) wählt die historisierte Zeile, die zum Stichtag gültig
+ * war — wichtig für rückwirkende Buchungen (GoBD).
+ */
+async function getMonthlyBudgetAmountCents(
+  customerId: number,
+  _tx?: DbClient,
+  _typeSettings?: CustomerBudgetTypeSetting[],
+  asOfDate?: string,
+): Promise<number> {
   const d = _tx ?? db;
 
-  const settings = _typeSettings ?? await d.select()
-    .from(customerBudgetTypeSettings)
-    .where(eq(customerBudgetTypeSettings.customerId, customerId));
+  const settings = _typeSettings ?? (asOfDate
+    ? await getActiveBudgetTypeSettings(customerId, asOfDate, d)
+    : await d.select()
+        .from(customerBudgetTypeSettings)
+        .where(eq(customerBudgetTypeSettings.customerId, customerId)));
 
   const s45b = settings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
   if (s45b?.monthlyLimitCents != null) {
-    return s45b.monthlyLimitCents;
+    const clamped = clampToStatutoryMax({
+      budgetType: "entlastungsbetrag_45b",
+      monthlyLimitCents: s45b.monthlyLimitCents,
+      yearlyLimitCents: null,
+      pflegegrad: null,
+    });
+    return clamped.monthlyLimitCents ?? DEFAULT_MONTHLY_BUDGET_CENTS;
   }
 
   const customerBudget = await d.select()
@@ -170,7 +195,7 @@ async function getMonthlyBudgetAmountCents(customerId: number, _tx?: DbClient, _
     .limit(1);
 
   if (customerBudget[0]?.entlastungsbetrag45b) {
-    return customerBudget[0].entlastungsbetrag45b;
+    return Math.min(customerBudget[0].entlastungsbetrag45b, DEFAULT_MONTHLY_BUDGET_CENTS);
   }
 
   return DEFAULT_MONTHLY_BUDGET_CENTS;
@@ -391,7 +416,37 @@ async function calculateAllocated45b(
     [...initialBalanceMonths, ...deletedIbMonths].map(ib => `${ib.year}-${ib.month}`)
   );
 
-  const monthlyAmount = await getMonthlyBudgetAmountCents(customerId, undefined, typeSettings);
+  // Task #603 — Per-Kunde konfigurierbarer §45b-Monats-Anteil ist historisiert.
+  // Wir holen ALLE §45b-Zeilen einmal und schlagen pro iteriertem Monat die
+  // damals gültige Zeile nach (Mitte-des-Monats-Stichtag). So sehen historische
+  // Monate den damals gültigen Anteil und keine spätere Änderung wirkt rückwirkend.
+  const all45bSettings = await d.select()
+    .from(customerBudgetTypeSettings)
+    .where(and(
+      eq(customerBudgetTypeSettings.customerId, customerId),
+      eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
+    ))
+    .orderBy(asc(customerBudgetTypeSettings.validFrom));
+
+  const fallbackMonthlyAmount = await getMonthlyBudgetAmountCents(customerId, undefined, typeSettings);
+
+  const monthlyAmountFor = (year: number, month: number): number => {
+    if (all45bSettings.length === 0) return fallbackMonthlyAmount;
+    const dateStr = `${year}-${String(month).padStart(2, "0")}-15`;
+    const row = all45bSettings.find(r =>
+      (r.validFrom == null || r.validFrom <= dateStr) &&
+      (r.validTo == null || r.validTo >= dateStr)
+    );
+    if (!row) return fallbackMonthlyAmount;
+    if (row.monthlyLimitCents == null) return DEFAULT_MONTHLY_BUDGET_CENTS;
+    const clamped = clampToStatutoryMax({
+      budgetType: "entlastungsbetrag_45b",
+      monthlyLimitCents: row.monthlyLimitCents,
+      yearlyLimitCents: null,
+      pflegegrad: null,
+    });
+    return clamped.monthlyLimitCents ?? DEFAULT_MONTHLY_BUDGET_CENTS;
+  };
 
   const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
 
@@ -437,7 +492,7 @@ async function calculateAllocated45b(
     let calculatedCents = 0;
     for (let m = yearStart; m <= yearEnd; m++) {
       if (!initialBalanceSet.has(`${opts.year}-${m}`)) {
-        calculatedCents += monthlyAmount;
+        calculatedCents += monthlyAmountFor(opts.year, m);
       }
     }
     calculatedCents += sumInitialBalancesForYear(existingAllocations, opts.year);
@@ -448,7 +503,7 @@ async function calculateAllocated45b(
   let y = allocStartYear, m = allocStartMonth;
   while (y < endYear || (y === endYear && m <= endMonth)) {
     if (!initialBalanceSet.has(`${y}-${m}`)) {
-      totalCalculated += monthlyAmount;
+      totalCalculated += monthlyAmountFor(y, m);
     }
     m++;
     if (m > 12) { m = 1; y++; }
