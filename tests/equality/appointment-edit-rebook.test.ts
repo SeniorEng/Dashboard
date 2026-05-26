@@ -120,7 +120,7 @@ describe("Termin-Edit Auto-Rebook (Task #618)", () => {
       const audits = await getRebookAuditEntries(booked.appointmentId);
       expect(audits.length).toBeGreaterThanOrEqual(1);
       const meta = audits[audits.length - 1].metadata as Record<string, unknown>;
-      expect(meta.trigger).toBe("km_change");
+      expect(meta.trigger).toBe("appointment_edit:km_change");
     } finally {
       await scenario.cleanup();
     }
@@ -164,7 +164,7 @@ describe("Termin-Edit Auto-Rebook (Task #618)", () => {
       const audits = await getRebookAuditEntries(booked.appointmentId);
       expect(audits.length).toBeGreaterThanOrEqual(1);
       const meta = audits[audits.length - 1].metadata as Record<string, unknown>;
-      expect(meta.trigger).toBe("date_change");
+      expect(meta.trigger).toBe("appointment_edit:date_change");
       expect(meta.previousTransactionDate).toBe(date);
       expect(meta.transactionDate).toBe(newDate);
     } finally {
@@ -204,7 +204,10 @@ describe("Termin-Edit Auto-Rebook (Task #618)", () => {
       const audits = await getRebookAuditEntries(booked.appointmentId);
       expect(audits.length).toBeGreaterThanOrEqual(1);
       const meta = audits[audits.length - 1].metadata as Record<string, unknown>;
-      expect(["services_change", "duration_change"]).toContain(meta.trigger);
+      expect([
+        "appointment_edit:services_change",
+        "appointment_edit:duration_change",
+      ]).toContain(meta.trigger);
       expect(meta.previousHauswirtschaftMinutes).toBe(60);
       expect(meta.hauswirtschaftMinutes).toBe(90);
     } finally {

@@ -223,8 +223,12 @@ describe("Series-Exception Auto-Rebook (Task #627)", () => {
       const audits = await getRebookAuditEntries(target.id);
       expect(audits.length).toBeGreaterThanOrEqual(1);
       const meta = audits[audits.length - 1].metadata as Record<string, unknown>;
-      expect(["km_change", "date_change", "services_change", "duration_change"])
-        .toContain(meta.trigger);
+      expect([
+        "appointment_edit:km_change",
+        "appointment_edit:date_change",
+        "appointment_edit:services_change",
+        "appointment_edit:duration_change",
+      ]).toContain(meta.trigger);
     } finally {
       await scenario.cleanup();
     }

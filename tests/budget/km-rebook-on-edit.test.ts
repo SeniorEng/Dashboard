@@ -5,7 +5,9 @@
  *  - PATCH eines dokumentierten Termins mit geänderten km löst Storno (reversal)
  *    + Neubuchung (consumption mit neuen km) aus.
  *  - Genau ein Audit-Eintrag mit action=`appointment_km_rebooked` und
- *    metadata.trigger=`appointment_edit` wird geschrieben.
+ *    metadata.trigger=`appointment_edit:km_change` wird geschrieben
+ *    (siehe Task #646 — einheitliches Trigger-Vokabular
+ *    `shared/domain/budget-rebook-triggers.ts`).
  *  - PATCH ohne km-Änderung fasst budget_transactions NICHT an und schreibt
  *    keinen Rebook-Audit-Eintrag.
  */
@@ -197,7 +199,7 @@ describe("Task #617 — Auto-Rebook bei km-Änderung im Termin-Edit", () => {
       newTravelKm?: number;
       reversedTransactionIds?: number[];
     } | null;
-    expect(meta?.trigger).toBe("appointment_edit");
+    expect(meta?.trigger).toBe("appointment_edit:km_change");
     expect(meta?.newTravelKm).toBe(25);
     expect(meta?.previousTravelKm).toBeCloseTo(10, 5);
     expect(Array.isArray(meta?.reversedTransactionIds)).toBe(true);

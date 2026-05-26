@@ -3,6 +3,7 @@ import { db } from "../lib/db";
 import { appointments, users } from "@shared/schema";
 import { findDriftRows } from "../scripts/audit-appointment-budget-drift";
 import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
+import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
 
@@ -24,7 +25,7 @@ import { log } from "../lib/log";
  * Vorgehen pro Drift-Termin:
  *   1. `rebookAppointmentConsumption` ausführen (Storno der alten Txs +
  *      Neu-Buchung mit den AKTUELLEN Termin-Werten).
- *   2. Audit-Eintrag `appointment_km_rebooked` mit Trigger `import-backfill`
+ *   2. Audit-Eintrag `appointment_km_rebooked` mit Trigger `appointment_import:backfill`
  *      schreiben.
  *
  * Idempotenz: Eigene Marker-Tabelle wäre Overkill — `findDriftRows`
@@ -87,7 +88,7 @@ export async function backfillImportUpdateBudgetDrift(): Promise<void> {
   }
 
   log(
-    `Import-Update-Drift-Backfill: ${driftRows.length} Termin(e) werden reconciliert (Trigger: import-backfill).`,
+    `Import-Update-Drift-Backfill: ${driftRows.length} Termin(e) werden reconciliert (Trigger: appointment_import:backfill).`,
     "startup",
   );
 
@@ -116,7 +117,7 @@ export async function backfillImportUpdateBudgetDrift(): Promise<void> {
         drift.appointmentId,
         {
           customerId: drift.customerId,
-          trigger: "import-backfill",
+          trigger: REBOOK_TRIGGERS.import.backfill,
           previousTransactionDate: result.previousTransactionDate,
           transactionDate: result.transactionDate,
           previousTravelKm: result.previousTravelKm,

@@ -7,6 +7,7 @@ import { storage } from "../storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { getAvailableForDate } from "../storage/budget/import-availability";
 import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
+import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { auditService } from "./audit";
 import { isWeekend } from "@shared/utils/datetime";
 import { appointmentsRepo, customersRepo } from "../repos";
@@ -666,7 +667,7 @@ export async function executeImport(
             appointmentId,
             {
               customerId: row.customerId,
-              trigger: "import-update",
+              trigger: REBOOK_TRIGGERS.import.update,
               previousTransactionDate: rebookInfo.previousTransactionDate,
               transactionDate: rebookInfo.transactionDate,
               previousTravelKm: rebookInfo.previousTravelKm,

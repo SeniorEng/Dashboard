@@ -16,6 +16,7 @@ import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
 import { getCachedCompanySettings } from "../services/cache";
 import { suggestTravelOrigin } from "@shared/domain/appointments";
+import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { calculateRoute } from "../services/routing";
 import { geocodeCustomer } from "../services/geocoding";
 import { isWeekend, currentTimeHHMMSS, todayISO, parseLocalDate, timeToMinutes } from "@shared/utils/datetime";
@@ -1094,14 +1095,14 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   const shouldRebookKm =
     travelKmChanged || customerKmChanged || dateChanged || durationChanged || servicesChanged;
   const rebookTrigger = travelKmChanged || customerKmChanged
-    ? "km_change"
+    ? REBOOK_TRIGGERS.edit.km
     : dateChanged
-      ? "date_change"
+      ? REBOOK_TRIGGERS.edit.date
       : servicesChanged
-        ? "services_change"
+        ? REBOOK_TRIGGERS.edit.services
         : durationChanged
-          ? "duration_change"
-          : "unknown";
+          ? REBOOK_TRIGGERS.edit.duration
+          : REBOOK_TRIGGERS.edit.unknown;
 
   const kmRebookHolder: { value: RebookKmResult | null } = { value: null };
 

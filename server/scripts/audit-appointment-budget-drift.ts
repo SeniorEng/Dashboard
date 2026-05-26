@@ -55,6 +55,7 @@ import {
   users,
 } from "@shared/schema";
 import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
+import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { auditService } from "../services/audit";
 
@@ -301,6 +302,7 @@ async function applyOne(
   }
 
   await auditService.log(userId, "appointment_km_rebooked", "appointment", c.appointmentId, {
+    trigger: REBOOK_TRIGGERS.reconcile.driftAudit,
     source: "audit-appointment-budget-drift",
     reason,
     monthClosedAtCorrection: monthClosed,
