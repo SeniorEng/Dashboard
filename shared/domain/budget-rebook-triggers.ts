@@ -32,6 +32,7 @@ export const REBOOK_TRIGGERS = {
   },
   reconcile: {
     driftAudit: "appointment_reconcile:drift-audit",
+    fromExcel: "appointment_import:reconcile",
   },
 } as const;
 

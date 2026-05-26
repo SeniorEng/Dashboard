@@ -844,6 +844,36 @@ Zur Sicherheit zusätzlich gegen `heliumdb` (~1.171 customers / 13.243 appointme
 
 **Durchgeführt von:** Replit Task-Agent (Task #239).
 
+### Runbook — Reconcile aus Original-Excel (Task #648)
+
+**Zweck:** Bestands-Termine, deren Felder (Service-Art, Dauer, End-Zeit, Mitarbeiter, km) vom Excel-Original abweichen — etwa weil ältere Import-Update-Pfade nur `kilometers`/Notiz übernommen haben — kontrolliert mit Audit-Spur korrigieren. Skript: `server/scripts/reconcile-import-from-excel.ts`.
+
+**GoBD-Voraussetzungen:** `--apply` erfordert einen Superadmin-User und eine Begründung ≥10 Zeichen. Geschlossene Monate werden standardmäßig übersprungen.
+
+**Schritte:**
+1. Original-Excel (z.B. Schröder) lokal nach `tmp/` legen.
+2. Trockenlauf zur Sichtung:
+   ```bash
+   tsx server/scripts/reconcile-import-from-excel.ts \
+     --file=tmp/schroeder.xlsx \
+     --customer=<id> \
+     --csv=tmp/reconcile-drift.csv
+   ```
+   Ausgabe prüfen: Drift-Termine pro Feld, Geister-Termine (Notiz LIKE `Import%`, fehlen in Excel — manuell prüfen, ob bewusst entfernt) und unmatched Excel-Zeilen.
+3. Scharfer Lauf (mit Superadmin + Begründung):
+   ```bash
+   tsx server/scripts/reconcile-import-from-excel.ts \
+     --file=tmp/schroeder.xlsx \
+     --customer=<id> \
+     --apply --user=<superadmin-id> \
+     --reason="Pilot Reconcile Import-Drift — Original-Excel <ARCHIV-PFAD>"
+   ```
+4. Audit-Log prüfen: pro korrigiertem Termin existiert ein `appointment_km_rebooked`-Eintrag mit `metadata.trigger = "appointment_import:reconcile"` und `metadata.source = "reconcile-import-from-excel"`.
+5. Geister-Termine NICHT vom Skript löschen lassen — Entscheidung pro Termin manuell (Stornieren, Soft-Delete oder bestätigt korrekt).
+6. Bei `--apply` in geschlossenen Monaten zusätzlich `--allow-closed-months` setzen; jeder so korrigierte Termin trägt im Audit-Eintrag `metadata.monthClosedAtCorrection=true`.
+
+**Pilot Schröder — Status:** Excel-Datei wurde dem Task-Sandbox nicht beigelegt; der scharfe Pilot-Lauf erfolgt manuell durch den Operator nach obigem Runbook. Skript + Tests sind ausgeliefert.
+
 ### 2026-04-28 21:25 UTC — Vollständiger Logical-Backup der Production-DB (Task #237)
 - **Anlass:** Pre-Publish-Sicherung vor Anwendung der Sprint #228-Drops (`appointments.services_done`, `customer_contracts.{hauswirtschaft,alltagsbegleitung,kilometer}_rate_cents`, Tabelle `customer_pricing_history`).
 - **Quelle:** `executeSql({environment: "production"})` (Read-Replica der Production-DB `neondb`).
