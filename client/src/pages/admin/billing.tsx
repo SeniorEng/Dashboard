@@ -1037,77 +1037,127 @@ export default function AdminBilling() {
               </div>
             )}
 
-            {bulkSendResult && (
-              <div
-                className="rounded border border-gray-200 bg-gray-50 px-3 py-2 space-y-2"
-                data-testid="bulk-send-summary"
-              >
-                <div>
-                  <div className="font-medium text-gray-800 mb-1">Ergebnis</div>
-                  <ul className="text-gray-700 space-y-0.5">
-                    <li>
-                      <span className="text-green-700 font-medium">{bulkSendResult.summary.sent}</span> versendet (Selbstzahler)
-                    </li>
-                    <li>
-                      <span className="text-blue-700 font-medium">{bulkSendResult.summary.markedSent}</span> als versendet markiert (Pflegekassen)
-                    </li>
-                    <li>
-                      <span className="text-gray-600 font-medium">{bulkSendResult.summary.skipped}</span> übersprungen
-                    </li>
-                    <li>
-                      <span className={bulkSendResult.summary.errors > 0 ? "text-red-700 font-medium" : "text-gray-600 font-medium"}>
-                        {bulkSendResult.summary.errors}
-                      </span>{" "}
-                      Fehler
-                    </li>
-                  </ul>
-                </div>
-
-                {bulkSendResult.results.length > 0 && (
+            {bulkSendResult && (() => {
+              // Task #591: Kundenname-Lookup aus der bekannten Rechnungsliste,
+              // damit die Fehler-Sektion „Rechnungsnummer + Kunde" anzeigen
+              // kann, ohne dass der Server die Antwort erweitern muss.
+              const customerNameById = new Map<number, string>();
+              for (const inv of invoices ?? []) {
+                if (inv.customerName) customerNameById.set(inv.id, inv.customerName);
+              }
+              const failedResults = bulkSendResult.results.filter((r) => r.status === "error");
+              const nonFailedResults = bulkSendResult.results.filter((r) => r.status !== "error");
+              return (
+                <div
+                  className="rounded border border-gray-200 bg-gray-50 px-3 py-2 space-y-2"
+                  data-testid="bulk-send-summary"
+                >
                   <div>
-                    <div className="font-medium text-gray-800 mb-1 mt-2">Pro Rechnung</div>
-                    <ul className="max-h-48 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white">
-                      {bulkSendResult.results.map((r) => {
-                        const dotColor =
-                          r.status === "sent" ? "bg-green-500"
-                          : r.status === "marked_sent" ? "bg-blue-500"
-                          : r.status === "skipped" ? "bg-gray-400"
-                          : "bg-red-500";
-                        const labelColor =
-                          r.status === "sent" ? "text-green-700"
-                          : r.status === "marked_sent" ? "text-blue-700"
-                          : r.status === "skipped" ? "text-gray-600"
-                          : "text-red-700";
-                        const labelText =
-                          r.status === "sent" ? "versendet"
-                          : r.status === "marked_sent" ? "als versendet markiert"
-                          : r.status === "skipped" ? "übersprungen"
-                          : "Fehler";
-                        const label = r.invoiceNumber || `Rechnung #${r.invoiceId}`;
-                        return (
-                          <li
-                            key={r.invoiceId}
-                            className="px-2 py-1.5 text-sm flex items-start gap-2"
-                            data-testid={`bulk-send-result-${r.invoiceId}`}
-                          >
-                            <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} aria-hidden="true" />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-baseline gap-x-2">
-                                <span className="font-medium text-gray-800 truncate">{label}</span>
-                                <span className={`text-xs font-medium ${labelColor}`}>{labelText}</span>
-                              </div>
-                              {r.message && (r.status === "error" || r.status === "skipped") && (
-                                <div className="text-xs text-gray-600 mt-0.5 break-words">{r.message}</div>
-                              )}
-                            </div>
-                          </li>
-                        );
-                      })}
+                    <div className="font-medium text-gray-800 mb-1">Ergebnis</div>
+                    <ul className="text-gray-700 space-y-0.5">
+                      <li>
+                        <span className="text-green-700 font-medium">{bulkSendResult.summary.sent}</span> versendet (Selbstzahler)
+                      </li>
+                      <li>
+                        <span className="text-blue-700 font-medium">{bulkSendResult.summary.markedSent}</span> als versendet markiert (Pflegekassen)
+                      </li>
+                      <li>
+                        <span className="text-gray-600 font-medium">{bulkSendResult.summary.skipped}</span> übersprungen
+                      </li>
+                      <li>
+                        <span className={bulkSendResult.summary.errors > 0 ? "text-red-700 font-medium" : "text-gray-600 font-medium"}>
+                          {bulkSendResult.summary.errors}
+                        </span>{" "}
+                        Fehler
+                      </li>
                     </ul>
                   </div>
-                )}
-              </div>
-            )}
+
+                  {failedResults.length > 0 && (
+                    <div data-testid="bulk-send-failures">
+                      <div className="font-medium text-red-700 mb-1 mt-2">
+                        Fehlgeschlagen ({failedResults.length})
+                      </div>
+                      <ul className="max-h-48 overflow-y-auto divide-y divide-red-200 border border-red-200 rounded bg-white">
+                        {failedResults.map((r) => {
+                          const label = r.invoiceNumber || `Rechnung #${r.invoiceId}`;
+                          const customerName = customerNameById.get(r.invoiceId);
+                          return (
+                            <li
+                              key={r.invoiceId}
+                              className="px-2 py-1.5 text-sm flex items-start gap-2"
+                              data-testid={`bulk-send-failure-${r.invoiceId}`}
+                            >
+                              <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0 bg-red-500" aria-hidden="true" />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-baseline gap-x-2">
+                                  <span className="font-medium text-gray-800 truncate">{label}</span>
+                                  {customerName && (
+                                    <span
+                                      className="text-xs text-gray-700 truncate"
+                                      data-testid={`bulk-send-failure-customer-${r.invoiceId}`}
+                                    >
+                                      {customerName}
+                                    </span>
+                                  )}
+                                </div>
+                                <div
+                                  className="text-xs text-red-700 mt-0.5 break-words"
+                                  data-testid={`bulk-send-failure-message-${r.invoiceId}`}
+                                >
+                                  {r.message || "Unbekannter Fehler"}
+                                </div>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
+                  {nonFailedResults.length > 0 && (
+                    <div>
+                      <div className="font-medium text-gray-800 mb-1 mt-2">Pro Rechnung</div>
+                      <ul className="max-h-48 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white">
+                        {nonFailedResults.map((r) => {
+                          const dotColor =
+                            r.status === "sent" ? "bg-green-500"
+                            : r.status === "marked_sent" ? "bg-blue-500"
+                            : "bg-gray-400";
+                          const labelColor =
+                            r.status === "sent" ? "text-green-700"
+                            : r.status === "marked_sent" ? "text-blue-700"
+                            : "text-gray-600";
+                          const labelText =
+                            r.status === "sent" ? "versendet"
+                            : r.status === "marked_sent" ? "als versendet markiert"
+                            : "übersprungen";
+                          const label = r.invoiceNumber || `Rechnung #${r.invoiceId}`;
+                          return (
+                            <li
+                              key={r.invoiceId}
+                              className="px-2 py-1.5 text-sm flex items-start gap-2"
+                              data-testid={`bulk-send-result-${r.invoiceId}`}
+                            >
+                              <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} aria-hidden="true" />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-baseline gap-x-2">
+                                  <span className="font-medium text-gray-800 truncate">{label}</span>
+                                  <span className={`text-xs font-medium ${labelColor}`}>{labelText}</span>
+                                </div>
+                                {r.message && r.status === "skipped" && (
+                                  <div className="text-xs text-gray-600 mt-0.5 break-words">{r.message}</div>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           <DialogFooter>
