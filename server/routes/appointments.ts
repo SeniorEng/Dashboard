@@ -34,6 +34,7 @@ import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { rebookAppointmentConsumptionForKm, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
 import type { Response } from "express";
 import type { CoverageCheckResponse } from "@shared/api";
@@ -1074,6 +1075,20 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     }
   }
 
+  // Task #613: km-Änderungen am Termin lösen automatisch Storno+Neu der
+  // Budget-Consumption aus, damit Anzeige (Termin-km) und Buchung
+  // (budget_transactions-km) nicht auseinanderlaufen. Das ersetzt den
+  // manuellen `reconcile-km-drift`-Schritt für den Live-Edit-Pfad.
+  const travelKmChanged =
+    validatedData.travelKilometers !== undefined
+    && (validatedData.travelKilometers ?? null) !== (existingAppointment.travelKilometers ?? null);
+  const customerKmChanged =
+    validatedData.customerKilometers !== undefined
+    && (validatedData.customerKilometers ?? null) !== (existingAppointment.customerKilometers ?? null);
+  const shouldRebookKm = travelKmChanged || customerKmChanged;
+
+  const kmRebookHolder: { value: RebookKmResult | null } = { value: null };
+
   const updated = await db.transaction(async (tx) => {
     const sync = await syncAppointmentServicesAndDuration(
       id,
@@ -1093,7 +1108,19 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       return existingAppointment;
     }
 
-    return await storage.updateAppointment(id, dataForUpdate as typeof validatedData, tx);
+    const result = await storage.updateAppointment(id, dataForUpdate as typeof validatedData, tx);
+
+    if (shouldRebookKm && result && result.customerId) {
+      kmRebookHolder.value = await rebookAppointmentConsumptionForKm({
+        appointmentId: id,
+        customerId: result.customerId,
+        travelKilometers: result.travelKilometers ?? 0,
+        customerKilometers: result.customerKilometers ?? 0,
+        userId: req.user?.id,
+      }, tx);
+    }
+
+    return result;
   });
 
   if (!updated) {
@@ -1112,6 +1139,33 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
         actor: { role: actorRole(req.user!) },
       },
       ip
+    );
+  }
+
+  // Task #613: separater Audit-Eintrag für den automatischen km-Rebook,
+  // damit Auswertungen sehen, dass ein Termin-Edit (nicht das manuelle
+  // Reconcile-Skript) der Auslöser war.
+  const rebookInfo = kmRebookHolder.value;
+  if (rebookInfo && rebookInfo.rebooked && existingAppointment.customerId != null) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(
+      req.user!.id,
+      "appointment_km_rebooked",
+      "appointment",
+      id,
+      {
+        customerId: existingAppointment.customerId,
+        trigger: "appointment_edit",
+        transactionDate: rebookInfo.transactionDate,
+        previousTravelKm: rebookInfo.previousTravelKm,
+        newTravelKm: updated.travelKilometers ?? 0,
+        previousCustomerKm: rebookInfo.previousCustomerKm,
+        newCustomerKm: updated.customerKilometers ?? 0,
+        reversedTransactionIds: rebookInfo.reversedTransactionIds,
+        hauswirtschaftMinutes: rebookInfo.hauswirtschaftMinutes,
+        alltagsbegleitungMinutes: rebookInfo.alltagsbegleitungMinutes,
+      },
+      ip,
     );
   }
 

@@ -75,6 +75,9 @@ const ALLOWED_PATHS = [
   // Tests, Skripte und Build-Artefakte.
   "tests/",
   "scripts/",
+  // CLI-Skripte unter server/scripts (z.B. reconcile-km-drift) loggen km
+  // roh in Konsole/Audit, keine Rechnungs-Line-Anzeige.
+  "server/scripts/",
   "dist/",
   "node_modules/",
 ];
