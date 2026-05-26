@@ -319,6 +319,19 @@ async function runStartupTasks() {
       log(`Budget-Historisierung-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #643: Bestands-Termine, die per Import-Update editiert wurden,
+    // haben einen gedrifteten Budget-Ledger (Schröder 12.01./21.01.2026).
+    // Idempotenter Backfill — nach erfolgreichem Rebook findet `findDriftRows`
+    // nichts mehr, weitere Läufe sind No-Op.
+    const { backfillImportUpdateBudgetDrift } = await import(
+      "./startup/backfill-import-update-budget-drift"
+    );
+    try {
+      await backfillImportUpdateBudgetDrift();
+    } catch (err) {
+      log(`Import-Update-Drift-Backfill fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #601: Duplikate §45b-Carryover (Wizard-Pfad vs Auto-Pfad
     // `ensureYearlyCarryover45b`) aus Altdaten räumen. Muss NACH der
     // Historisierungs-Migration laufen, weil der partielle Unique-Index

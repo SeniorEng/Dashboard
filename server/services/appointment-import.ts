@@ -6,6 +6,8 @@ import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { storage } from "../storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { getAvailableForDate } from "../storage/budget/import-availability";
+import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
+import { auditService } from "./audit";
 import { isWeekend } from "@shared/utils/datetime";
 import { appointmentsRepo, customersRepo } from "../repos";
 
@@ -634,14 +636,51 @@ export async function executeImport(
     }
 
     if (action.action === "update" && row.existingAppointmentId) {
+      const appointmentId = row.existingAppointmentId;
       try {
-        await db
-          .update(appointments)
-          .set({
-            travelKilometers: row.kilometers,
-            notes: "Import-Update aus Altdaten",
-          })
-          .where(eq(appointments.id, row.existingAppointmentId));
+        // Task #643: Update der appointments-Zeile UND Rebook der zugehörigen
+        // budget_transactions in einer gemeinsamen Transaktion. Sonst bleibt
+        // der Budget-Ledger auf den ALTEN km-Werten stehen (Drift Frau
+        // Schröder, Termin 12.01.2026). `rebookAppointmentConsumption` deckt
+        // per Konstruktion auch eventuelle Minuten-/Datums-Drifts ab.
+        const rebookInfo = await db.transaction(async (tx) => {
+          await tx
+            .update(appointments)
+            .set({
+              travelKilometers: row.kilometers,
+              notes: "Import-Update aus Altdaten",
+            })
+            .where(eq(appointments.id, appointmentId));
+
+          return rebookAppointmentConsumption(
+            { appointmentId, userId },
+            tx,
+          );
+        });
+
+        if (rebookInfo.rebooked && row.customerId != null) {
+          await auditService.log(
+            userId,
+            "appointment_km_rebooked",
+            "appointment",
+            appointmentId,
+            {
+              customerId: row.customerId,
+              trigger: "import-update",
+              previousTransactionDate: rebookInfo.previousTransactionDate,
+              transactionDate: rebookInfo.transactionDate,
+              previousTravelKm: rebookInfo.previousTravelKm,
+              newTravelKm: row.kilometers,
+              previousCustomerKm: rebookInfo.previousCustomerKm,
+              previousHauswirtschaftMinutes: rebookInfo.previousHauswirtschaftMinutes,
+              previousAlltagsbegleitungMinutes: rebookInfo.previousAlltagsbegleitungMinutes,
+              hauswirtschaftMinutes: rebookInfo.hauswirtschaftMinutes,
+              alltagsbegleitungMinutes: rebookInfo.alltagsbegleitungMinutes,
+              reversedTransactionIds: rebookInfo.reversedTransactionIds,
+            },
+          );
+        }
+
         result.updated++;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
