@@ -78,6 +78,9 @@ const ALLOWED_PATHS = [
   // CLI-Skripte unter server/scripts (z.B. reconcile-km-drift) loggen km
   // roh in Konsole/Audit, keine Rechnungs-Line-Anzeige.
   "server/scripts/",
+  // Startup-Audit (Drift-Detektor zwischen Termin- und Budget-km).
+  // Loggt km roh in Konsole/Audit-Log, kein Rechnungs-Line-Renderer.
+  "server/startup/audit-appointment-budget-km-drift.ts",
   "dist/",
   "node_modules/",
 ];
