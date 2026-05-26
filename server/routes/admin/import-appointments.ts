@@ -74,6 +74,18 @@ const matchedRowSchema = z.object({
     trimmedMinutes: z.number(),
     reason: z.string(),
   }).nullable().optional(),
+  diff: z.object({
+    serviceCode: z.object({ db: z.string().nullable(), excel: z.string() }).optional(),
+    durationMinutes: z.object({ db: z.number(), excel: z.number() }).optional(),
+    endTime: z.object({ db: z.string(), excel: z.string() }).optional(),
+    assignedEmployee: z.object({
+      dbId: z.number().nullable(),
+      dbName: z.string().nullable(),
+      excelId: z.number().nullable(),
+      excelName: z.string(),
+    }).optional(),
+    kilometers: z.object({ db: z.number(), excel: z.number() }).optional(),
+  }).nullable().optional(),
 });
 
 const executeSchema = z.object({
@@ -95,6 +107,7 @@ router.post(
     const matchedRows: MatchedRow[] = rows.map((r) => ({
       ...r,
       budgetTrimInfo: r.budgetTrimInfo ?? null,
+      diff: r.diff ?? null,
     }));
 
     for (const action of actions) {

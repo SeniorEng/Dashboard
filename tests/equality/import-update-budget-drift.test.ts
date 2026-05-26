@@ -16,7 +16,7 @@
  * bleibt bei 70).
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   getAuthCookie,
   runCleanup,
@@ -26,13 +26,15 @@ import {
   apiPut,
 } from "../test-utils";
 import { db } from "../../server/lib/db";
-import { appointments, budgetTransactions, services as servicesTable } from "@shared/schema";
+import { appointments, appointmentServices, budgetTransactions, services as servicesTable, auditLog } from "@shared/schema";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
+import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import type { MatchedRow } from "../../server/services/appointment-import";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let customerId: number;
 let serviceId: number;
+let serviceIdAb: number;
 
 beforeAll(async () => {
   auth = await getAuthCookie();
@@ -57,8 +59,13 @@ beforeAll(async () => {
   const hauswirtschaft = all.find(
     (s) => /hauswirtschaft/i.test(s.name ?? "") || /hauswirtschaft/i.test(s.code ?? ""),
   );
+  const alltagsbegleitung = all.find(
+    (s) => /alltagsbegleitung/i.test(s.name ?? "") || /alltagsbegleitung/i.test(s.code ?? ""),
+  );
   if (!hauswirtschaft) throw new Error("Service Hauswirtschaft nicht gefunden");
+  if (!alltagsbegleitung) throw new Error("Service Alltagsbegleitung nicht gefunden");
   serviceId = hauswirtschaft.id;
+  serviceIdAb = alltagsbegleitung.id;
 });
 
 afterAll(async () => {
@@ -106,6 +113,7 @@ describe("Equality: Import-Update koppelt Budget-Ledger an Termin (Task #643)", 
       existingAppointmentId: null,
       differences: [],
       budgetTrimInfo: null,
+      diff: null,
     };
 
     const importResult = await executeImport(
@@ -174,5 +182,154 @@ describe("Equality: Import-Update koppelt Budget-Ledger an Termin (Task #643)", 
 
     expect(liveKm).toBeCloseTo(quantizeKm(7.3), 2);
     expect(liveKm).toBeLessThan(10);
+  }, 120_000);
+
+  it("Task #647: Import-Update mit Service-Art-Mismatch HW→AB schreibt richtige Kategorie in DB und Budget-Ledger", async () => {
+    const { executeImport, matchRows } = await import("../../server/services/appointment-import");
+    const date = nextWeekday();
+
+    // (1) Import als Hauswirtschaft.
+    const baseRow: MatchedRow = {
+      rowIndex: 10,
+      kundeRaw: "Test",
+      kundeId: String(customerId),
+      vorname: "Test",
+      nachname: "Auto",
+      date,
+      startTime: "11:00",
+      endTime: "12:00",
+      durationMinutes: 60,
+      kilometers: 5,
+      employeeName: `${auth.user.vorname} ${auth.user.nachname}`,
+      serviceType: "Hauswirtschaft",
+      budgetType: "Entlastungsbetrag",
+      pflegekasseName: "",
+      pflegekasseIK: "",
+      versichertennummer: "",
+      pflegegrad: "",
+      customerId,
+      employeeId: auth.user.id,
+      serviceId,
+      budgetTypeKey: "entlastungsbetrag_45b",
+      status: "new",
+      errors: [],
+      existingAppointmentId: null,
+      differences: [],
+      budgetTrimInfo: null,
+      diff: null,
+    };
+
+    const importResult = await executeImport(
+      [baseRow],
+      [{ action: "import", rowIndex: 10 }],
+      auth.user.id,
+    );
+    expect(importResult.imported).toBe(1);
+
+    const created = await db
+      .select({ id: appointments.id, start: appointments.scheduledStart })
+      .from(appointments)
+      .where(eq(appointments.customerId, customerId));
+    const apptRow = created.find((c) => c.start === "11:00:00" || c.start === "11:00");
+    if (!apptRow) throw new Error("Test-Termin nicht gefunden");
+    const apptId = apptRow.id;
+
+    // Σ HW-Minuten der Consumption-Txs vor Update
+    const beforeTxs = await db
+      .select({ hw: budgetTransactions.hauswirtschaftMinutes, ab: budgetTransactions.alltagsbegleitungMinutes, type: budgetTransactions.transactionType })
+      .from(budgetTransactions)
+      .where(eq(budgetTransactions.appointmentId, apptId));
+    const beforeHw = beforeTxs.filter(t => t.type === "consumption").reduce((s, t) => s + (t.hw ?? 0), 0);
+    const beforeAb = beforeTxs.filter(t => t.type === "consumption").reduce((s, t) => s + (t.ab ?? 0), 0);
+    expect(beforeHw).toBe(60);
+    expect(beforeAb).toBe(0);
+
+    // (2) Update derselben Zeile als Alltagsbegleitung.
+    const updateRow: MatchedRow = {
+      ...baseRow,
+      rowIndex: 11,
+      serviceType: "Alltagsbegleitung",
+      serviceId: serviceIdAb,
+      status: "duplicate",
+      existingAppointmentId: apptId,
+      differences: ["Art: DB=hauswirtschaft → Excel=alltagsbegleitung"],
+      diff: { serviceCode: { db: "hauswirtschaft", excel: "alltagsbegleitung" } },
+    };
+
+    const updateResult = await executeImport(
+      [updateRow],
+      [{ action: "update", rowIndex: 11 }],
+      auth.user.id,
+    );
+    expect(updateResult.errors).toEqual([]);
+    expect(updateResult.updated).toBe(1);
+
+    // appointment_services muss jetzt auf AB stehen.
+    const svcRows = await db
+      .select({ serviceId: appointmentServices.serviceId, planned: appointmentServices.plannedDurationMinutes })
+      .from(appointmentServices)
+      .where(eq(appointmentServices.appointmentId, apptId));
+    expect(svcRows.length).toBe(1);
+    expect(svcRows[0].serviceId).toBe(serviceIdAb);
+    expect(svcRows[0].planned).toBe(60);
+
+    // Aktive Consumption-Txs (an Termin gekoppelt) müssen AB-Minuten zeigen.
+    const afterTxs = await db
+      .select({ hw: budgetTransactions.hauswirtschaftMinutes, ab: budgetTransactions.alltagsbegleitungMinutes, type: budgetTransactions.transactionType, apptId: budgetTransactions.appointmentId })
+      .from(budgetTransactions)
+      .where(eq(budgetTransactions.customerId, customerId));
+    const liveHw = afterTxs.filter(t => t.type === "consumption" && t.apptId === apptId).reduce((s, t) => s + (t.hw ?? 0), 0);
+    const liveAb = afterTxs.filter(t => t.type === "consumption" && t.apptId === apptId).reduce((s, t) => s + (t.ab ?? 0), 0);
+    expect(liveHw).toBe(0);
+    expect(liveAb).toBe(60);
+
+    // Audit-Log enthält previous/new ServiceCode + Trigger import:update
+    const audits = await db
+      .select({ action: auditLog.action, metadata: auditLog.metadata })
+      .from(auditLog)
+      .where(and(eq(auditLog.action, "appointment_km_rebooked"), eq(auditLog.entityId, apptId)));
+    const updateAudit = audits.find(a => {
+      const m = a.metadata as Record<string, unknown> | null;
+      return m?.trigger === REBOOK_TRIGGERS.import.update;
+    });
+    expect(updateAudit).toBeDefined();
+    const meta = updateAudit!.metadata as Record<string, unknown>;
+    expect(meta.previousServiceCode).toBe("hauswirtschaft");
+    expect(meta.newServiceCode).toBe("alltagsbegleitung");
+
+    // (3) Idempotenz — Re-Match der "alten" Excel-Zeile (jetzt AB) gegen
+    //     den aktuellen DB-Stand produziert KEINEN Diff mehr.
+    const { customers } = await import("@shared/schema");
+    const [custRow] = await db
+      .select({ vorname: customers.vorname, nachname: customers.nachname })
+      .from(customers)
+      .where(eq(customers.id, customerId));
+    const reMatched = await matchRows([{
+      rowIndex: 12,
+      kundeRaw: `${custRow.vorname} ${custRow.nachname}`,
+      kundeId: String(customerId),
+      vorname: custRow.vorname ?? "",
+      nachname: custRow.nachname ?? "",
+      date,
+      startTime: "11:00",
+      endTime: "12:00",
+      durationMinutes: 60,
+      kilometers: 5,
+      employeeName: `${auth.user.vorname} ${auth.user.nachname}`,
+      serviceType: "Alltagsbegleitung",
+      budgetType: "Entlastungsbetrag",
+      pflegekasseName: "",
+      pflegekasseIK: "",
+      versichertennummer: "",
+      pflegegrad: "",
+    }]);
+    const matched = reMatched.find(r => r.date === date && r.startTime === "11:00");
+    expect(matched).toBeDefined();
+    expect(matched!.status).toBe("duplicate");
+    // Idempotenz-Kernassertion: kein Service-Art-Diff mehr.
+    expect(matched!.diff?.serviceCode).toBeUndefined();
+    expect(matched!.diff?.durationMinutes).toBeUndefined();
+    expect(matched!.diff?.endTime).toBeUndefined();
+    expect(matched!.diff?.assignedEmployee).toBeUndefined();
   }, 120_000);
 });

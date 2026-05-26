@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { db } from "../lib/db";
 import { customers, users, appointments, appointmentServices, services, monthlyServiceRecords } from "@shared/schema";
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray } from "drizzle-orm";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { storage } from "../storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
@@ -38,6 +38,20 @@ interface BudgetTrimInfo {
   reason: string;
 }
 
+/**
+ * Task #647 — Strukturierter Diff zwischen Excel-Zeile und vorhandenem
+ * Termin (für Duplikate). Wird zusätzlich zu `differences` (Strings)
+ * geliefert, damit die UI Mismatches in einzelnen Spalten/Badges
+ * darstellen kann — insb. Service-Art-Mismatches.
+ */
+export interface ImportRowDiff {
+  serviceCode?: { db: string | null; excel: string };
+  durationMinutes?: { db: number; excel: number };
+  endTime?: { db: string; excel: string };
+  assignedEmployee?: { dbId: number | null; dbName: string | null; excelId: number | null; excelName: string };
+  kilometers?: { db: number; excel: number };
+}
+
 export interface MatchedRow extends ImportRow {
   customerId: number | null;
   employeeId: number | null;
@@ -48,6 +62,8 @@ export interface MatchedRow extends ImportRow {
   existingAppointmentId: number | null;
   differences: string[];
   budgetTrimInfo: BudgetTrimInfo | null;
+  /** Task #647: strukturierter Diff für die Vorschau-UI. */
+  diff: ImportRowDiff | null;
 }
 
 interface ImportAction {
@@ -272,9 +288,12 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       customerId: appointments.customerId,
       date: appointments.date,
       scheduledStart: appointments.scheduledStart,
+      scheduledEnd: appointments.scheduledEnd,
       actualStart: appointments.actualStart,
+      actualEnd: appointments.actualEnd,
       travelKilometers: appointments.travelKilometers,
       customerKilometers: appointments.customerKilometers,
+      assignedEmployeeId: appointments.assignedEmployeeId,
       notes: appointments.notes,
     }, db)
     .where(
@@ -283,6 +302,41 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
         eq(appointments.appointmentType, "Kundentermin")
       )
     );
+
+  // Task #647: für Duplikate brauchen wir Service-Art + Soll-Dauer aus
+  // `appointment_services`. Eine Bulk-Query je Termin-Set + Map.
+  const existingApptIds = existingAppts.map((a) => a.id);
+  const apptServiceRows = existingApptIds.length > 0
+    ? await db
+        .select({
+          appointmentId: appointmentServices.appointmentId,
+          serviceId: appointmentServices.serviceId,
+          serviceCode: services.code,
+          kategorie: services.lohnartKategorie,
+          actual: appointmentServices.actualDurationMinutes,
+          planned: appointmentServices.plannedDurationMinutes,
+        })
+        .from(appointmentServices)
+        .innerJoin(services, eq(appointmentServices.serviceId, services.id))
+        .where(inArray(appointmentServices.appointmentId, existingApptIds))
+    : [];
+  const apptServicesMap = new Map<number, typeof apptServiceRows>();
+  for (const r of apptServiceRows) {
+    let bucket = apptServicesMap.get(r.appointmentId);
+    if (!bucket) {
+      bucket = [];
+      apptServicesMap.set(r.appointmentId, bucket);
+    }
+    bucket.push(r);
+  }
+
+  const userNameById = new Map<number, string>();
+  for (const u of allUsers) {
+    userNameById.set(
+      u.id,
+      u.displayName ?? `${u.vorname ?? ""} ${u.nachname ?? ""}`.trim(),
+    );
+  }
 
   const customerMap = new Map<string, number>();
   for (const c of allCustomers) {
@@ -369,6 +423,7 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
 
     let status: MatchedRow["status"] = errors.length > 0 ? "error" : "new";
     let existingAppointmentId: number | null = null;
+    let diff: ImportRowDiff | null = null;
 
     if (customerId && row.date && row.startTime) {
       const dupKey = `${customerId}|${row.date}|${row.startTime}`;
@@ -376,10 +431,68 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       if (existing) {
         status = "duplicate";
         existingAppointmentId = existing.id;
+        diff = {};
+
+        // Kilometer
         const existingKm = existing.travelKilometers ?? 0;
-        if (existingKm !== row.kilometers) {
+        if (Math.abs(existingKm - row.kilometers) > 0.001) {
           differences.push(`Kilometer: DB=${existingKm} → Excel=${row.kilometers}`);
+          diff.kilometers = { db: existingKm, excel: row.kilometers };
         }
+
+        // Service-Art (Excel: "Hauswirtschaft"/"Alltagsbegleitung" → code-lower)
+        const excelServiceCode = row.serviceType.toLowerCase();
+        const apptSvcs = apptServicesMap.get(existing.id) ?? [];
+        // Bei mehreren Service-Zeilen: kategorisch dominierende Art heranziehen
+        let dbServiceCode: string | null = null;
+        if (apptSvcs.length === 1) {
+          dbServiceCode = apptSvcs[0].serviceCode ?? null;
+        } else if (apptSvcs.length > 1) {
+          let hwM = 0;
+          let abM = 0;
+          for (const s of apptSvcs) {
+            const m = s.actual ?? s.planned ?? 0;
+            if (s.kategorie === "hauswirtschaft") hwM += m;
+            else if (s.kategorie === "alltagsbegleitung") abM += m;
+          }
+          dbServiceCode = hwM >= abM ? "hauswirtschaft" : "alltagsbegleitung";
+        }
+        if (dbServiceCode && excelServiceCode && dbServiceCode !== excelServiceCode) {
+          differences.push(`Art: DB=${dbServiceCode} → Excel=${excelServiceCode}`);
+          diff.serviceCode = { db: dbServiceCode, excel: excelServiceCode };
+        }
+
+        // Dauer (Σ actual ?? planned)
+        const dbDuration = apptSvcs.reduce(
+          (s, r2) => s + (r2.actual ?? r2.planned ?? 0),
+          0,
+        );
+        if (dbDuration !== row.durationMinutes) {
+          differences.push(`Dauer: DB=${dbDuration}min → Excel=${row.durationMinutes}min`);
+          diff.durationMinutes = { db: dbDuration, excel: row.durationMinutes };
+        }
+
+        // End-Zeit
+        const dbEnd = (existing.scheduledEnd || existing.actualEnd || "").substring(0, 5);
+        if (row.endTime && dbEnd && dbEnd !== row.endTime) {
+          differences.push(`Ende: DB=${dbEnd} → Excel=${row.endTime}`);
+          diff.endTime = { db: dbEnd, excel: row.endTime };
+        }
+
+        // Mitarbeiter
+        const dbEmpId = existing.assignedEmployeeId ?? null;
+        const dbEmpName = dbEmpId != null ? (userNameById.get(dbEmpId) ?? null) : null;
+        if (employeeId != null && dbEmpId !== employeeId) {
+          differences.push(`Mitarbeiter: DB=${dbEmpName ?? dbEmpId ?? "?"} → Excel=${row.employeeName}`);
+          diff.assignedEmployee = {
+            dbId: dbEmpId,
+            dbName: dbEmpName,
+            excelId: employeeId,
+            excelName: row.employeeName,
+          };
+        }
+
+        if (Object.keys(diff).length === 0) diff = null;
       }
     }
 
@@ -394,6 +507,7 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       existingAppointmentId,
       differences,
       budgetTrimInfo: null,
+      diff,
     };
   });
 }
@@ -638,20 +752,88 @@ export async function executeImport(
 
     if (action.action === "update" && row.existingAppointmentId) {
       const appointmentId = row.existingAppointmentId;
+
+      // Task #647: Update braucht alle Stamm-IDs, damit Service-Art /
+      // Dauer / End-Zeit / Mitarbeiter aus der Excel übernommen werden.
+      if (!row.customerId || !effectiveEmployeeId || !row.serviceId) {
+        result.errors.push({ rowIndex: row.rowIndex, error: "Fehlende IDs für Update" });
+        continue;
+      }
+
       try {
-        // Task #643: Update der appointments-Zeile UND Rebook der zugehörigen
-        // budget_transactions in einer gemeinsamen Transaktion. Sonst bleibt
-        // der Budget-Ledger auf den ALTEN km-Werten stehen (Drift Frau
-        // Schröder, Termin 12.01.2026). `rebookAppointmentConsumption` deckt
-        // per Konstruktion auch eventuelle Minuten-/Datums-Drifts ab.
+        // Task #647: Vorher-Werte für Audit-Log laden (außerhalb der Tx —
+        // reine Reads, keine Rennbedingung mit dem darauf folgenden Update).
+        const [beforeAppt] = await db
+          .select({
+            assignedEmployeeId: appointments.assignedEmployeeId,
+            scheduledEnd: appointments.scheduledEnd,
+            durationPromised: appointments.durationPromised,
+            travelKilometers: appointments.travelKilometers,
+          })
+          .from(appointments)
+          .where(eq(appointments.id, appointmentId))
+          .limit(1);
+
+        const beforeSvcs = await db
+          .select({
+            serviceId: appointmentServices.serviceId,
+            serviceCode: services.code,
+            actual: appointmentServices.actualDurationMinutes,
+            planned: appointmentServices.plannedDurationMinutes,
+          })
+          .from(appointmentServices)
+          .innerJoin(services, eq(appointmentServices.serviceId, services.id))
+          .where(eq(appointmentServices.appointmentId, appointmentId));
+
+        const previousServiceCode = beforeSvcs.length === 1
+          ? (beforeSvcs[0].serviceCode ?? null)
+          : (beforeSvcs.length > 1 ? "mixed" : null);
+        const previousDurationMinutes = beforeSvcs.reduce(
+          (s, r2) => s + (r2.actual ?? r2.planned ?? 0),
+          0,
+        );
+
+        const [newSvc] = await db
+          .select({ code: services.code })
+          .from(services)
+          .where(eq(services.id, row.serviceId))
+          .limit(1);
+        const newServiceCode = newSvc?.code ?? null;
+
+        const scheduledEnd = row.endTime || row.startTime;
+
+        // Task #643 + #647: Update der appointments-Zeile UND der
+        // appointment_services UND Rebook in einer gemeinsamen Transaktion.
+        // `rebookAppointmentConsumption` liest danach den AKTUELLEN
+        // Service-Mix + km + Datum aus DB und bucht die Consumption
+        // entsprechend neu. Drift-Fall Frau Schröder, 18.03.2026:
+        // Excel sagt Hauswirtschaft, DB blieb Alltagsbegleitung.
         const rebookInfo = await db.transaction(async (tx) => {
           await tx
             .update(appointments)
             .set({
               travelKilometers: row.kilometers,
+              assignedEmployeeId: effectiveEmployeeId,
+              performedByEmployeeId: effectiveEmployeeId,
+              scheduledEnd,
+              actualEnd: row.endTime || null,
+              durationPromised: row.durationMinutes,
               notes: "Import-Update aus Altdaten",
             })
             .where(eq(appointments.id, appointmentId));
+
+          // Vorhandene Service-Zeilen ersetzen — Excel liefert genau eine
+          // Service-Art (Hauswirtschaft | Alltagsbegleitung).
+          await tx
+            .delete(appointmentServices)
+            .where(eq(appointmentServices.appointmentId, appointmentId));
+          await tx.insert(appointmentServices).values({
+            appointmentId,
+            serviceId: row.serviceId!,
+            plannedDurationMinutes: row.durationMinutes,
+            actualDurationMinutes: row.durationMinutes,
+            details: `Import: ${row.serviceType}`,
+          });
 
           return rebookAppointmentConsumption(
             { appointmentId, userId },
@@ -678,6 +860,16 @@ export async function executeImport(
               hauswirtschaftMinutes: rebookInfo.hauswirtschaftMinutes,
               alltagsbegleitungMinutes: rebookInfo.alltagsbegleitungMinutes,
               reversedTransactionIds: rebookInfo.reversedTransactionIds,
+              // Task #647: vollständiger Vorher/Nachher-Trail über alle
+              // jetzt vom Update-Pfad geschriebenen Felder.
+              previousServiceCode,
+              newServiceCode,
+              previousDurationMinutes,
+              newDurationMinutes: row.durationMinutes,
+              previousAssignedEmployeeId: beforeAppt?.assignedEmployeeId ?? null,
+              newAssignedEmployeeId: effectiveEmployeeId,
+              previousScheduledEnd: beforeAppt?.scheduledEnd ?? null,
+              newScheduledEnd: scheduledEnd,
             },
           );
         }

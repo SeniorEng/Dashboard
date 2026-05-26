@@ -16,6 +16,14 @@ interface BudgetTrimInfo {
   reason: string;
 }
 
+interface ImportRowDiff {
+  serviceCode?: { db: string | null; excel: string };
+  durationMinutes?: { db: number; excel: number };
+  endTime?: { db: string; excel: string };
+  assignedEmployee?: { dbId: number | null; dbName: string | null; excelId: number | null; excelName: string };
+  kilometers?: { db: number; excel: number };
+}
+
 interface MatchedRow {
   rowIndex: number;
   kundeRaw: string;
@@ -38,6 +46,14 @@ interface MatchedRow {
   existingAppointmentId: number | null;
   differences: string[];
   budgetTrimInfo: BudgetTrimInfo | null;
+  diff: ImportRowDiff | null;
+}
+
+function serviceCodeLabel(code: string | null | undefined): string {
+  if (!code) return "?";
+  if (code === "hauswirtschaft") return "HW";
+  if (code === "alltagsbegleitung") return "AB";
+  return code;
 }
 
 interface PreviewResponse {
@@ -385,7 +401,17 @@ export default function ImportAppointmentsPage() {
                           {row.vorname} {row.nachname}
                         </td>
                         <td className="p-2 whitespace-nowrap" data-testid={`text-date-${row.rowIndex}`}>{row.date}</td>
-                        <td className="p-2 whitespace-nowrap">{row.startTime}–{row.endTime}</td>
+                        <td className="p-2 whitespace-nowrap">
+                          {row.startTime}–{row.endTime}
+                          {row.diff?.endTime && (
+                            <span
+                              className="block text-yellow-700 text-[10px]"
+                              data-testid={`diff-endtime-${row.rowIndex}`}
+                            >
+                              DB: {row.diff.endTime.db}
+                            </span>
+                          )}
+                        </td>
                         <td className="p-2" data-testid={`text-duration-${row.rowIndex}`}>
                           {isBudgetTrimmed ? (
                             <span className="text-orange-700 font-medium">
@@ -396,8 +422,27 @@ export default function ImportAppointmentsPage() {
                           ) : (
                             <span>{row.durationMinutes}min</span>
                           )}
+                          {row.diff?.durationMinutes && (
+                            <span
+                              className="block text-yellow-700 text-[10px]"
+                              data-testid={`diff-duration-${row.rowIndex}`}
+                            >
+                              DB: {row.diff.durationMinutes.db}min
+                            </span>
+                          )}
                         </td>
-                        <td className="p-2">{row.serviceType}</td>
+                        <td className="p-2">
+                          {row.serviceType}
+                          {row.diff?.serviceCode && (
+                            <Badge
+                              variant="destructive"
+                              className="ml-1 text-[10px]"
+                              data-testid={`badge-service-mismatch-${row.rowIndex}`}
+                            >
+                              Art weicht ab: {serviceCodeLabel(row.diff.serviceCode.db)} → {serviceCodeLabel(row.diff.serviceCode.excel)}
+                            </Badge>
+                          )}
+                        </td>
                         <td className="p-2 whitespace-nowrap text-[10px]">{row.budgetType}</td>
                         <td className="p-2">
                           {hasEmployeeError ? (
@@ -430,8 +475,26 @@ export default function ImportAppointmentsPage() {
                           ) : (
                             <span className="text-[10px]" data-testid={`text-employee-${row.rowIndex}`}>{row.employeeName}</span>
                           )}
+                          {row.diff?.assignedEmployee && (
+                            <span
+                              className="block text-yellow-700 text-[10px]"
+                              data-testid={`diff-employee-${row.rowIndex}`}
+                            >
+                              DB: {row.diff.assignedEmployee.dbName ?? row.diff.assignedEmployee.dbId ?? "?"}
+                            </span>
+                          )}
                         </td>
-                        <td className="p-2">{row.kilometers}</td>
+                        <td className="p-2">
+                          {row.kilometers}
+                          {row.diff?.kilometers && (
+                            <span
+                              className="block text-yellow-700 text-[10px]"
+                              data-testid={`diff-km-${row.rowIndex}`}
+                            >
+                              DB: {row.diff.kilometers.db}
+                            </span>
+                          )}
+                        </td>
                         <td className="p-2">
                           {isBudgetTrimmed && (
                             <span className="text-orange-700 text-[10px] block" data-testid={`text-budget-trim-${row.rowIndex}`}>
