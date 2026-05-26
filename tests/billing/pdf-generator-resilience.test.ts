@@ -229,6 +229,92 @@ describe("generatePdfFromHtml — Parallelität / Last (Task #526)", () => {
   });
 });
 
+describe("withFreshPage — Recovery von 'Navigating frame was detached' unter Last (Task #594)", () => {
+  it("erkennt 'Navigating frame was detached' als page-level transient und retryed OHNE Browser-Discard", async () => {
+    const { withFreshPage } = await freshModule();
+
+    const browser = makeBrowser(async () => makePage());
+    launchMock.mockResolvedValue(browser);
+
+    const detachErr = new Error("Navigating frame was detached");
+    let attempt = 0;
+    const result = await withFreshPage(async () => {
+      attempt++;
+      if (attempt === 1) throw detachErr;
+      return "ok-after-retry";
+    });
+
+    expect(result).toBe("ok-after-retry");
+    expect(attempt).toBe(2);
+    // Page-level transient: Browser bleibt erhalten, kein Re-Launch.
+    expect(browser.close).not.toHaveBeenCalled();
+    expect(launchMock).toHaveBeenCalledTimes(1);
+    // Zwei Pages (eine pro Versuch), beide geschlossen.
+    expect(browser.newPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("retryed bis zu 3 Versuche bei wiederholtem Frame-Detach, dann propagiert der Fehler", async () => {
+    const { withFreshPage } = await freshModule();
+
+    const browser = makeBrowser(async () => makePage());
+    launchMock.mockResolvedValue(browser);
+
+    const detachErr = new Error("frame was detached");
+    let attempt = 0;
+
+    await expect(
+      withFreshPage(async () => {
+        attempt++;
+        throw detachErr;
+      }),
+    ).rejects.toThrow(/frame was detached/);
+
+    expect(attempt).toBe(3);
+    expect(browser.close).not.toHaveBeenCalled();
+    expect(launchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("begrenzt parallele Page-Erzeugung über den Render-Slot-Semaphor (PDF_RENDER_CONCURRENCY)", async () => {
+    const { withFreshPage, _getRenderSlotState } = await freshModule();
+
+    let liveNewPageCalls = 0;
+    let peakLive = 0;
+    const browser = makeBrowser(async () => {
+      liveNewPageCalls++;
+      peakLive = Math.max(peakLive, liveNewPageCalls);
+      const page = makePage();
+      const origClose = page.close;
+      page.close = vi.fn(async () => {
+        liveNewPageCalls--;
+        return origClose();
+      });
+      return page;
+    });
+    launchMock.mockResolvedValue(browser);
+
+    // 10 parallele Aufrufer — jeder hält die Page kurz fest.
+    const N = 10;
+    const results = await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        withFreshPage(async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          return i;
+        }),
+      ),
+    );
+
+    expect(results).toEqual(Array.from({ length: N }, (_, i) => i));
+    // Slot-Concurrency-Default = 2 → maximal 2 Pages gleichzeitig live.
+    expect(peakLive).toBeLessThanOrEqual(_getRenderSlotState().max);
+    expect(peakLive).toBeLessThanOrEqual(2);
+    // Trotzdem bekommt jeder Aufruf seine eigene Page.
+    expect(browser.newPage).toHaveBeenCalledTimes(N);
+    // Slot-State nach Abschluss: keine Lecks.
+    expect(_getRenderSlotState().active).toBe(0);
+    expect(_getRenderSlotState().waiting).toBe(0);
+  });
+});
+
 describe("withFreshPage — Race-Timeout gegen hängendes Chromium (Task #521)", () => {
   it("bricht hängenden Render nach PAGE_RENDER_TIMEOUT_MS mit klarer Fehlermeldung ab", async () => {
     const { withFreshPage } = await freshModule();

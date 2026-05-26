@@ -343,8 +343,75 @@ export function isRecoverablePuppeteerError(err: unknown): boolean {
     // Task #532: "Requesting main frame too early" tritt auf, wenn Chromium
     // unter --single-process beim ersten setContent() noch keinen Main-Frame
     // im CDP-FrameTree hat. Browser verwerfen und mit Warmup neu starten.
-    /Network\.enable|Protocol error|Target closed|Connection closed|Session closed|timed out|Requesting main frame too early/i.test(message)
+    // Task #594: "Navigating frame was detached" tritt unter paralleler
+    // Render-Last auf (mehrere setImmediate-Persist-Calls + Test-Requests
+    // teilen einen Browser). Page-Level transient — Browser bleibt nutzbar.
+    /Network\.enable|Protocol error|Target closed|Connection closed|Session closed|timed out|Requesting main frame too early|frame was detached|Navigating frame|Frame got detached/i.test(message)
   );
+}
+
+/**
+ * Task #594: Eine spezielle Klasse transienter Fehler, die NICHT vom Browser
+ * sondern vom konkreten Render (Frame/Target) verursacht werden. Diese Fehler
+ * profitieren von einem Retry mit frischer Page — ein voller Browser-Discard
+ * ist kontraproduktiv (zerstört auch alle anderen gerade laufenden Renders).
+ */
+function isPageLevelTransientError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const message = (err as { message?: string }).message ?? "";
+  return /frame was detached|Navigating frame|Frame got detached|Target closed|Session closed/i.test(message);
+}
+
+/**
+ * Task #594: Globaler Semaphor gegen Chromium-Resource-Contention.
+ *
+ * Hintergrund: `persistInvoicePdf` läuft seit Task #544 im Hintergrund
+ * (`setImmediate`). In Test-Läufen (und in Produktion bei Burst-Last)
+ * stapeln sich N parallele Hintergrund-Renders gleichzeitig auf demselben
+ * Singleton-Browser. Unter `--no-zygote --single-process` (Dev/Test-Profile)
+ * kollabieren Chromium-Frames dann mit "Navigating frame was detached".
+ *
+ * Wir begrenzen daher die parallele Page-Erzeugung pro Prozess. Default 2
+ * (ein laufender + ein wartender Render), per `PDF_RENDER_CONCURRENCY`
+ * überschreibbar. Der Resilience-Test "10 parallele Aufrufe" (Task #526)
+ * läuft mit dem Default in Wellen durch — jeder Aufruf erhält weiterhin
+ * seine eigene Page, nur eben nicht alle 10 simultan.
+ */
+const PDF_RENDER_MAX_CONCURRENCY = Math.max(
+  1,
+  Number.parseInt(process.env.PDF_RENDER_CONCURRENCY ?? "2", 10) || 2,
+);
+let activeRenderSlots = 0;
+const renderSlotWaiters: Array<() => void> = [];
+
+async function acquireRenderSlot(): Promise<void> {
+  if (activeRenderSlots < PDF_RENDER_MAX_CONCURRENCY) {
+    activeRenderSlots++;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    renderSlotWaiters.push(resolve);
+  });
+  // Slot wird in releaseRenderSlot() für uns übergeben (kein neuer Inkrement
+  // hier, sonst würden zwei Aufrufer denselben Slot besitzen).
+}
+
+function releaseRenderSlot(): void {
+  const next = renderSlotWaiters.shift();
+  if (next) {
+    // Slot 1:1 weiterreichen — activeRenderSlots bleibt konstant.
+    next();
+  } else {
+    activeRenderSlots = Math.max(0, activeRenderSlots - 1);
+  }
+}
+
+export function _getRenderSlotState(): { active: number; waiting: number; max: number } {
+  return {
+    active: activeRenderSlots,
+    waiting: renderSlotWaiters.length,
+    max: PDF_RENDER_MAX_CONCURRENCY,
+  };
 }
 
 /**
@@ -370,49 +437,72 @@ async function warmupPage(page: Page): Promise<void> {
  * Race-Timeout den gesamten Aufruf, sodass blockierte CDP-Calls nicht
  * länger als `PAGE_RENDER_TIMEOUT_MS` hängen.
  */
+const WITH_FRESH_PAGE_MAX_ATTEMPTS = 3;
+
 export async function withFreshPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let page: Page | null = null;
-    try {
-      const browser = await getBrowser();
-      page = await browser.newPage();
-      // Task #532: Frame-Warmup gegen "Requesting main frame too early".
-      await warmupPage(page);
-      const runner = fn(page);
-      const result = await Promise.race([
-        runner,
-        new Promise<T>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`PDF-Rendering überschritt ${PAGE_RENDER_TIMEOUT_MS}ms Timeout`)),
-            PAGE_RENDER_TIMEOUT_MS,
+  // Task #594: Slot-Akquise VOR allem anderen — wenn der Browser bereits
+  // saturiert ist, warten wir hier statt zusätzliche Pages aufzumachen.
+  await acquireRenderSlot();
+  try {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < WITH_FRESH_PAGE_MAX_ATTEMPTS; attempt++) {
+      let page: Page | null = null;
+      try {
+        const browser = await getBrowser();
+        page = await browser.newPage();
+        // Task #532: Frame-Warmup gegen "Requesting main frame too early".
+        await warmupPage(page);
+        const runner = fn(page);
+        const result = await Promise.race([
+          runner,
+          new Promise<T>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`PDF-Rendering überschritt ${PAGE_RENDER_TIMEOUT_MS}ms Timeout`)),
+              PAGE_RENDER_TIMEOUT_MS,
+            ),
           ),
-        ),
-      ]);
-      return result;
-    } catch (err) {
-      lastErr = err;
-      if (page) {
-        try { await page.close(); } catch { /* ignore */ }
-        page = null;
-      }
-      // Task #544: Bei fehlendem Chromium nicht retryen — schneller, klarer
-      // Fehler statt minutenlanges Hängen.
-      if (err instanceof ChromiumUnavailableError) {
+        ]);
+        return result;
+      } catch (err) {
+        lastErr = err;
+        if (page) {
+          try { await page.close(); } catch { /* ignore */ }
+          page = null;
+        }
+        // Task #544: Bei fehlendem Chromium nicht retryen — schneller, klarer
+        // Fehler statt minutenlanges Hängen.
+        if (err instanceof ChromiumUnavailableError) {
+          throw err;
+        }
+        const lastAttempt = attempt === WITH_FRESH_PAGE_MAX_ATTEMPTS - 1;
+        if (lastAttempt) {
+          throw err;
+        }
+        // Task #594: "Navigating frame was detached" ist Page-/Target-lokal
+        // — der Browser-Prozess lebt weiter und andere parallel laufende
+        // Renders dürfen nicht mit ihm sterben. Wir verwerfen den Browser
+        // nur bei echten Connection-/Protocol-Fehlern (Task #521/#532) und
+        // gönnen Frame-Detach-Retries kurz Backoff, damit der nächste
+        // Versuch nicht in dieselbe Saturations-Welle läuft.
+        if (isPageLevelTransientError(err)) {
+          await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+          continue;
+        }
+        if (isRecoverablePuppeteerError(err)) {
+          await discardBrowser();
+          continue;
+        }
         throw err;
-      }
-      if (isRecoverablePuppeteerError(err) && attempt === 0) {
-        await discardBrowser();
-        continue;
-      }
-      throw err;
-    } finally {
-      if (page) {
-        try { await page.close(); } catch { /* ignore */ }
+      } finally {
+        if (page) {
+          try { await page.close(); } catch { /* ignore */ }
+        }
       }
     }
+    throw lastErr ?? new Error("PDF-Rendering fehlgeschlagen");
+  } finally {
+    releaseRenderSlot();
   }
-  throw lastErr ?? new Error("PDF-Rendering fehlgeschlagen");
 }
 
 function isFullHtmlDocument(html: string): boolean {
