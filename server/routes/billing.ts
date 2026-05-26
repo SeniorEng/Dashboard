@@ -1090,8 +1090,9 @@ async function generateInvoiceCore(
   const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
 
   // T05/K3: Storno-then-rebill — wenn für diesen Zeitraum bereits stornierte
-  // Original-Rechnungen existieren, ist die neue Rechnung eine Nachberechnung
-  // und muss die Original-IDs zur Nachvollziehbarkeit verlinken.
+  // Original-Rechnungen existieren, müssen deren IDs zur Nachvollziehbarkeit
+  // verlinkt werden (Task #585: kein eigener Typ "nachberechnung" mehr —
+  // die neue Rechnung ist eine reguläre Rechnung mit Storno-Referenzen).
   const stornoOriginalRows = await db.select({ id: invoicesTable.id })
     .from(invoicesTable)
     .where(and(
@@ -1104,7 +1105,9 @@ async function generateInvoiceCore(
   const referencedStornoInvoiceIds = stornoOriginalRows.map((r) => r.id);
   const stornoRefsForInsert: number[] | null =
     referencedStornoInvoiceIds.length > 0 ? referencedStornoInvoiceIds : null;
-  const isNachberechnung = alreadyInvoicedIds.length > 0 || referencedStornoInvoiceIds.length > 0;
+  // Task #585: Der Typ "nachberechnung" wurde abgeschafft — jede neu erzeugte
+  // Rechnung ist fachlich einfach eine reguläre Rechnung. `alreadyInvoicedIds`
+  // (Termin-Ausschluss) und `referencedStornoInvoiceIds` (Verlinkung) bleiben.
 
   const apptIds = alreadyInvoicedIds.length > 0
     ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
@@ -1177,7 +1180,7 @@ async function generateInvoiceCore(
           invoiceNumber: kasseInvoiceNumber,
           customerId,
           billingType,
-          invoiceType: isNachberechnung ? "nachberechnung" as const : "rechnung" as const,
+          invoiceType: "rechnung" as const,
           billingMonth,
           billingYear,
           recipientName: kasseRecipientName,
@@ -1212,7 +1215,7 @@ async function generateInvoiceCore(
             invoiceNumber: kasseInvoiceNumber,
             customerId,
             billingType,
-            invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+            invoiceType: "rechnung",
             billingMonth,
             billingYear,
             grossAmountCents: kasseNetCents,
@@ -1240,7 +1243,7 @@ async function generateInvoiceCore(
           invoiceNumber: privateInvoiceNumber,
           customerId,
           billingType: "selbstzahler",
-          invoiceType: isNachberechnung ? "nachberechnung" as const : "rechnung" as const,
+          invoiceType: "rechnung" as const,
           billingMonth,
           billingYear,
           recipientName: customerName,
@@ -1276,7 +1279,7 @@ async function generateInvoiceCore(
             invoiceNumber: privateInvoiceNumber,
             customerId,
             billingType: "selbstzahler",
-            invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+            invoiceType: "rechnung",
             billingMonth,
             billingYear,
             grossAmountCents: privateNetCents + privateVatCents,
@@ -1359,7 +1362,7 @@ async function generateInvoiceCore(
         invoiceNumber: number,
         customerId,
         billingType,
-        invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+        invoiceType: "rechnung",
         billingMonth,
         billingYear,
         recipientName,
@@ -1390,7 +1393,7 @@ async function generateInvoiceCore(
           invoiceNumber: number,
           customerId,
           billingType,
-          invoiceType: isNachberechnung ? "nachberechnung" : "rechnung",
+          invoiceType: "rechnung",
           billingMonth,
           billingYear,
           grossAmountCents: totalNetCents + totalVatCents,

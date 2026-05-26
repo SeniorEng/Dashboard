@@ -889,8 +889,8 @@ describe("BF-3: Storno (Stornorechnung + Audit + Schutz)", () => {
 // BF-4: Nachberechnung
 // ============================================================
 
-describe("BF-4: Nachberechnung", () => {
-  it("BF-4.1 — Zweiter Termin im selben Monat erzeugt invoiceType=nachberechnung mit nur dem neuen Termin", async () => {
+describe("BF-4: Nachträglich abgerechnete Termine im selben Monat", () => {
+  it("BF-4.1 — Zweiter Termin im selben Monat erzeugt zusätzliche Rechnung mit nur dem neuen Termin", async () => {
     const custId = await createCustomer(szPayload("NB1"));
 
     // 1. Termin → erste Rechnung
@@ -904,7 +904,7 @@ describe("BF-4: Nachberechnung", () => {
     const firstInv = firstInvoices[0];
     expect(firstInv.invoiceType).toBe("rechnung");
 
-    // 2. Termin im selben Kalendermonat (anderer Tag) → Nachberechnung.
+    // 2. Termin im selben Kalendermonat (anderer Tag) → neue Rechnung (Task #585: nicht mehr als "nachberechnung" markiert).
     const a2 = await findFreeSlotInMonth(
       custId,
       hwServiceId,
@@ -924,7 +924,8 @@ describe("BF-4: Nachberechnung", () => {
     const { invoices: secondInvoices } = await generateInvoice(custId, d1.getFullYear(), d1.getMonth() + 1);
     expect(secondInvoices.length).toBe(1);
     const second = secondInvoices[0];
-    expect(second.invoiceType, "Zweite Rechnung im selben Monat muss nachberechnung sein").toBe("nachberechnung");
+    // Task #585: "nachberechnung" wurde abgeschafft — jede neue Rechnung ist "rechnung".
+    expect(second.invoiceType, "Zweite Rechnung im selben Monat ist regulär 'rechnung'").toBe("rechnung");
     expect(second.id).not.toBe(firstInv.id);
 
     const secondDetail = await loadInvoiceWithLineItems(second.id);
@@ -933,15 +934,15 @@ describe("BF-4: Nachberechnung", () => {
       .filter((id: number | null) => id !== null);
     expect(
       apptIdsInSecond.includes(a2.id),
-      "Nachberechnung muss den neuen Termin enthalten",
+      "Zweite Rechnung muss den neuen Termin enthalten",
     ).toBe(true);
     expect(
       apptIdsInSecond.includes(a1.id),
-      "Nachberechnung darf den bereits abgerechneten Termin NICHT erneut enthalten",
+      "Zweite Rechnung darf den bereits abgerechneten Termin NICHT erneut enthalten",
     ).toBe(false);
   });
 
-  it("BF-4.2 — Keine appointmentId erscheint in Original- UND Nachberechnung", async () => {
+  it("BF-4.2 — Keine appointmentId erscheint in beiden Rechnungen desselben Monats", async () => {
     const custId = await createCustomer(szPayload("NB2"));
     const a1 = await findFreeSlotAndCreate(custId, hwServiceId, 30, "NB2a");
     await documentAppointment(a1.id, a1.time, hwServiceId, 30, "BF-4.2 Original");
@@ -980,7 +981,7 @@ describe("BF-4: Nachberechnung", () => {
     for (const id of apptIdsSecond) {
       expect(
         apptIdsFirst.has(id),
-        `appointmentId ${id} darf NICHT in Original UND Nachberechnung erscheinen`,
+        `appointmentId ${id} darf NICHT in Original UND Zweitrechnung erscheinen`,
       ).toBe(false);
     }
   });

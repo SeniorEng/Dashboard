@@ -79,16 +79,18 @@ const STATUS_COLORS: Record<string, string> = {
   storniert: "bg-red-50 text-red-700 border-red-200",
 };
 
+// Task #585: "nachberechnung" wurde abgeschafft — historische Zeilen werden
+// einheitlich als "Rechnung" angezeigt.
 const TYPE_LABELS: Record<string, string> = {
   rechnung: "Rechnung",
   stornorechnung: "Stornorechnung",
-  nachberechnung: "Nachberechnung",
+  nachberechnung: "Rechnung",
 };
 
 const TYPE_COLORS: Record<string, string> = {
   rechnung: "bg-teal-50 text-teal-700 border-teal-200",
   stornorechnung: "bg-red-50 text-red-700 border-red-200",
-  nachberechnung: "bg-amber-50 text-amber-700 border-amber-200",
+  nachberechnung: "bg-teal-50 text-teal-700 border-teal-200",
 };
 
 function formatAmount(cents: number): string {

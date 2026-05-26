@@ -1,19 +1,15 @@
 /**
- * Phase-2 Bug-Tests — K3: Nachberechnung nach Storno mit Storno-Verlinkung
+ * K3: Re-Rechnung nach Storno mit Storno-Verlinkung
  *
- * Heute erzeugt eine erneute Generierung nach Storno eine Rechnung mit
- * invoiceType = "rechnung" (oder im Doku-Pfad "nachberechnung", aber ohne
- * Verlinkung zur stornierten Original-Rechnung). Es fehlt das Feld
- * `referencedStornoInvoiceIds`, das die Beziehung zur stornierten Rechnung
- * dokumentiert.
+ * Task #585: Der Typ "nachberechnung" wurde abgeschafft. Eine erneute
+ * Generierung nach Storno erzeugt eine reguläre Rechnung
+ * (`invoiceType = "rechnung"`), die über `referencedStornoInvoiceIds`
+ * die Original-Rechnung zur Nachvollziehbarkeit verlinkt.
  *
- * Erwartet (Phase-2):
+ * Erwartet:
  *   - Zweite Rechnung enthält T1 + T2 (alle Termine des Zeitraums).
- *   - invoiceType = "nachberechnung".
+ *   - invoiceType = "rechnung".
  *   - referencedStornoInvoiceIds enthält die ID von RE-001 (Original).
- *
- * Mapping: Test → K-Punkt → Fix-Status
- *   K3 → it.fails (heute keine Storno-Verlinkung, kippt nach K3-Fix)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -164,8 +160,8 @@ afterAll(async () => {
   await cleanupCustomer(customerId);
 });
 
-describe("K3 — Nachberechnung nach Storno verlinkt Original-Rechnung", () => {
-  it("K3.1 — Re-Generierung nach Storno: invoiceType=nachberechnung + referencedStornoInvoiceIds enthält Original", async () => {
+describe("K3 — Re-Rechnung nach Storno verlinkt Original-Rechnung", () => {
+  it("K3.1 — Re-Generierung nach Storno: invoiceType=rechnung + referencedStornoInvoiceIds enthält Original", async () => {
     const today = new Date();
     const year = today.getFullYear();
     const month = today.getMonth() + 1;
@@ -230,8 +226,8 @@ describe("K3 — Nachberechnung nach Storno verlinkt Original-Rechnung", () => {
     expect(inv2?.id, "Re-Rechnung muss erzeugt sein").toBeDefined();
     cleanupInvoiceIds.push(inv2.id);
 
-    // Phase-2 Erwartung: Nachberechnung mit Verlinkung.
-    expect(inv2.invoiceType, `K3-Bug: invoiceType=${inv2.invoiceType}, erwartet 'nachberechnung'`).toBe("nachberechnung");
+    // Task #585: Re-Rechnung ist eine reguläre Rechnung mit Storno-Verlinkung.
+    expect(inv2.invoiceType, `K3: invoiceType=${inv2.invoiceType}, erwartet 'rechnung'`).toBe("rechnung");
     expect(
       Array.isArray(inv2.referencedStornoInvoiceIds),
       `K3-Bug: referencedStornoInvoiceIds-Feld fehlt (got ${typeof inv2.referencedStornoInvoiceIds})`,

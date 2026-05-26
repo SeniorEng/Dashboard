@@ -823,7 +823,7 @@ export function PricingSection({ customerId, customerName, billingType, onRefres
               <div className="space-y-2 text-sm">
                 <p>
                   Sie ändern eine Preis-Periode, die bereits in abgerechneten Zeiträumen liegt.
-                  Diese Änderung könnte zukünftige Nachberechnungen oder erneute Rechnungserstellungen
+                  Diese Änderung könnte zukünftige Rechnungen oder erneute Rechnungserstellungen
                   mit anderen Preisen abrechnen, als ursprünglich auf der Rechnung standen.
                 </p>
                 {pendingChange && pendingChange.invoices.length > 0 && (

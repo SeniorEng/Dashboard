@@ -15,13 +15,19 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   storniert: "Storniert",
 };
 
+// Task #585: "nachberechnung" wurde als Rechnungstyp abgeschafft. Der Wert
+// bleibt in der Union erhalten, weil historische DB-Zeilen ihn weiterhin
+// tragen können (GoBD-Immutabilität, Spalte ist `text`, keine Enum-Migration).
+// Neu erzeugte Rechnungen verwenden ausschließlich "rechnung" oder
+// "stornorechnung". Anzeige historischer "nachberechnung"-Zeilen wird
+// einheitlich auf "Rechnung" gemappt (PDF + UI).
 export const INVOICE_TYPES = ["rechnung", "stornorechnung", "nachberechnung"] as const;
 export type InvoiceType = typeof INVOICE_TYPES[number];
 
 export const INVOICE_TYPE_LABELS: Record<InvoiceType, string> = {
   rechnung: "Rechnung",
   stornorechnung: "Stornorechnung",
-  nachberechnung: "Nachberechnung",
+  nachberechnung: "Rechnung",
 };
 
 export const invoices = pgTable("invoices", {

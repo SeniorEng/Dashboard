@@ -31,7 +31,7 @@ export interface InvoicePdfData {
   // zurück, sodass Pflegekassen-PDFs auch ohne explizites Aktenzeichen
   // ein dunkelverarbeitbares Feld tragen.
   buyerReference: string | null;
-  invoiceType: string; // rechnung, stornorechnung, nachberechnung
+  invoiceType: string; // rechnung, stornorechnung (historische Zeilen ggf. "nachberechnung" — werden als "RECHNUNG" gerendert, siehe Task #585)
   billingType: string; // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler
   billingMonth: number;
   billingYear: number;
@@ -142,9 +142,10 @@ function formatMinutes(minutes: number): string {
 const MONTH_NAMES = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
 function getInvoiceTypeLabel(type: string): string {
+  // Task #585: "nachberechnung" wurde abgeschafft. Historische Zeilen mit
+  // diesem Typ werden einheitlich als "RECHNUNG" gerendert.
   switch (type) {
     case "stornorechnung": return "STORNORECHNUNG";
-    case "nachberechnung": return "NACHBERECHNUNG";
     default: return "RECHNUNG";
   }
 }
