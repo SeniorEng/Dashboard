@@ -364,7 +364,20 @@ export default function AdminBilling() {
       }
     },
     onError: (error: Error) => {
-      toast({ title: "Massenerstellung fehlgeschlagen", description: error.message, variant: "destructive" });
+      // Task #586 — Server-Code mit anzeigen, damit „HTTP 500:" ohne
+      // Kontext nicht mehr beim Nutzer landet. `ApiError` trägt nach
+      // `parseErrorResponse` `code` + `status`; bei generischem
+      // Netz-/Parsing-Fehler bleibt nur die Message.
+      const apiErr = error as Error & { code?: string; status?: number };
+      const codePart = apiErr.code && apiErr.code !== "API_ERROR" && apiErr.code !== "NETWORK_ERROR"
+        ? ` [${apiErr.code}]`
+        : "";
+      const statusPart = apiErr.status ? ` (HTTP ${apiErr.status})` : "";
+      toast({
+        title: "Massenerstellung fehlgeschlagen",
+        description: `${error.message}${codePart}${statusPart}`,
+        variant: "destructive",
+      });
     },
   });
 

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { AppError, asyncHandler, badRequest, notFound } from "../lib/errors";
+import { log } from "../lib/log";
 import { requireIntParam } from "../lib/params";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
@@ -2984,6 +2985,13 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
   const { billingMonth, billingYear } = parsed.data;
+  // Task #586 — Strukturiertes Start-/Ende-Log + Voll-Stack im inneren
+  // Catch, damit der nächste 500-Vorfall in Prod im Server-Log sofort
+  // nachvollziehbar ist (Monat/Jahr, Customer-Count, created/skipped/errors,
+  // Dauer). Vor #586 hatten wir bei einem leeren "HTTP 500:" im Toast nur
+  // den blanken Express-Request-Log und keinen Kontext.
+  const startedAt = Date.now();
+  const userId = req.user?.id;
 
   // Berechtigte Kunden = Kunden mit signiertem Leistungsnachweis für den Monat.
   const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
@@ -2999,6 +3007,10 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
       monthlyServiceRecordsRepo.activeOnly(),
     ));
   const customerIds = Array.from(new Set(signedRecords.map(r => r.customerId)));
+  log(
+    `generate-all start month=${billingMonth}/${billingYear} eligibleCustomers=${customerIds.length} userId=${userId ?? "?"}`,
+    "billing",
+  );
 
   const results: Array<{
     customerId: number;
@@ -3039,11 +3051,20 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
         // / „nicht unterschrieben" werden als Skip gewertet, damit die
         // Massenerstellung idempotent bleibt und nicht jeder Kunde ohne
         // signierten LN als Fehler zählt.
-        if (msg.includes("bereits abgerechnet")
+        const isSkip = msg.includes("bereits abgerechnet")
             || msg.includes("noch nicht unterschrieben")
-            || msg.includes("Kein Leistungsnachweis")) {
+            || msg.includes("Kein Leistungsnachweis");
+        if (isSkip) {
           results.push({ customerId, status: "skipped", message: msg });
         } else {
+          // Task #586 — vollen Stack inkl. Kontext loggen, damit ein
+          // unerwarteter Fehler in `generateInvoiceCore` im nächsten
+          // Vorfall im Server-Log direkt rekonstruierbar ist.
+          const stack = innerErr instanceof Error && innerErr.stack ? innerErr.stack : msg;
+          log(
+            `generate-all inner error customer=${customerId} month=${billingMonth}/${billingYear} userId=${userId ?? "?"}: ${msg}\n${stack}`,
+            "billing",
+          );
           results.push({ customerId, status: "error", message: msg });
         }
       }
@@ -3056,6 +3077,12 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
   const created = results.filter(r => r.status === "created").length;
   const skipped = results.filter(r => r.status === "skipped").length;
   const errors = results.filter(r => r.status === "error").length;
+  const durationMs = Date.now() - startedAt;
+  const firstErrorMsg = results.find(r => r.status === "error")?.message;
+  log(
+    `generate-all done month=${billingMonth}/${billingYear} total=${results.length} created=${created} skipped=${skipped} errors=${errors} durationMs=${durationMs}${firstErrorMsg ? ` firstError=${JSON.stringify(firstErrorMsg)}` : ""}`,
+    "billing",
+  );
 
   res.json({
     summary: { total: results.length, created, skipped, errors },
