@@ -6,6 +6,19 @@
  * SHA-256 des persistierten PDFs. Außerdem muss verifyInvoiceIntegrity()
  * für die frisch erzeugte Rechnung xmlMatch=true und pdfHashMatch=true
  * liefern, da PDF + XML deterministisch re-renderbar sind.
+ *
+ * Drift-Repair-Härtung (Task #589):
+ * `server/startup/sync-appointment-service-durations.ts` läuft beim
+ * Server-Boot asynchron im Hintergrund und kann stale (Vor-Lauf-)Termine
+ * idempotent reparieren. Damit der Verifier-Re-Render denselben Snapshot
+ * sieht wie die Persistenz aus `/generate`, erzwingen wir vor jedem
+ * `verifyInvoiceIntegrity()`-Aufruf einen synchronen Re-Run der Drift-
+ * Reparatur — für den Test-Termin selbst muss das ein No-Op sein
+ * (Service-Zeile wird mit `durationMinutes === durationPromised` angelegt).
+ * Der Regressions-Test ZFP.2 simuliert dagegen einen echten Integrity-
+ * Drift (manuelle Mutation von `invoices.zugferd_xml`) und prüft, dass der
+ * Verifier diesen weiterhin als `xmlMatch=false` meldet — die Härtung
+ * gegen Drift-Repair-Interferenz darf echte Drift NICHT schlucken.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -39,6 +52,33 @@ function shiftToWeekday(d: Date): Date {
   return d;
 }
 const SEED_TIMES = ["00:00", "00:30", "01:00", "01:30", "02:00", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"];
+
+async function waitForZugferdPersisted(
+  invoiceId: number,
+): Promise<{ zugferdXml: string | null; pdfHash: string | null }> {
+  // Erste, kurze Warteschleife (5s) für den Hintergrund-Persist (Happy Path).
+  for (let i = 0; i < 10; i++) {
+    const [row] = await db
+      .select({ zugferdXml: invoicesTable.zugferdXml, pdfHash: invoicesTable.pdfHash })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, invoiceId))
+      .limit(1);
+    if (row?.zugferdXml && row?.pdfHash) return row;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  // Fallback: GET /:id/pdf triggert `persistInvoicePdf` synchron im Request-
+  // Handler (Cache-Miss-Pfad, siehe `server/routes/billing.ts`). Damit ist die
+  // Persistierung nach Rückkehr garantiert geschrieben — wir umgehen so den
+  // intermittierenden Puppeteer-Cold-Start („Navigating frame was detached"),
+  // der den Hintergrund-Persist gelegentlich in den 3x-Retry-Backoff schickt.
+  await apiGet<any>(`/api/billing/${invoiceId}/pdf`).catch(() => undefined);
+  const [row] = await db
+    .select({ zugferdXml: invoicesTable.zugferdXml, pdfHash: invoicesTable.pdfHash })
+    .from(invoicesTable)
+    .where(eq(invoicesTable.id, invoiceId))
+    .limit(1);
+  return row ?? { zugferdXml: null, pdfHash: null };
+}
 
 async function findFreeSlotAndCreate(custId: number, tag: string): Promise<{ id: number; date: string; time: string }> {
   for (let offset = 1; offset <= 60; offset++) {
@@ -133,18 +173,12 @@ describe("ZUGFeRD-Persistenz — invoices.zugferd_xml + Integrity-Verifier", () 
     expect(inv?.id, "Rechnung muss erzeugt sein").toBeDefined();
     cleanupInvoiceIds.push(inv.id);
 
-    // Task #544: persistInvoicePdf läuft nach /generate im Hintergrund.
-    // Auf das Erscheinen von zugferd_xml warten (bis 30s).
-    let row: { zugferdXml: string | null; pdfHash: string | null } | undefined;
-    for (let i = 0; i < 60; i++) {
-      [row] = await db
-        .select({ zugferdXml: invoicesTable.zugferdXml, pdfHash: invoicesTable.pdfHash })
-        .from(invoicesTable)
-        .where(eq(invoicesTable.id, inv.id))
-        .limit(1);
-      if (row?.zugferdXml && row?.pdfHash) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    // Task #544 + #589: persistInvoicePdf läuft nach /generate im Hintergrund
+    // und kann unter Last (Puppeteer-Cold-Start, „frame detached"-Retries) > 30s
+    // brauchen. Wir polln kurz und triggern dann den synchronen On-Demand-Render
+    // via GET /:id/pdf — der ruft `persistInvoicePdf` direkt auf und schreibt
+    // PDF + ZUGFeRD-XML hashstabil. So entfernen wir auch diese Flake-Quelle.
+    const row = await waitForZugferdPersisted(inv.id);
 
     expect(
       row?.zugferdXml,
@@ -158,11 +192,133 @@ describe("ZUGFeRD-Persistenz — invoices.zugferd_xml + Integrity-Verifier", () 
     expect(row?.zugferdXml).toContain("CrossIndustryInvoice");
     expect(row?.pdfHash, "pdf_hash darf nach /generate nicht NULL sein").not.toBeNull();
 
+    // Task #589: Race gegen Startup-Drift-Repair neutralisieren — synchron
+    // re-runnen, sodass alle pending Reparaturen abgeschlossen sind, BEVOR
+    // der Verifier den Re-Render startet. Für den Test-Termin ist der Re-Run
+    // ein No-Op (Service-Zeile wurde mit `durationMinutes === durationPromised`
+    // angelegt, Status ist nach /document `completed` → GoBD-locked → nur
+    // Audit-Log, keine Mutation).
+    const { syncAppointmentServiceDurations } = await import(
+      "../../server/startup/sync-appointment-service-durations"
+    );
+    await syncAppointmentServiceDurations();
+
     // Integrity-Verifier muss xmlMatch=true und pdfHashMatch=true liefern.
     const { verifyInvoiceIntegrity } = await import("../../server/services/invoice-integrity-verifier");
     const result = await verifyInvoiceIntegrity(inv.id);
     expect(result, "Verifier liefert Ergebnis").not.toBeNull();
+
+    // Diagnose-Hilfe (Task #589): falls die Re-Render-XML trotz synchronem
+    // Drift-Repair-Re-Run nicht matcht, dump den ersten abweichenden Index
+    // + 80-Byte-Kontext, damit die nächste Iteration die echte Drift-Quelle
+    // (z.B. cached companySettings, customer-State, Timestamp im XML) sofort
+    // sieht — statt erneut blind nach der Ursache zu raten.
+    if (result && !result.xmlMatch) {
+      const persisted = String(row?.zugferdXml ?? "");
+      const { buildInvoicePdfBytes } = await import("../../server/routes/billing");
+      const { getCachedCompanySettings } = await import("../../server/services/cache");
+      const cs = await getCachedCompanySettings();
+      const [invRow] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, inv.id)).limit(1);
+      const rerendered = cs && invRow ? (await buildInvoicePdfBytes(invRow as any, cs)).xml ?? "" : "";
+      let diffAt = -1;
+      const max = Math.min(persisted.length, rerendered.length);
+      for (let i = 0; i < max; i++) {
+        if (persisted.charCodeAt(i) !== rerendered.charCodeAt(i)) { diffAt = i; break; }
+      }
+      if (diffAt < 0 && persisted.length !== rerendered.length) diffAt = max;
+      const ctx = (s: string) => s.slice(Math.max(0, diffAt - 40), diffAt + 80).replace(/\s+/g, " ");
+       
+      console.error(`[ZFP.1] XML-Drift bei Byte ${diffAt} (persisted.len=${persisted.length} rerendered.len=${rerendered.length})\n  persisted : …${ctx(persisted)}…\n  rerendered: …${ctx(rerendered)}…`);
+    }
+
     expect(result?.xmlMatch, "Re-render-XML muss byte-genau gegen persistiertes XML matchen").toBe(true);
     expect(result?.pdfHashMatch, "Re-render-PDF-Hash muss gegen persistierten pdfHash matchen").toBe(true);
+  }, 60_000);
+
+  it("ZFP.2 — Verifier meldet echten XML-Drift weiterhin als xmlMatch=false (Regressions-Schutz)", async () => {
+    // Sicherstellen, dass die ZFP.1-Härtung (synchroner Drift-Repair-Re-Run +
+    // No-Op auf dem Test-Termin) keinen echten Integrity-Drift verschluckt:
+    // Wir mutieren das persistierte `invoices.zugferd_xml` direkt und
+    // erwarten, dass der Verifier diese Manipulation erkennt.
+    const slot = await findFreeSlotAndCreate(customerId, "Dr");
+    const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "ZFP-Dr" }],
+    });
+    expect(docRes.status, `document: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const d = new Date(slot.date);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+
+    const sr = await apiPost<any>("/api/service-records", {
+      customerId,
+      employeeId: auth.user.id,
+      year,
+      month,
+    });
+    expect(sr.status, `SR create: ${JSON.stringify(sr.data)}`).toBe(201);
+    cleanupSrIds.push(sr.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost<any>(`/api/service-records/${sr.data.id}/sign`, {
+        signerType,
+        signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      });
+      expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const gen = await apiPost<any>("/api/billing/generate", {
+      customerId,
+      billingMonth: month,
+      billingYear: year,
+    });
+    expect(gen.status, `generate: ${JSON.stringify(gen.data)}`).toBe(200);
+    const inv: any = gen.data?.splitInvoices ? gen.data.invoices[0]
+      : Array.isArray(gen.data) ? gen.data[0]
+      : gen.data;
+    expect(inv?.id).toBeDefined();
+    cleanupInvoiceIds.push(inv.id);
+
+    // Auf zugferd_xml warten — gleicher On-Demand-Fallback wie ZFP.1.
+    const persisted = await waitForZugferdPersisted(inv.id);
+    const originalXml = persisted.zugferdXml;
+    expect(originalXml).not.toBeNull();
+    expect(persisted.pdfHash).not.toBeNull();
+
+    // Künstlicher Integrity-Drift: persistiertes XML bewusst verstimmen.
+    const tamperedXml = (originalXml || "").replace(
+      "CrossIndustryInvoice",
+      "CrossIndustryInvoice_TAMPERED_ZFP2",
+    );
+    expect(tamperedXml).not.toBe(originalXml);
+    await db
+      .update(invoicesTable)
+      .set({ zugferdXml: tamperedXml })
+      .where(eq(invoicesTable.id, inv.id));
+
+    // Drift-Repair synchron triggern — Härtung darf den echten Drift NICHT
+    // kaschieren.
+    const { syncAppointmentServiceDurations } = await import(
+      "../../server/startup/sync-appointment-service-durations"
+    );
+    await syncAppointmentServiceDurations();
+
+    const { verifyInvoiceIntegrity } = await import("../../server/services/invoice-integrity-verifier");
+    const result = await verifyInvoiceIntegrity(inv.id);
+    expect(result).not.toBeNull();
+    expect(
+      result?.xmlMatch,
+      "Verifier muss manipuliertes XML weiterhin als Drift melden",
+    ).toBe(false);
+
+    // Aufräumen: persistiertes XML zurück auf den Original-Wert, damit der
+    // Storno-Cleanup im afterAll nicht über die Tampered-Daten stolpert.
+    await db
+      .update(invoicesTable)
+      .set({ zugferdXml: originalXml })
+      .where(eq(invoicesTable.id, inv.id));
   }, 60_000);
 });

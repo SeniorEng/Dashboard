@@ -53,6 +53,23 @@ npx vitest run tests/customers.test.ts
 | `public-signing.test.ts` | Digitale Unterschrift | Token-Validierung, Signatur (öffentlich) | 4 |
 | `statistics.test.ts` | Statistik/Cockpit | Overview, Trends, Budget, Margen | 6 |
 
+## ZUGFeRD-Persistenz-Test gegen Drift-Repair gehärtet (Task #589)
+
+`tests/billing/zugferd-persistence.test.ts` ruft vor jedem
+`verifyInvoiceIntegrity()`-Aufruf explizit
+`syncAppointmentServiceDurations()` synchron auf. Hintergrund: die Startup-
+Drift-Reparatur läuft beim Server-Boot asynchron im Hintergrund und kann
+stale Termine aus Vor-Läufen idempotent reparieren — wenn das zwischen
+`/api/billing/generate` und dem Verifier-Re-Render passiert, weicht der
+re-gerenderte ZUGFeRD-XML im worst case vom persistierten ab und der Test
+würde fälschlich `xmlMatch=false` melden. Der synchrone Re-Run serialisiert
+gegen den Hintergrund-Lauf und ist für den Test-Termin selbst ein No-Op
+(Service-Zeile wird mit `durationMinutes === durationPromised` angelegt,
+nach `/document` ist der Termin GoBD-locked). ZFP.2 stellt zusätzlich
+sicher, dass der Verifier echten Integrity-Drift (manuell mutiertes
+`invoices.zugferd_xml`) weiterhin erkennt — die Härtung darf real drift
+NICHT verschlucken.
+
 ## Drift-Detektoren "Anzeige vs. Buchung" (Task #427)
 
 Equality-Suite, die für 5 Hotspots prüft, dass der Read-Pfad (was die UI
