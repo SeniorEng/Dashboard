@@ -61,7 +61,7 @@ const ROLE_LABELS: Record<RoleKey, string> = {
   super_admin: "Superadmin",
 };
 
-const STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting", "completed", "cancelled", "expired_unsigned"];
+const STATUSES: AppointmentStatus[] = ["scheduled", "documenting", "completed", "cancelled", "expired_unsigned"];
 
 interface ScenarioFlags {
   isLocked: boolean;
@@ -232,9 +232,9 @@ describe("Berechtigungs-Matrix Termine", () => {
 
   it("Teamleiter darf editieren, aber nicht dokumentieren oder wiedereröffnen", () => {
     const flags: ScenarioFlags = { isLocked: false, isMonthClosed: false };
-    const inProgress = buildAppointment("team_lead", "in-progress", flags);
-    expect(canEditAppointment(ROLES.team_lead, inProgress).allowed).toBe(true);
-    expect(canDocumentAppointment(ROLES.team_lead, inProgress).allowed).toBe(false);
+    const documenting = buildAppointment("team_lead", "documenting", flags);
+    expect(canEditAppointment(ROLES.team_lead, documenting).allowed).toBe(true);
+    expect(canDocumentAppointment(ROLES.team_lead, documenting).allowed).toBe(false);
     const completed = buildAppointment("team_lead", "completed", flags);
     expect(canReopenAppointment(ROLES.team_lead, completed).allowed).toBe(false);
     // Teamleiter darf nur nicht-gestartete Termine löschen.
@@ -314,7 +314,7 @@ describe("Berechtigungs-Matrix Termine", () => {
       // Zugewiesener Mitarbeiter — Happy Path
       { role: "employee_assigned", status: "scheduled", flags: open,
         expected: { view: true, edit: true, delete: true, document: true, reopen: false, overrideClosedMonth: false } },
-      { role: "employee_assigned", status: "in-progress", flags: open,
+      { role: "employee_assigned", status: "documenting", flags: open,
         expected: { edit: true, delete: true, document: true, reopen: false } },
       { role: "employee_assigned", status: "completed", flags: open,
         expected: { edit: true, delete: false, document: false, reopen: true } },
@@ -334,7 +334,7 @@ describe("Berechtigungs-Matrix Termine", () => {
       // Teamleitung
       { role: "team_lead", status: "scheduled", flags: open,
         expected: { view: true, edit: true, delete: true, document: false, reopen: false } },
-      { role: "team_lead", status: "in-progress", flags: open,
+      { role: "team_lead", status: "documenting", flags: open,
         expected: { edit: true, delete: false, document: false } },
       { role: "team_lead", status: "completed", flags: open,
         expected: { edit: true, delete: false, document: false, reopen: false } },

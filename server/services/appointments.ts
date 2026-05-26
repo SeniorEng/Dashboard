@@ -372,30 +372,6 @@ class AppointmentService {
     return { valid: true };
   }
 
-  validateSchedulingChanges(
-    currentStatus: string,
-    targetStatus: string,
-    updates: UpdateAppointment
-  ): ValidationResult {
-    const hasSchedulingChanges = 
-      updates.date !== undefined || 
-      updates.scheduledStart !== undefined || 
-      updates.scheduledEnd !== undefined || 
-      updates.durationPromised !== undefined;
-    
-    if (hasSchedulingChanges) {
-      if (currentStatus !== "scheduled" || targetStatus !== "scheduled") {
-        return {
-          valid: false,
-          error: "Bearbeitung nicht möglich",
-          message: "Zeit und Datum können nur bei geplanten Terminen geändert werden. Dieser Termin wurde bereits gestartet."
-        };
-      }
-    }
-    
-    return { valid: true };
-  }
-
   validateNotesChange(currentStatus: string, updates: UpdateAppointment): ValidationResult {
     if (updates.notes !== undefined) {
       if (!canEditNotes(currentStatus as AppointmentStatus)) {
@@ -403,34 +379,6 @@ class AppointmentService {
           valid: false,
           error: "Bearbeitung nicht möglich",
           message: "Notizen können nur bei geplanten oder dokumentierten Terminen bearbeitet werden."
-        };
-      }
-    }
-    
-    return { valid: true };
-  }
-
-  validateVisitTimeChanges(
-    currentStatus: string,
-    targetStatus: string,
-    updates: UpdateAppointment
-  ): ValidationResult {
-    if (updates.actualStart !== undefined) {
-      if (!(currentStatus === "scheduled" && targetStatus === "in-progress")) {
-        return {
-          valid: false,
-          error: "Ungültige Aktion",
-          message: "Der Besuch kann nur bei einem geplanten Termin gestartet werden."
-        };
-      }
-    }
-    
-    if (updates.actualEnd !== undefined) {
-      if (!(currentStatus === "in-progress" && targetStatus === "documenting")) {
-        return {
-          valid: false,
-          error: "Ungültige Aktion",
-          message: "Der Besuch kann nur bei einem laufenden Termin beendet werden."
         };
       }
     }
@@ -458,13 +406,10 @@ class AppointmentService {
     updates: UpdateAppointment
   ): ValidationResult {
     const currentStatus = existingAppointment.status;
-    const targetStatus = (updates.status || currentStatus) as string;
-    
+
     const checks = [
       () => this.validateStatusTransition(currentStatus, updates.status, updates),
-      () => this.validateSchedulingChanges(currentStatus, targetStatus, updates),
       () => this.validateNotesChange(currentStatus, updates),
-      () => this.validateVisitTimeChanges(currentStatus, targetStatus, updates),
       () => this.validateDocumentationChanges(currentStatus, updates),
     ];
     

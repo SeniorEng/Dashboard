@@ -88,7 +88,7 @@ export async function getPlannedCostCents(
     INNER JOIN services s ON s.id = aps.service_id
     WHERE a.customer_id = ${customerId}
       AND a.appointment_type = 'Kundentermin'
-      AND a.status IN ('scheduled', 'in_progress', 'documenting')
+      AND a.status IN ('scheduled', 'documenting')
       AND a.deleted_at IS NULL
       ${monthFilter}
   `);

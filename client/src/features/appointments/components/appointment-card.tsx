@@ -23,8 +23,6 @@ function getStatusIcon(status: string) {
   switch (status) {
     case "completed":
       return <CheckCircle2 className="w-4 h-4 text-green-500" />;
-    case "in-progress":
-      return <Clock className="w-4 h-4 text-blue-500" />;
     case "documenting":
       return <FileText className="w-4 h-4 text-orange-500" />;
     default:

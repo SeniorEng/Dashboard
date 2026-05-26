@@ -103,7 +103,7 @@ function toPolicyAppointment(
   flags: { isLocked: boolean; isMonthClosed: boolean },
 ): PolicyAppointment {
   const status = appt.status as AppointmentStatus;
-  const isStarted = !!appt.actualStart || !!appt.actualEnd || status !== "scheduled";
+  const isStarted = !!appt.actualStart || !!appt.actualEnd || status === "documenting";
   return {
     assignedEmployeeId: appt.assignedEmployeeId,
     performedByEmployeeId: appt.performedByEmployeeId,
@@ -970,10 +970,9 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
         );
       }
     } else if (servicesSum !== existingAppointment.durationPromised) {
-      // Service-Änderungen, die die Gesamtdauer verschieben, sind eine
-      // implizite Scheduling-Änderung. Wir tragen die neue Dauer in die
-      // validierten Daten ein, damit `validateSchedulingChanges` sie sieht
-      // und auf nicht-`scheduled` Termine korrekt mit 403 antwortet.
+      // Service-Änderungen, die die Gesamtdauer verschieben, ziehen die
+      // Termin-Gesamtdauer automatisch nach, damit `scheduledEnd` und
+      // `durationPromised` konsistent bleiben.
       validatedData.durationPromised = servicesSum;
     }
 
@@ -1282,59 +1281,6 @@ function denyByPolicy(
   else if (/Status|abgeschlossen|stornier|abgelaufen/i.test(reason)) code = "INVALID_STATUS";
   sendForbidden(res, code, reason);
 }
-
-router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async (req, res) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-
-  const appointment = await storage.getAppointment(id);
-  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
-
-  const flags = await loadPolicyFlags(id, appointment);
-  const policyAppt = toPolicyAppointment(appointment, flags);
-  const decision = policyCanDocument(toPolicyUser(req.user!), policyAppt);
-  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
-  if (appointment.status !== "scheduled") {
-    return sendForbidden(res, "INVALID_STATUS", "Nur geplante Termine können gestartet werden");
-  }
-
-  const updatedAppointment = await storage.updateAppointment(id, {
-    status: "in-progress",
-    actualStart: currentTimeHHMMSS(),
-  });
-
-  res.json(updatedAppointment);
-}));
-
-router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (req, res) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-
-  const appointment = await storage.getAppointment(id);
-  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
-
-  const flags = await loadPolicyFlags(id, appointment);
-  const policyAppt = toPolicyAppointment(appointment, flags);
-  const decision = policyCanDocument(toPolicyUser(req.user!), policyAppt);
-  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
-  if (appointment.status !== "in-progress") {
-    return sendForbidden(res, "INVALID_STATUS", "Nur laufende Termine können beendet werden");
-  }
-  
-  const updatedAppointment = await storage.updateAppointment(id, {
-    status: "documenting",
-    actualEnd: currentTimeHHMMSS(),
-  });
-
-  if (appointment.date) {
-    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
-    if (employeeId) {
-      checkAndRecalcDailyAutoBreak(employeeId, appointment.date);
-    }
-  }
-  
-  res.json(updatedAppointment);
-}));
 
 router.get("/:id/travel-suggestion", asyncHandler("Fehler beim Laden der Fahrvorschläge", async (req, res) => {
   const id = requireIntParam(req.params.id, res);

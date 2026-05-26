@@ -89,11 +89,6 @@ describe("diagnoseDocumentation", () => {
     expect(d.severity).toBe("warning");
   });
 
-  it("status=in-progress → WARNING/IN_PROGRESS", () => {
-    const d = diagnoseDocumentation({ ...baseInput, status: "in-progress", actualEnd: null });
-    expect(d.code).toBe("IN_PROGRESS");
-  });
-
   it("status=customer_no_show → INFO/NO_SHOW", () => {
     const d = diagnoseDocumentation({ ...baseInput, status: "customer_no_show" });
     expect(d.code).toBe("NO_SHOW");

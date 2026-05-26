@@ -179,21 +179,20 @@ describe("Termin-Dauer ↔ Service-Zeilen Konsistenz (Marcel-Bug)", () => {
     expect(fetchRes.data.scheduledEnd).toBe(addMinutesToHHMMSS(start, 75));
   });
 
-  it("PATCH services allein auf in-progress Termin wird mit 403 abgelehnt (kein Scheduling-Bypass)", async () => {
+  it("PATCH services auf documenting Termin: Dauer-Anpassung ist seit Task #638 erlaubt", async () => {
     const apptId = await findFreeSlot(
       [{ serviceId: hwServiceId, durationMinutes: 30 }],
       ["05:00", "05:30", "06:00"],
     );
     const startRes = await apiPatch<any>(`/api/appointments/${apptId}`, {
-      status: "in-progress",
-      actualStart: "05:00",
+      status: "documenting",
     });
     expect(startRes.status).toBe(200);
 
     const patchRes = await apiPatch<any>(`/api/appointments/${apptId}`, {
       services: [{ serviceId: hwServiceId, plannedDurationMinutes: 60 }],
     });
-    expect(patchRes.status).toBe(403);
+    expect(patchRes.status).toBe(200);
   });
 
   it("PATCH mit widersprüchlicher Dauer + Services wird mit 400 abgelehnt", async () => {

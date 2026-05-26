@@ -14,7 +14,7 @@ export interface BudgetSummary {
   currentYearAllocatedCents: number;
   monthlyLimitCents: number | null;
   currentMonthUsedCents: number;
-  /** Geplante (scheduled/in_progress/documenting) Kosten im laufenden Monat. */
+  /** Geplante (scheduled/documenting) Kosten im laufenden Monat. */
   currentMonthPlannedCents: number;
   /**
    * Im laufenden Monat noch buchbar, unter Berücksichtigung des Monats-Caps.

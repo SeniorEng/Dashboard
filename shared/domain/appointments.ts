@@ -5,7 +5,7 @@ import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils
 // TYPES
 // ============================================
 
-export type AppointmentStatus = "scheduled" | "in-progress" | "documenting" | "completed" | "cancelled" | "expired_unsigned" | "customer_no_show";
+export type AppointmentStatus = "scheduled" | "documenting" | "completed" | "cancelled" | "expired_unsigned" | "customer_no_show";
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 
@@ -16,17 +16,15 @@ export type TravelOriginType = "home" | "appointment";
 
 const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "scheduled": 0,
-  "in-progress": 1,
-  "documenting": 2,
-  "completed": 3,
-  "cancelled": 4,
-  "expired_unsigned": 5,
-  "customer_no_show": 6,
+  "documenting": 1,
+  "completed": 2,
+  "cancelled": 3,
+  "expired_unsigned": 4,
+  "customer_no_show": 5,
 };
 
 export const STATUS_LABELS: Record<AppointmentStatus, string> = {
   "scheduled": "Geplant",
-  "in-progress": "Läuft",
   "documenting": "Dokumentation",
   "completed": "Abgeschlossen",
   "cancelled": "Storniert",
@@ -37,12 +35,12 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
 // ============================================
 // STATUS DEFINITIONS FOR SERVICE RECORDS
 // ============================================
-// 
+//
 // Diese Definitionen legen fest, welche Termin-Status für
 // Leistungsnachweise als "dokumentiert" gelten.
 //
 // Workflow für Leistungsnachweise:
-// 1. Termin durchführen → Status wechselt zu "documenting"
+// 1. Termin durchführen → Status wechselt direkt zu "documenting"
 // 2. Dokumentation ausfüllen (Dauer, Notizen, etc.)
 // 3. Termin abschließen → Status wechselt zu "completed"
 // 4. Leistungsnachweis erstellen (wenn ALLE Termine des Monats "completed" sind)
@@ -53,7 +51,6 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
 //
 // Ein Termin gilt als "undokumentiert" (blockiert Leistungsnachweis), wenn:
 // - Status = "scheduled" (noch nicht durchgeführt)
-// - Status = "in-progress" (läuft gerade)
 // - Status = "documenting" (Dokumentation noch nicht abgeschlossen)
 // ============================================
 
@@ -61,7 +58,7 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
  * Status, die einen Leistungsnachweis blockieren.
  * Solange Termine mit diesen Status existieren, kann kein Leistungsnachweis erstellt werden.
  */
-export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting"];
+export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = ["scheduled", "documenting"];
 
 
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;
@@ -122,8 +119,8 @@ interface CardServiceInfo extends ServiceInfo {
   borderClass: string;
 }
 
-const ALLOWED_CANCELLATION_SOURCES: AppointmentStatus[] = ["scheduled", "in-progress"];
-const ALLOWED_NO_SHOW_SOURCES: AppointmentStatus[] = ["scheduled", "in-progress", "documenting"];
+const ALLOWED_CANCELLATION_SOURCES: AppointmentStatus[] = ["scheduled"];
+const ALLOWED_NO_SHOW_SOURCES: AppointmentStatus[] = ["scheduled", "documenting"];
 
 export function isValidStatusTransition(
   currentStatus: AppointmentStatus,
@@ -158,9 +155,8 @@ export function canModifyAppointment(status: AppointmentStatus): boolean {
 //   2) im Status `scheduled` geblieben ist UND das geplante Termin-Ende
 //      bereits in der Vergangenheit liegt.
 //
-// Bewusst NICHT als „Doku unvollständig" gelten: `in-progress`
-// (läuft gerade, regulär), `completed`, `cancelled`, `expired_unsigned`,
-// `customer_no_show`.
+// Bewusst NICHT als „Doku unvollständig" gelten: `completed`, `cancelled`,
+// `expired_unsigned`, `customer_no_show`.
 
 function formatLocalIsoDate(d: Date): string {
   const y = d.getFullYear();
@@ -247,13 +243,12 @@ export function canEditNotes(status: AppointmentStatus): boolean {
 }
 
 export const STATUS_PRIORITY: Record<AppointmentStatus, number> = {
-  "in-progress": 0,
-  "documenting": 1,
-  "scheduled": 2,
-  "completed": 3,
-  "cancelled": 4,
-  "expired_unsigned": 5,
-  "customer_no_show": 6,
+  "documenting": 0,
+  "scheduled": 1,
+  "completed": 2,
+  "cancelled": 3,
+  "expired_unsigned": 4,
+  "customer_no_show": 5,
 };
 
 

@@ -871,19 +871,13 @@ export default function EditAppointment() {
 
   const isKundentermin = appointment.appointmentType === "Kundentermin";
   const isErstberatung = appointment.appointmentType === "Erstberatung";
-  // Bei Erstberatungen sperrt der Server-Guard `validateSchedulingChanges`
-  // jede Änderung an Datum/Uhrzeit/Dauer, sobald der Termin nicht mehr im
-  // Status `scheduled` ist. Wir spiegeln das in der UI, damit der Nutzer
-  // nicht in einen 403 läuft (Task #595).
-  const ebSchedulingLocked = isErstberatung && appointment.status !== "scheduled";
-  // Status `completed`/`customer_no_show` sperren zusätzlich Notizen und
-  // Mitarbeiterzuweisung — das deckt sich mit `canModifyAppointment`.
+  // Status `completed`/`customer_no_show` sperren Notizen, Mitarbeiterzuweisung
+  // und alle Scheduling-Felder — das deckt sich mit `canModifyAppointment`.
+  // `scheduled` und `documenting` bleiben editierbar (Task #638).
   const ebFullyLocked = isErstberatung && !canModifyAppointment(appointment.status as AppointmentStatus);
   const ebLockHint = ebFullyLocked
     ? "Dieser Termin ist abgeschlossen — Änderungen sind nicht mehr möglich."
-    : ebSchedulingLocked
-      ? "Dieser Termin wurde bereits gestartet — Datum, Uhrzeit und Dauer sind gesperrt. Notizen können weiterhin angepasst werden."
-      : null;
+    : null;
 
   return (
     <Layout>
@@ -1135,7 +1129,7 @@ export default function EditAppointment() {
                 value={date || null}
                 onChange={(val) => setDate(val || "")}
                 disableWeekends
-                disabled={ebSchedulingLocked}
+                disabled={ebFullyLocked}
                 data-testid="input-date"
               />
             </div>
@@ -1150,7 +1144,7 @@ export default function EditAppointment() {
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
                 className="text-base"
-                disabled={ebSchedulingLocked}
+                disabled={ebFullyLocked}
                 data-testid="input-time"
               />
             </div>
@@ -1222,7 +1216,7 @@ export default function EditAppointment() {
                             setEndTime(addMinutesToTime(time, dur));
                           }
                         }}
-                        disabled={ebSchedulingLocked}
+                        disabled={ebFullyLocked}
                       >
                         <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-duration">
                           <SelectValue />

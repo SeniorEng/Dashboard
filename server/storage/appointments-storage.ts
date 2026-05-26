@@ -212,7 +212,7 @@ export async function getAppointmentWithCustomer(id: number): Promise<Appointmen
  *      das geplante Ende liegt vor `nowTime`).
  *
  * Nicht enthalten sind: completed, cancelled, expired_unsigned,
- * customer_no_show, in-progress.
+ * customer_no_show.
  *
  * @param today    Heutiges Datum in Berlin-Zeit als ISO-String (YYYY-MM-DD).
  * @param nowTime  Aktuelle Uhrzeit in Berlin-Zeit als HH:MM-String.

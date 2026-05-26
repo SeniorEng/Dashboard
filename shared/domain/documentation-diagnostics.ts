@@ -22,8 +22,7 @@ export type DiagnosisCode =
   | "NO_SERVICES"
   | "MISSING_END_TIME"
   | "MISSING_SIGNATURE"
-  | "READY_BUT_NOT_FINALIZED"
-  | "IN_PROGRESS";
+  | "READY_BUT_NOT_FINALIZED";
 
 export interface DocumentationDiagnosisInput {
   status: AppointmentStatus;
@@ -59,8 +58,7 @@ function isInPast(date: string, today: string): boolean {
  *     `expired_unsigned`) → eindeutige Aussage, ohne Heuristik.
  *  2. `scheduled` in der Vergangenheit → Mitarbeiter hat den Termin nie
  *     gestartet.
- *  3. `in-progress` → noch nicht beendet.
- *  4. `documenting` → genauere Differenzierung: keine Services, fehlende
+ *  3. `documenting` → genauere Differenzierung: keine Services, fehlende
  *     Endzeit, fehlende Unterschrift, oder „alles da, aber nicht final".
  */
 export function diagnoseDocumentation(
@@ -126,15 +124,6 @@ export function diagnoseDocumentation(
       code: "NOT_STARTED",
       severity: "info",
       message: "Termin ist geplant und liegt noch in der Zukunft.",
-    };
-  }
-
-  if (status === "in-progress") {
-    return {
-      code: "IN_PROGRESS",
-      severity: "warning",
-      message:
-        "Termin wurde gestartet, aber noch nicht beendet. Mitarbeiter hat den Besuch vermutlich nicht abgeschlossen.",
     };
   }
 

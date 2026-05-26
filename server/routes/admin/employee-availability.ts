@@ -339,7 +339,7 @@ router.get("/employees/:id/handover-preview", asyncHandler("Übergabe-Vorschau k
       JOIN customers c ON c.id = a.customer_id
       WHERE a.assigned_employee_id = ${sourceId}
         AND a.deleted_at IS NULL
-        AND a.status IN ('scheduled', 'in_progress', 'documenting')
+        AND a.status IN ('scheduled', 'documenting')
         AND a.date >= ${today}
       ORDER BY a.date, a.scheduled_start
     `),
@@ -527,7 +527,7 @@ router.post("/employees/:id/handover", asyncHandler("Übergabe konnte nicht durc
       SET assigned_employee_id = ${targetEmployeeId}
       WHERE assigned_employee_id = ${sourceId}
         AND deleted_at IS NULL
-        AND status IN ('scheduled', 'in_progress', 'documenting')
+        AND status IN ('scheduled', 'documenting')
         AND date >= ${today}
     `);
 

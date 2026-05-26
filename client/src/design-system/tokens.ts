@@ -28,12 +28,6 @@ export const colors = {
       border: 'border-blue-200',
       icon: 'text-blue-500',
     },
-    inProgress: {
-      bg: 'bg-amber-50',
-      text: 'text-amber-700',
-      border: 'border-amber-200',
-      icon: 'text-amber-500',
-    },
     documenting: {
       bg: 'bg-orange-50',
       text: 'text-orange-700',
@@ -232,7 +226,6 @@ export type PflegegradColorSet = {
 export function getStatusColors(status: string): StatusColorSet {
   const statusMap: Record<string, StatusColorSet> = {
     scheduled: colors.status.scheduled,
-    'in-progress': colors.status.inProgress,
     documenting: colors.status.documenting,
     completed: colors.status.completed,
     cancelled: colors.status.cancelled,

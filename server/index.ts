@@ -286,6 +286,13 @@ async function runStartupTasks() {
       log(`§45b-Monatslimit-Bereinigung fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateInProgressAppointments } = await import("./startup/migrate-in-progress-appointments");
+    try {
+      await migrateInProgressAppointments();
+    } catch (err) {
+      log(`In-Progress-Termin-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #616: Termin-vs-Budget-km-Drift auditieren (Screenshot-Fall
     // 12.01./21.01./04.02.2026). Log-only, kein automatischer Schreibvorgang
     // auf GoBD-relevante Buchungen.

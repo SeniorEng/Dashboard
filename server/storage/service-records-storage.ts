@@ -351,7 +351,7 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
     vorname: customers.vorname,
     nachname: customers.nachname,
     documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
-    undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
+    undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
     totalAppointments: sqlBuilder<number>`COUNT(${appointments.id})::int`,
   }, db)
     .leftJoin(appointments, and(
@@ -366,7 +366,7 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
     vorname: customers.vorname,
     nachname: customers.nachname,
     documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
-    undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
+    undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
     totalAppointments: sqlBuilder<number>`COUNT(${appointments.id})::int`,
   }, db)
     .leftJoin(appointments, and(
@@ -495,7 +495,7 @@ export async function getAppointmentCountsForPeriod(customerId: number, employee
 
   const result = await appointmentsRepo.selectColumnsFrom({
     documentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
-    undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'in-progress', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
+    undocumentedCount: sqlBuilder<number>`COALESCE(SUM(CASE WHEN ${appointments.status} IN ('scheduled', 'documenting') THEN 1 ELSE 0 END), 0)::int`,
   }, db)
     .where(and(...conditions));
 

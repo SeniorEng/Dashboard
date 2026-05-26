@@ -72,7 +72,6 @@ describe("isDocumentationOverdue", () => {
     "cancelled",
     "expired_unsigned",
     "customer_no_show",
-    "in-progress",
   ] as const)("markiert Status '%s' nicht als überfällig (auch nicht in der Vergangenheit)", (status) => {
     expect(
       isDocumentationOverdue(

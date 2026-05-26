@@ -3,7 +3,6 @@ import { cn } from "@/lib/utils";
 import { colors, getStatusColors, getServiceColors, getPflegegradColors } from "@/design-system";
 import {
   Clock,
-  Play,
   FileText,
   CheckCircle2,
   XCircle,
@@ -40,7 +39,6 @@ interface StatusBadgeProps {
 
 const statusLabels: Record<string, string> = {
   scheduled: "Geplant",
-  "in-progress": "Unterwegs",
   documenting: "Dokumentation",
   completed: "Abgeschlossen",
   cancelled: "Abgesagt",
@@ -49,7 +47,6 @@ const statusLabels: Record<string, string> = {
 
 const statusIcons: Record<string, React.ReactNode> = {
   scheduled: <Clock className="h-3 w-3" />,
-  "in-progress": <Play className="h-3 w-3" />,
   documenting: <FileText className="h-3 w-3" />,
   completed: <CheckCircle2 className="h-3 w-3" />,
   cancelled: <XCircle className="h-3 w-3" />,

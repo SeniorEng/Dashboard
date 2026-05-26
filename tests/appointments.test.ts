@@ -269,24 +269,11 @@ describe("BIZ-5: Status-Workflow", () => {
     expect(res.data.status).toBe("scheduled");
   });
 
-  it("BIZ-5.2 – Start => in-progress", async () => {
+  it("BIZ-5.2 – PATCH status: scheduled => documenting (Task #638: direkter Übergang)", async () => {
     expect(apptId, "apptId muss aus BIZ-5.1 gesetzt sein").toBeTruthy();
-    const res = await apiPost<any>(`/api/appointments/${apptId}/start`, {});
-    expect(res.status).toBe(200);
-    expect(res.data.status).toBe("in-progress");
-  });
-
-  it("BIZ-5.3 – End => documenting", async () => {
-    expect(apptId, "apptId muss aus BIZ-5.1 gesetzt sein").toBeTruthy();
-    const res = await apiPost<any>(`/api/appointments/${apptId}/end`, {});
+    const res = await apiPatch<any>(`/api/appointments/${apptId}`, { status: "documenting" });
     expect(res.status).toBe(200);
     expect(res.data.status).toBe("documenting");
-  });
-
-  it("BIZ-5.4 – Doppeltes Starten im documenting-Status wird abgelehnt (403)", async () => {
-    expect(apptId, "apptId muss aus BIZ-5.1 gesetzt sein").toBeTruthy();
-    const res = await apiPost<any>(`/api/appointments/${apptId}/start`, {});
-    expect(res.status).toBe(403);
   });
 
   it("BIZ-5.5 – Geplanter Termin löschen als Absage-Äquivalent", async () => {
