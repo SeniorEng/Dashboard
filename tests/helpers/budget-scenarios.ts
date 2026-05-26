@@ -12,6 +12,7 @@ import {
 import {
   BUDGET_39_42A_MAX_YEARLY_CENTS,
   BUDGET_45A_MAX_BY_PFLEGEGRAD,
+  BUDGET_45B_MAX_MONTHLY_CENTS,
   type BudgetType,
 } from "@shared/domain/budgets";
 import type { BillingType } from "@shared/domain/customers";
@@ -348,9 +349,23 @@ export async function setupBudgetScenario(
     }
   }
 
+  const serverTypeSettings = spec.types.map((t) =>
+    toServerTypeSetting(t, pflegegrad),
+  );
+  for (const s of serverTypeSettings) {
+    if (
+      s.budgetType === "entlastungsbetrag_45b" &&
+      s.monthlyLimitCents != null &&
+      s.monthlyLimitCents > BUDGET_45B_MAX_MONTHLY_CENTS
+    ) {
+      throw new Error(
+        `setupBudgetScenario: §45b monthlyLimitCents=${s.monthlyLimitCents} überschreitet das gesetzliche Maximum BUDGET_45B_MAX_MONTHLY_CENTS=${BUDGET_45B_MAX_MONTHLY_CENTS} — Server würde mit 400 ablehnen.`,
+      );
+    }
+  }
   const typesRes = await apiPut<ServerTypeSetting[]>(
     `/api/budget/${customerId}/type-settings`,
-    { settings: spec.types.map((t) => toServerTypeSetting(t, pflegegrad)) },
+    { settings: serverTypeSettings },
   );
   if (typesRes.status !== 200) {
     throw new Error(

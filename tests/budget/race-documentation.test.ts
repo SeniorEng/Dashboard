@@ -12,6 +12,7 @@ import {
   setupBudgetScenario,
   type BudgetScenarioHandle,
 } from "../helpers/budget-scenarios";
+import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { runInParallel } from "../helpers/race";
 import { thawTime } from "../helpers/frozen-clock";
 
@@ -89,7 +90,7 @@ describe("Race K4 — parallele Dokumentation auf knappes §45b-Restbudget", () 
       acceptsPrivatePayment: true,
       preferences: { budgetStartDate },
       types: [
-        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: 100000 },
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: BUDGET_45B_MAX_MONTHLY_CENTS },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
