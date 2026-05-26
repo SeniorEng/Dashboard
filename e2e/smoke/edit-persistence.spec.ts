@@ -703,6 +703,269 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     }
   });
 
+  // ---------- 7d. Termin-Minuten 45 → 72 — Drift-frei in Detail/Ledger/Rechnung (#635) ----------
+  // Analog zum km-Drift-Test (#620): sichert die zweite Hälfte der Hotspot-
+  // Matrix (Leistungs-Minuten) gegen Anzeige↔Buchung-Drift bei Re-Documentation
+  // nach Reopen. PATCH erfolgt über die /document-API, weil 72 Min. nicht in
+  // den UI-DURATION_OPTIONS (15er-Schritten) auswählbar ist — der serverseitige
+  // Rebook-Pfad (rebook-storage.ts → createCascadeConsumption) ist identisch.
+  test("Termin Hauswirtschaft 45 → 72 Min — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '1 Std. 12 Min.'", async ({ page }) => {
+    test.setTimeout(90_000);
+    const customer = await createCustomer(session);
+    const employee = await createEmployee(session);
+    await assignEmployee(session, customer.id, employee.id);
+
+    // §45b mit Initial-Balance, damit die HW-Buchung im Kasse-Topf landet
+    // und der Ledger-Row tatsächlich hauswirtschaftMinutes/-Cents trägt.
+    const today = new Date();
+    const initialFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    {
+      const { status, data } = await apiPut(
+        session,
+        `/api/budget/${customer.id}/type-settings`,
+        {
+          settings: [
+            {
+              budgetType: "entlastungsbetrag_45b",
+              enabled: true,
+              priority: 1,
+              monthlyLimitCents: 13100,
+            },
+          ],
+        },
+      );
+      if (status >= 300) {
+        throw new Error(`type-settings failed: ${status} ${JSON.stringify(data)}`);
+      }
+    }
+    {
+      const { status, data } = await apiPost(
+        session,
+        `/api/budget/${customer.id}/initial-balance/entlastungsbetrag_45b`,
+        { amountCents: 100000, validFrom: initialFrom },
+      );
+      if (status >= 300) {
+        throw new Error(`initial-balance failed: ${status} ${JSON.stringify(data)}`);
+      }
+    }
+
+    const appt = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: employee.id,
+    });
+    const hwServiceId = await getServiceIdByCode(session, "hauswirtschaft");
+
+    try {
+      // --- Schritt 1: Termin mit 45 Min. dokumentieren (API) ---
+      const docPayload45 = {
+        actualStart: "10:00",
+        travelOriginType: "home" as const,
+        travelKilometers: 0,
+        services: [
+          {
+            serviceId: hwServiceId,
+            actualDurationMinutes: 45,
+            details: "Minuten-Drift-Smoketest",
+          },
+        ],
+      };
+      {
+        const { status, data } = await apiPost(
+          session,
+          `/api/appointments/${appt.id}/document`,
+          docPayload45,
+        );
+        if (status >= 300) {
+          throw new Error(`document(45) failed: ${status} ${JSON.stringify(data)}`);
+        }
+      }
+
+      type BudgetTx = {
+        id: number;
+        transactionType: string;
+        budgetType: string;
+        hauswirtschaftMinutes?: number | null;
+        hauswirtschaftCents?: number | null;
+        reversedTransactionId?: number | null;
+      };
+      const findActiveConsumption = (txs: BudgetTx[]) => {
+        const reversed = new Set(
+          txs
+            .filter((t) => t.reversedTransactionId != null)
+            .map((t) => t.reversedTransactionId as number),
+        );
+        return txs.find(
+          (t) => t.transactionType === "consumption" && !reversed.has(t.id),
+        );
+      };
+
+      const txsAfterFirst = (await session.api
+        .get(`/api/budget/${customer.id}/transactions?budgetType=entlastungsbetrag_45b`)
+        .then((r) => r.json())) as BudgetTx[];
+      const firstConsumption = findActiveConsumption(txsAfterFirst);
+      expect(firstConsumption, "Aktive §45b-Consumption (45 Min.) muss existieren").toBeTruthy();
+      expect(firstConsumption!.hauswirtschaftMinutes ?? 0).toBe(45);
+
+      // --- Schritt 2: Reopen via API ---
+      {
+        const { status, data } = await apiPost(
+          session,
+          `/api/appointments/${appt.id}/reopen`,
+          {},
+        );
+        if (status >= 300) {
+          throw new Error(`reopen failed: ${status} ${JSON.stringify(data)}`);
+        }
+      }
+
+      // --- Schritt 3: Re-Document mit 72 Min. (PATCH-analog via /document) ---
+      const docPayload72 = {
+        ...docPayload45,
+        services: [
+          { ...docPayload45.services[0], actualDurationMinutes: 72 },
+        ],
+      };
+      {
+        const { status, data } = await apiPost(
+          session,
+          `/api/appointments/${appt.id}/document`,
+          docPayload72,
+        );
+        if (status >= 300) {
+          throw new Error(`document(72) failed: ${status} ${JSON.stringify(data)}`);
+        }
+      }
+
+      // --- Verifikation 1: Termin-Detail-Seite (Reload) zeigt "1 Std. 12 Min." ---
+      await page.goto(`/appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("1 Std. 12 Min.").first()).toBeVisible({
+        timeout: 10000,
+      });
+
+      // --- Verifikation 2: Aktive Ledger-Buchung trägt 72 Min. + Cents > 0 ---
+      const txsAfterEdit = (await session.api
+        .get(`/api/budget/${customer.id}/transactions?budgetType=entlastungsbetrag_45b`)
+        .then((r) => r.json())) as BudgetTx[];
+      const activeConsumption = findActiveConsumption(txsAfterEdit);
+      expect(activeConsumption, "Aktive §45b-Consumption (72 Min.) muss existieren").toBeTruthy();
+      expect(activeConsumption!.id).not.toBe(firstConsumption!.id);
+      expect(activeConsumption!.hauswirtschaftMinutes ?? 0).toBe(72);
+      const ledgerHwCents = activeConsumption!.hauswirtschaftCents ?? 0;
+      expect(ledgerHwCents).toBeGreaterThan(0);
+
+      // UI-Ledger im Budget-Tab muss „HW: 72min" rendern (BudgetLedgerSection).
+      await page.goto(`/admin/customers/${customer.id}?tab=budgets`, {
+        waitUntil: "domcontentloaded",
+      });
+      const ledgerRow = page.locator(
+        `[data-testid='row-transaction-${activeConsumption!.id}']`,
+      );
+      await expect(ledgerRow).toBeVisible({ timeout: 10000 });
+      await expect(ledgerRow).toContainText("HW: 72min");
+
+      // --- Verifikation 3: Rechnungs-Line-Item zeigt 72 Min. mit identischem Cent-Betrag ---
+      const sr = await createSingleServiceRecord(session, {
+        customerId: customer.id,
+        appointmentId: appt.id,
+      });
+      {
+        const { status, data } = await apiPost(
+          session,
+          `/api/service-records/${sr.id}/sign`,
+          {
+            signatureData:
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+            signerType: "employee",
+            signingLocation: "Test-Smoke",
+          },
+        );
+        if (status >= 300) {
+          throw new Error(`sign service-record failed: ${status} ${JSON.stringify(data)}`);
+        }
+      }
+
+      const apptDate = new Date(appt.date);
+      const { status: genStatus, data: genData } = await apiPost<{
+        invoices?: Array<{ id: number }>;
+        invoice?: { id: number };
+      }>(session, "/api/billing/generate", {
+        customerId: customer.id,
+        billingMonth: apptDate.getMonth() + 1,
+        billingYear: apptDate.getFullYear(),
+      });
+      if (genStatus >= 300) {
+        throw new Error(`billing/generate failed: ${genStatus} ${JSON.stringify(genData)}`);
+      }
+      const invoiceId =
+        genData?.invoices?.[0]?.id ??
+        genData?.invoice?.id ??
+        (genData as { id?: number })?.id;
+      expect(invoiceId, `Rechnungs-ID fehlt: ${JSON.stringify(genData)}`).toBeTruthy();
+
+      type LineItem = {
+        serviceCode?: string | null;
+        quantityRaw?: string | number | null;
+        quantityUnit?: string | null;
+        durationMinutes?: number | null;
+        totalCents: number;
+      };
+      const invoiceDetail = (await session.api
+        .get(`/api/billing/${invoiceId}`)
+        .then((r) => r.json())) as { lineItems?: LineItem[] };
+      const hwLine = (invoiceDetail.lineItems ?? []).find(
+        (li) => li.serviceCode === "hauswirtschaft",
+      );
+      expect(
+        hwLine,
+        `hauswirtschaft Line-Item fehlt: ${JSON.stringify(invoiceDetail.lineItems)}`,
+      ).toBeTruthy();
+      expect(hwLine!.quantityUnit).toBe("hours");
+      // quantityRaw = 72/60 = 1.2 — Drift-Anker zwischen Anzeige (1 Std. 12 Min.)
+      // und Berechnung. durationMinutes (Fallback) muss ebenfalls 72 betragen.
+      expect(Number(hwLine!.quantityRaw ?? 0)).toBeCloseTo(72 / 60, 5);
+      expect(hwLine!.durationMinutes ?? 0).toBe(72);
+      // Drift-Anker: hauswirtschaftCents im Ledger MUSS == totalCents der Rechnungs-Line.
+      expect(hwLine!.totalCents).toBe(ledgerHwCents);
+
+      // --- Verifikation 4: Rechnungs-Detail in der Admin-UI zeigt "1 Std. 12 Min." ---
+      await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
+      const billingMonth = apptDate.getMonth() + 1;
+      const billingYear = apptDate.getFullYear();
+      await page.locator("[data-testid='select-billing-month']").click();
+      await page
+        .getByRole("option", {
+          name: new RegExp(
+            `^${[
+              "Januar",
+              "Februar",
+              "März",
+              "April",
+              "Mai",
+              "Juni",
+              "Juli",
+              "August",
+              "September",
+              "Oktober",
+              "November",
+              "Dezember",
+            ][billingMonth - 1]}$`,
+          ),
+        })
+        .click();
+      await page.locator("[data-testid='select-billing-year']").click();
+      await page.getByRole("option", { name: String(billingYear) }).click();
+
+      const invoiceRow = page.locator(`[data-testid='invoice-row-${invoiceId}']`);
+      await expect(invoiceRow).toBeVisible({ timeout: 15000 });
+      await page.locator(`[data-testid='button-detail-${invoiceId}']`).click();
+      await expect(page.getByText("1 Std. 12 Min.").first()).toBeVisible({
+        timeout: 10000,
+      });
+    } finally {
+      await deactivateEmployee(session, employee.id);
+    }
+  });
+
   // ---------- 8. Lead bearbeiten — Status + Notiz ----------
   test("Lead bearbeiten — Status + Notiz persistieren nach Reload", async ({ page }) => {
     const prospect = await createProspect(session);
