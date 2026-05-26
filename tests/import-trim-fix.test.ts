@@ -94,7 +94,10 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     });
     expect([200, 201]).toContain(initRes.status);
 
-    const allocRes = await apiGet<any[]>(`/api/budget/${customerId}/allocations?year=${year - 1}`);
+    // Task #601: Carryover-Konvention vereinheitlicht — `year` ist jetzt
+    // immer das Zieljahr (in dem der Übertrag verbraucht werden darf), nicht
+    // mehr das Quelljahr. Daher hier `year` statt `year - 1`.
+    const allocRes = await apiGet<any[]>(`/api/budget/${customerId}/allocations?year=${year}`);
     expect(allocRes.status).toBe(200);
 
     const carryover = (allocRes.data ?? []).find(

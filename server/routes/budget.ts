@@ -582,10 +582,16 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     // rückwirkende Buchungen/Imports im Stichjahr verfügbar ist (Task #116).
     // Ein an `budgetStartDate` gebundener Carryover wäre für Importmonate VOR
     // diesem Datum unsichtbar und würde fälschlich zu Monatscap-Kürzungen führen.
+    // Task #601 — `year` = Zieljahr (Jahr, in dem der Übertrag verfügbar ist),
+    // konsistent zu `ensureYearlyCarryover45b`. Vorher: `year - 1` (Quelljahr) —
+    // dadurch matchte der Auto-Dedup in `ensureYearlyCarryover45b`
+    // (`existingCarryoverYears.has(y + 1)`) die manuell aus dem Wizard
+    // angelegte Zeile nicht, und beim ersten `PUT /type-settings` wurde
+    // zusätzlich ein 2. Carryover (12 × monthly) angelegt → Doppelzählung.
     const carryoverAllocation = await budgetLedgerStorage.createBudgetAllocation({
       customerId,
       budgetType: "entlastungsbetrag_45b",
-      year: year - 1,
+      year,
       month: null,
       amountCents: carryoverAmountCents,
       source: "carryover",

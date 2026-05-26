@@ -293,6 +293,19 @@ async function runStartupTasks() {
       log(`Budget-Historisierung-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #601: Duplikate §45b-Carryover (Wizard-Pfad vs Auto-Pfad
+    // `ensureYearlyCarryover45b`) aus Altdaten räumen. Muss NACH der
+    // Historisierungs-Migration laufen, weil der partielle Unique-Index
+    // auf budget_allocations bis dahin u.U. noch nicht steht.
+    const { backfillDuplicateWizardCarryovers } = await import(
+      "./startup/backfill-duplicate-wizard-carryovers"
+    );
+    try {
+      await backfillDuplicateWizardCarryovers();
+    } catch (err) {
+      log(`Carryover-Duplikat-Backfill fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #576: Idempotente Korrektur — durch den entfernten Storno-
     // Side-Effekt fälschlich soft-gelöschte Leistungsnachweise reaktivieren
     // (Prod-IDs 8 und 48, 22.05.2026). Greift nur, solange die Ziel-IDs

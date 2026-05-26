@@ -755,6 +755,15 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     ));
 
   const existingCarryoverYears = new Set(carryoverAllocations.map(a => a.year));
+  // Task #601 — Defensiver Dedup zusätzlich über (validFrom|expiresAt). Vor
+  // dem Fix verwendete der Wizard-Pfad `year = sourceYear`, der Auto-Pfad
+  // `year = targetYear`. Der reine Year-Dedup hat solche Paare nicht erkannt
+  // und doppelte Carryovers angelegt. Für Altdaten und gegen zukünftige
+  // Convention-Drifts klemmen wir hier zusätzlich gegen identische
+  // Gültigkeitsfenster.
+  const existingCarryoverWindows = new Set(
+    carryoverAllocations.map(a => `${a.validFrom}|${a.expiresAt ?? ""}`)
+  );
 
   const preferences = await getBudgetPreferences(customerId, _tx);
   const typeSettings = await getBudgetTypeSettings(customerId, _tx);
@@ -815,9 +824,14 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   // Bulk-Vorberechnung (Task #442): statt pro Jahr vier separate SUM-Queries
   // abzusetzen, sammeln wir alle relevanten Allocation-IDs sowie den Jahres-
   // bereich einmal vorab und feuern höchstens zwei aggregierte Queries.
-  const yearsToProcess = years.filter(y =>
-    y < curYear && !existingCarryoverYears.has(y + 1) && !yearsWithInitialBalance.has(y)
-  );
+  const yearsToProcess = years.filter(y => {
+    const targetYear = y + 1;
+    const targetWindow = `${targetYear}-01-01|${targetYear}-06-30`;
+    return y < curYear
+      && !existingCarryoverYears.has(targetYear)
+      && !existingCarryoverWindows.has(targetWindow)
+      && !yearsWithInitialBalance.has(y);
+  });
 
   const linkedIdsByYear = new Map<number, number[]>();
   const allLinkedIdsSet = new Set<number>();

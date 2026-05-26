@@ -230,10 +230,16 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
           // rückwirkende Buchungen/Importe im Stichjahr den Übertrag sehen
           // (Task #116). Andernfalls wäre der Übertrag für Monate VOR dem
           // Anlagedatum unsichtbar und würde Monatscap-Kürzungen erzeugen.
+          // Task #601 — `year` = Zieljahr (Jahr, in dem der Übertrag verfügbar
+          // ist), konsistent zu `ensureYearlyCarryover45b`. Vorher:
+          // `currentYear - 1` (Quelljahr) — dadurch matchte der Auto-Dedup
+          // die Zeile nicht und beim ersten `syncCarryoverAndExpiry` (z.B.
+          // über `PUT /type-settings`) wurde ein zweiter Carryover für das
+          // Zieljahr angelegt → Doppelzählung im Budget-Overview.
           await budgetLedgerStorage.createBudgetAllocation({
             customerId,
             budgetType: "entlastungsbetrag_45b",
-            year: currentYear - 1,
+            year: currentYear,
             month: null,
             amountCents: input.budgets.carryoverAmountCents,
             source: "carryover",
