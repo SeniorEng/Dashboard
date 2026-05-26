@@ -121,6 +121,20 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
 
     if (hasUsage && appointment.appointmentType !== "Erstberatung") {
       try {
+        // Task #636 — Re-Document nach Reopen+Edit: der PATCH-Pfad hat über
+        // `rebookAppointmentConsumption` (Task #613/#618) bereits eine
+        // aktive Consumption für genau diese appointmentId gebucht. Würden
+        // wir hier blind ein zweites `createConsumptionTransaction`
+        // anstoßen, läuft es deterministisch in den Dup-Check der
+        // Cascade-Engine und antwortet mit einer kosmetischen
+        // `budgetWarning`, obwohl die Buchung tatsächlich schon korrekt
+        // gebucht ist. Wir prüfen daher VOR dem Buchungsversuch, ob bereits
+        // eine nicht-stornierte Consumption für den Termin existiert, und
+        // verwenden diese als `budgetTransaction`-Antwort.
+        const existing = await budgetLedgerStorage.getTransactionByAppointmentId(id, tx);
+        if (existing) {
+          budgetTransaction = existing;
+        } else {
         budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
           customerId: appointment.customerId!,
           appointmentId: id,
@@ -131,6 +145,7 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
           customerKilometers,
           userId: req.user?.id,
         }, tx);
+        }
 
         // Task #603 — §45b ist ein Jahrestopf ohne harten Monats-Cap. Der
         // konfigurierte "Unser Anteil"-Wert (summary.monthlyLimitCents)

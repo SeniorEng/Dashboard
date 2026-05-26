@@ -25,6 +25,7 @@ interface BudgetLedgerStorage {
   createBudgetTransaction(transaction: InsertBudgetTransaction, userId?: number): Promise<BudgetTransaction>;
   getBudgetTransactions(customerId: number, options?: { year?: number; limit?: number; budgetType?: string }): Promise<BudgetTransaction[]>;
   getTransactionsByAppointmentId(appointmentId: number): Promise<BudgetTransaction[]>;
+  getTransactionByAppointmentId(appointmentId: number, _tx?: DbClient): Promise<BudgetTransaction | undefined>;
   reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined>;
 
   syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void>;
@@ -79,6 +80,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   createBudgetTransaction: transaction.createBudgetTransaction,
   getBudgetTransactions: transaction.getBudgetTransactions,
   getTransactionsByAppointmentId: transaction.getTransactionsByAppointmentId,
+  getTransactionByAppointmentId: transaction.getTransactionByAppointmentId,
   reverseBudgetTransaction: transaction.reverseBudgetTransaction,
 
   syncCarryoverAndExpiry: allocation.syncCarryoverAndExpiry,
