@@ -39,8 +39,6 @@ function buildPdfData(overrides: Partial<InvoicePdfData> = {}): InvoicePdfData {
     signatures: [],
     invoiceDueDate: null,
     buyerReference: null,
-    auaApprovalRef: null,
-    auaApprovalDate: null,
     assignmentDeclarationDate: null,
     assignmentDeclarationRef: null,
     customerGeburtsdatum: null,
@@ -167,17 +165,15 @@ describe("Task #562 — ZUGFeRD-Pflichtfelder im generierten XML", () => {
     expect(xml).toMatch(/IncludedNote[\s\S]*Vers\.-Nr\.: A123456789[\s\S]*<ram:SubjectCode>AAK<\/ram:SubjectCode>/);
   });
 
-  it("schreibt eine IncludedNote mit AUA-Anerkennungs-Az. (SubjectCode REG)", async () => {
+  it("schreibt keine IncludedNote mit Anerkennungs-Az. (Task #599 — Feld entfernt)", async () => {
     const xml = await generateZugferdXml(
       buildPdfData({
         invoiceType: "pflegekasse_gesetzlich",
         ikNummer: "123456789",
-        auaApprovalRef: "AUA-2024-12345",
-        auaApprovalDate: "2024-11-04",
       }),
     );
     expect(xml).not.toBeNull();
-    expect(xml).toMatch(/IncludedNote[\s\S]*AUA-2024-12345[\s\S]*<ram:SubjectCode>REG<\/ram:SubjectCode>/);
+    expect(xml).not.toMatch(/Anerkennungs-Az\./);
   });
 
   it("schreibt eine IncludedNote für die Abtretungserklärung (SubjectCode REG)", async () => {

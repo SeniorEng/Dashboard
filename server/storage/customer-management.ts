@@ -472,9 +472,6 @@ class CustomerManagementStorage {
     inaktivAb: string | null;
     deactivationReason: string | null;
     deactivationNote: string | null;
-    // Task #562 — Trägerbezogene Anerkennungs-Daten (ZUGFeRD).
-    auaApprovalRef: string | null;
-    auaApprovalDate: string | null;
   }>): Promise<Customer | undefined> {
     return await db.transaction(async (tx) => {
     const updateData: any = { ...data, updatedAt: new Date() };

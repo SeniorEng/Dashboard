@@ -93,10 +93,6 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   const [creatingContract, setCreatingContract] = useState(false);
   const [newContractStart, setNewContractStart] = useState("");
 
-  // Task #562 — Träger-Anerkennungs-Stammdaten (Pflegekassen).
-  const [auaApprovalRef, setAuaApprovalRef] = useState("");
-  const [auaApprovalDate, setAuaApprovalDate] = useState("");
-
   const [deactivationReason, setDeactivationReason] = useState("");
   const [deactivationNote, setDeactivationNote] = useState("");
 
@@ -139,9 +135,6 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       setAcceptsPrivatePayment(customer.acceptsPrivatePayment ?? false);
       setBeihilfeBerechtigt(customer.beihilfeBerechtigt ?? false);
       setRechnungAnKunde(customer.rechnungAnKunde ?? false);
-    } else if (section === "aua") {
-      setAuaApprovalRef((customer as { auaApprovalRef?: string | null }).auaApprovalRef ?? "");
-      setAuaApprovalDate((customer as { auaApprovalDate?: string | null }).auaApprovalDate ?? "");
     }
     setEditingSection(section);
   };
@@ -279,27 +272,6 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       toast({ title: "Vertrag beendet & Kunde deaktiviert", description: "Der Kunde wurde erfolgreich deaktiviert." });
       setDeactivationReason("");
       setDeactivationNote("");
-    },
-    onError: (err: Error) => {
-      toast({ title: "Fehler", description: err.message, variant: "destructive" });
-    },
-  });
-
-  // Task #562 — AUA-Anerkennungs-Stammdaten (Trägerdaten für ZUGFeRD-
-  // Dunkelverarbeitung; werden in jede neu erzeugte §45b-Rechnung als
-  // IncludedNote/SubjectCode REG geschrieben).
-  const saveAua = useMutation({
-    mutationFn: async (data: { auaApprovalRef: string | null; auaApprovalDate: string | null }) => {
-      const result = await api.patch(`/admin/customers/${customerId}`, {
-        auaApprovalRef: data.auaApprovalRef,
-        auaApprovalDate: data.auaApprovalDate,
-      });
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateCustomer();
-      toast({ title: "Anerkennungs-Daten gespeichert" });
-      setEditingSection(null);
     },
     onError: (err: Error) => {
       toast({ title: "Fehler", description: err.message, variant: "destructive" });
@@ -825,84 +797,6 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
           </div>
         )}
       </SectionCard>}
-
-      {customer.billingType !== "selbstzahler" && (() => {
-        const cAua = customer as { auaApprovalRef?: string | null; auaApprovalDate?: string | null };
-        return (
-          <SectionCard
-            title="Anerkennung (§45b SGB XI)"
-            icon={<FileText className={iconSize.sm} />}
-            actions={editingSection !== "aua" ? editButton("aua") : undefined}
-          >
-            {editingSection === "aua" ? (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="auaApprovalRef-edit">Anerkennungs-Az.</Label>
-                  <Input
-                    id="auaApprovalRef-edit"
-                    value={auaApprovalRef}
-                    onChange={(e) => setAuaApprovalRef(e.target.value)}
-                    placeholder="z.B. AUA-2024-12345"
-                    maxLength={100}
-                    data-testid="input-edit-aua-approval-ref"
-                  />
-                  <p className="text-xs text-gray-500">
-                    Trägerbezogenes Aktenzeichen der Anerkennung. Für ZUGFeRD-Dunkelverarbeitung empfohlen.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="auaApprovalDate-edit">Anerkennungs-Datum</Label>
-                  <Input
-                    id="auaApprovalDate-edit"
-                    type="date"
-                    value={auaApprovalDate}
-                    onChange={(e) => setAuaApprovalDate(e.target.value)}
-                    data-testid="input-edit-aua-approval-date"
-                  />
-                </div>
-                <div className="flex items-center gap-2 pt-2">
-                  <Button
-                    className={componentStyles.btnPrimary}
-                    onClick={() => saveAua.mutate({
-                      auaApprovalRef: auaApprovalRef.trim() || null,
-                      auaApprovalDate: auaApprovalDate || null,
-                    })}
-                    disabled={saveAua.isPending}
-                    data-testid="button-save-aua"
-                  >
-                    {saveAua.isPending ? (
-                      <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-                    ) : (
-                      <Save className={`${iconSize.sm} mr-2`} />
-                    )}
-                    Speichern
-                  </Button>
-                  <Button variant="outline" onClick={cancelEditing} disabled={saveAua.isPending} data-testid="button-cancel-aua">
-                    <X className={`${iconSize.sm} mr-2`} />
-                    Abbrechen
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2" data-testid="text-aua-approval-ref">
-                  <p className="text-gray-700">Anerkennungs-Az.:</p>
-                  <p className="text-gray-900">{cAua.auaApprovalRef || <span className="text-gray-400">— nicht hinterlegt —</span>}</p>
-                </div>
-                <div className="flex items-center gap-2" data-testid="text-aua-approval-date">
-                  <p className="text-gray-700">Anerkennungs-Datum:</p>
-                  <p className="text-gray-900">{cAua.auaApprovalDate ? formatDateForDisplay(cAua.auaApprovalDate) : <span className="text-gray-400">— nicht hinterlegt —</span>}</p>
-                </div>
-                {!cAua.auaApprovalRef && (
-                  <p className="text-xs text-amber-700 pt-1">
-                    Für ZUGFeRD-Dunkelverarbeitung empfohlen. Pflegekassen mit Anerkennungs-Verfahren (z.B. SMS Sachsen) erwarten dieses Aktenzeichen in der Rechnung.
-                  </p>
-                )}
-              </div>
-            )}
-          </SectionCard>
-        );
-      })()}
 
       {customer.billingType === "selbstzahler" && (
         <SectionCard

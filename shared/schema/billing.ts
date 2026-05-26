@@ -210,8 +210,6 @@ export interface InvoiceRenderSnapshot {
     nr: string | null;
     plz: string | null;
     stadt: string | null;
-    auaApprovalRef: string | null;
-    auaApprovalDate: string | null;
   };
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;

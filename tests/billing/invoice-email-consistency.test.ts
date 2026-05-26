@@ -47,8 +47,6 @@ function makePdfData(overrides: Partial<InvoicePdfData> = {}): InvoicePdfData {
     customerName: "Max Mustermann",
     customerAddress: "Hauptstr. 1\n10115 Berlin",
     customerGeburtsdatum: null,
-    auaApprovalRef: null,
-    auaApprovalDate: null,
     assignmentDeclarationDate: null,
     assignmentDeclarationRef: null,
     lineItems: [

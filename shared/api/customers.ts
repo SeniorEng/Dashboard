@@ -159,11 +159,6 @@ export interface CreateCustomerRequest {
   documentDeliveryMethod?: "email" | "post";
   receivesMonthlyInvoice?: boolean;
   billingType?: "pflegekasse_gesetzlich" | "pflegekasse_privat" | "selbstzahler";
-  // Task #562 — Trägerbezogene Anerkennungs-Stammdaten (z.B. SMS Sachsen).
-  // Werden bei jeder neu erzeugten Pflegekassen-Rechnung in das eingebettete
-  // ZUGFeRD-XML als IncludedNote (SubjectCode "REG") geschrieben.
-  auaApprovalRef?: string | null;
-  auaApprovalDate?: string | null;
   insurance?: {
     providerId: number;
     versichertennummer: string;

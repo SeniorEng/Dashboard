@@ -86,12 +86,6 @@ export const customers = pgTable("customers", {
   cancellationFlatCents: integer("cancellation_flat_cents"),
   cancellationHourlyRateCents: integer("cancellation_hourly_rate_cents"),
   cancellationKmRateCents: integer("cancellation_km_rate_cents"),
-  // Task #562 — Stammdaten für ZUGFeRD-Dunkelverarbeitung. Anerkennungs-Aktenzeichen
-  // (z.B. SMS Sachsen) und -Datum sind trägerbezogen — sie hängen am Kunden, nicht
-  // an der einzelnen Rechnung. Pflegekassen referenzieren über diese Az. die §45b-
-  // Anerkennung des Leistungserbringers. Nullable, keine Pflicht (kein Backfill).
-  auaApprovalRef: text("aua_approval_ref"),
-  auaApprovalDate: date("aua_approval_date"),
 }, (table) => [
   index("customers_primary_employee_id_idx").on(table.primaryEmployeeId),
   index("customers_backup_employee_id_idx").on(table.backupEmployeeId),

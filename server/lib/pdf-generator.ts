@@ -51,11 +51,8 @@ export interface InvoicePdfData {
   customerAddress: string | null;
   customerGeburtsdatum: string | null;
 
-  // Task #562 — Trägerbezogene Anerkennungs-Daten + Abtretungs-Bezug,
-  // strukturiert für ZUGFeRD-Dunkelverarbeitung (Versichertendaten-Block,
-  // Abtretungserklärung-Footer).
-  auaApprovalRef: string | null;
-  auaApprovalDate: string | null;
+  // Task #562 — Abtretungs-Bezug, strukturiert für ZUGFeRD-Dunkel-
+  // verarbeitung (Abtretungserklärung-Footer).
   assignmentDeclarationDate: string | null;
   assignmentDeclarationRef: string | null;
   
@@ -304,7 +301,6 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       ${data.customerGeburtsdatum ? `<br>Geb.: ${formatDate(data.customerGeburtsdatum)}` : ""}
       ${data.versichertennummer ? `<br>Vers.-Nr.: ${escapeHtml(data.versichertennummer)}` : ""}
       ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
-      ${data.auaApprovalRef ? `<br>Anerkennungs-Az.: ${escapeHtml(data.auaApprovalRef)}${data.auaApprovalDate ? ` (${formatDate(data.auaApprovalDate)})` : ""}` : ""}
     </div>
   </div>
   ` : isCustomerInvoice ? `
@@ -320,7 +316,6 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     ${data.insuranceIkNummer ? `<br>IK-Nr.: ${escapeHtml(data.insuranceIkNummer)}` : ""}
     ${data.versichertennummer ? `<br>Vers.-Nr.: ${escapeHtml(data.versichertennummer)}` : ""}
     ${data.pflegegrad ? `<br>Pflegegrad: ${data.pflegegrad}` : ""}
-    ${data.auaApprovalRef ? `<br>Anerkennungs-Az.: ${escapeHtml(data.auaApprovalRef)}${data.auaApprovalDate ? ` (${formatDate(data.auaApprovalDate)})` : ""}` : ""}
   </div>
   ` : `
   <div class="recipient">
@@ -523,7 +518,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
     let abtretungSentence = "";
     if (includesAbtretung) {
-      abtretungSentence = ` Der/Die Leistungsempfänger/in tritt hiermit seinen/ihren Anspruch auf Kostenerstattung gegenüber der Pflegekasse in Höhe des abgerechneten Betrages an ${escapeHtml(data.companyName || "")} ab (§ 398 BGB).${data.ikNummer ? ` IK-Nr.: ${escapeHtml(data.ikNummer)}.` : ""}${data.auaApprovalRef ? ` Anerkennungs-Az.: ${escapeHtml(data.auaApprovalRef)}${data.auaApprovalDate ? ` vom ${formatDate(data.auaApprovalDate)}` : ""}.` : ""}${data.assignmentDeclarationDate ? ` Abtretungserklärung vom ${formatDate(data.assignmentDeclarationDate)}${data.assignmentDeclarationRef ? ` (Az. ${escapeHtml(data.assignmentDeclarationRef)})` : ""}.` : ""} Die Unterschrift unter dem Leistungsnachweis gilt gleichzeitig als Abtretungserklärung.`;
+      abtretungSentence = ` Der/Die Leistungsempfänger/in tritt hiermit seinen/ihren Anspruch auf Kostenerstattung gegenüber der Pflegekasse in Höhe des abgerechneten Betrages an ${escapeHtml(data.companyName || "")} ab (§ 398 BGB).${data.ikNummer ? ` IK-Nr.: ${escapeHtml(data.ikNummer)}.` : ""}${data.assignmentDeclarationDate ? ` Abtretungserklärung vom ${formatDate(data.assignmentDeclarationDate)}${data.assignmentDeclarationRef ? ` (Az. ${escapeHtml(data.assignmentDeclarationRef)})` : ""}.` : ""} Die Unterschrift unter dem Leistungsnachweis gilt gleichzeitig als Abtretungserklärung.`;
     }
 
     return `<div class="confirm-block">${confirmSentence}${abtretungSentence}</div>`;

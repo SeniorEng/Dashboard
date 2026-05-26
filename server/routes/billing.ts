@@ -1725,8 +1725,6 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     invoiceDate: invoice.sentAt ? formatDateForDisplay(formatDateISO(invoice.sentAt)) : formatDateForDisplay(todayISO()),
     invoiceDueDate: invoice.dueDate ? formatDateForDisplay(invoice.dueDate) : null,
     buyerReference: invoice.buyerReference ?? null,
-    auaApprovalRef: null,
-    auaApprovalDate: null,
     assignmentDeclarationDate: invoice.assignmentDeclarationDate ?? null,
     assignmentDeclarationRef: invoice.assignmentDeclarationRef ?? null,
     invoiceType: invoice.invoiceType,
@@ -1917,12 +1915,6 @@ async function buildInvoicePdfData(
       nr: customersTable.nr,
       plz: customersTable.plz,
       stadt: customersTable.stadt,
-      // Task #562 — AUA-Anerkennung ist Stammdatum am Kunden, kein Rechnungsfeld
-      // (siehe shared/schema/customers.ts). Wir lesen sie hier dazu, damit das
-      // PDF und (über buildZugferdData) auch das ZUGFeRD-XML strukturiert
-      // referenzieren können, ohne die Rechnungs-Zeile aufzublähen.
-      auaApprovalRef: customersTable.auaApprovalRef,
-      auaApprovalDate: customersTable.auaApprovalDate,
     })
       .from(customersTable)
       .where(eq(customersTable.id, invoice.customerId))
@@ -1939,8 +1931,6 @@ async function buildInvoicePdfData(
       nr: row?.nr ?? null,
       plz: row?.plz ?? null,
       stadt: row?.stadt ?? null,
-      auaApprovalRef: row?.auaApprovalRef ?? null,
-      auaApprovalDate: (row?.auaApprovalDate as string | null) ?? null,
     };
   }
 
@@ -1950,8 +1940,6 @@ async function buildInvoicePdfData(
     || invoice.billingType === "pflegekasse_gesetzlich";
   if (customerSnapshot.geburtsdatum) pdfData.customerGeburtsdatum = customerSnapshot.geburtsdatum;
   if (customerSnapshot.beihilfeBerechtigt) pdfData.beihilfeBerechtigt = true;
-  pdfData.auaApprovalRef = customerSnapshot.auaApprovalRef ?? null;
-  pdfData.auaApprovalDate = customerSnapshot.auaApprovalDate ?? null;
   if (invoice.billingType === "pflegekasse_gesetzlich" && customerSnapshot.rechnungAnKunde) {
     pdfData.rechnungAnKunde = true;
     const c = customerSnapshot;

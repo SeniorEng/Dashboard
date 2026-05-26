@@ -214,11 +214,6 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
     if (data.pflegegrad) parts.push(`Pflegegrad: ${data.pflegegrad}`);
     notes.push({ content: parts.join(" | "), subjectCode: "AAK" });
   }
-  if (data.auaApprovalRef) {
-    const auaParts: string[] = [`Anerkennungs-Az. (§45b SGB XI): ${data.auaApprovalRef}`];
-    if (data.auaApprovalDate) auaParts.push(`vom ${data.auaApprovalDate}`);
-    notes.push({ content: auaParts.join(" "), subjectCode: "REG" });
-  }
   if (data.assignmentDeclarationDate || data.assignmentDeclarationRef) {
     const aakParts: string[] = ["Abtretungserklärung (§ 398 BGB)"];
     if (data.assignmentDeclarationDate) aakParts.push(`vom ${data.assignmentDeclarationDate}`);

@@ -31,10 +31,6 @@ interface CustomerBaseFields {
   primaryEmployeeId?: number | null;
   backupEmployeeId?: number | null;
   backupEmployeeId2?: number | null;
-  // Task #562 — ZUGFeRD-Dunkelverarbeitung: Trägerbezogene Anerkennungs-
-  // Daten (AUA-Az/-Datum). Optional, keine Pflicht.
-  auaApprovalRef?: string | null;
-  auaApprovalDate?: string | null;
 }
 
 export function buildCustomerInsertData(data: CustomerBaseFields, createdByUserId: number): InsertCustomer {
@@ -66,8 +62,6 @@ export function buildCustomerInsertData(data: CustomerBaseFields, createdByUserI
     primaryEmployeeId: data.primaryEmployeeId ?? null,
     backupEmployeeId: data.backupEmployeeId ?? null,
     backupEmployeeId2: data.backupEmployeeId2 ?? null,
-    auaApprovalRef: data.auaApprovalRef || null,
-    auaApprovalDate: data.auaApprovalDate || null,
   };
 }
 
