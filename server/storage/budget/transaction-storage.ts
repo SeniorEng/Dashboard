@@ -3,7 +3,7 @@ import {
   type BudgetTransaction,
   type InsertBudgetTransaction,
 } from "@shared/schema";
-import { eq, and, desc, gte, lte } from "drizzle-orm";
+import { eq, and, desc, gte, lte, inArray, isNotNull } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -44,14 +44,31 @@ export async function getBudgetTransactions(customerId: number, options?: { year
 
 export async function getTransactionByAppointmentId(appointmentId: number, _tx?: DbClient): Promise<BudgetTransaction | undefined> {
   const d = _tx ?? db;
-  const result = await d.select()
+  // Bestehende Consumption-Buchungen für diesen Termin laden. Stornierte
+  // (reversed) Buchungen dürfen den Dup-Check NICHT mehr blockieren — sonst
+  // scheitert das Re-Document nach Reopen+Korrektur (UI-Pfad: Termin-Detail
+  // → „Zur Korrektur öffnen" → Wizard mit geänderter km/Service-Doku),
+  // obwohl die Original-Buchung explizit zurückgenommen wurde.
+  const consumptions = await d.select()
     .from(budgetTransactions)
     .where(and(
       eq(budgetTransactions.appointmentId, appointmentId),
       eq(budgetTransactions.transactionType, "consumption")
-    ))
-    .limit(1);
-  return result[0];
+    ));
+  if (consumptions.length === 0) return undefined;
+
+  const ids = consumptions.map((c) => c.id);
+  const reversals = await d.select({ rid: budgetTransactions.reversedTransactionId })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.transactionType, "reversal"),
+      isNotNull(budgetTransactions.reversedTransactionId),
+      inArray(budgetTransactions.reversedTransactionId, ids),
+    ));
+  const reversedIds = new Set(
+    reversals.map((r) => r.rid).filter((x): x is number => x != null),
+  );
+  return consumptions.find((c) => !reversedIds.has(c.id));
 }
 
 export async function getTransactionsByAppointmentId(appointmentId: number): Promise<BudgetTransaction[]> {

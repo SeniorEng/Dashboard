@@ -12,6 +12,7 @@ import {
   createCustomer,
   createEmployee,
   createProspect,
+  createSingleServiceRecord,
   deactivateEmployee,
   getServiceIdByCode,
 } from "../helpers/test-data";
@@ -19,6 +20,7 @@ import {
   clickSaveAndWait,
   expectFieldPersisted,
 } from "../helpers/round-trip";
+import { apiPost, apiPut } from "../helpers/auth";
 
 // Edit-Persistence Round-Trip Smoke Suite (#428). Skips ohne TEST_USER_*-Creds.
 
@@ -422,6 +424,280 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       expect(apptAfter.travelKilometers ?? 0).toBeCloseTo(5, 3);
       // Kunden-km muss 0 oder null sein.
       expect(apptAfter.customerKilometers ?? 0).toBe(0);
+    } finally {
+      await deactivateEmployee(session, employee.id);
+    }
+  });
+
+  // ---------- 7c. Termin km bearbeiten — Drift-frei in Ledger + Rechnung (#620) ----------
+  test("Termin km 7,3 → 12,7 — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '12,70 km'", async ({ page }) => {
+    // Komplexer Multi-Round-Trip (UI-Doku → Reopen → PATCH+Rebook →
+    // Re-Document → Rechnung) — der Default-Timeout (30s) ist zu knapp,
+    // sobald Puppeteer-PDF-Render und mehrere Reloads zusammenkommen.
+    test.setTimeout(90_000);
+    const customer = await createCustomer(session);
+    const employee = await createEmployee(session);
+    await assignEmployee(session, customer.id, employee.id);
+
+    // §45b mit Initial-Balance ausstatten, damit die Anfahrt im Kasse-Topf
+    // (nicht in der privaten Fallback-Buchung) landet — sonst rendert die
+    // §45b-Ledger-Sektion keinen Eintrag.
+    const today = new Date();
+    const initialFrom = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    {
+      const { status, data } = await apiPut(
+        session,
+        `/api/budget/${customer.id}/type-settings`,
+        {
+          settings: [
+            {
+              budgetType: "entlastungsbetrag_45b",
+              enabled: true,
+              priority: 1,
+              monthlyLimitCents: 13100,
+            },
+          ],
+        },
+      );
+      if (status >= 300) {
+        throw new Error(`type-settings failed: ${status} ${JSON.stringify(data)}`);
+      }
+    }
+    {
+      const { status, data } = await apiPost(
+        session,
+        `/api/budget/${customer.id}/initial-balance/entlastungsbetrag_45b`,
+        { amountCents: 100000, validFrom: initialFrom },
+      );
+      if (status >= 300) {
+        throw new Error(`initial-balance failed: ${status} ${JSON.stringify(data)}`);
+      }
+    }
+
+    const appt = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: employee.id,
+    });
+
+    try {
+      // --- Schritt 1: Termin mit 7,3 km dokumentieren (UI-Round-Trip) ---
+      await page.goto(`/document-appointment/${appt.id}`, {
+        waitUntil: "domcontentloaded",
+      });
+
+      const serviceDetail = page.locator(
+        "[data-testid='input-details-hauswirtschaft']",
+      );
+      await expect(serviceDetail).toBeVisible({ timeout: 10000 });
+      await serviceDetail.fill("km-Drift-Smoketest");
+      await page.locator("[data-testid='button-next']").click();
+
+      const travelKm = page.locator("[data-testid='input-kilometers']");
+      await expect(travelKm).toBeVisible({ timeout: 10000 });
+      // type="number" akzeptiert universell den Punkt; parseGermanDecimal
+      // im onChange normalisiert ihn intern wieder.
+      await travelKm.fill("7.3");
+
+      await clickSaveAndWait(
+        page,
+        { url: `/api/appointments/${appt.id}/document`, methods: ["POST"] },
+        "button-submit",
+      );
+
+      // --- Reload + Persistenz-Check (7,3 km) ---
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const apptAfterDoc = (await session.api
+        .get(`/api/appointments/${appt.id}`)
+        .then((r) => r.json())) as { travelKilometers?: number | null };
+      expect(apptAfterDoc.travelKilometers ?? 0).toBeCloseTo(7.3, 3);
+
+      // --- Schritt 2: km auf 12,7 ändern (UI: Reopen → Re-Document) ---
+      // Echter Browser-Round-Trip über die User-sichtbaren Controls:
+      // Termin-Detail-Seite → "Dokumentation korrigieren" → Dialog
+      // bestätigen → Redirect auf /document-appointment/:id → km-Feld
+      // mit 12,7 überschreiben → "Speichern". Das ist der einzige Pfad,
+      // den echte Anwender für eine km-Korrektur nehmen können.
+      await page.goto(`/appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
+      const reopenBtn = page.locator("[data-testid='button-reopen']");
+      await expect(reopenBtn).toBeVisible({ timeout: 10000 });
+      await reopenBtn.click();
+
+      // AlertDialog: „Zur Korrektur öffnen" bestätigen. Die reopen-Mutation
+      // navigiert anschliessend auf /document-appointment/:id.
+      const confirmReopen = page.getByRole("button", {
+        name: "Zur Korrektur öffnen",
+      });
+      await expect(confirmReopen).toBeVisible({ timeout: 5000 });
+      await Promise.all([
+        page.waitForURL(`**/document-appointment/${appt.id}`, { timeout: 15000 }),
+        confirmReopen.click(),
+      ]);
+
+      // Schritt 1 des Wizards: Service-Detail ist vom Vor-Lauf
+      // vorbefüllt, also direkt weiter.
+      const serviceDetailAgain = page.locator(
+        "[data-testid='input-details-hauswirtschaft']",
+      );
+      await expect(serviceDetailAgain).toBeVisible({ timeout: 10000 });
+      await page.locator("[data-testid='button-next']").click();
+
+      // Schritt 2: km-Feld mit 12,7 überschreiben. Beim Reopen ist 7,3
+      // vorbelegt — `fill` ersetzt den Inhalt komplett.
+      const travelKmEdit = page.locator("[data-testid='input-kilometers']");
+      await expect(travelKmEdit).toBeVisible({ timeout: 10000 });
+      await travelKmEdit.fill("12.7");
+
+      // Speichern: dieser POST triggert serverseitig die §45b-Storno-und-
+      // Neuabbuchung mit 12,7 km — exakt der Pfad, der die Anzeige↔
+      // Buchung-Drift verhindern soll, die dieser Smoke-Test absichert.
+      await clickSaveAndWait(
+        page,
+        { url: `/api/appointments/${appt.id}/document`, methods: ["POST"] },
+        "button-submit",
+      );
+
+      // --- Reload + Persistenz-Check (12,7 km) im Termin-Detail ---
+      await page.goto(`/appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
+      const apptAfterEdit = (await session.api
+        .get(`/api/appointments/${appt.id}`)
+        .then((r) => r.json())) as { travelKilometers?: number | null };
+      expect(apptAfterEdit.travelKilometers ?? 0).toBeCloseTo(12.7, 3);
+
+      // --- Verifikation 1: Termin-Detail-Seite zeigt "12,70 km" ---
+      // appointment-travel-card.tsx rendert formatKm(12.7) → "12,70" + " km".
+      await expect(page.getByText("12,70 km").first()).toBeVisible({ timeout: 10000 });
+
+      // --- Verifikation 2: Budget-Ledger zeigt aktive Consumption mit 12,7 km ---
+      type BudgetTx = {
+        id: number;
+        transactionType: string;
+        budgetType: string;
+        travelKilometers?: string | number | null;
+        travelCents?: number | null;
+        reversedTransactionId?: number | null;
+      };
+      const txs = (await session.api
+        .get(`/api/budget/${customer.id}/transactions?budgetType=entlastungsbetrag_45b`)
+        .then((r) => r.json())) as BudgetTx[];
+      // Aktive (nicht stornierte, nicht reversal) Consumption-Buchung finden.
+      // Reversal-Zeilen tragen `reversedTransactionId` mit der ID der
+      // stornierten Original-Buchung — daraus bauen wir das Set aller
+      // bereits stornierten Original-IDs.
+      const reversedIds = new Set(
+        txs
+          .filter((t) => t.reversedTransactionId != null)
+          .map((t) => t.reversedTransactionId as number),
+      );
+      const activeConsumption = txs.find(
+        (t) =>
+          t.transactionType === "consumption" &&
+          !reversedIds.has(t.id),
+      );
+      expect(activeConsumption, "Aktive §45b-Consumption-Buchung muss existieren").toBeTruthy();
+      const ledgerKm = Number(activeConsumption!.travelKilometers ?? 0);
+      expect(ledgerKm).toBeCloseTo(12.7, 3);
+      const ledgerTravelCents = activeConsumption!.travelCents ?? 0;
+      expect(ledgerTravelCents).toBeGreaterThan(0);
+
+      // UI-Ledger im Budget-Tab muss „Anfahrt: 12,70 km" rendern.
+      await page.goto(`/admin/customers/${customer.id}?tab=budgets`, {
+        waitUntil: "domcontentloaded",
+      });
+      const ledgerRow = page.locator(`[data-testid='row-transaction-${activeConsumption!.id}']`);
+      await expect(ledgerRow).toBeVisible({ timeout: 10000 });
+      await expect(ledgerRow).toContainText("Anfahrt: 12,70 km");
+
+      // --- Verifikation 3: Rechnungs-Line-Item zeigt 12,7 km mit identischem Cent-Betrag ---
+      const sr = await createSingleServiceRecord(session, {
+        customerId: customer.id,
+        appointmentId: appt.id,
+      });
+      // Admin darf jeden Leistungsnachweis signieren — signerType "employee"
+      // setzt den Record auf "employee_signed", was generateInvoiceCore zulässt.
+      {
+        const { status, data } = await apiPost(
+          session,
+          `/api/service-records/${sr.id}/sign`,
+          {
+            signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+            signerType: "employee",
+            signingLocation: "Test-Smoke",
+          },
+        );
+        if (status >= 300) {
+          throw new Error(`sign service-record failed: ${status} ${JSON.stringify(data)}`);
+        }
+      }
+
+      const apptDate = new Date(appt.date);
+      const { status: genStatus, data: genData } = await apiPost<{
+        invoices?: Array<{ id: number }>;
+        invoice?: { id: number };
+      }>(session, "/api/billing/generate", {
+        customerId: customer.id,
+        billingMonth: apptDate.getMonth() + 1,
+        billingYear: apptDate.getFullYear(),
+      });
+      if (genStatus >= 300) {
+        throw new Error(`billing/generate failed: ${genStatus} ${JSON.stringify(genData)}`);
+      }
+      const invoiceId =
+        genData?.invoices?.[0]?.id ??
+        genData?.invoice?.id ??
+        (genData as { id?: number })?.id;
+      expect(invoiceId, `Rechnungs-ID fehlt: ${JSON.stringify(genData)}`).toBeTruthy();
+
+      type LineItem = {
+        serviceCode?: string | null;
+        quantityRaw?: string | number | null;
+        quantityUnit?: string | null;
+        totalCents: number;
+      };
+      const invoiceDetail = (await session.api
+        .get(`/api/billing/${invoiceId}`)
+        .then((r) => r.json())) as { lineItems?: LineItem[] };
+      const travelLine = (invoiceDetail.lineItems ?? []).find(
+        (li) => li.serviceCode === "travel_km",
+      );
+      expect(travelLine, `travel_km Line-Item fehlt: ${JSON.stringify(invoiceDetail.lineItems)}`).toBeTruthy();
+      expect(travelLine!.quantityUnit).toBe("km");
+      expect(Number(travelLine!.quantityRaw ?? 0)).toBeCloseTo(12.7, 3);
+      // Drift-Anker: travelCents im Ledger MUSS == totalCents im Rechnungs-Line-Item.
+      expect(travelLine!.totalCents).toBe(ledgerTravelCents);
+
+      // --- Verifikation 4: Rechnungs-Detail in der Admin-UI zeigt "12,70 km" ---
+      // Browser-Round-Trip auf /admin/billing — Rechnung über
+      // button-detail-{id} ausklappen, in der Line-Item-Tabelle wird die
+      // gerundete km-Menge via `renderLineItemQuantity` als "12,70 km"
+      // gerendert (gleicher Helfer wie in der PDF). Das ist die einzige
+      // Browser-View der Rechnung; die eigentliche PDF wird per
+      // `target="_blank"` als Datei-Download geöffnet, ist also in
+      // Playwright nicht direkt im DOM prüfbar.
+      await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
+      // Monat/Jahr explizit auf den Rechnungs-Zeitraum stellen — die
+      // Billing-Seite filtert per Default auf den heutigen Monat, der
+      // Test-Termin liegt aber ggf. im Folgemonat (createAppointment
+      // setzt das Datum auf den nächsten Werktag +7).
+      const billingMonth = apptDate.getMonth() + 1;
+      const billingYear = apptDate.getFullYear();
+      await page.locator("[data-testid='select-billing-month']").click();
+      await page.getByRole("option", { name: new RegExp(`^${
+        ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][billingMonth - 1]
+      }$`) }).click();
+      await page.locator("[data-testid='select-billing-year']").click();
+      await page.getByRole("option", { name: String(billingYear) }).click();
+
+      const invoiceRow = page.locator(
+        `[data-testid='invoice-row-${invoiceId}']`,
+      );
+      await expect(invoiceRow).toBeVisible({ timeout: 15000 });
+      await page.locator(`[data-testid='button-detail-${invoiceId}']`).click();
+      // Detail-Karte rendert direkt nach der Row — wir suchen den
+      // km-Text innerhalb der Detail-Tabelle (toleranter Lookup, weil
+      // die Karte kein eigenes data-testid hat).
+      await expect(
+        page.getByText("12,70 km").first(),
+      ).toBeVisible({ timeout: 10000 });
     } finally {
       await deactivateEmployee(session, employee.id);
     }
