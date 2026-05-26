@@ -709,6 +709,19 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
         )}
       </SectionCard>
 
+      {customer.billingType === "selbstzahler" && (
+        <SectionCard
+          title="Abrechnung"
+          icon={<CreditCard className={iconSize.sm} />}
+        >
+          <div className="space-y-2 text-sm" data-testid="text-selbstzahler-hinweis">
+            <p className="text-gray-700">
+              Selbstzahler — Rechnungen gehen immer direkt an den Kunden. Keine Verrechnung mit der Pflegekasse, jeder dokumentierte Termin wird in voller Höhe privat verbucht.
+            </p>
+          </div>
+        </SectionCard>
+      )}
+
       {customer.billingType !== "selbstzahler" && <SectionCard
         title="Abrechnung"
         icon={<CreditCard className={iconSize.sm} />}
