@@ -90,9 +90,17 @@ function buildConsumptionTxData(
     hauswirtschaftCents: hwCents,
     alltagsbegleitungMinutes: params?.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null,
     alltagsbegleitungCents: abCents,
-    travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio) : null,
+    // Task #611 — km wird im DB-Schema als `real` mit 1-NK-Anzeige geführt
+    // (BudgetLedgerSection: `Number(km).toFixed(1)`). Vor dem Fix wurde hier
+    // `Math.round(km * ratio)` auf Integer-km eingedampft (7,3 → 7), wodurch
+    // Termin-Detail und Budget-Eintrag pro Termin um bis zu ±0,5 km
+    // auseinanderdriften. Bei verschachtelten Bestands-Bugs (z.B. ein
+    // Anwender hat ursprünglich 70 statt 7,3 km eingegeben und den Termin
+    // später korrigiert) summierte sich der Drift sichtbar zum Faktor 10.
+    // Wir runden jetzt auf 0,1 km, identisch zur Anzeige.
+    travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio * 10) / 10 : null,
     travelCents: tvCents,
-    customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio) : null,
+    customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio * 10) / 10 : null,
     customerKilometersCents: ckCents,
   };
 }

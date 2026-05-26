@@ -8,6 +8,63 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-26 — km-Drift Termin-Detail vs. Budget-Übersicht (Task #611)
+
+**Anlass:** In `BudgetLedgerSection` zeigte die Reisekosten-Zeile pro Termin
+einen abweichenden km-Wert vom Termin-Detail (z.B. Schröder Rosemarie,
+12.01.2026: Termin-Detail = 7,3 km, Budget-Eintrag = 70 km — Faktor-10-Drift).
+
+**Root Cause (zwei überlagerte Ursachen):**
+1. `server/storage/budget/consumption-engine.ts → buildConsumptionTxData`
+   rundete `travelKilometers`/`customerKilometers` über
+   `Math.round(km * ratio)` auf **Integer-km** (7,3 → 7). Das DB-Schema
+   `budget_transactions.travel_kilometers` ist aber `real`, und die UI
+   (`BudgetLedgerSection` Zeile 676) zeigt 1 NK (`Number(km).toFixed(1)`).
+   Jede dezimale km-Eingabe driftete damit ab Buchung um bis zu ±0,5 km.
+2. Bestandsdaten: Anwender hatten zum Teil ursprünglich fehlerhafte km
+   eingegeben (z.B. 70 statt 7,3) und den Termin nachträglich korrigiert.
+   Da Termin-Edits die alten Consumption-Buchungen nicht automatisch
+   rebooken, behielten die Budget-Transaktionen den alten falschen Wert
+   — sichtbar als bis zu Faktor-10-Drift.
+
+**Fix:**
+- `buildConsumptionTxData` rundet km jetzt auf `Math.round(km * ratio * 10) / 10`
+  (1 NK, identisch zur Anzeige und zur bereits korrekten Privat-Fallback-Logik
+  in derselben Datei). Damit kann der Bug für neue Buchungen nicht erneut
+  auftreten.
+- Drift-Detektor `tests/equality/travel-km-roundtrip.test.ts` prüft pro Termin
+  `|appt.km − Σ tx.km| ≤ 0,15 km` über den ECHTEN Buchungspfad
+  (`createConsumptionTransaction`). Schlug vor dem Fix mit Δ = 0,3 km für
+  den Regressionsfall (7,3 km) fehl, ist nach dem Fix grün.
+
+**Bestandsdaten-Reparatur:** `server/scripts/reconcile-km-drift.ts`
+- Sucht Termine mit `|appt.km − Σ tx.km| > 0,15 km`.
+- Pro Termin: Storno der bestehenden Consumption-Txs (Reversal mit
+  `reversedTransactionId`, idempotent via UNIQUE-Index) auf das ursprüngliche
+  `transactionDate` (damit Monatscaps korrekt netto rechnen), Abkoppeln der
+  alten Txs vom Termin (`appointmentId = null`) und Neu-Buchung über
+  `createConsumptionTransaction` mit den AKTUELLEN appt-km. hw/ab-Minuten
+  werden aus den Original-Txs summiert, damit die Topf-Wahl stabil bleibt.
+- Audit-Einträge pro Termin (`km_drift_reconciled`) + Sammel-Audit pro Lauf
+  (`km_drift_reconciled_batch`) mit gemeinsamer `batchId` (UUID).
+- CLI: `tsx server/scripts/reconcile-km-drift.ts [--apply] [--appointment=ID[,ID]] [--customer=ID[,ID]] [--tolerance=0.15]`.
+  Default = Trockenlauf, druckt pro Termin previous/new km + hw/ab-Minuten.
+
+**GoBD:** Storno + Neu-Anlage statt UPDATE — alte Tx + Reversal + neue Tx
+bleiben vollständig in der Historie. Rechnungs-PDFs werden NICHT angefasst
+(Out-of-Scope, GoBD-Immutabilität — Korrektur dort nur via Storno-Rechnung).
+
+**Out of Scope:**
+- Rechnungs-/ZUGFeRD-Korrekturen für bereits versandte Rechnungen
+  (siehe RE-2026-0003-Pfad in Task #561 für die übliche Storno+Neu-Vorlage).
+- Änderungen am Cost-Calculator (km × Tarif): Cents-Pfad blieb unverändert.
+
+**Durchgeführt von:** Replit Task-Agent (Task #611).
+**Publish-Ergebnis:** ⏳ ausstehend — Skript ist erst nach Publish gegen die
+Production-DB laufen zu lassen (zuerst Trockenlauf, dann `--apply`).
+
+---
+
 ## Vorlage (kopieren, ausfüllen, oben einfügen)
 
 ```markdown
