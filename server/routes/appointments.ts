@@ -34,7 +34,7 @@ import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { rebookAppointmentConsumptionForKm, type RebookKmResult } from "../storage/budget/km-rebook";
+import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
 import type { Response } from "express";
 import type { CoverageCheckResponse } from "@shared/api";
@@ -1075,17 +1075,34 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     }
   }
 
-  // Task #613: km-Änderungen am Termin lösen automatisch Storno+Neu der
-  // Budget-Consumption aus, damit Anzeige (Termin-km) und Buchung
-  // (budget_transactions-km) nicht auseinanderlaufen. Das ersetzt den
-  // manuellen `reconcile-km-drift`-Schritt für den Live-Edit-Pfad.
+  // Task #613/#618: Änderungen an budget-relevanten Termin-Feldern lösen
+  // automatisch Storno+Neu der Budget-Consumption aus, damit Anzeige
+  // (Termin-Werte) und Buchung (budget_transactions) nicht auseinander-
+  // laufen. Erfasste Felder: km, Datum, Gesamtdauer, Services.
   const travelKmChanged =
     validatedData.travelKilometers !== undefined
     && (validatedData.travelKilometers ?? null) !== (existingAppointment.travelKilometers ?? null);
   const customerKmChanged =
     validatedData.customerKilometers !== undefined
     && (validatedData.customerKilometers ?? null) !== (existingAppointment.customerKilometers ?? null);
-  const shouldRebookKm = travelKmChanged || customerKmChanged;
+  const dateChanged =
+    validatedData.date !== undefined
+    && validatedData.date !== existingAppointment.date;
+  const durationChanged =
+    validatedData.durationPromised !== undefined
+    && validatedData.durationPromised !== existingAppointment.durationPromised;
+  const servicesChanged = validatedServicesPayload !== undefined;
+  const shouldRebookKm =
+    travelKmChanged || customerKmChanged || dateChanged || durationChanged || servicesChanged;
+  const rebookTrigger = travelKmChanged || customerKmChanged
+    ? "km_change"
+    : dateChanged
+      ? "date_change"
+      : servicesChanged
+        ? "services_change"
+        : durationChanged
+          ? "duration_change"
+          : "unknown";
 
   const kmRebookHolder: { value: RebookKmResult | null } = { value: null };
 
@@ -1111,11 +1128,8 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     const result = await storage.updateAppointment(id, dataForUpdate as typeof validatedData, tx);
 
     if (shouldRebookKm && result && result.customerId) {
-      kmRebookHolder.value = await rebookAppointmentConsumptionForKm({
+      kmRebookHolder.value = await rebookAppointmentConsumption({
         appointmentId: id,
-        customerId: result.customerId,
-        travelKilometers: result.travelKilometers ?? 0,
-        customerKilometers: result.customerKilometers ?? 0,
         userId: req.user?.id,
       }, tx);
     }
@@ -1142,9 +1156,10 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     );
   }
 
-  // Task #613: separater Audit-Eintrag für den automatischen km-Rebook,
+  // Task #613/#618: separater Audit-Eintrag für den automatischen Rebook,
   // damit Auswertungen sehen, dass ein Termin-Edit (nicht das manuelle
-  // Reconcile-Skript) der Auslöser war.
+  // Reconcile-Skript) der Auslöser war. `trigger` benennt das geänderte
+  // Feld (km / date / duration / services).
   const rebookInfo = kmRebookHolder.value;
   if (rebookInfo && rebookInfo.rebooked && existingAppointment.customerId != null) {
     const ip = req.ip || req.socket.remoteAddress;
@@ -1155,12 +1170,15 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       id,
       {
         customerId: existingAppointment.customerId,
-        trigger: "appointment_edit",
+        trigger: rebookTrigger,
+        previousTransactionDate: rebookInfo.previousTransactionDate,
         transactionDate: rebookInfo.transactionDate,
         previousTravelKm: rebookInfo.previousTravelKm,
         newTravelKm: updated.travelKilometers ?? 0,
         previousCustomerKm: rebookInfo.previousCustomerKm,
         newCustomerKm: updated.customerKilometers ?? 0,
+        previousHauswirtschaftMinutes: rebookInfo.previousHauswirtschaftMinutes,
+        previousAlltagsbegleitungMinutes: rebookInfo.previousAlltagsbegleitungMinutes,
         reversedTransactionIds: rebookInfo.reversedTransactionIds,
         hauswirtschaftMinutes: rebookInfo.hauswirtschaftMinutes,
         alltagsbegleitungMinutes: rebookInfo.alltagsbegleitungMinutes,
