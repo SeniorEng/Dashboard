@@ -137,16 +137,27 @@ export async function upsertInitialBalanceAllocation(
 }
 
 export async function getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]> {
-  // Startwert-Historie darf ausschließlich manuelle initial_balance-Einträge enthalten.
-  // Carryover-Einträge entstehen automatisch und gehören nicht in die Startwert-Sektion (Task #101).
+  // Task #608: Für §45b zusätzlich `carryover`-Allokationen ausliefern, damit
+  // der Übertrag aus dem Vorjahr im UI „Startwert anpassen" sichtbar und
+  // löschbar wird. Vor #608 entstand sonst ein Geister-Übertrag, der zwar in
+  // der Budget-Übersicht summiert wurde, aber per UI weder bearbeitet noch
+  // gelöscht werden konnte — neu hinzugefügte Startwerte stapelten sich darauf
+  // („Gesamt zugewiesen" sprang unerklärbar nach oben).
+  //
+  // Für §45a / §39+42a bleibt die alte Semantik (nur `initial_balance`) — dort
+  // gibt es keinen automatischen Carryover-Pfad.
+  const sourceFilter = budgetType === "entlastungsbetrag_45b"
+    ? sql`${budgetAllocations.source} IN ('initial_balance', 'carryover')`
+    : eq(budgetAllocations.source, "initial_balance");
+
   return budgetAllocationsRepo.selectFrom(db)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
       isNull(budgetAllocations.deletedAt),
-      eq(budgetAllocations.source, "initial_balance"),
+      sourceFilter,
     ))
-    .orderBy(desc(budgetAllocations.validFrom));
+    .orderBy(desc(budgetAllocations.validFrom), desc(budgetAllocations.id));
 }
 
 /**

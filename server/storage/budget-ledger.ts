@@ -39,6 +39,7 @@ interface BudgetLedgerStorage {
 
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
+  clearLegacyInitialBalanceFromSettings(customerId: number, budgetType: string, tx: DbClient, userId?: number): Promise<boolean>;
 
   calculateAppointmentCost(params: {
     customerId: number;
@@ -92,6 +93,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
 
   upsertInitialBalanceAllocation: allocation.upsertInitialBalanceAllocation,
   getInitialBalanceAllocations: allocation.getInitialBalanceAllocations,
+  clearLegacyInitialBalanceFromSettings: preferences.clearLegacyInitialBalanceFromSettings,
 
   calculateAppointmentCost: pricing.calculateAppointmentCost,
 

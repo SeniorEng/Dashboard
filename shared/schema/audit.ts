@@ -69,6 +69,7 @@ export const AUDIT_ACTIONS = [
   "budget_allocation_resurrected",
   "budget_allocation_soft_deleted",
   "budget_type_settings_transition",
+  "budget_type_settings_initial_balance_cleared",
   "invoice_integrity_verified",
   "invoice_integrity_drift",
   "customer_soft_deleted",

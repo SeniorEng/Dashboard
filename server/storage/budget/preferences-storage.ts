@@ -11,6 +11,14 @@ import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { auditService } from "../../services/audit";
 
+/**
+ * Task #608: Backfill-Sentinel für `customer_budget_type_settings.validFrom`.
+ * Historische Zeilen, die der Historisierungs-Backfill nachträglich gefüllt
+ * hat, tragen diesen Wert statt eines echten Inkrafttreten-Datums. UI und
+ * Save-Logik müssen ihn maskieren bzw. beim ersten Edit ersetzen.
+ */
+export const SETTINGS_VALID_FROM_EPOCH = "1970-01-01";
+
 export async function getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined> {
   const d = _tx ?? db;
   const result = await d.select()
@@ -207,7 +215,18 @@ export async function upsertBudgetTypeSettings(
         //       reale Buchung referenziert haben.
         const oldValidFrom = current.validFrom;
         const createdToday = current.createdAt ? current.createdAt.toISOString().slice(0, 10) === today : false;
-        const isStillFresh = (oldValidFrom != null && oldValidFrom >= today) || (oldValidFrom == null && createdToday);
+        // Task #608 (Revision nach Code-Review): Den Backfill-Sentinel
+        // '1970-01-01' beim Edit NICHT in-place ersetzen — das hätte für
+        // historische asOfDate-Lookups (`getActiveBudgetTypeSettings(date)`,
+        // benötigt validFrom <= date) die einzige offene Zeile entfernt
+        // und damit Buchungen aus der Vergangenheit ihrer Topf-Konfig
+        // beraubt. Stattdessen läuft der Sentinel-Fall über den normalen
+        // append-only Transitions-Pfad weiter unten (alte Zeile schließen
+        // mit validTo=today, neue Zeile mit validFrom=tomorrow). Die
+        // UI maskiert den Sentinel kosmetisch, der Edit wird ab morgen
+        // wirksam — historische Lookups bleiben stabil.
+        const isStillFresh = (oldValidFrom != null && oldValidFrom >= today)
+          || (oldValidFrom == null && createdToday);
         if (isStillFresh) {
           await executor.update(customerBudgetTypeSettings)
             .set({
@@ -269,4 +288,53 @@ export async function upsertBudgetTypeSettings(
 
   if (tx) return run(tx);
   return db.transaction(run);
+}
+
+/**
+ * Task #608: Setzt die Legacy-Felder `initial_balance_cents` / `initial_balance_month`
+ * auf der aktuell offenen (validTo IS NULL) Settings-Zeile auf NULL.
+ *
+ * Wird vom DELETE-Pfad einer §45b-Startwert-/Carryover-Allokation aufgerufen,
+ * damit eine spätere Re-Materialisierung nicht erneut einen Geister-Übertrag
+ * aus diesen Spalten erzeugt. GoBD-konform: KEIN Schließen+Insert einer neuen
+ * Zeile (die fachlichen Felder enabled/priority/monthlyLimit ändern sich
+ * nicht), nur ein in-place UPDATE der reinen Legacy-Spalten + Audit-Eintrag,
+ * wenn überhaupt etwas zu clearen ist (Idempotenz).
+ *
+ * Liefert `true` zurück, wenn tatsächlich ein Wert genullt wurde.
+ */
+export async function clearLegacyInitialBalanceFromSettings(
+  customerId: number,
+  budgetType: string,
+  tx: DbClient,
+  userId?: number,
+): Promise<boolean> {
+  const openRows = await tx.select()
+    .from(customerBudgetTypeSettings)
+    .where(and(
+      eq(customerBudgetTypeSettings.customerId, customerId),
+      eq(customerBudgetTypeSettings.budgetType, budgetType),
+      isNull(customerBudgetTypeSettings.validTo),
+    ));
+  const current = openRows[0];
+  if (!current) return false;
+  if (current.initialBalanceCents == null && current.initialBalanceMonth == null) return false;
+
+  await tx.update(customerBudgetTypeSettings)
+    .set({ initialBalanceCents: null, initialBalanceMonth: null, updatedAt: sql`now()` })
+    .where(eq(customerBudgetTypeSettings.id, current.id));
+
+  if (userId != null) {
+    await auditService.log(userId, "budget_type_settings_initial_balance_cleared", "budget", customerId, {
+      customerId,
+      budgetType,
+      settingsId: current.id,
+      previous: {
+        initialBalanceCents: current.initialBalanceCents,
+        initialBalanceMonth: current.initialBalanceMonth,
+      },
+      reason: "Task #608: Carryover-/Startwert-Allokation gelöscht — Legacy-Felder neutralisiert, damit der nächste Recompute keinen Geister-Übertrag wiederbelebt.",
+    });
+  }
+  return true;
 }

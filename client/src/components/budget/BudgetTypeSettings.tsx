@@ -33,7 +33,19 @@ interface InitialBalanceAllocation {
   validFrom: string;
   notes: string | null;
   createdAt: string;
+  // Task #608: Carryover-Allokationen (source='carryover') werden für §45b
+  // in derselben Liste angezeigt wie manuelle Startwerte, damit der Übertrag
+  // aus dem Vorjahr im UI sichtbar und löschbar ist.
+  source?: string;
+  expiresAt?: string | null;
+  year?: number;
+  month?: number | null;
 }
+
+// Task #608: Sentinel-Wert, mit dem der Historisierungs-Backfill alte Zeilen
+// auf „rückwirkend gültig" markiert hat. Im UI als leeres Feld + Hinweistext
+// rendern, statt buchstäblich „01.01.1970" anzuzeigen.
+const SETTINGS_VALID_FROM_EPOCH = "1970-01-01";
 
 interface BudgetTypeSettingsProps {
   customerId: number;
@@ -67,6 +79,13 @@ function formatMonthYear(dateStr: string): string {
   if (parts.length < 2) return dateStr;
   const monthLabel = MONTH_OPTIONS.find(m => m.value === parts[1])?.label || parts[1];
   return `${monthLabel} ${parts[0]}`;
+}
+
+// Task #608: Carryover-Ablaufdatum als DE-Datum (TT.MM.JJJJ) ausgeben.
+function formatExpiryDE(isoDate: string): string {
+  const parts = isoDate.split("-");
+  if (parts.length !== 3) return isoDate;
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
 }
 
 // Task #441 — Re-Exports auf den zentralen Money-Helper.
@@ -119,7 +138,8 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
           yearly: centsToEuroString(s.yearlyLimitCents),
         };
         initDates[s.budgetType] = {
-          validFrom: s.validFrom || "",
+          // Task #608: Epoch-Sentinel als leer rendern (Backfill-Marker).
+          validFrom: s.validFrom && s.validFrom !== SETTINGS_VALID_FROM_EPOCH ? s.validFrom : "",
           validTo: s.validTo || "",
         };
       });
@@ -325,6 +345,14 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                         className="h-8 mt-1 text-sm"
                         data-testid={`input-valid-from-${setting.budgetType}`}
                       />
+                      {/* Task #608: Hinweis für historische Zeilen, deren validFrom vom
+                          Backfill auf den Unix-Epoch gesetzt wurde — der wörtliche
+                          „01.01.1970"-Wert hat Nutzer verwirrt. */}
+                      {setting.validFrom === SETTINGS_VALID_FROM_EPOCH && !dateValues[setting.budgetType]?.validFrom && (
+                        <p className="text-[11px] text-gray-500 mt-0.5" data-testid={`hint-valid-from-since-setup-${setting.budgetType}`}>
+                          seit Einrichtung (rückwirkend gültig)
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label className="text-xs text-gray-500">Gültig bis</Label>
@@ -629,12 +657,24 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
   return (
     <div>
       {latestAllocation && (
-        <div className="flex items-center justify-between mb-2 py-1 px-2 rounded bg-teal-50 text-sm" data-testid={`text-current-balance-${budgetType}`}>
-          <span className="text-gray-600">
-            Startwert (ab {formatMonthYear(latestAllocation.validFrom)})
+        <div
+          className={`flex items-center justify-between mb-2 py-1 px-2 rounded text-sm ${
+            latestAllocation.source === "carryover" ? "bg-amber-50" : "bg-teal-50"
+          }`}
+          data-testid={`text-current-balance-${budgetType}`}
+        >
+          <span className="text-gray-600 flex items-center gap-1.5">
+            {latestAllocation.source === "carryover" ? (
+              <>
+                <StatusBadge type="info" value="Übertrag" size="sm" />
+                <span>aus Vorjahr{latestAllocation.expiresAt ? ` (gültig bis ${formatExpiryDE(latestAllocation.expiresAt)})` : ""}</span>
+              </>
+            ) : (
+              <>Startwert (ab {formatMonthYear(latestAllocation.validFrom)})</>
+            )}
           </span>
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-teal-700">{formatCurrency(latestAllocation.amountCents)}</span>
+            <span className={`font-semibold ${latestAllocation.source === "carryover" ? "text-amber-700" : "text-teal-700"}`}>{formatCurrency(latestAllocation.amountCents)}</span>
             {deleteConfirmId === latestAllocation.id ? (
               <div className="flex items-center gap-1">
                 <button
@@ -795,7 +835,16 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
           {allocations.slice(1).map((alloc) => (
             <div key={alloc.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-gray-50 text-xs">
               <div className="flex items-center gap-2">
-                <StatusBadge type="info" value={`ab ${formatMonthYear(alloc.validFrom)}`} size="sm" />
+                {alloc.source === "carryover" ? (
+                  <>
+                    <StatusBadge type="info" value="Übertrag" size="sm" />
+                    <span className="text-gray-500">
+                      aus Vorjahr{alloc.expiresAt ? ` (gültig bis ${formatExpiryDE(alloc.expiresAt)})` : ""}
+                    </span>
+                  </>
+                ) : (
+                  <StatusBadge type="info" value={`ab ${formatMonthYear(alloc.validFrom)}`} size="sm" />
+                )}
                 {alloc.notes && <span className="text-gray-500">{alloc.notes}</span>}
               </div>
               <div className="flex items-center gap-2">

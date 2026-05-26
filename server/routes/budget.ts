@@ -394,27 +394,49 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
   const { budgetAllocations } = await import("@shared/schema");
   const { eq, and, or } = await import("drizzle-orm");
   const { budgetAllocationsRepo } = await import("../repos");
-  const existing = await budgetAllocationsRepo.selectFrom(database)
-    .where(and(
-      eq(budgetAllocations.id, allocationId),
-      eq(budgetAllocations.customerId, customerId),
-      budgetAllocationsRepo.activeOnly(),
-      or(
-        eq(budgetAllocations.source, "initial_balance"),
-        eq(budgetAllocations.source, "carryover"),
-        eq(budgetAllocations.source, "manual_adjustment"),
-      ),
-    ))
-    .limit(1);
 
-  if (existing.length === 0) {
+  // Task #608: Lookup + Soft-Delete + Settings-Cleanup laufen in einer
+  // Transaktion. So bleibt sichergestellt, dass die zugehörigen Legacy-Felder
+  // (`initial_balance_cents`/`_month`) in `customer_budget_type_settings`
+  // gemeinsam mit der Allocation neutralisiert werden — sonst materialisiert
+  // der nächste Recompute einen Geister-Übertrag aus diesen Spalten.
+  const existing = await database.transaction(async (tx) => {
+    const rows = await budgetAllocationsRepo.selectFrom(tx)
+      .where(and(
+        eq(budgetAllocations.id, allocationId),
+        eq(budgetAllocations.customerId, customerId),
+        budgetAllocationsRepo.activeOnly(),
+        or(
+          eq(budgetAllocations.source, "initial_balance"),
+          eq(budgetAllocations.source, "carryover"),
+          eq(budgetAllocations.source, "manual_adjustment"),
+        ),
+      ))
+      .limit(1);
+
+    if (rows.length === 0) return null;
+
+    await tx.update(budgetAllocations)
+      .set({ deletedAt: new Date() })
+      .where(eq(budgetAllocations.id, allocationId));
+
+    // Nur für §45b Startwert/Carryover — andere Töpfe (§45a/§39) haben die
+    // Legacy-Felder ohnehin nicht im Einsatz.
+    const r = rows[0];
+    if (
+      r.budgetType === "entlastungsbetrag_45b"
+      && (r.source === "initial_balance" || r.source === "carryover")
+    ) {
+      await budgetLedgerStorage.clearLegacyInitialBalanceFromSettings(customerId, r.budgetType, tx, userId);
+    }
+
+    return r;
+  });
+
+  if (existing === null) {
     res.status(404).json({ error: "NOT_FOUND", message: "Startwert nicht gefunden" });
     return;
   }
-
-  await database.update(budgetAllocations)
-    .set({ deletedAt: new Date() })
-    .where(eq(budgetAllocations.id, allocationId));
 
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;
@@ -426,16 +448,17 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
     await auditService.log(userId, "budget_allocation_soft_deleted", "budget", customerId, {
       customerId,
       allocationId,
-      amountCents: existing[0].amountCents,
-      budgetType: existing[0].budgetType,
-      source: existing[0].source,
+      amountCents: existing.amountCents,
+      budgetType: existing.budgetType,
+      source: existing.source,
       reason: "initial_balance_deleted",
     }, ip);
     await auditService.log(userId, "initial_balance_deleted", "budget", customerId, {
       customerId,
       allocationId,
-      amountCents: existing[0].amountCents,
-      budgetType: existing[0].budgetType,
+      amountCents: existing.amountCents,
+      budgetType: existing.budgetType,
+      source: existing.source,
     }, ip);
   }
 
