@@ -16,6 +16,8 @@ import type { UseTimeEntryConflictResult } from "../hooks/use-time-entry-conflic
 import { TIME_ENTRY_TYPE_CONFIG } from "../constants";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { entryTypeSupportsKilometers } from "@shared/domain/time-entries";
+import { getVacationHolidayDates, getVacationHolidayName } from "@shared/utils/holidays";
+import { useMemo } from "react";
 
 export interface EmployeeOption {
   value: string;
@@ -136,17 +138,30 @@ export function TimeEntryFormContent({
               data-testid={`${prefix}input-end-date`}
             />
           </div>
+          <VacationRangePreview
+            entryType={formState.entryType}
+            startDate={formState.entryDate}
+            endDate={formState.endDate || formState.entryDate}
+            testIdPrefix={prefix}
+          />
         </>
       ) : (
-        <div className="space-y-2">
-          <Label>Datum</Label>
-          <DatePicker
-            value={formState.entryDate || null}
-            onChange={(val) => onFieldChange("entryDate", val || "")}
-            disableWeekends
-            data-testid={`${prefix}input-entry-date`}
+        <>
+          <div className="space-y-2">
+            <Label>Datum</Label>
+            <DatePicker
+              value={formState.entryDate || null}
+              onChange={(val) => onFieldChange("entryDate", val || "")}
+              disableWeekends
+              data-testid={`${prefix}input-entry-date`}
+            />
+          </div>
+          <SingleDayHolidayHint
+            entryType={formState.entryType}
+            date={formState.entryDate}
+            testIdPrefix={prefix}
           />
-        </div>
+        </>
       )}
 
       {!isFullDayType && (
@@ -234,6 +249,133 @@ export function TimeEntryFormContent({
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Task #602: Live-Vorschau für Urlaubs-Mehrtagesbereiche.
+ * Berechnet client-seitig die echten Werktage zwischen `startDate` und
+ * `endDate` (Wochenenden + Feiertage gefiltert). Holt nichts vom Server,
+ * weil `getVacationHolidayDates` rein deterministisch ist.
+ */
+function VacationRangePreview({
+  entryType,
+  startDate,
+  endDate,
+  testIdPrefix,
+}: {
+  entryType: TimeEntryType;
+  startDate: string;
+  endDate: string;
+  testIdPrefix: string;
+}) {
+  const breakdown = useMemo(() => {
+    if (entryType !== "urlaub") return null;
+    if (!startDate || !endDate) return null;
+    if (endDate < startDate) return null;
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
+    const holidayCache = new Map<number, Set<string>>();
+    const holidayNameCache = new Map<string, string>();
+    let workdays = 0;
+    let weekendDays = 0;
+    const holidays: Array<{ date: string; name: string }> = [];
+    const cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      const y = cursor.getFullYear();
+      const m = String(cursor.getMonth() + 1).padStart(2, "0");
+      const d = String(cursor.getDate()).padStart(2, "0");
+      const iso = `${y}-${m}-${d}`;
+      const dow = cursor.getDay();
+      if (dow === 0 || dow === 6) {
+        weekendDays += 1;
+      } else {
+        let set = holidayCache.get(y);
+        if (!set) {
+          set = getVacationHolidayDates(y);
+          holidayCache.set(y, set);
+        }
+        if (set.has(iso)) {
+          let name = holidayNameCache.get(iso);
+          if (!name) {
+            name = getVacationHolidayName(iso) ?? "Feiertag";
+            holidayNameCache.set(iso, name);
+          }
+          holidays.push({ date: iso, name });
+        } else {
+          workdays += 1;
+        }
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return { workdays, weekendDays, holidays };
+  }, [entryType, startDate, endDate]);
+
+  if (!breakdown) return null;
+
+  const { workdays, weekendDays, holidays } = breakdown;
+  const skipParts: string[] = [];
+  if (holidays.length > 0) {
+    skipParts.push(`${holidays.length} ${holidays.length === 1 ? "Feiertag" : "Feiertage"}`);
+  }
+  if (weekendDays > 0) {
+    skipParts.push(`${weekendDays} ${weekendDays === 1 ? "Wochenendtag" : "Wochenendtage"}`);
+  }
+
+  return (
+    <div
+      className="p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm"
+      data-testid={`${testIdPrefix}vacation-range-preview`}
+    >
+      <p className="text-teal-900">
+        <span className="font-semibold" data-testid={`${testIdPrefix}vacation-workdays-count`}>
+          {workdays} {workdays === 1 ? "Werktag" : "Werktage"}
+        </span>
+        {skipParts.length > 0 && (
+          <span className="text-teal-700">
+            {" "}({skipParts.join(" und ")} werden nicht abgezogen)
+          </span>
+        )}
+      </p>
+      {holidays.length > 0 && (
+        <ul className="mt-1 text-xs text-teal-700 list-disc list-inside" data-testid={`${testIdPrefix}vacation-holidays-list`}>
+          {holidays.map((h) => (
+            <li key={h.date}>
+              {h.date.split("-").reverse().join(".")} – {h.name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Task #602: Hinweis im Single-Day-Modus, wenn ein gesetzlicher Feiertag
+ * ausgewählt ist und der Eintrags-Typ `urlaub` ist. Der Backend lehnt den
+ * Speichern-Versuch ohnehin ab — die Frontend-Vorwarnung erspart dem
+ * Nutzer den fehlgeschlagenen Roundtrip.
+ */
+function SingleDayHolidayHint({
+  entryType,
+  date,
+  testIdPrefix,
+}: {
+  entryType: TimeEntryType;
+  date: string;
+  testIdPrefix: string;
+}) {
+  if (entryType !== "urlaub" || !date) return null;
+  const name = getVacationHolidayName(date);
+  if (!name) return null;
+  const display = date.split("-").reverse().join(".");
+  return (
+    <div
+      className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800"
+      data-testid={`${testIdPrefix}vacation-holiday-warning`}
+    >
+      Der {display} ist ein gesetzlicher Feiertag ({name}) und kann nicht als Urlaubstag gebucht werden.
     </div>
   );
 }

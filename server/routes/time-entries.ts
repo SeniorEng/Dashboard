@@ -8,6 +8,7 @@ import type { TimesPageData, TimeOverviewData, VacationSummary } from "@shared/a
 import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { timeToMinutes, isWeekend, isPast } from "@shared/utils/datetime";
+import { getVacationHolidayName } from "@shared/utils/holidays";
 import { checkAndRecalcDailyAutoBreak, checkDailyMaximum } from "../services/auto-breaks";
 import { checkTimeConflicts } from "../services/time-entry-validation";
 import monthClosingRouter from "./month-closing";
@@ -162,6 +163,30 @@ router.post("/check-conflicts", asyncHandler("Konfliktprüfung fehlgeschlagen", 
 }));
 
 /**
+ * GET /time-entries/vacation-preview
+ * Preview für Mehrtages-Urlaub: liefert Anzahl Werktage, Wochenend- und
+ * Feiertage zwischen `startDate` und `endDate` (inklusive). Frontend-Helfer
+ * für die "X Werktage (Y Feiertage und Z Wochenendtage werden nicht
+ * abgezogen)"-Anzeige (Task #602).
+ */
+router.get("/vacation-preview", asyncHandler("Urlaubs-Vorschau konnte nicht berechnet werden", async (req: Request, res: Response) => {
+  const startDate = String(req.query.startDate || "");
+  const endDate = String(req.query.endDate || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return res.status(400).json({ error: "Ungültiges Datumsformat" });
+  }
+  if (endDate < startDate) {
+    return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
+  }
+  const breakdown = timeTrackingStorage.collectVacationRangeBreakdown(startDate, endDate);
+  res.json({
+    workdays: breakdown.workdays.length,
+    weekendDays: breakdown.weekendDates.length,
+    holidays: breakdown.holidays,
+  });
+}));
+
+/**
  * GET /time-entries/:id
  * Get a specific time entry
  */
@@ -227,11 +252,18 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
       return res.status(400).json({ error: "Enddatum muss nach Startdatum liegen" });
     }
 
-    // Collect weekday dates (skip weekends)
-    const weekdayDates = timeTrackingStorage.collectWeekdayDates(validatedData.entryDate, endDate);
+    // Task #602: Urlaub überspringt zusätzlich gesetzliche Feiertage
+    // (Sachsen). Krankheit bleibt unverändert — krank ist man auch an
+    // Feiertagen, der Tag wird (wie bisher) trotzdem dokumentiert.
+    const weekdayDates = validatedData.entryType === "urlaub"
+      ? timeTrackingStorage.collectVacationWorkdays(validatedData.entryDate, endDate)
+      : timeTrackingStorage.collectWeekdayDates(validatedData.entryDate, endDate);
 
     if (weekdayDates.length === 0) {
-      return res.status(400).json({ error: "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen." });
+      const msg = validatedData.entryType === "urlaub"
+        ? "Der gewählte Zeitraum enthält nur Wochenend- oder Feiertage. Bitte wählen Sie einen Zeitraum mit Werktagen."
+        : "Der gewählte Zeitraum enthält nur Wochenendtage. Bitte wählen Sie einen Zeitraum mit Werktagen.";
+      return res.status(400).json({ error: msg });
     }
 
     if (!req.user!.isSuperAdmin) {
@@ -308,6 +340,21 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     return res.status(403).json({ error: "Dieser Monat ist bereits abgeschlossen. Nur die Geschäftsführung kann Änderungen vornehmen." });
   }
   
+  // Task #602: Urlaub auf einem einzelnen gesetzlichen Feiertag ablehnen.
+  // Krankheit bleibt zulässig (krank ist man auch an Feiertagen).
+  // Feiertagscheck VOR Wochenendcheck, damit Feiertage am Wochenende
+  // (z.B. 03.10.2026 = Tag der Deutschen Einheit, Samstag) die spezifischere
+  // Feiertagsmeldung liefern statt der generischen Wochenendmeldung.
+  if (validatedData.entryType === "urlaub") {
+    const holidayName = getVacationHolidayName(validatedData.entryDate);
+    if (holidayName) {
+      const display = validatedData.entryDate.split('-').reverse().join('.');
+      return res.status(400).json({
+        error: `Der ${display} ist ein gesetzlicher Feiertag (${holidayName}) und kann nicht als Urlaubstag gebucht werden.`,
+      });
+    }
+  }
+
   // Single day entry - block weekends
   if (isWeekend(validatedData.entryDate)) {
     return res.status(400).json({ error: "Zeiteinträge können nicht an Samstagen oder Sonntagen erstellt werden." });
@@ -388,8 +435,22 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
   
   const validatedData = updateTimeEntrySchema.parse(req.body);
   
-  // Block weekend dates on update
   const dateToCheck = validatedData.entryDate ?? existing.entryDate;
+
+  // Task #602: Urlaub auch beim Update gegen Feiertage prüfen.
+  // Feiertagscheck vor Wochenendcheck (siehe POST).
+  const updatedEntryType = validatedData.entryType ?? existing.entryType;
+  if (updatedEntryType === "urlaub") {
+    const holidayName = getVacationHolidayName(dateToCheck);
+    if (holidayName) {
+      const display = dateToCheck.split('-').reverse().join('.');
+      return res.status(400).json({
+        error: `Der ${display} ist ein gesetzlicher Feiertag (${holidayName}) und kann nicht als Urlaubstag gebucht werden.`,
+      });
+    }
+  }
+
+  // Block weekend dates on update
   if (isWeekend(dateToCheck)) {
     return res.status(400).json({ error: "Zeiteinträge können nicht auf Samstage oder Sonntage gelegt werden." });
   }

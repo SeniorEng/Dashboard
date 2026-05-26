@@ -366,6 +366,13 @@ async function runStartupTasks() {
       log(`Schulung/Besprechung-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { cleanupVacationOnHolidays } = await import("./startup/cleanup-vacation-on-holidays");
+    try {
+      await cleanupVacationOnHolidays();
+    } catch (err) {
+      log(`Urlaubs-Feiertags-Bereinigung fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { syncAppointmentServiceDurations } = await import("./startup/sync-appointment-service-durations");
     try {
       await syncAppointmentServiceDurations();

@@ -77,3 +77,53 @@ export function isHoliday(dateStr: string): string | undefined {
   const map = getHolidayMap(year);
   return map.get(dateStr);
 }
+
+/**
+ * Unterstützte Bundesländer für die Urlaubsberechnung. Aktuell ist nur
+ * Sachsen relevant — die Liste ist offen erweiterbar, sobald CareConnect
+ * in weiteren Bundesländern eingesetzt wird (siehe Task #602, Step 1).
+ *
+ * Sachsen hat alle bundesweit gültigen Feiertage plus Reformationstag
+ * und Buß- und Bettag — also exakt die Liste, die `getHolidays` bereits
+ * liefert. Andere Bundesländer würden eine kuratierte Untermenge bzw.
+ * landesspezifische Tage (Mariä Himmelfahrt, Fronleichnam, …) benötigen.
+ */
+export type Bundesland = "SN";
+
+export const DEFAULT_BUNDESLAND: Bundesland = "SN";
+
+/**
+ * Liefert für ein Jahr die Menge aller Feiertagsdaten (ISO YYYY-MM-DD),
+ * die in `bundesland` als gesetzlicher Feiertag gelten und damit
+ * **nicht** als Urlaubstag abgezogen werden dürfen.
+ */
+export function getVacationHolidayDates(
+  year: number,
+  bundesland: Bundesland = DEFAULT_BUNDESLAND,
+): Set<string> {
+  if (bundesland !== "SN") {
+    throw new Error(`Bundesland ${bundesland} wird noch nicht unterstützt`);
+  }
+  const result = new Set<string>();
+  for (const h of getHolidays(year)) {
+    result.add(h.date);
+  }
+  return result;
+}
+
+/**
+ * Liefert für ein ISO-Datum den Feiertagsnamen, sofern es im angegebenen
+ * Bundesland (Default: Sachsen) ein gesetzlicher Feiertag ist und damit
+ * Urlaubs-Buchungen blockiert.
+ */
+export function getVacationHolidayName(
+  dateStr: string,
+  bundesland: Bundesland = DEFAULT_BUNDESLAND,
+): string | undefined {
+  if (bundesland !== "SN") {
+    throw new Error(`Bundesland ${bundesland} wird noch nicht unterstützt`);
+  }
+  const year = parseInt(dateStr.substring(0, 4));
+  const map = getHolidayMap(year);
+  return map.get(dateStr);
+}

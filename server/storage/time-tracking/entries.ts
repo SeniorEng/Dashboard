@@ -7,6 +7,7 @@ import {
   type UpdateTimeEntry,
 } from "@shared/schema";
 import { isWeekend, parseLocalDate, formatDateISO } from "@shared/utils/datetime";
+import { getVacationHolidayDates, getVacationHolidayName } from "@shared/utils/holidays";
 import { db } from "../../lib/db";
 import { buildTimeEntryFilterConditions, type TimeEntryFilters } from "./shared";
 import { employeeTimeEntriesRepo } from "../../repos";
@@ -70,6 +71,65 @@ export function collectWeekdayDates(startDate: string, endDate: string): string[
     cursor.setDate(cursor.getDate() + 1);
   }
   return dates;
+}
+
+export interface VacationRangeBreakdown {
+  workdays: string[];
+  weekendDates: string[];
+  holidays: Array<{ date: string; name: string }>;
+}
+
+/**
+ * Wie `collectWeekdayDates`, überspringt aber zusätzlich gesetzliche
+ * Feiertage des Standardbundeslandes (Sachsen). Liefert die echten
+ * Werktage zurück sowie die ausgelassenen Wochenenden und Feiertage —
+ * damit Frontend und Backend identische Werte für die Urlaubs-Vorschau
+ * verwenden können (Task #602).
+ */
+export function collectVacationRangeBreakdown(
+  startDate: string,
+  endDate: string,
+): VacationRangeBreakdown {
+  const start = parseLocalDate(startDate);
+  const end = parseLocalDate(endDate);
+  const workdays: string[] = [];
+  const weekendDates: string[] = [];
+  const holidays: Array<{ date: string; name: string }> = [];
+
+  // Cache holidays per year (range kann Jahreswechsel überspannen).
+  const holidayCache = new Map<number, Set<string>>();
+  function holidaysFor(year: number): Set<string> {
+    let s = holidayCache.get(year);
+    if (!s) {
+      s = getVacationHolidayDates(year);
+      holidayCache.set(year, s);
+    }
+    return s;
+  }
+
+  const cursor = new Date(start.getTime());
+  while (cursor <= end) {
+    const dateStr = formatDateISO(cursor);
+    if (isWeekend(dateStr)) {
+      weekendDates.push(dateStr);
+    } else if (holidaysFor(cursor.getFullYear()).has(dateStr)) {
+      const name = getVacationHolidayName(dateStr) ?? "Feiertag";
+      holidays.push({ date: dateStr, name });
+    } else {
+      workdays.push(dateStr);
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return { workdays, weekendDates, holidays };
+}
+
+/**
+ * Liefert nur die echten Urlaubs-Werktage (Wochenenden + Feiertage gefiltert).
+ * Convenience-Wrapper über `collectVacationRangeBreakdown`.
+ */
+export function collectVacationWorkdays(startDate: string, endDate: string): string[] {
+  return collectVacationRangeBreakdown(startDate, endDate).workdays;
 }
 
 /**
