@@ -1192,47 +1192,45 @@ export default function AdminBilling() {
                   </ul>
                 </div>
 
-                {generateAllProgress.results.length > 0 && (
-                  <div>
-                    <div className="font-medium text-gray-800 mb-1 mt-2">Pro Kunde</div>
-                    <ul className="max-h-48 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white">
-                      {generateAllProgress.results.map((r) => {
-                        const cust = customers?.find((c) => c.id === r.customerId);
-                        const name = cust ? getCustomerName(cust) : `Kunde #${r.customerId}`;
-                        const dotColor =
-                          r.status === "created" ? "bg-green-500"
-                          : r.status === "skipped" ? "bg-gray-400"
-                          : "bg-red-500";
-                        const labelColor =
-                          r.status === "created" ? "text-green-700"
-                          : r.status === "skipped" ? "text-gray-600"
-                          : "text-red-700";
-                        const labelText =
-                          r.status === "created" ? `erstellt${r.invoiceCount && r.invoiceCount > 1 ? ` (${r.invoiceCount} Rechnungen)` : ""}`
-                          : r.status === "skipped" ? "übersprungen"
-                          : "Fehler";
-                        return (
-                          <li
-                            key={r.customerId}
-                            className="px-2 py-1.5 text-sm flex items-start gap-2"
-                            data-testid={`generate-all-result-${r.customerId}`}
-                          >
-                            <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} aria-hidden="true" />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-baseline gap-x-2">
-                                <span className="font-medium text-gray-800 truncate">{name}</span>
-                                <span className={`text-xs font-medium ${labelColor}`}>{labelText}</span>
+                {/* Task #587: Nur fehlgeschlagene Kunden namentlich auflisten —
+                    inkl. Server-`message` (Task #586). Erfolgreiche bleiben
+                    in der Summary, übersprungene ebenfalls (Grund ist generisch
+                    „bereits abgerechnet"). */}
+                {(() => {
+                  const failed = generateAllProgress.results.filter((r) => r.status === "error");
+                  if (failed.length === 0) return null;
+                  return (
+                    <div data-testid="generate-all-failures">
+                      <div className="font-medium text-red-700 mb-1 mt-2">
+                        Fehlgeschlagene Kunden ({failed.length})
+                      </div>
+                      <ul className="max-h-48 overflow-y-auto divide-y divide-gray-200 border border-red-200 rounded bg-white">
+                        {failed.map((r) => {
+                          const cust = customers?.find((c) => c.id === r.customerId);
+                          const name = cust ? getCustomerName(cust) : `Kunde #${r.customerId}`;
+                          return (
+                            <li
+                              key={r.customerId}
+                              className="px-2 py-1.5 text-sm flex items-start gap-2"
+                              data-testid={`generate-all-result-${r.customerId}`}
+                            >
+                              <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0 bg-red-500" aria-hidden="true" />
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-gray-800 truncate">{name}</div>
+                                <div
+                                  className="text-xs text-red-700 mt-0.5 break-words"
+                                  data-testid={`generate-all-error-message-${r.customerId}`}
+                                >
+                                  {r.message ?? "Unbekannter Fehler"}
+                                </div>
                               </div>
-                              {r.message && (r.status === "error" || r.status === "skipped") && (
-                                <div className="text-xs text-gray-600 mt-0.5 break-words">{r.message}</div>
-                              )}
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

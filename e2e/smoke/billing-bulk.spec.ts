@@ -203,14 +203,19 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
       expect(myResults.every((r) => r.status === "created")).toBe(true);
       expect(genBody.summary.created).toBeGreaterThanOrEqual(2);
 
-      // Summary-Dialog ist sichtbar.
+      // Summary-Dialog ist sichtbar. Task #587: Erfolgreiche Kunden werden
+      // nicht mehr namentlich aufgelistet (nur die Summary-Counts), nur
+      // fehlgeschlagene erscheinen im „Fehlgeschlagene Kunden"-Block. Da
+      // beide Smoke-Kunden „created" sind, darf der Failures-Block nicht
+      // erscheinen.
       await expect(page.locator("[data-testid='generate-all-summary']")).toBeVisible();
+      await expect(page.locator("[data-testid='generate-all-failures']")).toHaveCount(0);
       await expect(
         page.locator(`[data-testid='generate-all-result-${selb.customer.id}']`),
-      ).toBeVisible();
+      ).toHaveCount(0);
       await expect(
         page.locator(`[data-testid='generate-all-result-${kasse.customer.id}']`),
-      ).toBeVisible();
+      ).toHaveCount(0);
 
       // Dialog schließen, damit Rechnungs-Karten klickbar sind.
       await page.keyboard.press("Escape");
