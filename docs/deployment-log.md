@@ -8,6 +8,157 @@ Neueste Einträge oben.
 
 ---
 
+### Geplant — Operator-Aktion: Bestandsdrift Termin-vs-Budget einmalig korrigieren (Task #641, Folge zu #616/#619/#629)
+
+**Anlass:** Der Boot-Audit `server/startup/audit-appointment-budget-km-drift.ts`
+(seit #629 km + Minuten + Datum) meldet beim Start weiterhin Drift zwischen
+`appointments` und den zugeordneten `budget_transactions`-Zeilen. Der Code-
+Pfad ist seit #616/#618/#629 konsistent (neue Buchungen driften nicht mehr),
+die historisch entstandenen Zeilen sind aber bewusst nicht angefasst worden
+— GoBD-Korrektur über Storno + Neuanlage muss der Superadmin manuell
+anstoßen. Konkret im Screenshot: Schröder Rosemarie, Termin 12.01.2026 —
+Kundenansicht zeigt „70,0 km / −75,95 €", der Cent-Betrag wurde aber mit
+7,3 km gerechnet (Faktor-10-Drift aus #611).
+
+**Trockenlauf-Befund (gegen Prod-Replica, 2026-05-26, ohne Schreibvorgänge):**
+- 372 Termine driften insgesamt (km, Minuten, Datum).
+- Davon **46 in einem geschlossenen Monat** (Mitarbeiter #6, Februar 2026 —
+  Closing in `employee_month_closings` ohne Reopen). Diese werden vom
+  Apply-Lauf ohne `--allow-closed-months` automatisch übersprungen.
+- Restliche **326 Termine in offenen Monaten** werden vom Apply-Lauf
+  korrigiert (inkl. Schröder Jan-2026-Beispiel: appt #67, appt km = 7,3 vs
+  bt km = 70).
+
+**Operator-Schritte (aus Shell mit Production-Zugriff, nach Publish dieses
+Tasks ausführen):**
+
+```bash
+export DATABASE_URL="$PROD_DATABASE_URL"   # aus Publishing-Tab
+
+# 1. Pflicht-Backup (Runbook §5):
+BACKUP_LABEL="-pre-task-641-appointment-budget-drift" bash scripts/backup-prod-db.sh
+
+# 2. Trockenlauf — listet alle Drift-Termine, schreibt nichts:
+tsx server/scripts/audit-appointment-budget-drift.ts \
+  --csv=tmp/drift-dryrun-$(date -u +%Y%m%dT%H%M%SZ).csv \
+  | tee tmp/drift-dryrun-$(date -u +%Y%m%dT%H%M%SZ).log
+
+# Plausibilitätscheck im Log:
+#   - Schröder Termin #67 (12.01.2026, Kunde #39, MA #6) MUSS in der Liste
+#     stehen mit „travel 70,00 vs 7,30 km".
+#   - Gesamtanzahl ~372 — bei deutlicher Abweichung erst klären, bevor Apply
+#     läuft.
+
+# 3. Scharf laufen (geschlossene Monate werden bewusst übersprungen):
+tsx server/scripts/audit-appointment-budget-drift.ts --apply \
+  --user=<superadmin-id> \
+  --reason="Bestandsdrift Termin-vs-Budget-km, Folge zu #616 (Task #641)" \
+  | tee tmp/drift-apply-$(date -u +%Y%m%dT%H%M%SZ).log
+
+# 4. Idempotenz-/Verifikations-Re-Run — muss nur noch die geschlossenen-
+#    Monats-Einträge (≤46) zeigen:
+tsx server/scripts/audit-appointment-budget-drift.ts
+
+# 5. Server frisch starten und im Boot-Log prüfen, dass die Zeile
+#    „Termin-vs-Budget-Drift gefunden in N Termin(en)" entweder ganz
+#    verschwindet oder nur noch die unten dokumentierten geschlossenen-
+#    Monats-Fälle listet.
+
+unset DATABASE_URL
+```
+
+**UI-Stichprobe (Akzeptanz):**
+1. Kunde **Schröder Rosemarie**, Termin **12.01.2026** öffnen.
+2. Budget-Ledger-Zeile zeigt jetzt **7,30 km** statt 70,0 km, Cent-Betrag
+   unverändert −75,95 € (km × 0,35 € + 105 min/60 × Stundensatz =
+   angezeigter Betrag, auf den Cent).
+3. Drei Tx-Zeilen für den Termin in der Historie sichtbar: alte Consumption
+   (km = 70), Reversal (+75,95 €) mit Notiz „Rebook", neue Consumption mit
+   km = 7,30.
+
+**Termine in geschlossenen Monaten — NICHT automatisch korrigieren
+(46 Termine, alle MA #6 / Februar 2026 / Closing ohne Reopen):**
+
+| Termin-ID | Datum | Kunde | appt km | bt km |
+|---|---|---|---|---|
+| 134 | 2026-02-24 | 92 | 13,1 | 131 |
+| 133 | 2026-02-17 | 92 | 6,8 | 68 |
+| 135 | 2026-02-03 | 66 | 12,0 | 120 |
+| 136 | 2026-02-23 | 66 | 12,0 | 120 |
+| 137 | 2026-02-02 | 55 | 7,3 | 73 |
+| 138 | 2026-02-12 | 55 | 5,4 | 54 |
+| 139 | 2026-02-11 | 76 | 17,0 | 170 |
+| 140 | 2026-02-25 | 76 | 17,5 | 175 |
+| 141 | 2026-02-02 | 53 | 19,3 | 193 |
+| 142 | 2026-02-09 | 54 | 7,0 | 70 |
+| 143 | 2026-02-13 | 54 | 25,8 | 258 |
+| 144 | 2026-02-16 | 54 | 7,4 | 74 |
+| 145 | 2026-02-20 | 54 | 17,4 | 74 |
+| 146 | 2026-02-23 | 54 | 0,0 | 94 |
+| 147 | 2026-02-05 | 69 | 7,3 | 73 |
+| 148 | 2026-02-19 | 69 | 22,9 | 229 |
+| 149 | 2026-02-03 | 81 | 9,9 | 99 |
+| 150 | 2026-02-17 | 81 | 9,6 | 96 |
+| 151 | 2026-02-04 | 91 | 7,1 | 71 |
+| 152 | 2026-02-18 | 83 | 2,7 | 27 |
+| 153 | 2026-02-09 | 95 | 6,9 | 0 |
+| 154 | 2026-02-20 | 95 | 21,8 | 436 |
+| 155 | 2026-02-23 | 95 | 7,3 | 0 |
+| 163 | 2026-02-17 | 58 | 10,4 | 104 |
+| 164 | 2026-02-09 | 108 | 3,3 | 33 |
+| 165 | 2026-02-11 | 108 | 1,0 | 10 |
+| 166 | 2026-02-11 | 108 | 1,0 | 10 |
+| 167 | 2026-02-18 | 108 | 5,7 | 57 |
+| 168 | 2026-02-25 | 108 | 22,6 | 226 |
+| 169 | 2026-02-04 | 63 | 1,9 | 19 |
+| 171 | 2026-02-18 | 63 | 4,1 | 41 |
+| 172 | 2026-02-24 | 63 | 2,0 | 20 |
+| 173 | 2026-02-24 | 78 | 27,8 | 278 |
+| 174 | 2026-02-19 | 82 | 18,3 | 183 |
+| 175 | 2026-02-03 | 75 | 11,0 | 110 |
+| 176 | 2026-02-16 | 75 | 7,3 | 73 |
+| 213 | 2026-02-27 | 56 | 10,7 | 107 |
+| 214 | 2026-02-26 | 50 | 12,2 | 122 |
+| 215 | 2026-02-04 | 50 | 7,3 | 73 |
+| 216 | 2026-02-12 | 94 | 12,1 | 121 |
+| 217 | 2026-02-05 | 51 | 12,6 | 126 |
+| 218 | 2026-02-05 | 72 | 18,1 | 181 |
+| 278 | 2026-02-13 | 56 | 12,6 | 126 |
+| 280 | 2026-02-20 | 72 | 16,2 | 162 |
+| 513 | 2026-02-11 | 76 | 17,0 | 170 |
+| 515 | 2026-02-20 | 95 | 21,8 | 436 |
+
+**Entscheidungspfad geschlossener Monat:** Superadmin entscheidet pro
+Termin, ob der Monat per Monatsabschluss-Reopen (Pflicht-Begründung
+≥10 Zeichen, landet im Audit-Log) wieder geöffnet und das Skript mit
+`--allow-closed-months` für genau diese Termin-IDs (`--appointment=…`)
+nachgezogen wird, oder ob die Bestandsdrift im geschlossenen Monat
+toleriert wird. KEIN globales `--allow-closed-months` ohne vorhergehende
+Einzelfall-Bewertung.
+
+**Done looks like (Checkliste):**
+- [ ] Backup-Pfad: __________
+- [ ] Trockenlauf-Log abgelegt: __________
+- [ ] Apply-Log abgelegt: __________
+- [ ] UI-Stichprobe Schröder 12.01.2026: bestanden / nicht bestanden
+- [ ] Re-Run zeigt ≤46 Drift-Kandidaten (nur geschlossener Monat)
+- [ ] Boot-Log nach Frischstart zeigt entsprechende Drift-Zahl
+- [ ] Entscheidung pro geschlossenem-Monat-Termin dokumentiert oder
+      bewusst zurückgestellt
+- [ ] Diesen Eintrag aktualisieren: „Geplant" → „✅ erledigt am YYYY-MM-DD
+      von <Operator>"
+
+**Rollback:** Replit/Neon PITR auf den in Schritt 1 erzeugten Snapshot.
+Einzeltermin-Rollback ist über die GoBD-Historie möglich: das Skript
+nutzt `rebookAppointmentConsumption` (Storno + Neuanlage), pro Termin
+wird ein `appointment_km_rebooked`-Audit-Eintrag mit Vorher/Nachher
+geschrieben.
+
+**Status:** ⏳ Geplant — vom Operator nach Production-Deploy von
+Task #641 auszuführen.
+
+---
+
 ### 2026-05-26 — Historische km-Drift-Buchungen per Superadmin korrigieren (Task #619)
 
 **Anlass:** Der Boot-Audit aus Task #616
