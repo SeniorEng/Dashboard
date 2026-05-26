@@ -460,10 +460,57 @@ export async function createConsumptionTransaction(params: {
       date: params.transactionDate,
     });
 
-    const [customer] = await customersRepo.selectColumnsFrom({ acceptsPrivatePayment: customers.acceptsPrivatePayment }, tx).where(eq(customers.id, params.customerId)).limit(1);
-    const acceptsPrivatePayment = customer?.acceptsPrivatePayment ?? false;
+    const [customer] = await customersRepo
+      .selectColumnsFrom(
+        {
+          acceptsPrivatePayment: customers.acceptsPrivatePayment,
+          billingType: customers.billingType,
+        },
+        tx,
+      )
+      .where(eq(customers.id, params.customerId))
+      .limit(1);
+    // Task #588: `selbstzahler` ist die kanonische Quelle dafür, dass der
+    // Kunde grundsätzlich privat zahlt — unabhängig vom Flag
+    // `acceptsPrivatePayment`, das im UI für Selbstzahler gar nicht setzbar
+    // ist und per Default `false` bleibt. Vor dem Fix scheiterte die
+    // Dokumentation für Selbstzahler hart mit "Budget reicht nicht …", weil
+    // der Pre-Check nur `acceptsPrivatePayment` betrachtete.
+    const isPrivateAllowed =
+      (customer?.acceptsPrivatePayment ?? false) ||
+      customer?.billingType === "selbstzahler";
 
+    const isSelbstzahler = customer?.billingType === "selbstzahler";
     const hasUsage = costs.totalCents > 0;
+
+    // Task #588 (Fast-Path): Selbstzahler bucht IMMER 100 % privat. Wir
+    // umgehen den Cascade-Pfad komplett, sodass selbst dann KEIN §45b/§45a/§39
+    // konsumiert wird, wenn an einem Selbstzahler (z.B. durch Migration oder
+    // Konfig-Drift) noch eine Pflegekassen-Allocation hängt. Andernfalls
+    // würde `createCascadeConsumption` einen vorhandenen Topf anzapfen und
+    // die UI-Anzeige "0 € Pflegekasse, alles privat" wäre eine Lüge.
+    if (isSelbstzahler && hasUsage) {
+      const [privateTransaction] = await tx.insert(budgetTransactions).values({
+        customerId: params.customerId,
+        budgetType: "private",
+        transactionDate: params.transactionDate,
+        transactionType: "consumption",
+        amountCents: -costs.totalCents,
+        appointmentId: params.appointmentId,
+        hauswirtschaftMinutes: params.hauswirtschaftMinutes,
+        hauswirtschaftCents: costs.hauswirtschaftCents,
+        alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
+        alltagsbegleitungCents: costs.alltagsbegleitungCents,
+        travelKilometers: params.travelKilometers,
+        travelCents: costs.travelCents,
+        customerKilometers: params.customerKilometers,
+        customerKilometersCents: costs.customerKilometersCents,
+        createdByUserId: params.userId,
+        notes: `Selbstzahler: ${formatEuroDE(costs.totalCents)}`,
+      }).returning();
+      return privateTransaction;
+    }
+
     if (!hasUsage) {
       const cascadeResult = await createCascadeConsumption({
         customerId: params.customerId,
@@ -483,7 +530,7 @@ export async function createConsumptionTransaction(params: {
       return cascadeResult.transactions[0];
     }
 
-    if (!acceptsPrivatePayment) {
+    if (!isPrivateAllowed) {
       // Date-aware Vorabprüfung: §45b nutzt die bis zum transactionDate
       // aufgelaufene Allocation minus bereits gebuchter Beträge bis dahin
       // (Task #425). §45a/§39 nutzen ihren jeweiligen Window-Cap relativ
@@ -521,7 +568,7 @@ export async function createConsumptionTransaction(params: {
     }, tx);
 
     if (cascadeResult.outstandingCents > 0) {
-      if (acceptsPrivatePayment) {
+      if (isPrivateAllowed) {
         const privateRatio = costs.totalCents > 0 ? cascadeResult.outstandingCents / costs.totalCents : 1;
         const hwCents = Math.round(costs.hauswirtschaftCents * privateRatio);
         const abCents = Math.round(costs.alltagsbegleitungCents * privateRatio);

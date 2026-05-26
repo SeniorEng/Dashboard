@@ -557,9 +557,10 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
     expect(detailPrivat.netAmountCents).toBeGreaterThan(0);
   });
 
-  it("BF-2.3 — Split greift NICHT, wenn acceptsPrivatePayment=false ist (Buchung wird abgelehnt, keine Rechnung)", async () => {
-    // Ohne Privatzahlungs-Akzeptanz darf die Dokumentation gar nicht stattfinden:
-    // consumption-engine wirft "Budget reicht nicht — Kunde akzeptiert keine Privatzahlung".
+  it("BF-2.3a — Pflegekasse OHNE Private Zuzahlung wird weiterhin geblockt (kein Regress)", async () => {
+    // Pflegekasse-Kunde ohne acceptsPrivatePayment darf weiterhin nicht
+    // dokumentiert werden, sobald das Budget nicht reicht — Task #588 ändert
+    // nur das Selbstzahler-Verhalten, nicht den Pflegekassen-Pfad.
     const custId = await createCustomer(pvPayload("SP3", { acceptsPrivatePayment: false }));
     await configureLowBudgetPV(custId);
 
@@ -570,7 +571,7 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
       travelOriginType: "home",
       travelKilometers: 0,
       customerKilometers: 0,
-      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "BF-2.3 No-Private" }],
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "BF-2.3a No-Private" }],
     });
     expect(
       docRes.status,
@@ -581,6 +582,44 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
       errMsg,
       "Fehlermeldung muss explizit auf Budget/Privatzahlung hinweisen",
     ).toMatch(/Budget reicht nicht|Privatzahlung|akzeptiert/i);
+  });
+
+  it("BF-2.3b — Selbstzahler-Doku läuft ohne Budget-Block durch (Task #588)", async () => {
+    // Selbstzahler haben per Definition gar kein Pflegekassen-Budget; das
+    // UI-Flag `acceptsPrivatePayment` ist für sie nicht setzbar und bleibt
+    // per Default `false`. Vor Task #588 schlug die Doku trotzdem mit
+    // "Budget reicht nicht — Kunde akzeptiert keine Privatzahlung." fehl.
+    // Erwartung jetzt: Doku läuft durch und erzeugt eine reine
+    // Privat-Transaktion über den vollen Betrag.
+    const custId = await createCustomer({
+      ...szPayload("SZ588"),
+      acceptsPrivatePayment: false,
+    });
+
+    const appt = await findFreeSlotAndCreate(custId, hwServiceId, 60, "SZ588");
+
+    const docRes = await apiPost<any>(`/api/appointments/${appt.id}/document`, {
+      actualStart: appt.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "BF-2.3b Selbstzahler" }],
+    });
+    expect(
+      docRes.status,
+      `Selbstzahler-Doku muss durchlaufen (got ${docRes.status} ${JSON.stringify(docRes.data)})`,
+    ).toBe(200);
+
+    // Resultierende Buchungen prüfen: keine §45b/§45a/§39-Konsum-Zeile,
+    // ausschließlich eine `private`-Konsum-Transaktion.
+    const txs = await apiGet<any[]>(`/api/budget/${custId}/transactions`);
+    expect(txs.status).toBe(200);
+    const apptTxs = (txs.data ?? []).filter(
+      (t: any) => t.appointmentId === appt.id && t.transactionType === "consumption",
+    );
+    expect(apptTxs.length, "genau eine Konsum-Transaktion für Selbstzahler").toBe(1);
+    expect(apptTxs[0].budgetType).toBe("private");
+    expect(apptTxs[0].amountCents).toBeLessThan(0);
   });
 
   it("BF-2.4 — Split-Erzeugung ist atomar in einer DB-Transaktion gewrappt", async () => {

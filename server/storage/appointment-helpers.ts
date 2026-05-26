@@ -252,6 +252,11 @@ function mapProspectAsCustomer(p: ProspectRow): AppointmentWithCustomer["custome
     status: "aktiv",
     inaktivAb: null,
     personenbefoerderungGewuenscht: false,
+    // Synthetische Defaults: Prospects haben keine Budget-Verbuchung
+    // (Erstberatung-Termine durchlaufen die Consumption-Engine nicht), die
+    // Selbstzahler-Privatpfad-Logik (Task #588) ist hier daher nicht
+    // relevant. `billingType` ist nur ein Anzeige-Platzhalter, bis der
+    // Prospect zum echten Kunden konvertiert wird.
     billingType: "pflegekasse_gesetzlich",
     acceptsPrivatePayment: false,
     documentDeliveryMethod: "email",

@@ -454,10 +454,23 @@ export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
 
   const privatePaymentMap = new Map<number, boolean>();
   for (const customerId of customerIds) {
-    const [customer] = await customersRepo.selectColumnsFrom({ acceptsPrivatePayment: customers.acceptsPrivatePayment }, db)
+    const [customer] = await customersRepo
+      .selectColumnsFrom(
+        {
+          acceptsPrivatePayment: customers.acceptsPrivatePayment,
+          billingType: customers.billingType,
+        },
+        db,
+      )
       .where(eq(customers.id, customerId))
       .limit(1);
-    privatePaymentMap.set(customerId, customer?.acceptsPrivatePayment ?? false);
+    // Task #588: Selbstzahler zahlen per Definition immer privat — der
+    // Import darf sie deshalb NICHT als "Budget reicht nicht"-Fall trimmen,
+    // genauso wenig wie der interaktive Doku-Pfad in der Consumption-Engine.
+    const isPrivateAllowed =
+      (customer?.acceptsPrivatePayment ?? false) ||
+      customer?.billingType === "selbstzahler";
+    privatePaymentMap.set(customerId, isPrivateAllowed);
   }
 
   for (const row of rows) {
