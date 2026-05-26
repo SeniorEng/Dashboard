@@ -75,6 +75,7 @@ export function TimeEntryFormContent({
   hideFooter = false,
 }: TimeEntryFormContentProps) {
   const prefix = testIdPrefix ? `${testIdPrefix}-` : "";
+  const disableHolidays = formState.entryType === "urlaub";
 
   return (
     <div className="space-y-4 pt-4">
@@ -125,6 +126,7 @@ export function TimeEntryFormContent({
               value={formState.entryDate || null}
               onChange={(val) => onFieldChange("entryDate", val || "")}
               disableWeekends
+              disableHolidays={disableHolidays}
               data-testid={`${prefix}input-entry-date`}
             />
           </div>
@@ -135,6 +137,7 @@ export function TimeEntryFormContent({
               minDate={formState.entryDate ? parseLocalDate(formState.entryDate) : undefined}
               onChange={(val) => onFieldChange("endDate", val || undefined)}
               disableWeekends
+              disableHolidays={disableHolidays}
               data-testid={`${prefix}input-end-date`}
             />
           </div>
@@ -153,6 +156,7 @@ export function TimeEntryFormContent({
               value={formState.entryDate || null}
               onChange={(val) => onFieldChange("entryDate", val || "")}
               disableWeekends
+              disableHolidays={disableHolidays}
               data-testid={`${prefix}input-entry-date`}
             />
           </div>

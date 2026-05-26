@@ -6,6 +6,7 @@ import { de } from "date-fns/locale"
 import { CalendarIcon, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { getVacationHolidayDates } from "@shared/utils/holidays"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import {
@@ -23,6 +24,7 @@ export interface DatePickerProps {
   minDate?: Date
   maxDate?: Date
   disableWeekends?: boolean
+  disableHolidays?: boolean
   className?: string
   "data-testid"?: string
 }
@@ -167,6 +169,7 @@ export function DatePicker({
   minDate,
   maxDate,
   disableWeekends = false,
+  disableHolidays = false,
   className,
   "data-testid": testId,
 }: DatePickerProps) {
@@ -339,6 +342,12 @@ export function DatePicker({
                 if (disableWeekends) {
                   const day = date.getDay()
                   if (day === 0 || day === 6) return true
+                }
+                if (disableHolidays) {
+                  const y = date.getFullYear()
+                  const m = String(date.getMonth() + 1).padStart(2, "0")
+                  const d = String(date.getDate()).padStart(2, "0")
+                  if (getVacationHolidayDates(y).has(`${y}-${m}-${d}`)) return true
                 }
                 return false
               }}

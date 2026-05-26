@@ -45,27 +45,34 @@ const DayCell = memo(function DayCell({
   onDayClick,
 }: DayCellProps) {
   const isHoliday = !!holidayName && isCurrentMonth;
+  const isBlocked = (isWeekend || isHoliday) && isCurrentMonth;
 
   return (
     <button
       onClick={() => onDayClick(date)}
-      disabled={isWeekend && isCurrentMonth}
+      disabled={isBlocked}
       className={`
         relative p-2 min-h-[60px] rounded-lg text-sm transition-colors
         ${isCurrentMonth ? "bg-white" : "bg-gray-50 text-gray-500"}
         ${isWeekend && isCurrentMonth ? "bg-gray-100 opacity-50 cursor-not-allowed" : ""}
         ${isWeekend && !isCurrentMonth ? "opacity-30" : ""}
-        ${isHoliday && !isSelected ? "bg-red-50 ring-1 ring-red-200" : ""}
+        ${isHoliday ? "bg-red-50 ring-1 ring-red-200 opacity-60 cursor-not-allowed" : ""}
         ${isToday && !isHoliday ? "ring-2 ring-teal-500" : ""}
         ${isToday && isHoliday ? "ring-2 ring-red-400" : ""}
-        ${isSelected && !isWeekend && isHoliday ? "ring-2 ring-red-500 bg-red-100" : ""}
-        ${isSelected && !isWeekend && !isHoliday ? "ring-2 ring-teal-600" : ""}
-        ${!isSelected && !isWeekend && !isHoliday ? "hover:bg-gray-100" : ""}
-        ${!isSelected && isHoliday ? "hover:bg-red-100" : ""}
+        ${isSelected && !isBlocked ? "ring-2 ring-teal-600" : ""}
+        ${!isSelected && !isBlocked ? "hover:bg-gray-100" : ""}
         ${hasMissingBreak && !isHoliday ? "bg-blue-50 border-2 border-blue-300" : ""}
       `}
       data-testid={`calendar-day-${date}`}
-      title={isWeekend && isCurrentMonth ? "Wochenende – keine Einträge möglich" : holidayName ? `Feiertag: ${holidayName}` : hasMissingBreak ? "Fehlende Pausendokumentation" : undefined}
+      title={
+        isWeekend && isCurrentMonth
+          ? "Wochenende – keine Einträge möglich"
+          : isHoliday
+            ? `Feiertag: ${holidayName} – keine Einträge möglich`
+            : hasMissingBreak
+              ? "Fehlende Pausendokumentation"
+              : undefined
+      }
     >
       <span className={`font-medium ${isHoliday ? "text-red-700" : ""} ${isToday && !isHoliday ? "text-teal-700" : ""} ${hasMissingBreak && !isHoliday ? "text-blue-800" : ""} ${isWeekend && isCurrentMonth ? "text-gray-500" : ""}`}>{day}</span>
       {hasMissingBreak && !isHoliday && (
