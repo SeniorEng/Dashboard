@@ -99,7 +99,20 @@ test.describe("@smoke Doku-Submit Resilienz (#490)", () => {
       // Verbindung wieder freigeben und auf "Erneut speichern" klicken.
       blockSubmit = false;
       attemptCount = 0;
-      await page.locator("[data-testid='button-retry-submit']").click();
+      // Auf den Response des Retry-Submits warten, BEVOR wir den Success-Banner
+      // asserten — sonst rennt die 800ms-Auto-Navigation (siehe
+      // use-documentation-form.ts → performSubmit.onSuccess) gegen den
+      // Playwright-Polling-Tick und der Test wird flaky (Task #615).
+      const [retryResp] = await Promise.all([
+        page.waitForResponse(
+          (r) =>
+            r.url().includes(`/api/appointments/${appointment.id}/document`)
+            && r.request().method() === "POST",
+          { timeout: 15000 },
+        ),
+        page.locator("[data-testid='button-retry-submit']").click(),
+      ]);
+      expect(retryResp.status()).toBeLessThan(400);
 
       await expect(page.locator("[data-testid='banner-submit-success']")).toBeVisible({
         timeout: 15000,

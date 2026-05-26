@@ -119,13 +119,16 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     const newTelefon = `+491701${Date.now().toString().slice(-7)}`;
 
     const openEditDialog = async () => {
+      // /admin/users rendert alle User ohne Virtualisierung. In der Test-DB
+      // existieren ggf. zehntausende Stale-Test-User (Cleanup wird oft durch
+      // referentielle Verflechtung abgelehnt), wodurch das vollständige Rendern
+      // > 15 s dauert. Über die Suche auf den frischen Mitarbeiter
+      // einschränken — so muss nur 1 Karte gerendert werden.
+      const search = page.locator("[data-testid='input-search-users']");
+      await expect(search).toBeVisible({ timeout: 15000 });
+      await search.fill(emp.email);
       const card = page.locator(`[data-testid='card-user-${emp.id}']`);
-      // Erst sicherstellen, dass die Karte gemountet ist — sonst läuft der
-      // anschliessende Action-Click in einen Re-Render-Race.
       await expect(card).toBeVisible({ timeout: 15000 });
-      // Click-fähigkeit von Playwright erzwingt Scroll-into-view automatisch
-      // und respektiert pointer-events; das ersetzt den vorher best-effort
-      // gehaltenen scrollIntoView-Aufruf und maskiert keine Fehler mehr.
       await page.locator(`[data-testid='button-actions-${emp.id}']`).click();
       await page.locator(`[data-testid='button-edit-user-${emp.id}']`).click();
     };
@@ -166,10 +169,14 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     const newHours = "37";
 
     const openEditDialog = async () => {
+      // Siehe Test #4: /admin/users ohne Virtualisierung + zehntausende
+      // Stale-Test-User → vor Klick per Suche auf den frischen Mitarbeiter
+      // einschränken.
+      const search = page.locator("[data-testid='input-search-users']");
+      await expect(search).toBeVisible({ timeout: 15000 });
+      await search.fill(emp.email);
       const card = page.locator(`[data-testid='card-user-${emp.id}']`);
       await expect(card).toBeVisible({ timeout: 15000 });
-      // Kein expliziter scrollIntoView — Playwrights `.click()` führt das
-      // deterministisch selbst aus und schluckt keine Fehler.
       await page.locator(`[data-testid='button-actions-${emp.id}']`).click();
       await page.locator(`[data-testid='button-edit-user-${emp.id}']`).click();
     };
@@ -519,7 +526,9 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
   // als Kundenpreis ablehnt. Backend lässt `priceCents: 0` zu (siehe
   // tests/services.test.ts) — hier prüfen wir den Round-Trip über die UI.
   test("Kundenpreis 0,00 € für Anfahrtskilometer speichern und nach Reload anzeigen", async ({ page }) => {
-    const customer = await createCustomer(session);
+    // PricingSection rendert nur für Selbstzahler-Kunden (siehe
+    // customer-contract-tab.tsx).
+    const customer = await createCustomer(session, { billingType: "selbstzahler" });
     const travelKmServiceId = await getServiceIdByCode(session, "travel_km");
 
     await page.goto(`/admin/customers/${customer.id}?tab=vertrag`, {
@@ -570,7 +579,9 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
   });
 
   test("Kundenpreis: negative Eingabe (-0,01) wird im UI abgelehnt", async ({ page }) => {
-    const customer = await createCustomer(session);
+    // PricingSection rendert nur für Selbstzahler-Kunden (siehe
+    // customer-contract-tab.tsx).
+    const customer = await createCustomer(session, { billingType: "selbstzahler" });
     const travelKmServiceId = await getServiceIdByCode(session, "travel_km");
 
     await page.goto(`/admin/customers/${customer.id}?tab=vertrag`, {
