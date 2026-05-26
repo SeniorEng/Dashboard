@@ -65,6 +65,94 @@ Production-DB laufen zu lassen (zuerst Trockenlauf, dann `--apply`).
 
 ---
 
+### Geplant — Operator-Aktion: Reisekosten-km in Production-Daten begradigen (Task #612)
+
+**Anlass:** Code-Fix aus Task #611 verhindert nur neue Drifts. Bestands-
+termine mit historisch falschen Budget-km (Faktor-10 oder Rundungs-Drift
+> 0,15 km) müssen einmalig in der Production-DB nachgebucht werden, damit
+Termin-Detail und Budget-Übersicht überall denselben Wert zeigen.
+
+**Vorbedingung:** Task #611 ist nach Production deployed. Der Task-Agent
+hat aus dem Sandbox heraus keinen direkten Zugriff auf die Production-DB
+(`PROD_DATABASE_URL` ist nur im Replit-Publishing-Tab verfügbar) — die
+folgenden Schritte sind vom menschlichen Operator nach dem Publish
+auszuführen.
+
+**Auszuführen aus einer Shell mit Production-DB-Zugriff:**
+
+```bash
+export DATABASE_URL="$PROD_DATABASE_URL"   # aus Publishing-Tab
+
+# 1. Pre-Publish-Backup (Pflicht laut Runbook, da Skript Daten schreibt)
+BACKUP_LABEL="-pre-task-612-km-reconcile" bash scripts/backup-prod-db.sh
+
+# 2. Trockenlauf — listet alle Drift-Termine + previous/new km pro Termin,
+#    schreibt NICHTS in die DB.
+tsx server/scripts/reconcile-km-drift.ts \
+  | tee tmp/reconcile-km-drift-dryrun-$(date -u +%Y%m%dT%H%M%SZ).log
+
+# 3. Trockenlauf-Report prüfen:
+#    - Plausibilitätscheck: enthält Schröder Rosemarie, Termin 12.01.2026?
+#      (erwartet: travel 70,0 → 7,3 km — Faktor-10-Drift aus Task #611)
+#    - Anzahl Kandidaten realistisch? Bei > 200 Treffern erst Rücksprache,
+#      bevor scharf gestellt wird.
+
+# 4. Scharf ausführen. Audit-Sammeleintrag mit batchId wird geschrieben.
+tsx server/scripts/reconcile-km-drift.ts --apply \
+  | tee tmp/reconcile-km-drift-apply-$(date -u +%Y%m%dT%H%M%SZ).log
+
+# 5. Aus der Apply-Log-Datei die batchId notieren (steht im
+#    km_drift_reconciled_batch-Audit; alternativ:
+#    SELECT details->>'batchId', created_at FROM audit_log
+#    WHERE action = 'km_drift_reconciled_batch' ORDER BY id DESC LIMIT 1;)
+
+# 6. Re-Run als Idempotenz-Check — muss „Drift-Kandidaten gefunden: 0" zeigen.
+tsx server/scripts/reconcile-km-drift.ts
+
+unset DATABASE_URL
+```
+
+**UI-Stichprobe (Akzeptanzkriterium aus Task #612):**
+1. In der Admin-App Kunde **Schröder Rosemarie**, Termin **12.01.2026** öffnen.
+2. Termin-Detail-Ansicht zeigt die korrigierten km (z.B. 7,3 km).
+3. In der Budget-Übersicht (`BudgetLedgerSection`) zeigt die Reisekosten-
+   Zeile desselben Termins denselben Wert (7,3 km, nicht mehr 70 km).
+4. Historie sichtbar: drei Zeilen für den Termin — alte Consumption,
+   Reversal (negativer Cent-Betrag, Notiz „Storno (Reconcile #611 km-Drift)"),
+   neue Consumption mit korrigiertem km.
+
+**Done looks like (Checkliste aus Task #612):**
+- [ ] Trockenlauf-Log abgelegt (Pfad: _________).
+- [ ] Apply-Log abgelegt (Pfad: _________).
+- [ ] Audit-Batch-ID notiert: _________.
+- [ ] UI-Stichprobe Schröder Rosemarie, 12.01.2026: bestanden / nicht bestanden.
+- [ ] Re-Run zeigt 0 Drift-Kandidaten.
+- [ ] Diesen Eintrag und den darüberliegenden Task-#611-Eintrag
+      (`Publish-Ergebnis: ⏳ ausstehend` → `Publish-Ergebnis: ✅ erledigt am
+      YYYY-MM-DD von <Operator>, batchId=<UUID>`) aktualisieren.
+
+**Diagnose bei Fehlern:**
+- Trockenlauf-Kandidaten enthalten Termine, die offensichtlich nicht
+  driften sollen → Toleranz mit `--tolerance=0.5` lockern und Befund
+  klären, bevor `--apply` läuft.
+- `--apply` wirft Fehler bei einem Termin → Skript überspringt diesen
+  Termin (Status `error`), alle anderen werden weiter verarbeitet; Fehler
+  steht im Apply-Log. Re-Run nach Code-Fix ist idempotent (Reversal-
+  UNIQUE-Index verhindert Doppel-Storno).
+- Budget-Übersicht zeigt nach Apply immer noch alte km → Browser-Cache
+  bzw. TanStack-Query-Cache der Admin-App invalidieren (Reload).
+
+**Rollback:** Replit/Neon PITR auf den in Schritt 1 erzeugten Snapshot.
+Da Storno + Neu-Anlage statt UPDATE verwendet werden, kann ein einzelner
+falsch reparierter Termin auch manuell rückgängig gemacht werden: neueste
+Consumption soft-löschen, Reversal soft-löschen, ursprüngliche Consumption
+wieder `appointmentId` setzen (Details im Audit-Log pro Termin).
+
+**Status:** ⏳ Geplant — vom Operator nach Production-Deploy von Task #611
+auszuführen und Checkliste hier auszufüllen.
+
+---
+
 ## Vorlage (kopieren, ausfüllen, oben einfügen)
 
 ```markdown
