@@ -34,6 +34,8 @@ import { addMinutesToTime, timeToMinutes, minutesToTimeDisplay, formatDurationDi
 import { DURATION_OPTIONS, PFLEGEGRAD_OPTIONS, formatDuration } from "@shared/types";
 import { validateDachPhone, formatPhoneAsYouType } from "@shared/utils/phone";
 import type { Service } from "@shared/schema";
+import { canModifyAppointment, type AppointmentStatus } from "@shared/domain/appointments";
+import { computeErstberatungUpdateFields } from "@/features/appointments/lib/edit-diff";
 
 export default function EditAppointment() {
   const [, params] = useRoute("/edit-appointment/:id");
@@ -125,6 +127,15 @@ export default function EditAppointment() {
   const [geocodedCoords, setGeocodedCoords] = useState<{ customerId: number; lat: number; lng: number } | null>(null);
 
   const fahrtdienstInitializedRef = useRef(false);
+  // Initiale Mount-Werte für time/duration festhalten, damit der Erstberatungs-
+  // Diff nicht gegen einen potenziell driftenden `durationPromised`-Wert aus
+  // der DB vergleicht (siehe edit-diff.ts). Wird beim ersten Befüllen des
+  // Formulars einmal gesetzt und nur bei Wechsel der Termin-ID zurückgesetzt
+  // (Schutz gegen Stale-Baseline, falls die Komponente für einen anderen
+  // Termin wiederverwendet wird).
+  const initialTimeRef = useRef<string | null>(null);
+  const initialDurationRef = useRef<number | null>(null);
+  const initialBaselineAppointmentIdRef = useRef<number | null>(null);
 
   const handlePickupTimeCalculated = useCallback((
     pickupTime: string,
@@ -142,10 +153,19 @@ export default function EditAppointment() {
 
   useEffect(() => {
     if (appointment) {
+      if (initialBaselineAppointmentIdRef.current !== appointment.id) {
+        initialBaselineAppointmentIdRef.current = appointment.id;
+        initialTimeRef.current = null;
+        initialDurationRef.current = null;
+      }
       setDate(appointment.date);
-      setTime(appointment.scheduledStart.slice(0, 5));
+      const initialTime = appointment.scheduledStart.slice(0, 5);
+      setTime(initialTime);
       setNotes(appointment.notes || "");
-      
+      if (initialTimeRef.current === null) {
+        initialTimeRef.current = initialTime;
+      }
+
       if (appointment.appointmentType === "Kundentermin") {
         if (appointmentServiceEntries.length > 0) {
           setServices(appointmentServiceEntries.map(e => ({
@@ -191,7 +211,12 @@ export default function EditAppointment() {
           const startMin = timeToMinutes(start);
           const endMin = timeToMinutes(end);
           const dur = endMin - startMin;
-          if (dur > 0) setDuration(dur);
+          if (dur > 0) {
+            setDuration(dur);
+            if (initialDurationRef.current === null) {
+              initialDurationRef.current = dur;
+            }
+          }
         }
 
         if (appointment.customer) {
@@ -524,25 +549,24 @@ export default function EditAppointment() {
 
   // Diff für Erstberatung-Save: nur tatsächlich geänderte Felder werden an den
   // Server geschickt, damit der Backend-Konfliktcheck (Mitarbeiter, Wochenende)
-  // bei reinen Notiz-Änderungen erst gar nicht greift.
+  // bei reinen Notiz-Änderungen erst gar nicht greift. Vergleich gegen die
+  // initialen Mount-Werte (Refs), nicht gegen `appointment.durationPromised`,
+  // weil das bei bereits gestarteten Terminen vom tatsächlichen
+  // `scheduledEnd-scheduledStart` driften kann (Task #595).
   const getErstberatungUpdateFields = (): Record<string, unknown> => {
     if (!appointment) return {};
-    const fields: Record<string, unknown> = {};
-    if (date !== appointment.date) fields.date = date;
-    const normalizedStart = (appointment.scheduledStart || "").slice(0, 5);
-    const timeChanged = time !== normalizedStart;
-    const durationChanged = duration !== appointment.durationPromised;
-    if (timeChanged) fields.scheduledStart = time;
-    if (timeChanged || durationChanged) {
-      fields.scheduledEnd = addMinutesToTime(time, duration);
-    }
-    if (durationChanged) fields.durationPromised = duration;
-    if ((notes || null) !== (appointment.notes || null)) fields.notes = notes || null;
-    if (ebAssignedEmployeeId) {
-      const newEmpId = parseInt(ebAssignedEmployeeId);
-      if (newEmpId !== appointment.assignedEmployeeId) fields.assignedEmployeeId = newEmpId;
-    }
-    return fields;
+    return computeErstberatungUpdateFields({
+      originalDate: appointment.date,
+      originalNotes: appointment.notes ?? null,
+      originalAssignedEmployeeId: appointment.assignedEmployeeId ?? null,
+      initialTime: initialTimeRef.current ?? (appointment.scheduledStart || "").slice(0, 5),
+      initialDuration: initialDurationRef.current ?? appointment.durationPromised,
+      date,
+      time,
+      duration,
+      notes,
+      assignedEmployeeId: ebAssignedEmployeeId,
+    });
   };
 
   // Diff für Kundentermin-Save: spart Konfliktchecks, wenn sich nur Notizen
@@ -847,6 +871,19 @@ export default function EditAppointment() {
 
   const isKundentermin = appointment.appointmentType === "Kundentermin";
   const isErstberatung = appointment.appointmentType === "Erstberatung";
+  // Bei Erstberatungen sperrt der Server-Guard `validateSchedulingChanges`
+  // jede Änderung an Datum/Uhrzeit/Dauer, sobald der Termin nicht mehr im
+  // Status `scheduled` ist. Wir spiegeln das in der UI, damit der Nutzer
+  // nicht in einen 403 läuft (Task #595).
+  const ebSchedulingLocked = isErstberatung && appointment.status !== "scheduled";
+  // Status `completed`/`customer_no_show` sperren zusätzlich Notizen und
+  // Mitarbeiterzuweisung — das deckt sich mit `canModifyAppointment`.
+  const ebFullyLocked = isErstberatung && !canModifyAppointment(appointment.status as AppointmentStatus);
+  const ebLockHint = ebFullyLocked
+    ? "Dieser Termin ist abgeschlossen — Änderungen sind nicht mehr möglich."
+    : ebSchedulingLocked
+      ? "Dieser Termin wurde bereits gestartet — Datum, Uhrzeit und Dauer sind gesperrt. Notizen können weiterhin angepasst werden."
+      : null;
 
   return (
     <Layout>
@@ -1071,10 +1108,20 @@ export default function EditAppointment() {
                     searchPlaceholder="Mitarbeiter suchen..."
                     emptyText="Kein Mitarbeiter mit Erstberatungs-Berechtigung gefunden."
                     className={errors.ebAssignedEmployeeId ? "border-destructive" : ""}
+                    disabled={ebFullyLocked}
                     data-testid="select-eb-employee"
                   />
                   {errors.ebAssignedEmployeeId && <p className="text-destructive text-sm">{errors.ebAssignedEmployeeId}</p>}
                 </div>
+              )}
+
+              {ebLockHint && (
+                <p
+                  className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
+                  data-testid="text-eb-lock-hint"
+                >
+                  {ebLockHint}
+                </p>
               )}
             </>
           )}
@@ -1088,6 +1135,7 @@ export default function EditAppointment() {
                 value={date || null}
                 onChange={(val) => setDate(val || "")}
                 disableWeekends
+                disabled={ebSchedulingLocked}
                 data-testid="input-date"
               />
             </div>
@@ -1102,6 +1150,7 @@ export default function EditAppointment() {
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
                 className="text-base"
+                disabled={ebSchedulingLocked}
                 data-testid="input-time"
               />
             </div>
@@ -1173,6 +1222,7 @@ export default function EditAppointment() {
                             setEndTime(addMinutesToTime(time, dur));
                           }
                         }}
+                        disabled={ebSchedulingLocked}
                       >
                         <SelectTrigger className="w-auto min-w-[120px]" data-testid="select-duration">
                           <SelectValue />
@@ -1260,6 +1310,7 @@ export default function EditAppointment() {
               value={notes}
               onChange={(e) => setNotes(e.target.value.slice(0, 255))}
               maxLength={255}
+              disabled={ebFullyLocked}
               data-testid="textarea-notes"
             />
             <p className="text-xs text-muted-foreground">{notes.length}/255</p>
@@ -1269,8 +1320,14 @@ export default function EditAppointment() {
             className={`w-full ${componentStyles.btnPrimary}`}
             size="lg"
             onClick={handleSubmit}
-            disabled={isPending || !hasChanges}
-            title={!hasChanges && !isPending ? "Keine Änderungen zu speichern" : undefined}
+            disabled={isPending || !hasChanges || ebFullyLocked}
+            title={
+              ebFullyLocked
+                ? "Dieser Termin ist abgeschlossen und kann nicht mehr bearbeitet werden."
+                : !hasChanges && !isPending
+                  ? "Keine Änderungen zu speichern"
+                  : undefined
+            }
             data-testid="button-save"
           >
             {isPending ? <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} /> : null}
