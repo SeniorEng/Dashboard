@@ -12,6 +12,11 @@
  *  - Wenn Policy "none" gilt oder keine Sätze gepflegt sind → 0 Cent.
  */
 
+import {
+  computeKmLineTotalCents,
+  formatKmQuantityDisplay,
+} from "./invoice-line-items";
+
 export const CANCELLATION_POLICY_TYPES = [
   "none",
   "flat_amount",
@@ -83,14 +88,18 @@ export function computeNoShowCharge(
   }
 
   // travel_plus_wait
+  // Task #616 — km-Berechnung & Anzeige über den geteilten Domain-Helper
+  // (`computeKmLineTotalCents` / `formatKmQuantityDisplay`), damit
+  // No-Show-Rechnung und reguläre Rechnungs-Line-Items (Task #561) denselben
+  // quantisierten km-Wert verwenden.
   const kmRate = clampNonNegative(policy.kmRateCents ?? fallback.kmRateCents);
   const hourlyRate = clampNonNegative(policy.hourlyRateCents ?? fallback.hourlyRateCents);
-  const travelCents = Math.round(km * kmRate);
+  const travelCents = computeKmLineTotalCents(km, kmRate);
   const waitCents = Math.round((waitMin / 60) * hourlyRate);
   const total = travelCents + waitCents;
 
   const parts: string[] = [];
-  if (km > 0 && kmRate > 0) parts.push(`${km.toFixed(1)} km Anfahrt`);
+  if (km > 0 && kmRate > 0) parts.push(`${formatKmQuantityDisplay(km)} Anfahrt`);
   if (waitMin > 0 && hourlyRate > 0) parts.push(`${waitMin} Min. Wartezeit`);
   const description = parts.length > 0
     ? `Vergebliche Anfahrt (${parts.join(" + ")})`

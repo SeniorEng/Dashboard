@@ -102,6 +102,54 @@ function* walk(dir: string): Generator<string> {
 }
 
 describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
+  /**
+   * Task #616 — verbietet zusätzlich `km.toFixed(...)` und das Muster
+   * `Math.round(<...km...> * <...rate...>)` außerhalb der km-Domain
+   * (`shared/domain/invoice-line-items.ts`). Vor #616 lebten zwei dieser
+   * Rundungen parallel im Budget-Ledger (1 NK) und im Rechnungs-Render
+   * (2 NK) — exakt der Anzeige-≠-Buchung-Drift aus dem Screenshot-Fall.
+   * Alles, was km bezogen runden/formatieren will, MUSS die Helper aus
+   * `shared/domain/invoice-line-items.ts` aufrufen.
+   */
+  it("Keine km-Rundung/-Formatierung (`toFixed`, `Math.round(km*rate)`) außerhalb shared/domain/invoice-line-items.ts (Task #616)", () => {
+    const allowedFile = "shared/domain/invoice-line-items.ts";
+    const hits: Array<{ file: string; line: number; snippet: string }> = [];
+
+    const tofixedRe = /\b(km|kilometer|kilometers|kilometre|travel(?:Kilometers)?|customerKilometers)\b[^\n;]{0,40}\.toFixed\s*\(/i;
+    const mathRoundKmRateRe = /Math\.round\s*\(\s*[^)]*\b(?:km|kilometer|kilometers|travel(?:Kilometers)?|customerKilometers)\b[^)]*\b(?:rate|cents)\b[^)]*\)/i;
+
+    const scanRoots = ["server", "client/src", "shared"].map((p) => join(ROOT, p));
+    for (const root of scanRoots) {
+      try { statSync(root); } catch { continue; }
+      for (const file of walk(root)) {
+        const rel = relative(ROOT, file).split(sep).join("/");
+        if (rel === allowedFile) continue;
+        if (rel.startsWith("tests/")) continue;
+        // One-off Wartungs-Skripte (Reconcile/Backfill) sind keine Hot-Loop-
+        // Berechnungspfade — die laufen nicht im normalen Request-Flow.
+        if (rel.startsWith("server/scripts/")) continue;
+        const content = readFileSync(file, "utf-8");
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (tofixedRe.test(line) || mathRoundKmRateRe.test(line)) {
+            hits.push({ file: rel, line: i + 1, snippet: line.trim().slice(0, 140) });
+          }
+        }
+      }
+    }
+
+    if (hits.length > 0) {
+      const msg = hits.map((h) => `  ${h.file}:${h.line} — ${h.snippet}`).join("\n");
+      expect.fail(
+        `Folgende km-Rundungen/-Formatierungen liegen außerhalb von '${allowedFile}':\n` +
+        `${msg}\n\n` +
+        `Verwende stattdessen die Helper aus 'shared/domain/invoice-line-items.ts' ` +
+        `(\`quantizeKm\`, \`computeKmLineTotalCents\`, \`formatKmQuantityDisplay\`).`,
+      );
+    }
+  });
+
   it("Keine neuen Hotspot-`calculate*`/`compute*`-Funktionen außerhalb der Allowlist", () => {
     const hits: Array<{ file: string; line: number; match: string; reason: string }> = [];
 

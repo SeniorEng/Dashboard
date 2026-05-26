@@ -8,6 +8,46 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-26 — Termin-Kostenberechnung Ende-zu-Ende konsistent (Task #616)
+
+**Anlass:** Auch nach Task #611 driftete die im Budget-Ledger angezeigte
+km-Zahl gegen den dort gebuchten Cent-Betrag (Screenshot 12.01./21.01./
+04.02.2026: „Anfahrt: 70,0 km = −75,95 €", korrekt für 7 km × 0,35 € +
+73,50 € AB). Zusätzlich konnten Preview-Kosten (Verfügbarkeitsprüfung) und
+Rechnungs-Line-Items leicht abweichen, weil km in drei Pfaden unabhängig
+gerundet wurden (1 NK in Ledger, ungerundet in Cost-Calculator, 2 NK in
+Rechnungs-Line-Items).
+
+**Fix:**
+- `shared/domain/invoice-line-items.ts` (Task #561) ist jetzt einzige
+  Quelle für km-Quantisierung. `appointment-cost-calculator.ts`,
+  `consumption-engine.ts` und `cancellation-policy.ts` rufen
+  `quantizeKm`/`computeKmLineTotalCents`/`formatKmQuantityDisplay` — kein
+  parallel-gerundeter km-Wert mehr.
+- `formatKm` (`shared/utils/format.ts`) liefert jetzt 2 NK (vorher 1 NK)
+  und `BudgetLedgerSection` zeigt km via `formatKmQuantityDisplay` an —
+  identisch zu Rechnungs-PDF.
+- Frontend-km-Inputs (`document-appointment.tsx`,
+  `travel-documentation.tsx`) nutzen `parseGermanDecimal` (deutsches
+  Komma → Punkt, NaN-sicher), `step="0.01"`, `inputMode="decimal"`.
+- Architektur-Test `tests/architecture/calculations-in-shared.test.ts`
+  verbietet jetzt `km.toFixed(...)` und `Math.round(km*rate)` außerhalb
+  von `shared/domain/invoice-line-items.ts`. Neue Equality-Suite
+  `tests/equality/budget-ledger-display-matches-booking.test.ts` fängt
+  Wiederkehr des Screenshot-Bugs ab.
+- `server/startup/audit-appointment-budget-km-drift.ts` läuft beim Boot
+  als reiner Reporter (keine Schreibvorgänge auf GoBD-relevante
+  Buchungen) und listet betroffene Buchungen für manuelle Korrektur via
+  Storno + Neuanlage.
+
+**Bewusst NICHT in #616:**
+- Automatisches Rebook bei Termin-Edit (`appointments`-Update-Pfad) —
+  zu invasiv, als Follow-up erfasst.
+- Automatische Datenkorrektur der historischen Drift-Buchungen — GoBD-
+  Risiko, manuell via Storno+Neuanlage entscheiden (Audit-Logging vorhanden).
+
+---
+
 ### 2026-05-26 — km-Drift Termin-Detail vs. Budget-Übersicht (Task #611)
 
 **Anlass:** In `BudgetLedgerSection` zeigte die Reisekosten-Zeile pro Termin

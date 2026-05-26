@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import { serviceCatalogStorage } from "../service-catalog";
+import { computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
 
 export async function calculateAppointmentCost(params: {
   customerId: number;
@@ -48,10 +49,13 @@ export async function calculateAppointmentCost(params: {
   const customerKmRateCents = cpMap.get("customer_km")
     ?? ((customerKmService?.isBillable !== false) ? (customerKmService?.defaultPriceCents || 0) : 0);
 
+  // Task #616 — Single Source of Truth: km-Cent via `computeKmLineTotalCents`,
+  // damit Budget-Preview, Verbrauchsbuchung und Rechnungs-Line-Items (Task #561)
+  // exakt denselben quantisierten Wert verwenden. Stunden bleiben minutengenau.
   const hauswirtschaftCents = Math.round((params.hauswirtschaftMinutes / 60) * hauswirtschaftRateCents);
   const alltagsbegleitungCents = Math.round((params.alltagsbegleitungMinutes / 60) * alltagsbegleitungRateCents);
-  const travelCents = Math.round(params.travelKilometers * travelKmRateCents);
-  const customerKilometersCents = Math.round(params.customerKilometers * customerKmRateCents);
+  const travelCents = computeKmLineTotalCents(params.travelKilometers, travelKmRateCents);
+  const customerKilometersCents = computeKmLineTotalCents(params.customerKilometers, customerKmRateCents);
 
   const totalCents = hauswirtschaftCents + alltagsbegleitungCents + travelCents + customerKilometersCents;
 

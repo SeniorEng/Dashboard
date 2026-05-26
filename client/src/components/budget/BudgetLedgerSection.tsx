@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
+import { formatKmQuantityDisplay } from "@shared/domain/invoice-line-items";
 import { formatDateForDisplay, parseLocalDate, todayISO } from "@shared/utils/datetime";
 import { SectionCard } from "@/components/patterns/section-card";
 
@@ -673,8 +674,8 @@ function TransactionList({
                     <p className="text-xs text-gray-500 mt-1">
                       {tx.hauswirtschaftMinutes ? `HW: ${tx.hauswirtschaftMinutes}min ` : ""}
                       {tx.alltagsbegleitungMinutes ? `AB: ${tx.alltagsbegleitungMinutes}min ` : ""}
-                      {tx.travelKilometers ? `Anfahrt: ${Number(tx.travelKilometers).toFixed(1).replace(".", ",")}km ` : ""}
-                      {tx.customerKilometers ? `Kunde: ${Number(tx.customerKilometers).toFixed(1).replace(".", ",")}km` : ""}
+                      {tx.travelKilometers ? `Anfahrt: ${formatKmQuantityDisplay(Number(tx.travelKilometers))} ` : ""}
+                      {tx.customerKilometers ? `Kunde: ${formatKmQuantityDisplay(Number(tx.customerKilometers))}` : ""}
                     </p>
                   )}
                 </div>

@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Home, MapPin, Navigation, ArrowRightToLine } from "lucide-react";
 import { iconSize } from "@/design-system";
+import { parseGermanDecimal } from "@shared/utils/format";
 
 interface TravelDocumentationProps {
   travelOriginType: "home" | "appointment";
@@ -96,9 +97,10 @@ export function TravelDocumentation({
                 id="kilometers"
                 type="number"
                 min="0"
-                step="0.1"
+                step="0.01"
+                inputMode="decimal"
                 value={travelKilometers || ""}
-                onChange={(e) => onTravelKilometersChange(parseFloat(e.target.value) || 0)}
+                onChange={(e) => onTravelKilometersChange(parseGermanDecimal(e.target.value))}
                 placeholder="0"
                 className="pr-12"
                 data-testid="input-kilometers"

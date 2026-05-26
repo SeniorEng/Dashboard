@@ -29,9 +29,32 @@ export function formatCurrency(cents: number, options?: { showSign?: boolean }):
 
 export { formatEuroDE, parseEuroDE, centsToEuroNumber } from "./money";
 import { formatEuroDE } from "./money";
+import { quantizeKm } from "@shared/domain/invoice-line-items";
 
+/**
+ * Task #616 — km wird projektweit mit 2 NK angezeigt (gleiche Quantisierung
+ * wie in Rechnungs-Line-Items, Task #561). Vorher lieferte `formatKm` 1 NK,
+ * was im Budget-Ledger zu „70,0 km" statt „7,30 km" führte und damit
+ * Anzeige ≠ Buchung erzeugte.
+ */
 export function formatKm(km: number | string | null | undefined): string {
-  return Number(km ?? 0).toFixed(1).replace(".", ",");
+  const n = quantizeKm(Number(km ?? 0));
+  return n.toFixed(2).replace(".", ",");
+}
+
+/**
+ * Task #616 — Parsed eine deutsche Dezimaleingabe ("7,3" → 7.3) NaN-sicher.
+ * Akzeptiert auch englisches Format (Punkt) für maschinell vorbefüllte
+ * Werte. Wird in allen km/Stunden-Inputs der Doku-Routen verwendet, damit
+ * "7,3" nicht stillschweigend zu 7 oder 73 wird.
+ */
+export function parseGermanDecimal(value: string | number | null | undefined): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (value == null) return 0;
+  const normalized = String(value).trim().replace(",", ".");
+  if (normalized === "") return 0;
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : 0;
 }
 
 /**

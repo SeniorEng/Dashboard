@@ -286,6 +286,18 @@ async function runStartupTasks() {
       log(`§45b-Monatslimit-Bereinigung fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #616: Termin-vs-Budget-km-Drift auditieren (Screenshot-Fall
+    // 12.01./21.01./04.02.2026). Log-only, kein automatischer Schreibvorgang
+    // auf GoBD-relevante Buchungen.
+    const { auditAppointmentBudgetKmDrift } = await import(
+      "./startup/audit-appointment-budget-km-drift"
+    );
+    try {
+      await auditAppointmentBudgetKmDrift();
+    } catch (err) {
+      log(`Termin-km-Drift-Audit fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { backfillBudgetHistorization } = await import("./startup/backfill-budget-historization");
     try {
       await backfillBudgetHistorization();

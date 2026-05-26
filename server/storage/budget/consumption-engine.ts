@@ -16,6 +16,7 @@ import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-st
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { getAvailableForDate } from "./import-availability";
 import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
+import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
 
@@ -90,17 +91,17 @@ function buildConsumptionTxData(
     hauswirtschaftCents: hwCents,
     alltagsbegleitungMinutes: params?.alltagsbegleitungMinutes != null ? Math.round(params.alltagsbegleitungMinutes * ratio) : null,
     alltagsbegleitungCents: abCents,
-    // Task #611 — km wird im DB-Schema als `real` mit 1-NK-Anzeige geführt
-    // (BudgetLedgerSection: `Number(km).toFixed(1)`). Vor dem Fix wurde hier
-    // `Math.round(km * ratio)` auf Integer-km eingedampft (7,3 → 7), wodurch
-    // Termin-Detail und Budget-Eintrag pro Termin um bis zu ±0,5 km
-    // auseinanderdriften. Bei verschachtelten Bestands-Bugs (z.B. ein
-    // Anwender hat ursprünglich 70 statt 7,3 km eingegeben und den Termin
-    // später korrigiert) summierte sich der Drift sichtbar zum Faktor 10.
-    // Wir runden jetzt auf 0,1 km, identisch zur Anzeige.
-    travelKilometers: params?.travelKilometers != null ? Math.round(params.travelKilometers * ratio * 10) / 10 : null,
+    // Task #616 — km wird mit derselben Quantisierung wie in den
+    // Rechnungs-Line-Items (Task #561) gespeichert: 2 NK kaufmännisch
+    // gerundet via `quantizeKm`. Vor #616 wurde hier auf 1 NK gerundet,
+    // wodurch Budget-Ledger (`formatKm`, 2 NK seit #616) und gebuchte
+    // km-Zahl auseinanderdriften konnten. Bei FIFO-Split (`ratio < 1`)
+    // wird jedes Leg unabhängig quantisiert — die Summe darf um ≤0,01 km
+    // von der Termin-km abweichen (Anzeige-Feld), der gebuchte Cent-Betrag
+    // bleibt durch das Subtract-last-Pattern (Task #441) residuell exakt.
+    travelKilometers: params?.travelKilometers != null ? quantizeKm(params.travelKilometers * ratio) : null,
     travelCents: tvCents,
-    customerKilometers: params?.customerKilometers != null ? Math.round(params.customerKilometers * ratio * 10) / 10 : null,
+    customerKilometers: params?.customerKilometers != null ? quantizeKm(params.customerKilometers * ratio) : null,
     customerKilometersCents: ckCents,
   };
 }
@@ -593,9 +594,9 @@ export async function createConsumptionTransaction(params: {
           hauswirtschaftCents: hwCents,
           alltagsbegleitungMinutes: Math.round(params.alltagsbegleitungMinutes * privateRatio),
           alltagsbegleitungCents: abCents,
-          travelKilometers: Math.round(params.travelKilometers * privateRatio * 10) / 10,
+          travelKilometers: quantizeKm(params.travelKilometers * privateRatio),
           travelCents: tvCents,
-          customerKilometers: Math.round(params.customerKilometers * privateRatio * 10) / 10,
+          customerKilometers: quantizeKm(params.customerKilometers * privateRatio),
           customerKilometersCents: ckCents,
           createdByUserId: params.userId,
           notes: `Privatzahlung: ${formatEuroDE(cascadeResult.outstandingCents)}`,

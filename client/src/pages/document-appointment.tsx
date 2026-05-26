@@ -17,6 +17,8 @@ import {
   formatDuration, 
   DURATION_OPTIONS,
 } from "@shared/types";
+import { parseGermanDecimal } from "@shared/utils/format";
+import { formatKmQuantityDisplay } from "@shared/domain/invoice-line-items";
 
 export default function DocumentAppointment() {
   const [, params] = useRoute("/document-appointment/:id");
@@ -399,12 +401,13 @@ export default function DocumentAppointment() {
                         id="customerKilometers"
                         type="number"
                         min="0"
-                        step="0.1"
+                        step="0.01"
                         value={formData.customerKilometers || ""}
                         onChange={(e) => setFormData(prev => ({
                           ...prev,
-                          customerKilometers: parseFloat(e.target.value) || 0,
+                          customerKilometers: parseGermanDecimal(e.target.value),
                         }))}
+                        inputMode="decimal"
                         placeholder="0"
                         className="pr-12"
                         data-testid="input-customer-kilometers"
@@ -445,14 +448,14 @@ export default function DocumentAppointment() {
               <div className={`flex justify-between pt-2 border-t ${formData.travelKilometers > 0 ? "" : "text-muted-foreground/60"}`}>
                 <span>Anfahrt zum Kunden</span>
                 <span data-testid="summary-travel-km">
-                  {formData.travelKilometers > 0 ? `${formData.travelKilometers} km` : "keine"}
+                  {formData.travelKilometers > 0 ? formatKmQuantityDisplay(formData.travelKilometers) : "keine"}
                 </span>
               </div>
               {showCustomerTravelBlock && (
                 <div className={`flex justify-between ${formData.customerKilometers > 0 ? "" : "text-muted-foreground/60"}`}>
                   <span>Fahrten mit dem Kunden</span>
                   <span data-testid="summary-customer-km">
-                    {formData.customerKilometers > 0 ? `${formData.customerKilometers} km` : "keine"}
+                    {formData.customerKilometers > 0 ? formatKmQuantityDisplay(formData.customerKilometers) : "keine"}
                   </span>
                 </div>
               )}
