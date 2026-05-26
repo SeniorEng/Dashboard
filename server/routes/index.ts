@@ -50,6 +50,17 @@ router.get("/public/branding", asyncHandler("Branding konnte nicht geladen werde
   });
 }));
 
+router.get("/public/og-image", asyncHandler("OG-Image konnte nicht geladen werden", async (_req, res) => {
+  const { ObjectStorageService } = await import("../replit_integrations/object_storage/objectStorage");
+  const objectStorageService = new ObjectStorageService();
+  const file = await objectStorageService.searchPublicObject("branding/opengraph.jpg");
+  if (!file) {
+    return res.status(404).json({ error: "OG image not found" });
+  }
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  await objectStorageService.downloadObject(file, res, 86400);
+}));
+
 router.get("/public/logo/:type", asyncHandler("Logo konnte nicht geladen werden", async (req, res) => {
   const settings = await getCachedCompanySettings();
   const logoPath = req.params.type === "pdf" ? settings?.pdfLogoUrl : settings?.logoUrl;
