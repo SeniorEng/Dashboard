@@ -13,7 +13,7 @@ import { users } from "./users";
 export const TASK_PRIORITIES = ["low", "medium", "high"] as const;
 export type TaskPriority = typeof TASK_PRIORITIES[number];
 
-export const TASK_STATUSES = ["open", "in-progress", "completed"] as const;
+export const TASK_STATUSES = ["open", "tasks_in_progress", "completed"] as const;
 export type TaskStatus = typeof TASK_STATUSES[number];
 
 export const tasks = pgTable("tasks", {

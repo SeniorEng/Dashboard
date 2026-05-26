@@ -293,6 +293,13 @@ async function runStartupTasks() {
       log(`In-Progress-Termin-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateTaskStatusInProgress } = await import("./startup/migrate-task-status-in-progress");
+    try {
+      await migrateTaskStatusInProgress();
+    } catch (err) {
+      log(`Task-Status-In-Progress-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #616: Termin-vs-Budget-km-Drift auditieren (Screenshot-Fall
     // 12.01./21.01./04.02.2026). Log-only, kein automatischer Schreibvorgang
     // auf GoBD-relevante Buchungen.

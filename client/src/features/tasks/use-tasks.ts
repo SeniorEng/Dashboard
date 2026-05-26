@@ -63,7 +63,7 @@ export function useUpdateTask() {
       description?: string;
       dueDate?: string;
       priority?: "low" | "medium" | "high";
-      status?: "open" | "in-progress" | "completed";
+      status?: "open" | "tasks_in_progress" | "completed";
       assignedToUserId?: number;
       customerId?: number;
     }) => {
