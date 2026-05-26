@@ -11,6 +11,7 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
+    "budget:correct-km-drift": "tsx server/scripts/reconcile-km-drift.ts",
     "lint": "eslint client/src server/routes --max-warnings 0",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --grep @smoke",

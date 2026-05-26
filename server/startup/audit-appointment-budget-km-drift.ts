@@ -71,7 +71,9 @@ export async function auditAppointmentBudgetKmDrift(): Promise<void> {
   if (driftRows.length === 0) return;
 
   log(
-    `Termin-km-Drift gefunden in ${driftRows.length} Buchung(en) — manuelle Storno+Neuanlage prüfen (Task #616):`,
+    `Termin-km-Drift gefunden in ${driftRows.length} Buchung(en) — Korrektur per ` +
+      `\`tsx server/scripts/reconcile-km-drift.ts --apply --user=<superadmin-id> ` +
+      `--reason="…"\` (Task #619, GoBD-konformes Storno+Neuanlage):`,
     "startup",
   );
   for (const r of driftRows) {

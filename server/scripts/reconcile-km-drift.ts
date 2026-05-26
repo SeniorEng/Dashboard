@@ -1,5 +1,5 @@
 /**
- * Reconciliation-Skript für Task #611:
+ * Reconciliation-Skript für Task #611 / #616 / #619:
  *   Repariert Termine, bei denen `appointments.travelKilometers` (Termin-
  *   Detail / Anzeige) und die Summe der `budget_transactions.travelKilometers`
  *   desselben Termins um mehr als die Rundungstoleranz auseinanderlaufen.
@@ -13,7 +13,19 @@
  *     später korrigierte, die alten Budget-Buchungen aber unverändert
  *     blieben. Sichtbar als "Faktor-10-Drift" in der Budget-Übersicht.
  *
- * Vorgehen pro Termin (Drift > 0,15 km):
+ * Task #619 — kontrollierte Storno+Neuanlage durch Superadmin:
+ *   - Der Boot-Audit (`server/startup/audit-appointment-budget-km-drift.ts`,
+ *     Task #616) listet betroffene Bestandsbuchungen nur — schreibt aus
+ *     GoBD-Gründen NICHTS. Dieses Skript ist die kontrollierte Korrektur:
+ *     erfordert beim --apply einen Superadmin-User und eine Begründung,
+ *     die im Audit-Eintrag `budget_transaction_corrected` landet.
+ *   - Bereits geschlossene Monate werden NICHT stillschweigend geöffnet —
+ *     standardmäßig wird der Termin übersprungen und in der Übersicht
+ *     gemeldet. Mit --allow-closed-months entscheidet der Superadmin
+ *     ausdrücklich pro Lauf, dass auch geschlossene Monate korrigiert
+ *     werden (z.B. wenn der Monat danach manuell wieder geschlossen wird).
+ *
+ * Vorgehen pro Termin (Drift > Toleranz):
  *   1. Termin-Daten + bestehende Consumption-Txs laden.
  *   2. Pro Consumption-Tx ein Reversal mit `reversedTransactionId = orig.id`
  *      einfügen (idempotent durch UNIQUE-Index auf `reversedTransactionId`,
@@ -24,53 +36,70 @@
  *   4. Neue Buchung mit den AKTUELLEN appt-Werten via
  *      `createConsumptionTransaction` — derselbe Pfad wie die normale
  *      Termin-Dokumentation, inkl. korrekter km-Rundung auf 0,1.
- *   5. Audit-Eintrag pro Termin + Sammel-Audit pro Lauf (mit batchId).
+ *   5. Audit-Eintrag `budget_transaction_corrected` pro Termin + Sammel-
+ *      Audit `budget_transaction_corrected_batch` pro Lauf (mit batchId und
+ *      Begründung).
  *
  * GoBD: Storno + Neu-Anlage statt UPDATE — die Historie bleibt vollständig
  * sichtbar (alte Tx + Reversal + Neue Tx).
  *
  * Idempotenz:
  *   - `reversedTransactionId`-UNIQUE-Index verhindert Doppel-Storno.
- *   - Re-Lauf: ein zweiter Aufruf findet keine driftenden Termine mehr.
+ *   - Re-Lauf: ein zweiter Aufruf findet keine driftenden Termine mehr,
+ *     weil die alten Txs ihre `appointmentId` verloren haben und die neue
+ *     Buchung die korrekten km hat. Der Boot-Audit ist danach leer.
  *
  * Aufruf:
  *   Trockenlauf:        tsx server/scripts/reconcile-km-drift.ts
  *   Bestimmte Termine:  tsx server/scripts/reconcile-km-drift.ts --appointment=39,57
  *   Bestimmter Kunde:   tsx server/scripts/reconcile-km-drift.ts --customer=12
- *   Scharf ausführen:   tsx server/scripts/reconcile-km-drift.ts --apply
  *   Toleranz anpassen:  tsx server/scripts/reconcile-km-drift.ts --tolerance=0.5
+ *   Scharf ausführen:   tsx server/scripts/reconcile-km-drift.ts --apply \
+ *                          --user=<superadmin-id> --reason="Schröder km-Drift #619"
+ *   Inkl. geschlossener Monate:
+ *                       … --allow-closed-months
  */
 
 import { randomUUID } from "node:crypto";
-import { eq, and, isNull, sql, inArray } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
   appointments,
-  appointmentServices,
   budgetTransactions,
-  customers,
-  services,
+  users,
 } from "@shared/schema";
 import { createConsumptionTransaction } from "../storage/budget/consumption-engine";
+import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { auditService } from "../services/audit";
 
-const DEFAULT_TOLERANCE_KM = 0.15;
-const AUDIT_ACTION = "km_drift_reconciled";
-const AUDIT_BATCH_ACTION = "km_drift_reconciled_batch";
+// Auf 0,05 km gesetzt, damit das Skript mindestens alles abdeckt, was der
+// Boot-Audit (`audit-appointment-budget-km-drift.ts`) flaggt. Sonst bliebe
+// die Schwelle 0,15 km > 0,05 km, und es blieben Drift-Fälle übrig, die
+// der Boot-Audit beim nächsten Re-Deploy wieder meldet (#619 verlangt
+// einen sauberen Re-Boot).
+const DEFAULT_TOLERANCE_KM = 0.05;
+const AUDIT_ACTION = "budget_transaction_corrected";
+const AUDIT_BATCH_ACTION = "budget_transaction_corrected_batch";
 
 interface CliArgs {
   apply: boolean;
   appointmentIds: number[];
   customerIds: number[];
   toleranceKm: number;
+  userId?: number;
+  reason?: string;
+  allowClosedMonths: boolean;
 }
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
   const apply = args.includes("--apply");
+  const allowClosedMonths = args.includes("--allow-closed-months");
   const apptArg = args.find(a => a.startsWith("--appointment="));
   const customerArg = args.find(a => a.startsWith("--customer="));
   const tolArg = args.find(a => a.startsWith("--tolerance="));
+  const userArg = args.find(a => a.startsWith("--user="));
+  const reasonArg = args.find(a => a.startsWith("--reason="));
 
   const parseIds = (s: string | undefined): number[] => {
     if (!s) return [];
@@ -80,12 +109,17 @@ function parseArgs(): CliArgs {
   };
 
   const toleranceKm = tolArg ? parseFloat(tolArg.split("=")[1]) : DEFAULT_TOLERANCE_KM;
+  const userId = userArg ? parseInt(userArg.split("=")[1], 10) : undefined;
+  const reason = reasonArg ? reasonArg.split("=").slice(1).join("=").trim() : undefined;
 
   return {
     apply,
     appointmentIds: parseIds(apptArg),
     customerIds: parseIds(customerArg),
     toleranceKm: Number.isFinite(toleranceKm) && toleranceKm >= 0 ? toleranceKm : DEFAULT_TOLERANCE_KM,
+    userId: userId !== undefined && !isNaN(userId) ? userId : undefined,
+    reason: reason && reason.length > 0 ? reason : undefined,
+    allowClosedMonths,
   };
 }
 
@@ -93,6 +127,7 @@ export interface DriftCandidate {
   appointmentId: number;
   customerId: number;
   date: string;
+  assignedEmployeeId: number | null;
   apptTravelKm: number;
   apptCustomerKm: number;
   txTravelKmSum: number;
@@ -126,6 +161,7 @@ export async function findDriftCandidates(opts: {
     date: appointments.date,
     travelKm: appointments.travelKilometers,
     customerKm: appointments.customerKilometers,
+    assignedEmployeeId: appointments.assignedEmployeeId,
   })
     .from(appointments)
     .where(and(...whereParts));
@@ -166,6 +202,7 @@ export async function findDriftCandidates(opts: {
       appointmentId: a.id,
       customerId: a.customerId!,
       date: typeof a.date === "string" ? a.date : String(a.date),
+      assignedEmployeeId: a.assignedEmployeeId ?? null,
       apptTravelKm: apptTravel,
       apptCustomerKm: apptCustomer,
       txTravelKmSum: sums.travel,
@@ -183,6 +220,7 @@ export interface ReconcileResult {
   detail: string;
   reversedTxIds: number[];
   newTxAmountCents?: number;
+  monthClosed?: boolean;
 }
 
 export interface KmReconcileSummary {
@@ -191,6 +229,7 @@ export interface KmReconcileSummary {
   repaired: number;
   skipped: number;
   errored: number;
+  closedMonthSkipped: number;
   batchId?: string;
 }
 
@@ -199,6 +238,8 @@ async function reconcileOne(
   apply: boolean,
   userId: number | undefined,
   batchId: string | undefined,
+  reason: string | undefined,
+  allowClosedMonths: boolean,
 ): Promise<ReconcileResult> {
   // Wir brauchen die Service-/Minuten-Information aus den bestehenden
   // Consumption-Txs, um die Neu-Buchung 1:1 mit derselben hw/ab-Verteilung
@@ -213,6 +254,26 @@ async function reconcileOne(
 
   if (existingTxs.length === 0) {
     return { appointmentId: c.appointmentId, status: "skipped", detail: "keine Consumption-Tx vorhanden", reversedTxIds: [] };
+  }
+
+  // Closed-Month-Schutz (Task #619): Termin-Monat darf nicht stillschweigend
+  // überschrieben werden. Geprüft wird gegen den zugewiesenen Mitarbeiter
+  // des Termins; wenn keiner gesetzt ist, wird die Buchung als „offen"
+  // betrachtet (kein Monatsabschluss möglich ohne assignedEmployeeId).
+  let monthClosed = false;
+  if (c.assignedEmployeeId !== null) {
+    monthClosed = await isMonthClosed(c.assignedEmployeeId, c.date);
+  }
+  if (monthClosed && !allowClosedMonths) {
+    return {
+      appointmentId: c.appointmentId,
+      status: "skipped",
+      detail:
+        `Monat von Mitarbeiter #${c.assignedEmployeeId} für ${c.date} ist geschlossen — ` +
+        `Korrektur übersprungen. Mit --allow-closed-months ausdrücklich erlauben.`,
+      reversedTxIds: [],
+      monthClosed: true,
+    };
   }
 
   // hw/ab-Minuten + km-Werte aus dem AKTUELLEN appt holen (km ist die
@@ -237,12 +298,15 @@ async function reconcileOne(
       detail:
         `Würde storno + neu anlegen: travel ${c.txTravelKmSum.toFixed(1)}→${c.apptTravelKm.toFixed(1)} km, ` +
         `customer ${c.txCustomerKmSum.toFixed(1)}→${c.apptCustomerKm.toFixed(1)} km ` +
-        `(hw=${hwSum} min, ab=${abSum} min)`,
+        `(hw=${hwSum} min, ab=${abSum} min)` +
+        (monthClosed ? ` [Monat geschlossen — wird wegen --allow-closed-months einbezogen]` : ""),
       reversedTxIds: existingTxs.map(t => t.id),
+      monthClosed,
     };
   }
 
   const reversedIds: number[] = [];
+  const noteSuffix = reason ? ` — Grund: ${reason}` : "";
 
   await db.transaction(async (tx) => {
     // 1. Reversal pro bestehender Consumption — datiert auf das ursprüngliche
@@ -267,7 +331,7 @@ async function reconcileOne(
         appointmentId: null,
         allocationId: orig.allocationId,
         reversedTransactionId: orig.id,
-        notes: `Storno (Reconcile #611 km-Drift) von Transaktion #${orig.id}`,
+        notes: `Storno (km-Drift-Korrektur #619) von Transaktion #${orig.id}${noteSuffix}`,
         createdByUserId: userId,
       })
         .onConflictDoNothing()
@@ -301,11 +365,14 @@ async function reconcileOne(
     await auditService.log(userId, AUDIT_ACTION, "appointment", c.appointmentId, {
       customerId: c.customerId,
       date: c.date,
+      assignedEmployeeId: c.assignedEmployeeId,
       previousTravelKm: c.txTravelKmSum,
       newTravelKm: c.apptTravelKm,
       previousCustomerKm: c.txCustomerKmSum,
       newCustomerKm: c.apptCustomerKm,
       reversedTransactionIds: reversedIds,
+      reason: reason ?? null,
+      monthClosedAtCorrection: monthClosed,
       ...(batchId ? { batchId } : {}),
     });
   }
@@ -315,8 +382,10 @@ async function reconcileOne(
     status: "ok",
     detail:
       `Storno + neu angelegt: travel ${c.txTravelKmSum.toFixed(1)}→${c.apptTravelKm.toFixed(1)} km, ` +
-      `customer ${c.txCustomerKmSum.toFixed(1)}→${c.apptCustomerKm.toFixed(1)} km`,
+      `customer ${c.txCustomerKmSum.toFixed(1)}→${c.apptCustomerKm.toFixed(1)} km` +
+      (monthClosed ? ` [im geschlossenen Monat korrigiert]` : ""),
     reversedTxIds: reversedIds,
+    monthClosed,
   };
 }
 
@@ -326,8 +395,11 @@ export async function reconcileKmDrift(opts: {
   apply: boolean;
   toleranceKm?: number;
   userId?: number;
+  reason?: string;
+  allowClosedMonths?: boolean;
 }): Promise<KmReconcileSummary> {
   const toleranceKm = opts.toleranceKm ?? DEFAULT_TOLERANCE_KM;
+  const allowClosedMonths = opts.allowClosedMonths ?? false;
   const candidates = await findDriftCandidates({
     appointmentIds: opts.appointmentIds,
     customerIds: opts.customerIds,
@@ -342,13 +414,17 @@ export async function reconcileKmDrift(opts: {
   let repaired = 0;
   let skipped = 0;
   let errored = 0;
+  let closedMonthSkipped = 0;
 
   for (const c of candidates) {
     try {
-      const r = await reconcileOne(c, opts.apply, opts.userId, batchId);
+      const r = await reconcileOne(c, opts.apply, opts.userId, batchId, opts.reason, allowClosedMonths);
       results.push(r);
       if (r.status === "ok") repaired++;
-      else if (r.status === "skipped") skipped++;
+      else if (r.status === "skipped") {
+        skipped++;
+        if (r.monthClosed) closedMonthSkipped++;
+      }
     } catch (err) {
       errored++;
       results.push({
@@ -364,45 +440,89 @@ export async function reconcileKmDrift(opts: {
     await auditService.log(opts.userId, AUDIT_BATCH_ACTION, "budget", 0, {
       batchId,
       toleranceKm,
+      reason: opts.reason ?? null,
+      allowClosedMonths,
       totalCandidates: candidates.length,
       repaired,
       skipped,
+      closedMonthSkipped,
       errored,
       appointmentIds: results.filter(r => r.status === "ok").map(r => r.appointmentId),
+      skippedClosedAppointmentIds: results
+        .filter(r => r.status === "skipped" && r.monthClosed)
+        .map(r => r.appointmentId),
     });
   }
 
-  return { candidates, results, repaired, skipped, errored, batchId };
+  return { candidates, results, repaired, skipped, closedMonthSkipped, errored, batchId };
+}
+
+async function assertSuperadminOrThrow(userId: number): Promise<void> {
+  const [row] = await db.select({
+    id: users.id,
+    isSuperAdmin: users.isSuperAdmin,
+    isActive: users.isActive,
+    displayName: users.displayName,
+  }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
+  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
+  if (!row.isSuperAdmin) {
+    throw new Error(
+      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
+        `km-Drift-Korrekturen sind Task #619 explizit auf Superadmins beschränkt.`,
+    );
+  }
 }
 
 async function main() {
   const args = parseArgs();
-  console.log(`Modus:      ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);
-  console.log(`Toleranz:   ${args.toleranceKm} km`);
-  if (args.appointmentIds.length > 0) console.log(`Termine:    ${args.appointmentIds.join(", ")}`);
-  if (args.customerIds.length > 0) console.log(`Kunden:     ${args.customerIds.join(", ")}`);
+
+  if (args.apply) {
+    if (args.userId === undefined) {
+      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
+      process.exit(1);
+    }
+    if (!args.reason || args.reason.length < 10) {
+      console.error("Fehler: --apply erfordert --reason=\"...\" (≥10 Zeichen Begründung für den Audit-Log).");
+      process.exit(1);
+    }
+    await assertSuperadminOrThrow(args.userId);
+  }
+
+  console.log(`Modus:               ${args.apply ? "SCHARF (--apply)" : "Trockenlauf"}`);
+  console.log(`Toleranz:            ${args.toleranceKm} km`);
+  console.log(`Geschlossene Monate: ${args.allowClosedMonths ? "EINBEZIEHEN (--allow-closed-months)" : "überspringen"}`);
+  if (args.userId !== undefined) console.log(`Superadmin (User-ID): ${args.userId}`);
+  if (args.reason) console.log(`Begründung:          ${args.reason}`);
+  if (args.appointmentIds.length > 0) console.log(`Termine:             ${args.appointmentIds.join(", ")}`);
+  if (args.customerIds.length > 0) console.log(`Kunden:              ${args.customerIds.join(", ")}`);
 
   const summary = await reconcileKmDrift({
     appointmentIds: args.appointmentIds.length > 0 ? args.appointmentIds : undefined,
     customerIds: args.customerIds.length > 0 ? args.customerIds : undefined,
     apply: args.apply,
     toleranceKm: args.toleranceKm,
+    userId: args.userId,
+    reason: args.reason,
+    allowClosedMonths: args.allowClosedMonths,
   });
 
   console.log(`\nDrift-Kandidaten gefunden: ${summary.candidates.length}`);
   for (const r of summary.results) {
     const c = summary.candidates.find(x => x.appointmentId === r.appointmentId)!;
     console.log(
-      `  Termin #${c.appointmentId} (${c.date}, Kunde #${c.customerId}): ${r.status} — ${r.detail}`,
+      `  Termin #${c.appointmentId} (${c.date}, Kunde #${c.customerId}, MA #${c.assignedEmployeeId ?? "—"}): ${r.status} — ${r.detail}`,
     );
   }
 
   console.log(`\n=== Zusammenfassung ===`);
-  console.log(`Repariert:    ${summary.repaired}`);
-  console.log(`Übersprungen: ${summary.skipped}`);
-  console.log(`Fehler:       ${summary.errored}`);
+  console.log(`Repariert:                  ${summary.repaired}`);
+  console.log(`Übersprungen (gesamt):      ${summary.skipped}`);
+  console.log(`  davon geschlossener Monat: ${summary.closedMonthSkipped}`);
+  console.log(`Fehler:                     ${summary.errored}`);
+  if (summary.batchId) console.log(`Audit-Batch-ID:             ${summary.batchId}`);
   if (!args.apply) {
-    console.log("\nHinweis: Trockenlauf — keine Änderungen geschrieben. Mit --apply ausführen.");
+    console.log("\nHinweis: Trockenlauf — keine Änderungen geschrieben. Mit --apply --user=<id> --reason=\"…\" ausführen.");
   }
   process.exit(0);
 }

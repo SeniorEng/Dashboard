@@ -8,6 +8,54 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-26 — Historische km-Drift-Buchungen per Superadmin korrigieren (Task #619)
+
+**Anlass:** Der Boot-Audit aus Task #616
+(`server/startup/audit-appointment-budget-km-drift.ts`) listet weiterhin
+Bestandsbuchungen mit Drift zwischen `appointments.travelKilometers`/
+`customerKilometers` und den zugeordneten `budget_transactions`-Zeilen
+(z.B. Schröder Rosemarie 12.01./21.01./04.02.2026). Aus GoBD-Gründen
+schreibt der Boot nichts — die Korrektur muss kontrolliert durch einen
+Superadmin erfolgen.
+
+**Fix:**
+- `server/scripts/reconcile-km-drift.ts` ist die Korrektur-Aktion: pro
+  Drift-Termin Storno der bestehenden Consumption-Tx + Neuanlage mit den
+  aktuellen Termin-km (gleicher Pfad wie #611, jetzt Superadmin-gated).
+- `--apply` erfordert `--user=<superadmin-id>` (Superadmin-Check via
+  `users.isSuperAdmin`) und `--reason="…"` (≥10 Zeichen, landet im Audit-
+  Log). Pro Termin wird `budget_transaction_corrected` geschrieben, pro
+  Lauf zusätzlich `budget_transaction_corrected_batch` mit batchId.
+- Geschlossene Monate werden standardmäßig **übersprungen** und im
+  Output gemeldet — nur mit `--allow-closed-months` werden sie
+  einbezogen. Es wird KEIN Monat automatisch wieder geöffnet; der
+  Superadmin entscheidet danach manuell über Re-Close.
+- Default-Toleranz auf 0,05 km gesetzt (vorher 0,15) — deckt sich mit
+  dem Boot-Audit, sodass ein Re-Boot nach Lauf eine leere Drift-Liste
+  ergibt.
+- Boot-Audit-Log-Zeile zeigt jetzt direkt den Aufruf-Hinweis.
+
+**Runbook:**
+```
+# 1. Trockenlauf — listet Kandidaten ohne Schreiben:
+npm run budget:correct-km-drift
+
+# 2. Scharf, ohne geschlossene Monate anzufassen:
+npm run budget:correct-km-drift -- --apply --user=<id> \
+  --reason="Schröder km-Drift Bestandsbuchungen #619"
+
+# 3. Auch geschlossene Monate einbeziehen (Superadmin entscheidet bewusst):
+npm run budget:correct-km-drift -- --apply --user=<id> \
+  --reason="…" --allow-closed-months
+
+# Anschließend: Re-Deploy → Boot-Audit muss leer bleiben.
+```
+
+**Audit-Schema:** Neue Actions `budget_transaction_corrected` /
+`budget_transaction_corrected_batch` in `shared/schema/audit.ts`.
+
+---
+
 ### 2026-05-26 — Termin-Kostenberechnung Ende-zu-Ende konsistent (Task #616)
 
 **Anlass:** Auch nach Task #611 driftete die im Budget-Ledger angezeigte

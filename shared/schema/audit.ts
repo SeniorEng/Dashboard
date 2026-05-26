@@ -84,6 +84,8 @@ export const AUDIT_ACTIONS = [
   "km_drift_reconciled",
   "km_drift_reconciled_batch",
   "appointment_km_rebooked",
+  "budget_transaction_corrected",
+  "budget_transaction_corrected_batch",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
