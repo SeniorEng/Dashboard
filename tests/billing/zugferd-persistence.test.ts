@@ -71,7 +71,21 @@ async function waitForZugferdPersisted(
   // Persistierung nach Rückkehr garantiert geschrieben — wir umgehen so den
   // intermittierenden Puppeteer-Cold-Start („Navigating frame was detached"),
   // der den Hintergrund-Persist gelegentlich in den 3x-Retry-Backoff schickt.
-  await apiGet<any>(`/api/billing/${invoiceId}/pdf`).catch(() => undefined);
+  // Task #593: GET /:id/pdf hat KEINEN eigenen Retry-Wrapper (nur der
+  // Background-Persist via `runPdfPersistWithRetry`), deshalb retryen wir den
+  // Fallback bis zu 3x — unter paralleler Test-Last (viele Workers) kann ein
+  // einzelner Puppeteer-Launch noch immer mit "Navigating frame was detached"
+  // schieflaufen, ohne dass das ein echter Drift-Bug wäre.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await apiGet<any>(`/api/billing/${invoiceId}/pdf`).catch(() => undefined);
+    const [row] = await db
+      .select({ zugferdXml: invoicesTable.zugferdXml, pdfHash: invoicesTable.pdfHash })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, invoiceId))
+      .limit(1);
+    if (row?.zugferdXml && row?.pdfHash) return row;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
   const [row] = await db
     .select({ zugferdXml: invoicesTable.zugferdXml, pdfHash: invoicesTable.pdfHash })
     .from(invoicesTable)
@@ -216,10 +230,13 @@ describe("ZUGFeRD-Persistenz — invoices.zugferd_xml + Integrity-Verifier", () 
     if (result && !result.xmlMatch) {
       const persisted = String(row?.zugferdXml ?? "");
       const { buildInvoicePdfBytes } = await import("../../server/routes/billing");
-      const { getCachedCompanySettings } = await import("../../server/services/cache");
-      const cs = await getCachedCompanySettings();
+      const { storage } = await import("../../server/storage");
+      const invJoined = await storage.getInvoice(inv.id);
       const [invRow] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, inv.id)).limit(1);
-      const rerendered = cs && invRow ? (await buildInvoicePdfBytes(invRow as any, cs)).xml ?? "" : "";
+      const snap = (invRow?.renderSnapshot ?? null) as any;
+      const rerendered = invJoined && snap?.companySettings
+        ? (await buildInvoicePdfBytes(invJoined as any, snap.companySettings, { snapshot: snap })).xml ?? ""
+        : "";
       let diffAt = -1;
       const max = Math.min(persisted.length, rerendered.length);
       for (let i = 0; i < max; i++) {
@@ -320,5 +337,92 @@ describe("ZUGFeRD-Persistenz — invoices.zugferd_xml + Integrity-Verifier", () 
       .update(invoicesTable)
       .set({ zugferdXml: originalXml })
       .where(eq(invoicesTable.id, inv.id));
+  }, 60_000);
+
+  /**
+   * ZFP.3 (Security-Härtung Task #593): `invoices.render_snapshot` darf NIEMALS
+   * Plaintext-Secrets der `company_settings` enthalten (smtpPass,
+   * letterxpressApiKey, qontoSecretKey, whatsappAccessToken, twilioAuthToken,
+   * …). Würden wir das gesamte companySettings-Objekt snapshotten, wäre pro
+   * Rechnung eine entschlüsselte Credential-Replik im JSONB persistiert —
+   * schwerer DSGVO-/GoBD-Verstoss. Der Snapshot ist über
+   * `INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS` strikt allowlist-gefiltert; dieser
+   * Test bewacht den Sanitizer.
+   */
+  it("ZFP.3 — render_snapshot enthält keine company_settings-Secrets (Allowlist erzwungen)", async () => {
+    const slot = await findFreeSlotAndCreate(customerId, "Sec");
+    const docRes = await apiPost<any>(`/api/appointments/${slot.id}/document`, {
+      actualStart: slot.time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "ZFP-Sec" }],
+    });
+    expect(docRes.status, `document: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const d = new Date(slot.date);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+
+    const sr = await apiPost<any>("/api/service-records", {
+      customerId,
+      employeeId: auth.user.id,
+      year,
+      month,
+    });
+    expect(sr.status, `SR create: ${JSON.stringify(sr.data)}`).toBe(201);
+    cleanupSrIds.push(sr.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost<any>(`/api/service-records/${sr.data.id}/sign`, {
+        signerType,
+        signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      });
+      expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const gen = await apiPost<any>("/api/billing/generate", {
+      customerId,
+      billingMonth: month,
+      billingYear: year,
+    });
+    expect(gen.status, `generate: ${JSON.stringify(gen.data)}`).toBe(200);
+    const inv: any = gen.data?.splitInvoices ? gen.data.invoices[0]
+      : Array.isArray(gen.data) ? gen.data[0]
+      : gen.data;
+    expect(inv?.id).toBeDefined();
+    cleanupInvoiceIds.push(inv.id);
+
+    const persisted = await waitForZugferdPersisted(inv.id);
+    expect(persisted.zugferdXml).not.toBeNull();
+
+    const [row] = await db
+      .select({ renderSnapshot: invoicesTable.renderSnapshot })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, inv.id))
+      .limit(1);
+    expect(row?.renderSnapshot, "render_snapshot muss nach /generate gesetzt sein").not.toBeNull();
+
+    const snap = row!.renderSnapshot as { companySettings: Record<string, unknown> };
+    const forbiddenKeys = [
+      "smtpPass",
+      "letterxpressApiKey",
+      "qontoSecretKey",
+      "whatsappAccessToken",
+      "twilioAuthToken",
+    ];
+    for (const k of forbiddenKeys) {
+      expect(
+        Object.prototype.hasOwnProperty.call(snap.companySettings, k),
+        `render_snapshot.companySettings darf '${k}' nicht enthalten`,
+      ).toBe(false);
+    }
+    // Defense-in-depth: Auch generische Secret-Heuristik prüfen.
+    const secretLike = Object.keys(snap.companySettings).filter((k) =>
+      /secret|token|password|pass$|apikey|api_key/i.test(k),
+    );
+    expect(
+      secretLike,
+      `render_snapshot.companySettings enthält Secret-verdächtige Keys: ${secretLike.join(", ")}`,
+    ).toEqual([]);
   }, 60_000);
 });

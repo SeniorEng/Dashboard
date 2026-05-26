@@ -1,0 +1,1 @@
+- [storage.getInvoice JOIN-alias trap](storage-get-invoice-customername.md) — getInvoice OVERRIDES invoice.customerName with customers.name; any verifier/re-render that selects raw from invoicesTable will drift.

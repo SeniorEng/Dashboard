@@ -24,7 +24,8 @@ import {
   customerServicePrices,
   budgetTransactions,
 } from "@shared/schema";
-import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery } from "@shared/schema";
+import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
+import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
 import type { BillingCustomerItem } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
@@ -1883,59 +1884,92 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
 // Task #521: Baut die PDF-Eingabedaten (pdfData) inkl. Kunden-Anschrift /
 // Beihilfe-/Rechnung-an-Kunde-Logik. Wird sowohl für den Voll-Build als auch
 // für reine LN-Renders verwendet (LN-only verzichtet auf den Invoice-Render).
-async function buildInvoicePdfData(invoice: Invoice, companySettings: CompanySettings): Promise<{
+async function buildInvoicePdfData(
+  invoice: Invoice,
+  companySettings: CompanySettings,
+  options?: { snapshot?: InvoiceRenderSnapshot | null },
+): Promise<{
   pdfData: InvoicePdfData;
   isCustomerInvoice: boolean;
   isPflegekasseInvoice: boolean;
+  customerSnapshot: InvoiceRenderSnapshot["customer"];
 }> {
   const lineItems = await storage.getInvoiceLineItems(invoice.id);
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
-  const customerForInv = await db.select({
-    geburtsdatum: customersTable.geburtsdatum,
-    beihilfeBerechtigt: customersTable.beihilfeBerechtigt,
-    rechnungAnKunde: customersTable.rechnungAnKunde,
-    name: customersTable.name,
-    vorname: customersTable.vorname,
-    nachname: customersTable.nachname,
-    strasse: customersTable.strasse,
-    nr: customersTable.nr,
-    plz: customersTable.plz,
-    stadt: customersTable.stadt,
-    // Task #562 — AUA-Anerkennung ist Stammdatum am Kunden, kein Rechnungsfeld
-    // (siehe shared/schema/customers.ts). Wir lesen sie hier dazu, damit das
-    // PDF und (über buildZugferdData) auch das ZUGFeRD-XML strukturiert
-    // referenzieren können, ohne die Rechnungs-Zeile aufzublähen.
-    auaApprovalRef: customersTable.auaApprovalRef,
-    auaApprovalDate: customersTable.auaApprovalDate,
-  })
-    .from(customersTable)
-    .where(eq(customersTable.id, invoice.customerId))
-    .limit(1);
+  // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
+  // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
+  // Damit reproduziert die Re-Render-XML auch dann byte-genau die persistierte
+  // XML, wenn parallel der Kunde mutiert wurde (oder wenn eine spätere
+  // Stammdaten-Änderung den Bestand nicht überschreiben darf — GoBD).
+  let customerSnapshot: InvoiceRenderSnapshot["customer"];
+  if (options?.snapshot) {
+    customerSnapshot = options.snapshot.customer;
+  } else {
+    const customerForInv = await db.select({
+      geburtsdatum: customersTable.geburtsdatum,
+      beihilfeBerechtigt: customersTable.beihilfeBerechtigt,
+      rechnungAnKunde: customersTable.rechnungAnKunde,
+      name: customersTable.name,
+      vorname: customersTable.vorname,
+      nachname: customersTable.nachname,
+      strasse: customersTable.strasse,
+      nr: customersTable.nr,
+      plz: customersTable.plz,
+      stadt: customersTable.stadt,
+      // Task #562 — AUA-Anerkennung ist Stammdatum am Kunden, kein Rechnungsfeld
+      // (siehe shared/schema/customers.ts). Wir lesen sie hier dazu, damit das
+      // PDF und (über buildZugferdData) auch das ZUGFeRD-XML strukturiert
+      // referenzieren können, ohne die Rechnungs-Zeile aufzublähen.
+      auaApprovalRef: customersTable.auaApprovalRef,
+      auaApprovalDate: customersTable.auaApprovalDate,
+    })
+      .from(customersTable)
+      .where(eq(customersTable.id, invoice.customerId))
+      .limit(1);
+    const row = customerForInv[0];
+    customerSnapshot = {
+      geburtsdatum: (row?.geburtsdatum as string | null) ?? null,
+      beihilfeBerechtigt: row?.beihilfeBerechtigt ?? null,
+      rechnungAnKunde: row?.rechnungAnKunde ?? null,
+      name: row?.name ?? null,
+      vorname: row?.vorname ?? null,
+      nachname: row?.nachname ?? null,
+      strasse: row?.strasse ?? null,
+      nr: row?.nr ?? null,
+      plz: row?.plz ?? null,
+      stadt: row?.stadt ?? null,
+      auaApprovalRef: row?.auaApprovalRef ?? null,
+      auaApprovalDate: (row?.auaApprovalDate as string | null) ?? null,
+    };
+  }
+
   const isCustomerInvoice = invoice.billingType === "pflegekasse_privat"
-    || (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0]?.rechnungAnKunde === true);
+    || (invoice.billingType === "pflegekasse_gesetzlich" && customerSnapshot.rechnungAnKunde === true);
   const isPflegekasseInvoice = invoice.billingType === "pflegekasse_privat"
     || invoice.billingType === "pflegekasse_gesetzlich";
-  if (customerForInv.length > 0) {
-    if (customerForInv[0].geburtsdatum) pdfData.customerGeburtsdatum = customerForInv[0].geburtsdatum;
-    if (customerForInv[0].beihilfeBerechtigt) pdfData.beihilfeBerechtigt = true;
-    pdfData.auaApprovalRef = customerForInv[0].auaApprovalRef ?? null;
-    pdfData.auaApprovalDate = customerForInv[0].auaApprovalDate ?? null;
-    if (invoice.billingType === "pflegekasse_gesetzlich" && customerForInv[0].rechnungAnKunde) {
-      pdfData.rechnungAnKunde = true;
-      const c = customerForInv[0];
-      const fullName = [c.vorname, c.nachname].filter(Boolean).join(" ") || c.name;
-      const addr = [c.strasse, c.nr].filter(Boolean).join(" ") +
-        (c.plz || c.stadt ? `\n${c.plz || ""} ${c.stadt || ""}` : "");
-      pdfData.recipientName = fullName;
-      pdfData.recipientAddress = addr || pdfData.recipientAddress;
-    }
+  if (customerSnapshot.geburtsdatum) pdfData.customerGeburtsdatum = customerSnapshot.geburtsdatum;
+  if (customerSnapshot.beihilfeBerechtigt) pdfData.beihilfeBerechtigt = true;
+  pdfData.auaApprovalRef = customerSnapshot.auaApprovalRef ?? null;
+  pdfData.auaApprovalDate = customerSnapshot.auaApprovalDate ?? null;
+  if (invoice.billingType === "pflegekasse_gesetzlich" && customerSnapshot.rechnungAnKunde) {
+    pdfData.rechnungAnKunde = true;
+    const c = customerSnapshot;
+    const fullName = [c.vorname, c.nachname].filter(Boolean).join(" ") || (c.name ?? "");
+    const addr = [c.strasse, c.nr].filter(Boolean).join(" ") +
+      (c.plz || c.stadt ? `\n${c.plz || ""} ${c.stadt || ""}` : "");
+    pdfData.recipientName = fullName;
+    pdfData.recipientAddress = addr || pdfData.recipientAddress;
   }
-  return { pdfData, isCustomerInvoice, isPflegekasseInvoice };
+  return { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot };
 }
 
-export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null }> {
-  const { pdfData, isCustomerInvoice, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
+export async function buildInvoicePdfBytes(
+  invoice: Invoice,
+  companySettings: CompanySettings,
+  options?: { snapshot?: InvoiceRenderSnapshot | null },
+): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"] }> {
+  const { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot } = await buildInvoicePdfData(invoice, companySettings, options);
 
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   const { embedZugferdXml } = await import("../lib/zugferd");
@@ -1975,9 +2009,9 @@ export async function buildInvoicePdfBytes(invoice: Invoice, companySettings: Co
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
       lp2.forEach((p) => merged.addPage(p));
     }
-    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint };
+    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot };
   }
-  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint };
+  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot };
 }
 
 // Task #521: LN-only Render — wird verwendet, wenn das Rechnungs-PDF bereits
@@ -2035,6 +2069,29 @@ async function computeLiveInvoiceFingerprints(invoice: Invoice): Promise<{
 // fehlgeschlagener Render erneut versucht werden kann.
 const persistInvoicePdfInFlight = new Map<number, Promise<void>>();
 
+/**
+ * Task #593 (Security-Härtung): Beim Persistieren des `renderSnapshot` MUSS
+ * `companySettings` strikt allowlist-gefiltert werden — der vollständige
+ * `getCachedCompanySettings()`-Return enthält entschlüsselte Secrets
+ * (smtpPass, letterxpressApiKey, qontoSecretKey, whatsappAccessToken,
+ * twilioAuthToken, …). Würden wir das gesamte Objekt nach `invoices.render_snapshot`
+ * (JSONB) schreiben, hätten wir pro Rechnung eine Plaintext-Replik aller
+ * Credentials — schwerer DSGVO-/GoBD-Verstoss. Wir kopieren ausschliesslich
+ * die Felder, die `buildPdfData`/ZUGFeRD-XML tatsächlich liest
+ * (siehe `INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS`).
+ */
+function sanitizeCompanySettingsForSnapshot(
+  settings: CompanySettings,
+): InvoiceRenderCompanySnapshot {
+  const src = settings as unknown as Record<string, unknown>;
+  const out = {} as Record<string, unknown>;
+  for (const key of INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS) {
+    const raw = src[key];
+    out[key] = raw == null ? null : raw;
+  }
+  return out as unknown as InvoiceRenderCompanySnapshot;
+}
+
 export function persistInvoicePdf(invoiceId: number): Promise<void> {
   const existing = persistInvoicePdfInFlight.get(invoiceId);
   if (existing) return existing;
@@ -2063,6 +2120,7 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
     pdfHash?: string;
     pdfDataFingerprint?: string;
     zugferdXml?: string;
+    renderSnapshot?: InvoiceRenderSnapshot;
     leistungsnachweisPath?: string;
     leistungsnachweisHash?: string;
     leistungsnachweisDataFingerprint?: string;
@@ -2070,7 +2128,7 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
 
   if (needsInvoicePdf) {
     // Voll-Build (Erstanlage): Invoice + XML + optional LN.
-    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint } =
+    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot } =
       await buildInvoicePdfBytes(invoice, companySettings);
     const pdfHash = computeDataHash(pdfBytes as unknown as string);
     const fileName = `invoices/${safeNumber}.pdf`;
@@ -2085,6 +2143,15 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
     updateData.pdfDataFingerprint = pdfDataFingerprint;
     // Tier-A3: ZUGFeRD-XML nur beim ersten Schreiben (GoBD-Immutabilität).
     if (zugferdXml && !invoice.zugferdXml) updateData.zugferdXml = zugferdXml;
+    // Task #593: Render-Snapshot zusammen mit der erstmaligen XML-/PDF-
+    // Persistierung schreiben. Idempotent: nur setzen, wenn die Rechnung
+    // noch keinen Snapshot hat — historische Bestände bleiben unangetastet.
+    if (!invoice.renderSnapshot) {
+      updateData.renderSnapshot = {
+        companySettings: sanitizeCompanySettingsForSnapshot(companySettings),
+        customer: customerSnapshot,
+      };
+    }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {
       const lnHash = computeDataHash(leistungsnachweisPdf as unknown as string);
       const lnFileName = `invoices/${safeNumber}-leistungsnachweis.pdf`;

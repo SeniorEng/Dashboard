@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, serial, index, unique, date, time, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, serial, index, unique, date, time, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -75,6 +75,16 @@ export const invoices = pgTable("invoices", {
   // nach der PDF-Erstellung geändert.
   pdfDataFingerprint: text("pdf_data_fingerprint"),
   leistungsnachweisDataFingerprint: text("leistungsnachweis_data_fingerprint"),
+  // Task #593: Snapshot der Render-Eingabedaten (companySettings + relevante
+  // Kunden-Stammfelder) zum Zeitpunkt der initialen PDF-/XML-Erstellung.
+  // Wird vom `verifyInvoiceIntegrity`-Re-Render verwendet, damit parallele
+  // Mutationen an `company_settings` oder am Kunden-Datensatz nicht zu
+  // falsch-positiven Drift-Treffern führen — die Re-Rendering-Quelle bleibt
+  // an die zur Generierung gespeicherten Daten gepinnt (GoBD-konform: die
+  // Rechnung muss aus den damals gültigen Stamm-/Firmendaten reproduzierbar
+  // bleiben, auch wenn sich Stammdaten später ändern). NULL für Bestand vor
+  // #593 — der Verifier fällt dann auf den Live-Snapshot zurück.
+  renderSnapshot: jsonb("render_snapshot"),
   sentAt: timestamp("sent_at"),
   paidAt: timestamp("paid_at"),
   storniertAt: timestamp("storniert_at"),
@@ -128,5 +138,81 @@ export const updateInvoiceStatusSchema = z.object({
 
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLineItem = typeof invoiceLineItems.$inferSelect;
+
+/**
+ * Task #593: Snapshot der Render-Eingabedaten, der zusammen mit dem
+ * persistierten ZUGFeRD-XML gespeichert wird. Wird vom Integrity-Verifier
+ * verwendet, damit `verifyInvoiceIntegrity` auch nach parallelen Mutationen
+ * an `company_settings` oder am Kunden-Datensatz das ursprünglich gerenderte
+ * XML byte-genau reproduzieren kann.
+ */
+/**
+ * Strikte Allow-Liste: ausschliesslich die companySettings-Felder, die in
+ * `buildPdfData` / ZUGFeRD-XML-Generierung tatsächlich gelesen werden. KEINE
+ * Secrets (smtpPass, letterxpressApiKey, qontoSecretKey, whatsappAccessToken,
+ * twilioAuthToken, …) — der Snapshot wird als JSONB pro Rechnung persistiert,
+ * Secret-Replikation wäre eine DSGVO/GoBD-Eskalation.
+ */
+export interface InvoiceRenderCompanySnapshot {
+  companyName: string | null;
+  logoUrl: string | null;
+  strasse: string | null;
+  hausnummer: string | null;
+  plz: string | null;
+  stadt: string | null;
+  telefon: string | null;
+  email: string | null;
+  website: string | null;
+  steuernummer: string | null;
+  ustId: string | null;
+  iban: string | null;
+  bic: string | null;
+  bankName: string | null;
+  ikNummer: string | null;
+  geschaeftsfuehrer: string | null;
+}
+
+/**
+ * Whitelist der companySettings-Keys, die im InvoiceRenderSnapshot persistiert
+ * werden dürfen. Source of truth für den Sanitizer + Architektur-Test.
+ */
+export const INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS: readonly (keyof InvoiceRenderCompanySnapshot)[] = [
+  "companyName",
+  "logoUrl",
+  "strasse",
+  "hausnummer",
+  "plz",
+  "stadt",
+  "telefon",
+  "email",
+  "website",
+  "steuernummer",
+  "ustId",
+  "iban",
+  "bic",
+  "bankName",
+  "ikNummer",
+  "geschaeftsfuehrer",
+] as const;
+
+export interface InvoiceRenderSnapshot {
+  /** Allow-Liste der companySettings-Felder, die in `buildPdfData` einfliessen. */
+  companySettings: InvoiceRenderCompanySnapshot;
+  /** Kundenfelder, die in `buildInvoicePdfData` zur XML-Erzeugung gelesen werden. */
+  customer: {
+    geburtsdatum: string | null;
+    beihilfeBerechtigt: boolean | null;
+    rechnungAnKunde: boolean | null;
+    name: string | null;
+    vorname: string | null;
+    nachname: string | null;
+    strasse: string | null;
+    nr: string | null;
+    plz: string | null;
+    stadt: string | null;
+    auaApprovalRef: string | null;
+    auaApprovalDate: string | null;
+  };
+}
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

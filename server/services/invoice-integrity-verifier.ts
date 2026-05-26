@@ -1,12 +1,14 @@
 import { and, eq, gte, isNotNull } from "drizzle-orm";
 import { db } from "../lib/db";
 import { invoices as invoicesTable } from "@shared/schema";
+import type { CompanySettings, InvoiceRenderSnapshot } from "@shared/schema";
 import { log } from "../lib/log";
 import { computeDataHash } from "./signature-integrity";
 import { getCachedCompanySettings } from "./cache";
 import { auditService } from "./audit";
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
+import { storage } from "../storage";
 
 interface VerifyResult {
   invoiceId: number;
@@ -25,15 +27,28 @@ interface VerifyResult {
  * sichtbar machen, nicht den Bestand brechen.
  */
 export async function verifyInvoiceIntegrity(invoiceId: number): Promise<VerifyResult | null> {
-  const [invoice] = await db
-    .select()
-    .from(invoicesTable)
-    .where(eq(invoicesTable.id, invoiceId))
-    .limit(1);
+  // Task #593: MUSS `storage.getInvoice` benutzen (nicht direkt `invoicesTable`-Select),
+  // weil storage.getInvoice `invoice.customerName` mit `customers.name` überschreibt
+  // (JOIN-Alias). `persistInvoicePdfInner` rendert über genau denselben Pfad — würden
+  // wir hier roh aus `invoices.customer_name` lesen, käme ein anderer Name in
+  // `buildPdfData → ZUGFeRD-XML` und der byte-genaue Vergleich liefe in falsch-positive
+  // Drift. Snapshot-Lookup direkt aus der Tabelle, da getInvoice nicht alle Felder
+  // standardisiert exponiert.
+  const invoice = await storage.getInvoice(invoiceId);
   if (!invoice) return null;
   if (!invoice.zugferdXml && !invoice.pdfHash) return null;
 
-  const companySettings = await getCachedCompanySettings();
+  // Task #593: Wenn ein `renderSnapshot` vorliegt (alle nach #593 erzeugten
+  // Rechnungen), wird das XML deterministisch aus dem damals gespeicherten
+  // Snapshot rekonstruiert — parallele Mutationen an `company_settings` oder
+  // am Kunden-Datensatz können die Re-Render-XML nicht mehr verstimmen und
+  // produzieren keine falsch-positiven Drift-Treffer. Für Bestand vor #593
+  // (snapshot=NULL) fällt der Verifier auf den Live-Snapshot zurück; das
+  // entspricht dem Verhalten vor dieser Härtung.
+  const snapshot = (invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
+  const companySettings = snapshot
+    ? (snapshot.companySettings as unknown as CompanySettings)
+    : await getCachedCompanySettings();
   if (!companySettings) return null;
 
   // Re-Render: prüft, ob ZUGFeRD-XML (rechtsverbindlicher E-Rechnungs-Inhalt)
@@ -41,7 +56,7 @@ export async function verifyInvoiceIntegrity(invoiceId: number): Promise<VerifyR
   // (PDF-Creation-Timestamps), daher wird der PDF-Hash gegen die in Object Storage
   // persistierten Bytes geprüft — das deckt Storage-Tampering ab.
   const { buildInvoicePdfBytes } = await import("../routes/billing");
-  const { xml } = await buildInvoicePdfBytes(invoice, companySettings);
+  const { xml } = await buildInvoicePdfBytes(invoice, companySettings, { snapshot });
 
   let storedPdfHash: string | null = null;
   if (invoice.pdfHash && invoice.pdfPath) {

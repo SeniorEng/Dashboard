@@ -256,6 +256,15 @@ async function runStartupTasks() {
       log(`Invoice-Line-Item-Quantity-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #593: Render-Snapshot-Spalte (companySettings + Kunden-Snapshot) für
+    // deterministische Integrity-Verifier-Re-Renders sicherstellen.
+    const { ensureInvoiceRenderSnapshotColumn } = await import("./startup/ensure-invoice-render-snapshot");
+    try {
+      await ensureInvoiceRenderSnapshotColumn();
+    } catch (err) {
+      log(`Invoice-Render-Snapshot-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();
