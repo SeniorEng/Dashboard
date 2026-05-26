@@ -13,6 +13,7 @@ import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { parseTimestamp } from "@shared/utils/datetime";
 import { formatEuroDE } from "@shared/utils/money";
+import { formatKmQuantityDisplay } from "@shared/domain/invoice-line-items";
 
 const ACTION_LABELS: Record<string, string> = {
   documentation_submitted: "Dokumentation eingereicht",
@@ -28,13 +29,21 @@ const ACTION_LABELS: Record<string, string> = {
   import_trim_reconciled_batch: "Import-Reparatur (Sitzung)",
   customer_hard_deleted: "Kunde gelöscht (hart)",
   customer_price_replaced: "Kundenpreis ersetzt",
+  budget_transaction_corrected: "km-Drift korrigiert (Termin)",
+  budget_transaction_corrected_batch: "km-Drift korrigiert (Sitzung)",
 };
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   appointment: "Termin",
   service_record: "Leistungsnachweis",
   customer: "Kunde",
+  budget: "Budget",
 };
+
+const DRIFT_CORRECTION_ACTIONS = [
+  "budget_transaction_corrected",
+  "budget_transaction_corrected_batch",
+] as const;
 
 interface AuditEntry {
   id: number;
@@ -133,6 +142,34 @@ export default function AdminAuditLog() {
         parts.push(`${fmt(m.oldPriceCents as number)} → ${fmt(m.newPriceCents as number)}`);
       }
     }
+    if (entry.action === "budget_transaction_corrected") {
+      if (typeof m.previousTravelKm === "number" && typeof m.newTravelKm === "number") {
+        parts.push(`Anfahrt: ${formatKmQuantityDisplay(m.previousTravelKm as number)} → ${formatKmQuantityDisplay(m.newTravelKm as number)}`);
+      }
+      if (typeof m.previousCustomerKm === "number" && typeof m.newCustomerKm === "number") {
+        parts.push(`Kunden-km: ${formatKmQuantityDisplay(m.previousCustomerKm as number)} → ${formatKmQuantityDisplay(m.newCustomerKm as number)}`);
+      }
+      if (Array.isArray(m.reversedTransactionIds) && m.reversedTransactionIds.length > 0) {
+        parts.push(`Stornierte Tx: ${(m.reversedTransactionIds as number[]).map(id => `#${id}`).join(", ")}`);
+      }
+      if (m.monthClosedAtCorrection === true) {
+        parts.push("im geschlossenen Monat korrigiert");
+      }
+    }
+    if (entry.action === "budget_transaction_corrected_batch") {
+      if (typeof m.totalCandidates === "number") parts.push(`${m.totalCandidates} Kandidaten`);
+      if (typeof m.repaired === "number") parts.push(`${m.repaired} korrigiert`);
+      if (typeof m.skipped === "number") parts.push(`${m.skipped} übersprungen`);
+      if (typeof m.closedMonthSkipped === "number" && (m.closedMonthSkipped as number) > 0) {
+        parts.push(`${m.closedMonthSkipped} geschlossener Monat`);
+      }
+      if (typeof m.errored === "number" && (m.errored as number) > 0) parts.push(`${m.errored} Fehler`);
+      if (typeof m.toleranceKm === "number") parts.push(`Toleranz: ${formatKmQuantityDisplay(m.toleranceKm as number)}`);
+      if (m.allowClosedMonths === true) parts.push("inkl. geschlossener Monate");
+      if (Array.isArray(m.appointmentIds) && m.appointmentIds.length > 0) {
+        parts.push(`Termine: ${(m.appointmentIds as number[]).map(id => `#${id}`).join(", ")}`);
+      }
+    }
     return parts.join(" · ");
   };
 
@@ -173,6 +210,7 @@ export default function AdminAuditLog() {
                       <SelectItem value="all">Alle</SelectItem>
                       <SelectItem value="appointment">Termine</SelectItem>
                       <SelectItem value="service_record">Leistungsnachweise</SelectItem>
+                      <SelectItem value="budget">Budget</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -195,6 +233,45 @@ export default function AdminAuditLog() {
                     {data ? `${data.total} Einträge` : ""}
                   </span>
                 </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-500">Schnellfilter:</span>
+                {DRIFT_CORRECTION_ACTIONS.map((act) => (
+                  <Button
+                    key={act}
+                    type="button"
+                    variant={action === act ? "default" : "outline"}
+                    size="sm"
+                    className="h-7"
+                    onClick={() => {
+                      setAction(action === act ? "all" : act);
+                      setEntityType("all");
+                      setBatchId(null);
+                      setPage(0);
+                    }}
+                    data-testid={`button-quickfilter-${act}`}
+                  >
+                    {ACTION_LABELS[act]}
+                  </Button>
+                ))}
+                {(action !== "all" || entityType !== "all" || batchId) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => {
+                      setAction("all");
+                      setEntityType("all");
+                      setBatchId(null);
+                      setPage(0);
+                    }}
+                    data-testid="button-clear-filters"
+                  >
+                    <X className={iconSize.sm} />
+                    <span className="ml-1">Alle Filter</span>
+                  </Button>
+                )}
               </div>
               {batchId && (
                 <div className="mt-3 flex items-center gap-2 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900" data-testid="banner-batch-filter">
