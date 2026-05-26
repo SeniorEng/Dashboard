@@ -8,6 +8,56 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-26 — §45b Auto-Renewal nach IB-Löschung wiederhergestellt (Task #642)
+
+**Anlass:** `calculateAllocated45b` baute das `initialBalanceSet` aus AKTIVEN
+UND soft-gelöschten `initial_balance`-Allokationen auf. Sobald für einen
+Monat M jemals ein Startwert existierte (auch wenn er später gelöscht
+wurde) und kein aktiver Startwert mehr denselben Monat abdeckte, fiel die
+reguläre 131-€-Aufstockung für M dauerhaft aus — der Topf verlor pro
+gelöschtem IB-Monat 131 €.
+
+**Fix:** Das Skip-Set wird jetzt nur noch aus AKTIVEN Startwerten
+(`deletedAt IS NULL`) gebildet (`server/storage/budget/allocation-storage.ts`).
+Der ursprüngliche Doppelzählungsschutz aus #101 bleibt erhalten, solange ein
+Startwert aktiv ist. Soft-gelöschte Zeilen sind dadurch frei für die virtuelle
+Monatsaufstockung.
+
+**Korrektur ist virtuell — kein Schreibzugriff auf `budget_allocations`:**
+Das Auto-Renewal-Modell ist rein rechnerisch. Sobald der gepatchte Code
+deployt ist, liefert der nächste Aufruf von `calculateAllocatedCents` den
+korrigierten Wert. Es müssen KEINE neuen Allocation-Zeilen materialisiert
+werden.
+
+**Audit-Trail:** Neue Audit-Action `budget_45b_gap_corrected`
+(`shared/schema/audit.ts`). Das Skript
+`scripts/audit-45b-deleted-ib-gaps.ts` simuliert pro Kunde die
+Allocation-Schleife zweimal (pre-Fix: aktive + gelöschte IBs im Skip-Set;
+post-Fix: nur aktive IBs) und berechnet so die EXAKTE Delta-Summe in Cent
+unter Berücksichtigung des per-Kunde historisierten Monats-Anteils
+(`monthly_limit_cents`) und des `latestIbMonth+1`-Shifts (deckt damit auch
+Vor-IB-Monate ab, die der Shift mitgerissen hat). Dry-Run default; `--apply`
+schreibt pro betroffenem Kunden einen Audit-Eintrag mit Monatsliste,
+deltaCents und `gapSignature`. Wiederholte Läufe sind idempotent (Signatur-
+Abgleich gegen bestehende `budget_45b_gap_corrected`-Einträge). Hostname-
+Guard analog `audit-invoice-line-items.ts` (Prod nur mit `--allow-prod`).
+
+**Drift-Schutz:** `tests/equality/45b-deleted-ib-renewal.test.ts` deckt drei
+Szenarien ab und ist grün:
+1. delete-then-renew — gelöschter IB-Monat kehrt zur Aufstockung zurück
+2. duplicate-with-one-active — aktiver IB blockiert seinen Monat weiterhin
+3. both-deleted — beide Zeilen weg → voller Auto-Renewal-Zeitraum
+
+**Operator-Aktion nach Deploy (optional):**
+1. Dry-Run: `npx tsx scripts/audit-45b-deleted-ib-gaps.ts` — listet
+   betroffene Kunden + (max) Gap-Höhe.
+2. Audit-Log schreiben: `npx tsx scripts/audit-45b-deleted-ib-gaps.ts --apply`
+   (in Production zusätzlich `--allow-prod`).
+3. Kundenseitig: keine Aktion nötig — die UI/Buchungslogik zeigt den
+   korrigierten Topf beim nächsten Refresh.
+
+---
+
 ### Geplant — Operator-Aktion: Bestandsdrift Termin-vs-Budget einmalig korrigieren (Task #641, Folge zu #616/#619/#629)
 
 **Anlass:** Der Boot-Audit `server/startup/audit-appointment-budget-km-drift.ts`

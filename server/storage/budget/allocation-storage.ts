@@ -8,7 +8,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, isNotNull, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, clampToStatutoryMax } from "@shared/domain/budgets";
 import { formatEuroDE } from "@shared/utils/money";
@@ -306,10 +306,14 @@ export async function calculateAllocatedCents(
  *      der Zukunft sehen damit nur Allokationen bis zum aktuellen Monat.
  *
  *   3. Iteriere Monat für Monat von Start bis Ende und addiere für jeden Monat
- *      `monthlyAmount`, sofern für diesen `(year, month)` KEIN expliziter
- *      `initial_balance` existiert (`initialBalanceSet` enthält auch gelöschte
- *      Startwerte, damit ein gelöschter Startwert nicht durch monatliche
- *      Auto-Allokation rückwirkend ersetzt wird → Task #101).
+ *      `monthlyAmount`, sofern für diesen `(year, month)` KEIN **aktiver**
+ *      `initial_balance` existiert. Soft-gelöschte Startwerte blockieren das
+ *      Auto-Renewal NICHT mehr (Task #642): wo kein aktiver Startwert mehr
+ *      einen Monat besetzt, kehrt die reguläre 131-€-Aufstockung zurück.
+ *      Solange ein Startwert aktiv ist, gilt sein Monat weiterhin als belegt
+ *      — damit ein manueller Startwert nicht doppelt durch die virtuelle
+ *      Auto-Allokation ergänzt wird (ursprüngliche Schutzeigenschaft aus
+ *      Task #101 bleibt erhalten).
  *
  *   4. Addiere alle persistierten `initial_balance`-Einträge bis `ibDateLimit`.
  *
@@ -388,24 +392,15 @@ async function calculateAllocated45b(
   let allocStartYear = startDate.getFullYear();
   let allocStartMonth = startDate.getMonth() + 1;
 
-  const deletedIbEntries = await budgetAllocationsRepo.selectColumnsFrom({
-    year: budgetAllocations.year,
-    month: budgetAllocations.month,
-  }, d)
-    .where(and(
-      eq(budgetAllocations.customerId, customerId),
-      eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
-      eq(budgetAllocations.source, "initial_balance"),
-      isNotNull(budgetAllocations.deletedAt)
-    ));
-
+  // Task #642: nur AKTIVE Startwerte blockieren das Auto-Renewal. Soft-
+  // gelöschte Startwert-Monate werden nicht mehr aus dem Skip-Set
+  // eingetragen, sodass die reguläre Monatsaufstockung zurückkehrt, sobald
+  // kein aktiver Startwert mehr den Monat überdeckt. Der ursprüngliche
+  // Doppelzählungsschutz (Task #101) wirkt weiter, solange ein Startwert
+  // aktiv ist.
   const initialBalanceMonths = existingAllocations
     .filter(a => a.source === "initial_balance" && a.month != null)
     .map(a => ({ year: a.year, month: a.month! }));
-
-  const deletedIbMonths = deletedIbEntries
-    .filter(e => e.month != null)
-    .map(e => ({ year: e.year, month: e.month! }));
 
   if (initialBalanceMonths.length > 0) {
     let latestIbYear = 0, latestIbMonth = 0;
@@ -424,7 +419,7 @@ async function calculateAllocated45b(
   }
 
   const initialBalanceSet = new Set(
-    [...initialBalanceMonths, ...deletedIbMonths].map(ib => `${ib.year}-${ib.month}`)
+    initialBalanceMonths.map(ib => `${ib.year}-${ib.month}`)
   );
 
   // Task #603 — Per-Kunde konfigurierbarer §45b-Monats-Anteil ist historisiert.
