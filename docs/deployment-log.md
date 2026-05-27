@@ -8,6 +8,23 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-27 — Audit verbleibender §45b-Carryover-Duplikate (Task #604)
+
+**Anlass:** Nachfolge-Audit zu Task #601 (Backfill `server/startup/backfill-duplicate-wizard-carryovers.ts`). Der Backfill räumt doppelte §45b-Carryover-Allokationen (Wizard schreibt `year=sourceYear`, Auto schreibt `year=targetYear`, Dedup-Check vergleicht nur `year` und übersieht das Duplikat) per Soft-Delete auf — ABER er überspringt Kandidaten, an denen `budget_transactions.allocation_id` hängt, um keine bereits verbuchte Allokation zu zerstören. Diese Fälle sollen einen GoBD-konformen Storno (Counter-Allokation) statt Hard-Delete bekommen.
+
+**Lieferumfang:**
+- `scripts/audit-duplicate-wizard-carryovers.ts` — Dry-Run-Report aller lebenden §45b-Carryover-Duplikat-Gruppen, mit pro Kandidat ausgewiesener Anzahl verlinkter Transaktionen. Im `--apply`-Modus schreibt das Skript pro skipped-Kandidat eine negative `source='carryover'`-Allokation (gleiche `year`/`valid_from`/`expires_at` wie das Duplikat) + einen `budget_allocation_storno`-Audit-Eintrag (`task: "#604"`, `reason: "duplicate_carryover_wizard_vs_auto_with_linked_tx"`, `stornoOfAllocationId`, `keptAllocationId`, `stornoAllocationId`, `linkedTxCount`). Idempotent über die Storno-Markierung im Audit-Log. Nicht-verlinkte Duplikate bleiben bewusst dem Backfill überlassen.
+- Die negative Carryover-Zeile fließt sowohl in `calculateAllocated45b` (carryoverTotal, gleicher Window/year-Filter) als auch in den Summary-Pfad `getCarryoverCents` (SUM nur über `source='carryover'`) ein und neutralisiert das Duplikat in beiden Anzeigewegen exakt — damit zeigt `GET /api/budget/:customerId/overview` wieder den vom Wizard ursprünglich eingegebenen Betrag.
+
+**Production-Befund (2026-05-27, Read-Replica):**
+- 0 lebende §45b-Carryover-Duplikat-Gruppen — der #601-Backfill hat in der Production-DB **alle** Fälle erfolgreich aufgelöst (19 Soft-Deletes am 2026-05-26 17:46 UTC mit `reason='duplicate_carryover_wizard_vs_auto'`, kein einziger skipped-Eintrag im Startup-Log).
+- Verifikation: `SELECT customer_id, valid_from, expires_at, COUNT(*) FROM budget_allocations WHERE budget_type='entlastungsbetrag_45b' AND source='carryover' AND deleted_at IS NULL GROUP BY 1,2,3 HAVING COUNT(*) > 1` → 0 Zeilen.
+- Keine GoBD-Korrekturbuchungen in der aktuellen Production-Datenbank notwendig.
+
+**Operativer Einsatz:** Das Audit-Skript bleibt als Sicherheitsnetz im Repo. Re-Run-Empfehlung: nach jedem Wizard-Heavy-Onboarding-Sprint oder vor jedem größeren Publish einmal `npx tsx scripts/audit-duplicate-wizard-carryovers.ts` ausführen. Sollte das Skript künftig skipped-Kandidaten finden (z.B. weil ein Operator versehentlich einen Carryover via §45b-Buchung "berührt" hat, bevor der Backfill greifen konnte), mit `--apply --allow-prod` und einem Superadmin-PAT scharf laufen lassen.
+
+---
+
 ### 2026-05-26 — §45b Auto-Renewal nach IB-Löschung wiederhergestellt (Task #642)
 
 **Anlass:** `calculateAllocated45b` baute das `initialBalanceSet` aus AKTIVEN
