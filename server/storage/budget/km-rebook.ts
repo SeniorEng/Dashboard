@@ -34,6 +34,7 @@ import { appointments, appointmentServices, budgetTransactions, services } from 
 import { createConsumptionTransaction } from "./consumption-engine";
 import type { DbClient } from "./types";
 import { db } from "../../lib/db";
+import { appointmentsRepo } from "../../repos";
 
 export interface RebookKmParams {
   appointmentId: number;
@@ -134,14 +135,16 @@ export async function rebookAppointmentConsumption(
 
   if (existingTxs.length === 0) return empty;
 
-  const [appt] = await tx.select({
+  const [appt] = await appointmentsRepo.selectColumnsFrom({
     customerId: appointments.customerId,
     date: appointments.date,
     travelKilometers: appointments.travelKilometers,
     customerKilometers: appointments.customerKilometers,
-  })
-    .from(appointments)
-    .where(eq(appointments.id, params.appointmentId))
+  }, tx)
+    .where(and(
+      eq(appointments.id, params.appointmentId),
+      appointmentsRepo.activeOnly(),
+    ))
     .limit(1);
 
   if (!appt || appt.customerId == null) return empty;
