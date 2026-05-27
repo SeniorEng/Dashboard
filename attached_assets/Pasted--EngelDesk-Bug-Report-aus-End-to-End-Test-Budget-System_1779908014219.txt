@@ -1,0 +1,323 @@
+# EngelDesk — Bug-Report aus End-to-End-Test (Budget-System)
+
+**Datum:** 2026-05-27
+**Tester:** Claude (Browser-Automation) + Alrik Degenkolb
+**Commit/Branch:** geprüft gegen Replit-Dev-Preview vom 27.05.2026
+**Methode:** API-getriebener End-to-End-Test über `/api/admin/customers`, `/api/budget/:cid/*`, `/api/appointments/*` und `/api/budget/:cid/transactions`
+**Test-Kunden (alle Naming-Pattern `Auto_TestBudget_*`):**
+- ID 148752 — `Sz-QA-BU-A` `Auto_TestBudget_A` — PG3, Selbstzahler
+- ID 148997 — `Pg4-QA-BU-B` `Auto_TestBudget_B` — PG4, Pflegekasse_gesetzlich
+
+> **Diesen Report bitte 1:1 dem Replit-AI-Assistant geben.** Jede Bug-Karte enthält File-Pfad, vermuteten Code-Anker, Reproducer (curl-äquivalent), Erwartung vs. Ist und Hinweise auf die Audit-Doku.
+
+---
+
+## Übersicht
+
+| # | Schwere | Bereich | Kurz |
+|---|---------|---------|------|
+| BUG-1 | 🔴 KRITISCH | Budget §45a + §39/§42a | **Doppel-Allokation:** `initial_balance` + virtuelles `monthly_auto`/`yearly_auto` aus Settings werden BEIDE summiert (Faktor 2). Dedup-Logik existiert für §45b (Task #670), fehlt für §45a und §39/§42a. |
+| BUG-2 | 🔴 KRITISCH | API-Routing | `POST /api/appointments` (und weitere POST-Routes ohne expliziten Handler) liefert **Status 200 mit HTML-Body** (Vite-SPA-Fallback). Frontend-Clients, die nur HTTP-Status prüfen, würden fälschlich Erfolg melden. |
+| BUG-3 | 🔴 HOCH | Routing / Konsistenz | `GET /api/admin/customers/:id` liefert HTML statt JSON. Parallel-Route `GET /api/customers/:id` funktioniert korrekt. PATCH/POST/DELETE auf `/api/admin/customers/:id` funktionieren ebenfalls JSON-mäßig — nur GET nicht. |
+| BUG-4 | 🟡 MITTEL | Customer-Create / Wizard-vs-API | API-Direktanlage (`POST /api/admin/customers`) erstellt KEINE Budget-Topf-Einträge, auch nicht bei `billingType=pflegekasse_gesetzlich` mit Pflegegrad ≥ 2. Wizard-UI macht das vermutlich anders. |
+| BUG-5 | 🟡 MITTEL | Initial-Budget / Vollständigkeit | `POST /api/budget/:cid/initial-budget` mit `budgetType=umwandlung_45a` oder `=ersatzpflege_39_42a` antwortet 201, aber der Topf erscheint NICHT als aktiv im Overview ohne zusätzlichen `PUT /api/budget/:cid/type-settings`-Call. Inkonsistent zum Wizard-Sammel-Endpoint. |
+| BUG-6 | 🟡 MITTEL | Customer-Routing | Selbstzahler-Kunde mit konfiguriertem §45b-Topf: Verbrauch wird auf `budgetType="private"` gebucht statt auf den §45b-Topf. Frage: bewusste Entscheidung oder Bug? UX-Fall klären. |
+| BUG-7 | 🟢 NIEDRIG | Naming-Drift | API-Parameter `currentYearAmountCents` legt eine **monatsgebundene** Allokation an (`year=2026, month=5`), nicht jahresgebunden. Parameter-Name irreführend. |
+| BUG-8 | 🟢 NIEDRIG | Onboarding-Persistenz | "Willkommen bei EngelDesk!"-Tour erscheint nach jeder Browser-Navigation neu. Skip-Status wird nicht persistiert. |
+
+Plus dokumentiert aus früherem App-Audit 2026 (separater Maßstab, hier bestätigt offen):
+- **KRITISCH-1** (audit chunk 07): `createCascadeConsumption` ohne `pg_advisory_xact_lock` (Race-Surface)
+- **HOCH-2** (audit chunk 07): `clampToStatutoryMax` setzt §45a silent auf 0€ bei fehlendem PG ≥ 2
+- **HOCH-6** (audit chunk 09a): Doppelte Signatur auf Service-Record nicht blockiert
+- **HOCH-1** (audit chunk 13): kein DB-Trigger für Audit-Log-Immutability
+- **KRITISCH-2** (audit chunk 02): CSRF-Token-Fixation
+
+---
+
+## BUG-1 🔴 KRITISCH: Doppel-Allokation §45a + §39/§42a
+
+### Symptom
+Wenn pro Kunde **gleichzeitig** ein `initial_balance` (via `/initial-budget`) UND eine `customer_budget_type_settings`-Zeile mit gesetztem `monthlyLimitCents` / `yearlyLimitCents` existiert, summieren sich die Werte (Faktor 2). §45b hat eine Dedup-Logik, die genau das verhindert (`calculateAllocated45b` in `server/storage/budget/allocation-storage.ts:374`), §45a und §39/§42a haben sie NICHT.
+
+### Konkretes Beispiel (live reproduziert)
+
+Kunde B (ID 148997, PG4 Pflegekasse_gesetzlich) nach Setup:
+- §45a `initial_balance` = 74.360 Cents (für `year=2026, month=5`)
+- §45a `customer_budget_type_settings.monthlyLimitCents` = 74.360
+- **Overview-Anzeige:** `currentMonthAvailableCents = 148.720` (= 1.487,20 €) — **DOPPELT** des korrekten Wertes 743,60 €
+
+Identisch bei §39/§42a:
+- `initial_balance` 353.900 + Settings `yearlyLimitCents` 353.900
+- **Overview:** `currentYearAvailableCents = 707.800` (7.078 €) — **doppelt** 3.539 €
+
+### Erwartung
+Wie bei §45b: virtueller `monthly_auto`/`yearly_auto` muss unterdrückt werden, wenn für den gleichen Zeitraum eine `initial_balance` existiert. Andernfalls können Kunden über das gesetzliche Maximum hinaus buchen → Rückforderung durch Pflegekasse.
+
+### Code-Anker
+- `server/storage/budget/allocation-storage.ts:374` (`calculateAllocated45b`) — vorhandene Dedup-Logik für §45b
+- `server/storage/budget/summary-queries.ts` — sucht hier nach analogen Berechnungen für `umwandlung_45a` und `ersatzpflege_39_42a`; vermutlich werden `monthly_auto`/`yearly_auto` virtuell aus Settings berechnet und parallel die persistierten `initial_balance` summiert
+- `shared/domain/budgets.ts:149` (`clampToStatutoryMax`) — Safety-Net, das aber NICHT die Summe abdeckt (clampt nur einzelne Werte gegen Maxima)
+
+### Reproducer (Browser-Console, eingeloggt als Admin)
+
+```javascript
+const csrf = document.cookie.split('careconnect_csrf=')[1].split(';')[0];
+const H = {'Content-Type':'application/json','x-csrf-token':csrf};
+
+// 1. Kunde anlegen
+const customer = await fetch('/api/admin/customers', {method:'POST', credentials:'include', headers:H, body: JSON.stringify({
+  vorname:'BugRepro', nachname:'Auto_DoubleAlloc', strasse:'Test', nr:'1', plz:'10115', stadt:'Berlin',
+  geburtsdatum:'1950-01-01', pflegegrad:4, billingType:'pflegekasse_gesetzlich', telefon:'0176 11111111',
+  pflegegradSeit:'2024-01-01'
+})}).then(r=>r.json());
+const cid = customer.id;
+
+// 2. §45a initial-budget mit 743,60 €/Monat
+await fetch('/api/budget/'+cid+'/initial-budget', {method:'POST', credentials:'include', headers:H, body: JSON.stringify({
+  budgetType:'umwandlung_45a', currentYearAmountCents:74360, budgetStartDate:'2026-05-27'
+})});
+
+// 3. §45a type-settings aktivieren mit monthlyLimitCents = 74.360
+await fetch('/api/budget/'+cid+'/type-settings', {method:'PUT', credentials:'include', headers:H, body: JSON.stringify({
+  settings:[{budgetType:'umwandlung_45a', enabled:true, priority:2, monthlyLimitCents:74360}]
+})});
+
+// 4. Overview prüfen
+const ov = await fetch('/api/budget/'+cid+'/overview', {credentials:'include'}).then(r=>r.json());
+console.log('§45a currentMonthAvailable:', ov.umwandlung45a.currentMonthAvailableCents);
+// IST: 148720 (= 1487,20 €) -- DOPPELT
+// SOLL: 74360 (= 743,60 €)
+```
+
+### Hinweise
+- Mit GoBD nicht vereinbar, sobald Buchungen auf dieser Basis erstellt werden.
+- §45b hat exakt dieses Problem in der Vergangenheit gehabt — Lösung war die Dedup-Logik in `calculateAllocated45b` (Task #670). Das gleiche Pattern muss für §45a und §39/§42a übernommen werden.
+- Möglich, dass die "korrekte" Anlage immer NUR per `type-settings` (ohne separates `initial-budget`) erfolgen soll. Falls ja: API-Vertrag dokumentieren und im `initial-budget`-Endpoint einen Reject einbauen, wenn schon Settings für den Topf existieren.
+
+---
+
+## BUG-2 🔴 KRITISCH: HTTP 200 + HTML-Fallback für nicht existente POST-Endpoints
+
+### Symptom
+`POST /api/appointments` (und vermutlich weitere Routes ohne expliziten POST-Handler) liefert **Status 200 mit HTML-Body** (Vite-SPA-Bootstrap). Ein Client, der nur den HTTP-Status prüft, sieht „Erfolg", obwohl im Backend nichts passiert ist.
+
+### Beobachtung
+```javascript
+const r = await fetch('/api/appointments', {method:'POST', credentials:'include', headers:H, body: '...'});
+// status = 200
+// content-type = text/html
+// body = "<!DOCTYPE html><html lang=\"de\">..."
+```
+
+`OPTIONS /api/appointments` antwortet `Allow: GET, HEAD` — also kein POST registriert, aber der Vite-Middleware-Fallback fängt die Request ab und liefert die SPA aus.
+
+### Erwartung
+- Status 405 (Method Not Allowed) oder 404
+- JSON-Body `{ error: "METHOD_NOT_ALLOWED" }` (konsistent zu sonstigen API-Fehlern)
+- Vite-Middleware darf `/api/*` NICHT abfangen
+
+### Code-Anker
+- `server/index.ts` / `server/vite.ts` — Reihenfolge der Middleware-Registrierung prüfen. Vite-Middleware muss NACH `/api/*` registriert werden UND `/api/*` aus dem Fallback ausschließen.
+- Express-Pattern: `app.use('/api', notFoundHandler)` VOR Vite-Middleware, der für nicht gematchte `/api`-Routes JSON-404 liefert.
+
+### Reproducer
+```javascript
+const r = await fetch('/api/appointments', {method:'POST', credentials:'include', headers:H, body: '{}'});
+console.log(r.status, await r.text().then(t=>t.substring(0,50)));
+// IST: 200 "<!DOCTYPE html>"
+// SOLL: 405 {"error":"METHOD_NOT_ALLOWED",...}
+```
+
+---
+
+## BUG-3 🔴 HOCH: `GET /api/admin/customers/:id` liefert HTML statt JSON
+
+### Symptom
+- `GET /api/admin/customers/:id` → Status 200, Body HTML (Vite-Fallback)
+- `GET /api/customers/:id` → Status 200, Body JSON (korrekt)
+- `PATCH /api/admin/customers/:id` → 200, Body JSON (korrekt)
+- `DELETE /api/admin/customers/:id` → vermutlich korrekt (nicht getestet)
+
+Inkonsistenz: nur der GET-Handler im Admin-Subrouter fehlt offenbar.
+
+### Reproducer
+```javascript
+const id = 147552;
+const a = await fetch('/api/admin/customers/'+id, {credentials:'include'}).then(r=>r.text());
+const b = await fetch('/api/customers/'+id, {credentials:'include'}).then(r=>r.text());
+console.log('admin:', a.substring(0,30));  // "<!DOCTYPE html>..."
+console.log('regular:', b.substring(0,30));  // "{\"id\":147552,..."
+```
+
+### Code-Anker
+- `server/routes/admin/customers/` — vermutlich Index-Datei ohne `router.get('/:id', ...)`
+- Wenn nicht beabsichtigt: ergänzen mit gleicher Auth-/Scope-Logik wie PATCH/DELETE
+- Wenn beabsichtigt (Admin nutzt nur `/api/customers/:id`): Dokumentieren
+
+---
+
+## BUG-4 🟡 MITTEL: API-Direktanlage erstellt keine Budget-Töpfe
+
+### Symptom
+`POST /api/admin/customers` mit `billingType=pflegekasse_gesetzlich`, `pflegegrad=4`, `pflegegradSeit='2024-09-01'` legt den Kunden korrekt an, aber:
+- `GET /api/budget/:cid/overview` zeigt für ALLE drei Töpfe: `totalAllocated=0`, `isCurrentlyActive=false`
+- Keine `customer_budget_type_settings`-Zeilen
+- Keine `budget_allocations`-Zeilen
+
+Bei einem PG4-Versicherten hätte der gesetzliche Pflegekassen-Anspruch §45b (131€/Mo), §45a (PG4: 743,60€/Mo) und §39/§42a (3.539€/Jahr) automatisch aktivieren MÜSSEN.
+
+### Erwartung
+Entweder:
+- (a) API erzeugt automatisch die drei Pflegekassen-Töpfe für gesetzlich Versicherte mit Pflegegrad ≥ 1/2, oder
+- (b) API verlangt zwingend einen anschließenden `POST /api/budget/:cid/initial-budget` für jeden Topf (dann sollte das im Customer-Create-Response als Hinweis kommen)
+
+### Code-Anker
+- `server/routes/admin/customers/` — Customer-Create-Handler
+- `client/src/features/customers/hooks/use-customer-wizard.ts:464` — der Wizard ruft `POST /api/budget/:cid/initial-budget` separat auf nach Customer-Create. API-Direktnutzer wissen das nicht.
+
+---
+
+## BUG-5 🟡 MITTEL: `/initial-budget` aktiviert §45a + §39 nicht ohne separaten Settings-Call
+
+### Symptom
+```javascript
+// Diese Aufrufe geben 201 zurück, ohne Fehler
+await fetch('/api/budget/'+cid+'/initial-budget', {method:'POST', ..., body: JSON.stringify({
+  budgetType:'umwandlung_45a', currentYearAmountCents:74360, ...
+})});  // → 201
+
+// Aber das Overview zeigt §45a als inaktiv
+await fetch('/api/budget/'+cid+'/overview', ...).then(r=>r.json()).then(j=>j.umwandlung45a.isCurrentlyActive);
+// → false
+```
+
+Erst nach einem separaten `PUT /api/budget/:cid/type-settings` mit `enabled:true` wird der Topf aktiv. Aber dann tritt sofort BUG-1 (Doppel-Allokation) auf.
+
+### Erwartung
+Entweder:
+- (a) `/initial-budget` setzt automatisch auch die `type-settings.enabled=true` (Einheits-Endpoint für Wizard)
+- (b) API antwortet 409 mit Meldung "Topf muss erst per /type-settings aktiviert werden"
+
+### Code-Anker
+- `server/routes/budget.ts` — `/initial-budget` Handler (vermutlich §45b-spezifisch implementiert, andere Töpfe nur teilweise abgedeckt)
+
+---
+
+## BUG-6 🟡 MITTEL: Selbstzahler-Verbrauch ignoriert konfigurierte Töpfe
+
+### Symptom
+Kunde A (ID 148752, PG3 Selbstzahler) hat aktiven §45b-Topf (`totalAllocated=33.100`, inkl. 200€ Carryover).
+Termin dokumentiert mit Hauswirtschaft 60 Min → Verbrauch:
+```json
+{
+  "transactionType": "consumption",
+  "amountCents": -3975,
+  "appointmentId": 267512,
+  "budgetType": "private",   // <-- nicht "entlastungsbetrag_45b"!
+  "allocationId": null
+}
+```
+§45b-Topf bleibt UNVERÄNDERT bei 33.100 Cents — der konfigurierte Topf wird nicht genutzt.
+
+### Klärungsbedarf
+- (a) **Beabsichtigt:** Selbstzahler heißt „Rechnung geht an Kunde, nicht an Kasse" → Verbrauch privat. Wenn Kunde §45b nutzen will, müsste er separat bei Kasse einreichen.
+- (b) **Bug:** §45b ist auch für Selbstzahler nutzbar (jeder Pflegegrad-1+-Bürger hat Anspruch laut SGB XI § 45b). Töpfe sollten greifen.
+
+Falls (a) gilt: API sollte die Anlage von §45b-Töpfen für Selbstzahler-Kunden ablehnen oder zumindest warnen.
+
+### Reproducer
+Siehe Setup-Block in BUG-1, dann:
+```javascript
+const appt = await fetch('/api/appointments/kundentermin', {method:'POST', ..., body: JSON.stringify({
+  customerId: cid, date: '2026-05-27', scheduledStart: '14:00',
+  services: [{serviceId: 15, durationMinutes: 60}],
+  assignedEmployeeId: 1, notes: 'BugRepro'
+})}).then(r=>r.json());
+
+await fetch('/api/appointments/'+appt.id+'/document', {method:'POST', ..., body: JSON.stringify({
+  actualStart:'14:00', travelOriginType:'home', travelKilometers:0,
+  services:[{serviceId:15, actualDurationMinutes:60, details:'Test'}]
+})});
+
+const tx = await fetch('/api/budget/'+cid+'/transactions', {credentials:'include'}).then(r=>r.json());
+console.log(tx[tx.length-1].budgetType);
+// IST: "private" — auch wenn §45b aktiv
+// SOLL: "entlastungsbetrag_45b" (wenn Anspruch besteht)
+```
+
+---
+
+## BUG-7 🟢 NIEDRIG: Naming-Drift `currentYearAmountCents`
+
+`POST /api/budget/:cid/initial-budget` mit Parameter `currentYearAmountCents: 13100` legt eine Allokation an mit `year=2026, month=5` (= aktueller Monat) statt für das ganze Jahr. Parametername ist irreführend.
+
+**Empfehlung:** Umbenennen auf `currentMonthAmountCents` oder Doku ergänzen.
+
+---
+
+## BUG-8 🟢 NIEDRIG: Onboarding-Tour persistiert nicht
+
+"Willkommen bei EngelDesk!"-Dialog erscheint nach jedem Page-Reload neu, auch wenn vorher "Überspringen" geklickt wurde. Skip-Status sollte in `users.onboardingCompleted` (existiert laut `/api/auth/me`) oder LocalStorage persistiert werden.
+
+---
+
+## Vorgehensvorschlag für die Fixes
+
+**Reihenfolge nach Dringlichkeit:**
+
+1. **BUG-1** (Doppel-Allokation §45a + §39) — höchste Priorität, GoBD-Risiko
+2. **BUG-2** (HTML-Fallback für POSTs) — Routing-Hygiene, betrifft sehr viele Endpoints
+3. **BUG-6** (Selbstzahler-Topf-Routing) — Klärung Fachseite + Implementierung
+4. **BUG-3** (GET /admin/customers/:id) — schneller Routing-Fix
+5. **BUG-4 + BUG-5** (Customer-Create + initial-budget Konsistenz) — Einheits-Endpoint überlegen
+6. **BUG-7, BUG-8** — Cleanup-Tickets
+
+**Tests, die nach den Fixes grün werden sollten:**
+
+- `tests/budget/properties-display-vs-booking.test.ts` (existiert) — sollte Dedup auch für §45a/§39 prüfen
+- `tests/equality/45b-cap.test.ts` (existiert) — vergleichbare Suite für §45a und §39/§42a anlegen
+- Neuer Test: `tests/api/post-method-not-allowed.test.ts` — alle `/api/*` ohne POST-Handler liefern 405, nicht HTML
+
+---
+
+## Was NOCH NICHT getestet wurde (Folge-Sweep)
+
+Aus Zeitgründen wurde der Live-Test nach den ersten kritischen Befunden gestoppt, um diesen Report zu erstellen. Offen bleiben (siehe `EngelDesk-Budget-Testplan.md`):
+
+- **Phasen-Wechsel `monthlyLimitCents`** (BU-P10/P11/P12 — append-only Historisierung mit point-in-time Lookup)
+- **Cascade über 3 Töpfe in einem Termin** (BU-T03b/c/d)
+- **Storno einer Multi-Topf-Buchung** (reverted alle Töpfe?)
+- **Rechnungsgenerierung + ZUGFeRD-Validation** (BU-R01-R06)
+- **Carryover-Verfall am 30.06.** (BU-V01 — via Datumsmanipulation)
+- **Concurrency: parallele Buchungen** (KRITISCH-1 aus Audit verifizieren)
+
+Diese stehen für die nächste Test-Session an.
+
+---
+
+## Test-Daten-Cleanup
+
+Alle erzeugten Test-Kunden folgen dem Naming-Pattern aus `tests/README.md`:
+- `Auto_TestBudget_A` (ID 148752) — `cleanup-test-data.ts` erkennt es automatisch
+- `Auto_TestBudget_B` (ID 148997) — dito
+- Test-Termin 267512 (storniert, Reversal-Buchung vorhanden — GoBD-konform erhalten)
+
+Cleanup-Befehl:
+```bash
+npx tsx server/scripts/cleanup-test-data.ts --apply --scope=customers
+```
+
+---
+
+## Anhang: Quellen-Mapping
+
+| Bug | Vermutlicher Code | Relevante Doku |
+|-----|-------------------|----------------|
+| BUG-1 | `server/storage/budget/summary-queries.ts`, `allocation-storage.ts:374` | `concept-budget-initialization.md` § 9 (Migration historischer Doppel-Startwerte), `replit.md` Task #670 |
+| BUG-2 | `server/index.ts`, `server/vite.ts` | — |
+| BUG-3 | `server/routes/admin/customers/` index | — |
+| BUG-4 | `server/routes/admin/customers/` create handler | `concept-budget-initialization.md` § 3.4 (Wizard-UI) |
+| BUG-5 | `server/routes/budget.ts:608+` (/allocations), `:549+` (/type-settings) | `replit.md` Architektur-Entscheidungen Budgeting System |
+| BUG-6 | `server/storage/budget/consumption-engine.ts`, `appointment-cost-calculator.ts` | `replit.md` "Selbstzahler" (sucht keinen expliziten Eintrag, fachliche Klärung nötig) |
+| BUG-7 | `server/routes/budget.ts` (/initial-budget) | — |
+| BUG-8 | `client/src/components/onboarding-dialog.tsx`, `shared/schema/users.ts` (onboardingCompleted) | — |
