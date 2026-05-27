@@ -211,6 +211,21 @@ export interface InvoiceRenderSnapshot {
     plz: string | null;
     stadt: string | null;
   };
+  /**
+   * Task #654 — Invoice-Datum-Snapshot. `buildPdfData` löst `invoiceDate`
+   * aus `invoice.sentAt ?? todayISO()` auf — d.h. eine zum Persistierzeitpunkt
+   * noch nicht versendete Rechnung würde bei jedem späteren Re-Render mit
+   * dem dann aktuellen `todayISO()` (bzw. mit dem inzwischen gesetzten
+   * `sentAt`) gerendert, und das ZUGFeRD-XML driftet byte-weise gegen das
+   * persistierte Original. Wir frieren das damals tatsächlich verwendete
+   * Anzeige-Datum (im de-DE-Format `DD.MM.YYYY`) sowie das Fälligkeitsdatum
+   * ein und lassen das Re-Render dieselben Werte verwenden. Optional, damit
+   * Bestände vor #654 keinen Migrations-Backfill brauchen.
+   */
+  invoice?: {
+    invoiceDate: string;
+    invoiceDueDate: string | null;
+  };
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

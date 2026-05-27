@@ -1891,9 +1891,24 @@ async function buildInvoicePdfData(
   isCustomerInvoice: boolean;
   isPflegekasseInvoice: boolean;
   customerSnapshot: InvoiceRenderSnapshot["customer"];
+  invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]>;
 }> {
   const lineItems = await storage.getInvoiceLineItems(invoice.id);
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
+
+  // Task #654 — Wenn ein Snapshot vorliegt, override das `invoiceDate`
+  // (und `invoiceDueDate`) mit den damals tatsächlich verwendeten Werten.
+  // Andernfalls produziert das Re-Render byte-anderes ZUGFeRD-XML, sobald
+  // `invoice.sentAt` zwischen Erst-Persist und Re-Render gesetzt wird oder
+  // sich `todayISO()` zwischen den beiden Renders ändert.
+  if (options?.snapshot?.invoice) {
+    pdfData.invoiceDate = options.snapshot.invoice.invoiceDate;
+    pdfData.invoiceDueDate = options.snapshot.invoice.invoiceDueDate;
+  }
+  const invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]> = {
+    invoiceDate: pdfData.invoiceDate,
+    invoiceDueDate: pdfData.invoiceDueDate ?? null,
+  };
 
   // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
   // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
@@ -1949,15 +1964,15 @@ async function buildInvoicePdfData(
     pdfData.recipientName = fullName;
     pdfData.recipientAddress = addr || pdfData.recipientAddress;
   }
-  return { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot };
+  return { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot, invoiceSnapshot };
 }
 
 export async function buildInvoicePdfBytes(
   invoice: Invoice,
   companySettings: CompanySettings,
   options?: { snapshot?: InvoiceRenderSnapshot | null },
-): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"] }> {
-  const { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot } = await buildInvoicePdfData(invoice, companySettings, options);
+): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"]; invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]> }> {
+  const { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot, invoiceSnapshot } = await buildInvoicePdfData(invoice, companySettings, options);
 
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
   const { embedZugferdXml } = await import("../lib/zugferd");
@@ -1997,9 +2012,9 @@ export async function buildInvoicePdfBytes(
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
       lp2.forEach((p) => merged.addPage(p));
     }
-    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot };
+    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot };
   }
-  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot };
+  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot };
 }
 
 // Task #521: LN-only Render — wird verwendet, wenn das Rechnungs-PDF bereits
@@ -2116,7 +2131,7 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
 
   if (needsInvoicePdf) {
     // Voll-Build (Erstanlage): Invoice + XML + optional LN.
-    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot } =
+    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot } =
       await buildInvoicePdfBytes(invoice, companySettings);
     const pdfHash = computeDataHash(pdfBytes as unknown as string);
     const fileName = `invoices/${safeNumber}.pdf`;
@@ -2138,6 +2153,12 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
       updateData.renderSnapshot = {
         companySettings: sanitizeCompanySettingsForSnapshot(companySettings),
         customer: customerSnapshot,
+        // Task #654: friert das Anzeige-Datum (de-DE) und das Fälligkeits-
+        // datum ein, das beim Erst-Persist tatsächlich in `buildPdfData`
+        // einging — sonst driftet `invoiceDate` beim Re-Render gegen das
+        // bereits in `zugferd_xml` versiegelte XML, sobald `sentAt`
+        // nachträglich gesetzt wird oder sich `todayISO()` ändert.
+        invoice: invoiceSnapshot,
       };
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {
