@@ -368,6 +368,18 @@ async function runStartupTasks() {
       log(`Carryover-Doppelallokation-Backfill (#684) fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #685: vom #684-Backfill übersprungene Doppel-Carryovers, an
+    // denen bereits Buchungen hängen, gezielt auflösen — Buchungen werden
+    // auf die Keep-Zeile umgehängt und die Dupe-Zeile danach soft-gelöscht.
+    const { backfillTask685RelinkOrphanCarryoverTx } = await import(
+      "./startup/backfill-task-685-relink-orphan-carryover-tx"
+    );
+    try {
+      await backfillTask685RelinkOrphanCarryoverTx();
+    } catch (err) {
+      log(`Carryover-Tx-Relink-Backfill (#685) fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #576: Idempotente Korrektur — durch den entfernten Storno-
     // Side-Effekt fälschlich soft-gelöschte Leistungsnachweise reaktivieren
     // (Prod-IDs 8 und 48, 22.05.2026). Greift nur, solange die Ziel-IDs

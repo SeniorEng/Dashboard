@@ -8,6 +8,26 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-27 — §45b-Carryover-Doppel-Allokationen mit verlinkten Buchungen auflösen (Task #685)
+
+**Anlass:** Der mit Task #684 eingeführte Startup-Backfill `backfillTask684OrphanAutoCarryovers` soft-löscht doppelte §45b-Carryover-Allokationen (gleiches Quelljahr, NULL-month umgeht den partiellen Unique-Index), überspringt aber aus GoBD-Gründen Kandidaten, an denen bereits `budget_transactions` hängen — solche Fälle blieben aktiv und im Startup-Log mit „überspringe Soft-Delete, manuelle Auflösung nötig" markiert. Produktions-Read-Replica zeigte 5 betroffene Gruppen (Kunden 161, 162, 163, 164, 167; je Quelljahr 2025), davon 3 mit verlinkten Buchungen (Kunden 161, 163, 167 — insgesamt 12 Buchungen inkl. Storno-Paare).
+
+**Lieferumfang:**
+- Neuer idempotenter Startup-Backfill `server/startup/backfill-task-685-relink-orphan-carryover-tx.ts`, eingehängt direkt nach `backfillTask684OrphanAutoCarryovers` in `server/index.ts`. Sortierlogik identisch zu #684 (User-erstellt → höherer Betrag → kleinere ID), wodurch die zu behaltende Zeile garantiert mit der vom #684-Lauf ausgewählten übereinstimmt.
+- Pro Dupe-Allokation mit verlinkten Tx: erst Safety-Check, dass **alle** Tx-Daten im Gültigkeitsfenster der Keep-Zeile liegen (`keep.validFrom ≤ tx.transactionDate ≤ keep.expiresAt`); bei auch nur einer Außerhalb-Buchung wird der Fall ausgelassen und manuell geflaggt. Im Erfolgsfall: `UPDATE budget_transactions SET allocation_id = keep.id` für alle betroffenen Buchungen + pro Tx ein `budget_transaction_corrected`-Audit (`reason: "task_685_relinked_carryover_tx"`, mit `previousAllocationId`/`newAllocationId`), anschließend Soft-Delete der Dupe-Zeile mit `budget_allocation_soft_deleted`-Audit, das die komplette `relinkedTransactionIds`-Liste enthält.
+- Vollständig idempotent: nach einmaligem Lauf ist die Dupe-Zeile soft-gelöscht und taucht in der Gruppen-Suche nicht mehr auf.
+
+**Erwarteter Production-Effekt beim nächsten Deploy:**
+- Kunde 161: 3 Buchungen (IDs 569, 594, 671, Datumsfenster 2026-04-24…2026-05-22) werden von Allokation 639 → 637 umgehängt; 639 wird soft-gelöscht.
+- Kunde 163: 7 Buchungen (IDs 436, 563, 582, 583, 591, 592, 593, Datumsfenster 2026-04-08…2026-05-11) werden von 675 → 673 umgehängt; 675 wird soft-gelöscht. Storno-Paare (582↔592, 583↔593) bleiben durch das gemeinsame Umhängen konsistent.
+- Kunde 167: 2 Buchungen (IDs 525, 622, Datumsfenster 2026-05-04…2026-05-18) werden von 691 → 689 umgehängt; 691 wird soft-gelöscht.
+- Alle Tx-Daten liegen im Keep-Fenster (Keep `expiresAt = 2026-06-30`, alle Tx ≤ 2026-05-22) — keine Manuell-Flags erwartet.
+- Kunden 162 und 164 haben ebenfalls Doppel-Carryovers, aber ohne verlinkte Buchungen — diese werden vom #684-Backfill abgedeckt und nicht doppelt verarbeitet.
+
+**Risiko:** Niedrig. Keine Schema-Änderung. Mutationen sind soft + per Audit-Log vollständig nachvollziehbar; Safety-Window-Check verhindert Umhängen auf eine bereits abgelaufene Allokation; Reihenfolge nach `backfillTask684OrphanAutoCarryovers` garantiert konsistente Keep-Wahl.
+
+---
+
 ### 2026-05-27 — Import-Reconcile-Schritt im Termin-Import-Wizard (Task #669)
 
 **Anlass:** Beim wiederkehrenden Excel-Import fehlte ein optionaler Schritt, der Excel-Daten als Single Source of Truth für einen gewählten Kunden/Zeitraum behandelt: DB-Termine, die NICHT in der Excel stehen, blieben bisher unerkannt stehen (operative Doppel-Pflege, Drift zu Buchhaltung).
