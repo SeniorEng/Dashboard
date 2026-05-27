@@ -136,6 +136,16 @@ export default function EditAppointment() {
   const initialTimeRef = useRef<string | null>(null);
   const initialDurationRef = useRef<number | null>(null);
   const initialBaselineAppointmentIdRef = useRef<number | null>(null);
+  // Guard, der die initiale Befüllung von date/time/notes/employee/customer
+  // genau einmal pro Termin-ID erlaubt. Ohne diesen Guard würde der
+  // useEffect bei jedem Eintreffen einer Sekundär-Query
+  // (appointmentServiceEntries, catalogServices) die Formularfelder erneut
+  // aus dem Server-Stand setzen und damit gerade vorgenommene Nutzer-
+  // Änderungen überschreiben (Task #632: Zeit-Fill kurz vor dem Eintreffen
+  // der Services-Antwort wurde auf den alten Wert zurückgesetzt → PATCH
+  // ohne `scheduledStart`).
+  const formInitializedRef = useRef<number | null>(null);
+  const servicesInitializedRef = useRef<number | null>(null);
 
   const handlePickupTimeCalculated = useCallback((
     pickupTime: string,
@@ -157,23 +167,41 @@ export default function EditAppointment() {
         initialBaselineAppointmentIdRef.current = appointment.id;
         initialTimeRef.current = null;
         initialDurationRef.current = null;
+        formInitializedRef.current = null;
+        servicesInitializedRef.current = null;
+        fahrtdienstInitializedRef.current = false;
       }
-      setDate(appointment.date);
-      const initialTime = appointment.scheduledStart.slice(0, 5);
-      setTime(initialTime);
-      setNotes(appointment.notes || "");
-      if (initialTimeRef.current === null) {
-        initialTimeRef.current = initialTime;
+
+      const needsFormInit = formInitializedRef.current !== appointment.id;
+      if (needsFormInit) {
+        formInitializedRef.current = appointment.id;
+        setDate(appointment.date);
+        const initialTime = appointment.scheduledStart.slice(0, 5);
+        setTime(initialTime);
+        setNotes(appointment.notes || "");
+        if (initialTimeRef.current === null) {
+          initialTimeRef.current = initialTime;
+        }
       }
 
       if (appointment.appointmentType === "Kundentermin") {
-        if (appointmentServiceEntries.length > 0) {
-          setServices(appointmentServiceEntries.map(e => ({
-            serviceId: e.serviceId,
-            durationMinutes: e.plannedDurationMinutes,
-          })));
+        // Services-Initialisierung wartet auf das erfolgreiche Laden der
+        // Services-Query und passiert dann genau einmal pro Termin-ID —
+        // ein späterer Refetch darf eine in der Zwischenzeit vom Nutzer
+        // geänderte Service-Auswahl nicht überschreiben.
+        if (
+          appointmentServicesLoaded &&
+          servicesInitializedRef.current !== appointment.id
+        ) {
+          servicesInitializedRef.current = appointment.id;
+          if (appointmentServiceEntries.length > 0) {
+            setServices(appointmentServiceEntries.map(e => ({
+              serviceId: e.serviceId,
+              durationMinutes: e.plannedDurationMinutes,
+            })));
+          }
         }
-        if (appointment.assignedEmployeeId) {
+        if (needsFormInit && appointment.assignedEmployeeId) {
           setKtAssignedEmployeeId(appointment.assignedEmployeeId.toString());
         }
         if (!fahrtdienstInitializedRef.current && appointmentServicesLoaded) {
@@ -203,7 +231,7 @@ export default function EditAppointment() {
             }
           }
         }
-      } else {
+      } else if (needsFormInit) {
         if (appointment.scheduledEnd) {
           const start = appointment.scheduledStart.slice(0, 5);
           const end = appointment.scheduledEnd.slice(0, 5);
