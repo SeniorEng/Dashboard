@@ -14,6 +14,8 @@ import { notificationService } from "../services/notification-service";
 import { todayISO, addMinutesToTimeHHMMSS, isWeekend, parseLocalDate } from "@shared/utils/datetime";
 import { appointmentService } from "../services/appointments";
 import { db } from "../lib/db";
+import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
+import { auditService } from "../services/audit";
 import {
   canCreateAppointment as policyCanCreateAppointment,
   canEditAppointment as policyCanEditAppointment,
@@ -475,7 +477,52 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
 
       updateData.isSeriesException = true;
     }
-    await storage.updateAppointment(appointmentId, updateData);
+
+    // Task #630: budget-relevante Felder lösen Auto-Rebook + Audit aus,
+    // analog Haupt-PATCH-Route (siehe server/routes/appointments.ts).
+    const dateChanged = updateFields.date !== undefined && updateFields.date !== appointment.date;
+    const shouldRebook = dateChanged;
+    const rebookTrigger = dateChanged ? "date_change" : "unknown";
+
+    const rebookHolder: { value: RebookKmResult | null } = { value: null };
+    const updatedAppt = await db.transaction(async (tx) => {
+      const result = await storage.updateAppointment(appointmentId, updateData, tx);
+      if (shouldRebook && result && result.customerId) {
+        rebookHolder.value = await rebookAppointmentConsumption({
+          appointmentId,
+          userId: user.id,
+        }, tx);
+      }
+      return result;
+    });
+
+    const rebookInfo = rebookHolder.value;
+    if (rebookInfo && rebookInfo.rebooked && updatedAppt && updatedAppt.customerId != null) {
+      const ip = req.ip || req.socket.remoteAddress;
+      await auditService.log(
+        user.id,
+        "appointment_km_rebooked",
+        "appointment",
+        appointmentId,
+        {
+          customerId: updatedAppt.customerId,
+          trigger: rebookTrigger,
+          previousTransactionDate: rebookInfo.previousTransactionDate,
+          transactionDate: rebookInfo.transactionDate,
+          previousTravelKm: rebookInfo.previousTravelKm,
+          newTravelKm: updatedAppt.travelKilometers ?? 0,
+          previousCustomerKm: rebookInfo.previousCustomerKm,
+          newCustomerKm: updatedAppt.customerKilometers ?? 0,
+          previousHauswirtschaftMinutes: rebookInfo.previousHauswirtschaftMinutes,
+          previousAlltagsbegleitungMinutes: rebookInfo.previousAlltagsbegleitungMinutes,
+          reversedTransactionIds: rebookInfo.reversedTransactionIds,
+          hauswirtschaftMinutes: rebookInfo.hauswirtschaftMinutes,
+          alltagsbegleitungMinutes: rebookInfo.alltagsbegleitungMinutes,
+        },
+        ip,
+      );
+    }
+
     return res.json({ updated: 1 });
   }
 
@@ -531,7 +578,57 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
     eligibleIds.push(apt.id);
   }
 
-  const count = await seriesStorage.bulkUpdateSeriesAppointments(eligibleIds, updateData);
+  // Task #630: bulk-Edit muss denselben Auto-Rebook + Audit-Trail auslösen
+  // wie die Haupt-PATCH-Route. Aktuell sind im Bulk-Pfad nur scheduledStart
+  // und assignedEmployeeId änderbar (Datum ist oben blockiert); diese Felder
+  // verändern das Budget nicht und der Rebook ist für sie ein No-Op. Wir
+  // wiren den Pfad trotzdem in einer Transaktion, damit zukünftig erweiterte
+  // Bulk-Felder (z.B. Datum) automatisch korrekt gebucht werden.
+  const rebookResults = new Map<number, RebookKmResult>();
+  const updatedRows = await db.transaction(async (tx) => {
+    const _count = await seriesStorage.bulkUpdateSeriesAppointments(eligibleIds, updateData, tx);
+    void _count;
+    const rows = await Promise.all(
+      eligibleIds.map(id => storage.getAppointment(id)),
+    );
+    for (const apt of rows) {
+      if (!apt || apt.customerId == null) continue;
+      const r = await rebookAppointmentConsumption({ appointmentId: apt.id, userId: user.id }, tx);
+      if (r.rebooked) rebookResults.set(apt.id, r);
+    }
+    return rows;
+  });
+
+  const ip = req.ip || req.socket.remoteAddress;
+  for (const apt of updatedRows) {
+    if (!apt || apt.customerId == null) continue;
+    const r = rebookResults.get(apt.id);
+    if (!r || !r.rebooked) continue;
+    const trigger = r.previousTransactionDate !== r.transactionDate ? "date_change" : "unknown";
+    await auditService.log(
+      user.id,
+      "appointment_km_rebooked",
+      "appointment",
+      apt.id,
+      {
+        customerId: apt.customerId,
+        trigger,
+        previousTransactionDate: r.previousTransactionDate,
+        transactionDate: r.transactionDate,
+        previousTravelKm: r.previousTravelKm,
+        newTravelKm: apt.travelKilometers ?? 0,
+        previousCustomerKm: r.previousCustomerKm,
+        newCustomerKm: apt.customerKilometers ?? 0,
+        previousHauswirtschaftMinutes: r.previousHauswirtschaftMinutes,
+        previousAlltagsbegleitungMinutes: r.previousAlltagsbegleitungMinutes,
+        reversedTransactionIds: r.reversedTransactionIds,
+        hauswirtschaftMinutes: r.hauswirtschaftMinutes,
+        alltagsbegleitungMinutes: r.alltagsbegleitungMinutes,
+      },
+      ip,
+    );
+  }
+  const count = eligibleIds.length;
 
   const seriesRuleUpdate: Record<string, unknown> = {};
   if (updateFields.scheduledStart !== undefined) seriesRuleUpdate.scheduledStart = updateFields.scheduledStart;
