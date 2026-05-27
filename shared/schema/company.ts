@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, boolean, real, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, boolean, numeric, index } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp, optionalGermanPhoneSchema, optionalInternationalPhoneSchema } from "./common";
 import { encryptedText } from "./encrypted-columns";
@@ -64,8 +64,8 @@ export const companySettings = pgTable("company_settings", {
   leadAutoReplyBody: text("lead_auto_reply_body"),
   leadAutoReplyAttachmentPath: text("lead_auto_reply_attachment_path"),
   leadAutoReplyAttachmentName: text("lead_auto_reply_attachment_name"),
-  latitude: real("latitude"),
-  longitude: real("longitude"),
+  latitude: numeric("latitude", { precision: 9, scale: 6, mode: "number" }),
+  longitude: numeric("longitude", { precision: 9, scale: 6, mode: "number" }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedByUserId: integer("updated_by_user_id").references(() => users.id),
 });

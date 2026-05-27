@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, time, date, boolean, index, real, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, time, date, boolean, index, numeric, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { isNull } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -109,10 +109,10 @@ export const appointments = pgTable("appointments", {
   // Travel documentation
   travelOriginType: text("travel_origin_type"), // "home" | "appointment"
   travelFromAppointmentId: integer("travel_from_appointment_id").references((): AnyPgColumn => appointments.id),
-  travelKilometers: real("travel_kilometers"),
+  travelKilometers: numeric("travel_kilometers", { precision: 10, scale: 3, mode: "number" }),
   travelMinutes: integer("travel_minutes"),
   // Customer kilometers (for Alltagsbegleitung - trips with/for customer)
-  customerKilometers: real("customer_kilometers"),
+  customerKilometers: numeric("customer_kilometers", { precision: 10, scale: 3, mode: "number" }),
   notes: text("notes"),
   signatureData: text("signature_data"),
   signatureHash: text("signature_hash"),
@@ -125,8 +125,8 @@ export const appointments = pgTable("appointments", {
   doctorNr: text("doctor_nr"),
   doctorPlz: text("doctor_plz"),
   doctorStadt: text("doctor_stadt"),
-  doctorLatitude: real("doctor_latitude"),
-  doctorLongitude: real("doctor_longitude"),
+  doctorLatitude: numeric("doctor_latitude", { precision: 9, scale: 6, mode: "number" }),
+  doctorLongitude: numeric("doctor_longitude", { precision: 9, scale: 6, mode: "number" }),
   estimatedTravelMinutes: integer("estimated_travel_minutes"),
   travelBufferMinutes: integer("travel_buffer_minutes"),
   seriesId: integer("series_id").references(() => appointmentSeries.id, { onDelete: "set null" }),
@@ -140,7 +140,7 @@ export const appointments = pgTable("appointments", {
   noShowReason: text("no_show_reason"), // nicht_angetroffen | kurzfristig_abgesagt | krankenhaus | sonstiges
   noShowReasonText: text("no_show_reason_text"),
   noShowWaitMinutes: integer("no_show_wait_minutes"),
-  noShowKilometers: real("no_show_kilometers"),
+  noShowKilometers: numeric("no_show_kilometers", { precision: 10, scale: 3, mode: "number" }),
   noShowNotes: text("no_show_notes"),
   // Wenn true: keine Privatrechnung ("Vergebliche Anfahrt") erzeugen.
   // suppressionReason ist dann Pflicht und wird im Audit-Log protokolliert.

@@ -256,6 +256,16 @@ async function runStartupTasks() {
       log(`Invoice-Line-Item-Quantity-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #678: KM-/Geo-Spalten von `real` (float) auf präzises `numeric`
+    // migrieren. Muss NACH `ensureInvoiceLineItemQuantityColumns` laufen,
+    // weil dort u.a. `quantity_raw` als `real` angelegt wird (Bestand).
+    const { migrateKmGeoToNumeric } = await import("./startup/migrate-km-geo-to-numeric");
+    try {
+      await migrateKmGeoToNumeric();
+    } catch (err) {
+      log(`KM/Geo-Numeric-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #593: Render-Snapshot-Spalte (companySettings + Kunden-Snapshot) für
     // deterministische Integrity-Verifier-Re-Renders sicherstellen.
     const { ensureInvoiceRenderSnapshotColumn } = await import("./startup/ensure-invoice-render-snapshot");

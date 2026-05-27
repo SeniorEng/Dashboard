@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, date, boolean, real, index, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, boolean, numeric, index, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { timestamp, germanPhoneTransformSchema, optionalGermanPhoneSchema, internationalPhoneTransformSchema, internationalEmailSchema } from "./common";
@@ -63,8 +63,8 @@ export const customers = pgTable("customers", {
   deletedAt: timestamp("deleted_at"),
   isAnonymized: boolean("is_anonymized").notNull().default(false),
   anonymizedAt: timestamp("anonymized_at"),
-  latitude: real("latitude"),
-  longitude: real("longitude"),
+  latitude: numeric("latitude", { precision: 9, scale: 6, mode: "number" }),
+  longitude: numeric("longitude", { precision: 9, scale: 6, mode: "number" }),
   // Setup-Folgeschritte aus dem Wizard (Task #376). Werden gesetzt, wenn
   // ein optionaler Folgeschritt nach erfolgreicher Customer-Anlage
   // fehlschlägt. Banner auf der Kundenseite bietet "Erneut versuchen".
