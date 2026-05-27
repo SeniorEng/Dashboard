@@ -1399,6 +1399,77 @@ router.get("/:id/route-calculation", asyncHandler("Fehler bei der Routenberechnu
   res.json({ suggestedKilometers, suggestedMinutes });
 }));
 
+/**
+ * Besuch starten — setzt `actualStart`, lässt den Status auf `scheduled`.
+ * Die State-Machine kennt seit #650 keinen Zwischen-Status `in-progress`
+ * mehr; stattdessen markiert das Vorhandensein von `actualStart` einen
+ * gestarteten Termin (`PolicyAppointment.isStarted`). Damit bleiben
+ * Berechtigungen (Teamleiter-Delete-Sperre) und Folge-Validierungen
+ * (Scheduling-Felder eingefroren, sobald gestartet) stabil.
+ */
+router.post("/:id/start", asyncHandler("Fehler beim Starten des Besuchs", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const appointment = await storage.getAppointment(id);
+  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
+
+  const flags = await loadPolicyFlags(id, appointment);
+  const policyAppt = toPolicyAppointment(appointment, flags);
+  const decision = policyCanDocument(toPolicyUser(req.user!), policyAppt);
+  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
+
+  if (appointment.status !== "scheduled") {
+    return sendForbidden(res, "INVALID_STATUS", "Nur geplante Termine können gestartet werden.");
+  }
+  if (appointment.actualStart) {
+    return sendForbidden(res, "INVALID_STATUS", "Der Termin wurde bereits gestartet.");
+  }
+
+  const updatedAppointment = await storage.updateAppointment(id, {
+    actualStart: currentTimeHHMMSS(),
+  });
+
+  res.json(updatedAppointment);
+}));
+
+/**
+ * Besuch beenden — Übergang `scheduled` (mit `actualStart`) → `documenting`.
+ * Voraussetzung: `actualStart` ist gesetzt (vorheriger `/start`-Aufruf).
+ * Ohne `actualStart` ist `/end` nicht erlaubt (verhindert das versehentliche
+ * Direkt-Beenden eines geplanten Termins ohne dokumentierten Startzeitpunkt).
+ */
+router.post("/:id/end", asyncHandler("Fehler beim Beenden des Besuchs", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const appointment = await storage.getAppointment(id);
+  if (!appointment) return sendNotFound(res, ErrorMessages.appointmentNotFound);
+
+  const flags = await loadPolicyFlags(id, appointment);
+  const policyAppt = toPolicyAppointment(appointment, flags);
+  const decision = policyCanDocument(toPolicyUser(req.user!), policyAppt);
+  if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
+
+  if (appointment.status !== "scheduled" || !appointment.actualStart) {
+    return sendForbidden(res, "INVALID_STATUS", "Der Termin kann nur nach dem Start beendet werden.");
+  }
+
+  const updatedAppointment = await storage.updateAppointment(id, {
+    status: "documenting",
+    actualEnd: currentTimeHHMMSS(),
+  });
+
+  if (appointment.date) {
+    const employeeId = appointment.assignedEmployeeId || appointment.performedByEmployeeId;
+    if (employeeId) {
+      checkAndRecalcDailyAutoBreak(employeeId, appointment.date);
+    }
+  }
+
+  res.json(updatedAppointment);
+}));
+
 router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;

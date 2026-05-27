@@ -372,6 +372,27 @@ class AppointmentService {
     return { valid: true };
   }
 
+  validateSchedulingChanges(
+    currentStatus: string,
+    updates: UpdateAppointment,
+  ): ValidationResult {
+    const hasSchedulingChanges =
+      updates.date !== undefined ||
+      updates.scheduledStart !== undefined ||
+      updates.scheduledEnd !== undefined ||
+      updates.durationPromised !== undefined;
+
+    if (hasSchedulingChanges && currentStatus !== "scheduled") {
+      return {
+        valid: false,
+        error: "Bearbeitung nicht möglich",
+        message: "Zeit und Datum können nur bei geplanten Terminen geändert werden. Dieser Termin wurde bereits gestartet.",
+      };
+    }
+
+    return { valid: true };
+  }
+
   validateNotesChange(currentStatus: string, updates: UpdateAppointment): ValidationResult {
     if (updates.notes !== undefined) {
       if (!canEditNotes(currentStatus as AppointmentStatus)) {
@@ -409,6 +430,7 @@ class AppointmentService {
 
     const checks = [
       () => this.validateStatusTransition(currentStatus, updates.status, updates),
+      () => this.validateSchedulingChanges(currentStatus, updates),
       () => this.validateNotesChange(currentStatus, updates),
       () => this.validateDocumentationChanges(currentStatus, updates),
     ];
