@@ -1,15 +1,11 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateRelated } from "@/lib/query-invalidation";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { iconSize, componentStyles } from "@/design-system";
-import { formatVacationDays } from "@/lib/utils";
-import { WorkloadBarTooltip, WorkloadInfoTooltip } from "@/features/team/components/workload-info-tooltip";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +20,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Layout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
@@ -33,43 +28,20 @@ import {
   ArrowLeft,
   Plus,
   Loader2,
-  UserCheck,
-  UserX,
-  Pencil,
-  Key,
-  Trash2,
   Search,
-  ShieldOff,
-  Mail,
-  Shield,
-  Save,
-  ArrowRightLeft,
-  Users,
-  Calendar,
   AlertTriangle,
-  Palmtree,
-  Info,
-  MoreHorizontal,
   ArrowDownUp,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { api, unwrapResult } from "@/lib/api/client";
 import {
   UserData,
   UserFormData,
   ROLE_LABELS,
   AVAILABLE_ROLES,
-  formatPhoneForDisplay,
 } from "@/features/team/components/user-types";
-import { useEmployeeWorkload } from "@/features/customers/hooks/use-employee-workload";
+import { useEmployeeWorkload, type EmployeeWorkloadResponse } from "@/features/customers/hooks/use-employee-workload";
 import { useAllVacationSummaries } from "@/features/time-tracking/hooks/use-vacation-summaries";
+import { UserCard, type VacationSummary } from "@/features/team/components/user-card";
 import { UserForm } from "@/features/team/components/user-form";
 import { EmployeeDocumentsSection } from "@/features/team/components/employee-documents-section";
 import { EmployeeServiceRates } from "@/features/team/components/employee-service-rates";
@@ -431,249 +403,19 @@ export default function AdminUsers() {
               Keine Mitarbeiter gefunden
             </div>
           ) : (
-            <div className="flex flex-col gap-3">
-              {filteredUsers.map((user) => {
-                const m = userMetrics.get(user.id);
-                const roleTag = user.isAdmin
-                  ? { label: "ADMIN", cls: "text-teal-700" }
-                  : user.isTeamLead
-                  ? { label: "TEAMLEITUNG", cls: "text-indigo-700" }
-                  : { label: "MITARBEITER", cls: "text-gray-500" };
-                const visibleRoles = user.roles.slice(0, 2);
-                const moreRoles = user.roles.length - visibleRoles.length;
-                const barWidth = m?.auslastungPct != null ? Math.min(m.auslastungPct, 150) / 1.5 : 0;
-                const barColor =
-                  m?.auslastungPct == null
-                    ? "bg-gray-300"
-                    : m.auslastungPct > 100
-                    ? "bg-red-500"
-                    : m.auslastungPct >= 85
-                    ? "bg-amber-500"
-                    : "bg-emerald-500";
-                const pctColor =
-                  m?.auslastungPct == null
-                    ? "text-gray-400"
-                    : m.auslastungPct > 100
-                    ? "text-red-600"
-                    : m.auslastungPct >= 85
-                    ? "text-amber-600"
-                    : "text-emerald-600";
-
-                return (
-                  <Card
-                    key={user.id}
-                    data-testid={`card-user-${user.id}`}
-                    className={`rounded-2xl border-gray-200 ${user.isAnonymized ? "opacity-60" : !user.isActive ? "opacity-80" : ""}`}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-3 mb-2">
-                        <div className="min-w-0 flex-1">
-                          <div className={`text-base font-bold leading-tight ${user.isAnonymized ? "text-gray-500 italic" : "text-gray-900"}`}>
-                            {user.displayName}
-                          </div>
-                          {!user.isAnonymized && (
-                            <div className="mt-0.5 flex items-center gap-2 text-xs">
-                              <span className={`font-semibold tracking-wide ${roleTag.cls}`}>{roleTag.label}</span>
-                              <span className="text-gray-400">·</span>
-                              {user.telefon ? (
-                                <a href={`tel:${user.telefon}`} className="text-gray-600 hover:text-primary">
-                                  {formatPhoneForDisplay(user.telefon)}
-                                </a>
-                              ) : (
-                                <span className="text-gray-400">–</span>
-                              )}
-                              {!user.isActive && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-semibold uppercase tracking-wide">
-                                  Inaktiv
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {user.isAnonymized && (
-                            <div className="mt-0.5 text-xs">
-                              <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 text-[10px] font-semibold uppercase tracking-wide">
-                                Anonymisiert
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {!user.isAnonymized && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-full border border-gray-200 text-gray-500 shrink-0"
-                                data-testid={`button-actions-${user.id}`}
-                                aria-label="Aktionen"
-                              >
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56">
-                              <DropdownMenuLabel>Aktionen</DropdownMenuLabel>
-                              <DropdownMenuItem
-                                onClick={() => setEditingUserId(user.id)}
-                                data-testid={`button-edit-user-${user.id}`}
-                              >
-                                <Pencil className="h-4 w-4 mr-2 text-gray-600" />
-                                Bearbeiten
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => setResetPasswordUser(user)}
-                                data-testid={`button-reset-password-${user.id}`}
-                              >
-                                <Key className="h-4 w-4 mr-2 text-gray-600" />
-                                Passwort zurücksetzen
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => resendWelcomeMutation.mutate(user.id)}
-                                disabled={resendWelcomeMutation.isPending}
-                                data-testid={`button-resend-welcome-${user.id}`}
-                              >
-                                <Mail className="h-4 w-4 mr-2 text-gray-600" />
-                                Willkommens-E-Mail senden
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => setHandoverUser(user)}
-                                data-testid={`button-handover-${user.id}`}
-                              >
-                                <ArrowRightLeft className="h-4 w-4 mr-2 text-teal-600" />
-                                Kunden &amp; Termine übergeben
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  toggleActiveMutation.mutate({ id: user.id, activate: !user.isActive })
-                                }
-                                data-testid={`button-toggle-active-${user.id}`}
-                              >
-                                {user.isActive ? (
-                                  <>
-                                    <UserX className="h-4 w-4 mr-2 text-red-500" />
-                                    Deaktivieren
-                                  </>
-                                ) : (
-                                  <>
-                                    <UserCheck className="h-4 w-4 mr-2 text-green-500" />
-                                    Aktivieren
-                                  </>
-                                )}
-                              </DropdownMenuItem>
-                              {!user.isActive && (
-                                <DropdownMenuItem
-                                  onClick={() => setAnonymizingUser(user)}
-                                  data-testid={`button-anonymize-user-${user.id}`}
-                                  className="text-purple-600 focus:text-purple-700"
-                                >
-                                  <ShieldOff className="h-4 w-4 mr-2" />
-                                  DSGVO-Anonymisierung
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </div>
-
-                      {!user.isAnonymized && m && m.hasSoll && (
-                        <div className="mt-3" data-testid={`workload-stats-${user.id}`}>
-                          <WorkloadBarTooltip>
-                            <div className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
-                              <div
-                                className={`h-full ${barColor} transition-all`}
-                                style={{ width: `${barWidth}%` }}
-                                data-testid={`workload-bar-${user.id}`}
-                              />
-                              <div
-                                className="absolute top-0 bottom-0 w-px bg-gray-300"
-                                style={{ left: `${100 / 1.5}%` }}
-                              />
-                            </div>
-                          </WorkloadBarTooltip>
-                          <div className="mt-1.5 flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-1.5 text-gray-700 flex-wrap">
-                              <span className="font-semibold" data-testid={`workload-hv-primary-${user.id}`}>
-                                {m.primaryCount} Kunden
-                              </span>
-                              <span className="text-gray-400">·</span>
-                              <span className="text-gray-500">Soll</span>
-                              <WorkloadInfoTooltip testId={`tooltip-workload-info-${user.id}`} />
-                              <span className="font-semibold" data-testid={`workload-soll-${user.id}`}>
-                                {m.sollHours}h
-                              </span>
-                              {m.hasIstBasis && m.auslastungPct !== null && m.auslastungPct > 100 && (
-                                <>
-                                  <span className="text-gray-400">·</span>
-                                  <span className="text-red-600 font-semibold" data-testid={`workload-over-${user.id}`}>
-                                    +{(m.istHours - m.sollHours!).toLocaleString("de-DE", { maximumFractionDigits: 1 })} h über
-                                  </span>
-                                </>
-                              )}
-                              {m.freieKunden !== null && m.freieKunden > 0 && (
-                                <>
-                                  <span className="text-gray-400">·</span>
-                                  <span className="text-emerald-600 font-semibold" data-testid={`workload-zusatzkunden-${user.id}`}>
-                                    +{m.freieKunden} mögliche Kunden
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                            <span
-                              className={`font-bold ${pctColor}`}
-                              data-testid={`workload-auslastung-${user.id}`}
-                            >
-                              {m.auslastungPct !== null ? `${m.auslastungPct}%` : "—"}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
-                      {!user.isAnonymized && !user.isAdmin && workloadData && m && !m.hasSoll && (
-                        <div className="mt-3 inline-flex items-center gap-1.5 text-xs text-amber-700" data-testid={`workload-soll-missing-${user.id}`}>
-                          <Info className="h-3.5 w-3.5" />
-                          <span>Vertragsstunden fehlen</span>
-                        </div>
-                      )}
-
-                      {!user.isAnonymized && user.roles.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {visibleRoles.map((role) => (
-                            <span
-                              key={role}
-                              className="inline-flex items-center px-2.5 py-1 rounded-md bg-gray-100 text-gray-700 text-xs font-medium"
-                            >
-                              {ROLE_LABELS[role] || role}
-                            </span>
-                          ))}
-                          {moreRoles > 0 && (
-                            <span
-                              className="inline-flex items-center px-2.5 py-1 rounded-md border border-dashed border-gray-300 text-gray-500 text-xs"
-                              title={user.roles.slice(2).map((r) => ROLE_LABELS[r] || r).join(", ")}
-                            >
-                              +{moreRoles} mehr
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {!user.isAnonymized && vacationData && vacationData[user.id] && (() => {
-                        const vac = vacationData[user.id];
-                        return (
-                          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500" data-testid={`vacation-stats-${user.id}`}>
-                            <Palmtree className="h-3 w-3" />
-                            <span className={`font-medium ${vac.remainingDays <= 0 ? 'text-red-600' : vac.remainingDays <= 3 ? 'text-amber-600' : 'text-emerald-700'}`} data-testid={`vacation-remaining-${user.id}`}>
-                              {formatVacationDays(vac.remainingDays)} Tage übrig
-                            </span>
-                            <span>· {vac.usedDays} genommen{vac.plannedDays > 0 ? ` · ${vac.plannedDays} geplant` : ''}{vac.sickDays > 0 ? ` · ${vac.sickDays} krank` : ''}</span>
-                          </div>
-                        );
-                      })()}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
+            <VirtualizedUserList
+              users={filteredUsers}
+              userMetrics={userMetrics}
+              workloadData={workloadData}
+              vacationData={vacationData}
+              onEdit={(id) => setEditingUserId(id)}
+              onResetPassword={setResetPasswordUser}
+              onResendWelcome={(id) => resendWelcomeMutation.mutate(id)}
+              resendWelcomePending={resendWelcomeMutation.isPending}
+              onHandover={setHandoverUser}
+              onToggleActive={(id, activate) => toggleActiveMutation.mutate({ id, activate })}
+              onAnonymize={setAnonymizingUser}
+            />
           )}
 
       <Dialog open={!!editingUserId} onOpenChange={() => setEditingUserId(null)}>
@@ -751,5 +493,94 @@ export default function AdminUsers() {
         </AlertDialogContent>
       </AlertDialog>
     </Layout>
+  );
+}
+
+interface VirtualizedUserListProps {
+  users: UserData[];
+  userMetrics: Map<number, WorkloadMetrics | null>;
+  workloadData: EmployeeWorkloadResponse | undefined;
+  vacationData: Record<number, VacationSummary> | undefined;
+  onEdit: (id: number) => void;
+  onResetPassword: (user: UserData) => void;
+  onResendWelcome: (id: number) => void;
+  resendWelcomePending: boolean;
+  onHandover: (user: UserData) => void;
+  onToggleActive: (id: number, activate: boolean) => void;
+  onAnonymize: (user: UserData) => void;
+}
+
+function VirtualizedUserList({
+  users,
+  userMetrics,
+  workloadData,
+  vacationData,
+  onEdit,
+  onResetPassword,
+  onResendWelcome,
+  resendWelcomePending,
+  onHandover,
+  onToggleActive,
+  onAnonymize,
+}: VirtualizedUserListProps) {
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const [offsetTop, setOffsetTop] = useState(0);
+
+  useEffect(() => {
+    const update = () => {
+      if (!parentRef.current) return;
+      setOffsetTop(parentRef.current.getBoundingClientRect().top + window.scrollY);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [users.length]);
+
+  const virtualizer = useWindowVirtualizer({
+    count: users.length,
+    estimateSize: () => 140,
+    overscan: 6,
+    scrollMargin: offsetTop,
+    gap: 12,
+    getItemKey: (index) => users[index]!.id,
+  });
+
+  const items = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+
+  return (
+    <div ref={parentRef} className="relative" style={{ height: totalSize }}>
+      {items.map((virtualItem) => {
+        const user = users[virtualItem.index]!;
+        return (
+          <div
+            key={virtualItem.key}
+            data-index={virtualItem.index}
+            ref={virtualizer.measureElement}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${virtualItem.start - offsetTop}px)`,
+            }}
+          >
+            <UserCard
+              user={user}
+              metrics={userMetrics.get(user.id)}
+              workloadData={workloadData}
+              vacation={vacationData?.[user.id]}
+              onEdit={onEdit}
+              onResetPassword={onResetPassword}
+              onResendWelcome={onResendWelcome}
+              resendWelcomePending={resendWelcomePending}
+              onHandover={onHandover}
+              onToggleActive={onToggleActive}
+              onAnonymize={onAnonymize}
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }
