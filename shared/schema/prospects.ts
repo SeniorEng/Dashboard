@@ -147,7 +147,40 @@ export const insertProspectSchema = createInsertSchema(prospects).omit({
   assignedEmployeeId: z.number().optional().nullable(),
 });
 
-export const updateProspectSchema = insertProspectSchema.partial();
+/**
+ * PATCH /api/admin/prospects/:id — explizite Whitelist + `.strict()` schließt
+ * Mass-Assignment-Bugs (Task #677). Bewusst NICHT aus `insertProspectSchema`
+ * abgeleitet: interne/systemseitige Felder werden ausschließlich über
+ * dedizierte Endpunkte gesetzt und dürfen über den generischen Edit-Pfad
+ * nicht mutiert werden:
+ *  - `convertedCustomerId` → wird nur von `prospectStorage.convert(...)` gesetzt
+ *    (über die separate Convert-Route), nicht durch UI-Edits.
+ *  - `geoQualified` → wird nur über `PATCH /:id/qualify` (qualifyProspectSchema)
+ *    geschrieben.
+ *  - `rawEmailContent` → wird ausschließlich beim Lead-Import (E-Mail-Parser)
+ *    persistiert; das UI darf den Originaltext nicht überschreiben.
+ *  - `assignedEmployeeId` → derzeit ohne UI-Edit-Pfad; falls künftig ein Edit
+ *    benötigt wird, soll dafür ein dedizierter Endpoint mit Rollenprüfung
+ *    entstehen.
+ *  - Stammdaten (`id`, `createdAt`, `updatedAt`, `deletedAt`) sowieso nie.
+ */
+export const updateProspectSchema = z.object({
+  vorname: insertProspectSchema.shape.vorname,
+  nachname: insertProspectSchema.shape.nachname,
+  telefon: insertProspectSchema.shape.telefon,
+  email: insertProspectSchema.shape.email,
+  strasse: insertProspectSchema.shape.strasse,
+  nr: insertProspectSchema.shape.nr,
+  plz: insertProspectSchema.shape.plz,
+  stadt: insertProspectSchema.shape.stadt,
+  pflegegrad: insertProspectSchema.shape.pflegegrad,
+  status: insertProspectSchema.shape.status,
+  wiedervorlageDate: insertProspectSchema.shape.wiedervorlageDate,
+  statusNotiz: insertProspectSchema.shape.statusNotiz,
+  quelle: insertProspectSchema.shape.quelle,
+  quelleDetails: insertProspectSchema.shape.quelleDetails,
+  disqualificationReason: insertProspectSchema.shape.disqualificationReason,
+}).partial().strict();
 
 export const qualifyProspectSchema = z.object({
   action: z.enum(["qualify", "disqualify"]),
