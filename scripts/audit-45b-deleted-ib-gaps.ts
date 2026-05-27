@@ -31,7 +31,7 @@
  *   npx tsx scripts/audit-45b-deleted-ib-gaps.ts --apply        # Schreibmodus
  *   npx tsx scripts/audit-45b-deleted-ib-gaps.ts --allow-prod   # Prod-Guard
  */
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../server/lib/db";
 import {
   auditLog,
@@ -354,7 +354,7 @@ async function getAlreadyLoggedSignatures(customerIds: number[]): Promise<Map<nu
     .where(and(
       eq(auditLog.action, "budget_45b_gap_corrected"),
       eq(auditLog.entityType, "budget"),
-      sql`${auditLog.entityId} = ANY(${customerIds})`,
+      inArray(auditLog.entityId, customerIds),
     ));
   const out = new Map<number, Set<string>>();
   for (const r of rows) {
@@ -369,7 +369,7 @@ async function getAlreadyLoggedSignatures(customerIds: number[]): Promise<Map<nu
 
 async function getAuditUserId(): Promise<number | null> {
   const rows = await db.execute(
-    /* sql */ `SELECT id FROM users WHERE role IN ('superadmin','admin') ORDER BY id ASC LIMIT 1`,
+    /* sql */ `SELECT id FROM users WHERE is_super_admin = true OR is_admin = true ORDER BY is_super_admin DESC, id ASC LIMIT 1`,
   );
   const r = (rows as { rows: Array<{ id: number }> }).rows;
   return r[0]?.id ?? null;

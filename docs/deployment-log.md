@@ -56,6 +56,26 @@ Szenarien ab und ist grün:
 3. Kundenseitig: keine Aktion nötig — die UI/Buchungslogik zeigt den
    korrigierten Topf beim nächsten Refresh.
 
+**Bestandsaufnahme & Audit-Log-Backfill (Task #644, 2026-05-27):**
+- Dry-Run gegen die Arbeits-DB hat 4 §45b-Kunden mit Gap gefunden,
+  Summe Δ = **524,00 €** (alle aus dem Januar 2026, je 131,00 € — Klassen-
+  Repräsentanten aus den E2E-Fixtures `T642-CASE1` / `T642-CASE3`).
+- `--apply`-Lauf hat 4 `budget_45b_gap_corrected`-Audit-Einträge geschrieben
+  (Action neu in `shared/schema/audit.ts`; entityType=`budget`,
+  entityId=customer.id, metadata inkl. `gapSignature`, `deltaCents`,
+  Monatsliste).
+- Wiederholungs-Lauf bestätigt Idempotenz: alle 4 Signaturen wurden als
+  „bereits geloggt" erkannt, 0 neue Einträge.
+- Hinweis: Auf der echten Produktion ist der Befund i.d.R. eine andere
+  Kunden-/Summenmenge — das Skript ist beim nächsten Prod-Deploy mit
+  `--apply --allow-prod` erneut zu fahren; der Hostname-Guard verhindert
+  versehentliche Doppelausführung.
+- Während des ersten Laufs sind zwei Inkompatibilitäten aufgefallen und
+  direkt im Skript gefixt worden: `inArray` statt `sql\`= ANY(...)\``
+  (Drizzle/Neon expandierte die Array-Bindung sonst zu Einzel-Parametern),
+  und der Admin-User-Lookup nutzt jetzt `is_super_admin`/`is_admin` aus
+  `shared/schema/users.ts` statt einer nicht existierenden `role`-Spalte.
+
 ---
 
 ### Geplant — Operator-Aktion: Bestandsdrift Termin-vs-Budget einmalig korrigieren (Task #641, Folge zu #616/#619/#629)
