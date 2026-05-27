@@ -393,6 +393,35 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
   res.json(allocations);
 }));
 
+// Task #686: Vor dem Soft-Delete einer Carryover-/Initial-Balance-Allokation
+// will das Admin-UI warnen, wenn schon Termine gegen genau diese Allokation
+// gebucht wurden. `allocationId` an `budget_transactions` ist die Quelle der
+// Wahrheit — `distinct(appointmentId)` zählt verbuchte Termine (NULL-Einträge
+// wie write-off / manual_adjustment fallen heraus). Nur lesend; keine
+// Seiteneffekte, daher unter `requireAdmin` ausreichend.
+router.get("/:customerId/initial-balance/:allocationId/usage", requireAdmin, asyncHandler("Allokations-Nutzung konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  const allocationId = requireIntParam(req.params.allocationId, res);
+  if (customerId === null || allocationId === null) return;
+
+  const { db: database } = await import("../lib/db");
+  const { budgetTransactions } = await import("@shared/schema");
+  const { eq, and, isNotNull, sql } = await import("drizzle-orm");
+
+  const rows = await database
+    .select({ count: sql<number>`COUNT(DISTINCT ${budgetTransactions.appointmentId})::int` })
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.allocationId, allocationId),
+      eq(budgetTransactions.transactionType, "consumption"),
+      isNotNull(budgetTransactions.appointmentId),
+    ));
+
+  const appointmentCount = rows[0]?.count ?? 0;
+  res.json({ appointmentCount });
+}));
+
 router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncHandler("Startwert konnte nicht gelöscht werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   const allocationId = requireIntParam(req.params.allocationId, res);

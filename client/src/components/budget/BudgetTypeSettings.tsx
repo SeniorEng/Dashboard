@@ -973,6 +973,20 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
     },
   });
 
+  // Task #686: Sobald der Admin den Lösch-Bestätigungs-Modus für eine
+  // Allokation öffnet, ziehen wir die Anzahl bereits verbuchter Termine vom
+  // Server. Das vermeidet, dass eine Allokation, gegen die schon Termine
+  // gebucht wurden, versehentlich entfernt wird (Reversal/Korrektur wird
+  // komplizierter, weil der Auto-Pfad nach #684 nichts mehr regeneriert).
+  const { data: deleteUsage, isLoading: deleteUsageLoading } = useQuery<{ appointmentCount: number }>({
+    queryKey: ["initial-balance-usage", customerId, deleteConfirmId],
+    queryFn: async () => unwrapResult(
+      await api.get<{ appointmentCount: number }>(`/budget/${customerId}/initial-balance/${deleteConfirmId}/usage`),
+    ),
+    enabled: deleteConfirmId !== null,
+    staleTime: 0,
+  });
+
   const sourceYearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 1 - i);
   const hasValidInput = amount && (euroStringToCents(amount) ?? 0) > 0;
   const existsForSelectedYear = carryovers.some(c => (c.year ?? 0) - 1 === sourceYear);
@@ -1004,22 +1018,42 @@ function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-amber-700">{formatCurrency(c.amountCents)}</span>
                   {deleteConfirmId === c.id ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => deleteMutation.mutate(c.id)}
-                        className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded hover:bg-red-600"
-                        data-testid={`btn-confirm-delete-carryover-${budgetType}-${src}`}
-                      >
-                        Löschen
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirmId(null)}
-                        className="text-[10px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded hover:bg-gray-300"
-                      >
-                        Abbrechen
-                      </button>
+                    <div className="flex flex-col items-end gap-1">
+                      {deleteUsageLoading ? (
+                        <span
+                          className="text-[10px] text-gray-500"
+                          data-testid={`text-carryover-usage-loading-${budgetType}-${src}`}
+                        >
+                          Prüfe Buchungen…
+                        </span>
+                      ) : deleteUsage && deleteUsage.appointmentCount > 0 ? (
+                        <span
+                          className="text-[10px] text-amber-800 max-w-[260px] text-right"
+                          data-testid={`text-carryover-usage-warning-${budgetType}-${src}`}
+                        >
+                          {deleteUsage.appointmentCount === 1
+                            ? "Auf diesem Übertrag läuft bereits 1 verbuchter Termin — Löschen entfernt die Allokation aus dem Topf, die Buchung bleibt bestehen."
+                            : `Auf diesem Übertrag laufen bereits ${deleteUsage.appointmentCount} verbuchte Termine — Löschen entfernt die Allokation aus dem Topf, die Buchungen bleiben bestehen.`}
+                        </span>
+                      ) : null}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => deleteMutation.mutate(c.id)}
+                          disabled={deleteUsageLoading || deleteMutation.isPending}
+                          className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
+                          data-testid={`btn-confirm-delete-carryover-${budgetType}-${src}`}
+                        >
+                          {deleteUsage && deleteUsage.appointmentCount > 0 ? "Trotzdem löschen" : "Löschen"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmId(null)}
+                          className="text-[10px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded hover:bg-gray-300"
+                        >
+                          Abbrechen
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <button
