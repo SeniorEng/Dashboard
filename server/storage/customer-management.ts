@@ -688,8 +688,8 @@ class CustomerManagementStorage {
 
   async createCustomerDirect(customerData: InsertCustomer, tx?: DbOrTx) {
     // Task #510/#512 — Karteileichen-Prävention: Status 'erstberatung' ist nur
-    // erlaubt, wenn ein Prospect-Bezug gesetzt ist. Defense-in-depth zusätzlich
-    // zum DB-CHECK-Constraint (siehe `startup/ensure-erstberatung-prospect-link.ts`).
+    // erlaubt, wenn ein Prospect-Bezug gesetzt ist. Application-level Guard
+    // (das ursprünglich geplante DB-CHECK-Constraint wurde nie scharfgeschaltet).
     assertErstberatungHasProspectLink(customerData.status, customerData.convertedFromProspectId);
     const executor = tx ?? db;
     const [customer] = await executor.insert(customers).values(customerData).returning();

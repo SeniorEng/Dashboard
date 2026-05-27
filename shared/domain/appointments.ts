@@ -1,5 +1,5 @@
 import type { Appointment } from "../schema";
-import { timeToMinutes, addMinutesToTime, formatDurationDisplay } from "../utils/datetime";
+import { timeToMinutes, addMinutesToTime, formatDurationDisplay, parseLocalDate } from "../utils/datetime";
 
 // ============================================
 // TYPES
@@ -211,11 +211,6 @@ export const DOCUMENTATION_AGE_BUCKET_ORDER: DocumentationAgeBucket[] = ["overdu
 
 function startOfLocalDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function parseLocalDate(iso: string): Date {
-  const [y, m, day] = iso.split("-").map((n) => parseInt(n, 10));
-  return new Date(y, (m || 1) - 1, day || 1);
 }
 
 export function daysOverdue(

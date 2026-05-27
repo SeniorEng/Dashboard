@@ -6,7 +6,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Run Server**: `npm run start` (server only)
 - **Build**: `npm run build`
 - **Typecheck**: `npm run check`
-- **DB Push**: `drizzle-kit push:pg`
+- **DB Push**: `drizzle-kit push`
 - **Env Vars**: vollständige Liste siehe Tabelle unten. (WhatsApp läuft ebenfalls über die Twilio-Credentials; Meta-Cloud-API-Token werden nicht mehr benötigt.)
 
 ### Environment Variables
