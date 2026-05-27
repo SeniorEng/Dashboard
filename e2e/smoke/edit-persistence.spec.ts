@@ -1167,6 +1167,150 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     }
   });
 
+  // ---------- 9b. §45b-Carryover über die UI löschen (Task #610) ----------
+  // Sichert den User-Flow ab, der in Production gebrochen war:
+  // Admin öffnet Kunden-Budget → sieht „Übertrag"-Badge → klickt Trash →
+  // bestätigt → Übertrag verschwindet, BudgetSummary stimmt nach Reload.
+  // Backend-Pfad ist durch Vitest abgesichert (tests/budget/task-608-*),
+  // der UI-Pfad (Toggle „Startwert festlegen" → Delete-Confirm-Mini-UI →
+  // Refetch der Summary) ist hier dran.
+  test("§45b-Carryover — Löschen über die UI persistiert nach Reload", async ({ page }) => {
+    const customer = await createCustomer(session);
+
+    // §45b aktivieren — sonst rendert die Kachel nicht und der Carryover wird
+    // beim nächsten syncCarryoverAndExpiry nicht als „aktiv" geführt.
+    {
+      const { status, data } = await apiPut(
+        session,
+        `/api/budget/${customer.id}/type-settings`,
+        {
+          settings: [
+            {
+              budgetType: "entlastungsbetrag_45b",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        },
+      );
+      if (status >= 300) {
+        throw new Error(`type-settings failed: ${status} ${JSON.stringify(data)}`);
+      }
+    }
+
+    // Carryover seeden via /initial-budget: legt eine `source='carryover'`
+    // Allocation für das laufende Jahr an (validFrom = YYYY-01-01,
+    // expiresAt = YYYY-06-30). Der laufende Jahresanteil wird mit 0 übersprungen.
+    const carryoverCents = 25000;
+    const today = new Date();
+    const todayISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    {
+      const { status, data } = await apiPost(
+        session,
+        `/api/budget/${customer.id}/initial-budget`,
+        {
+          budgetType: "entlastungsbetrag_45b",
+          currentYearAmountCents: 0,
+          carryoverAmountCents: carryoverCents,
+          budgetStartDate: todayISO,
+        },
+      );
+      if (status >= 300) {
+        throw new Error(`initial-budget seed failed: ${status} ${JSON.stringify(data)}`);
+      }
+    }
+
+    // Pre-Check: Carryover muss serverseitig vorhanden sein (sonst testet der
+    // UI-Pfad ein leeres Listenelement und „grünt" fälschlich).
+    {
+      const before = (await session.api
+        .get(`/api/budget/${customer.id}/initial-balances/entlastungsbetrag_45b`)
+        .then((r) => (r.ok() ? r.json() : []))) as Array<{ source?: string; amountCents?: number }>;
+      const carry = before.find((a) => a.source === "carryover");
+      expect(carry, "Seed: Carryover-Allocation nicht angelegt").toBeTruthy();
+      expect(carry?.amountCents).toBe(carryoverCents);
+    }
+
+    await page.goto(`/admin/customers/${customer.id}?tab=budgets`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    // Badge „Übertrag" muss sichtbar sein. Der Carryover wird in der
+    // §45b-Settings-Karte als `latestAllocation` mit testid
+    // `text-current-balance-entlastungsbetrag_45b` gerendert, nachdem der
+    // „Startwert festlegen"-Bereich aufgeklappt wurde.
+    const toggle = page.locator(
+      "[data-testid='btn-toggle-initial-balance-entlastungsbetrag_45b']",
+    );
+    await expect(toggle).toBeVisible({ timeout: 10000 });
+    await toggle.click();
+
+    const balanceRow = page.locator(
+      "[data-testid='text-current-balance-entlastungsbetrag_45b']",
+    );
+    await expect(balanceRow).toBeVisible({ timeout: 10000 });
+    await expect(balanceRow).toContainText("Übertrag");
+
+    // BudgetSummary zeigt den Carryover-Wert vor dem Löschen.
+    await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Trash → Mini-Confirm → DELETE abwarten.
+    await page
+      .locator("[data-testid='btn-delete-balance-entlastungsbetrag_45b']")
+      .click();
+    const confirm = page.locator(
+      "[data-testid='btn-confirm-delete-entlastungsbetrag_45b']",
+    );
+    await expect(confirm).toBeVisible({ timeout: 5000 });
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.ok() &&
+          r.request().method() === "DELETE" &&
+          r.url().includes(`/api/budget/${customer.id}/initial-balance/`),
+        { timeout: 15000 },
+      ),
+      confirm.click(),
+    ]);
+
+    // Vollständiger Reload — `page.reload()` allein würde nur den Cache des
+    // SPA neu hydratisieren; Re-Navigation forciert frische Queries.
+    await page.goto(`/admin/customers/${customer.id}?tab=budgets`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    // UI: „Startwert festlegen" wieder aufklappen — die Carryover-Zeile darf
+    // jetzt nicht mehr existieren.
+    await page
+      .locator("[data-testid='btn-toggle-initial-balance-entlastungsbetrag_45b']")
+      .click();
+    await expect(
+      page.locator("[data-testid='text-current-balance-entlastungsbetrag_45b']"),
+    ).toHaveCount(0);
+
+    // BudgetSummary-Kachel verschwindet, sobald `carryoverCents === 0`.
+    await expect(
+      page.locator("[data-testid='text-45b-carryover']"),
+    ).toHaveCount(0);
+
+    // API-Verifikation: Carryover ist server-seitig weg, Summary stimmt.
+    const after = (await session.api
+      .get(`/api/budget/${customer.id}/initial-balances/entlastungsbetrag_45b`)
+      .then((r) => (r.ok() ? r.json() : []))) as Array<{ source?: string }>;
+    expect(after.some((a) => a.source === "carryover")).toBe(false);
+
+    const summary = (await session.api
+      .get(`/api/budget/${customer.id}/summary`)
+      .then((r) => (r.ok() ? r.json() : null))) as
+      | { carryoverCents?: number }
+      | null;
+    if (summary && typeof summary.carryoverCents === "number") {
+      expect(summary.carryoverCents).toBe(0);
+    }
+  });
+
   // ---------- 10. Firmenstammdaten ----------
   test("Firmenstammdaten — Telefon persistiert nach Reload", async ({ page }) => {
     // Wir greifen Telefon (nicht companyName), weil das eindeutiger und
