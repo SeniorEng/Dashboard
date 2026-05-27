@@ -36,6 +36,7 @@ interface BudgetLedgerStorage {
   getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined>;
   upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number): Promise<CustomerBudgetPreferences>;
   getBudgetTypeSettings(customerId: number, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
+  getLatestBudgetTypeSettings(customerId: number, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
   upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>, tx?: DbClient, userId?: number): Promise<CustomerBudgetTypeSetting[]>;
 
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
@@ -92,6 +93,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   getBudgetPreferences: preferences.getBudgetPreferences,
   upsertBudgetPreferences: preferences.upsertBudgetPreferences,
   getBudgetTypeSettings: preferences.getBudgetTypeSettings,
+  getLatestBudgetTypeSettings: preferences.getLatestBudgetTypeSettings,
   upsertBudgetTypeSettings: preferences.upsertBudgetTypeSettings,
 
   upsertInitialBalanceAllocation: allocation.upsertInitialBalanceAllocation,

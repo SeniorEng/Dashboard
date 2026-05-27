@@ -284,7 +284,16 @@ router.use(requireAdmin);
 router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen konnten nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
-  const settings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
+  // Task #696 — Bug 1: GET dient der UI-Bearbeitung; muss die LATEST-INTENT-Zeile
+  // pro Topf liefern (nicht die für `today` aktive). Während einer echten
+  // Transition trägt die alte Zeile transient `validTo = heute` und die neue
+  // Zeile `validFrom = heute+1`; `getBudgetTypeSettings` (= for-today) würde
+  // die alte Zeile mit dem transienten `validTo = heute` zurückgeben, sodass
+  // der Admin den Eindruck hätte, „Gültig bis" sei gesetzt — ein anschließendes
+  // Clear+Save würde dann zum No-Op (die neue offene Zeile hat `validTo = null`
+  // bereits, der Equality-Check sieht keine Änderung). Booking-Pfade nutzen
+  // weiterhin `getActiveBudgetTypeSettings(transactionDate)`.
+  const settings = await budgetLedgerStorage.getLatestBudgetTypeSettings(customerId);
   const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }[] = [
     { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
     { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },

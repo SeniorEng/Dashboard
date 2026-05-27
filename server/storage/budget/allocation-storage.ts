@@ -526,6 +526,35 @@ async function calculateAllocated45b(
     }
   }
 
+  // Task #696 — Carryover-aware allocStart-Shift.
+  //
+  // Eine `source='carryover'` Allokation für Zieljahr Y repräsentiert das
+  // Restguthaben aus Jahr (Y-1). Der gesamte Konsum- und Allokationsverlauf
+  // für Jahre < Y ist damit auf einen einzigen Betrag (das Restguthaben)
+  // kondensiert worden — würde die Auto-Renewal-Schleife zusätzlich
+  // monatlich §45b-Beträge für Jahre < Y aufschlagen, käme es zur Doppel-
+  // zählung (Bug 2 Schröder: budgetStartDate = Dez 2025, Carryover für 2026
+  // vorhanden → Dez 2025 wurde 1× als monthly_auto UND 1× im Carryover gezählt).
+  //
+  // Daher: wenn ein gezählter Carryover (d.h. nicht via `ibYears` blockiert,
+  // siehe Task #101) existiert, schieben wir `allocStart` auf den 1. Januar
+  // des spätesten Zieljahrs vor. Carryovers, die ohnehin durch einen manuellen
+  // Startwert für das Quelljahr (Y-1) blockiert werden, lösen keinen Shift
+  // aus — dort übernimmt der bestehende IB-Shift die korrekte Begrenzung.
+  const ibYearsForShift = new Set(
+    existingAllocations.filter(a => a.source === "initial_balance").map(a => a.year)
+  );
+  const countedCarryoverYears = existingAllocations
+    .filter(a => a.source === "carryover" && !ibYearsForShift.has(a.year - 1))
+    .map(a => a.year);
+  if (countedCarryoverYears.length > 0) {
+    const latestCarryoverYear = Math.max(...countedCarryoverYears);
+    if (latestCarryoverYear > allocStartYear) {
+      allocStartYear = latestCarryoverYear;
+      allocStartMonth = 1;
+    }
+  }
+
   const initialBalanceSet = new Set(
     initialBalanceMonths.map(ib => `${ib.year}-${ib.month}`)
   );

@@ -93,6 +93,72 @@ export async function getBudgetTypeSettings(customerId: number, _tx?: DbClient):
   return getActiveBudgetTypeSettings(customerId, todayISO(), _tx);
 }
 
+/**
+ * Task #696 — Liefert pro `budgetType` die LATEST-INTENT-Zeile (die Zeile,
+ * die nach Abschluss aller append-only Transitionen den künftigen Zustand
+ * beschreibt). Für die UI-Bearbeitung der Topf-Einstellungen entscheidend,
+ * weil eine echte Transition heute eine Konstellation hinterlässt, in der
+ *
+ *   - die alte Zeile `validTo = heute` trägt (also den heutigen Tag noch
+ *     "abdeckt") und
+ *   - die neue Zeile `validFrom = heute+1` trägt (also für `getActive*(today)`
+ *     noch unsichtbar ist).
+ *
+ * `getBudgetTypeSettings(customerId)` (= active for today) würde in diesem
+ * Fenster die ALTE Zeile inkl. transientem `validTo = heute` zurückgeben —
+ * mit der Folge, dass der Admin "Gültig bis = heute" im Formular sieht,
+ * leert, speichert, und der Save zum No-Op wird (die neue offene Zeile hat
+ * `validTo = null` bereits, der Equality-Check erkennt nichts zu ändern).
+ *
+ * Diese Funktion ist read-only und ändert keine Historisierungs-Semantik:
+ * Buchungspfade (`consumption-engine`, `import-availability`, Auto-Allocation)
+ * nutzen weiterhin `getActiveBudgetTypeSettings(transactionDate)`. Hier
+ * werden ausschließlich Display-/Edit-Pfade bedient.
+ *
+ * Auswahl-Logik pro `budgetType` (über alle Zeilen):
+ *   1. Bevorzuge offene Zeilen (`validTo IS NULL`); unter mehreren offenen
+ *      die jüngste nach `validFrom` (mit `NULL` als kleinstem Wert, damit
+ *      eine später-erstellte explizit datierte Zeile gewinnt).
+ *   2. Wenn keine offene Zeile existiert, nimm die Zeile mit dem spätesten
+ *      `validFrom` (offene-Vorgänger-Reihen können geschlossen worden sein,
+ *      Töpfe können explizit deaktiviert/abgeschlossen worden sein).
+ *   3. Tie-Break: höchste `id` (jüngster Insert).
+ */
+export async function getLatestBudgetTypeSettings(
+  customerId: number,
+  _tx?: DbClient,
+): Promise<CustomerBudgetTypeSetting[]> {
+  const d = _tx ?? db;
+  const all = await d.select()
+    .from(customerBudgetTypeSettings)
+    .where(eq(customerBudgetTypeSettings.customerId, customerId));
+
+  const byType = new Map<string, CustomerBudgetTypeSetting>();
+  const isOpen = (r: CustomerBudgetTypeSetting) => r.validTo == null;
+  const vfRank = (r: CustomerBudgetTypeSetting) => r.validFrom ?? "0000-00-00";
+
+  for (const r of all) {
+    const incumbent = byType.get(r.budgetType);
+    if (!incumbent) {
+      byType.set(r.budgetType, r);
+      continue;
+    }
+    // Schritt 1: offene Zeile schlägt geschlossene.
+    if (isOpen(r) && !isOpen(incumbent)) {
+      byType.set(r.budgetType, r);
+      continue;
+    }
+    if (!isOpen(r) && isOpen(incumbent)) continue;
+    // Beide offen oder beide geschlossen → spätestes validFrom gewinnt.
+    const rVf = vfRank(r);
+    const iVf = vfRank(incumbent);
+    if (rVf > iVf || (rVf === iVf && r.id > incumbent.id)) {
+      byType.set(r.budgetType, r);
+    }
+  }
+  return Array.from(byType.values()).sort((a, b) => a.priority - b.priority);
+}
+
 type SettingPayload = {
   budgetType: string;
   enabled: boolean;
