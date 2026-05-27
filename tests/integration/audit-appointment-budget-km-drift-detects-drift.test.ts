@@ -16,7 +16,7 @@
  *     3) Korrektur via `reconcileKmDrift({ apply: true })`.
  *     4) 2. Audit-Aufruf — KEINE Drift-Zeilen mehr (kein "appt#…"-Log).
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { appointments, users } from "@shared/schema";
@@ -123,27 +123,34 @@ describe("Task #628 — Boot-Audit meldet vorhandene km-Drift", () => {
       .set({ travelKilometers: 70, customerKilometers: 30 })
       .where(inArray(appointments.id, apptIds));
 
-    // 2) `console.log` spyen — `log()` aus server/lib/log.ts ruft intern
-    //    `console.log` mit "[startup]" als Quelle auf. Wir filtern darauf,
-    //    damit unverwandtes Logging anderer Module den Test nicht stört.
-    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    // 2) `console.log` direkt umbiegen — `vi.spyOn(console, "log")` greift in
+    //    diesem Vitest-Setup nicht zuverlässig auf `console.log`-Aufrufe aus
+    //    importierten Server-Modulen durch (Self-Test bestätigt: spy.calls=0
+    //    trotz aktivem Spy). Direktes Re-Binding fängt alle Calls verlässlich.
+    const capturedLines: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      capturedLines.push(args.map((a) => String(a)).join(" "));
+    };
     try {
       await auditAppointmentBudgetKmDrift();
     } finally {
-      spy.mockRestore();
+      console.log = origLog;
     }
 
-    const startupLines = spy.mock.calls
-      .map((args) => args.map((a) => String(a)).join(" "))
-      .filter((line) => line.includes("[startup]"));
+    const startupLines = capturedLines.filter((line) => line.includes("[startup]"));
 
-    // Erwartung: 1 Header-Zeile + 1 Drift-Zeile pro Termin.
+    // Erwartung: 1 Header-Zeile + je 1 Drift-Zeile pro Termin. Die exakte
+    // Termin-/km-/min-Zählung im Header hängt vom globalen DB-Zustand ab
+    // (Test-DB enthält weitere Bestandsdaten mit Drift), daher nicht hart
+    // gegen `apptIds.length` prüfen — der Header-Existenznachweis plus die
+    // präzisen Per-Termin-Drift-Zeilen weiter unten sichern die Semantik ab.
     const headerLine = startupLines.find((l) =>
       l.includes("Termin-vs-Budget-Drift gefunden"),
     );
     expect(headerLine, `Kein Drift-Header in:\n${startupLines.join("\n")}`).toBeDefined();
-    expect(headerLine).toContain(`in ${apptIds.length} Termin(en)`);
-    expect(headerLine).toContain(`km: ${apptIds.length}`);
+    expect(headerLine).toMatch(/in \d+ Termin\(en\)/);
+    expect(headerLine).toMatch(/km: \d+/);
 
     const apptDates = await db
       .select({ id: appointments.id, date: appointments.date })
@@ -189,16 +196,18 @@ describe("Task #628 — Boot-Audit meldet vorhandene km-Drift", () => {
     expect(summary.errored).toBe(0);
 
     // 4) 2. Audit-Aufruf — keine Drift-Zeilen mehr für unsere Termine.
-    const spy2 = vi.spyOn(console, "log").mockImplementation(() => {});
+    const capturedLines2: string[] = [];
+    const origLog2 = console.log;
+    console.log = (...args: unknown[]) => {
+      capturedLines2.push(args.map((a) => String(a)).join(" "));
+    };
     try {
       await auditAppointmentBudgetKmDrift();
     } finally {
-      spy2.mockRestore();
+      console.log = origLog2;
     }
 
-    const startupLines2 = spy2.mock.calls
-      .map((args) => args.map((a) => String(a)).join(" "))
-      .filter((line) => line.includes("[startup]"));
+    const startupLines2 = capturedLines2.filter((line) => line.includes("[startup]"));
 
     for (const id of apptIds) {
       const stillThere = startupLines2.find((l) => l.includes(`appt#${id}`));
