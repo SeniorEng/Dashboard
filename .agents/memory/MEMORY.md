@@ -1,1 +1,2 @@
 - [storage.getInvoice JOIN-alias trap](storage-get-invoice-customername.md) — getInvoice OVERRIDES invoice.customerName with customers.name; any verifier/re-render that selects raw from invoicesTable will drift.
+- [vi.spyOn(console) broken](vitest-spyon-console-broken.md) — vi.spyOn(console,"log") does NOT capture console.log from imported modules in this vitest setup; rebind `console.log` directly and restore in finally.
