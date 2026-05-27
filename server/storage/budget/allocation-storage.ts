@@ -765,6 +765,17 @@ async function calculateAllocated45a(
 
   if (!monthlyAmount && initialBalances.length === 0) return 0;
 
+  // Task #705 — Dedup analog §45b (siehe `initialBalanceSet` oben):
+  // Wenn für einen Monat bereits ein `initial_balance` existiert, ist der
+  // virtuelle `monthlyAmount`-Beitrag für diesen Monat redundant — sonst
+  // verdoppelt sich die Anzeige (Reproducer: §45a 743,60 €/Mo + IB 743,60 €
+  // ergab 1.487,20 €).
+  const initialBalanceSet45a = new Set(
+    initialBalances
+      .filter(a => a.month != null)
+      .map(a => `${a.year}-${a.month}`)
+  );
+
   const startDate = parseLocalDate(startDateStr);
   let startYear = startDate.getFullYear();
   let startMonth = startDate.getMonth() + 1;
@@ -798,7 +809,11 @@ async function calculateAllocated45a(
     const ibForYear = initialBalances
       .filter(a => a.year === opts.year)
       .reduce((sum, a) => sum + a.amountCents, 0);
-    return Math.max(0, yearEndMonth - yearStartMonth + 1) * monthlyAmount + ibForYear;
+    let monthsInYear = 0;
+    for (let mm = yearStartMonth; mm <= yearEndMonth; mm++) {
+      if (!initialBalanceSet45a.has(`${opts.year}-${mm}`)) monthsInYear++;
+    }
+    return monthsInYear * monthlyAmount + ibForYear;
   }
 
   if (opts.asOfDate) {
@@ -811,13 +826,14 @@ async function calculateAllocated45a(
     const ibForMonth = initialBalances
       .filter(a => a.year === asOfYear && a.month === asOfMonth)
       .reduce((sum, a) => sum + a.amountCents, 0);
-    return monthlyAmount + ibForMonth;
+    const monthlyContribution = initialBalanceSet45a.has(`${asOfYear}-${asOfMonth}`) ? 0 : monthlyAmount;
+    return monthlyContribution + ibForMonth;
   }
 
   let count = 0;
   let y = startYear, m = startMonth;
   while (y < endYear || (y === endYear && m <= endMonth)) {
-    count++;
+    if (!initialBalanceSet45a.has(`${y}-${m}`)) count++;
     m++;
     if (m > 12) { m = 1; y++; }
   }
@@ -897,11 +913,17 @@ async function calculateAllocated39_42a(
     if (vtYear < curYear) endYear = vtYear;
   }
 
+  // Task #705 — §39/§42a ist ein JAHRES-Topf. Wenn für ein Jahr bereits ein
+  // `initial_balance` existiert, ist die zusätzliche `yearlyLimitCents`-
+  // Auf­stockung für dieses Jahr Doppelzählung (Reproducer analog §45a).
+  const ibYearsSet = new Set(initialBalances.map(a => a.year));
+
   if (opts.year != null) {
     const ibForYear = initialBalances
       .filter(a => a.year === opts.year)
       .reduce((sum, a) => sum + a.amountCents, 0);
-    const yearlyAlloc = opts.year >= startYear && opts.year <= endYear ? yearlyLimitCents : 0;
+    const inWindow = opts.year >= startYear && opts.year <= endYear;
+    const yearlyAlloc = inWindow && !ibYearsSet.has(opts.year) ? yearlyLimitCents : 0;
     return yearlyAlloc + ibForYear;
   }
 
@@ -910,12 +932,17 @@ async function calculateAllocated39_42a(
     const ibForYear = initialBalances
       .filter(a => a.year === asOfYear)
       .reduce((sum, a) => sum + a.amountCents, 0);
-    const yearlyAlloc = asOfYear >= startYear && asOfYear <= endYear ? yearlyLimitCents : 0;
+    const inWindow = asOfYear >= startYear && asOfYear <= endYear;
+    const yearlyAlloc = inWindow && !ibYearsSet.has(asOfYear) ? yearlyLimitCents : 0;
     return yearlyAlloc + ibForYear;
   }
 
   const ibTotal = initialBalances.reduce((sum, a) => sum + a.amountCents, 0);
-  return Math.max(0, endYear - startYear + 1) * yearlyLimitCents + ibTotal;
+  let yearsWithoutIb = 0;
+  for (let y = startYear; y <= endYear; y++) {
+    if (!ibYearsSet.has(y)) yearsWithoutIb++;
+  }
+  return yearsWithoutIb * yearlyLimitCents + ibTotal;
 }
 
 async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {

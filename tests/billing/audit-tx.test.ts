@@ -138,8 +138,11 @@ beforeAll(async () => {
     pflegegrad: 3 as const,
     billingType: "selbstzahler" as const,
     acceptsPrivatePayment: false,
+    // Task #705 (Variante A): Selbstzahler dürfen §45b nicht aktivieren —
+    // Server lehnt das mit 409 ab. Hier hat §45b ohnehin keine fachliche
+    // Wirkung (selbstzahler bucht 100 % privat), daher disabled.
     types: [
-      { type: "entlastungsbetrag_45b" as const, priority: 1, enabled: true, monthlyLimitCents: null },
+      { type: "entlastungsbetrag_45b" as const, priority: 1, enabled: false, monthlyLimitCents: null },
       { type: "umwandlung_45a" as const, priority: 2, enabled: false, monthlyLimitCents: null },
       { type: "ersatzpflege_39_42a" as const, priority: 3, enabled: false, yearlyLimitCents: null },
     ],

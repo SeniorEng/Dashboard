@@ -126,6 +126,21 @@ function isNeonDriverBug(message: string): boolean {
 (async () => {
   await registerRoutes(httpServer, app);
 
+  // Task #705 — API-Catch-All vor Vite/Static-Fallback. Vor diesem Handler
+  // sind sämtliche registrierten /api/*-Routen montiert; alles, was hier
+  // landet, ist ein echter 404 (oder 405, wenn dieselbe Pfad-Variante mit
+  // anderer Methode existiert). Ohne diesen Handler würde der Vite-
+  // Wildcard die /api/*-Request als HTML-Index ausliefern (Bug-Report
+  // 2026-05-27, "POST/PUT/DELETE auf unbekannte /api/*-Endpoints liefern
+  // HTML"). Erzwingt JSON-Antwort und blockiert das Durchreichen an Vite.
+  app.use("/api", (req, res) => {
+    res.status(404).json({
+      error: "NOT_FOUND",
+      code: "NOT_FOUND",
+      message: `API-Endpunkt nicht gefunden: ${req.method} ${req.originalUrl}`,
+    });
+  });
+
   app.use(errorMiddleware);
 
   if (process.env.NODE_ENV === "production") {

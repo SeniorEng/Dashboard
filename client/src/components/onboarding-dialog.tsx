@@ -95,6 +95,15 @@ export function OnboardingDialog({ open, onComplete }: { open: boolean; onComple
       return unwrapResult(result);
     },
     onSuccess: () => {
+      // Task #705 — Skip-Status persistieren: Cache eagerly aktualisieren
+      // (setQueryData), damit der Dialog beim nächsten Render auch dann nicht
+      // mehr erscheint, wenn das anschließende Refetch noch unterwegs ist.
+      // `invalidateRelated` allein war zu spät — Wrapper unmountete und der
+      // lokale `dismissed`-State ging beim nächsten Reload verloren.
+      queryClient.setQueryData<{ user?: { onboardingCompleted?: boolean } } | null>(
+        ["auth", "me"],
+        (old) => (old?.user ? { ...old, user: { ...old.user, onboardingCompleted: true } } : old),
+      );
       invalidateRelated(queryClient, "auth");
       onComplete();
     },

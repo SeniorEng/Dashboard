@@ -413,7 +413,10 @@ describe("BUD-EDGE: Budget-Grenzfälle", () => {
   });
 
   it("BUD-EDGE-1 – Budgetstatus für Kunde mit niedrigem Pflegegrad ist abrufbar", async () => {
-    const res = await apiGet<any>(`/api/budget/${edgeCustomerId}/status?year=${new Date().getFullYear()}`);
+    // Task #705: vorher /status (existierte nie, wurde vom Vite-HTML-
+    // Fallback maskiert). Mit dem neuen /api/* JSON-404-Catch-All
+    // unmaskiert — Test nutzt jetzt den tatsächlichen Summary-Endpoint.
+    const res = await apiGet<any>(`/api/budget/${edgeCustomerId}/summary?year=${new Date().getFullYear()}`);
     expect(res.status).toBe(200);
   });
 

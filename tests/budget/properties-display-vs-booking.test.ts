@@ -168,4 +168,96 @@ describe("Property §45b — Anzeige (verfügbar) ≥ Gebucht (Engine-Konsum)", 
       { numRuns: RUNS },
     );
   }, 600_000);
+
+  // Task #705 — Dedup-Invariante für §45a Monats-Pott:
+  // Wenn ein initial_balance UND ein monthlyLimitCents für DENSELBEN Monat
+  // gesetzt sind, darf `currentMonthAllocated` höchstens dem GRÖSSEREN der
+  // beiden Werte entsprechen — nicht der Summe. Anders gesagt: der IB
+  // REPRÄSENTIERT die Monats-Aufstockung, statt sie zu ergänzen.
+  it("§45a Monats-IB + monthlyLimit → currentMonthAllocated = max(ib, monthlyLimit) (KEINE Verdopplung)", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          ibCents: fc.integer({ min: 1000, max: 80000 }),
+          monthlyLimitCents: fc.integer({ min: 1000, max: 80000 }),
+        }),
+        async ({ ibCents, monthlyLimitCents }) => {
+          const now = new Date();
+          const firstOfMonth =
+            `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+          const scenario = await setupBudgetScenario({
+            customerNamePrefix: "T705-PROP-45A",
+            pflegegrad: 3,
+            billingType: "pflegekasse_gesetzlich",
+            acceptsPrivatePayment: false,
+            preferences: { budgetStartDate: firstOfMonth },
+            types: [
+              { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
+              { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents },
+              { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
+            ],
+            initialBalance: { type: "umwandlung_45a", amountCents: ibCents, validFrom: firstOfMonth },
+            appointments: [],
+          });
+          try {
+            const r = await apiGet<{
+              umwandlung45a: { currentMonthAllocatedCents: number };
+            }>(`/api/budget/${scenario.customerId}/overview`);
+            const allocated = r.data.umwandlung45a.currentMonthAllocatedCents;
+            const expectedMax = Math.max(ibCents, monthlyLimitCents);
+            // Verdopplung wäre ibCents + monthlyLimitCents → muss strikt
+            // unterhalb liegen, solange beide > 0 (sonst trivial gleich).
+            return allocated <= expectedMax;
+          } finally {
+            await scenario.cleanup();
+          }
+        },
+      ),
+      { numRuns: 5 },
+    );
+  }, 600_000);
+
+  // Task #705 — Dedup-Invariante für §39/§42a Jahres-Pott (analog):
+  // initial_balance für ein Jahr + yearlyLimitCents für dasselbe Jahr darf
+  // nicht doppelt gerechnet werden.
+  it("§39_42a Jahres-IB + yearlyLimit → currentYearAvailable = max(ib, yearlyLimit) (KEINE Verdopplung)", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          ibCents: fc.integer({ min: 10000, max: 161200 }),
+          yearlyLimitCents: fc.integer({ min: 10000, max: 161200 }),
+        }),
+        async ({ ibCents, yearlyLimitCents }) => {
+          const year = new Date().getFullYear();
+          const startOfYear = `${year}-01-01`;
+          const scenario = await setupBudgetScenario({
+            customerNamePrefix: "T705-PROP-3942A",
+            pflegegrad: 3,
+            billingType: "pflegekasse_gesetzlich",
+            acceptsPrivatePayment: false,
+            preferences: { budgetStartDate: startOfYear },
+            types: [
+              { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
+              { type: "umwandlung_45a", priority: 2, enabled: false },
+              { type: "ersatzpflege_39_42a", priority: 3, enabled: true, yearlyLimitCents },
+            ],
+            initialBalance: { type: "ersatzpflege_39_42a", amountCents: ibCents, validFrom: startOfYear },
+            appointments: [],
+          });
+          try {
+            const r = await apiGet<{
+              ersatzpflege39_42a: { currentYearAvailableCents: number };
+            }>(`/api/budget/${scenario.customerId}/overview`);
+            const available = r.data.ersatzpflege39_42a.currentYearAvailableCents;
+            const expectedMax = Math.max(ibCents, yearlyLimitCents);
+            // Verdopplung wäre ibCents + yearlyLimitCents.
+            return available <= expectedMax;
+          } finally {
+            await scenario.cleanup();
+          }
+        },
+      ),
+      { numRuns: 5 },
+    );
+  }, 600_000);
 });

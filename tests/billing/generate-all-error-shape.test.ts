@@ -51,8 +51,9 @@ beforeAll(async () => {
     pflegegrad: 3,
     billingType: "selbstzahler",
     acceptsPrivatePayment: false,
+    // Task #705 (Variante A): §45b für Selbstzahler nicht aktivierbar.
     types: [
-      { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+      { type: "entlastungsbetrag_45b", priority: 1, enabled: false, monthlyLimitCents: null },
       { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
       { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
     ],

@@ -127,6 +127,21 @@ router.get("/customers/unassigned-count", asyncHandler("Zählung konnte nicht ge
   res.json({ count });
 }));
 
+// Task #705 — GET /api/admin/customers/:id ergänzt (vorher fehlte er, während
+// PATCH/DELETE auf demselben Pfad existieren — Inkonsistenz aus dem Bug-Report
+// 2026-05-27). Delegiert auf `storage.getCustomer`, dieselbe Datenquelle wie
+// `/customers/:id` außerhalb des Admin-Subrouters.
+router.get("/customers/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+  const customer = await storage.getCustomer(id);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
+  res.json(customer);
+}));
+
 router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen werden", async (req: Request, res: Response) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
@@ -378,6 +393,19 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
   const userId = req.user!.id;
 
+  // Task #705 — Selbstzahler-Routing (Variante A) auch im Kundenanlage-
+  // Wizard durchsetzen: §45b ist eine Pflegekassenleistung und für
+  // Selbstzahler nicht buchbar. Sonst würde der Topf hier still angelegt
+  // und erst beim ersten Booking-Versuch krachen.
+  if (data.billingType === "selbstzahler" && data.budgets && (data.budgets.entlastungsbetrag45b ?? 0) > 0) {
+    res.status(409).json({
+      error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
+      code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
+      message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
+    });
+    return;
+  }
+
   const customerData = buildCustomerInsertData(data, userId);
   const testFaults = readTestFaults(req);
 
@@ -386,6 +414,13 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   // committen oder zurückrollen. Andernfalls bleibt der Customer als
   // "Halbleiche" zurück und stört Folge-Workflows (Termin-Anlage,
   // Rechnungslauf, §45b-Buchungen).
+  // Task #705 — Bewusst KEINE Auto-Anlage von Budget-Töpfen: Das Wizard-UI
+  // führt den Admin nach der Kundenanlage durch einen separaten Budget-
+  // Schritt (`POST /api/budget/:customerId/initial-budget` + PUT
+  // /type-settings), der die Pflegekassenleistungen (§45a, §45b, §39/§42a)
+  // pro Kunde explizit konfiguriert. Wird `data.budgets` weggelassen,
+  // bleiben die Töpfe absichtlich leer und müssen im Folgeschritt erfasst
+  // werden — `createCustomerRelatedData` legt nichts implizit an.
   const { customer, warnings } = await db.transaction(async (tx) => {
     const created = await customerManagementStorage.createCustomerDirect(customerData, tx);
     const w = await createCustomerRelatedData({
@@ -404,6 +439,19 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     });
     return { customer: created, warnings: w };
   });
+
+  // Task #705 — Strukturierter Hinweis, wenn ein pflegekassenberechtigter
+  // Kunde (Pflegegrad ≥ 2) ohne Budget-Daten angelegt wird: Der Wizard
+  // führt den nächsten Schritt (`/initial-budget` + `/type-settings`) zwar
+  // selbst, aber API-Konsumenten (Imports, Dritt-Tools) sehen sonst keinen
+  // Hinweis darauf, dass die statutorischen Töpfe noch leer sind.
+  if (
+    (data.billingType === "pflegekasse_gesetzlich" || data.billingType === "pflegekasse_privat") &&
+    (data.pflegegrad ?? 0) >= 2 &&
+    !data.budgets
+  ) {
+    warnings.push("BUDGET_SETUP_REQUIRED: Statutorische Töpfe (§45b/§45a/§39-§42a) müssen über POST /api/budget/:customerId/initial-budget + PUT /type-settings konfiguriert werden.");
+  }
 
   birthdaysCache.invalidateAll();
 
