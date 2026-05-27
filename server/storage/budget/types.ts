@@ -22,6 +22,13 @@ export interface BudgetSummary {
    */
   currentMonthAvailableCents: number;
   isCurrentlyActive: boolean;
+  /**
+   * Task #704 — Erster Monat (YYYY-MM), in dem die zeitliche §45b-Projektion
+   * (kumulative Monatsaufstockungen + ablaufende Carryover-Beträge) gegen die
+   * bis dahin geplanten Termine ins Minus läuft. `null` = keine Lücke
+   * prognostiziert. Wird vom Warnbanner als Erklärung herangezogen.
+   */
+  plannedShortfallMonth: string | null;
 }
 
 export interface Budget45aSummary {

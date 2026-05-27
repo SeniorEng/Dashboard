@@ -11,7 +11,7 @@ import { db } from "../../lib/db";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
-import { getPlannedCostCents } from "./appointment-cost-calculator";
+import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
@@ -177,10 +177,58 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
 
   const availableCents = totalAllocatedCents - netUsedCents;
   const currentMonthPrefix = today.slice(0, 7);
-  const [plannedCents, currentMonthPlannedCents] = await Promise.all([
-    getPlannedCostCents(customerId),
+  const [plannedByAppt, currentMonthPlannedCents] = await Promise.all([
+    getPlannedCostByAppointment(customerId),
     getPlannedCostCents(customerId, { monthPrefix: currentMonthPrefix }),
   ]);
+  const plannedCents = plannedByAppt.reduce((sum, p) => sum + p.costCents, 0);
+
+  // Task #704 — Zeitliche §45b-Projektion: zukünftige Monatsaufstockungen UND
+  // ablaufende Carryovers (30.06.) müssen in „Verfügbar (nach Planung)"
+  // einfließen, sonst werden langlaufende Serien (Catrin-Barz-Bug) fälschlich
+  // als „Budget reicht nicht" angezeigt. Wir gruppieren geplante Kosten nach
+  // Termin-Monat und prüfen für jedes Monatsende, ob die bis dahin
+  // aufgelaufene Allokation (`calculateAllocated45b` mit
+  // `projectFuture=true`) die kumulierten Buchungen deckt.
+  const futureCostsByMonth = new Map<string, number>();
+  const todayMonthPrefix = today.slice(0, 7);
+  let futurePlannedTotal = 0;
+  for (const p of plannedByAppt) {
+    // Termine im laufenden oder zukünftigen Monat fließen in die Projektion ein.
+    // Vergangene Termine sind bereits in `netUsedCents` enthalten (consumption)
+    // bzw. werden über `expired_unsigned` aus der Planung herausfallen.
+    if (p.date.slice(0, 7) < todayMonthPrefix) continue;
+    const ym = p.date.slice(0, 7);
+    futureCostsByMonth.set(ym, (futureCostsByMonth.get(ym) ?? 0) + p.costCents);
+    futurePlannedTotal += p.costCents;
+  }
+  const sortedMonths = [...futureCostsByMonth.keys()].sort();
+
+  let worstShortfallCents = 0;
+  let plannedShortfallMonth: string | null = null;
+  let allocAtHorizon = totalAllocatedCents;
+  if (sortedMonths.length > 0) {
+    let cumulativeUsed = netUsedCents;
+    for (const ym of sortedMonths) {
+      const [y, m] = ym.split("-").map(Number);
+      const monthEnd = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+      const allocAtEnd = await calculateAllocatedCents(
+        customerId,
+        "entlastungsbetrag_45b",
+        { asOfDate: monthEnd, projectFuture: true },
+        undefined,
+        preferences,
+        typeSettings,
+      );
+      cumulativeUsed += futureCostsByMonth.get(ym)!;
+      const remaining = allocAtEnd - cumulativeUsed;
+      if (remaining < 0 && -remaining > worstShortfallCents) {
+        worstShortfallCents = -remaining;
+        if (plannedShortfallMonth === null) plannedShortfallMonth = ym;
+      }
+      allocAtHorizon = allocAtEnd;
+    }
+  }
 
   const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
   const isCurrentlyActive = !s45b
@@ -206,13 +254,24 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     : null;
   const currentMonthAvailableRaw = availableCents;
 
+  // Task #704 — `availableAfterPlannedCents` ist die zeitlich projizierte
+  // Restdeckung. Bei einer Lücke spiegelt sie den größten kumulierten
+  // Fehlbetrag (negativ); ohne Lücke fällt sie auf den nach allen Buchungen
+  // verbleibenden Topf am Horizont zurück.
+  const projectedAvailable = sortedMonths.length > 0
+    ? allocAtHorizon - netUsedCents - futurePlannedTotal
+    : availableCents - plannedCents;
+  const availableAfterPlannedCents = worstShortfallCents > 0
+    ? -worstShortfallCents
+    : projectedAvailable;
+
   return {
     customerId,
     totalAllocatedCents,
     totalUsedCents: netUsedCents,
     availableCents: isCurrentlyActive ? availableCents : 0,
     plannedCents: isCurrentlyActive ? plannedCents : 0,
-    availableAfterPlannedCents: isCurrentlyActive ? availableCents - plannedCents : 0,
+    availableAfterPlannedCents: isCurrentlyActive ? availableAfterPlannedCents : 0,
     carryoverCents,
     carryoverExpiresAt,
     currentYearAllocatedCents,
@@ -221,6 +280,7 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     currentMonthPlannedCents: isCurrentlyActive ? currentMonthPlannedCents : 0,
     currentMonthAvailableCents: isCurrentlyActive ? Math.max(0, currentMonthAvailableRaw) : 0,
     isCurrentlyActive,
+    plannedShortfallMonth: isCurrentlyActive ? plannedShortfallMonth : null,
   };
 }
 

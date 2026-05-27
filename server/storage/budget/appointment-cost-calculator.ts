@@ -68,6 +68,87 @@ export async function calculateAppointmentCost(params: {
   };
 }
 
+/**
+ * Liefert die geplanten Kosten pro Termin (für „Geplant"-Aggregat und für
+ * die zeitliche §45b-Projektion, siehe `summary-queries.getBudgetSummary` /
+ * Task #704).
+ *
+ * Reihenfolge: chronologisch nach Termindatum aufsteigend, damit Aufrufer
+ * eine kumulative Forecast-Schleife ohne Re-Sort fahren können.
+ */
+export async function getPlannedCostByAppointment(
+  customerId: number,
+  opts: { monthPrefix?: string } = {},
+): Promise<Array<{ appointmentId: number; date: string; costCents: number }>> {
+  const monthFilter = opts.monthPrefix
+    ? sql`AND to_char(a.date, 'YYYY-MM') = ${opts.monthPrefix}`
+    : sql``;
+  const rows = await db.execute(sql`
+    SELECT 
+      a.id AS "appointmentId",
+      s.lohnart_kategorie AS "lohnartKategorie",
+      aps.planned_duration_minutes AS "plannedMinutes",
+      a.date AS "appointmentDate",
+      a.travel_kilometers AS "travelKm",
+      a.customer_kilometers AS "customerKm"
+    FROM appointments a
+    INNER JOIN appointment_services aps ON aps.appointment_id = a.id
+    INNER JOIN services s ON s.id = aps.service_id
+    WHERE a.customer_id = ${customerId}
+      AND a.appointment_type = 'Kundentermin'
+      AND a.status IN ('scheduled', 'documenting')
+      AND a.deleted_at IS NULL
+      ${monthFilter}
+  `);
+
+  if (rows.rows.length === 0) return [];
+
+  interface PlannedCostRow {
+    appointmentId: number;
+    lohnartKategorie: string;
+    plannedMinutes: number | null;
+    appointmentDate: string;
+    travelKm: number | null;
+    customerKm: number | null;
+  }
+
+  const perAppointment = new Map<number, { date: string; hwMinutes: number; abMinutes: number; travelKm: number; customerKm: number }>();
+  for (const row of (rows.rows as unknown) as PlannedCostRow[]) {
+    const apptId = row.appointmentId;
+    if (!perAppointment.has(apptId)) {
+      perAppointment.set(apptId, {
+        date: `${row.appointmentDate}`,
+        hwMinutes: 0,
+        abMinutes: 0,
+        travelKm: row.travelKm || 0,
+        customerKm: row.customerKm || 0,
+      });
+    }
+    const data = perAppointment.get(apptId)!;
+    const minutes = row.plannedMinutes || 0;
+    if (row.lohnartKategorie === "hauswirtschaft") {
+      data.hwMinutes += minutes;
+    } else if (row.lohnartKategorie === "alltagsbegleitung") {
+      data.abMinutes += minutes;
+    }
+  }
+
+  const result: Array<{ appointmentId: number; date: string; costCents: number }> = [];
+  for (const [appointmentId, data] of perAppointment) {
+    const costs = await calculateAppointmentCost({
+      customerId,
+      hauswirtschaftMinutes: data.hwMinutes,
+      alltagsbegleitungMinutes: data.abMinutes,
+      travelKilometers: data.travelKm,
+      customerKilometers: data.customerKm,
+      date: data.date,
+    });
+    result.push({ appointmentId, date: data.date, costCents: costs.totalCents });
+  }
+  result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.appointmentId - b.appointmentId));
+  return result;
+}
+
 export async function getPlannedCostCents(
   customerId: number,
   opts: { monthPrefix?: string } = {},

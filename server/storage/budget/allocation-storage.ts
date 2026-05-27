@@ -347,7 +347,7 @@ export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClien
 export async function calculateAllocatedCents(
   customerId: number,
   budgetType: string,
-  opts: { year?: number; asOfDate?: string },
+  opts: { year?: number; asOfDate?: string; projectFuture?: boolean },
   _tx?: DbClient,
   _preferences?: CustomerBudgetPreferences | undefined,
   _typeSettings?: CustomerBudgetTypeSetting[]
@@ -454,7 +454,7 @@ export async function calculateAllocatedCents(
  */
 async function calculateAllocated45b(
   customerId: number,
-  opts: { year?: number; asOfDate?: string },
+  opts: { year?: number; asOfDate?: string; projectFuture?: boolean },
   d: Pick<typeof db, 'select'>,
   preferences: CustomerBudgetPreferences | undefined,
   typeSettings: CustomerBudgetTypeSetting[]
@@ -634,7 +634,15 @@ async function calculateAllocated45b(
     const asOf = parseLocalDate(opts.asOfDate);
     const asOfYear = asOf.getFullYear();
     const asOfMonth = asOf.getMonth() + 1;
-    if (asOfYear < curYear || (asOfYear === curYear && asOfMonth < curMonth)) {
+    if (opts.projectFuture) {
+      // Task #704: Vorausschau-Modus für „Geplant"-Forecast. Horizont darf in
+      // die Zukunft wandern, damit zukünftige Monatsaufstockungen + ablaufende
+      // Carryovers in die Projektion einfließen. Echte Buchungen (cost-estimate,
+      // consumeFifo) verwenden weiterhin den Default (capped auf heute), um
+      // nicht für noch nicht angefallene Monate vorzuziehen.
+      horizonYear = asOfYear;
+      horizonMonth = asOfMonth;
+    } else if (asOfYear < curYear || (asOfYear === curYear && asOfMonth < curMonth)) {
       horizonYear = asOfYear;
       horizonMonth = asOfMonth;
     }

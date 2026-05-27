@@ -23,6 +23,7 @@ function summary(overrides: Partial<BudgetSummary>): BudgetSummary {
     currentMonthPlannedCents: 4000,
     currentMonthAvailableCents: 46200,
     isCurrentlyActive: true,
+    plannedShortfallMonth: null,
   };
   return { ...base, ...overrides };
 }
