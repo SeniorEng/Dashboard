@@ -9,6 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Upload, CheckCircle, AlertTriangle, XCircle, FileSpreadsheet, Scissors } from "lucide-react";
 import { Link } from "wouter";
 import { api, unwrapResult } from "@/lib/api/client";
+import {
+  ImportReconcileSection,
+  type ReconcileExecuteResponse,
+} from "@/features/appointments/import-reconcile-section";
 
 interface BudgetTrimInfo {
   originalMinutes: number;
@@ -90,6 +94,10 @@ export default function ImportAppointmentsPage() {
 
   const [rowActions, setRowActions] = useState<Map<number, RowAction>>(new Map());
   const [employeeOverrides, setEmployeeOverrides] = useState<Map<number, number>>(new Map());
+
+  // Task #669 — optional Import-Reconcile (Single-Source-of-Truth-Modus).
+  const [reconcileEnabled, setReconcileEnabled] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<ReconcileExecuteResponse | null>(null);
 
   const loadPreview = useCallback(async () => {
     if (!file) return;
@@ -519,6 +527,22 @@ export default function ImportAppointmentsPage() {
               </table>
             </div>
           </>
+        )}
+
+        {preview && !importResult && (
+          <ImportReconcileSection
+            excelRows={preview.rows.map((r) => ({
+              customerId: r.customerId,
+              date: r.date,
+              startTime: r.startTime,
+              vorname: r.vorname,
+              nachname: r.nachname,
+            }))}
+            enabled={reconcileEnabled}
+            onEnabledChange={setReconcileEnabled}
+            result={reconcileResult}
+            onResultChange={setReconcileResult}
+          />
         )}
 
         {importResult && (

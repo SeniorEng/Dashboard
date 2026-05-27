@@ -12,6 +12,10 @@ import {
 } from "../../services/appointment-import";
 import { z } from "zod";
 import { reconcileCustomerStructured } from "../../scripts/reconcile-trimmed-imports";
+import {
+  previewReconcile,
+  executeReconcile,
+} from "../../services/appointment-import-reconcile";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -146,6 +150,64 @@ router.post(
       apply === true,
       req.user!.id,
     );
+    res.json(result);
+  })
+);
+
+const excelKeySchema = z.object({
+  customerId: z.number().int().positive(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss YYYY-MM-DD sein"),
+  startTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Startzeit muss HH:MM sein"),
+});
+
+const reconcilePreviewSchema = z.object({
+  customerIds: z.array(z.number().int().positive()).min(1, "Mindestens ein Kunde erforderlich"),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Startdatum muss YYYY-MM-DD sein"),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enddatum muss YYYY-MM-DD sein"),
+  excelKeys: z.array(excelKeySchema),
+});
+
+router.post(
+  "/import-appointments/reconcile/preview",
+  asyncHandler("Reconcile-Vorschau konnte nicht erstellt werden", async (req: Request, res: Response) => {
+    const input = reconcilePreviewSchema.parse(req.body);
+    if (input.startDate > input.endDate) {
+      res.status(400).json({ error: "Startdatum darf nicht nach Enddatum liegen" });
+      return;
+    }
+    const result = await previewReconcile(
+      input.customerIds,
+      input.startDate,
+      input.endDate,
+      input.excelKeys,
+    );
+    res.json(result);
+  })
+);
+
+const reconcileExecuteSchema = z.object({
+  appointmentIds: z.array(z.number().int().positive()).min(1, "Mindestens ein Termin erforderlich"),
+  reason: z.string().min(10, "Begründung muss mindestens 10 Zeichen lang sein"),
+  batchId: z.string().uuid("batchId muss eine gültige UUID sein").optional(),
+  scopeCustomerIds: z.array(z.number().int().positive()).optional(),
+  scopeStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  scopeEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+router.post(
+  "/import-appointments/reconcile/execute",
+  asyncHandler("Reconcile-Stornierung konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
+    const input = reconcileExecuteSchema.parse(req.body);
+    const result = await executeReconcile({
+      appointmentIds: input.appointmentIds,
+      reason: input.reason,
+      batchId: input.batchId,
+      userId: req.user!.id,
+      ipAddress: req.ip || req.socket.remoteAddress,
+      scopeCustomerIds: input.scopeCustomerIds,
+      scopeStartDate: input.scopeStartDate,
+      scopeEndDate: input.scopeEndDate,
+    });
     res.json(result);
   })
 );

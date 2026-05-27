@@ -8,6 +8,24 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-27 — Import-Reconcile-Schritt im Termin-Import-Wizard (Task #669)
+
+**Anlass:** Beim wiederkehrenden Excel-Import fehlte ein optionaler Schritt, der Excel-Daten als Single Source of Truth für einen gewählten Kunden/Zeitraum behandelt: DB-Termine, die NICHT in der Excel stehen, blieben bisher unerkannt stehen (operative Doppel-Pflege, Drift zu Buchhaltung).
+
+**Lieferumfang:**
+- Service `server/services/appointment-import-reconcile.ts` mit `previewReconcile()` + `executeReconcile()`. Ausnahmen: signierter Leistungsnachweis, signierter Termin, geschlossener Monat — werden separat im Preview angezeigt und im Execute defensiv noch einmal geprüft.
+- Stornierung GoBD-konform: `status='cancelled'` + `deletedAt=NOW()`, alle Budget-Consumption-Transaktionen werden via `budgetLedgerStorage.reverseBudgetTransaction` in einer DB-Transaktion zurückgebucht. Mengen (durationPromised, km) werden NICHT verändert.
+- Audit pro Termin: neue Aktion `appointment_import_reconciled_cancelled` in `shared/schema/audit.ts`, Batch-ID (UUID) verknüpft alle Stornierungen eines Reconcile-Laufs, Begründung Pflicht (≥10 Zeichen, sowohl client- als auch serverseitig validiert).
+- Routen unter Superadmin-Guard: `POST /api/admin/import-appointments/reconcile/preview` und `…/execute`.
+- UI-Komponente `client/src/features/appointments/import-reconcile-section.tsx` (collapsible, Default ausgeklappt = off) ergänzt das Wizard-Preview in `client/src/pages/admin/import-appointments.tsx`: Kunden-Multi-Select + Zeitraum, separate Tabellen für Stornier-Kandidaten und Ausnahmen, Begründungs-Textarea.
+- Integrationstest `tests/import-reconcile.test.ts` (Preview-Klassifizierung, Reason-Validierung, Execute-Storno + Re-Preview, Audit-Eintrag mit Batch-ID).
+
+**Erwartete DB-Effekte (zur Laufzeit, kein Schema-Drop):** pro Reconcile-Lauf gewählte Geister-Termine → `appointments.status='cancelled'` + `deleted_at` gesetzt, zugehörige `budget_transactions` werden durch Counter-Buchungen neutralisiert, `audit_log`-Einträge mit gemeinsamer `batch_id`.
+
+**Risiko:** Niedrig. Endpunkt ist Superadmin-only, alle Mutationen sind soft + auditiert; Bestands-Tests + Typecheck + Lint grün.
+
+---
+
 ### 2026-05-27 — Audit verbleibender §45b-Carryover-Duplikate (Task #604)
 
 **Anlass:** Nachfolge-Audit zu Task #601 (Backfill `server/startup/backfill-duplicate-wizard-carryovers.ts`). Der Backfill räumt doppelte §45b-Carryover-Allokationen (Wizard schreibt `year=sourceYear`, Auto schreibt `year=targetYear`, Dedup-Check vergleicht nur `year` und übersieht das Duplikat) per Soft-Delete auf — ABER er überspringt Kandidaten, an denen `budget_transactions.allocation_id` hängt, um keine bereits verbuchte Allokation zu zerstören. Diese Fälle sollen einen GoBD-konformen Storno (Counter-Allokation) statt Hard-Delete bekommen.

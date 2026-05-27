@@ -87,6 +87,7 @@ export const AUDIT_ACTIONS = [
   "budget_transaction_corrected",
   "budget_transaction_corrected_batch",
   "budget_45b_gap_corrected",
+  "appointment_import_reconciled_cancelled",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
