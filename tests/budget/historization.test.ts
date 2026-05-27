@@ -128,6 +128,61 @@ describe("Task #440 — Settings-Historisierung", () => {
     expect(active[0].monthlyLimitCents).toBe(20000);
   });
 
+  it("Erstanlage + zwei Same-day-Updates ergibt weiterhin genau eine offene Zeile", async () => {
+    const customerId = await freshCustomer("T440-SAMEDAY-2");
+    const userId = await getActorUserId();
+    const today = todayISO();
+
+    await upsertBudgetTypeSettings(
+      customerId,
+      [{ budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: 10000 }],
+      undefined,
+      userId,
+    );
+    await upsertBudgetTypeSettings(
+      customerId,
+      [{ budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: 15000 }],
+      undefined,
+      userId,
+    );
+    await upsertBudgetTypeSettings(
+      customerId,
+      [{ budgetType: "umwandlung_45a", enabled: true, priority: 3, monthlyLimitCents: 20000 }],
+      undefined,
+      userId,
+    );
+
+    const rows = await db
+      .select()
+      .from(customerBudgetTypeSettings)
+      .where(eq(customerBudgetTypeSettings.customerId, customerId));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].monthlyLimitCents).toBe(20000);
+    expect(rows[0].priority).toBe(3);
+    expect(rows[0].validTo).toBeNull();
+
+    // Same-day-Updates dürfen weder einen "transition"- noch einen
+    // "in_place_update"-Audit-Eintrag erzeugen (keine echte Historie).
+    // Erstanlage darf weiterhin als "create" geloggt werden.
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.entityType, "budget"),
+          eq(auditLog.entityId, customerId),
+          eq(auditLog.action, "budget_type_settings_transition"),
+        ),
+      );
+    const kinds = audits.map((a) => (a.metadata as { kind?: string } | null)?.kind);
+    expect(kinds).not.toContain("transition");
+    expect(kinds).not.toContain("in_place_update");
+
+    const active = await getActiveBudgetTypeSettings(customerId, today);
+    expect(active[0].monthlyLimitCents).toBe(20000);
+  });
+
   it("Echte Transition (alte Zeile war an vorherigem Tag in Kraft) schließt validTo=heute und legt neue Zeile validFrom=morgen an", async () => {
     const customerId = await freshCustomer("T440-UPDATE");
     const userId = await getActorUserId();

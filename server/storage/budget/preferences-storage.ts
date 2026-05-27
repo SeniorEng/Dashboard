@@ -6,7 +6,7 @@ import {
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
 import { and, asc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
-import { addDays, todayISO } from "@shared/utils/datetime";
+import { addDays, formatDateISO, todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { auditService } from "../../services/audit";
@@ -214,7 +214,12 @@ export async function upsertBudgetTypeSettings(
         //       — d.h. die Zeile existiert noch keinen Werktag, kann also keine
         //       reale Buchung referenziert haben.
         const oldValidFrom = current.validFrom;
-        const createdToday = current.createdAt ? current.createdAt.toISOString().slice(0, 10) === today : false;
+        // Wichtig: lokale (Berlin-)Datums-Formatierung verwenden, NICHT
+        // `toISOString().slice(0,10)` — letzteres liefert UTC und führt
+        // nachts zwischen 00:00 und 02:00 Berlin-Zeit zu einem Off-by-One
+        // (createdAt-UTC-Datum = gestern, today-Berlin = heute), wodurch
+        // Same-day-Updates fälschlich als Transition erkannt würden.
+        const createdToday = current.createdAt ? formatDateISO(current.createdAt) === today : false;
         // Task #608 (Revision nach Code-Review): Den Backfill-Sentinel
         // '1970-01-01' beim Edit NICHT in-place ersetzen — das hätte für
         // historische asOfDate-Lookups (`getActiveBudgetTypeSettings(date)`,
@@ -256,8 +261,13 @@ export async function upsertBudgetTypeSettings(
 
     // 3. Audit-Log pro Transition. FK auf users.id → bei fehlendem userId
     // schreiben wir nichts (synthetische IDs sind nicht möglich).
+    // Same-day-in-place-Korrekturen werden NICHT als Transition geloggt
+    // (Task #652): die alte Version war nie "in Kraft", es gibt also keine
+    // historische Zustandsänderung — der Eintrag würde nur Audit-Rauschen
+    // erzeugen.
     if (userId != null) {
       for (const entry of auditEntries) {
+        if (entry.kind === "in_place_update") continue;
         await auditService.log(userId, "budget_type_settings_transition", "budget", customerId, {
           customerId,
           budgetType: entry.budgetType,
