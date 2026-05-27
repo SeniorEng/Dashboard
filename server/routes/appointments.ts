@@ -1007,7 +1007,17 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
     return sendBadRequest(res, "Termine können nicht auf Samstage oder Sonntage verschoben werden.");
   }
   
-  const validation = appointmentService.validateAllUpdateRules(existingAppointment, validatedData);
+  // Task #673: Schedule-Guard darf nur auf vom Client GESETZTE Schedule-Felder
+  // anschlagen. `durationPromised`/`scheduledEnd` werden weiter oben für reine
+  // `services`-PATCHes auf documenting-Terminen automatisch nachgezogen
+  // (Doku-Wizard-Korrektur, siehe #638) — diese derivierten Werte dürfen
+  // den Lock nicht auslösen.
+  const clientProvidedFields = new Set<string>(Object.keys(req.body || {}));
+  const validation = appointmentService.validateAllUpdateRules(
+    existingAppointment,
+    validatedData,
+    { clientProvidedFields },
+  );
   if (!validation.valid) {
     return sendForbidden(res, validation.error!, validation.message!);
   }

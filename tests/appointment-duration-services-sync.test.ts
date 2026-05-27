@@ -195,6 +195,25 @@ describe("Termin-Dauer ↔ Service-Zeilen Konsistenz (Marcel-Bug)", () => {
     expect(patchRes.status).toBe(200);
   });
 
+  it("Task #673 — PATCH scheduledStart auf documenting Termin bleibt geblockt (403)", async () => {
+    const apptId = await findFreeSlot(
+      [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      ["07:00", "07:30", "08:00"],
+    );
+    const startRes = await apiPatch<any>(`/api/appointments/${apptId}`, {
+      status: "documenting",
+    });
+    expect(startRes.status).toBe(200);
+
+    // Direkter Versuch, die geplante Startzeit auf einem documenting-Termin
+    // zu verschieben, muss weiterhin mit 403 abgelehnt werden — der
+    // Schedule-Guard aus #650 gilt für vom Client gesetzte Schedule-Felder.
+    const patchRes = await apiPatch<any>(`/api/appointments/${apptId}`, {
+      scheduledStart: "09:00:00",
+    });
+    expect(patchRes.status).toBe(403);
+  });
+
   it("PATCH mit widersprüchlicher Dauer + Services wird mit 400 abgelehnt", async () => {
     const apptId = await findFreeSlot([{ serviceId: hwServiceId, durationMinutes: 30 }]);
 

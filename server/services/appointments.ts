@@ -375,12 +375,22 @@ class AppointmentService {
   validateSchedulingChanges(
     currentStatus: string,
     updates: UpdateAppointment,
+    options?: { clientProvidedFields?: ReadonlySet<string> },
   ): ValidationResult {
+    // Task #673: `durationPromised`/`scheduledEnd` werden von der Route
+    // automatisch aus einem reinen `services`-PATCH abgeleitet (Doku-Wizard
+    // korrigiert die tatsächliche Dauer). Solche derivierten Werte dürfen
+    // den Schedule-Guard NICHT auslösen — nur was der Client wirklich
+    // geschickt hat, gilt als Schedule-Change.
+    const provided = options?.clientProvidedFields;
+    const isClientField = (key: string): boolean =>
+      provided ? provided.has(key) : true;
+
     const hasSchedulingChanges =
-      updates.date !== undefined ||
-      updates.scheduledStart !== undefined ||
-      updates.scheduledEnd !== undefined ||
-      updates.durationPromised !== undefined;
+      (updates.date !== undefined && isClientField("date")) ||
+      (updates.scheduledStart !== undefined && isClientField("scheduledStart")) ||
+      (updates.scheduledEnd !== undefined && isClientField("scheduledEnd")) ||
+      (updates.durationPromised !== undefined && isClientField("durationPromised"));
 
     if (hasSchedulingChanges && currentStatus !== "scheduled") {
       return {
@@ -424,13 +434,14 @@ class AppointmentService {
 
   validateAllUpdateRules(
     existingAppointment: Appointment,
-    updates: UpdateAppointment
+    updates: UpdateAppointment,
+    options?: { clientProvidedFields?: ReadonlySet<string> },
   ): ValidationResult {
     const currentStatus = existingAppointment.status;
 
     const checks = [
       () => this.validateStatusTransition(currentStatus, updates.status, updates),
-      () => this.validateSchedulingChanges(currentStatus, updates),
+      () => this.validateSchedulingChanges(currentStatus, updates, options),
       () => this.validateNotesChange(currentStatus, updates),
       () => this.validateDocumentationChanges(currentStatus, updates),
     ];
