@@ -64,6 +64,9 @@ export function LogoUploadCard({ companyData }: LogoUploadCardProps) {
     },
   });
 
+  // onError-waived: onError-Handler steckt in buildUploadOptions/buildDeleteOptions
+  // (oben definiert) — beide rufen denselben Fehler-Toast auf wie die übrigen
+  // Mutations. Aufruf ist nur die Verdrahtung der Options-Factory mit useMutation.
   const logoUploadMutation = useMutation(buildUploadOptions("logoUrl", setLogoUploading, "App-Logo"));
   const logoDeleteMutation = useMutation(buildDeleteOptions("logoUrl", "App-Logo"));
   const pdfLogoUploadMutation = useMutation(buildUploadOptions("pdfLogoUrl", setPdfLogoUploading, "Dokumenten-Logo"));

@@ -94,7 +94,11 @@ export function useCustomerDetailForm(
           lastAutoFilledStadt.current = result.data.results[0];
           setContactForm(f => ({ ...f, stadt: result.data.results[0] }));
         }
-      } catch {}
+      } catch {
+        // PLZ-Autofill ist ein reines Convenience-Feature. Schlägt der OpenPLZ-
+        // Lookup fehl (Offline, 5xx), tippt der Nutzer die Stadt manuell —
+        // ein Toast wäre hier eher störend als hilfreich.
+      }
       setPlzLoading(false);
     }, 400);
     return () => { if (plzTimeoutRef.current) clearTimeout(plzTimeoutRef.current); };

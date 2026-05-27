@@ -107,7 +107,7 @@ export function useCreateCustomer() {
       // Erfolgs-Toast wird vom Wizard-Hook mit Hinweisen (Pending-Folgeschritte)
       // gesteuert. Hier kein Standard-Toast mehr, sonst doppelte Meldungen.
     },
-    // Kein generischer Fehler-Toast: Der Wizard-Hook differenziert bewusst
+    // onError-waived: Der Wizard-Hook differenziert bewusst
     // zwischen DUPLICATE_WARNING / RECENT_DUPLICATE_WARNING / IDEMPOTENCY_KEY_REUSED
     // / NETWORK_ERROR / 5xx und zeigt jeweils eine spezifische Meldung mit
     // Retry-Hinweis (Task #376). Ein zusätzlicher generischer Toast würde
