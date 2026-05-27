@@ -345,6 +345,19 @@ async function runStartupTasks() {
       log(`Carryover-Duplikat-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #684: Doppel-Carryovers (manuell + automatisch, gleiches Quelljahr)
+    // bereinigen — der partielle Unique-Index greift bei `month IS NULL`
+    // nicht, und vor dem Fix konnte der Auto-Pfad neben einer manuell
+    // gesetzten Zeile eine zweite 131 €-Zeile anlegen.
+    const { backfillTask684OrphanAutoCarryovers } = await import(
+      "./startup/backfill-task-684-orphan-auto-carryovers"
+    );
+    try {
+      await backfillTask684OrphanAutoCarryovers();
+    } catch (err) {
+      log(`Carryover-Doppelallokation-Backfill (#684) fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #576: Idempotente Korrektur — durch den entfernten Storno-
     // Side-Effekt fälschlich soft-gelöschte Leistungsnachweise reaktivieren
     // (Prod-IDs 8 und 48, 22.05.2026). Greift nur, solange die Ziel-IDs

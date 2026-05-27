@@ -885,23 +885,33 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   const d = _tx ?? db;
   const { year: curYear } = currentYearAndMonth();
 
-  const carryoverAllocations = await budgetAllocationsRepo.selectFrom(d)
+  // Task #684 — Dedup über ALLE Carryover-Zeilen (aktiv UND soft-gelöscht).
+  // Eine vom Admin gelöschte Carryover-Zeile (`deleted_at IS NOT NULL`) ist
+  // ein expliziter „nicht regenerieren"-Marker — sonst legt der Auto-Pfad bei
+  // der nächsten Budget-Übersicht/-Buchung sofort wieder einen 131 €-Übertrag
+  // an und das Löschen wirkt nicht. Für Sum-/Verfügbarkeits-Berechnungen
+  // weiter unten brauchen wir aber nur die aktiven Zeilen.
+  const allCarryoverAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
       eq(budgetAllocations.source, "carryover"),
-      isNull(budgetAllocations.deletedAt)
     ));
+  const carryoverAllocations = allCarryoverAllocations.filter(a => a.deletedAt == null);
 
-  const existingCarryoverYears = new Set(carryoverAllocations.map(a => a.year));
+  // Dedup-Set umfasst aktive UND soft-gelöschte Jahre → blockiert sowohl
+  // Doppelanlage neben einer manuell gesetzten Zeile als auch die
+  // Wiederbelebung einer vom Admin bewusst gelöschten Zeile.
+  const existingCarryoverYears = new Set(allCarryoverAllocations.map(a => a.year));
   // Task #601 — Defensiver Dedup zusätzlich über (validFrom|expiresAt). Vor
   // dem Fix verwendete der Wizard-Pfad `year = sourceYear`, der Auto-Pfad
   // `year = targetYear`. Der reine Year-Dedup hat solche Paare nicht erkannt
   // und doppelte Carryovers angelegt. Für Altdaten und gegen zukünftige
   // Convention-Drifts klemmen wir hier zusätzlich gegen identische
-  // Gültigkeitsfenster.
+  // Gültigkeitsfenster. Wirkt sowohl für aktive als auch für soft-gelöschte
+  // Zeilen (Task #684).
   const existingCarryoverWindows = new Set(
-    carryoverAllocations.map(a => `${a.validFrom}|${a.expiresAt ?? ""}`)
+    allCarryoverAllocations.map(a => `${a.validFrom}|${a.expiresAt ?? ""}`)
   );
 
   const preferences = await getBudgetPreferences(customerId, _tx);
