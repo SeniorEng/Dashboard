@@ -25,6 +25,16 @@ interface BudgetTypeSetting {
   yearlyLimitCents: number | null;
   validFrom: string | null;
   validTo: string | null;
+  // Task #703 — Heute wirksamer Vorgänger bei nahtlosem Übergang. Wenn gesetzt,
+  // gilt diese Latest-Intent-Zeile erst ab validFrom, der Topf ist heute aber
+  // bereits aktiv (vorherige Zeile schließt mit validTo=heute).
+  effectiveToday?: {
+    validFrom: string | null;
+    validTo: string | null;
+    enabled: boolean;
+    monthlyLimitCents: number | null;
+    yearlyLimitCents: number | null;
+  } | null;
 }
 
 interface InitialBalanceAllocation {
@@ -169,6 +179,11 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
     },
     onSuccess: async () => {
       await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      // Task #703 — Nach dem Speichern muss `budget-type-settings` frisch geladen
+      // werden, damit Form-Init (validFrom/limits) und Übergangs-Banner die
+      // soeben angelegte Transition (alte Zeile validTo=heute, neue Zeile
+      // validFrom=morgen) sehen.
+      await queryClient.refetchQueries({ queryKey: ["budget-type-settings", customerId], type: "active" });
       invalidateRelated(queryClient, "budget", { customerId });
       toast({ title: "Budget-Einstellungen gespeichert" });
       setHasChanges(false);
@@ -293,6 +308,19 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
 
               {setting.enabled && (
                 <div className="mt-2 ml-[52px] space-y-2">
+                  {/* Task #703 — Nahtloser GoBD-Übergang: Latest-Intent-Zeile
+                      gilt ab validFrom (zukunft), aber `effectiveToday` deckt
+                      heute noch ab. Im Formular sehen Admins die Werte der
+                      kommenden Zeile — der Hinweis macht klar, wann die
+                      Änderung greift und was bis dahin gilt. */}
+                  {setting.effectiveToday && setting.validFrom && setting.validFrom > todayISO() && (
+                    <p className="text-[11px] text-gray-500" data-testid={`hint-pending-transition-${setting.budgetType}`}>
+                      Letzte Änderung greift ab {setting.validFrom}. Bis dahin gilt:
+                      {" "}{centsToEuroString(setting.effectiveToday.monthlyLimitCents) || centsToEuroString(setting.effectiveToday.yearlyLimitCents) || "—"}
+                      {setting.effectiveToday.monthlyLimitCents != null ? " €/Monat" : setting.effectiveToday.yearlyLimitCents != null ? " €/Jahr" : ""}
+                      .
+                    </p>
+                  )}
                   {isMonthlyBudget(setting.budgetType) && (
                     <div>
                       <Label className="text-xs text-gray-500">Unser Anteil (€/Monat)</Label>

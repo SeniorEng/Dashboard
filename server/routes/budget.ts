@@ -293,11 +293,12 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   // Clear+Save würde dann zum No-Op (die neue offene Zeile hat `validTo = null`
   // bereits, der Equality-Check sieht keine Änderung). Booking-Pfade nutzen
   // weiterhin `getActiveBudgetTypeSettings(transactionDate)`.
-  const settings = await budgetLedgerStorage.getLatestBudgetTypeSettings(customerId);
-  const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }[] = [
-    { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
-    { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
-    { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+  // Task #703 — Latest-Intent + `effectiveToday` für UI-Übergangs-Erkennung.
+  const settings = await budgetLedgerStorage.getLatestBudgetTypeSettingsWithTransition(customerId);
+  const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null; effectiveToday: null }[] = [
+    { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
+    { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
+    { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
   ];
   if (settings.length === 0) {
     const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId);

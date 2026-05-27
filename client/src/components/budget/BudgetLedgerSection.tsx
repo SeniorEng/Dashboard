@@ -56,6 +56,16 @@ interface BudgetTypeSetting {
   priority: number;
   validFrom: string | null;
   validTo: string | null;
+  // Task #703 — Wenn gesetzt, ist diese (zukunfts-)Zeile zwar latest-intent,
+  // aber eine andere Zeile gleichen Topfs deckt den heutigen Tag bereits ab
+  // (nahtloser GoBD-Übergang). In dem Fall KEIN „Noch nicht aktiv"-Banner.
+  effectiveToday?: {
+    validFrom: string | null;
+    validTo: string | null;
+    enabled: boolean;
+    monthlyLimitCents: number | null;
+    yearlyLimitCents: number | null;
+  } | null;
 }
 
 interface BudgetTransaction {
@@ -123,13 +133,24 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
   });
 
   const today = todayISO();
+  // Task #703 — `effectiveToday` (vom GET /type-settings beigelegt) signalisiert
+  // einen nahtlosen GoBD-Übergang: die Latest-Intent-Zeile gilt erst ab morgen,
+  // aber die Vorgänger-Zeile deckt heute noch ab. In dem Fall darf KEIN
+  // „Noch nicht aktiv"-Banner erscheinen — die Topf-Funktion ist heute aktiv.
+  // Wir gelten auch als aktiv, wenn entweder die Latest-Intent-Zeile selbst
+  // heute gültig ist ODER ein Übergangs-Vorgänger heute aktiv ist.
   const enabledTypes = (typeSettings || [])
     .filter(s => s.enabled)
     .sort((a, b) => a.priority - b.priority)
-    .map(s => ({
-      ...s,
-      isCurrentlyActive: (!s.validFrom || today >= s.validFrom) && (!s.validTo || today <= s.validTo),
-    }));
+    .map(s => {
+      const ownActive = (!s.validFrom || today >= s.validFrom) && (!s.validTo || today <= s.validTo);
+      const hasTransitionPredecessor = s.effectiveToday?.enabled === true;
+      return {
+        ...s,
+        isCurrentlyActive: ownActive || hasTransitionPredecessor,
+        hasTransitionPredecessor,
+      };
+    });
 
   const handleRefresh = () => {
     invalidateRelated(queryClient, "budget", { customerId });
@@ -163,20 +184,36 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
       {enabledTypes.map(setting => {
         const budgetType = setting.budgetType;
         const label = BUDGET_TYPE_LABELS[budgetType] || budgetType;
-        const inactiveLabel = !setting.isCurrentlyActive
-          ? setting.validFrom && today < setting.validFrom
-            ? `(ab ${setting.validFrom} gültig)`
-            : `(abgelaufen seit ${setting.validTo})`
-          : null;
+        // Task #703 — Drei Zustände:
+        //   1. isCurrentlyActive=true & hasTransitionPredecessor=true → nahtloser
+        //      Übergang läuft, dezenter Info-Hinweis (kein gelbes Warn-Banner).
+        //   2. isCurrentlyActive=false & validFrom>today → echter Future-Start ohne
+        //      Vorgänger, gelbes „Noch nicht aktiv"-Banner.
+        //   3. isCurrentlyActive=false & validTo<today → abgelaufen, gelbes Banner.
+        const isFutureStart = !setting.isCurrentlyActive && setting.validFrom != null && today < setting.validFrom;
+        const isExpired = !setting.isCurrentlyActive && setting.validTo != null && today > setting.validTo;
+        const isInTransition = setting.isCurrentlyActive && setting.hasTransitionPredecessor && setting.validFrom != null && today < setting.validFrom;
+        const inactiveLabel = isFutureStart
+          ? `(ab ${setting.validFrom} gültig)`
+          : isExpired
+            ? `(abgelaufen seit ${setting.validTo})`
+            : null;
 
         const wrapInactive = (content: React.ReactNode) => (
           <div key={budgetType} className={!setting.isCurrentlyActive ? "opacity-60 relative" : ""}>
             {!setting.isCurrentlyActive && (
               <div className="flex items-center gap-2 mb-2">
                 <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300" data-testid={`badge-inactive-${budgetType}`}>
-                  {setting.validFrom && today < setting.validFrom ? "Noch nicht aktiv" : "Abgelaufen"}
+                  {isFutureStart ? "Noch nicht aktiv" : "Abgelaufen"}
                 </Badge>
                 <span className="text-xs text-amber-600 font-medium">{inactiveLabel}</span>
+              </div>
+            )}
+            {isInTransition && (
+              <div className="flex items-center gap-2 mb-2" data-testid={`hint-transition-${budgetType}`}>
+                <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200">
+                  Änderung greift ab {setting.validFrom}
+                </Badge>
               </div>
             )}
             {content}

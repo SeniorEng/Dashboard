@@ -159,6 +159,74 @@ export async function getLatestBudgetTypeSettings(
   return Array.from(byType.values()).sort((a, b) => a.priority - b.priority);
 }
 
+/**
+ * Task #703 — Snapshot der heute wirksamen Topf-Zeile (für UI-Übergangs-Erkennung).
+ * Nur die Felder, die der UI helfen, einen nahtlosen Übergang von einer
+ * heute-noch-aktiven Vorgänger-Zeile zur ab-morgen-gültigen Nachfolger-Zeile
+ * zu erkennen. Keine GoBD-Semantik.
+ */
+export type EffectiveTodaySnapshot = {
+  validFrom: string | null;
+  validTo: string | null;
+  enabled: boolean;
+  monthlyLimitCents: number | null;
+  yearlyLimitCents: number | null;
+};
+
+export type BudgetTypeSettingWithTransition = CustomerBudgetTypeSetting & {
+  /**
+   * Wenn gesetzt: Diese Latest-Intent-Zeile ist NOCH NICHT in Kraft (validFrom
+   * liegt in der Zukunft), aber eine andere Zeile gleichen Topfs deckt den
+   * heutigen Tag noch ab. Die UI nutzt das, um statt eines irreführenden
+   * „Noch nicht aktiv"-Banners einen neutralen Übergangs-Hinweis zu zeigen.
+   * Wenn null: Latest-Intent-Zeile ist selbst heute aktiv oder es gibt keinen
+   * Vorgänger (echter Future-Start oder abgelaufen).
+   */
+  effectiveToday: EffectiveTodaySnapshot | null;
+};
+
+/**
+ * Task #703 — Liefert wie {@link getLatestBudgetTypeSettings} pro Topf die
+ * Latest-Intent-Zeile, ergänzt aber pro Eintrag um eine
+ * `effectiveToday`-Momentaufnahme: die Zeile, die HEUTE tatsächlich gilt,
+ * falls sie von der Latest-Intent-Zeile abweicht (typischer Fall: Admin
+ * hat soeben gespeichert → alte Zeile läuft bis heute, neue Zeile gilt ab
+ * morgen).
+ *
+ * Die Funktion ist read-only und teilt sich den Auswahl-Algorithmus mit
+ * `getLatestBudgetTypeSettings`. Sie holt zusätzlich die zum heutigen
+ * Datum aktive Zeile pro Topf und legt sie unter `effectiveToday` bei,
+ * wenn sie eine andere ID hat als die Latest-Intent-Zeile.
+ */
+export async function getLatestBudgetTypeSettingsWithTransition(
+  customerId: number,
+  _tx?: DbClient,
+): Promise<BudgetTypeSettingWithTransition[]> {
+  const today = todayISO();
+  const d = _tx ?? db;
+  const [latest, activeToday] = await Promise.all([
+    getLatestBudgetTypeSettings(customerId, d),
+    getActiveBudgetTypeSettings(customerId, today, d),
+  ]);
+  const activeByType = new Map(activeToday.map(r => [r.budgetType, r]));
+  return latest.map(row => {
+    const effective = activeByType.get(row.budgetType);
+    if (!effective || effective.id === row.id) {
+      return { ...row, effectiveToday: null };
+    }
+    return {
+      ...row,
+      effectiveToday: {
+        validFrom: effective.validFrom,
+        validTo: effective.validTo,
+        enabled: effective.enabled,
+        monthlyLimitCents: effective.monthlyLimitCents,
+        yearlyLimitCents: effective.yearlyLimitCents,
+      },
+    };
+  });
+}
+
 type SettingPayload = {
   budgetType: string;
   enabled: boolean;
