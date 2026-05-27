@@ -9,7 +9,7 @@ import {
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
-import { todayISO, parseLocalDate, currentYearAndMonth } from "@shared/utils/datetime";
+import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, clampToStatutoryMax } from "@shared/domain/budgets";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
@@ -424,8 +424,21 @@ async function calculateAllocated45b(
 
   // Task #603 — Per-Kunde konfigurierbarer §45b-Monats-Anteil ist historisiert.
   // Wir holen ALLE §45b-Zeilen einmal und schlagen pro iteriertem Monat die
-  // damals gültige Zeile nach (Mitte-des-Monats-Stichtag). So sehen historische
-  // Monate den damals gültigen Anteil und keine spätere Änderung wirkt rückwirkend.
+  // damals gültige Zeile nach. Verglichen wird gegen das **Monatsende**
+  // (siehe Task #668): ein einziger Mitte-des-Monats-Stichtag würde einen
+  // Settings-Wechsel, der erst NACH dem 15. greift (z.B. `validFrom = heute`
+  // an einem Tag > 15., oder die append-only-Transition mit
+  // `validFrom = morgen = 16.`+), für den aktuellen Monat verschlucken — die
+  // Monatsaufstockung fiele dann auf einen veralteten / leeren Fallback
+  // zurück. Mit Monatsende-Lookup matcht jede Zeile, die bis zum Ende des
+  // Monats in Kraft getreten ist; eine später (im Folgemonat) angelegte
+  // Zeile bleibt für historische Monate korrekt unsichtbar, weil ihr
+  // `validFrom` > Monatsende des historischen Monats liegt.
+  //
+  // Bei einer Transition innerhalb desselben Monats (alte Zeile mit
+  // `validTo < Monatsende` + neue Zeile mit `validFrom <= Monatsende`)
+  // matcht nur die NEUE Zeile — was dem Nutzer-Intent „ab heute gilt der
+  // neue Anteil" entspricht.
   const all45bSettings = await d.select()
     .from(customerBudgetTypeSettings)
     .where(and(
@@ -438,11 +451,23 @@ async function calculateAllocated45b(
 
   const monthlyAmountFor = (year: number, month: number): number => {
     if (all45bSettings.length === 0) return fallbackMonthlyAmount;
-    const dateStr = `${year}-${String(month).padStart(2, "0")}-15`;
-    const row = all45bSettings.find(r =>
-      (r.validFrom == null || r.validFrom <= dateStr) &&
-      (r.validTo == null || r.validTo >= dateStr)
-    );
+    const monthEnd = lastDayOfMonth(year, month);
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    // Wähle die Zeile mit dem spätesten `validFrom`, die bis Monatsende in
+    // Kraft getreten ist und deren Geltungsfenster den Monat berührt
+    // (validTo >= Monatsstart oder offen). `all45bSettings` ist nach
+    // `validFrom` aufsteigend sortiert, daher iterieren wir rückwärts und
+    // nehmen den ersten Treffer.
+    let row: CustomerBudgetTypeSetting | undefined;
+    for (let i = all45bSettings.length - 1; i >= 0; i--) {
+      const r = all45bSettings[i];
+      const startsByMonthEnd = r.validFrom == null || r.validFrom <= monthEnd;
+      const endsAfterMonthStart = r.validTo == null || r.validTo >= monthStart;
+      if (startsByMonthEnd && endsAfterMonthStart) {
+        row = r;
+        break;
+      }
+    }
     if (!row) return fallbackMonthlyAmount;
     if (row.monthlyLimitCents == null) return DEFAULT_MONTHLY_BUDGET_CENTS;
     const clamped = clampToStatutoryMax({
