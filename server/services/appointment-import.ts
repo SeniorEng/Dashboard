@@ -761,18 +761,31 @@ export async function executeImport(
       }
 
       try {
-        // Task #647: Vorher-Werte für Audit-Log laden (außerhalb der Tx —
-        // reine Reads, keine Rennbedingung mit dem darauf folgenden Update).
-        const [beforeAppt] = await db
-          .select({
+        // Task #647 / #674: Vorher-Werte für Audit-Log laden (außerhalb der
+        // Tx — reine Reads, keine Rennbedingung mit dem darauf folgenden
+        // Update). Über `appointmentsRepo` (statt direktem Tabellen-Read)
+        // erzwingen wir den `deletedAt IS NULL`-Filter — soft-gelöschte
+        // Termine dürfen nicht still über den Excel-Import wiederbelebt
+        // werden (Soft-Delete-Coverage-Architektur, Task #454).
+        const [beforeAppt] = await appointmentsRepo
+          .selectColumnsFrom({
             assignedEmployeeId: appointments.assignedEmployeeId,
             scheduledEnd: appointments.scheduledEnd,
             durationPromised: appointments.durationPromised,
             travelKilometers: appointments.travelKilometers,
           })
-          .from(appointments)
-          .where(eq(appointments.id, appointmentId))
+          .where(and(eq(appointments.id, appointmentId), appointmentsRepo.activeOnly()))
           .limit(1);
+
+        // Task #674: Wenn der Termin in der Zwischenzeit soft-gelöscht
+        // wurde, sauber überspringen statt zu crashen.
+        if (!beforeAppt) {
+          result.errors.push({
+            rowIndex: row.rowIndex,
+            error: `Termin #${appointmentId} ist nicht mehr aktiv (gelöscht) — Update übersprungen.`,
+          });
+          continue;
+        }
 
         const beforeSvcs = await db
           .select({

@@ -284,9 +284,14 @@ export async function executeReconcile(params: {
 
   const batchId = params.batchId ?? randomUUID();
 
-  // Re-Check aller Termine in einer Sammel-Abfrage.
-  const rows = await db
-    .select({
+  // Task #674: Re-Check aller Termine in einer Sammel-Abfrage. Bewusst über
+  // `appointmentsRepo.selectColumnsFrom(...)` OHNE `activeOnly()`, damit
+  // soft-gelöschte Zeilen weiterhin gefunden werden — der Reconcile-Pfad
+  // muss `deletedAt` lesen, um Drift-Fälle zu erkennen. Der Filter wird
+  // nicht vergessen, sondern absichtlich weggelassen; die Repo-Vermittlung
+  // dient hier der Architektur-Konsistenz (Soft-Delete-Coverage-Test).
+  const rows = await appointmentsRepo
+    .selectColumnsFrom({
       id: appointments.id,
       customerId: appointments.customerId,
       date: appointments.date,
@@ -297,7 +302,6 @@ export async function executeReconcile(params: {
       assignedEmployeeId: appointments.assignedEmployeeId,
       performedByEmployeeId: appointments.performedByEmployeeId,
     })
-    .from(appointments)
     .where(inArray(appointments.id, appointmentIds));
 
   const rowById = new Map(rows.map((r) => [r.id, r]));
