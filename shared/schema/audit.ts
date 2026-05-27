@@ -43,6 +43,7 @@ export const AUDIT_ACTIONS = [
   "appointment_reopened",
   "initial_balance_set",
   "initial_balance_deleted",
+  "carryover_set",
   "service_record_deleted",
   "prospect_converted",
   "employee_handover",

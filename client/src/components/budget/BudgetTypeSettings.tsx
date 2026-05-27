@@ -392,7 +392,12 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                       </button>
 
                       {expandedInitialBalance[setting.budgetType] && (
-                        <div className="border-t border-gray-100 pt-2">
+                        <div className="border-t border-gray-100 pt-2 space-y-3">
+                          {/* Task #670 — Restguthaben aus Vorjahr (Carryover, verfällt 30.06.) */}
+                          <CarryoverSection
+                            customerId={customerId}
+                            budgetType={setting.budgetType}
+                          />
                           <InitialBalanceSection
                             customerId={customerId}
                             budgetType={setting.budgetType}
@@ -594,7 +599,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
   const [month, setMonth] = useState(getCurrentYearMonth());
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
-  const { data: allocations, isLoading } = useQuery<InitialBalanceAllocation[]>({
+  const { data: allAllocations, isLoading } = useQuery<InitialBalanceAllocation[]>({
     queryKey: ["initial-balances", customerId, budgetType],
     queryFn: async () => {
       const result = await api.get<InitialBalanceAllocation[]>(`/budget/${customerId}/initial-balances/${budgetType}`);
@@ -602,6 +607,12 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
     },
     staleTime: 30000,
   });
+
+  // Task #670 — Startwert-Sektion zeigt NUR `initial_balance`. Carryover wird
+  // separat in `CarryoverSection` gerendert, damit die beiden fachlich
+  // unterschiedlichen Töpfe ("läuft nicht ab" vs. "verfällt 30.06.") in der
+  // UI nicht mehr vermischt werden.
+  const allocations = allAllocations?.filter(a => a.source !== "carryover");
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -639,7 +650,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
   });
 
   const latestAllocation = allocations?.[0];
-  const hasHistory = allocations && allocations.length > 0;
+  const hasHistory = !!allocations && allocations.length > 0;
   const hasValidInput = amount && (euroStringToCents(amount) ?? 0) > 0;
 
   const selectedYear = parseInt(month.split("-")[0]);
@@ -881,6 +892,213 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
           ))}
         </div>
       )}
+
+      {isLoading && <p className="text-xs text-gray-500 mt-2">Laden...</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Task #670 — Restguthaben aus Vorjahr (Carryover, verfällt 30.06.)
+//
+// Eigene Sektion, getrennt vom Startwert. Carryover ist nur für §45b relevant
+// (SGB XI §45b Abs. 3: ungenutzte Beträge übertragen sich ins Folgehalbjahr
+// und verfallen am 30.06.). Pro Kunde ein aktiver Eintrag pro Quelljahr —
+// Server validiert das via Quelljahr-Dedup in `upsertCarryoverAllocation`.
+// ---------------------------------------------------------------------------
+interface CarryoverSectionProps {
+  customerId: number;
+  budgetType: string;
+}
+
+function CarryoverSection({ customerId, budgetType }: CarryoverSectionProps) {
+  // Carryover ist gem. §45b SGB XI Abs. 3 nur für den Entlastungsbetrag
+  // definiert. Der Parent rendert die Sektion bereits nur für §45b — der
+  // Guard hier ist defensiv, MUSS aber vor allen Hooks stehen, damit die
+  // React-Hook-Reihenfolge bei Fehl-Aufrufen stabil bleibt.
+  const enabled = budgetType === "entlastungsbetrag_45b";
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const currentYear = new Date().getFullYear();
+  const [amount, setAmount] = useState("");
+  const [sourceYear, setSourceYear] = useState<number>(currentYear - 1);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+
+  const { data: allAllocations, isLoading } = useQuery<InitialBalanceAllocation[]>({
+    queryKey: ["initial-balances", customerId, budgetType],
+    queryFn: async () => {
+      const result = await api.get<InitialBalanceAllocation[]>(`/budget/${customerId}/initial-balances/${budgetType}`);
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
+    enabled,
+  });
+
+  const carryovers = allAllocations?.filter(a => a.source === "carryover") ?? [];
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const amountCents = euroStringToCents(amount);
+      if (!amountCents || amountCents <= 0) throw new Error("Bitte einen gültigen Betrag eingeben");
+      return unwrapResult(await api.post(`/budget/${customerId}/carryover/${budgetType}`, {
+        amountCents,
+        sourceYear,
+      }));
+    },
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
+      toast({ title: "Restguthaben aus Vorjahr gespeichert" });
+      setAmount("");
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    // Delete teilt sich den Initial-Balance-Endpoint — der Server akzeptiert
+    // dort sowohl `initial_balance` als auch `carryover`-Allokationen.
+    mutationFn: async (allocationId: number) => {
+      return unwrapResult(await api.delete(`/budget/${customerId}/initial-balance/${allocationId}`));
+    },
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
+      invalidateRelated(queryClient, "budget", { customerId });
+      toast({ title: "Restguthaben aus Vorjahr gelöscht" });
+      setDeleteConfirmId(null);
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
+    },
+  });
+
+  const sourceYearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 1 - i);
+  const hasValidInput = amount && (euroStringToCents(amount) ?? 0) > 0;
+  const existsForSelectedYear = carryovers.some(c => (c.year ?? 0) - 1 === sourceYear);
+  const targetYear = sourceYear + 1;
+
+  if (!enabled) return null;
+
+  return (
+    <div data-testid={`carryover-section-${budgetType}`}>
+      <Label className="text-xs text-gray-500 block mb-1">Restguthaben aus Vorjahr (verfällt 30.06.)</Label>
+
+      {carryovers.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {carryovers.map((c) => {
+            const src = (c.year ?? 0) - 1;
+            return (
+              <div
+                key={c.id}
+                className="flex items-center justify-between py-1 px-2 rounded text-sm bg-amber-50"
+                data-testid={`text-carryover-${budgetType}-${src}`}
+              >
+                <span className="text-gray-600 flex items-center gap-1.5">
+                  <StatusBadge type="info" value="Übertrag" size="sm" />
+                  <span>
+                    aus {src}
+                    {c.expiresAt ? ` (verfällt ${formatExpiryDE(c.expiresAt)})` : ""}
+                  </span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-amber-700">{formatCurrency(c.amountCents)}</span>
+                  {deleteConfirmId === c.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => deleteMutation.mutate(c.id)}
+                        className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded hover:bg-red-600"
+                        data-testid={`btn-confirm-delete-carryover-${budgetType}-${src}`}
+                      >
+                        Löschen
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="text-[10px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded hover:bg-gray-300"
+                      >
+                        Abbrechen
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmId(c.id)}
+                      className="p-0.5 text-gray-500 hover:text-red-500 rounded"
+                      title="Restguthaben aus Vorjahr löschen"
+                      data-testid={`btn-delete-carryover-${budgetType}-${src}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label className="text-[11px] text-gray-500">Restguthaben (€)</Label>
+            <Input
+              type="text"
+              inputMode="decimal"
+              placeholder="0,00"
+              value={amount}
+              onChange={(e) => {
+                if (isValidEuroInput(e.target.value)) setAmount(e.target.value);
+              }}
+              className="h-8 text-base"
+              data-testid={`input-carryover-amount-${budgetType}`}
+            />
+          </div>
+          <div>
+            <Label className="text-[11px] text-gray-500">Bezugsjahr</Label>
+            <select
+              value={sourceYear}
+              onChange={(e) => setSourceYear(parseInt(e.target.value))}
+              className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
+              data-testid={`select-carryover-source-year-${budgetType}`}
+            >
+              {sourceYearOptions.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {hasValidInput && existsForSelectedYear && (
+          <div
+            className="flex items-start gap-2 mt-1 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800"
+            data-testid={`warning-carryover-overwrite-${budgetType}`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>Für Bezugsjahr {sourceYear} ist bereits ein Restguthaben hinterlegt. Beim Speichern wird der Wert aktualisiert.</span>
+          </div>
+        )}
+
+        {hasValidInput && (
+          <div className="space-y-2 mt-1">
+            <p className="text-xs text-amber-700">
+              <Plus className="h-3 w-3 inline" /> {formatCurrency(euroStringToCents(amount) || 0)} Übertrag aus {sourceYear} – gültig 01.01.{targetYear}, verfällt 30.06.{targetYear}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              className="w-full h-7 text-xs"
+              data-testid={`btn-save-carryover-${budgetType}`}
+            >
+              <Save className="h-3 w-3 mr-1" />
+              {saveMutation.isPending ? "Wird gespeichert..." : (existsForSelectedYear ? "Restguthaben aktualisieren" : "Restguthaben speichern")}
+            </Button>
+          </div>
+        )}
+      </div>
 
       {isLoading && <p className="text-xs text-gray-500 mt-2">Laden...</p>}
     </div>

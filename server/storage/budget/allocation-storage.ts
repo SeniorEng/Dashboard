@@ -136,6 +136,114 @@ export async function upsertInitialBalanceAllocation(
   }
 }
 
+/**
+ * Task #670 — Manueller §45b-Carryover ("Restguthaben aus Vorjahr").
+ *
+ * Legt eine `source='carryover'` Allokation für `sourceYear + 1` an (validFrom
+ * = 01.01., expiresAt = 30.06. des Zieljahres, gem. SGB XI §45b Abs. 3).
+ * Per Kunde+Quelljahr genau eine aktive Zeile — beim Update wird die bestehende
+ * Zeile in-place aktualisiert (kein Drift mit dem Auto-Carryover-Pfad, da
+ * `ensureYearlyCarryover45b` denselben Quelljahr-Dedup über
+ * `existingCarryoverYears` macht).
+ *
+ * GoBD: Soft-gelöschte Carryover-Allokationen werden NICHT wiederbelebt
+ * (`deletedAt = null`); stattdessen wird eine frische Zeile angelegt und ein
+ * `budget_allocation_resurrected`-Audit-Eintrag geschrieben — analog zu
+ * `upsertInitialBalanceAllocation`.
+ */
+export async function upsertCarryoverAllocation(
+  params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string },
+  userId?: number
+): Promise<void> {
+  const targetYear = params.sourceYear + 1;
+  const validFrom = `${targetYear}-01-01`;
+  const expiresAt = `${targetYear}-06-30`;
+
+  const allExisting = await budgetAllocationsRepo.selectColumnsFrom(
+    { id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt },
+    db,
+  )
+    .where(and(
+      eq(budgetAllocations.customerId, params.customerId),
+      eq(budgetAllocations.budgetType, params.budgetType),
+      eq(budgetAllocations.source, "carryover"),
+      eq(budgetAllocations.year, targetYear),
+      isNull(budgetAllocations.month),
+    ))
+    .orderBy(desc(budgetAllocations.id));
+
+  const active = allExisting.filter(e => !e.deletedAt);
+  const deleted = allExisting.filter(e => !!e.deletedAt);
+
+  if (active.length > 0) {
+    await db.update(budgetAllocations)
+      .set({
+        amountCents: params.amountCents,
+        validFrom,
+        expiresAt,
+        notes: params.notes ?? null,
+      })
+      .where(eq(budgetAllocations.id, active[0].id));
+
+    for (let i = 1; i < active.length; i++) {
+      await db.update(budgetAllocations)
+        .set({ deletedAt: new Date() })
+        .where(eq(budgetAllocations.id, active[i].id));
+      if (userId != null) {
+        await auditService.log(userId, "budget_allocation_soft_deleted", "budget", params.customerId, {
+          customerId: params.customerId,
+          budgetType: params.budgetType,
+          allocationId: active[i].id,
+          reason: "GoBD: Duplikat-Bereinigung bei upsertCarryoverAllocation",
+          keptAllocationId: active[0].id,
+        });
+      }
+    }
+  } else if (deleted.length > 0) {
+    const inserted = await db.insert(budgetAllocations)
+      .values({
+        customerId: params.customerId,
+        budgetType: params.budgetType,
+        year: targetYear,
+        month: null,
+        amountCents: params.amountCents,
+        source: "carryover",
+        validFrom,
+        expiresAt,
+        notes: params.notes ?? null,
+        createdByUserId: userId,
+      })
+      .returning({ id: budgetAllocations.id });
+
+    if (userId != null) {
+      await auditService.log(userId, "budget_allocation_resurrected", "budget", params.customerId, {
+        customerId: params.customerId,
+        budgetType: params.budgetType,
+        year: targetYear,
+        source: "carryover",
+        amountCents: params.amountCents,
+        replacedSoftDeletedAllocationId: deleted[0].id,
+        newAllocationId: inserted[0]?.id ?? null,
+        reason: "GoBD: Ersatz-Insert statt Resurrect der soft-gelöschten carryover-Allokation",
+      });
+    }
+  } else {
+    await db.insert(budgetAllocations)
+      .values({
+        customerId: params.customerId,
+        budgetType: params.budgetType,
+        year: targetYear,
+        month: null,
+        amountCents: params.amountCents,
+        source: "carryover",
+        validFrom,
+        expiresAt,
+        notes: params.notes ?? null,
+        createdByUserId: userId,
+      });
+  }
+}
+
 export async function getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]> {
   // Task #608: Für §45b zusätzlich `carryover`-Allokationen ausliefern, damit
   // der Übertrag aus dem Vorjahr im UI „Startwert anpassen" sichtbar und

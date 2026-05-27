@@ -1235,34 +1235,36 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       waitUntil: "domcontentloaded",
     });
 
-    // Badge „Übertrag" muss sichtbar sein. Der Carryover wird in der
-    // §45b-Settings-Karte als `latestAllocation` mit testid
-    // `text-current-balance-entlastungsbetrag_45b` gerendert, nachdem der
-    // „Startwert festlegen"-Bereich aufgeklappt wurde.
+    // Task #670 — Carryover hat jetzt eine eigene Sektion (getrennt vom
+    // Startwert). Nach Aufklappen von „Startwert festlegen" muss die
+    // Carryover-Sektion sichtbar sein und mind. eine „Übertrag"-Zeile zeigen.
     const toggle = page.locator(
       "[data-testid='btn-toggle-initial-balance-entlastungsbetrag_45b']",
     );
     await expect(toggle).toBeVisible({ timeout: 10000 });
     await toggle.click();
 
-    const balanceRow = page.locator(
-      "[data-testid='text-current-balance-entlastungsbetrag_45b']",
+    const carryoverSection = page.locator(
+      "[data-testid='carryover-section-entlastungsbetrag_45b']",
     );
-    await expect(balanceRow).toBeVisible({ timeout: 10000 });
-    await expect(balanceRow).toContainText("Übertrag");
+    await expect(carryoverSection).toBeVisible({ timeout: 10000 });
+    await expect(carryoverSection).toContainText("Übertrag");
 
     // BudgetSummary zeigt den Carryover-Wert vor dem Löschen.
     await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
       timeout: 10000,
     });
 
-    // Trash → Mini-Confirm → DELETE abwarten.
-    await page
-      .locator("[data-testid='btn-delete-balance-entlastungsbetrag_45b']")
-      .click();
-    const confirm = page.locator(
-      "[data-testid='btn-confirm-delete-entlastungsbetrag_45b']",
-    );
+    // Trash → Mini-Confirm → DELETE abwarten. Die Zeile trägt den Quelljahr-
+    // Suffix; wir treffen sie über das gemeinsame Präfix.
+    const deleteBtn = carryoverSection.locator(
+      "[data-testid^='btn-delete-carryover-entlastungsbetrag_45b']",
+    ).first();
+    await expect(deleteBtn).toBeVisible({ timeout: 5000 });
+    await deleteBtn.click();
+    const confirm = carryoverSection.locator(
+      "[data-testid^='btn-confirm-delete-carryover-entlastungsbetrag_45b']",
+    ).first();
     await expect(confirm).toBeVisible({ timeout: 5000 });
     await Promise.all([
       page.waitForResponse(
@@ -1287,7 +1289,7 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       .locator("[data-testid='btn-toggle-initial-balance-entlastungsbetrag_45b']")
       .click();
     await expect(
-      page.locator("[data-testid='text-current-balance-entlastungsbetrag_45b']"),
+      page.locator("[data-testid^='text-carryover-entlastungsbetrag_45b']"),
     ).toHaveCount(0);
 
     // BudgetSummary-Kachel verschwindet, sobald `carryoverCents === 0`.

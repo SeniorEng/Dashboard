@@ -39,6 +39,7 @@ interface BudgetLedgerStorage {
   upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>, tx?: DbClient, userId?: number): Promise<CustomerBudgetTypeSetting[]>;
 
   upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
+  upsertCarryoverAllocation(params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string }, userId?: number): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
   clearLegacyInitialBalanceFromSettings(customerId: number, budgetType: string, tx: DbClient, userId?: number): Promise<boolean>;
 
@@ -94,6 +95,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   upsertBudgetTypeSettings: preferences.upsertBudgetTypeSettings,
 
   upsertInitialBalanceAllocation: allocation.upsertInitialBalanceAllocation,
+  upsertCarryoverAllocation: allocation.upsertCarryoverAllocation,
   getInitialBalanceAllocations: allocation.getInitialBalanceAllocations,
   clearLegacyInitialBalanceFromSettings: preferences.clearLegacyInitialBalanceFromSettings,
 

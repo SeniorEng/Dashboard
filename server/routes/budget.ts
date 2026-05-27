@@ -465,6 +465,75 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
   res.json({ success: true });
 }));
 
+// Task #670 — Manueller §45b-Carryover ("Restguthaben aus Vorjahr").
+// Eigenes Endpoint, getrennt vom Startwert-Pfad, damit Validierung und Audit
+// fachlich sauber unterscheidbar bleiben (Quelljahr-Plausibilität, eigener
+// Audit-Action-Name `carryover_set`). Delete teilt sich mit dem Startwert den
+// `DELETE /:customerId/initial-balance/:allocationId`-Pfad, da dort beide
+// Quellen (`initial_balance`, `carryover`) bereits behandelt werden.
+const carryoverSchema = z.object({
+  amountCents: z.number().int().min(1, "Betrag muss größer als 0 € sein"),
+  sourceYear: z.number().int().min(2020, "Bezugsjahr muss zwischen 2020 und dem Vorjahr liegen").max(2100),
+});
+
+router.post("/:customerId/carryover/:budgetType", requireAdmin, asyncHandler("Restguthaben aus Vorjahr konnte nicht gespeichert werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+  const budgetType = req.params.budgetType;
+
+  // Carryover ist gem. §45b SGB XI Abs. 3 nur für den Entlastungsbetrag definiert.
+  if (budgetType !== "entlastungsbetrag_45b") {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: "Restguthaben aus Vorjahr ist nur für den Entlastungsbetrag §45b verfügbar.",
+    });
+    return;
+  }
+
+  const result = carryoverSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Daten", details: result.error.issues });
+    return;
+  }
+
+  const { sourceYear, amountCents } = result.data;
+  const currentYear = new Date().getFullYear();
+  if (sourceYear >= currentYear) {
+    res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: `Bezugsjahr muss ein Vorjahr sein (kleiner als ${currentYear}).`,
+    });
+    return;
+  }
+
+  const targetYear = sourceYear + 1;
+  const userId = req.user?.id;
+
+  await budgetLedgerStorage.upsertCarryoverAllocation({
+    customerId,
+    budgetType,
+    sourceYear,
+    amountCents,
+    notes: `Restguthaben aus ${sourceYear} (verfällt 30.06.${targetYear})`,
+  }, userId);
+
+  if (userId) {
+    const ip = req.ip || req.socket.remoteAddress;
+    await auditService.log(userId, "carryover_set", "budget", customerId, {
+      customerId,
+      budgetType,
+      sourceYear,
+      targetYear,
+      amountCents,
+      validFrom: `${targetYear}-01-01`,
+      expiresAt: `${targetYear}-06-30`,
+    }, ip);
+  }
+
+  const allocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
+  res.json(allocations);
+}));
+
 const bulkBudgetTypeSettingsSchema = z.object({
   settings: z.array(z.object({
     budgetType: z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"]),
