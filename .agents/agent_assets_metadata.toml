@@ -137,3 +137,9 @@ id = "Mg9zfus40rai2TTGaAN-z"
 uri = "file://client/public/sounds/options/option3-twotone.mp3"
 type = "audio"
 title = "Option 3 — Two-Tone Ding (880 → 1320 Hz)"
+
+[[outputs]]
+id = "uPeh3D17n55AGhS6_eog8"
+uri = "file://docs/import-budget-drift-report-20260527.md"
+type = "text"
+title = "Budget-Ledger-Drift Diagnose-Report (27.05.2026)"
