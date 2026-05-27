@@ -267,6 +267,50 @@ router.post(
       OR LOWER(c.nachname) LIKE 'notrim-%' OR LOWER(c.nachname) LIKE 'reconcile-%'
       OR LOWER(c.nachname) LIKE 'aligned-%'
     )`;
+    // Detach-Pass (Task #631): Test-User mit echten Kunden verflochten zu lassen
+    // führte zu einer Sackgasse — der Blocker unten verweigerte das Cleanup,
+    // wodurch der Stale-Pool über die Zeit auf zehntausende User wuchs und die
+    // Admin-User-Seite lahmlegte. Wir entkoppeln daher die test-Mitarbeiter
+    // chirurgisch von echten Kunden, BEVOR der Blocker greift:
+    //   - appointments.assigned_employee_id ist nullable → SET NULL (Termin
+    //     des echten Kunden bleibt erhalten, nur die Test-User-Spur ist weg).
+    //   - monthly_service_records / customer_assignment_history haben employee_id
+    //     NOT NULL und sind reine Kontaminations-Zeilen (ein Test-User hat
+    //     niemals real Arbeit für einen echten Kunden geleistet); diese Zeilen
+    //     werden hart gelöscht. Echte MSR/Assignments echter Mitarbeiter sind
+    //     nicht betroffen, weil der Filter nur Test-User-IDs trifft.
+    let detachedAppointments = 0;
+    let detachedMsr = 0;
+    let detachedCah = 0;
+    await db.transaction(async (tx) => {
+      const apptRes = await tx.execute(sql`
+        UPDATE appointments a SET assigned_employee_id = NULL
+        FROM customers c
+        WHERE c.id = a.customer_id
+          AND a.assigned_employee_id IN (${idList})
+          AND NOT ${CUSTOMER_TEST_C}
+      `);
+      detachedAppointments = (apptRes as unknown as { rowCount?: number }).rowCount ?? 0;
+
+      const msrRes = await tx.execute(sql`
+        DELETE FROM monthly_service_records m
+        USING customers c
+        WHERE c.id = m.customer_id
+          AND m.employee_id IN (${idList})
+          AND NOT ${CUSTOMER_TEST_C}
+      `);
+      detachedMsr = (msrRes as unknown as { rowCount?: number }).rowCount ?? 0;
+
+      const cahRes = await tx.execute(sql`
+        DELETE FROM customer_assignment_history h
+        USING customers c
+        WHERE c.id = h.customer_id
+          AND h.employee_id IN (${idList})
+          AND NOT ${CUSTOMER_TEST_C}
+      `);
+      detachedCah = (cahRes as unknown as { rowCount?: number }).rowCount ?? 0;
+    });
+
     const blockerRes = await db.execute<{ appt: number; msr: number; cah: number }>(sql`
       SELECT
         (SELECT COUNT(*)::int FROM appointments a JOIN customers c ON c.id = a.customer_id
@@ -279,10 +323,13 @@ router.post(
     `);
     const b = (blockerRes as unknown as { rows: Array<{ appt: number; msr: number; cah: number }> }).rows[0];
     if (b.appt > 0 || b.msr > 0 || b.cah > 0) {
+      // Sollte nach dem Detach-Pass nie eintreten — Sicherheitsnetz für
+      // unerwartete neue FK-Wege (z.B. neue Spalten künftiger Migrationen).
       res.status(409).json({
         error: "BLOCKED_REAL_CUSTOMER_REFS",
-        message: `Test-User sind mit echten Kunden verflochten (${b.appt} aktive Termine, ${b.msr} Monats-LN, ${b.cah} Zuweisungen). Cleanup verweigert, um Datenverlust zu verhindern.`,
+        message: `Test-User sind weiter mit echten Kunden verflochten (${b.appt} aktive Termine, ${b.msr} Monats-LN, ${b.cah} Zuweisungen) trotz Detach-Pass. Cleanup verweigert, um Datenverlust zu verhindern.`,
         rejected: ids,
+        detached: { appointments: detachedAppointments, msr: detachedMsr, cah: detachedCah },
       });
       return;
     }

@@ -274,8 +274,11 @@ export async function setup() {
       if (testUsers.length > 0) {
         console.log(`[globalSetup] Found ${testUsers.length} stale test users, purging...`);
         const ids = testUsers.map((u) => u.id);
-        for (let i = 0; i < ids.length; i += 100) {
-          const batch = ids.slice(i, i + 100);
+        // Batch-Größe = 500 (Route-Maximum aus purgeUsersSchema): bei einem
+        // historisch gewachsenen Stale-Pool (Task #631 fand 60k+) reduziert
+        // das die Zahl der HTTP-Calls von 600 auf ~120, ohne neue Risiken.
+        for (let i = 0; i < ids.length; i += 500) {
+          const batch = ids.slice(i, i + 500);
           const res = await apiPost(auth, "/api/admin/test-cleanup/purge-test-users", { ids: batch });
           if (!res.ok) {
             console.warn(`[globalSetup] User purge batch failed: ${res.status} ${await res.text()}`);
