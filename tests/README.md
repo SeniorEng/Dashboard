@@ -101,6 +101,24 @@ Zusätzlich:
   die neue `calculate*`/`compute*`-Funktionen für die fünf Hotspot-Kategorien
   außerhalb von `shared/domain/` (bzw. der Allowlist) blockiert.
 
+### Property-Based Drift-Detektoren (Task #773)
+
+Reine fast-check-Properties (seed=42, numRuns=100 aus `tests/setup.ts`), die
+für zufällige Eingaben Render/Buchung gegen Parse/Aggregat prüfen — kein DB-/
+Server-Setup nötig.
+
+| Datei | Property | Read | Write |
+|-------|----------|------|-------|
+| `tests/equality/zugferd-roundtrip.test.ts` | ZUGFeRD-XML Round-Trip | Geparstes XML (Beträge, Steuersätze, Empfänger, BT-22-Note) | `generateZugferdXml` (`server/lib/zugferd.ts`) |
+| `tests/equality/storno-symmetrie.test.ts` | Storno-Symmetrie | Σ-Aggregate (Pot-Saldo, Termin, Kunde) nach Storno + Neuanlage | `splitLineItemsAcrossPots` (`shared/domain/budget-invoice-split.ts`) |
+
+`zugferd-roundtrip` rendert über den echten Renderer und parst das XML zurück:
+alle abrechnungsrelevanten Felder müssen bit-genau wieder auftauchen (inkl.
+TypeCode 380/384, Mengen/Einheiten KMT|HUR, §-Paragraf-Note bei Multi-Pot).
+`storno-symmetrie` modelliert den GoBD-Korrektur-Pfad „Storno + identische
+Neuanlage": Σ(Buchung)+Σ(Storno)=0 pro Topf/Termin/Kunde und
+Σ(Buchung+Storno+Neuanlage)=Σ(Buchung).
+
 Die Original-§45b-Suite `tests/budget/monthly-cap-display-vs-booking.test.ts`
 bleibt als ausführliche Regressions-Suite bestehen.
 
