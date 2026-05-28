@@ -46,6 +46,40 @@ Hintergrund: §45b ist eine Pflegekassenleistung; Selbstzahler haben keinen Ansp
 
 In Phase 1.1 wird diese Regel in einen Shared-Validator (`shared/domain/budget/selbstzahler-rules.ts`) gehoben, den Frontend und Backend gemeinsam konsumieren. Validator-Output: `{ ok, reasons: string[] }` (strukturiert, damit keine doppelten Fehlertexte entstehen).
 
+## API-Vertrag Customer-Create (Task #724, Option B)
+
+`POST /api/admin/customers` legt KEINE Budget-Töpfe automatisch an, wenn der Anlage-Payload keinen `budgets`-Block enthält — auch nicht für Pflegekasse-Kunden ab Pflegegrad 2. Die Initialisierung von §45b / §45a / §39-§42a bleibt Aufgabe der nachgelagerten Endpunkte `POST /api/budget/:customerId/initial-budget` und `PUT /api/budget/:customerId/type-settings`.
+
+Damit API-Konsumenten (Wizard, Import-Skripte, Drittsysteme) das nicht lautlos übersehen, beantwortet der Server jede erfolgreiche Anlage mit zwei strukturierten Marker-Feldern (`CreateCustomerResponse` in `shared/api/customers.ts`):
+
+| Feld | Bedeutung |
+|---|---|
+| `budgetSetupRequired: boolean` | `true`, wenn der Kunde pflegekassenberechtigt (`pflegekasse_gesetzlich` / `pflegekasse_privat`) mit `pflegegrad >= 2` ist UND der Anlage-Payload keinen `budgets`-Block enthält. Für Selbstzahler und Pflegegrad < 2 immer `false`. |
+| `requiredBudgetTypes: string[]` | Liste der noch zu konfigurierenden `BudgetType`-Werte (`entlastungsbetrag_45b`, `umwandlung_45a`, `ersatzpflege_39_42a`). Leer, wenn `budgetSetupRequired = false`. |
+
+Beispiel-Responses (gekürzt):
+
+```jsonc
+// PG4 Pflegekasse, Anlage ohne budgets-Block — Folge-Calls nötig
+{ "id": 8123, "name": "...", "billingType": "pflegekasse_gesetzlich",
+  "budgetSetupRequired": true,
+  "requiredBudgetTypes": ["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"] }
+
+// PG4 Pflegekasse, Anlage MIT budgets-Block (Wizard-Pfad)
+{ "id": 8124, "...": "...", "budgetSetupRequired": false, "requiredBudgetTypes": [] }
+
+// Selbstzahler oder PG1 — kein Auto-§45b/§45a-Anspruch
+{ "id": 8125, "...": "...", "budgetSetupRequired": false, "requiredBudgetTypes": [] }
+```
+
+**Warum Option B und nicht Auto-Init?** Wizard-Pfad und API-Pfad teilen sich bereits dieselbe Persistenz (`createCustomerRelatedData`), und der Wizard ruft die Init-Endpunkte explizit als Folgeschritt auf. Eine zusätzliche Auto-Init im Route-Handler hätte zwei Schreibpfade in dieselbe statutorische Konfiguration erzeugt (Wizard schreibt mit individuellen Startwerten/Carryover, API mit Defaults), die später in Edge-Cases gegeneinander gelaufen wären. Der Marker hält die Verantwortung bei genau einer Stelle — den expliziten Budget-Init-Endpunkten — und macht die Vertragslücke trotzdem unübersehbar.
+
+**Reproducer / Regressionsschutz**: `tests/customer-create-budget-setup-marker.test.ts` deckt alle vier `billingType` × `pflegegrad`-Kombinationen ab (Pflegekasse PG4 mit/ohne `budgets`, Pflegekasse PG1, Selbstzahler) sowie den Idempotency-Replay (Marker bleibt auch beim 200-Hit erhalten).
+
+**Idempotency-Replay**: Ein Retry mit gleichem `Idempotency-Key` liefert `200` mit `{...existing, idempotent: true, budgetSetupRequired, requiredBudgetTypes}`. Im Gegensatz zur 201-Erstanlage werden die Marker auf Basis des aktuellen DB-Zustands (`customer_budget_type_settings` mit `validTo IS NULL`) berechnet, nicht des ursprünglichen Payloads. Hat ein Caller zwischen Erstrequest und Retry die Töpfe bereits initialisiert, kippt der Marker korrekt auf `false`.
+
+**Bestandskunden**: `scripts/audit-customers-without-budget-init.ts` (read-only) listet bestehende Pflegekasse-Kunden ab PG 2 ohne aktive Budget-Settings; ein automatischer Backfill ist explizit nicht Teil von #724.
+
 ## Budgeting-System
 
 Three-pot Budget-Ledger mit Cascading-Allocation, FIFO für §45b und einem virtuellen Auto-Renewal-Modell für §45b, das monatliche Allocations nicht als DB-Zeilen materialisiert. Concurrent Budget-Consumption wird serialisiert.

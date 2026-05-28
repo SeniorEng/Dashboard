@@ -25,6 +25,7 @@ import { z } from "zod";
 import { db } from "../../lib/db";
 import { eq, and, sql, isNull, desc } from "drizzle-orm";
 import { auditLog, users } from "@shared/schema";
+import { customerBudgetTypeSettings } from "@shared/schema";
 
 import assignmentsRouter from "./customers/assignments";
 import budgetsRouter from "./customers/budgets";
@@ -34,6 +35,44 @@ import workflowsRouter from "./customers/workflows";
 import duplicatesRouter from "./customers/duplicates";
 
 const router = Router();
+
+// Task #724 (Option B) — zentrale Berechnung der Budget-Setup-Markierung.
+// Wird sowohl beim Erstanlegen (auf Basis des Payloads) als auch beim
+// Idempotency-Replay (auf Basis des IST-Zustands in der DB) verwendet,
+// damit der Vertrag „erfolgreiche Customer-Create-Response enthält immer
+// budgetSetupRequired + requiredBudgetTypes" lückenlos gilt.
+const REQUIRED_STATUTORY_BUDGET_TYPES = [
+  "entlastungsbetrag_45b",
+  "umwandlung_45a",
+  "ersatzpflege_39_42a",
+] as const;
+
+async function computeBudgetSetupMarkers(customer: Customer): Promise<{
+  budgetSetupRequired: boolean;
+  requiredBudgetTypes: string[];
+}> {
+  const isPflegekasse =
+    customer.billingType === "pflegekasse_gesetzlich" ||
+    customer.billingType === "pflegekasse_privat";
+  if (!isPflegekasse || (customer.pflegegrad ?? 0) < 2) {
+    return { budgetSetupRequired: false, requiredBudgetTypes: [] };
+  }
+  const activeRows = await db
+    .select({ id: customerBudgetTypeSettings.id })
+    .from(customerBudgetTypeSettings)
+    .where(and(
+      eq(customerBudgetTypeSettings.customerId, customer.id),
+      isNull(customerBudgetTypeSettings.validTo),
+    ))
+    .limit(1);
+  if (activeRows.length > 0) {
+    return { budgetSetupRequired: false, requiredBudgetTypes: [] };
+  }
+  return {
+    budgetSetupRequired: true,
+    requiredBudgetTypes: [...REQUIRED_STATUTORY_BUDGET_TYPES],
+  };
+}
 
 router.use("/", duplicatesRouter);
 router.use("/", assignmentsRouter);
@@ -296,7 +335,15 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     if (reservation.status === "hit") {
       const existing = await storage.getCustomer(reservation.customerId);
       if (existing) {
-        res.status(200).json({ ...existing, idempotent: true });
+        // Task #724 (Option B) — Markierung auch im Idempotency-Replay
+        // konsistent ausliefern. Statt den ursprünglichen Payload neu zu
+        // bewerten, lesen wir den IST-Zustand: wenn der wiederhergestellte
+        // Kunde pflegekassenberechtigt ist (PG ≥ 2) und KEINE aktive
+        // budget_type_settings-Zeile hat, muss der Caller die Töpfe noch
+        // einrichten. Hat er die Einrichtung zwischen Erstrequest und Retry
+        // bereits abgeschlossen, kippt der Marker korrekterweise auf false.
+        const existingMarkers = await computeBudgetSetupMarkers(existing);
+        res.status(200).json({ ...existing, idempotent: true, ...existingMarkers });
         return;
       }
     }
@@ -440,17 +487,23 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     return { customer: created, warnings: w };
   });
 
-  // Task #705 — Strukturierter Hinweis, wenn ein pflegekassenberechtigter
-  // Kunde (Pflegegrad ≥ 2) ohne Budget-Daten angelegt wird: Der Wizard
-  // führt den nächsten Schritt (`/initial-budget` + `/type-settings`) zwar
-  // selbst, aber API-Konsumenten (Imports, Dritt-Tools) sehen sonst keinen
-  // Hinweis darauf, dass die statutorischen Töpfe noch leer sind.
+  // Task #724 (Option B) — Strukturierte Markierung im Response, wenn ein
+  // pflegekassenberechtigter Kunde (Pflegegrad ≥ 2) ohne Budget-Daten
+  // angelegt wird. API-Konsumenten (Imports, Skripte, Drittsysteme) sehen
+  // damit eindeutig, dass die statutorischen Töpfe (§45b/§45a/§39-§42a)
+  // noch über `POST /api/budget/:customerId/initial-budget` + `PUT
+  // /api/budget/:customerId/type-settings` konfiguriert werden müssen.
+  // Der Wizard-Pfad triggert diese Folge-Calls bereits selbst — die
+  // Markierung schadet ihm nicht (Frontend nutzt sie nicht).
+  let budgetSetupRequired = false;
+  let requiredBudgetTypes: string[] = [];
   if (
     (data.billingType === "pflegekasse_gesetzlich" || data.billingType === "pflegekasse_privat") &&
     (data.pflegegrad ?? 0) >= 2 &&
     !data.budgets
   ) {
-    warnings.push("BUDGET_SETUP_REQUIRED: Statutorische Töpfe (§45b/§45a/§39-§42a) müssen über POST /api/budget/:customerId/initial-budget + PUT /type-settings konfiguriert werden.");
+    budgetSetupRequired = true;
+    requiredBudgetTypes = [...REQUIRED_STATUTORY_BUDGET_TYPES];
   }
 
   birthdaysCache.invalidateAll();
@@ -499,7 +552,12 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
     _idemReservationToRelease = null;
   }
 
-  res.status(201).json({ ...customer, warnings: warnings.length > 0 ? warnings : undefined });
+  res.status(201).json({
+    ...customer,
+    warnings: warnings.length > 0 ? warnings : undefined,
+    budgetSetupRequired,
+    requiredBudgetTypes,
+  });
   } finally {
     // Wenn der Handler ohne Finalize endet (z.B. 409 DUPLICATE_WARNING,
     // Validation-Error, Throw nach Reservierung), geben wir den Key wieder

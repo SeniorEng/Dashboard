@@ -192,3 +192,31 @@ export interface CreateCustomerRequest {
     }>;
   };
 }
+
+/**
+ * Response-Vertrag von `POST /api/admin/customers` (Task #724, Option B).
+ *
+ * Der Server beantwortet jede erfolgreiche Customer-Anlage mit dem
+ * vollständigen Customer-Objekt plus zwei strukturierten Marker-Feldern,
+ * damit API-Konsumenten (Wizard, Skripte, Drittsysteme) ohne String-Parsing
+ * erkennen, ob noch Folge-Calls für die statutorischen Budget-Töpfe nötig
+ * sind:
+ *
+ *   - `budgetSetupRequired = true` heißt: Kunde ist pflegekassenberechtigt
+ *     (`billingType in {pflegekasse_gesetzlich, pflegekasse_privat}` und
+ *     `pflegegrad >= 2`) und es wurden im Anlage-Payload keine `budgets`
+ *     mitgegeben. Die Töpfe müssen über
+ *     `POST /api/budget/:customerId/initial-budget` und
+ *     `PUT /api/budget/:customerId/type-settings` konfiguriert werden.
+ *   - `requiredBudgetTypes` listet die zu konfigurierenden `BudgetType`-
+ *     Werte (`entlastungsbetrag_45b`, `umwandlung_45a`, `ersatzpflege_39_42a`).
+ *
+ * Für Selbstzahler und Pflegegrad < 2 bleibt `budgetSetupRequired = false`
+ * und `requiredBudgetTypes = []` (kein Auto-§45b/§45a-Anspruch).
+ */
+export interface CreateCustomerResponse extends Customer {
+  warnings?: string[];
+  budgetSetupRequired: boolean;
+  requiredBudgetTypes: string[];
+  idempotent?: boolean;
+}
