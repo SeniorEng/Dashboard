@@ -11,7 +11,6 @@ import {
   type InsertCareLevelHistory,
   type CustomerNeedsAssessment,
   type InsertNeedsAssessment,
-  type CustomerBudget,
   type InsertCustomerBudget,
   type CustomerContract,
   type InsertCustomerContract,
@@ -25,7 +24,6 @@ import {
   customerContracts,
   customerContractRates,
   customerContacts,
-  customerBudgets,
   customerNeedsAssessments,
   customerCareLevelHistory,
   customerBudgetTypeSettings,
@@ -145,8 +143,6 @@ class CustomerManagementStorage {
 
   updateCustomerContract = contractsModule.updateCustomerContract;
 
-  getCustomerCurrentBudget = budgetsModule.getCustomerCurrentBudget;
-  getCustomerBudgetHistory = budgetsModule.getCustomerBudgetHistory;
   addCustomerBudget = budgetsModule.addCustomerBudget;
 
   getCustomerCurrentContract = contractsModule.getCustomerCurrentContract;
@@ -450,7 +446,6 @@ class CustomerManagementStorage {
       contacts,
       careLevelHistory,
       needsAssessment,
-      budget,
       contract,
       primaryEmployee,
       backupEmployee,
@@ -461,7 +456,6 @@ class CustomerManagementStorage {
       this.getCustomerContacts(customerId),
       this.getCustomerCareLevelHistory(customerId),
       this.getCustomerNeedsAssessment(customerId),
-      this.getCustomerCurrentBudget(customerId),
       this.getCustomerLatestContract(customerId),
       customer.primaryEmployeeId 
         ? db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, customer.primaryEmployeeId)).then(r => r[0])
@@ -497,7 +491,6 @@ class CustomerManagementStorage {
       contacts,
       careLevelHistory,
       needsAssessment: needsAssessment ?? undefined,
-      budget: budget ?? undefined,
       contract: contract ?? undefined,
       primaryEmployee,
       backupEmployee,

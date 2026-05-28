@@ -149,14 +149,13 @@ describe("KV-0: CRUD-Grundfunktionen", () => {
     expect(res.data.pflegegrad).toBe(4);
   });
 
-  it("KV-0.6 – GET details liefert Detailansicht mit Insurance und Budgets", async () => {
+  it("KV-0.6 – GET details liefert Detailansicht mit Insurance", async () => {
     const res = await apiGet<any>(`/api/admin/customers/${testCustomerId}/details`);
     expect(res.status).toBe(200);
     expect(res.data).toHaveProperty("id");
     expect(res.data.id).toBe(testCustomerId);
     expect(res.data.vorname).toBe("QS-Test");
     expect(res.data).toHaveProperty("currentInsurance");
-    expect(res.data).toHaveProperty("currentBudgets");
   });
 
   it("KV-0.7 – POST contacts fügt Kontaktperson hinzu", async () => {

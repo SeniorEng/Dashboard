@@ -55,12 +55,6 @@ interface BudgetSummaryInfo {
   currentMonthUsedCents: number;
 }
 
-interface CustomerBudgetsInfo {
-  entlastungsbetrag45b: number;
-  verhinderungspflege39: number;
-  pflegesachleistungen36: number;
-}
-
 interface CustomerNeedsAssessmentInfo {
   id: number;
   customerId: number;
@@ -131,7 +125,6 @@ export interface CustomerDetail extends Customer {
   } | null;
   contacts: CustomerContactItem[];
   careLevelHistory: CustomerCareLevelHistoryItem[];
-  currentBudgets: CustomerBudgetsInfo | null;
   activeContractCount: number;
   needsAssessment: CustomerNeedsAssessmentInfo | null;
   currentContract: CustomerContractInfo | null;

@@ -6,9 +6,6 @@
  *
  * Allowlist pro Datei (mit Begründung):
  *  - shared/schema/budget.ts            → Schema-Definition selbst.
- *  - server/storage/customer-mgmt/budgets.ts → Read-Only-Audit-Helper und
- *      No-Op-Writer (siehe @deprecated-Kommentar in der Datei).
- *  - server/storage/customer-management.ts → Re-Export der Read-Helper.
  *  - server/lib/customer-creation-helpers.ts → ruft den No-Op-Writer im
  *      Legacy-Pfad (prospects.ts) auf; bleibt bis der Pfad SSoT-only ist.
  *  - server/scripts/cleanup-test-data.ts → Test-Cleanup-Skript löscht
@@ -32,8 +29,6 @@ const ROOT = process.cwd();
 
 const ALLOWLIST: ReadonlyArray<string> = [
   "shared/schema/budget.ts",
-  "server/storage/customer-mgmt/budgets.ts",
-  "server/storage/customer-management.ts",
   "server/lib/customer-creation-helpers.ts",
   "server/scripts/cleanup-test-data.ts",
   "server/routes/admin/test-cleanup.ts",

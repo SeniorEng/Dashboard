@@ -18,14 +18,6 @@ import { eq, and, sql, gte, lte, isNull, isNotNull } from "drizzle-orm";
 
 const router = Router();
 
-router.get("/customers/:id/budgets", asyncHandler("Budget-Historie konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-
-  const history = await customerManagementStorage.getCustomerBudgetHistory(id);
-  res.json(history);
-}));
-
 const customerBudgetBodySchema = insertCustomerBudgetSchema
   .pick({
     entlastungsbetrag45b: true,

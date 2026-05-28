@@ -215,11 +215,6 @@ router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen we
       versichertennummer: customer.insurance.versichertennummer,
       validFrom: customer.insurance.validFrom,
     } : null,
-    currentBudgets: customer.budget ? {
-      entlastungsbetrag45b: customer.budget.entlastungsbetrag45b,
-      verhinderungspflege39: customer.budget.verhinderungspflege39,
-      pflegesachleistungen36: customer.budget.pflegesachleistungen36,
-    } : null,
     needsAssessment: customer.needsAssessment || null,
     currentContract: customer.contract ? {
       id: customer.contract.id,
