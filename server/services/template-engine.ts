@@ -24,6 +24,7 @@ const COMPANY_PLACEHOLDER_DEFAULTS: Record<string, string> = {
   company_iban: "",
   company_bic: "",
   company_bank_name: "",
+  company_bank_account_holder: "",
   company_logo: "",
   company_logo_url: "",
   customer_signature: "",
@@ -52,6 +53,8 @@ async function applyCompanySettings(placeholders: TemplatePlaceholders): Promise
       placeholders.company_iban = companySettings.iban || "";
       placeholders.company_bic = companySettings.bic || "";
       placeholders.company_bank_name = companySettings.bankName || "";
+      placeholders.company_bank_account_holder =
+        companySettings.bankAccountHolder?.trim() || companySettings.companyName || "";
       const pdfLogo = companySettings.pdfLogoUrl || companySettings.logoUrl;
       if (pdfLogo) {
         placeholders.company_logo_url = pdfLogo;
@@ -119,6 +122,7 @@ const PLACEHOLDER_CATALOG: Record<string, { label: string; source: string }> = {
   company_iban: { label: "IBAN", source: "company" },
   company_bic: { label: "BIC", source: "company" },
   company_bank_name: { label: "Bankname", source: "company" },
+  company_bank_account_holder: { label: "Kontoinhaber (abweichend, sonst Firmenname)", source: "company" },
   company_logo: { label: "Firmenlogo (als <img>-Tag)", source: "company" },
   company_logo_url: { label: "Firmenlogo URL (nur die URL)", source: "company" },
   customer_signature: { label: "Kundenunterschrift", source: "signature" },
