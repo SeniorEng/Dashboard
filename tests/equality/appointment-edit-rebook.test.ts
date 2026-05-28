@@ -142,9 +142,16 @@ describe("Termin-Edit Auto-Rebook (Task #618)", () => {
         userId: auth.user.id,
       });
 
-      // Datum 2 Tage nach vorne verschieben.
+      // Datum nach vorne verschieben — mindestens 2 Tage, aber bis zum
+      // nächsten Werktag rollen. Sonst landet der neue Termin abhängig vom
+      // Wochentag auf einem Samstag/Sonntag und die PATCH-Route lehnt
+      // korrekt mit 400 ab ("Termine können nicht auf Samstage oder
+      // Sonntage verschoben werden.").
       const newDateObj = new Date(date);
       newDateObj.setDate(newDateObj.getDate() + 2);
+      while (newDateObj.getDay() === 0 || newDateObj.getDay() === 6) {
+        newDateObj.setDate(newDateObj.getDate() + 1);
+      }
       const newDate = newDateObj.toISOString().slice(0, 10);
 
       const patch = await apiPatch(`/api/appointments/${booked.appointmentId}`, {

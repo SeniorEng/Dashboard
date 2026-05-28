@@ -622,8 +622,21 @@ async function calculateAllocated45b(
 
   const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
 
-  if (s45b?.validFrom) {
-    const vfDate = parseLocalDate(s45b.validFrom);
+  // Task #668-Followup: bei mehreren `customer_budget_type_settings`-Zeilen
+  // (Append-only-Transition: alte Zeile geschlossen, neue Zeile ab Folgetag)
+  // darf der allocStart-Shift NICHT die einzelne picked-row aus
+  // `typeSettings` benutzen — das ist üblicherweise die LATEST aktive Zeile
+  // und würde den Start fälschlich auf deren `validFrom` schieben, womit alle
+  // Monate vor dem Wechsel aus der Iteration fallen (Repro: Jan–Apr fehlten
+  // komplett, weil neue Zeile validFrom=Mai war). Korrekt ist die FRÜHESTE
+  // `validFrom` aller §45b-Zeilen für diesen Kunden.
+  // Liegt nur eine Zeile vor, fällt das auf das alte Verhalten zurück.
+  const effectiveS45bValidFrom = all45bSettings.length > 0
+    ? all45bSettings[0].validFrom // selectFrom oben asc sortiert
+    : (s45b?.validFrom ?? null);
+
+  if (effectiveS45bValidFrom) {
+    const vfDate = parseLocalDate(effectiveS45bValidFrom);
     const vfYear = vfDate.getFullYear();
     const vfMonth = vfDate.getMonth() + 1;
     if (vfYear > allocStartYear || (vfYear === allocStartYear && vfMonth > allocStartMonth)) {
@@ -654,8 +667,24 @@ async function calculateAllocated45b(
 
   let endYear = horizonYear;
   let endMonth = horizonMonth;
-  if (s45b?.validTo) {
-    const vtDate = parseLocalDate(s45b.validTo);
+  // Analog zum validFrom-Shift: bei mehreren §45b-Zeilen die SPÄTESTE
+  // `validTo` heranziehen. Eine offene Zeile (`validTo = null`) bedeutet
+  // unbegrenzte Geltung — dann kein End-Shift.
+  let effectiveS45bValidTo: string | null = null;
+  if (all45bSettings.length > 0) {
+    const hasOpenEnd = all45bSettings.some(r => r.validTo == null);
+    if (!hasOpenEnd) {
+      effectiveS45bValidTo = all45bSettings.reduce<string | null>(
+        (max, r) => (max == null || (r.validTo != null && r.validTo > max) ? r.validTo : max),
+        null,
+      );
+    }
+  } else {
+    effectiveS45bValidTo = s45b?.validTo ?? null;
+  }
+
+  if (effectiveS45bValidTo) {
+    const vtDate = parseLocalDate(effectiveS45bValidTo);
     const vtYear = vtDate.getFullYear();
     const vtMonth = vtDate.getMonth() + 1;
     if (vtYear < endYear || (vtYear === endYear && vtMonth < endMonth)) {

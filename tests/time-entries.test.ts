@@ -12,6 +12,7 @@ import {
   loginAs,
   createTestCustomer,
 } from "./test-utils";
+import { getVacationHolidayName } from "@shared/utils/holidays";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 const cleanupIds: number[] = [];
@@ -20,9 +21,19 @@ let hwServiceId: number;
 const apptCleanupIds: number[] = [];
 
 function getNextWeekday(date: Date): Date {
-  const dow = date.getDay();
-  if (dow === 0) date.setDate(date.getDate() + 1);
-  else if (dow === 6) date.setDate(date.getDate() + 2);
+  // Forward-Roll auf Werktag UND Nicht-Feiertag. Die alte Variante hat nur
+  // Wochenenden übersprungen — damit landete der Helper z.B. an
+  // Pfingstmontag-nahen Tagen auf einem gesetzlichen Feiertag (`urlaub` an
+  // Feiertagen wird Server-seitig korrekt mit 400 abgelehnt) und die Tests
+  // wurden datums-fragil. Wir rollen weiter, bis weder Wochenende noch
+  // bundeseinheitlicher Feiertag (Sachsen-Set, vgl. holidays.ts).
+  // Sicherheitsdeckel verhindert Endlosschleifen bei korrupten Daten.
+  for (let i = 0; i < 14; i++) {
+    const dow = date.getDay();
+    const iso = date.toISOString().slice(0, 10);
+    if (dow !== 0 && dow !== 6 && !getVacationHolidayName(iso)) return date;
+    date.setDate(date.getDate() + 1);
+  }
   return date;
 }
 
