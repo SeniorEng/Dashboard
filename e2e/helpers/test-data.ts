@@ -1,4 +1,4 @@
-import { apiPost, type ApiSession } from "./auth";
+import { apiPost, apiPatch, type ApiSession } from "./auth";
 
 interface ServiceCatalogEntry {
   id: number;
@@ -146,10 +146,14 @@ export async function assignEmployee(
   customerId: number,
   employeeId: number,
 ): Promise<void> {
-  const { status, data } = await apiPost<unknown>(
+  const { status, data } = await apiPatch<unknown>(
     session,
-    `/api/admin/customers/${customerId}/employees`,
-    { employeeId, isPrimary: true },
+    `/api/admin/customers/${customerId}/assign`,
+    {
+      primaryEmployeeId: employeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    },
   );
   if (status >= 300) {
     throw new Error(
