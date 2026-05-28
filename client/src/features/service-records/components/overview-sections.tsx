@@ -361,7 +361,7 @@ export function OverviewSections({
 
       {completedTotal > 0 && (
         <OverviewSection
-          title="Abgeschlossen"
+          title="Leistungsnachweise erstellt"
           tone="green"
           count={completedTotal}
           testId="section-completed"
