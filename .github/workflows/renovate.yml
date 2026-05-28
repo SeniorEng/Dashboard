@@ -1,0 +1,82 @@
+name: Renovate
+
+# Self-hosted Renovate (Task #787).
+#
+# Hintergrund: Die Renovate-GitHub-App konnte nicht im Org/Repo installiert
+# werden (Org-Approval fehlt). Stattdessen läuft Renovate hier als eigener
+# GitHub-Actions-Job — kein App-Install nötig. Die Konfiguration kommt
+# unverändert aus `renovate.json` im Repo-Root (gleiche Gruppierung,
+# Auto-Merge-Regeln, Vulnerability-Alerts wie zuvor geplant).
+#
+# Benötigtes Secret:
+#   RENOVATE_TOKEN — ein GitHub Personal Access Token (PAT) mit den Scopes
+#     `repo` + `workflow` (Classic-PAT) bzw. Fine-grained-PAT mit
+#     Contents: RW, Pull requests: RW, Issues: RW, Workflows: RW auf
+#     SeniorEng/Dashboard. WICHTIG: Es muss ein PAT sein und NICHT der
+#     automatische `GITHUB_TOKEN` — von `GITHUB_TOKEN` erstellte PRs lösen
+#     keine CI-Runs aus (GitHub-Loop-Schutz), wodurch die Required-Checks
+#     `static-analysis`/`tests`/`e2e-smoke` nie laufen und Auto-Merge für
+#     grüne Patch-Updates dauerhaft blockiert bliebe.
+#
+# Fehlt das Secret (z.B. in Forks), überspringt sich der Job sauber, statt
+# hart zu failen — analog zur CI-Skip-Logik in `ci.yml`.
+
+on:
+  schedule:
+    # Täglich 03:00 UTC. Wann Renovate tatsächlich PRs öffnet, steuert
+    # `renovate.json` selbst (normale Updates: Mo früh Berlin-Zeit;
+    # Vulnerability-Alerts: "at any time"). Daily-Cadence fängt beides ab.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    # Manueller Trigger über die Actions-UI (z.B. fürs erste Onboarding).
+    inputs:
+      logLevel:
+        description: "Renovate log level"
+        required: false
+        default: "info"
+        type: choice
+        options:
+          - debug
+          - info
+          - warn
+
+concurrency:
+  group: renovate-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: renovate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Guard: ohne RENOVATE_TOKEN sauber überspringen statt failen.
+      - name: Check for RENOVATE_TOKEN
+        id: guard
+        env:
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+        run: |
+          if [ -z "$RENOVATE_TOKEN" ]; then
+            echo "RENOVATE_TOKEN nicht gesetzt — Renovate-Lauf wird übersprungen."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Renovate
+        if: steps.guard.outputs.skip == 'false'
+        uses: renovatebot/github-action@v40.3.6
+        env:
+          # PAT, damit von Renovate erstellte PRs die CI-Checks auslösen.
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          # Nur dieses Repo bearbeiten.
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          # Onboarding-PR überspringen — Config liegt bereits als renovate.json vor.
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: "required"
+          LOG_LEVEL: ${{ github.event.inputs.logLevel || 'info' }}
+        with:
+          configurationFile: renovate.json
+          token: ${{ secrets.RENOVATE_TOKEN }}
