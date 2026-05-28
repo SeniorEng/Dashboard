@@ -26,7 +26,7 @@ import {
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
-import type { BillingCustomerItem } from "@shared/api";
+import type { BillingCustomerItem, BillingInvoicePreview } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
@@ -525,6 +525,32 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   }));
 
   res.json(eligibleCustomers);
+}));
+
+// Task #750: Vorschau-Block für „Neue Rechnung erstellen"-Dialog.
+// Liefert exakt die Werte, die der nachfolgende `POST /generate` schreiben
+// würde — Anzahl signierter LNs, abgerechnete Termine (nach Filter
+// „bereits abgerechnet"), dokumentierte Termine im Monat (Partial-Signing-
+// Hinweis) und Brutto-Summe über alle entstehenden Folge-Rechnungen
+// (Kassen-/Privatanteil bei Split). Persistiert nichts.
+router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", async (req, res) => {
+  const customerId = parseInt(String(req.query.customerId ?? ""), 10);
+  const month = parseInt(String(req.query.month ?? ""), 10);
+  const year = parseInt(String(req.query.year ?? ""), 10);
+  if (!Number.isFinite(customerId) || customerId <= 0
+    || !Number.isFinite(month) || month < 1 || month > 12
+    || !Number.isFinite(year) || year < 2000 || year > 2100) {
+    throw badRequest("Ungültige Parameter — customerId, month (1-12) und year sind erforderlich.");
+  }
+  const draft = await buildInvoiceDraft({ customerId, billingMonth: month, billingYear: year });
+  const response: BillingInvoicePreview = {
+    serviceRecordCount: draft.signedRecordCount,
+    coveredAppointments: draft.apptIds.length,
+    completedAppointments: draft.completedAppointmentsInPeriod,
+    totalCents: draft.grossAmountCents,
+    splitInvoices: draft.needsBudgetSplit && draft.hasPrivateShare,
+  };
+  res.json(response);
 }));
 
 router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (req, res) => {
@@ -1075,6 +1101,195 @@ type GenerateInvoiceResult =
   | Invoice
   | { splitInvoices: true; invoices: Invoice[]; message: string };
 
+/**
+ * Task #750: Pure read-only Helper, der dieselbe Build-Logik liefert wie
+ * `generateInvoiceCore`, aber NICHTS persistiert — keine Rechnungsnummer,
+ * keine Inserts, kein Audit-Log, kein PDF. Wird von `POST /billing/generate`
+ * UND `GET /billing/preview` aufgerufen, damit Vorschau-Werte und finale
+ * Rechnungssumme garantiert übereinstimmen.
+ *
+ * Wirft dieselben `badRequest`/`notFound`-Fehler wie `generateInvoiceCore`,
+ * sodass die Vorschau bei „kein LN", „keine Termine" usw. einen klaren
+ * Fehler zurückgibt (Frontend zeigt „Vorschau nicht verfügbar").
+ */
+interface InvoiceDraft {
+  customer: NonNullable<Awaited<ReturnType<typeof storage.getCustomer>>>;
+  customerName: string;
+  customerAddress: string;
+  billingType: string;
+  signedRecordCount: number;
+  apptIds: number[];                       // nach Filter „bereits abgerechnet"
+  alreadyInvoicedIds: number[];
+  completedAppointmentsInPeriod: number;   // dokumentierte Termine im Monat (für Partial-Signing-Hinweis)
+  insuranceInfo: Awaited<ReturnType<typeof getInsuranceData>>;
+  needsBudgetSplit: boolean;
+  hasPrivateShare: boolean;
+  lineItems: BuildLineItem[];              // Single-Pfad
+  kasseItems: BuildLineItem[];             // Split-Pfad (Kassenanteil)
+  privateItems: BuildLineItem[];           // Split-Pfad (Privatanteil)
+  totalNetCents: number;                   // Netto-Summe über alle Folge-Rechnungen
+  totalVatCents: number;                   // USt-Summe über alle Folge-Rechnungen
+  grossAmountCents: number;                // Brutto-Summe über alle Folge-Rechnungen
+  stornoRefsForInsert: number[] | null;
+  defaultBuyerReference: string | null;
+  invoiceDueDateIso: string;
+}
+
+async function buildInvoiceDraft(input: {
+  customerId: number;
+  billingMonth: number;
+  billingYear: number;
+}): Promise<InvoiceDraft> {
+  const { customerId, billingMonth, billingYear } = input;
+
+  const customer = await storage.getCustomer(customerId);
+  if (!customer) throw notFound("Kunde nicht gefunden");
+
+  // Task #562 — Fälligkeit (BT-9): zentral aus den Firmenstammdaten.
+  const companySettingsForInvoice = await getCachedCompanySettings();
+  const dueDays = companySettingsForInvoice?.invoiceDefaultDueDays ?? 30;
+  const invoiceIssueIso = todayISO();
+  const invoiceDueDateIso = addDays(invoiceIssueIso, dueDays);
+
+  // Task #562 — Käuferreferenz (BT-10) für Pflegekassen.
+  const insuranceInfo = await getInsuranceData(customerId);
+  const defaultBuyerReference =
+    (customer.billingType === "pflegekasse_gesetzlich" ||
+      customer.billingType === "pflegekasse_privat") &&
+    insuranceInfo?.versichertennummer
+      ? insuranceInfo.versichertennummer
+      : null;
+
+  const serviceRecords = await getServiceRecordsForPeriod(customerId, billingYear, billingMonth);
+  if (serviceRecords.length === 0) {
+    throw badRequest("Kein Leistungsnachweis für diesen Zeitraum vorhanden. Bitte erstellen Sie zuerst einen Leistungsnachweis im Bereich 'Nachweise'.");
+  }
+
+  const signedRecords = serviceRecords.filter(sr =>
+    sr.status === "completed" || sr.status === "employee_signed"
+  );
+  if (signedRecords.length === 0) {
+    throw badRequest("Der Leistungsnachweis wurde noch nicht unterschrieben. Bitte lassen Sie den Leistungsnachweis zuerst vom Mitarbeiter unterschreiben.");
+  }
+
+  const serviceRecordIds = signedRecords.map(sr => sr.id);
+  const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
+  if (allApptIds.length === 0) {
+    throw badRequest("Der Leistungsnachweis enthält keine Termine.");
+  }
+
+  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
+
+  // T05/K3: Storno-then-rebill — bereits stornierte Original-Rechnungen
+  // verlinken (Task #585).
+  const stornoOriginalRows = await db.select({ id: invoicesTable.id })
+    .from(invoicesTable)
+    .where(and(
+      eq(invoicesTable.customerId, customerId),
+      eq(invoicesTable.billingYear, billingYear),
+      eq(invoicesTable.billingMonth, billingMonth),
+      eq(invoicesTable.status, "storniert"),
+      ne(invoicesTable.invoiceType, "stornorechnung"),
+    ));
+  const referencedStornoInvoiceIds = stornoOriginalRows.map((r) => r.id);
+  const stornoRefsForInsert: number[] | null =
+    referencedStornoInvoiceIds.length > 0 ? referencedStornoInvoiceIds : null;
+
+  const apptIds = alreadyInvoicedIds.length > 0
+    ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
+    : allApptIds;
+  if (apptIds.length === 0) {
+    throw badRequest("Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.");
+  }
+
+  const billingType = customer.billingType || "selbstzahler";
+  const customerName = customer.vorname && customer.nachname
+    ? `${customer.vorname} ${customer.nachname}`
+    : customer.name || "Unbekannt";
+  const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
+    (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
+
+  // Task #750: Anzahl dokumentierter Termine im Monat (für Partial-Signing-
+  // Hinweis „N von X dokumentiert" im Vorschau-Block, konsistent mit
+  // `/eligible-customers`).
+  const mm = String(billingMonth).padStart(2, "0");
+  const periodStartStr = `${billingYear}-${mm}-01`;
+  const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
+  const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
+  const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+  const completedRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id })
+    .where(and(
+      eq(appointments.customerId, customerId),
+      eq(appointments.status, "completed"),
+      appointmentsRepo.activeOnly(),
+      gte(appointments.date, periodStartStr),
+      lt(appointments.date, periodEndStr),
+    ));
+  const completedAppointmentsInPeriod = completedRows.length;
+
+  const needsBudgetSplit = (billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat")
+    && customer.acceptsPrivatePayment;
+
+  if (needsBudgetSplit) {
+    const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds);
+    const hasPrivate = Array.from(budgetSplit.values()).some(s => s.privateCents > 0);
+    if (hasPrivate) {
+      const { lineItems: allLineItems } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
+      const { kasseItems, privateItems } = splitLineItemsByBudget(allLineItems, budgetSplit);
+      const kasseNetCents = kasseItems.reduce((sum, i) => sum + i.totalCents, 0);
+      const privateNetCents = privateItems.reduce((sum, i) => sum + i.totalCents, 0);
+      // Spiegelt die Berechnung im Split-Insert-Pfad: Kasse VAT 0, Privat 19%.
+      const privateVatCents = Math.round(privateNetCents * 1900 / 10000);
+      return {
+        customer,
+        customerName,
+        customerAddress,
+        billingType,
+        signedRecordCount: signedRecords.length,
+        apptIds,
+        alreadyInvoicedIds,
+        completedAppointmentsInPeriod,
+        insuranceInfo,
+        needsBudgetSplit: true,
+        hasPrivateShare: true,
+        lineItems: allLineItems,
+        kasseItems,
+        privateItems,
+        totalNetCents: kasseNetCents + privateNetCents,
+        totalVatCents: privateVatCents,
+        grossAmountCents: kasseNetCents + privateNetCents + privateVatCents,
+        stornoRefsForInsert,
+        defaultBuyerReference,
+        invoiceDueDateIso,
+      };
+    }
+  }
+
+  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
+  return {
+    customer,
+    customerName,
+    customerAddress,
+    billingType,
+    signedRecordCount: signedRecords.length,
+    apptIds,
+    alreadyInvoicedIds,
+    completedAppointmentsInPeriod,
+    insuranceInfo,
+    needsBudgetSplit,
+    hasPrivateShare: false,
+    lineItems,
+    kasseItems: [],
+    privateItems: [],
+    totalNetCents,
+    totalVatCents,
+    grossAmountCents: totalNetCents + totalVatCents,
+    stornoRefsForInsert,
+    defaultBuyerReference,
+    invoiceDueDateIso,
+  };
+}
+
 // Task #533 / Security: Kern-Logik der Rechnungserstellung extrahiert,
 // damit /generate-all die Logik direkt im selben Prozess aufrufen kann.
 // Kein HTTP-Self-Call, kein Forwarden von Session-Cookies, kein
@@ -1098,99 +1313,28 @@ async function generateInvoiceCore(
   const readTestFaults = (_: unknown): Set<string> => __testFaults;
   void readTestFaults; // wird unten verwendet
 
-  const customer = await storage.getCustomer(customerId);
-  if (!customer) throw notFound("Kunde nicht gefunden");
+  // Task #750: gemeinsame Berechnung mit Preview — derselbe Helper, derselbe
+  // Pfad. Verhindert Drift zwischen „Vorschau im Dialog" und finaler Rechnung.
+  const draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear });
+  const {
+    customer,
+    customerName,
+    customerAddress,
+    billingType,
+    insuranceInfo,
+    needsBudgetSplit,
+    hasPrivateShare,
+    lineItems,
+    kasseItems,
+    privateItems,
+    totalNetCents,
+    totalVatCents,
+    stornoRefsForInsert,
+    defaultBuyerReference,
+    invoiceDueDateIso,
+  } = draft;
 
-  // Task #562 — Fälligkeit (BT-9) wird zentral aus den Firmenstammdaten
-  // abgeleitet (Default 30 Tage, pro Mandant über `company_settings
-  // .invoice_default_due_days` überschreibbar). Wir berechnen sie hier auf
-  // dem Tagesgranulat, damit alle vier Insert-Pfade (Kasse, Privat, Single,
-  // Storno) denselben Wert sehen.
-  const companySettingsForInvoice = await getCachedCompanySettings();
-  const dueDays = companySettingsForInvoice?.invoiceDefaultDueDays ?? 30;
-  const invoiceIssueIso = todayISO();
-  const invoiceDueDateIso = addDays(invoiceIssueIso, dueDays);
-  // Task #562 — Käuferreferenz (BT-10): Pflegekassen-Rechnungen tragen
-  // standardmäßig die Versicherten-Nr. als Aktenzeichen, damit die
-  // Dunkelverarbeitung im Eingangs-System dem Vorgang zugeordnet werden
-  // kann. Selbstzahler haben heute keine eigene Käuferreferenz; das Feld
-  // bleibt nullable und kann später manuell befüllt werden.
-  const insuranceForBuyerRef = await getInsuranceData(customerId);
-  const defaultBuyerReference =
-    (customer.billingType === "pflegekasse_gesetzlich" ||
-      customer.billingType === "pflegekasse_privat") &&
-    insuranceForBuyerRef?.versichertennummer
-      ? insuranceForBuyerRef.versichertennummer
-      : null;
-
-  const serviceRecords = await getServiceRecordsForPeriod(customerId, billingYear, billingMonth);
-  if (serviceRecords.length === 0) {
-    throw badRequest("Kein Leistungsnachweis für diesen Zeitraum vorhanden. Bitte erstellen Sie zuerst einen Leistungsnachweis im Bereich 'Nachweise'.");
-  }
-
-  const signedRecords = serviceRecords.filter(sr =>
-    sr.status === "completed" || sr.status === "employee_signed"
-  );
-  if (signedRecords.length === 0) {
-    throw badRequest("Der Leistungsnachweis wurde noch nicht unterschrieben. Bitte lassen Sie den Leistungsnachweis zuerst vom Mitarbeiter unterschreiben.");
-  }
-
-  const serviceRecordIds = signedRecords.map(sr => sr.id);
-  const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
-
-  if (allApptIds.length === 0) {
-    throw badRequest("Der Leistungsnachweis enthält keine Termine.");
-  }
-
-  const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
-
-  // T05/K3: Storno-then-rebill — wenn für diesen Zeitraum bereits stornierte
-  // Original-Rechnungen existieren, müssen deren IDs zur Nachvollziehbarkeit
-  // verlinkt werden (Task #585: kein eigener Typ "nachberechnung" mehr —
-  // die neue Rechnung ist eine reguläre Rechnung mit Storno-Referenzen).
-  const stornoOriginalRows = await db.select({ id: invoicesTable.id })
-    .from(invoicesTable)
-    .where(and(
-      eq(invoicesTable.customerId, customerId),
-      eq(invoicesTable.billingYear, billingYear),
-      eq(invoicesTable.billingMonth, billingMonth),
-      eq(invoicesTable.status, "storniert"),
-      ne(invoicesTable.invoiceType, "stornorechnung"),
-    ));
-  const referencedStornoInvoiceIds = stornoOriginalRows.map((r) => r.id);
-  const stornoRefsForInsert: number[] | null =
-    referencedStornoInvoiceIds.length > 0 ? referencedStornoInvoiceIds : null;
-  // Task #585: Der Typ "nachberechnung" wurde abgeschafft — jede neu erzeugte
-  // Rechnung ist fachlich einfach eine reguläre Rechnung. `alreadyInvoicedIds`
-  // (Termin-Ausschluss) und `referencedStornoInvoiceIds` (Verlinkung) bleiben.
-
-  const apptIds = alreadyInvoicedIds.length > 0
-    ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
-    : allApptIds;
-
-  if (apptIds.length === 0) {
-    throw badRequest("Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.");
-  }
-
-  const billingType = customer.billingType || "selbstzahler";
-  const customerName = customer.vorname && customer.nachname
-    ? `${customer.vorname} ${customer.nachname}`
-    : customer.name || "Unbekannt";
-  const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
-    (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
-
-  const insuranceInfo = await getInsuranceData(customerId);
-  const needsBudgetSplit = (billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat")
-    && customer.acceptsPrivatePayment;
-
-  if (needsBudgetSplit) {
-    const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds);
-    const hasPrivate = Array.from(budgetSplit.values()).some(s => s.privateCents > 0);
-
-    if (hasPrivate) {
-      const { lineItems: allLineItems } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
-      const { kasseItems, privateItems } = splitLineItemsByBudget(allLineItems, budgetSplit);
-
+  if (needsBudgetSplit && hasPrivateShare) {
       const createdInvoices: Invoice[] = [];
 
       const splitResult = await withAudit(async (tx, audit) => {
@@ -1364,10 +1508,8 @@ async function generateInvoiceCore(
         invoices: splitResult,
         message: `${splitResult.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
       };
-    }
   }
 
-  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
   let recipientName = "";
   let recipientAddress = "";
   let insuranceProviderName = "";

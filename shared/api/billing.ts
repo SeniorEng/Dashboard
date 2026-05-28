@@ -85,6 +85,24 @@ export interface DeliveryRecord {
   letterxpressLetterId: string | null;
 }
 
+// Task #750: Vorschau im „Neue Rechnung erstellen"-Dialog. Wird vom selben
+// Helper berechnet (`buildInvoiceDraft`) wie `POST /billing/generate`,
+// damit angezeigte Werte und finale Rechnungssumme nicht driften können.
+export interface BillingInvoicePreview {
+  // Anzahl unterschriebener Leistungsnachweise im Zeitraum.
+  serviceRecordCount: number;
+  // Termine, die tatsächlich abgerechnet werden (nach Filter „bereits abgerechnet").
+  coveredAppointments: number;
+  // Dokumentierte Termine (`status = 'completed'`) im Monat — Sekundärwert
+  // für den Partial-Signing-Hinweis im UI.
+  completedAppointments: number;
+  // Brutto-Summe über alle entstehenden Folge-Rechnungen
+  // (bei Budget-Split: Kasse + Privat).
+  totalCents: number;
+  // True, wenn der Generate-Aufruf in zwei Rechnungen (Kassenanteil + Privatanteil) aufspaltet.
+  splitInvoices: boolean;
+}
+
 export interface GenerateInvoiceResponse {
   splitInvoices?: boolean;
   invoices?: { id: number }[];

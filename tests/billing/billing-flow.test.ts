@@ -1294,3 +1294,93 @@ describe("BF-7: /send-Fehlerpfade (Coverage)", () => {
     expect(sendRes.status).toBe(404);
   });
 });
+
+// ============================================================
+// BF-8: Vorschau-Endpoint (Task #750)
+// — Drift-Detektor: Preview muss exakt dieselben Zahlen liefern
+//   wie der nachfolgende Generate-Aufruf (gemeinsamer Helper).
+// ============================================================
+
+describe("BF-8: GET /billing/preview — Drift gegen /generate", () => {
+  it("BF-8.1 — Selbstzahler: Preview-Zahlen stimmen mit erzeugter Rechnung überein und Preview persistiert nichts", async () => {
+    const custId = await createCustomer(szPayload("PRV1"));
+    const appt = await findFreeSlotAndCreate(custId, hwServiceId, 60, "PRV1");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "BF-8.1 Preview-Drift");
+
+    const apptDate = new Date(appt.date);
+    const year = apptDate.getFullYear();
+    const month = apptDate.getMonth() + 1;
+    const srId = await createServiceRecord(custId, year, month);
+    await signServiceRecord(srId);
+
+    // Bestand vor Preview erfassen.
+    const beforeList = await apiGet<any[]>(`/api/billing?year=${year}&month=${month}`);
+    const beforeCount = (beforeList.data ?? []).filter((inv: any) => inv.customerId === custId).length;
+
+    // Preview zweimal aufrufen → identische Antwort, keine Side-Effects.
+    const previewA = await apiGet<any>(`/api/billing/preview?customerId=${custId}&month=${month}&year=${year}`);
+    expect(previewA.status, `Preview A: ${JSON.stringify(previewA.data)}`).toBe(200);
+    const previewB = await apiGet<any>(`/api/billing/preview?customerId=${custId}&month=${month}&year=${year}`);
+    expect(previewB.status).toBe(200);
+    expect(previewB.data).toEqual(previewA.data);
+
+    expect(previewA.data.serviceRecordCount).toBe(1);
+    expect(previewA.data.coveredAppointments).toBe(1);
+    expect(previewA.data.completedAppointments).toBeGreaterThanOrEqual(1);
+    expect(previewA.data.totalCents).toBeGreaterThan(0);
+    expect(previewA.data.splitInvoices).toBe(false);
+
+    // Bestand zwischen Preview-Aufrufen muss identisch geblieben sein.
+    const afterPreviewList = await apiGet<any[]>(`/api/billing?year=${year}&month=${month}`);
+    const afterPreviewCount = (afterPreviewList.data ?? []).filter((inv: any) => inv.customerId === custId).length;
+    expect(afterPreviewCount, "Preview darf KEINE Rechnung persistieren").toBe(beforeCount);
+
+    // Jetzt Rechnung erstellen und Zahlen vergleichen.
+    const { invoices, isSplit } = await generateInvoice(custId, year, month);
+    expect(isSplit).toBe(false);
+    expect(invoices.length).toBe(1);
+    const detail = await loadInvoiceWithLineItems(invoices[0].id);
+
+    expect(detail.grossAmountCents).toBe(previewA.data.totalCents);
+    expect(detail.lineItems.filter((li: any) => li.appointmentId === appt.id).length).toBeGreaterThan(0);
+  });
+
+  it("BF-8.2 — Split (PV + niedriges Budget): Preview-Brutto == Summe beider Folgerechnungen", async () => {
+    const custId = await createCustomer(pvPayload("PRV2"));
+    await configureLowBudgetPV(custId);
+    const appt = await findFreeSlotAndCreate(custId, hwServiceId, 60, "PRV2");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "BF-8.2 Preview-Split");
+
+    const apptDate = new Date(appt.date);
+    const year = apptDate.getFullYear();
+    const month = apptDate.getMonth() + 1;
+    const srId = await createServiceRecord(custId, year, month);
+    await signServiceRecord(srId);
+
+    const preview = await apiGet<any>(`/api/billing/preview?customerId=${custId}&month=${month}&year=${year}`);
+    expect(preview.status, `Preview: ${JSON.stringify(preview.data)}`).toBe(200);
+    expect(preview.data.splitInvoices).toBe(true);
+    expect(preview.data.serviceRecordCount).toBe(1);
+    expect(preview.data.coveredAppointments).toBe(1);
+
+    const { invoices, isSplit } = await generateInvoice(custId, year, month);
+    expect(isSplit).toBe(true);
+    expect(invoices.length).toBe(2);
+    const grossSum = invoices.reduce((sum: number, inv: any) => sum + (inv.grossAmountCents ?? 0), 0);
+    expect(grossSum, "Preview-Brutto muss Summe beider Split-Rechnungen sein").toBe(preview.data.totalCents);
+  });
+
+  it("BF-8.3 — Preview liefert klaren Fehler, wenn kein signierter LN vorhanden ist", async () => {
+    const custId = await createCustomer(szPayload("PRV3"));
+    // Termin + Doku, aber KEIN LN signiert.
+    const appt = await findFreeSlotAndCreate(custId, hwServiceId, 30, "PRV3");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 30, "BF-8.3 No-LN");
+
+    const apptDate = new Date(appt.date);
+    const year = apptDate.getFullYear();
+    const month = apptDate.getMonth() + 1;
+    const res = await apiGet<any>(`/api/billing/preview?customerId=${custId}&month=${month}&year=${year}`);
+    expect(res.status).toBe(400);
+    expect(String(res.data?.message || res.data?.error || "")).toMatch(/Leistungsnachweis/i);
+  });
+});

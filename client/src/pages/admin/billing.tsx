@@ -33,6 +33,7 @@ import { api, unwrapResult } from "@/lib/api";
 import { iconSize, componentStyles } from "@/design-system";
 import type {
   BillingCustomerItem,
+  BillingInvoicePreview,
   InvoiceItem,
   InvoiceDetail,
   DeliveryRecord,
@@ -187,6 +188,25 @@ export default function AdminBilling() {
       const result = await api.get<BillingCustomerItem[]>(`/billing/eligible-customers?${params.toString()}`, signal);
       return unwrapResult(result);
     },
+  });
+
+  // Task #750: Vorschau-Block im „Neue Rechnung erstellen"-Dialog.
+  // Lädt sobald ein Kunde ausgewählt ist; QueryKey beginnt mit "billing",
+  // sodass `invalidateRelated(qc, "billing")` (z.B. nach Generate) die
+  // Vorschau automatisch invalidiert.
+  const previewCustomerId = selectedCustomerId ? parseInt(selectedCustomerId, 10) : null;
+  const { data: invoicePreview, isLoading: previewLoading, isError: previewError } = useQuery({
+    queryKey: ["billing", "preview", previewCustomerId, selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("customerId", String(previewCustomerId));
+      params.set("month", String(selectedMonth));
+      params.set("year", String(selectedYear));
+      const result = await api.get<BillingInvoicePreview>(`/billing/preview?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: dialogOpen && previewCustomerId !== null,
+    retry: false,
   });
 
   // Krankenkassen-Dropdown — Liste der Pflegekassen mit Rechnungen im Monat.
@@ -1438,6 +1458,58 @@ export default function AdminBilling() {
                 </Select>
               )}
             </div>
+
+            {/* Task #750: Vorschau-Block — zeigt exakt die Werte, die die
+                nachfolgende Rechnung tragen wird (gemeinsamer Helper im Server). */}
+            {previewCustomerId !== null && (
+              <div
+                className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2"
+                data-testid="block-invoice-preview"
+              >
+                <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Vorschau
+                </div>
+                {previewLoading ? (
+                  <div className="flex items-center text-sm text-gray-500" data-testid="text-preview-loading">
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                    Wird berechnet...
+                  </div>
+                ) : previewError || !invoicePreview ? (
+                  <div className="text-sm text-amber-700" data-testid="text-preview-error">
+                    Vorschau nicht verfügbar.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    <div data-testid="text-preview-service-records">
+                      <div className="text-xs text-gray-500">Leistungsnachweise</div>
+                      <div className="font-semibold text-gray-900">{invoicePreview.serviceRecordCount}</div>
+                    </div>
+                    <div data-testid="text-preview-appointments">
+                      <div className="text-xs text-gray-500">Termine</div>
+                      <div className="font-semibold text-gray-900">
+                        {invoicePreview.coveredAppointments}
+                        {invoicePreview.completedAppointments > invoicePreview.coveredAppointments && (
+                          <span className="ml-1 text-xs font-normal text-amber-700">
+                            von {invoicePreview.completedAppointments} dokumentiert
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div data-testid="text-preview-total">
+                      <div className="text-xs text-gray-500">Summe (brutto)</div>
+                      <div className="font-semibold text-gray-900">
+                        {formatEuroDE(invoicePreview.totalCents)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {invoicePreview?.splitInvoices && (
+                  <div className="text-xs text-gray-600" data-testid="text-preview-split-hint">
+                    Wird in zwei Rechnungen aufgeteilt (Kassenanteil + Privatanteil).
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex gap-4">
               <div className="flex-1 space-y-2">
