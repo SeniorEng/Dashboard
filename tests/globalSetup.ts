@@ -183,14 +183,6 @@ async function loginAndGetAuth(): Promise<AuthInfo> {
   return { cookie: cookies, csrfToken: csrfMatch ? csrfMatch[1] : "" };
 }
 
-async function apiDelete(auth: AuthInfo, path: string): Promise<Response> {
-  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-  return fetch(`${BASE_URL}${path}`, {
-    method: "DELETE",
-    headers: { Cookie: cookieHeader, "x-csrf-token": auth.csrfToken },
-  });
-}
-
 async function apiPost(auth: AuthInfo, path: string, body: unknown): Promise<Response> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   return fetch(`${BASE_URL}${path}`, {
@@ -308,17 +300,19 @@ export async function setup() {
     const testProspects = prospects.filter(isTestProspect);
 
     if (testProspects.length > 0) {
-      console.log(`[globalSetup] Found ${testProspects.length} stale test prospects, deleting...`);
-      let deleted = 0;
-      for (const p of testProspects) {
-        const res = await apiDelete(auth, `/api/prospects/${p.id}`);
-        if (res.ok) {
-          deleted++;
-        } else {
-          console.warn(`[globalSetup] Failed to delete prospect ${p.id}: ${res.status}`);
-        }
+      console.log(`[globalSetup] Found ${testProspects.length} stale test prospects, purging...`);
+      // Task #789: EIN gescopter Bulk-DELETE statt eines HTTP-DELETE pro Datensatz.
+      // Es existierte nie eine DELETE /api/prospects/:id-Route, der alte Loop lief
+      // pro Datensatz in 404s und fraß bei 3000+ Stale-Prospects das gesamte
+      // Test-Zeitbudget. Die Route ist server-seitig auf das Test-Pattern gescopt.
+      const ids = testProspects.map((p) => p.id);
+      const res = await apiPost(auth, "/api/admin/test-cleanup/purge-prospects", { ids });
+      if (!res.ok) {
+        console.warn(`[globalSetup] Prospect purge failed: ${res.status} ${await res.text()}`);
+      } else {
+        const result = await res.json() as { deleted: number[] };
+        console.log(`[globalSetup] Purged ${result.deleted.length}/${testProspects.length} stale test prospects`);
       }
-      console.log(`[globalSetup] Deleted ${deleted}/${testProspects.length} stale test prospects`);
     }
   }
 

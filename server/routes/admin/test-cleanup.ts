@@ -4,7 +4,7 @@ import { inArray, eq, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
 import { requireSuperAdmin } from "../../middleware/auth";
 import { db } from "../../lib/db";
-import { appointmentsRepo } from "../../repos";
+import { appointmentsRepo, prospectsRepo } from "../../repos";
 import { customers } from "@shared/schema";
 import { appointments, appointmentSeries } from "@shared/schema";
 import { invoices, invoiceLineItems } from "@shared/schema";
@@ -126,6 +126,88 @@ router.post(
       }
     }
     res.json({ deleted, failed });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Test-Prospect-Cleanup (Task #789): löscht stale Test-Interessenten in EINEM
+// gescopten Query statt per HTTP-DELETE pro Datensatz. Es gab nie eine
+// DELETE /api/prospects/:id-Route — der alte globalSetup-Loop lief deshalb in
+// 404s pro Datensatz und fraß bei 3000+ stale Prospects das gesamte Test-
+// Zeitbudget. prospect_notes / prospect_offers / scheduled_calls hängen per
+// ON DELETE CASCADE dran; appointments.prospect_id ist ON DELETE SET NULL.
+// Sicherheits-Filter mirror't isTestProspect aus tests/globalSetup.ts, damit
+// niemals echte Leads gelöscht werden — selbst wenn eine fremde ID reinkommt.
+// ---------------------------------------------------------------------------
+const PROSPECT_TEST_FILTER = sql`(
+  LOWER(${prospects.vorname}) LIKE '%test%'
+  OR LOWER(${prospects.nachname}) LIKE '%test%'
+  OR LOWER(${prospects.vorname}) LIKE 'eb-%'
+  OR LOWER(${prospects.vorname}) LIKE 'status-%'
+  OR LOWER(${prospects.nachname}) LIKE 'eb%'
+)`;
+
+router.post(
+  "/test-cleanup/purge-prospects",
+  requireSuperAdmin,
+  asyncHandler("Test-Prospect-Cleanup fehlgeschlagen", async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === "production") {
+      res.status(403).json({ error: "FORBIDDEN", message: "Test-Cleanup ist in Produktion deaktiviert" });
+      return;
+    }
+    // ids ist optional: ohne ids werden ALLE Test-Interessenten gelöscht
+    // (One-Time-Backlog-Purge). Mit ids wird zusätzlich auf diese IDs gescopt.
+    const { ids } = z.object({
+      ids: z.array(z.number().int().positive()).max(10000).optional(),
+    }).parse(req.body ?? {});
+
+    const where = ids && ids.length > 0
+      ? and(inArray(prospects.id, ids), PROSPECT_TEST_FILTER)
+      : PROSPECT_TEST_FILTER;
+
+    const deleted = await db.transaction(async (tx) => {
+      // Ziel-Prospect-IDs auflösen (gescopt + Test-Pattern). Bewusst OHNE
+      // activeOnly() — auch bereits soft-gelöschte Test-Prospects sollen hart weg.
+      const targetRows = await prospectsRepo
+        .selectColumnsFrom({ id: prospects.id }, tx)
+        .where(where);
+      const prospectIds = targetRows.map((r) => r.id);
+      if (prospectIds.length === 0) return [];
+
+      // Termine, die auf diese Prospects zeigen, müssen HART gelöscht werden:
+      // appointments.prospect_id ist zwar ON DELETE SET NULL, aber der
+      // CHECK-Constraint `appointments_prospect_or_customer_check` verlangt
+      // entweder prospect_id ODER customer_id. Erstberatungs-Termine haben
+      // keinen Kunden → SET NULL würde den Constraint verletzen. Daher die
+      // Termine (inkl. ihrer FK-Referenzen) entfernen, bevor die Prospects fallen.
+      const apptRows = await appointmentsRepo
+        .selectColumnsFrom({ id: appointments.id }, tx)
+        .where(inArray(appointments.prospectId, prospectIds));
+      const apptIds = apptRows.map((r) => r.id);
+
+      if (apptIds.length > 0) {
+        await tx.update(budgetTransactions)
+          .set({ appointmentId: null })
+          .where(inArray(budgetTransactions.appointmentId, apptIds));
+        await tx.update(invoiceLineItems)
+          .set({ appointmentId: null })
+          .where(inArray(invoiceLineItems.appointmentId, apptIds));
+        await tx.update(appointments)
+          .set({ travelFromAppointmentId: null })
+          .where(inArray(appointments.travelFromAppointmentId, apptIds));
+        // appointment_services + service_records hängen per ON DELETE CASCADE dran.
+        await tx.delete(appointments).where(inArray(appointments.id, apptIds));
+      }
+
+      // prospect_notes / prospect_offers / scheduled_calls = ON DELETE CASCADE.
+      const deletedRows = await tx
+        .delete(prospects)
+        .where(inArray(prospects.id, prospectIds))
+        .returning({ id: prospects.id });
+      return deletedRows.map((r) => r.id);
+    });
+
+    res.json({ deleted });
   })
 );
 
