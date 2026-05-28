@@ -307,7 +307,7 @@ export async function setupBudgetScenario(
       `/api/budget/${customerId}/initial-budget`,
       {
         budgetType: ib.type,
-        currentYearAmountCents: ib.amountCents,
+        currentMonthAmountCents: ib.amountCents,
         carryoverAmountCents: carry.amountCents,
         budgetStartDate: normalizeValidFromToDate(ib.validFrom),
       },
@@ -322,7 +322,7 @@ export async function setupBudgetScenario(
       `/api/budget/${customerId}/initial-budget`,
       {
         budgetType: ib.type,
-        currentYearAmountCents: ib.amountCents,
+        currentMonthAmountCents: ib.amountCents,
         carryoverAmountCents: 0,
         budgetStartDate: normalizeValidFromToDate(ib.validFrom),
       },
@@ -337,7 +337,7 @@ export async function setupBudgetScenario(
       `/api/budget/${customerId}/initial-budget`,
       {
         budgetType: carry.type,
-        currentYearAmountCents: 0,
+        currentMonthAmountCents: 0,
         carryoverAmountCents: carry.amountCents,
         budgetStartDate: `${carry.year + 1}-01-01`,
       },

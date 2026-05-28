@@ -64,7 +64,7 @@ export function SetupPendingBanner({ customer, onRefresh }: { customer: SetupPen
         }
         result = lastResult;
       } else if (step === "budgets") {
-        const items = (stepPayload.items as Array<{ budgetType: string; currentYearAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }>) || [];
+        const items = (stepPayload.items as Array<{ budgetType: string; currentMonthAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }>) || [];
         let lastResult;
         for (const b of items) {
           lastResult = await api.post(`/budget/${customer.id}/initial-budget`, b);

@@ -1210,7 +1210,7 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
         `/api/budget/${customer.id}/initial-budget`,
         {
           budgetType: "entlastungsbetrag_45b",
-          currentYearAmountCents: 0,
+          currentMonthAmountCents: 0,
           carryoverAmountCents: carryoverCents,
           budgetStartDate: todayISO,
         },

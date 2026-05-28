@@ -50,7 +50,7 @@ beforeAll(async () => {
   });
   await apiPost(`/api/budget/${customerId}/initial-budget`, {
     budgetType: "entlastungsbetrag_45b",
-    currentYearAmountCents: 500000,
+    currentMonthAmountCents: 500000,
     carryoverAmountCents: 0,
     budgetStartDate: `${new Date().getFullYear()}-01-01`,
   });

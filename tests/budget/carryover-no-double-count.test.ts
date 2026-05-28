@@ -67,7 +67,7 @@ describe("Task #601 — §45b-Carryover wird nicht doppelt gezählt", () => {
       `/api/budget/${customerId}/initial-budget`,
       {
         budgetType: "entlastungsbetrag_45b",
-        currentYearAmountCents: 0,
+        currentMonthAmountCents: 0,
         carryoverAmountCents: carryoverCents,
         budgetStartDate,
       },

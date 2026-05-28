@@ -781,15 +781,18 @@ router.post("/:customerId/allocations", asyncHandler("Budget-Zuweisung konnte ni
   res.status(201).json(allocation);
 }));
 
-// Task #705 — `currentYearAmountCents` ist semantisch ein MONATSwert (er wird
-// als initial_balance für genau den Startmonat angelegt, nicht für das ganze
-// Jahr). Neu bevorzugter Name: `currentMonthAmountCents`. Der alte Name
-// bleibt als Backwards-Compat-Alias erhalten (Wizard + Tests + e2e-smoke
-// nutzen ihn aktuell noch), wird im Handler aber direkt nach dem Parse auf
-// den neuen Namen gemappt. Mindestens ein Feld muss gesetzt sein.
+// Task #705 / #725 — `currentYearAmountCents` ist semantisch ein MONATSwert
+// (er wird als `initial_balance`-Allokation für genau den Startmonat aus
+// `budgetStartDate` angelegt, NICHT als Jahresbetrag verteilt). Kanonischer
+// Name ist seit #705 `currentMonthAmountCents`; der alte Name bleibt als
+// Deprecated-Alias erhalten und wird im Handler auf den neuen Namen gemappt
+// — bei Verwendung schreiben wir eine Warn-Log (#725), damit Aufrufer
+// migrieren. Mindestens eines der beiden Felder muss gesetzt sein. Semantik
+// pro Topf siehe `docs/architecture/budget.md → initial-budget-Endpoint`.
 const initialBudgetSchema = z.object({
   budgetType: z.enum(BUDGET_TYPES).default("entlastungsbetrag_45b"),
   currentMonthAmountCents: z.number().min(0).optional(),
+  /** @deprecated Use `currentMonthAmountCents`. Semantik ist monatlich, nicht jährlich. */
   currentYearAmountCents: z.number().min(0).optional(),
   carryoverAmountCents: z.number().min(0).optional().default(0),
   budgetStartDate: z.string(),
@@ -813,8 +816,17 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   }
 
   const { budgetType, carryoverAmountCents, budgetStartDate } = result.data;
-  // Task #705 — Backwards-Compat: bevorzugt `currentMonthAmountCents`, fällt
-  // auf den alten Namen `currentYearAmountCents` zurück.
+  // Task #705 / #725 — Backwards-Compat: bevorzugt `currentMonthAmountCents`,
+  // fällt auf den alten, semantisch irreführenden Namen
+  // `currentYearAmountCents` zurück. Bei Verwendung des Alias warnen wir
+  // einmal pro Request, damit verbleibende Aufrufer migriert werden.
+  if (result.data.currentMonthAmountCents == null && result.data.currentYearAmountCents != null) {
+    const { log } = await import("../lib/log");
+    log(
+      `DEPRECATION: POST /budget/${customerId}/initial-budget verwendet 'currentYearAmountCents'. Bitte auf 'currentMonthAmountCents' migrieren — der Wert wird als Monats-Allokation für budgetStartDate gebucht, nicht als Jahresbetrag.`,
+      "budget",
+    );
+  }
   const currentMonthAmountCents = result.data.currentMonthAmountCents ?? result.data.currentYearAmountCents ?? 0;
   const userId = req.user?.id;
   const startDate = parseLocalDate(budgetStartDate);

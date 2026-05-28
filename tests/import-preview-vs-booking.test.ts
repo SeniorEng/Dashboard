@@ -132,7 +132,7 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
 
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 200000,
+      currentMonthAmountCents: 200000,
       carryoverAmountCents: 0,
       budgetStartDate: `${year}-01-01`,
     });
@@ -165,7 +165,7 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
 
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 200000,
+      currentMonthAmountCents: 200000,
       carryoverAmountCents: 0,
       budgetStartDate: `${year}-01-01`,
     });
@@ -200,7 +200,7 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
 
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 200000,
+      currentMonthAmountCents: 200000,
       carryoverAmountCents: 0,
       budgetStartDate: `${year}-01-01`,
     });
@@ -231,7 +231,7 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
     const cid2 = await setupCustomerWithCap();
     await apiPost(`/api/budget/${cid2}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 200000,
+      currentMonthAmountCents: 200000,
       carryoverAmountCents: 0,
       budgetStartDate: `${year}-01-01`,
     });
@@ -264,7 +264,7 @@ describe("Task #118 — Import-Vorschau == tatsächliche Buchung", () => {
 
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 200000,
+      currentMonthAmountCents: 200000,
       carryoverAmountCents: 0,
       budgetStartDate: `${year}-01-01`,
     });

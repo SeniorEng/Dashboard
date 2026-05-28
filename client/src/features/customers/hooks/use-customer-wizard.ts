@@ -506,17 +506,17 @@ export function useCustomerWizard() {
             umwandlung_45a: "§45a Umwandlungsanspruch",
             ersatzpflege_39_42a: "§39/§42a Verhinderungspflege",
           };
-          const failedBudgetItems: Array<{ budgetType: string; currentYearAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }> = [];
+          const failedBudgetItems: Array<{ budgetType: string; currentMonthAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }> = [];
           for (const bt of budgetTypes) {
             const carryover = bt.type === "entlastungsbetrag_45b" ? (carryoverAmount || 0) : 0;
             const trackFailure = () => {
               warnings.push(`Startbudget für ${typeLabels[bt.type] || bt.type} konnte nicht gespeichert werden — bitte manuell unter Budget-Einstellungen nachtragen`);
-              failedBudgetItems.push({ budgetType: bt.type, currentYearAmountCents: bt.cents, carryoverAmountCents: carryover, budgetStartDate: budgetStart });
+              failedBudgetItems.push({ budgetType: bt.type, currentMonthAmountCents: bt.cents, carryoverAmountCents: carryover, budgetStartDate: budgetStart });
             };
             try {
               const result = await api.post(`/budget/${customer.id}/initial-budget`, {
                 budgetType: bt.type,
-                currentYearAmountCents: bt.cents,
+                currentMonthAmountCents: bt.cents,
                 carryoverAmountCents: carryover,
                 budgetStartDate: budgetStart,
               });

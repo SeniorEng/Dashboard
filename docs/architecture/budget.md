@@ -85,6 +85,59 @@ Beispiel-Responses (gekürzt):
 
 Three-pot Budget-Ledger mit Cascading-Allocation, FIFO für §45b und einem virtuellen Auto-Renewal-Modell für §45b, das monatliche Allocations nicht als DB-Zeilen materialisiert. Concurrent Budget-Consumption wird serialisiert.
 
+### initial-budget-Endpoint (Task #725)
+
+`POST /api/budget/:customerId/initial-budget` legt eine `initial_balance`-Allokation pro Topf an. **Semantik: der Betrag wird genau für den Monat aus `budgetStartDate` gebucht — nicht als Jahresbetrag verteilt.**
+
+**Payload:**
+
+| Feld | Typ | Pflicht | Bedeutung |
+|---|---|---|---|
+| `budgetType` | `entlastungsbetrag_45b` \| `umwandlung_45a` \| `ersatzpflege_39_42a` | nein (Default `entlastungsbetrag_45b`) | Zieltopf. Für `selbstzahler`-Kunden + §45b → 409 (siehe Selbstzahler-Routing). |
+| `currentMonthAmountCents` | `number ≥ 0` | ja (oder Alias unten) | **Monats-Betrag in Cent.** Wird als `initial_balance`-Allokation mit `year/month` aus `budgetStartDate` angelegt. |
+| `currentYearAmountCents` | `number ≥ 0` | Alias (deprecated) | Backwards-Compat-Alias für `currentMonthAmountCents` — semantisch identisch (es war NIE ein Jahresbetrag). Server loggt eine Deprecation-Warnung. |
+| `carryoverAmountCents` | `number ≥ 0` | nein (Default 0) | Nur für §45b ausgewertet — legt zusätzlich eine `source='carryover'`-Zeile mit `validFrom = YYYY-01-01`, `expiresAt = YYYY-06-30` an. |
+| `budgetStartDate` | `YYYY-MM-DD` | ja | Bestimmt `year`/`month` der Monats-Allokation sowie deren `validFrom`. |
+
+Pro Topf legt ein Aufruf maximal eine `initial_balance`-Zeile an:
+
+- **§45b (`entlastungsbetrag_45b`)** — Jahrestopf mit monatlicher Auto-Aufstockung. Der `initial_balance`-Eintrag besetzt den Startmonat (verhindert Doppelzählung mit dem virtuellen Auto-Renewal); spätere Monate stockt `calculateAllocated45b` automatisch auf. `expiresAt = null`. Zusätzlicher `carryoverAmountCents > 0` legt eine `carryover`-Zeile mit Verfall 30.06. an.
+- **§45a (`umwandlung_45a`)** — monatliches Budget. `initial_balance` für den Startmonat; Folgemonate sind Sache der Settings/Booking-Pfade. `expiresAt = null`.
+- **§39/§42a (`ersatzpflege_39_42a`)** — jährlicher Anspruch. `initial_balance` wird auf den Startmonat gebucht, `expiresAt = YYYY-12-31`. Wer den vollen Jahresbetrag abbilden möchte, übergibt den Jahres-Anspruch als `currentMonthAmountCents` zum Jahresanfang (`budgetStartDate=YYYY-01-01`) — die Zeile gilt dann bis 31.12.
+
+Validierung (Zod): mindestens eines der beiden Amount-Felder muss gesetzt sein. Fehlen beide → 400 `VALIDATION_ERROR`.
+
+**Beispiel-Requests:**
+
+```jsonc
+// §45b — Startwert für den laufenden Monat + Restguthaben aus Vorjahr
+POST /api/budget/42/initial-budget
+{
+  "budgetType": "entlastungsbetrag_45b",
+  "currentMonthAmountCents": 13100,
+  "carryoverAmountCents": 50000,
+  "budgetStartDate": "2026-05-15"
+}
+
+// §45a — Monatsbudget ab Mai
+POST /api/budget/42/initial-budget
+{
+  "budgetType": "umwandlung_45a",
+  "currentMonthAmountCents": 25000,
+  "budgetStartDate": "2026-05-15"
+}
+
+// §39/§42a — Jahresanspruch zum Jahresanfang
+POST /api/budget/42/initial-budget
+{
+  "budgetType": "ersatzpflege_39_42a",
+  "currentMonthAmountCents": 161200,
+  "budgetStartDate": "2026-01-01"
+}
+```
+
+Konsumenten (Wizard, `setup-pending`, Test-Helper, E2E-Smoke) verwenden seit #725 den kanonischen `currentMonthAmountCents`. Der alte Name darf weiter geschickt werden, löst aber eine Deprecation-Warn-Log im Server aus. Drift-Schutz: `tests/budget/initial-budget-endpoint-semantics.test.ts` deckt pro Topf-Typ die gebuchte Zeilen-Position ab und prüft, dass der Alias identisch geroutet wird.
+
 ### §45b Startwert vs. Restguthaben aus Vorjahr (Task #670)
 
 Im UI getrennt:

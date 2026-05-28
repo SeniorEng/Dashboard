@@ -105,10 +105,10 @@ async function createScenarioCustomer(variant: Variant): Promise<number> {
   return c.id as number;
 }
 
-async function fillBudget(customerId: number, currentYearAmountCents: number): Promise<void> {
+async function fillBudget(customerId: number, currentMonthAmountCents: number): Promise<void> {
   await apiPost(`/api/budget/${customerId}/initial-budget`, {
     budgetType: "entlastungsbetrag_45b",
-    currentYearAmountCents,
+    currentMonthAmountCents,
     carryoverAmountCents: 0,
     budgetStartDate: "2024-01-01",
   });

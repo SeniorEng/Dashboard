@@ -88,7 +88,7 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
 
     const initRes = await apiPost<any>(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 50000,
+      currentMonthAmountCents: 50000,
       carryoverAmountCents: 12500,
       budgetStartDate,
     });
@@ -141,7 +141,7 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     const year = now.getFullYear();
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 0,
+      currentMonthAmountCents: 0,
       carryoverAmountCents: 50000,
       budgetStartDate: `${year}-12-01`, // bewusst nach dem Importmonat
     });
@@ -214,7 +214,7 @@ describe("Task #116 — Carryover wird auch für rückwirkende Importmonate gese
     const year = new Date().getFullYear();
     await apiPost(`/api/budget/${cid}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 0,
+      currentMonthAmountCents: 0,
       carryoverAmountCents: 50000,
       budgetStartDate: `${year}-01-01`,
     });

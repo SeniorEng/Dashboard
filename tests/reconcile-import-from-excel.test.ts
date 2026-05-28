@@ -132,7 +132,7 @@ describe("Task #648 — Reconcile aus Original-Excel", () => {
     const year = new Date().getFullYear();
     await apiPost(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 500000,
+      currentMonthAmountCents: 500000,
       carryoverAmountCents: 0,
       budgetStartDate: `${year}-01-01`,
     });
@@ -273,7 +273,7 @@ describe("Task #648 — Reconcile aus Original-Excel", () => {
     const year = new Date().getFullYear();
     await apiPost(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: 500000,
+      currentMonthAmountCents: 500000,
       carryoverAmountCents: 0,
       budgetStartDate: `${year}-01-01`,
     });
