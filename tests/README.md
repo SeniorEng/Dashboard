@@ -132,36 +132,66 @@ npx vitest run
 
 Alle Tests sollten grün sein bevor Code gemerged wird.
 
-## Coverage-Gate für `server/routes/billing.ts` (Task #109)
+## Targeted-Coverage-Gates (`script/coverage-gate.ts`, Task #109/#771)
 
-Der Billing-Flow hat einen eigenen Coverage-Gate, der per V8-Native-Coverage
-gegen einen separat instrumentierten Express-Server läuft (Port 5050):
+Statt eines globalen Coverage-Gates über 116k+ LOC (laut Fowler/ThoughtWorks
+„overrated") erzwingt CareConnect **pro kritischem Hotspot-Modul** ein eigenes
+Per-File-Gate mit kalibrierten Lines-/Branch-Schwellen. Alle Gates liegen in
+einer Konfig-Liste (`MODULES`) in `script/coverage-gate.ts`.
 
 ```bash
-TEST_USER_PASSWORD='dein_passwort' npx tsx script/coverage-billing.ts
+# Alle Module messen + Schwellen erzwingen
+TEST_USER_PASSWORD='dein_passwort' npx tsx script/coverage-gate.ts
+
+# Einzelnes Modul
+TEST_USER_PASSWORD='dein_passwort' npx tsx script/coverage-gate.ts qonto
+
+# Nur messen (Schwellen auf 0, Exit 0 sofern Tests grün) — zum Kalibrieren
+COVERAGE_MEASURE_ONLY=1 npx tsx script/coverage-gate.ts month-close-scheduler
 ```
 
-Das Skript:
+**Aktuelle Gates** (Schwelle = gemessener Ist-Wert minus ~5 %-Puffer):
 
-1. Startet `tsx server/index.ts` mit `NODE_V8_COVERAGE=coverage/billing-raw`
-   in einer eigenen Prozessgruppe auf Port 5050.
-2. Wartet, bis der Server hört, und führt `npx vitest run
-   tests/billing/billing-flow.test.ts` mit `TEST_BASE_URL=http://localhost:5050`
-   aus (alle 27 Billing-Tests).
-3. Sendet `SIGTERM` an die Server-Prozessgruppe; V8 schreibt seine Profile
-   in `coverage/billing-raw/`.
-4. Wertet die Profile mit `c8 report` aus (HTML-Report unter
-   `coverage/billing/index.html`) und erzwingt die Schwellen
-   **Lines ≥ 55 %** und **Branches ≥ 45 %** für `server/routes/billing.ts`.
+| Key | Ziel-Datei | Modus | Lines ≥ | Branches ≥ |
+|---|---|---|---|---|
+| `billing` | `server/routes/billing.ts` | server | 55 % | 45 % |
+| `qonto` | `server/services/qonto.ts` | server | 48 % | 60 % |
+| `consumption-engine` | `server/storage/budget/consumption-engine.ts` | vitest | 82 % | 62 % |
+| `month-close-scheduler` | `server/services/month-close-scheduler.ts` | vitest | 33 % | 21 % |
 
-**Hinweis zu den Schwellen:** Die ursprüngliche Zielmarke war
+**Zwei Messmodi**, weil die Tests den Code unterschiedlich erreichen:
+
+- **`server`** (billing, qonto): HTTP-Integrationstests. Das Skript startet
+  einen instrumentierten Server (`node --import tsx server/index.ts` mit
+  `NODE_V8_COVERAGE`, eigener Port via `COVERAGE_PORT`, Default 5050), fährt die
+  Tests via `TEST_BASE_URL` dagegen, beendet ihn per `SIGTERM` (V8 flusht die
+  Profile) und wertet mit `c8 report` aus. **Wichtig:** Es wird `node --import
+  tsx` statt der `tsx`-Bin benutzt — die Bin spawnt einen Kind-Prozess, dessen
+  Profile unter Last nicht flushen (c8 meldet dann 0/0).
+- **`vitest`** (consumption-engine, month-close-scheduler): Tests importieren
+  das Modul direkt und laufen im Vitest-Worker-Fork. Rohes `NODE_V8_COVERAGE`
+  flusht aus diesen Forks nicht zuverlässig, daher der native
+  `@vitest/coverage-v8`-Provider. Diese Tests brauchen keinen eigenen Server —
+  ihr `globalSetup` räumt über den bereits laufenden App-Server (Port 5000) auf.
+
+**False-Positive-Schutz:** Beide Modi prüfen die Schwellen über die
+`coverage-summary.json` und failen hart, wenn die Ziel-Datei **0 messbare
+Zeilen** hat (Profile nicht geschrieben / Pfad falsch). `c8 --check-coverage`
+allein wertet 0/0 als „bestanden" und wird daher NICHT verwendet.
+
+**Neues Gate hinzufügen:** Eintrag in `MODULES` ergänzen (`key`, `mode`,
+`target`, `tests`, `lines`, `branches`), Schwelle per `COVERAGE_MEASURE_ONLY=1`
+am Ist-Wert minus ~5 % kalibrieren und in `.github/workflows/ci.yml` einen
+eigenen Step `npx tsx script/coverage-gate.ts <key>` registrieren.
+
+**Hinweis zu den Schwellen (billing):** Die ursprüngliche Zielmarke war
 „Branch-Coverage > 70 %". V8-Native-Coverage zählt jedoch nur Branches in
 beobachteten Code-Pfaden, und der ~280 Zeilen lange SMTP-/E-Mail-Pfad in
 `router.post("/:id/send")` lässt sich ohne Mail-Mocking nicht abdecken
-(würde echte Postausgänge erzeugen). Der Floor wurde daher auf das aktuell
-gemessene Niveau gesetzt (Lines 57,6 % / Branches 47,9 %) und schützt vor
-Regressionen unter diese Linie. Für eine echte 70 %-Branch-Marke müsste der
-Mail-Versand-Pfad auf einen mockbaren SMTP-Adapter umgestellt werden.
+(würde echte Postausgänge erzeugen). Der Floor schützt daher vor Regressionen
+unter das gemessene Niveau. Analog sind `qonto` (echter Qonto-API-Sync nicht
+abgedeckt) und `month-close-scheduler` (WhatsApp/SMTP-Reminder + Banner-HTTP
+außerhalb der direkt importierenden Tests) bewusst konservativ angesetzt.
 
 ## Hinweise
 

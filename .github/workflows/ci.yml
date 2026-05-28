@@ -11,7 +11,9 @@ name: CI
 #   5. npx vitest run tests/architecture/  (Fitness-Functions, eigenes Gate)
 #   6. npm audit --audit-level=high        (Security)
 #   7. npm run test:e2e:smoke              (Playwright-Smoke)
-#   8. tsx script/coverage-billing.ts      (Coverage-Gate billing.ts)
+#   8. tsx script/coverage-gate.ts <key>   (Targeted-Coverage-Gates: billing,
+#                                            qonto, consumption-engine,
+#                                            month-close-scheduler)
 #   9. npm run gen:openapi -- --check      (OpenAPI-Drift, statisch)
 #
 # Die DB-/Server-abhängigen Gates (4, 5, 7, 8) benötigen Repo-Secrets
@@ -75,7 +77,7 @@ jobs:
   # -------------------------------------------------------------------------
   # DB-/Server-abhängige Gates: Vitest, Architektur-Fitness-Functions und
   # das Billing-Coverage-Gate. Brauchen Postgres + laufenden App-Server.
-  # Gates: 4 (vitest), 5 (architecture), 8 (coverage-billing)
+  # Gates: 4 (vitest), 5 (architecture), 8 (targeted coverage gates)
   # -------------------------------------------------------------------------
   tests:
     # Check-Name == Job-ID, damit Branch-Protection diesen Kontext exakt matcht
@@ -157,10 +159,24 @@ jobs:
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx vitest run tests/architecture/ --reporter=default --reporter=junit --outputFile=test-results/architecture-junit.xml
 
-      # Gate 8: bestehendes Billing-Coverage-Gate.
-      - name: Coverage gate (billing.ts)
+      # Gate 8: Targeted-Per-File-Coverage-Gates (ein eigener Step pro Modul,
+      # damit im CI-Log sofort sichtbar ist, welches Modul unter die Schwelle
+      # rutscht). Konfiguration/Schwellen: script/coverage-gate.ts.
+      - name: Coverage gate (billing)
         if: ${{ env.TEST_USER_PASSWORD != '' }}
-        run: npx tsx script/coverage-billing.ts
+        run: npx tsx script/coverage-gate.ts billing
+
+      - name: Coverage gate (qonto)
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx script/coverage-gate.ts qonto
+
+      - name: Coverage gate (consumption-engine)
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx script/coverage-gate.ts consumption-engine
+
+      - name: Coverage gate (month-close-scheduler)
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx script/coverage-gate.ts month-close-scheduler
 
       - name: Stop app server
         if: ${{ always() && env.SERVER_PID != '' }}
