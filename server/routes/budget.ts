@@ -15,6 +15,7 @@ import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budge
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-validator";
+import { validatePflegegrad45a } from "@shared/domain/budget-pflegegrad-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
@@ -31,17 +32,50 @@ async function rejectIfSelbstzahler45b(
   res: Response,
 ): Promise<boolean> {
   const cust = await storage.getCustomer(customerId);
-  const v = validateSelbstzahler45b({
-    billingType: cust?.billingType,
-    intent: { budgetType },
+  return rejectBudgetIntent(
+    {
+      billingType: cust?.billingType,
+      pflegegrad: cust?.pflegegrad,
+      budgetType,
+    },
+    res,
+  );
+}
+
+/**
+ * Task #722 — Zentraler Reject-Helper für Budget-Schreibpfade. Führt nach­
+ * einander die geteilten Validatoren (Selbstzahler #705/#716 + Pflegegrad
+ * #722) aus und sendet beim ersten Fail eine 409-Response im einheitlichen
+ * Wire-Format (`error`, `code`, `message`). Aufrufer, die den Kunden bereits
+ * geladen haben (z. B. `POST /initial-budget`), können Customer-Felder
+ * direkt durchreichen — sonst nimmt `rejectIfSelbstzahler45b` die Last ab
+ * und lädt den Kunden selbst.
+ */
+function rejectBudgetIntent(
+  args: {
+    billingType: string | null | undefined;
+    pflegegrad: number | null | undefined;
+    budgetType: string;
+  },
+  res: Response,
+): boolean {
+  const sz = validateSelbstzahler45b({
+    billingType: args.billingType,
+    intent: { budgetType: args.budgetType },
   });
-  if (v.ok) return false;
-  res.status(v.httpStatus).json({
-    error: v.code,
-    code: v.code,
-    message: v.message,
+  if (!sz.ok) {
+    res.status(sz.httpStatus).json({ error: sz.code, code: sz.code, message: sz.message });
+    return true;
+  }
+  const pg = validatePflegegrad45a({
+    pflegegrad: args.pflegegrad,
+    intent: { budgetType: args.budgetType },
   });
-  return true;
+  if (!pg.ok) {
+    res.status(pg.httpStatus).json({ error: pg.code, code: pg.code, message: pg.message });
+    return true;
+  }
+  return false;
 }
 
 const router = Router();
@@ -653,13 +687,33 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     return;
   }
 
-  // Task #705 / #716 — Selbstzahler-Block via shared Validator. Greift nur,
-  // wenn der Save mindestens eine `enabled=true`-Zeile für §45b enthält.
+  // Task #705 / #716 / #722 — Selbstzahler- und Pflegegrad-Block via shared
+  // Validatoren. Greift pro Topf nur, wenn der Save eine `enabled=true`-Zeile
+  // für genau diesen Topf enthält (Deaktivieren bleibt immer erlaubt, damit
+  // Bestandskunden ihre falsch angelegte Konfiguration jederzeit zurückbauen
+  // können).
   {
     const wants45b = result.data.settings.some(
       s => s.budgetType === "entlastungsbetrag_45b" && s.enabled,
     );
-    if (wants45b && await rejectIfSelbstzahler45b(customerId, "entlastungsbetrag_45b", res)) return;
+    const wants45a = result.data.settings.some(
+      s => s.budgetType === "umwandlung_45a" && s.enabled,
+    );
+    if (wants45b || wants45a) {
+      const customer = await storage.getCustomer(customerId);
+      if (!customer) {
+        res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+        return;
+      }
+      if (wants45b && rejectBudgetIntent(
+        { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType: "entlastungsbetrag_45b" },
+        res,
+      )) return;
+      if (wants45a && rejectBudgetIntent(
+        { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType: "umwandlung_45a" },
+        res,
+      )) return;
+    }
   }
 
   for (const s of result.data.settings) {
@@ -775,16 +829,13 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
     return;
   }
-  // Task #705 / #716 — Selbstzahler-Block via shared Validator. `customer`
-  // ist hier bereits geladen, daher inline statt `rejectIfSelbstzahler45b` (das
-  // den Kunden nochmal laden würde).
-  {
-    const v = validateSelbstzahler45b({ billingType: customer.billingType, intent: { budgetType } });
-    if (!v.ok) {
-      res.status(v.httpStatus).json({ error: v.code, code: v.code, message: v.message });
-      return;
-    }
-  }
+  // Task #705 / #716 / #722 — Selbstzahler- und Pflegegrad-Block via shared
+  // Validatoren. `customer` ist hier bereits geladen, daher direkt
+  // `rejectBudgetIntent` statt der DB-lesenden Wrapper-Funktion.
+  if (rejectBudgetIntent(
+    { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType },
+    res,
+  )) return;
 
   // Task #705 — Bug 5: Für §45a/§39_42a setzt das Wizard-Flow ein
   // `initial_balance` per `/initial-budget`, ohne dass die zugehörigen
