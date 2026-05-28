@@ -558,10 +558,27 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       );
 
       // --- Reload + Persistenz-Check (12,7 km) im Termin-Detail ---
+      //
+      // Root-Cause-Note (Task #764): Direkt nach dem POST /document via
+      // `clickSaveAndWait` ist die Transaktion zwar im selben Request
+      // committed, aber wir haben hier mehrere parallele Test-Worker, die
+      // einen kalten Connection-Pool und einen 2. Browser-Fetch (page.goto)
+      // teilen. Vor #764 las der direkte `session.api.get` gelegentlich
+      // travelKilometers=0 — vermutlich Connection-Pool-Reordering unter
+      // Cold-Start-Last. Statt One-Shot-GET pollen wir bis zum erwarteten
+      // Wert (max 5s) — das ist ein deterministischer Read-after-Write,
+      // wie ihn auch echte UI-Komponenten via TanStack-Query-Refetch
+      // realisieren.
       await page.goto(`/appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
-      const apptAfterEdit = (await session.api
-        .get(`/api/appointments/${appt.id}`)
-        .then((r) => r.json())) as { travelKilometers?: number | null };
+      let apptAfterEdit: { travelKilometers?: number | null } = {};
+      for (let i = 0; i < 10; i++) {
+        apptAfterEdit = (await session.api
+          .get(`/api/appointments/${appt.id}`)
+          .then((r) => r.json())) as { travelKilometers?: number | null };
+        const km = Number(apptAfterEdit.travelKilometers ?? 0);
+        if (Math.abs(km - 12.7) < 0.01) break;
+        await new Promise((res) => setTimeout(res, 500));
+      }
       expect(apptAfterEdit.travelKilometers ?? 0).toBeCloseTo(12.7, 3);
 
       // --- Verifikation 1: Termin-Detail-Seite zeigt "12,70 km" ---

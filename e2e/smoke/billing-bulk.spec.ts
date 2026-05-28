@@ -155,11 +155,27 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
 
     try {
       // 2) Generate-All über die UI: Monat/Jahr wählen, Dialog öffnen, bestätigen.
+      //
+      // Root-Cause-Note (Task #764): Auf Cold-Start mit vier parallelen Workern
+      // kann der `/api/billing/eligible-customers`-Request 10–20s brauchen.
+      // `button-generate-all` rendert NUR wenn `customers.length > 0` (siehe
+      // `client/src/pages/admin/billing.tsx`). Wenn wir nur auf `toBeVisible`
+      // warten, hängt der erste Try gelegentlich am 15s-Timeout, weil die
+      // Hydration-Query noch in Flight ist — der Retry rettet ihn dann.
+      // Deshalb warten wir hier EXPLIZIT auf den eligible-customers-GET, bevor
+      // wir auf das Button-Render gehen, und akzeptieren großzügige 30s.
+      const eligibleResp = page.waitForResponse(
+        (r) =>
+          r.url().includes("/api/billing/eligible-customers")
+          && r.request().method() === "GET",
+        { timeout: 30000 },
+      );
       await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
-      // Sicherstellen, dass die Page interaktiv ist, bevor wir die Radix-Selects bedienen.
+      await eligibleResp;
       await expect(page.locator("[data-testid='button-generate-all']")).toBeVisible({
         timeout: 15000,
       });
+      await expect(page.locator("[data-testid='button-generate-all']")).toBeEnabled();
 
       // Die Billing-Page initialisiert Monat/Jahr auf das aktuelle Datum.
       // `nextWeekday(7)` (7 Werktage in der Zukunft) bleibt nahezu immer im

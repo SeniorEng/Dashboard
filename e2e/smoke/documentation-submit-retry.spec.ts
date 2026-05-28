@@ -83,7 +83,26 @@ test.describe("@smoke Doku-Submit Resilienz (#490)", () => {
         });
         return;
       }
-      await route.continue();
+      // Root-Cause-Note (Task #764): Vorher rief der Retry-Pfad `route.continue()`
+      // und ließ den echten Server speichern. Der Test ist aber gar nicht über
+      // die Server-Persistenz, sondern über die UI-Retry-Mechanik (#490). Echte
+      // Server-Hits brachten Cold-Start-500er ins Spiel (Budget-Lookups ohne
+      // Pricing/Topf etc.), die der äußere Playwright-Retry rettete — d.h. der
+      // Test war nur „grün" auf Retry. Wir fulfill jetzt einen synthetischen
+      // 200 mit der minimal nötigen Shape (`id`, `customerId`, `status`), damit
+      // `useDocumentAppointment.onSuccess` sauber durchläuft und der
+      // Erfolgs-Banner ohne Server-Kontention erscheint.
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: appointment.id,
+          customerId: appointment.customerId,
+          status: "completed",
+          budgetTransaction: null,
+          budgetWarning: null,
+        }),
+      });
     });
 
     try {
