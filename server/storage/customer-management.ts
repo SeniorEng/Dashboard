@@ -11,7 +11,6 @@ import {
   type InsertCareLevelHistory,
   type CustomerNeedsAssessment,
   type InsertNeedsAssessment,
-  type InsertCustomerBudget,
   type CustomerContract,
   type InsertCustomerContract,
   type CustomerContractRate,
@@ -142,8 +141,6 @@ class CustomerManagementStorage {
   createNeedsAssessment = careLevelModule.createNeedsAssessment;
 
   updateCustomerContract = contractsModule.updateCustomerContract;
-
-  addCustomerBudget = budgetsModule.addCustomerBudget;
 
   getCustomerCurrentContract = contractsModule.getCustomerCurrentContract;
   getCustomerLatestContract = contractsModule.getCustomerLatestContract;

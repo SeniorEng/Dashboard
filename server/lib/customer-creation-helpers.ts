@@ -186,6 +186,11 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
 
   if (input.budgets) {
     if (input.useLedgerBudgets) {
+      // Task #742 — Der frühere `else`-Zweig (Legacy-Pfad mit
+      // `addCustomerBudget` in die abgeschaltete Legacy-Tabelle) ist
+      // entfallen. Der einzige Produktionsaufrufer (admin/customers.ts)
+      // setzt `useLedgerBudgets: true`, und der No-Op-Writer aus Task #728
+      // Phase 2.1 hätte ohnehin nichts mehr persistiert.
       const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
       if (input.budgets.entlastungsbetrag45b > 0) {
         // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Der vom
@@ -252,18 +257,10 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
           warnings.push("Übertrag aus Vorjahr konnte nicht gespeichert werden");
         }
       }
-    } else {
-      // Pflicht (Legacy-Pfad in prospects.ts): Budget-Eintrag in
-      // customer_budgets. Hard-Fail aus demselben Grund wie oben.
-      maybeFail("budget_settings", testFaults);
-      await customerManagementStorage.addCustomerBudget({
-        customerId,
-        entlastungsbetrag45b: input.budgets.entlastungsbetrag45b,
-        verhinderungspflege39: input.budgets.verhinderungspflege39,
-        pflegesachleistungen36: input.budgets.pflegesachleistungen36,
-        validFrom: input.budgets.validFrom,
-      }, userId, tx);
     }
+    // Task #742 — Kein Else-Zweig mehr: Bestandsaufrufer ohne
+    // `useLedgerBudgets` existieren nicht (siehe Audit im Task-Commit),
+    // und der frühere `addCustomerBudget`-No-Op aus Task #728 ist entfernt.
   }
 
   // Pflicht: Vertrag + Raten. Ohne Vertrag und Raten schlagen

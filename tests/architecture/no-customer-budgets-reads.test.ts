@@ -29,7 +29,6 @@ const ROOT = process.cwd();
 
 const ALLOWLIST: ReadonlyArray<string> = [
   "shared/schema/budget.ts",
-  "server/lib/customer-creation-helpers.ts",
   "server/scripts/cleanup-test-data.ts",
   "server/routes/admin/test-cleanup.ts",
   "server/routes/admin/customers/duplicates.ts",
