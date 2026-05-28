@@ -73,6 +73,7 @@ interface CustomerListItem {
 import {
   type SetupPendingCustomerLike,
   SetupPendingBanner,
+  BudgetSetupRequiredBanner,
   BudgetsTabContent,
 } from "@/features/customers/components/admin/customer-detail-sections";
 
@@ -303,6 +304,13 @@ export default function AdminCustomerDetail() {
           />
 
           <SetupPendingBanner customer={customer as unknown as SetupPendingCustomerLike} onRefresh={refetch} />
+
+          <BudgetSetupRequiredBanner
+            customerId={customerId}
+            billingType={customer.billingType}
+            pflegegrad={customer.pflegegrad ?? null}
+            onSetup={() => handleTabChange("budgets")}
+          />
 
           {customer.status === "aktiv" && customer.inaktivAb && (
             <SectionCard className="mb-4 border-blue-200 bg-blue-50">

@@ -6,7 +6,9 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { api, unwrapResult } from "@/lib/api";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { iconSize, componentStyles } from "@/design-system";
-import { Loader2, AlertCircle, AlertTriangle, CheckCircle2, Settings, Euro } from "lucide-react";
+import { Loader2, AlertCircle, AlertTriangle, CheckCircle2, Settings, Euro, Wallet } from "lucide-react";
+import { isPflegekasseCustomer } from "@shared/domain/customers";
+import type { BillingType } from "@shared/domain/customers";
 import { BudgetLedgerSection } from "@/components/budget/BudgetLedgerSection";
 import { BudgetTypeSettings } from "@/components/budget/BudgetTypeSettings";
 import { PflegegradBudgetSection } from "@/components/budget/PflegegradBudgetSection";
@@ -114,6 +116,81 @@ export function SetupPendingBanner({ customer, onRefresh }: { customer: SetupPen
               </Button>
             ))}
           </div>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+interface BudgetTypeSettingRow {
+  id: number | null;
+  budgetType: string;
+  enabled: boolean;
+  validTo: string | null;
+}
+
+/**
+ * Banner, der angezeigt wird, sobald ein pflegekassenberechtigter Kunde
+ * (Pflegegrad >= 2, billingType pflegekasse_*) noch keine aktiven Budget-
+ * Topf-Konfigurationen besitzt. Spiegelt die Server-Logik aus
+ * `computeBudgetSetupMarkers` (server/routes/admin/customers.ts) im UI, damit
+ * Lücken aus abgebrochenen Wizard-Folge-Flows oder Imports auch ohne
+ * persistiertes `setupPendingPayloads` sichtbar werden (Task #730).
+ */
+export function BudgetSetupRequiredBanner({
+  customerId,
+  billingType,
+  pflegegrad,
+  onSetup,
+}: {
+  customerId: number;
+  billingType: string | null | undefined;
+  pflegegrad: number | null | undefined;
+  onSetup: () => void;
+}) {
+  const requiresSetup =
+    isPflegekasseCustomer((billingType ?? "") as BillingType | "") &&
+    (pflegegrad ?? 0) >= 2;
+
+  const { data, isLoading } = useQuery<BudgetTypeSettingRow[]>({
+    queryKey: ["budget-type-settings", customerId],
+    queryFn: async () => unwrapResult(await api.get<BudgetTypeSettingRow[]>(`/budget/${customerId}/type-settings`)),
+    staleTime: 60000,
+    enabled: requiresSetup,
+  });
+
+  if (!requiresSetup || isLoading || !data) return null;
+
+  // Server liefert Default-Platzhalter mit id=null, wenn keine Zeile in
+  // `customer_budget_type_settings` existiert. Eine echte Konfiguration
+  // erkennen wir an mindestens einer offenen DB-Zeile (id != null, validTo
+  // = null) — dieselbe Logik wie `computeBudgetSetupMarkers` auf dem Server.
+  const hasActiveConfig = data.some(s => s.id !== null && s.validTo === null);
+  if (hasActiveConfig) return null;
+
+  return (
+    <SectionCard className="mb-4 border-amber-300 bg-amber-50" data-testid="banner-budget-setup-required">
+      <div className="flex items-start gap-3">
+        <Wallet className={`${iconSize.md} text-amber-600 mt-0.5 shrink-0`} />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-amber-900 mb-1">
+            Budget-Töpfe noch nicht eingerichtet
+          </p>
+          <p className="text-xs text-amber-800 mb-3">
+            Dieser Kunde ist pflegekassenberechtigt (Pflegegrad {pflegegrad ?? "?"}),
+            aber es sind noch keine Budget-Topf-Konfigurationen
+            (§45b, §45a, §39/§42a) hinterlegt. Solange keine Töpfe konfiguriert
+            sind, können Pflegekassenleistungen nicht korrekt verbucht werden.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-400 bg-white hover:bg-amber-100"
+            onClick={onSetup}
+            data-testid="button-budget-setup-open"
+          >
+            Budgets jetzt einrichten
+          </Button>
         </div>
       </div>
     </SectionCard>
