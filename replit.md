@@ -6,7 +6,9 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Run Server**: `npm run start` (server only)
 - **Build**: `npm run build`
 - **Typecheck**: `npm run check`
+- **Test**: `npm run test` (= `vitest run`)
 - **DB Push**: `drizzle-kit push`
+- **CI**: GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Request mit 8 Pflicht-Gates: (1) `npm ci`, (2) `tsc --noEmit`, (3) `eslint --max-warnings 0`, (4) `vitest run` (JUnit-Report als Artifact), (5) `vitest run tests/architecture/` (Fitness-Functions, eigenes Gate), (6) `npm audit --audit-level=high`, (7) `npm run test:e2e:smoke` (Playwright), (8) `tsx script/coverage-billing.ts`. Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` (Login gegen den in CI gestarteten App-Server) — fehlen sie (z.B. in Forks), werden diese Schritte sauber übersprungen, die statischen Gates (1, 2, 3, 6) laufen immer. Für Branch-Protection die Checks `static-analysis`, `tests` und `e2e-smoke` als Required aktivieren (Repo → Settings → Branches).
 - **Env Vars**: vollständige Liste siehe Tabelle unten. (WhatsApp läuft ebenfalls über die Twilio-Credentials; Meta-Cloud-API-Token werden nicht mehr benötigt.)
 
 ### Environment Variables

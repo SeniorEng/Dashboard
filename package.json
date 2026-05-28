@@ -9,6 +9,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test": "vitest run",
     "db:push": "drizzle-kit push",
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
     "budget:correct-km-drift": "tsx server/scripts/reconcile-km-drift.ts",
