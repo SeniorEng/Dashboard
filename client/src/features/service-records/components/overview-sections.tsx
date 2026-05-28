@@ -28,7 +28,7 @@ export interface CustomerOverviewItem {
   canCreateRecord: boolean;
 }
 
-type Tone = "amber" | "primary" | "green";
+type Tone = "amber" | "primary" | "green" | "yellow";
 
 function lastNameOf(fullName: string): string {
   const parts = fullName.trim().split(/\s+/);
@@ -44,13 +44,15 @@ function byNachname(a: CustomerOverviewItem, b: CustomerOverviewItem) {
 interface BucketedOverview {
   needsDoc: CustomerOverviewItem[];
   ready: CustomerOverviewItem[];
+  awaitingSignature: CustomerOverviewItem[];
   completed: CustomerOverviewItem[];
   orphans: CustomerOverviewItem[];
 }
 
-function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
+export function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
   const needsDoc: CustomerOverviewItem[] = [];
   const ready: CustomerOverviewItem[] = [];
+  const awaitingSignature: CustomerOverviewItem[] = [];
   const completed: CustomerOverviewItem[] = [];
   const orphans: CustomerOverviewItem[] = [];
   for (const it of items) {
@@ -62,14 +64,18 @@ function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
       ready.push(it);
       continue;
     }
-    // No open work. If any record is still awaiting signatures
-    // (pending/employee_signed), the customer is handled by the pending
-    // banner and must NOT appear in any section here (otherwise we get the
-    // "Abgeschlossen" mis-label the user complained about).
+    // No open work. Records still awaiting signatures (pending/employee_signed)
+    // get their own bucket so the customer never disappears completely — even
+    // if there is also a finished single-record alongside the pending monthly
+    // one (Rosali-Demirev case). Customers with ONLY completed records stay in
+    // the completed bucket.
     const hasPendingRecord =
       (it.existingRecord !== null && it.existingRecord.status !== "completed") ||
       it.singleRecords.some((r) => r.status !== "completed");
-    if (hasPendingRecord) continue;
+    if (hasPendingRecord) {
+      awaitingSignature.push(it);
+      continue;
+    }
 
     const hasCompletedRecord =
       it.existingRecord?.status === "completed" ||
@@ -86,9 +92,10 @@ function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
   }
   needsDoc.sort(byNachname);
   ready.sort(byNachname);
+  awaitingSignature.sort(byNachname);
   completed.sort(byNachname);
   orphans.sort(byNachname);
-  return { needsDoc, ready, completed, orphans };
+  return { needsDoc, ready, awaitingSignature, completed, orphans };
 }
 
 interface OverviewSectionProps {
@@ -104,12 +111,14 @@ const toneTextClass: Record<Tone, string> = {
   amber: "text-amber-700",
   primary: "text-primary",
   green: "text-green-700",
+  yellow: "text-yellow-700",
 };
 
 const toneBadgeClass: Record<Tone, string> = {
   amber: "bg-amber-100 text-amber-700 border-amber-200",
   primary: "bg-primary/10 text-primary border-primary/20",
   green: "bg-green-100 text-green-700 border-green-200",
+  yellow: "bg-yellow-100 text-yellow-700 border-yellow-200",
 };
 
 function OverviewSection({
@@ -254,6 +263,61 @@ function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedC
   );
 }
 
+function AwaitingSignatureCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
+  // Prefer the monthly record; otherwise fall back to the first not-yet-completed
+  // single record. We always have at least one of those — bucketize put us here
+  // exactly because hasPendingRecord was true.
+  const pendingSingle = item.singleRecords.find((r) => r.status !== "completed");
+  const monthlyPending =
+    item.existingRecord && item.existingRecord.status !== "completed"
+      ? item.existingRecord
+      : null;
+  const target = monthlyPending ?? pendingSingle ?? item.existingRecord ?? null;
+  const href = target
+    ? `/service-records/${target.id}`
+    : `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
+
+  const singleCount = item.singleRecords.length;
+  const hasMonthly = !!item.existingRecord;
+  const parts: string[] = [
+    `${item.totalAppointments} ${item.totalAppointments === 1 ? "Termin" : "Termine"}`,
+  ];
+  if (hasMonthly) parts.push("1 monatl. LN");
+  if (singleCount > 0) parts.push(`${singleCount} Einzel-LN`);
+
+  return (
+    <Link href={href}>
+      <Card
+        className="border-yellow-200 bg-yellow-50/40"
+        data-testid={`card-awaiting-${item.customerId}`}
+      >
+        <CardContent className="p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5 min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <User className={`${iconSize.sm} text-muted-foreground`} />
+                <span
+                  className="font-medium truncate"
+                  data-testid={`text-customer-${item.customerId}`}
+                >
+                  {item.customerName}
+                </span>
+              </div>
+              <p
+                className="text-xs text-yellow-700"
+                data-testid={`text-awaiting-${item.customerId}`}
+              >
+                {parts.join(" · ")} · Unterschrift offen
+              </p>
+            </div>
+            <ChevronRight className={`${iconSize.sm} text-muted-foreground shrink-0`} />
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
 function OrphanRecordCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
   const href = item.existingRecord
     ? `/service-records/${item.existingRecord.id}`
@@ -303,6 +367,7 @@ export function OverviewSections({
   const allEmpty =
     buckets.needsDoc.length === 0 &&
     buckets.ready.length === 0 &&
+    buckets.awaitingSignature.length === 0 &&
     completedTotal === 0;
 
   if (allEmpty) {
@@ -354,6 +419,24 @@ export function OverviewSections({
               selectedYear={selectedYear}
               selectedMonth={selectedMonth}
               variant="ready"
+            />
+          ))}
+        </OverviewSection>
+      )}
+
+      {buckets.awaitingSignature.length > 0 && (
+        <OverviewSection
+          title="Wartet auf Unterschrift"
+          tone="yellow"
+          count={buckets.awaitingSignature.length}
+          testId="section-awaiting-signature"
+        >
+          {buckets.awaitingSignature.map((item) => (
+            <AwaitingSignatureCard
+              key={item.customerId}
+              item={item}
+              selectedYear={selectedYear}
+              selectedMonth={selectedMonth}
             />
           ))}
         </OverviewSection>

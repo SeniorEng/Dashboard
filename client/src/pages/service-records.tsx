@@ -182,6 +182,7 @@ export default function ServiceRecordsPage() {
     selectedYear,
     selectedMonth,
     customerId,
+    overview,
   );
 
   return (
@@ -209,6 +210,7 @@ export default function ServiceRecordsPage() {
         selectedYear={selectedYear}
         selectedMonth={selectedMonth}
         customerId={customerId}
+        overview={overview}
         onSingleClick={(record) => {
           setSelectedYear(record.year);
           setSelectedMonth(record.month);

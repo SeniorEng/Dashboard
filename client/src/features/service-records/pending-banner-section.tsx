@@ -2,7 +2,10 @@ import { AlertCircle, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import type { MonthlyServiceRecord } from "@shared/schema";
 import { iconSize } from "@/design-system";
-import { computeVisiblePendingRecords } from "./pending-banner";
+import {
+  computeVisiblePendingRecords,
+  type PendingBannerOverviewItem,
+} from "./pending-banner";
 
 export interface PendingBannerSectionProps {
   pendingRecords: MonthlyServiceRecord[] | undefined;
@@ -12,6 +15,7 @@ export interface PendingBannerSectionProps {
   onSingleClick: (record: MonthlyServiceRecord) => void;
   onMultiClick: () => void;
   renderSingleLabel: (record: MonthlyServiceRecord) => ReactNode;
+  overview?: PendingBannerOverviewItem[];
 }
 
 export function PendingBannerSection({
@@ -22,12 +26,14 @@ export function PendingBannerSection({
   onSingleClick,
   onMultiClick,
   renderSingleLabel,
+  overview,
 }: PendingBannerSectionProps) {
   const visible = computeVisiblePendingRecords(
     pendingRecords,
     selectedYear,
     selectedMonth,
     customerId,
+    overview,
   );
   if (visible.length === 0) return null;
   const single = visible.length === 1 ? visible[0] : null;

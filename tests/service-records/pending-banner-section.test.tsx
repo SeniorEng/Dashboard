@@ -57,7 +57,25 @@ describe("PendingBannerSection — customer-scoped pages must not show foreign p
     expect(screen.getByTestId("label")).toBeTruthy();
   });
 
-  it("hides the banner on the overview page when the pending record matches the currently selected month/year", () => {
+  it("hides the banner on the overview page when the pending record's customer is already surfaced in an awaiting-signature overview group (Task #718)", () => {
+    render(
+      <PendingBannerSection
+        pendingRecords={[foreignPending]}
+        selectedYear={2026}
+        selectedMonth={3}
+        customerId={null}
+        overview={[
+          { customerId: 999, undocumentedCount: 0, uncoveredDocumentedCount: 0 },
+        ]}
+        onSingleClick={() => {}}
+        onMultiClick={() => {}}
+        renderSingleLabel={() => null}
+      />,
+    );
+    expect(screen.queryByTestId("banner-pending")).toBeNull();
+  });
+
+  it("STILL renders the banner on the overview page when overview data is not yet loaded — no open record may disappear (Task #718)", () => {
     render(
       <PendingBannerSection
         pendingRecords={[foreignPending]}
@@ -66,9 +84,9 @@ describe("PendingBannerSection — customer-scoped pages must not show foreign p
         customerId={null}
         onSingleClick={() => {}}
         onMultiClick={() => {}}
-        renderSingleLabel={() => null}
+        renderSingleLabel={() => <span data-testid="label">x</span>}
       />,
     );
-    expect(screen.queryByTestId("banner-pending")).toBeNull();
+    expect(screen.getByTestId("banner-pending")).toBeTruthy();
   });
 });

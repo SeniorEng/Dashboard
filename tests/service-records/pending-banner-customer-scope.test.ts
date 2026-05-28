@@ -28,9 +28,36 @@ describe("computeVisiblePendingRecords — customer-scoped pages must not show f
     expect(result[0].id).toBe(42);
   });
 
-  it("hides the pending record on the overview page when the selected month equals the record's month", () => {
+  it("keeps the pending record on the overview page when the selected month matches but the customer is NOT yet handled by an overview group (Task #718: no record disappears)", () => {
+    // Without overview data the banner cannot prove the record is already
+    // surfaced elsewhere, so it must stay visible to keep the consistency rule
+    // "one open record is always shown in EITHER overview OR banner".
     const result = computeVisiblePendingRecords([foreignPending], 2026, 3, null);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe(42);
+  });
+
+  it("hides the pending record on the overview page when the customer IS shown in an awaiting-signature / completed overview group (Task #718)", () => {
+    const overview = [
+      { customerId: 999, undocumentedCount: 0, uncoveredDocumentedCount: 0 },
+    ];
+    const result = computeVisiblePendingRecords([foreignPending], 2026, 3, null, overview);
     expect(result).toEqual([]);
+  });
+
+  it("keeps the pending record visible when the customer is in an ACTION group (needsDoc / ready) — those cards link to a create flow, not the existing record (Task #718)", () => {
+    const overviewNeedsDoc = [
+      { customerId: 999, undocumentedCount: 2, uncoveredDocumentedCount: 0 },
+    ];
+    const overviewReady = [
+      { customerId: 999, undocumentedCount: 0, uncoveredDocumentedCount: 3 },
+    ];
+    expect(
+      computeVisiblePendingRecords([foreignPending], 2026, 3, null, overviewNeedsDoc),
+    ).toHaveLength(1);
+    expect(
+      computeVisiblePendingRecords([foreignPending], 2026, 3, null, overviewReady),
+    ).toHaveLength(1);
   });
 
   it("tolerates undefined input", () => {
