@@ -199,6 +199,22 @@ export function CompanyDetailsForm({ companyForm, updateField, onSubmit, isSavin
                   onChange={(e) => updateField("bankName", e.target.value)}
                 />
               </div>
+              <div>
+                <Label htmlFor="bankAccountHolder">Kontoinhaber (abweichend)</Label>
+                <Input
+                  id="bankAccountHolder"
+                  data-testid="input-company-bankAccountHolder"
+                  value={companyForm.bankAccountHolder}
+                  onChange={(e) => updateField("bankAccountHolder", e.target.value)}
+                  placeholder="Optional, sonst Firmenname"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Nur ausfüllen, wenn das Geschäftskonto auf einen abweichenden
+                  Inhaber lautet (z.B. Einzelunternehmer/Holding). Wird im
+                  Zahlungsblock und im ZUGFeRD-XML statt des Firmennamens
+                  verwendet.
+                </p>
+              </div>
             </div>
           </div>
 

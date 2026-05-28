@@ -18,6 +18,9 @@ export interface InvoicePdfData {
   iban: string;
   bic: string;
   bankName: string;
+  // Task #757: Optionaler abweichender Kontoinhaber. Wenn nicht gesetzt,
+  // fällt der Zahlungsblock auf `companyName` zurück (bisheriges Verhalten).
+  bankAccountHolder: string | null;
   ikNummer: string | null;
   geschaeftsfuehrer: string | null;
   
@@ -462,7 +465,11 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       dueLine = `<div class="due-line">Bitte überweisen Sie den Betrag auf folgendes Konto.</div>`;
     }
 
-    const accountHolder = data.companyName || "";
+    // Task #757: Wenn ein abweichender Kontoinhaber gepflegt ist (z.B. Inhaber-
+    // Privatperson bei Einzelunternehmen oder Holding/Tochter-Konstellation),
+    // wird dieser im Zahlungsblock gerendert. Andernfalls Fallback auf den
+    // Firmennamen (bisheriges Verhalten).
+    const accountHolder = (data.bankAccountHolder?.trim() || data.companyName || "");
     const purposeForBlock = isStorno ? stornoPurpose : purpose;
 
     return `

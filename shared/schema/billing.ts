@@ -211,6 +211,7 @@ export interface InvoiceRenderCompanySnapshot {
   iban: string | null;
   bic: string | null;
   bankName: string | null;
+  bankAccountHolder: string | null;
   ikNummer: string | null;
   geschaeftsfuehrer: string | null;
 }
@@ -234,6 +235,7 @@ export const INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS: readonly (keyof InvoiceRender
   "iban",
   "bic",
   "bankName",
+  "bankAccountHolder",
   "ikNummer",
   "geschaeftsfuehrer",
 ] as const;

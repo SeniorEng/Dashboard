@@ -120,7 +120,7 @@ interface ZugferdInvoiceData {
       currencyCode: string;
       paymentMeans: {
         typeCode: string;
-        payeeAccount: { iban: string };
+        payeeAccount: { iban: string; accountName?: string };
         payeeInstitution?: { bic: string };
       };
       tradeTax: {
@@ -296,6 +296,13 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
           typeCode: "58",
           payeeAccount: {
             iban: data.iban,
+            // Task #757: Optionaler abweichender Kontoinhaber (BT-85,
+            // PayeeFinancialAccount.AccountName). Wenn nicht gesetzt, bleibt
+            // der Firmenname implizit über die SellerTradeParty-Identifikation
+            // bestehen (bisheriges Verhalten).
+            ...((data.bankAccountHolder ?? "").trim()
+              ? { accountName: (data.bankAccountHolder as string).trim() }
+              : {}),
           },
           ...(data.bic ? {
             payeeInstitution: {

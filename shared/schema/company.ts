@@ -22,6 +22,10 @@ export const companySettings = pgTable("company_settings", {
   iban: text("iban"),
   bic: text("bic"),
   bankName: text("bank_name"),
+  // Task #757: Optionaler abweichender Kontoinhaber für das Geschäftskonto.
+  // Wenn gesetzt, wird er statt `companyName` im Zahlungsblock und als
+  // PayeeFinancialAccount.AccountName im ZUGFeRD-XML gerendert.
+  bankAccountHolder: text("bank_account_holder"),
   ikNummer: text("ik_nummer"),
   logoUrl: text("logo_url"),
   pdfLogoUrl: text("pdf_logo_url"),
@@ -87,6 +91,7 @@ export const updateCompanySettingsSchema = z.object({
   iban: z.string().optional(),
   bic: z.string().optional(),
   bankName: z.string().optional(),
+  bankAccountHolder: z.string().optional().nullable(),
   ikNummer: z.string().optional(),
   logoUrl: z.string().optional().nullable(),
   pdfLogoUrl: z.string().optional().nullable(),

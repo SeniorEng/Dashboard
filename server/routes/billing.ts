@@ -1919,6 +1919,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     iban: companySettings.iban || "",
     bic: companySettings.bic || "",
     bankName: companySettings.bankName || "",
+    bankAccountHolder: companySettings.bankAccountHolder ?? null,
     ikNummer: companySettings.ikNummer ?? null,
     geschaeftsfuehrer: companySettings.geschaeftsfuehrer ?? null,
     invoiceNumber: invoice.invoiceNumber,

@@ -263,6 +263,7 @@ export default function AdminSettings() {
         iban: companyData.iban ?? "",
         bic: companyData.bic ?? "",
         bankName: companyData.bankName ?? "",
+        bankAccountHolder: companyData.bankAccountHolder ?? "",
         ikNummer: companyData.ikNummer ?? "",
         smtpHost: companyData.smtpHost ?? "",
         smtpPort: companyData.smtpPort ?? "",
@@ -312,6 +313,7 @@ export default function AdminSettings() {
     iban: companyForm.iban,
     bic: companyForm.bic,
     bankName: companyForm.bankName,
+    bankAccountHolder: companyForm.bankAccountHolder?.trim() ? companyForm.bankAccountHolder.trim() : null,
     ikNummer: companyForm.ikNummer,
   };
 

@@ -13,6 +13,7 @@ export const emptyCompanyForm = {
   iban: "",
   bic: "",
   bankName: "",
+  bankAccountHolder: "",
   ikNummer: "",
   smtpHost: "",
   smtpPort: "",

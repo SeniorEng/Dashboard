@@ -299,6 +299,14 @@ async function runStartupTasks() {
       log(`Invoice-Per-Pot-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #757: Spalte für abweichenden Kontoinhaber in den Firmenstammdaten.
+    const { ensureCompanyBankAccountHolderColumn } = await import("./startup/ensure-company-bank-account-holder");
+    try {
+      await ensureCompanyBankAccountHolderColumn();
+    } catch (err) {
+      log(`Company-Bank-Account-Holder-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();
