@@ -34,6 +34,9 @@ export interface InvoicePdfData {
   buyerReference: string | null;
   invoiceType: string; // rechnung, stornorechnung (historische Zeilen ggf. "nachberechnung" — werden als "RECHNUNG" gerendert, siehe Task #585)
   billingType: string; // pflegekasse_gesetzlich, pflegekasse_privat, selbstzahler
+  // Task #759 — Variant C: Pot-Marker für Pot-spezifische Labels/§-Notiz.
+  // NULL = Bestands-/Selbstzahler-Rechnung, fällt auf billingType-Logik zurück.
+  budgetType?: string | null;
   billingMonth: number;
   billingYear: number;
   
@@ -177,7 +180,17 @@ function getInvoiceTypeLabel(type: string): string {
   }
 }
 
-function getBillingTypeNote(billingType: string, insuranceProviderName: string | null, beihilfeBerechtigt?: boolean, rechnungAnKunde?: boolean): string {
+function getBillingTypeNote(billingType: string, insuranceProviderName: string | null, beihilfeBerechtigt?: boolean, rechnungAnKunde?: boolean, budgetType?: string | null): string {
+  // Task #759 — Pot-spezifische §-Notiz, wenn `budgetType` gesetzt ist
+  // (Variant-C-Rechnung). Bei Kassen-Pots: paragraphisch korrekt; bei
+  // privatem Überschuss-Pot: Hinweis auf Budget-Überschreitung.
+  const potNote = getPotNote(budgetType);
+  if (potNote) {
+    if (isCustomerAddressedInvoice(billingType, rechnungAnKunde)) {
+      return `Zur Erstattung bei Ihrer Pflegekasse${insuranceProviderName ? ` (${insuranceProviderName})` : ""} einzureichen. ${potNote}${beihilfeBerechtigt ? " Diese Rechnung wurde in doppelter Ausfertigung erstellt — für Ihre Pflegekasse und Ihre Beihilfestelle." : ""}`;
+    }
+    return potNote;
+  }
   // Im Kostenerstattungsverfahren (gesetzlich + rechnungAnKunde) wird
   // dieselbe Hinweisformulierung wie bei pflegekasse_privat verwendet.
   if (isCustomerAddressedInvoice(billingType, rechnungAnKunde)) {
@@ -193,6 +206,19 @@ function getBillingTypeNote(billingType: string, insuranceProviderName: string |
   }
 }
 
+function getPotNote(budgetType?: string | null): string {
+  switch (budgetType) {
+    case "entlastungsbetrag_45b":
+      return "Abrechnung gemäß Abtretungserklärung über den Entlastungsbetrag nach § 45b SGB XI.";
+    case "umwandlung_45a":
+      return "Abrechnung des Umwandlungsanspruchs nach § 45a SGB XI (40 % der nicht ausgeschöpften Pflegesachleistung).";
+    case "ersatzpflege_39_42a":
+      return "Abrechnung der Verhinderungs-/Ersatzpflege nach §§ 39 i.V.m. 42a SGB XI.";
+    default:
+      return "";
+  }
+}
+
 /**
  * Liefert true, wenn die Rechnung effektiv an den Kunden adressiert ist
  * (Layout/Empfänger/Zahlung wie pflegekasse_privat).
@@ -203,7 +229,18 @@ function isCustomerAddressedInvoice(billingType: string, rechnungAnKunde?: boole
   return false;
 }
 
-function getBudgettopfLabel(billingType: string): string {
+function getBudgettopfLabel(billingType: string, budgetType?: string | null): string {
+  // Task #759 — Pot-spezifischer Topf-Label, sobald `budgetType` gesetzt ist.
+  switch (budgetType) {
+    case "entlastungsbetrag_45b":
+      return billingType === "pflegekasse_privat"
+        ? "§ 45b SGB XI – Entlastungsbetrag (privat)"
+        : "§ 45b SGB XI – Entlastungsbetrag";
+    case "umwandlung_45a":
+      return "§ 45a SGB XI – Umwandlungsanspruch";
+    case "ersatzpflege_39_42a":
+      return "§§ 39 / 42a SGB XI – Verhinderungspflege";
+  }
   switch (billingType) {
     case "pflegekasse_gesetzlich":
       return "§ 45b SGB XI – Entlastungsbetrag";
@@ -237,7 +274,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const invoiceDate = data.invoiceDate || `${today.getDate().toString().padStart(2, "0")}.${(today.getMonth() + 1).toString().padStart(2, "0")}.${today.getFullYear()}`;
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
   const typeLabel = getInvoiceTypeLabel(data.invoiceType);
-  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt, data.rechnungAnKunde);
+  const billingNote = getBillingTypeNote(data.billingType, data.insuranceProviderName, data.beihilfeBerechtigt, data.rechnungAnKunde, data.budgetType);
   const isStorno = data.invoiceType === "stornorechnung";
   const isSelbstzahler = data.billingType === "selbstzahler";
   const isCustomerInvoice = isCustomerAddressedInvoice(data.billingType, data.rechnungAnKunde);
@@ -697,7 +734,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <div class="info-grid">
           <div class="info-box" style="flex: 1;">
             <div class="info-label">Abrechnungsgrundlage</div>
-            <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType))}</div>
+            <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType, data.budgetType))}</div>
           </div>
         </div>
 
@@ -872,7 +909,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   <div class="info-grid">
     <div class="info-box" style="flex: 1;">
       <div class="info-label">Abrechnungsgrundlage</div>
-      <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType))}</div>
+      <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType, data.budgetType))}</div>
     </div>
   </div>
 

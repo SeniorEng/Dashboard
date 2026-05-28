@@ -5,4 +5,5 @@
 - [Budget-Type-Settings Window-Shift-Falle](budget-typesettings-window-trap.md) — allocStart/end aus FRÜHESTEM validFrom / SPÄTESTEM validTo aller Zeilen ableiten, nicht aus einer einzelnen typeSettings.find()-Row, sonst kippt jede append-only-Transition.
 - [Budget-Type-Settings Phasen-Append](budget-typesettings-phase-append.md) — zukünftiges validFrom MUSS Phasen-Append (Vorgänger schließen, einklemmen) triggern, NICHT den isStillFresh-In-Place-Pfad; sonst überschreibt jeder Folge-PUT die Vorgänger-Phase.
 - [Budget-Architektur-Doku ausgelagert](budget-doc-layout.md) — Budget-Details NICHT in replit.md ablegen; docs/architecture/budget.md ist die Quelle, replit.md hält nur Pointer.
+- [Invoice-per-pot split (Variant C)](invoice-per-pot-split.md) — Multi-Pot-Lauf → N Rechnungen via billing_run_id; Σ-Invariante via shared/domain/budget-invoice-split.ts (Largest-Remainder), Cascade-Storno explizit per Flag.
 - [vi.spyOn(console) broken](vitest-spyon-console-broken.md) — vi.spyOn(console,"log") does NOT capture console.log from imported modules in this vitest setup; rebind `console.log` directly and restore in finally.

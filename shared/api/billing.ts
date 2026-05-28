@@ -42,6 +42,12 @@ export interface InvoiceItem {
   // dem Frontend zur Unterscheidung zwischen „noch in Arbeit" und „Fehler".
   pdfPath: string | null;
   createdAt: string;
+  // Task #759: Rechnungs-Split pro Budget-Topf. `billingRunId` gruppiert
+  // alle Geschwister-Rechnungen eines Multi-Pot-Laufs (uuid). `budgetType`
+  // identifiziert den konkreten Topf (NULL = Selbstzahler oder Single-Pot-
+  // Bestand vor #759).
+  billingRunId: string | null;
+  budgetType: string | null;
 }
 
 interface InvoiceLineItem {

@@ -89,6 +89,17 @@ export const invoices = pgTable("invoices", {
   paidAt: timestamp("paid_at"),
   storniertAt: timestamp("storniert_at"),
   notes: text("notes"),
+  // Task #759 — Variant C: Rechnungs-Split pro Budget-Topf.
+  // `budgetType` markiert, welchem Topf der Rechnungs-Anteil zugeordnet ist
+  // (`entlastungsbetrag_45b` | `umwandlung_45a` | `ersatzpflege_39_42a`).
+  // NULL = Selbstzahler-/Privat-Anteil oder Bestands-Rechnung vor #759
+  // (GoBD: keine Backfill-Mutation auf historische Datensätze).
+  budgetType: text("budget_type"),
+  // `billingRunId` (UUID-Text) gruppiert alle Pot-Rechnungen, die in einem
+  // gemeinsamen Abrechnungslauf entstanden sind. Wird nur gesetzt, wenn der
+  // Lauf >1 Rechnung produziert hat — Single-Pot-Läufe bleiben NULL und
+  // verhalten sich exakt wie vor #759 (Bestand bleibt unverändert).
+  billingRunId: text("billing_run_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
 }, (table) => [
@@ -98,7 +109,35 @@ export const invoices = pgTable("invoices", {
   index("invoices_status_idx").on(table.status),
   index("invoices_invoice_number_idx").on(table.invoiceNumber),
   index("invoices_stornierte_rechnung_id_idx").on(table.stornierteRechnungId),
+  index("invoices_billing_run_id_idx").on(table.billingRunId),
 ]);
+
+// Task #759 — Optionaler Override des Rechnungs-Empfängers pro
+// (Kunde × Budget-Topf). Wird vom Resolver bevorzugt; fehlt ein
+// gültiger Eintrag, fällt der Resolver auf die aktuelle
+// `customer_insurance_history`-Zeile (Kasse-Töpfe) bzw. die
+// Kunden-Stammadresse (Selbstzahler-Pot) zurück.
+//
+// Append-only-Historisierung über validFrom/validTo (GoBD).
+export const customerBudgetRecipients = pgTable("customer_budget_recipients", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id),
+  budgetType: text("budget_type").notNull(),
+  insuranceProviderId: integer("insurance_provider_id"),
+  recipientName: text("recipient_name").notNull(),
+  recipientAddress: text("recipient_address"),
+  ikNummer: text("ik_nummer"),
+  versichertennummer: text("versichertennummer"),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("customer_budget_recipients_customer_idx").on(table.customerId, table.budgetType),
+]);
+
+export type CustomerBudgetRecipient = typeof customerBudgetRecipients.$inferSelect;
 
 export const invoiceLineItems = pgTable("invoice_line_items", {
   id: serial("id").primaryKey(),
@@ -134,6 +173,10 @@ export const createInvoiceSchema = z.object({
 export const updateInvoiceStatusSchema = z.object({
   status: z.enum(INVOICE_STATUSES),
   notes: z.string().optional().nullable(),
+  // Task #759 — Variant C: bei `status='storniert'` und `cascadeRun=true`
+  // storniert der Endpoint zusätzlich alle Geschwister-Rechnungen mit
+  // identischer `billingRunId` in EINEM withAudit-Block.
+  cascadeRun: z.boolean().optional(),
 });
 
 export type Invoice = typeof invoices.$inferSelect;

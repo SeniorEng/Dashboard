@@ -290,6 +290,15 @@ async function runStartupTasks() {
       log(`Invoice-Render-Snapshot-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #759 — Variant C: invoices.budget_type / invoices.billing_run_id
+    // + customer_budget_recipients sicherstellen (Rechnungs-Split pro Topf).
+    const { ensureInvoicePerPotColumns } = await import("./startup/ensure-invoice-per-pot-columns");
+    try {
+      await ensureInvoicePerPotColumns();
+    } catch (err) {
+      log(`Invoice-Per-Pot-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { seedWhatsAppRules } = await import("./startup/seed-whatsapp-rules");
     try {
       await seedWhatsAppRules();

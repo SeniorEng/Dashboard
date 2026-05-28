@@ -7,6 +7,16 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
 import {
+  splitLineItemsAcrossPots,
+  sumSharesByPot,
+  POT_ORDER,
+  type InvoicePotKey,
+  type BudgetSplitForAppointment,
+} from "@shared/domain/budget-invoice-split";
+import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
+import { resolveBudgetRecipient } from "../storage/budget-recipients";
+import { randomUUID } from "crypto";
+import {
   createInvoiceSchema,
   updateInvoiceStatusSchema,
   appointments,
@@ -548,7 +558,7 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
     coveredAppointments: draft.apptIds.length,
     completedAppointments: draft.completedAppointmentsInPeriod,
     totalCents: draft.grossAmountCents,
-    splitInvoices: draft.needsBudgetSplit && draft.hasPrivateShare,
+    splitInvoices: draft.needsBudgetSplit,
   };
   res.json(response);
 }));
@@ -970,106 +980,63 @@ router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (r
   res.json({ ...invoice, lineItems, pdfDrift, leistungsnachweisDrift });
 }));
 
-async function getBudgetSplitForAppointments(customerId: number, apptIds: number[]) {
-  if (apptIds.length === 0) return new Map<number, { kasseCents: number; privateCents: number }>();
+/**
+ * Task #759 — Variant C: liefert pro Termin die tatsächlich gebuchten
+ * Pot-Anteile aus `budget_transactions` (`consumption`). Pot-Keys sind
+ * die echten BudgetType-Werte (`entlastungsbetrag_45b` /
+ * `umwandlung_45a` / `ersatzpflege_39_42a`) sowie `"private"` für den
+ * Selbstzahler-Overflow — exakt das, was `consumption-engine.ts` schreibt.
+ */
+async function getBudgetSplitForAppointments(
+  customerId: number,
+  apptIds: number[],
+): Promise<Map<number, BudgetSplitForAppointment>> {
+  const out = new Map<number, BudgetSplitForAppointment>();
+  if (apptIds.length === 0) return out;
 
   const txns = await db.select({
     appointmentId: budgetTransactions.appointmentId,
     budgetType: budgetTransactions.budgetType,
-    transactionType: budgetTransactions.transactionType,
     amountCents: budgetTransactions.amountCents,
   })
   .from(budgetTransactions)
   .where(and(
     eq(budgetTransactions.customerId, customerId),
     inArray(budgetTransactions.appointmentId, apptIds),
-    eq(budgetTransactions.transactionType, "consumption")
+    eq(budgetTransactions.transactionType, "consumption"),
   ));
-
-  const splitMap = new Map<number, { kasseCents: number; privateCents: number }>();
 
   for (const txn of txns) {
     if (!txn.appointmentId) continue;
-    const existing = splitMap.get(txn.appointmentId) || { kasseCents: 0, privateCents: 0 };
-    const absCents = Math.abs(txn.amountCents);
-    if (txn.budgetType === "private") {
-      existing.privateCents += absCents;
-    } else {
-      existing.kasseCents += absCents;
-    }
-    splitMap.set(txn.appointmentId, existing);
+    const potKey = (POT_ORDER as readonly string[]).includes(txn.budgetType)
+      ? (txn.budgetType as InvoicePotKey)
+      : "private";
+    const entry = out.get(txn.appointmentId) ?? { cents: {} };
+    entry.cents[potKey] = (entry.cents[potKey] ?? 0) + Math.abs(txn.amountCents);
+    out.set(txn.appointmentId, entry);
   }
-
-  return splitMap;
+  return out;
 }
 
-function splitLineItemsByBudget(
+/**
+ * Wrapper um den pure shared-Helper. Bündelt Line-Items pro Pot und
+ * verteilt Cent-Anteile mit Largest-Remainder-Rundung (Σ pro Termin =
+ * `item.totalCents`, keine Drift).
+ */
+function splitLineItemsByPot(
   lineItems: BuildLineItem[],
-  budgetSplit: Map<number, { kasseCents: number; privateCents: number }>
-): { kasseItems: BuildLineItem[]; privateItems: BuildLineItem[] } {
-  const kasseItems: BuildLineItem[] = [];
-  const privateItems: BuildLineItem[] = [];
-
-  const apptGroups = new Map<number, BuildLineItem[]>();
-  for (const item of lineItems) {
-    const apptId = item.appointmentId;
-    const existing = apptGroups.get(apptId) || [];
-    existing.push(item);
-    apptGroups.set(apptId, existing);
+  budgetSplit: Map<number, BudgetSplitForAppointment>,
+): Map<InvoicePotKey, BuildLineItem[]> {
+  const shares = splitLineItemsAcrossPots(lineItems, budgetSplit, {
+    fallbackPot: "private",
+  });
+  const byPot = new Map<InvoicePotKey, BuildLineItem[]>();
+  for (const share of shares) {
+    const list = byPot.get(share.potKey) ?? [];
+    list.push({ ...share.item, totalCents: share.totalCents });
+    byPot.set(share.potKey, list);
   }
-
-  for (const [apptId, items] of apptGroups) {
-    const split = budgetSplit.get(apptId);
-    if (!split) {
-      kasseItems.push(...items);
-      continue;
-    }
-
-    if (split.privateCents === 0) {
-      kasseItems.push(...items);
-      continue;
-    }
-
-    if (split.kasseCents === 0) {
-      privateItems.push(...items);
-      continue;
-    }
-
-    const totalApptCents = items.reduce((sum, i) => sum + i.totalCents, 0);
-    if (totalApptCents <= 0) {
-      kasseItems.push(...items);
-      continue;
-    }
-
-    const kasseRatio = split.kasseCents / (split.kasseCents + split.privateCents);
-
-    let kasseRemaining = split.kasseCents;
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const isLast = i === items.length - 1;
-
-      let kasseShare: number;
-      let privateShare: number;
-
-      if (isLast) {
-        kasseShare = Math.max(0, kasseRemaining);
-        privateShare = item.totalCents - kasseShare;
-      } else {
-        kasseShare = Math.round(item.totalCents * kasseRatio);
-        privateShare = item.totalCents - kasseShare;
-        kasseRemaining -= kasseShare;
-      }
-
-      if (kasseShare > 0) {
-        kasseItems.push({ ...item, totalCents: kasseShare });
-      }
-      if (privateShare > 0) {
-        privateItems.push({ ...item, totalCents: privateShare });
-      }
-    }
-  }
-
-  return { kasseItems, privateItems };
+  return byPot;
 }
 
 async function getInsuranceData(customerId: number) {
@@ -1122,17 +1089,39 @@ interface InvoiceDraft {
   alreadyInvoicedIds: number[];
   completedAppointmentsInPeriod: number;   // dokumentierte Termine im Monat (für Partial-Signing-Hinweis)
   insuranceInfo: Awaited<ReturnType<typeof getInsuranceData>>;
-  needsBudgetSplit: boolean;
-  hasPrivateShare: boolean;
-  lineItems: BuildLineItem[];              // Single-Pfad
-  kasseItems: BuildLineItem[];             // Split-Pfad (Kassenanteil)
-  privateItems: BuildLineItem[];           // Split-Pfad (Privatanteil)
+  // Task #759 — Variant C: Pot-Items sind die Wahrheits-Quelle. Wenn nur
+  // ein Pot belegt ist, wird der Legacy-Single-Invoice-Pfad verwendet
+  // (Bestand bleibt 1:1). Bei ≥2 Pots läuft die N-Invoice-Generierung.
+  potItems: Map<InvoicePotKey, BuildLineItem[]>;
+  needsBudgetSplit: boolean;               // potItems.size > 1
+  hasPrivateShare: boolean;                // potItems.has("private")
+  lineItems: BuildLineItem[];              // Single-Pfad (alle Items, ungesplittet)
+  kasseItems: BuildLineItem[];             // [DEPRECATED, kept for /preview]
+  privateItems: BuildLineItem[];           // [DEPRECATED, kept for /preview]
   totalNetCents: number;                   // Netto-Summe über alle Folge-Rechnungen
   totalVatCents: number;                   // USt-Summe über alle Folge-Rechnungen
   grossAmountCents: number;                // Brutto-Summe über alle Folge-Rechnungen
   stornoRefsForInsert: number[] | null;
   defaultBuyerReference: string | null;
   invoiceDueDateIso: string;
+}
+
+/** Task #759 — pot-spezifischer Hinweis für invoices.notes. */
+function getPotInvoiceNote(potKey: InvoicePotKey): string {
+  switch (potKey) {
+    case "entlastungsbetrag_45b":
+      return "Abrechnung des Entlastungsbetrags gem. § 45b SGB XI";
+    case "umwandlung_45a":
+      return "Abrechnung des Umwandlungsanspruchs gem. § 45a SGB XI";
+    case "ersatzpflege_39_42a":
+      return "Abrechnung der Verhinderungspflege gem. §§ 39 / 42a SGB XI";
+    case "private":
+      return "Privatzahlung — Anteil außerhalb des verfügbaren Budgets";
+  }
+}
+
+function isKassePot(potKey: InvoicePotKey): potKey is BudgetType {
+  return potKey !== "private";
 }
 
 async function buildInvoiceDraft(input: {
@@ -1227,45 +1216,68 @@ async function buildInvoiceDraft(input: {
     ));
   const completedAppointmentsInPeriod = completedRows.length;
 
-  const needsBudgetSplit = (billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat")
-    && customer.acceptsPrivatePayment;
+  // Task #759 — Variant C: Pot-Split jetzt **immer** rechnen. Wenn nur ein
+  // Pot belegt ist, fällt der Generator auf den Legacy-Single-Invoice-Pfad
+  // zurück (Bestandskunden ohne Mehrtopf-Konfiguration sehen 0 Verhaltens-
+  // änderung).
+  const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds);
+  const { lineItems: allLineItems, totalNetCents: singleNetCents, totalVatCents: singleVatCents } =
+    await buildLineItemsFromAppointments(apptIds, customerId, billingType);
 
-  if (needsBudgetSplit) {
-    const budgetSplit = await getBudgetSplitForAppointments(customerId, apptIds);
-    const hasPrivate = Array.from(budgetSplit.values()).some(s => s.privateCents > 0);
-    if (hasPrivate) {
-      const { lineItems: allLineItems } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
-      const { kasseItems, privateItems } = splitLineItemsByBudget(allLineItems, budgetSplit);
-      const kasseNetCents = kasseItems.reduce((sum, i) => sum + i.totalCents, 0);
-      const privateNetCents = privateItems.reduce((sum, i) => sum + i.totalCents, 0);
-      // Spiegelt die Berechnung im Split-Insert-Pfad: Kasse VAT 0, Privat 19%.
-      const privateVatCents = Math.round(privateNetCents * 1900 / 10000);
-      return {
-        customer,
-        customerName,
-        customerAddress,
-        billingType,
-        signedRecordCount: signedRecords.length,
-        apptIds,
-        alreadyInvoicedIds,
-        completedAppointmentsInPeriod,
-        insuranceInfo,
-        needsBudgetSplit: true,
-        hasPrivateShare: true,
-        lineItems: allLineItems,
-        kasseItems,
-        privateItems,
-        totalNetCents: kasseNetCents + privateNetCents,
-        totalVatCents: privateVatCents,
-        grossAmountCents: kasseNetCents + privateNetCents + privateVatCents,
-        stornoRefsForInsert,
-        defaultBuyerReference,
-        invoiceDueDateIso,
-      };
+  const potItems = splitLineItemsByPot(allLineItems, budgetSplit);
+
+  // Selbstzahler-Kunden: Konsumption schreibt keinen Pot, alle Items
+  // landen via fallbackPot=`"private"` in einem Eintrag → derselbe
+  // Single-Invoice-Pfad wie vor #759, billingType=`selbstzahler`.
+  // Reine Kassen-Kunden ohne acceptsPrivatePayment: identisch — nur ein
+  // Kasse-Pot belegt (z.B. `entlastungsbetrag_45b`) → 1 Rechnung.
+  const hasPrivateShare = potItems.has("private");
+  const needsBudgetSplit = potItems.size > 1;
+
+  if (!needsBudgetSplit) {
+    return {
+      customer,
+      customerName,
+      customerAddress,
+      billingType,
+      signedRecordCount: signedRecords.length,
+      apptIds,
+      alreadyInvoicedIds,
+      completedAppointmentsInPeriod,
+      insuranceInfo,
+      potItems,
+      needsBudgetSplit: false,
+      hasPrivateShare,
+      lineItems: allLineItems,
+      kasseItems: [],
+      privateItems: [],
+      totalNetCents: singleNetCents,
+      totalVatCents: singleVatCents,
+      grossAmountCents: singleNetCents + singleVatCents,
+      stornoRefsForInsert,
+      defaultBuyerReference,
+      invoiceDueDateIso,
+    };
+  }
+
+  // Multi-Pot — Σ Netto + Σ USt über alle Folge-Rechnungen.
+  // Kasse-Pots VAT 0, Privat-Pot VAT 19% (spiegelt Bestand vor #759 + den
+  // Insert-Pfad in `generateInvoiceCore`).
+  let totalNet = 0;
+  let totalVat = 0;
+  const legacyKasseItems: BuildLineItem[] = [];
+  const legacyPrivateItems: BuildLineItem[] = [];
+  for (const [pot, items] of potItems) {
+    const net = items.reduce((s, i) => s + i.totalCents, 0);
+    totalNet += net;
+    if (pot === "private") {
+      totalVat += Math.round((net * 1900) / 10000);
+      legacyPrivateItems.push(...items);
+    } else {
+      legacyKasseItems.push(...items);
     }
   }
 
-  const { lineItems, totalNetCents, totalVatCents } = await buildLineItemsFromAppointments(apptIds, customerId, billingType);
   return {
     customer,
     customerName,
@@ -1276,14 +1288,15 @@ async function buildInvoiceDraft(input: {
     alreadyInvoicedIds,
     completedAppointmentsInPeriod,
     insuranceInfo,
-    needsBudgetSplit,
-    hasPrivateShare: false,
-    lineItems,
-    kasseItems: [],
-    privateItems: [],
-    totalNetCents,
-    totalVatCents,
-    grossAmountCents: totalNetCents + totalVatCents,
+    potItems,
+    needsBudgetSplit: true,
+    hasPrivateShare,
+    lineItems: allLineItems,
+    kasseItems: legacyKasseItems,
+    privateItems: legacyPrivateItems,
+    totalNetCents: totalNet,
+    totalVatCents: totalVat,
+    grossAmountCents: totalNet + totalVat,
     stornoRefsForInsert,
     defaultBuyerReference,
     invoiceDueDateIso,
@@ -1323,10 +1336,8 @@ async function generateInvoiceCore(
     billingType,
     insuranceInfo,
     needsBudgetSplit,
-    hasPrivateShare,
+    potItems,
     lineItems,
-    kasseItems,
-    privateItems,
     totalNetCents,
     totalVatCents,
     stornoRefsForInsert,
@@ -1334,180 +1345,135 @@ async function generateInvoiceCore(
     invoiceDueDateIso,
   } = draft;
 
-  if (needsBudgetSplit && hasPrivateShare) {
+  if (needsBudgetSplit) {
+    // Task #759 — Variant C: N-Invoice-Pfad mit gemeinsamer billingRunId.
+    // Pro Pot eine eigene Rechnung mit pot-spezifischem Empfänger
+    // (resolveBudgetRecipient), §-Notiz und Käuferreferenz.
+    const billingRunId = randomUUID();
+    const asOfIso = todayISO();
+
+    const splitResult = await withAudit(async (tx, audit) => {
       const createdInvoices: Invoice[] = [];
+      // Deterministische Reihenfolge gemäß POT_ORDER — die Rechnungsnummern
+      // folgen damit der gleichen Sortierung wie der Cascade.
+      for (const pot of POT_ORDER) {
+        const items = potItems.get(pot);
+        if (!items || items.length === 0) continue;
 
-      const splitResult = await withAudit(async (tx, audit) => {
-      if (kasseItems.length > 0) {
-        const kasseNetCents = kasseItems.reduce((sum, i) => sum + i.totalCents, 0);
-        let kasseRecipientName = "";
-        let kasseRecipientAddress = "";
-        let insuranceProviderName = "";
-        let insuranceIkNummer: string | null = "";
-        let versichertennummer: string | null = "";
+        const isKasse = isKassePot(pot);
+        // Empfänger: bei rechnungAnKunde adressiert der Generator alle
+        // Kasse-Rechnungen weiterhin an den Kunden — der Resolver wird
+        // umgangen, damit der Bestandskunde keine Verhaltens-Änderung sieht.
+        let recipientName: string;
+        let recipientAddress: string;
+        let providerName: string | null = null;
+        let ikNummer: string | null = null;
+        let versichertennummer: string | null = null;
+        let buyerReference: string | null = null;
 
-        if (billingType === "pflegekasse_gesetzlich" && insuranceInfo && !customer.rechnungAnKunde) {
-          kasseRecipientName = insuranceInfo.empfaenger || insuranceInfo.providerName;
-          insuranceProviderName = insuranceInfo.providerName;
-          insuranceIkNummer = insuranceInfo.ikNummer;
-          versichertennummer = insuranceInfo.versichertennummer;
-          const addrParts: string[] = [];
-          if (insuranceInfo.empfaengerZeile2) addrParts.push(insuranceInfo.empfaengerZeile2);
-          if (insuranceInfo.anschrift) {
-            addrParts.push(insuranceInfo.anschrift);
-          } else if (insuranceInfo.strasse) {
-            addrParts.push([insuranceInfo.strasse, insuranceInfo.hausnummer].filter(Boolean).join(" "));
-          }
-          if (insuranceInfo.plzOrt) {
-            addrParts.push(insuranceInfo.plzOrt);
-          } else if (insuranceInfo.plz || insuranceInfo.stadt) {
-            addrParts.push([insuranceInfo.plz, insuranceInfo.stadt].filter(Boolean).join(" "));
-          }
-          kasseRecipientAddress = addrParts.join("\n");
-        } else {
-          kasseRecipientName = customerName;
-          kasseRecipientAddress = customerAddress;
+        if (pot === "private") {
+          recipientName = customerName;
+          recipientAddress = customerAddress;
           if (insuranceInfo) {
-            insuranceProviderName = insuranceInfo.providerName;
-            insuranceIkNummer = insuranceInfo.ikNummer;
+            providerName = insuranceInfo.providerName;
+            ikNummer = insuranceInfo.ikNummer;
             versichertennummer = insuranceInfo.versichertennummer;
           }
+        } else if (isKasse && !customer.rechnungAnKunde) {
+          const resolved = await resolveBudgetRecipient(customerId, pot, asOfIso);
+          recipientName = resolved.recipientName;
+          recipientAddress = resolved.recipientAddress ?? "";
+          providerName = resolved.insuranceProviderName;
+          ikNummer = resolved.ikNummer;
+          versichertennummer = resolved.versichertennummer;
+          buyerReference = defaultBuyerReference;
+        } else {
+          // Kasse-Pot + rechnungAnKunde → Kunde zahlt selbst, leitet zur
+          // Pflegekasse weiter (Kostenerstattungsverfahren).
+          recipientName = customerName;
+          recipientAddress = customerAddress;
+          if (insuranceInfo) {
+            providerName = insuranceInfo.providerName;
+            ikNummer = insuranceInfo.ikNummer;
+            versichertennummer = insuranceInfo.versichertennummer;
+          }
+          buyerReference = defaultBuyerReference;
         }
 
-        const kasseInvoiceNumber = await getNextInvoiceNumberTx(tx, billingYear);
-        const kasseInvoiceData = {
-          invoiceNumber: kasseInvoiceNumber,
+        const netCents = items.reduce((s, i) => s + i.totalCents, 0);
+        const vatCents = pot === "private" ? Math.round((netCents * 1900) / 10000) : 0;
+        const invoiceBillingType = pot === "private" ? "selbstzahler" : billingType;
+
+        const invoiceNumber = await getNextInvoiceNumberTx(tx, billingYear);
+        const invoiceData = {
+          invoiceNumber,
           customerId,
-          billingType,
+          billingType: invoiceBillingType,
           invoiceType: "rechnung" as const,
           billingMonth,
           billingYear,
-          recipientName: kasseRecipientName,
-          recipientAddress: kasseRecipientAddress,
+          recipientName,
+          recipientAddress,
           customerName,
-          insuranceProviderName: insuranceProviderName || null,
-          insuranceIkNummer: insuranceIkNummer || null,
-          versichertennummer: versichertennummer || null,
+          insuranceProviderName: providerName,
+          insuranceIkNummer: ikNummer,
+          versichertennummer,
           pflegegrad: customer.pflegegrad || null,
-          netAmountCents: kasseNetCents,
-          vatAmountCents: 0,
-          grossAmountCents: kasseNetCents,
-          vatRate: 0,
+          netAmountCents: netCents,
+          vatAmountCents: vatCents,
+          grossAmountCents: netCents + vatCents,
+          vatRate: pot === "private" ? 1900 : 0,
           status: "entwurf",
-          notes: "Kassenanteil — Leistungen im Rahmen des verfügbaren Budgets",
+          notes: getPotInvoiceNote(pot),
+          // Pot-Marker + Lauf-Gruppierung für Cascade-Storno und Reporting.
+          budgetType: pot === "private" ? null : pot,
+          billingRunId,
           referencedStornoInvoiceIds: stornoRefsForInsert,
           dueDate: invoiceDueDateIso,
-          buyerReference: defaultBuyerReference,
+          buyerReference,
           assignmentDeclarationDate: null,
           assignmentDeclarationRef: null,
         };
 
-        const kasseInvoice = await createInvoiceTx(tx, kasseInvoiceData, kasseItems as Record<string, unknown>[], req.user!.id);
-        createdInvoices.push(kasseInvoice);
+        const invoice = await createInvoiceTx(tx, invoiceData, items as Record<string, unknown>[], req.user!.id);
+        createdInvoices.push(invoice);
 
         audit.record({
           userId: req.user!.id,
           action: "invoice_created",
           entityType: "invoice",
-          entityId: kasseInvoice.id,
+          entityId: invoice.id,
           metadata: {
-            invoiceNumber: kasseInvoiceNumber,
+            invoiceNumber,
             customerId,
-            billingType,
+            billingType: invoiceBillingType,
             invoiceType: "rechnung",
             billingMonth,
             billingYear,
-            grossAmountCents: kasseNetCents,
-            lineItemCount: kasseItems.length,
-            splitType: "kasse",
+            grossAmountCents: netCents + vatCents,
+            lineItemCount: items.length,
+            budgetType: pot === "private" ? "private" : pot,
+            billingRunId,
           },
           ipAddress: req.ip,
         });
       }
+      return createdInvoices;
+    }, { faults: readTestFaults(req) });
 
-      if (privateItems.length > 0) {
-        const privateNetCents = privateItems.reduce((sum, i) => sum + i.totalCents, 0);
-        const privateVatCents = Math.round(privateNetCents * 1900 / 10000);
-        let insuranceProviderName = "";
-        let insuranceIkNummer: string | null = "";
-        let versichertennummer: string | null = "";
-        if (insuranceInfo) {
-          insuranceProviderName = insuranceInfo.providerName;
-          insuranceIkNummer = insuranceInfo.ikNummer;
-          versichertennummer = insuranceInfo.versichertennummer;
-        }
+    // Task #544: PDF im Hintergrund persistieren (Bestand vor #759).
+    for (const inv of splitResult) {
+      schedulePdfPersistInBackground(inv.id);
+    }
 
-        const privateInvoiceNumber = await getNextInvoiceNumberTx(tx, billingYear);
-        const privateInvoiceData = {
-          invoiceNumber: privateInvoiceNumber,
-          customerId,
-          billingType: "selbstzahler",
-          invoiceType: "rechnung" as const,
-          billingMonth,
-          billingYear,
-          recipientName: customerName,
-          recipientAddress: customerAddress,
-          customerName,
-          insuranceProviderName: insuranceProviderName || null,
-          insuranceIkNummer: insuranceIkNummer || null,
-          versichertennummer: versichertennummer || null,
-          pflegegrad: customer.pflegegrad || null,
-          netAmountCents: privateNetCents,
-          vatAmountCents: privateVatCents,
-          grossAmountCents: privateNetCents + privateVatCents,
-          vatRate: 1900,
-          status: "entwurf",
-          notes: "Privatzahlung — Budget-Überschreitung gem. Vereinbarung",
-          referencedStornoInvoiceIds: stornoRefsForInsert,
-          dueDate: invoiceDueDateIso,
-          // Privatanteil: keine Käuferreferenz, da kein Pflegekassen-Vorgang.
-          buyerReference: null,
-          assignmentDeclarationDate: null,
-          assignmentDeclarationRef: null,
-        };
-
-        const privateInvoice = await createInvoiceTx(tx, privateInvoiceData, privateItems as Record<string, unknown>[], req.user!.id);
-        createdInvoices.push(privateInvoice);
-
-        audit.record({
-          userId: req.user!.id,
-          action: "invoice_created",
-          entityType: "invoice",
-          entityId: privateInvoice.id,
-          metadata: {
-            invoiceNumber: privateInvoiceNumber,
-            customerId,
-            billingType: "selbstzahler",
-            invoiceType: "rechnung",
-            billingMonth,
-            billingYear,
-            grossAmountCents: privateNetCents + privateVatCents,
-            lineItemCount: privateItems.length,
-            splitType: "privat",
-          },
-          ipAddress: req.ip,
-        });
-      }
-
-        return createdInvoices;
-      }, { faults: readTestFaults(req) });
-
-      // Task #544: PDF-Persistierung ist GoBD-relevant, aber NICHT zeitkritisch
-      // für den HTTP-Response. Wir geben die Rechnungen sofort zurück und
-      // rendern die PDFs im Hintergrund — sonst hängt der "Wird erstellt..."-
-      // Button minutenlang, wenn Puppeteer in einen Timeout läuft.
-      for (const inv of splitResult) {
-        schedulePdfPersistInBackground(inv.id);
-      }
-
-      if (splitResult.length === 1) {
-        return splitResult[0];
-      }
-      return {
-        splitInvoices: true as const,
-        invoices: splitResult,
-        message: `${splitResult.length} Rechnungen erstellt: Kassenanteil und Privatanteil (Budget-Überschreitung).`,
-      };
+    if (splitResult.length === 1) {
+      return splitResult[0];
+    }
+    return {
+      splitInvoices: true as const,
+      invoices: splitResult,
+      message: `${splitResult.length} Rechnungen erstellt (1 Rechnung pro Budget-Topf, Lauf-ID ${billingRunId}).`,
+    };
   }
 
   let recipientName = "";
@@ -1715,7 +1681,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
   const invoice = await storage.getInvoice(id);
   if (!invoice) throw notFound("Rechnung nicht gefunden");
 
-  const { status } = parsed.data;
+  const { status, cascadeRun } = parsed.data;
   const currentStatus = invoice.status;
 
   const allowedTransitions: Record<string, string[]> = {
@@ -1735,11 +1701,16 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       throw badRequest("Stornorechnungen können nicht erneut storniert werden.");
     }
 
-    const { stornoInvoice, invoiceNumber, updatedOriginal } = await withAudit(async (tx, audit) => {
+    // Task #759 — Cascade-Storno: ein PATCH storniert alle Geschwister-
+    // Rechnungen einer billing_run_id in EINER Transaktion. So bleibt der
+    // Topf-Split atomar konsistent (entweder ALLE Rechnungen storniert
+    // oder keine).
+    const { stornoInvoice, invoiceNumber, updatedOriginal, cascadeIds } = await withAudit(async (tx, audit) => {
+      const performStorno = async (originalId: number): Promise<{ stornoInvoice: Invoice; invoiceNumber: string; updatedOriginal: Invoice }> => {
       // Re-Read mit FOR UPDATE: serialisiert parallele Stornos derselben
       // Originalrechnung. Ohne Lock würden zwei PATCHs den alten Status sehen
       // und beide eine Stornorechnung erzeugen.
-      const locked = await getInvoiceForUpdateTx(tx, id);
+      const locked = await getInvoiceForUpdateTx(tx, originalId);
       if (!locked) throw notFound("Rechnung nicht gefunden");
       if (locked.status === "storniert") {
         throw badRequest("Diese Rechnung wurde bereits storniert.");
@@ -1749,7 +1720,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       }
 
       const number = await getNextInvoiceNumberTx(tx, locked.billingYear);
-      const lineItems = await getInvoiceLineItemsTx(tx, id);
+      const lineItems = await getInvoiceLineItemsTx(tx, originalId);
 
       // Task #562 — Fälligkeit auch für Storno-Inserts (außerhalb von
       // generateInvoiceCore): companySettings + Default 30 Tage.
@@ -1809,7 +1780,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       }));
 
       const created = await createInvoiceTx(tx, stornoData, stornoLineItems, req.user!.id);
-      const original = await updateInvoiceStatusTx(tx, id, status, req.user!.id);
+      const original = await updateInvoiceStatusTx(tx, originalId, status, req.user!.id);
 
       // Task #576: Storno darf den zugehörigen Leistungsnachweis NIE
       // soft-löschen. Der frühere T05/K3-Pfad hat bei Partial-Signing
@@ -1852,20 +1823,49 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
         userId: req.user!.id,
         action: "invoice_cancelled",
         entityType: "invoice",
-        entityId: id,
+        entityId: originalId,
         metadata: {
           originalInvoiceNumber: locked.invoiceNumber,
           stornoInvoiceId: created.id,
           stornoInvoiceNumber: number,
           customerId: locked.customerId,
           grossAmountCents: locked.grossAmountCents,
-          oldStatus: currentStatus,
+          oldStatus: locked.status,
           newStatus: status,
+          ...(locked.billingRunId ? { billingRunId: locked.billingRunId } : {}),
         },
         ipAddress: req.ip,
       });
 
       return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
+      };
+
+      // 1) Haupt-Rechnung stornieren.
+      const main = await performStorno(id);
+
+      // 2) Optional: Cascade über billing_run_id-Geschwister.
+      const cascadeStornoIds: number[] = [];
+      if (cascadeRun && invoice.billingRunId) {
+        const siblings = await tx.select({ id: invoicesTable.id })
+          .from(invoicesTable)
+          .where(and(
+            eq(invoicesTable.billingRunId, invoice.billingRunId),
+            ne(invoicesTable.id, id),
+            ne(invoicesTable.status, "storniert"),
+            ne(invoicesTable.invoiceType, "stornorechnung"),
+          ));
+        for (const s of siblings) {
+          const r = await performStorno(s.id);
+          cascadeStornoIds.push(r.stornoInvoice.id);
+        }
+      }
+
+      return {
+        stornoInvoice: main.stornoInvoice,
+        invoiceNumber: main.invoiceNumber,
+        updatedOriginal: main.updatedOriginal,
+        cascadeIds: cascadeStornoIds,
+      };
     }, { faults: readTestFaults(req) });
 
     // Task #577: Storno-PDF im Hintergrund persistieren — analog zum normalen
@@ -1874,6 +1874,11 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
     // E-Mail-/E-POST-Versand blockiert. (Prod-IDs 5/6/7/9 sind das Erbe
     // dieses Defekts und werden via Startup-Migration nachgezogen.)
     schedulePdfPersistInBackground(stornoInvoice.id);
+    // Task #759: Auch die Geschwister-Stornos brauchen ihre PDFs.
+    for (const sid of cascadeIds) {
+      schedulePdfPersistInBackground(sid);
+    }
+    void invoiceNumber;
 
     updated = updatedOriginal;
   } else {
@@ -1924,6 +1929,7 @@ function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], companySet
     assignmentDeclarationRef: invoice.assignmentDeclarationRef ?? null,
     invoiceType: invoice.invoiceType,
     billingType: invoice.billingType,
+    budgetType: invoice.budgetType ?? null,
     billingMonth: invoice.billingMonth,
     billingYear: invoice.billingYear,
     recipientName: invoice.recipientName,

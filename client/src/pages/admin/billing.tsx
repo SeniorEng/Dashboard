@@ -749,6 +749,16 @@ export default function AdminBilling() {
                             <Badge variant="outline" className={STATUS_COLORS[invoice.status] || "bg-gray-100 text-gray-600 border-gray-200"}>
                               {STATUS_LABELS[invoice.status] || invoice.status}
                             </Badge>
+                            {invoice.billingRunId && (
+                              <Badge
+                                variant="outline"
+                                className="bg-violet-50 text-violet-700 border-violet-200"
+                                title={`Teil eines Topf-Splits (Lauf-ID ${invoice.billingRunId.slice(0, 8)}…). Cascade-Storno betrifft alle Geschwister-Rechnungen.`}
+                                data-testid={`badge-topf-gruppe-${invoice.id}`}
+                              >
+                                Topf-Gruppe
+                              </Badge>
+                            )}
                             {/* Task #546: PDF-Persistierungs-Status sichtbar
                                 machen — wenn der Hintergrund-Render hängt
                                 oder gescheitert ist, sehen Admins das hier

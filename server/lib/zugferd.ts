@@ -220,6 +220,20 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
     if (data.assignmentDeclarationRef) aakParts.push(`Az. ${data.assignmentDeclarationRef}`);
     notes.push({ content: aakParts.join(" "), subjectCode: "REG" });
   }
+  // Task #759 — Variant C: §-Paragraf der Pot-Rechnung als BT-22-Note
+  // (subjectCode "REG" = regulatory). Pflegekassen-Eingangsverarbeitung
+  // sieht damit topf-spezifisch, welcher Anspruch abgerechnet wird.
+  switch (data.budgetType) {
+    case "entlastungsbetrag_45b":
+      notes.push({ content: "§ 45b SGB XI — Entlastungsbetrag", subjectCode: "REG" });
+      break;
+    case "umwandlung_45a":
+      notes.push({ content: "§ 45a SGB XI — Umwandlungsanspruch", subjectCode: "REG" });
+      break;
+    case "ersatzpflege_39_42a":
+      notes.push({ content: "§§ 39 / 42a SGB XI — Verhinderungspflege", subjectCode: "REG" });
+      break;
+  }
 
   const result: ZugferdInvoiceData = {
     number: data.invoiceNumber,

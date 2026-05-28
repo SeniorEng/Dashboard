@@ -210,3 +210,58 @@ zuvor entweder den Phasen-Append-Pfad (Zukunftsdatum) oder die
 Transitions-/In-Place-Logik (heutiges/gestriges Datum).
 
 Regressions-Test: `tests/budget/type-settings-future-row-overwrite.test.ts`
+
+## Rechnungs-Split pro Topf (Task #759, Variant C)
+
+Ab Task #759 wird ein Abrechnungslauf, der Termin-Anteile aus **mehreren**
+Budget-Töpfen verbraucht hat, in **N Rechnungen** aufgeteilt — eine pro
+`budget_type` (`entlastungsbetrag_45b`, `umwandlung_45a`,
+`ersatzpflege_39_42a`) plus optional eine Selbstzahler-Rechnung für den
+privaten Rest. Hat ein Lauf nur einen einzigen Topf, bleibt es bei der
+Bestand-Single-Invoice (kein Verhaltenswechsel, kein Bestand-Rewrite).
+
+### Pot → Empfänger
+
+`resolveBudgetRecipient(customerId, budgetType, asOf)`
+(`server/storage/budget-recipients.ts`) löst pro Topf den Rechnungs-
+Empfänger auf:
+
+1. Append-only `customer_budget_recipients`-Override für diesen Kunden +
+   Topf, gültig zum Termin-Datum.
+2. Andernfalls: Kassen-Töpfe → aktueller `customerInsuranceHistory`-Eintrag
+   (Pflegekasse), Selbstzahler-Pot → Kunden-Adresse.
+3. `rechnungAnKunde=true` zwingt alle Kassen-Empfänger zurück auf die
+   Kunden-Adresse (Kostenerstattungsverfahren).
+
+### `billingRunId` (uuid)
+
+Jeder Multi-Pot-Lauf bekommt eine `randomUUID()`, die als `billing_run_id`
+auf **allen** zugehörigen Rechnungen gespeichert wird. Die UI rendert ein
+„Topf-Gruppe"-Badge, sobald `billingRunId` gesetzt ist. Single-Pot-Läufe
+schreiben `billing_run_id = NULL`.
+
+### Cascade-Storno
+
+`PATCH /api/billing/:id/status` akzeptiert `{ status: "storniert",
+cascadeRun: true }`. Ist die Quelle Teil einer `billingRunId`-Gruppe,
+storniert die innere Transaktion ALLE aktiven Geschwister (Status ≠
+`storniert`, nicht selbst Stornorechnung) im selben `withAudit`-Run.
+Pro Geschwister wird eine eigene Storno-Rechnung mit eigener Nummer
+angelegt, das Budget-Reversal läuft pro `appointmentId` wie zuvor, und
+alle Storno-PDFs werden im Hintergrund persistiert.
+
+### Drift-Garantie
+
+Die Verteilung selbst lebt pure in
+`shared/domain/budget-invoice-split.ts` (`splitLineItemsAcrossPots`).
+Largest-Remainder mit deterministischem Pot-Tiebreak (`POT_ORDER`)
+garantiert: Σ aller Pot-Anteile = Σ Line-Item-Beträge — pro Termin und
+über den ganzen Lauf, ohne Cent-Drift. Detektor:
+`tests/equality/invoice-per-pot-arithmetic.test.ts`.
+
+### GoBD
+
+Bestand wird nicht angetastet — alte Single-Pot-Rechnungen behalten
+`budget_type = NULL` und `billing_run_id = NULL`. Spaltenanlage läuft
+idempotent in `server/startup/ensure-invoice-per-pot-columns.ts` (kein
+`drizzle-kit push`, siehe Gotcha in `replit.md`).
