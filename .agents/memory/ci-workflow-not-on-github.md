@@ -1,32 +1,46 @@
 ---
-name: CI workflow file missing from GitHub repo
-description: Why GitHub Actions CI never actually runs on SeniorEng/Dashboard despite replit.md documenting it
+name: GitHub Actions CI — on the repo now, but DB-gates can't go green yet
+description: State of CI on SeniorEng/Dashboard after the workflow file was finally pushed, and the two remaining blockers that keep the DB-backed gates red
 ---
 
-# CI workflow is committed locally but absent from the GitHub repo
+# CI workflow IS now on the GitHub repo (was previously missing)
 
-`.github/workflows/ci.yml` is tracked in the local/platform git, but the GitHub
-repo `SeniorEng/Dashboard` has **zero** workflows registered and no `.github/`
-directory on its `main` branch. The Replit "Publish your App" snapshot did not
-include the workflow file.
+`.github/workflows/ci.yml` and `scripts/ci-seed-superadmin.ts` are now present on
+`SeniorEng/Dashboard` `main`, the workflow is **registered + active**
+(`GET /actions/workflows` total_count = 1), and it runs on every push/PR.
+Branch protection correctly gates merges on the checks (a PR with a red required
+check shows `mergeable_state: blocked`).
 
-**Why:** The connected GitHub OAuth token only carries scopes
-`read:org, read:project, read:user, repo, user:email` — it has **no `workflow`
-scope**. Any attempt to create/update a tree or ref that adds a path under
-`.github/workflows/` via the GitHub API is rejected (tree create returns 404),
-so neither the publish flow nor the API can push the workflow file.
+**How it got there:** the connected GitHub OAuth token has no `workflow` scope, so
+adding any path under `.github/workflows/` via the API 404s. The fix was a
+user-supplied classic **PAT with `repo` + `workflow` scopes** (stored as secret
+`GITHUB_WORKFLOW_PAT`), used once to PUT the files via the contents API. The
+default connector token still cannot push workflow files — if you need to
+re-push, request a PAT again.
 
-**Consequences:**
-- The required status checks configured in branch protection
-  (`static-analysis`, `tests`, `e2e-smoke`, strict) can never be reported,
-  because no workflow produces them. With strict protection this means PRs
-  cannot satisfy the checks at all until the workflow file is pushed.
-- Repo Actions secrets (e.g. `TEST_USER_EMAIL` / `TEST_USER_PASSWORD`) are set
-  correctly but have no consumer until `ci.yml` lands on the repo.
+## Two remaining blockers keep `tests` / `e2e-smoke` / `static-analysis` red
 
-**How to apply / fix:** To actually enable the gate, the GitHub connection must
-be re-authorized **with the `workflow` scope** (or `ci.yml` pushed via a PAT
-that has it). After that, verification (a PR triggering the checks, a
-deliberately failing test blocking merge) becomes possible. Don't assume CI is
-live on the GitHub repo just because replit.md documents it — check
-`GET /repos/.../actions/workflows` (total_count) first.
+These are NOT the "file missing" problem — they only became visible once CI
+actually ran for the first time.
+
+1. **Neon serverless driver vs CI's plain Postgres.** `server/lib/db.ts` uses
+   `@neondatabase/serverless` with `useSecureWebSocket = true` (WebSocket/TLS).
+   CI provisions a plain `postgres:16` service container and sets
+   `DATABASE_URL=postgres://...@localhost:5432/...`. The driver tries a secure
+   WebSocket and gets `ECONNREFUSED`, so the **Seed test superadmin** step (and
+   any server/test step using the app DB layer) fails before any real test runs.
+   Note `drizzle-kit push` works fine (it uses a direct pg connection, not the
+   neon driver). Fix needs a CI WebSocket proxy (e.g. local-neon-http-proxy) +
+   an env-gated branch in `db.ts` to disable secure WS / set `wsProxy` when
+   targeting the proxy — production path (real neon host) must stay untouched.
+
+2. **Repo is stale vs the live Replit project.** GitHub `main` ≈ last
+   "Published your App" snapshot; post-publish work (e.g. the seed script) was
+   missing. So CI tests older code and e.g. the **OpenAPI drift gate**
+   (`gen:openapi --check`) is red from drift. A fresh publish is the real sync;
+   hand-pushing individual files is only a band-aid.
+
+**Consequence:** because branch protection requires `static-analysis`, `tests`,
+`e2e-smoke` (strict), and those are red, PRs are still blocked from merging until
+the two blockers above are resolved. This was also true before (checks absent),
+so it's not a regression — but "checks are green and merges flow" needs both fixes.
