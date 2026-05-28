@@ -3,12 +3,30 @@ import { drizzle } from "drizzle-orm/neon-serverless";
 import ws from "ws";
 
 neonConfig.webSocketConstructor = ws;
-// Pipeline TLS+auth in fewer round-trips — measurably reduces Neon cold-start
-// latency on the initial WebSocket handshake (without this, the first query
-// after a cold start regularly hits >5s).
-neonConfig.useSecureWebSocket = true;
-neonConfig.pipelineConnect = "password";
-neonConfig.pipelineTLS = true;
+
+// CI/Local-only: gegen eine plain Postgres-Instanz hinter einem
+// Neon-WebSocket-Proxy (z.B. ghcr.io/timowilhelm/local-neon-http-proxy) testen.
+// Der Neon-Serverless-Treiber spricht sonst ausschließlich Secure-WebSocket/TLS
+// und kann sich nicht mit einem nackten `postgres:16`-Service-Container
+// verbinden (ECONNREFUSED). Ist `NEON_LOCAL_WS_PROXY` gesetzt (z.B.
+// `localhost:4444`), schalten wir Secure-WS/TLS-Pipelining AB und routen den
+// WebSocket über den Proxy. Der Produktivpfad (echter Neon-Host) bleibt
+// unverändert, solange die Variable NICHT gesetzt ist.
+const localWsProxy = process.env.NEON_LOCAL_WS_PROXY?.trim();
+if (localWsProxy) {
+  neonConfig.wsProxy = () => `${localWsProxy}/v2`;
+  neonConfig.useSecureWebSocket = false;
+  neonConfig.pipelineConnect = false;
+  neonConfig.pipelineTLS = false;
+  console.log(`[db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy ${localWsProxy} (kein TLS).`);
+} else {
+  // Pipeline TLS+auth in fewer round-trips — measurably reduces Neon cold-start
+  // latency on the initial WebSocket handshake (without this, the first query
+  // after a cold start regularly hits >5s).
+  neonConfig.useSecureWebSocket = true;
+  neonConfig.pipelineConnect = "password";
+  neonConfig.pipelineTLS = true;
+}
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL ist nicht gesetzt. Bitte die Umgebungsvariable konfigurieren.");
