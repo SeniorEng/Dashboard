@@ -293,11 +293,17 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     .totals td { padding: 4px 8px; white-space: nowrap; }
     .totals td:last-child { text-align: right; }
     .total-row { font-weight: bold; font-size: 12pt; border-top: 2px solid #0d9488; }
-    .footer { margin-top: 40px; font-size: 9pt; color: #1f2937; border-top: 1px solid #e5e7eb; padding-top: 10px; }
-    .footer-grid { display: flex; justify-content: space-between; }
-    .footer-col { flex: 1; }
+    .footer { margin-top: 18px; font-size: 8pt; color: #4b5563; border-top: 1px solid #e5e7eb; padding-top: 6px; text-align: center; page-break-inside: avoid; }
     .note { margin-top: 15px; padding: 10px; background: #f0fdfa; border-left: 3px solid #0d9488; font-size: 9pt; }
     .insurance-ref { margin-top: 10px; padding: 8px; background: #eff6ff; border: 1px solid #bfdbfe; font-size: 9pt; }
+    .payment-block { margin-top: 18px; padding: 12px 14px; border: 1.5px solid #0d9488; background: #f0fdfa; font-size: 9.5pt; page-break-inside: avoid; }
+    .payment-block-title { font-size: 11pt; font-weight: bold; color: #0d9488; margin-bottom: 6px; }
+    .payment-block table { border-collapse: collapse; }
+    .payment-block td { padding: 2px 8px 2px 0; vertical-align: top; }
+    .payment-block td.label { color: #4b5563; white-space: nowrap; }
+    .payment-block td.value { color: #111827; }
+    .payment-block .iban-value { font-weight: bold; font-size: 11pt; letter-spacing: 0.3px; }
+    .payment-block .due-line { margin-top: 6px; color: #1f2937; }
   </style>
 </head>
 <body>
@@ -311,6 +317,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       </div>
     </div>
     <div style="text-align: right;">
+      ${data.geschaeftsfuehrer ? `<div class="company-info">Geschäftsführer: ${escapeHtml(data.geschaeftsfuehrer)}</div>` : ""}
       ${data.ikNummer ? `<div class="company-info">IK-Nr.: ${data.ikNummer}</div>` : ""}
       ${data.steuernummer ? `<div class="company-info">St.-Nr.: ${data.steuernummer}</div>` : ""}
       ${data.ustId ? `<div class="company-info">USt-ID: ${data.ustId}</div>` : ""}
@@ -394,39 +401,52 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 
   ${billingNote ? `<div class="note">${billingNote}</div>` : ""}
 
-  ${isSelbstzahler || isCustomerInvoice ? `
-  <div style="margin-top: 20px; font-size: 9pt;">
-    <p>Bitte überweisen Sie den Betrag innerhalb von 14 Tagen auf folgendes Konto:</p>
-    <table style="margin-top: 5px;">
-      <tr><td style="color: #1f2937; padding-right: 10px;">IBAN:</td><td style="color: #111827;"><strong>${escapeHtml(data.iban)}</strong></td></tr>
-      <tr><td style="color: #1f2937; padding-right: 10px;">BIC:</td><td style="color: #111827;">${escapeHtml(data.bic)}</td></tr>
-      <tr><td style="color: #1f2937; padding-right: 10px;">Bank:</td><td style="color: #111827;">${escapeHtml(data.bankName)}</td></tr>
-    </table>
-    ${isCustomerInvoice ? `<p style="margin-top: 8px; color: #4b5563;">Diese Rechnung können Sie zusammen mit dem beigefügten Leistungsnachweis bei Ihrer Pflegekasse zur Erstattung einreichen.</p>` : ""}
-  </div>
-  ` : `
-  <div style="margin-top: 20px; font-size: 9pt;">
-    <p>Bankverbindung: ${escapeHtml(data.bankName)} | IBAN: ${escapeHtml(data.iban)} | BIC: ${escapeHtml(data.bic)}</p>
-  </div>
-  `}
+  ${(() => {
+    // Task #755 — vereinheitlichter Zahlungsblock für ALLE Rechnungstypen.
+    // Verwendungszweck wird deterministisch aus Rechnungsnummer (+ optional
+    // Käuferreferenz/Versichertennummer) gebildet. Bei Storno wird kein
+    // Zahlungsaufruf gerendert, sondern ein Hinweis auf den Stornocharakter
+    // — aber die Kontodaten bleiben sichtbar (Pflichtangaben).
+    const purposeParts = [`Rechnungsnr. ${data.invoiceNumber}`];
+    if (data.buyerReference) {
+      purposeParts.push(`Käuferreferenz ${data.buyerReference}`);
+    }
+    const purpose = purposeParts.join(", ");
+    const stornoPurpose = `Storno zu Rechnungsnr. ${data.invoiceNumber}`;
 
-  ${data.notes ? `<div style="margin-top: 15px; font-size: 9pt; color: #1f2937;"><strong>Hinweis:</strong> ${escapeHtml(data.notes)}</div>` : ""}
+    let dueLine = "";
+    if (isStorno) {
+      dueLine = `<div class="due-line">Diese Stornorechnung hebt die zugrunde liegende Rechnung auf. Es ist keine Zahlung zu leisten.</div>`;
+    } else if (isSelbstzahler || isCustomerInvoice) {
+      dueLine = data.invoiceDueDate
+        ? `<div class="due-line">Bitte überweisen Sie den Betrag bis zum <strong>${escapeHtml(data.invoiceDueDate)}</strong> auf folgendes Konto.</div>`
+        : `<div class="due-line">Bitte überweisen Sie den Betrag zeitnah auf folgendes Konto.</div>`;
+    } else {
+      dueLine = `<div class="due-line">Bitte überweisen Sie den Betrag auf folgendes Konto.</div>`;
+    }
+
+    const accountHolder = data.companyName || "";
+    const purposeForBlock = isStorno ? stornoPurpose : purpose;
+
+    return `
+  <div class="payment-block">
+    <div class="payment-block-title">Zahlungsinformationen</div>
+    ${dueLine}
+    <table>
+      ${accountHolder ? `<tr><td class="label">Kontoinhaber:</td><td class="value">${escapeHtml(accountHolder)}</td></tr>` : ""}
+      <tr><td class="label">IBAN:</td><td class="value iban-value">${escapeHtml(data.iban)}</td></tr>
+      <tr><td class="label">BIC:</td><td class="value">${escapeHtml(data.bic)}</td></tr>
+      ${data.bankName ? `<tr><td class="label">Bank:</td><td class="value">${escapeHtml(data.bankName)}</td></tr>` : ""}
+      <tr><td class="label">Verwendungszweck:</td><td class="value">${escapeHtml(purposeForBlock)}</td></tr>
+    </table>
+    ${isCustomerInvoice && !isStorno ? `<div style="margin-top: 8px; color: #4b5563; font-size: 9pt;">Diese Rechnung können Sie zusammen mit dem beigefügten Leistungsnachweis bei Ihrer Pflegekasse zur Erstattung einreichen.</div>` : ""}
+  </div>`;
+  })()}
+
+  ${data.notes ? `<div style="margin-top: 12px; font-size: 9pt; color: #1f2937;"><strong>Hinweis:</strong> ${escapeHtml(data.notes)}</div>` : ""}
 
   <div class="footer">
-    <div class="footer-grid">
-      <div class="footer-col">
-        ${escapeHtml(data.companyName || "")}<br>
-        ${data.geschaeftsfuehrer ? `Geschäftsführer: ${escapeHtml(data.geschaeftsfuehrer)}` : ""}
-      </div>
-      <div class="footer-col" style="text-align: center;">
-        ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""}<br>
-        ${escapeHtml(data.companyEmail || "")}
-      </div>
-      <div class="footer-col" style="text-align: right;">
-        ${data.iban ? `IBAN: ${escapeHtml(data.iban)}` : ""}<br>
-        ${data.bic ? `BIC: ${escapeHtml(data.bic)}` : ""}
-      </div>
-    </div>
+    ${escapeHtml(data.companyName || "")}${data.geschaeftsfuehrer ? ` &middot; Geschäftsführer: ${escapeHtml(data.geschaeftsfuehrer)}` : ""}${data.steuernummer ? ` &middot; St.-Nr. ${escapeHtml(data.steuernummer)}` : ""}${data.ustId ? ` &middot; USt-ID ${escapeHtml(data.ustId)}` : ""}
   </div>
 </body>
 </html>`;

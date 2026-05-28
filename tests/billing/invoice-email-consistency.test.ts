@@ -99,22 +99,18 @@ function splitHeadAndFoot(html: string): { head: string; foot: string } {
 describe("Invoice-/Leistungsnachweis-PDF: Firmen-E-Mail-Konsistenz (Task #573)", () => {
   const customEmail = "kontakt@pflege-engel-test.de";
 
-  it("Rechnung: rendert in Kopf UND Fuß exakt dieselbe E-Mail aus company_settings", () => {
+  it("Rechnung: rendert genau dieselbe E-Mail aus company_settings (Header, keine zweite Schreibweise)", () => {
+    // Task #755 — der separate Footer-Grid mit duplizierter E-Mail-/Bank-
+    // Adresse wurde entfernt; die Firmen-E-Mail steht nur noch einmal im
+    // Header-Kontaktblock. Garantie aus #573 bleibt: keine hartkodierte
+    // zweite Adresse irgendwo im Output.
     const html = generateInvoiceHtml(makePdfData({ companyEmail: customEmail }));
 
-    // Nur EINE unique Adresse im gesamten Output.
     const emails = uniqueEmailsIn(html);
     expect(emails).toEqual([customEmail.toLowerCase()]);
 
-    // Bereiche oberhalb (Header) und ab `<div class="footer">` (Footer)
-    // müssen die Adresse jeweils enthalten — beweist Kopf/Fuß-Konsistenz.
-    const { head, foot } = splitHeadAndFoot(html);
+    const { head } = splitHeadAndFoot(html);
     expect(head, "Header-Bereich soll companyEmail enthalten").toContain(customEmail);
-    expect(foot, "Footer-Bereich soll companyEmail enthalten").toContain(customEmail);
-
-    // Zur Sicherheit: insgesamt ≥ 2× im Output.
-    const occurrences = html.split(customEmail).length - 1;
-    expect(occurrences).toBeGreaterThanOrEqual(2);
   });
 
   it("Rechnung: keine hartkodierte Fallback-Adresse, wenn companyEmail leer ist", () => {
