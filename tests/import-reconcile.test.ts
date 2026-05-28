@@ -88,10 +88,14 @@ describe("Task #669 — Import-Reconcile", () => {
     expect(cancellableIds).toContain(onlyInDb.appointmentId);
     expect(cancellableIds).not.toContain(inExcel.appointmentId);
 
+    const previewToken = preview.data.previewToken as string;
+    expect(previewToken).toMatch(/^[0-9a-f-]{36}$/i);
+
     // Begründung zu kurz → 400
     const shortReason = await apiPost<any>("/api/admin/import-appointments/reconcile/execute", {
       appointmentIds: [onlyInDb.appointmentId],
       reason: "kurz",
+      previewToken,
     });
     expect(shortReason.status).toBe(400);
 
@@ -99,9 +103,7 @@ describe("Task #669 — Import-Reconcile", () => {
     const exec = await apiPost<any>("/api/admin/import-appointments/reconcile/execute", {
       appointmentIds: [onlyInDb.appointmentId],
       reason: "Excel ist Single Source of Truth für diesen Zeitraum (Test)",
-      scopeCustomerIds: [customerId],
-      scopeStartDate: futureDate,
-      scopeEndDate: futureDate,
+      previewToken,
     });
     expect(exec.status).toBe(200);
     expect(exec.data.cancelled).toBe(1);

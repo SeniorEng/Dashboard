@@ -39,13 +39,19 @@ interface ReconcileAppointmentInfo {
 }
 
 interface ReconcileExcludedInfo extends ReconcileAppointmentInfo {
-  exclusionReason: "signed_service_record" | "signed_appointment" | "month_closed";
+  exclusionReason:
+    | "signed_service_record"
+    | "signed_appointment"
+    | "month_closed"
+    | "beyond_excel_cutoff";
   exclusionDetail?: string;
 }
 
 interface ReconcilePreviewResponse {
   cancellable: ReconcileAppointmentInfo[];
   excluded: ReconcileExcludedInfo[];
+  /** Task #708: Server-Token, im Execute zwingend mitzusenden. */
+  previewToken: string;
 }
 
 export interface ReconcileExecuteResponse {
@@ -64,6 +70,8 @@ function exclusionReasonLabel(r: ReconcileExcludedInfo["exclusionReason"]): stri
       return "Termin unterschrieben";
     case "month_closed":
       return "Monat geschlossen";
+    case "beyond_excel_cutoff":
+      return "Cutoff-geschützt (nach letztem Excel-Monat)";
   }
 }
 
@@ -210,9 +218,9 @@ export function ImportReconcileSection({
           {
             appointmentIds: Array.from(selectedAppointmentIds),
             reason: reason.trim(),
-            scopeCustomerIds: Array.from(selectedCustomerIds),
-            scopeStartDate: startDate,
-            scopeEndDate: endDate,
+            // Task #708: Server-trusted Snapshot via Token; Scope + Cutoff
+            // werden serverseitig aus dem Preview-Snapshot gelesen.
+            previewToken: preview.previewToken,
           },
         ),
       );

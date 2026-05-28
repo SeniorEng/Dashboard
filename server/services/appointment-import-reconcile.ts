@@ -32,11 +32,14 @@ import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { storage } from "../storage";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { appointmentsRepo } from "../repos";
+import { computeLastExcelMonth, isBeyondCutoff, type ExcelCutoff } from "@shared/domain/import-cutoff";
 
 export type ReconcileExclusionReason =
   | "signed_service_record"
   | "signed_appointment"
-  | "month_closed";
+  | "month_closed"
+  /** Task #708: DB-Termin liegt jenseits des letzten Excel-Monats. */
+  | "beyond_excel_cutoff";
 
 export interface ReconcileAppointmentInfo {
   appointmentId: number;
@@ -106,6 +109,11 @@ export async function previewReconcile(
   }
 
   const excelSet = buildExcelKeySet(excelKeys);
+  // Task #708: Cutoff = letzter Tag des größten YYYY-MM in der Excel. DB-Termine
+  // jenseits dieses Tages werden niemals automatisch storniert — sonst würde
+  // ein Re-Import einer Jan-Apr-Excel die bereits geplanten Mai-Termine eines
+  // Kunden als "nicht in Excel → cancel" markieren.
+  const cutoff = computeLastExcelMonth(excelKeys.map((k) => k.date));
 
   const rows = await appointmentsRepo
     .selectColumnsFrom(
@@ -208,6 +216,16 @@ export async function previewReconcile(
       status: row.status,
     };
 
+    // Exklusion 0 (Task #708): jenseits Excel-Cutoff geschützt.
+    if (cutoff && isBeyondCutoff(dateStr, cutoff)) {
+      excluded.push({
+        ...info,
+        exclusionReason: "beyond_excel_cutoff",
+        exclusionDetail: `Liegt nach dem letzten Excel-Monat (${cutoff.yearMonth})`,
+      });
+      continue;
+    }
+
     // Exklusion 1: Signierter Leistungsnachweis verbunden.
     if (signedRecordAppointmentIds.has(row.appointmentId)) {
       excluded.push({
@@ -267,6 +285,14 @@ export async function executeReconcile(params: {
   scopeCustomerIds?: number[];
   scopeStartDate?: string;
   scopeEndDate?: string;
+  /**
+   * Task #708: Optionaler Excel-Cutoff (größter YYYY-MM in der Excel).
+   * Wenn gesetzt, werden Termine deren Datum > `cutoff.lastDay` ist
+   * im Execute-Pfad hart ausgeschlossen — auch wenn der Client die
+   * appointmentIds-Liste manipuliert oder ein erweiterter Scope greift.
+   * Defense-in-Depth zur Klassifizierung in `classifyReconcileCandidates`.
+   */
+  excelCutoff?: ExcelCutoff | null;
 }): Promise<ReconcileExecuteResult> {
   const { appointmentIds, reason, userId, ipAddress } = params;
   if (reason.trim().length < 10) {
@@ -350,6 +376,21 @@ export async function executeReconcile(params: {
       }
       const empForCloseCheck = row.performedByEmployeeId ?? row.assignedEmployeeId;
       const dateStr = typeof row.date === "string" ? row.date : String(row.date);
+      // Task #708: Defense-in-Depth — auch im Execute-Pfad gegen den
+      // explizit übergebenen scopeEndDate prüfen, falls der Scope vom
+      // Aufrufer enger gesetzt wurde als die ursprünglich gelieferten
+      // appointmentIds.
+      if (params.scopeEndDate && dateStr > params.scopeEndDate) {
+        excluded++;
+        continue;
+      }
+      // Task #708: harte Excel-Cutoff-Sperre im Execute-Pfad — verhindert,
+      // dass ein Re-Import eines Teil-Excels (z.B. Jan-Apr) zukünftige
+      // Termine (Mai+) als „missing in Excel" storniert.
+      if (params.excelCutoff && isBeyondCutoff(dateStr, params.excelCutoff)) {
+        excluded++;
+        continue;
+      }
       if (empForCloseCheck != null) {
         const closed = await isMonthClosed(empForCloseCheck, dateStr);
         if (closed) {

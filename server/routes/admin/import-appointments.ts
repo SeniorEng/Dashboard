@@ -16,6 +16,14 @@ import {
   previewReconcile,
   executeReconcile,
 } from "../../services/appointment-import-reconcile";
+import {
+  storeImportPreview,
+  loadImportPreview,
+  storeReconcilePreview,
+  loadReconcilePreview,
+  consumePreview,
+} from "../../services/import-preview-cache";
+import { computeLastExcelMonth } from "@shared/domain/import-cutoff";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -39,11 +47,37 @@ router.post(
       total: matched.length,
       new: matched.filter((r) => r.status === "new").length,
       duplicate: matched.filter((r) => r.status === "duplicate").length,
+      upgrade: matched.filter((r) => r.status === "upgrade").length,
+      beyondCutoff: matched.filter((r) => r.status === "beyond_cutoff").length,
       error: matched.filter((r) => r.status === "error").length,
       budgetTrimmed: matched.filter((r) => r.budgetTrimInfo !== null).length,
     };
 
-    res.json({ rows: matched, summary });
+    // Task #708: Server-trusted Snapshot — Cutoff aus den vom Server selbst
+    // geparsten Excel-Daten + Whitelist erlaubter rowIndexes mit ihren
+    // Original-Daten. Execute prüft gegen diesen Snapshot, sodass ein
+    // manipulierter Client weder Cutoff noch Zeilen-Daten verschieben kann.
+    const excelCutoff = computeLastExcelMonth(matched.map((r) => r.date));
+    const rows = new Map<number, import("../../services/import-preview-cache").TrustedRowSnapshot>();
+    const allowedRowIndexes = new Set<number>();
+    for (const r of matched) {
+      rows.set(r.rowIndex, {
+        date: r.date,
+        customerId: r.customerId,
+        employeeId: r.employeeId,
+        serviceId: r.serviceId,
+        existingAppointmentId: r.existingAppointmentId,
+        status: r.status,
+      });
+      allowedRowIndexes.add(r.rowIndex);
+    }
+    const previewToken = storeImportPreview(req.user!.id, {
+      excelCutoff,
+      allowedRowIndexes,
+      rows,
+    });
+
+    res.json({ rows: matched, summary, previewToken });
   })
 );
 
@@ -69,7 +103,7 @@ const matchedRowSchema = z.object({
   employeeId: z.number().nullable(),
   serviceId: z.number().nullable(),
   budgetTypeKey: z.string().nullable(),
-  status: z.enum(["new", "duplicate", "error"]),
+  status: z.enum(["new", "duplicate", "upgrade", "beyond_cutoff", "error"]),
   errors: z.array(z.string()),
   existingAppointmentId: z.number().nullable(),
   differences: z.array(z.string()),
@@ -96,23 +130,94 @@ const executeSchema = z.object({
   rows: z.array(matchedRowSchema),
   actions: z.array(
     z.object({
-      action: z.enum(["import", "update", "skip"]),
+      action: z.enum(["import", "update", "upgrade", "skip"]),
       rowIndex: z.number(),
       employeeIdOverride: z.number().optional(),
     })
   ),
+  /**
+   * Task #708: Pflicht-Token aus dem vorhergehenden /preview-Call.
+   * Server-trusted Snapshot enthält den aus der Original-Excel berechneten
+   * Cutoff. Fehlt der Token oder gehört er einem anderen User, wird der
+   * Execute abgelehnt — kein Cutoff-Bypass durch Client-Manipulation.
+   */
+  previewToken: z.string().uuid("previewToken muss eine gültige UUID sein"),
 });
 
 router.post(
   "/import-appointments/execute",
   asyncHandler("Import konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
-    const { rows, actions } = executeSchema.parse(req.body);
+    const { rows, actions, previewToken } = executeSchema.parse(req.body);
 
-    const matchedRows: MatchedRow[] = rows.map((r) => ({
-      ...r,
-      budgetTrimInfo: r.budgetTrimInfo ?? null,
-      diff: r.diff ?? null,
-    }));
+    // Task #708: Server-trusted Snapshot laden. Wenn nicht (mehr) vorhanden,
+    // muss der User neu Preview-en — wir akzeptieren keinen Fallback, weil
+    // genau das die Bypass-Lücke war.
+    const snapshot = loadImportPreview(previewToken, req.user!.id);
+    if (!snapshot) {
+      res.status(409).json({
+        error:
+          "Preview ist abgelaufen oder ungültig. Bitte Excel-Datei erneut hochladen.",
+      });
+      return;
+    }
+
+    // Task #708 v4: Eingehende Zeilen müssen Teil des Preview-Snapshots sein
+    // UND alle sicherheitsrelevanten Felder müssen exakt dem trusted Preview
+    // entsprechen. So kann ein manipulierter Client weder Datum noch das
+    // Mutations-Ziel (existingAppointmentId) noch Customer/Service/Employee
+    // einer legitimen rowIndex-Zeile verschieben.
+    //
+    // employeeId ist Sonderfall: Der Operator darf während Execute via
+    // `employeeIdOverride` einen Mitarbeiter zuordnen, daher prüfen wir hier
+    // nur, dass der Payload mit dem Snapshot übereinstimmt — der spätere
+    // Override wird unten gegen den trusted Snapshot angewandt.
+    for (const r of rows) {
+      if (!snapshot.allowedRowIndexes.has(r.rowIndex)) {
+        res.status(400).json({
+          error: `Unbekannte Zeile (rowIndex=${r.rowIndex}) — nicht Teil des Preview-Snapshots.`,
+        });
+        return;
+      }
+      const trusted = snapshot.rows.get(r.rowIndex)!;
+      const mismatches: string[] = [];
+      if (trusted.date !== r.date) mismatches.push(`date(${trusted.date}≠${r.date})`);
+      if (trusted.customerId !== r.customerId)
+        mismatches.push(`customerId(${trusted.customerId}≠${r.customerId})`);
+      if (trusted.serviceId !== r.serviceId)
+        mismatches.push(`serviceId(${trusted.serviceId}≠${r.serviceId})`);
+      if (trusted.employeeId !== r.employeeId)
+        mismatches.push(`employeeId(${trusted.employeeId}≠${r.employeeId})`);
+      if (trusted.existingAppointmentId !== r.existingAppointmentId)
+        mismatches.push(
+          `existingAppointmentId(${trusted.existingAppointmentId}≠${r.existingAppointmentId})`,
+        );
+      if (trusted.status !== r.status)
+        mismatches.push(`status(${trusted.status}≠${r.status})`);
+      if (mismatches.length > 0) {
+        res.status(400).json({
+          error: `Zeile manipuliert (rowIndex=${r.rowIndex}): ${mismatches.join(", ")}.`,
+        });
+        return;
+      }
+    }
+
+    // Trusted Zeilen aus dem Snapshot anstelle des Client-Payloads
+    // weiterverarbeiten — der Client-Payload diente nur dazu, Aktionen pro
+    // rowIndex zu bestimmen.
+    const matchedRows: MatchedRow[] = rows.map((r) => {
+      const trusted = snapshot.rows.get(r.rowIndex)!;
+      return {
+        ...r,
+        date: trusted.date,
+        customerId: trusted.customerId,
+        serviceId: trusted.serviceId,
+        employeeId: trusted.employeeId,
+        existingAppointmentId: trusted.existingAppointmentId,
+        status: trusted.status,
+        budgetTrimInfo: r.budgetTrimInfo ?? null,
+        diff: r.diff ?? null,
+      };
+    });
 
     for (const action of actions) {
       if (action.employeeIdOverride) {
@@ -123,7 +228,14 @@ router.post(
       }
     }
 
-    const result = await executeImport(matchedRows, actions, req.user!.id);
+    // Cutoff kommt ausschließlich aus dem server-trusted Snapshot.
+    const result = await executeImport(
+      matchedRows,
+      actions,
+      req.user!.id,
+      snapshot.excelCutoff,
+    );
+    consumePreview(previewToken);
     res.json(result);
   })
 );
@@ -181,7 +293,19 @@ router.post(
       input.endDate,
       input.excelKeys,
     );
-    res.json(result);
+    // Task #708: Server-trusted Snapshot mit Cutoff + zulässigen AppointmentIds.
+    const excelCutoff = computeLastExcelMonth(input.excelKeys.map((k) => k.date));
+    const allowedAppointmentIds = new Set<number>(
+      result.cancellable.map((c) => c.appointmentId),
+    );
+    const previewToken = storeReconcilePreview(req.user!.id, {
+      excelCutoff,
+      allowedAppointmentIds,
+      scopeCustomerIds: input.customerIds,
+      scopeStartDate: input.startDate,
+      scopeEndDate: input.endDate,
+    });
+    res.json({ ...result, previewToken });
   })
 );
 
@@ -189,25 +313,51 @@ const reconcileExecuteSchema = z.object({
   appointmentIds: z.array(z.number().int().positive()).min(1, "Mindestens ein Termin erforderlich"),
   reason: z.string().min(10, "Begründung muss mindestens 10 Zeichen lang sein"),
   batchId: z.string().uuid("batchId muss eine gültige UUID sein").optional(),
-  scopeCustomerIds: z.array(z.number().int().positive()).optional(),
-  scopeStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  scopeEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /**
+   * Task #708: Pflicht-Token aus /reconcile/preview. Server-trusted Snapshot
+   * liefert Cutoff, Scope und Whitelist erlaubter AppointmentIds.
+   */
+  previewToken: z.string().uuid("previewToken muss eine gültige UUID sein"),
 });
 
 router.post(
   "/import-appointments/reconcile/execute",
   asyncHandler("Reconcile-Stornierung konnte nicht durchgeführt werden", async (req: Request, res: Response) => {
     const input = reconcileExecuteSchema.parse(req.body);
+
+    const snapshot = loadReconcilePreview(input.previewToken, req.user!.id);
+    if (!snapshot) {
+      res.status(409).json({
+        error:
+          "Reconcile-Preview ist abgelaufen oder ungültig. Bitte Vorschau neu erstellen.",
+      });
+      return;
+    }
+
+    // Jede vom Client gesendete appointmentId muss Teil der zur Storno
+    // freigegebenen Menge sein. Schützt davor, dass ein Client beliebige
+    // andere Termin-IDs (z.B. aus anderen Scopes) reinschmuggelt.
+    for (const id of input.appointmentIds) {
+      if (!snapshot.allowedAppointmentIds.has(id)) {
+        res.status(400).json({
+          error: `AppointmentId ${id} ist nicht Teil des Preview-Snapshots.`,
+        });
+        return;
+      }
+    }
+
     const result = await executeReconcile({
       appointmentIds: input.appointmentIds,
       reason: input.reason,
       batchId: input.batchId,
       userId: req.user!.id,
       ipAddress: req.ip || req.socket.remoteAddress,
-      scopeCustomerIds: input.scopeCustomerIds,
-      scopeStartDate: input.scopeStartDate,
-      scopeEndDate: input.scopeEndDate,
+      scopeCustomerIds: snapshot.scopeCustomerIds,
+      scopeStartDate: snapshot.scopeStartDate,
+      scopeEndDate: snapshot.scopeEndDate,
+      excelCutoff: snapshot.excelCutoff,
     });
+    consumePreview(input.previewToken);
     res.json(result);
   })
 );

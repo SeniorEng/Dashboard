@@ -45,7 +45,7 @@ interface MatchedRow {
   employeeId: number | null;
   serviceId: number | null;
   budgetTypeKey: string | null;
-  status: "new" | "duplicate" | "error";
+  status: "new" | "duplicate" | "upgrade" | "beyond_cutoff" | "error";
   errors: string[];
   existingAppointmentId: number | null;
   differences: string[];
@@ -62,14 +62,20 @@ function serviceCodeLabel(code: string | null | undefined): string {
 
 interface PreviewResponse {
   rows: MatchedRow[];
-  summary: { total: number; new: number; duplicate: number; error: number; budgetTrimmed: number };
+  summary: { total: number; new: number; duplicate: number; upgrade: number; beyondCutoff: number; error: number; budgetTrimmed: number };
+  /** Task #708: Server-Token für Trust-Boundary im Execute. */
+  previewToken: string;
 }
 
 interface ImportResult {
   imported: number;
   updated: number;
+  /** Task #708: bisher nur geplante Termine auf `completed` angehoben. */
+  upgraded: number;
   skipped: number;
   trimmed: number;
+  /** Task #708: durch Cutoff-Schutz blockierte Mutationen. */
+  cutoffProtected: number;
   errors: { rowIndex: number; error: string }[];
 }
 
@@ -78,7 +84,7 @@ interface Employee {
   displayName: string;
 }
 
-type RowAction = "import" | "update" | "skip";
+type RowAction = "import" | "update" | "upgrade" | "skip";
 
 export default function ImportAppointmentsPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -119,6 +125,14 @@ export default function ImportAppointmentsPage() {
       for (const row of data.rows) {
         if (row.status === "new") {
           defaultActions.set(row.rowIndex, "import");
+        } else if (row.status === "upgrade") {
+          // Task #708: Default für geplante Termine ohne Unterschrift =
+          // auf `completed` anheben + Budget buchen.
+          defaultActions.set(row.rowIndex, "upgrade");
+        } else if (row.status === "beyond_cutoff") {
+          // Task #708: Cutoff-geschützte Termine sind nicht selektierbar
+          // — Server blockiert ohnehin alle Mutationen.
+          defaultActions.set(row.rowIndex, "skip");
         } else if (row.status === "duplicate") {
           defaultActions.set(row.rowIndex, "skip");
         } else {
@@ -152,7 +166,11 @@ export default function ImportAppointmentsPage() {
       }));
 
       const result = unwrapResult(
-        await api.post<ImportResult>("/admin/import-appointments/execute", { rows: preview.rows, actions })
+        await api.post<ImportResult>("/admin/import-appointments/execute", {
+          rows: preview.rows,
+          actions,
+          previewToken: preview.previewToken,
+        })
       );
       setImportResult(result);
       setProgress(100);
@@ -193,7 +211,7 @@ export default function ImportAppointmentsPage() {
   const selectedForImport = preview
     ? preview.rows.filter((r) => {
         const action = rowActions.get(r.rowIndex);
-        return action === "import" || action === "update";
+        return action === "import" || action === "update" || action === "upgrade";
       }).length
     : 0;
 
@@ -263,6 +281,18 @@ export default function ImportAppointmentsPage() {
                     <AlertTriangle className="h-4 w-4 text-yellow-600" />
                     <span>Duplikate: {preview.summary.duplicate}</span>
                   </div>
+                  {preview.summary.upgrade > 0 && (
+                    <div className="flex items-center gap-1" data-testid="summary-upgrade">
+                      <CheckCircle className="h-4 w-4 text-blue-600" />
+                      <span>Upgegradet: {preview.summary.upgrade}</span>
+                    </div>
+                  )}
+                  {preview.summary.beyondCutoff > 0 && (
+                    <div className="flex items-center gap-1" data-testid="summary-beyond-cutoff">
+                      <AlertTriangle className="h-4 w-4 text-slate-500" />
+                      <span>Cutoff-geschützt: {preview.summary.beyondCutoff}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-1">
                     <XCircle className="h-4 w-4 text-red-600" />
                     <span>Fehler: {preview.summary.error}</span>
@@ -330,7 +360,7 @@ export default function ImportAppointmentsPage() {
                 <tbody>
                   {preview.rows.map((row) => {
                     const action = rowActions.get(row.rowIndex) || "skip";
-                    const isSelected = action === "import" || action === "update";
+                    const isSelected = action === "import" || action === "update" || action === "upgrade";
                     const hasEmployeeError = row.errors.some((e) => e.includes("Mitarbeiter"));
                     const override = employeeOverrides.get(row.rowIndex);
                     const isBudgetTrimmed = row.budgetTrimInfo !== null;
@@ -346,11 +376,18 @@ export default function ImportAppointmentsPage() {
                         <td className="p-2">
                           <Checkbox
                             checked={isSelected}
-                            disabled={row.status === "error" && !hasEmployeeError}
+                            disabled={(row.status === "error" && !hasEmployeeError) || row.status === "beyond_cutoff"}
                             onCheckedChange={(checked) => {
                               const newActions = new Map(rowActions);
                               if (checked) {
-                                newActions.set(row.rowIndex, row.status === "duplicate" ? "update" : "import");
+                                newActions.set(
+                                  row.rowIndex,
+                                  row.status === "upgrade"
+                                    ? "upgrade"
+                                    : row.status === "duplicate"
+                                      ? "update"
+                                      : "import",
+                                );
                               } else {
                                 newActions.set(row.rowIndex, "skip");
                               }
@@ -376,6 +413,16 @@ export default function ImportAppointmentsPage() {
                               Duplikat
                             </Badge>
                           )}
+                          {row.status === "upgrade" && (
+                            <Badge variant="outline" className="text-blue-700 border-blue-300 bg-blue-50 text-[10px]" data-testid={`status-upgrade-${row.rowIndex}`}>
+                              Hochstufen
+                            </Badge>
+                          )}
+                          {row.status === "beyond_cutoff" && (
+                            <Badge variant="outline" className="text-slate-600 border-slate-300 bg-slate-50 text-[10px]" data-testid={`status-beyond-cutoff-${row.rowIndex}`}>
+                              Cutoff-geschützt
+                            </Badge>
+                          )}
                           {row.status === "error" && (
                             <Badge variant="destructive" className="text-[10px]" data-testid={`status-error-${row.rowIndex}`}>
                               Fehler
@@ -383,7 +430,9 @@ export default function ImportAppointmentsPage() {
                           )}
                         </td>
                         <td className="p-2">
-                          {row.status !== "error" || hasEmployeeError ? (
+                          {row.status === "beyond_cutoff" ? (
+                            <span className="text-slate-400 text-[10px]">Cutoff</span>
+                          ) : row.status !== "error" || hasEmployeeError ? (
                             <Select
                               value={action}
                               onValueChange={(val: string) => {
@@ -399,6 +448,7 @@ export default function ImportAppointmentsPage() {
                                 <SelectItem value="skip">Überspringen</SelectItem>
                                 <SelectItem value="import">Importieren</SelectItem>
                                 {row.status === "duplicate" && <SelectItem value="update">Aktualisieren</SelectItem>}
+                                {row.status === "upgrade" && <SelectItem value="upgrade">Hochstufen</SelectItem>}
                               </SelectContent>
                             </Select>
                           ) : (
@@ -566,6 +616,18 @@ export default function ImportAppointmentsPage() {
                   <div className="font-medium text-blue-800">Aktualisiert</div>
                   <div className="text-2xl font-bold text-blue-700">{importResult.updated}</div>
                 </div>
+                {importResult.upgraded > 0 && (
+                  <div className="p-3 rounded bg-purple-50 border border-purple-200" data-testid="text-result-upgraded">
+                    <div className="font-medium text-purple-800">Upgegradet</div>
+                    <div className="text-2xl font-bold text-purple-700">{importResult.upgraded}</div>
+                  </div>
+                )}
+                {importResult.cutoffProtected > 0 && (
+                  <div className="p-3 rounded bg-amber-50 border border-amber-200" data-testid="text-result-cutoff-protected">
+                    <div className="font-medium text-amber-800">Cutoff-geschützt</div>
+                    <div className="text-2xl font-bold text-amber-700">{importResult.cutoffProtected}</div>
+                  </div>
+                )}
                 <div className="p-3 rounded bg-gray-50 border border-gray-200" data-testid="text-result-skipped">
                   <div className="font-medium text-gray-600">Übersprungen</div>
                   <div className="text-2xl font-bold text-gray-500">{importResult.skipped}</div>

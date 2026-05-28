@@ -29,6 +29,13 @@ export const REBOOK_TRIGGERS = {
   import: {
     update: "appointment_import:update",
     backfill: "appointment_import:backfill",
+    /**
+     * Task #708 — Excel-Import hebt einen bisher nur geplanten
+     * (`status='scheduled'`) Termin auf `completed` an und legt die
+     * fehlende Budget-Consumption an (kein Storno+Neuanlage, sondern
+     * Ersterfassung).
+     */
+    upgrade: "appointment_import:upgrade",
   },
   reconcile: {
     driftAudit: "appointment_reconcile:drift-audit",

@@ -11,6 +11,8 @@ import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { auditService } from "./audit";
 import { isWeekend } from "@shared/utils/datetime";
 import { appointmentsRepo, customersRepo } from "../repos";
+import { excelServiceArtToCategory, isHauswirtschaftArt } from "@shared/domain/excel-service-art";
+import { computeLastExcelMonth, isBeyondCutoff, type ExcelCutoff } from "@shared/domain/import-cutoff";
 
 interface ImportRow {
   rowIndex: number;
@@ -57,7 +59,7 @@ export interface MatchedRow extends ImportRow {
   employeeId: number | null;
   serviceId: number | null;
   budgetTypeKey: string | null;
-  status: "new" | "duplicate" | "error";
+  status: "new" | "duplicate" | "upgrade" | "beyond_cutoff" | "error";
   errors: string[];
   existingAppointmentId: number | null;
   differences: string[];
@@ -67,7 +69,7 @@ export interface MatchedRow extends ImportRow {
 }
 
 interface ImportAction {
-  action: "import" | "update" | "skip";
+  action: "import" | "update" | "upgrade" | "skip";
   rowIndex: number;
   employeeIdOverride?: number;
 }
@@ -75,8 +77,12 @@ interface ImportAction {
 interface ImportResult {
   imported: number;
   updated: number;
+  /** Task #708: upgegradete bisher nur geplante Termine. */
+  upgraded: number;
   skipped: number;
   trimmed: number;
+  /** Task #708: durch Cutoff-Schutz blockierte Mutationen. */
+  cutoffProtected: number;
   errors: { rowIndex: number; error: string }[];
 }
 
@@ -295,6 +301,8 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       customerKilometers: appointments.customerKilometers,
       assignedEmployeeId: appointments.assignedEmployeeId,
       notes: appointments.notes,
+      status: appointments.status,
+      signedAt: appointments.signedAt,
     }, db)
     .where(
       and(
@@ -384,6 +392,13 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
     apptIndex.set(key, a);
   }
 
+  // Task #708: Cutoff = letzter Tag des größten YYYY-MM aus der Excel-Datei.
+  // Termine NACH dem Cutoff (z. B. Folgemonat) dürfen vom Re-Import
+  // niemals angefasst werden, weil sie in der Excel-Quelle noch nicht
+  // dokumentiert sind — sonst löscht ein Re-Import frisch geplante,
+  // noch nicht durchgeführte Termine.
+  const cutoff = computeLastExcelMonth(rows.map((r) => r.date));
+
   return rows.map((row) => {
     const errors: string[] = [];
     const differences: string[] = [];
@@ -400,7 +415,12 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       errors.push(`Mitarbeiter nicht gefunden: ${row.employeeName}`);
     }
 
-    const serviceKey = row.serviceType.toLowerCase();
+    // Task #708: Service-Lookup geht über die zentrale Excel-Art-Map,
+    // damit auch Kürzel ("HW"/"AB") und gemischte Schreibweisen einen
+    // serviceId-Treffer ergeben. Fallback auf den rohen Lowercase-Code
+    // erhält Rückwärtskompatibilität für nicht-Art-Spalten.
+    const centralServiceKey = excelServiceArtToCategory(row.serviceType);
+    const serviceKey = centralServiceKey ?? row.serviceType.toLowerCase();
     const serviceId = serviceMap[serviceKey] ?? null;
     if (!serviceId) {
       errors.push(`Service unbekannt: ${row.serviceType}`);
@@ -429,7 +449,14 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       const dupKey = `${customerId}|${row.date}|${row.startTime}`;
       const existing = apptIndex.get(dupKey);
       if (existing) {
-        status = "duplicate";
+        // Task #708: Geplante (`scheduled`) und nicht-unterschriebene
+        // Termine sind keine echten Duplikate — die Excel-Doku ist die
+        // verbindliche Quelle und hebt sie via "upgrade"-Aktion auf
+        // `completed` an. Bereits unterschriebene oder anders abgeschlossene
+        // Termine bleiben "duplicate" (nur Felder-Drift möglich).
+        const isUpgradable =
+          existing.status === "scheduled" && existing.signedAt == null;
+        status = isUpgradable ? "upgrade" : "duplicate";
         existingAppointmentId = existing.id;
         diff = {};
 
@@ -441,7 +468,8 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
         }
 
         // Service-Art (Excel: "Hauswirtschaft"/"Alltagsbegleitung" → code-lower)
-        const excelServiceCode = row.serviceType.toLowerCase();
+        const excelCat = excelServiceArtToCategory(row.serviceType);
+        const excelServiceCode = excelCat ?? row.serviceType.toLowerCase();
         const apptSvcs = apptServicesMap.get(existing.id) ?? [];
         // Bei mehreren Service-Zeilen: kategorisch dominierende Art heranziehen
         let dbServiceCode: string | null = null;
@@ -496,6 +524,15 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       }
     }
 
+    // Task #708: Cutoff-Schutz nach Status-Bestimmung — egal ob `new`,
+    // `duplicate` oder `upgrade`: Termine jenseits des Excel-Cutoffs
+    // werden nicht angefasst. Fehler-Zeilen bleiben Fehler (man muss sie
+    // sehen können). Reihenfolge in der UI: cutoff überlagert alles
+    // außer error.
+    if (status !== "error" && row.date && cutoff && isBeyondCutoff(row.date, cutoff)) {
+      status = "beyond_cutoff";
+    }
+
     return {
       ...row,
       customerId,
@@ -525,7 +562,7 @@ async function computeVerifiedTrimmedMinutes(
   date: string,
   availableCents: number,
 ): Promise<number> {
-  const isHauswirtschaft = serviceType.toLowerCase() === "hauswirtschaft";
+  const isHauswirtschaft = isHauswirtschaftArt(serviceType);
 
   const fullCosts = await calculateAppointmentCost({
     customerId,
@@ -596,7 +633,7 @@ export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
     if (privatePaymentMap.get(row.customerId)) continue;
 
     try {
-      const isHauswirtschaft = row.serviceType.toLowerCase() === "hauswirtschaft";
+      const isHauswirtschaft = isHauswirtschaftArt(row.serviceType);
       const costs = await calculateAppointmentCost({
         customerId: row.customerId,
         hauswirtschaftMinutes: isHauswirtschaft ? row.durationMinutes : 0,
@@ -673,7 +710,7 @@ async function importSingleRow(
       details: `Import: ${row.serviceType}`,
     });
 
-    const isHauswirtschaft = row.serviceType.toLowerCase() === "hauswirtschaft";
+    const isHauswirtschaft = isHauswirtschaftArt(row.serviceType);
     const hwMinutes = isHauswirtschaft ? durationMinutes : 0;
     const abMinutes = isHauswirtschaft ? 0 : durationMinutes;
 
@@ -696,19 +733,48 @@ async function importSingleRow(
 export async function executeImport(
   matchedRows: MatchedRow[],
   actions: ImportAction[],
-  userId: number
+  userId: number,
+  /**
+   * Task #708: Optionaler expliziter Excel-Cutoff. Falls gesetzt, wird er
+   * als harte obere Grenze über `matchedRows` hinweg verwendet —
+   * unabhängig davon, ob der Client zusätzliche Zeilen jenseits des
+   * ursprünglichen Excel-Bereichs einschmuggelt. Fallback: aus
+   * `matchedRows.date` ableiten (legacy Default).
+   */
+  excelCutoff?: ExcelCutoff | null,
 ): Promise<ImportResult> {
-  const result: ImportResult = { imported: 0, updated: 0, skipped: 0, trimmed: 0, errors: [] };
+  const result: ImportResult = { imported: 0, updated: 0, upgraded: 0, skipped: 0, trimmed: 0, cutoffProtected: 0, errors: [] };
 
   const actionMap = new Map<number, ImportAction>();
   for (const a of actions) {
     actionMap.set(a.rowIndex, a);
   }
 
+  // Task #708: Defense-in-depth — Cutoff aus den preview-matched Zeilen
+  // erneut berechnen und JEDE Mutation (Import/Update/Upgrade) jenseits
+  // davon hart blockieren, selbst wenn der Client ein passendes Action-
+  // Objekt schickt. Die Zeilen sind in `matchRows` schon mit
+  // `beyond_cutoff` getaggt, aber ein manipulierter Client könnte den
+  // Status umgehen. Wenn `excelCutoff` explizit übergeben wurde, hat das
+  // Vorrang — sonst Fallback auf Ableitung aus den matchedRows selbst.
+  const executeCutoff =
+    excelCutoff !== undefined
+      ? excelCutoff
+      : computeLastExcelMonth(matchedRows.map((r) => r.date));
+
   for (const row of matchedRows) {
     const action = actionMap.get(row.rowIndex);
     if (!action || action.action === "skip") {
       result.skipped++;
+      continue;
+    }
+
+    // Task #708: Cutoff-Schutz — Termine nach Cutoff werden NIE angefasst.
+    if (
+      (row.status === "beyond_cutoff") ||
+      (executeCutoff && row.date && isBeyondCutoff(row.date, executeCutoff))
+    ) {
+      result.cutoffProtected++;
       continue;
     }
 
@@ -888,6 +954,128 @@ export async function executeImport(
         }
 
         result.updated++;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result.errors.push({ rowIndex: row.rowIndex, error: msg });
+      }
+    }
+
+    // Task #708: Upgrade-Pfad — bisher nur geplanter Termin wird auf
+    // `completed` angehoben, actualStart/actualEnd/signedAt nachgetragen,
+    // Service-Zuordnung anhand Excel ersetzt und die Budget-Consumption
+    // erstmalig gebucht (KEIN Rebook — vorher gab es keine Consumption).
+    if (action.action === "upgrade" && row.existingAppointmentId) {
+      const appointmentId = row.existingAppointmentId;
+
+      if (!row.customerId || !effectiveEmployeeId || !row.serviceId) {
+        result.errors.push({ rowIndex: row.rowIndex, error: "Fehlende IDs für Upgrade" });
+        continue;
+      }
+
+      try {
+        const [beforeAppt] = await appointmentsRepo
+          .selectColumnsFrom({
+            status: appointments.status,
+            signedAt: appointments.signedAt,
+            assignedEmployeeId: appointments.assignedEmployeeId,
+            scheduledEnd: appointments.scheduledEnd,
+            durationPromised: appointments.durationPromised,
+            travelKilometers: appointments.travelKilometers,
+          })
+          .where(and(eq(appointments.id, appointmentId), appointmentsRepo.activeOnly()))
+          .limit(1);
+
+        if (!beforeAppt) {
+          result.errors.push({
+            rowIndex: row.rowIndex,
+            error: `Termin #${appointmentId} ist nicht mehr aktiv — Upgrade übersprungen.`,
+          });
+          continue;
+        }
+
+        // Defense-in-Depth: wenn der Termin in der Zwischenzeit doch
+        // unterschrieben oder anderweitig abgeschlossen wurde, nicht
+        // mehr upgraden (Idempotenz / Race-Schutz).
+        if (beforeAppt.status !== "scheduled" || beforeAppt.signedAt != null) {
+          result.skipped++;
+          continue;
+        }
+
+        const scheduledEnd = row.endTime || row.startTime;
+        const isHauswirtschaft = isHauswirtschaftArt(row.serviceType);
+        const hwMinutes = isHauswirtschaft ? row.durationMinutes : 0;
+        const abMinutes = isHauswirtschaft ? 0 : row.durationMinutes;
+        const signedAt = new Date();
+
+        await db.transaction(async (tx) => {
+          await tx
+            .update(appointments)
+            .set({
+              status: "completed",
+              actualStart: row.startTime,
+              actualEnd: row.endTime || null,
+              scheduledEnd,
+              durationPromised: row.durationMinutes,
+              assignedEmployeeId: effectiveEmployeeId,
+              performedByEmployeeId: effectiveEmployeeId,
+              travelKilometers: row.kilometers,
+              signedAt,
+              signedByUserId: userId,
+              notes: "Import-Upgrade aus Altdaten",
+            })
+            .where(eq(appointments.id, appointmentId));
+
+          await tx
+            .delete(appointmentServices)
+            .where(eq(appointmentServices.appointmentId, appointmentId));
+          await tx.insert(appointmentServices).values({
+            appointmentId,
+            serviceId: row.serviceId!,
+            plannedDurationMinutes: row.durationMinutes,
+            actualDurationMinutes: row.durationMinutes,
+            details: `Import-Upgrade: ${row.serviceType}`,
+          });
+
+          await budgetLedgerStorage.createConsumptionTransaction(
+            {
+              customerId: row.customerId!,
+              appointmentId,
+              transactionDate: row.date,
+              hauswirtschaftMinutes: hwMinutes,
+              alltagsbegleitungMinutes: abMinutes,
+              travelKilometers: row.kilometers,
+              customerKilometers: 0,
+              userId,
+            },
+            tx,
+          );
+        });
+
+        await auditService.log(
+          userId,
+          "appointment_km_rebooked",
+          "appointment",
+          appointmentId,
+          {
+            customerId: row.customerId,
+            trigger: REBOOK_TRIGGERS.import.upgrade,
+            previousStatus: beforeAppt.status,
+            newStatus: "completed",
+            actualStart: row.startTime,
+            actualEnd: row.endTime ?? null,
+            signedAt: signedAt.toISOString(),
+            hauswirtschaftMinutes: hwMinutes,
+            alltagsbegleitungMinutes: abMinutes,
+            travelKilometers: row.kilometers,
+            previousTravelKm: beforeAppt.travelKilometers ?? 0,
+            previousAssignedEmployeeId: beforeAppt.assignedEmployeeId ?? null,
+            newAssignedEmployeeId: effectiveEmployeeId,
+            previousDurationMinutes: beforeAppt.durationPromised ?? 0,
+            newDurationMinutes: row.durationMinutes,
+          },
+        );
+
+        result.upgraded++;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         result.errors.push({ rowIndex: row.rowIndex, error: msg });
