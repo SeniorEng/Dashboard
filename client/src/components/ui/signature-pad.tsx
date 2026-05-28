@@ -2,11 +2,45 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import SignatureCanvas from "react-signature-canvas";
 import { Button } from "./button";
 import { Card, CardContent } from "./card";
-import { Eraser, Check, X, Pen } from "lucide-react";
+import { Eraser, Check, X, Pen, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface SignatureMetadata {
   location?: { lat: number; lng: number };
+}
+
+/**
+ * Task #752 — Mindestanzahl sichtbarer (nicht voll-transparenter) Pixel,
+ * die wir als „echte Tinte auf dem Canvas" akzeptieren. Spiegelt die
+ * Server-Heuristik aus `server/lib/signature-validation.ts`
+ * (`MIN_SIGNATURE_INK_BYTES = 50`) wider: weniger Pixel ⇒ Canvas wirkt
+ * leer und wir wollen den Server-Roundtrip mit `EMPTY_SIGNATURE` gar
+ * nicht erst provozieren.
+ */
+export const MIN_SIGNATURE_INK_PIXELS = 50;
+
+/**
+ * Zählt Pixel mit Alpha > 0 auf einem Canvas. Wird sowohl reaktiv beim
+ * Stroke-Ende verwendet (Button-Disable + Inline-Warnung) als auch
+ * defensiv kurz vor `onSave`. Liefert 0 zurück, wenn `getImageData`
+ * fehlschlägt (z.B. ohne 2D-Kontext im Test-Env) — der Save-Pfad
+ * behandelt 0 wie „leer".
+ */
+export function countSignatureInkPixels(canvas: HTMLCanvasElement | null | undefined): number {
+  if (!canvas) return 0;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return 0;
+  let data: Uint8ClampedArray;
+  try {
+    data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] > 0) count++;
+  }
+  return count;
 }
 
 interface SignaturePadProps {
@@ -30,8 +64,18 @@ export function SignaturePad({
   const signatureRef = useRef<SignatureCanvas>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(true);
+  const [hasEnoughInk, setHasEnoughInk] = useState(false);
+  const [showEmptyWarning, setShowEmptyWarning] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 300, height: 300 });
   const locationRef = useRef<{ lat: number; lng: number } | undefined>(undefined);
+
+  const recomputeInk = useCallback(() => {
+    const canvas = signatureRef.current?.getCanvas();
+    const pixels = countSignatureInkPixels(canvas);
+    const enough = pixels >= MIN_SIGNATURE_INK_PIXELS;
+    setHasEnoughInk(enough);
+    if (enough) setShowEmptyWarning(false);
+  }, []);
 
   const updateCanvasSize = useCallback(() => {
     if (!isFullscreen || !canvasContainerRef.current) return;
@@ -75,35 +119,54 @@ export function SignaturePad({
   const handleClear = () => {
     signatureRef.current?.clear();
     setIsEmpty(true);
+    setHasEnoughInk(false);
+    setShowEmptyWarning(false);
   };
 
   const handleSave = () => {
-    if (signatureRef.current && !isEmpty) {
-      const canvas = signatureRef.current.getCanvas();
-      const dataUrl = canvas.toDataURL("image/png");
-      setIsFullscreen(false);
-      const metadata: SignatureMetadata = {};
-      if (locationRef.current) {
-        metadata.location = locationRef.current;
-      }
-      onSave(dataUrl, Object.keys(metadata).length > 0 ? metadata : undefined);
+    if (!signatureRef.current) return;
+    const canvas = signatureRef.current.getCanvas();
+    const inkPixels = countSignatureInkPixels(canvas);
+    if (inkPixels < MIN_SIGNATURE_INK_PIXELS) {
+      // Task #752 — Spiegelt die Server-Validierung (EMPTY_SIGNATURE).
+      // Statt einen 400-Roundtrip zu provozieren, blockieren wir hier
+      // direkt und zeigen eine deutsche Inline-Warnung.
+      setHasEnoughInk(false);
+      setShowEmptyWarning(true);
+      return;
     }
+    const dataUrl = canvas.toDataURL("image/png");
+    setIsFullscreen(false);
+    const metadata: SignatureMetadata = {};
+    if (locationRef.current) {
+      metadata.location = locationRef.current;
+    }
+    onSave(dataUrl, Object.keys(metadata).length > 0 ? metadata : undefined);
   };
 
   const handleClose = () => {
     setIsFullscreen(false);
     setIsEmpty(true);
+    setHasEnoughInk(false);
+    setShowEmptyWarning(false);
     signatureRef.current?.clear();
     onCancel?.();
   };
 
   const handleBegin = () => {
     setIsEmpty(false);
+    setShowEmptyWarning(false);
+  };
+
+  const handleEnd = () => {
+    recomputeInk();
   };
 
   const openFullscreen = () => {
     if (!disabled) {
       setIsEmpty(true);
+      setHasEnoughInk(false);
+      setShowEmptyWarning(false);
       locationRef.current = undefined;
       setIsFullscreen(true);
       if (navigator.geolocation) {
@@ -162,6 +225,7 @@ export function SignaturePad({
               style: { touchAction: "none" },
             }}
             onBegin={handleBegin}
+            onEnd={handleEnd}
           />
 
           <div className="absolute left-6 right-6 bottom-[30%] border-b-2 border-gray-300 pointer-events-none" />
@@ -180,6 +244,16 @@ export function SignaturePad({
         </div>
 
         <div className="shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-4 pb-safe">
+          {showEmptyWarning && (
+            <div
+              className="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+              role="alert"
+              data-testid="warning-empty-signature"
+            >
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>Bitte zuerst auf der Fläche unterschreiben.</span>
+            </div>
+          )}
           <div className="flex gap-3">
             <Button
               type="button"
@@ -195,7 +269,7 @@ export function SignaturePad({
             <Button
               type="button"
               onClick={handleSave}
-              disabled={isEmpty}
+              disabled={isEmpty || !hasEnoughInk}
               className="flex-1 min-h-[52px] text-base font-semibold px-5"
               data-testid="button-save-signature"
             >
