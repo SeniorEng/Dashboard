@@ -14,6 +14,7 @@ import {
   deactivateEmployee,
   documentAppointment,
   getServiceIdByCode,
+  validSignatureDataUrl,
   type TestCustomer,
 } from "../helpers/test-data";
 
@@ -68,7 +69,7 @@ async function createSignedServiceRecord(
   for (const signerType of ["employee", "customer"] as const) {
     const r = await apiPost(s, `/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     if (r.status !== 200) {
       throw new Error(
@@ -217,8 +218,12 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
         page.locator(`[data-testid='generate-all-result-${kasse.customer.id}']`),
       ).toHaveCount(0);
 
-      // Dialog schließen, damit Rechnungs-Karten klickbar sind.
-      await page.keyboard.press("Escape");
+      // Dialog schließen, damit Rechnungs-Karten klickbar sind. Escape ist
+      // in diesem Dialog nicht zuverlässig (Focus liegt nach dem disabled
+      // confirm-Button nicht mehr im DialogContent), daher explizit den
+      // „Schließen"-Footer-Button klicken.
+      await page.getByRole("button", { name: "Schließen", exact: true }).first().click();
+      await expect(page.locator("[data-testid='generate-all-summary']")).toHaveCount(0);
 
       // 3) Rechnungen müssen jetzt in der UI-Liste erscheinen (Task #540 —
       //    die Generate-All-Mutation pollt nach dem Insert bis die neuen

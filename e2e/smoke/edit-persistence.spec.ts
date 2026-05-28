@@ -15,6 +15,7 @@ import {
   createSingleServiceRecord,
   deactivateEmployee,
   getServiceIdByCode,
+  validSignatureDataUrl,
 } from "../helpers/test-data";
 import {
   clickSaveAndWait,
@@ -619,7 +620,7 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
           session,
           `/api/service-records/${sr.id}/sign`,
           {
-            signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+            signatureData: validSignatureDataUrl(),
             signerType: "employee",
             signingLocation: "Test-Smoke",
           },
@@ -873,8 +874,7 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
           session,
           `/api/service-records/${sr.id}/sign`,
           {
-            signatureData:
-              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+            signatureData: validSignatureDataUrl(),
             signerType: "employee",
             signingLocation: "Test-Smoke",
           },
