@@ -21,3 +21,6 @@ playwright-report/
 # Stryker mutation testing (Task #770)
 reports/
 .stryker-tmp/
+
+# Coverage-Gate-Artefakte (generiert via script/coverage-gate.ts)
+coverage/
