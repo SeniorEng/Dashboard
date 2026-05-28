@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "./helpers/valid-signature";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
@@ -184,7 +185,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
     expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
 
     const res = await apiPost<any>(`/api/service-records/${serviceRecordId}/sign`, {
-      signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      signatureData: validSignatureDataUrl(),
       signerType: "customer",
       signingLocation: "Vor Ort",
     });
@@ -195,7 +196,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
     expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
 
     const res = await apiPost<any>(`/api/service-records/${serviceRecordId}/sign`, {
-      signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      signatureData: validSignatureDataUrl(),
       signerType: "employee",
       signingLocation: "Vor Ort",
     });
@@ -209,7 +210,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
     expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
 
     const res = await apiPost<any>(`/api/service-records/${serviceRecordId}/sign`, {
-      signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      signatureData: validSignatureDataUrl(),
       signerType: "employee",
       signingLocation: "Vor Ort",
     });
@@ -220,7 +221,7 @@ describe("LN-3: Einzeltermin-Leistungsnachweis erstellen & unterschreiben", () =
     expect(serviceRecordId, "serviceRecordId muss gesetzt sein").toBeTruthy();
 
     const res = await apiPost<any>(`/api/service-records/${serviceRecordId}/sign`, {
-      signatureData: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      signatureData: validSignatureDataUrl(),
       signerType: "customer",
       signingLocation: "Vor Ort",
     });

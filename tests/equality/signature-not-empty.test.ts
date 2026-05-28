@@ -20,7 +20,6 @@
  */
 
 import { describe, it, expect } from "vitest";
-import zlib from "node:zlib";
 import {
   analyzeSignatureImage,
   isSignatureImageMeaningful,
@@ -29,35 +28,7 @@ import {
   generateLeistungsnachweisHtml,
   type InvoicePdfData,
 } from "../../server/lib/pdf-generator";
-
-function buildPng(width: number, height: number, fillAlpha: boolean): string {
-  const bpp = 4;
-  const rowSize = 1 + width * bpp;
-  const raw = Buffer.alloc(rowSize * height);
-  if (fillAlpha) {
-    for (let y = 0; y < height; y++) {
-      const off = y * rowSize;
-      raw[off] = 0;
-      for (let x = 0; x < width; x++) {
-        const p = off + 1 + x * bpp;
-        raw[p + 3] = 255;
-      }
-    }
-  }
-  const idat = zlib.deflateSync(raw);
-  function chunk(type: string, data: Buffer): Buffer {
-    const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0);
-    const crc = Buffer.alloc(4); crc.writeUInt32BE(0, 0);
-    return Buffer.concat([len, Buffer.from(type, "ascii"), data, crc]);
-  }
-  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; ihdr[9] = 6;
-  const png = Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0))]);
-  return `data:image/png;base64,${png.toString("base64")}`;
-}
+import { buildPng } from "../helpers/valid-signature";
 
 const EMPTY_SIG = buildPng(600, 200, false);
 const REAL_SIG = buildPng(600, 200, true);

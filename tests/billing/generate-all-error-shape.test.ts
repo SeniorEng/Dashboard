@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Task #586 — Massenerstellung HTTP 500 reproduzieren und absichern.
  *
@@ -82,7 +83,7 @@ beforeAll(async () => {
   for (const signerType of ["employee", "customer"] as const) {
     const sig = await apiPost<any>(`/api/service-records/${srRes.data.id}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     expect(sig.status).toBe(200);
   }

@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Phase-2 Bug-Tests — PDF-Hash bei Rechnungs-Generierung
  *
@@ -126,7 +127,7 @@ describe("PDF-Hash — invoices.pdf_hash wird bei Generierung befüllt", () => {
     for (const signerType of ["employee", "customer"] as const) {
       const sig = await apiPost<any>(`/api/service-records/${sr.data.id}/sign`, {
         signerType,
-        signatureData: "data:image/png;base64,iVBORw0KGgo=",
+        signatureData: validSignatureDataUrl(),
       });
       expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
     }

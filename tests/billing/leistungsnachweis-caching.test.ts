@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Task #521 — LN-PDF-Caching analog zum Rechnungs-PDF-Cache.
  *
@@ -99,7 +100,7 @@ beforeAll(async () => {
   for (const signerType of ["employee", "customer"] as const) {
     const sig = await apiPost<any>(`/api/service-records/${sr.data.id}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     if (sig.status !== 200) throw new Error(`sign(${signerType}) failed: ${JSON.stringify(sig.data)}`);
   }

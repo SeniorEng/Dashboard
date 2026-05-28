@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "./helpers/valid-signature";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
@@ -232,7 +233,7 @@ async function createServiceRecord(customerId: number, year: number, month: numb
 async function signServiceRecord(recordId: number): Promise<void> {
   const empSignRes = await apiPost<any>(`/api/service-records/${recordId}/sign`, {
     signerType: "employee",
-    signatureData: "data:image/png;base64,iVBORw0KGgo=",
+    signatureData: validSignatureDataUrl(),
   });
   if (empSignRes.status !== 200) {
     console.error(`Employee sign failed:`, JSON.stringify(empSignRes.data));
@@ -242,7 +243,7 @@ async function signServiceRecord(recordId: number): Promise<void> {
 
   const custSignRes = await apiPost<any>(`/api/service-records/${recordId}/sign`, {
     signerType: "customer",
-    signatureData: "data:image/png;base64,iVBORw0KGgo=",
+    signatureData: validSignatureDataUrl(),
   });
   if (custSignRes.status !== 200) {
     console.error(`Customer sign failed:`, JSON.stringify(custSignRes.data));

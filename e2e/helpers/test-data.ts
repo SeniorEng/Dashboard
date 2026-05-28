@@ -1,53 +1,9 @@
 import { apiPost, apiPatch, type ApiSession } from "./auth";
-import zlib from "node:zlib";
 
-/**
- * Erzeugt eine "echte" PNG-Unterschrift als data-URL, die den Server-
- * seitigen Validator (`server/lib/signature-validation.ts`) passiert:
- * >= 40×20 px, RGBA mit Alpha=255 (also "Tinte auf Leinwand"),
- * dekodiert >= 250 Bytes, inflated >= 50 Non-Zero-Bytes. Reicht für alle
- * E2E-Setup-Pfade, die einen LN signieren müssen — Task #758.
- *
- * CRC-Felder werden mit Nullen gefüllt; der Validator prüft nur die
- * IHDR/IDAT-Chunk-Längen und entpackt IDAT, validiert aber keine CRCs.
- */
-let cachedSignature: string | null = null;
-export function validSignatureDataUrl(): string {
-  if (cachedSignature) return cachedSignature;
-  const width = 600;
-  const height = 200;
-  const bpp = 4;
-  const rowSize = 1 + width * bpp;
-  const raw = Buffer.alloc(rowSize * height);
-  for (let y = 0; y < height; y++) {
-    const off = y * rowSize;
-    raw[off] = 0;
-    for (let x = 0; x < width; x++) {
-      raw[off + 1 + x * bpp + 3] = 255;
-    }
-  }
-  const idat = zlib.deflateSync(raw);
-  function chunk(type: string, data: Buffer): Buffer {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length, 0);
-    const crc = Buffer.alloc(4);
-    return Buffer.concat([len, Buffer.from(type, "ascii"), data, crc]);
-  }
-  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 6;
-  const png = Buffer.concat([
-    sig,
-    chunk("IHDR", ihdr),
-    chunk("IDAT", idat),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-  cachedSignature = `data:image/png;base64,${png.toString("base64")}`;
-  return cachedSignature;
-}
+// Re-export aus dem zentralen Helper (Task #763). KEINE eigene PNG-Konstante
+// hier definieren — siehe `tests/helpers/valid-signature.ts` und
+// `tests/README.md` ("Test-Unterschriften").
+export { validSignatureDataUrl } from "../../tests/helpers/valid-signature";
 
 interface ServiceCatalogEntry {
   id: number;

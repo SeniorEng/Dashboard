@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Phase-2 Bug-Tests — LN-Sign-Tx: signServiceRecord muss transaktional sein
  *
@@ -157,7 +158,7 @@ describe("LN-Sign-Tx — signServiceRecord ist transaktional", () => {
         await expect(
           srStorage.signServiceRecord(
             serviceRecordId,
-            "data:image/png;base64,iVBORw0KGgo=",
+            validSignatureDataUrl(),
             "employee",
             auth.user.id,
             "127.0.0.1",

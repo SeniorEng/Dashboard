@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Phase-2 Bug-Tests — K8: Termin-Lock nach LN-Sign
  *
@@ -108,7 +109,7 @@ async function createAndSignServiceRecord(customerId: number, year: number, mont
   for (const signerType of ["employee", "customer"] as const) {
     const sigRes = await apiPost<any>(`/api/service-records/${res.data.id}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     if (sigRes.status !== 200) throw new Error(`SR sign(${signerType}) failed: ${sigRes.status} ${JSON.stringify(sigRes.data)}`);
   }

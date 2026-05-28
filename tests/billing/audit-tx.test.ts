@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Task #444 — Transaktions-bewusster Audit-Wrapper (Pilot Billing)
  *
@@ -124,7 +125,7 @@ async function createSignedSr(scenario: BudgetScenarioHandle): Promise<{ year: n
   for (const signerType of ["employee", "customer"] as const) {
     const sig = await apiPost<any>(`/api/service-records/${srRes.data.id}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     expect(sig.status).toBe(200);
   }

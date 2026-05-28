@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "./helpers/valid-signature";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
@@ -460,7 +461,7 @@ describe("FD-LN: Fahrtdienst → Leistungsnachweis", () => {
   it("FD-5.3 – Mitarbeiter-Unterschrift setzt Status auf employee_signed", async () => {
     const res = await apiPost<any>(`/api/service-records/${lnServiceRecordId}/sign`, {
       signerType: "employee",
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     expect(res.status).toBe(200);
     expect(res.data.status).toBe("employee_signed");
@@ -469,7 +470,7 @@ describe("FD-LN: Fahrtdienst → Leistungsnachweis", () => {
   it("FD-5.4 – Kunden-Unterschrift setzt Status auf completed", async () => {
     const res = await apiPost<any>(`/api/service-records/${lnServiceRecordId}/sign`, {
       signerType: "customer",
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     expect(res.status).toBe(200);
     expect(res.data.status).toBe("completed");
@@ -537,13 +538,13 @@ describe("FD-BILLING: Fahrtdienst → Rechnung", () => {
 
     const empSign = await apiPost<any>(`/api/service-records/${billServiceRecordId}/sign`, {
       signerType: "employee",
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     expect(empSign.status).toBe(200);
 
     const custSign = await apiPost<any>(`/api/service-records/${billServiceRecordId}/sign`, {
       signerType: "customer",
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     expect(custSign.status).toBe(200);
   });

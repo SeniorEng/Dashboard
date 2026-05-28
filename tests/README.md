@@ -61,6 +61,38 @@ npx vitest run tests/customers.test.ts
 | `public-signing.test.ts` | Digitale Unterschrift | Token-Validierung, Signatur (öffentlich) | 4 |
 | `statistics.test.ts` | Statistik/Cockpit | Overview, Trends, Budget, Margen | 6 |
 
+## Test-Unterschriften: zentralen Helper benutzen (Task #763)
+
+Für ALLE Tests, die einen Leistungsnachweis, Service-Record oder sonst eine
+Signatur über `POST /api/service-records/:id/sign` o.ä. setzen, ist
+`tests/helpers/valid-signature.ts` die **einzige** Quelle für gültige
+Test-PNGs:
+
+```ts
+import { validSignatureDataUrl } from "../helpers/valid-signature";
+// ...
+await apiPost(`/api/service-records/${id}/sign`, {
+  signerType: "employee",
+  signatureData: validSignatureDataUrl(),
+});
+```
+
+E2E-Tests unter `e2e/` greifen über `e2e/helpers/test-data.ts` auf denselben
+Helper zu — `test-data.ts` re-exportiert `validSignatureDataUrl` aus
+`tests/helpers/valid-signature.ts`, sodass es nur eine Quelle gibt.
+
+**KEINE eigenen PNG-Konstanten** (z.B. `"data:image/png;base64,iVBORw0KGgo="`)
+mehr in Tests anlegen. Hintergrund: nach Task #749 prüft
+`server/lib/signature-validation.ts` Mindestgröße (≥ 40×20 px), Mindest-
+Bytecount und ob überhaupt sichtbare Pixel (Alpha > 0) vorhanden sind — die
+früher überall kopierten 1×1-PNGs werden hart abgelehnt und Tests brachen
+wellenartig, sobald die Validator-Regeln nachgezogen wurden. Mit dem
+zentralen Helper muss die Anpassung nur an einer einzigen Stelle erfolgen.
+
+Wer einen leeren / „transparenten" Canvas zum Testen der Reject-Pfade
+braucht, nutzt direkt `buildPng(width, height, false)` aus demselben Modul
+(siehe `tests/equality/signature-not-empty.test.ts`).
+
 ## ZUGFeRD-Persistenz-Test gegen Drift-Repair gehärtet (Task #589)
 
 `tests/billing/zugferd-persistence.test.ts` ruft vor jedem

@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Task #559 — Send-Pfad bricht bei ZUGFeRD-Einbettungsfehler sauber ab.
  *
@@ -195,7 +196,7 @@ describe("Task #559 — Send-Pfad bricht bei ZUGFeRD-Fehler sauber ab", () => {
     for (const signerType of ["employee", "customer"] as const) {
       const sig = await apiPost<any>(`/api/service-records/${srRes.data.id}/sign`, {
         signerType,
-        signatureData: "data:image/png;base64,iVBORw0KGgo=",
+        signatureData: validSignatureDataUrl(),
       });
       expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
     }

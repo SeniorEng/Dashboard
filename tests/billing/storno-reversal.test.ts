@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Phase-2 Bug-Tests — K2: Storno mit Budget-Reversal
  *
@@ -107,7 +108,7 @@ describe("K2 — Storno reversiert §45b-Budget-Transaktionen", () => {
     for (const signerType of ["employee", "customer"] as const) {
       const sig = await apiPost<any>(`/api/service-records/${srRes.data.id}/sign`, {
         signerType,
-        signatureData: "data:image/png;base64,iVBORw0KGgo=",
+        signatureData: validSignatureDataUrl(),
       });
       expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
     }

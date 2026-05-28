@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Task #576 — Regressionstest: Storno darf den zugehörigen
  * Leistungsnachweis NICHT soft-löschen.
@@ -99,7 +100,7 @@ async function createAndSignSr(custId: number, year: number, month: number): Pro
   for (const signerType of ["employee", "customer"] as const) {
     const sig = await apiPost<any>(`/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     if (sig.status !== 200) throw new Error(`SR sign(${signerType}): ${JSON.stringify(sig.data)}`);
   }

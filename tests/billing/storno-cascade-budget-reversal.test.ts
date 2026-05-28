@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Task #788 — Storno reversiert das Budget vollständig über den ECHTEN
  * Rechnungs-Flow (Multi-Topf-Split + Cascade-Storno).
@@ -46,7 +47,6 @@ import {
   runCleanup,
   uniqueId,
 } from "../test-utils";
-import { VALID_SIGNATURE_DATA_URL } from "../helpers/signature";
 
 const NUMERIC_COLUMNS = [
   "amountCents",
@@ -266,7 +266,7 @@ describe("Task #788 — Cascade-Storno reversiert Multi-Topf-Budget über den ec
     for (const signerType of ["employee", "customer"] as const) {
       const sig = await apiPost(`/api/service-records/${srRes.data.id}/sign`, {
         signerType,
-        signatureData: VALID_SIGNATURE_DATA_URL,
+        signatureData: validSignatureDataUrl(),
       });
       expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
     }

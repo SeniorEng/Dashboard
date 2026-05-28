@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Billing-Flow Test-Coverage (Task #109)
  *
@@ -215,7 +216,7 @@ async function signServiceRecord(srId: number): Promise<void> {
   for (const signerType of ["employee", "customer"] as const) {
     const res = await apiPost<any>(`/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     if (res.status !== 200) {
       throw new Error(`signServiceRecord(${srId}, ${signerType}) failed: ${res.status} ${JSON.stringify(res.data)}`);

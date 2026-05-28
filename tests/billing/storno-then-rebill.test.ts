@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * K3: Re-Rechnung nach Storno mit Storno-Verlinkung
  *
@@ -129,7 +130,7 @@ async function ensureSignedSr(custId: number, year: number, month: number): Prom
     if (cur.data?.status === "employee_signed" && signerType === "employee") continue;
     const sig = await apiPost<any>(`/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: validSignatureDataUrl(),
     });
     if (sig.status !== 200) {
       // Wenn employee_signed schon vor war, ersten Signer überspringen

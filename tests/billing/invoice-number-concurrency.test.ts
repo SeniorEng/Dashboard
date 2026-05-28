@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 // Concurrency-Tests: Rechnungsnummer-Vergabe + Storno-Atomarität.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -21,7 +22,6 @@ import {
 import { invoices } from "../../shared/schema";
 import { and, eq } from "drizzle-orm";
 import { runInParallel } from "../helpers/race";
-import { VALID_SIGNATURE_DATA_URL } from "../helpers/signature";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testEmployeeId: number;
@@ -116,7 +116,7 @@ async function signServiceRecord(srId: number): Promise<void> {
   for (const signerType of ["employee", "customer"] as const) {
     const res = await apiPost(`/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: VALID_SIGNATURE_DATA_URL,
+      signatureData: validSignatureDataUrl(),
     });
     if (res.status !== 200) {
       throw new Error(`signServiceRecord(${srId}, ${signerType}) failed: ${res.status} ${JSON.stringify(res.data)}`);

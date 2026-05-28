@@ -1,3 +1,4 @@
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 // K1 Cross-Customer Race-Test: Zwei parallele billing/generate-Aufrufe für
 // unterschiedliche Customers im selben Monat dürfen nie zur selben
 // Rechnungsnummer führen. Sicherung läuft über `pg_advisory_xact_lock` in
@@ -7,7 +8,6 @@ import { describe, it, expect, afterAll } from "vitest";
 import { apiPost, apiDelete, uniqueId } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { runInParallel } from "../helpers/race";
-import { VALID_SIGNATURE_DATA_URL } from "../helpers/signature";
 import { db } from "../../server/lib/db";
 import { invoices } from "../../shared/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -96,7 +96,7 @@ async function prepareCustomer(
   for (const signerType of ["employee", "customer"] as const) {
     const signRes = await apiPost(`/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: VALID_SIGNATURE_DATA_URL,
+      signatureData: validSignatureDataUrl(),
     });
     if (signRes.status !== 200) {
       throw new Error(
