@@ -11,6 +11,7 @@
     "check": "tsc",
     "test": "vitest run",
     "db:push": "drizzle-kit push",
+    "gen:openapi": "tsx script/gen-openapi.ts",
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
     "budget:correct-km-drift": "tsx server/scripts/reconcile-km-drift.ts",
     "lint": "eslint client/src server/routes --max-warnings 0",
@@ -19,6 +20,7 @@
     "chromium:smoke": "tsx scripts/smoke-chromium.ts"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.4",
     "@google-cloud/storage": "^7.19.0",
     "@neondatabase/serverless": "^0.10.4",
     "@radix-ui/react-alert-dialog": "^1.1.15",

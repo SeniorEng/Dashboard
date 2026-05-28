@@ -34,6 +34,17 @@ async function buildAll() {
   console.log("building client...");
   await viteBuild();
 
+  console.log("generating OpenAPI spec...");
+  {
+    const { buildOpenApiDocument } = await import("../shared/api/openapi");
+    const { mkdir } = await import("fs/promises");
+    await mkdir("docs/api", { recursive: true });
+    await writeFile(
+      "docs/api/openapi.json",
+      JSON.stringify(buildOpenApiDocument(), null, 2) + "\n",
+    );
+  }
+
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
   const allDeps = [

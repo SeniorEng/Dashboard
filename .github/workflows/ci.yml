@@ -1,6 +1,6 @@
 name: CI
 
-# Vollständige CI-Pipeline mit allen 8 Gates (Task #768).
+# Vollständige CI-Pipeline mit allen Gates (Task #768, #775).
 # Läuft bei jedem Push und Pull-Request.
 #
 # Gate-Übersicht:
@@ -12,6 +12,7 @@ name: CI
 #   6. npm audit --audit-level=high        (Security)
 #   7. npm run test:e2e:smoke              (Playwright-Smoke)
 #   8. tsx script/coverage-billing.ts      (Coverage-Gate billing.ts)
+#   9. npm run gen:openapi -- --check      (OpenAPI-Drift, statisch)
 #
 # Die DB-/Server-abhängigen Gates (4, 5, 7, 8) benötigen Repo-Secrets
 # (`TEST_USER_EMAIL`, `TEST_USER_PASSWORD`). Fehlen diese (z.B. in Forks),
@@ -59,6 +60,11 @@ jobs:
       # Gate 3: Lint (max-warnings 0)
       - name: Lint (eslint --max-warnings 0)
         run: npm run lint
+
+      # Gate 9: OpenAPI-Drift — committete Spec muss mit der frisch aus den
+      # Zod-Schemas generierten übereinstimmen (Task #775).
+      - name: OpenAPI spec drift gate (gen:openapi --check)
+        run: npm run gen:openapi -- --check
 
       # Gate 6: Security-Audit
       - name: Security audit (npm audit --audit-level=high)
