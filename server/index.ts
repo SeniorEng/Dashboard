@@ -344,7 +344,7 @@ async function runStartupTasks() {
       log(`Budget-Historisierung-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #743 — Eingefrorene Legacy-Tabelle `customer_budgets` endgültig
+    // Task #743 / #748 — Eingefrorene Legacy-Tabelle `customer_budgets` endgültig
     // droppen. Vorbedingung (Task #728 Phase 2.1): Backfill nach
     // `customer_budget_type_settings` ist auf Production gelaufen und vom
     // Operator validiert (siehe `docs/deployment-log.md`-Eintrag 2026-05-28).
