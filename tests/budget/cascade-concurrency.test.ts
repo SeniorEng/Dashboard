@@ -73,22 +73,26 @@ describe("Race — paralleler Cascade-Consume (Task #494)", () => {
     // skipExistingCheck=true, damit die Wiederverwendung der appointmentId
     // nicht am Existenz-Check scheitert — der Test zielt auf das
     // Lock-Verhalten der Cascade-Schleife selbst.
-    const calls: Array<() => Promise<CascadeResult>> = Array.from({ length: N }, () => () =>
-      createCascadeConsumption({
-        customerId: scenario.customerId,
-        appointmentId: apptId,
-        transactionDate: txDate,
-        totalAmountCents: PER_CALL_CENTS,
-        hauswirtschaftMinutes: 10,
-        hauswirtschaftCents: PER_CALL_CENTS,
-        alltagsbegleitungMinutes: 0,
-        alltagsbegleitungCents: 0,
-        travelKilometers: 0,
-        travelCents: 0,
-        customerKilometers: 0,
-        customerKilometersCents: 0,
-        skipExistingCheck: true,
-      }),
+    const calls = Array.from(
+      { length: N },
+      () => async (arrive: () => Promise<void>) => {
+        await arrive();
+        return createCascadeConsumption({
+          customerId: scenario.customerId,
+          appointmentId: apptId,
+          transactionDate: txDate,
+          totalAmountCents: PER_CALL_CENTS,
+          hauswirtschaftMinutes: 10,
+          hauswirtschaftCents: PER_CALL_CENTS,
+          alltagsbegleitungMinutes: 0,
+          alltagsbegleitungCents: 0,
+          travelKilometers: 0,
+          travelCents: 0,
+          customerKilometers: 0,
+          customerKilometersCents: 0,
+          skipExistingCheck: true,
+        });
+      },
     );
 
     const results = await runInParallel(calls);

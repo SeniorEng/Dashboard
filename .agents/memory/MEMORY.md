@@ -7,3 +7,4 @@
 - [Budget-Architektur-Doku ausgelagert](budget-doc-layout.md) — Budget-Details NICHT in replit.md ablegen; docs/architecture/budget.md ist die Quelle, replit.md hält nur Pointer.
 - [Invoice-per-pot split (Variant C)](invoice-per-pot-split.md) — Multi-Pot-Lauf → N Rechnungen via billing_run_id; Σ-Invariante via shared/domain/budget-invoice-split.ts (Largest-Remainder), Cascade-Storno explizit per Flag.
 - [vi.spyOn(console) broken](vitest-spyon-console-broken.md) — vi.spyOn(console,"log") does NOT capture console.log from imported modules in this vitest setup; rebind `console.log` directly and restore in finally.
+- [Test signature fixtures min bytes](test-signature-fixture-min-bytes.md) — 8-byte PNG stub fails signature-validation (Task #749) → setup EMPTY_SIGNATURE; use tests/helpers/signature.ts VALID_SIGNATURE_DATA_URL.

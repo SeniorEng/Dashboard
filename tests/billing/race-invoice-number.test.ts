@@ -7,6 +7,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { apiPost, apiDelete, uniqueId } from "../test-utils";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { runInParallel } from "../helpers/race";
+import { VALID_SIGNATURE_DATA_URL } from "../helpers/signature";
 import { db } from "../../server/lib/db";
 import { invoices } from "../../shared/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -95,7 +96,7 @@ async function prepareCustomer(
   for (const signerType of ["employee", "customer"] as const) {
     const signRes = await apiPost(`/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: VALID_SIGNATURE_DATA_URL,
     });
     if (signRes.status !== 200) {
       throw new Error(
@@ -152,18 +153,22 @@ describe("K1: Cross-Customer Race auf Rechnungsnummern", () => {
 
     type GenResult = { status: number; data: GenerateResponse | InvoiceLite };
     const settled = await runInParallel<GenResult>([
-      () =>
-        apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
+      async (arrive) => {
+        await arrive();
+        return apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
           customerId: prepA.customerId,
           billingMonth,
           billingYear,
-        }),
-      () =>
-        apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
+        });
+      },
+      async (arrive) => {
+        await arrive();
+        return apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
           customerId: prepB.customerId,
           billingMonth,
           billingYear,
-        }),
+        });
+      },
     ]);
 
     // Assertion 1: beide fulfilled (HTTP 200/201), keine 5xx.

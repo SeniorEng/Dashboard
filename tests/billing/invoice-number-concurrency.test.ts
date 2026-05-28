@@ -20,6 +20,8 @@ import {
 } from "../../server/storage/billing-storage";
 import { invoices } from "../../shared/schema";
 import { and, eq } from "drizzle-orm";
+import { runInParallel } from "../helpers/race";
+import { VALID_SIGNATURE_DATA_URL } from "../helpers/signature";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testEmployeeId: number;
@@ -114,7 +116,7 @@ async function signServiceRecord(srId: number): Promise<void> {
   for (const signerType of ["employee", "customer"] as const) {
     const res = await apiPost(`/api/service-records/${srId}/sign`, {
       signerType,
-      signatureData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureData: VALID_SIGNATURE_DATA_URL,
     });
     if (res.status !== 200) {
       throw new Error(`signServiceRecord(${srId}, ${signerType}) failed: ${res.status} ${JSON.stringify(res.data)}`);
@@ -251,14 +253,15 @@ describe("INC-1: Parallele Rechnungs-Generierung", () => {
     const billingYear = prepared.year;
 
     type GenResult = { status: number; data: GenerateResponse | InvoiceLite };
-    const settled = await Promise.allSettled(
-      Array.from({ length: 10 }, () =>
-        apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
+    const settled = await runInParallel(
+      Array.from({ length: 10 }, () => async (arrive) => {
+        await arrive();
+        return apiPost<GenerateResponse | InvoiceLite>("/api/billing/generate", {
           customerId: prepared.customerId,
           billingMonth: prepared.month,
           billingYear: prepared.year,
-        }),
-      ),
+        });
+      }),
     );
 
     for (let i = 0; i < settled.length; i++) {
@@ -336,8 +339,11 @@ describe("INC-2: Parallele Storno-Operationen", () => {
       expect(res.status, `versendet-Transition für ${inv.invoiceNumber}`).toBe(200);
     }
 
-    const settled = await Promise.allSettled(
-      originals.map((inv) => apiPatch(`/api/billing/${inv.id}/status`, { status: "storniert" })),
+    const settled = await runInParallel(
+      originals.map((inv) => async (arrive) => {
+        await arrive();
+        return apiPatch(`/api/billing/${inv.id}/status`, { status: "storniert" });
+      }),
     );
 
     for (let i = 0; i < settled.length; i++) {
@@ -380,10 +386,11 @@ describe("INC-2: Parallele Storno-Operationen", () => {
     expect(send.status).toBe(200);
 
     type PatchResult = { status: number; data: unknown };
-    const settled = await Promise.allSettled(
-      Array.from({ length: 5 }, () =>
-        apiPatch<unknown>(`/api/billing/${original.id}/status`, { status: "storniert" }),
-      ),
+    const settled = await runInParallel(
+      Array.from({ length: 5 }, () => async (arrive) => {
+        await arrive();
+        return apiPatch<unknown>(`/api/billing/${original.id}/status`, { status: "storniert" });
+      }),
     );
 
     const responses: PatchResult[] = settled

@@ -18,6 +18,7 @@ import {
 } from "@shared/schema";
 import { createConsumptionTransaction } from "../server/storage/budget/consumption-engine";
 import { syncCarryoverAndExpiry } from "../server/storage/budget/allocation-storage";
+import { runInParallel } from "./helpers/race";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let hwServiceId: number;
@@ -147,9 +148,13 @@ describe("BC-K4: Advisory-Lock serialisiert parallele Konsumbuchungen", () => {
     expect(expectedSuccesses).toBeLessThan(5);
 
     // Direkter Storage-Aufruf, parallel — das ist die echte Konkurrenzprobe.
-    const results = await Promise.allSettled(
-      appointmentIds.map(async (apptId) => {
+    const results = await runInParallel(
+      appointmentIds.map((apptId) => async (arrive) => {
+        // Setup VOR der Barriere: erst die Termin-Daten holen, dann an der
+        // Schranke melden, damit alle Worker die kritische Buchung gemeinsam
+        // starten (statt durch das vorgelagerte apiGet serialisiert zu werden).
         const apptDate = (await apiGet<any>(`/api/appointments/${apptId}`)).data.date;
+        await arrive();
         return createConsumptionTransaction({
           customerId,
           appointmentId: apptId,
@@ -228,8 +233,11 @@ describe("BC-K7: Partielle UNIQUE-Constraint macht Write-Off idempotent", () => 
 
     // 5x parallel — ohne UNIQUE würde jeder Lauf den existsCheck umgehen
     // und einen eigenen write_off einfügen.
-    const results = await Promise.allSettled(
-      Array.from({ length: 5 }, () => syncCarryoverAndExpiry(customerId))
+    const results = await runInParallel(
+      Array.from({ length: 5 }, () => async (arrive) => {
+        await arrive();
+        return syncCarryoverAndExpiry(customerId);
+      })
     );
 
     // Alle 5 dürfen erfolgreich durchlaufen — die UNIQUE-Constraint löst über

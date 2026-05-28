@@ -88,8 +88,14 @@ describe("Race K7 — paralleler Write-Off auf abgelaufenen §45b-Carryover", ()
     // transaction_type='write_off' würde jeder Lauf den existsCheck umgehen
     // und einen eigenen write_off einfügen — Doppel-Buchung.
     const results = await runInParallel([
-      () => processExpiredCarryover(scenario.customerId),
-      () => processExpiredCarryover(scenario.customerId),
+      async (arrive) => {
+        await arrive();
+        return processExpiredCarryover(scenario.customerId);
+      },
+      async (arrive) => {
+        await arrive();
+        return processExpiredCarryover(scenario.customerId);
+      },
     ]);
 
     // Beide Calls müssen sauber durchlaufen — die UNIQUE-Constraint löst per

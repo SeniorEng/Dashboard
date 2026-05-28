@@ -161,8 +161,14 @@ describe("Race K4 — parallele Dokumentation auf knappes §45b-Restbudget", () 
       status: number;
       data: DocumentResponse;
     }>([
-      () => apiPost<DocumentResponse>(`/api/appointments/${apptId1}/document`, buildDocPayload()),
-      () => apiPost<DocumentResponse>(`/api/appointments/${apptId2}/document`, buildDocPayload()),
+      async (arrive) => {
+        await arrive();
+        return apiPost<DocumentResponse>(`/api/appointments/${apptId1}/document`, buildDocPayload());
+      },
+      async (arrive) => {
+        await arrive();
+        return apiPost<DocumentResponse>(`/api/appointments/${apptId2}/document`, buildDocPayload());
+      },
     ]);
 
     // Beide Calls dürfen erfolgreich sein, weil acceptsPrivatePayment=true
