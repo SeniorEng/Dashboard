@@ -490,7 +490,6 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
       contacts: data.contacts,
       budgets: data.budgets,
       contract: data.contract,
-      useLedgerBudgets: true,
       tx,
       testFaults,
     });

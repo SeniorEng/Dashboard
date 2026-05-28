@@ -6,8 +6,6 @@
  *
  * Allowlist pro Datei (mit Begründung):
  *  - shared/schema/budget.ts            → Schema-Definition selbst.
- *  - server/lib/customer-creation-helpers.ts → ruft den No-Op-Writer im
- *      Legacy-Pfad (prospects.ts) auf; bleibt bis der Pfad SSoT-only ist.
  *  - server/scripts/cleanup-test-data.ts → Test-Cleanup-Skript löscht
  *      Bestandszeilen.
  *  - server/routes/admin/test-cleanup.ts → Admin-Endpunkt für dasselbe

@@ -61,7 +61,6 @@ export function assertErstberatungHasProspectLink(
 import * as insuranceModule from "./customer-mgmt/insurance";
 import * as contactsModule from "./customer-mgmt/contacts";
 import * as careLevelModule from "./customer-mgmt/care-level";
-import * as budgetsModule from "./customer-mgmt/budgets";
 import * as contractsModule from "./customer-mgmt/contracts";
 
 export interface CustomerListFilters {
