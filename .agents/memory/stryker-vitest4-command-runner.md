@@ -6,19 +6,32 @@ description: Why Stryker uses the command runner (not the vitest runner) and how
 # Stryker mutation testing (CareConnect)
 
 ## Decision: command runner, not @stryker-mutator/vitest-runner
-The dedicated `@stryker-mutator/vitest-runner` (9.6.1) hangs forever at
-"Creating test runner process(es)" with **vitest 4.x** — vitest 4 is newer than
-the runner's supported internals (its peer range `>=2.0.0` is misleadingly loose).
-The dry run never completes.
+The native `@stryker-mutator/vitest-runner` is still NOT viable on **vitest 4.x**
+for this suite. Re-verified 2026-05-28 (runner 9.6.1, vitest 4.0.18):
 
-**Fix:** `testRunner: "command"` with
+- The **dry run now completes** with the native runner — the old
+  "Creating test runner process(es)" / "never finishes the dry run" hang is gone.
+  So "dry run works" is NO LONGER sufficient proof; you must verify a FULL run.
+- With the default `coverageAnalysis: "perTest"` the **mutation phase hangs**:
+  it stalls reproducibly around ~152/269 with no progress and the per-mutant
+  timeout never fires.
+- Even with `coverageAnalysis: "off"` the run **still hangs** on individual
+  mutants that create a *synchronous* infinite loop inside the fast-check
+  property tests (`tests/equality/*`). A vitest worker thread can't be aborted
+  mid-synchronous-loop, so Stryker's timeout doesn't kill it.
+
+**Fix:** keep `testRunner: "command"` with
 `commandRunner.command = "npx vitest run --config vitest.stryker.config.ts"`.
-The command runner reruns the whole (small, pure) suite per mutant — version-agnostic,
-~3s cold start per mutant, fine for a tiny suite.
+The command runner spawns a fresh child per mutant and SIGKILLs it after
+`timeoutMS` — so synchronous-infinite-loop mutants are killed by process death,
+not by an in-worker timeout. Version-agnostic, ~3s cold start per mutant, fine
+for a tiny pure suite.
 
 **Why:** mutation testing must stay usable in CI; a hanging runner blocks the gate.
-**How to apply:** if you ever migrate to the vitest runner, re-verify a dry run
-actually completes on the installed vitest major version before trusting it.
+**How to apply:** before migrating to the native runner, verify a **full**
+`npm run mutation` run (not just the dry run) completes on the installed vitest
+major — and remember the real blocker is in-worker timeout enforcement on
+synchronous-infinite-loop mutants, which the property tests routinely produce.
 
 ## Scope is deliberately pure-only
 Only **pure** `shared/domain/` calc modules are mutated (no DB/server I/O), each backed

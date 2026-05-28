@@ -29,12 +29,24 @@
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 export default {
   packageManager: "npm",
-  // Command-Runner statt des dedizierten Vitest-Runners: vitest 4.x ist neuer
-  // als die offizielle Stryker-Vitest-Runner-Integration (9.6.1), deren
-  // Per-Mutant-Test-Selektion gegen die vitest-4-Internals hängt
-  // ("Creating test runner process(es)" ohne Fortschritt). Der Command-Runner
-  // ruft pro Mutant die komplette PURE Suite auf — bei 5 reinen Dateien in
-  // ~1,3 s ist das schnell genug und vollständig versions-agnostisch.
+  // Command-Runner statt des nativen Vitest-Runners — auf vitest 4.x weiterhin
+  // nötig (re-verifiziert für Task #792, 2026-05-28, @stryker-mutator/vitest-
+  // runner 9.6.1, vitest 4.0.18):
+  //   * Der DRY-RUN läuft mit dem nativen Runner inzwischen durch (der alte
+  //     "Creating test runner process(es)"-Hang ist weg), ABER
+  //   * mit dem Default `coverageAnalysis: "perTest"` verklemmt sich die
+  //     eigentliche Mutations-Phase reproduzierbar (bleibt bei ~152/269 ohne
+  //     Fortschritt stehen, der Per-Mutant-Timeout greift nicht), und
+  //   * selbst mit `coverageAnalysis: "off"` hängt der Lauf an einzelnen
+  //     Mutanten, die in den fast-check-Property-Tests (tests/equality/*) eine
+  //     SYNCHRONE Endlosschleife erzeugen: vitests Worker-Thread lässt sich
+  //     synchron nicht abbrechen, der Timeout feuert nicht zuverlässig.
+  // Der Command-Runner umgeht das, weil Stryker pro Mutant einen frischen
+  // `npx vitest run`-Kindprozess startet und ihn nach timeoutMS hart per
+  // SIGKILL beendet — versions-agnostisch und ohne Hang. Bei 5 reinen Dateien
+  // (~42 schnelle Tests) ist der ~3s-Kaltstart je Mutant akzeptabel.
+  // Wieder-Umstellung erst, wenn ein neuer Runner einen VOLLEN Lauf (nicht nur
+  // den Dry-Run) auf der installierten vitest-Major nachweislich durchzieht.
   testRunner: "command",
   commandRunner: {
     command: "npx vitest run --config vitest.stryker.config.ts",

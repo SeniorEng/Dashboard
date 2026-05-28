@@ -49,9 +49,18 @@ Die acht Hotspots (`mutate` in `stryker.conf.mjs`):
 - **Vitest-Config für Mutation-Läufe:** `vitest.stryker.config.ts` (ohne `globalSetup`,
   d.h. ohne DB-Cleanup; nur die acht puren Test-Dateien)
 - **Test-Runner:** `command` (`npx vitest run --config vitest.stryker.config.ts`).
-  Grund: vitest 4.x ist neuer als der offizielle Stryker-Vitest-Runner (9.6.1), dessen
-  Per-Mutant-Selektion gegen die vitest-4-Internals hängt. Der Command-Runner ist
-  versions-agnostisch und bei dieser kleinen, schnellen Suite ausreichend.
+  Grund (re-verifiziert 2026-05-28, Runner 9.6.1 / vitest 4.0.18): Der native
+  `@stryker-mutator/vitest-runner` ist auf vitest 4.x weiterhin nicht nutzbar.
+  Der Dry-Run läuft inzwischen zwar durch, aber die eigentliche Mutations-Phase
+  hängt: mit dem Default `coverageAnalysis: "perTest"` bleibt der Lauf bei ~152/269
+  stehen, und selbst mit `coverageAnalysis: "off"` verklemmt er sich an Mutanten,
+  die in den fast-check-Property-Tests (`tests/equality/*`) eine *synchrone*
+  Endlosschleife erzeugen — der vitest-Worker lässt sich synchron nicht abbrechen,
+  der Per-Mutant-Timeout greift nicht. Der Command-Runner umgeht das, weil Stryker
+  pro Mutant einen frischen Kindprozess startet und ihn nach `timeoutMS` hart per
+  SIGKILL beendet. Versions-agnostisch und bei dieser kleinen, schnellen Suite
+  ausreichend. Wieder-Umstellung erst, wenn ein neuer Runner einen VOLLEN Lauf
+  (nicht nur den Dry-Run) auf der installierten vitest-Major durchzieht.
 - **Incremental-Mode:** aktiv. `reports/stryker-incremental.json` (gitignored, in CI per
   `actions/cache`) merkt sich Ergebnisse; Folge-Läufe prüfen nur betroffene Mutanten erneut.
 - **Schwellen (CI-Gate):** `high: 80`, `low: 60`, `break: 60`. Fällt der Score unter 60 %,
