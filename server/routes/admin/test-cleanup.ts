@@ -4,83 +4,25 @@ import { inArray, eq, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { asyncHandler } from "../../lib/errors";
 import { requireSuperAdmin } from "../../middleware/auth";
 import { db } from "../../lib/db";
-import { appointmentsRepo, prospectsRepo } from "../../repos";
+import { appointmentsRepo } from "../../repos";
 import { customers } from "@shared/schema";
-import { appointments, appointmentSeries } from "@shared/schema";
-import { invoices, invoiceLineItems } from "@shared/schema";
+import { appointments } from "@shared/schema";
 import { budgetTransactions } from "@shared/schema";
-import { prospects } from "@shared/schema";
-import { qontoTransactions, paymentAdviceItems } from "@shared/schema";
-import { documentDeliveries } from "@shared/schema";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
-import { users } from "@shared/schema/users";
 import { services } from "@shared/schema";
 import { appointmentServices } from "@shared/schema";
 import { customerServicePrices } from "@shared/schema";
+import {
+  purgeTestCustomersByIds,
+  purgeTestProspectsByIds,
+  purgeTestUsersByIds,
+} from "../../services/test-data-cleanup";
 
 const router = Router();
 
 const purgeSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(2000),
 });
-
-async function purgeCustomerCascade(id: number): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.update(prospects)
-      .set({ convertedCustomerId: null })
-      .where(eq(prospects.convertedCustomerId, id));
-
-    await tx.update(customers)
-      .set({ mergedIntoCustomerId: null })
-      .where(eq(customers.mergedIntoCustomerId, id));
-
-    // Hard-delete unten (Zeile 70) löscht ALLE Appointments dieses Kunden,
-    // inkl. bereits soft-gelöschter. FK-Refs auf budgetTransactions.appointmentId
-    // und appointments.travelFromAppointmentId müssen daher auch für
-    // soft-gelöschte Zeilen aufgeräumt werden — `activeOnly()` würde diese
-    // ausschließen und FK-Konflikte beim Hard-Delete provozieren.
-    const apptIdsRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, tx)
-      .where(eq(appointments.customerId, id));
-    const apptIds = apptIdsRows.map(r => r.id);
-
-    const invIdsRows = await tx
-      .select({ id: invoices.id })
-      .from(invoices)
-      .where(eq(invoices.customerId, id));
-    const invIds = invIdsRows.map(r => r.id);
-
-    if (invIds.length > 0) {
-      await tx.update(qontoTransactions)
-        .set({ matchedInvoiceId: null })
-        .where(inArray(qontoTransactions.matchedInvoiceId, invIds));
-      await tx.update(paymentAdviceItems)
-        .set({ matchedInvoiceId: null })
-        .where(inArray(paymentAdviceItems.matchedInvoiceId, invIds));
-      await tx.update(invoices)
-        .set({ stornierteRechnungId: null })
-        .where(inArray(invoices.stornierteRechnungId, invIds));
-      await tx.delete(invoiceLineItems).where(inArray(invoiceLineItems.invoiceId, invIds));
-      await tx.delete(invoices).where(eq(invoices.customerId, id));
-    }
-
-    await tx.delete(appointmentSeries).where(eq(appointmentSeries.customerId, id));
-
-    if (apptIds.length > 0) {
-      await tx.update(budgetTransactions)
-        .set({ appointmentId: null })
-        .where(inArray(budgetTransactions.appointmentId, apptIds));
-      await tx.update(appointments)
-        .set({ travelFromAppointmentId: null })
-        .where(inArray(appointments.travelFromAppointmentId, apptIds));
-      await tx.delete(appointments).where(eq(appointments.customerId, id));
-    }
-
-    await tx.delete(documentDeliveries).where(eq(documentDeliveries.customerId, id));
-    await tx.delete(budgetTransactions).where(eq(budgetTransactions.customerId, id));
-
-    await tx.delete(customers).where(eq(customers.id, id));
-  });
-}
 
 const backdateSchema = z.object({
   customerId: z.number().int().positive(),
@@ -115,16 +57,7 @@ router.post(
       return;
     }
     const { ids } = purgeSchema.parse(req.body);
-    const deleted: number[] = [];
-    const failed: Array<{ id: number; error: string }> = [];
-    for (const id of ids) {
-      try {
-        await purgeCustomerCascade(id);
-        deleted.push(id);
-      } catch (err) {
-        failed.push({ id, error: err instanceof Error ? err.message : String(err) });
-      }
-    }
+    const { deleted, failed } = await purgeTestCustomersByIds(ids);
     res.json({ deleted, failed });
   })
 );
@@ -134,19 +67,10 @@ router.post(
 // gescopten Query statt per HTTP-DELETE pro Datensatz. Es gab nie eine
 // DELETE /api/prospects/:id-Route — der alte globalSetup-Loop lief deshalb in
 // 404s pro Datensatz und fraß bei 3000+ stale Prospects das gesamte Test-
-// Zeitbudget. prospect_notes / prospect_offers / scheduled_calls hängen per
-// ON DELETE CASCADE dran; appointments.prospect_id ist ON DELETE SET NULL.
-// Sicherheits-Filter mirror't isTestProspect aus tests/globalSetup.ts, damit
-// niemals echte Leads gelöscht werden — selbst wenn eine fremde ID reinkommt.
+// Zeitbudget. Die eigentliche Lösch-Logik (inkl. Test-Pattern-Filter) lebt im
+// wiederverwendbaren Service `server/services/test-data-cleanup.ts`, sodass der
+// periodische Safety-Scheduler (Task #795) dieselbe gescopte Logik nutzt.
 // ---------------------------------------------------------------------------
-const PROSPECT_TEST_FILTER = sql`(
-  LOWER(${prospects.vorname}) LIKE '%test%'
-  OR LOWER(${prospects.nachname}) LIKE '%test%'
-  OR LOWER(${prospects.vorname}) LIKE 'eb-%'
-  OR LOWER(${prospects.vorname}) LIKE 'status-%'
-  OR LOWER(${prospects.nachname}) LIKE 'eb%'
-)`;
-
 router.post(
   "/test-cleanup/purge-prospects",
   requireSuperAdmin,
@@ -161,52 +85,7 @@ router.post(
       ids: z.array(z.number().int().positive()).max(10000).optional(),
     }).parse(req.body ?? {});
 
-    const where = ids && ids.length > 0
-      ? and(inArray(prospects.id, ids), PROSPECT_TEST_FILTER)
-      : PROSPECT_TEST_FILTER;
-
-    const deleted = await db.transaction(async (tx) => {
-      // Ziel-Prospect-IDs auflösen (gescopt + Test-Pattern). Bewusst OHNE
-      // activeOnly() — auch bereits soft-gelöschte Test-Prospects sollen hart weg.
-      const targetRows = await prospectsRepo
-        .selectColumnsFrom({ id: prospects.id }, tx)
-        .where(where);
-      const prospectIds = targetRows.map((r) => r.id);
-      if (prospectIds.length === 0) return [];
-
-      // Termine, die auf diese Prospects zeigen, müssen HART gelöscht werden:
-      // appointments.prospect_id ist zwar ON DELETE SET NULL, aber der
-      // CHECK-Constraint `appointments_prospect_or_customer_check` verlangt
-      // entweder prospect_id ODER customer_id. Erstberatungs-Termine haben
-      // keinen Kunden → SET NULL würde den Constraint verletzen. Daher die
-      // Termine (inkl. ihrer FK-Referenzen) entfernen, bevor die Prospects fallen.
-      const apptRows = await appointmentsRepo
-        .selectColumnsFrom({ id: appointments.id }, tx)
-        .where(inArray(appointments.prospectId, prospectIds));
-      const apptIds = apptRows.map((r) => r.id);
-
-      if (apptIds.length > 0) {
-        await tx.update(budgetTransactions)
-          .set({ appointmentId: null })
-          .where(inArray(budgetTransactions.appointmentId, apptIds));
-        await tx.update(invoiceLineItems)
-          .set({ appointmentId: null })
-          .where(inArray(invoiceLineItems.appointmentId, apptIds));
-        await tx.update(appointments)
-          .set({ travelFromAppointmentId: null })
-          .where(inArray(appointments.travelFromAppointmentId, apptIds));
-        // appointment_services + service_records hängen per ON DELETE CASCADE dran.
-        await tx.delete(appointments).where(inArray(appointments.id, apptIds));
-      }
-
-      // prospect_notes / prospect_offers / scheduled_calls = ON DELETE CASCADE.
-      const deletedRows = await tx
-        .delete(prospects)
-        .where(inArray(prospects.id, prospectIds))
-        .returning({ id: prospects.id });
-      return deletedRows.map((r) => r.id);
-    });
-
+    const deleted = await purgeTestProspectsByIds(ids);
     res.json({ deleted });
   })
 );
@@ -299,8 +178,9 @@ router.post(
 
 // ---------------------------------------------------------------------------
 // Test-User-Cleanup: löscht hart, inkl. audit_log-Einträge der Test-User.
-// Audit-Log ist per RULE append-only — wir umgehen das nur für die Dauer der
-// Transaktion (im finally wieder eingeschaltet, auch bei Fehlern).
+// Die eigentliche Lösch-Logik (Detach-Pass, Blocker, Audit-Rule-Toggle) lebt im
+// wiederverwendbaren Service `server/services/test-data-cleanup.ts`, sodass der
+// periodische Safety-Scheduler (Task #795) dieselbe gescopte Logik nutzt.
 // ---------------------------------------------------------------------------
 const purgeUsersSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(500),
@@ -315,197 +195,25 @@ router.post(
       return;
     }
     const { ids } = purgeUsersSchema.parse(req.body);
+    const result = await purgeTestUsersByIds(ids);
 
-    // Sicherheits-Filter: nur User mit Test-Pattern wirklich löschen.
-    const testUsers = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(
-        inArray(users.id, ids),
-        sql`(LOWER(${users.email}) LIKE '%@test.local' OR LOWER(${users.email}) LIKE 'testemp-%' OR LOWER(${users.nachname}) LIKE 'testemp#_%' ESCAPE '#')`,
-      ));
-    const safeIds = testUsers.map((u) => u.id);
-    const rejected = ids.filter((i) => !safeIds.includes(i));
-
-    if (safeIds.length === 0) {
-      res.json({ deleted: [], rejected, reason: "Keine IDs entsprechen dem Test-User-Muster." });
-      return;
-    }
-
-    const idList = sql.join(safeIds.map((i) => sql`${i}`), sql`, `);
-
-    // Pre-Flight-Sicherheitscheck (gespiegelt aus cleanup-test-data.ts):
-    // Test-User dürfen NICHT mit echten Kunden verflochten sein, sonst würden
-    // wir bei Hard-Delete von monthly_service_records / customer_assignment_history
-    // / aktiven Terminen Daten echter Kunden zerstören.
-    const CUSTOMER_TEST_C = sql`(
-      LOWER(c.vorname) LIKE '%test%' OR LOWER(c.nachname) LIKE '%test%'
-      OR LOWER(c.nachname) LIKE 'auto#_%' ESCAPE '#'
-      OR LOWER(c.nachname) LIKE 'privat-%' OR LOWER(c.nachname) LIKE 'fahrtdienst-%' OR LOWER(c.nachname) LIKE 'integ-%'
-      OR LOWER(c.vorname) LIKE 'sz-%' OR LOWER(c.vorname) LIKE 'pv-%' OR LOWER(c.vorname) LIKE 'fd-%'
-      OR LOWER(c.vorname) LIKE 'eb-%' OR LOWER(c.vorname) LIKE 'pg1-%' OR LOWER(c.vorname) LIKE 'qs-%'
-      OR LOWER(c.vorname) LIKE 'status-%'
-      OR LOWER(c.nachname) LIKE 'mustermann-%' OR LOWER(c.nachname) LIKE 'importtrim-%'
-      OR LOWER(c.nachname) LIKE 'notrim-%' OR LOWER(c.nachname) LIKE 'reconcile-%'
-      OR LOWER(c.nachname) LIKE 'aligned-%'
-    )`;
-    // Detach-Pass (Task #631): Test-User mit echten Kunden verflochten zu lassen
-    // führte zu einer Sackgasse — der Blocker unten verweigerte das Cleanup,
-    // wodurch der Stale-Pool über die Zeit auf zehntausende User wuchs und die
-    // Admin-User-Seite lahmlegte. Wir entkoppeln daher die test-Mitarbeiter
-    // chirurgisch von echten Kunden, BEVOR der Blocker greift:
-    //   - appointments.assigned_employee_id ist nullable → SET NULL (Termin
-    //     des echten Kunden bleibt erhalten, nur die Test-User-Spur ist weg).
-    //   - monthly_service_records / customer_assignment_history haben employee_id
-    //     NOT NULL und sind reine Kontaminations-Zeilen (ein Test-User hat
-    //     niemals real Arbeit für einen echten Kunden geleistet); diese Zeilen
-    //     werden hart gelöscht. Echte MSR/Assignments echter Mitarbeiter sind
-    //     nicht betroffen, weil der Filter nur Test-User-IDs trifft.
-    let detachedAppointments = 0;
-    let detachedMsr = 0;
-    let detachedCah = 0;
-    await db.transaction(async (tx) => {
-      const apptRes = await tx.execute(sql`
-        UPDATE appointments a SET assigned_employee_id = NULL
-        FROM customers c
-        WHERE c.id = a.customer_id
-          AND a.assigned_employee_id IN (${idList})
-          AND NOT ${CUSTOMER_TEST_C}
-      `);
-      detachedAppointments = (apptRes as unknown as { rowCount?: number }).rowCount ?? 0;
-
-      const msrRes = await tx.execute(sql`
-        DELETE FROM monthly_service_records m
-        USING customers c
-        WHERE c.id = m.customer_id
-          AND m.employee_id IN (${idList})
-          AND NOT ${CUSTOMER_TEST_C}
-      `);
-      detachedMsr = (msrRes as unknown as { rowCount?: number }).rowCount ?? 0;
-
-      const cahRes = await tx.execute(sql`
-        DELETE FROM customer_assignment_history h
-        USING customers c
-        WHERE c.id = h.customer_id
-          AND h.employee_id IN (${idList})
-          AND NOT ${CUSTOMER_TEST_C}
-      `);
-      detachedCah = (cahRes as unknown as { rowCount?: number }).rowCount ?? 0;
-    });
-
-    const blockerRes = await db.execute<{ appt: number; msr: number; cah: number }>(sql`
-      SELECT
-        (SELECT COUNT(*)::int FROM appointments a JOIN customers c ON c.id = a.customer_id
-          WHERE a.deleted_at IS NULL AND a.assigned_employee_id IN (${idList})
-            AND NOT ${CUSTOMER_TEST_C}) AS appt,
-        (SELECT COUNT(*)::int FROM monthly_service_records m JOIN customers c ON c.id = m.customer_id
-          WHERE m.employee_id IN (${idList}) AND NOT ${CUSTOMER_TEST_C}) AS msr,
-        (SELECT COUNT(*)::int FROM customer_assignment_history h JOIN customers c ON c.id = h.customer_id
-          WHERE h.employee_id IN (${idList}) AND NOT ${CUSTOMER_TEST_C}) AS cah
-    `);
-    const b = (blockerRes as unknown as { rows: Array<{ appt: number; msr: number; cah: number }> }).rows[0];
-    if (b.appt > 0 || b.msr > 0 || b.cah > 0) {
+    if (!result.ok) {
       // Sollte nach dem Detach-Pass nie eintreten — Sicherheitsnetz für
       // unerwartete neue FK-Wege (z.B. neue Spalten künftiger Migrationen).
       res.status(409).json({
         error: "BLOCKED_REAL_CUSTOMER_REFS",
-        message: `Test-User sind weiter mit echten Kunden verflochten (${b.appt} aktive Termine, ${b.msr} Monats-LN, ${b.cah} Zuweisungen) trotz Detach-Pass. Cleanup verweigert, um Datenverlust zu verhindern.`,
-        rejected: ids,
-        detached: { appointments: detachedAppointments, msr: detachedMsr, cah: detachedCah },
+        message: `Test-User sind weiter mit echten Kunden verflochten (${result.counts.appt} aktive Termine, ${result.counts.msr} Monats-LN, ${result.counts.cah} Zuweisungen) trotz Detach-Pass. Cleanup verweigert, um Datenverlust zu verhindern.`,
+        rejected: result.rejected,
+        detached: result.detached,
       });
       return;
     }
 
-    // Audit-Schutzregeln nur für die Dauer dieses Batches deaktivieren.
-    // ENABLE RULE auf bereits aktivierte Regel ist ein No-op, daher in finally
-    // immer beide ausführen — selbst wenn DISABLE für die zweite fehlschlug,
-    // wird die erste sicher wieder aktiviert.
-    let disabledNoDelete = false;
-    let disabledNoUpdate = false;
-    try {
-      await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_delete`);
-      disabledNoDelete = true;
-      await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_update`);
-      disabledNoUpdate = true;
-
-      await db.transaction(async (tx) => {
-        // Hard-delete child rows in tables with NO ACTION + non-nullable FK
-        await tx.execute(sql`DELETE FROM employee_time_entries WHERE user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM notifications WHERE user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM employee_month_closings WHERE user_id IN (${idList}) OR closed_by_user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM employee_vacation_allowance WHERE user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM user_whatsapp_preferences WHERE user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM whatsapp_message_log WHERE user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM audit_log WHERE user_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM monthly_service_records WHERE employee_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM customer_assignment_history WHERE employee_id IN (${idList})`);
-        await tx.execute(sql`DELETE FROM tasks WHERE created_by_user_id IN (${idList}) OR assigned_to_user_id IN (${idList})`);
-        // KEIN DELETE auf appointment_series via assigned_employee_id — würde
-        // Serien echter Kunden treffen, denen mal ein Test-Mitarbeiter zugewiesen
-        // war. Series der Test-Kunden sind bereits über purge-customers weg;
-        // verbleibende Series gehören echten Kunden und bekommen unten SET NULL.
-        await tx.execute(sql`DELETE FROM employee_compensation_history WHERE created_by_user_id IN (${idList})`);
-
-        // SET NULL on nullable FK refs (NO ACTION rules) — Test-User-Spuren
-        // in System-/Echt-Daten nullen, damit echte Daten unangetastet bleiben
-        await tx.execute(sql`UPDATE birthday_card_tracking SET sent_by_user_id = NULL WHERE sent_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE company_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE system_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE payment_advices SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE service_rates SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE prospect_notes SET user_id = NULL WHERE user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE prospect_offers SET created_by = NULL WHERE created_by IN (${idList})`);
-        await tx.execute(sql`UPDATE prospects SET assigned_employee_id = NULL WHERE assigned_employee_id IN (${idList})`);
-
-        await tx.execute(sql`UPDATE customers SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customers SET primary_employee_id = NULL WHERE primary_employee_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customers SET backup_employee_id = NULL WHERE backup_employee_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customers SET backup_employee_id_2 = NULL WHERE backup_employee_id_2 IN (${idList})`);
-
-        await tx.execute(sql`UPDATE appointments SET assigned_employee_id = NULL WHERE assigned_employee_id IN (${idList})`);
-        await tx.execute(sql`UPDATE appointments SET performed_by_employee_id = NULL WHERE performed_by_employee_id IN (${idList})`);
-        await tx.execute(sql`UPDATE appointments SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE appointments SET signed_by_user_id = NULL WHERE signed_by_user_id IN (${idList})`);
-
-        await tx.execute(sql`UPDATE appointment_series SET assigned_employee_id = NULL WHERE assigned_employee_id IN (${idList})`);
-        await tx.execute(sql`UPDATE appointment_series SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-
-        await tx.execute(sql`UPDATE budget_transactions SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE budget_allocations SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_assignment_history SET changed_by_user_id = NULL WHERE changed_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_assignment_history SET employee_id = NULL WHERE employee_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_care_level_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_contract_rates SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_contracts SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_documents SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_insurance_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE customer_needs_assessments SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE document_deliveries SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE employee_compensation_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE employee_document_proofs SET reviewed_by_user_id = NULL WHERE reviewed_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE employee_documents SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE employee_month_closings SET reopened_by_user_id = NULL WHERE reopened_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE employee_qualifications SET assigned_by_user_id = NULL WHERE assigned_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE generated_documents SET signed_by_employee_id = NULL WHERE signed_by_employee_id IN (${idList})`);
-        await tx.execute(sql`UPDATE generated_documents SET generated_by_user_id = NULL WHERE generated_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE invoices SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE monthly_service_records SET customer_signed_by_user_id = NULL WHERE customer_signed_by_user_id IN (${idList})`);
-        await tx.execute(sql`UPDATE monthly_service_records SET employee_signed_by_user_id = NULL WHERE employee_signed_by_user_id IN (${idList})`);
-
-        await tx.execute(sql`DELETE FROM users WHERE id IN (${idList})`);
-      });
-    } finally {
-      // Audit-Schutzregeln in jedem Fall wieder aktivieren — ENABLE auf
-      // bereits aktivierter Regel ist ein No-op, also safe.
-      if (disabledNoUpdate) {
-        try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_update`); } catch {}
-      }
-      if (disabledNoDelete) {
-        try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_delete`); } catch {}
-      }
+    if (result.reason) {
+      res.json({ deleted: result.deleted, rejected: result.rejected, reason: result.reason });
+      return;
     }
-
-    res.json({ deleted: safeIds, rejected });
+    res.json({ deleted: result.deleted, rejected: result.rejected });
   })
 );
 

@@ -687,6 +687,14 @@ async function runStartupTasks() {
   const monthCloseScheduler = startMonthCloseScheduler();
   intervals.push(monthCloseScheduler.interval);
 
+  // Task #795: Periodischer Safety-Purge der stale Test-Daten (nur Dev/Test,
+  // niemals Production). Verhindert, dass abgebrochene Testläufe den
+  // Stale-Pool wieder auf tausende verwaiste Records anwachsen lassen.
+  const { startTestDataCleanupScheduler } = await import("./services/test-data-cleanup-scheduler");
+  const testDataCleanupScheduler = startTestDataCleanupScheduler();
+  if (testDataCleanupScheduler.timeout) timeouts.push(testDataCleanupScheduler.timeout);
+  if (testDataCleanupScheduler.interval) intervals.push(testDataCleanupScheduler.interval);
+
   // Tier-A3: Nächtlicher Integrity-Check der letzten 30 Tage Rechnungen.
   // Re-rendert PDF + XML und gleicht gegen persistierten pdfHash/zugferdXml
   // ab, dokumentiert Drift im Audit-Log.
