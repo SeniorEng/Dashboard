@@ -106,6 +106,15 @@ export interface BatchSendInvoiceResponse {
 // Task #534: Typenübergreifender Bulk-Versand. Pflegekassen-Entwürfe werden
 // manuell als „versendet" markiert (kein TI-Anschluss), Selbstzahler-Entwürfe
 // erhalten den Status „versendet" über den regulären Status-Pfad.
+// Krankenkassen-Filter: Liste der Pflegekassen, die im gewählten Monat/Jahr
+// mindestens eine Rechnung haben. Wird im Filter-Dropdown der
+// Abrechnungs-Seite angezeigt; `invoiceCount` dient als Hilfs-Label.
+export interface PayerSummary {
+  insuranceProviderId: number;
+  name: string;
+  invoiceCount: number;
+}
+
 export interface BulkSendInvoiceResponse {
   summary: {
     total: number;

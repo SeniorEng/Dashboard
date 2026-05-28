@@ -40,6 +40,7 @@ import type {
   SendInvoiceResponse as SendResponse,
   BatchSendInvoiceResponse as BatchSendResponse,
   BulkSendInvoiceResponse,
+  PayerSummary,
 } from "@shared/api";
 import {
   ArrowLeft,
@@ -144,6 +145,10 @@ export default function AdminBilling() {
   const [selectedMonth, setSelectedMonth] = useState(today.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
   const [statusFilter, setStatusFilter] = useState("alle");
+  // Krankenkassen-Filter: "alle" oder die insuranceProviderId als String.
+  // Wirkt server-seitig auf Liste, eligible-customers, generate-all und
+  // bestimmt zusätzlich die Sichtbarkeit der Bündel-Download-Buttons.
+  const [payerFilter, setPayerFilter] = useState<string>("alle");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
@@ -160,27 +165,46 @@ export default function AdminBilling() {
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
   const { data: invoices, isLoading: invoicesLoading } = useQuery({
-    queryKey: ["billing-invoices", selectedYear, selectedMonth, statusFilter],
+    queryKey: ["billing-invoices", selectedYear, selectedMonth, statusFilter, payerFilter],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       if (statusFilter !== "alle") params.set("status", statusFilter);
+      if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
       const result = await api.get<InvoiceItem[]>(`/billing?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });
 
   const { data: customers } = useQuery({
-    queryKey: ["billing-eligible-customers", selectedYear, selectedMonth],
+    queryKey: ["billing-eligible-customers", selectedYear, selectedMonth, payerFilter],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       params.set("month", selectedMonth.toString());
       params.set("year", selectedYear.toString());
+      if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
       const result = await api.get<BillingCustomerItem[]>(`/billing/eligible-customers?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });
+
+  // Krankenkassen-Dropdown — Liste der Pflegekassen mit Rechnungen im Monat.
+  const { data: payers } = useQuery({
+    queryKey: ["billing-payers", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      const result = await api.get<PayerSummary[]>(`/billing/payers?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+
+  const activePayer = payerFilter !== "alle"
+    ? payers?.find((p) => p.insuranceProviderId.toString() === payerFilter) ?? null
+    : null;
+  const payerSuffix = activePayer ? ` für ${activePayer.name}` : "";
 
   const { data: expandedDetail, isLoading: detailLoading } = useQuery({
     queryKey: ["billing-invoice-detail", expandedInvoiceId],
@@ -324,6 +348,7 @@ export default function AdminBilling() {
       const result = await api.post<GenerateAllResponse>("/billing/generate-all", {
         billingMonth: selectedMonth,
         billingYear: selectedYear,
+        ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
       });
       return unwrapResult(result);
     },
@@ -567,12 +592,65 @@ export default function AdminBilling() {
                       <SelectItem value="storniert">Storniert</SelectItem>
                     </SelectContent>
                   </Select>
+
+                  <span className="text-sm text-gray-500">Kasse:</span>
+                  <Select value={payerFilter} onValueChange={setPayerFilter}>
+                    <SelectTrigger className="w-full max-w-[280px]" data-testid="select-billing-payer">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="alle">Alle Krankenkassen</SelectItem>
+                      {payers?.map((p) => (
+                        <SelectItem
+                          key={p.insuranceProviderId}
+                          value={p.insuranceProviderId.toString()}
+                          data-testid={`select-payer-option-${p.insuranceProviderId}`}
+                        >
+                          {p.name} ({p.invoiceCount})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Task #533: Mobil-fix — Aktionsleiste bricht auf schmalen
                     Viewports um (flex-wrap), Buttons nehmen volle Breite und
                     Beschriftungen sind auf Mobile kürzer (sm:inline-Zusatz). */}
                 <div className="flex flex-wrap justify-end gap-2">
+                  {activePayer && (
+                    <>
+                      <a
+                        href={`/api/billing/bundle-by-payer?year=${selectedYear}&month=${selectedMonth}&insuranceProviderId=${activePayer.insuranceProviderId}&format=zip`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-testid="link-bundle-zip"
+                        className="w-full sm:w-auto"
+                      >
+                        <Button
+                          variant="outline"
+                          className="text-indigo-700 border-indigo-200 hover:bg-indigo-50 w-full sm:w-auto"
+                        >
+                          <FileText className={`${iconSize.sm} mr-1`} />
+                          ZIP-Download{payerSuffix}
+                        </Button>
+                      </a>
+                      <a
+                        href={`/api/billing/bundle-by-payer?year=${selectedYear}&month=${selectedMonth}&insuranceProviderId=${activePayer.insuranceProviderId}&format=pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-testid="link-bundle-pdf"
+                        className="w-full sm:w-auto"
+                      >
+                        <Button
+                          variant="outline"
+                          className="text-indigo-700 border-indigo-200 hover:bg-indigo-50 w-full sm:w-auto"
+                        >
+                          <Printer className={`${iconSize.sm} mr-1`} />
+                          Kombi-PDF{payerSuffix}
+                        </Button>
+                      </a>
+                    </>
+                  )}
                   {draftBulkInvoices.length > 0 && (
                     <Button
                       variant="outline"
@@ -581,7 +659,7 @@ export default function AdminBilling() {
                       data-testid="button-bulk-send"
                     >
                       <Send className={`${iconSize.sm} mr-1`} />
-                      <span className="hidden sm:inline">Alle </span>versenden ({draftBulkInvoices.length})
+                      <span className="hidden sm:inline">Alle </span>versenden{payerSuffix} ({draftBulkInvoices.length})
                     </Button>
                   )}
                   {draftPflegekasseInvoices.length > 0 && (
@@ -600,7 +678,7 @@ export default function AdminBilling() {
                       ) : (
                         <>
                           <Send className={`${iconSize.sm} mr-1`} />
-                          <span className="hidden sm:inline">Alle an </span>Pflegekassen senden ({draftPflegekasseInvoices.length})
+                          <span className="hidden sm:inline">Alle an </span>Pflegekassen senden{payerSuffix} ({draftPflegekasseInvoices.length})
                         </>
                       )}
                     </Button>
@@ -615,7 +693,7 @@ export default function AdminBilling() {
                       <Layers className={`${iconSize.sm} mr-1`} />
                       <span className="hidden sm:inline">Alle offenen erstellen </span>
                       <span className="sm:hidden">Alle erstellen </span>
-                      ({customers.length})
+                      {payerSuffix}({customers.length})
                     </Button>
                   )}
                   <Button

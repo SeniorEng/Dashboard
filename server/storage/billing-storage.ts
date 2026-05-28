@@ -5,14 +5,25 @@ import {
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import type { InvoiceWithCustomer } from "../storage";
 
-export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<InvoiceWithCustomer[]> {
+export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number }): Promise<InvoiceWithCustomer[]> {
   const { invoices, customers } = await import("@shared/schema");
-  const { eq, and, asc, desc } = await import("drizzle-orm");
-  const conditions: ReturnType<typeof eq>[] = [];
+  const { eq, and, asc, desc, sql } = await import("drizzle-orm");
+  const conditions: Array<ReturnType<typeof eq> | ReturnType<typeof sql>> = [];
   if (filters.year) conditions.push(eq(invoices.billingYear, filters.year));
   if (filters.month) conditions.push(eq(invoices.billingMonth, filters.month));
   if (filters.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
   if (filters.status) conditions.push(eq(invoices.status, filters.status as string));
+  // Krankenkassen-Filter: matched gegen den aktuell aktiven Insurance-History-
+  // Eintrag des Kunden (validTo IS NULL). Selbstzahler-Rechnungen haben keinen
+  // Eintrag und fallen damit automatisch raus, was dem Filter-Intent entspricht.
+  if (filters.insuranceProviderId) {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM customer_insurance_history cih
+      WHERE cih.customer_id = ${invoices.customerId}
+        AND cih.valid_to IS NULL
+        AND cih.insurance_provider_id = ${filters.insuranceProviderId}
+    )`);
+  }
 
   const results = await db.select({
     invoice: invoices,
