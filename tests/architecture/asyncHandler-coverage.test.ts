@@ -9,21 +9,54 @@
  * ausgespielt werden. Damit dieselbe Falle nicht wieder einzieht, prüft dieser
  * Test, dass jede Express-Route-Registrierung in dieser Datei einen
  * `asyncHandler(...)`-Aufruf als Handler-Argument verwendet.
+ *
+ * Task #776 — Von Regex-Zählung (`/app\.(get|post|...)\(/g` vs.
+ * `/asyncHandler\(/g`) auf `ast-grep` umgestellt. Die alte Variante zählte nur
+ * Vorkommen und konnte:
+ *   - `app.get(`/`asyncHandler(` in Kommentaren oder String-Literalen
+ *     mitzählen (False-Positives),
+ *   - nicht prüfen, ob `asyncHandler(...)` tatsächlich ARGUMENT der jeweiligen
+ *     Route-Registrierung ist (eine Route ohne Wrapper + eine doppelt
+ *     gewrappte Route hätten sich in der Summe ausgeglichen).
+ * Die AST-Variante prüft jetzt pro Route-Call, dass eines seiner Argumente ein
+ * `asyncHandler(...)`-Aufruf ist.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { parseSource } from "./ast-grep-helpers";
+import type { SgNode } from "@ast-grep/napi";
 
 const FILE = join(
   process.cwd(),
   "server/replit_integrations/object_storage/routes.ts",
 );
 
-const ROUTE_REGISTRATION = /\bapp\.(get|post|put|patch|delete)\s*\(/g;
-const ASYNC_HANDLER_CALL = /\basyncHandler\s*\(/g;
+const HTTP_VERBS = new Set(["get", "post", "put", "patch", "delete"]);
+
+/** Liefert `<verb>` für einen `app.<verb>(...)`-Call, sonst null. */
+function appRouteVerb(call: SgNode): string | null {
+  const fn = call.field("function");
+  if (!fn || fn.kind() !== "member_expression") return null;
+  const obj = fn.field("object")?.text();
+  const prop = fn.field("property")?.text();
+  if (obj === "app" && prop && HTTP_VERBS.has(prop)) return prop;
+  return null;
+}
+
+/** Prüft, ob innerhalb eines Route-Calls ein `asyncHandler(...)`-Aufruf steckt. */
+function hasAsyncHandlerArg(call: SgNode): boolean {
+  return call
+    .findAll({ rule: { kind: "call_expression" } })
+    .some((c) => {
+      const fn = c.field("function");
+      return fn?.kind() === "identifier" && fn.text() === "asyncHandler";
+    });
+}
 
 describe("Architektur: Object-Storage-Routes nutzen asyncHandler (Task #676)", () => {
   const src = readFileSync(FILE, "utf8");
+  const root = parseSource(src, false);
 
   it("importiert asyncHandler aus server/lib/errors", () => {
     expect(
@@ -34,21 +67,29 @@ describe("Architektur: Object-Storage-Routes nutzen asyncHandler (Task #676)", (
   });
 
   it("jede app.<verb>(...)-Registrierung wird über asyncHandler(...) gewrappt", () => {
-    const routeCount = (src.match(ROUTE_REGISTRATION) ?? []).length;
-    const handlerCount = (src.match(ASYNC_HANDLER_CALL) ?? []).length;
+    const calls = root.findAll({ rule: { kind: "call_expression" } });
+    const routeCalls = calls.filter((c) => appRouteVerb(c) !== null);
 
     expect(
-      routeCount,
+      routeCalls.length,
       "Erwarte mindestens eine Route-Registrierung in object_storage/routes.ts",
     ).toBeGreaterThan(0);
 
+    const unwrapped = routeCalls
+      .filter((c) => !hasAsyncHandlerArg(c))
+      .map((c) => {
+        const verb = appRouteVerb(c);
+        const line = c.range().start.line + 1;
+        return `app.${verb}(...) @ Zeile ${line}`;
+      });
+
     expect(
-      handlerCount,
-      `Jede Route in object_storage/routes.ts MUSS asyncHandler(...) verwenden. ` +
-        `Gefunden: ${routeCount} Route(s), aber nur ${handlerCount} asyncHandler-Aufruf(e). ` +
-        `Manuelles try/catch + res.status().json() bricht die zentrale Error-Konvention ` +
-        `(deutsche Meldungen, Stack-Trace-Logging via errorMiddleware).`,
-    ).toBeGreaterThanOrEqual(routeCount);
+      unwrapped,
+      `Jede Route in object_storage/routes.ts MUSS asyncHandler(...) als Handler ` +
+        `verwenden. Ohne Wrapper greift die zentrale Error-Konvention nicht ` +
+        `(deutsche Meldungen, Stack-Trace-Logging via errorMiddleware). ` +
+        `Nicht gewrappte Routen:\n  ${unwrapped.join("\n  ")}`,
+    ).toEqual([]);
   });
 
   it("enthält keine englischen Fallback-Fehlermeldungen mehr", () => {

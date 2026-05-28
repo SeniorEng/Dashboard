@@ -16,12 +16,24 @@
  *
  * Failure-Modus: Test schlägt fehl mit der Liste der Treffer und einer
  * Erklärung, wie man die Berechnung nach `shared/domain/` zieht.
+ *
+ * Task #776 — Die Hotspot-Erkennung (zweiter `it`) wurde von einer
+ * zeilenweisen Regex (`extractDeclaredName`) auf `ast-grep` umgestellt. Die
+ * Regex hat Funktionsnamen auch in Kommentaren/Strings sowie in reinen
+ * Wert-Variablen (`const x = computeCap(...)`) getroffen und mehrzeilige
+ * Deklarationen verfehlt. `ast-grep` matcht nur echte Funktions-Knoten im
+ * AST. Der km-Rundungs-Test bleibt vorerst regex-basiert (Ausdrucks-Muster,
+ * nicht Deklarations-Muster).
  */
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import { join, relative, sep } from "path";
-
-const ROOT = process.cwd();
+import {
+  ROOT,
+  walkTsFiles,
+  parseSource,
+  collectNamedFunctions,
+} from "./ast-grep-helpers";
 
 // Hotspot-Schlüsselwörter: wenn der DEKLARIERTE Funktionsname auf eines
 // dieser Muster passt, MUSS er in shared/domain/ wohnen (oder explizit in
@@ -35,27 +47,6 @@ const HOTSPOT_NAME_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
   { regex: /^calculate(.*Travel|.*Reisekost)/i, reason: "Reisekosten" },
   { regex: /^compute(.*Cutoff|.*MonthClose)/i, reason: "Monatsabschluss-Cutoff" },
 ];
-
-/**
- * Extrahiert den Namen einer Funktions-/Konstanten-DEKLARATION aus einer
- * Code-Zeile. Aufrufstellen wie `const x = computeCapSlot(...)` werden
- * absichtlich NICHT getroffen, weil dort der zugewiesene Name (`x`)
- * extrahiert wird, nicht der aufgerufene Funktionsname.
- */
-function extractDeclaredName(line: string): string | null {
-  // function foo / async function foo / export (default)? function foo
-  const fn = line.match(/\b(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+(\w+)/);
-  if (fn) return fn[1];
-  // const foo = ... | let foo = ... | var foo = ...
-  // Erfasst auch arrow functions / function expressions als Wert. Wir
-  // verlassen uns darauf, dass der NAME selbst dem Hotspot-Muster folgt.
-  const cn = line.match(/^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=/);
-  if (cn) return cn[1];
-  // Klassen-Methoden: `  calculateFoo(args) {` oder `  async calculateFoo(`
-  const mt = line.match(/^\s*(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:async\s+)?(\w+)\s*\(/);
-  if (mt) return mt[1];
-  return null;
-}
 
 // Pfade, die explizit erlaubt sind, weil sie reine Wrapper/Storage-Layer um
 // shared/domain/ sind oder die kanonische Implementation bilden.
@@ -87,20 +78,6 @@ function shouldSkip(absPath: string): boolean {
   return ALLOWED_PATHS.some((p) => rel.startsWith(p));
 }
 
-function* walk(dir: string): Generator<string> {
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (entry.startsWith(".") || entry === "node_modules" || entry === "dist") continue;
-    let stat;
-    try { stat = statSync(full); } catch { continue; }
-    if (stat.isDirectory()) {
-      yield* walk(full);
-    } else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) {
-      yield full;
-    }
-  }
-}
-
 describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
   /**
    * Task #616 — verbietet zusätzlich `km.toFixed(...)` und das Muster
@@ -121,7 +98,7 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
     const scanRoots = ["server", "client/src", "shared"].map((p) => join(ROOT, p));
     for (const root of scanRoots) {
       try { statSync(root); } catch { continue; }
-      for (const file of walk(root)) {
+      for (const file of walkTsFiles(root)) {
         const rel = relative(ROOT, file).split(sep).join("/");
         if (rel === allowedFile) continue;
         if (rel.startsWith("tests/")) continue;
@@ -156,24 +133,21 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
     const scanRoots = ["server", "client/src", "shared"].map((p) => join(ROOT, p));
     for (const root of scanRoots) {
       try { statSync(root); } catch { continue; }
-      for (const file of walk(root)) {
+      for (const file of walkTsFiles(root)) {
         if (shouldSkip(file)) continue;
         const content = readFileSync(file, "utf-8");
-        const lines = content.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const name = extractDeclaredName(line);
-          if (!name) continue;
-          // Filter: typische Keywords, die der Methoden-Matcher fälschlich
-          // greift (`if (...)`, `for (...)`, `return (...)` etc.).
-          if (/^(?:if|for|while|switch|return|throw|catch|else|do|try|new|await|typeof|void|in|of)$/i.test(name)) {
-            continue;
-          }
+        // ast-grep statt zeilenweiser Regex: Es werden nur echte benannte
+        // Funktions-Definitionen aus dem AST gezogen — Vorkommen in
+        // Kommentaren/Strings sowie reine Wert-Variablen
+        // (`const x = computeCap(...)`) sind eigene Knoten und werden NICHT
+        // mitgezählt (Task #776).
+        const astRoot = parseSource(content, file.endsWith(".tsx"));
+        for (const { name, line } of collectNamedFunctions(astRoot)) {
           for (const { regex, reason } of HOTSPOT_NAME_PATTERNS) {
             if (regex.test(name)) {
               hits.push({
                 file: relative(ROOT, file).split(sep).join("/"),
-                line: i + 1,
+                line,
                 match: name,
                 reason,
               });

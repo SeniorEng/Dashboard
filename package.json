@@ -74,6 +74,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@ast-grep/napi": "^0.43.0",
     "@playwright/test": "^1.58.2",
     "@replit/vite-plugin-cartographer": "^0.4.4",
     "@replit/vite-plugin-dev-banner": "^0.1.1",
