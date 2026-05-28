@@ -344,6 +344,17 @@ async function runStartupTasks() {
       log(`Budget-Historisierung-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #721 — Idempotenter Read-Only-Audit der Phasen-Kette in
+    // customer_budget_type_settings. Schreibt nur Log, korrigiert nichts
+    // (verlorene Phasen sind nicht rekonstruierbar; Überlappungen sind
+    // GoBD-relevant und müssen manuell entschieden werden).
+    const { auditBudgetTypeSettingsChain } = await import("./startup/audit-budget-type-settings-chain");
+    try {
+      await auditBudgetTypeSettingsChain();
+    } catch (err) {
+      log(`Budget-Settings-Chain-Audit fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #643: Bestands-Termine, die per Import-Update editiert wurden,
     // haben einen gedrifteten Budget-Ledger (Schröder 12.01./21.01.2026).
     // Idempotenter Backfill — nach erfolgreichem Rebook findet `findDriftRows`

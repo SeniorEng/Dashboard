@@ -315,11 +315,33 @@ function settingsEqual(a: CustomerBudgetTypeSetting, b: SettingPayload): boolean
 }
 
 /**
- * Historisierte Aktualisierung der Topf-Konfiguration (Task #440 / GoBD).
+ * Historisierte Aktualisierung der Topf-Konfiguration (Task #440 / GoBD,
+ * Phasen-Append-Only-Fix Task #721).
  *
- * - Statt `DELETE + INSERT` wird die alte offene Zeile pro `(customer, budgetType)`
- *   per `validTo = heute` geschlossen und eine neue Zeile mit `validFrom = heute+1`
- *   angelegt. Erstanlagen (keine offene Vorgängerzeile) starten direkt heute.
+ * Vertrag (Append-Only, keine UPDATEs auf bereits in Kraft gewesene Zeilen
+ * außer der `validTo`-Schließung):
+ *
+ * - Ohne explizites `validFrom` im Payload: alte offene Zeile pro
+ *   `(customer, budgetType)` per `validTo = heute` schließen und neue Zeile
+ *   mit `validFrom = heute+1` anlegen (klassischer Same-Day-Edit-Pfad).
+ *   Erstanlage ohne `validFrom` speichert `validFrom = NULL` (rückwirkend
+ *   gültig). Wurde die alte Zeile noch nie aktiv (Same-Day-Korrektur),
+ *   wird sie in-place überschrieben statt eine Pseudo-Transition zu
+ *   erzeugen.
+ *
+ * - Mit explizitem `validFrom` im Payload (Phasen-Schreibung, Task #721):
+ *   Jeder Aufruf legt eine eigene Phase pro `validFrom` an. Über alle
+ *   bestehenden Zeilen desselben Topfs wird der unmittelbare Vorgänger
+ *   gesucht (max `validFrom < neuesValidFrom`, der den neuen Stichtag noch
+ *   überdeckt) und auf `validTo = neuesValidFrom - 1` geschlossen. Falls
+ *   eine bestehende Phase chronologisch HINTER der neuen liegt, wird die
+ *   neue Phase mit `validTo = (nächstesValidFrom - 1)` eingeklemmt — keine
+ *   überlappenden Gültigkeiten. Wird derselbe `validFrom` zweimal
+ *   geschrieben, gewinnt die spätere Schreibung per in-place Update auf
+ *   genau dieser Zeile (Phase war zum Zeitpunkt der ersten Schreibung
+ *   bereits explizit datiert — typischerweise zukunftsdatiert und noch
+ *   nicht in Kraft).
+ *
  * - Aus dem Payload entfernte Töpfe werden geschlossen (validTo = heute),
  *   nicht gelöscht.
  * - Unveränderte Zeilen bleiben unangetastet (keine Pseudo-Transitionen).
@@ -328,7 +350,10 @@ function settingsEqual(a: CustomerBudgetTypeSetting, b: SettingPayload): boolean
  *
  * Der partielle UNIQUE-Index `customer_budget_type_settings_unique_idx`
  * (`WHERE valid_to IS NULL`) stellt sicher, dass immer höchstens eine offene
- * Zeile pro `(customer, budgetType)` existiert.
+ * Zeile pro `(customer, budgetType)` existiert. Beim Phasen-Append darf die
+ * neue Zeile daher `validTo = null` nur dann tragen, wenn keine spätere
+ * Phase existiert; andernfalls wird sie sofort durch die nächste Phase
+ * begrenzt.
  */
 export async function upsertBudgetTypeSettings(
   customerId: number,
@@ -340,13 +365,16 @@ export async function upsertBudgetTypeSettings(
   const tomorrow = addDays(today, 1);
 
   const run = async (executor: DbClient): Promise<CustomerBudgetTypeSetting[]> => {
-    const openRows = await executor.select()
+    const allRowsForCustomer = await executor.select()
       .from(customerBudgetTypeSettings)
-      .where(and(
-        eq(customerBudgetTypeSettings.customerId, customerId),
-        isNull(customerBudgetTypeSettings.validTo),
-      ));
+      .where(eq(customerBudgetTypeSettings.customerId, customerId));
 
+    const rowsByType = new Map<string, CustomerBudgetTypeSetting[]>();
+    for (const r of allRowsForCustomer) {
+      const list = rowsByType.get(r.budgetType);
+      if (list) list.push(r); else rowsByType.set(r.budgetType, [r]);
+    }
+    const openRows = allRowsForCustomer.filter(r => r.validTo == null);
     const openByType = new Map(openRows.map(r => [r.budgetType, r]));
     const payloadByType = new Map(settings.map(s => [s.budgetType, s]));
 
@@ -367,7 +395,7 @@ export async function upsertBudgetTypeSettings(
       }
     }
 
-    // 2. Payload abarbeiten — Erstanlage, Transition oder No-Op.
+    // 2. Payload abarbeiten — Erstanlage, Phasen-Append, Same-Day-Edit, Transition oder No-Op.
     for (const s of settings) {
       const current = openByType.get(s.budgetType);
       const baseValues = {
@@ -379,6 +407,109 @@ export async function upsertBudgetTypeSettings(
         yearlyLimitCents: s.yearlyLimitCents ?? null,
         validTo: s.validTo ?? null,
       };
+
+      // Task #721 — Phasen-Append-Pfad: explizites validFrom aus dem Payload
+      // bedeutet "neue Phase ab diesem Stichtag", NICHT "vorhandene Zeile
+      // umdatieren". Wir suchen Vorgänger/Nachfolger über ALLE Zeilen des
+      // Topfs (offene UND geschlossene), klemmen die neue Phase ein und
+      // schließen den Vorgänger per `validTo = neuesValidFrom - 1`.
+      //
+      // Bedingung für diesen Pfad: explizites validFrom > heute UND
+      // (kein current vorhanden ODER current trägt ein anderes validFrom).
+      // - validFrom <= heute fällt durch in den Erstanlage-/In-Place-Pfad,
+      //   damit Setup-Flows mit rückwirkendem Datum stabil bleiben.
+      // - validFrom === current.validFrom ist ein Same-Phase-Edit; die
+      //   Standardpfade behandeln das korrekt (In-Place wenn noch nie in
+      //   Kraft, sonst Transition).
+      const explicitVf = s.validFrom ?? null;
+      const isPhaseAppend = explicitVf != null
+        && explicitVf > today
+        && (!current || (current.validFrom ?? null) !== explicitVf);
+
+      if (isPhaseAppend) {
+        const allOfType = rowsByType.get(s.budgetType) ?? [];
+        const dayBefore = addDays(explicitVf, -1);
+
+        // 0) Exakter Treffer auf validFrom (über ALLE Zeilen, nicht nur die
+        //    offene): "Wird derselbe validFrom zweimal mit unterschiedlichen
+        //    Werten geschickt, gewinnt die spätere Schreibung." Auch dann,
+        //    wenn die Zeile inzwischen durch einen Nachfolger geschlossen
+        //    wurde — wir aktualisieren die Felder in-place, validTo bleibt
+        //    durch den Nachfolger weiterhin geklemmt.
+        const exactMatch = allOfType.find(r => r.validFrom === explicitVf) ?? null;
+        if (exactMatch) {
+          if (!settingsEqual(exactMatch, s)) {
+            await executor.update(customerBudgetTypeSettings)
+              .set({
+                enabled: s.enabled,
+                priority: s.priority,
+                monthlyLimitCents: s.monthlyLimitCents ?? null,
+                yearlyLimitCents: s.yearlyLimitCents ?? null,
+                // validTo NICHT überschreiben — bleibt entweder NULL (offene
+                // letzte Phase) oder vom Nachfolger geklemmt.
+                updatedAt: sql`now()`,
+              })
+              .where(eq(customerBudgetTypeSettings.id, exactMatch.id));
+            auditEntries.push({ kind: "in_place_update", budgetType: s.budgetType, before: exactMatch, after: s, nextValidFrom: explicitVf });
+          }
+          continue;
+        }
+
+        // 1) Vorgänger = Zeile mit größtem validFrom < explicitVf, deren
+        //    Gültigkeit den neuen Stichtag noch überdeckt. NULL-validFrom
+        //    zählt als "rückwirkend ab Beginn" (= -∞) und ist ein gültiger
+        //    Kandidat, wenn die Zeile noch offen ist oder bis >= explicitVf
+        //    reicht. Ohne diese Behandlung würde eine offene NULL-Baseline
+        //    nicht geschlossen → zwei offene Zeilen → Unique-Index-Verletzung.
+        let predecessor: CustomerBudgetTypeSetting | null = null;
+        for (const r of allOfType) {
+          const rvf = r.validFrom;
+          // Kandidaten-Filter: validFrom < explicitVf (NULL = -∞).
+          if (rvf != null && rvf >= explicitVf) continue;
+          // Coverage: validTo NULL ODER >= explicitVf.
+          if (r.validTo != null && r.validTo < explicitVf) continue;
+          if (!predecessor) {
+            predecessor = r;
+            continue;
+          }
+          // Größtes validFrom gewinnt. NULL ist immer kleiner als ein Datum.
+          const pvf = predecessor.validFrom;
+          if (pvf == null && rvf != null) predecessor = r;
+          else if (pvf != null && rvf != null && pvf < rvf) predecessor = r;
+        }
+
+        // 2) Nachfolger = Zeile mit kleinstem validFrom > explicitVf.
+        let successor: CustomerBudgetTypeSetting | null = null;
+        for (const r of allOfType) {
+          const rvf = r.validFrom;
+          if (rvf == null || rvf <= explicitVf) continue;
+          if (!successor || rvf < successor.validFrom!) successor = r;
+        }
+
+        // 3) Vorgänger schließen (idempotent: nur wenn die alte Schließung
+        //    den neuen Stichtag noch überdeckt).
+        if (predecessor && (predecessor.validTo == null || predecessor.validTo > dayBefore)) {
+          await executor.update(customerBudgetTypeSettings)
+            .set({ validTo: dayBefore, updatedAt: sql`now()` })
+            .where(eq(customerBudgetTypeSettings.id, predecessor.id));
+        }
+
+        // 4) Neue Phase einklemmen: validTo aus Payload (falls gesetzt) ODER
+        //    bis (Nachfolger.validFrom - 1) ODER offen.
+        let newValidTo: string | null = s.validTo ?? null;
+        if (successor) {
+          const cap = addDays(successor.validFrom!, -1);
+          if (newValidTo == null || newValidTo > cap) newValidTo = cap;
+        }
+
+        await executor.insert(customerBudgetTypeSettings).values({
+          ...baseValues,
+          validFrom: explicitVf,
+          validTo: newValidTo,
+        });
+        auditEntries.push({ kind: "create", budgetType: s.budgetType, before: null, after: s, nextValidFrom: explicitVf });
+        continue;
+      }
 
       if (!current) {
         // Erstanlage: wenn der Aufrufer kein validFrom mitgibt, speichern wir
