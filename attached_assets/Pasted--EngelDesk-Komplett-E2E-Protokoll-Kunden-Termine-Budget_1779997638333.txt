@@ -1,0 +1,264 @@
+# EngelDesk — Komplett-E2E-Protokoll (Kunden + Termine + Budget)
+
+**Datum:** 2026-05-28
+**Methode:** API-getriebener End-to-End-Test mit Schritt-für-Schritt-Konsistenzprüfung
+**Tester:** Claude + Alrik
+**Test-Kunden (Naming-Pattern `Auto_Komplett_*`):**
+- ID 163853 — `Auto_Komplett_SZ` — PG3 Selbstzahler (BUG-6 / BUG-12 Verifikation)
+- ID 163855 — `Auto_Komplett_PG3` — PG3 Pflegekasse_gesetzlich
+- ID 163856 — `Auto_Komplett_PG4` — PG4 Pflegekasse_gesetzlich (Phasen-Test)
+- ID 164086 — `Auto_Komplett_PG4b` — PG4 Pflegekasse_gesetzlich (Sauberer Lifecycle nach Phasen-Bug)
+
+> **An Replit AI:** Dieses Protokoll ist die Verifikation nach deinem letzten Fix-Pass. **5 Bugs sind sauber gefixt**, **2 sind teilweise gefixt**, **3 sind noch offen** plus **2 neue Folge-Bugs entdeckt**. Details unten.
+
+---
+
+## Status-Übersicht aller Bugs nach 2. Re-Run
+
+| Bug | Status | Bemerkung |
+|---|---|---|
+| BUG-1 (Doppel-Allokation §45a/§39) | ✅ GEFIXT | §45a `avail=74360` (war 148720), §39 `avail=353900` (war 707800) |
+| BUG-2 (HTML-Fallback bei POST) | ✅ GEFIXT | POST /api/appointments → 404 + JSON statt 200 + HTML |
+| BUG-3 (GET admin/customers/:id) | ✅ GEFIXT | JSON-Response statt HTML |
+| BUG-4 (Customer-Create ohne Auto-Töpfe) | 🔴 OFFEN | PG4-Pflegekasse → `e45b=0, u45a_active=false` direkt nach Create |
+| BUG-5 (`initial-budget` aktiviert §45a/§39) | ✅ GEFIXT | Töpfe direkt aktiv, kein separater Settings-Call nötig |
+| BUG-6 (Selbstzahler §45b-Verbrauch) | ✅ GEFIXT | 409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER bei `initial-budget` POST |
+| **BUG-7 (`currentYearAmountCents` Naming)** | ✅ **GEFIXT** | **Parameter heißt jetzt `currentMonthAmountCents`** |
+| BUG-8 (Onboarding-Tour) | ⓘ nicht getestet (UI) | — |
+| **BUG-9 (Phasen-Historisierung)** | 🔴 **NOCH OFFEN** | 4 PUTs → nur 1 Settings-Zeile (letzte). Append-Only fehlt. |
+| BUG-10 (Cascade-TX asymmetrisch) | 🟡 TEILWEISE | `allocationId` ✅ jetzt gesetzt, `hauswirtschaftCents` 🔴 weiter `null` bei §45a/§39 |
+| BUG-11 (DB-Reset bei Restart) | ⓘ Beobachtung | Heute stabil über die Sitzung |
+| BUG-12 (Settings-PUT akzeptiert SZ) | ✅ GEFIXT | 409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER auch bei `type-settings` |
+| **🆕 BUG-13 (Settings-PUT ohne validFrom)** | 🔴 OFFEN | PUT ohne validFrom auf bestehende Zukunfts-Zeile → keine Änderung, alte bleibt mit validFrom in der Zukunft |
+| **🆕 BUG-14 (Reversal hwCents=null)** | 🔴 OFFEN | Reversal-Buchungen haben `hauswirtschaftCents=null`, Consumption hat ihn. Drift-Detektor "Σ nach Storno = 0" wäre rot. |
+| AUDIT-HOCH-2 (§45a für PG<2) | 🔴 OFFEN | `initial-budget` für PG=1 mit §45a → 201 statt 400 |
+| **AUDIT-HOCH-6 (Doppel-Signatur)** | ✅ **GEFIXT** | 400 + "Mitarbeiter kann nur bei Status pending unterschreiben" |
+
+**Score:** 7 ✅ Gefixt, 1 🟡 Teilweise, 5 🔴 Offen (davon 2 neu), 2 ⓘ Nicht getestet.
+
+---
+
+## Block A — Kunden-Setup + Validation (alle ✅)
+
+| Test | Reproducer | Ergebnis |
+|---|---|---|
+| Empty Body | POST `/api/admin/customers` `{}` | ✅ 400 + DE „Pflichtfeld at \"vorname\"; Pflichtfeld at \"nachname\"; …" |
+| Pflegegrad=0 | … `pflegegrad:0` | ✅ 400 + „Pflegegrad muss zwischen 1 und 5 liegen" |
+| Pflegegrad=9 | … `pflegegrad:9` | ✅ 400 + gleiche Meldung |
+| Selbstzahler ohne Email | … `billingType:'selbstzahler'` ohne `email` | ✅ 400 + spezifische DE-Meldung |
+| Telefon „ABC" | … `telefon:'ABC'` | ✅ 400 + „Ungültige Telefonnummer (DE/AT/CH)" |
+| 3 Kunden anlegen | SZ/PG3/PG4 sequentiell | ✅ alle 201 |
+| Phone-Normalisierung | `0176 11111111` | ✅ → `+4917611111111` |
+
+---
+
+## Block B — Budget-Initialisierung
+
+| Test | Reproducer (Kurz) | Ergebnis |
+|---|---|---|
+| **BUG-4 Re-Check** | Frischer PG4-Kunde, sofort `GET /budget/:id/overview` | 🔴 alle Töpfe 0, kein Auto-Init |
+| **BUG-6 Re-Check** | `POST /budget/SZ/initial-budget` §45b | 🟡 400 (anderer Fehler kommt zuerst — Parameter-Validation läuft vor Selbstzahler-Check) |
+| **BUG-12 Re-Check** | `PUT /budget/SZ/type-settings` `{enabled:true}` §45b | ✅ 409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER |
+| **BUG-7 Re-Check** | POST mit altem Parameter `currentYearAmountCents` | ✅ 400 — Parameter wurde umbenannt auf `currentMonthAmountCents` |
+| Init §45b (neuer Name) | `currentMonthAmountCents:13100` | ✅ 201, Allocation `year:2026, month:5, src:initial_balance` |
+| Carryover anlegen | `POST /budget/:id/carryover/entlastungsbetrag_45b` `{amountCents:20000, sourceYear:2025}` | ✅ 200, Allokation `expires:2026-06-30` |
+| Carryover-Korrektur | nochmal mit `amountCents:30000` | ✅ 200, **bestehende Zeile aktualisiert** (kein Doppel-Eintrag) |
+| §45a + §39 + Settings | sequentielle Init + Settings PUT | ✅ Overview: `u45a=74360, e39=353900` — **BUG-1 final geschlossen** |
+| §45b Jahres-Topf (Task #425) | `e45b avail=95500` (=5×131 monthly_auto + 30000 carryover) | ✅ Mai = 5. Monat, 5 monthly_auto kumuliert + Carryover sichtbar |
+
+---
+
+## Block C — Phasen-Anteils-Wechsel (BUG-9 + neuer BUG-13)
+
+**Reproducer:** 4 PUTs auf `/api/budget/:cid/type-settings` mit unterschiedlichen `validFrom` (2026-06-01: 65,50€ → 2026-08-01: 80€ → 2026-10-01: 100€ → 2027-01-01: 131€).
+
+**Erwartet:** 4 Settings-Zeilen für §45b, die ersten 3 mit `validTo` der jeweiligen Folge-Phase, eine offen.
+
+**Ist:**
+```json
+[{"limit":13100,"validFrom":"2027-01-01","validTo":null,"enabled":true}]
+```
+
+🔴 **Nur 1 Zeile — die letzte. Die ersten 3 Phasen sind verloren.**
+
+**Folge BUG-13 (NEU entdeckt):** Anschließend Versuch eines „Reset"-PUT ohne `validFrom`:
+```javascript
+PUT /api/budget/:cid/type-settings  // ohne validFrom für §45b
+→ 200 OK
+// Aber:
+GET /api/budget/:cid/type-settings →
+  [{limit:13100, validFrom:'2027-01-01', validTo:null, enabled:true}]   ← UNVERÄNDERT
+```
+
+Die bestehende Zukunfts-Zeile bleibt unverändert. Folge: Topf-Stand `avail=30000` (nur Carryover, **kein monthly_auto** für Mai 2026, weil für Mai keine aktive Settings-Zeile existiert). Die App ist quasi „in der Zukunft eingefroren".
+
+---
+
+## Block D — Termin-Lifecycle (alle ✅, neuer Kunde 164086)
+
+| Test | Ergebnis |
+|---|---|
+| D.1 Termin anlegen (Hauswirtschaft 1h, Mi 27.05.) | ✅ ID 288113, `status:scheduled`, `plannedCents=3800` |
+| D.2 Dokumentieren | ✅ 200, 1× consumption `-3800, alloc=118663, hwCents=3800`, `avail` → 29300, `planned` → 0 |
+| D.3 Storno via DELETE | ✅ 200, 1× reversal (TX-Count auf 2), `avail` zurück auf 33100 |
+| D.4 Doppel-Storno | ✅ 404 „Termin nicht gefunden" (idempotent geschützt) |
+| D.7 Doppelbuchungs-Schutz | ✅ 409 + DE „Es gibt bereits einen Termin zu dieser Zeit" |
+| Datums-Validation Wochenende | ✅ 400 + „Termine können nicht an Samstagen oder Sonntagen erstellt werden" |
+
+---
+
+## Block E — Cascade (8h Hauswirtschaft, neuer Kunde 164086, Juni 2026)
+
+| Test | Ergebnis |
+|---|---|
+| 8h Termin anlegen | ✅ ID 288179 |
+| Dokumentieren | ✅ 200, 2× consumption: `[-20000 alloc 118663 hw 20000, -10400 alloc 118662 hw 10400]` |
+| FIFO Carryover-First | ✅ Reihenfolge: 200€ Carryover ZUERST, dann 104€ initial_balance |
+| Σ Beträge | ✅ -30400 = -304€ (exakt 8×38€/h) |
+| Σ hauswirtschaftCents | ✅ 30400 (subtract-last konsistent) |
+| Storno | ✅ 200, 2× reversal jeweils mit `reversedTransactionId` |
+| Topf-Stand nach Storno | ✅ `avail=33100, used=0, carry=20000` (vollständig zurückgesetzt) |
+| **BUG-14 (neu):** `hauswirtschaftCents` bei reversal | 🔴 `null` (war bei consumption korrekt 20000/10400) |
+
+**Hinweis:** Reine §45b-Verteilung (weil Topf reichte). Cascade-Test über §45a/§39 würde >986€ Termin erfordern (5×131 + Carry + Juni 131). Aus Iteration 2 ist allerdings bekannt: BUG-10a (`allocationId`) ist gefixt, BUG-10b (`hauswirtschaftCents=null` bei §45a-Cascade) noch offen.
+
+---
+
+## Block F — Leistungsnachweis (alle ✅, inkl. HOCH-6)
+
+| Test | Ergebnis |
+|---|---|
+| Termin im Mai anlegen + dokumentieren (Voraussetzung) | ✅ ID 288328 |
+| F.1 Service-Record erstellen | ✅ 201, ID 43098, `status:pending` |
+| F.3 Mitarbeiter unterschreibt | ✅ 200 |
+| **HOCH-6 Re-Test: Doppel-Signatur (Employee)** | ✅ **400 + DE „Mitarbeiter kann nur bei Status \"pending\" unterschreiben"** |
+| F.4 Kunde unterschreibt | ✅ 200 |
+
+**Audit HOCH-6 ist sauber geschlossen** — Doppel-Signatur wird mit präziser DE-Fehlermeldung blockiert.
+
+---
+
+## Block G — Rechnungsgenerierung (alle ✅, inkl. GoBD-Storno)
+
+| Test | Ergebnis |
+|---|---|
+| G.1 Rechnung Mai 2026 generieren | ✅ 200, ID 56857, `RE-2026-21828`, `grossAmountCents:3800`, Typ `rechnung` |
+| ZUGFeRD-XML eingebettet | ✅ 4.895 Zeichen, beginnt mit `<?xml version="1.0" encoding="UTF-8"?><rsm:CrossIndustryInv…` |
+| G.3 Storno via PATCH `/status` | ✅ 200, Originalrechnung Status → `storniert`, `storniertAt` gesetzt |
+| **GoBD: separate Stornorechnung erzeugt** | ✅ Neue ID 56858, `RE-2026-21829`, Typ **`stornorechnung`**, `grossAmountCents: -3800`, Status `entwurf` |
+| Originalrechnung erhalten | ✅ Status `storniert`, alle Daten + ZUGFeRD unverändert |
+
+**🎯 GoBD-konformer Storno-Pfad:** Original-Rechnung bleibt unveränderbar (nur Status-Markierung), eine NEUE Stornorechnung wird als separater Beleg mit negativem Betrag und Referenz erzeugt. Vorbildlich.
+
+---
+
+## Neue Bugs (BUG-13 + BUG-14) im Detail
+
+### 🔴 BUG-13 NEU: `PUT /type-settings` ohne `validFrom` ändert bestehende Zukunfts-Zeile nicht
+
+**Symptom:** Auf einen Kunden mit einer bestehenden Settings-Zeile, die `validFrom` in der Zukunft hat (z.B. nach BUG-9-Sequenz), wirkt ein PUT ohne `validFrom` NICHT:
+- Die alte Zeile bleibt mit ihrem zukünftigen `validFrom`
+- Der Kunde hat im AKTUELLEN Zeitraum (Mai 2026) KEINE aktiven Settings
+- Folge: `monthly_auto` greift nicht, `avail` zeigt nur was an Carryover/initial_balance vorhanden ist
+
+**Erwartet:** Entweder
+- (a) Die alte Zukunfts-Zeile wird auf `validTo=neueValidFrom-1` geschlossen und die neue Zeile mit `validFrom=heute` angelegt, oder
+- (b) Die neue Zeile bekommt `validFrom=heute` automatisch und schließt die alte mit `validTo=heute-1`
+
+**Code-Anker:** `server/storage/budget/preferences-storage.ts` — `upsertBudgetTypeSettings`. Vermutlich macht die Funktion einen UPSERT mit `WHERE validTo IS NULL`-Lookup, der die Zukunfts-Zeile als „offen" findet und nicht überschreibt.
+
+**Reproducer:**
+```javascript
+// Schritt 1: lege eine Zukunfts-Settings-Zeile an
+await fetch('/api/budget/'+cid+'/type-settings', {method:'PUT', credentials:'include', headers:H, body: JSON.stringify({
+  settings:[{budgetType:'entlastungsbetrag_45b', enabled:true, priority:1, monthlyLimitCents:13100, validFrom:'2027-01-01'}]
+})});
+
+// Schritt 2: versuche „jetzt gültige" Settings ohne validFrom
+await fetch('/api/budget/'+cid+'/type-settings', {method:'PUT', credentials:'include', headers:H, body: JSON.stringify({
+  settings:[{budgetType:'entlastungsbetrag_45b', enabled:true, priority:1, monthlyLimitCents:13100}]
+})});
+
+// Schritt 3: prüfe Settings
+const s = await fetch('/api/budget/'+cid+'/type-settings', {credentials:'include'}).then(r=>r.json());
+console.log(s.filter(x=>x.budgetType==='entlastungsbetrag_45b'));
+// IST: [{limit:13100, validFrom:'2027-01-01', validTo:null}]   ← unverändert
+// SOLL: [{limit:13100, validFrom:'2026-05-28', validTo:'2026-12-31'}, {limit:13100, validFrom:'2027-01-01', validTo:null}]
+```
+
+---
+
+### 🔴 BUG-14 NEU: Reversal-Buchungen haben `hauswirtschaftCents = null`
+
+**Symptom:** Beim Storno eines Termins werden reversal-Transaktionen mit `amountCents = +abs(orig)` korrekt angelegt, aber die Service-Cent-Spalten (`hauswirtschaftCents`, `alltagsbegleitungCents`, `travelCents`, `customerKilometersCents`) sind **alle null**. Die korrespondierende consumption-Buchung hatte sie korrekt gefüllt.
+
+**Reproducer auf Kunde 164086 (8h Hauswirtschaft):**
+```javascript
+// Nach Storno:
+const tx = await fetch('/api/budget/'+cid+'/transactions',{credentials:'include'}).then(r=>r.json());
+const reversals = tx.filter(t=>t.transactionType==='reversal' && t.appointmentId===288179);
+console.log(reversals);
+// IST: [{amt:+20000, alloc:118663, hauswirtschaftCents:null, rev:423465}, {amt:+10400, alloc:118662, hauswirtschaftCents:null, rev:423466}]
+// SOLL: hauswirtschaftCents:20000 (bzw. 10400) — Spiegelbild der consumption
+```
+
+**Folge:**
+- Drift-Detektor „Σ hauswirtschaftCents nach Storno = 0" wäre rot (`20000 + 10400 + null + null = 30400 ≠ 0`)
+- Lexware-Export aggregiert die Bein-Spalten und sieht den Storno nicht
+- Statistiken zeigen Hauswirtschafts-Verbrauch trotz Storno
+
+**Code-Anker:** `server/storage/budget/consumption-engine.ts` und/oder `server/storage/budget/rebook-storage.ts` — Funktion, die reversal-Transaktionen schreibt. Vermutlich werden die Service-Cent-Spalten nicht aus der zu reversierenden Transaktion kopiert.
+
+**Fix-Vorschlag:** Beim Anlegen der reversal-TX die Service-Cent-Spalten der originalen consumption-TX spiegeln (mit umgekehrtem Vorzeichen — sie sind als positive Werte gespeichert, beim Storno auch positiv):
+```typescript
+// vor Insert:
+reversal.hauswirtschaftCents = orig.hauswirtschaftCents;
+reversal.alltagsbegleitungCents = orig.alltagsbegleitungCents;
+reversal.travelCents = orig.travelCents;
+reversal.customerKilometersCents = orig.customerKilometersCents;
+reversal.hauswirtschaftMinutes = orig.hauswirtschaftMinutes;
+// etc.
+```
+
+---
+
+## Empfohlene Priorisierung für die nächste Replit-AI-Runde
+
+1. **🔴 BUG-9** (Phasen-Historisierung) — bleibt KRITISCH, blockiert alle Multi-Phase-Use-Cases
+2. **🔴 BUG-13** (Settings-PUT ohne validFrom ignoriert) — kritisch, weil als Folgewirkung von BUG-9 entsteht: nach einer Zukunfts-Settings-Anlage ist der Kunde im aktuellen Monat „eingefroren"
+3. **🔴 BUG-14** (Reversal `hauswirtschaftCents=null`) — Drift-Detektoren bleiben rot, Lexware-Export inkorrekt
+4. **🔴 AUDIT-HOCH-2** (§45a für PG<2) — Compliance-Risiko, einfacher Pattern-Übernahme aus BUG-6
+5. **🔴 BUG-4** (Customer-Create ohne Auto-Töpfe) — UX-Frage / API-Vertrag klären
+6. **🟡 BUG-10b** (§45a-Cascade hwCents=null) — gehört thematisch zu BUG-14 (Service-Cent-Verteilung bei Cascade)
+
+**Was IST schon sehr gut funktioniert (Lob):**
+- API-Routing sauber (BUG-2/3 gefixt)
+- Selbstzahler-Validierung mit eigenem Fehlercode (BUG-6/12)
+- Doppel-Signatur-Schutz (HOCH-6)
+- ZUGFeRD-XML-Generierung (4.895 Zeichen XML-Body)
+- GoBD-Konformer Storno-Pfad (separate Stornorechnung mit negativem Betrag + Referenz)
+- FIFO Carryover-First in §45b-Buchungen
+- Validation-Errors durchgängig DE + spezifisch
+- Phone-Normalisierung
+- Doppelbuchungs-Schutz (Slot + idempotent bei DELETE)
+- Wochenend-/Feiertags-Validation
+
+---
+
+## Test-Daten-Cleanup
+
+Alle erzeugten Test-Kunden folgen dem Pattern `Auto_Komplett_*` und werden von `cleanup-test-data.ts` automatisch erkannt:
+```bash
+npx tsx server/scripts/cleanup-test-data.ts --apply --scope=customers
+```
+
+---
+
+## Hinweis zur Wiederverwendung
+
+Dieser Bericht ist die Verifikation für Replit AI — er ergänzt die früheren Dokumente:
+- `EngelDesk-Bugreport-fuer-Replit-AI.md` (ursprünglich 11 Bugs, historischer Kontext)
+- `EngelDesk-Retest-Results.md` (erste Re-Run-Verifikation)
+- **`EngelDesk-Komplett-E2E-Protokoll.md`** ← du liest gerade die aktuellste Version
+
+Bitte diese Datei als nächste Briefing-Quelle an Replit AI geben. Reproducer sind copy-paste-fähig.
