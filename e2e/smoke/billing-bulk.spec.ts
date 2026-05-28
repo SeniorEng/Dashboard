@@ -234,11 +234,12 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
         page.locator(`[data-testid='generate-all-result-${kasse.customer.id}']`),
       ).toHaveCount(0);
 
-      // Dialog schließen, damit Rechnungs-Karten klickbar sind. Escape ist
-      // in diesem Dialog nicht zuverlässig (Focus liegt nach dem disabled
-      // confirm-Button nicht mehr im DialogContent), daher explizit den
-      // „Schließen"-Footer-Button klicken.
-      await page.getByRole("button", { name: "Schließen", exact: true }).first().click();
+      // Dialog schließen, damit Rechnungs-Karten klickbar sind. Task #762:
+      // Nach Abschluss zieht der Page den Fokus aktiv auf den „Schließen"-
+      // Button im Footer, damit Escape im DialogContent zuverlässig wirkt
+      // (und Tastatur-Nutzer den Dialog nicht „verlieren"). Dieser Smoke-Test
+      // ist gleichzeitig der Regression-Guard dafür.
+      await page.keyboard.press("Escape");
       await expect(page.locator("[data-testid='generate-all-summary']")).toHaveCount(0);
 
       // 3) Rechnungen müssen jetzt in der UI-Liste erscheinen (Task #540 —

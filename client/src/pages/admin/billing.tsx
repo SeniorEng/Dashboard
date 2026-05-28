@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { formatEuroDE } from "@shared/utils/money";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
@@ -158,6 +158,18 @@ export default function AdminBilling() {
   const [batchSending, setBatchSending] = useState(false);
   const [generateAllOpen, setGenerateAllOpen] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<GenerateAllResponse | null>(null);
+  // Task #762: Wenn der Confirm-Button nach dem Lauf disabled wird (entweder
+  // weil isPending true war und gerade auf false fällt, oder weil customers
+  // gefiltert sind), verliert er den Fokus an das <body>. Damit funktioniert
+  // Escape im DialogContent nicht mehr. Wir verschieben den Fokus aktiv auf
+  // den „Schließen"-Button im Footer, sobald das Ergebnis da ist — so kann
+  // Tastatur-Bedienung den Dialog mit Escape ODER Enter zuverlässig schließen.
+  const generateAllCloseBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (generateAllProgress && generateAllOpen) {
+      generateAllCloseBtnRef.current?.focus();
+    }
+  }, [generateAllProgress, generateAllOpen]);
   // Task #534: Bulk-Versand-Dialog (typenübergreifend).
   const [bulkSendOpen, setBulkSendOpen] = useState(false);
   const [bulkSendResult, setBulkSendResult] = useState<BulkSendInvoiceResponse | null>(null);
@@ -1395,15 +1407,17 @@ export default function AdminBilling() {
 
           <DialogFooter>
             <Button
+              ref={generateAllCloseBtnRef}
               variant="outline"
               onClick={() => { setGenerateAllOpen(false); setGenerateAllProgress(null); }}
               disabled={generateAllMutation.isPending}
+              data-testid="button-close-generate-all"
             >
               Schließen
             </Button>
             <Button
               onClick={() => generateAllMutation.mutate()}
-              disabled={generateAllMutation.isPending || !customers || customers.length === 0}
+              disabled={generateAllMutation.isPending || !customers || customers.length === 0 || !!generateAllProgress}
               className="bg-teal-600 hover:bg-teal-700 text-white"
               data-testid="button-confirm-generate-all"
             >
