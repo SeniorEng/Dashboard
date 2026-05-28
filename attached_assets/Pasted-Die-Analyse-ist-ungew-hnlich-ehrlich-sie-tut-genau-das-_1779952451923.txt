@@ -1,0 +1,14 @@
+Die Analyse ist ungewöhnlich ehrlich — sie tut genau das, was die meisten Tool-Vorschläge nicht tun: sie schaut sich die tatsächliche Bug-Historie an und fragt, ob das vorgeschlagene Werkzeug diese Bugs gefunden hätte. Und die Antwort ist korrekt: nein. Knowledge Graphs, Embeddings, Code-Suche helfen bei „wo ist das definiert" — eure Bugs sind aber vom Typ „die Berechnung ist an drei Stellen, zwei sind richtig". Das ist kein Suchproblem, sondern ein Strukturproblem.
+
+Was ich unterstütze (in der vorgeschlagenen Reihenfolge):
+
+Stufe 1 ist der richtige Hebel. SSoT pro Domäne + Read-Modelle pro UI-Karte adressieren die „Anzeige driftet gegen Buchung"-Klasse an der Wurzel. Genau richtig, dass mit Budget angefangen wird — das ist auch die Domäne mit den teuersten Fehlern.
+Architecture-Tests erweitern statt neue Tools. Ihr habt schon Architecture-Tests für calculate*/compute* — die Regel „kein SUM auf Budget-Tabellen außerhalb storage/budget" ist eine kleine Ergänzung mit großer Wirkung. Das ist mechanische Prävention, kein Vibes-Tooling.
+Ablehnung von Knowledge Graph / RAG / CodeQL ist korrekt. Für eure Größe ist TS-Compiler + ripgrep + Architecture-Tests die richtige Antwort.
+Wo ich vorsichtiger wäre:
+
+„3–5 Tage pro Domäne" ist optimistisch, wenn Drift schon existiert. Die echte Arbeit ist nicht das Erstellen der SSoT, sondern das Auffinden aller Stellen, die heute parallel rechnen, und das Migrieren ohne Regression. Realistisch eher 1–2 Wochen pro Domäne, mit dem ersten Durchlauf als teuersten.
+Read-Modell pro UI-Karte kann in Wildwuchs enden. Wenn jede Karte ihren eigenen View bekommt, hat man N gleich aussehende Views mit subtilen Unterschieden — die nächste Generation desselben Bugs. Mein Vorschlag: Read-Modelle gruppieren („Budget-Übersicht", „Budget-Settings", „Budget-Übergänge"), nicht 1:1 pro Karte.
+Stufe 2 (Repo-Map, SCIP) ist nice-to-have, nicht kritisch. Wenn Stufe 1 ordentlich durchgezogen wird, sinkt der Wert von „Agent orientiert sich schneller" automatisch, weil der Code selbst klarer wird. Würde ich erst angehen, wenn Stufe 1 für mindestens eine Domäne durch ist.
+Stufe 3 ist eine separate Achse und sollte nicht mit dem Bug-Prevention-Argument vermischt werden. Performance-Arbeit lohnt sich, aber nicht weil es Bugs verhindert.
+Mein Rat: Stufe 1.1 (Budget-SSoT) als nächste größere Arbeit, mit klarem Inventar vorab („wo wird heute Budget-Allocated gerechnet?") bevor irgendwas geschrieben wird. Stufe 2 zurückstellen. Stufe 3 separat priorisieren, wenn ein konkretes Performance-Problem akut wird
