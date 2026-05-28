@@ -99,15 +99,35 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
 
   if (existingReversal.length > 0) return existingReversal[0];
 
+  // Task #754 (BUG-14 / BUG-10b) — Service-Cent-/Minuten-/km-Spalten der
+  // Original-Consumption werden auf die Reversal-Tx GESPIEGELT und dabei
+  // vorzeichen-invertiert, damit Σ je Termin/appointmentId für jede
+  // Service-Spalte über {consumption + reversal} netto 0 ergibt — analog zur
+  // bereits geltenden Konvention für `amountCents` (consumption negativ,
+  // reversal positiv). Lexware-Export, §45b-Anzeige und Statistiken summieren
+  // diese Spalten; ohne Spiegelung blieben sie auf dem Voll-Wert der
+  // ursprünglichen Buchung hängen und der Termin würde nach Storno wie ein
+  // vollständig gebuchter Termin aussehen. Drift-Detektor:
+  // `tests/equality/storno-summe-null.test.ts`.
+  const orig = original[0];
+  const negate = (v: number | null | undefined) => (v == null ? null : -v);
   const reversal = await d.insert(budgetTransactions).values({
-    customerId: original[0].customerId,
-    budgetType: original[0].budgetType,
+    customerId: orig.customerId,
+    budgetType: orig.budgetType,
     transactionDate: todayISO(),
     transactionType: "reversal",
-    amountCents: -original[0].amountCents,
-    appointmentId: original[0].appointmentId,
-    allocationId: original[0].allocationId,
+    amountCents: -orig.amountCents,
+    appointmentId: orig.appointmentId,
+    allocationId: orig.allocationId,
     reversedTransactionId: transactionId,
+    hauswirtschaftMinutes: negate(orig.hauswirtschaftMinutes),
+    hauswirtschaftCents: negate(orig.hauswirtschaftCents),
+    alltagsbegleitungMinutes: negate(orig.alltagsbegleitungMinutes),
+    alltagsbegleitungCents: negate(orig.alltagsbegleitungCents),
+    travelKilometers: negate(orig.travelKilometers),
+    travelCents: negate(orig.travelCents),
+    customerKilometers: negate(orig.customerKilometers),
+    customerKilometersCents: negate(orig.customerKilometersCents),
     notes: `Storno von Transaktion #${transactionId}`,
     createdByUserId: userId,
   }).onConflictDoNothing().returning();

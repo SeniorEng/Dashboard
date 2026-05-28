@@ -562,18 +562,32 @@ export async function upsertBudgetTypeSettings(
         const isStillFresh = (oldValidFrom != null && oldValidFrom >= today)
           || (oldValidFrom == null && createdToday);
         if (isStillFresh) {
+          // Task #754 (BUG-13) — PUT ohne explizites `validFrom` auf eine
+          // offene Zeile, deren `validFrom` in der Zukunft liegt, bedeutet
+          // semantisch „jetzt aktivieren". Vor dem Fix hat
+          // `s.validFrom ?? oldValidFrom` das zukünftige Datum stur behalten,
+          // sodass die gerade gespeicherten Werte (Monatslimit, enabled, …)
+          // bis zum Stichtag UNSICHTBAR blieben und z.B. `monthly_auto` im
+          // laufenden Monat keine Allocation mehr erzeugte. Wir ziehen die
+          // Zeile in diesem Fall idempotent auf `today` vor — die Historie
+          // bleibt korrekt, weil die alte Zukunfts-Konfiguration noch nie
+          // „in Kraft" war (Konsumtions-Lookups arbeiten mit `validFrom <=
+          // transactionDate`). Explizites `s.validFrom` aus dem Payload
+          // hat weiterhin Vorrang.
+          const pullForward = s.validFrom == null && oldValidFrom != null && oldValidFrom > today;
+          const effectiveValidFrom = s.validFrom ?? (pullForward ? today : oldValidFrom);
           await executor.update(customerBudgetTypeSettings)
             .set({
               enabled: s.enabled,
               priority: s.priority,
               monthlyLimitCents: s.monthlyLimitCents ?? null,
               yearlyLimitCents: s.yearlyLimitCents ?? null,
-              validFrom: s.validFrom ?? oldValidFrom,
+              validFrom: effectiveValidFrom,
               validTo: s.validTo ?? null,
               updatedAt: sql`now()`,
             })
             .where(eq(customerBudgetTypeSettings.id, current.id));
-          auditEntries.push({ kind: "in_place_update", budgetType: s.budgetType, before: current, after: s, nextValidFrom: s.validFrom ?? oldValidFrom });
+          auditEntries.push({ kind: "in_place_update", budgetType: s.budgetType, before: current, after: s, nextValidFrom: effectiveValidFrom });
         } else {
           await executor.update(customerBudgetTypeSettings)
             .set({ validTo: today, updatedAt: sql`now()` })

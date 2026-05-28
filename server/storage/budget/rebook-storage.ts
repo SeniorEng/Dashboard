@@ -80,6 +80,12 @@ export async function rebookSingleTransaction(
 
     const absAmount = Math.abs(original.amountCents);
 
+    // Task #754 (BUG-14 / BUG-10b) — Service-Cent-/Minuten-/km-Spalten der
+    // Original-Consumption spiegeln (vorzeichen-invertiert), damit Σ je
+    // Service-Spalte über {original consumption + reversal} = 0. Andernfalls
+    // bleibt der Termin in Lexware/Statistik als „voll gebucht" sichtbar,
+    // obwohl der Umbuchungs-Storno die Zahlung zurückgenommen hat.
+    const negate = (v: number | null | undefined) => (v == null ? null : -v);
     const [reversalTransaction] = await tx.insert(budgetTransactions)
       .values({
         customerId,
@@ -90,6 +96,14 @@ export async function rebookSingleTransaction(
         appointmentId: original.appointmentId,
         allocationId: original.allocationId,
         reversedTransactionId: transactionId,
+        hauswirtschaftMinutes: negate(original.hauswirtschaftMinutes),
+        hauswirtschaftCents: negate(original.hauswirtschaftCents),
+        alltagsbegleitungMinutes: negate(original.alltagsbegleitungMinutes),
+        alltagsbegleitungCents: negate(original.alltagsbegleitungCents),
+        travelKilometers: negate(original.travelKilometers),
+        travelCents: negate(original.travelCents),
+        customerKilometers: negate(original.customerKilometers),
+        customerKilometersCents: negate(original.customerKilometersCents),
         notes: `Storno für Umbuchung nach ${targetBudgetType} (Transaktion #${transactionId})`,
         createdByUserId: userId,
       })
@@ -250,6 +264,12 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
         let localReversedCount = 0;
         let localOldAmountCents = 0;
 
+        // Task #754 (BUG-10b) — Cascade-Storno spiegelt pro Reversal-TX die
+        // anteiligen Service-Cents/-Minuten/-km der korrespondierenden
+        // Consumption-TX (vorzeichen-invertiert), sodass Σ pro Service-Spalte
+        // über alle Cascade-Töpfe + ihre Storno-Zeilen netto 0 ergibt — auch
+        // dann, wenn ein Termin §45b + §45a + §39 gleichzeitig getroffen hat.
+        const negate = (v: number | null | undefined) => (v == null ? null : -v);
         for (const oldTx of unreversedConsumptions) {
           await tx.insert(budgetTransactions).values({
             customerId,
@@ -260,6 +280,14 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
             appointmentId: oldTx.appointmentId,
             allocationId: oldTx.allocationId,
             reversedTransactionId: oldTx.id,
+            hauswirtschaftMinutes: negate(oldTx.hauswirtschaftMinutes),
+            hauswirtschaftCents: negate(oldTx.hauswirtschaftCents),
+            alltagsbegleitungMinutes: negate(oldTx.alltagsbegleitungMinutes),
+            alltagsbegleitungCents: negate(oldTx.alltagsbegleitungCents),
+            travelKilometers: negate(oldTx.travelKilometers),
+            travelCents: negate(oldTx.travelCents),
+            customerKilometers: negate(oldTx.customerKilometers),
+            customerKilometersCents: negate(oldTx.customerKilometersCents),
             notes: `Storno von Transaktion #${oldTx.id} (Umbuchung)`,
             createdByUserId: userId,
           });

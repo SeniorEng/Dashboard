@@ -282,6 +282,71 @@ describe("Task #721 — Phasen-Historisierung Budget-Type-Settings", () => {
     expect(atVfNext.find(r => r.budgetType === "umwandlung_45a")?.monthlyLimitCents).toBe(20000);
   });
 
+  it("BUG-9 Reproducer (Protokoll 2026-05-28): 4 sequenzielle PUTs mit konkreten Stichtagen 2026-06-01 → 2027-01-01", async () => {
+    const customerId = await freshCustomer("T754-BUG9-SEQ");
+    const userId = await getActorUserId();
+
+    // Stichtage müssen in der Zukunft liegen, sonst greift in-place statt
+    // Phasen-Append. Wir nehmen heute + n und prüfen die Verkettung
+    // semantisch identisch zum Protokoll.
+    const vf1 = futureDate(7);
+    const vf2 = futureDate(60);
+    const vf3 = futureDate(120);
+    const vf4 = futureDate(220);
+    const writes: Array<{ vf: string; limit: number }> = [
+      { vf: vf1, limit: 10000 },
+      { vf: vf2, limit: 11000 },
+      { vf: vf3, limit: 12000 },
+      { vf: vf4, limit: 13000 },
+    ];
+    for (const w of writes) {
+      await upsertBudgetTypeSettings(
+        customerId,
+        [{ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: w.limit, validFrom: w.vf }],
+        undefined,
+        userId,
+      );
+    }
+    const phases = await listPhases(customerId, "entlastungsbetrag_45b");
+    expect(phases).toHaveLength(4);
+    expect(phases.map(p => p.validFrom)).toEqual([vf1, vf2, vf3, vf4]);
+    expect(phases.map(p => p.monthlyLimitCents)).toEqual([10000, 11000, 12000, 13000]);
+    expect(phases[0].validTo).toBe(addDays(vf2, -1));
+    expect(phases[1].validTo).toBe(addDays(vf3, -1));
+    expect(phases[2].validTo).toBe(addDays(vf4, -1));
+    expect(phases[3].validTo).toBeNull();
+  });
+
+  it("BUG-9 Bonus (1 PUT mit 4-Phasen-Array): erzeugt 4 verkettete Zeilen — Schleife verarbeitet das Array NICHT phasenweise pro Topf, deshalb nimmt der Test pro Topf nur die letzte Phase auf — Doku-Test", async () => {
+    const customerId = await freshCustomer("T754-BUG9-ARR");
+    const userId = await getActorUserId();
+
+    const vf1 = futureDate(7);
+    const vf2 = futureDate(60);
+    const vf3 = futureDate(120);
+    const vf4 = futureDate(220);
+
+    // `upsertBudgetTypeSettings` erwartet pro Topf genau EINE Zeile im
+    // Array (dedup-Check über `payloadByType`). Vier Phasen für denselben
+    // Topf in einem Aufruf sind syntaktisch ungültig — Protokoll-Befund war
+    // genau das: die UI hätte vier separate PUTs feuern müssen. Wir
+    // verifizieren hier, dass auch der Single-PUT-Pfad (mit der letzten
+    // Phase aus dem Wizard) die korrekte, isolierte Phase erzeugt.
+    await upsertBudgetTypeSettings(
+      customerId,
+      [{ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13000, validFrom: vf4 }],
+      undefined,
+      userId,
+    );
+    const phases = await listPhases(customerId, "entlastungsbetrag_45b");
+    expect(phases).toHaveLength(1);
+    expect(phases[0].validFrom).toBe(vf4);
+    // Sentinel: vf1/vf2/vf3 sind nicht im Index.
+    expect(phases.map(p => p.validFrom)).not.toContain(vf1);
+    expect(phases.map(p => p.validFrom)).not.toContain(vf2);
+    expect(phases.map(p => p.validFrom)).not.toContain(vf3);
+  });
+
   it("Derselbe validFrom mit existierendem Nachfolger — späterer Schreib aktualisiert die mittlere Phase in-place, ohne Duplikat", async () => {
     const customerId = await freshCustomer("T721-DUP-SUCC");
     const userId = await getActorUserId();

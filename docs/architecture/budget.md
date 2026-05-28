@@ -156,3 +156,57 @@ Carryover ist nur für §45b verfügbar — Server validiert, UI rendert die Sek
 Server validiert Werte > 131 € mit deutscher Fehlermeldung; `clampToStatutoryMax` greift als Safety-Net. Per-Monat-Lookup über die historisierten Zeilen (`validFrom`/`validTo`, Stichtag = Mitte-des-Monats) garantiert, dass rückwirkende Buchungen den damals gültigen Anteil sehen.
 
 Die Startup-Migration `clear-45b-monthly-limits` ist No-Op, damit Re-Deploys konfigurierte Werte nicht wegwerfen.
+
+## Storno / Reversal — Service-Cent-Spiegel-Konvention (Task #754)
+
+Jede Reversal-TX SPIEGELT die Service-Cent-, Minuten- und Kilometer-Spalten
+ihrer korrespondierenden Consumption-TX **vorzeichen-invertiert**:
+
+| Spalte                       | Consumption        | Reversal             |
+|------------------------------|--------------------|----------------------|
+| `amountCents`                | `-X` (negativ)     | `+X` (positiv)       |
+| `hauswirtschaftCents`        | `+a` (positiv)     | `-a` (negativ)       |
+| `alltagsbegleitungCents`     | `+b`               | `-b`                 |
+| `travelCents`                | `+c`               | `-c`                 |
+| `customerKilometersCents`    | `+d`               | `-d`                 |
+| `hauswirtschaftMinutes`      | `+m1`              | `-m1`                |
+| `alltagsbegleitungMinutes`   | `+m2`              | `-m2`                |
+| `travelKilometers`           | `+k1`              | `-k1`                |
+| `customerKilometers`         | `+k2`              | `-k2`                |
+
+**Invariante**: `Σ <spalte>` über `{consumption + reversal}` je `appointmentId`
+= 0 für alle Service-Spalten. Lexware-Export, §45b-Anzeige und Statistik
+summieren diese Spalten direkt — stornierte Termine ergeben damit netto 0
+gebuchte Hauswirtschaft / Alltagsbegleitung / Reisekosten / Customer-km.
+
+**Aufrufer-Pflicht**: jede neue Code-Stelle, die eine Reversal-TX einfügt,
+muss die Service-Spalten aus der Original-Consumption übernehmen und negieren.
+Die drei produktiven Pfade sind:
+- `reverseBudgetTransaction` in `server/storage/budget/transaction-storage.ts`
+- `rebookSingleTransaction` in `server/storage/budget/rebook-storage.ts`
+- `rebookDisabledBudgetTransactions` (Cascade-Loop) ebenda
+
+Drift-Detektor: `tests/equality/storno-summe-null.test.ts`
+Konventions-Test: `tests/budget/reversal-service-cents-mirror.test.ts`
+
+**GoBD / Bestandsdaten**: Reversal-Tx, die vor Task #754 mit `NULL`-Service-
+Spalten geschrieben wurden, werden NICHT in-place korrigiert. Falls bei
+Audit Produktivdaten betroffen, separater Korrektur-Task: Storno der
+beschädigten Reversal + Neuanlage mit korrekten Spiegel-Werten.
+
+## PUT `/type-settings` ohne `validFrom` auf Zukunfts-Zeile (BUG-13 / Task #754)
+
+Liegt für einen Topf eine offene Zeile mit `validFrom > today` vor und sendet
+der Aufrufer einen PUT **ohne** explizites `validFrom`, wird die bestehende
+Zeile auf `validFrom = today` vorgezogen (In-Place-Update mit den neuen
+Werten). Begründung: solange `validFrom > today`, war die Zeile noch nie
+"in Kraft" — keine Buchung kann sie referenziert haben (Konsumtions-Lookups
+nutzen `validFrom <= transactionDate`). Pull-Forward macht die neu
+gespeicherten Werte (Limit, enabled, Priorität) im laufenden Monat sofort
+sichtbar und damit für `monthly_auto` greifbar.
+
+Explizites `validFrom` im Payload hat weiterhin Vorrang und triggert wie
+zuvor entweder den Phasen-Append-Pfad (Zukunftsdatum) oder die
+Transitions-/In-Place-Logik (heutiges/gestriges Datum).
+
+Regressions-Test: `tests/budget/type-settings-future-row-overwrite.test.ts`

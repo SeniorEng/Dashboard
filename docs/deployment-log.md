@@ -1084,3 +1084,44 @@ Zur Sicherheit zusätzlich gegen `heliumdb` (~1.171 customers / 13.243 appointme
 - **Tests:** `tests/equality/45b-carryover-no-pre-year-double-count.test.ts` (2 Szenarien — Schröder-Repro + IB-blockt-Shift-Guard), `tests/equality/45b-validto-clear-roundtrip.test.ts` (2 Szenarien — echte Transition liefert über `getLatestBudgetTypeSettings` die neue offene Zeile, Booking-Pfad weiterhin chronologisch korrekt; direkter Tie-Break-Test mit zwei manuell gesetzten Zeilen). Beide Suiten failten gegen die alte Implementierung, passen gegen die neue.
 - **Schema-Änderungen:** keine. Read-Path-Refactor in `server/storage/budget/preferences-storage.ts`, Interface-Erweiterung in `server/storage/budget-ledger.ts`, Calc-Patch in `server/storage/budget/allocation-storage.ts`, Route-Switch in `server/routes/budget.ts`.
 - **Publish-Status:** ⏳ ausstehend.
+
+## 2026-05-28 — Task #754: Budget-E2E-Protokoll 28.05., 6 offene Bugs geschlossen
+
+- **BUG-14 / BUG-10b** (Reversal-Service-Cent-Spiegel): `reverseBudgetTransaction`
+  (server/storage/budget/transaction-storage.ts) und beide Reversal-Pfade in
+  `server/storage/budget/rebook-storage.ts` kopieren jetzt die
+  Service-Cent-/Minuten-/Kilometer-Spalten der Original-Consumption-TX
+  VORZEICHEN-INVERTIERT auf die Reversal-TX. Σ je Service-Feld über
+  {consumption + reversal} je `appointmentId` ergibt netto 0. Drift-Detektor:
+  `tests/equality/storno-summe-null.test.ts`, Konventions-Test:
+  `tests/budget/reversal-service-cents-mirror.test.ts`. **Backfill für
+  historische Daten = OUT-OF-SCOPE** (vgl. Task #754 §"Out of scope"); falls
+  bei Audit Produktivdaten betroffen, separater GoBD-Korrektur-Task (Storno +
+  Neuanlage, kein In-Place-Update).
+- **BUG-13** (PUT `/type-settings` ohne `validFrom` auf Zukunfts-Zeile):
+  In-Place-Update-Pfad in `upsertBudgetTypeSettings`
+  (server/storage/budget/preferences-storage.ts) zieht eine offene Zeile mit
+  `validFrom > today` jetzt auf `today` vor, wenn das Payload kein explizites
+  `validFrom` mitliefert. Damit werden neu gespeicherte Werte (Limit, enabled,
+  Priorität) sofort aktiv und `monthly_auto` greift im laufenden Monat
+  wieder. Regressions-Test: `tests/budget/type-settings-future-row-overwrite.test.ts`.
+- **BUG-9** (Phasen-Historisierung mehrerer PUTs): Wurzelpfad
+  `upsertBudgetTypeSettings` ist seit Task #721 korrekt; der Protokoll-Befund
+  war nicht reproduzierbar. Zusätzlicher Regressions-Wächter mit den exakten
+  Protokoll-Stichtagen plus ein Doku-Test zur 1-PUT-Single-Phase-Variante
+  eingebaut in `tests/budget/task-721-phased-type-settings.test.ts`.
+- **BUG-4** (Customer-Create-API ohne Auto-Töpfe): Verhalten ist seit Task
+  #724 dokumentiert (Variante B: kein implizites Anlegen, aber strukturierte
+  Markierung `budgetSetupRequired` + `requiredBudgetTypes` in der
+  POST-Response). Keine Code-Änderung; Verhalten in
+  `docs/architecture/budget.md` festgehalten.
+- **AUDIT-HOCH-2** (§45a für PG<2): Validator `validatePflegegrad45a` ist
+  seit Task #722 in `POST /initial-budget` und `PUT /type-settings`
+  verdrahtet (server/routes/budget.ts → `rejectBudgetIntent`). Bestehender
+  Test `tests/budget/task-722-pflegegrad-45a.test.ts` deckt den Reproducer
+  ab. Keine Code-Änderung.
+
+Sign-Konvention für Reversal-Tx ab #754: `amountCents` invertiert (wie
+bisher), Service-Cents/-Minuten/-km ebenfalls invertiert (NEU). Lexware-/
+Statistik-Aggregatoren, die `SUM(serviceCent)` über consumption + reversal
+ausrechnen, sehen 0 für stornierte Termine.
