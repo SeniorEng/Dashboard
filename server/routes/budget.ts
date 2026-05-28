@@ -258,6 +258,29 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   });
 }));
 
+/**
+ * Task #727 — Phase 1.3 `BudgetHistoryView`: monatliche Aggregation der
+ * Budget-Transaktionen pro Pot. Antwort exponiert beide Sichten:
+ *   - `netUsedAllocationCents` (Topf-Sicht, inkl. write_off)
+ *   - `netUsedWindowCents` (Fenster-Cap-Sicht, ohne write_off)
+ * Equality-Test `tests/equality/budget-history-vs-overview.test.ts`
+ * verifiziert SUM(monatlich, §45b) === `getBudgetSummary.totalUsedCents`.
+ */
+router.get("/:customerId/history", checkCustomerAccess, asyncHandler("Budget-Historie konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+  const from = typeof req.query.from === "string" ? req.query.from : undefined;
+  const to = typeof req.query.to === "string" ? req.query.to : undefined;
+  const budgetTypeParam = req.query.budgetType;
+  const budgetTypes = typeof budgetTypeParam === "string"
+    ? [budgetTypeParam]
+    : Array.isArray(budgetTypeParam)
+      ? budgetTypeParam.filter((s): s is string => typeof s === "string")
+      : undefined;
+  const buckets = await budgetLedgerStorage.getMonthlyHistory(customerId, { from, to, budgetTypes });
+  res.json({ buckets });
+}));
+
 router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;

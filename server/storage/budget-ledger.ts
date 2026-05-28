@@ -17,6 +17,8 @@ import * as summary from "./budget/summary-queries";
 import * as consumption from "./budget/consumption-engine";
 import * as rebook from "./budget/rebook-storage";
 import * as pricing from "./budget/appointment-cost-calculator";
+import * as history from "./budget/history-aggregation";
+import type { MonthlyHistoryBucket } from "@shared/domain/budget/history-aggregation";
 
 interface BudgetLedgerStorage {
   createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation>;
@@ -32,6 +34,9 @@ interface BudgetLedgerStorage {
   getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary>;
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
   getPlannedCostCents(customerId: number): Promise<number>;
+  // Task #727 — Phase 1.3: monatliche History-Aggregation (Allocations- und
+  // Fenster-Cap-Sicht) über die pure `aggregateHistoryByMonth`.
+  getMonthlyHistory(customerId: number, opts?: history.GetMonthlyHistoryOptions): Promise<MonthlyHistoryBucket[]>;
 
   getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined>;
   upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number): Promise<CustomerBudgetPreferences>;
@@ -96,6 +101,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   getBudgetSummary: summary.getBudgetSummary,
   getAllBudgetSummaries: summary.getAllBudgetSummaries,
   getPlannedCostCents: pricing.getPlannedCostCents,
+  getMonthlyHistory: history.getMonthlyHistory,
 
   getBudgetPreferences: preferences.getBudgetPreferences,
   upsertBudgetPreferences: preferences.upsertBudgetPreferences,

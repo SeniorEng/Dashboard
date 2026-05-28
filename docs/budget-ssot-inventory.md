@@ -413,3 +413,23 @@ Buchhalterische Bestätigung der Regel folgt in Phase 1.3 (`write_off` als Archi
 > **Regel:** `write_off` zählt in der **Topf-/Allocation-Sicht** als Used (es ist Geld, das aus dem Topf raus ist), aber NICHT in der **Fenster-Cap-Sicht** (es ist keine Termin-Konsumption im Fenster).
 
 Phase 1.3 hebt diese Regel als Architecture-Test fest (Test scannt nach `transactionType IN (...)`-Listen und gleicht gegen eine Allowlist pro Datei ab), damit eine neue Call-Site sich aktiv für eine Sicht entscheiden muss.
+
+### Phase 1.3 — `BudgetHistoryView` (abgeschlossen, Task #727)
+
+Geliefert in dieser Iteration:
+- **Pure Monats-Aggregation** `shared/domain/budget/history-aggregation.ts` (`aggregateHistoryByMonth`, Querschnitts-Auflage A erfüllt: keine DB-Zugriffe, keine Defaults). Output pro Monatsbucket exponiert BEIDE Sichten explizit: `netUsedAllocationCents` (Topf-Sicht, inkl. `write_off`/`manual_adjustment`) UND `netUsedWindowCents` (Fenster-Cap-Sicht, ausschließlich `consumption − reversal`). Damit muss eine UI sich aktiv für eine Sicht entscheiden — ein dritter, drifteanfälliger „kombinierter" Used-Wert kann nicht versehentlich entstehen.
+- **DB-Lader-Wrapper** `server/storage/budget/history-aggregation.ts` (`getMonthlyHistory`). Einzige Stelle, die `budget_transactions` für die History-Sicht roh liest, delegiert die Aggregation an die pure Funktion. Re-Export über `server/storage/budget-ledger.ts`.
+- **Konsolidierter Endpunkt** `GET /api/budget/:customerId/history?from=&to=&budgetType=` (`checkCustomerAccess`, mirror von `/overview`). Frontend/Equality-Tests konsumieren denselben Aggregat-Output statt eigener Filter über `/transactions`.
+- **Drift-Schutz Equality** `tests/equality/budget-history-vs-overview.test.ts` (Random-Customer + §45b-Szenario mit Initial-Balance, 2 dokumentierten Terminen, 1 Reversal, 1 Manual-Adjustment): `SUM(history.netUsedAllocationCents, §45b) === overview.entlastungsbetrag45b.totalUsedCents`. Wenn jemand künftig in `getBudgetSummary` oder `aggregateHistoryByMonth` eine Buchungs-Typ-Klassifizierung verschiebt, schlägt der Test mit der konkreten Differenz fehl.
+- **Drift-Schutz Architecture** `tests/architecture/budget-write-off-classification.test.ts`: scannt Server- und Shared-Code nach `'write_off'`-Treffern in `transactionType`-Kontext und gleicht gegen eine Allowlist pro Datei (mit Sicht-Klassifizierung) ab. Neue Call-Sites müssen sich aktiv eintragen UND die Audit-Tabelle in §1.4 ergänzen — die in §7 Beschluss #9 verlangte „Audit-first statt Regel-first"-Disziplin ist damit ab jetzt automatisiert geschützt.
+
+Bewusst NICHT in dieser Iteration (Phase 2):
+- **`customer_budgets`-Fallback aus `getMonthlyBudgetAmountCents` entfernen.** Beschluss #1 verlangt vor der Entfernung einen SQL-Check (Kunden ohne Settings-Eintrag, aber mit alten `customer_budgets`-Daten würden sonst still mit 0 rendern). Die Tabelle bleibt vorerst Read-Only-Historie. Bewusste Phase-2-Aufgabe gemeinsam mit der echten Tabellen-Abschaltung.
+- **`getInitialBalanceAllocations` / Allocation-Listen in den `BudgetHistoryView`-Endpunkt ziehen.** Die aktuelle History-Aggregation deckt den Transaktionsteil der Sicht ab; Allocation-/Audit-Joins folgen, sobald die Frontend-Umstellung der History-UI (`BudgetLedgerSection.tsx`) angesetzt wird. Die Aggregations-SSoT steht bereits — eine Erweiterung des DTO ist additiv, ohne Drift-Risiko.
+
+### Phase 2 — freigeschaltet
+
+Mit Abschluss der drei Read-Views (Settings, Overview, History) und der `write_off`-Architecture-Schranke ist Phase 2 freigeschaltet:
+- `BudgetForecastView` (Blocker: Task #704-Stabilität).
+- `customer_budgets`-Tabelle abschalten (SQL-Pre-Check + Fallback-Removal in `getMonthlyBudgetAmountCents`/`getCustomerBudgetAmounts`, danach `PflegegradBudgetSection.tsx` als Read-Only-Historie auf den History-Endpunkt umstellen).
+- Stats-V2-Batch-Read (`getOverviewBatch(customerIds[])`, Architecture-Test: max. X Queries unabhängig von N).
