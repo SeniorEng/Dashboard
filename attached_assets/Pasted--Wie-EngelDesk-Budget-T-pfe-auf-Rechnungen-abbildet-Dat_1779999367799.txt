@@ -1,0 +1,249 @@
+# Wie EngelDesk Budget-Töpfe auf Rechnungen abbildet
+
+**Datum:** 2026-05-28
+**Anlass:** Frage von Alrik — „Wo sieht man auf Rechnungen welcher Budgettopf abgerechnet wird? Und was passiert bei Cascade z.B. 10€ §45b + 40€ §39?"
+**Quelle:** Code-Analyse (`server/routes/billing.ts`, `shared/schema/billing.ts`) + Live-Tests Iteration 2/3
+**Status:** **Fachlich heikel — siehe Empfehlung am Ende**
+
+---
+
+## TL;DR (3 Sätze)
+
+1. **Eine Rechnung pro Empfänger pro Monat** — wenn `billingType=pflegekasse_gesetzlich`, geht **eine** Rechnung an die in den Stammdaten hinterlegte Kasse mit dem GESAMTBETRAG aller dort dokumentierten Termine.
+2. **Es gibt KEINE Aufschlüsselung pro Budgettopf** auf der Rechnung — weder ein Feld an der Rechnung selbst noch an den Line Items. Die `invoice_line_items`-Tabelle hat kein `budgetType`-Feld; jede Zeile beschreibt einen Termin mit Dauer, Stundensatz, Gesamtbetrag.
+3. **Bei Cascade (10€ §45b + 40€ §39)** sieht die Pflegekasse nur „1h Hauswirtschaft, 50€" — sie muss selbst entscheiden, aus welchem ihrer Töpfe sie wie viel anrechnet. Das ist **gegenüber der Kasse intransparent** und liegt aktuell außerhalb der Rechnungs-Spalten.
+
+---
+
+## Was hat eine Rechnung an Empfänger-/Topf-Information?
+
+**`invoices`-Tabelle (`shared/schema/billing.ts:33`):**
+
+| Feld | Inhalt | Empfänger-relevant? |
+|---|---|---|
+| `billingType` | `selbstzahler` / `pflegekasse_gesetzlich` / `pflegekasse_privat` | ✅ Bestimmt Empfänger-Typ |
+| `recipientName` | „AOK Bayern" oder „Max Mustermann" | ✅ |
+| `recipientAddress` | Adresse | ✅ |
+| `insuranceProviderName` | „AOK Bayern" | ✅ |
+| `insuranceIkNummer` | IK-Nummer | ✅ |
+| `versichertennummer` | Versicherten-Nr. | ✅ |
+| `pflegegrad` | Snapshot zum Zeitpunkt | ⓘ informativ |
+| `assignmentDeclarationDate`/`Ref` | Abtretungserklärung | ⓘ informativ |
+| **`budgetType`** | **— gibt es nicht** | 🔴 **fehlt** |
+
+**`invoice_line_items`-Tabelle (`shared/schema/billing.ts:103`):**
+
+| Feld | Inhalt |
+|---|---|
+| `appointmentId`, `appointmentDate`, `startTime`, `endTime` | Termin-Bezug |
+| `serviceCode`, `serviceDescription` | z.B. `hauswirtschaft`, „Hauswirtschaft" |
+| `durationMinutes`, `quantityRaw`, `quantityUnit` | Menge |
+| `unitPriceCents`, `totalCents` | Preis |
+| `employeeName` | Mitarbeiter |
+| `serviceDetails` | Freitext-Detail |
+| **`budgetType`** | **— gibt es nicht** |
+| **`budgetSource`** | **— gibt es nicht** |
+
+Damit ist beim Rendern der Rechnung (PDF und ZUGFeRD-XML) **per Spalten-Inventar gar nicht ableitbar, welcher Topf wie viel beigetragen hat**.
+
+---
+
+## Wie funktioniert die Aufteilung heute? (`server/routes/billing.ts:894-1027`)
+
+### Schritt 1 — Topf-Aggregation pro Termin
+
+`getBudgetSplitForAppointments` liest alle `consumption`-Transaktionen pro Termin und summiert **nur in zwei Buckets**:
+
+```typescript
+if (txn.budgetType === "private") {
+  existing.privateCents += absCents;     // Selbstzahler-Anteil
+} else {
+  existing.kasseCents += absCents;        // ALLE Pflegekassen-Töpfe zusammen
+                                          // (§45b + §45a + §39 + §42a)
+}
+```
+
+Es gibt also genau **2 Kategorien:**
+- `kasseCents` — Summe aller Pflegekassen-Töpfe (§45b + §45a + §39/§42a)
+- `privateCents` — Selbstzahler-Anteil (wenn Kunde `acceptsPrivatePayment` hat und ein Termin den Cap überschritten hat)
+
+### Schritt 2 — Rechnungs-Split (nur Kasse vs. Privat)
+
+`splitLineItemsByBudget` (`billing.ts:927`) entscheidet basierend auf dem Termin-Aggregat:
+
+```
+if split.privateCents == 0:   alle Items → Kasse-Rechnung
+if split.kasseCents   == 0:   alle Items → Privat-Rechnung
+if beide > 0:                 anteilig auf 2 Rechnungen aufgeteilt
+```
+
+→ Es entstehen ggf. **2 Rechnungen** für denselben Termin/Monat:
+- eine an die Pflegekasse mit dem Kassen-Anteil
+- eine an den Kunden mit dem Privat-Anteil
+
+### Schritt 3 — Rendering
+
+Jede Rechnung wird gerendert mit ihrem `recipientName` / `recipientAddress` aus:
+- Bei Kasse: `insurance_provider.empfaenger` / Adresse (aus den Kostenträger-Stammdaten)
+- Bei Selbstzahler / Privatabrechnung: Kunden-Name + Kunden-Adresse
+
+**Aber:** Die Kassen-Rechnung enthält keinerlei Topf-Aufschlüsselung. Die Pflegekasse sieht nur „Mai 2026, Hauswirtschaft 1h, 50€".
+
+---
+
+## Konkretes Cascade-Beispiel (Live-Test Iteration 3 nachgestellt)
+
+**Setup** (Kunde 165852, PG4 Pflegekasse_gesetzlich):
+- §45b verfügbar: 10€ (`monthlyLimitCents=1000`)
+- §45a verfügbar: 743,60€
+- §39 deaktiviert (vereinfachtes Szenario)
+
+**Termin:** 1h Hauswirtschaft = 38€ → §45b reicht nicht (10€) → Cascade auf §45a (28€)
+
+**`budget_transactions` nach Dokumentation (live verifiziert):**
+
+```json
+[
+  {"appointmentId": 290581, "budgetType": "entlastungsbetrag_45b", "amountCents": -1000, "hauswirtschaftCents": 1000},
+  {"appointmentId": 290581, "budgetType": "umwandlung_45a",         "amountCents": -2800, "hauswirtschaftCents": 2800}
+]
+```
+
+Σ = -3800 = -38€ ✓
+
+**Was passiert bei `getBudgetSplitForAppointments(165852, [290581])`?**
+
+```
+splitMap[290581] = { kasseCents: 3800, privateCents: 0 }
+                                ^^^^
+                  §45b 1000 + §45a 2800 — beide gemischt in EINEM Bucket
+```
+
+**Was passiert bei `splitLineItemsByBudget(...)`?**
+
+`privateCents = 0` → alle Line Items gehen in die **Kassen-Rechnung**.
+
+**Was steht auf der Rechnung an die Pflegekasse?**
+
+| Pos | Beschreibung | Datum | Menge | Einzelpreis | Summe |
+|---:|---|---|---:|---:|---:|
+| 1 | Hauswirtschaft | 28.05.2026 | 1,0 Std. | 38,00 € | 38,00 € |
+
+**Genau eine Zeile. Kein Hinweis, dass davon 10€ aus §45b und 28€ aus §45a kommen sollen.** Die Kasse müsste das aus den Pflegegrad-Stammdaten und dem laufenden Topf-Stand selbst rekonstruieren.
+
+---
+
+## Was passiert, wenn `acceptsPrivatePayment` aktiv ist (2-Wege-Split)?
+
+Dann läuft `needsBudgetSplit = true` (`billing.ts:1130-1132`). Beispiel:
+- Termin 50€
+- §45b deckt 30€ → `kasseCents = 30`
+- Restbetrag 20€ als `budgetType="private"` gebucht (kein Pflegekassen-Topf hatte mehr Platz) → `privateCents = 20`
+
+Resultat: **2 separate Rechnungen** für den Monat:
+- Eine Rechnung 30€ an die Kasse (mit Kassen-Empfänger)
+- Eine Rechnung 20€ an den Kunden (mit Kunden-Empfänger)
+
+Wenn ein Termin GEMISCHT ist, splittet `splitLineItemsByBudget` proportional über die Line Items.
+
+→ Das funktioniert für die **fachliche Frage „wer kriegt die Rechnung", aber NICHT für „welcher Topf bei der Kasse"**.
+
+---
+
+## Bewertung: Ist das ein Bug oder Feature?
+
+### Argumente, dass es OK ist
+- In **Deutschland geht eine Pflegekassen-Rechnung an die Pflegekasse als juristischer Person**. Es gibt nicht „eine Rechnung an §45b-Konto" und „eine andere an §39-Konto" — der Empfänger ist immer derselbe (AOK, Barmer, etc.).
+- Die **Abtretungserklärung** (`assignmentDeclarationDate/Ref` auf der Rechnung) wickelt das Innenverhältnis ab — die Kasse weiß, dass alle Beträge in einer Sammelrechnung kommen können.
+- Im SGB XI ist der Pflegedienst nicht verpflichtet, die Aufteilung pro Topf vorzunehmen — das ist Sache der Kasse.
+
+### Argumente, dass es problematisch ist
+- **Transparenz für die Kasse:** ohne Topf-Aufschlüsselung muss die Kasse selbst herleiten, welcher Topf wie weit ausgeschöpft wurde. Bei elektronischer Verarbeitung (ZUGFeRD/EN-16931) führt das zu Rückfragen.
+- **Cap-Konflikte:** wenn die Kasse einen Topf nicht akzeptiert (z.B. §45a für PG1 — siehe AUDIT-HOCH-2), kann die Kasse den Anteil ablehnen. Ohne Aufschlüsselung wird die GANZE Rechnung gekürzt oder zurückgewiesen.
+- **Beispiel Hr. Popp (April 2026):** AOK Bayern hat die März-Rechnung 2026-03-02_1 um 242,02 € gekürzt mit Begründung „Höchstbetrag für den Abrechnungsmonat März ausgeschöpft." Hätte die Rechnung eine Topf-Aufschlüsselung gehabt, wäre klar gewesen, welche 242,02 € problematisch sind.
+- **Stundenabrechnung mit Cascade:** Wenn ein Kunde sagt „ich gebe euch nur 50% meines §45b" und die App bucht intern korrekt, ist das auf der Rechnung trotzdem nicht sichtbar — die Kasse sieht nur den Gesamtbetrag.
+- **GoBD/Compliance-Risiko:** bei Außenprüfung muss man die Aufteilung nachweisen können. Aktuell läuft das nur über das Audit-Log und `budget_transactions`, nicht über die Rechnung selbst.
+
+---
+
+## Empfehlung
+
+**Aus meiner Sicht ist das ein fachlich relevanter Verbesserungspunkt — kein dringender Bug, aber wichtig für Skalierung.**
+
+### Variante A — Minimal-Fix (transparent ohne UI-Änderung)
+
+Auf der Rechnung (PDF + ZUGFeRD-XML) **zusätzliche Aggregat-Zeile** anhängen, z.B.:
+
+```
+Aufteilung auf Leistungs-Töpfe:
+  § 45b SGB XI Entlastungsbetrag:     10,00 €
+  § 45a SGB XI Umwandlung:            28,00 €
+  ─────────────────────────────────────────────
+  Gesamt:                              38,00 €
+```
+
+Diese Aggregation kann auf der Rendering-Ebene aus `budget_transactions` berechnet werden, ohne Schema-Änderung an `invoice_line_items`.
+
+### Variante B — Pro Line Item ein Topf-Bezug
+
+`invoice_line_items.budgetType` als neue Spalte. Pro Termin werden bei Cascade ggf. **mehrere Line Items** erzeugt — eine pro Topf. Im obigen Beispiel:
+
+| Pos | Beschreibung | Topf | Menge | Preis | Summe |
+|---:|---|---|---:|---:|---:|
+| 1 | Hauswirtschaft (aus §45b-Anteil) | §45b | 0,26 Std. | 38,00 € | 10,00 € |
+| 2 | Hauswirtschaft (aus §45a-Anteil) | §45a | 0,74 Std. | 38,00 € | 28,00 € |
+
+Vorteil: maximale Transparenz, EN-16931-kompatibel (jede Position hat klare Zuordnung). Nachteil: Aufteilung in „Sub-Stunden" wirkt ungewohnt — Pflegekassen-Sachbearbeiter müssen es verstehen.
+
+### Variante C — Pro Topf eine eigene Rechnung
+
+`splitLineItemsByBudget` auf **3-Wege-Split** erweitern (§45b / §45a / §39+§42a-kombiniert), drei separate Rechnungen erzeugen. Empfänger bleibt dieselbe Kasse, aber jede Rechnung hat klar einen Topf.
+
+Vorteil: vollkommen sauber. Nachteil: Verdreifacht die Rechnungs-Menge an die gleiche Kasse, formelle Mehrarbeit + ggf. Kassen-Bearbeitungsgebühren.
+
+### Empfohlene Reihenfolge
+
+1. **Variante A** (Aggregat-Zeile im PDF + ZUGFeRD-Memo) — minimaler Aufwand, maximale Transparenz für die Kasse. **Sofort umsetzbar.**
+2. Falls die Kasse dann Rückfragen hat oder eine elektronische Aufteilung will: **Variante B** als zweite Stufe.
+3. **Variante C** nur, falls explizit von der Kasse gefordert (selten).
+
+---
+
+## Test-Empfehlung für Replit AI
+
+Wenn dieser Punkt umgesetzt wird, sollte folgender Test entstehen:
+
+```typescript
+it("Cascade-Termin: Rechnung zeigt Topf-Aufschlüsselung", async () => {
+  // Setup: Kunde mit §45b-Rest 10€, §45a 743€
+  const cid = await createTestCustomer({ pg: 4, billingType: 'pflegekasse_gesetzlich' });
+  await setBudget(cid, '45b', { monthlyLimit: 1000 });  // 10€
+  await setBudget(cid, '45a', { monthlyLimit: 74360 });
+  
+  // 1h Hauswirtschaft = 38€ → Cascade
+  const a = await createAndDocumentAppointment(cid, { hours: 1, service: 'hauswirtschaft' });
+  
+  // Service-Record + Sign + Rechnung
+  const srId = await createMonthlyServiceRecord(cid, 2026, 5);
+  await signServiceRecord(srId, 'employee');
+  await signServiceRecord(srId, 'customer');
+  const inv = await generateInvoice(cid, 5, 2026);
+  
+  // Erwartung Variante A:
+  expect(inv.pdfText).toContain('§45b');
+  expect(inv.pdfText).toContain('§45a');
+  expect(inv.pdfText).toContain('10,00');
+  expect(inv.pdfText).toContain('28,00');
+});
+```
+
+---
+
+## Live verifiziert in diesem Test (165852)
+
+- ✅ Cascade-Buchung Σ exakt (10 + 28 = 38€)
+- ✅ Beide Transaktionen haben `hauswirtschaftCents` gefüllt (1000 / 2800) — BUG-10b ist hier sogar gefixt für §45a, sobald `enabled=true` + `monthlyLimitCents` gesetzt sind. ✨
+- 🔴 `invoice_line_items` enthält KEIN `budgetType`-Feld
+- 🔴 `invoices` enthält KEIN `budgetType`-Feld
+- 🔴 `getBudgetSplitForAppointments` aggregiert nur kasseCents vs. privateCents
+- 🔴 ZUGFeRD-XML der vorhandenen Rechnung enthält keine §45b/§45a-Referenz (Stichprobe auf Rechnung 56985)
