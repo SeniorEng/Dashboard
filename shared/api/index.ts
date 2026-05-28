@@ -7,3 +7,4 @@ export * from "./billing";
 export * from "./appointments";
 export * from "./labor-law";
 export * from "./birthdays";
+export * from "./budget";

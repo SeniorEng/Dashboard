@@ -17,38 +17,12 @@ import { formatCurrency } from "@shared/utils/format";
 import { formatKmQuantityDisplay } from "@shared/domain/invoice-line-items";
 import { formatDateForDisplay, parseLocalDate, todayISO } from "@shared/utils/datetime";
 import { SectionCard } from "@/components/patterns/section-card";
+import type { BudgetOverviewDTO } from "@shared/api/budget";
 
-interface BudgetOverview {
-  entlastungsbetrag45b: {
-    totalAllocatedCents: number;
-    totalUsedCents: number;
-    availableCents: number;
-    plannedCents: number;
-    availableAfterPlannedCents: number;
-    currentMonthUsedCents: number;
-    currentMonthAvailableCents: number;
-    monthlyLimitCents: number | null;
-    carryoverCents: number;
-    carryoverExpiresAt: string | null;
-    currentYearAllocatedCents: number;
-    isCurrentlyActive: boolean;
-  };
-  umwandlung45a: {
-    monthlyBudgetCents: number;
-    currentMonthAllocatedCents: number;
-    currentMonthUsedCents: number;
-    currentMonthAvailableCents: number;
-    isCurrentlyActive: boolean;
-    label: string;
-  };
-  ersatzpflege39_42a: {
-    yearlyBudgetCents: number;
-    currentYearAllocatedCents: number;
-    currentYearUsedCents: number;
-    currentYearAvailableCents: number;
-    label: string;
-  };
-}
+// Task #720 — Wire-Shape lebt zentral in `shared/api/budget.ts`. Vor #720 war
+// dieses Interface hier inline dupliziert; jede Backend-Feldänderung wäre nur
+// zur Runtime aufgefallen.
+type BudgetOverview = BudgetOverviewDTO;
 
 interface BudgetTypeSetting {
   budgetType: string;

@@ -379,3 +379,37 @@ Nicht enthalten (folgt in 1.2/1.3):
 - Write-Pfad-Konsolidierung (`upsertBudgetTypeSettings`, Transition-Insert).
 - `BudgetOverviewView`, `BudgetHistoryView`.
 - Frontend-Übernahme des Selbstzahler-Validators in der §45b-Karte.
+
+### Phase 1.2 — `BudgetOverviewView` (laufend, Task #720)
+
+Geliefert in dieser Iteration:
+- **DTO-SSoT** `shared/api/budget.ts` (`BudgetOverviewDTO`, `BudgetOverview45bDTO`, `BudgetOverview45aDTO`, `BudgetOverview39_42aDTO`). Schließt die in Abschnitt 3.6 dokumentierte „Wire-Shape lebt nur inline in der Route"-Lücke. Backend (`server/routes/budget.ts` `/overview`) ist explizit gegen den Typ annotiert; Frontend (`client/src/components/budget/BudgetLedgerSection.tsx`) konsumiert denselben Typ statt der bisher duplizierten Inline-Interface-Definition. Drift zwischen Wire und UI wäre jetzt ein Compile-Fehler.
+- **Pure Cap-Mathematik** `shared/domain/budget/cap-math.ts` (`computeCapRemaining`, Querschnitts-Auflage A erfüllt: keine DB-Zugriffe, keine States, keine Defaults). Der bisherige Monolith `server/storage/budget/cap-calculator.ts:computeCapSlot` wird zum DB-Lader-Wrapper: er materialisiert `netUsedInWindowCents`, `carryoverCents` und `pflegegrad` aus der DB und delegiert die Klemm-/Cap-Logik an die pure Funktion. Damit teilen sich Buchung (`createCascadeConsumption`), Vorab-Prüfung (`getAvailableForDate`) und künftig Equality-Tests/Frontend-Forecast denselben Code-Pfad — die §45b/§45a/§39-Maxima können nicht mehr in zwei Stellen unterschiedlich geklemmt werden.
+- **Drift-Schutz** `tests/equality/budget-overview-dto-shape.test.ts` (Topologie-Snapshot der `/overview`-Response gegen `BudgetOverviewDTO`). Toleranz 0 für Feld-Namen, Spot-Checks für nullable-Verhalten von `monthlyLimitCents` und `carryoverExpiresAt`.
+
+Bewusst NICHT in dieser Iteration (Drift-Notiz für Folge-Task):
+- **`getBudgetSummary45a` / `getBudgetSummary39_42a` auf `computeCapSlot` umstellen** — die beiden Summary-Pfade bauen ihre Cap-Mathematik aktuell direkt in `summary-queries.ts` nach. Der Rewire ist mechanisch klein, aber jede Equality-Test-Familie (`45a-cap.test.ts`, `39-42a-cap.test.ts`, `monthly-cap-display-vs-booking.test.ts`) muss vorher als Anker laufen und bestätigt grün sein. Mit den drei pre-existierenden Failures (TE-BIZ-18.1, Datums-Edit-Rebook, 45b-monthly-amount Szenario 2) wäre die Drift-Diagnose unsauber. Folge-Task soll diese Failures separat fixen und dann den Rewire mit Equality-Vergleich „vor/nach"-Snapshot durchführen.
+- **`/cost-estimate`-Route in `POST /pricing/estimate` + `GET /budget/:id/availability` aufspalten** — die Route ist ~180 LOC und vermischt Pricing (`hauswirtschaftMinutes * rate`, `serviceIds`-Pfad), Selbstzahler-Routing (`isSelbstzahler` → früher Return) und Availability (`getAvailableForDate` + Shortfall/Privatzahlung). Die Aufteilung erfordert Frontend-Updates in `edit-appointment.tsx`, `use-new-appointment-form.ts` und `CostEstimatePreview` PLUS einen neuen Combined-Hook, damit kein Wasserfall zweier Sequence-Calls entsteht. Folge-Task: Hook-Composition zuerst, dann Route-Split mit alter Route als Compatibility-Shim für eine Iteration (zwingender Grund: e2e-smoke-Tests laufen gegen die alte URL).
+- **Frontend-Übernahme des Selbstzahler-Validators** — bleibt Phase 1.1-Restposten.
+
+### Phase 1.2 — `write_off`-Asymmetrie-Audit (Task #720)
+
+Buchhalterische Bestätigung der Regel folgt in Phase 1.3 (`write_off` als Architecture-Test). Diese Inventur ist die Vorlage.
+
+**Definition:** `write_off` ist eine pot-bezogene Korrektur (Verfall, manuelle Abschreibung verfallenen Carryovers). Sie ist KEIN Fenster-Consumption — eine Buchung im Mai 2026 mit Datum `2025-06-30` wegen Carryover-Verfall darf den Mai-2026-Buchungs-Cap nicht reduzieren.
+
+| Call-Site | Datei + Zeile | Behandelt `write_off` als | Begründung / Konsequenz | Soll-Regel Phase 1.3 |
+|---|---|---|---|---|
+| Cap-Mathematik (Fenster-Cap) | `server/storage/budget/cap-calculator.ts:42-87,150-156` (jetzt via `shared/domain/budget/cap-math.ts`) | **NICHT als Used gezählt** | Korrekt. `netUsedInWindowCents = consumption - reversal` ohne `write_off`. Andernfalls würde ein Carryover-Verfall im Sommer das Fenster-Budget für Termine im selben Fenster künstlich blockieren. | **Bestätigt korrekt** |
+| Allocation-Kumulativ-Summary | `server/storage/budget/summary-queries.ts:167-170` (`getBudgetSummary` §45b) | **Als Used gezählt** (`netUsedCents = consumption + writeOff + manualAdjustment - reversals`) | Korrekt für die Sicht „Was ist insgesamt aus dem Jahres-Topf raus": Verfall reduziert das Restguthaben, soll also in `availableCents` sichtbar sein. Ohne diesen Beitrag wäre der Verfall am 30.06. nicht im Topf-Rest abgebildet. | **Bestätigt korrekt** |
+| Per-Allocation-Verbrauchsrechnung (Carryover) | `server/storage/budget/summary-queries.ts:`(`getAvailableCarryoverCents`) `transactionType IN ('consumption','write_off')` | **Als Used gezählt** | Korrekt. Der pro Carryover-Allokation berechnete Rest darf den auto-`write_off` (Verfallsbuchung) als Verbrauch sehen, damit `Math.max(0, alloc - consumed)` nicht doppelt einen schon abgeschriebenen Rest zeigt. | **Bestätigt korrekt** |
+| Import-Availability (`getAvailableForDate`) | `server/storage/budget/import-availability.ts:28` | **Als Used gezählt** | Korrekt für die Sicht „Was kann ein Termin mit Buchungsdatum X noch konsumieren": eine vor X liegende `write_off`-Buchung hat das Guthaben tatsächlich entwertet. | **Bestätigt korrekt** |
+| Consumption-Engine FIFO-Carryover | `server/storage/budget/consumption-engine.ts:163,208` | **Als Used gezählt** (in der Berechnung „wieviel ist von dieser Spezial-Allokation noch übrig") | Korrekt. Spiegelt dieselbe Allocations-pro-Stück-Logik wie `getAvailableCarryoverCents`. | **Bestätigt korrekt** |
+| Allocation-Storage Aggregate | `server/storage/budget/allocation-storage.ts:1078,1105,1213` (`SUM` über `consumption/write_off/reversal`) | **Alle drei aggregiert** | Korrekt für Anzeige-Aggregate à la „Topf-Bewegungen". Hier zählen alle drei Buchungstypen. | **Bestätigt korrekt** |
+| Idempotente Verfalls-Schreibung | `server/storage/budget/allocation-storage.ts:1190,1238,1246` (`processExpiredCarryover` schreibt `write_off`, partielle UNIQUE schützt vor Doppel-Schreiben) | **Ist die Schreib-Stelle**, nicht Lese-Konsument | Schreibt einen einzigen `write_off` pro verfallener Allokation. UNIQUE-Index `(customer_id, allocation_id) WHERE transaction_type='write_off'` schützt vor Doppel-Buchung beim parallelen Sync. | **Bestätigt korrekt** |
+
+**Beschluss:** Die Asymmetrie ist nicht zufällig, sondern modelliert zwei Sichten korrekt:
+
+> **Regel:** `write_off` zählt in der **Topf-/Allocation-Sicht** als Used (es ist Geld, das aus dem Topf raus ist), aber NICHT in der **Fenster-Cap-Sicht** (es ist keine Termin-Konsumption im Fenster).
+
+Phase 1.3 hebt diese Regel als Architecture-Test fest (Test scannt nach `transactionType IN (...)`-Listen und gleicht gegen eine Allowlist pro Datei ab), damit eine neue Call-Site sich aktiv für eine Sicht entscheiden muss.

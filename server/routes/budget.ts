@@ -16,6 +16,7 @@ import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
+import type { BudgetOverviewDTO } from "@shared/api/budget";
 
 /**
  * Task #716 — Selbstzahler-Block für §45b. Einheitlicher Wire-Format-Output
@@ -273,7 +274,11 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
   const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
 
   const s45b = summaries.entlastungsbetrag45b;
-  res.json({
+  // Task #720 — explizite Typannotation gegen `BudgetOverviewDTO`
+  // (`shared/api/budget.ts`). Frontend (`BudgetLedgerSection.tsx`) und
+  // dieser Sender teilen denselben Typ; Drift zwischen Wire-Shape und
+  // UI-Erwartung wird beim Compile sichtbar.
+  const overview: BudgetOverviewDTO = {
     entlastungsbetrag45b: {
       totalAllocatedCents: s45b.totalAllocatedCents,
       totalUsedCents: s45b.totalUsedCents,
@@ -303,7 +308,8 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
       currentYearAvailableCents: summaries.ersatzpflege39_42a.currentYearAvailableCents,
       label: "§39/§42a Gemeinsamer Jahresbetrag",
     },
-  });
+  };
+  res.json(overview);
 }));
 
 router.use(requireAdmin);

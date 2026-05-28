@@ -4,7 +4,7 @@ import { parseLocalDate } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { getTotalCarryoverCents } from "./summary-queries";
-import { clampToStatutoryMax } from "@shared/domain/budgets";
+import { computeCapRemaining } from "@shared/domain/budget/cap-math";
 import { customersRepo } from "../../repos";
 
 type MonthlyBudgetType = "entlastungsbetrag_45b" | "umwandlung_45a";
@@ -140,32 +140,18 @@ export async function computeCapSlot(
       .limit(1);
     pflegegrad = row?.pflegegrad ?? null;
   }
-  const clamped = clampToStatutoryMax({
+
+  // Task #720 — DB-Lookup-Stelle, reine Mathe lebt in `shared/domain/budget/`.
+  // Damit Frontend/Equality-Tests denselben Code wie der Buchungspfad nutzen
+  // können (siehe `docs/budget-ssot-inventory.md` Phase 1.2).
+  const { capRemainingCents } = computeCapRemaining({
     budgetType: input.budgetType,
+    pflegegrad,
     monthlyLimitCents: input.monthlyLimitCents,
     yearlyLimitCents: input.yearlyLimitCents,
-    pflegegrad,
+    carryoverCents,
+    netUsedInWindowCents,
   });
-
-  let capRemainingCents = Number.POSITIVE_INFINITY;
-  if (isYearly) {
-    if (clamped.yearlyLimitCents !== null) {
-      capRemainingCents = Math.max(0, clamped.yearlyLimitCents - netUsedInWindowCents);
-    }
-  } else if (input.budgetType === "entlastungsbetrag_45b") {
-    // §45b ist ein Jahrestopf mit monatlicher Aufstockung — KEIN harter Monats-Cap.
-    // Der per-Kunde konfigurierbare "Unser Anteil"-Wert (Task #603) wirkt nicht
-    // hier (als Buchungs-Cap), sondern reduziert die monatliche Aufstockung in
-    // `calculateAllocated45b`. Der reduzierte Topf zieht damit die Verfügbarkeit
-    // automatisch nach unten — Verfügbarkeit = aufgelaufene Allocation minus
-    // bereits gebuchter Beträge (siehe summary-queries.getBudgetSummary).
-    capRemainingCents = Number.POSITIVE_INFINITY;
-  } else {
-    if (clamped.monthlyLimitCents !== null) {
-      const effectiveLimit = clamped.monthlyLimitCents + carryoverCents;
-      capRemainingCents = Math.max(0, effectiveLimit - netUsedInWindowCents);
-    }
-  }
 
   return { range, netUsedInWindowCents, carryoverCents, capRemainingCents };
 }

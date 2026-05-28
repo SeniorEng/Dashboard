@@ -1,0 +1,305 @@
+# EngelDesk — Re-Test-Ergebnisse nach Replit-AI-Fixes
+
+**Datum Re-Test:** 2026-05-28
+**Ausgangs-Bug-Report:** `EngelDesk-Bugreport-fuer-Replit-AI.md` (11 Bugs + 5 Audit-Findings)
+**Test-Kunden (alle Naming-Pattern `Auto_Retest_*`):**
+- ID 153082 — `Auto_Retest_C` — PG4, Pflegekasse_gesetzlich (Cascade-Test)
+- ID 153210 — `Auto_Retest_SZ` — PG3, Selbstzahler (BUG-6 Verifikation)
+- ID 153211 — `Auto_Retest_PG1` — PG1, Pflegekasse_gesetzlich (HOCH-2 Verifikation)
+
+---
+
+## Zusammenfassung
+
+| Status | Anzahl | Bugs |
+|---|---:|---|
+| ✅ **GEFIXT** | 4 | BUG-1, BUG-2, BUG-3, BUG-5, BUG-6 |
+| 🟡 **TEILWEISE GEFIXT** | 1 | BUG-10 (allocationId ja, hauswirtschaftCents nein) |
+| 🔴 **NOCH OFFEN** | 4 | BUG-4, BUG-7, BUG-9, HOCH-2 |
+| ⓘ **Nicht testbar** in dieser Runde | 4 | BUG-8 (UI), BUG-11 (DB-Verhalten), KRITISCH-1 (Concurrency), HOCH-6 (Doppel-Signatur) |
+| 🆕 **Neue Folge-Bugs** | 1 | BUG-12 (Selbstzahler-Settings-Asymmetrie) |
+
+**Top-Line:** **5 von 11** ursprünglichen Bugs vollständig gefixt + 1 teilweise. Beide kritischen Routing-Bugs (BUG-2, BUG-3) und die kritische Doppel-Allokation (BUG-1) sind sauber gelöst.
+
+---
+
+## Detail pro Bug
+
+### ✅ BUG-1 GEFIXT: Doppel-Allokation §45a + §39
+
+**Reproducer ausgeführt** auf Kunde 153082 (PG4 Pflegekasse_gesetzlich):
+
+1. `POST /api/budget/153082/initial-budget` für §45a (74360 Cents) → 201
+2. `POST /api/budget/153082/initial-budget` für §39 (353900 Cents) → 201
+3. `PUT /api/budget/153082/type-settings` mit `monthlyLimitCents=74360` für §45a und `yearlyLimitCents=353900` für §39 → 200
+4. `GET /api/budget/153082/overview`
+
+**Ergebnis:**
+
+```json
+{
+  "umwandlung45a": { "currentMonthAvailableCents": 74360 },
+  "ersatzpflege39_42a": { "currentYearAvailableCents": 353900 }
+}
+```
+
+**Vorher:** 148720 (doppelt) / 707800 (doppelt). **Jetzt:** korrekte Einzelwerte 74360 € / 353900 €. **`u45a_doubled: false, e39_doubled: false`** verifiziert.
+
+---
+
+### ✅ BUG-2 GEFIXT: HTML-Fallback für nicht existente POST-Routes
+
+**Reproducer:**
+
+```javascript
+const r = await fetch('/api/appointments', {method:'POST', credentials:'include', headers:H, body:'{}'});
+console.log(r.status, await r.text());
+```
+
+**Ergebnis:** `404 {"error":"NOT_FOUND","code":"NOT_FOUND","message":"API-Endpunkt nicht gefunden: …"}`
+
+**Vorher:** 200 + Vite-SPA-HTML-Bootstrap. **Jetzt:** sauberes 404 JSON. Auch `/api/admin/appointments` gleich gefixt.
+
+---
+
+### ✅ BUG-3 GEFIXT: GET /api/admin/customers/:id liefert JSON
+
+**Reproducer:**
+
+```javascript
+fetch('/api/admin/customers/152977', {credentials:'include'}).then(r=>r.text())
+// IST: JSON-Response mit Kunden-Daten
+// War: HTML (Vite-SPA-Bootstrap)
+```
+
+Beide Routes (`/api/admin/customers/:id` und `/api/customers/:id`) liefern jetzt konsistent JSON.
+
+---
+
+### 🔴 BUG-4 NOCH OFFEN: Customer-Create erstellt keine Budget-Töpfe
+
+**Reproducer:** POST `/api/admin/customers` mit `pflegegrad=4`, `billingType=pflegekasse_gesetzlich`, `pflegegradSeit='2024-01-01'` → 201 Created.
+
+Sofortiger `GET /api/budget/:id/overview`:
+```json
+{
+  "BUG-4_initial_pots": {
+    "e45b_alloc": 0,
+    "u45a_active": false
+  }
+}
+```
+
+**Erwartet:** Bei einem PG4-Pflegekasse_gesetzlich-Versicherten sollten die drei Töpfe automatisch initialisiert werden ODER die API sollte einen Hinweis im Response geben, dass separate `/initial-budget`-Calls nötig sind.
+
+**Status:** Keine Änderung beobachtbar.
+
+---
+
+### ✅ BUG-5 GEFIXT: initial-budget aktiviert §45a/§39 jetzt automatisch
+
+**Vorher:** `POST /initial-budget` für §45a oder §39 → 201, aber `isCurrentlyActive=false` im Overview ohne separaten `PUT /type-settings`.
+
+**Jetzt:** Nach 3 sequenziellen `POST /initial-budget` (für §45b, §45a, §39):
+```json
+{
+  "e45b": 13100,
+  "u45a_active": true,
+  "u45a_avail": 74360,
+  "e39_active": true,
+  "e39_avail": 353900
+}
+```
+
+Töpfe sind direkt aktiv ohne zusätzlichen Settings-Call.
+
+---
+
+### ✅ BUG-6 GEFIXT: Selbstzahler kann keine Pflegekassen-Töpfe mehr haben
+
+**Reproducer auf Kunde 153210 (PG3 Selbstzahler):**
+
+```javascript
+fetch('/api/budget/153210/initial-budget', {method:'POST', ..., body: JSON.stringify({
+  budgetType:'entlastungsbetrag_45b', currentYearAmountCents:13100, ...
+})})
+// IST: 409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER
+//      "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar."
+// War: 201 mit erfolgreicher Allokation
+```
+
+**Status:** Vorbildliche fachliche Validierung mit DE-Fehlercode. Selbstzahler-Verbrauch landet damit korrekt auf „private", die Pflegekassen-Töpfe sind nicht mehr fälschlich konfigurierbar.
+
+---
+
+### 🔴 BUG-7 NOCH OFFEN: `currentYearAmountCents` erzeugt monatsgebundene Allokation
+
+**Reproducer:**
+```javascript
+await fetch('/api/budget/153082/initial-budget', {method:'POST', ..., body: JSON.stringify({
+  budgetType:'entlastungsbetrag_45b',
+  currentYearAmountCents: 13100,
+  budgetStartDate: '2026-05-28'
+})});
+fetch('/api/budget/153082/initial-balances/entlastungsbetrag_45b', ...)
+// IST: [{year:2026, month:5, source:'initial_balance', amountCents:13100}]
+// Erwartet bei "currentYear": month:null oder Allokation für ganzes Jahr
+```
+
+Parameter-Name suggeriert „Jahresbetrag", tatsächlich wird Monatsbetrag gespeichert. **Naming-Drift fortbesteht.**
+
+---
+
+### 🔴 BUG-9 NOCH OFFEN: Phasen-Historisierung defekt
+
+**Reproducer:** 4 sequenzielle `PUT /api/budget/153082/type-settings` mit unterschiedlichen `validFrom` (2026-06-01: 65,50€ → 2026-08-01: 80€ → 2026-10-01: 100€ → 2027-01-01: 131€).
+
+**Erwartet:** 4 Zeilen in `customer_budget_type_settings` für `entlastungsbetrag_45b`, 3 davon mit `validTo` der jeweiligen Folge-Phase, eine offen.
+
+**Ergebnis:**
+```json
+[
+  {"limit": 13100, "validFrom": "2027-01-01", "validTo": null}
+]
+```
+**Nur 1 Zeile.** Die ersten 3 Phasen sind komplett verloren — Append-Only-Historisierung greift nicht bei explizit gesetztem `validFrom`. Dies blockiert das gesamte Anwendungsfall „Anteil ändert sich über die Zeit" (z.B. „Kunde gesteht uns von Juni–Juli 50% des §45b zu, ab August 80%").
+
+**Status:** Wie im Original-Report — keine Änderung sichtbar.
+
+---
+
+### 🟡 BUG-10 TEILWEISE GEFIXT: Cascade-Transaktion §45a
+
+**Reproducer:** 4h Hauswirtschaft (152 €) auf Kunde 153082 mit erschöpftem §45b → Cascade auf §45a.
+
+**Ergebnis:**
+```json
+[
+  {"bt":"entlastungsbetrag_45b", "amt":-7900,  "alloc":109438, "hwCents":7900},
+  {"bt":"umwandlung_45a",        "amt":-7300,  "alloc":109439, "hwCents":null}
+]
+```
+
+- ✅ **`allocationId=109439`** (vorher null) — Cascade-Folge-Tx wird jetzt korrekt einer Allokation zugeordnet
+- 🔴 **`hauswirtschaftCents=null`** — der proportionale Service-Anteil wird weiterhin nicht aufgeteilt
+
+**Folge:** Drift-Detektoren wie `tests/equality/*` würden bei Σ(hauswirtschaftCents) = 7900 (≠ 15200 = appointment.hwCents) immer noch rot. Lexware-Export und Statistiken aggregieren nur die §45b-Zeile.
+
+---
+
+### ⓘ BUG-11 BEOBACHTUNG: DB-Persistenz scheint stabil
+
+Im Re-Test heute über mehrere Stunden blieben Kunden 153082 / 153210 / 153211 mit allen Allocations + Settings erhalten — keine Mid-Session-Resets beobachtet. Sollte über mehrere Tage hinweg beobachtet werden, um sicher zu beurteilen.
+
+---
+
+### ⓘ BUG-8 nicht getestet
+
+Onboarding-Persistenz braucht UI-Test mit neuem User-Login — nicht in dieser API-Runde geprüft.
+
+---
+
+### 🔴 AUDIT HOCH-2 NOCH OFFEN: §45a für PG<2 zugelassen
+
+**Reproducer:** Kunde 153211 angelegt mit `pflegegrad=1`, `billingType=pflegekasse_gesetzlich`. Versuch:
+
+```javascript
+fetch('/api/budget/153211/initial-budget', {method:'POST', ..., body: JSON.stringify({
+  budgetType:'umwandlung_45a',
+  currentYearAmountCents: 31840,
+  budgetStartDate: '2026-05-28'
+})})
+// IST: 201 "Startbudget erfolgreich erfasst"
+//      Allokation angelegt: id=109536, year=2026, month=5, amount=31840, source=initial_balance
+// SOLL: 400/409 + "§45a Umwandlungsanspruch ist erst ab Pflegegrad 2 verfügbar"
+```
+
+`clampToStatutoryMax` aus `shared/domain/budgets.ts:65-76` validiert diesen Fall bereits korrekt mit der erwarteten DE-Meldung — aber der `initial-budget`-Endpoint ruft die Funktion nicht auf oder ignoriert ihren Return.
+
+**Status:** Wie im Original-Audit-Chunk 07 dokumentiert. Selbstzahler-Validierung (BUG-6) zeigt, dass das Pattern „bei nicht zulässigem Topf 409 mit DE-Fehler" möglich ist — sollte für §45a/PG<2 analog implementiert werden.
+
+---
+
+### 🆕 BUG-12 NEU: Type-Settings akzeptiert für Selbstzahler ohne Reject
+
+**Beobachtung:** Selbstzahler-Kunde 153210 hat trotz BUG-6-Fix immer noch:
+```json
+[
+  {"budgetType":"entlastungsbetrag_45b", "enabled": true,  "monthlyLimitCents": null},
+  {"budgetType":"umwandlung_45a",        "enabled": false, "monthlyLimitCents": null},
+  {"budgetType":"ersatzpflege_39_42a",   "enabled": false, "monthlyLimitCents": null}
+]
+```
+
+**Ursache:** `PUT /api/budget/:cid/type-settings` mit `enabled=true` für §45b für einen Selbstzahler-Kunden wurde **201** akzeptiert. Erst der nachfolgende `initial-budget`-Call greift mit 409.
+
+**Inkonsistenz:** Eine Settings-Zeile mit `enabled=true` für einen Topf, der für diesen Kunden „nicht verfügbar" ist, ist semantisch widersprüchlich.
+
+**Empfehlung:** Selbstzahler-Check auch in `upsertBudgetTypeSettings` einbauen, mit gleichem `BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER`-Fehlercode.
+
+---
+
+## Was als nächstes (Iteration 3)
+
+**Priorisiert nach Risiko:**
+
+1. **BUG-9** (Phasen-Historisierung) — KRITISCH. Solange das offen ist, sind alle Multi-Phase-Use-Cases unbrauchbar.
+2. **HOCH-2** (§45a für PG<2) — Compliance-Risiko, leicht zu fixen (Pattern aus BUG-6 übernehmen).
+3. **BUG-10** (`hauswirtschaftCents=null` bei Cascade) — Drift-Detektoren bleiben rot, Lexware-Export inkorrekt.
+4. **BUG-4** (Customer-Create ohne Auto-Töpfe) — UX-Frage: API-Vertrag dokumentieren oder Auto-Init implementieren.
+5. **BUG-7** (Naming) — Cleanup, niedrige Prio.
+6. **BUG-12** (neues Folge-Bug) — Inkonsistenz zur BUG-6-Implementation, schnell zu fixen.
+
+**Nicht getestet, sollten Iteration 3 abdecken:**
+
+- **HOCH-6** (Doppel-Signatur Service-Record) — nach BUG-2-Fix sollte POST `/sign` zweimal sauber 409 liefern
+- **KRITISCH-1** (Cascade-Lock-Race) — `tests/budget-concurrency.test.ts` lokal ausführen und Ergebnis dokumentieren
+- **HOCH-1** (Audit-Log DB-Trigger) — SQL `UPDATE audit_log SET ... WHERE id=...` direkt testen
+- **CSRF-Fixation** (KRITISCH-2 aus Audit Chunk 2) — Probe ohne Cookie, prüfen ob neuer Cookie ausgestellt wird
+- **Carryover-Verfall am 30.06.** — Datums-Manipulation einer Test-Allokation
+
+---
+
+## Reproducer-Snippets (Stand 2026-05-28, kompakt)
+
+Diese Blöcke können 1:1 in die Browser-Console (eingeloggt als Admin) gepastet werden:
+
+```javascript
+// Helper für alle Tests
+const csrf = document.cookie.split('careconnect_csrf=')[1].split(';')[0];
+const H = {'Content-Type':'application/json','x-csrf-token':csrf};
+
+// Test BUG-9 (Phasen-Historisierung)
+async function testBug9(cid) {
+  for (const [vf, limit] of [['2026-06-01',6550],['2026-08-01',8000],['2026-10-01',10000],['2027-01-01',13100]]) {
+    await fetch('/api/budget/'+cid+'/type-settings', {method:'PUT', credentials:'include', headers:H, body: JSON.stringify({
+      settings: [{budgetType:'entlastungsbetrag_45b', enabled:true, priority:1, monthlyLimitCents:limit, validFrom:vf}]
+    })});
+  }
+  const s = await fetch('/api/budget/'+cid+'/type-settings', {credentials:'include'}).then(r=>r.json());
+  console.log('§45b settings:', s.filter(x=>x.budgetType==='entlastungsbetrag_45b'));
+  // PASS: array.length === 4 mit validTo gesetzt für die ersten 3
+  // FAIL: array.length === 1 (nur letzte)
+}
+
+// Test HOCH-2 (§45a für PG<2)
+async function testHoch2() {
+  const c = await fetch('/api/admin/customers',{method:'POST',credentials:'include',headers:H,body:JSON.stringify({
+    vorname:'Hoch2-RT', nachname:'Auto_Retest_PG1Check', strasse:'T', nr:'1', plz:'10115', stadt:'B',
+    geburtsdatum:'1950-01-01', pflegegrad:1, billingType:'pflegekasse_gesetzlich', telefon:'0176 11111111',
+    pflegegradSeit:'2024-01-01'
+  })}).then(r=>r.json());
+  const r = await fetch('/api/budget/'+c.id+'/initial-budget',{method:'POST',credentials:'include',headers:H,body:JSON.stringify({
+    budgetType:'umwandlung_45a', currentYearAmountCents:31840, budgetStartDate:'2026-05-28'
+  })});
+  console.log('§45a für PG1:', r.status, await r.text());
+  // PASS: 400/409 + DE-Meldung "§45a ... erst ab Pflegegrad 2 ..."
+  // FAIL: 201 "Startbudget erfolgreich erfasst"
+}
+
+// Test BUG-10 (Cascade asymmetrisch)
+// Nach Setup mit allen 3 Töpfen + 4h Hauswirtschaft → Termin dokumentieren → transactions prüfen
+// Prüfen: cascadeTx where budgetType !== 'entlastungsbetrag_45b'
+//   - allocationId !== null ?  (✅ aktuell)
+//   - hauswirtschaftCents !== null ?  (🔴 aktuell null)
+```
