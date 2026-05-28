@@ -8,6 +8,23 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-28 (d) — RE-2026-0010-Folge: Backfill-Audit leerer Unterschriften gegen Production (Task #751, kein Publish)
+
+**Anlass:** Folge zu RE-2026-0010 / Task #749 — Bestands-Service-Records, die VOR der Validator-Hardening-Welle aus #749 mit „signed but visually empty" Signaturen abgeschlossen wurden, müssen identifiziert und manuell nachversorgt werden (Re-Sign bei Entwurfs-Rechnungen, Storno + Neuanlage bei versendeten/bezahlten).
+
+**Vorgehen:**
+1. `monthly_service_records` der Production-DB read-only abgefragt (Replit-Production-Read-Replica): `WHERE deleted_at IS NULL AND status IN ('employee_signed','completed') AND customer_signature_data IS NOT NULL` → **45 Records** (IDs 2, 4, 7–11, 48, 54–66, 69–80, 82, 84–87, 89–95).
+2. Pro Record sowohl `customer_signature_data` als auch `employee_signature_data` mit derselben `analyzeSignatureImage`-Logik geprüft, die das Audit-Skript `server/scripts/audit-empty-signatures.ts` verwendet (PNG-Magic, IHDR-Mindestmaße 40×20 px, IDAT-Inflate, ≥50 Non-Zero-Bytes als Tinte-Proxy; payload ≥250 Bytes).
+3. Geprüfte Records: 45/45. Parse-Fehler: 0. Validator-Verdikt: **alle 90 Signaturen (45 Kunden + 45 Mitarbeiter) PASS** — keine leeren/transparenten/zu kleinen Bilder gefunden.
+
+**Befund:** Production hat keine „signed but empty"-Signatur-Altlast außerhalb des bereits korrigierten RE-2026-0010-Falls (Unterschütz April 2026), der per Storno + Neuanlage bereinigt wurde. Re-Sign-Welle entfällt; keine GoBD-relevanten Mutationen erforderlich.
+
+**Nachsorge / Empfehlung:** `tsx server/scripts/audit-empty-signatures.ts` bleibt als laufender Smoke-Check in der Pre-Publish-Checkliste — beim nächsten Publish und nach jedem Bug-Fix im Signatur-Pfad erneut ausführen. Exit-Code 0 = sauber, Exit-Code 1 = manuelle Nachsorge nach obigem RE-2026-0010-Runbook (vorheriger Eintrag).
+
+**Publish-Status:** ⏳ ausstehend (reines Audit, keine Code- oder Datenänderung).
+
+---
+
 ### 2026-05-28 (c) — RE-2026-0010: leere Kundenunterschrift im Leistungsnachweis-PDF (Task #749, kein Publish)
 
 **Anlass:** Rechnung RE-2026-0010 (Unterschütz, Karla — April 2026) wurde mit einem Leistungsnachweis-PDF ausgespielt, in dem das Signatur-Label „08.05.2026, Karla Unterschütz" gerendert wurde, das `<img>` der Kundenunterschrift jedoch leer/unsichtbar war. Ursache: der bisherige Renderer-Guard prüfte lediglich per Regex, ob `customerSignatureData` ein gültiges Data-URL ist — ein transparentes (= leeres) PNG aus dem Signature-Pad bestand diesen Test und wurde mit signed-Label kombiniert.
