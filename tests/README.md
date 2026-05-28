@@ -11,6 +11,14 @@ Diese Tests prüfen die Kern-Funktionalität der CareConnect-APIs.
 
 `tests/globalSetup.ts` loggt sich beim Start mit `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` ein, um stale Test-Daten zu purgen. Jede Integrationssuite ruft in `beforeAll` ebenfalls `getAuthCookie()` auf. Wenn der App-Server beim `test`-Workflow-Start noch nicht auf Port 5000 lauscht (Race mit `Start application` im Replit-Setup), failt das Login mit `fetch failed`. Früher hat `globalSetup` das still mit „skipping cleanup" geloggt und tests/auth-utils sind später beim ersten Test eingestiegen — Resultat: ganze Suiten (insb. Billing) wurden als _skipped_ gemeldet, der Workflow blieb aber grün. Deshalb gilt jetzt: `globalSetup` macht eine Health-Probe gegen `/api/health` (30×1s) und retried Login bei Connection-Errors (6× exponential Backoff). Schlägt beides fehl, wird **hart geworfen** statt geschluckt, damit der Lauf sichtbar rot wird und Skip-Sweeps in Billing-Suiten nicht mehr unbemerkt durchrutschen.
 
+## Stale-Server-Schutz (Task #726)
+
+Der `Start application`-Workflow startet `tsx server/index.ts` **ohne** Watch-Mode. Wer Server-Code in `server/` oder `shared/` ändert und den `test`-Workflow startet, ohne vorher `Start application` zu restarten, würde sonst gegen die alte Server-Instanz testen — Tests sind dann scheinbar rot, obwohl der Fix bereits im Code steht.
+
+Schutz: `/api/health` liefert `bootedAt` (Boot-Zeitstempel des Prozesses). `tests/globalSetup.ts` vergleicht das mit der jüngsten mtime unter `server/` und `shared/` und bricht den Lauf hart mit einer klaren Fehlermeldung ab, wenn eine Quelldatei neuer ist als der Server-Boot. Workaround in dem Fall: `Start application` neu starten und Tests erneut laufen lassen.
+
+Deaktivieren mit `SKIP_SERVER_FRESHNESS_CHECK=1` (z.B. für CI gegen einen vorab gebauten Container).
+
 ## Tests ausführen
 
 ```bash

@@ -29,6 +29,86 @@ interface Service {
   code?: string | null;
 }
 
+async function assertServerBuildFresh(): Promise<void> {
+  // Task #726: Verhindern, dass Tests gegen eine alte Server-Instanz laufen.
+  // Der Replit-Workflow `Start application` startet `tsx server/index.ts`
+  // OHNE Watch-Mode. Wer Server-Code ändert und den `test`-Workflow startet,
+  // ohne vorher `Start application` zu restarten, testet weiter gegen den
+  // alten Build. Das ist in der Vergangenheit mehrfach als „Test ist rot,
+  // obwohl der Fix doch drin ist"-Bug aufgetreten.
+  //
+  // Schutz: /api/health exponiert `bootedAt` (Boot-Zeitstempel des laufenden
+  // Prozesses). Wir vergleichen das mit der jüngsten mtime unter
+  // `server/` und `shared/`. Ist eine Quelldatei neuer als der Server-Boot,
+  // werfen wir hart und weisen darauf hin, den `Start application`-Workflow
+  // zu restarten. Mit `SKIP_SERVER_FRESHNESS_CHECK=1` deaktivierbar (z.B.
+  // für CI gegen einen vorab gebauten Container).
+  if (process.env.SKIP_SERVER_FRESHNESS_CHECK === "1") return;
+
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+
+  let bootedAt: number | null = null;
+  try {
+    const res = await fetch(`${BASE_URL}/api/health`);
+    if (res.ok) {
+      const body = (await res.json()) as { bootedAt?: number };
+      if (typeof body.bootedAt === "number") bootedAt = body.bootedAt;
+    }
+  } catch {
+    // Falls Health-Probe scheitert, übernimmt waitForServer den Hard-Fail.
+    return;
+  }
+  if (bootedAt == null) {
+    // Älterer Server ohne `bootedAt` (vor Task #726) — keine Aussage möglich.
+    console.warn("[globalSetup] /api/health liefert kein bootedAt — Freshness-Check übersprungen. Bitte `Start application` neu starten, um den neuen Server zu laden.");
+    return;
+  }
+
+  const roots = ["server", "shared"];
+  let newestMtime = 0;
+  let newestFile = "";
+  async function walk(dir: string): Promise<void> {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (ent.name === "node_modules" || ent.name.startsWith(".")) continue;
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        await walk(full);
+      } else if (ent.isFile() && /\.(ts|tsx|js|mjs|cjs|json)$/.test(ent.name)) {
+        try {
+          const stat = await fs.stat(full);
+          if (stat.mtimeMs > newestMtime) {
+            newestMtime = stat.mtimeMs;
+            newestFile = full;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+  for (const root of roots) await walk(root);
+
+  // Toleranz: 2s puffern, damit Datei-Saves direkt vor dem Boot keinen
+  // False-Positive auslösen (Boot dauert i.d.R. mehrere Sekunden).
+  const skewMs = 2000;
+  if (newestMtime > bootedAt + skewMs) {
+    const ageSec = Math.round((newestMtime - bootedAt) / 1000);
+    throw new Error(
+      `[globalSetup] Stale server detected: '${newestFile}' wurde ${ageSec}s NACH dem letzten Server-Boot geändert ` +
+      `(server bootedAt=${new Date(bootedAt).toISOString()}, file mtime=${new Date(newestMtime).toISOString()}). ` +
+      `Bitte den 'Start application'-Workflow neu starten, bevor Tests laufen — sonst testest du gegen alten Code. ` +
+      `Override: SKIP_SERVER_FRESHNESS_CHECK=1.`,
+    );
+  }
+}
+
 async function waitForServer(): Promise<void> {
   // Health-Probe gegen /api/health. Notwendig, weil der `test`-Workflow im
   // Replit-Setup parallel zum `Start application`-Workflow startet — der
@@ -175,6 +255,13 @@ export async function setup() {
     console.warn("[globalSetup] Skipping cleanup in production environment");
     return;
   }
+
+  // Task #726: Stale-Server-Schutz VOR jeder weiteren Logik. waitForServer()
+  // in loginAndGetAuth() probt nur Erreichbarkeit, nicht Frische — der Check
+  // hier vergleicht /api/health bootedAt mit der jüngsten Source-mtime und
+  // bricht hart ab, wenn der `Start application`-Workflow nach einer
+  // Server-Änderung vergessen wurde zu restarten.
+  await assertServerBuildFresh();
 
   console.log("[globalSetup] Cleaning stale test data...");
 

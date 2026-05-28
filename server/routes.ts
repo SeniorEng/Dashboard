@@ -8,6 +8,13 @@ import { registerObjectStorageRoutes } from "./replit_integrations/object_storag
 import { db } from "./lib/db";
 import { sql } from "drizzle-orm";
 
+// Task #726: Boot-Zeitstempel des aktuell laufenden Server-Prozesses.
+// Wird im /api/health-Endpoint exponiert, damit Integration-Tests (siehe
+// tests/globalSetup.ts) erkennen können, ob ihre Server-Quelldateien neuer
+// sind als die laufende Instanz — und dann den Lauf hart abbrechen statt
+// gegen Stand-Code zu testen.
+const SERVER_BOOTED_AT = Date.now();
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -35,6 +42,7 @@ export async function registerRoutes(
         status: "ok",
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
+        bootedAt: SERVER_BOOTED_AT,
         chromium: chromiumStatus,
         pdfCache,
       });
@@ -44,6 +52,7 @@ export async function registerRoutes(
         message: "Database unavailable",
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
+        bootedAt: SERVER_BOOTED_AT,
         chromium: chromiumStatus,
         pdfCache,
       });
