@@ -169,8 +169,8 @@ export function BudgetSetupRequiredBanner({
   if (hasActiveConfig) return null;
 
   return (
-    <SectionCard className="mb-4 border-amber-300 bg-amber-50" data-testid="banner-budget-setup-required">
-      <div className="flex items-start gap-3">
+    <SectionCard className="mb-4 border-amber-300 bg-amber-50">
+      <div className="flex items-start gap-3" data-testid="banner-budget-setup-required">
         <Wallet className={`${iconSize.md} text-amber-600 mt-0.5 shrink-0`} />
         <div className="flex-1">
           <p className="text-sm font-medium text-amber-900 mb-1">
