@@ -16,6 +16,7 @@ import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
+import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
 
 /**
@@ -192,18 +193,28 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     }
   }
 
+  // Phase-1.2-Drift-Folge — Klassifikation (Selbstzahler / OK / Soft-Private /
+  // Hard-Block) inkl. Warnungs-Wording und VAT-Mathematik lebt zentral in
+  // `shared/domain/budget/cost-estimate-outcome.ts`. Diese Route ist nur noch
+  // der Komposition-Wrapper: Preise + Verfügbarkeit aus DB ziehen, an die
+  // pure Funktion übergeben, Wire-Shape bauen.
   if (isSelbstzahler) {
-    const vatCents = Math.round(totalCostCents * (weightedVatRate / 100));
-    const bruttoCents = totalCostCents + vatCents;
+    const outcome = classifyCostEstimate({
+      totalCostCents,
+      availableCents: 0,
+      weightedVatRate,
+      acceptsPrivatePayment: false,
+      isSelbstzahler: true,
+    });
     res.json({
       totalCents: totalCostCents,
       isSelbstzahler: true,
-      bruttoCents,
-      vatCents,
+      bruttoCents: outcome.bruttoCents,
+      vatCents: outcome.vatCents,
       vatRate: Math.round(weightedVatRate),
-      warning: null,
-      isHardBlock: false,
-      privateCents: 0,
+      warning: outcome.warning,
+      isHardBlock: outcome.isHardBlock,
+      privateCents: outcome.privateCents,
       acceptsPrivatePayment: false,
       ...(process.env.NODE_ENV === "test" ? { _testBudgetQueriesExecuted: false } : {}),
     });
@@ -222,46 +233,25 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
   const summary45b = summaries.entlastungsbetrag45b;
 
-  const typeSettings = await budgetLedgerStorage.readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() });
-  const enabledMap: Record<string, boolean> = {
-    entlastungsbetrag_45b: true,
-    umwandlung_45a: false,
-    ersatzpflege_39_42a: false,
-  };
-  for (const s of typeSettings) {
-    enabledMap[s.budgetType] = s.enabled;
-  }
-
   const totalAvailable = dateAware.totalCents;
 
-  let warning: string | null = null;
-  let isHardBlock = false;
-  let privateCents = 0;
-  let vatCents = 0;
-
-  if (totalCostCents > totalAvailable) {
-    const shortfall = totalCostCents - totalAvailable;
-    const shortfallEuro = formatEuroDE(shortfall);
-
-    if (acceptsPrivatePayment) {
-      privateCents = shortfall;
-      vatCents = Math.round(shortfall * (weightedVatRate / 100));
-      warning = `Budget reicht nicht — ${shortfallEuro} werden privat berechnet.`;
-    } else {
-      warning = `Budget reicht nicht — es fehlen ${shortfallEuro}.`;
-      isHardBlock = true;
-    }
-  }
+  const outcome = classifyCostEstimate({
+    totalCostCents,
+    availableCents: totalAvailable,
+    weightedVatRate,
+    acceptsPrivatePayment,
+    isSelbstzahler: false,
+  });
 
   res.json({
     totalCents: totalCostCents,
     availableCents: totalAvailable,
     currentMonthUsedCents: summary45b.currentMonthUsedCents,
     monthlyLimitCents: summary45b.monthlyLimitCents,
-    warning,
-    isHardBlock,
-    privateCents,
-    vatCents,
+    warning: outcome.warning,
+    isHardBlock: outcome.isHardBlock,
+    privateCents: outcome.privateCents,
+    vatCents: outcome.vatCents,
     vatRate: Math.round(weightedVatRate),
     acceptsPrivatePayment,
     ...(process.env.NODE_ENV === "test" ? { _testBudgetQueriesExecuted: true } : {}),

@@ -12,6 +12,7 @@ import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, Al
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
+import { computeCapSlot } from "./cap-calculator";
 import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
@@ -286,11 +287,6 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
 
 async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget45aSummary> {
   const today = todayISO();
-  const todayDate = parseLocalDate(today);
-  const currentYear = todayDate.getFullYear();
-  const currentMonth = todayDate.getMonth() + 1;
-  const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
-  const currentMonthLastDay = lastDayOfMonth(currentYear, currentMonth);
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
   const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today });
@@ -300,38 +296,38 @@ async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBu
     ? true
     : (!s45a.validFrom || today >= s45a.validFrom) && (!s45a.validTo || today <= s45a.validTo);
 
-  const [currentMonthAllocatedCents, txConsumptionResult, txReversalResult] = await Promise.all([
+  // SSoT-Pfad: Cap-Mathematik (Monats-Fenster, statutorische Klemme nach
+  // Pflegegrad) wird über `computeCapSlot` aus demselben Helfer gezogen,
+  // den auch der Buchungspfad (`createCascadeConsumption`) und die Import-
+  // Preview (`getAvailableForDate`) nutzen. Vorher hatte diese Funktion
+  // ihre eigene Window-Net-Aggregation — bei Daten, bei denen
+  // `monthlyLimitCents` über dem gesetzlichen Maximum lag (Backfill, manueller
+  // SQL-Eingriff), wich die Overview-Anzeige vom tatsächlich buchbaren Betrag
+  // ab. Siehe `docs/budget-ssot-inventory.md` Phase 1.2.
+  const capSlotPromise = computeCapSlot({
+    customerId,
+    budgetType: "umwandlung_45a",
+    transactionDate: today,
+    monthlyLimitCents: s45a?.monthlyLimitCents ?? null,
+    yearlyLimitCents: null,
+  });
+  const [currentMonthAllocatedCents, capSlot] = await Promise.all([
     calculateAllocatedCents(customerId, "umwandlung_45a", { asOfDate: today }, undefined, preferences, typeSettings),
-
-    db.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "umwandlung_45a"),
-      eq(budgetTransactions.transactionType, "consumption"),
-      gte(budgetTransactions.transactionDate, currentMonthStart),
-      lte(budgetTransactions.transactionDate, currentMonthLastDay)
-    )),
-
-    db.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "umwandlung_45a"),
-      eq(budgetTransactions.transactionType, "reversal"),
-      gte(budgetTransactions.transactionDate, currentMonthStart),
-      lte(budgetTransactions.transactionDate, currentMonthLastDay)
-    )),
+    capSlotPromise,
   ]);
 
-  const currentMonthUsedCents = Math.max(0, Number(txConsumptionResult[0]?.total ?? 0) - Number(txReversalResult[0]?.total ?? 0));
+  const currentMonthUsedCents = capSlot.netUsedInWindowCents;
+  const fallbackAvailable = Math.max(0, currentMonthAllocatedCents - currentMonthUsedCents);
+  const cappedAvailable = Number.isFinite(capSlot.capRemainingCents)
+    ? Math.min(capSlot.capRemainingCents, fallbackAvailable)
+    : fallbackAvailable;
 
   return {
     customerId,
     monthlyBudgetCents: amounts.pflegesachleistungen36,
     currentMonthAllocatedCents,
     currentMonthUsedCents,
-    currentMonthAvailableCents: isCurrentlyActive ? currentMonthAllocatedCents - currentMonthUsedCents : 0,
+    currentMonthAvailableCents: isCurrentlyActive ? cappedAvailable : 0,
     isCurrentlyActive,
   };
 }
@@ -340,45 +336,39 @@ async function getBudgetSummary39_42a(customerId: number, _preferences?: Custome
   const today = todayISO();
   const todayDate = parseLocalDate(today);
   const currentYear = todayDate.getFullYear();
-  const yearStart = `${currentYear}-01-01`;
-  const yearEnd = `${currentYear}-12-31`;
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
   const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today });
   const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
+  const s39 = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
 
-  const [currentYearAllocatedCents, txConsumptionResult, txReversalResult] = await Promise.all([
+  // SSoT-Pfad: Year-Cap (§39/§42a-Jahres-Cap inkl. statutorischer Klemme auf
+  // BUDGET_39_42A_MAX_YEARLY_CENTS) wird über denselben `computeCapSlot`-Helfer
+  // berechnet wie Buchungspfad/Preview. Siehe Kommentar oben (§45a).
+  const capSlotPromise = computeCapSlot({
+    customerId,
+    budgetType: "ersatzpflege_39_42a",
+    transactionDate: today,
+    monthlyLimitCents: null,
+    yearlyLimitCents: s39?.yearlyLimitCents ?? null,
+  });
+  const [currentYearAllocatedCents, capSlot] = await Promise.all([
     calculateAllocatedCents(customerId, "ersatzpflege_39_42a", { year: currentYear }, undefined, preferences, typeSettings),
-
-    db.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
-      eq(budgetTransactions.transactionType, "consumption"),
-      gte(budgetTransactions.transactionDate, yearStart),
-      lte(budgetTransactions.transactionDate, yearEnd)
-    )),
-
-    db.select({
-      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    }).from(budgetTransactions).where(and(
-      eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "ersatzpflege_39_42a"),
-      eq(budgetTransactions.transactionType, "reversal"),
-      gte(budgetTransactions.transactionDate, yearStart),
-      lte(budgetTransactions.transactionDate, yearEnd)
-    )),
+    capSlotPromise,
   ]);
 
-  const currentYearUsedCents = Math.max(0, Number(txConsumptionResult[0]?.total ?? 0) - Number(txReversalResult[0]?.total ?? 0));
+  const currentYearUsedCents = capSlot.netUsedInWindowCents;
+  const fallbackAvailable = Math.max(0, currentYearAllocatedCents - currentYearUsedCents);
+  const cappedAvailable = Number.isFinite(capSlot.capRemainingCents)
+    ? Math.min(capSlot.capRemainingCents, fallbackAvailable)
+    : fallbackAvailable;
 
   return {
     customerId,
     yearlyBudgetCents: amounts.verhinderungspflege39,
     currentYearAllocatedCents,
     currentYearUsedCents,
-    currentYearAvailableCents: currentYearAllocatedCents - currentYearUsedCents,
+    currentYearAvailableCents: cappedAvailable,
   };
 }
 

@@ -1,4 +1,6 @@
 - [storage.getInvoice JOIN-alias trap](storage-get-invoice-customername.md) — getInvoice OVERRIDES invoice.customerName with customers.name; any verifier/re-render that selects raw from invoicesTable will drift.
+- [Budget Cap-SSoT (computeCapSlot)](budget-cap-ssot-computecapslot.md) — §45a/§39_42a Anzeige UND Buchung müssen über computeCapSlot rechnen; eigene allocated−used-Mathe driftet, sobald monthlyLimit > statutorischer Cap.
+- [Cost-Estimate Klassifikation](budget-cost-estimate-classification.md) — vier Branches (Selbstzahler/OK/Soft-Private/Hard-Block) leben als pure classifyCostEstimate() in shared/domain/budget/; Route ist nur Wrapper.
 - [Budget write_off-Asymmetrie](budget-write-off-asymmetry.md) — write_off zählt in Topf-/Allocation-Sicht als Used, NICHT in Fenster-Cap-Sicht; jede neue budget_transactions-Aggregation muss sich aktiv entscheiden.
 - [Budget-Type-Settings Window-Shift-Falle](budget-typesettings-window-trap.md) — allocStart/end aus FRÜHESTEM validFrom / SPÄTESTEM validTo aller Zeilen ableiten, nicht aus einer einzelnen typeSettings.find()-Row, sonst kippt jede append-only-Transition.
 - [Budget-Architektur-Doku ausgelagert](budget-doc-layout.md) — Budget-Details NICHT in replit.md ablegen; docs/architecture/budget.md ist die Quelle, replit.md hält nur Pointer.
