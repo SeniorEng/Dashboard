@@ -32,6 +32,16 @@ type ConsumptionParams = {
   travelCents?: number;
   customerKilometers?: number;
   customerKilometersCents?: number;
+  /**
+   * Task #723 — Skalierungsnenner für die Service-Felder bei Cascade-Buchungen.
+   * Wird vom Cascade-Pfad (createCascadeConsumption) als Termin-Gesamtkost
+   * (`costs.totalCents`) gesetzt, damit Folge-Töpfe ihre Service-Felder
+   * proportional zum Termin-Total (nicht zum Topf-Chunk) berechnen und in
+   * Summe über alle Legs wieder die Termin-Werte ergeben. Wenn `undefined`,
+   * fällt buildConsumptionTxData auf das Chunk-Argument als Nenner zurück
+   * (Rebook-Pfad, Single-Pot-Konsumtion).
+   */
+  totalAmountCents?: number;
 };
 
 function buildConsumptionTxData(
@@ -40,13 +50,27 @@ function buildConsumptionTxData(
   transactionDate: string,
   amountCents: number,
   allocationId: number | null,
-  ratio: number,
+  chunkAmountCents: number,
   params?: ConsumptionParams,
 ): typeof budgetTransactions.$inferInsert {
   const hwSrc = params?.hauswirtschaftCents;
   const abSrc = params?.alltagsbegleitungCents;
   const tvSrc = params?.travelCents;
   const ckSrc = params?.customerKilometersCents;
+
+  // Task #723 — Skalierungs-Nenner:
+  // - Cascade-Pfad: `params.totalAmountCents` = Termin-Gesamtkost. Dadurch
+  //   gilt ratio = legBetrag / Termin-Total, und die Summe der Service-Felder
+  //   über ALLE Cascade-Töpfe (§45b + §45a + §39 + ggf. private) konvergiert
+  //   gegen die Termin-Werte (mit Final-Reconcile gegen ≤(n-1)-Cent-Drift).
+  // - Rebook/Single-Pot-Pfad: kein totalAmountCents → Fallback auf das
+  //   übergebene Chunk-Argument (alte Semantik). Damit bleibt das Verhalten
+  //   für `rebook-storage` unverändert.
+  const consumeAbs = Math.abs(amountCents);
+  const scaleDenom = params?.totalAmountCents && params.totalAmountCents > 0
+    ? params.totalAmountCents
+    : chunkAmountCents;
+  const ratio = scaleDenom > 0 ? consumeAbs / scaleDenom : 0;
 
   let hwCents = hwSrc != null ? Math.round(hwSrc * ratio) : null;
   let abCents = abSrc != null ? Math.round(abSrc * ratio) : null;
@@ -230,7 +254,6 @@ export async function consumeFifo(
   let remaining = Math.min(amountCents, totalAvailable);
   let totalConsumedAmount = 0;
   const transactions: BudgetTransaction[] = [];
-  let isFirstTransaction = true;
 
   for (const allocation of specialAllocations) {
     if (remaining <= 0) break;
@@ -243,22 +266,18 @@ export async function consumeFifo(
     if (available <= 0) continue;
 
     const consumeAmount = Math.min(remaining, available);
-    const ratio = params && amountCents > 0 ? consumeAmount / amountCents : (isFirstTransaction ? 1 : 0);
 
-    const txData = buildConsumptionTxData(customerId, budgetType, transactionDate, -consumeAmount, allocation.id, ratio, params);
+    const txData = buildConsumptionTxData(customerId, budgetType, transactionDate, -consumeAmount, allocation.id, amountCents, params);
 
     const result = await d.insert(budgetTransactions).values(txData).returning();
     if (result[0]) transactions.push(result[0]);
 
     remaining -= consumeAmount;
     totalConsumedAmount += consumeAmount;
-    isFirstTransaction = false;
   }
 
   if (remaining > 0) {
-    const ratio = params && amountCents > 0 ? remaining / amountCents : (isFirstTransaction ? 1 : 0);
-
-    const txData = buildConsumptionTxData(customerId, budgetType, transactionDate, -remaining, null, ratio, params);
+    const txData = buildConsumptionTxData(customerId, budgetType, transactionDate, -remaining, null, amountCents, params);
 
     const result = await d.insert(budgetTransactions).values(txData).returning();
     if (result[0]) transactions.push(result[0]);
@@ -398,13 +417,21 @@ export async function createCascadeConsumption(params: {
         continue;
       }
 
-      const isFirstPot = allTransactions.length === 0;
+      // Task #723 — Service-Felder werden in JEDEN Cascade-Topf gegeben
+      // (nicht nur in den ersten). Vor #723 bekamen Folge-Töpfe nur
+      // `{appointmentId,userId}` → ihre hwCents/abCents/tvCents/ckCents
+      // landeten als NULL in der DB, sodass Σ über alle Legs ≠
+      // appointment.<feld>Cents war (Lexware-Export, §45b-Anzeige und
+      // Statistik addieren diese Spalten). Mit `totalAmountCents` als
+      // Skalierungs-Nenner berechnet `buildConsumptionTxData` pro Leg
+      // ratio = legBetrag / Termin-Total, und der Final-Reconcile am
+      // Cascade-Ende (siehe unten) absorbiert verbleibende Cent-Drift.
       const fifoResult = await consumeFifo(
         params.customerId,
         pot.budgetType,
         maxConsumable,
         params.transactionDate,
-        isFirstPot ? {
+        {
           appointmentId: params.appointmentId,
           userId: params.userId,
           hauswirtschaftMinutes: params.hauswirtschaftMinutes,
@@ -415,9 +442,7 @@ export async function createCascadeConsumption(params: {
           travelCents: params.travelCents,
           customerKilometers: params.customerKilometers,
           customerKilometersCents: params.customerKilometersCents,
-        } : {
-          appointmentId: params.appointmentId,
-          userId: params.userId,
+          totalAmountCents: params.totalAmountCents,
         },
         tx
       );
@@ -425,6 +450,23 @@ export async function createCascadeConsumption(params: {
       allTransactions.push(...fifoResult.transactions);
       remaining -= fifoResult.consumedCents;
       breakdown.push({ budgetType: pot.budgetType, consumedCents: fifoResult.consumedCents });
+    }
+
+    // Task #723 — Final-Reconcile gegen Rest-Drift:
+    // Wenn die Cascade den Termin vollständig abgedeckt hat (kein
+    // Privatzahlungs-Overflow), gleichen wir die ≤(n-1)-Cent-Rundungsdrift
+    // pro Service-Feld am letzten eingefügten Leg aus. Bei Outstanding > 0
+    // übernimmt der private Overflow-Pfad in `createConsumptionTransaction`
+    // die Reconciliation, nachdem die Privat-Tx eingefügt wurde — sonst
+    // würden wir Rundungsfehler korrigieren, die der private Leg gerade
+    // erst auffüllt.
+    if (remaining === 0 && allTransactions.length > 0) {
+      await reconcileAppointmentLegFieldDrift(tx, allTransactions, {
+        hauswirtschaftCents: params.hauswirtschaftCents,
+        alltagsbegleitungCents: params.alltagsbegleitungCents,
+        travelCents: params.travelCents,
+        customerKilometersCents: params.customerKilometersCents,
+      });
     }
 
     return {
@@ -439,6 +481,90 @@ export async function createCascadeConsumption(params: {
     return await doWork(outerTx);
   }
   return await db.transaction(async (tx: DbClient) => doWork(tx));
+}
+
+/**
+ * Task #723 — Final-Reconcile: Σ Service-Feld pro Termin = appointment-Wert.
+ *
+ * Der Cascade-Pfad rundet jedes Leg unabhängig (ratio = legBetrag / Termin-
+ * Total) und wendet dann pro Tx Subtract-Last gegen die Betragsdrift an
+ * (Task #441). Über mehrere Legs hinweg kann die Summe pro Service-Feld
+ * dennoch um ≤(n-1) Cent vom Termin-Wert abweichen — diese Drift wird hier
+ * komplett auf das jeweils letzte Konsum-Tx desselben Termins gebucht.
+ *
+ * Invariante nach Aufruf:
+ *   Σ hauswirtschaftCents      = full.hauswirtschaftCents
+ *   Σ alltagsbegleitungCents   = full.alltagsbegleitungCents
+ *   Σ travelCents              = full.travelCents
+ *   Σ customerKilometersCents  = full.customerKilometersCents
+ *
+ * Schutz: nur wenn Σ Δ über alle Felder = 0 (sonst würde sich die pro-Tx-
+ * Betragsinvariante verschieben). Σ Δ = 0 ist garantiert, sobald der
+ * Cascade-Pfad das Termin-Total vollständig konsumiert hat (kein
+ * Outstanding) — der Aufrufer muss das sicherstellen.
+ */
+async function reconcileAppointmentLegFieldDrift(
+  tx: DbClient,
+  appointmentTxs: BudgetTransaction[],
+  full: {
+    hauswirtschaftCents: number;
+    alltagsbegleitungCents: number;
+    travelCents: number;
+    customerKilometersCents: number;
+  },
+): Promise<void> {
+  const consumptions = appointmentTxs.filter(
+    (t) => t.transactionType === "consumption",
+  );
+  if (consumptions.length === 0) return;
+
+  let sumHw = 0;
+  let sumAb = 0;
+  let sumTv = 0;
+  let sumCk = 0;
+  for (const t of consumptions) {
+    sumHw += t.hauswirtschaftCents ?? 0;
+    sumAb += t.alltagsbegleitungCents ?? 0;
+    sumTv += t.travelCents ?? 0;
+    sumCk += t.customerKilometersCents ?? 0;
+  }
+
+  const dHw = full.hauswirtschaftCents - sumHw;
+  const dAb = full.alltagsbegleitungCents - sumAb;
+  const dTv = full.travelCents - sumTv;
+  const dCk = full.customerKilometersCents - sumCk;
+
+  if (dHw === 0 && dAb === 0 && dTv === 0 && dCk === 0) return;
+
+  // Schutz: Σ Δ muss 0 sein, sonst verschiebt der UPDATE die pro-Tx-
+  // Betragsinvariante. Bei Drift ≠ 0 liegt eine tiefere Inkonsistenz vor
+  // (Cascade hat nicht vollständig konsumiert) — lautlos auslassen statt
+  // falsch zu korrigieren.
+  if (dHw + dAb + dTv + dCk !== 0) return;
+
+  const last = consumptions[consumptions.length - 1];
+  const newHw = (last.hauswirtschaftCents ?? 0) + dHw;
+  const newAb = (last.alltagsbegleitungCents ?? 0) + dAb;
+  const newTv = (last.travelCents ?? 0) + dTv;
+  const newCk = (last.customerKilometersCents ?? 0) + dCk;
+
+  await tx
+    .update(budgetTransactions)
+    .set({
+      hauswirtschaftCents: newHw,
+      alltagsbegleitungCents: newAb,
+      travelCents: newTv,
+      customerKilometersCents: newCk,
+    })
+    .where(eq(budgetTransactions.id, last.id));
+
+  // In-Memory-Repräsentation aktualisieren, damit nachgelagerte Aufrufer
+  // (z.B. `createConsumptionTransaction`-Rückgabewert) den Zustand der DB
+  // sehen.
+  (last as { hauswirtschaftCents: number | null }).hauswirtschaftCents = newHw;
+  (last as { alltagsbegleitungCents: number | null }).alltagsbegleitungCents = newAb;
+  (last as { travelCents: number | null }).travelCents = newTv;
+  (last as { customerKilometersCents: number | null }).customerKilometersCents = newCk;
 }
 
 export async function createConsumptionTransaction(params: {
@@ -601,6 +727,23 @@ export async function createConsumptionTransaction(params: {
           createdByUserId: params.userId,
           notes: `Privatzahlung: ${formatEuroDE(cascadeResult.outstandingCents)}`,
         }).returning();
+
+        // Task #723 — Reconcile über Cascade + Privat: jede Tx wurde
+        // unabhängig gerundet, hier wird die ≤(n-1)-Cent-Drift pro
+        // Service-Feld am letzten eingefügten Leg (der Privat-Tx)
+        // ausgeglichen. Σ Δ = 0 ist gegeben, weil
+        // cascadeConsumed + outstanding = costs.totalCents per Konstruktion.
+        await reconcileAppointmentLegFieldDrift(
+          tx,
+          [...cascadeResult.transactions, privateTransaction],
+          {
+            hauswirtschaftCents: costs.hauswirtschaftCents,
+            alltagsbegleitungCents: costs.alltagsbegleitungCents,
+            travelCents: costs.travelCents,
+            customerKilometersCents: costs.customerKilometersCents,
+          },
+        );
+
         return cascadeResult.transactions[0] ?? privateTransaction;
       }
       throw new Error(
