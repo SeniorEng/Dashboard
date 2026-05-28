@@ -239,6 +239,19 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
       // Button im Footer, damit Escape im DialogContent zuverlässig wirkt
       // (und Tastatur-Nutzer den Dialog nicht „verlieren"). Dieser Smoke-Test
       // ist gleichzeitig der Regression-Guard dafür.
+      //
+      // Flake-Fix (Task #790): Die Fokus-Verschiebung auf den Schließen-Button
+      // passiert per `useEffect` NACH dem Render des Ergebnis-Panels — also
+      // asynchron. Radix schließt das DialogContent bei Escape aber nur, wenn
+      // der Fokus zu diesem Zeitpunkt INNERHALB des Contents liegt. Drückten
+      // wir Escape, bevor der Effect den Fokus vom (jetzt disabled) Confirm-
+      // Button auf den Schließen-Button gezogen hat, landete der Tastendruck
+      // am <body> und das Panel blieb sichtbar (count 1 statt 0). Wir warten
+      // daher explizit, bis der Schließen-Button den Fokus hat — das ist
+      // gleichzeitig die Assertion für das #762-Fokus-Management — und drücken
+      // erst dann Escape.
+      const closeBtn = page.locator("[data-testid='button-close-generate-all']");
+      await expect(closeBtn).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(page.locator("[data-testid='generate-all-summary']")).toHaveCount(0);
 

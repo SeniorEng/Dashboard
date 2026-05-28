@@ -296,17 +296,56 @@ export async function createSingleServiceRecord(
   session: ApiSession,
   opts: { customerId: number; appointmentId: number },
 ): Promise<{ id: number }> {
-  const { status, data } = await apiPost<unknown>(
-    session,
-    "/api/service-records/single",
-    { customerId: opts.customerId, appointmentId: opts.appointmentId },
-  );
-  if (status !== 201 && status !== 200) {
-    throw new Error(
-      `createSingleServiceRecord failed: ${status} ${JSON.stringify(data)}`,
+  // Flake-Fix (Task #790): Unter Cold-Start mit vier parallelen Workern teilt
+  // sich der frisch hochgefahrene App-Server einen kalten Connection-Pool. Der
+  // /single-Endpoint öffnet eine DB-Transaktion (createServiceRecord +
+  // addAppointmentsToServiceRecord + Audit-Log) — bei Pool-Sättigung lief der
+  // erste Versuch gelegentlich in einen Connect-Timeout und der asyncHandler
+  // antwortete mit 500. Das ist ein transienter Infrastruktur-Flake, kein
+  // Logik-Fehler. Wir wiederholen daher NUR bei 5xx mit kurzem Backoff.
+  //
+  // Sonderfall: Hat der erste (fehlgeschlagene) Versuch den Record server-
+  // seitig doch angelegt, antwortet der Retry mit 409 inkl. existingRecordId
+  // (Idempotenz-Pfad im Endpoint) — den behandeln wir als Erfolg, statt einen
+  // vermeintlichen „bereits vorhanden"-Fehler zu werfen.
+  const maxAttempts = 4;
+  let lastStatus = 0;
+  let lastData: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const { status, data } = await apiPost<unknown>(
+      session,
+      "/api/service-records/single",
+      { customerId: opts.customerId, appointmentId: opts.appointmentId },
     );
+    lastStatus = status;
+    lastData = data;
+
+    if (status === 201 || status === 200) {
+      return { id: idFrom(data, "createSingleServiceRecord") };
+    }
+
+    // Ein Retry, der den bereits angelegten Record findet, ist ein Erfolg.
+    if (
+      attempt > 1 &&
+      status === 409 &&
+      data &&
+      typeof data === "object" &&
+      "existingRecordId" in data &&
+      typeof (data as { existingRecordId: unknown }).existingRecordId === "number"
+    ) {
+      return { id: (data as { existingRecordId: number }).existingRecordId };
+    }
+
+    // Nur transiente Serverfehler (5xx) sind ein Retry wert. 4xx ist ein
+    // echter Logik-/Eingabefehler und wird sofort propagiert.
+    if (status < 500 || attempt === maxAttempts) {
+      break;
+    }
+    await new Promise((res) => setTimeout(res, 300 * attempt));
   }
-  return { id: idFrom(data, "createSingleServiceRecord") };
+  throw new Error(
+    `createSingleServiceRecord failed: ${lastStatus} ${JSON.stringify(lastData)}`,
+  );
 }
 
 export interface TestProspect {

@@ -158,18 +158,10 @@ export default function AdminBilling() {
   const [batchSending, setBatchSending] = useState(false);
   const [generateAllOpen, setGenerateAllOpen] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<GenerateAllResponse | null>(null);
-  // Task #762: Wenn der Confirm-Button nach dem Lauf disabled wird (entweder
-  // weil isPending true war und gerade auf false fällt, oder weil customers
-  // gefiltert sind), verliert er den Fokus an das <body>. Damit funktioniert
-  // Escape im DialogContent nicht mehr. Wir verschieben den Fokus aktiv auf
-  // den „Schließen"-Button im Footer, sobald das Ergebnis da ist — so kann
-  // Tastatur-Bedienung den Dialog mit Escape ODER Enter zuverlässig schließen.
+  // Task #762/#790: Fokus-Management für den „Schließen"-Button des
+  // Massenerstellung-Dialogs. Der zugehörige useEffect steht unten beim
+  // `generateAllMutation` (er braucht dessen `isPending`).
   const generateAllCloseBtnRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (generateAllProgress && generateAllOpen) {
-      generateAllCloseBtnRef.current?.focus();
-    }
-  }, [generateAllProgress, generateAllOpen]);
   // Task #534: Bulk-Versand-Dialog (typenübergreifend).
   const [bulkSendOpen, setBulkSendOpen] = useState(false);
   const [bulkSendResult, setBulkSendResult] = useState<BulkSendInvoiceResponse | null>(null);
@@ -437,6 +429,24 @@ export default function AdminBilling() {
       });
     },
   });
+
+  // Task #762 / #790: Wenn der Confirm-Button nach dem Lauf disabled wird,
+  // verliert er den Fokus an das <body> — Escape im DialogContent wirkt dann
+  // nicht mehr. Wir verschieben den Fokus aktiv auf den „Schließen"-Button im
+  // Footer, sobald das Ergebnis da ist UND die Mutation nicht mehr läuft.
+  // WICHTIG (#790-Bugfix): Der Schließen-Button ist `disabled`, solange
+  // `generateAllMutation.isPending` true ist — ein `.focus()` auf ein disabled
+  // Element ist ein No-Op. Früher hing der Effect nur an `generateAllProgress`/
+  // `generateAllOpen`; er feuerte damit, während der Button noch disabled war,
+  // und lief nach dem Enable nicht erneut → der Fokus landete nie auf dem
+  // Button und Escape schloss den Dialog nicht zuverlässig. Deshalb hängt der
+  // Effect jetzt zusätzlich an `isPending` und feuert erst, wenn der Button
+  // tatsächlich fokussierbar (enabled) ist.
+  useEffect(() => {
+    if (generateAllProgress && generateAllOpen && !generateAllMutation.isPending) {
+      generateAllCloseBtnRef.current?.focus();
+    }
+  }, [generateAllProgress, generateAllOpen, generateAllMutation.isPending]);
 
   const batchSendMutation = useMutation({
     mutationFn: async (invoiceIds: number[]) => {

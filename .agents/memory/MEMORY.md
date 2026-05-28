@@ -10,3 +10,4 @@
 - [Stryker mutation setup](stryker-vitest4-command-runner.md) — vitest4 hangs the stryker vitest-runner → use command runner; mutate ONLY pure shared/domain calc modules; allowlist ignorePatterns to dodge EISDIR sandbox-copy crash.
 - [vi.spyOn(console) broken](vitest-spyon-console-broken.md) — vi.spyOn(console,"log") does NOT capture console.log from imported modules in this vitest setup; rebind `console.log` directly and restore in finally.
 - [Test signature fixtures min bytes](test-signature-fixture-min-bytes.md) — 8-byte PNG stub fails signature-validation (Task #749) → setup EMPTY_SIGNATURE; use tests/helpers/signature.ts VALID_SIGNATURE_DATA_URL.
+- [focus() on disabled button is no-op](focus-disabled-button-race.md) — dialog auto-focus useEffect must depend on/guard the is-pending flag, else focus never lands → Radix Escape flakes.
