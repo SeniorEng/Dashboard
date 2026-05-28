@@ -46,6 +46,7 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.responsibleEmployeeId) searchParams.set("responsibleEmployeeId", params.responsibleEmployeeId);
   if (params.status) searchParams.set("status", params.status);
   if (params.insuranceProviderId) searchParams.set("insuranceProviderId", params.insuranceProviderId);
+  if (params.budgetSetupMissing) searchParams.set("budgetSetupMissing", params.budgetSetupMissing);
   if (params.sortBy) searchParams.set("sortBy", params.sortBy);
   if (params.sortOrder) searchParams.set("sortOrder", params.sortOrder);
   const qs = searchParams.toString();
@@ -112,6 +113,23 @@ export function useCreateCustomer() {
     // / NETWORK_ERROR / 5xx und zeigt jeweils eine spezifische Meldung mit
     // Retry-Hinweis (Task #376). Ein zusätzlicher generischer Toast würde
     // die spezifische Meldung verdecken bzw. doppeln.
+  });
+}
+
+// Task #729 — Zähler für „Budget-Einrichtung steht aus"-Banner in der
+// Admin-Kundenliste. Spiegelt das Read-only-Audit-Skript
+// `scripts/audit-customers-without-budget-init.ts`.
+export function useBudgetSetupMissingCount() {
+  return useQuery({
+    queryKey: [...customerKeys.all, "budget-setup-missing-count"] as const,
+    queryFn: async ({ signal }) => {
+      const result = await api.get<{ count: number }>(
+        "/admin/customers/budget-setup-missing-count",
+        signal
+      );
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
   });
 }
 

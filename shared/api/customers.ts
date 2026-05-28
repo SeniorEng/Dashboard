@@ -23,6 +23,12 @@ export interface CustomerListItem {
   hasActiveContract: boolean;
   hasBetreuer: boolean;
   rechnungAnKunde: boolean;
+  /**
+   * Task #729 — true bei pflegekassen-berechtigten Kunden (PG ≥ 2) ohne
+   * aktive Zeile in `customer_budget_type_settings`. Listen-Marker für die
+   * „Budget-Einrichtung steht noch aus"-UI.
+   */
+  budgetSetupMissing: boolean;
   createdAt: string;
 }
 
@@ -32,6 +38,7 @@ export interface CustomerListParams extends PaginationParams {
   responsibleEmployeeId?: string;
   status?: string;
   insuranceProviderId?: string;
+  budgetSetupMissing?: string;
   sortBy?: string;
   sortOrder?: string;
 }
@@ -131,6 +138,17 @@ export interface CustomerDetail extends Customer {
   primaryEmployee: { id: number; displayName: string } | null;
   backupEmployee: { id: number; displayName: string } | null;
   backupEmployee2: { id: number; displayName: string } | null;
+  /**
+   * Task #729 — true bei pflegekassen-berechtigten Kunden (PG ≥ 2) ohne
+   * aktive Zeile in `customer_budget_type_settings`. Steuert das Banner
+   * „Budget-Einrichtung steht noch aus" in der Kunden-Detailseite und
+   * den Deep-Link auf den Budget-Tab.
+   */
+  budgetSetupMissing?: boolean;
+}
+
+export interface BudgetSetupMissingCount {
+  count: number;
 }
 
 export interface CreateCustomerRequest {

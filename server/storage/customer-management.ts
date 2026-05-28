@@ -28,6 +28,7 @@ import {
   customerBudgets,
   customerNeedsAssessments,
   customerCareLevelHistory,
+  customerBudgetTypeSettings,
   users,
   customerAssignmentHistory,
 } from "@shared/schema";
@@ -74,6 +75,14 @@ export interface CustomerListFilters {
   status?: string;
   billingType?: string;
   insuranceProviderId?: number;
+  /**
+   * Task #729 — Filtert auf bestehende Pflegekasse-Kunden (PG ≥ 2), bei
+   * denen die statutorischen Budget-Töpfe (§45b/§45a/§39-§42a) noch nie
+   * eingerichtet wurden (keine aktive Zeile in
+   * `customer_budget_type_settings`). Spiegelt das Read-only-Audit-Skript
+   * `scripts/audit-customers-without-budget-init.ts`.
+   */
+  budgetSetupMissing?: boolean;
   sortBy?: "name" | "contractStart" | "createdAt";
   sortOrder?: "asc" | "desc";
 }
@@ -95,6 +104,7 @@ interface CustomerListItem {
   telefon: string | null;
   festnetz: string | null;
   geburtsdatum: string | null;
+  budgetSetupMissing: boolean;
   pflegegrad: number | null;
   address: string;
   stadt: string | null;
@@ -248,6 +258,29 @@ class CustomerManagementStorage {
       .groupBy(customerContacts.customerId)
       .as('betreuer_contacts');
 
+    // Task #729 — Spiegelt das Audit-Skript: aktive Topf-Settings sind solche
+    // mit `validTo IS NULL AND enabled = true`. Wenn ein pflegekassen-
+    // berechtigter Kunde (PG ≥ 2) keine einzige solche Zeile hat, gilt die
+    // Budget-Einrichtung als „nicht erfolgt".
+    const activeBudgetSettingsSubquery = db
+      .select({
+        customerId: customerBudgetTypeSettings.customerId,
+        hasActiveBudgetSettings: sqlBuilder<boolean>`true`.as('has_active_budget_settings'),
+      })
+      .from(customerBudgetTypeSettings)
+      .where(and(
+        isNull(customerBudgetTypeSettings.validTo),
+        eq(customerBudgetTypeSettings.enabled, true),
+      ))
+      .groupBy(customerBudgetTypeSettings.customerId)
+      .as('active_budget_settings');
+
+    const budgetSetupMissingExpr = sqlBuilder<boolean>`(
+      ${customers.billingType} IN ('pflegekasse_gesetzlich', 'pflegekasse_privat')
+      AND COALESCE(${customers.pflegegrad}, 0) >= 2
+      AND ${activeBudgetSettingsSubquery.customerId} IS NULL
+    )`;
+
     let fullConditions = [...baseConditions];
     if (filters?.hasActiveContract === true) {
       fullConditions.push(isNotNull(activeContractSubquery.customerId));
@@ -257,10 +290,16 @@ class CustomerManagementStorage {
     if (insuranceSubquery) {
       fullConditions.push(isNotNull(insuranceSubquery.customerId));
     }
+    if (filters?.budgetSetupMissing) {
+      fullConditions.push(sqlBuilder`${customers.billingType} IN ('pflegekasse_gesetzlich', 'pflegekasse_privat')`);
+      fullConditions.push(sqlBuilder`COALESCE(${customers.pflegegrad}, 0) >= 2`);
+      fullConditions.push(isNull(activeBudgetSettingsSubquery.customerId));
+    }
     const fullWhereClause = fullConditions.length > 0 ? and(...fullConditions) : undefined;
 
     let countQueryBuilder = customersRepo.selectColumnsFrom({ count: count() }, db)
-      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId));
+      .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
+      .leftJoin(activeBudgetSettingsSubquery, eq(customers.id, activeBudgetSettingsSubquery.customerId));
     if (insuranceSubquery) {
       countQueryBuilder = countQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
     }
@@ -295,12 +334,14 @@ class CustomerManagementStorage {
         backupEmployee2Name: backupUser2.displayName,
         hasActiveContract: activeContractSubquery.hasContract,
         hasBetreuer: betreuerSubquery.hasBetreuer,
+        budgetSetupMissing: budgetSetupMissingExpr,
       }, db)
       .leftJoin(users, eq(customers.primaryEmployeeId, users.id))
       .leftJoin(backupUser, eq(customers.backupEmployeeId, backupUser.id))
       .leftJoin(backupUser2, eq(customers.backupEmployeeId2, backupUser2.id))
       .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
-      .leftJoin(betreuerSubquery, eq(customers.id, betreuerSubquery.customerId));
+      .leftJoin(betreuerSubquery, eq(customers.id, betreuerSubquery.customerId))
+      .leftJoin(activeBudgetSettingsSubquery, eq(customers.id, activeBudgetSettingsSubquery.customerId));
     if (insuranceSubquery) {
       dataQueryBuilder = dataQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
     }
@@ -376,6 +417,7 @@ class CustomerManagementStorage {
         matchedRole,
         hasActiveContract: r.hasActiveContract === true,
         hasBetreuer: r.hasBetreuer === true,
+        budgetSetupMissing: r.budgetSetupMissing === true,
         createdAt: r.createdAt,
       };
     });
@@ -413,6 +455,7 @@ class CustomerManagementStorage {
       primaryEmployee,
       backupEmployee,
       backupEmployee2,
+      activeBudgetSettings,
     ] = await Promise.all([
       this.getCustomerCurrentInsurance(customerId),
       this.getCustomerContacts(customerId),
@@ -429,7 +472,24 @@ class CustomerManagementStorage {
       customer.backupEmployeeId2
         ? db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, customer.backupEmployeeId2)).then(r => r[0])
         : Promise.resolve(undefined),
+      // Task #729 — Spiegelt das Audit-Skript: aktive Topf-Settings sind
+      // solche mit `validTo IS NULL AND enabled = true`.
+      db
+        .select({ id: customerBudgetTypeSettings.id })
+        .from(customerBudgetTypeSettings)
+        .where(and(
+          eq(customerBudgetTypeSettings.customerId, customerId),
+          isNull(customerBudgetTypeSettings.validTo),
+          eq(customerBudgetTypeSettings.enabled, true),
+        ))
+        .limit(1),
     ]);
+
+    const isPflegekasse = customer.billingType === "pflegekasse_gesetzlich" || customer.billingType === "pflegekasse_privat";
+    const budgetSetupMissing =
+      isPflegekasse &&
+      (customer.pflegegrad ?? 0) >= 2 &&
+      activeBudgetSettings.length === 0;
 
     return {
       ...customer,
@@ -442,6 +502,7 @@ class CustomerManagementStorage {
       primaryEmployee,
       backupEmployee,
       backupEmployee2,
+      budgetSetupMissing,
     };
   }
 

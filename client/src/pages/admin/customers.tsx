@@ -13,7 +13,7 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { DataList, DataListItem } from "@/components/patterns/data-list";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer, useUnassignedCustomerCount } from "@/features/customers";
+import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer, useUnassignedCustomerCount, useBudgetSetupMissingCount } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import { isChild } from "@shared/utils/datetime";
@@ -34,6 +34,7 @@ import {
   X,
   UserX,
   CheckCircle2,
+  Wallet,
 } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -54,6 +55,8 @@ export default function AdminCustomers() {
   const [billingTypeFilter, setBillingTypeFilter] = useState<string>("");
   const [employeeFilter, setEmployeeFilter] = useState<string>("");
   const [insuranceProviderFilter, setInsuranceProviderFilter] = useState<string>("");
+  // Task #729 — Toggle für „Budget-Einrichtung steht aus"-Filter.
+  const [budgetSetupMissingFilter, setBudgetSetupMissingFilter] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortOrder, setSortOrder] = useState<string>("asc");
@@ -79,6 +82,8 @@ export default function AdminCustomers() {
   const assignCustomer = useAssignCustomer();
   const { data: unassignedData } = useUnassignedCustomerCount();
   const unassignedCount = unassignedData?.count ?? 0;
+  const { data: budgetSetupMissingData } = useBudgetSetupMissingCount();
+  const budgetSetupMissingCount = budgetSetupMissingData?.count ?? 0;
 
   const employeeFilterOptions = useMemo(() => [
     { value: "all", label: "Alle Mitarbeiter" },
@@ -112,11 +117,12 @@ export default function AdminCustomers() {
     billingType: billingTypeFilter || undefined,
     responsibleEmployeeId: employeeFilter || undefined,
     insuranceProviderId: insuranceProviderFilter || undefined,
+    budgetSetupMissing: budgetSetupMissingFilter ? "true" : undefined,
     sortBy: sortBy || undefined,
     sortOrder: sortOrder || undefined,
     page: currentPage,
     limit: 15,
-  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, sortBy, sortOrder, currentPage]);
+  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, sortBy, sortOrder, currentPage]);
 
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
@@ -157,6 +163,7 @@ export default function AdminCustomers() {
     setBillingTypeFilter("");
     setEmployeeFilter("");
     setInsuranceProviderFilter("");
+    setBudgetSetupMissingFilter(false);
     setSortBy("name");
     setSortOrder("asc");
     setSearchQuery("");
@@ -171,9 +178,10 @@ export default function AdminCustomers() {
     if (billingTypeFilter) count++;
     if (employeeFilter) count++;
     if (insuranceProviderFilter) count++;
+    if (budgetSetupMissingFilter) count++;
     if (sortBy !== "name" || sortOrder !== "asc") count++;
     return count;
-  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, sortBy, sortOrder]);
+  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, sortBy, sortOrder]);
 
   const startEditing = useCallback((customer: CustomerListItem, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -273,6 +281,35 @@ export default function AdminCustomers() {
               </>
             )}
           </button>
+
+          {budgetSetupMissingCount > 0 && (
+            <button
+              onClick={() => {
+                setBudgetSetupMissingFilter((prev) => !prev);
+                setCurrentPage(1);
+              }}
+              className={`w-full mb-4 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                budgetSetupMissingFilter
+                  ? "bg-amber-100 border border-amber-400 text-amber-800"
+                  : "bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 cursor-pointer"
+              }`}
+              data-testid="banner-budget-setup-missing-list"
+            >
+              <Wallet className={iconSize.sm} />
+              <span>
+                {budgetSetupMissingCount} {budgetSetupMissingCount === 1 ? "Kunde" : "Kunden"} ohne eingerichtetes Budget (PG ≥ 2)
+              </span>
+              {budgetSetupMissingFilter && (
+                <Badge
+                  className="ml-auto bg-amber-200 text-amber-800 hover:bg-amber-300 cursor-pointer"
+                  onClick={(e) => { e.stopPropagation(); setBudgetSetupMissingFilter(false); setCurrentPage(1); }}
+                  data-testid="badge-clear-budget-setup-missing-filter"
+                >
+                  Filter aufheben
+                </Badge>
+              )}
+            </button>
+          )}
 
           <div className="flex gap-1 mb-4 bg-white rounded-lg p-1 border" data-testid="status-filter">
             {[
@@ -387,6 +424,29 @@ export default function AdminCustomers() {
                       emptyText="Kein Kostenträger gefunden."
                       data-testid="select-insurance-provider"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Budget-Setup</Label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBudgetSetupMissingFilter((prev) => !prev);
+                        setCurrentPage(1);
+                      }}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${
+                        budgetSetupMissingFilter
+                          ? "bg-amber-100 border-amber-400 text-amber-800"
+                          : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                      }`}
+                      data-testid="toggle-filter-budget-setup-missing"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Wallet className={iconSize.sm} />
+                        Nur Kunden ohne eingerichtetes Budget
+                      </span>
+                      {budgetSetupMissingFilter ? <Check className={iconSize.sm} /> : null}
+                    </button>
                   </div>
 
                   <div className="space-y-2">
@@ -515,6 +575,15 @@ export default function AdminCustomers() {
                       )}
                       {customer.pflegegrad !== null && customer.pflegegrad > 0 && (
                         <StatusBadge type="pflegegrad" value={customer.pflegegrad} />
+                      )}
+                      {customer.budgetSetupMissing && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs border-amber-400 text-amber-800 bg-amber-50"
+                          data-testid={`badge-budget-setup-missing-${customer.id}`}
+                        >
+                          Budget fehlt
+                        </Badge>
                       )}
                       {isChild(customer.geburtsdatum) && (
                         <StatusBadge type="warning" value="Minderjährig" data-testid={`badge-minor-${customer.id}`} />
