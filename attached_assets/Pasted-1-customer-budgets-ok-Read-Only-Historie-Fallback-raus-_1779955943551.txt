@@ -1,0 +1,31 @@
+1. customer_budgets — ok.
+Read-Only-Historie + Fallback raus ist richtig. Caveat: vor dem Fallback-Entfernen prüfen, ob es Kunden ohne Settings-Eintrag aber mit alten customer_budgets-Daten gibt — die würden sonst still mit 0 rendern. Kurzer SQL-Check vorher.
+
+2. Sentinel 1970-01-01 — ok.
+GoBD-Argument ist korrekt. Ein Punkt zusätzlich: die zentrale Helper-Funktion sollte den Sentinel als Konstante exportieren, damit kein „date < '2000-01-01'"-Vergleich in der Codebase entsteht.
+
+3. §45b CarryoverService — ok, mit Auflage.
+Service muss pure sein (Input: Quelljahr-Settings + Buchungen, Output: verfügbarer Carryover). Keine eigene Persistenz, kein eigener Cache. Sonst habt ihr die nächste Drift-Quelle gebaut.
+
+4. DTO-Lücke /overview vor Konsolidierung — ok.
+Genau richtig: Schema-First gibt euch den Vorher-Nachher-Snapshot. Würde explizit einen Schnappschuss-Test einbauen, der das aktuelle Antwort-JSON gegen das neue Schema validiert, bevor die Storage-Konsolidierung startet.
+
+5. Cost-Estimate-Route aufteilen — ok.
+Die Trennung Preisberechnung (stateless) vs. Verfügbarkeit (stateful, asOfDate) ist sauber. Wichtig: alte Route nicht parallel laufen lassen — Konsumenten umstellen und entfernen, sonst habt ihr zwei Wahrheiten.
+
+6. getBudgetSummary45a/39_42a Cap-Pfad in OverviewView — ok.
+Eine Migration statt zwei ist offensichtlich richtig. Setzt voraus, dass computeCapSlot vorher als pure Funktion in shared/domain/budget/ liegt — nicht parallel zur View bauen.
+
+7. Selbstzahler-§45b Shared-Validator — ok.
+Klassischer SSoT-Fall. Validator-Output sollte strukturiert sein ({ ok: boolean, reasons: string[] }), nicht nur boolean — sonst muss Frontend Fehlermeldungen separat pflegen und ihr habt wieder Drift.
+
+8. Stats-V2 Forecast in Phase 2 — ok.
+Scope-Disziplin richtig. Würde aber #704 als Blocker für Phase 2 explizit aufschreiben, sonst beginnt Phase 2 mit halbem Forecast-Modell.
+
+9. write_off-Asymmetrie — Gegenvorschlag.
+Hier würde ich nicht die Regel setzen und dann migrieren, sondern umgekehrt: erst die Call-Sites auditieren (welche Window-Berechnung rechnet heute write_off mit ein, und ist das ein Bug oder Absicht?). „GoBD-Ausbuchung gehört nicht ins Window" klingt plausibel, ist aber eine Behauptung — die Buchhaltung muss das bestätigen. Vorgehen: Inventur der ~5-10 betroffenen Stellen, Entscheidung pro Stelle dokumentieren, dann die einheitliche Regel als Architecture-Test festschreiben. Andersrum riskiert ihr, eine Regel zu zementieren, die fachlich nicht trägt.
+
+10. Cross-Customer-Aggregate per Kunde + Batch-Schicht — ok, mit Performance-Vorbehalt.
+Architektur stimmt. Aber: wenn OverviewView pro Kunde mehrere Queries macht, ist getOverviewBatch(customerIds[]) als N-Aufrufe katastrophal. Batch-Implementierung muss explizit als einzelner SQL-Join gebaut werden, der dasselbe DTO liefert — nicht als Schleife über die Single-View. Würde das als Architecture-Test verankern: „getOverviewBatch darf maximal X Queries machen, unabhängig von N".
+
+Zusammengefasst: 9 von 10 ok, bei #9 würde ich erst auditieren bevor ihr eine Regel setzt. Die zwei wichtigsten Querschnitts-Auflagen sind (a) pure Funktionen ohne eigenen State in den neuen Services/Views, (b) strukturierte Outputs (nicht boolean), damit Frontend/Backend nicht wieder drift-fähige eigene Texte pflegen.

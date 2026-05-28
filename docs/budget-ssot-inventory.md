@@ -329,3 +329,35 @@ Absorbiert:
 8. **Stats-V2 Forecast** — Teil der Phase-1-Konsolidierung oder eigener Phase-2-Schritt zusammen mit Task #704?
 9. **`write_off`-Asymmetrie** (siehe 1.4) — bewusst lassen oder vereinheitlichen? Hat Audit-Folgen.
 10. **Cross-Customer-Aggregate** (Stats-V2): per Kunde aus `BudgetOverviewView` ziehen oder eigene Batch-Read-Schicht?
+
+---
+
+## 7. Beschlüsse (Review-Runde 2026-05-28)
+
+Querschnitts-Auflagen für alle neuen Services/Views:
+- **(A) Pure Funktionen, kein eigener State.** Neue Services/Views haben keine eigene Persistenz, keinen eigenen Cache. Eingaben rein, Ausgaben rein — sonst entsteht die nächste Drift-Quelle.
+- **(B) Strukturierte Outputs.** Validatoren liefern `{ ok: boolean, reasons: string[] }`, keine nackten Booleans. Sonst pflegen Frontend und Backend wieder eigene Fehlertexte und driften erneut.
+
+| # | Frage | Beschluss | Owner-Phase | Auflagen |
+|---|---|---|---|---|
+| 1 | `customer_budgets` (Legacy) abschalten? | Nein in Phase 1 — Read-Only-Historie in `BudgetHistoryView`, Fallback aus `getMonthlyBudgetAmountCents` entfernen. Echte Abschaltung Phase 2. | 1.3 + 2 | **Vor Fallback-Entfernung SQL-Check:** Kunden ohne Settings-Eintrag aber mit alten `customer_budgets`-Daten würden sonst still mit 0 rendern. |
+| 2 | Sentinel `1970-01-01` | Mitziehen, kein Backfill (GoBD-Spur). Helper-Funktion in `BudgetSettingsView`. | 1.1 | Sentinel **als exportierte Konstante**, kein freier `date < '2000-01-01'`-Vergleich in der Codebase. |
+| 3 | §45b Carryover-Quelljahr-Dedup | Eigener `CarryoverService` unterhalb von `BudgetSettingsView`. | 1.1 | Service **muss pure sein** (Input: Quelljahr-Settings + Buchungen, Output: verfügbarer Carryover). Keine eigene Persistenz, kein eigener Cache. |
+| 4 | DTO-Lücke `/overview` | Vor der Storage-Konsolidierung. Schema nach `shared/api/budget.ts` heben, Route umstellen. | 1.2 (Vorlauf) | **Snapshot-Test:** aktuelles Antwort-JSON gegen neues Schema validieren, bevor die Storage-Konsolidierung startet. |
+| 5 | Cost-Estimate-Route aufteilen | Ja: `POST /pricing/estimate` (Cents) + `GET /budget/:id/availability?asOfDate=…` (Cents + Warnings). | 1.2 | **Alte Route nicht parallel betreiben.** Konsumenten umstellen und entfernen — sonst zwei Wahrheiten. |
+| 6 | `getBudgetSummary45a/39_42a` Cap-Pfad | Als Teil von Phase 1.2 auf `computeCapSlot` umstellen. | 1.2 | **`computeCapSlot` muss vorher als pure Funktion in `shared/domain/budget/` liegen.** Nicht parallel zur View bauen. |
+| 7 | Selbstzahler-§45b-Block | Shared-Validator in `shared/domain/budget/selbstzahler-rules.ts`. Frontend und Backend konsumieren denselben. | 1.1 | **Output strukturiert** (`{ ok, reasons: string[] }`), nicht nur boolean. |
+| 8 | Stats-V2 Forecast | Phase 2, gemeinsam mit #704-Folgearbeit. | 2 | **#704-Stabilität ist expliziter Blocker für Phase 2** — sonst beginnt Phase 2 mit halbem Forecast-Modell. |
+| 9 | `write_off`-Asymmetrie | **Audit-first statt Regel-first.** Inventur der ~5-10 betroffenen Call-Sites, Entscheidung pro Stelle dokumentieren, dann einheitliche Regel als Architecture-Test festschreiben. Buchhaltung bestätigt die Regel vor Codifizierung. | 1.2 (Audit) → 1.3 (Regel) | Audit-Ergebnis als Tabelle in dieses Dokument anhängen, bevor Regel-Code geschrieben wird. |
+| 10 | Cross-Customer-Aggregate | Per Kunde aus `BudgetOverviewView`, dazu explizite Batch-Schicht `getOverviewBatch(customerIds[])`. | 2 | **Batch-Implementierung als einzelner SQL-Join**, nicht als Schleife über die Single-View. Architecture-Test: „`getOverviewBatch` macht maximal X Queries unabhängig von N". |
+
+### Phasen-Reihenfolge (verbindlich)
+
+1. **Phase 1.1 — `BudgetSettingsView`** (1-2 Wochen): 4 Settings-Read-Funktionen → eine API mit Modus `forDate` / `forEdit` / `withTransition`. Selbstzahler-Validator und `CarryoverService` ziehen mit. Sentinel-Konstante. Equality-Tests pro Aufrufer-Pfad als Migrations-Guard.
+2. **Phase 1.2 — `BudgetOverviewView`** (1-2 Wochen, nach 1.1): DTO-Vorlauf, Cap-Konsolidierung auf `computeCapSlot`, Cost-Estimate-Aufteilung, `write_off`-Audit als Vorbereitung.
+3. **Phase 1.3 — `BudgetHistoryView`** (~1 Woche, nach 1.2): Allocations/Transactions/Audit-Aggregation, `write_off`-Regel als Architecture-Test, `customer_budgets` als Read-Only-Historie.
+4. **Phase 2** — `BudgetForecastView` (Blocker: #704), `customer_budgets`-Tabelle abschalten, Stats-V2-Batch-Read.
+
+### Begleitende Doku-Auslagerung
+
+Budget-spezifische Architecture-Decisions und Gotchas wandern aus `replit.md` nach [`docs/architecture/budget.md`](./architecture/budget.md). `replit.md` behält nur Pointer.
