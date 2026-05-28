@@ -51,6 +51,9 @@ export default {
     "shared/domain/budget/cost-estimate-outcome.ts",
     "shared/domain/budget/cap-math.ts",
     "shared/domain/budget/history-aggregation.ts",
+    "shared/domain/budgets.ts",
+    "shared/domain/vacation.ts",
+    "shared/domain/cancellation-policy.ts",
   ],
   // Incremental-Mode: nur Mutanten erneut prüfen, die von Code-/Test-
   // Änderungen seit dem letzten Lauf betroffen sind. Die Datei wird per

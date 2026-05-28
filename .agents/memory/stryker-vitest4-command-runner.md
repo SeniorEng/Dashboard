@@ -34,6 +34,16 @@ has dot-dirs (`.cache/`, `.config/pulse/`) with FIFOs/special files that crash t
 with `EISDIR`. Solution: allowlist `ignorePatterns` (`["**", "!shared/**", "!tests/**",
 ...]`) so only what the pure tests need is copied. node_modules is symlinked, not copied.
 
+## Incremental cache is keyed on SOURCE hash, not test hash
+`incremental: true` (`reports/stryker-incremental.json`) reuses prior mutant results
+whenever the mutated source file is unchanged — even if you added/changed assertions in
+its TEST file. So after writing new tests to kill survivors, a normal `npm run mutation`
+reports the OLD (stale) score. To re-measure: `rm -f reports/stryker-incremental.json`
+before the run (CLI `--incremental false` does NOT work — it's parsed as a config-file
+path and errors with "Invalid config file 'false'"). The report file is gitignored.
+**How to apply:** any time you tune tests to raise a module's score, delete the
+incremental report first or you'll trust a cached number.
+
 ## Gotcha when killing runs manually
 `pkill -f stryker` / `pgrep -f stryker` self-match the running shell's own command line
 (it contains "stryker") and SIGKILL the shell (exit 137). Kill by exact PID, or match a

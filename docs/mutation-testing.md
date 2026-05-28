@@ -20,7 +20,7 @@ Gemutiert werden **ausschließlich pure Berechnungs-/Buchungs-Module** unter
 `shared/domain/`, die reine Unit-Tests **ohne DB und ohne laufenden Server**
 besitzen. Nur so läuft ein Lauf in Minuten statt Stunden.
 
-Die fünf Hotspots (`mutate` in `stryker.conf.mjs`):
+Die acht Hotspots (`mutate` in `stryker.conf.mjs`):
 
 | Modul | Pure Tests |
 |---|---|
@@ -29,6 +29,9 @@ Die fünf Hotspots (`mutate` in `stryker.conf.mjs`):
 | `shared/domain/budget/cost-estimate-outcome.ts` | `tests/budget/cost-estimate-outcome.test.ts` |
 | `shared/domain/budget/cap-math.ts` | `tests/budget/cap-math.test.ts` |
 | `shared/domain/budget/history-aggregation.ts` | `tests/budget/history-aggregation.test.ts` |
+| `shared/domain/budgets.ts` | `tests/budget/statutory-clamp.test.ts` |
+| `shared/domain/vacation.ts` | `tests/unit/vacation-pro-rata.test.ts` |
+| `shared/domain/cancellation-policy.ts` | `tests/unit/cancellation-policy.test.ts` |
 
 **Out of scope** (explizit nicht enthalten):
 
@@ -44,7 +47,7 @@ Die fünf Hotspots (`mutate` in `stryker.conf.mjs`):
 
 - **Stryker-Config:** `stryker.conf.mjs`
 - **Vitest-Config für Mutation-Läufe:** `vitest.stryker.config.ts` (ohne `globalSetup`,
-  d.h. ohne DB-Cleanup; nur die fünf puren Test-Dateien)
+  d.h. ohne DB-Cleanup; nur die acht puren Test-Dateien)
 - **Test-Runner:** `command` (`npx vitest run --config vitest.stryker.config.ts`).
   Grund: vitest 4.x ist neuer als der offizielle Stryker-Vitest-Runner (9.6.1), dessen
   Per-Mutant-Selektion gegen die vitest-4-Internals hängt. Der Command-Runner ist
@@ -57,7 +60,7 @@ Die fünf Hotspots (`mutate` in `stryker.conf.mjs`):
 ## Lokale Nutzung
 
 ```bash
-# Vollständiger Lauf über alle fünf Hotspots (nutzt/erzeugt Incremental-Report):
+# Vollständiger Lauf über alle acht Hotspots (nutzt/erzeugt Incremental-Report):
 npm run mutation
 
 # Nur bestimmte Dateien mutieren (wie CI es im PR tut):
@@ -74,7 +77,7 @@ Der HTML-Report landet unter `reports/mutation/index.html`.
 Job `mutation` in `.github/workflows/ci.yml`:
 
 1. Läuft **nur bei `pull_request`** (der Diff wird gegen den Base-Branch berechnet).
-2. Ermittelt per `git diff`, welche der fünf Hotspot-Dateien im PR geändert wurden.
+2. Ermittelt per `git diff`, welche der acht Hotspot-Dateien im PR geändert wurden.
 3. Wurde keine geändert → Schritt wird sauber übersprungen.
 4. Andernfalls: `npx stryker run --mutate <geänderte Dateien>`.
 5. Der Incremental-Report wird per `actions/cache` über Läufe hinweg erhalten.
