@@ -18,13 +18,29 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
+  // Flake-Härtung (Task #774): in CI bis zu 2 Retries. Ein Test, der erst im
+  // Retry grün wird, gilt als Flake — Playwright markiert ihn im Report als
+  // "flaky" (eigener Status neben passed/failed), die JUnit-XML enthält die
+  // Retry-Attempts. So ist die Flake-Rate aus den CI-Artifacts ablesbar.
   retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
-  reporter: "list",
+  // In CI zusätzlich JUnit-XML für Flake-Tracking-Tooling schreiben; lokal
+  // bleibt die kompakte Listen-Ausgabe.
+  reporter: process.env.CI
+    ? [
+        ["list"],
+        ["junit", { outputFile: "test-results/playwright-junit.xml" }],
+        ["html", { open: "never" }],
+      ]
+    : "list",
   timeout: 30000,
   use: {
     baseURL: "http://localhost:5000",
-    trace: "on-first-retry",
+    // Trace bei jedem Retry-Versuch aufzeichnen (nicht nur beim ersten),
+    // damit jeder Flake-Retry diagnostizierbar ist.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure",
   },
   projects: [
     {
