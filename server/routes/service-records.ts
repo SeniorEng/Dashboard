@@ -497,6 +497,14 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
     if (!record) {
       return res.status(404).json({ message: "Leistungsnachweis nicht gefunden" });
     }
+    // Task #749 — Audit-Log für den Cache-Invalidierungs-Effekt (sichtbare
+    // Folge: gespeicherte Leistungsnachweis-PDFs der laufenden Entwurfs-
+    // Rechnungen werden beim nächsten Abruf neu gerendert).
+    if (signerType === "customer") {
+      console.log(
+        `[service-records/sign] LN cache invalidated for customer=${record.customerId} period=${record.year}-${String(record.month).padStart(2, "0")} record=${record.id}`,
+      );
+    }
 
     const ip = req.ip || req.socket.remoteAddress;
     await auditService.serviceRecordSigned(
@@ -509,6 +517,13 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
 
     res.json(record);
   } catch (error) {
+    if (error instanceof Error && error.name === "EmptySignatureError") {
+      return res.status(400).json({
+        error: "EMPTY_SIGNATURE",
+        message: error.message,
+        code: (error as { code?: string }).code ?? "empty_canvas",
+      });
+    }
     if (error instanceof Error && error.message.includes("kann nur")) {
       return res.status(400).json({ message: error.message });
     }

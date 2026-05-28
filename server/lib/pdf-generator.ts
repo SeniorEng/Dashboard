@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
 import { renderLineItemQuantity, isKmLineItem, type LineItemQuantityUnit } from "@shared/domain/invoice-line-items";
+import { isSignatureImageMeaningful } from "./signature-validation";
 
 export interface InvoicePdfData {
   // Company data
@@ -120,6 +121,35 @@ function escapeHtml(str: string): string {
 
 function isValidDataUrl(str: string): boolean {
   return /^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=\s]+$/.test(str.trim());
+}
+
+// Task #749 — defensiver "Sieht das Bild auch wirklich nach Unterschrift
+// aus?"-Check für den Leistungsnachweis-Renderer. Wird ein leeres oder
+// trivial-kleines Signatur-Bild übergeben, fällt der Renderer auf den
+// "noch nicht unterschrieben"-Branch zurück statt einen signierten Label
+// neben einem leeren <img> auszugeben (Drift-Pfad aus RE-2026-0010).
+function isMeaningfulSignatureForRender(value: string | null | undefined): boolean {
+  if (!value) return false;
+  if (!isValidDataUrl(value)) return false;
+  if (!/^data:image\/(png|jpeg);base64,/.test(value.trim())) {
+    // SVG signatures bypass the meaningful-pixel check (no PNG/JPEG path).
+    return true;
+  }
+  if (isSignatureImageMeaningful(value)) return true;
+  // Audit-grade Strukturlog: Falls hier ein Signatur-Bild durchrutscht, ist
+  // die Server-Validierung in signServiceRecord umgangen worden (Drift, Bug
+  // oder ältere Bestandsdaten vor Task #749). Aggregations-Pipelines können
+  // auf das `[AUDIT][signature]`-Präfix matchen.
+  console.warn(
+    "[AUDIT][signature] RE-2026-0010-guard: stored signature data URL rejected as empty/trivial — falling back to unsigned-text branch in LN-renderer",
+    JSON.stringify({
+      event: "signature.render.fallback_empty",
+      severity: "warn",
+      dataUrlPrefix: value.slice(0, 32),
+      byteLength: value.length,
+    }),
+  );
+  return false;
 }
 
 function formatDate(dateStr: string): string {
@@ -540,8 +570,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   }
 
   function renderSignature(sig: NonNullable<InvoicePdfData["signatures"]>[0], fallbackEmployeeLabel: string): string {
-    const custSigValid = sig.customerSignatureData && isValidDataUrl(sig.customerSignatureData);
-    const empSigValid = sig.employeeSignatureData && isValidDataUrl(sig.employeeSignatureData);
+    const custSigValid = isMeaningfulSignatureForRender(sig.customerSignatureData);
+    const empSigValid = isMeaningfulSignatureForRender(sig.employeeSignatureData);
     const custSigClean = custSigValid ? cleanDataUrl(sig.customerSignatureData!) : "";
     const empSigClean = empSigValid ? cleanDataUrl(sig.employeeSignatureData!) : "";
     return `

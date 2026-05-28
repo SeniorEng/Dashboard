@@ -8,6 +8,29 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-28 (c) — RE-2026-0010: leere Kundenunterschrift im Leistungsnachweis-PDF (Task #749, kein Publish)
+
+**Anlass:** Rechnung RE-2026-0010 (Unterschütz, Karla — April 2026) wurde mit einem Leistungsnachweis-PDF ausgespielt, in dem das Signatur-Label „08.05.2026, Karla Unterschütz" gerendert wurde, das `<img>` der Kundenunterschrift jedoch leer/unsichtbar war. Ursache: der bisherige Renderer-Guard prüfte lediglich per Regex, ob `customerSignatureData` ein gültiges Data-URL ist — ein transparentes (= leeres) PNG aus dem Signature-Pad bestand diesen Test und wurde mit signed-Label kombiniert.
+
+**Änderungen (Code, kein Schema):**
+- Neuer Validator `server/lib/signature-validation.ts` (`analyzeSignatureImage`, `isSignatureImageMeaningful`): PNG-Chunk-Parser liest IHDR, inflated IDAT, zählt Non-Zero-Bytes als „Tinte"-Proxy. Mindestmaße 40×20 px, mindestens 50 Non-Zero-Bytes nach Inflate.
+- `signServiceRecord` (server/storage/service-records-storage.ts) ruft den Validator VOR jeder Status-Transition auf und wirft `EmptySignatureError` (HTTP 400) bei leeren/winzigen Signaturen. In derselben Transaktion werden anschließend für alle Rechnungen desselben Kunden/Monats im Status `entwurf` die Cache-Felder `leistungsnachweisPath/-Hash/-DataFingerprint` auf NULL gesetzt — das Rechnungs-PDF (`pdfPath/pdfHash/zugferdXml`) bleibt GoBD-immutabel.
+- `generateLeistungsnachweisHtml` (server/lib/pdf-generator.ts) prüft jede Signatur über `isSignatureImageMeaningful` und fällt bei „nicht-meaningful" auf den unsigned-Text-Branch zurück (kein leeres `<img>` + signed-Label mehr).
+- `server/services/document-pdf.ts` (`generateAndStorePdf`, `regeneratePdfWithSignature`, `buildSignatureImg`) verwendet denselben Validator — auch der Public-Signing-Pfad lehnt leere Bilder mit `badRequest` ab.
+- Drift-Test `tests/equality/signature-not-empty.test.ts`: konstruiert PNGs (transparent vs. mit Alpha=255), prüft Validator-Verdikt und LN-Renderer-Output (keine `signature-line-signed`-Klasse + kein `EMPTY_SIG`-Source bei leerer Signatur, beides bei echter Signatur).
+- Audit-Skript `server/scripts/audit-empty-signatures.ts` (read-only): listet alle Service-Records mit `status IN ('employee_signed','completed')`, deren gespeicherte Signatur den Validator NICHT besteht, inkl. zugehöriger Rechnungs-Nummern + Cache-Status.
+
+**Manuelle Nachsorge RE-2026-0010 (Operator-Runbook):**
+1. Read-only Bestandsaufnahme: `tsx server/scripts/audit-empty-signatures.ts` → liefert betroffene Service-Records + Rechnungen.
+2. Pro betroffenem Service-Record entscheiden:
+   - **Rechnung noch im Entwurf:** Service-Record per Superadmin auf `employee_signed` zurücksetzen (`UPDATE monthly_service_records SET status='employee_signed', customer_signature_data=NULL, customer_signature_hash=NULL, customer_signed_at=NULL, customer_signed_by_user_id=NULL WHERE id=<SR_ID>`). Kunde unterschreibt erneut über die Standard-`SignaturePad`-Komponente; der neue Sign-Call invalidiert automatisch den LN-Cache. Beim nächsten `GET /api/billing/:id/leistungsnachweis` wird das PDF mit sichtbarer Unterschrift frisch gerendert.
+   - **Rechnung bereits versendet/bezahlt (RE-2026-0010-Fall):** Storno-Rechnung anlegen, Service-Record zurücksetzen + neu signieren lassen, Neu-Rechnung mit demselben Leistungszeitraum erstellen. GoBD-konform — das versendete PDF wird nicht überschrieben.
+3. Nach Eingriff erneut `audit-empty-signatures.ts` laufen lassen → erwartet `OK`.
+
+**Publish-Status:** ⏳ ausstehend.
+
+---
+
 ### 2026-05-28 (b) — Legacy-Tabelle `customer_budgets` endgültig gedroppt (Task #743, kein Publish)
 
 **Anlass:** Mit Task #728 Phase 2.1 wurde die Tabelle als Read-Quelle abgeschaltet und ihr Inhalt nach `customer_budget_type_settings` migriert. Nach Operator-Validierung des Backfill-Ergebnisses auf Production (Pre-Publish-Check unten) kann sie ohne weitere Vorarbeiten gedroppt werden — sie wird nur noch von Audit-Helpern, einem No-Op-Writer und Cleanup-Skripten erwähnt, die alle im selben Schritt mit entfernt werden.

@@ -7,9 +7,11 @@ import {
   appointments,
   monthlyServiceRecords,
   serviceRecordAppointments,
+  invoices as invoicesTable,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { computeDataHash } from "../services/signature-integrity";
+import { analyzeSignatureImage } from "../lib/signature-validation";
 import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQL, type SQLWrapper } from "drizzle-orm";
 import { db, type DbOrTx } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
@@ -109,9 +111,34 @@ export async function createServiceRecord(record: InsertServiceRecord, txClient?
   return result[0];
 }
 
+/**
+ * Task #749 — Thrown by `signServiceRecord` when the supplied signature
+ * image fails the meaningful-pixel check (empty/transparent canvas,
+ * mini-canvas race, etc.). The HTTP route surfaces this as a 400 with
+ * the German message; the service record stays in its previous status.
+ */
+export class EmptySignatureError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "EmptySignatureError";
+    this.code = code;
+  }
+}
+
 export async function signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined> {
   const existing = await getServiceRecord(id);
   if (!existing) return undefined;
+
+  // Task #749 — Bevor wir Status oder Signatur persistieren, prüfen ob das
+  // übergebene Bild tatsächlich eine sichtbare Unterschrift trägt. Damit
+  // verhindern wir, dass ein Service-Record auf `completed` rutscht, dessen
+  // customerSignatureData im Leistungsnachweis-PDF als leeres <img> rendert
+  // (Hauptfehler-Pfad aus RE-2026-0010).
+  const validation = analyzeSignatureImage(signatureData);
+  if (!validation.ok) {
+    throw new EmptySignatureError(validation.reason, validation.code);
+  }
 
   const now = new Date();
   const hash = computeDataHash(signatureData);
@@ -158,6 +185,35 @@ export async function signServiceRecord(id: number, signatureData: string, signe
       .set({ status: nextStatus, updatedAt: now })
       .where(eq(monthlyServiceRecords.id, id))
       .returning();
+
+    // Task #749 — Cache-Invalidierung: Sobald sich die Unterschriftslage
+    // ändert (neu unterschrieben oder re-signed), können sowohl das
+    // Leistungsnachweis-PDF als auch das Rechnungs-PDF/ZUGFeRD-XML für
+    // diesen Kunden/Monat/Jahr veraltet sein (LN ist Anlage zur Rechnung,
+    // beide enthalten Signaturen). Wir nullen die Cache-Felder für
+    // betroffene Rechnungen im Entwurfs-Status, damit der nächste Abruf
+    // frisch rendert.
+    //
+    // GoBD: Versendete (`versendet`), bezahlte (`bezahlt`) und stornierte
+    // (`storniert`) Rechnungen bleiben UNANGETASTET — Korrektur dort
+    // ausschließlich über Storno + Neuanlage (siehe
+    // docs/deployment-log.md, RE-2026-0010-Runbook).
+    await tx.update(invoicesTable)
+      .set({
+        leistungsnachweisPath: null,
+        leistungsnachweisHash: null,
+        leistungsnachweisDataFingerprint: null,
+        pdfPath: null,
+        pdfHash: null,
+        pdfDataFingerprint: null,
+      })
+      .where(and(
+        eq(invoicesTable.customerId, existing.customerId),
+        eq(invoicesTable.billingYear, existing.year),
+        eq(invoicesTable.billingMonth, existing.month),
+        eq(invoicesTable.status, "entwurf"),
+      ));
+
     return result[0];
   });
 }

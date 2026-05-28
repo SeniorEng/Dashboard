@@ -25,37 +25,30 @@ export function stripReservedRawHtmlPlaceholders(
   return result;
 }
 
-const SIGNATURE_DATA_URL_RE = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/;
+import { analyzeSignatureImage, isSignatureImageMeaningful } from "../lib/signature-validation";
 
-function isValidSignatureDataUrl(value: string): boolean {
-  if (value.length > 5 * 1024 * 1024) return false;
-  const match = SIGNATURE_DATA_URL_RE.exec(value);
-  if (!match) return false;
-  const [, mime, b64] = match;
-  let decoded: Buffer;
-  try {
-    decoded = Buffer.from(b64, "base64");
-  } catch {
-    return false;
-  }
-  if (decoded.length === 0) return false;
-  if (mime === "png") {
-    return decoded.length >= 8 &&
-      decoded[0] === 0x89 && decoded[1] === 0x50 && decoded[2] === 0x4e && decoded[3] === 0x47 &&
-      decoded[4] === 0x0d && decoded[5] === 0x0a && decoded[6] === 0x1a && decoded[7] === 0x0a;
-  }
-  if (mime === "jpeg") {
-    return decoded.length >= 3 && decoded[0] === 0xff && decoded[1] === 0xd8 && decoded[2] === 0xff;
-  }
-  return false;
-}
-
+// Task #749 — Renderer-Guard: liefert das übergebene Signatur-Bild nur dann
+// als <img> aus, wenn es nicht leer/winzig ist. Andernfalls wird der
+// Platzhalter-Text gerendert (statt eines leeren <img> mit Signed-Label).
 export function buildSignatureImg(value: string, alt: string, maxHeightPx: number): string {
   const safeAlt = escapeHtml(alt);
-  if (!isValidSignatureDataUrl(value)) {
+  if (!isSignatureImageMeaningful(value)) {
     return escapeHtml(value);
   }
   return `<img src="${value}" alt="${safeAlt}" style="max-height:${maxHeightPx}px;" />`;
+}
+
+// Task #749 — Server-seitige Validierung für alle Dokumenten-PDF-Pfade
+// (Kunden-Vorlagen-Sign, generateAndStorePdf, regeneratePdfWithSignature).
+// Wirft eine `badRequest`-Antwort mit deutscher Begründung, sobald eine
+// Unterschrift leer oder zu klein ist — verhindert "signed but empty"-PDFs
+// analog zum Service-Record-Pfad (`EmptySignatureError`).
+function assertMeaningfulSignatureForDocument(value: string | null | undefined, label: string): void {
+  if (value === null || value === undefined || value === "") return;
+  const result = analyzeSignatureImage(value);
+  if (!result.ok) {
+    throw badRequest(`${label}: ${result.reason}`);
+  }
 }
 
 function buildAuditStamp(options: {
@@ -111,6 +104,11 @@ export async function generateAndStorePdf(options: {
   generatedDocId: number;
 }> {
   const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, generatedByUserId, signingStatus = "complete", signingIp, signingLocation } = options;
+
+  // Task #749 — Leere/winzige Signaturen früh ablehnen, bevor das PDF
+  // gerendert und im Object-Storage abgelegt wird.
+  assertMeaningfulSignatureForDocument(customerSignatureData, "Kundenunterschrift");
+  assertMeaningfulSignatureForDocument(employeeSignatureData, "Mitarbeiterunterschrift");
 
   const overrides = stripReservedRawHtmlPlaceholders(placeholderOverrides);
   if (customerSignatureData) {
@@ -213,6 +211,10 @@ export async function regeneratePdfWithSignature(
   signingLocation?: string | null,
 ): Promise<{ objectPath: string; fileName: string; integrityHash: string }> {
   if (!doc.renderedHtml) throw new Error("Kein gerendertetes HTML vorhanden");
+
+  // Task #749 — Auch der Token-Holder-Pfad (public-signing) muss leere
+  // Signaturen früh ablehnen, sonst landet ein leeres <img> im finalen PDF.
+  assertMeaningfulSignatureForDocument(employeeSignatureData, "Mitarbeiterunterschrift");
 
   const sigHtml = buildSignatureImg(employeeSignatureData, "Mitarbeiterunterschrift", 60);
   let updatedHtml = doc.renderedHtml;
