@@ -1,0 +1,75 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "Europe/Berlin",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "rangeStrategy": "bump",
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "chore(deps):",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"],
+    "schedule": ["at any time"]
+  },
+  "osvVulnerabilityAlerts": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "major": {
+    "labels": ["dependencies", "major-update"],
+    "automerge": false
+  },
+  "packageRules": [
+    {
+      "description": "Group all @radix-ui packages into a single PR",
+      "matchPackageNames": ["@radix-ui/**"],
+      "groupName": "radix-ui"
+    },
+    {
+      "description": "Keep Drizzle ORM, drizzle-zod and drizzle-kit in lockstep",
+      "matchPackageNames": ["drizzle-orm", "drizzle-zod", "drizzle-kit"],
+      "groupName": "drizzle"
+    },
+    {
+      "description": "Group TanStack packages",
+      "matchPackageNames": ["@tanstack/**"],
+      "groupName": "tanstack"
+    },
+    {
+      "description": "Group React + React DOM and their types",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "groupName": "react"
+    },
+    {
+      "description": "Group all dev dependencies (non-major) separately from runtime deps",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev-dependencies"
+    },
+    {
+      "description": "Auto-merge green patch updates on dev dependencies only",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Group @types/* packages",
+      "matchPackageNames": ["@types/**"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "type-definitions"
+    }
+  ]
+}
