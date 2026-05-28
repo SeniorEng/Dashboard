@@ -1,0 +1,190 @@
+# Replit-AI-Prompt: Knowledge-Graph für EngelDesk einführen und ersten Bug-Einsatz fahren
+
+> **So nutzt du dieses Dokument:** Den Abschnitt "🟢 PROMPT ZUM KOPIEREN" unten 1:1 in das Replit-AI-Chatfenster einfügen. Davor (Phase A) musst du **einmal lokal** den Graphen erzeugen — Anleitung steht in Abschnitt 1.
+
+---
+
+## Warum dieser Zweischritt?
+
+`Understand-Anything` (das Plugin aus dem Reflexions-Dokument) braucht für die Erst-Analyse einen LLM-fähigen Coding-Assistenten (Claude Code, Codex, Gemini CLI …). Replit-AI ist nicht auf der nativen Support-Liste, und der Replit-Agent kann nicht ohne Weiteres einen externen LLM-CLI mit API-Key installieren. Deshalb:
+
+- **Phase A — lokal bei dir (Cowork/Claude Code, ~30 Min):** Repo klonen, `/understand` laufen lassen, `.understand-anything/knowledge-graph.json` committen und pushen.
+- **Phase B — in Replit:** den committeten Graphen validieren, ein kleines Query-Helferskript bauen und ihn sofort an BUG-1 ausprobieren.
+
+Phase A ist trivial und schnell. Phase B ist das, was du als Prompt an Replit-AI gibst.
+
+---
+
+## 1. Phase A — Setup lokal (einmalig, du machst das in Cowork/Claude Code)
+
+```bash
+# 1. Repo klonen (falls noch nicht vorhanden)
+git clone <EngelDesk-Repo-URL> engeldesk
+cd engeldesk
+
+# 2. Plugin installieren — direkt aus Claude Code:
+#    /plugin marketplace add Lum1104/Understand-Anything
+#    /plugin install understand-anything
+
+# 3. Vollscan starten — in Claude Code:
+#    /understand --language de
+
+# 4. Ergebnis prüfen
+ls -la .understand-anything/
+#    -> knowledge-graph.json sollte existieren (typ. 1–5 MB)
+
+# 5. Was NICHT committed wird (in .gitignore aufnehmen)
+cat >> .gitignore <<'EOF'
+.understand-anything/intermediate/
+.understand-anything/diff-overlay.json
+EOF
+
+# 6. Graph committen und pushen
+git add .gitignore .understand-anything/
+git commit -m "chore: add Understand-Anything knowledge graph for EngelDesk"
+git push
+```
+
+**Sanity-Check vor dem Push:** öffne `/understand-dashboard` und suche nach `calculateAllocated45b`. Wenn der Knoten existiert und Verbindungen zu §45b-Settings zeigt, ist der Graph brauchbar. Wenn der Knoten leer ist oder die Pipeline mit Fehlern endet, **erst** das Problem klären, bevor du Replit drauf loslässt.
+
+---
+
+## 2. Phase B — Replit-AI-Prompt
+
+### 🟢 PROMPT ZUM KOPIEREN (alles ab hier bis "🔴 ENDE" markieren und in Replit-AI einfügen)
+
+---
+
+**Auftrag: Code-Knowledge-Graph integrieren, validieren, ersten Bug-Einsatz**
+
+Du bekommst ein neues Artefakt im Repo: `.understand-anything/knowledge-graph.json`. Das ist ein vollständiger Code-Knowledge-Graph dieses EngelDesk-Repos — jeder File, jede Funktion, jede Klasse, jede Aufruf-/Import-Beziehung als Knoten und Kante. Erzeugt durch `Lum1104/Understand-Anything` (Multi-Agent-Pipeline). Ziel ist, dass du diesen Graphen ab jetzt **als Ground-Truth-Strukturmodell** nutzt — für Impact-Analysen, das Auffinden duplizierter Logik, Konsistenz-Checks zwischen Code-Pfaden und das Erkennen "vergessener Fixes" beim Refactoring.
+
+Bitte arbeite die folgenden vier Phasen **in dieser Reihenfolge** ab und **stoppe nach jeder Phase mit einem kurzen Statusbericht**, bevor du die nächste startest. Frage zurück, wenn etwas unklar ist — keine Annahmen, keine Code-Änderungen am Produktivcode in dieser Session.
+
+---
+
+#### Phase 1 — Graph laden und validieren
+
+1. Stelle sicher, dass `.understand-anything/knowledge-graph.json` im Workspace existiert. Falls nicht: stop, Statusbericht.
+2. Validiere die Datei:
+   - JSON-Parsbarkeit
+   - Vorhandensein der Top-Level-Keys (mindestens `nodes`, `edges`; je nach Version evtl. `layers`, `tours`, `meta`)
+   - Anzahl Knoten und Kanten (grobe Plausibilität: Repo hat ca. 50–150 k Zeilen TS/JS, also erwarte mindestens ~500 Knoten)
+   - Spotcheck: such die Knoten `calculateAllocated45b`, `clampToStatutoryMax` und `createCascadeConsumption` — alle drei sind im Bugreport namentlich genannt und müssen existieren.
+3. Schreibe einen Mini-Bericht in `.understand-anything/AUDIT.md`:
+   - Datum, commit-SHA, Anzahl Knoten, Anzahl Kanten, Sprach-Verteilung, Layer-Verteilung
+   - Liste der drei Spotcheck-Knoten mit jeweils: Datei:Zeile, eingehende und ausgehende Kanten (Top-5).
+   - Auffälligkeiten (orphaned nodes, fehlende Layer-Zuweisung, Knoten ohne Description).
+
+**STOP. Statusbericht. Warte auf "Phase 2 freigegeben".**
+
+---
+
+#### Phase 2 — Query-Helferskript bauen
+
+Lege ein kleines Node-Skript `scripts/kg.ts` an, das den Graphen in den Speicher lädt und folgende Kommandos bereitstellt (CLI-Aufruf via `pnpm tsx scripts/kg.ts <command> <args>`):
+
+- `find <symbolname>` — listet alle Knoten, deren `name` oder `id` exakt oder als Substring passt; Output: `name | type | layer | file:line`.
+- `callers <symbolname> [--depth=N]` — gibt alle eingehenden `CALLS`-Kanten zurück, optional transitiv bis Tiefe N (Default 1). Format: Liste mit `caller | file:line | depth`.
+- `callees <symbolname> [--depth=N]` — dasselbe für ausgehende Kanten.
+- `siblings <symbolname>` — listet Funktionen im **gleichen Modul** mit **ähnlicher Signatur/Edge-Struktur** (Heuristik: gleicher Layer + überlappende ausgehende Edge-Targets ≥ 50 %). Ziel: Schwesterfunktionen finden, die strukturell parallel sind.
+- `touches <symbolOrField>` — alle Knoten, die ein bestimmtes Symbol oder Feld lesen/schreiben (DB-Feld, Konstante, Typ).
+- `route-handlers` — listet alle Express-/Router-Endpoints und prüft, ob für jede Methode (GET/POST/PATCH/DELETE) ein expliziter Handler-Knoten existiert. Endpoints ohne Handler werden als ⚠️ markiert.
+
+Hinweise:
+- Keine externen Abhängigkeiten außer dem, was schon in `package.json` ist. Wenn ein JSON-Loader und einfache Filter ausreichen, dann genau das.
+- Output als lesbare Tabelle (auch ASCII-Tabelle), zusätzlich `--json`-Flag für maschinenlesbare Ausgabe.
+- Schreibe in `scripts/README-kg.md` eine 10-Zeilen-Anleitung, wie man das Skript aufruft.
+
+Smoke-Tests, die du selbst ausführst und deren Output du in deinen Statusbericht packst:
+- `pnpm tsx scripts/kg.ts find calculateAllocated`
+- `pnpm tsx scripts/kg.ts callers calculateAllocated45b --depth=2`
+- `pnpm tsx scripts/kg.ts siblings calculateAllocated45b`
+- `pnpm tsx scripts/kg.ts route-handlers | grep "/api/admin/customers"`
+
+**STOP. Statusbericht mit den vier Outputs. Warte auf "Phase 3 freigegeben".**
+
+---
+
+#### Phase 3 — Erster echter Einsatz: BUG-1 (Doppel-Allokation §45a / §39/§42a)
+
+Kontext (steht in `EngelDesk-Bugreport-fuer-Replit-AI.md`, BUG-1, KRITISCH):
+- Für §45b existiert eine Dedup-Logik (`calculateAllocated45b` in `server/storage/budget/allocation-storage.ts:374`), die verhindert, dass `initial_balance` UND virtuelles `monthly_auto`/`yearly_auto` doppelt summiert werden.
+- Für §45a (`umwandlung_45a`) und §39/§42a (`ersatzpflege_39_42a`) fehlt diese Dedup-Logik vermutlich. Live reproduziert: Faktor 2 zu viel im Overview.
+
+Was du jetzt **nur mit Hilfe des Graphen und Lesezugriff** machst (keine Code-Änderungen):
+
+1. Nutze `siblings calculateAllocated45b` und `find calculateAllocated`, um die Schwesterfunktionen für §45a und §39 zu identifizieren. Wenn sie existieren: nenne ihre Pfade. Wenn sie **fehlen**, ist das die strukturelle Bestätigung der Bug-Hypothese.
+2. Für jede Variante (§45b, §45a, §39) liste mit `callees …` die ausgehenden Edges. Ziel: vergleichen, welche Tabellen/Felder gelesen werden. Konkret prüfen:
+   - Wird sowohl `initial_balance` als auch `customer_budget_type_settings.monthlyLimitCents`/`yearlyLimitCents` gelesen?
+   - Wird in §45b zusätzlich eine Dedup-Bedingung gegen den anderen Wert angewendet, in §45a/§39 nicht?
+3. Nutze `touches customer_budget_type_settings`, um alle Stellen aufzulisten, die diese Tabelle lesen. Markiere die, die für §45a/§39 relevant sind.
+4. Erzeuge `.understand-anything/findings/BUG-1-structural-evidence.md` mit:
+   - **Hypothese aus Bugreport** (1 Absatz)
+   - **Strukturelle Evidenz aus dem Graphen** (Tabelle: §45b vs §45a vs §39, jeweils mit Funktionsname, Datei:Zeile, gelesenen Feldern, vorhandener/fehlender Dedup-Verzweigung)
+   - **Schluss:** wird die Hypothese durch die Struktur bestätigt, widerlegt, oder ist sie ambivalent?
+   - **Vorgeschlagener Fix-Pfad** (welche Funktionen müssten ergänzt/refaktoriert werden, welche Stellen sind via `callers` betroffen)
+   - **NICHT** den Fix selbst implementieren — nur dokumentieren.
+
+**STOP. Statusbericht mit Pfad zur findings-Datei. Warte auf "Phase 4 freigegeben".**
+
+---
+
+#### Phase 4 — Quick-Win-Scan auf BUG-3 und BUG-4
+
+Da der Graph einmal geladen ist, fahre zwei weitere Strukturchecks:
+
+1. **BUG-3 (Route-Verb-Lücke):** Laufe `route-handlers` über `/api/admin/customers/:id`. Erwartet: alle 4 Verben (GET/POST/PATCH/DELETE) mit expliziten Handlern. Beobachtet im Bug: GET fehlt (fällt auf Vite-SPA zurück). Bestätige oder widerlege das aus dem Graphen.
+2. **BUG-4 (Wizard vs. API-Direktanlage):** Finde die beiden Code-Pfade für "Kunde anlegen". Vergleiche per `callees`, ob beide `seedBudgetPots` (oder die analog benannte Funktion) aufrufen. Wenn nur einer es tut, ist die Divergenz strukturell bestätigt.
+
+Schreibe die Ergebnisse als zwei kurze Findings-Dateien (`BUG-3-route-handler-gap.md`, `BUG-4-customer-create-divergence.md`) im gleichen `findings/`-Verzeichnis.
+
+**Abschluss-Statusbericht** mit:
+- Wieviel Zeit hat jede Phase gekostet
+- Welche Bugs sind durch die Graph-Analyse strukturell bestätigt
+- Welche Limitationen hast du beobachtet (z. B. fehlende Knoten, schwache Edges, Heuristik-Treffer schlecht)
+- Empfehlung: Lohnt sich das Tooling für die nächsten Sprints? In welcher Form?
+
+---
+
+**Hard Constraints für die ganze Session:**
+- Keine Änderungen am Produktivcode (nichts in `server/`, `client/`, `shared/` außer Lesezugriff).
+- Schreibrechte nur in `scripts/`, `.understand-anything/findings/`, `.understand-anything/AUDIT.md` und `scripts/README-kg.md`.
+- Kein `git push` — alle Commits bleiben lokal in der Replit-Session, ich reviewe vor dem Push.
+- Keine Secrets oder API-Keys konsumieren, keine externen Calls außerhalb der bereits installierten npm-Registry.
+- Wenn ein Schritt mehr als 10 Minuten kostet oder unklar wird: stop, fragen.
+
+**Was ich von dir am Ende der Session brauche:**
+1. `scripts/kg.ts` + `scripts/README-kg.md`
+2. `.understand-anything/AUDIT.md`
+3. `.understand-anything/findings/BUG-1-structural-evidence.md`
+4. `.understand-anything/findings/BUG-3-route-handler-gap.md`
+5. `.understand-anything/findings/BUG-4-customer-create-divergence.md`
+6. Einen Abschluss-Statusbericht direkt im Chat (max. 30 Zeilen)
+
+---
+
+🔴 ENDE des kopierbaren Prompts
+
+---
+
+## 3. Was du selbst tust, nachdem Replit-AI fertig ist
+
+1. **Die drei Findings-Dateien reviewen.** Wenn die strukturelle Evidenz die Bug-Hypothesen bestätigt, hast du Replit-AI für die eigentlichen Fixes eine viel bessere Argumentationsbasis als bisher.
+2. **Erst dann** Replit-AI mit der Code-Änderung beauftragen — pro Bug eine eigene Session, immer mit der Findings-Datei als Anker.
+3. **Auto-Update-Hook entscheiden:** wenn Phase 1–4 überzeugt, in Phase A lokal `/understand --auto-update` aktivieren, damit der Graph pro Commit inkrementell mitwächst. Sonst nach jedem Refactor manuell neu erzeugen.
+
+## 4. Wenn etwas schiefgeht
+
+| Symptom | Wahrscheinliche Ursache | Aktion |
+|---|---|---|
+| `knowledge-graph.json` ist > 50 MB | Repo zu groß für direkten Commit | git-lfs aktivieren wie im Understand-Anything-README beschrieben |
+| Spotcheck-Knoten fehlen | Pipeline ist auf Fehler gelaufen oder Pfade wurden ignoriert | Lokal `/understand` mit `--review` neu starten, `.understand-anything/intermediate/` prüfen |
+| Replit-AI „erfindet" Funktionen, die nicht im Graphen stehen | LLM-Halluzination trotz Graph | Im Prompt nochmal explizit „nur Knoten, die im Graphen existieren" einfordern |
+| Sibling-Heuristik liefert Müll | Schwellwert 50 % zu lasch | In `scripts/kg.ts` auf 70 % anziehen und neu laufen lassen |
+| `route-handlers` listet alle Verben als OK, obwohl BUG-3 real ist | Vite-Fallback-Route ist auch ein Knoten, der gezählt wird | Skript um Filter „nur Knoten in `server/routes/`" erweitern |
+
+---
+
+**Erwarteter Gesamtaufwand:** ~30 Min Phase A bei dir, ~60–90 Min Phase B in Replit. Wenn nach diesen ~2 Stunden die drei Findings-Dateien sinnvoll aussehen, ist der Pilot bestanden und wir bauen das dauerhaft ein.
+
