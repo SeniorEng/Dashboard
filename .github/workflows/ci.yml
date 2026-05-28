@@ -292,3 +292,81 @@ jobs:
             server.log
           if-no-files-found: ignore
           retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # Mutation-Testing-Gate (Task #770): Stryker im Incremental-Mode, NUR auf
+  # den in diesem PR geänderten kritischen Berechnungs-Modulen. Läuft rein
+  # gegen die puren shared/domain-Tests (keine DB/kein Server nötig). Greift
+  # nur bei pull_request, weil der Diff gegen den Base-Branch berechnet wird.
+  # Out-of-scope (siehe docs/mutation-testing.md): Full-Suite-Mutation in CI.
+  # -------------------------------------------------------------------------
+  mutation:
+    name: Mutation testing (stryker · changed files)
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Vollständige History, damit der Base-Branch für den Diff verfügbar ist.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Incremental-Report über Läufe hinweg cachen — Stryker prüft dann nur
+      # Mutanten erneut, die von Code-/Test-Änderungen betroffen sind.
+      - name: Cache Stryker incremental report
+        uses: actions/cache@v4
+        with:
+          path: reports/stryker-incremental.json
+          key: stryker-incremental-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            stryker-incremental-${{ runner.os }}-${{ github.ref }}-
+            stryker-incremental-${{ runner.os }}-
+
+      # Nur die in diesem PR geänderten Hotspot-Module ermitteln. Gibt es
+      # keine, wird der Stryker-Schritt sauber übersprungen.
+      - name: Determine changed mutation targets
+        id: targets
+        run: |
+          BASE="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}" || true
+          HOTSPOTS="shared/domain/invoice-line-items.ts shared/domain/budget-invoice-split.ts shared/domain/budget/cost-estimate-outcome.ts shared/domain/budget/cap-math.ts shared/domain/budget/history-aggregation.ts"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null || true)
+          MUTATE=""
+          for f in $HOTSPOTS; do
+            if echo "$CHANGED" | grep -qx "$f"; then
+              MUTATE="$MUTATE $f"
+            fi
+          done
+          MUTATE=$(echo "$MUTATE" | xargs || true)
+          if [ -z "$MUTATE" ]; then
+            echo "No critical calculation modules changed — skipping mutation run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Mutating changed targets: $MUTATE"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "mutate=$MUTATE" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Gate: Stryker bricht ab (exit != 0), wenn der Mutation-Score unter
+      # `break` (60 %) fällt — siehe stryker.conf.mjs.
+      - name: Run Stryker on changed files
+        if: ${{ steps.targets.outputs.run == 'true' }}
+        run: npx stryker run --mutate ${{ steps.targets.outputs.mutate }}
+
+      - name: Upload mutation report
+        if: ${{ always() && steps.targets.outputs.run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: reports/mutation/
+          if-no-files-found: ignore
+          retention-days: 7

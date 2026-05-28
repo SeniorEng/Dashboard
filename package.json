@@ -17,7 +17,8 @@
     "lint": "eslint client/src server/routes --max-warnings 0",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --grep @smoke",
-    "chromium:smoke": "tsx scripts/smoke-chromium.ts"
+    "chromium:smoke": "tsx scripts/smoke-chromium.ts",
+    "mutation": "stryker run"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",
@@ -38,6 +39,8 @@
     "@radix-ui/react-toast": "^1.2.7",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@radix-ui/react-visually-hidden": "^1.2.4",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@tanstack/react-query": "^5.60.5",
     "@tanstack/react-virtual": "^3.13.26",
     "bcrypt": "^6.0.0",
