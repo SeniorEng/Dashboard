@@ -12,12 +12,11 @@ import type { DbClient } from "./types";
 import { auditService } from "../../services/audit";
 
 /**
- * Task #608: Backfill-Sentinel für `customer_budget_type_settings.validFrom`.
- * Historische Zeilen, die der Historisierungs-Backfill nachträglich gefüllt
- * hat, tragen diesen Wert statt eines echten Inkrafttreten-Datums. UI und
- * Save-Logik müssen ihn maskieren bzw. beim ersten Edit ersetzen.
+ * Task #608 / #716: Backfill-Sentinel für `customer_budget_type_settings.validFrom`.
+ * SSoT lebt in `shared/domain/budget-settings-sentinel.ts`; hier nur re-exportiert
+ * für Rückwärts-Kompatibilität (interne Storage-Aufrufer).
  */
-export const SETTINGS_VALID_FROM_EPOCH = "1970-01-01";
+export { SETTINGS_VALID_FROM_EPOCH } from "@shared/domain/budget-settings-sentinel";
 
 export async function getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined> {
   const d = _tx ?? db;
@@ -62,6 +61,7 @@ export async function upsertBudgetPreferences(preferences: InsertBudgetPreferenc
  * transactionDate-Kontext (z.B. consumption-engine, import-availability) müssen
  * diese Funktion mit dem transactionDate aufrufen.
  */
+/** @deprecated Task #716 — bitte `readBudgetTypeSettings(c, { kind: "forDate", asOfDate })`. */
 export async function getActiveBudgetTypeSettings(
   customerId: number,
   asOfDate: string,
@@ -85,9 +85,10 @@ export async function getActiveBudgetTypeSettings(
 }
 
 /**
- * Backwards-kompatibler Getter: liefert die HEUTE gültige Konfiguration.
- * Für historische Lookups (z. B. Buchung mit `transactionDate`) bitte
- * `getActiveBudgetTypeSettings(customerId, transactionDate, tx)` verwenden.
+ * @deprecated Task #716 — bitte `readBudgetTypeSettings(c, { kind: "forDate", asOfDate: todayISO() })`
+ * oder, wenn der Aufrufer einen historischen Stichtag hat, direkt mit dem konkreten
+ * `asOfDate` aufrufen. Bleibt als Wrapper bestehen, damit Tests/Altcode kompilieren —
+ * neue Aufrufer werden vom Architektur-Test geblockt.
  */
 export async function getBudgetTypeSettings(customerId: number, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]> {
   return getActiveBudgetTypeSettings(customerId, todayISO(), _tx);
@@ -124,6 +125,7 @@ export async function getBudgetTypeSettings(customerId: number, _tx?: DbClient):
  *      Töpfe können explizit deaktiviert/abgeschlossen worden sein).
  *   3. Tie-Break: höchste `id` (jüngster Insert).
  */
+/** @deprecated Task #716 — bitte `readBudgetTypeSettings(c, { kind: "forEdit" })`. */
 export async function getLatestBudgetTypeSettings(
   customerId: number,
   _tx?: DbClient,
@@ -198,6 +200,7 @@ export type BudgetTypeSettingWithTransition = CustomerBudgetTypeSetting & {
  * Datum aktive Zeile pro Topf und legt sie unter `effectiveToday` bei,
  * wenn sie eine andere ID hat als die Latest-Intent-Zeile.
  */
+/** @deprecated Task #716 — bitte `readBudgetTypeSettings(c, { kind: "withTransition" })`. */
 export async function getLatestBudgetTypeSettingsWithTransition(
   customerId: number,
   _tx?: DbClient,
@@ -225,6 +228,67 @@ export async function getLatestBudgetTypeSettingsWithTransition(
       },
     };
   });
+}
+
+/**
+ * Task #716 (Phase 1.1) — Konsolidierter Lese-Einstiegspunkt für
+ * `customer_budget_type_settings`.
+ *
+ * Genau EINE Funktion mit drei expliziten Modi statt vier separater Reads:
+ *
+ * - `{ kind: "forDate", asOfDate }` → liefert die zum Stichtag gültige
+ *   Konfiguration. ZWINGEND für Buchungs-Pfade (consumption-engine,
+ *   import-availability, rebook), damit GoBD-relevante Lookups mit
+ *   `transactionDate` in der Vergangenheit nicht die heutige Konfig
+ *   verwenden. Entspricht `getActiveBudgetTypeSettings(c, asOfDate)`.
+ *
+ * - `{ kind: "forEdit" }` → liefert pro Pot die jüngste Intent-Zeile, auch
+ *   wenn sie erst morgen wirksam wird (Edit-/Settings-Form/Wizard).
+ *   Entspricht `getLatestBudgetTypeSettings(c)`.
+ *
+ * - `{ kind: "withTransition" }` → Edit-Snapshot plus `effectiveToday`-
+ *   Vorgänger pro Pot (UI-Übergangs-Banner).
+ *   Entspricht `getLatestBudgetTypeSettingsWithTransition(c)`.
+ *
+ * Die vier alten Funktionen bleiben als `@deprecated`-Wrapper bestehen, damit
+ * Bestandstests stabil bleiben — der Architektur-Test verhindert neue
+ * Direkt-Aufrufe.
+ */
+export type SettingsReadMode =
+  | { kind: "forDate"; asOfDate: string }
+  | { kind: "forEdit" }
+  | { kind: "withTransition" };
+
+// Overloads statt Conditional-Type, weil TS bei Generics auf
+// Discriminated-Unions die return-Variante nicht zuverlässig narrow'd —
+// die Aufrufer brauchen aber die exakten Element-Typen (Sort/Filter etc.).
+export function readBudgetTypeSettings(
+  customerId: number,
+  mode: { kind: "forDate"; asOfDate: string },
+  tx?: DbClient,
+): Promise<CustomerBudgetTypeSetting[]>;
+export function readBudgetTypeSettings(
+  customerId: number,
+  mode: { kind: "forEdit" },
+  tx?: DbClient,
+): Promise<CustomerBudgetTypeSetting[]>;
+export function readBudgetTypeSettings(
+  customerId: number,
+  mode: { kind: "withTransition" },
+  tx?: DbClient,
+): Promise<BudgetTypeSettingWithTransition[]>;
+export function readBudgetTypeSettings(
+  customerId: number,
+  mode: SettingsReadMode,
+  tx?: DbClient,
+): Promise<CustomerBudgetTypeSetting[] | BudgetTypeSettingWithTransition[]> {
+  if (mode.kind === "forDate") {
+    return getActiveBudgetTypeSettings(customerId, mode.asOfDate, tx);
+  }
+  if (mode.kind === "forEdit") {
+    return getLatestBudgetTypeSettings(customerId, tx);
+  }
+  return getLatestBudgetTypeSettingsWithTransition(customerId, tx);
 }
 
 type SettingPayload = {

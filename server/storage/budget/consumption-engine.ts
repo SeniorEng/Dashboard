@@ -11,7 +11,7 @@ import { db } from "../../lib/db";
 import type { DbClient, CascadeResult } from "./types";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
-import { getBudgetPreferences, getActiveBudgetTypeSettings } from "./preferences-storage";
+import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { getAvailableForDate } from "./import-availability";
@@ -141,7 +141,7 @@ export async function consumeFifo(
   // Task #440: Topf-Einstellungen aus Sicht von `transactionDate` laden
   // (append-only Historisierung), damit Buchungen NIE die heutige Konfiguration
   // für ein historisches Datum verwenden.
-  const historicalTypeSettings = await getActiveBudgetTypeSettings(customerId, today, _tx);
+  const historicalTypeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today }, _tx);
   const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx, undefined, historicalTypeSettings);
 
   if (totalAllocated <= 0 && specialAllocations.length === 0) {
@@ -307,7 +307,7 @@ export async function createCascadeConsumption(params: {
 
     // GoBD-Historisierung (Task #440): die Konfiguration, die zum
     // transactionDate gültig war, entscheidet — nicht die aktuelle.
-    const typeSettings = await getActiveBudgetTypeSettings(params.customerId, params.transactionDate, tx);
+    const typeSettings = await readBudgetTypeSettings(params.customerId, { kind: "forDate", asOfDate: params.transactionDate }, tx);
 
     await syncCarryoverAndExpiry(params.customerId, tx);
 

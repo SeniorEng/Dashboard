@@ -6,7 +6,19 @@ Detaillierte Architektur-Entscheidungen und Gotchas zur Budget-Domäne. Übergeo
 
 - **Phase 0 — Inventur** (abgeschlossen): [`../budget-ssot-inventory.md`](../budget-ssot-inventory.md) listet alle Berechnungsstellen pro Kennzahl, dokumentiert 8 Konfliktpunkte und schlägt ein Drei-View-Modell (`BudgetOverviewView`, `BudgetSettingsView`, `BudgetHistoryView`) vor.
 - **Beschlüsse Review-Runde** (siehe Inventur-Abschnitt 7): 9/10 Empfehlungen angenommen, #9 (`write_off`-Asymmetrie) per Audit-first statt Regel-first; zwei Querschnitts-Auflagen: (a) neue Services/Views sind pure (kein eigener State/Cache), (b) Validator-Outputs sind strukturiert (`{ ok, reasons[] }`), nicht boolean.
-- **Phase 1.1 — `BudgetSettingsView`** (geplant): konsolidiert 4 Settings-Read-Funktionen auf eine Read-API mit explizitem Modus (`forDate` / `forEdit` / `withTransition`).
+- **Phase 1.1 — `BudgetSettingsView`** (in Arbeit, Read-Pfad fertig): die 4 Settings-Read-Funktionen sind auf eine Read-API `readBudgetTypeSettings(customerId, mode)` mit explizitem Modus (`forDate` / `forEdit` / `withTransition`) konsolidiert. Selbstzahler-Regel liegt als Shared-Validator (`shared/domain/budget-selbstzahler-validator.ts`), §45b-Carryover-Dedup als Shared-Helper (`shared/domain/budget-carryover-dedup.ts`), der `1970-01-01`-Backfill-Sentinel als Shared-Konstante (`shared/domain/budget-settings-sentinel.ts`). Drift-Tests: `tests/equality/budget-settings-read-modes.test.ts` (SSoT === Legacy pro Modus) und `tests/architecture/budget-sentinel-uniqueness.test.ts` (Sentinel-String nur im SSoT-Modul). Write-Pfad/Overview/History folgen in 1.2/1.3.
+
+### Lese-API-Modi (Phase 1.1)
+
+`readBudgetTypeSettings(customerId, mode)` ist der einzige Read-Einstieg in `customer_budget_type_settings`. Die alten Wrapper bleiben bis Phase-1.1-Abschluss als `@deprecated`-Re-Exports bestehen, dürfen aber nicht mehr neu aufgerufen werden.
+
+| Mode | Frage | Verhalten | Heutiger Caller-Typ |
+|---|---|---|---|
+| `{ kind: "forDate", asOfDate }` | „Welche Topf-Konfig galt an Datum X?" | Filtert `validFrom <= asOfDate AND (validTo IS NULL OR validTo >= asOfDate)`, gibt pro `budget_type` die aktive Zeile zurück. | Booking-Pfad, Cap-Berechnung, Stats-as-of. |
+| `{ kind: "forEdit" }` | „Was würde der Edit-Dialog dem User als Latest-Intent zeigen?" | Pro `budget_type` die Zeile mit dem höchsten `validFrom` (auch in der Zukunft). | Settings-Dialog initial load. |
+| `{ kind: "withTransition" }` | „Latest-Intent + heute effektive Zeile in einer Antwort." | Wie `forEdit`, plus eine zweite Spalte `effectiveToday` mit dem `forDate(today)`-Treffer. UI maskiert den Übergangsbalken daraus. | Settings-Dialog mit Transition-Hint. |
+
+Regel: neue Caller wählen einen Modus explizit; Read-Pfad und Write-Pfad teilen sich denselben Eintrag — keine parallele Inline-Query mehr.
 - **Phase 1.2 — `BudgetOverviewView`** (geplant, nach 1.1): konsolidiert §45b-/§45a-/§39-Cap-Pfade auf `computeCapSlot`, hebt DTO nach `shared/api/budget.ts`, teilt Cost-Estimate-Route auf.
 - **Phase 1.3 — `BudgetHistoryView`** (geplant, nach 1.2): aggregiert Allocations/Transactions/Audit-Reads.
 - **Phase 2** — `BudgetForecastView` (Blocker: stabiler Forecast aus #704), `customer_budgets`-Tabelle endgültig abschalten, Stats-V2 auf Batch-Read über OverviewView.

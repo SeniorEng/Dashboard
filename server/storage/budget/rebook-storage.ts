@@ -8,7 +8,8 @@ import {
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
-import { getActiveBudgetTypeSettings, getBudgetTypeSettings } from "./preferences-storage";
+import { readBudgetTypeSettings } from "./preferences-storage";
+import { todayISO } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 import { formatEuroDE } from "@shared/utils/money";
@@ -47,7 +48,7 @@ export async function rebookSingleTransaction(
 
     // Historisierungs-aware (Task #440): die zum ursprünglichen Buchungsdatum
     // gültige Topf-Konfiguration entscheidet, ob die Umbuchung erlaubt ist.
-    const typeSettings = await getActiveBudgetTypeSettings(customerId, original.transactionDate, tx);
+    const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: original.transactionDate }, tx);
     const targetSetting = typeSettings.find(s => s.budgetType === targetBudgetType);
     if (!targetSetting || !targetSetting.enabled) {
       throw new Error("Ziel-Topf ist nicht aktiviert");
@@ -133,7 +134,10 @@ export async function getRebookPreview(customerId: number): Promise<{
   totalAmountCents: number;
   transactions: Array<{ id: number; budgetType: string; amountCents: number; appointmentId: number | null; transactionDate: string }>;
 }> {
-  const typeSettings = await getBudgetTypeSettings(customerId);
+  // Task #716: Rebook-Preview ist eine Edit-/Operator-Ansicht (welche Töpfe
+  // sind aktuell deaktiviert?), nicht ein Buchungs-Lookup für einen
+  // historischen Stichtag — wir lesen pro Topf die jüngste Intent-Zeile.
+  const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forEdit" });
   const disabledTypes = typeSettings.filter(s => !s.enabled).map(s => s.budgetType);
 
   if (disabledTypes.length === 0) {

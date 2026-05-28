@@ -9,7 +9,7 @@ import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime
 import { clampToStatutoryMax } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
-import { getBudgetPreferences, getBudgetTypeSettings } from "./preferences-storage";
+import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { budgetAllocationsRepo } from "../../repos";
@@ -96,7 +96,7 @@ async function getAvailableCarryoverCents(customerId: number, asOfDate: string, 
 export async function getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary> {
   const [preferences, typeSettings] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
-    _typeSettings ?? getBudgetTypeSettings(customerId),
+    _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }),
   ]);
 
   const today = todayISO();
@@ -293,7 +293,7 @@ async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBu
   const currentMonthLastDay = lastDayOfMonth(currentYear, currentMonth);
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
-  const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId);
+  const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today });
   const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
   const s45a = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
   const isCurrentlyActive = !s45a
@@ -344,7 +344,7 @@ async function getBudgetSummary39_42a(customerId: number, _preferences?: Custome
   const yearEnd = `${currentYear}-12-31`;
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
-  const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId);
+  const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today });
   const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
 
   const [currentYearAllocatedCents, txConsumptionResult, txReversalResult] = await Promise.all([
@@ -387,7 +387,7 @@ export async function getAllBudgetSummaries(customerId: number): Promise<AllBudg
 
   const [preferences, typeSettings] = await Promise.all([
     getBudgetPreferences(customerId),
-    getBudgetTypeSettings(customerId),
+    readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }),
   ]);
   const amounts = await getCustomerBudgetAmounts(customerId, undefined, typeSettings);
 

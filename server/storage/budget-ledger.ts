@@ -35,6 +35,12 @@ interface BudgetLedgerStorage {
 
   getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined>;
   upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number): Promise<CustomerBudgetPreferences>;
+  // Task #716 — Konsolidierter Lese-Einstiegspunkt (SSoT). Overload-Set
+  // spiegelt die drei Modi 1:1 wider, damit Caller den exakten Element-Typ
+  // bekommen (ohne Conditional-Type-Narrowing-Probleme).
+  readBudgetTypeSettings(customerId: number, mode: { kind: "forDate"; asOfDate: string }, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
+  readBudgetTypeSettings(customerId: number, mode: { kind: "forEdit" }, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
+  readBudgetTypeSettings(customerId: number, mode: { kind: "withTransition" }, _tx?: DbClient): Promise<preferences.BudgetTypeSettingWithTransition[]>;
   getBudgetTypeSettings(customerId: number, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
   getLatestBudgetTypeSettings(customerId: number, _tx?: DbClient): Promise<CustomerBudgetTypeSetting[]>;
   getLatestBudgetTypeSettingsWithTransition(customerId: number, _tx?: DbClient): Promise<preferences.BudgetTypeSettingWithTransition[]>;
@@ -93,8 +99,15 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
 
   getBudgetPreferences: preferences.getBudgetPreferences,
   upsertBudgetPreferences: preferences.upsertBudgetPreferences,
+  // Task #716 — Konsolidierter Lese-Einstiegspunkt (SSoT). Neue Caller
+  // bitte ausschließlich diese Funktion verwenden — die drei alten
+  // Read-Wrapper bleiben `@deprecated` für Bestandscode.
+  readBudgetTypeSettings: preferences.readBudgetTypeSettings,
+  /** @deprecated Task #716 — bitte `readBudgetTypeSettings({ kind: "forDate", asOfDate })`. */
   getBudgetTypeSettings: preferences.getBudgetTypeSettings,
+  /** @deprecated Task #716 — bitte `readBudgetTypeSettings({ kind: "forEdit" })`. */
   getLatestBudgetTypeSettings: preferences.getLatestBudgetTypeSettings,
+  /** @deprecated Task #716 — bitte `readBudgetTypeSettings({ kind: "withTransition" })`. */
   getLatestBudgetTypeSettingsWithTransition: preferences.getLatestBudgetTypeSettingsWithTransition,
   upsertBudgetTypeSettings: preferences.upsertBudgetTypeSettings,
 

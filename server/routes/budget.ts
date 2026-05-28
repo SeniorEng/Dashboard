@@ -14,6 +14,33 @@ import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
+import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-validator";
+import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
+
+/**
+ * Task #716 — Selbstzahler-Block für §45b. Einheitlicher Wire-Format-Output
+ * (`error`, `code`, `message`) — das Frontend mapped auf den `code`-Wert.
+ * Liefert `true` zurück, wenn die Response geschickt wurde (Handler sollte
+ * abbrechen).
+ */
+async function rejectIfSelbstzahler45b(
+  customerId: number,
+  budgetType: string,
+  res: Response,
+): Promise<boolean> {
+  const cust = await storage.getCustomer(customerId);
+  const v = validateSelbstzahler45b({
+    billingType: cust?.billingType,
+    intent: { budgetType },
+  });
+  if (v.ok) return false;
+  res.status(v.httpStatus).json({
+    error: v.code,
+    code: v.code,
+    message: v.message,
+  });
+  return true;
+}
 
 const router = Router();
 
@@ -194,7 +221,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
   const summary45b = summaries.entlastungsbetrag45b;
 
-  const typeSettings = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
+  const typeSettings = await budgetLedgerStorage.readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() });
   const enabledMap: Record<string, boolean> = {
     entlastungsbetrag_45b: true,
     umwandlung_45a: false,
@@ -294,7 +321,7 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   // bereits, der Equality-Check sieht keine Änderung). Booking-Pfade nutzen
   // weiterhin `getActiveBudgetTypeSettings(transactionDate)`.
   // Task #703 — Latest-Intent + `effectiveToday` für UI-Übergangs-Erkennung.
-  const settings = await budgetLedgerStorage.getLatestBudgetTypeSettingsWithTransition(customerId);
+  const settings = await budgetLedgerStorage.readBudgetTypeSettings(customerId, { kind: "withTransition" });
   const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null; effectiveToday: null }[] = [
     { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
     { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
@@ -350,20 +377,8 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
     return;
   }
 
-  // Task #705 — Selbstzahler dürfen §45b weder als Type-Setting noch als
-  // Startwert anlegen (Variante A, konsistent zu `/type-settings` und
-  // `/initial-budget`).
-  if (budgetType === "entlastungsbetrag_45b") {
-    const cust = await storage.getCustomer(customerId);
-    if (cust?.billingType === "selbstzahler") {
-      res.status(409).json({
-        error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
-      });
-      return;
-    }
-  }
+  // Task #705 / #716 — Selbstzahler-Block via shared Validator.
+  if (await rejectIfSelbstzahler45b(customerId, budgetType, res)) return;
 
   const [yearStr, monthStr] = result.data.validFrom.split("-");
   const year = parseInt(yearStr);
@@ -544,20 +559,8 @@ router.post("/:customerId/carryover/:budgetType", requireAdmin, asyncHandler("Re
     return;
   }
 
-  // Task #705 — Selbstzahler dürfen §45b auch nicht als Carryover anlegen
-  // (Variante A, konsistent zu `/type-settings` / `/initial-budget` /
-  // `/initial-balance`). §45b ist eine Pflegekassenleistung.
-  {
-    const cust = await storage.getCustomer(customerId);
-    if (cust?.billingType === "selbstzahler") {
-      res.status(409).json({
-        error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
-      });
-      return;
-    }
-  }
+  // Task #705 / #716 — Selbstzahler-Block via shared Validator.
+  if (await rejectIfSelbstzahler45b(customerId, budgetType, res)) return;
 
   const result = carryoverSchema.safeParse(req.body);
   if (!result.success) {
@@ -575,7 +578,7 @@ router.post("/:customerId/carryover/:budgetType", requireAdmin, asyncHandler("Re
     return;
   }
 
-  const targetYear = sourceYear + 1;
+  const window = carryoverWindowFor(sourceYear);
   const userId = req.user?.id;
 
   await budgetLedgerStorage.upsertCarryoverAllocation({
@@ -583,7 +586,7 @@ router.post("/:customerId/carryover/:budgetType", requireAdmin, asyncHandler("Re
     budgetType,
     sourceYear,
     amountCents,
-    notes: `Restguthaben aus ${sourceYear} (verfällt 30.06.${targetYear})`,
+    notes: `Restguthaben aus ${sourceYear} (verfällt 30.06.${window.targetYear})`,
   }, userId);
 
   if (userId) {
@@ -592,10 +595,10 @@ router.post("/:customerId/carryover/:budgetType", requireAdmin, asyncHandler("Re
       customerId,
       budgetType,
       sourceYear,
-      targetYear,
+      targetYear: window.targetYear,
       amountCents,
-      validFrom: `${targetYear}-01-01`,
-      expiresAt: `${targetYear}-06-30`,
+      validFrom: window.validFrom,
+      expiresAt: window.expiresAt,
     }, ip);
   }
 
@@ -631,23 +634,13 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     return;
   }
 
-  // Task #705 — Selbstzahler dürfen §45b nicht aktivieren (Variante A,
-  // konsistent zu `/initial-budget`).
+  // Task #705 / #716 — Selbstzahler-Block via shared Validator. Greift nur,
+  // wenn der Save mindestens eine `enabled=true`-Zeile für §45b enthält.
   {
-    const cust = await storage.getCustomer(customerId);
-    if (cust?.billingType === "selbstzahler") {
-      const wants45b = result.data.settings.some(
-        s => s.budgetType === "entlastungsbetrag_45b" && s.enabled,
-      );
-      if (wants45b) {
-        res.status(409).json({
-          error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-          code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-          message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
-        });
-        return;
-      }
-    }
+    const wants45b = result.data.settings.some(
+      s => s.budgetType === "entlastungsbetrag_45b" && s.enabled,
+    );
+    if (wants45b && await rejectIfSelbstzahler45b(customerId, "entlastungsbetrag_45b", res)) return;
   }
 
   for (const s of result.data.settings) {
@@ -707,19 +700,8 @@ router.post("/:customerId/allocations", asyncHandler("Budget-Zuweisung konnte ni
     return;
   }
 
-  // Task #705 — Selbstzahler dürfen §45b nicht direkt allozieren
-  // (Variante A, konsistent zu allen anderen Budget-Anlage-Pfaden).
-  if (result.data.budgetType === "entlastungsbetrag_45b") {
-    const cust = await storage.getCustomer(customerId);
-    if (cust?.billingType === "selbstzahler") {
-      res.status(409).json({
-        error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
-      });
-      return;
-    }
-  }
+  // Task #705 / #716 — Selbstzahler-Block via shared Validator.
+  if (await rejectIfSelbstzahler45b(customerId, result.data.budgetType, res)) return;
 
   const userId = req.user?.id;
   const allocation = await budgetLedgerStorage.createBudgetAllocation(result.data, userId);
@@ -774,13 +756,15 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
     return;
   }
-  if (budgetType === "entlastungsbetrag_45b" && customer.billingType === "selbstzahler") {
-    res.status(409).json({
-      error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-      code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-      message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
-    });
-    return;
+  // Task #705 / #716 — Selbstzahler-Block via shared Validator. `customer`
+  // ist hier bereits geladen, daher inline statt `rejectIfSelbstzahler45b` (das
+  // den Kunden nochmal laden würde).
+  {
+    const v = validateSelbstzahler45b({ billingType: customer.billingType, intent: { budgetType } });
+    if (!v.ok) {
+      res.status(v.httpStatus).json({ error: v.code, code: v.code, message: v.message });
+      return;
+    }
   }
 
   // Task #705 — Bug 5: Für §45a/§39_42a setzt das Wizard-Flow ein
@@ -792,7 +776,7 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   // mit gesetzlichen Defaults an (Priority anhängend, keine
   // monthly/yearlyLimit-Caps).
   if ((budgetType === "umwandlung_45a" || budgetType === "ersatzpflege_39_42a") && currentMonthAmountCents > 0) {
-    const active = await budgetLedgerStorage.getBudgetTypeSettings(customerId);
+    const active = await budgetLedgerStorage.readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() });
     const matching = active.find((s) => s.budgetType === budgetType);
     if (!matching || !matching.enabled) {
       // Bewusst KEIN `upsertBudgetTypeSettings`: dessen Transitions-Pfad
@@ -957,19 +941,8 @@ router.post("/:customerId/manual-adjustment", asyncHandler("Manuelle Korrektur k
 
   const { budgetType, amountCents, notes } = result.data;
 
-  // Task #705 — Selbstzahler dürfen §45b nicht per manueller Korrektur
-  // aufstocken oder konsumieren (Variante A — kein Pflegekassen-Anspruch).
-  if (budgetType === "entlastungsbetrag_45b") {
-    const cust = await storage.getCustomer(customerId);
-    if (cust?.billingType === "selbstzahler") {
-      res.status(409).json({
-        error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-        message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
-      });
-      return;
-    }
-  }
+  // Task #705 / #716 — Selbstzahler-Block via shared Validator.
+  if (await rejectIfSelbstzahler45b(customerId, budgetType, res)) return;
 
   if (amountCents > 0) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${currentYear}-12-31` : null;

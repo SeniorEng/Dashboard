@@ -2,7 +2,7 @@ import { budgetTransactions } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
-import { getActiveBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
+import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
 import { calculateAllocatedCents, syncCarryoverAndExpiry } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
 
@@ -64,7 +64,7 @@ export async function getAvailableForDate(
   await syncCarryoverAndExpiry(customerId, _tx);
 
   const [typeSettings, preferences] = await Promise.all([
-    getActiveBudgetTypeSettings(customerId, transactionDate, _tx),
+    readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: transactionDate }, _tx),
     getBudgetPreferences(customerId, _tx),
   ]);
 

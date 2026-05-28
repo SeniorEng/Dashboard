@@ -14,7 +14,11 @@ import { BUDGET_45B_MAX_MONTHLY_CENTS, clampToStatutoryMax } from "@shared/domai
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
-import { getBudgetPreferences, getBudgetTypeSettings, getActiveBudgetTypeSettings } from "./preferences-storage";
+import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
+import {
+  carryoverWindowFor,
+  buildCarryoverDedupSets,
+} from "@shared/domain/budget-carryover-dedup";
 import { auditService } from "../../services/audit";
 import { budgetAllocationsRepo } from "../../repos";
 
@@ -155,9 +159,9 @@ export async function upsertCarryoverAllocation(
   params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string },
   userId?: number
 ): Promise<void> {
-  const targetYear = params.sourceYear + 1;
-  const validFrom = `${targetYear}-01-01`;
-  const expiresAt = `${targetYear}-06-30`;
+  // Task #716 — Fenster aus shared SSoT, damit Auto-/Manual-Pfad nicht
+  // driften (siehe `ensureYearlyCarryover45b`).
+  const { targetYear, validFrom, expiresAt } = carryoverWindowFor(params.sourceYear);
 
   const allExisting = await budgetAllocationsRepo.selectColumnsFrom(
     { id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt },
@@ -289,7 +293,7 @@ async function getMonthlyBudgetAmountCents(
   const d = _tx ?? db;
 
   const settings = _typeSettings ?? (asOfDate
-    ? await getActiveBudgetTypeSettings(customerId, asOfDate, d)
+    ? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }, d)
     : await d.select()
         .from(customerBudgetTypeSettings)
         .where(eq(customerBudgetTypeSettings.customerId, customerId)));
@@ -323,7 +327,7 @@ async function getMonthlyBudgetAmountCents(
 export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClient, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
   const d = _tx ?? db;
 
-  const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId, _tx);
+  const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }, _tx);
   const setting45a = typeSettings.find(s => s.budgetType === "umwandlung_45a");
   const setting39 = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a");
 
@@ -353,7 +357,7 @@ export async function calculateAllocatedCents(
   _typeSettings?: CustomerBudgetTypeSetting[]
 ): Promise<number> {
   const d = _tx ?? db;
-  const typeSettings = _typeSettings ?? await getBudgetTypeSettings(customerId, _tx);
+  const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }, _tx);
   const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId, _tx);
 
   let calculated = 0;
@@ -963,23 +967,23 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     ));
   const carryoverAllocations = allCarryoverAllocations.filter(a => a.deletedAt == null);
 
-  // Dedup-Set umfasst aktive UND soft-gelöschte Jahre → blockiert sowohl
-  // Doppelanlage neben einer manuell gesetzten Zeile als auch die
-  // Wiederbelebung einer vom Admin bewusst gelöschten Zeile.
-  const existingCarryoverYears = new Set(allCarryoverAllocations.map(a => a.year));
-  // Task #601 — Defensiver Dedup zusätzlich über (validFrom|expiresAt). Vor
-  // dem Fix verwendete der Wizard-Pfad `year = sourceYear`, der Auto-Pfad
-  // `year = targetYear`. Der reine Year-Dedup hat solche Paare nicht erkannt
-  // und doppelte Carryovers angelegt. Für Altdaten und gegen zukünftige
-  // Convention-Drifts klemmen wir hier zusätzlich gegen identische
-  // Gültigkeitsfenster. Wirkt sowohl für aktive als auch für soft-gelöschte
-  // Zeilen (Task #684).
-  const existingCarryoverWindows = new Set(
-    allCarryoverAllocations.map(a => `${a.validFrom}|${a.expiresAt ?? ""}`)
+  // Task #716 — Dedup-Sets aus shared SSoT (`buildCarryoverDedupSets`).
+  // Umfasst aktive UND soft-gelöschte Zeilen → blockiert sowohl Doppelanlage
+  // neben einer manuell gesetzten Zeile (Year-Dedup) als auch die
+  // Wiederbelebung einer vom Admin bewusst gelöschten Zeile (Task #684).
+  // Window-Dedup (Task #601) ist defensiver Fallback gegen Convention-Drift
+  // zwischen Wizard-Pfad (`year = sourceYear`) und Auto-Pfad
+  // (`year = targetYear`).
+  const { years: existingCarryoverYears, windows: existingCarryoverWindows } = buildCarryoverDedupSets(
+    allCarryoverAllocations.map(a => ({
+      year: a.year,
+      validFrom: a.validFrom,
+      expiresAt: a.expiresAt ?? null,
+    })),
   );
 
   const preferences = await getBudgetPreferences(customerId, _tx);
-  const typeSettings = await getBudgetTypeSettings(customerId, _tx);
+  const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }, _tx);
 
   const allAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
@@ -1038,12 +1042,12 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   // abzusetzen, sammeln wir alle relevanten Allocation-IDs sowie den Jahres-
   // bereich einmal vorab und feuern höchstens zwei aggregierte Queries.
   const yearsToProcess = years.filter(y => {
-    const targetYear = y + 1;
-    const targetWindow = `${targetYear}-01-01|${targetYear}-06-30`;
-    return y < curYear
-      && !existingCarryoverYears.has(targetYear)
-      && !existingCarryoverWindows.has(targetWindow)
-      && !yearsWithInitialBalance.has(y);
+    if (y >= curYear) return false;
+    if (yearsWithInitialBalance.has(y)) return false;
+    const win = carryoverWindowFor(y);
+    const targetWindow = `${win.validFrom}|${win.expiresAt}`;
+    return !existingCarryoverYears.has(win.targetYear)
+      && !existingCarryoverWindows.has(targetWindow);
   });
 
   const linkedIdsByYear = new Map<number, number[]>();

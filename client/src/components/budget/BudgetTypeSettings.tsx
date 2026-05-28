@@ -14,6 +14,12 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { todayISO } from "@shared/utils/datetime";
+// Task #608 / #716: Sentinel-Wert, mit dem der Historisierungs-Backfill alte
+// Zeilen auf „rückwirkend gültig" markiert hat. Im UI als leeres Feld +
+// Hinweistext rendern, statt buchstäblich „01.01.1970" anzuzeigen. Zentral
+// in `shared/domain/budget-settings-sentinel.ts` — KEIN frei stehender
+// `"1970-01-01"`-String hier (Architektur-Test).
+import { SETTINGS_VALID_FROM_EPOCH } from "@shared/domain/budget-settings-sentinel";
 
 interface BudgetTypeSetting {
   id: number | null;
@@ -51,11 +57,6 @@ interface InitialBalanceAllocation {
   year?: number;
   month?: number | null;
 }
-
-// Task #608: Sentinel-Wert, mit dem der Historisierungs-Backfill alte Zeilen
-// auf „rückwirkend gültig" markiert hat. Im UI als leeres Feld + Hinweistext
-// rendern, statt buchstäblich „01.01.1970" anzuzeigen.
-const SETTINGS_VALID_FROM_EPOCH = "1970-01-01";
 
 interface BudgetTypeSettingsProps {
   customerId: number;

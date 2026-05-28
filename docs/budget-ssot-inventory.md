@@ -361,3 +361,21 @@ Querschnitts-Auflagen für alle neuen Services/Views:
 ### Begleitende Doku-Auslagerung
 
 Budget-spezifische Architecture-Decisions und Gotchas wandern aus `replit.md` nach [`docs/architecture/budget.md`](./architecture/budget.md). `replit.md` behält nur Pointer.
+
+---
+
+## 8. Phasen-Stand
+
+### Phase 1.1 — `BudgetSettingsView` Read-Pfad (abgeschlossen)
+
+Geliefert:
+- **Eine Read-API** `readBudgetTypeSettings(customerId, mode)` in `server/storage/budget/preferences-storage.ts` mit drei Modi (`forDate` / `forEdit` / `withTransition`). Re-Export auch über `server/storage/budget-ledger.ts`. Alte 4 Wrapper sind `@deprecated`, bleiben bis 1.1-Abschluss bestehen.
+- **Selbstzahler-Validator** `shared/domain/budget-selbstzahler-validator.ts` (Output `{ ok, reasons: string[] }`, Querschnitts-Auflage B). Backend nutzt ihn über den Helper `rejectIfSelbstzahler45b` in `server/routes/budget.ts`; die 6 alten Inline-Blöcke sind ersetzt. Frontend kann denselben Validator anziehen, sobald die UI-Surface der §45b-Karte angefasst wird.
+- **§45b-Carryover-Dedup** `shared/domain/budget-carryover-dedup.ts` (`carryoverWindowFor`, `buildCarryoverDedupSets`). Manueller Pfad (`upsertCarryoverAllocation`) und Auto-Pfad (`ensureYearlyCarryover45b`) teilen sich denselben Quelljahr-Schlüssel.
+- **Sentinel-Konstante** `shared/domain/budget-settings-sentinel.ts` (`SETTINGS_VALID_FROM_EPOCH`). Frontend-Maskierung und Backend-Backfill-Erkenner importieren denselben Wert.
+- **Drift-Schutz**: `tests/equality/budget-settings-read-modes.test.ts` (SSoT-API === Legacy-Getter pro Modus, mit 3-Zeilen-Seed: alt geschlossen / aktiv / zukünftig) und `tests/architecture/budget-sentinel-uniqueness.test.ts` (Sentinel-String nur im SSoT-Modul; Whitelist für Roh-SQL-Backfill und policy-fremde Stub-Daten dokumentiert in-File).
+
+Nicht enthalten (folgt in 1.2/1.3):
+- Write-Pfad-Konsolidierung (`upsertBudgetTypeSettings`, Transition-Insert).
+- `BudgetOverviewView`, `BudgetHistoryView`.
+- Frontend-Übernahme des Selbstzahler-Validators in der §45b-Karte.
