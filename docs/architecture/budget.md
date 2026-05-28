@@ -94,8 +94,7 @@ Three-pot Budget-Ledger mit Cascading-Allocation, FIFO für §45b und einem virt
 | Feld | Typ | Pflicht | Bedeutung |
 |---|---|---|---|
 | `budgetType` | `entlastungsbetrag_45b` \| `umwandlung_45a` \| `ersatzpflege_39_42a` | nein (Default `entlastungsbetrag_45b`) | Zieltopf. Für `selbstzahler`-Kunden + §45b → 409 (siehe Selbstzahler-Routing). |
-| `currentMonthAmountCents` | `number ≥ 0` | ja (oder Alias unten) | **Monats-Betrag in Cent.** Wird als `initial_balance`-Allokation mit `year/month` aus `budgetStartDate` angelegt. |
-| `currentYearAmountCents` | `number ≥ 0` | Alias (deprecated) | Backwards-Compat-Alias für `currentMonthAmountCents` — semantisch identisch (es war NIE ein Jahresbetrag). Server loggt eine Deprecation-Warnung. |
+| `currentMonthAmountCents` | `number ≥ 0` | ja | **Monats-Betrag in Cent.** Wird als `initial_balance`-Allokation mit `year/month` aus `budgetStartDate` angelegt. (Der vormalige Alias `currentYearAmountCents` wurde mit Task #731 entfernt — Requests damit erhalten 400.) |
 | `carryoverAmountCents` | `number ≥ 0` | nein (Default 0) | Nur für §45b ausgewertet — legt zusätzlich eine `source='carryover'`-Zeile mit `validFrom = YYYY-01-01`, `expiresAt = YYYY-06-30` an. |
 | `budgetStartDate` | `YYYY-MM-DD` | ja | Bestimmt `year`/`month` der Monats-Allokation sowie deren `validFrom`. |
 

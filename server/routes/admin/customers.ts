@@ -604,17 +604,11 @@ const setupPendingBodySchema = z.object({
   budgets: z.object({
     items: z.array(z.object({
       budgetType: z.string(),
-      // Task #725 — kanonisch ist `currentMonthAmountCents`; alter Name bleibt
-      // optional als Backwards-Compat-Alias, mind. eines muss gesetzt sein.
-      currentMonthAmountCents: z.number().optional(),
-      /** @deprecated Use `currentMonthAmountCents`. */
-      currentYearAmountCents: z.number().optional(),
+      // Task #731 — Alias `currentYearAmountCents` nach Release-Zyklus entfernt.
+      currentMonthAmountCents: z.number(),
       carryoverAmountCents: z.number(),
       budgetStartDate: z.string(),
-    }).refine(
-      d => d.currentMonthAmountCents != null || d.currentYearAmountCents != null,
-      { message: "currentMonthAmountCents oder currentYearAmountCents ist erforderlich" },
-    )),
+    })),
   }).optional(),
   delivery: z.object({
     method: z.string(),

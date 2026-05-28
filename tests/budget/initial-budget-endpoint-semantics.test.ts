@@ -1,13 +1,14 @@
 /**
- * Task #725 — `POST /api/budget/:cid/initial-budget` Semantik pro Topf.
+ * Task #725 / #731 — `POST /api/budget/:cid/initial-budget` Semantik pro Topf.
  *
  * Reproducer-Test: der Parameter ist semantisch ein **Monatswert**, nicht
  * ein Jahreswert. Der kanonische Name ist `currentMonthAmountCents`; der
- * alte Name `currentYearAmountCents` bleibt als Deprecated-Alias erhalten
- * und wird identisch geroutet. Pro Topf-Typ (§45b / §45a / §39_42a) prüft
- * diese Suite, dass GENAU EINE `initial_balance`-Allokation für den durch
- * `budgetStartDate` adressierten Monat angelegt wird — nicht zwölf, nicht
- * eine Jahres-Zeile mit `month=null`.
+ * alte Name `currentYearAmountCents` wurde nach einem Release-Zyklus
+ * entfernt (#731) und wird vom Schema mit 400 abgelehnt. Pro Topf-Typ
+ * (§45b / §45a / §39_42a) prüft diese Suite, dass GENAU EINE
+ * `initial_balance`-Allokation für den durch `budgetStartDate`
+ * adressierten Monat angelegt wird — nicht zwölf, nicht eine Jahres-Zeile
+ * mit `month=null`.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, isNull } from "drizzle-orm";
@@ -117,28 +118,22 @@ describe("Task #725 — initial-budget Endpoint-Semantik (Monatswert)", () => {
     expect(rows[0].expiresAt).toBe("2026-12-31");
   });
 
-  it("Deprecated-Alias `currentYearAmountCents` wird semantisch identisch zu `currentMonthAmountCents` geroutet", async () => {
-    const customerId = await freshCustomer("T725-alias");
-    const budgetStartDate = "2026-05-15";
-    const amount = 13_100;
-
+  it("Task #731: alter Alias `currentYearAmountCents` wird vom Schema mit 400 abgelehnt", async () => {
+    const customerId = await freshCustomer("T731-alias-removed");
     const res = await apiPost(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
-      currentYearAmountCents: amount,
+      currentYearAmountCents: 13_100,
       carryoverAmountCents: 0,
-      budgetStartDate,
+      budgetStartDate: "2026-05-15",
     });
-    expect([200, 201]).toContain(res.status);
+    expect(res.status).toBe(400);
 
+    // Es darf KEINE Allokation angelegt worden sein.
     const rows = await getInitialBalances(customerId, "entlastungsbetrag_45b");
-    // Genau eine Monatszeile — KEIN Jahres-Sweep, keine 12 Zeilen.
-    expect(rows.length).toBe(1);
-    expect(rows[0].month).toBe(5);
-    expect(rows[0].year).toBe(2026);
-    expect(rows[0].amountCents).toBe(amount);
+    expect(rows.length).toBe(0);
   });
 
-  it("Validation: ohne `currentMonthAmountCents` UND ohne `currentYearAmountCents` → 400", async () => {
+  it("Validation: ohne `currentMonthAmountCents` → 400", async () => {
     const customerId = await freshCustomer("T725-validation");
     const res = await apiPost(`/api/budget/${customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
