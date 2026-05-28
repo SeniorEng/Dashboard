@@ -184,70 +184,72 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
   }
 
   if (input.budgets) {
-    const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
-    if (input.budgets.entlastungsbetrag45b > 0) {
-      // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Der vom
-      // Wizard gesendete Eurobetrag dient nur noch als Enable-Signal —
-      // monthlyLimitCents bleibt explizit null.
-      typeSettings.push({ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null });
-    }
-    if (input.budgets.pflegesachleistungen36 > 0) {
-      typeSettings.push({ budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: input.budgets.pflegesachleistungen36 });
-    }
-    if (input.budgets.verhinderungspflege39 > 0) {
-      typeSettings.push({ budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, yearlyLimitCents: input.budgets.verhinderungspflege39 });
-    }
-
-    // Pflicht: Budget-Type-Settings. Ohne diese kann der §45b-Pfad weder
-    // monatliche Auto-Allokation noch Carryover korrekt berechnen.
-    if (typeSettings.length > 0) {
-      maybeFail("budget_settings", testFaults);
-      await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, typeSettings, tx, userId);
-    }
-
-    // Soft: Carryover-Sync. Best-Effort — bei Fehler weiter, aber als
-    // Warning hochgereicht.
-    if (typeSettings.length > 0) {
-      try {
-        await budgetLedgerStorage.syncCarryoverAndExpiry(customerId, tx);
-      } catch (err) {
-        console.error(`[${logPrefix}] Budget-Sync fehlgeschlagen für Kunde ${customerId}:`, err);
+    {
+      const typeSettings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null }> = [];
+      if (input.budgets.entlastungsbetrag45b > 0) {
+        // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Der vom
+        // Wizard gesendete Eurobetrag dient nur noch als Enable-Signal —
+        // monthlyLimitCents bleibt explizit null.
+        typeSettings.push({ budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null });
       }
-    }
+      if (input.budgets.pflegesachleistungen36 > 0) {
+        typeSettings.push({ budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: input.budgets.pflegesachleistungen36 });
+      }
+      if (input.budgets.verhinderungspflege39 > 0) {
+        typeSettings.push({ budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, yearlyLimitCents: input.budgets.verhinderungspflege39 });
+      }
 
-    // Soft: Carryover-Allocation aus Vorjahr. Bleibt als Warning
-    // tolerierbar, weil der Customer ohne Carryover funktional weiter
-    // nutzbar ist (manueller Nachtrag später möglich).
-    if (input.budgets.carryoverAmountCents && input.budgets.carryoverAmountCents > 0) {
-      try {
-        maybeFail("carryover", testFaults);
-        const validFrom = input.budgets.validFrom || todayISO();
-        const validFromDate = parseLocalDate(validFrom);
-        const currentYear = validFromDate.getFullYear();
-        // validFrom des Carryover wird auf Jahresanfang gesetzt, damit
-        // rückwirkende Buchungen/Importe im Stichjahr den Übertrag sehen
-        // (Task #116). Andernfalls wäre der Übertrag für Monate VOR dem
-        // Anlagedatum unsichtbar und würde Monatscap-Kürzungen erzeugen.
-        // Task #601 — `year` = Zieljahr (Jahr, in dem der Übertrag verfügbar
-        // ist), konsistent zu `ensureYearlyCarryover45b`. Vorher:
-        // `currentYear - 1` (Quelljahr) — dadurch matchte der Auto-Dedup
-        // die Zeile nicht und beim ersten `syncCarryoverAndExpiry` (z.B.
-        // über `PUT /type-settings`) wurde ein zweiter Carryover für das
-        // Zieljahr angelegt → Doppelzählung im Budget-Overview.
-        await budgetLedgerStorage.createBudgetAllocation({
-          customerId,
-          budgetType: "entlastungsbetrag_45b",
-          year: currentYear,
-          month: null,
-          amountCents: input.budgets.carryoverAmountCents,
-          source: "carryover",
-          validFrom: `${currentYear}-01-01`,
-          expiresAt: `${currentYear}-06-30`,
-          notes: `Übertrag aus ${currentYear - 1}`,
-        }, userId, tx);
-      } catch (err) {
-        console.error(`[${logPrefix}] Carryover-Allocation fehlgeschlagen für Kunde ${customerId}:`, err);
-        warnings.push("Übertrag aus Vorjahr konnte nicht gespeichert werden");
+      // Pflicht: Budget-Type-Settings. Ohne diese kann der §45b-Pfad weder
+      // monatliche Auto-Allokation noch Carryover korrekt berechnen.
+      if (typeSettings.length > 0) {
+        maybeFail("budget_settings", testFaults);
+        await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, typeSettings, tx, userId);
+      }
+
+      // Soft: Carryover-Sync. Best-Effort — bei Fehler weiter, aber als
+      // Warning hochgereicht.
+      if (typeSettings.length > 0) {
+        try {
+          await budgetLedgerStorage.syncCarryoverAndExpiry(customerId, tx);
+        } catch (err) {
+          console.error(`[${logPrefix}] Budget-Sync fehlgeschlagen für Kunde ${customerId}:`, err);
+        }
+      }
+
+      // Soft: Carryover-Allokation aus Vorjahr. Bleibt als Warning
+      // tolerierbar, weil der Customer ohne Carryover funktional weiter
+      // nutzbar ist (manueller Nachtrag später möglich).
+      if (input.budgets.carryoverAmountCents && input.budgets.carryoverAmountCents > 0) {
+        try {
+          maybeFail("carryover", testFaults);
+          const validFrom = input.budgets.validFrom || todayISO();
+          const validFromDate = parseLocalDate(validFrom);
+          const currentYear = validFromDate.getFullYear();
+          // validFrom des Carryover wird auf Jahresanfang gesetzt, damit
+          // rückwirkende Buchungen/Importe im Stichjahr den Übertrag sehen
+          // (Task #116). Andernfalls wäre der Übertrag für Monate VOR dem
+          // Anlagedatum unsichtbar und würde Monatscap-Kürzungen erzeugen.
+          // Task #601 — `year` = Zieljahr (Jahr, in dem der Übertrag verfügbar
+          // ist), konsistent zu `ensureYearlyCarryover45b`. Vorher:
+          // `currentYear - 1` (Quelljahr) — dadurch matchte der Auto-Dedup
+          // die Zeile nicht und beim ersten `syncCarryoverAndExpiry` (z.B.
+          // über `PUT /type-settings`) wurde ein zweiter Carryover für das
+          // Zieljahr angelegt → Doppelzählung im Budget-Overview.
+          await budgetLedgerStorage.createBudgetAllocation({
+            customerId,
+            budgetType: "entlastungsbetrag_45b",
+            year: currentYear,
+            month: null,
+            amountCents: input.budgets.carryoverAmountCents,
+            source: "carryover",
+            validFrom: `${currentYear}-01-01`,
+            expiresAt: `${currentYear}-06-30`,
+            notes: `Übertrag aus ${currentYear - 1}`,
+          }, userId, tx);
+        } catch (err) {
+          console.error(`[${logPrefix}] Carryover-Allocation fehlgeschlagen für Kunde ${customerId}:`, err);
+          warnings.push("Übertrag aus Vorjahr konnte nicht gespeichert werden");
+        }
       }
     }
   }

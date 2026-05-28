@@ -344,18 +344,18 @@ async function runStartupTasks() {
       log(`Budget-Historisierung-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #728 Phase 2.1 — Inhalt der Legacy-Tabelle `customer_budgets`
-    // in die SSoT `customer_budget_type_settings` migrieren, BEVOR die
-    // Lese-Fallbacks in allocation-storage abgeschaltet werden. Muss NACH
-    // `backfillBudgetHistorization` laufen, damit der Sentinel-`validFrom`
-    // konsistent ist; idempotent (skippt jeden bereits migrierten Topf).
-    const { backfillCustomerBudgetsToTypeSettings } = await import(
-      "./startup/backfill-customer-budgets-to-typesettings"
+    // Task #743 — Eingefrorene Legacy-Tabelle `customer_budgets` endgültig
+    // droppen. Vorbedingung (Task #728 Phase 2.1): Backfill nach
+    // `customer_budget_type_settings` ist auf Production gelaufen und vom
+    // Operator validiert (siehe `docs/deployment-log.md`-Eintrag 2026-05-28).
+    // Idempotent: prüft Existenz vor DROP, mehrfacher Lauf = No-Op.
+    const { dropCustomerBudgetsTable } = await import(
+      "./startup/drop-customer-budgets-table"
     );
     try {
-      await backfillCustomerBudgetsToTypeSettings();
+      await dropCustomerBudgetsTable();
     } catch (err) {
-      log(`Customer-Budgets-Backfill fehlgeschlagen: ${err}`, "startup");
+      log(`Customer-Budgets-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #721 — Idempotenter Read-Only-Audit der Phasen-Kette in

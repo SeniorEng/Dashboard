@@ -6,32 +6,14 @@ import { timestamp } from "./common";
 import { customers } from "./customers";
 import { users } from "./users";
 import { appointments } from "./appointments";
-import { BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS } from "../domain/budgets";
-
-// ============================================
-// BUDGETS (historized) - Legacy table, kept for migration
-// ============================================
-
-export const customerBudgets = pgTable("customer_budgets", {
-  id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
-  // Monthly budget amounts in cents (to avoid floating point issues)
-  entlastungsbetrag45b: integer("entlastungsbetrag_45b").notNull().default(0), // § 45b SGB XI
-  verhinderungspflege39: integer("verhinderungspflege_39").notNull().default(0), // § 39 SGB XI
-  pflegesachleistungen36: integer("pflegesachleistungen_36").notNull().default(0), // § 36 SGB XI
-  validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"), // null = current
-  notes: text("notes"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
-}, (table) => [
-  index("customer_budgets_customer_id_idx").on(table.customerId),
-  index("customer_budgets_valid_idx").on(table.customerId, table.validTo),
-]);
 
 // ============================================
 // BUDGET LEDGER SYSTEM (§45b, §45a, §39/§42a)
 // ============================================
+//
+// Hinweis (Task #743): Die Legacy-Tabelle `customer_budgets` (eingefroren
+// in Task #728 Phase 2.1) ist endgültig entfernt. SSoT für Topf-
+// Konfiguration ist `customer_budget_type_settings`.
 
 // Budget allocation sources
 export const BUDGET_ALLOCATION_SOURCES = [
@@ -162,20 +144,6 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
     .where(sql`valid_to IS NULL`),
   index("customer_budget_type_settings_customer_idx").on(table.customerId),
 ]);
-
-// Budget schemas
-export const insertCustomerBudgetSchema = z.object({
-  customerId: z.number(),
-  entlastungsbetrag45b: z.number().min(0, "Wert darf nicht negativ sein").max(BUDGET_45B_MAX_MONTHLY_CENTS, "Maximaler Entlastungsbetrag überschritten").default(0),
-  verhinderungspflege39: z.number().min(0, "Wert darf nicht negativ sein").max(BUDGET_39_42A_MAX_YEARLY_CENTS, "Maximaler Verhinderungspflege-Betrag überschritten").default(0),
-  pflegesachleistungen36: z.number().min(0, "Wert darf nicht negativ sein").default(0), // Max depends on Pflegegrad, validated in route
-  validFrom: z.string(),
-  validTo: z.string().optional().nullable(),
-  notes: z.string().max(500, "Maximal 500 Zeichen").optional().nullable(),
-});
-
-export type CustomerBudget = typeof customerBudgets.$inferSelect;
-export type InsertCustomerBudget = z.infer<typeof insertCustomerBudgetSchema>;
 
 // Budget Allocation schemas (Ledger system)
 export const insertBudgetAllocationSchema = z.object({

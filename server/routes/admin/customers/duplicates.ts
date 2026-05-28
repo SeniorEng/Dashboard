@@ -202,7 +202,6 @@ router.post(
       await simpleUpdate("customer_needs_assessments", "customer_id");
       await simpleUpdate("customer_assignment_history", "customer_id");
       await simpleUpdate("customer_insurance_history", "customer_id");
-      await simpleUpdate("customer_budgets", "customer_id");
       await simpleUpdate("customer_documents", "customer_id");
       await simpleUpdate("generated_documents", "customer_id");
       await simpleUpdate("monthly_service_records", "customer_id");

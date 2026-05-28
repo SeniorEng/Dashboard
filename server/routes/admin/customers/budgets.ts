@@ -16,6 +16,7 @@ const router = Router();
 // abgeschaltete Legacy-Tabelle). SSoT für Topf-Konfiguration ist
 // `customer_budget_type_settings` via PUT /customers/:id/budget-type-settings
 // (`budgetLedgerStorage.upsertBudgetTypeSettings`).
+// Task #743 — Legacy-Tabelle `customer_budgets` per Startup-Migration gedroppt.
 
 router.get("/budget/backfill-preview", asyncHandler("Vorschau fehlgeschlagen", async (req: Request, res: Response) => {
   const customerIdParsed = parseOptionalIntQuery(req.query.customerId, res, "customerId");

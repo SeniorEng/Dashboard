@@ -68,6 +68,15 @@ Erzeugt unter `tmp/db-backups/affected-<TIMESTAMP>/`:
 - `customer_pricing_history.csv` — Tabelle (erwartet: leer)
 - `row-count-report.txt` — Zählungen pro Spalte/Tabelle
 
+> **Task #743 (DROP `customer_budgets`)**: Vor dem Publish zusätzlich einen separaten Snapshot der frozen Legacy-Tabelle ziehen, da die Startup-Migration die Tabelle idempotent droppt und sie danach nicht mehr rekonstruierbar ist:
+> ```bash
+> pg_dump "$DATABASE_URL" --table=customer_budgets --data-only --format=plain \
+>   | gzip > tmp/db-backups/customer_budgets-pre-drop-$(date +%Y%m%d_%H%M%S).sql.gz
+> psql "$DATABASE_URL" -c "SELECT COUNT(*) FROM customer_budgets;" \
+>   >> tmp/db-backups/row-count-report.txt
+> ```
+> Snapshot mindestens 10 Jahre aufbewahren (GoBD: historische Budget-Stammdaten).
+
 ### 3.3 Backup an sicheren Ort kopieren
 
 `tmp/db-backups/` liegt nur in der Repl. Vor dem Publish:

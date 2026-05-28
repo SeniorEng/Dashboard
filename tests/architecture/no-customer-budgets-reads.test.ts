@@ -5,16 +5,17 @@
  * (Drizzle-Schema-Tabelle) DÜRFEN NICHT entstehen.
  *
  * Allowlist pro Datei (mit Begründung):
- *  - shared/schema/budget.ts            → Schema-Definition selbst.
- *  - server/scripts/cleanup-test-data.ts → Test-Cleanup-Skript löscht
- *      Bestandszeilen.
+ *  - shared/schema/budget.ts            → Hinweis-Kommentar zur gedroppten Tabelle.
+ *  - server/scripts/cleanup-test-data.ts → Test-Cleanup-Skript (historische
+ *      Spurenbeseitigung, falls vorhanden).
  *  - server/routes/admin/test-cleanup.ts → Admin-Endpunkt für dasselbe
  *      Cleanup.
  *  - server/routes/admin/customers/duplicates.ts → Dup-Merge zählt
  *      Bestandszeilen für die Anzeige.
- *  - scripts/budget-summary-test.ts → Maintenance-Skript (manueller Lauf).
- *  - server/startup/backfill-customer-budgets-to-typesettings.ts →
- *      einmalige Backfill-Migration, die die Tabelle entleert (Roh-SQL).
+ *  - server/startup/drop-customer-budgets-table.ts → Task #743:
+ *      idempotente Startup-Migration, die die Legacy-Tabelle droppt (Roh-SQL).
+ *  - server/routes/admin/customers/budgets.ts → Erklärender Task-#743/#744-
+ *      Kommentar, kein aktiver Read/Write.
  *
  * Failure-Modus: Test schlägt mit der Liste neuer Dateien fehl. Behebung:
  * Aufrufer auf SSoT umstellen oder in der Allowlist eintragen MIT Begründung.
@@ -30,10 +31,10 @@ const ALLOWLIST: ReadonlyArray<string> = [
   "server/scripts/cleanup-test-data.ts",
   "server/routes/admin/test-cleanup.ts",
   "server/routes/admin/customers/duplicates.ts",
-  "scripts/budget-summary-test.ts",
-  "server/startup/backfill-customer-budgets-to-typesettings.ts",
-  // Erklärende Task-#728-Kommentare nennen `customer_budgets` als
-  // Begründung für die Fallback-Entfernung / Backfill-Verdrahtung — kein
+  "server/startup/drop-customer-budgets-table.ts",
+  "server/routes/admin/customers/budgets.ts",
+  // Erklärende Task-#728/#743-Kommentare nennen `customer_budgets` als
+  // Begründung für die Fallback-Entfernung / Drop-Migration — kein
   // aktiver Read/Write.
   "server/index.ts",
   "server/storage/budget/allocation-storage.ts",

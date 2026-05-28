@@ -8,6 +8,46 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-28 (b) — Legacy-Tabelle `customer_budgets` endgültig gedroppt (Task #743, kein Publish)
+
+**Anlass:** Mit Task #728 Phase 2.1 wurde die Tabelle als Read-Quelle abgeschaltet und ihr Inhalt nach `customer_budget_type_settings` migriert. Nach Operator-Validierung des Backfill-Ergebnisses auf Production (Pre-Publish-Check unten) kann sie ohne weitere Vorarbeiten gedroppt werden — sie wird nur noch von Audit-Helpern, einem No-Op-Writer und Cleanup-Skripten erwähnt, die alle im selben Schritt mit entfernt werden.
+
+**Änderungen:**
+- Neue idempotente Startup-Migration `server/startup/drop-customer-budgets-table.ts` (`DROP TABLE IF EXISTS customer_budgets CASCADE`, mit Existenz-Check vor dem DROP). Ersetzt den abgeschlossenen Backfill aus 2026-05-28 in der Startup-Kette.
+- `shared/schema/budget.ts`: `customerBudgets`-pgTable, `insertCustomerBudgetSchema`, `CustomerBudget`/`InsertCustomerBudget` entfernt.
+- `server/storage/customer-mgmt/budgets.ts` gelöscht (`getCustomerCurrentBudget`/`getCustomerBudgetHistory`/`addCustomerBudget`-No-Op). Bindings in `server/storage/customer-management.ts` und `budget`-Feld in `CustomerWithDetails` raus.
+- `server/routes/admin/customers/budgets.ts`: `GET /customers/:id/budgets` (Historie) und `POST /customers/:id/budgets` (Mutation) entfernt; Backfill-Endpunkte bleiben.
+- `server/lib/customer-creation-helpers.ts`: toter Legacy-Else-Branch + `useLedgerBudgets`-Flag entfernt (einziger Caller setzte konstant `true`). `server/routes/admin/customers.ts` zieht das Feld aus dem Aufruf raus.
+- Cleanup-Skripte (`server/scripts/cleanup-test-data.ts`, `server/routes/admin/test-cleanup.ts`, `server/routes/admin/customers/duplicates.ts`) und `scripts/budget-summary-test.ts` entfernt / bereinigt.
+- Architecture-Tests `tests/architecture/no-customer-budgets-reads.test.ts` und Backfill-Integrationstest `tests/budget/customer-budgets-backfill.test.ts` gelöscht; Sentinel-Whitelist-Eintrag in `tests/architecture/budget-sentinel-uniqueness.test.ts` entfernt.
+
+**Schema-Risiko (Pre-Publish):** DROP TABLE ist destruktiv. Vor Deploy ist ein Backup-Snapshot der Tabelle `customer_budgets` Pflicht (siehe `docs/pre-publish-backup-runbook.md`). Die Migration läuft idempotent — beim zweiten Boot ist die Tabelle weg, der Existenz-Check skippt sauber.
+
+**Pre-Publish-Check (Operator, vor Deploy):**
+```sql
+-- Beide Werte müssen 0 ergeben (jeder konfigurierte Topf in customer_budgets hat einen SSoT-Eintrag):
+SELECT COUNT(*) AS missing_45b
+FROM customer_budgets cb
+WHERE cb.valid_to IS NULL AND cb.entlastungsbetrag_45b > 0
+  AND NOT EXISTS (SELECT 1 FROM customer_budget_type_settings s
+                  WHERE s.customer_id = cb.customer_id
+                    AND s.budget_type = 'entlastungsbetrag_45b');
+SELECT COUNT(*) AS missing_45a
+FROM customer_budgets cb
+WHERE cb.valid_to IS NULL AND cb.pflegesachleistungen_36 > 0
+  AND NOT EXISTS (SELECT 1 FROM customer_budget_type_settings s
+                  WHERE s.customer_id = cb.customer_id
+                    AND s.budget_type = 'umwandlung_45a');
+SELECT COUNT(*) AS missing_39
+FROM customer_budgets cb
+WHERE cb.valid_to IS NULL AND cb.verhinderungspflege_39 > 0
+  AND NOT EXISTS (SELECT 1 FROM customer_budget_type_settings s
+                  WHERE s.customer_id = cb.customer_id
+                    AND s.budget_type = 'ersatzpflege_39_42a');
+```
+
+---
+
 ### 2026-05-28 — `customer_budgets` als Read-Quelle abgeschaltet (Task #728 Phase 2.1, kein Publish)
 
 **Anlass:** Phase-2-Beschluss aus `docs/budget-ssot-inventory.md`: Die Legacy-Tabelle `customer_budgets` war nach Einführung der SSoT `customer_budget_type_settings` (Phase 1.1/1.3) nur noch über einen stillen Lese-Fallback in `server/storage/budget/allocation-storage.ts` (`getMonthlyBudgetAmountCents`, `getCustomerBudgetAmounts`) und über `addCustomerBudget` als Schreibpfad eingebunden. Solange dieser Fallback existierte, konnte Drift zwischen Anzeige (SSoT) und Buchung (`customer_budgets`) für Bestandskunden auftreten, sobald ein Topf in einer der beiden Quellen aktualisiert wurde.
