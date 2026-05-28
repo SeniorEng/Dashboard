@@ -37,7 +37,9 @@ jobs:
   # Gates: 1 (npm ci), 2 (tsc), 3 (eslint), 6 (npm audit)
   # -------------------------------------------------------------------------
   static-analysis:
-    name: Static analysis (typecheck · lint · audit)
+    # Check-Name == Job-ID, damit Branch-Protection diesen Kontext exakt matcht
+    # (Typecheck · Lint · Audit — Details siehe Steps + Gate-Übersicht oben).
+    name: static-analysis
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -76,7 +78,9 @@ jobs:
   # Gates: 4 (vitest), 5 (architecture), 8 (coverage-billing)
   # -------------------------------------------------------------------------
   tests:
-    name: Tests (vitest · architecture · coverage)
+    # Check-Name == Job-ID, damit Branch-Protection diesen Kontext exakt matcht
+    # (Vitest · Architecture-Fitness · Coverage — Details siehe Steps).
+    name: tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -120,6 +124,12 @@ jobs:
       - name: Push DB schema (drizzle-kit push)
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx drizzle-kit push --force
+
+      # Frische CI-DB hat keinen User → Test-Superadmin seeden, sonst schlägt
+      # das Login in globalSetup fehl und das Gate liefe permanent rot (Task #786).
+      - name: Seed test superadmin
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx scripts/ci-seed-superadmin.ts
 
       - name: Start app server
         if: ${{ env.TEST_USER_PASSWORD != '' }}
@@ -178,7 +188,9 @@ jobs:
   # Gate: 7 (test:e2e:smoke)
   # -------------------------------------------------------------------------
   e2e-smoke:
-    name: E2E smoke (playwright)
+    # Check-Name == Job-ID, damit Branch-Protection diesen Kontext exakt matcht
+    # (Playwright-Smoke — Details siehe Steps).
+    name: e2e-smoke
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -232,6 +244,12 @@ jobs:
       - name: Push DB schema (drizzle-kit push)
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx drizzle-kit push --force
+
+      # Frische CI-DB hat keinen User → Test-Superadmin seeden, sonst schlägt
+      # das Login fehl und das Gate liefe permanent rot (Task #786).
+      - name: Seed test superadmin
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx scripts/ci-seed-superadmin.ts
 
       - name: Start app server
         if: ${{ env.TEST_USER_PASSWORD != '' }}
