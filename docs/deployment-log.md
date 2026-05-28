@@ -8,6 +8,33 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-05-28 — `customer_budgets` als Read-Quelle abgeschaltet (Task #728 Phase 2.1, kein Publish)
+
+**Anlass:** Phase-2-Beschluss aus `docs/budget-ssot-inventory.md`: Die Legacy-Tabelle `customer_budgets` war nach Einführung der SSoT `customer_budget_type_settings` (Phase 1.1/1.3) nur noch über einen stillen Lese-Fallback in `server/storage/budget/allocation-storage.ts` (`getMonthlyBudgetAmountCents`, `getCustomerBudgetAmounts`) und über `addCustomerBudget` als Schreibpfad eingebunden. Solange dieser Fallback existierte, konnte Drift zwischen Anzeige (SSoT) und Buchung (`customer_budgets`) für Bestandskunden auftreten, sobald ein Topf in einer der beiden Quellen aktualisiert wurde.
+
+**Lieferumfang:**
+- Idempotente Backfill-Migration `server/startup/backfill-customer-budgets-to-typesettings.ts` (LATEST `customer_budgets`-Zeile pro Kunde → `customer_budget_type_settings`-Zeile pro nicht-Null-Topf; mappt 45b/45a auf `monthly_limit_cents`, 39/42a auf `yearly_limit_cents`; `valid_from` aus der Quellzeile, Sentinel `'1970-01-01'` als Fallback). Wird im Startup nach `backfillBudgetHistorization` aufgerufen. Schreibt NUR, wenn für (customer_id, budget_type) keine SSoT-Zeile existiert — bestehende historisierte Konfigurationen sind unantastbar (GoBD).
+- Read-Fallback in `allocation-storage.ts` entfernt; `customerBudgets`-Import dort gelöscht.
+- `addCustomerBudget` zum No-Op (log warning + synthetischer Stub-Return), damit Legacy-Caller weiter kompilieren ohne die eingefrorene Tabelle zu beschreiben.
+- Drift-Schutz: `tests/architecture/no-customer-budgets-reads.test.ts` (Allowlist-Scan) + `tests/budget/customer-budgets-backfill.test.ts` (Mapping / Idempotenz / „bestehende SSoT-Zeile wird NICHT überschrieben"). Sentinel-Whitelist (`tests/architecture/budget-sentinel-uniqueness.test.ts`) um den neuen Backfill erweitert.
+
+**Schema-Änderungen:** keine. Tabelle `customer_budgets` bleibt eingefroren im Schema (Read-Only-Audit über `getCustomerCurrentBudget`/`getCustomerBudgetHistory`, beide `@deprecated`). Drop in einer späteren Phase nach Frontend-Entwöhnung von `customer.budget` und vollständiger Operator-Validierung des Backfill-Ergebnisses in Production.
+
+**Operator-Pre-Publish-Check (empfohlen):** Vor Publish auf Production-Read-Replica
+```sql
+SELECT cb.customer_id, cb.entlastungsbetrag_45b, cb.pflegesachleistungen_36, cb.verhinderungspflege_39
+FROM customer_budgets cb
+WHERE NOT EXISTS (
+  SELECT 1 FROM customer_budget_type_settings s
+  WHERE s.customer_id = cb.customer_id
+);
+```
+ausführen und prüfen, dass die Kandidatenliste plausibel ist (= Kunden, die der Backfill nach dem Deploy in die SSoT übernehmen wird). Beträge mit 0/NULL werden vom Backfill übersprungen, das ist der gewünschte Default.
+
+**Publish-Status:** ⏳ ausstehend.
+
+---
+
 ### 2026-05-27 — §45b-Carryover-Doppel-Allokationen mit verlinkten Buchungen auflösen (Task #685)
 
 **Anlass:** Der mit Task #684 eingeführte Startup-Backfill `backfillTask684OrphanAutoCarryovers` soft-löscht doppelte §45b-Carryover-Allokationen (gleiches Quelljahr, NULL-month umgeht den partiellen Unique-Index), überspringt aber aus GoBD-Gründen Kandidaten, an denen bereits `budget_transactions` hängen — solche Fälle blieben aktiv und im Startup-Log mit „überspringe Soft-Delete, manuelle Auflösung nötig" markiert. Produktions-Read-Replica zeigte 5 betroffene Gruppen (Kunden 161, 162, 163, 164, 167; je Quelljahr 2025), davon 3 mit verlinkten Buchungen (Kunden 161, 163, 167 — insgesamt 12 Buchungen inkl. Storno-Paare).

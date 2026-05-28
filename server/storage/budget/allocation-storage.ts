@@ -1,7 +1,6 @@
 import {
   budgetAllocations,
   budgetTransactions,
-  customerBudgets,
   customerBudgetTypeSettings,
   type BudgetAllocation,
   type InsertBudgetAllocation,
@@ -297,6 +296,7 @@ async function getMonthlyBudgetAmountCents(
     : await d.select()
         .from(customerBudgetTypeSettings)
         .where(eq(customerBudgetTypeSettings.customerId, customerId)));
+  void d;
 
   const s45b = settings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
   if (s45b?.monthlyLimitCents != null) {
@@ -309,43 +309,26 @@ async function getMonthlyBudgetAmountCents(
     return clamped.monthlyLimitCents ?? DEFAULT_MONTHLY_BUDGET_CENTS;
   }
 
-  const customerBudget = await d.select()
-    .from(customerBudgets)
-    .where(and(
-      eq(customerBudgets.customerId, customerId),
-      isNull(customerBudgets.validTo)
-    ))
-    .limit(1);
-
-  if (customerBudget[0]?.entlastungsbetrag45b) {
-    return Math.min(customerBudget[0].entlastungsbetrag45b, DEFAULT_MONTHLY_BUDGET_CENTS);
-  }
-
+  // Task #728 (Phase 2.1): `customer_budgets`-Fallback entfernt. Inhalte
+  // sind durch `backfillCustomerBudgetsToTypeSettings` (Startup) in die
+  // SSoT `customer_budget_type_settings` migriert. Kunden ohne Setting
+  // erhalten den gesetzlichen Default.
   return DEFAULT_MONTHLY_BUDGET_CENTS;
 }
 
 export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClient, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<{ pflegesachleistungen36: number; verhinderungspflege39: number }> {
-  const d = _tx ?? db;
-
   const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }, _tx);
   const setting45a = typeSettings.find(s => s.budgetType === "umwandlung_45a");
   const setting39 = typeSettings.find(s => s.budgetType === "ersatzpflege_39_42a");
 
-  if (setting45a?.monthlyLimitCents != null || setting39?.yearlyLimitCents != null) {
-    return {
-      pflegesachleistungen36: setting45a?.monthlyLimitCents ?? 0,
-      verhinderungspflege39: setting39?.yearlyLimitCents ?? 0,
-    };
-  }
-
-  const result = await d.select().from(customerBudgets).where(and(eq(customerBudgets.customerId, customerId), isNull(customerBudgets.validTo))).limit(1);
-  if (result[0]) {
-    return {
-      pflegesachleistungen36: result[0].pflegesachleistungen36 ?? 0,
-      verhinderungspflege39: result[0].verhinderungspflege39 ?? 0,
-    };
-  }
-  return { pflegesachleistungen36: 0, verhinderungspflege39: 0 };
+  // Task #728 (Phase 2.1): `customer_budgets`-Fallback entfernt.
+  // Backfill (`backfillCustomerBudgetsToTypeSettings`) hat die Legacy-Werte
+  // in `customer_budget_type_settings` übertragen; Kunden ohne Setting
+  // liefern jetzt 0 statt eines stillschweigenden Legacy-Werts.
+  return {
+    pflegesachleistungen36: setting45a?.monthlyLimitCents ?? 0,
+    verhinderungspflege39: setting39?.yearlyLimitCents ?? 0,
+  };
 }
 
 export async function calculateAllocatedCents(

@@ -24,6 +24,11 @@ const WHITELIST: ReadonlyArray<string> = [
   // SQL; die Konstante hier zu importieren würde nichts gewinnen, weil das
   // SQL-Template das Literal ohnehin wieder als String enthalten muss.
   "server/startup/backfill-budget-historization.ts",
+  // Task #728 Phase 2.1 — Backfill von `customer_budgets` in
+  // `customer_budget_type_settings` befüllt fehlende `valid_from` mit
+  // demselben Sentinel-Datum als SQL-Literal. Selber Grund wie oben:
+  // Roh-SQL kommt ohne TS-Konstante aus.
+  "server/startup/backfill-customer-budgets-to-typesettings.ts",
   // Termin-Policy verwendet "1970-01-01" als unabhängigen Stub-Wert für
   // einen Datums-Check, der gar nicht ausgewertet wird. Kein Bezug zum
   // Budget-Sentinel.
