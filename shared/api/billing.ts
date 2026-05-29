@@ -115,6 +115,25 @@ export interface GenerateInvoiceResponse {
   message?: string;
 }
 
+// Task #817: Verwaiste Entwurfs-Rechnungen, die die Termine eines Zeitraums
+// blockieren (status = 'entwurf', kein Storno). Sie verhindern eine neue
+// Rechnung, obwohl sie nie finalisiert wurden — der Dialog bietet sie zum
+// Verwerfen an.
+export interface BlockingDraftInvoice {
+  id: number;
+  invoiceNumber: string;
+  grossAmountCents: number;
+  billingRunId: string | null;
+  createdAt: string;
+}
+
+// Task #817: Antwort des Verwerfen-Endpunkts. `discarded` = Anzahl gelöschter
+// Entwürfe, `invoiceNumbers` für die Audit-/UI-Bestätigung.
+export interface DiscardDraftsResponse {
+  discarded: number;
+  invoiceNumbers: string[];
+}
+
 export interface SendInvoiceResponse {
   message: string;
   invoice?: InvoiceItem;

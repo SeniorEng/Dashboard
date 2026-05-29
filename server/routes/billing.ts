@@ -36,7 +36,7 @@ import {
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
-import type { BillingCustomerItem, BillingInvoicePreview } from "@shared/api";
+import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
@@ -106,6 +106,31 @@ async function getAlreadyInvoicedAppointmentIds(customerId: number, billingYear:
       ne(invoicesTable.invoiceType, "stornorechnung")
     ));
   return rows.map(r => r.appointmentId).filter((id): id is number => id !== null);
+}
+
+// Task #817: Verwaiste/blockierende Entwurfs-Rechnungen eines Zeitraums.
+// Sie tauchen in `getAlreadyInvoicedAppointmentIds` als „bereits abgerechnet"
+// auf (status != 'storniert'), obwohl sie nie finalisiert wurden — und
+// blockieren so jede neue Rechnung. Storno-Rechnungen sind ausgeschlossen:
+// Ein Storno-Entwurf gehört zum GoBD-Storno-Trail und darf NICHT als
+// „verwaist" verworfen werden.
+async function getBlockingDraftInvoices(customerId: number, billingYear: number, billingMonth: number) {
+  return db.select({
+    id: invoicesTable.id,
+    invoiceNumber: invoicesTable.invoiceNumber,
+    grossAmountCents: invoicesTable.grossAmountCents,
+    billingRunId: invoicesTable.billingRunId,
+    createdAt: invoicesTable.createdAt,
+  })
+    .from(invoicesTable)
+    .where(and(
+      eq(invoicesTable.customerId, customerId),
+      eq(invoicesTable.billingYear, billingYear),
+      eq(invoicesTable.billingMonth, billingMonth),
+      eq(invoicesTable.status, "entwurf"),
+      ne(invoicesTable.invoiceType, "stornorechnung"),
+    ))
+    .orderBy(desc(invoicesTable.createdAt));
 }
 
 async function getServiceRecordsForPeriod(customerId: number, year: number, month: number) {
@@ -559,6 +584,106 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
     completedAppointments: draft.completedAppointmentsInPeriod,
     totalCents: draft.grossAmountCents,
     splitInvoices: draft.needsBudgetSplit,
+  };
+  res.json(response);
+}));
+
+// Task #817: Listet verwaiste/blockierende Entwurfs-Rechnungen für einen
+// Zeitraum. Der Dialog ruft dies auf, wenn die Vorschau „Alle Termine …
+// bereits abgerechnet" meldet, um dem Admin eine konkrete Verwerfen-Aktion
+// anzubieten. Persistiert nichts.
+router.get("/blocking-drafts", asyncHandler("Blockierende Entwürfe konnten nicht ermittelt werden", async (req, res) => {
+  const customerId = parseInt(String(req.query.customerId ?? ""), 10);
+  const month = parseInt(String(req.query.month ?? ""), 10);
+  const year = parseInt(String(req.query.year ?? ""), 10);
+  if (!Number.isFinite(customerId) || customerId <= 0
+    || !Number.isFinite(month) || month < 1 || month > 12
+    || !Number.isFinite(year) || year < 2000 || year > 2100) {
+    throw badRequest("Ungültige Parameter — customerId, month (1-12) und year sind erforderlich.");
+  }
+  const rows = await getBlockingDraftInvoices(customerId, year, month);
+  const response: BlockingDraftInvoice[] = rows.map((r) => ({
+    id: r.id,
+    invoiceNumber: r.invoiceNumber,
+    grossAmountCents: r.grossAmountCents,
+    billingRunId: r.billingRunId,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+  }));
+  res.json(response);
+}));
+
+// Task #817: Verwirft verwaiste Entwurfs-Rechnungen, die die Termine eines
+// Zeitraums blockieren. GoBD-konform: NUR `status = 'entwurf'`-Rechnungen
+// (nie festgeschrieben) werden gelöscht — finalisierte (versendet/bezahlt)
+// und Storno-Rechnungen bleiben unberührt. Das Löschen kaskadiert die
+// `invoice_line_items` (FK `ON DELETE CASCADE`) und gibt damit die Termine
+// wieder frei. Jeder gelöschte Entwurf wird einzeln im Audit-Log
+// dokumentiert, damit die Rechnungsnummern-Lücke nachvollziehbar bleibt.
+router.post("/discard-drafts", asyncHandler("Entwürfe konnten nicht verworfen werden", async (req, res) => {
+  const parsed = z.object({
+    customerId: z.number().int().positive(),
+    month: z.number().int().min(1).max(12),
+    year: z.number().int().min(2000).max(2100),
+    invoiceIds: z.array(z.number().int().positive()).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+  const { customerId, month, year, invoiceIds } = parsed.data;
+
+  // Kandidaten serverseitig auf genau diesen Kunden/Zeitraum + Entwurf-Status
+  // einschränken. Ein optional übergebenes `invoiceIds` filtert nur innerhalb
+  // dieser Menge — es kann NIE eine fremde/finalisierte Rechnung erfassen.
+  const candidates = await getBlockingDraftInvoices(customerId, year, month);
+  const scoped = invoiceIds && invoiceIds.length > 0
+    ? candidates.filter((c) => invoiceIds.includes(c.id))
+    : candidates;
+
+  if (scoped.length === 0) {
+    throw badRequest("Keine verwaisten Entwurfs-Rechnungen zum Verwerfen gefunden.");
+  }
+
+  const discardedNumbers = await withAudit(async (tx, audit) => {
+    const numbers: string[] = [];
+    for (const draft of scoped) {
+      // Defensiv erneut auf Entwurf + kein Storno scopen (Race-Schutz):
+      // Wenn der Entwurf zwischenzeitlich versendet/storniert wurde, löscht
+      // dieses DELETE nichts und wird übersprungen.
+      const deleted = await tx.delete(invoicesTable)
+        .where(and(
+          eq(invoicesTable.id, draft.id),
+          eq(invoicesTable.customerId, customerId),
+          eq(invoicesTable.billingYear, year),
+          eq(invoicesTable.billingMonth, month),
+          eq(invoicesTable.status, "entwurf"),
+          ne(invoicesTable.invoiceType, "stornorechnung"),
+        ))
+        .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber });
+      if (deleted.length === 0) continue;
+      numbers.push(deleted[0].invoiceNumber);
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_draft_discarded",
+        entityType: "invoice",
+        entityId: draft.id,
+        metadata: {
+          invoiceNumber: deleted[0].invoiceNumber,
+          customerId,
+          billingMonth: month,
+          billingYear: year,
+          billingRunId: draft.billingRunId,
+          grossAmountCents: draft.grossAmountCents,
+          reason: "orphaned_draft_blocking_billing",
+        },
+        ipAddress: req.ip,
+      });
+    }
+    return numbers;
+  }, { faults: readTestFaults(req) });
+
+  const response: DiscardDraftsResponse = {
+    discarded: discardedNumbers.length,
+    invoiceNumbers: discardedNumbers,
   };
   res.json(response);
 }));

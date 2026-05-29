@@ -34,6 +34,8 @@ import { iconSize, componentStyles } from "@/design-system";
 import type {
   BillingCustomerItem,
   BillingInvoicePreview,
+  BlockingDraftInvoice,
+  DiscardDraftsResponse,
   InvoiceItem,
   InvoiceDetail,
   DeliveryRecord,
@@ -154,6 +156,7 @@ export default function AdminBilling() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
   const [stornoTarget, setStornoTarget] = useState<InvoiceItem | null>(null);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
   const [batchSending, setBatchSending] = useState(false);
   const [generateAllOpen, setGenerateAllOpen] = useState(false);
@@ -210,6 +213,24 @@ export default function AdminBilling() {
       return unwrapResult(result);
     },
     enabled: dialogOpen && previewCustomerId !== null,
+    retry: false,
+  });
+
+  // Task #817: Verwaiste Entwurfs-Rechnungen, die die Termine blockieren.
+  // Wird nur geladen, wenn die Vorschau einen Fehler liefert (typisch:
+  // „Alle Termine … bereits abgerechnet"). QueryKey beginnt mit "billing",
+  // damit `invalidateRelated(qc, "billing")` nach dem Verwerfen neu lädt.
+  const { data: blockingDrafts } = useQuery({
+    queryKey: ["billing", "blocking-drafts", previewCustomerId, selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("customerId", String(previewCustomerId));
+      params.set("month", String(selectedMonth));
+      params.set("year", String(selectedYear));
+      const result = await api.get<BlockingDraftInvoice[]>(`/billing/blocking-drafts?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: dialogOpen && previewCustomerId !== null && previewError,
     retry: false,
   });
 
@@ -282,6 +303,27 @@ export default function AdminBilling() {
       setSelectedCustomerId("");
     },
     onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Task #817: Verwaiste Entwurfs-Rechnungen verwerfen, damit die Termine
+  // wieder frei werden und die Vorschau echte Werte liefert.
+  const discardDraftsMutation = useMutation({
+    mutationFn: async (data: { customerId: number; month: number; year: number }) => {
+      const result = await api.post<DiscardDraftsResponse>("/billing/discard-drafts", data);
+      return unwrapResult(result);
+    },
+    onSuccess: (data: DiscardDraftsResponse) => {
+      toast({
+        title: data.discarded === 1 ? "Entwurf verworfen" : `${data.discarded} Entwürfe verworfen`,
+        description: data.invoiceNumbers.length > 0 ? data.invoiceNumbers.join(", ") : undefined,
+      });
+      setDiscardConfirmOpen(false);
+      invalidateRelated(queryClient, "billing");
+    },
+    onError: (error: Error) => {
+      setDiscardConfirmOpen(false);
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
@@ -1509,17 +1551,53 @@ export default function AdminBilling() {
                     Wird berechnet...
                   </div>
                 ) : previewError || !invoicePreview ? (
-                  <div className="text-sm text-amber-700" data-testid="text-preview-error">
-                    {(() => {
-                      // Task #816 — Die konkrete fachliche Server-Meldung (400)
-                      // anzeigen statt der generischen „nicht verfügbar". Bei
-                      // unerwarteten Fehlern (Netzwerk/5xx, keine spezifische
-                      // Meldung) bleibt der allgemeine Fallback erhalten.
-                      const apiErr = previewErrorObj as (Error & { status?: number }) | null;
-                      const isClientError = !!apiErr?.status && apiErr.status >= 400 && apiErr.status < 500;
-                      const serverMessage = isClientError ? apiErr?.message?.trim() : undefined;
-                      return serverMessage || "Vorschau nicht verfügbar.";
-                    })()}
+                  <div className="space-y-2">
+                    <div className="text-sm text-amber-700" data-testid="text-preview-error">
+                      {(() => {
+                        // Task #816 — Die konkrete fachliche Server-Meldung (400)
+                        // anzeigen statt der generischen „nicht verfügbar". Bei
+                        // unerwarteten Fehlern (Netzwerk/5xx, keine spezifische
+                        // Meldung) bleibt der allgemeine Fallback erhalten.
+                        const apiErr = previewErrorObj as (Error & { status?: number }) | null;
+                        const isClientError = !!apiErr?.status && apiErr.status >= 400 && apiErr.status < 500;
+                        const serverMessage = isClientError ? apiErr?.message?.trim() : undefined;
+                        return serverMessage || "Vorschau nicht verfügbar.";
+                      })()}
+                    </div>
+                    {/* Task #817 — Verwaiste Entwurfs-Rechnungen, die die Termine
+                        blockieren, direkt aus dem Dialog auflösen. Nur Entwürfe
+                        (nie festgeschrieben) werden angeboten. */}
+                    {blockingDrafts && blockingDrafts.length > 0 && (
+                      <div
+                        className="rounded-md border border-amber-200 bg-amber-50 p-2 space-y-2"
+                        data-testid="block-blocking-drafts"
+                      >
+                        <div className="text-xs text-amber-800">
+                          {blockingDrafts.length === 1
+                            ? "Ein alter Rechnungs-Entwurf blockiert die Termine:"
+                            : `${blockingDrafts.length} alte Rechnungs-Entwürfe blockieren die Termine:`}
+                          {" "}
+                          <span className="font-medium">
+                            {blockingDrafts.map((d) => d.invoiceNumber).join(", ")}
+                          </span>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-amber-300 text-amber-800 hover:bg-amber-100"
+                          onClick={() => setDiscardConfirmOpen(true)}
+                          disabled={discardDraftsMutation.isPending}
+                          data-testid="button-discard-drafts"
+                        >
+                          {discardDraftsMutation.isPending ? (
+                            <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                          ) : (
+                            <Ban className={`${iconSize.sm} mr-1`} />
+                          )}
+                          {blockingDrafts.length === 1 ? "Entwurf verwerfen" : "Entwürfe verwerfen"}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 gap-3 text-sm">
@@ -1627,6 +1705,62 @@ export default function AdminBilling() {
                 <>
                   <Ban className={`${iconSize.sm} mr-1`} />
                   Stornieren
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Task #817 — Bestätigung für das Verwerfen verwaister Entwürfe. */}
+      <AlertDialog open={discardConfirmOpen} onOpenChange={(open) => !open && setDiscardConfirmOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {blockingDrafts && blockingDrafts.length === 1 ? "Entwurf verwerfen?" : "Entwürfe verwerfen?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {blockingDrafts && blockingDrafts.length > 0 ? (
+                <>
+                  {blockingDrafts.length === 1 ? "Der Entwurf " : "Die Entwürfe "}
+                  <span className="font-medium">
+                    {blockingDrafts.map((d) => d.invoiceNumber).join(", ")}
+                  </span>
+                  {blockingDrafts.length === 1 ? " wird " : " werden "}
+                  endgültig gelöscht. Die zugehörigen Termine werden wieder frei und können neu
+                  abgerechnet werden. Nur unfertige Entwürfe sind betroffen — versendete oder bezahlte
+                  Rechnungen bleiben unberührt.
+                </>
+              ) : (
+                "Es gibt keine verwaisten Entwürfe mehr zum Verwerfen."
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                if (previewCustomerId !== null) {
+                  discardDraftsMutation.mutate({
+                    customerId: previewCustomerId,
+                    month: selectedMonth,
+                    year: selectedYear,
+                  });
+                }
+              }}
+              disabled={discardDraftsMutation.isPending}
+              data-testid="button-confirm-discard-drafts"
+            >
+              {discardDraftsMutation.isPending ? (
+                <>
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  Wird verworfen...
+                </>
+              ) : (
+                <>
+                  <Ban className={`${iconSize.sm} mr-1`} />
+                  Verwerfen
                 </>
               )}
             </AlertDialogAction>
