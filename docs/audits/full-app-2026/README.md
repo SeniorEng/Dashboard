@@ -1,12 +1,18 @@
 # Full-App-Audit 2026 — Übersicht
 
-**Stand:** 2026-05-29 (Refresh, Task #822)
+**Stand:** 2026-05-29 (Refresh + **Gap-Fill**, Task #822)
 **Geprüfter Commit:** `178b2574222197c3e0d218b176cd3af2f79d5ab5`
 **Branch:** `main`
 **Vorgänger-Audit:** #481 @ `3e0d3fb` (2026-05-15) — 332 Commits Delta
 **Inventar:** 593 Dateien / 136 816 LOC (war 521 / 116 282)
-**Severity (Refresh):** 1 KRITISCH · 4 HOCH · 12 MITTEL · 10 NIEDRIG (war 7/17/30/20)
-**Fix-Task-Drafts:** `.local/tasks/proposed-from-822/`
+**Severity (final, alle 21 Chunks deep):** 1 KRITISCH · 10 HOCH · 29 MITTEL · 18 NIEDRIG (Refresh-Welle 1 hatte nur 7/21 Chunks deep → 1/4/12/10)
+**Fix-Task-Drafts:** `.local/tasks/proposed-from-822/` (Welle 1) + `.local/tasks/proposed-from-822-gapfill/` (6 neue HOCH)
+
+> **Coverage-Update:** Refresh-Welle 1 prüfte nur 7 von 21 Chunks tief (01/02/05a/07/08/09a/13);
+> die übrigen 14 bekamen nur ein Banner über #481-Altinhalt. Die **Gap-Fill-Welle**
+> hat diese 14 Chunks am Commit `178b2574` nachgeholt → **jetzt alle 21 Chunks Deep**,
+> 6 neue HOCH-Findings. Maßgeblich ist `REPORT.md`; die Tiefenstufen in der Tabelle
+> unten sind teils #481-historisch.
 
 ---
 
