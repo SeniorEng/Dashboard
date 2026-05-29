@@ -9,7 +9,12 @@
  * Feiertagslogik nicht still driften kann.
  */
 import { describe, it, expect } from "vitest";
-import { getNationalHolidayDates } from "@shared/utils/holidays";
+import {
+  getNationalHolidayDates,
+  getVacationHolidayDates,
+  getVacationHolidayName,
+  isHoliday,
+} from "@shared/utils/holidays";
 
 describe("getNationalHolidayDates", () => {
   it("liefert die exakte bundeseinheitliche Feiertagsmenge für 2025 (Ostern = 20.04.2025)", () => {
@@ -55,5 +60,63 @@ describe("getNationalHolidayDates", () => {
   it("enthält genau 9 bundeseinheitliche Feiertage pro Jahr", () => {
     expect(getNationalHolidayDates(2025).size).toBe(9);
     expect(getNationalHolidayDates(2026).size).toBe(9);
+  });
+});
+
+describe("getVacationHolidayDates (Sachsen)", () => {
+  it("enthält zusätzlich zur bundesweiten Menge die Sachsen-spezifischen Tage", () => {
+    const national = getNationalHolidayDates(2025);
+    const vacation = getVacationHolidayDates(2025);
+
+    // Alle bundesweiten Feiertage sind weiterhin enthalten.
+    for (const date of national) {
+      expect(vacation.has(date)).toBe(true);
+    }
+
+    // Reformationstag 31.10. — in Sachsen gesetzlich, bundesweit nicht.
+    expect(national.has("2025-10-31")).toBe(false);
+    expect(vacation.has("2025-10-31")).toBe(true);
+
+    // Buß- und Bettag 2025 = 19.11. — nur in Sachsen gesetzlich.
+    expect(national.has("2025-11-19")).toBe(false);
+    expect(vacation.has("2025-11-19")).toBe(true);
+  });
+
+  it("enthält Ostersonntag und Pfingstsonntag (in getHolidays gelistet)", () => {
+    const vacation = getVacationHolidayDates(2025);
+    expect(vacation.has("2025-04-20")).toBe(true); // Ostersonntag
+    expect(vacation.has("2025-06-08")).toBe(true); // Pfingstsonntag
+  });
+
+  it("legt Buß- und Bettag auf den korrekten Mittwoch (2025 = 19.11., 2026 = 18.11.)", () => {
+    expect(getVacationHolidayName("2025-11-19")).toBe("Buß- und Bettag");
+    expect(getVacationHolidayName("2026-11-18")).toBe("Buß- und Bettag");
+    // Falsche Mittwoche dürfen es nicht sein.
+    expect(getVacationHolidayName("2025-11-26")).toBeUndefined();
+    expect(getVacationHolidayName("2026-11-25")).toBeUndefined();
+  });
+
+  it("wirft für ein nicht unterstütztes Bundesland", () => {
+    // @ts-expect-error — bewusst ungültiges Bundesland zum Testen des Guards.
+    expect(() => getVacationHolidayDates(2025, "BY")).toThrow();
+  });
+});
+
+describe("getVacationHolidayName / isHoliday", () => {
+  it("liefert den Feiertagsnamen für ein Feiertagsdatum", () => {
+    expect(getVacationHolidayName("2025-01-01")).toBe("Neujahr");
+    expect(getVacationHolidayName("2025-10-31")).toBe("Reformationstag");
+    expect(isHoliday("2025-01-01")).toBe("Neujahr");
+    expect(isHoliday("2025-10-31")).toBe("Reformationstag");
+  });
+
+  it("liefert undefined für einen normalen Werktag", () => {
+    expect(getVacationHolidayName("2025-03-12")).toBeUndefined();
+    expect(isHoliday("2025-03-12")).toBeUndefined();
+  });
+
+  it("wirft für ein nicht unterstütztes Bundesland", () => {
+    // @ts-expect-error — bewusst ungültiges Bundesland zum Testen des Guards.
+    expect(() => getVacationHolidayName("2025-01-01", "NW")).toThrow();
   });
 });
