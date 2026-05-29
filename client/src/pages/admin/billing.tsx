@@ -199,7 +199,7 @@ export default function AdminBilling() {
   // sodass `invalidateRelated(qc, "billing")` (z.B. nach Generate) die
   // Vorschau automatisch invalidiert.
   const previewCustomerId = selectedCustomerId ? parseInt(selectedCustomerId, 10) : null;
-  const { data: invoicePreview, isLoading: previewLoading, isError: previewError } = useQuery({
+  const { data: invoicePreview, isLoading: previewLoading, isError: previewError, error: previewErrorObj } = useQuery({
     queryKey: ["billing", "preview", previewCustomerId, selectedYear, selectedMonth],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
@@ -1510,7 +1510,16 @@ export default function AdminBilling() {
                   </div>
                 ) : previewError || !invoicePreview ? (
                   <div className="text-sm text-amber-700" data-testid="text-preview-error">
-                    Vorschau nicht verfügbar.
+                    {(() => {
+                      // Task #816 — Die konkrete fachliche Server-Meldung (400)
+                      // anzeigen statt der generischen „nicht verfügbar". Bei
+                      // unerwarteten Fehlern (Netzwerk/5xx, keine spezifische
+                      // Meldung) bleibt der allgemeine Fallback erhalten.
+                      const apiErr = previewErrorObj as (Error & { status?: number }) | null;
+                      const isClientError = !!apiErr?.status && apiErr.status >= 400 && apiErr.status < 500;
+                      const serverMessage = isClientError ? apiErr?.message?.trim() : undefined;
+                      return serverMessage || "Vorschau nicht verfügbar.";
+                    })()}
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 gap-3 text-sm">
