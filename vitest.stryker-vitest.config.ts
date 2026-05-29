@@ -32,6 +32,7 @@ export default defineConfig({
       "tests/unit/cancellation-policy.test.ts",
       "tests/utils/money.test.ts",
       "tests/unit/import-cutoff.test.ts",
+      "tests/month-close-cutoff.test.ts",
     ],
     testTimeout: 20000,
     hookTimeout: 20000,

@@ -64,6 +64,40 @@ export function getHolidays(year: number): Holiday[] {
   return holidays;
 }
 
+/**
+ * Bundeseinheitliche (in ALLEN Bundesländern gesetzliche) Feiertage.
+ * `getHolidays` liefert die Sachsen-Liste inkl. landesspezifischer Tage
+ * (Reformationstag, Buß- und Bettag); diese Menge grenzt davon die
+ * bundesweit gültigen Tage ab. Die Klassifikation ist Feiertags-Domänenwissen
+ * und gehört daher hierher (nicht in konsumierende Utilities wie den
+ * Monatsabschluss-Cutoff).
+ */
+const BUNDESEINHEITLICHE_FEIERTAGE = new Set<string>([
+  "Neujahr",
+  "Karfreitag",
+  "Ostermontag",
+  "Tag der Arbeit",
+  "Christi Himmelfahrt",
+  "Pfingstmontag",
+  "Tag der Deutschen Einheit",
+  "1. Weihnachtsfeiertag",
+  "2. Weihnachtsfeiertag",
+]);
+
+/**
+ * Liefert für ein Jahr die Menge aller ISO-Daten (YYYY-MM-DD), die in GANZ
+ * Deutschland gesetzlicher Feiertag sind (ohne landesspezifische Tage).
+ */
+export function getNationalHolidayDates(year: number): Set<string> {
+  const dates = new Set<string>();
+  for (const h of getHolidays(year)) {
+    if (BUNDESEINHEITLICHE_FEIERTAGE.has(h.name)) {
+      dates.add(h.date);
+    }
+  }
+  return dates;
+}
+
 export function getHolidayMap(year: number): Map<string, string> {
   const map = new Map<string, string>();
   for (const h of getHolidays(year)) {

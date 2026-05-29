@@ -1,25 +1,17 @@
-import { getHolidays } from "./holidays";
+import { getNationalHolidayDates } from "./holidays";
 
-const BUNDESEINHEITLICHE_FEIERTAGE = new Set<string>([
-  "Neujahr",
-  "Karfreitag",
-  "Ostermontag",
-  "Tag der Arbeit",
-  "Christi Himmelfahrt",
-  "Pfingstmontag",
-  "Tag der Deutschen Einheit",
-  "1. Weihnachtsfeiertag",
-  "2. Weihnachtsfeiertag",
-]);
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-function getNationalHolidayDates(year: number): Set<string> {
-  const dates = new Set<string>();
-  for (const h of getHolidays(year)) {
-    if (BUNDESEINHEITLICHE_FEIERTAGE.has(h.name)) {
-      dates.add(h.date);
-    }
-  }
-  return dates;
+/**
+ * Zerlegt ein ISO-Datum (YYYY-MM-DD) in seine numerischen Bestandteile.
+ * Bewusst über `split("-")` statt `slice()` — so ist jede Stelle eine eigene
+ * Komponente, deren Vertauschen/Entfernen ein Test sichtbar machen kann
+ * (mit `slice(0,4)` + `parseInt` blieben Index-Mutationen unbemerkt, weil
+ * `parseInt` ohnehin am `-` stoppt).
+ */
+function parseIsoParts(iso: string): { year: number; month: number; day: number } {
+  const [y, m, d] = iso.split("-");
+  return { year: Number(y), month: Number(m), day: Number(d) };
 }
 
 function toIsoDate(d: Date): string {
@@ -48,21 +40,16 @@ function isWeekendOrHoliday(d: Date, holidays: Set<string>): boolean {
  * @returns ISO-Datum (YYYY-MM-DD) des Cutoff-Tags
  */
 export function computeMonthCloseCutoff(year: number, month: number): string {
-  // Folgemonat
-  let nextYear = year;
-  let nextMonth = month + 1;
-  if (nextMonth > 12) {
-    nextMonth = 1;
-    nextYear += 1;
-  }
+  // Folgemonat: `month` ist 1-12, der 0-basierte Index des Folgemonats ist
+  // also `month`. Date.UTC normalisiert den Dezember→Januar-Überlauf selbst,
+  // daher kein manuelles Roll-over nötig. Das Cutoff-Jahr (für die
+  // Feiertagsliste) ist nur im Dezember das Folgejahr.
+  const cutoffYear = month === 12 ? year + 1 : year;
+  const holidays = getNationalHolidayDates(cutoffYear);
 
-  const holidaysCurrent = getNationalHolidayDates(nextYear);
-  const holidaysPrev = getNationalHolidayDates(nextYear - 1);
-  const holidaysAll = new Set<string>([...holidaysCurrent, ...holidaysPrev]);
-
-  let cutoff = new Date(Date.UTC(nextYear, nextMonth - 1, 8));
-  while (isWeekendOrHoliday(cutoff, holidaysAll)) {
-    cutoff = new Date(cutoff.getTime() - 24 * 60 * 60 * 1000);
+  let cutoff = new Date(Date.UTC(year, month, 8));
+  while (isWeekendOrHoliday(cutoff, holidays)) {
+    cutoff = new Date(cutoff.getTime() - MS_PER_DAY);
   }
 
   return toIsoDate(cutoff);
@@ -82,25 +69,18 @@ export function isCutoffDay(today: string, year: number, month: number): boolean
  */
 export function daysUntilCutoff(today: string, year: number, month: number): number {
   const cutoff = computeMonthCloseCutoff(year, month);
-  const todayMs = Date.UTC(
-    parseInt(today.slice(0, 4)),
-    parseInt(today.slice(5, 7)) - 1,
-    parseInt(today.slice(8, 10)),
-  );
-  const cutoffMs = Date.UTC(
-    parseInt(cutoff.slice(0, 4)),
-    parseInt(cutoff.slice(5, 7)) - 1,
-    parseInt(cutoff.slice(8, 10)),
-  );
-  return Math.round((cutoffMs - todayMs) / (24 * 60 * 60 * 1000));
+  const t = parseIsoParts(today);
+  const c = parseIsoParts(cutoff);
+  const todayMs = Date.UTC(t.year, t.month - 1, t.day);
+  const cutoffMs = Date.UTC(c.year, c.month - 1, c.day);
+  return Math.round((cutoffMs - todayMs) / MS_PER_DAY);
 }
 
 /**
  * Liefert (year, month) des Vormonats relativ zu einem ISO-Datum.
  */
 export function previousMonth(today: string): { year: number; month: number } {
-  const y = parseInt(today.slice(0, 4));
-  const m = parseInt(today.slice(5, 7));
-  if (m === 1) return { year: y - 1, month: 12 };
-  return { year: y, month: m - 1 };
+  const { year, month } = parseIsoParts(today);
+  if (month === 1) return { year: year - 1, month: 12 };
+  return { year, month: month - 1 };
 }

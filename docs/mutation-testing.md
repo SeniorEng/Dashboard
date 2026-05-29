@@ -21,7 +21,7 @@ unter `shared/domain/`, ergänzt um pure Helfer wie `shared/utils/money.ts`), di
 reine Unit-Tests **ohne DB und ohne laufenden Server** besitzen. Nur so läuft ein
 Lauf in Minuten statt Stunden.
 
-Die zehn Hotspots sind seit Task #804 auf **zwei Profile** aufgeteilt (siehe
+Die elf Hotspots sind seit Task #804 auf **zwei Profile** aufgeteilt (siehe
 Abschnitt „Konfiguration: zwei Profile"):
 
 **Profil `vitest`** (nativer `@stryker-mutator/vitest-runner`, schnell — `mutate`
@@ -37,6 +37,7 @@ in `stryker.vitest.conf.mjs`):
 | `shared/domain/cancellation-policy.ts` | `tests/unit/cancellation-policy.test.ts` |
 | `shared/utils/money.ts` | `tests/utils/money.test.ts` |
 | `shared/domain/import-cutoff.ts` | `tests/unit/import-cutoff.test.ts` |
+| `shared/utils/month-close-cutoff.ts` | `tests/month-close-cutoff.test.ts` |
 
 **Profil `command`** (Command-Runner, SIGKILL-sicher — `mutate` in
 `stryker.command.conf.mjs`): die zwei PROPERTY-basierten Module, deren
@@ -69,10 +70,10 @@ Test-Runnern aufgeteilt, plus ein Orchestrator, der beide fährt und den Score
   das harte Gate (`break: 60`) erzwingt der Orchestrator auf dem AGGREGIERTEN
   Score, sonst würde ein einzelnes Profil <60 % den Lauf killen, obwohl der
   kombinierte Score das Gate besteht.
-- **Profil `vitest`:** `stryker.vitest.conf.mjs` — die acht DETERMINISTISCHEN
+- **Profil `vitest`:** `stryker.vitest.conf.mjs` — die neun DETERMINISTISCHEN
   Module auf dem nativen `@stryker-mutator/vitest-runner`
   (`coverageAnalysis: "off"`). Vitest-Config: `vitest.stryker-vitest.config.ts`
-  (nur die acht deterministischen Test-Dateien). Eigene Incremental-Datei
+  (nur die neun deterministischen Test-Dateien). Eigene Incremental-Datei
   `reports/stryker-incremental-vitest.json`. Deutlich schneller als der
   Command-Runner-Kaltstart (~1 Min für die ganze Gruppe).
 - **Profil `command`:** `stryker.command.conf.mjs` — die zwei PROPERTY-basierten
@@ -92,7 +93,7 @@ Property-Module erzeugen in den fast-check-Tests (`tests/equality/*`) eine
 abbrechen, der Per-Mutant-Timeout greift nicht, der Lauf hängt. Der
 Command-Runner umgeht das, weil Stryker pro Mutant einen frischen Kindprozess
 startet und ihn nach `timeoutMS` hart per SIGKILL beendet — versions-agnostisch
-sicher, aber pro Mutant ein teurer Kaltstart. Die acht DETERMINISTISCHEN Module
+sicher, aber pro Mutant ein teurer Kaltstart. Die neun DETERMINISTISCHEN Module
 haben dieses Risiko nicht und laufen daher auf dem schnellen nativen Runner.
 Wieder-Umstellung der Property-Module auf den nativen Runner erst, wenn ein neuer
 Runner einen VOLLEN Lauf (nicht nur den Dry-Run) ohne Hänger durchzieht.
@@ -132,7 +133,7 @@ Die HTML-Reports landen pro Profil unter `reports/mutation/vitest/index.html` bz
 `reports/mutation/command/index.html`; der Orchestrator druckt am Ende den
 aggregierten Gesamt-Score.
 
-**Hinweis zur Laufzeit:** Das Profil `vitest` ist schnell (~1 Min für alle acht
+**Hinweis zur Laufzeit:** Das Profil `vitest` ist schnell (~1 Min für alle neun
 Module). Das Profil `command` ist pro Mutant deutlich teurer (frischer
 `npx vitest run`-Kaltstart je Mutant), deckt aber nur zwei Module ab. Ein
 **kalter** Voll-Lauf beider Profile kann daher mehrere Minuten dauern;
@@ -146,7 +147,7 @@ mutierte.
 Job `mutation` in `.github/workflows/ci.yml`:
 
 1. Läuft **nur bei `pull_request`** (der Diff wird gegen den Base-Branch berechnet).
-2. Ermittelt per `git diff`, welche der zehn Hotspot-Dateien im PR geändert wurden.
+2. Ermittelt per `git diff`, welche der elf Hotspot-Dateien im PR geändert wurden.
 3. Wurde keine geändert → Schritt wird sauber übersprungen.
 4. Andernfalls: `npm run mutation -- --mutate <geänderte Dateien>` (Orchestrator
    routet die Dateien in die passenden Profile und gatet den aggregierten Score).
@@ -162,8 +163,10 @@ Job `mutation` in `.github/workflows/ci.yml`:
 3. Profil wählen:
    - **Deterministisch** (keine fast-check-Endlosschleifen-Gefahr) → schnelles
      Profil `vitest`: Test-Datei in `vitest.stryker-vitest.config.ts` →
-     `test.include`, Modulpfad in `stryker.vitest.conf.mjs` → `mutate`, und in die
-     `VITEST_MODULES`-Liste in `scripts/run-mutation.mjs`.
+     `test.include` und Modulpfad in `stryker.vitest.conf.mjs` → `mutate`. (Der
+     Orchestrator `scripts/run-mutation.mjs` routet automatisch alles ins
+     `vitest`-Profil, was NICHT in `COMMAND_MODULES` steht — daher keine eigene
+     Liste pflegen.)
    - **Property-basiert** (fast-check, Endlosschleifen-Risiko) → sicheres Profil
      `command`: Test-Datei in `vitest.stryker.config.ts` → `test.include`,
      Modulpfad in `stryker.command.conf.mjs` → `mutate`, und in die
