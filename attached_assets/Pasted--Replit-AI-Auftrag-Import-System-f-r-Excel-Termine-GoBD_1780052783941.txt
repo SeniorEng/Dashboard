@@ -1,0 +1,307 @@
+# Replit-AI-Auftrag: Import-System für Excel-Termine GoBD-konform machen
+
+**Kontext:** Live-Audit Prod-DB (Kunde 39, Schröder, Rosemarie, 9 Termine Jan–Apr 2026) hat strukturelle Lücken im Excel-Import-Pfad aufgedeckt. Die Termin-Daten (Datum/Start/Dauer/Service/km) sind nach den heutigen Korrekturen jetzt 1:1 wie in der Excel — aber der Weg dorthin war über mehrere Re-Booking-Schichten, die orphaned `budget_transactions` (appointmentId=NULL) hinterlassen haben.
+
+**Beispiel-Fall, der die Probleme aufgedeckt hat:**
+
+```
+Termin ID 303, 18.03.2026 14:15, Hauswirtschaft 0,5h, Excel-km = 10,9
+
+App-Historie (aus audit_log + budget_transactions):
+  18.03.2026 13:36 → documentation_submitted (live durch MA)
+  18.03.2026 14:19 → appointment_reopened (Doku zurückgenommen)
+  18.03.2026 14:20 → documentation_submitted (2. Versuch)
+  26.05.2026 22:38 → appointment_km_rebooked
+                     {trigger: "appointment_import:backfill",
+                      previousTravelKm: 109, newTravelKm: 10.9}
+  27.05.2026 14:43 → appointment_km_rebooked
+                     {trigger: "appointment_import:update",
+                      newTravelKm: 10.9, newScheduledEnd: "14:45"}
+```
+
+Root-Cause: Excel-Zelle `10,9` (deutsches Dezimal-Komma) wurde beim Import als `109` gelesen. Alle nachfolgenden Backfill-/Update-Läufe haben das mit Re-Booking korrigiert, aber jedesmal Audit-Brüche erzeugt: `budget_transactions` mit `appointmentId = NULL` und `notes = "Storno (Termin-Edit) von Transaktion #XYZ"`.
+
+---
+
+## TICKET A — KRITISCH: Deutsches Dezimal-Komma in Excel-Parser
+
+**File:** `server/services/appointment-import.ts` → `parseExcelFile`
+**Was:** Eine Excel-Zelle mit `10,9` (deutscher Standard) wird als `109` (Faktor 10 zu groß) oder `NaN` interpretiert. Betrifft die km-Spalten, vermutlich auch die Stunden-Spalte.
+
+**Reproducer (Unit-Test, schlägt aktuell fehl):**
+```typescript
+import { parseGermanDecimal } from "../services/appointment-import";
+
+it.each([
+  ["10,9",      10.9],
+  ["10.9",      10.9],
+  ["0,35",      0.35],
+  ["1.234,56",  1234.56],  // deutsches Tausender-Trennzeichen
+  [10.9,        10.9],     // schon Number
+  ["",          0],
+  [null,        0],
+])("parseGermanDecimal(%p) === %p", (input, expected) => {
+  expect(parseGermanDecimal(input as any)).toBe(expected);
+});
+```
+
+**Fix:**
+1. Helper `parseGermanDecimal(value: string | number | null): number` in `shared/utils/number-parsing.ts` neu anlegen.
+2. In `parseExcelFile` für alle Dezimal-Spalten (`kilometers`, `stunden`) verwenden.
+3. **Architektur-Test:** `tests/architecture/no-naive-decimal-parsing.test.ts` — grept verbietet `Number(cell.value)` direkt im Import-Pfad ohne `parseGermanDecimal`-Wrapper.
+
+**Akzeptanzkriterium:**
+- Unit-Tests oben grün.
+- Property-Based-Test (fast-check) mit zufälligen Floats: Roundtrip `serialize → parse` ist bit-genau für 0–10000 mit bis zu 3 Nachkommastellen.
+- Bestehender Termin 303 nach Re-Import: `travelKilometers === 10.9` (nicht 109).
+
+---
+
+## TICKET B — KRITISCH: `appointment_id` MUSS bei consumption/reversal gesetzt sein
+
+**File:** `server/storage/budget/km-rebook.ts` (vermuteter Ort), `server/storage/budget/consumption-engine.ts`, Schema-Migration.
+
+**Was:** Aktuell schreibt der Rebook-Pfad (`appointment_km_rebooked`) `budget_transactions` mit `appointmentId = NULL`. Damit ist die GoBD-Audit-Spur zwischen Termin und Buchung gebrochen — eine externe Prüfung (z.B. Pflegekassen-Plausibilitätsprüfung) kann nicht mehr nachweisen, welche Buchung zu welchem Termin gehört.
+
+**Live-Belege auf Prod (Kunde 39):**
+- Mind. 3 `budget_transactions` mit `appointmentId = NULL`, alle mit `notes = "Storno (Termin-Edit) von Transaktion #XYZ"`
+- Beträge: 38,63 € + 22,02 € + (weitere) — Netto je 0 € (paarweise consumption + reversal), aber als orphaned Records in der DB
+
+**Fix:**
+
+1. **Code-Ebene:** Im km-Rebook-Pfad MUSS die `appointmentId` aus dem ursprünglichen Termin durchgereicht werden:
+```typescript
+// Aktuell vermutlich:
+await tx.insert(budgetTransactions).values({
+  customerId,
+  budgetType,
+  transactionType: 'reversal',
+  amountCents: +absAmount,
+  appointmentId: null,  // ← BUG
+  // …
+});
+
+// Soll:
+await tx.insert(budgetTransactions).values({
+  customerId,
+  budgetType,
+  transactionType: 'reversal',
+  amountCents: +absAmount,
+  appointmentId: originalTx.appointmentId,  // ← FIX
+  reversedTransactionId: originalTx.id,
+  // …
+});
+```
+
+2. **Datenbank-Constraint (Migration):**
+```sql
+ALTER TABLE budget_transactions
+ADD CONSTRAINT chk_appointment_id_required CHECK (
+  transaction_type IN ('manual_adjustment', 'expiration', 'write_off')
+  OR appointment_id IS NOT NULL
+);
+```
+
+3. **Backfill für bestehende NULL-Records** (Einmal-Skript `server/scripts/backfill-orphaned-budget-tx-appointment-id.ts`):
+   - Für jede `budget_transactions`-Zeile mit `appointmentId = NULL` UND `notes LIKE '%von Transaktion #%'`
+   - Extrahiere die referenzierte Transaktion-ID aus den Notes
+   - Setze `appointmentId` auf die `appointmentId` der referenzierten Transaktion
+   - Audit-Log-Eintrag: `orphaned_tx_appointment_id_backfilled`
+
+**Akzeptanzkriterium:**
+- DB-Constraint aktiv, ein direkter `INSERT` von `consumption` mit `appointmentId=NULL` wirft SQL-Fehler.
+- Re-Import von Termin 303 erzeugt KEINE neuen Records mit `appointmentId = NULL`.
+- Architektur-Test `tests/architecture/budget-tx-appointment-id-required.test.ts`: greppt alle `budget_transactions.insert`-Stellen und prüft, dass `appointmentId` mitgegeben wird (außer in den 3 Ausnahme-Fällen).
+
+---
+
+## TICKET C — HOCH: `import_batches`-Tabelle für vollständige Audit-Spur
+
+**File:** Neue Schema-Migration + Erweiterung `server/services/appointment-import.ts`.
+
+**Was:** Aktuell weiß die DB nicht, welcher Import-Lauf welche Termine/Buchungen erzeugt hat. Bei einem Drift-Befund (wie heute bei Rosemarie) muss man im audit_log archäologisch graben. Mit einer `import_batches`-Tabelle wird jede Buchung einer Excel-Datei + User + Zeitpunkt zugeordnet.
+
+**Fix:**
+
+```sql
+-- Migration
+CREATE TABLE import_batches (
+  id SERIAL PRIMARY KEY,
+  uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  uploaded_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  file_name TEXT NOT NULL,
+  file_hash TEXT NOT NULL,        -- SHA-256 der Excel-Datei
+  file_size_bytes INTEGER NOT NULL,
+  row_count_total INTEGER NOT NULL,
+  row_count_created INTEGER NOT NULL,
+  row_count_updated INTEGER NOT NULL,
+  row_count_skipped INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'completed'   -- completed | failed | cancelled
+);
+CREATE INDEX import_batches_file_hash_idx ON import_batches(file_hash);
+CREATE INDEX import_batches_uploaded_at_idx ON import_batches(uploaded_at DESC);
+
+ALTER TABLE appointments
+  ADD COLUMN import_batch_id INTEGER REFERENCES import_batches(id);
+ALTER TABLE budget_transactions
+  ADD COLUMN import_batch_id INTEGER REFERENCES import_batches(id);
+
+CREATE INDEX appointments_import_batch_idx ON appointments(import_batch_id);
+CREATE INDEX budget_tx_import_batch_idx ON budget_transactions(import_batch_id);
+```
+
+**Code-Änderung:**
+- `executeImport()` legt zu Beginn einen `import_batches`-Record an, gibt die `batchId` an alle nachfolgenden `insert`-Calls weiter.
+- File-Hash wird aus dem Multer-Buffer berechnet (`crypto.createHash('sha256').update(buffer).digest('hex')`).
+
+**Bonus — Duplicate-Detection im Preview:**
+```typescript
+const fileHash = sha256(buffer);
+const existing = await db.select().from(importBatches)
+  .where(eq(importBatches.fileHash, fileHash)).limit(1);
+if (existing.length > 0) {
+  // Im Preview-Response anzeigen:
+  warning: `Diese Datei wurde bereits am ${existing[0].uploadedAt} von User #${existing[0].uploadedByUserId} importiert (Batch #${existing[0].id}). Trotzdem fortfahren?`
+}
+```
+
+**Akzeptanzkriterium:**
+- Jede neu erzeugte `appointment`-Zeile + `budget_transactions`-Zeile aus einem Import hat `import_batch_id != NULL`.
+- API-Endpoint `GET /api/admin/import-batches` listet alle Läufe mit Statistik.
+- Test: doppelter Upload derselben Excel-Datei zeigt im Preview-Response das Warning-Feld.
+
+---
+
+## TICKET D — MITTEL: Drei Import-Pfade konsolidieren
+
+**File:** `server/services/appointment-import.ts`, `server/services/appointment-import-reconcile.ts`.
+
+**Was:** Aktuell existieren drei Pfade mit unterschiedlicher Storno-Semantik:
+- `appointment_import:execute` (Neu-Import)
+- `appointment_import:backfill` (Lückenfüllung, gestern 22:38 gelaufen)
+- `appointment_import:update` (Update bestehender Termine, heute 14:43 gelaufen)
+
+Sie verhalten sich beim Korrigieren bestehender Termine teilweise unterschiedlich — Folge: Drei-fache Buchungsketten wie bei Termin 303.
+
+**Fix:** Ein zentraler Entscheider-Code-Pfad:
+
+```typescript
+type ImportAction =
+  | { type: 'create' }
+  | { type: 'noop' }
+  | { type: 'update', diff: ImportRowDiff };
+
+function determineImportAction(
+  excelRow: NormalizedExcelRow,
+  existingAppt: Appointment | null
+): ImportAction {
+  if (!existingAppt) return { type: 'create' };
+  const diff = computeDiff(excelRow, existingAppt);
+  if (isEmpty(diff)) return { type: 'noop' };
+  return { type: 'update', diff };
+}
+```
+
+Und nur EIN Update-Code-Pfad, der:
+1. Reversal der bestehenden Termin-Buchungen MIT `appointmentId` (siehe Ticket B)
+2. Neue consumption mit neuen Werten MIT `appointmentId`
+3. `audit_log`-Eintrag `appointment_import_updated` mit `{batchId, diff}`
+
+**Akzeptanzkriterium:**
+- Backfill + Update-Action sind nur noch dünne Wrapper um `determineImportAction()`.
+- Re-Import derselben unveränderten Datei erzeugt 0 neue `budget_transactions` (alles `noop`).
+- Update mit nur km-Änderung erzeugt **genau** 2 neue Buchungen (reversal + consumption), beide mit `appointmentId` und `import_batch_id` gesetzt.
+
+---
+
+## TICKET E — MITTEL: Diff-Vorschau VOR Update
+
+**File:** `client/src/pages/admin/import-appointments.tsx`.
+
+**Was:** Beim Excel-Re-Import sollte der User die geplanten Änderungen pro Termin sehen, bevor er „Import durchführen" klickt — mit klarer Anzeige `[unverändert]` / `[Update]` / `[Neu]`.
+
+**UI-Mockup:**
+```
+✓ ID 13  21.01.2026 09:00  Janet  HW  1,5h  2,6km   [unverändert]
+✓ ID 67  12.01.2026 09:00  Christiane  AB  1,75h  7,3km   [unverändert]
+⚠ ID 303 18.03.2026 14:15  Marcel  HW  0,5h  10,9km  [Update: km 109 → 10,9]
++ —      19.05.2026 10:00  Janet  HW  1,0h  3,0km   [Neu anlegen]
+```
+
+**Akzeptanzkriterium:** UI zeigt vor dem Submit eine Tabelle mit Status pro Zeile. User bestätigt explizit per Checkbox „Ich habe alle Diffs geprüft" bevor „Importieren" klickbar wird.
+
+---
+
+## TICKET F — NIEDRIG: `parseGermanDecimal` auch für Stunden + Doku-Werte
+
+**Was:** Die Stunden-Spalte in der Excel ist `1,75` (1,75h = 105 Min) — falls auch dort `Number()` direkt verwendet wird, droht derselbe Bug.
+
+**Fix:** In allen Import-Decimal-Spalten konsequent `parseGermanDecimal` verwenden.
+
+**Akzeptanzkriterium:** Architektur-Test aus Ticket A deckt auch andere Felder ab.
+
+---
+
+## Aufwand-Schätzung & Reihenfolge
+
+| Prio | Ticket | Aufwand | Wirkung |
+|---|---|---|---|
+| 🔴 1 | A — Komma-Parsing | 1 PT | Root-Cause des konkreten Bugs |
+| 🔴 2 | B — appointmentId-Constraint + Backfill | 1,5 PT | Heilung der bestehenden orphaned Records + Prävention |
+| 🟡 3 | C — import_batches-Tabelle | 2 PT | Audit-Spur-Fundament für GoBD |
+| 🟡 4 | D — Pfad-Konsolidierung | 1,5 PT | Verhindert weitere 3-fach-Buchungen |
+| 🟢 5 | E — Diff-Vorschau UI | 1 PT | UX, verhindert versehentliche Updates |
+| 🟢 6 | F — Komma-Parsing weitere Spalten | 0,5 PT | Vollständigkeit |
+
+**Σ Min-Pflicht (A+B): 2,5 PT** → behebt sowohl den Komma-Bug als auch die orphaned-Records-Schwäche.
+**Σ Vollständig (A–E): 7 PT** → Import-System ist GoBD-fest und idempotent.
+
+---
+
+## Vorgeschlagene Test-Suite-Erweiterungen
+
+Neu hinzufügen in `tests/`:
+
+```
+tests/import/
+  parse-german-decimal.test.ts            (Ticket A, Unit + PBT)
+  excel-import-roundtrip.test.ts          (Ticket A, end-to-end: Excel-Buffer → Import → DB-Read = bit-genau)
+  re-import-idempotent.test.ts            (Ticket D, gleiche Datei 2× = 0 neue Buchungen)
+  import-update-preserves-appointment-id.test.ts  (Ticket B)
+  duplicate-file-hash-warning.test.ts     (Ticket C)
+
+tests/architecture/
+  no-naive-decimal-parsing.test.ts        (Ticket A, Fitness Function)
+  budget-tx-appointment-id-required.test.ts  (Ticket B, Fitness Function)
+```
+
+Plus DB-Constraint-Test, der prüft dass die Migration aus Ticket B in Vitest greift (Test-Container PostgreSQL → INSERT mit appointmentId=NULL muss SQL-Fehler werfen).
+
+---
+
+## Live-Verifikation nach dem Fix
+
+Sobald die KI die 6 Tickets umgesetzt hat, sind diese Probes auf Prod erwartbar:
+
+```javascript
+// 1. Orphaned-Records bei Rosemarie sind weg
+const orphans = await fetch('/api/budget/39/transactions?limit=500',{credentials:'include'})
+  .then(r=>r.json())
+  .then(arr => arr.filter(t => t.appointmentId === null));
+// Erwartung: 0 (nach Backfill aus Ticket B)
+
+// 2. Re-Import derselben Excel = 0 neue Termine
+//    Upload der Rosemarie-Excel nochmal über Preview → Antwort sollte zeigen:
+//    {summary: {total: 9, duplicate: 9, new: 0, upgrade: 0, error: 0}}
+
+// 3. import_batches-Tabelle existiert und Termin 303 hat eine batch_id
+const appt = await fetch('/api/appointments/303',{credentials:'include'}).then(r=>r.json());
+// appt.importBatchId !== null
+```
+
+---
+
+**Hinweise:**
+- Alle Audit-Befunde stammen aus einer Read-Only-Live-Session auf der Prod-DB (admin.seniorenengel-alltagsbegleitung.de) am 27.05.2026 ab 19:30 — keine Mutationen vorgenommen.
+- Diese Tickets ersetzen NICHT die bereits offenen Findings aus früheren Bug-Reports (BUG-9 Phasen-Historisierung, HOCH-2 §45a-Clamp etc.) — sie ergänzen sie um den Import-Pfad.
+- Die Excel `Rosemarie Schröder - alle Termine.xlsx` (9 Termine Jan–Apr 2026) eignet sich als Standard-Test-Fixture für die neuen Import-Tests.
