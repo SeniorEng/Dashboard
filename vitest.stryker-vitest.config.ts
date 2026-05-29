@@ -30,6 +30,8 @@ export default defineConfig({
       "tests/budget/statutory-clamp.test.ts",
       "tests/unit/vacation-pro-rata.test.ts",
       "tests/unit/cancellation-policy.test.ts",
+      "tests/utils/money.test.ts",
+      "tests/unit/import-cutoff.test.ts",
     ],
     testTimeout: 20000,
     hookTimeout: 20000,

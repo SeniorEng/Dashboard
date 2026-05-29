@@ -51,6 +51,13 @@ describe("shared/utils/money", () => {
     it("tolerant gegenüber Euro-Zeichen und Whitespace", () => {
       expect(parseEuroDE("  125,50 €  ")).toBe(12550);
       expect(parseEuroDE("125 €")).toBe(12500);
+      // Führendes €: die €-/Whitespace-Zeichen müssen vollständig ENTFERNT
+      // (nicht durch anderen Text ersetzt) werden, sonst scheitert parseFloat
+      // am vorangestellten Symbol und liefert null statt des Betrags.
+      expect(parseEuroDE("€125,50")).toBe(12550);
+      // Tausendertrennung per Leerzeichen: interner Whitespace muss raus,
+      // damit "1 234,56" als 1234,56 € geparst wird (nicht bei der 1 abbrechen).
+      expect(parseEuroDE("1 234,56 €")).toBe(123456);
     });
 
     it("liefert null für leere/ungültige Eingaben", () => {

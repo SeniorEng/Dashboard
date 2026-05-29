@@ -16,11 +16,12 @@ Der **Mutation-Score** = `killed / (killed + survived + no-coverage)`.
 
 ## Scope (bewusst eng gehalten)
 
-Gemutiert werden **ausschließlich pure Berechnungs-/Buchungs-Module** unter
-`shared/domain/`, die reine Unit-Tests **ohne DB und ohne laufenden Server**
-besitzen. Nur so läuft ein Lauf in Minuten statt Stunden.
+Gemutiert werden **ausschließlich pure Berechnungs-/Buchungs-Module** (vorrangig
+unter `shared/domain/`, ergänzt um pure Helfer wie `shared/utils/money.ts`), die
+reine Unit-Tests **ohne DB und ohne laufenden Server** besitzen. Nur so läuft ein
+Lauf in Minuten statt Stunden.
 
-Die acht Hotspots sind seit Task #804 auf **zwei Profile** aufgeteilt (siehe
+Die zehn Hotspots sind seit Task #804 auf **zwei Profile** aufgeteilt (siehe
 Abschnitt „Konfiguration: zwei Profile"):
 
 **Profil `vitest`** (nativer `@stryker-mutator/vitest-runner`, schnell — `mutate`
@@ -34,6 +35,8 @@ in `stryker.vitest.conf.mjs`):
 | `shared/domain/budgets.ts` | `tests/budget/statutory-clamp.test.ts` |
 | `shared/domain/vacation.ts` | `tests/unit/vacation-pro-rata.test.ts` |
 | `shared/domain/cancellation-policy.ts` | `tests/unit/cancellation-policy.test.ts` |
+| `shared/utils/money.ts` | `tests/utils/money.test.ts` |
+| `shared/domain/import-cutoff.ts` | `tests/unit/import-cutoff.test.ts` |
 
 **Profil `command`** (Command-Runner, SIGKILL-sicher — `mutate` in
 `stryker.command.conf.mjs`): die zwei PROPERTY-basierten Module, deren
@@ -66,10 +69,10 @@ Test-Runnern aufgeteilt, plus ein Orchestrator, der beide fährt und den Score
   das harte Gate (`break: 60`) erzwingt der Orchestrator auf dem AGGREGIERTEN
   Score, sonst würde ein einzelnes Profil <60 % den Lauf killen, obwohl der
   kombinierte Score das Gate besteht.
-- **Profil `vitest`:** `stryker.vitest.conf.mjs` — die sechs DETERMINISTISCHEN
+- **Profil `vitest`:** `stryker.vitest.conf.mjs` — die acht DETERMINISTISCHEN
   Module auf dem nativen `@stryker-mutator/vitest-runner`
   (`coverageAnalysis: "off"`). Vitest-Config: `vitest.stryker-vitest.config.ts`
-  (nur die sechs deterministischen Test-Dateien). Eigene Incremental-Datei
+  (nur die acht deterministischen Test-Dateien). Eigene Incremental-Datei
   `reports/stryker-incremental-vitest.json`. Deutlich schneller als der
   Command-Runner-Kaltstart (~1 Min für die ganze Gruppe).
 - **Profil `command`:** `stryker.command.conf.mjs` — die zwei PROPERTY-basierten
@@ -89,7 +92,7 @@ Property-Module erzeugen in den fast-check-Tests (`tests/equality/*`) eine
 abbrechen, der Per-Mutant-Timeout greift nicht, der Lauf hängt. Der
 Command-Runner umgeht das, weil Stryker pro Mutant einen frischen Kindprozess
 startet und ihn nach `timeoutMS` hart per SIGKILL beendet — versions-agnostisch
-sicher, aber pro Mutant ein teurer Kaltstart. Die sechs DETERMINISTISCHEN Module
+sicher, aber pro Mutant ein teurer Kaltstart. Die acht DETERMINISTISCHEN Module
 haben dieses Risiko nicht und laufen daher auf dem schnellen nativen Runner.
 Wieder-Umstellung der Property-Module auf den nativen Runner erst, wenn ein neuer
 Runner einen VOLLEN Lauf (nicht nur den Dry-Run) ohne Hänger durchzieht.
@@ -129,13 +132,13 @@ Die HTML-Reports landen pro Profil unter `reports/mutation/vitest/index.html` bz
 `reports/mutation/command/index.html`; der Orchestrator druckt am Ende den
 aggregierten Gesamt-Score.
 
-**Hinweis zur Laufzeit:** Das Profil `vitest` ist schnell (~1 Min für alle sechs
+**Hinweis zur Laufzeit:** Das Profil `vitest` ist schnell (~1 Min für alle acht
 Module). Das Profil `command` ist pro Mutant deutlich teurer (frischer
 `npx vitest run`-Kaltstart je Mutant), deckt aber nur zwei Module ab. Ein
 **kalter** Voll-Lauf beider Profile kann daher mehrere Minuten dauern;
 Folge-Läufe sind dank Incremental-Mode (zwei getrennte Report-Dateien) deutlich
 schneller. Genau dieser Split ist der Speedup gegenüber dem früheren
-Single-Command-Runner-Lauf, der ALLE acht Module über den langsamen Kaltstart
+Single-Command-Runner-Lauf, der ALLE zehn Module über den langsamen Kaltstart
 mutierte.
 
 ## CI-Integration
@@ -143,7 +146,7 @@ mutierte.
 Job `mutation` in `.github/workflows/ci.yml`:
 
 1. Läuft **nur bei `pull_request`** (der Diff wird gegen den Base-Branch berechnet).
-2. Ermittelt per `git diff`, welche der acht Hotspot-Dateien im PR geändert wurden.
+2. Ermittelt per `git diff`, welche der zehn Hotspot-Dateien im PR geändert wurden.
 3. Wurde keine geändert → Schritt wird sauber übersprungen.
 4. Andernfalls: `npm run mutation -- --mutate <geänderte Dateien>` (Orchestrator
    routet die Dateien in die passenden Profile und gatet den aggregierten Score).

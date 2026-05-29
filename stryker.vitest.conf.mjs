@@ -35,6 +35,8 @@ export default {
     "shared/domain/budgets.ts",
     "shared/domain/vacation.ts",
     "shared/domain/cancellation-policy.ts",
+    "shared/utils/money.ts",
+    "shared/domain/import-cutoff.ts",
   ],
   incrementalFile: "reports/stryker-incremental-vitest.json",
   htmlReporter: {

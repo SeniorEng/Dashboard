@@ -42,6 +42,18 @@ describe("computeLastExcelMonth", () => {
       computeLastExcelMonth(["", null, "2026-05-10", "kaputt"]),
     ).toEqual({ yearMonth: "2026-05", lastDay: "2026-05-31" });
   });
+
+  it("ist strikt anchored — Datums-Strings mit Prefix/Suffix-Müll werden NICHT erkannt", () => {
+    // ^-Anker: führender Müll vor dem Datum darf nicht matchen.
+    expect(computeLastExcelMonth(["garbage2026-12-15"])).toBeNull();
+    // $-Anker: nachgestellter Müll hinter dem Datum darf nicht matchen.
+    expect(computeLastExcelMonth(["2026-12-15garbage"])).toBeNull();
+    // Kombiniert mit einem sauberen Datum: die Müll-Einträge dürfen den
+    // Max-Monat NICHT auf Dezember hochziehen — nur das valide Mai-Datum zählt.
+    expect(
+      computeLastExcelMonth(["2026-05-10", "garbage2026-12-01", "2026-12-31extra"]),
+    ).toEqual({ yearMonth: "2026-05", lastDay: "2026-05-31" });
+  });
 });
 
 describe("isBeyondCutoff", () => {

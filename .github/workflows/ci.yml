@@ -381,7 +381,7 @@ jobs:
         run: |
           BASE="origin/${{ github.base_ref }}"
           git fetch --no-tags --depth=1 origin "${{ github.base_ref }}" || true
-          HOTSPOTS="shared/domain/invoice-line-items.ts shared/domain/budget-invoice-split.ts shared/domain/budget/cost-estimate-outcome.ts shared/domain/budget/cap-math.ts shared/domain/budget/history-aggregation.ts shared/domain/budgets.ts shared/domain/vacation.ts shared/domain/cancellation-policy.ts"
+          HOTSPOTS="shared/domain/invoice-line-items.ts shared/domain/budget-invoice-split.ts shared/domain/budget/cost-estimate-outcome.ts shared/domain/budget/cap-math.ts shared/domain/budget/history-aggregation.ts shared/domain/budgets.ts shared/domain/vacation.ts shared/domain/cancellation-policy.ts shared/utils/money.ts shared/domain/import-cutoff.ts"
           CHANGED=$(git diff --name-only "$BASE"...HEAD 2>/dev/null || true)
           MUTATE=""
           for f in $HOTSPOTS; do
