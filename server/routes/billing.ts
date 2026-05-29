@@ -1095,6 +1095,7 @@ interface InvoiceDraft {
   potItems: Map<InvoicePotKey, BuildLineItem[]>;
   needsBudgetSplit: boolean;               // potItems.size > 1
   hasPrivateShare: boolean;                // potItems.has("private")
+  singlePotIsPrivate: boolean;             // Single-Pfad, einziger Pot = "private" → Selbstzahler-Rechnung (19% USt)
   lineItems: BuildLineItem[];              // Single-Pfad (alle Items, ungesplittet)
   kasseItems: BuildLineItem[];             // [DEPRECATED, kept for /preview]
   privateItems: BuildLineItem[];           // [DEPRECATED, kept for /preview]
@@ -1235,6 +1236,18 @@ async function buildInvoiceDraft(input: {
   const needsBudgetSplit = potItems.size > 1;
 
   if (!needsBudgetSplit) {
+    // Wenn der einzige belegte Pot „private" ist (z.B. Kassen-Kunde mit
+    // §45b-Limit = 0 und acceptsPrivatePayment → alle Kosten landen privat),
+    // muss die Single-Invoice genauso wie der Privat-Anteil eines Mehrtopf-
+    // Splits als Selbstzahler-Rechnung mit 19% USt ausgewiesen werden.
+    // `buildLineItemsFromAppointments` rechnete die USt mit dem Kunden-
+    // billingType (USt-befreit) → 0; deshalb hier auf den Privat-Satz
+    // umrechnen (spiegelt den Split-Pfad, Aggregat-Rundung wie dort).
+    const singlePotIsPrivate = hasPrivateShare && potItems.size === 1;
+    const reclassifyToSelbstzahler = singlePotIsPrivate && billingType !== "selbstzahler";
+    const effectiveVatCents = reclassifyToSelbstzahler
+      ? Math.round((singleNetCents * 1900) / 10000)
+      : singleVatCents;
     return {
       customer,
       customerName,
@@ -1248,12 +1261,13 @@ async function buildInvoiceDraft(input: {
       potItems,
       needsBudgetSplit: false,
       hasPrivateShare,
+      singlePotIsPrivate,
       lineItems: allLineItems,
       kasseItems: [],
       privateItems: [],
       totalNetCents: singleNetCents,
-      totalVatCents: singleVatCents,
-      grossAmountCents: singleNetCents + singleVatCents,
+      totalVatCents: effectiveVatCents,
+      grossAmountCents: singleNetCents + effectiveVatCents,
       stornoRefsForInsert,
       defaultBuyerReference,
       invoiceDueDateIso,
@@ -1291,6 +1305,7 @@ async function buildInvoiceDraft(input: {
     potItems,
     needsBudgetSplit: true,
     hasPrivateShare,
+    singlePotIsPrivate: false,
     lineItems: allLineItems,
     kasseItems: legacyKasseItems,
     privateItems: legacyPrivateItems,
@@ -1336,6 +1351,7 @@ async function generateInvoiceCore(
     billingType,
     insuranceInfo,
     needsBudgetSplit,
+    singlePotIsPrivate,
     potItems,
     lineItems,
     totalNetCents,
@@ -1516,6 +1532,13 @@ async function generateInvoiceCore(
     }
   }
 
+  // Task #802: Einziger belegter Pot = „private" (z.B. Kasse-Kunde mit
+  // §45b-Limit 0 + acceptsPrivatePayment) → Rechnung wird als Selbstzahler
+  // mit 19% USt ausgewiesen, analog zum Privat-Anteil des Mehrtopf-Splits.
+  // Empfänger/Versicherten-Metadaten bleiben über den Kunden-billingType
+  // aufgelöst (siehe oben), nur der ausgewiesene Rechnungstyp + USt wechseln.
+  const invoiceBillingType = singlePotIsPrivate ? "selbstzahler" : billingType;
+
   let invoice: Invoice;
   let invoiceNumber: string;
   try {
@@ -1524,7 +1547,7 @@ async function generateInvoiceCore(
       const invoiceData = {
         invoiceNumber: number,
         customerId,
-        billingType,
+        billingType: invoiceBillingType,
         invoiceType: "rechnung",
         billingMonth,
         billingYear,
@@ -1538,7 +1561,7 @@ async function generateInvoiceCore(
         netAmountCents: totalNetCents,
         vatAmountCents: totalVatCents,
         grossAmountCents: totalNetCents + totalVatCents,
-        vatRate: billingType === "selbstzahler" ? 1900 : 0,
+        vatRate: invoiceBillingType === "selbstzahler" ? 1900 : 0,
         status: "entwurf",
         referencedStornoInvoiceIds: stornoRefsForInsert,
         dueDate: invoiceDueDateIso,
@@ -1555,7 +1578,7 @@ async function generateInvoiceCore(
         metadata: {
           invoiceNumber: number,
           customerId,
-          billingType,
+          billingType: invoiceBillingType,
           invoiceType: "rechnung",
           billingMonth,
           billingYear,

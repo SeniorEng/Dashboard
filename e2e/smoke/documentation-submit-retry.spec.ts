@@ -52,7 +52,13 @@ async function setupAppointment() {
 
 async function gotoStep2(page: import("@playwright/test").Page, appointmentId: number) {
   await page.goto(`/document-appointment/${appointmentId}`);
-  await expect(page.locator("[data-testid='input-actual-start']")).toBeVisible();
+  // Erster Render nach frischer Navigation: SPA-Route + Termin-Fetch. Unter
+  // CI-Last (4 parallele Worker + paralleler Integration-Server-Traffic) kann
+  // das den 5s-Default-Timeout reißen → großzügigeres Fenster wie bei den
+  // übrigen Waits in dieser Datei (Task #802, flaky-tests.md).
+  await expect(page.locator("[data-testid='input-actual-start']")).toBeVisible({
+    timeout: 15000,
+  });
   // Termin liefert genau eine Hauswirtschaft-Position (siehe createAppointment-Helper).
   await page
     .locator("[data-testid='input-details-hauswirtschaft']")

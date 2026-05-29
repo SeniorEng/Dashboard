@@ -34,7 +34,7 @@ Retries, siehe Task #774).
 
 | Test-Datei | Erkannt am | Owner | Fix-Deadline | Status | Notiz |
 |---|---|---|---|---|---|
-| _(noch keine bekannten Flakes)_ | — | — | — | — | Eintrag bei erster Erkennung anlegen. |
+| `e2e/smoke/documentation-submit-retry.spec.ts` (`ALREADY_COMPLETED zeigt spezifische Meldung und sperrt Retry`) | 2026-05-28 | SeniorEng | 2026-06-11 | gefixt | Erster Render nach `page.goto('/document-appointment/:id')` riss unter CI-Last (4 Worker + paralleler Integration-Traffic) den 5s-Default-Timeout für `input-actual-start` → grün erst im Playwright-Retry. Fix: Visibility-Wait in `gotoStep2` auf 15s angehoben (konsistent mit den übrigen Waits der Datei). |
 
 > Beim Eintragen das Datum absolut (YYYY-MM-DD) angeben und einen konkreten
 > Owner benennen — nicht „Team". Status: `offen` / `quarantäne` / `gefixt`.
