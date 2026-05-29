@@ -11,3 +11,4 @@
 - [vi.spyOn(console) broken](vitest-spyon-console-broken.md) — vi.spyOn(console,"log") does NOT capture console.log from imported modules in this vitest setup; rebind `console.log` directly and restore in finally.
 - [Test signature fixtures min bytes](test-signature-fixture-min-bytes.md) — 8-byte PNG stub fails signature-validation (Task #749) → setup EMPTY_SIGNATURE; use tests/helpers/signature.ts VALID_SIGNATURE_DATA_URL.
 - [focus() on disabled button is no-op](focus-disabled-button-race.md) — dialog auto-focus useEffect must depend on/guard the is-pending flag, else focus never lands → Radix Escape flakes.
+- [Test-data backlog & purge perf](test-data-backlog-purge-perf.md) — runTestDataCleanup is O(n) txns/customer; a big stale backlog hangs globalSetup & the test workflow → recover with a batched set-based purge (exact test-pattern filters); re-check audit_log rules after any killed purge.
