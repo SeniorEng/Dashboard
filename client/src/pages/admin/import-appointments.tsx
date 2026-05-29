@@ -13,6 +13,11 @@ import {
   ImportReconcileSection,
   type ReconcileExecuteResponse,
 } from "@/features/appointments/import-reconcile-section";
+import {
+  determineImportAction,
+  actionWhenSelected,
+  classifyImportAction,
+} from "@shared/domain/import-appointment-action";
 
 interface BudgetTrimInfo {
   originalMinutes: number;
@@ -60,11 +65,23 @@ function serviceCodeLabel(code: string | null | undefined): string {
   return code;
 }
 
+interface DuplicateImportWarning {
+  batchId: number;
+  fileName: string | null;
+  importedAt: string;
+  importedCount: number;
+  updatedCount: number;
+}
+
 interface PreviewResponse {
   rows: MatchedRow[];
   summary: { total: number; new: number; duplicate: number; upgrade: number; beyondCutoff: number; error: number; budgetTrimmed: number };
   /** Task #708: Server-Token für Trust-Boundary im Execute. */
   previewToken: string;
+  /** Task #819: SHA-256 des Datei-Puffers (Doppel-Import-Erkennung). */
+  fileHash: string;
+  /** Task #819: Gesetzt, wenn dieselbe Datei schon einmal importiert wurde. */
+  duplicateImportWarning: DuplicateImportWarning | null;
 }
 
 interface ImportResult {
@@ -100,6 +117,9 @@ export default function ImportAppointmentsPage() {
 
   const [rowActions, setRowActions] = useState<Map<number, RowAction>>(new Map());
   const [employeeOverrides, setEmployeeOverrides] = useState<Map<number, number>>(new Map());
+  // Task #819: GoBD-Gate — Diffs müssen bewusst geprüft werden, bevor
+  // Bestandstermine via Import überschrieben werden.
+  const [diffsReviewed, setDiffsReviewed] = useState(false);
 
   // Task #669 — optional Import-Reconcile (Single-Source-of-Truth-Modus).
   const [reconcileEnabled, setReconcileEnabled] = useState(false);
@@ -121,25 +141,18 @@ export default function ImportAppointmentsPage() {
       );
       setPreview(data);
 
+      // Task #819: Default-Aktion zentral aus Status + Diff ableiten
+      // (`determineImportAction`) — eine einzige Quelle für Preview-Default
+      // UND Checkbox-Toggle, damit die Status→Aktion-Logik nicht driftet.
       const defaultActions = new Map<number, RowAction>();
       for (const row of data.rows) {
-        if (row.status === "new") {
-          defaultActions.set(row.rowIndex, "import");
-        } else if (row.status === "upgrade") {
-          // Task #708: Default für geplante Termine ohne Unterschrift =
-          // auf `completed` anheben + Budget buchen.
-          defaultActions.set(row.rowIndex, "upgrade");
-        } else if (row.status === "beyond_cutoff") {
-          // Task #708: Cutoff-geschützte Termine sind nicht selektierbar
-          // — Server blockiert ohnehin alle Mutationen.
-          defaultActions.set(row.rowIndex, "skip");
-        } else if (row.status === "duplicate") {
-          defaultActions.set(row.rowIndex, "skip");
-        } else {
-          defaultActions.set(row.rowIndex, "skip");
-        }
+        defaultActions.set(
+          row.rowIndex,
+          determineImportAction({ status: row.status, hasDiff: row.diff !== null }),
+        );
       }
       setRowActions(defaultActions);
+      setDiffsReviewed(false);
 
       const empResult = await api.get<Employee[]>("/admin/import-appointments/employees");
       if (empResult.success) {
@@ -215,6 +228,18 @@ export default function ImportAppointmentsPage() {
       }).length
     : 0;
 
+  // Task #819: Sind selektierte Zeilen dabei, die einen Bestandstermin mit
+  // Feld-Diff überschreiben (Update/Upgrade)? Dann muss der Nutzer die Diffs
+  // vor dem Import explizit bestätigt haben (GoBD-Vier-Augen-Gate).
+  const selectedDiffCount = preview
+    ? preview.rows.filter((r) => {
+        const action = rowActions.get(r.rowIndex);
+        return (action === "update" || action === "upgrade") && r.diff !== null;
+      }).length
+    : 0;
+  const requiresDiffReview = selectedDiffCount > 0;
+  const executeBlocked = selectedForImport === 0 || (requiresDiffReview && !diffsReviewed);
+
   return (
     <Layout variant="admin">
       <div className="space-y-4">
@@ -261,6 +286,26 @@ export default function ImportAppointmentsPage() {
                 <Upload className="h-4 w-4 mr-2" />
                 {loading ? "Verarbeite..." : "Vorschau laden"}
               </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {preview?.duplicateImportWarning && !importResult && (
+          <Card className="border-amber-300 bg-amber-50" data-testid="card-duplicate-import-warning">
+            <CardContent className="pt-4">
+              <div className="flex items-start gap-2 text-sm text-amber-800">
+                <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-600" />
+                <div>
+                  <p className="font-medium">Diese Datei wurde bereits importiert.</p>
+                  <p className="text-amber-700 text-xs mt-0.5" data-testid="text-duplicate-import-detail">
+                    {preview.duplicateImportWarning.fileName ?? "Unbenannte Datei"} — am{" "}
+                    {new Date(preview.duplicateImportWarning.importedAt).toLocaleString("de-DE")}
+                    {" "}({preview.duplicateImportWarning.importedCount} importiert,{" "}
+                    {preview.duplicateImportWarning.updatedCount} aktualisiert). Ein erneuter
+                    Import kann zu Doppelbuchungen führen — bitte die Diffs sorgfältig prüfen.
+                  </p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -321,10 +366,22 @@ export default function ImportAppointmentsPage() {
                 <Button size="sm" variant="outline" onClick={() => setAllActions("update", "duplicate")} data-testid="button-update-all-duplicates">
                   Alle Duplikate aktualisieren
                 </Button>
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-3">
+                  {requiresDiffReview && (
+                    <label className="flex items-center gap-2 text-xs text-amber-800 cursor-pointer" data-testid="label-diffs-reviewed">
+                      <Checkbox
+                        checked={diffsReviewed}
+                        onCheckedChange={(checked) => setDiffsReviewed(checked === true)}
+                        data-testid="checkbox-diffs-reviewed"
+                      />
+                      <span>
+                        Diffs geprüft ({selectedDiffCount} Termin{selectedDiffCount === 1 ? "" : "e"} mit Abweichung)
+                      </span>
+                    </label>
+                  )}
                   <Button
                     onClick={executeImport}
-                    disabled={importing || selectedForImport === 0}
+                    disabled={importing || executeBlocked}
                     data-testid="button-execute-import"
                   >
                     {importing ? "Importiere..." : `${selectedForImport} Termine importieren`}
@@ -380,14 +437,7 @@ export default function ImportAppointmentsPage() {
                             onCheckedChange={(checked) => {
                               const newActions = new Map(rowActions);
                               if (checked) {
-                                newActions.set(
-                                  row.rowIndex,
-                                  row.status === "upgrade"
-                                    ? "upgrade"
-                                    : row.status === "duplicate"
-                                      ? "update"
-                                      : "import",
-                                );
+                                newActions.set(row.rowIndex, actionWhenSelected(row.status));
                               } else {
                                 newActions.set(row.rowIndex, "skip");
                               }
@@ -427,6 +477,18 @@ export default function ImportAppointmentsPage() {
                             <Badge variant="destructive" className="text-[10px]" data-testid={`status-error-${row.rowIndex}`}>
                               Fehler
                             </Badge>
+                          )}
+                          {/* Task #819: Aktions-Klassifikation (create/update/noop) */}
+                          {(row.status === "duplicate" || row.status === "upgrade") && (
+                            classifyImportAction({ status: row.status, hasDiff: row.diff !== null }) === "update" ? (
+                              <Badge variant="outline" className="ml-1 text-amber-700 border-amber-300 bg-amber-50 text-[10px]" data-testid={`classify-update-${row.rowIndex}`}>
+                                Update: alt→neu
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="ml-1 text-slate-500 border-slate-300 text-[10px]" data-testid={`classify-unchanged-${row.rowIndex}`}>
+                                unverändert
+                              </Badge>
+                            )
                           )}
                         </td>
                         <td className="p-2">

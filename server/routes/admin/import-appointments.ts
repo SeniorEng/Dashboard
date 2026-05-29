@@ -24,6 +24,8 @@ import {
   consumePreview,
 } from "../../services/import-preview-cache";
 import { computeLastExcelMonth } from "@shared/domain/import-cutoff";
+import { createHash } from "crypto";
+import { importBatchesStorage } from "../../storage/import-batches";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -38,6 +40,10 @@ router.post(
       res.status(400).json({ error: "Keine Datei hochgeladen" });
       return;
     }
+
+    // Task #819: SHA-256 des Datei-Puffers → Doppel-Import-Erkennung.
+    const fileHash = createHash("sha256").update(req.file.buffer).digest("hex");
+    const previousBatch = await importBatchesStorage.findByHash(fileHash);
 
     const parsed = await parseExcelFile(req.file.buffer);
     const matched = await matchRows(parsed);
@@ -75,9 +81,21 @@ router.post(
       excelCutoff,
       allowedRowIndexes,
       rows,
+      fileHash,
+      fileName: req.file.originalname ?? null,
     });
 
-    res.json({ rows: matched, summary, previewToken });
+    const duplicateImportWarning = previousBatch
+      ? {
+          batchId: previousBatch.id,
+          fileName: previousBatch.fileName,
+          importedAt: previousBatch.createdAt,
+          importedCount: previousBatch.importedCount,
+          updatedCount: previousBatch.updatedCount,
+        }
+      : null;
+
+    res.json({ rows: matched, summary, previewToken, fileHash, duplicateImportWarning });
   })
 );
 
@@ -228,15 +246,33 @@ router.post(
       }
     }
 
+    // Task #819: Import-Batch anlegen (Datei-Hash aus dem trusted Snapshot),
+    // damit alle erzeugten/aktualisierten Termine + Budget-Buchungen über
+    // `import_batch_id` auf diesen Lauf zurückführbar sind.
+    const batch = await importBatchesStorage.create({
+      fileName: snapshot.fileName,
+      fileHash: snapshot.fileHash,
+      rowCount: matchedRows.length,
+      createdByUserId: req.user!.id,
+    });
+
     // Cutoff kommt ausschließlich aus dem server-trusted Snapshot.
     const result = await executeImport(
       matchedRows,
       actions,
       req.user!.id,
       snapshot.excelCutoff,
+      batch.id,
     );
+
+    await importBatchesStorage.updateCounts(batch.id, {
+      importedCount: result.imported,
+      updatedCount: result.updated + result.upgraded,
+      skippedCount: result.skipped,
+    });
+
     consumePreview(previewToken);
-    res.json(result);
+    res.json({ ...result, importBatchId: batch.id });
   })
 );
 
@@ -359,6 +395,14 @@ router.post(
     });
     consumePreview(input.previewToken);
     res.json(result);
+  })
+);
+
+router.get(
+  "/import-batches",
+  asyncHandler("Import-Protokoll konnte nicht geladen werden", async (_req: Request, res: Response) => {
+    const batches = await importBatchesStorage.list();
+    res.json(batches);
   })
 );
 

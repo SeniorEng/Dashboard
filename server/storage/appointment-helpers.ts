@@ -99,6 +99,7 @@ export const appointmentWithCustomerSelectFields = {
   doctorLongitude: appointments.doctorLongitude,
   estimatedTravelMinutes: appointments.estimatedTravelMinutes,
   travelBufferMinutes: appointments.travelBufferMinutes,
+  importBatchId: appointments.importBatchId,
   assignedEmployeeName: assignedEmployee,
   customer: {
     id: customers.id,
@@ -192,6 +193,7 @@ export function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unkn
     noShowNotes: (row.noShowNotes as string | null) ?? null,
     noShowChargeSuppressed: (row.noShowChargeSuppressed as boolean | null) ?? false,
     noShowChargeSuppressionReason: (row.noShowChargeSuppressionReason as string | null) ?? null,
+    importBatchId: (row.importBatchId as number | null) ?? null,
     assignedEmployeeName: (row.assignedEmployeeName as string | null) ?? null,
     customer: (row.customer as { id?: number })?.id
       ? row.customer as AppointmentWithCustomer["customer"]

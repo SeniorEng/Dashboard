@@ -167,17 +167,23 @@ describe("Equality: Import-Update koppelt Budget-Ledger an Termin (Task #643)", 
 
     const afterTxs = await db
       .select({
+        id: budgetTransactions.id,
         km: budgetTransactions.travelKilometers,
         type: budgetTransactions.transactionType,
         apptId: budgetTransactions.appointmentId,
+        reversedTransactionId: budgetTransactions.reversedTransactionId,
       })
       .from(budgetTransactions)
       .where(eq(budgetTransactions.customerId, customerId));
 
-    // Nur die Consumption-Txs, die noch am Termin hängen (alte sind via
-    // rebookAppointmentConsumption abgekoppelt → appointmentId = null).
+    // Task #819 (GoBD): Storno-Zeilen behalten jetzt die appointmentId der
+    // Original-Consumption (kein Abkoppeln auf appointmentId=null mehr). Eine
+    // Consumption ist „live", wenn KEINE Reversal-Zeile auf sie zeigt.
+    const reversedIds = new Set(
+      afterTxs.filter((t) => t.type === "reversal").map((t) => t.reversedTransactionId),
+    );
     const liveKm = afterTxs
-      .filter((t) => t.type === "consumption" && t.apptId === createdAppt.id)
+      .filter((t) => t.type === "consumption" && t.apptId === createdAppt.id && !reversedIds.has(t.id))
       .reduce((s, t) => s + (t.km ?? 0), 0);
 
     expect(liveKm).toBeCloseTo(quantizeKm(7.3), 2);
@@ -275,11 +281,13 @@ describe("Equality: Import-Update koppelt Budget-Ledger an Termin (Task #643)", 
 
     // Aktive Consumption-Txs (an Termin gekoppelt) müssen AB-Minuten zeigen.
     const afterTxs = await db
-      .select({ hw: budgetTransactions.hauswirtschaftMinutes, ab: budgetTransactions.alltagsbegleitungMinutes, type: budgetTransactions.transactionType, apptId: budgetTransactions.appointmentId })
+      .select({ id: budgetTransactions.id, hw: budgetTransactions.hauswirtschaftMinutes, ab: budgetTransactions.alltagsbegleitungMinutes, type: budgetTransactions.transactionType, apptId: budgetTransactions.appointmentId, reversedTransactionId: budgetTransactions.reversedTransactionId })
       .from(budgetTransactions)
       .where(eq(budgetTransactions.customerId, customerId));
-    const liveHw = afterTxs.filter(t => t.type === "consumption" && t.apptId === apptId).reduce((s, t) => s + (t.hw ?? 0), 0);
-    const liveAb = afterTxs.filter(t => t.type === "consumption" && t.apptId === apptId).reduce((s, t) => s + (t.ab ?? 0), 0);
+    // Task #819 (GoBD): Storno behält appointmentId; live = nicht-stornierte Consumption.
+    const reversedIds = new Set(afterTxs.filter(t => t.type === "reversal").map(t => t.reversedTransactionId));
+    const liveHw = afterTxs.filter(t => t.type === "consumption" && t.apptId === apptId && !reversedIds.has(t.id)).reduce((s, t) => s + (t.hw ?? 0), 0);
+    const liveAb = afterTxs.filter(t => t.type === "consumption" && t.apptId === apptId && !reversedIds.has(t.id)).reduce((s, t) => s + (t.ab ?? 0), 0);
     expect(liveHw).toBe(0);
     expect(liveAb).toBe(60);
 

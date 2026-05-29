@@ -299,6 +299,30 @@ async function runStartupTasks() {
       log(`Invoice-Per-Pot-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #819 — Import-Batch-Tabelle + import_batch_id-Spalten.
+    const { ensureImportBatch } = await import("./startup/ensure-import-batch");
+    try {
+      await ensureImportBatch();
+    } catch (err) {
+      log(`Import-Batch-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
+    // Task #819 — GoBD: verwaiste NULL-appointment_id-Reversals auflösen
+    // (MUSS vor der CHECK-Constraint laufen), danach Constraint anlegen.
+    const { backfillOrphanReversalAppointmentId } = await import("./startup/backfill-orphan-reversal-appointment-id");
+    try {
+      await backfillOrphanReversalAppointmentId();
+    } catch (err) {
+      log(`Orphan-Reversal-Backfill fehlgeschlagen: ${err}`, "startup");
+    }
+
+    const { ensureBudgetTxAppointmentConstraint } = await import("./startup/ensure-budget-tx-appointment-constraint");
+    try {
+      await ensureBudgetTxAppointmentConstraint();
+    } catch (err) {
+      log(`Budget-Tx-Appointment-Constraint-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #757: Spalte für abweichenden Kontoinhaber in den Firmenstammdaten.
     const { ensureCompanyBankAccountHolderColumn } = await import("./startup/ensure-company-bank-account-holder");
     try {

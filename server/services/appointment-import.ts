@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { db } from "../lib/db";
-import { customers, users, appointments, appointmentServices, services, monthlyServiceRecords } from "@shared/schema";
+import { customers, users, appointments, appointmentServices, services, monthlyServiceRecords, budgetTransactions } from "@shared/schema";
 import { eq, and, isNull, sql, inArray } from "drizzle-orm";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { storage } from "../storage";
@@ -10,6 +10,7 @@ import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { auditService } from "./audit";
 import { isWeekend } from "@shared/utils/datetime";
+import { parseGermanDecimal } from "@shared/utils/parse-german-decimal";
 import { appointmentsRepo, customersRepo } from "../repos";
 import { excelServiceArtToCategory, isHauswirtschaftArt } from "@shared/domain/excel-service-art";
 import { computeLastExcelMonth, isBeyondCutoff, type ExcelCutoff } from "@shared/domain/import-cutoff";
@@ -243,8 +244,13 @@ export async function parseExcelFile(buffer: Buffer): Promise<ImportRow[]> {
       endTime = excelTimeToHHMM(endVal);
     }
 
-    const stunden = Number(row[colMap.stunden]) || 0;
-    const km = Number(row[colMap.kilometer]) || 0;
+    // Task #819 (GoBD): Dezimal-Spalten MÜSSEN über parseGermanDecimal laufen.
+    // `Number("10,9")` ergibt NaN (→ 0) und würde bei text-formatierten Excel-
+    // Zellen alle Nachkommastellen still auf 0 runden — eine GoBD-widrige stille
+    // Datenverfälschung beim Import. Fitness-Function:
+    // tests/architecture/no-bare-number-in-import.test.ts.
+    const stunden = parseGermanDecimal(row[colMap.stunden]);
+    const km = parseGermanDecimal(row[colMap.kilometer]);
     const employeeName = String(row[colMap.employee] ?? "").trim();
     const art = String(row[colMap.art] ?? "").trim();
     const budget = String(row[colMap.budget] ?? "").trim();
@@ -670,6 +676,7 @@ async function importSingleRow(
   userId: number,
   durationMinutes: number,
   notes: string,
+  importBatchId?: number | null,
 ): Promise<void> {
   if (isWeekend(row.date)) {
     throw new Error("Termine an Samstagen oder Sonntagen sind nicht erlaubt");
@@ -699,6 +706,7 @@ async function importSingleRow(
         notes,
         signedAt: new Date(),
         signedByUserId: userId,
+        importBatchId: importBatchId ?? null,
       })
       .returning();
 
@@ -727,6 +735,15 @@ async function importSingleRow(
       },
       tx
     );
+
+    // Task #819: Alle für diesen Termin erzeugten Budget-Buchungen
+    // (Cascading über mehrere Töpfe möglich) mit dem Import-Batch verknüpfen.
+    if (importBatchId != null) {
+      await tx
+        .update(budgetTransactions)
+        .set({ importBatchId })
+        .where(eq(budgetTransactions.appointmentId, appt.id));
+    }
   });
 }
 
@@ -742,6 +759,8 @@ export async function executeImport(
    * `matchedRows.date` ableiten (legacy Default).
    */
   excelCutoff?: ExcelCutoff | null,
+  /** Task #819: Verknüpft alle erzeugten/aktualisierten Datensätze mit dem Import-Batch. */
+  importBatchId?: number | null,
 ): Promise<ImportResult> {
   const result: ImportResult = { imported: 0, updated: 0, upgraded: 0, skipped: 0, trimmed: 0, cutoffProtected: 0, errors: [] };
 
@@ -787,7 +806,7 @@ export async function executeImport(
       }
 
       try {
-        await importSingleRow(row, effectiveEmployeeId, userId, row.durationMinutes, "Import aus Altdaten");
+        await importSingleRow(row, effectiveEmployeeId, userId, row.durationMinutes, "Import aus Altdaten", importBatchId);
         result.imported++;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -803,7 +822,7 @@ export async function executeImport(
             const trimNote = trimmedMinutes > 0
               ? `Import aus Altdaten — Budget gekürzt: ${row.durationMinutes} → ${trimmedMinutes} Min`
               : `Import aus Altdaten — Budget erschöpft: ${row.durationMinutes} → 0 Min`;
-            await importSingleRow(row, effectiveEmployeeId, userId, trimmedMinutes, trimNote);
+            await importSingleRow(row, effectiveEmployeeId, userId, trimmedMinutes, trimNote, importBatchId);
             result.imported++;
             result.trimmed++;
           } catch (retryErr: unknown) {
@@ -898,6 +917,7 @@ export async function executeImport(
               actualEnd: row.endTime || null,
               durationPromised: row.durationMinutes,
               notes: "Import-Update aus Altdaten",
+              importBatchId: importBatchId ?? null,
             })
             .where(eq(appointments.id, appointmentId));
 
@@ -914,10 +934,20 @@ export async function executeImport(
             details: `Import: ${row.serviceType}`,
           });
 
-          return rebookAppointmentConsumption(
+          const info = await rebookAppointmentConsumption(
             { appointmentId, userId },
             tx,
           );
+
+          // Task #819: neu gebuchte Budget-Consumption mit dem Batch verknüpfen.
+          if (importBatchId != null) {
+            await tx
+              .update(budgetTransactions)
+              .set({ importBatchId })
+              .where(eq(budgetTransactions.appointmentId, appointmentId));
+          }
+
+          return info;
         });
 
         if (rebookInfo.rebooked && row.customerId != null) {
@@ -1049,6 +1079,14 @@ export async function executeImport(
             },
             tx,
           );
+
+          // Task #819: Upgrade-Consumption mit dem Import-Batch verknüpfen.
+          if (importBatchId != null) {
+            await tx
+              .update(budgetTransactions)
+              .set({ importBatchId })
+              .where(eq(budgetTransactions.appointmentId, appointmentId));
+          }
         });
 
         await auditService.log(

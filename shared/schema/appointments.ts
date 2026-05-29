@@ -146,6 +146,7 @@ export const appointments = pgTable("appointments", {
   // suppressionReason ist dann Pflicht und wird im Audit-Log protokolliert.
   noShowChargeSuppressed: boolean("no_show_charge_suppressed").notNull().default(false),
   noShowChargeSuppressionReason: text("no_show_charge_suppression_reason"),
+  importBatchId: integer("import_batch_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),
 }, (table) => [

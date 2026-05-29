@@ -322,13 +322,17 @@ async function reconcileOne(
         .limit(1);
       if (dup.length > 0) continue;
 
+      // Task #819 (GoBD): Reversal behält die appointmentId der Original-
+      // Consumption (keine appointmentId=null-Waisen mehr). Der Pre-Check in
+      // createCascadeConsumption sieht die stornierte Zeile nicht mehr, weil
+      // getTransactionByAppointmentId reversedTransactionId-Stornos ausblendet.
       const [rev] = await tx.insert(budgetTransactions).values({
         customerId: orig.customerId,
         budgetType: orig.budgetType,
         transactionDate: orig.transactionDate,
         transactionType: "reversal",
         amountCents: -orig.amountCents,
-        appointmentId: null,
+        appointmentId: orig.appointmentId,
         allocationId: orig.allocationId,
         reversedTransactionId: orig.id,
         notes: `Storno (km-Drift-Korrektur #619) von Transaktion #${orig.id}${noteSuffix}`,
@@ -339,16 +343,7 @@ async function reconcileOne(
       if (rev) reversedIds.push(orig.id);
     }
 
-    // 2. Alte Consumptions vom Termin abkoppeln, damit der Pre-Check in
-    //    createCascadeConsumption keine offene Zeile mehr sieht.
-    await tx.update(budgetTransactions)
-      .set({ appointmentId: null })
-      .where(and(
-        eq(budgetTransactions.appointmentId, c.appointmentId),
-        inArray(budgetTransactions.id, existingTxs.map(t => t.id)),
-      ));
-
-    // 3. Neu-Buchung mit AKTUELLEM appt-km am ursprünglichen Datum.
+    // 2. Neu-Buchung mit AKTUELLEM appt-km am ursprünglichen Datum.
     await createConsumptionTransaction({
       customerId: c.customerId,
       appointmentId: c.appointmentId,

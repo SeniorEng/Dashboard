@@ -30,7 +30,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { eq, and, isNull, sql, inArray } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
   appointments,
@@ -224,13 +224,17 @@ async function reconcileAppointment(c: CandidateAppt, apply: boolean, userId?: n
         .limit(1);
       if (existingReversal.length > 0) continue;
 
+      // Task #819 (GoBD): Reversal behält die appointmentId der Original-
+      // Consumption (keine appointmentId=null-Waisen mehr). Der Pre-Check in
+      // createCascadeConsumption sieht die stornierte Zeile nicht mehr, weil
+      // getTransactionByAppointmentId reversedTransactionId-Stornos ausblendet.
       await tx.insert(budgetTransactions).values({
         customerId: t.customerId,
         budgetType: t.budgetType,
         transactionDate: t.transactionDate,
         transactionType: "reversal",
         amountCents: -t.amountCents,
-        appointmentId: null,
+        appointmentId: t.appointmentId,
         allocationId: t.allocationId,
         reversedTransactionId: t.id,
         notes: `Storno (Reconcile #116) von Transaktion #${t.id}`,
@@ -238,17 +242,7 @@ async function reconcileAppointment(c: CandidateAppt, apply: boolean, userId?: n
       }).onConflictDoNothing();
     }
 
-    // 2. Alte Consumptions vom Termin abkoppeln (appointmentId=null), damit der
-    //    Pre-Check in createCascadeConsumption für den Termin keine offene Zeile
-    //    mehr sieht. Reversal-Verknüpfung über reversedTransactionId bleibt erhalten.
-    await tx.update(budgetTransactions)
-      .set({ appointmentId: null })
-      .where(and(
-        eq(budgetTransactions.appointmentId, c.id),
-        inArray(budgetTransactions.id, existingTxs.map(t => t.id)),
-      ));
-
-    // 3. Termin-Daten auf Originalminuten zurücksetzen.
+    // 2. Termin-Daten auf Originalminuten zurücksetzen.
     await tx.update(appointments)
       .set({
         durationPromised: c.originalMinutes,

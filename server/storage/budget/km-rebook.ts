@@ -29,7 +29,7 @@
  * Audit-Trail erkennbar bleibt.
  */
 
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { appointments, appointmentServices, budgetTransactions, services } from "@shared/schema";
 import { createConsumptionTransaction } from "./consumption-engine";
 import type { DbClient } from "./types";
@@ -192,16 +192,34 @@ export async function rebookAppointmentConsumption(
   // gleich: Reverse + leeres Re-Booking.
   const reversedIds: number[] = [];
 
+  // Task #819 (GoBD): Reversal-Zeilen behalten die `appointmentId` der
+  // Original-Consumption. Früher wurde hier `appointmentId: null` gesetzt UND
+  // die Original-Consumptions vom Termin abgekoppelt — beides erzeugte
+  // budget_transactions-Waisen ohne Termin-Bezug und verletzt die neue
+  // CHECK-Constraint (consumption/reversal MÜSSEN eine appointmentId haben).
+  // Der Pre-Check in `createCascadeConsumption` läuft trotzdem sauber durch:
+  // `getTransactionByAppointmentId` blendet bereits stornierte Consumptions
+  // (via `reversedTransactionId`) aus, sieht also nach diesem Storno-Block
+  // keine offene Zeile mehr.
   for (const orig of existingTxs) {
+    const negate = (v: number | null | undefined) => (v == null ? null : -v);
     const [rev] = await tx.insert(budgetTransactions).values({
       customerId: orig.customerId,
       budgetType: orig.budgetType,
       transactionDate: orig.transactionDate,
       transactionType: "reversal",
       amountCents: -orig.amountCents,
-      appointmentId: null,
+      appointmentId: orig.appointmentId,
       allocationId: orig.allocationId,
       reversedTransactionId: orig.id,
+      hauswirtschaftMinutes: negate(orig.hauswirtschaftMinutes),
+      hauswirtschaftCents: negate(orig.hauswirtschaftCents),
+      alltagsbegleitungMinutes: negate(orig.alltagsbegleitungMinutes),
+      alltagsbegleitungCents: negate(orig.alltagsbegleitungCents),
+      travelKilometers: negate(orig.travelKilometers),
+      travelCents: negate(orig.travelCents),
+      customerKilometers: negate(orig.customerKilometers),
+      customerKilometersCents: negate(orig.customerKilometersCents),
       notes: `Storno (Termin-Edit) von Transaktion #${orig.id}`,
       createdByUserId: params.userId,
     })
@@ -209,15 +227,6 @@ export async function rebookAppointmentConsumption(
       .returning();
     if (rev) reversedIds.push(orig.id);
   }
-
-  // Alte Consumptions vom Termin abkoppeln, damit der Pre-Check in
-  // createCascadeConsumption keine offene Zeile mehr sieht.
-  await tx.update(budgetTransactions)
-    .set({ appointmentId: null })
-    .where(and(
-      eq(budgetTransactions.appointmentId, params.appointmentId),
-      inArray(budgetTransactions.id, existingTxs.map(t => t.id)),
-    ));
 
   if (newHw > 0 || newAb > 0 || newTravelKm > 0 || newCustomerKm > 0) {
     await createConsumptionTransaction({

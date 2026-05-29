@@ -45,6 +45,10 @@ export interface ImportPreviewSnapshot {
   allowedRowIndexes: Set<number>;
   /** rowIndex → trusted per-Zeile-Daten aus dem Preview. */
   rows: Map<number, TrustedRowSnapshot>;
+  /** Task #819: SHA-256 des hochgeladenen Datei-Puffers (Doppel-Import-Erkennung). */
+  fileHash: string;
+  /** Task #819: Original-Dateiname für das Import-Batch-Protokoll. */
+  fileName: string | null;
   createdAt: number;
 }
 
