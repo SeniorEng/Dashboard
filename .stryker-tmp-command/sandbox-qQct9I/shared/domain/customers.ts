@@ -1,0 +1,157 @@
+// @ts-nocheck
+import { CONTACT_TYPES as CONTACT_TYPE_VALUES, LEGACY_CONTACT_TYPES } from "../schema/customers";
+
+export { LEGACY_CONTACT_TYPES };
+
+export const BILLING_TYPES = [
+  "pflegekasse_gesetzlich",
+  "pflegekasse_privat",
+  "selbstzahler",
+] as const;
+
+export type BillingType = typeof BILLING_TYPES[number];
+
+export const BILLING_TYPE_LABELS: Record<BillingType, string> = {
+  pflegekasse_gesetzlich: "Pflegekasse (gesetzlich)",
+  pflegekasse_privat: "Pflegekasse (privat)",
+  selbstzahler: "Selbstzahler",
+};
+
+
+export const BILLING_TYPE_SELECT_OPTIONS = BILLING_TYPES.map((v) => ({
+  value: v,
+  label: BILLING_TYPE_LABELS[v],
+})).sort((a, b) => a.label.localeCompare(b.label, "de"));
+
+export const BILLING_TYPE_DESCRIPTIONS: Record<BillingType, string> = {
+  pflegekasse_gesetzlich: "Abrechnung über gesetzliche Pflegekasse inkl. Forderungsabtretung",
+  pflegekasse_privat: "Abrechnung über private Pflegekasse, optional mit SEPA-Mandat",
+  selbstzahler: "Direktabrechnung ohne Pflegekasse, optional mit SEPA-Mandat",
+};
+
+export function isPflegekasseCustomer(billingType: BillingType | ""): boolean {
+  return billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat";
+}
+
+export function isSelbstzahlerCustomer(billingType: BillingType | ""): boolean {
+  return billingType === "selbstzahler";
+}
+
+/**
+ * Bestimmt, ob die Rechnung effektiv an den Kunden adressiert ist
+ * (Layout/Empfänger/Zahlung wie pflegekasse_privat).
+ *
+ * - `pflegekasse_privat`: Immer an den Kunden, der reicht selbst bei
+ *   seiner privaten Pflegekasse zur Erstattung ein.
+ * - `pflegekasse_gesetzlich` + `rechnungAnKunde`: Kostenerstattungsverfahren —
+ *   Kunde zahlt selbst und reicht bei seiner gesetzlichen Pflegekasse
+ *   zur Erstattung ein. Statistisch bleibt er gesetzlich versichert.
+ */
+export function invoiceGoesToCustomer(
+  billingType: string | null | undefined,
+  rechnungAnKunde: boolean | null | undefined,
+): boolean {
+  if (billingType === "pflegekasse_privat") return true;
+  if (billingType === "pflegekasse_gesetzlich" && !!rechnungAnKunde) return true;
+  return false;
+}
+
+
+export function needsBudgetData(billingType: BillingType | ""): boolean {
+  return isPflegekasseCustomer(billingType);
+}
+
+function needsPflegegradData(billingType: BillingType | ""): boolean {
+  return isPflegekasseCustomer(billingType);
+}
+
+export function needsVorerkrankungenData(billingType: BillingType | ""): boolean {
+  return isPflegekasseCustomer(billingType) || billingType === "selbstzahler";
+}
+
+export const CUSTOMER_DETAIL_TABS = ["overview", "vertrag", "documents", "contacts", "budgets", "insurance", "timeline"] as const;
+export const SELBSTZAHLER_HIDDEN_TABS = ["budgets", "insurance"] as const;
+
+export function getVisibleTabs(billingType: string | null | undefined): readonly string[] {
+  if (billingType !== "selbstzahler") return CUSTOMER_DETAIL_TABS;
+  return CUSTOMER_DETAIL_TABS.filter((t) => !(SELBSTZAHLER_HIDDEN_TABS as readonly string[]).includes(t));
+}
+
+export function getEffectiveTab(activeTab: string, billingType: string | null | undefined): string {
+  if (billingType === "selbstzahler" && (SELBSTZAHLER_HIDDEN_TABS as readonly string[]).includes(activeTab)) return "overview";
+  return activeTab;
+}
+
+export function displayPriceCents(priceCents: number, billingType: string | null | undefined, vatRate: number = 19): number {
+  return billingType === "selbstzahler" ? Math.round(priceCents * (1 + vatRate / 100)) : priceCents;
+}
+
+export function netFromInputCents(inputCents: number, billingType: string | null | undefined, vatRate: number = 19): number {
+  return billingType === "selbstzahler" ? Math.round(inputCents / (1 + vatRate / 100)) : inputCents;
+}
+
+const DEACTIVATION_REASONS = [
+  "stationaere_pflege",
+  "versterben",
+  "anbieterwechsel",
+  "angehoerigenpflege",
+  "gesundheitliche_verbesserung",
+  "krankenhausaufenthalt",
+  "umzug",
+  "finanzielle_gruende",
+  "wunsch_des_kunden",
+  "kein_interesse",
+  "zusammengefuehrt",
+  "sonstiges",
+] as const;
+
+export type DeactivationReason = typeof DEACTIVATION_REASONS[number];
+
+export const DEACTIVATION_REASON_LABELS: Record<DeactivationReason, string> = {
+  stationaere_pflege: "Umzug in stationäre Pflege",
+  versterben: "Versterben",
+  anbieterwechsel: "Wechsel zu anderem Anbieter",
+  angehoerigenpflege: "Pflege durch Angehörige übernommen",
+  gesundheitliche_verbesserung: "Gesundheitliche Verbesserung",
+  krankenhausaufenthalt: "Krankenhausaufenthalt (Langzeit)",
+  umzug: "Umzug aus dem Einzugsgebiet",
+  finanzielle_gruende: "Finanzielle Gründe",
+  wunsch_des_kunden: "Wunsch des Kunden (ohne Angabe)",
+  kein_interesse: "Kein Interesse (Erstberatung)",
+  zusammengefuehrt: "Mit bestehendem Kunden zusammengeführt",
+  sonstiges: "Sonstiges",
+};
+
+export const DEACTIVATION_REASON_SELECT_OPTIONS = DEACTIVATION_REASONS.map((v) => ({
+  value: v,
+  label: DEACTIVATION_REASON_LABELS[v],
+})).sort((a, b) => a.label.localeCompare(b.label, "de"));
+
+const PFLEGEGRAD_VALUES = [1, 2, 3, 4, 5] as const;
+
+export const PFLEGEGRAD_SELECT_OPTIONS = PFLEGEGRAD_VALUES.map((v) => ({
+  value: String(v),
+  label: `Pflegegrad ${v}`,
+}));
+
+export const CONTACT_TYPE_LABELS: Record<string, string> = {
+  partner: "Partner/in",
+  kind: "Kind",
+  eltern: "Elternteil",
+  geschwister: "Geschwister",
+  sonstige_verwandte: "Sonstige Verwandte",
+  betreuer: "Betreuer/in",
+  hausarzt: "Hausarzt",
+  nachbar: "Nachbar/in",
+  sonstige: "Sonstige",
+  familie: "Familienmitglied (alt)",
+  angehoerige: "Angehörige (alt)",
+};
+
+export const CONTACT_TYPE_SELECT_OPTIONS = CONTACT_TYPE_VALUES
+  .filter((v) => !(LEGACY_CONTACT_TYPES as readonly string[]).includes(v))
+  .map((v) => ({
+    value: v,
+    label: CONTACT_TYPE_LABELS[v] ?? v,
+  }))
+  .sort((a, b) => a.label.localeCompare(b.label, "de"));

@@ -362,10 +362,13 @@ jobs:
 
       # Incremental-Report über Läufe hinweg cachen — Stryker prüft dann nur
       # Mutanten erneut, die von Code-/Test-Änderungen betroffen sind.
-      - name: Cache Stryker incremental report
+      - name: Cache Stryker incremental reports
         uses: actions/cache@v4
         with:
-          path: reports/stryker-incremental.json
+          # Beide Profile (vitest/command) haben je eine eigene Incremental-Datei.
+          path: |
+            reports/stryker-incremental-vitest.json
+            reports/stryker-incremental-command.json
           key: stryker-incremental-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
           restore-keys: |
             stryker-incremental-${{ runner.os }}-${{ github.ref }}-
@@ -396,11 +399,13 @@ jobs:
             echo "mutate=$MUTATE" >> "$GITHUB_OUTPUT"
           fi
 
-      # Gate: Stryker bricht ab (exit != 0), wenn der Mutation-Score unter
-      # `break` (60 %) fällt — siehe stryker.conf.mjs.
+      # Gate: Der Orchestrator routet die geänderten Hotspots auf die beiden
+      # Profile (vitest/command), führt sie aus und bricht ab (exit != 0), wenn
+      # der AGGREGIERTE Mutation-Score unter `break` (60 %) fällt — siehe
+      # scripts/run-mutation.mjs + stryker.base.mjs.
       - name: Run Stryker on changed files
         if: ${{ steps.targets.outputs.run == 'true' }}
-        run: npx stryker run --mutate ${{ steps.targets.outputs.mutate }}
+        run: node scripts/run-mutation.mjs --mutate ${{ steps.targets.outputs.mutate }}
 
       - name: Upload mutation report
         if: ${{ always() && steps.targets.outputs.run == 'true' }}

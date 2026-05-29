@@ -2,19 +2,25 @@ import { defineConfig } from "vitest/config";
 import path from "path";
 
 /**
- * Dedizierte Vitest-Konfiguration für Stryker-Mutation-Testing (Task #770).
+ * Vitest-Konfiguration für das Stryker-Profil "command" (Task #770/#804).
+ *
+ * Wird vom Command-Runner (`stryker.command.conf.mjs`) pro Mutant als frischer
+ * `npx vitest run --config vitest.stryker.config.ts`-Kindprozess gestartet.
+ * Enthält ausschließlich die fast-check-PROPERTY-Tests der beiden Module, die
+ * den nativen vitest-Runner zum Hängen bringen (synchrone Endlosschleifen unter
+ * Mutation). Die deterministischen Module laufen im schnelleren vitest-Profil
+ * über `vitest.stryker-vitest.config.ts`.
  *
  * Unterschiede zur Haupt-`vitest.config.ts`:
  *  - KEIN `globalSetup` (der braucht eine laufende DB + App-Server für den
  *    Test-Daten-Cleanup). Mutation-Testing läuft ausschließlich gegen die
- *    PUREN Berechnungs-Module in `shared/domain/` und deren reine Unit-Tests
+ *    PUREN Berechnungs-Module in `shared/domain/` und deren reine Tests
  *    — ohne I/O, damit ein Run in Minuten statt Stunden durchläuft.
- *  - `include` ist eng auf die Tests gepinnt, die die fünf Hotspot-Module
- *    abdecken. Stryker führt pro Mutant nur diese Suite aus.
+ *  - `include` ist eng auf die zwei Property-Test-Dateien gepinnt.
  *  - `fileParallelism` bleibt aktiv (keine geteilte DB → keine Races).
  *
- * Wer ein neues pures Berechnungs-Modul in die Mutation-Suite aufnimmt,
- * trägt es in `stryker.conf.mjs` (`mutate`) UND die zugehörige reine
+ * Wer ein neues PROPERTY-basiertes Modul in das Command-Profil aufnimmt,
+ * trägt es in `stryker.command.conf.mjs` (`mutate`) UND die zugehörige
  * Test-Datei hier in `include` ein.
  */
 export default defineConfig({
@@ -27,12 +33,6 @@ export default defineConfig({
     include: [
       "tests/equality/invoice-line-item-arithmetic.test.ts",
       "tests/equality/invoice-per-pot-arithmetic.test.ts",
-      "tests/budget/cost-estimate-outcome.test.ts",
-      "tests/budget/cap-math.test.ts",
-      "tests/budget/history-aggregation.test.ts",
-      "tests/budget/statutory-clamp.test.ts",
-      "tests/unit/vacation-pro-rata.test.ts",
-      "tests/unit/cancellation-policy.test.ts",
     ],
     testTimeout: 20000,
     hookTimeout: 20000,

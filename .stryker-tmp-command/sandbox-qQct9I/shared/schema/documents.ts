@@ -1,0 +1,339 @@
+// @ts-nocheck
+import { pgTable, text, integer, serial, boolean, date, index, uniqueIndex, unique, uuid } from "drizzle-orm/pg-core";
+import { z } from "zod";
+import { timestamp } from "./common";
+import { users } from "./users";
+import { customers } from "./customers";
+
+export const DOCUMENT_TYPE_CONTEXTS = ["vertragsabschluss", "bestandskunde", "beide"] as const;
+export type DocumentTypeContext = typeof DOCUMENT_TYPE_CONTEXTS[number];
+
+export const DOCUMENT_TYPE_CONTEXT_LABELS: Record<DocumentTypeContext, string> = {
+  vertragsabschluss: "Nur bei Vertragsabschluss",
+  bestandskunde: "Nur bei Bestandskunden",
+  beide: "Immer verfügbar",
+};
+
+export const INPUT_METHODS = ["upload", "signature", "both", "info"] as const;
+export type InputMethod = typeof INPUT_METHODS[number];
+
+export const INPUT_METHOD_LABELS: Record<InputMethod, string> = {
+  upload: "Nur Upload",
+  signature: "Nur digitale Unterschrift",
+  both: "Upload oder digitale Unterschrift",
+  info: "Zur Kenntnisnahme (automatisch Vertragsbestandteil)",
+};
+
+export const documentTypes = pgTable("document_types", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  targetType: text("target_type").notNull().default("employee"),
+  context: text("context").notNull().default("beide"),
+  inputMethod: text("input_method").notNull().default("upload"),
+  isMandatory: boolean("is_mandatory").notNull().default(false),
+  renewalDays: integer("renewal_days"),
+  reviewIntervalMonths: integer("review_interval_months"),
+  reminderLeadTimeDays: integer("reminder_lead_time_days").default(14),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const employeeDocuments = pgTable("employee_documents", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  documentTypeId: integer("document_type_id").notNull().references(() => documentTypes.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  objectPath: text("object_path").notNull(),
+  uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+  uploadedByUserId: integer("uploaded_by_user_id").references(() => users.id),
+  reviewDueDate: date("review_due_date"),
+  documentDate: date("document_date"),
+  isCurrent: boolean("is_current").notNull().default(true),
+  notes: text("notes"),
+  batchId: uuid("batch_id").notNull().defaultRandom(),
+  batchLabel: text("batch_label"),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  index("employee_documents_employee_idx").on(table.employeeId),
+  index("employee_documents_type_idx").on(table.documentTypeId),
+  index("employee_documents_current_idx").on(table.employeeId, table.isCurrent),
+  index("employee_documents_review_due_idx").on(table.reviewDueDate, table.isCurrent),
+  index("employee_documents_batch_idx").on(table.batchId),
+]);
+
+export const customerDocuments = pgTable("customer_documents", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  documentTypeId: integer("document_type_id").notNull().references(() => documentTypes.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  objectPath: text("object_path").notNull(),
+  uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+  uploadedByUserId: integer("uploaded_by_user_id").references(() => users.id),
+  reviewDueDate: date("review_due_date"),
+  documentDate: date("document_date"),
+  isCurrent: boolean("is_current").notNull().default(true),
+  notes: text("notes"),
+  batchId: uuid("batch_id").notNull().defaultRandom(),
+  batchLabel: text("batch_label"),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  index("customer_documents_customer_idx").on(table.customerId),
+  index("customer_documents_type_idx").on(table.documentTypeId),
+  index("customer_documents_current_idx").on(table.customerId, table.isCurrent),
+  index("customer_documents_review_due_idx").on(table.reviewDueDate, table.isCurrent),
+  index("customer_documents_batch_idx").on(table.batchId),
+]);
+
+export const documentTemplates = pgTable("document_templates", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  htmlContent: text("html_content").notNull(),
+  version: integer("version").notNull().default(1),
+  isSystem: boolean("is_system").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+  documentTypeId: integer("document_type_id").references(() => documentTypes.id, { onDelete: "set null" }),
+  context: text("context").notNull().default("beide"),
+  targetType: text("target_type").notNull().default("customer"),
+  requiresCustomerSignature: boolean("requires_customer_signature").notNull().default(true),
+  requiresEmployeeSignature: boolean("requires_employee_signature").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("document_templates_slug_key").on(table.slug),
+  index("document_templates_type_idx").on(table.documentTypeId),
+  index("document_templates_context_idx").on(table.context),
+  index("document_templates_target_idx").on(table.targetType),
+]);
+
+export const documentTemplateBillingTypes = pgTable("document_template_billing_types", {
+  id: serial("id").primaryKey(),
+  templateId: integer("template_id").notNull().references(() => documentTemplates.id, { onDelete: "cascade" }),
+  billingType: text("billing_type").notNull(),
+  requirement: text("requirement").notNull().default("pflicht"),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (table) => [
+  index("dtbt_template_idx").on(table.templateId),
+  index("dtbt_billing_type_idx").on(table.billingType),
+  uniqueIndex("dtbt_template_billing_unique").on(table.templateId, table.billingType),
+]);
+
+export const TRIGGER_TYPES = ["field_match", "role", "always"] as const;
+export type TriggerType = typeof TRIGGER_TYPES[number];
+
+export const TRIGGER_TYPE_LABELS: Record<TriggerType, string> = {
+  field_match: "Feldabgleich",
+  role: "Mitarbeiter-Rolle",
+  always: "Immer (alle)",
+};
+
+export const TRIGGER_OPERATORS = ["equals", "greater_than", "is_true"] as const;
+export type TriggerOperator = typeof TRIGGER_OPERATORS[number];
+
+export const TRIGGER_OPERATOR_LABELS: Record<TriggerOperator, string> = {
+  equals: "ist gleich",
+  greater_than: "größer als",
+  is_true: "ist aktiv",
+};
+
+export const REQUIREMENT_LEVELS = ["pflicht", "optional"] as const;
+export type RequirementLevel = typeof REQUIREMENT_LEVELS[number];
+
+export const REQUIREMENT_LEVEL_LABELS: Record<RequirementLevel, string> = {
+  pflicht: "Pflicht",
+  optional: "Optional",
+};
+
+export const documentTypeTriggers = pgTable("document_type_triggers", {
+  id: serial("id").primaryKey(),
+  documentTypeId: integer("document_type_id").notNull().references(() => documentTypes.id, { onDelete: "cascade" }),
+  entityType: text("entity_type").notNull(),
+  triggerType: text("trigger_type").notNull(),
+  conditionField: text("condition_field"),
+  conditionOperator: text("condition_operator").notNull().default("equals"),
+  conditionValue: text("condition_value"),
+  requirement: text("requirement").notNull().default("pflicht"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("dtt_doc_type_idx").on(table.documentTypeId),
+  index("dtt_entity_type_idx").on(table.entityType),
+  index("dtt_active_idx").on(table.isActive),
+  uniqueIndex("dtt_unique").on(table.documentTypeId, table.entityType, table.triggerType, table.conditionField, table.conditionValue),
+]);
+
+export const SIGNING_STATUSES = ["complete", "pending_employee_signature"] as const;
+export type SigningStatus = typeof SIGNING_STATUSES[number];
+
+export const SIGNING_STATUS_LABELS: Record<SigningStatus, string> = {
+  complete: "Vollständig unterschrieben",
+  pending_employee_signature: "Unterschrift ausstehend",
+};
+
+export const generatedDocuments = pgTable("generated_documents", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "cascade" }),
+  employeeId: integer("employee_id").references(() => users.id, { onDelete: "cascade" }),
+  templateId: integer("template_id").notNull().references(() => documentTemplates.id),
+  templateVersion: integer("template_version").notNull(),
+  documentTypeId: integer("document_type_id").references(() => documentTypes.id, { onDelete: "set null" }),
+  fileName: text("file_name").notNull(),
+  objectPath: text("object_path").notNull(),
+  renderedHtml: text("rendered_html"),
+  customerSignatureData: text("customer_signature_data"),
+  employeeSignatureData: text("employee_signature_data"),
+  signingStatus: text("signing_status").notNull().default("complete"),
+  signedAt: timestamp("signed_at"),
+  signedByEmployeeId: integer("signed_by_employee_id").references(() => users.id),
+  integrityHash: text("integrity_hash"),
+  signingIp: text("signing_ip"),
+  signingLocation: text("signing_location"),
+  generatedAt: timestamp("generated_at").notNull().defaultNow(),
+  generatedByUserId: integer("generated_by_user_id").references(() => users.id),
+}, (table) => [
+  index("generated_docs_customer_idx").on(table.customerId),
+  index("generated_docs_employee_idx").on(table.employeeId),
+  index("generated_docs_template_idx").on(table.templateId),
+  index("generated_docs_doctype_idx").on(table.documentTypeId),
+  index("generated_docs_signing_status_idx").on(table.signingStatus),
+]);
+
+export const documentSigningTokens = pgTable("document_signing_tokens", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id").notNull().references(() => generatedDocuments.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("document_signing_tokens_token_hash_key").on(table.tokenHash),
+  index("signing_tokens_document_idx").on(table.documentId),
+  index("signing_tokens_hash_idx").on(table.tokenHash),
+]);
+
+export const TEMPLATE_CONTEXTS = ["vertragsabschluss", "bestandskunde", "beide"] as const;
+export type TemplateContext = typeof TEMPLATE_CONTEXTS[number];
+
+export const TEMPLATE_CONTEXT_LABELS: Record<TemplateContext, string> = {
+  vertragsabschluss: "Nur bei Vertragsabschluss",
+  bestandskunde: "Nur bei Bestandskunden",
+  beide: "Immer verfügbar",
+};
+
+export const TEMPLATE_TARGET_TYPES = ["customer", "employee", "beide"] as const;
+export type TemplateTargetType = typeof TEMPLATE_TARGET_TYPES[number];
+
+export const TEMPLATE_TARGET_TYPE_LABELS: Record<TemplateTargetType, string> = {
+  customer: "Kunden",
+  employee: "Mitarbeiter",
+  beide: "Beide",
+};
+
+export const insertDocumentTemplateSchema = z.object({
+  slug: z.string().min(1, "Slug ist erforderlich").max(100, "Maximal 100 Zeichen"),
+  name: z.string().min(1, "Name ist erforderlich").max(200, "Maximal 200 Zeichen"),
+  description: z.string().max(1000, "Maximal 1000 Zeichen").nullable().optional(),
+  htmlContent: z.string().min(1, "HTML-Inhalt ist erforderlich").max(500000, "Maximal 500000 Zeichen"),
+  isSystem: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+  documentTypeId: z.number().int().nullable().optional(),
+  context: z.enum(TEMPLATE_CONTEXTS).default("beide"),
+  targetType: z.enum(TEMPLATE_TARGET_TYPES).default("customer"),
+  requiresCustomerSignature: z.boolean().default(true),
+  requiresEmployeeSignature: z.boolean().default(true),
+});
+
+export const updateDocumentTemplateSchema = z.object({
+  name: z.string().min(1, "Name ist erforderlich").max(200, "Maximal 200 Zeichen").optional(),
+  description: z.string().max(1000, "Maximal 1000 Zeichen").nullable().optional(),
+  htmlContent: z.string().min(1, "HTML-Inhalt ist erforderlich").max(500000, "Maximal 500000 Zeichen").optional(),
+  isActive: z.boolean().optional(),
+  documentTypeId: z.number().int().nullable().optional(),
+  context: z.enum(TEMPLATE_CONTEXTS).optional(),
+  targetType: z.enum(TEMPLATE_TARGET_TYPES).optional(),
+  requiresCustomerSignature: z.boolean().optional(),
+  requiresEmployeeSignature: z.boolean().optional(),
+});
+
+export const insertGeneratedDocumentSchema = z.object({
+  customerId: z.number().int().nullable().optional(),
+  employeeId: z.number().int().nullable().optional(),
+  templateId: z.number().int(),
+  templateVersion: z.number().int(),
+  documentTypeId: z.number().int().nullable().optional(),
+  fileName: z.string().min(1, "Dateiname ist erforderlich"),
+  objectPath: z.string().min(1, "Dateipfad ist erforderlich"),
+  renderedHtml: z.string().nullable().optional(),
+  customerSignatureData: z.string().nullable().optional(),
+  employeeSignatureData: z.string().nullable().optional(),
+  signingStatus: z.enum(SIGNING_STATUSES).optional().default("complete"),
+  integrityHash: z.string().nullable().optional(),
+  signingIp: z.string().nullable().optional(),
+  signingLocation: z.string().nullable().optional(),
+});
+
+export type DocumentTemplate = typeof documentTemplates.$inferSelect;
+export type InsertDocumentTemplate = z.infer<typeof insertDocumentTemplateSchema>;
+export type UpdateDocumentTemplate = z.infer<typeof updateDocumentTemplateSchema>;
+export type DocumentTemplateBillingType = typeof documentTemplateBillingTypes.$inferSelect;
+export type GeneratedDocument = typeof generatedDocuments.$inferSelect;
+export type InsertGeneratedDocument = z.infer<typeof insertGeneratedDocumentSchema>;
+export type DocumentSigningToken = typeof documentSigningTokens.$inferSelect;
+
+export const insertDocumentTypeSchema = z.object({
+  name: z.string().min(1, "Name ist erforderlich").max(100, "Maximal 100 Zeichen"),
+  description: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
+  targetType: z.enum(["employee", "customer"]).default("employee"),
+  context: z.enum(DOCUMENT_TYPE_CONTEXTS).default("beide"),
+  inputMethod: z.enum(INPUT_METHODS).default("upload"),
+  isMandatory: z.boolean().default(false),
+  renewalDays: z.number().int().min(1, "Wiedervorlage muss mindestens 1 Tag sein").nullable().optional(),
+  reviewIntervalMonths: z.number().int().min(1, "Prüfintervall muss mindestens 1 Monat sein").nullable().optional(),
+  reminderLeadTimeDays: z.number().int().min(1, "Vorlaufzeit muss mindestens 1 Tag sein").max(365, "Vorlaufzeit darf maximal 365 Tage sein").default(14),
+  isActive: z.boolean().default(true),
+});
+
+export const updateDocumentTypeSchema = insertDocumentTypeSchema.partial();
+
+export const insertDocumentTypeTriggerSchema = z.object({
+  documentTypeId: z.number().int(),
+  entityType: z.enum(["customer", "employee"]),
+  triggerType: z.enum(["field_match", "role", "always"]),
+  conditionField: z.string().nullable().optional(),
+  conditionOperator: z.enum(["equals", "greater_than", "is_true"]).default("equals"),
+  conditionValue: z.string().nullable().optional(),
+  requirement: z.enum(["pflicht", "optional"]).default("pflicht"),
+  sortOrder: z.number().int().default(0),
+  isActive: z.boolean().default(true),
+});
+
+export const insertEmployeeDocumentSchema = z.object({
+  employeeId: z.number().int(),
+  documentTypeId: z.number().int(),
+  fileName: z.string().min(1, "Dateiname ist erforderlich"),
+  objectPath: z.string().min(1, "Dateipfad ist erforderlich"),
+  notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
+});
+
+export const insertCustomerDocumentSchema = z.object({
+  customerId: z.number().int(),
+  documentTypeId: z.number().int(),
+  fileName: z.string().min(1, "Dateiname ist erforderlich"),
+  objectPath: z.string().min(1, "Dateipfad ist erforderlich"),
+  notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
+});
+
+export type DocumentType = typeof documentTypes.$inferSelect;
+export type InsertDocumentType = z.infer<typeof insertDocumentTypeSchema>;
+export type UpdateDocumentType = z.infer<typeof updateDocumentTypeSchema>;
+export type DocumentTypeTrigger = typeof documentTypeTriggers.$inferSelect;
+export type InsertDocumentTypeTrigger = z.infer<typeof insertDocumentTypeTriggerSchema>;
+export type EmployeeDocument = typeof employeeDocuments.$inferSelect;
+export type InsertEmployeeDocument = z.infer<typeof insertEmployeeDocumentSchema>;
+export type CustomerDocument = typeof customerDocuments.$inferSelect;
+export type InsertCustomerDocument = z.infer<typeof insertCustomerDocumentSchema>;
