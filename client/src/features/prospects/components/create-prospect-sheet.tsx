@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Loader2, Plus } from "lucide-react";
 import { useCreateProspect } from "@/features/prospects/hooks/use-prospects";
@@ -18,6 +19,7 @@ export function CreateProspectSheet({ open, onClose }: { open: boolean; onClose:
   const [nr, setNr] = useState("");
   const [plz, setPlz] = useState("");
   const [stadt, setStadt] = useState("");
+  const [pflegegrad, setPflegegrad] = useState("");
   const [quelle, setQuelle] = useState("");
   const [notiz, setNotiz] = useState("");
   const [wiedervorlageDate, setWiedervorlageDate] = useState("");
@@ -56,6 +58,7 @@ export function CreateProspectSheet({ open, onClose }: { open: boolean; onClose:
       nr: nr || null,
       plz: plz || null,
       stadt: stadt || null,
+      pflegegrad: pflegegrad && pflegegrad !== "none" ? parseInt(pflegegrad) : null,
       quelle: quelle || null,
       status: wiedervorlageDate ? "wiedervorlage" : "neu",
       wiedervorlageDate: wiedervorlageDate || null,
@@ -64,7 +67,7 @@ export function CreateProspectSheet({ open, onClose }: { open: boolean; onClose:
       onSuccess: () => {
         setVorname(""); setNachname(""); setTelefon(""); setEmail("");
         setStrasse(""); setNr(""); setPlz(""); setStadt("");
-        setQuelle(""); setNotiz(""); setWiedervorlageDate("");
+        setPflegegrad(""); setQuelle(""); setNotiz(""); setWiedervorlageDate("");
         setErrors({});
         onClose();
       },
@@ -109,6 +112,20 @@ export function CreateProspectSheet({ open, onClose }: { open: boolean; onClose:
             testIdPrefix="prospect"
           />
           {errors.plz && <p className="text-destructive text-xs">{errors.plz}</p>}
+          <div>
+            <Label>Pflegegrad</Label>
+            <Select value={pflegegrad} onValueChange={setPflegegrad}>
+              <SelectTrigger data-testid="select-prospect-pflegegrad">
+                <SelectValue placeholder="Nicht bekannt" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nicht bekannt</SelectItem>
+                {[1, 2, 3, 4, 5].map((g) => (
+                  <SelectItem key={g} value={g.toString()}>Pflegegrad {g}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div>
             <Label>Quelle</Label>
             <Input value={quelle} onChange={(e) => setQuelle(e.target.value)} placeholder="z.B. pflege24.de" data-testid="input-prospect-quelle" />
