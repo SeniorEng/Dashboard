@@ -29,7 +29,6 @@ exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pr
   ],
   "server/routes/admin/test-cleanup.ts": [
     "appointmentsRepo",
-    "prospectsRepo",
   ],
   "server/routes/appointments.ts": [
     "appointmentsRepo",
