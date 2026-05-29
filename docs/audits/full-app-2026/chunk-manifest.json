@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-05-15",
-  "totalFiles": 521,
-  "totalLoc": 116282,
+  "generatedAt": "2026-05-29",
+  "totalFiles": 593,
+  "totalLoc": 136816,
   "outOfScope": {
     "files": 9,
     "loc": 2335,
@@ -153,7 +153,7 @@
       ]
     },
     "4b1": {
-      "name": "Customer FE: Anlage-Wizard + Vertr\u00e4ge/Versicherung",
+      "name": "Customer FE: Anlage-Wizard + Verträge/Versicherung",
       "risk": "HOCH",
       "files": 15,
       "loc": 4835,
@@ -698,5 +698,7 @@
         "server/vite.ts"
       ]
     }
-  }
+  },
+  "commit": "178b2574222197c3e0d218b176cd3af2f79d5ab5",
+  "refreshNote": "Refreshed for Task #822 against commit 178b2574 (2026-05-29). Totals updated to current snapshot; per-chunk path lists carried over from the #481/3e0d3fb baseline — new files since then (e.g. budget/km-rebook.ts, startup/ensure-invoice-per-pot-columns.ts) fall under their existing domain chunk. Out-of-scope set unchanged."
 }

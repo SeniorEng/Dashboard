@@ -1,91 +1,92 @@
 {
-  "generatedAt": "2026-05-15",
-  "totalFiles": 521,
-  "totalLoc": 116282,
+  "generatedAt": "2026-05-29",
+  "commit": "178b2574222197c3e0d218b176cd3af2f79d5ab5",
+  "totalFiles": 593,
+  "totalLoc": 136816,
   "byDomain": {
-    "billing": {
-      "files": 12,
-      "loc": 4538,
+    "other": {
+      "files": 124,
+      "loc": 25593,
+      "risk": "MITTEL"
+    },
+    "customer": {
+      "files": 77,
+      "loc": 22545,
       "risk": "HOCH"
     },
     "appointment": {
-      "files": 51,
-      "loc": 14346,
+      "files": 72,
+      "loc": 20549,
       "risk": "HOCH"
     },
     "budget": {
-      "files": 24,
-      "loc": 7033,
-      "risk": "HOCH"
-    },
-    "customer": {
-      "files": 83,
-      "loc": 22988,
+      "files": 46,
+      "loc": 11808,
       "risk": "HOCH"
     },
     "documents": {
-      "files": 29,
-      "loc": 9747,
+      "files": 30,
+      "loc": 9144,
       "risk": "HOCH"
     },
-    "settings": {
-      "files": 39,
-      "loc": 8012,
-      "risk": "MITTEL"
-    },
-    "statistics": {
-      "files": 21,
-      "loc": 5557,
-      "risk": "MITTEL"
-    },
-    "other": {
-      "files": 78,
-      "loc": 12738,
-      "risk": "NIEDRIG"
-    },
-    "profile": {
-      "files": 23,
-      "loc": 4298,
-      "risk": "MITTEL"
-    },
-    "devops": {
-      "files": 8,
-      "loc": 2632,
-      "risk": "MITTEL"
-    },
-    "layout-ui": {
-      "files": 31,
-      "loc": 3787,
-      "risk": "NIEDRIG"
-    },
-    "auth": {
+    "billing": {
       "files": 14,
-      "loc": 2842,
-      "risk": "HOCH"
-    },
-    "prospects": {
-      "files": 18,
-      "loc": 3505,
-      "risk": "MITTEL"
-    },
-    "compliance": {
-      "files": 15,
-      "loc": 3108,
+      "loc": 8708,
       "risk": "HOCH"
     },
     "time-tracking": {
-      "files": 31,
-      "loc": 5820,
+      "files": 28,
+      "loc": 5553,
+      "risk": "HOCH"
+    },
+    "statistics": {
+      "files": 18,
+      "loc": 4199,
+      "risk": "MITTEL"
+    },
+    "profile": {
+      "files": 26,
+      "loc": 4072,
+      "risk": "MITTEL"
+    },
+    "compliance": {
+      "files": 16,
+      "loc": 3728,
       "risk": "HOCH"
     },
     "notifications": {
-      "files": 21,
-      "loc": 3501,
+      "files": 22,
+      "loc": 3711,
+      "risk": "MITTEL"
+    },
+    "settings": {
+      "files": 16,
+      "loc": 3416,
       "risk": "MITTEL"
     },
     "shared-foundation": {
-      "files": 22,
-      "loc": 1748,
+      "files": 28,
+      "loc": 3295,
+      "risk": "HOCH"
+    },
+    "layout-ui": {
+      "files": 26,
+      "loc": 3167,
+      "risk": "NIEDRIG"
+    },
+    "devops": {
+      "files": 27,
+      "loc": 2986,
+      "risk": "MITTEL"
+    },
+    "prospects": {
+      "files": 13,
+      "loc": 2148,
+      "risk": "MITTEL"
+    },
+    "auth": {
+      "files": 9,
+      "loc": 2112,
       "risk": "HOCH"
     },
     "search": {
@@ -97,38 +98,68 @@
   "files": [
     {
       "path": "server/routes/billing.ts",
-      "loc": 2131,
+      "loc": 3656,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/billing.tsx",
+      "loc": 1772,
       "domain": "billing",
       "risk": "HOCH"
     },
     {
       "path": "server/routes/appointments.ts",
-      "loc": 1485,
+      "loc": 1632,
       "domain": "appointment",
       "risk": "HOCH"
     },
     {
       "path": "client/src/pages/edit-appointment.tsx",
-      "loc": 1349,
+      "loc": 1428,
       "domain": "appointment",
       "risk": "HOCH"
     },
     {
-      "path": "server/storage/budget/allocation-storage.ts",
-      "loc": 976,
+      "path": "server/routes/budget.ts",
+      "loc": 1278,
       "domain": "budget",
       "risk": "HOCH"
     },
     {
-      "path": "server/routes/budget.ts",
-      "loc": 936,
+      "path": "server/storage/budget/allocation-storage.ts",
+      "loc": 1274,
       "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/appointment-import.ts",
+      "loc": 1201,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/components/budget/BudgetTypeSettings.tsx",
+      "loc": 1169,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/pdf-generator.ts",
+      "loc": 958,
+      "domain": "documents",
       "risk": "HOCH"
     },
     {
       "path": "client/src/features/customers/hooks/use-customer-wizard.ts",
       "loc": 908,
       "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/api/openapi.ts",
+      "loc": 903,
+      "domain": "shared-foundation",
       "risk": "HOCH"
     },
     {
@@ -144,40 +175,52 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/routes/appointment-series.ts",
+      "loc": 884,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/pages/admin/qonto.tsx",
       "loc": 883,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "domain": "billing",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/pages/dashboard.tsx",
       "loc": 879,
-      "domain": "statistics",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
+      "path": "client/src/features/customers/components/admin/customer-pricing-section.tsx",
+      "loc": 871,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/components/budget/BudgetLedgerSection.tsx",
-      "loc": 854,
+      "loc": 866,
       "domain": "budget",
       "risk": "HOCH"
     },
     {
-      "path": "client/src/components/budget/BudgetTypeSettings.tsx",
-      "loc": 845,
-      "domain": "budget",
+      "path": "server/routes/admin/customers.ts",
+      "loc": 858,
+      "domain": "customer",
       "risk": "HOCH"
     },
     {
       "path": "client/src/pages/admin/services.tsx",
       "loc": 843,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "client/src/features/customers/components/admin/customer-pricing-section.tsx",
-      "loc": 841,
-      "domain": "customer",
-      "risk": "HOCH"
+      "path": "client/src/pages/admin/settings.tsx",
+      "loc": 835,
+      "domain": "settings",
+      "risk": "MITTEL"
     },
     {
       "path": "server/storage/documents.ts",
@@ -186,43 +229,49 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/admin/settings.tsx",
-      "loc": 833,
-      "domain": "settings",
-      "risk": "MITTEL"
-    },
-    {
       "path": "client/src/features/customers/components/admin/customer-contract-tab.tsx",
-      "loc": 805,
+      "loc": 818,
       "domain": "customer",
       "risk": "HOCH"
     },
     {
-      "path": "server/lib/pdf-generator.ts",
-      "loc": 800,
-      "domain": "documents",
-      "risk": "HOCH"
+      "path": "server/routes/admin/employee-users.ts",
+      "loc": 771,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
-      "path": "server/routes/appointment-series.ts",
-      "loc": 787,
+      "path": "server/index.ts",
+      "loc": 768,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/import-appointments.tsx",
+      "loc": 765,
       "domain": "appointment",
       "risk": "HOCH"
     },
     {
-      "path": "server/routes/admin/employee-users.ts",
-      "loc": 760,
-      "domain": "profile",
-      "risk": "MITTEL"
+      "path": "server/storage/budget/consumption-engine.ts",
+      "loc": 761,
+      "domain": "budget",
+      "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/admin/users.tsx",
+      "path": "client/src/pages/admin/customers.tsx",
       "loc": 755,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "domain": "customer",
+      "risk": "HOCH"
     },
     {
-      "path": "server/routes/admin/customers.ts",
+      "path": "server/storage/customer-management.ts",
+      "loc": 750,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/customer-detail.tsx",
       "loc": 742,
       "domain": "customer",
       "risk": "HOCH"
@@ -231,12 +280,6 @@
       "path": "client/src/pages/admin/document-templates.tsx",
       "loc": 739,
       "domain": "documents",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/pages/admin/customer-detail.tsx",
-      "loc": 734,
-      "domain": "customer",
       "risk": "HOCH"
     },
     {
@@ -252,27 +295,15 @@
       "risk": "MITTEL"
     },
     {
-      "path": "client/src/pages/admin/billing.tsx",
-      "loc": 727,
-      "domain": "billing",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/services/appointment-import.ts",
-      "loc": 717,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
       "path": "client/src/features/customers/components/admin/customer-documents-section-admin.tsx",
       "loc": 702,
       "domain": "customer",
       "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/admin/customers.tsx",
-      "loc": 686,
-      "domain": "customer",
+      "path": "server/storage/budget/preferences-storage.ts",
+      "loc": 693,
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
@@ -289,8 +320,8 @@
     },
     {
       "path": "server/scripts/cleanup-test-data.ts",
-      "loc": 679,
-      "domain": "devops",
+      "loc": 678,
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -301,7 +332,7 @@
     },
     {
       "path": "server/services/auth.ts",
-      "loc": 675,
+      "loc": 677,
       "domain": "auth",
       "risk": "HOCH"
     },
@@ -312,16 +343,10 @@
       "risk": "MITTEL"
     },
     {
-      "path": "server/storage/customer-management.ts",
-      "loc": 664,
-      "domain": "customer",
-      "risk": "HOCH"
-    },
-    {
       "path": "server/routes/service-records.ts",
-      "loc": 644,
-      "domain": "documents",
-      "risk": "HOCH"
+      "loc": 659,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/components/customer-documents-section.tsx",
@@ -330,10 +355,16 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/scripts/reconcile-import-from-excel.ts",
+      "loc": 627,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/routes/admin/employee-availability.ts",
       "loc": 609,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/routes/admin/customers/workflows.ts",
@@ -348,21 +379,21 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/service-records.tsx",
-      "loc": 600,
-      "domain": "documents",
-      "risk": "HOCH"
+      "path": "server/storage/service-records-storage.ts",
+      "loc": 599,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
-      "path": "server/services/appointments.ts",
-      "loc": 598,
-      "domain": "appointment",
-      "risk": "HOCH"
+      "path": "client/src/pages/service-records.tsx",
+      "loc": 593,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/admin/whatsapp.tsx",
       "loc": 591,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -372,9 +403,27 @@
       "risk": "HOCH"
     },
     {
+      "path": "client/src/pages/admin/users.tsx",
+      "loc": 586,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/routes/time-entries.ts",
+      "loc": 584,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/services/month-close-scheduler.ts",
       "loc": 584,
       "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/appointments.ts",
+      "loc": 576,
+      "domain": "appointment",
       "risk": "HOCH"
     },
     {
@@ -384,15 +433,33 @@
       "risk": "MITTEL"
     },
     {
+      "path": "server/lib/zugferd.ts",
+      "loc": 563,
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/features/customers/components/admin/digital-document-flow-admin.tsx",
       "loc": 562,
       "domain": "customer",
       "risk": "HOCH"
     },
     {
+      "path": "client/src/pages/document-appointment.tsx",
+      "loc": 561,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/appointment-documentation.ts",
+      "loc": 561,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/services/email-parser.ts",
       "loc": 561,
-      "domain": "prospects",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -402,26 +469,14 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/admin/import-appointments.tsx",
-      "loc": 554,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/storage/budget/consumption-engine.ts",
-      "loc": 551,
-      "domain": "budget",
-      "risk": "HOCH"
-    },
-    {
       "path": "client/src/pages/admin/time-entries.tsx",
       "loc": 543,
       "domain": "time-tracking",
       "risk": "HOCH"
     },
     {
-      "path": "server/storage/service-records-storage.ts",
-      "loc": 543,
+      "path": "server/services/pdf-generator.ts",
+      "loc": 541,
       "domain": "documents",
       "risk": "HOCH"
     },
@@ -432,15 +487,15 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/scripts/reconcile-km-drift.ts",
+      "loc": 530,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "client/src/features/customers/components/admin/customer-contacts-tab.tsx",
       "loc": 527,
       "domain": "customer",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/routes/time-entries.ts",
-      "loc": 523,
-      "domain": "time-tracking",
       "risk": "HOCH"
     },
     {
@@ -453,7 +508,7 @@
       "path": "client/src/pages/help.tsx",
       "loc": 499,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/routes/admin/documents.ts",
@@ -468,6 +523,12 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/services/test-data-cleanup.ts",
+      "loc": 491,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "client/src/pages/team-workload.tsx",
       "loc": 490,
       "domain": "profile",
@@ -476,53 +537,59 @@
     {
       "path": "client/src/pages/service-record-detail.tsx",
       "loc": 486,
-      "domain": "documents",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/routes/admin/test-cleanup.ts",
-      "loc": 480,
       "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
-      "path": "server/index.ts",
-      "loc": 477,
-      "domain": "devops",
       "risk": "MITTEL"
     },
     {
-      "path": "client/src/pages/document-appointment.tsx",
-      "loc": 465,
+      "path": "server/storage/appointments-storage.ts",
+      "loc": 475,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/appointment-detail.tsx",
+      "loc": 473,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/service-records/components/overview-sections.tsx",
+      "loc": 473,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/import-reconcile-section.tsx",
+      "loc": 467,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/appointment-import-reconcile.ts",
+      "loc": 462,
       "domain": "appointment",
       "risk": "HOCH"
     },
     {
       "path": "server/services/template-engine.ts",
-      "loc": 457,
-      "domain": "settings",
-      "risk": "MITTEL"
-    },
-    {
-      "path": "client/src/pages/appointment-detail.tsx",
-      "loc": 456,
-      "domain": "appointment",
+      "loc": 461,
+      "domain": "documents",
       "risk": "HOCH"
     },
     {
       "path": "server/routes/admin/lexware-export.ts",
       "loc": 450,
-      "domain": "billing",
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/scripts/audit-appointment-budget-drift.ts",
+      "loc": 448,
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
       "path": "server/scripts/reconcile-trimmed-imports.ts",
-      "loc": 447,
-      "domain": "devops",
-      "risk": "MITTEL"
-    },
-    {
-      "path": "server/storage/appointments-storage.ts",
       "loc": 441,
       "domain": "appointment",
       "risk": "HOCH"
@@ -534,28 +601,22 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/admin/duplicates.tsx",
-      "loc": 437,
-      "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
       "path": "client/src/pages/admin/availability.tsx",
       "loc": 435,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/admin/duplicates.tsx",
+      "loc": 435,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "server/storage/tasks.ts",
       "loc": 434,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
-    },
-    {
-      "path": "server/lib/zugferd.ts",
-      "loc": 431,
-      "domain": "billing",
-      "risk": "HOCH"
     },
     {
       "path": "client/src/pages/admin/statistics/v2/cockpit-v2-tab.tsx",
@@ -565,8 +626,20 @@
     },
     {
       "path": "server/routes/auth.ts",
-      "loc": 414,
+      "loc": 425,
       "domain": "auth",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes/admin/import-appointments.ts",
+      "loc": 421,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/time-entry-dialog.tsx",
+      "loc": 416,
+      "domain": "time-tracking",
       "risk": "HOCH"
     },
     {
@@ -583,21 +656,45 @@
     },
     {
       "path": "client/src/features/customers/hooks/use-customer-detail-form.ts",
-      "loc": 398,
+      "loc": 402,
       "domain": "customer",
       "risk": "HOCH"
     },
     {
-      "path": "client/src/features/customers/components/wizard/budgets-contract-step.tsx",
-      "loc": 397,
-      "domain": "customer",
+      "path": "server/storage/time-tracking/overview.ts",
+      "loc": 402,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/audit-log.tsx",
+      "loc": 401,
+      "domain": "compliance",
       "risk": "HOCH"
     },
     {
       "path": "server/routes/index.ts",
-      "loc": 390,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "loc": 401,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/budget/summary-queries.ts",
+      "loc": 397,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-documentation-form.ts",
+      "loc": 394,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/wizard/budgets-contract-step.tsx",
+      "loc": 392,
+      "domain": "budget",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/pages/admin/statistics/v2/revenue-page.tsx",
@@ -612,9 +709,27 @@
       "risk": "HOCH"
     },
     {
+      "path": "client/src/components/ui/signature-pad.tsx",
+      "loc": 384,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/features/tasks/components.tsx",
       "loc": 384,
-      "domain": "notifications",
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/budget/rebook-storage.ts",
+      "loc": 383,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/App.tsx",
+      "loc": 380,
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -624,16 +739,16 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/storage/time-tracking/overview.ts",
+      "path": "server/services/audit.ts",
       "loc": 380,
-      "domain": "time-tracking",
+      "domain": "compliance",
       "risk": "HOCH"
     },
     {
-      "path": "client/src/App.tsx",
-      "loc": 372,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "path": "server/services/document-pdf.ts",
+      "loc": 373,
+      "domain": "documents",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/time-tracking/components/day-detail-panel.tsx",
@@ -643,9 +758,33 @@
     },
     {
       "path": "client/src/components/ui/date-picker.tsx",
-      "loc": 361,
+      "loc": 370,
       "domain": "layout-ui",
       "risk": "NIEDRIG"
+    },
+    {
+      "path": "shared/domain/appointments.ts",
+      "loc": 369,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/lib/api/client.ts",
+      "loc": 367,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/scripts/correct-schroeder-39.ts",
+      "loc": 367,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/document-appointment-no-show.tsx",
+      "loc": 361,
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/customers/components/admin/customer-insurance-tab.tsx",
@@ -654,33 +793,21 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/lib/api/client.ts",
-      "loc": 360,
-      "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
       "path": "server/storage/time-tracking/month-closing.ts",
       "loc": 360,
-      "domain": "time-tracking",
+      "domain": "compliance",
       "risk": "HOCH"
     },
     {
       "path": "server/routes/admin/qonto.ts",
       "loc": 359,
-      "domain": "settings",
-      "risk": "MITTEL"
-    },
-    {
-      "path": "server/services/audit.ts",
-      "loc": 359,
-      "domain": "compliance",
+      "domain": "billing",
       "risk": "HOCH"
     },
     {
       "path": "client/src/pages/admin/birthday-cards.tsx",
       "loc": 358,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -690,26 +817,32 @@
       "risk": "MITTEL"
     },
     {
-      "path": "server/storage/budget/rebook-storage.ts",
-      "loc": 351,
-      "domain": "budget",
+      "path": "shared/schema/appointments.ts",
+      "loc": 358,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/customers/components/admin/customer-detail-sections.tsx",
+      "loc": 348,
+      "domain": "customer",
       "risk": "HOCH"
     },
     {
       "path": "client/src/pages/admin/dashboard.tsx",
       "loc": 345,
-      "domain": "statistics",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/admin/settings/lead-auto-reply-card.tsx",
       "loc": 345,
-      "domain": "prospects",
+      "domain": "settings",
       "risk": "MITTEL"
     },
     {
       "path": "server/routes/admin/customers/duplicates.ts",
-      "loc": 341,
+      "loc": 340,
       "domain": "customer",
       "risk": "HOCH"
     },
@@ -732,16 +865,22 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/storage/budget/summary-queries.ts",
-      "loc": 333,
-      "domain": "budget",
+      "path": "server/storage/customers-storage.ts",
+      "loc": 334,
+      "domain": "customer",
       "risk": "HOCH"
     },
     {
       "path": "client/src/pages/tasks.tsx",
       "loc": 331,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
+    },
+    {
+      "path": "shared/policies/appointments.ts",
+      "loc": 330,
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "server/storage/time-tracking/vacation.ts",
@@ -750,27 +889,9 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/storage/customers-storage.ts",
-      "loc": 327,
-      "domain": "customer",
-      "risk": "HOCH"
-    },
-    {
-      "path": "shared/policies/appointments.ts",
-      "loc": 327,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/features/appointments/hooks/use-documentation-form.ts",
-      "loc": 325,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/pages/admin/audit-log.tsx",
-      "loc": 324,
-      "domain": "compliance",
+      "path": "client/src/features/time-tracking/components/time-overview-summary.tsx",
+      "loc": 326,
+      "domain": "time-tracking",
       "risk": "HOCH"
     },
     {
@@ -795,25 +916,25 @@
       "path": "server/services/auto-breaks.ts",
       "loc": 318,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "server/services/document-pdf.ts",
-      "loc": 315,
-      "domain": "documents",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/components/ui/signature-pad.tsx",
-      "loc": 310,
-      "domain": "documents",
-      "risk": "HOCH"
+      "path": "server/routes/admin/test-cleanup.ts",
+      "loc": 316,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "server/storage.ts",
-      "loc": 309,
+      "loc": 314,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/lib/query-invalidation.ts",
+      "loc": 313,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "server/startup/sync-appointment-service-durations.ts",
@@ -824,8 +945,8 @@
     {
       "path": "client/src/pages/admin/lexware-export.tsx",
       "loc": 308,
-      "domain": "billing",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "server/services/notification-service.ts",
@@ -836,8 +957,8 @@
     {
       "path": "server/repos/index.ts",
       "loc": 303,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/admin/appointment-series.tsx",
@@ -849,13 +970,25 @@
       "path": "server/replit_integrations/object_storage/objectStorage.ts",
       "loc": 300,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/my-times.tsx",
       "loc": 299,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/team/components/user-card.tsx",
+      "loc": 298,
+      "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/customers.ts",
+      "loc": 298,
+      "domain": "customer",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/customers/components/admin-overview/details-sections.tsx",
@@ -866,60 +999,42 @@
     {
       "path": "client/src/features/appointments/components/new-appointment-kundentermin-tab.tsx",
       "loc": 293,
-      "domain": "customer",
+      "domain": "appointment",
       "risk": "HOCH"
     },
     {
       "path": "server/services/employee-availability.ts",
       "loc": 293,
       "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
-      "path": "client/src/features/time-tracking/components/time-overview-summary.tsx",
-      "loc": 291,
-      "domain": "time-tracking",
-      "risk": "HOCH"
+      "risk": "MITTEL"
     },
     {
       "path": "server/scripts/cleanup-duplicate-service-prices.ts",
       "loc": 291,
-      "domain": "devops",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
-      "path": "server/lib/customer-creation-helpers.ts",
-      "loc": 290,
+      "path": "server/storage/statistics/customers.ts",
+      "loc": 289,
       "domain": "customer",
       "risk": "HOCH"
     },
     {
-      "path": "shared/schema/appointments.ts",
-      "loc": 289,
+      "path": "server/storage/appointment-helpers.ts",
+      "loc": 286,
       "domain": "appointment",
       "risk": "HOCH"
     },
     {
       "path": "client/src/components/patterns/status-badge.tsx",
-      "loc": 288,
+      "loc": 285,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "client/src/lib/query-invalidation.ts",
-      "loc": 283,
-      "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
-      "path": "server/storage/statistics/customers.ts",
-      "loc": 283,
-      "domain": "customer",
-      "risk": "HOCH"
-    },
-    {
-      "path": "shared/schema/customers.ts",
-      "loc": 283,
+      "path": "server/lib/customer-creation-helpers.ts",
+      "loc": 284,
       "domain": "customer",
       "risk": "HOCH"
     },
@@ -938,8 +1053,8 @@
     {
       "path": "server/services/qonto.ts",
       "loc": 281,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "domain": "billing",
+      "risk": "HOCH"
     },
     {
       "path": "server/storage/statistics/process-health.ts",
@@ -948,9 +1063,9 @@
       "risk": "MITTEL"
     },
     {
-      "path": "shared/domain/appointments.ts",
-      "loc": 278,
-      "domain": "appointment",
+      "path": "shared/schema/billing.ts",
+      "loc": 276,
+      "domain": "billing",
       "risk": "HOCH"
     },
     {
@@ -960,22 +1075,10 @@
       "risk": "MITTEL"
     },
     {
-      "path": "server/routes/admin/customers/budgets.ts",
-      "loc": 272,
-      "domain": "customer",
-      "risk": "HOCH"
-    },
-    {
       "path": "server/services/cache.ts",
       "loc": 272,
       "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
-      "path": "server/storage/budget/preferences-storage.ts",
-      "loc": 272,
-      "domain": "budget",
-      "risk": "HOCH"
+      "risk": "MITTEL"
     },
     {
       "path": "server/storage/statistics/performance.ts",
@@ -990,27 +1093,9 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/features/customers/components/admin/customer-detail-sections.tsx",
-      "loc": 271,
-      "domain": "customer",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/features/time-tracking/components/time-entry-dialog.tsx",
-      "loc": 270,
-      "domain": "time-tracking",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/storage/appointment-helpers.ts",
-      "loc": 268,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
       "path": "server/services/email-service.ts",
       "loc": 263,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -1018,12 +1103,6 @@
       "loc": 263,
       "domain": "shared-foundation",
       "risk": "HOCH"
-    },
-    {
-      "path": "client/src/design-system/tokens.ts",
-      "loc": 262,
-      "domain": "layout-ui",
-      "risk": "NIEDRIG"
     },
     {
       "path": "server/routes/month-closing.ts",
@@ -1035,7 +1114,7 @@
       "path": "server/services/call-scheduler.ts",
       "loc": 261,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/services/document-delivery.ts",
@@ -1044,16 +1123,16 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/services/avis-parser.ts",
-      "loc": 258,
-      "domain": "prospects",
-      "risk": "MITTEL"
-    },
-    {
-      "path": "shared/schema/budget.ts",
-      "loc": 258,
+      "path": "server/storage/budget/km-rebook.ts",
+      "loc": 259,
       "domain": "budget",
       "risk": "HOCH"
+    },
+    {
+      "path": "server/services/avis-parser.ts",
+      "loc": 258,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/admin/statistics/v2/process-health-page.tsx",
@@ -1068,10 +1147,22 @@
       "risk": "HOCH"
     },
     {
+      "path": "client/src/design-system/tokens.ts",
+      "loc": 255,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/storage/qonto.ts",
       "loc": 255,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "domain": "billing",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-documentation-diagnosis.tsx",
+      "loc": 254,
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/customers/components/customer-timeline.tsx",
@@ -1080,9 +1171,15 @@
       "risk": "HOCH"
     },
     {
+      "path": "client/src/pages/admin/settings/company-details-form.tsx",
+      "loc": 253,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/routes/tasks.ts",
       "loc": 251,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -1094,8 +1191,8 @@
     {
       "path": "client/src/pages/admin/contact-migration.tsx",
       "loc": 248,
-      "domain": "compliance",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/components/customer-contact-section.tsx",
@@ -1104,15 +1201,45 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/routes/birthdays.ts",
-      "loc": 239,
-      "domain": "notifications",
+      "path": "server/startup/backfill-task-685-relink-orphan-carryover-tx.ts",
+      "loc": 240,
+      "domain": "devops",
       "risk": "MITTEL"
     },
     {
-      "path": "client/src/pages/admin/settings/company-details-form.tsx",
+      "path": "server/routes/birthdays.ts",
+      "loc": 239,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/components/appointment-card.tsx",
+      "loc": 238,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/time-tracking/components/calendar-grid.tsx",
       "loc": 237,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/time-tracking/entries.ts",
+      "loc": 237,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/settings/logo-upload.tsx",
+      "loc": 236,
       "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/prospects.ts",
+      "loc": 236,
+      "domain": "prospects",
       "risk": "MITTEL"
     },
     {
@@ -1122,20 +1249,14 @@
       "risk": "MITTEL"
     },
     {
-      "path": "client/src/pages/admin/settings/logo-upload.tsx",
+      "path": "shared/api/customers.ts",
       "loc": 233,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "domain": "customer",
+      "risk": "HOCH"
     },
     {
       "path": "shared/domain/vacation.ts",
       "loc": 231,
-      "domain": "time-tracking",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/features/time-tracking/components/calendar-grid.tsx",
-      "loc": 230,
       "domain": "time-tracking",
       "risk": "HOCH"
     },
@@ -1149,7 +1270,7 @@
       "path": "client/src/pages/admin/proof-review.tsx",
       "loc": 228,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/components/admin/employee-matching.tsx",
@@ -1158,16 +1279,28 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/services/customer-deletion-service.ts",
+      "loc": 227,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget/appointment-cost-calculator.ts",
+      "loc": 227,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/budget.ts",
+      "loc": 227,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/pages/admin/statistics/v2/process-health-detail.tsx",
       "loc": 226,
       "domain": "statistics",
       "risk": "MITTEL"
-    },
-    {
-      "path": "server/services/customer-deletion-service.ts",
-      "loc": 226,
-      "domain": "customer",
-      "risk": "HOCH"
     },
     {
       "path": "server/routes/admin/audit.ts",
@@ -1188,38 +1321,38 @@
       "risk": "MITTEL"
     },
     {
+      "path": "server/routes/admin.ts",
+      "loc": 223,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/services/whatsapp-service.ts",
       "loc": 223,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
       "path": "server/storage/service-catalog.ts",
       "loc": 223,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/services/geocoding.ts",
       "loc": 222,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/error-boundary.tsx",
       "loc": 221,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/services/appointment-series.ts",
       "loc": 220,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/features/appointments/components/appointment-card.tsx",
-      "loc": 219,
       "domain": "appointment",
       "risk": "HOCH"
     },
@@ -1232,14 +1365,14 @@
     {
       "path": "client/src/pages/reset-password.tsx",
       "loc": 215,
-      "domain": "auth",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/address-autocomplete.tsx",
       "loc": 214,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/appointments/components/appointment-time-services-card.tsx",
@@ -1250,8 +1383,8 @@
     {
       "path": "server/startup/import-pflegekassen.ts",
       "loc": 214,
-      "domain": "devops",
-      "risk": "MITTEL"
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/components/budget/PflegegradBudgetSection.tsx",
@@ -1266,28 +1399,28 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/startup/migrate-erstberatung-customers.ts",
+      "loc": 213,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/features/profile/components/personal-data-section.tsx",
       "loc": 212,
       "domain": "profile",
       "risk": "MITTEL"
     },
     {
+      "path": "server/routes/admin/customers/budgets.ts",
+      "loc": 212,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/features/notifications/notification-list.tsx",
       "loc": 211,
       "domain": "notifications",
       "risk": "MITTEL"
-    },
-    {
-      "path": "server/routes/appointment-documentation.ts",
-      "loc": 211,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/lib/errors.ts",
-      "loc": 209,
-      "domain": "other",
-      "risk": "NIEDRIG"
     },
     {
       "path": "client/src/pages/new-appointment.tsx",
@@ -1302,9 +1435,27 @@
       "risk": "MITTEL"
     },
     {
+      "path": "client/src/components/onboarding-dialog.tsx",
+      "loc": 206,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/errors.ts",
+      "loc": 206,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/cleanup-orphan-erstberatung-customers.ts",
+      "loc": 205,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/services/lead-auto-reply.ts",
       "loc": 204,
-      "domain": "prospects",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -1320,22 +1471,22 @@
       "risk": "HOCH"
     },
     {
-      "path": "shared/schema/prospects.ts",
-      "loc": 203,
-      "domain": "prospects",
-      "risk": "MITTEL"
-    },
-    {
       "path": "client/src/components/ui/dropdown-menu.tsx",
       "loc": 202,
       "domain": "layout-ui",
       "risk": "NIEDRIG"
     },
     {
+      "path": "server/startup/restore-storno-deleted-service-records.ts",
+      "loc": 202,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
       "path": "client/src/pages/public-signing.tsx",
       "loc": 201,
-      "domain": "documents",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/components/admin-overview/care-level-section.tsx",
@@ -1350,22 +1501,10 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/components/onboarding-dialog.tsx",
-      "loc": 197,
-      "domain": "layout-ui",
-      "risk": "NIEDRIG"
-    },
-    {
       "path": "client/src/pages/admin/settings/smtp-settings.tsx",
       "loc": 197,
       "domain": "settings",
       "risk": "MITTEL"
-    },
-    {
-      "path": "shared/api/customers.ts",
-      "loc": 194,
-      "domain": "customer",
-      "risk": "HOCH"
     },
     {
       "path": "client/src/features/team/team-workload-view.ts",
@@ -1383,7 +1522,7 @@
       "path": "client/src/hooks/use-toast.ts",
       "loc": 191,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/admin/statistics/v2/budgets-page.tsx",
@@ -1410,22 +1549,40 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/storage/budget-recipients.ts",
+      "loc": 187,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
       "path": "shared/domain/budgets.ts",
       "loc": 187,
       "domain": "budget",
       "risk": "HOCH"
     },
     {
+      "path": "client/src/components/month-close-banner.tsx",
+      "loc": 182,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/services/qonto-csv-parser.ts",
       "loc": 182,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "domain": "billing",
+      "risk": "HOCH"
     },
     {
       "path": "server/replit_integrations/object_storage/objectAcl.ts",
       "loc": 181,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/hooks/use-appointment-mutations.ts",
+      "loc": 180,
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/prospects/hooks/use-prospects.ts",
@@ -1440,9 +1597,15 @@
       "risk": "MITTEL"
     },
     {
-      "path": "server/storage/time-tracking/entries.ts",
+      "path": "server/lib/signature-validation.ts",
       "loc": 177,
-      "domain": "time-tracking",
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/api/billing.ts",
+      "loc": 177,
+      "domain": "billing",
       "risk": "HOCH"
     },
     {
@@ -1466,8 +1629,8 @@
     {
       "path": "client/src/pages/login.tsx",
       "loc": 175,
-      "domain": "auth",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/ui/searchable-select.tsx",
@@ -1476,22 +1639,34 @@
       "risk": "NIEDRIG"
     },
     {
+      "path": "client/src/pages/undocumented-appointments.tsx",
+      "loc": 174,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/features/time-tracking/hooks/use-time-entries.ts",
       "loc": 173,
       "domain": "time-tracking",
       "risk": "HOCH"
     },
     {
+      "path": "client/src/features/customers/hooks/use-customers.ts",
+      "loc": 172,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/routes/public-signing.ts",
       "loc": 172,
-      "domain": "documents",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "server/services/cover-letter.ts",
       "loc": 172,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/appointments/components/employee-availability.tsx",
@@ -1503,7 +1678,7 @@
       "path": "server/services/letterxpress-service.ts",
       "loc": 171,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/storage/appointment-series-storage.ts",
@@ -1524,15 +1699,15 @@
       "risk": "MITTEL"
     },
     {
-      "path": "server/storage/budget/cap-calculator.ts",
+      "path": "shared/api/time-tracking.ts",
       "loc": 169,
-      "domain": "budget",
+      "domain": "time-tracking",
       "risk": "HOCH"
     },
     {
       "path": "server/services/twilio-call-bridge.ts",
       "loc": 168,
-      "domain": "settings",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -1544,8 +1719,20 @@
     {
       "path": "server/scripts/cleanup-duplicate-carryovers.ts",
       "loc": 166,
-      "domain": "devops",
+      "domain": "other",
       "risk": "MITTEL"
+    },
+    {
+      "path": "shared/domain/documentation-diagnostics.ts",
+      "loc": 165,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/billing-storage.ts",
+      "loc": 164,
+      "domain": "billing",
+      "risk": "HOCH"
     },
     {
       "path": "server/storage/budget/import-availability.ts",
@@ -1557,7 +1744,7 @@
       "path": "client/src/pages/setup.tsx",
       "loc": 163,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/routes/profile.ts",
@@ -1566,10 +1753,22 @@
       "risk": "MITTEL"
     },
     {
+      "path": "server/startup/backfill-orphan-reversal-appointment-id.ts",
+      "loc": 163,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/utils/holidays.ts",
+      "loc": 163,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/components/charts/sparkline.tsx",
       "loc": 162,
-      "domain": "layout-ui",
-      "risk": "NIEDRIG"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/ui/select.tsx",
@@ -1584,9 +1783,15 @@
       "risk": "HOCH"
     },
     {
+      "path": "shared/schema/company.ts",
+      "loc": 161,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/storage/whatsapp.ts",
       "loc": 160,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -1608,21 +1813,21 @@
       "risk": "HOCH"
     },
     {
-      "path": "shared/api/time-tracking.ts",
-      "loc": 158,
-      "domain": "time-tracking",
-      "risk": "HOCH"
-    },
-    {
       "path": "client/src/components/patterns/responsive-tabs.tsx",
       "loc": 157,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/forgot-password.tsx",
       "loc": 157,
-      "domain": "auth",
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/pages/customer-undocumented-appointments.tsx",
+      "loc": 157,
+      "domain": "appointment",
       "risk": "HOCH"
     },
     {
@@ -1635,7 +1840,13 @@
       "path": "server/lib/idempotency.ts",
       "loc": 157,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/storage/budget/cap-calculator.ts",
+      "loc": 157,
+      "domain": "budget",
+      "risk": "HOCH"
     },
     {
       "path": "server/storage/statistics/alerts.ts",
@@ -1650,27 +1861,21 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/routes/admin.ts",
-      "loc": 155,
-      "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
       "path": "server/services/travel-time.ts",
       "loc": 155,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "client/src/features/customers/hooks/use-customers.ts",
+      "path": "shared/domain/budget-invoice-split.ts",
       "loc": 154,
-      "domain": "customer",
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
       "path": "shared/schema/whatsapp.ts",
       "loc": 154,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -1686,15 +1891,27 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/routes/admin/import-appointments.ts",
+      "path": "shared/domain/budget/history-aggregation.ts",
       "loc": 152,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/audit.ts",
+      "loc": 152,
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/features/appointments/components/travel-documentation.tsx",
+      "loc": 150,
       "domain": "appointment",
       "risk": "HOCH"
     },
     {
-      "path": "shared/schema/company.ts",
-      "loc": 151,
-      "domain": "settings",
+      "path": "client/src/features/prospects/components/create-prospect-sheet.tsx",
+      "loc": 150,
+      "domain": "prospects",
       "risk": "MITTEL"
     },
     {
@@ -1704,9 +1921,9 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/features/appointments/components/travel-documentation.tsx",
+      "path": "server/startup/backfill-import-update-budget-drift.ts",
       "loc": 148,
-      "domain": "appointment",
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
@@ -1714,6 +1931,18 @@
       "loc": 148,
       "domain": "time-tracking",
       "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget/transaction-storage.ts",
+      "loc": 147,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/backfill-duplicate-wizard-carryovers.ts",
+      "loc": 147,
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/profile/components/emergency-contact-section.tsx",
@@ -1728,34 +1957,28 @@
       "risk": "MITTEL"
     },
     {
+      "path": "server/services/invoice-integrity-verifier.ts",
+      "loc": 144,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "client/src/components/ui/alert-dialog.tsx",
       "loc": 142,
       "domain": "layout-ui",
       "risk": "NIEDRIG"
     },
     {
-      "path": "server/storage/budget/appointment-cost-calculator.ts",
+      "path": "server/startup/backfill-storno-invoice-pdfs.ts",
       "loc": 142,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/startup/migrate-erstberatung-customers.ts",
-      "loc": 142,
-      "domain": "customer",
+      "domain": "documents",
       "risk": "HOCH"
     },
     {
       "path": "client/src/features/profile/components/whatsapp-section.tsx",
       "loc": 140,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
-    },
-    {
-      "path": "server/storage/billing-storage.ts",
-      "loc": 139,
-      "domain": "billing",
-      "risk": "HOCH"
     },
     {
       "path": "client/src/components/ui/sheet.tsx",
@@ -1767,12 +1990,12 @@
       "path": "client/src/hooks/use-upload.ts",
       "loc": 138,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/charts/kpi-tile.tsx",
       "loc": 134,
-      "domain": "statistics",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -1782,27 +2005,15 @@
       "risk": "HOCH"
     },
     {
-      "path": "shared/schema/audit.ts",
-      "loc": 134,
+      "path": "client/src/features/time-tracking/hooks/use-month-closing.ts",
+      "loc": 133,
       "domain": "compliance",
       "risk": "HOCH"
     },
     {
-      "path": "client/src/features/time-tracking/hooks/use-month-closing.ts",
-      "loc": 133,
-      "domain": "time-tracking",
-      "risk": "HOCH"
-    },
-    {
-      "path": "client/src/features/prospects/components/create-prospect-sheet.tsx",
-      "loc": 133,
-      "domain": "prospects",
-      "risk": "MITTEL"
-    },
-    {
       "path": "server/services/whatsapp-reminder-scheduler.ts",
       "loc": 133,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -1812,10 +2023,28 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/services/invoice-integrity-verifier.ts",
-      "loc": 129,
-      "domain": "billing",
+      "path": "server/scripts/audit-km-geo-precision.ts",
+      "loc": 133,
+      "domain": "compliance",
       "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/budget-ledger.ts",
+      "loc": 132,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/backfill-task-684-orphan-auto-carryovers.ts",
+      "loc": 132,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/migrate-km-geo-to-numeric.ts",
+      "loc": 130,
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/team/components/admin-permissions-section.tsx",
@@ -1828,12 +2057,6 @@
       "loc": 127,
       "domain": "layout-ui",
       "risk": "NIEDRIG"
-    },
-    {
-      "path": "client/src/features/appointments/hooks/use-appointment-mutations.ts",
-      "loc": 127,
-      "domain": "appointment",
-      "risk": "HOCH"
     },
     {
       "path": "client/src/features/customers/components/wizard/delivery-step.tsx",
@@ -1851,6 +2074,12 @@
       "path": "server/routes/admin/document-delivery.ts",
       "loc": 127,
       "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/services/import-preview-cache.ts",
+      "loc": 127,
+      "domain": "appointment",
       "risk": "HOCH"
     },
     {
@@ -1878,9 +2107,27 @@
       "risk": "NIEDRIG"
     },
     {
+      "path": "server/lib/db.ts",
+      "loc": 125,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/backfill-invoice-pdfs.ts",
+      "loc": 125,
+      "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/features/profile/components/documents-section.tsx",
       "loc": 124,
       "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/cancellation-policy.ts",
+      "loc": 124,
+      "domain": "shared-foundation",
       "risk": "HOCH"
     },
     {
@@ -1892,7 +2139,7 @@
     {
       "path": "client/src/features/tasks/use-tasks.ts",
       "loc": 122,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -1904,13 +2151,19 @@
     {
       "path": "server/routes/admin/whatsapp.ts",
       "loc": 121,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
       "path": "server/services/document-review.ts",
       "loc": 121,
       "domain": "documents",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/invoice-line-items.ts",
+      "loc": 121,
+      "domain": "shared-foundation",
       "risk": "HOCH"
     },
     {
@@ -1941,12 +2194,18 @@
       "path": "client/src/pages/admin/planned-consultations.tsx",
       "loc": 118,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/components/wizard/customer-types.ts",
       "loc": 118,
       "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/lib/invoice-pdf-fingerprint.ts",
+      "loc": 118,
+      "domain": "documents",
       "risk": "HOCH"
     },
     {
@@ -1963,21 +2222,15 @@
     },
     {
       "path": "server/storage/time-tracking.ts",
-      "loc": 113,
+      "loc": 115,
       "domain": "time-tracking",
       "risk": "HOCH"
     },
     {
       "path": "client/src/features/profile/components/password-section.tsx",
       "loc": 111,
-      "domain": "auth",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/storage/budget/transaction-storage.ts",
-      "loc": 110,
-      "domain": "budget",
-      "risk": "HOCH"
+      "domain": "profile",
+      "risk": "MITTEL"
     },
     {
       "path": "shared/schema/contracts.ts",
@@ -1992,7 +2245,7 @@
       "risk": "MITTEL"
     },
     {
-      "path": "server/startup/clear-45b-monthly-limits.ts",
+      "path": "shared/domain/budget/cost-estimate-outcome.ts",
       "loc": 107,
       "domain": "budget",
       "risk": "HOCH"
@@ -2006,14 +2259,8 @@
     {
       "path": "server/routes/webhook-twilio.ts",
       "loc": 106,
-      "domain": "settings",
+      "domain": "other",
       "risk": "MITTEL"
-    },
-    {
-      "path": "shared/utils/month-close-cutoff.ts",
-      "loc": 106,
-      "domain": "compliance",
-      "risk": "HOCH"
     },
     {
       "path": "client/src/pages/admin/statistics.tsx",
@@ -2028,15 +2275,15 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/storage/budget-ledger.ts",
+      "path": "server/startup/audit-budget-type-settings-chain.ts",
       "loc": 103,
       "domain": "budget",
       "risk": "HOCH"
     },
     {
-      "path": "shared/schema/billing.ts",
+      "path": "shared/domain/budget/cap-math.ts",
       "loc": 103,
-      "domain": "billing",
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
@@ -2048,19 +2295,13 @@
     {
       "path": "shared/schema/qonto.ts",
       "loc": 101,
-      "domain": "settings",
-      "risk": "MITTEL"
-    },
-    {
-      "path": "client/src/components/month-close-banner.tsx",
-      "loc": 100,
-      "domain": "compliance",
+      "domain": "billing",
       "risk": "HOCH"
     },
     {
       "path": "server/routes/webhook.ts",
       "loc": 100,
-      "domain": "settings",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -2090,13 +2331,19 @@
     {
       "path": "client/src/features/time-tracking/components/month-closing-section.tsx",
       "loc": 97,
-      "domain": "time-tracking",
+      "domain": "compliance",
       "risk": "HOCH"
     },
     {
       "path": "client/src/features/time-tracking/lib/month-closing-message.ts",
       "loc": 97,
-      "domain": "time-tracking",
+      "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/scripts/audit-empty-signatures.ts",
+      "loc": 97,
+      "domain": "documents",
       "risk": "HOCH"
     },
     {
@@ -2112,9 +2359,15 @@
       "risk": "HOCH"
     },
     {
+      "path": "shared/utils/parse-german-decimal.ts",
+      "loc": 96,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
+    },
+    {
       "path": "shared/schema/service-records.ts",
       "loc": 96,
-      "domain": "documents",
+      "domain": "shared-foundation",
       "risk": "HOCH"
     },
     {
@@ -2127,7 +2380,13 @@
       "path": "server/lib/duplicate-check.ts",
       "loc": 95,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/utils/format.ts",
+      "loc": 94,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/appointments/components/cost-estimate-preview.tsx",
@@ -2150,7 +2409,7 @@
     {
       "path": "server/scripts/fix-customer-182-budget-cap.ts",
       "loc": 93,
-      "domain": "customer",
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
@@ -2168,8 +2427,14 @@
     {
       "path": "server/lib/twilio-callback-token.ts",
       "loc": 92,
-      "domain": "settings",
+      "domain": "other",
       "risk": "MITTEL"
+    },
+    {
+      "path": "server/lib/pdf-cache-stats.ts",
+      "loc": 92,
+      "domain": "documents",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/notifications/use-notifications.ts",
@@ -2196,6 +2461,12 @@
       "risk": "HOCH"
     },
     {
+      "path": "client/src/features/appointments/lib/submit-with-retry.ts",
+      "loc": 89,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/lib/with-audit.ts",
       "loc": 89,
       "domain": "compliance",
@@ -2211,19 +2482,19 @@
       "path": "client/src/hooks/use-view-as-employee.tsx",
       "loc": 87,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/routes/birthday-cards.ts",
       "loc": 87,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
       "path": "client/src/features/team/components/reset-password-form.tsx",
       "loc": 86,
-      "domain": "auth",
-      "risk": "HOCH"
+      "domain": "profile",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/team/components/workload-info-tooltip.tsx",
@@ -2236,6 +2507,12 @@
       "loc": 86,
       "domain": "notifications",
       "risk": "MITTEL"
+    },
+    {
+      "path": "shared/utils/month-close-cutoff.ts",
+      "loc": 86,
+      "domain": "compliance",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/customers/components/wizard/address-fields.tsx",
@@ -2259,43 +2536,49 @@
       "path": "client/src/lib/favicon-badge.ts",
       "loc": 81,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/appointments/components/appointment-customer-header.tsx",
       "loc": 81,
-      "domain": "customer",
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/routes.ts",
+      "loc": 80,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/audit-appointment-budget-km-drift.ts",
+      "loc": 80,
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
       "path": "client/src/features/birthdays/lib/birthday-display.ts",
       "loc": 79,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
       "path": "server/lib/params.ts",
       "loc": 79,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "shared/utils/holidays.ts",
+      "path": "server/middleware/csrf.ts",
       "loc": 79,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "domain": "auth",
+      "risk": "HOCH"
     },
     {
       "path": "server/routes/company.ts",
       "loc": 78,
       "domain": "settings",
       "risk": "MITTEL"
-    },
-    {
-      "path": "server/middleware/csrf.ts",
-      "loc": 78,
-      "domain": "auth",
-      "risk": "HOCH"
     },
     {
       "path": "shared/utils/zod-german.ts",
@@ -2316,9 +2599,21 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/startup/cleanup-vacation-on-holidays.ts",
+      "loc": 76,
+      "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/routes/team.ts",
       "loc": 75,
       "domain": "profile",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/services/test-data-cleanup-scheduler.ts",
+      "loc": 75,
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -2334,21 +2629,21 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/undocumented-appointments.tsx",
+      "path": "shared/domain/budget-carryover-dedup.ts",
+      "loc": 74,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/storage/notifications.ts",
       "loc": 73,
-      "domain": "appointment",
-      "risk": "HOCH"
+      "domain": "notifications",
+      "risk": "MITTEL"
     },
     {
-      "path": "shared/utils/format.ts",
-      "loc": 71,
-      "domain": "shared-foundation",
-      "risk": "HOCH"
-    },
-    {
-      "path": "shared/api/billing.ts",
-      "loc": 71,
-      "domain": "billing",
+      "path": "shared/api/budget.ts",
+      "loc": 72,
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
@@ -2360,14 +2655,8 @@
     {
       "path": "server/routes/admin/contact-migration.ts",
       "loc": 69,
-      "domain": "compliance",
-      "risk": "HOCH"
-    },
-    {
-      "path": "server/services/pdf-generator.ts",
-      "loc": 69,
-      "domain": "documents",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "shared/schema/system.ts",
@@ -2379,16 +2668,22 @@
       "path": "server/routes/services.ts",
       "loc": 68,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/patterns/page-header.tsx",
       "loc": 67,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/services/budget-renewal-checker.ts",
+      "loc": 67,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/budget-pflegegrad-validator.ts",
       "loc": 67,
       "domain": "budget",
       "risk": "HOCH"
@@ -2400,15 +2695,21 @@
       "risk": "HOCH"
     },
     {
-      "path": "server/storage/notifications.ts",
-      "loc": 66,
-      "domain": "notifications",
-      "risk": "MITTEL"
-    },
-    {
       "path": "server/storage/customer-mgmt/contacts.ts",
       "loc": 66,
       "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
+      "path": "server/startup/ensure-budget-tx-appointment-constraint.ts",
+      "loc": 66,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/import-appointment-action.ts",
+      "loc": 66,
+      "domain": "appointment",
       "risk": "HOCH"
     },
     {
@@ -2430,6 +2731,12 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/storage/budget/types.ts",
+      "loc": 65,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/features/customers/components/admin-overview/section-helpers.tsx",
       "loc": 64,
       "domain": "customer",
@@ -2439,7 +2746,7 @@
       "path": "server/lib/crypto.ts",
       "loc": 63,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "shared/schema/tasks.ts",
@@ -2454,15 +2761,27 @@
       "risk": "MITTEL"
     },
     {
+      "path": "client/src/features/appointments/lib/map-submit-error.ts",
+      "loc": 61,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/components/patterns/data-list.tsx",
       "loc": 60,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/storage/time-tracking/shared.ts",
       "loc": 60,
       "domain": "time-tracking",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/domain/budget-selbstzahler-validator.ts",
+      "loc": 60,
+      "domain": "budget",
       "risk": "HOCH"
     },
     {
@@ -2484,28 +2803,40 @@
       "risk": "HOCH"
     },
     {
+      "path": "client/src/features/service-records/pending-banner-section.tsx",
+      "loc": 59,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/vite.ts",
       "loc": 58,
       "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
-      "path": "server/storage/budget/types.ts",
-      "loc": 58,
-      "domain": "budget",
-      "risk": "HOCH"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/patterns/section-card.tsx",
       "loc": 57,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/lib/edit-diff.ts",
+      "loc": 57,
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/components/patterns/error-state.tsx",
       "loc": 54,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/ensure-invoice-per-pot-columns.ts",
+      "loc": 54,
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/ui/tabs.tsx",
@@ -2526,10 +2857,22 @@
       "risk": "MITTEL"
     },
     {
+      "path": "shared/domain/import-cutoff.ts",
+      "loc": 53,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "shared/schema/notifications.ts",
       "loc": 52,
-      "domain": "shared-foundation",
-      "risk": "HOCH"
+      "domain": "notifications",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/replit_integrations/object_storage/routes.ts",
+      "loc": 51,
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/appointments/components/appointment-summary.tsx",
@@ -2538,10 +2881,22 @@
       "risk": "HOCH"
     },
     {
+      "path": "client/src/features/service-records/components/deadline-hint.tsx",
+      "loc": 50,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/services/logo-resolver.ts",
       "loc": 50,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/types.ts",
+      "loc": 50,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/time-tracking/constants.ts",
@@ -2553,25 +2908,19 @@
       "path": "server/storage/deliveries.ts",
       "loc": 49,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "shared/types.ts",
+      "path": "shared/domain/budget-rebook-triggers.ts",
       "loc": 49,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "domain": "budget",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/team/components/workload-metrics.ts",
       "loc": 48,
       "domain": "profile",
       "risk": "MITTEL"
-    },
-    {
-      "path": "server/storage/customer-mgmt/budgets.ts",
-      "loc": 48,
-      "domain": "customer",
-      "risk": "HOCH"
     },
     {
       "path": "client/src/pages/admin/documents.tsx",
@@ -2589,13 +2938,19 @@
       "path": "server/storage/admin-permissions.ts",
       "loc": 47,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "server/replit_integrations/object_storage/routes.ts",
+      "path": "server/storage/budget/history-aggregation.ts",
       "loc": 47,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
+      "path": "client/src/pages/admin/settings/types.ts",
+      "loc": 45,
+      "domain": "settings",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/profile/components/pet-acceptance-section.tsx",
@@ -2606,8 +2961,8 @@
     {
       "path": "server/lib/encrypted-row.ts",
       "loc": 45,
-      "domain": "compliance",
-      "risk": "HOCH"
+      "domain": "other",
+      "risk": "MITTEL"
     },
     {
       "path": "server/startup/ensure-customer-idempotency-schema.ts",
@@ -2616,10 +2971,10 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/pages/admin/settings/types.ts",
-      "loc": 44,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "path": "server/startup/ensure-import-batch.ts",
+      "loc": 45,
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/components/ui/badge.tsx",
@@ -2631,13 +2986,7 @@
       "path": "client/src/components/patterns/empty-state.tsx",
       "loc": 43,
       "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
-      "path": "server/routes.ts",
-      "loc": 43,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/components/ui/radio-group.tsx",
@@ -2650,6 +2999,12 @@
       "loc": 41,
       "domain": "notifications",
       "risk": "MITTEL"
+    },
+    {
+      "path": "shared/domain/excel-service-art.ts",
+      "loc": 41,
+      "domain": "shared-foundation",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/features/appointments/hooks/use-appointment-coverage.ts",
@@ -2673,19 +3028,19 @@
       "path": "server/services/routing.ts",
       "loc": 39,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/lib/team-lead.ts",
       "loc": 39,
-      "domain": "prospects",
+      "domain": "profile",
       "risk": "MITTEL"
     },
     {
       "path": "server/middleware/cache-headers.ts",
       "loc": 39,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/startup/migrate-budget-sources.ts",
@@ -2694,10 +3049,16 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/startup/migrate-in-progress-appointments.ts",
+      "loc": 39,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/lib/queryClient.ts",
       "loc": 38,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/components/review-badge.tsx",
@@ -2712,9 +3073,21 @@
       "risk": "MITTEL"
     },
     {
+      "path": "server/storage/import-batches.ts",
+      "loc": 38,
+      "domain": "appointment",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/startup/ensure-audit-parent-deletion.ts",
       "loc": 38,
       "domain": "compliance",
+      "risk": "HOCH"
+    },
+    {
+      "path": "shared/schema/import-batches.ts",
+      "loc": 38,
+      "domain": "appointment",
       "risk": "HOCH"
     },
     {
@@ -2726,7 +3099,7 @@
     {
       "path": "server/startup/migrate-whatsapp-twilio.ts",
       "loc": 37,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -2754,15 +3127,27 @@
       "risk": "MITTEL"
     },
     {
+      "path": "server/startup/drop-customer-budgets-table.ts",
+      "loc": 34,
+      "domain": "budget",
+      "risk": "HOCH"
+    },
+    {
       "path": "client/src/components/ui/toaster.tsx",
       "loc": 33,
       "domain": "layout-ui",
       "risk": "NIEDRIG"
     },
     {
+      "path": "client/src/features/service-records/pending-banner.ts",
+      "loc": 33,
+      "domain": "other",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/startup/seed-whatsapp-rules.ts",
       "loc": 33,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
@@ -2790,16 +3175,22 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/startup/migrate-task-status-in-progress.ts",
+      "loc": 32,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
       "path": "client/src/lib/public-branding.ts",
       "loc": 30,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/lib/test-fault-injector.ts",
       "loc": 30,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/lib/budget-warning.ts",
@@ -2834,14 +3225,14 @@
     {
       "path": "server/routes/whatsapp.ts",
       "loc": 28,
-      "domain": "settings",
+      "domain": "notifications",
       "risk": "MITTEL"
     },
     {
       "path": "server/startup/ensure-qonto-match-idempotency.ts",
       "loc": 28,
-      "domain": "settings",
-      "risk": "MITTEL"
+      "domain": "billing",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/components/ui/switch.tsx",
@@ -2853,7 +3244,7 @@
       "path": "client/src/lib/api/types.ts",
       "loc": 27,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/appointments/components/performed-by-selector.tsx",
@@ -2876,8 +3267,8 @@
     {
       "path": "server/startup/fix-invoice-line-item-types.ts",
       "loc": 27,
-      "domain": "billing",
-      "risk": "HOCH"
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "shared/schema/birthday-cards.ts",
@@ -2892,21 +3283,27 @@
       "risk": "NIEDRIG"
     },
     {
+      "path": "client/src/features/customers/hooks/index.ts",
+      "loc": 26,
+      "domain": "customer",
+      "risk": "HOCH"
+    },
+    {
       "path": "server/routes/settings.ts",
       "loc": 26,
       "domain": "settings",
       "risk": "MITTEL"
     },
     {
-      "path": "server/lib/db.ts",
-      "loc": 26,
-      "domain": "other",
-      "risk": "NIEDRIG"
-    },
-    {
       "path": "server/startup/migrate-prospect-statuses.ts",
       "loc": 26,
       "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/index.ts",
+      "loc": 26,
+      "domain": "devops",
       "risk": "MITTEL"
     },
     {
@@ -2916,28 +3313,22 @@
       "risk": "NIEDRIG"
     },
     {
-      "path": "client/src/features/customers/hooks/index.ts",
-      "loc": 25,
-      "domain": "customer",
-      "risk": "HOCH"
-    },
-    {
-      "path": "shared/schema/index.ts",
-      "loc": 25,
-      "domain": "shared-foundation",
-      "risk": "HOCH"
-    },
-    {
       "path": "client/src/features/appointments/hooks/use-customer-list.ts",
       "loc": 24,
-      "domain": "customer",
+      "domain": "appointment",
       "risk": "HOCH"
     },
     {
       "path": "server/lib/db-helpers.ts",
       "loc": 24,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/schema/customer-full.ts",
+      "loc": 24,
+      "domain": "customer",
+      "risk": "HOCH"
     },
     {
       "path": "shared/api/insurance.ts",
@@ -2967,13 +3358,13 @@
       "path": "client/src/pages/not-found.tsx",
       "loc": 22,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/static.ts",
       "loc": 22,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/prospects/components/prospect-status-constants.ts",
@@ -2985,13 +3376,13 @@
       "path": "server/lib/with-timeout.ts",
       "loc": 21,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/replit_integrations/object_storage/index.ts",
       "loc": 21,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "shared/api/pagination.ts",
@@ -3009,13 +3400,37 @@
       "path": "client/src/hooks/use-mobile.tsx",
       "loc": 19,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
-      "path": "shared/schema/customer-full.ts",
+      "path": "server/startup/ensure-invoice-leistungsnachweis-columns.ts",
+      "loc": 19,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/ensure-invoice-fingerprint-columns.ts",
+      "loc": 19,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/ensure-invoice-render-snapshot.ts",
+      "loc": 19,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/ensure-invoice-line-item-quantity-columns.ts",
       "loc": 18,
-      "domain": "customer",
-      "risk": "HOCH"
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/startup/clear-45b-monthly-limits.ts",
+      "loc": 18,
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/time-tracking/index.ts",
@@ -3024,34 +3439,52 @@
       "risk": "HOCH"
     },
     {
+      "path": "server/startup/ensure-company-bank-account-holder.ts",
+      "loc": 17,
+      "domain": "settings",
+      "risk": "MITTEL"
+    },
+    {
       "path": "server/routes/holidays.ts",
       "loc": 16,
-      "domain": "settings",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
       "path": "shared/schema/encrypted-columns.ts",
       "loc": 16,
-      "domain": "compliance",
+      "domain": "shared-foundation",
       "risk": "HOCH"
     },
     {
       "path": "server/routes/test-outbox.ts",
       "loc": 15,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/lib/xml.ts",
       "loc": 15,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
+    },
+    {
+      "path": "shared/domain/budget-settings-sentinel.ts",
+      "loc": 15,
+      "domain": "budget",
+      "risk": "HOCH"
     },
     {
       "path": "client/src/lib/api/index.ts",
       "loc": 13,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "client/src/features/appointments/components/index.ts",
+      "loc": 13,
+      "domain": "appointment",
+      "risk": "HOCH"
     },
     {
       "path": "shared/api/employees.ts",
@@ -3060,16 +3493,10 @@
       "risk": "HOCH"
     },
     {
-      "path": "client/src/features/appointments/components/index.ts",
-      "loc": 12,
-      "domain": "appointment",
-      "risk": "HOCH"
-    },
-    {
       "path": "server/lib/object-storage-helpers.ts",
       "loc": 12,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/components/admin-overview/types.ts",
@@ -3086,8 +3513,8 @@
     {
       "path": "server/startup/migrate-invoice-storno-refs.ts",
       "loc": 11,
-      "domain": "billing",
-      "risk": "HOCH"
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "server/startup/migrate-invoice-zugferd-xml.ts",
@@ -3111,13 +3538,13 @@
       "path": "server/routes/admin/employees.ts",
       "loc": 10,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "server/lib/log.ts",
       "loc": 10,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "shared/api/labor-law.ts",
@@ -3126,28 +3553,28 @@
       "risk": "HOCH"
     },
     {
+      "path": "shared/api/index.ts",
+      "loc": 10,
+      "domain": "devops",
+      "risk": "MITTEL"
+    },
+    {
       "path": "client/src/features/prospects/components/status-badge.tsx",
       "loc": 9,
       "domain": "prospects",
       "risk": "MITTEL"
     },
     {
-      "path": "shared/api/index.ts",
-      "loc": 9,
-      "domain": "shared-foundation",
-      "risk": "HOCH"
-    },
-    {
       "path": "client/src/components/patterns/index.ts",
       "loc": 8,
-      "domain": "other",
-      "risk": "NIEDRIG"
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/lib/utils.ts",
       "loc": 8,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/customers/index.ts",
@@ -3158,25 +3585,25 @@
     {
       "path": "client/src/design-system/index.ts",
       "loc": 7,
-      "domain": "layout-ui",
-      "risk": "NIEDRIG"
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "server/utils/sanitize-user.ts",
       "loc": 6,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/main.tsx",
       "loc": 5,
       "domain": "other",
-      "risk": "NIEDRIG"
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/pages/birthdays.tsx",
       "loc": 5,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
@@ -3194,25 +3621,31 @@
     {
       "path": "client/src/features/tasks/index.ts",
       "loc": 2,
-      "domain": "notifications",
+      "domain": "devops",
       "risk": "MITTEL"
     },
     {
       "path": "client/src/components/charts/index.ts",
       "loc": 1,
-      "domain": "layout-ui",
-      "risk": "NIEDRIG"
+      "domain": "devops",
+      "risk": "MITTEL"
     },
     {
       "path": "client/src/features/tasks/task-list.ts",
       "loc": 1,
-      "domain": "notifications",
+      "domain": "other",
       "risk": "MITTEL"
     },
     {
       "path": "client/src/features/prospects/index.ts",
       "loc": 1,
       "domain": "prospects",
+      "risk": "MITTEL"
+    },
+    {
+      "path": "server/types/archiver.d.ts",
+      "loc": 1,
+      "domain": "other",
       "risk": "MITTEL"
     },
     {

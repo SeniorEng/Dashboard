@@ -320,3 +320,25 @@ NICHT vom Server-Split ab und können sofort beginnen.
    aufgerufen, das CHECK-Constraint ist nie aktiv geworden. Application-Level
    Guard in `createCustomerDirect` bleibt bestehen; Kommentar dort
    aktualisiert.
+
+## 8. Audit-2026-Refresh (#822, Commit 178b2574, 2026-05-29)
+
+Querverweis aus dem Full-App-Audit-Refresh (`docs/audits/full-app-2026/REPORT.md` §6).
+Neue/eskalierte Simplification-/Performance-Posten seit dem 2026-05-27-Sweep:
+
+- **`server/routes/billing.ts` = 3656 LOC** (war 2131) — neuer Top-Monolith.
+  PDF-/Qonto-/Storno-Logik nach `billing-service.ts` extrahieren (vgl. §6 Out-of-Scope
+  Task #666; jetzt höchste Priorität unter den Route-Splits).
+- **`server/storage/budget/allocation-storage.ts` = 1274 LOC** und
+  **`client/src/components/budget/BudgetTypeSettings.tsx` = 1169 LOC** — neue >1000-LOC-Posten.
+- **`client/src/pages/admin/billing.tsx` = 1772 LOC** (war ~1445) — weiter gewachsen.
+- **Startup-Migrations-Retirement:** ~30 einmalige Backfills weiter im Boot-Pfad
+  (Liste in `docs/audits/full-app-2026/chunks/16-devops-startup.md`). KEEP: Seeds,
+  `sync-budget-allocations`, `migrate-km-geo-to-numeric`, `prospect-customer-matching`,
+  `audit-*`-Integritätsläufe, `encrypt-company-secrets`.
+- **`invalidateRelated`-Adoption ~20 %** (M10 im Audit) — Disziplin breiter ausrollen.
+- **Performance:** Lexware-Export-N+1, fehlende Indizes (`performedByEmployeeId`,
+  `import_batch_id`), fehlende `.limit()`/Pagination auf vielen Storage-List-Queries.
+
+Schema-Migrationen aus dem Audit (real→numeric `monthly_work_hours`, IBAN/BIC-Encryption)
+laufen als eigene Fix-Tasks (`.local/tasks/proposed-from-822/`), nicht über diesen Plan.

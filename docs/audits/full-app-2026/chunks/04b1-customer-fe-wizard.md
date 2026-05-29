@@ -1,3 +1,5 @@
+> **Refresh #822 (2026-05-29, Commit `178b2574`):** Dieser Chunk wurde in der Refresh-Welle als **Pattern-Scan** behandelt (keine neuen KRITISCH/HOCH-Findings in dieser Domäne). Maßgeblich ist `../REPORT.md` (Severity-Counts, Vorgänger-Status §5). Inhalt unten stammt aus dem #481-Lauf @`3e0d3fb`.
+
 # Chunk 4b1 — Customer FE Wizard + Verträge/Versicherung
 
 **Tiefenstufe:** Pattern-Scan

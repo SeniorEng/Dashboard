@@ -1,25 +1,34 @@
-# Chunk 5a — Appointments Backend
+# Chunk 5a — Appointments-Backend + Import/Export (Deep-Audit, Refresh #822)
 
-**Tiefenstufe:** Pattern-Scan (53-Test-Suite deckt das Wesentliche)
-**Commit:** `3e0d3fb`
-**Risiko:** HOCH
-**LOC / Files:** 5 359 / 11
+**Commit:** `178b2574` · **Stand:** 2026-05-29 · **Tiefe:** Deep (Import/Export-Teil)
+**Skills:** Business-Logic · Error-Handling · Security · Performance
 
-## Befunde
+> Hinweis: Die Appointment-km-Rebook-on-Edit-Regression ist als KRITISCH-1 in
+> `chunks/07-budget-ledger.md` geführt (Budget-Ledger-Pfad), betrifft aber den
+> Appointment-`PATCH`-Endpunkt mit.
 
-- ✅ `tests/appointments.test.ts` 53 Tests + `tests/equality/pflegegrad-pricing`
-  und `tests/equality/travel-cost` decken das Stop-Kriterium aus dem Plan.
-- ✅ `tests/architecture/soft-delete-coverage.test.ts` läuft erfolgreich gegen
-  Routes/Storage (Service-Module hat 1 Test rot — separater Tech-Debt-
-  Folge-Task).
-- ⚠️ **MITTEL:** 11 SuperAdmin-Stellen in `appointments.ts` — meiste Logik
-  hängt an Admin-Gate. Per Stichprobe verifizieren, dass keine
-  Datums-Vergangenheit-Bypass-Routes für Nicht-Admins existieren.
-- ⚠️ **NIEDRIG:** Auto-Breaks-Service (ArbZG) laut Plan-Annotation
-  „Cross-Ref Chunk 6"; im vertieften Audit verifizieren, dass nur ein
-  Pfad ihn aufruft.
+## Befunde Import/Export
 
-## Empfohlener Folge-Task
+### HOCH-1 — Bulk-Reconcile nicht atomar
+- `server/services/appointment-import-reconcile.ts:405` — Stornierung im Bulk-Reconcile
+  wrappt **jede** Zeile in eine eigene Transaktion innerhalb der Schleife. Mid-Batch-Fehler
+  hinterlässt teil-reconcilierten Zustand. Fix: eine Transaktion über den Batch (oder
+  Saga/Resume mit Idempotenz-Marker). Effort M. → T-822-IMPORT-01
 
-Teil eines übergreifenden `[MITTEL] Appointments-Backend Slot-Validation +
-ArbZG-Pfad Deep-Audit` (zusammen mit Chunk 6).
+### MITTEL-1 — Excel Formula-Injection-Härtung
+- `server/services/appointment-import.ts:146` — `ExcelJS.xlsx.load` ohne explizites
+  Formula-Disabling; `unwrapCellValue` behandelt `result`, aber Härtung empfohlen. Effort S.
+
+### MITTEL-2 — Lexware-Export N+1
+- `server/routes/admin/lexware-export.ts` — pro Mitarbeiter Einzel-Fetch der Monatsdatensätze. Effort M.
+
+### NIEDRIG-1 — Duplizierte Date-Helper
+- `appointment-import.ts:90` — `excelDateToISO` vs `dateToISO` redundant.
+
+### NIEDRIG-2 — Dead-Code
+- `appointment-import-reconcile.ts:459` — `__testing`-Export im Prod-Pfad.
+
+## Positive Confirmations
+- `parseGermanDecimal` für „Stunden"/„Kilometer" → kein stilles GoBD-Rounding.
+- SHA-256-File-Hash (`import-batches.ts:29`) verhindert Doppelverarbeitung derselben Datei.
+- EDIFACT-Pflegekassen-Import: `latin1` (DE-Standard) — NIEDRIG-Hinweis BOM/Header-Check.

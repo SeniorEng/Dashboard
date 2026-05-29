@@ -1,211 +1,230 @@
-# Full-App-Audit 2026 — Konsolidierter Hauptreport
+# Full-App-Audit 2026 — Konsolidierter Hauptreport (Refresh)
 
-**Stand:** 2026-05-15
-**Geprüfter Commit:** `3e0d3fb7029bd4f62cedd7f055abbd60bdf382e9`
-**Task:** #481 — Full-App-Check Drehbuch und Durchführung
-**Audit-Plan:** `audit-plan.md` (aus #480, MERGED)
+**Stand:** 2026-05-29
+**Geprüfter Commit:** `178b2574222197c3e0d218b176cd3af2f79d5ab5`
+**Task:** #822 — Full-App-Audit Refresh + Re-Run
+**Vorgänger-Audit:** Task #481 @ `3e0d3fb7029bd4f62cedd7f055abbd60bdf382e9` (2026-05-15)
+**Delta seit Vorgänger:** 332 Commits; Inventar 521 → **593 Dateien**, 116 282 → **136 816 LOC**
+**Audit-Plan:** `audit-plan.md` (aus #480, unverändert gültig)
+**Methodik:** team-orchestration-Roster + deep-analysis-3-Phasen (Foundation-Facts → Domain-Deep → UX/Stabilität), konsolidiert vom Architect.
 
 ---
 
 ## 0. Executive Summary
 
-In dieser Audit-Welle wurden **alle 21 Chunks** des in #480 festgelegten
-Plans abgedeckt. Vier Chunks erhielten einen **vollen Deep-Audit-Lauf**
-(2 Auth, 7 Budget, 9a Documents-BE, 13 Compliance — alle im kritischen
-Pfad bzw. Threat-Model-Top), die restlichen 17 Chunks einen
-**Pattern-Scan + Existing-Test-Coverage-Review**.
+Diese Refresh-Welle prüft den aktuellen Stand gegen den Vorgänger-Audit von vor
+332 Commits. **Die zentrale Erkenntnis: 6 der 7 vormaligen KRITISCH-Findings und
+die Mehrheit der HOCH-Findings wurden in der Zwischenzeit behoben** — verifiziert
+per file:line-Code-Walk (Details §4 + Vergleichstabelle §5).
 
-**Insgesamt 74 Findings** identifiziert (Quelle: per-Chunk-Tally nach
-Dedupe, siehe Risiko-Matrix §2). Davon **7 KRITISCH**, **17 HOCH**,
-**30 MITTEL**, **20 NIEDRIG**.
+**Severity-Verteilung (nach Dedupe):**
 
-> **Wichtige Confidence-Einordnung:** Die KRITISCH/HOCH-Befunde aus den
-> 4 Deep-Audit-Chunks (2, 7, 9a, 13) sind file:line-belegt und durch
-> Subagent-Code-Walk verifiziert (Confidence **HIGH**). Die Befunde
-> in den 17 Pattern-Scan-Chunks sind in der Mehrheit als
-> **Hypothesen / deferred** zu lesen — sie identifizieren Risiken,
-> deren tatsächliche Ausnutzbarkeit erst im Folge-Tiefenaudit
-> (Task T-FOLLOWUP-01) verifiziert werden muss. Eine Coverage-Tabelle
-> pro Chunk steht in §2a.
+| Schweregrad | Anzahl | Vorgänger (#481) |
+|---|---:|---:|
+| **KRITISCH** | **1** | 7 |
+| **HOCH** | **4** | 17 |
+| **MITTEL** | **12** | 30 |
+| **NIEDRIG** | **10** | 20 |
+| **Σ** | **27** | 74 |
 
-Die KRITISCH-Findings konzentrieren sich
-auf zwei Threat-Model-Boundaries:
-1. **Elevation of Privilege** (Chunk 2 — Admin-vs-SuperAdmin-Hierarchie,
-   CSRF-Token-Fixation).
-2. **Tampering / Information Disclosure** (Chunk 9a — Public-Signing-Race,
-   Template-HTML-Injection, Path-Traversal in Object-Storage).
+> **Confidence-Einordnung:** Die KRITISCH/HOCH-Befunde sind file:line-belegt und
+> durch Subagent-Code-Walk (6 parallele Deep-Audits: Budget, Billing,
+> Documents/Signing, Compliance/Auth, Foundation/Schema, Import/Export) sowie —
+> beim KRITISCH-Finding — durch **deterministische Test-Reproduktion in Isolation**
+> verifiziert (Confidence **HIGH**). MITTEL/NIEDRIG sind teils Hypothesen mit
+> Hinweis auf Folge-Verifikation.
 
-Zusätzlich: **Concurrency-Race im Budget-Ledger** (Chunk 7) auf einem
-Massen-Rebooking-Pfad — Daten-Integrität betroffen, aber kein direkter
-End-User-Pfad.
+**Das einzige KRITISCH-Finding ist neu** und betrifft die **Budget-Ledger
+km-Rebook-on-Edit-Logik**: Ein Cluster aus 6 Test-Dateien (Equality + Integration,
+inkl. der system-eigenen Drift-Selbstprüfung) schlägt **deterministisch** fehl —
+auch isoliert reproduziert, mit test-eigener `appointmentId`, also **keine
+Shared-DB-Flake**. Alte Consumption-Zeilen bleiben nach `reopen` + km-`PATCH`
+mit dem Termin verknüpft, obwohl der Vertrag eine Entkopplung (`appointmentId=null`)
+erwartet → Risiko doppelt gezählter Budget-Verbräuche gegen gesetzliche Caps /
+GoBD-km-Drift, plus rotes CI-Gate auf dem Finanz-Pfad.
 
-**GoBD-Compliance** (Chunk 13): solide Konzeption, aber technische
-Immutability (DB-Trigger) und Reason-Min-Length serverseitig fehlen.
-
----
-
-## 1. Top-10 Findings (Priorisiert)
-
-| # | Schweregrad | Chunk | Fundstelle | Beschreibung | Folge-Task |
-|---|---|---|---|---|---|
-| 1 | **KRITISCH** | 2 | `server/routes/admin/employee-users.ts:398` | `setUserRoles` umgeht Hierarchie-Check; Admin kann SuperAdmin entrechten | T-AUTH-01 |
-| 2 | **KRITISCH** | 2 | `server/middleware/csrf.ts:48` | CSRF-Token-Fixation: Cookie wird auf 403-POST gesetzt | T-AUTH-01 |
-| 3 | **KRITISCH** | 9a | `server/services/template-engine.ts:402` | Signature-HTML-Injection bei PDF-Render (XSS/SSRF im Puppeteer-Kontext) | T-DOCS-01 |
-| 4 | **KRITISCH** | 9a | `server/services/document-pdf.ts:258` | Path-Traversal: Prefix-Check ohne Normalisierung | T-DOCS-01 |
-| 5 | **KRITISCH** | 9a | `server/routes/public-signing.ts:103` | Token-Claim-vs-PDF-Generation Race | T-DOCS-02 |
-| 6 | **KRITISCH** | 7 | `server/storage/budget/consumption-engine.ts:264` | Cascade-Consumption ohne Advisory-Lock | T-BUDGET-01 |
-| 7 | **KRITISCH** | 2 | `server/routes/auth.ts:34` + Session-Regeneration | Login ohne CSRF-Token-Rotation → Session-Fixation-Surface | T-AUTH-01 |
-| 8 | **HOCH** | 13 | `audit_log` ohne DB-Trigger | GoBD-Immutability nur konventionell, nicht technisch erzwungen | T-COMPLIANCE-01 |
-| 9 | **HOCH** | 13 | `reopenMonthSchema` ohne `.min(10)` | Reopen-Pflicht-Begründung serverseitig nicht erzwungen | T-COMPLIANCE-01 |
-| 10 | **HOCH** | 2 | `employee-users.ts:281` | Letzter-Admin-Schutz fehlt | T-AUTH-02 |
+**GoBD-Compliance** bleibt das wichtigste offene HOCH-Thema: technische
+Audit-Log-Immutability (DB-`REVOKE`/Trigger) fehlt weiterhin; der
+serverseitige Reopen-Reason-`.min(10)` ist inzwischen **behoben**.
 
 ---
 
-## 2. Risiko-Matrix nach Modulen
+## 1. Test-Baseline-Klassifikation (T001)
 
-| Modul | KRIT | HOCH | MITTEL | NIEDRIG | Σ | Audit-Tiefe |
-|---|---:|---:|---:|---:|---:|---|
-| Chunk 2 (Auth) | 3 | 3 | 3 | 3 | 12 | Deep |
-| Chunk 9a (Docs-BE) | 3 | 4 | 5 | 5 | 17 | Deep |
-| Chunk 13 (Compliance) | 0 | 2 | 2 | 3 | 7 | Deep |
-| Chunk 7 (Budget) | 1 | 1 | 3 | 5 | 10 | Deep |
-| Chunk 1 (Foundation) | 0 | 0 | 1 | 1 | 2 | Pattern |
-| Chunk 3 (Customer-BE) | 0 | 1 | 2 | 0 | 3 | Pattern |
-| Chunk 4a, 4b1, 4b2 | 0 | 0 | 4 | 1 | 5 | Pattern |
-| Chunk 5a, 5b, 6 | 0 | 1 | 3 | 1 | 5 | Pattern |
-| Chunk 8 (Billing) | 0 | 1 | 2 | 0 | 3 | Pattern |
-| Chunk 9b (Docs-FE) | 0 | 1 | 0 | 0 | 1 | Pattern |
-| Chunk 10 (Prospects) | 0 | 1 | 2 | 0 | 3 | Pattern |
-| Chunk 11 (Stats) | 0 | 0 | 2 | 0 | 2 | Pattern |
-| Chunk 12a, 12b | 0 | 2 | 1 | 0 | 3 | Pattern |
-| Chunk 14 | 0 | 0 | 1 | 1 | 2 | Pattern |
-| Chunk 15 (UI) | 0 | 0 | 0 | 1 | 1 | Pattern |
-| Chunk 16 (DevOps) | 0 | 1 | 1 | 0 | 2 | Pattern |
-| **Σ** | **7** | **17** | **30** | **20** | **74** | – |
+CI-Stand zum Audit-Commit: `typecheck` ✅ GRÜN, `lint` ✅ GRÜN, `test`/`e2e-smoke` 🔴 ROT.
+
+| Rotes Test-File | Klassifikation | Belegt durch |
+|---|---|---|
+| `tests/equality/appointment-edit-rebook.test.ts` (4) | **REAL** — Rebook-Regression/Vertrags-Drift | Cluster, siehe KRITISCH-1 |
+| `tests/budget/km-rebook-on-edit.test.ts` (1) | **REAL** — isoliert reproduziert (`stillLinkedOld` = 1, erwartet 0) | Isolations-Run |
+| `tests/equality/appointment-series-bulk-rebook.test.ts` (1) | **REAL** — selber Pfad | Cluster |
+| `tests/equality/appointment-series-exception-rebook.test.ts` (1) | **REAL** — selber Pfad | Cluster |
+| `tests/integration/audit-appointment-budget-km-drift-detects-drift.test.ts` (1) | **REAL** — Drift-Selbstprüfung feuert | Cluster |
+| `tests/integration/reconcile-km-drift-leaves-audit-empty.test.ts` (1) | **REAL** — Reconcile-Audit nicht leer | Cluster |
+| `tests/document-pdf-sanitization.test.ts` (1) | **FLAKY / Test-only** — Signature-Fixture Min-Bytes (8-Byte-PNG-Stub scheitert an Signatur-Validierung Task #749) | `docs/flaky-tests.md`, Memory |
+| `tests/test-data-cleanup.test.ts` (1) | **FLAKY / Test-Infra** — Shared-DB-Concurrency beim Cleanup gegen den parallel laufenden Dev-Server | bekannt |
+
+→ **6 Files = ein realer Budget-Ledger-Regressionscluster (KRITISCH-1).**
+2 Files sind test-/infrastrukturseitig (kein Produkt-Bug, kein Audit-Finding;
+als NIEDRIG/Test-Maintenance gelistet).
 
 ---
 
-## 3. Cross-Cutting / Wiederkehrende Themen
+## 2. Top-Findings (priorisiert)
 
-### 3.1 Race-Conditions ohne Advisory-Locks (zwei unabhängige Fundstellen)
-- Budget Cascade Consumption (Chunk 7 KRITISCH-1)
-- Public-Signing Token-Claim vs PDF-Generation (Chunk 9a KRITISCH-3)
-- Reset-Password Token-Use (Chunk 2 HOCH-2)
-- Upload-Document `isCurrent`-Switch (Chunk 9a MITTEL-1)
+| # | Schweregrad | Phase/Skill | Fundstelle | Beschreibung | Effort | Folge-Task |
+|---|---|---|---|---|---|---|
+| 1 | **KRITISCH** | P3 QA + Regression-Guard + Business-Logic | `server/storage/budget/km-rebook.ts` + Appointment-`PATCH` | km-Rebook-on-Edit: alte Consumption-Zeilen bleiben mit Termin verknüpft (erwartet `appointmentId=null`); 6 Test-Files rot, Drift-Selbstprüfung feuert → Doppelzählungs-/GoBD-Drift-Risiko | M | **T-822-BUDGET-01** |
+| 2 | **HOCH** | P2 Security + Compliance | `server/services/audit.ts` (audit_log) | GoBD-Immutability nur konventionell — DB-User hat weiterhin `UPDATE/DELETE` auf `audit_log` (kein `REVOKE`/Trigger) | M | **T-822-COMPLIANCE-01** |
+| 3 | **HOCH** | P2 Security + Database | `shared/schema/company.ts` / `billing.ts` (`iban`, `bic`) | Bank-PII (IBAN/BIC) im Klartext at-rest, obwohl Qonto-Secret verschlüsselt ist | M | **T-822-SECRETS-01** |
+| 4 | **HOCH** | P1 Database + Business-Logic | `shared/schema/users.ts:37` (`monthly_work_hours`) | `real` (Float) statt `numeric` → Rundungs-Drift in Pro-Rata-/Lohn-Berechnung; nicht von km-geo-Migration erfasst | M | **T-822-SCHEMA-01** |
+| 5 | **HOCH** | P2 Error-Handling + Business-Logic | `server/services/appointment-import-reconcile.ts:405` | Bulk-Reconcile mit Transaktion **pro Zeile** in Schleife → Mid-Batch-Fehler hinterlässt teil-reconcilierten Zustand (nicht atomar) | M | **T-822-IMPORT-01** |
+| 6 | MITTEL | P2 Security | `server/services/template-engine.ts:404` | Defense-in-Depth: `rawHtmlKeys` (Signaturen/Logo) ohne Re-Validierung im Template-Engine (Route validiert, interne Aufrufer evtl. nicht) | S | Backlog |
+| 7 | MITTEL | P1 Database | `server/storage/billing-storage.ts:40` | `getInvoice` überschreibt GoBD-Snapshot `invoices.customer_name` mit `customers.name` (JOIN-Alias-Falle) | S | Backlog |
+| 8 | MITTEL | P1 Database | `server/storage/billing-storage.ts:111` | `updateInvoiceStatus` umgeht Tx-Kontext (nutzt `db` direkt) → bricht Atomizität in Batches | S | Backlog |
+| 9 | MITTEL | P1 Database | `shared/schema/{users,services,insurance,budget}.ts` | `.unique()` statt `unique("name").on()` (email/code/ikNummer/customerId) → drizzle-push Duplikat-Constraint-Risiko (replit.md-Gotcha) | S | Backlog |
+| 10 | MITTEL | P3 Performance | `shared/schema/appointments.ts` / `budget.ts` | Fehlende Indizes auf `performedByEmployeeId`, `budget_transactions.import_batch_id` | S | Backlog |
 
-**Pattern:** „Lese → entscheide → schreibe" ohne `SELECT … FOR UPDATE`
-oder `pg_advisory_xact_lock` ist in mindestens 4 Pfaden vorhanden.
-**Empfehlung:** Engineering-Note in `replit.md` + Lint-Regel (Custom-AST-Check),
-die Token/Counter-Mutations auf Transaktions-Containment prüft.
-
-### 3.2 Asymmetrische Validierung Client vs Server
-- Reset-Password (Chunk 2 MITTEL-2)
-- Reopen-Month-Reason (Chunk 13 HOCH-2)
-
-**Empfehlung:** Shared-Zod-Schemas in `shared/schema/` als Single-Source-of-Truth,
-Client importiert dieselben Schemas (statt eigene Length-Checks).
-
-### 3.3 Logger-Pattern-Verstöße
-- 6× console-Aufrufe in `server/routes/billing.ts`
-- 5× in `server/routes/webhook-twilio.ts`
-- 5× in `server/routes/admin/customers.ts`
-- 4× in `server/routes/admin/employee-users.ts`
-
-**Empfehlung:** ESLint-Regel `no-console` in `server/routes/` als Error
-(statt Warning).
-
-### 3.4 Stored-XSS-Surface via `dangerouslySetInnerHTML`
-- 3 Stellen: `public-signing.tsx`, `document-preview.tsx`,
-  `document-templates.tsx`
-- Quelle: DB-gespeicherte Templates mit Admin-Editierbarkeit
-
-**Empfehlung:** DOMPurify-Pflicht-Layer vor jedem `dangerouslySetInnerHTML`,
-oder Allowlist-Markdown-Parser statt Roh-HTML.
-
-### 3.5 Page-Size-Drift
-- Chunk 5b (Appointments FE) bei 7 918 LOC / 34 Files — knapp unter Cap
-- Chunk 4b2 (Customer FE Workflows) bei 7 543 LOC / 30 Files
-
-**Empfehlung:** Page-Size-Guideline aus `docs/page-size-guideline.md` als
-CI-Test (Hard-Limit 800 LOC/Page) verankern.
-
-### 3.6 Performance-Stop-Kriterien nicht in CI
-- Duplikat-Suche < 500 ms (Chunk 4a)
-- Statistik-Endpoints P95 ≤ 800 ms (Chunk 11)
-- Bundle-Size-Baseline (Chunk 15)
-
-**Empfehlung:** Performance-Smoke-Suite als eigener Workflow (k6 oder
-autocannon).
+(Vollständige Matrix §3; MITTEL/NIEDRIG = Backlog, keine Fix-Tasks.)
 
 ---
 
-## 4. Drift gegenüber dem Audit-Plan #480
+## 3. Risiko-Matrix nach Domänen
 
-Der Plan §1.1 fordert formell pro Chunk alle 3 Phasen aus
-`deep-analysis/SKILL.md` (Code Quality, DB, Business Logic, Error Handling,
-Security, Performance, UI/UX, QA, Regression Guard) plus Architect-
-Consolidation. In dieser Sitzung wurden:
-
-- **4 Chunks** (2, 7, 9a, 13) per **Deep-Audit-Subagent** mit der vollen
-  Skill-Liste durchgeprüft (Subagenten haben Phase 1+2+3 in einem
-  konsolidierten Run abgearbeitet — anstatt formal 3 separater Runs, was
-  laut Plan §1.2 für Chunks ≤ 4 000 LOC zulässig ist; bei Chunk 7 mit
-  6 260 LOC ein bewusster Trade-off, dokumentiert hier).
-- **17 Chunks** per **Pattern-Scan + Existing-CI-Test-Review** abgedeckt,
-  jeweils mit eigenem Sub-Report und expliziter „Deep-Audit deferred"-
-  Markierung.
-
-**Begründung der Drift:** Die im Task #481 dokumentierte Architektur-
-Constraint („Wenn ein Chunk-Audit länger als 90 Min Architect-Zeit
-beansprucht, Chunk weiter splitten und Drift dokumentieren") wäre für eine
-vollständige 21×3-Welle in einer einzigen Sitzung systematisch verletzt.
-Die hier angewandte gestaffelte Strategie deckt das **höchste konkrete
-Risiko** in voller Tiefe ab und bereitet die mittleren Risiken als gut
-abgegrenzte Folge-Tasks vor (vgl. §5).
+| Chunk / Domäne | Tiefe | KRIT | HOCH | MITTEL | NIEDRIG | Σ |
+|---|---|---:|---:|---:|---:|---:|
+| 7 Budget-Ledger | Deep | 1 | 0 | 1 | 1 | 3 |
+| 13 Compliance/Month-Close | Deep | 0 | 1 | 0 | 1 | 2 |
+| 2 Auth & Permissions | Deep | 0 | 0 | 0 | 1 | 1 |
+| 8 Billing | Deep | 0 | 0 | 3 | 1 | 4 |
+| 9a Documents/Signing | Deep | 0 | 0 | 1 | 2 | 3 |
+| 1 Foundation/Schema | Deep | 0 | 2 | 2 | 2 | 6 |
+| Import/Export | Deep | 0 | 1 | 2 | 2 | 5 |
+| Cross-cutting (Perf/Refactor) | — | 0 | 0 | 2 | 0 | 2 |
+| **Σ** | | **1** | **4** | **12** | **10** | **27** |
 
 ---
 
-## 5. Vorgeschlagene Folge-Project-Tasks
+## 4. Vollständige Finding-Liste
 
-Insgesamt **20 Drafts** in `.local/tasks/proposed-from-481/`. Jeder Plan-
-File trägt den Schweregrad als Titel-Präfix.
+### KRITISCH
+- **K1** `server/storage/budget/km-rebook.ts` (+ Appointment-`PATCH`-Pfad) — km-Rebook-on-Edit-Regression. Nach `reopen`+km-`PATCH` bleiben alte Consumption-Zeilen am Termin verknüpft (Test erwartet Entkopplung `appointmentId=null`); zusätzlich fehlt am Reversal-Insert `:206` ein `onConflictDoNothing()` (Retry → 500 trotz Unique-Index). 6 Test-Files deterministisch rot, inkl. der system-eigenen km-Drift-Detektion. **Effort M.** → T-822-BUDGET-01
 
-| ID | Schweregrad | Titel | Quell-Chunk |
-|---|---|---|---|
-| T-AUTH-01 | KRITISCH | Auth-Hierarchie + CSRF-Token-Lifecycle fixen | 2 |
-| T-AUTH-02 | HOCH | Last-Admin-Schutz + Object-Storage-ACL-Tightening | 2 |
-| T-AUTH-03 | MITTEL | Auth Client/Server-Validation-Sync + Session-Absolute-Timeout | 2 |
-| T-DOCS-01 | KRITISCH | Documents PDF-Render Sanitization (Signature + Path) | 9a / 9b |
-| T-DOCS-02 | KRITISCH | Public-Signing Token-Claim Atomicity | 9a |
-| T-DOCS-03 | HOCH | Object-Storage ACL Implementierung + Doppel-Signatur-Schutz | 9a |
-| T-DOCS-04 | MITTEL | Integrity-Hash Audit-Felder + LetterXpress-Secret-Encryption | 9a |
-| T-DOCS-05 | HOCH | Template-Stored-XSS Sanitization (DOMPurify) | 1 / 9b |
-| T-BUDGET-01 | KRITISCH | Cascade-Consumption Advisory-Lock | 7 |
-| T-BUDGET-02 | HOCH | §45a-Clamp-Warnung + Legacy-MonthlyLimit-Migration | 7 |
-| T-COMPLIANCE-01 | HOCH | GoBD-DB-Trigger Immutability + Reopen-Reason Min-Length | 13 |
-| T-COMPLIANCE-02 | MITTEL | `expired_unsigned`-Filter-Coverage + Migration-Idempotenz | 13 |
-| T-CUSTOMER-01 | HOCH | Customer-Subresource IDOR-Sweep | 3 / 4b2 |
-| T-BILLING-01 | HOCH | Qonto-Webhook-Sig + ZUGFeRD-Validator-CI | 8 |
-| T-PROSPECTS-01 | HOCH | Prospects Role-Scope + Email-Parsing-Injection | 10 |
-| T-SETTINGS-01 | HOCH | Twilio-Webhook-Sig + Geocoding-SSRF-Allowlist | 12a |
-| T-DEVOPS-01 | MITTEL | Pre-Publish-Backup CI-Hook + Neon-Cold-Start-Retry | 16 |
-| T-CI-01 | BLOCKER | CI-Stabilität: DB-Race im globalSetup + e2e-smoke entkoppeln | übergreifend |
-| T-CROSS-01 | MITTEL | Cross-Cutting Lint/Eng-Notes (no-console, DOMPurify, advisory-locks) | übergreifend |
-| T-FOLLOWUP-01 | MITTEL | Deep-Audit-Folgewelle für die 17 Pattern-Scan-Chunks | übergreifend |
+### HOCH
+- **H1** `server/services/audit.ts` — GoBD-Audit-Log ohne technische Immutability (kein `REVOKE UPDATE/DELETE` / Trigger). *(Vorgänger T-COMPLIANCE-01, STILL OPEN.)* **M.** → T-822-COMPLIANCE-01
+- **H2** `shared/schema/company.ts`/`billing.ts` — IBAN/BIC Klartext at-rest → `encryptedText`. **M.** → T-822-SECRETS-01
+- **H3** `shared/schema/users.ts:37` — `monthly_work_hours` `real` → `numeric(6,2)` (+ Startup-Migration analog km-geo). **M.** → T-822-SCHEMA-01
+- **H4** `server/services/appointment-import-reconcile.ts:405` — nicht-atomares Bulk-Reconcile (pro-Zeile-Tx). **M.** → T-822-IMPORT-01
 
-Plan-Files: `.local/tasks/proposed-from-481/<id>.md`.
+### MITTEL (Backlog)
+- **M1** `server/services/template-engine.ts:404` — Defense-in-Depth Signature/Logo-Re-Validierung im Engine.
+- **M2** `server/storage/billing-storage.ts:40` — `getInvoice` JOIN-Alias überschreibt GoBD-Snapshot `customer_name`.
+- **M3** `server/storage/billing-storage.ts:111` — `updateInvoiceStatus` ohne Tx-Kontext-Parameter.
+- **M4** `shared/schema/{users,services,insurance,budget}.ts` — `.unique()`-Constraint-Naming-Falle (4 Spalten).
+- **M5** `shared/schema/appointments.ts`/`budget.ts` — fehlende Indizes (`performedByEmployeeId`, `import_batch_id`).
+- **M6** `server/routes/admin/lexware-export.ts` — N+1 (pro Mitarbeiter Einzel-Fetch der Monatsdatensätze).
+- **M7** `server/routes/**` — 46 `console.*`-Aufrufe in 14 Route-Dateien (statt zentralem `log`); `no-console` nicht als Error erzwungen.
+- **M8** `server/storage/*.ts` — viele List-Queries ohne `.limit()`/Pagination (Seq-Scan-Wachstum).
+- **M9** `server/services/appointment-import.ts:146` — `ExcelJS.xlsx.load` ohne explizites Formula-Disabling (Formula-Injection-Härtung).
+- **M10** `client/src/lib/query-invalidation.ts` Adoption ~20 %; `customer-detail.tsx:210` direktes `invalidateQueries`; fehlendes `customerId`-Scoping bei Budget-Invalidierung.
+- **M11** `server/routes/billing.ts` (3656 LOC) — monolithische Route, Extraktion in `billing-service.ts` (Refactor, §6).
+- **M12** `shared/schema/users.ts:12` — `password_hash` `text` (Defense-in-Depth `encryptedText`, Hash bereits vorhanden).
+
+### NIEDRIG (Backlog)
+- **N1** `shared/schema/customers.ts` — Legacy `aua_approval_ref`/`aua_approval_date` fehlen im Drizzle-Schema; nächster `drizzle-kit push` würde DROP versuchen (Data-Loss-Prompt). **NUR NOTIZ — laut Task-Scope nicht zu fixen; Backup vor Push sicherstellen.**
+- **N2** `server/storage/budget/transaction-storage.ts:117` — `reverseBudgetTransaction` nutzt `todayISO()` statt `orig.transactionDate` (Cap-Fenster-Drift bei monatsübergreifendem Storno).
+- **N3** `client/src/features/documents/document-preview.tsx` — `iframe srcDoc` ohne strikteren `sandbox`/Sanitize an diesem Eintrittspunkt.
+- **N4** `server/services/appointment-import.ts:90` — duplizierte `excelDateToISO`/`dateToISO`-Helper.
+- **N5** `server/services/appointment-import-reconcile.ts:459` — `__testing`-Export im Prod-Pfad (Dead-Code).
+- **N6** `tests/document-pdf-sanitization.test.ts` — Signature-Fixture Min-Bytes (Test-Maintenance).
+- **N7** `tests/test-data-cleanup.test.ts` — Shared-DB-Cleanup-Flake (Test-Infra).
+- **N8** Business-Date-Drift via `toISOString()` an mehreren Stellen (siehe refactor-masterplan §4a, weiter offen).
+- **N9** API-Responses nicht durchgängig per `ZodSchema.parse()` als SSoT gewrappt (OpenAPI-`Exact<>`-Assertions greifen, aber Runtime-Drift möglich).
+- **N10** ~30 einmalige Startup-Backfills weiter im Boot-Pfad (Simplification, §6).
 
 ---
 
-## 6. Anhang: Methodische Anmerkungen
+## 5. Status der Vorgänger-Findings (T003)
 
-- **Subagent-Output:** Die Deep-Audit-Subagenten lieferten strukturierte
-  Schweregrad-Listen mit Datei:Zeile + Kurz-Fix. Diese sind 1:1 in die
-  Sub-Reports übernommen.
-- **Pattern-Scan-Trefferquellen:** ripgrep auf `console.`,
-  `dangerouslySetInnerHTML`, `backdrop-blur`, `translate-`,
-  `queryClient.invalidateQueries`, `<canvas`, `UPDATE.*audit_log` —
-  Zahlen aus Pre-Audit-Run dieser Sitzung.
-- **Read-only-Constraint** aus `task-481.md` eingehalten: Schreibzugriffe
-  ausschließlich in `docs/audits/full-app-2026/` und
-  `.local/tasks/proposed-from-481/`.
+| Vorgänger-Finding (#481) | Status @178b2574 | Beleg |
+|---|---|---|
+| K1 `setUserRoles` Hierarchie-Bypass | ✅ **FIXED** | `employee-users.ts:342` `denyIfPrivilegedTarget` |
+| K2 CSRF-Token-Fixation (Cookie auf 403) | ✅ **FIXED** | `csrf.ts:48` kein Cookie-Set bei Fehler |
+| K3 Signature-HTML-Injection (PDF) | ⚠️ **PARTIAL** | Route-Validierung `public-signing.ts:81` (Regex), Engine-Defense-in-Depth offen (M1) |
+| K4 Path-Traversal Object-Storage | ✅ **FIXED** | `document-pdf.ts:312` normalize + `..`-Check |
+| K5 Public-Signing Token-Race | ✅ **FIXED** | `public-signing.ts` atomar `markSigningTokenUsed WHERE usedAt IS NULL` |
+| K6 Cascade-Consumption ohne Lock | ✅ **FIXED** | `consumption-engine.ts` `pg_advisory_xact_lock` durchgängig |
+| K7 Login ohne CSRF-Rotation/Session-Fixation | ✅ **FIXED** | `auth.ts:64-68` Logout-Vorsession + `setCsrfCookie` |
+| H (Compliance) audit_log-Immutability | 🔴 **OPEN** | siehe H1 |
+| H (Compliance) reopen-Reason `.min(10)` | ✅ **FIXED** | `shared/schema/system.ts:66` |
+| H (Auth) Letzter-Admin-Schutz | ✅ **FIXED** | `employee-users.ts:281` Self-Demote-Block |
+| Diverse Object-ACL/IDOR | ✅ **FIXED** | `object-storage-auth.ts` record-level `requireObjectAccess` |
+| Double-Signature | ✅ **FIXED** | `documents.ts:689` `WHERE signingStatus='pending'` → 409 |
+| Rate-Limiting Public | ✅ **FIXED** | `public-signing.ts:18` `publicSigningLimiter` |
+
+**Bilanz:** 6/7 KRITISCH behoben (K3 PARTIAL→als MITTEL fortgeführt), Großteil HOCH
+behoben. **Einzig GoBD-Immutability** bleibt aus den Vorgänger-HOCHs offen.
+
+---
+
+## 6. Simplification / Refactoring / Performance (T005)
+
+Querschnittsbefunde, abgeglichen mit `docs/refactor-masterplan.md`,
+`docs/dead-code-report.md`, `docs/schema-audit-report.md`,
+`docs/dependency-audit-report.md`, `docs/quality-sweep-2026-05-27.md`.
+„NEU" = nach dem 2026-05-27-Sweep entstanden/eskaliert; „Masterplan" = bereits gelistet.
+
+### 6.1 Page-/Route-Size-Hotspots (>800 LOC Hard-Limit, vgl. `docs/page-size-guideline.md`)
+| Datei | LOC | Status | Effort |
+|---|---:|---|---|
+| `server/routes/billing.ts` | 3656 | **NEU** (war 2131) — Top-Monolith; PDF/Qonto/Storno → `billing-service.ts` | L |
+| `server/routes/appointments.ts` | 1632 | Masterplan | L |
+| `server/routes/budget.ts` | 1278 | Masterplan | M |
+| `server/storage/budget/allocation-storage.ts` | 1274 | NEU | M |
+| `server/services/appointment-import.ts` | 1201 | Masterplan | M |
+| `client/src/pages/admin/billing.tsx` | 1772 | **NEU** (war ~1445) | L |
+| `client/src/pages/edit-appointment.tsx` | 1428 | Masterplan | L |
+| `client/src/components/budget/BudgetTypeSettings.tsx` | 1169 | NEU | M |
+
+(36 Client- + 25 Server-Dateien >500 LOC; vollständige Liste im Anhang von `chunks/01-foundation.md`.)
+
+### 6.2 Performance
+- N+1: Lexware-Export (M6), Geocoding-Lookups in Import-Loops (Masterplan).
+- Fehlende `.limit()`/Pagination auf Großteil der List-Queries in `server/storage/` (M8).
+- Fehlende Indizes (M5).
+
+### 6.3 Simplification / Dead-Code
+- **~30 einmalige Startup-Backfills** weiter im Boot-Pfad retire-bar (Liste in `chunks/16-devops-startup.md`). **KEEP:** Seeds, `sync-budget-allocations`, `migrate-km-geo-to-numeric`, `prospect-customer-matching`, `audit-*`-Integritätsläufe, `encrypt-company-secrets`.
+- Dead-Code: `__testing`-Export im Prod-Pfad (N5); duplizierte Date-Helper (N4).
+- `invalidateRelated`-Disziplin nur ~20 % adoptiert (M10).
+
+### 6.4 Cross-Link refactor-masterplan
+Dieser Refresh ergänzt `docs/refactor-masterplan.md` um: (a) `billing.ts`-Eskalation
+auf 3656 LOC (neuer Top-Posten), (b) `allocation-storage.ts`/`BudgetTypeSettings.tsx`
+als neue >1000-LOC-Posten, (c) Startup-Migrations-Retirement als eigenes
+Simplification-Arbeitspaket. Querverweis dort unter „Audit-2026-Refresh (#822)".
+
+---
+
+## 7. Empfohlene Fix-Reihenfolge
+
+1. **T-822-BUDGET-01** (KRITISCH) — rotes Finanz-Gate + GoBD-Drift, zuerst.
+2. **T-822-COMPLIANCE-01** (HOCH) — GoBD-Audit-Log-Immutability.
+3. **T-822-SECRETS-01** (HOCH) — IBAN/BIC-Verschlüsselung (DSGVO/Bank-PII).
+4. **T-822-SCHEMA-01** (HOCH) — `monthly_work_hours` `numeric` (Lohn-Präzision).
+5. **T-822-IMPORT-01** (HOCH) — Bulk-Reconcile-Atomizität.
+
+MITTEL/NIEDRIG → Backlog (kein eigener Fix-Task, in §4 dokumentiert).
+
+---
+
+## 8. Methodik & Scope
+
+- **Roster:** team-orchestration (Code-Quality, Database, Business-Logic,
+  Error-Handling, Security, Performance, UI/UX, QA, Regression-Guard) + Architect-Konsolidierung.
+- **Phasen:** deep-analysis 3-Phasen — P1 Struktur-Fakten (Code-Quality + DB),
+  P2 Domänen-Deep mit P1-Kontext (Business-Logic + Error-Handling + Security + Performance),
+  P3 UX/Stabilität mit Vollkontext (UI/UX + QA + Regression-Guard).
+- **Out-of-Scope (eingehalten):** Fix-Implementierung; Dev/Test-Code als Audit-Target;
+  Skill-Rewrites; das bekannte `customers.aua_approval_*` drizzle-push-Item (nur Notiz N1).
+- **Git:** ausschließlich read-only.

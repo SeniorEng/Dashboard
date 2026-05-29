@@ -1,10 +1,12 @@
 # Full-App-Audit 2026 — Übersicht
 
-**Stand:** 2026-05-15
-**Geprüfter Commit:** `3e0d3fb7029bd4f62cedd7f055abbd60bdf382e9`
+**Stand:** 2026-05-29 (Refresh, Task #822)
+**Geprüfter Commit:** `178b2574222197c3e0d218b176cd3af2f79d5ab5`
 **Branch:** `main`
-**Vorgänger-Task:** #480 (Audit-Plan + Chunk-Zerlegung) — MERGED
-**Dieser Task:** #481 (Full-App-Check Drehbuch und Durchführung)
+**Vorgänger-Audit:** #481 @ `3e0d3fb` (2026-05-15) — 332 Commits Delta
+**Inventar:** 593 Dateien / 136 816 LOC (war 521 / 116 282)
+**Severity (Refresh):** 1 KRITISCH · 4 HOCH · 12 MITTEL · 10 NIEDRIG (war 7/17/30/20)
+**Fix-Task-Drafts:** `.local/tasks/proposed-from-822/`
 
 ---
 
@@ -13,7 +15,7 @@
 | Datei | Zweck |
 |---|---|
 | `audit-plan.md` | Verbindlicher Audit-Plan: 21 Chunks, DAG, Stop-Kriterien (aus #480) |
-| `chunk-manifest.json` | Maschinenlesbares File→Chunk-Mapping (521 Files, 116 282 LOC) |
+| `chunk-manifest.json` | Maschinenlesbares File→Chunk-Mapping (593 Files, 136 816 LOC) |
 | `inventory.json` | LOC pro Datei + Heuristik-Domain (Inventar-Snapshot) |
 | `REPORT.md` | **Konsolidierter Hauptreport** mit Executive Summary, Top-Findings, Folge-Task-Liste |
 | `chunks/<id>-<name>.md` | Sub-Report je Chunk |
@@ -60,21 +62,21 @@ Pattern-Scans auf den restlichen 17 Chunks. Die Pattern-Scan-Chunks haben
 bestehende CI-Tests, die einen großen Teil der Skill-Findings bereits abdecken;
 sie werden als reguläre Folge-Project-Tasks für vertiefte Audits empfohlen.
 
-## Pre-Audit CI-Stand
+## Pre-Audit CI-Stand (Refresh @178b2574)
 
 | Workflow | Status | Bemerkung |
 |---|---|---|
 | `typecheck` | ✅ GRÜN | – |
 | `lint` | ✅ GRÜN | – |
-| `test` | 🔴 ROT (pre-existing) | 8 Test-Files failed wegen "fetch failed" beim globalSetup-Login (DB-Startup-Race auf NeonDB), nicht audit-relevant. Test-Suite-Stabilität ist eigener Folge-Task. |
-| `e2e-smoke` | 🔴 ROT (pre-existing) | Login-Failures wegen gleicher DB-Race; bekannt aus Task #275/#288. |
+| `test` | 🔴 ROT | 6 Files = **realer** Budget-km-Rebook-Cluster (→ KRITISCH-1, in Isolation reproduziert); 2 Files test-/infra-seitig (flaky). Klassifikation siehe `REPORT.md` §1. |
+| `e2e-smoke` | 🔴 ROT | Folge des km-Rebook-Clusters + bekannte Shared-DB-Login-Race. |
 
-Pre-existing rote Tests blockieren das Audit nicht (laut `task-481.md` Step 1
-zulässig). Ein dedizierter Folge-Task `[BLOCKER] CI-Stabilität` ist im Hauptreport
-gelistet.
+Anders als im Vorgänger-Audit ist der rote `test`-Lauf diesmal **nicht** rein
+pre-existing/flaky: der km-Rebook-Cluster ist ein echter Regressionsbefund
+(KRITISCH-1, Fix-Task T-822-BUDGET-01).
 
 ## Lese-Reihenfolge
 
 1. `REPORT.md` — beginne hier für Top-Findings + priorisierte Folge-Tasks.
 2. Bei Interesse an einer Domain: zugehörigen `chunks/<id>-<name>.md` lesen.
-3. Plan-Files der vorgeschlagenen Folge-Tasks: `.local/tasks/proposed-from-481/`.
+3. Plan-Files der vorgeschlagenen Folge-Tasks: `.local/tasks/proposed-from-822/` (Refresh) bzw. `.local/tasks/proposed-from-481/` (Vorgänger).
