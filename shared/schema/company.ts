@@ -19,8 +19,8 @@ export const companySettings = pgTable("company_settings", {
   website: text("website"),
   steuernummer: text("steuernummer"),
   ustId: text("ust_id"),
-  iban: text("iban"),
-  bic: text("bic"),
+  iban: encryptedText("iban"),
+  bic: encryptedText("bic"),
   bankName: text("bank_name"),
   // Task #757: Optionaler abweichender Kontoinhaber für das Geschäftskonto.
   // Wenn gesetzt, wird er statt `companyName` im Zahlungsblock und als
