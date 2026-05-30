@@ -253,6 +253,16 @@ async function runStartupTasks() {
       log(`Drop-appointments.service_type-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #861: leftover Legacy-Spalten customers.aua_approval_ref /
+    // aua_approval_date entfernen. Idempotent (DROP COLUMN IF EXISTS) mit
+    // Nicht-NULL-Guard pro Spalte — beim nächsten Boot ein No-Op.
+    const { dropAuaApprovalColumns } = await import("./startup/drop-aua-approval-columns");
+    try {
+      await dropAuaApprovalColumns();
+    } catch (err) {
+      log(`Drop-customers.aua_approval_*-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { encryptExistingSecrets } = await import("./startup/encrypt-company-secrets");
     try {
       await encryptExistingSecrets();
