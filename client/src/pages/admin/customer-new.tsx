@@ -1,4 +1,3 @@
-import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
@@ -33,11 +32,15 @@ export default function AdminCustomerNew() {
       />
 
       <div className="flex items-center gap-4 mb-6">
-        <Link href="/admin/customers">
-          <Button variant="ghost" size="icon" aria-label="Zurück" data-testid="button-back">
-            <ArrowLeft className={iconSize.md} />
-          </Button>
-        </Link>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Zurück"
+          data-testid="button-back"
+          onClick={wizard.handleCancel}
+        >
+          <ArrowLeft className={iconSize.md} />
+        </Button>
         <h1 className={componentStyles.pageTitle}>Neuen Kunden anlegen</h1>
       </div>
 

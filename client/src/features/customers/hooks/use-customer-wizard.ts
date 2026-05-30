@@ -12,9 +12,7 @@ import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customer
 import { validateVersichertennummerFor } from "@shared/schema/common";
 import type { WizardUploadedDoc } from "../components/wizard/signatures-step";
 import type { DuplicateDialogEntry } from "../components/wizard/wizard-dialogs";
-
-const DRAFT_KEY = "careconnect_customer_draft";
-const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+import { loadDraft, saveDraft, clearDraft } from "../lib/customer-draft";
 
 function generateIdempotencyKey(): string {
   // Bevorzugt crypto.randomUUID(); Fallback nur, falls nicht vorhanden.
@@ -24,28 +22,6 @@ function generateIdempotencyKey(): string {
     }
   } catch { /* ignore */ }
   return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function loadDraft(): { formData: CustomerFormData; currentStep: number; timestamp: string; idempotencyKey?: string } | null {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.timestamp) return null;
-    const age = Date.now() - new Date(parsed.timestamp).getTime();
-    if (age > DRAFT_MAX_AGE_MS) {
-      localStorage.removeItem(DRAFT_KEY);
-      return null;
-    }
-    return parsed;
-  } catch {
-    localStorage.removeItem(DRAFT_KEY);
-    return null;
-  }
-}
-
-function clearDraft() {
-  localStorage.removeItem(DRAFT_KEY);
 }
 
 function createInitialFormData(): CustomerFormData {
@@ -137,7 +113,7 @@ export function useCustomerWizard() {
     if (draft) {
       draftRestoringRef.current = true;
       setFormData(prev => ({ ...prev, ...draft.formData }));
-      const restoredSteps = getStepsForBillingType(draft.formData.billingType);
+      const restoredSteps = getStepsForBillingType(draft.formData.billingType ?? "");
       const clampedStep = Math.min(draft.currentStep, restoredSteps.length - 1);
       const targetStep = Math.max(1, clampedStep);
       setCurrentStep(targetStep);
@@ -161,6 +137,16 @@ export function useCustomerWizard() {
     setDraftDialog(null);
   }, []);
 
+  // Expliziter Wizard-Abbruch: Der Anwender verlässt die Anlage bewusst über
+  // den Zurück-/Abbrechen-Button. Hier MUSS der Entwurf gelöscht werden,
+  // damit keine (auch nicht-sensiblen) Eingaben auf einem geteilten Rechner
+  // zurückbleiben. Der Restore-Flow ist nur für versehentliches Verlassen
+  // (Reload/Crash/Tab-Schließen) gedacht.
+  const handleCancel = useCallback(() => {
+    clearDraft();
+    setLocation("/admin/customers");
+  }, [setLocation]);
+
   useEffect(() => {
     if (createdRef.current) return;
     if (draftDialog) return;
@@ -171,12 +157,11 @@ export function useCustomerWizard() {
       if (draftDialog) return;
       const hasData = formData.vorname.trim() || formData.nachname.trim() || formData.billingType;
       if (hasData) {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        saveDraft({
           formData,
           currentStep,
-          timestamp: new Date().toISOString(),
           idempotencyKey: idempotencyKeyRef.current,
-        }));
+        });
       }
     }, 500);
     return () => {
@@ -901,6 +886,7 @@ export function useCustomerWizard() {
     handleSubmit,
     restoreDraft,
     discardDraft,
+    handleCancel,
     handleDuplicateContinue,
     handleDuplicateCancel,
     handleDuplicateOpenExisting,

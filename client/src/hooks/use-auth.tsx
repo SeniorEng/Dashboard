@@ -10,6 +10,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
+import { clearDraft as clearCustomerDraft } from "@/features/customers/lib/customer-draft";
 
 export interface User {
   id: number;
@@ -117,11 +118,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logoutMutation = useMutation({
     mutationFn: logoutRequest,
     onSuccess: () => {
+      clearCustomerDraft();
       queryClient.setQueryData(["auth", "me"], null);
       queryClient.setQueryData(["admin", "my-permissions"], null);
       queryClient.clear();
     },
     onError: () => {
+      clearCustomerDraft();
       queryClient.setQueryData(["auth", "me"], null);
       queryClient.setQueryData(["admin", "my-permissions"], null);
       queryClient.clear();
