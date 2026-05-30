@@ -68,7 +68,6 @@ function createInitialFormData(): CustomerFormData {
     receivesMonthlyInvoice: false,
     acceptsPrivatePayment: false,
     rechnungAnKunde: false,
-    vorjahrVerbraucht45b: "",
     uebertrag45b: "0",
   };
 }
@@ -635,27 +634,9 @@ export function useCustomerWizard() {
           newData.pflegesachleistungen36 = centsToEuroNumber(maxCents).toString();
         }
       }
-      if (field === "vorjahrVerbraucht45b" || (field === "pflegegradSeit" && prev.vorjahrVerbraucht45b !== "")) {
-        const verbraucht = field === "vorjahrVerbraucht45b"
-          ? (parseFloat(value as string) || 0)
-          : (parseFloat(prev.vorjahrVerbraucht45b) || 0);
-        const pgSeit = field === "pflegegradSeit" ? (value as string) : prev.pflegegradSeit;
-        const curYear = new Date().getFullYear();
-        const prevYear = curYear - 1;
-        let eligibleMonths = 12;
-        if (pgSeit) {
-          const pgStart = parseLocalDate(pgSeit);
-          const pgStartYear = pgStart.getFullYear();
-          if (pgStartYear > prevYear) {
-            eligibleMonths = 0;
-          } else if (pgStartYear === prevYear) {
-            eligibleMonths = 12 - pgStart.getMonth();
-          }
-        }
-        const maxCarryover = 131 * eligibleMonths;
-        const uebertrag = Math.max(0, maxCarryover - verbraucht);
-        newData.uebertrag45b = uebertrag.toFixed(2).replace(/\.00$/, "");
-      }
+      // Task #860 — Kein Auto-Berechnen des §45b-Übertrags mehr. Das Vorjahr gilt
+      // beim Onboarding als aufgebraucht (Default-Übertrag 0 €). Ein tatsächlich
+      // verbliebenes Restguthaben trägt der Operator manuell in `uebertrag45b` ein.
       return newData;
     });
   };

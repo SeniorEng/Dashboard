@@ -10,7 +10,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
-import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampDerived45bAnchor, clampToStatutoryMax } from "@shared/domain/budgets";
+import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax } from "@shared/domain/budgets";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -477,13 +477,18 @@ async function calculateAllocated45b(
     ));
 
   let budgetStartDate = preferences?.budgetStartDate ?? null;
-  // Task #856 — Origin-aware §45b-Kappung: NUR ein automatisch aus dem
-  // Pflegegrad-Beginn abgeleiteter Anker (Origin 'derived_pflegegrad', vom
-  // Wizard/initial-budget gesetzt) wird aufs rechtliche §45b-Fenster (aktuelles
-  // Jahr + Vorjahr bis 30.06.) gekappt. Ein manuell gesetzter Anker ('manual')
-  // und Altbestand (NULL) bleiben unangetastet — manuell gewinnt immer.
+  // Task #860 — §45b-Onboarding-Baseline: Ein automatisch aus dem Pflegegrad-
+  // Beginn abgeleiteter Anker (Origin 'derived_pflegegrad', vom Wizard/
+  // initial-budget gesetzt) wird auf den 1.1. des LAUFENDEN Jahres gebodet. Das
+  // Vorjahr gilt beim Onboarding als aufgebraucht (Default-Übertrag 0 €) — es
+  // wird also weder ein voller Vorjahres-Anspruch gutgeschrieben noch ein
+  // automatischer Vorjahres-Carryover fabriziert (der sonst zum 30.06. mit
+  // sichtbarem Write-off verfiele). Ein manuell gesetzter Anker ('manual') und
+  // Altbestand (NULL) bleiben unangetastet — manuell gewinnt immer. Identisch in
+  // `ensureYearlyCarryover45b` und im /initial-budget-§45b-Write, sonst driften
+  // Summe und Carryover-Anlage.
   if (budgetStartDate && preferences?.budgetStartDateOrigin === "derived_pflegegrad") {
-    budgetStartDate = clampDerived45bAnchor(budgetStartDate, curYear, curMonth);
+    budgetStartDate = floorAutoAnchor45bToCurrentYear(budgetStartDate, curYear);
   }
 
   if (!budgetStartDate) {
@@ -1000,7 +1005,7 @@ async function calculateAllocated39_42a(
 
 async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
   const d = _tx ?? db;
-  const { year: curYear, month: curMonth } = currentYearAndMonth();
+  const { year: curYear } = currentYearAndMonth();
 
   // Task #684 — Dedup über ALLE Carryover-Zeilen (aktiv UND soft-gelöscht).
   // Eine vom Admin gelöschte Carryover-Zeile (`deleted_at IS NOT NULL`) ist
@@ -1044,12 +1049,14 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   let eligibilityStartYear = curYear;
 
   let budgetStartDate = preferences?.budgetStartDate ?? null;
-  // Task #856 — Origin-aware §45b-Kappung, identisch zu `calculateAllocated45b`:
-  // ein abgeleiteter Anker ('derived_pflegegrad') wird aufs rechtliche Fenster
-  // gekappt, damit `eligibilityStartYear` keine jahrelangen Vorjahres-Überträge
-  // fabriziert. Manuell ('manual') und Altbestand (NULL) bleiben unangetastet.
+  // Task #860 — §45b-Onboarding-Baseline, identisch zu `calculateAllocated45b`:
+  // ein abgeleiteter Anker ('derived_pflegegrad') wird auf den 1.1. des laufenden
+  // Jahres gebodet, damit `eligibilityStartYear` = curYear bleibt und KEIN
+  // automatischer Vorjahres-Übertrag mehr erzeugt wird (Vorjahr gilt beim
+  // Onboarding als aufgebraucht; nur operator-erfasste Überträge zählen).
+  // Manuell ('manual') und Altbestand (NULL) bleiben unangetastet.
   if (budgetStartDate && preferences?.budgetStartDateOrigin === "derived_pflegegrad") {
-    budgetStartDate = clampDerived45bAnchor(budgetStartDate, curYear, curMonth);
+    budgetStartDate = floorAutoAnchor45bToCurrentYear(budgetStartDate, curYear);
   }
   if (!budgetStartDate) {
     const ibEntries = allAllocations.filter(a => a.source === "initial_balance" && a.validFrom);

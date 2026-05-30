@@ -59,7 +59,6 @@ export interface CustomerFormData {
   receivesMonthlyInvoice: boolean;
   acceptsPrivatePayment: boolean;
   rechnungAnKunde: boolean;
-  vorjahrVerbraucht45b: string;
   uebertrag45b: string;
 }
 

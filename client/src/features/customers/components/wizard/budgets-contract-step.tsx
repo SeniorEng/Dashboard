@@ -79,7 +79,6 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
     ersatzpflege_39_42a: "€/Jahr",
   };
 
-  const vorjahrVerbraucht = parseFloat(formData.vorjahrVerbraucht45b) || 0;
   const uebertrag = parseFloat(formData.uebertrag45b) || 0;
 
   const currentYear = new Date().getFullYear();
@@ -202,27 +201,6 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                     <div className="mt-4 p-3 rounded-md bg-green-100/50 border border-green-200 space-y-3">
                       <h4 className="text-sm font-medium text-green-800">Übertrag aus Vorjahr</h4>
                       <div className="space-y-2">
-                        <Label htmlFor="vorjahrVerbraucht45b" className="text-xs">
-                          Wie viel wurde im Vorjahr vom Entlastungsbetrag verbraucht? (€)
-                        </Label>
-                        <Input
-                          id="vorjahrVerbraucht45b"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max={maxCarryover}
-                          value={formData.vorjahrVerbraucht45b}
-                          onChange={(e) => onChange("vorjahrVerbraucht45b", e.target.value)}
-                          data-testid="input-vorjahr-verbraucht-45b"
-                        />
-                        <p className="text-xs text-gray-500">
-                          {eligibleMonthsLastYear === 0
-                            ? "Kein Vorjahresanspruch (Pflegegrad erst in diesem Jahr)"
-                            : `Maximaler Jahresbetrag: ${maxCarryover.toFixed(2)} € (131 € × ${eligibleMonthsLastYear} Monat${eligibleMonthsLastYear !== 1 ? "e" : ""})`
-                          }
-                        </p>
-                      </div>
-                      <div className="space-y-2">
                         <Label htmlFor="uebertrag45b" className="text-xs">
                           Übertrag (€)
                         </Label>
@@ -231,12 +209,18 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                           type="number"
                           step="0.01"
                           min="0"
+                          max={eligibleMonthsLastYear > 0 ? maxCarryover : undefined}
                           value={formData.uebertrag45b}
                           onChange={(e) => onChange("uebertrag45b", e.target.value)}
                           data-testid="input-uebertrag-45b"
                         />
                         <p className="text-xs text-gray-500">
-                          Automatisch berechnet: {maxCarryover.toFixed(2)} € − {vorjahrVerbraucht.toFixed(2)} € = {Math.max(0, maxCarryover - vorjahrVerbraucht).toFixed(2)} €. Manuell überschreibbar.
+                          Standard: 0 € – das Vorjahr gilt als aufgebraucht. Tragen Sie hier nur ein
+                          tatsächlich noch vorhandenes Restguthaben aus dem Vorjahr ein. Es ist bis zum
+                          30.06. dieses Jahres nutzbar und verfällt danach.
+                          {eligibleMonthsLastYear > 0
+                            ? ` (Maximal möglich: ${maxCarryover.toFixed(2)} €)`
+                            : " (Kein Vorjahresanspruch – Pflegegrad erst in diesem Jahr.)"}
                         </p>
                         {errorCarryover && <p className="text-xs text-red-600 font-medium">{errorCarryover}</p>}
                       </div>

@@ -5,14 +5,22 @@ import {
   floorAutoAnchor45bToCurrentYear,
 } from "@shared/domain/budgets";
 
-// Task #856 — §45b wird ab dem Pflegegrad-Beginn angesetzt. Zwei verschiedene
-// Anker-Regeln dürfen NICHT verwechselt werden:
-//   - `clampDerived45bAnchor`  → EXPLIZITE, audit-pflichtige Pfade
-//     (Startwert-Eingabe, Korrektur-Skript): erlaubt das rechtliche
-//     Vorjahres-Fenster (aktuelles Jahr + Vorjahr bis 30.06.).
-//   - `floorAutoAnchor45bToCurrentYear` → AUTO-Fallback für nie eingerichtete
-//     Kunden: nur laufendes Jahr, NIE ein Vorjahres-Übertrag.
-describe("§45b Anchor-Helfer (Task #856)", () => {
+// Task #856/#860 — §45b wird ab dem Pflegegrad-Beginn angesetzt. Zwei
+// verschiedene Anker-Regeln dürfen NICHT verwechselt werden:
+//   - `floorAutoAnchor45bToCurrentYear` → Onboarding-Baseline (Task #860): der
+//     gesamte §45b-RUNTIME-Pfad (Lesepfad `calculateAllocated45b`, Carryover-
+//     Anlage `ensureYearlyCarryover45b`, `/initial-budget`-Write) UND der Auto-
+//     Fallback für nie eingerichtete Kunden boden den Anker auf das laufende
+//     Jahr. Das Vorjahr gilt beim Onboarding als aufgebraucht → NIE ein
+//     automatischer Vorjahres-Übertrag (12 × 131 €). Nur operator-erfasste
+//     Überträge zählen.
+//   - `clampDerived45bAnchor`/`earliest45bRelevantAnchor` → erlauben das
+//     rechtliche Vorjahres-Fenster (aktuelles Jahr + Vorjahr bis 30.06.). Seit
+//     Task #860 NICHT mehr im Runtime-Pfad — nur noch vom einmaligen
+//     Korrektur-Skript `server/scripts/fix-customer-45b-anchor.ts` genutzt. Die
+//     Helfer bleiben samt Tests erhalten, falls erneut eine gezielte Daten-
+//     Korrektur im Vorjahres-Fenster nötig wird.
+describe("§45b Anchor-Helfer (Task #856/#860)", () => {
   describe("earliest45bRelevantAnchor", () => {
     it("zählt im 1. Halbjahr noch das Vorjahr als Fensteranfang", () => {
       // Januar–Juni: Vorjahres-Carryover ist bis 30.06. gültig.

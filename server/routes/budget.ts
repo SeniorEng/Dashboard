@@ -11,7 +11,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
-import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, clampDerived45bAnchor } from "@shared/domain/budgets";
+import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear } from "@shared/domain/budgets";
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-validator";
@@ -822,8 +822,16 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   const rawBudgetStartDate = result.data.budgetStartDate;
   let budgetStartDate = rawBudgetStartDate;
   if (budgetType === "entlastungsbetrag_45b") {
+    // Task #860 — §45b-Onboarding-Baseline: Startwert- und Carryover-Zeilen werden
+    // auf das LAUFENDE Jahr gebodet (1.1. curYear), identisch zum §45b-Lesepfad
+    // (`calculateAllocated45b`/`ensureYearlyCarryover45b`). So liegt eine evtl.
+    // angelegte initial_balance-Zeile im selben Jahr wie der Accrual-Start und ein
+    // operator-erfasster Übertrag bekommt validFrom=1.1./expiresAt=30.06. des
+    // laufenden Jahres. Das Vorjahr gilt beim Onboarding als aufgebraucht — der
+    // RAW-Anker (`rawBudgetStartDate`, Origin 'derived_pflegegrad') bleibt in den
+    // Preferences für §45a/§39 erhalten.
     const now = parseLocalDate(todayISO());
-    budgetStartDate = clampDerived45bAnchor(budgetStartDate, now.getFullYear(), now.getMonth() + 1);
+    budgetStartDate = floorAutoAnchor45bToCurrentYear(budgetStartDate, now.getFullYear());
   }
   const startDate = parseLocalDate(budgetStartDate);
   const year = startDate.getFullYear();

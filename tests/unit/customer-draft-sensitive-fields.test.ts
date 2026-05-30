@@ -59,7 +59,6 @@ function createSensitiveFormData(): CustomerFormData {
     receivesMonthlyInvoice: false,
     acceptsPrivatePayment: false,
     rechnungAnKunde: false,
-    vorjahrVerbraucht45b: "",
     uebertrag45b: "0",
   };
 }
