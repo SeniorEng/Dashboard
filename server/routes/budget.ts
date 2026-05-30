@@ -11,7 +11,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
-import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
+import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, clampDerived45bAnchor } from "@shared/domain/budgets";
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-validator";
@@ -808,8 +808,23 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     return;
   }
 
-  const { budgetType, carryoverAmountCents, budgetStartDate, currentMonthAmountCents } = result.data;
+  const { budgetType, carryoverAmountCents, currentMonthAmountCents } = result.data;
   const userId = req.user?.id;
+  // Task #856 — §45b wird ab dem Pflegegrad-Beginn angesetzt. Damit ein weit
+  // zurückliegender Pflegegrad nicht jahrelange 131€-Beträge rückwirkend
+  // akkumuliert, kappt der Server NUR die §45b-Allokationszeilen (Startwert +
+  // Carryover) aufs rechtliche §45b-Carryover-/Verfalls-Fenster (aktuelles Jahr +
+  // Vorjahr bis 30.06.). Der RAW-Anker (`rawBudgetStartDate`) wird unverändert in
+  // den kunden-weiten Preferences abgelegt (Origin = 'derived_pflegegrad'), damit
+  // §45a/§39 weiterhin den ungekappten Pflegegrad-Beginn als Anker lesen. Der
+  // §45b-LESEpfad kappt den Preferences-Anker erneut, sobald Origin =
+  // 'derived_pflegegrad' ist — so bleibt §45b gebunden, ohne §45a/§39 zu ändern.
+  const rawBudgetStartDate = result.data.budgetStartDate;
+  let budgetStartDate = rawBudgetStartDate;
+  if (budgetType === "entlastungsbetrag_45b") {
+    const now = parseLocalDate(todayISO());
+    budgetStartDate = clampDerived45bAnchor(budgetStartDate, now.getFullYear(), now.getMonth() + 1);
+  }
   const startDate = parseLocalDate(budgetStartDate);
   const year = startDate.getFullYear();
 
@@ -925,9 +940,19 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     allocations.push(carryoverAllocation);
   }
 
+  // Task #856 — `budget_preferences.budget_start_date` ist KUNDEN-WEIT und wird
+  // von allen Töpfen als primärer Anker gelesen. Der Wizard postet §45b → §45a →
+  // §39 nacheinander mit demselben (weit zurückliegenden) `pflegegradSeit`. Alle
+  // Töpfe schreiben hier den RAW-Anker (`rawBudgetStartDate`) mit Origin
+  // 'derived_pflegegrad' — die §45b-Kappung passiert ausschließlich im Lesepfad
+  // (Origin-aware), NICHT durch eine gekappte Preferences-Zeile. So lesen §45a/§39
+  // weiterhin den ungekappten Pflegegrad-Beginn (unverändertes Verhalten), während
+  // §45b denselben Anker beim Lesen aufs rechtliche Fenster kappt. Die Reihenfolge
+  // der Calls ist damit irrelevant (alle schreiben denselben RAW-Wert).
   await budgetLedgerStorage.upsertBudgetPreferences({
     customerId,
-    budgetStartDate,
+    budgetStartDate: rawBudgetStartDate,
+    budgetStartDateOrigin: "derived_pflegegrad",
   }, userId);
 
   if (userId) {
@@ -963,7 +988,17 @@ router.put("/:customerId/preferences", asyncHandler("Budget-Einstellungen konnte
   }
 
   const userId = req.user?.id;
-  const preferences = await budgetLedgerStorage.upsertBudgetPreferences(result.data, userId);
+  // Task #856 — Ein explizit gesetztes budgetStartDate ist eine bewusste
+  // Admin-Entscheidung und gewinnt IMMER vor dem abgeleiteten Pflegegrad-Anker:
+  // Origin = 'manual' → der §45b-Lesepfad kappt diesen Anker NICHT. Nur setzen,
+  // wenn das Datum tatsächlich mitgeschickt wurde — sonst (z.B. reines Ändern des
+  // Monatslimits) bleibt der bestehende Origin unangetastet (undefined → Drizzle
+  // überschreibt die Spalte nicht).
+  const manualOrigin = result.data.budgetStartDate != null ? "manual" as const : undefined;
+  const preferences = await budgetLedgerStorage.upsertBudgetPreferences(
+    { ...result.data, budgetStartDateOrigin: manualOrigin },
+    userId,
+  );
 
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;

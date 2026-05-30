@@ -480,7 +480,12 @@ export function useCustomerWizard() {
         }
 
         if (isPflegekasse && budgets) {
-          const budgetStart = formData.contractStart || today;
+          // Task #856 — Das Budget (insb. der §45b-Entlastungsbetrag) wird ab
+          // dem Pflegegrad-Beginn angesetzt, nicht ab Vertragsbeginn. Liegt der
+          // Pflegegrad-Start vor dem Vertrag, werden so die anrechenbaren Monate
+          // vor Vertragsbeginn berücksichtigt. Den rechtlichen §45b-Carryover-/
+          // Verfalls-Clamp übernimmt der Server (/initial-budget).
+          const budgetStart = formData.pflegegradSeit || today;
           const budgetTypes: Array<{ type: string; cents: number }> = [];
           if (budgets.entlastungsbetrag45b > 0) budgetTypes.push({ type: "entlastungsbetrag_45b", cents: budgets.entlastungsbetrag45b });
           if (budgets.pflegesachleistungen36 > 0) budgetTypes.push({ type: "umwandlung_45a", cents: budgets.pflegesachleistungen36 });

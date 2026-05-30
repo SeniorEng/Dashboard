@@ -358,6 +358,15 @@ async function runStartupTasks() {
       log(`Invoice-Per-Pot-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #856 — customer_budget_preferences.budget_start_date_origin (Herkunft
+    // des §45b-Ankers: derived_pflegegrad → kappen, manual → nie kappen).
+    const { ensureBudgetStartDateOrigin } = await import("./startup/ensure-budget-start-date-origin");
+    try {
+      await ensureBudgetStartDateOrigin();
+    } catch (err) {
+      log(`Budget-Start-Date-Origin-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #819 — Import-Batch-Tabelle + import_batch_id-Spalten.
     const { ensureImportBatch } = await import("./startup/ensure-import-batch");
     try {

@@ -2,6 +2,7 @@ import {
   budgetAllocations,
   budgetTransactions,
   customerBudgetTypeSettings,
+  customerCareLevelHistory,
   type BudgetAllocation,
   type InsertBudgetAllocation,
   type CustomerBudgetPreferences,
@@ -9,7 +10,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
-import { BUDGET_45B_MAX_MONTHLY_CENTS, clampToStatutoryMax } from "@shared/domain/budgets";
+import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampDerived45bAnchor, clampToStatutoryMax } from "@shared/domain/budgets";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -22,6 +23,26 @@ import { auditService } from "../../services/audit";
 import { budgetAllocationsRepo } from "../../repos";
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
+
+/**
+ * Task #856 — Frühester Pflegegrad-Beginn des Kunden aus der historisierten
+ * Pflegegrad-Historie (`customer_care_level_history`). Dient als Anker für die
+ * §45b-Auto-Allokation, wenn (noch) kein explizites Budget-Startdatum und keine
+ * bestehenden Allokationen vorliegen — so profitieren auch Bestandskunden ohne
+ * gespeichertes Startdatum vom Pflegegrad-Anker. Rückgabe `null`, wenn keine
+ * Pflegegrad-Historie existiert.
+ */
+async function earliestCareLevelStart(
+  customerId: number,
+  d: Pick<typeof db, "select">,
+): Promise<string | null> {
+  const rows = await d.select({ validFrom: customerCareLevelHistory.validFrom })
+    .from(customerCareLevelHistory)
+    .where(eq(customerCareLevelHistory.customerId, customerId))
+    .orderBy(asc(customerCareLevelHistory.validFrom))
+    .limit(1);
+  return rows[0]?.validFrom ?? null;
+}
 
 export async function createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation> {
   const executor = tx ?? db;
@@ -456,6 +477,14 @@ async function calculateAllocated45b(
     ));
 
   let budgetStartDate = preferences?.budgetStartDate ?? null;
+  // Task #856 — Origin-aware §45b-Kappung: NUR ein automatisch aus dem
+  // Pflegegrad-Beginn abgeleiteter Anker (Origin 'derived_pflegegrad', vom
+  // Wizard/initial-budget gesetzt) wird aufs rechtliche §45b-Fenster (aktuelles
+  // Jahr + Vorjahr bis 30.06.) gekappt. Ein manuell gesetzter Anker ('manual')
+  // und Altbestand (NULL) bleiben unangetastet — manuell gewinnt immer.
+  if (budgetStartDate && preferences?.budgetStartDateOrigin === "derived_pflegegrad") {
+    budgetStartDate = clampDerived45bAnchor(budgetStartDate, curYear, curMonth);
+  }
 
   if (!budgetStartDate) {
     const initialBalances = existingAllocations
@@ -480,7 +509,15 @@ async function calculateAllocated45b(
   if (!budgetStartDate) {
     const s45bEnabled = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
     if (!s45bEnabled) return 0;
-    budgetStartDate = `${curYear}-01-01`;
+    // Task #856 — Auto-Fallback (Kunde ohne expliziten Budget-Start): Anker am
+    // Pflegegrad-Beginn, aber NUR innerhalb des laufenden Jahres. Ein weit
+    // zurückliegender Pflegegrad fabriziert KEINEN Vorjahres-Übertrag (das
+    // Vorjahres-Fenster bleibt den expliziten Pfaden vorbehalten). Identisch in
+    // `ensureYearlyCarryover45b`, sonst driften Summe und Carryover-Anlage.
+    const pgStart = await earliestCareLevelStart(customerId, d);
+    budgetStartDate = pgStart
+      ? floorAutoAnchor45bToCurrentYear(pgStart, curYear)
+      : `${curYear}-01-01`;
   }
 
   const startDate = parseLocalDate(budgetStartDate);
@@ -963,7 +1000,7 @@ async function calculateAllocated39_42a(
 
 async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Promise<BudgetAllocation[]> {
   const d = _tx ?? db;
-  const { year: curYear } = currentYearAndMonth();
+  const { year: curYear, month: curMonth } = currentYearAndMonth();
 
   // Task #684 — Dedup über ALLE Carryover-Zeilen (aktiv UND soft-gelöscht).
   // Eine vom Admin gelöschte Carryover-Zeile (`deleted_at IS NOT NULL`) ist
@@ -1007,6 +1044,13 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   let eligibilityStartYear = curYear;
 
   let budgetStartDate = preferences?.budgetStartDate ?? null;
+  // Task #856 — Origin-aware §45b-Kappung, identisch zu `calculateAllocated45b`:
+  // ein abgeleiteter Anker ('derived_pflegegrad') wird aufs rechtliche Fenster
+  // gekappt, damit `eligibilityStartYear` keine jahrelangen Vorjahres-Überträge
+  // fabriziert. Manuell ('manual') und Altbestand (NULL) bleiben unangetastet.
+  if (budgetStartDate && preferences?.budgetStartDateOrigin === "derived_pflegegrad") {
+    budgetStartDate = clampDerived45bAnchor(budgetStartDate, curYear, curMonth);
+  }
   if (!budgetStartDate) {
     const ibEntries = allAllocations.filter(a => a.source === "initial_balance" && a.validFrom);
     if (ibEntries.length > 0) {
@@ -1024,7 +1068,14 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   if (!budgetStartDate) {
     const s45bEnabled = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
     if (!s45bEnabled) return [];
-    budgetStartDate = `${curYear}-01-01`;
+    // Task #856 — Auto-Fallback identisch zu `calculateAllocated45b`: Anker am
+    // Pflegegrad-Beginn, aber NUR im laufenden Jahr. Kein automatischer Vorjahres-
+    // Übertrag für nie eingerichtete Kunden (sonst driften Summe und Carryover-
+    // Anlage UND der Auto-Pfad materialisiert 12 × 131 € ohne fachliche Grundlage).
+    const pgStart = await earliestCareLevelStart(customerId, d);
+    budgetStartDate = pgStart
+      ? floorAutoAnchor45bToCurrentYear(pgStart, curYear)
+      : `${curYear}-01-01`;
   }
   eligibilityStartYear = parseLocalDate(budgetStartDate).getFullYear();
 

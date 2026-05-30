@@ -158,6 +158,20 @@ Server validiert Werte > 131 € mit deutscher Fehlermeldung; `clampToStatutoryM
 
 Die Startup-Migration `clear-45b-monthly-limits` ist No-Op, damit Re-Deploys konfigurierte Werte nicht wegwerfen.
 
+### §45b Anker am Pflegegrad-Beginn (Task #856)
+
+Der §45b-Entlastungsbetrag wächst ab dem **Pflegegrad-Beginn** (frühster Eintrag in der Care-Level-History), nicht ab dem Vertragsbeginn. So sieht ein Kunde mit Pflegegrad seit März, aber Vertrag erst ab Juni, die ungenutzten März-/April-/Mai-Monate im Budgets-Tab statt „Noch keine Zuweisungen vorhanden".
+
+**Anker-Auflösung — zwei getrennte Regeln, NICHT verwechseln** (beide in `shared/domain/budgets.ts`):
+
+- **§45b-Allokationszeilen aus `POST /initial-budget`** (Startwert + Carryover) und das Korrektur-Skript `server/scripts/fix-customer-45b-anchor.ts` nutzen `clampDerived45bAnchor`. Die angelegten Zeilen werden auf das **rechtliche §45b-Fenster** gekappt (laufendes Jahr + Vorjahr, dessen Carryover bis 30.06. gültig ist, siehe `earliest45bRelevantAnchor`). Ein weit zurückliegender Pflegegrad erzeugt hier maximal einen Vorjahres-Übertrag.
+- **§45b-Lesepfad** (`calculateAllocated45b` / `ensureYearlyCarryover45b` in `server/storage/budget/allocation-storage.ts`) kappt den aus den Preferences gelesenen Anker **origin-aware** mit `clampDerived45bAnchor` — aber **nur**, wenn `budget_start_date_origin = 'derived_pflegegrad'`. Bei `'manual'` (oder NULL = Altbestand) bleibt der Anker ungekappt.
+- **Auto-Fallback für nie eingerichtete Kunden** (`calculateAllocated45b` / `ensureYearlyCarryover45b`, wenn weder `budgetStartDate` noch Startwert/Carryover gesetzt ist) nutzt `floorAutoAnchor45bToCurrentYear`. Der Pflegegrad-Beginn zählt hier **nur innerhalb des laufenden Jahres**; ein Datum vor dem 1.1. des laufenden Jahres wird auf den Jahresanfang angehoben. **Warum strenger:** Für einen Kunden, der nie ein Budget eingerichtet hat, gibt es keine fachliche Grundlage, automatisch einen Vorjahres-Übertrag (12 × 131 € = 1.572 €) zu materialisieren. Der Auto-Pfad darf daher kein Vorjahr fabrizieren — sonst taucht nach dem Löschen einer Carryover-Zeile sofort wieder ein voller Vorjahres-Übertrag auf (E2E-Regression `§45b-Carryover — Löschen … persistiert nach Reload`).
+
+Beide Lesepfad-Blöcke (`calculateAllocated45b` und `ensureYearlyCarryover45b`) müssen denselben Anker (inkl. identischer origin-aware Kappung) verwenden, sonst driften die angezeigte Summe und die tatsächlich angelegten Carryover-Zeilen auseinander. Die manuell gesetzte `budgetStartDate` gewinnt immer vor dem abgeleiteten Pflegegrad-Anker. Helfer-Unit-Tests: `tests/unit/budget-45b-anchor.test.ts`.
+
+**Shared-Preferences-Schreibdisziplin (`budget_preferences.budget_start_date` + `budget_start_date_origin`):** Das Feld ist **kunden-weit** und wird von ALLEN Töpfen als primärer Anker gelesen. Der Wizard postet `POST /initial-budget` nacheinander für §45b → §45a → §39 mit demselben (ungekappten) `pflegegradSeit`. **Alle drei Calls** schreiben denselben **RAW**-Anker (`rawBudgetStartDate`, ungekappt) mit `budget_start_date_origin = 'derived_pflegegrad'` in die Preferences — die Reihenfolge ist damit irrelevant. Die §45b-Kappung passiert ausschließlich im **Lesepfad** (origin-aware, s.o.), NICHT durch eine gekappte Preferences-Zeile. So lesen §45a/§39 weiterhin den ungekappten Pflegegrad-Beginn (unverändertes Verhalten), während §45b denselben Anker beim Lesen aufs rechtliche Fenster kappt. Setzt ein Admin den Start explizit via `PUT /preferences`, wird `origin = 'manual'` markiert → der §45b-Read kappt NICHT mehr (Szenario INT-13: historische `budgetStartDate` 2024 behält ihren Vorjahres-Carryover). Altbestand vor #856 hat `origin = NULL` und wird bewusst wie `'manual'` behandelt (kein stilles Umrechnen bestehender Budgets; betroffene Altkunden werden gezielt per Korrektur-Skript migriert). Idempotente Spalten-Migration: `server/startup/ensure-budget-start-date-origin.ts`.
+
 ## Storno / Reversal — Service-Cent-Spiegel-Konvention (Task #754)
 
 Jede Reversal-TX SPIEGELT die Service-Cent-, Minuten- und Kilometer-Spalten
