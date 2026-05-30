@@ -6,8 +6,9 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { db, type DbOrTx } from "../../lib/db";
 
-export async function getCustomerContact(id: number): Promise<CustomerContact | undefined> {
-  const result = await db.select().from(customerContacts).where(eq(customerContacts.id, id));
+export async function getCustomerContact(id: number, tx?: DbOrTx): Promise<CustomerContact | undefined> {
+  const executor = tx ?? db;
+  const result = await executor.select().from(customerContacts).where(eq(customerContacts.id, id));
   return result[0];
 }
 
@@ -37,18 +38,19 @@ export async function addCustomerContact(data: InsertCustomerContact, tx?: DbOrT
   return result[0];
 }
 
-export async function updateCustomerContact(id: number, data: Partial<InsertCustomerContact>): Promise<CustomerContact | undefined> {
+export async function updateCustomerContact(id: number, data: Partial<InsertCustomerContact>, tx?: DbOrTx): Promise<CustomerContact | undefined> {
+  const executor = tx ?? db;
   if (data.isPrimary) {
-    const existing = await db.select().from(customerContacts).where(eq(customerContacts.id, id));
+    const existing = await executor.select().from(customerContacts).where(eq(customerContacts.id, id));
     if (existing.length > 0) {
-      await db
+      await executor
         .update(customerContacts)
         .set({ isPrimary: false })
         .where(eq(customerContacts.customerId, existing[0].customerId));
     }
   }
   
-  const result = await db
+  const result = await executor
     .update(customerContacts)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(customerContacts.id, id))
@@ -56,8 +58,9 @@ export async function updateCustomerContact(id: number, data: Partial<InsertCust
   return result[0];
 }
 
-export async function deleteCustomerContact(id: number): Promise<boolean> {
-  const result = await db
+export async function deleteCustomerContact(id: number, tx?: DbOrTx): Promise<boolean> {
+  const executor = tx ?? db;
+  const result = await executor
     .update(customerContacts)
     .set({ isActive: false, updatedAt: new Date() })
     .where(eq(customerContacts.id, id))

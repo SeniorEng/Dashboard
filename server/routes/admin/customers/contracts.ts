@@ -3,6 +3,7 @@ import { storage } from "../../../storage";
 import { customerManagementStorage } from "../../../storage/customer-management";
 import { asyncHandler } from "../../../lib/errors";
 import { requireIntParam } from "../../../lib/params";
+import { withAudit } from "../../../lib/with-audit";
 import { z } from "zod";
 import {
   customers,
@@ -76,14 +77,38 @@ router.post("/customers/:id/contract", asyncHandler("Vertrag konnte nicht angele
   }
 
   const data = createContractSchema.parse(req.body);
-  const result = await customerManagementStorage.createCustomerContract({
-    customerId: id,
-    contractStart: data.contractStart,
-    contractDate: data.contractDate || null,
-    contractEnd: data.contractEnd || null,
-    hoursPerPeriod: data.hoursPerPeriod ?? 0,
-    periodType: data.periodType ?? "week",
-    status: "active",
+
+  const result = await withAudit(async (tx, audit) => {
+    const created = await customerManagementStorage.createCustomerContract({
+      customerId: id,
+      contractStart: data.contractStart,
+      contractDate: data.contractDate || null,
+      contractEnd: data.contractEnd || null,
+      hoursPerPeriod: data.hoursPerPeriod ?? 0,
+      periodType: data.periodType ?? "week",
+      status: "active",
+    }, req.user!.id, tx);
+
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_contract_updated",
+      entityType: "customer",
+      entityId: id,
+      metadata: {
+        changedFields: ["vertrag_angelegt"],
+        oldValues: {},
+        newValues: {
+          contractId: created.id,
+          contractStart: created.contractStart,
+          contractEnd: created.contractEnd,
+          hoursPerPeriod: created.hoursPerPeriod,
+          periodType: created.periodType,
+          status: created.status,
+        },
+      },
+      ipAddress: req.ip,
+    });
+    return created;
   });
 
   res.status(201).json(result);
@@ -113,7 +138,15 @@ router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktua
 
   const validatedData = updateContractSchema.parse(req.body);
 
-  const result = await db.transaction(async (tx) => {
+  const changedFields = Object.keys(validatedData);
+  const oldValues: Record<string, unknown> = {};
+  const newValues: Record<string, unknown> = {};
+  for (const field of changedFields) {
+    oldValues[field] = (latestContract as Record<string, unknown>)[field];
+    newValues[field] = (validatedData as Record<string, unknown>)[field];
+  }
+
+  const result = await withAudit(async (tx, audit) => {
     const updated = await customerManagementStorage.updateCustomerContract(latestContract.id, validatedData, tx);
 
     if (!updated) {
@@ -129,6 +162,19 @@ router.patch("/customers/:id/contract", asyncHandler("Vertrag konnte nicht aktua
         })
         .where(eq(customers.id, id));
     }
+
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_contract_updated",
+      entityType: "customer",
+      entityId: id,
+      metadata: {
+        changedFields,
+        oldValues: { contractId: latestContract.id, ...oldValues },
+        newValues,
+      },
+      ipAddress: req.ip,
+    });
 
     return updated;
   });
@@ -146,7 +192,39 @@ router.patch("/customers/:id/needs-assessment", asyncHandler("Leistungen konnten
   if (id === null) return;
 
   const validatedData = updateNeedsAssessmentSchema.parse(req.body);
-  const result = await customerManagementStorage.updateNeedsAssessment(id, validatedData);
+
+  const changedFields = Object.keys(validatedData);
+
+  const result = await withAudit(async (tx, audit) => {
+    const existing = await customerManagementStorage.getCustomerNeedsAssessment(id, tx);
+    const updated = await customerManagementStorage.updateNeedsAssessment(id, validatedData, tx);
+
+    if (!updated) {
+      return undefined;
+    }
+
+    const oldValues: Record<string, unknown> = {};
+    const newValues: Record<string, unknown> = {};
+    for (const field of changedFields) {
+      oldValues[field] = existing ? (existing as Record<string, unknown>)[field] : undefined;
+      newValues[field] = (validatedData as Record<string, unknown>)[field];
+    }
+
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_contract_updated",
+      entityType: "customer",
+      entityId: id,
+      metadata: {
+        changedFields: ["bedarfserhebung_aktualisiert", ...changedFields],
+        oldValues,
+        newValues,
+      },
+      ipAddress: req.ip,
+    });
+
+    return updated;
+  });
 
   if (!result) {
     res.status(404).json({ error: "NOT_FOUND", message: "Bedarfserhebung nicht gefunden" });

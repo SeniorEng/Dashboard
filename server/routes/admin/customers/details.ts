@@ -3,6 +3,7 @@ import { customerManagementStorage } from "../../../storage/customer-management"
 import { storage } from "../../../storage";
 import { asyncHandler } from "../../../lib/errors";
 import { requireIntParam } from "../../../lib/params";
+import { withAudit } from "../../../lib/with-audit";
 import {
   insertCustomerInsuranceSchema,
   insertCustomerContactSchema,
@@ -38,7 +39,29 @@ router.post("/customers/:id/insurance", asyncHandler("Versicherung konnte nicht 
   const schema = insertCustomerInsuranceSchema.extend({ versichertennummer: versichertennummerSchemaForCase });
 
   const data = schema.parse({ ...req.body, customerId });
-  const insurance = await customerManagementStorage.addCustomerInsurance(data, req.user!.id);
+
+  const insurance = await withAudit(async (tx, audit) => {
+    const created = await customerManagementStorage.addCustomerInsurance(data, req.user!.id, tx);
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_updated",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        changedFields: ["versicherung_hinzugefügt"],
+        oldValues: {},
+        newValues: {
+          insuranceId: created.id,
+          insuranceProviderId: created.insuranceProviderId,
+          versichertennummer: created.versichertennummer,
+          validFrom: created.validFrom,
+        },
+      },
+      ipAddress: req.ip,
+    });
+    return created;
+  });
+
   res.status(201).json(insurance);
 }));
 
@@ -55,7 +78,24 @@ router.post("/customers/:id/contacts", asyncHandler("Kontakt konnte nicht hinzug
   if (customerId === null) return;
   
   const validatedData = insertCustomerContactSchema.parse({ ...req.body, customerId });
-  const contact = await customerManagementStorage.addCustomerContact(validatedData);
+
+  const contact = await withAudit(async (tx, audit) => {
+    const created = await customerManagementStorage.addCustomerContact(validatedData, tx);
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_updated",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        changedFields: ["notfallkontakt_hinzugefügt"],
+        oldValues: {},
+        newValues: { contactId: created.id, vorname: created.vorname, nachname: created.nachname, contactType: created.contactType },
+      },
+      ipAddress: req.ip,
+    });
+    return created;
+  });
+
   res.status(201).json(contact);
 }));
 
@@ -64,6 +104,8 @@ const updateCustomerContactSchema = insertCustomerContactSchema
   .partial();
 
 router.patch("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt konnte nicht aktualisiert werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const contactId = requireIntParam(req.params.contactId, res);
   if (contactId === null) return;
   
@@ -76,8 +118,33 @@ router.patch("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt
     });
     return;
   }
-  
-  const contact = await customerManagementStorage.updateCustomerContact(contactId, result.data);
+
+  // Bindung des Kontakts an den Kunden in der URL verifizieren, damit der
+  // Audit-Eintrag nicht unter einer fremden Kunden-ID landet (IDOR/Integrität).
+  const existingContact = await customerManagementStorage.getCustomerContact(contactId);
+  if (!existingContact || existingContact.customerId !== customerId) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" });
+    return;
+  }
+
+  const contact = await withAudit(async (tx, audit) => {
+    const updated = await customerManagementStorage.updateCustomerContact(contactId, result.data, tx);
+    if (!updated) return undefined;
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_updated",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        changedFields: ["notfallkontakt_aktualisiert"],
+        oldValues: { contactId, vorname: existingContact.vorname, nachname: existingContact.nachname, contactType: existingContact.contactType },
+        newValues: { contactId, ...result.data },
+      },
+      ipAddress: req.ip,
+    });
+    return updated;
+  });
+
   if (!contact) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" });
     return;
@@ -87,10 +154,37 @@ router.patch("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt
 }));
 
 router.delete("/customers/:customerId/contacts/:contactId", asyncHandler("Kontakt konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
   const contactId = requireIntParam(req.params.contactId, res);
   if (contactId === null) return;
-  
-  const deleted = await customerManagementStorage.deleteCustomerContact(contactId);
+
+  // Bindung des Kontakts an den Kunden in der URL verifizieren, damit der
+  // Audit-Eintrag nicht unter einer fremden Kunden-ID landet (IDOR/Integrität).
+  const existingContact = await customerManagementStorage.getCustomerContact(contactId);
+  if (!existingContact || existingContact.customerId !== customerId) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" });
+    return;
+  }
+
+  const deleted = await withAudit(async (tx, audit) => {
+    const ok = await customerManagementStorage.deleteCustomerContact(contactId, tx);
+    if (!ok) return false;
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_updated",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        changedFields: ["notfallkontakt_gelöscht"],
+        oldValues: { contactId, vorname: existingContact.vorname, nachname: existingContact.nachname, contactType: existingContact.contactType },
+        newValues: {},
+      },
+      ipAddress: req.ip,
+    });
+    return ok;
+  });
+
   if (!deleted) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kontakt nicht gefunden" });
     return;
@@ -111,8 +205,28 @@ router.post("/customers/:id/care-level", asyncHandler("Pflegegrad konnte nicht a
   const customerId = requireIntParam(req.params.id, res);
   if (customerId === null) return;
   
+  const customer = await storage.getCustomer(customerId);
+  const oldPflegegrad = customer?.pflegegrad ?? null;
+
   const validatedData = insertCareLevelHistorySchema.parse({ ...req.body, customerId });
-  const careLevel = await customerManagementStorage.addCareLevelHistory(validatedData, req.user!.id);
+
+  const careLevel = await withAudit(async (tx, audit) => {
+    const created = await customerManagementStorage.addCareLevelHistory(validatedData, req.user!.id, tx);
+    audit.record({
+      userId: req.user!.id,
+      action: "customer_care_level_changed",
+      entityType: "customer",
+      entityId: customerId,
+      metadata: {
+        oldPflegegrad,
+        newPflegegrad: validatedData.pflegegrad,
+        seitDatum: validatedData.validFrom,
+      },
+      ipAddress: req.ip,
+    });
+    return created;
+  });
+
   res.status(201).json(careLevel);
 }));
 

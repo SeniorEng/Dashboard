@@ -78,8 +78,9 @@ export async function addCareLevelHistory(data: InsertCareLevelHistory, userId?:
   return result[0];
 }
 
-export async function getCustomerNeedsAssessment(customerId: number): Promise<CustomerNeedsAssessment | undefined> {
-  const result = await db
+export async function getCustomerNeedsAssessment(customerId: number, tx?: DbOrTx): Promise<CustomerNeedsAssessment | undefined> {
+  const executor = tx ?? db;
+  const result = await executor
     .select()
     .from(customerNeedsAssessments)
     .where(eq(customerNeedsAssessments.customerId, customerId))
@@ -114,11 +115,12 @@ export async function updateNeedsAssessment(customerId: number, data: Partial<{
   serviceFreizeitgestaltung: boolean;
   serviceKreativ: boolean;
   sonstigeLeistungen: string | null;
-}>): Promise<CustomerNeedsAssessment | undefined> {
-  const existing = await getCustomerNeedsAssessment(customerId);
+}>, tx?: DbOrTx): Promise<CustomerNeedsAssessment | undefined> {
+  const executor = tx ?? db;
+  const existing = await getCustomerNeedsAssessment(customerId, tx);
   if (!existing) return undefined;
 
-  const result = await db.update(customerNeedsAssessments)
+  const result = await executor.update(customerNeedsAssessments)
     .set(data)
     .where(eq(customerNeedsAssessments.id, existing.id))
     .returning();
