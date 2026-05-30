@@ -156,36 +156,44 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
     try {
       // 2) Generate-All über die UI: Monat/Jahr wählen, Dialog öffnen, bestätigen.
       //
-      // Root-Cause-Note (Task #764): Auf Cold-Start mit vier parallelen Workern
-      // kann der `/api/billing/eligible-customers`-Request 10–20s brauchen.
-      // `button-generate-all` rendert NUR wenn `customers.length > 0` (siehe
-      // `client/src/pages/admin/billing.tsx`). Wenn wir nur auf `toBeVisible`
-      // warten, hängt der erste Try gelegentlich am 15s-Timeout, weil die
-      // Hydration-Query noch in Flight ist — der Retry rettet ihn dann.
-      // Deshalb warten wir hier EXPLIZIT auf den eligible-customers-GET, bevor
-      // wir auf das Button-Render gehen, und akzeptieren großzügige 30s.
-      const eligibleResp = page.waitForResponse(
-        (r) =>
-          r.url().includes("/api/billing/eligible-customers")
-          && r.request().method() === "GET",
-        { timeout: 30000 },
-      );
-      await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
-      await eligibleResp;
-      await expect(page.locator("[data-testid='button-generate-all']")).toBeVisible({
-        timeout: 15000,
-      });
-      await expect(page.locator("[data-testid='button-generate-all']")).toBeEnabled();
-
-      // Die Billing-Page initialisiert Monat/Jahr auf das aktuelle Datum.
-      // `nextWeekday(7)` (7 Werktage in der Zukunft) bleibt nahezu immer im
-      // aktuellen Monat — nur kurz vor Monatsende könnte ein Wechsel nötig
-      // sein. In diesem Fall überspringen wir die Select-UI nicht und
-      // führen die Anwahl per Radix-Trigger durch.
+      // Die Billing-Page initialisiert Monat/Jahr auf das AKTUELLE Datum, das
+      // Termin-Datum (`nextWeekday(7)`) kann aber kurz vor Monatsende bereits im
+      // FOLGEMONAT liegen. `button-generate-all` rendert NUR, wenn die
+      // `eligible-customers`-Query für den ANGEZEIGTEN Monat einen Treffer
+      // liefert (siehe `client/src/pages/admin/billing.tsx`). Früher wurde
+      // zuerst gegen den Default-Monat auf den Button gewartet und erst DANACH
+      // der Monat umgestellt — an Monatsgrenzen lief dieser Button-Wait dann ins
+      // Leere (Default-Monat = leer) und der Smoke flakete. Deshalb stellen wir
+      // den Monat des Seeds ZUERST ein und warten erst dann auf die passende
+      // eligible-customers-Antwort + das Button-Render.
       const today = new Date();
       const currentMonth = today.getMonth() + 1;
       const currentYear = today.getFullYear();
-      if (kasse.month !== currentMonth || kasse.year !== currentYear) {
+      const needsMonthSwitch =
+        kasse.month !== currentMonth || kasse.year !== currentYear;
+
+      // Root-Cause-Note (Task #764): Auf Cold-Start mit vier parallelen Workern
+      // kann der eligible-customers-Request 10–20s brauchen. Wir warten daher
+      // EXPLIZIT auf den GET für den tatsächlich angezeigten (Seed-)Monat, bevor
+      // wir auf das Button-Render gehen, und akzeptieren großzügige 30s.
+      const eligibleResp = page.waitForResponse(
+        (r) => {
+          if (
+            !r.url().includes("/api/billing/eligible-customers")
+            || r.request().method() !== "GET"
+          ) {
+            return false;
+          }
+          const params = new URL(r.url()).searchParams;
+          return (
+            params.get("month") === String(kasse.month)
+            && params.get("year") === String(kasse.year)
+          );
+        },
+        { timeout: 30000 },
+      );
+      await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
+      if (needsMonthSwitch) {
         await selectRadixOption(
           page,
           "select-billing-month",
@@ -193,6 +201,11 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
         );
         await selectRadixOption(page, "select-billing-year", String(kasse.year));
       }
+      await eligibleResp;
+      await expect(page.locator("[data-testid='button-generate-all']")).toBeVisible({
+        timeout: 15000,
+      });
+      await expect(page.locator("[data-testid='button-generate-all']")).toBeEnabled();
 
       // Dialog öffnen
       await page.locator("[data-testid='button-generate-all']").click();

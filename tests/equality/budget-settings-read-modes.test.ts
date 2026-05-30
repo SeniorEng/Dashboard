@@ -14,6 +14,7 @@ import {
   customerBudgetTypeSettings,
 } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { withGobdMutation } from "../helpers/gobd";
 import {
   readBudgetTypeSettings,
   getActiveBudgetTypeSettings,
@@ -83,7 +84,11 @@ async function seed(): Promise<number> {
 }
 
 async function cleanup(id: number): Promise<void> {
-  await db.delete(customerBudgetTypeSettings).where(eq(customerBudgetTypeSettings.customerId, id));
+  // customer_budget_type_settings ist append-only (GoBD-Trigger Task #828) —
+  // Hard-Delete im Test-Teardown nur über den transaktions-lokalen Bypass.
+  await withGobdMutation((tx) =>
+    tx.delete(customerBudgetTypeSettings).where(eq(customerBudgetTypeSettings.customerId, id)),
+  );
   await db.delete(customers).where(eq(customers.id, id));
 }
 

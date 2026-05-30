@@ -19,6 +19,7 @@ import {
 import { backfillBudgetHistorization } from "../../server/startup/backfill-budget-historization";
 import { assertSecondRunIsNoOp } from "./backfill-guard-pattern";
 import { uniqueId } from "../test-utils";
+import { withGobdMutation } from "../helpers/gobd";
 
 const TAG = `t578-hist-${uniqueId()}`;
 let customerId: number;
@@ -38,9 +39,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // customer_budget_type_settings ist append-only (GoBD-Trigger Task #828) —
+  // Hard-Delete im Test-Teardown nur über den transaktions-lokalen Bypass.
   if (settingsIds.length > 0) {
-    await db.delete(customerBudgetTypeSettings)
-      .where(inArray(customerBudgetTypeSettings.id, settingsIds));
+    await withGobdMutation((tx) =>
+      tx.delete(customerBudgetTypeSettings)
+        .where(inArray(customerBudgetTypeSettings.id, settingsIds)),
+    );
   }
   for (const id of createdCustomerIds) {
     try { await db.delete(customers).where(eq(customers.id, id)); } catch {}
@@ -48,8 +53,10 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(customerBudgetTypeSettings)
-    .where(eq(customerBudgetTypeSettings.customerId, customerId));
+  await withGobdMutation((tx) =>
+    tx.delete(customerBudgetTypeSettings)
+      .where(eq(customerBudgetTypeSettings.customerId, customerId)),
+  );
   settingsIds.length = 0;
 });
 

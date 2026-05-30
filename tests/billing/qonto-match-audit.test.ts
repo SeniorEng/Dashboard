@@ -27,6 +27,7 @@ import {
   auditLog,
 } from "../../shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { withGobdMutation } from "../helpers/gobd";
 
 interface Seeded {
   customerId: number;
@@ -120,7 +121,11 @@ afterAll(async () => {
     await db.delete(qontoTransactions).where(inArray(qontoTransactions.id, seeded.qontoTxIds));
   }
   if (seeded.invoiceIds.length > 0) {
-    await db.delete(invoices).where(inArray(invoices.id, seeded.invoiceIds));
+    // invoices ist GoBD-unveränderbar (finalisierte Rechnungen, Trigger Task #828)
+    // — Hard-Delete im Test-Teardown nur über den transaktions-lokalen Bypass.
+    await withGobdMutation((tx) =>
+      tx.delete(invoices).where(inArray(invoices.id, seeded.invoiceIds)),
+    );
   }
   if (seeded.customerId) {
     await db.delete(customers).where(eq(customers.id, seeded.customerId));

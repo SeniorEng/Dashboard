@@ -19,6 +19,9 @@ silently. Protections:
 
 **Bypass:** single transaction-local GUC `SET LOCAL app.allow_gobd_mutation = 'on'`
 (separate from audit_log's `app.allow_audit_log_mutation`). Production never sets it.
+For Vitest teardowns deleting these tables, use `withGobdMutation(tx => ...)` from
+`tests/helpers/gobd.ts` instead of hand-rolling the GUC — a plain `db.delete(...)`
+in `afterAll`/`cleanup` fails with `restrict_violation` and reds the whole suite.
 
 **Why these legit paths MUST set the bypass** (miss one → breaks prod or the test
 suite): customer-merge tx in `duplicates.ts` (direct deletes), the two test-purge
