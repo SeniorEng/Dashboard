@@ -71,8 +71,9 @@ export async function getTransactionByAppointmentId(appointmentId: number, _tx?:
   return consumptions.find((c) => !reversedIds.has(c.id));
 }
 
-export async function getTransactionsByAppointmentId(appointmentId: number): Promise<BudgetTransaction[]> {
-  return db.select()
+export async function getTransactionsByAppointmentId(appointmentId: number, txClient?: DbClient): Promise<BudgetTransaction[]> {
+  const d = txClient ?? db;
+  return d.select()
     .from(budgetTransactions)
     .where(and(
       eq(budgetTransactions.appointmentId, appointmentId),

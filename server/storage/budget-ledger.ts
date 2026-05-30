@@ -26,7 +26,7 @@ interface BudgetLedgerStorage {
 
   createBudgetTransaction(transaction: InsertBudgetTransaction, userId?: number): Promise<BudgetTransaction>;
   getBudgetTransactions(customerId: number, options?: { year?: number; limit?: number; budgetType?: string }): Promise<BudgetTransaction[]>;
-  getTransactionsByAppointmentId(appointmentId: number): Promise<BudgetTransaction[]>;
+  getTransactionsByAppointmentId(appointmentId: number, txClient?: DbClient): Promise<BudgetTransaction[]>;
   getTransactionByAppointmentId(appointmentId: number, _tx?: DbClient): Promise<BudgetTransaction | undefined>;
   reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined>;
 

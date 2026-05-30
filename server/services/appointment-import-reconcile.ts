@@ -310,59 +310,75 @@ export async function executeReconcile(params: {
 
   const batchId = params.batchId ?? randomUUID();
 
-  // Task #674: Re-Check aller Termine in einer Sammel-Abfrage. Bewusst über
-  // `appointmentsRepo.selectColumnsFrom(...)` OHNE `activeOnly()`, damit
-  // soft-gelöschte Zeilen weiterhin gefunden werden — der Reconcile-Pfad
-  // muss `deletedAt` lesen, um Drift-Fälle zu erkennen. Der Filter wird
-  // nicht vergessen, sondern absichtlich weggelassen; die Repo-Vermittlung
-  // dient hier der Architektur-Konsistenz (Soft-Delete-Coverage-Test).
-  const rows = await appointmentsRepo
-    .selectColumnsFrom({
-      id: appointments.id,
-      customerId: appointments.customerId,
-      date: appointments.date,
-      scheduledStart: appointments.scheduledStart,
-      status: appointments.status,
-      deletedAt: appointments.deletedAt,
-      signedAt: appointments.signedAt,
-      assignedEmployeeId: appointments.assignedEmployeeId,
-      performedByEmployeeId: appointments.performedByEmployeeId,
-    })
-    .where(inArray(appointments.id, appointmentIds));
-
-  const rowById = new Map(rows.map((r) => [r.id, r]));
-
-  const signedRecordSet = new Set<number>();
-  if (rows.length > 0) {
-    const signed = await db
-      .select({ appointmentId: serviceRecordAppointments.appointmentId })
-      .from(serviceRecordAppointments)
-      .innerJoin(
-        monthlyServiceRecords,
-        eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id),
-      )
-      .where(
-        and(
-          inArray(serviceRecordAppointments.appointmentId, rows.map((r) => r.id)),
-          isNull(monthlyServiceRecords.deletedAt),
-          or(
-            isNotNull(monthlyServiceRecords.employeeSignedAt),
-            isNotNull(monthlyServiceRecords.customerSignedAt),
-          ),
-        ),
-      );
-    for (const s of signed) signedRecordSet.add(s.appointmentId);
-  }
-
   let cancelled = 0;
   let reversedTransactions = 0;
   let excluded = 0;
   const errors: { appointmentId: number; error: string }[] = [];
 
-  for (const appointmentId of appointmentIds) {
-    try {
+  // Task #834: Der gesamte Reconcile-Lauf läuft in EINER Transaktion —
+  // all-or-nothing. Früher öffnete jede Iteration ihre eigene
+  // `db.transaction(...)`, sodass ein Fehler in der Mitte des Laufs einen
+  // Teil der Termine bereits storniert + Budget-Verbrauch zurückgerollt
+  // zurückließ, während der Rest unangetastet blieb (GoBD-Datenintegritäts-
+  // Risiko). Jetzt rollt jeder geworfene Fehler den KOMPLETTEN Lauf zurück;
+  // Stornos, Budget-Reversals UND die Audit-Einträge teilen dieselbe
+  // transaktionale Grenze. Idempotenz bleibt erhalten: ein zweiter Lauf
+  // findet die Termine bereits `cancelled`/soft-deleted und überspringt sie.
+  //
+  // Task #834: AUCH die Guard-Reads (Termin-Re-Check + Signed-Record-Lookup)
+  // laufen innerhalb dieser Transaktion (über `tx`), damit alle Schutz-
+  // entscheidungen und Mutationen denselben konsistenten Snapshot sehen —
+  // kein TOCTOU-Fenster zwischen Vorab-Read und Mutation mehr.
+  await db.transaction(async (tx) => {
+    // Re-Check aller Termine in einer Sammel-Abfrage. Bewusst über
+    // `appointmentsRepo.selectColumnsFrom(...)` OHNE `activeOnly()`, damit
+    // soft-gelöschte Zeilen weiterhin gefunden werden — der Reconcile-Pfad
+    // muss `deletedAt` lesen, um Drift-Fälle zu erkennen (Task #674). Der
+    // Filter wird nicht vergessen, sondern absichtlich weggelassen.
+    const rows = await appointmentsRepo
+      .selectColumnsFrom({
+        id: appointments.id,
+        customerId: appointments.customerId,
+        date: appointments.date,
+        scheduledStart: appointments.scheduledStart,
+        status: appointments.status,
+        deletedAt: appointments.deletedAt,
+        signedAt: appointments.signedAt,
+        assignedEmployeeId: appointments.assignedEmployeeId,
+        performedByEmployeeId: appointments.performedByEmployeeId,
+      }, tx)
+      .where(inArray(appointments.id, appointmentIds));
+
+    const rowById = new Map(rows.map((r) => [r.id, r]));
+
+    const signedRecordSet = new Set<number>();
+    if (rows.length > 0) {
+      const signed = await tx
+        .select({ appointmentId: serviceRecordAppointments.appointmentId })
+        .from(serviceRecordAppointments)
+        .innerJoin(
+          monthlyServiceRecords,
+          eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id),
+        )
+        .where(
+          and(
+            inArray(serviceRecordAppointments.appointmentId, rows.map((r) => r.id)),
+            isNull(monthlyServiceRecords.deletedAt),
+            or(
+              isNotNull(monthlyServiceRecords.employeeSignedAt),
+              isNotNull(monthlyServiceRecords.customerSignedAt),
+            ),
+          ),
+        );
+      for (const s of signed) signedRecordSet.add(s.appointmentId);
+    }
+
+    for (const appointmentId of appointmentIds) {
       const row = rowById.get(appointmentId);
       if (!row) {
+        // Reines Daten-Skip (keine Mutation) — bricht den Lauf NICHT ab,
+        // damit ein einzelner unbekannter Termin nicht den gesamten,
+        // ansonsten validen Reconcile verhindert.
         errors.push({ appointmentId, error: "Termin nicht gefunden" });
         continue;
       }
@@ -399,28 +415,29 @@ export async function executeReconcile(params: {
         }
       }
 
-      const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(appointmentId);
+      const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(appointmentId, tx);
       let reversedHere = 0;
 
-      await db.transaction(async (tx) => {
-        for (const t of transactions) {
-          // Nur consumption-Txs storno-bedürftig; reversal-Txs ignorieren.
-          if (t.transactionType !== "consumption") continue;
-          await budgetLedgerStorage.reverseBudgetTransaction(t.id, userId, tx);
-          reversedHere++;
-        }
-        await tx
-          .update(appointments)
-          .set({
-            status: "cancelled",
-            deletedAt: new Date(),
-          })
-          .where(eq(appointments.id, appointmentId));
-      });
+      for (const t of transactions) {
+        // Nur consumption-Txs storno-bedürftig; reversal-Txs ignorieren.
+        if (t.transactionType !== "consumption") continue;
+        await budgetLedgerStorage.reverseBudgetTransaction(t.id, userId, tx);
+        reversedHere++;
+      }
+      await tx
+        .update(appointments)
+        .set({
+          status: "cancelled",
+          deletedAt: new Date(),
+        })
+        .where(eq(appointments.id, appointmentId));
 
       reversedTransactions += reversedHere;
       cancelled++;
 
+      // Audit-Eintrag innerhalb derselben Transaktion (exec = tx), damit ein
+      // späterer Rollback auch den Audit-Trail mitnimmt und nie ein
+      // verwaister „cancelled"-Eintrag ohne Mutation übrig bleibt.
       await auditService.log(
         userId,
         "appointment_import_reconciled_cancelled",
@@ -443,14 +460,10 @@ export async function executeReconcile(params: {
           },
         },
         ipAddress,
+        tx,
       );
-    } catch (err) {
-      errors.push({
-        appointmentId,
-        error: err instanceof Error ? err.message : String(err),
-      });
     }
-  }
+  });
 
   return { batchId, cancelled, reversedTransactions, excluded, errors };
 }
