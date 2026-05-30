@@ -321,16 +321,12 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
     };
   }
 
-  // Audit-Schutzregeln nur für die Dauer dieses Batches deaktivieren.
-  let disabledNoDelete = false;
-  let disabledNoUpdate = false;
-  try {
-    await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_delete`);
-    disabledNoDelete = true;
-    await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_update`);
-    disabledNoUpdate = true;
-
-    await db.transaction(async (tx) => {
+  await db.transaction(async (tx) => {
+      // GoBD: audit_log ist per BEFORE-Trigger unveränderbar (Task #824). Für
+      // diesen — nur in Nicht-Prod erreichbaren — Test-Cleanup-Pfad schalten
+      // wir die Mutation transaktions-lokal frei. `SET LOCAL` gilt ausschließlich
+      // innerhalb dieser Transaktion und wird beim Commit/Rollback verworfen.
+      await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
       // Hard-delete child rows in tables with NO ACTION + non-nullable FK
       await tx.execute(sql`DELETE FROM employee_time_entries WHERE user_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM notifications WHERE user_id IN (${idList})`);
@@ -394,17 +390,7 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
       await tx.execute(sql`UPDATE monthly_service_records SET employee_signed_by_user_id = NULL WHERE employee_signed_by_user_id IN (${idList})`);
 
       await tx.execute(sql`DELETE FROM users WHERE id IN (${idList})`);
-    });
-  } finally {
-    // Audit-Schutzregeln in jedem Fall wieder aktivieren — ENABLE auf bereits
-    // aktivierter Regel ist ein No-op, also safe.
-    if (disabledNoUpdate) {
-      try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_update`); } catch {}
-    }
-    if (disabledNoDelete) {
-      try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_delete`); } catch {}
-    }
-  }
+  });
 
   return { ok: true, deleted: safeIds, rejected };
 }

@@ -123,11 +123,16 @@ async function resetRecordToSoftDeleted(id: number, deletedAt: Date): Promise<vo
   await db.update(monthlyServiceRecords)
     .set({ deletedAt })
     .where(eq(monthlyServiceRecords.id, id));
-  await db.delete(auditLog).where(and(
-    eq(auditLog.action, "service_record_resurrected"),
-    eq(auditLog.entityType, "service_record"),
-    eq(auditLog.entityId, id),
-  ));
+  // audit_log ist GoBD-unveränderbar (Trigger, Task #824) — Löschen nur über
+  // den transaktions-lokalen Bypass-GUC.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
+    await tx.delete(auditLog).where(and(
+      eq(auditLog.action, "service_record_resurrected"),
+      eq(auditLog.entityType, "service_record"),
+      eq(auditLog.entityId, id),
+    ));
+  });
 }
 
 beforeAll(async () => {
@@ -145,11 +150,16 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (recordIds.length > 0) {
-    await db.delete(auditLog).where(and(
-      eq(auditLog.action, "service_record_resurrected"),
-      eq(auditLog.entityType, "service_record"),
-      inArray(auditLog.entityId, recordIds),
-    ));
+    // audit_log ist GoBD-unveränderbar (Trigger, Task #824) — Löschen nur über
+    // den transaktions-lokalen Bypass-GUC.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
+      await tx.delete(auditLog).where(and(
+        eq(auditLog.action, "service_record_resurrected"),
+        eq(auditLog.entityType, "service_record"),
+        inArray(auditLog.entityId, recordIds),
+      ));
+    });
     await db.delete(monthlyServiceRecords).where(inArray(monthlyServiceRecords.id, recordIds));
     recordIds = [];
   }

@@ -105,11 +105,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // Cleanup audit_log → qonto_transactions → invoices → customer
+  // audit_log ist GoBD-unveränderbar (Trigger, Task #824) — Löschen nur über
+  // den transaktions-lokalen Bypass-GUC.
   if (seeded.invoiceIds.length > 0) {
-    await db.delete(auditLog).where(and(
-      eq(auditLog.entityType, "invoice"),
-      inArray(auditLog.entityId, seeded.invoiceIds),
-    ));
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
+      await tx.delete(auditLog).where(and(
+        eq(auditLog.entityType, "invoice"),
+        inArray(auditLog.entityId, seeded.invoiceIds),
+      ));
+    });
   }
   if (seeded.qontoTxIds.length > 0) {
     await db.delete(qontoTransactions).where(inArray(qontoTransactions.id, seeded.qontoTxIds));

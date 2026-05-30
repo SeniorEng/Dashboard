@@ -459,18 +459,11 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
     const batch = all.slice(i, i + batchSize);
     const idList = sql.join(batch.map((u) => sql`${u.id}`), sql`, `);
 
-    // audit_log ist per RULE append-only (audit_log_no_delete / no_update).
-    // Wir deaktivieren die Regeln nur für die Dauer dieses Batches und stellen sie
-    // im finally-Block in jedem Fall wieder her – auch wenn das DISABLE selbst
-    // bereits fehlgeschlagen ist (ENABLE auf bereits aktivierte Regel ist No-op).
-    let disabledNoDelete = false;
-    let disabledNoUpdate = false;
-    try {
-    await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_delete`);
-    disabledNoDelete = true;
-    await db.execute(sql`ALTER TABLE audit_log DISABLE RULE audit_log_no_update`);
-    disabledNoUpdate = true;
+    // audit_log ist per BEFORE-Trigger GoBD-unveränderbar (Task #824). Für
+    // diesen Test-Cleanup schalten wir die Mutation transaktions-lokal frei
+    // (SET LOCAL, gilt nur innerhalb der folgenden Transaktion).
     await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
       // Hard-delete child rows in tables with NO ACTION + non-nullable FK to test users.
       // (Test-Daten ohne Wert für echte Kunden – verifiziert vor dem Lauf.)
       await tx.execute(sql`DELETE FROM employee_time_entries WHERE user_id IN (${idList})`);
@@ -547,17 +540,6 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
       // employee_document_proofs.employee_id).
       await tx.execute(sql`DELETE FROM users WHERE id IN (${idList})`);
     });
-    } finally {
-      // audit_log-Schutzregeln in JEDEM Fall wieder aktivieren.
-      // try/catch um ENABLE — falls die Verbindung schon kaputt ist, soll
-      // das die Original-Exception nicht überschreiben.
-      if (disabledNoUpdate) {
-        try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_update`); } catch {}
-      }
-      if (disabledNoDelete) {
-        try { await db.execute(sql`ALTER TABLE audit_log ENABLE RULE audit_log_no_delete`); } catch {}
-      }
-    }
 
     done += batch.length;
     log(`  Fortschritt: ${done}/${all.length} Mitarbeiter verarbeitet`);
