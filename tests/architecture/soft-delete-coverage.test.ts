@@ -128,3 +128,114 @@ describe("Architektur — Soft-Delete-Coverage in server/services/** (Task #454)
     expect(repoUsageSnapshot(SERVICES_ROOT)).toMatchSnapshot();
   });
 });
+
+/**
+ * Task #837 — Konsistenz-Gate: der reine Repo-Import (oben) gab falsche
+ * Sicherheit. `server/services/auto-breaks.ts` nutzte `employeeTimeEntriesRepo`
+ * korrekt, vergaß im Query aber den `isNull(deletedAt)`-Filter — `selectFrom`/
+ * `selectColumnsFrom` setzen ihn (anders als `findById`) NICHT automatisch.
+ * Beim Reopen→Reclose eines Monats sah der Existenz-Guard die soft-gelöschte
+ * Pause als „vorhanden" → die ArbZG-Pflichtpause wurde nicht neu angelegt.
+ *
+ * Vollständige statische Verifikation, dass JEDE `selectFrom`-Query den Filter
+ * setzt, ist nicht robust (Filter werden oft dynamisch über `conditions`-Arrays
+ * komponiert → massenhaft False Positives). Stattdessen prüfen wir die
+ * KONSISTENZ innerhalb eines Statements: filtert ein Statement EINE
+ * soft-deletable Tabelle explizit per `isNull(<table>.deletedAt)` /
+ * `<repo>.activeOnly()`, MUSS es das für ALLE in DEMSELBEN Statement gelesenen
+ * soft-deletable Tabellen tun. Genau diese Inkonsistenz (eine Tabelle gefiltert,
+ * die Schwester-Tabelle im selben `Promise.all` nicht) war der Bug.
+ *
+ * Bewusste „inkl. soft-gelöschter Zeilen"-Reads (z.B. Test-Daten-Purge) per
+ * Inline-Kommentar `// soft-delete-include-deleted: <grund>` im Statement
+ * ausnehmen.
+ */
+function softDeleteFilterTokens(table: string): RegExp[] {
+  return [
+    new RegExp(`isNull\\(\\s*${table}\\.deletedAt\\s*\\)`),
+    new RegExp(`${table}Repo\\.activeOnly\\(`),
+    new RegExp(`${table}Repo\\.withActive\\(`),
+    new RegExp(`activeOnly\\(\\s*${table}\\s*[\\),]`),
+    new RegExp(`withActive\\(\\s*${table}\\s*[\\),]`),
+    new RegExp(`${table}\\.deletedAt\\s*}\\s*IS NULL`, "i"),
+  ];
+}
+
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/[^\n]*/g, "");
+}
+
+function checkFilterConsistency(label: string, root: string) {
+  const repoCallRe = new RegExp(
+    `(${SOFT_DELETABLE_TABLE_IDENTS.join("|")})Repo\\.(?:selectFrom|selectColumnsFrom)\\(`,
+    "g",
+  );
+  const violations: Array<{ file: string; filtered: string[]; missing: string[]; snippet: string }> = [];
+
+  for (const file of walkTs(root)) {
+    const raw = readFileSync(file, "utf-8");
+    // Statement-Grenze ≈ `;`. Query-Chains enthalten kein `;`, daher landet ein
+    // ganzes `Promise.all([...])` in EINEM Statement — genau die Granularität,
+    // die wir für die Konsistenzprüfung brauchen.
+    const statements = stripComments(raw).split(";");
+    const rawStatements = raw.split(";");
+
+    for (let s = 0; s < statements.length; s++) {
+      const stmt = statements[s];
+      const rawStmt = rawStatements[s] ?? "";
+      repoCallRe.lastIndex = 0;
+      const tables = new Set<string>();
+      let m: RegExpExecArray | null;
+      while ((m = repoCallRe.exec(stmt)) !== null) tables.add(m[1]);
+      if (tables.size < 2) continue;
+      if (/soft-delete-include-deleted/.test(rawStmt)) continue;
+
+      const filtered: string[] = [];
+      const missing: string[] = [];
+      for (const t of tables) {
+        if (softDeleteFilterTokens(t).some((re) => re.test(stmt))) filtered.push(t);
+        else missing.push(t);
+      }
+
+      if (filtered.length > 0 && missing.length > 0) {
+        violations.push({
+          file: relative(ROOT, file).split(sep).join("/"),
+          filtered: filtered.sort(),
+          missing: missing.sort(),
+          snippet: stmt.trim().split("\n").slice(0, 4).map((l) => l.trim()).join(" "),
+        });
+      }
+    }
+  }
+
+  if (violations.length > 0) {
+    const msg = violations
+      .map((v) => `  ${v.file} — gefiltert: [${v.filtered.join(", ")}], FEHLT: [${v.missing.join(", ")}]\n    ${v.snippet.slice(0, 200)}`)
+      .join("\n");
+    expect.fail(
+      `Folgende Statements (${label}) filtern eine soft-deletable Tabelle explizit per ` +
+      `\`isNull(<table>.deletedAt)\`/\`activeOnly()\`, lassen den Filter für eine im SELBEN ` +
+      `Statement gelesene Schwester-Tabelle aber weg. \`selectFrom\`/\`selectColumnsFrom\` ` +
+      `setzen den Soft-Delete-Filter NICHT automatisch — er muss pro Tabelle explizit ` +
+      `angegeben werden (das war der Task-#837-Bug in auto-breaks.ts). Bitte den fehlenden ` +
+      `Filter ergänzen oder den bewussten Include-Deleted-Read mit ` +
+      `\`// soft-delete-include-deleted: <grund>\` markieren:\n${msg}`,
+    );
+  }
+}
+
+describe("Architektur — Soft-Delete-Filter-Konsistenz (Task #837)", () => {
+  it("Routen: keine Tabelle gefiltert, Schwester-Tabelle ungefiltert im selben Statement", () => {
+    checkFilterConsistency("server/routes/**", ROUTES_ROOT);
+  });
+
+  it("Storage: keine Tabelle gefiltert, Schwester-Tabelle ungefiltert im selben Statement", () => {
+    checkFilterConsistency("server/storage/**", STORAGE_ROOT);
+  });
+
+  it("Services: keine Tabelle gefiltert, Schwester-Tabelle ungefiltert im selben Statement", () => {
+    checkFilterConsistency("server/services/**", SERVICES_ROOT);
+  });
+});
