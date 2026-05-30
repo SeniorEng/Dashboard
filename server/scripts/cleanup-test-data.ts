@@ -258,6 +258,10 @@ async function countTestEntities(): Promise<{
  */
 async function purgeCustomerCascade(id: number): Promise<void> {
   await db.transaction(async (tx) => {
+    // Task #828: Kunden-Purge löscht Rechnungen/Positionen + cascadet in
+    // budget_allocations/customer_budget_type_settings (GoBD-Hard-Delete-
+    // Trigger). Bypass transaktions-lokal freischalten.
+    await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
     await tx.execute(sql`UPDATE prospects SET converted_customer_id = NULL WHERE converted_customer_id = ${id}`);
     await tx.execute(sql`UPDATE customers SET merged_into_customer_id = NULL WHERE merged_into_customer_id = ${id}`);
 

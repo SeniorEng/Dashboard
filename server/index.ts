@@ -209,6 +209,20 @@ async function runStartupTasks() {
       log(`Audit-Log-Immutability-Self-Check fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #828: GoBD-technische Absicherung weiterer integritäts-/
+    // historisierungskritischer Tabellen (budget_allocations no-resurrect/
+    // no-delete, customer_budget_type_settings append-only, invoices/
+    // invoice_line_items für finalisierte Rechnungen) via BEFORE-Trigger mit
+    // transaktions-lokalem Bypass-GUC `app.allow_gobd_mutation`. Läuft VOR
+    // migrate-budget-sources, damit dessen legitimer Hard-Delete den Bypass
+    // bereits gegen aktive Trigger nutzt.
+    const { ensureGobdTableImmutability } = await import("./startup/ensure-gobd-table-immutability");
+    try {
+      await ensureGobdTableImmutability();
+    } catch (err) {
+      log(`GoBD-Tabellen-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { ensureQontoMatchIdempotency } = await import("./startup/ensure-qonto-match-idempotency");
     try {
       await ensureQontoMatchIdempotency();

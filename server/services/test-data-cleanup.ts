@@ -82,6 +82,10 @@ export const USER_TEST_FILTER = sql`(
 // ---------------------------------------------------------------------------
 export async function purgeCustomerCascade(id: number): Promise<void> {
   await db.transaction(async (tx) => {
+    // Task #828: Der Kunden-Purge löscht Rechnungen/Positionen und triggert
+    // per Customer-Cascade auch budget_allocations/customer_budget_type_settings
+    // (GoBD-Hard-Delete-Trigger). Bypass transaktions-lokal freischalten.
+    await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
     await tx.update(prospects)
       .set({ convertedCustomerId: null })
       .where(eq(prospects.convertedCustomerId, id));
@@ -182,6 +186,10 @@ export async function purgeTestProspectsByIds(ids?: number[]): Promise<number[]>
     : PROSPECT_TEST_FILTER;
 
   return db.transaction(async (tx) => {
+    // Task #828: Das Lösen der Termin-Refs setzt invoice_line_items.appointment_id
+    // auf NULL — bei Positionen finalisierter Rechnungen greift sonst der
+    // GoBD-Trigger. Bypass transaktions-lokal freischalten (Test-Pfad).
+    await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
     const targetRows = await prospectsRepo
       .selectColumnsFrom({ id: prospects.id }, tx)
       .where(where);

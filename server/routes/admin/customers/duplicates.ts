@@ -147,6 +147,10 @@ router.post(
     const userId = req.user!.id;
 
     const summary = await db.transaction(async (tx) => {
+      // Task #828: Der Kunden-Merge löscht legitim Konflikt-Zeilen aus
+      // customer_budget_type_settings + budget_allocations (GoBD-Hard-Delete-
+      // Trigger). Bypass nur transaktions-lokal freischalten.
+      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
       // Lock both customer rows in a deterministic order (lowest ID first) to avoid deadlocks.
       const lockIds = [sourceCustomerId, targetCustomerId].sort((a, b) => a - b);
       const locked = await tx.execute(sql`
