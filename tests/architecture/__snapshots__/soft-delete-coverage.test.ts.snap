@@ -159,6 +159,7 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
   ],
   "server/storage/time-tracking/overview.ts": [
     "appointmentsRepo",
+    "customersRepo",
     "employeeTimeEntriesRepo",
   ],
   "server/storage/time-tracking/vacation.ts": [

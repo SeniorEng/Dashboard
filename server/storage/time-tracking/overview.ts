@@ -21,11 +21,15 @@ import {
 import { formatDateISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import { employeeVisibleAppointmentsFilter } from "../appointment-helpers";
+import {
+  attributeAppointmentToEmployees,
+  type CustomerCoverage,
+} from "@shared/domain/appointment-attribution";
 import { monthDateRange, type TimeOverviewFilters } from "./shared";
 import { getAllAppointmentsInRange, getEmployeeAppointments } from "./appointments";
 import { getAllTimeEntries, getTimeEntries } from "./entries";
 import type { AdminTimeTrackingOverview } from "@shared/api";
-import { appointmentsRepo, employeeTimeEntriesRepo } from "../../repos";
+import { appointmentsRepo, customersRepo, employeeTimeEntriesRepo } from "../../repos";
 
 export async function getTimeOverview(
   userId: number,
@@ -382,15 +386,68 @@ export async function getAdminTimeTrackingOverview(
   type EnrichedAppt = typeof apptsFiltered[number] & {
     appointmentServiceDetails: ReturnType<Map<number, never[]>['get']>;
   };
+  const enrich = (appt: typeof apptsFiltered[number]): EnrichedAppt => ({
+    ...appt,
+    appointmentServiceDetails: servicesByAppt.get(appt.id) || [],
+  } as EnrichedAppt);
+
   const appointmentsByEmployeeId: Record<number, EnrichedAppt[]> = {};
-  for (const appt of apptsFiltered) {
-    const empId = appt.assignedEmployeeId;
-    if (empId == null) continue;
-    const enriched = {
-      ...appt,
-      appointmentServiceDetails: servicesByAppt.get(appt.id) || [],
-    } as EnrichedAppt;
-    (appointmentsByEmployeeId[empId] ||= []).push(enriched);
+  if (userId !== undefined) {
+    // Einzelner Mitarbeiter: `getEmployeeAppointments` hat die Zuordnungsregel
+    // (performedBy/Coverage) bereits per SQL angewendet — alle Treffer gehören
+    // diesem Mitarbeiter. Deckungsgleich mit der Eigensicht (`getTimeOverview`).
+    for (const appt of apptsFiltered) {
+      (appointmentsByEmployeeId[userId] ||= []).push(enrich(appt));
+    }
+  } else {
+    // Alle Mitarbeiter: pro Termin über die zentrale Zuordnungsregel
+    // (`attributeAppointmentToEmployees`) den/die zuständigen Mitarbeiter
+    // bestimmen — abgeschlossene Termine über `performedByEmployeeId`, offene
+    // über `assignedEmployeeId` bzw. die Vertretungs-Kette des Kunden. Damit
+    // sieht der Admin pro Mitarbeiter exakt dieselben Termine wie der
+    // Mitarbeiter selbst (Task #838). Vorher wurde stumpf nach
+    // `assignedEmployeeId` gruppiert und NULL-Zuweisungen verworfen.
+    const customerIds = [
+      ...new Set(
+        apptsFiltered
+          .map(a => a.customerId)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const coverageById = new Map<number, CustomerCoverage>();
+    if (customerIds.length > 0) {
+      // Bewusst OHNE `activeOnly()`: die Eigensicht (`getEmployeeAppointments`)
+      // liest die Coverage über einen ungefilterten `leftJoin` auf `customers`,
+      // also auch für soft-gelöschte Kunden. Für Parität muss die Admin-Sicht
+      // dieselbe Coverage sehen.
+      const coverageRows = await customersRepo
+        .selectColumnsFrom({
+          id: customers.id,
+          primaryEmployeeId: customers.primaryEmployeeId,
+          backupEmployeeId: customers.backupEmployeeId,
+          backupEmployeeId2: customers.backupEmployeeId2,
+        })
+        .where(inArray(customers.id, customerIds));
+      for (const row of coverageRows) {
+        coverageById.set(row.id, {
+          primaryEmployeeId: row.primaryEmployeeId,
+          backupEmployeeId: row.backupEmployeeId,
+          backupEmployeeId2: row.backupEmployeeId2,
+        });
+      }
+    }
+
+    for (const appt of apptsFiltered) {
+      const coverage = appt.customerId != null
+        ? coverageById.get(appt.customerId) ?? null
+        : null;
+      const empIds = attributeAppointmentToEmployees(appt, coverage);
+      if (empIds.length === 0) continue;
+      const enriched = enrich(appt);
+      for (const empId of empIds) {
+        (appointmentsByEmployeeId[empId] ||= []).push(enriched);
+      }
+    }
   }
 
   // Cast: storage returns Date objects which become ISO strings after JSON
