@@ -79,3 +79,133 @@ export async function ensureAuditLogImmutable(): Promise<void> {
 
   log("audit_log Unveraenderbarkeit (Trigger) sichergestellt", "startup");
 }
+
+/**
+ * Erwartete BEFORE-Trigger auf `audit_log` (siehe `ensureAuditLogImmutable`).
+ */
+export const REQUIRED_AUDIT_LOG_TRIGGERS = [
+  "audit_log_no_update_trigger",
+  "audit_log_no_delete_trigger",
+  "audit_log_no_truncate_trigger",
+] as const;
+
+/**
+ * Alte, GoBD-schwache `DO INSTEAD NOTHING`-RULEs, die NICHT mehr existieren
+ * dürfen — solange sie da sind, würde das UPDATE/DELETE still verschluckt und
+ * der BEFORE-Trigger nie feuern.
+ */
+export const FORBIDDEN_AUDIT_LOG_RULES = [
+  "audit_log_no_update",
+  "audit_log_no_delete",
+] as const;
+
+export interface AuditLogImmutabilityStatus {
+  /** True nur, wenn alle Trigger da sind UND keine Alt-RULEs mehr existieren. */
+  ok: boolean;
+  /** Trigger-Namen, die laut DB existieren (Schnittmenge mit den erwarteten). */
+  presentTriggers: string[];
+  /** Erwartete Trigger, die in der DB fehlen. */
+  missingTriggers: string[];
+  /** Alt-RULEs, die noch existieren (müssen leer sein). */
+  lingeringRules: string[];
+  /** Gesetzt, wenn die Prüfung selbst (DB-Query) fehlgeschlagen ist. */
+  error?: string;
+}
+
+let cachedStatus: AuditLogImmutabilityStatus | null = null;
+
+/**
+ * Laufzeit-Self-Check der audit_log-Manipulationssperre (Task #829).
+ *
+ * Prüft gegen die LAUFENDE DB, ob die BEFORE-Trigger tatsächlich existieren und
+ * die alten still-schluckenden RULEs verschwunden sind. Nötig, weil die
+ * idempotente Startup-Migration in Produktion stumm übersprungen worden sein
+ * könnte (DB-Restore, manueller Schema-Eingriff, fehlgeschlagener Boot-Hook) —
+ * eine solche Lücke würde sonst erst im Ernstfall (Manipulationsversuch)
+ * auffallen.
+ *
+ * Das Ergebnis wird gecached und unter `/api/health → auditLogImmutability`
+ * exponiert; `assertAuditLogImmutable()` nutzt es für eine Startup-Warnung.
+ */
+export async function verifyAuditLogImmutable(): Promise<AuditLogImmutabilityStatus> {
+  try {
+    const triggerRes = await db.execute(sql`
+      SELECT tgname
+      FROM pg_trigger
+      WHERE tgrelid = 'audit_log'::regclass
+        AND NOT tgisinternal
+    `);
+    const allTriggers = (
+      (triggerRes as unknown as { rows?: Array<{ tgname: string }> }).rows ?? []
+    ).map((r) => r.tgname);
+    const presentTriggers = REQUIRED_AUDIT_LOG_TRIGGERS.filter((t) =>
+      allTriggers.includes(t)
+    );
+
+    const ruleRes = await db.execute(sql`
+      SELECT rulename
+      FROM pg_rules
+      WHERE schemaname = current_schema()
+        AND tablename = 'audit_log'
+    `);
+    const allRules = (
+      (ruleRes as unknown as { rows?: Array<{ rulename: string }> }).rows ?? []
+    ).map((r) => r.rulename);
+    const lingeringRules = FORBIDDEN_AUDIT_LOG_RULES.filter((r) =>
+      allRules.includes(r)
+    );
+
+    const missingTriggers = REQUIRED_AUDIT_LOG_TRIGGERS.filter(
+      (t) => !presentTriggers.includes(t)
+    );
+
+    const status: AuditLogImmutabilityStatus = {
+      ok: missingTriggers.length === 0 && lingeringRules.length === 0,
+      presentTriggers,
+      missingTriggers,
+      lingeringRules,
+    };
+    cachedStatus = status;
+    return status;
+  } catch (err) {
+    const status: AuditLogImmutabilityStatus = {
+      ok: false,
+      presentTriggers: [],
+      missingTriggers: [...REQUIRED_AUDIT_LOG_TRIGGERS],
+      lingeringRules: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+    cachedStatus = status;
+    return status;
+  }
+}
+
+/**
+ * Letztes Ergebnis von `verifyAuditLogImmutable()` (für /api/health), oder
+ * `null`, wenn die Prüfung noch nicht gelaufen ist.
+ */
+export function getAuditLogImmutabilityStatus(): AuditLogImmutabilityStatus | null {
+  return cachedStatus;
+}
+
+/**
+ * Startup-Assertion: prüft die Manipulationssperre und schreibt bei einer Lücke
+ * eine laute Warnung ins Log (statt hart zu crashen — eine fehlende Sperre soll
+ * den Server-Boot nicht blockieren, aber zwingend sichtbar sein).
+ */
+export async function assertAuditLogImmutable(): Promise<AuditLogImmutabilityStatus> {
+  const status = await verifyAuditLogImmutable();
+  if (!status.ok) {
+    const details = status.error
+      ? `Pruefung fehlgeschlagen: ${status.error}`
+      : `fehlende Trigger=[${status.missingTriggers.join(", ")}] ` +
+        `verbliebene RULEs=[${status.lingeringRules.join(", ")}]`;
+    log(
+      `WARNUNG: audit_log-Manipulationssperre NICHT vollstaendig aktiv (GoBD-Risiko)! ${details}`,
+      "startup"
+    );
+  } else {
+    log("audit_log-Manipulationssperre verifiziert (Trigger aktiv, keine Alt-RULEs)", "startup");
+  }
+  return status;
+}

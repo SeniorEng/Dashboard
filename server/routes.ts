@@ -36,6 +36,15 @@ export async function registerRoutes(
     // tatsächlich Cache-Hits liefert.
     const { getPdfCacheStatsSnapshot } = await import("./lib/pdf-cache-stats");
     const pdfCache = getPdfCacheStatsSnapshot();
+    // Task #829: GoBD-Manipulationssperre der audit_log zur Laufzeit ausweisen,
+    // damit ein Operator/Monitoring sofort sieht, ob die Trigger in der LIVE-DB
+    // wirklich aktiv sind (z.B. nach DB-Restore). Wir nehmen das gecachte
+    // Startup-Ergebnis; nur wenn das noch nicht existiert, prüfen wir on-demand.
+    const { getAuditLogImmutabilityStatus, verifyAuditLogImmutable } = await import(
+      "./startup/ensure-audit-log-immutable"
+    );
+    const auditLogImmutability =
+      getAuditLogImmutabilityStatus() ?? (await verifyAuditLogImmutable());
     try {
       await db.execute(sql`SELECT 1`);
       res.json({
@@ -45,6 +54,7 @@ export async function registerRoutes(
         bootedAt: SERVER_BOOTED_AT,
         chromium: chromiumStatus,
         pdfCache,
+        auditLogImmutability,
       });
     } catch (error) {
       res.status(503).json({
@@ -55,6 +65,7 @@ export async function registerRoutes(
         bootedAt: SERVER_BOOTED_AT,
         chromium: chromiumStatus,
         pdfCache,
+        auditLogImmutability,
       });
     }
   });

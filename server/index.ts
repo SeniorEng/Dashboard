@@ -193,11 +193,20 @@ async function runStartupTasks() {
     // Task #824: GoBD-technische Unveränderbarkeit von audit_log erzwingen
     // (BEFORE-UPDATE/DELETE/TRUNCATE-Trigger, die fehlschlagen statt still zu
     // schlucken). Ersetzt die alten DO-INSTEAD-NOTHING-RULEs.
-    const { ensureAuditLogImmutable } = await import("./startup/ensure-audit-log-immutable");
+    const { ensureAuditLogImmutable, assertAuditLogImmutable } = await import("./startup/ensure-audit-log-immutable");
     try {
       await ensureAuditLogImmutable();
     } catch (err) {
       log(`Audit-Log-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+    // Task #829: Self-Check gegen die LAUFENDE DB, dass die Trigger wirklich
+    // aktiv sind und die Alt-RULEs weg sind (z.B. nach DB-Restore oder wenn die
+    // Migration oben übersprungen/fehlgeschlagen ist). Ergebnis landet im
+    // /api/health-Endpoint; eine Lücke wird laut ins Log gewarnt.
+    try {
+      await assertAuditLogImmutable();
+    } catch (err) {
+      log(`Audit-Log-Immutability-Self-Check fehlgeschlagen: ${err}`, "startup");
     }
 
     const { ensureQontoMatchIdempotency } = await import("./startup/ensure-qonto-match-idempotency");

@@ -13,6 +13,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../server/lib/db";
 import { auditLog } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
+import {
+  verifyAuditLogImmutable,
+  REQUIRED_AUDIT_LOG_TRIGGERS,
+} from "../server/startup/ensure-audit-log-immutable";
 
 let userId: number;
 let seededId: number | null = null;
@@ -87,5 +91,18 @@ describe("audit_log ist GoBD-technisch unveränderbar", () => {
       .where(eq(auditLog.id, seededId as number));
     expect(rows.length).toBe(0);
     seededId = null;
+  });
+});
+
+describe("audit_log-Manipulationssperre Self-Check (Task #829)", () => {
+  it("verifyAuditLogImmutable meldet die LAUFENDE DB als geschützt", async () => {
+    const status = await verifyAuditLogImmutable();
+    expect(status.error, status.error).toBeUndefined();
+    expect(status.missingTriggers, "Fehlende Trigger").toEqual([]);
+    expect(status.lingeringRules, "Verbliebene Alt-RULEs").toEqual([]);
+    expect(status.presentTriggers.sort()).toEqual(
+      [...REQUIRED_AUDIT_LOG_TRIGGERS].sort(),
+    );
+    expect(status.ok).toBe(true);
   });
 });
