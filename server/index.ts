@@ -291,6 +291,16 @@ async function runStartupTasks() {
       log(`KM/Geo-Numeric-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #833: users.monthly_work_hours von `real` (float) auf exaktes
+    // `numeric(6,2)` migrieren — verhindert IEEE-754-Drift in Pro-Rata-Urlaub
+    // und Stunden-Statistiken.
+    const { migrateMonthlyWorkHoursToNumeric } = await import("./startup/migrate-monthly-work-hours-to-numeric");
+    try {
+      await migrateMonthlyWorkHoursToNumeric();
+    } catch (err) {
+      log(`monthly_work_hours-Numeric-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #593: Render-Snapshot-Spalte (companySettings + Kunden-Snapshot) für
     // deterministische Integrity-Verifier-Re-Renders sicherstellen.
     const { ensureInvoiceRenderSnapshotColumn } = await import("./startup/ensure-invoice-render-snapshot");

@@ -34,7 +34,7 @@ export const users = pgTable("users", {
   isEuRentner: boolean("is_eu_rentner").notNull().default(false),
   employmentType: text("employment_type").notNull().default("sozialversicherungspflichtig"), // "minijobber" | "sozialversicherungspflichtig"
   weeklyWorkDays: integer("weekly_work_days").notNull().default(5),
-  monthlyWorkHours: real("monthly_work_hours"),
+  monthlyWorkHours: numeric("monthly_work_hours", { precision: 6, scale: 2, mode: "number" }),
   notfallkontaktName: text("notfallkontakt_name"),
   notfallkontaktTelefon: text("notfallkontakt_telefon"),
   notfallkontaktBeziehung: text("notfallkontakt_beziehung"),
