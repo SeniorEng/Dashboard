@@ -29,7 +29,7 @@
  * Audit-Trail erkennbar bleibt.
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { appointments, appointmentServices, budgetTransactions, services } from "@shared/schema";
 import { createConsumptionTransaction } from "./consumption-engine";
 import type { DbClient } from "./types";
@@ -193,14 +193,20 @@ export async function rebookAppointmentConsumption(
   const reversedIds: number[] = [];
 
   // Task #819 (GoBD): Reversal-Zeilen behalten die `appointmentId` der
-  // Original-Consumption. Früher wurde hier `appointmentId: null` gesetzt UND
-  // die Original-Consumptions vom Termin abgekoppelt — beides erzeugte
-  // budget_transactions-Waisen ohne Termin-Bezug und verletzt die neue
-  // CHECK-Constraint (consumption/reversal MÜSSEN eine appointmentId haben).
-  // Der Pre-Check in `createCascadeConsumption` läuft trotzdem sauber durch:
-  // `getTransactionByAppointmentId` blendet bereits stornierte Consumptions
-  // (via `reversedTransactionId`) aus, sieht also nach diesem Storno-Block
-  // keine offene Zeile mehr.
+  // Original-Consumption — so bleibt jede Storno-Bewegung im Audit-Trail
+  // ihrem Termin zuordenbar (und über `reversedTransactionId` der zurück-
+  // genommenen Buchung).
+  //
+  // Task #823 (Doppelzählungs-Fix): Die ORIGINAL-Consumptions werden NACH dem
+  // Storno wieder vom Termin abgekoppelt (`appointmentId = null`, siehe unten).
+  // #819 hatte das Abkoppeln entfernt (vermeintliche CHECK-Constraint), wodurch
+  // sowohl die alte (stornierte) als auch die neue Consumption am Termin hingen.
+  // Jede Aggregation, die naiv `type='consumption' AND appointmentId=X` summiert
+  // (Drift-Detektor, Statistik-Cross-Checks, Tests), zählte dadurch doppelt
+  // (alt + neu) — Verbrauch gegen Caps und km-Drift liefen auseinander. Es gibt
+  // KEINE solche CHECK-Constraint in der DB; das Abkoppeln ist GoBD-konform,
+  // weil die stornierte Buchung über die Reversal-Zeile + `reversedTransactionId`
+  // weiterhin lückenlos auf den Termin rückführbar bleibt.
   for (const orig of existingTxs) {
     const negate = (v: number | null | undefined) => (v == null ? null : -v);
     const [rev] = await tx.insert(budgetTransactions).values({
@@ -227,6 +233,14 @@ export async function rebookAppointmentConsumption(
       .returning();
     if (rev) reversedIds.push(orig.id);
   }
+
+  // Original-Consumptions vom Termin abkoppeln (Task #823): so summieren
+  // naive `type='consumption' AND appointmentId=X`-Aggregationen nur noch die
+  // neue (lebende) Buchung und nicht zusätzlich die stornierte Alt-Zeile.
+  // Die Reversal-Zeilen behalten ihre `appointmentId` (Audit-Trail).
+  await tx.update(budgetTransactions)
+    .set({ appointmentId: null })
+    .where(inArray(budgetTransactions.id, existingTxs.map((t) => t.id)));
 
   if (newHw > 0 || newAb > 0 || newTravelKm > 0 || newCustomerKm > 0) {
     await createConsumptionTransaction({

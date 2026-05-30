@@ -343,6 +343,16 @@ async function reconcileOne(
       if (rev) reversedIds.push(orig.id);
     }
 
+    // 1b. Original-Consumptions vom Termin abkoppeln (Task #823): sonst hängen
+    //     stornierte Alt-Zeile UND Neu-Buchung am selben Termin und jede naive
+    //     `type='consumption' AND appointmentId=X`-Aggregation (Drift-Detektor,
+    //     Re-Lauf-Idempotenz) zählt doppelt. Reversal-Zeilen behalten ihre
+    //     appointmentId (Audit-Trail); die stornierte Buchung bleibt über
+    //     `reversedTransactionId` rückführbar.
+    await tx.update(budgetTransactions)
+      .set({ appointmentId: null })
+      .where(inArray(budgetTransactions.id, existingTxs.map(t => t.id)));
+
     // 2. Neu-Buchung mit AKTUELLEM appt-km am ursprünglichen Datum.
     await createConsumptionTransaction({
       customerId: c.customerId,
