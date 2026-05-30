@@ -29,6 +29,9 @@ const ACTION_LABELS: Record<string, string> = {
   import_trim_reconciled_batch: "Import-Reparatur (Sitzung)",
   customer_hard_deleted: "Kunde gelöscht (hart)",
   customer_price_replaced: "Kundenpreis ersetzt",
+  customer_price_created: "Kundenpreis angelegt",
+  customer_price_updated: "Kundenpreis geändert",
+  customer_price_deleted: "Kundenpreis gelöscht",
   budget_transaction_corrected: "km-Drift korrigiert (Termin)",
   budget_transaction_corrected_batch: "km-Drift korrigiert (Sitzung)",
 };
@@ -141,6 +144,30 @@ export default function AdminAuditLog() {
         const fmt = (c: number) => formatEuroDE(c);
         parts.push(`${fmt(m.oldPriceCents as number)} → ${fmt(m.newPriceCents as number)}`);
       }
+    }
+    if (entry.action === "customer_price_created") {
+      if (typeof m.serviceId === "number") parts.push(`Service #${m.serviceId}`);
+      if (typeof m.priceCents === "number") parts.push(`Preis: ${formatEuroDE(m.priceCents as number)}`);
+      if (typeof m.validFrom === "string") parts.push(`ab ${m.validFrom}`);
+      if (typeof m.validTo === "string") parts.push(`bis ${m.validTo}`);
+    }
+    if (entry.action === "customer_price_updated") {
+      if (typeof m.serviceId === "number") parts.push(`Service #${m.serviceId}`);
+      const before = m.before as Record<string, unknown> | undefined;
+      const after = m.after as Record<string, unknown> | undefined;
+      if (before && after && typeof before.priceCents === "number" && typeof after.priceCents === "number"
+        && before.priceCents !== after.priceCents) {
+        parts.push(`${formatEuroDE(before.priceCents as number)} → ${formatEuroDE(after.priceCents as number)}`);
+      }
+      if (Array.isArray(m.changedFields) && m.changedFields.length > 0) {
+        parts.push(`Felder: ${(m.changedFields as string[]).join(", ")}`);
+      }
+    }
+    if (entry.action === "customer_price_deleted") {
+      if (typeof m.serviceId === "number") parts.push(`Service #${m.serviceId}`);
+      if (typeof m.validFrom === "string") parts.push(`ab ${m.validFrom}`);
+      if (typeof m.validTo === "string") parts.push(`bis ${m.validTo}`);
+      if (m.futureOnly === true) parts.push("nur Zukunftspreis");
     }
     if (entry.action === "budget_transaction_corrected") {
       if (typeof m.previousTravelKm === "number" && typeof m.newTravelKm === "number") {

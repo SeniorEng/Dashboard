@@ -323,47 +323,79 @@ router.post("/:id/service-prices", requireAdmin, asyncHandler("Kundenpreis konnt
     throw err;
   }
 
-  if (replacedRow && req.user) {
-    const insertedRow = result.rows[0] as { id: number };
-    auditService.log(
-      req.user.id,
-      "customer_price_replaced",
-      "customer",
-      customerId,
-      {
-        customerId,
-        serviceId,
-        serviceName: replacedRow.serviceName,
-        validFrom: newValidFromDate,
-        replacedPriceId: replacedRow.id,
-        oldPriceCents: replacedRow.priceCents,
-        newPriceId: insertedRow.id,
-        newPriceCents: priceCents,
-      },
-      req.ip,
-    ).catch(() => {});
-  }
-
-  if (affectedInvoices.length > 0 && req.user?.id) {
-    await auditService.log(
-      req.user.id,
-      "customer_price_changed_invoiced",
-      "customer",
-      customerId,
-      {
-        action: "create_price",
-        serviceId,
-        priceCents,
-        validFrom: newValidFrom,
-        affectedInvoices: affectedInvoices.map(i => ({
+  // Jede Preisanlage wird auditiert — unabhängig davon, ob bereits abgerechnete
+  // Monate betroffen sind. Eine reine Zukunftspreis-Anlage ohne Rechnungsbezug
+  // erzeugt damit ebenfalls einen Forensik-Eintrag (Task #836). Die zusätzliche
+  // Rechnungs-Impact-Detailzeile (customer_price_changed_invoiced) bleibt als
+  // ergänzender Kontext erhalten.
+  if (req.user?.id) {
+    const actorId = req.user.id;
+    const insertedRow = result.rows[0] as { id: number; validTo?: unknown };
+    const insertedValidTo = insertedRow.validTo != null ? rawDateToISO(insertedRow.validTo) : null;
+    const affectedInvoicesMeta = affectedInvoices.length > 0
+      ? affectedInvoices.map((i) => ({
           id: i.id,
           invoiceNumber: i.invoiceNumber,
           billingMonth: i.billingMonth,
           billingYear: i.billingYear,
-        })),
-      },
-      req.ip,
-    );
+        }))
+      : undefined;
+
+    if (replacedRow) {
+      await auditService.log(
+        actorId,
+        "customer_price_replaced",
+        "customer",
+        customerId,
+        {
+          customerId,
+          serviceId,
+          serviceName: replacedRow.serviceName,
+          validFrom: newValidFromDate,
+          validTo: insertedValidTo,
+          replacedPriceId: replacedRow.id,
+          oldPriceCents: replacedRow.priceCents,
+          newPriceId: insertedRow.id,
+          newPriceCents: priceCents,
+          ...(affectedInvoicesMeta ? { affectedInvoices: affectedInvoicesMeta } : {}),
+        },
+        req.ip,
+      );
+    } else {
+      await auditService.log(
+        actorId,
+        "customer_price_created",
+        "customer",
+        customerId,
+        {
+          customerId,
+          serviceId,
+          newPriceId: insertedRow.id,
+          priceCents,
+          validFrom: newValidFromDate,
+          validTo: insertedValidTo,
+          ...(affectedInvoicesMeta ? { affectedInvoices: affectedInvoicesMeta } : {}),
+        },
+        req.ip,
+      );
+    }
+
+    if (affectedInvoices.length > 0) {
+      await auditService.log(
+        actorId,
+        "customer_price_changed_invoiced",
+        "customer",
+        customerId,
+        {
+          action: "create_price",
+          serviceId,
+          priceCents,
+          validFrom: newValidFrom,
+          affectedInvoices: affectedInvoicesMeta,
+        },
+        req.ip,
+      );
+    }
   }
 
   res.json(result.rows[0]);
@@ -448,27 +480,57 @@ router.patch("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kundenp
     WHERE id = ${priceId}
   `);
 
-  if (affectedInvoices.length > 0 && req.user?.id) {
-    await auditService.log(
-      req.user.id,
-      "customer_price_changed_invoiced",
-      "customer",
-      customerId,
-      {
-        action: "update_price",
-        priceId,
-        serviceId: row.service_id,
-        before: { priceCents: oldPriceCents, validFrom: oldValidFrom, validTo: oldValidTo },
-        after: { priceCents: newPriceCents, validFrom: newValidFrom, validTo: newValidTo },
-        affectedInvoices: affectedInvoices.map((i) => ({
+  // Jede Preisänderung wird auditiert — auch wenn kein abgerechneter Monat
+  // betroffen ist (z. B. reines Verschieben eines Zukunftspreises, Task #836).
+  // Die Rechnungs-Impact-Detailzeile bleibt als ergänzender Kontext erhalten.
+  if (req.user?.id) {
+    const actorId = req.user.id;
+    const affectedInvoicesMeta = affectedInvoices.length > 0
+      ? affectedInvoices.map((i) => ({
           id: i.id,
           invoiceNumber: i.invoiceNumber,
           billingMonth: i.billingMonth,
           billingYear: i.billingYear,
-        })),
+        }))
+      : undefined;
+
+    await auditService.log(
+      actorId,
+      "customer_price_updated",
+      "customer",
+      customerId,
+      {
+        priceId,
+        serviceId: row.service_id,
+        changedFields: [
+          ...(priceChanged ? ["priceCents"] : []),
+          ...(validFromChanged ? ["validFrom"] : []),
+          ...(validToChanged ? ["validTo"] : []),
+        ],
+        before: { priceCents: oldPriceCents, validFrom: oldValidFrom, validTo: oldValidTo },
+        after: { priceCents: newPriceCents, validFrom: newValidFrom, validTo: newValidTo },
+        ...(affectedInvoicesMeta ? { affectedInvoices: affectedInvoicesMeta } : {}),
       },
       req.ip,
     );
+
+    if (affectedInvoices.length > 0) {
+      await auditService.log(
+        actorId,
+        "customer_price_changed_invoiced",
+        "customer",
+        customerId,
+        {
+          action: "update_price",
+          priceId,
+          serviceId: row.service_id,
+          before: { priceCents: oldPriceCents, validFrom: oldValidFrom, validTo: oldValidTo },
+          after: { priceCents: newPriceCents, validFrom: newValidFrom, validTo: newValidTo },
+          affectedInvoices: affectedInvoicesMeta,
+        },
+        req.ip,
+      );
+    }
   }
 
   const updated = await db.execute(sql`
@@ -562,26 +624,53 @@ router.delete("/:id/service-prices/:priceId", requireAdmin, asyncHandler("Kunden
     }
   });
 
-  if (affectedInvoices.length > 0 && req.user?.id) {
-    await auditService.log(
-      req.user.id,
-      "customer_price_changed_invoiced",
-      "customer",
-      customerId,
-      {
-        action: "delete_price",
-        priceId,
-        serviceId: row.service_id,
-        validFrom: recordValidFrom,
-        affectedInvoices: affectedInvoices.map(i => ({
+  // Jede Preislöschung wird auditiert — auch reine Zukunftspreise ohne
+  // Rechnungsbezug (Task #836). Die Rechnungs-Impact-Detailzeile bleibt als
+  // ergänzender Kontext erhalten.
+  if (req.user?.id) {
+    const actorId = req.user.id;
+    const recordValidTo = row.valid_to != null ? rawDateToISO(row.valid_to) : null;
+    const affectedInvoicesMeta = affectedInvoices.length > 0
+      ? affectedInvoices.map((i) => ({
           id: i.id,
           invoiceNumber: i.invoiceNumber,
           billingMonth: i.billingMonth,
           billingYear: i.billingYear,
-        })),
+        }))
+      : undefined;
+
+    await auditService.log(
+      actorId,
+      "customer_price_deleted",
+      "customer",
+      customerId,
+      {
+        priceId,
+        serviceId: row.service_id,
+        validFrom: recordValidFrom,
+        validTo: recordValidTo,
+        futureOnly: recordValidFrom > today,
+        ...(affectedInvoicesMeta ? { affectedInvoices: affectedInvoicesMeta } : {}),
       },
       req.ip,
     );
+
+    if (affectedInvoices.length > 0) {
+      await auditService.log(
+        actorId,
+        "customer_price_changed_invoiced",
+        "customer",
+        customerId,
+        {
+          action: "delete_price",
+          priceId,
+          serviceId: row.service_id,
+          validFrom: recordValidFrom,
+          affectedInvoices: affectedInvoicesMeta,
+        },
+        req.ip,
+      );
+    }
   }
 
   res.json({ success: true });
