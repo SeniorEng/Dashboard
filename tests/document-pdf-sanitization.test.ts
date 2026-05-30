@@ -6,9 +6,9 @@ import {
 } from "../server/services/document-pdf";
 import { AppError } from "../server/lib/errors";
 import { renderTemplate } from "../server/services/template-engine";
+import { validSignatureDataUrl } from "./helpers/valid-signature";
 
-const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
-const VALID_PNG = `data:image/png;base64,${PNG_HEADER.toString("base64")}`;
+const VALID_PNG = validSignatureDataUrl();
 
 describe("buildSignatureImg", () => {
   it("renders a valid PNG data URL as an <img> tag", () => {
