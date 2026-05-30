@@ -231,15 +231,27 @@ async function runStartupTasks() {
     }
 
     const { serviceCatalogStorage } = await import("./storage/service-catalog");
-    await serviceCatalogStorage.ensureSystemServices();
+    try {
+      await serviceCatalogStorage.ensureSystemServices();
+    } catch (err) {
+      log(`System-Services-Seed fehlgeschlagen: ${err}`, "startup");
+    }
 
     const { documentStorage } = await import("./storage/documents");
-    await documentStorage.ensureCustomerDocumentTypes();
+    try {
+      await documentStorage.ensureCustomerDocumentTypes();
+    } catch (err) {
+      log(`Kunden-Dokumenttypen-Seed fehlgeschlagen: ${err}`, "startup");
+    }
 
     // Entfernt die deprecated Spalte appointments.service_type endgültig.
     // Idempotent (DROP COLUMN IF EXISTS) — beim nächsten Boot ein No-Op.
     const { dropAppointmentsServiceTypeColumn } = await import("./startup/drop-appointments-service-type");
-    await dropAppointmentsServiceTypeColumn();
+    try {
+      await dropAppointmentsServiceTypeColumn();
+    } catch (err) {
+      log(`Drop-appointments.service_type-Migration fehlgeschlagen: ${err}`, "startup");
+    }
 
     const { encryptExistingSecrets } = await import("./startup/encrypt-company-secrets");
     try {
@@ -249,7 +261,11 @@ async function runStartupTasks() {
     }
 
     const { importPflegekassen } = await import("./startup/import-pflegekassen");
-    await importPflegekassen();
+    try {
+      await importPflegekassen();
+    } catch (err) {
+      log(`Pflegekassen-Import fehlgeschlagen: ${err}`, "startup");
+    }
 
     const { seedPkvProviders } = await import("./startup/seed-pkv-providers");
     try {
