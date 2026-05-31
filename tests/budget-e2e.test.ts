@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import {
   getAuthCookie,
   apiGet,
@@ -12,6 +12,9 @@ import {
   setupBudgetScenario,
   type BudgetScenarioHandle,
 } from "./helpers/budget-scenarios";
+import { freezeTime, thawTime } from "./helpers/frozen-clock";
+import { processExpiredCarryover } from "../server/storage/budget/allocation-storage";
+import { getBudgetSummary } from "../server/storage/budget/summary-queries";
 import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
 
@@ -1617,5 +1620,83 @@ describe("INT-19: §45b Onboarding – operator-erfasster Übertrag bleibt erhal
     } else {
       expect(s45b.carryoverCents).toBe(0);
     }
+  });
+});
+
+
+describe("INT-20: §45b Carryover-Verfall nach 30.06. (deterministisch, clock-injectable)", () => {
+  // Ergänzung zu INT-19.2: Der Post-30.06.-Verfallspfad (write_off +
+  // carryoverCents → 0) wird hier datum-UNABHÄNGIG abgesichert. Statt gegen die
+  // Wall-Clock des laufenden Servers zu branchen, frieren wir die In-Process-Zeit
+  // mit `freezeTime` auf den 1.7. des laufenden Jahres ein und rufen die
+  // Storage-Funktionen direkt (in-process, gegen dieselbe DB) auf — so greifen
+  // `todayISO()`/`new Date()` in `processExpiredCarryover` und `getBudgetSummary`
+  // auf die gefrorene Zeit zu. Der Setup (HTTP /initial-budget) läuft bewusst mit
+  // der realen Uhr, damit die Carryover-Zeile mit expiresAt=30.06.${curYear}
+  // entsteht; erst die Assertions laufen unter gefrorener Zeit.
+  let scenario: BudgetScenarioHandle;
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const priorYear = curYear - 1;
+  const derivedAnchor = `${priorYear}-01-01`;
+  const carryoverCents = 50000;
+  // Fix: 1.7. des laufenden (realen) Jahres → strikt nach dem 30.06.-Cutoff.
+  const afterCutoff = `${curYear}-07-01T12:00:00`;
+
+  beforeAll(async () => {
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-20",
+      types: [
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+        { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+    const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 0,
+      carryoverAmountCents: carryoverCents,
+      budgetStartDate: derivedAnchor,
+    });
+    expect([200, 201]).toContain(res.status);
+  });
+
+  beforeEach(() => {
+    freezeTime(afterCutoff);
+  });
+
+  afterEach(() => {
+    thawTime();
+  });
+
+  afterAll(async () => {
+    thawTime();
+    await scenario.cleanup();
+  });
+
+  it("INT-20.1 – processExpiredCarryover bucht den vollen Übertrag nach dem 30.06. ab und ist idempotent", async () => {
+    // Self-contained: der erste Lauf bucht den vollen Verfall, ein zweiter Lauf
+    // darf NIE eine doppelte write_off-Buchung erzeugen (DB-seitige partielle
+    // UNIQUE pro Allokation). Unabhängig von der Ausführungsreihenfolge.
+    const created = await processExpiredCarryover(scenario.customerId);
+    expect(created.length).toBe(1);
+    const writeOff = created[0];
+    expect(writeOff.transactionType).toBe("write_off");
+    expect(writeOff.budgetType).toBe("entlastungsbetrag_45b");
+    expect(writeOff.amountCents).toBe(-carryoverCents);
+    expect(writeOff.transactionDate).toBe(`${curYear}-06-30`);
+
+    const again = await processExpiredCarryover(scenario.customerId);
+    expect(again.length).toBe(0);
+  });
+
+  it("INT-20.2 – Overview zeigt carryoverCents=0 nach dem Verfall", async () => {
+    // Reihenfolge-unabhängig: nach dem 30.06. fällt die abgelaufene
+    // Carryover-Zeile aus der Summen-Query (expiresAt < today) heraus — egal ob
+    // der Write-off bereits gebucht wurde oder hier erstmalig anläuft.
+    await processExpiredCarryover(scenario.customerId);
+    const summary = await getBudgetSummary(scenario.customerId);
+    expect(summary.carryoverCents).toBe(0);
+    expect(summary.carryoverExpiresAt).toBeNull();
   });
 });
