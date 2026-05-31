@@ -14,9 +14,9 @@ import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
-import { getAvailableForDate } from "./import-availability";
 import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
+import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
@@ -361,6 +361,21 @@ export async function createCascadeConsumption(params: {
   customerKilometersCents: number;
   userId?: number;
   skipExistingCheck?: boolean;
+  /**
+   * Task #873 (Budget GF Phase 3) — optionaler privater Selbstzahler-Topf als
+   * terminaler `uncapped`-Topf der Kaskade. Ist er gesetzt, hängt `planCascade`
+   * ihn als letzten Topf an; er absorbiert den GESAMTEN Rest, sodass kein
+   * `outstandingCents` entsteht (R7: seine Kapazität wird nie als Zahl gelesen).
+   *  - `statutoryExcluded`: §45b/§45a/§39 komplett auslassen — reiner
+   *    Selbstzahler bucht 100 % privat, selbst wenn (Migration/Drift) noch eine
+   *    Pflegekassen-Allocation am Kunden hängt.
+   *  - `noteKind`: Notiz-Variante der privaten Konsum-Zeile
+   *    (`selbstzahler` → „Selbstzahler: …", `privatzahlung` → „Privatzahlung: …").
+   */
+  privatePot?: {
+    statutoryExcluded: boolean;
+    noteKind: "selbstzahler" | "privatzahlung";
+  };
 }, outerTx?: DbClient): Promise<CascadeResult> {
   const doWork = async (tx: DbClient) => {
     // Pro-Kunde-Advisory-Lock (Task #494): serialisiert ALLE Einstiegspunkte
@@ -439,10 +454,15 @@ export async function createCascadeConsumption(params: {
     //   prioritäts-füllend auf die Töpfe (subtract-last, verlustfrei).
     // Phase 3 (write): pro Split > 0 gegen die vorab gelesene Verfügbarkeit
     //   buchen (`consumeFifoWithAvailability`).
-    const cascadePots: Array<{ budgetType: string; capacityCents: number }> = [];
+    const cascadePots: Array<{ budgetType: string; capacityCents: number; uncapped?: boolean }> = [];
     const availabilityByType = new Map<string, FifoAvailability>();
 
-    for (const pot of priorityOrder) {
+    // Task #873 (Budget GF Phase 3): Reiner Selbstzahler bucht 100 % privat —
+    // die statutorischen Töpfe werden komplett ausgelassen, selbst wenn noch
+    // eine Pflegekassen-Allocation am Kunden hängt (Migration/Konfig-Drift).
+    const statutoryExcluded = params.privatePot?.statutoryExcluded === true;
+
+    for (const pot of (statutoryExcluded ? [] : priorityOrder)) {
       if (!pot.enabled) {
         cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
         continue;
@@ -492,6 +512,14 @@ export async function createCascadeConsumption(params: {
       cascadePots.push({ budgetType: pot.budgetType, capacityCents: capacity });
     }
 
+    // Task #873 (Budget GF Phase 3): privater Selbstzahler-Topf als terminaler
+    // `uncapped`-Topf. `planCascade` legt den GESAMTEN Rest hier ab; seine
+    // `capacityCents` (0) wird NIE als Zahl gelesen (R7) — der uncapped-Zweig
+    // ignoriert die Kapazität vollständig.
+    if (params.privatePot) {
+      cascadePots.push({ budgetType: "private", capacityCents: 0, uncapped: true });
+    }
+
     const plan = planCascade(params.totalAmountCents, cascadePots);
 
     const allTransactions: BudgetTransaction[] = [];
@@ -500,6 +528,45 @@ export async function createCascadeConsumption(params: {
     for (const split of plan.splits) {
       if (split.amountCents <= 0) {
         breakdown.push({ budgetType: split.budgetType, consumedCents: 0 });
+        continue;
+      }
+
+      // Task #873 (Budget GF Phase 3): der private (uncapped) Topf hat keine
+      // Allocation/FIFO — er wird als EINE private Konsum-Zeile gebucht. Die
+      // Service-Felder skaliert derselbe `buildConsumptionTxData`-Pfad wie die
+      // statutorischen Legs (ratio = Leg-Betrag / Termin-Total), sodass die
+      // Ausgabe byte-identisch zum alten Selbstzahler-Fast-Path bzw.
+      // Privatzahlungs-Overflow ist (I6). Bei vollständiger Deckung
+      // (outstanding === 0) gleicht der Final-Reconcile unten die ≤(n-1)-Cent-
+      // Drift auch über die private Zeile aus.
+      if (split.uncapped) {
+        const notePrefix =
+          params.privatePot?.noteKind === "selbstzahler" ? "Selbstzahler" : "Privatzahlung";
+        const privateTxData = buildConsumptionTxData(
+          params.customerId,
+          "private",
+          params.transactionDate,
+          -split.amountCents,
+          null,
+          split.amountCents,
+          {
+            appointmentId: params.appointmentId,
+            userId: params.userId,
+            hauswirtschaftMinutes: params.hauswirtschaftMinutes,
+            hauswirtschaftCents: params.hauswirtschaftCents,
+            alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
+            alltagsbegleitungCents: params.alltagsbegleitungCents,
+            travelKilometers: params.travelKilometers,
+            travelCents: params.travelCents,
+            customerKilometers: params.customerKilometers,
+            customerKilometersCents: params.customerKilometersCents,
+            totalAmountCents: params.totalAmountCents,
+            notes: `${notePrefix}: ${formatEuroDE(split.amountCents)}`,
+          },
+        );
+        const [privateTx] = await tx.insert(budgetTransactions).values(privateTxData).returning();
+        if (privateTx) allTransactions.push(privateTx);
+        breakdown.push({ budgetType: split.budgetType, consumedCents: split.amountCents });
         continue;
       }
 
@@ -543,13 +610,13 @@ export async function createCascadeConsumption(params: {
     const remaining = plan.outstandingCents;
 
     // Task #723 — Final-Reconcile gegen Rest-Drift:
-    // Wenn die Cascade den Termin vollständig abgedeckt hat (kein
-    // Privatzahlungs-Overflow), gleichen wir die ≤(n-1)-Cent-Rundungsdrift
-    // pro Service-Feld am letzten eingefügten Leg aus. Bei Outstanding > 0
-    // übernimmt der private Overflow-Pfad in `createConsumptionTransaction`
-    // die Reconciliation, nachdem die Privat-Tx eingefügt wurde — sonst
-    // würden wir Rundungsfehler korrigieren, die der private Leg gerade
-    // erst auffüllt.
+    // Wenn die Cascade den Termin vollständig abgedeckt hat (kein offener
+    // Rest), gleichen wir die ≤(n-1)-Cent-Rundungsdrift pro Service-Feld am
+    // letzten eingefügten Leg aus. Seit Task #873 ist der private Selbstzahler-
+    // Topf Teil der Kaskade (uncapped, terminal) — die private Zeile ist damit
+    // im `allTransactions`-Array enthalten und wird vom Reconcile miterfasst.
+    // Bleibt ein Rest (`remaining > 0`), gibt es KEINEN privaten Topf
+    // (Pflegekasse ohne Privatzahlung) → der Aufrufer wirft den Hard-Block.
     if (remaining === 0 && allTransactions.length > 0) {
       await reconcileAppointmentLegFieldDrift(tx, allTransactions, {
         hauswirtschaftCents: params.hauswirtschaftCents,
@@ -698,43 +765,12 @@ export async function createConsumptionTransaction(params: {
     // Task #588: `selbstzahler` ist die kanonische Quelle dafür, dass der
     // Kunde grundsätzlich privat zahlt — unabhängig vom Flag
     // `acceptsPrivatePayment`, das im UI für Selbstzahler gar nicht setzbar
-    // ist und per Default `false` bleibt. Vor dem Fix scheiterte die
-    // Dokumentation für Selbstzahler hart mit "Budget reicht nicht …", weil
-    // der Pre-Check nur `acceptsPrivatePayment` betrachtete.
-    const isPrivateAllowed =
-      (customer?.acceptsPrivatePayment ?? false) ||
-      customer?.billingType === "selbstzahler";
-
+    // ist und per Default `false` bleibt.
     const isSelbstzahler = customer?.billingType === "selbstzahler";
-    const hasUsage = costs.totalCents > 0;
+    const isPrivateAllowed =
+      (customer?.acceptsPrivatePayment ?? false) || isSelbstzahler;
 
-    // Task #588 (Fast-Path): Selbstzahler bucht IMMER 100 % privat. Wir
-    // umgehen den Cascade-Pfad komplett, sodass selbst dann KEIN §45b/§45a/§39
-    // konsumiert wird, wenn an einem Selbstzahler (z.B. durch Migration oder
-    // Konfig-Drift) noch eine Pflegekassen-Allocation hängt. Andernfalls
-    // würde `createCascadeConsumption` einen vorhandenen Topf anzapfen und
-    // die UI-Anzeige "0 € Pflegekasse, alles privat" wäre eine Lüge.
-    if (isSelbstzahler && hasUsage) {
-      const [privateTransaction] = await tx.insert(budgetTransactions).values({
-        customerId: params.customerId,
-        budgetType: "private",
-        transactionDate: params.transactionDate,
-        transactionType: "consumption",
-        amountCents: -costs.totalCents,
-        appointmentId: params.appointmentId,
-        hauswirtschaftMinutes: params.hauswirtschaftMinutes,
-        hauswirtschaftCents: costs.hauswirtschaftCents,
-        alltagsbegleitungMinutes: params.alltagsbegleitungMinutes,
-        alltagsbegleitungCents: costs.alltagsbegleitungCents,
-        travelKilometers: params.travelKilometers,
-        travelCents: costs.travelCents,
-        customerKilometers: params.customerKilometers,
-        customerKilometersCents: costs.customerKilometersCents,
-        createdByUserId: params.userId,
-        notes: `Selbstzahler: ${formatEuroDE(costs.totalCents)}`,
-      }).returning();
-      return privateTransaction;
-    }
+    const hasUsage = costs.totalCents > 0;
 
     if (!hasUsage) {
       const cascadeResult = await createCascadeConsumption({
@@ -755,26 +791,22 @@ export async function createConsumptionTransaction(params: {
       return cascadeResult.transactions[0];
     }
 
-    if (!isPrivateAllowed) {
-      // Date-aware Vorabprüfung: §45b nutzt die bis zum transactionDate
-      // aufgelaufene Allocation minus bereits gebuchter Beträge bis dahin
-      // (Task #425). §45a/§39 nutzen ihren jeweiligen Window-Cap relativ
-      // zum transactionDate. getAvailableForDate berücksichtigt
-      // enabled/validFrom/validTo bereits.
-      const availability = await getAvailableForDate(
-        params.customerId,
-        params.transactionDate,
-        tx,
-      );
-      const totalAvailable = availability.totalCents;
-
-      if (costs.totalCents > totalAvailable) {
-        const shortfall = costs.totalCents - totalAvailable;
-        throw new Error(
-          `Budget reicht nicht — es fehlen ${formatEuroDE(shortfall)}. Kunde akzeptiert keine Privatzahlung.`
-        );
-      }
-    }
+    // Task #873 (Budget GF Phase 3): EIN Buchungspfad für ALLE Kunden über die
+    // pure `planCascade`. Der Selbstzahler-Fast-Path und der separate
+    // Privatzahlungs-Overflow-Zweig sind entfallen; stattdessen entscheidet
+    // `privatePot`, ob die Kaskade in einem `uncapped`-Privattopf endet:
+    //   - Selbstzahler        → nur der private (uncapped) Topf, §45b/§45a/§39
+    //                           werden ausgelassen (100 % privat, Note
+    //                           „Selbstzahler: …").
+    //   - Pflegekasse + privat → statutorische Töpfe + uncapped Privattopf, der
+    //                           den Rest absorbiert (Note „Privatzahlung: …").
+    //   - Pflegekasse o. privat → KEIN privater Topf; bleibt ein Rest, wirft die
+    //                           Kaskade über `BudgetHardBlockError` (I5).
+    const privatePot = isSelbstzahler
+      ? { statutoryExcluded: true, noteKind: "selbstzahler" as const }
+      : isPrivateAllowed
+        ? { statutoryExcluded: false, noteKind: "privatzahlung" as const }
+        : undefined;
 
     const cascadeResult = await createCascadeConsumption({
       customerId: params.customerId,
@@ -790,55 +822,16 @@ export async function createConsumptionTransaction(params: {
       customerKilometers: params.customerKilometers,
       customerKilometersCents: costs.customerKilometersCents,
       userId: params.userId,
+      privatePot,
     }, tx);
 
     if (cascadeResult.outstandingCents > 0) {
-      if (isPrivateAllowed) {
-        const privateRatio = costs.totalCents > 0 ? cascadeResult.outstandingCents / costs.totalCents : 1;
-        const hwCents = Math.round(costs.hauswirtschaftCents * privateRatio);
-        const abCents = Math.round(costs.alltagsbegleitungCents * privateRatio);
-        const tvCents = Math.round(costs.travelCents * privateRatio);
-        const ckCents = cascadeResult.outstandingCents - hwCents - abCents - tvCents;
-        const [privateTransaction] = await tx.insert(budgetTransactions).values({
-          customerId: params.customerId,
-          budgetType: "private",
-          transactionDate: params.transactionDate,
-          transactionType: "consumption",
-          amountCents: -cascadeResult.outstandingCents,
-          appointmentId: params.appointmentId,
-          hauswirtschaftMinutes: Math.round(params.hauswirtschaftMinutes * privateRatio),
-          hauswirtschaftCents: hwCents,
-          alltagsbegleitungMinutes: Math.round(params.alltagsbegleitungMinutes * privateRatio),
-          alltagsbegleitungCents: abCents,
-          travelKilometers: quantizeKm(params.travelKilometers * privateRatio),
-          travelCents: tvCents,
-          customerKilometers: quantizeKm(params.customerKilometers * privateRatio),
-          customerKilometersCents: ckCents,
-          createdByUserId: params.userId,
-          notes: `Privatzahlung: ${formatEuroDE(cascadeResult.outstandingCents)}`,
-        }).returning();
-
-        // Task #723 — Reconcile über Cascade + Privat: jede Tx wurde
-        // unabhängig gerundet, hier wird die ≤(n-1)-Cent-Drift pro
-        // Service-Feld am letzten eingefügten Leg (der Privat-Tx)
-        // ausgeglichen. Σ Δ = 0 ist gegeben, weil
-        // cascadeConsumed + outstanding = costs.totalCents per Konstruktion.
-        await reconcileAppointmentLegFieldDrift(
-          tx,
-          [...cascadeResult.transactions, privateTransaction],
-          {
-            hauswirtschaftCents: costs.hauswirtschaftCents,
-            alltagsbegleitungCents: costs.alltagsbegleitungCents,
-            travelCents: costs.travelCents,
-            customerKilometersCents: costs.customerKilometersCents,
-          },
-        );
-
-        return cascadeResult.transactions[0] ?? privateTransaction;
-      }
-      throw new Error(
-        `Budget reicht nicht — es fehlen ${formatEuroDE(cascadeResult.outstandingCents)}. Kunde akzeptiert keine Privatzahlung.`
-      );
+      // Kann nur eintreten, wenn KEIN privater (uncapped) Topf vorhanden war
+      // (Pflegekasse ohne Privatzahlung) und die statutorischen Töpfe nicht
+      // ausreichten. Der Throw rollt die gesamte `doWork`-Transaktion zurück,
+      // sodass die bereits geschriebenen statutorischen Legs nicht persistiert
+      // werden (gleiches Verhalten wie der frühere Pre-Check).
+      throw new BudgetHardBlockError(cascadeResult.outstandingCents);
     }
 
     return cascadeResult.transactions[0];
