@@ -1,0 +1,63 @@
+Validation Report — Addendum
+Budget Greenfield Architecture — North Star v2 (hardened)
+Second-pass re-validation of the revised plan
+Prepared 31 May 2026  ·  Re-validates v2 against the first-pass findings (F1–F17 / R1–R12)
+
+
+ 
+1. Verdict
+v2 is a substantial and correct hardening. Every one of the twelve recommendations (R1–R12) is addressed, and most are addressed the right way rather than superficially. The headline change — splitting the model into three tables so that a hold is no longer a Buchung — is the single most valuable correction in the document and resolves the GoBD conflation cleanly. The concurrency story (advisory lock + database-enforced non-negativity), the reconciliation rules (cases a/b/c), idempotency with post-or-void-once, and the reordering of read-unification before hard-holds are all now sound.
+Status: Approved to build, Phase 0 first. No critical issues remain. However, the three-table split — while the correct call — introduces a handful of second-order issues that are inherent to any system that makes reservations mutable and posts them into an immutable ledger. They are not regressions; they are the new edges created by the better design, and they should be nailed down in Phase 0 design rather than discovered in Phase 5. Eight are listed in section 3 (N1–N8); two (N1, N2) deserve explicit design decisions before tables are built.
+2. Recommendation sign-off (R1–R12)
+Each first-pass recommendation, the v2 mechanism that addresses it, and the result.
+
+R	v2 mechanism	Result	Note
+R1	Conservation verifier I13 added; double-entry deferred but acknowledged in residual risks.	Resolved	Detective control, not preventive — acceptable; see N-note.
+R2	Full state machine incl. compound correction and reschedule = release+new-hold (I3).	Resolved	Correct.
+R3	Advisory lock + DB constraint refusing negative on capped pots; lazy §45b via ON CONFLICT (I14).	Resolved	Correct; enforcement now spans 2 tables — see N3.
+R4	Reconciliation cases a/b/c with OverBudgetCompletionError (I16).	Resolved	Correct; operator path for (c) underspecified — N7.
+R5	Idempotency key per (appt, occurrence, transition); post-or-void-once (I15).	Resolved	Correct; key must span the cross-table capture — N2.
+R6	expiresAt + read-only orphan sweep.	Resolved	Correct; expiry vs late completion edge — N4.
+R7	Uncapped boolean flag, never a literal amount; I6 extended.	Resolved	Correct.
+R8	Three tables: allocations / operational reservations / GoBD ledger; I17.	Resolved	Correct; creates temporal + atomicity edges — N1, N2.
+R9	Financial layer append-only; reservation transitions audit-logged.	Resolved	Correct; audit-log durability matters — N1.
+R10	Read SSoT moved to Phase 4 (before holds); shadow-soak gate on Phase 6; per-phase rollback; I18.	Resolved	Correct; stale banner reference — N6.
+R11	Verfahrensdokumentation seeded Phase 0, finalized Phase 6.	Resolved	Correct.
+R12	Batched/checkpointed backfill; async/bounded series materialization.	Resolved	Correct.
+3. New & residual findings (introduced or exposed by v2)
+These arise from the three-table split and the mutable-reservation decision. None block the build; N1 and N2 should be settled in Phase 0.
+
+Severity	Finding	Recommended fix
+HIGH	N1 — Historical Available is no longer trivially reconstructable. By moving reservations OUT of the immutable ledger to gain audit cleanliness, you lose the ability to answer “what was Available on date X, as of the information we had then?” from the ledger alone. Reconstructing past Available now requires the reservation history, but reservations are mutable. I10 already claims temporal correctness for holds at a past transactionDate — that claim is only true if the reservation audit-log is append-only and sufficient to replay reservation state as-of any date.	Make the reservation audit-log append-only and bitemporal (valid-time + transaction-time), OR explicitly scope I10/temporal guarantees to the financial layer and document that holds are reconstructable only via the audit-log. Decide in Phase 0.
+HIGH	N2 — Capture is a cross-table write that must be atomic as a unit. hold→captured touches three things: the reservation row (→captured + capturedLedgerId), a new consumed ledger row, and the conservation arithmetic. If these are not in ONE database transaction, a crash mid-capture leaves a half-state (ledger row with no captured reservation, or vice versa). Because both tables live in the same PostgreSQL database, you do NOT need a saga/outbox — a single local ACID transaction suffices and is simpler — but it must be written as one transaction, and the idempotency key must guard the ledger insert specifically.	Specify capture as a single ACID transaction; one idempotency key covers the whole capture. Extend I13 to cross-check reservations.capturedLedgerId against ledger rows and flag any orphan on either side.
+MEDIUM	N3 — Non-negativity enforcement now spans two tables. Available = Allocated − HoldsActive(reservations) − ConsumedNet(ledger). A single-table CHECK constraint cannot see across tables, so the “refuse if it would drive a capped pot negative” guard must be a trigger that re-derives Available from BOTH reservations and ledger, inside the advisory-locked transaction.	Implement enforcement as a trigger/guard function that aggregates both tables under the per-(customer,pot,period) lock. The lock keeps the aggregate small, so cost is bounded; document this explicitly.
+MEDIUM	N4 — Expiry vs. late completion race. An expired/swept hold frees budget. If the appointment is then completed late, the state machine rejects captured-from-expired, forcing a fresh reservation that may now hit the over-budget hard-block on work already performed — the exact pain R4 was meant to prevent.	Align expiresAt with the appointment lifecycle so a live appointment’s hold cannot expire before completion, OR route late completion explicitly through the R4 case-(c) over-budget path rather than failing.
+MEDIUM	N5 — Reschedule must be all-or-nothing. “Release old + create new hold” is two writes. If the target period cannot cover the cost, the new hold is refused — and the appointment must not be left with its old hold already released and no reservation.	Wrap reschedule in one transaction; if the new-period hold is refused, roll back the release and reject the reschedule, leaving the original reservation intact.
+LOW	N6 — Stale phase reference in the gating banner. The top banner says “do not ship Phase 4 (hard-holds)”, but in v2 hard-holds are Phase 5 (Phase 4 is the read-SSoT unification). The acceptance-gate table is correct; only the banner is off by one.	Fix the banner to read “Phase 5 (hard-holds)” to avoid an implementer gating the wrong phase.
+LOW	N7 — Operator path for OverBudgetCompletionError is undefined. For a non-private customer, case (c) leaves a completed-but-unbooked appointment in limbo. The orphan sweep will surface it, but the remediation options are not specified.	Document the allowed operator resolutions (e.g., manual_adjustment allocation, service downgrade, or documented write-off) and assert the appointment cannot silently vanish from conservation (I13).
+LOW	N8 — I7 (hold/consume parity) and I16 (reconciliation) must be scoped so they don’t contradict. I7 holds only for equal actuals; partial capture (case a) intentionally yields a smaller consumed split than the hold (remainder released), and case (b/c) yields a larger/re-potted one.	State I7 as “for equal inputs” and let I16 own all unequal-actuals cases; test them as complementary, not overlapping.
+4. What to lock in Phase 0 (before any table is built)
+v2 already mandates Phase 0 for the reservation/financial split (R8) and transition-storage model (R9). Add these three decisions to that same phase so they are designed in, not retrofitted:
+•	Reservation history model (N1). Decide whether the reservation audit-log is append-only/bitemporal and therefore replayable as-of a past date, or whether temporal guarantees are scoped to the financial ledger only. This determines what an auditor or a disputed-booking review can actually reconstruct.
+•	Capture transaction boundary (N2). Fix that hold→captured is one local ACID transaction across the reservation and ledger tables, with one idempotency key, and that I13 cross-checks both sides. Same-database means no saga is needed — write it down so nobody splits it into two calls.
+•	Two-table non-negativity guard (N3). Decide the trigger/guard shape that enforces non-negativity across reservations + ledger under the advisory lock, so overdraft impossibility (I14) is real and not just asserted.
+5. Suggested invariant adjustments
+Invariant	Adjustment	Why
+I7	Scope to equal-input only; reference I16 for unequal actuals.	Removes the apparent contradiction with reconciliation (N8).
+I10	State whether it covers reservations; if so, require an append-only reservation audit-log replayable as-of date.	Makes the temporal claim honest after the split (N1).
+I13	Extend to cross-check reservations.capturedLedgerId ↔ ledger rows; flag half-captured states.	Catches cross-table capture failures (N2).
+I14	Note enforcement aggregates both tables inside the locked transaction.	Makes the overdraft guarantee implementable as written (N3).
++ I19	Reschedule atomicity: a reschedule either moves the hold to the new period or leaves the original intact — never zero reservations.	Covers N5.
++ I20	No limbo: a completed appointment is always either consumed or carries an open OverBudgetCompletionError surfaced by the sweep — never silently unbooked.	Covers N7.
+6. Bottom line
+v2 took the first-pass critique seriously and is materially stronger for it — the GoBD split alone retires a whole category of audit risk. The remaining work is not about fixing mistakes; it is about closing the edges that any mutable-reservation-plus-immutable-ledger design has to confront: reconstructing the past (N1), keeping capture atomic across the two tables (N2), and enforcing non-negativity across them (N3). Settle those three in Phase 0, add invariants I19/I20, fix the banner, and this plan is defensible enough to build against and to put in front of an auditor.
+Sources (this pass)
+•	Bitemporal Inventory Ledgers: reconstructing state as-of a past date — InventoryPath
+•	Bitemporality for data compliance — Intellyx (2025)
+•	Data Immutability (mutable while pending, immutable once posted) — Modern Treasury
+•	Enforcing Immutability in your Double-Entry Ledger — Modern Treasury
+•	Transactional Outbox, Idempotency, and Saga Pivots — System Overflow
+•	Transactional Outbox pattern — AWS Prescriptive Guidance
+•	Two-Phase Transfers (post-or-void-once, timeouts) — TigerBeetle Docs
+•	Fixing Race Conditions in PostgreSQL for Financial Systems — Daniel Dallas Okoye
+•	GoBD: Grundsätze ordnungsmäßiger Buchführung — Lexware

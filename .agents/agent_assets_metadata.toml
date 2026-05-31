@@ -143,3 +143,9 @@ id = "uPeh3D17n55AGhS6_eog8"
 uri = "file://docs/import-budget-drift-report-20260527.md"
 type = "text"
 title = "Budget-Ledger-Drift Diagnose-Report (27.05.2026)"
+
+[[outputs]]
+id = "lp6oH6snkhYUh8SM-C--B"
+uri = "file://.local/tasks/budget-greenfield-architecture.md"
+type = "text"
+title = "Budget Greenfield Architecture — North Star v3 (build-ready)"
