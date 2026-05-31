@@ -223,6 +223,25 @@ async function runStartupTasks() {
       log(`GoBD-Tabellen-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Budget GF Phase 1 (Task #871): budget_ledger ist GoBD-immutable
+    // (append-only). Trigger lehnen UPDATE/DELETE/TRUNCATE ab (Bypass-GUC
+    // app.allow_gobd_mutation). budget_reservations bleibt bewusst mutierbar.
+    const { ensureBudgetLedgerImmutability, assertBudgetLedgerImmutable } = await import("./startup/ensure-budget-ledger-immutability");
+    try {
+      await ensureBudgetLedgerImmutability();
+    } catch (err) {
+      log(`Budget-Ledger-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+    // Self-Check gegen die LAUFENDE DB, dass die Trigger wirklich aktiv sind
+    // (z.B. nach DB-Restore oder wenn die Migration oben übersprungen/
+    // fehlgeschlagen ist). Ergebnis landet im /api/health-Endpoint; eine Lücke
+    // wird laut ins Log gewarnt.
+    try {
+      await assertBudgetLedgerImmutable();
+    } catch (err) {
+      log(`Budget-Ledger-Immutability-Self-Check fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { ensureQontoMatchIdempotency } = await import("./startup/ensure-qonto-match-idempotency");
     try {
       await ensureQontoMatchIdempotency();

@@ -45,6 +45,10 @@ export async function registerRoutes(
     );
     const auditLogImmutability =
       getAuditLogImmutabilityStatus() ?? (await verifyAuditLogImmutable());
+    const { getBudgetLedgerImmutabilityStatus, verifyBudgetLedgerImmutable } =
+      await import("./startup/ensure-budget-ledger-immutability");
+    const budgetLedgerImmutability =
+      getBudgetLedgerImmutabilityStatus() ?? (await verifyBudgetLedgerImmutable());
     try {
       await db.execute(sql`SELECT 1`);
       res.json({
@@ -55,6 +59,7 @@ export async function registerRoutes(
         chromium: chromiumStatus,
         pdfCache,
         auditLogImmutability,
+        budgetLedgerImmutability,
       });
     } catch (error) {
       res.status(503).json({
@@ -66,6 +71,7 @@ export async function registerRoutes(
         chromium: chromiumStatus,
         pdfCache,
         auditLogImmutability,
+        budgetLedgerImmutability,
       });
     }
   });

@@ -152,6 +152,124 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
   index("customer_budget_type_settings_customer_idx").on(table.customerId),
 ]);
 
+// ============================================
+// THREE-TABLE MODEL (Budget GF Phase 1, Task #871)
+// ============================================
+//
+// `budget_allocations` (oben) = "was existiert" (Credits).
+// `budget_ledger`            = finanzielle Buchungen (GoBD-immutable, append-only).
+// `budget_reservations`      = operative Holds (NICHT GoBD, mutierbar, audit-logged).
+//
+// Phase 1 ist FOUNDATIONS-ONLY: die Tabellen existieren, der Ledger ist per
+// Startup-Trigger append-only (server/startup/ensure-budget-ledger-immutability.ts),
+// aber es schreibt noch KEIN Pfad in sie. Die Buchung läuft weiter ausschließlich
+// über `budget_transactions` (Legacy-Engine), jetzt über die pure `planCascade`
+// (shared/domain/budget/plan-cascade.ts) geroutet — byte-identisch. Reservations
+// (Phase 5) und §45b-Materialisierung (Phase 2) sind explizit NICHT Teil von Phase 1.
+
+// budget_ledger / budget_reservations Zustände
+export const BUDGET_LEDGER_STATES = ["consumed", "reversed"] as const;
+export type BudgetLedgerState = typeof BUDGET_LEDGER_STATES[number];
+
+export const BUDGET_RESERVATION_STATES = ["hold", "captured", "released", "expired"] as const;
+export type BudgetReservationState = typeof BUDGET_RESERVATION_STATES[number];
+
+// budget_ledger — finanzielle Bookings (GoBD-immutable, append-only).
+// Nur `consumed`/`reversed`-Zeilen; eine Korrektur ist eine NEUE `reversed`-Zeile
+// plus eine frische `consumed`-Zeile, niemals ein In-Place-Edit.
+export const budgetLedger = pgTable("budget_ledger", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  appointmentId: integer("appointment_id").references(() => appointments.id),
+  occurrenceId: text("occurrence_id"), // recurring-series occurrence (null = single)
+  allocationId: integer("allocation_id").references(() => budgetAllocations.id),
+  budgetType: text("budget_type").notNull(),
+  period: text("period"), // z.B. "2026-05" (Monat) oder "2026" (Jahr); informativ
+  transactionDate: date("transaction_date").notNull(),
+  state: text("state").notNull(), // consumed | reversed
+  amountCents: integer("amount_cents").notNull(), // negativ für consumed
+  hauswirtschaftMinutes: integer("hauswirtschaft_minutes"),
+  hauswirtschaftCents: integer("hauswirtschaft_cents"),
+  alltagsbegleitungMinutes: integer("alltagsbegleitung_minutes"),
+  alltagsbegleitungCents: integer("alltagsbegleitung_cents"),
+  travelKilometers: numeric("travel_kilometers", { precision: 10, scale: 3, mode: "number" }),
+  travelCents: integer("travel_cents"),
+  customerKilometers: numeric("customer_kilometers", { precision: 10, scale: 3, mode: "number" }),
+  customerKilometersCents: integer("customer_kilometers_cents"),
+  reversesLedgerId: integer("reverses_ledger_id"), // → budget_ledger.id der stornierten Buchung
+  idempotencyKey: text("idempotency_key").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("budget_ledger_customer_idx").on(table.customerId),
+  index("budget_ledger_customer_date_idx").on(table.customerId, table.transactionDate),
+  index("budget_ledger_appointment_idx").on(table.appointmentId),
+  index("budget_ledger_allocation_idx").on(table.allocationId),
+  // Idempotenz (R5): jede Ledger-mutierende Operation trägt einen eindeutigen Key.
+  uniqueIndex("budget_ledger_idempotency_key_idx").on(table.idempotencyKey),
+  // Post-or-void-once: pro stornierter Buchung höchstens eine reversal-Zeile.
+  uniqueIndex("budget_ledger_reverses_unique_idx")
+    .on(table.reversesLedgerId)
+    .where(sql`reverses_ledger_id IS NOT NULL`),
+]);
+
+// budget_reservations — operative Holds (NICHT GoBD). Mutierbar, jeder
+// State-Übergang wird audit-logged. Aus GoBD-/Finanz-Exporten ausgeschlossen.
+export const budgetReservations = pgTable("budget_reservations", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  appointmentId: integer("appointment_id").references(() => appointments.id),
+  occurrenceId: text("occurrence_id"),
+  allocationId: integer("allocation_id").references(() => budgetAllocations.id),
+  budgetType: text("budget_type").notNull(),
+  period: text("period"),
+  amountCents: integer("amount_cents").notNull(),
+  hauswirtschaftMinutes: integer("hauswirtschaft_minutes"),
+  hauswirtschaftCents: integer("hauswirtschaft_cents"),
+  alltagsbegleitungMinutes: integer("alltagsbegleitung_minutes"),
+  alltagsbegleitungCents: integer("alltagsbegleitung_cents"),
+  travelKilometers: numeric("travel_kilometers", { precision: 10, scale: 3, mode: "number" }),
+  travelCents: integer("travel_cents"),
+  customerKilometers: numeric("customer_kilometers", { precision: 10, scale: 3, mode: "number" }),
+  customerKilometersCents: integer("customer_kilometers_cents"),
+  state: text("state").notNull().default("hold"), // hold | captured | released | expired
+  idempotencyKey: text("idempotency_key").notNull(),
+  expiresAt: timestamp("expires_at"),
+  capturedLedgerId: integer("captured_ledger_id").references(() => budgetLedger.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("budget_reservations_customer_idx").on(table.customerId),
+  index("budget_reservations_appointment_idx").on(table.appointmentId),
+  index("budget_reservations_allocation_idx").on(table.allocationId),
+  index("budget_reservations_state_idx").on(table.customerId, table.state),
+  uniqueIndex("budget_reservations_idempotency_key_idx").on(table.idempotencyKey),
+]);
+
+// budget_ledger / budget_reservations schemas + types
+export const insertBudgetLedgerSchema = createInsertSchema(budgetLedger).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  state: z.enum(BUDGET_LEDGER_STATES),
+});
+
+export type BudgetLedgerRow = typeof budgetLedger.$inferSelect;
+export type InsertBudgetLedger = z.infer<typeof insertBudgetLedgerSchema>;
+
+export const insertBudgetReservationSchema = createInsertSchema(budgetReservations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  state: z.enum(BUDGET_RESERVATION_STATES).default("hold"),
+});
+
+export type BudgetReservation = typeof budgetReservations.$inferSelect;
+export type InsertBudgetReservation = z.infer<typeof insertBudgetReservationSchema>;
+
 // Budget Allocation schemas (Ledger system)
 export const insertBudgetAllocationSchema = z.object({
   customerId: z.number(),

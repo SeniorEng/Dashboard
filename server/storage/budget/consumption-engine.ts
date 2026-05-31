@@ -16,6 +16,7 @@ import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-st
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { getAvailableForDate } from "./import-availability";
 import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
+import { planCascade } from "@shared/domain/budget/plan-cascade";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
@@ -130,14 +131,29 @@ function buildConsumptionTxData(
   };
 }
 
-export async function consumeFifo(
+/**
+ * Task #871 — Read-only-Hälfte von `consumeFifo`: berechnet die FIFO-
+ * Verfügbarkeit eines Topfes zum `transactionDate`, OHNE zu schreiben.
+ *
+ * Gibt `totalAvailable` (bis zum Datum aufgelaufene Allocation minus Netto-
+ * Konsumtion, ≥0) plus die für die Spezial-Allocation-FIFO-Verteilung nötigen
+ * Maps zurück. Dieselbe Logik wie der READ-Teil des alten `consumeFifo`
+ * (vormals Zeilen 144–252) — extrahiert, damit `createCascadeConsumption` die
+ * Topf-Kapazität VOR der `planCascade`-Entscheidung kennt, ohne zu buchen.
+ */
+type FifoAvailability = {
+  totalAvailable: number;
+  specialAllocations: Array<{ id: number; amountCents: number }>;
+  consumedBySpecial: Map<number, number>;
+  reversalBySpecial: Map<number, number>;
+};
+
+export async function computeFifoAvailability(
   customerId: number,
   budgetType: string,
-  amountCents: number,
   transactionDate: string,
-  params?: ConsumptionParams,
-  _tx?: DbClient
-): Promise<{ consumedCents: number; transactions: BudgetTransaction[]; remainingCents: number }> {
+  _tx?: DbClient,
+): Promise<FifoAvailability> {
   const d = _tx ?? db;
   const today = transactionDate;
 
@@ -169,7 +185,7 @@ export async function consumeFifo(
   const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx, undefined, historicalTypeSettings);
 
   if (totalAllocated <= 0 && specialAllocations.length === 0) {
-    return { consumedCents: 0, transactions: [], remainingCents: amountCents };
+    return { totalAvailable: 0, specialAllocations, consumedBySpecial: new Map(), reversalBySpecial: new Map() };
   }
 
   const allSpecialIds = specialAllocations.map(a => a.id);
@@ -247,6 +263,28 @@ export async function consumeFifo(
   const totalNetConsumed = Math.max(0, Number(totalConsumedResult[0]?.total ?? 0) - Number(totalReversalsResult[0]?.total ?? 0));
   const totalAvailable = Math.max(0, totalAllocated - totalNetConsumed);
 
+  return { totalAvailable, specialAllocations, consumedBySpecial, reversalBySpecial };
+}
+
+/**
+ * Task #871 — Write-Hälfte von `consumeFifo`: bucht gegen eine VORAB berechnete
+ * Verfügbarkeit (`computeFifoAvailability`), OHNE erneut zu lesen. Byte-
+ * identisch zum WRITE-Teil des alten `consumeFifo` (vormals Zeilen 254–289):
+ * begrenzt auf `min(amountCents, availability.totalAvailable)`, verteilt FIFO
+ * über die Spezial-Allocations (carryover/initial/manual) und bucht den Rest
+ * gegen `allocationId = null`.
+ */
+async function consumeFifoWithAvailability(
+  availability: FifoAvailability,
+  customerId: number,
+  budgetType: string,
+  amountCents: number,
+  transactionDate: string,
+  params: ConsumptionParams | undefined,
+  d: DbClient,
+): Promise<{ consumedCents: number; transactions: BudgetTransaction[]; remainingCents: number }> {
+  const { totalAvailable, specialAllocations, consumedBySpecial, reversalBySpecial } = availability;
+
   if (totalAvailable <= 0) {
     return { consumedCents: 0, transactions: [], remainingCents: amountCents };
   }
@@ -287,6 +325,25 @@ export async function consumeFifo(
   }
 
   return { consumedCents: totalConsumedAmount, transactions, remainingCents: amountCents - totalConsumedAmount };
+}
+
+/**
+ * FIFO-Konsumtion eines einzelnen Topfes: read (`computeFifoAvailability`) +
+ * write (`consumeFifoWithAvailability`). Wrapper für alle Aufrufer, die in
+ * EINEM Schritt lesen und buchen wollen (z.B. `rebook-storage`). Verhalten
+ * unverändert gegenüber dem alten monolithischen `consumeFifo`.
+ */
+export async function consumeFifo(
+  customerId: number,
+  budgetType: string,
+  amountCents: number,
+  transactionDate: string,
+  params?: ConsumptionParams,
+  _tx?: DbClient
+): Promise<{ consumedCents: number; transactions: BudgetTransaction[]; remainingCents: number }> {
+  const d = _tx ?? db;
+  const availability = await computeFifoAvailability(customerId, budgetType, transactionDate, _tx);
+  return consumeFifoWithAvailability(availability, customerId, budgetType, amountCents, transactionDate, params, d);
 }
 
 export async function createCascadeConsumption(params: {
@@ -367,27 +424,47 @@ export async function createCascadeConsumption(params: {
       }));
     }
 
-    let remaining = params.totalAmountCents;
-    const allTransactions: BudgetTransaction[] = [];
-    const breakdown: Array<{ budgetType: string; consumedCents: number }> = [];
+    // Task #871 — Topf-Kaskade über die EINE pure `planCascade`-Funktion.
+    //
+    // Phase 1 (read-only): pro Topf die effektive Kapazität bestimmen
+    //   - deaktiviert / außerhalb Gültigkeitsfenster → 0
+    //   - gedeckelte Töpfe (§45a / §39+§42a) mit Cap → min(FIFO-Verfügbarkeit,
+    //     Cap-Restslot via `computeCapSlot`, der SSoT der Cap-Mathematik)
+    //   - sonst → FIFO-Verfügbarkeit (`computeFifoAvailability`)
+    //   Die FIFO-Verfügbarkeit wird je Topf VORAB gelesen und für die Write-
+    //   Phase aufbewahrt. Pro `budgetType` ist die Verfügbarkeit unabhängig von
+    //   Buchungen anderer Töpfe, daher ist dieses Vorab-Lesen byte-identisch zur
+    //   früheren just-in-time-Lesung innerhalb der Schleife.
+    // Phase 2: `planCascade` verteilt die Termin-Kost deterministisch
+    //   prioritäts-füllend auf die Töpfe (subtract-last, verlustfrei).
+    // Phase 3 (write): pro Split > 0 gegen die vorab gelesene Verfügbarkeit
+    //   buchen (`consumeFifoWithAvailability`).
+    const cascadePots: Array<{ budgetType: string; capacityCents: number }> = [];
+    const availabilityByType = new Map<string, FifoAvailability>();
 
     for (const pot of priorityOrder) {
-      if (remaining <= 0) break;
       if (!pot.enabled) {
-        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+        cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
         continue;
       }
-
       if (pot.validFrom && params.transactionDate < pot.validFrom) {
-        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+        cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
         continue;
       }
       if (pot.validTo && params.transactionDate > pot.validTo) {
-        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+        cascadePots.push({ budgetType: pot.budgetType, capacityCents: 0 });
         continue;
       }
 
-      let maxConsumable = remaining;
+      const availability = await computeFifoAvailability(
+        params.customerId,
+        pot.budgetType,
+        params.transactionDate,
+        tx,
+      );
+      availabilityByType.set(pot.budgetType, availability);
+
+      let capacity = availability.totalAvailable;
 
       // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Die FIFO-
       // Konsumtion wird nur durch die bis zum transactionDate aufgelaufene
@@ -409,13 +486,24 @@ export async function createCascadeConsumption(params: {
           monthlyLimitCents: pot.monthlyLimitCents,
           yearlyLimitCents: pot.yearlyLimitCents,
         }, tx);
-        maxConsumable = Math.min(remaining, cap.capRemainingCents);
+        capacity = Math.min(capacity, cap.capRemainingCents);
       }
 
-      if (maxConsumable <= 0) {
-        breakdown.push({ budgetType: pot.budgetType, consumedCents: 0 });
+      cascadePots.push({ budgetType: pot.budgetType, capacityCents: capacity });
+    }
+
+    const plan = planCascade(params.totalAmountCents, cascadePots);
+
+    const allTransactions: BudgetTransaction[] = [];
+    const breakdown: Array<{ budgetType: string; consumedCents: number }> = [];
+
+    for (const split of plan.splits) {
+      if (split.amountCents <= 0) {
+        breakdown.push({ budgetType: split.budgetType, consumedCents: 0 });
         continue;
       }
+
+      const availability = availabilityByType.get(split.budgetType)!;
 
       // Task #723 — Service-Felder werden in JEDEN Cascade-Topf gegeben
       // (nicht nur in den ersten). Vor #723 bekamen Folge-Töpfe nur
@@ -426,10 +514,11 @@ export async function createCascadeConsumption(params: {
       // Skalierungs-Nenner berechnet `buildConsumptionTxData` pro Leg
       // ratio = legBetrag / Termin-Total, und der Final-Reconcile am
       // Cascade-Ende (siehe unten) absorbiert verbleibende Cent-Drift.
-      const fifoResult = await consumeFifo(
+      const fifoResult = await consumeFifoWithAvailability(
+        availability,
         params.customerId,
-        pot.budgetType,
-        maxConsumable,
+        split.budgetType,
+        split.amountCents,
         params.transactionDate,
         {
           appointmentId: params.appointmentId,
@@ -444,13 +533,14 @@ export async function createCascadeConsumption(params: {
           customerKilometersCents: params.customerKilometersCents,
           totalAmountCents: params.totalAmountCents,
         },
-        tx
+        tx,
       );
 
       allTransactions.push(...fifoResult.transactions);
-      remaining -= fifoResult.consumedCents;
-      breakdown.push({ budgetType: pot.budgetType, consumedCents: fifoResult.consumedCents });
+      breakdown.push({ budgetType: split.budgetType, consumedCents: fifoResult.consumedCents });
     }
+
+    const remaining = plan.outstandingCents;
 
     // Task #723 — Final-Reconcile gegen Rest-Drift:
     // Wenn die Cascade den Termin vollständig abgedeckt hat (kein
