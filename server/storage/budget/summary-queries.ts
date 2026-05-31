@@ -13,6 +13,7 @@ import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-stor
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
+import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
 import { budgetAllocationsRepo } from "../../repos";
 
 // Hinweis (Task #603): §45b bleibt ein Jahrestopf — KEIN harter Monats-Cap.
@@ -285,7 +286,7 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   };
 }
 
-async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget45aSummary> {
+export async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget45aSummary> {
   const today = todayISO();
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
@@ -332,7 +333,7 @@ async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBu
   };
 }
 
-async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget39_42aSummary> {
+export async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget39_42aSummary> {
   const today = todayISO();
   const todayDate = parseLocalDate(today);
   const currentYear = todayDate.getFullYear();
@@ -394,4 +395,97 @@ export async function getAllBudgetSummaries(customerId: number): Promise<AllBudg
       : { customerId, yearlyBudgetCents: 0, currentYearAllocatedCents: 0, currentYearUsedCents: 0, currentYearAvailableCents: 0 } as Budget39_42aSummary,
   ]);
   return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
+}
+
+// ---------------------------------------------------------------------------
+// Task #874 — Serving-Assembler (Phase 4): Verfügbarkeit aus dem EINEN Reader.
+//
+// Die Legacy-`getBudgetSummary*`-Reader oben bleiben UNVERÄNDERT — sie sind der
+// Shadow-/Compat-Pfad (Soak-Vergleich `compareUnifiedVsLegacy`, Equality-Test
+// `unified-reader-vs-legacy`) und liefern weiterhin das volle DTO-Gerüst
+// (Carryover, Planung, Limit, `totalUsedCents`).
+//
+// Die nach AUSSEN ausgelieferten Verfügbarkeits-Zahlen (`availableCents` & Co.)
+// kommen ab Phase 4 ausschließlich aus `readUnifiedBudgetAvailability` (SSoT
+// `Available = Allocated − HoldsActive − ConsumedNet`). Diese Assembler
+// überschreiben nur die Available-Felder des Legacy-Gerüsts.
+//
+// WICHTIG §45b: `totalUsedCents` bleibt die ALLOCATION-Sicht (consumption +
+// write_off + manual_adjustment − reversal, all-time) — sie ist durch den
+// Equality-Test `budget-history-vs-overview` an die History-Aggregation
+// gepinnt und ist NICHT dasselbe wie die buchbare Verfügbarkeit. Der unified
+// Reader schließt `manual_adjustment` bewusst aus (= Buchungspfad
+// `getAvailableForDate`). Für Kunden MIT `manual_adjustment` weicht die
+// angezeigte §45b-Verfügbarkeit daher ab — bewusste Produkt-Entscheidung
+// (Phase 4), die Reconciliation der manual_adjustment-Semantik ist Phase 6.
+// ---------------------------------------------------------------------------
+
+/**
+ * §45b: Legacy-Gerüst + unified Available. `availableCents`,
+ * `currentMonthAvailableCents` kommen 1:1 aus dem unified Reader; die
+ * Planungs-Projektion `availableAfterPlannedCents` wird um exakt die Differenz
+ * (= im Wesentlichen der nicht mehr abgezogene `manual_adjustment`)
+ * verschoben, damit „Verfügbar" und „Verfügbar nach Planung" konsistent auf
+ * derselben Basis stehen.
+ */
+export function mergeServed45b(legacy: BudgetSummary, pot: PotAvailability): BudgetSummary {
+  if (!legacy.isCurrentlyActive) {
+    return { ...legacy, availableCents: 0, currentMonthAvailableCents: 0, availableAfterPlannedCents: 0 };
+  }
+  const availableDelta = pot.availableCents - legacy.availableCents;
+  return {
+    ...legacy,
+    availableCents: pot.availableCents,
+    currentMonthAvailableCents: Math.max(0, pot.availableCents),
+    availableAfterPlannedCents: legacy.availableAfterPlannedCents + availableDelta,
+  };
+}
+
+function mergeServed45a(legacy: Budget45aSummary, pot: PotAvailability): Budget45aSummary {
+  return {
+    ...legacy,
+    currentMonthAvailableCents: legacy.isCurrentlyActive ? pot.availableCents : 0,
+  };
+}
+
+function mergeServed39_42a(legacy: Budget39_42aSummary, pot: PotAvailability): Budget39_42aSummary {
+  return {
+    ...legacy,
+    currentYearAvailableCents: pot.availableCents,
+  };
+}
+
+/** Reine Verfügbarkeits-Überschreibung des Legacy-Gerüsts mit dem unified Reader. */
+export function mergeServedAvailability(
+  legacy: AllBudgetSummaries,
+  unified: UnifiedBudgetAvailability,
+): AllBudgetSummaries {
+  return {
+    entlastungsbetrag45b: mergeServed45b(legacy.entlastungsbetrag45b, unified.pots.entlastungsbetrag_45b),
+    umwandlung45a: mergeServed45a(legacy.umwandlung45a, unified.pots.umwandlung_45a),
+    ersatzpflege39_42a: mergeServed39_42a(legacy.ersatzpflege39_42a, unified.pots.ersatzpflege_39_42a),
+  };
+}
+
+/**
+ * Serving-Pfad für `/overview`: Legacy-Gerüst (synct Carryover/Expiry, liefert
+ * Planung/Carryover/Limit) + unified Available. Reihenfolge: Legacy ZUERST
+ * (synct), damit der rein lesende unified Reader die gesynchten Allocations
+ * sieht.
+ */
+export async function getAllBudgetSummariesServed(customerId: number): Promise<AllBudgetSummaries> {
+  const legacy = await getAllBudgetSummaries(customerId);
+  const unified = await readUnifiedBudgetAvailability(customerId, todayISO());
+  return mergeServedAvailability(legacy, unified);
+}
+
+/**
+ * Serving-Pfad für `/summary` und die §45b-Budget-Warnung (Termin-/Serien-
+ * Anlage). Synct NICHT selbst — die Caller rufen `syncCarryoverAndExpiry`
+ * explizit auf, bevor sie diesen Reader nutzen.
+ */
+export async function getBudgetSummaryServed(customerId: number): Promise<BudgetSummary> {
+  const legacy = await getBudgetSummary(customerId);
+  const unified = await readUnifiedBudgetAvailability(customerId, todayISO());
+  return mergeServed45b(legacy, unified.pots.entlastungsbetrag_45b);
 }

@@ -46,9 +46,11 @@ const ALLOWLIST: Record<string, WriteOffView> = {
   // Schreib-Stelle der `processExpiredCarryover`-Verfallsbuchung.
   "server/storage/budget/allocation-storage.ts": "allocation-view",
 
-  // „Verfügbar zum Buchungsdatum" — write_off vor dem Buchungsdatum
-  // hat den Pot entwertet, zählt also als Used.
-  "server/storage/budget/import-availability.ts": "allocation-view",
+  // Task #874 — DER eine Verfügbarkeits-Reader: „Verfügbar zum Buchungsdatum"
+  // (`netConsumedUpToDate`). write_off vor dem Buchungsdatum hat den Pot
+  // entwertet, zählt also als Used. `import-availability.ts` delegiert seit
+  // Phase 4 nur noch hierhin und referenziert `write_off` selbst nicht mehr.
+  "server/storage/budget/unified-reader.ts": "allocation-view",
 
   // Phase 1.3 — pure History-Aggregation exponiert beide Sichten gleichzeitig
   // (Topologie ist „both"): die Entscheidung, welche Sicht eine UI verwendet,

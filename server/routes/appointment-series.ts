@@ -262,7 +262,8 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
   let _budgetWarning: string | undefined;
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(input.customerId);
-    const budgetSummary = await budgetLedgerStorage.getBudgetSummary(input.customerId);
+    // Task #874 — Serving-Pfad: Budget-Warnung nutzt unified Verfügbarkeit.
+    const budgetSummary = await budgetLedgerStorage.getBudgetSummaryServed(input.customerId);
     _budgetWarning = buildBudgetWarning(budgetSummary, {
       appointmentDates: validation.validDates,
     }) ?? undefined;

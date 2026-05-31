@@ -761,8 +761,9 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
       { label: "syncCarryoverAndExpiry" },
     );
     const budgetSummary = await withDbRetry(
-      () => budgetLedgerStorage.getBudgetSummary(validatedData.customerId),
-      { label: "getBudgetSummary" },
+      // Task #874 — Serving-Pfad: Budget-Warnung nutzt unified Verfügbarkeit.
+      () => budgetLedgerStorage.getBudgetSummaryServed(validatedData.customerId),
+      { label: "getBudgetSummaryServed" },
     );
     _warning = buildBudgetWarning(budgetSummary, { appointmentDates: [validatedData.date] }) ?? undefined;
   } catch (err) {

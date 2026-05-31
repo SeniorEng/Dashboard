@@ -90,7 +90,8 @@ router.get("/:customerId/summary", checkCustomerAccess, asyncHandler("Budget-Üb
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
   await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
-  const summary = await budgetLedgerStorage.getBudgetSummary(customerId);
+  // Task #874 — Serving-Pfad: Verfügbarkeit aus dem EINEN unified Reader.
+  const summary = await budgetLedgerStorage.getBudgetSummaryServed(customerId);
   res.json(summary);
 }));
 
@@ -318,7 +319,10 @@ router.get("/:customerId/history", checkCustomerAccess, asyncHandler("Budget-His
 router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
-  const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
+  // Task #874 — Serving-Pfad: Verfügbarkeit aus dem EINEN unified Reader
+  // (`readUnifiedBudgetAvailability`). Das Legacy-Gerüst liefert nur noch die
+  // Nicht-Verfügbarkeits-Felder (Carryover, Planung, Limit, totalUsedCents).
+  const summaries = await budgetLedgerStorage.getAllBudgetSummariesServed(customerId);
 
   const s45b = summaries.entlastungsbetrag45b;
   // Task #720 — explizite Typannotation gegen `BudgetOverviewDTO`
@@ -357,6 +361,22 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
     },
   };
   res.json(overview);
+
+  // Task #874 — Shadow-Read-Soak (I18): vergleiche unified vs legacy Reader auf
+  // live Traffic. Nicht-blockierend (setImmediate) und hinter `BUDGET_SHADOW_READ`
+  // (="1"/"true"), damit der Read-Pfad nie betroffen ist. Loggt nur bei Drift.
+  if (process.env.BUDGET_SHADOW_READ === "1" || process.env.BUDGET_SHADOW_READ === "true") {
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const { compareUnifiedVsLegacy, logShadowDrift } = await import("../storage/budget/shadow-read");
+          logShadowDrift(await compareUnifiedVsLegacy(customerId));
+        } catch (err) {
+          console.warn(`[budget-shadow-read] Vergleich fehlgeschlagen (customer=${customerId}):`, err);
+        }
+      })();
+    });
+  }
 }));
 
 router.use(requireAdmin);

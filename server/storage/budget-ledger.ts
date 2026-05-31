@@ -33,6 +33,10 @@ interface BudgetLedgerStorage {
   syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void>;
   getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary>;
   getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
+  // Task #874 — Serving-Pfad (Phase 4): Verfügbarkeit aus dem EINEN unified
+  // Reader. Legacy `getBudgetSummary*` bleiben der Shadow-/Compat-Pfad.
+  getBudgetSummaryServed(customerId: number): Promise<BudgetSummary>;
+  getAllBudgetSummariesServed(customerId: number): Promise<AllBudgetSummaries>;
   getPlannedCostCents(customerId: number): Promise<number>;
   // Task #727 — Phase 1.3: monatliche History-Aggregation (Allocations- und
   // Fenster-Cap-Sicht) über die pure `aggregateHistoryByMonth`.
@@ -100,6 +104,8 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   syncCarryoverAndExpiry: allocation.syncCarryoverAndExpiry,
   getBudgetSummary: summary.getBudgetSummary,
   getAllBudgetSummaries: summary.getAllBudgetSummaries,
+  getBudgetSummaryServed: summary.getBudgetSummaryServed,
+  getAllBudgetSummariesServed: summary.getAllBudgetSummariesServed,
   getPlannedCostCents: pricing.getPlannedCostCents,
   getMonthlyHistory: history.getMonthlyHistory,
 
