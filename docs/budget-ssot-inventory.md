@@ -1,5 +1,13 @@
 # Budget-SSoT Phase 0 — Inventur aller Berechnungs- und Anzeigestellen
 
+> **Vereinbarter Endzustand:** Dieses Inventar ist die Ist-Analyse und der Migrationspfad.
+> Die **verbindliche Ziel-Architektur** (Drei-Tabellen-Modell, Reservierung/Finanz-Split,
+> GoBD-Posture) lebt in
+> [`./architecture/budget-greenfield-architecture.md`](./architecture/budget-greenfield-architecture.md)
+> mit den Phase-0-Entscheidungen in
+> [`./architecture/adr/`](./architecture/adr/). Diese Inventur wird von dem North-Star-Dokument
+> als „halb-fertige SSoT-Migration" abgelöst und dient ihm als Karte des Ist-Zustands.
+>
 > **Status:** Analytisches Inventar (Task #712). KEINE Code-Änderungen.
 > **Ziel:** Vollständige Karte aller Stellen in Server, Client und Shared-Code,
 > an denen Budget-Werte berechnet, aggregiert oder angezeigt werden — als

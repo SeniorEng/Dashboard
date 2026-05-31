@@ -2,6 +2,22 @@
 
 Detaillierte Architektur-Entscheidungen und Gotchas zur Budget-Domäne. Übergeordneter Projekt-README: [`../../replit.md`](../../replit.md).
 
+## Greenfield-Ziel-Architektur (North Star)
+
+> **Verbindliche Ziel-Architektur:** [`./budget-greenfield-architecture.md`](./budget-greenfield-architecture.md)
+> ist die durable Engineering-Referenz für den Budget-Endzustand (Drei-Tabellen-Modell:
+> Allocations / operative Reservierungen / GoBD-immutabler Finanz-Ledger). Die vier
+> hart-zu-ändernden Phase-0-Entscheidungen sind in den ADRs unter
+> [`./adr/`](./adr/) festgeschrieben:
+> [ADR-0001 Reservation/Finanz-Split](./adr/0001-reservation-financial-split.md),
+> [ADR-0002 Reservierungs-Historie](./adr/0002-reservation-history-model.md),
+> [ADR-0003 Capture-Transaktions-Grenze](./adr/0003-capture-transaction-boundary.md),
+> [ADR-0004 Zwei-Tabellen-Non-Negativity-Guard](./adr/0004-two-table-non-negativity-guard.md).
+> Die GoBD-Verfahrensdokumentation ist in
+> [`./budget-verfahrensdokumentation.md`](./budget-verfahrensdokumentation.md) geseedet
+> (Finalisierung in Phase 6). Die unten beschriebene SSoT-Konsolidierung ist der
+> Migrationspfad dorthin.
+
 ## Aktuelle Konsolidierung (SSoT-Migration)
 
 - **Phase 0 — Inventur** (abgeschlossen): [`../budget-ssot-inventory.md`](../budget-ssot-inventory.md) listet alle Berechnungsstellen pro Kennzahl, dokumentiert 8 Konfliktpunkte und schlägt ein Drei-View-Modell (`BudgetOverviewView`, `BudgetSettingsView`, `BudgetHistoryView`) vor.
