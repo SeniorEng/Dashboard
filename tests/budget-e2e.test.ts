@@ -1467,3 +1467,155 @@ describe("INT-17: Selbstzahler ohne Preis-Konfiguration (noPricing edge case)", 
     expect(afterCodes).toEqual(beforeCodes);
   });
 });
+
+
+describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abgeleitetem Anker (Task #860)", () => {
+  // Frisch onboardeter Kunde, dessen Pflegegrad im VORJAHR begann. Der §45b-
+  // Anker wird wie vom Wizard via /initial-budget gesetzt — Origin
+  // 'derived_pflegegrad', RAW-Datum im Vorjahr, KEIN Startguthaben, KEIN
+  // operator-erfasster Übertrag. Erwartung (Task #860): das Vorjahr gilt als
+  // aufgebraucht — es entsteht KEINE automatisch materialisierte Carryover-
+  // Zeile, carryoverCents = 0, und der laufende Jahresanteil läuft ab dem
+  // 1.1. des LAUFENDEN Jahres an (Anker gebodet via
+  // floorAutoAnchor45bToCurrentYear). Dieser End-to-End-Pfad war zuvor nur
+  // durch die Unit-Tests des Helpers abgedeckt, nicht über die API.
+  let scenario: BudgetScenarioHandle;
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const priorYear = curYear - 1;
+  // Pflegegrad-Beginn im Vorjahr = der abgeleitete §45b-Anker.
+  const derivedAnchor = `${priorYear}-01-01`;
+
+  beforeAll(async () => {
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-18",
+      types: [
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+        { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+    // Wizard-Onboarding emuliert: /initial-budget mit Vorjahres-Anker, ohne
+    // Startguthaben und ohne Übertrag. Der Endpoint setzt
+    // budgetStartDateOrigin = 'derived_pflegegrad'.
+    const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 0,
+      carryoverAmountCents: 0,
+      budgetStartDate: derivedAnchor,
+    });
+    expect([200, 201]).toContain(res.status);
+  });
+
+  afterAll(async () => {
+    await scenario.cleanup();
+  });
+
+  it("INT-18.1 – Anker-Origin ist 'derived_pflegegrad' mit Vorjahres-RAW-Datum", async () => {
+    const prefRes = await apiGet<any>(`/api/budget/${scenario.customerId}/preferences`);
+    expect(prefRes.status).toBe(200);
+    // RAW-Anker bleibt im Vorjahr (für §45a/§39), Origin markiert ihn als
+    // abgeleitet — genau dieser Origin triggert die §45b-Kappung im Lesepfad.
+    expect(prefRes.data.budgetStartDate).toBe(derivedAnchor);
+    expect(prefRes.data.budgetStartDateOrigin).toBe("derived_pflegegrad");
+  });
+
+  it("INT-18.2 – KEINE automatisch materialisierte §45b-Carryover-Zeile (Vor- und laufendes Jahr)", async () => {
+    const allocCur = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${curYear}`);
+    expect(allocCur.status).toBe(200);
+    const carryoverCur = allocCur.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && !a.deletedAt
+    );
+    expect(carryoverCur.length).toBe(0);
+
+    const allocPrior = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${priorYear}`);
+    expect(allocPrior.status).toBe(200);
+    const carryoverPrior = allocPrior.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && !a.deletedAt
+    );
+    expect(carryoverPrior.length).toBe(0);
+  });
+
+  it("INT-18.3 – Overview carryoverCents ist 0 (kein Operator-Übertrag)", async () => {
+    const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    expect(res.status).toBe(200);
+    const s45b = res.data.entlastungsbetrag45b;
+    expect(s45b.carryoverCents).toBe(0);
+  });
+
+  it("INT-18.4 – Laufender Jahresanteil ab 1.1. des laufenden Jahres gebodet (Monate = Monatsindex)", async () => {
+    const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    expect(res.status).toBe(200);
+    const s45b = res.data.entlastungsbetrag45b;
+    // Anker im Vorjahr → auf 1.1. curYear gebodet. Akkumulierte Monate =
+    // aktueller Monatsindex (Jan=1 … aktueller Monat), KEIN Vorjahres-Anteil.
+    const expectedMonths = now.getMonth() + 1;
+    expect(s45b.totalAllocatedCents).toBe(expectedMonths * 13100);
+    expect(s45b.carryoverCents).toBe(0);
+  });
+});
+
+
+describe("INT-19: §45b Onboarding – operator-erfasster Übertrag bleibt erhalten (Regression-Guard)", () => {
+  // Gegenprobe zu INT-18: Trotz abgeleitetem Vorjahres-Anker MUSS ein vom
+  // Operator im Wizard erfasster Übertrag eine echte Carryover-Zeile mit
+  // validFrom = 1.1. / expiresAt = 30.06. des laufenden Jahres erzeugen. Das
+  // §860-Boden-Verhalten unterdrückt nur die AUTOMATISCHE Materialisierung,
+  // nicht die bewusste Operator-Eingabe.
+  let scenario: BudgetScenarioHandle;
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const priorYear = curYear - 1;
+  const derivedAnchor = `${priorYear}-01-01`;
+  const carryoverCents = 50000;
+
+  beforeAll(async () => {
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "INT-19",
+      types: [
+        { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
+        { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+    });
+    // Wizard-Onboarding mit Vorjahres-Anker UND operator-erfasstem Übertrag.
+    const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 0,
+      carryoverAmountCents: carryoverCents,
+      budgetStartDate: derivedAnchor,
+    });
+    expect([200, 201]).toContain(res.status);
+  });
+
+  afterAll(async () => {
+    await scenario.cleanup();
+  });
+
+  it("INT-19.1 – Übertrag-Zeile mit validFrom=1.1. / expiresAt=30.06. des laufenden Jahres", async () => {
+    const allocRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/allocations?year=${curYear}`);
+    expect(allocRes.status).toBe(200);
+    const carryover = allocRes.data.filter(
+      (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover" && !a.deletedAt
+    );
+    expect(carryover.length).toBe(1);
+    expect(carryover[0].validFrom).toBe(`${curYear}-01-01`);
+    expect(carryover[0].expiresAt).toBe(`${curYear}-06-30`);
+    expect(carryover[0].amountCents).toBe(carryoverCents);
+  });
+
+  it("INT-19.2 – Overview spiegelt den Operator-Übertrag (gültig bis 30.06.)", async () => {
+    const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    expect(res.status).toBe(200);
+    const s45b = res.data.entlastungsbetrag45b;
+    // Vor dem 30.06. ist der Übertrag aktiv und sichtbar; ab dem 1.7. verfällt
+    // er (Write-off) und carryoverCents fällt auf 0 — beide Pfade sind valide.
+    const beforeJulyCutoff = now.getMonth() <= 5; // 0-basiert: Jan(0) … Jun(5)
+    if (beforeJulyCutoff) {
+      expect(s45b.carryoverCents).toBe(carryoverCents);
+      expect(s45b.carryoverExpiresAt).toBe(`${curYear}-06-30`);
+    } else {
+      expect(s45b.carryoverCents).toBe(0);
+    }
+  });
+});
