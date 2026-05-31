@@ -24,17 +24,20 @@ import { timeRangesOverlap } from "@shared/domain/time-entries";
 import { 
   ErrorMessages, 
   asyncHandler,
+  AppError,
   sendBadRequest, 
   sendConflict, 
   sendForbidden, 
   sendNotFound,
   sendServerError
 } from "../lib/errors";
+import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { requireAuth } from "../middleware/auth";
 import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { getPlannedHoldInputs } from "../storage/budget/appointment-cost-calculator";
 import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
 import type { Response } from "express";
@@ -733,7 +736,37 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     if (serviceEntries.length > 0) {
       await storage.createAppointmentServices(created.id, serviceEntries, tx);
     }
+
+    // Task #875 (gated) — Hard-Hold beim Planen: reserviert Budget in derselben
+    // Transaktion wie die Terminanlage. Wirft planHold einen Hard-Block, rollt
+    // der ganze Termin zurück (Overdraft unmöglich, R3/I14). Flag aus = No-op.
+    if (budgetLedgerStorage.hardHoldsEnabled()) {
+      const planned = await getPlannedHoldInputs(created.id, tx);
+      if (planned) {
+        await budgetLedgerStorage.planHold(
+          {
+            customerId: planned.customerId,
+            appointmentId: created.id,
+            transactionDate: planned.date,
+            hauswirtschaftMinutes: planned.hauswirtschaftMinutes,
+            alltagsbegleitungMinutes: planned.alltagsbegleitungMinutes,
+            travelKilometers: planned.travelKilometers,
+            customerKilometers: planned.customerKilometers,
+            userId: user.id,
+          },
+          tx,
+        );
+      }
+    }
     return created;
+  }).catch((err) => {
+    // Task #875 — Hard-Block beim Planen (gekappte Töpfe reichen nicht, Kunde
+    // zahlt nicht privat) ist eine designte Geschäfts-Ablehnung, kein 500.
+    // Als 422 mit Maschinen-Code BUDGET_HARD_BLOCK abbilden.
+    if (err instanceof BudgetHardBlockError) {
+      throw new AppError(422, err.code, err.message);
+    }
+    throw err;
   });
 
   await auditService.appointmentCreated(
@@ -1143,9 +1176,46 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
         appointmentId: id,
         userId: req.user?.id,
       }, tx);
+
+      // Task #875 (gated) — atomarer Reschedule (I19): alte Holds freigeben und
+      // mit den neuen geplanten Mengen neu reservieren, in DERSELBEN Tx wie das
+      // Termin-Update. Hard-Block beim Neu-Planen rollt das ganze Edit zurück
+      // (alte Holds bleiben). Flag aus = No-op.
+      if (budgetLedgerStorage.hardHoldsEnabled()) {
+        const planned = await getPlannedHoldInputs(id, tx);
+        if (planned) {
+          await budgetLedgerStorage.rescheduleHold(
+            {
+              customerId: planned.customerId,
+              appointmentId: id,
+              transactionDate: planned.date,
+              hauswirtschaftMinutes: planned.hauswirtschaftMinutes,
+              alltagsbegleitungMinutes: planned.alltagsbegleitungMinutes,
+              travelKilometers: planned.travelKilometers,
+              customerKilometers: planned.customerKilometers,
+              userId: req.user?.id,
+            },
+            tx,
+          );
+        } else {
+          // Termin hat nach dem Edit keine geplante Budget-Nutzung mehr (z.B.
+          // Leistungen auf leer gesetzt) → alte Holds müssen trotzdem freigegeben
+          // werden (release-only, kein Replan), sonst hängen tote Holds am Termin
+          // und blähen das reservierte Budget künstlich auf, bis der Orphan-Sweep
+          // greift. Idempotent (wirkt nur auf state='hold').
+          await budgetLedgerStorage.releaseHolds(id, req.user?.id, tx);
+        }
+      }
     }
 
     return result;
+  }).catch((err) => {
+    // Task #875 — Hard-Block beim atomaren Reschedule rollt das ganze Edit zurück
+    // und muss als 422 (BUDGET_HARD_BLOCK) statt 500 beim Client ankommen.
+    if (err instanceof BudgetHardBlockError) {
+      throw new AppError(422, err.code, err.message);
+    }
+    throw err;
   });
 
   if (!updated) {
@@ -1500,6 +1570,12 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
       await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
     }
 
+    // Task #875 (gated) — beim Reopen lingering Holds freigeben; die Re-Doku
+    // legt beim erneuten Abschluss frische Buchungen an. Flag aus = No-op.
+    if (budgetLedgerStorage.hardHoldsEnabled()) {
+      await budgetLedgerStorage.releaseHolds(id, req.user!.id, txClient);
+    }
+
     const result = await storage.updateAppointment(id, {
       status: "documenting",
       signatureData: null,
@@ -1571,10 +1647,14 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   let reversedTransactions = 0;
   const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
 
-  if (transactions.length > 0) {
+  if (transactions.length > 0 || budgetLedgerStorage.hardHoldsEnabled()) {
     await db.transaction(async (txClient) => {
       for (const tx of transactions) {
         await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
+      }
+      // Task #875 (gated) — aktive Holds des Termins freigeben (R6). Flag aus = No-op.
+      if (budgetLedgerStorage.hardHoldsEnabled()) {
+        await budgetLedgerStorage.releaseHolds(id, req.user!.id, txClient);
       }
       const deleted = await storage.deleteAppointment(id, txClient);
       if (!deleted) {

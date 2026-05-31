@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { OverBudgetCompletionError } from "@shared/domain/budget/over-budget-error";
 import { documentAppointmentSchema, documentNoShowSchema, customers as customersTable } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
 import { auditService } from "../services/audit";
@@ -152,7 +153,26 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
         // reduziert die monatliche Aufstockung, ist aber KEIN
         // Überschreitungs-Cap. Eine "Monatslimit überschritten"-Warnung wäre
         // hier daher irreführend; sie entfällt bewusst.
+
+        // Task #875 (gated) — Hard-Hold-Capture: überführt die beim Planen
+        // geschriebenen Holds in derselben ACID-Tx in den Ledger (getreuer
+        // Schatten der gerade gebuchten Legacy-Konsumtion). Flag aus = No-op.
+        if (budgetLedgerStorage.hardHoldsEnabled()) {
+          await budgetLedgerStorage.captureHolds(
+            {
+              customerId: appointment.customerId!,
+              appointmentId: id,
+              userId: req.user?.id,
+            },
+            tx,
+          );
+        }
       } catch (budgetError: unknown) {
+        // Task #875 — eine echte Über-Budget-Buchung beim Abschluss ist KEIN
+        // kosmetischer Warnhinweis, sondern muss den Submit hart ablehnen.
+        if (budgetError instanceof OverBudgetCompletionError) {
+          throw budgetError;
+        }
         const errorMessage = budgetError instanceof Error ? budgetError.message : "Budget-Abbuchung fehlgeschlagen";
         if (errorMessage.includes("Preisvereinbarung") || errorMessage.includes("Budget reicht nicht")) {
           throw budgetError;
@@ -198,6 +218,14 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     return result;
   }).catch((err) => {
     if (err instanceof AppError) throw err;
+    // Task #875 — Über-Budget-Abschluss (Reconciliation case c, R4/I20) ist eine
+    // designte Geschäfts-Ablehnung bereits geleisteter Arbeit, kein Serverfehler.
+    // Als 422 mit maschinenlesbarem Code (`OVER_BUDGET_COMPLETION`) abbilden, damit
+    // der Client den Operator-Auflösungs-Flow (Aufstockung / Herabstufung /
+    // Write-off) anstoßen kann, statt eines generischen 500 von asyncHandler.
+    if (err instanceof OverBudgetCompletionError) {
+      throw new AppError(422, err.code, err.message);
+    }
     const errorMessage = err instanceof Error ? err.message : "Budget-Abbuchung fehlgeschlagen";
     if (errorMessage.includes("Preisvereinbarung")) {
       throw badRequest(`${errorMessage}. Bitte hinterlegen Sie zuerst eine Preisvereinbarung für diesen Kunden.`);

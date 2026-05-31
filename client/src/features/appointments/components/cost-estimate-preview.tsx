@@ -12,6 +12,12 @@ export type CostEstimate = {
   bruttoCents?: number;
   vatCents?: number;
   vatRate?: number;
+  /**
+   * Task #875 — bereits durch andere geplante Termine reservierter Betrag
+   * (Holds). > 0 nur wenn das Hard-Hold-Feature aktiv ist; sonst 0 ⇒ kein
+   * Reservierungs-Hinweis.
+   */
+  holdsActiveCents?: number;
 };
 
 interface CostEstimatePreviewProps {
@@ -56,6 +62,14 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
   const displayCents = displayPriceCents(cost.totalCents, billingType);
   const costEuro = formatEuroDE(displayCents, { withCurrency: false });
   const availEuro = cost.availableCents !== undefined ? formatEuroDE(cost.availableCents, { withCurrency: false }) : null;
+  const holdsCents = cost.holdsActiveCents ?? 0;
+  const holdsNote = holdsCents > 0
+    ? (
+      <p className="text-xs mt-1 opacity-80" data-testid="text-budget-holds-reserved">
+        davon {formatEuroDE(holdsCents, { withCurrency: false })} € durch geplante Termine reserviert
+      </p>
+    )
+    : null;
 
   if (cost.isHardBlock) {
     return (
@@ -77,6 +91,7 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
         <div>
           <p className="text-amber-800 font-semibold">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal">— verfügbar: {availEuro} €</span>}</p>
           <p className="text-amber-700 text-xs mt-1">{cost.warning}</p>
+          {holdsNote}
         </div>
       </div>
     );
@@ -87,6 +102,7 @@ export function CostEstimatePreview({ costEstimate, billingType }: CostEstimateP
       <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
       <div>
         <p className="text-green-800 font-medium">Kosten: {costEuro} € {availEuro !== null && <span className="font-normal text-green-600">— verfügbar: {availEuro} €</span>}</p>
+        {holdsNote}
       </div>
     </div>
   );

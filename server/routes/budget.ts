@@ -278,9 +278,21 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
     isSelbstzahler: false,
   });
 
+  // Task #875 (gated) — aktive Holds (geplante, noch nicht abgeschlossene
+  // Termine) explizit ausweisen, damit die Planungs-Banner zeigen kann, wie
+  // viel des verfügbaren Budgets bereits reserviert ist. Flag aus = 0 (das
+  // Feld bleibt 0 ⇒ UI rendert keinen Reservierungs-Hinweis, byte-identisch).
+  let holdsActiveCents = 0;
+  if (budgetLedgerStorage.hardHoldsEnabled()) {
+    const { readUnifiedBudgetAvailability } = await import("../storage/budget/unified-reader");
+    const unified = await readUnifiedBudgetAvailability(customerId, date);
+    holdsActiveCents = unified.totalHoldsCents;
+  }
+
   res.json({
     totalCents: totalCostCents,
     availableCents: totalAvailable,
+    holdsActiveCents,
     currentMonthUsedCents: summary45b.currentMonthUsedCents,
     monthlyLimitCents: summary45b.monthlyLimitCents,
     warning: outcome.warning,

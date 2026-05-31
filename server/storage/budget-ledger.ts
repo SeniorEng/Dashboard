@@ -18,6 +18,7 @@ import * as consumption from "./budget/consumption-engine";
 import * as rebook from "./budget/rebook-storage";
 import * as pricing from "./budget/appointment-cost-calculator";
 import * as history from "./budget/history-aggregation";
+import * as reservation from "./budget/reservation-storage";
 import type { MonthlyHistoryBucket } from "@shared/domain/budget/history-aggregation";
 
 interface BudgetLedgerStorage {
@@ -89,6 +90,14 @@ interface BudgetLedgerStorage {
   rebookSingleTransaction(customerId: number, transactionId: number, targetBudgetType: string, userId: number): Promise<{ reversalTransaction: BudgetTransaction; newTransaction: BudgetTransaction | null; amountCents: number }>;
   getRebookPreview(customerId: number): Promise<{ disabledTypes: string[]; affectedAppointments: number; totalAmountCents: number; transactions: Array<{ id: number; budgetType: string; amountCents: number; appointmentId: number | null; transactionDate: string }> }>;
   rebookDisabledBudgetTransactions(customerId: number, userId: number): Promise<{ reversedCount: number; rebookedCount: number; totalOldAmountCents: number; totalNewAmountCents: number; errors: Array<{ appointmentId: number; error: string }> }>;
+
+  // Task #875 — Hard-hold reservations (gated via BUDGET_HARD_HOLDS).
+  hardHoldsEnabled: typeof reservation.hardHoldsEnabled;
+  planHold: typeof reservation.planHold;
+  captureHolds: typeof reservation.captureHolds;
+  releaseHolds: typeof reservation.releaseHolds;
+  rescheduleHold: typeof reservation.rescheduleHold;
+  sweepOrphanHolds: typeof reservation.sweepOrphanHolds;
 }
 
 export const budgetLedgerStorage: BudgetLedgerStorage = {
@@ -135,4 +144,11 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   rebookSingleTransaction: rebook.rebookSingleTransaction,
   getRebookPreview: rebook.getRebookPreview,
   rebookDisabledBudgetTransactions: rebook.rebookDisabledBudgetTransactions,
+
+  hardHoldsEnabled: reservation.hardHoldsEnabled,
+  planHold: reservation.planHold,
+  captureHolds: reservation.captureHolds,
+  releaseHolds: reservation.releaseHolds,
+  rescheduleHold: reservation.rescheduleHold,
+  sweepOrphanHolds: reservation.sweepOrphanHolds,
 };

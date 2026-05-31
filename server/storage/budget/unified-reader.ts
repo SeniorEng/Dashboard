@@ -22,7 +22,7 @@
  * er prod-sicher im Shadow-Read-Soak (`server/scripts/shadow-read-soak.ts`) und
  * im Conservation-Verifier-Stil laufen kann.
  */
-import { budgetTransactions } from "@shared/schema";
+import { budgetTransactions, budgetReservations } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -31,10 +31,48 @@ import { calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
 
 /**
- * Phase 4: keine aktiven Hard-Holds. Reservierungen kommen in Phase 5; bis dahin
- * ist die Hold-Komponente der Erhaltungs-Identität konstant 0.
+ * Task #875 (Phase 5): aktive Hard-Holds (`budget_reservations.state = 'hold'`)
+ * gehen jetzt als `HoldsActive` in die Erhaltungs-Identität ein. Solange kein
+ * Pfad Holds schreibt (Feature-Flag `BUDGET_HARD_HOLDS` aus), liefert die
+ * Aggregation 0 → die Verfügbarkeit ist byte-identisch zu Phase 4 (Equality-
+ * Garantie `tests/equality/unified-reader-vs-legacy.test.ts` bleibt grün).
  */
 export const HOLDS_ACTIVE_CENTS_PHASE4 = 0 as const;
+
+/**
+ * Summe der AKTIVEN Holds (state='hold') eines Topfes im relevanten Fenster.
+ *
+ * Holds sind operative Reservierungen für GEPLANTE (oft zukünftige) Termine und
+ * werden daher bewusst NICHT auf `≤ asOfDate` gefiltert — ein Hold für einen
+ * Termin nächste Woche muss die heute verfügbare Summe schon reduzieren.
+ * Fenster pro Topf identisch zur Consumed-Sicht:
+ *   - §45b / §39+§42a: gesamtes Kalenderjahr von `asOfDate` (`period` = 'YYYY-MM').
+ *   - §45a: exakt der Kalendermonat von `asOfDate`.
+ */
+async function activeHoldsCents(
+  customerId: number,
+  budgetType: string,
+  asOfDate: string,
+  window: "year" | "month",
+  d: DbClient,
+): Promise<number> {
+  const periodPrefix =
+    window === "month" ? asOfDate.slice(0, 7) : asOfDate.slice(0, 4);
+  const [row] = await d
+    .select({
+      total: sql<number>`COALESCE(SUM(${budgetReservations.amountCents}), 0)`,
+    })
+    .from(budgetReservations)
+    .where(
+      and(
+        eq(budgetReservations.customerId, customerId),
+        eq(budgetReservations.budgetType, budgetType),
+        eq(budgetReservations.state, "hold"),
+        sql`${budgetReservations.period} LIKE ${periodPrefix + "%"}`,
+      ),
+    );
+  return Math.max(0, Number(row?.total ?? 0));
+}
 
 export type CappedBudgetPot =
   | "entlastungsbetrag_45b"
@@ -67,6 +105,8 @@ export interface UnifiedBudgetAvailability {
   total45a: number;
   total39_42a: number;
   totalCents: number;
+  /** Summe der aktiven Hard-Holds über alle Töpfe (Phase 5). */
+  totalHoldsCents: number;
 }
 
 /**
@@ -160,14 +200,15 @@ export async function readUnifiedBudgetAvailability(
       typeSettings,
     );
     const consumedNet = await netConsumedUpToDate(customerId, "entlastungsbetrag_45b", asOfDate, d);
-    const available = Math.max(0, allocated - HOLDS_ACTIVE_CENTS_PHASE4 - consumedNet);
+    const holds = await activeHoldsCents(customerId, "entlastungsbetrag_45b", asOfDate, "year", d);
+    const available = Math.max(0, allocated - holds - consumedNet);
     pot45b = {
       budgetType: "entlastungsbetrag_45b",
       enabled: enabled45b,
       inRange: inRange45b,
       allocatedCents: allocated,
       consumedNetCents: consumedNet,
-      holdsActiveCents: HOLDS_ACTIVE_CENTS_PHASE4,
+      holdsActiveCents: holds,
       capRemainingCents: Infinity,
       availableCents: available,
     };
@@ -194,14 +235,15 @@ export async function readUnifiedBudgetAvailability(
       monthlyLimitCents: s45a?.monthlyLimitCents ?? null,
       yearlyLimitCents: null,
     }, tx);
-    const potRemaining = Math.max(0, allocated - HOLDS_ACTIVE_CENTS_PHASE4 - cap.netUsedInWindowCents);
+    const holds = await activeHoldsCents(customerId, "umwandlung_45a", asOfDate, "month", d);
+    const potRemaining = Math.max(0, allocated - holds - cap.netUsedInWindowCents);
     pot45a = {
       budgetType: "umwandlung_45a",
       enabled: enabled45a,
       inRange: inRange45a,
       allocatedCents: allocated,
       consumedNetCents: cap.netUsedInWindowCents,
-      holdsActiveCents: HOLDS_ACTIVE_CENTS_PHASE4,
+      holdsActiveCents: holds,
       capRemainingCents: cap.capRemainingCents,
       availableCents: Math.min(potRemaining, cap.capRemainingCents),
     };
@@ -228,14 +270,15 @@ export async function readUnifiedBudgetAvailability(
       monthlyLimitCents: null,
       yearlyLimitCents: s39?.yearlyLimitCents ?? null,
     }, tx);
-    const potRemaining = Math.max(0, allocated - HOLDS_ACTIVE_CENTS_PHASE4 - cap.netUsedInWindowCents);
+    const holds = await activeHoldsCents(customerId, "ersatzpflege_39_42a", asOfDate, "year", d);
+    const potRemaining = Math.max(0, allocated - holds - cap.netUsedInWindowCents);
     pot39 = {
       budgetType: "ersatzpflege_39_42a",
       enabled: enabled39,
       inRange: inRange39,
       allocatedCents: allocated,
       consumedNetCents: cap.netUsedInWindowCents,
-      holdsActiveCents: HOLDS_ACTIVE_CENTS_PHASE4,
+      holdsActiveCents: holds,
       capRemainingCents: cap.capRemainingCents,
       availableCents: Math.min(potRemaining, cap.capRemainingCents),
     };
@@ -253,5 +296,7 @@ export async function readUnifiedBudgetAvailability(
     total45a: pot45a.availableCents,
     total39_42a: pot39.availableCents,
     totalCents: pot45b.availableCents + pot45a.availableCents + pot39.availableCents,
+    totalHoldsCents:
+      pot45b.holdsActiveCents + pot45a.holdsActiveCents + pot39.holdsActiveCents,
   };
 }

@@ -1,7 +1,70 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
+import type { DbClient } from "./types";
 import { serviceCatalogStorage } from "../service-catalog";
 import { computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
+
+/**
+ * Task #875 — Geplante Mengen (Hauswirtschaft/Alltagsbegleitung-Minuten + km)
+ * EINES Termins, kategorisiert über `services.lohnart_kategorie` — identisch zur
+ * Aggregation in `getPlannedCostByAppointment`. Tx-fähig, damit der Hold-
+ * Schreibpfad die frisch in derselben Transaktion angelegten
+ * `appointment_services` sieht. Gibt `null`, wenn der Termin keine Services hat.
+ */
+export async function getPlannedHoldInputs(
+  appointmentId: number,
+  tx: DbClient = db,
+): Promise<{
+  customerId: number;
+  date: string;
+  hauswirtschaftMinutes: number;
+  alltagsbegleitungMinutes: number;
+  travelKilometers: number;
+  customerKilometers: number;
+} | null> {
+  const rows = await tx.execute(sql`
+    SELECT
+      a.customer_id AS "customerId",
+      a.date AS "appointmentDate",
+      a.travel_kilometers AS "travelKm",
+      a.customer_kilometers AS "customerKm",
+      s.lohnart_kategorie AS "lohnartKategorie",
+      aps.planned_duration_minutes AS "plannedMinutes"
+    FROM appointments a
+    INNER JOIN appointment_services aps ON aps.appointment_id = a.id
+    INNER JOIN services s ON s.id = aps.service_id
+    WHERE a.id = ${appointmentId}
+      AND a.deleted_at IS NULL
+  `);
+
+  interface Row {
+    customerId: number;
+    appointmentDate: string;
+    travelKm: number | null;
+    customerKm: number | null;
+    lohnartKategorie: string;
+    plannedMinutes: number | null;
+  }
+  const list = (rows.rows as unknown) as Row[];
+  if (list.length === 0) return null;
+
+  let hauswirtschaftMinutes = 0;
+  let alltagsbegleitungMinutes = 0;
+  for (const row of list) {
+    const minutes = row.plannedMinutes || 0;
+    if (row.lohnartKategorie === "hauswirtschaft") hauswirtschaftMinutes += minutes;
+    else if (row.lohnartKategorie === "alltagsbegleitung") alltagsbegleitungMinutes += minutes;
+  }
+
+  return {
+    customerId: list[0].customerId,
+    date: `${list[0].appointmentDate}`,
+    hauswirtschaftMinutes,
+    alltagsbegleitungMinutes,
+    travelKilometers: list[0].travelKm || 0,
+    customerKilometers: list[0].customerKm || 0,
+  };
+}
 
 export async function calculateAppointmentCost(params: {
   customerId: number;
