@@ -11,6 +11,7 @@ import {
 import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax } from "@shared/domain/budgets";
+import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
@@ -718,30 +719,28 @@ async function calculateAllocated45b(
     }
   }
 
+  // Task #872 — §45b-Monatsaufstockung als reine SSoT-Aufzählung. Identisch zur
+  // historischen Monat-für-Monat-Schleife (allocStart→end, Startwert-Monate
+  // übersprungen, historisierter Monatsbetrag pro Monat), nur ausgelagert in
+  // `enumerate45bStatutoryMonths` — gleichzeitig die Quelle der materialisierten
+  // `statutory_monthly`-Zeilen und der Backfill-Reconciliation.
+  const statutoryMonths = enumerate45bStatutoryMonths({
+    allocStartYear,
+    allocStartMonth,
+    endYear,
+    endMonth,
+    initialBalanceMonthKeys: initialBalanceSet,
+    monthlyAmountFor,
+  });
+
   if (opts.year != null) {
-    if (allocStartYear > opts.year) return sumInitialBalancesForYear(existingAllocations, opts.year);
-    if (endYear < opts.year) return sumInitialBalancesForYear(existingAllocations, opts.year);
-    const yearStart = opts.year === allocStartYear ? allocStartMonth : 1;
-    const yearEnd = opts.year === endYear ? endMonth : 12;
-    let calculatedCents = 0;
-    for (let m = yearStart; m <= yearEnd; m++) {
-      if (!initialBalanceSet.has(`${opts.year}-${m}`)) {
-        calculatedCents += monthlyAmountFor(opts.year, m);
-      }
-    }
-    calculatedCents += sumInitialBalancesForYear(existingAllocations, opts.year);
-    return calculatedCents;
+    const yearMonthlyTotal = sum45bStatutoryMonths(
+      statutoryMonths.filter(s => s.year === opts.year),
+    );
+    return yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year);
   }
 
-  let totalCalculated = 0;
-  let y = allocStartYear, m = allocStartMonth;
-  while (y < endYear || (y === endYear && m <= endMonth)) {
-    if (!initialBalanceSet.has(`${y}-${m}`)) {
-      totalCalculated += monthlyAmountFor(y, m);
-    }
-    m++;
-    if (m > 12) { m = 1; y++; }
-  }
+  const totalCalculated = sum45bStatutoryMonths(statutoryMonths);
 
   const ibDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
   const initialBalanceTotal = existingAllocations

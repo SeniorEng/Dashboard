@@ -22,6 +22,7 @@ export const BUDGET_ALLOCATION_SOURCES = [
   "initial_balance",   // Initial balance when customer joins
   "manual_adjustment", // Manual correction/adjustment
   "yearly_auto",       // Yearly auto-allocation (for §39/§42a)
+  "statutory_monthly", // Materialized §45b monthly statutory top-up (Task #872)
 ] as const;
 
 export type BudgetAllocationSource = typeof BUDGET_ALLOCATION_SOURCES[number];
