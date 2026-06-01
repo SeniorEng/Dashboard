@@ -13,16 +13,14 @@ import { services } from "@shared/schema";
 import { appointmentServices } from "@shared/schema";
 import { customerServicePrices } from "@shared/schema";
 import {
-  purgeTestCustomersByIds,
+  purgeTestCustomersBulk,
   purgeTestProspectsByIds,
   purgeTestUsersByIds,
+  purgeAllTestUsers,
+  findTestCustomerIds,
 } from "../../services/test-data-cleanup";
 
 const router = Router();
-
-const purgeSchema = z.object({
-  ids: z.array(z.number().int().positive()).min(1).max(2000),
-});
 
 const backdateSchema = z.object({
   customerId: z.number().int().positive(),
@@ -56,8 +54,14 @@ router.post(
       res.status(403).json({ error: "FORBIDDEN", message: "Test-Cleanup ist in Produktion deaktiviert" });
       return;
     }
-    const { ids } = purgeSchema.parse(req.body);
-    const { deleted, failed } = await purgeTestCustomersByIds(ids);
+    // Task #887: ids optional. Ohne ids wird der KOMPLETTE Test-Kunden-Backlog
+    // gescopt gepurged (One-Time-Backlog-Purge); mit ids wird zusätzlich darauf
+    // gescopt. Gelöscht wird in jedem Fall set-based in Batches.
+    const { ids } = z.object({
+      ids: z.array(z.number().int().positive()).max(20000).optional(),
+    }).parse(req.body ?? {});
+    const targetIds = ids && ids.length > 0 ? ids : await findTestCustomerIds();
+    const { deleted, failed } = await purgeTestCustomersBulk(targetIds);
     res.json({ deleted, failed });
   })
 );
@@ -194,7 +198,17 @@ router.post(
       res.status(403).json({ error: "FORBIDDEN", message: "Test-Cleanup ist in Produktion deaktiviert" });
       return;
     }
-    const { ids } = purgeUsersSchema.parse(req.body);
+    // Task #887: ids optional. Ohne ids wird der KOMPLETTE Test-User-Backlog
+    // gescopt in Batches gepurged (One-Time-Backlog-Purge), unabhängig von einer
+    // client-seitigen Fetch-Obergrenze.
+    const body = (req.body ?? {}) as { ids?: unknown };
+    if (body.ids === undefined || body.ids === null) {
+      const all = await purgeAllTestUsers();
+      res.json({ deleted: all.deleted, rejected: all.rejected, blocked: all.blocked });
+      return;
+    }
+
+    const { ids } = purgeUsersSchema.parse(body);
     const result = await purgeTestUsersByIds(ids);
 
     if (!result.ok) {

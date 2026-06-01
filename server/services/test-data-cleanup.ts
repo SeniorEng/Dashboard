@@ -161,6 +161,116 @@ export async function purgeTestCustomersByIds(ids: number[]): Promise<PurgeCusto
   return { deleted, failed };
 }
 
+// ---------------------------------------------------------------------------
+// Set-based Bulk-Kunden-Purge (Task #887)
+//
+// `purgeCustomerCascade` lief bisher in EINER Transaktion PRO Kunde. Bei einem
+// gewachsenen Stale-Backlog (dutzende+ Test-Kunden) summierte sich das zu
+// hunderten seriellen Transaktionen und ließ `tests/globalSetup.ts` so lange im
+// Cleanup hängen, dass der Run abgebrochen wurde, BEVOR der erste Test lief.
+//
+// `purgeCustomerCascadeBulk` macht denselben Cascade für eine MENGE von IDs in
+// EINER Transaktion (inArray statt eq) — O(1) Transaktionen pro Batch statt
+// O(n). Die FK-Detach-/Delete-Reihenfolge ist identisch zur Einzelvariante.
+// ---------------------------------------------------------------------------
+export async function purgeCustomerCascadeBulk(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  await db.transaction(async (tx) => {
+    // Task #828: Customer-Cascade triggert GoBD-Hard-Delete-Trigger
+    // (budget_allocations/customer_budget_type_settings/invoices). Bypass
+    // transaktions-lokal freischalten.
+    await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
+
+    await tx.update(prospects)
+      .set({ convertedCustomerId: null })
+      .where(inArray(prospects.convertedCustomerId, ids));
+
+    await tx.update(customers)
+      .set({ mergedIntoCustomerId: null })
+      .where(inArray(customers.mergedIntoCustomerId, ids));
+
+    // Hard-delete unten entfernt ALLE (auch soft-gelöschte) Termine/Rechnungen
+    // dieser Kunden — FK-Refs daher ohne activeOnly() auflösen.
+    const apptIdsRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, tx)
+      .where(inArray(appointments.customerId, ids));
+    const apptIds = apptIdsRows.map((r) => r.id);
+
+    const invIdsRows = await tx
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(inArray(invoices.customerId, ids));
+    const invIds = invIdsRows.map((r) => r.id);
+
+    if (invIds.length > 0) {
+      await tx.update(qontoTransactions)
+        .set({ matchedInvoiceId: null })
+        .where(inArray(qontoTransactions.matchedInvoiceId, invIds));
+      await tx.update(paymentAdviceItems)
+        .set({ matchedInvoiceId: null })
+        .where(inArray(paymentAdviceItems.matchedInvoiceId, invIds));
+      await tx.update(invoices)
+        .set({ stornierteRechnungId: null })
+        .where(inArray(invoices.stornierteRechnungId, invIds));
+      await tx.delete(invoiceLineItems).where(inArray(invoiceLineItems.invoiceId, invIds));
+      await tx.delete(invoices).where(inArray(invoices.customerId, ids));
+    }
+
+    await tx.delete(appointmentSeries).where(inArray(appointmentSeries.customerId, ids));
+
+    if (apptIds.length > 0) {
+      await tx.update(budgetTransactions)
+        .set({ appointmentId: null })
+        .where(inArray(budgetTransactions.appointmentId, apptIds));
+      await tx.update(appointments)
+        .set({ travelFromAppointmentId: null })
+        .where(inArray(appointments.travelFromAppointmentId, apptIds));
+      await tx.delete(appointments).where(inArray(appointments.customerId, ids));
+    }
+
+    await tx.delete(documentDeliveries).where(inArray(documentDeliveries.customerId, ids));
+    await tx.delete(budgetTransactions).where(inArray(budgetTransactions.customerId, ids));
+
+    await tx.delete(customers).where(inArray(customers.id, ids));
+  });
+}
+
+// Batch-Größe für den Bulk-Kunden-Purge. Klein genug, damit eine einzelne
+// Transaktion keine riesigen IN-Listen erzeugt, groß genug, um die Zahl der
+// Transaktionen drastisch gegenüber dem alten O(n)-Pro-Kunde-Loop zu senken.
+const CUSTOMER_PURGE_BATCH = 200;
+
+// Bulk-Purge der übergebenen Kunden-IDs, set-based in Batches. Schlägt ein
+// ganzer Batch fehl (z.B. unerwarteter neuer FK-Weg), fällt NUR dieser Batch auf
+// den per-Record-Cascade zurück, damit ein einzelner „poison row" nicht den
+// gesamten Backlog blockiert.
+//
+// BEWUSST OHNE Test-Pattern-Filter auf den übergebenen IDs: die
+// `purge-customers`-Route ist (anders als prospects/users) absichtlich
+// ungefiltert per-ID — Tests legen Kunden mit beliebigen (auch nicht-Test-
+// Pattern) Namen an und räumen sie über diese Route per ID wieder auf
+// (siehe tests/test-cleanup-safety.test.ts CLEAN-1.3). Das Test-Pattern-Scoping
+// für den Full-Backlog-Purge passiert stattdessen bei der ID-Ermittlung über
+// `findTestCustomerIds()` (CUSTOMER_TEST_FILTER).
+export async function purgeTestCustomersBulk(ids: number[]): Promise<PurgeCustomersResult> {
+  if (ids.length === 0) return { deleted: [], failed: [] };
+
+  const deleted: number[] = [];
+  const failed: Array<{ id: number; error: string }> = [];
+  for (let i = 0; i < ids.length; i += CUSTOMER_PURGE_BATCH) {
+    const batch = ids.slice(i, i + CUSTOMER_PURGE_BATCH);
+    try {
+      await purgeCustomerCascadeBulk(batch);
+      deleted.push(...batch);
+    } catch {
+      // Per-Record-Fallback nur für diesen Batch.
+      const res = await purgeTestCustomersByIds(batch);
+      deleted.push(...res.deleted);
+      failed.push(...res.failed);
+    }
+  }
+  return { deleted, failed };
+}
+
 // Findet alle Kunden, die dem Test-Pattern entsprechen (gescopt). Bewusst OHNE
 // activeOnly() — auch soft-gelöschte Test-Kunden sollen hart wegfallen.
 export async function findTestCustomerIds(): Promise<number[]> {
@@ -412,6 +522,34 @@ export async function findTestUserIds(): Promise<number[]> {
   return rows.map((r) => r.id);
 }
 
+export interface PurgeAllUsersResult {
+  deleted: number[];
+  rejected: number[];
+  blocked: boolean;
+}
+
+// Full-Backlog-Purge aller Test-Pattern-User in Batches (Task #887). Wird vom
+// `purge-test-users`-Endpoint (ohne explizite ids) und von `globalSetup`
+// genutzt, damit der User-Cleanup nicht mehr von einer client-seitigen
+// Fetch-Obergrenze (limit=1000) gedeckelt ist.
+export async function purgeAllTestUsers(): Promise<PurgeAllUsersResult> {
+  const ids = await findTestUserIds();
+  const deleted: number[] = [];
+  const rejected: number[] = [];
+  let blocked = false;
+  for (let i = 0; i < ids.length; i += USER_PURGE_BATCH) {
+    const batch = ids.slice(i, i + USER_PURGE_BATCH);
+    const res = await purgeTestUsersByIds(batch);
+    if (res.ok) {
+      deleted.push(...res.deleted);
+      rejected.push(...res.rejected);
+    } else {
+      blocked = true;
+    }
+  }
+  return { deleted, rejected, blocked };
+}
+
 // ---------------------------------------------------------------------------
 // High-Level-Runner für den periodischen Safety-Scheduler (Task #795)
 // ---------------------------------------------------------------------------
@@ -449,7 +587,8 @@ export async function runTestDataCleanup(): Promise<TestDataCleanupSummary> {
   let customersDeleted = 0;
   let customersFailed = 0;
   if (custIds.length > 0) {
-    const res = await purgeTestCustomersByIds(custIds);
+    // Task #887: set-based Bulk-Purge statt eines per-Record-Transaktions-Loops.
+    const res = await purgeTestCustomersBulk(custIds);
     customersDeleted = res.deleted.length;
     customersFailed = res.failed.length;
   }

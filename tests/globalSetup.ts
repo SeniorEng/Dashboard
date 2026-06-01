@@ -5,24 +5,6 @@ interface AuthInfo {
   csrfToken: string;
 }
 
-interface Customer {
-  id: number;
-  vorname: string;
-  nachname: string;
-}
-
-interface Prospect {
-  id: number;
-  vorname: string;
-  nachname: string;
-}
-
-interface User {
-  id: number;
-  email: string;
-  nachname: string;
-}
-
 interface Service {
   id: number;
   name: string;
@@ -202,37 +184,11 @@ async function apiGet(auth: AuthInfo, path: string): Promise<Response> {
   });
 }
 
-function isTestCustomer(c: Customer): boolean {
-  const v = (c.vorname || "").toLowerCase();
-  const n = (c.nachname || "").toLowerCase();
-  return (
-    v.includes("test") || n.includes("test") ||
-    n.startsWith("auto_") ||
-    v.startsWith("sz-") || v.startsWith("pv-") ||
-    v.startsWith("fd-") || v.startsWith("eb-") ||
-    v.startsWith("pg1-") || v.startsWith("qs-") ||
-    v.startsWith("status-") ||
-    n.startsWith("privat-") || n.startsWith("fahrtdienst-") ||
-    n.startsWith("integ-") ||
-    n.startsWith("mustermann-") || n.startsWith("importtrim-") ||
-    n.startsWith("notrim-") || n.startsWith("reconcile-") ||
-    n.startsWith("aligned-")
-  );
-}
-
-function isTestProspect(p: Prospect): boolean {
-  const v = (p.vorname || "").toLowerCase();
-  const n = (p.nachname || "").toLowerCase();
-  return v.includes("test") || n.includes("test") || v.startsWith("eb-") ||
-    v.startsWith("status-") || n.startsWith("eb");
-}
-
-function isTestUser(u: User): boolean {
-  const e = (u.email || "").toLowerCase();
-  const n = (u.nachname || "").toLowerCase();
-  return e.endsWith("@test.local") || e.startsWith("testemp-") || n.startsWith("testemp_");
-}
-
+// Task #887: isTestCustomer/isTestProspect/isTestUser leben nicht mehr hier —
+// die Test-Pattern-Filter sind server-seitig die SSoT (CUSTOMER/PROSPECT/USER_
+// TEST_FILTER in server/services/test-data-cleanup.ts), und der Cleanup ruft
+// die gescopten Full-Backlog-Purges direkt auf. Nur der Service-Cleanup filtert
+// noch client-seitig, weil es dafür keinen Full-Backlog-Endpoint gibt.
 function isTestService(s: Service): boolean {
   // BEWUSST eng gefasst (Task #183 Spec): nur Services mit unverkennbarem
   // Test-Marker im Namen ODER Code. NICHT generisches "test" Substring,
@@ -263,55 +219,40 @@ export async function setup() {
   // „skipped" meldet — der Testlauf sähe grün aus, obwohl nichts gelaufen ist.
   const auth: AuthInfo = await loginAndGetAuth();
 
-  const custRes = await apiGet(auth, "/api/admin/customers?limit=500");
-  if (!custRes.ok) {
-    console.warn("[globalSetup] Could not fetch customers, skipping cleanup");
-    return;
-  }
-  const custData: unknown = await custRes.json();
-  const customers: Customer[] = Array.isArray(custData)
-    ? custData
-    : (custData as Record<string, unknown>).data as Customer[] || [];
-
-  const testCustomers = customers.filter(isTestCustomer);
-
-  if (testCustomers.length > 0) {
-    console.log(`[globalSetup] Found ${testCustomers.length} stale test customers, purging...`);
-    const ids = testCustomers.map(c => c.id);
-    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-customers", { ids });
+  // Task #887: Kunden/Interessenten/User werden NICHT mehr client-seitig
+  // gefetcht+gefiltert (das war O(n) und zusätzlich durch ein limit=500/1000
+  // gedeckelt, sodass ein großer Stale-Backlog nie vollständig abgeräumt
+  // wurde). Stattdessen triggern wir EINEN server-seitigen Full-Backlog-Purge
+  // pro Domäne — die Routen sind auf das Test-Pattern gescopt und löschen
+  // set-based in Batches, sodass das Cleanup auch bei tausenden Stale-Records
+  // schnell durchläuft, bevor der erste Test startet.
+  {
+    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-customers", {});
     if (!res.ok) {
-      console.warn(`[globalSetup] Bulk purge failed: ${res.status} ${await res.text()}`);
+      console.warn(`[globalSetup] Customer purge failed: ${res.status} ${await res.text()}`);
     } else {
       const result = await res.json() as { deleted: number[]; failed: Array<{ id: number; error: string }> };
-      console.log(`[globalSetup] Purged ${result.deleted.length}/${testCustomers.length} stale test customers`);
+      if (result.deleted.length > 0 || result.failed.length > 0) {
+        console.log(`[globalSetup] Purged ${result.deleted.length} stale test customers`);
+      }
       if (result.failed.length > 0) {
         const sample = result.failed.slice(0, 3).map(f => `${f.id}:${f.error}`).join("; ");
-        console.warn(`[globalSetup] ${result.failed.length} purge failures (first 3): ${sample}`);
+        console.warn(`[globalSetup] ${result.failed.length} customer purge failures (first 3): ${sample}`);
       }
     }
   }
 
-  const prospRes = await apiGet(auth, "/api/admin/prospects");
-  if (prospRes.ok) {
-    const prospData: unknown = await prospRes.json();
-    const prospects: Prospect[] = Array.isArray(prospData)
-      ? prospData
-      : (prospData as Record<string, unknown>).data as Prospect[] || [];
-    const testProspects = prospects.filter(isTestProspect);
-
-    if (testProspects.length > 0) {
-      console.log(`[globalSetup] Found ${testProspects.length} stale test prospects, purging...`);
-      // Task #789: EIN gescopter Bulk-DELETE statt eines HTTP-DELETE pro Datensatz.
-      // Es existierte nie eine DELETE /api/prospects/:id-Route, der alte Loop lief
-      // pro Datensatz in 404s und fraß bei 3000+ Stale-Prospects das gesamte
-      // Test-Zeitbudget. Die Route ist server-seitig auf das Test-Pattern gescopt.
-      const ids = testProspects.map((p) => p.id);
-      const res = await apiPost(auth, "/api/admin/test-cleanup/purge-prospects", { ids });
-      if (!res.ok) {
-        console.warn(`[globalSetup] Prospect purge failed: ${res.status} ${await res.text()}`);
-      } else {
-        const result = await res.json() as { deleted: number[] };
-        console.log(`[globalSetup] Purged ${result.deleted.length}/${testProspects.length} stale test prospects`);
+  {
+    // Task #789/#887: EIN gescopter Full-Backlog-Bulk-DELETE (leerer Body =
+    // gesamter Test-Interessenten-Backlog). Die Route ist server-seitig auf das
+    // Test-Pattern gescopt und löscht in einer Transaktion.
+    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-prospects", {});
+    if (!res.ok) {
+      console.warn(`[globalSetup] Prospect purge failed: ${res.status} ${await res.text()}`);
+    } else {
+      const result = await res.json() as { deleted: number[] };
+      if (result.deleted.length > 0) {
+        console.log(`[globalSetup] Purged ${result.deleted.length} stale test prospects`);
       }
     }
   }
@@ -343,30 +284,22 @@ export async function setup() {
     console.warn(`[globalSetup] Calendar purge errored: ${msg}`);
   }
 
-  // Schritt 4: Test-User aufräumen (Domain @test.local oder testemp- Prefix)
+  // Schritt 4: Test-User aufräumen (Domain @test.local oder testemp- Prefix).
+  // Task #887: EIN server-seitiger Full-Backlog-Purge (leerer Body) statt
+  // client-seitigem Fetch (limit=1000) + manuellem Batching. Die Route findet
+  // den kompletten Test-User-Backlog server-seitig und löscht in 500er-Batches,
+  // sodass auch ein historisch gewachsener Stale-Pool vollständig abgeräumt wird.
   try {
-    const userRes = await apiGet(auth, "/api/admin/users?limit=1000");
-    if (userRes.ok) {
-      const userData: unknown = await userRes.json();
-      const allUsers: User[] = Array.isArray(userData)
-        ? userData
-        : (userData as Record<string, unknown>).data as User[] || [];
-      const testUsers = allUsers.filter(isTestUser);
-      if (testUsers.length > 0) {
-        console.log(`[globalSetup] Found ${testUsers.length} stale test users, purging...`);
-        const ids = testUsers.map((u) => u.id);
-        // Batch-Größe = 500 (Route-Maximum aus purgeUsersSchema): bei einem
-        // historisch gewachsenen Stale-Pool (Task #631 fand 60k+) reduziert
-        // das die Zahl der HTTP-Calls von 600 auf ~120, ohne neue Risiken.
-        for (let i = 0; i < ids.length; i += 500) {
-          const batch = ids.slice(i, i + 500);
-          const res = await apiPost(auth, "/api/admin/test-cleanup/purge-test-users", { ids: batch });
-          if (!res.ok) {
-            console.warn(`[globalSetup] User purge batch failed: ${res.status} ${await res.text()}`);
-            break;
-          }
-        }
-        console.log(`[globalSetup] Test-User-Cleanup abgeschlossen`);
+    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-test-users", {});
+    if (!res.ok) {
+      console.warn(`[globalSetup] User purge failed: ${res.status} ${await res.text()}`);
+    } else {
+      const result = await res.json() as { deleted: number[]; blocked?: boolean };
+      if (result.deleted.length > 0) {
+        console.log(`[globalSetup] Purged ${result.deleted.length} stale test users`);
+      }
+      if (result.blocked) {
+        console.warn(`[globalSetup] Ein User-Batch wurde blockiert (echte Kunden-Refs trotz Detach-Pass)`);
       }
     }
   } catch (e: unknown) {
