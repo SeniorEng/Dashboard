@@ -473,3 +473,52 @@ export async function getServicesByIds(serviceIds: number[]): Promise<{ id: numb
   const rows = await db.select({ id: servicesTable.id, code: servicesTable.code }).from(servicesTable).where(inArray(servicesTable.id, serviceIds));
   return rows.filter((r): r is { id: number; code: string } => r.code !== null);
 }
+
+/**
+ * Task #876 — aus dem Budget-Backfill-Route (`admin/customers/budgets.ts`)
+ * herausgezogen, damit die Route keinen direkten `db.*`-Zugriff mehr hat. Löst
+ * pro Termin die dominante `lohnart_kategorie` (Hauswirtschaft vs.
+ * Alltagsbegleitung) über `appointment_services` → `services` auf. DISTINCT ON
+ * + CASE-Sortierung bleibt 1:1 erhalten (bevorzugt eine bekannte Kategorie,
+ * danach die längste Leistungsdauer). Termine ohne passende Kategorie liefern
+ * `null`.
+ */
+export async function resolveDominantServiceCategories(
+  appointmentIds: number[],
+): Promise<Map<number, "hauswirtschaft" | "alltagsbegleitung" | null>> {
+  const result = new Map<number, "hauswirtschaft" | "alltagsbegleitung" | null>();
+  if (appointmentIds.length === 0) return result;
+  const catRows = await db.execute(sqlBuilder`
+    SELECT DISTINCT ON (asvc.appointment_id)
+      asvc.appointment_id AS id,
+      s.lohnart_kategorie AS category
+    FROM appointment_services asvc
+    JOIN services s ON s.id = asvc.service_id
+    WHERE asvc.appointment_id IN (${sqlBuilder.join(appointmentIds.map((id) => sqlBuilder`${id}`), sqlBuilder`, `)})
+    ORDER BY asvc.appointment_id,
+      CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+      COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+  `);
+  for (const r of catRows.rows as Array<{ id: number; category: string | null }>) {
+    const cat = r.category === "hauswirtschaft" || r.category === "alltagsbegleitung" ? r.category : null;
+    result.set(Number(r.id), cat);
+  }
+  return result;
+}
+
+/**
+ * Task #876 — System-Signatur für den Budget-Backfill (vorher direktes
+ * `db.update(appointments)` in der Route). Setzt die Systemsignatur-Felder
+ * eines Termins; Aufrufer prüft vorab, ob bereits eine Signatur existiert.
+ */
+export async function markAppointmentSystemSigned(
+  appointmentId: number,
+  params: { signatureText: string; signatureHash: string; userId: number },
+): Promise<void> {
+  await db.update(appointments).set({
+    signatureData: params.signatureText,
+    signatureHash: params.signatureHash,
+    signedAt: new Date(),
+    signedByUserId: params.userId,
+  }).where(eq(appointments.id, appointmentId));
+}

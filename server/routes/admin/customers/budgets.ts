@@ -6,8 +6,8 @@ import { asyncHandler } from "../../../lib/errors";
 import { parseOptionalIntQuery } from "../../../lib/params";
 import { z } from "zod";
 import { appointments } from "@shared/schema";
-import { db } from "../../../lib/db";
 import { appointmentsRepo } from "../../../repos";
+import { resolveDominantServiceCategories, markAppointmentSystemSigned } from "../../../storage/appointments-storage";
 import { eq, and, sql, gte, lte, isNull, isNotNull } from "drizzle-orm";
 
 const router = Router();
@@ -111,26 +111,11 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
   .where(and(...conditions))
   .orderBy(appointments.date);
 
-  // Resolve dominant lohnart_kategorie per appointment via appointment_services.
+  // Task #876 — Dominante lohnart_kategorie-Auflösung in den Storage-Layer
+  // gefoldet (`resolveDominantServiceCategories`); kein direkter db.*-Zugriff
+  // mehr in der Route.
   const apptIds = apptRows.map((a) => a.id);
-  const categoryByAppt = new Map<number, "hauswirtschaft" | "alltagsbegleitung" | null>();
-  if (apptIds.length > 0) {
-    const catRows = await db.execute(sql`
-      SELECT DISTINCT ON (asvc.appointment_id)
-        asvc.appointment_id AS id,
-        s.lohnart_kategorie AS category
-      FROM appointment_services asvc
-      JOIN services s ON s.id = asvc.service_id
-      WHERE asvc.appointment_id IN (${sql.join(apptIds.map((id) => sql`${id}`), sql`, `)})
-      ORDER BY asvc.appointment_id,
-        CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
-        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
-    `);
-    for (const r of catRows.rows as Array<{ id: number; category: string | null }>) {
-      const cat = r.category === "hauswirtschaft" || r.category === "alltagsbegleitung" ? r.category : null;
-      categoryByAppt.set(Number(r.id), cat);
-    }
-  }
+  const categoryByAppt = await resolveDominantServiceCategories(apptIds);
   const appointmentsWithoutBudget = apptRows.map((a) => ({
     ...a,
     serviceCategory: categoryByAppt.get(a.id) ?? null,
@@ -173,12 +158,11 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
       });
 
       if (!appt.signatureData) {
-        await db.update(appointments).set({
-          signatureData: systemSignatureText,
-          signatureHash: signatureHash,
-          signedAt: new Date(),
-          signedByUserId: req.user!.id,
-        }).where(eq(appointments.id, appt.id));
+        await markAppointmentSystemSigned(appt.id, {
+          signatureText: systemSignatureText,
+          signatureHash,
+          userId: req.user!.id,
+        });
       }
 
       await auditService.log(

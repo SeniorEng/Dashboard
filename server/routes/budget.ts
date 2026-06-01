@@ -265,7 +265,11 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   const { getAvailableForDate } = await import("../storage/budget/import-availability");
   const dateAware = await getAvailableForDate(customerId, date);
 
-  const summaries = await budgetLedgerStorage.getAllBudgetSummaries(customerId);
+  // Task #876 — Serving-Pfad auf den unified Reader vereinheitlicht. Gelesen
+  // werden hier nur Nicht-Verfügbarkeits-Felder (`currentMonthUsedCents`,
+  // `monthlyLimitCents`); das verfügbare Budget kommt weiterhin aus
+  // `getAvailableForDate` (datum-genau, gleiche SSoT wie der Buchungspfad).
+  const summaries = await budgetLedgerStorage.getAllBudgetSummariesServed(customerId);
   const summary45b = summaries.entlastungsbetrag45b;
 
   const totalAvailable = dateAware.totalCents;
@@ -894,46 +898,10 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   // mit gesetzlichen Defaults an (Priority anhängend, keine
   // monthly/yearlyLimit-Caps).
   if ((budgetType === "umwandlung_45a" || budgetType === "ersatzpflege_39_42a") && currentMonthAmountCents > 0) {
-    const active = await budgetLedgerStorage.readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() });
-    const matching = active.find((s) => s.budgetType === budgetType);
-    if (!matching || !matching.enabled) {
-      // Bewusst KEIN `upsertBudgetTypeSettings`: dessen Transitions-Pfad
-      // würde eine bereits seit gestern offene `enabled=false`-Zeile
-      // schließen (`validTo=today`) und die neue mit `validFrom=tomorrow`
-      // einsetzen → der Topf wäre HEUTE noch inaktiv, obwohl wir hier
-      // genau jetzt sein Initial-Balance schreiben. Da `enabled=false`-
-      // Zeilen niemals reale Buchungen referenziert haben (Read-Pfade
-      // filtern sie raus), ist eine direkte In-place-Aktivierung
-      // GoBD-unbedenklich.
-      const { eq, and, isNull, sql: sqlTag } = await import("drizzle-orm");
-      const { db } = await import("../lib/db");
-      const { customerBudgetTypeSettings } = await import("@shared/schema");
-      if (matching) {
-        await db.update(customerBudgetTypeSettings)
-          .set({
-            enabled: true,
-            validFrom: budgetStartDate,
-            updatedAt: sqlTag`now()`,
-          })
-          .where(and(
-            eq(customerBudgetTypeSettings.customerId, customerId),
-            eq(customerBudgetTypeSettings.budgetType, budgetType),
-            isNull(customerBudgetTypeSettings.validTo),
-          ));
-      } else {
-        const nextPriority = (active.reduce((max: number, s) => Math.max(max, s.priority), 0) || 0) + 1;
-        await db.insert(customerBudgetTypeSettings).values({
-          customerId,
-          budgetType,
-          enabled: true,
-          priority: nextPriority,
-          monthlyLimitCents: null,
-          yearlyLimitCents: null,
-          validFrom: budgetStartDate,
-          validTo: null,
-        });
-      }
-    }
+    // Task #876 — In-place-Aktivierung in den Storage-Layer gefoldet
+    // (`ensureBudgetTypeEnabledInPlace`); kein direkter db.*-Zugriff mehr in
+    // der Route. Begründung/GoBD-Hinweis siehe dort.
+    await budgetLedgerStorage.ensureBudgetTypeEnabledInPlace(customerId, budgetType, budgetStartDate);
   }
 
   const allocations: BudgetAllocation[] = [];

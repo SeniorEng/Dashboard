@@ -1,15 +1,69 @@
-# GoBD-Verfahrensdokumentation — Budget-Ledger (Seed)
+# GoBD-Verfahrensdokumentation — Budget-Ledger
 
-> **Status:** SEED (Phase 0, Task #870). Dies ist die initiale Fassung der
-> GoBD-Verfahrensdokumentation für die Budget-Domäne. Sie wird in **Phase 6**
-> (`[R11]`) finalisiert, sobald der reservierungs-/finanzgetrennte Ledger produktiv
-> ist und die Legacy-Pfade abgeschaltet sind. Bis dahin beschreibt sie das **Soll-Modell**
-> (North Star), nicht den heutigen Ist-Zustand.
+> **Status:** PHASE-6-FINALISIERT (`[R11]`). Dieses Dokument beschreibt zwei Ebenen:
+> das **Soll-Modell** (North Star: reservierungs-/finanzgetrennter Ledger) als verbindliche
+> Ziel-Architektur **und** den **Ist-Zustand nach Phase 6** (Abschnitt direkt unten), der
+> dokumentiert, welcher Teil davon heute produktiv ist und welcher bewusst auf eine spätere
+> Phase verschoben wurde. Die Soll-Beschreibung bleibt erhalten, weil sie der durable
+> Engineering-North-Star ist; sie ist NICHT zu lesen als „so läuft es heute".
 >
 > **Quellen:** Ziel-Architektur [Budget Greenfield Architecture](./budget-greenfield-architecture.md);
 > Entscheidungen [ADR-0001](./adr/0001-reservation-financial-split.md) …
 > [ADR-0004](./adr/0004-two-table-non-negativity-guard.md); heutige Historisierungs-Gotchas
-> [budget.md](./budget.md).
+> und Phase-6-Endzustand [budget.md](./budget.md); SSoT-Inventur & Phasen-Log
+> [budget-ssot-inventory.md](../budget-ssot-inventory.md).
+
+## Ist-Zustand nach Phase 6 (was heute produktiv ist)
+
+Phase 6 hat die **SSoT-Konsolidierung** abgeschlossen, nicht den physischen
+Tabellen-Umbau des North Star. Konkret gilt heute:
+
+- **Eine Lese-Quelle für `Available`:** Die unified Verfügbarkeits-Berechnung
+  (`readUnifiedBudgetAvailability` / `getAvailableForDate`) ist die **einzige** SSoT für
+  „wie viel Budget ist an Datum X frei". Alle Serving-Pfade (Overview, Kostenschätzung,
+  Termin-Anlage **und** Termin-Serien-Verlängerung) lesen ausschließlich darüber. Die alten
+  Summary-Reader (`getBudgetSummary*`, `getAllBudgetSummaries`) sind aus dem Serving-Pfad
+  entfernt und dienen nur noch als **Shadow-/Equality-Baseline** in den Drift-Tests.
+- **Legacy-Tabelle `customer_budgets` abgeschaltet (Read & Write):** Kein produktiver
+  Lese-Fallback mehr (seit Task #728). Schreibpfad ist No-Op-Stub. Single-Source-of-Truth
+  für Topf-Konfiguration ist `customer_budget_type_settings` (append-only historisiert).
+  Eine Architektur-Schranke (`tests/architecture/no-customer-budgets-reads.test.ts`) blockt
+  neue Leser; die physische Tabelle wird in einer späteren Phase gedroppt.
+- **Buchung & Historisierung:** Budget-Verbrauch läuft über `budget_transactions`
+  (`consumption` / `reversal`, append-only), Gutschriften über `budget_allocations`
+  (no-resurrect), Topf-Konfiguration über `customer_budget_type_settings` (append-only).
+  Alle vier sind per BEFORE-Trigger DB-seitig unveränderbar (siehe
+  [budget.md → GoBD-Historisierung](./budget.md)). Die Storno-Semantik (`reversal` behält
+  `appointmentId`, Summe je Termin = 0) ist umgesetzt.
+- **Route→Storage-Folds:** In den Budget-Routen verbleibt keine direkte `db.*`-Choreographie
+  mehr; Transaktions-/Schreiblogik liegt im Storage-Layer.
+- **Rechnungs-Split pro Topf:** Multi-Pot-Läufe erzeugen N Rechnungen, verbunden über
+  `invoices.billing_run_id`; die Σ-Invariante ist per Equality-Test abgesichert.
+
+### Bewusst verschoben (NICHT in Phase 6)
+
+- **Physischer Reservierungs-/Finanz-Ledger-Split** (eigene Tabellen
+  `budget_reservations` + `budget_ledger`, ADR-0001..0004): Das Soll-Modell unten beschreibt
+  diesen Endzustand; gebaut ist er noch nicht. Heute trägt `budget_transactions` die
+  finanzielle Buchung; ein getrennter operativer Hold-Layer existiert (noch) nicht als eigene
+  Tabelle.
+- **§45b-Materialisierung (Phase 2):** Der §45b-Monatsbetrag wird weiterhin **virtuell**
+  (Auto-Renewal-Modell, `calculateAllocated45b`) abgeleitet, nicht als monatliche
+  `budget_allocations`-Zeile materialisiert. Daraus resultiert die **eine bekannte und
+  akzeptierte** Shadow-Read-Divergenz (siehe nächster Absatz).
+- **Drop der `customer_budgets`-Tabelle** (DDL): bleibt für eine spätere Phase, um
+  destruktive Drizzle-Push-Diffs zu vermeiden.
+
+### Akzeptierte Shadow-Read-Divergenz (Gate I18)
+
+Der Shadow-Read-Soak (`server/scripts/shadow-read-soak.ts`) zeigt für §45a und §39/§42a
+durchgängig **Δ0** (Legacy-Reader == unified Reader). Für **§45b** (`entlastungsbetrag_45b`)
+besteht eine erwartete Differenz, weil der Legacy-Reader all-time rechnet, während der unified
+Reader as-of + `manual_adjustment`-aware rechnet. Diese Divergenz ist **kein Drift-Fehler**,
+sondern die designgewollte Folge des virtuellen §45b-Modells; der unified Reader ist die SSoT.
+Sie verschwindet erst mit der §45b-Materialisierung (Phase 2) und wird **nicht** durch
+Angleichen der Legacy-Mathematik „repariert" (das würde die History-vs-Overview- und
+Unified-vs-Legacy-Equality-Netze gegeneinander brechen).
 
 ## Zweck dieses Dokuments
 
@@ -124,14 +178,31 @@ würde. Ungedeckelte Töpfe (privat/Selbstzahler) sind ausgenommen.
 - Operative Reservierungen sind nicht aufbewahrungspflichtig; ihr Transitions-Audit-Log
   bleibt jedoch erhalten, solange der zugehörige Termin/Ledger-Bezug besteht.
 - Detaillierte Fristen und Lösch-/Anonymisierungs-Pfade (DSGVO Art. 17 vs. GoBD-Aufbewahrung)
-  werden in der **Phase-6-Finalisierung** ergänzt.
+  werden gemeinsam mit der §45b-Materialisierung (Phase 2) je Tabelle festgeschrieben (siehe
+  „Offene Punkte" unten).
 
-## Offene Punkte für die Phase-6-Finalisierung
+## Internes Kontrollsystem (IKS) — laufende Kontrollen
 
-- Konkrete Tabellen-/Spalten-Namen und Trigger-Definitionen, sobald das Schema gebaut ist
-  (Phase 1+).
-- Mapping der gesetzlichen Aufbewahrungsfristen auf die einzelnen Tabellen.
-- Beschreibung des Internen Kontrollsystems (IKS): Conservation-Verifier (I13),
-  Shadow-Read-Soak (I18), Orphan-Sweep (R6) als laufende Kontrollen.
-- Verweise auf die konkreten Test-Artefakte (Equality-Netz, Property-Tests, Stress-Tests)
-  als Nachweis der Verfahrenssicherheit.
+- **Shadow-Read-Soak (I18):** `server/scripts/shadow-read-soak.ts` vergleicht den
+  Legacy-Reader gegen den unified Reader pro Topf. §45a/§39 == Δ0; §45b führt die oben
+  dokumentierte, akzeptierte virtuelle Divergenz. Das Gate verlangt **kein** Δ0 auf §45b,
+  sondern „keine *unerwartete* Divergenz".
+- **Equality-Netz (Drift-Detektoren):** `tests/equality/unified-reader-vs-legacy.test.ts`,
+  `budget-history-vs-overview.test.ts`, `budget-ledger-display-matches-booking.test.ts`,
+  `budget-settings-read-modes.test.ts`, `invoice-per-pot-arithmetic.test.ts`.
+- **Architektur-Schranken:** `tests/architecture/no-customer-budgets-reads.test.ts`
+  (kein neuer `customer_budgets`-Leser), `calculations-in-shared.test.ts` (Berechnungen
+  liegen in `shared/domain`), `budget-sentinel-uniqueness.test.ts`.
+- **DB-seitige Unveränderbarkeit:** BEFORE-Trigger auf `budget_transactions`/-`allocations`/
+  `customer_budget_type_settings`/`invoices` (Startup-verifiziert), Bypass nur per GUC-Flag
+  in Wartungs-Transaktionen.
+
+## Offene Punkte (Folgephasen, nicht Phase 6)
+
+- **Physischer Reservierungs-/Finanz-Ledger-Split** (Soll-Modell): konkrete Tabellen-/
+  Spalten-Namen und Trigger-Definitionen, sobald das Schema (ADR-0001..0004) gebaut ist.
+- **§45b-Materialisierung (Phase 2):** ersetzt das virtuelle Auto-Renewal-Modell durch
+  monatliche `budget_allocations`-Zeilen und schließt damit die akzeptierte Shadow-Divergenz.
+- **Drop der `customer_budgets`-Tabelle** (DDL) nach der Materialisierungsphase.
+- Mapping der gesetzlichen Aufbewahrungsfristen auf die einzelnen Tabellen (DSGVO Art. 17 vs.
+  GoBD-Aufbewahrung).

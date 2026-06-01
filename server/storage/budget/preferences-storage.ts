@@ -692,3 +692,49 @@ export async function clearLegacyInitialBalanceFromSettings(
   }
   return true;
 }
+
+/**
+ * Task #876 — In-place-Aktivierung eines §45a/§39_42a-Topfs für den
+ * Initial-Balance-Flow (vorher dynamische `drizzle-orm`/`db`-Imports direkt in
+ * `routes/budget.ts`). Hintergrund (Task #705, Bug 5): Das Wizard-Flow schreibt
+ * via `/initial-budget` einen Startwert, ohne dass die zugehörigen
+ * `customer_budget_type_settings` `enabled=true` sind — Read-Pfade filtern den
+ * Topf dann raus und der Startwert taucht im UI nicht auf.
+ *
+ * Bewusst KEIN `upsertBudgetTypeSettings`: dessen Transitions-Pfad würde eine
+ * bereits offene `enabled=false`-Zeile schließen (`validTo=today`) und die neue
+ * mit `validFrom=tomorrow` einsetzen → der Topf wäre HEUTE noch inaktiv, obwohl
+ * wir genau jetzt seinen Initial-Balance schreiben. Da `enabled=false`-Zeilen
+ * niemals reale Buchungen referenziert haben, ist die direkte In-place-
+ * Aktivierung GoBD-unbedenklich.
+ */
+export async function ensureBudgetTypeEnabledInPlace(
+  customerId: number,
+  budgetType: string,
+  validFrom: string,
+): Promise<void> {
+  const active = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() });
+  const matching = active.find((s) => s.budgetType === budgetType);
+  if (matching && matching.enabled) return;
+  if (matching) {
+    await db.update(customerBudgetTypeSettings)
+      .set({ enabled: true, validFrom, updatedAt: sql`now()` })
+      .where(and(
+        eq(customerBudgetTypeSettings.customerId, customerId),
+        eq(customerBudgetTypeSettings.budgetType, budgetType),
+        isNull(customerBudgetTypeSettings.validTo),
+      ));
+  } else {
+    const nextPriority = (active.reduce((max: number, s) => Math.max(max, s.priority), 0) || 0) + 1;
+    await db.insert(customerBudgetTypeSettings).values({
+      customerId,
+      budgetType,
+      enabled: true,
+      priority: nextPriority,
+      monthlyLimitCents: null,
+      yearlyLimitCents: null,
+      validFrom,
+      validTo: null,
+    });
+  }
+}

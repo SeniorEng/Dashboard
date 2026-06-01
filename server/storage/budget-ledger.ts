@@ -60,6 +60,9 @@ interface BudgetLedgerStorage {
   upsertCarryoverAllocation(params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string }, userId?: number): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
   clearLegacyInitialBalanceFromSettings(customerId: number, budgetType: string, tx: DbClient, userId?: number): Promise<boolean>;
+  // Task #876 — In-place-Aktivierung für den Initial-Balance-Flow (vorher
+  // direkte db.*-Zugriffe in routes/budget.ts).
+  ensureBudgetTypeEnabledInPlace(customerId: number, budgetType: string, validFrom: string): Promise<void>;
 
   calculateAppointmentCost(params: {
     customerId: number;
@@ -136,6 +139,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   upsertCarryoverAllocation: allocation.upsertCarryoverAllocation,
   getInitialBalanceAllocations: allocation.getInitialBalanceAllocations,
   clearLegacyInitialBalanceFromSettings: preferences.clearLegacyInitialBalanceFromSettings,
+  ensureBudgetTypeEnabledInPlace: preferences.ensureBudgetTypeEnabledInPlace,
 
   calculateAppointmentCost: pricing.calculateAppointmentCost,
 

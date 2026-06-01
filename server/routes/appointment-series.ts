@@ -793,7 +793,10 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
 
   try {
     await budgetLedgerStorage.syncCarryoverAndExpiry(series.customerId);
-    const budgetSummary = await budgetLedgerStorage.getBudgetSummary(series.customerId);
+    // Task #876 — Serving-Pfad nutzt die unified Verfügbarkeit (wie der
+    // Create-Series-Pfad), damit die Budget-Warnung beim Verlängern dieselbe
+    // Zahl zeigt wie Übersicht und Anlage.
+    const budgetSummary = await budgetLedgerStorage.getBudgetSummaryServed(series.customerId);
     _budgetWarning = buildBudgetWarning(budgetSummary, {
       appointmentDates: validation.validDates,
     }) ?? undefined;

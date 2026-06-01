@@ -37,7 +37,17 @@ Detaillierte Architektur-Entscheidungen und Gotchas zur Budget-Domäne. Übergeo
 Regel: neue Caller wählen einen Modus explizit; Read-Pfad und Write-Pfad teilen sich denselben Eintrag — keine parallele Inline-Query mehr.
 - **Phase 1.2 — `BudgetOverviewView`** (geplant, nach 1.1): konsolidiert §45b-/§45a-/§39-Cap-Pfade auf `computeCapSlot`, hebt DTO nach `shared/api/budget.ts`, teilt Cost-Estimate-Route auf.
 - **Phase 1.3 — `BudgetHistoryView`** (geplant, nach 1.2): aggregiert Allocations/Transactions/Audit-Reads.
-- **Phase 2** — `BudgetForecastView` (Blocker: stabiler Forecast aus #704), `customer_budgets`-Tabelle endgültig abschalten, Stats-V2 auf Batch-Read über OverviewView.
+- **Phase 2** — `BudgetForecastView` (Blocker: stabiler Forecast aus #704), §45b-Materialisierung (virtuelles Auto-Renewal → monatliche `budget_allocations`-Zeilen), `customer_budgets`-Tabelle physisch droppen (DDL), Stats-V2 auf Batch-Read über OverviewView.
+
+### Phase 6 — Endzustand (abgeschlossen)
+
+Phase 6 hat die SSoT-Konsolidierung abgeschlossen (NICHT den physischen Reservierungs-/Finanz-Ledger-Split des North Star — der bleibt Ziel-Architektur):
+
+- **Eine `Available`-Lese-Quelle:** Alle Serving-Pfade (Overview, Kostenschätzung, Termin-Anlage, Termin-Serien-Verlängerung) lesen ausschließlich über den unified Reader (`getAvailableForDate` / `readUnifiedBudgetAvailability`). Die alten Summary-Reader (`getBudgetSummary*`, `getAllBudgetSummaries`) sind aus dem Serving entfernt und nur noch Shadow-/Equality-Baseline.
+- **`customer_budgets`-Reads & -Writes abgeschaltet** (seit Task #728, hier verifiziert + per Architektur-Test `tests/architecture/no-customer-budgets-reads.test.ts` verriegelt). Physischer Tabellen-Drop bleibt Phase 2.
+- **Route→Storage-Folds:** keine direkte `db.*`-Choreographie mehr in den Budget-Routen (`server/routes/budget.ts`, `server/routes/admin/customers/budgets.ts`); Schreib-/Transaktionslogik liegt im Storage-Layer.
+- **Rechnungs-Split pro Topf** über `invoices.billing_run_id`, Σ-Invariante per Equality-Test abgesichert.
+- **Akzeptierte §45b-Shadow-Divergenz:** Der §45b-Monatsbetrag bleibt virtuell (`calculateAllocated45b`); der Shadow-Soak zeigt darum eine erwartete, designgewollte Differenz Legacy↔unified (§45a/§39 = Δ0). Sie wird NICHT durch Angleichen der Legacy-Mathematik „repariert", sondern erst mit der §45b-Materialisierung (Phase 2) aufgelöst. Details: [`budget-verfahrensdokumentation.md → Ist-Zustand nach Phase 6`](./budget-verfahrensdokumentation.md).
 
 ## Query-Invalidation (Budget-Spezifika)
 
