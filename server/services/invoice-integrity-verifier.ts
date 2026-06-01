@@ -55,7 +55,7 @@ export async function verifyInvoiceIntegrity(invoiceId: number): Promise<VerifyR
   // deterministisch reproduzierbar ist. Eingebettete PDFs sind nicht byte-stabil
   // (PDF-Creation-Timestamps), daher wird der PDF-Hash gegen die in Object Storage
   // persistierten Bytes geprüft — das deckt Storage-Tampering ab.
-  const { buildInvoicePdfBytes } = await import("../routes/billing");
+  const { buildInvoicePdfBytes } = await import("./invoice-pdf-orchestrator");
   const { xml } = await buildInvoicePdfBytes(invoice, companySettings, { snapshot });
 
   let storedPdfHash: string | null = null;

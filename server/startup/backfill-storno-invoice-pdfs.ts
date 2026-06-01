@@ -64,7 +64,7 @@ export async function backfillStornoInvoicePdfs(): Promise<{ processed: number; 
 
   log(`Backfill Storno-PDF: ${rows.length} Stornorechnung(en) ohne pdf_path gefunden — starte Nachgenerierung`, "startup");
 
-  const { persistInvoicePdf } = await import("../routes/billing");
+  const { persistInvoicePdf } = await import("../services/invoice-pdf-orchestrator");
 
   let processed = 0;
   let failed = 0;

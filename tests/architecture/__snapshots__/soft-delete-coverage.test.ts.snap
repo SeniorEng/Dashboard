@@ -77,6 +77,17 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
   "server/services/geocoding.ts": [
     "customersRepo",
   ],
+  "server/services/invoice-calc.ts": [
+    "appointmentsRepo",
+  ],
+  "server/services/invoice-data.ts": [
+    "appointmentsRepo",
+    "customerServicePricesRepo",
+    "monthlyServiceRecordsRepo",
+  ],
+  "server/services/invoice-pdf-orchestrator.ts": [
+    "monthlyServiceRecordsRepo",
+  ],
   "server/services/month-close-scheduler.ts": [
     "appointmentsRepo",
     "employeeTimeEntriesRepo",

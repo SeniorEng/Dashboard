@@ -201,7 +201,7 @@ describe("LN-PDF-Caching — invoices.leistungsnachweis_path/hash werden bei Gen
       .set({ leistungsnachweisPath: null, leistungsnachweisHash: null })
       .where(eq(invoicesTable.id, invoiceId));
 
-    const { persistInvoicePdf } = await import("../../server/routes/billing");
+    const { persistInvoicePdf } = await import("../../server/services/invoice-pdf-orchestrator");
     await persistInvoicePdf(invoiceId);
 
     const [after] = await db
@@ -236,7 +236,7 @@ describe("LN-PDF-Caching — invoices.leistungsnachweis_path/hash werden bei Gen
       .set({ pdfPath: null, pdfHash: null, leistungsnachweisPath: null, leistungsnachweisHash: null })
       .where(eq(invoicesTable.id, invoiceId));
 
-    const { persistInvoicePdf } = await import("../../server/routes/billing");
+    const { persistInvoicePdf } = await import("../../server/services/invoice-pdf-orchestrator");
     await persistInvoicePdf(invoiceId);
 
     const [after] = await db

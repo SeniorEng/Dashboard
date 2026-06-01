@@ -20,7 +20,7 @@ import importAppointmentsRouter from "./admin/import-appointments";
 import contactMigrationRouter from "./admin/contact-migration";
 import testCleanupRouter from "./admin/test-cleanup";
 import { initiateTestCall } from "../services/twilio-call-bridge";
-import { persistInvoicePdf } from "./billing";
+import { persistInvoicePdf } from "../services/invoice-pdf-orchestrator";
 import { storage } from "../storage";
 import { auditService } from "../services/audit";
 import { notFound } from "../lib/errors";

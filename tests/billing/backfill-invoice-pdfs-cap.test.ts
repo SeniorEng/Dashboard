@@ -50,7 +50,7 @@ vi.mock("../../server/lib/log", () => ({
   log: vi.fn(),
 }));
 
-vi.mock("../../server/routes/billing", () => {
+vi.mock("../../server/services/invoice-pdf-orchestrator", () => {
   const fn = vi.fn(async () => {});
   state.persistSpy = fn;
   return { persistInvoicePdf: fn };
@@ -79,7 +79,7 @@ vi.mock("@shared/schema", () => ({
 
 async function freshModule() {
   vi.resetModules();
-  // Persist-Spy wird beim Re-Import des billing-Mocks NICHT neu erzeugt
+  // Persist-Spy wird beim Re-Import des Orchestrator-Mocks NICHT neu erzeugt
   // (vitest cached den Factory-Output). Wir setzen ihn defensiv hier neu auf,
   // falls der erste Test ihn bereits aufgerufen hat.
   state.persistSpy?.mockClear?.();

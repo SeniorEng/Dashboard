@@ -77,7 +77,7 @@ export async function backfillInvoicePdfs(): Promise<{ processed: number; failed
     return { processed: 0, failed: 0 };
   }
 
-  const { persistInvoicePdf } = await import("../routes/billing");
+  const { persistInvoicePdf } = await import("../services/invoice-pdf-orchestrator");
 
   let processed = 0;
   let failed = 0;
