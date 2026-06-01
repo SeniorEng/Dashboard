@@ -74,23 +74,23 @@ args = "npm run check"
 name = "test"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npx vitest run"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -x /tmp/careconnect-test-db.lock npx vitest run"
 
 [[workflows.workflow]]
 name = "e2e-smoke"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm run test:e2e:smoke"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -x /tmp/careconnect-test-db.lock npm run test:e2e:smoke"
 
 [[workflows.workflow]]
 name = "lint"
