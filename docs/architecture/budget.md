@@ -309,3 +309,73 @@ Bestand wird nicht angetastet — alte Single-Pot-Rechnungen behalten
 `budget_type = NULL` und `billing_run_id = NULL`. Spaltenanlage läuft
 idempotent in `server/startup/ensure-invoice-per-pot-columns.ts` (kein
 `drizzle-kit push`, siehe Gotcha in `replit.md`).
+
+## Verlässliches Budget-Migrations-Framework (Task #895)
+
+Einmalige Budget-DATEN-Migrationen mutieren historisierte Finanztabellen
+(`budget_allocations`, `budget_transactions`, …) und sind doppelt sensibel:
+sie dürfen weder mehrfach laufen noch eine Erhaltungs-Invariante (kein Topf
+überzogen, I13) verletzen. Dafür gibt es drei Bausteine.
+
+### Bausteine
+
+- **Ledger (`budget_migrations`)** — `server/startup/ensure-migration-ledger.ts`
+  legt die Tabelle idempotent an (eindeutig per `name`). Jede erfolgreiche
+  Migration trägt eine Zeile ein → exactly-once, beweisbar. Der Insert läuft
+  INNERHALB der Migrations-Transaktion: ein Rollback entfernt ihn wieder, sodass
+  die Migration beim nächsten Boot erneut versucht wird.
+- **Guarded Runner** — `server/startup/budget-migration-runner.ts`
+  (`runGuardedBudgetMigration`) führt eine Migration in EINER Transaktion mit
+  transaktions-lokalem GoBD-Bypass (`SET LOCAL app.allow_gobd_mutation='on'`)
+  aus, klammert sie mit einem Conservation-Pre-/Post-Check
+  (`server/lib/budget-conservation.ts`, SSoT) ein und ROLLT ZURÜCK, sobald die
+  Migration eine NEUE Verletzung einführt. Vorbestehende Verletzungen blockieren
+  legitime Migrationen NICHT (`assertNoNewConservationViolations`).
+- **Registry/Entry-Point** — `runBudgetDataMigrations()` führt alle
+  startup-getriebenen Budget-Daten-Migrationen in deterministischer Reihenfolge
+  aus, jede fault-isoliert (Fehlschlag → loggen + überspringen, Boot läuft
+  weiter). Wird in `server/index.ts` NACH den GoBD-Immutability-Triggern
+  aufgerufen, damit der Bypass gegen aktive Trigger greift.
+
+### Eine neue Migration anlegen
+
+1. Migrations-Funktion `(tx: Tx) => Promise<BudgetMigrationSummary>` schreiben
+   (z.B. in `server/startup/`). Sie MUSS idempotent sein und ausschließlich auf
+   `tx` arbeiten (keine eigene Transaktion, kein eigenes Bypass-GUC — beides
+   liefert der Runner). Referenz: `server/startup/migrate-budget-sources.ts`.
+2. In der Registry in `runBudgetDataMigrations()` mit einem stabilen,
+   eindeutigen `name` registrieren.
+3. Optionen: `conservationCheck: false` nur für Migrationen, die nachweislich
+   keine Topf-Konsumtion berühren; `gobdBypass: false`, wenn keine
+   GoBD-geschützte Tabelle angefasst wird.
+
+Das Gating erfolgt über den **Namen**. Ändert sich die Logik einer bereits
+angewendeten Migration grundlegend, MUSS ein neuer Name vergeben werden — der
+Runner re-runt eine eingetragene Migration nie automatisch.
+
+### Production-Runbook (sicheres Rollout)
+
+1. **Vorab (lesend, prod-safe):** `tsx server/scripts/verify-budget-conservation.ts`
+   gegen die Ziel-DB ausführen. Exit 0 = saubere Baseline. Vorbestehende
+   Verletzungen notieren — der Runner toleriert sie, der Operator sollte sie
+   aber kennen.
+2. **Deploy/Boot:** Beim Start laufen Ledger-Setup + `runBudgetDataMigrations()`
+   automatisch. Im Boot-Log nach `[budget-migration]`-Zeilen suchen
+   (`applied` / `skipped` / `fehlgeschlagen (Transaktion zurückgerollt)`).
+3. **Bei Rollback:** Ein `fehlgeschlagen`-Log bedeutet, die Transaktion (inkl.
+   Ledger-Eintrag) wurde zurückgerollt — der Datenbestand ist UNVERÄNDERT. Die
+   Ursache (Conservation-Verletzung oder Exception) im Log prüfen, Migration
+   korrigieren, neu deployen. Die Migration läuft beim nächsten Boot erneut.
+4. **Verifikation (lesend):** Nach dem Boot erneut
+   `verify-budget-conservation.ts` ausführen — Exit 0 bestätigt, dass keine neue
+   Verletzung eingeführt wurde. Ledger-Stand prüfen:
+   `SELECT name, version, summary, applied_at FROM budget_migrations ORDER BY applied_at;`.
+
+### Tests
+
+- `tests/budget-migration-runner.test.ts` — exactly-once (Ledger-Gating),
+  Rollback bei Exception (kein Ledger-Eintrag, keine Schreibwirkung), und die
+  Conservation-Guard-Entscheidung als Unit-Test.
+- `tests/architecture/startup-steps-fault-isolated.test.ts` — verlangt, dass
+  `ensureMigrationLedger()` und `runBudgetDataMigrations()` einzeln
+  fault-isoliert in `runStartupTasks` liegen.

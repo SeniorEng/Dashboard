@@ -30,6 +30,11 @@ const GUARDED_STEP_CALLS = [
   "await documentStorage.ensureCustomerDocumentTypes()",
   "await dropAppointmentsServiceTypeColumn()",
   "await importPflegekassen()",
+  // Task #895 — verlässliches Budget-Migrations-Framework: Ledger-Setup und
+  // der Guarded-Runner-Entry-Point müssen einzeln fault-isoliert sein, damit
+  // ein Fehlschlag die restliche Startup-Kette nicht abbricht.
+  "await ensureMigrationLedger()",
+  "await runBudgetDataMigrations()",
 ] as const;
 
 function extractRunStartupTasksBody(src: string): string {

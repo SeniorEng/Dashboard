@@ -303,11 +303,24 @@ async function runStartupTasks() {
       log(`PKV-Provider-Seed fehlgeschlagen: ${err}`, "startup");
     }
 
-    const { migrateBudgetSources } = await import("./startup/migrate-budget-sources");
+    // Task #895: Verlässliches Budget-Migrations-Framework. Der Ledger
+    // (`budget_migrations`) gatet einmalige Budget-Daten-Migrationen auf
+    // exactly-once; der Guarded-Runner klammert jede Migration mit einem
+    // Conservation-Pre-/Post-Check ein (Rollback bei NEU eingeführter
+    // Überziehung). Läuft NACH den GoBD-Immutability-Triggern (oben), damit der
+    // transaktions-lokale Bypass gegen aktive Trigger greift.
+    const { ensureMigrationLedger } = await import("./startup/ensure-migration-ledger");
     try {
-      await migrateBudgetSources();
+      await ensureMigrationLedger();
     } catch (err) {
-      log(`Budget-Source-Migration fehlgeschlagen: ${err}`, "startup");
+      log(`Migrations-Ledger-Setup fehlgeschlagen: ${err}`, "startup");
+    }
+
+    const { runBudgetDataMigrations } = await import("./startup/budget-migration-runner");
+    try {
+      await runBudgetDataMigrations();
+    } catch (err) {
+      log(`Budget-Daten-Migrationen fehlgeschlagen: ${err}`, "startup");
     }
 
     const { migrateInvoiceStornoRefs } = await import("./startup/migrate-invoice-storno-refs");

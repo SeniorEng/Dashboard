@@ -52,6 +52,12 @@ const ALLOWLIST: Record<string, WriteOffView> = {
   // Phase 4 nur noch hierhin und referenziert `write_off` selbst nicht mehr.
   "server/storage/budget/unified-reader.ts": "allocation-view",
 
+  // Task #895 — Read-only Conservation-Verifier (I13, kein Topf überzogen).
+  // Topf-/Allocation-Sicht: NettoKonsum = consumption + write_off − reversal ≤
+  // Σ Allocated. write_off zählt als Used (Geld ist aus dem Topf raus). Genutzt
+  // vom Migrations-Guard (Pre-/Post-Check) und dem CLI-Verifier.
+  "server/lib/budget-conservation.ts": "allocation-view",
+
   // Phase 1.3 — pure History-Aggregation exponiert beide Sichten gleichzeitig
   // (Topologie ist „both"): die Entscheidung, welche Sicht eine UI verwendet,
   // fällt erst beim Reduzieren der Buckets (siehe `sumAllocationView`). Der
