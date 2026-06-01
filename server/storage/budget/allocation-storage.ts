@@ -477,6 +477,14 @@ async function calculateAllocated45b(
       isNull(budgetAllocations.deletedAt)
     ));
 
+  const all45bSettings = await d.select()
+    .from(customerBudgetTypeSettings)
+    .where(and(
+      eq(customerBudgetTypeSettings.customerId, customerId),
+      eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
+    ))
+    .orderBy(asc(customerBudgetTypeSettings.validFrom));
+
   let budgetStartDate = preferences?.budgetStartDate ?? null;
   // Task #860 — §45b-Onboarding-Baseline: Ein automatisch aus dem Pflegegrad-
   // Beginn abgeleiteter Anker (Origin 'derived_pflegegrad', vom Wizard/
@@ -513,7 +521,15 @@ async function calculateAllocated45b(
   }
 
   if (!budgetStartDate) {
-    const s45bEnabled = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+    // Task #885 — Eligibility/Anker-Gate darf NICHT nur am Heute-Stand
+    // (`typeSettings`, forDate today) hängen: Ein §45b-Settings-Fenster, das
+    // im abgefragten Zeitraum (Jahr/asOfDate) gültig war, aber bis „heute"
+    // bereits abgelaufen ist (validTo in der Vergangenheit), würde sonst zum
+    // harten `return 0` führen — die Monats-Aufstockung des Gültigkeitsmonats
+    // verschwände komplett. Wir prüfen daher gegen ALLE §45b-Zeilen
+    // (`all45bSettings`, datumsunabhängig). Das Windowing übernimmt weiterhin
+    // der allocStart/end-Shift weiter unten (validFrom/validTo-Klammer).
+    const s45bEnabled = all45bSettings.some(s => s.enabled);
     if (!s45bEnabled) return 0;
     // Task #856 — Auto-Fallback (Kunde ohne expliziten Budget-Start): Anker am
     // Pflegegrad-Beginn, aber NUR innerhalb des laufenden Jahres. Ein weit
@@ -606,14 +622,6 @@ async function calculateAllocated45b(
   // `validTo < Monatsende` + neue Zeile mit `validFrom <= Monatsende`)
   // matcht nur die NEUE Zeile — was dem Nutzer-Intent „ab heute gilt der
   // neue Anteil" entspricht.
-  const all45bSettings = await d.select()
-    .from(customerBudgetTypeSettings)
-    .where(and(
-      eq(customerBudgetTypeSettings.customerId, customerId),
-      eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
-    ))
-    .orderBy(asc(customerBudgetTypeSettings.validFrom));
-
   const fallbackMonthlyAmount = await getMonthlyBudgetAmountCents(customerId, undefined, typeSettings);
 
   const monthlyAmountFor = (year: number, month: number): number => {

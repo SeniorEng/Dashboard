@@ -55,8 +55,17 @@ async function clear45bSettings(customerId: number): Promise<void> {
 
 // Mai 2026 enthält den 27. und 31. — perfekter Repro-Monat für den Bug
 // (Stichtag 2026-05-15 würde validFrom=2026-05-27 verfehlen).
+//
+// Task #885 — Auswertung IMMER über `asOfDate` (Stichtag im Mai), NICHT über
+// `{ year }`: Die Jahres-Variante summiert bis „heute" (YTD-Horizont) und
+// liefert daher je nach Wanduhr unterschiedliche Werte (im Juni z.B. zusätzlich
+// die Juni-Aufstockung). `asOfDate` klemmt den Horizont auf `min(Stichtag,
+// heute)` — da der Repro-Monat fest in der Vergangenheit liegt, ist das
+// Ergebnis für alle künftigen Laufzeitpunkte deterministisch. Gleichzeitig
+// reproduziert genau diese Konstellation (Stichtag im Mai, echte Wanduhr >
+// Mai) den eigentlichen Bug: das §45b-Fenster ist „heute" bereits abgelaufen,
+// die alte Eligibility-Prüfung am Heute-Stand fiel auf 0 zurück (Szenario 3).
 const REPRO_AS_OF = "2026-05-31";
-const REPRO_YEAR = 2026;
 const MAY_ANTEIL_CENTS = 6550; // €65,50 — Wert aus dem Prod-Repro
 
 describe("Task #668 — §45b monthlyAmountFor: Monatsende-Lookup statt Mitte-des-Monats", () => {
@@ -75,20 +84,13 @@ describe("Task #668 — §45b monthlyAmountFor: Monatsende-Lookup statt Mitte-de
       validTo: null,
     });
 
-    const yearAllocated = await calculateAllocatedCents(
-      customerId,
-      "entlastungsbetrag_45b",
-      { year: REPRO_YEAR },
-    );
-
-    expect(yearAllocated).toBe(MAY_ANTEIL_CENTS);
-
-    const totalAllocated = await calculateAllocatedCents(
+    const allocated = await calculateAllocatedCents(
       customerId,
       "entlastungsbetrag_45b",
       { asOfDate: REPRO_AS_OF },
     );
-    expect(totalAllocated).toBe(MAY_ANTEIL_CENTS);
+
+    expect(allocated).toBe(MAY_ANTEIL_CENTS);
   });
 
   it("Szenario 2: Transition (alt geschlossen heute, neu validFrom=morgen) — Mai fällt nicht heraus", async () => {
@@ -121,15 +123,15 @@ describe("Task #668 — §45b monthlyAmountFor: Monatsende-Lookup statt Mitte-de
       },
     ]);
 
-    const yearAllocated = await calculateAllocatedCents(
+    const allocated = await calculateAllocatedCents(
       customerId,
       "entlastungsbetrag_45b",
-      { year: REPRO_YEAR },
+      { asOfDate: REPRO_AS_OF },
     );
 
     // Jan–Apr: alte Zeile (monthlyLimit=null) → gesetzlicher Default 131 €.
     // Mai: neue Zeile (6550 ct). Summe = 4×13100 + 6550 = 58950.
-    expect(yearAllocated).toBe(4 * 13100 + MAY_ANTEIL_CENTS);
+    expect(allocated).toBe(4 * 13100 + MAY_ANTEIL_CENTS);
   });
 
   it("Szenario 3: Lookup fällt nie auf 0 zurück, solange eine §45b-Zeile den Monat überlappt", async () => {
@@ -148,13 +150,13 @@ describe("Task #668 — §45b monthlyAmountFor: Monatsende-Lookup statt Mitte-de
       validTo: "2026-05-31",
     });
 
-    const yearAllocated = await calculateAllocatedCents(
+    const allocated = await calculateAllocatedCents(
       customerId,
       "entlastungsbetrag_45b",
-      { year: REPRO_YEAR },
+      { asOfDate: REPRO_AS_OF },
     );
 
-    expect(yearAllocated).toBe(MAY_ANTEIL_CENTS);
-    expect(yearAllocated).not.toBe(0);
+    expect(allocated).toBe(MAY_ANTEIL_CENTS);
+    expect(allocated).not.toBe(0);
   });
 });
