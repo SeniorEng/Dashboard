@@ -15,11 +15,11 @@ import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
 import { getCachedCompanySettings } from "../services/cache";
-import { suggestTravelOrigin } from "@shared/domain/appointments";
+import { suggestTravelOrigin, isMoreThan3MonthsInPast } from "@shared/domain/appointments";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { calculateRoute } from "../services/routing";
 import { geocodeCustomer } from "../services/geocoding";
-import { isWeekend, currentTimeHHMMSS, todayISO, parseLocalDate, timeToMinutes } from "@shared/utils/datetime";
+import { isWeekend, currentTimeHHMMSS, todayISO, timeToMinutes } from "@shared/utils/datetime";
 import { timeRangesOverlap } from "@shared/domain/time-entries";
 import { 
   ErrorMessages, 
@@ -149,14 +149,6 @@ async function checkEmployeeBlocker(
     }
   }
   return null;
-}
-
-function isDateMoreThan3MonthsInPast(dateStr: string): boolean {
-  const date = parseLocalDate(dateStr);
-  const threeMonthsAgo = new Date();
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-  threeMonthsAgo.setHours(0, 0, 0, 0);
-  return date < threeMonthsAgo;
 }
 
 async function checkCustomerAccess(
@@ -625,7 +617,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   const isAssignedToCustomer = (await storage.getCurrentlyAssignedCustomerIds(user.id))
     .includes(validatedData.customerId);
 
-  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
+  const farPastDate = isMoreThan3MonthsInPast(validatedData.date);
   const decision = policyCanCreate(toPolicyUser(user), {
     date: validatedData.date,
     isWeekend: isWeekend(validatedData.date),
@@ -815,7 +807,7 @@ router.post("/prospect-erstberatung", asyncHandler("Erstberatung konnte nicht er
     return sendNotFound(res, "Interessent nicht gefunden");
   }
 
-  const farPastDate = isDateMoreThan3MonthsInPast(validatedData.date);
+  const farPastDate = isMoreThan3MonthsInPast(validatedData.date);
   const checkEmpForMonth = validatedData.assignedEmployeeId || user.id;
   const monthClosedErst = await timeTrackingStorage.isMonthClosed(checkEmpForMonth, validatedData.date);
   const erstDecision = policyCanCreate(toPolicyUser(user), {

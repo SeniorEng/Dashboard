@@ -12,6 +12,7 @@ import { useCreateKundentermin, useCreateErstberatung } from "./use-appointment-
 import { useCreateAppointmentSeries, usePreviewAppointmentSeries } from "./use-appointment-series";
 import type { SeriesCreateInput } from "./use-appointment-series";
 import { timeToMinutes, minutesToTimeDisplay, formatDurationDisplay, todayISO } from "@shared/utils/datetime";
+import { generateSeriesDates } from "@shared/domain/appointments";
 import type { Weekday, SeriesFrequency } from "@shared/schema/appointments";
 import { isDachPhone } from "@shared/schema/common";
 import type { Service } from "@shared/schema";
@@ -420,34 +421,11 @@ export function useNewAppointmentForm() {
     const endDateObj = new Date(seriesEndDate + "T00:00:00");
     if (endDateObj <= startDateObj) return null;
 
-    const weekdayMap: Record<string, number> = { mo: 1, di: 2, mi: 3, do: 4, fr: 5 };
-    const selectedJsDays = seriesWeekdays.map(d => weekdayMap[d]).filter(Boolean);
-
-    const dates: string[] = [];
-    const current = new Date(startDateObj);
-    let weekCounter = 0;
-    let lastWeek = -1;
-
-    while (current <= endDateObj) {
-      const jsDay = current.getDay();
-      const weekNum = Math.floor((current.getTime() - startDateObj.getTime()) / (7 * 24 * 60 * 60 * 1000));
-
-      if (weekNum !== lastWeek) {
-        if (lastWeek >= 0) weekCounter++;
-        lastWeek = weekNum;
-      }
-
-      const isActiveWeek = seriesFrequency === "weekly" || weekCounter % 2 === 0;
-
-      if (isActiveWeek && selectedJsDays.includes(jsDay === 0 ? 7 : jsDay)) {
-        const y = current.getFullYear();
-        const m = String(current.getMonth() + 1).padStart(2, "0");
-        const d = String(current.getDate()).padStart(2, "0");
-        dates.push(`${y}-${m}-${d}`);
-      }
-
-      current.setDate(current.getDate() + 1);
-    }
+    // SSoT: identische Datums-Generierung wie der Server (shared/domain).
+    // Damit stimmt die Vorschau exakt mit den tatsächlich angelegten Terminen
+    // überein (insbesondere die Biweekly-Wochenzählung).
+    const dates = generateSeriesDates(ktDate, seriesEndDate, seriesWeekdays, seriesFrequency)
+      .map(d => d.date);
 
     const totalMinutes = ktServices.reduce((sum, s) => sum + s.durationMinutes, 0);
 

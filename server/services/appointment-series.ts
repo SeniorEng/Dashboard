@@ -1,23 +1,11 @@
-import { isWeekend, addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
-import { isHoliday } from "@shared/utils/holidays";
-import type { Weekday, CreateSeriesInput } from "@shared/schema";
+import { addMinutesToTimeHHMMSS } from "@shared/utils/datetime";
+import type { CreateSeriesInput } from "@shared/schema";
 import { appointments, appointmentServices as appointmentServicesTable } from "@shared/schema";
+import { generateSeriesDates, type GeneratedDate } from "@shared/domain/appointments";
 import { appointmentService } from "./appointments";
 import { db, type DbOrTx } from "../lib/db";
 
-const WEEKDAY_TO_JS_DAY: Record<Weekday, number> = {
-  mo: 1,
-  di: 2,
-  mi: 3,
-  do: 4,
-  fr: 5,
-};
-
-export interface GeneratedDate {
-  date: string;
-  skipped: boolean;
-  skipReason?: string;
-}
+export type { GeneratedDate };
 
 export interface SeriesValidationResult {
   valid: boolean;
@@ -25,73 +13,6 @@ export interface SeriesValidationResult {
   dates: GeneratedDate[];
   validDates: string[];
   conflicts: Array<{ date: string; reason: string }>;
-}
-
-function parseDate(dateStr: string): Date {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function formatDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function generateSeriesDates(
-  startDate: string,
-  endDate: string,
-  weekdays: Weekday[],
-  frequency: "weekly" | "biweekly",
-): GeneratedDate[] {
-  const start = parseDate(startDate);
-  const end = parseDate(endDate);
-
-  const targetDays = new Set(weekdays.map(w => WEEKDAY_TO_JS_DAY[w]));
-
-  const results: GeneratedDate[] = [];
-  const current = new Date(start);
-
-  const weekStart = new Date(start);
-  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
-
-  let weekNumber = 0;
-  let lastWeekStart = weekStart.getTime();
-
-  while (current <= end) {
-    const currentWeekStart = new Date(current);
-    currentWeekStart.setDate(currentWeekStart.getDate() - ((currentWeekStart.getDay() + 6) % 7));
-
-    if (currentWeekStart.getTime() !== lastWeekStart) {
-      weekNumber++;
-      lastWeekStart = currentWeekStart.getTime();
-    }
-
-    const dayOfWeek = current.getDay();
-    const dateStr = formatDate(current);
-
-    if (targetDays.has(dayOfWeek)) {
-      const shouldSkipBiweekly = frequency === "biweekly" && weekNumber % 2 !== 0;
-
-      if (shouldSkipBiweekly) {
-        // skip silently for biweekly
-      } else if (isWeekend(dateStr)) {
-        results.push({ date: dateStr, skipped: true, skipReason: "Wochenende" });
-      } else {
-        const holidayName = isHoliday(dateStr);
-        if (holidayName) {
-          results.push({ date: dateStr, skipped: true, skipReason: `Feiertag: ${holidayName}` });
-        } else {
-          results.push({ date: dateStr, skipped: false });
-        }
-      }
-    }
-
-    current.setDate(current.getDate() + 1);
-  }
-
-  return results;
 }
 
 export async function validateSeriesDates(

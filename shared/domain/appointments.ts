@@ -1,5 +1,6 @@
-import type { Appointment } from "../schema";
-import { timeToMinutes, addMinutesToTime, formatDurationDisplay, parseLocalDate } from "../utils/datetime";
+import type { Appointment, Weekday } from "../schema";
+import { timeToMinutes, addMinutesToTime, formatDurationDisplay, parseLocalDate, isWeekend } from "../utils/datetime";
+import { isHoliday } from "../utils/holidays";
 
 // ============================================
 // TYPES
@@ -366,4 +367,120 @@ export function validateServiceDocumentationFromServices(
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+// ============================================
+// BOOKING DATE RULES (SSoT)
+// ============================================
+
+/**
+ * Liegt das Datum mehr als 3 Monate vor "heute"?
+ *
+ * Pure Datums-Regel — zentrale Quelle für den Far-Past-Check, dessen Ergebnis
+ * die Create-Policy als `isFarPast`-Flag konsumiert (die Policy bleibt damit
+ * frei von "now"-Logik). `now` ist für Tests injizierbar.
+ */
+export function isMoreThan3MonthsInPast(dateStr: string, now: Date = new Date()): boolean {
+  const date = parseLocalDate(dateStr);
+  const threeMonthsAgo = new Date(now);
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  threeMonthsAgo.setHours(0, 0, 0, 0);
+  return date < threeMonthsAgo;
+}
+
+// ============================================
+// SERIES DATE GENERATION (SSoT)
+// ============================================
+//
+// Eine Quelle für die Wochentags-/Biweekly-Expansion einer Terminserie.
+// Server (`validateSeriesDates`/`createSeriesAppointments`) UND Client-Vorschau
+// (`use-new-appointment-form`) nutzen dieselbe Funktion, damit die angezeigte
+// Vorschau exakt den tatsächlich angelegten Terminen entspricht.
+
+const WEEKDAY_TO_JS_DAY: Record<Weekday, number> = {
+  mo: 1,
+  di: 2,
+  mi: 3,
+  do: 4,
+  fr: 5,
+};
+
+export interface GeneratedDate {
+  date: string;
+  skipped: boolean;
+  skipReason?: string;
+}
+
+function parseSeriesDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatSeriesDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Erzeugt alle Termin-Daten einer Serie zwischen `startDate` und `endDate`.
+ *
+ * Wochen werden Montag-ausgerichtet gezählt (ISO), damit `biweekly` jede zweite
+ * Kalenderwoche trifft. Wochenenden und Feiertage werden als `skipped`-Einträge
+ * markiert (nicht entfernt), Biweekly-Pausenwochen werden still ausgelassen.
+ */
+export function generateSeriesDates(
+  startDate: string,
+  endDate: string,
+  weekdays: Weekday[],
+  frequency: "weekly" | "biweekly",
+): GeneratedDate[] {
+  const start = parseSeriesDate(startDate);
+  const end = parseSeriesDate(endDate);
+
+  const targetDays = new Set(weekdays.map(w => WEEKDAY_TO_JS_DAY[w]));
+
+  const results: GeneratedDate[] = [];
+  const current = new Date(start);
+
+  const weekStart = new Date(start);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+
+  let weekNumber = 0;
+  let lastWeekStart = weekStart.getTime();
+
+  while (current <= end) {
+    const currentWeekStart = new Date(current);
+    currentWeekStart.setDate(currentWeekStart.getDate() - ((currentWeekStart.getDay() + 6) % 7));
+
+    if (currentWeekStart.getTime() !== lastWeekStart) {
+      weekNumber++;
+      lastWeekStart = currentWeekStart.getTime();
+    }
+
+    const dayOfWeek = current.getDay();
+    const dateStr = formatSeriesDate(current);
+
+    if (targetDays.has(dayOfWeek)) {
+      const shouldSkipBiweekly = frequency === "biweekly" && weekNumber % 2 !== 0;
+
+      if (shouldSkipBiweekly) {
+        // skip silently for biweekly
+      } else if (isWeekend(dateStr)) {
+        results.push({ date: dateStr, skipped: true, skipReason: "Wochenende" });
+      } else {
+        const holidayName = isHoliday(dateStr);
+        if (holidayName) {
+          results.push({ date: dateStr, skipped: true, skipReason: `Feiertag: ${holidayName}` });
+        } else {
+          results.push({ date: dateStr, skipped: false });
+        }
+      }
+    }
+
+    current.setDate(current.getDate() + 1);
+  }
+
+  return results;
 }
