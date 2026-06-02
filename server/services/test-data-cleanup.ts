@@ -443,6 +443,16 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
       // wir die Mutation transaktions-lokal frei. `SET LOCAL` gilt ausschließlich
       // innerhalb dieser Transaktion und wird beim Commit/Rollback verworfen.
       await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
+      // Task #906: Ziel-User VOR jedem Child-Delete mit FOR UPDATE sperren.
+      // Unter paralleler Test-Last (Task #894) legt der live laufende
+      // Worker-App-Server u.U. zwischen Child-Delete und `DELETE FROM users`
+      // eine neue `notifications`-Zeile für den Test-User an — ein FK-Insert
+      // nimmt dabei einen FOR-KEY-SHARE-Lock auf die Parent-Row. Halten WIR
+      // bereits einen FOR-UPDATE-Lock auf dieselbe Row, blockiert dieser
+      // Insert bis zu unserem Commit (dann ist der User weg) — der spätere
+      // `DELETE FROM users` kann also nicht mehr an einer nebenläufig neu
+      // entstandenen Child-Row scheitern.
+      await tx.execute(sql`SELECT id FROM users WHERE id IN (${idList}) FOR UPDATE`);
       // Hard-delete child rows in tables with NO ACTION + non-nullable FK
       await tx.execute(sql`DELETE FROM employee_time_entries WHERE user_id IN (${idList})`);
       await tx.execute(sql`DELETE FROM notifications WHERE user_id IN (${idList})`);

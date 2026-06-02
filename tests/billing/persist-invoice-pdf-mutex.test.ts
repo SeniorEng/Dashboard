@@ -133,7 +133,7 @@ describe("persistInvoicePdf — Mutex pro Rechnungs-ID (Task #552)", () => {
       release = resolve;
     });
 
-    const { persistInvoicePdf } = await import("../../server/routes/billing");
+    const { persistInvoicePdf } = await import("../../server/services/invoice-pdf-orchestrator");
 
     // 5 parallele Aufrufer für dieselbe ID.
     const promises = [
@@ -169,7 +169,7 @@ describe("persistInvoicePdf — Mutex pro Rechnungs-ID (Task #552)", () => {
       createdByUserId: 1,
     };
 
-    const { persistInvoicePdf } = await import("../../server/routes/billing");
+    const { persistInvoicePdf } = await import("../../server/services/invoice-pdf-orchestrator");
     await persistInvoicePdf(42);
 
     expect(state.buildPdfBytesCalls).toBe(0);
@@ -178,7 +178,7 @@ describe("persistInvoicePdf — Mutex pro Rechnungs-ID (Task #552)", () => {
   });
 
   it("nach erfolgreichem Lauf wird die Mutex-Map wieder freigegeben (zweiter Lauf startet neu)", async () => {
-    const { persistInvoicePdf } = await import("../../server/routes/billing");
+    const { persistInvoicePdf } = await import("../../server/services/invoice-pdf-orchestrator");
     await persistInvoicePdf(42);
     const callsAfterFirst = state.getInvoiceCalls;
 

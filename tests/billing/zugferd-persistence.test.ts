@@ -52,7 +52,26 @@ function shiftToWeekday(d: Date): Date {
   else if (dow === 6) d.setDate(d.getDate() - 1);
   return d;
 }
-const SEED_TIMES = ["00:00", "00:30", "01:00", "01:30", "02:00", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"];
+// Task #906: Auf einer von mehreren Test-Dateien geteilten Worker-DB
+// (fileParallelism, Task #894) werden feste Slots schnell aufgebraucht — alle
+// Dateien buchen gegen denselben geseedeten Mitarbeiter. Statt 11 fixer Zeiten
+// generieren wir alle 48 Halbstunden-Slots über bis zu 90 Werktage und
+// probieren sie in ZUFÄLLIGER Reihenfolge, damit parallele Dateien nicht um
+// dieselben Slots konkurrieren und ein freier Slot praktisch immer gefunden wird.
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+const ALL_HALF_HOUR_SLOTS: string[] = (() => {
+  const out: string[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (const m of ["00", "30"]) out.push(`${String(h).padStart(2, "0")}:${m}`);
+  }
+  return out;
+})();
 
 async function waitForZugferdPersisted(
   invoiceId: number,
@@ -96,12 +115,13 @@ async function waitForZugferdPersisted(
 }
 
 async function findFreeSlotAndCreate(custId: number, tag: string): Promise<{ id: number; date: string; time: string }> {
-  for (let offset = 1; offset <= 60; offset++) {
+  const offsets = shuffle(Array.from({ length: 90 }, (_, i) => i + 1));
+  for (const offset of offsets) {
     const cand = new Date();
     cand.setDate(cand.getDate() - offset);
     shiftToWeekday(cand);
     const dateStr = ymd(cand);
-    for (const time of SEED_TIMES) {
+    for (const time of shuffle([...ALL_HALF_HOUR_SLOTS])) {
       const res = await apiPost<any>("/api/appointments/kundentermin", {
         customerId: custId,
         date: dateStr,

@@ -363,6 +363,27 @@ function isPageLevelTransientError(err: unknown): boolean {
 }
 
 /**
+ * Task #906: Browser-LAUNCH-Fehler unter paralleler Worker-Last.
+ *
+ * Unter `fileParallelism: true` (Task #894) startet jeder Vitest-Worker einen
+ * eigenen App-Server, und mehrere davon (zzgl. der e2e-Browser) feuern
+ * gleichzeitig einen Chromium-Launch. Das Container-cgroup limitiert
+ * `pids.max` auf ~1024 — die Lastspitze tötet dann den startenden Prozess mit
+ * "Failed to launch the browser process: Code: null" bzw. "spawn EAGAIN".
+ * Das ist Resource-Contention, kein Defekt: Der Render darf NICHT scheitern,
+ * nur weil er das Launch-Rennen verloren hat. Solche Fehler werden mit
+ * Browser-Discard + deutlichem, jitterndem Backoff erneut versucht. Der PDF-
+ * Output ändert sich dadurch nicht — nur das Timing des Launches.
+ */
+function isBrowserLaunchError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const message = (err as { message?: string }).message ?? "";
+  return /Failed to launch the browser process|Code: null|spawn EAGAIN|Chromium-Launch überschritt|browser process .*exited|Browser was not found/i.test(
+    message,
+  );
+}
+
+/**
  * Task #594: Globaler Semaphor gegen Chromium-Resource-Contention.
  *
  * Hintergrund: `persistInvoicePdf` läuft seit Task #544 im Hintergrund
@@ -437,7 +458,7 @@ async function warmupPage(page: Page): Promise<void> {
  * Race-Timeout den gesamten Aufruf, sodass blockierte CDP-Calls nicht
  * länger als `PAGE_RENDER_TIMEOUT_MS` hängen.
  */
-const WITH_FRESH_PAGE_MAX_ATTEMPTS = 3;
+const WITH_FRESH_PAGE_MAX_ATTEMPTS = 5;
 
 export async function withFreshPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
   // Task #594: Slot-Akquise VOR allem anderen — wenn der Browser bereits
@@ -486,6 +507,17 @@ export async function withFreshPage<T>(fn: (page: Page) => Promise<T>): Promise<
         // Versuch nicht in dieselbe Saturations-Welle läuft.
         if (isPageLevelTransientError(err)) {
           await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+          continue;
+        }
+        // Task #906: Launch-Fehler unter PID-Druck (paralleler Worker-Last) —
+        // Browser verwerfen und mit deutlichem, jitterndem Backoff erneut
+        // versuchen, damit der nächste Launch nicht in dieselbe Lastspitze
+        // läuft. Der Jitter entkoppelt parallele Worker, die sonst im
+        // Gleichschritt retryen würden.
+        if (isBrowserLaunchError(err)) {
+          await discardBrowser();
+          const backoff = 500 * (attempt + 1) + Math.floor(Math.random() * 400);
+          await new Promise((resolve) => setTimeout(resolve, backoff));
           continue;
         }
         if (isRecoverablePuppeteerError(err)) {
