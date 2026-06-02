@@ -64,9 +64,16 @@ export function parseDbCreatedAt(name: string): number | null {
 // Reine Entscheidungsfunktion: Soll diese verbindungslose Wegwerf-DB gedroppt
 // werden? Nur `cc_test_`-DBs mit parsebarem Zeitstempel, die älter als
 // `minAgeMs` sind. (`minAgeMs <= 0` => Altersgrenze deaktiviert, z.B. beim
-// manuellen Force-Sweep.)
-export function shouldDropOrphan(name: string, now: number, minAgeMs: number): boolean {
+// manuellen Force-Sweep.) `protectedDbs` (z.B. die langlebige Cache-Template-DB
+// aus Task #907) werden NIE gedroppt — auch nicht im Force-Modus.
+export function shouldDropOrphan(
+  name: string,
+  now: number,
+  minAgeMs: number,
+  protectedDbs?: ReadonlySet<string>,
+): boolean {
   if (!name.startsWith(DB_PREFIX)) return false;
+  if (protectedDbs?.has(name)) return false;
   if (minAgeMs <= 0) return true;
   const createdAt = parseDbCreatedAt(name);
   if (createdAt == null) return false;
@@ -80,6 +87,8 @@ export interface SweepOptions {
   dryRun?: boolean;
   /** Logger (Default: leise / no-op). */
   log?: (msg: string) => void;
+  /** DB-Namen, die NIE gedroppt werden dürfen (z.B. die Cache-Template-DB). */
+  protectedDbs?: ReadonlySet<string>;
 }
 
 export interface SweepResult {
@@ -108,7 +117,7 @@ export function sweepOrphans(adminUrl: string, opts: SweepOptions = {}): SweepRe
 
   const now = Date.now();
   for (const name of list.stdout.split("\n").map((s) => s.trim()).filter(Boolean)) {
-    if (!shouldDropOrphan(name, now, minAgeMs)) {
+    if (!shouldDropOrphan(name, now, minAgeMs, opts.protectedDbs)) {
       result.skipped.push(name);
       continue;
     }

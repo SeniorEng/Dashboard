@@ -25,6 +25,7 @@ import {
   sweepOrphanLogs,
   sweepOrphans,
 } from "./lib/ephemeral-db-sweep.ts";
+import { CACHE_DB_NAME } from "./lib/template-cache.ts";
 
 function fail(msg: string): never {
   console.error(`[sweep] ${msg}`);
@@ -53,6 +54,9 @@ const result = sweepOrphans(adminUrl, {
   minAgeMs,
   dryRun,
   log: (m) => console.log(m),
+  // Die langlebige Cache-Template-DB (Task #907) ist absichtlich verbindungslos
+  // und alt — sie darf NIE als Waise gedroppt werden, auch nicht im Force-Modus.
+  protectedDbs: new Set([CACHE_DB_NAME]),
 });
 
 const logResult = sweepOrphanLogs({

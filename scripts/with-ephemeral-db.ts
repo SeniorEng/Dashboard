@@ -6,9 +6,17 @@
 // Am Ende werden DBs + Server wieder entfernt (auch im Fehlerfall).
 //
 // ISOLATION & PARALLELITÄT:
-//   - Es wird EINE geseedete Template-DB gebaut (Schema-Push + Superadmin +
-//     Basis-Referenzdaten), aus der dann pro Worker eine eigene Wegwerf-DB
-//     per `CREATE DATABASE ... TEMPLATE` geklont wird (billiger als N× Push).
+//   - Es wird EINE geseedete Per-Lauf-Template-DB bereitgestellt, aus der dann
+//     pro Worker eine eigene Wegwerf-DB per `CREATE DATABASE ... TEMPLATE`
+//     geklont wird (billiger als N× Push).
+//   - Task #907: Die geseedete Vorlage (Schema-Push + Superadmin + Basis-
+//     Referenzdaten) wird über Läufe hinweg in einer persistenten Cache-DB
+//     `cc_test_tmpl_cache` wiederverwendet, geschlüsselt über einen Hash von
+//     `shared/schema/**` + `drizzle.config.ts` + den Seed-Skripten (hinterlegt
+//     als `COMMENT ON DATABASE`). Passt der Hash, entfallen Push + Seeds und die
+//     Per-Lauf-Template wird direkt aus dem Cache geklont (warme Läufe starten
+//     in Sekunden statt ~24s). Ändert sich Schema/Seed, wird der Cache einmalig
+//     neu gebaut. Abschaltbar via `EPHEMERAL_DB_CACHE=0`.
 //   - Für Vitest werden mehrere Worker (Default 2) provisioniert: jeder Worker
 //     bekommt seine EIGENE DB + seinen EIGENEN App-Server auf einem frei vom
 //     OS vergebenen Port. Vitest verteilt die Integrationsdateien über die
@@ -45,6 +53,11 @@ import { createWriteStream, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve as resolvePath } from "node:path";
 import { DB_PREFIX, sweepOrphanLogs, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
+import {
+  CACHE_DB_NAME,
+  computeTemplateHash,
+  isCacheFresh,
+} from "./lib/template-cache.ts";
 import { buildServerBundle } from "../script/server-bundle";
 
 function fail(msg: string): never {
@@ -73,6 +86,11 @@ const workerCount = Math.max(
   1,
   Number(process.env.EPHEMERAL_DB_WORKERS || (isVitest ? "2" : "1")) || 1,
 );
+
+// Task #907: Wiederverwendung der geseedeten Cache-Template-DB über Läufe
+// hinweg. Per `EPHEMERAL_DB_CACHE=0` abschaltbar (dann altes Verhalten: Push +
+// Seeds frisch pro Lauf direkt in die Per-Lauf-Template).
+const cachingEnabled = process.env.EPHEMERAL_DB_CACHE !== "0";
 
 const runId = `${Date.now().toString(36)}_${process.pid}_${randomBytes(4).toString("hex")}`;
 const templateDb = `${DB_PREFIX}${runId}_tmpl`;
@@ -290,6 +308,113 @@ function dropMirrorConstraint(dbUrl: string): void {
   }
 }
 
+// --- Task #907: Cache-Template-Helfer -------------------------------------
+const cacheUrl = urlForDb(CACHE_DB_NAME);
+
+function dbExists(name: string): boolean {
+  const res = psql(adminUrl!, `SELECT 1 FROM pg_database WHERE datname = '${name}'`);
+  return res.ok && res.stdout.trim() === "1";
+}
+
+// Liest den in der Cache-DB als `COMMENT ON DATABASE` hinterlegten Template-Hash.
+// null = DB fehlt oder kein Kommentar gesetzt.
+function readCacheHash(): string | null {
+  if (!dbExists(CACHE_DB_NAME)) return null;
+  const res = psql(
+    adminUrl!,
+    `SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${CACHE_DB_NAME}'`,
+  );
+  if (!res.ok) return null;
+  const val = res.stdout.trim();
+  return val.length > 0 ? val : null;
+}
+
+// Kappt alle Fremd-Verbindungen zu einer DB (Voraussetzung für `CREATE DATABASE
+// ... TEMPLATE`, das eine verbindungsfreie Vorlage verlangt).
+function terminateConnections(dbName: string): void {
+  psql(
+    adminUrl!,
+    `SELECT pg_terminate_backend(pid) FROM pg_stat_activity ` +
+      `WHERE datname = '${dbName}' AND pid <> pg_backend_pid()`,
+  );
+}
+
+// Schema-Push + Seeds in die über `dbUrl` adressierte DB. Geteilt von Cache-Bau
+// und Legacy-Direkt-Bau (Caching deaktiviert).
+function seedTemplateInto(dbUrl: string): void {
+  const env: NodeJS.ProcessEnv = { ...baseEnv, DATABASE_URL: dbUrl };
+  console.log("[ephemeral-db] Pushe Drizzle-Schema (drizzle-kit push --force) ...");
+  run("npx", ["drizzle-kit", "push", "--force"], env);
+  console.log("[ephemeral-db] Seede Test-Superadmin ...");
+  run("npx", ["tsx", "scripts/ci-seed-superadmin.ts"], env);
+  // Basis-Stammdaten (Nicht-System-Leistungen hauswirtschaft/alltagsbegleitung
+  // inkl. Budget-Töpfen) seeden — die Startup-Hooks legen nur System-Services +
+  // Pflegekassen an, viele Tests setzen aber diese zwei Basis-Leistungen voraus.
+  console.log("[ephemeral-db] Seede Basis-Referenzdaten (Leistungen) ...");
+  run("npx", ["tsx", "scripts/seed-test-reference-data.ts"], env);
+}
+
+// Klont `target` aus der Vorlage `source`. Da zwei GLEICHZEITIGE Läufe (Auto-Run
+// + Validation) zeitgleich aus derselben Cache-Vorlage klonen können, retryt der
+// CREATE bei „source database ... is being accessed by other users".
+function cloneDbFromTemplate(target: string, source: string): void {
+  const maxAttempts = 8;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = psql(adminUrl!, `CREATE DATABASE "${target}" TEMPLATE "${source}"`);
+    if (res.ok) return;
+    const busy = /being accessed by other users|source database .* is being accessed/i.test(
+      res.stdout,
+    );
+    if (busy && attempt < maxAttempts) {
+      const waitMs = 250 * attempt;
+      console.log(
+        `[ephemeral-db] Vorlage ${source} gerade in Benutzung — Retry ${attempt}/${maxAttempts} in ${waitMs}ms ...`,
+      );
+      const until = Date.now() + waitMs;
+      while (Date.now() < until) {
+        /* busy-wait (spawnSync ist synchron) */
+      }
+      continue;
+    }
+    throw new Error(`CREATE DATABASE ${target} TEMPLATE ${source} fehlgeschlagen: ${res.stdout}`);
+  }
+}
+
+// Stellt sicher, dass die persistente Cache-Template-DB für `hash` frisch ist.
+// Warm = vorhanden + hinterlegter Hash passt -> nichts zu tun. Sonst neu bauen
+// (drop + create + push + seed + Hash-Kommentar).
+function ensureCacheTemplate(hash: string): void {
+  const stored = readCacheHash();
+  if (isCacheFresh(stored, hash)) {
+    console.log(
+      `[ephemeral-db] Cache-Template ${CACHE_DB_NAME} ist frisch (Hash passt) — Push + Seeds übersprungen.`,
+    );
+    return;
+  }
+  console.log(
+    `[ephemeral-db] Cache-Template ${CACHE_DB_NAME} ${stored == null ? "fehlt" : "veraltet"} — wird neu gebaut ...`,
+  );
+  // FORCE kappt evtl. verbliebene Verbindungen eines hart abgebrochenen Baus.
+  const dropped = psql(adminUrl!, `DROP DATABASE IF EXISTS "${CACHE_DB_NAME}" WITH (FORCE)`);
+  if (!dropped.ok) {
+    console.warn(`[ephemeral-db] Konnte alten Cache nicht droppen: ${dropped.stdout}`);
+  }
+  const created = psql(adminUrl!, `CREATE DATABASE "${CACHE_DB_NAME}"`);
+  if (!created.ok) fail(`CREATE DATABASE ${CACHE_DB_NAME} fehlgeschlagen: ${created.stdout}`);
+
+  seedTemplateInto(cacheUrl);
+  terminateConnections(CACHE_DB_NAME);
+
+  const commented = psql(
+    adminUrl!,
+    `COMMENT ON DATABASE "${CACHE_DB_NAME}" IS '${hash}'`,
+  );
+  if (!commented.ok) {
+    console.warn(`[ephemeral-db] Konnte Cache-Hash nicht setzen: ${commented.stdout}`);
+  }
+  console.log(`[ephemeral-db] Cache-Template ${CACHE_DB_NAME} neu gebaut (Hash hinterlegt).`);
+}
+
 interface WorkerHandle {
   dbName: string;
   dbUrl: string;
@@ -360,7 +485,11 @@ async function startWorker(dbName: string): Promise<WorkerHandle> {
 async function main(): Promise<number> {
   // Verwaiste Wegwerf-DBs früherer (hart abgebrochener) Läufe aufräumen, bevor
   // die neue Lauf-DB angelegt wird. Nur verbindungslose, ausreichend alte DBs.
-  sweepOrphans(adminUrl!, { log: (m) => console.log(`[ephemeral-db] ${m}`) });
+  // Die langlebige Cache-Template-DB (Task #907) ist hier explizit geschützt.
+  sweepOrphans(adminUrl!, {
+    log: (m) => console.log(`[ephemeral-db] ${m}`),
+    protectedDbs: new Set([CACHE_DB_NAME]),
+  });
   // ... und die zurückgebliebenen per-Worker-Server-Logs (Task #904). Aktive
   // Schwester-Läufe schreiben fortlaufend (frische mtime) → geschützt; die N
   // jüngsten werden ohnehin behalten.
@@ -372,28 +501,29 @@ async function main(): Promise<number> {
   // so kostet der Client-Build kaum zusätzliche Wall-Clock-Zeit.
   const clientBuildPromise = buildClientBundle ? buildClientAsync() : null;
 
-  // 1) Template-DB anlegen, Schema pushen, seeden.
-  console.log(`[ephemeral-db] Erstelle Template-DB ${templateDb} ...`);
-  const created = psql(adminUrl!, `CREATE DATABASE "${templateDb}"`);
-  if (!created.ok) fail(`CREATE DATABASE fehlgeschlagen: ${created.stdout}`);
-
-  const templateEnv: NodeJS.ProcessEnv = { ...baseEnv, DATABASE_URL: templateUrl };
-  console.log("[ephemeral-db] Pushe Drizzle-Schema (drizzle-kit push --force) ...");
-  run("npx", ["drizzle-kit", "push", "--force"], templateEnv);
-  console.log("[ephemeral-db] Seede Test-Superadmin ...");
-  run("npx", ["tsx", "scripts/ci-seed-superadmin.ts"], templateEnv);
-  // Basis-Stammdaten (Nicht-System-Leistungen hauswirtschaft/alltagsbegleitung
-  // inkl. Budget-Töpfen) seeden — die Startup-Hooks legen nur System-Services +
-  // Pflegekassen an, viele Tests setzen aber diese zwei Basis-Leistungen voraus.
-  console.log("[ephemeral-db] Seede Basis-Referenzdaten (Leistungen) ...");
-  run("npx", ["tsx", "scripts/seed-test-reference-data.ts"], templateEnv);
+  // 1) Per-Lauf-Template bereitstellen.
+  if (cachingEnabled) {
+    // Task #907: Geseedete Cache-Template-DB über Läufe hinweg wiederverwenden.
+    // Stimmt der Schema-/Seed-Hash mit dem zuletzt gebauten Cache überein,
+    // entfallen Push + Seeds komplett — die Per-Lauf-Template wird in EINEM
+    // CREATE DATABASE ... TEMPLATE aus dem Cache geklont (Sekunden statt ~24s).
+    const hash = computeTemplateHash();
+    ensureCacheTemplate(hash);
+    console.log(
+      `[ephemeral-db] Klone Per-Lauf-Template ${templateDb} aus Cache ${CACHE_DB_NAME} ...`,
+    );
+    cloneDbFromTemplate(templateDb, CACHE_DB_NAME);
+  } else {
+    // Caching deaktiviert (EPHEMERAL_DB_CACHE=0): altes Verhalten — Push + Seeds
+    // frisch direkt in die Per-Lauf-Template.
+    console.log(`[ephemeral-db] Erstelle Template-DB ${templateDb} (ohne Cache) ...`);
+    const created = psql(adminUrl!, `CREATE DATABASE "${templateDb}"`);
+    if (!created.ok) fail(`CREATE DATABASE fehlgeschlagen: ${created.stdout}`);
+    seedTemplateInto(templateUrl);
+  }
 
   // Restverbindungen zur Template kappen, damit das Klonen nicht blockiert.
-  psql(
-    adminUrl!,
-    `SELECT pg_terminate_backend(pid) FROM pg_stat_activity ` +
-      `WHERE datname = '${templateDb}' AND pid <> pg_backend_pid()`,
-  );
+  terminateConnections(templateDb);
 
   // 1b) Server EINMAL pro Lauf bündeln (Task #903/#908, beide Pfade). Alle Worker
   // booten danach aus diesem Bundle mit plain `node` (~3s statt ~13s tsx-Boot).

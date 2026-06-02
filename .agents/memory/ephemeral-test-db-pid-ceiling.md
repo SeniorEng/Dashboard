@@ -46,6 +46,21 @@ fires before the hard kill), output to a file, then grep in the same call. Setup
 (template push + per-worker clone + server boot) is ~40-60s, leaving ~40-50s of test
 budget → run small file subsets only.
 
+**UPDATE (2026-06): `tsx` itself HANGS in the bash tool shell.** Even a trivial
+`node_modules/.bin/tsx -e "console.log('x')"` exits 124 (timeout) with an EMPTY output
+file. So the "synchronous bash run" method above does NOT work for anything launched via
+`tsx` (the orchestrator `scripts/with-ephemeral-db.ts`, `npx tsx ...`) — it produces zero
+output and never makes progress. `restart_workflow` on `test`/`e2e-smoke` reliably TIMES
+OUT ("waiting for run environment to rebuild") and a stuck old run (status RUNNING) keeps
+getting re-dumped into freshly-named `/tmp/logs/*.log` files with the SAME run_id/content,
+so "new logs" ≠ a fresh run — always check the `<run_id>` to tell a real rerun from a
+re-snapshot. **What DOES work in the bash shell:** `vitest` (run unit/integration tests
+directly), `psql` (verify raw SQL mechanics against the real DB), `tsc`, and plain `node`.
+**How to verify tsx-only orchestrator logic here:** keep the pure decision/IO logic in a
+plain `.ts` module unit-testable by vitest, verify the exact SQL it issues by hand via
+psql, and rely on tsc for wiring. Full warm/cold end-to-end of the orchestrator is only
+truly exercisable on the CI runner (or whatever env runs the workflow without the hang).
+
 **Note (2026-06): all 5 workflows auto-re-fire together** in this env (platform
 re-runs, not your edits — `.local` bundle writes are gitignored and do NOT trigger the
 watcher). So a "clean isolated" full 2-worker run is effectively impossible here: a

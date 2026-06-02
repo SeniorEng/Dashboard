@@ -1,0 +1,123 @@
+// ---------------------------------------------------------------------------
+// Wiederverwendbare, geseedete Template-DB für Testläufe (Task #907)
+//
+// Seit Task #903 ist der dominante Fixkosten-Block beim Start eines Testlaufs
+// nicht mehr der Server-Boot, sondern der Aufbau der Template-DB:
+// `drizzle-kit push --force` + Superadmin-Seed + Basis-Referenzdaten-Seed —
+// auf JEDEM Lauf frisch (~12s seriell), obwohl sich Schema + Seeds zwischen den
+// meisten Läufen NICHT ändern.
+//
+// Idee: Wir halten EINE persistente, geseedete Cache-Template-DB
+// (`cc_test_tmpl_cache`) vor und schlüsseln sie über einen Hash von
+// `shared/schema/**` + `drizzle.config.ts` + den Seed-Skripten. Stimmt der Hash
+// beim nächsten Lauf mit dem in der Cache-DB hinterlegten überein (gespeichert
+// als `COMMENT ON DATABASE`), überspringen wir Push + Seeds komplett und klonen
+// die Per-Lauf-Template direkt aus dem Cache. Ändert sich das Schema oder ein
+// Seed-Skript, kippt der Hash und der Cache wird einmalig neu gebaut.
+//
+// ISOLATION bleibt erhalten: Jeder Lauf klont weiterhin eine eigene Wegwerf-
+// Per-Lauf-Template (und daraus die Worker-DBs) — NUR die geseedete Vorlage wird
+// über Läufe hinweg wiederverwendet, nie direkt beschrieben.
+//
+// Diese Datei enthält bewusst die reine, testbare Entscheidungs-/Hash-Logik
+// (keine DB-Seiteneffekte) — das psql-/Provisionierungs-Drumherum lebt im
+// Orchestrator `scripts/with-ephemeral-db.ts`.
+// ---------------------------------------------------------------------------
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+
+import { DB_PREFIX } from "./ephemeral-db-sweep.ts";
+
+// Stabiler, fixer Name der wiederverwendeten Cache-Template-DB. Behält das
+// `cc_test_`-Präfix (Sicherheits-Invariante: Orchestrator/Sweep fassen nur
+// solche DBs an), wird aber im Orphan-Sweep explizit GESCHÜTZT (sie ist
+// langlebig + zwischen Läufen verbindungslos und sähe sonst wie eine Waise aus).
+export const CACHE_DB_NAME = `${DB_PREFIX}tmpl_cache`;
+
+// Wird in den Hash gemischt, damit wir bei Änderungen am Cache-/Seed-VERFAHREN
+// (nicht nur an den gehashten Dateien) alle bestehenden Caches gezielt
+// invalidieren können. Bei inhaltlichen Änderungen am Build-Ablauf hochzählen.
+export const CACHE_FORMAT_VERSION = "1";
+
+// Quellen, deren Inhalt das Template-Ergebnis (Schema + Seeds) bestimmt.
+// Verzeichnisse werden rekursiv gehasht, Einzeldateien direkt.
+export const HASH_SOURCE_DIRS = ["shared/schema"] as const;
+export const HASH_SOURCE_FILES = [
+  "shared/schema.ts",
+  "drizzle.config.ts",
+  "scripts/ci-seed-superadmin.ts",
+  "scripts/seed-test-reference-data.ts",
+] as const;
+
+function collectDirFiles(absDir: string): string[] {
+  let entries: ReturnType<typeof readdirSync>;
+  try {
+    entries = readdirSync(absDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const files: string[] = [];
+  for (const entry of entries) {
+    const full = join(absDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectDirFiles(full));
+    } else if (entry.isFile()) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+function fileExists(abs: string): boolean {
+  try {
+    return statSync(abs).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// Sammelt alle hashrelevanten Dateien (absolut, dedupliziert, sortiert) unter
+// `rootDir`. Sortierung garantiert plattform-/reihenfolgenunabhängige Hashes.
+export function collectHashableFiles(rootDir: string): string[] {
+  const found = new Set<string>();
+  for (const dir of HASH_SOURCE_DIRS) {
+    for (const f of collectDirFiles(join(rootDir, dir))) found.add(f);
+  }
+  for (const f of HASH_SOURCE_FILES) {
+    const abs = join(rootDir, f);
+    if (fileExists(abs)) found.add(abs);
+  }
+  // Nach RELATIVEM Pfad mit „/"-Normalisierung sortieren, damit der Hash auf
+  // jeder Plattform identisch ausfällt.
+  return [...found].sort((a, b) =>
+    relative(rootDir, a).split(sep).join("/") <
+    relative(rootDir, b).split(sep).join("/")
+      ? -1
+      : 1,
+  );
+}
+
+// Deterministischer SHA-256 über Format-Version + (relativer Pfad, Inhalt) jeder
+// Quelldatei. Reine Funktion bis auf das Lesen der Dateien.
+export function computeTemplateHash(rootDir: string = process.cwd()): string {
+  const h = createHash("sha256");
+  h.update(`v${CACHE_FORMAT_VERSION}\0`);
+  for (const abs of collectHashableFiles(rootDir)) {
+    const rel = relative(rootDir, abs).split(sep).join("/");
+    h.update(rel);
+    h.update("\0");
+    h.update(readFileSync(abs));
+    h.update("\0");
+  }
+  return h.digest("hex");
+}
+
+// Reine Entscheidung: Ist die vorhandene Cache-DB für den aktuellen Hash frisch?
+// `storedHash === null` => keine Cache-DB / kein hinterlegter Hash => nicht frisch.
+export function isCacheFresh(
+  storedHash: string | null,
+  currentHash: string,
+): boolean {
+  return storedHash !== null && storedHash.length > 0 && storedHash === currentHash;
+}
