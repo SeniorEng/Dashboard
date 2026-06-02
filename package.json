@@ -15,6 +15,8 @@
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
     "test:sweep-dbs": "tsx scripts/sweep-test-dbs.ts",
     "test:verify-cache": "tsx scripts/verify-template-cache.ts",
+    "test:verify-concurrent-cache": "tsx scripts/verify-concurrent-cache-build.ts",
+    "test:verify-concurrent-clone": "tsx scripts/verify-concurrent-template-clone.ts",
     "budget:correct-km-drift": "tsx server/scripts/reconcile-km-drift.ts",
     "lint": "eslint client/src server/routes --max-warnings 0",
     "test:e2e": "playwright test",

@@ -403,6 +403,12 @@ jobs:
       - name: Verify template cache (cold vs warm + invalidation)
         run: npm run test:verify-cache
 
+      - name: Verify concurrent cold cache builds serialize (no crash)
+        run: npm run test:verify-concurrent-cache
+
+      - name: Verify concurrent warm template clones don't collide (no crash)
+        run: npm run test:verify-concurrent-clone
+
   # -------------------------------------------------------------------------
   # Mutation-Testing-Gate (Task #770): Stryker im Incremental-Mode, NUR auf
   # den in diesem PR geänderten kritischen Berechnungs-Modulen. Läuft rein
