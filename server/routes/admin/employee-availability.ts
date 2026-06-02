@@ -12,7 +12,7 @@ import {
   employeeTimeEntries,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { timeToMinutes, minutesToTimeDisplay, todayISO } from "@shared/utils/datetime";
+import { timeToMinutes, minutesToTimeDisplay, todayISO, isValidCalendarDate } from "@shared/utils/datetime";
 import { loadEmployeesWeeklyAvailability, buildDateRange } from "../../services/employee-availability";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
@@ -107,12 +107,6 @@ function collectBlockedSlots(
     }
   }
   return blockedSlots;
-}
-
-function isValidCalendarDate(dateStr: string): boolean {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }
 
 router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit konnte nicht geladen werden", async (req: Request, res: Response) => {

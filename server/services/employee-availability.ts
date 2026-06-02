@@ -5,7 +5,7 @@ import {
   prospects,
   employeeTimeEntries,
 } from "@shared/schema";
-import { timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay } from "@shared/utils/datetime";
+import { timeToMinutes, addDays as addDaysShared, minutesToTimeDisplay, isValidCalendarDate } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { eq, and, isNull, inArray, sql, asc } from "drizzle-orm";
 import { appointmentsRepo, employeeTimeEntriesRepo } from "../repos";
@@ -76,12 +76,6 @@ function collectBlockedSlots(
     }
   }
   return blockedSlots;
-}
-
-function isValidCalendarDate(dateStr: string): boolean {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }
 
 export function buildDateRange(startDate: string, days: number): string[] {

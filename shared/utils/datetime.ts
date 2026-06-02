@@ -107,6 +107,17 @@ export function formatDateForDisplay(
 }
 
 /**
+ * Prüft ob ein "YYYY-MM-DD"-String einem real existierenden Kalenderdatum
+ * entspricht (fängt z. B. den 31. Februar oder den 13. Monat ab).
+ * @param dateStr - Datum als "YYYY-MM-DD" String
+ */
+export function isValidCalendarDate(dateStr: string): boolean {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
+/**
  * Prüft ob ein Datumsstring in der Vergangenheit liegt.
  */
 export function isPast(dateString: string): boolean {
