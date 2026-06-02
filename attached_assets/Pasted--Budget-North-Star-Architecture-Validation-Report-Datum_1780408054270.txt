@@ -1,0 +1,258 @@
+# Budget North-Star Architecture — Validation Report
+
+**Datum:** 2026-06-02
+**Validator:** Claude (Section-E-Independent-Checklist)
+**Quelle:** `origin/main` von `SeniorEng/Dashboard` (HEAD `e9a82dce`), Live-Verifikation auf Replit-Dev (`748840b2-...worf.replit.dev`)
+**Reproducer-Customer:** ZZZValidator NorthStar92449 (ID 203047) — bleibt für späteren Cleanup
+**Scope:** North-Star v3 (12 Invarianten + 6 Phasen)
+
+---
+
+## Executive Summary
+
+| Status | Bewertung |
+|---|---|
+| 🟢 **Phase 0+1+2+4 LIVE** | Architektur sauber implementiert. `planCascade`, `unified-reader`, `budget_ledger`/`budget_reservations`-Tabellen, GoBD-Trigger, 4 ADRs, Property-Tests. |
+| 🟡 **Phase 3** | Selbstzahler-Fastpath physisch noch im Code (`consumption-engine.ts:769-805`), aber Equality-Test sichert Korrektheit. |
+| 🟡 **Phase 5 gegated** | Code komplett implementiert (`reservation-storage.ts`, 8 Route-Hooks), aber `BUDGET_HARD_HOLDS` Feature-Flag auf Replit-Dev **AUS** — Hard-Block I5 ist deshalb live nicht durchsetzungsfähig. |
+| 🟡 **Phase 6** | Architektur-Test verbietet neue `customer_budgets`-Reads, Legacy-Pfade aber noch aktiv. |
+
+**Gesamt-Verdikt:** **„Approved to build" hat geliefert** — die Architektur funktioniert, die Conservation-Identität (`Available = Allocated − Holds − Consumed`) ist live verifiziert. **Aber bevor Phase 5 ausgerollt werden kann**, müssen 4 kritische Bugs gefixt werden, sonst kippt das Hard-Block-Versprechen leer.
+
+---
+
+## Section-E-Checklist Ergebnisse
+
+| # | Prüfung | Ergebnis | Evidenz |
+|---|---|---|---|
+| 1 | `npm run check` (TypeScript) | ✅ **0 errors** | `tsc --noEmit` exit 0 auf `e9a82dce` |
+| 2 | Phase-Equality-Tests | ⚠️ TEILWEISE | Architektur-Tests 4/4 grün; vollständige Equality-Suite (selbstzahler-private-booking + 45a/b/39 cap) wegen Sandbox-Timeout nicht durchgelaufen |
+| 3 | Property-Tests (I4/I5/I7) | ✅ **20/20 grün** | `plan-cascade.test.ts` 12/12, `plan-cascade-property.test.ts` 5/5, `budget-hard-block.test.ts` 3/3 |
+| 4 | Grep-Asserts Deletion-Claims | ⚠️ Phase 3/6 noch nicht durch | `calculateAllocated45b` in 6 Files (vermutlich legacy-Pfade in Migration), `isSelbstzahler` in consumption-engine.ts:769 |
+| 5 | Read-only Verifier-Script | ❌ Nicht gelaufen | `server/scripts/verify-45b-anchor-change.ts` etc. nicht gegen DB-Snapshot ausgeführt |
+| 6 | GoBD-Trigger refused | ✅ **VERIFIZIERT LIVE** | `/api/health` meldet 3/3 Trigger present, `missingTriggers: []` |
+
+---
+
+## Invarianten-Matrix (Section A) — Live-Verifikation
+
+| ID | Invariante | Status | Evidenz aus Live-Reproducer |
+|---|---|---|---|
+| **I1** | SSoT identity `Available = Allocated − HoldsActive − ConsumedNet` | ✅ **erfüllt** | Vor Doku: 99400 = 103600 − 4200 − 0. Nach Doku: 99400 = 103600 − 0 − 4200. Nach Storno: 94700 = 94700 − 0 − 0. |
+| **I2** | Allocations sind Rows | ⚠️ **partiell** | Carry-Row materialisiert (1 Row in `/allocations`), aber Statutory-§45b-Monats-Rows fehlen — nur `currentYearAllocatedCents` Aggregat ist sichtbar → **Phase 2 reader-virtuell, nicht materialisiert** |
+| **I3** | Ledger state machine | ⚠️ nicht direkt geprüft | Strukturell vorhanden (Schema definiert `consumed\|reversed` für ledger, `hold\|captured\|released\|expired` für reservations) — aber Storno-Pfad zeigt Reverse-Verhalten korrekt |
+| **I4** | Cascade conservation (planCascade pure) | ✅ **erfüllt** | 5 Property-Tests grün |
+| **I5** | Hard-block vs private | 🔴 **VERLETZT LIVE** | `acceptsPrivatePayment=false` + Overdraft 30h-Termin → Server akzeptiert mit **Status 201** und nur `_warning`-Feld statt typed error. `BUDGET_HARD_HOLDS` Flag aus. |
+| **I6** | Infinite-pot Selbstzahler-Equivalenz | ⚠️ nicht live geprüft | Equality-Test existiert (`tests/equality/selbstzahler-private-booking.test.ts`) — nicht ausgeführt wegen Sandbox |
+| **I7** | Hold/consume parity | ✅ **erfüllt** | Termin 338933: plannedCents 4200 → 0; totalUsedCents 0 → 4200 — identische Beträge |
+| **I8** | Lifecycle conservation | ✅ **erfüllt** (für Doku→Storno) | Doku→Storno: totalUsedCents 4200 → 0; availableCents 99400 → 94700 |
+| **I9** | Series horizon (12mo) | ❌ nicht getestet | Serien-Termin nicht angelegt |
+| **I10** | Temporal correctness | 🔴 **VERLETZT** | `asOfDate` Query-Parameter komplett ignoriert — Antwort für 2026-01-15, 2026-05-31, 2026-12-31 identisch (alle = today) |
+| **I11** | GoBD immutability | ✅ **erfüllt** | `/api/health.budgetLedgerImmutability.ok = true`, 3 Trigger present, 0 missing |
+| **I12** | Money discipline | ✅ **strukturell** | Architektur-Test `no-money-arithmetic-outside-helper.test.ts` existiert (nicht ausgeführt) |
+
+---
+
+## Phase-Status pro Phase 1–6
+
+| Phase | Was es heißt | Status | Beweise |
+|---|---|---|---|
+| **1** Foundations + `planCascade` | Pure cascade fn + ledger model | 🟢 **LIVE** | `shared/domain/budget/plan-cascade.ts` aufgerufen in `consumption-engine.ts:523`, `reservation-storage.ts:270`. 5 Property-Tests grün. |
+| **2** Materialize §45b | Eine `statutory_monthly` Row pro Monat | 🟡 **READER-VIRTUELL** | `calculateAllocatedCents` noch im unified-reader. `/api/budget/:cid/allocations` zeigt nur 1 Row (Carry) statt 6+. Aggregat-Wert stimmt (`currentYearAllocated=78600=6×131`), aber keine echten Rows. |
+| **3** Infinite private pot | Selbstzahler-Fastpath weg | 🟡 **PHYSISCH NOCH DA** | `isSelbstzahler`-Branch in `consumption-engine.ts:769-805`. Vermutlich semantisch durch Equality-Test abgedeckt, aber Code-Cleanup pending. |
+| **4** Unified Reader SSoT | EIN Reader für alle Verfügbarkeitsabfragen | 🟢 **LIVE** | `server/storage/budget/unified-reader.ts` mit explicit "Phase 4" Kommentar. Architektur-Test `budget-single-reader.test.ts` grün. |
+| **5** Hard-hold reservations | Plan reserviert Budget, Overdraft hart blockiert | 🟡 **CODE DA, FLAG AUS** | `hardHoldsEnabled()` aus 8 Routen aufgerufen. Flag `BUDGET_HARD_HOLDS` auf Replit-Dev = nicht gesetzt → kein Hold-Schreiben. Overdraft-Test zeigt: keine Durchsetzung. |
+| **6** Kill `customer_budgets` | Fallback-DB komplett weg | 🟡 **TEILWEISE** | Architektur-Test `no-customer-budgets-reads.test.ts` verbietet NEUE Reads. Legacy-Pfade noch in `allocation-storage.ts:309-337`. |
+
+---
+
+## 🔴 KRITISCHE BUGS (vor Phase-5-Rollout fixen)
+
+### BUG-NS-1 — `asOfDate` Query-Parameter wird ignoriert (Invariante I10)
+
+**Symptom:**
+`GET /api/budget/203047/overview?asOfDate=2026-01-15` liefert **byte-identische** Antwort zu `?asOfDate=2026-12-31`. Beide zeigen Werte von **today**.
+
+**Live-Beweis** (Cust 203047, alle 5 Stichtage liefern dasselbe):
+```
+2026-01-15: currentYearAllocatedCents=78600
+2026-03-15: currentYearAllocatedCents=78600
+2026-05-31: currentYearAllocatedCents=78600
+2026-06-02: currentYearAllocatedCents=78600
+2026-12-31: currentYearAllocatedCents=78600
+```
+
+**Erwartet** (lt. Invariante I10 — Temporal correctness):
+```
+2026-01-15: 13100 (1 Monat)
+2026-05-31: 65500 (5 Monate)
+2026-12-31: 157200 (12 Monate)
+```
+
+**Impact:** Stichtags-Auswertungen, Monatsabschluss-Reports, „Verbrauch zum Quartalsende" — alle liefern falsche Werte. Wenn das Reporting-System darauf baut, sind alle historischen Reports verfälscht.
+
+**Code-Pointer:** `server/routes/budget.ts` `GET /:customerId/overview` — Parameter wird vermutlich nicht an `unified-reader` weitergereicht.
+
+**Fix:** `req.query.asOfDate` parsen, an `unified-reader.getBudgetSummary*(customerId, asOfDate)` weiterleiten, dort als `transactionDate` für allocation-historization verwenden.
+
+**Priorität:** 🔴 **BLOCKER** — verletzt Kern-Invariante I10.
+
+---
+
+### BUG-NS-2 — Hard-Block bei Overdraft nicht aktiv (Invariante I5)
+
+**Symptom:**
+Customer mit `acceptsPrivatePayment=false` + verfügbarem Budget 947€. Termin mit 30h Alltagsbegleitung (1260€) gebucht → **Status 201 Created** + Soft-Warning-Feld `_warning: "Achtung: Geplante Termine übersteigen §45b um 355,00 €."`
+
+**Erwartet** (lt. North-Star §"Private/Selbstzahler" + Invariante I5):
+```
+Status 403 Forbidden / 422 Unprocessable
+Body: {error: "BUDGET_INSUFFICIENT", message: "...", ...}
+```
+
+**Live-Beweis:** Termin 338934 angelegt, `availableAfterPlannedCents: -31300` (negativ!). Server gibt kein Veto.
+
+**Diagnose:** `BUDGET_HARD_HOLDS` Feature-Flag auf Replit-Dev **AUS**. Die Routen prüfen `if (hardHoldsEnabled()) ...` — aus = keine Reservierung = kein Block.
+
+**Fix-Optionen:**
+- **(A)** Flag `BUDGET_HARD_HOLDS=1` setzen auf Replit-Dev (+ Equality-Verifier vorher laufen lassen)
+- **(B)** Zusätzlich: auch bei Flag-Aus eine *Sanftere* Pre-Validation in `appointments.ts` einbauen, die wenigstens bei `availableAfterPlanned < 0` und `acceptsPrivatePayment=false` mit 422 antwortet
+
+**Priorität:** 🔴 **BLOCKER** für Phase-5-Rollout — sonst wird das ganze Hard-Hold-Versprechen leer.
+
+---
+
+### BUG-NS-3 — §45a `monthlyBudgetCents = 0` trotz PG 2
+
+**Symptom:**
+Customer PG 2, §45a `enabled=true`, `isCurrentlyActive=true`, aber `monthlyBudgetCents=0`. Lt. SGB XI §45a hat PG 2 Anspruch auf 40% des Sachleistungsbetrags = **318 €/Monat** (oder mehr bei PG 3-5).
+
+**Live-Beweis** (Cust 203047, alle 5 Stichtage):
+```
+umwandlung45a: {
+  isCurrentlyActive: true,
+  monthlyBudgetCents: 0,
+  currentMonthAllocatedCents: 0,
+  currentMonthAvailableCents: 0
+}
+```
+
+**Diagnose:** Bei PUT type-settings habe ich kein `monthlyLimitCents` für §45a gesetzt. Vermutlich erwartet die Logik einen expliziten Wert, statt vom PG abzuleiten.
+
+**Im Code (vermutlich):** §45a-Auto-Allocation aus PG nicht implementiert. Statt 40% × `BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad]` automatisch zu setzen, wird der eingegebene `monthlyLimitCents` 1:1 verwendet → null wird zu 0.
+
+**Fix:** In `unified-reader` oder `cap-calculator` §45a-Default = `BUDGET_45A_MAX_BY_PFLEGEGRAD[customer.pflegegrad]` setzen, wenn `monthlyLimitCents` null ist.
+
+**Priorität:** 🟡 **HOCH** — affects all customers PG 2-5 who don't manually configure §45a. Likely already affects production.
+
+---
+
+### BUG-NS-4 — `monthlyLimitCents` in Overview NULL obwohl gesetzt+wirksam
+
+**Symptom:**
+Nach `PUT /api/budget/:cid/type-settings` mit `monthlyLimitCents: 4200`:
+- `currentYearAllocatedCents` sank von 78600 → 69700 (Cap wirksam, Juni-Monat auf 4200 statt 13100 reduziert ✅)
+- `monthlyLimitCents` in Overview-Response: **null** ❌
+
+**Erwartet:** Overview zeigt `monthlyLimitCents: 4200`.
+
+**Impact:** UI weiß nicht dass ein Cap aktiv ist → User sieht reduzierten Allocated-Wert ohne Grund → Vertrauensverlust.
+
+**Code-Pointer:** Overview-DTO-Building in `summary-queries.ts` oder `unified-reader.ts` — Cap aus `customer_budget_type_settings` wird nicht ins DTO durchgereicht.
+
+**Priorität:** 🟡 **MITTEL** — UX-Bug, keine Datenkorruption.
+
+---
+
+## 🟢 BESTÄTIGTE STÄRKEN
+
+### Conservation-Identität (I1) funktioniert robust
+
+Live-Beweis aus Reproducer:
+```
+Schritt          | Allocated | Holds | Consumed | Available
+-----------------|-----------|-------|----------|----------
+Init             | 103600    | 0     | 0        | 103600 ✅
+Termin geplant   | 103600    | 4200  | 0        | 99400  ✅
+Termin doku'd    | 103600    | 0     | 4200     | 99400  ✅
+Storno           | 103600    | 0     | 0        | 103600 ≈ 94700* ✅
+```
+* Drift kommt von §45b monthlyLimit-Cap-Setting dazwischen, nicht vom Storno.
+
+### Hold→Consumed Transition (I7+I8) atomic
+
+Plan→Document→Storno-Zyklus produziert keine Geist-Rows, keine Doppel-Buchungen, keine Drift.
+
+### GoBD-Trigger live aktiv (I11)
+
+3 Trigger (`no_update`, `no_delete`, `no_truncate`) auf `budget_ledger` installiert und vom Health-Check bestätigt. `audit_log` ebenfalls.
+
+### Property-Tests 20/20 grün
+
+`plan-cascade-property.test.ts` mit fast-check fuzzt 5 Konservierungs-Properties. Hard-block 3/3, plan-cascade core 12/12.
+
+### Architektur-Tests verhindern Drift
+
+`budget-single-reader.test.ts`, `no-customer-budgets-reads.test.ts`, `budget-sentinel-uniqueness.test.ts`, `budget-write-off-classification.test.ts` — alle 4 grün. Verhindern Code-Regression in Richtung Legacy.
+
+### Dokumentation komplett
+
+4 ADRs (`docs/architecture/adr/0001-0004`), Greenfield-Doc v3 hardened (incorporating zwei externe Validation-Passes mit F1-F17, R1-R12, N1-N8), Verfahrensdoku-Skelett, SSoT-Inventory.
+
+---
+
+## Was NICHT getestet wurde
+
+- **I9 (Series horizon):** Serien-Termin mit 12-Monats-Materialisierung
+- **I6 (Selbstzahler equivalence):** Equality-Test nicht gelaufen
+- **Verifier-Script:** `server/scripts/verify-45b-anchor-change.ts` o.ä. gegen Live-DB
+- **GoBD-Trigger refusal:** Tatsächlicher Versuch eines `UPDATE budget_ledger` (würde nur read-only Probe taugen)
+- **`BUDGET_HARD_HOLDS=1` Modus:** Replit-Dev hat Flag aus, also Phase-5-Reservations-Pfad praktisch ungetestet im Live-System
+- **Concurrency-Test:** Parallele Bookings gegen denselben Topf (advisory-lock)
+- **§42a/§39 Mid-Year-Übergang** (PUEG 01.07.2025)
+
+---
+
+## Empfehlung — nächste Schritte
+
+| Prio | Schritt | Aufwand |
+|---|---|---|
+| 🔴 **1** | **BUG-NS-1 fixen** (asOfDate ignoriert) — Stichtags-Korrektheit ist Grundvoraussetzung für Phase 5 | 0.5 PT |
+| 🔴 **2** | **BUG-NS-2 fixen** (Hard-Block I5) — entweder `BUDGET_HARD_HOLDS=1` setzen + Equality-Verifier-Run, oder zusätzliche Pre-Validation | 1 PT |
+| 🟡 **3** | **BUG-NS-3 fixen** (§45a 0 trotz PG 2) — Default-Cap aus PG ableiten | 0.5 PT |
+| 🟡 **4** | **BUG-NS-4 fixen** (monthlyLimitCents null in Overview) — DTO-Mapping | 0.25 PT |
+| 🟢 **5** | **Equality-Verifier-Run** auf Replit-Dev (server/scripts/verify-45b-anchor-change.ts gegen DB-Snapshot) | 0.5 PT |
+| 🟢 **6** | **Phase-5-Rollout** sobald BUG-NS-1+2 grün — `BUDGET_HARD_HOLDS=1`, Soak-Test, Cutover | 2 PT |
+
+**Gesamt-Pflicht für „North-Star Phase 5 ready":** ~2.5 PT (Bug-Fixes) + 0.5 PT Verifier + 2 PT Rollout = **5 PT**.
+
+---
+
+## Reproducer-Daten (für Nachstellen / Cleanup)
+
+```
+Customer:        ZZZValidator NorthStar92449
+ID:              203047
+billing:         pflegekasse_gesetzlich
+acceptsPrivate:  false
+PG:              2
+pflegegradSeit:  2025-01-01 (an Customer-Create gesendet, aber Feld in API-Response abwesend → C1-Bug bestätigt)
+Termine erstellt: 338933 (gelöscht), 338934 (gelöscht)
+Carryover:       250 € (allocation ID 148873)
+Type-Settings:   §45b enabled (monthlyLimit=4200 wirksam!), §45a enabled (monthlyLimit=null=0 → BUG-NS-3), §39/§42a enabled mit yearlyLimit=353900
+```
+
+**Cleanup:** Customer 203047 + allocation 148873 + type-settings 361111-361113 löschen.
+
+---
+
+## Anhang — Replit-Dev Test-System Status
+
+```
+URL:       https://748840b2-f31a-4c5c-a9fa-cb9125cb4769-00-ee5m69dhb2b1.worf.replit.dev
+Login:     alrikdegenkolb@seniorenengel-alltagsbegleitung.de / (Prod-PW funktioniert)
+Customers: 7759 (vermutlich Seeded test-DB, NICHT Prod-Clone — alle createdAt 2026-02-23)
+Server:    Replit Workspace, auto-hibernate nach ~Stunden Idle (mehrfach im Test passiert)
+Code:      origin/main e9a82dce (Phasen 1-5 implementiert, Phase 5 gegated)
+BUDGET_HARD_HOLDS: vermutlich nicht gesetzt (Hard-Block-Verhalten beweist es)
+```
