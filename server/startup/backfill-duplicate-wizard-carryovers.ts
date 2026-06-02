@@ -1,8 +1,9 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { db } from "../lib/db";
+import type { Tx } from "../lib/db";
 import { budgetAllocations, budgetTransactions } from "@shared/schema";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
+import type { BudgetMigrationSummary } from "./budget-migration-runner";
 
 /**
  * Task #601 — Backfill: Duplikate §45b-Carryover (Wizard vs Auto).
@@ -18,7 +19,7 @@ import { log } from "../lib/log";
  * lebende Carryover-Zeilen für dasselbe Zielfenster
  * (`validFrom = YYYY-01-01`, `expiresAt = YYYY-06-30`).
  *
- * Dieser Backfill läuft beim Start idempotent:
+ * Dieser Backfill läuft idempotent:
  *   1) Lade alle lebenden §45b-Carryover-Allokationen (`deleted_at IS NULL`).
  *   2) Gruppiere pro (customer_id, validFrom, expiresAt).
  *   3) In Gruppen mit ≥ 2 Zeilen: behalte genau eine — bevorzugt die
@@ -38,9 +39,16 @@ import { log } from "../lib/log";
  * Nach dem Backfill greift der harte Dedup in
  * `ensureYearlyCarryover45b` (Year + validFrom/expiresAt-Fenster), sodass
  * keine neuen Duplikate entstehen.
+ *
+ * Task #896 — Auf das Budget-Migrations-Framework migriert: läuft jetzt als
+ * (tx) => BudgetMigrationSummary innerhalb EINER guarded Transaktion (atomar,
+ * GoBD-Bypass + Conservation-Pre-/Post-Check). Muss NACH
+ * `backfillBudgetHistorization` laufen (Registry-Aufruf-Reihenfolge in
+ * `server/index.ts`), damit der partielle Unique-Index auf
+ * `budget_allocations` steht.
  */
-export async function backfillDuplicateWizardCarryovers(): Promise<void> {
-  const allCarryovers = await db
+export async function backfillDuplicateWizardCarryovers(tx: Tx): Promise<BudgetMigrationSummary> {
+  const allCarryovers = await tx
     .select()
     .from(budgetAllocations)
     .where(
@@ -51,7 +59,7 @@ export async function backfillDuplicateWizardCarryovers(): Promise<void> {
       ),
     );
 
-  if (allCarryovers.length === 0) return;
+  if (allCarryovers.length === 0) return { changed: 0, note: "keine Carryover-Zeilen" };
 
   // Gruppe-Key: customer_id|validFrom|expiresAt
   const groups = new Map<string, typeof allCarryovers>();
@@ -84,7 +92,7 @@ export async function backfillDuplicateWizardCarryovers(): Promise<void> {
     for (const dupe of toDelete) {
       // Schutz: niemals eine Zeile soft-löschen, an der noch Transaktionen
       // hängen — sonst würden Storno-/Audit-Pfade ins Leere zeigen.
-      const linkedTx = await db
+      const linkedTx = await tx
         .select({ id: budgetTransactions.id })
         .from(budgetTransactions)
         .where(eq(budgetTransactions.allocationId, dupe.id))
@@ -99,7 +107,7 @@ export async function backfillDuplicateWizardCarryovers(): Promise<void> {
         continue;
       }
 
-      await db
+      await tx
         .update(budgetAllocations)
         .set({ deletedAt: new Date() })
         .where(eq(budgetAllocations.id, dupe.id));
@@ -130,6 +138,8 @@ export async function backfillDuplicateWizardCarryovers(): Promise<void> {
             amountCents: dupe.amountCents,
             task: "#601",
           },
+          undefined,
+          tx,
         );
       }
 
@@ -144,4 +154,9 @@ export async function backfillDuplicateWizardCarryovers(): Promise<void> {
       "startup",
     );
   }
+
+  return {
+    changed: softDeletedCount,
+    note: `soft-deleted=${softDeletedCount}, skippedLinked=${skippedLinkedCount}, customers=${affectedCustomers.size}`,
+  };
 }

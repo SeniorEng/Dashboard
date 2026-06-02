@@ -303,24 +303,18 @@ async function runStartupTasks() {
       log(`PKV-Provider-Seed fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #895: Verlässliches Budget-Migrations-Framework. Der Ledger
+    // Task #895 / #896: Verlässliches Budget-Migrations-Framework. Der Ledger
     // (`budget_migrations`) gatet einmalige Budget-Daten-Migrationen auf
-    // exactly-once; der Guarded-Runner klammert jede Migration mit einem
-    // Conservation-Pre-/Post-Check ein (Rollback bei NEU eingeführter
-    // Überziehung). Läuft NACH den GoBD-Immutability-Triggern (oben), damit der
-    // transaktions-lokale Bypass gegen aktive Trigger greift.
+    // exactly-once und wird HIER (früh) angelegt. Der eigentliche
+    // Guarded-Runner (`runBudgetDataMigrations`) läuft weiter unten — NACH
+    // `backfillBudgetHistorization` —, weil die dort registrierten
+    // Carryover-Backfills (#601/#684/#685) den partiellen Unique-Index auf
+    // budget_allocations voraussetzen.
     const { ensureMigrationLedger } = await import("./startup/ensure-migration-ledger");
     try {
       await ensureMigrationLedger();
     } catch (err) {
       log(`Migrations-Ledger-Setup fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { runBudgetDataMigrations } = await import("./startup/budget-migration-runner");
-    try {
-      await runBudgetDataMigrations();
-    } catch (err) {
-      log(`Budget-Daten-Migrationen fehlgeschlagen: ${err}`, "startup");
     }
 
     const { migrateInvoiceStornoRefs } = await import("./startup/migrate-invoice-storno-refs");
@@ -520,55 +514,23 @@ async function runStartupTasks() {
       log(`Budget-Settings-Chain-Audit fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #643: Bestands-Termine, die per Import-Update editiert wurden,
-    // haben einen gedrifteten Budget-Ledger (Schröder 12.01./21.01.2026).
-    // Idempotenter Backfill — nach erfolgreichem Rebook findet `findDriftRows`
-    // nichts mehr, weitere Läufe sind No-Op.
-    const { backfillImportUpdateBudgetDrift } = await import(
-      "./startup/backfill-import-update-budget-drift"
-    );
+    // Task #895 / #896 — Guarded Budget-Daten-Migrationen (Registry in
+    // `server/startup/budget-migration-runner.ts`). Der Ledger
+    // (`budget_migrations`) gatet jede einmalige Budget-Daten-Migration auf
+    // exactly-once; der Guarded-Runner klammert jede Migration mit einem
+    // Conservation-Pre-/Post-Check ein (Rollback bei NEU eingeführter
+    // Überziehung) und ist fault-isoliert. Läuft hier — NACH
+    // `backfillBudgetHistorization` (partieller Unique-Index auf
+    // budget_allocations) und NACH den GoBD-Immutability-Triggern (oben) —,
+    // weil die registrierten Carryover-Backfills (#601/#684/#685) genau diese
+    // Vorbedingungen brauchen und der transaktions-lokale GoBD-Bypass gegen
+    // aktive Trigger greifen muss. Der Ledger wurde bereits weiter oben
+    // (ensureMigrationLedger) angelegt.
+    const { runBudgetDataMigrations } = await import("./startup/budget-migration-runner");
     try {
-      await backfillImportUpdateBudgetDrift();
+      await runBudgetDataMigrations();
     } catch (err) {
-      log(`Import-Update-Drift-Backfill fehlgeschlagen: ${err}`, "startup");
-    }
-
-    // Task #601: Duplikate §45b-Carryover (Wizard-Pfad vs Auto-Pfad
-    // `ensureYearlyCarryover45b`) aus Altdaten räumen. Muss NACH der
-    // Historisierungs-Migration laufen, weil der partielle Unique-Index
-    // auf budget_allocations bis dahin u.U. noch nicht steht.
-    const { backfillDuplicateWizardCarryovers } = await import(
-      "./startup/backfill-duplicate-wizard-carryovers"
-    );
-    try {
-      await backfillDuplicateWizardCarryovers();
-    } catch (err) {
-      log(`Carryover-Duplikat-Backfill fehlgeschlagen: ${err}`, "startup");
-    }
-
-    // Task #684: Doppel-Carryovers (manuell + automatisch, gleiches Quelljahr)
-    // bereinigen — der partielle Unique-Index greift bei `month IS NULL`
-    // nicht, und vor dem Fix konnte der Auto-Pfad neben einer manuell
-    // gesetzten Zeile eine zweite 131 €-Zeile anlegen.
-    const { backfillTask684OrphanAutoCarryovers } = await import(
-      "./startup/backfill-task-684-orphan-auto-carryovers"
-    );
-    try {
-      await backfillTask684OrphanAutoCarryovers();
-    } catch (err) {
-      log(`Carryover-Doppelallokation-Backfill (#684) fehlgeschlagen: ${err}`, "startup");
-    }
-
-    // Task #685: vom #684-Backfill übersprungene Doppel-Carryovers, an
-    // denen bereits Buchungen hängen, gezielt auflösen — Buchungen werden
-    // auf die Keep-Zeile umgehängt und die Dupe-Zeile danach soft-gelöscht.
-    const { backfillTask685RelinkOrphanCarryoverTx } = await import(
-      "./startup/backfill-task-685-relink-orphan-carryover-tx"
-    );
-    try {
-      await backfillTask685RelinkOrphanCarryoverTx();
-    } catch (err) {
-      log(`Carryover-Tx-Relink-Backfill (#685) fehlgeschlagen: ${err}`, "startup");
+      log(`Budget-Daten-Migrationen fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #576: Idempotente Korrektur — durch den entfernten Storno-

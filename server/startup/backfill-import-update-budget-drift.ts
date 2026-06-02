@@ -1,11 +1,12 @@
 import { eq, and, like, isNull, asc } from "drizzle-orm";
-import { db } from "../lib/db";
+import type { Tx } from "../lib/db";
 import { appointments, users } from "@shared/schema";
 import { findDriftRows } from "../scripts/audit-appointment-budget-drift";
 import { rebookAppointmentConsumption } from "../storage/budget/km-rebook";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
+import type { BudgetMigrationSummary } from "./budget-migration-runner";
 
 /**
  * Task #643 — Einmaliger Backfill für Bestandsdrift aus Import-Updates.
@@ -22,46 +23,43 @@ import { log } from "../lib/log";
  * geprüft, ob ein Drift (km / Minuten / Datum) gegenüber den gebuchten
  * Consumption-Txs vorliegt — dieselbe Logik wie `findDriftRows`.
  *
- * Vorgehen pro Drift-Termin:
+ * Vorgehen pro Drift-Termin (atomar pro Termin via Savepoint):
  *   1. `rebookAppointmentConsumption` ausführen (Storno der alten Txs +
  *      Neu-Buchung mit den AKTUELLEN Termin-Werten).
  *   2. Audit-Eintrag `appointment_km_rebooked` mit Trigger `appointment_import:backfill`
- *      schreiben.
+ *      schreiben (Audit-Insert läuft mit `exec=savepoint`, damit ein
+ *      gescheiterter Audit-Schreib den Rebook desselben Termins zurückrollt).
  *
- * Idempotenz: Eigene Marker-Tabelle wäre Overkill — `findDriftRows`
- * liefert nach erfolgreichem Rebook keinen Drift mehr; ein zweiter
- * Migrationslauf ist deshalb von Natur aus No-Op. Verbleibende
- * Bestands-Termine (z.B. weil zwischenzeitlich erneut editiert) werden
- * dann beim nächsten Lauf erfasst.
+ * Task #896 — Auf das Budget-Migrations-Framework migriert: läuft jetzt als
+ * (tx) => BudgetMigrationSummary innerhalb EINER guarded Transaktion mit
+ * Conservation-Pre-/Post-Check. Per-Termin-Fehler werden über einen Savepoint
+ * isoliert (gescheiterter Termin wird übersprungen, ohne die übrigen
+ * abzuwürgen). Idempotenz unverändert: `findDriftRows` liefert nach
+ * erfolgreichem Rebook keinen Drift mehr — ein zweiter Lauf ist No-Op.
  */
-export async function backfillImportUpdateBudgetDrift(): Promise<void> {
-  let importUpdateAppointmentIds: number[];
-  try {
-    const rows = await db
-      .select({ id: appointments.id })
-      .from(appointments)
-      .where(and(
-        isNull(appointments.deletedAt),
-        like(appointments.notes, "Import-Update aus Altdaten%"),
-      ));
-    importUpdateAppointmentIds = rows.map(r => r.id);
-  } catch (err) {
-    log(
-      `Import-Update-Drift-Backfill übersprungen (DB nicht bereit): ${(err as Error).message}`,
-      "startup",
-    );
-    return;
+export async function backfillImportUpdateBudgetDrift(tx: Tx): Promise<BudgetMigrationSummary> {
+  const rows = await tx
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(and(
+      isNull(appointments.deletedAt),
+      like(appointments.notes, "Import-Update aus Altdaten%"),
+    ));
+  const importUpdateAppointmentIds = rows.map(r => r.id);
+
+  if (importUpdateAppointmentIds.length === 0) {
+    return { changed: 0, note: "keine Import-Update-Termine" };
   }
 
-  if (importUpdateAppointmentIds.length === 0) return;
-
   const driftRows = await findDriftRows({ appointmentIds: importUpdateAppointmentIds });
-  if (driftRows.length === 0) return;
+  if (driftRows.length === 0) {
+    return { changed: 0, note: "kein Drift" };
+  }
 
   // Mandatory Audit: ohne Akteur keine Mutation. Wir wählen den ältesten
   // Superadmin (Fallback: ältesten Admin) als Audit-Akteur — dasselbe
   // Muster wie `restore-storno-deleted-service-records`.
-  const [superActor] = await db
+  const [superActor] = await tx
     .select({ id: users.id })
     .from(users)
     .where(eq(users.isSuperAdmin, true))
@@ -69,7 +67,7 @@ export async function backfillImportUpdateBudgetDrift(): Promise<void> {
     .limit(1);
   let actorId: number | null = superActor?.id ?? null;
   if (actorId == null) {
-    const [adminActor] = await db
+    const [adminActor] = await tx
       .select({ id: users.id })
       .from(users)
       .where(eq(users.isAdmin, true))
@@ -84,8 +82,9 @@ export async function backfillImportUpdateBudgetDrift(): Promise<void> {
         `tsx server/scripts/audit-appointment-budget-drift.ts --apply).`,
       "startup",
     );
-    return;
+    return { changed: 0, note: "kein Audit-Akteur" };
   }
+  const auditActorId = actorId;
 
   log(
     `Import-Update-Drift-Backfill: ${driftRows.length} Termin(e) werden reconciliert (Trigger: appointment_import:backfill).`,
@@ -98,39 +97,45 @@ export async function backfillImportUpdateBudgetDrift(): Promise<void> {
 
   for (const drift of driftRows) {
     try {
-      const result = await db.transaction(async (tx) => {
-        return rebookAppointmentConsumption(
+      const result = await tx.transaction(async (sp) => {
+        const r = await rebookAppointmentConsumption(
           { appointmentId: drift.appointmentId },
-          tx,
+          sp,
         );
+
+        if (r.rebooked) {
+          await auditService.log(
+            auditActorId,
+            "appointment_km_rebooked",
+            "appointment",
+            drift.appointmentId,
+            {
+              customerId: drift.customerId,
+              trigger: REBOOK_TRIGGERS.import.backfill,
+              previousTransactionDate: r.previousTransactionDate,
+              transactionDate: r.transactionDate,
+              previousTravelKm: r.previousTravelKm,
+              newTravelKm: drift.apptTravelKm,
+              previousCustomerKm: r.previousCustomerKm,
+              newCustomerKm: drift.apptCustomerKm,
+              previousHauswirtschaftMinutes: r.previousHauswirtschaftMinutes,
+              previousAlltagsbegleitungMinutes: r.previousAlltagsbegleitungMinutes,
+              hauswirtschaftMinutes: r.hauswirtschaftMinutes,
+              alltagsbegleitungMinutes: r.alltagsbegleitungMinutes,
+              reversedTransactionIds: r.reversedTransactionIds,
+            },
+            undefined,
+            sp,
+          );
+        }
+
+        return r;
       });
 
       if (!result.rebooked) {
         noop++;
         continue;
       }
-
-      await auditService.log(
-        actorId,
-        "appointment_km_rebooked",
-        "appointment",
-        drift.appointmentId,
-        {
-          customerId: drift.customerId,
-          trigger: REBOOK_TRIGGERS.import.backfill,
-          previousTransactionDate: result.previousTransactionDate,
-          transactionDate: result.transactionDate,
-          previousTravelKm: result.previousTravelKm,
-          newTravelKm: drift.apptTravelKm,
-          previousCustomerKm: result.previousCustomerKm,
-          newCustomerKm: drift.apptCustomerKm,
-          previousHauswirtschaftMinutes: result.previousHauswirtschaftMinutes,
-          previousAlltagsbegleitungMinutes: result.previousAlltagsbegleitungMinutes,
-          hauswirtschaftMinutes: result.hauswirtschaftMinutes,
-          alltagsbegleitungMinutes: result.alltagsbegleitungMinutes,
-          reversedTransactionIds: result.reversedTransactionIds,
-        },
-      );
       rebooked++;
     } catch (err) {
       errored++;
@@ -145,4 +150,9 @@ export async function backfillImportUpdateBudgetDrift(): Promise<void> {
     `Import-Update-Drift-Backfill abgeschlossen: rebooked=${rebooked}, noop=${noop}, errored=${errored}.`,
     "startup",
   );
+
+  return {
+    changed: rebooked,
+    note: `rebooked=${rebooked}, noop=${noop}, errored=${errored}`,
+  };
 }

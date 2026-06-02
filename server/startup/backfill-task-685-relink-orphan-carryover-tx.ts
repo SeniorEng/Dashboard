@@ -1,9 +1,10 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { db } from "../lib/db";
+import type { Tx } from "../lib/db";
 import { budgetAllocations, budgetTransactions, users } from "@shared/schema";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
 import { parseLocalDate } from "@shared/utils/datetime";
+import type { BudgetMigrationSummary } from "./budget-migration-runner";
 
 /**
  * Task #685 — Auflösung der vom Backfill #684 übersprungenen Doppel-
@@ -26,13 +27,13 @@ import { parseLocalDate } from "@shared/utils/datetime";
  *      auch nur eine Buchung außerhalb, wird der Fall übersprungen
  *      (Log + Manuell-Flag), damit wir nie Buchungen an eine bereits
  *      abgelaufene Allokation umhängen.
- *   3) Andernfalls werden in EINER DB-Transaktion: alle Buchungen via
+ *   3) Andernfalls werden in EINEM Savepoint: alle Buchungen via
  *      UPDATE auf die Keep-Zeile umgehängt, pro Buchung ein
  *      `budget_transaction_corrected`-Audit geschrieben, die Dupe-Zeile
  *      soft-gelöscht und ein abschließendes
  *      `budget_allocation_soft_deleted`-Audit angelegt. Audit-Writes
- *      laufen mit `exec=tx`, damit ein gescheiterter Audit-Insert die
- *      gesamte Transaktion zurückrollt (GoBD: keine Mutation ohne
+ *      laufen mit `exec=savepoint`, damit ein gescheiterter Audit-Insert
+ *      die gesamte Umhängung zurückrollt (GoBD: keine Mutation ohne
  *      Audit).
  *   4) Vollständig idempotent: nach einmaligem Lauf ist die Dupe-Zeile
  *      soft-gelöscht und taucht in der Gruppen-Suche nicht mehr auf.
@@ -43,11 +44,15 @@ import { parseLocalDate } from "@shared/utils/datetime";
  * verfügbaren Akteur wird der Fall übersprungen — keine Mutation ohne
  * Audit.
  *
- * Wird nach `backfillTask684OrphanAutoCarryovers` aufgerufen — der dort
- * gewählte Keep stimmt damit garantiert mit dem hier gewählten überein.
+ * Task #896 — Auf das Budget-Migrations-Framework migriert: läuft jetzt als
+ * (tx) => BudgetMigrationSummary innerhalb EINER guarded Transaktion
+ * (GoBD-Bypass + Conservation-Pre-/Post-Check). Die per-Dupe-Atomarität wird
+ * über einen Savepoint (`tx.transaction`) gewahrt. MUSS NACH #684 registriert
+ * sein — der dort gewählte Keep stimmt damit garantiert mit dem hier
+ * gewählten überein.
  */
-export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
-  const activeCarryovers = await db
+export async function backfillTask685RelinkOrphanCarryoverTx(tx: Tx): Promise<BudgetMigrationSummary> {
+  const activeCarryovers = await tx
     .select()
     .from(budgetAllocations)
     .where(
@@ -58,7 +63,7 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
       ),
     );
 
-  if (activeCarryovers.length === 0) return;
+  if (activeCarryovers.length === 0) return { changed: 0, note: "keine Carryover-Zeilen" };
 
   const groups = new Map<string, typeof activeCarryovers>();
   for (const row of activeCarryovers) {
@@ -70,11 +75,11 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
 
   // Frühe Prüfung: gibt es überhaupt Duplikat-Gruppen?
   const hasDupes = Array.from(groups.values()).some((rows) => rows.length >= 2);
-  if (!hasDupes) return;
+  if (!hasDupes) return { changed: 0, note: "keine Duplikat-Gruppen" };
 
   // System-Actor-Fallback (Super-/Admin) für Audits, wenn weder Dupe
   // noch Keep einen `createdByUserId` haben.
-  const [superActor] = await db
+  const [superActor] = await tx
     .select({ id: users.id })
     .from(users)
     .where(eq(users.isSuperAdmin, true))
@@ -82,7 +87,7 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
     .limit(1);
   let systemActorId: number | null = superActor?.id ?? null;
   if (systemActorId == null) {
-    const [adminActor] = await db
+    const [adminActor] = await tx
       .select({ id: users.id })
       .from(users)
       .where(eq(users.isAdmin, true))
@@ -115,7 +120,7 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
     const keepExpiresAt = keep.expiresAt ? parseLocalDate(keep.expiresAt) : null;
 
     for (const dupe of toResolve) {
-      const linkedTx = await db
+      const linkedTx = await tx
         .select({
           id: budgetTransactions.id,
           transactionDate: budgetTransactions.transactionDate,
@@ -128,8 +133,8 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
       if (linkedTx.length === 0) continue; // wird von #684 abgedeckt
 
       // Safety: alle Tx-Daten müssen im Keep-Fenster liegen.
-      const outOfWindow = linkedTx.filter((tx) => {
-        const d = parseLocalDate(tx.transactionDate);
+      const outOfWindow = linkedTx.filter((t) => {
+        const d = parseLocalDate(t.transactionDate);
         if (d < keepValidFrom) return true;
         if (keepExpiresAt && d > keepExpiresAt) return true;
         return false;
@@ -156,11 +161,12 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
 
       const txIds = linkedTx.map((t) => t.id);
 
-      // Atomar: Relink + per-Tx-Audit + Soft-Delete + Soft-Delete-Audit.
-      // Audit-Writes mit `exec=tx`, damit Fehler die gesamte Transaktion
-      // zurückrollen (GoBD: keine Mutation ohne Audit-Eintrag).
-      await db.transaction(async (tx) => {
-        await tx
+      // Atomar pro Dupe (Savepoint): Relink + per-Tx-Audit + Soft-Delete +
+      // Soft-Delete-Audit. Audit-Writes mit `exec=savepoint`, damit Fehler
+      // die Umhängung dieses Dupes zurückrollen (GoBD: keine Mutation ohne
+      // Audit-Eintrag).
+      await tx.transaction(async (sp) => {
+        await sp
           .update(budgetTransactions)
           .set({ allocationId: keep.id })
           .where(inArray(budgetTransactions.id, txIds));
@@ -185,11 +191,11 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
               year: dupe.year,
             },
             undefined,
-            tx,
+            sp,
           );
         }
 
-        await tx
+        await sp
           .update(budgetAllocations)
           .set({ deletedAt: new Date() })
           .where(eq(budgetAllocations.id, dupe.id));
@@ -216,7 +222,7 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
             relinkedTransactionIds: txIds,
           },
           undefined,
-          tx,
+          sp,
         );
       });
 
@@ -237,4 +243,9 @@ export async function backfillTask685RelinkOrphanCarryoverTx(): Promise<void> {
       "startup",
     );
   }
+
+  return {
+    changed: softDeletedCount,
+    note: `relinkedTx=${relinkedTxCount}, soft-deleted=${softDeletedCount}, skippedOutOfWindow=${skippedOutOfWindowCount}, skippedNoActor=${skippedNoActorCount}, customers=${affectedCustomers.size}`,
+  };
 }

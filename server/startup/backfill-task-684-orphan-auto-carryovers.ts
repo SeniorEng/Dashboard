@@ -1,8 +1,9 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { db } from "../lib/db";
+import type { Tx } from "../lib/db";
 import { budgetAllocations, budgetTransactions } from "@shared/schema";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
+import type { BudgetMigrationSummary } from "./budget-migration-runner";
 
 /**
  * Task #684 — §45b-Carryover: Doppel-Allokationen (manuell + automatisch) für
@@ -17,7 +18,7 @@ import { log } from "../lib/log";
  * blieb neben einer manuell gesetzten 344,50 €-Zeile bestehen → §45b-
  * Übersicht überzählte um exakt den Auto-Betrag).
  *
- * Dieser Backfill läuft beim Start idempotent:
+ * Dieser Backfill läuft idempotent:
  *   1) Gruppiere alle aktiven §45b-Carryover-Allokationen pro
  *      (customer_id, year) — was effektiv pro (Kunde, Quelljahr) ist.
  *   2) Bei ≥ 2 aktiven Zeilen pro Gruppe: bevorzugt User-erstellte
@@ -27,14 +28,19 @@ import { log } from "../lib/log";
  *   3) Andere Zeilen → soft-deleted, Audit-Log
  *      `budget_allocation_soft_deleted` mit Begründung Task #684.
  *      Zeilen mit verlinkten `budget_transactions` werden übersprungen
- *      (manuelle Auflösung nötig).
+ *      (manuelle Auflösung nötig — übernimmt #685).
  *
  * Nach dem Backfill greift der erweiterte Dedup in
  * `ensureYearlyCarryover45b` (aktiv + soft-gelöscht), sodass auch zukünftig
  * keine neuen Doppel-Carryovers entstehen.
+ *
+ * Task #896 — Auf das Budget-Migrations-Framework migriert: läuft jetzt als
+ * (tx) => BudgetMigrationSummary innerhalb EINER guarded Transaktion (atomar,
+ * GoBD-Bypass + Conservation-Pre-/Post-Check). MUSS vor #685 registriert sein
+ * (gleiche Keep-Wahl).
  */
-export async function backfillTask684OrphanAutoCarryovers(): Promise<void> {
-  const activeCarryovers = await db
+export async function backfillTask684OrphanAutoCarryovers(tx: Tx): Promise<BudgetMigrationSummary> {
+  const activeCarryovers = await tx
     .select()
     .from(budgetAllocations)
     .where(
@@ -45,7 +51,7 @@ export async function backfillTask684OrphanAutoCarryovers(): Promise<void> {
       ),
     );
 
-  if (activeCarryovers.length === 0) return;
+  if (activeCarryovers.length === 0) return { changed: 0, note: "keine Carryover-Zeilen" };
 
   const groups = new Map<string, typeof activeCarryovers>();
   for (const row of activeCarryovers) {
@@ -75,7 +81,7 @@ export async function backfillTask684OrphanAutoCarryovers(): Promise<void> {
     const toDelete = sorted.slice(1);
 
     for (const dupe of toDelete) {
-      const linkedTx = await db
+      const linkedTx = await tx
         .select({ id: budgetTransactions.id })
         .from(budgetTransactions)
         .where(eq(budgetTransactions.allocationId, dupe.id))
@@ -90,7 +96,7 @@ export async function backfillTask684OrphanAutoCarryovers(): Promise<void> {
         continue;
       }
 
-      await db
+      await tx
         .update(budgetAllocations)
         .set({ deletedAt: new Date() })
         .where(eq(budgetAllocations.id, dupe.id));
@@ -115,6 +121,8 @@ export async function backfillTask684OrphanAutoCarryovers(): Promise<void> {
             validFrom: dupe.validFrom,
             expiresAt: dupe.expiresAt,
           },
+          undefined,
+          tx,
         );
       }
 
@@ -129,4 +137,9 @@ export async function backfillTask684OrphanAutoCarryovers(): Promise<void> {
       "startup",
     );
   }
+
+  return {
+    changed: softDeletedCount,
+    note: `soft-deleted=${softDeletedCount}, skippedLinked=${skippedLinkedCount}, customers=${affectedCustomers.size}`,
+  };
 }

@@ -334,8 +334,17 @@ sie dürfen weder mehrfach laufen noch eine Erhaltungs-Invariante (kein Topf
 - **Registry/Entry-Point** — `runBudgetDataMigrations()` führt alle
   startup-getriebenen Budget-Daten-Migrationen in deterministischer Reihenfolge
   aus, jede fault-isoliert (Fehlschlag → loggen + überspringen, Boot läuft
-  weiter). Wird in `server/index.ts` NACH den GoBD-Immutability-Triggern
-  aufgerufen, damit der Bypass gegen aktive Trigger greift.
+  weiter). Aktuelle Reihenfolge: `migrate-budget-sources` →
+  `backfill-import-update-budget-drift` →
+  `backfill-duplicate-wizard-carryovers-601` →
+  `backfill-task-684-orphan-auto-carryovers` →
+  `backfill-task-685-relink-orphan-carryover-tx` (#685 hängt von der Keep-Wahl
+  aus #684 ab und MUSS danach laufen). Der Entry-Point wird in `server/index.ts`
+  NACH den GoBD-Immutability-Triggern UND NACH `backfillBudgetHistorization`
+  aufgerufen: der Bypass muss gegen aktive Trigger greifen, und die drei
+  Carryover-Backfills setzen den partiellen Unique-Index auf `budget_allocations`
+  voraus. Der Ledger (`ensureMigrationLedger`) wird weiter oben im Boot
+  angelegt, bleibt aber ein separat fault-isolierter Schritt.
 
 ### Eine neue Migration anlegen
 
@@ -352,6 +361,44 @@ sie dürfen weder mehrfach laufen noch eine Erhaltungs-Invariante (kein Topf
 Das Gating erfolgt über den **Namen**. Ändert sich die Logik einer bereits
 angewendeten Migration grundlegend, MUSS ein neuer Name vergeben werden — der
 Runner re-runt eine eingetragene Migration nie automatisch.
+
+### Intentionale Abweichung — was NICHT auf dem Framework liegt (Task #896)
+
+Nicht jeder budget-bezogene Startup-Schritt ist eine guarded Daten-Migration.
+Die folgenden Schritte mutieren KEINE Topf-Konsumtion und bleiben bewusst
+außerhalb der Registry — sie hier zu führen wäre semantisch falsch (kein
+exactly-once-/Conservation-Bedarf) bzw. würde wiederkehrende Schritte
+fälschlich einmalig gaten:
+
+- **Reine DDL / Trigger / Index** — `ensure-migration-ledger`,
+  `ensure-invoice-per-pot-columns`, `ensure-gobd-table-immutability` (+ weitere
+  `ensure-*`), `backfill-budget-historization`,
+  `drop-customer-budgets-table`, `migrate-km-geo-to-numeric`. Diese legen
+  Strukturen/Constraints an oder typisieren Spalten um; keine Pot-Konsumtion,
+  daher kein Conservation-Check sinnvoll. (`backfill-budget-historization`
+  schreibt zwar `customer_budget_type_settings`-Phasen, berührt aber weder
+  `budget_allocations`-Beträge noch `budget_transactions` und ist Vorbedingung
+  des Runners — siehe Reihenfolge oben.)
+- **Read-only Audits** — `audit-budget-type-settings-chain`,
+  `audit-appointment-budget-km-drift`. Loggen nur, mutieren nichts.
+- **Wiederkehrende Synchronisation (KEIN one-shot)** —
+  `sync-budget-allocations` (`syncAllBudgetAllocations`) läuft bei JEDEM Boot
+  und materialisiert abgeleitete Allokationen idempotent neu. Ledger-Gating
+  würde es nach dem ersten Lauf fälschlich überspringen → bleibt außerhalb des
+  Frameworks.
+- **Reines Relinking ohne Beträge** — `backfill-orphan-reversal-appointment-id`
+  setzt nur `budget_transactions.appointment_id` auf Reversal-Zeilen nach (GoBD
+  CHECK), ohne Beträge/Konsumtion zu ändern; keine Erhaltungs-Invariante
+  betroffen.
+- **No-Op-Bereinigung** — `clear-45b-monthly-limits` ist nach dem materialisierten
+  §45b-Modell effektiv ein No-Op.
+
+Migriert wurden hingegen alle Schritte, die Pot-Konsumtion ändern (Storno +
+Neu-Buchung bzw. Soft-Delete/Relink von Carryover-Allokationen):
+`backfill-import-update-budget-drift`, `backfill-duplicate-wizard-carryovers-601`
+(#601), `backfill-task-684-orphan-auto-carryovers` (#684) und
+`backfill-task-685-relink-orphan-carryover-tx` (#685). Referenz für eine
+guarded Migration bleibt `migrate-budget-sources`.
 
 ### Production-Runbook (sicheres Rollout)
 

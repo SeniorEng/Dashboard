@@ -189,9 +189,46 @@ export async function runGuardedBudgetMigration(m: GuardedBudgetMigration): Prom
  */
 export async function runBudgetDataMigrations(): Promise<void> {
   const { migrateBudgetSources } = await import("./migrate-budget-sources");
+  const { backfillImportUpdateBudgetDrift } = await import(
+    "./backfill-import-update-budget-drift"
+  );
+  const { backfillDuplicateWizardCarryovers } = await import(
+    "./backfill-duplicate-wizard-carryovers"
+  );
+  const { backfillTask684OrphanAutoCarryovers } = await import(
+    "./backfill-task-684-orphan-auto-carryovers"
+  );
+  const { backfillTask685RelinkOrphanCarryoverTx } = await import(
+    "./backfill-task-685-relink-orphan-carryover-tx"
+  );
 
+  // Reihenfolge ist relevant: #685 hängt von der Keep-Wahl aus #684 ab.
+  // Alle vier Carryover-/Drift-Backfills setzen voraus, dass
+  // `backfillBudgetHistorization` (partieller Unique-Index auf
+  // budget_allocations) bereits gelaufen ist — der Entry-Point wird in
+  // `server/index.ts` daher NACH der Historisierung aufgerufen (Task #896).
   const migrations: GuardedBudgetMigration[] = [
     { name: "migrate-budget-sources", version: "2", migrate: migrateBudgetSources },
+    {
+      name: "backfill-import-update-budget-drift",
+      version: "1",
+      migrate: backfillImportUpdateBudgetDrift,
+    },
+    {
+      name: "backfill-duplicate-wizard-carryovers-601",
+      version: "1",
+      migrate: backfillDuplicateWizardCarryovers,
+    },
+    {
+      name: "backfill-task-684-orphan-auto-carryovers",
+      version: "1",
+      migrate: backfillTask684OrphanAutoCarryovers,
+    },
+    {
+      name: "backfill-task-685-relink-orphan-carryover-tx",
+      version: "1",
+      migrate: backfillTask685RelinkOrphanCarryoverTx,
+    },
   ];
 
   for (const m of migrations) {
