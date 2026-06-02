@@ -104,12 +104,13 @@ export default mergeConfig(
             // Orchestrator (1 Worker) bleibt es sequenziell.
             fileParallelism: INTEGRATION_PARALLEL,
             pool: "forks",
-            poolOptions: {
-              forks: {
-                minForks: INTEGRATION_WORKERS,
-                maxForks: INTEGRATION_WORKERS,
-              },
-            },
+            // Vitest 4 (Task #936): `poolOptions.forks.minForks/maxForks` wurde
+            // entfernt; die Fork-Anzahl wird jetzt über die Top-Level-Optionen
+            // `minWorkers`/`maxWorkers` gepinnt (Pool-Rework, siehe
+            // https://vitest.dev/guide/migration#pool-rework). Verhalten
+            // unverändert: exakt INTEGRATION_WORKERS Forks → 1:1 Worker→DB-Mapping.
+            minWorkers: INTEGRATION_WORKERS,
+            maxWorkers: INTEGRATION_WORKERS,
             testTimeout: 60000,
             hookTimeout: 60000,
             setupFiles: ["./tests/setup.ts"],
