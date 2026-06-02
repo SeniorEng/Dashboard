@@ -1,0 +1,31 @@
+2026-06-02T04:56:50.7404859Z ##[group]Run npm audit --audit-level=high
+2026-06-02T04:56:50.7405330Z [36;1mnpm audit --audit-level=high[0m
+2026-06-02T04:56:50.7437179Z shell: /usr/bin/bash -e {0}
+2026-06-02T04:56:50.7437517Z env:
+2026-06-02T04:56:50.7437772Z   NODE_VERSION: 20
+2026-06-02T04:56:50.7438047Z ##[endgroup]
+2026-06-02T04:56:51.3949041Z # npm audit report
+2026-06-02T04:56:51.3949352Z 
+2026-06-02T04:56:51.3949527Z axios  1.0.0 - 1.15.2
+2026-06-02T04:56:51.3950052Z Severity: high
+2026-06-02T04:56:51.3951346Z axios's shouldBypassProxy does not recognize IPv4-mapped IPv6 addresses, allowing NO_PROXY bypass (incomplete fix for CVE-2025-62718) - https://github.com/advisories/GHSA-pjwm-pj3p-43mv
+2026-06-02T04:56:51.3953100Z axios has DoS & Header Injection via Prototype Pollution Read-Side Gadgets in axios merge functions - https://github.com/advisories/GHSA-898c-q2cr-xwhg
+2026-06-02T04:56:51.3955223Z Axios has a Patch Bypass: Proxy-Authorization Header Injection via Prototype Pollution — Incomplete Null-Prototype Fix - https://github.com/advisories/GHSA-654m-c8p4-x5fp
+2026-06-02T04:56:51.3957051Z axios Vulnerable to Full Man-in-the-Middle via Prototype Pollution Gadget in `config.proxy` - https://github.com/advisories/GHSA-35jp-ww65-95wh
+2026-06-02T04:56:51.3957827Z fix available via `npm audit fix`
+2026-06-02T04:56:51.3958120Z node_modules/axios
+2026-06-02T04:56:51.3958234Z 
+2026-06-02T04:56:51.3958321Z qs  6.11.1 - 6.15.1
+2026-06-02T04:56:51.3958526Z Severity: moderate
+2026-06-02T04:56:51.3959290Z qs has a remotely triggerable DoS: qs.stringify crashes with TypeError on null/undefined entries in comma-format arrays when encodeValuesOnly is set - https://github.com/advisories/GHSA-q8mj-m7cp-5q26
+2026-06-02T04:56:51.3960260Z fix available via `npm audit fix`
+2026-06-02T04:56:51.3960698Z node_modules/typed-rest-client/node_modules/qs
+2026-06-02T04:56:51.3961018Z   typed-rest-client  >=2.3.1
+2026-06-02T04:56:51.3961260Z   Depends on vulnerable versions of qs
+2026-06-02T04:56:51.3961526Z   node_modules/typed-rest-client
+2026-06-02T04:56:51.3961675Z 
+2026-06-02T04:56:51.3961808Z 3 vulnerabilities (2 moderate, 1 high)
+2026-06-02T04:56:51.3961953Z 
+2026-06-02T04:56:51.3962055Z To address all issues, run:
+2026-06-02T04:56:51.3962256Z   npm audit fix
+2026-06-02T04:56:51.4046959Z ##[error]Process completed with exit code 1.
