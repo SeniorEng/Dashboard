@@ -15,11 +15,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { format, addDays, startOfWeek, subWeeks, isSameDay } from "date-fns";
-import { de } from "date-fns/locale";
+import {
+  formatDateISO,
+  formatGermanDate,
+  startOfWeekMonday,
+  addDaysToDate,
+  addWeeksToDate,
+  isSameLocalDay,
+  parseLocalDate,
+  isWeekend,
+} from "@shared/utils/datetime";
 import { Plus, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, CalendarCheck, Pencil, Trash2, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { parseLocalDate, isWeekend } from "@shared/utils/datetime";
 import { getHolidayMap } from "@shared/utils/holidays";
 import { iconSize } from "@/design-system";
 import { useDayTimeEntries, useCreateTimeEntry, useUpdateTimeEntry, useDeleteTimeEntry } from "@/features/time-tracking/hooks/use-time-entries";
@@ -151,7 +158,7 @@ function DayButton({ dayStr, day, index, isSelected, isDayToday, appointmentCoun
         {WEEKDAY_NAMES_SHORT[index]}
       </span>
       <span className={`font-semibold ${isWeekend && !isSelected ? "text-sm" : "text-base"} ${isDayToday && !isSelected && !holidayName ? "text-primary" : ""}`}>
-        {format(day, "d")}
+        {formatGermanDate(day, "d")}
       </span>
       <span className={`text-[9px] font-semibold leading-none h-[10px] flex items-center justify-center ${
         hasAppointments
@@ -258,13 +265,13 @@ function getDefaultDateForMonth(year: number, month: number): string {
   const todayYear = today.getFullYear();
   const todayMonth = today.getMonth() + 1;
   if (year === todayYear && month === todayMonth) {
-    return format(today, "yyyy-MM-dd");
+    return formatDateISO(today);
   }
   const firstOfMonth = new Date(year, month - 1, 1);
   const dayOfWeek = firstOfMonth.getDay();
   const offset = dayOfWeek === 0 ? 1 : dayOfWeek === 6 ? 2 : 0;
-  const targetDate = addDays(firstOfMonth, offset);
-  return format(targetDate, "yyyy-MM-dd");
+  const targetDate = addDaysToDate(firstOfMonth, offset);
+  return formatDateISO(targetDate);
 }
 
 function CoverageBanner({ data }: { data: CoverageData }) {
@@ -387,7 +394,7 @@ export default function Dashboard() {
     }
     return new Date();
   });
-  const dateString = format(selectedDate, "yyyy-MM-dd");
+  const dateString = formatDateISO(selectedDate);
 
   const { data: appointments, isLoading, error, refetch } = useAppointments(dateString);
   const { data: dayTimeEntries } = useDayTimeEntries(dateString);
@@ -488,16 +495,16 @@ export default function Dashboard() {
   }, [createForm, createMutation]);
 
   const today = useMemo(() => new Date(), []);
-  const todayString = format(today, "yyyy-MM-dd");
+  const todayString = formatDateISO(today);
   const isToday = todayString === dateString;
 
   const weekDays = useMemo(() => {
-    const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
-    return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    const weekStart = startOfWeekMonday(selectedDate);
+    return Array.from({ length: 7 }, (_, i) => addDaysToDate(weekStart, i));
   }, [selectedDate]);
 
   const weekDateStrings = useMemo(() =>
-    weekDays.map(d => format(d, "yyyy-MM-dd")),
+    weekDays.map(d => formatDateISO(d)),
     [weekDays]
   );
 
@@ -515,14 +522,14 @@ export default function Dashboard() {
 
   const selectedHoliday = holidayMap.get(dateString);
 
-  const goToPreviousWeek = () => setSelectedDate(prev => subWeeks(prev, 1));
+  const goToPreviousWeek = () => setSelectedDate(prev => addWeeksToDate(prev, -1));
   const goToNextWeek = () => setSelectedDate(prev => {
-    const weekStart = startOfWeek(prev, { weekStartsOn: 1 });
-    return addDays(weekStart, 7);
+    const weekStart = startOfWeekMonday(prev);
+    return addDaysToDate(weekStart, 7);
   });
 
   const goToToday = () => setSelectedDate(new Date());
-  const monthLabel = format(selectedDate, "MMMM yyyy", { locale: de });
+  const monthLabel = formatGermanDate(selectedDate, "MMMM yyyy");
 
   const { fullDayEntries, timelineEntries } = useMemo(() => {
     const fullDay: TimeEntry[] = [];
@@ -652,9 +659,9 @@ export default function Dashboard() {
             data-testid="weekday-strip"
           >
             {weekDays.map((day, index) => {
-              const dayStr = format(day, "yyyy-MM-dd");
+              const dayStr = formatDateISO(day);
               const isSelected = dayStr === dateString;
-              const isDayToday = isSameDay(day, today);
+              const isDayToday = isSameLocalDay(day, today);
               const appointmentCount = weekAppointmentCounts?.[dayStr] || 0;
               const holidayName = holidayMap.get(dayStr);
 
@@ -701,13 +708,13 @@ export default function Dashboard() {
             <h2 className="text-lg font-semibold text-foreground/90" data-testid="text-date">
               {isToday ? (
                 <>
-                  <span className="sm:hidden">Heute, {format(selectedDate, "d. MMMM", { locale: de })}</span>
-                  <span className="hidden sm:inline">Heute, {format(selectedDate, "EEEE, d. MMMM", { locale: de })}</span>
+                  <span className="sm:hidden">Heute, {formatGermanDate(selectedDate, "d. MMMM")}</span>
+                  <span className="hidden sm:inline">Heute, {formatGermanDate(selectedDate, "EEEE, d. MMMM")}</span>
                 </>
               ) : (
                 <>
-                  <span className="sm:hidden">{format(selectedDate, "EEEEEE, d. MMMM", { locale: de })}</span>
-                  <span className="hidden sm:inline">{format(selectedDate, "EEEE, d. MMMM", { locale: de })}</span>
+                  <span className="sm:hidden">{formatGermanDate(selectedDate, "EEEEEE, d. MMMM")}</span>
+                  <span className="hidden sm:inline">{formatGermanDate(selectedDate, "EEEE, d. MMMM")}</span>
                 </>
               )}
             </h2>

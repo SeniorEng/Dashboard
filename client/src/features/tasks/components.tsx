@@ -12,8 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DatePicker } from "@/components/ui/date-picker";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Calendar, Flag, Loader2, Trash2, Pencil } from "lucide-react";
-import { format, parseISO, isToday, isTomorrow, isPast, isValid } from "date-fns";
-import { de } from "date-fns/locale";
+import { formatGermanDate, isToday, isTomorrow, isPast, isValidDateString } from "@shared/utils/datetime";
 import { iconSize } from "@/design-system";
 import { useTasks, useCreateTask, useToggleTaskStatus, useUpdateTask, useDeleteTask, type TaskWithRelations } from "./use-tasks";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -26,25 +25,15 @@ const priorityConfig = {
 
 function formatDueDate(dateString: string | null): string | null {
   if (!dateString) return null;
-  try {
-    const date = parseISO(dateString);
-    if (!isValid(date)) return null;
-    if (isToday(date)) return "Heute";
-    if (isTomorrow(date)) return "Morgen";
-    return format(date, "d. MMM", { locale: de });
-  } catch {
-    return null;
-  }
+  if (!isValidDateString(dateString)) return null;
+  if (isToday(dateString)) return "Heute";
+  if (isTomorrow(dateString)) return "Morgen";
+  return formatGermanDate(dateString, "d. MMM");
 }
 
 function isDueDateOverdue(dateString: string | null): boolean {
   if (!dateString) return false;
-  try {
-    const date = parseISO(dateString);
-    return isValid(date) && isPast(date) && !isToday(date);
-  } catch {
-    return false;
-  }
+  return isValidDateString(dateString) && isPast(dateString);
 }
 
 interface TaskFormData {

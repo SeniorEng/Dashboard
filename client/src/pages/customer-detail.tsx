@@ -27,6 +27,7 @@ import { useCustomerDetailForm } from "@/features/customers/hooks/use-customer-d
 import { api, unwrapResult } from "@/lib/api/client";
 import { todayISO } from "@shared/utils/datetime";
 import { formatEuroDE } from "@shared/utils/money";
+import { clampedUtilizationPercent } from "@shared/domain/budget/utilization";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import type { Customer, CustomerContact } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -394,7 +395,7 @@ export default function CustomerDetailPage() {
               <div className="space-y-4">
                 {budgetOverview.entlastungsbetrag45b.totalAllocatedCents > 0 && (() => {
                   const b = budgetOverview.entlastungsbetrag45b;
-                  const usedPercent = b.totalAllocatedCents > 0 ? Math.min(100, Math.round((b.totalUsedCents / b.totalAllocatedCents) * 100)) : 0;
+                  const usedPercent = clampedUtilizationPercent(b.totalUsedCents, b.totalAllocatedCents);
                   return (
                     <div data-testid="budget-45b">
                       <div className="flex items-center justify-between mb-1">
@@ -419,7 +420,7 @@ export default function CustomerDetailPage() {
 
                 {budgetOverview.umwandlung45a.monthlyBudgetCents > 0 && (() => {
                   const b = budgetOverview.umwandlung45a;
-                  const usedPercent = b.currentMonthAllocatedCents > 0 ? Math.min(100, Math.round((b.currentMonthUsedCents / b.currentMonthAllocatedCents) * 100)) : 0;
+                  const usedPercent = clampedUtilizationPercent(b.currentMonthUsedCents, b.currentMonthAllocatedCents);
                   return (
                     <div data-testid="budget-45a">
                       <div className="flex items-center justify-between mb-1">
@@ -444,7 +445,7 @@ export default function CustomerDetailPage() {
 
                 {budgetOverview.ersatzpflege39_42a.yearlyBudgetCents > 0 && (() => {
                   const b = budgetOverview.ersatzpflege39_42a;
-                  const usedPercent = b.currentYearAllocatedCents > 0 ? Math.min(100, Math.round((b.currentYearUsedCents / b.currentYearAllocatedCents) * 100)) : 0;
+                  const usedPercent = clampedUtilizationPercent(b.currentYearUsedCents, b.currentYearAllocatedCents);
                   return (
                     <div data-testid="budget-39-42a">
                       <div className="flex items-center justify-between mb-1">

@@ -7,7 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import { CustomerFormData, BudgetTypeSettingForm, PFLEGEGRAD_OPTIONS } from "./customer-types";
-import { parseLocalDate } from "@shared/utils/datetime";
 import { centsToEuroNumber } from "@shared/utils/money";
 import { 
   BUDGET_45B_MAX_MONTHLY_CENTS, 
@@ -18,6 +17,7 @@ import {
   BUDGET_TYPE_LABELS,
   type BudgetType,
 } from "@shared/domain/budgets";
+import { eligible45bCarryoverMonths, max45bCarryoverCents } from "@shared/domain/budget/carryover-eligibility";
 
 const BUDGET_COLORS: Record<BudgetType, { bg: string; border: string }> = {
   entlastungsbetrag_45b: { bg: "bg-green-50", border: "border-green-100" },
@@ -82,19 +82,8 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
   const uebertrag = parseFloat(formData.uebertrag45b) || 0;
 
   const currentYear = new Date().getFullYear();
-  const previousYear = currentYear - 1;
-  let eligibleMonthsLastYear = 12;
-  if (formData.pflegegradSeit) {
-    const pgStart = parseLocalDate(formData.pflegegradSeit);
-    const pgStartYear = pgStart.getFullYear();
-    if (pgStartYear > previousYear) {
-      eligibleMonthsLastYear = 0;
-    } else if (pgStartYear === previousYear) {
-      eligibleMonthsLastYear = 12 - pgStart.getMonth();
-    }
-  }
-
-  const maxCarryover = (BUDGET_45B_MAX_MONTHLY_CENTS / 100) * eligibleMonthsLastYear;
+  const eligibleMonthsLastYear = eligible45bCarryoverMonths(formData.pflegegradSeit, currentYear);
+  const maxCarryover = max45bCarryoverCents(eligibleMonthsLastYear) / 100;
   const errorCarryover = uebertrag < 0 ? "Übertrag darf nicht negativ sein" : null;
 
   const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? true;

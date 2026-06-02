@@ -20,8 +20,14 @@ import {
 } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
-import { format, startOfWeek, addWeeks, subWeeks, addDays, isSameDay } from "date-fns";
-import { de } from "date-fns/locale";
+import {
+  formatDateISO,
+  formatGermanDate,
+  startOfWeekMonday,
+  addWeeksToDate,
+  addDaysToDate,
+  isSameLocalDay,
+} from "@shared/utils/datetime";
 
 interface FreeSlot {
   start: string;
@@ -63,7 +69,7 @@ interface WeeklyAvailabilityResponse {
 const DAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 
 function getWeekStart(date: Date): Date {
-  return startOfWeek(date, { weekStartsOn: 1 });
+  return startOfWeekMonday(date);
 }
 
 export default function AvailabilityPage() {
@@ -73,9 +79,9 @@ export default function AvailabilityPage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
   const [mobileSelectedDay, setMobileSelectedDay] = useState(0);
 
-  const startDateStr = format(currentWeekStart, "yyyy-MM-dd");
+  const startDateStr = formatDateISO(currentWeekStart);
   const weekDates = useMemo(() => {
-    return Array.from({ length: 5 }, (_, i) => addDays(currentWeekStart, i));
+    return Array.from({ length: 5 }, (_, i) => addDaysToDate(currentWeekStart, i));
   }, [currentWeekStart]);
 
   const { data, isLoading } = useQuery<WeeklyAvailabilityResponse>({
@@ -101,7 +107,7 @@ export default function AvailabilityPage() {
     );
   };
 
-  const isThisWeek = isSameDay(currentWeekStart, getWeekStart(today));
+  const isThisWeek = isSameLocalDay(currentWeekStart, getWeekStart(today));
 
   return (
     <Layout variant="admin">
@@ -128,20 +134,20 @@ export default function AvailabilityPage() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setCurrentWeekStart(subWeeks(currentWeekStart, 1))}
+            onClick={() => setCurrentWeekStart(addWeeksToDate(currentWeekStart, -1))}
             data-testid="button-prev-week"
             aria-label="Vorherige Woche"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <div className="text-sm font-medium min-w-[180px] text-center" data-testid="text-week-range">
-            {format(currentWeekStart, "d. MMM", { locale: de })} –{" "}
-            {format(addDays(currentWeekStart, 4), "d. MMM yyyy", { locale: de })}
+            {formatGermanDate(currentWeekStart, "d. MMM")} –{" "}
+            {formatGermanDate(addDaysToDate(currentWeekStart, 4), "d. MMM yyyy")}
           </div>
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setCurrentWeekStart(addWeeks(currentWeekStart, 1))}
+            onClick={() => setCurrentWeekStart(addWeeksToDate(currentWeekStart, 1))}
             data-testid="button-next-week"
             aria-label="Nächste Woche"
           >
@@ -180,8 +186,8 @@ export default function AvailabilityPage() {
 
       <div className="md:hidden flex gap-1 mb-3 overflow-x-auto">
         {weekDates.map((date, idx) => {
-          const dateStr = format(date, "yyyy-MM-dd");
-          const isToday = isSameDay(date, today);
+          const dateStr = formatDateISO(date);
+          const isToday = isSameLocalDay(date, today);
           const isSelected = idx === mobileSelectedDay;
           return (
             <button
@@ -197,7 +203,7 @@ export default function AvailabilityPage() {
               data-testid={`button-mobile-day-${idx}`}
             >
               <div className="text-xs font-medium">{DAY_NAMES_SHORT[idx]}</div>
-              <div className="text-lg font-bold">{format(date, "d")}</div>
+              <div className="text-lg font-bold">{formatGermanDate(date, "d")}</div>
             </button>
           );
         })}
@@ -222,7 +228,7 @@ export default function AvailabilityPage() {
                     Mitarbeiter
                   </th>
                   {weekDates.map((date, idx) => {
-                    const isToday = isSameDay(date, today);
+                    const isToday = isSameLocalDay(date, today);
                     return (
                       <th
                         key={idx}
@@ -232,7 +238,7 @@ export default function AvailabilityPage() {
                       >
                         <div>{DAY_NAMES_SHORT[idx]}</div>
                         <div className={`text-lg font-bold ${isToday ? "text-primary" : ""}`}>
-                          {format(date, "d. MMM", { locale: de })}
+                          {formatGermanDate(date, "d. MMM")}
                         </div>
                       </th>
                     );
@@ -255,7 +261,7 @@ export default function AvailabilityPage() {
                       </div>
                     </td>
                     {weekDates.map((date) => {
-                      const dateStr = format(date, "yyyy-MM-dd");
+                      const dateStr = formatDateISO(date);
                       const dayData = emp.days[dateStr];
                       return (
                         <td key={dateStr} className="p-1.5 align-top" data-testid={`cell-${emp.id}-${dateStr}`}>
@@ -276,7 +282,7 @@ export default function AvailabilityPage() {
 
           <div className="md:hidden space-y-3">
             {employees.map((emp) => {
-              const dateStr = format(weekDates[mobileSelectedDay], "yyyy-MM-dd");
+              const dateStr = formatDateISO(weekDates[mobileSelectedDay]);
               const dayData = emp.days[dateStr];
               return (
                 <Card key={emp.id} className="p-3" data-testid={`mobile-card-${emp.id}`}>

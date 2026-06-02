@@ -1,6 +1,5 @@
 import { memo, useCallback, useMemo } from "react";
-import { format, parseISO } from "date-fns";
-import { de } from "date-fns/locale";
+import { formatGermanDate } from "@shared/utils/datetime";
 import { Card } from "@/components/ui/card";
 import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Repeat, Car, AlertCircle } from "lucide-react";
 import { useLocation } from "wouter";
@@ -132,7 +131,7 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQue
           <div className="flex-1 py-2.5 px-3 min-w-0">
             {showDate && (
               <div className="text-xs text-muted-foreground mb-0.5">
-                {format(parseISO(appointment.date), "EEEE, d. MMM", { locale: de })}
+                {formatGermanDate(appointment.date, "EEEE, d. MMM")}
               </div>
             )}
             <div className="flex items-center gap-1.5 flex-wrap">

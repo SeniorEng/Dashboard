@@ -6,6 +6,7 @@ import { KpiTile } from "@/components/charts";
 import { PiggyBank, Wallet } from "lucide-react";
 import { api, unwrapResult } from "@/lib/api/client";
 import type { BudgetStatsResponse, BudgetPotRow } from "@shared/statistics";
+import { utilizationPercent } from "@shared/domain/budget/utilization";
 import { cents, compareLabel, pickDelta, fmtCentsDelta } from "../helpers";
 import { StatsPageShell, StatsLoading, StatsError, buildPeriodQs } from "./page-shell";
 import { DrillDownTable } from "./drill-down-table";
@@ -67,9 +68,7 @@ function BudgetsContent({ qs, year, month }: { qs: string; year: number; month: 
   if (query.isError || !query.data) return <StatsError testId="budgets-error" />;
 
   const data = query.data;
-  const usedPct = data.totalAllocatedCents.current > 0
-    ? Math.round((data.totalUsedCents.current / data.totalAllocatedCents.current) * 100)
-    : 0;
+  const usedPct = utilizationPercent(data.totalUsedCents.current, data.totalAllocatedCents.current);
   const potOptions = Array.from(new Set(data.rows.map((r) => r.budgetType)));
 
   return (

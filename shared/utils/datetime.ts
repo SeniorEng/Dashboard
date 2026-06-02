@@ -25,6 +25,8 @@
  * 
  * @see replit.md für vollständige Dokumentation
  */
+import { format as dfFormat } from "date-fns";
+import { de } from "date-fns/locale";
 
 interface ParsedTime {
   hours: number;
@@ -125,6 +127,77 @@ export function isPast(dateString: string): boolean {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return date < today;
+}
+
+/**
+ * Prüft, ob ein Datums-String "YYYY-MM-DD" das heutige Datum ist.
+ */
+export function isToday(dateString: string): boolean {
+  return dateString === todayISO();
+}
+
+/**
+ * Prüft, ob ein Datums-String "YYYY-MM-DD" der morgige Tag ist.
+ */
+export function isTomorrow(dateString: string): boolean {
+  return dateString === addDays(todayISO(), 1);
+}
+
+/**
+ * Prüft, ob ein String ein gültiges Datum "YYYY-MM-DD" ergibt.
+ */
+export function isValidDateString(dateString: string): boolean {
+  if (!dateString) return false;
+  const date = parseLocalDate(dateString);
+  return !Number.isNaN(date.getTime());
+}
+
+/**
+ * Zentrale deutschsprachige Datumsformatierung via date-fns + de-Locale.
+ * Bündelt die date-fns-Locale-Nutzung an EINER Stelle (Task #928), statt sie
+ * über UI-Dateien zu streuen. Akzeptiert ein Date-Objekt ODER einen ISO-String
+ * "YYYY-MM-DD" (lokal geparst). `pattern` ist ein date-fns-Format-Token-String
+ * (z.B. "EEEE, d. MMMM", "d. MMM yyyy", "MMMM yyyy").
+ */
+export function formatGermanDate(date: Date | string, pattern: string): string {
+  const d = typeof date === "string" ? parseLocalDate(date) : date;
+  return dfFormat(d, pattern, { locale: de });
+}
+
+/**
+ * Montag 00:00 (lokal) der Woche, in der `date` liegt. Date-Objekt-Variante
+ * für UI-Wochenberechnungen (entspricht date-fns `startOfWeek(d, { weekStartsOn: 1 })`).
+ */
+export function startOfWeekMonday(date: Date): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const daysSinceMonday = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - daysSinceMonday);
+  return d;
+}
+
+/**
+ * `date` plus `days` Tage als neues Date-Objekt (lokal, Uhrzeit bleibt erhalten).
+ * Date-Objekt-Variante von `addDays` (das mit Strings arbeitet).
+ */
+export function addDaysToDate(date: Date, days: number): Date {
+  const d = new Date(date.getTime());
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+/**
+ * `date` plus `weeks` Wochen als neues Date-Objekt.
+ */
+export function addWeeksToDate(date: Date, weeks: number): Date {
+  return addDaysToDate(date, weeks * 7);
+}
+
+/**
+ * Prüft, ob zwei Date-Objekte auf denselben Kalendertag (lokal) fallen.
+ * Uhrzeit wird ignoriert (entspricht date-fns `isSameDay`).
+ */
+export function isSameLocalDay(a: Date, b: Date): boolean {
+  return formatDateISO(a) === formatDateISO(b);
 }
 
 // ============================================================
