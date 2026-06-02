@@ -43,12 +43,14 @@ import {
 import { classifyReconciliation } from "@shared/domain/budget/reconciliation";
 import { assertReservationTransition } from "@shared/domain/budget/reservation-state-machine";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
+import { calculateAllocatedCents } from "./allocation-storage";
 import { customersRepo } from "../../repos";
 import { readBudgetTypeSettings } from "./preferences-storage";
 import {
   readUnifiedBudgetAvailability,
   type CappedBudgetPot,
 } from "./unified-reader";
+import { lastDayOfMonth, parseLocalDate } from "@shared/utils/datetime";
 
 const STATUTORY_POTS: CappedBudgetPot[] = [
   "entlastungsbetrag_45b",
@@ -246,6 +248,39 @@ export async function planHold(
       settings.map((s) => [s.budgetType, s.priority]),
     );
 
+    // Task #912 — §45b-Buchungsverfügbarkeit an die Overview-Projektion koppeln.
+    // Der unified Reader liest §45b strikt zum Termin-Datum (`asOfDate`) OHNE die
+    // Vorausschau (`projectFuture`), die die „Verfügbar (nach Planung)"-Anzeige
+    // benutzt (Task #704). Für einen ZUKÜNFTIGEN Termin kappt
+    // `calculateAllocated45b` den Akkumulations-Horizont sonst auf „heute" — die
+    // bis zum Termin-Monat noch auflaufende Monatsaufstockung fehlt. Folge:
+    // Einzeltermine und frühe Serien-Vorkommen, deren Kost den bis HEUTE
+    // aufgelaufenen §45b übersteigt, aber im bis zum Termin-Monat PROJIZIERTEN
+    // Anspruch liegen, würden fälschlich hart geblockt — strenger als die
+    // Anzeige. Wir projizieren §45b daher mit demselben Horizont wie das Summary
+    // (`projectFuture` bis zum Monatsende des Termin-Monats) und behalten Holds +
+    // bereits gebuchten Net exakt aus dem In-Lock-Read bei (Overdraft-Garantie:
+    // aktive Holds des Jahres werden weiter abgezogen, der projizierte Anspruch
+    // ist die einzige Änderung). §45a/§39 bleiben unverändert (Monats-/Jahres-Cap).
+    const pot45b = avail.pots.entlastungsbetrag_45b;
+    let projected45bAvailableCents = pot45b.availableCents;
+    if (pot45b.enabled && pot45b.inRange) {
+      const apptDate = parseLocalDate(params.transactionDate);
+      const monthEnd = lastDayOfMonth(apptDate.getFullYear(), apptDate.getMonth() + 1);
+      const projectedAllocated = await calculateAllocatedCents(
+        params.customerId,
+        "entlastungsbetrag_45b",
+        { asOfDate: monthEnd, projectFuture: true },
+        tx,
+        undefined,
+        settings,
+      );
+      projected45bAvailableCents = Math.max(
+        0,
+        projectedAllocated - pot45b.consumedNetCents - pot45b.holdsActiveCents,
+      );
+    }
+
     const orderedStatutory = isSelbstzahler
       ? []
       : [...STATUTORY_POTS]
@@ -256,7 +291,10 @@ export async function planHold(
           )
           .map<CascadePot>((bt) => ({
             budgetType: bt,
-            capacityCents: avail.pots[bt].availableCents,
+            capacityCents:
+              bt === "entlastungsbetrag_45b"
+                ? projected45bAvailableCents
+                : avail.pots[bt].availableCents,
           }));
 
     const pots: CascadePot[] = [...orderedStatutory];

@@ -118,6 +118,7 @@ integrations = ["javascript_object_storage:2.0.0", "github:1.0.0"]
 [userenv]
 
 [userenv.development]
+BUDGET_HARD_HOLDS = "1"
 
 [userenv.shared]
 SUPER_ADMIN_EMAIL = "alrikdegenkolb@seniorenengel-alltagsbegleitung.de"

@@ -25,6 +25,7 @@ import {
   rescheduleHold,
 } from "../../server/storage/budget/reservation-storage";
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
+import { readUnifiedBudgetAvailability } from "../../server/storage/budget/unified-reader";
 import { apiPost, apiGet, getAuthCookie } from "../test-utils";
 import {
   setupBudgetScenario,
@@ -52,6 +53,34 @@ function pastWeekdayInCurrentMonth(): string {
     return d.toISOString().split("T")[0];
   }
   throw new Error("Kein Werktag im aktuellen Monat gefunden");
+}
+
+/**
+ * Task #912 — deterministischer Termin in einem ZUKÜNFTIGEN Monat (relativ zu
+ * heute), plus der erste Tag dieses Monats als §45b-`validFrom`. Robust übers
+ * ganze Jahr inkl. Jahreswechsel (Dezember → Januar Folgejahr). Tag liegt in der
+ * Monatsmitte auf einem Werktag (Mo–Fr), damit `/api/appointments/kundentermin`
+ * nicht an Wochenenden scheitert.
+ */
+function futureMonthWeekday(): { date: string; monthStart: string } {
+  const today = new Date();
+  let year = today.getFullYear();
+  let month = today.getMonth() + 2; // 1-based, ein Monat in die Zukunft
+  if (month > 12) {
+    month -= 12;
+    year += 1;
+  }
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  for (let day = 15; day <= 28; day++) {
+    const d = new Date(year, month - 1, day);
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) continue;
+    return {
+      date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      monthStart,
+    };
+  }
+  throw new Error("Kein Werktag in der Monatsmitte gefunden");
 }
 
 async function holdRows(appointmentId: number) {
@@ -475,5 +504,71 @@ describe("Task #875 — Hard-Hold-Engine (gated)", () => {
     const captured = (await holdRows(appointmentId)).filter((r) => r.state === "captured");
     const capturedTotal = captured.reduce((s, r) => s + r.amountCents, 0);
     expect(capturedTotal).toBe(actualA);
+  });
+
+  it("Task #912: zukünftiger §45b-Termin wird über die projizierte Vorausschau gebucht statt fälschlich hart geblockt", async () => {
+    // §45b beginnt erst im ZUKÜNFTIGEN Termin-Monat (validFrom = 1. des Monats).
+    // → Bis HEUTE ist 0 € §45b aufgelaufen (Horizont des unified Readers = heute,
+    //   liegt VOR validFrom), aber bis zum Termin-Monat projiziert genau ein
+    //   Monats-Anspruch. KEINE Privatzahlung, KEINE anderen Töpfe: Vor dem Fix
+    //   (planHold las die nackte As-of-Verfügbarkeit = 0) hätte das einen
+    //   BudgetHardBlockError ausgelöst; nach dem Fix bucht planHold gegen die
+    //   projizierte §45b-Verfügbarkeit (gleicher Horizont wie die Overview).
+    const { date, monthStart } = futureMonthWeekday();
+    scenario = await setupBudgetScenario({
+      customerNamePrefix: "T912-PROJ",
+      pflegegrad: 3,
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      types: [
+        {
+          type: "entlastungsbetrag_45b",
+          priority: 1,
+          enabled: true,
+          monthlyLimitCents: null,
+          validFrom: monthStart,
+        },
+        { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+        { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+      ],
+      appointments: [
+        {
+          date,
+          scheduledStart: "08:00",
+          services: [{ code: "hauswirtschaft", durationMinutes: 60 }],
+          document: false,
+          travelKilometers: 0,
+          customerKilometers: 0,
+        },
+      ],
+    });
+    const [appointmentId] = scenario.appointmentIds;
+    const customerId = scenario.customerId;
+
+    // Vorbedingung: die NACKTE As-of-Verfügbarkeit (alte planHold-Sicht) ist 0 —
+    // genau das hätte vorher hart geblockt.
+    const bareAvail = await readUnifiedBudgetAvailability(customerId, date);
+    expect(bareAvail.pots.entlastungsbetrag_45b.availableCents).toBe(0);
+
+    // Nach dem Fix: planHold bucht erfolgreich gegen die Projektion.
+    const plan = await planHold({
+      customerId,
+      appointmentId,
+      transactionDate: date,
+      hauswirtschaftMinutes: 60,
+      alltagsbegleitungMinutes: 0,
+      travelKilometers: 0,
+      customerKilometers: 0,
+    });
+    expect(plan.heldCents).toBeGreaterThan(0);
+    // Der Hold liegt im §45b-Topf (nicht privat, da nur §45b aktiv ist).
+    const held45b = plan.reservations.filter(
+      (r) => r.budgetType === "entlastungsbetrag_45b",
+    );
+    expect(held45b.length).toBeGreaterThan(0);
+    expect(held45b.reduce((s, r) => s + r.amountCents, 0)).toBe(plan.heldCents);
+    // Es bleibt KEIN Rest → kein Hard-Block trotz fehlender Privatzahlung.
+    const active = (await holdRows(appointmentId)).filter((r) => r.state === "hold");
+    expect(active.length).toBe(held45b.length);
   });
 });
