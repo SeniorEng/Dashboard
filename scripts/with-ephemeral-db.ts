@@ -43,7 +43,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createWriteStream, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
-import { DB_PREFIX, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
+import { DB_PREFIX, sweepOrphanLogs, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
 import { buildServerBundle } from "../script/server-bundle";
 
 function fail(msg: string): never {
@@ -301,6 +301,10 @@ async function main(): Promise<number> {
   // Verwaiste Wegwerf-DBs früherer (hart abgebrochener) Läufe aufräumen, bevor
   // die neue Lauf-DB angelegt wird. Nur verbindungslose, ausreichend alte DBs.
   sweepOrphans(adminUrl!, { log: (m) => console.log(`[ephemeral-db] ${m}`) });
+  // ... und die zurückgebliebenen per-Worker-Server-Logs (Task #904). Aktive
+  // Schwester-Läufe schreiben fortlaufend (frische mtime) → geschützt; die N
+  // jüngsten werden ohnehin behalten.
+  sweepOrphanLogs({ log: (m) => console.log(`[ephemeral-db] ${m}`) });
 
   // 1) Template-DB anlegen, Schema pushen, seeden.
   console.log(`[ephemeral-db] Erstelle Template-DB ${templateDb} ...`);
