@@ -54,6 +54,7 @@ import { createServer } from "node:net";
 import { resolve as resolvePath } from "node:path";
 import { DB_PREFIX, sweepOrphanLogs, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
 import {
+  CACHE_BUILD_LOCK_KEY,
   CACHE_DB_NAME,
   computeTemplateHash,
   isCacheFresh,
@@ -387,6 +388,93 @@ function cloneDbFromTemplate(target: string, source: string): void {
   }
 }
 
+// Task #913: Serialisiert KONKURRIERENDE kalte Cache-Aufbauten über einen
+// Cluster-weiten Postgres-Advisory-Lock. Zwei gleichzeitig gestartete Läufe
+// (Auto-Run + Validation: `test` und `e2e-smoke` parallel) würden bei FEHLENDEM
+// Cache sonst beide dieselbe Cache-DB droppen/erzeugen und gleichzeitig
+// `drizzle-kit push --force` dagegen feuern → einer scheitert mit exit 1.
+//
+// Der Lock wird über eine PERSISTENTE psql-Session gehalten: `pg_advisory_lock`
+// gilt für die Dauer der Session, daher genügt EIN spawnSync-Aufruf NICHT (er
+// würde den Lock beim Prozess-Ende sofort wieder freigeben). Wir starten daher
+// einen langlebigen psql-Prozess, der den Lock greift und dann auf weiteren
+// stdin wartet — der Lock bleibt gehalten, bis wir stdin schließen/den Prozess
+// killen. Bricht der Lock-Halter (oder der ganze Lauf) hart ab, gibt Postgres
+// den Lock automatisch beim Verbindungsabbruch frei (kein verwaister Lock-File).
+//
+// Gibt eine `release`-Funktion zurück; bei Timeout/Fehler wird hart abgebrochen.
+function acquireCacheBuildLock(timeoutMs = 180_000): Promise<() => void> {
+  return new Promise((resolve, reject) => {
+    // Eigene psql-Session (-X = keine ~/.psqlrc); SQL kommt über stdin, das wir
+    // bewusst offen halten, damit die Session — und damit der Lock — bestehen
+    // bleibt. Der Lock-Schlüssel ist Cluster-weit, also datenbankübergreifend.
+    const child = spawn("psql", [adminUrl!, "-X", "-q", "-v", "ON_ERROR_STOP=1"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let acquired = false;
+    let settled = false;
+    let out = "";
+    let stderr = "";
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+      reject(new Error(`Cache-Build-Lock nicht innerhalb von ${timeoutMs}ms erlangt`));
+    }, timeoutMs);
+    timer.unref?.();
+
+    child.stdout.on("data", (buf: Buffer) => {
+      out += buf.toString();
+      if (!acquired && out.includes("LOCK_ACQUIRED")) {
+        acquired = true;
+        settled = true;
+        clearTimeout(timer);
+        resolve(() => {
+          try {
+            child.stdin.end();
+          } catch {
+            // ignore
+          }
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            // ignore
+          }
+        });
+      }
+    });
+    child.stderr.on("data", (buf: Buffer) => {
+      stderr += buf.toString();
+    });
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("exit", (code) => {
+      if (acquired || settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `Lock-psql endete (code ${code}) bevor der Lock erlangt wurde. ${stderr.trim()}`,
+        ),
+      );
+    });
+
+    // SELECT blockiert, bis der Lock erlangt ist; `\echo` signalisiert das dann.
+    child.stdin.write(
+      `SELECT pg_advisory_lock(${CACHE_BUILD_LOCK_KEY});\n\\echo LOCK_ACQUIRED\n`,
+    );
+  });
+}
+
 // Stellt sicher, dass die persistente Cache-Template-DB für `hash` frisch ist.
 // Warm = vorhanden + hinterlegter Hash passt -> nichts zu tun. Sonst neu bauen
 // (drop + create + push + seed + Hash-Kommentar). Gibt zurück, ob der Cache
@@ -518,7 +606,26 @@ async function main(): Promise<number> {
     // entfallen Push + Seeds komplett — die Per-Lauf-Template wird in EINEM
     // CREATE DATABASE ... TEMPLATE aus dem Cache geklont (Sekunden statt ~24s).
     const hash = computeTemplateHash();
-    const cacheResult = ensureCacheTemplate(hash);
+    // Warm-Pfad bleibt lock-frei (kein Overhead, wenn der Cache schon frisch
+    // ist): Wir prüfen die Frische zuerst OHNE Lock und holen den serialisierenden
+    // Build-Lock NUR, wenn neu gebaut werden muss (Task #913).
+    let cacheResult: "warm" | "cold";
+    if (isCacheFresh(readCacheHash(), hash)) {
+      cacheResult = ensureCacheTemplate(hash); // schneller Warm-Pfad, kein Lock
+    } else {
+      console.log(
+        `[ephemeral-db] Cache nicht frisch — hole Build-Lock (serialisiert konkurrierende Aufbauten) ...`,
+      );
+      const release = await acquireCacheBuildLock();
+      try {
+        // Double-Checked: Ein parallel gestarteter Lauf könnte den Cache gebaut
+        // haben, während wir auf den Lock warteten — ensureCacheTemplate prüft
+        // die Frische erneut und liefert dann "warm" zurück (kein Re-Build).
+        cacheResult = ensureCacheTemplate(hash);
+      } finally {
+        release();
+      }
+    }
     // Task #910: Maschinen-lesbarer Marker, damit der Verify-Pfad den Warm-/
     // Kalt-Ausgang ohne Log-Heuristik prüfen kann.
     console.log(`[ephemeral-db] CACHE_RESULT=${cacheResult}`);

@@ -121,3 +121,20 @@ export function isCacheFresh(
 ): boolean {
   return storedHash !== null && storedHash.length > 0 && storedHash === currentHash;
 }
+
+// Task #913: Stabiler Postgres-Advisory-Lock-Schlüssel, mit dem konkurrierende
+// KALTE Cache-Aufbauten serialisiert werden. Zwei gleichzeitig gestartete Läufe
+// (im Agent-/Validation-Harness laufen `test` und `e2e-smoke` parallel) würden
+// sonst bei FEHLENDEM Cache beide dieselbe Cache-DB droppen/erzeugen und
+// gleichzeitig `drizzle-kit push --force` dagegen feuern → einer scheitert.
+// Advisory-Locks sind Cluster-weit (Session-Scope, datenbankübergreifend), daher
+// reicht EIN fixer Schlüssel, abgeleitet aus dem Cache-DB-Namen. Wir maskieren
+// auf 63 Bit, damit der Wert ein positiver, vorzeichenbehafteter bigint bleibt
+// (Postgres `pg_advisory_lock(bigint)`).
+export function advisoryLockKey(name: string = CACHE_DB_NAME): bigint {
+  const digest = createHash("sha256").update(name).digest();
+  const raw = digest.readBigUInt64BE(0);
+  return raw & ((1n << 63n) - 1n);
+}
+
+export const CACHE_BUILD_LOCK_KEY = advisoryLockKey();

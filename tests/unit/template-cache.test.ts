@@ -13,6 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  advisoryLockKey,
+  CACHE_BUILD_LOCK_KEY,
   CACHE_DB_NAME,
   collectHashableFiles,
   computeTemplateHash,
@@ -22,6 +24,27 @@ import {
 describe("CACHE_DB_NAME", () => {
   it("behält das cc_test_-Präfix (Sicherheits-Invariante)", () => {
     expect(CACHE_DB_NAME.startsWith("cc_test_")).toBe(true);
+  });
+});
+
+describe("advisoryLockKey (Task #913)", () => {
+  it("ist deterministisch für denselben Namen", () => {
+    expect(advisoryLockKey("foo")).toBe(advisoryLockKey("foo"));
+  });
+
+  it("unterscheidet sich für unterschiedliche Namen", () => {
+    expect(advisoryLockKey("foo")).not.toBe(advisoryLockKey("bar"));
+  });
+
+  it("liefert einen positiven, vorzeichenbehafteten 63-Bit-bigint (Postgres-tauglich)", () => {
+    const key = advisoryLockKey("foo");
+    expect(typeof key).toBe("bigint");
+    expect(key >= 0n).toBe(true);
+    expect(key < 1n << 63n).toBe(true);
+  });
+
+  it("CACHE_BUILD_LOCK_KEY ist aus dem Cache-DB-Namen abgeleitet", () => {
+    expect(CACHE_BUILD_LOCK_KEY).toBe(advisoryLockKey(CACHE_DB_NAME));
   });
 });
 
