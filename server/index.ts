@@ -143,7 +143,18 @@ function isNeonDriverBug(message: string): boolean {
 
   app.use(errorMiddleware);
 
-  if (process.env.NODE_ENV === "production") {
+  // Task #903: API-only-Test-Server (Vitest-Integrationslauf) brauchen weder
+  // den Vite-Dev-Server noch die statischen Client-Assets — die Tests rufen
+  // ausschließlich /api/*-Endpunkte. `createViteServer()` ist beim Boot teuer
+  // (mehrere Sekunden Modul-Optimierung pro Worker-Server). Wenn der
+  // Ephemeral-DB-Orchestrator `TEST_SKIP_CLIENT=1` setzt (nur für den
+  // Vitest-Pfad, NICHT für Playwright/e2e, das die SPA wirklich rendert),
+  // überspringen wir das Client-Serving komplett und sparen pro Worker-Boot die
+  // Vite-Setup-Zeit. In Dev (`Start application`) und Prod bleibt alles wie bisher.
+  const skipClient = process.env.TEST_SKIP_CLIENT === "1";
+  if (skipClient) {
+    log("TEST_SKIP_CLIENT=1 — Client-Serving (Vite/Static) übersprungen (API-only Test-Server)", "startup");
+  } else if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
     const { setupVite } = await import("./vite");

@@ -41,9 +41,10 @@
 // ---------------------------------------------------------------------------
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createWriteStream, mkdirSync } from "node:fs";
+import { createWriteStream, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { DB_PREFIX, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
+import { buildServerBundle } from "../script/server-bundle";
 
 function fail(msg: string): never {
   console.error(`[ephemeral-db] ${msg}`);
@@ -75,6 +76,15 @@ const workerCount = Math.max(
 const runId = `${Date.now().toString(36)}_${process.pid}_${randomBytes(4).toString("hex")}`;
 const templateDb = `${DB_PREFIX}${runId}_tmpl`;
 const workerDbs = Array.from({ length: workerCount }, (_, i) => `${DB_PREFIX}${runId}_w${i}`);
+
+// Task #903: Für den Vitest-Pfad (API-only) bündeln wir den Server EINMAL pro
+// Lauf via esbuild und booten die Worker mit plain `node` statt `tsx`. Das senkt
+// den Boot pro Worker von ~13s (tsx-Transpilation) auf ~3s. Playwright/e2e
+// braucht die gerenderte SPA → bleibt auf `tsx server/index.ts`.
+// Per-Lauf-Pfad, damit zwei GLEICHZEITIGE Läufe (Auto-Run + Validation) nicht
+// auf derselben Bundle-Datei kollidieren.
+const useServerBundle = isVitest;
+const serverBundlePath = `.local/test-server-${runId}.cjs`;
 
 function urlForDb(dbName: string): string {
   const u = new URL(adminUrl!);
@@ -139,9 +149,19 @@ function killServers(): void {
   }
 }
 
+function cleanupBundle(): void {
+  if (!useServerBundle) return;
+  try {
+    rmSync(serverBundlePath, { force: true });
+  } catch {
+    // ignore
+  }
+}
+
 function teardown(): void {
   killServers();
   dropAllDbs();
+  cleanupBundle();
 }
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -242,9 +262,20 @@ async function startWorker(dbName: string): Promise<WorkerHandle> {
   const logFd = createWriteStream(logPath, { flags: "w" });
   await new Promise((resolve) => logFd.once("open", resolve));
 
-  console.log(`[ephemeral-db] Starte App-Server (${dbName}) auf Port ${port} (Logs: ${logPath}) ...`);
-  const child = spawn("npx", ["tsx", "server/index.ts"], {
-    env: { ...baseEnv, DATABASE_URL: dbUrl, PORT: String(port) },
+  // Task #903: Vitest-Worker booten aus dem vorab gebauten esbuild-Bundle mit
+  // plain `node` (schneller als `tsx`-Kaltstart). Das Bundle ist API-only
+  // (ohne ./vite) → MUSS mit TEST_SKIP_CLIENT=1 laufen. e2e (Playwright) bleibt
+  // auf `tsx`, weil es die gerenderte SPA braucht.
+  const [spawnCmd, spawnArgs, extraEnv]: [string, string[], NodeJS.ProcessEnv] =
+    useServerBundle
+      ? ["node", [serverBundlePath], { TEST_SKIP_CLIENT: "1" }]
+      : ["npx", ["tsx", "server/index.ts"], {}];
+
+  console.log(
+    `[ephemeral-db] Starte App-Server (${dbName}) auf Port ${port} via ${spawnCmd} ${spawnArgs.join(" ")} (Logs: ${logPath}) ...`,
+  );
+  const child = spawn(spawnCmd, spawnArgs, {
+    env: { ...baseEnv, ...extraEnv, DATABASE_URL: dbUrl, PORT: String(port) },
     stdio: ["ignore", logFd, logFd],
   });
   serverChildren.push(child);
@@ -293,6 +324,15 @@ async function main(): Promise<number> {
     `SELECT pg_terminate_backend(pid) FROM pg_stat_activity ` +
       `WHERE datname = '${templateDb}' AND pid <> pg_backend_pid()`,
   );
+
+  // 1b) Server EINMAL pro Lauf bündeln (Task #903, nur Vitest-Pfad). Alle Worker
+  // booten danach aus diesem Bundle mit plain `node` (~3s statt ~13s tsx-Boot).
+  if (useServerBundle) {
+    const t0 = Date.now();
+    console.log("[ephemeral-db] Baue Test-Server-Bundle (esbuild, API-only) ...");
+    await buildServerBundle({ outfile: serverBundlePath, excludeClientServer: true });
+    console.log(`[ephemeral-db] Test-Server-Bundle fertig in ${Date.now() - t0}ms (${serverBundlePath}).`);
+  }
 
   // 2) Worker-DBs aus der Template klonen + je einen App-Server starten (parallel).
   console.log(`[ephemeral-db] Provisioniere ${workerCount} Worker (DB + Server) ...`);

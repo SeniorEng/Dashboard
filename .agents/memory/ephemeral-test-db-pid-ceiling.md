@@ -45,3 +45,28 @@ internal `timeout --signal=TERM <~100>` (so the orchestrator's DB/server teardow
 fires before the hard kill), output to a file, then grep in the same call. Setup
 (template push + per-worker clone + server boot) is ~40-60s, leaving ~40-50s of test
 budget → run small file subsets only.
+
+**Note (2026-06): all 5 workflows auto-re-fire together** in this env (platform
+re-runs, not your edits — `.local` bundle writes are gitignored and do NOT trigger the
+watcher). So a "clean isolated" full 2-worker run is effectively impossible here: a
+manual background run always ends up racing a concurrently-re-fired `test`+`e2e-smoke`
+and slows to 10+ min / EAGAINs. To validate correctness despite this, lean on: (a) tsc
+(authoritative for code, fast even under load), (b) a one-time clean provisioning
+measurement grabbed before contention hits, (c) the fact that failures are the SAME
+resource-exhaustion set as baseline. True green is the isolated CI runner's job.
+
+## tsx cold-start, not seeders, dominates per-worker boot
+**Finding (Task #903):** per-worker app-server boot was ~13s and is dominated by
+`tsx`'s on-the-fly transpilation of the whole server import graph, NOT by the startup
+seeders/migrations. `TEST_SKIP_CLIENT` (skipping the Vite client mount) alone saved
+only ~1.5s.
+**Fix that worked:** esbuild-bundle the server ONCE per run (~2s) into a gitignored
+`.local/test-server-<runId>.cjs` and boot each worker with plain `node <bundle>` →
+"serving" in ~3s vs ~13s; whole-run provisioning ~24s vs ~31s. Shared esbuild helper
+`script/server-bundle.ts` (`buildServerBundle`/`getServerExternals`), reused by the
+prod build `script/build.ts`. Keep `drizzle-orm`/`@neondatabase/serverless`/`ws`
+EXTERNAL — bundling drizzle breaks SQL template-fragment composition. The e2e/Playwright
+path still needs `tsx` (it serves the real Vite client), so only the vitest path was
+switched to the bundle.
+**Why:** future "make tests faster" work should attack boot/transpile cost (bundle,
+fewer workers' cold starts) before touching seeders.
