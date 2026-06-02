@@ -8,11 +8,16 @@ import { log } from "../lib/log";
  * benötigt (Task #448). Idempotent (ADD COLUMN IF NOT EXISTS + IF NOT
  * EXISTS auf Index/Constraint).
  */
+// Task #922 — rohes Spalten-DDL als Konstante exportiert (Drift-Wächter-SSoT).
+// FK + Index bleiben separat (PostgreSQL kann ADD COLUMN IF NOT EXISTS ...
+// REFERENCES nicht atomar) und sind für den Spalten-Drift-Check irrelevant.
+export const AUDIT_PARENT_DELETION_COLUMN_SQL = `
+  ALTER TABLE audit_log
+  ADD COLUMN IF NOT EXISTS parent_deletion_id integer
+`;
+
 export async function ensureAuditParentDeletionColumn(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE audit_log
-    ADD COLUMN IF NOT EXISTS parent_deletion_id integer
-  `);
+  await db.execute(sql.raw(AUDIT_PARENT_DELETION_COLUMN_SQL));
 
   // FK separat anlegen — ADD COLUMN IF NOT EXISTS ... REFERENCES geht in
   // PostgreSQL nicht atomar. Wir prüfen über pg_constraint.

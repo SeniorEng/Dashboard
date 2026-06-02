@@ -24,6 +24,17 @@ import { log } from "../lib/log";
  * Heuristik die Spalte droppt + neu anlegt (Datenverlust).
  */
 
+// Task #922 — Ziel-Typ als exportierte SSoT für den Drift-Wächter
+// (`tests/startup/startup-schema-drift.test.ts`): die Spalte MUSS im Drizzle-
+// Modell als exakt `numeric(6,2)` deklariert sein. Das ALTER unten baut seinen
+// Typ aus genau diesen Konstanten.
+export const MONTHLY_WORK_HOURS_TARGET = {
+  table: "users",
+  column: "monthly_work_hours",
+  precision: 6,
+  scale: 2,
+} as const;
+
 async function getColumnType(
   table: string,
   column: string,
@@ -65,7 +76,7 @@ export async function migrateMonthlyWorkHoursToNumeric(): Promise<void> {
   }
 
   await db.execute(sql.raw(
-    `ALTER TABLE "users" ALTER COLUMN "monthly_work_hours" TYPE numeric(6,2) USING ROUND("monthly_work_hours"::numeric, 2)`,
+    `ALTER TABLE "${MONTHLY_WORK_HOURS_TARGET.table}" ALTER COLUMN "${MONTHLY_WORK_HOURS_TARGET.column}" TYPE numeric(${MONTHLY_WORK_HOURS_TARGET.precision},${MONTHLY_WORK_HOURS_TARGET.scale}) USING ROUND("${MONTHLY_WORK_HOURS_TARGET.column}"::numeric, ${MONTHLY_WORK_HOURS_TARGET.scale})`,
   ));
   log(
     `monthly_work_hours-Migration: users.monthly_work_hours (${dataType} → numeric(6,2))`,

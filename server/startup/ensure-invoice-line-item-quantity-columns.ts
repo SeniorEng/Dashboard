@@ -8,11 +8,19 @@ import { log } from "../lib/log";
  * nullable — historische Zeilen behalten NULL, das PDF-Template fällt für
  * sie auf `duration_minutes` zurück (GoBD-Immutabilität).
  */
+// Task #922 — rohes DDL als Konstante exportiert (Drift-Wächter-SSoT).
+// HINWEIS: `quantity_raw` wird hier als `real` angelegt, aber direkt danach von
+// `migrate-km-geo-to-numeric.ts` auf `numeric(10,3)` migriert (siehe
+// KM_GEO_COLUMNS). Der Drift-Wächter prüft `quantity_raw` daher NICHT in diesem
+// ADD-COLUMN-Block (Zwischentyp), sondern über die ALTER-TYPE-Registry gegen das
+// finale Drizzle-`numeric(10,3)`.
+export const INVOICE_LINE_ITEM_QUANTITY_COLUMNS_SQL = `
+  ALTER TABLE invoice_line_items
+  ADD COLUMN IF NOT EXISTS quantity_raw real,
+  ADD COLUMN IF NOT EXISTS quantity_unit text
+`;
+
 export async function ensureInvoiceLineItemQuantityColumns(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE invoice_line_items
-    ADD COLUMN IF NOT EXISTS quantity_raw real,
-    ADD COLUMN IF NOT EXISTS quantity_unit text
-  `);
+  await db.execute(sql.raw(INVOICE_LINE_ITEM_QUANTITY_COLUMNS_SQL));
   log("Invoice-Line-Item-Schema: quantity_raw/quantity_unit sichergestellt", "startup");
 }

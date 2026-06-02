@@ -10,6 +10,16 @@ import { log } from "../lib/log";
  * Spalte wird im Produktivcode nicht mehr gelesen oder geschrieben.
  * Diese idempotente Migration entfernt die Spalte endgültig.
  */
+// Task #922 — als SSoT exportiert: der Drift-Wächter
+// (`tests/startup/startup-schema-drift.test.ts`) stellt sicher, dass diese
+// gedroppte Spalte NICHT (wieder) im Drizzle-Modell auftaucht — sonst legt
+// `drizzle-kit push` sie an und diese Migration droppt sie beim nächsten Boot
+// wieder (Flapping).
+export const DROPPED_APPOINTMENTS_SERVICE_TYPE = {
+  table: "appointments",
+  column: "service_type",
+} as const;
+
 export async function dropAppointmentsServiceTypeColumn(): Promise<void> {
   try {
     const check = await db.execute(sql`

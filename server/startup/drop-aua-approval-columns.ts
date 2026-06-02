@@ -18,6 +18,16 @@ import { log } from "../lib/log";
  * Nicht-NULL-Wert existiert. Findet sich wider Erwarten ein Wert, bleibt die
  * Spalte erhalten und es wird gewarnt (kein stiller Datenverlust).
  */
+// Task #922 — als SSoT exportiert: der Drift-Wächter
+// (`tests/startup/startup-schema-drift.test.ts`) stellt sicher, dass diese
+// gedroppten Spalten NICHT (wieder) im Drizzle-Modell auftauchen — sonst legt
+// `drizzle-kit push` sie an und diese Migration droppt sie beim nächsten Boot
+// wieder (Flapping / destruktive Push-Warnung).
+export const DROPPED_AUA_APPROVAL_COLUMNS = {
+  table: "customers",
+  columns: ["aua_approval_ref", "aua_approval_date"],
+} as const;
+
 async function dropColumnIfEmpty(column: string): Promise<void> {
   const exists = await db.execute(sql`
     SELECT 1 AS exists

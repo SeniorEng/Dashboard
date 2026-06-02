@@ -9,11 +9,14 @@ import { log } from "../lib/log";
  * „Fingerprint zum Zeitpunkt der PDF-Erstellung"). Idempotente DDL — beim
  * nächsten Boot ein No-Op.
  */
+// Task #922 — rohes DDL als Konstante exportiert (Drift-Wächter-SSoT).
+export const INVOICE_FINGERPRINT_COLUMNS_SQL = `
+  ALTER TABLE invoices
+  ADD COLUMN IF NOT EXISTS pdf_data_fingerprint text,
+  ADD COLUMN IF NOT EXISTS leistungsnachweis_data_fingerprint text
+`;
+
 export async function ensureInvoiceFingerprintColumns(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE invoices
-    ADD COLUMN IF NOT EXISTS pdf_data_fingerprint text,
-    ADD COLUMN IF NOT EXISTS leistungsnachweis_data_fingerprint text
-  `);
+  await db.execute(sql.raw(INVOICE_FINGERPRINT_COLUMNS_SQL));
   log("Invoice-Schema-Migration: pdf_data_fingerprint/leistungsnachweis_data_fingerprint sichergestellt", "startup");
 }

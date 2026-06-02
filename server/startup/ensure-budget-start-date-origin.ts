@@ -17,10 +17,15 @@ import { log } from "../lib/log";
  * 'manual' behandelt (kein stilles Umrechnen bestehender Kunden-Budgets;
  * betroffene Altkunden werden gezielt per Korrektur-Skript migriert).
  */
+// Task #922 — Single-Source-of-Truth für das rohe DDL, damit der Drift-Wächter
+// (`tests/startup/startup-schema-drift.test.ts`) es introspizieren kann, ohne es
+// zu duplizieren.
+export const BUDGET_START_DATE_ORIGIN_COLUMN_SQL = `
+  ALTER TABLE customer_budget_preferences
+  ADD COLUMN IF NOT EXISTS budget_start_date_origin text
+`;
+
 export async function ensureBudgetStartDateOrigin(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE customer_budget_preferences
-    ADD COLUMN IF NOT EXISTS budget_start_date_origin text
-  `);
+  await db.execute(sql.raw(BUDGET_START_DATE_ORIGIN_COLUMN_SQL));
   log("customer_budget_preferences.budget_start_date_origin sichergestellt", "startup");
 }

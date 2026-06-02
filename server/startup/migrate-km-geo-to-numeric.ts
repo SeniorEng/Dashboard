@@ -31,13 +31,22 @@ import { log } from "../lib/log";
  * mehrere Sekunden Lock kosten — siehe Backfill-Plan im Runbook.
  */
 
-type ColumnSpec = {
+export type KmGeoColumnSpec = {
   table: string;
   column: string;
   type: "km" | "geo";
 };
 
-const KM_GEO_COLUMNS: ColumnSpec[] = [
+// Task #922 — Ziel-Typen als exportierte SSoT, damit der Drift-Wächter
+// (`tests/startup/startup-schema-drift.test.ts`) prüfen kann, dass jede migrierte
+// Spalte im Drizzle-Modell als exakt dieser `numeric`-Typ deklariert ist. Die
+// ALTER-Statements unten bauen ihren Typ aus genau diesen Konstanten.
+export const KM_NUMERIC_PRECISION = 10;
+export const KM_NUMERIC_SCALE = 3;
+export const GEO_NUMERIC_PRECISION = 9;
+export const GEO_NUMERIC_SCALE = 6;
+
+export const KM_GEO_COLUMNS: KmGeoColumnSpec[] = [
   // KM
   { table: "appointments", column: "travel_kilometers", type: "km" },
   { table: "appointments", column: "customer_kilometers", type: "km" },
@@ -109,11 +118,11 @@ export async function migrateKmGeoToNumeric(): Promise<void> {
       // wir behalten 3 NK Speicher-Auflösung, damit Routing-Roh-km nicht
       // bereits beim Migrieren ihre dritte Stelle verlieren.
       await db.execute(sql.raw(
-        `ALTER TABLE "${spec.table}" ALTER COLUMN "${spec.column}" TYPE numeric(10,3) USING ROUND("${spec.column}"::numeric, 3)`,
+        `ALTER TABLE "${spec.table}" ALTER COLUMN "${spec.column}" TYPE numeric(${KM_NUMERIC_PRECISION},${KM_NUMERIC_SCALE}) USING ROUND("${spec.column}"::numeric, ${KM_NUMERIC_SCALE})`,
       ));
     } else {
       await db.execute(sql.raw(
-        `ALTER TABLE "${spec.table}" ALTER COLUMN "${spec.column}" TYPE numeric(9,6) USING ROUND("${spec.column}"::numeric, 6)`,
+        `ALTER TABLE "${spec.table}" ALTER COLUMN "${spec.column}" TYPE numeric(${GEO_NUMERIC_PRECISION},${GEO_NUMERIC_SCALE}) USING ROUND("${spec.column}"::numeric, ${GEO_NUMERIC_SCALE})`,
       ));
     }
     changed++;
