@@ -70,9 +70,18 @@ describe("BC-K4: Advisory-Lock serialisiert parallele Konsumbuchungen", () => {
     // Klar definiertes Budget: genau 100 € als initial_balance, ab heute gültig,
     // ohne Verfall — überschreibt die monatliche §45b-Berechnung nicht, addiert
     // sich aber auf, also nutzen wir manual_adjustment, das überschaubar ist.
-    const today = new Date();
-    const todayIso = today.toISOString().split("T")[0];
-    const yyyymm = todayIso.substring(0, 7);
+    // Termin-Anker: 3 Tage in der Vergangenheit, auf einen Werktag verschoben.
+    // WICHTIG (Task #894): Der Allokations-Kalendermonat MUSS = Konsum-(Termin-)
+    // Monat sein. Am Monatsersten (z. B. 1. Juni) rutscht today-3 in den Vormonat
+    // (Mai); läge die manual_adjustment-Allokation dann im aktuellen Monat (Juni),
+    // sähe die Mai-Konsumbuchung 0 € verfügbar und ALLE 5 Buchungen würden
+    // abgelehnt (fulfilled=0). Daher leiten wir Jahr/Monat/validFrom aus dem
+    // Termin-Anker ab statt aus „heute".
+    const apptAnchor = new Date();
+    apptAnchor.setDate(apptAnchor.getDate() - 3);
+    shiftWeekday(apptAnchor);
+    const dateStr = apptAnchor.toISOString().split("T")[0];
+    const yyyymm = dateStr.substring(0, 7);
 
     // Damit nicht zusätzlich monatliche §45b-Allokationen entstehen, setzen wir
     // budgetStartDate weit in die Zukunft. Die manual_adjustment-Allokation
@@ -88,8 +97,8 @@ describe("BC-K4: Advisory-Lock serialisiert parallele Konsumbuchungen", () => {
     await db.insert(budgetAllocations).values({
       customerId,
       budgetType: "entlastungsbetrag_45b",
-      year: today.getFullYear(),
-      month: today.getMonth() + 1,
+      year: apptAnchor.getFullYear(),
+      month: apptAnchor.getMonth() + 1,
       amountCents: 10000,
       source: "manual_adjustment",
       validFrom: `${yyyymm}-01`,
@@ -105,10 +114,6 @@ describe("BC-K4: Advisory-Lock serialisiert parallele Konsumbuchungen", () => {
     // mit leerem Kalender; der Insert simuliert den fertig dokumentierten
     // Zustand „scheduled" für die Konsumbuchung).
     const slotTimes = ["08:00", "09:30", "11:00", "12:30", "14:00"];
-    const candidate = new Date();
-    candidate.setDate(candidate.getDate() - 3);
-    shiftWeekday(candidate);
-    const dateStr = candidate.toISOString().split("T")[0];
 
     const appointmentIds: number[] = [];
     for (const time of slotTimes) {

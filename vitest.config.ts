@@ -17,6 +17,20 @@ const UNIT_INCLUDE = [
   "tests/architecture/**/*.test.tsx",
 ];
 
+// Integrations-Parallelität (Task #894): Der Orchestrator
+// `scripts/with-ephemeral-db.ts` setzt `EPHEMERAL_DB_WORKERS` auf die Anzahl der
+// provisionierten DB/Server-Paare. Pro Worker existiert genau EINE isolierte DB +
+// EIN App-Server (Base-URL-Liste in `TEST_BASE_URLS`, Zuordnung in tests/setup.ts).
+// → Wir pinnen den Fork-Pool auf exakt diese Anzahl und aktivieren
+// `fileParallelism`, sobald >1 Worker da sind. Ohne Orchestrator (rohes
+// `vitest run`, z.B. gegen den Dev-Server) bleibt es bei 1 Worker / sequenziell,
+// damit Tests sich keine geteilte DB zerschießen.
+const INTEGRATION_WORKERS = Math.max(
+  1,
+  Number(process.env.EPHEMERAL_DB_WORKERS || "1") || 1,
+);
+const INTEGRATION_PARALLEL = INTEGRATION_WORKERS > 1;
+
 export default defineConfig({
   esbuild: {
     jsx: "automatic",
@@ -65,8 +79,19 @@ export default defineConfig({
             "tests/architecture/**",
           ],
           isolate: true,
-          // Sequenziell: gemeinsamer App-Server + DB-State.
-          fileParallelism: false,
+          // Task #894: Datei-Parallelität über isolierte Per-Worker-DB/Server.
+          // Jeder Fork-Worker bekommt seine eigene Wegwerf-DB + seinen eigenen
+          // App-Server (siehe scripts/with-ephemeral-db.ts + tests/setup.ts), die
+          // Fork-Anzahl ist exakt auf die Worker-Anzahl gepinnt. Ohne
+          // Orchestrator (1 Worker) bleibt es sequenziell.
+          fileParallelism: INTEGRATION_PARALLEL,
+          pool: "forks",
+          poolOptions: {
+            forks: {
+              minForks: INTEGRATION_WORKERS,
+              maxForks: INTEGRATION_WORKERS,
+            },
+          },
           testTimeout: 60000,
           hookTimeout: 60000,
           setupFiles: ["./tests/setup.ts"],

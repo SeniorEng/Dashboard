@@ -147,7 +147,13 @@ describe("#576 — Storno hält LN aktiv und Kunde eligible", () => {
     // T2: zusätzlich dokumentieren — wird vom LN NICHT abgedeckt
     // (Partial-Signing-Setup). Ohne Task #576 würde der spätere Storno
     // den LN soft-löschen, weil `hasUnlinkedDoc=true`.
-    const t2 = await findFreeSlot(customerId, year, month, t1.date, "T2");
+    // Task #894: KEIN Datums-Ausschluss von T1 — sonst findet der Test am
+    // Monatsersten (z. B. 1. Juni) keinen zweiten freien Werktag im laufenden
+    // Monat (nur EIN vergangener Werktag existiert) und scheitert mit "kein
+    // freier Slot". Ein zweiter Termin am selben Tag zu anderer Uhrzeit erfüllt
+    // dieselbe Rolle (separater, vom bereits signierten LN nicht erfasster
+    // Beleg), da der LN bei seiner Erstellung nur T1 kannte.
+    const t2 = await findFreeSlot(customerId, year, month, null, "T2");
     await documentAppt(t2.id, t2.time);
 
     // Storno der Rechnung.

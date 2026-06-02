@@ -60,6 +60,17 @@ function makeRecord(overrides: Partial<MonthlyServiceRecord>): MonthlyServiceRec
 
 const foreignPending = makeRecord({ id: 42, customerId: 999, year: 2026, month: 3 });
 
+// Die Seite leitet selectedYear/selectedMonth aus `window.location.search` ab
+// (nicht aus dem gemockten wouter-`useSearch`); in jsdom ist die URL leer, also
+// fällt sie auf den AKTUELLEN Monat zurück. Der Records-Query-Key enthält genau
+// diesen Monat — pre-seeden wir mit einem festen Monat (z. B. Mai), greift am
+// Monatsersten anderer Monate (z. B. 1. Juni) der Cache nicht, der Query bleibt
+// ohne queryFn ewig pending und die Seite zeigt nur den Loader statt des Banners
+// (Task #894). Wir pre-seeden daher mit dem aktuellen Monat.
+const NOW = new Date();
+const CURRENT_YEAR = NOW.getFullYear();
+const CURRENT_MONTH = NOW.getMonth() + 1;
+
 function renderPage({
   search,
   selectedYear,
@@ -150,8 +161,8 @@ describe("ServiceRecordsPage — pending banner is suppressed on customer pages 
   it("does NOT render banner-pending on a customer page even when the query cache holds another customer's pending record", () => {
     renderPage({
       search: "customerId=100",
-      selectedYear: 2026,
-      selectedMonth: 5,
+      selectedYear: CURRENT_YEAR,
+      selectedMonth: CURRENT_MONTH,
       customerIdForCacheKey: 100,
     });
     expect(screen.queryByTestId("banner-pending")).toBeNull();
@@ -159,9 +170,9 @@ describe("ServiceRecordsPage — pending banner is suppressed on customer pages 
 
   it("DOES render banner-pending on the overview page (no customerId) with the same cached pending record", () => {
     renderPage({
-      search: "year=2026&month=5",
-      selectedYear: 2026,
-      selectedMonth: 5,
+      search: "",
+      selectedYear: CURRENT_YEAR,
+      selectedMonth: CURRENT_MONTH,
       customerIdForCacheKey: null,
     });
     expect(screen.getByTestId("banner-pending")).toBeTruthy();

@@ -365,10 +365,20 @@ async function configureLowBudgetPV(
   });
   // Task #425: §45b ist ein Jahrestopf. Damit die Tests weiterhin den Split
   // erzwingen (wenig Budget bei viel Termin), setzen wir budgetStartDate auf
-  // den 1. des aktuellen Monats — dann hat sich genau 1 × monthlyLimitCents
-  // aufgestockt und der Topf ist mit hoher Wahrscheinlichkeit erschöpft.
-  const now = new Date();
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  // den 1. des Monats, in dem findFreeSlotAndCreate den Termin anlegt — dann
+  // hat sich genau 1 × monthlyLimitCents aufgestockt und der Topf ist
+  // erschöpft. Task #894: Der Anker-Termin landet auf dem ersten freien
+  // vergangenen Werktag (offset=1 ab heute, danach Wochenend-Shift rückwärts).
+  // Am Monatsersten (z. B. 1. Juni) fällt dieser Termin in den VORMONAT — ein
+  // hartcodierter "aktueller Monat" als budgetStartDate ließe den §45b-Topf im
+  // Termin-Monat dann leer (kein Split). Wir spiegeln daher dieselbe
+  // Slot-Logik, damit Budget-Fenster und Termin-Monat immer übereinstimmen
+  // (weiter zurück darf budgetStartDate NICHT liegen, sonst trägt der
+  // §45b-Carryover ungenutzte Vormonate in den Termin-Monat → kein Split).
+  const slotTarget = new Date();
+  slotTarget.setDate(slotTarget.getDate() - 1);
+  shiftToWeekday(slotTarget);
+  const monthStart = `${slotTarget.getFullYear()}-${String(slotTarget.getMonth() + 1).padStart(2, "0")}-01`;
   await apiPut(`/api/budget/${customerId}/preferences`, {
     budgetStartDate: monthStart,
     monthlyLimitCents: null,

@@ -7,6 +7,7 @@ import twilioWebhookRouter from "./routes/webhook-twilio";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { db } from "./lib/db";
 import { sql } from "drizzle-orm";
+import { isStartupComplete } from "./lib/startup-state";
 
 // Task #726: Boot-Zeitstempel des aktuell laufenden Server-Prozesses.
 // Wird im /api/health-Endpoint exponiert, damit Integration-Tests (siehe
@@ -56,6 +57,7 @@ export async function registerRoutes(
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         bootedAt: SERVER_BOOTED_AT,
+        startupComplete: isStartupComplete(),
         chromium: chromiumStatus,
         pdfCache,
         auditLogImmutability,

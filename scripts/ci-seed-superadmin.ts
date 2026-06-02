@@ -19,8 +19,20 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "../server/lib/db";
-import { users } from "@shared/schema";
+import { users, userRoles } from "@shared/schema";
 import { authService } from "../server/services/auth";
+
+// Service-Rollen, die der Test-User auf der gewachsenen Dev-DB historisch hat.
+// Viele Integrationstests (u.a. der Erstberatungs-Flow) setzen voraus, dass der
+// agierende Admin/Superadmin selbst Erstberater ist bzw. alle Leistungsrollen
+// trägt — auf einer frischen Wegwerf-DB (Task #894) fehlen sie sonst.
+const TEST_USER_SERVICE_ROLES = [
+  "hauswirtschaft",
+  "alltagsbegleitung",
+  "erstberatung",
+  "personenbefoerderung",
+  "kinderbetreuung",
+] as const;
 
 async function main(): Promise<void> {
   const email = process.env.TEST_USER_EMAIL;
@@ -56,12 +68,32 @@ async function main(): Promise<void> {
   // Superadmin + aktiv erzwingen, damit alle Suiten (inkl. Monatsabschluss,
   // Audit-only-Operationen) durchlaufen — unabhängig von der Reihenfolge
   // gegenüber der Startup-Promotion.
+  // `onboardingCompleted` = Onboarding abgeschlossen. Auf der gewachsenen
+  // Dev-DB hat der Test-User das Onboarding längst weggeklickt; auf der frischen
+  // Wegwerf-DB (Task #894) ist es false → der Onboarding-Dialog (App.tsx:
+  // `!user.onboardingCompleted && !dismissed`) legt sich als fixed-Overlay über
+  // die Seite und fängt in den e2e-Smoke-Tests sämtliche Klicks ab
+  // (Pointer-Interception). Daher hier idempotent auf abgeschlossen setzen.
   await db
     .update(users)
-    .set({ isSuperAdmin: true, isActive: true })
+    .set({ isSuperAdmin: true, isActive: true, onboardingCompleted: true })
     .where(eq(users.email, normalized));
 
-  console.log("[ci-seed] Superadmin-Rechte + aktiv-Status sichergestellt.");
+  console.log("[ci-seed] Superadmin-Rechte + aktiv-Status + Onboarding-Flag sichergestellt.");
+
+  // Service-Rollen idempotent vergeben (user_role_unique → onConflictDoNothing).
+  const [seeded] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, normalized))
+    .limit(1);
+  if (seeded) {
+    await db
+      .insert(userRoles)
+      .values(TEST_USER_SERVICE_ROLES.map((role) => ({ userId: seeded.id, role })))
+      .onConflictDoNothing();
+    console.log(`[ci-seed] Service-Rollen sichergestellt (${TEST_USER_SERVICE_ROLES.length}).`);
+  }
 }
 
 main()

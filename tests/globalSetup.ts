@@ -1,111 +1,35 @@
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 
-interface AuthInfo {
-  cookie: string;
-  csrfToken: string;
-}
-
-interface Service {
-  id: number;
-  name: string;
-  code?: string | null;
-}
-
-async function assertServerBuildFresh(): Promise<void> {
-  // Task #726: Verhindern, dass Tests gegen eine alte Server-Instanz laufen.
-  // Der Replit-Workflow `Start application` startet `tsx server/index.ts`
-  // OHNE Watch-Mode. Wer Server-Code ändert und den `test`-Workflow startet,
-  // ohne vorher `Start application` zu restarten, testet weiter gegen den
-  // alten Build. Das ist in der Vergangenheit mehrfach als „Test ist rot,
-  // obwohl der Fix doch drin ist"-Bug aufgetreten.
-  //
-  // Schutz: /api/health exponiert `bootedAt` (Boot-Zeitstempel des laufenden
-  // Prozesses). Wir vergleichen das mit der jüngsten mtime unter
-  // `server/` und `shared/`. Ist eine Quelldatei neuer als der Server-Boot,
-  // werfen wir hart und weisen darauf hin, den `Start application`-Workflow
-  // zu restarten. Mit `SKIP_SERVER_FRESHNESS_CHECK=1` deaktivierbar (z.B.
-  // für CI gegen einen vorab gebauten Container).
-  if (process.env.SKIP_SERVER_FRESHNESS_CHECK === "1") return;
-
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-
-  let bootedAt: number | null = null;
-  try {
-    const res = await fetch(`${BASE_URL}/api/health`);
-    if (res.ok) {
-      const body = (await res.json()) as { bootedAt?: number };
-      if (typeof body.bootedAt === "number") bootedAt = body.bootedAt;
-    }
-  } catch {
-    // Falls Health-Probe scheitert, übernimmt waitForServer den Hard-Fail.
-    return;
-  }
-  if (bootedAt == null) {
-    // Älterer Server ohne `bootedAt` (vor Task #726) — keine Aussage möglich.
-    console.warn("[globalSetup] /api/health liefert kein bootedAt — Freshness-Check übersprungen. Bitte `Start application` neu starten, um den neuen Server zu laden.");
-    return;
-  }
-
-  const roots = ["server", "shared"];
-  let newestMtime = 0;
-  let newestFile = "";
-  async function walk(dir: string): Promise<void> {
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const ent of entries) {
-      if (ent.name === "node_modules" || ent.name.startsWith(".")) continue;
-      const full = path.join(dir, ent.name);
-      if (ent.isDirectory()) {
-        await walk(full);
-      } else if (ent.isFile() && /\.(ts|tsx|js|mjs|cjs|json)$/.test(ent.name)) {
-        try {
-          const stat = await fs.stat(full);
-          if (stat.mtimeMs > newestMtime) {
-            newestMtime = stat.mtimeMs;
-            newestFile = full;
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-  for (const root of roots) await walk(root);
-
-  // Toleranz: 2s puffern, damit Datei-Saves direkt vor dem Boot keinen
-  // False-Positive auslösen (Boot dauert i.d.R. mehrere Sekunden).
-  const skewMs = 2000;
-  if (newestMtime > bootedAt + skewMs) {
-    const ageSec = Math.round((newestMtime - bootedAt) / 1000);
-    throw new Error(
-      `[globalSetup] Stale server detected: '${newestFile}' wurde ${ageSec}s NACH dem letzten Server-Boot geändert ` +
-      `(server bootedAt=${new Date(bootedAt).toISOString()}, file mtime=${new Date(newestMtime).toISOString()}). ` +
-      `Bitte den 'Start application'-Workflow neu starten, bevor Tests laufen — sonst testest du gegen alten Code. ` +
-      `Override: SKIP_SERVER_FRESHNESS_CHECK=1.`,
-    );
-  }
-}
-
+// Task #894: Jeder Integrationslauf bekommt seine eigene wegwerf-DB plus einen
+// frisch gestarteten App-Server (siehe `scripts/with-ephemeral-db.ts`).
+// Dadurch teilen sich Läufe KEINEN Datenbank-State mehr — der frühere
+// Bulk-Purge der stale Test-Daten und der Server-Freshness-Guard
+// (`assertServerBuildFresh`) sind damit hinfällig und wurden entfernt.
+//
+// Es bleibt nur die Health-Probe: In CI startet der App-Server in einem
+// separaten Step (vor `vitest run`), daher warten wir hier defensiv, bis
+// `/api/health` antwortet, bevor die HTTP-Suiten loslaufen. Lokal hat der
+// Orchestrator bereits auf Health gewartet — die Probe ist dann ein No-Op.
+//
+// Task #894: Wir warten NICHT nur auf `status: ok`, sondern auf
+// `startupComplete: true`. `runStartupTasks()` (server/index.ts) läuft
+// fire-and-forget NACH `listen()` — auf einer frischen DB (ephemeral oder CI)
+// sind die Seeder (System-Services/Pflegekassen/PKV-Provider) sonst noch nicht
+// durch, wenn die ersten `beforeAll`-Blöcke Referenzdaten erwarten (Race).
 async function waitForServer(): Promise<void> {
-  // Health-Probe gegen /api/health. Notwendig, weil der `test`-Workflow im
-  // Replit-Setup parallel zum `Start application`-Workflow startet — der
-  // App-Server hört zum globalSetup-Start daher noch nicht zwingend auf
-  // Port 5000. Ohne diese Probe failt der erste Login mit `fetch failed`
-  // (ECONNREFUSED), globalSetup gab das früher still auf und alle Suiten
-  // mit `getAuthCookie()` in `beforeAll` wurden als skipped gemeldet.
-  const maxAttempts = 30;
+  const maxAttempts = 60;
   const delayMs = 1000;
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const res = await fetch(`${BASE_URL}/api/health`);
-      if (res.ok) return;
-      lastError = new Error(`health status ${res.status}`);
+      if (res.ok) {
+        const body = (await res.json()) as { startupComplete?: boolean };
+        if (body.startupComplete === true) return;
+        lastError = new Error("startupComplete=false (Seeder noch nicht durch)");
+      } else {
+        lastError = new Error(`health status ${res.status}`);
+      }
     } catch (e) {
       lastError = e;
     }
@@ -118,222 +42,14 @@ async function waitForServer(): Promise<void> {
   const msg = lastError instanceof Error ? lastError.message : String(lastError);
   throw new Error(
     `[globalSetup] App server at ${BASE_URL} did not become healthy after ${maxAttempts}s. ` +
-    `Stelle sicher, dass der "Start application"-Workflow läuft, bevor "test" gestartet wird. Letzter Fehler: ${msg}`,
+    `Letzter Fehler: ${msg}`,
   );
-}
-
-async function loginAndGetAuth(): Promise<AuthInfo> {
-  const email = process.env.TEST_USER_EMAIL || "alrikdegenkolb@seniorenengel-alltagsbegleitung.de";
-  const password = process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL;
-  if (!password) throw new Error("TEST_USER_PASSWORD not set");
-
-  await waitForServer();
-
-  let res: Response | null = null;
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try {
-      res = await fetch(`${BASE_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-    } catch (e) {
-      // Connection-Error (z.B. ECONNRESET, EAI_AGAIN) — Backoff statt sofort
-      // hart failen, damit Race-Conditions am Server-Start nicht zu still
-      // übersprungenen Suiten führen.
-      lastError = e;
-      const msg = e instanceof Error ? e.message : String(e);
-      const delay = 1500 * Math.pow(2, attempt);
-      console.warn(`[globalSetup] login connection error (${msg}), retry in ${delay}ms`);
-      await new Promise((r) => setTimeout(r, delay));
-      continue;
-    }
-    if (res.status !== 429) break;
-    const delay = 1500 * Math.pow(2, attempt);
-    console.warn(`[globalSetup] 429 on login, retry in ${delay}ms`);
-    await new Promise((r) => setTimeout(r, delay));
-  }
-  if (!res) {
-    const msg = lastError instanceof Error ? lastError.message : String(lastError);
-    throw new Error(`[globalSetup] Login failed (connection): ${msg}`);
-  }
-  if (!res.ok) throw new Error(`[globalSetup] Login failed: HTTP ${res.status}`);
-
-  const cookies = res.headers.get("set-cookie") || "";
-  const csrfMatch = cookies.match(/careconnect_csrf=([^;]+)/);
-  return { cookie: cookies, csrfToken: csrfMatch ? csrfMatch[1] : "" };
-}
-
-async function apiPost(auth: AuthInfo, path: string, body: unknown): Promise<Response> {
-  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
-  return fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers: {
-      Cookie: cookieHeader,
-      "x-csrf-token": auth.csrfToken,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-}
-
-async function apiGet(auth: AuthInfo, path: string): Promise<Response> {
-  return fetch(`${BASE_URL}${path}`, {
-    headers: { Cookie: auth.cookie },
-  });
-}
-
-// Task #887: isTestCustomer/isTestProspect/isTestUser leben nicht mehr hier —
-// die Test-Pattern-Filter sind server-seitig die SSoT (CUSTOMER/PROSPECT/USER_
-// TEST_FILTER in server/services/test-data-cleanup.ts), und der Cleanup ruft
-// die gescopten Full-Backlog-Purges direkt auf. Nur der Service-Cleanup filtert
-// noch client-seitig, weil es dafür keinen Full-Backlog-Endpoint gibt.
-function isTestService(s: Service): boolean {
-  // BEWUSST eng gefasst (Task #183 Spec): nur Services mit unverkennbarem
-  // Test-Marker im Namen ODER Code. NICHT generisches "test" Substring,
-  // sonst würden Produktiv-Services mit "test" im Namen fälschlich gelöscht.
-  const n = (s.name || "").toLowerCase();
-  const c = (s.code || "").toLowerCase();
-  return n.includes("_test_") || c.startsWith("qs-test-");
 }
 
 export async function setup() {
   if (process.env.NODE_ENV === "production") {
-    console.warn("[globalSetup] Skipping cleanup in production environment");
+    console.warn("[globalSetup] Skipping in production environment");
     return;
   }
-
-  // Task #726: Stale-Server-Schutz VOR jeder weiteren Logik. waitForServer()
-  // in loginAndGetAuth() probt nur Erreichbarkeit, nicht Frische — der Check
-  // hier vergleicht /api/health bootedAt mit der jüngsten Source-mtime und
-  // bricht hart ab, wenn der `Start application`-Workflow nach einer
-  // Server-Änderung vergessen wurde zu restarten.
-  await assertServerBuildFresh();
-
-  console.log("[globalSetup] Cleaning stale test data...");
-
-  // Hart failen statt still „skipping cleanup" loggen: ein nicht erreichbarer
-  // Server oder ein kaputter Login führt sonst dazu, dass jedes `beforeAll`
-  // mit `getAuthCookie()` failt und Vitest die betroffenen Suiten als
-  // „skipped" meldet — der Testlauf sähe grün aus, obwohl nichts gelaufen ist.
-  const auth: AuthInfo = await loginAndGetAuth();
-
-  // Task #887: Kunden/Interessenten/User werden NICHT mehr client-seitig
-  // gefetcht+gefiltert (das war O(n) und zusätzlich durch ein limit=500/1000
-  // gedeckelt, sodass ein großer Stale-Backlog nie vollständig abgeräumt
-  // wurde). Stattdessen triggern wir EINEN server-seitigen Full-Backlog-Purge
-  // pro Domäne — die Routen sind auf das Test-Pattern gescopt und löschen
-  // set-based in Batches, sodass das Cleanup auch bei tausenden Stale-Records
-  // schnell durchläuft, bevor der erste Test startet.
-  {
-    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-customers", {});
-    if (!res.ok) {
-      console.warn(`[globalSetup] Customer purge failed: ${res.status} ${await res.text()}`);
-    } else {
-      const result = await res.json() as { deleted: number[]; failed: Array<{ id: number; error: string }> };
-      if (result.deleted.length > 0 || result.failed.length > 0) {
-        console.log(`[globalSetup] Purged ${result.deleted.length} stale test customers`);
-      }
-      if (result.failed.length > 0) {
-        const sample = result.failed.slice(0, 3).map(f => `${f.id}:${f.error}`).join("; ");
-        console.warn(`[globalSetup] ${result.failed.length} customer purge failures (first 3): ${sample}`);
-      }
-    }
-  }
-
-  {
-    // Task #789/#887: EIN gescopter Full-Backlog-Bulk-DELETE (leerer Body =
-    // gesamter Test-Interessenten-Backlog). Die Route ist server-seitig auf das
-    // Test-Pattern gescopt und löscht in einer Transaktion.
-    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-prospects", {});
-    if (!res.ok) {
-      console.warn(`[globalSetup] Prospect purge failed: ${res.status} ${await res.text()}`);
-    } else {
-      const result = await res.json() as { deleted: number[] };
-      if (result.deleted.length > 0) {
-        console.log(`[globalSetup] Purged ${result.deleted.length} stale test prospects`);
-      }
-    }
-  }
-
-  // Step 3: Purge stale time-entries and admin-assigned appointments in the
-  // far-future test pollution window. Tests like TE-BIZ-3 (offset 260+) and
-  // EB-5.2 (offset 280) need a clean calendar window for the test admin.
-  // The near future (next 30 days) is preserved so any near-term planning data
-  // is not wiped. The window extends to ~2.5 years out which covers all
-  // far-future offsets used by the test suite (max ~680 + buffer).
-  try {
-    const calRes = await apiPost(auth, "/api/admin/test-cleanup/purge-admin-calendar-range", {
-      startOffsetDays: 30,
-      endOffsetDays: 900,
-    });
-    if (calRes.ok) {
-      const result = await calRes.json() as {
-        timeEntriesDeleted: number;
-        appointmentsDeleted: number;
-        startDate: string;
-        endDate: string;
-      };
-      console.log(`[globalSetup] Purged ${result.timeEntriesDeleted} stale time-entries and ${result.appointmentsDeleted} stale admin appointments in [${result.startDate}, ${result.endDate}]`);
-    } else {
-      console.warn(`[globalSetup] Calendar purge failed: ${calRes.status} ${await calRes.text()}`);
-    }
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[globalSetup] Calendar purge errored: ${msg}`);
-  }
-
-  // Schritt 4: Test-User aufräumen (Domain @test.local oder testemp- Prefix).
-  // Task #887: EIN server-seitiger Full-Backlog-Purge (leerer Body) statt
-  // client-seitigem Fetch (limit=1000) + manuellem Batching. Die Route findet
-  // den kompletten Test-User-Backlog server-seitig und löscht in 500er-Batches,
-  // sodass auch ein historisch gewachsener Stale-Pool vollständig abgeräumt wird.
-  try {
-    const res = await apiPost(auth, "/api/admin/test-cleanup/purge-test-users", {});
-    if (!res.ok) {
-      console.warn(`[globalSetup] User purge failed: ${res.status} ${await res.text()}`);
-    } else {
-      const result = await res.json() as { deleted: number[]; blocked?: boolean };
-      if (result.deleted.length > 0) {
-        console.log(`[globalSetup] Purged ${result.deleted.length} stale test users`);
-      }
-      if (result.blocked) {
-        console.warn(`[globalSetup] Ein User-Batch wurde blockiert (echte Kunden-Refs trotz Detach-Pass)`);
-      }
-    }
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[globalSetup] User purge errored: ${msg}`);
-  }
-
-  // Schritt 5: Test-Services aufräumen (Name enthält _test_ etc.)
-  try {
-    const svcRes = await apiGet(auth, "/api/services");
-    if (svcRes.ok) {
-      const svcData: unknown = await svcRes.json();
-      const allServices: Service[] = Array.isArray(svcData)
-        ? svcData
-        : (svcData as Record<string, unknown>).data as Service[] || [];
-      const testServices = allServices.filter(isTestService);
-      if (testServices.length > 0) {
-        console.log(`[globalSetup] Found ${testServices.length} stale test services, purging unreferenced...`);
-        const ids = testServices.map((s) => s.id);
-        for (let i = 0; i < ids.length; i += 100) {
-          const batch = ids.slice(i, i + 100);
-          const res = await apiPost(auth, "/api/admin/test-cleanup/purge-test-services", { ids: batch });
-          if (!res.ok) {
-            console.warn(`[globalSetup] Service purge batch failed: ${res.status} ${await res.text()}`);
-            break;
-          }
-        }
-        console.log(`[globalSetup] Test-Service-Cleanup abgeschlossen`);
-      }
-    }
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[globalSetup] Service purge errored: ${msg}`);
-  }
-
-  console.log("[globalSetup] Cleanup complete");
+  await waitForServer();
 }

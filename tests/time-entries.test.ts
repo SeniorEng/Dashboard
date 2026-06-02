@@ -11,6 +11,7 @@ import {
   getFutureDate,
   loginAs,
   createTestCustomer,
+  createTestEmployee,
 } from "./test-utils";
 import { getVacationHolidayName } from "@shared/utils/holidays";
 
@@ -1151,10 +1152,16 @@ describe("TE-ATTR: Stundenübersicht Attribution (performedByEmployeeId)", () =>
     const usersRes = await apiGet<any[]>("/api/admin/users");
     const allUsers = Array.isArray(usersRes.data) ? usersRes.data : [];
     const otherUser = allUsers.find((u: any) => u.id !== auth.user.id && u.isActive !== false);
-    if (!otherUser) {
-      throw new Error("Need a second employee for attribution test");
+    if (otherUser) {
+      employee2Id = otherUser.id;
+    } else {
+      // Frische Wegwerf-DB (Task #894): außer dem Seed-Superadmin existiert kein
+      // weiterer aktiver Mitarbeiter. Wir legen den zweiten Mitarbeiter für den
+      // Attributions-Test selbst an, statt auf gewachsene Dev-DB-Stammdaten zu
+      // vertrauen.
+      const created = await createTestEmployee({ nachnamePrefix: "TE-ATTR" });
+      employee2Id = created.id;
     }
-    employee2Id = otherUser.id;
   });
 
   afterAll(async () => {

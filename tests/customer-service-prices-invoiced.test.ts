@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { apiGet, apiPost, apiPatch, apiDelete, uniqueId } from "./test-utils";
+import { apiPost, apiPatch, apiDelete, uniqueId, createTestCustomer, cleanupCustomer } from "./test-utils";
 import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
 
@@ -20,10 +20,8 @@ describe("Schutz gegen versehentliches Verlängern abgelaufener Kundenpreise (Ta
     expect(svcRes.status).toBe(201);
     createdServiceId = svcRes.data.id;
 
-    const customers = await apiGet<any[]>("/api/customers");
-    expect(customers.status).toBe(200);
-    expect(customers.data.length).toBeGreaterThan(0);
-    createdCustomerId = customers.data[0].id;
+    const cust = await createTestCustomer();
+    createdCustomerId = cust.id;
 
     const today = new Date();
     const billingMonth = today.getMonth() + 1;
@@ -61,6 +59,7 @@ describe("Schutz gegen versehentliches Verlängern abgelaufener Kundenpreise (Ta
         await db.execute(sql`UPDATE services SET is_active = false WHERE id = ${createdServiceId}`);
       }
     } catch {}
+    await cleanupCustomer(createdCustomerId);
   });
 
   it("blockiert POST mit 409, wenn die Preisänderung in einen abgerechneten Monat fällt", async () => {
@@ -158,10 +157,8 @@ describe("Schutz gegen direktes PATCH-Update von Kundenpreisen in abgerechneten 
     expect(svcRes.status).toBe(201);
     svcId = svcRes.data.id;
 
-    const customers = await apiGet<any[]>("/api/customers");
-    expect(customers.status).toBe(200);
-    expect(customers.data.length).toBeGreaterThan(0);
-    custId = customers.data[0].id;
+    const cust = await createTestCustomer();
+    custId = cust.id;
 
     const future = new Date();
     future.setMonth(future.getMonth() + 6);
@@ -209,6 +206,7 @@ describe("Schutz gegen direktes PATCH-Update von Kundenpreisen in abgerechneten 
         await db.execute(sql`UPDATE services SET is_active = false WHERE id = ${svcId}`);
       }
     } catch {}
+    await cleanupCustomer(custId);
   });
 
   it("akzeptiert PATCH ohne Override, wenn nur ein zukünftiger validFrom verschoben wird (kein abgerechneter Monat betroffen)", async () => {

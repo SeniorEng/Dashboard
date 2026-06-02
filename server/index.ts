@@ -783,13 +783,9 @@ async function runStartupTasks() {
   const monthCloseScheduler = startMonthCloseScheduler();
   intervals.push(monthCloseScheduler.interval);
 
-  // Task #795: Periodischer Safety-Purge der stale Test-Daten (nur Dev/Test,
-  // niemals Production). Verhindert, dass abgebrochene Testläufe den
-  // Stale-Pool wieder auf tausende verwaiste Records anwachsen lassen.
-  const { startTestDataCleanupScheduler } = await import("./services/test-data-cleanup-scheduler");
-  const testDataCleanupScheduler = startTestDataCleanupScheduler();
-  if (testDataCleanupScheduler.timeout) timeouts.push(testDataCleanupScheduler.timeout);
-  if (testDataCleanupScheduler.interval) intervals.push(testDataCleanupScheduler.interval);
+  // Task #894: Der periodische Test-Daten-Safety-Purge entfällt — seit jeder
+  // Integrationslauf seine eigene wegwerf-DB nutzt (scripts/with-ephemeral-db.ts)
+  // wächst kein Stale-Pool mehr an, der aufgeräumt werden müsste.
 
   // Tier-A3: Nächtlicher Integrity-Check der letzten 30 Tage Rechnungen.
   // Re-rendert PDF + XML und gleicht gegen persistierten pdfHash/zugferdXml
@@ -804,6 +800,12 @@ async function runStartupTasks() {
   };
   timeouts.push(setTimeout(runInvoiceIntegrityCheck, 15 * 60 * 1000));
   intervals.push(setInterval(runInvoiceIntegrityCheck, 24 * 60 * 60 * 1000));
+
+  // Task #894: Alle Startup-Seeder/-Migrationen sind durch — Readiness-Flag
+  // setzen, damit Test-Setups (die auf /api/health → startupComplete warten)
+  // erst jetzt loslaufen und nicht in die Seed-Race-Condition rennen.
+  const { markStartupComplete } = await import("./lib/startup-state");
+  markStartupComplete();
 }
 
 async function gracefulShutdown(signal: string) {

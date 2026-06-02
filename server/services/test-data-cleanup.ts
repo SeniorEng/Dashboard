@@ -3,15 +3,13 @@
 //
 // Zentrale, wiederverwendbare Implementierung der gescopten Test-Daten-Purges.
 // Sie ist die Single Source of Truth für die HTTP-Routen in
-// `server/routes/admin/test-cleanup.ts` UND den periodischen Safety-Scheduler
-// (`server/services/test-data-cleanup-scheduler.ts`).
+// `server/routes/admin/test-cleanup.ts`.
 //
-// Vorher lebte die Lösch-Logik ausschließlich in den Route-Handlern und wurde
-// nur durch `tests/globalSetup.ts` (per HTTP) getriggert. Wenn ein Testlauf vor
-// seinem `afterAll`-Cleanup abgebrochen wurde, wuchsen die Stale-Datensätze bis
-// zum nächsten `globalSetup` an (Task #789 räumte einen 3300er-Backlog auf).
-// Der Scheduler ruft dieselben gescopten Purges periodisch auf, sodass der
-// Stale-Pool nie wieder unkontrolliert wächst.
+// Task #894: Seit jeder Integrationslauf seine eigene wegwerf-DB nutzt
+// (`scripts/with-ephemeral-db.ts`), wächst kein Stale-Pool mehr an. Der frühere
+// periodische Safety-Scheduler und der `globalSetup`-Bulk-Purge wurden deshalb
+// entfernt. Service + Routen bleiben als gescopte, getestete Utility erhalten
+// (z.B. für manuelle Aufräum-Aktionen auf einer geteilten Dev-DB).
 //
 // SICHERHEIT: Alle Funktionen sind in Production ein No-op (siehe
 // `assertNotProduction`). Die SQL-Test-Pattern-Filter spiegeln die

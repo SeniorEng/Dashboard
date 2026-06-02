@@ -35,7 +35,7 @@ export default defineConfig({
     : "list",
   timeout: 30000,
   use: {
-    baseURL: "http://localhost:5000",
+    baseURL: process.env.TEST_BASE_URL || "http://localhost:5000",
     // Trace bei jedem Retry-Versuch aufzeichnen (nicht nur beim ersten),
     // damit jeder Flake-Retry diagnostizierbar ist.
     trace: "retain-on-failure",
