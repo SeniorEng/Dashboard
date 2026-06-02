@@ -336,6 +336,28 @@ export const insertBudgetTypeSettingsSchema = createInsertSchema(customerBudgetT
 export type CustomerBudgetTypeSetting = typeof customerBudgetTypeSettings.$inferSelect;
 export type InsertBudgetTypeSetting = z.infer<typeof insertBudgetTypeSettingsSchema>;
 
+// ============================================
+// BUDGET MIGRATIONS LEDGER (Task #895)
+// ============================================
+//
+// Run-once-Gate für einmalige Budget-Daten-Migrationen. Die Tabelle wird beim
+// Startup idempotent per Raw-SQL angelegt (`server/startup/ensure-migration-
+// ledger.ts`); diese Drizzle-Deklaration spiegelt sie 1:1, damit `drizzle-kit
+// push` sie KENNT und NICHT als unbekannte Tabelle zum Löschen vorschlägt
+// ("data loss"-Warnung). Bewusst KEIN GoBD-Immutability-Trigger — operative
+// Migrations-Metadaten, kein historisierter Finanzdatensatz.
+export const budgetMigrations = pgTable("budget_migrations", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  version: text("version").notNull().default("1"),
+  summary: text("summary"),
+  appliedAt: timestamp("applied_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("budget_migrations_name_key").on(table.name),
+]);
+
+export type BudgetMigration = typeof budgetMigrations.$inferSelect;
+
 // Budget summary for customer detail view
 export interface BudgetSummary {
   customerId: number;
