@@ -43,8 +43,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createWriteStream, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
-
-const DB_PREFIX = "cc_test_";
+import { DB_PREFIX, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
 
 function fail(msg: string): never {
   console.error(`[ephemeral-db] ${msg}`);
@@ -112,42 +111,6 @@ function findFreePort(): Promise<number> {
       }
     });
   });
-}
-
-// Mindestalter (ms), ab dem eine verbindungslose Wegwerf-DB als „verwaist" gilt.
-// Schützt parallel laufende Schwester-Läufe: deren DB hat während des
-// Provisioning-Fensters (Seeds disconnected, Server noch nicht verbunden)
-// kurzzeitig KEINE aktiven Verbindungen — ohne Altersgrenze würde ein
-// zeitgleicher Sweep sie genau in diesem Fenster löschen.
-const ORPHAN_MIN_AGE_MS = 15 * 60 * 1000;
-
-// Parst den base36-Zeitstempel aus `cc_test_<ts36>_<pid>_<hex>...`. Liefert null
-// für Alt-Namen ohne Zeitstempel (die werden konservativ NICHT angefasst).
-function parseDbCreatedAt(name: string): number | null {
-  const rest = name.slice(DB_PREFIX.length);
-  const ts36 = rest.split("_")[0];
-  if (!ts36 || !/^[0-9a-z]+$/.test(ts36)) return null;
-  const ms = parseInt(ts36, 36);
-  return Number.isFinite(ms) && ms > 0 ? ms : null;
-}
-
-// Verwaiste Wegwerf-DBs früherer (abgestürzter) Läufe aufräumen — aber NUR
-// solche OHNE aktive Verbindungen UND älter als ORPHAN_MIN_AGE_MS, damit ein
-// parallel laufender Schwester-Lauf seine frisch provisionierte DB nie verliert.
-function sweepOrphans(): void {
-  const list = psql(
-    adminUrl!,
-    `SELECT datname FROM pg_database d WHERE datname LIKE '${DB_PREFIX}%' ` +
-      `AND NOT EXISTS (SELECT 1 FROM pg_stat_activity a WHERE a.datname = d.datname)`,
-  );
-  if (!list.ok || !list.stdout) return;
-  const now = Date.now();
-  for (const name of list.stdout.split("\n").map((s) => s.trim()).filter(Boolean)) {
-    if (!name.startsWith(DB_PREFIX)) continue;
-    const createdAt = parseDbCreatedAt(name);
-    if (createdAt == null || now - createdAt < ORPHAN_MIN_AGE_MS) continue;
-    psql(adminUrl!, `DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
-  }
 }
 
 const serverChildren: ReturnType<typeof spawn>[] = [];
@@ -304,7 +267,9 @@ async function startWorker(dbName: string): Promise<WorkerHandle> {
 }
 
 async function main(): Promise<number> {
-  sweepOrphans();
+  // Verwaiste Wegwerf-DBs früherer (hart abgebrochener) Läufe aufräumen, bevor
+  // die neue Lauf-DB angelegt wird. Nur verbindungslose, ausreichend alte DBs.
+  sweepOrphans(adminUrl!, { log: (m) => console.log(`[ephemeral-db] ${m}`) });
 
   // 1) Template-DB anlegen, Schema pushen, seeden.
   console.log(`[ephemeral-db] Erstelle Template-DB ${templateDb} ...`);

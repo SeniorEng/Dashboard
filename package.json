@@ -13,6 +13,7 @@
     "db:push": "drizzle-kit push",
     "gen:openapi": "tsx script/gen-openapi.ts",
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
+    "test:sweep-dbs": "tsx scripts/sweep-test-dbs.ts",
     "budget:correct-km-drift": "tsx server/scripts/reconcile-km-drift.ts",
     "lint": "eslint client/src server/routes --max-warnings 0",
     "test:e2e": "playwright test",
