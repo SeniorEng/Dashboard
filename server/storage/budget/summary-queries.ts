@@ -315,8 +315,15 @@ export async function getBudgetSummary45a(customerId: number, _preferences?: Cus
   const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today });
   const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId);
   const s45a = typeSettings.find(s => s.budgetType === "umwandlung_45a" && s.enabled);
+  // Task #915 — `typeSettings` ist auf den Stichtag gefiltert
+  // (`readBudgetTypeSettings({ kind: "forDate", asOfDate })`). Fehlt die §45a-
+  // Zeile, ist §45a am abgefragten Datum NICHT konfiguriert-und-wirksam (vor
+  // `validFrom` bzw. nach `validTo`) → der Topf ist nicht aktiv. Früher
+  // defaultete dieser Zweig auf `true` und meldete einen noch-nicht/nicht-mehr
+  // konfigurierten §45a-Topf fälschlich als aktiv für Vergangenheits-/Zukunfts-
+  // Stichtage.
   const isCurrentlyActive = !s45a
-    ? true
+    ? false
     : (!s45a.validFrom || today >= s45a.validFrom) && (!s45a.validTo || today <= s45a.validTo);
 
   // SSoT-Pfad: Cap-Mathematik (Monats-Fenster, statutorische Klemme nach
