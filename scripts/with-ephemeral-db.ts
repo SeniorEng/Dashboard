@@ -92,6 +92,13 @@ const workerCount = Math.max(
 // Seeds frisch pro Lauf direkt in die Per-Lauf-Template).
 const cachingEnabled = process.env.EPHEMERAL_DB_CACHE !== "0";
 
+// Task #910: Verify-/Diagnose-Modus. Stellt NUR die (ggf. gecachte) Per-Lauf-
+// Template-DB bereit und bricht dann VOR dem Server-Bundle/-Boot + Testlauf ab.
+// Genau das, was der Cache-Verify-Pfad (scripts/verify-template-cache.ts) zum
+// Messen des Warm-/Kalt-Ausgangs braucht — ohne den App-Server-Boot, der im CI
+// hinter dem fix verdrahteten Neon-Proxy ohnehin nicht pro DB routen würde.
+const provisionOnly = process.env.EPHEMERAL_PROVISION_ONLY === "1";
+
 const runId = `${Date.now().toString(36)}_${process.pid}_${randomBytes(4).toString("hex")}`;
 const templateDb = `${DB_PREFIX}${runId}_tmpl`;
 const workerDbs = Array.from({ length: workerCount }, (_, i) => `${DB_PREFIX}${runId}_w${i}`);
@@ -382,14 +389,16 @@ function cloneDbFromTemplate(target: string, source: string): void {
 
 // Stellt sicher, dass die persistente Cache-Template-DB für `hash` frisch ist.
 // Warm = vorhanden + hinterlegter Hash passt -> nichts zu tun. Sonst neu bauen
-// (drop + create + push + seed + Hash-Kommentar).
-function ensureCacheTemplate(hash: string): void {
+// (drop + create + push + seed + Hash-Kommentar). Gibt zurück, ob der Cache
+// wiederverwendet (`"warm"`) oder neu gebaut (`"cold"`) wurde — so kann der
+// Verify-Pfad (Task #910) den Warm-/Kalt-Ausgang deterministisch prüfen.
+function ensureCacheTemplate(hash: string): "warm" | "cold" {
   const stored = readCacheHash();
   if (isCacheFresh(stored, hash)) {
     console.log(
       `[ephemeral-db] Cache-Template ${CACHE_DB_NAME} ist frisch (Hash passt) — Push + Seeds übersprungen.`,
     );
-    return;
+    return "warm";
   }
   console.log(
     `[ephemeral-db] Cache-Template ${CACHE_DB_NAME} ${stored == null ? "fehlt" : "veraltet"} — wird neu gebaut ...`,
@@ -413,6 +422,7 @@ function ensureCacheTemplate(hash: string): void {
     console.warn(`[ephemeral-db] Konnte Cache-Hash nicht setzen: ${commented.stdout}`);
   }
   console.log(`[ephemeral-db] Cache-Template ${CACHE_DB_NAME} neu gebaut (Hash hinterlegt).`);
+  return "cold";
 }
 
 interface WorkerHandle {
@@ -499,7 +509,7 @@ async function main(): Promise<number> {
   // damit er PARALLEL zur (synchron blockierenden) DB-Provisionierung + dem
   // Server-Bundling läuft. Awaited wird er erst direkt vor dem Worker-Start —
   // so kostet der Client-Build kaum zusätzliche Wall-Clock-Zeit.
-  const clientBuildPromise = buildClientBundle ? buildClientAsync() : null;
+  const clientBuildPromise = buildClientBundle && !provisionOnly ? buildClientAsync() : null;
 
   // 1) Per-Lauf-Template bereitstellen.
   if (cachingEnabled) {
@@ -508,7 +518,10 @@ async function main(): Promise<number> {
     // entfallen Push + Seeds komplett — die Per-Lauf-Template wird in EINEM
     // CREATE DATABASE ... TEMPLATE aus dem Cache geklont (Sekunden statt ~24s).
     const hash = computeTemplateHash();
-    ensureCacheTemplate(hash);
+    const cacheResult = ensureCacheTemplate(hash);
+    // Task #910: Maschinen-lesbarer Marker, damit der Verify-Pfad den Warm-/
+    // Kalt-Ausgang ohne Log-Heuristik prüfen kann.
+    console.log(`[ephemeral-db] CACHE_RESULT=${cacheResult}`);
     console.log(
       `[ephemeral-db] Klone Per-Lauf-Template ${templateDb} aus Cache ${CACHE_DB_NAME} ...`,
     );
@@ -516,6 +529,7 @@ async function main(): Promise<number> {
   } else {
     // Caching deaktiviert (EPHEMERAL_DB_CACHE=0): altes Verhalten — Push + Seeds
     // frisch direkt in die Per-Lauf-Template.
+    console.log(`[ephemeral-db] CACHE_RESULT=disabled`);
     console.log(`[ephemeral-db] Erstelle Template-DB ${templateDb} (ohne Cache) ...`);
     const created = psql(adminUrl!, `CREATE DATABASE "${templateDb}"`);
     if (!created.ok) fail(`CREATE DATABASE fehlgeschlagen: ${created.stdout}`);
@@ -524,6 +538,17 @@ async function main(): Promise<number> {
 
   // Restverbindungen zur Template kappen, damit das Klonen nicht blockiert.
   terminateConnections(templateDb);
+
+  // Task #910: Im Verify-/Diagnose-Modus ist die Template jetzt bereitgestellt —
+  // wir brechen VOR Server-Bundle/-Boot + Testlauf sauber ab. Der nachfolgende
+  // teardown() (im .then-Handler) droppt die Per-Lauf-DBs wieder; die langlebige
+  // Cache-DB bleibt erhalten.
+  if (provisionOnly) {
+    console.log(
+      `[ephemeral-db] EPHEMERAL_PROVISION_ONLY=1 — Template bereit, beende vor Server-Boot/Testlauf.`,
+    );
+    return 0;
+  }
 
   // 1b) Server EINMAL pro Lauf bündeln (Task #903/#908, beide Pfade). Alle Worker
   // booten danach aus diesem Bundle mit plain `node` (~3s statt ~13s tsx-Boot).

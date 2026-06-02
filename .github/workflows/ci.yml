@@ -334,6 +334,76 @@ jobs:
           retention-days: 7
 
   # -------------------------------------------------------------------------
+  # Cache-Template-Verify-Gate (Task #910): beweist auf einem echten Runner,
+  # dass der wiederverwendete, geseedete Cache-Template-DB-Mechanismus (Task
+  # #907) tatsächlich greift — was im Dev-Container nie ausführbar war (der
+  # App-Server-Boot via tsx hängt dort). Das Skript fährt den ECHTEN Orchestrator
+  # zweimal im Provision-Only-Modus (kein App-Server-Boot) und prüft:
+  #   1. Lauf 1 baut den Cache KALT (drizzle-kit push + beide Seeds laufen).
+  #   2. Lauf 2 nutzt den Cache WARM (Push + Seeds übersprungen) UND ist messbar
+  #      schneller.
+  #   3. Eine Hash-Quellen-Änderung invalidiert den Cache (erneut KALT).
+  # Braucht Postgres (CREATE/DROP DATABASE + drizzle-kit push direkt) und den
+  # Neon-Proxy (die Seed-Skripte sprechen über den Neon-Treiber). Im Provision-
+  # Only-Modus bootet KEIN App-Server, daher ist die feste Proxy-Ziel-DB des CI
+  # (careconnect) unkritisch — die Cache-Mechanik (Push in die Cache-DB, Hash-
+  # Kommentar, Klonen) läuft komplett über direkte psql-/pg-Verbindungen.
+  template-cache-verify:
+    name: template-cache-verify
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: careconnect
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # Neon-WebSocket-Proxy vor dem plain Postgres (siehe `tests`-Job). Die
+      # Seed-Skripte (ci-seed-superadmin / seed-test-reference-data) verbinden
+      # über server/lib/db.ts (Neon-Treiber) und brauchen daher den Proxy.
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy:main
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/careconnect
+        ports:
+          - 4444:4444
+    env:
+      NODE_ENV: test
+      # psql (CREATE/DROP DATABASE) + drizzle-kit push gehen direkt nach 5432;
+      # der Neon-Treiber der Seeds routet über NEON_LOCAL_WS_PROXY.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/careconnect
+      NEON_LOCAL_WS_PROXY: localhost:4444
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Die feste Proxy-Ziel-DB (careconnect) braucht ein Schema, damit die
+      # Neon-getriebenen Seed-Skripte im KALTEN Lauf nicht an fehlenden Tabellen
+      # scheitern. (Der Cache-DB-Push selbst läuft direkt gegen die Cache-DB.)
+      - name: Push schema to proxy target DB (careconnect)
+        run: npx drizzle-kit push --force
+
+      - name: Verify template cache (cold vs warm + invalidation)
+        run: npm run test:verify-cache
+
+  # -------------------------------------------------------------------------
   # Mutation-Testing-Gate (Task #770): Stryker im Incremental-Mode, NUR auf
   # den in diesem PR geänderten kritischen Berechnungs-Modulen. Läuft rein
   # gegen die puren shared/domain-Tests (keine DB/kein Server nötig). Greift
