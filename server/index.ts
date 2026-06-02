@@ -152,9 +152,19 @@ function isNeonDriverBug(message: string): boolean {
   // überspringen wir das Client-Serving komplett und sparen pro Worker-Boot die
   // Vite-Setup-Zeit. In Dev (`Start application`) und Prod bleibt alles wie bisher.
   const skipClient = process.env.TEST_SKIP_CLIENT === "1";
+  // Task #908: Der e2e-Test-Server bootet aus dem esbuild-Bundle mit plain
+  // `node` (statt `tsx server/index.ts`) und liefert einen vorgebauten Vite-
+  // Client statisch aus — wie der Prod-Pfad, aber ohne `NODE_ENV=production`
+  // (der Server soll seine Test-Semantik behalten, nur das teure Vite-Dev-
+  // Setup entfällt). `TEST_SERVE_STATIC_CLIENT=1` erzwingt daher den
+  // serveStatic-Pfad; `CLIENT_STATIC_DIR` zeigt auf das Pro-Lauf-Build.
+  const serveStaticClient = process.env.TEST_SERVE_STATIC_CLIENT === "1";
   if (skipClient) {
     log("TEST_SKIP_CLIENT=1 — Client-Serving (Vite/Static) übersprungen (API-only Test-Server)", "startup");
-  } else if (process.env.NODE_ENV === "production") {
+  } else if (serveStaticClient || process.env.NODE_ENV === "production") {
+    if (serveStaticClient) {
+      log("TEST_SERVE_STATIC_CLIENT=1 — vorgebauten Vite-Client statisch ausliefern (e2e Test-Server)", "startup");
+    }
     serveStatic(app);
   } else {
     const { setupVite } = await import("./vite");

@@ -70,3 +70,17 @@ path still needs `tsx` (it serves the real Vite client), so only the vitest path
 switched to the bundle.
 **Why:** future "make tests faster" work should attack boot/transpile cost (bundle,
 fewer workers' cold starts) before touching seeders.
+
+## Both test paths boot from ONE API-only server bundle
+**Rule:** vitest AND e2e workers boot from the same esbuild bundle
+(`excludeClientServer: true`) via plain `node`, not `tsx server/index.ts`.
+- vitest: `TEST_SKIP_CLIENT=1` (no client at all).
+- e2e: `TEST_SERVE_STATIC_CLIENT=1` + `CLIENT_STATIC_DIR=<per-run vite build>` →
+  server takes the `serveStatic` branch even under `NODE_ENV=test`.
+**Why one bundle works for both:** static serving never imports `./vite`, so the
+API-only bundle (which excludes the Vite dev server) is sufficient for the SPA path
+too. The per-run `vite build` is kicked off CONCURRENTLY with DB provisioning +
+server bundling, so it costs almost no wall-clock.
+**How to apply:** escape hatch `EPHEMERAL_DISABLE_BUNDLE=1` reverts BOTH paths to the
+old `tsx` boot (e2e then back to the Vite dev server). If e2e serves a stale UI,
+check that the per-run client build (`.local/test-client-<runId>`) actually rebuilt.

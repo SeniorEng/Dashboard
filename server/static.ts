@@ -3,7 +3,13 @@ import fs from "fs";
 import path from "path";
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(__dirname, "public");
+  // `CLIENT_STATIC_DIR` erlaubt es, das ausgelieferte Client-Verzeichnis frei zu
+  // setzen (Task #908): Der Ephemeral-Test-Orchestrator bootet den e2e-Server aus
+  // einem esbuild-Bundle in `.local/` und baut den Vite-Client pro Lauf in ein
+  // eigenes per-Lauf-Verzeichnis — dort gibt es kein `<__dirname>/public`.
+  const distPath = process.env.CLIENT_STATIC_DIR
+    ? path.resolve(process.env.CLIENT_STATIC_DIR)
+    : path.resolve(__dirname, "public");
   if (!fs.existsSync(distPath)) {
     throw new Error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`,

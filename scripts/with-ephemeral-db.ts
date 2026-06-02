@@ -43,6 +43,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createWriteStream, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
+import { resolve as resolvePath } from "node:path";
 import { DB_PREFIX, sweepOrphanLogs, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
 import { buildServerBundle } from "../script/server-bundle";
 
@@ -77,14 +78,27 @@ const runId = `${Date.now().toString(36)}_${process.pid}_${randomBytes(4).toStri
 const templateDb = `${DB_PREFIX}${runId}_tmpl`;
 const workerDbs = Array.from({ length: workerCount }, (_, i) => `${DB_PREFIX}${runId}_w${i}`);
 
-// Task #903: Für den Vitest-Pfad (API-only) bündeln wir den Server EINMAL pro
-// Lauf via esbuild und booten die Worker mit plain `node` statt `tsx`. Das senkt
-// den Boot pro Worker von ~13s (tsx-Transpilation) auf ~3s. Playwright/e2e
-// braucht die gerenderte SPA → bleibt auf `tsx server/index.ts`.
-// Per-Lauf-Pfad, damit zwei GLEICHZEITIGE Läufe (Auto-Run + Validation) nicht
-// auf derselben Bundle-Datei kollidieren.
-const useServerBundle = isVitest;
+// Task #903/#908: Wir bündeln den Server EINMAL pro Lauf via esbuild (API-only)
+// und booten die Worker mit plain `node` statt `tsx`. Das senkt den Boot pro
+// Worker von ~13s (tsx-Transpilation) auf ~3s. Das gilt jetzt für BEIDE Pfade:
+//   - Vitest (API-only): bootet mit `TEST_SKIP_CLIENT=1` (kein Client nötig).
+//   - Playwright/e2e: braucht eine gerenderte SPA. Statt des teuren Vite-Dev-
+//     Servers (`tsx server/index.ts` → setupVite) bauen wir den Vite-Client
+//     EINMAL pro Lauf vor und liefern ihn statisch aus (`TEST_SERVE_STATIC_CLIENT=1`
+//     + `CLIENT_STATIC_DIR`). Das `./vite`-Modul wird nie geladen → das gleiche
+//     API-only-Bundle (`excludeClientServer: true`) funktioniert für beide Pfade.
+// Per-Lauf-Pfade, damit zwei GLEICHZEITIGE Läufe nicht auf derselben Bundle-/
+// Client-Datei kollidieren. Escape-Hatch `EPHEMERAL_DISABLE_BUNDLE=1` fällt auf
+// den alten `tsx`-Boot zurück (e2e dann wieder via Vite-Dev-Server).
+const useServerBundle = process.env.EPHEMERAL_DISABLE_BUNDLE !== "1";
 const serverBundlePath = `.local/test-server-${runId}.cjs`;
+// e2e (alles außer Vitest) liefert einen echten Client aus. Beim Bundle-Boot
+// bauen wir den Vite-Client pro Lauf in dieses Verzeichnis vor; beim tsx-Boot
+// rendert weiterhin der Vite-Dev-Server (kein Vorab-Build nötig).
+const needsClient = !isVitest;
+const clientStaticDir = `.local/test-client-${runId}`;
+const clientStaticDirAbs = resolvePath(clientStaticDir);
+const buildClientBundle = useServerBundle && needsClient;
 
 function urlForDb(dbName: string): string {
   const u = new URL(adminUrl!);
@@ -158,10 +172,20 @@ function cleanupBundle(): void {
   }
 }
 
+function cleanupClient(): void {
+  if (!buildClientBundle) return;
+  try {
+    rmSync(clientStaticDir, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
+}
+
 function teardown(): void {
   killServers();
   dropAllDbs();
   cleanupBundle();
+  cleanupClient();
 }
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -188,6 +212,33 @@ function run(cmd: string, args: string[], env: NodeJS.ProcessEnv): void {
   if (res.status !== 0) {
     throw new Error(`Befehl fehlgeschlagen (${cmd} ${args.join(" ")}): exit ${res.status}`);
   }
+}
+
+// Task #908: Baut den Vite-Client EINMAL pro Lauf in `clientStaticDirAbs` vor,
+// damit der gebündelte e2e-Server ihn statisch ausliefern kann (statt eines
+// teuren Vite-Dev-Servers pro Boot). Läuft als eigener Prozess → kann parallel
+// zur DB-Provisionierung (drizzle-kit push + Seeds) laufen, sodass der reine
+// Server-Boot danach schnell ist. `NODE_ENV=production` baut den Client wie im
+// Prod-Pfad (ohne Dev-Plugins); der Server selbst läuft weiter mit `NODE_ENV=test`.
+function buildClientAsync(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    console.log(`[ephemeral-db] Baue Vite-Client (einmal pro Lauf) → ${clientStaticDirAbs} ...`);
+    const child = spawn(
+      "npx",
+      ["vite", "build", "--outDir", clientStaticDirAbs, "--emptyOutDir"],
+      { env: { ...process.env, NODE_ENV: "production" }, stdio: ["ignore", "inherit", "inherit"] },
+    );
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        console.log(`[ephemeral-db] Vite-Client fertig in ${Date.now() - t0}ms.`);
+        resolve();
+      } else {
+        reject(new Error(`vite build fehlgeschlagen (exit ${code})`));
+      }
+    });
+  });
 }
 
 // Wartet, bis der Server NICHT NUR antwortet, sondern auch alle Startup-Seeder
@@ -262,14 +313,23 @@ async function startWorker(dbName: string): Promise<WorkerHandle> {
   const logFd = createWriteStream(logPath, { flags: "w" });
   await new Promise((resolve) => logFd.once("open", resolve));
 
-  // Task #903: Vitest-Worker booten aus dem vorab gebauten esbuild-Bundle mit
+  // Task #903/#908: Worker booten aus dem vorab gebauten esbuild-Bundle mit
   // plain `node` (schneller als `tsx`-Kaltstart). Das Bundle ist API-only
-  // (ohne ./vite) → MUSS mit TEST_SKIP_CLIENT=1 laufen. e2e (Playwright) bleibt
-  // auf `tsx`, weil es die gerenderte SPA braucht.
+  // (ohne ./vite). Vitest braucht keinen Client → TEST_SKIP_CLIENT=1. e2e
+  // braucht eine SPA → der pro Lauf vorgebaute Vite-Client wird statisch
+  // ausgeliefert (TEST_SERVE_STATIC_CLIENT=1 + CLIENT_STATIC_DIR), `./vite`
+  // wird nie geladen. Fallback (EPHEMERAL_DISABLE_BUNDLE=1): tsx-Boot, e2e
+  // dann wieder via Vite-Dev-Server (kein TEST_SKIP_CLIENT für e2e).
   const [spawnCmd, spawnArgs, extraEnv]: [string, string[], NodeJS.ProcessEnv] =
     useServerBundle
-      ? ["node", [serverBundlePath], { TEST_SKIP_CLIENT: "1" }]
-      : ["npx", ["tsx", "server/index.ts"], {}];
+      ? [
+          "node",
+          [serverBundlePath],
+          needsClient
+            ? { TEST_SERVE_STATIC_CLIENT: "1", CLIENT_STATIC_DIR: clientStaticDirAbs }
+            : { TEST_SKIP_CLIENT: "1" },
+        ]
+      : ["npx", ["tsx", "server/index.ts"], needsClient ? {} : { TEST_SKIP_CLIENT: "1" }];
 
   console.log(
     `[ephemeral-db] Starte App-Server (${dbName}) auf Port ${port} via ${spawnCmd} ${spawnArgs.join(" ")} (Logs: ${logPath}) ...`,
@@ -306,6 +366,12 @@ async function main(): Promise<number> {
   // jüngsten werden ohnehin behalten.
   sweepOrphanLogs({ log: (m) => console.log(`[ephemeral-db] ${m}`) });
 
+  // Task #908: Den Vite-Client-Build (e2e) JETZT als eigenen Prozess starten,
+  // damit er PARALLEL zur (synchron blockierenden) DB-Provisionierung + dem
+  // Server-Bundling läuft. Awaited wird er erst direkt vor dem Worker-Start —
+  // so kostet der Client-Build kaum zusätzliche Wall-Clock-Zeit.
+  const clientBuildPromise = buildClientBundle ? buildClientAsync() : null;
+
   // 1) Template-DB anlegen, Schema pushen, seeden.
   console.log(`[ephemeral-db] Erstelle Template-DB ${templateDb} ...`);
   const created = psql(adminUrl!, `CREATE DATABASE "${templateDb}"`);
@@ -329,13 +395,19 @@ async function main(): Promise<number> {
       `WHERE datname = '${templateDb}' AND pid <> pg_backend_pid()`,
   );
 
-  // 1b) Server EINMAL pro Lauf bündeln (Task #903, nur Vitest-Pfad). Alle Worker
+  // 1b) Server EINMAL pro Lauf bündeln (Task #903/#908, beide Pfade). Alle Worker
   // booten danach aus diesem Bundle mit plain `node` (~3s statt ~13s tsx-Boot).
   if (useServerBundle) {
     const t0 = Date.now();
     console.log("[ephemeral-db] Baue Test-Server-Bundle (esbuild, API-only) ...");
     await buildServerBundle({ outfile: serverBundlePath, excludeClientServer: true });
     console.log(`[ephemeral-db] Test-Server-Bundle fertig in ${Date.now() - t0}ms (${serverBundlePath}).`);
+  }
+
+  // 1c) Auf den (parallel gestarteten) Vite-Client-Build warten — der e2e-Server
+  // braucht die statischen Assets, bevor er bootet.
+  if (clientBuildPromise) {
+    await clientBuildPromise;
   }
 
   // 2) Worker-DBs aus der Template klonen + je einen App-Server starten (parallel).
