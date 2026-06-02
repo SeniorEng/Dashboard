@@ -78,6 +78,29 @@ function rejectBudgetIntent(
   return false;
 }
 
+/**
+ * Task #911 (NS-1) — Stichtag-Query-Param `?date=` für die Read-Routen
+ * `/summary` und `/overview` (spiegelt die `?date=`-Konvention von
+ * `/cost-estimate`). Optional; fehlt der Param, gilt heute. Liegt ein Wert vor,
+ * MUSS er ein gültiges `YYYY-MM-DD`-Datum sein — sonst 400 (Response wird hier
+ * gesendet und `null` zurückgegeben, damit der Handler abbricht).
+ */
+function parseAsOfDateQuery(req: Request, res: Response): string | null {
+  const raw = req.query.date;
+  if (raw === undefined || raw === "") return todayISO();
+  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    res.status(400).json({ error: "Ungültiges Datum. Erwartet wird das Format YYYY-MM-DD." });
+    return null;
+  }
+  const parsed = parseLocalDate(raw);
+  const roundTrip = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+  if (roundTrip !== raw) {
+    res.status(400).json({ error: "Ungültiges Datum. Erwartet wird das Format YYYY-MM-DD." });
+    return null;
+  }
+  return raw;
+}
+
 const router = Router();
 
 router.use(requireAuth);
@@ -89,9 +112,12 @@ const checkCustomerAccess = requireCustomerAccess(
 router.get("/:customerId/summary", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
+  const asOfDate = parseAsOfDateQuery(req, res);
+  if (asOfDate === null) return;
   await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
   // Task #874 — Serving-Pfad: Verfügbarkeit aus dem EINEN unified Reader.
-  const summary = await budgetLedgerStorage.getBudgetSummaryServed(customerId);
+  // Task #911 (NS-1) — optionaler Stichtag (?date=, Default heute).
+  const summary = await budgetLedgerStorage.getBudgetSummaryServed(customerId, asOfDate);
   res.json(summary);
 }));
 
@@ -335,10 +361,13 @@ router.get("/:customerId/history", checkCustomerAccess, asyncHandler("Budget-His
 router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Übersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
+  const asOfDate = parseAsOfDateQuery(req, res);
+  if (asOfDate === null) return;
   // Task #874 — Serving-Pfad: Verfügbarkeit aus dem EINEN unified Reader
   // (`readUnifiedBudgetAvailability`). Das Legacy-Gerüst liefert nur noch die
   // Nicht-Verfügbarkeits-Felder (Carryover, Planung, Limit, totalUsedCents).
-  const summaries = await budgetLedgerStorage.getAllBudgetSummariesServed(customerId);
+  // Task #911 (NS-1) — optionaler Stichtag (?date=, Default heute).
+  const summaries = await budgetLedgerStorage.getAllBudgetSummariesServed(customerId, asOfDate);
 
   const s45b = summaries.entlastungsbetrag45b;
   // Task #720 — explizite Typannotation gegen `BudgetOverviewDTO`

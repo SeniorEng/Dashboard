@@ -113,9 +113,19 @@ describe("Equality — BudgetHistoryView monatlich === BudgetOverview Snapshot (
       );
       expect([200, 201]).toContain(reverseRes.status);
 
+      // Overview-Snapshot AS-OF dem spätesten Buchungsdatum (`day2`): seit
+      // Task #911 sind die Overview-Zahlen stichtag-korrekt — `totalUsedCents`
+      // zählt nur Buchungen mit `transactionDate <= asOfDate` (nötig für
+      // `availableCents`-Konsistenz, da `totalAllocatedCents` ebenfalls nur bis
+      // zum Stichtag aufstockt). Die Test-Termine liegen in der nahen Zukunft
+      // (Cutoff-Dodge); ohne Stichtag (= heute) würden sie aus `totalUsedCents`
+      // fallen, während die History-Sicht (Monats-Ledger) sie zählt. Mit
+      // `?date=day2` deckt der Stichtag alle gebuchten Transaktionen ab, sodass
+      // der Phase-1.3-Formel-Vertrag (gleiche Allocation-Sicht-Formel) weiterhin
+      // gilt.
       const [historyRes, overviewRes] = await Promise.all([
         apiGet<HistoryResponse>(`/api/budget/${scenario.customerId}/history`),
-        apiGet<OverviewResponse>(`/api/budget/${scenario.customerId}/overview`),
+        apiGet<OverviewResponse>(`/api/budget/${scenario.customerId}/overview?date=${day2}`),
       ]);
 
       expect(historyRes.status).toBe(200);

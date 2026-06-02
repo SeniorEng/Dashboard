@@ -26,6 +26,43 @@ import { budgetAllocationsRepo } from "../../repos";
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
 /**
+ * Task #911 — Phasen-bewusste Auswahl der für einen Monat wirksamen §45b-
+ * `customer_budget_type_settings`-Zeile. SSoT für die Monats-Aufstockung
+ * (`monthlyAmountFor` unten) UND für die in der Overview/Summary angezeigte
+ * `monthlyLimitCents` (`getBudgetSummary`). Vorher leitete die Anzeige den
+ * Limit-Wert aus einer einzigen `forDate(heute)`-Zeile ab, während die
+ * Allocation über ALLE Phasen iterierte — eine erst im Folge-Append wirksame
+ * Phase (z.B. `validFrom = morgen`, aber bis Monatsende in Kraft) reduzierte
+ * den Topf korrekt, die UI zeigte aber `null`.
+ *
+ * Auswahl analog `monthlyAmountFor`: gegen das **Monatsende** geprüft (eine im
+ * laufenden Monat ab Tag > 15 wirksame Phase matcht trotzdem), die Zeile mit
+ * dem spätesten `validFrom`, deren Fenster den Monat berührt, gewinnt. `rows`
+ * darf in beliebiger Reihenfolge übergeben werden.
+ */
+export function pickEffective45bSettingRow(
+  rows: CustomerBudgetTypeSetting[],
+  year: number,
+  month: number,
+): CustomerBudgetTypeSetting | undefined {
+  if (rows.length === 0) return undefined;
+  const monthEnd = lastDayOfMonth(year, month);
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const sorted = [...rows].sort((a, b) => {
+    const av = a.validFrom ?? "";
+    const bv = b.validFrom ?? "";
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  });
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const r = sorted[i];
+    const startsByMonthEnd = r.validFrom == null || r.validFrom <= monthEnd;
+    const endsAfterMonthStart = r.validTo == null || r.validTo >= monthStart;
+    if (startsByMonthEnd && endsAfterMonthStart) return r;
+  }
+  return undefined;
+}
+
+/**
  * Task #856 — Frühester Pflegegrad-Beginn des Kunden aus der historisierten
  * Pflegegrad-Historie (`customer_care_level_history`). Dient als Anker für die
  * §45b-Auto-Allokation, wenn (noch) kein explizites Budget-Startdatum und keine
@@ -626,23 +663,11 @@ async function calculateAllocated45b(
 
   const monthlyAmountFor = (year: number, month: number): number => {
     if (all45bSettings.length === 0) return fallbackMonthlyAmount;
-    const monthEnd = lastDayOfMonth(year, month);
-    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-    // Wähle die Zeile mit dem spätesten `validFrom`, die bis Monatsende in
-    // Kraft getreten ist und deren Geltungsfenster den Monat berührt
-    // (validTo >= Monatsstart oder offen). `all45bSettings` ist nach
-    // `validFrom` aufsteigend sortiert, daher iterieren wir rückwärts und
-    // nehmen den ersten Treffer.
-    let row: CustomerBudgetTypeSetting | undefined;
-    for (let i = all45bSettings.length - 1; i >= 0; i--) {
-      const r = all45bSettings[i];
-      const startsByMonthEnd = r.validFrom == null || r.validFrom <= monthEnd;
-      const endsAfterMonthStart = r.validTo == null || r.validTo >= monthStart;
-      if (startsByMonthEnd && endsAfterMonthStart) {
-        row = r;
-        break;
-      }
-    }
+    // Task #911 — SSoT-Auswahl der wirksamen Phasen-Zeile (geteilt mit der in
+    // der Overview angezeigten `monthlyLimitCents`, siehe
+    // `pickEffective45bSettingRow`). `all45bSettings` ist bereits nach
+    // `validFrom` aufsteigend sortiert; der Picker sortiert defensiv erneut.
+    const row = pickEffective45bSettingRow(all45bSettings, year, month);
     if (!row) return fallbackMonthlyAmount;
     if (row.monthlyLimitCents == null) return DEFAULT_MONTHLY_BUDGET_CENTS;
     const clamped = clampToStatutoryMax({

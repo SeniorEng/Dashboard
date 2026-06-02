@@ -1,6 +1,7 @@
 import {
   budgetAllocations,
   budgetTransactions,
+  customerBudgetTypeSettings,
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
@@ -10,7 +11,7 @@ import { clampToStatutoryMax } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
+import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow } from "./allocation-storage";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
 import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
@@ -95,19 +96,20 @@ async function getAvailableCarryoverCents(customerId: number, asOfDate: string, 
   return totalAvailable;
 }
 
-export async function getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary> {
+export async function getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate: string = todayISO()): Promise<BudgetSummary> {
   const [preferences, typeSettings] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
-    _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }),
+    _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }),
   ]);
 
-  const today = todayISO();
+  // Task #911 — Stichtag respektieren: alle Monats-/Jahres-/Fenster-Ableitungen
+  // hängen an `today`, das jetzt der übergebene Stichtag ist (Default = heute,
+  // damit Bestandscaller/Tests unverändert bleiben).
+  const today = asOfDate;
   const todayDate = parseLocalDate(today);
   const currentYear = todayDate.getFullYear();
   const currentMonth = todayDate.getMonth() + 1;
   const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
-  const lastDay = new Date(currentYear, currentMonth, 0).getDate();
-  const currentMonthEnd = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
   const allocValidWhere = and(
     eq(budgetAllocations.customerId, customerId),
@@ -120,15 +122,19 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   const [totalAllocatedCents, currentYearAllocatedCents, txResult, carryoverResult, currentMonthResult, currentMonthReversalResult] = await Promise.all([
     calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { asOfDate: today }, undefined, preferences, typeSettings),
 
-    calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: currentYear }, undefined, preferences, typeSettings),
+    calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year: currentYear, asOfDate: today }, undefined, preferences, typeSettings),
 
+    // Task #911 — Stichtag-Korrektheit: `totalUsedCents` (Allocation-Sicht)
+    // darf nur Buchungen BIS zum Stichtag summieren, sonst flössen bei einer
+    // Vergangenheits-Abfrage spätere Buchungen mit ein.
     db.select({
       transactionType: budgetTransactions.transactionType,
       absTotal: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
       rawTotal: sql<number>`COALESCE(SUM(${budgetTransactions.amountCents}), 0)`,
     }).from(budgetTransactions).where(and(
       eq(budgetTransactions.customerId, customerId),
-      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b")
+      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+      lte(budgetTransactions.transactionDate, today)
     )).groupBy(budgetTransactions.transactionType),
 
     budgetAllocationsRepo.selectColumnsFrom({
@@ -147,7 +153,7 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
       eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
       eq(budgetTransactions.transactionType, "consumption"),
       gte(budgetTransactions.transactionDate, currentMonthStart),
-      lte(budgetTransactions.transactionDate, currentMonthEnd)
+      lte(budgetTransactions.transactionDate, today)
     )),
 
     db.select({
@@ -157,7 +163,7 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
       eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
       eq(budgetTransactions.transactionType, "reversal"),
       gte(budgetTransactions.transactionDate, currentMonthStart),
-      lte(budgetTransactions.transactionDate, currentMonthEnd)
+      lte(budgetTransactions.transactionDate, today)
     )),
   ]);
 
@@ -246,10 +252,26 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   // "Unser Anteil"-Wert (geclampt gegen §45b-Maximum), damit die UI ihn anzeigen
   // kann. Er wirkt NICHT als Buchungs-Cap — der reduzierte Pot folgt aus der
   // reduzierten monatlichen Aufstockung.
-  const monthlyLimitCents = s45b?.monthlyLimitCents != null
+  //
+  // Task #911 (NS-4) — Der angezeigte Limit-Wert MUSS aus derselben phasen-
+  // bewussten Quelle stammen wie die Allocation-Reduktion (`monthlyAmountFor`
+  // in `calculateAllocated45b`). Vorher leitete die Anzeige ihn aus der
+  // einzelnen `forDate(asOfDate)`-Zeile (`s45b`) ab — lag der effektive Limit-
+  // Wert in einer Phasen-Zeile, die dieser Single-Row-Lookup nicht traf (z.B.
+  // ein Append mit `validFrom = morgen`, aber bis Monatsende in Kraft), schrumpfte
+  // der Topf korrekt, die UI zeigte aber `null`. Wir wählen daher die für den
+  // Monat des Stichtags wirksame Zeile über `pickEffective45bSettingRow`.
+  const all45bSettingRows = await db.select()
+    .from(customerBudgetTypeSettings)
+    .where(and(
+      eq(customerBudgetTypeSettings.customerId, customerId),
+      eq(customerBudgetTypeSettings.budgetType, "entlastungsbetrag_45b"),
+    ));
+  const effective45b = pickEffective45bSettingRow(all45bSettingRows, currentYear, currentMonth);
+  const monthlyLimitCents = effective45b?.monthlyLimitCents != null
     ? clampToStatutoryMax({
         budgetType: "entlastungsbetrag_45b",
-        monthlyLimitCents: s45b.monthlyLimitCents,
+        monthlyLimitCents: effective45b.monthlyLimitCents,
         yearlyLimitCents: null,
         pflegegrad: null,
       }).monthlyLimitCents
@@ -286,8 +308,8 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   };
 }
 
-export async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget45aSummary> {
-  const today = todayISO();
+export async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate: string = todayISO()): Promise<Budget45aSummary> {
+  const today = asOfDate;
 
   const amounts = _amounts ?? await getCustomerBudgetAmounts(customerId);
   const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today });
@@ -333,8 +355,8 @@ export async function getBudgetSummary45a(customerId: number, _preferences?: Cus
   };
 }
 
-export async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<Budget39_42aSummary> {
-  const today = todayISO();
+export async function getBudgetSummary39_42a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate: string = todayISO()): Promise<Budget39_42aSummary> {
+  const today = asOfDate;
   const todayDate = parseLocalDate(today);
   const currentYear = todayDate.getFullYear();
 
@@ -373,12 +395,12 @@ export async function getBudgetSummary39_42a(customerId: number, _preferences?: 
   };
 }
 
-export async function getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries> {
+export async function getAllBudgetSummaries(customerId: number, asOfDate: string = todayISO()): Promise<AllBudgetSummaries> {
   await syncCarryoverAndExpiry(customerId);
 
   const [preferences, typeSettings] = await Promise.all([
     getBudgetPreferences(customerId),
-    readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }),
+    readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }),
   ]);
   const amounts = await getCustomerBudgetAmounts(customerId, undefined, typeSettings);
 
@@ -386,12 +408,12 @@ export async function getAllBudgetSummaries(customerId: number): Promise<AllBudg
   const is39Enabled = typeSettings.some(s => s.budgetType === "ersatzpflege_39_42a" && s.enabled);
 
   const [entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a] = await Promise.all([
-    getBudgetSummary(customerId, preferences, typeSettings),
+    getBudgetSummary(customerId, preferences, typeSettings, asOfDate),
     is45aEnabled
-      ? getBudgetSummary45a(customerId, preferences, amounts, typeSettings)
+      ? getBudgetSummary45a(customerId, preferences, amounts, typeSettings, asOfDate)
       : { customerId, monthlyBudgetCents: 0, currentMonthAllocatedCents: 0, currentMonthUsedCents: 0, currentMonthAvailableCents: 0, isCurrentlyActive: false } as Budget45aSummary,
     is39Enabled
-      ? getBudgetSummary39_42a(customerId, preferences, amounts, typeSettings)
+      ? getBudgetSummary39_42a(customerId, preferences, amounts, typeSettings, asOfDate)
       : { customerId, yearlyBudgetCents: 0, currentYearAllocatedCents: 0, currentYearUsedCents: 0, currentYearAvailableCents: 0 } as Budget39_42aSummary,
   ]);
   return { entlastungsbetrag45b, umwandlung45a, ersatzpflege39_42a };
@@ -473,9 +495,9 @@ export function mergeServedAvailability(
  * (synct), damit der rein lesende unified Reader die gesynchten Allocations
  * sieht.
  */
-export async function getAllBudgetSummariesServed(customerId: number): Promise<AllBudgetSummaries> {
-  const legacy = await getAllBudgetSummaries(customerId);
-  const unified = await readUnifiedBudgetAvailability(customerId, todayISO());
+export async function getAllBudgetSummariesServed(customerId: number, asOfDate: string = todayISO()): Promise<AllBudgetSummaries> {
+  const legacy = await getAllBudgetSummaries(customerId, asOfDate);
+  const unified = await readUnifiedBudgetAvailability(customerId, asOfDate);
   return mergeServedAvailability(legacy, unified);
 }
 
@@ -484,8 +506,8 @@ export async function getAllBudgetSummariesServed(customerId: number): Promise<A
  * Anlage). Synct NICHT selbst — die Caller rufen `syncCarryoverAndExpiry`
  * explizit auf, bevor sie diesen Reader nutzen.
  */
-export async function getBudgetSummaryServed(customerId: number): Promise<BudgetSummary> {
-  const legacy = await getBudgetSummary(customerId);
-  const unified = await readUnifiedBudgetAvailability(customerId, todayISO());
+export async function getBudgetSummaryServed(customerId: number, asOfDate: string = todayISO()): Promise<BudgetSummary> {
+  const legacy = await getBudgetSummary(customerId, undefined, undefined, asOfDate);
+  const unified = await readUnifiedBudgetAvailability(customerId, asOfDate);
   return mergeServed45b(legacy, unified.pots.entlastungsbetrag_45b);
 }

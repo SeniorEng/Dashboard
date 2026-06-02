@@ -32,12 +32,13 @@ interface BudgetLedgerStorage {
   reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined>;
 
   syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void>;
-  getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[]): Promise<BudgetSummary>;
-  getAllBudgetSummaries(customerId: number): Promise<AllBudgetSummaries>;
+  getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate?: string): Promise<BudgetSummary>;
+  getAllBudgetSummaries(customerId: number, asOfDate?: string): Promise<AllBudgetSummaries>;
   // Task #874 — Serving-Pfad (Phase 4): Verfügbarkeit aus dem EINEN unified
   // Reader. Legacy `getBudgetSummary*` bleiben der Shadow-/Compat-Pfad.
-  getBudgetSummaryServed(customerId: number): Promise<BudgetSummary>;
-  getAllBudgetSummariesServed(customerId: number): Promise<AllBudgetSummaries>;
+  // Task #911 — optionaler Stichtag (Default heute) für die date-korrekte Overview.
+  getBudgetSummaryServed(customerId: number, asOfDate?: string): Promise<BudgetSummary>;
+  getAllBudgetSummariesServed(customerId: number, asOfDate?: string): Promise<AllBudgetSummaries>;
   getPlannedCostCents(customerId: number): Promise<number>;
   // Task #727 — Phase 1.3: monatliche History-Aggregation (Allocations- und
   // Fenster-Cap-Sicht) über die pure `aggregateHistoryByMonth`.
