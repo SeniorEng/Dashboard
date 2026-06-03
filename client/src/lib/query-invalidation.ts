@@ -27,7 +27,6 @@ type Domain =
   | "document-templates"
   | "birthday-cards"
   | "pending-proofs"
-  | "contact-migration"
   | "insurance-providers";
 
 const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
@@ -160,9 +159,6 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
   "pending-proofs": [
     ["admin", "pending-proofs"],
   ],
-  "contact-migration": [
-    ["admin", "contact-migration", "legacy"],
-  ],
   "insurance-providers": [
     ["insurance-providers"],
   ],
@@ -195,7 +191,6 @@ const RELATED_DOMAINS: Record<Domain, Domain[]> = {
   "document-templates": [],
   "birthday-cards": [],
   "pending-proofs": ["employee-proofs"],
-  "contact-migration": ["customers"],
   "insurance-providers": [],
 };
 

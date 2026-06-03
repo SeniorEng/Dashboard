@@ -17,7 +17,6 @@ import prospectsRouter from "./admin/prospects";
 import qontoRouter from "./admin/qonto";
 import whatsappRouter from "./admin/whatsapp";
 import importAppointmentsRouter from "./admin/import-appointments";
-import contactMigrationRouter from "./admin/contact-migration";
 import testCleanupRouter from "./admin/test-cleanup";
 import { initiateTestCall } from "../services/twilio-call-bridge";
 import { persistInvoicePdf } from "../services/invoice-pdf-orchestrator";
@@ -149,7 +148,6 @@ router.use("/", lexwareExportRouter);
 router.use("/", documentDeliveryRouter);
 router.use("/", prospectsRouter);
 router.use("/", importAppointmentsRouter);
-router.use("/", contactMigrationRouter);
 
 router.post("/twilio/test-call", requireSuperAdmin, asyncHandler("Testanruf fehlgeschlagen", async (_req: Request, res: Response) => {
   const result = await initiateTestCall();

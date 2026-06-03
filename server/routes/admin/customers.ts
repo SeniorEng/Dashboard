@@ -181,21 +181,9 @@ router.get("/customers/budget-setup-missing-count", asyncHandler("Zählung konnt
   res.json({ count: result.total });
 }));
 
-// Task #705 — GET /api/admin/customers/:id ergänzt (vorher fehlte er, während
-// PATCH/DELETE auf demselben Pfad existieren — Inkonsistenz aus dem Bug-Report
-// 2026-05-27). Delegiert auf `storage.getCustomer`, dieselbe Datenquelle wie
-// `/customers/:id` außerhalb des Admin-Subrouters.
-router.get("/customers/:id", asyncHandler("Kunde konnte nicht geladen werden", async (req: Request, res: Response) => {
-  const id = requireIntParam(req.params.id, res);
-  if (id === null) return;
-  const customer = await storage.getCustomer(id);
-  if (!customer) {
-    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
-    return;
-  }
-  res.json(customer);
-}));
-
+// Einzelkunden-Lesen läuft über `GET /api/customers/:id` (server/routes/customers.ts,
+// SSoT, `storage.getCustomer`). Der frühere Admin-Duplikat-GET wurde entfernt
+// (Task #932) — Admin-Konsumenten laden über `/customers/:id/details`.
 router.get("/customers/:id/details", asyncHandler("Kunde konnte nicht geladen werden", async (req: Request, res: Response) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;

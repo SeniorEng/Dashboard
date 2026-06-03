@@ -57,7 +57,6 @@ const AdminQonto = lazy(() => import("@/pages/admin/qonto"));
 const AdminWhatsApp = lazy(() => import("@/pages/admin/whatsapp"));
 const AdminImportAppointments = lazy(() => import("@/pages/admin/import-appointments"));
 const AdminAvailability = lazy(() => import("@/pages/admin/availability"));
-const AdminContactMigration = lazy(() => import("@/pages/admin/contact-migration"));
 const AdminMonthClosing = lazy(() => import("@/pages/admin/month-closing"));
 const AdminAppointmentSeries = lazy(() => import("@/pages/admin/appointment-series"));
 const AdminPlannedConsultations = lazy(() => import("@/pages/admin/planned-consultations"));
@@ -309,9 +308,6 @@ function Router() {
       </Route>
       <Route path="/admin/import-appointments">
         <AdminRoute component={AdminImportAppointments} />
-      </Route>
-      <Route path="/admin/contact-migration">
-        <AdminRoute component={AdminContactMigration} />
       </Route>
       <Route path="/admin/month-closing">
         <AdminRoute component={AdminMonthClosing} />

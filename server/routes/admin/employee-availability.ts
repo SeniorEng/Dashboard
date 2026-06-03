@@ -12,8 +12,8 @@ import {
   employeeTimeEntries,
   customerAssignmentHistory,
 } from "@shared/schema";
-import { timeToMinutes, minutesToTimeDisplay, todayISO, isValidCalendarDate } from "@shared/utils/datetime";
-import { loadEmployeesWeeklyAvailability, buildDateRange } from "../../services/employee-availability";
+import { todayISO, isValidCalendarDate } from "@shared/utils/datetime";
+import { loadEmployeesWeeklyAvailability, buildDateRange, computeFreeSlots, collectBlockedSlots } from "../../services/employee-availability";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { auditService } from "../../services/audit";
@@ -40,74 +40,6 @@ router.get("/employees", asyncHandler("Mitarbeiter konnten nicht geladen werden"
   
   res.json(safeEmployees);
 }));
-
-function computeFreeSlots(
-  availability: { startTime: string | null; endTime: string | null }[],
-  blockedSlots: { start: number; end: number }[]
-): { start: string; end: string }[] {
-  if (availability.length === 0) return [];
-  
-  const freeSlots: { start: string; end: string }[] = [];
-  
-  for (const slot of availability) {
-    if (!slot.startTime || !slot.endTime) continue;
-    const slotStart = timeToMinutes(slot.startTime);
-    const slotEnd = timeToMinutes(slot.endTime);
-    
-    const relevantBlocks = blockedSlots
-      .filter(b => b.start < slotEnd && b.end > slotStart)
-      .sort((a, b) => a.start - b.start);
-    
-    let cursor = slotStart;
-    for (const block of relevantBlocks) {
-      if (block.start > cursor) {
-        freeSlots.push({ start: minutesToHHMM(cursor), end: minutesToHHMM(block.start) });
-      }
-      cursor = Math.max(cursor, block.end);
-    }
-    if (cursor < slotEnd) {
-      freeSlots.push({ start: minutesToHHMM(cursor), end: minutesToHHMM(slotEnd) });
-    }
-  }
-  
-  return freeSlots;
-}
-
-function minutesToHHMM(mins: number): string {
-  return minutesToTimeDisplay(((mins % 1440) + 1440) % 1440);
-}
-
-function collectBlockedSlots(
-  dayAppointments: { scheduledStart: string | null; scheduledEnd: string | null; durationMinutes: number | null }[],
-  dayTimeEntries: { startTime: string | null; endTime: string | null }[],
-  dayBlockers: { startTime: string | null; endTime: string | null }[],
-): { start: number; end: number }[] {
-  const blockedSlots: { start: number; end: number }[] = [];
-  for (const appt of dayAppointments) {
-    if (appt.scheduledStart) {
-      const s = timeToMinutes(appt.scheduledStart);
-      const e = appt.scheduledEnd ? timeToMinutes(appt.scheduledEnd) : s + (appt.durationMinutes || 60);
-      blockedSlots.push({ start: s, end: e });
-    }
-  }
-  for (const te of dayTimeEntries) {
-    if (te.startTime && te.endTime) {
-      blockedSlots.push({
-        start: timeToMinutes(te.startTime.slice(0, 5)),
-        end: timeToMinutes(te.endTime.slice(0, 5)),
-      });
-    }
-  }
-  for (const blocker of dayBlockers) {
-    if (blocker.startTime && blocker.endTime) {
-      blockedSlots.push({
-        start: timeToMinutes(blocker.startTime.slice(0, 5)),
-        end: timeToMinutes(blocker.endTime.slice(0, 5)),
-      });
-    }
-  }
-  return blockedSlots;
-}
 
 router.get("/employees/weekly-availability", asyncHandler("Wochen-Verfügbarkeit konnte nicht geladen werden", async (req: Request, res: Response) => {
   const { startDate, days: daysParam, allEmployees: allEmployeesParam } = req.query;

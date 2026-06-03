@@ -14,7 +14,7 @@ function minutesToHHMM(mins: number): string {
   return minutesToTimeDisplay(((mins % 1440) + 1440) % 1440);
 }
 
-function computeFreeSlots(
+export function computeFreeSlots(
   availability: { startTime: string | null; endTime: string | null }[],
   blockedSlots: { start: number; end: number }[]
 ): { start: string; end: string }[] {
@@ -46,7 +46,7 @@ function computeFreeSlots(
   return freeSlots;
 }
 
-function collectBlockedSlots(
+export function collectBlockedSlots(
   dayAppointments: { scheduledStart: string | null; scheduledEnd: string | null; durationMinutes: number | null }[],
   dayTimeEntries: { startTime: string | null; endTime: string | null }[],
   dayBlockers: { startTime: string | null; endTime: string | null }[],
