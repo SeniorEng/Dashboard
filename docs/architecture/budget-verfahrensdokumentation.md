@@ -54,10 +54,10 @@ Tabellen-Umbau des North Star. Konkret gilt heute:
 - **Drop der `customer_budgets`-Tabelle** (DDL): bleibt für eine spätere Phase, um
   destruktive Drizzle-Push-Diffs zu vermeiden.
 
-### Akzeptierte Shadow-Read-Divergenz (Gate I18)
+### Akzeptierte §45b-Divergenz (Legacy-Summary vs. unified Reader)
 
-Der Shadow-Read-Soak (`server/scripts/shadow-read-soak.ts`) zeigt für §45a und §39/§42a
-durchgängig **Δ0** (Legacy-Reader == unified Reader). Für **§45b** (`entlastungsbetrag_45b`)
+Auf §45a und §39/§42a rechnen die Legacy-Summary-Reader und der unified Reader
+durchgängig identisch (**Δ0**). Für **§45b** (`entlastungsbetrag_45b`)
 besteht eine erwartete Differenz, weil der Legacy-Reader all-time rechnet, während der unified
 Reader as-of + `manual_adjustment`-aware rechnet. Diese Divergenz ist **kein Drift-Fehler**,
 sondern die designgewollte Folge des virtuellen §45b-Modells; der unified Reader ist die SSoT.
@@ -183,12 +183,8 @@ würde. Ungedeckelte Töpfe (privat/Selbstzahler) sind ausgenommen.
 
 ## Internes Kontrollsystem (IKS) — laufende Kontrollen
 
-- **Shadow-Read-Soak (I18):** `server/scripts/shadow-read-soak.ts` vergleicht den
-  Legacy-Reader gegen den unified Reader pro Topf. §45a/§39 == Δ0; §45b führt die oben
-  dokumentierte, akzeptierte virtuelle Divergenz. Das Gate verlangt **kein** Δ0 auf §45b,
-  sondern „keine *unerwartete* Divergenz".
-- **Equality-Netz (Drift-Detektoren):** `tests/equality/unified-reader-vs-legacy.test.ts`,
-  `budget-history-vs-overview.test.ts`, `budget-ledger-display-matches-booking.test.ts`,
+- **Equality-Netz (Drift-Detektoren):** `budget-history-vs-overview.test.ts`,
+  `budget-ledger-display-matches-booking.test.ts`,
   `budget-settings-read-modes.test.ts`, `invoice-per-pot-arithmetic.test.ts`.
 - **Architektur-Schranken:** `tests/architecture/no-customer-budgets-reads.test.ts`
   (kein neuer `customer_budgets`-Leser), `calculations-in-shared.test.ts` (Berechnungen

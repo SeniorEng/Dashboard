@@ -406,22 +406,6 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
     },
   };
   res.json(overview);
-
-  // Task #874 — Shadow-Read-Soak (I18): vergleiche unified vs legacy Reader auf
-  // live Traffic. Nicht-blockierend (setImmediate) und hinter `BUDGET_SHADOW_READ`
-  // (="1"/"true"), damit der Read-Pfad nie betroffen ist. Loggt nur bei Drift.
-  if (process.env.BUDGET_SHADOW_READ === "1" || process.env.BUDGET_SHADOW_READ === "true") {
-    setImmediate(() => {
-      void (async () => {
-        try {
-          const { compareUnifiedVsLegacy, logShadowDrift } = await import("../storage/budget/shadow-read");
-          logShadowDrift(await compareUnifiedVsLegacy(customerId));
-        } catch (err) {
-          console.warn(`[budget-shadow-read] Vergleich fehlgeschlagen (customer=${customerId}):`, err);
-        }
-      })();
-    });
-  }
 }));
 
 router.use(requireAdmin);

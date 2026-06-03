@@ -430,8 +430,7 @@ export async function getAllBudgetSummaries(customerId: number, asOfDate: string
 // Task #874 — Serving-Assembler (Phase 4): Verfügbarkeit aus dem EINEN Reader.
 //
 // Die Legacy-`getBudgetSummary*`-Reader oben bleiben UNVERÄNDERT — sie sind der
-// Shadow-/Compat-Pfad (Soak-Vergleich `compareUnifiedVsLegacy`, Equality-Test
-// `unified-reader-vs-legacy`) und liefern weiterhin das volle DTO-Gerüst
+// Compat-/Equality-Pfad und liefern weiterhin das volle DTO-Gerüst
 // (Carryover, Planung, Limit, `totalUsedCents`).
 //
 // Die nach AUSSEN ausgelieferten Verfügbarkeits-Zahlen (`availableCents` & Co.)

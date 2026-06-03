@@ -19,8 +19,7 @@
  *
  * WICHTIG: Dieser Reader ist REIN LESEND (nur `db.select` / `computeCapSlot` /
  * `calculateAllocatedCents`). Er ruft KEIN `syncCarryoverAndExpiry` auf, damit
- * er prod-sicher im Shadow-Read-Soak (`server/scripts/shadow-read-soak.ts`) und
- * im Conservation-Verifier-Stil laufen kann.
+ * er prod-sicher im Conservation-Verifier-Stil laufen kann.
  */
 import { budgetTransactions, budgetReservations } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -34,8 +33,7 @@ import { computeCapSlot } from "./cap-calculator";
  * Task #875 (Phase 5): aktive Hard-Holds (`budget_reservations.state = 'hold'`)
  * gehen jetzt als `HoldsActive` in die Erhaltungs-Identität ein. Solange kein
  * Pfad Holds schreibt (Feature-Flag `BUDGET_HARD_HOLDS` aus), liefert die
- * Aggregation 0 → die Verfügbarkeit ist byte-identisch zu Phase 4 (Equality-
- * Garantie `tests/equality/unified-reader-vs-legacy.test.ts` bleibt grün).
+ * Aggregation 0 → die Verfügbarkeit ist byte-identisch zu Phase 4.
  */
 export const HOLDS_ACTIVE_CENTS_PHASE4 = 0 as const;
 
