@@ -28,6 +28,9 @@ export function LogoUploadCard({ companyData }: LogoUploadCardProps) {
       );
       const uploadData = unwrapResult(uploadRes);
 
+      // Raw fetch (intentional): PUTs the raw binary file directly to the
+      // external presigned object-storage URL — not an `/api` JSON call, so it
+      // deliberately bypasses the api client (no CSRF/JSON envelope here).
       await fetch(uploadData.uploadURL, {
         method: "PUT",
         body: file,

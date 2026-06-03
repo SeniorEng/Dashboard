@@ -77,6 +77,9 @@ export function useUpload(options: UseUploadOptions = {}) {
    */
   const uploadToPresignedUrl = useCallback(
     async (file: File, uploadURL: string): Promise<void> => {
+      // Raw fetch (intentional): this PUTs the raw binary file directly to the
+      // external presigned object-storage URL — it is NOT an `/api` JSON call,
+      // so it must not go through the api client (no CSRF/JSON envelope here).
       const response = await fetch(uploadURL, {
         method: "PUT",
         body: file,

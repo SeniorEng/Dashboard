@@ -159,24 +159,18 @@ export default function AdminCustomerDetail() {
     setHardDeleting(true);
     setHardDeleteConflict(null);
     try {
-      const response = await fetch(`/api/admin/customers/${customerId}`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "x-csrf-token": document.cookie.split("; ").find((c) => c.startsWith("careconnect_csrf="))?.split("=")[1] ?? "",
-        },
-        body: JSON.stringify({ reason: hardDeleteReason, confirmName: hardDeleteConfirmName }),
+      const result = await api.delete(`/admin/customers/${customerId}`, {
+        body: { reason: hardDeleteReason, confirmName: hardDeleteConfirmName },
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (response.status === 409 && data?.details?.checks) {
-          setHardDeleteConflict(data.details.checks);
+      if (!result.success) {
+        const checks = result.error.details?.checks;
+        if (result.error.status === 409 && Array.isArray(checks)) {
+          setHardDeleteConflict(checks as Array<{ key: string; label: string; count: number; met: boolean }>);
           await refetchHardDeleteReadiness();
         }
         toast({
           title: "Löschen fehlgeschlagen",
-          description: data?.message || `Fehler ${response.status}`,
+          description: result.error.message || `Fehler ${result.error.status ?? ""}`,
           variant: "destructive",
         });
         return;

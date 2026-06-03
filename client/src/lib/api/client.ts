@@ -332,8 +332,16 @@ export const api = {
   patch: <T, B = unknown>(endpoint: string, body: B, signal?: AbortSignal) =>
     apiRequest<T, B>(endpoint, { method: 'PATCH', body, signal }),
 
-  delete: <T = void>(endpoint: string, signal?: AbortSignal) =>
-    apiRequest<T>(endpoint, { method: 'DELETE', signal }),
+  delete: <T = void, B = unknown>(
+    endpoint: string,
+    opts?: AbortSignal | { body?: B; signal?: AbortSignal },
+  ) => {
+    if (opts && typeof (opts as AbortSignal).aborted === 'boolean') {
+      return apiRequest<T, B>(endpoint, { method: 'DELETE', signal: opts as AbortSignal });
+    }
+    const o = (opts as { body?: B; signal?: AbortSignal } | undefined) || {};
+    return apiRequest<T, B>(endpoint, { method: 'DELETE', body: o.body, signal: o.signal });
+  },
 };
 
 /**

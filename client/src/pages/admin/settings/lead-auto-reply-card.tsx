@@ -85,6 +85,9 @@ export function LeadAutoReplyCard({ companyForm, companyData, updateField }: Lea
       );
       const uploadData = unwrapResult(uploadRes);
 
+      // Raw fetch (intentional): PUTs the raw binary file directly to the
+      // external presigned object-storage URL — not an `/api` JSON call, so it
+      // deliberately bypasses the api client (no CSRF/JSON envelope here).
       const putResponse = await fetch(uploadData.uploadURL, {
         method: "PUT",
         body: file,
