@@ -18,7 +18,7 @@
  * verbietet neue `compute*`/`calculate*`-Cap-Funktionen außerhalb dieses
  * Verzeichnisses.
  */
-import { clampToStatutoryMax } from "../budgets";
+import { clampToStatutoryMax, resolve45aMonthlyLimitCents } from "../budgets";
 
 export type CapBudgetType =
   | "entlastungsbetrag_45b"
@@ -87,10 +87,19 @@ export function computeCapRemaining(input: CapMathInput): CapMathResult {
     capRemainingCents = Number.POSITIVE_INFINITY;
   } else {
     // §45a Monats-Cap, ggf. plus Carryover (für §45a aktuell 0).
-    if (clamped.monthlyLimitCents === null) {
+    // Task #954 — ohne expliziten Kunden-Wert greift der gesetzliche §45a-
+    // Default nach Pflegegrad (SSoT `resolve45aMonthlyLimitCents`), damit
+    // anspruchsberechtigte (PG≥2) Kunden den gesetzlichen Monats-Cap sehen UND
+    // buchen können. Ein expliziter (geklemmter) Wert hat weiterhin Vorrang;
+    // PG<2 ohne Wert ⇒ kein Cap (Infinity, unveränderter Topf).
+    const effective45aLimit = resolve45aMonthlyLimitCents(
+      clamped.monthlyLimitCents,
+      input.pflegegrad,
+    );
+    if (effective45aLimit === null) {
       capRemainingCents = Number.POSITIVE_INFINITY;
     } else {
-      const effectiveLimit = clamped.monthlyLimitCents + input.carryoverCents;
+      const effectiveLimit = effective45aLimit + input.carryoverCents;
       capRemainingCents = Math.max(0, effectiveLimit - input.netUsedInWindowCents);
     }
   }

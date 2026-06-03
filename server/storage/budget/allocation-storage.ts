@@ -3,6 +3,7 @@ import {
   budgetTransactions,
   customerBudgetTypeSettings,
   customerCareLevelHistory,
+  customers,
   type BudgetAllocation,
   type InsertBudgetAllocation,
   type CustomerBudgetPreferences,
@@ -10,7 +11,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
-import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax } from "@shared/domain/budgets";
+import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
@@ -21,7 +22,7 @@ import {
   buildCarryoverDedupSets,
 } from "@shared/domain/budget-carryover-dedup";
 import { auditService } from "../../services/audit";
-import { budgetAllocationsRepo } from "../../repos";
+import { budgetAllocationsRepo, customersRepo } from "../../repos";
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
 
@@ -384,8 +385,24 @@ export async function getCustomerBudgetAmounts(customerId: number, _tx?: DbClien
   // Backfill (`backfillCustomerBudgetsToTypeSettings`) hat die Legacy-Werte
   // in `customer_budget_type_settings` übertragen; Kunden ohne Setting
   // liefern jetzt 0 statt eines stillschweigenden Legacy-Werts.
+  let pflegesachleistungen36 = setting45a?.monthlyLimitCents ?? 0;
+
+  // Task #954 — §45a statutorischer Default nach Pflegegrad: Ist der §45a-Topf
+  // aktiviert, aber ohne expliziten Monatsbetrag, greift der gesetzliche
+  // Umwandlungsanspruch (PG≥2). Derselbe SSoT-Resolver speist auch den Cap-Pfad
+  // (`computeCapRemaining`), damit Anzeige (Overview) und Buchung (Cascade)
+  // identisch defaulten — kein „Anzeige vs. Buchung"-Drift.
+  if (setting45a?.enabled && setting45a.monthlyLimitCents == null) {
+    const d = _tx ?? db;
+    const [row] = await customersRepo
+      .selectColumnsFrom({ pflegegrad: customers.pflegegrad }, d)
+      .where(eq(customers.id, customerId))
+      .limit(1);
+    pflegesachleistungen36 = resolve45aMonthlyLimitCents(null, row?.pflegegrad ?? null) ?? 0;
+  }
+
   return {
-    pflegesachleistungen36: setting45a?.monthlyLimitCents ?? 0,
+    pflegesachleistungen36,
     verhinderungspflege39: setting39?.yearlyLimitCents ?? 0,
   };
 }

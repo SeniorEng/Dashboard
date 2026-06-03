@@ -5,6 +5,7 @@
 - [storage.getInvoice JOIN-alias trap](storage-get-invoice-customername.md) — getInvoice OVERRIDES invoice.customerName with customers.name; any verifier/re-render that selects raw from invoicesTable will drift.
 - [Audit-refresh banner trap](audit-refresh-banner-trap.md) — chunked full-app audit refreshes may banner old content instead of re-walking; verify chunk header commit hash before trusting severity counts.
 - [Budget Cap-SSoT (computeCapSlot)](budget-cap-ssot-computecapslot.md) — §45a/§39_42a Anzeige UND Buchung müssen über computeCapSlot rechnen; eigene allocated−used-Mathe driftet, sobald monthlyLimit > statutorischer Cap.
+- [§45a statutory default cap](45a-statutory-default-cap.md) — PG≥2 + §45a enabled + monthlyLimitCents null ⇒ resolve45aMonthlyLimitCents default; MUST flow through BOTH cap-math AND getCustomerBudgetAmounts or overview shows 0 / drifts. Explicit (incl. 0) overrides.
 - [Cost-Estimate Klassifikation](budget-cost-estimate-classification.md) — vier Branches (Selbstzahler/OK/Soft-Private/Hard-Block) leben als pure classifyCostEstimate() in shared/domain/budget/; Route ist nur Wrapper.
 - [Budget write_off-Asymmetrie](budget-write-off-asymmetry.md) — write_off zählt in Topf-/Allocation-Sicht als Used, NICHT in Fenster-Cap-Sicht; jede neue budget_transactions-Aggregation muss sich aktiv entscheiden.
 - [Reversal rows keep appointmentId](budget-reversal-keeps-appointmentid.md) — storno/reversal behält jetzt orig.appointmentId (GoBD CHECK); „live" Consumption = type='consumption' minus Rows, auf die ein reversedTransactionId zeigt.

@@ -141,6 +141,29 @@ export function get45aMaxForPflegegrad(pflegegrad: number | null): number {
   return BUDGET_45A_MAX_BY_PFLEGEGRAD[pflegegrad] ?? 0;
 }
 
+/**
+ * Task #954 — Effektiver §45a-Monats-Cap (Cents), Single Source of Truth.
+ *
+ * §45a Umwandlungsanspruch ist ab Pflegegrad 2 ein gesetzlicher Anspruch. Fehlt
+ * ein expliziter Kunden-Wert (`monthlyLimitCents`), greift der gesetzliche
+ * Default nach Pflegegrad (`get45aMaxForPflegegrad`). Ein expliziter Wert hat
+ * IMMER Vorrang (Override). PG<2 hat keinen Default → `null` (kein Cap-Beitrag,
+ * Topf bleibt für Nicht-Anspruchsberechtigte unverändert).
+ *
+ * Wird sowohl von der Cap-Mathematik (`computeCapRemaining`) als auch vom
+ * Allokations-Pfad (§45a-Monatsbetrag in `getCustomerBudgetAmounts`) genutzt,
+ * damit Anzeige und Buchung denselben Default sehen — kein „Anzeige vs.
+ * Buchung"-Drift (Task #423/#427).
+ */
+export function resolve45aMonthlyLimitCents(
+  explicitMonthlyLimitCents: number | null | undefined,
+  pflegegrad: number | null,
+): number | null {
+  if (explicitMonthlyLimitCents != null) return explicitMonthlyLimitCents;
+  const statutory = get45aMaxForPflegegrad(pflegegrad);
+  return statutory > 0 ? statutory : null;
+}
+
 // ============================================
 // Cascade-Reihenfolge (Single Source of Truth, Task #441)
 // ============================================
