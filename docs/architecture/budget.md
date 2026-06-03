@@ -49,6 +49,15 @@ Phase 6 hat die SSoT-Konsolidierung abgeschlossen (NICHT den physischen Reservie
 - **Rechnungs-Split pro Topf** über `invoices.billing_run_id`, Σ-Invariante per Equality-Test abgesichert.
 - **Akzeptierte §45b-Shadow-Divergenz:** Der §45b-Monatsbetrag bleibt virtuell (`calculateAllocated45b`); der Shadow-Soak zeigt darum eine erwartete, designgewollte Differenz Legacy↔unified (§45a/§39 = Δ0). Sie wird NICHT durch Angleichen der Legacy-Mathematik „repariert", sondern erst mit der §45b-Materialisierung (Phase 2) aufgelöst. Details: [`budget-verfahrensdokumentation.md → Ist-Zustand nach Phase 6`](./budget-verfahrensdokumentation.md).
 
+### Hard-Block-Scharfschaltung in Produktion (Task #953)
+
+Der Overdraft-Hard-Block (Termin-Anlage, die einen nicht-privat-zahlenden Kunden über sein Budget zieht → `422 BUDGET_HARD_BLOCK`) ist hinter dem Feature-Flag `BUDGET_HARD_HOLDS` gegated (`hardHoldsEnabled()` in `server/storage/budget/reservation-storage.ts`, an = `"1"`/`"true"`). Das Flag ist über die Replit-Env-Scopes in `.replit` gesetzt: `[userenv.development]` **und** `[userenv.production]` = `"1"` (gepflegt über die Secrets-/Env-Verwaltung, nicht durch direktes `.replit`-Editieren).
+
+- **Regressionsschutz:** `tests/architecture/budget-hard-holds-production-enabled.test.ts` (reiner `.replit`-Read, `unit`-Project) failed, wenn weder ein produktions- noch ein shared-Scope das Flag scharf schaltet — so kann die Prod-Konfiguration nicht lautlos auf OFF zurückdriften.
+- **Laufzeit-Sichtbarkeit:** `/api/health → budgetHardHolds.enabled` weist den effektiven Zustand der laufenden Instanz aus; der Startup (`server/index.ts`) loggt in Produktion zusätzlich laut, falls das Flag fehlt.
+- **Testserver bleibt Legacy:** Der Ephemeral-DB-Orchestrator (`scripts/with-ephemeral-db.ts`) entfernt `BUDGET_HARD_HOLDS` aus dem Test-Server-Env, damit `tests/budget/hard-holds-engine.test.ts` die Engine weiter direkt gegen die DB treibt (HTTP-Pfad legacy). In CI ist das Flag nie gesetzt.
+- **Publish-Hinweis:** Die Env-Änderung greift erst nach einem Re-Publish des Deployments (aus der Main-Version, nach Merge dieses Tasks).
+
 ## Query-Invalidation (Budget-Spezifika)
 
 Allgemeine Konvention zu `invalidateRelated()` siehe [`replit.md → Architecture decisions → Strict Data Consistency`](../../replit.md#architecture-decisions).

@@ -50,6 +50,11 @@ export async function registerRoutes(
       await import("./startup/ensure-budget-ledger-immutability");
     const budgetLedgerImmutability =
       getBudgetLedgerImmutabilityStatus() ?? (await verifyBudgetLedgerImmutable());
+    // Task #953: Budget-Hard-Block-Scharfschaltung (BUDGET_HARD_HOLDS) im
+    // Health-Endpoint sichtbar machen, damit ein Operator/Monitoring sofort
+    // sieht, ob der Overdraft-Schutz in der laufenden (Prod-)Instanz aktiv ist.
+    const { hardHoldsEnabled } = await import("./storage/budget/reservation-storage");
+    const budgetHardHolds = { enabled: hardHoldsEnabled() };
     try {
       await db.execute(sql`SELECT 1`);
       res.json({
@@ -62,6 +67,7 @@ export async function registerRoutes(
         pdfCache,
         auditLogImmutability,
         budgetLedgerImmutability,
+        budgetHardHolds,
       });
     } catch (error) {
       res.status(503).json({
@@ -74,6 +80,7 @@ export async function registerRoutes(
         pdfCache,
         auditLogImmutability,
         budgetLedgerImmutability,
+        budgetHardHolds,
       });
     }
   });

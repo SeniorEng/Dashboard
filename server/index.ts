@@ -833,6 +833,28 @@ async function runStartupTasks() {
   timeouts.push(setTimeout(runInvoiceIntegrityCheck, 15 * 60 * 1000));
   intervals.push(setInterval(runInvoiceIntegrityCheck, 24 * 60 * 60 * 1000));
 
+  // Task #953: Budget-Hard-Block-Scharfschaltung in Produktion verriegeln.
+  // Der Overdraft-Hard-Block (422 BUDGET_HARD_BLOCK) ist hinter dem Feature-Flag
+  // `BUDGET_HARD_HOLDS` gegated. In Produktion MUSS er aktiv sein — fehlt das
+  // Flag dort (z.B. weil die `[userenv.production]`-Zeile aus `.replit` /
+  // Deployment-Secrets verschwindet), läuft der Server still im Legacy-Modus
+  // ohne Überziehungsschutz weiter. Das wäre eine lautlose Regression, daher
+  // hier eine laute Warnung. Der Status wird zusätzlich unter
+  // `/api/health → budgetHardHolds` exponiert (Monitoring).
+  if (process.env.NODE_ENV === "production") {
+    const { hardHoldsEnabled } = await import("./storage/budget/reservation-storage");
+    if (!hardHoldsEnabled()) {
+      log(
+        "WARN Budget-Hard-Block (BUDGET_HARD_HOLDS) ist in PRODUKTION NICHT aktiv — " +
+          "Overdraft-Schutz läuft im Legacy-Modus. Flag in `.replit` [userenv.production] " +
+          "bzw. den Deployment-Secrets setzen ('1').",
+        "startup",
+      );
+    } else {
+      log("Budget-Hard-Block (BUDGET_HARD_HOLDS) aktiv in Produktion.", "startup");
+    }
+  }
+
   // Task #894: Alle Startup-Seeder/-Migrationen sind durch — Readiness-Flag
   // setzen, damit Test-Setups (die auf /api/health → startupComplete warten)
   // erst jetzt loslaufen und nicht in die Seed-Race-Condition rennen.

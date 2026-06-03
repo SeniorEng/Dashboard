@@ -235,9 +235,10 @@ const baseEnv: NodeJS.ProcessEnv = {
 
 // Dev-only Feature-Flags dürfen NICHT in den Test-Server (oder den Vitest-Prozess)
 // lecken. `BUDGET_HARD_HOLDS=1` ist in `.replit` unter `[userenv.development]`
-// gesetzt, damit die laufende Dev-App den gegateten Hard-Hold-Pfad ausübt — der
-// Workflow-Prozess (und damit dieser Orchestrator) erbt es. In CI ist das Flag NIE
-// gesetzt; die Test-Suite (insb. `tests/budget/hard-holds-engine.test.ts`) treibt
+// UND `[userenv.production]` gesetzt (Task #953: Hard-Block scharf in Prod), damit
+// die laufende Dev-App und das Deployment den gegateten Hard-Hold-Pfad ausüben — der
+// Workflow-Prozess (und damit dieser Orchestrator) erbt den Dev-Wert. In CI ist das
+// Flag NIE gesetzt; die Test-Suite (insb. `tests/budget/hard-holds-engine.test.ts`) treibt
 // die Hard-Hold-Engine bewusst DIREKT und setzt einen Server OHNE das Flag voraus.
 // Geerbt würde es die gegateten Route-Hooks (planHold bei Terminanlage, captureHolds
 // beim Abschluss) feuern lassen und diese Tests environment-abhängig rotbrechen.
