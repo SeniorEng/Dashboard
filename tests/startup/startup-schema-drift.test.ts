@@ -29,16 +29,21 @@
  *      verschwunden sein (sonst legt `push` sie an, die Migration droppt sie
  *      beim nächsten Boot — Flapping).
  */
+import { readFileSync, readdirSync, statSync } from "fs";
+import { join } from "path";
 import { describe, it, expect } from "vitest";
 import { sql, getTableColumns } from "drizzle-orm";
+import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import type { PgTable, PgColumn } from "drizzle-orm/pg-core";
 import { db } from "../../server/lib/db";
 import {
   appointments,
+  budgetAllocations,
   budgetTransactions,
   customers,
   customerBudgetPreferences,
   customerBudgetRecipients,
+  customerBudgetTypeSettings,
   customerCreationIdempotencyKeys,
   companySettings,
   importBatches,
@@ -46,6 +51,7 @@ import {
   invoiceLineItems,
   auditLog,
   employeeTimeEntries,
+  qontoTransactions,
   users,
 } from "@shared/schema";
 
@@ -54,16 +60,29 @@ import {
   IMPORT_BATCHES_CREATE_TABLE_SQL,
   APPOINTMENTS_IMPORT_BATCH_ID_COLUMN_SQL,
   BUDGET_TRANSACTIONS_IMPORT_BATCH_ID_COLUMN_SQL,
+  IMPORT_BATCHES_FILE_HASH_INDEX_SQL,
 } from "../../server/startup/ensure-import-batch";
 import {
   INVOICES_PER_POT_COLUMNS_SQL,
   CUSTOMER_BUDGET_RECIPIENTS_CREATE_TABLE_SQL,
+  INVOICES_BILLING_RUN_INDEX_SQL,
+  CUSTOMER_BUDGET_RECIPIENTS_INDEX_SQL,
 } from "../../server/startup/ensure-invoice-per-pot-columns";
 import {
   CUSTOMERS_SETUP_COLUMNS_SQL,
   CUSTOMER_IDEMPOTENCY_CREATE_TABLE_SQL,
+  CUSTOMER_IDEMPOTENCY_UNIQUE_INDEX_SQL,
+  CUSTOMER_IDEMPOTENCY_EXPIRES_INDEX_SQL,
 } from "../../server/startup/ensure-customer-idempotency-schema";
-import { AUDIT_PARENT_DELETION_COLUMN_SQL } from "../../server/startup/ensure-audit-parent-deletion";
+import {
+  AUDIT_PARENT_DELETION_COLUMN_SQL,
+  AUDIT_PARENT_DELETION_INDEX_SQL,
+} from "../../server/startup/ensure-audit-parent-deletion";
+import { QONTO_MATCH_UNIQUE_INDEX_SQL } from "../../server/startup/ensure-qonto-match-idempotency";
+import {
+  CBTS_UNIQUE_INDEX_SQL,
+  BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL,
+} from "../../server/startup/backfill-budget-historization";
 import { BUDGET_START_DATE_ORIGIN_COLUMN_SQL } from "../../server/startup/ensure-budget-start-date-origin";
 import { COMPANY_BANK_ACCOUNT_HOLDER_COLUMN_SQL } from "../../server/startup/ensure-company-bank-account-holder";
 import { INVOICE_FINGERPRINT_COLUMNS_SQL } from "../../server/startup/ensure-invoice-fingerprint-columns";
@@ -567,5 +586,273 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
         );
       }
     });
+  });
+});
+
+// ===========================================================================
+// Task #923 — INDEX / UNIQUE-CONSTRAINT-Drift.
+//
+// Der Spalten-Drift-Wächter oben prüft Typ/Nullability/Default, NICHT aber die
+// Indexe/Unique-Constraints, die die Startup-Migrationen per rohem SQL anlegen.
+// Ein Index, der nur im rohen SQL existiert (oder dort ANDERS definiert ist als
+// im Drizzle-Modell), lässt `drizzle-kit push` ihn anlegen/droppen bzw. Dev und
+// Prod auseinanderlaufen — derselbe Footgun, den #922 für Spalten geschlossen
+// hat.
+//
+// Strategie (pro Startup-Index): Wir spielen BEIDE Definitionen — das rohe
+// Startup-SQL UND die aus dem Drizzle-Modell (`getTableConfig().indexes`)
+// gerenderte — gegen DIESELBE TEMP-Tabelle und vergleichen die von PostgreSQL
+// normalisierten `pg_get_indexdef`-Ausgaben (nur der Indexname wird ausmaskiert).
+// So werden Spaltenliste/-reihenfolge, UNIQUE-ness UND der WHERE-Prädikat
+// (partielle Indexe) identisch normalisiert verglichen. `budget_migrations` ist
+// bewusst ausgeklammert — sein Index hat den dedizierten Geschwister-Test
+// `migration-ledger-schema-drift.test.ts`.
+// ===========================================================================
+
+const dialect = new PgDialect();
+
+interface IndexSource {
+  label: string;
+  /** Rohes Startup-SQL (exportierte SSoT-Konstante). */
+  rawSql: string;
+  /** Index-Name, wie ihn beide Quellen tragen MÜSSEN. */
+  indexName: string;
+  realTable: string;
+  drizzleTable: PgTable;
+  /** DDL der TEMP-Tabelle: indizierte + im WHERE referenzierte Spalten. */
+  tempColumns: string;
+}
+
+const INDEX_SOURCES: IndexSource[] = [
+  {
+    label: "ensure-import-batch: import_batches_file_hash_idx",
+    rawSql: IMPORT_BATCHES_FILE_HASH_INDEX_SQL,
+    indexName: "import_batches_file_hash_idx",
+    realTable: "import_batches",
+    drizzleTable: importBatches,
+    tempColumns: "file_hash text",
+  },
+  {
+    label: "ensure-invoice-per-pot-columns: invoices_billing_run_id_idx",
+    rawSql: INVOICES_BILLING_RUN_INDEX_SQL,
+    indexName: "invoices_billing_run_id_idx",
+    realTable: "invoices",
+    drizzleTable: invoices,
+    tempColumns: "billing_run_id text",
+  },
+  {
+    label:
+      "ensure-invoice-per-pot-columns: customer_budget_recipients_customer_idx",
+    rawSql: CUSTOMER_BUDGET_RECIPIENTS_INDEX_SQL,
+    indexName: "customer_budget_recipients_customer_idx",
+    realTable: "customer_budget_recipients",
+    drizzleTable: customerBudgetRecipients,
+    tempColumns: "customer_id integer, budget_type text",
+  },
+  {
+    label: "ensure-customer-idempotency-schema: customer_idem_key_unique",
+    rawSql: CUSTOMER_IDEMPOTENCY_UNIQUE_INDEX_SQL,
+    indexName: "customer_idem_key_unique",
+    realTable: "customer_creation_idempotency_keys",
+    drizzleTable: customerCreationIdempotencyKeys,
+    tempColumns: "idempotency_key text",
+  },
+  {
+    label: "ensure-customer-idempotency-schema: customer_idem_key_expires_idx",
+    rawSql: CUSTOMER_IDEMPOTENCY_EXPIRES_INDEX_SQL,
+    indexName: "customer_idem_key_expires_idx",
+    realTable: "customer_creation_idempotency_keys",
+    drizzleTable: customerCreationIdempotencyKeys,
+    tempColumns: "expires_at timestamptz",
+  },
+  {
+    label: "ensure-audit-parent-deletion: audit_log_parent_deletion_idx",
+    rawSql: AUDIT_PARENT_DELETION_INDEX_SQL,
+    indexName: "audit_log_parent_deletion_idx",
+    realTable: "audit_log",
+    drizzleTable: auditLog,
+    tempColumns: "parent_deletion_id integer",
+  },
+  {
+    label:
+      "ensure-qonto-match-idempotency: qonto_transactions_matched_invoice_unique_idx",
+    rawSql: QONTO_MATCH_UNIQUE_INDEX_SQL,
+    indexName: "qonto_transactions_matched_invoice_unique_idx",
+    realTable: "qonto_transactions",
+    drizzleTable: qontoTransactions,
+    tempColumns: "matched_invoice_id integer",
+  },
+  {
+    label:
+      "backfill-budget-historization: customer_budget_type_settings_unique_idx",
+    rawSql: CBTS_UNIQUE_INDEX_SQL,
+    indexName: "customer_budget_type_settings_unique_idx",
+    realTable: "customer_budget_type_settings",
+    drizzleTable: customerBudgetTypeSettings,
+    tempColumns: "customer_id integer, budget_type text, valid_to date",
+  },
+  {
+    label: "backfill-budget-historization: budget_allocations_auto_unique_idx",
+    rawSql: BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL,
+    indexName: "budget_allocations_auto_unique_idx",
+    realTable: "budget_allocations",
+    drizzleTable: budgetAllocations,
+    tempColumns:
+      "customer_id integer, budget_type text, year integer, month integer, source text, deleted_at timestamptz",
+  },
+];
+
+/** Indexe, die woanders abgesichert sind und vom Coverage-Scan ignoriert werden. */
+const INDEX_COVERAGE_ALLOWLIST = new Set<string>([
+  // budget_migrations: dedizierter Geschwister-Test (migration-ledger-...).
+  "budget_migrations_name_key",
+]);
+
+/** Rohes CREATE-INDEX-SQL auf eine isolierte TEMP-Tabelle + frischen Namen umbiegen. */
+function rewriteRawIndexSql(
+  rawSql: string,
+  realTable: string,
+  probe: string,
+  probeIndexName: string,
+): string {
+  let s = rawSql.trim();
+  s = s.replace(
+    /(CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?)\S+/i,
+    `$1${probeIndexName}`,
+  );
+  s = s.replace(new RegExp(`\\bON\\s+"?${realTable}"?`, "i"), `ON ${probe}`);
+  return s;
+}
+
+/** Aus dem Drizzle-Index-Config ein CREATE-INDEX-SQL für die TEMP-Tabelle bauen. */
+function buildDrizzleIndexSql(
+  table: PgTable,
+  indexName: string,
+  probe: string,
+  probeIndexName: string,
+): string {
+  const { indexes } = getTableConfig(table);
+  const idx = indexes.find((i) => i.config.name === indexName);
+  if (!idx) {
+    throw new Error(
+      `Drizzle-Modell hat keinen Index namens "${indexName}" — rohes Startup-SQL legt ihn aber an (push würde ihn droppen).`,
+    );
+  }
+  const cfg = idx.config;
+  const unique = cfg.unique ? "UNIQUE " : "";
+  const cols = (cfg.columns as Array<{ name: string }>)
+    .map((c) => c.name)
+    .join(", ");
+  const where = cfg.where
+    ? ` WHERE ${dialect.sqlToQuery(cfg.where).sql}`
+    : "";
+  return `CREATE ${unique}INDEX ${probeIndexName} ON ${probe} (${cols})${where}`;
+}
+
+/** Indexname aus dem `pg_get_indexdef`-String ausmaskieren, damit nur die Definition bleibt. */
+function maskIndexName(indexDef: string, indexName: string): string {
+  return indexDef.replace(indexName, "IDX");
+}
+
+describe("Startup Index-Drift (server/startup/**)", () => {
+  describe("INDEX / UNIQUE — rohes SQL == Drizzle-Modell", () => {
+    for (const src of INDEX_SOURCES) {
+      it(src.label, async () => {
+        const probe = nextProbeName();
+        const rawIdxName = `${probe}_raw`;
+        const dzIdxName = `${probe}_dz`;
+
+        const rawIndexSql = rewriteRawIndexSql(
+          src.rawSql,
+          src.realTable,
+          probe,
+          rawIdxName,
+        );
+        // Sanity: Transformation hat gegriffen (echter Tabellenname nicht mehr
+        // als CREATE-INDEX-Ziel, frischer Indexname gesetzt).
+        expect(rawIndexSql).toContain(`ON ${probe}`);
+        expect(rawIndexSql).toContain(rawIdxName);
+        expect(rawIndexSql).not.toMatch(
+          new RegExp(`\\bON\\s+"?${src.realTable}"?[\\s(]`, "i"),
+        );
+
+        // buildDrizzleIndexSql wirft, wenn der Index im Modell fehlt → klare Drift-Meldung.
+        const dzIndexSql = buildDrizzleIndexSql(
+          src.drizzleTable,
+          src.indexName,
+          probe,
+          dzIdxName,
+        );
+
+        let rawDef = "";
+        let dzDef = "";
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql.raw(`CREATE TEMP TABLE ${probe} (${src.tempColumns})`),
+          );
+          await tx.execute(sql.raw(rawIndexSql));
+          await tx.execute(sql.raw(dzIndexSql));
+
+          const res = await tx.execute(sql`
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE tablename = ${probe}
+            ORDER BY indexname
+          `);
+          for (const r of res.rows as Array<Record<string, unknown>>) {
+            const name = r.indexname as string;
+            const def = r.indexdef as string;
+            if (name === rawIdxName) rawDef = maskIndexName(def, rawIdxName);
+            if (name === dzIdxName) dzDef = maskIndexName(def, dzIdxName);
+          }
+        });
+
+        expect(rawDef, `rohes Index-SQL erzeugte keinen Index: ${src.label}`).not.toBe(
+          "",
+        );
+        expect(
+          dzDef,
+          `Drizzle-Index-SQL erzeugte keinen Index: ${src.label}`,
+        ).not.toBe("");
+        expect(
+          rawDef,
+          `Index-Drift bei ${src.indexName}: rohes Startup-SQL ≠ Drizzle-Modell`,
+        ).toEqual(dzDef);
+      });
+    }
+  });
+
+  it("jeder CREATE-INDEX in server/startup/** ist vom Drift-Wächter abgedeckt", () => {
+    const covered = new Set(INDEX_SOURCES.map((s) => s.indexName));
+    const startupDir = join(process.cwd(), "server", "startup");
+
+    const found = new Map<string, string>(); // indexName -> Datei
+    for (const entry of readdirSync(startupDir)) {
+      if (!entry.endsWith(".ts")) continue;
+      const full = join(startupDir, entry);
+      if (!statSync(full).isFile()) continue;
+      // JS-Kommentare entfernen, damit erläuternde Prosa (z.B. ein im Fließtext
+      // zitiertes `CREATE UNIQUE INDEX IF NOT EXISTS …`) keine Phantom-Treffer
+      // erzeugt — nur echte DDL in Template-Strings soll zählen.
+      const sourceText = readFileSync(full, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\n]*/g, "");
+      const re =
+        /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sourceText)) !== null) {
+        found.set(m[1], entry);
+      }
+    }
+
+    const uncovered = [...found.entries()].filter(
+      ([name]) => !covered.has(name) && !INDEX_COVERAGE_ALLOWLIST.has(name),
+    );
+    expect(
+      uncovered,
+      `Neue(r) Startup-Index ohne Drift-Wächter-Eintrag: ${uncovered
+        .map(([name, file]) => `${name} (${file})`)
+        .join(", ")}. In INDEX_SOURCES aufnehmen oder allowlisten.`,
+    ).toEqual([]);
   });
 });

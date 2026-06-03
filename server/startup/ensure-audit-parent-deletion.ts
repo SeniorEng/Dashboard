@@ -16,6 +16,12 @@ export const AUDIT_PARENT_DELETION_COLUMN_SQL = `
   ADD COLUMN IF NOT EXISTS parent_deletion_id integer
 `;
 
+// Task #923 — Index-DDL als Konstante exportiert (Index-Drift-Wächter-SSoT).
+export const AUDIT_PARENT_DELETION_INDEX_SQL = `
+  CREATE INDEX IF NOT EXISTS audit_log_parent_deletion_idx
+  ON audit_log(parent_deletion_id)
+`;
+
 export async function ensureAuditParentDeletionColumn(): Promise<void> {
   await db.execute(sql.raw(AUDIT_PARENT_DELETION_COLUMN_SQL));
 
@@ -34,10 +40,7 @@ export async function ensureAuditParentDeletionColumn(): Promise<void> {
     END$$;
   `);
 
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS audit_log_parent_deletion_idx
-    ON audit_log(parent_deletion_id)
-  `);
+  await db.execute(sql.raw(AUDIT_PARENT_DELETION_INDEX_SQL));
 
   log("audit_log.parent_deletion_id sichergestellt", "startup");
 }

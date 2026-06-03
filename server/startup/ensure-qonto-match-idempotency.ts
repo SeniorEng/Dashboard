@@ -15,13 +15,16 @@ import { log } from "../lib/log";
  * Bootstrapping läuft weiter, damit der Server hochfährt und ein
  * Operator die Duplikate manuell auflösen kann.
  */
+// Task #923 — Index-DDL als Konstante exportiert (Index-Drift-Wächter-SSoT).
+export const QONTO_MATCH_UNIQUE_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS qonto_transactions_matched_invoice_unique_idx
+    ON qonto_transactions (matched_invoice_id)
+    WHERE matched_invoice_id IS NOT NULL
+`;
+
 export async function ensureQontoMatchIdempotency(): Promise<void> {
   try {
-    await db.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS qonto_transactions_matched_invoice_unique_idx
-        ON qonto_transactions (matched_invoice_id)
-        WHERE matched_invoice_id IS NOT NULL
-    `);
+    await db.execute(sql.raw(QONTO_MATCH_UNIQUE_INDEX_SQL));
   } catch (err) {
     log(`ensureQontoMatchIdempotency: ${err}`, "startup");
   }

@@ -19,6 +19,19 @@ import { log } from "../lib/log";
  * Die historisierte Schließung (`validTo = heute`) und Neuanlage
  * (`validFrom = heute+1`) übernimmt seitdem `upsertBudgetTypeSettings`.
  */
+// Task #923 — Index-DDL als Konstanten exportiert (Index-Drift-Wächter-SSoT).
+export const CBTS_UNIQUE_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS customer_budget_type_settings_unique_idx
+    ON customer_budget_type_settings (customer_id, budget_type)
+    WHERE valid_to IS NULL
+`;
+
+export const BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS budget_allocations_auto_unique_idx
+    ON budget_allocations (customer_id, budget_type, year, month, source)
+    WHERE deleted_at IS NULL
+`;
+
 export async function backfillBudgetHistorization(): Promise<void> {
   const result = await db.execute(sql`
     UPDATE customer_budget_type_settings
@@ -80,14 +93,6 @@ export async function backfillBudgetHistorization(): Promise<void> {
     END $$;
   `);
 
-  await db.execute(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS customer_budget_type_settings_unique_idx
-      ON customer_budget_type_settings (customer_id, budget_type)
-      WHERE valid_to IS NULL
-  `);
-  await db.execute(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS budget_allocations_auto_unique_idx
-      ON budget_allocations (customer_id, budget_type, year, month, source)
-      WHERE deleted_at IS NULL
-  `);
+  await db.execute(sql.raw(CBTS_UNIQUE_INDEX_SQL));
+  await db.execute(sql.raw(BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL));
 }
