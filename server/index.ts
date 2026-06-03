@@ -415,6 +415,17 @@ async function runStartupTasks() {
       log(`Invoice-Per-Pot-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #924 — Bereits-provisionierte Prod-DBs versöhnen, deren Spalten von
+    // alten (falschen) DDL-Pfaden mit dem falschen Typ angelegt wurden. Läuft
+    // NACH allen ensure-*-Migrationen, die die Ziel-Tabellen anlegen. Idempotent:
+    // ALTER nur, wenn der Ist-Typ vom Drizzle-Soll-Typ abweicht.
+    const { reconcileDriftedColumnTypes } = await import("./startup/reconcile-drifted-column-types");
+    try {
+      await reconcileDriftedColumnTypes();
+    } catch (err) {
+      log(`Drift-Spaltentyp-Reconciliation fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #856 — customer_budget_preferences.budget_start_date_origin (Herkunft
     // des §45b-Ankers: derived_pflegegrad → kappen, manual → nie kappen).
     const { ensureBudgetStartDateOrigin } = await import("./startup/ensure-budget-start-date-origin");

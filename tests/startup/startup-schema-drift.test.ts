@@ -102,6 +102,7 @@ import {
 } from "../../server/startup/migrate-km-geo-to-numeric";
 import { MONTHLY_WORK_HOURS_TARGET } from "../../server/startup/migrate-monthly-work-hours-to-numeric";
 import { FIX_COLUMN_TYPE_TARGETS } from "../../server/startup/fix-invoice-line-item-types";
+import { RECONCILE_COLUMN_TYPE_TARGETS } from "../../server/startup/reconcile-drifted-column-types";
 
 // --- DROP registries -------------------------------------------------------
 import { DROPPED_APPOINTMENTS_SERVICE_TYPE } from "../../server/startup/drop-appointments-service-type";
@@ -565,6 +566,31 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
         expect(
           canonDrizzleType(col!),
           `${target.table}.${target.column} muss ${target.targetType} sein`,
+        ).toBe(target.targetType);
+      }
+    });
+
+    it("reconcile-drifted-column-types: versöhnte Spalten == Drizzle-Soll-Typ", () => {
+      for (const target of RECONCILE_COLUMN_TYPE_TARGETS) {
+        const table = DRIZZLE_TABLES[target.table];
+        expect(table, `Unbekannte Tabelle: ${target.table}`).toBeDefined();
+        const col = drizzleColumnsByDbName(table).get(target.column);
+        expect(
+          col,
+          `Drizzle-Spalte fehlt: ${target.table}.${target.column}`,
+        ).toBeDefined();
+        // Soll-Typ (targetType) muss exakt der Drizzle-Deklaration entsprechen,
+        // sonst würde das Reconcile die Spalte in einen Typ versöhnen, den der
+        // nächste `drizzle-kit push` sofort wieder altern würde.
+        expect(
+          canonDrizzleType(col!),
+          `${target.table}.${target.column} muss ${target.targetType} sein`,
+        ).toBe(target.targetType);
+        // expectedDataType (information_schema-Form) und targetType (kanonisch)
+        // müssen denselben Typ beschreiben, sonst greift der Idempotenz-Guard fehl.
+        expect(
+          normalizeBaseType(target.expectedDataType),
+          `${target.table}.${target.column}: expectedDataType passt nicht zu targetType`,
         ).toBe(target.targetType);
       }
     });
