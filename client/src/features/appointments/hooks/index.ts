@@ -1,4 +1,12 @@
 export { useAppointments, useAppointment, useDeleteAppointment, useWeekAppointmentCounts } from "./use-appointments";
+export { useEditAppointment } from "./use-edit-appointment-form";
+export { useEditAppointmentMutations } from "./use-edit-appointment-mutations";
+export {
+  useAppointmentServiceEntries,
+  useCatalogServices,
+  useCostEstimate,
+  type AppointmentServiceEntry,
+} from "./use-edit-appointment-data";
 export { useCreateKundentermin, useCreateErstberatung, useDocumentAppointment, useTravelSuggestion, useRouteCalculation } from "./use-appointment-mutations";
 export { useCustomerList, type CustomerWithAccess } from "./use-customer-list";
 export { useActiveEmployees, useAdminEmployees } from "./use-active-employees";

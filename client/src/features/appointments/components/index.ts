@@ -11,3 +11,8 @@ export { AppointmentServiceRecordCard } from "./appointment-service-record-card"
 export { AppointmentSeriesDeleteDialog } from "./appointment-series-delete-dialog";
 export { AppointmentCustomerHeader } from "./appointment-customer-header";
 export { AppointmentDocumentationDiagnosis } from "./appointment-documentation-diagnosis";
+export { EditAppointmentProspectFields } from "./edit-appointment-prospect-fields";
+export { EditAppointmentDateTimeFields } from "./edit-appointment-date-time-fields";
+export { EditAppointmentServicesSection, type EditAppointmentSummary } from "./edit-appointment-services-section";
+export { EditAppointmentDurationSection } from "./edit-appointment-duration-section";
+export { EditAppointmentSeriesDialog } from "./edit-appointment-series-dialog";
