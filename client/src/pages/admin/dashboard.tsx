@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, Lock, Repeat, Merge,
+  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, CalendarClock, Lock, Repeat, Merge,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -90,24 +90,6 @@ export default function AdminDashboard() {
       permissionKey: "time_entries",
     },
     {
-      href: "/admin/availability",
-      testId: "card-availability",
-      icon: <CalendarCheck className={`${iconSize.lg} text-emerald-600`} />,
-      iconBg: "bg-emerald-100",
-      title: "Verfügbarkeiten",
-      description: "Wochenübersicht freie Zeiten für Erstberatungen",
-      permissionKey: "users",
-    },
-    {
-      href: "/admin/appointment-series",
-      testId: "card-appointment-series",
-      icon: <Repeat className={`${iconSize.lg} text-purple-600`} />,
-      iconBg: "bg-purple-100",
-      title: "Serientermine",
-      description: "Aktive Terminserien pro Kunde verwalten, verlängern oder beenden",
-      permissionKey: "customers",
-    },
-    {
       href: "/admin/birthday-cards",
       testId: "card-birthday-cards",
       icon: <Gift className={`${iconSize.lg} text-rose-600`} />,
@@ -133,6 +115,36 @@ export default function AdminDashboard() {
       title: "Statistiken",
       description: "Kennzahlen, Umsatz und Performance-Analysen",
       permissionKey: "statistics",
+    },
+  ];
+
+  const schedulingCards: AdminCardData[] = [
+    {
+      href: "/admin/availability",
+      testId: "card-availability",
+      icon: <CalendarCheck className={`${iconSize.lg} text-emerald-600`} />,
+      iconBg: "bg-emerald-100",
+      title: "Verfügbarkeiten",
+      description: "Wochenübersicht freie Zeiten für Erstberatungen",
+      permissionKey: "users",
+    },
+    {
+      href: "/admin/planned-consultations",
+      testId: "card-planned-consultations",
+      icon: <CalendarClock className={`${iconSize.lg} text-teal-600`} />,
+      iconBg: "bg-teal-100",
+      title: "Erstberatungen",
+      description: "Geplante und überfällige Erstberatungstermine im Blick",
+      permissionKey: "customers",
+    },
+    {
+      href: "/admin/appointment-series",
+      testId: "card-appointment-series",
+      icon: <Repeat className={`${iconSize.lg} text-purple-600`} />,
+      iconBg: "bg-purple-100",
+      title: "Serientermine",
+      description: "Aktive Terminserien pro Kunde verwalten, verlängern oder beenden",
+      permissionKey: "customers",
     },
   ];
 
@@ -289,6 +301,7 @@ export default function AdminDashboard() {
   }
 
   const visiblePersonal = filterCards(personalCards);
+  const visibleScheduling = filterCards(schedulingCards);
   const visibleKunden = filterCards(kundenCards);
   const visibleAbrechnung = filterCards(abrechnungCards);
   const visibleSystem = filterCards(systemCards);
@@ -311,6 +324,14 @@ export default function AdminDashboard() {
         {visiblePersonal.length > 0 && (
           <Section title="Personal & Team">
             {visiblePersonal.map((card) => (
+              <AdminCard key={card.testId} {...card} />
+            ))}
+          </Section>
+        )}
+
+        {visibleScheduling.length > 0 && (
+          <Section title="Terminplanung">
+            {visibleScheduling.map((card) => (
               <AdminCard key={card.testId} {...card} />
             ))}
           </Section>

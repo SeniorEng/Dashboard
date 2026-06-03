@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,7 +9,9 @@ import { DocumentTypesContent } from "./document-types";
 import { DocumentTemplatesContent } from "./document-templates";
 
 export default function AdminDocuments() {
-  const [activeTab, setActiveTab] = useState("types");
+  const search = useSearch();
+  const initialTab = new URLSearchParams(search).get("tab") === "templates" ? "templates" : "types";
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   return (
     <Layout variant="admin">

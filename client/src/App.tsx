@@ -40,8 +40,6 @@ const AdminInsuranceProviders = lazy(() => import("@/pages/admin/insurance-provi
 const AdminServices = lazy(() => import("@/pages/admin/services"));
 const AdminSettings = lazy(() => import("@/pages/admin/settings"));
 const AdminDocuments = lazy(() => import("@/pages/admin/documents"));
-const AdminDocumentTypes = lazy(() => import("@/pages/admin/document-types"));
-const AdminDocumentTemplates = lazy(() => import("@/pages/admin/document-templates"));
 const AdminAuditLog = lazy(() => import("@/pages/admin/audit-log"));
 const AdminBirthdayCards = lazy(() => import("@/pages/admin/birthday-cards"));
 const AdminStatistics = lazy(() => import("@/pages/admin/statistics"));
@@ -259,10 +257,10 @@ function Router() {
         <AdminRoute component={AdminDocuments} />
       </Route>
       <Route path="/admin/document-types">
-        <AdminRoute component={AdminDocumentTypes} />
+        <Redirect to="/admin/documents?tab=types" />
       </Route>
       <Route path="/admin/document-templates">
-        <AdminRoute component={AdminDocumentTemplates} />
+        <Redirect to="/admin/documents?tab=templates" />
       </Route>
       <Route path="/admin/audit-log">
         <AdminRoute component={AdminAuditLog} />
