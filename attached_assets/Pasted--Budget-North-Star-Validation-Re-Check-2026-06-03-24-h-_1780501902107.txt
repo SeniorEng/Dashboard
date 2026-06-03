@@ -1,0 +1,61 @@
+# Budget North-Star Validation — Re-Check 2026-06-03
+
+**24 h nach Erst-Validierung.** Selber Customer 203047, gleiches Replit-Dev. Was hat sich verändert?
+
+## Status-Delta pro Bug
+
+| Bug | Erst-Befund (2026-06-02) | Re-Check (2026-06-03) | Status |
+|---|---|---|---|
+| **NS-1 — asOfDate ignoriert (I10)** | Alle 5 Stichtage identisch | Alle 6 Parameter-Varianten + Baseline identisch (`78600` cents). Auch `/summary` und `transactionDate` ohne Wirkung. | 🔴 **WEITERHIN OFFEN** |
+| **NS-2 — Hard-Block fehlt (I5)** | 30 h-Termin angenommen mit Soft-Warning, Status 201 | 30 h-Termin **abgelehnt** mit Status **422** + `{code: "BUDGET_HARD_BLOCK", message: "Budget reicht nicht — es fehlen 313,00 €. Kunde akzeptiert keine Privatzahlung."}` | ✅ **GEFIXT** |
+| **NS-3 — §45a `monthlyBudgetCents = 0` trotz PG 2** | `monthlyLimitCents:null` → Overview zeigt 0 | Auch mit **explizitem** `monthlyLimitCents:31840` zeigt Overview 0 (heute), weil Phase-5-Historization neue Settings erst ab **morgen** (2026-06-04) aktiviert (`validFrom: 2026-06-04`) — die heute aktive Setting hat noch `monthlyLimitCents:null` | 🔴 **WEITERHIN OFFEN** — kein PG-Default-Fallback |
+| **NS-4 — `monthlyLimitCents` null in Overview** | Cap 4200 wirksam, aber null reported | Overview liefert `monthlyLimitCents: 4200` korrekt | ✅ **GEFIXT (oder Timing)** |
+
+## Bilanz
+
+- **2 Bugs gefixt** (NS-2 Hard-Block, NS-4 Cap-Reporting) seit gestern → Replit-AI hat zwischenzeitlich deployed
+- **2 Bugs offen** (NS-1 asOfDate, NS-3 §45a Default-Cap)
+
+## Was sonst noch aufgefallen ist beim Re-Check
+
+### 🟢 Phase-5-Historization wirkt sauber
+
+Wenn man `PUT /api/budget/:cid/type-settings` mit `validFrom: '2025-01-01'` schickt, **überschreibt der Server das auf morgen** (`validFrom: 2026-06-04`). Heute aktive Setting bekommt `validTo: 2026-06-03` (heute). Damit ist Temporal-Historization (Invariante I10 für *Settings*) durchgesetzt — neue Einstellungen wirken nie rückwirkend.
+
+Das ist konsistent mit ADR-0001 und dem Anti-Goal "kein silent rewrite der Vergangenheit". 👍
+
+### Aber: Reader macht aus historization keinen asOfDate-Support
+
+Phase-5-Historization für *Settings* ist da, aber:
+- `GET /api/budget/:cid/overview?asOfDate=X` reagiert nicht auf X
+- Auch nicht `?transactionDate`, `?as_of_date`, `?date`, `?at`, `?asOf` — getestet, alle identisch
+
+→ Der unified-reader hat die historization-Logik intern, akzeptiert aber kein asOfDate vom Caller. NS-1 ist also nicht "vergessen", sondern explizit nicht durchgereicht.
+
+### §45a-Default ist ein Code-Path-Problem, nicht Validation-Problem
+
+Re-Test mit `monthlyLimitCents:31840` explizit → wird in DB gespeichert (`settings45a.monthlyLimitCents=31840` lt. Settings-GET), wird aber erst morgen aktiv. Wenn morgen aktiv und Overview immer noch 0 zeigt, ist es ein Bug im DTO-Mapping (settings → overview). Falls morgen 31840 erscheint, ist es nur der fehlende PG-Default.
+
+→ **Action für morgen (2026-06-04):** Overview-§45a-Wert re-checken bei Customer 203047 → entweder „nur Default fehlt" oder „auch explizite Werte propagieren nicht".
+
+## Verbleibender Aufwand (vs. ursprüngliche Schätzung)
+
+| Prio | Bug | Aufwand | Status |
+|---|---|---|---|
+| ~~🔴 NS-2 Hard-Block~~ | ✅ done | -1 PT | gespart |
+| ~~🟡 NS-4 Cap-Reporting~~ | ✅ done | -0.25 PT | gespart |
+| 🔴 NS-1 asOfDate-Parameter | 0.5 PT | weiterhin offen |
+| 🟡 NS-3 §45a-Default | 0.5 PT | weiterhin offen (+ Morgen-Check ob expliziter Wert greift) |
+
+**Neue Restschätzung bis Phase-5-Ready: ~1 PT (Bugs) + 0.5 PT Verifier + 2 PT Rollout = 3.5 PT** (vorher 5 PT, also ~1.25 PT von Replit-AI über Nacht gespart).
+
+## Bestätigte stabile Befunde (unverändert)
+
+- ✅ TypeScript clean
+- ✅ 20/20 Property-Tests
+- ✅ 4/4 Architektur-Tests
+- ✅ GoBD-Trigger live (3/3 via /api/health)
+- ✅ Conservation-Identität I1 (Available = Allocated − Holds − Consumed)
+- ✅ Hold/Consume-Parity I7
+- ✅ Storno-Reverse I8
+- ✅ Phase 1+2+4 LIVE, Phase 5 gegated, Phase 6 partiell
