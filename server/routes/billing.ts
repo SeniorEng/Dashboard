@@ -1595,10 +1595,7 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   }
 
   // format === "zip"
-  // archiver hat keine TS-Types — wir importieren als any, die genutzte
-  // Oberfläche (zip/pipe/append/finalize/on-error) ist stabil seit v5.
-  const archiverMod = (await import("archiver")) as unknown as { default: (format: string, opts?: unknown) => any };
-  const archiver = archiverMod.default;
+  const archiver = (await import("archiver")).default;
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", `attachment; filename="${baseFileName}.zip"`);
   const archive = archiver("zip", { zlib: { level: 6 } });
