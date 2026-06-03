@@ -44,6 +44,17 @@ count of ALL existing reservation rows (any state) for that appointment+occurren
 True replay (no release) is short-circuited earlier by the active-hold check, so the
 revision only bumps after a real release/capture.
 
+**`.replit` dev userenv leaks `BUDGET_HARD_HOLDS=1` into the ephemeral test server (Task #945 trap):**
+`.replit` sets `BUDGET_HARD_HOLDS = "1"` under `[userenv.development]` for the dev app. The
+ephemeral-DB test orchestrator (`scripts/with-ephemeral-db.ts`) inherits the ambient env when
+spawning its per-worker app-servers, so the flag silently turns ON in tests — but CI never sets
+it. With the flag ON the gated route hooks fire (planHold at appointment create → 422
+BUDGET_HARD_BLOCK; captureHolds at documentation), which breaks both the direct-engine tests
+(which assume the legacy path) and any slot-creation test that fits a tight budget. The
+orchestrator therefore explicitly `delete baseEnv.BUDGET_HARD_HOLDS` so every worker server +
+the vitest process match CI (flag OFF). **Why:** unsetting is safe precisely because HTTP/e2e
+can't reach the gated branches anyway (see top of file) — no test needs the flag ON.
+
 **captureHolds reconciliation headroom must add back THIS appt's actual (R4/I16 trap):**
 captureHolds runs AFTER legacy consumption is written in the same tx, so
 `readUnifiedBudgetAvailability` already subtracts BOTH this appointment's active hold

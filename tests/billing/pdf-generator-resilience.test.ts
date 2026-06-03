@@ -253,8 +253,8 @@ describe("withFreshPage — Recovery von 'Navigating frame was detached' unter L
     expect(browser.newPage).toHaveBeenCalledTimes(2);
   });
 
-  it("retryed bis zu 3 Versuche bei wiederholtem Frame-Detach, dann propagiert der Fehler", async () => {
-    const { withFreshPage } = await freshModule();
+  it("retryed bis zum Versuchs-Limit bei wiederholtem Frame-Detach, dann propagiert der Fehler", async () => {
+    const { withFreshPage, WITH_FRESH_PAGE_MAX_ATTEMPTS } = await freshModule();
 
     const browser = makeBrowser(async () => makePage());
     launchMock.mockResolvedValue(browser);
@@ -269,7 +269,11 @@ describe("withFreshPage — Recovery von 'Navigating frame was detached' unter L
       }),
     ).rejects.toThrow(/frame was detached/);
 
-    expect(attempt).toBe(3);
+    // An die Quell-Konstante gekoppelt, damit der Test nicht erneut driftet,
+    // wenn das Versuchs-Limit (Task #906: Launch-Retries unter PID-Druck)
+    // verändert wird. Frame-Detach ist page-level transient → retryed im selben
+    // Loop bis zum letzten Versuch, dann wird der Fehler propagiert.
+    expect(attempt).toBe(WITH_FRESH_PAGE_MAX_ATTEMPTS);
     expect(browser.close).not.toHaveBeenCalled();
     expect(launchMock).toHaveBeenCalledTimes(1);
   });

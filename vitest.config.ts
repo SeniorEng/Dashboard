@@ -76,6 +76,14 @@ export default mergeConfig(
             isolate: true,
             // Parallel: schnelles Feedback für reine Logik-/Fitness-Tests.
             fileParallelism: true,
+            // Vitest 4: Projects mit unterschiedlichem `maxWorkers` dürfen nicht
+            // dieselbe `sequence.groupOrder` teilen (sonst „different 'maxWorkers'
+            // but same 'sequence.groupOrder'"-Abbruch vor dem ersten Test). Das
+            // `unit`-Project nutzt den Default-Parallelpool, das `integration`-
+            // Project pinnt `min/maxWorkers` auf die Worker-DB-Anzahl → wir trennen
+            // sie in eigene Order-Gruppen: erst die schnellen Unit-/Fitness-Tests
+            // (Gruppe 0), danach die DB-/Server-gebundenen Integrationstests (1).
+            sequence: { groupOrder: 0 },
             testTimeout: 30000,
             hookTimeout: 30000,
             setupFiles: ["./tests/setup.ts"],
@@ -111,6 +119,10 @@ export default mergeConfig(
             // unverändert: exakt INTEGRATION_WORKERS Forks → 1:1 Worker→DB-Mapping.
             minWorkers: INTEGRATION_WORKERS,
             maxWorkers: INTEGRATION_WORKERS,
+            // Eigene Order-Gruppe (vgl. `unit`-Project oben): läuft NACH den
+            // schnellen Unit-/Fitness-Tests, mit eigenem auf die Worker-DB-Anzahl
+            // gepinnten Fork-Pool.
+            sequence: { groupOrder: 1 },
             testTimeout: 60000,
             hookTimeout: 60000,
             setupFiles: ["./tests/setup.ts"],

@@ -458,7 +458,7 @@ async function warmupPage(page: Page): Promise<void> {
  * Race-Timeout den gesamten Aufruf, sodass blockierte CDP-Calls nicht
  * länger als `PAGE_RENDER_TIMEOUT_MS` hängen.
  */
-const WITH_FRESH_PAGE_MAX_ATTEMPTS = 5;
+export const WITH_FRESH_PAGE_MAX_ATTEMPTS = 5;
 
 export async function withFreshPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
   // Task #594: Slot-Akquise VOR allem anderen — wenn der Browser bereits
