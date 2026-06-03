@@ -1,0 +1,137 @@
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrapResult } from "@/lib/api";
+import type {
+  BillingCustomerItem,
+  BillingInvoicePreview,
+  BlockingDraftInvoice,
+  InvoiceItem,
+  InvoiceDetail,
+  DeliveryRecord,
+  PayerSummary,
+} from "@shared/api";
+
+export function useBillingInvoices(
+  selectedYear: number,
+  selectedMonth: number,
+  statusFilter: string,
+  payerFilter: string,
+) {
+  return useQuery({
+    queryKey: ["billing-invoices", selectedYear, selectedMonth, statusFilter, payerFilter],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      if (statusFilter !== "alle") params.set("status", statusFilter);
+      if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
+      const result = await api.get<InvoiceItem[]>(`/billing?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+export function useEligibleCustomers(
+  selectedYear: number,
+  selectedMonth: number,
+  payerFilter: string,
+) {
+  return useQuery({
+    queryKey: ["billing-eligible-customers", selectedYear, selectedMonth, payerFilter],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("month", selectedMonth.toString());
+      params.set("year", selectedYear.toString());
+      if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
+      const result = await api.get<BillingCustomerItem[]>(`/billing/eligible-customers?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+// Task #750: Vorschau-Block im „Neue Rechnung erstellen"-Dialog.
+// Lädt sobald ein Kunde ausgewählt ist; QueryKey beginnt mit "billing",
+// sodass `invalidateRelated(qc, "billing")` (z.B. nach Generate) die
+// Vorschau automatisch invalidiert.
+export function useInvoicePreview(
+  previewCustomerId: number | null,
+  selectedYear: number,
+  selectedMonth: number,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["billing", "preview", previewCustomerId, selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("customerId", String(previewCustomerId));
+      params.set("month", String(selectedMonth));
+      params.set("year", String(selectedYear));
+      const result = await api.get<BillingInvoicePreview>(`/billing/preview?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: enabled && previewCustomerId !== null,
+    retry: false,
+  });
+}
+
+// Task #817: Verwaiste Entwurfs-Rechnungen, die die Termine blockieren.
+// Wird nur geladen, wenn die Vorschau einen Fehler liefert (typisch:
+// „Alle Termine … bereits abgerechnet"). QueryKey beginnt mit "billing",
+// damit `invalidateRelated(qc, "billing")` nach dem Verwerfen neu lädt.
+export function useBlockingDrafts(
+  previewCustomerId: number | null,
+  selectedYear: number,
+  selectedMonth: number,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["billing", "blocking-drafts", previewCustomerId, selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("customerId", String(previewCustomerId));
+      params.set("month", String(selectedMonth));
+      params.set("year", String(selectedYear));
+      const result = await api.get<BlockingDraftInvoice[]>(`/billing/blocking-drafts?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: enabled && previewCustomerId !== null,
+    retry: false,
+  });
+}
+
+// Krankenkassen-Dropdown — Liste der Pflegekassen mit Rechnungen im Monat.
+export function usePayers(selectedYear: number, selectedMonth: number) {
+  return useQuery({
+    queryKey: ["billing-payers", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      const result = await api.get<PayerSummary[]>(`/billing/payers?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+export function useInvoiceDetail(expandedInvoiceId: number | null) {
+  return useQuery({
+    queryKey: ["billing-invoice-detail", expandedInvoiceId],
+    queryFn: async ({ signal }) => {
+      if (!expandedInvoiceId) return null;
+      const result = await api.get<InvoiceDetail>(`/billing/${expandedInvoiceId}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: !!expandedInvoiceId,
+  });
+}
+
+export function useDeliveryHistory(expandedInvoiceId: number | null) {
+  return useQuery({
+    queryKey: ["billing-delivery-history", expandedInvoiceId],
+    queryFn: async ({ signal }) => {
+      if (!expandedInvoiceId) return [];
+      const result = await api.get<DeliveryRecord[]>(`/billing/deliveries/${expandedInvoiceId}`, signal);
+      return unwrapResult(result);
+    },
+    enabled: !!expandedInvoiceId,
+  });
+}
