@@ -7,6 +7,17 @@ interface QueryResult {
   rows: Record<string, unknown>[];
 }
 
+// Task #943 — rohes CHECK-Constraint-DDL als SSoT-Konstante exportiert
+// (Constraint-Drift-Wächter, analog zu den Spalten-/Index-Konstanten).
+export const APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_NAME =
+  "appointments_prospect_or_customer_check";
+
+export const APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL = `
+    ALTER TABLE appointments
+    ADD CONSTRAINT appointments_prospect_or_customer_check
+    CHECK (prospect_id IS NOT NULL OR customer_id IS NOT NULL)
+  `;
+
 async function ensureCheckConstraint(): Promise<void> {
   const existing = await db.execute(sql`
     SELECT 1 FROM pg_constraint c
@@ -30,11 +41,7 @@ async function ensureCheckConstraint(): Promise<void> {
     return;
   }
 
-  await db.execute(sql`
-    ALTER TABLE appointments
-    ADD CONSTRAINT appointments_prospect_or_customer_check
-    CHECK (prospect_id IS NOT NULL OR customer_id IS NOT NULL)
-  `);
+  await db.execute(sql.raw(APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL));
   log("CHECK-Constraint für appointments (prospect_id OR customer_id) hinzugefügt", "startup");
 }
 

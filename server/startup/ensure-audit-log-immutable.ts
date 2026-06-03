@@ -1,6 +1,65 @@
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
+import {
+  type StartupTriggerSpec,
+  renderCreateTriggerSql,
+  renderDropTriggerSql,
+} from "./trigger-spec";
+
+// Task #943 — Trigger-Funktionen + Trigger-Specs als SSoT-Konstanten exportiert,
+// damit der Startup-Schema-Drift-Wächter sie gegen ihre erwartete Bindung prüft.
+export const AUDIT_LOG_PREVENT_MUTATION_FN_SQL = `
+    CREATE OR REPLACE FUNCTION audit_log_prevent_mutation()
+    RETURNS trigger AS $$
+    BEGIN
+      IF current_setting('app.allow_audit_log_mutation', true) = 'on' THEN
+        RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
+      END IF;
+      RAISE EXCEPTION
+        'audit_log ist GoBD-technisch unveraenderbar (% verweigert)', TG_OP
+        USING ERRCODE = 'restrict_violation';
+    END;
+    $$ LANGUAGE plpgsql;
+  `;
+
+export const AUDIT_LOG_PREVENT_TRUNCATE_FN_SQL = `
+    CREATE OR REPLACE FUNCTION audit_log_prevent_truncate()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION
+        'audit_log ist GoBD-technisch unveraenderbar (TRUNCATE verweigert)'
+        USING ERRCODE = 'restrict_violation';
+    END;
+    $$ LANGUAGE plpgsql;
+  `;
+
+export const AUDIT_LOG_TRIGGERS: StartupTriggerSpec[] = [
+  {
+    name: "audit_log_no_update_trigger",
+    table: "audit_log",
+    timing: "BEFORE",
+    events: ["UPDATE"],
+    level: "ROW",
+    functionName: "audit_log_prevent_mutation",
+  },
+  {
+    name: "audit_log_no_delete_trigger",
+    table: "audit_log",
+    timing: "BEFORE",
+    events: ["DELETE"],
+    level: "ROW",
+    functionName: "audit_log_prevent_mutation",
+  },
+  {
+    name: "audit_log_no_truncate_trigger",
+    table: "audit_log",
+    timing: "BEFORE",
+    events: ["TRUNCATE"],
+    level: "STATEMENT",
+    functionName: "audit_log_prevent_truncate",
+  },
+];
 
 /**
  * GoBD: technische Unveränderbarkeit von `audit_log` (Task #824).
@@ -31,51 +90,13 @@ export async function ensureAuditLogImmutable(): Promise<void> {
   await db.execute(sql`DROP RULE IF EXISTS audit_log_no_delete ON audit_log`);
   await db.execute(sql`DROP RULE IF EXISTS audit_log_no_update ON audit_log`);
 
-  await db.execute(sql`
-    CREATE OR REPLACE FUNCTION audit_log_prevent_mutation()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_audit_log_mutation', true) = 'on' THEN
-        RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
-      END IF;
-      RAISE EXCEPTION
-        'audit_log ist GoBD-technisch unveraenderbar (% verweigert)', TG_OP
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `);
+  await db.execute(sql.raw(AUDIT_LOG_PREVENT_MUTATION_FN_SQL));
+  await db.execute(sql.raw(AUDIT_LOG_PREVENT_TRUNCATE_FN_SQL));
 
-  await db.execute(sql`
-    CREATE OR REPLACE FUNCTION audit_log_prevent_truncate()
-    RETURNS trigger AS $$
-    BEGIN
-      RAISE EXCEPTION
-        'audit_log ist GoBD-technisch unveraenderbar (TRUNCATE verweigert)'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `);
-
-  await db.execute(sql`DROP TRIGGER IF EXISTS audit_log_no_update_trigger ON audit_log`);
-  await db.execute(sql`
-    CREATE TRIGGER audit_log_no_update_trigger
-    BEFORE UPDATE ON audit_log
-    FOR EACH ROW EXECUTE FUNCTION audit_log_prevent_mutation();
-  `);
-
-  await db.execute(sql`DROP TRIGGER IF EXISTS audit_log_no_delete_trigger ON audit_log`);
-  await db.execute(sql`
-    CREATE TRIGGER audit_log_no_delete_trigger
-    BEFORE DELETE ON audit_log
-    FOR EACH ROW EXECUTE FUNCTION audit_log_prevent_mutation();
-  `);
-
-  await db.execute(sql`DROP TRIGGER IF EXISTS audit_log_no_truncate_trigger ON audit_log`);
-  await db.execute(sql`
-    CREATE TRIGGER audit_log_no_truncate_trigger
-    BEFORE TRUNCATE ON audit_log
-    FOR EACH STATEMENT EXECUTE FUNCTION audit_log_prevent_truncate();
-  `);
+  for (const spec of AUDIT_LOG_TRIGGERS) {
+    await db.execute(sql.raw(renderDropTriggerSql(spec)));
+    await db.execute(sql.raw(renderCreateTriggerSql(spec)));
+  }
 
   log("audit_log Unveraenderbarkeit (Trigger) sichergestellt", "startup");
 }
@@ -83,11 +104,9 @@ export async function ensureAuditLogImmutable(): Promise<void> {
 /**
  * Erwartete BEFORE-Trigger auf `audit_log` (siehe `ensureAuditLogImmutable`).
  */
-export const REQUIRED_AUDIT_LOG_TRIGGERS = [
-  "audit_log_no_update_trigger",
-  "audit_log_no_delete_trigger",
-  "audit_log_no_truncate_trigger",
-] as const;
+export const REQUIRED_AUDIT_LOG_TRIGGERS = AUDIT_LOG_TRIGGERS.map(
+  (t) => t.name,
+);
 
 /**
  * Alte, GoBD-schwache `DO INSTEAD NOTHING`-RULEs, die NICHT mehr existieren

@@ -108,6 +108,26 @@ import { RECONCILE_COLUMN_TYPE_TARGETS } from "../../server/startup/reconcile-dr
 import { DROPPED_APPOINTMENTS_SERVICE_TYPE } from "../../server/startup/drop-appointments-service-type";
 import { DROPPED_AUA_APPROVAL_COLUMNS } from "../../server/startup/drop-aua-approval-columns";
 
+// --- CHECK-constraint raw-SQL sources --------------------------------------
+import {
+  BUDGET_TX_APPOINTMENT_CHECK_NAME,
+  BUDGET_TX_APPOINTMENT_CHECK_SQL,
+} from "../../server/startup/ensure-budget-tx-appointment-constraint";
+import {
+  APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_NAME,
+  APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL,
+} from "../../server/startup/migrate-erstberatung-customers";
+
+// --- Trigger specs (SSoT) --------------------------------------------------
+import {
+  type StartupTriggerSpec,
+  type TriggerEvent,
+  renderCreateTriggerSql,
+} from "../../server/startup/trigger-spec";
+import { AUDIT_LOG_TRIGGERS } from "../../server/startup/ensure-audit-log-immutable";
+import { BUDGET_LEDGER_TRIGGERS } from "../../server/startup/ensure-budget-ledger-immutability";
+import { GOBD_TABLE_TRIGGERS } from "../../server/startup/ensure-gobd-table-immutability";
+
 // ===========================================================================
 // Drizzle-Tabellen-Registry: DB-Tabellenname → Drizzle-Modell.
 // ===========================================================================
@@ -879,6 +899,425 @@ describe("Startup Index-Drift (server/startup/**)", () => {
       `Neue(r) Startup-Index ohne Drift-Wächter-Eintrag: ${uncovered
         .map(([name, file]) => `${name} (${file})`)
         .join(", ")}. In INDEX_SOURCES aufnehmen oder allowlisten.`,
+    ).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Task #943 — CHECK-CONSTRAINT-Drift.
+//
+// Der Spalten-/Index-Drift-Wächter oben deckt Typ/Nullability/Default und
+// Indexe ab, NICHT aber die CHECK-Constraints, die die Startup-Migrationen per
+// rohem SQL anlegen. Ein CHECK, der nur im rohen SQL existiert (oder dort ein
+// ANDERES Prädikat trägt als beabsichtigt), bleibt vom Drizzle-Modell völlig
+// unbemerkt — Drizzle kennt diese CHECKs gar nicht. Driftet das Prädikat,
+// lässt entweder GoBD-verletzendes Schreiben durch oder blockiert legitimes.
+//
+// Strategie (pro Startup-CHECK): Wir spielen das rohe Startup-SQL UND ein
+// unabhängig im Test handgepflegtes Erwartungs-Prädikat in DIESELBE TEMP-
+// Tabelle und vergleichen die von PostgreSQL normalisierte
+// `pg_get_constraintdef`-Ausgabe (die den Namen NICHT enthält). So werden
+// beide Prädikate identisch normalisiert (z.B. `IN (...)` → `= ANY (ARRAY...)`)
+// und ein Drift zwischen Startup-DDL und dem erwarteten Vertrag fällt auf.
+// ===========================================================================
+
+interface CheckSource {
+  label: string;
+  /** Rohes Startup-SQL (exportierte SSoT-Konstante). */
+  rawSql: string;
+  /** Constraint-Name, wie ihn das Startup-SQL trägt. */
+  constraintName: string;
+  realTable: string;
+  /** DDL der TEMP-Tabelle: alle im CHECK referenzierten Spalten. */
+  tempColumns: string;
+  /** Unabhängig handgepflegtes Erwartungs-Prädikat (der eigentliche Vertrag). */
+  expectedPredicate: string;
+}
+
+const CHECK_SOURCES: CheckSource[] = [
+  {
+    label:
+      "ensure-budget-tx-appointment-constraint: budget_transactions_appointment_required_check",
+    rawSql: BUDGET_TX_APPOINTMENT_CHECK_SQL,
+    constraintName: BUDGET_TX_APPOINTMENT_CHECK_NAME,
+    realTable: "budget_transactions",
+    tempColumns: "transaction_type text, appointment_id integer",
+    expectedPredicate:
+      "transaction_type IN ('manual_adjustment', 'expiration', 'write_off') OR appointment_id IS NOT NULL",
+  },
+  {
+    label:
+      "migrate-erstberatung-customers: appointments_prospect_or_customer_check",
+    rawSql: APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL,
+    constraintName: APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_NAME,
+    realTable: "appointments",
+    tempColumns: "prospect_id integer, customer_id integer",
+    expectedPredicate: "prospect_id IS NOT NULL OR customer_id IS NOT NULL",
+  },
+];
+
+/** CHECK-Constraints, die woanders abgesichert sind / kein CHECK-Vertrag nötig. */
+const CHECK_COVERAGE_ALLOWLIST = new Set<string>([]);
+
+/** Rohes ALTER…ADD CONSTRAINT…CHECK auf eine TEMP-Tabelle + frischen Namen umbiegen. */
+function rewriteRawCheckSql(
+  rawSql: string,
+  realTable: string,
+  probe: string,
+  probeConstraintName: string,
+): string {
+  let s = rawSql.trim();
+  s = s.replace(
+    new RegExp(`ALTER TABLE\\s+"?${realTable}"?`, "i"),
+    `ALTER TABLE ${probe}`,
+  );
+  s = s.replace(
+    /ADD CONSTRAINT\s+\S+/i,
+    `ADD CONSTRAINT ${probeConstraintName}`,
+  );
+  return s;
+}
+
+async function readCheckDefs(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  probe: string,
+): Promise<Map<string, string>> {
+  const res = await tx.execute(sql`
+    SELECT con.conname, pg_get_constraintdef(con.oid) AS def
+    FROM pg_constraint con
+    JOIN pg_class c ON con.conrelid = c.oid
+    WHERE c.relname = ${probe} AND con.contype = 'c'
+  `);
+  const map = new Map<string, string>();
+  for (const r of res.rows as Array<Record<string, unknown>>) {
+    map.set(r.conname as string, r.def as string);
+  }
+  return map;
+}
+
+describe("Startup CHECK-Constraint-Drift (server/startup/**)", () => {
+  describe("CHECK — rohes SQL == erwartetes Prädikat", () => {
+    for (const src of CHECK_SOURCES) {
+      it(src.label, async () => {
+        const probe = nextProbeName();
+        const rawConName = `${probe}_raw`;
+        const expConName = `${probe}_exp`;
+
+        const rawCheckSql = rewriteRawCheckSql(
+          src.rawSql,
+          src.realTable,
+          probe,
+          rawConName,
+        );
+        // Sanity: Transformation hat gegriffen.
+        expect(rawCheckSql).toContain(`ALTER TABLE ${probe}`);
+        expect(rawCheckSql).toContain(rawConName);
+        expect(rawCheckSql).not.toMatch(
+          new RegExp(`ALTER TABLE\\s+"?${src.realTable}"?`, "i"),
+        );
+
+        let rawDef = "";
+        let expDef = "";
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql.raw(`CREATE TEMP TABLE ${probe} (${src.tempColumns})`),
+          );
+          await tx.execute(sql.raw(rawCheckSql));
+          await tx.execute(
+            sql.raw(
+              `ALTER TABLE ${probe} ADD CONSTRAINT ${expConName} CHECK (${src.expectedPredicate})`,
+            ),
+          );
+          const defs = await readCheckDefs(tx, probe);
+          rawDef = defs.get(rawConName) ?? "";
+          expDef = defs.get(expConName) ?? "";
+        });
+
+        expect(
+          rawDef,
+          `rohes CHECK-SQL erzeugte keinen Constraint: ${src.label}`,
+        ).not.toBe("");
+        expect(
+          expDef,
+          `Erwartungs-Prädikat erzeugte keinen Constraint: ${src.label}`,
+        ).not.toBe("");
+        expect(
+          rawDef,
+          `CHECK-Drift bei ${src.constraintName}: rohes Startup-SQL ≠ erwartetes Prädikat`,
+        ).toEqual(expDef);
+      });
+    }
+  });
+
+  it("absichtlich abweichendes CHECK-Prädikat fällt auf", async () => {
+    // Negativ-Kontrolle: das rohe budget_tx-CHECK gegen ein bewusst FALSCHES
+    // Prädikat (ohne den transaction_type-Zweig) → die normalisierten Defs
+    // dürfen NICHT gleich sein, sonst wäre der Vergleich oben wertlos.
+    const probe = nextProbeName();
+    const rawConName = `${probe}_raw`;
+    const wrongConName = `${probe}_wrong`;
+    const rawCheckSql = rewriteRawCheckSql(
+      BUDGET_TX_APPOINTMENT_CHECK_SQL,
+      "budget_transactions",
+      probe,
+      rawConName,
+    );
+
+    let rawDef = "";
+    let wrongDef = "";
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql.raw(
+          `CREATE TEMP TABLE ${probe} (transaction_type text, appointment_id integer)`,
+        ),
+      );
+      await tx.execute(sql.raw(rawCheckSql));
+      await tx.execute(
+        sql.raw(
+          `ALTER TABLE ${probe} ADD CONSTRAINT ${wrongConName} CHECK (appointment_id IS NOT NULL)`,
+        ),
+      );
+      const defs = await readCheckDefs(tx, probe);
+      rawDef = defs.get(rawConName) ?? "";
+      wrongDef = defs.get(wrongConName) ?? "";
+    });
+
+    expect(rawDef).not.toBe("");
+    expect(wrongDef).not.toBe("");
+    expect(rawDef).not.toEqual(wrongDef);
+  });
+
+  it("jeder ADD CONSTRAINT … CHECK in server/startup/** ist abgedeckt", () => {
+    const covered = new Set(CHECK_SOURCES.map((s) => s.constraintName));
+    const startupDir = join(process.cwd(), "server", "startup");
+
+    const found = new Map<string, string>(); // constraintName -> Datei
+    for (const entry of readdirSync(startupDir)) {
+      if (!entry.endsWith(".ts")) continue;
+      const full = join(startupDir, entry);
+      if (!statSync(full).isFile()) continue;
+      const sourceText = readFileSync(full, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\n]*/g, "");
+      const re =
+        /ADD\s+CONSTRAINT\s+([A-Za-z_][A-Za-z0-9_]*)\s+CHECK\b/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sourceText)) !== null) {
+        found.set(m[1], entry);
+      }
+    }
+
+    const uncovered = [...found.entries()].filter(
+      ([name]) => !covered.has(name) && !CHECK_COVERAGE_ALLOWLIST.has(name),
+    );
+    expect(
+      uncovered,
+      `Neue(r) Startup-CHECK-Constraint ohne Drift-Wächter-Eintrag: ${uncovered
+        .map(([name, file]) => `${name} (${file})`)
+        .join(", ")}. In CHECK_SOURCES aufnehmen oder allowlisten.`,
+    ).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Task #943 — TRIGGER-Drift.
+//
+// Die GoBD-/audit_log-Immutabilitäts-Migrationen schützen ihre Tabellen per
+// BEFORE-Trigger (Hard-Delete-/Resurrect-/Mutations-/TRUNCATE-Sperren). Diese
+// Trigger sind GoBD-kritisch: fehlt einer oder ist er an das falsche
+// Event/Timing/Level/die falsche Funktion gebunden, lässt die DB stillschweigend
+// verbotene Schreibzugriffe durch. Drizzle kennt diese Trigger NICHT.
+//
+// Strategie: Jede Migration deklariert ihre Trigger als typisierte
+// `StartupTriggerSpec` (SSoT) und BAUT ihr CREATE-TRIGGER-DDL daraus
+// (`renderCreateTriggerSql`). Dieser Test liest die zur Laufzeit (beim Startup)
+// real angelegten Trigger aus `pg_trigger` der Live-Test-DB, dekodiert die
+// `tgtype`-Bitmaske und vergleicht Tabelle/Timing/Events/Level/Funktion gegen
+// die Spec. So ist garantiert: (a) der Trigger existiert wirklich, (b) er ist
+// exakt so gebunden, wie die Spec behauptet.
+// ===========================================================================
+
+const ALL_STARTUP_TRIGGER_SPECS: StartupTriggerSpec[] = [
+  ...AUDIT_LOG_TRIGGERS,
+  ...BUDGET_LEDGER_TRIGGERS,
+  ...GOBD_TABLE_TRIGGERS,
+];
+
+// pg_trigger.tgtype-Bitmaske (siehe PostgreSQL-Quelle catalog/pg_trigger.h).
+const TG_ROW = 1 << 0;
+const TG_BEFORE = 1 << 1;
+const TG_INSERT = 1 << 2;
+const TG_DELETE = 1 << 3;
+const TG_UPDATE = 1 << 4;
+const TG_TRUNCATE = 1 << 5;
+
+interface DecodedTrigger {
+  timing: "BEFORE" | "AFTER";
+  level: "ROW" | "STATEMENT";
+  events: Set<TriggerEvent>;
+  functionName: string;
+}
+
+function decodeTgType(tgtype: number, proname: string): DecodedTrigger {
+  const events = new Set<TriggerEvent>();
+  if (tgtype & TG_INSERT) events.add("INSERT");
+  if (tgtype & TG_UPDATE) events.add("UPDATE");
+  if (tgtype & TG_DELETE) events.add("DELETE");
+  if (tgtype & TG_TRUNCATE) events.add("TRUNCATE");
+  return {
+    timing: tgtype & TG_BEFORE ? "BEFORE" : "AFTER",
+    level: tgtype & TG_ROW ? "ROW" : "STATEMENT",
+    events,
+    functionName: proname,
+  };
+}
+
+function eventsEqual(a: Set<TriggerEvent>, b: Iterable<TriggerEvent>): boolean {
+  const bs = new Set(b);
+  if (a.size !== bs.size) return false;
+  for (const e of a) if (!bs.has(e)) return false;
+  return true;
+}
+
+/** Reiner Vergleich: deckt sich der real gebundene Trigger mit der Spec? */
+function triggerMatchesSpec(
+  decoded: DecodedTrigger,
+  table: string,
+  spec: StartupTriggerSpec,
+): boolean {
+  return (
+    decoded.timing === spec.timing &&
+    decoded.level === spec.level &&
+    decoded.functionName === spec.functionName &&
+    table === spec.table &&
+    eventsEqual(decoded.events, spec.events)
+  );
+}
+
+interface LiveTrigger {
+  tgtype: number;
+  proname: string;
+  relname: string;
+}
+
+async function readLiveTrigger(
+  exec: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
+  table: string,
+  name: string,
+): Promise<LiveTrigger | null> {
+  const res = await exec.execute(sql`
+    SELECT t.tgtype::int AS tgtype, p.proname, c.relname
+    FROM pg_trigger t
+    JOIN pg_class c ON t.tgrelid = c.oid
+    JOIN pg_proc p ON t.tgfoid = p.oid
+    WHERE c.relname = ${table}
+      AND t.tgname = ${name}
+      AND NOT t.tgisinternal
+  `);
+  const row = (res.rows as Array<Record<string, unknown>>)[0];
+  if (!row) return null;
+  return {
+    tgtype: Number(row.tgtype),
+    proname: row.proname as string,
+    relname: row.relname as string,
+  };
+}
+
+describe("Startup Trigger-Drift (server/startup/**)", () => {
+  describe("TRIGGER — Live-DB-Bindung == Spec", () => {
+    for (const spec of ALL_STARTUP_TRIGGER_SPECS) {
+      it(`${spec.table}.${spec.name}`, async () => {
+        const live = await readLiveTrigger(db, spec.table, spec.name);
+        expect(
+          live,
+          `Trigger fehlt in der DB: ${spec.name} auf ${spec.table}`,
+        ).not.toBeNull();
+        const decoded = decodeTgType(live!.tgtype, live!.proname);
+        expect(decoded.timing, `Timing-Drift bei ${spec.name}`).toBe(
+          spec.timing,
+        );
+        expect(decoded.level, `Level-Drift bei ${spec.name}`).toBe(spec.level);
+        expect(
+          [...decoded.events].sort(),
+          `Event-Drift bei ${spec.name}`,
+        ).toEqual([...spec.events].sort());
+        expect(
+          decoded.functionName,
+          `Funktions-Drift bei ${spec.name}`,
+        ).toBe(spec.functionName);
+        expect(live!.relname, `Tabellen-Drift bei ${spec.name}`).toBe(
+          spec.table,
+        );
+        expect(triggerMatchesSpec(decoded, live!.relname, spec)).toBe(true);
+      });
+    }
+  });
+
+  it("absichtlich abweichende Trigger-Bindung fällt auf", async () => {
+    // Negativ-Kontrolle: ein bewusst falsch gebundener Trigger (AFTER statt
+    // BEFORE) auf einer TEMP-Tabelle muss vom Vergleich abgelehnt werden — sonst
+    // wäre die Live-Prüfung oben wertlos. Wir nutzen eine real existierende
+    // Trigger-Funktion (aus dem Startup), aber eine verfälschte Spec.
+    const reference = ALL_STARTUP_TRIGGER_SPECS.find(
+      (s) => s.timing === "BEFORE" && s.level === "ROW",
+    )!;
+    const probe = nextProbeName();
+    const probeTrigger = `${probe}_t`;
+    const wrongSpec: StartupTriggerSpec = {
+      ...reference,
+      timing: "AFTER",
+      name: probeTrigger,
+    };
+
+    let decoded: DecodedTrigger | null = null;
+    let relname = "";
+    await db.transaction(async (tx) => {
+      await tx.execute(sql.raw(`CREATE TEMP TABLE ${probe} (id integer)`));
+      await tx.execute(
+        sql.raw(renderCreateTriggerSql(wrongSpec, probe, probeTrigger)),
+      );
+      const live = await readLiveTrigger(tx, probe, probeTrigger);
+      expect(live).not.toBeNull();
+      decoded = decodeTgType(live!.tgtype, live!.proname);
+      relname = live!.relname;
+    });
+
+    // Gegen die ORIGINALE (BEFORE-)Spec verglichen → muss als Drift auffallen.
+    expect(triggerMatchesSpec(decoded!, relname, reference)).toBe(false);
+    expect(decoded!.timing).toBe("AFTER");
+  });
+
+  it("jeder CREATE TRIGGER in server/startup/** ist über eine Spec abgedeckt", () => {
+    const covered = new Set(ALL_STARTUP_TRIGGER_SPECS.map((s) => s.name));
+    const startupDir = join(process.cwd(), "server", "startup");
+
+    const found = new Map<string, string>(); // triggerName -> Datei
+    for (const entry of readdirSync(startupDir)) {
+      if (!entry.endsWith(".ts")) continue;
+      // trigger-spec.ts ist der Renderer (enthält `CREATE TRIGGER ${...}`),
+      // keine Migration → nicht scannen.
+      if (entry === "trigger-spec.ts") continue;
+      const full = join(startupDir, entry);
+      if (!statSync(full).isFile()) continue;
+      const sourceText = readFileSync(full, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\n]*/g, "");
+      const re =
+        /CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+([A-Za-z_][A-Za-z0-9_]*)/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sourceText)) !== null) {
+        found.set(m[1], entry);
+      }
+    }
+
+    const uncovered = [...found.entries()].filter(
+      ([name]) => !covered.has(name),
+    );
+    expect(
+      uncovered,
+      `Roh angelegter Startup-Trigger ohne Spec/Drift-Wächter-Eintrag: ${uncovered
+        .map(([name, file]) => `${name} (${file})`)
+        .join(", ")}. Als StartupTriggerSpec deklarieren (renderCreateTriggerSql).`,
     ).toEqual([]);
   });
 });

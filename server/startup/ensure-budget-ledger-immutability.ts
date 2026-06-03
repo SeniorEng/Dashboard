@@ -1,6 +1,81 @@
 import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
+import {
+  type StartupTriggerSpec,
+  renderCreateTriggerSql,
+  renderDropTriggerSql,
+} from "./trigger-spec";
+
+// Task #943 — Trigger-Funktionen + Trigger-Specs als SSoT-Konstanten exportiert.
+export const BUDGET_LEDGER_PREVENT_UPDATE_FN_SQL = `
+    CREATE OR REPLACE FUNCTION budget_ledger_prevent_update()
+    RETURNS trigger AS $$
+    BEGIN
+      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
+        RETURN NEW;
+      END IF;
+      RAISE EXCEPTION
+        'budget_ledger: GoBD-UPDATE verboten (append-only; Korrektur nur via neue reversed- + consumed-Zeile)'
+        USING ERRCODE = 'restrict_violation';
+    END;
+    $$ LANGUAGE plpgsql;
+  `;
+
+export const BUDGET_LEDGER_PREVENT_DELETE_FN_SQL = `
+    CREATE OR REPLACE FUNCTION budget_ledger_prevent_delete()
+    RETURNS trigger AS $$
+    BEGIN
+      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
+        RETURN OLD;
+      END IF;
+      RAISE EXCEPTION
+        'budget_ledger: GoBD-Hard-Delete verboten (append-only Finanz-Ledger)'
+        USING ERRCODE = 'restrict_violation';
+    END;
+    $$ LANGUAGE plpgsql;
+  `;
+
+export const BUDGET_LEDGER_PREVENT_TRUNCATE_FN_SQL = `
+    CREATE OR REPLACE FUNCTION budget_ledger_prevent_truncate()
+    RETURNS trigger AS $$
+    BEGIN
+      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
+        RETURN NULL;
+      END IF;
+      RAISE EXCEPTION
+        'budget_ledger: GoBD-TRUNCATE verboten'
+        USING ERRCODE = 'restrict_violation';
+    END;
+    $$ LANGUAGE plpgsql;
+  `;
+
+export const BUDGET_LEDGER_TRIGGERS: StartupTriggerSpec[] = [
+  {
+    name: "budget_ledger_no_update_trigger",
+    table: "budget_ledger",
+    timing: "BEFORE",
+    events: ["UPDATE"],
+    level: "ROW",
+    functionName: "budget_ledger_prevent_update",
+  },
+  {
+    name: "budget_ledger_no_delete_trigger",
+    table: "budget_ledger",
+    timing: "BEFORE",
+    events: ["DELETE"],
+    level: "ROW",
+    functionName: "budget_ledger_prevent_delete",
+  },
+  {
+    name: "budget_ledger_no_truncate_trigger",
+    table: "budget_ledger",
+    timing: "BEFORE",
+    events: ["TRUNCATE"],
+    level: "STATEMENT",
+    functionName: "budget_ledger_prevent_truncate",
+  },
+];
 
 /**
  * GoBD: technische Unveränderbarkeit der finanziellen Budget-Ledger-Tabelle
@@ -28,68 +103,14 @@ import { log } from "../lib/log";
  * jedem weiteren Boot ein No-Op.
  */
 export async function ensureBudgetLedgerImmutability(): Promise<void> {
-  await db.execute(sql`
-    CREATE OR REPLACE FUNCTION budget_ledger_prevent_update()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
-        RETURN NEW;
-      END IF;
-      RAISE EXCEPTION
-        'budget_ledger: GoBD-UPDATE verboten (append-only; Korrektur nur via neue reversed- + consumed-Zeile)'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `);
+  await db.execute(sql.raw(BUDGET_LEDGER_PREVENT_UPDATE_FN_SQL));
+  await db.execute(sql.raw(BUDGET_LEDGER_PREVENT_DELETE_FN_SQL));
+  await db.execute(sql.raw(BUDGET_LEDGER_PREVENT_TRUNCATE_FN_SQL));
 
-  await db.execute(sql`
-    CREATE OR REPLACE FUNCTION budget_ledger_prevent_delete()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
-        RETURN OLD;
-      END IF;
-      RAISE EXCEPTION
-        'budget_ledger: GoBD-Hard-Delete verboten (append-only Finanz-Ledger)'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `);
-
-  await db.execute(sql`
-    CREATE OR REPLACE FUNCTION budget_ledger_prevent_truncate()
-    RETURNS trigger AS $$
-    BEGIN
-      IF current_setting('app.allow_gobd_mutation', true) = 'on' THEN
-        RETURN NULL;
-      END IF;
-      RAISE EXCEPTION
-        'budget_ledger: GoBD-TRUNCATE verboten'
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;
-  `);
-
-  await db.execute(sql`DROP TRIGGER IF EXISTS budget_ledger_no_update_trigger ON budget_ledger`);
-  await db.execute(sql`
-    CREATE TRIGGER budget_ledger_no_update_trigger
-    BEFORE UPDATE ON budget_ledger
-    FOR EACH ROW EXECUTE FUNCTION budget_ledger_prevent_update();
-  `);
-
-  await db.execute(sql`DROP TRIGGER IF EXISTS budget_ledger_no_delete_trigger ON budget_ledger`);
-  await db.execute(sql`
-    CREATE TRIGGER budget_ledger_no_delete_trigger
-    BEFORE DELETE ON budget_ledger
-    FOR EACH ROW EXECUTE FUNCTION budget_ledger_prevent_delete();
-  `);
-
-  await db.execute(sql`DROP TRIGGER IF EXISTS budget_ledger_no_truncate_trigger ON budget_ledger`);
-  await db.execute(sql`
-    CREATE TRIGGER budget_ledger_no_truncate_trigger
-    BEFORE TRUNCATE ON budget_ledger
-    FOR EACH STATEMENT EXECUTE FUNCTION budget_ledger_prevent_truncate();
-  `);
+  for (const spec of BUDGET_LEDGER_TRIGGERS) {
+    await db.execute(sql.raw(renderDropTriggerSql(spec)));
+    await db.execute(sql.raw(renderCreateTriggerSql(spec)));
+  }
 
   log("GoBD-Unveraenderbarkeit budget_ledger (append-only Trigger) sichergestellt", "startup");
 }
@@ -98,11 +119,9 @@ export async function ensureBudgetLedgerImmutability(): Promise<void> {
  * Erwartete BEFORE-Trigger auf `budget_ledger` (siehe
  * `ensureBudgetLedgerImmutability`).
  */
-export const REQUIRED_BUDGET_LEDGER_TRIGGERS = [
-  "budget_ledger_no_update_trigger",
-  "budget_ledger_no_delete_trigger",
-  "budget_ledger_no_truncate_trigger",
-] as const;
+export const REQUIRED_BUDGET_LEDGER_TRIGGERS = BUDGET_LEDGER_TRIGGERS.map(
+  (t) => t.name,
+);
 
 export interface BudgetLedgerImmutabilityStatus {
   /** True nur, wenn alle erwarteten Trigger in der LIVE-DB existieren. */
