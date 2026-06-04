@@ -455,12 +455,24 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
     });
   }
 
-  // Nur der zugeordnete Mitarbeiter (oder ein Admin) darf seinen Leistungsnachweis unterschreiben.
-  // Backup-Mitarbeiter mit Kunden-Zugriff dürfen keine Records anderer Mitarbeiter signieren.
-  if (!req.user!.isAdmin && existingRecord.employeeId !== req.user!.id) {
+  const linkedAppointments = await storage.getAppointmentsForServiceRecord(id);
+
+  // Wer darf unterschreiben? Der dem Leistungsnachweis zugeordnete Mitarbeiter
+  // (existingRecord.employeeId) ODER der Mitarbeiter, der einen der enthaltenen
+  // Termine nachweislich geleistet hat (performedByEmployeeId) bzw. ihm zugewiesen
+  // war (assignedEmployeeId — Vertretung/Backup). Admins immer.
+  // Der Kunden-Zugriff ist oben bereits geprüft; hier wird die Eigentümer-Grenze
+  // korrekt auf den tatsächlich Leistenden erweitert, ohne sie aufzuweichen — ein
+  // fremder Mitarbeiter ohne Bezug zu den Terminen bleibt blockiert (Task #978).
+  const allowedSignerIds = new Set<number>([existingRecord.employeeId]);
+  for (const appt of linkedAppointments) {
+    if (appt.performedByEmployeeId != null) allowedSignerIds.add(appt.performedByEmployeeId);
+    if (appt.assignedEmployeeId != null) allowedSignerIds.add(appt.assignedEmployeeId);
+  }
+  if (!req.user!.isAdmin && !allowedSignerIds.has(req.user!.id)) {
     return res.status(403).json({
       error: "FORBIDDEN",
-      message: "Nur der zugeordnete Mitarbeiter darf diesen Leistungsnachweis unterschreiben",
+      message: "Nur der zugeordnete oder der ausführende Mitarbeiter darf diesen Leistungsnachweis unterschreiben",
     });
   }
 
@@ -480,7 +492,6 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
     });
   }
 
-  const linkedAppointments = await storage.getAppointmentsForServiceRecord(id);
   const nonCompletedAppointments = linkedAppointments.filter(a => a.status !== "completed");
   if (nonCompletedAppointments.length > 0) {
     const details = nonCompletedAppointments.slice(0, 3).map(a => `${a.date} (${a.status})`).join(", ");

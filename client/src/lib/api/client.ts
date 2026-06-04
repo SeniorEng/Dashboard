@@ -114,8 +114,12 @@ function delay(ms: number): Promise<void> {
  * Parse error response from API
  */
 async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
+  // Body genau einmal als Text lesen, dann JSON parsen. So bleibt der Rohtext
+  // für den Fallback verfügbar, falls die Antwort kein JSON ist (z.B. ein
+  // Proxy-/Plain-Text-403), statt nur ein nacktes "HTTP 403:" zu zeigen.
+  const rawBody = await response.text().catch(() => '');
   try {
-    const data = await response.json();
+    const data = JSON.parse(rawBody);
     let message = 'Ein unbekannter Fehler ist aufgetreten';
     if (typeof data.message === 'string' && data.message) {
       message = data.message;
@@ -141,9 +145,15 @@ async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
       status: response.status,
     };
   } catch {
+    // Kein JSON-Body: kurze, nicht-HTML Plain-Text-Meldung des Servers anzeigen,
+    // sonst auf den generischen HTTP-Status zurückfallen.
+    const trimmed = rawBody.trim();
+    const usableText = trimmed && trimmed.length <= 300 && !trimmed.startsWith('<')
+      ? trimmed
+      : null;
     return {
       code: 'NETWORK_ERROR',
-      message: `HTTP ${response.status}: ${response.statusText}`,
+      message: usableText ?? `HTTP ${response.status}: ${response.statusText}`,
       status: response.status,
     };
   }
