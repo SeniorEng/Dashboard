@@ -196,8 +196,11 @@ describe("CLEAN-1: Test-Cleanup-Filter löschen niemals echte Datensätze", () =
     expect(purge.data.deleted).toContain(testEmp.id);
 
     // Der CUSTOMER_TEST_C-Filter + Detach-Pass MÜSSEN den echten Kunden
-    // erhalten — gelöscht/genullt wird nur die Test-User-Spur.
-    const cust = await apiGet<{ id: number }>(`/api/admin/customers/${realCustomerId}`);
+    // erhalten — gelöscht/genullt wird nur die Test-User-Spur. Die Kunden-Detail-
+    // Route liegt unter /:id/details (ein blankes /:id existiert nicht und würde
+    // für JEDEN Kunden 404 liefern); ein 200 hier beweist, dass die Kunden-Zeile
+    // den Purge überlebt hat.
+    const cust = await apiGet<{ id: number }>(`/api/admin/customers/${realCustomerId}/details`);
     expect(cust.status).toBe(200);
     expect(cust.data.id).toBe(realCustomerId);
 
