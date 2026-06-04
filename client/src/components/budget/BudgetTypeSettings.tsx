@@ -14,7 +14,7 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { todayISO } from "@shared/utils/datetime";
-import { validate45bInitialBalanceNotPriorYear } from "@shared/domain/budget/carryover-eligibility";
+import { validate45bInitialBalanceNotPriorYear, max45bStartValueCents } from "@shared/domain/budget/carryover-eligibility";
 // Task #608 / #716: Sentinel-Wert, mit dem der Historisierungs-Backfill alte
 // Zeilen auf „rückwirkend gültig" markiert hat. Im UI als leeres Feld +
 // Hinweistext rendern, statt buchstäblich „01.01.1970" anzuzeigen. Zentral
@@ -59,9 +59,17 @@ interface InitialBalanceAllocation {
   month?: number | null;
 }
 
+interface CareLevelHistoryEntry {
+  validFrom: string;
+}
+
 interface BudgetTypeSettingsProps {
   customerId: number;
   pflegegrad?: number;
+  // Task #975 — Pflegegrad-Historie als Accrual-Anker für die §45b-Startwert-
+  // Obergrenze (frühestes `validFrom`). Identisch zur Server-Logik in
+  // `server/routes/budget.ts` (initial-balance-Handler).
+  careLevelHistory?: CareLevelHistoryEntry[];
 }
 
 const MONTH_OPTIONS = [
@@ -118,7 +126,7 @@ function isValidEuroInput(value: string): boolean {
   return /^[0-9]+[.,]?[0-9]{0,2}$/.test(value);
 }
 
-export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSettingsProps) {
+export function BudgetTypeSettings({ customerId, pflegegrad, careLevelHistory }: BudgetTypeSettingsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<BudgetTypeSetting[]>([]);
@@ -431,6 +439,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad }: BudgetTypeSetting
                           <InitialBalanceSection
                             customerId={customerId}
                             budgetType={setting.budgetType}
+                            careLevelHistory={careLevelHistory}
                             expanded={!!expandedHistory[setting.budgetType]}
                             onToggleHistory={() => toggleHistory(setting.budgetType)}
                           />
@@ -618,11 +627,12 @@ function RebookSection({ customerId }: { customerId: number }) {
 interface InitialBalanceSectionProps {
   customerId: number;
   budgetType: string;
+  careLevelHistory?: CareLevelHistoryEntry[];
   expanded: boolean;
   onToggleHistory: () => void;
 }
 
-function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHistory }: InitialBalanceSectionProps) {
+function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expanded, onToggleHistory }: InitialBalanceSectionProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState("");
@@ -654,6 +664,12 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
         ? validate45bInitialBalanceNotPriorYear(month, new Date().getFullYear())
         : null;
       if (guardError) throw new Error(guardError);
+      // Task #975 — §45b-Startwert-Obergrenze (gleiche SSoT wie Server,
+      // `max45bStartValueCents`). Vor dem Round-Trip blocken, damit der Admin
+      // nicht erst eine 400-Antwort erhält.
+      if (budgetType === "entlastungsbetrag_45b" && start45bCap !== null && amountCents > start45bCap) {
+        throw new Error(`§45b-Startguthaben darf höchstens ${formatCurrency(start45bCap)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat).`);
+      }
       return unwrapResult(await api.post(`/budget/${customerId}/initial-balance/${budgetType}`, {
         amountCents,
         validFrom: month,
@@ -708,6 +724,20 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
   const yearOptions = is45b
     ? [currentYear]
     : Array.from({ length: 5 }, (_, i) => currentYear - i);
+
+  // Task #975 — §45b-Startwert-Obergrenze sichtbar machen, BEVOR gespeichert wird.
+  // Identisch zur Server-Berechnung (`max45bStartValueCents`,
+  // `server/routes/budget.ts`): Accrual-Anker = FRÜHESTES `validFrom` der
+  // Pflegegrad-Historie (Fallback = der erfasste Startmonat selbst), Stichmonat =
+  // `${month}-01`. Nur für §45b — §45a/§39 bleiben uncapped.
+  const validFromDate = `${month}-01`;
+  const accrualAnchor = (careLevelHistory ?? [])
+    .map(e => e.validFrom)
+    .filter((v): v is string => !!v)
+    .sort()[0] ?? validFromDate;
+  const start45bCap = is45b ? max45bStartValueCents(accrualAnchor, validFromDate) : null;
+  const enteredCents = euroStringToCents(amount) ?? 0;
+  const exceedsCap = start45bCap !== null && hasValidInput && enteredCents > start45bCap;
 
   const filteredMonths = MONTH_OPTIONS.filter(m => {
     if (selectedYear < currentYear) return true;
@@ -784,9 +814,17 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
               onChange={(e) => {
                 if (isValidEuroInput(e.target.value)) setAmount(e.target.value);
               }}
-              className="h-8 text-base"
+              className={`h-8 text-base ${exceedsCap ? "border-red-400 focus-visible:ring-red-400" : ""}`}
               data-testid={`input-initial-balance-${budgetType}`}
             />
+            {is45b && start45bCap !== null && !priorYearError && (
+              <p
+                className={`text-[11px] mt-0.5 ${exceedsCap ? "text-red-600 font-medium" : "text-gray-500"}`}
+                data-testid={`text-max-initial-balance-${budgetType}`}
+              >
+                Maximal {formatCurrency(start45bCap)} möglich (rechtlich mögliche Ansammlung bis {formatMonthYear(month)}).
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -868,7 +906,17 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
           </div>
         )}
 
-        {hasValidInput && !priorYearError && (
+        {exceedsCap && !priorYearError && start45bCap !== null && (
+          <div
+            className="flex items-start gap-2 mt-1 p-2 rounded bg-red-50 border border-red-200 text-xs text-red-700"
+            data-testid={`error-exceeds-cap-initial-balance-${budgetType}`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <p>§45b-Startguthaben darf höchstens {formatCurrency(start45bCap)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat).</p>
+          </div>
+        )}
+
+        {hasValidInput && !priorYearError && !exceedsCap && (
           <div className="space-y-2 mt-1">
             <p className="text-xs text-teal-600">
               <Plus className="h-3 w-3 inline" /> {formatCurrency(euroStringToCents(amount) || 0)} wird als Restguthaben ab {formatMonthYear(month)} {hasHistory ? "aktualisiert" : "gespeichert"}

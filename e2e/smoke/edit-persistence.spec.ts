@@ -22,6 +22,7 @@ import {
   expectFieldPersisted,
 } from "../helpers/round-trip";
 import { apiPost, apiPut } from "../helpers/auth";
+import { max45bStartValueCents } from "../../shared/domain/budget/carryover-eligibility";
 
 // Edit-Persistence Round-Trip Smoke Suite (#428). Skips ohne TEST_USER_*-Creds.
 
@@ -468,7 +469,7 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       const { status, data } = await apiPost(
         session,
         `/api/budget/${customer.id}/initial-balance/entlastungsbetrag_45b`,
-        { amountCents: 100000, validFrom: initialFrom },
+        { amountCents: max45bStartValueCents("2024-01-01", `${initialFrom}-01`), validFrom: initialFrom },
       );
       if (status >= 300) {
         throw new Error(`initial-balance failed: ${status} ${JSON.stringify(data)}`);
@@ -760,7 +761,7 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       const { status, data } = await apiPost(
         session,
         `/api/budget/${customer.id}/initial-balance/entlastungsbetrag_45b`,
-        { amountCents: 100000, validFrom: initialFrom },
+        { amountCents: max45bStartValueCents("2024-01-01", `${initialFrom}-01`), validFrom: initialFrom },
       );
       if (status >= 300) {
         throw new Error(`initial-balance failed: ${status} ${JSON.stringify(data)}`);

@@ -321,7 +321,7 @@ export function BudgetsTabContent({
         title="Budget-Einstellungen"
         icon={<Settings className={iconSize.sm} />}
       >
-        <BudgetTypeSettings customerId={customerId} pflegegrad={pflegegrad} />
+        <BudgetTypeSettings customerId={customerId} pflegegrad={pflegegrad} careLevelHistory={careLevelHistory} />
       </SectionCard>
 
       <BudgetLedgerSection
