@@ -17,7 +17,8 @@ import {
   BUDGET_TYPE_LABELS,
   type BudgetType,
 } from "@shared/domain/budgets";
-import { eligible45bCarryoverMonths, max45bCarryoverCents } from "@shared/domain/budget/carryover-eligibility";
+import { eligible45bCarryoverMonths, max45bCarryoverCents, max45bStartValueCents } from "@shared/domain/budget/carryover-eligibility";
+import { todayISO } from "@shared/utils/datetime";
 
 const BUDGET_COLORS: Record<BudgetType, { bg: string; border: string }> = {
   entlastungsbetrag_45b: { bg: "bg-green-50", border: "border-green-100" },
@@ -87,6 +88,36 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
   const errorCarryover = uebertrag < 0 ? "Übertrag darf nicht negativ sein" : null;
 
   const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? true;
+
+  // Task #960 — Der Übertrag aus dem Vorjahr ist nur relevant, solange er
+  // (bis 30.06.) nutzbar sein kann. Bei einem Vertragsbeginn nach dem 30.06.
+  // wird das Feld ausgeblendet.
+  const effectiveContractStart = formData.contractStart || todayISO();
+  const showCarryover = effectiveContractStart < `${currentYear}-07-01`;
+
+  // Task #960 — Optionaler Override für das aktuelle §45b-Restguthaben des
+  // laufenden Jahres mit Stichmonat (Default: aktueller Monat).
+  const MONTH_NAMES = [
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+  ];
+  const stichmonatOptions = MONTH_NAMES.map((name, idx) => {
+    const mm = String(idx + 1).padStart(2, "0");
+    return { value: `${currentYear}-${mm}`, label: `${name} ${currentYear}` };
+  });
+  const stichmonatLabel =
+    stichmonatOptions.find(o => o.value === formData.restguthaben45bStichmonat)?.label ?? `${currentYear}`;
+  const restguthaben = parseFloat(formData.restguthaben45b) || 0;
+  const maxStartCents = max45bStartValueCents(
+    formData.pflegegradSeit,
+    `${formData.restguthaben45bStichmonat || `${currentYear}-01`}-01`,
+  );
+  const maxStartEuro = centsToEuroNumber(maxStartCents);
+  const errorRestguthaben = restguthaben < 0
+    ? "Restguthaben darf nicht negativ sein"
+    : Math.round(restguthaben * 100) > maxStartCents
+    ? `Maximal ${maxStartEuro.toFixed(2)} € möglich`
+    : null;
 
   return (
     <div className="space-y-6">
@@ -187,31 +218,111 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                   )}
 
                   {budgetType === "entlastungsbetrag_45b" && (
-                    <div className="mt-4 p-3 rounded-md bg-green-100/50 border border-green-200 space-y-3">
-                      <h4 className="text-sm font-medium text-green-800">Übertrag aus Vorjahr</h4>
-                      <div className="space-y-2">
-                        <Label htmlFor="uebertrag45b" className="text-xs">
-                          Übertrag (€)
-                        </Label>
-                        <Input
-                          id="uebertrag45b"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max={eligibleMonthsLastYear > 0 ? maxCarryover : undefined}
-                          value={formData.uebertrag45b}
-                          onChange={(e) => onChange("uebertrag45b", e.target.value)}
-                          data-testid="input-uebertrag-45b"
-                        />
+                    <div className="mt-4 space-y-3">
+                      {showCarryover && (
+                        <div className="p-3 rounded-md bg-green-100/50 border border-green-200 space-y-3">
+                          <h4 className="text-sm font-medium text-green-800">Übertrag aus Vorjahr</h4>
+                          <div className="space-y-2">
+                            <Label htmlFor="uebertrag45b" className="text-xs">
+                              Übertrag (€)
+                            </Label>
+                            <Input
+                              id="uebertrag45b"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max={eligibleMonthsLastYear > 0 ? maxCarryover : undefined}
+                              value={formData.uebertrag45b}
+                              onChange={(e) => onChange("uebertrag45b", e.target.value)}
+                              data-testid="input-uebertrag-45b"
+                            />
+                            <p className="text-xs text-gray-500">
+                              Standard: 0 € – das Vorjahr gilt als aufgebraucht. Tragen Sie hier nur ein
+                              tatsächlich noch vorhandenes Restguthaben aus dem Vorjahr ein. Es ist bis zum
+                              30.06. dieses Jahres nutzbar und verfällt danach.
+                              {eligibleMonthsLastYear > 0
+                                ? ` (Maximal möglich: ${maxCarryover.toFixed(2)} €)`
+                                : " (Kein Vorjahresanspruch – Pflegegrad erst in diesem Jahr.)"}
+                            </p>
+                            {errorCarryover && <p className="text-xs text-red-600 font-medium">{errorCarryover}</p>}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="p-3 rounded-md bg-green-100/50 border border-green-200 space-y-3">
+                        <h4 className="text-sm font-medium text-green-800">Aktuelles Restguthaben (laufendes Jahr)</h4>
                         <p className="text-xs text-gray-500">
-                          Standard: 0 € – das Vorjahr gilt als aufgebraucht. Tragen Sie hier nur ein
-                          tatsächlich noch vorhandenes Restguthaben aus dem Vorjahr ein. Es ist bis zum
-                          30.06. dieses Jahres nutzbar und verfällt danach.
-                          {eligibleMonthsLastYear > 0
-                            ? ` (Maximal möglich: ${maxCarryover.toFixed(2)} €)`
-                            : " (Kein Vorjahresanspruch – Pflegegrad erst in diesem Jahr.)"}
+                          Normalerweise wird das Guthaben des laufenden Jahres automatisch aus dem
+                          Pflegegrad-Beginn berechnet (131 €/Monat). Aktivieren Sie diese Option nur,
+                          wenn das tatsächliche Restguthaben davon abweicht – etwa weil schon etwas
+                          verbraucht wurde.
                         </p>
-                        {errorCarryover && <p className="text-xs text-red-600 font-medium">{errorCarryover}</p>}
+                        <div className="flex items-center gap-3">
+                          <Checkbox
+                            id="restguthaben45bOverrideEnabled"
+                            checked={formData.restguthaben45bOverrideEnabled}
+                            onCheckedChange={(checked) => onChange("restguthaben45bOverrideEnabled", !!checked)}
+                            data-testid="checkbox-restguthaben-override"
+                          />
+                          <Label
+                            htmlFor="restguthaben45bOverrideEnabled"
+                            className="text-xs font-medium text-green-800"
+                          >
+                            Restguthaben abweichend erfassen
+                          </Label>
+                        </div>
+
+                        {formData.restguthaben45bOverrideEnabled && (
+                          <div className="space-y-3">
+                            <div className="space-y-2">
+                              <Label htmlFor="restguthaben45bStichmonat" className="text-xs">
+                                Stichmonat
+                              </Label>
+                              <Select
+                                value={formData.restguthaben45bStichmonat}
+                                onValueChange={(value) => onChange("restguthaben45bStichmonat", value)}
+                              >
+                                <SelectTrigger data-testid="input-restguthaben-stichmonat">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {stichmonatOptions.map((opt) => (
+                                    <SelectItem key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <p className="text-xs text-gray-500">
+                                Monat, auf den sich das Restguthaben bezieht (Standard: aktueller Monat).
+                              </p>
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="restguthaben45b" className="text-xs">
+                                Restguthaben ({stichmonatLabel}) in €
+                              </Label>
+                              <Input
+                                id="restguthaben45b"
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max={maxStartEuro > 0 ? maxStartEuro : undefined}
+                                value={formData.restguthaben45b}
+                                onChange={(e) => onChange("restguthaben45b", e.target.value)}
+                                data-testid="input-restguthaben-45b"
+                              />
+                              <p className="text-xs text-gray-500">
+                                Noch verfügbares §45b-Guthaben zum gewählten Stichmonat.
+                                {maxStartCents > 0
+                                  ? ` (Maximal möglich: ${maxStartEuro.toFixed(2)} €)`
+                                  : " (Im gewählten Stichmonat noch kein §45b-Anspruch.)"}
+                              </p>
+                              {errorRestguthaben && (
+                                <p className="text-xs text-red-600 font-medium">{errorRestguthaben}</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

@@ -8,6 +8,7 @@ import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { centsToEuroNumber } from "@shared/utils/money";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/wizard/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
+import { eligible45bCarryoverMonths, max45bCarryoverCents, max45bStartValueCents } from "@shared/domain/budget/carryover-eligibility";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
 import { validateVersichertennummerFor } from "@shared/schema/common";
 import type { WizardUploadedDoc } from "../components/wizard/signatures-step";
@@ -69,6 +70,9 @@ function createInitialFormData(): CustomerFormData {
     acceptsPrivatePayment: false,
     rechnungAnKunde: false,
     uebertrag45b: "0",
+    restguthaben45bOverrideEnabled: false,
+    restguthaben45bStichmonat: todayISO().slice(0, 7),
+    restguthaben45b: "0",
   };
 }
 
@@ -341,7 +345,19 @@ export function useCustomerWizard() {
     const is45bEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")?.enabled ?? false;
     const is45aEnabled = formData.budgetTypeSettings.find(s => s.budgetType === "umwandlung_45a")?.enabled ?? false;
     const is39Enabled = formData.budgetTypeSettings.find(s => s.budgetType === "ersatzpflege_39_42a")?.enabled ?? false;
-    const carryoverAmount = is45bEnabled ? (Math.round(parseFloat(formData.uebertrag45b) * 100) || 0) : 0;
+    // Task #960 — Der Vorjahres-Übertrag ist nur bei Vertragsbeginn vor dem
+    // 30.06. nutzbar (verfällt danach). Bei späterem Beginn wird das Feld
+    // ausgeblendet und darf auch nicht gebucht werden.
+    const carryover45bUsable = (formData.contractStart || today) < `${new Date().getFullYear()}-07-01`;
+    const carryoverAmount = is45bEnabled && carryover45bUsable ? (Math.round(parseFloat(formData.uebertrag45b) * 100) || 0) : 0;
+    // Task #960 — Optionaler §45b-Restguthaben-Override (laufendes Jahr). Nur
+    // wenn aktiv, wird ein initial_balance für den Stichmonat gebucht; sonst
+    // bleibt das §45b-Guthaben rein auto-renewal-getrieben (kein initial_balance).
+    const override45bActive = is45bEnabled && formData.restguthaben45bOverrideEnabled;
+    const override45bCents = override45bActive ? (Math.round(parseFloat(formData.restguthaben45b) * 100) || 0) : 0;
+    const override45bStichmonatStart = override45bActive && formData.restguthaben45bStichmonat
+      ? `${formData.restguthaben45bStichmonat}-01`
+      : null;
     const budgetValues = {
       entlastungsbetrag45b: is45bEnabled ? (Math.round(parseFloat(formData.entlastungsbetrag45b) * 100) || 0) : 0,
       verhinderungspflege39: is39Enabled ? (Math.round(parseFloat(formData.verhinderungspflege39) * 100) || 0) : 0,
@@ -485,10 +501,20 @@ export function useCustomerWizard() {
           // vor Vertragsbeginn berücksichtigt. Den rechtlichen §45b-Carryover-/
           // Verfalls-Clamp übernimmt der Server (/initial-budget).
           const budgetStart = formData.pflegegradSeit || today;
-          const budgetTypes: Array<{ type: string; cents: number }> = [];
-          if (budgets.entlastungsbetrag45b > 0) budgetTypes.push({ type: "entlastungsbetrag_45b", cents: budgets.entlastungsbetrag45b });
-          if (budgets.pflegesachleistungen36 > 0) budgetTypes.push({ type: "umwandlung_45a", cents: budgets.pflegesachleistungen36 });
-          if (budgets.verhinderungspflege39 > 0) budgetTypes.push({ type: "ersatzpflege_39_42a", cents: budgets.verhinderungspflege39 });
+          const budgetTypes: Array<{ type: string; cents: number; budgetStartDate: string }> = [];
+          // Task #960 — §45b wird auch ohne Eurobetrag gepostet (cents = 0), damit
+          // Carryover + Anker (Preferences) gesetzt werden, ohne ein redundantes
+          // initial_balance zu erzeugen. Nur der aktive Override bucht einen
+          // Startwert (für den gewählten Stichmonat als validFrom/budgetStartDate).
+          if (is45bEnabled) {
+            budgetTypes.push({
+              type: "entlastungsbetrag_45b",
+              cents: override45bCents,
+              budgetStartDate: override45bStichmonatStart || budgetStart,
+            });
+          }
+          if (budgets.pflegesachleistungen36 > 0) budgetTypes.push({ type: "umwandlung_45a", cents: budgets.pflegesachleistungen36, budgetStartDate: budgetStart });
+          if (budgets.verhinderungspflege39 > 0) budgetTypes.push({ type: "ersatzpflege_39_42a", cents: budgets.verhinderungspflege39, budgetStartDate: budgetStart });
 
           const typeLabels: Record<string, string> = {
             entlastungsbetrag_45b: "§45b Entlastungsbetrag",
@@ -500,14 +526,14 @@ export function useCustomerWizard() {
             const carryover = bt.type === "entlastungsbetrag_45b" ? (carryoverAmount || 0) : 0;
             const trackFailure = () => {
               warnings.push(`Startbudget für ${typeLabels[bt.type] || bt.type} konnte nicht gespeichert werden — bitte manuell unter Budget-Einstellungen nachtragen`);
-              failedBudgetItems.push({ budgetType: bt.type, currentMonthAmountCents: bt.cents, carryoverAmountCents: carryover, budgetStartDate: budgetStart });
+              failedBudgetItems.push({ budgetType: bt.type, currentMonthAmountCents: bt.cents, carryoverAmountCents: carryover, budgetStartDate: bt.budgetStartDate });
             };
             try {
               const result = await api.post(`/budget/${customer.id}/initial-budget`, {
                 budgetType: bt.type,
                 currentMonthAmountCents: bt.cents,
                 carryoverAmountCents: carryover,
-                budgetStartDate: budgetStart,
+                budgetStartDate: bt.budgetStartDate,
               });
               if (!result.success) {
                 console.error(`Budget-Initialisierung (${bt.type}) fehlgeschlagen:`, result.error);
@@ -671,6 +697,46 @@ export function useCustomerWizard() {
         if (isPflegekasseCustomer(formData.billingType)) {
           if (!formData.pflegegrad || formData.pflegegrad === "0") errors.push("Pflegegrad auswählen");
           if (!formData.pflegegradSeit) errors.push("Pflegegrad seit fehlt");
+          {
+            // Task #960 — Vorjahres-Übertrag nur validieren, solange er (bis
+            // 30.06.) nutzbar ist; bei späterem Vertragsbeginn ist das Feld
+            // ausgeblendet und wird beim Speichern auf 0 gezwungen.
+            const currentYear = new Date().getFullYear();
+            const carryoverUsable = (formData.contractStart || todayISO()) < `${currentYear}-07-01`;
+            if (carryoverUsable) {
+              const uebertrag = parseFloat(formData.uebertrag45b);
+              if (isNaN(uebertrag) || uebertrag < 0) {
+                errors.push("Übertrag darf nicht negativ sein");
+              } else {
+                const eligibleMonths = eligible45bCarryoverMonths(formData.pflegegradSeit, currentYear);
+                const maxCarryoverCents = max45bCarryoverCents(eligibleMonths);
+                if (Math.round(uebertrag * 100) > maxCarryoverCents) {
+                  errors.push(`Übertrag überschreitet das mögliche Maximum (${centsToEuroNumber(maxCarryoverCents).toFixed(2)} €)`);
+                }
+              }
+            }
+          }
+          if (formData.restguthaben45bOverrideEnabled) {
+            const stichmonat = formData.restguthaben45bStichmonat;
+            const currentYear = new Date().getFullYear();
+            const contractMonth = (formData.contractStart || todayISO()).slice(0, 7);
+            if (!stichmonat) {
+              errors.push("Stichmonat für das Restguthaben fehlt");
+            } else {
+              const [stichYear] = stichmonat.split("-").map(Number);
+              if (stichYear !== currentYear) errors.push("Stichmonat muss im laufenden Jahr liegen");
+              if (stichmonat < contractMonth) errors.push("Stichmonat darf nicht vor dem Vertragsbeginn liegen");
+            }
+            const rest = parseFloat(formData.restguthaben45b);
+            if (isNaN(rest) || rest < 0) {
+              errors.push("Restguthaben darf nicht negativ sein");
+            } else if (stichmonat) {
+              const maxStartCents = max45bStartValueCents(formData.pflegegradSeit, `${stichmonat}-01`);
+              if (Math.round(rest * 100) > maxStartCents) {
+                errors.push(`Restguthaben überschreitet das mögliche Maximum (${centsToEuroNumber(maxStartCents).toFixed(2)} €)`);
+              }
+            }
+          }
         }
         break;
       case "contract":

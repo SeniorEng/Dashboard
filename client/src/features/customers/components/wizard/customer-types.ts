@@ -60,6 +60,9 @@ export interface CustomerFormData {
   acceptsPrivatePayment: boolean;
   rechnungAnKunde: boolean;
   uebertrag45b: string;
+  restguthaben45bOverrideEnabled: boolean;
+  restguthaben45bStichmonat: string;
+  restguthaben45b: string;
 }
 
 export interface SelectOption {
