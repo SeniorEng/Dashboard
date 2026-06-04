@@ -9,6 +9,7 @@
  * Keine DB-Zugriffe, keine State-Werte — alle Inputs werden explizit übergeben.
  */
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "../budgets";
+import { formatCurrency } from "../../utils/format";
 
 /**
  * Anzahl der im Vorjahr §45b-berechtigten Monate (0–12), abgeleitet aus dem
@@ -114,6 +115,28 @@ export function resolve45bAccrualAnchor(
     }
   }
   return earliest ?? fallbackISO;
+}
+
+/**
+ * Task #979 — Einheitlicher Hinweistext für die §45b-Startwert-Obergrenze
+ * (SSoT für Admin-Editor UND Kundenanlage-Wizard). Beide Oberflächen müssen
+ * exakt dieselbe Formulierung zeigen; daher lebt der Text hier statt inline.
+ *
+ * @param capCents   Obergrenze in Cent (aus `max45bStartValueCents`).
+ * @param monthLabel Lesbarer Stichmonat (z.B. "März 2026"); vom Aufrufer
+ *   formatiert, damit die Monatsnamen-Tabelle nicht dupliziert wird.
+ */
+export function max45bStartValueCapHint(capCents: number, monthLabel: string): string {
+  return `Maximal ${formatCurrency(capCents)} möglich (rechtlich mögliche Ansammlung bis ${monthLabel}).`;
+}
+
+/**
+ * Task #979 — Einheitliche Fehlermeldung, wenn ein §45b-Startwert die
+ * rechtlich mögliche Ansammlung überschreitet (SSoT für Admin-Editor,
+ * Wizard-Validierung und Server-konsistentes Vorab-Blocken).
+ */
+export function max45bStartValueExceededMessage(capCents: number): string {
+  return `§45b-Startguthaben darf höchstens ${formatCurrency(capCents)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat).`;
 }
 
 /**

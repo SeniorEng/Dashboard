@@ -13,6 +13,8 @@ import {
   eligible45bCarryoverMonths,
   max45bCarryoverCents,
   max45bStartValueCents,
+  max45bStartValueCapHint,
+  max45bStartValueExceededMessage,
   validate45bInitialBalanceNotPriorYear,
   PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE,
 } from "@shared/domain/budget/carryover-eligibility";
@@ -143,5 +145,28 @@ describe("validate45bInitialBalanceNotPriorYear (Task #964)", () => {
   it("gibt null zurück bei leerer/unparsebarer Eingabe (Schema greift separat)", () => {
     expect(validate45bInitialBalanceNotPriorYear("", 2026)).toBeNull();
     expect(validate45bInitialBalanceNotPriorYear("kein-datum", 2026)).toBeNull();
+  });
+});
+
+describe("§45b-Startwert-Meldungen (SSoT, Task #979)", () => {
+  // formatCurrency trennt Betrag und „€" mit einem geschützten Leerzeichen (U+00A0).
+  const NBSP = "\u00A0";
+
+  it("max45bStartValueCapHint nennt den formatierten Cap und den Stichmonat", () => {
+    expect(max45bStartValueCapHint(BUDGET_45B_MAX_MONTHLY_CENTS * 3, "März 2026")).toBe(
+      `Maximal 393,00${NBSP}€ möglich (rechtlich mögliche Ansammlung bis März 2026).`,
+    );
+  });
+
+  it("max45bStartValueCapHint formatiert auch den 0-€-Cap (kein Anspruch)", () => {
+    expect(max45bStartValueCapHint(0, "Januar 2026")).toBe(
+      `Maximal 0,00${NBSP}€ möglich (rechtlich mögliche Ansammlung bis Januar 2026).`,
+    );
+  });
+
+  it("max45bStartValueExceededMessage nennt den formatierten Cap", () => {
+    expect(max45bStartValueExceededMessage(BUDGET_45B_MAX_MONTHLY_CENTS)).toBe(
+      `§45b-Startguthaben darf höchstens 131,00${NBSP}€ betragen (rechtlich mögliche Ansammlung bis zum Startmonat).`,
+    );
   });
 });

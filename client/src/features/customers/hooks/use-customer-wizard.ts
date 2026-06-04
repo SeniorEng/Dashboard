@@ -8,7 +8,7 @@ import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { centsToEuroNumber } from "@shared/utils/money";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/wizard/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
-import { eligible45bCarryoverMonths, max45bCarryoverCents, max45bStartValueCents } from "@shared/domain/budget/carryover-eligibility";
+import { eligible45bCarryoverMonths, max45bCarryoverCents, max45bStartValueCents, max45bStartValueExceededMessage } from "@shared/domain/budget/carryover-eligibility";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
 import { validateVersichertennummerFor } from "@shared/schema/common";
 import type { WizardUploadedDoc } from "../components/wizard/signatures-step";
@@ -733,7 +733,7 @@ export function useCustomerWizard() {
             } else if (stichmonat) {
               const maxStartCents = max45bStartValueCents(formData.pflegegradSeit, `${stichmonat}-01`);
               if (Math.round(rest * 100) > maxStartCents) {
-                errors.push(`Restguthaben überschreitet das mögliche Maximum (${centsToEuroNumber(maxStartCents).toFixed(2)} €)`);
+                errors.push(max45bStartValueExceededMessage(maxStartCents));
               }
             }
           }

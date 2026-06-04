@@ -17,7 +17,7 @@ import {
   BUDGET_TYPE_LABELS,
   type BudgetType,
 } from "@shared/domain/budgets";
-import { eligible45bCarryoverMonths, max45bCarryoverCents, max45bStartValueCents } from "@shared/domain/budget/carryover-eligibility";
+import { eligible45bCarryoverMonths, max45bCarryoverCents, max45bStartValueCents, max45bStartValueCapHint, max45bStartValueExceededMessage } from "@shared/domain/budget/carryover-eligibility";
 import { todayISO } from "@shared/utils/datetime";
 
 const BUDGET_COLORS: Record<BudgetType, { bg: string; border: string }> = {
@@ -113,11 +113,11 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
     `${formData.restguthaben45bStichmonat || `${currentYear}-01`}-01`,
   );
   const maxStartEuro = centsToEuroNumber(maxStartCents);
-  const errorRestguthaben = restguthaben < 0
-    ? "Restguthaben darf nicht negativ sein"
-    : Math.round(restguthaben * 100) > maxStartCents
-    ? `Maximal ${maxStartEuro.toFixed(2)} € möglich`
-    : null;
+  // Task #979 — Gleiche Cap-Logik + Formulierung wie im Admin-Editor
+  // (`InitialBalanceSection`): negatives Restguthaben separat, Überschreitung
+  // der rechtlich möglichen Ansammlung über die zentrale SSoT-Meldung.
+  const restguthabenNegative = restguthaben < 0;
+  const exceedsStartCap = !restguthabenNegative && Math.round(restguthaben * 100) > maxStartCents;
 
   return (
     <div className="space-y-6">
@@ -309,16 +309,25 @@ export function BudgetsStep({ formData, onChange, onBudgetTypeToggle, onBudgetTy
                                 max={maxStartEuro > 0 ? maxStartEuro : undefined}
                                 value={formData.restguthaben45b}
                                 onChange={(e) => onChange("restguthaben45b", e.target.value)}
+                                className={exceedsStartCap ? "border-red-400 focus-visible:ring-red-400" : ""}
                                 data-testid="input-restguthaben-45b"
                               />
                               <p className="text-xs text-gray-500">
                                 Noch verfügbares §45b-Guthaben zum gewählten Stichmonat.
-                                {maxStartCents > 0
-                                  ? ` (Maximal möglich: ${maxStartEuro.toFixed(2)} €)`
-                                  : " (Im gewählten Stichmonat noch kein §45b-Anspruch.)"}
                               </p>
-                              {errorRestguthaben && (
-                                <p className="text-xs text-red-600 font-medium">{errorRestguthaben}</p>
+                              <p
+                                className={`text-xs ${exceedsStartCap ? "text-red-600 font-medium" : "text-gray-500"}`}
+                                data-testid="text-max-restguthaben-45b"
+                              >
+                                {max45bStartValueCapHint(maxStartCents, stichmonatLabel)}
+                              </p>
+                              {restguthabenNegative && (
+                                <p className="text-xs text-red-600 font-medium">Restguthaben darf nicht negativ sein</p>
+                              )}
+                              {exceedsStartCap && (
+                                <p className="text-xs text-red-600 font-medium" data-testid="error-exceeds-cap-restguthaben-45b">
+                                  {max45bStartValueExceededMessage(maxStartCents)}
+                                </p>
                               )}
                             </div>
                           </div>

@@ -14,7 +14,7 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { todayISO } from "@shared/utils/datetime";
-import { validate45bInitialBalanceNotPriorYear, max45bStartValueCents, resolve45bAccrualAnchor } from "@shared/domain/budget/carryover-eligibility";
+import { validate45bInitialBalanceNotPriorYear, max45bStartValueCents, resolve45bAccrualAnchor, max45bStartValueCapHint, max45bStartValueExceededMessage } from "@shared/domain/budget/carryover-eligibility";
 // Task #608 / #716: Sentinel-Wert, mit dem der Historisierungs-Backfill alte
 // Zeilen auf „rückwirkend gültig" markiert hat. Im UI als leeres Feld +
 // Hinweistext rendern, statt buchstäblich „01.01.1970" anzuzeigen. Zentral
@@ -668,7 +668,7 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
       // `max45bStartValueCents`). Vor dem Round-Trip blocken, damit der Admin
       // nicht erst eine 400-Antwort erhält.
       if (budgetType === "entlastungsbetrag_45b" && start45bCap !== null && amountCents > start45bCap) {
-        throw new Error(`§45b-Startguthaben darf höchstens ${formatCurrency(start45bCap)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat).`);
+        throw new Error(max45bStartValueExceededMessage(start45bCap));
       }
       return unwrapResult(await api.post(`/budget/${customerId}/initial-balance/${budgetType}`, {
         amountCents,
@@ -821,7 +821,7 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
                 className={`text-[11px] mt-0.5 ${exceedsCap ? "text-red-600 font-medium" : "text-gray-500"}`}
                 data-testid={`text-max-initial-balance-${budgetType}`}
               >
-                Maximal {formatCurrency(start45bCap)} möglich (rechtlich mögliche Ansammlung bis {formatMonthYear(month)}).
+                {max45bStartValueCapHint(start45bCap, formatMonthYear(month))}
               </p>
             )}
           </div>
@@ -911,7 +911,7 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
             data-testid={`error-exceeds-cap-initial-balance-${budgetType}`}
           >
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <p>§45b-Startguthaben darf höchstens {formatCurrency(start45bCap)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat).</p>
+            <p>{max45bStartValueExceededMessage(start45bCap)}</p>
           </div>
         )}
 
