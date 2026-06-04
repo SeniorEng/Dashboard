@@ -112,8 +112,10 @@ function delay(ms: number): Promise<void> {
 
 /**
  * Parse error response from API
+ *
+ * Exportiert für den Unit-Test (tests/unit/api-client-error-parsing.test.ts).
  */
-async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
+export async function parseErrorResponse(response: Response): Promise<ApiErrorInfo> {
   // Body genau einmal als Text lesen, dann JSON parsen. So bleibt der Rohtext
   // für den Fallback verfügbar, falls die Antwort kein JSON ist (z.B. ein
   // Proxy-/Plain-Text-403), statt nur ein nacktes "HTTP 403:" zu zeigen.
