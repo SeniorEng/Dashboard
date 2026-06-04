@@ -80,6 +80,43 @@ export function max45bStartValueCents(
 }
 
 /**
+ * Task #981 — Reiner Accrual-Anker-Resolver (SSoT).
+ *
+ * Der §45b-Accrual-Anker ist der früheste Pflegegrad-Beginn (`validFrom`) aus
+ * der Care-Level-Historie eines Kunden. Er speist sowohl die angezeigte als auch
+ * die durchgesetzte §45b-Startwert-Obergrenze (`max45bStartValueCents`) und den
+ * Vorjahres-Übertrag (`eligible45bCarryoverMonths`).
+ *
+ * Diese Funktion ist REIHENFOLGE-UNABHÄNGIG: sie wählt das lexikografisch
+ * kleinste (= chronologisch früheste) `validFrom` der übergebenen Zeilen,
+ * unabhängig davon, ob die Historie auf- oder absteigend sortiert geliefert
+ * wird. Leere/ungültige Zeilen werden ignoriert. Gibt es keine gültige Zeile,
+ * fällt die Funktion auf `fallbackISO` (i.d.R. den erfassten Startmonat) zurück.
+ *
+ * Hintergrund: Client und Server leiteten den Anker zuvor mit je eigenem
+ * Ausdruck ab (frühestes `validFrom` vs. letztes Element der `desc`-Historie).
+ * Beide stimmten nur überein, solange `getCustomerCareLevelHistory` in
+ * `desc(validFrom)`-Ordnung liefert. Dieser gemeinsame Resolver entfernt die
+ * Abhängigkeit von der DB-Sortierung.
+ *
+ * Reiner Wert, keine Seiteneffekte, kein `Date`-Parsing.
+ */
+export function resolve45bAccrualAnchor(
+  careLevelHistory: ReadonlyArray<{ validFrom?: string | null }>,
+  fallbackISO: string,
+): string {
+  let earliest: string | undefined;
+  for (const row of careLevelHistory) {
+    const validFrom = row?.validFrom;
+    if (!validFrom) continue;
+    if (earliest === undefined || validFrom < earliest) {
+      earliest = validFrom;
+    }
+  }
+  return earliest ?? fallbackISO;
+}
+
+/**
  * Task #964 — Deutsche Fehler-/Hinweismeldung, die einen §45b-Startwert mit
  * einem Stichmonat/`validFrom` aus einem früheren Jahr ablehnt und stattdessen
  * auf das Übertrag-Feld verweist. Rechtlicher Hintergrund: §45b-Guthaben aus

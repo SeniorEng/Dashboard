@@ -22,6 +22,7 @@ import {
   eligible45bCarryoverMonths,
   max45bCarryoverCents,
   max45bStartValueCents,
+  resolve45bAccrualAnchor,
   validate45bInitialBalanceNotPriorYear,
 } from "@shared/domain/budget/carryover-eligibility";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
@@ -526,9 +527,7 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
   if (budgetType === "entlastungsbetrag_45b") {
     const { getCustomerCareLevelHistory } = await import("../storage/customer-mgmt/care-level");
     const careLevelHistory = await getCustomerCareLevelHistory(customerId);
-    const accrualAnchor = careLevelHistory.length > 0
-      ? careLevelHistory[careLevelHistory.length - 1].validFrom
-      : validFromDate;
+    const accrualAnchor = resolve45bAccrualAnchor(careLevelHistory, validFromDate);
     const startCap = max45bStartValueCents(accrualAnchor, validFromDate);
     if (result.data.amountCents > startCap) {
       res.status(400).json({
@@ -964,9 +963,7 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
   if (budgetType === "entlastungsbetrag_45b") {
     const { getCustomerCareLevelHistory } = await import("../storage/customer-mgmt/care-level");
     const careLevelHistory = await getCustomerCareLevelHistory(customerId);
-    const accrualAnchor = careLevelHistory.length > 0
-      ? careLevelHistory[careLevelHistory.length - 1].validFrom
-      : rawBudgetStartDate;
+    const accrualAnchor = resolve45bAccrualAnchor(careLevelHistory, rawBudgetStartDate);
 
     if (currentMonthAmountCents > 0) {
       const startCap = max45bStartValueCents(accrualAnchor, budgetStartDate);

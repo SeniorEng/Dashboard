@@ -14,7 +14,7 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { todayISO } from "@shared/utils/datetime";
-import { validate45bInitialBalanceNotPriorYear, max45bStartValueCents } from "@shared/domain/budget/carryover-eligibility";
+import { validate45bInitialBalanceNotPriorYear, max45bStartValueCents, resolve45bAccrualAnchor } from "@shared/domain/budget/carryover-eligibility";
 // Task #608 / #716: Sentinel-Wert, mit dem der Historisierungs-Backfill alte
 // Zeilen auf „rückwirkend gültig" markiert hat. Im UI als leeres Feld +
 // Hinweistext rendern, statt buchstäblich „01.01.1970" anzuzeigen. Zentral
@@ -729,12 +729,11 @@ function InitialBalanceSection({ customerId, budgetType, careLevelHistory, expan
   // Identisch zur Server-Berechnung (`max45bStartValueCents`,
   // `server/routes/budget.ts`): Accrual-Anker = FRÜHESTES `validFrom` der
   // Pflegegrad-Historie (Fallback = der erfasste Startmonat selbst), Stichmonat =
-  // `${month}-01`. Nur für §45b — §45a/§39 bleiben uncapped.
+  // `${month}-01`. Nur für §45b — §45a/§39 bleiben uncapped. Task #981: Der Anker
+  // wird über die gemeinsame, reihenfolge-unabhängige SSoT `resolve45bAccrualAnchor`
+  // abgeleitet (kein eigener Sortier-Ausdruck mehr).
   const validFromDate = `${month}-01`;
-  const accrualAnchor = (careLevelHistory ?? [])
-    .map(e => e.validFrom)
-    .filter((v): v is string => !!v)
-    .sort()[0] ?? validFromDate;
+  const accrualAnchor = resolve45bAccrualAnchor(careLevelHistory ?? [], validFromDate);
   const start45bCap = is45b ? max45bStartValueCents(accrualAnchor, validFromDate) : null;
   const enteredCents = euroStringToCents(amount) ?? 0;
   const exceedsCap = start45bCap !== null && hasValidInput && enteredCents > start45bCap;

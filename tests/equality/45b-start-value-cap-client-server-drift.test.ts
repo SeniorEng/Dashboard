@@ -27,43 +27,36 @@
  * (Anzeige ≠ Buchung). Reiner Wert-Test, keine DB/kein Server.
  */
 import { describe, it, expect } from "vitest";
-import { max45bStartValueCents } from "@shared/domain/budget/carryover-eligibility";
+import {
+  max45bStartValueCents,
+  resolve45bAccrualAnchor,
+} from "@shared/domain/budget/carryover-eligibility";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 
 /**
  * Eine Pflegegrad-Historienzeile (nur das fürs Anker-Mapping relevante Feld).
  * Die Test-Szenarien geben die Zeilen in CHRONOLOGISCHER Reihenfolge (ältester
- * zuerst) an; `serverHistoryDesc` dreht sie in die `desc(validFrom)`-Ordnung,
- * die `getCustomerCareLevelHistory` real liefert.
+ * zuerst) an; `toDesc` dreht sie in die `desc(validFrom)`-Ordnung, die
+ * `getCustomerCareLevelHistory` real liefert.
  */
 type CareLevelRow = { validFrom: string };
 
 /**
- * Repliziert die Anker-Wahl + den Cap-Aufruf der CLIENT-Anzeige
- * (`BudgetTypeSettings.tsx`): frühestes `validFrom`, Fallback = Startmonat.
+ * Task #981 — Beide Seiten leiten den Accrual-Anker jetzt über DIESELBE reine
+ * SSoT `resolve45bAccrualAnchor` ab (reihenfolge-unabhängig). Der Test ruft
+ * dieselbe Funktion einmal mit der chronologisch sortierten (Client-Sicht) und
+ * einmal mit der `desc(validFrom)`-sortierten Historie (Server-/DB-Sicht) auf —
+ * das Ergebnis MUSS identisch sein, unabhängig von der Sortierung.
  */
 function clientCapCents(history: CareLevelRow[], month: string): number {
   const validFromDate = `${month}-01`;
-  const accrualAnchor =
-    history
-      .map(e => e.validFrom)
-      .filter((v): v is string => !!v)
-      .sort()[0] ?? validFromDate;
+  const accrualAnchor = resolve45bAccrualAnchor(history, validFromDate);
   return max45bStartValueCents(accrualAnchor, validFromDate);
 }
 
-/**
- * Repliziert die Anker-Wahl + den Cap-Aufruf der SERVER-Durchsetzung
- * (`server/routes/budget.ts`): letztes Element der `desc(validFrom)`-Historie,
- * Fallback = Startmonat. Erwartet die Historie BEREITS desc-sortiert (so wie
- * `getCustomerCareLevelHistory` sie liefert).
- */
 function serverCapCents(historyDesc: CareLevelRow[], month: string): number {
   const validFromDate = `${month}-01`;
-  const accrualAnchor =
-    historyDesc.length > 0
-      ? historyDesc[historyDesc.length - 1].validFrom
-      : validFromDate;
+  const accrualAnchor = resolve45bAccrualAnchor(historyDesc, validFromDate);
   return max45bStartValueCents(accrualAnchor, validFromDate);
 }
 
