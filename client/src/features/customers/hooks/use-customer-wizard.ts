@@ -8,7 +8,7 @@ import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { centsToEuroNumber } from "@shared/utils/money";
 import { CustomerFormData, ContactFormData, BudgetTypeSettingForm, getStepsForBillingType, DEFAULT_BUDGETS, EMPTY_CONTACT, MAX_CONTACTS } from "../components/wizard/customer-types";
 import { BUDGET_45A_MAX_BY_PFLEGEGRAD, BUDGET_TYPES, type BudgetType } from "@shared/domain/budgets";
-import { eligible45bCarryoverMonths, max45bCarryoverCents, max45bStartValueCents, max45bStartValueExceededMessage } from "@shared/domain/budget/carryover-eligibility";
+import { budgetsStepErrors } from "../components/wizard/budgets-step-validation";
 import { isPflegekasseCustomer, type BillingType } from "@shared/domain/customers";
 import { validateVersichertennummerFor } from "@shared/schema/common";
 import type { WizardUploadedDoc } from "../components/wizard/signatures-step";
@@ -694,50 +694,10 @@ export function useCustomerWizard() {
         }
         break;
       case "budgets":
-        if (isPflegekasseCustomer(formData.billingType)) {
-          if (!formData.pflegegrad || formData.pflegegrad === "0") errors.push("Pflegegrad auswählen");
-          if (!formData.pflegegradSeit) errors.push("Pflegegrad seit fehlt");
-          {
-            // Task #960 — Vorjahres-Übertrag nur validieren, solange er (bis
-            // 30.06.) nutzbar ist; bei späterem Vertragsbeginn ist das Feld
-            // ausgeblendet und wird beim Speichern auf 0 gezwungen.
-            const currentYear = new Date().getFullYear();
-            const carryoverUsable = (formData.contractStart || todayISO()) < `${currentYear}-07-01`;
-            if (carryoverUsable) {
-              const uebertrag = parseFloat(formData.uebertrag45b);
-              if (isNaN(uebertrag) || uebertrag < 0) {
-                errors.push("Übertrag darf nicht negativ sein");
-              } else {
-                const eligibleMonths = eligible45bCarryoverMonths(formData.pflegegradSeit, currentYear);
-                const maxCarryoverCents = max45bCarryoverCents(eligibleMonths);
-                if (Math.round(uebertrag * 100) > maxCarryoverCents) {
-                  errors.push(`Übertrag überschreitet das mögliche Maximum (${centsToEuroNumber(maxCarryoverCents).toFixed(2)} €)`);
-                }
-              }
-            }
-          }
-          if (formData.restguthaben45bOverrideEnabled) {
-            const stichmonat = formData.restguthaben45bStichmonat;
-            const currentYear = new Date().getFullYear();
-            const contractMonth = (formData.contractStart || todayISO()).slice(0, 7);
-            if (!stichmonat) {
-              errors.push("Stichmonat für das Restguthaben fehlt");
-            } else {
-              const [stichYear] = stichmonat.split("-").map(Number);
-              if (stichYear !== currentYear) errors.push("Stichmonat muss im laufenden Jahr liegen");
-              if (stichmonat < contractMonth) errors.push("Stichmonat darf nicht vor dem Vertragsbeginn liegen");
-            }
-            const rest = parseFloat(formData.restguthaben45b);
-            if (isNaN(rest) || rest < 0) {
-              errors.push("Restguthaben darf nicht negativ sein");
-            } else if (stichmonat) {
-              const maxStartCents = max45bStartValueCents(formData.pflegegradSeit, `${stichmonat}-01`);
-              if (Math.round(rest * 100) > maxStartCents) {
-                errors.push(max45bStartValueExceededMessage(maxStartCents));
-              }
-            }
-          }
-        }
+        // Task #982 — Block-Logik des Budget-Schritts lebt als reine SSoT in
+        // `budgetsStepErrors`, damit das "Weiter"-Blockieren (insb. die §45b-
+        // Startwert-Obergrenze) deterministisch unit-getestet werden kann.
+        errors.push(...budgetsStepErrors(formData, new Date().getFullYear(), todayISO()));
         break;
       case "contract":
         if (!formData.contractDate) errors.push("Vertragsabschluss-Datum fehlt");
