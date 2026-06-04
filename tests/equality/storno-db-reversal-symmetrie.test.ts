@@ -147,9 +147,30 @@ async function bookConsumption(customerId: number, appointmentId: number, userId
   });
 }
 
+// Cent- und Minuten-Spalten sind ganzzahlig und MÜSSEN exakt übereinstimmen.
+// travelKilometers/customerKilometers werden hingegen proportional über die
+// Töpfe gesplittet (Cascade §45b → §45a); die Summe der Split-Anteile kann nach
+// Storno + identischer Neuanlage um 1 ULP driften (IEEE754, nicht-assoziativ),
+// weil die Topf-Proportionen nach dem Reversal minimal anders liegen. Eine
+// vergessene/nicht-negierte km-Spalte würde um GANZE Kilometer abweichen, nicht
+// um 1e-15 — die 6-Stellen-Toleranz fängt also echte Regressionen weiter ab.
+const INTEGER_COLUMNS: ReadonlySet<(typeof NUMERIC_COLUMNS)[number]> = new Set([
+  "amountCents",
+  "hauswirtschaftMinutes",
+  "hauswirtschaftCents",
+  "alltagsbegleitungMinutes",
+  "alltagsbegleitungCents",
+  "travelCents",
+  "customerKilometersCents",
+]);
+
 function expectSumsEqual(actual: ColumnSums, expected: ColumnSums, label: string): void {
   for (const col of NUMERIC_COLUMNS) {
-    expect(actual[col], `${label} — Spalte ${col}`).toBe(expected[col]);
+    if (INTEGER_COLUMNS.has(col)) {
+      expect(actual[col], `${label} — Spalte ${col}`).toBe(expected[col]);
+    } else {
+      expect(actual[col], `${label} — Spalte ${col}`).toBeCloseTo(expected[col], 6);
+    }
   }
 }
 

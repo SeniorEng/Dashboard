@@ -33,6 +33,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { migrateKmGeoToNumeric } from "../../server/startup/migrate-km-geo-to-numeric";
+import { createTestCustomer, createAndDocumentAppointment, cleanupCustomer } from "../test-utils";
 
 const KM_TABLE = "employee_time_entries";
 const KM_COLUMN = "kilometers";
@@ -128,8 +129,51 @@ describe("Task #857 — migrate-km-geo-to-numeric Idempotenz + Round-Trip", () =
   let geoOrigValue: number | null;
   let kmRowId: number;
   let kmOrigValue: number | null;
+  // Auf einer frischen Wegwerf-Test-DB (scripts/with-ephemeral-db.ts) existieren
+  // weder Termine noch Zeiterfassungen. Falls nötig seeden wir per API einen
+  // eigenen Kunden + dokumentierten Termin (erzeugt zugleich einen
+  // employee_time_entries-Eintrag) und räumen ihn in afterAll wieder ab.
+  let seededCustomerId: number | null = null;
+  let seededTimeEntryId: number | null = null;
+
+  async function ensureRoundtripRowsExist(): Promise<void> {
+    // Geo-Round-Trip braucht eine Termin-Zeile: bei Bedarf per API einen Kunden
+    // + dokumentierten Termin anlegen.
+    const apptCheck = await db.execute(
+      sql`SELECT 1 FROM appointments WHERE deleted_at IS NULL LIMIT 1`,
+    );
+    if (apptCheck.rows.length === 0) {
+      const svcRes = await db.execute(
+        sql`SELECT id FROM services WHERE code = 'hauswirtschaft' LIMIT 1`,
+      );
+      const svcRow = svcRes.rows[0] as Record<string, unknown> | undefined;
+      if (!svcRow) throw new Error("Basis-Leistung 'hauswirtschaft' fehlt in der Test-DB");
+      const customer = await createTestCustomer();
+      seededCustomerId = customer.id as number;
+      await createAndDocumentAppointment(seededCustomerId, Number(svcRow.id));
+    }
+
+    // KM-Round-Trip braucht eine Zeiterfassungs-Zeile. Termin-Dokumentation legt
+    // keine an, daher seeden wir eine minimale Zeile direkt (FK: irgendein User).
+    const kmCheck = await db.execute(
+      sql`SELECT 1 FROM employee_time_entries LIMIT 1`,
+    );
+    if (kmCheck.rows.length === 0) {
+      const userRes = await db.execute(sql`SELECT id FROM users ORDER BY id LIMIT 1`);
+      const userRow = userRes.rows[0] as Record<string, unknown> | undefined;
+      if (!userRow) throw new Error("Kein Benutzer in der Test-DB für den KM-Round-Trip gefunden");
+      const ins = await db.execute(sql`
+        INSERT INTO employee_time_entries (user_id, entry_type, entry_date, kilometers)
+        VALUES (${Number(userRow.id)}, 'client_work', CURRENT_DATE, 0)
+        RETURNING id
+      `);
+      seededTimeEntryId = Number((ins.rows[0] as Record<string, unknown>).id);
+    }
+  }
 
   beforeAll(async () => {
+    await ensureRoundtripRowsExist();
+
     // Eine (produktiv NULL-)Termin-Zeile für den Geo-Round-Trip auswählen,
     // Original-Wert merken und mit einem bekannten Wert belegen.
     const apptRes = await db.execute(
@@ -178,6 +222,16 @@ describe("Task #857 — migrate-km-geo-to-numeric Idempotenz + Round-Trip", () =
       await db
         .execute(sql`UPDATE employee_time_entries SET kilometers = ${kmOrigValue} WHERE id = ${kmRowId}`)
         .catch(() => {});
+    }
+    // Selbst-geseedete Zeile(n) abräumen (Zeiterfassung hängt am User, nicht am
+    // Kunden — daher separat löschen; Kunde inkl. Termin-Kaskade via Purge).
+    if (seededTimeEntryId) {
+      await db
+        .execute(sql`DELETE FROM employee_time_entries WHERE id = ${seededTimeEntryId}`)
+        .catch(() => {});
+    }
+    if (seededCustomerId) {
+      await cleanupCustomer(seededCustomerId).catch(() => {});
     }
   });
 

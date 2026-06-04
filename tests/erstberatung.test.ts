@@ -282,7 +282,12 @@ describe("EB-7: Prospect-Sichtbarkeit", () => {
     const res = await apiGet<any>("/api/admin/customers?limit=200");
     expect(res.status).toBe(200);
     const list = Array.isArray(res.data) ? res.data : res.data.data || [];
-    const found = list.find((c: any) => c.id === prospectId);
+    // Prospect-IDs und Customer-IDs stammen aus GETRENNTEN Sequenzen (prospects
+    // vs customers) und kollidieren auf einer frischen Test-DB mit niedrigen IDs:
+    // ein fremder Test-Kunde kann zufällig dieselbe numerische ID wie der Prospect
+    // haben. Daher über den eindeutigen Prospect-Nachnamen prüfen statt über die
+    // rohe ID — ein geleakter Prospect würde mit genau diesem Nachnamen auftauchen.
+    const found = list.find((c: any) => c.nachname === nachname);
     expect(found, "Prospect darf nicht in Kundenliste erscheinen").toBeUndefined();
   });
 

@@ -1,23 +1,29 @@
 ---
-name: Full vitest run blocked by groupOrder
-description: Why `vitest run` (full, all projects) aborts before any test and how to verify changes anyway in this repo.
+name: Full vitest run + project groupOrder (vitest 4)
+description: vitest 4 aborts a multi-project run when projects share sequence.groupOrder but differ in maxWorkers — and how the repo resolves it.
 ---
 
-A full `vitest run` (all projects) aborts BEFORE executing any test with:
+A full `vitest run` over multiple projects can abort BEFORE any test with:
 `Error: Projects "integration" and "unit" have different 'maxWorkers' but
 same 'sequence.groupOrder'. Provide unique 'sequence.groupOrder' for them.`
 
-**Why:** `vitest.config.ts` defines two projects — `unit` (fileParallelism, no
-explicit maxWorkers) and `integration` (maxWorkers pinned to
-`EPHEMERAL_DB_WORKERS`). Vitest 4's pool rework (the repo's vitest-4 migration)
-now requires projects with differing maxWorkers to declare a unique
-`sequence.groupOrder`. The repo doesn't, so the orchestrated `test` workflow
-(`scripts/with-ephemeral-db.ts`, EPHEMERAL_DB_WORKERS=2) fails at the config
-stage. It is NOT a test/logic failure and is unrelated to test/startup code.
+**Why:** vitest 4's `groupSpecs` (the spec-scheduler, runs ONCE over ALL specs
+of ALL projects right AFTER globalSetup, BEFORE any test) groups specs by
+`sequence.groupOrder`; if two projects land in the same order-group with
+different resolved `maxWorkers`, it throws. The repo's `unit` project uses the
+default parallel pool while `integration` pins `min/maxWorkers` to
+`EPHEMERAL_DB_WORKERS`, so without distinct groupOrders they collide.
 
-**How to apply:** To verify test changes, run TARGETED raw vitest against a
-single file or single project (e.g. `npx vitest run tests/<file>.test.ts`) —
-the groupOrder check only compares projects that both have matching specs, so a
-single-file run (or `--project integration`) sidesteps it. Until the config is
-fixed (add unique `sequence: { groupOrder }` per project), do not rely on the
-full `test` workflow / full `vitest run` to validate.
+**Resolution (in `vitest.config.ts`):** the two projects declare distinct
+`sequence.groupOrder` — `0` for `unit`, `1` for `integration`. They then run in
+separate order-groups (unit first, then the DB/server-bound integration tests),
+each with its own consistent pool config, so the throw never fires. The
+integration project keeps `minWorkers === maxWorkers === EPHEMERAL_DB_WORKERS`,
+preserving the 1:1 worker→DB mapping. The orchestrated `test` workflow
+(`scripts/with-ephemeral-db.ts`, EPHEMERAL_DB_WORKERS=2) runs the full suite.
+
+**How to verify:** the error fires only AFTER globalSetup succeeds (i.e. via the
+orchestrator with a live app server), so a bare `npx vitest run` that times out
+in globalSetup never reaches the grouping check and tells you nothing about it.
+Trust the orchestrated `test` workflow: if integration specs are executing, the
+single-pass `groupSpecs` already accepted ALL specs of BOTH projects.
