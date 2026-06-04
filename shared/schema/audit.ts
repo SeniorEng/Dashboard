@@ -93,6 +93,7 @@ export const AUDIT_ACTIONS = [
   "budget_45b_gap_corrected",
   "appointment_import_reconciled_cancelled",
   "orphaned_tx_appointment_id_backfilled",
+  "storno_transaction_date_backfilled",
   "invoice_draft_discarded",
 ] as const;
 

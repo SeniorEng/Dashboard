@@ -459,6 +459,16 @@ async function runStartupTasks() {
       log(`Budget-Tx-Appointment-Constraint-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #963 — fehl-datierte Storno-Reversals auf das Original-transactionDate
+    // umdatieren, damit stichtagsbezogene Budget-Checks Verbrauch + Storno korrekt
+    // verrechnen (kein fälschlicher Hard-Block dokumentierbarer Termine).
+    const { backfillStornoTransactionDate } = await import("./startup/backfill-storno-transaction-date");
+    try {
+      await backfillStornoTransactionDate();
+    } catch (err) {
+      log(`Storno-transactionDate-Backfill fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #757: Spalte für abweichenden Kontoinhaber in den Firmenstammdaten.
     const { ensureCompanyBankAccountHolderColumn } = await import("./startup/ensure-company-bank-account-holder");
     try {

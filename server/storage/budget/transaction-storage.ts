@@ -4,7 +4,6 @@ import {
   type InsertBudgetTransaction,
 } from "@shared/schema";
 import { eq, and, desc, gte, lte, inArray, isNotNull } from "drizzle-orm";
-import { todayISO } from "@shared/utils/datetime";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 
@@ -112,10 +111,21 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
   // `tests/equality/storno-summe-null.test.ts`.
   const orig = original[0];
   const negate = (v: number | null | undefined) => (v == null ? null : -v);
+  // Task #963 — Storno-Datum an die Originalbuchung koppeln. Eine Reversal-Zeile
+  // MUSS dasselbe `transactionDate` wie die stornierte Consumption tragen, damit
+  // sich Verbrauch + Storno in JEDEM Stichtagsfenster (`transactionDate <=
+  // asOfDate`) zu null verrechnen — egal, wann das Storno ausgeführt wird.
+  // Vorher (`todayISO()`) fiel die Gutschrift bei einem Storno NACH dem
+  // Termindatum aus dem Fenster, der Topf wirkte überzogen und ein real
+  // dokumentierbarer Termin wurde fälschlich hart geblockt (Anzeige-vs-Buchung-
+  // Drift; Übersicht rechnet mit asOfDate=heute und sah das Storno korrekt).
+  // Der reale Storno-Zeitpunkt bleibt über `created_at` erhalten. Die anderen
+  // Reversal-Pfade (rebook-storage.ts, km-rebook.ts) erben das Original-Datum
+  // bereits. Drift-Detektor: `tests/equality/storno-asofdate-window.test.ts`.
   const reversal = await d.insert(budgetTransactions).values({
     customerId: orig.customerId,
     budgetType: orig.budgetType,
-    transactionDate: todayISO(),
+    transactionDate: orig.transactionDate,
     transactionType: "reversal",
     amountCents: -orig.amountCents,
     appointmentId: orig.appointmentId,
