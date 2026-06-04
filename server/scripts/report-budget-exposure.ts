@@ -44,12 +44,19 @@ import { writeFileSync } from "node:fs";
 import { and, asc, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
 import { customers } from "@shared/schema";
-import { readUnifiedBudgetAvailability, type PotAvailability } from "../storage/budget/unified-reader";
+import { readUnifiedBudgetAvailability } from "../storage/budget/unified-reader";
 import { todayISO, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
-import { formatEuroDE } from "@shared/utils/money";
-
-const euro = (c: number) => formatEuroDE(c);
-const eurCsv = (c: number) => (c / 100).toFixed(2);
+import {
+  euro,
+  buildMonthEval,
+  buildCustomerReport,
+  classifyKind,
+  potCell,
+  toCsv,
+  type MonthSlot,
+  type CustomerReport,
+  type CustomerReportBase,
+} from "./report-budget-exposure-core";
 
 interface CliArgs {
   showAll: boolean;
@@ -84,11 +91,6 @@ function parseArgs(): CliArgs {
   };
 }
 
-interface MonthSlot {
-  label: string; // YYYY-MM
-  asOfDate: string; // YYYY-MM-DD
-}
-
 function buildMonths(horizonMonths: number): MonthSlot[] {
   const { year, month } = currentYearAndMonth();
   const today = todayISO();
@@ -107,112 +109,33 @@ function buildMonths(horizonMonths: number): MonthSlot[] {
   return slots;
 }
 
-interface PotEval {
-  active: boolean; // enabled && inRange
-  remainingCents: number;
-  exhausted: boolean; // active && remaining <= 0
-}
-
-function evalPot(p: PotAvailability): PotEval {
-  const active = p.enabled && p.inRange;
-  return {
-    active,
-    remainingCents: active ? p.availableCents : 0,
-    exhausted: active && p.availableCents <= 0,
-  };
-}
-
-interface MonthEval {
-  slot: MonthSlot;
-  activePots: number;
-  overallRemainingCents: number;
-  overallExhausted: boolean;
-  p45b: PotEval;
-  p45a: PotEval;
-  p39: PotEval;
-}
-
-interface CustomerReport {
-  id: number;
-  name: string;
-  billingType: string;
-  acceptsPrivatePayment: boolean;
-  kind: "statutory" | "selbstzahler";
-  months: MonthEval[];
-  firstOverallIdx: number | null;
-  first45bIdx: number | null;
-  first45aIdx: number | null;
-  first39Idx: number | null;
-  anyExhausted: boolean;
-}
-
 async function evaluateCustomer(
   cust: { id: number; name: string; billingType: string; acceptsPrivatePayment: boolean },
   months: MonthSlot[],
 ): Promise<CustomerReport> {
-  const base: Omit<CustomerReport, "months" | "firstOverallIdx" | "first45bIdx" | "first45aIdx" | "first39Idx" | "anyExhausted"> = {
+  const base: CustomerReportBase = {
     id: cust.id,
     name: cust.name,
     billingType: cust.billingType,
     acceptsPrivatePayment: cust.acceptsPrivatePayment,
-    kind: cust.billingType === "selbstzahler" ? "selbstzahler" : "statutory",
+    kind: classifyKind(cust.billingType),
   };
 
   // Selbstzahler routen in den ungedeckelten Privattopf → laufen nie leer.
   if (base.kind === "selbstzahler") {
-    return {
-      ...base,
-      months: [],
-      firstOverallIdx: null,
-      first45bIdx: null,
-      first45aIdx: null,
-      first39Idx: null,
-      anyExhausted: false,
-    };
+    return buildCustomerReport(base, []);
   }
 
-  const monthEvals: MonthEval[] = [];
+  const monthEvals = [];
   for (const slot of months) {
     const u = await readUnifiedBudgetAvailability(cust.id, slot.asOfDate);
-    const p45b = evalPot(u.pots.entlastungsbetrag_45b);
-    const p45a = evalPot(u.pots.umwandlung_45a);
-    const p39 = evalPot(u.pots.ersatzpflege_39_42a);
-    const activePots = [p45b, p45a, p39].filter((p) => p.active).length;
-    monthEvals.push({
-      slot,
-      activePots,
-      overallRemainingCents: u.totalCents,
-      overallExhausted: activePots > 0 && u.totalCents <= 0,
-      p45b,
-      p45a,
-      p39,
-    });
+    monthEvals.push(buildMonthEval(slot, u));
   }
 
-  const firstIdx = (pick: (m: MonthEval) => boolean): number | null => {
-    const idx = monthEvals.findIndex(pick);
-    return idx === -1 ? null : idx;
-  };
-
-  const firstOverallIdx = firstIdx((m) => m.overallExhausted);
-  const first45bIdx = firstIdx((m) => m.p45b.exhausted);
-  const first45aIdx = firstIdx((m) => m.p45a.exhausted);
-  const first39Idx = firstIdx((m) => m.p39.exhausted);
-
-  return {
-    ...base,
-    months: monthEvals,
-    firstOverallIdx,
-    first45bIdx,
-    first45aIdx,
-    first39Idx,
-    anyExhausted:
-      firstOverallIdx !== null ||
-      first45bIdx !== null ||
-      first45aIdx !== null ||
-      first39Idx !== null,
-  };
+  return buildCustomerReport(base, monthEvals);
 }
+
+// Klassifizierungs-/CSV-Logik lebt in `report-budget-exposure-core.ts`.
 
 async function mapPool<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -225,88 +148,6 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
-}
-
-function toCsv(reports: CustomerReport[], months: MonthSlot[]): string {
-  const header = [
-    "customerId",
-    "customerName",
-    "billingType",
-    "acceptsPrivatePayment",
-    "kind",
-    "month",
-    "asOfDate",
-    "activePots",
-    "overallRemainingEur",
-    "overallExhausted",
-    "p45bActive",
-    "p45bRemainingEur",
-    "p45bExhausted",
-    "p45aActive",
-    "p45aRemainingEur",
-    "p45aExhausted",
-    "p39Active",
-    "p39RemainingEur",
-    "p39Exhausted",
-  ];
-  const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  const lines = [header.join(",")];
-
-  for (const r of reports) {
-    if (r.kind === "selbstzahler") {
-      for (const slot of months) {
-        lines.push(
-          [
-            r.id,
-            esc(r.name),
-            r.billingType,
-            r.acceptsPrivatePayment,
-            r.kind,
-            slot.label,
-            slot.asOfDate,
-            "0",
-            "uncapped",
-            "false",
-            "false", "uncapped", "false",
-            "false", "uncapped", "false",
-            "false", "uncapped", "false",
-          ].join(","),
-        );
-      }
-      continue;
-    }
-    for (const m of r.months) {
-      lines.push(
-        [
-          r.id,
-          esc(r.name),
-          r.billingType,
-          r.acceptsPrivatePayment,
-          r.kind,
-          m.slot.label,
-          m.slot.asOfDate,
-          m.activePots,
-          eurCsv(m.overallRemainingCents),
-          m.overallExhausted,
-          m.p45b.active,
-          m.p45b.active ? eurCsv(m.p45b.remainingCents) : "n/a",
-          m.p45b.exhausted,
-          m.p45a.active,
-          m.p45a.active ? eurCsv(m.p45a.remainingCents) : "n/a",
-          m.p45a.exhausted,
-          m.p39.active,
-          m.p39.active ? eurCsv(m.p39.remainingCents) : "n/a",
-          m.p39.exhausted,
-        ].join(","),
-      );
-    }
-  }
-  return lines.join("\n");
-}
-
-function potCell(label: string, p: PotEval): string {
-  if (!p.active) return `${label} inaktiv`;
-  return `${label} ${euro(p.remainingCents)}${p.exhausted ? " ⚠" : ""}`;
 }
 
 async function main(): Promise<number> {
