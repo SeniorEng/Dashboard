@@ -24,6 +24,14 @@ Durable decisions for the new-customer wizard's §45b budget handling:
   when contract start >= 1 July it is hidden AND forced to 0 on submit.
   **Why:** a stale entered value otherwise still posts after the field is hidden.
 
+- **The §45b carryover is written by BOTH paths → currently produces two identical
+  `source="carryover"` allocation rows on customer create.** The create-payload
+  `budgets` handler writes one carryover row, and the `/initial-budget` per-type
+  loop (`carryoverAmountCents`) writes a second identical one. Suspected
+  double-count bug (filed as a follow-up). **How to apply:** any test asserting
+  carryover on wizard-created customers must assert existence + amount, not an exact
+  row count of 1, until the dual write is deduped.
+
 - **Money conversions in client code go through `centsToEuroNumber`/`parseEuroDE`,
   never raw `<...Cents> / 100` or `Math.round(euros * 100)`.** An architecture test
   (`tests/architecture/no-money-arithmetic-outside-helper.test.ts`) fails on a
