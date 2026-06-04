@@ -472,24 +472,35 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
     expect(ibRes.status).toBe(200);
   });
 
-  it("BUD-IB-DEDUP-1 – Startwert-Historie liefert ausschließlich initial_balance-Einträge", async () => {
+  it("BUD-IB-DEDUP-1 – Startwert-Historie zeigt genau EINEN Startwert (+ ggf. Auto-Carryover, keine Doppelung)", async () => {
+    // Task #608: Für §45b liefert die Startwert-Historie zusätzlich den
+    // automatischen `carryover` aus (damit er im UI sicht-/löschbar ist).
+    // Task #959: Der Vorjahres-Startwert rollt nun in genau EINEN Carryover —
+    // die Historie enthält also initial_balance + carryover, aber den eigentlichen
+    // Startwert weiterhin nur EINMAL (Anti-Doppelzählung, Task #101).
     await apiGet<any>(`/api/budget/${dedupCustomerId}/overview`); // triggert syncCarryoverAndExpiry
     const res = await apiGet<any[]>(`/api/budget/${dedupCustomerId}/initial-balances/entlastungsbetrag_45b`);
     expect(res.status).toBe(200);
     expect(res.data.length).toBeGreaterThan(0);
     for (const a of res.data) {
-      expect(a.source).toBe("initial_balance");
+      expect(["initial_balance", "carryover"]).toContain(a.source);
     }
+    const initialBalances = res.data.filter((a: any) => a.source === "initial_balance");
+    expect(initialBalances.length).toBe(1);
   });
 
-  it("BUD-IB-DEDUP-2 – Kein automatischer Carryover, wenn Vorjahres-Startwert existiert", async () => {
+  it("BUD-IB-DEDUP-2 – Genau EIN automatischer Carryover, wenn Vorjahres-Startwert existiert (exactly-once)", async () => {
+    // Task #959: Der Vorjahres-Startwert rollt seinen Rest forward-only in
+    // GENAU EINEN Carryover fürs laufende Jahr (validFrom 1.1., expiresAt 30.6.).
+    // Der ursprüngliche initial_balance wird dabei in der Aggregat-Sicht
+    // verdrängt (IB-Supersession) → keine Doppelzählung (siehe BUD-IB-DEDUP-3).
     await apiGet<any>(`/api/budget/${dedupCustomerId}/overview`);
     const allocRes = await apiGet<any[]>(`/api/budget/${dedupCustomerId}/allocations`);
     expect(allocRes.status).toBe(200);
     const autoCarryover = allocRes.data.filter(
       (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover"
     );
-    expect(autoCarryover.length).toBe(0);
+    expect(autoCarryover.length).toBe(1);
   });
 
   it("BUD-IB-DEDUP-3 – totalAllocatedCents = Startwert + Auto-Allokationen ab Folgemonat", async () => {

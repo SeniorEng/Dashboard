@@ -40,3 +40,41 @@ export function eligible45bCarryoverMonths(
 export function max45bCarryoverCents(eligibleMonths: number): number {
   return BUDGET_45B_MAX_MONTHLY_CENTS * eligibleMonths;
 }
+
+/**
+ * Task #959 — Obergrenze für den §45b-STARTWERT (`initial_balance`) in Cent.
+ *
+ * Ein §45b-Startwert repräsentiert das im LAUFENDEN Jahr bis zum Startmonat
+ * akkumulierte, noch nicht verbrauchte Guthaben (z.B. Onboarding im März mit
+ * unverbrauchtem Januar–März). Er darf höchstens so groß sein, wie bis zum
+ * Startmonat überhaupt angesammelt werden konnte: (Anzahl der vom Accrual-Anker
+ * bis zum Startmonat verstrichenen, §45b-berechtigten Monate) × Monatsaufstockung.
+ *
+ * - `accrualAnchorISO` = §45b-Accrual-Beginn (i.d.R. Pflegegrad-Beginn, ISO
+ *   "YYYY-MM-DD"). Fehlt er, wird ab Januar des Startjahres gerechnet (großzügige
+ *   Obergrenze: es kann nicht mehr als `startMonth` Monate angesammelt sein).
+ * - `startMonthISO` = Datum, für das der Startwert gebucht wird ("YYYY-MM-DD").
+ *
+ * Reiner Wert, keine Seiteneffekte. Der Vorjahres-Übertrag wird separat über
+ * `max45bCarryoverCents` begrenzt (eigene Allokationszeile).
+ */
+export function max45bStartValueCents(
+  accrualAnchorISO: string | null | undefined,
+  startMonthISO: string,
+): number {
+  const [startYear, startMonth] = startMonthISO.split("-").map(Number);
+  if (!startYear || !startMonth) return BUDGET_45B_MAX_MONTHLY_CENTS;
+
+  let earliestEligibleMonth = 1;
+  if (accrualAnchorISO) {
+    const [anchorYear, anchorMonth] = accrualAnchorISO.split("-").map(Number);
+    if (anchorYear && anchorMonth) {
+      if (anchorYear > startYear) return 0; // im Startjahr noch nicht berechtigt
+      if (anchorYear === startYear) earliestEligibleMonth = anchorMonth;
+      // anchorYear < startYear → ab Januar (earliestEligibleMonth bleibt 1)
+    }
+  }
+
+  const months = Math.max(0, startMonth - earliestEligibleMonth + 1);
+  return months * BUDGET_45B_MAX_MONTHLY_CENTS;
+}

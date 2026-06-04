@@ -290,6 +290,48 @@ export async function setupBudgetScenario(
 
   const ib = spec.initialBalance;
   const carry = spec.carryover;
+
+  // Task #959 — §45b-Startwert als direkte Fixture statt über /initial-budget.
+  // Der Onboarding-Cap (Startwert ≤ rechtlich bis zum Startmonat ansammelbare
+  // Monate) lehnt die hier üblichen Sammel-Startwerte (z.B. 1.000 € zum
+  // 1. Januar) zu Recht ab — er schützt die echte API. Test-Fixtures stellen
+  // dagegen bewusst „Kunde hat bereits Budget" her; sie seeden den §45b-
+  // Startwert daher als Allokationszeile direkt in die DB und umgehen so NUR
+  // den Routen-Cap, nicht die Lese-/Buchungslogik. Der Startwert wird zudem
+  // ins laufende Jahr gebodet, damit ihn die §45b-Verfallslogik (Task #959)
+  // nicht als abgelaufenes Vorjahres-Guthaben aussortiert.
+  async function seed45bInitialBalanceDirect(validFromISO: string, amountCents: number): Promise<void> {
+    const normalized = normalizeValidFromToDate(validFromISO);
+    const requestedYear = parseInt(normalized.slice(0, 4), 10);
+    const currentYear = new Date().getFullYear();
+    const seedValidFrom = requestedYear < currentYear ? `${currentYear}-01-01` : normalized;
+    const [seedYear, seedMonth] = seedValidFrom.split("-").map(Number);
+    const { upsertInitialBalanceAllocation } = await import(
+      "../../server/storage/budget/allocation-storage"
+    );
+    await upsertInitialBalanceAllocation({
+      customerId,
+      budgetType: "entlastungsbetrag_45b",
+      year: seedYear,
+      month: seedMonth,
+      amountCents,
+      validFrom: seedValidFrom,
+      expiresAt: null,
+    });
+  }
+
+  async function seed45bCarryoverDirect(sourceYear: number, amountCents: number): Promise<void> {
+    const { upsertCarryoverAllocation } = await import(
+      "../../server/storage/budget/allocation-storage"
+    );
+    await upsertCarryoverAllocation({
+      customerId,
+      budgetType: "entlastungsbetrag_45b",
+      sourceYear,
+      amountCents,
+    });
+  }
+
   if (ib && carry) {
     if (ib.type !== carry.type) {
       throw new Error(
@@ -303,20 +345,12 @@ export async function setupBudgetScenario(
         `setupBudgetScenario: initialBalance.validFrom (Jahr=${ibYear}) muss im Folgejahr von carryover.year=${carry.year} liegen (Jahr=${targetYear})`,
       );
     }
-    const res = await apiPost<InitialBudgetResponse>(
-      `/api/budget/${customerId}/initial-budget`,
-      {
-        budgetType: ib.type,
-        currentMonthAmountCents: ib.amountCents,
-        carryoverAmountCents: carry.amountCents,
-        budgetStartDate: normalizeValidFromToDate(ib.validFrom),
-      },
-    );
-    if (res.status !== 201 && res.status !== 200) {
-      throw new Error(
-        `setupBudgetScenario: initial-budget fehlgeschlagen (status=${res.status})`,
-      );
-    }
+    // carryover ist per Invariante (oben) immer §45b → beide Anteile als
+    // direkte Fixture seeden (umgeht den §45b-Startwert-Cap der Route).
+    await seed45bInitialBalanceDirect(ib.validFrom, ib.amountCents);
+    await seed45bCarryoverDirect(carry.year, carry.amountCents);
+  } else if (ib && ib.type === "entlastungsbetrag_45b") {
+    await seed45bInitialBalanceDirect(ib.validFrom, ib.amountCents);
   } else if (ib) {
     const res = await apiPost<InitialBudgetResponse>(
       `/api/budget/${customerId}/initial-budget`,

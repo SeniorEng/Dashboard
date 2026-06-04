@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import {
   eligible45bCarryoverMonths,
   max45bCarryoverCents,
+  max45bStartValueCents,
 } from "@shared/domain/budget/carryover-eligibility";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 
@@ -61,5 +62,47 @@ describe("max45bCarryoverCents", () => {
 
   it("liefert den vollen Jahresbetrag bei 12 Monaten", () => {
     expect(max45bCarryoverCents(12)).toBe(BUDGET_45B_MAX_MONTHLY_CENTS * 12);
+  });
+});
+
+describe("max45bStartValueCents (Task #959)", () => {
+  it("kappt auf 1 Monat, wenn Anker = Startmonat (Onboarding im selben Monat)", () => {
+    expect(max45bStartValueCents("2026-03-01", "2026-03-15")).toBe(
+      BUDGET_45B_MAX_MONTHLY_CENTS,
+    );
+  });
+
+  it("erlaubt akkumulierte Monate, wenn der Anker früher im Jahr liegt", () => {
+    // Pflegegrad seit Januar, Startwert für Mai → Jan..Mai = 5 Monate
+    expect(max45bStartValueCents("2026-01-10", "2026-05-15")).toBe(
+      BUDGET_45B_MAX_MONTHLY_CENTS * 5,
+    );
+  });
+
+  it("rechnet ab Januar, wenn der Anker in einem Vorjahr liegt", () => {
+    // Anker 2023, Startwert für April 2026 → Jan..Apr 2026 = 4 Monate
+    expect(max45bStartValueCents("2023-08-01", "2026-04-01")).toBe(
+      BUDGET_45B_MAX_MONTHLY_CENTS * 4,
+    );
+  });
+
+  it("gibt 0 zurück, wenn der Anker erst NACH dem Startmonat im Startjahr beginnt", () => {
+    expect(max45bStartValueCents("2026-06-01", "2026-03-01")).toBe(0);
+  });
+
+  it("gibt 0 zurück, wenn der Anker in einem späteren Jahr liegt", () => {
+    expect(max45bStartValueCents("2027-01-01", "2026-05-01")).toBe(0);
+  });
+
+  it("rechnet ab Januar (großzügig), wenn kein Anker übergeben wird", () => {
+    expect(max45bStartValueCents(null, "2026-04-15")).toBe(
+      BUDGET_45B_MAX_MONTHLY_CENTS * 4,
+    );
+  });
+
+  it("fällt bei unparsebarem Startmonat auf eine Monatsaufstockung zurück", () => {
+    expect(max45bStartValueCents("2026-01-01", "kein-datum")).toBe(
+      BUDGET_45B_MAX_MONTHLY_CENTS,
+    );
   });
 });

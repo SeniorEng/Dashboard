@@ -104,8 +104,11 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
           { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
         ],
         initialBalance: {
+          // Task #959 — §45b-Startwert ≤ Obergrenze: Anker 2024-01 (pflegegradSeit
+          // im Helper), Startmonat 2026-01 → genau 1 berechtigter Monat = 131 €.
+          // Das laufende §45b-Budget kommt ohnehin aus der Monats-Akkumulation.
           type: "entlastungsbetrag_45b",
-          amountCents: 100000,
+          amountCents: 13_100,
           validFrom: "2026-01-01",
         },
         appointments: [
@@ -175,8 +178,9 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
           { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
         ],
         initialBalance: {
+          // Task #959 — §45b-Startwert ≤ Obergrenze (1 berechtigter Monat = 131 €).
           type: "entlastungsbetrag_45b",
-          amountCents: 100000,
+          amountCents: 13_100,
           validFrom: "2026-01-01",
         },
         appointments: [],

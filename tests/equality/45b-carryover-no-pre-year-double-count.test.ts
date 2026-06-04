@@ -103,13 +103,15 @@ describe("Task #696 (Bug 2) — §45b: kein Doppelzähl-Drift durch Vorjahres-Mo
     expect(totalAllocated).not.toBe(6 * 13_100 + 34_450);
   });
 
-  it("Carryover, der durch einen manuellen Startwert für das Quelljahr blockiert ist, löst KEINEN Allocation-Start-Shift aus", async () => {
-    // Wenn der Quelljahr-IB existiert, ignoriert `calculateAllocated45b` den
-    // Carryover (Task #101 / siehe `ibYears`-Filter). Genau dann darf der
-    // Carryover auch den neuen allocStart-Shift NICHT triggern — sonst würden
-    // die Vorjahres-Monate, die durch den Startwert legitim abgedeckt sind,
-    // verlorengehen.
-    const customerId = await fresh45bCustomerWithoutAutoSettings("T696-IB-BLOCKS");
+  it("Vorjahres-Startwert wird vom Carryover superseded (exactly-once, Task #959): Carryover zählt, IB nicht doppelt", async () => {
+    // Task #959 — Universelles Verfalls-/Übertrags-Modell: Der Carryover bildet
+    // das gesamte Restguthaben des Quelljahrs (inkl. eines Dez-Startwerts) ab.
+    // Die alte `ibYears`-Ausnahme (Task #101: Carryover bei vorhandenem Quelljahr-
+    // Startwert unterdrücken, Startwert behalten) entfällt — stattdessen wird der
+    // Carryover gezählt UND der Vorjahres-Startwert per IB-Supersession aus
+    // `initialBalanceTotal` herausgerechnet. Ergebnis = identisch zur ersten
+    // Repro (99.950 €), KEINE Doppelzählung, kein Verlust von Restguthaben.
+    const customerId = await fresh45bCustomerWithoutAutoSettings("T696-IB-SUPERSEDED");
 
     await db.insert(customerBudgetTypeSettings).values({
       customerId,
@@ -153,10 +155,13 @@ describe("Task #696 (Bug 2) — §45b: kein Doppelzähl-Drift durch Vorjahres-Mo
       { asOfDate: "2026-05-27" },
     );
 
-    // Erwartung: Carryover wird via ibYears unterdrückt → 0 € Carryover.
-    // Monatslauf: Dez 2025 (IB-Monat, übersprungen via initialBalanceSet) +
-    // Jan..Mai 2026 = 5 × 13100 = 65500, plus IB-Summe 13100 → 78600.
-    // Der Shift darf hier NICHT greifen, sonst gingen Vorjahres-Monate verloren.
-    expect(totalAllocated).toBe(5 * 13_100 + 13_100);
+    // Task #959 — Erwartung neu (exactly-once): Carryover wird gezählt (34450),
+    // der Vorjahres-Startwert (year 2025) wird per IB-Supersession aus
+    // `initialBalanceTotal` entfernt (ibFloorYear = max(2025, 2026) = 2026).
+    // Monatslauf: allocStart auf 2026-01 geschoben → Jan..Mai 2026 = 5 × 13100 =
+    // 65500, plus Carryover 34450 → 99950. Identisch zur ersten Repro, KEINE
+    // Doppelzählung des Dez-2025-Guthabens.
+    expect(totalAllocated).toBe(5 * 13_100 + 34_450);
+    expect(totalAllocated).not.toBe(6 * 13_100); // alte ibYears-Semantik (78600) ist weg
   });
 });

@@ -11,7 +11,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
-import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
+import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, earliest45bRelevantAnchor, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
@@ -636,23 +636,37 @@ async function calculateAllocated45b(
   // zählung (Bug 2 Schröder: budgetStartDate = Dez 2025, Carryover für 2026
   // vorhanden → Dez 2025 wurde 1× als monthly_auto UND 1× im Carryover gezählt).
   //
-  // Daher: wenn ein gezählter Carryover (d.h. nicht via `ibYears` blockiert,
-  // siehe Task #101) existiert, schieben wir `allocStart` auf den 1. Januar
-  // des spätesten Zieljahrs vor. Carryovers, die ohnehin durch einen manuellen
-  // Startwert für das Quelljahr (Y-1) blockiert werden, lösen keinen Shift
-  // aus — dort übernimmt der bestehende IB-Shift die korrekte Begrenzung.
-  const ibYearsForShift = new Set(
-    existingAllocations.filter(a => a.source === "initial_balance").map(a => a.year)
-  );
+  // Daher: wenn ein Carryover existiert, schieben wir `allocStart` auf den 1.
+  // Januar des spätesten Zieljahrs vor.
+  //
+  // Task #959 — Universelles Verfalls-/Übertrags-Modell: Ein Carryover
+  // kondensiert das Restguthaben des Quelljahrs aus JEDER Herkunft (virtuelle
+  // Monatsaufstockung, `initial_balance`, manueller/Legacy-Anker). Die frühere
+  // `ibYears`-Ausnahme (Task #101: Carryover neben einem Startwert ignorieren)
+  // entfällt — stattdessen rollt der Startwert ebenfalls in den Carryover (siehe
+  // `ensureYearlyCarryover45b`) und wird hier per IB-Supersession aus
+  // `initialBalanceTotal` herausgerechnet (kein Doppelzählen). So bekommt JEDER
+  // Kunde (neu, alt, manuell) exakt EINEN ablaufenden Übertrag pro Jahr.
+  //
+  // WICHTIG (Task #959): Der Shift darf nur Carryovers berücksichtigen, die zum
+  // Lese-Stichtag (`opts.asOfDate`) bereits gültig sind — exakt dieselbe Schranke,
+  // die unten `carryoverTotal` (Zeile ~825) zählt. Sonst zieht ein in die ZUKUNFT
+  // materialisierter Carryover (z.B. Zieljahr 2026, `validFrom = 2026-01-01`) den
+  // `allocStart` einer RÜCKWIRKENDEN Buchung (`asOfDate = 2024-06-15`) fälschlich
+  // auf 2026 vor → `allocStart > end` → §45b-Verfügbarkeit fällt auf 0 und die
+  // historische Buchung kippt in den nächsten Topf (GoBD-Regression bei
+  // backdated Bookings). Mit der Schranke bleibt der Shift mit dem tatsächlich
+  // gezählten Carryover-Bestand konsistent.
+  const carryoverCountLimit = opts.asOfDate ?? `${curYear}-12-31`;
   const countedCarryoverYears = existingAllocations
-    .filter(a => a.source === "carryover" && !ibYearsForShift.has(a.year - 1))
+    .filter(a => a.source === "carryover" && a.validFrom <= carryoverCountLimit)
     .map(a => a.year);
-  if (countedCarryoverYears.length > 0) {
-    const latestCarryoverYear = Math.max(...countedCarryoverYears);
-    if (latestCarryoverYear > allocStartYear) {
-      allocStartYear = latestCarryoverYear;
-      allocStartMonth = 1;
-    }
+  const latestCountedCarryoverYear = countedCarryoverYears.length > 0
+    ? Math.max(...countedCarryoverYears)
+    : null;
+  if (latestCountedCarryoverYear != null && latestCountedCarryoverYear > allocStartYear) {
+    allocStartYear = latestCountedCarryoverYear;
+    allocStartMonth = 1;
   }
 
   const initialBalanceSet = new Set(
@@ -741,6 +755,26 @@ async function calculateAllocated45b(
     }
   }
 
+  // Task #959 — §45b-Verfalls-Boden (universell, für JEDEN Kunden). Zum Horizont
+  // (heute oder Forecast-Datum) trägt nur noch das rechtlich relevante Fenster
+  // zum verfügbaren Budget bei: im 1. Halbjahr Vorjahr + laufendes Jahr, ab Juli
+  // nur das laufende Jahr (`earliest45bRelevantAnchor`). Wir heben `allocStart`
+  // auf diesen Boden an — ein weit zurückliegender (manueller/Legacy-)Anker
+  // akkumuliert damit KEINE jahrelang nicht-verfallenden Monatsbeträge mehr,
+  // selbst wenn (noch) kein Carryover materialisiert wurde. Der Boden wird per
+  // `Math.max` mit den bestehenden Shifts (Carryover/IB/Settings) kombiniert,
+  // sodass ein materialisierter Carryover (der das Restguthaben exakt abbildet)
+  // weiterhin Vorrang behält und es zu KEINER Doppelzählung kommt. NICHT im
+  // `{year}`-Modus (Pool-Berechnung von `ensureYearlyCarryover45b`) — dort muss
+  // das volle Quelljahr sichtbar bleiben, damit der Übertrag korrekt entsteht.
+  const expiryFloorAnchorYear = horizonMonth <= 6 ? horizonYear - 1 : horizonYear;
+  if (opts.year == null) {
+    if (expiryFloorAnchorYear > allocStartYear) {
+      allocStartYear = expiryFloorAnchorYear;
+      allocStartMonth = 1;
+    }
+  }
+
   let endYear = horizonYear;
   let endMonth = horizonMonth;
   // Analog zum validFrom-Shift: bei mehreren §45b-Zeilen die SPÄTESTE
@@ -792,22 +826,32 @@ async function calculateAllocated45b(
 
   const totalCalculated = sum45bStatutoryMonths(statutoryMonths);
 
+  // Task #959 — IB-Supersession + Verfall. Ein Startwert (`initial_balance`)
+  // für ein Jahr, das vor dem aktuellen Verfalls-Fenster liegt, trägt nicht mehr
+  // zum verfügbaren Budget bei: Entweder kondensiert ihn ein materialisierter
+  // Carryover (Quelljahr < spätestes Carryover-Zieljahr → der Carryover bildet
+  // das Restguthaben bereits ab, doppelt zählen = verboten) ODER er ist schlicht
+  // verfallen (Jahr < Verfalls-Boden, z.B. Vorjahr ab Juli). Wir behalten nur
+  // Startwerte ab `ibFloorYear = max(Verfalls-Boden, spätestes Carryover-Jahr)`.
+  // Im laufenden/Vorjahres-Fenster ohne kondensierenden Carryover bleibt der
+  // Startwert sichtbar (Vorjahr im 1. Halbjahr noch gültig).
   const ibDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
+  const ibFloorYear = Math.max(expiryFloorAnchorYear, latestCountedCarryoverYear ?? 0);
   const initialBalanceTotal = existingAllocations
-    .filter(a => a.source === "initial_balance" && a.validFrom <= ibDateLimit)
+    .filter(a => a.source === "initial_balance"
+      && a.validFrom <= ibDateLimit
+      && a.year >= ibFloorYear)
     .reduce((sum, a) => sum + a.amountCents, 0);
 
-  // Carryover ignorieren, wenn für das *Quelljahr* (carryover.year - 1) ein manueller Startwert
-  // existiert: Der Startwert bildet das Restguthaben bereits ab und der Carryover wäre
-  // Doppelzählung (Task #101). Das Cleanup-Skript räumt solche obsoleten Einträge zusätzlich auf.
-  const ibYears = new Set(
-    existingAllocations.filter(a => a.source === "initial_balance").map(a => a.year)
-  );
+  // Task #959 — Carryover wird IMMER gezählt (frühere `ibYears`-Ausnahme aus
+  // Task #101 entfällt): Der Startwert desselben Quelljahrs ist jetzt per
+  // IB-Supersession (oben) aus `initialBalanceTotal` entfernt, sodass Carryover
+  // + Startwert sich nicht mehr doppeln. Es zählen nur noch nicht verfallene
+  // Überträge (validFrom <= Stichtag, expiresAt >= Stichtag).
   const carryoverTotal = existingAllocations
     .filter(a => a.source === "carryover" &&
       a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
-      (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)) &&
-      !ibYears.has(a.year - 1))
+      (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)))
     .reduce((sum, a) => sum + a.amountCents, 0);
 
   return totalCalculated + initialBalanceTotal + carryoverTotal;
@@ -1148,21 +1192,21 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
 
   const created: BudgetAllocation[] = [];
 
-  // Jahre mit manuellem Startwert (initial_balance) – für diese Jahre darf KEIN automatischer
-  // Carryover ins Folgejahr erzeugt werden. Begründung (Task #101): Ein manuell gesetzter
-  // Startwert bildet das Restguthaben ab seinem Stichmonat bereits ab. Würde zusätzlich ein
-  // Carryover für das Folgejahr automatisch angelegt, käme es zur Doppelzählung. Die klassische
-  // Übertrags-Logik bleibt erhalten für Jahre OHNE manuellen Startwert.
-  const yearsWithInitialBalance = new Set(
-    allAllocations.filter(a => a.source === "initial_balance").map(a => a.year)
-  );
+  // Task #959 — Universelles Übertrags-Modell: Jahre MIT Startwert
+  // (`initial_balance`) rollen ihr Restguthaben ebenfalls in den Folgejahres-
+  // Carryover. Die frühere `yearsWithInitialBalance`-Ausnahme (Task #101: kein
+  // Auto-Carryover neben einem Startwert, um Doppelzählung zu vermeiden) entfällt,
+  // weil der Pool eines Jahres den Startwert bereits über `yearAllocatedCents`
+  // (= `sumInitialBalancesForYear`) enthält und der Lesepfad den überrollten
+  // Startwert per IB-Supersession aus `initialBalanceTotal` herausrechnet. So
+  // verfällt das Restguthaben JEDES Kunden (neu, alt, manuell) als sichtbarer
+  // Write-off zum 30.06., statt unbegrenzt als Startwert sichtbar zu bleiben.
 
   // Bulk-Vorberechnung (Task #442): statt pro Jahr vier separate SUM-Queries
   // abzusetzen, sammeln wir alle relevanten Allocation-IDs sowie den Jahres-
   // bereich einmal vorab und feuern höchstens zwei aggregierte Queries.
   const yearsToProcess = years.filter(y => {
     if (y >= curYear) return false;
-    if (yearsWithInitialBalance.has(y)) return false;
     const win = carryoverWindowFor(y);
     const targetWindow = `${win.validFrom}|${win.expiresAt}`;
     return !existingCarryoverYears.has(win.targetYear)

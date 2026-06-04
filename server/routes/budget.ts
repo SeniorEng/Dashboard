@@ -18,6 +18,11 @@ import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-vali
 import { validatePflegegrad45a } from "@shared/domain/budget-pflegegrad-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
+import {
+  eligible45bCarryoverMonths,
+  max45bCarryoverCents,
+  max45bStartValueCents,
+} from "@shared/domain/budget/carryover-eligibility";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
 
 /**
@@ -901,6 +906,48 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType },
     res,
   )) return;
+
+  // Task #959 — §45b-Akkumulations-Obergrenze (Gap 3). Ein §45b-Startwert
+  // (`initial_balance`) repräsentiert das bis zum Startmonat angesammelte, noch
+  // nicht verbrauchte Guthaben; er darf höchstens (berechtigte Monate ab
+  // Accrual-Anker bis Startmonat) × 131 € betragen. Der Vorjahres-Übertrag wird
+  // separat über die im Vorjahr berechtigten Monate begrenzt. Beide Caps
+  // verhindern, dass beim Onboarding mehr §45b-Budget erfasst wird, als rechtlich
+  // je hätte entstehen können. Accrual-Anker = frühester Pflegegrad-Beginn
+  // (Care-Level-Historie), Fallback = RAW-Budget-Start.
+  if (budgetType === "entlastungsbetrag_45b") {
+    const { getCustomerCareLevelHistory } = await import("../storage/customer-mgmt/care-level");
+    const careLevelHistory = await getCustomerCareLevelHistory(customerId);
+    const accrualAnchor = careLevelHistory.length > 0
+      ? careLevelHistory[careLevelHistory.length - 1].validFrom
+      : rawBudgetStartDate;
+
+    if (currentMonthAmountCents > 0) {
+      const startCap = max45bStartValueCents(accrualAnchor, budgetStartDate);
+      if (currentMonthAmountCents > startCap) {
+        res.status(400).json({
+          error: "VALIDATION_ERROR",
+          code: "BUDGET_45B_START_VALUE_EXCEEDED",
+          message: `§45b-Startguthaben darf höchstens ${formatEuroDE(startCap)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat). Eingegeben: ${formatEuroDE(currentMonthAmountCents)}.`,
+        });
+        return;
+      }
+    }
+
+    if (carryoverAmountCents > 0) {
+      const carryoverCap = max45bCarryoverCents(
+        eligible45bCarryoverMonths(accrualAnchor, year),
+      );
+      if (carryoverAmountCents > carryoverCap) {
+        res.status(400).json({
+          error: "VALIDATION_ERROR",
+          code: "BUDGET_45B_CARRYOVER_EXCEEDED",
+          message: `§45b-Übertrag aus ${year - 1} darf höchstens ${formatEuroDE(carryoverCap)} betragen (im Vorjahr berechtigte Monate). Eingegeben: ${formatEuroDE(carryoverAmountCents)}.`,
+        });
+        return;
+      }
+    }
+  }
 
   // Task #705 — Bug 5: Für §45a/§39_42a setzt das Wizard-Flow ein
   // `initial_balance` per `/initial-budget`, ohne dass die zugehörigen
