@@ -1,6 +1,8 @@
 import { installGermanZodErrors } from "@shared/utils/zod-german";
 installGermanZodErrors();
 
+import { transformSignatureFields } from "@shared/utils/signature-transport";
+
 import express from "express";
 import cookieParser from "cookie-parser";
 import compression from "compression";
@@ -46,6 +48,17 @@ app.use(express.json({ limit: "10mb" }));
 
 app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 app.use(cookieParser());
+
+// Restore the `data:image/...;base64,` prefix on signature fields. The browser
+// strips it before sending (the edge WAF blocks request bodies containing a
+// `data:` URI), so we rebuild the full data URL here — before any validation,
+// hashing, storage or PDF rendering — keeping the persisted format unchanged.
+app.use((req, _res, next) => {
+  if (req.path.startsWith("/api") && req.body && typeof req.body === "object") {
+    req.body = transformSignatureFields(req.body, "restore");
+  }
+  next();
+});
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

@@ -161,3 +161,44 @@ describe("API-Client CSRF Auto-Heilung (Task #984)", () => {
     expect(postCalls).toHaveLength(2);
   });
 });
+
+describe("API-Client Unterschrift-Transport (Edge-WAF)", () => {
+  let originalFetch: typeof globalThis.fetch;
+  let originalDocument: unknown;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalDocument = (globalThis as Record<string, unknown>).document;
+    (globalThis as Record<string, unknown>).document = { cookie: "" };
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    (globalThis as Record<string, unknown>).document = originalDocument;
+    vi.restoreAllMocks();
+  });
+
+  it("entfernt den `data:image`-Prefix aus Unterschriftsfeldern im gesendeten Body (sonst blockt die Edge-WAF mit 403)", async () => {
+    let sentBody = "";
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/csrf-token")) {
+        return jsonResponse({ csrfToken: "tok" });
+      }
+      sentBody = String(init?.body ?? "");
+      return jsonResponse({ id: 1, signed: true });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const RAW = "iVBORw0KGgoAAAANSUhEUgAAAAUA";
+    await api.post("/service-records/1/sign", {
+      signatureData: "data:image/png;base64," + RAW,
+      signingLocation: "Berlin",
+    });
+
+    // Der Wire-Body darf den von der WAF blockierten `data:`-Token NICHT enthalten,
+    // aber die rohe Base64-Nutzlast und Nicht-Signatur-Felder bleiben erhalten.
+    expect(sentBody).not.toContain("data:");
+    expect(sentBody).toContain(RAW);
+    expect(JSON.parse(sentBody)).toEqual({ signatureData: RAW, signingLocation: "Berlin" });
+  });
+});

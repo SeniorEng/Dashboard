@@ -6,6 +6,8 @@
  * Includes CSRF protection for all state-changing requests.
  */
 
+import { transformSignatureFields } from "@shared/utils/signature-transport";
+
 // CSRF Token handling
 const CSRF_COOKIE_NAME = "careconnect_csrf";
 const CSRF_HEADER_NAME = "x-csrf-token";
@@ -249,7 +251,11 @@ async function apiRequest<TResponse, TBody = unknown>(
       };
 
       if (body !== undefined) {
-        fetchOptions.body = JSON.stringify(body);
+        // Strip the `data:image/...;base64,` prefix from signature fields so the
+        // request body never contains a `data:` URI — the published edge WAF
+        // hard-blocks such bodies with a 403 before they reach the server. The
+        // server rebuilds the full data URL at ingestion.
+        fetchOptions.body = JSON.stringify(transformSignatureFields(body, "strip"));
       }
 
       let response = await fetch(`/api${endpoint}`, fetchOptions);
