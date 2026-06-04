@@ -531,9 +531,13 @@ describe("INT-9: Initiale Startwerte (initial_balance)", () => {
   });
 
   it("INT-9.1 – Bestehende Startwerte aufraeumen und neuen setzen", async () => {
+    // Task #964: §45b-Startwerte mit Stichmonat aus einem Vorjahr werden über
+    // die API abgelehnt (= Übertrag). Dieser CRUD-Test nutzt daher den
+    // laufenden Jahresanfang als gültigen Stichmonat.
+    const validFrom = `${new Date().getFullYear()}-01`;
     const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-balance/entlastungsbetrag_45b`, {
       amountCents: 50000,
-      validFrom: "2025-11",
+      validFrom,
     });
     expect([200, 201]).toContain(res.status);
   });

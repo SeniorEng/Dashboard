@@ -78,3 +78,38 @@ export function max45bStartValueCents(
   const months = Math.max(0, startMonth - earliestEligibleMonth + 1);
   return months * BUDGET_45B_MAX_MONTHLY_CENTS;
 }
+
+/**
+ * Task #964 — Deutsche Fehler-/Hinweismeldung, die einen §45b-Startwert mit
+ * einem Stichmonat/`validFrom` aus einem früheren Jahr ablehnt und stattdessen
+ * auf das Übertrag-Feld verweist. Rechtlicher Hintergrund: §45b-Guthaben aus
+ * einem Vorjahr ist ein Übertrag (verfällt am 30.06. des laufenden Jahres) und
+ * KEIN dauerhafter Startwert.
+ */
+export const PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE =
+  "Ein §45b-Restguthaben aus einem früheren Jahr ist ein Übertrag aus dem Vorjahr "
+  + "(verfällt am 30.06. dieses Jahres) und kann nicht als Startwert erfasst werden. "
+  + "Bitte tragen Sie den Betrag im Feld \"Übertrag aus Vorjahr\" ein.";
+
+/**
+ * Task #964 — Reiner Guard, der einen §45b-Startwert mit einem Stichmonat aus
+ * einem früheren Jahr ablehnt. Gilt AUSSCHLIESSLICH für §45b (Entlastungsbetrag);
+ * §45a/§39 werden über diese Funktion nie geprüft. Vorjahres-§45b-Guthaben muss
+ * als Übertrag (`carryover`) erfasst werden, nicht als dauerhafter Startwert.
+ *
+ * @param startMonthISO Stichmonat/`validFrom` des Startwerts ("YYYY-MM" oder
+ *   "YYYY-MM-DD").
+ * @param currentYear  Laufendes Jahr (vom Aufrufer übergeben — keine `Date`-
+ *   Seiteneffekte hier).
+ * @returns Deutsche Fehlermeldung, falls das Jahr vor `currentYear` liegt, sonst
+ *   `null`. Ungültige/leere Eingaben ergeben `null` (Schema-Validierung greift
+ *   separat).
+ */
+export function validate45bInitialBalanceNotPriorYear(
+  startMonthISO: string,
+  currentYear: number,
+): string | null {
+  const year = Number(startMonthISO.split("-")[0]);
+  if (!Number.isFinite(year) || year === 0) return null;
+  return year < currentYear ? PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE : null;
+}

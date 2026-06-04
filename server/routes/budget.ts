@@ -22,6 +22,7 @@ import {
   eligible45bCarryoverMonths,
   max45bCarryoverCents,
   max45bStartValueCents,
+  validate45bInitialBalanceNotPriorYear,
 } from "@shared/domain/budget/carryover-eligibility";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
 
@@ -486,6 +487,25 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
 
   // Task #705 / #716 — Selbstzahler-Block via shared Validator.
   if (await rejectIfSelbstzahler45b(customerId, budgetType, res)) return;
+
+  // Task #964 — §45b-Restguthaben aus einem früheren Jahr ist rechtlich ein
+  // Übertrag (verfällt 30.06.), kein dauerhafter Startwert. Prior-Year-Stichmonate
+  // werden über den normalen API-Contract abgelehnt und auf das Übertrag-Feld
+  // umgeleitet. Gilt NUR für §45b — §45a/§39 bleiben unberührt. KEIN harter
+  // Storage-Layer-Wall: Migration/Backfill (Epoch-Sentinel) & Korrektur-Tooling
+  // schreiben weiterhin direkt über die Storage-Schicht.
+  if (budgetType === "entlastungsbetrag_45b") {
+    const currentYear = parseLocalDate(todayISO()).getFullYear();
+    const priorYearError = validate45bInitialBalanceNotPriorYear(result.data.validFrom, currentYear);
+    if (priorYearError) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        code: "BUDGET_45B_PRIOR_YEAR_INITIAL_BALANCE",
+        message: priorYearError,
+      });
+      return;
+    }
+  }
 
   const [yearStr, monthStr] = result.data.validFrom.split("-");
   const year = parseInt(yearStr);

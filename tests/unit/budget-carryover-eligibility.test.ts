@@ -13,6 +13,8 @@ import {
   eligible45bCarryoverMonths,
   max45bCarryoverCents,
   max45bStartValueCents,
+  validate45bInitialBalanceNotPriorYear,
+  PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE,
 } from "@shared/domain/budget/carryover-eligibility";
 import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 
@@ -104,5 +106,42 @@ describe("max45bStartValueCents (Task #959)", () => {
     expect(max45bStartValueCents("2026-01-01", "kein-datum")).toBe(
       BUDGET_45B_MAX_MONTHLY_CENTS,
     );
+  });
+});
+
+describe("validate45bInitialBalanceNotPriorYear (Task #964)", () => {
+  it("lehnt einen Stichmonat aus dem Vorjahr ab und verweist auf den Übertrag", () => {
+    const err = validate45bInitialBalanceNotPriorYear("2025-11", 2026);
+    expect(err).toBe(PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE);
+    expect(err).toContain("Übertrag aus Vorjahr");
+  });
+
+  it("lehnt auch ein weit zurückliegendes Jahr ab", () => {
+    expect(validate45bInitialBalanceNotPriorYear("2020-01-01", 2026)).toBe(
+      PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE,
+    );
+  });
+
+  it("erlaubt einen Stichmonat im laufenden Jahr", () => {
+    expect(validate45bInitialBalanceNotPriorYear("2026-01", 2026)).toBeNull();
+    expect(validate45bInitialBalanceNotPriorYear("2026-12-01", 2026)).toBeNull();
+  });
+
+  it("erlaubt einen Stichmonat in einem späteren Jahr (kein Vorjahr)", () => {
+    expect(validate45bInitialBalanceNotPriorYear("2027-03", 2026)).toBeNull();
+  });
+
+  it("akzeptiert sowohl YYYY-MM als auch YYYY-MM-DD", () => {
+    expect(validate45bInitialBalanceNotPriorYear("2025-06", 2026)).toBe(
+      PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE,
+    );
+    expect(validate45bInitialBalanceNotPriorYear("2025-06-15", 2026)).toBe(
+      PRIOR_YEAR_45B_INITIAL_BALANCE_MESSAGE,
+    );
+  });
+
+  it("gibt null zurück bei leerer/unparsebarer Eingabe (Schema greift separat)", () => {
+    expect(validate45bInitialBalanceNotPriorYear("", 2026)).toBeNull();
+    expect(validate45bInitialBalanceNotPriorYear("kein-datum", 2026)).toBeNull();
   });
 });

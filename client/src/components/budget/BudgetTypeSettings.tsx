@@ -14,6 +14,7 @@ import { invalidateRelated } from "@/lib/query-invalidation";
 import { formatCurrency } from "@shared/utils/format";
 import { formatEuroDE, parseEuroDE } from "@shared/utils/money";
 import { todayISO } from "@shared/utils/datetime";
+import { validate45bInitialBalanceNotPriorYear } from "@shared/domain/budget/carryover-eligibility";
 // Task #608 / #716: Sentinel-Wert, mit dem der Historisierungs-Backfill alte
 // Zeilen auf „rückwirkend gültig" markiert hat. Im UI als leeres Feld +
 // Hinweistext rendern, statt buchstäblich „01.01.1970" anzuzeigen. Zentral
@@ -647,6 +648,12 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
     mutationFn: async () => {
       const amountCents = euroStringToCents(amount);
       if (!amountCents || amountCents <= 0) throw new Error("Bitte einen gültigen Betrag eingeben");
+      // Task #964 — Prior-Year-§45b-Startwert ist ein Übertrag; Server lehnt ihn
+      // ebenfalls ab. Hier früh blocken, damit die Fehlermeldung sofort erscheint.
+      const guardError = budgetType === "entlastungsbetrag_45b"
+        ? validate45bInitialBalanceNotPriorYear(month, new Date().getFullYear())
+        : null;
+      if (guardError) throw new Error(guardError);
       return unwrapResult(await api.post(`/budget/${customerId}/initial-balance/${budgetType}`, {
         amountCents,
         validFrom: month,
@@ -687,6 +694,20 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
   const showMidYearWarning = selectedMonthNum > 1;
+
+  // Task #964 — §45b-Startwerte dürfen NUR im laufenden Jahr liegen. Ein
+  // Stichmonat aus einem früheren Jahr ist rechtlich ein Übertrag aus dem
+  // Vorjahr (verfällt 30.06.) und gehört in die `CarryoverSection`. Daher
+  // bietet die Jahr-Auswahl für §45b nur das laufende Jahr an, und ein
+  // Server-konsistenter Guard blockt das Speichern, falls doch ein Vorjahr
+  // im State landet. (§45a/§39 nutzen diese Sektion nicht.)
+  const is45b = budgetType === "entlastungsbetrag_45b";
+  const priorYearError = is45b
+    ? validate45bInitialBalanceNotPriorYear(month, currentYear)
+    : null;
+  const yearOptions = is45b
+    ? [currentYear]
+    : Array.from({ length: 5 }, (_, i) => currentYear - i);
 
   const filteredMonths = MONTH_OPTIONS.filter(m => {
     if (selectedYear < currentYear) return true;
@@ -798,7 +819,7 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
                 className="h-8 w-full text-sm border border-gray-200 rounded-md px-2"
                 data-testid={`select-balance-year-${budgetType}`}
               >
-                {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                {yearOptions.map(y => (
                   <option key={y} value={String(y)}>{y}</option>
                 ))}
               </select>
@@ -837,7 +858,17 @@ function InitialBalanceSection({ customerId, budgetType, expanded, onToggleHisto
           </div>
         )}
 
-        {hasValidInput && (
+        {priorYearError && (
+          <div
+            className="flex items-start gap-2 mt-1 p-2 rounded bg-red-50 border border-red-200 text-xs text-red-700"
+            data-testid={`error-prior-year-initial-balance-${budgetType}`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <p>{priorYearError}</p>
+          </div>
+        )}
+
+        {hasValidInput && !priorYearError && (
           <div className="space-y-2 mt-1">
             <p className="text-xs text-teal-600">
               <Plus className="h-3 w-3 inline" /> {formatCurrency(euroStringToCents(amount) || 0)} wird als Restguthaben ab {formatMonthYear(month)} {hasHistory ? "aktualisiert" : "gespeichert"}

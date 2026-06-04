@@ -464,12 +464,24 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
       ],
     });
 
-    // Startwert ab Dezember Vorjahr
-    const ibRes = await apiPost<any>(`/api/budget/${dedupCustomerId}/initial-balance/entlastungsbetrag_45b`, {
+    // Startwert ab Dezember Vorjahr. Task #964: Die API lehnt §45b-Startwerte
+    // mit Vorjahres-Stichmonat ab (= Übertrag). Dieser Test prüft aber GENAU
+    // die §959-Roll-Logik für bereits existierende Vorjahres-Startwerte (aus
+    // Migration/Korrektur). Wir seeden den Vorjahres-Startwert daher direkt
+    // über die Storage-Schicht — den vom Task bewusst erhaltenen
+    // Migrations-/Korrektur-Pfad — und umgehen so nur den Routen-Guard.
+    const { upsertInitialBalanceAllocation } = await import(
+      "../server/storage/budget/allocation-storage"
+    );
+    await upsertInitialBalanceAllocation({
+      customerId: dedupCustomerId,
+      budgetType: "entlastungsbetrag_45b",
+      year: previousYear,
+      month: startMonth,
       amountCents: ibAmountCents,
-      validFrom: `${previousYear}-${String(startMonth).padStart(2, "0")}`,
+      validFrom: `${previousYear}-${String(startMonth).padStart(2, "0")}-01`,
+      expiresAt: null,
     });
-    expect(ibRes.status).toBe(200);
   });
 
   it("BUD-IB-DEDUP-1 – Startwert-Historie zeigt genau EINEN Startwert (+ ggf. Auto-Carryover, keine Doppelung)", async () => {
