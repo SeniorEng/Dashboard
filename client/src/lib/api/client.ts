@@ -41,6 +41,40 @@ async function ensureCsrfToken(): Promise<string | null> {
   return token;
 }
 
+/**
+ * Holt unbedingt einen frischen CSRF-Token vom Server (ignoriert den evtl.
+ * abgelaufenen/fehlenden Cookie). Wird für die einmalige Auto-Heilung nach einem
+ * CSRF-403 genutzt: Der Server setzt dabei einen neuen `careconnect_csrf`-Cookie
+ * und liefert denselben Token im JSON zurück, sodass Header und Cookie für den
+ * Retry wieder zusammenpassen.
+ */
+async function forceRefreshCsrfToken(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/csrf-token", { credentials: "include", cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      if (typeof data?.csrfToken === "string" && data.csrfToken) {
+        return data.csrfToken;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to refresh CSRF token:", e);
+  }
+  // Fallback: evtl. wurde der Cookie trotzdem gesetzt.
+  return getCsrfToken();
+}
+
+/**
+ * Erkennt eine CSRF-bedingte Ablehnung (fehlender oder ungültiger Token). Der
+ * Server sendet `{ error: "CSRF_TOKEN_MISSING" | "CSRF_TOKEN_INVALID" }`; nach
+ * `parseErrorResponse` landet das in `code` bzw. `details.errorCode`.
+ */
+function isCsrfError(error: ApiErrorInfo): boolean {
+  const codes = ["CSRF_TOKEN_MISSING", "CSRF_TOKEN_INVALID"];
+  const errorCode = typeof error.details?.errorCode === "string" ? error.details.errorCode : "";
+  return codes.includes(error.code) || codes.includes(errorCode);
+}
+
 // Standard API error structure
 export interface ApiErrorInfo {
   code: string;
@@ -192,6 +226,12 @@ async function apiRequest<TResponse, TBody = unknown>(
   }
 
   let lastError: ApiErrorInfo | null = null;
+  // Einmalige Auto-Heilung bei CSRF-403: Ein abgelaufener/fehlender Token darf
+  // einen sonst gültigen Schreibvorgang (z.B. Leistungsnachweis unterschreiben)
+  // nicht hart scheitern lassen. Wir holen genau EINMAL einen frischen Token und
+  // wiederholen die Anfrage. Sicher, weil ein Cross-Site-Angreifer weder
+  // /api/csrf-token lesen noch den Cookie setzen kann.
+  let csrfRetried = false;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     // Skip retry for non-idempotent methods after first attempt
@@ -212,11 +252,34 @@ async function apiRequest<TResponse, TBody = unknown>(
         fetchOptions.body = JSON.stringify(body);
       }
 
-      const response = await fetch(`/api${endpoint}`, fetchOptions);
+      let response = await fetch(`/api${endpoint}`, fetchOptions);
 
       if (!response.ok) {
-        const error = await parseErrorResponse(response);
-        
+        let error = await parseErrorResponse(response);
+
+        // One-time CSRF auto-heal: frischen Token holen und Anfrage wiederholen.
+        if (
+          response.status === 403 &&
+          !safeMethods.includes(method) &&
+          !csrfRetried &&
+          isCsrfError(error)
+        ) {
+          csrfRetried = true;
+          const fresh = await forceRefreshCsrfToken();
+          if (fresh) {
+            requestHeaders[CSRF_HEADER_NAME] = fresh;
+            response = await fetch(`/api${endpoint}`, fetchOptions);
+            if (response.ok) {
+              if (response.status === 204) {
+                return { success: true, data: undefined as TResponse };
+              }
+              const data = await response.json();
+              return { success: true, data };
+            }
+            error = await parseErrorResponse(response);
+          }
+        }
+
         // Check if we should retry
         if (attempt < retries && isRetryableError(response, null)) {
           lastError = error;
