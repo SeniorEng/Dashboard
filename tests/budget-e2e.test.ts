@@ -532,9 +532,14 @@ describe("INT-9: Initiale Startwerte (initial_balance)", () => {
 
   it("INT-9.1 – Bestehende Startwerte aufraeumen und neuen setzen", async () => {
     // Task #964: §45b-Startwerte mit Stichmonat aus einem Vorjahr werden über
-    // die API abgelehnt (= Übertrag). Dieser CRUD-Test nutzt daher den
-    // laufenden Jahresanfang als gültigen Stichmonat.
-    const validFrom = `${new Date().getFullYear()}-01`;
+    // die API abgelehnt (= Übertrag). Dieser CRUD-Test nutzt daher einen
+    // Stichmonat im laufenden Jahr.
+    // Task #971: Der §45b-Startwert ist auf (berechtigte Monate ab
+    // Accrual-Anker bis Startmonat) × 131 € gedeckelt. Der Scenario-Kunde hat
+    // `pflegegradSeit` im Vorjahr, daher gilt ab Januar des laufenden Jahres
+    // 131 €/Monat. Für 50 000 ct (500 €) braucht es ≥4 angesammelte Monate
+    // (4 × 131 € = 524 €), also einen April-Stichmonat.
+    const validFrom = `${new Date().getFullYear()}-04`;
     const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-balance/entlastungsbetrag_45b`, {
       amountCents: 50000,
       validFrom,

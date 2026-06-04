@@ -514,6 +514,32 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
   const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
   const userId = req.user?.id;
 
+  // Task #971 — §45b-Akkumulations-Obergrenze auch im Admin-Startwert-Editor
+  // erzwingen (konsistent zum `/initial-budget`-Pfad, Task #959). Ein §45b-
+  // Startwert (`initial_balance`) repräsentiert das bis zum Startmonat
+  // angesammelte, noch nicht verbrauchte Guthaben; er darf höchstens
+  // (berechtigte Monate ab Accrual-Anker bis Startmonat) × 131 € betragen.
+  // Accrual-Anker = frühester Pflegegrad-Beginn (Care-Level-Historie), Fallback
+  // = der erfasste Startmonat selbst. Gilt NUR für §45b — §45a/§39 bleiben
+  // uncapped. KEIN harter Storage-Layer-Wall: Migration/Korrektur-Tooling
+  // schreibt weiterhin direkt über die Storage-Schicht.
+  if (budgetType === "entlastungsbetrag_45b") {
+    const { getCustomerCareLevelHistory } = await import("../storage/customer-mgmt/care-level");
+    const careLevelHistory = await getCustomerCareLevelHistory(customerId);
+    const accrualAnchor = careLevelHistory.length > 0
+      ? careLevelHistory[careLevelHistory.length - 1].validFrom
+      : validFromDate;
+    const startCap = max45bStartValueCents(accrualAnchor, validFromDate);
+    if (result.data.amountCents > startCap) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        code: "BUDGET_45B_START_VALUE_EXCEEDED",
+        message: `§45b-Startguthaben darf höchstens ${formatEuroDE(startCap)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat). Eingegeben: ${formatEuroDE(result.data.amountCents)}.`,
+      });
+      return;
+    }
+  }
+
   await budgetLedgerStorage.upsertInitialBalanceAllocation({
     customerId,
     budgetType,
