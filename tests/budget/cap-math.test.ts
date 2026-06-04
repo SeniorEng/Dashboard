@@ -130,10 +130,29 @@ describe("computeCapRemaining — §45a (Monats-Cap + Carryover + Pflegegrad)", 
     expect(out.capRemainingCents).toBe(0);
   });
 
-  it("liefert POSITIVE_INFINITY wenn kein Monatslimit gesetzt ist", () => {
+  it("ohne Monatslimit greift bei PG≥2 der gesetzliche Default-Cap (kein Infinity)", () => {
+    // Task #954/#973 — PG≥2 + §45a aktiv + kein expliziter Kunden-Wert ⇒ der
+    // gesetzliche §45a-Default nach Pflegegrad greift (Anspruchsberechtigte sehen
+    // UND buchen den gesetzlichen Monats-Cap). KEIN Infinity.
     const out = computeCapRemaining({
       budgetType: "umwandlung_45a",
       pflegegrad: 5,
+      monthlyLimitCents: null,
+      yearlyLimitCents: null,
+      carryoverCents: 0,
+      netUsedInWindowCents: 0,
+    });
+    expect(out.capRemainingCents).toBe(BUDGET_45A_MAX_BY_PFLEGEGRAD[5]);
+  });
+
+  it("ohne Monatslimit UND ohne Anspruch (PG<2) liefert POSITIVE_INFINITY (kein Cap-Beitrag)", () => {
+    // PG<2 hat keinen gesetzlichen §45a-Default ⇒ resolve45aMonthlyLimitCents
+    // liefert null ⇒ kein Fenster-Cap (Topf bleibt für Nicht-Anspruchsberechtigte
+    // unverändert). PG<2-§45a-Aktivierung wird ohnehin an der API abgelehnt (400),
+    // dieser Zweig ist also nur als reiner Resolver-Pfad erreichbar.
+    const out = computeCapRemaining({
+      budgetType: "umwandlung_45a",
+      pflegegrad: 1,
       monthlyLimitCents: null,
       yearlyLimitCents: null,
       carryoverCents: 0,
