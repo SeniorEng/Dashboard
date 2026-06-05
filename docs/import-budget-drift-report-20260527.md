@@ -745,3 +745,76 @@ LIMIT 30;
 - Produktion ist Replica — Zeitpunkt-Snapshot vom 27.05.2026. Bei sehr frischen Writes (letzte Minuten) kann Drift kurzfristig auftauchen oder verschwinden.
 - Soft-gelöschte Termine und Transaktionen wurden in `Phantom-Stornos` und `Doppel-Konsum` bewusst je nach Frage berücksichtigt oder ausgeschlossen — siehe Definitionen je Abschnitt.
 - Audit-Log (Tabelle ist `audit_log` singular, nicht `audit_logs`) hat zum 23.02.2026 keinen passenden Eintrag — der Backfill von H1 lief am Audit-Layer vorbei.
+
+---
+
+## 10. Nachtrag — Task #987: Phantom-Storno-Korrektur (Verbrauch zu niedrig)
+
+- **Stand:** 05.06.2026
+- **Datenquelle:** Produktion (READ-ONLY für Diagnose + Verifikation)
+- **Scope:** Append-only-Korrektur der in §1 beschriebenen verwaisten Stornos.
+
+### 10.1 Problem (präzisiert)
+
+Verwaiste Reversal-Zeilen (`reversed_transaction_id IS NULL`, Notiz „Storno von
+Transaktion #N") schreiben denselben Verbrauch ein **zweites Mal gut**, wenn die
+referenzierte Original-Buchung tatsächlich verbraucht bleibt. Der partielle
+Unique-Index `budget_transactions_reversal_unique_idx` greift nur für
+Reversals mit **gesetztem** Link und übersieht die NULL-Link-Waisen. Folge:
+Netto-Verbrauch zu niedrig, Restguthaben zu hoch (Kunde 39 zeigte 587,02 €
+statt 609,84 €).
+
+### 10.2 Authoritative Messung (READ-ONLY, vor Korrektur)
+
+Maß: pro Kunde/Topf `drift = true_used − net_used`, mit
+`net_used = Σ|consumption+write_off| − Σ|reversal|` und
+`true_used = Σ|consumption, die NICHT per Link storniert ist|`.
+
+Eine Waise wird als **Phantom** klassifiziert (zu korrigieren), wenn die
+referenzierte Original-Buchung **(a)** zusätzlich regulär (verknüpft) storniert
+ist **ODER (b)** zu einem real geleisteten (lebenden) Termin gehört
+(`deleted_at IS NULL AND status <> 'cancelled'`). Ein **Einzel-Storno eines
+stornierten/gelöschten Termins** wäre legitim und wird übersprungen — im
+Bestand kam dieser Fall nicht vor (alle 28 Waisen sind Phantom).
+
+| Kunde | Topf | Phantom-Waisen | Phantom-Gutschrift |
+|---|---|---:|---:|
+| 95 | entlastungsbetrag_45b | 10 | 541,44 € |
+| 72 | entlastungsbetrag_45b | 4 | 169,50 € |
+| 52 | entlastungsbetrag_45b | 1 | 125,90 € |
+| 95 | ersatzpflege_39_42a | 2 | 114,00 € |
+| 92 | entlastungsbetrag_45b | 2 | 111,47 € |
+| 77 | entlastungsbetrag_45b | 3 | 93,70 € |
+| 106 | entlastungsbetrag_45b | 1 | 81,60 € |
+| 58 | entlastungsbetrag_45b | 2 | 80,98 € |
+| 136 | entlastungsbetrag_45b | 1 | 68,64 € |
+| 76 | entlastungsbetrag_45b | 1 | 62,95 € |
+| 39 | entlastungsbetrag_45b | 1 | 22,82 € |
+| **Σ** | | **28** | **1.473,00 €** |
+
+Kunde 39: `net_used` 587,02 € + 22,82 € = **609,84 €** (Soll erreicht).
+
+### 10.3 Korrektur (GoBD, append-only)
+
+Pro Phantom-Waise eine inverse Ausgleichsbuchung (`consumption`) mit
+vorzeichen-invertierten Beträgen **und allen Service-Spalten**
+(`hauswirtschaft/alltagsbegleitung` Minuten+Cents, `travel/customer`
+Kilometer+Cents). Σ(Waise + Korrektur) = 0 je Spalte → der Verbrauch wird wieder
+gezählt, die ursprüngliche Waise bleibt revisionssicher stehen. Notiz mit
+eindeutiger Idempotenz-Markierung „verwaisten Storno #<id> (ref #<N>)".
+
+- **Skript:** `server/scripts/reconcile-phantom-stornos.ts`
+  (Trockenlauf-Default; `--apply` erfordert `--user=<superadmin-id>` +
+  `--reason="…"` ≥10 Zeichen; Audit-Log pro Korrektur + Sammel-Batch).
+- **Kernlogik (SSoT, rein):** `shared/domain/budget/phantom-storno.ts`
+  (genutzt von Skript, Schreib-Guard und Drift-Test).
+- **Prävention:** `reverseBudgetTransaction` erkennt jetzt auch Note-basierte
+  Waisen-Stornos derselben Original-Buchung und verhindert ein zweites Storno.
+- **Drift-Test:** `tests/architecture/phantom-storno-detector.test.ts`
+  schlägt an, sobald Waise + verknüpfte Storno-Zeile derselben Buchung auftritt.
+
+### 10.4 Verifikation nach `--apply` (Produktion, READ-ONLY)
+
+> Nach scharfem Lauf auszufüllen — pro Kunde/Topf `net_used == true_used`
+> bestätigen, Kunde 39 = 609,84 €, Σ neu gebuchter Korrekturen = 1.473,00 €,
+> Audit-Batch-ID notieren.

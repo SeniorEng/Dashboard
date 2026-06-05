@@ -3,7 +3,7 @@ import {
   type BudgetTransaction,
   type InsertBudgetTransaction,
 } from "@shared/schema";
-import { eq, and, desc, gte, lte, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, desc, gte, lte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 
@@ -98,6 +98,26 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
     .limit(1);
 
   if (existingReversal.length > 0) return existingReversal[0];
+
+  // Task #987 — auch NOTE-basierte Waisen-Stornos (`reversed_transaction_id`
+  // NULL) für DIESELBE Original-Buchung erkennen. Der Partial-Unique-Index
+  // `budget_transactions_reversal_unique_idx` greift nur für GESETZTE Links und
+  // übersieht Import-Waisen. Existiert bereits eine verwaiste Storno-Zeile, die
+  // diese Original-Buchung referenziert ("Storno … von Transaktion #<id>"),
+  // wäre ein zweites (reguläres) Storno die Phantom-Doppel-Gutschrift aus #987
+  // — also stattdessen die bestehende Waise zurückgeben statt neu zu buchen.
+  const orig0 = original[0];
+  const orphanStorno = await d.select()
+    .from(budgetTransactions)
+    .where(and(
+      eq(budgetTransactions.customerId, orig0.customerId),
+      eq(budgetTransactions.transactionType, "reversal"),
+      isNull(budgetTransactions.reversedTransactionId),
+      sql`${budgetTransactions.notes} ~ ${`Storno.*Transaktion #${transactionId}(\\D|$)`}`,
+    ))
+    .limit(1);
+
+  if (orphanStorno.length > 0) return orphanStorno[0];
 
   // Task #754 (BUG-14 / BUG-10b) — Service-Cent-/Minuten-/km-Spalten der
   // Original-Consumption werden auf die Reversal-Tx GESPIEGELT und dabei
