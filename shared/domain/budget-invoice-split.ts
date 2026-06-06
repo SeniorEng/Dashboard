@@ -23,6 +23,7 @@
 
 import type { BudgetType } from "./budgets";
 import { BUDGET_TYPES } from "./budgets";
+import { parseStornoReference } from "./budget/phantom-storno";
 
 export type InvoicePotKey = BudgetType | "private";
 
@@ -52,6 +53,74 @@ export function isPrivatePot(potKey: InvoicePotKey): boolean {
 export interface BudgetSplitForAppointment {
   /** cents pro Pot, summiert aus den `consumption`-Transaktionen. */
   cents: Partial<Record<InvoicePotKey, number>>;
+}
+
+/** Mappt einen rohen `budget_type` auf einen Pot-Key (unbekannt → "private"). */
+export function toPotKey(budgetType: string): InvoicePotKey {
+  return (POT_ORDER as readonly string[]).includes(budgetType)
+    ? (budgetType as InvoicePotKey)
+    : "private";
+}
+
+/** Minimal-Sicht auf eine `consumption`-Ledger-Zeile für den Split. */
+export interface SplitConsumptionRow {
+  id: number;
+  appointmentId: number | null;
+  budgetType: string;
+  amountCents: number;
+}
+
+/** Minimal-Sicht auf eine `reversal`-Ledger-Zeile für den Split. */
+export interface SplitReversalRow {
+  reversedTransactionId: number | null;
+  notes: string | null;
+}
+
+/**
+ * Task #1012 — Baut den Pot-Split aus den Ledger-Zeilen und schließt dabei
+ * Konsumptionen aus, die durch ein Storno wieder zurückgenommen wurden.
+ *
+ * Hintergrund: `getBudgetSplitForAppointments` las bisher ALLE
+ * `consumption`-Zeilen und ignorierte Reversals komplett. Ein Topf, dessen
+ * Verbrauch ausschließlich aus stornierten Buchungen besteht (z.B. eine
+ * „Phantom-§45a-Aufteilung", die durch ein Storno entstanden ist), erschien
+ * dadurch weiterhin im Split und erzeugte eine überflüssige eigene
+ * Folge-Rechnung.
+ *
+ * Eine Konsumption gilt als zurückgenommen, wenn ihre `id`
+ *   - von einer VERKNÜPFTEN Reversal-Zeile referenziert wird
+ *     (`reversed_transaction_id` gesetzt), ODER
+ *   - von einer NOTE-basierten Waisen-Storno-Zeile referenziert wird
+ *     („Storno … von Transaktion #<id>", `reversed_transaction_id` NULL) —
+ *     beide Fälle werden gemäß der Phantom-Storno-Konvention als echtes
+ *     Storno gewertet (vgl. `shared/domain/budget/phantom-storno.ts`).
+ *
+ * Nur die verbleibenden (lebenden) Konsumptionen fließen in den Split;
+ * Töpfe ohne lebende Konsumption tauchen nicht mehr auf.
+ */
+export function buildBudgetSplitFromLedger(
+  consumptions: SplitConsumptionRow[],
+  reversals: SplitReversalRow[],
+): Map<number, BudgetSplitForAppointment> {
+  const reversedConsumptionIds = new Set<number>();
+  for (const r of reversals) {
+    if (r.reversedTransactionId != null) {
+      reversedConsumptionIds.add(r.reversedTransactionId);
+    }
+    const noteRef = parseStornoReference(r.notes);
+    if (noteRef != null) reversedConsumptionIds.add(noteRef);
+  }
+
+  const out = new Map<number, BudgetSplitForAppointment>();
+  for (const c of consumptions) {
+    if (c.appointmentId == null) continue;
+    if (reversedConsumptionIds.has(c.id)) continue; // storniert → nicht abrechnen
+    const potKey = toPotKey(c.budgetType);
+    const entry = out.get(c.appointmentId) ?? { cents: {} };
+    entry.cents[potKey] = (entry.cents[potKey] ?? 0) + Math.abs(c.amountCents);
+    out.set(c.appointmentId, entry);
+  }
+  return out;
 }
 
 export interface SplitInputItem {

@@ -1,11 +1,12 @@
 import { badRequest } from "../lib/errors";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
-import { POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
-import { DEFAULT_BUDGET_POT_ORDER, type BudgetType } from "@shared/domain/budgets";
+import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
+import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
+import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, customerServicePrices, budgetTransactions } from "@shared/schema";
-import { eq, and, isNull, isNotNull, inArray, ne, desc } from "drizzle-orm";
+import { eq, and, isNull, inArray, ne, desc, or } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
@@ -368,8 +369,7 @@ export async function getBudgetSplitForAppointments(
   customerId: number,
   apptIds: number[],
 ): Promise<Map<number, BudgetSplitForAppointment>> {
-  const out = new Map<number, BudgetSplitForAppointment>();
-  if (apptIds.length === 0) return out;
+  if (apptIds.length === 0) return new Map();
 
   // ID mitlesen, damit wir gegen die Reversal-Verweise abgleichen können.
   const txns = await db.select({
@@ -385,41 +385,39 @@ export async function getBudgetSplitForAppointments(
     eq(budgetTransactions.transactionType, "consumption"),
   ));
 
-  if (txns.length === 0) return out;
+  if (txns.length === 0) return new Map();
 
-  // Stornierte Original-Buchungen ermitteln: jede consumption-Zeile, deren ID
-  // von einer reversal-Zeile referenziert wird, ist netto null und zählt nicht.
+  // Stornierte Original-Buchungen ermitteln — sowohl über die VERKNÜPFUNG
+  // (`reversed_transaction_id`) als auch über NOTE-basierte Waisen-Stornos
+  // („Storno … von Transaktion #<id>"), gemäß der Phantom-Storno-Konvention
+  // (vgl. shared/domain/budget/phantom-storno.ts). Eine so referenzierte
+  // consumption-Zeile ist netto null belegt und zählt nicht. (Task #1012)
   const consumptionIds = txns.map((t) => t.id);
   const reversalRows = await db.select({
     reversedTransactionId: budgetTransactions.reversedTransactionId,
+    notes: budgetTransactions.notes,
   })
   .from(budgetTransactions)
   .where(and(
     eq(budgetTransactions.customerId, customerId),
     eq(budgetTransactions.transactionType, "reversal"),
-    isNotNull(budgetTransactions.reversedTransactionId),
-    inArray(budgetTransactions.reversedTransactionId, consumptionIds),
+    or(
+      inArray(budgetTransactions.reversedTransactionId, consumptionIds),
+      inArray(budgetTransactions.appointmentId, apptIds),
+    ),
   ));
-  const reversedIds = new Set<number>(
-    reversalRows
-      .map((r) => r.reversedTransactionId)
-      .filter((id): id is number => id !== null),
-  );
-
-  // Termine, die ÜBERHAUPT eine Konsumption hatten (für die Netto-Null-Erkennung
-  // unten), getrennt von den Terminen mit aktivem Live-Konsum.
-  const apptsWithAnyConsumption = new Set<number>();
-  for (const txn of txns) {
-    if (!txn.appointmentId) continue;
-    apptsWithAnyConsumption.add(txn.appointmentId);
-    if (reversedIds.has(txn.id)) continue; // stornierte Buchung → kein Pot-Anteil
-    const potKey = (POT_ORDER as readonly string[]).includes(txn.budgetType)
-      ? (txn.budgetType as InvoicePotKey)
-      : "private";
-    const entry = out.get(txn.appointmentId) ?? { cents: {} };
-    entry.cents[potKey] = (entry.cents[potKey] ?? 0) + Math.abs(txn.amountCents);
-    out.set(txn.appointmentId, entry);
+  const reversedIds = new Set<number>();
+  for (const r of reversalRows) {
+    if (r.reversedTransactionId != null) reversedIds.add(r.reversedTransactionId);
+    const noteRef = parseStornoReference(r.notes);
+    if (noteRef != null) reversedIds.add(noteRef);
   }
+
+  // Live-Split (storno-bereinigt) über die pure SSoT im shared/domain. Töpfe,
+  // deren Verbrauch ausschließlich aus stornierten Buchungen besteht (z.B. eine
+  // Phantom-§45a-Aufteilung), fallen hier weg und erzeugen keine eigene
+  // Folge-Rechnung mehr (Task #1012).
+  const out = buildBudgetSplitFromLedger(txns, reversalRows);
 
   // Stolperfalle (Task #1011): Termine, die eine Konsumption HATTEN, deren
   // Buchungen aber ALLE storniert wurden (netto null, kein Live-Konsum mehr),
@@ -428,6 +426,10 @@ export async function getBudgetSplitForAppointments(
   // Allocation re-derivieren (read-only Cascade gegen die heute verfügbaren
   // Töpfe). Termine, die NIE eine Konsumption hatten (echte Selbstzahler /
   // Alt-Daten), behalten das bestehende Verhalten (kein Eintrag → private).
+  const apptsWithAnyConsumption = new Set<number>();
+  for (const txn of txns) {
+    if (txn.appointmentId != null) apptsWithAnyConsumption.add(txn.appointmentId);
+  }
   const netZeroApptIds = [...apptsWithAnyConsumption].filter((id) => !out.has(id));
   if (netZeroApptIds.length > 0) {
     await rederiveSplitFromCurrentAllocation(customerId, netZeroApptIds, txns, reversedIds, out);
@@ -463,12 +465,11 @@ async function rederiveSplitFromCurrentAllocation(
     );
   }
 
-  const apptRows = await db.select({
+  const apptRows = await appointmentsRepo.selectColumnsFrom({
     id: appointments.id,
     date: appointments.date,
   })
-  .from(appointments)
-  .where(inArray(appointments.id, apptIds));
+  .where(and(inArray(appointments.id, apptIds), appointmentsRepo.activeOnly()));
   const dateByAppt = new Map(apptRows.map((a) => [a.id, a.date]));
 
   // Standard-Cascade-Priorität (§45b → §45a → §39/§42a).

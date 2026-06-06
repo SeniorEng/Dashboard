@@ -7,11 +7,26 @@ description: Why §45b "low budget" billing-flow split tests fail while §45a sp
 
 `getBudgetSplitForAppointments` + `splitLineItemsByPot` (now in
 `server/services/invoice-calc.ts` / `invoice-data.ts`) do **not** recompute any
-budget cascade. They simply `SELECT` `budget_transactions` rows with
-`transaction_type='consumption'` for the appointments and bucket them by
-`budget_type`. `needsBudgetSplit = potItems.size > 1`. So a multi-invoice
-(Kasse + Privat) split is produced **only if the consumption engine already
-booked the appointment across >1 pot** at `documentAppointment` time.
+budget cascade. They `SELECT` `budget_transactions` rows with
+`transaction_type='consumption'` for the appointments, **drop the ones that
+were reversed/stornoed**, and bucket the survivors by `budget_type`.
+`needsBudgetSplit = potItems.size > 1`. So a multi-invoice (Kasse + Privat)
+split is produced **only if the consumption engine already booked the
+appointment across >1 LIVE pot** at `documentAppointment` time.
+
+**Task #1012 — stornoed pots no longer bill:** the split now excludes any
+consumption whose `id` is reversed, via the pure
+`buildBudgetSplitFromLedger(consumptions, reversals)` in
+`shared/domain/budget-invoice-split.ts`. "Reversed" = a reversal row links it
+(`reversed_transaction_id`) OR a NOTE-orphan references it ("Storno … von
+Transaktion #<id>", parsed by `parseStornoReference`). A pot whose consumption
+is entirely stornoed (e.g. a phantom-§45a split born from a cancelled booking)
+drops out → no superfluous follow-up invoice. Drift test:
+`tests/equality/phantom-storno-split.test.ts`. **Why:** before this, the split
+ignored reversals entirely, so a fully-cancelled pot still spawned its own
+invoice (Egon Uhlig April 2026). **How to apply:** any new aggregation over
+`budget_transactions` for billing/preview must net out reversed consumptions,
+not blind-SUM `consumption` rows.
 
 **Observed asymmetry (DB-verified):** the consumption engine books
 `{private, umwandlung_45a}` two-row splits for §45a overflow, but for
