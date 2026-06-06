@@ -482,17 +482,12 @@ async function runStartupTasks() {
       log(`Storno-transactionDate-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #988 — Phantom-Storno-Korrektur (Import-Drift #987) automatisch beim
-    // App-Start anwenden. Idempotent (bereits korrigierte Waisen werden
-    // übersprungen), GoBD-konform append-only. Läuft nach dem Orphan-Reversal-
-    // appointment_id-Backfill (#819) und dem Storno-transactionDate-Backfill,
-    // damit Referenzen + Termin-Bindung bereits aufgelöst sind.
-    const { reconcilePhantomStornosOnStartup } = await import("./startup/reconcile-phantom-stornos");
-    try {
-      await reconcilePhantomStornosOnStartup();
-    } catch (err) {
-      log(`Phantom-Storno-Korrektur (Task #988) fehlgeschlagen: ${err}`, "startup");
-    }
+    // Task #988/#993/#994 — Die einmalige Phantom-Storno-Import-Drift-Korrektur
+    // (#987) lief beim Prod-(Re-)Deploy einmalig scharf durch und ist bestätigt
+    // (0 offene Waisen, 28 Korrekturen, Audit-Batch in
+    // docs/import-budget-drift-report-20260527.md §10.4). Der Startup-Hook wurde
+    // daher in Task #994 ersatzlos entfernt; der manuelle CLI-Fallback
+    // server/scripts/reconcile-phantom-stornos.ts bleibt als scharfes Werkzeug.
 
     // Task #757: Spalte für abweichenden Kontoinhaber in den Firmenstammdaten.
     const { ensureCompanyBankAccountHolderColumn } = await import("./startup/ensure-company-bank-account-holder");

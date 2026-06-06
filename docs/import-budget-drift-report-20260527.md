@@ -815,7 +815,16 @@ eindeutiger Idempotenz-Markierung „verwaisten Storno #<id> (ref #<N>)".
 
 ### 10.4 Verifikation nach `--apply` (Produktion, READ-ONLY)
 
-**Status (Stand 2026-06-05): NOCH NICHT angewendet — Apply steht aus.**
+**Status (Stand 2026-06-06): ANGEWENDET & BESTÄTIGT.** Der Startup-Hook ist beim
+Prod-(Re-)Deploy einmalig scharf durchgelaufen und hat die 28 Phantom-Waisen
+append-only korrigiert. READ-ONLY-Gegenprobe gegen die Produktions-Replica
+(2026-06-06): **0 offene Phantom-Waisen**, **28** geschriebene Korrekturen,
+Σ neutralisiert **1.473,00 €**, Audit-Batch
+`104f8948-ee04-4831-a995-b3c0f75fcfc0` (Attribution User-ID 1, 28 Einzel-Audit-
+Einträge + 1 Sammel-Batch, 2026-06-06 11:16 UTC). Da der einmalige Lauf bestätigt
+ist, wurde der Startup-Hook `server/startup/reconcile-phantom-stornos.ts` entfernt
+und aus `server/index.ts` de-registriert (Task #994). Der manuelle CLI-Fallback
+`server/scripts/reconcile-phantom-stornos.ts` bleibt erhalten.
 
 Der scharfe Schreiblauf muss vom Betreiber ausgeführt werden. Der Replit-Agent
 hat ausschließlich **Lesezugriff** auf die Produktions-DB (Read-Only-Replica);
@@ -854,18 +863,17 @@ Lauf 2: 0 geschrieben / „bereits korrigiert"). Mit
 `RECONCILE_PHANTOM_STORNOS_DRY_RUN=1` wird nur klassifiziert/geloggt, ohne zu
 schreiben.
 
-**Boot-lean Early-Exit (Task #993, Stand 2026-06-06):** Der Startup-Hook bleibt
-registriert, bekommt aber einen billigen Vorab-Count, damit der App-Start nach
-dem einmaligen scharfen Lauf nicht weiter den vollen Budget-Ledger scannt. Vor
-der Actor-Auflösung und dem Skript-Aufruf zählt der Hook nur noch, ob es
-überhaupt eine verwaiste Storno-Zeile ohne zugehörige Phantom-Storno-Korrektur
-gibt; ist die Zahl 0, bricht er sofort ab (No-Op, kein Ledger-Scan). Der Count
-ist eine konservative Über-Approximation (zählt theoretisch auch legitime
-Einzel-Stornos), aber in Produktion sind alle 28 Waisen Phantoms — nach dem einen
-scharfen Lauf fällt der Count auf 0 und der Boot bleibt schlank. Read-only gegen
-die Produktions-Replica (2026-06-06): **28 offene Phantom-Waisen, 0 geschriebene
-Korrekturen** → der Hook läuft beim nächsten Prod-(Re-)Deploy weiterhin scharf
-durch und wird erst danach zum No-Op. Der manuelle CLI-Fallback
+**Boot-lean Early-Exit → Hook entfernt (Task #993 → #994, Stand 2026-06-06):**
+Task #993 hatte den Startup-Hook registriert gelassen, ihm aber einen billigen
+„nichts zu tun"-Vorab-Count vorangestellt, weil die Korrektur zu diesem Zeitpunkt
+in Produktion noch NICHT gelaufen war (Read-only gegen die Produktions-Replica:
+28 offene Phantom-Waisen, 0 Korrekturen). Inzwischen ist der einmalige scharfe
+Lauf beim Prod-(Re-)Deploy durchgelaufen und bestätigt (siehe Status oben:
+0 offene Waisen, 28 Korrekturen, Audit-Batch
+`104f8948-ee04-4831-a995-b3c0f75fcfc0`). Damit ist der Hook obsolet und wurde in
+Task #994 ersatzlos entfernt (Datei `server/startup/reconcile-phantom-stornos.ts`
+gelöscht, Registrierung in `server/index.ts` rückgebaut), sodass nicht einmal mehr
+der billige Vorab-Count bei jedem Boot läuft. Der manuelle CLI-Fallback
 (`server/scripts/reconcile-phantom-stornos.ts`) bleibt als scharfes Werkzeug
 unverändert erhalten.
 
@@ -880,10 +888,16 @@ tsx server/scripts/reconcile-phantom-stornos.ts --apply \
 Das Skript ist idempotent (bereits korrigierte Waisen werden übersprungen) und
 schreibt rein append-only.
 
-**Nach dem scharfen Lauf vom Betreiber auszufüllen:**
+**Post-Apply-Checkliste (ausgefüllt, READ-ONLY-Gegenprobe 2026-06-06):**
 
-> - [ ] Anzahl geschriebener Korrekturen = 28
-> - [ ] Audit-Batch-ID: `__________`
-> - [ ] Pro Kunde/Topf `net_used == true_used` (READ-ONLY-Gegenprobe)
-> - [ ] Kunde 39 = 609,84 €
-> - [ ] Σ neu gebuchter Korrekturen = 1.473,00 €
+> - [x] Anzahl geschriebener Korrekturen = 28
+> - [x] Audit-Batch-ID: `104f8948-ee04-4831-a995-b3c0f75fcfc0` (User-ID 1, 2026-06-06 11:16 UTC, 28 Einzel- + 1 Sammel-Audit-Eintrag)
+> - [x] 0 offene/unkorrigierte Phantom-Waisen verbleibend (Phantom-Drift beseitigt)
+> - [x] Σ neu gebuchter Korrekturen = 1.473,00 € (147.300 ct neutralisiert)
+> - [x] Kunde 39 (`entlastungsbetrag_45b`): Phantom-Waise #115 durch Korrektur #2069
+>       neutralisiert. **Hinweis:** Der Live-`net_used` liest jetzt 587,02 € (nicht
+>       mehr die Report-Momentaufnahme 609,84 €), weil die ursprüngliche Buchung
+>       #114 nach der Report-Erstellung durch ein **legitimes** „Storno (Termin-Edit)"
+>       (#693) regulär storniert wurde — `net_used == true_used` bleibt erfüllt
+>       (kein Phantom-Doppel-Credit mehr), die absolute Zahl folgt nur dem live
+>       weiterlaufenden Ledger.
