@@ -2,11 +2,13 @@ import { badRequest } from "../lib/errors";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
 import { POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
-import type { BudgetType } from "@shared/domain/budgets";
+import { DEFAULT_BUDGET_POT_ORDER, type BudgetType } from "@shared/domain/budgets";
+import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, customerServicePrices, budgetTransactions } from "@shared/schema";
-import { eq, and, isNull, inArray, ne, desc } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, ne, desc } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
+import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customerServicePricesRepo } from "../repos";
 
 export interface BuildLineItem extends Record<string, unknown> {
@@ -353,6 +355,14 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
  * die echten BudgetType-Werte (`entlastungsbetrag_45b` /
  * `umwandlung_45a` / `ersatzpflege_39_42a`) sowie `"private"` für den
  * Selbstzahler-Overflow — exakt das, was `consumption-engine.ts` schreibt.
+ *
+ * Task #1011 — nur die AKTIVE (nicht stornierte) Konsumption zählt. Eine
+ * `consumption`-Zeile, auf die ein `reversal` zeigt (`reversedTransactionId`),
+ * ist netto null belegt und darf KEINEN Pot-Anteil mehr erzeugen — sonst
+ * entstünde eine Phantom-Folgerechnung für einen Topf, der real gar nicht
+ * (mehr) belegt ist (z.B. eine §45a-Buchung, die am selben Tag wieder
+ * storniert wurde). „Live"-Konsum = `consumption` minus die Zeilen, auf die
+ * ein `reversal` verweist — dieselbe Projekt-SSoT wie im Storage-Layer.
  */
 export async function getBudgetSplitForAppointments(
   customerId: number,
@@ -361,7 +371,9 @@ export async function getBudgetSplitForAppointments(
   const out = new Map<number, BudgetSplitForAppointment>();
   if (apptIds.length === 0) return out;
 
+  // ID mitlesen, damit wir gegen die Reversal-Verweise abgleichen können.
   const txns = await db.select({
+    id: budgetTransactions.id,
     appointmentId: budgetTransactions.appointmentId,
     budgetType: budgetTransactions.budgetType,
     amountCents: budgetTransactions.amountCents,
@@ -373,8 +385,34 @@ export async function getBudgetSplitForAppointments(
     eq(budgetTransactions.transactionType, "consumption"),
   ));
 
+  if (txns.length === 0) return out;
+
+  // Stornierte Original-Buchungen ermitteln: jede consumption-Zeile, deren ID
+  // von einer reversal-Zeile referenziert wird, ist netto null und zählt nicht.
+  const consumptionIds = txns.map((t) => t.id);
+  const reversalRows = await db.select({
+    reversedTransactionId: budgetTransactions.reversedTransactionId,
+  })
+  .from(budgetTransactions)
+  .where(and(
+    eq(budgetTransactions.customerId, customerId),
+    eq(budgetTransactions.transactionType, "reversal"),
+    isNotNull(budgetTransactions.reversedTransactionId),
+    inArray(budgetTransactions.reversedTransactionId, consumptionIds),
+  ));
+  const reversedIds = new Set<number>(
+    reversalRows
+      .map((r) => r.reversedTransactionId)
+      .filter((id): id is number => id !== null),
+  );
+
+  // Termine, die ÜBERHAUPT eine Konsumption hatten (für die Netto-Null-Erkennung
+  // unten), getrennt von den Terminen mit aktivem Live-Konsum.
+  const apptsWithAnyConsumption = new Set<number>();
   for (const txn of txns) {
     if (!txn.appointmentId) continue;
+    apptsWithAnyConsumption.add(txn.appointmentId);
+    if (reversedIds.has(txn.id)) continue; // stornierte Buchung → kein Pot-Anteil
     const potKey = (POT_ORDER as readonly string[]).includes(txn.budgetType)
       ? (txn.budgetType as InvoicePotKey)
       : "private";
@@ -382,7 +420,88 @@ export async function getBudgetSplitForAppointments(
     entry.cents[potKey] = (entry.cents[potKey] ?? 0) + Math.abs(txn.amountCents);
     out.set(txn.appointmentId, entry);
   }
+
+  // Stolperfalle (Task #1011): Termine, die eine Konsumption HATTEN, deren
+  // Buchungen aber ALLE storniert wurden (netto null, kein Live-Konsum mehr),
+  // dürfen NICHT blind auf den private-Fallback fallen — das erzeugte eine
+  // falsche Selbstzahler-Rechnung. Stattdessen den Pot-Anteil aus der AKTUELLEN
+  // Allocation re-derivieren (read-only Cascade gegen die heute verfügbaren
+  // Töpfe). Termine, die NIE eine Konsumption hatten (echte Selbstzahler /
+  // Alt-Daten), behalten das bestehende Verhalten (kein Eintrag → private).
+  const netZeroApptIds = [...apptsWithAnyConsumption].filter((id) => !out.has(id));
+  if (netZeroApptIds.length > 0) {
+    await rederiveSplitFromCurrentAllocation(customerId, netZeroApptIds, txns, reversedIds, out);
+  }
+
   return out;
+}
+
+/**
+ * Task #1011 — Re-Derivation für netto-null-belegte Termine (alle Buchungen
+ * storniert, keine aktive Konsumption mehr). Verteilt die Termin-Kost (= Σ der
+ * stornierten Original-Buchungen dieses Termins) read-only über die aktuelle
+ * Topf-Verfügbarkeit (`readUnifiedBudgetAvailability` → `planCascade`), in der
+ * Standard-Cascade-Priorität §45b → §45a → §39/§42a, Rest → private. Es wird
+ * NICHTS gebucht — Preview und Generate sehen denselben Split, und es entsteht
+ * keine Phantom-Rechnung für einen netto-null belegten Topf.
+ */
+async function rederiveSplitFromCurrentAllocation(
+  customerId: number,
+  apptIds: number[],
+  txns: ReadonlyArray<{ id: number; appointmentId: number | null; amountCents: number }>,
+  reversedIds: ReadonlySet<number>,
+  out: Map<number, BudgetSplitForAppointment>,
+): Promise<void> {
+  // Termin-Kost = Σ |Betrag| der stornierten Original-Buchungen des Termins.
+  const costByAppt = new Map<number, number>();
+  for (const txn of txns) {
+    if (!txn.appointmentId || !reversedIds.has(txn.id)) continue;
+    if (!apptIds.includes(txn.appointmentId)) continue;
+    costByAppt.set(
+      txn.appointmentId,
+      (costByAppt.get(txn.appointmentId) ?? 0) + Math.abs(txn.amountCents),
+    );
+  }
+
+  const apptRows = await db.select({
+    id: appointments.id,
+    date: appointments.date,
+  })
+  .from(appointments)
+  .where(inArray(appointments.id, apptIds));
+  const dateByAppt = new Map(apptRows.map((a) => [a.id, a.date]));
+
+  // Standard-Cascade-Priorität (§45b → §45a → §39/§42a).
+  const orderedPots = [...DEFAULT_BUDGET_POT_ORDER]
+    .sort((a, b) => a.priority - b.priority)
+    .map((p) => p.budgetType as CappedBudgetPot);
+
+  for (const apptId of apptIds) {
+    const cost = costByAppt.get(apptId) ?? 0;
+    const date = dateByAppt.get(apptId);
+    if (cost <= 0 || !date) continue; // nichts ableitbar → bleibt ohne Eintrag (private)
+
+    const avail = await readUnifiedBudgetAvailability(customerId, date, db);
+    const pots: CascadePot[] = orderedPots.map((bt) => ({
+      budgetType: bt,
+      capacityCents: avail.pots[bt].availableCents,
+    }));
+    // privater Topf absorbiert den Rest, der von keinem Kassen-Topf gedeckt ist.
+    pots.push({ budgetType: "private", capacityCents: 0, uncapped: true });
+
+    const { splits } = planCascade(cost, pots);
+    const cents: BudgetSplitForAppointment["cents"] = {};
+    for (const split of splits) {
+      if (split.amountCents <= 0) continue;
+      const potKey = (POT_ORDER as readonly string[]).includes(split.budgetType)
+        ? (split.budgetType as InvoicePotKey)
+        : "private";
+      cents[potKey] = (cents[potKey] ?? 0) + split.amountCents;
+    }
+    if (Object.keys(cents).length > 0) {
+      out.set(apptId, { cents });
+    }
+  }
 }
 
 export async function getInsuranceData(customerId: number) {
