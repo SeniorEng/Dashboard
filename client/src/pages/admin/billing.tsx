@@ -34,6 +34,9 @@ export default function AdminBilling() {
   // Wirkt server-seitig auf Liste, eligible-customers, generate-all und
   // bestimmt zusätzlich die Sichtbarkeit der Bündel-Download-Buttons.
   const [payerFilter, setPayerFilter] = useState<string>("alle");
+  // Task #990: Stornos ausblenden — blendet stornierte Rechnungen (Status
+  // "storniert") UND Stornorechnungen (Typ "stornorechnung") aus der Liste.
+  const [hideStornos, setHideStornos] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
@@ -56,6 +59,15 @@ export default function AdminBilling() {
     statusFilter,
     payerFilter,
   );
+
+  // Task #990: Client-seitiger Stornos-Filter — entfernt stornierte Rechnungen
+  // und Stornorechnungen aus der angezeigten Liste, ohne Server-Filter/Aktionen
+  // zu verändern.
+  const visibleInvoices = hideStornos
+    ? invoices?.filter(
+        (inv) => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung",
+      )
+    : invoices;
 
   const { data: customers } = useEligibleCustomers(selectedYear, selectedMonth, payerFilter);
 
@@ -198,6 +210,8 @@ export default function AdminBilling() {
         setStatusFilter={setStatusFilter}
         payerFilter={payerFilter}
         setPayerFilter={setPayerFilter}
+        hideStornos={hideStornos}
+        setHideStornos={setHideStornos}
         payers={payers}
         activePayer={activePayer}
         payerSuffix={payerSuffix}
@@ -212,7 +226,7 @@ export default function AdminBilling() {
       />
 
       <InvoiceList
-        invoices={invoices}
+        invoices={visibleInvoices}
         invoicesLoading={invoicesLoading}
         expandedInvoiceId={expandedInvoiceId}
         onToggleDetail={handleToggleDetail}

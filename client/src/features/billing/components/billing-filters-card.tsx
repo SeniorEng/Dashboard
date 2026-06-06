@@ -1,6 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { iconSize } from "@/design-system";
 import { Plus, Send, Loader2, FileText, Printer, Layers } from "lucide-react";
 import type { BillingCustomerItem, InvoiceItem, PayerSummary } from "@shared/api";
@@ -16,6 +18,8 @@ interface BillingFiltersCardProps {
   setStatusFilter: (status: string) => void;
   payerFilter: string;
   setPayerFilter: (payer: string) => void;
+  hideStornos: boolean;
+  setHideStornos: (hide: boolean) => void;
   payers: PayerSummary[] | undefined;
   activePayer: PayerSummary | null;
   payerSuffix: string;
@@ -39,6 +43,8 @@ export function BillingFiltersCard({
   setStatusFilter,
   payerFilter,
   setPayerFilter,
+  hideStornos,
+  setHideStornos,
   payers,
   activePayer,
   payerSuffix,
@@ -116,6 +122,19 @@ export function BillingFiltersCard({
                 ))}
               </SelectContent>
             </Select>
+
+            <span className="text-sm text-gray-500">Stornos:</span>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="hide-stornos"
+                checked={hideStornos}
+                onCheckedChange={setHideStornos}
+                data-testid="switch-hide-stornos"
+              />
+              <Label htmlFor="hide-stornos" className="text-sm text-gray-600 cursor-pointer">
+                Stornos ausblenden
+              </Label>
+            </div>
           </div>
 
           {/* Task #533: Mobil-fix — Aktionsleiste bricht auf schmalen

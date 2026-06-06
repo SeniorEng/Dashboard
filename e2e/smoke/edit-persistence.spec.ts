@@ -710,6 +710,9 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
         `[data-testid='invoice-row-${invoiceId}']`,
       );
       await expect(invoiceRow).toBeVisible({ timeout: 15000 });
+      // Task #990: Sekundäraktionen (inkl. Details) liegen jetzt im
+      // Überlauf-Menü — erst Menü öffnen, dann Detail-Eintrag klicken.
+      await page.locator(`[data-testid='button-actions-menu-${invoiceId}']`).click();
       await page.locator(`[data-testid='button-detail-${invoiceId}']`).click();
       // Detail-Karte rendert direkt nach der Row — wir suchen den
       // km-Text innerhalb der Detail-Tabelle (toleranter Lookup, weil
@@ -975,6 +978,8 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
 
       const invoiceRow = page.locator(`[data-testid='invoice-row-${invoiceId}']`);
       await expect(invoiceRow).toBeVisible({ timeout: 15000 });
+      // Task #990: Detail-Aktion liegt jetzt im Überlauf-Menü.
+      await page.locator(`[data-testid='button-actions-menu-${invoiceId}']`).click();
       await page.locator(`[data-testid='button-detail-${invoiceId}']`).click();
       await expect(page.getByText("1 Std. 12 Min.").first()).toBeVisible({
         timeout: 10000,

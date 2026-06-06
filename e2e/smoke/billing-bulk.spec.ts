@@ -304,6 +304,11 @@ test.describe("@smoke Billing — Massenerstellung & Bündel-Druck", () => {
         page.locator(`[data-testid='invoice-row-${kasseInv!.id}']`),
       ).toBeVisible({ timeout: 15000 });
 
+      // Task #990: Sekundäraktionen (Bündel-Druck, Als-versendet-markieren bei
+      //    gesetzlichen Kassen) liegen jetzt im Überlauf-Menü — vor den Checks
+      //    öffnen. Beide Einträge teilen sich dasselbe geöffnete Menü.
+      await page.locator(`[data-testid='button-actions-menu-${kasseInv!.id}']`).click();
+
       // 4) Bündel-Druck via UI-Button: der Button ist ein <a target="_blank">.
       //    Wir greifen den href ab und holen das PDF mit der Session-API, um
       //    Popup-Flakiness in Playwright zu vermeiden — der UI-Klick selbst
