@@ -1,7 +1,7 @@
 import { badRequest } from "../lib/errors";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
-import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
+import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment, type SplitReversalRow } from "@shared/domain/budget-invoice-split";
 import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
@@ -350,28 +350,24 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
   return { lineItems, totalNetCents, totalVatCents };
 }
 
+type ApptConsumptionTxn = {
+  id: number;
+  appointmentId: number | null;
+  budgetType: string;
+  amountCents: number;
+};
+
 /**
- * Task #759 — Variant C: liefert pro Termin die tatsächlich gebuchten
- * Pot-Anteile aus `budget_transactions` (`consumption`). Pot-Keys sind
- * die echten BudgetType-Werte (`entlastungsbetrag_45b` /
- * `umwandlung_45a` / `ersatzpflege_39_42a`) sowie `"private"` für den
- * Selbstzahler-Overflow — exakt das, was `consumption-engine.ts` schreibt.
- *
- * Task #1011 — nur die AKTIVE (nicht stornierte) Konsumption zählt. Eine
- * `consumption`-Zeile, auf die ein `reversal` zeigt (`reversedTransactionId`),
- * ist netto null belegt und darf KEINEN Pot-Anteil mehr erzeugen — sonst
- * entstünde eine Phantom-Folgerechnung für einen Topf, der real gar nicht
- * (mehr) belegt ist (z.B. eine §45a-Buchung, die am selben Tag wieder
- * storniert wurde). „Live"-Konsum = `consumption` minus die Zeilen, auf die
- * ein `reversal` verweist — dieselbe Projekt-SSoT wie im Storage-Layer.
+ * Lädt die `consumption`-Zeilen der angegebenen Termine plus die Menge der
+ * IDs, auf die ein `reversal` zeigt (stornierte Original-Buchungen). Eine
+ * `consumption`-Zeile, deren ID in `reversedIds` liegt, ist netto null belegt.
+ * SSoT für die Netto-Null-Erkennung — geteilt von `getBudgetSplitForAppointments`
+ * (Anzeige-Split) und `findNetZeroBilledAppointments` (Re-Buchungs-Trigger).
  */
-export async function getBudgetSplitForAppointments(
+async function loadAppointmentConsumptionTxns(
   customerId: number,
   apptIds: number[],
-): Promise<Map<number, BudgetSplitForAppointment>> {
-  if (apptIds.length === 0) return new Map();
-
-  // ID mitlesen, damit wir gegen die Reversal-Verweise abgleichen können.
+): Promise<{ txns: ApptConsumptionTxn[]; reversedIds: Set<number>; reversalRows: SplitReversalRow[] }> {
   const txns = await db.select({
     id: budgetTransactions.id,
     appointmentId: budgetTransactions.appointmentId,
@@ -385,7 +381,7 @@ export async function getBudgetSplitForAppointments(
     eq(budgetTransactions.transactionType, "consumption"),
   ));
 
-  if (txns.length === 0) return new Map();
+  if (txns.length === 0) return { txns, reversedIds: new Set<number>(), reversalRows: [] };
 
   // Stornierte Original-Buchungen ermitteln — sowohl über die VERKNÜPFUNG
   // (`reversed_transaction_id`) als auch über NOTE-basierte Waisen-Stornos
@@ -412,6 +408,75 @@ export async function getBudgetSplitForAppointments(
     const noteRef = parseStornoReference(r.notes);
     if (noteRef != null) reversedIds.add(noteRef);
   }
+  return { txns, reversedIds, reversalRows };
+}
+
+/**
+ * Netto-Null-Termine = Termine, die EINE Konsumption hatten, deren Buchungen
+ * aber ALLE storniert wurden (kein Live-Konsum mehr). Termine, die NIE eine
+ * Konsumption hatten (echte Selbstzahler / Alt-Daten), sind NICHT netto-null.
+ */
+function computeNetZeroApptIds(
+  txns: ReadonlyArray<{ id: number; appointmentId: number | null }>,
+  reversedIds: ReadonlySet<number>,
+): number[] {
+  const hadConsumption = new Set<number>();
+  const hasLiveConsumption = new Set<number>();
+  for (const txn of txns) {
+    if (!txn.appointmentId) continue;
+    hadConsumption.add(txn.appointmentId);
+    if (!reversedIds.has(txn.id)) hasLiveConsumption.add(txn.appointmentId);
+  }
+  return [...hadConsumption].filter((id) => !hasLiveConsumption.has(id));
+}
+
+/**
+ * Task #1014 — Trigger für die Re-Buchung netto-null-belegter Termine bei der
+ * tatsächlichen Rechnungs-ERSTELLUNG (nicht Preview). Liefert die Termine, die
+ * eine Konsumption hatten, deren Buchungen aber komplett storniert wurden —
+ * exakt die Termine, deren Pot-Anteil `getBudgetSplitForAppointments`
+ * read-only aus der aktuellen Allocation re-deriviert. Beim Generieren werden
+ * für diese Termine frische `consumption`-Zeilen gebucht (siehe
+ * `rebookNetZeroAppointmentConsumption`), damit Ledger und Rechnung nicht
+ * auseinanderlaufen.
+ */
+export async function findNetZeroBilledAppointments(
+  customerId: number,
+  apptIds: number[],
+): Promise<number[]> {
+  if (apptIds.length === 0) return [];
+  const { txns, reversedIds } = await loadAppointmentConsumptionTxns(customerId, apptIds);
+  if (txns.length === 0) return [];
+  return computeNetZeroApptIds(txns, reversedIds);
+}
+
+/**
+ * Task #759 — Variant C: liefert pro Termin die tatsächlich gebuchten
+ * Pot-Anteile aus `budget_transactions` (`consumption`). Pot-Keys sind
+ * die echten BudgetType-Werte (`entlastungsbetrag_45b` /
+ * `umwandlung_45a` / `ersatzpflege_39_42a`) sowie `"private"` für den
+ * Selbstzahler-Overflow — exakt das, was `consumption-engine.ts` schreibt.
+ *
+ * Task #1011 — nur die AKTIVE (nicht stornierte) Konsumption zählt. Eine
+ * `consumption`-Zeile, auf die ein `reversal` zeigt (`reversedTransactionId`),
+ * ist netto null belegt und darf KEINEN Pot-Anteil mehr erzeugen — sonst
+ * entstünde eine Phantom-Folgerechnung für einen Topf, der real gar nicht
+ * (mehr) belegt ist (z.B. eine §45a-Buchung, die am selben Tag wieder
+ * storniert wurde). „Live"-Konsum = `consumption` minus die Zeilen, auf die
+ * ein `reversal` verweist — dieselbe Projekt-SSoT wie im Storage-Layer.
+ */
+export async function getBudgetSplitForAppointments(
+  customerId: number,
+  apptIds: number[],
+): Promise<Map<number, BudgetSplitForAppointment>> {
+  if (apptIds.length === 0) return new Map();
+
+  // SSoT-Loader liefert die Konsumptionen, die storno-bereinigten Reversal-Zeilen
+  // (link- UND note-basiert, Task #1012) und die abgeleitete Menge der netto-null
+  // belegten Original-IDs — geteilt mit findNetZeroBilledAppointments.
+  const { txns, reversedIds, reversalRows } = await loadAppointmentConsumptionTxns(customerId, apptIds);
+
+  if (txns.length === 0) return new Map();
 
   // Live-Split (storno-bereinigt) über die pure SSoT im shared/domain. Töpfe,
   // deren Verbrauch ausschließlich aus stornierten Buchungen besteht (z.B. eine

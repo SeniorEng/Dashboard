@@ -5,7 +5,7 @@ import {
   services,
   type BudgetTransaction,
 } from "@shared/schema";
-import { eq, and, sql, or, inArray } from "drizzle-orm";
+import { eq, and, sql, or, inArray, isNotNull } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
@@ -380,4 +380,157 @@ export async function rebookDisabledBudgetTransactions(customerId: number, userI
   }
 
   return { reversedCount, rebookedCount, totalOldAmountCents, totalNewAmountCents, errors };
+}
+
+/**
+ * Task #1014 — Re-Buchung netto-null-belegter Termine bei der Rechnungs-
+ * ERSTELLUNG (nicht Preview).
+ *
+ * Hintergrund: Wird eine Rechnung storniert, läuft pro Termin ein Budget-
+ * Reversal — der Termin wird wieder abrechenbar und seine Konsumption ist
+ * netto null (alle `consumption`-Zeilen storniert). Beim Re-Abrechnen
+ * deriviert `getBudgetSplitForAppointments` den Pot-Anteil read-only aus der
+ * AKTUELLEN Allocation (Task #1011), bucht aber NICHTS. Ohne Re-Buchung weist
+ * die neue Rechnung also einen Pott aus (z.B. §45b), während der Ledger den
+ * Topf weiterhin als „verfügbar" führt → ein späterer Termin verbraucht
+ * denselben Topf erneut → derselbe Topf ist über ZWEI aktive Rechnungen
+ * doppelt belegt (GoBD-/Finanz-Drift).
+ *
+ * Lösung: Vor dem Bauen des finalen Rechnungs-Drafts werden für die netto-
+ * null-Termine frische Cascade-`consumption`-Zeilen GoBD-append-only gebucht
+ * (gegen die jetzt verfügbaren Töpfe, identische Standard-Priorität §45b →
+ * §45a → §39/§42a, Rest → privater uncapped-Topf). Danach liest der Draft den
+ * Split aus diesen Live-Zeilen — Ledger und Rechnung sind per Konstruktion
+ * deckungsgleich (eine Quelle: die gebuchten Zeilen).
+ *
+ * Kein Doppel-Verbrauch: Es wird ausschließlich für Termine OHNE Live-Konsum
+ * gebucht. Nach erfolgreicher Buchung ist der Termin nicht mehr netto-null →
+ * ein erneuter Generate-Lauf erkennt ihn nicht mehr als netto-null und bucht
+ * nicht erneut (idempotent). Die Netto-Null-Prüfung läuft UNTER dem
+ * Pro-Kunde-Advisory-Lock erneut, damit parallele Läufe nicht doppelt buchen.
+ */
+export async function rebookNetZeroAppointmentConsumption(params: {
+  customerId: number;
+  appointmentIds: number[];
+  userId: number;
+}): Promise<{ rebookedAppointmentIds: number[] }> {
+  const { customerId, appointmentIds, userId } = params;
+  const rebookedAppointmentIds: number[] = [];
+  if (appointmentIds.length === 0) return { rebookedAppointmentIds };
+
+  for (const appointmentId of appointmentIds) {
+    const didRebook = await db.transaction(async (tx) => {
+      // Gleicher Advisory-Lock-Namespace wie createConsumptionTransaction /
+      // rebookDisabledBudgetTransactions: serialisiert Re-Buchung und
+      // parallele Konsumbuchungen pro Kunde.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('budget_consumption_' || ${customerId}::text))`
+      );
+
+      // Netto-Null UNTER dem Lock erneut prüfen (Concurrency-Schutz).
+      const consumptions = await tx.select({ id: budgetTransactions.id })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.appointmentId, appointmentId),
+          eq(budgetTransactions.transactionType, "consumption"),
+        ));
+      // Nie konsumiert (echter Selbstzahler / Alt-Daten) → nicht netto-null,
+      // nichts zu tun.
+      if (consumptions.length === 0) return false;
+
+      const consumptionIds = consumptions.map((c) => c.id);
+      const reversals = await tx.select({
+        reversedTransactionId: budgetTransactions.reversedTransactionId,
+      })
+        .from(budgetTransactions)
+        .where(and(
+          eq(budgetTransactions.customerId, customerId),
+          eq(budgetTransactions.transactionType, "reversal"),
+          isNotNull(budgetTransactions.reversedTransactionId),
+          inArray(budgetTransactions.reversedTransactionId, consumptionIds),
+        ));
+      const reversedIds = new Set(
+        reversals
+          .map((r) => r.reversedTransactionId)
+          .filter((id): id is number => id !== null),
+      );
+      const hasLiveConsumption = consumptions.some((c) => !reversedIds.has(c.id));
+      // Bereits (wieder) live belegt → nicht netto-null (z.B. paralleler Lauf
+      // war schneller). Idempotent: nichts buchen.
+      if (hasLiveConsumption) return false;
+
+      // Termin-Kost frisch zum Termin-Datum berechnen (temporale Preise) —
+      // identische Quelle wie der normale Konsum-Buchungspfad.
+      const [appt] = await appointmentsRepo.selectColumnsFrom({
+        date: appointments.date,
+        travelKilometers: appointments.travelKilometers,
+        customerKilometers: appointments.customerKilometers,
+      }, tx).where(eq(appointments.id, appointmentId)).limit(1);
+      if (!appt) return false;
+
+      const apptServices = await tx.select({
+        serviceId: appointmentServices.serviceId,
+        actualDurationMinutes: appointmentServices.actualDurationMinutes,
+      }).from(appointmentServices).where(eq(appointmentServices.appointmentId, appointmentId));
+
+      const allServices = await tx.select({
+        id: services.id,
+        code: services.code,
+      }).from(services);
+      const serviceCodeMap = new Map(allServices.map((s) => [s.id, s.code]));
+
+      let hwMinutes = 0;
+      let abMinutes = 0;
+      for (const as of apptServices) {
+        const code = serviceCodeMap.get(as.serviceId);
+        const mins = as.actualDurationMinutes ?? 0;
+        if (code === "hauswirtschaft") hwMinutes += mins;
+        else if (code === "alltagsbegleitung") abMinutes += mins;
+      }
+
+      const travelKm = appt.travelKilometers ?? 0;
+      const customerKm = appt.customerKilometers ?? 0;
+      const txDate = typeof appt.date === "string" ? appt.date : String(appt.date);
+
+      const costs = await calculateAppointmentCost({
+        customerId,
+        hauswirtschaftMinutes: hwMinutes,
+        alltagsbegleitungMinutes: abMinutes,
+        travelKilometers: travelKm,
+        customerKilometers: customerKm,
+        date: txDate,
+      });
+      if (costs.totalCents <= 0) return false;
+
+      // Cascade gegen die heute verfügbaren Töpfe + privater uncapped-Topf als
+      // Terminal — spiegelt exakt die read-only Re-Derivation des Splits
+      // (rederiveSplitFromCurrentAllocation): §45b → §45a → §39/§42a, Rest
+      // privat. Der private Terminal-Topf absorbiert jeden Rest → kein
+      // outstandingCents, kein Hard-Block.
+      await createCascadeConsumption({
+        customerId,
+        appointmentId,
+        transactionDate: txDate,
+        totalAmountCents: costs.totalCents,
+        hauswirtschaftMinutes: hwMinutes,
+        hauswirtschaftCents: costs.hauswirtschaftCents,
+        alltagsbegleitungMinutes: abMinutes,
+        alltagsbegleitungCents: costs.alltagsbegleitungCents,
+        travelKilometers: travelKm,
+        travelCents: costs.travelCents,
+        customerKilometers: customerKm,
+        customerKilometersCents: costs.customerKilometersCents,
+        userId,
+        skipExistingCheck: true,
+        privatePot: { statutoryExcluded: false, noteKind: "privatzahlung" },
+      }, tx);
+
+      return true;
+    });
+
+    if (didRebook) rebookedAppointmentIds.push(appointmentId);
+  }
+
+  return { rebookedAppointmentIds };
 }

@@ -319,6 +319,66 @@ Bestand wird nicht angetastet — alte Single-Pot-Rechnungen behalten
 idempotent in `server/startup/ensure-invoice-per-pot-columns.ts` (kein
 `drizzle-kit push`, siehe Gotcha in `replit.md`).
 
+## Re-Buchung netto-null-belegter Termine bei Re-Abrechnung (Task #1014)
+
+**Entscheidung: JA — bei der Rechnungs-ERSTELLUNG (niemals in der Preview)
+wird für netto-null-belegte Termine frische Cascade-Konsumption gebucht.**
+
+### Problem
+
+Wird eine Rechnung storniert, läuft pro Termin ein Budget-Reversal: der
+Termin wird wieder abrechenbar und seine Konsumption ist **netto null**
+(alle `consumption`-Zeilen sind durch `reversal`-Zeilen storniert). Beim
+Re-Abrechnen deriviert `getBudgetSplitForAppointments`
+(`rederiveSplitFromCurrentAllocation`, Task #1011) den Pot-Anteil
+**read-only** aus der aktuellen Allocation — es wird NICHTS gebucht. Folge:
+Die neue Rechnung weist einen Topf aus (z.B. §45b), während der Ledger den
+Topf weiterhin als „verfügbar" führt. Ein **späterer** Termin verbraucht
+denselben Topf erneut → derselbe Topf ist über **zwei aktive Rechnungen**
+doppelt belegt (Doppel-Spend, GoBD-/Finanz-Drift).
+
+### Lösung (Trigger: Generate, nicht Preview)
+
+In `generateInvoiceCore` (`server/services/invoice-calc.ts`) werden VOR dem
+Bauen des finalen Drafts die netto-null-Termine ermittelt
+(`findNetZeroBilledAppointments`, SSoT-Detektion via
+`loadAppointmentConsumptionTxns` + `computeNetZeroApptIds` in
+`invoice-data.ts`). Für diese Termine bucht
+`rebookNetZeroAppointmentConsumption`
+(`server/storage/budget/rebook-storage.ts`) frische GoBD-append-only
+`consumption`-Zeilen über `createCascadeConsumption` — gegen die heute
+verfügbaren Töpfe in derselben Standard-Priorität §45b → §45a → §39/§42a,
+Rest → privater uncapped-Topf. Danach wird der Draft NEU gebaut, sodass der
+Split aus den frisch gebuchten Live-Zeilen kommt. **Eine Quelle: die
+gebuchten Zeilen — Rechnung == Ledger per Konstruktion.**
+
+Die **Preview** bleibt strikt read-only (sie liest weiter über
+`rederiveSplitFromCurrentAllocation`) — eine Vorschau darf den Ledger nie
+verändern.
+
+### Kein Doppel-Spend, idempotent
+
+- Gebucht wird **ausschließlich** für Termine OHNE Live-Konsum
+  (`hasLiveConsumption === false`). Nach erfolgreicher Buchung ist der Termin
+  nicht mehr netto-null → ein erneuter Generate-Lauf erkennt ihn nicht mehr
+  als netto-null und bucht NICHT erneut.
+- Die Netto-Null-Prüfung läuft pro Termin UNTER dem Pro-Kunde-
+  Advisory-Lock (`pg_advisory_xact_lock('budget_consumption_' || customerId)`),
+  identisch zur normalen Konsum-Buchung — parallele Läufe können nicht doppelt
+  buchen.
+- Der private Terminal-Topf (`privatePot: { statutoryExcluded: false,
+  noteKind: "privatzahlung" }`) absorbiert jeden Rest → kein
+  `outstandingCents`, kein Hard-Block.
+
+### Akzeptierter Preview-vs-Generate-Drift
+
+Die Preview-Re-Derivation nutzt `readUnifiedBudgetAvailability` → `planCascade`,
+die Generate-Buchung nutzt `createCascadeConsumption` (FIFO-Availability +
+Cap-Slot). In seltenen Fällen kann der Pot-Split der Preview minimal von dem
+der erstellten Rechnung abweichen. Das ist akzeptiert: Die **erstellte
+Rechnung mit ihren Live-Ledger-Zeilen ist die Quelle der Wahrheit**, die
+Preview ist nur eine unverbindliche Vorschau.
+
 ## Verlässliches Budget-Migrations-Framework (Task #895)
 
 Einmalige Budget-DATEN-Migrationen mutieren historisierte Finanztabellen

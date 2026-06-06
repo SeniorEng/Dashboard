@@ -15,7 +15,8 @@ import { withAudit } from "../lib/with-audit";
 import { readTestFaults } from "../lib/test-fault-injector";
 import { getCachedCompanySettings } from "./cache";
 import { schedulePdfPersistInBackground } from "./invoice-pdf-orchestrator";
-import { getAlreadyInvoicedAppointmentIds, getServiceRecordsForPeriod, getAppointmentIdsFromServiceRecords, buildLineItemsFromAppointments, getBudgetSplitForAppointments, getInsuranceData } from "./invoice-data";
+import { getAlreadyInvoicedAppointmentIds, getServiceRecordsForPeriod, getAppointmentIdsFromServiceRecords, buildLineItemsFromAppointments, getBudgetSplitForAppointments, getInsuranceData, findNetZeroBilledAppointments } from "./invoice-data";
+import { rebookNetZeroAppointmentConsumption } from "../storage/budget/rebook-storage";
 import type { BuildLineItem } from "./invoice-data";
 
 /**
@@ -318,7 +319,27 @@ export async function generateInvoiceCore(
 
   // Task #750: gemeinsame Berechnung mit Preview — derselbe Helper, derselbe
   // Pfad. Verhindert Drift zwischen „Vorschau im Dialog" und finaler Rechnung.
-  const draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear });
+  let draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear });
+
+  // Task #1014: Netto-null-belegte Termine (alle Konsum-Buchungen storniert,
+  // z.B. nach Rechnungs-Storno) werden bei der ERSTELLUNG — nicht in der
+  // read-only Preview — frisch gebucht (GoBD-append-only Cascade). Sonst weist
+  // die neue Rechnung einen Topf aus, den der Ledger weiter als verfügbar
+  // führt → doppelte Topf-Belegung über zwei aktive Rechnungen. Nach der
+  // Buchung den Draft neu bauen, damit der Split aus den Live-Zeilen kommt
+  // (eine Quelle: die gebuchten Zeilen, garantiert deckungsgleich). Idempotent:
+  // re-gebuchte Termine sind nicht mehr netto-null.
+  const netZeroApptIds = await findNetZeroBilledAppointments(customerId, draft.apptIds);
+  if (netZeroApptIds.length > 0) {
+    const { rebookedAppointmentIds } = await rebookNetZeroAppointmentConsumption({
+      customerId,
+      appointmentIds: netZeroApptIds,
+      userId: ctx.userId,
+    });
+    if (rebookedAppointmentIds.length > 0) {
+      draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear });
+    }
+  }
   const {
     customer,
     customerName,
