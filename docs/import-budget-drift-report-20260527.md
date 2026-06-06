@@ -815,6 +815,60 @@ eindeutiger Idempotenz-Markierung „verwaisten Storno #<id> (ref #<N>)".
 
 ### 10.4 Verifikation nach `--apply` (Produktion, READ-ONLY)
 
-> Nach scharfem Lauf auszufüllen — pro Kunde/Topf `net_used == true_used`
-> bestätigen, Kunde 39 = 609,84 €, Σ neu gebuchter Korrekturen = 1.473,00 €,
-> Audit-Batch-ID notieren.
+**Status (Stand 2026-06-05): NOCH NICHT angewendet — Apply steht aus.**
+
+Der scharfe Schreiblauf muss vom Betreiber ausgeführt werden. Der Replit-Agent
+hat ausschließlich **Lesezugriff** auf die Produktions-DB (Read-Only-Replica);
+ein Schreiben der 28 Korrektur-Buchungen + Audit-Einträge gegen die Live-DB ist
+über den Agenten technisch nicht möglich. Der Workspace-`DATABASE_URL` zeigt auf
+die Entwicklungs-DB, nicht auf Produktion.
+
+**Pre-Flight Re-Verifikation (2026-06-05, READ-ONLY gegen Produktions-Replica):**
+Die Klassifikation aus `shared/domain/budget/phantom-storno.ts` wurde erneut auf
+den Live-Ledger angewendet. Ergebnis **identisch** zum Trockenlauf in §10.2:
+
+- Phantom-Waisen zu korrigieren: **28** (19 × `live_appointment_consumption`,
+  9 × `double_storno_linked`); bereits geschriebene Korrekturen: **0**.
+- Σ Phantom-Gutschrift (= zu neutralisierender Über-Kredit): **1.473,00 €** über
+  **11** Kunden/Topf-Kombis.
+- Kunde 39 (`entlastungsbetrag_45b`): `net_used` aktuell **587,02 €**, nach
+  Korrektur **609,84 €** (Gutschrift 22,82 €).
+- Superadmin für die Audit-Attribution: **User-ID 1 (Alrik Degenkolb)** — als
+  einziger aktiver Superadmin in Produktion bestätigt.
+
+**Anwendung erfolgt automatisch beim App-Start (Task #988).**
+
+Da der Agent nicht in die Produktions-DB schreiben kann, der **deployte App-Server
+aber gegen die Produktions-DB läuft**, wird die Korrektur über den Startup-Hook
+`server/startup/reconcile-phantom-stornos.ts` bei jedem App-Start automatisch
+angewendet. Beim **nächsten (Re-)Deploy / Neustart der Produktion** korrigiert der
+Hook die 28 Phantom-Waisen append-only und schreibt einen Audit-Batch (Attribution
+auf den ältesten aktiven Superadmin = User-ID 1). Der Hook läuft nach dem
+Orphan-Reversal-`appointment_id`-Backfill (#819) und dem
+Storno-`transactionDate`-Backfill, damit Referenzen + Termin-Bindung aufgelöst sind.
+
+Idempotent: bereits korrigierte Waisen werden anhand der eindeutigen
+Korrektur-Notiz übersprungen — jeder weitere Start ist ein No-Op (0 geschriebene
+Korrekturen). Lokal in der Dev-DB verifiziert (Lauf 1: Korrekturen geschrieben,
+Lauf 2: 0 geschrieben / „bereits korrigiert"). Mit
+`RECONCILE_PHANTOM_STORNOS_DRY_RUN=1` wird nur klassifiziert/geloggt, ohne zu
+schreiben.
+
+**Manueller Fallback** (identische Logik, falls der Betreiber den scharfen Lauf
+außerhalb des Startups ausführen will, gegen die Produktions-DB):
+
+```bash
+tsx server/scripts/reconcile-phantom-stornos.ts --apply \
+  --user=1 --reason="Phantom-Storno Import-Drift #987"
+```
+
+Das Skript ist idempotent (bereits korrigierte Waisen werden übersprungen) und
+schreibt rein append-only.
+
+**Nach dem scharfen Lauf vom Betreiber auszufüllen:**
+
+> - [ ] Anzahl geschriebener Korrekturen = 28
+> - [ ] Audit-Batch-ID: `__________`
+> - [ ] Pro Kunde/Topf `net_used == true_used` (READ-ONLY-Gegenprobe)
+> - [ ] Kunde 39 = 609,84 €
+> - [ ] Σ neu gebuchter Korrekturen = 1.473,00 €
