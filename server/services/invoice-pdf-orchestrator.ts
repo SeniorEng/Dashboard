@@ -171,6 +171,7 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
     customerSignedAt: monthlyServiceRecords.customerSignedAt,
     status: monthlyServiceRecords.status,
     recordType: monthlyServiceRecords.recordType,
+    customerId: monthlyServiceRecords.customerId,
   })
     .where(and(
       eq(monthlyServiceRecords.customerId, invoice.customerId),
@@ -179,8 +180,31 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
       monthlyServiceRecordsRepo.activeOnly()
     ));
 
+  // Task #997 (#3): Fail-closed. Der LN MUSS sich ausschließlich auf den Kunden
+  // SEINER Rechnung beziehen. Die WHERE-Klausel filtert bereits per customerId;
+  // diese Assertion fängt jede künftige Lockerung der Query ab, damit niemals
+  // fremde Kundendaten auf einen LN geraten.
+  const foreignRecord = serviceRecords.find(r => r.customerId !== invoice.customerId);
+  if (foreignRecord) {
+    throw new Error(
+      `Leistungsnachweis-Scope verletzt: Service-Record #${foreignRecord.id} ` +
+      `gehört Kunde ${foreignRecord.customerId}, Rechnung ${invoice.invoiceNumber} ` +
+      `aber Kunde ${invoice.customerId}.`,
+    );
+  }
+
   const signedRecords = serviceRecords.filter(r =>
     r.status === "completed" || r.status === "employee_signed"
+  );
+
+  // Task #997 (#3): Nur die Termine, die TATSÄCHLICH auf DIESER Rechnung
+  // abgerechnet wurden, dürfen im LN erscheinen. Bei einem Multi-Topf-Split
+  // (eine Rechnung pro budget_type) trägt jede Rechnung nur ihren Topf-Anteil;
+  // die Signatur-Sektionen werden unten auf diese Termin-IDs eingeschränkt.
+  const invoiceAppointmentIds = new Set(
+    pdfData.lineItems
+      .map(i => i.appointmentId)
+      .filter((id): id is number => id != null),
   );
 
   if (signedRecords.length > 0) {
@@ -234,7 +258,7 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
       customerSignatureData: r.customerSignatureData,
       customerSignedAt: r.customerSignedAt ? formatDateForDisplay(formatDateISO(r.customerSignedAt instanceof Date ? r.customerSignedAt : parseTimestamp(r.customerSignedAt))) : null,
       customerName: invoice.customerName || invoice.recipientName,
-      appointmentIds: appointmentsByRecord.get(r.id) ?? [],
+      appointmentIds: (appointmentsByRecord.get(r.id) ?? []).filter(id => invoiceAppointmentIds.has(id)),
       recordType: r.recordType,
     }));
   }
@@ -401,7 +425,11 @@ export async function buildInvoicePdfBytes(
     ip.forEach((p) => merged.addPage(p));
     const lp = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
     lp.forEach((p) => merged.addPage(p));
-    if (pdfData.beihilfeBerechtigt) {
+    // Task #997 (#4): Die Beihilfe-Zweitausfertigung (zweite Rechnung + zweiter
+    // LN für die Beihilfestelle) darf NICHT für Stornorechnungen erzeugt werden
+    // — ein Storno hebt die Rechnung auf und braucht keine Zweitschrift; das
+    // Duplizieren führte zu doppelten LN-Seiten auf Storno-Dokumenten.
+    if (pdfData.beihilfeBerechtigt && pdfData.invoiceType !== "stornorechnung") {
       const ip2 = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
       ip2.forEach((p) => merged.addPage(p));
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());

@@ -96,8 +96,11 @@ function excelDateToISO(serial: number): string {
   return `${y}-${m}-${d}`;
 }
 
-function excelTimeToHHMM(decimal: number): string {
-  const totalMinutes = Math.round(decimal * 24 * 60);
+export function excelTimeToHHMM(decimal: number): string {
+  // Task #997 (#5): Mitternacht normalisieren. Ein Excel-Zeitserial von genau
+  // 1.0 (oder Rundung darauf) ergäbe sonst "24:00" — keine gültige Uhrzeit und
+  // PostgreSQL-`time`-untauglich. `% 1440` faltet 24:00 → 00:00.
+  const totalMinutes = Math.round(decimal * 24 * 60) % 1440;
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;

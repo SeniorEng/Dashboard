@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
 import { renderLineItemQuantity, isKmLineItem, type LineItemQuantityUnit } from "@shared/domain/invoice-line-items";
+import { resolveVatTreatment, distributeVatAcrossLines, grossUpUnitPriceCents, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
 import { isSignatureImageMeaningful } from "./signature-validation";
 
 export interface InvoicePdfData {
@@ -287,16 +288,27 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   const isStorno = data.invoiceType === "stornorechnung";
   const isSelbstzahler = data.billingType === "selbstzahler";
   const isCustomerInvoice = isCustomerAddressedInvoice(data.billingType, data.rechnungAnKunde);
-  const vatMultiplier = isSelbstzahler && data.vatRate > 0 ? (1 + data.vatRate / 10000) : 1;
-  
-  const lineItemsHtml = data.lineItems.map(item => {
+  // Task #997: USt-Behandlung Topf-gebunden + EINE Quelle für Zeile↔Summe.
+  // Kein unabhängiges ×1,19 mehr (RE-2026-0023). Steuerpflichtig (private/
+  // Selbstzahler) → persistierte USt-Summe drift-frei auf die Zeilen verteilen,
+  // sodass Σ(Brutto-Zeilen) === Gesamtbetrag. Steuerfrei → netto === brutto.
+  const treatment = resolveVatTreatment({ billingType: data.billingType, budgetType: data.budgetType });
+  const isStandard = treatment === "standard";
+  const lineNetCents = data.lineItems.map(i => i.totalCents);
+  const lineVatCents = isStandard
+    ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
+    : lineNetCents.map(() => 0);
+  const displayVatCents = isStandard ? data.vatAmountCents : 0;
+  const displayGrossCents = isStandard ? data.grossAmountCents : data.netAmountCents;
+
+  const lineItemsHtml = data.lineItems.map((item, idx) => {
     const isKm = isKmLineItem(item.serviceCode);
     // Task #561: zentrale Quantity-Anzeige — nutzt `quantityRaw`/`quantityUnit`
     // wenn vorhanden, sonst Fallback auf `durationMinutes` (historische Zeilen).
     const quantityDisplay = renderLineItemQuantity(item);
     const unitLabel = isKm ? "/km" : "/Std.";
-    const displayUnitPrice = Math.round(item.unitPriceCents * vatMultiplier);
-    const displayTotal = Math.round(item.totalCents * vatMultiplier);
+    const displayUnitPrice = grossUpUnitPriceCents(item.unitPriceCents, treatment);
+    const displayTotal = item.totalCents + lineVatCents[idx];
     // Task #565: 0,00-€-Zeilen als „kostenlos" kennzeichnen, damit unterscheidbar
     // von versehentlich fehlenden Preisen. Nur für reguläre Rechnungen (nicht Storno,
     // dort sind negative/0-Beträge erwartetes Verhalten).
@@ -431,8 +443,8 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
         <th>Uhrzeit</th>
         <th>Leistung</th>
         <th>Dauer</th>
-        <th>Satz${isSelbstzahler ? " (brutto)" : ""}</th>
-        <th>Betrag${isSelbstzahler ? " (brutto)" : ""}</th>
+        <th>Satz${isStandard ? " (brutto)" : ""}</th>
+        <th>Betrag${isStandard ? " (brutto)" : ""}</th>
       </tr>
     </thead>
     <tbody>
@@ -440,12 +452,12 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     </tbody>
   </table>
 
-  ${isSelbstzahler ? `<div style="font-size: 9pt; color: #4b5563; margin-bottom: 10px;">Alle Einzelbeträge verstehen sich inkl. ${(data.vatRate / 100).toFixed(0)}% MwSt.</div>` : ""}
+  ${isStandard ? `<div style="font-size: 9pt; color: #4b5563; margin-bottom: 10px;">Alle Einzelbeträge verstehen sich inkl. ${(STANDARD_VAT_RATE_BP / 100).toFixed(0)}% MwSt.</div>` : ""}
 
   <table class="totals">
     <tr><td>Nettobetrag:</td><td>${formatCents(data.netAmountCents)}</td></tr>
-    ${data.vatAmountCents !== 0 ? `<tr><td>USt. ${(data.vatRate / 100).toFixed(0)}%:</td><td>${formatCents(data.vatAmountCents)}</td></tr>` : `<tr><td colspan="2" style="font-size: 9pt; color: #1f2937;">Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG</td></tr>`}
-    <tr class="total-row"><td>Gesamtbetrag${isSelbstzahler ? " (inkl. MwSt.)" : ""}:</td><td style="color: ${isStorno ? '#dc2626' : 'inherit'};">${formatCents(data.grossAmountCents)}</td></tr>
+    ${isStandard ? `<tr><td>USt. ${(STANDARD_VAT_RATE_BP / 100).toFixed(0)}%:</td><td>${formatCents(displayVatCents)}</td></tr>` : `<tr><td colspan="2" style="font-size: 9pt; color: #1f2937;">Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG</td></tr>`}
+    <tr class="total-row"><td>Gesamtbetrag${isStandard ? " (inkl. MwSt.)" : ""}:</td><td style="color: ${isStorno ? '#dc2626' : 'inherit'};">${formatCents(displayGrossCents)}</td></tr>
   </table>
 
   ${billingNote ? `<div class="note">${billingNote}</div>` : ""}
@@ -532,8 +544,20 @@ export function buildLeistungsnachweisFooterTemplate(data: InvoicePdfData): stri
 
 export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   const periodLabel = `${MONTH_NAMES[data.billingMonth - 1]} ${data.billingYear}`;
-  const isSelbstzahler = data.billingType === "selbstzahler";
-  const vatMultiplier = isSelbstzahler && data.vatRate > 0 ? (1 + data.vatRate / 10000) : 1;
+  // Task #997: identische Topf-gebundene USt-Quelle wie in generateInvoiceHtml.
+  // Steuerpflichtig → persistierte USt-Summe drift-frei pro Zeile verteilen
+  // (Largest-Remainder), Brutto je Zeile via Objekt-Referenz-Map (sortItems/
+  // groupByAppointment erhalten die Referenzen). Steuerfrei → netto === brutto.
+  const treatment = resolveVatTreatment({ billingType: data.billingType, budgetType: data.budgetType });
+  const isStandard = treatment === "standard";
+  const lineNetCents = data.lineItems.map(i => i.totalCents);
+  const lineVatCents = isStandard
+    ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
+    : lineNetCents.map(() => 0);
+  const lineGrossByRef = new Map<typeof data.lineItems[0], number>();
+  data.lineItems.forEach((it, idx) => lineGrossByRef.set(it, it.totalCents + lineVatCents[idx]));
+  const grossOf = (item: typeof data.lineItems[0]) => lineGrossByRef.get(item) ?? item.totalCents;
+  const displayGrossCents = isStandard ? data.grossAmountCents : data.netAmountCents;
 
   const KM_CODES = ["travel_km", "customer_km"];
   const isKmItem = (item: typeof data.lineItems[0]) => KM_CODES.includes(item.serviceCode || "");
@@ -585,8 +609,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       for (let i = 0; i < group.services.length; i++) {
         const svc = group.services[i];
         const showDateCol = i === 0;
-        const displayUnitPrice = Math.round(svc.unitPriceCents * vatMultiplier);
-        const displayTotal = Math.round(svc.totalCents * vatMultiplier);
+        const displayUnitPrice = grossUpUnitPriceCents(svc.unitPriceCents, treatment);
+        const displayTotal = grossOf(svc);
         rows.push(`
         <tr>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
@@ -600,8 +624,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       }
       for (const km of group.kmItems) {
         const kmLabel = km.serviceCode === "customer_km" ? "Fahrten für/mit Kunde" : "Anfahrt";
-        const displayKmUnitPrice = Math.round(km.unitPriceCents * vatMultiplier);
-        const displayKmTotal = Math.round(km.totalCents * vatMultiplier);
+        const displayKmUnitPrice = grossUpUnitPriceCents(km.unitPriceCents, treatment);
+        const displayKmTotal = grossOf(km);
         // Task #561: km-Anzeige via Helper — Menge × Satz = Summe konsistent.
         const kmQuantityDisplay = renderLineItemQuantity(km);
         // Task #584: Anfahrt-Zeilen tragen Datum + Termin-Bezug, damit
@@ -724,9 +748,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       const groups = groupByAppointment(sectionItems);
       const tableRowsHtml = renderTableRows(groups);
       const tableClass = tableClassForGroups(groups);
-      const sectionCents = isSelbstzahler
-        ? sectionItems.reduce((sum, item) => sum + Math.round(item.totalCents * vatMultiplier), 0)
-        : sectionItems.reduce((sum, item) => sum + item.totalCents, 0);
+      const sectionCents = sectionItems.reduce((sum, item) => sum + grossOf(item), 0);
 
       const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
       const sectionEmployeeName = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
@@ -787,14 +809,14 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
               <th>Leistung</th>
               <th>Beschreibung</th>
               <th>Dauer/Km</th>
-              <th>Einzelpreis${isSelbstzahler ? " (brutto)" : ""}</th>
-              <th>Betrag${isSelbstzahler ? " (brutto)" : ""}</th>
+              <th>Einzelpreis${isStandard ? " (brutto)" : ""}</th>
+              <th>Betrag${isStandard ? " (brutto)" : ""}</th>
             </tr>
           </thead>
           <tbody>
             ${tableRowsHtml}
             <tr class="total-row">
-              <td colspan="6">Summe${isSelbstzahler ? " (inkl. MwSt.)" : ""}</td>
+              <td colspan="6">Summe${isStandard ? " (inkl. MwSt.)" : ""}</td>
               <td style="text-align: right; white-space: nowrap;">${formatCents(sectionCents)}</td>
             </tr>
           </tbody>
@@ -813,9 +835,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     const groups = groupByAppointment(allSorted);
     const tableRowsHtml = renderTableRows(groups);
     const tableClass = tableClassForGroups(groups);
-    const totalCentsAll = isSelbstzahler
-      ? data.grossAmountCents
-      : allSorted.reduce((sum, item) => sum + item.totalCents, 0);
+    const totalCentsAll = allSorted.reduce((sum, item) => sum + grossOf(item), 0);
 
     sectionsHtml = `
     <table class="${tableClass}">
@@ -826,14 +846,14 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
           <th>Leistung</th>
           <th>Beschreibung</th>
           <th>Dauer/Km</th>
-          <th>Einzelpreis${isSelbstzahler ? " (brutto)" : ""}</th>
-          <th>Betrag${isSelbstzahler ? " (brutto)" : ""}</th>
+          <th>Einzelpreis${isStandard ? " (brutto)" : ""}</th>
+          <th>Betrag${isStandard ? " (brutto)" : ""}</th>
         </tr>
       </thead>
       <tbody>
         ${tableRowsHtml}
         <tr class="total-row">
-          <td colspan="6">Gesamt${isSelbstzahler ? " (inkl. MwSt.)" : ""}</td>
+          <td colspan="6">Gesamt${isStandard ? " (inkl. MwSt.)" : ""}</td>
           <td style="text-align: right; white-space: nowrap;">${formatCents(totalCentsAll)}</td>
         </tr>
       </tbody>
@@ -841,7 +861,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 
     <div style="margin-top: 8px;">
       <table style="width: 300px; margin-left: auto;">
-        <tr><td style="padding: 3px 8px;">Gesamtbetrag${isSelbstzahler ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
+        <tr><td style="padding: 3px 8px;">Gesamtbetrag${isStandard ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(displayGrossCents)}</td></tr>
       </table>
     </div>
 
@@ -962,7 +982,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   ${hasMultipleLNs ? `
   <div style="margin-top: 30px; border-top: 2px solid #0d9488; padding-top: 10px;">
     <table style="width: 300px; margin-left: auto;">
-      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag${isSelbstzahler ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(data.grossAmountCents)}</td></tr>
+      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag${isStandard ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(displayGrossCents)}</td></tr>
     </table>
   </div>
   ` : ''}
