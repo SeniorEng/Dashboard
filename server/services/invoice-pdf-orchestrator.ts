@@ -26,6 +26,12 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   import { getCachedCompanySettings } from "./cache";
   import { recordPdfCacheSend } from "../lib/pdf-cache-stats";
 
+  // Task #995 — Effektive Seitenränder pro Dokumenttyp. Das HTML setzt
+  // `@page{margin:0}`; die Ränder (inkl. reserviertem Bottom-Margin für den
+  // wiederholten Puppeteer-Footer) kommen hier über page.pdf({margin}).
+  const INVOICE_PDF_MARGIN = { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" } as const;
+  const LEISTUNGSNACHWEIS_PDF_MARGIN = { top: "15mm", right: "15mm", bottom: "18mm", left: "15mm" } as const;
+
   /**
  * Task #544: Feuert `persistInvoicePdf` im Hintergrund (Microtask), damit der
  * HTTP-Request „Rechnung erstellen" nicht durch einen langsamen Puppeteer-
@@ -363,11 +369,11 @@ export async function buildInvoicePdfBytes(
 ): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"]; invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]> }> {
   const { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot, invoiceSnapshot } = await buildInvoicePdfData(invoice, companySettings, options);
 
-  const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf, buildInvoiceFooterTemplate, buildLeistungsnachweisFooterTemplate } = await import("../lib/pdf-generator");
   const { embedZugferdXml } = await import("../lib/zugferd");
 
   const html = generateInvoiceHtml(pdfData);
-  const { buffer } = await generatePdf(html);
+  const { buffer } = await generatePdf(html, { footerHtml: buildInvoiceFooterTemplate(pdfData), margin: INVOICE_PDF_MARGIN });
   const { pdf: zugferdBuffer, xml: zugferdXml } = await embedZugferdXml(buffer, pdfData);
   // Task #522: Fingerprint VOR der LN-Signatur-Anreicherung erfassen — der
   // Invoice-Fingerprint deckt nur die Rechnungs-Inhalte ab.
@@ -381,7 +387,7 @@ export async function buildInvoicePdfBytes(
   if (isPflegekasseInvoice) {
     await enrichPdfDataWithSignatures(pdfData, invoice);
     const lnHtml = generateLeistungsnachweisHtml(pdfData);
-    const { buffer: lnPdfBuf } = await generatePdf(lnHtml);
+    const { buffer: lnPdfBuf } = await generatePdf(lnHtml, { footerHtml: buildLeistungsnachweisFooterTemplate(pdfData), margin: LEISTUNGSNACHWEIS_PDF_MARGIN });
     leistungsnachweisPdf = lnPdfBuf;
     leistungsnachweisDataFingerprint = computeLeistungsnachweisFingerprint(pdfData);
   }
@@ -412,10 +418,10 @@ export async function buildInvoicePdfBytes(
 async function renderLeistungsnachweisOnly(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; fingerprint: string } | null> {
   const { pdfData, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
   if (!isPflegekasseInvoice) return null;
-  const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  const { generateLeistungsnachweisHtml, generatePdf, buildLeistungsnachweisFooterTemplate } = await import("../lib/pdf-generator");
   await enrichPdfDataWithSignatures(pdfData, invoice);
   const lnHtml = generateLeistungsnachweisHtml(pdfData);
-  const { buffer: lnPdf } = await generatePdf(lnHtml);
+  const { buffer: lnPdf } = await generatePdf(lnHtml, { footerHtml: buildLeistungsnachweisFooterTemplate(pdfData), margin: LEISTUNGSNACHWEIS_PDF_MARGIN });
   return { pdf: lnPdf, fingerprint: computeLeistungsnachweisFingerprint(pdfData) };
 }
 
@@ -630,20 +636,20 @@ export async function loadOrRenderSendablePdfs(
   const cachedLn = lnPdf !== null;
 
   if (!invoicePdf || !lnPdf) {
-    const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+    const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf, buildInvoiceFooterTemplate, buildLeistungsnachweisFooterTemplate } = await import("../lib/pdf-generator");
     if (!invoicePdf) {
       // Task #553: Im Send-Pfad MUSS Strict-Mode aktiv sein, damit ein
       // Embedding-Failure als typisierter `ZugferdEmbedError` propagiert
       // wird statt still ein nicht-konformes PDF zurückzuliefern.
       const { embedZugferdXml } = await import("../lib/zugferd");
       const invoiceHtml = generateInvoiceHtml(pdfData);
-      const { buffer: rendered } = await generatePdf(invoiceHtml);
+      const { buffer: rendered } = await generatePdf(invoiceHtml, { footerHtml: buildInvoiceFooterTemplate(pdfData), margin: INVOICE_PDF_MARGIN });
       const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData, { strict: opts.strictZugferd === true, testFaults: opts.testFaults });
       invoicePdf = zugferdBuffer;
     }
     if (!lnPdf) {
       const lnHtml = generateLeistungsnachweisHtml(pdfData);
-      const { buffer: rendered } = await generatePdf(lnHtml);
+      const { buffer: rendered } = await generatePdf(lnHtml, { footerHtml: buildLeistungsnachweisFooterTemplate(pdfData), margin: LEISTUNGSNACHWEIS_PDF_MARGIN });
       lnPdf = rendered;
     }
     // Hintergrund-Persist (Mutex-serialisiert): beim nächsten Send hoffentlich
@@ -686,7 +692,7 @@ async function loadStoredPdfByPath(pdfPath: string | null): Promise<Buffer | nul
 export async function renderLeistungsnachweisOnTheFly(invoice: Invoice): Promise<Buffer> {
   const lineItems = await storage.getInvoiceLineItems(invoice.id);
   const companySettings = await getCachedCompanySettings();
-  const { generateLeistungsnachweisHtml, generatePdf } = await import("../lib/pdf-generator");
+  const { generateLeistungsnachweisHtml, generatePdf, buildLeistungsnachweisFooterTemplate } = await import("../lib/pdf-generator");
 
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 
@@ -707,6 +713,6 @@ export async function renderLeistungsnachweisOnTheFly(invoice: Invoice): Promise
   await enrichPdfDataWithSignatures(pdfData, invoice);
 
   const html = generateLeistungsnachweisHtml(pdfData);
-  const { buffer } = await generatePdf(html);
+  const { buffer } = await generatePdf(html, { footerHtml: buildLeistungsnachweisFooterTemplate(pdfData), margin: LEISTUNGSNACHWEIS_PDF_MARGIN });
   return buffer;
 }

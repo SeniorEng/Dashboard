@@ -13,6 +13,8 @@ import { describe, it, expect } from "vitest";
 import {
   generateInvoiceHtml,
   generateLeistungsnachweisHtml,
+  buildInvoiceFooterTemplate,
+  buildLeistungsnachweisFooterTemplate,
   type InvoicePdfData,
 } from "../../server/lib/pdf-generator";
 
@@ -83,63 +85,52 @@ function uniqueEmailsIn(html: string): string[] {
   return Array.from(new Set(matches.map((m) => m.toLowerCase())));
 }
 
-/**
- * Teilt das HTML am `<div class="footer">` und liefert {head, foot}, sodass
- * beide Bereiche unabhängig auf die Firmen-E-Mail geprüft werden können.
- * Der Header-Bereich der Rechnung (`.header`) enthält bei Cards mit
- * verschachtelten DIVs zu viele Schließ-Tags für eine einfache Greedy-Regex,
- * deshalb splitten wir am Footer-Anker.
- */
-function splitHeadAndFoot(html: string): { head: string; foot: string } {
-  const footerIdx = html.lastIndexOf('<div class="footer"');
-  if (footerIdx === -1) return { head: html, foot: "" };
-  return { head: html.slice(0, footerIdx), foot: html.slice(footerIdx) };
-}
-
 describe("Invoice-/Leistungsnachweis-PDF: Firmen-E-Mail-Konsistenz (Task #573)", () => {
   const customEmail = "kontakt@pflege-engel-test.de";
 
   it("Rechnung: rendert genau dieselbe E-Mail aus company_settings (Header, keine zweite Schreibweise)", () => {
     // Task #755 — der separate Footer-Grid mit duplizierter E-Mail-/Bank-
     // Adresse wurde entfernt; die Firmen-E-Mail steht nur noch einmal im
-    // Header-Kontaktblock. Garantie aus #573 bleibt: keine hartkodierte
-    // zweite Adresse irgendwo im Output.
-    const html = generateInvoiceHtml(makePdfData({ companyEmail: customEmail }));
+    // Header-Kontaktblock. Task #995 — der Body-Footer wanderte in den
+    // Puppeteer-`footerTemplate` (buildInvoiceFooterTemplate); dieser trägt
+    // KEINE E-Mail. Garantie aus #573 bleibt: keine hartkodierte zweite
+    // Adresse irgendwo im Gesamt-Output (Body + Footer-Template).
+    const data = makePdfData({ companyEmail: customEmail });
+    const html = generateInvoiceHtml(data);
+    const footer = buildInvoiceFooterTemplate(data);
 
-    const emails = uniqueEmailsIn(html);
+    const emails = uniqueEmailsIn(html + footer);
     expect(emails).toEqual([customEmail.toLowerCase()]);
 
-    const { head } = splitHeadAndFoot(html);
-    expect(head, "Header-Bereich soll companyEmail enthalten").toContain(customEmail);
+    expect(html, "Header-Bereich soll companyEmail enthalten").toContain(customEmail);
   });
 
   it("Rechnung: keine hartkodierte Fallback-Adresse, wenn companyEmail leer ist", () => {
-    const html = generateInvoiceHtml(makePdfData({ companyEmail: "" }));
-    const emails = uniqueEmailsIn(html);
+    const data = makePdfData({ companyEmail: "" });
+    const emails = uniqueEmailsIn(generateInvoiceHtml(data) + buildInvoiceFooterTemplate(data));
     expect(emails).toEqual([]);
   });
 
   it("Leistungsnachweis: rendert genau dieselbe E-Mail aus company_settings (keine zweite Schreibweise)", () => {
     // Der Leistungsnachweis blendet im Header bewusst nur Firmenname/IK-Nr.
     // ein (keine Kontaktdaten) und führt die vollständige Kontaktzeile inkl.
-    // E-Mail im Footer. Wichtig ist hier: KEINE zweite, hartkodierte
-    // Adresse — der Footer-Eintrag ist die einzige Quelle der Wahrheit.
-    const html = generateLeistungsnachweisHtml(
-      makePdfData({ companyEmail: customEmail }),
-    );
+    // E-Mail im Footer. Task #995 — dieser Footer ist nun der Puppeteer-
+    // `footerTemplate` (buildLeistungsnachweisFooterTemplate), nicht mehr ein
+    // Body-Element. Wichtig bleibt: KEINE zweite, hartkodierte Adresse — der
+    // Footer-Eintrag ist die einzige Quelle der Wahrheit.
+    const data = makePdfData({ companyEmail: customEmail });
+    const html = generateLeistungsnachweisHtml(data);
+    const footer = buildLeistungsnachweisFooterTemplate(data);
 
-    const emails = uniqueEmailsIn(html);
+    const emails = uniqueEmailsIn(html + footer);
     expect(emails).toEqual([customEmail.toLowerCase()]);
 
-    const { foot } = splitHeadAndFoot(html);
-    expect(foot, "Footer des Leistungsnachweises soll companyEmail enthalten").toContain(customEmail);
+    expect(footer, "Footer-Template des Leistungsnachweises soll companyEmail enthalten").toContain(customEmail);
   });
 
   it("Leistungsnachweis: keine hartkodierte Fallback-Adresse, wenn companyEmail leer ist", () => {
-    const html = generateLeistungsnachweisHtml(
-      makePdfData({ companyEmail: "" }),
-    );
-    const emails = uniqueEmailsIn(html);
+    const data = makePdfData({ companyEmail: "" });
+    const emails = uniqueEmailsIn(generateLeistungsnachweisHtml(data) + buildLeistungsnachweisFooterTemplate(data));
     expect(emails).toEqual([]);
   });
 });

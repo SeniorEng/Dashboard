@@ -125,22 +125,28 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-function isValidDataUrl(str: string): boolean {
-  return /^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=\s]+$/.test(str.trim());
+// SVG-Signaturen können nicht pixel-analysiert werden (kein PNG/JPEG/WebP-
+// Decode-Pfad), werden aber als gültiges Vektorformat akzeptiert.
+function isSvgSignatureDataUrl(str: string): boolean {
+  return /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=\s]+$/.test(str.trim());
 }
 
-// Task #749 — defensiver "Sieht das Bild auch wirklich nach Unterschrift
+// Task #749 / #995 — defensiver "Sieht das Bild auch wirklich nach Unterschrift
 // aus?"-Check für den Leistungsnachweis-Renderer. Wird ein leeres oder
 // trivial-kleines Signatur-Bild übergeben, fällt der Renderer auf den
 // "noch nicht unterschrieben"-Branch zurück statt einen signierten Label
 // neben einem leeren <img> auszugeben (Drift-Pfad aus RE-2026-0010).
+//
+// Task #995 — Die Format-Akzeptanz darf NICHT von der Signier-Zeit-Validierung
+// (`analyzeSignatureImage`, akzeptiert png/jpeg/jpg/webp) abweichen: eine bei
+// der Erfassung gültige Unterschrift wurde sonst beim Rendern still verworfen
+// (z.B. jpg/webp) und der Leistungsnachweis zeigte nur die Namenszeile ohne
+// Bild. Deshalb ist `isSignatureImageMeaningful` (≙ `analyzeSignatureImage`)
+// hier die einzige Quelle der Wahrheit für Raster-Formate; SVG passiert
+// separat. `analyzeSignatureImage` normalisiert Whitespace selbst.
 function isMeaningfulSignatureForRender(value: string | null | undefined): boolean {
   if (!value) return false;
-  if (!isValidDataUrl(value)) return false;
-  if (!/^data:image\/(png|jpeg);base64,/.test(value.trim())) {
-    // SVG signatures bypass the meaningful-pixel check (no PNG/JPEG path).
-    return true;
-  }
+  if (isSvgSignatureDataUrl(value)) return true;
   if (isSignatureImageMeaningful(value)) return true;
   // Audit-grade Strukturlog: Falls hier ein Signatur-Bild durchrutscht, ist
   // die Server-Validierung in signServiceRecord umgangen worden (Drift, Bug
@@ -314,7 +320,11 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 <head>
   <meta charset="UTF-8">
   <style>
-    @page { margin: 20mm 15mm; size: A4; }
+    /* Task #995 — @page-Margins auf 0; die effektiven Seitenränder werden in
+       generatePdf via page.pdf({margin}) gesetzt, damit der Puppeteer-Footer
+       (displayHeaderFooter) im reservierten Bottom-Margin gezeichnet wird und
+       nicht mehr als Body-Element auf eine Leerseite verdrängt werden kann. */
+    @page { margin: 0; size: A4; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; color: #1f2937; line-height: 1.5; margin: 0; padding: 0; }
     .header { display: flex; justify-content: space-between; margin-bottom: 30px; }
     .company-info { font-size: 9pt; color: #1f2937; }
@@ -333,7 +343,6 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     .totals td { padding: 4px 8px; white-space: nowrap; }
     .totals td:last-child { text-align: right; }
     .total-row { font-weight: bold; font-size: 12pt; border-top: 2px solid #0d9488; }
-    .footer { margin-top: 18px; font-size: 8pt; color: #4b5563; border-top: 1px solid #e5e7eb; padding-top: 6px; text-align: center; page-break-inside: avoid; }
     .note { margin-top: 15px; padding: 10px; background: #f0fdfa; border-left: 3px solid #0d9488; font-size: 9pt; }
     .insurance-ref { margin-top: 10px; padding: 8px; background: #eff6ff; border: 1px solid #bfdbfe; font-size: 9pt; }
     .payment-block { margin-top: 18px; padding: 12px 14px; border: 1.5px solid #0d9488; background: #f0fdfa; font-size: 9.5pt; page-break-inside: avoid; }
@@ -488,12 +497,37 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   })()}
 
   ${data.notes ? `<div style="margin-top: 12px; font-size: 9pt; color: #1f2937;"><strong>Hinweis:</strong> ${escapeHtml(data.notes)}</div>` : ""}
-
-  <div class="footer">
-    ${escapeHtml(data.companyName || "")}${data.geschaeftsfuehrer ? ` &middot; Geschäftsführer: ${escapeHtml(data.geschaeftsfuehrer)}` : ""}${data.steuernummer ? ` &middot; St.-Nr. ${escapeHtml(data.steuernummer)}` : ""}${data.ustId ? ` &middot; USt-ID ${escapeHtml(data.ustId)}` : ""}
-  </div>
 </body>
 </html>`;
+}
+
+// Task #995 — Footer-Inhalt (Pflichtangaben-Zeile) als self-contained
+// Puppeteer-`footerTemplate`. Footer-Templates sehen das Seiten-CSS NICHT,
+// daher MÜSSEN alle Styles inline stehen und eine explizite `font-size`
+// gesetzt sein (Default ist sonst 0). Wird auf JEDER Seite im reservierten
+// Bottom-Margin gezeichnet (siehe generatePdf), nie als Body-Element.
+function pdfFooterTemplate(innerHtml: string): string {
+  return `<div style="width:100%;font-size:8pt;color:#4b5563;font-family:Arial,Helvetica,sans-serif;padding:0 15mm;box-sizing:border-box;-webkit-print-color-adjust:exact;">`
+    + `<div style="border-top:1px solid #e5e7eb;padding-top:4px;text-align:center;">${innerHtml}</div>`
+    + `</div>`;
+}
+
+export function buildInvoiceFooterTemplate(data: InvoicePdfData): string {
+  const inner = `${escapeHtml(data.companyName || "")}`
+    + `${data.geschaeftsfuehrer ? ` &middot; Geschäftsführer: ${escapeHtml(data.geschaeftsfuehrer)}` : ""}`
+    + `${data.steuernummer ? ` &middot; St.-Nr. ${escapeHtml(data.steuernummer)}` : ""}`
+    + `${data.ustId ? ` &middot; USt-ID ${escapeHtml(data.ustId)}` : ""}`;
+  return pdfFooterTemplate(inner);
+}
+
+export function buildLeistungsnachweisFooterTemplate(data: InvoicePdfData): string {
+  const parts = [
+    escapeHtml(data.companyName || ""),
+    escapeHtml(data.companyAddress || ""),
+    data.companyPhone ? `Tel.: ${escapeHtml(formatPhoneForDisplay(data.companyPhone))}` : "",
+    escapeHtml(data.companyEmail || ""),
+  ].filter(Boolean);
+  return pdfFooterTemplate(parts.join(" | "));
 }
 
 export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
@@ -832,7 +866,9 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 <head>
   <meta charset="UTF-8">
   <style>
-    @page { margin: 15mm 15mm; size: A4; }
+    /* Task #995 — siehe Rechnungs-Template: @page-Margin 0, effektive Ränder +
+       wiederholter Footer kommen aus generatePdf (page.pdf margin + footerTemplate). */
+    @page { margin: 0; size: A4; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; color: #1f2937; line-height: 1.4; margin: 0; padding: 0; }
     .header { margin-bottom: 12px; }
     .title { font-size: 15pt; font-weight: bold; color: #0d9488; margin-bottom: 6px; }
@@ -855,7 +891,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     .signature-img { max-width: 260px; max-height: 130px; filter: brightness(0) saturate(100%) invert(18%) sepia(60%) saturate(600%) hue-rotate(190deg); }
     .signature-line { border-top: 1px solid #1f2937; margin-top: 36px; padding-top: 4px; font-size: 9pt; color: #1f2937; }
     .signature-line-signed { margin-top: 0; }
-    .footer { margin-top: 20px; font-size: 9pt; color: #1f2937; border-top: 1px solid #e5e7eb; padding-top: 8px; }
     /* Task #571: Ein neutraler, zusammenhängender Bestätigungs-/Abtretungs-
        Absatz direkt über den Unterschriften — keine farbigen Doppel-Kästen mehr. */
     .confirm-block { margin-top: 12px; padding: 8px 0 4px 0; border-top: 1px solid #e5e7eb; font-size: 9pt; line-height: 1.45; color: #1f2937; text-align: justify; }
@@ -931,25 +966,43 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     </table>
   </div>
   ` : ''}
-
-  <div class="footer">
-    ${data.companyName || ""} | ${data.companyAddress || ""} | ${data.companyPhone ? `Tel.: ${formatPhoneForDisplay(data.companyPhone)}` : ""} | ${data.companyEmail || ""}
-  </div>
 </body>
 </html>`;
 }
 
-export async function generatePdf(html: string): Promise<{ buffer: Buffer; hash: string }> {
+export interface GeneratePdfOptions {
+  /**
+   * Task #995 — self-contained Puppeteer-`footerTemplate` (inline-Styles).
+   * Gesetzt ⇒ `displayHeaderFooter:true` und der Footer wird auf JEDER Seite
+   * im reservierten Bottom-Margin gezeichnet, statt als Body-Element auf eine
+   * Leerseite verdrängt zu werden. Leer/undefined ⇒ altes Verhalten.
+   */
+  footerHtml?: string;
+  /** Effektive Seitenränder (das HTML setzt `@page{margin:0}`). */
+  margin?: { top: string; right: string; bottom: string; left: string };
+}
+
+const ZERO_MARGIN = { top: "0", right: "0", bottom: "0", left: "0" } as const;
+
+export async function generatePdf(html: string, options?: GeneratePdfOptions): Promise<{ buffer: Buffer; hash: string }> {
   // Task #521: nutzt `withFreshPage` für protocolTimeout/Recycling auf
   // Puppeteer-ProtocolError ("Network.enable timed out") + harten
   // Render-Timeout statt der bisherigen unbegrenzten Wartezeit.
   const { withFreshPage } = await import("../services/pdf-generator");
+  const margin = options?.margin ?? ZERO_MARGIN;
+  const useFooter = Boolean(options?.footerHtml);
   const buffer = await withFreshPage(async (page) => {
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 15000 });
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "0", bottom: "0", left: "0", right: "0" },
+      margin,
+      // Task #995 — leeres headerTemplate verhindert Puppeteers Default-Header
+      // (Datum/Titel); footerTemplate trägt die Pflichtangaben-Zeile.
+      displayHeaderFooter: useFooter,
+      ...(useFooter
+        ? { headerTemplate: "<span></span>", footerTemplate: options!.footerHtml }
+        : {}),
     });
     return Buffer.from(pdfBuffer);
   });
