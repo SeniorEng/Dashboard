@@ -9,6 +9,7 @@ import type {
   SendInvoiceResponse as SendResponse,
   BatchSendInvoiceResponse as BatchSendResponse,
   BulkSendInvoiceResponse,
+  BulkPrintSummary,
   DiscardDraftsResponse,
 } from "@shared/api";
 import type { GenerateAllResponse } from "../types";
@@ -42,6 +43,7 @@ export function useBillingMutations({
   const [batchSending, setBatchSending] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<GenerateAllResponse | null>(null);
   const [bulkSendResult, setBulkSendResult] = useState<BulkSendInvoiceResponse | null>(null);
+  const [bulkPrintResult, setBulkPrintResult] = useState<BulkPrintSummary | null>(null);
 
   const generateMutation = useMutation({
     mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number }) => {
@@ -327,6 +329,71 @@ export function useBillingMutations({
     },
   });
 
+  // Task #996: Sammeldruck — bündelt alle Entwurfs-Rechnungen des Monats
+  // (Rechnung + Leistungsnachweis) in ein PDF (bzw. ZIP je Krankenkasse),
+  // löst den Datei-Download im Browser aus und markiert die enthaltenen
+  // Rechnungen serverseitig als „versendet". Das Ergebnis-Summary kommt im
+  // `X-Bulk-Print-Summary`-Header und wird im Dialog angezeigt.
+  const bulkPrintMutation = useMutation({
+    mutationFn: async (opts: { groupByPayer: boolean }) => {
+      setBulkPrintResult(null);
+      const result = await api.postBlob<BulkPrintSummary>(
+        "/billing/bulk-print",
+        {
+          billingMonth: selectedMonth,
+          billingYear: selectedYear,
+          groupByPayer: opts.groupByPayer,
+          ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
+        },
+        "X-Bulk-Print-Summary",
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: async (data) => {
+      // Browser-Download des gebündelten PDF/ZIP auslösen.
+      const url = URL.createObjectURL(data.blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setBulkPrintResult(data.summary);
+      const s = data.summary;
+      toast({
+        title: "Sammeldruck erstellt",
+        description: s
+          ? `${s.printed} gedruckt, ${s.marked} als versendet markiert, ${s.errors} Fehler`
+          : "Download wurde gestartet.",
+      });
+
+      invalidateRelated(queryClient, "billing");
+
+      // Replika-Lag-Schutz: erfolgreich markierte Rechnungen dürfen nicht mehr
+      // als `entwurf` in der Liste auftauchen.
+      if (s) {
+        const markedIds = new Set(
+          s.results.filter((r) => r.status === "printed").map((r) => r.invoiceId),
+        );
+        if (markedIds.size > 0) {
+          await refetchWithPoll<InvoiceItem[]>(
+            queryClient,
+            ["billing-invoices", selectedYear, selectedMonth, statusFilter],
+            (list) => {
+              if (!list) return true;
+              return !list.some((inv) => markedIds.has(inv.id) && inv.status === "entwurf");
+            },
+          );
+        }
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Sammeldruck fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
   return {
     generateMutation,
     discardDraftsMutation,
@@ -336,11 +403,14 @@ export function useBillingMutations({
     generateAllMutation,
     batchSendMutation,
     bulkSendMutation,
+    bulkPrintMutation,
     sendingInvoiceId,
     batchSending,
     generateAllProgress,
     setGenerateAllProgress,
     bulkSendResult,
     setBulkSendResult,
+    bulkPrintResult,
+    setBulkPrintResult,
   };
 }

@@ -67,7 +67,7 @@ import {
 } from "../lib/invoice-pdf-fingerprint";
 import { getCachedCompanySettings } from "../services/cache";
 import { recordPdfCacheSend } from "../lib/pdf-cache-stats";
-import { sendInvoiceCopyByPost } from "../services/document-delivery";
+import { sendInvoiceCopyByPost, combinePdfBuffers } from "../services/document-delivery";
 import {
     schedulePdfPersistInBackground,
     buildPdfData,
@@ -234,6 +234,28 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
       ));
     const allowed = new Set(matching.map(r => r.customerId));
     filteredCustomerRows = customerRows.filter(c => allowed.has(c.id));
+  }
+
+  // Task #996: Kunden mit bereits existierender aktiver (nicht stornierter)
+  // Rechnung für diesen Monat ausschließen — spiegelt die Idempotenz-Prüfung
+  // aus `POST /generate-all` (hasActive), damit der „Alle offenen erstellen
+  // (N)"-Counter exakt die Kunden zählt, für die die Massenerstellung
+  // tatsächlich eine Rechnung anlegt (und nicht überspringt).
+  const candidateIds = filteredCustomerRows.map(c => c.id);
+  if (candidateIds.length > 0) {
+    const existingInvoices = await db.select({
+      customerId: invoicesTable.customerId,
+    })
+      .from(invoicesTable)
+      .where(and(
+        inArray(invoicesTable.customerId, candidateIds),
+        eq(invoicesTable.billingYear, year),
+        eq(invoicesTable.billingMonth, month),
+        ne(invoicesTable.status, "storniert"),
+        ne(invoicesTable.invoiceType, "stornorechnung"),
+      ));
+    const alreadyInvoiced = new Set(existingInvoices.map(r => r.customerId));
+    filteredCustomerRows = filteredCustomerRows.filter(c => !alreadyInvoiced.has(c.id));
   }
 
   const eligibleCustomers: BillingCustomerItem[] = filteredCustomerRows.map(c => ({
@@ -1792,6 +1814,252 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
     summary: { total: results.length, sent, markedSent, skipped, errors },
     results,
   });
+}));
+
+// Task #996: Sammeldruck — bündelt alle Entwurfs-Rechnungen eines Monats
+// (Rechnung + Leistungsnachweis je Rechnung) in ein druckfertiges PDF und
+// markiert die enthaltenen Rechnungen anschließend als „versendet".
+//   - groupByPayer=false → ein zusammengeführtes Gesamt-PDF (application/pdf)
+//   - groupByPayer=true  → ZIP mit einem PDF je Krankenkasse (Selbstzahler in
+//     einem eigenen Bündel)
+// Die PDF-Beschaffung nutzt exakt dieselben Helper wie /bundle-by-payer
+// (Cache-Hit → on-demand-Render → Hintergrund-Persist), es wird KEIN neuer
+// Render-Pfad eingeführt. Per-Rechnung-Fehler werden gesammelt und im
+// `x-bulk-print-summary`-Header zurückgemeldet, sodass ein einzelner Fehler
+// den Lauf nicht still verschluckt. Das Mark-Sent läuft über denselben Pfad
+// wie /send-bulk (updateInvoiceStatusTx + Audit-Log).
+router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werden", async (req, res) => {
+  const parsed = z.object({
+    billingMonth: z.number().int().min(1).max(12),
+    billingYear: z.number().int().min(2000).max(2100),
+    insuranceProviderId: z.number().int().positive().optional(),
+    groupByPayer: z.boolean().optional().default(false),
+  }).safeParse(req.body);
+  if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
+  const { billingMonth, billingYear, insuranceProviderId, groupByPayer } = parsed.data;
+
+  // Entwurfs-Rechnungen des Monats laden (optional auf eine Kasse gefiltert).
+  // Reine Stornorechnungen werden — wie im Druck-Bündel /bundle-by-payer —
+  // ausgeschlossen; der Sammeldruck ist der monatliche Rechnungsstapel.
+  const allDrafts = await storage.getInvoices({
+    year: billingYear,
+    month: billingMonth,
+    status: "entwurf",
+    insuranceProviderId,
+  });
+  const drafts = allDrafts
+    .filter(inv => inv.invoiceType !== "stornorechnung")
+    .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+
+  if (drafts.length === 0) {
+    throw notFound(
+      `Keine Entwurfs-Rechnungen für ${String(billingMonth).padStart(2, "0")}/${billingYear} gefunden.`,
+    );
+  }
+
+  // Krankenkassen-Zuordnung je Kunde (für groupByPayer + Dateinamen).
+  const customerIds = Array.from(new Set(drafts.map(d => d.customerId)));
+  const payerRows = await db.select({
+    customerId: customerInsuranceHistory.customerId,
+    providerId: insuranceProviders.id,
+    providerName: insuranceProviders.name,
+  })
+    .from(customerInsuranceHistory)
+    .innerJoin(insuranceProviders, eq(insuranceProviders.id, customerInsuranceHistory.insuranceProviderId))
+    .where(and(
+      inArray(customerInsuranceHistory.customerId, customerIds),
+      isNull(customerInsuranceHistory.validTo),
+    ));
+  const payerByCustomer = new Map(payerRows.map(r => [r.customerId, { id: r.providerId, name: r.providerName }]));
+
+  type ResultEntry = {
+    invoiceId: number;
+    invoiceNumber: string;
+    customerId: number;
+    status: "printed" | "error";
+    message?: string;
+  };
+  const results: ResultEntry[] = [];
+
+  // Phase 1 — PDFs beschaffen (kein State-Change). Fehler je Rechnung sammeln.
+  type DraftInvoice = Awaited<ReturnType<typeof storage.getInvoices>>[number];
+  type Rendered = {
+    invoice: DraftInvoice;
+    invoicePdf: Buffer;
+    lnPdf: Buffer | null;
+    payerKey: string;
+    payerLabel: string;
+  };
+  const rendered: Rendered[] = [];
+  for (const inv of drafts) {
+    try {
+      let invoicePdf = await loadInvoicePdfFromStorage(inv);
+      let lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
+      const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
+      if (!invoicePdf || (!lnPdf && isPflegekasse)) {
+        try {
+          await persistInvoicePdf(inv.id);
+        } catch (err) {
+          console.error(`[billing/bulk-print] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
+        }
+        const refreshed = await storage.getInvoice(inv.id);
+        if (refreshed) {
+          invoicePdf = await loadInvoicePdfFromStorage(refreshed) ?? invoicePdf;
+          lnPdf = await loadLeistungsnachweisPdfFromStorage(refreshed) ?? lnPdf;
+        }
+      }
+      if (!invoicePdf) {
+        throw new Error("Rechnungs-PDF konnte nicht geladen werden.");
+      }
+      if (!lnPdf) {
+        lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+      }
+      const payer = payerByCustomer.get(inv.customerId);
+      rendered.push({
+        invoice: inv,
+        invoicePdf,
+        lnPdf,
+        payerKey: payer ? `kasse-${payer.id}` : "selbstzahler",
+        payerLabel: payer ? payer.name : "Selbstzahler",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
+      console.error(`[billing/bulk-print] Render für Rechnung ${inv.id} fehlgeschlagen:`, err);
+      results.push({
+        invoiceId: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        customerId: inv.customerId,
+        status: "error",
+        message: msg,
+      });
+    }
+  }
+
+  if (rendered.length === 0) {
+    throw new AppError(
+      500,
+      "Keine der Entwurfs-Rechnungen konnte für den Sammeldruck gerendert werden.",
+      "BULK_PRINT_RENDER_FAILED",
+    );
+  }
+
+  // Output-Buffer ZUERST bauen (vor dem State-Change). Schlägt das Mergen
+  // fehl, ist noch keine Rechnung als versendet markiert.
+  const monthSlug = `${String(billingMonth).padStart(2, "0")}-${billingYear}`;
+  let outputBuffer: Buffer;
+  let contentType: string;
+  let fileName: string;
+
+  if (groupByPayer) {
+    const groups = new Map<string, { label: string; pairs: Rendered[] }>();
+    for (const r of rendered) {
+      const g = groups.get(r.payerKey) ?? { label: r.payerLabel, pairs: [] };
+      g.pairs.push(r);
+      groups.set(r.payerKey, g);
+    }
+    const archiver = (await import("archiver")).default;
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    const chunks: Buffer[] = [];
+    archive.on("data", (c: Buffer) => chunks.push(c));
+    const done = new Promise<void>((resolve, reject) => {
+      archive.on("end", () => resolve());
+      archive.on("error", (err: Error) => reject(err));
+    });
+    for (const [, g] of groups) {
+      const flat: Buffer[] = [];
+      for (const p of g.pairs) {
+        flat.push(p.invoicePdf);
+        if (p.lnPdf) flat.push(p.lnPdf);
+      }
+      const mergedGroup = await combinePdfBuffers(flat);
+      const slug = g.label.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Kasse";
+      archive.append(mergedGroup, { name: `Sammeldruck-${slug}-${monthSlug}.pdf` });
+    }
+    await archive.finalize();
+    await done;
+    outputBuffer = Buffer.concat(chunks);
+    contentType = "application/zip";
+    fileName = `Sammeldruck-${monthSlug}.zip`;
+  } else {
+    const flat: Buffer[] = [];
+    for (const r of rendered) {
+      flat.push(r.invoicePdf);
+      if (r.lnPdf) flat.push(r.lnPdf);
+    }
+    outputBuffer = await combinePdfBuffers(flat);
+    contentType = "application/pdf";
+    fileName = `Sammeldruck-${monthSlug}.pdf`;
+  }
+
+  // Phase 2 — enthaltene Rechnungen als „versendet" markieren (gleicher Pfad
+  // wie /send-bulk: updateInvoiceStatusTx + sentAt + Audit-Log). Fehler je
+  // Rechnung isolieren, damit ein einzelner Mark-Fehler den Lauf nicht kippt.
+  let marked = 0;
+  for (const r of rendered) {
+    const inv = r.invoice;
+    const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
+    try {
+      schedulePdfPersistInBackground(inv.id);
+      await withAudit(async (tx, audit) => {
+        await updateInvoiceStatusTx(tx, inv.id, "versendet", req.user!.id);
+        await tx.update(invoicesTable)
+          .set({ sentAt: new Date() })
+          .where(eq(invoicesTable.id, inv.id));
+        audit.record({
+          userId: req.user!.id,
+          action: isPflegekasse ? "invoice_marked_sent_manually" : "invoice_status_changed",
+          entityType: "invoice",
+          entityId: inv.id,
+          metadata: {
+            invoiceNumber: inv.invoiceNumber,
+            customerId: inv.customerId,
+            billingType: inv.billingType,
+            oldStatus: inv.status,
+            newStatus: "versendet",
+            source: "bulk_print",
+            ...(isPflegekasse ? { reason: "manual_mark_sent_no_ti" } : {}),
+          },
+          ipAddress: req.ip,
+        });
+      }, { faults: readTestFaults(req) });
+      marked++;
+      results.push({
+        invoiceId: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        customerId: inv.customerId,
+        status: "printed",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
+      console.error(`[billing/bulk-print] Mark-Sent für Rechnung ${inv.id} fehlgeschlagen:`, err);
+      results.push({
+        invoiceId: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        customerId: inv.customerId,
+        status: "error",
+        message: `Im Druck enthalten, aber Markieren als versendet fehlgeschlagen: ${msg}`,
+      });
+    }
+  }
+
+  const errors = results.filter(r => r.status === "error").length;
+  const summary = {
+    total: drafts.length,
+    printed: rendered.length,
+    marked,
+    errors,
+    groupedByPayer: groupByPayer,
+    results,
+  };
+  log(
+    `bulk-print done month=${billingMonth}/${billingYear} total=${drafts.length} printed=${rendered.length} marked=${marked} errors=${errors} groupByPayer=${groupByPayer} userId=${req.user?.id ?? "?"}`,
+    "billing",
+  );
+
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.setHeader("X-Bulk-Print-Summary", encodeURIComponent(JSON.stringify(summary)));
+  res.send(outputBuffer);
 }));
 
 // Task #533: Massenerstellung — erzeugt für alle berechtigten Kunden des

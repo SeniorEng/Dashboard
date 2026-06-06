@@ -18,6 +18,7 @@ import {
   BillingFiltersCard,
   InvoiceList,
   BulkSendDialog,
+  BulkPrintDialog,
   GenerateAllDialog,
   NewInvoiceDialog,
   StornoDialog,
@@ -36,7 +37,9 @@ export default function AdminBilling() {
   const [payerFilter, setPayerFilter] = useState<string>("alle");
   // Task #990: Stornos ausblenden — blendet stornierte Rechnungen (Status
   // "storniert") UND Stornorechnungen (Typ "stornorechnung") aus der Liste.
-  const [hideStornos, setHideStornos] = useState(false);
+  // Task #996: Standardmäßig aktiv — der Abrechnungs-Alltag dreht sich um
+  // offene/aktive Rechnungen; Storno-Belege blähen die Liste nur auf.
+  const [hideStornos, setHideStornos] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
@@ -49,6 +52,8 @@ export default function AdminBilling() {
   const generateAllCloseBtnRef = useRef<HTMLButtonElement>(null);
   // Task #534: Bulk-Versand-Dialog (typenübergreifend).
   const [bulkSendOpen, setBulkSendOpen] = useState(false);
+  // Task #996: Sammeldruck-Dialog (gebündelter PDF/ZIP-Druck der Entwürfe).
+  const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
 
   const currentYear = today.getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
@@ -105,12 +110,15 @@ export default function AdminBilling() {
     generateAllMutation,
     batchSendMutation,
     bulkSendMutation,
+    bulkPrintMutation,
     sendingInvoiceId,
     batchSending,
     generateAllProgress,
     setGenerateAllProgress,
     bulkSendResult,
     setBulkSendResult,
+    bulkPrintResult,
+    setBulkPrintResult,
   } = useBillingMutations({
     selectedMonth,
     selectedYear,
@@ -170,6 +178,11 @@ export default function AdminBilling() {
     bulkSendMutation.mutate(draftBulkInvoices.map((inv) => inv.id));
   };
 
+  const handleBulkPrint = (groupByPayer: boolean) => {
+    if (draftBulkInvoices.length === 0) return;
+    bulkPrintMutation.mutate({ groupByPayer });
+  };
+
   const handleGenerate = () => {
     if (!selectedCustomerId) {
       toast({ title: "Bitte Kunden auswählen", variant: "destructive" });
@@ -221,6 +234,7 @@ export default function AdminBilling() {
         batchSending={batchSending}
         onBatchSend={handleBatchSend}
         onOpenBulkSend={() => { setBulkSendResult(null); setBulkSendOpen(true); }}
+        onOpenBulkPrint={() => { setBulkPrintResult(null); setBulkPrintOpen(true); }}
         onOpenGenerateAll={() => { setGenerateAllProgress(null); setGenerateAllOpen(true); }}
         onOpenNewInvoice={() => setDialogOpen(true)}
       />
@@ -251,6 +265,20 @@ export default function AdminBilling() {
         onBulkSend={handleBulkSend}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
+      />
+
+      <BulkPrintDialog
+        open={bulkPrintOpen}
+        setOpen={setBulkPrintOpen}
+        bulkPrintResult={bulkPrintResult}
+        setBulkPrintResult={setBulkPrintResult}
+        bulkPrintMutation={bulkPrintMutation}
+        draftBulkInvoices={draftBulkInvoices}
+        invoices={invoices}
+        onBulkPrint={handleBulkPrint}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        payerSuffix={payerSuffix}
       />
 
       <GenerateAllDialog

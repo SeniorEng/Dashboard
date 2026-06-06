@@ -407,6 +407,64 @@ export const api = {
     }
   },
 
+  /**
+   * POST mit binärer Antwort (PDF/ZIP-Download). Liefert den `Blob`, den aus
+   * `Content-Disposition` geparsten Dateinamen und — falls ein Summary-Header
+   * angegeben ist — das daraus dekodierte JSON (URL-encodiert gesetzt vom
+   * Server, damit Umlaute headersicher transportiert werden). Behandelt CSRF
+   * wie `postFormData` (kein Auto-Retry — POST ist nicht idempotent).
+   */
+  postBlob: async <S = unknown>(
+    endpoint: string,
+    body: unknown,
+    summaryHeader?: string,
+    signal?: AbortSignal,
+  ): Promise<ApiResult<{ blob: Blob; fileName: string; summary: S | null }>> => {
+    const csrfToken = await ensureCsrfToken();
+    const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (csrfToken) requestHeaders[CSRF_HEADER_NAME] = csrfToken;
+
+    try {
+      const response = await fetch(`/api${endpoint}`, {
+        method: 'POST',
+        credentials: 'include',
+        signal,
+        headers: requestHeaders,
+        cache: 'no-store',
+        body: JSON.stringify(transformSignatureFields(body, 'strip')),
+      });
+
+      if (!response.ok) {
+        const error = await parseErrorResponse(response);
+        return { success: false, error };
+      }
+
+      const blob = await response.blob();
+      const cd = response.headers.get('Content-Disposition') || '';
+      const match = /filename="?([^"]+)"?/i.exec(cd);
+      const fileName = match ? match[1] : 'download';
+
+      let summary: S | null = null;
+      if (summaryHeader) {
+        const raw = response.headers.get(summaryHeader);
+        if (raw) {
+          try {
+            summary = JSON.parse(decodeURIComponent(raw)) as S;
+          } catch {
+            summary = null;
+          }
+        }
+      }
+
+      return { success: true, data: { blob, fileName, summary } };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return { success: false, error: { code: 'ABORTED', message: 'Anfrage wurde abgebrochen' } };
+      }
+      return { success: false, error: { code: 'NETWORK_ERROR', message: 'Netzwerkfehler: Bitte prüfen Sie Ihre Internetverbindung' } };
+    }
+  },
+
   put: <T, B = unknown>(endpoint: string, body: B, signal?: AbortSignal) =>
     apiRequest<T, B>(endpoint, { method: 'PUT', body, signal }),
 

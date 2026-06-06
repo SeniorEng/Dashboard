@@ -175,3 +175,22 @@ export interface BulkSendInvoiceResponse {
     message?: string;
   }>;
 }
+
+// Task #996: Sammeldruck — Zusammenfassung, die der binäre `/billing/bulk-print`
+// Download im `X-Bulk-Print-Summary`-Header (URL-encodiertes JSON) mitliefert.
+// Der eigentliche Payload ist die PDF/ZIP-Datei; diese Struktur beschreibt nur
+// das Ergebnis je Rechnung (gedruckt + als versendet markiert oder Fehler).
+export interface BulkPrintSummary {
+  total: number;
+  printed: number;
+  marked: number;
+  errors: number;
+  groupedByPayer: boolean;
+  results: Array<{
+    invoiceId: number;
+    invoiceNumber: string;
+    customerId: number;
+    status: "printed" | "error";
+    message?: string;
+  }>;
+}

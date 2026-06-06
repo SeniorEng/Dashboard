@@ -29,6 +29,7 @@ interface BillingFiltersCardProps {
   batchSending: boolean;
   onBatchSend: () => void;
   onOpenBulkSend: () => void;
+  onOpenBulkPrint: () => void;
   onOpenGenerateAll: () => void;
   onOpenNewInvoice: () => void;
 }
@@ -54,6 +55,7 @@ export function BillingFiltersCard({
   batchSending,
   onBatchSend,
   onOpenBulkSend,
+  onOpenBulkPrint,
   onOpenGenerateAll,
   onOpenNewInvoice,
 }: BillingFiltersCardProps) {
@@ -183,7 +185,18 @@ export function BillingFiltersCard({
                 data-testid="button-bulk-send"
               >
                 <Send className={`${iconSize.sm} mr-1`} />
-                <span className="hidden sm:inline">Alle </span>versenden{payerSuffix} ({draftBulkInvoices.length})
+                <span className="hidden sm:inline">Alle </span>versenden{payerSuffix} ({draftBulkInvoices.length} {draftBulkInvoices.length === 1 ? "Rechnung" : "Rechnungen"})
+              </Button>
+            )}
+            {draftBulkInvoices.length > 0 && (
+              <Button
+                variant="outline"
+                className="text-emerald-700 border-emerald-200 hover:bg-emerald-50 w-full sm:w-auto"
+                onClick={onOpenBulkPrint}
+                data-testid="button-bulk-print"
+              >
+                <Printer className={`${iconSize.sm} mr-1`} />
+                Sammeldruck{payerSuffix} ({draftBulkInvoices.length} {draftBulkInvoices.length === 1 ? "Rechnung" : "Rechnungen"})
               </Button>
             )}
             {draftPflegekasseInvoices.length > 0 && (
