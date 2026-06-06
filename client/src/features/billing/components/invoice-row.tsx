@@ -71,13 +71,27 @@ export function InvoiceRow({
   const canStorno =
     invoice.status !== "storniert" && invoice.invoiceType !== "stornorechnung";
 
+  // Task #1007: Betrag wird am Handy in der Kopfzeile (neben der Nummer) und auf
+  // größeren Screens in der eigenen Spalte angezeigt — dieselbe Darstellung,
+  // zwei Positionen. Eine Hilfsfunktion vermeidet Logik-Duplikate.
+  const amountNode = (
+    <span className={`font-medium tabular-nums ${invoice.grossAmountCents < 0 ? "text-red-600" : "text-gray-900"}`}>
+      {formatAmount(invoice.grossAmountCents)}
+      {invoice.billingType === "selbstzahler" && (
+        <span className="text-xs text-gray-400 font-normal ml-1 hidden sm:inline">inkl. MwSt.</span>
+      )}
+    </span>
+  );
+
   return (
     <div>
       <Card data-testid={`invoice-row-${invoice.id}`}>
         <CardContent className="py-2 px-3">
-          <div className="flex items-center gap-3">
-            {/* Nummer + Typ/Status-Badges */}
-            <div className="flex items-center gap-2 shrink-0">
+          {/* Task #1007: Am Handy gestapeltes Layout (Kopf / Kunde / Aktionen
+              je eigene Zeile), ab sm wieder kompakt in einer Reihe. */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            {/* Kopf: Nummer + Typ/Status-Badges, am Handy zusätzlich der Betrag rechts */}
+            <div className="flex items-center gap-2 sm:shrink-0">
               <span className="font-medium text-gray-900 text-sm">{invoice.invoiceNumber}</span>
               <Badge
                 variant="outline"
@@ -122,43 +136,44 @@ export function InvoiceRow({
                   PDF-Fehler
                 </Badge>
               )}
+              {/* Betrag am Handy: rechts in der Kopfzeile */}
+              <span className="ml-auto text-sm sm:hidden" data-testid={`text-amount-mobile-${invoice.id}`}>
+                {amountNode}
+              </span>
             </div>
 
-            {/* Kunde / Empfänger */}
-            <div className="flex-1 min-w-0 flex items-center gap-2 text-sm">
-              {customerDisplay && (
-                <Link
-                  href={`/admin/customers/${invoice.customerId}`}
-                  className="text-gray-900 font-medium hover:underline truncate"
-                  data-testid={`link-customer-${invoice.id}`}
-                >
-                  {customerDisplay}
-                </Link>
-              )}
-              {showSeparateRecipient && (
-                <span className="text-gray-500 truncate hidden md:inline" data-testid={`text-recipient-${invoice.id}`}>
-                  <span className="text-gray-400">→</span> {invoice.recipientName}
-                </span>
-              )}
-            </div>
+            {/* Kunde / Empfänger — am Handy eigene, gut sichtbare Zeile */}
+            {(customerDisplay || showSeparateRecipient) && (
+              <div className="min-w-0 sm:flex-1 flex items-center gap-2 text-sm">
+                {customerDisplay && (
+                  <Link
+                    href={`/admin/customers/${invoice.customerId}`}
+                    className="text-gray-900 font-medium hover:underline truncate"
+                    data-testid={`link-customer-${invoice.id}`}
+                  >
+                    {customerDisplay}
+                  </Link>
+                )}
+                {showSeparateRecipient && (
+                  <span className="text-gray-500 truncate hidden md:inline" data-testid={`text-recipient-${invoice.id}`}>
+                    <span className="text-gray-400">→</span> {invoice.recipientName}
+                  </span>
+                )}
+              </div>
+            )}
 
-            {/* Betrag + Versanddatum */}
-            <div className="flex items-center gap-2 shrink-0 text-sm">
+            {/* Betrag + Versanddatum — ab sm in eigener Spalte */}
+            <div className="hidden sm:flex items-center gap-2 sm:shrink-0 text-sm">
               {invoice.sentAt && (invoice.status === "versendet" || invoice.status === "bezahlt") && (
                 <span className="text-xs text-blue-700 hidden lg:inline" data-testid={`text-sentat-${invoice.id}`}>
                   Versendet {formatSentAt(invoice.sentAt)}
                 </span>
               )}
-              <span className={`font-medium tabular-nums ${invoice.grossAmountCents < 0 ? "text-red-600" : "text-gray-900"}`}>
-                {formatAmount(invoice.grossAmountCents)}
-                {invoice.billingType === "selbstzahler" && (
-                  <span className="text-xs text-gray-400 font-normal ml-1 hidden sm:inline">inkl. MwSt.</span>
-                )}
-              </span>
+              {amountNode}
             </div>
 
-            {/* Aktionen: primäre Status-Aktion sichtbar, Rest im Menü */}
-            <div className="flex items-center gap-1 shrink-0">
+            {/* Aktionen: am Handy eigene Zeile mit Beschriftungen, ab sm kompakt */}
+            <div className="flex flex-wrap items-center justify-end gap-1 sm:flex-nowrap sm:shrink-0">
               {invoice.status === "entwurf" && invoice.billingType === "pflegekasse_gesetzlich" && (
                 <Button
                   variant="ghost"
@@ -171,12 +186,12 @@ export function InvoiceRow({
                   {sendingInvoiceId === invoice.id ? (
                     <>
                       <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
-                      <span className="hidden sm:inline">Sende...</span>
+                      <span>Sende...</span>
                     </>
                   ) : (
                     <>
-                      <Send className={`${iconSize.sm} sm:mr-1`} />
-                      <span className="hidden sm:inline">An Kasse senden</span>
+                      <Send className={`${iconSize.sm} mr-1`} />
+                      <span>An Kasse senden</span>
                     </>
                   )}
                 </Button>
@@ -192,8 +207,8 @@ export function InvoiceRow({
                   data-testid={`button-mark-sent-${invoice.id}`}
                   title="Manuell als versendet markieren (z.B. nach Postversand)"
                 >
-                  <Check className={`${iconSize.sm} sm:mr-1`} />
-                  <span className="hidden sm:inline">Als versendet markieren</span>
+                  <Check className={`${iconSize.sm} mr-1`} />
+                  <span>Als versendet markieren</span>
                 </Button>
               )}
 
@@ -206,8 +221,8 @@ export function InvoiceRow({
                   disabled={statusMutation.isPending}
                   data-testid={`button-status-versendet-${invoice.id}`}
                 >
-                  <Send className={`${iconSize.sm} sm:mr-1`} />
-                  <span className="hidden sm:inline">Versendet</span>
+                  <Send className={`${iconSize.sm} mr-1`} />
+                  <span>Versendet</span>
                 </Button>
               )}
 
@@ -220,8 +235,8 @@ export function InvoiceRow({
                   disabled={statusMutation.isPending}
                   data-testid={`button-status-bezahlt-${invoice.id}`}
                 >
-                  <Check className={`${iconSize.sm} sm:mr-1`} />
-                  <span className="hidden sm:inline">Bezahlt</span>
+                  <Check className={`${iconSize.sm} mr-1`} />
+                  <span>Bezahlt</span>
                 </Button>
               )}
 
@@ -234,8 +249,8 @@ export function InvoiceRow({
                   disabled={statusMutation.isPending}
                   data-testid={`button-status-stornieren-${invoice.id}`}
                 >
-                  <Ban className={`${iconSize.sm} sm:mr-1`} />
-                  <span className="hidden sm:inline">Stornieren</span>
+                  <Ban className={`${iconSize.sm} mr-1`} />
+                  <span>Stornieren</span>
                 </Button>
               )}
 
@@ -243,11 +258,13 @@ export function InvoiceRow({
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="sm"
                     aria-label="Weitere Aktionen"
+                    className="border border-gray-200 text-gray-700 sm:border-0"
                     data-testid={`button-actions-menu-${invoice.id}`}
                   >
                     <MoreHorizontal className={iconSize.sm} />
+                    <span className="ml-1 sm:hidden">Mehr</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
