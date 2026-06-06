@@ -854,6 +854,21 @@ Lauf 2: 0 geschrieben / „bereits korrigiert"). Mit
 `RECONCILE_PHANTOM_STORNOS_DRY_RUN=1` wird nur klassifiziert/geloggt, ohne zu
 schreiben.
 
+**Boot-lean Early-Exit (Task #993, Stand 2026-06-06):** Der Startup-Hook bleibt
+registriert, bekommt aber einen billigen Vorab-Count, damit der App-Start nach
+dem einmaligen scharfen Lauf nicht weiter den vollen Budget-Ledger scannt. Vor
+der Actor-Auflösung und dem Skript-Aufruf zählt der Hook nur noch, ob es
+überhaupt eine verwaiste Storno-Zeile ohne zugehörige Phantom-Storno-Korrektur
+gibt; ist die Zahl 0, bricht er sofort ab (No-Op, kein Ledger-Scan). Der Count
+ist eine konservative Über-Approximation (zählt theoretisch auch legitime
+Einzel-Stornos), aber in Produktion sind alle 28 Waisen Phantoms — nach dem einen
+scharfen Lauf fällt der Count auf 0 und der Boot bleibt schlank. Read-only gegen
+die Produktions-Replica (2026-06-06): **28 offene Phantom-Waisen, 0 geschriebene
+Korrekturen** → der Hook läuft beim nächsten Prod-(Re-)Deploy weiterhin scharf
+durch und wird erst danach zum No-Op. Der manuelle CLI-Fallback
+(`server/scripts/reconcile-phantom-stornos.ts`) bleibt als scharfes Werkzeug
+unverändert erhalten.
+
 **Manueller Fallback** (identische Logik, falls der Betreiber den scharfen Lauf
 außerhalb des Startups ausführen will, gegen die Produktions-DB):
 

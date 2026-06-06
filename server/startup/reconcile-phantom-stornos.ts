@@ -1,6 +1,6 @@
-import { asc, eq, and } from "drizzle-orm";
+import { asc, eq, and, sql } from "drizzle-orm";
 import { db } from "../lib/db";
-import { users } from "@shared/schema";
+import { budgetTransactions, users } from "@shared/schema";
 import { log } from "../lib/log";
 import { reconcilePhantomStornos } from "../scripts/reconcile-phantom-stornos";
 
@@ -25,10 +25,51 @@ import { reconcilePhantomStornos } from "../scripts/reconcile-phantom-stornos";
  * Korrektur-Notiz übersprungen — jeder weitere Start ist ein No-Op
  * (0 geschriebene Korrekturen). Mit `RECONCILE_PHANTOM_STORNOS_DRY_RUN=1` wird
  * nur klassifiziert/geloggt, ohne zu schreiben.
+ *
+ * Task #993 — Boot-lean Early-Exit. Dies ist eine EINMALIGE Import-Drift-
+ * Korrektur (#987). Sobald sie in Produktion gelaufen ist, soll der App-Start
+ * nicht weiter den vollen Budget-Ledger in den Speicher laden und klassifizieren.
+ * Vor dem teuren Pfad steht deshalb ein billiger Vorab-Count: gibt es überhaupt
+ * noch eine verwaiste Storno-Zeile (`reversed_transaction_id IS NULL`, Notiz
+ * "Storno von Transaktion #…"), für die KEINE Phantom-Storno-Korrektur existiert?
+ * Ist die Zahl 0 → No-Op, sofortiger Abbruch ohne Ledger-Scan und ohne
+ * Actor-Auflösung. Der Check ist eine konservative Über-Approximation: er zählt
+ * auch legitime Einzel-Stornos mit (die nie eine Korrektur bekommen). In
+ * Produktion sind aber alle 28 Waisen Phantoms (siehe
+ * `docs/import-budget-drift-report-20260527.md` §10.4), d.h. nach dem einen
+ * scharfen Lauf fällt der Count auf 0 und der Boot bleibt schlank. Der manuelle
+ * CLI-Fallback (`server/scripts/reconcile-phantom-stornos.ts`) bleibt erhalten.
  */
 export async function reconcilePhantomStornosOnStartup(
   dryRun = process.env.RECONCILE_PHANTOM_STORNOS_DRY_RUN === "1",
 ): Promise<void> {
+  // Task #993 — Billiger "nichts zu tun"-Vorab-Check: zähle verwaiste Storno-
+  // Zeilen, für die noch keine Gegenbuchung existiert. 0 ⇒ sofortiger No-Op
+  // (kein Full-Ledger-Scan, keine Actor-Auflösung).
+  const pendingRes = await db.execute(sql`
+    SELECT count(*)::int AS n
+    FROM ${budgetTransactions} AS o
+    WHERE o.transaction_type = 'reversal'
+      AND o.reversed_transaction_id IS NULL
+      AND o.notes LIKE 'Storno von Transaktion #%'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ${budgetTransactions} AS c
+        WHERE c.transaction_type = 'consumption'
+          AND c.notes LIKE '%verwaisten Storno #' || o.id || ' (%'
+      )
+  `);
+  const pendingOrphans = Number(
+    (pendingRes.rows?.[0] as { n?: number } | undefined)?.n ?? 0,
+  );
+  if (pendingOrphans === 0) {
+    log(
+      "Phantom-Storno-Korrektur (Task #988/#993): keine offenen Phantom-Waisen — übersprungen (lean boot)",
+      "startup",
+    );
+    return;
+  }
+
   // System-Actor für die GoBD-Audit-Attribution: ältester aktiver Superadmin,
   // sonst (Fallback) ältester aktiver Admin.
   const [superActor] = await db
