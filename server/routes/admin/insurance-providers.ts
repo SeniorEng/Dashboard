@@ -4,8 +4,70 @@ import { insertInsuranceProviderSchema, insuranceProviderBaseSchema } from "@sha
 import { ikNummerSchema } from "@shared/schema/common";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
+import { requireSuperAdmin } from "../../middleware/auth";
+import { auditService } from "../../services/audit";
 
 const router = Router();
+
+// ---------------------------------------------------------------------------
+// Cleanup unbenutzter Pflegekassen (Task #1000), Superadmin-only.
+// Das Löschen ist in Produktion deaktiviert (konsistent mit den Bulk-Purge-
+// Werkzeugen) — die Vorschau-Zählung bleibt überall verfügbar.
+// WICHTIG: Diese Routen MÜSSEN vor "/insurance-providers/:id" registriert
+// werden, sonst würde "cleanup" als :id interpretiert.
+// ---------------------------------------------------------------------------
+const isProduction = () => process.env.NODE_ENV === "production";
+
+router.get(
+  "/insurance-providers/cleanup/unused-count",
+  requireSuperAdmin,
+  asyncHandler("Unbenutzte Pflegekassen konnten nicht ermittelt werden", async (_req: Request, res: Response) => {
+    const stats = await customerManagementStorage.getUnusedInsuranceProviderStats();
+    res.json({ ...stats, cleanupEnabled: !isProduction() });
+  }),
+);
+
+router.post(
+  "/insurance-providers/cleanup/unused",
+  requireSuperAdmin,
+  asyncHandler("Unbenutzte Pflegekassen konnten nicht gelöscht werden", async (req: Request, res: Response) => {
+    if (isProduction()) {
+      res.status(403).json({
+        error: "FORBIDDEN",
+        message: "Das Aufräumen unbenutzter Pflegekassen ist in der Produktivumgebung deaktiviert.",
+      });
+      return;
+    }
+
+    const result = await customerManagementStorage.deleteUnusedInsuranceProviders();
+
+    if (result.total > 0) {
+      await auditService.log(
+        req.user!.id,
+        "insurance_providers_cleanup",
+        "insurance_provider",
+        0,
+        {
+          deletedTotal: result.total,
+          deletedPrivate: result.private,
+          deletedStatutory: result.statutory,
+          deletedIds: result.deletedIds,
+        },
+        req.ip,
+      );
+    }
+
+    res.json({
+      deleted: result.total,
+      deletedPrivate: result.private,
+      deletedStatutory: result.statutory,
+      message:
+        result.total > 0
+          ? `${result.total} unbenutzte Pflegekasse${result.total === 1 ? "" : "n"} wurde${result.total === 1 ? "" : "n"} gelöscht.`
+          : "Es gab keine unbenutzten Pflegekassen zum Löschen.",
+    });
+  }),
+);
 
 // Insurance Providers (Lookup table)
 router.get("/insurance-providers", asyncHandler("Pflegekassen konnten nicht geladen werden", async (req: Request, res: Response) => {

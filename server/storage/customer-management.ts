@@ -122,6 +122,8 @@ class CustomerManagementStorage {
   createInsuranceProvider = insuranceModule.createInsuranceProvider;
   updateInsuranceProvider = insuranceModule.updateInsuranceProvider;
   getActiveCustomerCountForProvider = insuranceModule.getActiveCustomerCountForProvider;
+  getUnusedInsuranceProviderStats = insuranceModule.getUnusedInsuranceProviderStats;
+  deleteUnusedInsuranceProviders = insuranceModule.deleteUnusedInsuranceProviders;
   getCustomerCurrentInsurance = insuranceModule.getCustomerCurrentInsurance;
   getCustomerInsuranceHistory = insuranceModule.getCustomerInsuranceHistory;
   addCustomerInsurance = insuranceModule.addCustomerInsurance;

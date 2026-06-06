@@ -29,8 +29,11 @@ import {
   useInsuranceProviders,
   useCreateInsuranceProvider,
   useUpdateInsuranceProvider,
+  useUnusedInsuranceProviderCount,
+  useCleanupUnusedInsuranceProviders,
   type InsuranceProviderFormData,
 } from "@/features/customers";
+import { useAuth } from "@/hooks/use-auth";
 import type { InsuranceProviderItem } from "@/lib/api/types";
 import {
   ZAHLUNGSBEDINGUNGEN,
@@ -71,14 +74,19 @@ const EMPTY_FORM: InsuranceProviderFormData = {
 
 export default function AdminInsuranceProviders() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isSuperAdmin = !!user?.isSuperAdmin;
   const { data: providers, isLoading } = useInsuranceProviders(true);
   const createMutation = useCreateInsuranceProvider();
   const updateMutation = useUpdateInsuranceProvider();
+  const { data: unusedCount } = useUnusedInsuranceProviderCount(isSuperAdmin);
+  const cleanupMutation = useCleanupUnusedInsuranceProviders();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<InsuranceProviderItem | null>(null);
   const [form, setForm] = useState<InsuranceProviderFormData>(EMPTY_FORM);
   const [deactivateConfirm, setDeactivateConfirm] = useState<{ count: number; payload: InsuranceProviderFormData } | null>(null);
+  const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
@@ -262,6 +270,45 @@ export default function AdminInsuranceProviders() {
               Neu
             </Button>
           </div>
+
+          {isSuperAdmin && unusedCount && unusedCount.total > 0 && (
+            <Card className="mb-4 border-amber-200 bg-amber-50">
+              <CardContent className="py-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className={`${iconSize.md} text-amber-600 mt-0.5 shrink-0`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-amber-900" data-testid="text-unused-providers-title">
+                      {unusedCount.total} unbenutzte {unusedCount.total === 1 ? "Pflegekasse" : "Pflegekassen"} gefunden
+                    </p>
+                    <p className="text-sm text-amber-800/80 mt-0.5" data-testid="text-unused-providers-breakdown">
+                      Keiner Kunden­zuweisung oder Rechnung zugeordnet
+                      {" · "}
+                      {unusedCount.statutory} gesetzlich, {unusedCount.private} privat (PKV)
+                    </p>
+                    {!unusedCount.cleanupEnabled && (
+                      <p className="text-xs text-amber-700 mt-2" data-testid="text-cleanup-disabled-hint">
+                        Das Löschen ist in der Produktivumgebung deaktiviert.
+                      </p>
+                    )}
+                  </div>
+                  {unusedCount.cleanupEnabled && (
+                    <Button
+                      variant="outline"
+                      className="border-amber-300 text-amber-800 hover:bg-amber-100 shrink-0"
+                      onClick={() => setCleanupConfirmOpen(true)}
+                      disabled={cleanupMutation.isPending}
+                      data-testid="button-cleanup-unused"
+                    >
+                      {cleanupMutation.isPending ? (
+                        <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                      ) : null}
+                      Aufräumen
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
@@ -696,6 +743,36 @@ export default function AdminInsuranceProviders() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={cleanupConfirmOpen} onOpenChange={setCleanupConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className={`${iconSize.md} text-red-500`} />
+              Unbenutzte Pflegekassen löschen?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {unusedCount?.total ?? 0} Pflegekasse{(unusedCount?.total ?? 0) === 1 ? "" : "n"} ohne
+              Kundenzuweisung und ohne Rechnungsbezug werden{" "}
+              <strong>endgültig gelöscht</strong>. Bereits genutzte Kassen bleiben unangetastet.
+              Diese Aktion kann nicht rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-cleanup">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                cleanupMutation.mutate();
+                setCleanupConfirmOpen(false);
+              }}
+              data-testid="button-confirm-cleanup"
+            >
+              Endgültig löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deactivateConfirm} onOpenChange={(open) => !open && setDeactivateConfirm(null)}>
         <AlertDialogContent>

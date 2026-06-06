@@ -21,6 +21,10 @@ export {
   useInsuranceProviders, 
   useCreateInsuranceProvider,
   useUpdateInsuranceProvider,
+  useUnusedInsuranceProviderCount,
+  useCleanupUnusedInsuranceProviders,
   insuranceProviderKeys,
   type InsuranceProviderFormData,
+  type UnusedInsuranceProviderCount,
+  type CleanupUnusedInsuranceProvidersResult,
 } from './use-insurance-providers';

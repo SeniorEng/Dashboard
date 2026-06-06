@@ -148,8 +148,20 @@ export async function importPflegekassen(): Promise<void> {
       .from(insuranceProviders);
     const existingIKs = new Set(existing.map(e => e.ikNummer));
 
+    // Task #1000: Bei bereits befüllter Tabelle standardmäßig NUR bestehende
+    // Zeilen aktualisieren, KEINE neuen anlegen. So tauchen über den Cleanup
+    // gelöschte (unbenutzte) Pflegekassen nach einem Neustart nicht wieder auf.
+    // Ausnahmen, bei denen Inserts erlaubt sind:
+    //  - leere Tabelle (Erst-Onboarding / frische Test-DB) → volle Massen-Anlage,
+    //  - explizit via `INSURANCE_PROVIDER_IMPORT_INSERT=1` erzwungen.
+    const forceInsert = ["1", "true"].includes(
+      (process.env.INSURANCE_PROVIDER_IMPORT_INSERT ?? "").toLowerCase(),
+    );
+    const allowInsert = forceInsert || existing.length === 0;
+
     let created = 0;
     let updated = 0;
+    let skipped = 0;
 
     for (const kasse of kassen) {
       const addr = kasse.ans1 || kasse.ans2;
@@ -178,6 +190,10 @@ export async function importPflegekassen(): Promise<void> {
         `);
         if ((result.rowCount ?? 0) > 0) updated++;
       } else {
+        if (!allowInsert) {
+          skipped++;
+          continue;
+        }
         try {
           await db.insert(insuranceProviders).values({
             name: displayName,
@@ -205,8 +221,9 @@ export async function importPflegekassen(): Promise<void> {
       }
     }
 
-    if (created > 0 || updated > 0) {
-      log(`Pflegekassen-Import: ${created} neu erstellt, ${updated} aktualisiert (von ${kassen.length} in EDIFACT)`, "startup");
+    if (created > 0 || updated > 0 || skipped > 0) {
+      const skipNote = skipped > 0 ? `, ${skipped} neue übersprungen (Insert deaktiviert)` : "";
+      log(`Pflegekassen-Import: ${created} neu erstellt, ${updated} aktualisiert${skipNote} (von ${kassen.length} in EDIFACT)`, "startup");
     }
   } catch (error) {
     log(`Pflegekassen-Import fehlgeschlagen: ${error}`, "startup");

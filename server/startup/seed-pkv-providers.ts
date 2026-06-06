@@ -272,8 +272,25 @@ const PKV_PROVIDERS: PkvProviderSeed[] = [
 
 export async function seedPkvProviders(): Promise<void> {
   try {
+    // Task #1000: Bei bereits geseedeten PKV-Anbietern standardmäßig nur den
+    // is_private-Status pflegen, KEINE neuen Zeilen anlegen — sonst tauchen über
+    // den Cleanup gelöschte Anbieter nach einem Neustart wieder auf.
+    // Ausnahmen, bei denen Inserts erlaubt sind:
+    //  - noch KEIN bekannter PKV-Anbieter vorhanden (Erst-Seeding / frische Test-DB),
+    //  - explizit via `INSURANCE_PROVIDER_IMPORT_INSERT=1` erzwungen.
+    const forceInsert = ["1", "true"].includes(
+      (process.env.INSURANCE_PROVIDER_IMPORT_INSERT ?? "").toLowerCase(),
+    );
+    const knownNames = new Set(PKV_PROVIDERS.map(p => p.name.toLowerCase()));
+    const allNames = await db
+      .select({ name: insuranceProviders.name })
+      .from(insuranceProviders);
+    const anyPkvExists = allNames.some(r => knownNames.has((r.name ?? "").toLowerCase()));
+    const allowInsert = forceInsert || !anyPkvExists;
+
     let created = 0;
     let updated = 0;
+    let skipped = 0;
 
     for (const seed of PKV_PROVIDERS) {
       const existing = await db.execute(sql`
@@ -294,6 +311,10 @@ export async function seedPkvProviders(): Promise<void> {
           updated++;
         }
       } else {
+        if (!allowInsert) {
+          skipped++;
+          continue;
+        }
         try {
           await db.insert(insuranceProviders).values({
             name: seed.name,
@@ -315,8 +336,9 @@ export async function seedPkvProviders(): Promise<void> {
       }
     }
 
-    if (created > 0 || updated > 0) {
-      log(`PKV-Provider-Seed: ${created} neu erstellt, ${updated} als privat markiert (von ${PKV_PROVIDERS.length} bekannten PKV-Anbietern)`, "startup");
+    if (created > 0 || updated > 0 || skipped > 0) {
+      const skipNote = skipped > 0 ? `, ${skipped} neue übersprungen (Insert deaktiviert)` : "";
+      log(`PKV-Provider-Seed: ${created} neu erstellt, ${updated} als privat markiert${skipNote} (von ${PKV_PROVIDERS.length} bekannten PKV-Anbietern)`, "startup");
     }
   } catch (error) {
     log(`PKV-Provider-Seed fehlgeschlagen: ${error}`, "startup");

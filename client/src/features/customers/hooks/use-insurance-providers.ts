@@ -69,6 +69,57 @@ export function useCreateInsuranceProvider() {
   });
 }
 
+export interface UnusedInsuranceProviderCount {
+  total: number;
+  private: number;
+  statutory: number;
+  cleanupEnabled: boolean;
+}
+
+export interface CleanupUnusedInsuranceProvidersResult {
+  deleted: number;
+  deletedPrivate: number;
+  deletedStatutory: number;
+  message: string;
+}
+
+export function useUnusedInsuranceProviderCount(enabled = true) {
+  return useQuery({
+    queryKey: [...insuranceProviderKeys.all, "unused-count"] as const,
+    queryFn: async ({ signal }) => {
+      const result = await api.get<UnusedInsuranceProviderCount>(
+        "/admin/insurance-providers/cleanup/unused-count",
+        signal,
+      );
+      return unwrapResult(result);
+    },
+    enabled,
+    staleTime: 0,
+  });
+}
+
+export function useCleanupUnusedInsuranceProviders() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async () => {
+      const result = await api.post<CleanupUnusedInsuranceProvidersResult>(
+        "/admin/insurance-providers/cleanup/unused",
+        {},
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: (result) => {
+      invalidateRelated(queryClient, "insurance-providers");
+      toast({ title: "Aufräumen abgeschlossen", description: result.message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
 export function useUpdateInsuranceProvider() {
   const queryClient = useQueryClient();
   const { toast } = useToast();

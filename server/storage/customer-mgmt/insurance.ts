@@ -5,8 +5,9 @@ import {
   type InsertCustomerInsurance,
   insuranceProviders,
   customerInsuranceHistory,
+  customerBudgetRecipients,
 } from "@shared/schema";
-import { eq, and, isNull, desc, count } from "drizzle-orm";
+import { eq, and, isNull, desc, count, notExists, sql } from "drizzle-orm";
 import { todayISO } from "@shared/utils/datetime";
 import { db, type DbOrTx } from "../../lib/db";
 
@@ -84,6 +85,70 @@ export async function getActiveCustomerCountForProvider(providerId: number): Pro
       isNull(customerInsuranceHistory.validTo)
     ));
   return Number(result[0]?.count ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Unused-Pflegekassen-Cleanup (Task #1000): Eine Pflegekasse gilt als "unbenutzt",
+// wenn sie WEDER in customer_insurance_history (aktuell oder historisch) noch über
+// customer_budget_recipients (Rechnungs-Empfänger-Override, der den Abrechnungs-/
+// Rechnungslauf an die Kasse bindet) referenziert wird. Die Tabelle `invoices`
+// hält nur einen denormalisierten `insurance_provider_name` (Text, keine ID),
+// die ID-Referenz für Rechnungen läuft über customer_budget_recipients.
+// Solche unbenutzten Zeilen stammen aus dem EDIFACT-Massenimport / PKV-Seed und
+// blähen nur die Auswahl auf. Referenzierte Zeilen bleiben IMMER erhalten (GoBD;
+// es gibt kein ON DELETE CASCADE auf insurance_providers, ein Löschen würde
+// ohnehin am FK scheitern).
+// ---------------------------------------------------------------------------
+const isUnusedInsuranceProvider = () =>
+  and(
+    notExists(
+      db
+        .select({ one: sql`1` })
+        .from(customerInsuranceHistory)
+        .where(eq(customerInsuranceHistory.insuranceProviderId, insuranceProviders.id)),
+    ),
+    notExists(
+      db
+        .select({ one: sql`1` })
+        .from(customerBudgetRecipients)
+        .where(eq(customerBudgetRecipients.insuranceProviderId, insuranceProviders.id)),
+    ),
+  );
+
+export interface UnusedInsuranceProviderStats {
+  total: number;
+  private: number;
+  statutory: number;
+}
+
+export async function getUnusedInsuranceProviderStats(): Promise<UnusedInsuranceProviderStats> {
+  const rows = await db
+    .select({ isPrivate: insuranceProviders.isPrivate })
+    .from(insuranceProviders)
+    .where(isUnusedInsuranceProvider());
+  const total = rows.length;
+  const priv = rows.filter((r) => r.isPrivate).length;
+  return { total, private: priv, statutory: total - priv };
+}
+
+export async function deleteUnusedInsuranceProviders(): Promise<UnusedInsuranceProviderStats & { deletedIds: number[] }> {
+  // Innerhalb EINER Transaktion neu auswerten und löschen: das DELETE matched nur
+  // Zeilen, die zum Lösch-Zeitpunkt unreferenziert sind (Schutz gegen Race-
+  // Conditions mit gleichzeitigen Zuweisungen/Rechnungen).
+  return await db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(insuranceProviders)
+      .where(isUnusedInsuranceProvider())
+      .returning({ id: insuranceProviders.id, isPrivate: insuranceProviders.isPrivate });
+    const deletedIds = deleted.map((r) => r.id);
+    const priv = deleted.filter((r) => r.isPrivate).length;
+    return {
+      total: deleted.length,
+      private: priv,
+      statutory: deleted.length - priv,
+      deletedIds,
+    };
+  });
 }
 
 export async function getCustomerCurrentInsurance(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {
