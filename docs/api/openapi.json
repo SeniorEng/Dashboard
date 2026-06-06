@@ -1041,6 +1041,18 @@
           },
           "splitInvoices": {
             "type": "boolean"
+          },
+          "splitPots": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "entlastungsbetrag_45b",
+                "umwandlung_45a",
+                "ersatzpflege_39_42a",
+                "private"
+              ]
+            }
           }
         },
         "required": [
@@ -1048,7 +1060,8 @@
           "coveredAppointments",
           "completedAppointments",
           "totalCents",
-          "splitInvoices"
+          "splitInvoices",
+          "splitPots"
         ]
       },
       "GenerateInvoiceResponse": {

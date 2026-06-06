@@ -19,8 +19,23 @@ import type {
   DiscardDraftsResponse,
   GenerateInvoiceResponse,
 } from "@shared/api";
+import { POT_DISPLAY_LABELS, type InvoicePotKey } from "@shared/domain/budget-invoice-split";
 import { MONTH_NAMES } from "../constants";
 import { getCustomerName } from "../utils";
+
+const SPLIT_COUNT_WORDS = ["null", "eine", "zwei", "drei", "vier"];
+
+// Task #1010: Beschriftet den Split-Hinweis exakt nach den betroffenen Töpfen.
+// „Privat" erscheint nur, wenn ein echter Selbstzahler-Anteil dabei ist;
+// reine Kassen-Aufteilungen heißen „Kassen-Rechnungen".
+function buildSplitHint(splitPots: InvoicePotKey[]): string {
+  const count = splitPots.length;
+  const countWord = SPLIT_COUNT_WORDS[count] ?? String(count);
+  const hasPrivateShare = splitPots.includes("private");
+  const kind = hasPrivateShare ? "Rechnungen" : "Kassen-Rechnungen";
+  const labels = splitPots.map((pot) => POT_DISPLAY_LABELS[pot]).join(" + ");
+  return `Wird in ${countWord} ${kind} aufgeteilt (${labels}).`;
+}
 
 interface NewInvoiceDialogProps {
   open: boolean;
@@ -197,9 +212,9 @@ export function NewInvoiceDialog({
                   </div>
                 </div>
               )}
-              {invoicePreview?.splitInvoices && (
+              {invoicePreview?.splitInvoices && invoicePreview.splitPots?.length > 0 && (
                 <div className="text-xs text-gray-600" data-testid="text-preview-split-hint">
-                  Wird in zwei Rechnungen aufgeteilt (Kassenanteil + Privatanteil).
+                  {buildSplitHint(invoicePreview.splitPots)}
                 </div>
               )}
             </div>

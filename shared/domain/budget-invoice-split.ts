@@ -32,6 +32,23 @@ export const POT_ORDER: ReadonlyArray<InvoicePotKey> = [
   "private",
 ];
 
+/**
+ * Task #1010 — Lesbare deutsche Bezeichnung pro Budget-Topf für die UI
+ * (Rechnungs-Split-Hinweis). Single Source of Truth, damit der Vorschau-
+ * Hinweis exakt die Töpfe der erzeugten Folge-Rechnungen benennt.
+ */
+export const POT_DISPLAY_LABELS: Record<InvoicePotKey, string> = {
+  entlastungsbetrag_45b: "§45b Entlastungsbetrag",
+  umwandlung_45a: "§45a Umwandlungsanspruch",
+  ersatzpflege_39_42a: "§39/§42a Verhinderungspflege",
+  private: "Privat",
+};
+
+/** True, wenn der Topf ein echter Selbstzahler-/Privatanteil ist. */
+export function isPrivatePot(potKey: InvoicePotKey): boolean {
+  return potKey === "private";
+}
+
 export interface BudgetSplitForAppointment {
   /** cents pro Pot, summiert aus den `consumption`-Transaktionen. */
   cents: Partial<Record<InvoicePotKey, number>>;

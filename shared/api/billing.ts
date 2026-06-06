@@ -1,3 +1,5 @@
+import type { InvoicePotKey } from "../domain/budget-invoice-split";
+
 export interface BillingCustomerItem {
   id: number;
   name: string;
@@ -105,8 +107,13 @@ export interface BillingInvoicePreview {
   // Brutto-Summe über alle entstehenden Folge-Rechnungen
   // (bei Budget-Split: Kasse + Privat).
   totalCents: number;
-  // True, wenn der Generate-Aufruf in zwei Rechnungen (Kassenanteil + Privatanteil) aufspaltet.
+  // True, wenn der Generate-Aufruf in mehrere Folge-Rechnungen aufspaltet.
   splitInvoices: boolean;
+  // Task #1010: Die tatsächlich betroffenen Budget-Töpfe bei einem Split,
+  // sortiert nach `POT_ORDER` — eine Folge-Rechnung pro Eintrag. Leer, wenn
+  // kein Split entsteht. Erlaubt dem UI, den Hinweis exakt zu beschriften
+  // (z.B. „§45b + §45a") und „Privat" nur bei echtem Selbstzahler-Anteil.
+  splitPots: InvoicePotKey[];
 }
 
 export interface GenerateInvoiceResponse {

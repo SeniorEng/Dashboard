@@ -289,6 +289,14 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
     completedAppointments: draft.completedAppointmentsInPeriod,
     totalCents: draft.grossAmountCents,
     splitInvoices: draft.needsBudgetSplit,
+    // Task #1010: Töpfe der erzeugten Folge-Rechnungen — nach POT_ORDER
+    // sortiert, damit der Vorschau-Hinweis exakt benennt, was der
+    // Generierungslauf erzeugt (keine Drift Vorschau ↔ Rechnung).
+    splitPots: draft.needsBudgetSplit
+      ? [...draft.potItems.keys()].sort(
+          (a, b) => POT_ORDER.indexOf(a) - POT_ORDER.indexOf(b),
+        )
+      : [],
   };
   res.json(response);
 }));

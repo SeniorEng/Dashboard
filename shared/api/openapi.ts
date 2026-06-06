@@ -429,6 +429,14 @@ export const BillingInvoicePreviewSchema = component(
     completedAppointments: z.number().int(),
     totalCents: z.number().int(),
     splitInvoices: z.boolean(),
+    splitPots: z.array(
+      z.enum([
+        "entlastungsbetrag_45b",
+        "umwandlung_45a",
+        "ersatzpflege_39_42a",
+        "private",
+      ]),
+    ),
   }),
 );
 
