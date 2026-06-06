@@ -161,7 +161,30 @@ export function buildPdfData(invoice: Invoice, lineItems: InvoiceLineItem[], com
   };
 }
 
-async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Invoice): Promise<void> {
+/**
+ * Task #997 (#3) / Task #1001: Fail-closed Scope-Guard als reine, testbare
+ * Funktion. Der Leistungsnachweis MUSS sich ausschließlich auf den Kunden
+ * SEINER Rechnung beziehen. `enrichPdfDataWithSignatures` filtert die
+ * Service-Records bereits per `customerId`; diese Assertion fängt jede künftige
+ * Lockerung der Query ab, damit niemals fremde Kundendaten auf einen LN geraten.
+ * Wirft, sobald ein Service-Record einem anderen Kunden gehört.
+ */
+export function assertServiceRecordsScopedToInvoice(
+  serviceRecords: ReadonlyArray<{ id: number; customerId: number }>,
+  invoiceCustomerId: number,
+  invoiceNumber: string,
+): void {
+  const foreignRecord = serviceRecords.find(r => r.customerId !== invoiceCustomerId);
+  if (foreignRecord) {
+    throw new Error(
+      `Leistungsnachweis-Scope verletzt: Service-Record #${foreignRecord.id} ` +
+      `gehört Kunde ${foreignRecord.customerId}, Rechnung ${invoiceNumber} ` +
+      `aber Kunde ${invoiceCustomerId}.`,
+    );
+  }
+}
+
+export async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Invoice): Promise<void> {
   const serviceRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
     id: monthlyServiceRecords.id,
     employeeSignatureData: monthlyServiceRecords.employeeSignatureData,
@@ -184,14 +207,7 @@ async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoice: Inv
   // SEINER Rechnung beziehen. Die WHERE-Klausel filtert bereits per customerId;
   // diese Assertion fängt jede künftige Lockerung der Query ab, damit niemals
   // fremde Kundendaten auf einen LN geraten.
-  const foreignRecord = serviceRecords.find(r => r.customerId !== invoice.customerId);
-  if (foreignRecord) {
-    throw new Error(
-      `Leistungsnachweis-Scope verletzt: Service-Record #${foreignRecord.id} ` +
-      `gehört Kunde ${foreignRecord.customerId}, Rechnung ${invoice.invoiceNumber} ` +
-      `aber Kunde ${invoice.customerId}.`,
-    );
-  }
+  assertServiceRecordsScopedToInvoice(serviceRecords, invoice.customerId, invoice.invoiceNumber);
 
   const signedRecords = serviceRecords.filter(r =>
     r.status === "completed" || r.status === "employee_signed"
