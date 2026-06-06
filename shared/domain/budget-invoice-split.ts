@@ -98,10 +98,17 @@ export interface SplitReversalRow {
  * Nur die verbleibenden (lebenden) Konsumptionen fließen in den Split;
  * Töpfe ohne lebende Konsumption tauchen nicht mehr auf.
  */
-export function buildBudgetSplitFromLedger(
-  consumptions: SplitConsumptionRow[],
+/**
+ * Sammelt die IDs aller Konsumptions-Buchungen, die durch ein Storno wieder
+ * zurückgenommen wurden — sowohl über die VERKNÜPFUNG
+ * (`reversed_transaction_id`) als auch über NOTE-basierte Waisen-Stornos
+ * („Storno … von Transaktion #<id>"). Single Source of Truth für die
+ * Storno-Erkennung im Rechnungs-Split UND in der Phantom-Topf-Rechnungs-
+ * Diagnose (Task #1016).
+ */
+export function collectReversedConsumptionIds(
   reversals: SplitReversalRow[],
-): Map<number, BudgetSplitForAppointment> {
+): Set<number> {
   const reversedConsumptionIds = new Set<number>();
   for (const r of reversals) {
     if (r.reversedTransactionId != null) {
@@ -110,6 +117,14 @@ export function buildBudgetSplitFromLedger(
     const noteRef = parseStornoReference(r.notes);
     if (noteRef != null) reversedConsumptionIds.add(noteRef);
   }
+  return reversedConsumptionIds;
+}
+
+export function buildBudgetSplitFromLedger(
+  consumptions: SplitConsumptionRow[],
+  reversals: SplitReversalRow[],
+): Map<number, BudgetSplitForAppointment> {
+  const reversedConsumptionIds = collectReversedConsumptionIds(reversals);
 
   const out = new Map<number, BudgetSplitForAppointment>();
   for (const c of consumptions) {
@@ -121,6 +136,42 @@ export function buildBudgetSplitFromLedger(
     out.set(c.appointmentId, entry);
   }
   return out;
+}
+
+/**
+ * Task #1016 — Phantom-Topf-Rechnungs-Diagnose.
+ *
+ * Beantwortet die Frage: „Ist der Budget-Topf `potKey` für die übergebenen
+ * Konsumptions-/Reversal-Zeilen AUSSCHLIESSLICH durch stornierte Buchungen
+ * belegt?" — d.h. es GAB Konsumption in diesem Topf, aber sie wurde komplett
+ * zurückgenommen, sodass netto keine lebende Konsumption mehr existiert.
+ *
+ * Genau dieser Zustand kennzeichnet eine überflüssige, bereits ausgestellte
+ * Folge-Rechnung für `potKey` (z.B. die §45a-Phantom-Rechnung im Egon-Uhlig-
+ * Fall): Die Rechnung repräsentiert einen Topf, der real (netto) gar nicht
+ * mehr belegt ist.
+ *
+ * Rückgabe:
+ *   - `false`, wenn der Topf NIE Konsumption hatte (echte Selbstzahler /
+ *     Alt-Daten — keine „stornierte" Belegung, nichts aufzuräumen).
+ *   - `false`, solange ≥1 lebende (nicht stornierte) Konsumption im Topf bleibt.
+ *   - `true`, nur wenn der Topf Konsumption HATTE und ALLE davon storniert sind.
+ *
+ * Die Storno-Erkennung nutzt dieselbe SSoT wie der Rechnungs-Split
+ * (`collectReversedConsumptionIds`) — verknüpfte UND NOTE-basierte Waisen-Stornos.
+ */
+export function isPotEntirelyReversed(
+  consumptions: SplitConsumptionRow[],
+  reversals: SplitReversalRow[],
+  potKey: InvoicePotKey,
+): boolean {
+  const potConsumptions = consumptions.filter(
+    (c) => toPotKey(c.budgetType) === potKey,
+  );
+  if (potConsumptions.length === 0) return false; // nie belegt → nichts zu stornieren
+  const reversedIds = collectReversedConsumptionIds(reversals);
+  const hasLive = potConsumptions.some((c) => !reversedIds.has(c.id));
+  return !hasLive;
 }
 
 export interface SplitInputItem {
