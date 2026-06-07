@@ -312,7 +312,14 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
       const kmSvc = kmServiceMap.get(kmEntry.code);
       if (!kmSvc) continue;
       const kmCustomerPrice = getCustomerPrice(kmSvc.id, apptDate);
-      const pricePerKm = kmCustomerPrice ?? kmSvc.defaultPriceCents ?? 35;
+      // Task #1033 — Kein stiller, festkodierter Kilometer-Fallback-Preis:
+      // analog zum Stunden-Preis (oben) wird ein fehlender km-Satz als klarer
+      // Konfigurationsfehler gemeldet statt mit einem irreführenden Default
+      // (vorher `?? 35`) abgerechnet, der nicht zur Preisliste passt.
+      const pricePerKm = kmCustomerPrice ?? kmSvc.defaultPriceCents;
+      if (pricePerKm == null) {
+        throw badRequest(`Kein Kilometer-Preis hinterlegt für "${kmSvc.name || kmEntry.code}". Bitte prüfen Sie den Dienstleistungskatalog.`);
+      }
       // Task #561: GoBD-konforme km-Quantisierung — Anzeige UND Berechnung
       // verwenden denselben auf 2 Nachkommastellen gerundeten Wert.
       // Vorher: `Math.round(km * pricePerKm)` mit ungerundetem Float +

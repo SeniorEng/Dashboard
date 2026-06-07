@@ -330,7 +330,20 @@ export async function buildInvoicePdfData(
   invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]>;
 }> {
   const lineItems = await storage.getInvoiceLineItems(invoice.id);
-  const pdfData = buildPdfData(invoice, lineItems, companySettings);
+  // Task #1033 — Firmenstammdaten GoBD-konform einfrieren: liegt ein
+  // Render-Snapshot vor (versendete/stornierte Rechnung), werden die
+  // Company-Felder (Adresse, IBAN/BIC/Bank/Kontoinhaber, Steuernummer,
+  // USt-ID, IK-Nr, Geschäftsführer) aus dem Snapshot gelesen statt aus der
+  // Live-`company_settings`-Tabelle. So re-rendert eine bereits ausgestellte
+  // Rechnung mit den zum Ausstellungszeitpunkt gültigen Werten, auch wenn
+  // sich die Bankverbindung o.Ä. danach ändert. Entwürfe (kein Snapshot)
+  // bleiben live. Post-#593-Snapshots == Live-Werte beim Erst-Persist, daher
+  // bleibt die byte-genaue ZUGFeRD-/PDF-Integrität unberührt; Bestände ohne
+  // Snapshot fallen sauber auf die Live-Settings zurück.
+  const effectiveCompanySettings: CompanySettings = options?.snapshot?.companySettings
+    ? { ...companySettings, ...options.snapshot.companySettings }
+    : companySettings;
+  const pdfData = buildPdfData(invoice, lineItems, effectiveCompanySettings);
 
   // Task #654 — Wenn ein Snapshot vorliegt, override das `invoiceDate`
   // (und `invoiceDueDate`) mit den damals tatsächlich verwendeten Werten.
@@ -477,7 +490,11 @@ export async function buildInvoicePdfBytes(
 // rechtsverbindlich in Object Storage liegt (GoBD-Immutabilität!), aber der
 // Leistungsnachweis-Cache noch fehlt (z.B. Bestandsrechnungen vor Task #521).
 async function renderLeistungsnachweisOnly(invoice: Invoice, companySettings: CompanySettings): Promise<{ pdf: Buffer; fingerprint: string } | null> {
-  const { pdfData, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings);
+  // Task #1033 — Snapshot durchreichen, damit der LN-Backfill einer bereits
+  // ausgestellten Rechnung die zum Ausstellungszeitpunkt gültigen Firmen-/
+  // Kundenstammdaten einfriert statt der Live-Werte (GoBD).
+  const snapshot = (invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
+  const { pdfData, isPflegekasseInvoice } = await buildInvoicePdfData(invoice, companySettings, { snapshot });
   if (!isPflegekasseInvoice) return null;
   const { generateLeistungsnachweisHtml, generatePdf, buildLeistungsnachweisFooterTemplate } = await import("../lib/pdf-generator");
   await enrichPdfDataWithSignatures(pdfData, invoice);
@@ -752,8 +769,16 @@ async function loadStoredPdfByPath(pdfPath: string | null): Promise<Buffer | nul
 
 export async function renderLeistungsnachweisOnTheFly(invoice: Invoice): Promise<Buffer> {
   const lineItems = await storage.getInvoiceLineItems(invoice.id);
-  const companySettings = await getCachedCompanySettings();
+  const liveCompanySettings = await getCachedCompanySettings();
   const { generateLeistungsnachweisHtml, generatePdf, buildLeistungsnachweisFooterTemplate } = await import("../lib/pdf-generator");
+
+  // Task #1033 — Firmenstammdaten einfrieren (siehe buildInvoicePdfData): für
+  // versendete/stornierte Rechnungen mit Render-Snapshot werden die Company-
+  // Felder aus dem Snapshot statt der Live-Tabelle gelesen.
+  const snapshot = (invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
+  const companySettings = snapshot?.companySettings && liveCompanySettings
+    ? { ...liveCompanySettings, ...snapshot.companySettings }
+    : liveCompanySettings;
 
   const pdfData = buildPdfData(invoice, lineItems, companySettings);
 

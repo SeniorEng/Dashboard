@@ -7,6 +7,7 @@ import { appointments, invoices as invoicesTable, type Invoice } from "@shared/s
 import { eq, and, gte, lt, ne } from "drizzle-orm";
 import { z } from "zod";
 import { todayISO, addDays } from "@shared/utils/datetime";
+import { STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
 import { storage } from "../storage";
 import { db } from "../lib/db";
 import { appointmentsRepo } from "../repos";
@@ -169,9 +170,17 @@ export async function buildInvoiceDraft(input: {
   }
 
   const billingType = customer.billingType || "selbstzahler";
+  // Task #1033 — Kein stiller „Unbekannt"-Platzhalter: `customers.name` ist
+  // NOT NULL und bei der Anlage pflichtvalidiert. Fehlt ausnahmsweise jeder
+  // Name (leerer String + keine Vor-/Nachname-Splittung), wird die Erstellung
+  // mit klarer Fehlermeldung abgebrochen statt einen irreführenden Namen auf
+  // die Rechnung zu drucken.
   const customerName = customer.vorname && customer.nachname
     ? `${customer.vorname} ${customer.nachname}`
-    : customer.name || "Unbekannt";
+    : customer.name;
+  if (!customerName) {
+    throw badRequest(`Kunde #${customerId} hat keinen Namen hinterlegt — Rechnung kann nicht erstellt werden. Bitte ergänzen Sie die Kundenstammdaten.`);
+  }
   const customerAddress = [customer.strasse, customer.nr].filter(Boolean).join(" ") +
     (customer.plz || customer.stadt ? `\n${customer.plz || ""} ${customer.stadt || ""}` : "");
 
@@ -222,7 +231,7 @@ export async function buildInvoiceDraft(input: {
     const singlePotIsPrivate = hasPrivateShare && potItems.size === 1;
     const reclassifyToSelbstzahler = singlePotIsPrivate && billingType !== "selbstzahler";
     const effectiveVatCents = reclassifyToSelbstzahler
-      ? Math.round((singleNetCents * 1900) / 10000)
+      ? Math.round((singleNetCents * STANDARD_VAT_RATE_BP) / 10000)
       : singleVatCents;
     return {
       customer,
@@ -261,7 +270,7 @@ export async function buildInvoiceDraft(input: {
     const net = items.reduce((s, i) => s + i.totalCents, 0);
     totalNet += net;
     if (pot === "private") {
-      totalVat += Math.round((net * 1900) / 10000);
+      totalVat += Math.round((net * STANDARD_VAT_RATE_BP) / 10000);
       legacyPrivateItems.push(...items);
     } else {
       legacyKasseItems.push(...items);
@@ -413,7 +422,7 @@ export async function generateInvoiceCore(
         }
 
         const netCents = items.reduce((s, i) => s + i.totalCents, 0);
-        const vatCents = pot === "private" ? Math.round((netCents * 1900) / 10000) : 0;
+        const vatCents = pot === "private" ? Math.round((netCents * STANDARD_VAT_RATE_BP) / 10000) : 0;
         const invoiceBillingType = pot === "private" ? "selbstzahler" : billingType;
 
         const invoiceNumber = await getNextInvoiceNumberTx(tx, billingYear);
@@ -434,7 +443,7 @@ export async function generateInvoiceCore(
           netAmountCents: netCents,
           vatAmountCents: vatCents,
           grossAmountCents: netCents + vatCents,
-          vatRate: pot === "private" ? 1900 : 0,
+          vatRate: pot === "private" ? STANDARD_VAT_RATE_BP : 0,
           status: "entwurf",
           notes: getPotInvoiceNote(pot),
           // Pot-Marker + Lauf-Gruppierung für Cascade-Storno und Reporting.
@@ -557,7 +566,7 @@ export async function generateInvoiceCore(
         netAmountCents: totalNetCents,
         vatAmountCents: totalVatCents,
         grossAmountCents: totalNetCents + totalVatCents,
-        vatRate: invoiceBillingType === "selbstzahler" ? 1900 : 0,
+        vatRate: invoiceBillingType === "selbstzahler" ? STANDARD_VAT_RATE_BP : 0,
         status: "entwurf",
         referencedStornoInvoiceIds: stornoRefsForInsert,
         dueDate: invoiceDueDateIso,
