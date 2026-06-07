@@ -47,6 +47,8 @@ import {
   deactivateTestEmployee,
   cleanupCustomer,
   getAuthCookie,
+  getTestOutbox,
+  clearTestOutbox,
   runCleanup,
   uniqueId,
 } from "../test-utils";
@@ -55,6 +57,50 @@ async function pageCount(buf: Buffer): Promise<number> {
   const { PDFDocument } = await import("pdf-lib");
   const doc = await PDFDocument.load(buf);
   return doc.getPageCount();
+}
+
+// Leichtgewichtiger PDF-Text-Extraktor (nur Tests, devDependency `pdf-parse`).
+// Subpfad-Import vermeidet den Demo-Code in `pdf-parse/index.js`.
+//
+// `pdf-parse` bündelt ein altes pdf.js (v1.10.100), das die Object-Streams
+// moderner PDFs (pdf-lib-Merge in bundle/bulk-print) nicht lesen kann
+// ("Invalid PDF structure"). Wir normalisieren die Bytes daher über pdf-lib
+// auf eine klassische Xref-Tabelle (useObjectStreams:false), bevor wir den
+// Text extrahieren — die Text-Streams bleiben dabei unverändert.
+type PdfParseFn = (data: Buffer) => Promise<{ text: string }>;
+async function extractPdfText(buf: Buffer): Promise<string> {
+  const { PDFDocument } = await import("pdf-lib");
+  const doc = await PDFDocument.load(buf);
+  const normalized = Buffer.from(await doc.save({ useObjectStreams: false }));
+  const ns = (await import("pdf-parse/lib/pdf-parse.js")) as unknown as { default: PdfParseFn };
+  const parsed = await ns.default(normalized);
+  return parsed.text;
+}
+
+const RAW_BASE = process.env.TEST_BASE_URL || "http://localhost:5000";
+
+// Roh-Fetch-Helfer für binäre PDF-/ZIP-Antworten (apiGet/apiPost lesen JSON).
+async function fetchBinaryGet(path: string): Promise<{ status: number; contentType: string; buf: Buffer }> {
+  const auth = await getAuthCookie();
+  const res = await fetch(`${RAW_BASE}${path}`, { headers: { Cookie: auth.cookie } });
+  const buf = Buffer.from(await res.arrayBuffer());
+  return { status: res.status, contentType: res.headers.get("content-type") ?? "", buf };
+}
+
+async function fetchBinaryPost(path: string, body: unknown): Promise<{ status: number; contentType: string; buf: Buffer }> {
+  const auth = await getAuthCookie();
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
+  const res = await fetch(`${RAW_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
+    },
+    body: JSON.stringify(body),
+  });
+  const buf = Buffer.from(await res.arrayBuffer());
+  return { status: res.status, contentType: res.headers.get("content-type") ?? "", buf };
 }
 
 // ---------------------------------------------------------------------------
@@ -713,4 +759,292 @@ describe("Task #1032 — LN-Adresse = Kunden-Stammadresse (Render-Ebene)", () =>
     expect(frozenBytes.leistungsnachweisPdf, "Snapshot-Render erzeugt LN-Bytes").toBeTruthy();
     expect(frozenBytes.leistungsnachweisPdf!.length).toBeGreaterThan(0);
   }, 180_000);
+});
+
+// ---------------------------------------------------------------------------
+// Task #1034 — LN-Adresse = Kunden-Stammadresse über die ECHTEN HTTP-Routen.
+//
+// Task #1032 bewies die Stammadresse auf Orchestrator-/Render-Ebene. Diese
+// Suite schließt die Lücke und treibt die tatsächlichen Versand- und Druck-
+// Routen für einen gesetzlich versicherten Kunden (rechnungAnKunde=false):
+//
+//   - POST /api/billing/:id/send  → die E-Mail an die PFLEGEKASSE hängt einen
+//     Leistungsnachweis (LN-<Nr>.pdf) an. Der ausgelieferte LN muss die
+//     Kunden-STAMMADRESSE tragen, NICHT die Kassen-Anschrift.
+//   - GET  /api/billing/:id/bundle → zusammengeführtes Druck-PDF (Rechnung +
+//     LN). Die LN-Seite trägt die Stammadresse.
+//   - POST /api/billing/bulk-print → monatliches Sammeldruck-PDF. Auch hier
+//     trägt die LN-Seite die Stammadresse.
+//
+// Eine DEDIZIERTE Pflegekasse mit unverwechselbarer Anschrift wird angelegt,
+// damit wir im freistehenden LN positiv die Stammadresse UND negativ die
+// Abwesenheit der Kassen-Anschrift prüfen können. Der gelieferte LN-Text wird
+// aus den finalen PDF-Bytes extrahiert (`pdf-parse`).
+// ---------------------------------------------------------------------------
+describe("Task #1034 — LN-Stammadresse über Versand-/Druck-Routen (HTTP)", () => {
+  const YEAR = 2026;
+  const SEND_MONTH = 3; // send + bundle
+  const BULK_MONTH = 2; // bulk-print (eigener Entwurf, gleicher Kunde)
+
+  // Unverwechselbare Stammadresse (kollidiert nicht mit Kasse oder #1032).
+  const MASTER_STRASSE = "Behandlungspfad";
+  const MASTER_NR = "3";
+  const MASTER_PLZ = "01097";
+  const MASTER_STADT = "Dresden-Stammort";
+
+  // Unverwechselbare Kassen-Anschrift — diese DARF im freistehenden LN nicht
+  // auftauchen (recipientAddress wird in invoice-calc.ts aus diesen Feldern
+  // gebaut, wenn gesetzlich + !rechnungAnKunde).
+  const KASSE_STRASSE = "Kassenallee";
+  const KASSE_NR = "9";
+  const KASSE_PLZ = "99998";
+  const KASSE_STADT = "Kassenstadt-Fernort";
+
+  let customerId: number;
+  let employeeId: number;
+  let hwServiceId: number;
+  let insuranceProviderId: number;
+  let kasseEmail: string;
+  const cleanupApptIds: number[] = [];
+  const cleanupSrIds: number[] = [];
+  const cleanupInvoiceIds: number[] = [];
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    const services = await apiGet<Array<{ id: number; code: string | null }>>("/api/services/all");
+    hwServiceId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
+
+    // Dedizierte gesetzliche Pflegekasse mit E-Mail-Versand + eindeutiger
+    // Anschrift. Eigene Kasse → wir mutieren keine geseedete AOK und
+    // isolieren bulk-print sauber über insuranceProviderId.
+    kasseEmail = `kasse-route-${uniqueId()}@test.local`;
+    const ik = String(Math.floor(100000000 + Math.random() * 900000000));
+    const provRes = await apiPost<{ id: number }>("/api/admin/insurance-providers", {
+      name: `Route-Kasse ${uniqueId()}`,
+      isPrivate: false,
+      ikNummer: ik,
+      strasse: KASSE_STRASSE,
+      hausnummer: KASSE_NR,
+      plz: KASSE_PLZ,
+      stadt: KASSE_STADT,
+      email: kasseEmail,
+      emailInvoiceEnabled: true,
+    });
+    expect(provRes.status, `create provider: ${JSON.stringify(provRes.data)}`).toBe(201);
+    insuranceProviderId = provRes.data.id;
+
+    const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Route",
+      nachname: `LN-${uniqueId()}`,
+      geburtsdatum: "1940-03-03",
+      email: `route-ln-${uniqueId()}@test.local`,
+      strasse: MASTER_STRASSE,
+      nr: MASTER_NR,
+      plz: MASTER_PLZ,
+      stadt: MASTER_STADT,
+      telefon: "+4917600000004",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      rechnungAnKunde: false,
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "R" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+    customerId = custRes.data.id;
+
+    const emp = await createTestEmployee({ nachnamePrefix: "RouteLN_Integ" });
+    employeeId = emp.id;
+    const assignRes = await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: employeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+
+    // §45b mit reichlich Budget ab dem früheren Monat → beide Termine
+    // (Februar + März) werden vollständig aus der Kasse gedeckt, die
+    // Rechnung bleibt pflegekasse_gesetzlich und erzeugt einen LN.
+    const init45b = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${YEAR}-0${BULK_MONTH}-01`,
+    });
+    expect([200, 201]).toContain(init45b.status);
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13100, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    // SMTP-Dummy-Konfig: Der Versand-Pfad ruft `ensureSmtpConfigured` VOR der
+    // Stub-Weiche auf — ohne gesetzte SMTP-Felder schlägt POST /send auch im
+    // Test-Stub mit "SMTP-Konfiguration unvollständig" fehl. Unter NODE_ENV=test
+    // verbindet sich nichts; die Mail landet im In-Memory-Outbox-Stub.
+    const smtpRes = await apiPatch(`/api/company-settings`, {
+      smtpHost: "smtp.test.local",
+      smtpPort: "587",
+      smtpUser: "outbox@test.local",
+      smtpPass: "stub-secret",
+      smtpFromEmail: "absender@test.local",
+      smtpFromName: "CareConnect Test",
+    });
+    expect(smtpRes.status, `smtp-config: ${JSON.stringify(smtpRes.data)}`).toBe(200);
+  });
+
+  afterAll(async () => {
+    for (const id of cleanupInvoiceIds) {
+      try { await db.delete(invoicesTable).where(eq(invoicesTable.id, id)); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupSrIds) {
+      try { await apiDelete(`/api/service-records/${id}`); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch { /* best-effort */ }
+    }
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
+    // Keine Delete-Route für Pflegekassen — die dedizierte Kasse bleibt in der
+    // pro Lauf verworfenen Ephemeral-Test-DB zurück (kein Cross-Test-Leak,
+    // da IK/E-Mail eindeutig pro Lauf sind).
+    await runCleanup();
+  });
+
+  // Erzeugt für einen Monat einen signierten, gesetzlich gedeckten
+  // Entwurf (Termin → Dokumentation → SR → 2 Unterschriften → Rechnung).
+  async function generateSignedInvoice(month: number): Promise<number> {
+    const apptRes = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+      customerId,
+      date: `${YEAR}-0${month}-05`,
+      scheduledStart: "10:00",
+      scheduledEnd: "11:00",
+      notes: `RouteLN-${uniqueId()}`,
+      assignedEmployeeId: employeeId,
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+    });
+    expect(apptRes.status, `appt ${month}: ${JSON.stringify(apptRes.data)}`).toBe(201);
+    cleanupApptIds.push(apptRes.data.id);
+    const docRes = await apiPost(`/api/appointments/${apptRes.data.id}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Repro" }],
+    });
+    expect(docRes.status, `document ${month}: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const srRes = await apiPost<{ id: number }>("/api/service-records", {
+      customerId, employeeId, year: YEAR, month,
+    });
+    expect(srRes.status, `SR create ${month}: ${JSON.stringify(srRes.data)}`).toBe(201);
+    cleanupSrIds.push(srRes.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost(`/api/service-records/${srRes.data.id}/sign`, {
+        signerType, signatureData: validSignatureDataUrl(),
+      });
+      expect(sig.status, `sign(${signerType}) ${month}: ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const genRes = await apiPost<any>("/api/billing/generate", {
+      customerId, billingMonth: month, billingYear: YEAR,
+    });
+    expect(genRes.status, `generate ${month}: ${JSON.stringify(genRes.data)}`).toBe(200);
+    const invData = Array.isArray(genRes.data) ? genRes.data[0]
+      : genRes.data?.invoices ? genRes.data.invoices[0]
+      : genRes.data;
+    const invoiceId: number = invData.id;
+    expect(invoiceId, `Rechnung ${month} muss eine id haben`).toBeTruthy();
+    cleanupInvoiceIds.push(invoiceId);
+    return invoiceId;
+  }
+
+  it("Bündel- UND Versand-Route liefern den LN mit der Kunden-Stammadresse", async () => {
+    const invoiceId = await generateSignedInvoice(SEND_MONTH);
+
+    const invoice = await storage.getInvoice(invoiceId);
+    expect(invoice, `getInvoice(${invoiceId})`).toBeTruthy();
+    // Voraussetzung des geschlossenen Bugs: gesetzliche Kasse OHNE
+    // Kostenerstattung → recipientAddress ist die Kassen-Anschrift.
+    expect(invoice!.billingType, "Rechnung bleibt pflegekasse_gesetzlich").toBe("pflegekasse_gesetzlich");
+    const invoiceNumber = invoice!.invoiceNumber;
+
+    const expectedMaster = formatCustomerMasterAddress({
+      strasse: MASTER_STRASSE, nr: MASTER_NR, plz: MASTER_PLZ, stadt: MASTER_STADT,
+    });
+    expect(expectedMaster, "Stammadresse darf nicht leer sein").toBeTruthy();
+    // Die Kassen-Anschrift (recipientAddress) muss von der Stammadresse
+    // abweichen — sonst wäre der Negativ-Test wertlos.
+    expect(invoice!.recipientAddress ?? "", "recipientAddress = Kassen-Anschrift").toContain(KASSE_STADT);
+    expect(invoice!.recipientAddress ?? "").not.toContain(MASTER_STRASSE);
+
+    // --- (A) BÜNDEL-ROUTE: Rechnung + LN als ein PDF. Wärmt zugleich den
+    //     PDF-Cache (persistInvoicePdf), den der Versand-Pfad danach liest.
+    const bundle = await fetchBinaryGet(`/api/billing/${invoiceId}/bundle`);
+    expect(bundle.status, "bundle HTTP 200").toBe(200);
+    expect(bundle.contentType).toContain("application/pdf");
+    expect(await pageCount(bundle.buf), "Bündel = Rechnung + LN (≥2 Seiten)").toBeGreaterThanOrEqual(2);
+    const bundleText = await extractPdfText(bundle.buf);
+    expect(bundleText, "Bündel-PDF enthält die Stamm-Straße (LN-Seite)").toContain(MASTER_STRASSE);
+    expect(bundleText, "Bündel-PDF enthält den Stamm-Ort (LN-Seite)").toContain(MASTER_STADT);
+
+    // --- (B) VERSAND-ROUTE: E-Mail an die Pflegekasse mit LN-Anhang.
+    await clearTestOutbox();
+    const sendRes = await apiPost<any>(`/api/billing/${invoiceId}/send`, {});
+    expect(sendRes.status, `send: ${JSON.stringify(sendRes.data)}`).toBe(200);
+
+    const outbox = await getTestOutbox();
+    const lnAttachment = `LN-${invoiceNumber}.pdf`;
+    const msg = outbox.find((m) => m.attachmentNames.includes(lnAttachment));
+    expect(msg, `Versand-Mail mit Anhang ${lnAttachment} muss im Postausgang liegen`).toBeTruthy();
+    // Empfänger ist die PFLEGEKASSE (nicht der Kunde), da gesetzlich +
+    // !rechnungAnKunde → sendToCustomer=false.
+    expect(msg!.to, "Empfänger = Pflegekassen-E-Mail").toBe(kasseEmail);
+    expect(msg!.attachmentNames, "auch die Rechnung hängt an").toContain(`${invoiceNumber}.pdf`);
+
+    // Der versendete LN entspricht dem im Send-Pfad angehängten gecachten
+    // LN (loadLeistungsnachweisPdfFromStorage). GET /:id/leistungsnachweis
+    // liefert exakt diese Bytes → wir extrahieren den Text und prüfen, dass
+    // der an die KASSE versandte LN die Kunden-STAMMADRESSE trägt und NICHT
+    // die Kassen-Anschrift.
+    const lnRes = await fetchBinaryGet(`/api/billing/${invoiceId}/leistungsnachweis`);
+    expect(lnRes.status, "leistungsnachweis HTTP 200").toBe(200);
+    expect(lnRes.contentType).toContain("application/pdf");
+    const lnText = await extractPdfText(lnRes.buf);
+    expect(lnText, "versandter LN enthält die Stamm-Straße").toContain(MASTER_STRASSE);
+    expect(lnText, "versandter LN enthält den Stamm-Ort").toContain(MASTER_STADT);
+    // Negativ: die Kassen-Anschrift darf im freistehenden LN nicht auftauchen.
+    expect(lnText, "LN zeigt NICHT die Kassen-Straße").not.toContain(KASSE_STRASSE);
+    expect(lnText, "LN zeigt NICHT den Kassen-Ort").not.toContain(KASSE_STADT);
+
+    // Versand setzt den Status auf versendet.
+    const afterSend = await storage.getInvoice(invoiceId);
+    expect(afterSend!.status, "nach Versand: Status versendet").toBe("versendet");
+  }, 240_000);
+
+  it("Sammeldruck-Route (bulk-print) liefert den LN mit der Kunden-Stammadresse", async () => {
+    const invoiceId = await generateSignedInvoice(BULK_MONTH);
+    const invoice = await storage.getInvoice(invoiceId);
+    expect(invoice!.billingType, "Rechnung bleibt pflegekasse_gesetzlich").toBe("pflegekasse_gesetzlich");
+
+    // Auf die dedizierte Kasse gefiltert → genau dieser eine Entwurf.
+    const bulk = await fetchBinaryPost("/api/billing/bulk-print", {
+      billingMonth: BULK_MONTH,
+      billingYear: YEAR,
+      insuranceProviderId,
+    });
+    expect(bulk.status, `bulk-print HTTP 200 (ct=${bulk.contentType})`).toBe(200);
+    expect(bulk.contentType, "Sammeldruck = ein zusammengeführtes PDF").toContain("application/pdf");
+    expect(await pageCount(bulk.buf), "Sammeldruck = Rechnung + LN (≥2 Seiten)").toBeGreaterThanOrEqual(2);
+    const bulkText = await extractPdfText(bulk.buf);
+    expect(bulkText, "Sammeldruck-PDF enthält die Stamm-Straße (LN-Seite)").toContain(MASTER_STRASSE);
+    expect(bulkText, "Sammeldruck-PDF enthält den Stamm-Ort (LN-Seite)").toContain(MASTER_STADT);
+  }, 240_000);
 });
