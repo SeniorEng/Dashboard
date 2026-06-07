@@ -66,6 +66,12 @@ const APPT_DATE = `${YEAR}-0${MONTH}-15`;
 const LIVE_45B_CENTS = 3000; // lebende §45b-Konsumption → §45b-Rechnung gross
 const REVERSED_45A_CENTS = 2000; // stornierte §45a-Konsumption → Phantom-§45a-Rechnung gross
 
+// Negativfall (Task #1027): ein §45a-Topf mit ZWEI Konsumptionen — eine lebt,
+// eine ist storniert. Der Topf ist damit NICHT vollständig storniert und darf
+// vom Reconcile NICHT als Phantom-Topf-Rechnung erkannt werden.
+const LIVE_45A_CENTS = 2500; // lebende §45a-Konsumption (bleibt bestehen)
+const PARTIAL_REVERSED_45A_CENTS = 1500; // stornierte §45a-Konsumption im selben Topf
+
 interface StornoVariant {
   label: string;
   /**
@@ -407,6 +413,215 @@ describe.each(VARIANTS)(
         customerIds: [customerId],
       });
       expect(summary.findings.some((f) => f.invoiceId === invoice45aId)).toBe(false);
+    }, 120_000);
+  },
+);
+
+/**
+ * Task #1027 — Negativfall / Schutz gegen False-Positives.
+ *
+ * Spiegelbild des Positivfalls oben: hier ist der §45a-Topf NUR TEILWEISE
+ * storniert — er trägt ZWEI Konsumptionen, von denen genau EINE storniert ist
+ * (live + reversed gemischt). `isPotEntirelyReversed` muss daher `false`
+ * liefern (≥1 lebende Konsumption bleibt), und der Reconcile darf die
+ * zugehörige §45a-Rechnung NICHT als Phantom-Topf-Rechnung melden.
+ *
+ * Würde der Reconcile hier ein Finding produzieren und (im Scharflauf) die
+ * Rechnung stornieren, ginge eine real belegte, GoBD-relevante Rechnung
+ * verloren — finanziell destruktiv. Genau diese Regression deckt der Test ab.
+ *
+ * Wie der Positivfall ist der Test über die ART des §45a-Stornos parametrisiert
+ * (verknüpfter Reversal vs. NULL-Link Note-Storno, Task #1026), damit beide
+ * Storno-Erkennungspfade gegen False-Positives abgesichert sind.
+ */
+describe.each(VARIANTS)(
+  "reconcilePhantomPotInvoices — Negativfall (teils stornierter §45a-Topf) · §45a-Storno: $label",
+  ({ linkReversal }) => {
+    let customerId: number;
+    let employeeId: number;
+    let abServiceId: number;
+    let superadminId: number;
+
+    let liveApptId: number; // Termin der lebenden §45a-Konsumption
+    let reversedApptId: number; // Termin der stornierten §45a-Konsumption
+    let invoice45aId: number; // §45a-Rechnung über BEIDE Termine (live + storniert)
+
+    const cleanupApptIds: number[] = [];
+
+    async function createAppt(scheduledStart: string, scheduledEnd: string): Promise<number> {
+      const res = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+        customerId,
+        date: APPT_DATE,
+        scheduledStart,
+        scheduledEnd,
+        notes: `Phantom-Reconcile-Neg-${uniqueId()}`,
+        assignedEmployeeId: employeeId,
+        services: [{ serviceId: abServiceId, durationMinutes: 30 }],
+      });
+      expect(res.status, `create appt: ${JSON.stringify(res.data)}`).toBe(201);
+      cleanupApptIds.push(res.data.id);
+      return res.data.id;
+    }
+
+    beforeAll(async () => {
+      const auth = await getAuthCookie();
+
+      const [admin] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.isSuperAdmin, true))
+        .limit(1);
+      superadminId = admin?.id ?? auth.user.id;
+
+      const services = await apiGet<Array<{ id: number; code: string | null }>>("/api/services/all");
+      abServiceId = services.data.find((s) => s.code === "alltagsbegleitung")!.id;
+
+      const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+        vorname: "Phantom",
+        nachname: `ReconcileNeg-${uniqueId()}`,
+        geburtsdatum: "1941-03-08",
+        email: `phantom-neg-${uniqueId()}@test.local`,
+        strasse: "Phantomweg",
+        nr: "16",
+        plz: "01067",
+        stadt: "Dresden",
+        telefon: "+4917600000003",
+        pflegegrad: 3,
+        pflegegradSeit: "2024-01-01",
+        billingType: "pflegekasse_gesetzlich",
+        acceptsPrivatePayment: false,
+      });
+      expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+      customerId = custRes.data.id;
+
+      const emp = await createTestEmployee({ vorname: "Erik", nachnamePrefix: "Phantom_Neg" });
+      employeeId = emp.id;
+      const assignRes = await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+        primaryEmployeeId: employeeId,
+        backupEmployeeId: null,
+        backupEmployeeId2: null,
+      });
+      expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+
+      liveApptId = await createAppt("13:00", "13:30");
+      reversedApptId = await createAppt("14:00", "14:30");
+
+      // --- Synthetischer Ledger: EIN §45a-Topf, zwei Konsumptionen. ---
+
+      // LIVE §45a-Konsumption (NICHT storniert) → hält den Topf am Leben.
+      await db.insert(budgetTransactions).values({
+        customerId,
+        budgetType: "umwandlung_45a",
+        transactionDate: APPT_DATE,
+        transactionType: "consumption",
+        amountCents: -LIVE_45A_CENTS,
+        appointmentId: liveApptId,
+        notes: "Negativfall: live §45a (bleibt bestehen)",
+      });
+
+      // §45a-Konsumption auf dem zweiten Termin → vollständig storniert.
+      const [orig45a] = await db
+        .insert(budgetTransactions)
+        .values({
+          customerId,
+          budgetType: "umwandlung_45a",
+          transactionDate: APPT_DATE,
+          transactionType: "consumption",
+          amountCents: -PARTIAL_REVERSED_45A_CENTS,
+          appointmentId: reversedApptId,
+          notes: "Negativfall: §45a (wird storniert)",
+        })
+        .returning({ id: budgetTransactions.id });
+
+      // Storno-Variante: verknüpft ODER verwaist (NUR über die Notiz auflösbar,
+      // Task #1026) — identisch zum Positivfall, damit BEIDE Erkennungspfade
+      // gegen False-Positives geschützt sind.
+      await db.insert(budgetTransactions).values({
+        customerId,
+        budgetType: "umwandlung_45a",
+        transactionDate: APPT_DATE,
+        transactionType: "reversal",
+        amountCents: PARTIAL_REVERSED_45A_CENTS,
+        appointmentId: reversedApptId,
+        reversedTransactionId: linkReversal ? orig45a.id : null,
+        notes: `Storno von Transaktion #${orig45a.id}`,
+      });
+
+      // --- EINE §45a-Rechnung über BEIDE Termine (live + storniert). ---
+      const billingRunId = globalThis.crypto?.randomUUID?.() ?? `run-neg-${uniqueId()}`;
+      const grossTotal = LIVE_45A_CENTS + PARTIAL_REVERSED_45A_CENTS;
+
+      const baseInvoice = {
+        customerId,
+        billingType: "pflegekasse_gesetzlich",
+        invoiceType: "rechnung",
+        billingMonth: MONTH,
+        billingYear: YEAR,
+        recipientName: "Pflegekasse Test",
+        recipientAddress: "Kassenweg 1, 01067 Dresden",
+        customerName: "Phantom ReconcileNeg",
+        pflegegrad: 3,
+        netAmountCents: grossTotal,
+        vatAmountCents: 0,
+        grossAmountCents: grossTotal,
+        vatRate: 0,
+        status: "versendet",
+        budgetType: "umwandlung_45a",
+        billingRunId,
+      };
+
+      const lineItem = (apptId: number, gross: number) => ({
+        appointmentId: apptId,
+        appointmentDate: APPT_DATE,
+        serviceDescription: "Alltagsbegleitung",
+        serviceCode: "alltagsbegleitung",
+        durationMinutes: 30,
+        unitPriceCents: gross,
+        totalCents: gross,
+        employeeName: "Erik",
+      });
+
+      const seeded = await db.transaction(async (tx) => {
+        const num = await getNextInvoiceNumberTx(tx, YEAR);
+        return createInvoiceTx(
+          tx,
+          { ...baseInvoice, invoiceNumber: num },
+          [
+            lineItem(liveApptId, LIVE_45A_CENTS),
+            lineItem(reversedApptId, PARTIAL_REVERSED_45A_CENTS),
+          ],
+          superadminId,
+        );
+      });
+      invoice45aId = seeded.id;
+    }, 120_000);
+
+    afterAll(async () => {
+      for (const id of cleanupApptIds) {
+        try { await apiDelete(`/api/appointments/${id}`); } catch { /* best-effort */ }
+      }
+      await cleanupCustomer(customerId);
+      await deactivateTestEmployee(employeeId);
+      await runCleanup();
+    });
+
+    it("Trockenlauf meldet die teils stornierte §45a-Rechnung NICHT (kein False-Positive)", async () => {
+      const summary = await reconcilePhantomPotInvoices({
+        apply: false,
+        customerIds: [customerId],
+      });
+
+      // Der §45a-Topf trägt noch eine lebende Konsumption → keine Phantom-Rechnung.
+      expect(summary.findings.some((f) => f.invoiceId === invoice45aId)).toBe(false);
+      expect(summary.findings).toHaveLength(0);
+      expect(summary.stornoedCount).toBe(0);
+
+      // Die Originalrechnung bleibt unverändert „versendet" (kein Storno-Trail).
+      const [orig45a] = await db
+        .select({ status: invoicesTable.status })
+        .from(invoicesTable)
+        .where(eq(invoicesTable.id, invoice45aId));
+      expect(orig45a.status).toBe("versendet");
     }, 120_000);
   },
 );
