@@ -5,6 +5,7 @@ import { birthdaysCache } from "../../services/cache";
 import { auditService } from "../../services/audit";
 import { notificationService } from "../../services/notification-service";
 import { geocodeCustomer } from "../../services/geocoding";
+import { refreshDraftInvoicesForCustomerAddress } from "../../services/invoice-address-refresh";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/customers";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
@@ -784,6 +785,13 @@ router.patch("/customers/:id", asyncHandler("Kunde konnte nicht aktualisiert wer
   const addressChanged = changedFields.some(f => ["strasse", "nr", "plz", "stadt"].includes(f));
   if (addressChanged) {
     geocodeCustomer(id).catch(err => console.error("[geocoding] Background geocoding failed:", err));
+    // Task #1030 — Entwurf-Rechnungen tragen die Kunden-Stammadresse (als
+    // Rechnungsempfänger bei Selbstzahler/Kostenerstattung bzw. als
+    // „Leistungsempfänger" auf dem Leistungsnachweis). Bei einer Adressänderung
+    // im Hintergrund neu auflösen + betroffene PDFs neu rendern. Versendete/
+    // stornierte Rechnungen bleiben unangetastet (GoBD).
+    void refreshDraftInvoicesForCustomerAddress(id).catch(err =>
+      console.error(`[billing] Entwurf-Rechnungs-Adressaktualisierung für Kunde ${id} fehlgeschlagen:`, err));
   }
   
   birthdaysCache.invalidateAll();
