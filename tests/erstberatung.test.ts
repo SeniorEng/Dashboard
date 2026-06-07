@@ -12,6 +12,7 @@ import {
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let prospectId: number;
 let erstberatungId: number;
+const nachname = "EB-Test-" + uniqueId();
 const cleanupIds: number[] = [];
 const cleanupProspectIds: number[] = [];
 
@@ -29,8 +30,6 @@ afterAll(async () => {
 });
 
 describe("EB-1: Prospect (Interessent) erstellen (inline)", () => {
-  const nachname = "EB-Test-" + uniqueId();
-
   it("EB-1.1 – Interessent inline erstellen", async () => {
     const res = await apiPost<any>("/api/prospects/inline", {
       vorname: "Erika",

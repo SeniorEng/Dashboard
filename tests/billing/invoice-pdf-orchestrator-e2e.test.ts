@@ -31,7 +31,11 @@ import {
   enrichPdfDataWithSignatures,
   assertServiceRecordsScopedToInvoice,
   buildInvoicePdfBytes,
+  buildInvoicePdfData,
 } from "../../server/services/invoice-pdf-orchestrator";
+import { generateLeistungsnachweisHtml } from "../../server/lib/pdf-generator";
+import { formatCustomerMasterAddress } from "../../server/lib/customer-address-format";
+import type { InvoiceRenderSnapshot } from "@shared/schema";
 import { getCachedCompanySettings } from "../../server/services/cache";
 import {
   apiGet,
@@ -448,5 +452,265 @@ describe("Task #1001 — Storno-Rechnung ohne Beihilfe-Duplikat", () => {
     // Das Original verdoppelt (Beihilfe-Zweitausfertigung), das Storno NICHT.
     expect(pStorno, "Storno-Dokument: Rechnung + 1 LN-Seite").toBeGreaterThanOrEqual(2);
     expect(pOrig, "Original-Dokument muss durch Beihilfe-Duplikat genau doppelt so viele Seiten haben").toBe(pStorno * 2);
+  }, 180_000);
+});
+
+// ---------------------------------------------------------------------------
+// (4) Task #1032 — Render-Level-Absicherung: Der Leistungsnachweis
+//     ("Leistungsempfänger/in") trägt die KUNDEN-STAMMADRESSE, NICHT die
+//     Pflegekassen-Anschrift. Für eine gesetzliche Kasse OHNE Kostenerstattung
+//     (`rechnungAnKunde=false`) ist `invoice.recipientAddress` die Kassen-
+//     Anschrift; `buildPdfData` bindet `customerAddress` daran. Die Korrektur
+//     in `buildInvoicePdfData` überschreibt `customerAddress` mit der aus dem
+//     customerSnapshot abgeleiteten Stammadresse (live für Entwürfe, eingefroren
+//     via renderSnapshot für versendete/stornierte Rechnungen). Dieser Test
+//     verriegelt beide Pfade auf Render-Ebene (pdfData + gerendertes LN-HTML +
+//     erzeugte LN-PDF-Bytes), damit die emailten/gebündelten Kopien dieselbe
+//     korrekte Adresse zeigen.
+// ---------------------------------------------------------------------------
+describe("Task #1032 — LN-Adresse = Kunden-Stammadresse (Render-Ebene)", () => {
+  const YEAR = 2026;
+  const MONTH = 6;
+  // Eindeutige Stammadresse, die NICHT mit einer geseedeten Kassen-Anschrift
+  // kollidieren kann.
+  const MASTER_STRASSE = "Patientenweg";
+  const MASTER_NR = "7";
+  const MASTER_PLZ = "01069";
+  const MASTER_STADT = "Dresden-Patientort";
+  let customerId: number;
+  let employeeId: number;
+  let hwServiceId: number;
+  const cleanupApptIds: number[] = [];
+  const cleanupSrIds: number[] = [];
+  const cleanupInvoiceIds: number[] = [];
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    const services = await apiGet<Array<{ id: number; code: string | null }>>("/api/services/all");
+    hwServiceId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
+
+    const providers = await apiGet<Array<{ id: number; name: string }>>("/api/admin/insurance-providers");
+    const aok = providers.data.find((p) => /AOK PLUS/i.test(p.name)) ?? providers.data[0];
+    expect(aok, "Mindestens eine Pflegekasse muss geseedet sein").toBeTruthy();
+
+    const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Adress",
+      nachname: `LN-${uniqueId()}`,
+      geburtsdatum: "1941-07-07",
+      email: `ln-addr-${uniqueId()}@test.local`,
+      strasse: MASTER_STRASSE,
+      nr: MASTER_NR,
+      plz: MASTER_PLZ,
+      stadt: MASTER_STADT,
+      telefon: "+4917600000003",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      rechnungAnKunde: false,
+      insurance: {
+        providerId: aok!.id,
+        versichertennummer: "C" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+    customerId = custRes.data.id;
+
+    const emp = await createTestEmployee({ nachnamePrefix: "LNAddr_Integ" });
+    employeeId = emp.id;
+    const assignRes = await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: employeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+  });
+
+  afterAll(async () => {
+    for (const id of cleanupInvoiceIds) {
+      try { await db.delete(invoicesTable).where(eq(invoicesTable.id, id)); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupSrIds) {
+      try { await apiDelete(`/api/service-records/${id}`); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch { /* best-effort */ }
+    }
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
+    await runCleanup();
+  });
+
+  it("LN zeigt die Stammadresse — live-draft UND eingefrorener renderSnapshot", async () => {
+    // §45b mit reichlich Budget → der Termin wird vollständig aus dem
+    // Pflegekassen-Topf gedeckt (kein Selbstzahler-Reklassifizieren) und die
+    // Rechnung bleibt pflegekasse_gesetzlich → erzeugt einen LN.
+    const init45b = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${YEAR}-0${MONTH}-01`,
+    });
+    expect([200, 201]).toContain(init45b.status);
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13100, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    const apptRes = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+      customerId,
+      date: `${YEAR}-0${MONTH}-05`,
+      scheduledStart: "10:00",
+      scheduledEnd: "11:00",
+      notes: `LN-Addr-${uniqueId()}`,
+      assignedEmployeeId: employeeId,
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+    });
+    expect(apptRes.status, `appt: ${JSON.stringify(apptRes.data)}`).toBe(201);
+    cleanupApptIds.push(apptRes.data.id);
+    const docRes = await apiPost(`/api/appointments/${apptRes.data.id}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Repro" }],
+    });
+    expect(docRes.status, `document: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const srRes = await apiPost<{ id: number }>("/api/service-records", {
+      customerId, employeeId, year: YEAR, month: MONTH,
+    });
+    expect(srRes.status, `SR create: ${JSON.stringify(srRes.data)}`).toBe(201);
+    cleanupSrIds.push(srRes.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost(`/api/service-records/${srRes.data.id}/sign`, {
+        signerType, signatureData: validSignatureDataUrl(),
+      });
+      expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const genRes = await apiPost<any>("/api/billing/generate", {
+      customerId, billingMonth: MONTH, billingYear: YEAR,
+    });
+    expect(genRes.status, `generate: ${JSON.stringify(genRes.data)}`).toBe(200);
+    const invData = Array.isArray(genRes.data) ? genRes.data[0]
+      : genRes.data?.invoices ? genRes.data.invoices[0]
+      : genRes.data;
+    const invoiceId: number = invData.id;
+    expect(invoiceId, "Rechnung muss eine id haben").toBeTruthy();
+    cleanupInvoiceIds.push(invoiceId);
+
+    const companySettings = await getCachedCompanySettings();
+    expect(companySettings, "company_settings müssen konfiguriert sein").toBeTruthy();
+
+    const invoice = await storage.getInvoice(invoiceId);
+    expect(invoice, `getInvoice(${invoiceId})`).toBeTruthy();
+    // Voraussetzung des Bugs: gesetzliche Kasse OHNE Kostenerstattung →
+    // recipientAddress ist NICHT die Stammadresse (sondern Kasse bzw. leer).
+    expect(invoice!.billingType, "Rechnung bleibt pflegekasse_gesetzlich").toBe("pflegekasse_gesetzlich");
+
+    const expectedMaster = formatCustomerMasterAddress({
+      strasse: MASTER_STRASSE, nr: MASTER_NR, plz: MASTER_PLZ, stadt: MASTER_STADT,
+    });
+    expect(expectedMaster, "Stammadresse darf nicht leer sein").toBeTruthy();
+
+    // --- (A) LIVE-DRAFT-PFAD (kein Snapshot): Stammadresse wird live gelesen.
+    const live = await buildInvoicePdfData(invoice!, companySettings!);
+    expect(live.isPflegekasseInvoice, "Pflegekassen-Rechnung → erhält einen LN").toBe(true);
+    expect(
+      live.pdfData.customerAddress,
+      "LN-customerAddress (live) = Kunden-Stammadresse, NICHT die Kassen-Anschrift",
+    ).toBe(expectedMaster);
+    // Die Stammadresse weicht von der Rechnungsempfänger-Anschrift (Kasse) ab —
+    // genau das war der Regressions-Kern (LN zeigte zuvor recipientAddress).
+    expect(
+      live.pdfData.customerAddress,
+      "customerAddress darf NICHT der Rechnungsempfänger-Anschrift (Kasse) entsprechen",
+    ).not.toBe(invoice!.recipientAddress ?? null);
+
+    // Render-Ebene: das gerenderte LN-HTML enthält die Stammadresse im
+    // "Leistungsempfänger/in"-Block und NICHT die Kassen-Anschrift.
+    await enrichPdfDataWithSignatures(live.pdfData, invoice!);
+    const liveHtml = generateLeistungsnachweisHtml(live.pdfData);
+    expect(liveHtml).toContain(MASTER_STRASSE);
+    expect(liveHtml).toContain(MASTER_STADT);
+
+    // Erzeugte LN-PDF-Bytes (= emailten/gebündelten Kopien) entstehen ohne
+    // Fehler und sind nicht leer.
+    const liveBytes = await buildInvoicePdfBytes(invoice!, companySettings!);
+    expect(liveBytes.leistungsnachweisPdf, "Pflegekassen-Rechnung erzeugt LN-Bytes").toBeTruthy();
+    expect(liveBytes.leistungsnachweisPdf!.length).toBeGreaterThan(0);
+
+    // --- (B) EINGEFRORENER SNAPSHOT-PFAD (versendet/storniert): Die LN-Adresse
+    //     wird aus dem renderSnapshot abgeleitet — auch wenn dieser eine ANDERE
+    //     (zum Versendezeitpunkt eingefrorene) Stammadresse trägt als die Live-
+    //     Tabelle. Das beweist, dass der Snapshot-Pfad die Stammadresse aus dem
+    //     customerSnapshot und NICHT die Kassen-Anschrift verwendet.
+    const FROZEN_STRASSE = "Altweg";
+    const FROZEN_NR = "99";
+    const FROZEN_PLZ = "04109";
+    const FROZEN_STADT = "Leipzig-Altort";
+    const frozenMaster = formatCustomerMasterAddress({
+      strasse: FROZEN_STRASSE, nr: FROZEN_NR, plz: FROZEN_PLZ, stadt: FROZEN_STADT,
+    })!;
+    const snapshot: InvoiceRenderSnapshot = {
+      companySettings: {
+        companyName: companySettings!.companyName ?? null,
+        logoUrl: null,
+        strasse: companySettings!.strasse ?? null,
+        hausnummer: companySettings!.hausnummer ?? null,
+        plz: companySettings!.plz ?? null,
+        stadt: companySettings!.stadt ?? null,
+        telefon: companySettings!.telefon ?? null,
+        email: companySettings!.email ?? null,
+        website: companySettings!.website ?? null,
+        steuernummer: companySettings!.steuernummer ?? null,
+        ustId: companySettings!.ustId ?? null,
+        iban: companySettings!.iban ?? null,
+        bic: companySettings!.bic ?? null,
+        bankName: companySettings!.bankName ?? null,
+        bankAccountHolder: companySettings!.bankAccountHolder ?? null,
+        ikNummer: companySettings!.ikNummer ?? null,
+        geschaeftsfuehrer: companySettings!.geschaeftsfuehrer ?? null,
+      },
+      customer: {
+        geburtsdatum: "1941-07-07",
+        beihilfeBerechtigt: false,
+        rechnungAnKunde: false,
+        name: null,
+        vorname: "Adress",
+        nachname: "LN",
+        strasse: FROZEN_STRASSE,
+        nr: FROZEN_NR,
+        plz: FROZEN_PLZ,
+        stadt: FROZEN_STADT,
+      },
+    };
+
+    const frozen = await buildInvoicePdfData(invoice!, companySettings!, { snapshot });
+    expect(
+      frozen.pdfData.customerAddress,
+      "LN-customerAddress (snapshot) = eingefrorene Stamm-Anschrift, NICHT die Kasse",
+    ).toBe(frozenMaster);
+    expect(
+      frozen.pdfData.customerAddress,
+      "Snapshot-Pfad darf NICHT die live-Stammadresse verwenden",
+    ).not.toBe(expectedMaster);
+
+    await enrichPdfDataWithSignatures(frozen.pdfData, invoice!);
+    const frozenHtml = generateLeistungsnachweisHtml(frozen.pdfData);
+    expect(frozenHtml).toContain(FROZEN_STRASSE);
+    expect(frozenHtml).toContain(FROZEN_STADT);
+    // Die LIVE-Stammadresse darf im eingefrorenen Render NICHT auftauchen.
+    expect(frozenHtml).not.toContain(MASTER_STRASSE);
+
+    const frozenBytes = await buildInvoicePdfBytes(invoice!, companySettings!, { snapshot });
+    expect(frozenBytes.leistungsnachweisPdf, "Snapshot-Render erzeugt LN-Bytes").toBeTruthy();
+    expect(frozenBytes.leistungsnachweisPdf!.length).toBeGreaterThan(0);
   }, 180_000);
 });

@@ -318,7 +318,7 @@ export async function enrichPdfDataWithSignatures(pdfData: InvoicePdfData, invoi
 // Task #521: Baut die PDF-Eingabedaten (pdfData) inkl. Kunden-Anschrift /
 // Beihilfe-/Rechnung-an-Kunde-Logik. Wird sowohl für den Voll-Build als auch
 // für reine LN-Renders verwendet (LN-only verzichtet auf den Invoice-Render).
-async function buildInvoicePdfData(
+export async function buildInvoicePdfData(
   invoice: Invoice,
   companySettings: CompanySettings,
   options?: { snapshot?: InvoiceRenderSnapshot | null },
