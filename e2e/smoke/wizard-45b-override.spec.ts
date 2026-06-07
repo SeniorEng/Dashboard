@@ -276,8 +276,12 @@ test.describe("@smoke §45b Restguthaben-Override (Wizard)", () => {
     // 9999 € liegt immer über dem Cap (max. 12 × 131 € = 1572 €).
     await page.locator("[data-testid='input-restguthaben-45b']").fill("9999");
 
-    // Inline-Fehler erscheint sofort (client-seitiger Cap aus max45bStartValueCents).
-    await expect(page.getByText(/Maximal .* € möglich/)).toBeVisible();
+    // Dedizierter Über-Cap-Guard erscheint sofort (client-seitiger Cap aus
+    // max45bStartValueCents). Wir prüfen das eigene Fehler-Element statt eines
+    // Text-Regex: der immer sichtbare Hinweis ("Maximal … € möglich") nutzt das
+    // deutsche Währungsformat mit schmalem geschütztem Leerzeichen (U+202F) vor
+    // dem "€", was ein Literal-Space-Regex nie matchen würde.
+    await expect(page.locator("[data-testid='error-exceeds-cap-restguthaben-45b']")).toBeVisible();
 
     // Weiter-Klick wird geblockt (getStepErrors verhindert den Schrittwechsel):
     // der Wizard bleibt auf dem Budgets-Schritt stehen.
@@ -286,7 +290,7 @@ test.describe("@smoke §45b Restguthaben-Override (Wizard)", () => {
     await page.waitForTimeout(500);
     await expect(page.locator("[data-testid='input-restguthaben-45b']")).toBeVisible();
     await expect(page.locator("[data-testid='select-pflegegrad-budget']")).toBeVisible();
-    // Inline-Fehler steht weiterhin (Betrag immer noch über dem Cap).
-    await expect(page.getByText(/Maximal .* € möglich/)).toBeVisible();
+    // Über-Cap-Guard steht weiterhin (Betrag immer noch über dem Cap).
+    await expect(page.locator("[data-testid='error-exceeds-cap-restguthaben-45b']")).toBeVisible();
   });
 });
