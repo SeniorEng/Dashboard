@@ -32,11 +32,14 @@ import {
   assertServiceRecordsScopedToInvoice,
   buildInvoicePdfBytes,
   buildInvoicePdfData,
+  persistInvoicePdf,
+  renderLeistungsnachweisOnTheFly,
+  loadLeistungsnachweisPdfFromStorage,
 } from "../../server/services/invoice-pdf-orchestrator";
 import { generateLeistungsnachweisHtml } from "../../server/lib/pdf-generator";
 import { formatCustomerMasterAddress } from "../../server/lib/customer-address-format";
 import type { InvoiceRenderSnapshot } from "@shared/schema";
-import { getCachedCompanySettings } from "../../server/services/cache";
+import { getCachedCompanySettings, companySettingsCache } from "../../server/services/cache";
 import {
   apiGet,
   apiPost,
@@ -1047,4 +1050,346 @@ describe("Task #1034 — LN-Stammadresse über Versand-/Druck-Routen (HTTP)", ()
     expect(bulkText, "Sammeldruck-PDF enthält die Stamm-Straße (LN-Seite)").toContain(MASTER_STRASSE);
     expect(bulkText, "Sammeldruck-PDF enthält den Stamm-Ort (LN-Seite)").toContain(MASTER_STADT);
   }, 240_000);
+});
+
+// ---------------------------------------------------------------------------
+// (Task #1038) — GoBD: Firmen-/Bankstammdaten einer bereits AUSGESTELLTEN
+//     Rechnung sind EINGEFROREN. Ändert sich nach dem Versand die Live-
+//     `company_settings`-Tabelle (IBAN/BIC/Bank/Kontoinhaber, Anschrift,
+//     Steuernummer, USt-ID, IK-Nr, Geschäftsführer), MUSS jedes Re-Render der
+//     versendeten/stornierten Rechnung weiterhin die zum Ausstellungszeitpunkt
+//     gültigen Werte aus `invoice.renderSnapshot` zeigen — ENTWÜRFE (ohne
+//     Snapshot) übernehmen dagegen die NEUEN Live-Werte.
+//
+//     Verriegelt alle drei von Task #1033 berührten Render-Pfade:
+//       (1) `buildInvoicePdfData`            — Rechnungs-/ZUGFeRD-Datenobjekt
+//       (2) `renderLeistungsnachweisOnTheFly`— On-the-fly-LN (Cache-Miss-Abruf)
+//       (3) `renderLeistungsnachweisOnly`    — LN-Backfill via `persistInvoicePdf`
+//                                              (privat, nur über den Persist-Pfad
+//                                              erreichbar)
+// ---------------------------------------------------------------------------
+describe("Task #1038 — Firmen-/Bankstammdaten GoBD-eingefroren (3 Render-Pfade)", () => {
+  const YEAR = 2026;
+  const MONTH = 8;
+  const uid = uniqueId();
+
+  // Kunden-Stammadresse (im OLD-Snapshot eingefroren — der LN braucht einen
+  // Leistungsempfänger; nicht Gegenstand der Firmen-Freeze-Assertions).
+  const CUST_STRASSE = "Frozenweg";
+  const CUST_NR = "3";
+  const CUST_PLZ = "01097";
+  const CUST_STADT = "Frozenstadt";
+
+  // Die 16 Company-Felder, die der Snapshot/`buildPdfData`/ZUGFeRD-XML liest.
+  const MUT_KEYS = [
+    "companyName", "geschaeftsfuehrer", "strasse", "hausnummer", "plz", "stadt",
+    "telefon", "email", "website", "steuernummer", "ustId", "iban", "bic",
+    "bankName", "bankAccountHolder", "ikNummer",
+  ] as const;
+
+  // EINGEFRORENE Werte (= Ausstellungszeitpunkt, leben im renderSnapshot).
+  const OLD = {
+    companyName: `FirmaAltOLD${uid}`,
+    geschaeftsfuehrer: `GFAltOLD${uid}`,
+    strasse: "Altstrasse",
+    hausnummer: "11",
+    plz: "01001",
+    stadt: `AltstadtOLD${uid}`,
+    telefon: "+4935100000001",
+    email: `alt-${uid}@firma.local`,
+    website: "https://alt.example",
+    steuernummer: `STNRALT${uid}`,
+    ustId: `DEUSTALT${uid}`,
+    iban: `DE00ALTIBANOLD${uid}`,
+    bic: `ALTBICOLDXXX`,
+    bankName: `HausbankAltOLD${uid}`,
+    bankAccountHolder: `KontoAltOLD${uid}`,
+    ikNummer: `IKALT${uid}`,
+  };
+
+  // NEUE LIVE-Werte (nach dem Versand in `company_settings` geschrieben).
+  const NEW = {
+    companyName: `FirmaNeuNEU${uid}`,
+    geschaeftsfuehrer: `GFNeuNEU${uid}`,
+    strasse: "Neustrasse",
+    hausnummer: "22",
+    plz: "01002",
+    stadt: `NeustadtNEU${uid}`,
+    telefon: "+4935100000002",
+    email: `neu-${uid}@firma.local`,
+    website: "https://neu.example",
+    steuernummer: `STNRNEU${uid}`,
+    ustId: `DEUSTNEU${uid}`,
+    iban: `DE00NEUIBANNEU${uid}`,
+    bic: `NEUBICNEUXXX`,
+    bankName: `HausbankNeuNEU${uid}`,
+    bankAccountHolder: `KontoNeuNEU${uid}`,
+    ikNummer: `IKNEU${uid}`,
+  };
+
+  const OLD_SNAPSHOT: InvoiceRenderSnapshot = {
+    companySettings: {
+      companyName: OLD.companyName,
+      logoUrl: null,
+      strasse: OLD.strasse,
+      hausnummer: OLD.hausnummer,
+      plz: OLD.plz,
+      stadt: OLD.stadt,
+      telefon: OLD.telefon,
+      email: OLD.email,
+      website: OLD.website,
+      steuernummer: OLD.steuernummer,
+      ustId: OLD.ustId,
+      iban: OLD.iban,
+      bic: OLD.bic,
+      bankName: OLD.bankName,
+      bankAccountHolder: OLD.bankAccountHolder,
+      ikNummer: OLD.ikNummer,
+      geschaeftsfuehrer: OLD.geschaeftsfuehrer,
+    },
+    customer: {
+      geburtsdatum: "1940-08-08",
+      beihilfeBerechtigt: false,
+      rechnungAnKunde: false,
+      name: null,
+      vorname: "Frozen",
+      nachname: `Kunde-${uid}`,
+      strasse: CUST_STRASSE,
+      nr: CUST_NR,
+      plz: CUST_PLZ,
+      stadt: CUST_STADT,
+    },
+  };
+
+  let customerId: number;
+  let employeeId: number;
+  let invoiceId: number;
+  let invoiceRow: NonNullable<Awaited<ReturnType<typeof storage.getInvoice>>>;
+  let superadminUserId: number;
+  // Original-Werte, um `company_settings` in afterAll wiederherzustellen
+  // (die Tabelle ist innerhalb der Worker-Wegwerf-DB geteilt).
+  const ORIGINAL_PARTIAL: Record<string, unknown> = {};
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    superadminUserId = auth.user.id;
+
+    // Original-Company-Settings sichern (für die Wiederherstellung).
+    const orig = await getCachedCompanySettings();
+    expect(orig, "company_settings müssen geseedet sein").toBeTruthy();
+    for (const k of MUT_KEYS) ORIGINAL_PARTIAL[k] = (orig as Record<string, unknown>)[k] ?? null;
+
+    const services = await apiGet<Array<{ id: number; code: string | null }>>("/api/services/all");
+    const hwServiceId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
+
+    const providers = await apiGet<Array<{ id: number; name: string }>>("/api/admin/insurance-providers");
+    const aok = providers.data.find((p) => /AOK PLUS/i.test(p.name)) ?? providers.data[0];
+    expect(aok, "Mindestens eine Pflegekasse muss geseedet sein").toBeTruthy();
+
+    const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Frozen",
+      nachname: `Kunde-${uid}`,
+      geburtsdatum: "1940-08-08",
+      email: `freeze-${uid}@test.local`,
+      strasse: CUST_STRASSE,
+      nr: CUST_NR,
+      plz: CUST_PLZ,
+      stadt: CUST_STADT,
+      telefon: "+4917600000008",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      rechnungAnKunde: false,
+      insurance: {
+        providerId: aok!.id,
+        versichertennummer: "F" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+    customerId = custRes.data.id;
+
+    const emp = await createTestEmployee({ nachnamePrefix: "Freeze_Integ" });
+    employeeId = emp.id;
+    const assignRes = await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: employeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+
+    // §45b reichlich finanzieren → Termin bleibt voll aus der Kasse gedeckt,
+    // Rechnung bleibt `pflegekasse_gesetzlich` und erzeugt einen LN.
+    const init45b = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${YEAR}-0${MONTH}-01`,
+    });
+    expect([200, 201]).toContain(init45b.status);
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13100, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    const apptRes = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+      customerId,
+      date: `${YEAR}-0${MONTH}-05`,
+      scheduledStart: "10:00",
+      scheduledEnd: "11:00",
+      notes: `Freeze-${uid}`,
+      assignedEmployeeId: employeeId,
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+    });
+    expect(apptRes.status, `appt: ${JSON.stringify(apptRes.data)}`).toBe(201);
+    const docRes = await apiPost(`/api/appointments/${apptRes.data.id}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Freeze" }],
+    });
+    expect(docRes.status, `document: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const srRes = await apiPost<{ id: number }>("/api/service-records", {
+      customerId, employeeId, year: YEAR, month: MONTH,
+    });
+    expect(srRes.status, `SR create: ${JSON.stringify(srRes.data)}`).toBe(201);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost(`/api/service-records/${srRes.data.id}/sign`, {
+        signerType, signatureData: validSignatureDataUrl(),
+      });
+      expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const genRes = await apiPost<any>("/api/billing/generate", {
+      customerId, billingMonth: MONTH, billingYear: YEAR,
+    });
+    expect(genRes.status, `generate: ${JSON.stringify(genRes.data)}`).toBe(200);
+    const invData = Array.isArray(genRes.data) ? genRes.data[0]
+      : genRes.data?.invoices ? genRes.data.invoices[0]
+      : genRes.data;
+    invoiceId = invData.id;
+    expect(invoiceId, "Rechnung muss eine id haben").toBeTruthy();
+
+    // Voll-Build deterministisch abschließen (synchron, de-duped mit dem
+    // Hintergrund-Persist) → die Rechnung hat danach ein echtes pdfPath.
+    await persistInvoicePdf(invoiceId);
+
+    // "Versendet"-Zustand simulieren: Snapshot mit den EINGEFRORENEN OLD-Werten
+    // setzen und den LN-Cache leeren (das echte pdfPath bleibt erhalten — der
+    // LN-Backfill-Pfad `renderLeistungsnachweisOnly` greift nur, wenn pdfPath
+    // gesetzt UND leistungsnachweisPath NULL ist).
+    await db.update(invoicesTable)
+      .set({ renderSnapshot: OLD_SNAPSHOT, leistungsnachweisPath: null, leistungsnachweisHash: null })
+      .where(eq(invoicesTable.id, invoiceId));
+
+    // NACH dem Versand: Live-`company_settings` auf die NEUEN Werte ändern.
+    await storage.updateCompanySettings(NEW as Parameters<typeof storage.updateCompanySettings>[0], superadminUserId);
+    companySettingsCache.invalidate();
+
+    const reloaded = await storage.getInvoice(invoiceId);
+    expect(reloaded, `getInvoice(${invoiceId})`).toBeTruthy();
+    expect(reloaded!.billingType, "Rechnung bleibt pflegekasse_gesetzlich").toBe("pflegekasse_gesetzlich");
+    invoiceRow = reloaded!;
+
+    // Sanity: die Live-Mutation ist sichtbar (Entwürfe sehen NEU).
+    const liveNew = await getCachedCompanySettings();
+    expect(liveNew.companyName, "Live-company_settings tragen jetzt die NEUEN Werte").toBe(NEW.companyName);
+    expect(liveNew.iban).toBe(NEW.iban);
+  }, 180_000);
+
+  afterAll(async () => {
+    // Company-Settings wiederherstellen (Tabelle ist Worker-weit geteilt).
+    try {
+      await storage.updateCompanySettings(ORIGINAL_PARTIAL as Parameters<typeof storage.updateCompanySettings>[0], superadminUserId);
+      companySettingsCache.invalidate();
+    } catch { /* best-effort */ }
+    try { await db.delete(invoicesTable).where(eq(invoicesTable.id, invoiceId)); } catch { /* best-effort (finalisierte Rechnung) */ }
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
+    await runCleanup();
+  });
+
+  it("(1) buildInvoicePdfData: Snapshot friert alle Firmen-/Bankfelder ein; Entwurf nutzt NEUE Live-Werte", async () => {
+    const liveNew = await getCachedCompanySettings();
+    expect(liveNew.companyName).toBe(NEW.companyName);
+
+    // --- EINGEFROREN (Snapshot vorhanden = versendet/storniert) → OLD-Werte.
+    const frozen = await buildInvoicePdfData(invoiceRow, liveNew, { snapshot: OLD_SNAPSHOT });
+    expect(frozen.isPflegekasseInvoice, "Pflegekassen-Rechnung").toBe(true);
+    const fp = frozen.pdfData;
+    expect(fp.companyName, "companyName eingefroren").toBe(OLD.companyName);
+    expect(fp.iban, "IBAN eingefroren").toBe(OLD.iban);
+    expect(fp.bic, "BIC eingefroren").toBe(OLD.bic);
+    expect(fp.bankName, "bankName eingefroren").toBe(OLD.bankName);
+    expect(fp.bankAccountHolder, "Kontoinhaber eingefroren").toBe(OLD.bankAccountHolder);
+    expect(fp.steuernummer, "Steuernummer eingefroren").toBe(OLD.steuernummer);
+    expect(fp.ustId, "USt-ID eingefroren").toBe(OLD.ustId);
+    expect(fp.ikNummer, "IK-Nr eingefroren").toBe(OLD.ikNummer);
+    expect(fp.geschaeftsfuehrer, "Geschäftsführer eingefroren").toBe(OLD.geschaeftsfuehrer);
+    expect(fp.companyAddress, "Firmen-Anschrift eingefroren (Stadt)").toContain(OLD.stadt);
+    // Die NEUEN Live-Werte dürfen im eingefrorenen Render NICHT erscheinen.
+    expect(fp.companyName).not.toBe(NEW.companyName);
+    expect(fp.iban).not.toBe(NEW.iban);
+    expect(fp.bankName).not.toBe(NEW.bankName);
+    expect(fp.steuernummer).not.toBe(NEW.steuernummer);
+
+    // --- ENTWURF (kein Snapshot) → übernimmt die NEUEN Live-Werte.
+    const draft = await buildInvoicePdfData(invoiceRow, liveNew);
+    const dp = draft.pdfData;
+    expect(dp.companyName, "Entwurf: companyName = NEU").toBe(NEW.companyName);
+    expect(dp.iban, "Entwurf: IBAN = NEU").toBe(NEW.iban);
+    expect(dp.bic, "Entwurf: BIC = NEU").toBe(NEW.bic);
+    expect(dp.bankName, "Entwurf: bankName = NEU").toBe(NEW.bankName);
+    expect(dp.bankAccountHolder, "Entwurf: Kontoinhaber = NEU").toBe(NEW.bankAccountHolder);
+    expect(dp.steuernummer, "Entwurf: Steuernummer = NEU").toBe(NEW.steuernummer);
+    expect(dp.ustId, "Entwurf: USt-ID = NEU").toBe(NEW.ustId);
+    expect(dp.ikNummer, "Entwurf: IK-Nr = NEU").toBe(NEW.ikNummer);
+    expect(dp.geschaeftsfuehrer, "Entwurf: Geschäftsführer = NEU").toBe(NEW.geschaeftsfuehrer);
+    expect(dp.companyAddress, "Entwurf: Firmen-Anschrift = NEU (Stadt)").toContain(NEW.stadt);
+    // Sicherstellen, dass OLD und NEW tatsächlich verschieden sind.
+    expect(OLD.iban).not.toBe(NEW.iban);
+    expect(OLD.companyName).not.toBe(NEW.companyName);
+  }, 60_000);
+
+  it("(2) renderLeistungsnachweisOnTheFly: Snapshot-Rechnung zeigt eingefrorenen Firmennamen, Entwurf den NEUEN", async () => {
+    // Versendet (renderSnapshot gesetzt) → On-the-fly-LN trägt OLD.
+    const frozenInvoice = { ...invoiceRow, renderSnapshot: OLD_SNAPSHOT } as typeof invoiceRow;
+    const frozenLn = await renderLeistungsnachweisOnTheFly(frozenInvoice);
+    expect(frozenLn.length, "LN-PDF-Bytes nicht leer").toBeGreaterThan(0);
+    const frozenText = await extractPdfText(frozenLn);
+    expect(frozenText, "On-the-fly-LN (versendet) trägt den EINGEFRORENEN Firmennamen").toContain(OLD.companyName);
+    expect(frozenText, "On-the-fly-LN (versendet) trägt NICHT den NEUEN Firmennamen").not.toContain(NEW.companyName);
+
+    // Entwurf (kein renderSnapshot) → On-the-fly-LN trägt die NEUEN Live-Werte.
+    const draftInvoice = { ...invoiceRow, renderSnapshot: null } as typeof invoiceRow;
+    const draftLn = await renderLeistungsnachweisOnTheFly(draftInvoice);
+    const draftText = await extractPdfText(draftLn);
+    expect(draftText, "On-the-fly-LN (Entwurf) trägt den NEUEN Firmennamen").toContain(NEW.companyName);
+    expect(draftText, "On-the-fly-LN (Entwurf) trägt NICHT den eingefrorenen Firmennamen").not.toContain(OLD.companyName);
+  }, 120_000);
+
+  it("(3) renderLeistungsnachweisOnly (LN-Backfill via persistInvoicePdf): friert den Firmennamen ein", async () => {
+    // Sicherstellen: Snapshot=OLD, LN-Cache leer (pdfPath bleibt gesetzt) →
+    // persistInvoicePdf nimmt den `renderLeistungsnachweisOnly`-Zweig.
+    await db.update(invoicesTable)
+      .set({ renderSnapshot: OLD_SNAPSHOT, leistungsnachweisPath: null, leistungsnachweisHash: null })
+      .where(eq(invoicesTable.id, invoiceId));
+
+    await persistInvoicePdf(invoiceId);
+
+    const reloaded = await storage.getInvoice(invoiceId);
+    expect(reloaded!.leistungsnachweisPath, "LN-Backfill hat einen Pfad persistiert").toBeTruthy();
+    const lnBytes = await loadLeistungsnachweisPdfFromStorage(reloaded!);
+    expect(lnBytes, "persistierte LN-Bytes geladen").toBeTruthy();
+    const text = await extractPdfText(lnBytes!);
+    expect(text, "Backfill-LN trägt den EINGEFRORENEN Firmennamen").toContain(OLD.companyName);
+    expect(text, "Backfill-LN trägt NICHT den NEUEN Firmennamen (Live)").not.toContain(NEW.companyName);
+  }, 120_000);
 });
