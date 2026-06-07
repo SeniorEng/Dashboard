@@ -30,3 +30,15 @@ synchronous foreground runs.
 **Why:** repeatedly chased "failures" that were just the harness's concurrent
 fan-out, wasting time re-running the orchestrator. Trust the per-file isolated run
 and the test's own concurrency-immunity comments over the noisy harness aggregate.
+
+**Running the ephemeral orchestrator manually (Chromium/PDF integration files that
+NEED a throwaway DB, so the raw-vitest-vs-dev-server trick above doesn't apply):**
+- `setsid`/`nohup &` detached runs STALL forever at the esbuild "Baue
+  Test-Server-Bundle" step — esbuild's child service never spawns without a
+  controlling TTY (the parent sits idle with no children). Run in the FOREGROUND.
+- Booting a second app server + Chromium alongside the running `Start application`
+  dev server (plus any concurrent `test`/`e2e-smoke`) OOM-kills the run (exit 137).
+  Mitigate: `EPHEMERAL_DB_WORKERS=1 PDF_RENDER_CONCURRENCY=1`, kill the competing
+  orchestrators (`pkill -9 -f "with-ephemeral-db.ts 5050"` / `5051` / `test:e2e:smoke`),
+  and launch in a window where `test`+`e2e-smoke` show "failed/stopped". A clean
+  single-file run then fits in ~20s, well under the 120s bash cap.

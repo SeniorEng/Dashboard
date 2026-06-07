@@ -1393,3 +1393,247 @@ describe("Task #1038 — Firmen-/Bankstammdaten GoBD-eingefroren (3 Render-Pfade
     expect(text, "Backfill-LN trägt NICHT den NEUEN Firmennamen (Live)").not.toContain(NEW.companyName);
   }, 120_000);
 });
+
+// ---------------------------------------------------------------------------
+// Task #1036 — LN-Stammadresse auf dem ON-DEMAND-Render-Pfad des Versands.
+//
+// Task #1034 wärmt vor `POST /api/billing/:id/send` über die Bündel-Route den
+// PDF-Cache, sodass der emailte LN-Anhang aus dem persistierten Cache geliefert
+// wird. Damit blieb der Cache-MISS-Pfad ungetestet: wenn `/send` selbst den LN
+// on-demand (Chromium) rendern muss, baut die Route `pdfData` über
+// `buildPdfData` + `applyCustomerPdfRecipient` — NICHT über `buildInvoicePdfData`
+// (wo die #1032-Korrektur lebt). Eine Regression dort würde die FALSCHE
+// (Pflegekassen-)Anschrift verschicken, während der gecachte-Pfad-Test grün
+// bleibt.
+//
+// Dieser Test treibt `/send` OHNE Vorwärmung (kein Bündel-Call) und löscht
+// zusätzlich vor dem Versand den persistierten LN-Pfad → erzwingt den
+// on-demand-Render. Der TATSÄCHLICH versandte LN-Anhang (Bytes aus dem Test-
+// Outbox-Stub) wird text-extrahiert und positiv auf die Kunden-Stammadresse,
+// negativ auf die Kassen-Anschrift geprüft.
+// ---------------------------------------------------------------------------
+describe("Task #1036 — LN-Stammadresse auf dem on-demand Versand-Render", () => {
+  const YEAR = 2026;
+  const SEND_MONTH = 7;
+
+  // Unverwechselbare Stammadresse (kollidiert nicht mit Kasse oder anderen Suiten).
+  const MASTER_STRASSE = "Ondemandweg";
+  const MASTER_NR = "11";
+  const MASTER_PLZ = "01187";
+  const MASTER_STADT = "Dresden-Ondemandort";
+
+  // Unverwechselbare Kassen-Anschrift — diese DARF im freistehenden LN NICHT
+  // auftauchen.
+  const KASSE_STRASSE = "Ondemandkassenallee";
+  const KASSE_NR = "5";
+  const KASSE_PLZ = "99990";
+  const KASSE_STADT = "Ondemandkassenstadt";
+
+  let customerId: number;
+  let employeeId: number;
+  let hwServiceId: number;
+  let insuranceProviderId: number;
+  let kasseEmail: string;
+  const cleanupApptIds: number[] = [];
+  const cleanupSrIds: number[] = [];
+  const cleanupInvoiceIds: number[] = [];
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    const services = await apiGet<Array<{ id: number; code: string | null }>>("/api/services/all");
+    hwServiceId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
+
+    kasseEmail = `kasse-ondemand-${uniqueId()}@test.local`;
+    const ik = String(Math.floor(100000000 + Math.random() * 900000000));
+    const provRes = await apiPost<{ id: number }>("/api/admin/insurance-providers", {
+      name: `Ondemand-Kasse ${uniqueId()}`,
+      isPrivate: false,
+      ikNummer: ik,
+      strasse: KASSE_STRASSE,
+      hausnummer: KASSE_NR,
+      plz: KASSE_PLZ,
+      stadt: KASSE_STADT,
+      email: kasseEmail,
+      emailInvoiceEnabled: true,
+    });
+    expect(provRes.status, `create provider: ${JSON.stringify(provRes.data)}`).toBe(201);
+    insuranceProviderId = provRes.data.id;
+
+    const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Ondemand",
+      nachname: `LN-${uniqueId()}`,
+      geburtsdatum: "1939-02-02",
+      email: `ondemand-ln-${uniqueId()}@test.local`,
+      strasse: MASTER_STRASSE,
+      nr: MASTER_NR,
+      plz: MASTER_PLZ,
+      stadt: MASTER_STADT,
+      telefon: "+4917600000005",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      rechnungAnKunde: false,
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "O" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+    customerId = custRes.data.id;
+
+    const emp = await createTestEmployee({ nachnamePrefix: "OndemandLN_Integ" });
+    employeeId = emp.id;
+    const assignRes = await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: employeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+
+    const init45b = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${YEAR}-0${SEND_MONTH}-01`,
+    });
+    expect([200, 201]).toContain(init45b.status);
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13100, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    // SMTP-Dummy-Konfig (siehe #1034): `ensureSmtpConfigured` läuft VOR der
+    // Stub-Weiche, daher müssen die Felder gesetzt sein, sonst schlägt /send
+    // auch im Test-Stub fehl.
+    const smtpRes = await apiPatch(`/api/company-settings`, {
+      smtpHost: "smtp.test.local",
+      smtpPort: "587",
+      smtpUser: "outbox@test.local",
+      smtpPass: "stub-secret",
+      smtpFromEmail: "absender@test.local",
+      smtpFromName: "CareConnect Test",
+    });
+    expect(smtpRes.status, `smtp-config: ${JSON.stringify(smtpRes.data)}`).toBe(200);
+  });
+
+  afterAll(async () => {
+    for (const id of cleanupInvoiceIds) {
+      try { await db.delete(invoicesTable).where(eq(invoicesTable.id, id)); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupSrIds) {
+      try { await apiDelete(`/api/service-records/${id}`); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch { /* best-effort */ }
+    }
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
+    await runCleanup();
+  });
+
+  it("emailter LN (Cache-MISS → on-demand-Render) trägt die Kunden-Stammadresse, NICHT die Kasse", async () => {
+    // --- Signierten, gesetzlich gedeckten Entwurf erzeugen (ohne Bündel-/
+    //     Leistungsnachweis-Call → der PDF-Cache bleibt KALT).
+    const apptRes = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+      customerId,
+      date: `${YEAR}-0${SEND_MONTH}-08`,
+      scheduledStart: "10:00",
+      scheduledEnd: "11:00",
+      notes: `OndemandLN-${uniqueId()}`,
+      assignedEmployeeId: employeeId,
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+    });
+    expect(apptRes.status, `appt: ${JSON.stringify(apptRes.data)}`).toBe(201);
+    cleanupApptIds.push(apptRes.data.id);
+    const docRes = await apiPost(`/api/appointments/${apptRes.data.id}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Repro" }],
+    });
+    expect(docRes.status, `document: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const srRes = await apiPost<{ id: number }>("/api/service-records", {
+      customerId, employeeId, year: YEAR, month: SEND_MONTH,
+    });
+    expect(srRes.status, `SR create: ${JSON.stringify(srRes.data)}`).toBe(201);
+    cleanupSrIds.push(srRes.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost(`/api/service-records/${srRes.data.id}/sign`, {
+        signerType, signatureData: validSignatureDataUrl(),
+      });
+      expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const genRes = await apiPost<any>("/api/billing/generate", {
+      customerId, billingMonth: SEND_MONTH, billingYear: YEAR,
+    });
+    expect(genRes.status, `generate: ${JSON.stringify(genRes.data)}`).toBe(200);
+    const invData = Array.isArray(genRes.data) ? genRes.data[0]
+      : genRes.data?.invoices ? genRes.data.invoices[0]
+      : genRes.data;
+    const invoiceId: number = invData.id;
+    expect(invoiceId, "Rechnung muss eine id haben").toBeTruthy();
+    cleanupInvoiceIds.push(invoiceId);
+
+    const invoice = await storage.getInvoice(invoiceId);
+    expect(invoice, `getInvoice(${invoiceId})`).toBeTruthy();
+    expect(invoice!.billingType, "Rechnung bleibt pflegekasse_gesetzlich").toBe("pflegekasse_gesetzlich");
+    const invoiceNumber = invoice!.invoiceNumber;
+
+    const expectedMaster = formatCustomerMasterAddress({
+      strasse: MASTER_STRASSE, nr: MASTER_NR, plz: MASTER_PLZ, stadt: MASTER_STADT,
+    });
+    expect(expectedMaster, "Stammadresse darf nicht leer sein").toBeTruthy();
+    // Voraussetzung: recipientAddress = Kassen-Anschrift (≠ Stammadresse), sonst
+    // wäre der Negativ-Test wertlos.
+    expect(invoice!.recipientAddress ?? "", "recipientAddress = Kassen-Anschrift").toContain(KASSE_STADT);
+    expect(invoice!.recipientAddress ?? "").not.toContain(MASTER_STRASSE);
+
+    // --- Cache-MISS deterministisch erzwingen: generate persistiert das LN-PDF
+    //     NICHT; zusätzlich räumen wir hier explizit pdfPath/leistungsnachweisPath
+    //     ab, damit `/send` den LN garantiert on-demand rendert (nicht aus dem
+    //     Cache liest). Draft-Path-Updates sind GoBD-Trigger-erlaubt (persist
+    //     schreibt dieselben Spalten ohne Bypass).
+    await db.update(invoicesTable)
+      .set({ pdfPath: null, leistungsnachweisPath: null })
+      .where(eq(invoicesTable.id, invoiceId));
+    const cold = await storage.getInvoice(invoiceId);
+    expect(cold!.leistungsnachweisPath ?? null, "LN-Cache muss vor /send leer sein (Cache-MISS)").toBeNull();
+
+    // --- Versand → E-Mail an die Pflegekasse mit on-demand gerendertem LN.
+    await clearTestOutbox();
+    const sendRes = await apiPost<any>(`/api/billing/${invoiceId}/send`, {});
+    expect(sendRes.status, `send: ${JSON.stringify(sendRes.data)}`).toBe(200);
+
+    const outbox = await getTestOutbox();
+    const lnAttachmentName = `LN-${invoiceNumber}.pdf`;
+    const msg = outbox.find((m) => m.attachmentNames.includes(lnAttachmentName));
+    expect(msg, `Versand-Mail mit Anhang ${lnAttachmentName} muss im Postausgang liegen`).toBeTruthy();
+    expect(msg!.to, "Empfänger = Pflegekassen-E-Mail").toBe(kasseEmail);
+
+    // KERN: die TATSÄCHLICH versandten LN-Bytes aus dem Outbox-Stub extrahieren.
+    const lnAtt = msg!.attachments.find((a) => a.filename === lnAttachmentName);
+    expect(lnAtt, "LN-Anhang-Bytes müssen im Stub-Outbox vorliegen").toBeTruthy();
+    const lnBytes = Buffer.from(lnAtt!.contentBase64, "base64");
+    expect(lnBytes.length, "LN-Anhang darf nicht leer sein").toBeGreaterThan(0);
+    const lnText = await extractPdfText(lnBytes);
+
+    // Positiv: der on-demand gerenderte, versandte LN trägt die Stammadresse.
+    expect(lnText, "on-demand versandter LN enthält die Stamm-Straße").toContain(MASTER_STRASSE);
+    expect(lnText, "on-demand versandter LN enthält den Stamm-Ort").toContain(MASTER_STADT);
+    // Negativ: die Kassen-Anschrift darf im freistehenden LN nicht erscheinen.
+    expect(lnText, "on-demand versandter LN zeigt NICHT die Kassen-Straße").not.toContain(KASSE_STRASSE);
+    expect(lnText, "on-demand versandter LN zeigt NICHT den Kassen-Ort").not.toContain(KASSE_STADT);
+
+    const afterSend = await storage.getInvoice(invoiceId);
+    expect(afterSend!.status, "nach Versand: Status versendet").toBe("versendet");
+  }, 240_000);
+});

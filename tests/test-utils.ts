@@ -294,6 +294,8 @@ export interface TestOutboxMessage {
   from: string;
   attachmentCount: number;
   attachmentNames: string[];
+  // Task #1036 — Anhang-Bytes (base64), nur im Test-Stub-Transport befüllt.
+  attachments: Array<{ filename: string; contentBase64: string; contentType: string }>;
   messageId: string;
   sentAt: string;
 }

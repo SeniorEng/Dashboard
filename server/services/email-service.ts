@@ -19,6 +19,11 @@ export interface TestOutboxEntry {
   from: string;
   attachmentCount: number;
   attachmentNames: string[];
+  // Task #1036 — Anhang-Bytes (base64) werden NUR im Stub-Transport (Test)
+  // mitgeschrieben, damit Tests den tatsächlich versandten PDF-Inhalt prüfen
+  // können (z.B. dass der on-demand gerenderte Leistungsnachweis die richtige
+  // Patient-Stammadresse trägt). Im Produktiv-Transport wird nichts gespeichert.
+  attachments: Array<{ filename: string; contentBase64: string; contentType: string }>;
   messageId: string;
   sentAt: string;
 }
@@ -96,6 +101,11 @@ export async function sendEmail(settings: CompanySettings, options: EmailOptions
       from: fromHeader,
       attachmentCount: options.attachments?.length ?? 0,
       attachmentNames: options.attachments?.map((a) => a.filename) ?? [],
+      attachments: options.attachments?.map((a) => ({
+        filename: a.filename,
+        contentBase64: a.content.toString("base64"),
+        contentType: a.contentType || "application/pdf",
+      })) ?? [],
       messageId,
       sentAt: new Date().toISOString(),
     });
