@@ -353,6 +353,52 @@ Mustang/KoSIT (EN-16931-Schematron) und veraPDF (PDF/A-3b). Ohne Java
 überspringt sich das Skript sauber; der CI-Job `erechnung-validation` erzwingt
 die Prüfung. Runbook: [`docs/erechnung-validation.md`](../erechnung-validation.md).
 
+### Bestandsrechnungen-Backfill auf EN 16931 — Entscheidung (Task #1081)
+
+**Frage:** Müssen die VOR der Profil-Umstellung (Task #1073) versiegelten
+Bestandsrechnungen — eingebettete ZUGFeRD-XML im Profil `basic` — nachträglich
+auf das `en16931`-Profil gehoben („re-sealed") werden?
+
+**Entscheidung: NEIN. Kein erzwungener Backfill.** Bestandsrechnungen behalten
+ihre versiegelte BASIC-XML; ein In-Place-Re-Seal wird bewusst **nicht**
+implementiert.
+
+**Begründung:**
+
+1. **Keine Konformitätslücke.** Das ZUGFeRD/Factur-X-Profil **BASIC ist bereits
+   ein konformer Subset von EN 16931** (im Gegensatz zu `MINIMUM`/`BASIC WL`,
+   die reine Buchungshilfen und NICHT EN-16931-konform sind). Eine mit BASIC
+   versiegelte Bestandsrechnung ist also eine rechtlich gültige
+   EN-16931-Rechnung. `en16931` (COMFORT) erlaubt nur zusätzliche **optionale**
+   Felder — es ist nicht „konformer", sondern nur reichhaltiger. Es gibt damit
+   nichts zu „reparieren".
+2. **GoBD-Immutabilität.** `pdf_hash`, `zugferd_xml` und `render_snapshot` sind
+   versiegelt und per BEFORE-Trigger schreibgeschützt. Ein Re-Seal würde genau
+   diese unveränderlichen Felder mutieren (neue XML ⇒ neuer `pdf_hash`) — ein
+   GoBD-Verstoß. Zusätzlich reproduziert ein Re-Render der Pre-#1047-Bestände
+   ihren versiegelten Hash ohnehin **nie** byte-genau (verlorene
+   Wall-Clock-/XMP-Zeitstempel), weshalb die bestehenden Korrektur-Skripte
+   solche Objekte korrekt **flaggen** statt zu überschreiben.
+3. **Bewusste Bestands-Politik.** Die Render-Pipeline rendert versiegelte
+   Bestände ohne `profile` im Snapshot absichtlich weiter als `basic` (Byte-
+   Stabilität, siehe oben). Ein Backfill würde diese Garantie unterlaufen.
+
+**Falls ein Upgrade je DOCH zwingend würde** (nur denkbar, wenn eine künftige
+gesetzliche Pflicht ein EN-16931-Pflichtfeld verlangt, das BASIC strukturell
+nicht trägt): Der GoBD-konforme Weg ist dann **Storno + Neuausstellung** (alte
+Rechnung stornieren, neue Rechnung mit neuer Nummer und frisch versiegeltem
+`en16931`-Dokument), **nicht** ein stilles Re-Seal der versiegelten Felder.
+
+Ein erzwungenes In-Place-Re-Seal käme nur als allerletztes Mittel in Frage und
+müsste exakt das Muster der bestehenden Korrektur-Skripte
+(`regenerate-clobbered-invoice-pdfs.ts` /
+`restore-legacy-invoice-pdfs-from-backup.ts`) spiegeln: Trockenlauf als Default,
+`--apply` nur mit `--user=<superadmin>` + `--reason` (≥10 Zeichen), eine eigene
+Append-only-Audit-Action (z.B. `invoice_zugferd_profile_upgraded`), atomares
+Schreiben von PDF-Bytes + `zugferd_xml` + `pdf_hash` + `render_snapshot.profile`
+und ein GoBD-Trigger-Bypass (`SET LOCAL app.allow_gobd_mutation='on'`). Mangels
+Bedarf ist dieser Pfad **absichtlich nicht gebaut**.
+
 ## Re-Buchung netto-null-belegter Termine bei Re-Abrechnung (Task #1014)
 
 **Entscheidung: JA — bei der Rechnungs-ERSTELLUNG (niemals in der Preview)

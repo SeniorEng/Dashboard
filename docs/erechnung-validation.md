@@ -89,3 +89,12 @@ weiter als `basic` re-gerendert. Detektoren:
 Kann die XML nicht im Strict-Modus erzeugt werden, fällt der Renderer auf
 Non-Strict zurück und schreibt beim Versiegeln einen Audit-Log-Eintrag
 `invoice_zugferd_nonstrict_seal` (statt still zu degradieren).
+
+## Bestandsrechnungen-Backfill (kein erzwungenes Re-Seal)
+
+Vor Task #1073 versiegelte Rechnungen tragen ein BASIC-Profil. Sie werden
+**bewusst NICHT** nachträglich auf `en16931` gehoben — BASIC ist bereits ein
+konformer EN-16931-Subset, und ein In-Place-Re-Seal würde die versiegelten
+GoBD-Felder (`pdf_hash`/`zugferd_xml`) mutieren. Vollständige Entscheidung +
+Kontingenz-Pfad (Storno + Neuausstellung): [`docs/architecture/budget.md`](architecture/budget.md)
+→ „Bestandsrechnungen-Backfill auf EN 16931 — Entscheidung".
