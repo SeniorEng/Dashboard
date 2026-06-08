@@ -21,10 +21,22 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  *      eine Stornorechnung NICHT. Ein Storno-Dokument hat damit exakt EINE
  *      LN-Seite (kein Beihilfe-Duplikat).
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import express, { type Request, type Response, type NextFunction } from "express";
+import type { AddressInfo } from "net";
+import type { Server } from "http";
 import { db } from "../../server/lib/db";
-import { invoices as invoicesTable } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import {
+  invoices as invoicesTable,
+  customers as customersTable,
+  documentDeliveries,
+} from "@shared/schema";
+import type { UserWithRoles } from "@shared/schema";
+import { eq, and } from "drizzle-orm";
+import {
+  getTestOutbox as getLocalOutbox,
+  clearTestOutbox as clearLocalOutbox,
+} from "../../server/services/email-service";
 import { storage } from "../../server/storage";
 import {
   buildPdfData,
@@ -1882,5 +1894,596 @@ describe("Task #1040 — LN-Stammadresse auf dem Stapel-Versand-Render (send-bat
 
     const afterSend = await storage.getInvoice(invoiceId);
     expect(afterSend!.status, "nach Stapel-Versand: Status versendet").toBe("versendet");
+  }, 240_000);
+});
+
+// ---------------------------------------------------------------------------
+// Task #1046 — Postversand der Kunden-KOPIE (Brief) trägt die Patient-
+// Stammadresse, und die Zustell-Empfänger-Adresse ist der KUNDE (NICHT die
+// Pflegekasse).
+//
+// Für `receivesMonthlyInvoice=true` + `documentDeliveryMethod="post"` baut die
+// Versand-Route (`POST /api/billing/:id/send`) nach dem Kassen-Versand eine
+// Kunden-Kopie als BRIEF: `buildCustomerPostAddress(cust)` (= Kunden-Stamm-
+// adresse) plus `sendInvoiceCopyByPost` (Anschreiben + Rechnung + LN →
+// LetterXpress `/setJob`). Die Zustell-Adresse (`document_deliveries.
+// recipient_address`) wird NUR bei LetterXpress-Erfolg persistiert. Gegen den
+// laufenden Server lässt sich der echte LetterXpress-fetch NICHT abfangen —
+// deshalb wird hier die ECHTE Billing-Route IN-PROCESS gemountet und nur der
+// LetterXpress-Host über einen globalen fetch-Dispatcher gemockt (alles andere
+// läuft unverändert über den echten fetch gegen localhost).
+//
+// Eine Regression, die den Kunden-Brief versehentlich an die Pflegekassen-
+// Anschrift adressiert (oder den LN mit Kassen-Anschrift füllt), würde Kunden-
+// Post an die falsche Adresse schicken und trotzdem grün bleiben.
+//
+// HINWEIS zum Negativ-Test: der kombinierte Brief enthält die Rechnungsseite,
+// die LEGITIM die Kassen-Anschrift trägt. Der Negativ-Test ("keine Kasse")
+// wird daher auf dem ISOLIERTEN LN-Anhang (identischer Buffer wie in der
+// Kassen-Mail) UND auf der persistierten Zustell-Adresse geführt, nicht auf
+// dem gesamten Brief.
+// ---------------------------------------------------------------------------
+describe("Task #1046 — Post-Kopie an Kunde: LN trägt Stammadresse, Empfänger = Kunde", () => {
+  const YEAR = 2026;
+  const SEND_MONTH = 11;
+
+  // Unverwechselbare Stammadresse (kollidiert nicht mit Kasse oder anderen Suiten).
+  const MASTER_STRASSE = "Briefkopieweg";
+  const MASTER_NR = "33";
+  const MASTER_PLZ = "01069";
+  const MASTER_STADT = "Dresden-Briefkopieort";
+
+  // Unverwechselbare Kassen-Anschrift — diese DARF im isolierten LN / in der
+  // Zustell-Adresse NICHT auftauchen.
+  const KASSE_STRASSE = "Briefkopiekassenallee";
+  const KASSE_NR = "7";
+  const KASSE_PLZ = "99970";
+  const KASSE_STADT = "Briefkopiekassenstadt";
+
+  let customerId: number;
+  let employeeId: number;
+  let hwServiceId: number;
+  let insuranceProviderId: number;
+  let kasseEmail: string;
+  let adminUserId: number;
+  const cleanupApptIds: number[] = [];
+  const cleanupSrIds: number[] = [];
+  const cleanupInvoiceIds: number[] = [];
+
+  // --- In-Process-Mount der echten Billing-Route + LetterXpress-fetch-Mock ---
+  const LX_HOST = "api.letterxpress.de";
+  const LX_LETTER_ID = `lx-1046-${Date.now()}`;
+  let realFetch: typeof fetch;
+  const lxCalls: Array<{ url: string; body: string }> = [];
+  const dispatchFetch = ((input: unknown, init?: unknown) => {
+    const url =
+      typeof input === "string" ? input
+      : input instanceof URL ? input.toString()
+      : (input as { url?: string })?.url ?? String(input);
+    if (url.includes(LX_HOST)) {
+      const body = (init as { body?: unknown } | undefined)?.body;
+      lxCalls.push({ url, body: typeof body === "string" ? body : String(body ?? "") });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ status: 200, message: "OK", data: { letter_id: LX_LETTER_ID } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    return realFetch(input as RequestInfo, init as RequestInit);
+  }) as typeof fetch;
+
+  let server: Server | null = null;
+  let localBaseUrl = "";
+
+  async function startInProcessBilling(): Promise<void> {
+    const { default: billingRouter } = await import("../../server/routes/billing");
+    const app = express();
+    app.use(express.json({ limit: "50mb" }));
+    // Fake-Auth: echter Superadmin (gültige DB-id für Audit-FKs) VOR den
+    // router-internen requireAuth/requireAdmin.
+    app.use((req: Request, _res: Response, next: NextFunction) => {
+      (req as Request & { user: UserWithRoles }).user = {
+        id: adminUserId, isAdmin: true, isSuperAdmin: true, roles: [],
+      } as unknown as UserWithRoles;
+      next();
+    });
+    app.use("/api/billing", billingRouter);
+    // 4-arg Error-Handler: macht AppError-Status/JSON sichtbar.
+    app.use((err: { statusCode?: number; status?: number; code?: string; message?: string }, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err?.statusCode ?? err?.status ?? 500;
+      res.status(status).json({ code: err?.code ?? "SERVER_ERROR", message: err?.message ?? String(err) });
+    });
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, "127.0.0.1", () => resolve());
+    });
+    const addr = server!.address() as AddressInfo;
+    localBaseUrl = `http://127.0.0.1:${addr.port}`;
+  }
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    adminUserId = auth.user.id;
+
+    const services = await apiGet<Array<{ id: number; code: string | null }>>("/api/services/all");
+    hwServiceId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
+
+    kasseEmail = `kasse-briefkopie-${uniqueId()}@test.local`;
+    const ik = String(Math.floor(100000000 + Math.random() * 900000000));
+    const provRes = await apiPost<{ id: number }>("/api/admin/insurance-providers", {
+      name: `Briefkopie-Kasse ${uniqueId()}`,
+      isPrivate: false,
+      ikNummer: ik,
+      strasse: KASSE_STRASSE,
+      hausnummer: KASSE_NR,
+      plz: KASSE_PLZ,
+      stadt: KASSE_STADT,
+      email: kasseEmail,
+      emailInvoiceEnabled: true,
+    });
+    expect(provRes.status, `create provider: ${JSON.stringify(provRes.data)}`).toBe(201);
+    insuranceProviderId = provRes.data.id;
+
+    const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Briefkopie",
+      nachname: `LN-${uniqueId()}`,
+      geburtsdatum: "1937-04-04",
+      email: `briefkopie-ln-${uniqueId()}@test.local`,
+      strasse: MASTER_STRASSE,
+      nr: MASTER_NR,
+      plz: MASTER_PLZ,
+      stadt: MASTER_STADT,
+      telefon: "+4917600000007",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      rechnungAnKunde: false,
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "B" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+    customerId = custRes.data.id;
+
+    // Kunden-Kopie per BRIEF aktivieren (Felder nicht im Create-Payload → direkt
+    // setzen; Kunden sind nicht GoBD-Trigger-geschützt).
+    await db.update(customersTable)
+      .set({ receivesMonthlyInvoice: true, documentDeliveryMethod: "post" })
+      .where(eq(customersTable.id, customerId));
+
+    const emp = await createTestEmployee({ nachnamePrefix: "BriefkopieLN_Integ" });
+    employeeId = emp.id;
+    const assignRes = await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: employeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+
+    const init45b = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${YEAR}-${SEND_MONTH}-01`,
+    });
+    expect([200, 201]).toContain(init45b.status);
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13100, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    // SMTP-Dummy (Kassen-Mail-Stub-Weiche) + LetterXpress-Creds (Postversand).
+    // letterxpressTestMode=true → print:"test".
+    const settingsRes = await apiPatch(`/api/company-settings`, {
+      smtpHost: "smtp.test.local",
+      smtpPort: "587",
+      smtpUser: "outbox@test.local",
+      smtpPass: "stub-secret",
+      smtpFromEmail: "absender@test.local",
+      smtpFromName: "CareConnect Test",
+      letterxpressUsername: "lx-user",
+      letterxpressApiKey: "lx-key",
+      letterxpressTestMode: true,
+    });
+    expect(settingsRes.status, `settings: ${JSON.stringify(settingsRes.data)}`).toBe(200);
+
+    realFetch = globalThis.fetch.bind(globalThis);
+    await startInProcessBilling();
+    vi.stubGlobal("fetch", dispatchFetch);
+  });
+
+  afterAll(async () => {
+    vi.unstubAllGlobals();
+    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+    for (const id of cleanupInvoiceIds) {
+      try { await db.delete(invoicesTable).where(eq(invoicesTable.id, id)); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupSrIds) {
+      try { await apiDelete(`/api/service-records/${id}`); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch { /* best-effort */ }
+    }
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
+    await runCleanup();
+  });
+
+  it("Brief-Kopie: LN trägt Stammadresse, Brief wird abgesetzt, Zustell-Adresse = Kunde (nicht Kasse)", async () => {
+    // --- Signierten, gesetzlich gedeckten Entwurf erzeugen (ohne Bündel-Call
+    //     → PDF-Cache bleibt kalt).
+    const apptRes = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+      customerId,
+      date: `${YEAR}-${SEND_MONTH}-09`,
+      scheduledStart: "10:00",
+      scheduledEnd: "11:00",
+      notes: `BriefkopieLN-${uniqueId()}`,
+      assignedEmployeeId: employeeId,
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+    });
+    expect(apptRes.status, `appt(post): ${JSON.stringify(apptRes.data)}`).toBe(201);
+    cleanupApptIds.push(apptRes.data.id);
+    const docRes = await apiPost(`/api/appointments/${apptRes.data.id}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Repro" }],
+    });
+    expect(docRes.status, `document: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const srRes = await apiPost<{ id: number }>("/api/service-records", {
+      customerId, employeeId, year: YEAR, month: SEND_MONTH,
+    });
+    expect(srRes.status, `SR create: ${JSON.stringify(srRes.data)}`).toBe(201);
+    cleanupSrIds.push(srRes.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost(`/api/service-records/${srRes.data.id}/sign`, {
+        signerType, signatureData: validSignatureDataUrl(),
+      });
+      expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const genRes = await apiPost<any>("/api/billing/generate", {
+      customerId, billingMonth: SEND_MONTH, billingYear: YEAR,
+    });
+    expect(genRes.status, `generate: ${JSON.stringify(genRes.data)}`).toBe(200);
+    const invData = Array.isArray(genRes.data) ? genRes.data[0]
+      : genRes.data?.invoices ? genRes.data.invoices[0]
+      : genRes.data;
+    const invoiceId: number = invData.id;
+    expect(invoiceId, "Rechnung muss eine id haben").toBeTruthy();
+    cleanupInvoiceIds.push(invoiceId);
+
+    const invoice = await storage.getInvoice(invoiceId);
+    expect(invoice, `getInvoice(${invoiceId})`).toBeTruthy();
+    expect(invoice!.billingType, "Rechnung bleibt pflegekasse_gesetzlich").toBe("pflegekasse_gesetzlich");
+    const invoiceNumber = invoice!.invoiceNumber;
+
+    // Voraussetzung: Rechnungs-Empfänger = Kasse (≠ Stammadresse), sonst wäre
+    // der Negativ-Test wertlos.
+    expect(invoice!.recipientAddress ?? "", "recipientAddress = Kassen-Anschrift").toContain(KASSE_STADT);
+    expect(invoice!.recipientAddress ?? "").not.toContain(MASTER_STRASSE);
+
+    // --- Cache-MISS erzwingen → /send rendert Rechnung + LN on-demand.
+    await db.update(invoicesTable)
+      .set({ pdfPath: null, leistungsnachweisPath: null })
+      .where(eq(invoicesTable.id, invoiceId));
+    const cold = await storage.getInvoice(invoiceId);
+    expect(cold!.leistungsnachweisPath ?? null, "LN-Cache muss vor /send leer sein (Cache-MISS)").toBeNull();
+
+    // Test-Prozess-Caches/Outbox/LX-Aufrufe zurücksetzen, damit die in-process
+    // Route SMTP+LetterXpress frisch aus der DB lädt.
+    companySettingsCache.invalidate();
+    clearLocalOutbox();
+    lxCalls.length = 0;
+
+    // --- Versand über die IN-PROCESS gemountete echte Billing-Route ---
+    const sendResp = await realFetch(`${localBaseUrl}/api/billing/${invoiceId}/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const sendJson: any = await sendResp.json();
+    expect(sendResp.status, `send: ${JSON.stringify(sendJson)}`).toBe(200);
+
+    // (1) Post-Kopie-Ergebnis vorhanden + genau ein LetterXpress-/setJob-Aufruf.
+    const postResult = (sendJson.results ?? []).find((r: any) => r.customerCopy && r.status === "post_sent");
+    expect(postResult, `Post-Kopie-Ergebnis: ${JSON.stringify(sendJson.results)}`).toBeTruthy();
+    expect(postResult!.letterxpressLetterId, "Letter-ID vom LetterXpress-Stub").toBe(LX_LETTER_ID);
+    expect(lxCalls.length, "genau ein LetterXpress-/setJob-Aufruf").toBe(1);
+    expect(lxCalls[0].url, "LetterXpress-Pfad /setJob").toContain("/setJob");
+
+    // (2) Der kombinierte Brief (Anschreiben + Rechnung + LN) enthält die
+    //     Kunden-Stammadresse (Anschreiben-Adressfenster + LN-Leistungsempfänger).
+    const lxBody = JSON.parse(lxCalls[0].body);
+    const combinedBase64: string = lxBody?.letter?.base64_file ?? "";
+    expect(combinedBase64.length, "base64_file im LetterXpress-Payload").toBeGreaterThan(0);
+    const combinedBytes = Buffer.from(combinedBase64, "base64");
+    expect(await pageCount(combinedBytes), "Brief = Anschreiben + Rechnung + LN (≥3 Seiten)").toBeGreaterThanOrEqual(3);
+    const combinedText = await extractPdfText(combinedBytes);
+    expect(combinedText, "Brief enthält die Stamm-Straße").toContain(MASTER_STRASSE);
+    expect(combinedText, "Brief enthält den Stamm-Ort").toContain(MASTER_STADT);
+
+    // (3) Der LN selbst (identischer Buffer wie in der Kassen-Mail) trägt die
+    //     Stammadresse und NICHT die Kassen-Anschrift. Im kombinierten Brief
+    //     erscheint die Kasse legitim auf der Rechnungsseite — daher Negativ-Test
+    //     auf dem isolierten LN-Anhang.
+    const localOutbox = getLocalOutbox();
+    const lnAttachmentName = `LN-${invoiceNumber}.pdf`;
+    const kasseMsg = localOutbox.find((m) => m.to === kasseEmail && m.attachmentNames.includes(lnAttachmentName));
+    expect(
+      kasseMsg,
+      `Kassen-Mail mit ${lnAttachmentName}: ${JSON.stringify(localOutbox.map((m) => ({ to: m.to, names: m.attachmentNames })))}`,
+    ).toBeTruthy();
+    const lnAtt = kasseMsg!.attachments.find((a) => a.filename === lnAttachmentName);
+    expect(lnAtt, "LN-Anhang-Bytes im Stub-Outbox").toBeTruthy();
+    const lnBytes = Buffer.from(lnAtt!.contentBase64, "base64");
+    expect(lnBytes.length, "LN-Anhang darf nicht leer sein").toBeGreaterThan(0);
+    const lnText = await extractPdfText(lnBytes);
+    expect(lnText, "LN trägt die Stamm-Straße").toContain(MASTER_STRASSE);
+    expect(lnText, "LN trägt den Stamm-Ort").toContain(MASTER_STADT);
+    expect(lnText, "LN zeigt NICHT die Kassen-Straße").not.toContain(KASSE_STRASSE);
+    expect(lnText, "LN zeigt NICHT den Kassen-Ort").not.toContain(KASSE_STADT);
+
+    // (4) KERN — die persistierte Zustell-Adresse der Post-Kopie = KUNDE, nicht Kasse.
+    const postDeliveries = await db.select().from(documentDeliveries)
+      .where(and(eq(documentDeliveries.customerId, customerId), eq(documentDeliveries.deliveryMethod, "post")));
+    expect(postDeliveries.length, "Post-Zustell-Eintrag muss existieren").toBeGreaterThanOrEqual(1);
+    const postDelivery = postDeliveries.find((d) => d.letterxpressLetterId === LX_LETTER_ID) ?? postDeliveries[0];
+    expect(postDelivery.status, "Post-Zustellung erfolgreich").toBe("sent");
+    expect(postDelivery.recipientAddress ?? "", "Zustell-Adresse enthält Stamm-Straße").toContain(MASTER_STRASSE);
+    expect(postDelivery.recipientAddress ?? "", "Zustell-Adresse enthält Stamm-Ort").toContain(MASTER_STADT);
+    expect(postDelivery.recipientAddress ?? "", "Zustell-Adresse NICHT Kassen-Straße").not.toContain(KASSE_STRASSE);
+    expect(postDelivery.recipientAddress ?? "", "Zustell-Adresse NICHT Kassen-Ort").not.toContain(KASSE_STADT);
+
+    const afterSend = await storage.getInvoice(invoiceId);
+    expect(afterSend!.status, "nach Versand: Status versendet").toBe("versendet");
+  }, 240_000);
+});
+
+// ---------------------------------------------------------------------------
+// Task #1046 (Ergänzung) — EMAIL-Kopie an den Kunden trägt die Patient-
+// Stammadresse, und der Kopie-Empfänger ist der KUNDE (NICHT die Pflegekasse).
+//
+// Gegenstück zum Post-Pfad: für `receivesMonthlyInvoice=true` +
+// `documentDeliveryMethod="email"` mailt `/send` zusätzlich eine Rechnungs-Kopie
+// (Rechnung + LN) an die KUNDEN-E-Mail. Dieser Pfad braucht kein LetterXpress
+// und läuft daher vollständig gegen den laufenden Server. Geprüft wird, dass der
+// emailte LN die Stammadresse (nicht die Kasse) trägt und der Kopie-Empfänger
+// die Kunden-E-Mail ist.
+// ---------------------------------------------------------------------------
+describe("Task #1046 (Ergänzung) — Email-Kopie an Kunde: LN trägt Stammadresse, Empfänger = Kunde", () => {
+  const YEAR = 2026;
+  const SEND_MONTH = 12;
+
+  const MASTER_STRASSE = "Mailkopieweg";
+  const MASTER_NR = "44";
+  const MASTER_PLZ = "01099";
+  const MASTER_STADT = "Dresden-Mailkopieort";
+
+  const KASSE_STRASSE = "Mailkopiekassenallee";
+  const KASSE_NR = "3";
+  const KASSE_PLZ = "99960";
+  const KASSE_STADT = "Mailkopiekassenstadt";
+
+  let customerId: number;
+  let employeeId: number;
+  let hwServiceId: number;
+  let insuranceProviderId: number;
+  let kasseEmail: string;
+  let customerEmail: string;
+  const cleanupApptIds: number[] = [];
+  const cleanupSrIds: number[] = [];
+  const cleanupInvoiceIds: number[] = [];
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    const services = await apiGet<Array<{ id: number; code: string | null }>>("/api/services/all");
+    hwServiceId = services.data.find((s) => s.code === "hauswirtschaft")!.id;
+
+    kasseEmail = `kasse-mailkopie-${uniqueId()}@test.local`;
+    const ik = String(Math.floor(100000000 + Math.random() * 900000000));
+    const provRes = await apiPost<{ id: number }>("/api/admin/insurance-providers", {
+      name: `Mailkopie-Kasse ${uniqueId()}`,
+      isPrivate: false,
+      ikNummer: ik,
+      strasse: KASSE_STRASSE,
+      hausnummer: KASSE_NR,
+      plz: KASSE_PLZ,
+      stadt: KASSE_STADT,
+      email: kasseEmail,
+      emailInvoiceEnabled: true,
+    });
+    expect(provRes.status, `create provider: ${JSON.stringify(provRes.data)}`).toBe(201);
+    insuranceProviderId = provRes.data.id;
+
+    customerEmail = `mailkopie-ln-${uniqueId()}@test.local`;
+    const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Mailkopie",
+      nachname: `LN-${uniqueId()}`,
+      geburtsdatum: "1936-05-05",
+      email: customerEmail,
+      strasse: MASTER_STRASSE,
+      nr: MASTER_NR,
+      plz: MASTER_PLZ,
+      stadt: MASTER_STADT,
+      telefon: "+4917600000008",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      rechnungAnKunde: false,
+      insurance: {
+        providerId: insuranceProviderId,
+        versichertennummer: "M" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+    });
+    expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+    customerId = custRes.data.id;
+
+    // Kunden-Kopie per EMAIL aktivieren (documentDeliveryMethod bleibt Default
+    // "email"; nur receivesMonthlyInvoice muss true sein).
+    await db.update(customersTable)
+      .set({ receivesMonthlyInvoice: true, documentDeliveryMethod: "email" })
+      .where(eq(customersTable.id, customerId));
+
+    const emp = await createTestEmployee({ nachnamePrefix: "MailkopieLN_Integ" });
+    employeeId = emp.id;
+    const assignRes = await apiPatch(`/api/admin/customers/${customerId}/assign`, {
+      primaryEmployeeId: employeeId,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+    expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+
+    const init45b = await apiPost(`/api/budget/${customerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 13100,
+      carryoverAmountCents: 0,
+      budgetStartDate: `${YEAR}-${SEND_MONTH}-01`,
+    });
+    expect([200, 201]).toContain(init45b.status);
+    const typesRes = await apiPut(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: 13100, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+      ],
+    });
+    expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+    const smtpRes = await apiPatch(`/api/company-settings`, {
+      smtpHost: "smtp.test.local",
+      smtpPort: "587",
+      smtpUser: "outbox@test.local",
+      smtpPass: "stub-secret",
+      smtpFromEmail: "absender@test.local",
+      smtpFromName: "CareConnect Test",
+    });
+    expect(smtpRes.status, `smtp-config: ${JSON.stringify(smtpRes.data)}`).toBe(200);
+  });
+
+  afterAll(async () => {
+    for (const id of cleanupInvoiceIds) {
+      try { await db.delete(invoicesTable).where(eq(invoicesTable.id, id)); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupSrIds) {
+      try { await apiDelete(`/api/service-records/${id}`); } catch { /* best-effort */ }
+    }
+    for (const id of cleanupApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch { /* best-effort */ }
+    }
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
+    await runCleanup();
+  });
+
+  it("Email-Kopie: emailter LN an die Kunden-Adresse trägt die Stammadresse, NICHT die Kasse", async () => {
+    const apptRes = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+      customerId,
+      date: `${YEAR}-${SEND_MONTH}-08`,
+      scheduledStart: "10:00",
+      scheduledEnd: "11:00",
+      notes: `MailkopieLN-${uniqueId()}`,
+      assignedEmployeeId: employeeId,
+      services: [{ serviceId: hwServiceId, durationMinutes: 60 }],
+    });
+    expect(apptRes.status, `appt: ${JSON.stringify(apptRes.data)}`).toBe(201);
+    cleanupApptIds.push(apptRes.data.id);
+    const docRes = await apiPost(`/api/appointments/${apptRes.data.id}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 60, details: "Repro" }],
+    });
+    expect(docRes.status, `document: ${JSON.stringify(docRes.data)}`).toBe(200);
+
+    const srRes = await apiPost<{ id: number }>("/api/service-records", {
+      customerId, employeeId, year: YEAR, month: SEND_MONTH,
+    });
+    expect(srRes.status, `SR create: ${JSON.stringify(srRes.data)}`).toBe(201);
+    cleanupSrIds.push(srRes.data.id);
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost(`/api/service-records/${srRes.data.id}/sign`, {
+        signerType, signatureData: validSignatureDataUrl(),
+      });
+      expect(sig.status, `sign(${signerType}): ${JSON.stringify(sig.data)}`).toBe(200);
+    }
+
+    const genRes = await apiPost<any>("/api/billing/generate", {
+      customerId, billingMonth: SEND_MONTH, billingYear: YEAR,
+    });
+    expect(genRes.status, `generate: ${JSON.stringify(genRes.data)}`).toBe(200);
+    const invData = Array.isArray(genRes.data) ? genRes.data[0]
+      : genRes.data?.invoices ? genRes.data.invoices[0]
+      : genRes.data;
+    const invoiceId: number = invData.id;
+    expect(invoiceId, "Rechnung muss eine id haben").toBeTruthy();
+    cleanupInvoiceIds.push(invoiceId);
+
+    const invoice = await storage.getInvoice(invoiceId);
+    expect(invoice, `getInvoice(${invoiceId})`).toBeTruthy();
+    expect(invoice!.billingType, "Rechnung bleibt pflegekasse_gesetzlich").toBe("pflegekasse_gesetzlich");
+    const invoiceNumber = invoice!.invoiceNumber;
+
+    // Voraussetzung: Rechnungs-Empfänger = Kasse (≠ Stammadresse).
+    expect(invoice!.recipientAddress ?? "", "recipientAddress = Kassen-Anschrift").toContain(KASSE_STADT);
+    expect(invoice!.recipientAddress ?? "").not.toContain(MASTER_STRASSE);
+
+    // Cache-MISS erzwingen → on-demand-Render.
+    await db.update(invoicesTable)
+      .set({ pdfPath: null, leistungsnachweisPath: null })
+      .where(eq(invoicesTable.id, invoiceId));
+    const cold = await storage.getInvoice(invoiceId);
+    expect(cold!.leistungsnachweisPath ?? null, "LN-Cache muss vor /send leer sein (Cache-MISS)").toBeNull();
+
+    await clearTestOutbox();
+    const sendRes = await apiPost<any>(`/api/billing/${invoiceId}/send`, {});
+    expect(sendRes.status, `send: ${JSON.stringify(sendRes.data)}`).toBe(200);
+
+    // Kunden-Kopie-Ergebnis: Versand an die KUNDEN-E-Mail.
+    const copyResult = (sendRes.data?.results ?? []).find((r: any) => r.customerCopy && r.status === "sent");
+    expect(copyResult, `Kunden-Kopie-Ergebnis: ${JSON.stringify(sendRes.data?.results)}`).toBeTruthy();
+    expect(copyResult!.recipientEmail, "Kopie-Empfänger = Kunden-E-Mail").toBe(customerEmail);
+
+    const outbox = await getTestOutbox();
+    const lnAttachmentName = `LN-${invoiceNumber}.pdf`;
+    // Genau die KUNDEN-Kopie (nicht die Kassen-Mail) herausgreifen.
+    const copyMsg = outbox.find((m) => m.to === customerEmail && m.attachmentNames.includes(lnAttachmentName));
+    expect(
+      copyMsg,
+      `Kunden-Kopie-Mail mit ${lnAttachmentName}: ${JSON.stringify(outbox.map((m) => ({ to: m.to, names: m.attachmentNames })))}`,
+    ).toBeTruthy();
+    expect(copyMsg!.to, "Empfänger der Kopie = Kunde, nicht Kasse").not.toBe(kasseEmail);
+
+    const lnAtt = copyMsg!.attachments.find((a) => a.filename === lnAttachmentName);
+    expect(lnAtt, "LN-Anhang-Bytes der Kunden-Kopie").toBeTruthy();
+    const lnBytes = Buffer.from(lnAtt!.contentBase64, "base64");
+    expect(lnBytes.length, "LN-Anhang darf nicht leer sein").toBeGreaterThan(0);
+    const lnText = await extractPdfText(lnBytes);
+    expect(lnText, "LN der Kunden-Kopie trägt die Stamm-Straße").toContain(MASTER_STRASSE);
+    expect(lnText, "LN der Kunden-Kopie trägt den Stamm-Ort").toContain(MASTER_STADT);
+    expect(lnText, "LN der Kunden-Kopie zeigt NICHT die Kassen-Straße").not.toContain(KASSE_STRASSE);
+    expect(lnText, "LN der Kunden-Kopie zeigt NICHT den Kassen-Ort").not.toContain(KASSE_STADT);
+
+    // Zustell-Eintrag der Email-Kopie: Empfänger = Kunden-E-Mail.
+    const emailDeliveries = await db.select().from(documentDeliveries)
+      .where(and(eq(documentDeliveries.customerId, customerId), eq(documentDeliveries.deliveryMethod, "email")));
+    const copyDelivery = emailDeliveries.find((d) => d.recipientEmail === customerEmail);
+    expect(copyDelivery, `Email-Kopie-Zustell-Eintrag für ${customerEmail}`).toBeTruthy();
+    expect(copyDelivery!.status, "Email-Kopie erfolgreich").toBe("sent");
+
+    const afterSend = await storage.getInvoice(invoiceId);
+    expect(afterSend!.status, "nach Versand: Status versendet").toBe("versendet");
   }, 240_000);
 });
