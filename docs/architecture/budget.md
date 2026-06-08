@@ -319,6 +319,40 @@ Bestand wird nicht angetastet — alte Single-Pot-Rechnungen behalten
 idempotent in `server/startup/ensure-invoice-per-pot-columns.ts` (kein
 `drizzle-kit push`, siehe Gotcha in `replit.md`).
 
+## E-Rechnung (ZUGFeRD/Factur-X EN 16931) — Abgrenzung & Validierung (Task #1073)
+
+**Was die eingebettete ZUGFeRD/Factur-X-XML IST:** die maschinenlesbare
+Repräsentation der **umsatzsteuerlichen, menschenlesbaren Rechnung** nach
+EN 16931 (deutsches Profil; Standard-Profil seit Task #1073 = `en16931`,
+vorher `basic`). Sie ist Teil des hybriden PDF/A-3-Dokuments (sichtbares PDF
++ eingebettete `factur-x.xml`) und dient der **GoBD-konformen Rechnungs-
+stellung** an Pflegekasse, Beihilfe oder Selbstzahler. Empfänger, Beträge,
+Steuerkategorien und §-Hinweis (BT-22-Note) spiegeln exakt die Buchung.
+
+**Was sie ausdrücklich NICHT IST:** der **sozialrechtliche Leistungs-/
+Abrechnungs-Datenaustausch** mit den Kostenträgern nach **§ 105 SGB XI**
+(Pflege) bzw. **§ 302 SGB V** (häusliche Krankenpflege / Hilfsmittel). Jener
+Datenaustausch läuft über ein **separates, technisch unabhängiges Verfahren**
+(EDIFACT/PFLEGE bzw. die TA-/Datenträger-Spezifikationen der GKV, i.d.R. über
+ein Abrechnungszentrum). Die ZUGFeRD-Rechnung ersetzt diesen Kanal nicht und
+wird nicht aus seinen Datenstrukturen erzeugt. Wer „E-Rechnung" sagt, meint
+hier **immer** die EN-16931-USt-Rechnung, nie den §105/§302-Kanal.
+
+**Silent-Fallback ist jetzt protokolliert:** Kann node-zugferd die XML nicht
+im Strict-Modus (XSD-validiert) erzeugen, fällt der Renderer auf Non-Strict
+zurück, **bricht aber die GoBD-Byte-Determinismus-Garantie nicht** (gleiches
+Snapshot ⇒ gleiches XML ⇒ gleicher Integritätshash). Statt still zu degradieren
+wird beim Versiegeln ein Audit-Log-Eintrag `invoice_zugferd_nonstrict_seal`
+geschrieben. Bereits versiegelte Bestand-Rechnungen ohne `profile` im Snapshot
+werden bewusst weiter als `basic` re-gerendert, damit ihre versiegelte XML
+byte-identisch bleibt.
+
+**Validierungs-Gate:** `npm run validate:erechnung` erzeugt eine Beispiel-
+EN-16931-PDF/A-3 (ohne Chromium) und prüft sie mit den offiziellen Werkzeugen
+Mustang/KoSIT (EN-16931-Schematron) und veraPDF (PDF/A-3b). Ohne Java
+überspringt sich das Skript sauber; der CI-Job `erechnung-validation` erzwingt
+die Prüfung. Runbook: [`docs/erechnung-validation.md`](../erechnung-validation.md).
+
 ## Re-Buchung netto-null-belegter Termine bei Re-Abrechnung (Task #1014)
 
 **Entscheidung: JA — bei der Rechnungs-ERSTELLUNG (niemals in der Preview)

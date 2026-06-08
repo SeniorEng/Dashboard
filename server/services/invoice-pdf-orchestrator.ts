@@ -9,6 +9,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   } from "@shared/schema";
   import type { Invoice, InvoiceLineItem, CompanySettings, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
   import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
+  import { DEFAULT_ZUGFERD_PROFILE, type ZugferdProfileId } from "../lib/zugferd";
   import { computeDataHash } from "./signature-integrity";
   import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
   import { parseObjectPath, getPrivateDir, buildInvoicePdfObjectKey, assertInvoicePdfWriteKeyAllowed } from "../lib/object-storage-helpers";
@@ -438,8 +439,19 @@ export async function buildInvoicePdfBytes(
   invoice: Invoice,
   companySettings: CompanySettings,
   options?: { snapshot?: InvoiceRenderSnapshot | null },
-): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"]; invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]>; pdfCreationDate: string }> {
+): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"]; invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]>; pdfCreationDate: string; zugferdProfile: ZugferdProfileId; usedStrictMode: boolean; strictModeReason: string | null }> {
   const { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot, invoiceSnapshot } = await buildInvoicePdfData(invoice, companySettings, options);
+
+  // Task #1073 — ZUGFeRD-Profil pro Rechnung einfrieren (GoBD-Byte-Determinismus).
+  // Liegt ein Snapshot vor (Re-Render: Integritäts-Verifier / Self-Heal / Send-
+  // Cache-Miss einer bereits versiegelten Rechnung), wird das damals versiegelte
+  // Profil reproduziert: explizit gesetztes `snapshot.profile`, sonst `"basic"`
+  // für Bestände, die VOR der EN-16931-Umstellung versiegelt wurden. Ohne
+  // Snapshot (Erst-Persist / Draft-Vorschau) wird das aktuelle Default-Profil
+  // (EN 16931) verwendet und über `persistInvoicePdfInner` im Snapshot versiegelt.
+  const zugferdProfile: ZugferdProfileId = options?.snapshot
+    ? (options.snapshot.profile ?? "basic")
+    : DEFAULT_ZUGFERD_PROFILE;
 
   // Task #1047 — eingefrorener Erzeugungszeitpunkt. Liegt ein Snapshot mit
   // `pdfCreationDate` vor (Re-Render-Pfad: Integritäts-Verifier / Clobbered-PDF-
@@ -456,7 +468,7 @@ export async function buildInvoicePdfBytes(
 
   const html = generateInvoiceHtml(pdfData);
   const { buffer } = await generatePdf(html, { footerHtml: buildInvoiceFooterTemplate(pdfData), margin: INVOICE_PDF_MARGIN });
-  const { pdf: zugferdRaw, xml: zugferdXml } = await embedZugferdXml(buffer, pdfData, { creationDate: pdfCreationDate });
+  const { pdf: zugferdRaw, xml: zugferdXml, usedStrictMode, strictModeReason } = await embedZugferdXml(buffer, pdfData, { creationDate: pdfCreationDate, profile: zugferdProfile });
   // Task #1047 — finale Metadaten-Normalisierung (XMP-Zeitstempel + Datei-/ID).
   const zugferdBuffer = normalizePdfDeterminism(zugferdRaw, detOpts);
   // Task #522: Fingerprint VOR der LN-Signatur-Anreicherung erfassen — der
@@ -509,9 +521,9 @@ export async function buildInvoicePdfBytes(
     const frozenMergeDate = new Date(pdfCreationDate);
     merged.setCreationDate(frozenMergeDate);
     merged.setModificationDate(frozenMergeDate);
-    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate };
+    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate, zugferdProfile, usedStrictMode, strictModeReason };
   }
-  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate };
+  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate, zugferdProfile, usedStrictMode, strictModeReason };
 }
 
 // Task #521: LN-only Render — wird verwendet, wenn das Rechnungs-PDF bereits
@@ -669,7 +681,7 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
     // eingefrorene Render-Snapshot durchgereicht, damit das Re-Render die
     // versiegelten Bytes byte-genau reproduziert (Rechnungen ab #1047). Bei der
     // Erstanlage ist `renderSnapshot` null → Live-Render wie bisher.
-    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate } =
+    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate, zugferdProfile, usedStrictMode, strictModeReason } =
       await buildInvoicePdfBytes(invoice, companySettings, { snapshot: (invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null });
     const pdfHash = computeDataHash(pdfBytes as unknown as string);
     const fileName = buildInvoicePdfObjectKey(safeNumber);
@@ -698,7 +710,20 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
       updateData.pdfDataFingerprint = pdfDataFingerprint;
     }
     // Tier-A3: ZUGFeRD-XML nur beim ersten Schreiben (GoBD-Immutabilität).
-    if (zugferdXml && !invoice.zugferdXml) updateData.zugferdXml = zugferdXml;
+    if (zugferdXml && !invoice.zugferdXml) {
+      updateData.zugferdXml = zugferdXml;
+      // Task #1073 — Non-Strict-Versiegelung dokumentieren statt still
+      // schlucken. node-zugferd konnte die XSD-Strict-Validierung nicht
+      // ausführen (fehlende `xsd-schema-validator`/Java-Runtime) ODER das XML
+      // bestand sie nicht; in beiden Fällen wurde die XML im Non-Strict-Pfad
+      // versiegelt. Die rechtsverbindliche EN-16931-/PDF-A-3-Konformitätsprüfung
+      // übernimmt das externe Validierungs-Gate (`scripts/validate-erechnung.ts`
+      // / CI). Wir hard-rejecten hier bewusst NICHT, da das den gesamten
+      // Rechnungslauf in Umgebungen ohne Java-Runtime blockieren würde.
+      if (!usedStrictMode) {
+        await logZugferdNonStrictSeal(invoice, zugferdProfile, strictModeReason);
+      }
+    }
     // Task #593: Render-Snapshot zusammen mit der erstmaligen XML-/PDF-
     // Persistierung schreiben. Idempotent: nur setzen, wenn die Rechnung
     // noch keinen Snapshot hat — historische Bestände bleiben unangetastet.
@@ -715,6 +740,9 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         // Task #1047: eingefrorener PDF-Erzeugungszeitpunkt — ermöglicht das
         // byte-genaue Re-Render (Integritäts-Verifier / Clobbered-PDF-Restore).
         pdfCreationDate,
+        // Task #1073: eingefrorenes ZUGFeRD-Profil — das Re-Render reproduziert
+        // das eingebettete XML mit exakt diesem Profil (byte-genau).
+        profile: zugferdProfile,
       };
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {
@@ -860,7 +888,13 @@ export async function loadOrRenderSendablePdfs(
       const { embedZugferdXml } = await import("../lib/zugferd");
       const invoiceHtml = generateInvoiceHtml(pdfData);
       const { buffer: rendered } = await generatePdf(invoiceHtml, { footerHtml: buildInvoiceFooterTemplate(pdfData), margin: INVOICE_PDF_MARGIN });
-      const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData, { strict: opts.strictZugferd === true, testFaults: opts.testFaults });
+      // Task #1073 — den On-Demand-Send-Render mit dem versiegelten Profil
+      // erzeugen, damit das eingebettete XML dem in `zugferd_xml` versiegelten
+      // entspricht. Bestände ohne Snapshot-Profil = vor der EN-16931-Umstellung
+      // versiegeltes BASIC.
+      const sendSnapshot = (invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
+      const sendProfile: ZugferdProfileId = sendSnapshot ? (sendSnapshot.profile ?? "basic") : DEFAULT_ZUGFERD_PROFILE;
+      const { pdf: zugferdBuffer } = await embedZugferdXml(rendered, pdfData, { strict: opts.strictZugferd === true, testFaults: opts.testFaults, profile: sendProfile });
       invoicePdf = zugferdBuffer;
     }
     if (!lnPdf) {
@@ -954,6 +988,44 @@ async function logPdfReseal(
   } catch (auditErr) {
     console.error(
       `[invoice-pdf-orchestrator] Audit-Log für PDF-Reseal (Rechnung ${invoice.id}, ${artifact}) konnte nicht geschrieben werden:`,
+      auditErr,
+    );
+  }
+}
+
+/**
+ * Task #1073 — dokumentiert die erstmalige Versiegelung einer ZUGFeRD-XML, die
+ * NICHT durch die node-zugferd-XSD-Strict-Validierung lief. FRÜHER fiel der
+ * Code still vom Strict- auf den Non-Strict-Pfad zurück (z.B. weil
+ * `xsd-schema-validator`/Java in der Umgebung fehlt). Jetzt wird jede
+ * Non-Strict-Versiegelung mit Profil + Grund im Audit-Log festgehalten, damit
+ * im Nachhinein nachvollziehbar ist, welche Rechnung ohne library-seitige
+ * Schema-Validierung versiegelt wurde. Die verbindliche EN-16931-/PDF-A-3-
+ * Konformitätsprüfung läuft separat im externen Validierungs-Gate
+ * (`scripts/validate-erechnung.ts` / CI).
+ */
+async function logZugferdNonStrictSeal(
+  invoice: Invoice,
+  profile: ZugferdProfileId,
+  strictModeReason: string | null,
+): Promise<void> {
+  try {
+    await auditService.log(
+      invoice.createdByUserId ?? 0,
+      "invoice_zugferd_nonstrict_seal",
+      "invoice",
+      invoice.id,
+      {
+        invoiceNumber: invoice.invoiceNumber,
+        profile,
+        strictModeReason: strictModeReason ?? "unbekannt",
+        reason:
+          "ZUGFeRD-XML im Non-Strict-Modus versiegelt — node-zugferd-XSD-Strict-Validierung nicht ausgeführt bzw. nicht bestanden. Verbindliche EN-16931-/PDF-A-3-Konformität wird vom externen Validierungs-Gate (scripts/validate-erechnung.ts / CI) geprüft.",
+      },
+    );
+  } catch (auditErr) {
+    console.error(
+      `[invoice-pdf-orchestrator] Audit-Log für ZUGFeRD-Non-Strict-Versiegelung (Rechnung ${invoice.id}) konnte nicht geschrieben werden:`,
       auditErr,
     );
   }

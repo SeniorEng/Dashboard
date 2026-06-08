@@ -16,19 +16,46 @@ interface ZugferdFactory {
   (options: { profile: unknown; strict?: boolean }): ZugferdInstance;
 }
 
-let cachedZugferd: ZugferdFactory | null = null;
-let cachedBasic: unknown = null;
+/**
+ * Task #1073 — Wählbares ZUGFeRD-Profil. `basic` ist das historische
+ * Factur-X-BASIC-Profil, `en16931` das vollständige EN-16931-(COMFORT)-Profil.
+ *
+ * WICHTIG (GoBD-Byte-Determinismus): Das Profil MUSS pro Rechnung im
+ * `InvoiceRenderSnapshot` eingefroren werden. Bestände, die VOR der Umstellung
+ * auf EN 16931 mit dem BASIC-Profil versiegelt wurden, haben keinen
+ * `snapshot.profile` und MÜSSEN beim Re-Render wieder mit `basic` gerendert
+ * werden — sonst driftet das frisch erzeugte XML byte-weise gegen das in
+ * `invoices.zugferd_xml` versiegelte Original (falsch-positive Integritäts-
+ * Drift). Neue Rechnungen werden mit `DEFAULT_ZUGFERD_PROFILE` (= en16931)
+ * versiegelt und re-rendern aus dem dann gesetzten `snapshot.profile`.
+ */
+export type ZugferdProfileId = "basic" | "en16931";
 
-async function loadZugferd(): Promise<{ zugferd: ZugferdFactory; BASIC: unknown }> {
-  if (!cachedZugferd || !cachedBasic) {
-    const modPath = "node-zugferd";
-    const basicPath = "node-zugferd/profile/basic";
-    const mod: Record<string, unknown> = await import(modPath);
-    const basicMod: Record<string, unknown> = await import(basicPath);
+/** Profil für frisch versiegelte Rechnungen (Erst-Persist / Draft-Vorschau). */
+export const DEFAULT_ZUGFERD_PROFILE: ZugferdProfileId = "en16931";
+
+let cachedZugferd: ZugferdFactory | null = null;
+const cachedProfiles = new Map<ZugferdProfileId, unknown>();
+
+async function loadZugferd(
+  profileId: ZugferdProfileId,
+): Promise<{ zugferd: ZugferdFactory; profile: unknown }> {
+  if (!cachedZugferd) {
+    const mod: Record<string, unknown> = await import("node-zugferd");
     cachedZugferd = mod.zugferd as ZugferdFactory;
-    cachedBasic = basicMod.BASIC;
   }
-  return { zugferd: cachedZugferd, BASIC: cachedBasic };
+  let profile = cachedProfiles.get(profileId);
+  if (!profile) {
+    if (profileId === "en16931") {
+      const m: Record<string, unknown> = await import("node-zugferd/profile/en16931");
+      profile = m.EN16931;
+    } else {
+      const m: Record<string, unknown> = await import("node-zugferd/profile/basic");
+      profile = m.BASIC;
+    }
+    cachedProfiles.set(profileId, profile);
+  }
+  return { zugferd: cachedZugferd, profile };
 }
 
 function parseDateString(dateStr: string): Date {
@@ -419,33 +446,49 @@ function validateZugferdData(data: ZugferdInvoiceData, pdfData: InvoicePdfData):
   return errors;
 }
 
-async function buildZugferdInvoice(data: InvoicePdfData): Promise<
-  | { ok: true; xml: string; invoice: ZugferdInvoice; usedStrictMode: boolean }
+async function buildZugferdInvoice(
+  data: InvoicePdfData,
+  profileId: ZugferdProfileId,
+): Promise<
+  | { ok: true; xml: string; invoice: ZugferdInvoice; usedStrictMode: boolean; strictModeReason: string | null; profile: ZugferdProfileId }
   | { ok: false; errors: string[] }
 > {
-  const { zugferd, BASIC } = await loadZugferd();
+  const { zugferd, profile } = await loadZugferd(profileId);
   const zugferdData = buildZugferdData(data);
 
   const dataErrors = validateZugferdData(zugferdData, data);
   if (dataErrors.length > 0) return { ok: false, errors: dataErrors };
 
   let invoice: ZugferdInvoice;
+  let xml: string;
   let usedStrictMode = false;
+  // Task #1073 — Grund für die Nutzung des Non-Strict-Pfades. node-zugferd
+  // ruft im Strict-Modus `profile.validate()` auf, das `xsd-schema-validator`
+  // (+ Java-Runtime) voraussetzt. Fehlt diese Abhängigkeit, wirft der Aufruf
+  // und wir fallen auf den Non-Strict-Pfad zurück. FRÜHER passierte das
+  // STILL; jetzt wird der Grund nach oben gereicht, damit die Versiegelung am
+  // Seal-Punkt (`persistInvoicePdfInner`) per Audit-Log dokumentiert wird —
+  // welche Rechnung lief ohne XSD-Strict-Validierung und warum. Die echte
+  // Konformitätsprüfung (EN-16931-Schematron, PDF/A-3) übernimmt das externe
+  // Validierungs-Gate (`scripts/validate-erechnung.ts` / CI), unabhängig von
+  // dieser Beta-Library.
+  let strictModeReason: string | null = null;
   try {
-    const strictInvoicer = zugferd({ profile: BASIC, strict: true });
+    const strictInvoicer = zugferd({ profile, strict: true });
     invoice = strictInvoicer.create(zugferdData);
-    await invoice.toXML();
+    xml = await invoice.toXML();
     usedStrictMode = true;
-  } catch {
-    const invoicer = zugferd({ profile: BASIC, strict: false });
+  } catch (err) {
+    strictModeReason = err instanceof Error ? err.message : String(err);
+    const invoicer = zugferd({ profile, strict: false });
     invoice = invoicer.create(zugferdData);
+    xml = await invoice.toXML();
   }
 
-  const xml = await invoice.toXML();
   const result = validateZugferd(xml);
   if (!result.ok) return { ok: false, errors: result.errors };
 
-  return { ok: true, xml, invoice, usedStrictMode };
+  return { ok: true, xml, invoice, usedStrictMode, strictModeReason, profile: profileId };
 }
 
 export interface EmbedZugferdResult {
@@ -453,6 +496,15 @@ export interface EmbedZugferdResult {
   pdf: Buffer;
   /** Das tatsächlich eingebettete XML, oder null wenn nur das Standard-PDF zurückgegeben wurde. */
   xml: string | null;
+  /** Task #1073 — tatsächlich verwendetes Profil (für die Snapshot-Versiegelung). */
+  profile: ZugferdProfileId;
+  /**
+   * Task #1073 — true, wenn node-zugferd die XSD-Strict-Validierung tatsächlich
+   * ausgeführt hat. false = Non-Strict-Fallback (Grund in `strictModeReason`).
+   */
+  usedStrictMode: boolean;
+  /** Grund, warum der Non-Strict-Pfad genutzt wurde (null wenn strict lief). */
+  strictModeReason: string | null;
 }
 
 /**
@@ -474,9 +526,10 @@ export class ZugferdEmbedError extends Error {
 export async function embedZugferdXml(
   pdfBuffer: Buffer,
   data: InvoicePdfData,
-  options?: { strict?: boolean; testFaults?: Set<string>; creationDate?: string | Date }
+  options?: { strict?: boolean; testFaults?: Set<string>; creationDate?: string | Date; profile?: ZugferdProfileId }
 ): Promise<EmbedZugferdResult> {
   const strict = options?.strict === true;
+  const profileId = options?.profile ?? DEFAULT_ZUGFERD_PROFILE;
   // Task #559: Test-Fault-Injection — erlaubt es Integrationstests, einen
   // ZUGFeRD-Embedding-Fehler im Send-Pfad zu erzwingen, ohne echte Library-
   // Internals zu mocken. Nur in NODE_ENV=test aktiv (und nur wenn strict=true,
@@ -489,14 +542,14 @@ export async function embedZugferdXml(
     throw new ZugferdEmbedError("Test fault injected: zugferd_embed");
   }
   try {
-    const built = await buildZugferdInvoice(data);
+    const built = await buildZugferdInvoice(data, profileId);
     if (!built.ok) {
       const reason = `Validierungsfehler: ${built.errors.join("; ")}`;
       if (strict) {
         throw new ZugferdEmbedError(reason);
       }
       log(`${reason} — verwende Standard-PDF`, "ZUGFeRD");
-      return { pdf: pdfBuffer, xml: null };
+      return { pdf: pdfBuffer, xml: null, profile: profileId, usedStrictMode: false, strictModeReason: reason };
     }
 
     let resultPdf: Uint8Array;
@@ -544,10 +597,10 @@ export async function embedZugferdXml(
         throw new ZugferdEmbedError(reason);
       }
       log(`${reason}, verwende Standard-PDF`, "ZUGFeRD");
-      return { pdf: pdfBuffer, xml: null };
+      return { pdf: pdfBuffer, xml: null, profile: profileId, usedStrictMode: false, strictModeReason: reason };
     }
 
-    return { pdf: pdfResult, xml: built.xml };
+    return { pdf: pdfResult, xml: built.xml, profile: built.profile, usedStrictMode: built.usedStrictMode, strictModeReason: built.strictModeReason };
   } catch (err) {
     if (err instanceof ZugferdEmbedError) {
       throw err;
@@ -559,13 +612,16 @@ export async function embedZugferdXml(
       );
     }
     log(`Fehler beim Einbetten der XML-Daten, verwende Standard-PDF: ${err}`, "ZUGFeRD");
-    return { pdf: pdfBuffer, xml: null };
+    return { pdf: pdfBuffer, xml: null, profile: profileId, usedStrictMode: false, strictModeReason: err instanceof Error ? err.message : String(err) };
   }
 }
 
-export async function generateZugferdXml(data: InvoicePdfData): Promise<string | null> {
+export async function generateZugferdXml(
+  data: InvoicePdfData,
+  profile: ZugferdProfileId = DEFAULT_ZUGFERD_PROFILE,
+): Promise<string | null> {
   try {
-    const built = await buildZugferdInvoice(data);
+    const built = await buildZugferdInvoice(data, profile);
     if (!built.ok) {
       log(`Validierungsfehler: ${built.errors.join("; ")}`, "ZUGFeRD");
       return null;

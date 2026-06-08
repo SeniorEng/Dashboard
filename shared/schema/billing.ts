@@ -284,6 +284,15 @@ export interface InvoiceRenderSnapshot {
    * (diese re-rendern weiterhin nicht byte-genau → werden im Restore „flagged").
    */
   pdfCreationDate?: string;
+  /**
+   * Task #1073 — eingefrorenes ZUGFeRD-Profil. Bestimmt, mit welchem Profil das
+   * eingebettete Factur-X/ZUGFeRD-XML beim Re-Render reproduziert wird.
+   * `undefined` = Bestand, der VOR der EN-16931-Umstellung mit dem BASIC-Profil
+   * versiegelt wurde → MUSS als `"basic"` re-gerendert werden, sonst driftet das
+   * XML byte-weise gegen das in `invoices.zugferd_xml` versiegelte Original.
+   * Neue Rechnungen werden mit `"en16931"` (EN 16931 / COMFORT) versiegelt.
+   */
+  profile?: "basic" | "en16931";
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

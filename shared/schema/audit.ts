@@ -85,6 +85,7 @@ export const AUDIT_ACTIONS = [
   "invoice_marked_sent_manually",
   "invoice_pdf_persist_failed",
   "invoice_zugferd_embed_failed",
+  "invoice_zugferd_nonstrict_seal",
   "service_record_resurrected",
   "vacation_holiday_cleanup",
   "km_drift_reconciled",
