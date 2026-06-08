@@ -821,10 +821,12 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
     let invoicePdf = await loadInvoicePdfFromStorage(inv);
     let lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
     const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
+    let persistError: unknown = null;
     if (!invoicePdf || (!lnPdf && isPflegekasse)) {
       try {
         await persistInvoicePdf(inv.id);
       } catch (err) {
+        persistError = err;
         console.error(`[billing/bundle-by-payer] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
       }
       const refreshed = await storage.getInvoice(inv.id);
@@ -834,7 +836,9 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
       }
     }
     if (!invoicePdf) {
-      throw new Error(`Rechnungs-PDF für ${inv.invoiceNumber} konnte nicht geladen werden — Bündel abgebrochen.`);
+      // Task #1068 — konkrete Ursache (Chromium/Timeout/Object fehlt) melden,
+      // statt eines generischen „konnte nicht geladen werden".
+      throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${inv.invoiceNumber}`);
     }
     const appendLn = await shouldAppendStandaloneLeistungsnachweis(inv);
     if (!lnPdf && appendLn) {
@@ -842,7 +846,8 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
         lnPdf = await renderLeistungsnachweisOnTheFly(inv);
       } catch (err) {
         console.error(`[billing/bundle-by-payer] LN-On-the-fly für Rechnung ${inv.id} fehlgeschlagen:`, err);
-        throw new Error(`Leistungsnachweis für ${inv.invoiceNumber} konnte nicht erzeugt werden — Bündel abgebrochen.`);
+        // Task #1068 — konkrete Ursache statt generisch melden.
+        throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
       }
     }
     pairs.push({ invoiceNumber: inv.invoiceNumber, invoicePdf, lnPdf, appendLn });
@@ -1957,10 +1962,12 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
       let invoicePdf = await loadInvoicePdfFromStorage(inv);
       let lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
       const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
+      let persistError: unknown = null;
       if (!invoicePdf || (!lnPdf && isPflegekasse)) {
         try {
           await persistInvoicePdf(inv.id);
         } catch (err) {
+          persistError = err;
           console.error(`[billing/bulk-print] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
         }
         const refreshed = await storage.getInvoice(inv.id);
@@ -1970,11 +1977,19 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
         }
       }
       if (!invoicePdf) {
-        throw new Error("Rechnungs-PDF konnte nicht geladen werden.");
+        // Task #1068 — konkrete Ursache (Chromium/Timeout/Object fehlt) statt
+        // generisch melden, damit der gesammelte Fehler im
+        // x-bulk-print-summary-Header verwertbar ist.
+        throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${inv.invoiceNumber}`);
       }
       const appendLn = await shouldAppendStandaloneLeistungsnachweis(inv);
       if (!lnPdf && appendLn) {
-        lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+        try {
+          lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+        } catch (err) {
+          // Task #1068 — konkrete Ursache statt generisch melden.
+          throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
+        }
       }
       const payer = payerByCustomer.get(inv.customerId);
       rendered.push({
