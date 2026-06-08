@@ -1,10 +1,12 @@
 // Single source of truth for the PDF page geometry (margins) and the legal/
 // company footer line of generated invoices (Rechnungen) and Leistungsnachweise.
 //
-// The document HTML produced by `server/lib/pdf-generator.ts` intentionally sets
-// `@page { margin: 0 }` and `body { margin: 0; padding: 0 }` — the effective page
-// margins and the repeating footer are applied by Puppeteer via
-// `page.pdf({ margin, footerTemplate })` (see `invoice-pdf-orchestrator.ts`).
+// The document HTML produced by `server/lib/pdf-generator.ts` sets only
+// `@page { size: A4 }` (NO `@page { margin }`, since a CSS `@page` margin would
+// override the `page.pdf({ margin })` params in Chromium — Task #1066) and
+// `body { margin: 0; padding: 0 }` — the effective page margins and the repeating
+// footer are applied by Puppeteer via `page.pdf({ margin, footerTemplate })`
+// (see `invoice-pdf-orchestrator.ts`).
 //
 // Because of that, an on-screen HTML preview of these documents would otherwise
 // "lose" the margins and footer the real PDF has. Both the server (PDF) and the

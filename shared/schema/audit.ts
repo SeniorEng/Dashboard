@@ -81,6 +81,7 @@ export const AUDIT_ACTIONS = [
   "appointment_no_show_documented",
   "invoice_pdf_manually_regenerated",
   "invoice_pdf_restored_from_backup",
+  "invoice_pdf_reseal_on_recovery",
   "invoice_marked_sent_manually",
   "invoice_pdf_persist_failed",
   "invoice_zugferd_embed_failed",

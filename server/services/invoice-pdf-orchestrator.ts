@@ -616,9 +616,27 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
 
   const isPflegekasseInvoice = invoice.billingType === "pflegekasse_privat"
     || invoice.billingType === "pflegekasse_gesetzlich";
-  const needsInvoicePdf = !invoice.pdfPath;
-  const needsLeistungsnachweis = isPflegekasseInvoice && !invoice.leistungsnachweisPath;
+
+  // Task #1066 — Self-Heal: Ein bereits gesetzter Pfad, dessen Object-Storage-
+  // Objekt fehlt (z.B. nach der Legacy-Key-Space-Migration oder einem gelöschten
+  // Bucket-Objekt), wird wie ein fehlendes Artefakt behandelt und aus dem
+  // eingefrorenen Render-Snapshot neu gerendert. Für Rechnungen ab #1047 ist das
+  // byte-genau reproduzierbar; ältere Bestände bekommen einen frischen
+  // Erzeugungszeitpunkt — die geänderte Versiegelung wird dann per Audit-Log
+  // dokumentiert (NIEMALS still).
+  const invoicePdfObjectMissing = await storedObjectIsMissing(invoice.pdfPath);
+  const lnObjectMissing = isPflegekasseInvoice
+    && await storedObjectIsMissing(invoice.leistungsnachweisPath ?? null);
+
+  const needsInvoicePdf = !invoice.pdfPath || invoicePdfObjectMissing;
+  const needsLeistungsnachweis = isPflegekasseInvoice
+    && (!invoice.leistungsnachweisPath || lnObjectMissing);
   if (!needsInvoicePdf && !needsLeistungsnachweis) return;
+
+  // Recovery = ein bereits versiegelter Pfad zeigt ins Leere (Self-Heal), im
+  // Gegensatz zur Erstanlage (Pfad noch nie gesetzt).
+  const isInvoiceRecovery = !!invoice.pdfPath && invoicePdfObjectMissing;
+  const isLnRecovery = !!invoice.leistungsnachweisPath && lnObjectMissing;
 
   const safeNumber = invoice.invoiceNumber.replace(/[^a-z0-9_-]/gi, "_");
   const updateData: {
@@ -633,9 +651,12 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
   } = {};
 
   if (needsInvoicePdf) {
-    // Voll-Build (Erstanlage): Invoice + XML + optional LN.
+    // Voll-Build: Invoice + XML + optional LN. Bei Recovery (Self-Heal) wird der
+    // eingefrorene Render-Snapshot durchgereicht, damit das Re-Render die
+    // versiegelten Bytes byte-genau reproduziert (Rechnungen ab #1047). Bei der
+    // Erstanlage ist `renderSnapshot` null → Live-Render wie bisher.
     const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate } =
-      await buildInvoicePdfBytes(invoice, companySettings);
+      await buildInvoicePdfBytes(invoice, companySettings, { snapshot: (invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null });
     const pdfHash = computeDataHash(pdfBytes as unknown as string);
     const fileName = buildInvoicePdfObjectKey(safeNumber);
     assertInvoicePdfWriteKeyAllowed(fileName);
@@ -646,8 +667,22 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
       metadata: { invoiceNumber: invoice.invoiceNumber, pdfHash },
     });
     updateData.pdfPath = `/objects/${fileName}`;
-    updateData.pdfHash = pdfHash;
-    updateData.pdfDataFingerprint = pdfDataFingerprint;
+    if (isInvoiceRecovery) {
+      // Self-Heal eines bereits versiegelten PDFs: den `pdf_hash` nur dann
+      // ändern, wenn die neu gerenderten Bytes tatsächlich abweichen (Pre-#1047-
+      // Bestand ohne eingefrorenen Erzeugungszeitpunkt). Die geänderte
+      // Versiegelung wird per Audit-Log dokumentiert — niemals still. Der
+      // Inhalts-Fingerprint bleibt unangetastet (bereits versiegelt).
+      if (invoice.pdfHash && invoice.pdfHash !== pdfHash) {
+        updateData.pdfHash = pdfHash;
+        await logPdfReseal(invoice, "invoice", invoice.pdfHash, pdfHash);
+      } else if (!invoice.pdfHash) {
+        updateData.pdfHash = pdfHash;
+      }
+    } else {
+      updateData.pdfHash = pdfHash;
+      updateData.pdfDataFingerprint = pdfDataFingerprint;
+    }
     // Tier-A3: ZUGFeRD-XML nur beim ersten Schreiben (GoBD-Immutabilität).
     if (zugferdXml && !invoice.zugferdXml) updateData.zugferdXml = zugferdXml;
     // Task #593: Render-Snapshot zusammen mit der erstmaligen XML-/PDF-
@@ -679,9 +714,18 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
       });
       updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
-      updateData.leistungsnachweisHash = lnHash;
-      if (leistungsnachweisDataFingerprint) {
-        updateData.leistungsnachweisDataFingerprint = leistungsnachweisDataFingerprint;
+      if (isLnRecovery) {
+        if (invoice.leistungsnachweisHash && invoice.leistungsnachweisHash !== lnHash) {
+          updateData.leistungsnachweisHash = lnHash;
+          await logPdfReseal(invoice, "leistungsnachweis", invoice.leistungsnachweisHash, lnHash);
+        } else if (!invoice.leistungsnachweisHash) {
+          updateData.leistungsnachweisHash = lnHash;
+        }
+      } else {
+        updateData.leistungsnachweisHash = lnHash;
+        if (leistungsnachweisDataFingerprint) {
+          updateData.leistungsnachweisDataFingerprint = leistungsnachweisDataFingerprint;
+        }
       }
     }
   } else if (needsLeistungsnachweis) {
@@ -698,8 +742,17 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
       });
       updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
-      updateData.leistungsnachweisHash = lnHash;
-      updateData.leistungsnachweisDataFingerprint = ln.fingerprint;
+      if (isLnRecovery) {
+        if (invoice.leistungsnachweisHash && invoice.leistungsnachweisHash !== lnHash) {
+          updateData.leistungsnachweisHash = lnHash;
+          await logPdfReseal(invoice, "leistungsnachweis", invoice.leistungsnachweisHash, lnHash);
+        } else if (!invoice.leistungsnachweisHash) {
+          updateData.leistungsnachweisHash = lnHash;
+        }
+      } else {
+        updateData.leistungsnachweisHash = lnHash;
+        updateData.leistungsnachweisDataFingerprint = ln.fingerprint;
+      }
     }
   }
 
@@ -822,19 +875,73 @@ export async function loadOrRenderSendablePdfs(
   return { invoicePdf, lnPdf, cachedInvoice, cachedLn };
 }
 
-async function loadStoredPdfByPath(pdfPath: string | null): Promise<Buffer | null> {
-  if (!pdfPath) return null;
+function resolveStorageFileFromPath(pdfPath: string) {
   let entityId = pdfPath;
   if (entityId.startsWith("/objects/")) entityId = entityId.slice("/objects/".length);
   let entityDir = getPrivateDir();
   if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
   const fullPath = `${entityDir}${entityId}`;
   const { bucketName, objectName } = parseObjectPath(fullPath);
-  const file = objectStorageClient.bucket(bucketName).file(objectName);
+  return objectStorageClient.bucket(bucketName).file(objectName);
+}
+
+async function loadStoredPdfByPath(pdfPath: string | null): Promise<Buffer | null> {
+  if (!pdfPath) return null;
+  const file = resolveStorageFileFromPath(pdfPath);
   const [exists] = await file.exists();
   if (!exists) return null;
   const [contents] = await file.download();
   return Buffer.from(contents);
+}
+
+/**
+ * Task #1066 — True, wenn ein gesetzter `pdf_path` ins Leere zeigt (das
+ * Object-Storage-Objekt fehlt). Tritt nach einer Umgebungs-Key-Space-Migration
+ * (Legacy-Bare-Pfade → `_nonprod/…`) oder bei einem versehentlich gelöschten/
+ * überschriebenen Bucket-Objekt auf. Der Self-Heal-Pfad rendert das Artefakt
+ * dann aus dem eingefrorenen Render-Snapshot neu, statt einen 404 auszuliefern.
+ */
+async function storedObjectIsMissing(pdfPath: string | null): Promise<boolean> {
+  if (!pdfPath) return false;
+  const [exists] = await resolveStorageFileFromPath(pdfPath).exists();
+  return !exists;
+}
+
+/**
+ * Task #1066 — Dokumentiert eine geänderte PDF-Versiegelung im Audit-Log, wenn
+ * ein Self-Heal-Re-Render eines bereits versiegelten Artefakts (Rechnungs-PDF
+ * oder Leistungsnachweis) andere Bytes erzeugt als der gespeicherte Hash. Das
+ * passiert nur bei Pre-#1047-Bestand ohne eingefrorenen Erzeugungszeitpunkt —
+ * die Inhalts-Daten sind identisch, nur Metadaten (Erzeugungsdatum) driften.
+ * Audit-Fehler dürfen die Recovery NICHT abbrechen (best effort).
+ */
+async function logPdfReseal(
+  invoice: Invoice,
+  artifact: "invoice" | "leistungsnachweis",
+  oldHash: string,
+  newHash: string,
+): Promise<void> {
+  try {
+    await auditService.log(
+      invoice.createdByUserId ?? 0,
+      "invoice_pdf_reseal_on_recovery",
+      "invoice",
+      invoice.id,
+      {
+        invoiceNumber: invoice.invoiceNumber,
+        artifact,
+        oldHash,
+        newHash,
+        reason:
+          "Object-Storage-Objekt fehlte; PDF aus eingefrorenem Render-Snapshot neu gerendert. Pre-#1047-Bestand ohne versiegelten Erzeugungszeitpunkt — geänderte Versiegelung (nur Metadaten/Erzeugungsdatum, Inhalt unverändert).",
+      },
+    );
+  } catch (auditErr) {
+    console.error(
+      `[invoice-pdf-orchestrator] Audit-Log für PDF-Reseal (Rechnung ${invoice.id}, ${artifact}) konnte nicht geschrieben werden:`,
+      auditErr,
+    );
+  }
 }
 
 export async function renderLeistungsnachweisOnTheFly(invoice: Invoice): Promise<Buffer> {

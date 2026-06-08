@@ -333,11 +333,15 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
 <head>
   <meta charset="UTF-8">
   <style>
-    /* Task #995 — @page-Margins auf 0; die effektiven Seitenränder werden in
-       generatePdf via page.pdf({margin}) gesetzt, damit der Puppeteer-Footer
-       (displayHeaderFooter) im reservierten Bottom-Margin gezeichnet wird und
-       nicht mehr als Body-Element auf eine Leerseite verdrängt werden kann. */
-    @page { margin: 0; size: A4; }
+    /* Task #1066 — NUR size:A4, KEIN @page-Margin.
+       Chromiums Print-Engine lässt eine CSS-@page-Margin über die an
+       page.pdf({margin}) übergebenen Ränder GEWINNEN — margin:0 setzte die
+       effektiven Seitenränder also faktisch auf 0 (Inhalt randlos). Ohne die
+       @page-Margin greifen die in generatePdf via page.pdf({margin}) gesetzten
+       Ränder (SSoT INVOICE_PDF_MARGIN). Der Puppeteer-Footer
+       (displayHeaderFooter) wird weiterhin im reservierten Bottom-Margin
+       gezeichnet, nie als Body-Element auf eine Leerseite verdrängt. */
+    @page { size: A4; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; color: #1f2937; line-height: 1.5; margin: 0; padding: 0; }
     .header { display: flex; justify-content: space-between; margin-bottom: 30px; }
     .company-info { font-size: 9pt; color: #1f2937; }
@@ -889,9 +893,10 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
 <head>
   <meta charset="UTF-8">
   <style>
-    /* Task #995 — siehe Rechnungs-Template: @page-Margin 0, effektive Ränder +
+    /* Task #1066 — siehe Rechnungs-Template: KEIN @page-Margin
+       (würde die page.pdf({margin})-Ränder überstimmen). Effektive Ränder +
        wiederholter Footer kommen aus generatePdf (page.pdf margin + footerTemplate). */
-    @page { margin: 0; size: A4; }
+    @page { size: A4; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; color: #1f2937; line-height: 1.4; margin: 0; padding: 0; }
     .header { margin-bottom: 12px; }
     .title { font-size: 15pt; font-weight: bold; color: #0d9488; margin-bottom: 6px; }

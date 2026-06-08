@@ -419,6 +419,20 @@ async function runStartupTasks() {
       log(`Invoice-Render-Snapshot-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1066 — Bestands-PDF-Pfade aus dem nackten Produktions-Key-Space
+    // (`invoices/…`) in den umgebungs-isolierten Key-Space
+    // (`_nonprod/<NODE_ENV>/…`) umschreiben, damit Dev/Test nicht mehr auf
+    // dieselben Object-Keys wie die Produktion zeigen (RE-2026-0001/0002/0004/
+    // 0036-Kollisionen). Nur Nicht-Produktion; läuft NACH den LN-/Render-
+    // Snapshot-Spalten-Migrationen. Der Self-Heal-Pfad rendert das frische
+    // Objekt beim nächsten Abruf aus dem eingefrorenen Snapshot neu.
+    const { migrateLegacyInvoicePdfPaths } = await import("./startup/migrate-legacy-invoice-pdf-paths");
+    try {
+      await migrateLegacyInvoicePdfPaths();
+    } catch (err) {
+      log(`Legacy-Invoice-PDF-Pfad-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #759 — Variant C: invoices.budget_type / invoices.billing_run_id
     // + customer_budget_recipients sicherstellen (Rechnungs-Split pro Topf).
     const { ensureInvoicePerPotColumns } = await import("./startup/ensure-invoice-per-pot-columns");

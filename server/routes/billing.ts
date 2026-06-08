@@ -80,6 +80,7 @@ import {
     renderLeistungsnachweisOnTheFly,
     shouldAppendStandaloneLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
+import { ChromiumUnavailableError } from "../services/pdf-generator";
 import { getBlockingDraftInvoices } from "../services/invoice-data";
 import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
 import {
@@ -94,6 +95,32 @@ import {
 const router = Router();
 router.use(requireAuth);
 router.use(requireAdmin);
+
+// Task #1066 — Übersetzt einen PDF-Render-/Persist-Fehler in eine konkrete,
+// für den Admin verwertbare Fehlermeldung (statt eines generischen 500ers).
+// Drei Klassen: Chromium nicht verfügbar (503), Render-Timeout (504) und
+// fehlendes/nicht ladbares Object (404). `subject` benennt das betroffene
+// Artefakt (z.B. "Rechnungs-PDF RE-2026-0007").
+function classifyPdfRenderError(err: unknown, subject: string): AppError {
+  if (err instanceof ChromiumUnavailableError) {
+    return new AppError(
+      503,
+      "PDF_ENGINE_UNAVAILABLE",
+      `${subject} konnte nicht erzeugt werden: Die PDF-Engine (Chromium) ist auf diesem Server nicht verfügbar. Bitte den Support kontaktieren.`,
+    );
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  if (/Timeout|überschritt/i.test(message)) {
+    return new AppError(
+      504,
+      "PDF_RENDER_TIMEOUT",
+      `${subject} konnte nicht erzeugt werden: Die PDF-Erstellung hat das Zeitlimit überschritten. Bitte in wenigen Minuten erneut versuchen.`,
+    );
+  }
+  return notFound(
+    `${subject} konnte nicht geladen werden — die PDF-Datei fehlt und konnte nicht neu erzeugt werden. Bitte erneut versuchen oder den Support kontaktieren.`,
+  );
+}
 
 router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (req, res) => {
   const filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number } = {};
@@ -1600,10 +1627,12 @@ router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werde
   let lnPdf = await loadLeistungsnachweisPdfFromStorage(invoice);
   const isPflegekasse = invoice.billingType === "pflegekasse_gesetzlich" || invoice.billingType === "pflegekasse_privat";
 
+  let persistError: unknown = null;
   if (!invoicePdf || (!lnPdf && isPflegekasse)) {
     try {
       await persistInvoicePdf(id);
     } catch (err) {
+      persistError = err;
       console.error(`[billing/bundle] PDF-Persistierung für Rechnung ${id} fehlgeschlagen:`, err);
     }
     const refreshed = await storage.getInvoice(id);
@@ -1614,7 +1643,9 @@ router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werde
   }
 
   if (!invoicePdf) {
-    throw notFound("Rechnungs-PDF konnte nicht geladen werden.");
+    // Task #1066 — konkrete Ursache melden: Chromium fehlt (503), Render-Timeout
+    // (504) oder Object endgültig nicht ladbar (404).
+    throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${invoice.invoiceNumber}`);
   }
 
   // Task #1039 — Für kundenadressierte Rechnungen (pflegekasse_privat sowie
@@ -1636,7 +1667,8 @@ router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werde
       lnPdf = await renderLeistungsnachweisOnTheFly(invoice);
     } catch (err) {
       console.error(`[billing/bundle] LN-On-the-fly-Render für Rechnung ${id} fehlgeschlagen:`, err);
-      throw new Error("Leistungsnachweis konnte nicht erzeugt werden — Bündel-Druck nicht möglich. Bitte erneut versuchen oder einzeln drucken.");
+      // Task #1066 — konkrete Ursache (Chromium/Timeout) statt generisch melden.
+      throw classifyPdfRenderError(err, `Leistungsnachweis ${invoice.invoiceNumber}`);
     }
   }
 
