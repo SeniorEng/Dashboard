@@ -27,13 +27,13 @@ interface VerifyResult {
  * sichtbar machen, nicht den Bestand brechen.
  */
 export async function verifyInvoiceIntegrity(invoiceId: number): Promise<VerifyResult | null> {
-  // Task #593: MUSS `storage.getInvoice` benutzen (nicht direkt `invoicesTable`-Select),
-  // weil storage.getInvoice `invoice.customerName` mit `customers.name` überschreibt
-  // (JOIN-Alias). `persistInvoicePdfInner` rendert über genau denselben Pfad — würden
-  // wir hier roh aus `invoices.customer_name` lesen, käme ein anderer Name in
-  // `buildPdfData → ZUGFeRD-XML` und der byte-genaue Vergleich liefe in falsch-positive
-  // Drift. Snapshot-Lookup direkt aus der Tabelle, da getInvoice nicht alle Felder
-  // standardisiert exponiert.
+  // Task #1074: MUSS `storage.getInvoice` benutzen (nicht direkt `invoicesTable`-Select).
+  // getInvoice liefert seit #1074 den EINGEFRORENEN Snapshot-Kundennamen statt des
+  // per JOIN aktuellen `customers.name`. `persistInvoicePdfInner` rendert über genau
+  // denselben Pfad — beide bauen das ZUGFeRD-XML aus dem Snapshot. Eine spätere
+  // Namensänderung am Kunden kann den byte-genauen Vergleich daher nicht mehr in
+  // falsch-positive Drift treiben. Snapshot-Lookup zusätzlich direkt aus der Tabelle,
+  // da getInvoice nicht alle Snapshot-Felder (companySettings/invoice) exponiert.
   const invoice = await storage.getInvoice(invoiceId);
   if (!invoice) return null;
   if (!invoice.zugferdXml && !invoice.pdfHash) return null;

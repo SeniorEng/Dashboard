@@ -12,7 +12,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   import { computeDataHash } from "./signature-integrity";
   import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
   import { parseObjectPath, getPrivateDir, buildInvoicePdfObjectKey, assertInvoicePdfWriteKeyAllowed } from "../lib/object-storage-helpers";
-  import { eq, and, inArray } from "drizzle-orm";
+  import { eq, and, inArray, sql } from "drizzle-orm";
   import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
   import { storage } from "../storage";
   import { db } from "../lib/db";
@@ -370,6 +370,11 @@ export async function buildInvoicePdfData(
   let customerSnapshot: InvoiceRenderSnapshot["customer"];
   if (options?.snapshot) {
     customerSnapshot = options.snapshot.customer;
+    // Task #1074 — Re-Render baut den Kundennamen KONSEQUENT aus dem Snapshot
+    // (GoBD-eingefroren), unabhängig davon, wie `invoice` geladen wurde. Der
+    // Snapshot-Name == versiegelter Wert ⇒ byte-stabil; spätere Namens-
+    // änderungen am Kunden erzeugen keine falsch-positive Drift mehr.
+    if (customerSnapshot.name) pdfData.customerName = customerSnapshot.name;
   } else {
     const customerForInv = await db.select({
       geburtsdatum: customersTable.geburtsdatum,
@@ -609,6 +614,15 @@ export function persistInvoicePdf(invoiceId: number): Promise<void> {
 }
 
 async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
+  // Task #1074 — Mehr-Instanz-Rennschutz: Ein DB-seitiger Advisory-Lock auf die
+  // Rechnungs-ID serialisiert Lock + Re-Check + Render + Write über ALLE
+  // Server-Instanzen hinweg (der in-process-Mutex `persistInvoicePdfInFlight`
+  // schützt nur EINEN Prozess). Der xact-Lock wird bei Commit/Rollback
+  // automatisch freigegeben. Nach Lock-Erwerb wird die Rechnung FRISCH gelesen:
+  // Hat eine andere Instanz inzwischen persistiert (`pdfPath` gesetzt), ist der
+  // Re-Check ein No-op — kein Doppel-Render, kein Hash-/Blob-Auseinanderlaufen.
+  await db.transaction(async (tx) => {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`invoice_pdf_${invoiceId}`})::int8)`);
   const invoice = await storage.getInvoice(invoiceId);
   if (!invoice) return;
   const companySettings = await getCachedCompanySettings();
@@ -757,9 +771,10 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
   }
 
   if (Object.keys(updateData).length === 0) return;
-  await db.update(invoicesTable)
+  await tx.update(invoicesTable)
     .set(updateData)
     .where(eq(invoicesTable.id, invoiceId));
+  });
 }
 
 export async function loadInvoicePdfFromStorage(invoice: Invoice): Promise<Buffer | null> {

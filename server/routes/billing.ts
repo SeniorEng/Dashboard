@@ -2238,6 +2238,9 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
         // signierten LN als Fehler zählt.
         const isSkip = msg.includes("bereits abgerechnet")
             || msg.includes("noch nicht unterschrieben")
+            // Task #1074 — Pflegekasse-Kunde mit nur mitarbeiter-signiertem LN ist
+            // (noch) nicht abrechenbar → Skip, kein harter Fehler in der Massenerstellung.
+            || msg.includes("vom Kunden unterschrieben sein")
             || msg.includes("Kein Leistungsnachweis");
         if (isSkip) {
           results.push({ customerId, status: "skipped", message: msg });

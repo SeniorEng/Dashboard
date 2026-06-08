@@ -1,6 +1,7 @@
 import {
   type Invoice,
   type InvoiceLineItem,
+  type InvoiceRenderSnapshot,
 } from "@shared/schema";
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import type { InvoiceWithCustomer } from "../storage";
@@ -36,12 +37,21 @@ export async function getInvoices(filters: { year?: number; month?: number; cust
   .where(conditions.length > 0 ? and(...conditions) : undefined)
   .orderBy(desc(invoices.createdAt));
 
-  return results.map(r => ({
-    ...r.invoice,
-    customerName: r.customerName,
-    customerVorname: r.customerVorname,
-    customerNachname: r.customerNachname,
-  }));
+  return results.map(r => {
+    // Task #1074 (GoBD) — Geladene Rechnungen liefern den EINGEFRORENEN
+    // Kundennamen aus dem Render-Snapshot, nicht den per JOIN aktuellen
+    // Stammdaten-Namen. Der Snapshot-Name == `customers.name` zum
+    // Versiegelungszeitpunkt, daher byte-stabil für Re-Render/Verifier; eine
+    // spätere Namensänderung erzeugt keine falsch-positive Drift mehr. Nur
+    // Entwürfe (noch kein Snapshot) fallen auf den Live-Namen zurück.
+    const snapshot = (r.invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
+    return {
+      ...r.invoice,
+      customerName: snapshot?.customer?.name ?? r.customerName,
+      customerVorname: r.customerVorname,
+      customerNachname: r.customerNachname,
+    };
+  });
 }
 
 export async function getInvoice(id: number): Promise<InvoiceWithCustomer | undefined> {
@@ -57,9 +67,12 @@ export async function getInvoice(id: number): Promise<InvoiceWithCustomer | unde
   .innerJoin(customers, eq(invoices.customerId, customers.id))
   .where(eq(invoices.id, id));
   if (results.length === 0) return undefined;
+  // Task #1074 (GoBD) — siehe getInvoices: eingefrorener Snapshot-Kundenname
+  // statt JOIN-Live-Name (byte-stabil für Re-Render/Verifier).
+  const snapshot = (results[0].invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
   return {
     ...results[0].invoice,
-    customerName: results[0].customerName,
+    customerName: snapshot?.customer?.name ?? results[0].customerName,
     customerVorname: results[0].customerVorname,
     customerNachname: results[0].customerNachname,
   };

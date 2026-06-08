@@ -132,11 +132,26 @@ export async function buildInvoiceDraft(input: {
     throw badRequest("Kein Leistungsnachweis für diesen Zeitraum vorhanden. Bitte erstellen Sie zuerst einen Leistungsnachweis im Bereich 'Nachweise'.");
   }
 
+  // Task #1074 — Abrechnungs-Eligibilität nach billingType (GoBD/Kassen-Vorgabe):
+  //  • Pflegekasse (gesetzlich/privat): NUR mit Kundenunterschrift abrechenbar
+  //    (`status='completed'`). Ein nur mitarbeiter-signierter Leistungsnachweis
+  //    (`employee_signed`) genügt NICHT — die Kasse verlangt den vom Kunden
+  //    bestätigten Leistungsnachweis.
+  //  • Selbstzahler: `employee_signed` bleibt zulässig (keine Kassen-Vorgabe),
+  //    `completed` selbstverständlich ebenso.
+  const isPflegekasseBilling = customer.billingType === "pflegekasse_gesetzlich"
+    || customer.billingType === "pflegekasse_privat";
   const signedRecords = serviceRecords.filter(sr =>
-    sr.status === "completed" || sr.status === "employee_signed"
+    isPflegekasseBilling
+      ? sr.status === "completed"
+      : sr.status === "completed" || sr.status === "employee_signed"
   );
   if (signedRecords.length === 0) {
-    throw badRequest("Der Leistungsnachweis wurde noch nicht unterschrieben. Bitte lassen Sie den Leistungsnachweis zuerst vom Mitarbeiter unterschreiben.");
+    throw badRequest(
+      isPflegekasseBilling
+        ? "Bei Pflegekassen-Abrechnung muss der Leistungsnachweis vom Kunden unterschrieben sein — eine reine Mitarbeiter-Unterschrift genügt nicht."
+        : "Der Leistungsnachweis wurde noch nicht unterschrieben. Bitte lassen Sie den Leistungsnachweis zuerst vom Mitarbeiter unterschreiben.",
+    );
   }
 
   const serviceRecordIds = signedRecords.map(sr => sr.id);

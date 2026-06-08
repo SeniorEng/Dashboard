@@ -631,15 +631,17 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
         customerId: customer.id,
         appointmentId: appt.id,
       });
-      // Admin darf jeden Leistungsnachweis signieren — signerType "employee"
-      // setzt den Record auf "employee_signed", was generateInvoiceCore zulässt.
-      {
+      // Task #1074: §45b ist eine Pflegekassen-Abrechnung — die ist NUR mit
+      // Kundenunterschrift (status="completed") abrechenbar; eine reine
+      // Mitarbeiter-Unterschrift ("employee_signed") genügt nicht mehr.
+      // Daher beide Unterschriften setzen (employee → customer).
+      for (const signerType of ["employee", "customer"] as const) {
         const { status, data } = await apiPost(
           session,
           `/api/service-records/${sr.id}/sign`,
           {
             signatureData: validSignatureDataUrl(),
-            signerType: "employee",
+            signerType,
             signingLocation: "Test-Smoke",
           },
         );
@@ -890,13 +892,15 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
         customerId: customer.id,
         appointmentId: appt.id,
       });
-      {
+      // Task #1074: §45b = Pflegekassen-Abrechnung → Kundenunterschrift Pflicht
+      // (employee_signed allein genügt nicht). Beide Unterschriften setzen.
+      for (const signerType of ["employee", "customer"] as const) {
         const { status, data } = await apiPost(
           session,
           `/api/service-records/${sr.id}/sign`,
           {
             signatureData: validSignatureDataUrl(),
-            signerType: "employee",
+            signerType,
             signingLocation: "Test-Smoke",
           },
         );
