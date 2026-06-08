@@ -257,3 +257,139 @@ describe("Task #1066 — effektive Rechnungs-/LN-Seitenränder", () => {
     }
   });
 });
+
+/**
+ * Task #1072 — Mengen-robuste Seitenumbrüche für „große Monate".
+ *
+ * Früher hielten die Templates jeden LN-Abschnitt per `page-break-inside: avoid`
+ * zwangsweise auf einer Seite — bei sehr vielen Terminen lief der Inhalt am
+ * Footer-Rand über bzw. wurde abgeschnitten. Jetzt bricht die Positionstabelle
+ * geordnet über mehrere Seiten um, der Spaltenkopf wird auf jeder Folgeseite
+ * wiederholt (`thead { display: table-header-group }`), Zeilen werden nicht
+ * mittig geteilt, und der Summen-/Unterschriftsblock bleibt zusammen.
+ *
+ * Diese Suite rendert echte „große Monate" (60 Termine) und prüft:
+ *  - der Beleg bricht tatsächlich über mehrere Seiten um (kein Überlauf),
+ *  - der Tabellenkopf taucht auf mehreren Seiten auf (Spalten-Header wiederholt),
+ *  - die effektiven Ränder bleiben auch mehrseitig erhalten (kein Rand-/Footer-
+ *    Überlauf — Inhaltskasten exakt um das Margin-Verhältnis verkleinert),
+ *  - der Bestätigungs-/Unterschriftsblock wird unverändert gerendert.
+ */
+
+function buildBigMonthLineItems(count: number): InvoicePdfData["lineItems"] {
+  const items: InvoicePdfData["lineItems"] = [];
+  for (let i = 0; i < count; i++) {
+    const day = (i % 27) + 1;
+    const dd = day.toString().padStart(2, "0");
+    items.push({
+      appointmentId: i + 1,
+      serviceCode: "HW",
+      serviceDescription: "Hauswirtschaftliche Unterstützung im Haushalt der versicherten Person",
+      durationMinutes: 60,
+      unitPriceCents: 4200,
+      totalCents: 4200,
+      appointmentDate: `2026-01-${dd}`,
+      startTime: "09:00:00",
+      endTime: "10:00:00",
+      employeeName: "Anna Helfer",
+      appointmentNotes: null,
+      serviceDetails: null,
+    } as InvoicePdfData["lineItems"][number]);
+  }
+  return items;
+}
+
+// Extrahiert den Volltext eines PDFs (font-encoding-robust via pdf-parse/pdf.js,
+// das die ToUnicode-CMaps der Chromium-Subset-Fonts auflöst — eine reine
+// Content-Stream-Inspektion sieht nur Glyph-IDs, keine lesbaren Buchstaben).
+// Subpfad-Import vermeidet den Demo-Code in `pdf-parse/index.js`; pdf-lib
+// normalisiert vorab auf eine klassische Xref-Tabelle, ohne die Text-Streams
+// anzufassen.
+type PdfParseFn = (data: Buffer) => Promise<{ text: string }>;
+async function extractPdfText(buf: Buffer): Promise<string> {
+  const { PDFDocument } = await import("pdf-lib");
+  const doc = await PDFDocument.load(buf);
+  const normalized = Buffer.from(await doc.save({ useObjectStreams: false }));
+  const ns = (await import("pdf-parse/lib/pdf-parse.js")) as unknown as { default: PdfParseFn };
+  const parsed = await ns.default(normalized);
+  return parsed.text;
+}
+
+// Zählt, wie oft der Spaltenkopf-Begriff im Volltext vorkommt. Der Begriff steht
+// ausschließlich im thead — wiederholt sich der Kopf pro Seite, steigt der
+// Zähler mit der Seitenzahl.
+function countOccurrences(text: string, keyword: string): number {
+  return text.split(keyword).length - 1;
+}
+
+describe("Task #1072 — Rechnung/LN: mengen-robuste Seitenumbrüche (großer Monat)", () => {
+  it("Rechnung mit 60 Positionen bricht mehrseitig um und wiederholt den Tabellenkopf", async () => {
+    const data = buildPdfData({
+      lineItems: buildBigMonthLineItems(60),
+      netAmountCents: 60 * 4200,
+      grossAmountCents: 60 * 4200,
+    });
+    const html = generateInvoiceHtml(data);
+    const footer = buildInvoiceFooterTemplate(data);
+
+    const { buffer } = await generatePdf(html, { margin: INVOICE_PDF_MARGIN, footerHtml: footer });
+    expect(await pageCount(buffer)).toBeGreaterThan(1);
+    // Spaltenkopf „Uhrzeit" erscheint nur im thead — pro Folgeseite einmal.
+    expect(countOccurrences(await extractPdfText(buffer), "Uhrzeit")).toBeGreaterThanOrEqual(2);
+
+    // Auch mehrseitig: Ränder bleiben erhalten (kein Rand-/Footer-Überlauf).
+    const bg = injectFullBleedBackground(html);
+    const full = await measureContentBox(bg, ZERO_PAGE_MARGIN);
+    const inset = await measureContentBox(bg, INVOICE_PDF_MARGIN);
+    const expectedWidthRatio = (A4_WIDTH_MM - mm(INVOICE_PDF_MARGIN.left) - mm(INVOICE_PDF_MARGIN.right)) / A4_WIDTH_MM;
+    const expectedHeightRatio = (A4_HEIGHT_MM - mm(INVOICE_PDF_MARGIN.top) - mm(INVOICE_PDF_MARGIN.bottom)) / A4_HEIGHT_MM;
+    expect(inset.w / full.w).toBeCloseTo(expectedWidthRatio, 1);
+    expect(inset.h / full.h).toBeCloseTo(expectedHeightRatio, 1);
+  });
+
+  it("Leistungsnachweis mit 60 Terminen bricht mehrseitig um, wiederholt den Kopf und hält den Unterschriftsblock zusammen", async () => {
+    const data = buildPdfData({
+      billingType: "pflegekasse_privat",
+      lineItems: buildBigMonthLineItems(60),
+      netAmountCents: 60 * 4200,
+      grossAmountCents: 60 * 4200,
+    });
+    const html = generateLeistungsnachweisHtml(data);
+    const footer = buildLeistungsnachweisFooterTemplate(data);
+
+    const { buffer } = await generatePdf(html, { margin: LEISTUNGSNACHWEIS_PDF_MARGIN, footerHtml: footer });
+    expect(await pageCount(buffer)).toBeGreaterThan(1);
+    expect(countOccurrences(await extractPdfText(buffer), "Uhrzeit")).toBeGreaterThanOrEqual(2);
+
+    const bg = injectFullBleedBackground(html);
+    const full = await measureContentBox(bg, ZERO_PAGE_MARGIN);
+    const inset = await measureContentBox(bg, LEISTUNGSNACHWEIS_PDF_MARGIN);
+    const expectedWidthRatio = (A4_WIDTH_MM - mm(LEISTUNGSNACHWEIS_PDF_MARGIN.left) - mm(LEISTUNGSNACHWEIS_PDF_MARGIN.right)) / A4_WIDTH_MM;
+    const expectedHeightRatio = (A4_HEIGHT_MM - mm(LEISTUNGSNACHWEIS_PDF_MARGIN.top) - mm(LEISTUNGSNACHWEIS_PDF_MARGIN.bottom)) / A4_HEIGHT_MM;
+    expect(inset.w / full.w).toBeCloseTo(expectedWidthRatio, 1);
+    expect(inset.h / full.h).toBeCloseTo(expectedHeightRatio, 1);
+
+    // Bestätigungs-/Unterschriftsblock wird gerendert (intakt, als Einheit).
+    expect(html).toContain('class="confirm-signature-block"');
+    expect(html).toContain("Ich bestätige hiermit");
+    expect(html).toContain("(Leistungserbringer/in)");
+  });
+
+  it("statischer Wächter: Templates wiederholen den Tabellenkopf und teilen keine Zeilen, ohne den Abschnitt zwangsweise auf eine Seite zu zwingen", () => {
+    for (const html of [
+      generateInvoiceHtml(buildPdfData()),
+      generateLeistungsnachweisHtml(buildPdfData({ billingType: "pflegekasse_privat" })),
+    ]) {
+      // thead wird auf jeder Folgeseite wiederholt.
+      expect(html).toMatch(/table\.items\s+thead\s*\{[^}]*table-header-group/i);
+      // Positionszeilen werden nie mittig geteilt.
+      expect(html).toMatch(/table\.items\s+tr\s*\{[^}]*break-inside:\s*avoid/i);
+    }
+    // Der LN-Abschnitt selbst wird NICHT mehr zwangsweise auf eine Seite
+    // gehalten (sonst überläuft ein großer Monat wieder am Footer-Rand).
+    const lnHtml = generateLeistungsnachweisHtml(buildPdfData({ billingType: "pflegekasse_privat" }));
+    expect(lnHtml).not.toMatch(/\.ln-section\s*\{[^}]*break-inside:\s*avoid/i);
+    // Bestätigung + Unterschriften bleiben aber als Einheit zusammen.
+    expect(lnHtml).toMatch(/\.confirm-signature-block\s*\{[^}]*break-inside:\s*avoid/i);
+  });
+});

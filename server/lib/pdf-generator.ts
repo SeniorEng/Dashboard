@@ -356,7 +356,15 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
     table.items th { background: #f3f4f6; padding: 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
     table.items th:nth-child(4), table.items th:nth-child(5), table.items th:nth-child(6) { text-align: right; }
-    .totals { margin-left: auto; width: 300px; }
+    /* Task #1072 — Mengen-robuste Seitenumbrüche: Bei vielen Positionen bricht
+       die Tabelle geordnet über mehrere Seiten um. table-header-group wiederholt
+       den Spaltenkopf auf jeder Folgeseite, break-inside:avoid auf den Zeilen
+       verhindert mittig durchgeschnittene Zeilen, overflow-wrap lässt lange
+       Beschreibungen sauber umbrechen statt aus der Zelle zu laufen. */
+    table.items thead { display: table-header-group; }
+    table.items tr { page-break-inside: avoid; break-inside: avoid; }
+    table.items td { word-break: break-word; overflow-wrap: anywhere; }
+    .totals { margin-left: auto; width: 300px; page-break-inside: avoid; break-inside: avoid; }
     .totals td { padding: 4px 8px; white-space: nowrap; }
     .totals td:last-child { text-align: right; }
     .total-row { font-weight: bold; font-size: 12pt; border-top: 2px solid #0d9488; }
@@ -765,6 +773,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       ${sections.length > 0 ? '<div style="page-break-before: always;"></div>' : ''}
 
       <section class="ln-section">
+        <div class="ln-section-head">
         <div class="header">
           <div class="title">LEISTUNGSNACHWEIS</div>
           <div style="font-size: 9pt; color: #1f2937;">
@@ -806,6 +815,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
             <div class="info-label">Abrechnungsgrundlage</div>
             <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType, data.budgetType))}</div>
           </div>
+        </div>
         </div>
 
         <table class="${tableClass}">
@@ -866,7 +876,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       </tbody>
     </table>
 
-    <div style="margin-top: 8px;">
+    <div style="margin-top: 8px; page-break-inside: avoid; break-inside: avoid;">
       <table style="width: 300px; margin-left: auto;">
         <tr><td style="padding: 3px 8px;">Gesamtbetrag${isStandard ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(displayGrossCents)}</td></tr>
       </table>
@@ -908,8 +918,17 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
     table.items th { background: #f3f4f6; padding: 6px 8px; text-align: left; font-size: 9pt; font-weight: 600; border-bottom: 2px solid #d1d5db; }
     table.items th:nth-child(5), table.items th:nth-child(6), table.items th:nth-child(7) { text-align: right; }
+    /* Task #1072 — Mengen-robuste Seitenumbrüche (siehe Rechnungs-Template):
+       Spaltenkopf wird auf jeder Folgeseite wiederholt, Positionszeilen werden
+       nicht mittig geteilt, lange Beschreibungen brechen sauber innerhalb der
+       Zelle. So läuft ein Abschnitt mit sehr vielen Terminen geordnet über
+       mehrere Seiten statt am Footer-Rand überzulaufen. */
+    table.items thead { display: table-header-group; }
+    table.items tr { page-break-inside: avoid; break-inside: avoid; }
+    table.items td { word-break: break-word; overflow-wrap: anywhere; }
     /* Task #571: kompakte Tabellen-Variante für Abschnitte mit vielen Zeilen,
-       damit Kopf + Tabelle + Bestätigung + Unterschriften auf eine Seite passen. */
+       damit Kopf + Tabelle + Bestätigung + Unterschriften auf eine Seite passen.
+       Task #1072: bei noch mehr Zeilen ist der Mehrseiten-Umbruch der Fallback. */
     table.items.compact th { padding: 4px 6px; font-size: 8.5pt; }
     table.items.compact td { padding: 3px 6px !important; font-size: 8.5pt; }
     .total-row td { font-weight: bold; border-top: 2px solid #0d9488; padding: 6px 8px; }
@@ -925,15 +944,24 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     /* Task #571: Bestätigungstext + Unterschriften dürfen nicht über Seiten
        umbrechen — sie bleiben immer zusammen. */
     .confirm-signature-block { page-break-inside: avoid; break-inside: avoid; }
-    /* Task #571: Ein Leistungsnachweis-Abschnitt (Kopf, Tabelle, Bestätigung,
-       Unterschriften) bleibt auf einer A4-Seite zusammen. Bei Mehrfach-LN
-       erzeugt ein eigener page-break-before zwischen Abschnitten den Umbruch. */
-    .ln-section { page-break-inside: avoid; break-inside: avoid; }
+    /* Task #1072 — Mengen-robustes Umbruchverhalten: Ein Leistungsnachweis-
+       Abschnitt darf NICHT mehr zwangsweise auf einer Seite gehalten werden
+       (früher page-break-inside:avoid auf .ln-section). Bei sehr vielen Terminen
+       führte das zum Überlauf/Abschneiden am Footer-Rand. Stattdessen bricht die
+       Positionstabelle jetzt geordnet über mehrere Seiten um (wiederholter
+       thead, keine geteilten Zeilen), während Kopf/Info am Anfang stehen
+       bleiben und Bestätigung + Unterschriften (.confirm-signature-block)
+       als Einheit zusammengehalten werden. Bei Mehrfach-LN erzeugt weiterhin
+       ein page-break-before zwischen Abschnitten den Umbruch.
+       Der Kopfbereich (Header + Info-Grids) wird zusammengehalten, damit die
+       Stammdaten nicht von der ersten Positionszeile getrennt verwaisen. */
+    .ln-section-head { page-break-inside: avoid; break-inside: avoid; }
   </style>
 </head>
 <body>
   ${hasMultipleLNs ? sectionsHtml : `
   <section class="ln-section">
+  <div class="ln-section-head">
   <div class="header">
     <div class="title">LEISTUNGSNACHWEIS</div>
     <div style="font-size: 9pt; color: #1f2937;">
@@ -981,6 +1009,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       <div class="info-label">Abrechnungsgrundlage</div>
       <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType, data.budgetType))}</div>
     </div>
+  </div>
   </div>
 
   ${sectionsHtml}
