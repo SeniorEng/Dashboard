@@ -33,9 +33,17 @@ without ever mutating `pdf_hash`/`zugferd_xml`/`render_snapshot` content.
   node-zugferd's embed metadata to freeze them at the source.
 
 ## Key facts
-- pdf-lib merge (Beihilfe etc.) is ALREADY deterministic given deterministic
-  inputs — copyPages doesn't copy doc-level `/ID`, XMP, or Info dates. No
-  re-normalize needed after merge.
+- pdf-lib merge (customer/Beihilfe path) is NOT deterministic on its own: a FRESH
+  `PDFDocument.create()` + `save()` stamps Info `/CreationDate`+`/ModDate` with the
+  wall-clock (`new Date()`). With default `useObjectStreams:true` those dates land
+  COMPRESSED in an ObjStm → invisible to `normalizePdfDeterminism`'s plaintext
+  regex → the merge byte-drifts run-to-run (single-byte diff in a compressed
+  stream). Fix: call `merged.setCreationDate(frozen)` +
+  `merged.setModificationDate(frozen)` with the snapshot `pdfCreationDate` BEFORE
+  `save()`. copyPages does NOT copy doc-level `/ID`, XMP, or the source Info dates,
+  so the merged doc's OWN Info dates are the only drift source — freezing them is
+  sufficient (no post-merge re-normalize, which couldn't reach the compressed
+  tokens anyway).
 - node-zugferd uses an XRef STREAM (no `trailer` keyword); `/ID` is 64-hex inside
   it.
 - The send path (`loadOrRenderSendablePdfs`) is intentionally left unnormalized;

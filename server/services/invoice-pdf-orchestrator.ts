@@ -489,9 +489,19 @@ export async function buildInvoicePdfBytes(
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
       lp2.forEach((p) => merged.addPage(p));
     }
-    // Task #1047 — pdf-lib-Merge ist bei deterministischen Eingangs-PDFs selbst
-    // deterministisch (keine eigenen Wall-Clock-/Zufalls-Tokens), daher kein
-    // erneutes Normalisieren der zusammengeführten Bytes nötig.
+    // Task #1052 — pdf-lib stempelt beim `save()` einer FRISCH erzeugten
+    // PDFDocument die Info-`/CreationDate` und `/ModDate` mit der Wall-Clock
+    // (`new Date()`). Bei Default-`useObjectStreams` landen diese Tokens
+    // KOMPRIMIERT im Object-Stream und sind damit für `normalizePdfDeterminism`
+    // (reine Plaintext-Regex) unsichtbar — das Merge-PDF driftete daher byte-weise
+    // von Render zu Render und reproduzierte den versiegelten `pdf_hash` nicht.
+    // Fix: dieselbe eingefrorene `pdfCreationDate` wie alle übrigen Render-
+    // Artefakte in die Info-Daten schreiben, damit der Merge byte-genau
+    // reproduzierbar ist (die kopierten Seiten selbst tragen keine eigenen
+    // Zeitstempel, die Info-Daten sind die einzige Drift-Quelle).
+    const frozenMergeDate = new Date(pdfCreationDate);
+    merged.setCreationDate(frozenMergeDate);
+    merged.setModificationDate(frozenMergeDate);
     return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate };
   }
   return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate };
