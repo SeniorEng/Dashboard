@@ -748,6 +748,121 @@ router.get("/deliveries/:invoiceId", asyncHandler("Versandhistorie konnte nicht 
   res.json(invoiceDeliveries);
 }));
 
+// Task #1044 — MUSS vor `router.get("/:id")` stehen: sonst fängt die
+// param-Route den statischen Pfad `/bundle-by-payer` ab (id="bundle-by-payer"
+// → 400 "Ungültiger Parameter") und die Route ist tot.
+router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht erzeugt werden — bitte erneut versuchen.", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  const insuranceProviderId = Number(req.query.insuranceProviderId);
+  const format = String(req.query.format ?? "zip").toLowerCase();
+  if (!year || !month || month < 1 || month > 12) {
+    throw badRequest("Monat und Jahr sind erforderlich.");
+  }
+  if (!Number.isFinite(insuranceProviderId) || insuranceProviderId <= 0) {
+    throw badRequest("insuranceProviderId ist erforderlich.");
+  }
+  if (format !== "zip" && format !== "pdf") {
+    throw badRequest("format muss 'zip' oder 'pdf' sein.");
+  }
+
+  const provider = await db.select({ name: insuranceProviders.name })
+    .from(insuranceProviders)
+    .where(eq(insuranceProviders.id, insuranceProviderId));
+  if (provider.length === 0) throw notFound("Krankenkasse nicht gefunden");
+  const providerName = provider[0].name;
+
+  const allInvoices = await storage.getInvoices({ year, month, insuranceProviderId });
+  // Stornierte Rechnungen und reine Stornorechnungen fliegen aus dem
+  // Druck-Bündel raus — der Admin will den postalischen Stapel für die
+  // Kasse drucken, nicht Storno-Belege.
+  const printable = allInvoices
+    .filter(inv => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung")
+    .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+
+  if (printable.length === 0) {
+    throw notFound(`Keine druckbaren Rechnungen für ${providerName} in ${String(month).padStart(2, "0")}/${year} gefunden.`);
+  }
+
+  // Pro Rechnung: Rechnungs-PDF + LN-PDF beschaffen (gleiche Logik wie /:id/bundle).
+  // Task #1039 — `appendLn` steuert, ob der separat gecachte Standalone-LN
+  // zusätzlich angehängt wird. Bei kundenadressierten Rechnungen ist der LN
+  // bereits im Rechnungs-PDF einmontiert → nicht doppelt anhängen.
+  type Pair = { invoiceNumber: string; invoicePdf: Buffer; lnPdf: Buffer | null; appendLn: boolean };
+  const pairs: Pair[] = [];
+  for (const inv of printable) {
+    let invoicePdf = await loadInvoicePdfFromStorage(inv);
+    let lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
+    const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
+    if (!invoicePdf || (!lnPdf && isPflegekasse)) {
+      try {
+        await persistInvoicePdf(inv.id);
+      } catch (err) {
+        console.error(`[billing/bundle-by-payer] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
+      }
+      const refreshed = await storage.getInvoice(inv.id);
+      if (refreshed) {
+        invoicePdf = await loadInvoicePdfFromStorage(refreshed) ?? invoicePdf;
+        lnPdf = await loadLeistungsnachweisPdfFromStorage(refreshed) ?? lnPdf;
+      }
+    }
+    if (!invoicePdf) {
+      throw new Error(`Rechnungs-PDF für ${inv.invoiceNumber} konnte nicht geladen werden — Bündel abgebrochen.`);
+    }
+    const appendLn = await shouldAppendStandaloneLeistungsnachweis(inv);
+    if (!lnPdf && appendLn) {
+      try {
+        lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+      } catch (err) {
+        console.error(`[billing/bundle-by-payer] LN-On-the-fly für Rechnung ${inv.id} fehlgeschlagen:`, err);
+        throw new Error(`Leistungsnachweis für ${inv.invoiceNumber} konnte nicht erzeugt werden — Bündel abgebrochen.`);
+      }
+    }
+    pairs.push({ invoiceNumber: inv.invoiceNumber, invoicePdf, lnPdf, appendLn });
+  }
+
+  const safeProviderSlug = providerName.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Kasse";
+  const baseFileName = `Buendel-${safeProviderSlug}-${String(month).padStart(2, "0")}-${year}`;
+
+  if (format === "pdf") {
+    const { PDFDocument } = await import("pdf-lib");
+    const merged = await PDFDocument.create();
+    for (const p of pairs) {
+      const inv = await PDFDocument.load(p.invoicePdf);
+      const ip = await merged.copyPages(inv, inv.getPageIndices());
+      ip.forEach(pg => merged.addPage(pg));
+      if (p.lnPdf && p.appendLn) {
+        const ln = await PDFDocument.load(p.lnPdf);
+        const lp = await merged.copyPages(ln, ln.getPageIndices());
+        lp.forEach(pg => merged.addPage(pg));
+      }
+    }
+    const bytes = Buffer.from(await merged.save());
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${baseFileName}.pdf"`);
+    return res.send(bytes);
+  }
+
+  // format === "zip"
+  const archiver = (await import("archiver")).default;
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="${baseFileName}.zip"`);
+  const archive = archiver("zip", { zlib: { level: 6 } });
+  archive.on("error", (err: Error) => {
+    console.error("[billing/bundle-by-payer] archive error:", err);
+    if (!res.headersSent) res.status(500);
+    res.end();
+  });
+  archive.pipe(res);
+  for (const p of pairs) {
+    archive.append(p.invoicePdf, { name: `${p.invoiceNumber}-Rechnung.pdf` });
+    if (p.lnPdf && p.appendLn) {
+      archive.append(p.lnPdf, { name: `${p.invoiceNumber}-Leistungsnachweis.pdf` });
+    }
+  }
+  await archive.finalize();
+}));
+
 router.get("/:id", asyncHandler("Rechnung konnte nicht geladen werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
@@ -1547,118 +1662,6 @@ router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werde
 // PDF. Wie /:id/bundle berührt das den GoBD-Cache nicht zusätzlich:
 // fehlende PDFs werden über `persistInvoicePdf` einmalig nachgezogen, der
 // Leistungsnachweis wird sonst on-the-fly gerendert (kein Schreibe-Pfad).
-router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht erzeugt werden — bitte erneut versuchen.", async (req, res) => {
-  const year = Number(req.query.year);
-  const month = Number(req.query.month);
-  const insuranceProviderId = Number(req.query.insuranceProviderId);
-  const format = String(req.query.format ?? "zip").toLowerCase();
-  if (!year || !month || month < 1 || month > 12) {
-    throw badRequest("Monat und Jahr sind erforderlich.");
-  }
-  if (!Number.isFinite(insuranceProviderId) || insuranceProviderId <= 0) {
-    throw badRequest("insuranceProviderId ist erforderlich.");
-  }
-  if (format !== "zip" && format !== "pdf") {
-    throw badRequest("format muss 'zip' oder 'pdf' sein.");
-  }
-
-  const provider = await db.select({ name: insuranceProviders.name })
-    .from(insuranceProviders)
-    .where(eq(insuranceProviders.id, insuranceProviderId));
-  if (provider.length === 0) throw notFound("Krankenkasse nicht gefunden");
-  const providerName = provider[0].name;
-
-  const allInvoices = await storage.getInvoices({ year, month, insuranceProviderId });
-  // Stornierte Rechnungen und reine Stornorechnungen fliegen aus dem
-  // Druck-Bündel raus — der Admin will den postalischen Stapel für die
-  // Kasse drucken, nicht Storno-Belege.
-  const printable = allInvoices
-    .filter(inv => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung")
-    .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
-
-  if (printable.length === 0) {
-    throw notFound(`Keine druckbaren Rechnungen für ${providerName} in ${String(month).padStart(2, "0")}/${year} gefunden.`);
-  }
-
-  // Pro Rechnung: Rechnungs-PDF + LN-PDF beschaffen (gleiche Logik wie /:id/bundle).
-  // Task #1039 — `appendLn` steuert, ob der separat gecachte Standalone-LN
-  // zusätzlich angehängt wird. Bei kundenadressierten Rechnungen ist der LN
-  // bereits im Rechnungs-PDF einmontiert → nicht doppelt anhängen.
-  type Pair = { invoiceNumber: string; invoicePdf: Buffer; lnPdf: Buffer | null; appendLn: boolean };
-  const pairs: Pair[] = [];
-  for (const inv of printable) {
-    let invoicePdf = await loadInvoicePdfFromStorage(inv);
-    let lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
-    const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
-    if (!invoicePdf || (!lnPdf && isPflegekasse)) {
-      try {
-        await persistInvoicePdf(inv.id);
-      } catch (err) {
-        console.error(`[billing/bundle-by-payer] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
-      }
-      const refreshed = await storage.getInvoice(inv.id);
-      if (refreshed) {
-        invoicePdf = await loadInvoicePdfFromStorage(refreshed) ?? invoicePdf;
-        lnPdf = await loadLeistungsnachweisPdfFromStorage(refreshed) ?? lnPdf;
-      }
-    }
-    if (!invoicePdf) {
-      throw new Error(`Rechnungs-PDF für ${inv.invoiceNumber} konnte nicht geladen werden — Bündel abgebrochen.`);
-    }
-    const appendLn = await shouldAppendStandaloneLeistungsnachweis(inv);
-    if (!lnPdf && appendLn) {
-      try {
-        lnPdf = await renderLeistungsnachweisOnTheFly(inv);
-      } catch (err) {
-        console.error(`[billing/bundle-by-payer] LN-On-the-fly für Rechnung ${inv.id} fehlgeschlagen:`, err);
-        throw new Error(`Leistungsnachweis für ${inv.invoiceNumber} konnte nicht erzeugt werden — Bündel abgebrochen.`);
-      }
-    }
-    pairs.push({ invoiceNumber: inv.invoiceNumber, invoicePdf, lnPdf, appendLn });
-  }
-
-  const safeProviderSlug = providerName.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Kasse";
-  const baseFileName = `Buendel-${safeProviderSlug}-${String(month).padStart(2, "0")}-${year}`;
-
-  if (format === "pdf") {
-    const { PDFDocument } = await import("pdf-lib");
-    const merged = await PDFDocument.create();
-    for (const p of pairs) {
-      const inv = await PDFDocument.load(p.invoicePdf);
-      const ip = await merged.copyPages(inv, inv.getPageIndices());
-      ip.forEach(pg => merged.addPage(pg));
-      if (p.lnPdf && p.appendLn) {
-        const ln = await PDFDocument.load(p.lnPdf);
-        const lp = await merged.copyPages(ln, ln.getPageIndices());
-        lp.forEach(pg => merged.addPage(pg));
-      }
-    }
-    const bytes = Buffer.from(await merged.save());
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${baseFileName}.pdf"`);
-    return res.send(bytes);
-  }
-
-  // format === "zip"
-  const archiver = (await import("archiver")).default;
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename="${baseFileName}.zip"`);
-  const archive = archiver("zip", { zlib: { level: 6 } });
-  archive.on("error", (err: Error) => {
-    console.error("[billing/bundle-by-payer] archive error:", err);
-    if (!res.headersSent) res.status(500);
-    res.end();
-  });
-  archive.pipe(res);
-  for (const p of pairs) {
-    archive.append(p.invoicePdf, { name: `${p.invoiceNumber}-Rechnung.pdf` });
-    if (p.lnPdf && p.appendLn) {
-      archive.append(p.lnPdf, { name: `${p.invoiceNumber}-Leistungsnachweis.pdf` });
-    }
-  }
-  await archive.finalize();
-}));
-
 // Task #533: Manuelles Markieren als „versendet" für Pflegekassen-Rechnungen,
 // solange der TI-Versand fehlt. Audit-Log mit Hinweis auf den manuellen Pfad.
 router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {

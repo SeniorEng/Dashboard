@@ -215,6 +215,25 @@ async function countLeistungsnachweise(buf: Buffer): Promise<number> {
   return (text.match(/LEISTUNGSNACHWEIS/g) ?? []).length;
 }
 
+// Summiert die LN-Seiten über ALLE PDF-Einträge eines ZIP-Archivs. Greift für
+// beide ZIP-Layouts:
+//   - /bundle-by-payer ZIP: pro Rechnung zwei Dateien (Rechnung + ggf. LN).
+//   - /bulk-print ZIP (groupByPayer=true): pro Payer-Gruppe EIN gemergtes PDF.
+// In beiden Fällen ist die Σ der `LEISTUNGSNACHWEIS`-Titel über alle PDFs die
+// effektive LN-Anzahl, die der Admin gedruckt bekommt.
+async function countLeistungsnachweiseInZip(buf: Buffer): Promise<number> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(buf);
+  const entries = Object.values(zip.files).filter((f) => !f.dir);
+  let total = 0;
+  for (const entry of entries) {
+    const content = await entry.async("nodebuffer");
+    if (content.subarray(0, 5).toString("latin1") !== "%PDF-") continue;
+    total += await countLeistungsnachweise(content);
+  }
+  return total;
+}
+
 // ============================================================
 
 beforeAll(async () => {
@@ -374,4 +393,234 @@ describe("LN-Dup: Bündel-Druck enthält den Leistungsnachweis genau einmal (Tas
     const bundle = await fetchBundlePdf(ids[0]);
     expect(await countLeistungsnachweise(bundle), "selbstzahler-Bündel = genau 1 LN").toBe(1);
   }, 240_000);
+});
+
+// ============================================================
+// Task #1044 — Dieselbe LN-Dup-Regression auch für die beiden Mehr-Rechnungs-
+// Druckwege fixieren:
+//   - GET  /api/billing/bundle-by-payer  (Kassen-Bündel, PDF + ZIP)
+//   - POST /api/billing/bulk-print       (Monats-Sammeldruck, groupByPayer
+//                                          false = gemergtes PDF, true = ZIP)
+//
+// Beide nutzen — wie /:id/bundle — `shouldAppendStandaloneLeistungsnachweis`,
+// um den bereits ins Rechnungs-PDF einmontierten LN nicht ein zweites Mal
+// anzuhängen. Eine Regression (doppelter LN) muss hier ebenso auffliegen.
+//
+// Isolation: Jeder Kunde bekommt eine EIGENE dedizierte Krankenkasse und wird
+// per `insuranceProviderId` gefiltert abgefragt. Das gilt auch für den
+// Selbstzahler — er darf laut Customer-Schema einen Insurance-Block tragen
+// (billingType bleibt `selbstzahler`, LN-Logik unverändert), wodurch er über
+// denselben Kassen-Filter exakt isolierbar wird. So liefert jeder Aufruf genau
+// EINE Rechnung zurück — robust gegen Fremd-Drafts aus anderen Tests/der Dev-DB.
+// ============================================================
+
+type BillingTypeKey = "privat" | "gesetzlich" | "selbstzahler" | "beihilfe";
+
+function rand9(): string {
+  return String(Math.floor(100000000 + Math.random() * 900000000));
+}
+
+async function createIsolatedProvider(tag: string): Promise<{ id: number; name: string }> {
+  const res = await apiPost<{ id: number; name: string }>("/api/admin/insurance-providers", {
+    name: `LNDup1044-${tag}-${uniqueId()}`,
+    ikNummer: rand9(),
+    isPrivate: false,
+  });
+  if (res.status !== 201) {
+    throw new Error(`createIsolatedProvider failed: ${res.status} ${JSON.stringify(res.data)}`);
+  }
+  return { id: res.data.id, name: res.data.name };
+}
+
+function typedCustomerPayload(key: BillingTypeKey, providerId: number): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    nachname: `K-${uniqueId()}`,
+    strasse: "Sammeldruckweg",
+    nr: "3",
+    plz: "10117",
+    stadt: "Berlin",
+    pflegegradSeit: "2024-01-01",
+  };
+  const insurance = (prefix: string) => ({
+    providerId,
+    versichertennummer: prefix + rand9(),
+    validFrom: "2024-01-01",
+  });
+  const budgets = {
+    entlastungsbetrag45b: 13100,
+    verhinderungspflege39: 0,
+    pflegesachleistungen36: 0,
+    validFrom: "2024-01-01",
+  };
+  switch (key) {
+    case "privat":
+      return {
+        ...base,
+        vorname: "BP-Privat",
+        geburtsdatum: "1938-05-12",
+        pflegegrad: 3,
+        billingType: "pflegekasse_privat",
+        acceptsPrivatePayment: true,
+        insurance: insurance("A"),
+        budgets,
+      };
+    case "beihilfe":
+      return {
+        ...base,
+        vorname: "BP-Beihilfe",
+        geburtsdatum: "1936-02-02",
+        pflegegrad: 3,
+        billingType: "pflegekasse_privat",
+        acceptsPrivatePayment: true,
+        beihilfeBerechtigt: true,
+        insurance: insurance("B"),
+        budgets,
+      };
+    case "gesetzlich":
+      return {
+        ...base,
+        vorname: "BP-Gesetzlich",
+        geburtsdatum: "1940-03-03",
+        pflegegrad: 3,
+        billingType: "pflegekasse_gesetzlich",
+        acceptsPrivatePayment: false,
+        rechnungAnKunde: false,
+        insurance: insurance("G"),
+        budgets,
+      };
+    case "selbstzahler":
+      return {
+        ...base,
+        vorname: "BP-Selbstzahler",
+        geburtsdatum: "1942-03-10",
+        email: `bp-sz-${uniqueId()}@test.local`,
+        pflegegrad: 2,
+        billingType: "selbstzahler",
+        acceptsPrivatePayment: true,
+        insurance: insurance("S"),
+      };
+  }
+}
+
+interface TypedInvoice {
+  customerId: number;
+  invoiceId: number;
+  provider: { id: number; name: string };
+}
+
+async function createTypedInvoice(
+  key: BillingTypeKey,
+  year: number,
+  month: number,
+  tag: string,
+): Promise<TypedInvoice> {
+  const provider = await createIsolatedProvider(tag);
+  const customerId = await createCustomer(typedCustomerPayload(key, provider.id));
+  const appt = await createAppointmentInMonth(customerId, hwServiceId, 30, year, month, tag);
+  await documentAppointment(appt.id, appt.time, hwServiceId, 30);
+  await createAndSignServiceRecord(customerId, year, month);
+  const ids = await generateInvoice(customerId, year, month);
+  expect(ids.length, `${key}/${tag} darf nicht splitten`).toBe(1);
+  return { customerId, invoiceId: ids[0], provider };
+}
+
+async function fetchBundleByPayer(
+  providerId: number,
+  year: number,
+  month: number,
+  format: "pdf" | "zip",
+): Promise<{ status: number; contentType: string; buffer: Buffer }> {
+  const res = await fetch(
+    `${BASE_URL}/api/billing/bundle-by-payer?year=${year}&month=${month}&insuranceProviderId=${providerId}&format=${format}`,
+    { headers: { Cookie: auth.cookie } },
+  );
+  return {
+    status: res.status,
+    contentType: res.headers.get("content-type") ?? "",
+    buffer: Buffer.from(await res.arrayBuffer()),
+  };
+}
+
+async function bulkPrint(body: {
+  billingMonth: number;
+  billingYear: number;
+  insuranceProviderId?: number;
+  groupByPayer?: boolean;
+}): Promise<{ status: number; contentType: string; buffer: Buffer }> {
+  const res = await fetch(`${BASE_URL}/api/billing/bulk-print`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`,
+      "x-csrf-token": auth.csrfToken,
+    },
+    body: JSON.stringify(body),
+  });
+  return {
+    status: res.status,
+    contentType: res.headers.get("content-type") ?? "",
+    buffer: Buffer.from(await res.arrayBuffer()),
+  };
+}
+
+const PRINT_TYPES: Array<{ key: BillingTypeKey; label: string; expectedLn: number }> = [
+  { key: "privat", label: "pflegekasse_privat", expectedLn: 1 },
+  { key: "gesetzlich", label: "pflegekasse_gesetzlich", expectedLn: 1 },
+  { key: "selbstzahler", label: "selbstzahler", expectedLn: 1 },
+  { key: "beihilfe", label: "pflegekasse_privat + Beihilfe", expectedLn: 2 },
+];
+
+describe("LN-Dup: Kassen-Bündel & Sammeldruck enthalten den LN genau einmal (Task #1044)", () => {
+  for (const t of PRINT_TYPES) {
+    describe(t.label, () => {
+      const { year, month } = recentPastWeekdayAnchor();
+      // invA: read-only Bündel-Abfragen + Sammeldruck groupByPayer=false (konsumiert).
+      // invB: separater Draft für Sammeldruck groupByPayer=true (konsumiert).
+      let invA: TypedInvoice;
+      let invB: TypedInvoice;
+
+      beforeAll(async () => {
+        invA = await createTypedInvoice(t.key, year, month, `${t.key}A`);
+        invB = await createTypedInvoice(t.key, year, month, `${t.key}B`);
+      }, 240_000);
+
+      it(`bundle-by-payer PDF → genau ${t.expectedLn} LN`, async () => {
+        const out = await fetchBundleByPayer(invA.provider.id, year, month, "pdf");
+        expect(out.status, "bundle-by-payer PDF HTTP 200").toBe(200);
+        expect(out.contentType).toContain("application/pdf");
+        expect(await countLeistungsnachweise(out.buffer), `${t.label} bundle-by-payer PDF`).toBe(t.expectedLn);
+      }, 120_000);
+
+      it(`bundle-by-payer ZIP → genau ${t.expectedLn} LN`, async () => {
+        const out = await fetchBundleByPayer(invA.provider.id, year, month, "zip");
+        expect(out.status, "bundle-by-payer ZIP HTTP 200").toBe(200);
+        expect(out.contentType).toContain("application/zip");
+        expect(await countLeistungsnachweiseInZip(out.buffer), `${t.label} bundle-by-payer ZIP`).toBe(t.expectedLn);
+      }, 120_000);
+
+      it(`bulk-print groupByPayer=false → genau ${t.expectedLn} LN`, async () => {
+        const out = await bulkPrint({
+          billingMonth: month,
+          billingYear: year,
+          insuranceProviderId: invA.provider.id,
+          groupByPayer: false,
+        });
+        expect(out.status, "bulk-print PDF HTTP 200").toBe(200);
+        expect(out.contentType).toContain("application/pdf");
+        expect(await countLeistungsnachweise(out.buffer), `${t.label} bulk-print PDF`).toBe(t.expectedLn);
+      }, 120_000);
+
+      it(`bulk-print groupByPayer=true → genau ${t.expectedLn} LN`, async () => {
+        const out = await bulkPrint({
+          billingMonth: month,
+          billingYear: year,
+          insuranceProviderId: invB.provider.id,
+          groupByPayer: true,
+        });
+        expect(out.status, "bulk-print ZIP HTTP 200").toBe(200);
+        expect(out.contentType).toContain("application/zip");
+        expect(await countLeistungsnachweiseInZip(out.buffer), `${t.label} bulk-print ZIP`).toBe(t.expectedLn);
+      }, 120_000);
+    });
+  }
 });
