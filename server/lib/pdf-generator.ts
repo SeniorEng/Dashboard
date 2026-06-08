@@ -5,6 +5,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
 import { renderLineItemQuantity, isKmLineItem, type LineItemQuantityUnit } from "@shared/domain/invoice-line-items";
 import { resolveVatTreatment, distributeVatAcrossLines, grossUpUnitPriceCents, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
+import { buildInvoiceFooterInnerHtml, buildLeistungsnachweisFooterInnerHtml } from "@shared/domain/document-page-geometry";
 import { isSignatureImageMeaningful } from "./signature-validation";
 
 export interface InvoicePdfData {
@@ -525,21 +526,23 @@ function pdfFooterTemplate(innerHtml: string): string {
 }
 
 export function buildInvoiceFooterTemplate(data: InvoicePdfData): string {
-  const inner = `${escapeHtml(data.companyName || "")}`
-    + `${data.geschaeftsfuehrer ? ` &middot; Geschäftsführer: ${escapeHtml(data.geschaeftsfuehrer)}` : ""}`
-    + `${data.steuernummer ? ` &middot; St.-Nr. ${escapeHtml(data.steuernummer)}` : ""}`
-    + `${data.ustId ? ` &middot; USt-ID ${escapeHtml(data.ustId)}` : ""}`;
-  return pdfFooterTemplate(inner);
+  // Task #1064 — Footer-Inhalt als SSoT in shared, damit die On-Screen-Vorschau
+  // dieselbe Pflichtangaben-Zeile rendern kann (byte-identisch zum PDF).
+  return pdfFooterTemplate(buildInvoiceFooterInnerHtml({
+    companyName: data.companyName ?? null,
+    geschaeftsfuehrer: data.geschaeftsfuehrer ?? null,
+    steuernummer: data.steuernummer ?? null,
+    ustId: data.ustId ?? null,
+  }));
 }
 
 export function buildLeistungsnachweisFooterTemplate(data: InvoicePdfData): string {
-  const parts = [
-    escapeHtml(data.companyName || ""),
-    escapeHtml(data.companyAddress || ""),
-    data.companyPhone ? `Tel.: ${escapeHtml(formatPhoneForDisplay(data.companyPhone))}` : "",
-    escapeHtml(data.companyEmail || ""),
-  ].filter(Boolean);
-  return pdfFooterTemplate(parts.join(" | "));
+  return pdfFooterTemplate(buildLeistungsnachweisFooterInnerHtml({
+    companyName: data.companyName ?? null,
+    companyAddress: data.companyAddress ?? null,
+    companyPhone: data.companyPhone ?? null,
+    companyEmail: data.companyEmail ?? null,
+  }));
 }
 
 export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {

@@ -31,8 +31,10 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   // Task #995 — Effektive Seitenränder pro Dokumenttyp. Das HTML setzt
   // `@page{margin:0}`; die Ränder (inkl. reserviertem Bottom-Margin für den
   // wiederholten Puppeteer-Footer) kommen hier über page.pdf({margin}).
-  const INVOICE_PDF_MARGIN = { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" } as const;
-  const LEISTUNGSNACHWEIS_PDF_MARGIN = { top: "15mm", right: "15mm", bottom: "18mm", left: "15mm" } as const;
+  // Task #1064 — Werte leben jetzt als SSoT in `shared/domain/document-page-geometry.ts`,
+  // damit die On-Screen-Vorschau (Client) und das PDF (Server) dieselben Ränder
+  // verwenden und nicht auseinanderdriften können.
+  import { INVOICE_PDF_MARGIN, LEISTUNGSNACHWEIS_PDF_MARGIN } from "@shared/domain/document-page-geometry";
 
   /**
  * Task #544: Feuert `persistInvoicePdf` im Hintergrund (Microtask), damit der
