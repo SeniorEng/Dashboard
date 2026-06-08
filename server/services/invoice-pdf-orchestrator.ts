@@ -26,6 +26,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   import { getCachedCompanySettings } from "./cache";
   import { recordPdfCacheSend } from "../lib/pdf-cache-stats";
   import { applyLeistungsnachweisCustomerAddress } from "../lib/customer-address-format";
+  import { normalizePdfDeterminism } from "../lib/pdf-determinism";
 
   // Task #995 — Effektive Seitenränder pro Dokumenttyp. Das HTML setzt
   // `@page{margin:0}`; die Ränder (inkl. reserviertem Bottom-Margin für den
@@ -430,15 +431,27 @@ export async function buildInvoicePdfBytes(
   invoice: Invoice,
   companySettings: CompanySettings,
   options?: { snapshot?: InvoiceRenderSnapshot | null },
-): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"]; invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]> }> {
+): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"]; invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]>; pdfCreationDate: string }> {
   const { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot, invoiceSnapshot } = await buildInvoicePdfData(invoice, companySettings, options);
+
+  // Task #1047 — eingefrorener Erzeugungszeitpunkt. Liegt ein Snapshot mit
+  // `pdfCreationDate` vor (Re-Render-Pfad: Integritäts-Verifier / Clobbered-PDF-
+  // Restore), wird exakt dieser Wert wiederverwendet, sonst beim Erst-Persist
+  // EINMAL erzeugt und über `persistInvoicePdfInner` im Snapshot versiegelt.
+  // Beide Render-Artefakte (Rechnung + LN) teilen denselben Wert, damit sie
+  // gemeinsam byte-genau reproduzierbar sind. `idSeed` = Rechnungsnummer macht
+  // die XRef-Stream-`/ID` deterministisch.
+  const pdfCreationDate = options?.snapshot?.pdfCreationDate ?? new Date().toISOString();
+  const detOpts = { creationDate: pdfCreationDate, idSeed: invoice.invoiceNumber };
 
   const { generateInvoiceHtml, generateLeistungsnachweisHtml, generatePdf, buildInvoiceFooterTemplate, buildLeistungsnachweisFooterTemplate } = await import("../lib/pdf-generator");
   const { embedZugferdXml } = await import("../lib/zugferd");
 
   const html = generateInvoiceHtml(pdfData);
   const { buffer } = await generatePdf(html, { footerHtml: buildInvoiceFooterTemplate(pdfData), margin: INVOICE_PDF_MARGIN });
-  const { pdf: zugferdBuffer, xml: zugferdXml } = await embedZugferdXml(buffer, pdfData);
+  const { pdf: zugferdRaw, xml: zugferdXml } = await embedZugferdXml(buffer, pdfData, { creationDate: pdfCreationDate });
+  // Task #1047 — finale Metadaten-Normalisierung (XMP-Zeitstempel + Datei-/ID).
+  const zugferdBuffer = normalizePdfDeterminism(zugferdRaw, detOpts);
   // Task #522: Fingerprint VOR der LN-Signatur-Anreicherung erfassen — der
   // Invoice-Fingerprint deckt nur die Rechnungs-Inhalte ab.
   const pdfDataFingerprint = computeInvoicePdfFingerprint(pdfData);
@@ -452,7 +465,8 @@ export async function buildInvoicePdfBytes(
     await enrichPdfDataWithSignatures(pdfData, invoice);
     const lnHtml = generateLeistungsnachweisHtml(pdfData);
     const { buffer: lnPdfBuf } = await generatePdf(lnHtml, { footerHtml: buildLeistungsnachweisFooterTemplate(pdfData), margin: LEISTUNGSNACHWEIS_PDF_MARGIN });
-    leistungsnachweisPdf = lnPdfBuf;
+    // Task #1047 — LN-PDF (reines Chromium-PDF) ebenfalls deterministisch machen.
+    leistungsnachweisPdf = normalizePdfDeterminism(lnPdfBuf, detOpts);
     leistungsnachweisDataFingerprint = computeLeistungsnachweisFingerprint(pdfData);
   }
 
@@ -475,9 +489,12 @@ export async function buildInvoicePdfBytes(
       const lp2 = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
       lp2.forEach((p) => merged.addPage(p));
     }
-    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot };
+    // Task #1047 — pdf-lib-Merge ist bei deterministischen Eingangs-PDFs selbst
+    // deterministisch (keine eigenen Wall-Clock-/Zufalls-Tokens), daher kein
+    // erneutes Normalisieren der zusammengeführten Bytes nötig.
+    return { pdf: Buffer.from(await merged.save()), xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate };
   }
-  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot };
+  return { pdf: zugferdBuffer, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate };
 }
 
 // Task #521: LN-only Render — wird verwendet, wenn das Rechnungs-PDF bereits
@@ -494,7 +511,14 @@ async function renderLeistungsnachweisOnly(invoice: Invoice, companySettings: Co
   await enrichPdfDataWithSignatures(pdfData, invoice);
   const lnHtml = generateLeistungsnachweisHtml(pdfData);
   const { buffer: lnPdf } = await generatePdf(lnHtml, { footerHtml: buildLeistungsnachweisFooterTemplate(pdfData), margin: LEISTUNGSNACHWEIS_PDF_MARGIN });
-  return { pdf: lnPdf, fingerprint: computeLeistungsnachweisFingerprint(pdfData) };
+  // Task #1047 — auch der LN-only-Backfill wird deterministisch normalisiert.
+  // Liegt der eingefrorene Erzeugungszeitpunkt im Snapshot vor (Rechnungen ab
+  // #1047), reproduziert das Re-Render byte-genau; ältere Bestände ohne
+  // `pdfCreationDate` bekommen einen frischen Zeitpunkt (nicht byte-stabil,
+  // akzeptiert — siehe Task-Beschreibung).
+  const lnCreationDate = snapshot?.pdfCreationDate ?? new Date().toISOString();
+  const normalizedLn = normalizePdfDeterminism(lnPdf, { creationDate: lnCreationDate, idSeed: invoice.invoiceNumber });
+  return { pdf: normalizedLn, fingerprint: computeLeistungsnachweisFingerprint(pdfData) };
 }
 
 /**
@@ -598,7 +622,7 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
 
   if (needsInvoicePdf) {
     // Voll-Build (Erstanlage): Invoice + XML + optional LN.
-    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot } =
+    const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot, pdfCreationDate } =
       await buildInvoicePdfBytes(invoice, companySettings);
     const pdfHash = computeDataHash(pdfBytes as unknown as string);
     const fileName = buildInvoicePdfObjectKey(safeNumber);
@@ -627,6 +651,9 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         // bereits in `zugferd_xml` versiegelte XML, sobald `sentAt`
         // nachträglich gesetzt wird oder sich `todayISO()` ändert.
         invoice: invoiceSnapshot,
+        // Task #1047: eingefrorener PDF-Erzeugungszeitpunkt — ermöglicht das
+        // byte-genaue Re-Render (Integritäts-Verifier / Clobbered-PDF-Restore).
+        pdfCreationDate,
       };
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {

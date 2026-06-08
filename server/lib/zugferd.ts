@@ -474,7 +474,7 @@ export class ZugferdEmbedError extends Error {
 export async function embedZugferdXml(
   pdfBuffer: Buffer,
   data: InvoicePdfData,
-  options?: { strict?: boolean; testFaults?: Set<string> }
+  options?: { strict?: boolean; testFaults?: Set<string>; creationDate?: string | Date }
 ): Promise<EmbedZugferdResult> {
   const strict = options?.strict === true;
   // Task #559: Test-Fault-Injection — erlaubt es Integrationstests, einen
@@ -501,11 +501,26 @@ export async function embedZugferdXml(
 
     let resultPdf: Uint8Array;
     try {
+      // Task #1047 — eingefrorenes Erzeugungsdatum: node-zugferd schreibt die
+      // Info-Dict-Zeitstempel (`/CreationDate`/`/ModDate`) komprimiert in einen
+      // Object-Stream, der NICHT byte-nachträglich gepatcht werden kann. Daher
+      // wird der eingefrorene Zeitpunkt hier an der Quelle übergeben; die NICHT
+      // überschreibbaren XMP-Zeitstempel und die XRef-Stream-`/ID` werden
+      // anschließend per `normalizePdfDeterminism` längenerhaltend normalisiert.
+      const frozenDate =
+        options?.creationDate != null
+          ? (typeof options.creationDate === "string"
+              ? new Date(options.creationDate)
+              : options.creationDate)
+          : undefined;
       resultPdf = await built.invoice.embedInPdf(pdfBuffer, {
         metadata: {
           title: `Rechnung ${data.invoiceNumber}`,
           author: data.companyName,
           subject: `Rechnung ${data.invoiceNumber}`,
+          ...(frozenDate && !Number.isNaN(frozenDate.getTime())
+            ? { createDate: frozenDate, modifyDate: frozenDate }
+            : {}),
         },
       });
     } catch (embedErr) {

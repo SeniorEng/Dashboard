@@ -271,6 +271,19 @@ export interface InvoiceRenderSnapshot {
     invoiceDate: string;
     invoiceDueDate: string | null;
   };
+  /**
+   * Task #1047 — eingefrorener PDF-Erzeugungszeitpunkt (ISO-8601). PDFs betten
+   * Wall-Clock-Zeitstempel (`/CreationDate`/`/ModDate`, XMP-Metadaten) und eine
+   * zufällige Datei-`/ID` ein, sodass ein Re-Render NIE byte-genau den
+   * versiegelten `pdf_hash` reproduziert. Beim Erst-Persist wird dieser
+   * Zeitpunkt EINMAL festgehalten; jedes Re-Render aus dem Snapshot
+   * (Integritäts-Verifier, Clobbered-PDF-Restore) speist denselben Wert in die
+   * Render-Pipeline (`buildInvoicePdfBytes` → `embedZugferdXml` /
+   * `normalizePdfDeterminism`) und erzeugt damit byte-identische PDFs.
+   * Optional, damit Bestände vor #1047 keinen Migrations-Backfill brauchen
+   * (diese re-rendern weiterhin nicht byte-genau → werden im Restore „flagged").
+   */
+  pdfCreationDate?: string;
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

@@ -1017,6 +1017,13 @@ export async function generatePdf(html: string, options?: GeneratePdfOptions): P
       format: "A4",
       printBackground: true,
       margin,
+      // Task #1047 — `tagged:false` deaktiviert die Tagged-PDF-Struktur.
+      // Chromium vergibt sonst pro Render fortlaufende, lauf-abhängige
+      // StructElem-`/ID (nodeNNNNNNNN)`-Zähler, die ein byte-genaues Re-Render
+      // verhindern (auch komprimiert in node-zugferds Object-Stream). Tagging
+      // ist für PDF/A-3b (node-zugferd-Ziel) nicht erforderlich; entfällt es,
+      // bleiben nur die normalisierbaren Zeitstempel/IDs als Nicht-Determinismus.
+      tagged: false,
       // Task #995 — leeres headerTemplate verhindert Puppeteers Default-Header
       // (Datum/Titel); footerTemplate trägt die Pflichtangaben-Zeile.
       displayHeaderFooter: useFooter,
