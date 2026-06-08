@@ -31,6 +31,22 @@ export function getPrivateDir(): string {
 
 const NONPROD_PDF_PREFIX = "_nonprod";
 
+// Task #1051: Pro-Lauf-Isolation für Rechnungs-/LN-PDF-Objektschlüssel.
+//
+// Die Ephemeral-Test-DBs sind pro Lauf/Worker isoliert, der Object-Storage-
+// Bucket ist es NICHT — alle Nicht-Prod-Läufe teilen den Prefix
+// `_nonprod/<NODE_ENV>/` (NODE_ENV=test für jeden Testlauf). Starten zwei
+// Testläufe gleichzeitig (z.B. der `test`-Workflow plus ein manueller Lauf),
+// erzeugen beide aus ihren frischen DBs dieselben Rechnungsnummern → identische
+// Objektschlüssel → sie überschreiben sich gegenseitig die Bucket-Objekte.
+//
+// Lösung: Der Orchestrator (`scripts/with-ephemeral-db.ts`) exportiert eine
+// lauf-eindeutige Run-ID via `EPHEMERAL_RUN_ID` an BEIDE Seiten (Worker-App-
+// Server UND den Vitest-Prozess). Ist sie gesetzt, wird der Nicht-Prod-Prefix
+// um ein `run-<id>`-Segment erweitert, sodass parallele Läufe denselben Bucket
+// ohne gegenseitiges Überschreiben teilen. Produktion ist davon unberührt.
+const RUN_ID_ENV = "EPHEMERAL_RUN_ID";
+
 /**
  * True, wenn die laufende Umgebung die Produktion ist. Nur in der Produktion
  * werden PDFs unter den nackten Produktions-Key-Space geschrieben.
@@ -42,12 +58,21 @@ export function isProductionPdfEnv(): boolean {
 /**
  * SSoT für den Object-Key-Prefix der Rechnungs-/LN-PDF-Schreibvorgänge.
  * Produktion: "" (nackter `invoices/…`-Key-Space). Nicht-Produktion:
- * `_nonprod/<NODE_ENV>` (z.B. `_nonprod/development`, `_nonprod/test`).
+ * `_nonprod/<NODE_ENV>` (z.B. `_nonprod/development`, `_nonprod/test`), und —
+ * falls eine Ephemeral-Lauf-ID gesetzt ist (`EPHEMERAL_RUN_ID`) — zusätzlich
+ * pro Lauf gescoped: `_nonprod/<NODE_ENV>/run-<id>` (Task #1051), damit
+ * parallele Testläufe sich nicht gegenseitig die Bucket-Objekte überschreiben.
  */
 export function getInvoicePdfKeyPrefix(): string {
   if (isProductionPdfEnv()) return "";
   const env = process.env.NODE_ENV || "unknown";
-  return `${NONPROD_PDF_PREFIX}/${env}`;
+  const base = `${NONPROD_PDF_PREFIX}/${env}`;
+  const rawRunId = process.env[RUN_ID_ENV];
+  if (rawRunId) {
+    const safeRunId = rawRunId.replace(/[^a-z0-9_-]/gi, "_");
+    if (safeRunId) return `${base}/run-${safeRunId}`;
+  }
+  return base;
 }
 
 /**

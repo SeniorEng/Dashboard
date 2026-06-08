@@ -224,6 +224,14 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 const baseEnv: NodeJS.ProcessEnv = {
   ...process.env,
   NODE_ENV: "test",
+  // Task #1051: Lauf-eindeutige Run-ID. Der Object-Storage-Bucket ist (anders als
+  // die Ephemeral-DBs) NICHT pro Lauf isoliert; PDF-Objektschlüssel würden sonst
+  // zwischen parallelen Läufen (gleiche Rechnungsnummern aus frischen DBs)
+  // kollidieren. Wird sowohl von den Worker-App-Servern (siehe startWorker) als
+  // auch vom Vitest-Prozess (testEnv = { ...baseEnv, ... }) geerbt, sodass beide
+  // Seiten denselben pro-Lauf-gescopten Prefix `_nonprod/<env>/run-<id>` bilden
+  // (server/lib/object-storage-helpers.ts → getInvoicePdfKeyPrefix).
+  EPHEMERAL_RUN_ID: runId,
   TEST_USER_PASSWORD:
     process.env.TEST_USER_PASSWORD || process.env.TEST_USER_PASSWORD_INTERNAL,
   // Chromium-Drosselung: Jeder Worker-App-Server rendert PDFs nur 1× gleichzeitig.

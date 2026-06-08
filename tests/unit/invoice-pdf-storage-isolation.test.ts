@@ -18,7 +18,7 @@
  *  4. Der Schreib-Guard schlägt in Nicht-Produktion hart fehl, wenn ein
  *     Object-Key den Produktions-Prefix verwenden würde (Defense-in-Depth).
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import {
   buildInvoicePdfObjectKey,
   assertInvoicePdfWriteKeyAllowed,
@@ -27,6 +27,7 @@ import {
 } from "../../server/lib/object-storage-helpers";
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+const ORIGINAL_RUN_ID = process.env.EPHEMERAL_RUN_ID;
 
 function setEnv(value: string | undefined): void {
   if (value === undefined) {
@@ -36,8 +37,25 @@ function setEnv(value: string | undefined): void {
   }
 }
 
+function setRunId(value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env.EPHEMERAL_RUN_ID;
+  } else {
+    process.env.EPHEMERAL_RUN_ID = value;
+  }
+}
+
+// Diese Suite läuft selbst unter dem Ephemeral-Orchestrator, der
+// `EPHEMERAL_RUN_ID` setzt (Task #1051). Für die umgebungs-genauen Prefix-
+// Assertions die Run-ID standardmäßig entfernen; die Run-ID-Scoping-Tests
+// setzen sie explizit.
+beforeEach(() => {
+  setRunId(undefined);
+});
+
 afterEach(() => {
   setEnv(ORIGINAL_NODE_ENV);
+  setRunId(ORIGINAL_RUN_ID);
 });
 
 describe("Invoice PDF storage isolation (Task #1042)", () => {
@@ -107,5 +125,55 @@ describe("Invoice PDF storage isolation (Task #1042)", () => {
   it("der Schreib-Guard ist in Produktion ein No-op (nackter Key-Space erlaubt)", () => {
     setEnv("production");
     expect(() => assertInvoicePdfWriteKeyAllowed("invoices/RE-2026-0034.pdf")).not.toThrow();
+  });
+});
+
+describe("Invoice PDF storage per-run isolation (Task #1051)", () => {
+  it("EPHEMERAL_RUN_ID scoped den Nicht-Prod-Prefix pro Lauf", () => {
+    setEnv("test");
+    setRunId("abc123_42_deadbeef");
+    expect(getInvoicePdfKeyPrefix()).toBe("_nonprod/test/run-abc123_42_deadbeef");
+    expect(buildInvoicePdfObjectKey("RE-2026-0034")).toBe(
+      "_nonprod/test/run-abc123_42_deadbeef/invoices/RE-2026-0034.pdf",
+    );
+    expect(buildInvoicePdfObjectKey("RE-2026-0034", { leistungsnachweis: true })).toBe(
+      "_nonprod/test/run-abc123_42_deadbeef/invoices/RE-2026-0034-leistungsnachweis.pdf",
+    );
+  });
+
+  it("zwei verschiedene Run-IDs ergeben verschiedene Object-Keys (kein paralleles Overwrite)", () => {
+    setEnv("test");
+    setRunId("run-one");
+    const keyA = buildInvoicePdfObjectKey("RE-2026-0034");
+    setRunId("run-two");
+    const keyB = buildInvoicePdfObjectKey("RE-2026-0034");
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it("der Schreib-Guard akzeptiert den lauf-gescopten Key und lehnt fremde Läufe/Prod ab", () => {
+    setEnv("test");
+    setRunId("my-run");
+    const key = buildInvoicePdfObjectKey("RE-2026-0034");
+    expect(() => assertInvoicePdfWriteKeyAllowed(key)).not.toThrow();
+    // Ein Key OHNE den eigenen run-Prefix (z.B. eines anderen Laufs) wird abgelehnt.
+    expect(() =>
+      assertInvoicePdfWriteKeyAllowed("_nonprod/test/run-other/invoices/RE-2026-0034.pdf"),
+    ).toThrow(/Object-Storage-Isolation/);
+    expect(() => assertInvoicePdfWriteKeyAllowed("invoices/RE-2026-0034.pdf")).toThrow(
+      /Object-Storage-Isolation/,
+    );
+  });
+
+  it("ohne EPHEMERAL_RUN_ID bleibt der Prefix der reine Umgebungs-Prefix", () => {
+    setEnv("test");
+    setRunId(undefined);
+    expect(getInvoicePdfKeyPrefix()).toBe("_nonprod/test");
+  });
+
+  it("Produktion ignoriert EPHEMERAL_RUN_ID (nackter Key-Space bleibt)", () => {
+    setEnv("production");
+    setRunId("should-be-ignored");
+    expect(getInvoicePdfKeyPrefix()).toBe("");
+    expect(buildInvoicePdfObjectKey("RE-2026-0034")).toBe("invoices/RE-2026-0034.pdf");
   });
 });

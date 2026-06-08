@@ -1,14 +1,24 @@
 ---
-name: Object storage bucket is shared across ephemeral test DBs
-description: Why invoice-PDF integration tests flake under concurrent harness runs even though the database is isolated per run.
+name: Object storage bucket is shared across ephemeral test DBs (now run-scoped)
+description: Why invoice-PDF integration tests USED to flake under concurrent harness runs; non-prod PDF keys now carry a per-run id so the bucket is logically isolated.
 ---
 
-# Object storage is NOT isolated per ephemeral test DB
+# Object storage bucket is shared, but non-prod PDF keys are now per-run scoped
+
+**Update:** non-prod invoice/LN PDF object keys now include a per-run component.
+`getInvoicePdfKeyPrefix()` (`server/lib/object-storage-helpers.ts`) appends
+`/run-<sanitized EPHEMERAL_RUN_ID>` to the `_nonprod/<NODE_ENV>/` prefix when the
+`EPHEMERAL_RUN_ID` env var is set; the orchestrator (`scripts/with-ephemeral-db.ts`)
+exports that var (its `runId`) into `baseEnv` so every worker app-server AND the
+vitest process inherit it. Production is unaffected (prefix stays `""`). This means
+two concurrent test runs no longer clobber each other's PDF objects even though the
+underlying bucket is still physically shared. The history below explains the failure
+mode this prevents.
 
 The ephemeral-DB orchestrator (`scripts/with-ephemeral-db.ts`) gives each
 run/worker its own throwaway Postgres DB, but the **object storage bucket is the
-real shared bucket**. Invoice/LN PDF object keys are only namespaced by
-`_nonprod/<NODE_ENV>/...` (`server/lib/object-storage-helpers.ts`
+real shared bucket**. Before the run-id fix, invoice/LN PDF object keys were only
+namespaced by `_nonprod/<NODE_ENV>/...` (`server/lib/object-storage-helpers.ts`
 `buildInvoicePdfObjectKey`), and `NODE_ENV=test` for every run.
 
 **Consequence:** two test runs executing the same invoice-PDF test concurrently
@@ -25,10 +35,11 @@ exercise PDF-render code — a failure there during a PDF change is almost alway
 bucket collision, not a regression.
 
 ## How to apply
-Verify invoice-PDF tests in ISOLATION: run the single file via
-`with-ephemeral-db.ts` with NOTHING else touching the bucket (let the `test`
-workflow finish first). A green isolated run + green typecheck/lint is the
-trustworthy signal. Do not trust failures observed while the harness/`test`
-workflow runs the same file concurrently. (See also
-validation-env-concurrency-flakes.) Real fix would be a run-unique component in
-the non-prod PDF object key.
+The run-id key scoping (above) is the implemented fix, so concurrent runs no
+longer clobber. Any NEW non-prod PDF write path must still route through
+`buildInvoicePdfObjectKey`/`assertInvoicePdfWriteKeyAllowed` (which use
+`getInvoicePdfKeyPrefix`) so it inherits the run scope — do not hand-build keys.
+If you ever run a PDF object-key test WITHOUT the orchestrator (no
+`EPHEMERAL_RUN_ID`), keys fall back to the bare `_nonprod/<NODE_ENV>/` prefix and
+the old clobber race returns; prefer running via `with-ephemeral-db.ts`. Reads
+stay verbatim on the stored path. (See also validation-env-concurrency-flakes.)
