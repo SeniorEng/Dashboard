@@ -1,0 +1,297 @@
+# Analyse: Rechnungs- + Leistungsnachweis-Pipeline
+
+**Datum:** 2026-06-05
+**Code-Basis:** `origin/main e9a82dce`
+**Scope:** Vollständige Architektur-Kartierung + bekannte Bugs + GoBD-Best-Practice-Abgleich
+**Status:** Code-Analyse abgeschlossen, Live-Reproducer nicht möglich (Replit-Dev hibernated)
+
+---
+
+## TL;DR
+
+Die Pipeline ist **architektonisch sauber** (Pot-Split, Cascade-Storno, Drift-Detection, ZUGFeRD), hat aber **drei bekannte Bugs** aus dem letzten Audit (29.05.2026) plus **vier strukturelle Risiken** im Storno- und PDF-Pfad. **Keine direkten GoBD-Verletzungen** — aber das System verlangt strenge Disziplin im Edge-Case-Verhalten, die laut Code teilweise nur über Tests + Audits gewährleistet ist.
+
+---
+
+## A. Architektur-Kartierung
+
+### A.1 — Rechnungs-Generierung (`generateInvoiceCore`)
+
+**Zentraler Pfad:** `server/services/invoice-calc.ts:300`
+
+```
+POST /api/billing/generate                          (Einzeln)
+POST /api/billing/generate-all                      (Massenerstellung)
+       │
+       ▼
+generateInvoiceCore(customerId, billingMonth, billingYear)
+       │
+       ├─→ buildInvoiceDraft (gemeinsame Logik mit Preview)
+       │     ├─→ Customer-Stammdaten + Insurance + Abtretungsdeklaration
+       │     ├─→ Pot-Split (§45b / §45a / §39+§42a / private) via Largest-Remainder
+       │     ├─→ Line-Items pro Pot (mit km-Quantisierung)
+       │     └─→ Storno-Refs aus früher stornierten Rechnungen
+       │
+       ├─→ N-Invoice-Pfad (wenn Pot-Split nötig):
+       │     ├─→ EINE Rechnung pro Pot mit gemeinsamer billingRunId
+       │     ├─→ Pot-spezifischer Empfänger (Kasse/Kunde)
+       │     ├─→ getNextInvoiceNumberTx mit FOR-UPDATE-Lock
+       │     └─→ Insert in invoices + invoice_line_items (atomar)
+       │
+       └─→ schedulePdfPersistInBackground (Task #544)
+             └─→ persistInvoicePdf — generiert PDF + LN + ZUGFeRD-XML asynchron
+```
+
+**Wichtige Garantien laut Code:**
+- ✅ **GoBD-Snapshot:** `customerName`, `recipientName/Address`, `insuranceProviderName`, `pflegegrad` werden zum Zeitpunkt der Rechnung in die Zeile geschrieben — Stammdaten-Änderungen brechen die Historie nicht.
+- ✅ **Pot-Σ-Invariante:** `shared/domain/budget-invoice-split.ts` (Largest-Remainder, deterministischer `POT_ORDER`-Tiebreak).
+- ✅ **Idempotenz:** vor `generate-all` Check `hasActive` blockiert Doppel-Generierung.
+- ✅ **Lückenlose Nummernkreise pro Jahr:** `getNextInvoiceNumberTx` mit Tx-Lock.
+
+### A.2 — Leistungsnachweis-PDF
+
+**Zentraler Pfad:** `server/lib/pdf-generator.ts:499`
+
+```
+GET /api/billing/:id/leistungsnachweis
+       │
+       ├─→ Cache-Hit: aus Object Storage ausliefern + X-Pdf-Drift-Header
+       │
+       ├─→ Cache-Miss (Pflegekasse): persistInvoicePdf → reload → ausliefern
+       │
+       └─→ Cache-Miss (Selbstzahler): renderLeistungsnachweisOnTheFly (kein Cache)
+```
+
+**HTML-Bau:**
+- `generateLeistungsnachweisHtml(data)` → Gruppierung nach `appointmentId`, dann Datum/Zeit (Task #571)
+- Service-Zeilen + KM-Zeilen (`travel_km`, `customer_km`) getrennt rendern
+- Selbstzahler: USt addieren auf Display-Preis; Pflegekassen-Rechnungen: USt = 0
+
+**Concurrency-Schutz:**
+- `persistInvoicePdfInFlight: Map<invoiceId, Promise>` (pdf-generator.ts:462–493) verhindert paralleles Doppel-Persistieren.
+- Globale Semaphore: `PDF_RENDER_CONCURRENCY` (env-konfigurierbar).
+
+### A.3 — Storno-Pipeline
+
+**Zentraler Pfad:** `PATCH /api/billing/:id/status { status: "storniert", cascadeRun?: true }`
+
+```
+PATCH → allowedTransitions: entwurf/versendet/bezahlt → storniert
+       │
+       └─→ performStorno (in withAudit-Transaktion)
+             ├─→ getInvoiceForUpdateTx (FOR-UPDATE-Lock auf Original)
+             ├─→ getNextInvoiceNumberTx (neue Stornorechnung-Nummer)
+             ├─→ Copy aller Line-Items mit negativen Beträgen
+             ├─→ Storno-dueDate = today + N Tage (default 30, Task #562)
+             ├─→ stornierteRechnungId = Original-ID
+             ├─→ status = "entwurf" (nicht "versendet")
+             └─→ Cascade (wenn cascadeRun=true):
+                  └─→ Alle Geschwister mit gleicher billing_run_id stornieren
+       │
+       └─→ schedulePdfPersistInBackground für Storno-Rechnung
+```
+
+**Wichtige Garantien:**
+- ✅ **Pessimistisches Locking:** Verhindert Doppel-Storno bei parallelen PATCH-Anfragen.
+- ✅ **GoBD-Immutability:** Original wird NICHT überschrieben — eine NEUE Storno-Rechnung mit negativen Beträgen + Referenz wird angelegt.
+- ✅ **Cascade-Atomarität:** Alle Geschwister-Rechnungen einer billing_run_id in EINER Transaktion (Task #759).
+- ✅ **Storno hält LN aktiv** (Task #576): der zugehörige Leistungsnachweis wird beim Storno NICHT ungültig.
+- ✅ **Re-Rechnung nach Storno:** `referencedStornoInvoiceIds`-Array verlinkt Original (Task #585).
+
+### A.4 — Verifikation + Drift-Detection
+
+**Drei Fingerprints:**
+- `pdfDataFingerprint` (Render-Eingabedaten für Rechnung)
+- `leistungsnachweisDataFingerprint` (Render-Eingabedaten für LN)
+- `pdfHash`, `leistungsnachweisHash` (bytestabile sha256 der PDFs)
+
+**Beim Abruf:** Live-Fingerprint wird neu berechnet und verglichen → `X-Pdf-Drift: true` Header, wenn Stammdaten/Positionen sich nachträglich geändert haben.
+
+---
+
+## B. Bekannte Bugs aus Audits
+
+### B.1 — `MITTEL-1`: GoBD-Snapshot-Drift durch JOIN-Alias 🔴
+
+**Quelle:** `docs/audits/full-app-2026/chunks/08-billing.md`
+
+**Symptom:** `server/storage/billing-storage.ts:40` (`getInvoice`) liefert `customers.name` als Feld `customerName` und **überschreibt damit den persistierten GoBD-Snapshot `invoices.customer_name`**.
+
+**Impact:**
+- Verifier-/Re-Render-Code, der aus dem Snapshot baut, sieht den AKTUELLEN Kundennamen statt den damals festgehaltenen.
+- Bei Namens-Änderung (Heirat, Korrektur) drifted die Rechnungs-Historie.
+- GoBD-Risiko bei Steuerprüfung: Re-Render erzeugt eine andere PDF als die ursprünglich versendete.
+
+**Fix-Vorschlag:** `customerName` aus dem JOIN-Mapping entfernen, immer `invoices.customer_name` (Snapshot) zurückgeben. Effort: S.
+
+### B.2 — `MITTEL-2`: `updateInvoiceStatus` ohne Tx-Kontext 🟡
+
+**Quelle:** `docs/audits/full-app-2026/chunks/08-billing.md`
+
+**Symptom:** `server/storage/billing-storage.ts:111` (`updateInvoiceStatus`) nutzt `db` direkt statt eines `DbOrTx`-Parameters.
+
+**Impact:** Wenn aus einer Batch-Transaktion aufgerufen, **bricht die Atomizität** — der Status-Update läuft in einer separaten Tx und kann teilweise persistieren, während der Rest rollbackt.
+
+**Fix-Vorschlag:** `DbOrTx`-Parameter hinzufügen, Default `db`. Effort: S.
+
+### B.3 — `NIEDRIG`: God-File `billing.ts` 🟢
+
+**Stand:** Quality-Sweep 27.05.2026 zeigt 3169 LOC; aktueller HEAD `e9a82dce` zeigt **3656 LOC**.
+
+**Impact:** Nicht review-fähig, hohes Regressions-Risiko bei Änderungen. Wachsend über Zeit.
+
+**Fix-Vorschlag:** Refactor → `billing-service.ts` (siehe Refactor-Masterplan). Effort: L.
+
+---
+
+## C. Strukturelle Risiken (potenzielle Bugs, nicht im Audit dokumentiert)
+
+### C.1 — PDF-Drift bei nachträglicher Daten-Änderung 🟡
+
+**Risiko:** `X-Pdf-Drift: true` wird **nur als HTTP-Header** ausgeliefert. Ist im UI sichtbar? Wenn nicht, fällt es nur dann auf, wenn jemand den Header inspiziert.
+
+**Was schief gehen kann:**
+- Customer-Stammdaten werden korrigiert (z.B. Adresse) → bestehende Rechnungs-PDFs zeigen alten Stand (korrekt nach GoBD), aber Verifier-Re-Render würde neuen Stand produzieren → Hash-Mismatch.
+- Hier verbirgt sich der `MITTEL-1`-Bug: weil `getInvoice` den aktuellen Namen statt Snapshot zurückgibt, sieht der Live-Fingerprint immer den aktuellen Stand → falsch-positive Drift-Meldung.
+
+**Fix:** B.1 lösen + UI-Hinweis bei Drift einbauen (z.B. roter Banner "Daten haben sich seit PDF-Erstellung geändert").
+
+### C.2 — Race-Condition bei `persistInvoicePdf` 🟡
+
+**Beobachtung:** `persistInvoicePdfInFlight` (Map) verhindert Doppel-Persist **innerhalb eines Prozesses**.
+
+**Was schief gehen kann:**
+- Bei zwei Server-Instanzen (Replit-Auto-Scale) sieht jede Instanz nur ihre eigene In-Flight-Map → beide rendern parallel und persistieren beide.
+- `loadInvoicePdfFromStorage` liest aus Object Storage; wenn beide Persistierungen abschließen, gewinnt die letzte → mögliche Hash-Inkonsistenz mit DB.
+- Mitigation laut Code: GoBD-Code-Kommentar sagt `persistInvoicePdf` überschreibe kein bestehendes `pdf_path` — also kein DB-Drift. Aber das Storage-Blob könnte doppelt vorhanden sein.
+
+**Fix:** DB-Advisory-Lock (`pg_advisory_xact_lock(invoice_id)`) am Beginn von `persistInvoicePdfInner` einbauen. Effort: S.
+
+### C.3 — Storno: dueDate-Drift 🟡
+
+**Beobachtung:** `stornoDueDateIso = addDays(todayISO(), 30)` setzt die Fälligkeit der **Stornorechnung** auf heute + 30 Tage.
+
+**Was passt:**
+- Storno-Rechnung ist eine neue Rechnung mit eigener Fälligkeit (richtig).
+
+**Was missverstanden werden könnte:**
+- User könnte erwarten, dass die Storno-Fälligkeit = ursprüngliche Fälligkeit (z.B. wenn Storno wegen Korrektur-Wiederabrechnung). Ist das **Anwender-Verhalten** bekannt?
+- ZUGFeRD-Code BT-9 erwartet ein definiertes Datum → ok, aber semantisch zweideutig.
+
+**Fix-Vorschlag:** UI bei Storno-Auslösung eine Wahl bieten: „Fälligkeit übernehmen" / „neue Fälligkeit (heute + 30)". Effort: S.
+
+### C.4 — LN-PDF wird bei Selbstzahler NICHT gecached 🟡
+
+**Beobachtung:** Im Selbstzahler-Pfad rendert `renderLeistungsnachweisOnTheFly` JEDES Mal neu. Kein Object-Storage-Cache.
+
+**Impact:**
+- Jeder Abruf des Selbstzahler-LN startet einen Puppeteer-Render (50–500 ms, je nach Hardware).
+- Bei vielen Selbstzahler-Kunden → Performance-Sumpf.
+- GoBD-mäßig vertretbar, da Selbstzahler-LN nicht versendet wird (nur intern), aber inkonsistent zur Pflegekassen-Pipeline.
+
+**Fix:** Selbstzahler-Cache analog Pflegekasse aktivieren. Effort: M.
+
+### C.5 — Datenfluss Termin → Leistungsnachweis → Rechnung 🔴
+
+**Architektur:**
+1. Termine werden geplant + dokumentiert (`POST /api/appointments/:id/document`)
+2. Monatlich entsteht ein `monthly_service_records`-Eintrag (Leistungsnachweis-Datensatz)
+3. LN wird **vom Kunden signiert** (oder employee_signed, dann auf customer warten)
+4. `generate-all` filtert auf Records mit `status IN ('completed', 'employee_signed')`
+5. Daraus entstehen Rechnungen + LN-PDFs
+
+**Risiko Punkt 3:** Was passiert, wenn der Kunde nicht signiert, aber Mitarbeiter schon? Die `generate-all` akzeptiert beides:
+```ts
+or(
+  eq(monthlyServiceRecords.status, "completed"),
+  eq(monthlyServiceRecords.status, "employee_signed"),
+)
+```
+
+**Frage:** Ist `employee_signed` ohne Customer-Unterschrift bei Pflegekassen-Abrechnung zulässig? Laut SGB-XI-Vereinbarung muss der Pflegebedürftige die Leistung quittieren. **Wenn `employee_signed` reicht für die Rechnung, riskiert das Rückforderungen der Pflegekasse.**
+
+**Fix:** Verifizieren: bei Pflegekassen-Customers nur `completed` zulassen, `employee_signed` nur für Selbstzahler. Falls bereits so, dann dokumentieren. Effort: S.
+
+---
+
+## D. GoBD-Best-Practice-Abgleich
+
+### D.1 — Aktueller Rechtsstand (Stand 2026)
+
+| Anforderung | Quelle | App-Status |
+|---|---|---|
+| **Stornorechnung = neue Rechnung mit eigener Nummer + Referenz auf Original** | [kostenlose-erechnung.de](https://kostenlose-erechnung.de/ratgeber/stornorechnung-vorlage-muster/) | ✅ stornierteRechnungId + neue invoiceNumber |
+| **Negative Beträge in Stornorechnung** | [pida-faktura.de](https://pida-faktura.de/stornorechnung-oder-korrekturrechnung/) | ✅ -netAmount/-vat/-gross |
+| **Ursprüngliche + Stornorechnung beide aufbewahren (unveränderbar)** | [lexware.de](https://www.lexware.de/wissen/buchhaltung-finanzen/gobd/) | ✅ pdf_path nie überschrieben (Task #521-Garantie) |
+| **Lückenlose Rechnungsnummern NICHT zwingend, aber Nummernsystem dokumentiert** | [handelskammer-hamburg.de](https://www.handelskammer-hamburg.de/recht-steuern/steuerrecht/umsatzsteuer-mehrwertsteuer/umsatzsteuer-mehrwertsteuer-national/umsatzsteuer-pflichtangaben-rechnungen-6680494) | ✅ JJJJ/laufend-Schema dokumentiert in replit.md |
+| **§14 UStG Pflichtangaben** | [ihk.de](https://www.ihk.de/stuttgart/fuer-unternehmen/recht-und-steuern/steuerrecht/umsatzsteuer-national/neue-pflichtangaben-fuer-rechnungen-684834) | ✅ Schema-Spalten decken alle Pflichtangaben ab |
+| **E-Rechnungspflicht B2B ab 2025 (Empfangs-Pflicht)** | [BMF](https://www.bundesfinanzministerium.de/Content/DE/FAQ/e-rechnung.html) | ✅ ZUGFeRD ausgehend; eingehende E-Rechnungen via E-Mail/Inbox |
+| **GoBD-Update BMF 14.07.2025** | [grantthornton.de](https://www.grantthornton.de/themen/2026/gobd-compliance-und-e-rechnung-anforderungen-pflichten-und-umsetzung-im-b2b-bereich/) | ⚠️ Nicht explizit dokumentiert, ob neu geprüft |
+| **Pflegekassen-Rechnungen oft USt-frei → keine E-Rechnung-Pflicht** | [etl-advision.de](https://www.etl-advision.de/aktuelles/e-rechnungspflicht-in-der-pflege-ab-2025/) | ✅ vatRate=0 bei Pflegekasse, ZUGFeRD trotzdem für Strukturierungs-Vorteile |
+| **Übergangsfrist bis 31.12.2026 für sonstige Rechnungen, bis 31.12.2027 für Kleinunternehmer** | [BMF](https://www.bundesfinanzministerium.de/Content/DE/FAQ/e-rechnung.html) | ✅ App erzeugt ZUGFeRD = sicher konform |
+
+### D.2 — SGB-XI-Leistungsnachweis-Vorgaben
+
+| Anforderung | Quelle | App-Status |
+|---|---|---|
+| **LN als XML-Datensatz nach Anlage 1 Technische Anlage** | [gkv-datenaustausch.de](https://www.gkv-datenaustausch.de/media/dokumente/leistungserbringer_1/pflege/2023_10_05_Vereinbarung__105_Abs.2_Satz_2_SGBXI_final.pdf) | ⚠️ App liefert PDF, kein XML — Datenaustausch läuft separat über DTA-Provider |
+| **Bei Korrektur: Kopie mit neuem Status, Unterschrift kann NICHT übertragen werden** | siehe oben | ⚠️ App behält LN aktiv beim Storno (Task #576) — vermutlich richtig wenn Storno = Rechnungs-Korrektur, NICHT LN-Korrektur. Bei LN-Korrektur müsste neue Signatur eingeholt werden. |
+| **Vorgänger-LN verliert Gültigkeit nicht bei Korrektur an Pflegekasse senden** | siehe oben | ⚠️ App-Verhalten bei LN-Edit prüfen |
+| **Pilotverfahren Datenaustausch endete 01.05.2026** | siehe oben | ✅ irrelevant für die App |
+
+### D.3 — Puppeteer-PDF-Best-Practices
+
+Laut Web-Research [DEV Community](https://dev.to/iurii_rogulia/pdf-generation-on-the-server-puppeteer-vs-react-pdfrenderer-a-production-comparison-44cg):
+
+| Best Practice | App-Status |
+|---|---|
+| **Fonts einmal beim Module-Load registrieren** | ✅ vermutlich ok; nicht explizit geprüft |
+| **`networkidle0` warten für vollständiges Rendering** | ⚠️ in generatePdf prüfen |
+| **`page.close()` mit Timeout** | ✅ Task #521 explizit erwähnt withFreshPage für protocolTimeout |
+| **Concurrency-Limit 10–15 pro CPU-Core** | ✅ PDF_RENDER_CONCURRENCY env |
+| **Speicher-Leaks vermeiden (orphaned processes)** | ✅ Test pdf-generator-resilience.test.ts existiert |
+
+---
+
+## E. Priorisierte Fix-Liste für Replit-AI
+
+| Prio | Bug | Effort | Begründung |
+|---|---|---|---|
+| 🔴 **1** | **B.1 — getInvoice Snapshot-Drift** | S (0.5 PT) | GoBD-relevant. Verifier-Drift, Re-Render-Inkonsistenz. |
+| 🔴 **2** | **C.5 — `employee_signed` für Pflegekassen ausschließen** | S (0.25 PT) | Rückforderungs-Risiko durch Pflegekasse. Wenn schon geregelt: dokumentieren. |
+| 🟡 **3** | **B.2 — updateInvoiceStatus Tx-Kontext** | S (0.5 PT) | Atomizität-Risiko in Batch-Pfaden. |
+| 🟡 **4** | **C.2 — `persistInvoicePdf` Advisory-Lock** | S (0.5 PT) | Sicherheits-Netz für Multi-Instance-Setups. |
+| 🟡 **5** | **C.1 — UI-Sichtbarkeit Drift-Header** | S (0.5 PT) | Drift wird heute nur per HTTP-Header signalisiert, im UI unsichtbar. |
+| 🟢 **6** | **C.4 — Selbstzahler-LN-Cache** | M (1 PT) | Performance-Verbesserung. |
+| 🟢 **7** | **C.3 — Storno-dueDate UX-Wahl** | S (0.25 PT) | Klarheit in Edge-Cases. |
+| 🟢 **8** | **B.3 — billing.ts Refactor** | L (3 PT) | Wartbarkeit; nicht akut. |
+
+**Min-Pflicht für GoBD-Sauberkeit: 1.25 PT (Prio 1+2+3)** — Prio 1 ist GoBD-relevant, Prio 2 ist Pflegekassen-Rückforderungs-Risiko.
+
+---
+
+## F. Was als nächstes geprüft werden sollte (Live-Tests)
+
+Wenn der Replit-Dev wieder läuft (Run-Klick), würde ich folgendes live durchtesten:
+
+1. **Reproducer für B.1:** Rechnung anlegen → Customer.name ändern → Rechnung erneut abrufen → prüfen ob `customerName` driftet oder Snapshot bleibt.
+2. **Reproducer für C.5:** Termin als employee_signed markieren (Customer-Signatur fehlt) → generate-all auslösen → prüfen ob trotzdem eine Rechnung an die Pflegekasse rausgeht.
+3. **Storno-Cascade-Test:** Multi-Topf-Customer; eine Rechnung generieren (mehrere Topf-Splits); EINE stornieren mit `cascadeRun=true` → prüfen ob alle Geschwister atomar storniert sind.
+4. **Drift-Test:** Rechnung generieren → PDF abrufen → Customer-Stammdaten ändern → PDF erneut abrufen → `X-Pdf-Drift: true` Header erwarten.
+5. **Re-Rechnung nach Storno (Task #585):** Storno einer Rechnung → erneutes generate-all → prüfen ob `referencedStornoInvoiceIds` korrekt verlinkt.
+6. **ZUGFeRD-Embedding:** Pflegekassen-Rechnung versenden → empfangenes PDF prüfen, ob ZUGFeRD-XML eingebettet ist und EN-16931 validiert.
+
+---
+
+## Quellen
+
+- [GoBD: Grundsätze ordnungsmäßiger Buchführung — Lexware](https://www.lexware.de/wissen/buchhaltung-finanzen/gobd/)
+- [Stornorechnung erstellen 2026 — kostenlose-erechnung.de](https://kostenlose-erechnung.de/ratgeber/stornorechnung-vorlage-muster/)
+- [Stornorechnung oder Korrekturrechnung — pida-faktura.de](https://pida-faktura.de/stornorechnung-oder-korrekturrechnung/)
+- [Rechnungsnummer 2026 GoBD-konform vergeben — kostenlose-erechnung.de](https://www.kostenlose-erechnung.de/ratgeber/rechnungsnummer-system-pflichten/)
+- [GoBD-Compliance und E-Rechnung — Grant Thornton](https://www.grantthornton.de/themen/2026/gobd-compliance-und-e-rechnung-anforderungen-pflichten-und-umsetzung-im-b2b-bereich/)
+- [E-Rechnungspflicht in der Pflege ab 2025 — ETL ADVISION](https://www.etl-advision.de/aktuelles/e-rechnungspflicht-in-der-pflege-ab-2025/)
+- [E-Rechnung B2B FAQs — Bundesfinanzministerium](https://www.bundesfinanzministerium.de/Content/DE/FAQ/e-rechnung.html)
+- [Vereinbarung §105 Abs.2 SGB XI — gkv-datenaustausch.de](https://www.gkv-datenaustausch.de/media/dokumente/leistungserbringer_1/pflege/2023_10_05_Vereinbarung__105_Abs.2_Satz_2_SGBXI_final.pdf)
+- [Pflichtangaben Rechnung §14 UStG — IHK Stuttgart](https://www.ihk.de/stuttgart/fuer-unternehmen/recht-und-steuern/steuerrecht/umsatzsteuer-national/neue-pflichtangaben-fuer-rechnungen-684834)
+- [Puppeteer PDF Production Comparison — DEV Community](https://dev.to/iurii_rogulia/pdf-generation-on-the-server-puppeteer-vs-react-pdfrenderer-a-production-comparison-44cg)
