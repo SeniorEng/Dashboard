@@ -78,6 +78,7 @@ import {
     loadLeistungsnachweisPdfFromStorage,
     loadOrRenderSendablePdfs,
     renderLeistungsnachweisOnTheFly,
+    shouldAppendStandaloneLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { getBlockingDraftInvoices } from "../services/invoice-data";
 import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
@@ -1501,11 +1502,21 @@ router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werde
     throw notFound("Rechnungs-PDF konnte nicht geladen werden.");
   }
 
-  // Selbstzahler/Privat ohne LN-Cache: on-the-fly rendern, damit das Bündel
+  // Task #1039 — Für kundenadressierte Rechnungen (pflegekasse_privat sowie
+  // gesetzlich mit rechnungAnKunde/Beihilfe) ist der Leistungsnachweis bereits
+  // fest in das gespeicherte Rechnungs-PDF einmontiert. In diesem Fall darf der
+  // separat gecachte Standalone-LN NICHT ein zweites Mal angehängt werden
+  // (sonst doppelter LN, RE-2026-0034). Nur gesetzliche Kassen (ohne
+  // Kostenerstattung) und Selbstzahler bekommen den LN hier separat angehängt.
+  const appendStandaloneLn = await shouldAppendStandaloneLeistungsnachweis(invoice);
+
+  // Selbstzahler/gesetzlich ohne LN-Cache: on-the-fly rendern, damit das Bündel
   // immer Rechnung + Leistungsnachweis enthält (kein Cache-Schreibe-Pfad).
   // Schlägt das fehl, brechen wir hart ab statt still nur die Rechnung
-  // auszuliefern — sonst druckt der Admin unbemerkt ohne LN.
-  if (!lnPdf) {
+  // auszuliefern — sonst druckt der Admin unbemerkt ohne LN. Bei kunden-
+  // adressierten Rechnungen ist der LN bereits im Rechnungs-PDF, daher kein
+  // On-the-fly-Render nötig.
+  if (!lnPdf && appendStandaloneLn) {
     try {
       lnPdf = await renderLeistungsnachweisOnTheFly(invoice);
     } catch (err) {
@@ -1519,7 +1530,7 @@ router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werde
   const invoiceDoc = await PDFDocument.load(invoicePdf);
   const ip = await merged.copyPages(invoiceDoc, invoiceDoc.getPageIndices());
   ip.forEach((p) => merged.addPage(p));
-  if (lnPdf) {
+  if (lnPdf && appendStandaloneLn) {
     const lnDoc = await PDFDocument.load(lnPdf);
     const lp = await merged.copyPages(lnDoc, lnDoc.getPageIndices());
     lp.forEach((p) => merged.addPage(p));
@@ -1570,7 +1581,10 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   }
 
   // Pro Rechnung: Rechnungs-PDF + LN-PDF beschaffen (gleiche Logik wie /:id/bundle).
-  type Pair = { invoiceNumber: string; invoicePdf: Buffer; lnPdf: Buffer | null };
+  // Task #1039 — `appendLn` steuert, ob der separat gecachte Standalone-LN
+  // zusätzlich angehängt wird. Bei kundenadressierten Rechnungen ist der LN
+  // bereits im Rechnungs-PDF einmontiert → nicht doppelt anhängen.
+  type Pair = { invoiceNumber: string; invoicePdf: Buffer; lnPdf: Buffer | null; appendLn: boolean };
   const pairs: Pair[] = [];
   for (const inv of printable) {
     let invoicePdf = await loadInvoicePdfFromStorage(inv);
@@ -1591,7 +1605,8 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
     if (!invoicePdf) {
       throw new Error(`Rechnungs-PDF für ${inv.invoiceNumber} konnte nicht geladen werden — Bündel abgebrochen.`);
     }
-    if (!lnPdf) {
+    const appendLn = await shouldAppendStandaloneLeistungsnachweis(inv);
+    if (!lnPdf && appendLn) {
       try {
         lnPdf = await renderLeistungsnachweisOnTheFly(inv);
       } catch (err) {
@@ -1599,7 +1614,7 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
         throw new Error(`Leistungsnachweis für ${inv.invoiceNumber} konnte nicht erzeugt werden — Bündel abgebrochen.`);
       }
     }
-    pairs.push({ invoiceNumber: inv.invoiceNumber, invoicePdf, lnPdf });
+    pairs.push({ invoiceNumber: inv.invoiceNumber, invoicePdf, lnPdf, appendLn });
   }
 
   const safeProviderSlug = providerName.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Kasse";
@@ -1612,7 +1627,7 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
       const inv = await PDFDocument.load(p.invoicePdf);
       const ip = await merged.copyPages(inv, inv.getPageIndices());
       ip.forEach(pg => merged.addPage(pg));
-      if (p.lnPdf) {
+      if (p.lnPdf && p.appendLn) {
         const ln = await PDFDocument.load(p.lnPdf);
         const lp = await merged.copyPages(ln, ln.getPageIndices());
         lp.forEach(pg => merged.addPage(pg));
@@ -1637,7 +1652,7 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   archive.pipe(res);
   for (const p of pairs) {
     archive.append(p.invoicePdf, { name: `${p.invoiceNumber}-Rechnung.pdf` });
-    if (p.lnPdf) {
+    if (p.lnPdf && p.appendLn) {
       archive.append(p.lnPdf, { name: `${p.invoiceNumber}-Leistungsnachweis.pdf` });
     }
   }
@@ -1895,6 +1910,9 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
     invoice: DraftInvoice;
     invoicePdf: Buffer;
     lnPdf: Buffer | null;
+    // Task #1039 — bei kundenadressierten Rechnungen steckt der LN bereits im
+    // Rechnungs-PDF; dann nicht doppelt anhängen.
+    appendLn: boolean;
     payerKey: string;
     payerLabel: string;
   };
@@ -1919,7 +1937,8 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
       if (!invoicePdf) {
         throw new Error("Rechnungs-PDF konnte nicht geladen werden.");
       }
-      if (!lnPdf) {
+      const appendLn = await shouldAppendStandaloneLeistungsnachweis(inv);
+      if (!lnPdf && appendLn) {
         lnPdf = await renderLeistungsnachweisOnTheFly(inv);
       }
       const payer = payerByCustomer.get(inv.customerId);
@@ -1927,6 +1946,7 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
         invoice: inv,
         invoicePdf,
         lnPdf,
+        appendLn,
         payerKey: payer ? `kasse-${payer.id}` : "selbstzahler",
         payerLabel: payer ? payer.name : "Selbstzahler",
       });
@@ -1977,7 +1997,7 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
       const flat: Buffer[] = [];
       for (const p of g.pairs) {
         flat.push(p.invoicePdf);
-        if (p.lnPdf) flat.push(p.lnPdf);
+        if (p.lnPdf && p.appendLn) flat.push(p.lnPdf);
       }
       const mergedGroup = await combinePdfBuffers(flat);
       const slug = g.label.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Kasse";
@@ -1992,7 +2012,7 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
     const flat: Buffer[] = [];
     for (const r of rendered) {
       flat.push(r.invoicePdf);
-      if (r.lnPdf) flat.push(r.lnPdf);
+      if (r.lnPdf && r.appendLn) flat.push(r.lnPdf);
     }
     outputBuffer = await combinePdfBuffers(flat);
     contentType = "application/pdf";

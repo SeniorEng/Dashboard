@@ -685,6 +685,40 @@ export async function loadLeistungsnachweisPdfFromStorage(invoice: Invoice): Pro
 }
 
 /**
+ * Task #1039 — Liefert true, wenn das gespeicherte Rechnungs-PDF (`pdfPath`)
+ * den Leistungsnachweis bereits einmontiert enthält. Das ist genau dann der
+ * Fall, wenn die Rechnung kundenadressiert ist (`pflegekasse_privat` oder
+ * `pflegekasse_gesetzlich` mit `rechnungAnKunde`/Beihilfe) — dann mergt
+ * `buildInvoicePdfBytes` Rechnung + LN (bei Beihilfe Rechnung + LN + Rechnung
+ * + LN) in das persistierte PDF.
+ *
+ * Gesetzliche Kassen-Rechnungen (ohne Kostenerstattung) und Selbstzahler
+ * enthalten den LN NICHT im Rechnungs-PDF.
+ */
+export async function storedInvoicePdfContainsLeistungsnachweis(invoice: Invoice): Promise<boolean> {
+  if (invoice.billingType === "pflegekasse_privat") return true;
+  if (invoice.billingType === "pflegekasse_gesetzlich") {
+    const rows = await db
+      .select({ rechnungAnKunde: customersTable.rechnungAnKunde })
+      .from(customersTable)
+      .where(eq(customersTable.id, invoice.customerId))
+      .limit(1);
+    return rows[0]?.rechnungAnKunde === true;
+  }
+  return false;
+}
+
+/**
+ * Task #1039 — Einzige Quelle der Wahrheit für die Bündel-/Sammeldruck-
+ * Endpoints: Soll der separat gecachte Standalone-Leistungsnachweis zusätzlich
+ * an das Rechnungs-PDF angehängt werden? Antwort = nur dann, wenn das
+ * Rechnungs-PDF ihn nicht bereits enthält (sonst doppelter LN, RE-2026-0034).
+ */
+export async function shouldAppendStandaloneLeistungsnachweis(invoice: Invoice): Promise<boolean> {
+  return !(await storedInvoicePdfContainsLeistungsnachweis(invoice));
+}
+
+/**
  * Task #552: Lädt für den Versand-Pfad die standalone Rechnungs- und LN-PDF-
  * Bytes. Reihenfolge:
  *   1. Cache-Hit: `pdfPath` (standalone zugferd-Invoice) + `leistungsnachweisPath`
