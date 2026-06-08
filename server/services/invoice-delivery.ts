@@ -8,7 +8,7 @@ import {
 import { db } from "../lib/db";
 import { storage } from "../storage";
 import type { InvoicePdfData } from "../lib/pdf-generator";
-import { formatCustomerMasterAddress } from "../lib/customer-address-format";
+import { applyLeistungsnachweisCustomerAddress } from "../lib/customer-address-format";
 
 export const MONTH_NAMES_DE = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -92,20 +92,13 @@ export function applyCustomerPdfRecipient(
     pdfData.recipientAddress = customerAddr || pdfData.recipientAddress;
   }
 
-  // Task #1036 — Der Leistungsnachweis-„Leistungsempfänger/in" (= versorgter
-  // Patient) rendert `pdfData.customerAddress`. `buildPdfData` bindet diese an
-  // `invoice.recipientAddress` — das ist für gesetzliche Kassen OHNE
-  // Kostenerstattung die PFLEGEKASSEN-Anschrift (falscher Patient-Wohnort).
-  // Im Versand-Pfad (Cache-Miss → on-demand-Render des LN) wird sonst die
-  // Kassen-Anschrift auf den LN gedruckt. Wir überschreiben die LN-Adresse
-  // strikt mit der Kunden-Stammadresse — byte-identisch zur Korrektur in
-  // `invoice-pdf-orchestrator.buildInvoicePdfData` (Cache-/Persist-Pfad), damit
-  // emailter und gecachter LN denselben Patient-Wohnort tragen. customerAddress
-  // fliesst NUR in den Leistungsnachweis, nicht in das Rechnungs-PDF/ZUGFeRD-XML.
-  const lnMasterAddress = formatCustomerMasterAddress(cust);
-  if (lnMasterAddress) {
-    pdfData.customerAddress = lnMasterAddress;
-  }
+  // Task #1041 — LN-Adress-Korrektur über die EINZIGE Quelle (siehe
+  // `applyLeistungsnachweisCustomerAddress`). Im Versand-Pfad (Cache-Miss →
+  // on-demand-Render des LN) wird sonst die Kassen-Anschrift auf den LN
+  // gedruckt. Die geteilte Funktion garantiert, dass emailter und gecachter LN
+  // denselben Patient-Wohnort tragen — byte-identisch zum Cache-/Persist-Pfad
+  // in `invoice-pdf-orchestrator.buildInvoicePdfData`.
+  applyLeistungsnachweisCustomerAddress(pdfData, cust);
 }
 
 /**

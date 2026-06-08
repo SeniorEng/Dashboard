@@ -25,7 +25,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   } from "../lib/invoice-pdf-fingerprint";
   import { getCachedCompanySettings } from "./cache";
   import { recordPdfCacheSend } from "../lib/pdf-cache-stats";
-  import { formatCustomerMasterAddress } from "../lib/customer-address-format";
+  import { applyLeistungsnachweisCustomerAddress } from "../lib/customer-address-format";
 
   // Task #995 — Effektive Seitenränder pro Dokumenttyp. Das HTML setzt
   // `@page{margin:0}`; die Ränder (inkl. reserviertem Bottom-Margin für den
@@ -414,20 +414,14 @@ export async function buildInvoicePdfData(
     pdfData.recipientAddress = addr || pdfData.recipientAddress;
   }
 
-  // Task #1030 — Der Leistungsnachweis-„Leistungsempfänger/in" (= der versorgte
-  // Kunde, pdf-generator.ts) rendert `pdfData.customerAddress`. buildPdfData
-  // bindet customerAddress an `invoice.recipientAddress` — das ist für
-  // gesetzliche Kassen ohne Kostenerstattung die PFLEGEKASSEN-Anschrift und
-  // damit der falsche „Patient-Wohnort". Wir leiten die LN-Adresse strikt aus
-  // dem customerSnapshot (Stammadresse) ab: live für Entwürfe, eingefroren via
-  // renderSnapshot für versendete/stornierte Rechnungen (GoBD-konform — der
-  // Verifier reproduziert dieselben Bytes). customerAddress fliesst nur in den
-  // Leistungsnachweis, NICHT in das Rechnungs-PDF/ZUGFeRD-XML, daher bleibt die
-  // byte-genaue Integritätsprüfung unberührt.
-  const lnCustomerAddress = formatCustomerMasterAddress(customerSnapshot);
-  if (lnCustomerAddress) {
-    pdfData.customerAddress = lnCustomerAddress;
-  }
+  // Task #1041 — LN-Adress-Korrektur über die EINZIGE Quelle (siehe
+  // `applyLeistungsnachweisCustomerAddress`). Persist-/Cache-/Bundle-Pfad und
+  // On-Demand-Versand-Pfad teilen sich dieselbe Funktion, damit gecachtes und
+  // frisch gerendertes LN-PDF nicht wieder auseinanderdriften. Wir leiten die
+  // LN-Adresse strikt aus dem customerSnapshot (Stammadresse) ab: live für
+  // Entwürfe, eingefroren via renderSnapshot für versendete/stornierte
+  // Rechnungen (GoBD-konform — der Verifier reproduziert dieselben Bytes).
+  applyLeistungsnachweisCustomerAddress(pdfData, customerSnapshot);
 
   return { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot, invoiceSnapshot };
 }
