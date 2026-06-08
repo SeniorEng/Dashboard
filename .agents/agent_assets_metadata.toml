@@ -149,3 +149,15 @@ id = "lp6oH6snkhYUh8SM-C--B"
 uri = "file://.local/tasks/budget-greenfield-architecture.md"
 type = "text"
 title = "Budget Greenfield Architecture — North Star v3 (build-ready)"
+
+[[outputs]]
+id = "G6YoPjIEEG38W-pY0jQdV"
+uri = "file://exports/Termine_Sandra_Buse.xlsx"
+type = "table"
+title = "Termine Sandra Buse (35 Termine)"
+
+[[outputs]]
+id = "z1owmVtant_Vo-6QxYk9E"
+uri = "file://exports/Termine_Nico_Richter.xlsx"
+type = "table"
+title = "Termine Nico Richter (52 Termine)"

@@ -27,3 +27,4 @@ reports/
 
 # Coverage-Gate-Artefakte (generiert via script/coverage-gate.ts)
 coverage/
+exports/
