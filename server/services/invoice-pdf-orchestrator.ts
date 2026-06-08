@@ -11,7 +11,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
   import { computeDataHash } from "./signature-integrity";
   import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
-  import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
+  import { parseObjectPath, getPrivateDir, buildInvoicePdfObjectKey, assertInvoicePdfWriteKeyAllowed } from "../lib/object-storage-helpers";
   import { eq, and, inArray } from "drizzle-orm";
   import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
   import { storage } from "../storage";
@@ -607,7 +607,8 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
     const { pdf: pdfBytes, xml: zugferdXml, leistungsnachweisPdf, pdfDataFingerprint, leistungsnachweisDataFingerprint, customerSnapshot, invoiceSnapshot } =
       await buildInvoicePdfBytes(invoice, companySettings);
     const pdfHash = computeDataHash(pdfBytes as unknown as string);
-    const fileName = `invoices/${safeNumber}.pdf`;
+    const fileName = buildInvoicePdfObjectKey(safeNumber);
+    assertInvoicePdfWriteKeyAllowed(fileName);
     const fullPath = `${getPrivateDir()}/${fileName}`;
     const { bucketName, objectName } = parseObjectPath(fullPath);
     await objectStorageClient.bucket(bucketName).file(objectName).save(pdfBytes, {
@@ -636,7 +637,8 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {
       const lnHash = computeDataHash(leistungsnachweisPdf as unknown as string);
-      const lnFileName = `invoices/${safeNumber}-leistungsnachweis.pdf`;
+      const lnFileName = buildInvoicePdfObjectKey(safeNumber, { leistungsnachweis: true });
+      assertInvoicePdfWriteKeyAllowed(lnFileName);
       const lnFullPath = `${getPrivateDir()}/${lnFileName}`;
       const { bucketName: lnBucket, objectName: lnObj } = parseObjectPath(lnFullPath);
       await objectStorageClient.bucket(lnBucket).file(lnObj).save(leistungsnachweisPdf, {
@@ -654,7 +656,8 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
     const ln = await renderLeistungsnachweisOnly(invoice, companySettings);
     if (ln) {
       const lnHash = computeDataHash(ln.pdf as unknown as string);
-      const lnFileName = `invoices/${safeNumber}-leistungsnachweis.pdf`;
+      const lnFileName = buildInvoicePdfObjectKey(safeNumber, { leistungsnachweis: true });
+      assertInvoicePdfWriteKeyAllowed(lnFileName);
       const lnFullPath = `${getPrivateDir()}/${lnFileName}`;
       const { bucketName: lnBucket, objectName: lnObj } = parseObjectPath(lnFullPath);
       await objectStorageClient.bucket(lnBucket).file(lnObj).save(ln.pdf, {

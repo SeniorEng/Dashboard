@@ -54,3 +54,4 @@
 - [PDF text extraction in route tests](pdf-text-extraction-in-tests.md) — to text-extract route-produced invoice/LN PDFs, normalize merged pdf-lib bytes before the old pdf-parse parser; LN shows the patient address, the Kasse only by name.
 - [/send route needs SMTP config](send-route-stub-needs-smtp-config.md) — the billing send route validates SMTP config before the test-outbox stub, so send tests must seed dummy company SMTP settings first.
 - [e2e currency-text assertions](e2e-currency-text-assertions.md) — formatEuroDE renders U+202F (narrow no-break space) before €, so `/.* € .*/` literal-space regexes never match; assert on data-testid guard elements instead.
+- [Invoice PDF storage isolation](invoice-pdf-storage-isolation.md) — invoice/LN PDF object keys are env-scoped (prod=bare `invoices/…`, non-prod=`_nonprod/<NODE_ENV>/…`); new write paths MUST use buildInvoicePdfObjectKey + assertInvoicePdfWriteKeyAllowed, reads stay verbatim on stored path.

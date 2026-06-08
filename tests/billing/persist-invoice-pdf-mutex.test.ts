@@ -75,6 +75,11 @@ vi.mock("../../server/replit_integrations/object_storage/objectStorage", () => (
 vi.mock("../../server/lib/object-storage-helpers", () => ({
   parseObjectPath: (p: string) => ({ bucketName: "b", objectName: p }),
   getPrivateDir: () => "/private",
+  buildInvoicePdfObjectKey: (safeNumber: string, opts?: { leistungsnachweis?: boolean }) =>
+    opts?.leistungsnachweis
+      ? `invoices/${safeNumber}-leistungsnachweis.pdf`
+      : `invoices/${safeNumber}.pdf`,
+  assertInvoicePdfWriteKeyAllowed: () => {},
 }));
 
 vi.mock("../../server/lib/db", () => ({
