@@ -50,6 +50,7 @@ export function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId:
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showWiedervorlageDialog, setShowWiedervorlageDialog] = useState(false);
   const [showNichtInteressiertDialog, setShowNichtInteressiertDialog] = useState(false);
+  const [showWiederaufnahmeDialog, setShowWiederaufnahmeDialog] = useState(false);
   const [showDisqualifyDialog, setShowDisqualifyDialog] = useState(false);
   const [dialogWiedervorlageDate, setDialogWiedervorlageDate] = useState("");
   const [dialogKommentar, setDialogKommentar] = useState("");
@@ -158,6 +159,20 @@ export function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId:
     updateMutation.mutate({ id: prospectId, data }, {
       onSuccess: () => {
         setShowNichtInteressiertDialog(false);
+        setDialogKommentar("");
+      },
+    });
+  };
+
+  const handleWiederaufnahmeConfirm = () => {
+    if (!prospectId) return;
+    const data: Record<string, unknown> = { status: "qualifiziert" };
+    if (dialogKommentar.trim()) {
+      data.statusNotiz = dialogKommentar.trim();
+    }
+    updateMutation.mutate({ id: prospectId, data }, {
+      onSuccess: () => {
+        setShowWiederaufnahmeDialog(false);
         setDialogKommentar("");
       },
     });
@@ -466,6 +481,28 @@ export function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId:
                   </Card>
                 )}
 
+                {prospect.status === "nicht_interessiert" && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Aktionen</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Dieser Interessent ist als „Nicht interessiert" markiert. Bei erneutem Interesse kann er wieder in die Pipeline aufgenommen werden.
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-teal-600"
+                        onClick={() => setShowWiederaufnahmeDialog(true)}
+                        data-testid="button-status-wieder-aufnehmen"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 mr-1" /> Wieder aufnehmen
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">Notiz hinzufügen</CardTitle>
@@ -623,6 +660,36 @@ export function ProspectDetailSheet({ prospectId, open, onClose }: { prospectId:
               <AlertDialogAction onClick={handleNichtInteressiertConfirm} className="bg-red-600 hover:bg-red-700" disabled={updateMutation.isPending} data-testid="button-confirm-nicht-interessiert">
                 {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Bestätigen
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showWiederaufnahmeDialog} onOpenChange={(v) => { if (!v) { setShowWiederaufnahmeDialog(false); setDialogKommentar(""); } }}>
+        <AlertDialogContent className="fixed inset-0 flex items-center justify-center">
+          <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-lg border">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Interessent wieder aufnehmen?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Der Interessent wird auf „Qualifiziert" gesetzt und erscheint wieder in der aktiven Pipeline. Anschließend kann eine Erstberatung geplant werden.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="mt-3">
+              <Label>Grund / Kommentar</Label>
+              <Textarea
+                value={dialogKommentar}
+                onChange={(e) => setDialogKommentar(e.target.value)}
+                placeholder="z.B. hat sich erneut gemeldet (optional)"
+                className="min-h-[60px]"
+                data-testid="input-wieder-aufnehmen-kommentar"
+              />
+            </div>
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogCancel onClick={() => { setShowWiederaufnahmeDialog(false); setDialogKommentar(""); }} data-testid="button-cancel-wieder-aufnehmen">Abbrechen</AlertDialogCancel>
+              <AlertDialogAction onClick={handleWiederaufnahmeConfirm} disabled={updateMutation.isPending} data-testid="button-confirm-wieder-aufnehmen">
+                {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Wieder aufnehmen
               </AlertDialogAction>
             </AlertDialogFooter>
           </div>
