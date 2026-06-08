@@ -23,3 +23,14 @@ expected and correct, not a bug. To actually enable auto-repair you must first m
 PDF rendering byte-deterministic (freeze Puppeteer creation timestamps + ZUGFeRD XMP
 creation time). Test repair/restore paths by INJECTING the renderer (return known
 bytes), since real Chromium output is non-deterministic.
+
+**Legacy (pre-#1047) split:** PDFs sealed BEFORE the determinism work have NO
+`pdfCreationDate` in `render_snapshot`, so re-render can NEVER reproduce their
+`pdf_hash` — they are permanently `flagged` by the re-render path. Their only repair
+is recovering the ORIGINAL bytes from a backup, hash-gated against the sealed
+`pdf_hash` (`server/scripts/restore-legacy-invoice-pdfs-from-backup.ts`, runbook
+docs/pre-publish-backup-runbook.md §9). NEVER backfill `pdfCreationDate` into a
+sealed snapshot to "fix" the hash — that mutates a GoBD-sealed field. The re-render
+script now labels these via `pdfCreationDateSealed=false` / `flaggedLegacy` so the
+legacy backlog is countable. Detect legacy with `isLegacyInvoice(snapshot)` =
+snapshot present + no `pdfCreationDate`.

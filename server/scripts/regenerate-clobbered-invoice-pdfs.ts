@@ -226,6 +226,14 @@ export interface ObjectOutcome {
   decision: "repair" | "flag" | "skip";
   /** Bei `--apply` und `repair`: ob die Bytes tatsächlich geschrieben wurden. */
   restored: boolean;
+  /**
+   * Task #1050 — ob die Rechnung einen versiegelten `pdfCreationDate` trägt
+   * (post-#1047). `false` = Legacy-Bestand (Wall-Clock-Ära): der Re-Render kann
+   * den `pdf_hash` NIE byte-genau reproduzieren. Solche `flag`-Objekte sind über
+   * `restore-legacy-invoice-pdfs-from-backup.ts` (Backup-Original) zu reparieren,
+   * nicht per Re-Render.
+   */
+  pdfCreationDateSealed: boolean;
   /** Manuelle-Prüfung-Grund (nur für `flag`). */
   flagReason?: string;
 }
@@ -240,6 +248,14 @@ export interface RegenerateSummary {
   repaired: number;
   /** Objekte, deren Re-Render `pdf_hash` NICHT reproduziert → manuelle Prüfung. */
   flagged: number;
+  /**
+   * Task #1050 — Teilmenge von `flagged`: Legacy-Bestände (pre-#1047, kein
+   * versiegelter `pdfCreationDate`), die per Re-Render NIE reparierbar sind und
+   * stattdessen über `restore-legacy-invoice-pdfs-from-backup.ts` (Backup-
+   * Original) zu adressieren sind. Macht „wie viele Altbestände warum geflaggt"
+   * direkt bezifferbar.
+   */
+  flaggedLegacy: number;
   /** Detail pro Objekt (verklobberte + reparierte + geflaggte). */
   outcomes: ObjectOutcome[];
 }
@@ -350,10 +366,16 @@ async function processObject(args: {
   expectedHash: string;
   apply: boolean;
   userId?: number;
+  /**
+   * Task #1050 — `false` = Legacy-Bestand (pre-#1047, kein versiegelter
+   * `pdfCreationDate`); ein Re-Render reproduziert den `pdf_hash` NIE byte-genau,
+   * weshalb die Flag-Begründung auf den Backup-Restore-Pfad verweist.
+   */
+  pdfCreationDateSealed: boolean;
   /** Lazy-Re-Render: liefert (gecached) die Artefakte der ganzen Rechnung. */
   getArtifacts: () => Promise<RenderedInvoiceArtifacts>;
 }): Promise<ObjectOutcome> {
-  const { invoice, kind, storedPath, expectedHash, apply } = args;
+  const { invoice, kind, storedPath, expectedHash, apply, pdfCreationDateSealed } = args;
 
   const storedBytes = await downloadStoredBytes(storedPath);
   const storedHash = storedBytes ? computeDataHash(storedBytes as unknown as string) : null;
@@ -372,6 +394,7 @@ async function processObject(args: {
     storedState,
     decision: "skip",
     restored: false,
+    pdfCreationDateSealed,
   };
 
   if (storedState === "correct") {
@@ -397,13 +420,22 @@ async function processObject(args: {
   const decision = decideRestore({ rerenderHash, expectedHash });
 
   if (decision === "flag") {
+    // Task #1050 — Legacy-Bestände (kein versiegelter pdfCreationDate) können
+    // per Re-Render prinzipiell NIE repariert werden. Den Operator gezielt auf
+    // den Backup-Original-Pfad verweisen, statt eine generische Byte-Stabilitäts-
+    // Warnung zu geben.
+    const legacyHint = pdfCreationDateSealed
+      ? `PDFs sind nicht byte-stabil (Creation-Timestamps) — manuelle GoBD-Prüfung nötig.`
+      : `LEGACY-BESTAND (pre-#1047, kein versiegelter pdfCreationDate): Re-Render kann ` +
+        `den pdf_hash NIE reproduzieren. Reparatur nur über Backup-Original via ` +
+        `restore-legacy-invoice-pdfs-from-backup.ts.`;
     return {
       ...base,
       decision: "flag",
       flagReason:
         `Re-Render reproduziert pdf_hash NICHT byte-genau ` +
         `(erwartet ${expectedHash.slice(0, 12)}…, re-rendered ${rerenderHash.slice(0, 12)}…). ` +
-        `PDFs sind nicht byte-stabil (Creation-Timestamps) — manuelle GoBD-Prüfung nötig.`,
+        legacyHint,
     };
   }
 
@@ -437,6 +469,10 @@ export async function regenerateClobberedInvoicePdfs(
     const snapshot = (invoice.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
     if (!snapshot) continue; // Defensive: Kandidaten-Filter garantiert das bereits.
 
+    // Task #1050 — Legacy-Bestände (pre-#1047) tragen keinen versiegelten
+    // pdfCreationDate; ihr Re-Render reproduziert den pdf_hash NIE byte-genau.
+    const pdfCreationDateSealed = Boolean(snapshot.pdfCreationDate);
+
     // Lazy + gecacht: Re-Render erst, wenn mindestens ein Objekt verklobbert ist.
     let artifactsPromise: Promise<RenderedInvoiceArtifacts> | null = null;
     const getArtifacts = () => {
@@ -468,6 +504,7 @@ export async function regenerateClobberedInvoicePdfs(
         expectedHash: obj.expectedHash,
         apply: options.apply,
         userId: options.userId,
+        pdfCreationDateSealed,
         getArtifacts,
       });
       outcomes.push(outcome);
@@ -508,6 +545,12 @@ export async function regenerateClobberedInvoicePdfs(
   // false`) — die per-Objekt-`restored`-Flagge unterscheidet beides.
   const repaired = outcomes.filter((o) => o.decision === "repair").length;
   const flagged = outcomes.filter((o) => o.decision === "flag").length;
+  // Task #1050 — Teilmenge der geflaggten Objekte, die Legacy-Bestände sind
+  // (kein versiegelter pdfCreationDate). Diese sind per Re-Render nicht
+  // reparierbar und gehören in den Backup-Restore-Pfad.
+  const flaggedLegacy = outcomes.filter(
+    (o) => o.decision === "flag" && !o.pdfCreationDateSealed,
+  ).length;
 
   return {
     apply: options.apply,
@@ -515,6 +558,7 @@ export async function regenerateClobberedInvoicePdfs(
     alreadyCorrect,
     repaired,
     flagged,
+    flaggedLegacy,
     outcomes,
   };
 }
@@ -588,7 +632,8 @@ async function main() {
   console.log(`\nGeprüfte Objekte:        ${summary.checked}`);
   console.log(`Bereits korrekt:         ${summary.alreadyCorrect}`);
   console.log(`${args.apply ? "Repariert" : "Reparierbar (Trockenlauf)"}: ${summary.repaired}`);
-  console.log(`Geflaggt (manuelle Prüfung): ${summary.flagged}\n`);
+  console.log(`Geflaggt (manuelle Prüfung): ${summary.flagged}`);
+  console.log(`  davon Legacy (pre-#1047, Backup nötig): ${summary.flaggedLegacy}\n`);
 
   const actionable = summary.outcomes.filter((o) => o.storedState !== "correct");
   for (const o of actionable) {

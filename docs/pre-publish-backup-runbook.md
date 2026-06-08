@@ -197,3 +197,111 @@ Das Skript hakt automatisch ab, was es prüfen kann (Backup-Datei < 24 h alt,
 destruktive Statements in der jüngsten Migration), und listet die manuellen
 Restpunkte (Replit-Auto-Backup verifizieren, Eintrag in `docs/deployment-log.md`,
 `unset PROD_DATABASE_URL`) auf.
+
+---
+
+## 9. Legacy-Rechnungs-/LN-PDF-Restore aus Backup (Task #1050)
+
+### 9.1 Problem
+
+Vor Task #1042 überschrieben Dev-/Test-Läufe im geteilten Object-Storage-Bucket
+PRODUKTIONS-PDF-Bytes (kollidierende Rechnungsnummern). Die DB blieb intakt
+(`pdf_hash`, `zugferd_xml`, `render_snapshot`). Der Re-Render-Pfad
+`server/scripts/regenerate-clobbered-invoice-pdfs.ts` (Task #1043) rendert solche
+PDFs aus dem versiegelten Snapshot neu und schreibt sie NUR zurück, wenn der
+Re-Render den versiegelten `pdf_hash` byte-genau reproduziert.
+
+Für **Altbestände aus der „Wall-Clock-Ära" (pre-#1047)** gelingt das NIE: Task
+#1047 versiegelt den Erzeugungszeitpunkt einmalig im `render_snapshot`
+(`pdfCreationDate`) und macht das PDF damit byte-reproduzierbar. PDFs, die VOR
+#1047 erzeugt wurden, haben dieses Feld nicht — ihre Original-Bytes trugen eine
+verlorene Wall-Clock-`/CreationDate` (+ XMP-Zeitstempel + zufällige Datei-`/ID`).
+Der Re-Render-Hash weicht deshalb immer ab, und das Objekt wird (korrekt,
+GoBD-sicher) nur **geflaggt** statt überschrieben.
+
+Diese Altbestände lassen sich nur reparieren, indem die ORIGINAL-Bytes aus einem
+Backup zurückgeschrieben werden — und auch dann NUR, wenn die Backup-Bytes den
+versiegelten `pdf_hash` byte-genau reproduzieren.
+
+### 9.2 Wie viele sind betroffen? (Inventur / Census)
+
+`server/scripts/regenerate-clobbered-invoice-pdfs.ts` beziffert die Altbestände
+jetzt direkt: Im Trockenlauf zeigt die Zusammenfassung neben `Geflaggt` zusätzlich
+`davon Legacy (pre-#1047, Backup nötig)`. Pro Objekt steht im
+`flagReason`, ob es ein Legacy-Bestand ist (`pdfCreationDateSealed === false`).
+
+Reine Legacy-Inventur (kein Backup nötig, schreibt nie):
+
+```bash
+tsx server/scripts/restore-legacy-invoice-pdfs-from-backup.ts
+```
+
+Census-Ausgabe: `Geprüfte Legacy-Objekte`, `Bereits korrekt`,
+`Geflaggt (kein Backup)`. Damit ist quantifizierbar, wie viele Altbestände noch
+verklobbert/fehlend sind und warum.
+
+### 9.3 Backup-Original beschaffen
+
+Quelle der Original-Bytes (in Reihenfolge der Präferenz):
+1. **Lokal heruntergeladene Object-Storage-Snapshots** aus früheren Pre-Publish-
+   Backups (Abschnitt 3.3) — falls die PDFs damals mitgesichert wurden.
+2. **Die ursprünglich versendeten PDFs** (E-Mail-Anhänge an Pflegekasse/Kunde,
+   postalischer LetterExpress-Versand-Archiv).
+3. Replit/Neon-PITR hilft NICHT — Object Storage liegt außerhalb der DB.
+
+Die Original-Dateien in ein lokales Verzeichnis legen, z.B. `tmp/pdf-backup/`.
+Pro Objekt werden mehrere Pfade probiert (erster Treffer gewinnt):
+- `<backup-dir>/<object-key>` (z.B. `tmp/pdf-backup/invoices/RE-2026-0034.pdf`)
+- `<backup-dir>/<basename>` (z.B. `tmp/pdf-backup/RE-2026-0034.pdf`)
+
+Der Leistungsnachweis trägt den Suffix `-leistungsnachweis.pdf` (wie im
+Object-Key).
+
+### 9.4 Restore durchführen
+
+```bash
+# 1. Trockenlauf mit Backup (read-only, prüft Hash-Reproduktion, schreibt nie):
+tsx server/scripts/restore-legacy-invoice-pdfs-from-backup.ts \
+  --backup-dir=tmp/pdf-backup
+
+# 2. Scharf (schreibt verbatim die Original-Bytes zurück + Append-only-Audit):
+tsx server/scripts/restore-legacy-invoice-pdfs-from-backup.ts \
+  --backup-dir=tmp/pdf-backup --apply \
+  --user=<superadmin-id> --reason="Legacy-PDF-Restore Task #1050"
+```
+
+Optionale Eingrenzung: `--customer=<id,id>` oder `--invoice=<id,id>`.
+
+Die Zusammenfassung beziffert das Ergebnis vollständig:
+- `Aus Backup wiederhergestellt` — Backup reproduziert `pdf_hash` byte-genau.
+- `Geflaggt (kein Backup)` — kein Original im Backup-Verzeichnis gefunden.
+- `Geflaggt (Hash-Mismatch)` — Backup gefunden, reproduziert den `pdf_hash`
+  aber NICHT → falsche/abweichende Sicherung, manuelle GoBD-Prüfung nötig.
+
+### 9.5 GoBD-Garantien des Skripts
+
+- `pdf_hash`, `zugferd_xml`, `render_snapshot` und alle anderen versiegelten
+  Rechnungs-Felder werden NIE mutiert. Geschrieben werden ausschließlich
+  Object-Storage-Bytes (verbatim auf den gespeicherten `pdf_path`) und ein
+  Append-only-Audit-Eintrag (`invoice_pdf_restored_from_backup`).
+- Harter Hash-Gate: ein Backup-Original wird NUR akzeptiert, wenn es den
+  versiegelten `pdf_hash` byte-genau reproduziert. Fehlendes/abweichendes Backup
+  führt NIE zu einem stillen Überschreiben.
+- Trockenlauf ist Default; `--apply` erfordert `--backup-dir`, einen aktiven
+  Superadmin (`--user`) und eine Begründung (`--reason`, ≥10 Zeichen) für den
+  Audit-Log.
+- Der Restore schreibt verbatim auf den gespeicherten `pdf_path`. In Produktion
+  ist das der nackte `invoices/…`-Key; aus einer Nicht-Produktions-Umgebung bricht
+  `assertInvoicePdfWriteKeyAllowed` einen Schreibzugriff auf den Produktions-
+  Key-Space hart ab.
+
+### 9.6 Wenn kein byte-genaues Backup existiert
+
+Bleibt ein Legacy-Objekt nach allen Backup-Quellen `Geflaggt (kein Backup)` oder
+`Geflaggt (Hash-Mismatch)`, ist es NICHT automatisch reparierbar. Optionen:
+- Den verbleibenden Bestand dokumentieren (Census-Ausgabe + Begründung) und als
+  bekannten Restposten im `docs/deployment-log.md` festhalten.
+- Das versiegelte ZUGFeRD-XML (`zugferd_xml`) bleibt in der DB als
+  GoBD-konformer, maschinenlesbarer Beleg erhalten — der `pdf_hash` belegt
+  weiterhin die Integrität des ursprünglichen Belegs, auch wenn die PDF-Bytes
+  selbst nicht mehr beschaffbar sind.
