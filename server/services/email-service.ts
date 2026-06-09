@@ -58,7 +58,16 @@ export interface TestOutboxEntry {
   // mitgeschrieben, damit Tests den tatsächlich versandten PDF-Inhalt prüfen
   // können (z.B. dass der on-demand gerenderte Leistungsnachweis die richtige
   // Patient-Stammadresse trägt). Im Produktiv-Transport wird nichts gespeichert.
-  attachments: Array<{ filename: string; contentBase64: string; contentType: string }>;
+  // Task #1104 — `cid`/`contentDisposition` werden mitgeschrieben, damit Tests
+  // verifizieren können, dass das Firmenlogo als Inline-Anhang (cid:) statt als
+  // data:-URI mitgeschickt wird (Regression-Schutz für Task #1102).
+  attachments: Array<{
+    filename: string;
+    contentBase64: string;
+    contentType: string;
+    cid?: string;
+    contentDisposition?: string;
+  }>;
   messageId: string;
   sentAt: string;
 }
@@ -140,6 +149,8 @@ export async function sendEmail(settings: CompanySettings, options: EmailOptions
         filename: a.filename,
         contentBase64: a.content.toString("base64"),
         contentType: a.contentType || "application/pdf",
+        ...(a.cid ? { cid: a.cid } : {}),
+        ...(a.contentDisposition ? { contentDisposition: a.contentDisposition } : {}),
       })) ?? [],
       messageId,
       sentAt: new Date().toISOString(),

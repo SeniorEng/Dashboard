@@ -295,7 +295,14 @@ export interface TestOutboxMessage {
   attachmentCount: number;
   attachmentNames: string[];
   // Task #1036 — Anhang-Bytes (base64), nur im Test-Stub-Transport befüllt.
-  attachments: Array<{ filename: string; contentBase64: string; contentType: string }>;
+  // Task #1104 — `cid`/`contentDisposition` für die Inline-Logo-Anhang-Prüfung.
+  attachments: Array<{
+    filename: string;
+    contentBase64: string;
+    contentType: string;
+    cid?: string;
+    contentDisposition?: string;
+  }>;
   messageId: string;
   sentAt: string;
 }
