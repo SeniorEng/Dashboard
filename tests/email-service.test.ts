@@ -5,13 +5,25 @@ import {
   sendEmail,
   testSmtpConnection,
   isStubEmailTransport,
+  buildLogoInlineAttachment,
+  buildEmailLayout,
+  EMAIL_LOGO_CID,
+  EMAIL_LOGO_SRC,
+  getTestOutbox,
+  clearTestOutbox,
 } from "../server/services/email-service";
+import { loadLogoBytes } from "../server/services/logo-resolver";
 
 vi.mock("nodemailer", () => ({
   default: { createTransport: vi.fn() },
 }));
 
+vi.mock("../server/services/logo-resolver", () => ({
+  loadLogoBytes: vi.fn(),
+}));
+
 const createTransport = nodemailer.createTransport as unknown as ReturnType<typeof vi.fn>;
+const loadLogoBytesMock = loadLogoBytes as unknown as ReturnType<typeof vi.fn>;
 
 function makeSettings(overrides: Partial<CompanySettings> = {}): CompanySettings {
   return {
@@ -271,6 +283,151 @@ describe("email-service real SMTP path (Task #232)", () => {
 
       expect(result).toEqual({ success: true });
       expect(createTransport).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("email-service inline logo embedding (Task #1092 / #1103)", () => {
+  beforeEach(() => {
+    createTransport.mockReset();
+    loadLogoBytesMock.mockReset();
+    clearTestOutbox();
+  });
+
+  afterEach(() => {
+    delete process.env.EMAIL_TRANSPORT;
+    clearTestOutbox();
+  });
+
+  describe("buildLogoInlineAttachment()", () => {
+    it("returns an inline cid attachment when the logo is loadable", async () => {
+      loadLogoBytesMock.mockResolvedValue({
+        content: Buffer.from("PNGDATA"),
+        contentType: "image/png",
+      });
+
+      const attachment = await buildLogoInlineAttachment("/objects/logo.png");
+
+      expect(loadLogoBytesMock).toHaveBeenCalledWith("/objects/logo.png");
+      expect(attachment).not.toBeNull();
+      expect(attachment).toMatchObject({
+        cid: EMAIL_LOGO_CID,
+        contentDisposition: "inline",
+        contentType: "image/png",
+        filename: "logo.png",
+      });
+      expect(attachment!.content).toBeInstanceOf(Buffer);
+      expect(attachment!.content.toString()).toBe("PNGDATA");
+    });
+
+    it("derives the filename extension from the content type (jpeg, svg+xml)", async () => {
+      loadLogoBytesMock.mockResolvedValue({
+        content: Buffer.from("JPEG"),
+        contentType: "image/jpeg",
+      });
+      expect((await buildLogoInlineAttachment("/objects/logo"))!.filename).toBe("logo.jpeg");
+
+      loadLogoBytesMock.mockResolvedValue({
+        content: Buffer.from("<svg/>"),
+        contentType: "image/svg+xml",
+      });
+      expect((await buildLogoInlineAttachment("/objects/logo"))!.filename).toBe("logo.svg");
+    });
+
+    it("returns null when no logo is configured / loadable", async () => {
+      loadLogoBytesMock.mockResolvedValue(null);
+      expect(await buildLogoInlineAttachment(null)).toBeNull();
+      expect(await buildLogoInlineAttachment("/objects/logo.png")).toBeNull();
+    });
+  });
+
+  describe("buildEmailLayout() logo rendering", () => {
+    it("renders <img src=\"cid:company-logo\"> when EMAIL_LOGO_SRC is passed", () => {
+      const html = buildEmailLayout("Test GmbH", EMAIL_LOGO_SRC, "<p>body</p>");
+      expect(html).toContain(`<img src="${EMAIL_LOGO_SRC}"`);
+      expect(html).toContain('src="cid:company-logo"');
+      expect(html).toContain("<p>body</p>");
+    });
+
+    it("renders no <img> when the logo URL is null", () => {
+      const html = buildEmailLayout("Test GmbH", null, "<p>body</p>");
+      expect(html).not.toContain("<img");
+      expect(html).not.toContain("cid:");
+    });
+  });
+
+  describe("sendEmail() carries the inline logo attachment (stub outbox)", () => {
+    it("records the inline logo attachment in the stub outbox", async () => {
+      process.env.EMAIL_TRANSPORT = "stub";
+      loadLogoBytesMock.mockResolvedValue({
+        content: Buffer.from("PNGDATA"),
+        contentType: "image/png",
+      });
+
+      const logoAttachment = await buildLogoInlineAttachment("/objects/logo.png");
+      expect(logoAttachment).not.toBeNull();
+
+      await sendEmail(makeSettings(), {
+        to: "to@test.local",
+        subject: "Mit Logo",
+        html: buildEmailLayout("Test GmbH", EMAIL_LOGO_SRC, "<p>hi</p>"),
+        attachments: [logoAttachment!],
+      });
+
+      const outbox = getTestOutbox();
+      expect(outbox).toHaveLength(1);
+      expect(outbox[0].attachmentCount).toBe(1);
+      expect(outbox[0].attachmentNames).toEqual(["logo.png"]);
+      expect(outbox[0].attachments[0].contentType).toBe("image/png");
+      expect(outbox[0].html).toContain('src="cid:company-logo"');
+    });
+
+    it("sends no attachment and no <img> when the logo is absent", async () => {
+      process.env.EMAIL_TRANSPORT = "stub";
+      loadLogoBytesMock.mockResolvedValue(null);
+
+      const logoAttachment = await buildLogoInlineAttachment(null);
+      expect(logoAttachment).toBeNull();
+
+      await sendEmail(makeSettings(), {
+        to: "to@test.local",
+        subject: "Ohne Logo",
+        html: buildEmailLayout("Test GmbH", null, "<p>hi</p>"),
+        attachments: logoAttachment ? [logoAttachment] : [],
+      });
+
+      const outbox = getTestOutbox();
+      expect(outbox).toHaveLength(1);
+      expect(outbox[0].attachmentCount).toBe(0);
+      expect(outbox[0].html).not.toContain("<img");
+    });
+
+    it("forwards cid + contentDisposition to nodemailer on the real path", async () => {
+      process.env.EMAIL_TRANSPORT = "real";
+      const sendMail = vi.fn().mockResolvedValue({ messageId: "<logo-1@test.local>" });
+      createTransport.mockReturnValue({ verify: vi.fn(), sendMail });
+      loadLogoBytesMock.mockResolvedValue({
+        content: Buffer.from("PNGDATA"),
+        contentType: "image/png",
+      });
+
+      const logoAttachment = await buildLogoInlineAttachment("/objects/logo.png");
+
+      await sendEmail(makeSettings(), {
+        to: "to@test.local",
+        subject: "Mit Logo",
+        html: buildEmailLayout("Test GmbH", EMAIL_LOGO_SRC, "<p>hi</p>"),
+        attachments: [logoAttachment!],
+      });
+
+      const call = sendMail.mock.calls[0][0];
+      expect(call.attachments).toHaveLength(1);
+      expect(call.attachments[0]).toMatchObject({
+        filename: "logo.png",
+        contentType: "image/png",
+        cid: EMAIL_LOGO_CID,
+        contentDisposition: "inline",
+      });
     });
   });
 });
