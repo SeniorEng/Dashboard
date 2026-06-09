@@ -59,13 +59,17 @@ async function scheduleErstberatung(opts: {
   assignedEmployeeId: number;
   /** Vergangener Slot (für Dokumentation/Abschluss), Default: zukünftig. */
   past?: boolean;
+  /** Offset-Fenster (Tage) für die Slot-Suche, Default: [18, 45]. */
+  offsetRange?: [number, number];
 }): Promise<{
   id: number;
+  date: string;
   displayDate: string;
   displayTime: string;
   scheduledStart: string;
 }> {
-  for (let offset = 18; offset <= 45; offset++) {
+  const [from, to] = opts.offsetRange ?? [18, 45];
+  for (let offset = from; offset <= to; offset++) {
     const candidate = new Date();
     candidate.setDate(candidate.getDate() + (opts.past ? -offset : offset));
     const dow = candidate.getDay();
@@ -89,6 +93,7 @@ async function scheduleErstberatung(opts: {
         const [y, m, d] = dateStr.split("-");
         return {
           id: appt.id,
+          date: dateStr,
           displayDate: `${d}.${m}`,
           displayTime: toHHMM(time),
           scheduledStart: toHHMM(time),
@@ -210,6 +215,55 @@ test.describe("@smoke Interessenten-Karte zeigt Erstberatungs-Details", () => {
     );
     await expect(employeeEl).toBeVisible();
     await expect(employeeEl).toContainText(currentUserName);
+  });
+
+  test("Nach Umplanung: Karte zeigt den aktuellsten (späteren) Erstberatungstermin", async ({ page }) => {
+    // Task #1099: Browser-Round-Trip zu Backend PL-3. Ein Interessent hat
+    // mehrere Erstberatungen (z. B. nach einer Umplanung) — die Karte MUSS den
+    // aktuellsten Termin (spätestes Datum + Startzeit) rendern, nicht den ersten.
+    const prospect = await createProspect(session);
+
+    const earlier = await scheduleErstberatung({
+      prospectId: prospect.id,
+      assignedEmployeeId: currentUserId,
+      offsetRange: [18, 28],
+    });
+    const later = await scheduleErstberatung({
+      prospectId: prospect.id,
+      assignedEmployeeId: currentUserId,
+      offsetRange: [45, 60],
+    });
+
+    // Sanity: der zweite Termin muss echt nach dem ersten liegen, sonst prüft
+    // der Test nicht den "most current"-Pfad.
+    expect(
+      later.date > earlier.date,
+      "later.date muss nach earlier.date liegen",
+    ).toBe(true);
+
+    await page.goto("/admin/prospects", { waitUntil: "domcontentloaded" });
+    const search = page.locator("[data-testid='input-search-prospects']");
+    await expect(search).toBeVisible({ timeout: 15000 });
+    await search.fill(prospect.nachname);
+
+    const card = page.locator(`[data-testid='card-prospect-${prospect.id}']`);
+    await expect(card).toBeVisible({ timeout: 15000 });
+
+    const ebBlock = page.locator(
+      `[data-testid='text-prospect-erstberatung-${prospect.id}']`,
+    );
+    await expect(ebBlock).toBeVisible({ timeout: 10000 });
+
+    // Die Karte rendert den SPÄTEREN Termin (Datum + Startzeit) …
+    await expect(ebBlock).toContainText(later.displayDate);
+    await expect(ebBlock).toContainText(later.displayTime);
+
+    // … und NICHT mehr den früheren Termin.
+    expect(
+      later.displayDate,
+      "Beide Termine dürfen nicht dasselbe Anzeigedatum haben",
+    ).not.toBe(earlier.displayDate);
+    await expect(ebBlock).not.toContainText(earlier.displayDate);
   });
 
   test("Abgeschlossene Erstberatung durch Vertretung: Karte zeigt durchführenden Mitarbeiter + 'Abgeschlossen'", async ({ page }) => {
