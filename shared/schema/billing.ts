@@ -304,6 +304,18 @@ export interface InvoiceRenderSnapshot {
    * mit `"cumulative"` versiegelt.
    */
   lineAggregation?: "cumulative" | "per_appointment";
+  /**
+   * Task #1098 — eingefrorenes BT-131-Flag (`LineTotalAmount`, Pro-Zeilen-Betrag
+   * im eingebetteten ZUGFeRD-/EN-16931-XML). `true` = die Rechnung wurde MIT
+   * BT-131 versiegelt; das Re-Render emittiert den Positionsbetrag je Zeile.
+   * `undefined`/`false` = Bestand, der VOR dieser Korrektur OHNE BT-131
+   * versiegelt wurde (node-zugferd verwarf den damals falschen Schlüssel still)
+   * → MUSS weiterhin OHNE BT-131 re-gerendert werden, sonst driftet das XML
+   * byte-weise gegen das in `invoices.zugferd_xml` / `pdf_hash` versiegelte
+   * Original (Integritäts-Verifier). Neu erzeugte Rechnungen werden mit `true`
+   * versiegelt.
+   */
+  includeLineTotalAmount?: boolean;
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

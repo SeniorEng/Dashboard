@@ -92,6 +92,12 @@ export interface InvoicePdfData {
   // byte-stabil über den Render-Snapshot eingefroren).
   lineAggregation?: "cumulative" | "per_appointment";
 
+  // Task #1098 — Pro-Zeilen-Betrag (BT-131, `LineTotalAmount`) im eingebetteten
+  // ZUGFeRD-/EN-16931-XML. `true` für neue Rechnungen (BT-131 ist in EN 16931
+  // Pflicht); `undefined`/`false` für Bestände, die VOR dieser Korrektur ohne
+  // BT-131 versiegelt wurden (byte-stabiler Re-Render über den Render-Snapshot).
+  includeLineTotalAmount?: boolean;
+
   // Totals
   netAmountCents: number;
   vatAmountCents: number;

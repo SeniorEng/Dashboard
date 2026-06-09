@@ -327,7 +327,17 @@ EN 16931 (deutsches Profil; Standard-Profil seit Task #1073 = `en16931`,
 vorher `basic`). Sie ist Teil des hybriden PDF/A-3-Dokuments (sichtbares PDF
 + eingebettete `factur-x.xml`) und dient der **GoBD-konformen Rechnungs-
 stellung** an Pflegekasse, Beihilfe oder Selbstzahler. Empfänger, Beträge,
-Steuerkategorien und §-Hinweis (BT-22-Note) spiegeln exakt die Buchung.
+Steuerkategorien und §-Hinweis (BT-22-Note) spiegeln exakt die Buchung. Pro
+Position wird zudem der **Pro-Zeilen-Betrag (BT-131, `LineTotalAmount`)**
+ausgegeben (Task #1098), der bit-genau dem persistierten `totalCents` der
+(ggf. kumulierten) Position entspricht — Σ(BT-131) == Nettobetrag. Hinweis:
+node-zugferd erwartet im Line-Block den Schlüssel `lineTotalAmount`; der
+frühere `totalAmount` wurde still verworfen, sodass das XML vor #1098 keinen
+BT-131 trug und nur über den Non-Strict-Fallback konform war. BT-131 wird
+analog zu Profil/Aggregationsmodus per `InvoiceRenderSnapshot`
+(`includeLineTotalAmount`) eingefroren: vor #1098 versiegelte Bestände tragen
+das Flag nicht und re-rendern bewusst **ohne** BT-131 (byte-stabiler
+Re-Render, GoBD-Hash-Stabilität); neue Rechnungen werden mit `true` versiegelt.
 
 **Was sie ausdrücklich NICHT IST:** der **sozialrechtliche Leistungs-/
 Abrechnungs-Datenaustausch** mit den Kostenträgern nach **§ 105 SGB XI**

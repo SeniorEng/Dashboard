@@ -141,7 +141,12 @@ interface ZugferdInvoiceData {
       tradeDelivery: { billedQuantity: { amount: number; unitMeasureCode: string } };
       tradeSettlement: {
         tradeTax: { typeCode: string; categoryCode: string; rateApplicablePercent: number };
-        monetarySummation: { totalAmount: string };
+        // Task #1098 — Pro-Zeilen-Betrag (BT-131). Der korrekte node-zugferd-
+        // Schlüssel ist `lineTotalAmount`; der frühere `totalAmount` wurde von
+        // node-zugferd still verworfen (kein BT-131 im XML). Für versiegelte
+        // Bestände ohne BT-131 (Snapshot-gated) wird weiterhin der alte
+        // `totalAmount`-Schlüssel emittiert, damit das XML byte-stabil bleibt.
+        monetarySummation: { totalAmount?: string; lineTotalAmount?: string };
       };
     }[];
     tradeSettlement: {
@@ -233,9 +238,13 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
           categoryCode: taxCategoryCode,
           rateApplicablePercent: taxPercent,
         },
-        monetarySummation: {
-          totalAmount: lineTotal,
-        },
+        // Task #1098 — BT-131 (`lineTotalAmount`) für neue Rechnungen. Bestände
+        // ohne BT-131 (Snapshot ohne `includeLineTotalAmount`) re-rendern weiter
+        // mit dem alten `totalAmount`-Schlüssel, den node-zugferd ignoriert,
+        // damit das versiegelte XML byte-identisch bleibt (GoBD-Hash-Stabilität).
+        monetarySummation: data.includeLineTotalAmount
+          ? { lineTotalAmount: lineTotal }
+          : { totalAmount: lineTotal },
       },
     };
   });

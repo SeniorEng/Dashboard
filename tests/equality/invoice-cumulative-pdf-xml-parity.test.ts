@@ -99,6 +99,8 @@ function makeData(): InvoicePdfData {
     assignmentDeclarationRef: null,
     lineItems: LINE_ITEMS,
     lineAggregation: "cumulative",
+    // Task #1098 — neue Rechnungen betten den Pro-Zeilen-Betrag (BT-131) ein.
+    includeLineTotalAmount: true,
     netAmountCents: NET_AMOUNT_CENTS,
     vatAmountCents: 0,
     grossAmountCents: NET_AMOUNT_CENTS,
@@ -187,14 +189,13 @@ describe("Task #1085 — kumulierte Rechnung: PDF == E-Rechnung-XML (Positionen)
 // unterschiedliche Mengen/Stückpreise/Beträge rendern (z.B. wenn eine Schicht
 // anders rundet als die andere).
 //
-// Hinweis zum Positionsbetrag: das aktuell eingebettete EN-16931-/ZUGFeRD-XML
-// trägt KEINEN expliziten Pro-Zeilen-Betrag (BT-131) — node-zugferd gibt im
-// genutzten Profil nur `BilledQuantity` (Menge) und `ChargeAmount` (Stückpreis)
-// je Position aus. Den Positionsbetrag prüfen wir deshalb gegen die SSoT
-// (`totalCents` der kumulierten Position) UND gegen die aus den XML-Werten
-// abgeleitete Identität Menge × Stückpreis. Da die Fixture steuerbefreit ist
-// (§45b-Topf, USt = 0), gilt netto === brutto und der PDF-Stückpreis (sonst
-// brutto hochgerundet) entspricht 1:1 dem XML-Netto-Stückpreis.
+// Hinweis zum Positionsbetrag (Task #1098): das eingebettete EN-16931-/ZUGFeRD-
+// XML trägt seit der BT-131-Korrektur pro Position einen expliziten Pro-Zeilen-
+// Betrag (`LineTotalAmount`). Wir prüfen ihn deshalb DIREKT aus dem XML gegen
+// PDF und SSoT (`totalCents`) — zusätzlich zur älteren abgeleiteten Identität
+// Menge × Stückpreis. Da die Fixture steuerbefreit ist (§45b-Topf, USt = 0),
+// gilt netto === brutto und der PDF-Stückpreis (sonst brutto hochgerundet)
+// entspricht 1:1 dem XML-Netto-Stückpreis.
 // ---------------------------------------------------------------------------
 
 interface PdfRow {
@@ -231,9 +232,14 @@ interface XmlLine {
   unitCode: string | null;
   quantity: number;
   chargeAmount: string | null;
+  lineTotalAmount: string | null;
 }
 
-/** Parst die EN-16931-LineItems (Name, Menge+Einheit, Netto-Stückpreis). */
+/**
+ * Parst die EN-16931-LineItems (Name, Menge+Einheit, Netto-Stückpreis, BT-131
+ * Pro-Zeilen-Betrag). BT-131 liegt im `SpecifiedLineTradeSettlement` →
+ * `SpecifiedTradeSettlementLineMonetarySummation` → `LineTotalAmount`.
+ */
 function parseXmlLines(xml: string): XmlLine[] {
   const blocks = xml
     .split("<ram:IncludedSupplyChainTradeLineItem>")
@@ -243,11 +249,13 @@ function parseXmlLines(xml: string): XmlLine[] {
     const name = b.match(/<ram:Name>([^<]*)<\/ram:Name>/)?.[1] ?? null;
     const charge = b.match(/<ram:ChargeAmount>([^<]*)<\/ram:ChargeAmount>/)?.[1] ?? null;
     const qty = b.match(/<ram:BilledQuantity unitCode="([^"]*)">([^<]*)<\/ram:BilledQuantity>/);
+    const lineTotal = b.match(/<ram:LineTotalAmount>([^<]*)<\/ram:LineTotalAmount>/)?.[1] ?? null;
     return {
       name,
       unitCode: qty ? qty[1] : null,
       quantity: qty ? Number(qty[2]) : NaN,
       chargeAmount: charge,
+      lineTotalAmount: lineTotal,
     };
   });
 }
@@ -350,6 +358,25 @@ describe("Task #1086 — kumulierte Rechnung: PDF == E-Rechnung-XML (Werte je Po
     });
   });
 
+  // Task #1098 — Pro-Zeilen-Betrag DIREKT aus dem XML (BT-131, `LineTotalAmount`)
+  // gegen PDF und SSoT prüfen, statt ihn nur über Menge × Stückpreis abzuleiten.
+  // node-zugferd MUSS pro Position einen expliziten `LineTotalAmount` ausgeben.
+  it("pro Position: BT-131 (LineTotalAmount) direkt im XML == PDF == SSoT", () => {
+    expectedAggregated.forEach((expected, i) => {
+      const xmlLineTotalCents = xmlDecimalToCents(xmlLines[i].lineTotalAmount);
+      // BT-131 direkt aus dem XML === gebuchter SSoT-Betrag (totalCents).
+      expect(xmlLineTotalCents).toBe(expected.totalCents);
+      // …und === PDF-Betrag.
+      const pdfTotalCents = parseEuroDE(pdfRows[i].totalText);
+      expect(xmlLineTotalCents).toBe(pdfTotalCents);
+    });
+  });
+
+  it("Σ(BT-131) der XML-Positionen === Nettobetrag (Reconciliation)", () => {
+    const sumLineTotals = xmlLines.reduce((s, l) => s + xmlDecimalToCents(l.lineTotalAmount), 0);
+    expect(sumLineTotals).toBe(NET_AMOUNT_CENTS);
+  });
+
   it("gemergte Fahrtkosten-Zeile: 5,00 km × 0,35 € = 1,75 € in PDF und XML", () => {
     const idx = expectedAggregated.findIndex((l) => l.serviceDescription === FAHRTKOSTEN_LABEL);
     expect(idx).toBeGreaterThanOrEqual(0);
@@ -368,5 +395,7 @@ describe("Task #1086 — kumulierte Rechnung: PDF == E-Rechnung-XML (Werte je Po
     expect(parsePdfUnitPriceCents(pdf.unitPriceText)).toBe(35);
     expect(xmlDecimalToCents(x.chargeAmount)).toBe(35);
     expect(parseEuroDE(pdf.totalText)).toBe(175);
+    // BT-131 (Pro-Zeilen-Betrag) direkt aus dem XML.
+    expect(xmlDecimalToCents(x.lineTotalAmount)).toBe(175);
   });
 });

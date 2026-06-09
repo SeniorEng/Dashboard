@@ -374,6 +374,17 @@ export async function buildInvoicePdfData(
     ? (options.snapshot.lineAggregation ?? "per_appointment")
     : "cumulative";
 
+  // Task #1098 — Pro-Zeilen-Betrag (BT-131, `LineTotalAmount`) im ZUGFeRD-XML.
+  // Liegt ein Snapshot vor (Re-Render einer versiegelten Rechnung), wird der
+  // damals versiegelte Zustand reproduziert: nur Rechnungen mit
+  // `snapshot.includeLineTotalAmount === true` re-rendern MIT BT-131; Bestände
+  // ohne dieses Flag bleiben OHNE BT-131 (byte-stabile XML-Reproduktion). Ohne
+  // Snapshot (Erst-Persist / Draft-Vorschau) wird BT-131 emittiert und über
+  // `persistInvoicePdfInner` als `true` im Snapshot versiegelt.
+  pdfData.includeLineTotalAmount = options?.snapshot
+    ? options.snapshot.includeLineTotalAmount === true
+    : true;
+
   // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
   // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
   // Damit reproduziert die Re-Render-XML auch dann byte-genau die persistierte
@@ -758,6 +769,10 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         // Rechnungen werden kumuliert versiegelt; das Re-Render reproduziert
         // PDF + ZUGFeRD-XML byte-genau (Integritäts-Verifier).
         lineAggregation: "cumulative",
+        // Task #1098: eingefrorenes BT-131-Flag. Neu erzeugte Rechnungen werden
+        // MIT Pro-Zeilen-Betrag (`LineTotalAmount`) versiegelt; das Re-Render
+        // reproduziert das eingebettete EN-16931-XML byte-genau.
+        includeLineTotalAmount: true,
       };
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {

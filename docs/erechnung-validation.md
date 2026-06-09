@@ -81,9 +81,15 @@ Das Standard-Profil ist seit Task #1073 `en16931` (vorher `basic`). Der
 Wechsel **darf die Re-Render-Hash-Stabilität bereits versiegelter Rechnungen
 nicht brechen**: `InvoiceRenderSnapshot.profile` friert das Profil beim
 Erst-Persist ein; Bestand-Rechnungen ohne `profile` im Snapshot werden bewusst
-weiter als `basic` re-gerendert. Detektoren:
+weiter als `basic` re-gerendert. Analog friert `InvoiceRenderSnapshot.lineAggregation`
+den Positions-Aggregationsmodus und (seit Task #1098) `InvoiceRenderSnapshot.includeLineTotalAmount`
+den Pro-Zeilen-Betrag (BT-131, `LineTotalAmount`) ein: vor #1098 versiegelte
+Rechnungen tragen das Flag nicht und re-rendern bewusst **ohne** BT-131
+(node-zugferd verwarf den damals falschen `totalAmount`-Schlüssel still), neue
+Rechnungen werden mit `includeLineTotalAmount: true` versiegelt. Detektoren:
 `tests/equality/zugferd-roundtrip.test.ts`,
 `tests/equality/zugferd-xml-rerender.test.ts`,
+`tests/equality/invoice-cumulative-pdf-xml-parity.test.ts`,
 `server/services/invoice-integrity-verifier.ts`.
 
 Kann die XML nicht im Strict-Modus erzeugt werden, fällt der Renderer auf
