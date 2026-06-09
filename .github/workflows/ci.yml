@@ -517,6 +517,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Task #1109: Java-freies Strict-Gate. Validiert die WASM-XSD-Strict-
+      # Versiegelung (validateZugferdXsd) gegen reale Pot-/USt-Szenarien und
+      # failt bei jeder Nicht-Konformität — unabhängig davon, ob die Java-Tools
+      # unten erfolgreich installiert werden. Läuft VOR dem Java-Setup, damit
+      # eine Regression des Strict-Pfades auch dann sichtbar wird, wenn der
+      # Mustang/veraPDF-Download mal hakt.
+      - name: Strict WASM-XSD gate (real pot/VAT scenarios)
+        run: npm run validate:erechnung:strict
+
       # Java-Runtime für Mustang + veraPDF.
       - name: Setup Java (Temurin 17)
         uses: actions/setup-java@v4

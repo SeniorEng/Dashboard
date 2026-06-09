@@ -805,6 +805,36 @@ export async function embedZugferdXml(
   }
 }
 
+/**
+ * Task #1109 — Java-freie Strict-Konformitäts-Prüfung einer kompletten
+ * Rechnung über den WASM-XSD-Pfad (`validateZugferdXsd`). Baut die ZUGFeRD-XML
+ * exakt über denselben Produktivpfad (`buildZugferdInvoice`), den auch der
+ * Seal-Punkt nutzt, und validiert das emittierte XML gegen die gebündelten
+ * Profil-XSDs. Anders als `buildZugferdInvoice` (das den WASM-Check nur bei
+ * `data.strictSettlement === true` ausführt) erzwingt diese Funktion die
+ * XSD-Validierung IMMER und reicht die konkreten XSD-Fehler nach oben — damit
+ * das CI-Gate (`scripts/validate-erechnung-strict.ts`) jede Nicht-Konformität
+ * einer realen Pot-/USt-Szenario-Rechnung hart failt, unabhängig davon, ob
+ * Java/Mustang/veraPDF auf dem Runner installiert sind.
+ */
+export async function validateInvoiceXsd(
+  data: InvoicePdfData,
+  profileId: ZugferdProfileId = DEFAULT_ZUGFERD_PROFILE,
+): Promise<{ ok: boolean; xml: string | null; errors: string[]; usedStrictMode: boolean }> {
+  const built = await buildZugferdInvoice(data, profileId);
+  if (!built.ok) {
+    return { ok: false, xml: null, errors: built.errors, usedStrictMode: false };
+  }
+  const { profile } = await loadZugferd(profileId);
+  const xsd = await validateZugferdXsd(built.xml, profile);
+  return {
+    ok: xsd.ok,
+    xml: built.xml,
+    errors: xsd.ok ? [] : xsd.errors,
+    usedStrictMode: built.usedStrictMode,
+  };
+}
+
 export async function generateZugferdXml(
   data: InvoicePdfData,
   profile: ZugferdProfileId = DEFAULT_ZUGFERD_PROFILE,

@@ -82,6 +82,40 @@ Das Gate ist **nicht** branch-protected (Required-Checks bleiben
 `static-analysis`/`tests`/`e2e-smoke`), läuft aber bei jedem Push/PR und macht
 einen Konformitätsbruch sofort sichtbar.
 
+## Java-freies Strict-Gate (Task #1109)
+
+Der oben beschriebene Mustang/veraPDF-Job hängt an einer Java-Runtime + zwei
+externen Downloads (Maven Central, verapdf.org). Damit der seit Task #1105
+genutzte **Java-freie** Strict-Pfad (`validateZugferdXsd`, xmllint-wasm) nicht
+unbemerkt für neue Rechnungen regressiert — und der
+`invoice_zugferd_nonstrict_seal`-Audit nicht still zurückkehrt — gibt es ein
+zweites, von Java unabhängiges Gate:
+
+```bash
+npm run validate:erechnung:strict
+```
+
+`scripts/validate-erechnung-strict.ts` baut für die wichtigsten **Pot-/USt-
+Szenarien** je eine vollständige Rechnung (mit `strictSettlement: true` wie neue
+Rechnungen) über den Produktivpfad (`buildZugferdInvoice` → node-zugferd),
+validiert das emittierte XML per `validateInvoiceXsd` (`server/lib/zugferd.ts`,
+xmllint-wasm gegen die gebündelten EN-16931-Profil-XSDs) und verlangt, dass
+**jedes** Szenario XSD-konform ist **und** als strict markiert würde
+(`usedStrictMode === true`). Abgedeckte Szenarien:
+
+- § 45b Entlastungsbetrag (Pflegekasse, USt-befreit § 4 Nr. 16 UStG)
+- § 45a Umwandlungsanspruch (Pflegekasse, USt-befreit)
+- §§ 39 / 42a Verhinderungspflege (Pflegekasse, USt-befreit)
+- Selbstzahler (19 % USt)
+- Stornorechnung (§ 45b, USt-befreit, typeCode 384)
+
+Exit-Codes: `0` = alle konform + strict, `1` = mindestens ein Szenario
+nicht-konform bzw. nur Non-Strict-versiegelbar (Regression), `2` =
+Pipeline-Defekt. Das Gate braucht **kein** Java, **keine** DB und **keinen**
+Server und läuft im CI-Job `erechnung-validation` als eigener Schritt **vor**
+dem Java-Setup — so wird eine Strict-Pfad-Regression auch dann rot, wenn der
+Mustang/veraPDF-Download mal hakt.
+
 ## GoBD-Byte-Determinismus
 
 Das Standard-Profil ist seit Task #1073 `en16931` (vorher `basic`). Der
