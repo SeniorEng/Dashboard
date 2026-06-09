@@ -23,6 +23,9 @@ import {
   aggregateInvoiceLineItems,
   FAHRTKOSTEN_LABEL,
 } from "@shared/domain/invoice-line-aggregation";
+import { renderLineItemQuantity } from "@shared/domain/invoice-line-items";
+import { grossUpUnitPriceCents, resolveVatTreatment } from "@shared/domain/invoice-vat";
+import { parseEuroDE } from "@shared/utils/money";
 
 function makeLineItem(over: Partial<InvoicePdfData["lineItems"][0]> = {}): InvoicePdfData["lineItems"][0] {
   return {
@@ -165,5 +168,205 @@ describe("Task #1085 — kumulierte Rechnung: PDF == E-Rechnung-XML (Positionen)
   it("GENAU EINE gemeinsame Fahrtkosten-Zeile in PDF und XML", () => {
     expect(countPdfFahrtkostenRows(html)).toBe(1);
     expect(countXmlFahrtkostenItems(xml)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task #1086 — Positions-PARITÄT (Werte, nicht nur Anzahl).
+//
+// Der Test oben (#1085) beweist nur, dass PDF und XML gleich VIELE Positionen
+// (und genau eine Fahrtkosten-Zeile) zeigen. Hier gehen wir eine Ebene tiefer
+// und matchen die Positionen PAARWEISE — beide Render-Schichten iterieren über
+// dasselbe `aggregateInvoiceLineItems(...)`-Ergebnis, also ist die Reihenfolge
+// identisch und der Index-Match valide. Pro Position prüfen wir bit-genau:
+//   - Menge inkl. Einheit (km ⇒ KMT/„… km", Std. ⇒ HUR/„… Std."),
+//   - Stückpreis,
+//   - Positionsbetrag.
+//
+// So fällt ein Drift auf, bei dem beide gleich viele Zeilen, aber
+// unterschiedliche Mengen/Stückpreise/Beträge rendern (z.B. wenn eine Schicht
+// anders rundet als die andere).
+//
+// Hinweis zum Positionsbetrag: das aktuell eingebettete EN-16931-/ZUGFeRD-XML
+// trägt KEINEN expliziten Pro-Zeilen-Betrag (BT-131) — node-zugferd gibt im
+// genutzten Profil nur `BilledQuantity` (Menge) und `ChargeAmount` (Stückpreis)
+// je Position aus. Den Positionsbetrag prüfen wir deshalb gegen die SSoT
+// (`totalCents` der kumulierten Position) UND gegen die aus den XML-Werten
+// abgeleitete Identität Menge × Stückpreis. Da die Fixture steuerbefreit ist
+// (§45b-Topf, USt = 0), gilt netto === brutto und der PDF-Stückpreis (sonst
+// brutto hochgerundet) entspricht 1:1 dem XML-Netto-Stückpreis.
+// ---------------------------------------------------------------------------
+
+interface PdfRow {
+  description: string;
+  quantityText: string;
+  unitPriceText: string;
+  totalText: string;
+}
+
+/** Entfernt HTML-Tags und normalisiert Whitespace einer Tabellenzelle. */
+function stripCell(html: string): string {
+  return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Parst die Positions-Zeilen der PDF-Items-Tabelle. Im `cumulative`-Modus
+ * entfallen die Datum-/Uhrzeit-Spalten, jede Zeile hat exakt 4 Zellen:
+ * [Beschreibung, Menge, Stückpreis, Betrag].
+ */
+function parsePdfRows(html: string): PdfRow[] {
+  const tbody = html.split("<tbody>")[1]?.split("</tbody>")[0] ?? "";
+  const rows = [...tbody.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((m) => m[1]);
+  return rows.map((tr) => {
+    const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => stripCell(m[1]));
+    if (cells.length !== 4) {
+      throw new Error(`Erwartete 4 Zellen je kumulierter PDF-Zeile, bekam ${cells.length}: ${JSON.stringify(cells)}`);
+    }
+    return { description: cells[0], quantityText: cells[1], unitPriceText: cells[2], totalText: cells[3] };
+  });
+}
+
+interface XmlLine {
+  name: string | null;
+  unitCode: string | null;
+  quantity: number;
+  chargeAmount: string | null;
+}
+
+/** Parst die EN-16931-LineItems (Name, Menge+Einheit, Netto-Stückpreis). */
+function parseXmlLines(xml: string): XmlLine[] {
+  const blocks = xml
+    .split("<ram:IncludedSupplyChainTradeLineItem>")
+    .slice(1)
+    .map((p) => p.split("</ram:IncludedSupplyChainTradeLineItem>")[0]);
+  return blocks.map((b) => {
+    const name = b.match(/<ram:Name>([^<]*)<\/ram:Name>/)?.[1] ?? null;
+    const charge = b.match(/<ram:ChargeAmount>([^<]*)<\/ram:ChargeAmount>/)?.[1] ?? null;
+    const qty = b.match(/<ram:BilledQuantity unitCode="([^"]*)">([^<]*)<\/ram:BilledQuantity>/);
+    return {
+      name,
+      unitCode: qty ? qty[1] : null,
+      quantity: qty ? Number(qty[2]) : NaN,
+      chargeAmount: charge,
+    };
+  });
+}
+
+/** Wandelt die deutsche PDF-Mengen-Anzeige zurück in eine Zahl (km bzw. Std.). */
+function parsePdfQuantityToNumber(text: string): number {
+  if (/km/.test(text)) {
+    // „5,00 km" → 5  (Tausenderpunkt entfernen, Komma → Punkt).
+    return Number(text.replace(/\s*km/, "").replace(/\./g, "").replace(",", "."));
+  }
+  // „3 Std." / „1 Std. 30 Min." / „45 Min." → Dezimalstunden.
+  const std = text.match(/(\d+)\s*Std\./);
+  const min = text.match(/(\d+)\s*Min\./);
+  return (std ? Number(std[1]) : 0) + (min ? Number(min[1]) : 0) / 60;
+}
+
+/** Stückpreis-Zelle („0,35 €/km") → Cents. */
+function parsePdfUnitPriceCents(text: string): number {
+  const noUnit = text.replace(/\/(km|Std\.)\s*$/, "").trim();
+  const cents = parseEuroDE(noUnit);
+  if (cents == null) throw new Error(`Konnte PDF-Stückpreis nicht parsen: "${text}"`);
+  return cents;
+}
+
+/** XML-Dezimalbetrag ("0.35") → Cents. */
+function xmlDecimalToCents(decimal: string | null): number {
+  if (decimal == null) throw new Error("XML-Betrag fehlt");
+  return Math.round(Number(decimal) * 100);
+}
+
+describe("Task #1086 — kumulierte Rechnung: PDF == E-Rechnung-XML (Werte je Position)", () => {
+  const data = makeData();
+  const treatment = resolveVatTreatment({ billingType: data.billingType, budgetType: data.budgetType });
+  const expectedAggregated = aggregateInvoiceLineItems(LINE_ITEMS);
+
+  let pdfRows: PdfRow[];
+  let xmlLines: XmlLine[];
+
+  beforeAll(async () => {
+    const html = generateInvoiceHtml(data);
+    const generated = await generateZugferdXml(data);
+    if (!generated) throw new Error("ZUGFeRD-XML konnte nicht generiert werden");
+    pdfRows = parsePdfRows(html);
+    xmlLines = parseXmlLines(generated);
+  });
+
+  it("Voraussetzung: steuerbefreite Fixture (USt = 0) ⇒ Netto-Stückpreis === Brutto-Anzeige", () => {
+    expect(treatment).not.toBe("standard");
+    expect(data.vatAmountCents).toBe(0);
+    // Bei steuerfreier Behandlung rundet die PDF-Stückpreisspalte nicht hoch.
+    for (const line of expectedAggregated) {
+      expect(grossUpUnitPriceCents(line.unitPriceCents, treatment)).toBe(line.unitPriceCents);
+    }
+  });
+
+  it("gleiche Anzahl paarbarer Positionen in PDF, XML und SSoT", () => {
+    expect(pdfRows).toHaveLength(expectedAggregated.length);
+    expect(xmlLines).toHaveLength(expectedAggregated.length);
+  });
+
+  it("pro Position: Menge (inkl. Einheit) bit-genau identisch in PDF und XML", () => {
+    expectedAggregated.forEach((expected, i) => {
+      const pdf = pdfRows[i];
+      const x = xmlLines[i];
+      const isKm = expected.quantityUnit === "km";
+
+      // PDF-Anzeige === exakt die zentrale Mengen-Formatierung der SSoT-Position.
+      expect(pdf.quantityText).toBe(renderLineItemQuantity(expected));
+      // Einheit: km ⇒ „… km" + KMT, Std. ⇒ HUR.
+      expect(/km/.test(pdf.quantityText)).toBe(isKm);
+      expect(x.unitCode).toBe(isKm ? "KMT" : "HUR");
+
+      // XML-Menge === SSoT-Menge (quantityRaw) bit-genau.
+      expect(x.quantity).toBe(expected.quantityRaw ?? null);
+      // Cross-Layer: aus der PDF-Anzeige zurückgerechnete Menge === XML-Menge.
+      expect(parsePdfQuantityToNumber(pdf.quantityText)).toBeCloseTo(x.quantity, 5);
+    });
+  });
+
+  it("pro Position: Stückpreis bit-genau identisch in PDF und XML", () => {
+    expectedAggregated.forEach((expected, i) => {
+      const pdfCents = parsePdfUnitPriceCents(pdfRows[i].unitPriceText);
+      const xmlCents = xmlDecimalToCents(xmlLines[i].chargeAmount);
+      expect(pdfCents).toBe(xmlCents);
+      expect(pdfCents).toBe(expected.unitPriceCents);
+    });
+  });
+
+  it("pro Position: Positionsbetrag bit-genau (PDF == SSoT == Menge × Stückpreis aus XML)", () => {
+    expectedAggregated.forEach((expected, i) => {
+      const pdfTotalCents = parseEuroDE(pdfRows[i].totalText);
+      expect(pdfTotalCents).not.toBeNull();
+      // PDF-Betrag === gebuchter SSoT-Betrag.
+      expect(pdfTotalCents).toBe(expected.totalCents);
+      // Aus den XML-Werten (Menge × Netto-Stückpreis) abgeleiteter Betrag === SSoT.
+      const xmlImpliedCents = Math.round(xmlLines[i].quantity * xmlDecimalToCents(xmlLines[i].chargeAmount));
+      expect(xmlImpliedCents).toBe(expected.totalCents);
+      // ⇒ damit gilt auch PDF-Betrag === XML-abgeleiteter Betrag.
+      expect(pdfTotalCents).toBe(xmlImpliedCents);
+    });
+  });
+
+  it("gemergte Fahrtkosten-Zeile: 5,00 km × 0,35 € = 1,75 € in PDF und XML", () => {
+    const idx = expectedAggregated.findIndex((l) => l.serviceDescription === FAHRTKOSTEN_LABEL);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const pdf = pdfRows[idx];
+    const x = xmlLines[idx];
+
+    expect(pdf.description).toContain(FAHRTKOSTEN_LABEL);
+    expect(x.name).toBe(FAHRTKOSTEN_LABEL);
+
+    // Menge: travel_km (3) + customer_km (2) = 5,00 km (quantizeKm).
+    expect(pdf.quantityText).toBe("5,00 km");
+    expect(x.quantity).toBe(5);
+    expect(x.unitCode).toBe("KMT");
+
+    // Stückpreis 0,35 €, Betrag 1,75 €.
+    expect(parsePdfUnitPriceCents(pdf.unitPriceText)).toBe(35);
+    expect(xmlDecimalToCents(x.chargeAmount)).toBe(35);
+    expect(parseEuroDE(pdf.totalText)).toBe(175);
   });
 });
