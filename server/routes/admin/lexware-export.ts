@@ -485,4 +485,71 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
   res.json({ rows, year, month, earningsLimitCents });
 }));
 
+interface UnsignedAppointmentRow {
+  id: number;
+  date: string;
+  scheduledStart: string | null;
+  customerName: string;
+  minutes: number;
+}
+
+// Liste der completed-aber-unsignierten Termine eines Mitarbeiters im gewählten
+// Monat — Sprung-Ziel aus der Warnung „N Termine ohne Unterschrift" der
+// Stundenübersicht. Nutzt dasselbe Prädikat (`completedButUnsignedSqlRaw`) wie
+// die Warnzählung in `/hours-overview`, damit Liste und Zähler konsistent sind.
+router.get("/hours-overview/unsigned-appointments", asyncHandler("Nicht unterschriebene Termine konnten nicht geladen werden", async (req: Request, res: Response) => {
+  const year = parseInt(req.query.year as string);
+  const month = parseInt(req.query.month as string);
+  const employeeId = parseInt(req.query.employeeId as string);
+
+  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültiges Jahr oder Monat" });
+    return;
+  }
+
+  if (isNaN(employeeId)) {
+    res.status(400).json({ error: "VALIDATION_ERROR", message: "Ungültige Mitarbeiter-ID" });
+    return;
+  }
+
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+
+  const result = await db.execute(sql`
+    SELECT
+      a.id as id,
+      a.date as date,
+      a.scheduled_start as scheduled_start,
+      c.name as customer_name,
+      COALESCE(svc_minutes.minutes, 0) as minutes
+    FROM appointments a
+    JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN LATERAL (
+      SELECT SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
+      FROM appointment_services asvc
+      JOIN services s ON s.id = asvc.service_id
+      WHERE asvc.appointment_id = a.id
+        AND s.unit_type = 'hours'
+        AND s.code IN ('hauswirtschaft', 'alltagsbegleitung', 'erstberatung')
+    ) svc_minutes ON true
+    WHERE ${completedButUnsignedSqlRaw('a')}
+      AND a.deleted_at IS NULL
+      AND a.date >= ${startDate}
+      AND a.date <= ${endDate}
+      AND a.performed_by_employee_id = ${employeeId}
+    ORDER BY a.date ASC, a.scheduled_start ASC NULLS LAST
+  `);
+
+  const appointments: UnsignedAppointmentRow[] = (result.rows as any[]).map(row => ({
+    id: Number(row.id),
+    date: typeof row.date === "string" ? row.date : new Date(row.date).toISOString().slice(0, 10),
+    scheduledStart: row.scheduled_start ?? null,
+    customerName: row.customer_name ?? "",
+    minutes: Number(row.minutes) || 0,
+  }));
+
+  res.json({ appointments, year, month, employeeId });
+}));
+
 export default router;

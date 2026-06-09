@@ -5,7 +5,14 @@ import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Clock, AlertTriangle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Clock, AlertTriangle, ChevronRight, Loader2 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { api, unwrapResult } from "@/lib/api/client";
 import { formatEuroDE } from "@shared/utils/money";
@@ -45,6 +52,21 @@ interface OverviewData {
   earningsLimitCents: number;
 }
 
+interface UnsignedAppointment {
+  id: number;
+  date: string;
+  scheduledStart: string | null;
+  customerName: string;
+  minutes: number;
+}
+
+interface UnsignedAppointmentsData {
+  appointments: UnsignedAppointment[];
+  year: number;
+  month: number;
+  employeeId: number;
+}
+
 const MONTHS = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember",
@@ -71,6 +93,17 @@ function formatDays(days: number): string {
   return `${days}`;
 }
 
+function formatDateDE(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}.${m}.${y}`;
+}
+
+function formatTimeDE(time: string | null): string {
+  if (!time) return "";
+  return time.slice(0, 5);
+}
+
 export default function HoursOverview() {
   const now = new Date();
   const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
@@ -78,6 +111,7 @@ export default function HoursOverview() {
 
   const [selectedYear, setSelectedYear] = useState(String(prevYear));
   const [selectedMonth, setSelectedMonth] = useState(String(prevMonth));
+  const [unsignedFor, setUnsignedFor] = useState<{ employeeId: number; name: string } | null>(null);
 
   const { data, isLoading, error } = useQuery<OverviewData>({
     queryKey: ["hours-overview", selectedYear, selectedMonth],
@@ -85,6 +119,17 @@ export default function HoursOverview() {
       const result = await api.get<OverviewData>(`/admin/hours-overview?year=${selectedYear}&month=${selectedMonth}`);
       return unwrapResult(result);
     },
+  });
+
+  const { data: unsignedData, isLoading: unsignedLoading } = useQuery<UnsignedAppointmentsData>({
+    queryKey: ["hours-overview-unsigned", selectedYear, selectedMonth, unsignedFor?.employeeId],
+    queryFn: async () => {
+      const result = await api.get<UnsignedAppointmentsData>(
+        `/admin/hours-overview/unsigned-appointments?year=${selectedYear}&month=${selectedMonth}&employeeId=${unsignedFor!.employeeId}`
+      );
+      return unwrapResult(result);
+    },
+    enabled: unsignedFor !== null,
   });
 
   const years = [];
@@ -257,16 +302,19 @@ export default function HoursOverview() {
                             </div>
                           )}
                           {row.unsignedAppointmentCount > 0 && (
-                            <div
-                              className="flex items-center gap-1 mt-0.5"
-                              title="Abgeschlossene Termine ohne Unterschrift werden noch nicht in die Stunden gezählt. Unterschriften vor dem Lohnlauf einholen."
+                            <button
+                              type="button"
+                              onClick={() => setUnsignedFor({ employeeId: row.employeeId, name: `${row.nachname}, ${row.vorname}` })}
+                              className="flex items-center gap-1 mt-0.5 text-left hover:underline focus:underline focus:outline-none"
+                              title="Abgeschlossene Termine ohne Unterschrift anzeigen. Unterschriften vor dem Lohnlauf einholen."
                               data-testid={`warning-unsigned-${row.employeeId}`}
                             >
-                              <AlertTriangle className="h-3 w-3 text-orange-600" />
+                              <AlertTriangle className="h-3 w-3 text-orange-600 shrink-0" />
                               <span className="text-[11px] text-orange-700 font-medium">
                                 {row.unsignedAppointmentCount} {row.unsignedAppointmentCount === 1 ? "Termin" : "Termine"} ohne Unterschrift – Stunden zählen erst nach Unterschrift
                               </span>
-                            </div>
+                              <ChevronRight className="h-3 w-3 text-orange-600 shrink-0" />
+                            </button>
                           )}
                         </td>
                         <td className="py-2 pr-4 text-right font-mono" data-testid={`text-hw-${row.employeeId}`}>{formatHours(row.stundenHauswirtschaft)}</td>
@@ -333,6 +381,49 @@ export default function HoursOverview() {
           Minijob-Verdienstgrenze: {formatEuro(data.earningsLimitCents)} / Monat. Übertrag-Spalten nur für Minijobber mit hinterlegten Stundensätzen.
         </p>
       )}
+
+      <Dialog open={unsignedFor !== null} onOpenChange={(open) => { if (!open) setUnsignedFor(null); }}>
+        <DialogContent className="max-w-lg" data-testid="dialog-unsigned-appointments">
+          <DialogHeader>
+            <DialogTitle>Termine ohne Unterschrift</DialogTitle>
+            <DialogDescription>
+              {unsignedFor?.name} · {MONTHS[parseInt(selectedMonth) - 1]} {selectedYear}
+            </DialogDescription>
+          </DialogHeader>
+          {unsignedLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className={`${iconSize.lg} animate-spin text-muted-foreground`} />
+            </div>
+          ) : !unsignedData?.appointments?.length ? (
+            <p className="text-sm text-muted-foreground py-8 text-center" data-testid="text-no-unsigned">
+              Keine offenen Termine ohne Unterschrift.
+            </p>
+          ) : (
+            <ul className="divide-y max-h-[60vh] overflow-y-auto" data-testid="list-unsigned-appointments">
+              {unsignedData.appointments.map((appt) => (
+                <li key={appt.id}>
+                  <Link
+                    href={`/document-appointment/${appt.id}`}
+                    className="flex items-center justify-between gap-3 py-2.5 px-1 hover:bg-muted/50 rounded"
+                    data-testid={`link-unsigned-appointment-${appt.id}`}
+                    onClick={() => setUnsignedFor(null)}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{appt.customerName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatDateDE(appt.date)}
+                        {appt.scheduledStart ? ` · ${formatTimeDE(appt.scheduledStart)} Uhr` : ""}
+                        {appt.minutes > 0 ? ` · ${formatHours(appt.minutes / 60)} Std.` : ""}
+                      </div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
