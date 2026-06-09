@@ -70,6 +70,7 @@ import { AddressFields } from "@/features/customers/components/wizard/address-fi
 import { isDachPhone } from "@shared/schema/common";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, DISQUALIFICATION_REASON_LABELS, DISQUALIFICATION_REASONS, type ProspectStatus, type ProspectNoteType, type DisqualificationReason } from "@shared/schema";
 import { formatDateForDisplay, formatTimeHHMM, todayISO } from "@shared/utils/datetime";
+import { STATUS_LABELS, type AppointmentStatus } from "@shared/domain/appointments";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatAddress } from "@shared/utils/format";
 
@@ -213,6 +214,9 @@ export default function AdminProspects() {
                         <span className="flex items-center gap-1">
                           <CalendarCheck className="h-3 w-3" />
                           Erstberatung: {formatDateForDisplay(String(prospect.erstberatung.date).substring(0, 10), { day: "2-digit", month: "2-digit" })} {formatTimeHHMM(prospect.erstberatung.scheduledStart)}
+                        </span>
+                        <span data-testid={`text-prospect-erstberatung-status-${prospect.id}`}>
+                          {STATUS_LABELS[prospect.erstberatung.status as AppointmentStatus] ?? prospect.erstberatung.status}
                         </span>
                         {prospect.erstberatung.employeeName && (
                           <span className="flex items-center gap-1" data-testid={`text-prospect-erstberatung-employee-${prospect.id}`}>
