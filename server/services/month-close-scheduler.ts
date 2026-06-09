@@ -22,6 +22,10 @@ import { storage } from "../storage";
 import { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "./email-service";
 import { ensureMonthClosingTask, completeMonthClosingTask } from "../storage/tasks";
 import { appointmentsRepo, employeeTimeEntriesRepo } from "../repos";
+import {
+  appointmentCompletedButUnsignedCondition,
+  appointmentNotDocumentedAndSignedCondition,
+} from "../lib/appointment-signed";
 
 const POLL_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
@@ -116,7 +120,7 @@ async function getEmployeesWithMonthBlockers(year: number, month: number): Promi
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        notInArray(appointments.status, ["completed", "cancelled", "expired_unsigned"]),
+        notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
         employeeOr,
       ),
     )
@@ -132,8 +136,7 @@ async function getEmployeesWithMonthBlockers(year: number, month: number): Promi
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        eq(appointments.status, "completed"),
-        isNull(appointments.signatureData),
+        appointmentCompletedButUnsignedCondition(),
         employeeOr,
       ),
     )
@@ -195,36 +198,24 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
 
   const { startDate, endDate } = monthDateRange(year, month);
 
-  // Step 1: Mark undocumented appointments as expired_unsigned.
-  // Includes:
-  //  - any appointment NOT in (cancelled, expired_unsigned) AND NOT completed
-  //  - completed appointments without a signature (signature_data IS NULL)
-  const expiredResult = await db
-    .update(appointments)
-    .set({ status: "expired_unsigned" })
+  // Task #1119: Der Monatsabschluss überschreibt KEINEN Termin-Status mehr auf
+  // `expired_unsigned`. Die Periodensperre hängt allein an `employee_month_closings`
+  // (Step 2). „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label
+  // (`deriveAppointmentDisplayStatus`), kein gespeicherter Status.
+  //
+  // Wir ermitteln die Zahl der nicht dokumentiert+unterschriebenen Termine nur noch
+  // READ-ONLY, für Log/Return/Audit-Metadaten — ohne Schreibvorgang.
+  const [expiredAgg] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
     .where(
       and(
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        notInArray(appointments.status, ["cancelled", "expired_unsigned"]),
-        or(
-          notInArray(appointments.status, ["completed"]),
-          and(eq(appointments.status, "completed"), isNull(appointments.signatureData)),
-        ),
+        notInArray(appointments.status, ["cancelled", "customer_no_show"]),
+        appointmentNotDocumentedAndSignedCondition(),
       ),
-    )
-    .returning({ id: appointments.id, employeeId: appointments.assignedEmployeeId });
-
-  for (const row of expiredResult) {
-    await auditService.log(
-      systemActorId,
-      "appointment_expired_unsigned",
-      "appointment",
-      row.id,
-      { year, month, autoClose: true },
     );
-  }
+  const expiredCount = Number(expiredAgg?.count ?? 0);
 
   // Step 2: Close month for each active employee with activity in prev month
   const activeEmployees = await db
@@ -314,18 +305,18 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
       "month_auto_closed",
       "month_closing",
       emp.id,
-      { year, month, autoClose: true, expiredAppointmentsTotal: expiredResult.length },
+      { year, month, autoClose: true, expiredAppointmentsTotal: expiredCount },
     );
 
     closedCount += 1;
   }
 
   log(
-    `Auto-Close für ${month}/${year}: ${closedCount} Mitarbeiter geschlossen, ${expiredResult.length} Termine als verfallen markiert`,
+    `Auto-Close für ${month}/${year}: ${closedCount} Mitarbeiter geschlossen, ${expiredCount} Termine nicht dokumentiert+unterschrieben (abgeleitet „Nicht abgerechnet", kein Status-Schreibvorgang)`,
     "month-close",
   );
 
-  return { closed: closedCount, expired: expiredResult.length, skipped: false };
+  return { closed: closedCount, expired: expiredCount, skipped: false };
 }
 
 type ReminderWave = "T-3" | "T-1" | "T-0";
@@ -485,7 +476,7 @@ export async function getMonthCloseBanner(userId: number): Promise<{
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        notInArray(appointments.status, ["completed", "cancelled", "expired_unsigned"]),
+        notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
         employeeFilter,
       ),
     );
@@ -497,20 +488,7 @@ export async function getMonthCloseBanner(userId: number): Promise<{
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        eq(appointments.status, "completed"),
-        isNull(appointments.signatureData),
-        employeeFilter,
-      ),
-    );
-
-  const [expiredCount] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
-    .innerJoin(customers, eq(appointments.customerId, customers.id))
-    .where(
-      and(
-        gte(appointments.date, startDate),
-        lte(appointments.date, endDate),
-        isNull(appointments.deletedAt),
-        eq(appointments.status, "expired_unsigned"),
+        appointmentCompletedButUnsignedCondition(),
         employeeFilter,
       ),
     );
@@ -529,9 +507,19 @@ export async function getMonthCloseBanner(userId: number): Promise<{
 
   const isClosed = !!(closing && !closing.reopenedAt);
 
-  const open = Number(openCount?.count ?? 0);
-  const unsigned = Number(unsignedCount?.count ?? 0);
-  const expired = Number(expiredCount?.count ?? 0);
+  let open = Number(openCount?.count ?? 0);
+  let unsigned = Number(unsignedCount?.count ?? 0);
+  let expired = 0;
+
+  // Task #1119: „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label. Ist der
+  // Monat geschlossen, gelten die noch offenen/unsignierten Termine als verfallen
+  // (`expired`) — exakt wie zuvor, nur ohne gespeicherten Status. Vor dem Abschluss
+  // bleiben sie als offen/unsigniert sichtbar.
+  if (isClosed) {
+    expired = open + unsigned;
+    open = 0;
+    unsigned = 0;
+  }
 
   // Show banner whenever:
   //  - the previous month is closed (info row), OR
@@ -539,7 +527,7 @@ export async function getMonthCloseBanner(userId: number): Promise<{
   //    with the previous-month context, OR
   //  - there are blockers / expired entries the user should see.
   // Only hide if the cutoff has long passed AND there is nothing to show.
-  if (!isClosed && days < 0 && open === 0 && unsigned === 0 && expired === 0) {
+  if (!isClosed && days < 0 && open === 0 && unsigned === 0) {
     return null;
   }
 

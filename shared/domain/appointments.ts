@@ -6,7 +6,15 @@ import { isHoliday } from "../utils/holidays";
 // TYPES
 // ============================================
 
+// `expired_unsigned` ist KEIN persistierter Lebenszyklus-Status mehr (Task #1119).
+// Es ist ausschließlich ein ABGELEITETES Anzeige-Label ("Nicht abgerechnet"), das
+// `deriveAppointmentDisplayStatus()` zur Laufzeit erzeugt, wenn ein Monat geschlossen
+// ist und der Termin nicht dokumentiert+unterschrieben ist. Es darf NIE in die
+// Spalte `appointments.status` geschrieben werden.
 export type AppointmentStatus = "scheduled" | "documenting" | "completed" | "cancelled" | "expired_unsigned" | "customer_no_show";
+
+/** Persistierbare Lebenszyklus-Status (ohne das Anzeige-Label `expired_unsigned`). */
+export type PersistedAppointmentStatus = Exclude<AppointmentStatus, "expired_unsigned">;
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 
@@ -32,6 +40,50 @@ export const STATUS_LABELS: Record<AppointmentStatus, string> = {
   "expired_unsigned": "Nicht abgerechnet",
   "customer_no_show": "Kunde nicht angetroffen",
 };
+
+// ============================================
+// DOKUMENTIERT-&-UNTERSCHRIEBEN — geteiltes Prädikat (Task #1119)
+// ============================================
+
+/** Unterschrifts-Evidenz eines Termins (status + direkte/Leistungsnachweis-Signatur). */
+export interface AppointmentSignatureEvidence {
+  status: AppointmentStatus | string;
+  /** Direkte Termin-Unterschrift (`appointments.signature_data`) liegt vor. */
+  hasDirectSignature: boolean;
+  /**
+   * Termin ist mit einem unterschriebenen Leistungsnachweis verknüpft
+   * (`monthly_service_records.status` in 'employee_signed'/'completed').
+   */
+  hasSignedServiceRecord: boolean;
+}
+
+/**
+ * EINZIGE Quelle der Wahrheit für „dokumentiert & unterschrieben":
+ * Termin ist `completed` UND besitzt eine direkte ODER Leistungsnachweis-Unterschrift.
+ *
+ * Die server-seitigen SQL-Spiegelungen liegen in `server/lib/appointment-signed.ts`
+ * und MÜSSEN mit dieser Logik in lockstep bleiben.
+ */
+export function isAppointmentDocumentedAndSigned(evidence: AppointmentSignatureEvidence): boolean {
+  if (evidence.status !== "completed") return false;
+  return evidence.hasDirectSignature || evidence.hasSignedServiceRecord;
+}
+
+/**
+ * Leitet den ANZEIGE-Status eines Termins ab. `expired_unsigned` ("Nicht abgerechnet")
+ * entsteht ausschließlich hier zur Laufzeit: wenn der Monat geschlossen ist und der
+ * Termin nicht dokumentiert+unterschrieben ist — und er kein bereits dokumentiertes
+ * Terminal-Ergebnis (`cancelled`/`customer_no_show`) ist. Der persistierte Status
+ * bleibt unverändert.
+ */
+export function deriveAppointmentDisplayStatus(
+  status: AppointmentStatus,
+  opts: { documentedAndSigned: boolean; isMonthClosed: boolean },
+): AppointmentStatus {
+  if (status === "cancelled" || status === "customer_no_show") return status;
+  if (opts.isMonthClosed && !opts.documentedAndSigned) return "expired_unsigned";
+  return status;
+}
 
 // ============================================
 // STATUS DEFINITIONS FOR SERVICE RECORDS

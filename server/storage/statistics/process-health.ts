@@ -33,7 +33,7 @@ async function periodCounts(p: ResolvedPeriod): Promise<PeriodCounts> {
               ${dFilter}
           )) AS wo_appts,
       (SELECT COUNT(*)::int FROM appointments a
-        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+        WHERE a.deleted_at IS NULL AND a.status = 'completed'
           ${dFilter}
           AND NOT EXISTS (SELECT 1 FROM service_record_appointments sra WHERE sra.appointment_id = a.id)) AS wo_record,
       (SELECT COUNT(DISTINCT msr.id)::int FROM monthly_service_records msr
@@ -88,7 +88,7 @@ async function monthlySparkRows(year: number): Promise<MonthlySparkRow[]> {
           AND EXTRACT(YEAR FROM a.date::date) = ${year}
           AND EXTRACT(MONTH FROM a.date::date) = g.m), 0)::int AS undoc,
       COALESCE((SELECT COUNT(*)::int FROM appointments a
-        WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+        WHERE a.deleted_at IS NULL AND a.status = 'completed'
           AND EXTRACT(YEAR FROM a.date::date) = ${year}
           AND EXTRACT(MONTH FROM a.date::date) = g.m
           AND NOT EXISTS (SELECT 1 FROM service_record_appointments sra WHERE sra.appointment_id = a.id)
@@ -237,7 +237,7 @@ export async function listAppointmentsWithoutRecord(p: ResolvedPeriod): Promise<
     FROM appointments a
     JOIN customers c ON c.id = a.customer_id
     LEFT JOIN users u ON u.id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
-    WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+    WHERE a.deleted_at IS NULL AND a.status = 'completed'
       ${dFilter}
       AND NOT EXISTS (SELECT 1 FROM service_record_appointments sra WHERE sra.appointment_id = a.id)
     ORDER BY a.date DESC LIMIT 500

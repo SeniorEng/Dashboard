@@ -546,6 +546,13 @@ async function runStartupTasks() {
       log(`Task-Status-In-Progress-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { migrateExpiredUnsignedAppointments } = await import("./startup/migrate-expired-unsigned-appointments");
+    try {
+      await migrateExpiredUnsignedAppointments();
+    } catch (err) {
+      log(`Expired-Unsigned-Termin-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #616: Termin-vs-Budget-km-Drift auditieren (Screenshot-Fall
     // 12.01./21.01./04.02.2026). Log-only, kein automatischer Schreibvorgang
     // auf GoBD-relevante Buchungen.
