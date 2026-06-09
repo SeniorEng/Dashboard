@@ -34,6 +34,8 @@ interface EmployeeSummaryRow {
   uebertragVormonatCents: number | null;
   auszahlbarCents: number | null;
   uebertragNeuCents: number | null;
+  unsignedAppointmentCount: number;
+  unsignedMinutes: number;
 }
 
 interface OverviewData {
@@ -176,6 +178,22 @@ export default function HoursOverview() {
             </p>
           ) : (
             <div className="overflow-x-auto">
+              {(() => {
+                const unsignedEmployees = data.rows.filter((r) => r.unsignedAppointmentCount > 0).length;
+                if (unsignedEmployees === 0) return null;
+                return (
+                  <div
+                    className="flex items-center gap-2 mb-3 px-3 py-2 rounded border border-orange-200 bg-orange-50"
+                    data-testid="banner-unsigned-summary"
+                  >
+                    <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0" />
+                    <span className="text-sm text-orange-800">
+                      {unsignedEmployees} {unsignedEmployees === 1 ? "Mitarbeiter hat" : "Mitarbeiter haben"} noch
+                      nicht unterschriebene Termine. Diese Stunden zählen erst nach Unterschrift.
+                    </span>
+                  </div>
+                );
+              })()}
               <table className="w-full text-sm" data-testid="table-hours-overview">
                 <thead>
                   <tr className="border-b text-left">
@@ -235,6 +253,18 @@ export default function HoursOverview() {
                               <AlertTriangle className="h-3 w-3 text-red-600" />
                               <span className="text-[11px] text-red-600 font-medium">
                                 {formatHours(totalHours)}h / max. {formatHours(maxMonthlyHours)}h (EU-Grenze)
+                              </span>
+                            </div>
+                          )}
+                          {row.unsignedAppointmentCount > 0 && (
+                            <div
+                              className="flex items-center gap-1 mt-0.5"
+                              title="Abgeschlossene Termine ohne Unterschrift werden noch nicht in die Stunden gezählt. Unterschriften vor dem Lohnlauf einholen."
+                              data-testid={`warning-unsigned-${row.employeeId}`}
+                            >
+                              <AlertTriangle className="h-3 w-3 text-orange-600" />
+                              <span className="text-[11px] text-orange-700 font-medium">
+                                {row.unsignedAppointmentCount} {row.unsignedAppointmentCount === 1 ? "Termin" : "Termine"} ohne Unterschrift – Stunden zählen erst nach Unterschrift
                               </span>
                             </div>
                           )}

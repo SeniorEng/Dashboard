@@ -58,6 +58,8 @@ interface OverviewRow {
   kilometer: number;
   kilometerAnfahrt: number;
   kilometerKunden: number;
+  unsignedAppointmentCount: number;
+  unsignedMinutes: number;
 }
 
 interface OverviewResponse {
@@ -69,14 +71,19 @@ interface OverviewResponse {
 describe("Task #1121: Lexware-Export zählt nur dokumentiert+unterschriebene Termine", () => {
   let customerId: number;
   let employeeId: number;
+  // Zweiter Mitarbeiter mit AUSSCHLIESSLICH unsignierter Monatsaktivität (Task #1123):
+  // muss trotz 0 gezählter Stunden eine Zeile mit Warnung erhalten.
+  let unsignedOnlyEmployeeId: number;
   let serviceId: number;
 
   async function seedAppointment(opts: {
     status: string;
     signed: boolean;
+    forEmployeeId?: number;
   }): Promise<number> {
+    const empId = opts.forEmployeeId ?? employeeId;
     const { appointmentId } = await createAndDocumentAppointment(customerId, serviceId, {
-      assignedEmployeeId: employeeId,
+      assignedEmployeeId: empId,
       durationMinutes: HW_MINUTES,
     });
 
@@ -85,8 +92,8 @@ describe("Task #1121: Lexware-Export zählt nur dokumentiert+unterschriebene Ter
       SET date = ${TARGET_DATE},
           status = ${opts.status},
           signature_data = ${opts.signed ? validSignatureDataUrl() : null},
-          performed_by_employee_id = ${employeeId},
-          assigned_employee_id = ${employeeId},
+          performed_by_employee_id = ${empId},
+          assigned_employee_id = ${empId},
           travel_minutes = ${TRAVEL_MINUTES},
           travel_kilometers = ${TRAVEL_KM},
           customer_kilometers = ${CUSTOMER_KM}
@@ -111,17 +118,25 @@ describe("Task #1121: Lexware-Export zählt nur dokumentiert+unterschriebene Ter
     employeeId = employee.id;
     await assignEmployeeToCustomer(customerId, employeeId);
 
+    const unsignedOnlyEmployee = await createTestEmployee({ nachnamePrefix: "TestLexUnsigned" });
+    unsignedOnlyEmployeeId = unsignedOnlyEmployee.id;
+    await assignEmployeeToCustomer(customerId, unsignedOnlyEmployeeId);
+
     // A) dokumentiert + unterschrieben ⇒ zählt
     await seedAppointment({ status: "completed", signed: true });
     // B) completed, aber ohne Unterschrift ⇒ zählt NICHT
     await seedAppointment({ status: "completed", signed: false });
     // C) noch nicht abgeschlossen ⇒ zählt NICHT
     await seedAppointment({ status: "documenting", signed: false });
+
+    // Zweiter Mitarbeiter: NUR ein completed-aber-unsignierter Termin, sonst nichts.
+    await seedAppointment({ status: "completed", signed: false, forEmployeeId: unsignedOnlyEmployeeId });
   });
 
   afterAll(async () => {
     await cleanupCustomer(customerId);
     await deactivateTestEmployee(employeeId);
+    await deactivateTestEmployee(unsignedOnlyEmployeeId);
   });
 
   it("aggregiert nur den unterschriebenen Termin in Stunden und Kilometern", async () => {
@@ -140,5 +155,42 @@ describe("Task #1121: Lexware-Export zählt nur dokumentiert+unterschriebene Ter
     expect(row!.kilometerAnfahrt).toBeCloseTo(TRAVEL_KM, 3); // 10
     expect(row!.kilometerKunden).toBeCloseTo(CUSTOMER_KM, 3); // 8
     expect(row!.kilometer).toBeCloseTo(TRAVEL_KM + CUSTOMER_KM, 3); // 18
+  });
+
+  it("meldet completed-aber-unsignierte Termine als Warnung, ohne die Stunden zu erhöhen", async () => {
+    const res = await apiGet<OverviewResponse>(
+      `/api/admin/hours-overview?year=${TARGET_YEAR}&month=${TARGET_MONTH}`,
+    );
+    expect(res.status).toBe(200);
+
+    const row = res.data.rows.find((r) => r.employeeId === employeeId);
+    expect(row, "Zeile für Test-Mitarbeiter muss existieren").toBeDefined();
+
+    // Nur Termin B (completed, ohne Unterschrift) zählt als „ohne Unterschrift".
+    // Termin C ist `documenting` (nicht completed) und zählt NICHT.
+    expect(row!.unsignedAppointmentCount).toBe(1);
+    expect(row!.unsignedMinutes).toBe(HW_MINUTES);
+    // Die gezählten Stunden bleiben unverändert (nur Termin A).
+    expect(row!.stundenHauswirtschaft).toBe(HW_MINUTES / 60);
+  });
+
+  it("zeigt Mitarbeiter mit ausschließlich unsignierter Aktivität als eigene Zeile mit Warnung", async () => {
+    const res = await apiGet<OverviewResponse>(
+      `/api/admin/hours-overview?year=${TARGET_YEAR}&month=${TARGET_MONTH}`,
+    );
+    expect(res.status).toBe(200);
+
+    const row = res.data.rows.find((r) => r.employeeId === unsignedOnlyEmployeeId);
+    expect(
+      row,
+      "Mitarbeiter mit nur unsignierten Terminen muss trotz 0 Stunden eine Zeile bekommen",
+    ).toBeDefined();
+
+    expect(row!.unsignedAppointmentCount).toBe(1);
+    expect(row!.unsignedMinutes).toBe(HW_MINUTES);
+    // Keine gezählte Arbeit — unsignierte Termine erhöhen die Zahlen NICHT.
+    expect(row!.stundenHauswirtschaft).toBe(0);
+    expect(row!.stundenAnfahrt).toBe(0);
+    expect(row!.kilometer).toBe(0);
   });
 });

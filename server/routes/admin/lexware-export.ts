@@ -8,7 +8,7 @@ import { employeeTimeEntriesRepo } from "../../repos";
 import { asyncHandler } from "../../lib/errors";
 import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
-import { documentedAndSignedSqlRaw } from "../../lib/appointment-signed";
+import { documentedAndSignedSqlRaw, completedButUnsignedSqlRaw } from "../../lib/appointment-signed";
 
 const router = Router();
 
@@ -36,6 +36,8 @@ interface EmployeeSummaryRow {
   uebertragVormonatCents: number | null;
   auszahlbarCents: number | null;
   uebertragNeuCents: number | null;
+  unsignedAppointmentCount: number;
+  unsignedMinutes: number;
 }
 
 interface CompensationRates {
@@ -321,6 +323,35 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
 
   const currentMonthHours = allMonthsHours[month] || {};
 
+  const unsignedResult = await db.execute(sql`
+    SELECT
+      a.performed_by_employee_id as employee_id,
+      COUNT(DISTINCT a.id) as unsigned_count,
+      COALESCE(SUM(svc_minutes.minutes), 0) as unsigned_minutes
+    FROM appointments a
+    LEFT JOIN LATERAL (
+      SELECT SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
+      FROM appointment_services asvc
+      JOIN services s ON s.id = asvc.service_id
+      WHERE asvc.appointment_id = a.id
+        AND s.unit_type = 'hours'
+        AND s.code IN ('hauswirtschaft', 'alltagsbegleitung', 'erstberatung')
+    ) svc_minutes ON true
+    WHERE ${completedButUnsignedSqlRaw('a')}
+      AND a.deleted_at IS NULL
+      AND a.date >= ${startDate}
+      AND a.date <= ${endDate}
+      AND a.performed_by_employee_id = ANY(${sql`ARRAY[${sql.join(employeeIds.map(id => sql`${id}`), sql`, `)}]::int[]`})
+    GROUP BY a.performed_by_employee_id
+  `);
+
+  const unsignedCountByEmployee: Record<number, number> = {};
+  const unsignedMinutesByEmployee: Record<number, number> = {};
+  for (const row of unsignedResult.rows as any[]) {
+    unsignedCountByEmployee[row.employee_id] = Number(row.unsigned_count) || 0;
+    unsignedMinutesByEmployee[row.employee_id] = Number(row.unsigned_minutes) || 0;
+  }
+
   const kmResult = await db.execute(sql`
     SELECT 
       performed_by_employee_id as employee_id,
@@ -411,9 +442,13 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       }
     }
 
+    const unsignedAppointmentCount = unsignedCountByEmployee[emp.id] || 0;
+    const unsignedMinutes = unsignedMinutesByEmployee[emp.id] || 0;
+
     if (
       stundenHW > 0 || stundenAB > 0 || stundenErstberatung > 0 || stundenAnfahrt > 0 ||
-      stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0 || feiertage > 0
+      stundenSonstiges > 0 || km > 0 || urlaub > 0 || krankheit > 0 || feiertage > 0 ||
+      unsignedAppointmentCount > 0
     ) {
       rows.push({
         employeeId: emp.id,
@@ -439,6 +474,8 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
         uebertragVormonatCents,
         auszahlbarCents,
         uebertragNeuCents,
+        unsignedAppointmentCount,
+        unsignedMinutes,
       });
     }
   }

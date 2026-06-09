@@ -64,3 +64,21 @@ export function documentedAndSignedSqlRaw(alias: string): SQL {
       AND msr.status IN ('employee_signed', 'completed')
   )))`;
 }
+
+/**
+ * Roh-SQL-Fragment „completed, aber unsigniert" für `db.execute`-Queries, die mit
+ * einem Tabellen-Alias arbeiten (z.B. `FROM appointments a`). Spiegelt
+ * `appointmentCompletedButUnsignedCondition()` und MUSS mit dem reinen TS-Prädikat
+ * in `shared/domain/appointments.ts` in lockstep bleiben.
+ */
+export function completedButUnsignedSqlRaw(alias: string): SQL {
+  const a = sql.raw(alias);
+  return sql`(${a}.status = 'completed' AND ${a}.signature_data IS NULL AND NOT EXISTS (
+    SELECT 1
+    FROM service_record_appointments sra
+    JOIN monthly_service_records msr ON msr.id = sra.service_record_id
+    WHERE sra.appointment_id = ${a}.id
+      AND msr.deleted_at IS NULL
+      AND msr.status IN ('employee_signed', 'completed')
+  ))`;
+}
