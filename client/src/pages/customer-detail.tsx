@@ -23,6 +23,7 @@ import { CustomerEmergencySection } from "@/features/customers/components/custom
 import { CustomerAssignmentSection } from "@/features/customers/components/customer-assignment-section";
 import { CustomerPetsSection } from "@/features/customers/components/customer-pets-section";
 import { CustomerDocumentsSection } from "@/features/customers/components/customer-documents-section";
+import { Budget45bFifoBreakdown } from "@/features/customers/components/budget-45b-fifo-breakdown";
 import { useCustomerDetailForm } from "@/features/customers/hooks/use-customer-detail-form";
 import { api, unwrapResult } from "@/lib/api/client";
 import { todayISO } from "@shared/utils/datetime";
@@ -31,6 +32,7 @@ import { clampedUtilizationPercent } from "@shared/domain/budget/utilization";
 import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import type { Customer, CustomerContact } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
+import type { BudgetFifo45bBreakdownDTO } from "@shared/api/budget";
 
 interface CustomerDetails {
   contacts: CustomerContact[];
@@ -121,6 +123,15 @@ export default function CustomerDetailPage() {
           label: string;
         };
       }>(`/budget/${customerId}/overview`);
+      return unwrapResult(result);
+    },
+    enabled: !!customerId,
+  });
+
+  const { data: fifoBreakdown } = useQuery<BudgetFifo45bBreakdownDTO>({
+    queryKey: ["budget-fifo-breakdown", customerId],
+    queryFn: async () => {
+      const result = await api.get<BudgetFifo45bBreakdownDTO>(`/budget/${customerId}/fifo-breakdown`);
       return unwrapResult(result);
     },
     enabled: !!customerId,
@@ -414,6 +425,7 @@ export default function CustomerDetailPage() {
                         <span>{formatEuroDE(b.totalUsedCents)} von {formatEuroDE(b.totalAllocatedCents)} verbraucht</span>
                         <span>Monat: {formatEuroDE(b.currentMonthUsedCents)}</span>
                       </div>
+                      {fifoBreakdown && <Budget45bFifoBreakdown data={fifoBreakdown} />}
                     </div>
                   );
                 })()}

@@ -70,3 +70,42 @@ export interface BudgetOverviewDTO {
   umwandlung45a: BudgetOverview45aDTO;
   ersatzpflege39_42a: BudgetOverview39_42aDTO;
 }
+
+/**
+ * §45b FIFO-Aufschlüsselung (Task #1129) — Wire-Format von
+ * `GET /api/budget/:customerId/fifo-breakdown`. Rein lesende Visualisierung;
+ * keine eigene Verfügbarkeits-Mathematik. Summen rekonzilieren exakt mit der
+ * §45b-Karte:
+ *   Σ pots.allocatedCents === totalAllocatedCents (== Overview totalAllocatedCents)
+ *   Σ pots.consumedCents   === totalConsumedCents  (== Overview totalUsedCents, sofern kein manual_adjustment)
+ *   Σ pots.remainingCents  === totalAvailableCents (== Overview availableCents)
+ * Pro Topf gilt: allocatedCents === consumedCents + plannedCents + remainingCents
+ * und consumedCents === consumedBilledCents + consumedDocumentedCents + consumedOtherCents.
+ */
+export type BudgetFifoPotType = "carryover" | "current_year";
+
+export interface BudgetFifoPotDTO {
+  potType: BudgetFifoPotType;
+  allocatedCents: number;
+  consumedCents: number;
+  /** Konsum für bereits abgerechnete Termine. */
+  consumedBilledCents: number;
+  /** Konsum für dokumentierte (abgeschlossen + unterschriebene) Termine. */
+  consumedDocumentedCents: number;
+  /** Restlicher Konsum (write_off, Importe ohne Termin-Status …). */
+  consumedOtherCents: number;
+  /** Aktive Hard-Holds (geplante/blockierte Reservierungen). */
+  plannedCents: number;
+  /** Frei verfügbar. */
+  remainingCents: number;
+}
+
+export interface BudgetFifo45bBreakdownDTO {
+  /** FIFO-Reihenfolge: Übertrag zuerst, dann laufendes Jahr. */
+  pots: BudgetFifoPotDTO[];
+  carryoverExpiresAt: string | null;
+  totalAllocatedCents: number;
+  totalConsumedCents: number;
+  totalPlannedCents: number;
+  totalAvailableCents: number;
+}

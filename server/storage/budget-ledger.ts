@@ -19,6 +19,7 @@ import * as rebook from "./budget/rebook-storage";
 import * as pricing from "./budget/appointment-cost-calculator";
 import * as history from "./budget/history-aggregation";
 import * as reservation from "./budget/reservation-storage";
+import * as fifoBreakdown from "./budget/fifo-breakdown";
 import type { MonthlyHistoryBucket } from "@shared/domain/budget/history-aggregation";
 
 interface BudgetLedgerStorage {
@@ -39,6 +40,8 @@ interface BudgetLedgerStorage {
   // Task #911 — optionaler Stichtag (Default heute) für die date-korrekte Overview.
   getBudgetSummaryServed(customerId: number, asOfDate?: string): Promise<BudgetSummary>;
   getAllBudgetSummariesServed(customerId: number, asOfDate?: string): Promise<AllBudgetSummaries>;
+  // Task #1129 — read-only §45b FIFO-Aufschlüsselung (Übertrag → laufendes Jahr).
+  readBudget45bFifoBreakdown: typeof fifoBreakdown.readBudget45bFifoBreakdown;
   getPlannedCostCents(customerId: number): Promise<number>;
   // Task #727 — Phase 1.3: monatliche History-Aggregation (Allocations- und
   // Fenster-Cap-Sicht) über die pure `aggregateHistoryByMonth`.
@@ -119,6 +122,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   getAllBudgetSummaries: summary.getAllBudgetSummaries,
   getBudgetSummaryServed: summary.getBudgetSummaryServed,
   getAllBudgetSummariesServed: summary.getAllBudgetSummariesServed,
+  readBudget45bFifoBreakdown: fifoBreakdown.readBudget45bFifoBreakdown,
   getPlannedCostCents: pricing.getPlannedCostCents,
   getMonthlyHistory: history.getMonthlyHistory,
 

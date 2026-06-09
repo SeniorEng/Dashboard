@@ -128,6 +128,19 @@ router.get("/:customerId/summary", checkCustomerAccess, asyncHandler("Budget-Üb
   res.json(summary);
 }));
 
+// Task #1129 — read-only §45b FIFO-Aufschlüsselung (Übertrag → laufendes Jahr).
+// Verteilt die unified-Reader-Summen FIFO-konform auf zwei Töpfe und
+// klassifiziert den Konsum nach Termin-Zustand. Keine eigene Mathematik.
+router.get("/:customerId/fifo-breakdown", checkCustomerAccess, asyncHandler("§45b-Aufschlüsselung konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const customerId = requireIntParam(req.params.customerId, res);
+  if (customerId === null) return;
+  const asOfDate = parseAsOfDateQuery(req, res);
+  if (asOfDate === null) return;
+  await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
+  const breakdown = await budgetLedgerStorage.readBudget45bFifoBreakdown(customerId, asOfDate);
+  res.json(breakdown);
+}));
+
 router.get("/:customerId/allocations", checkCustomerAccess, asyncHandler("Budget-Zuweisungen konnten nicht geladen werden", async (req: Request, res: Response) => {
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
