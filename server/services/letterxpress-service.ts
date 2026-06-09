@@ -1,4 +1,5 @@
 import type { CompanySettings } from "@shared/schema";
+import { lxHttpRequest } from "./letterxpress-http";
 
 const LETTERXPRESS_API_BASE = "https://api.letterxpress.de/v2";
 const LETTERXPRESS_TIMEOUT_MS = 30000;
@@ -15,11 +16,19 @@ export const LETTERXPRESS_SPEC = {
 } as const;
 
 interface LetterxpressResponse {
-  status: number;
+  status?: number | string;
   message?: string;
+  // GET /balance returns the credit at the top level as `balance.value` (a
+  // decimal string, e.g. "91.59").
+  balance?: {
+    currency?: string;
+    value?: string | number;
+  };
+  // POST /setjob returns the created job id at `data.id` (an integer). Older
+  // payloads/wrappers used `letter_id`, which we still accept defensively.
   data?: {
+    id?: string | number;
     letter_id?: string | number;
-    balance?: number;
   };
 }
 
@@ -35,32 +44,33 @@ function buildAuth(settings: CompanySettings) {
   return {
     username: settings.letterxpressUsername,
     apikey: settings.letterxpressApiKey,
-    mode: settings.letterxpressTestMode ? "test" : "live",
+    // LetterXpress v2 expects "test" for sandbox and "production" for live sends.
+    mode: settings.letterxpressTestMode ? "test" : "production",
   };
 }
 
 async function callLetterxpress(
+  method: "GET" | "POST",
   path: string,
   payload: Record<string, unknown>,
   timeoutMs: number = LETTERXPRESS_TIMEOUT_MS
 ): Promise<LetterxpressResponse> {
-  const response = await fetch(`${LETTERXPRESS_API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const response = await lxHttpRequest({
+    url: `${LETTERXPRESS_API_BASE}${path}`,
+    method,
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
+    timeoutMs,
   });
 
-  const text = await response.text();
   let data: LetterxpressResponse | null = null;
   try {
-    data = text ? (JSON.parse(text) as LetterxpressResponse) : null;
+    data = response.text ? (JSON.parse(response.text) as LetterxpressResponse) : null;
   } catch {
     data = null;
   }
 
-  if (!response.ok) {
-    const msg = data?.message || text || "Unbekannter Fehler";
+  if (response.status < 200 || response.status >= 300) {
+    const msg = data?.message || response.text || "Unbekannter Fehler";
     throw new Error(`LetterXpress-Aufruf fehlgeschlagen (${response.status}): ${msg}`);
   }
 
@@ -72,7 +82,7 @@ async function callLetterxpress(
 }
 
 /**
- * Sends a letter via LetterXpress v2 (POST /setJob).
+ * Sends a letter via LetterXpress v2 (POST /setjob).
  *
  * Wichtig zum Adress-Handling: die LetterXpress v2-API nimmt im Body NUR die PDF
  * (base64) plus Spezifikation entgegen — Empfänger- und Absenderadresse werden
@@ -133,12 +143,18 @@ export async function sendLetterxpressLetter(
     },
   };
 
-  const result = await callLetterxpress("/setJob", payload);
-  const letterId = result.data?.letter_id;
+  const result = await callLetterxpress("POST", "/setjob", payload);
+  const letterId = result.data?.id ?? result.data?.letter_id;
   if (letterId === undefined || letterId === null || letterId === "") {
     throw new Error("LetterXpress-Briefversand: Keine Letter-ID erhalten");
   }
   return { letterId: String(letterId) };
+}
+
+function parseBalance(value: string | number | undefined): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export async function testLetterxpressConnection(
@@ -146,8 +162,8 @@ export async function testLetterxpressConnection(
 ): Promise<{ success: boolean; error?: string; balance?: number }> {
   try {
     validateLetterxpressConfig(settings);
-    const result = await callLetterxpress("/getBalance", { auth: buildAuth(settings) });
-    return { success: true, balance: result.data?.balance };
+    const result = await callLetterxpress("GET", "/balance", { auth: buildAuth(settings) });
+    return { success: true, balance: parseBalance(result.balance?.value) };
   } catch (error: unknown) {
     return { success: false, error: error instanceof Error ? error.message : "Verbindung fehlgeschlagen" };
   }
@@ -155,16 +171,20 @@ export async function testLetterxpressConnection(
 
 export async function checkLetterxpressHealth(): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(`${LETTERXPRESS_API_BASE}/getBalance`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const response = await lxHttpRequest({
+      url: `${LETTERXPRESS_API_BASE}/balance`,
+      method: "GET",
       body: JSON.stringify({}),
-      signal: AbortSignal.timeout(LETTERXPRESS_TIMEOUT_MS),
+      timeoutMs: LETTERXPRESS_TIMEOUT_MS,
     });
-    if (response.status >= 500) {
-      return { success: false, error: `API nicht erreichbar (${response.status})` };
+    // The health check sends no credentials, so 401 ("Unauthorized") is the
+    // expected healthy response: it proves the /balance endpoint exists and the
+    // server is up. Anything else (404 wrong path, 5xx, network error) means the
+    // integration is NOT reachable and the badge must turn red.
+    if (response.status === 200 || response.status === 401) {
+      return { success: true };
     }
-    return { success: true };
+    return { success: false, error: `API nicht erreichbar (${response.status})` };
   } catch (error: unknown) {
     return { success: false, error: error instanceof Error ? error.message : "API nicht erreichbar" };
   }

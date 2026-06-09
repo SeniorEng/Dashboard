@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express, { type Request, type Response, type NextFunction } from "express";
 import type { AddressInfo } from "net";
 import { PDFDocument } from "pdf-lib";
+import type { LxHttpResponse } from "../server/services/letterxpress-http";
 import type {
   CompanySettings,
   Customer,
@@ -135,22 +136,13 @@ vi.mock("../server/services/email-service", () => ({
   testSmtpConnection: vi.fn(),
 }));
 
-const realFetch = globalThis.fetch.bind(globalThis);
-const LX_HOST = "api.letterxpress.de";
-const fetchMock = vi.fn<typeof fetch>();
-
-const dispatchFetch: typeof fetch = (input, init) => {
-  const url =
-    typeof input === "string"
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : input.url;
-  if (url.includes(LX_HOST)) {
-    return fetchMock(input, init);
-  }
-  return realFetch(input, init);
-};
+// The LetterXpress HTTP boundary is mocked at the transport layer (node:https
+// based, see server/services/letterxpress-http.ts) so the full route → service →
+// storage → letterxpress wiring is exercised without real network access.
+const lxHttpRequest = vi.fn<(opts: { url: string; method: string; body: string; timeoutMs: number }) => Promise<LxHttpResponse>>();
+vi.mock("../server/services/letterxpress-http", () => ({
+  lxHttpRequest: (opts: { url: string; method: string; body: string; timeoutMs: number }) => lxHttpRequest(opts),
+}));
 
 let server: import("http").Server;
 let baseUrl: string;
@@ -177,23 +169,18 @@ async function startTestServer(): Promise<void> {
 
 beforeEach(async () => {
   deliveryRows.length = 0;
-  fetchMock.mockReset();
-  vi.stubGlobal("fetch", dispatchFetch);
+  lxHttpRequest.mockReset();
   await startTestServer();
 });
 
 afterEach(async () => {
-  vi.unstubAllGlobals();
   await new Promise<void>((resolve, reject) =>
     server.close((err) => (err ? reject(err) : resolve())),
   );
 });
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+function lxResponse(body: unknown, status = 200): LxHttpResponse {
+  return { status, text: JSON.stringify(body) };
 }
 
 interface SendResponseSuccess {
@@ -209,8 +196,8 @@ interface SendResponseError {
 
 describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
   it("happy path: route → service → storage → letterxpress writes a 'sent' delivery row with the returned letterxpress_letter_id", async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({ status: 200, message: "OK", data: { letter_id: "lx-987" } }),
+    lxHttpRequest.mockResolvedValueOnce(
+      lxResponse({ status: 200, message: "OK", data: { id: "lx-987" } }),
     );
 
     const res = await fetch(`${baseUrl}/api/admin/document-delivery/send`, {
@@ -228,10 +215,11 @@ describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
     expect(body.status).toBe("sent");
     expect(typeof body.deliveryId).toBe("number");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain("/setJob");
-    const lxBody = JSON.parse((init as RequestInit).body as string) as {
+    expect(lxHttpRequest).toHaveBeenCalledTimes(1);
+    const opts = lxHttpRequest.mock.calls[0][0];
+    expect(opts.method).toBe("POST");
+    expect(String(opts.url)).toContain("/setjob");
+    const lxBody = JSON.parse(opts.body) as {
       auth: { username: string; apikey: string; mode: string };
       letter: {
         base64_file: string;
@@ -264,8 +252,8 @@ describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
   });
 
   it("failure path: LetterXpress 4xx → delivery row is marked 'error' with the German error message", async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({ status: 401, message: "Unauthorized" }, 401),
+    lxHttpRequest.mockResolvedValueOnce(
+      lxResponse({ status: 401, message: "Unauthorized" }, 401),
     );
 
     const res = await fetch(`${baseUrl}/api/admin/document-delivery/send`, {
