@@ -22,7 +22,7 @@ import { asyncHandler } from "../lib/errors";
 import { generateCsrfToken, setCsrfCookie, csrfProtection } from "../middleware/csrf";
 import { getOpenTaskCount } from "../storage/tasks";
 import { storage } from "../storage";
-import { sendEmail, buildPasswordResetEmailHtml } from "../services/email-service";
+import { sendEmail, buildPasswordResetEmailHtml, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "../services/email-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
 import { birthdaysCache, getCachedCompanySettings } from "../services/cache";
 import { ensureEmployeeGeocoded } from "../services/geocoding";
@@ -201,18 +201,21 @@ router.post(
           const baseUrl = `${req.protocol}://${req.get("host")}`;
           const resetUrl = `${baseUrl}/reset-password?token=${token}`;
 
+          const logoAttachment = await buildLogoInlineAttachment(companySettings.logoUrl);
+
           const html = buildPasswordResetEmailHtml({
             vorname: user.vorname || "",
             nachname: user.nachname || "",
             companyName: companySettings.companyName || "SeniorenEngel",
             resetUrl,
-            logoUrl: companySettings.logoUrl ? "/api/public/logo/main" : null,
+            logoUrl: logoAttachment ? EMAIL_LOGO_SRC : null,
           });
 
           await sendEmail(companySettings, {
             to: result.data.email,
             subject: `Passwort zurücksetzen – ${companySettings.companyName || "SeniorenEngel"}`,
             html,
+            attachments: logoAttachment ? [logoAttachment] : undefined,
           });
         }
       } catch (emailError) {

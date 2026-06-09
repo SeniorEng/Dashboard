@@ -26,7 +26,7 @@ import { db } from "../../lib/db";
 import { appointmentsRepo } from "../../repos";
 import { eq, and, ne, or, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { sendEmail, buildWelcomeEmailHtml } from "../../services/email-service";
+import { sendEmail, buildWelcomeEmailHtml, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "../../services/email-service";
 
 const router = Router();
 
@@ -209,19 +209,22 @@ router.post("/users", asyncHandler("Benutzer konnte nicht erstellt werden", asyn
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
 
+      const logoAttachment = await buildLogoInlineAttachment(companySettings.logoUrl);
+
       const html = buildWelcomeEmailHtml({
         vorname: result.data.vorname,
         nachname: result.data.nachname,
         email: result.data.email,
         companyName: companySettings.companyName || "SeniorenEngel",
         resetUrl,
-        logoUrl: companySettings.logoUrl ? "/api/public/logo/main" : null,
+        logoUrl: logoAttachment ? EMAIL_LOGO_SRC : null,
       });
 
       const emailResult = await sendEmail(companySettings, {
         to: result.data.email,
         subject: `Willkommen bei ${companySettings.companyName || "SeniorenEngel"} – Ihr Zugang`,
         html,
+        attachments: logoAttachment ? [logoAttachment] : undefined,
       });
       log(`Willkommens-E-Mail erfolgreich gesendet: ${emailResult.messageId}`, "email");
     } else {
@@ -522,19 +525,22 @@ router.post("/users/:id/resend-welcome", asyncHandler("Willkommens-E-Mail konnte
   const baseUrl = `${req.protocol}://${req.get("host")}`;
   const resetUrl = `${baseUrl}/reset-password?token=${welcomeToken}`;
 
+  const logoAttachment = await buildLogoInlineAttachment(companySettings.logoUrl);
+
   const html = buildWelcomeEmailHtml({
     vorname: user.vorname || "",
     nachname: user.nachname || "",
     email: user.email,
     companyName: companySettings.companyName || "SeniorenEngel",
     resetUrl,
-    logoUrl: companySettings.logoUrl ? "/api/public/logo/main" : null,
+    logoUrl: logoAttachment ? EMAIL_LOGO_SRC : null,
   });
 
   const emailResult = await sendEmail(companySettings, {
     to: user.email,
     subject: `Willkommen bei ${companySettings.companyName || "SeniorenEngel"} – Ihr Zugang`,
     html,
+    attachments: logoAttachment ? [logoAttachment] : undefined,
   });
 
   log(`Willkommens-E-Mail erneut gesendet an ${user.email}: ${emailResult.messageId}`, "email");

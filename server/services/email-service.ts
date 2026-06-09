@@ -1,15 +1,50 @@
 import nodemailer from "nodemailer";
 import type { CompanySettings } from "@shared/schema";
+import { loadLogoBytes } from "./logo-resolver";
+
+interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+  // Task #1092 — inline images (logo) are embedded via a Content-ID reference
+  // (`cid:`) instead of a remote URL, so mail clients (GMX/Outlook/Gmail …)
+  // render them without the "load external images" prompt.
+  cid?: string;
+  contentDisposition?: "inline" | "attachment";
+}
 
 interface EmailOptions {
   to: string;
   subject: string;
   html: string;
-  attachments?: Array<{
-    filename: string;
-    content: Buffer;
-    contentType?: string;
-  }>;
+  attachments?: EmailAttachment[];
+}
+
+// Fixed Content-ID for the company logo embedded in the email header. The
+// matching `<img src="cid:company-logo">` is produced by `buildEmailLayout`
+// when callers pass `EMAIL_LOGO_SRC` as the logo URL.
+export const EMAIL_LOGO_CID = "company-logo";
+export const EMAIL_LOGO_SRC = `cid:${EMAIL_LOGO_CID}`;
+
+/**
+ * Loads the company logo from object storage and returns it as an inline
+ * (`cid:`) email attachment, or `null` when no logo is configured / loadable.
+ * Pass the result into `sendEmail({ attachments })` and use `EMAIL_LOGO_SRC`
+ * as the logo URL for the layout builders.
+ */
+export async function buildLogoInlineAttachment(
+  logoPath: string | null | undefined,
+): Promise<EmailAttachment | null> {
+  const bytes = await loadLogoBytes(logoPath);
+  if (!bytes) return null;
+  const ext = bytes.contentType.split("/")[1]?.split("+")[0] || "png";
+  return {
+    filename: `logo.${ext}`,
+    content: bytes.content,
+    contentType: bytes.contentType,
+    cid: EMAIL_LOGO_CID,
+    contentDisposition: "inline",
+  };
 }
 
 export interface TestOutboxEntry {
@@ -123,6 +158,8 @@ export async function sendEmail(settings: CompanySettings, options: EmailOptions
       filename: a.filename,
       content: a.content,
       contentType: a.contentType || "application/pdf",
+      ...(a.cid ? { cid: a.cid } : {}),
+      ...(a.contentDisposition ? { contentDisposition: a.contentDisposition } : {}),
     })),
   });
 
@@ -149,6 +186,7 @@ export async function testSmtpConnection(settings: CompanySettings): Promise<{ s
 
 function toAbsoluteUrl(relativeUrl: string | null | undefined): string | null {
   if (!relativeUrl) return null;
+  if (relativeUrl.startsWith("cid:")) return relativeUrl;
   if (relativeUrl.startsWith("data:")) return relativeUrl;
   if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) return relativeUrl;
   const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN;

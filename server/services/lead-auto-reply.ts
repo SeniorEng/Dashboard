@@ -1,6 +1,6 @@
 import { storage } from "../storage";
 import { prospectStorage } from "../storage/prospects";
-import { sendEmail, buildEmailLayout } from "./email-service";
+import { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "./email-service";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import { withTimeout } from "../lib/with-timeout";
 import { log } from "../lib/log";
@@ -129,18 +129,24 @@ export async function sendLeadAutoReply(params: LeadAutoReplyParams): Promise<vo
     return;
   }
 
+  const logoAttachment = await buildLogoInlineAttachment(settings.logoUrl);
+
   const html = buildLeadAutoReplyHtml({
     vorname: leadVorname,
     nachname: leadNachname,
     companyName: settings.companyName || "SeniorenEngel",
-    logoUrl: settings.logoUrl ? "/api/public/logo/main" : null,
+    logoUrl: logoAttachment ? EMAIL_LOGO_SRC : null,
     bodyText: settings.leadAutoReplyBody,
     telefon: settings.telefon,
     email: settings.email,
     website: settings.website,
   });
 
-  const attachments: Array<{ filename: string; content: Buffer; contentType?: string }> = [];
+  const attachments: Array<{ filename: string; content: Buffer; contentType?: string; cid?: string; contentDisposition?: "inline" | "attachment" }> = [];
+
+  if (logoAttachment) {
+    attachments.push(logoAttachment);
+  }
 
   if (settings.leadAutoReplyAttachmentPath) {
     const attachmentBuffer = await downloadAttachment(settings.leadAutoReplyAttachmentPath);

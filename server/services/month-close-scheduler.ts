@@ -19,7 +19,7 @@ import { auditService } from "./audit";
 import { createNotification } from "../storage/notifications";
 import { notificationService } from "./notification-service";
 import { storage } from "../storage";
-import { sendEmail, buildEmailLayout } from "./email-service";
+import { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "./email-service";
 import { ensureMonthClosingTask, completeMonthClosingTask } from "../storage/tasks";
 import { appointmentsRepo, employeeTimeEntriesRepo } from "../repos";
 
@@ -375,7 +375,10 @@ export async function sendMonthCloseReminders(today: string): Promise<{ wave: Re
 
   const settings = await storage.getCompanySettings();
   const companyName = settings?.companyName ?? "CareConnect";
-  const logoUrl = settings?.logoUrl ?? null;
+  // Load the logo bytes once for the whole reminder wave and embed it as an
+  // inline (cid:) attachment in every reminder email (Task #1092).
+  const logoAttachment = await buildLogoInlineAttachment(settings?.logoUrl ?? null);
+  const logoUrl = logoAttachment ? EMAIL_LOGO_SRC : null;
 
   let sent = 0;
 
@@ -420,7 +423,12 @@ export async function sendMonthCloseReminders(today: string): Promise<{ wave: Re
           companyName,
           logoUrl,
         );
-        await sendEmail(settings, { to: emp.email, subject, html });
+        await sendEmail(settings, {
+          to: emp.email,
+          subject,
+          html,
+          attachments: logoAttachment ? [logoAttachment] : undefined,
+        });
       } catch (err) {
         console.error("[month-close] E-Mail-Reminder fehlgeschlagen:", err);
       }
