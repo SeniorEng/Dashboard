@@ -122,7 +122,7 @@ export function MonthCloseBanner() {
   const isUrgent = banner.daysUntilCutoff <= 1;
   const headline =
     banner.daysUntilCutoff === 0
-      ? `Heute ist Cutoff (${cutoffDe}, 23:00) für ${monthLabel}`
+      ? `Monatsabschluss heute (${cutoffDe}, 23:00) — danach keine Änderungen für ${monthLabel} möglich`
       : `Monatsabschluss ${monthLabel} in ${banner.daysUntilCutoff} Tag${banner.daysUntilCutoff === 1 ? "" : "en"} (${cutoffDe})`;
 
   // No blockers: still show a calm countdown row so all employees see the cutoff date.
