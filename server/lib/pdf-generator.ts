@@ -98,6 +98,17 @@ export interface InvoicePdfData {
   // BT-131 versiegelt wurden (byte-stabiler Re-Render über den Render-Snapshot).
   includeLineTotalAmount?: boolean;
 
+  // Task #1105 — Korrekte Header-Settlement-Aufschlüsselung (BG-16
+  // `paymentInstruction` + BG-23 `vatBreakdown`) im eingebetteten ZUGFeRD-/
+  // EN-16931-XML. `true` für neue Rechnungen → das emittierte XML enthält die
+  // Pflicht-USt-Aufschlüsselung und besteht die XSD-Strict-Validierung.
+  // `undefined`/`false` für Bestände, die mit den FRÜHEREN (von node-zugferd
+  // still verworfenen) Schlüsseln `paymentMeans`/`tradeTax` versiegelt wurden
+  // → MUSS weiterhin ohne Header-Aufschlüsselung re-gerendert werden, sonst
+  // driftet das XML byte-weise gegen das in `invoices.zugferd_xml` versiegelte
+  // Original (GoBD-Integritäts-Verifier).
+  strictSettlement?: boolean;
+
   // Totals
   netAmountCents: number;
   vatAmountCents: number;

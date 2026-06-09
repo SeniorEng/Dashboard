@@ -316,6 +316,19 @@ export interface InvoiceRenderSnapshot {
    * versiegelt.
    */
   includeLineTotalAmount?: boolean;
+  /**
+   * Task #1105 — eingefrorenes Flag für die korrekte Header-Settlement-
+   * Aufschlüsselung (BG-16 `paymentInstruction` + BG-23 `vatBreakdown`) im
+   * eingebetteten ZUGFeRD-/EN-16931-XML. `true` = die Rechnung wurde mit der
+   * XSD-strikt-konformen USt-/Zahlungs-Aufschlüsselung versiegelt; das Re-Render
+   * emittiert sie byte-genau. `undefined`/`false` = Bestand, der mit den
+   * FRÜHEREN (von node-zugferd still verworfenen) Schlüsseln `paymentMeans`/
+   * `tradeTax` versiegelt wurde → MUSS weiterhin OHNE Header-Aufschlüsselung
+   * re-gerendert werden, sonst driftet das XML byte-weise gegen das in
+   * `invoices.zugferd_xml` versiegelte Original (Integritäts-Verifier).
+   * Neu erzeugte Rechnungen werden mit `true` versiegelt.
+   */
+  strictSettlement?: boolean;
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

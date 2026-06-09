@@ -385,6 +385,18 @@ export async function buildInvoicePdfData(
     ? options.snapshot.includeLineTotalAmount === true
     : true;
 
+  // Task #1105 — Korrekte Header-Settlement-Aufschlüsselung (BG-16/BG-23) im
+  // eingebetteten ZUGFeRD-XML. Liegt ein Snapshot vor (Re-Render), wird der
+  // versiegelte Zustand reproduziert: nur Rechnungen mit
+  // `snapshot.strictSettlement === true` re-rendern MIT der korrekten
+  // Aufschlüsselung; Bestände ohne dieses Flag bleiben OHNE (byte-stabile
+  // XML-Reproduktion gegen `invoices.zugferd_xml`). Ohne Snapshot
+  // (Erst-Persist / Draft-Vorschau) wird die korrekte Aufschlüsselung emittiert
+  // und über `persistInvoicePdfInner` als `true` im Snapshot versiegelt.
+  pdfData.strictSettlement = options?.snapshot
+    ? options.snapshot.strictSettlement === true
+    : true;
+
   // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
   // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
   // Damit reproduziert die Re-Render-XML auch dann byte-genau die persistierte
@@ -773,6 +785,11 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         // MIT Pro-Zeilen-Betrag (`LineTotalAmount`) versiegelt; das Re-Render
         // reproduziert das eingebettete EN-16931-XML byte-genau.
         includeLineTotalAmount: true,
+        // Task #1105: eingefrorenes Settlement-Flag. Neu erzeugte Rechnungen
+        // werden mit der korrekten Header-USt-/Zahlungs-Aufschlüsselung (BG-16/
+        // BG-23) versiegelt (XSD-strict-konform); das Re-Render reproduziert das
+        // eingebettete EN-16931-XML byte-genau.
+        strictSettlement: true,
       };
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {

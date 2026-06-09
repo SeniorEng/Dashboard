@@ -151,18 +151,36 @@ interface ZugferdInvoiceData {
     }[];
     tradeSettlement: {
       currencyCode: string;
-      paymentMeans: {
+      // Task #1105 — Bestands-/Legacy-Schlüssel (`paymentMeans`/`tradeTax`).
+      // node-zugferd kennt diese Schlüssel NICHT und verwirft sie still; sie
+      // bleiben ausschließlich erhalten, damit das Re-Render versiegelter
+      // Rechnungen das damals emittierte (unvollständige) XML byte-genau
+      // reproduziert (GoBD). Neue Rechnungen verwenden stattdessen die korrekten
+      // Schlüssel `paymentInstruction` (BG-16) und `vatBreakdown` (BG-23).
+      paymentMeans?: {
         typeCode: string;
         payeeAccount: { iban: string; accountName?: string };
         payeeInstitution?: { bic: string };
       };
-      tradeTax: {
+      paymentInstruction?: {
+        typeCode: string;
+        transfers: { paymentAccountIdentifier: string }[];
+      };
+      tradeTax?: {
         calculatedAmount: string;
         typeCode: string;
         basisAmount: string;
         categoryCode: string;
         rateApplicablePercent: number;
         exemptionReason?: string;
+      }[];
+      vatBreakdown?: {
+        calculatedAmount: string;
+        typeCode: string;
+        basisAmount: string;
+        categoryCode: string;
+        rateApplicablePercent: number;
+        exemptionReasonText?: string;
       }[];
       invoicingPeriod: { startDate: Date; endDate: Date };
       // Task #562 — BT-9 Fälligkeitsdatum. paymentTerms.dueDate ist im
@@ -339,32 +357,58 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
       line: lineItems,
       tradeSettlement: {
         currencyCode: "EUR" as const,
-        paymentMeans: {
-          typeCode: "58",
-          payeeAccount: {
-            iban: data.iban,
-            // Task #757: Optionaler abweichender Kontoinhaber (BT-85,
-            // PayeeFinancialAccount.AccountName). Wenn nicht gesetzt, bleibt
-            // der Firmenname implizit über die SellerTradeParty-Identifikation
-            // bestehen (bisheriges Verhalten).
-            ...((data.bankAccountHolder ?? "").trim()
-              ? { accountName: (data.bankAccountHolder as string).trim() }
-              : {}),
-          },
-          ...(data.bic ? {
-            payeeInstitution: {
-              bic: data.bic,
-            },
-          } : {}),
-        },
-        tradeTax: [{
-          calculatedAmount: centsToDecimal(data.vatAmountCents),
-          typeCode: "VAT" as const,
-          basisAmount: centsToDecimal(data.netAmountCents),
-          categoryCode: taxCategoryCode,
-          rateApplicablePercent: taxPercent,
-          ...(vatExempt ? { exemptionReason: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
-        }],
+        // Task #1105 — Header-Zahlungsweg (BG-16) und USt-Aufschlüsselung (BG-23).
+        // Neue Rechnungen (`strictSettlement`) verwenden die KORREKTEN
+        // node-zugferd-Schlüssel `paymentInstruction`/`vatBreakdown`. Erst damit
+        // emittiert node-zugferd die EN-16931-Pflicht-USt-Aufschlüsselung
+        // (`ApplicableTradeTax` im Settlement-Header) und das XML besteht die
+        // XSD-Strict-Validierung. Bestände OHNE das Flag behalten die FRÜHEREN
+        // Schlüssel `paymentMeans`/`tradeTax`, die node-zugferd STILL verwarf —
+        // so reproduziert das Re-Render das in `invoices.zugferd_xml` versiegelte
+        // (unvollständige) XML byte-genau (GoBD-Integritäts-Verifier).
+        ...(data.strictSettlement
+          ? {
+              paymentInstruction: {
+                typeCode: "58",
+                transfers: [{ paymentAccountIdentifier: data.iban }],
+              },
+              vatBreakdown: [{
+                calculatedAmount: centsToDecimal(data.vatAmountCents),
+                typeCode: "VAT" as const,
+                basisAmount: centsToDecimal(data.netAmountCents),
+                categoryCode: taxCategoryCode,
+                rateApplicablePercent: taxPercent,
+                ...(vatExempt ? { exemptionReasonText: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
+              }],
+            }
+          : {
+              paymentMeans: {
+                typeCode: "58",
+                payeeAccount: {
+                  iban: data.iban,
+                  // Task #757: Optionaler abweichender Kontoinhaber (BT-85,
+                  // PayeeFinancialAccount.AccountName). Wenn nicht gesetzt, bleibt
+                  // der Firmenname implizit über die SellerTradeParty-Identifikation
+                  // bestehen (bisheriges Verhalten).
+                  ...((data.bankAccountHolder ?? "").trim()
+                    ? { accountName: (data.bankAccountHolder as string).trim() }
+                    : {}),
+                },
+                ...(data.bic ? {
+                  payeeInstitution: {
+                    bic: data.bic,
+                  },
+                } : {}),
+              },
+              tradeTax: [{
+                calculatedAmount: centsToDecimal(data.vatAmountCents),
+                typeCode: "VAT" as const,
+                basisAmount: centsToDecimal(data.netAmountCents),
+                categoryCode: taxCategoryCode,
+                rateApplicablePercent: taxPercent,
+                ...(vatExempt ? { exemptionReason: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
+              }],
+            }),
         invoicingPeriod: {
           startDate: period.start,
           endDate: period.end,
@@ -424,6 +468,77 @@ export function validateZugferd(xml: string | null | undefined): ValidateZugferd
     }
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
+/**
+ * Task #1105 — Lädt das XSD-Schema-Set eines node-zugferd-Profils (Haupt-XSD +
+ * alle per `xsd:import schemaLocation` referenzierten Sub-Schemas) als
+ * In-Memory-Dateien für `xmllint-wasm`. Der Pfad wird über die von node-zugferd
+ * exponierte `profile.xsdPath()`-Funktion aufgelöst (kein hartcodierter Pfad),
+ * die referenzierten Sub-Schemas werden aus demselben Verzeichnis nachgeladen.
+ */
+async function loadXsdSchemaSet(
+  profile: unknown,
+): Promise<{ mainFileName: string; files: { fileName: string; contents: string }[] } | null> {
+  const xsdPathFn = (profile as { xsdPath?: () => string } | null)?.xsdPath;
+  if (typeof xsdPathFn !== "function") return null;
+  const mainPath = xsdPathFn();
+  const { readFileSync } = await import("node:fs");
+  const { dirname, basename, join } = await import("node:path");
+  const dir = dirname(mainPath);
+  const files = new Map<string, string>();
+  const queue: string[] = [mainPath];
+  while (queue.length > 0) {
+    const filePath = queue.shift() as string;
+    const fileName = basename(filePath);
+    if (files.has(fileName)) continue;
+    const contents = readFileSync(filePath, "utf8");
+    files.set(fileName, contents);
+    const importRe = /schemaLocation="([^"]+)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = importRe.exec(contents)) !== null) {
+      const childName = basename(match[1]);
+      if (!files.has(childName)) queue.push(join(dir, match[1]));
+    }
+  }
+  return {
+    mainFileName: basename(mainPath),
+    files: [...files.entries()].map(([fileName, contents]) => ({ fileName, contents })),
+  };
+}
+
+/**
+ * Task #1105 — XSD-Strict-Validierung des eingebetteten ZUGFeRD-/Factur-X-XML
+ * OHNE Java-Runtime. node-zugferd's eingebaute Strict-Validierung benötigt
+ * `xsd-schema-validator` + Java (in Dev/Prod nicht verfügbar); diese Funktion
+ * validiert stattdessen mit `xmllint-wasm` (reines WebAssembly) gegen die von
+ * node-zugferd gebündelten Profil-XSDs. Wird beim Erst-Seal neuer Rechnungen
+ * genutzt, um die Versiegelung als strict zu markieren (kein
+ * `invoice_zugferd_nonstrict_seal`-Audit).
+ */
+export async function validateZugferdXsd(
+  xml: string,
+  profile: unknown,
+): Promise<ValidateZugferdResult> {
+  try {
+    const schemaSet = await loadXsdSchemaSet(profile);
+    if (!schemaSet) return { ok: false, errors: ["XSD-Schema nicht auffindbar (profile.xsdPath fehlt)"] };
+    const mainFile = schemaSet.files.find((f) => f.fileName === schemaSet.mainFileName);
+    if (!mainFile) return { ok: false, errors: ["Haupt-XSD nicht gefunden"] };
+    const { validateXML } = await import("xmllint-wasm");
+    const result = await validateXML({
+      xml: [{ fileName: "factur-x.xml", contents: xml }],
+      schema: [mainFile],
+      preload: schemaSet.files,
+    });
+    if (result.valid) return { ok: true };
+    const errors = (result.errors ?? []).map((e) =>
+      typeof e === "string" ? e : (e as { message?: string }).message ?? JSON.stringify(e),
+    );
+    return { ok: false, errors: errors.length > 0 ? errors : ["XSD-Validierung fehlgeschlagen"] };
+  } catch (err) {
+    return { ok: false, errors: [err instanceof Error ? err.message : String(err)] };
+  }
 }
 
 /**
@@ -503,6 +618,25 @@ async function buildZugferdInvoice(
     const invoicer = zugferd({ profile, strict: false });
     invoice = invoicer.create(zugferdData);
     xml = await invoice.toXML();
+  }
+
+  // Task #1105 — Strict-Versiegelung OHNE Java-Runtime. Der node-zugferd-
+  // Strict-Pfad oben wirft mangels `xsd-schema-validator`/Java in Dev/Prod
+  // immer → ohne diese Brücke bliebe `usedStrictMode` false und jede neue
+  // Rechnung würde am Seal-Punkt einen `invoice_zugferd_nonstrict_seal`-Audit
+  // auslösen. Für neue Rechnungen (mit korrekter Settlement-Aufschlüsselung,
+  // `strictSettlement`) validieren wir das emittierte XML stattdessen mit
+  // `xmllint-wasm` gegen die gebündelten Profil-XSDs. Besteht es, gilt die
+  // Versiegelung als strict. Bestände (ohne `strictSettlement`) durchlaufen
+  // diese Brücke NICHT (ihr XML ist absichtlich unverändert/unvollständig).
+  if (!usedStrictMode && data.strictSettlement === true) {
+    const xsdResult = await validateZugferdXsd(xml, profile);
+    if (xsdResult.ok) {
+      usedStrictMode = true;
+      strictModeReason = null;
+    } else {
+      strictModeReason = `WASM-XSD-Validierung fehlgeschlagen: ${xsdResult.errors.join("; ")}`;
+    }
   }
 
   const result = validateZugferd(xml);

@@ -86,7 +86,15 @@ den Positions-Aggregationsmodus und (seit Task #1098) `InvoiceRenderSnapshot.inc
 den Pro-Zeilen-Betrag (BT-131, `LineTotalAmount`) ein: vor #1098 versiegelte
 Rechnungen tragen das Flag nicht und re-rendern bewusst **ohne** BT-131
 (node-zugferd verwarf den damals falschen `totalAmount`-Schlüssel still), neue
-Rechnungen werden mit `includeLineTotalAmount: true` versiegelt. Detektoren:
+Rechnungen werden mit `includeLineTotalAmount: true` versiegelt. Analog friert
+(seit Task #1105) `InvoiceRenderSnapshot.strictSettlement` die **Header-Settlement-
+Struktur** ein: vor #1105 versiegelte Rechnungen tragen das Flag nicht und
+re-rendern bewusst über den Legacy-Pfad (die damals an node-zugferd übergebenen
+Schlüssel `tradeTax`/`paymentMeans` waren falsch und wurden still verworfen →
+kein Header-`ApplicableTradeTax`/keine `PaymentMeans` im XML). Neue Rechnungen
+werden mit `strictSettlement: true` versiegelt und verwenden die **korrekten**
+node-zugferd-Schlüssel `vatBreakdown` (BG-23, Header-USt-Aufschlüsselung) +
+`paymentInstruction` (BG-16) — erst damit besteht das XML die XSD. Detektoren:
 `tests/equality/zugferd-roundtrip.test.ts`,
 `tests/equality/zugferd-xml-rerender.test.ts`,
 `tests/equality/invoice-cumulative-pdf-xml-parity.test.ts`,
@@ -94,7 +102,16 @@ Rechnungen werden mit `includeLineTotalAmount: true` versiegelt. Detektoren:
 
 Kann die XML nicht im Strict-Modus erzeugt werden, fällt der Renderer auf
 Non-Strict zurück und schreibt beim Versiegeln einen Audit-Log-Eintrag
-`invoice_zugferd_nonstrict_seal` (statt still zu degradieren).
+`invoice_zugferd_nonstrict_seal` (statt still zu degradieren). Seit Task #1105
+wird die Strict-Versiegelung **ohne Java** verifiziert: `validateZugferdXsd()`
+(`server/lib/zugferd.ts`) prüft das emittierte XML mit `xmllint-wasm` (reines
+WebAssembly) gegen die von node-zugferd gebündelten Profil-XSDs
+(`profile.xsdPath()` + per `schemaLocation` nachgeladene Sub-Schemas). Besteht
+eine **neue** Rechnung (`strictSettlement: true`) diese WASM-XSD-Prüfung, gilt
+die Versiegelung als strict und der `invoice_zugferd_nonstrict_seal`-Audit
+unterbleibt; schlägt sie fehl, bleibt es beim Non-Strict-Audit (graceful, kein
+Abbruch). Bestand (ohne `strictSettlement`) durchläuft diese Brücke nicht und
+bleibt byte-identisch.
 
 ## Bestandsrechnungen-Backfill (kein erzwungenes Re-Seal)
 
