@@ -397,6 +397,17 @@ export async function buildInvoicePdfData(
     ? options.snapshot.strictSettlement === true
     : true;
 
+  // Task #1106 — XMP-Namespace-Reparatur (PDF/A-3b). Orthogonal zu
+  // `strictSettlement` (XML-Header): nur Rechnungen mit
+  // `snapshot.includeConformantSettlement === true` re-rendern mit repariertem
+  // XMP; Bestände ohne das Flag behalten das fehlerhafte Original-XMP
+  // (byte-stabile PDF-Reproduktion gegen `pdf_hash`). Ohne Snapshot
+  // (Erst-Persist / Draft-Vorschau) wird repariert und über
+  // `persistInvoicePdfInner` als `true` im Snapshot versiegelt.
+  pdfData.includeConformantSettlement = options?.snapshot
+    ? options.snapshot.includeConformantSettlement === true
+    : true;
+
   // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
   // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
   // Damit reproduziert die Re-Render-XML auch dann byte-genau die persistierte
@@ -790,6 +801,10 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         // BG-23) versiegelt (XSD-strict-konform); das Re-Render reproduziert das
         // eingebettete EN-16931-XML byte-genau.
         strictSettlement: true,
+        // Task #1106: eingefrorenes XMP-Reparatur-Flag (PDF/A-3b). Neu erzeugte
+        // Rechnungen werden mit repariertem XMP-Namespace versiegelt; das
+        // Re-Render reproduziert das PDF byte-genau.
+        includeConformantSettlement: true,
       };
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {

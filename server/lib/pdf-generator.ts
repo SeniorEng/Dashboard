@@ -109,6 +109,14 @@ export interface InvoicePdfData {
   // Original (GoBD-Integritäts-Verifier).
   strictSettlement?: boolean;
 
+  // Task #1106 — Reparatur des fehlerhaften node-zugferd-XMP-Namespaces
+  // (`xmlns:about=""` → `rdf:about=""`) für PDF/A-3b (veraPDF). `true` für neue
+  // Rechnungen; `undefined`/`false` für Bestände, die VOR dieser Korrektur
+  // versiegelt wurden → byte-stabiler Re-Render über den Render-Snapshot.
+  // Orthogonal zu `strictSettlement` (XML-Header): erst beide zusammen ergeben
+  // eine vollständig EN-16931- UND PDF/A-3b-konforme Rechnung.
+  includeConformantSettlement?: boolean;
+
   // Totals
   netAmountCents: number;
   vatAmountCents: number;

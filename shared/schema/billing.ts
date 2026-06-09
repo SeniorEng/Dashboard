@@ -329,6 +329,19 @@ export interface InvoiceRenderSnapshot {
    * Neu erzeugte Rechnungen werden mit `true` versiegelt.
    */
   strictSettlement?: boolean;
+  /**
+   * Task #1106 — eingefrorenes Flag für die XMP-Namespace-Reparatur (PDF/A-3b).
+   * `true` = die Rechnung wurde mit repariertem XMP-Namespace versiegelt
+   * (node-zugferd schreibt fälschlich `xmlns:about=""` statt `rdf:about=""`, was
+   * den XMP-Parse bricht und veraPDF PDF/A-3b fehlschlagen lässt). `undefined`/
+   * `false` = Bestand, der VOR dieser Korrektur versiegelt wurde → MUSS weiterhin
+   * mit dem (fehlerhaften) Original-XMP re-gerendert werden, sonst driftet das PDF
+   * byte-weise gegen den in `pdf_hash` versiegelten Original-Stand (Integritäts-
+   * Verifier). Orthogonal zu `strictSettlement` (XML-Header): erst beide Flags
+   * zusammen ergeben eine vollständig EN-16931- UND PDF/A-3b-konforme Rechnung.
+   * Neu erzeugte Rechnungen werden mit `true` versiegelt.
+   */
+  includeConformantSettlement?: boolean;
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;

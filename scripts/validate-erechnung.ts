@@ -42,7 +42,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PDFDocument, StandardFonts } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import { embedZugferdXml, DEFAULT_ZUGFERD_PROFILE } from "../server/lib/zugferd";
 import type { InvoicePdfData } from "../server/lib/pdf-generator";
 
@@ -63,7 +63,10 @@ function buildSampleInvoiceData(): InvoicePdfData {
     bic: "COBADEFFXXX",
     ikNummer: "123456789",
     ustId: "",
-    steuernummer: "",
+    // EN-16931 BR-E-2: Bei USt-Befreiung (Kategorie E) MUSS der Verkäufer eine
+    // USt-IdNr. (BT-31) ODER eine Steuernummer (BT-32) führen. Pflegedienste
+    // rechnen i.d.R. ohne USt-IdNr. ab → Steuernummer (localIdentifier).
+    steuernummer: "30/123/45678",
     insuranceIkNummer: "987654321",
     versichertennummer: "A123456789",
     recipientName: "AOK Nordost",
@@ -78,6 +81,15 @@ function buildSampleInvoiceData(): InvoicePdfData {
     vatAmountCents: 0,
     grossAmountCents: 12045,
     vatRate: 0,
+    // Task #1106 — die Beispielrechnung muss den AKTUELLEN Produktivpfad
+    // abbilden: kumulierte Positionen, BT-131 (LineTotalAmount) und die
+    // EN-16931-konformen Header-Settlement-Schlüssel (`paymentInstruction`/IBAN,
+    // `vatBreakdown`) + die XMP-Namespace-Reparatur. Neue Rechnungen werden mit
+    // genau diesen Flags versiegelt.
+    lineAggregation: "cumulative",
+    includeLineTotalAmount: true,
+    strictSettlement: true,
+    includeConformantSettlement: true,
     lineItems: [
       {
         appointmentId: 101,
@@ -117,13 +129,19 @@ function buildSampleInvoiceData(): InvoicePdfData {
   } as unknown as InvoicePdfData;
 }
 
-/** Leeres A4-Trägerdokument (kein Chromium nötig). */
-async function buildCarrierPdf(invoiceNumber: string): Promise<Buffer> {
+/**
+ * Leeres A4-Trägerdokument (kein Chromium nötig).
+ *
+ * WICHTIG (PDF/A-3b): KEINEN Text mit pdf-lib-`StandardFonts` zeichnen — die
+ * Standard-14-Fonts werden NICHT eingebettet, was PDF/A (alle Glyphen müssen
+ * eingebettet sein) bricht und veraPDF failen lässt. Im Produktivpfad rendert
+ * Chromium die sichtbare Rechnung mit eingebetteten Fonts; das Gate prüft hier
+ * nur die node-zugferd-Pipeline (XML-Erzeugung + Einbettung + PDF/A-Struktur),
+ * daher genügt eine leere Trägerseite ohne Fonts.
+ */
+async function buildCarrierPdf(_invoiceNumber: string): Promise<Buffer> {
   const doc = await PDFDocument.create();
-  const page = doc.addPage([595.28, 841.89]); // A4 in pt
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  page.drawText(`Beispiel-Rechnung ${invoiceNumber}`, { x: 56, y: 780, size: 16, font });
-  page.drawText("Trägerdokument für die ZUGFeRD/Factur-X EN-16931 Validierung.", { x: 56, y: 752, size: 10, font });
+  doc.addPage([595.28, 841.89]); // A4 in pt, leer (keine Fonts)
   // Eingefrorenes Erzeugungsdatum → deterministisch (für reproduzierbare Läufe).
   const frozen = new Date("2026-01-15T00:00:00.000Z");
   doc.setCreationDate(frozen);

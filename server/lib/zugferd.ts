@@ -152,11 +152,12 @@ interface ZugferdInvoiceData {
     tradeSettlement: {
       currencyCode: string;
       // Task #1105 — Bestands-/Legacy-Schlüssel (`paymentMeans`/`tradeTax`).
-      // node-zugferd kennt diese Schlüssel NICHT und verwirft sie still; sie
-      // bleiben ausschließlich erhalten, damit das Re-Render versiegelter
-      // Rechnungen das damals emittierte (unvollständige) XML byte-genau
-      // reproduziert (GoBD). Neue Rechnungen verwenden stattdessen die korrekten
-      // Schlüssel `paymentInstruction` (BG-16) und `vatBreakdown` (BG-23).
+      // node-zugferd kennt diese Schlüssel im Header NICHT (es sind die
+      // Zeilen-Schlüssel) und verwirft sie still; sie bleiben ausschließlich
+      // erhalten, damit das Re-Render versiegelter Rechnungen das damals
+      // emittierte (unvollständige) XML byte-genau reproduziert (GoBD). Neue
+      // Rechnungen verwenden stattdessen die korrekten Schlüssel
+      // `paymentInstruction` (BG-16) und `vatBreakdown` (BG-23).
       paymentMeans?: {
         typeCode: string;
         payeeAccount: { iban: string; accountName?: string };
@@ -362,10 +363,12 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
         // node-zugferd-Schlüssel `paymentInstruction`/`vatBreakdown`. Erst damit
         // emittiert node-zugferd die EN-16931-Pflicht-USt-Aufschlüsselung
         // (`ApplicableTradeTax` im Settlement-Header) und das XML besteht die
-        // XSD-Strict-Validierung. Bestände OHNE das Flag behalten die FRÜHEREN
-        // Schlüssel `paymentMeans`/`tradeTax`, die node-zugferd STILL verwarf —
-        // so reproduziert das Re-Render das in `invoices.zugferd_xml` versiegelte
-        // (unvollständige) XML byte-genau (GoBD-Integritäts-Verifier).
+        // XSD-Strict-Validierung. node-zugferd erwartet `transfers`/`vatBreakdown`
+        // als ARRAYS (BG-16/BG-23) — als Einzelobjekt würde der Inhalt (z.B. die
+        // IBAN) still verworfen (Mustang BR-CO-27). Bestände OHNE das Flag behalten
+        // die FRÜHEREN Schlüssel `paymentMeans`/`tradeTax`, die node-zugferd STILL
+        // verwarf — so reproduziert das Re-Render das in `invoices.zugferd_xml`
+        // versiegelte (unvollständige) XML byte-genau (GoBD-Integritäts-Verifier).
         ...(data.strictSettlement
           ? {
               paymentInstruction: {
@@ -378,6 +381,7 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
                 basisAmount: centsToDecimal(data.netAmountCents),
                 categoryCode: taxCategoryCode,
                 rateApplicablePercent: taxPercent,
+                // BT-120 — Befreiungsgrund-Text (Pflicht bei Kategorie E, BR-E-10).
                 ...(vatExempt ? { exemptionReasonText: "Umsatzsteuerbefreit gem. § 4 Nr. 16 UStG" } : {}),
               }],
             }
@@ -677,6 +681,31 @@ export class ZugferdEmbedError extends Error {
   }
 }
 
+/**
+ * Task #1106 — repariert das von node-zugferd fehlerhaft emittierte XMP-Metadaten-
+ * Paket. node-zugferd schreibt `<rdf:Description ... xmlns:about="">` statt
+ * `<rdf:Description ... rdf:about="">`: Ein Präfix (`about`) auf den LEEREN
+ * Namespace zu binden ist nach XML-Namespaces 1.0 illegal und bricht den
+ * XMP-Parse → veraPDF meldet PDF/A-3b als NICHT konform.
+ *
+ * Die Reparatur ist LÄNGENERHALTEND (`xmlns:about=""` und `rdf:about=""  ` sind
+ * beide 14 Bytes): so verschieben sich KEINE PDF-XRef-Offsets und der
+ * nachgelagerte `normalizePdfDeterminism`-Pfad bleibt unberührt. PDF/A schreibt
+ * das XMP-Paket als unkomprimierten Stream vor, daher greift der Byte-Replace.
+ */
+function repairZugferdXmpNamespace(pdf: Buffer): Buffer {
+  const needle = Buffer.from('xmlns:about=""', "latin1");
+  const replacement = Buffer.from('rdf:about=""  ', "latin1"); // identische Länge (14)
+  let idx = pdf.indexOf(needle);
+  if (idx === -1) return pdf;
+  const out = Buffer.from(pdf);
+  while (idx !== -1) {
+    replacement.copy(out, idx);
+    idx = out.indexOf(needle, idx + replacement.length);
+  }
+  return out;
+}
+
 export async function embedZugferdXml(
   pdfBuffer: Buffer,
   data: InvoicePdfData,
@@ -740,7 +769,13 @@ export async function embedZugferdXml(
       throw embedErr;
     }
 
-    const pdfResult = Buffer.from(resultPdf);
+    // Task #1106 — fehlerhaftes XMP-Namespace-Attribut längenerhaltend reparieren
+    // (gated über `includeConformantSettlement`, damit versiegelte Bestände
+    // byte-identisch re-rendern). Ohne Reparatur bricht der XMP-Parse → veraPDF
+    // meldet PDF/A-3b als nicht konform.
+    const pdfResult = data.includeConformantSettlement
+      ? repairZugferdXmpNamespace(Buffer.from(resultPdf))
+      : Buffer.from(resultPdf);
     const { hasPdfA } = await readPdfAXmp(pdfResult);
     const hasXml = pdfResult.includes(Buffer.from("factur-x.xml"));
     log(`PDF eingebettet für ${data.invoiceNumber} | strict=${built.usedStrictMode} | PDF/A=${hasPdfA} | XML=${hasXml}`, "ZUGFeRD");

@@ -18,6 +18,13 @@ das Ergebnis mit den **offiziellen** Prüfwerkzeugen:
 Beide sind Java-Tools. Das Gate testet damit exakt die Pipeline, die auch der
 Produktivpfad nutzt — nicht eine Nachbildung.
 
+Seit Task #1106 besteht die Beispielrechnung **beide** Validatoren ohne Fehler
+(Mustang: `XML:valid`, 0 Schematron-Errors; veraPDF: `isCompliant="true"`,
+PDF/A-3b). Davor war das Gate zwar verdrahtet, sprang aber ohne lokales Java
+still über — produktive Rechnungen scheiterten an EN-16931-Schematron-Regeln
+(fehlende IBAN/BG-16, fehlende USt-Aufschlüsselung/BG-23) und an PDF/A wegen
+eines kaputten XMP-Namespaces (`xmlns:about` statt `rdf:about`).
+
 ## Abgrenzung (wichtig)
 
 Die ZUGFeRD/Factur-X-XML ist die maschinenlesbare **umsatzsteuerliche**
@@ -94,7 +101,31 @@ Schlüssel `tradeTax`/`paymentMeans` waren falsch und wurden still verworfen →
 kein Header-`ApplicableTradeTax`/keine `PaymentMeans` im XML). Neue Rechnungen
 werden mit `strictSettlement: true` versiegelt und verwenden die **korrekten**
 node-zugferd-Schlüssel `vatBreakdown` (BG-23, Header-USt-Aufschlüsselung) +
-`paymentInstruction` (BG-16) — erst damit besteht das XML die XSD. Detektoren:
+`paymentInstruction` (BG-16) — erst damit besteht das XML die XSD. **Beide
+Untergruppen sind Arrays** (`transfers`/`vatBreakdown`) — als Einzelobjekt
+übergeben droppt node-zugferd den Inhalt (z. B. fehlende `IBANID` ⇒ Mustang
+`BR-CO-27`).
+
+Task #1106 ergänzt die zweite, dazu **orthogonale** Versionierung über
+`InvoiceRenderSnapshot.includeConformantSettlement` — diese friert die
+**XMP-Namespace-Reparatur** (PDF/A-3b) ein, unabhängig von der XML-Header-
+Struktur (`strictSettlement`). Erst beide Flags zusammen ergeben eine vollständig
+EN-16931- UND PDF/A-3b-konforme Rechnung:
+
+- **XMP-Reparatur:** node-zugferd schreibt in den PDF/A-Metadatenstream
+  `xmlns:about=""` statt `rdf:about=""`; `repairZugferdXmpNamespace` ersetzt das
+  **längenerhaltend** (beide Tokens 14 Bytes), damit die Byte-Offsets der
+  PDF-XRef-Tabelle gültig bleiben und veraPDF PDF/A-3b grün meldet. Vor #1106
+  versiegelte Rechnungen tragen das Flag nicht und re-rendern mit dem
+  unreparierten Original-XMP ⇒ versiegeltes PDF bleibt byte-identisch
+  (GoBD-`pdf_hash`-Stabilität).
+- **USt-befreite Pflegekassen-Rechnungen (Kategorie E):** EN-16931 `BR-E-2`
+  verlangt eine USt-IdNr. (BT-31) **oder** Steuernummer (BT-32). Pflegedienste
+  rechnen i. d. R. ohne USt-IdNr. ab ⇒ die Firmen-`steuernummer` MUSS gepflegt
+  sein, sonst failt Mustang.
+
+Neue Rechnungen werden mit `strictSettlement: true` **und**
+`includeConformantSettlement: true` versiegelt. Detektoren:
 `tests/equality/zugferd-roundtrip.test.ts`,
 `tests/equality/zugferd-xml-rerender.test.ts`,
 `tests/equality/invoice-cumulative-pdf-xml-parity.test.ts`,
