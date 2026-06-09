@@ -13,6 +13,7 @@ import { db } from "../lib/db";
 import { appointmentsRepo } from "../repos";
 import { getNextInvoiceNumberTx, createInvoiceTx } from "../storage/billing-storage";
 import { withAudit } from "../lib/with-audit";
+import { auditService } from "./audit";
 import { readTestFaults } from "../lib/test-fault-injector";
 import { getCachedCompanySettings } from "./cache";
 import { schedulePdfPersistInBackground } from "./invoice-pdf-orchestrator";
@@ -100,6 +101,23 @@ export function getPotInvoiceNote(potKey: InvoicePotKey): string {
 
 export function isKassePot(potKey: InvoicePotKey): potKey is BudgetType {
   return potKey !== "private";
+}
+
+/**
+ * Task #1094 — Bestimmt den Budget-Topf einer Single-Pot-Rechnung. Liefert den
+ * Kasse-Topf (`entlastungsbetrag_45b` | `umwandlung_45a` | `ersatzpflege_39_42a`),
+ * wenn genau ein Kasse-Pot belegt ist; `null`, wenn der einzige belegte Pot
+ * der Selbstzahler-/Privat-Pot ist (`singlePotIsPrivate`) oder kein eindeutiger
+ * Topf bestimmbar ist (keine belegten Pots / mehrere Pots). Wird genutzt, um
+ * eine Single-Pot-Kassenrechnung mit ihrem echten Topf zu stempeln, statt sich
+ * im Renderer still auf die §45b-Formulierung zurückfallen zu lassen.
+ */
+export function resolveSinglePotBudgetType(
+  potItems: Map<InvoicePotKey, BuildLineItem[]>,
+): BudgetType | null {
+  if (potItems.size !== 1) return null;
+  const [onlyPot] = potItems.keys();
+  return isKassePot(onlyPot) ? onlyPot : null;
 }
 
 export async function buildInvoiceDraft(input: {
@@ -559,6 +577,46 @@ export async function generateInvoiceCore(
   // aufgelöst (siehe oben), nur der ausgewiesene Rechnungstyp + USt wechseln.
   const invoiceBillingType = singlePotIsPrivate ? "selbstzahler" : billingType;
 
+  // Task #1094 — Den echten Budget-Topf der Single-Pot-Kassenrechnung
+  // stempeln, damit der Renderer die pot-spezifische §-Notiz/Überschrift/
+  // ZUGFeRD-Note verwendet, statt still auf die §45b-Formulierung
+  // zurückzufallen. Selbstzahler-/Privat-Rechnungen (inkl. der
+  // singlePotIsPrivate-Reklassifizierung) bleiben bewusst `budgetType=null`.
+  const singlePotBudgetType = resolveSinglePotBudgetType(potItems);
+
+  // Task #1094 — Lauter Invariant: Eine Kassen-Rechnung (pflegekasse_*) DARF
+  // niemals ohne auflösbaren Budget-Topf versiegelt werden. Andernfalls würde
+  // der Renderer still die §45b-Formulierung auf eine Rechnung stempeln, die
+  // einen anderen Topf abrechnet (z.B. §45a allein) — rechtlich falsch, ohne
+  // Fehler oder Feedback. Wir scheitern hier laut (Fehler + Audit-Trail), statt
+  // uns auf den Render-Zeit-Fallback zu verlassen (der nur für versiegelte
+  // Bestandsrechnungen mit `budgetType=null` reserviert bleibt).
+  const isKasseInvoice =
+    invoiceBillingType === "pflegekasse_gesetzlich" ||
+    invoiceBillingType === "pflegekasse_privat";
+  if (isKasseInvoice && !singlePotBudgetType) {
+    await auditService.log(
+      ctx.userId,
+      "invoice_creation_pot_unresolved",
+      "customer",
+      customerId,
+      {
+        customerId,
+        billingType: invoiceBillingType,
+        billingMonth,
+        billingYear,
+        occupiedPots: Array.from(potItems.keys()),
+      },
+      ctx.ipAddress,
+    );
+    throw badRequest(
+      `Rechnung kann nicht erstellt werden: Der Budget-Topf für die ` +
+      `Kassenabrechnung (${customerName}, ${billingMonth}/${billingYear}) ` +
+      `konnte nicht eindeutig bestimmt werden. Bitte prüfen Sie die ` +
+      `Budget-Konfiguration und Buchungen für diesen Zeitraum.`,
+    );
+  }
+
   let invoice: Invoice;
   let invoiceNumber: string;
   try {
@@ -583,6 +641,10 @@ export async function generateInvoiceCore(
         grossAmountCents: totalNetCents + totalVatCents,
         vatRate: invoiceBillingType === "selbstzahler" ? STANDARD_VAT_RATE_BP : 0,
         status: "entwurf",
+        // Task #1094 — echter Topf der Single-Pot-Kassenrechnung (null für
+        // Selbstzahler/Privat). Damit greift der pot-spezifische Renderer
+        // statt des §45b-Render-Zeit-Fallbacks (der nur Bestand mit NULL trifft).
+        budgetType: singlePotBudgetType,
         referencedStornoInvoiceIds: stornoRefsForInsert,
         dueDate: invoiceDueDateIso,
         buyerReference: defaultBuyerReference,
@@ -604,6 +666,7 @@ export async function generateInvoiceCore(
           billingYear,
           grossAmountCents: totalNetCents + totalVatCents,
           lineItemCount: lineItems.length,
+          budgetType: singlePotBudgetType,
         },
         ipAddress: req.ip,
       });

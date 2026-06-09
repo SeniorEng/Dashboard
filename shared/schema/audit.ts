@@ -98,6 +98,7 @@ export const AUDIT_ACTIONS = [
   "orphaned_tx_appointment_id_backfilled",
   "storno_transaction_date_backfilled",
   "invoice_draft_discarded",
+  "invoice_creation_pot_unresolved",
   "insurance_providers_cleanup",
 ] as const;
 
