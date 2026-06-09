@@ -5,14 +5,19 @@ import {
   type ProspectNote,
   type InsertProspectNote,
   type ProspectOffer,
+  type ProspectWithErstberatung,
+  type ProspectErstberatungInfo,
   prospects,
   prospectNotes,
   prospectOffers,
   appointments,
+  users,
 } from "@shared/schema";
-import { eq, and, or, ilike, isNull, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, ilike, isNull, ne, asc, desc, sql, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../lib/db";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { attributeAppointmentToEmployees } from "@shared/domain/appointment-attribution";
 import { appointmentsRepo, prospectsRepo } from "../repos";
 
 export const prospectStorage = {
@@ -24,7 +29,7 @@ export const prospectStorage = {
   async getAll(filters?: {
     status?: string;
     search?: string;
-  }): Promise<Prospect[]> {
+  }): Promise<ProspectWithErstberatung[]> {
     const conditions = [isNull(prospects.deletedAt)];
 
     if (filters?.status) {
@@ -49,9 +54,88 @@ export const prospectStorage = {
       );
     }
 
-    return prospectsRepo.selectFrom(db)
+    const rows = await prospectsRepo.selectFrom(db)
       .where(and(...conditions))
       .orderBy(desc(prospects.createdAt));
+
+    const erstberatungByProspect = await this.getErstberatungInfoForProspects(
+      rows.map(p => p.id),
+    );
+
+    return rows.map(p => ({
+      ...p,
+      erstberatung: erstberatungByProspect.get(p.id) ?? null,
+    }));
+  },
+
+  /**
+   * Lädt für die übergebenen Interessenten den jeweils relevanten
+   * Erstberatungstermin (Termin-Typ `Erstberatung`, nicht storniert, nicht
+   * gelöscht). Bei mehreren Terminen wird der aktuellste (spätestes Datum +
+   * Startzeit) gewählt. Der verantwortliche Mitarbeiter wird über die zentrale
+   * Termin→Mitarbeiter-Regel (`attributeAppointmentToEmployees`) bestimmt:
+   * durchgeführt → performedBy, sonst zugewiesen.
+   */
+  async getErstberatungInfoForProspects(
+    prospectIds: number[],
+  ): Promise<Map<number, ProspectErstberatungInfo>> {
+    const result = new Map<number, ProspectErstberatungInfo>();
+    if (prospectIds.length === 0) return result;
+
+    const assignedUser = alias(users, "erstberatung_assigned_user");
+    const performedUser = alias(users, "erstberatung_performed_user");
+
+    // Aufsteigend sortiert: pro Interessent gewinnt damit die letzte (aktuellste) Zeile.
+    const apptRows = await appointmentsRepo
+      .selectColumnsFrom({
+        prospectId: appointments.prospectId,
+        date: appointments.date,
+        scheduledStart: appointments.scheduledStart,
+        status: appointments.status,
+        assignedEmployeeId: appointments.assignedEmployeeId,
+        performedByEmployeeId: appointments.performedByEmployeeId,
+        assignedName: assignedUser.displayName,
+        performedName: performedUser.displayName,
+      }, db)
+      .leftJoin(assignedUser, eq(appointments.assignedEmployeeId, assignedUser.id))
+      .leftJoin(performedUser, eq(appointments.performedByEmployeeId, performedUser.id))
+      .where(and(
+        inArray(appointments.prospectId, prospectIds),
+        eq(appointments.appointmentType, "Erstberatung"),
+        isNull(appointments.deletedAt),
+        ne(appointments.status, "cancelled"),
+      ))
+      .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
+
+    for (const row of apptRows) {
+      if (row.prospectId == null) continue;
+
+      const employeeIds = attributeAppointmentToEmployees(
+        {
+          status: row.status,
+          assignedEmployeeId: row.assignedEmployeeId,
+          performedByEmployeeId: row.performedByEmployeeId,
+        },
+        null,
+      );
+      const employeeId = employeeIds[0] ?? null;
+      let employeeName: string | null = null;
+      if (employeeId != null && employeeId === row.performedByEmployeeId) {
+        employeeName = row.performedName;
+      } else if (employeeId != null && employeeId === row.assignedEmployeeId) {
+        employeeName = row.assignedName;
+      }
+
+      // Aufsteigend sortiert ⇒ Überschreiben behält den aktuellsten Termin.
+      result.set(row.prospectId, {
+        date: row.date,
+        scheduledStart: row.scheduledStart,
+        status: row.status,
+        employeeName,
+      });
+    }
+
+    return result;
   },
 
   async getById(id: number): Promise<Prospect | undefined> {

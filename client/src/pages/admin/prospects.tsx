@@ -69,7 +69,7 @@ import { useProspects, useProspectStats, useProspect, useCreateProspect, useUpda
 import { AddressFields } from "@/features/customers/components/wizard/address-fields";
 import { isDachPhone } from "@shared/schema/common";
 import { PROSPECT_STATUS_LABELS, PROSPECT_STATUSES, PROSPECT_NOTE_TYPE_LABELS, DISQUALIFICATION_REASON_LABELS, DISQUALIFICATION_REASONS, type ProspectStatus, type ProspectNoteType, type DisqualificationReason } from "@shared/schema";
-import { formatDateForDisplay, todayISO } from "@shared/utils/datetime";
+import { formatDateForDisplay, formatTimeHHMM, todayISO } from "@shared/utils/datetime";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatAddress } from "@shared/utils/format";
 
@@ -203,6 +203,23 @@ export default function AdminProspects() {
                       <div className="flex items-center gap-1 mt-1 text-xs text-purple-600">
                         <CalendarClock className="h-3 w-3" />
                         Wiedervorlage: {formatDateForDisplay(String(prospect.wiedervorlageDate).substring(0, 10))}
+                      </div>
+                    )}
+                    {prospect.erstberatung && (
+                      <div
+                        className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-blue-600"
+                        data-testid={`text-prospect-erstberatung-${prospect.id}`}
+                      >
+                        <span className="flex items-center gap-1">
+                          <CalendarCheck className="h-3 w-3" />
+                          Erstberatung: {formatDateForDisplay(String(prospect.erstberatung.date).substring(0, 10), { day: "2-digit", month: "2-digit" })} {formatTimeHHMM(prospect.erstberatung.scheduledStart)}
+                        </span>
+                        {prospect.erstberatung.employeeName && (
+                          <span className="flex items-center gap-1" data-testid={`text-prospect-erstberatung-employee-${prospect.id}`}>
+                            <UserPlus className="h-3 w-3" />
+                            {prospect.erstberatung.employeeName}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

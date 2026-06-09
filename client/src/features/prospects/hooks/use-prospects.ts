@@ -2,18 +2,18 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useToast } from "@/hooks/use-toast";
-import type { Prospect, ProspectNote, InsertProspect, UpdateProspect, InsertProspectNote } from "@shared/schema";
+import type { Prospect, ProspectNote, ProspectWithErstberatung, InsertProspect, UpdateProspect, InsertProspectNote } from "@shared/schema";
 
 type ProspectWithNotes = Prospect & { notes: ProspectNote[] };
 
 export function useProspects(filters?: { status?: string; search?: string }) {
-  return useQuery<Prospect[]>({
+  return useQuery<ProspectWithErstberatung[]>({
     queryKey: ["prospects", filters],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters?.status) params.set("status", filters.status);
       if (filters?.search) params.set("search", filters.search);
-      const result = await api.get<Prospect[]>(`/admin/prospects?${params}`);
+      const result = await api.get<ProspectWithErstberatung[]>(`/admin/prospects?${params}`);
       return unwrapResult(result);
     },
     staleTime: 30000,

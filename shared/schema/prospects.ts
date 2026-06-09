@@ -204,6 +204,31 @@ export const insertProspectNoteSchema = createInsertSchema(prospectNotes).omit({
 });
 
 export type Prospect = typeof prospects.$inferSelect;
+
+/**
+ * Kompakte Infos zum verknüpften Erstberatungstermin eines Interessenten,
+ * wie sie in der Interessenten-Übersicht (Liste) angezeigt werden.
+ */
+export interface ProspectErstberatungInfo {
+  /** Termindatum (ISO `YYYY-MM-DD`). */
+  date: string;
+  /** Geplanter Beginn (`HH:MM:SS`). */
+  scheduledStart: string;
+  /** Termin-Status (z. B. `scheduled`, `completed`). */
+  status: string;
+  /**
+   * Anzeigename des verantwortlichen Mitarbeiters gemäß zentraler
+   * Termin→Mitarbeiter-Regel (durchgeführt → performedBy, sonst zugewiesen),
+   * oder `null`, wenn keiner zugeordnet werden kann.
+   */
+  employeeName: string | null;
+}
+
+/** Interessent inkl. (optionalem) verknüpftem Erstberatungstermin für die Listenansicht. */
+export type ProspectWithErstberatung = Prospect & {
+  erstberatung: ProspectErstberatungInfo | null;
+};
+
 export type InsertProspect = z.infer<typeof insertProspectSchema>;
 export type UpdateProspect = z.infer<typeof updateProspectSchema>;
 export type ProspectNote = typeof prospectNotes.$inferSelect;

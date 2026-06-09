@@ -31,6 +31,18 @@ synchronous foreground runs.
 fan-out, wasting time re-running the orchestrator. Trust the per-file isolated run
 and the test's own concurrency-immunity comments over the noisy harness aggregate.
 
+**Caveat — not every billing failure is a concurrency flake:**
+`tests/billing/persist-invoice-pdf-mutex.test.ts` fails DETERMINISTICALLY with
+`TypeError: db.transaction is not a function` (invoice-pdf-orchestrator) even under
+raw single-file vitest against the dev DB — i.e. it reproduces in full isolation, so
+it is NOT the concurrent-fan-out flake above. The dev `Start application` server uses
+that exact `db.transaction` path fine, so it's a vitest module-resolution artifact of
+the billing/orchestrator import graph, pre-existing and independent of unrelated
+feature work (e.g. prospect-card changes touch no billing code). Don't try to "fix" it
+from an unrelated task; confirm zero coupling (grep that your change isn't imported by
+billing) and skip it. Same for `billing-flow.test.ts` `list.data.find is not a function`
+and `bulk-print` count `0 >= 1` — pre-existing billing-suite breakage in this env.
+
 **Running the ephemeral orchestrator manually (Chromium/PDF integration files that
 NEED a throwaway DB, so the raw-vitest-vs-dev-server trick above doesn't apply):**
 - `setsid`/`nohup &` detached runs STALL forever at the esbuild "Baue
