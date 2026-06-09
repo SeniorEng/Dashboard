@@ -449,10 +449,14 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
   // Task #553: `ZugferdEmbedError` wird hier eager geladen, damit der
   // catch-Block unten typisiert prüfen kann.
   const { ZugferdEmbedError } = await import("../lib/zugferd");
-  const { sendEmail, buildEmailLayout } = await import("../services/email-service");
-  const { resolveLogoToDataUrl } = await import("../services/logo-resolver");
+  const { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC } = await import("../services/email-service");
   const companyName = companySettings.companyName || "SeniorenEngel";
-  const resolvedLogo = await resolveLogoToDataUrl(companySettings.logoUrl);
+  // Task #1102: Logo wird einmal vor der Schleife als Inline-Anhang (cid:)
+  // geladen, statt als data:-URI ins HTML eingebettet — Gmail/Outlook
+  // entfernen data:-Bilder, cid:-Inline-Anhänge werden zuverlässig angezeigt.
+  const logoAttachment = await buildLogoInlineAttachment(companySettings.logoUrl);
+  const resolvedLogo = logoAttachment ? EMAIL_LOGO_SRC : null;
+  const logoAttachments = logoAttachment ? [logoAttachment] : [];
 
   for (const invoiceId of invoiceIds) {
     try {
@@ -608,6 +612,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
           subject,
           html,
           attachments: [
+            ...logoAttachments,
             { filename: `${invoice.invoiceNumber}.pdf`, content: finalInvoicePdf, contentType: "application/pdf" },
             { filename: `LN-${invoice.invoiceNumber}.pdf`, content: finalLnPdf, contentType: "application/pdf" },
           ],
@@ -691,6 +696,7 @@ router.post("/send-batch", asyncHandler("Stapelversand fehlgeschlagen", async (r
               subject: customerSubject,
               html: customerHtml,
               attachments: [
+                ...logoAttachments,
                 { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
                 { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
               ],
@@ -1422,10 +1428,13 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
     finalLnPdf = doubled.lnPdf;
   }
 
-  const { sendEmail, buildEmailLayout } = await import("../services/email-service");
-  const { resolveLogoToDataUrl } = await import("../services/logo-resolver");
+  const { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC } = await import("../services/email-service");
   const companyName = companySettings.companyName || "SeniorenEngel";
-  const resolvedLogo = await resolveLogoToDataUrl(companySettings.logoUrl);
+  // Task #1102: Logo als Inline-Anhang (cid:) statt data:-URI — wird von
+  // Gmail/Outlook zuverlässig angezeigt. Einmal laden, in alle Mails einbetten.
+  const logoAttachment = await buildLogoInlineAttachment(companySettings.logoUrl);
+  const resolvedLogo = logoAttachment ? EMAIL_LOGO_SRC : null;
+  const logoAttachments = logoAttachment ? [logoAttachment] : [];
 
   const monthName = MONTH_NAMES_DE[(invoice.billingMonth - 1)] || String(invoice.billingMonth);
   const customerFullName = [cust.vorname, cust.nachname].filter(Boolean).join(" ") || cust.name;
@@ -1464,6 +1473,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
       subject,
       html,
       attachments: [
+        ...logoAttachments,
         { filename: `${invoice.invoiceNumber}.pdf`, content: finalInvoicePdf, contentType: "application/pdf" },
         { filename: `LN-${invoice.invoiceNumber}.pdf`, content: finalLnPdf, contentType: "application/pdf" },
       ],
@@ -1549,6 +1559,7 @@ router.post("/:id/send", asyncHandler("Rechnung konnte nicht versendet werden", 
           subject: customerSubject,
           html: customerHtml,
           attachments: [
+            ...logoAttachments,
             { filename: `${invoice.invoiceNumber}.pdf`, content: zugferdBuffer, contentType: "application/pdf" },
             { filename: `LN-${invoice.invoiceNumber}.pdf`, content: lnPdf, contentType: "application/pdf" },
           ],
