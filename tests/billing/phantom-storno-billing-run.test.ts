@@ -221,12 +221,16 @@ describe("Phantom-Storno über echten Rechnungslauf (Task #1015)", () => {
     expect(activeInvoices.length, "Es darf genau EINE aktive Rechnung entstehen (keine Phantom-§45a-Rechnung)").toBe(1);
     expect(activeInvoices[0].id, "Die einzige Rechnung ist die generierte §45b-Rechnung").toBe(genRes.data.id);
 
-    // (4d) Detail laden: Single-Topf → kein Pot-Marker, Summe = 7,00 €.
+    // (4d) Detail laden: Single-Topf → seit Task #1094 mit echtem Pot gestempelt
+    //      (§45b), aber keiner Topf-Gruppe zugehörig, Summe = 7,00 €.
     const detail = await apiGet<{ budgetType: string | null; billingRunId: string | null; totalCents?: number; grossAmountCents?: number; lineItems?: Array<{ serviceCode: string | null; totalCents: number }> }>(
       `/api/billing/${genRes.data.id}`,
     );
     expect(detail.status, `detail: ${JSON.stringify(detail.data)}`).toBe(200);
-    expect(detail.data.budgetType ?? null, "Single-Topf-Rechnung trägt keinen Pot-Marker (Legacy-Pfad)").toBeNull();
+    // Task #1094: Die Single-Pot-Kassenrechnung wird mit ihrem echten Budget-Topf
+    // gestempelt (statt des früheren Legacy-NULL-Markers), damit der Renderer die
+    // pot-spezifische §-Notiz/Überschrift verwendet.
+    expect(detail.data.budgetType ?? null, "Single-Topf-§45b-Rechnung trägt seit Task #1094 ihren echten Pot-Marker").toBe("entlastungsbetrag_45b");
     expect(detail.data.billingRunId ?? null, "Single-Topf-Rechnung gehört zu keiner Topf-Gruppe").toBeNull();
     const lineItems = detail.data.lineItems ?? [];
     const abLines = lineItems.filter((li) => li.serviceCode === "alltagsbegleitung");
