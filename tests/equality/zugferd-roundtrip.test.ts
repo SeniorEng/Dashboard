@@ -218,6 +218,9 @@ function buildPdfData(spec: InvoiceArb): InvoicePdfData {
     vatAmountCents,
     grossAmountCents,
     vatRate: spec.vatBasisPoints,
+    // Task #1083: dieser Property-Roundtrip prüft die pro-Termin-XML-Form
+    // (eine Zeile je Spec-Item). Aggregation wird separat unit-getestet.
+    lineAggregation: "per_appointment",
     lineItems: spec.lineItems.map((li, idx) => ({
       appointmentId: idx + 1,
       appointmentDate: "2026-01-05",

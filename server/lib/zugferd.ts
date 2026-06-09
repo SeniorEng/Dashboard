@@ -2,6 +2,7 @@ import type { InvoicePdfData } from "./pdf-generator";
 import { log } from "./log";
 import { parseLocalDate, parseTimestamp } from "@shared/utils/datetime";
 import { centsToEuroNumber } from "@shared/utils/money";
+import { aggregateInvoiceLineItems } from "@shared/domain/invoice-line-aggregation";
 
 interface ZugferdInvoice {
   toXML(): Promise<string>;
@@ -187,7 +188,17 @@ function buildZugferdData(data: InvoicePdfData): ZugferdInvoiceData {
   const taxCategoryCode = vatExempt ? "E" : "S";
   const taxPercent = vatExempt ? 0 : data.vatRate / 100;
 
-  const lineItems = data.lineItems.map((item, index) => {
+  // Task #1083: Das eingebettete EN-16931-/ZUGFeRD-XML spiegelt exakt die im
+  // PDF sichtbaren Positionen. Für neue Rechnungen kumuliert (eine Zeile je
+  // Leistungs-/Fahrtkosten-Typ), für Bestand pro Termin (über den Render-
+  // Snapshot byte-stabil eingefroren). Σ(LineTotal) bleibt bit-genau erhalten,
+  // sodass die Reconciliation (LineTotalSum == Nettobetrag) weiterhin hält.
+  const sourceLineItems =
+    data.lineAggregation === "cumulative"
+      ? aggregateInvoiceLineItems(data.lineItems)
+      : data.lineItems;
+
+  const lineItems = sourceLineItems.map((item, index) => {
     const isKm = item.serviceCode === "travel_km" || item.serviceCode === "customer_km";
     const unitCode = isKm ? "KMT" : "HUR";
     // Task #561: bevorzugt `quantityRaw` (Dezimal-km bzw. Dezimalstunden);

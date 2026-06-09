@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import { formatEuroDE } from "@shared/utils/money";
 import { renderLineItemQuantity, isKmLineItem, type LineItemQuantityUnit } from "@shared/domain/invoice-line-items";
+import { aggregateInvoiceLineItems } from "@shared/domain/invoice-line-aggregation";
 import { resolveVatTreatment, distributeVatAcrossLines, grossUpUnitPriceCents, STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
 import { buildInvoiceFooterInnerHtml, buildLeistungsnachweisFooterInnerHtml } from "@shared/domain/document-page-geometry";
 import { isSignatureImageMeaningful } from "./signature-validation";
@@ -85,6 +86,12 @@ export interface InvoicePdfData {
     serviceDetails: string | null;
   }[];
   
+  // Task #1083 — Positions-Aggregationsmodus. `"cumulative"` fasst Positionen je
+  // Leistungs-/Fahrtkosten-Typ zusammen (Standard für neue Rechnungen), alles
+  // andere (inkl. `undefined`/`"per_appointment"`) rendert pro Termin (Bestand,
+  // byte-stabil über den Render-Snapshot eingefroren).
+  lineAggregation?: "cumulative" | "per_appointment";
+
   // Totals
   netAmountCents: number;
   vatAmountCents: number;
@@ -295,14 +302,19 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   // sodass Σ(Brutto-Zeilen) === Gesamtbetrag. Steuerfrei → netto === brutto.
   const treatment = resolveVatTreatment({ billingType: data.billingType, budgetType: data.budgetType });
   const isStandard = treatment === "standard";
-  const lineNetCents = data.lineItems.map(i => i.totalCents);
+  // Task #1083: kumulierte Positionen (neue Rechnungen) vs. pro-Termin (Bestand,
+  // byte-stabil per Render-Snapshot eingefroren). Die persistierten Line-Items
+  // bleiben unangetastet — kumuliert wird nur die Anzeige.
+  const aggregate = data.lineAggregation === "cumulative";
+  const renderItems = aggregate ? aggregateInvoiceLineItems(data.lineItems) : data.lineItems;
+  const lineNetCents = renderItems.map(i => i.totalCents);
   const lineVatCents = isStandard
     ? distributeVatAcrossLines(lineNetCents, data.vatAmountCents)
     : lineNetCents.map(() => 0);
   const displayVatCents = isStandard ? data.vatAmountCents : 0;
   const displayGrossCents = isStandard ? data.grossAmountCents : data.netAmountCents;
 
-  const lineItemsHtml = data.lineItems.map((item, idx) => {
+  const lineItemsHtml = renderItems.map((item, idx) => {
     const isKm = isKmLineItem(item.serviceCode);
     // Task #561: zentrale Quantity-Anzeige — nutzt `quantityRaw`/`quantityUnit`
     // wenn vorhanden, sonst Fallback auf `durationMinutes` (historische Zeilen).
@@ -317,10 +329,16 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     const freeHint = isFreeLine
       ? `<div style="font-size: 8pt; color: #047857; font-style: italic; margin-top: 2px;">kostenlos</div>`
       : "";
+    // Task #1083: Bei kumulierten Positionen entfallen die Datum-/Uhrzeit-
+    // Spalten (kein Termin-Bezug mehr) — der Termin-Detailnachweis bleibt dem
+    // Leistungsnachweis vorbehalten.
+    const dateTimeCells = aggregate
+      ? ""
+      : `<td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>`;
     return `
     <tr>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${formatDate(item.appointmentDate)}</td>
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${item.startTime ? item.startTime.slice(0, 5) : ""}-${item.endTime ? item.endTime.slice(0, 5) : ""}</td>
+      ${dateTimeCells}
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}${freeHint}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayUnitPrice)}${unitLabel}</td>
@@ -452,12 +470,12 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
   <table class="items">
     <thead>
       <tr>
-        <th>Datum</th>
-        <th>Uhrzeit</th>
+        ${aggregate ? "" : `<th>Datum</th>
+        <th>Uhrzeit</th>`}
         <th>Leistung</th>
-        <th>Dauer</th>
-        <th>Satz${isStandard ? " (brutto)" : ""}</th>
-        <th>Betrag${isStandard ? " (brutto)" : ""}</th>
+        <th${aggregate ? ' style="text-align: right;"' : ""}>Dauer</th>
+        <th${aggregate ? ' style="text-align: right;"' : ""}>Satz${isStandard ? " (brutto)" : ""}</th>
+        <th${aggregate ? ' style="text-align: right;"' : ""}>Betrag${isStandard ? " (brutto)" : ""}</th>
       </tr>
     </thead>
     <tbody>

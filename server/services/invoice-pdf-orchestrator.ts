@@ -363,6 +363,17 @@ export async function buildInvoicePdfData(
     invoiceDueDate: pdfData.invoiceDueDate ?? null,
   };
 
+  // Task #1083 — Positions-Aggregationsmodus. Liegt ein Snapshot vor (Re-Render
+  // einer versiegelten Rechnung: Integritäts-Verifier / Self-Heal / Send-Cache-
+  // Miss), wird der damals versiegelte Modus reproduziert: explizit gesetztes
+  // `snapshot.lineAggregation`, sonst `"per_appointment"` für Bestände, die VOR
+  // der Kumulierung versiegelt wurden (byte-stabile PDF-/XML-Reproduktion).
+  // Ohne Snapshot (Erst-Persist / Draft-Vorschau) wird kumuliert gerendert und
+  // über `persistInvoicePdfInner` als `"cumulative"` im Snapshot versiegelt.
+  pdfData.lineAggregation = options?.snapshot
+    ? (options.snapshot.lineAggregation ?? "per_appointment")
+    : "cumulative";
+
   // Task #593: Wenn ein Render-Snapshot vorliegt (Verifier-Re-Render-Pfad),
   // werden die Kunden-Stammfelder daraus gelesen statt aus der Live-Tabelle.
   // Damit reproduziert die Re-Render-XML auch dann byte-genau die persistierte
@@ -743,6 +754,10 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         // Task #1073: eingefrorenes ZUGFeRD-Profil — das Re-Render reproduziert
         // das eingebettete XML mit exakt diesem Profil (byte-genau).
         profile: zugferdProfile,
+        // Task #1083: eingefrorener Positions-Aggregationsmodus. Neu erzeugte
+        // Rechnungen werden kumuliert versiegelt; das Re-Render reproduziert
+        // PDF + ZUGFeRD-XML byte-genau (Integritäts-Verifier).
+        lineAggregation: "cumulative",
       };
     }
     if (leistungsnachweisPdf && needsLeistungsnachweis) {

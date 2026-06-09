@@ -293,6 +293,17 @@ export interface InvoiceRenderSnapshot {
    * Neue Rechnungen werden mit `"en16931"` (EN 16931 / COMFORT) versiegelt.
    */
   profile?: "basic" | "en16931";
+  /**
+   * Task #1083 — eingefrorener Positions-Aggregationsmodus. Bestimmt, ob das
+   * Rechnungs-PDF und das eingebettete ZUGFeRD-XML die Positionen pro Termin
+   * (`per_appointment`) oder kumuliert je Leistungs-/Fahrtkosten-Typ
+   * (`cumulative`) rendern. `undefined` = Bestand, der VOR der Kumulierung
+   * versiegelt wurde → MUSS als `per_appointment` re-gerendert werden, sonst
+   * driftet PDF/XML byte-weise gegen das in `invoices.zugferd_xml` / `pdf_hash`
+   * versiegelte Original (Integritäts-Verifier). Neu erzeugte Rechnungen werden
+   * mit `"cumulative"` versiegelt.
+   */
+  lineAggregation?: "cumulative" | "per_appointment";
 }
 export type InsertInvoice = z.infer<typeof createInvoiceSchema>;
 export type UpdateInvoiceStatus = z.infer<typeof updateInvoiceStatusSchema>;
