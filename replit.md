@@ -2,16 +2,12 @@
 Streamlines elderly care service management for caregivers, enhancing efficiency and data integrity.
 
 ## Run & Operate
-- **Run Dev**: `npm run dev` (client & server)
-- **Run Server**: `npm run start` (server only)
-- **Build**: `npm run build`
-- **Typecheck**: `npm run check`
-- **Test**: `npm run test` (= `vitest run`). Vitest ist in zwei Projects getrennt: `unit` (reine Logik-/Fitness-Tests aus `tests/unit/` + `tests/architecture/`, **parallel**, kein Server/DB) und `integration` (alle übrigen `tests/**`). Einzelnes Project: `vitest run --project unit`. Die Workflows `test`/`e2e-smoke` laufen über den Orchestrator `scripts/with-ephemeral-db.ts` (isolierte Wegwerf-DBs pro Worker + dedizierte App-Server + geseedeter Template-Cache), NICHT gegen die Dev-DB. Vollständiges Runbook (Configs, Orchestrator, Template-Cache, Env-Schalter): [`docs/test-infrastructure.md`](docs/test-infrastructure.md). Bekannte Flakes + Policy: [`docs/flaky-tests.md`](docs/flaky-tests.md).
-- **DB Push**: `drizzle-kit push`
-- **Mutation Test**: `npm run mutation` (Stryker, Incremental-Mode, nur die kritischen puren Berechnungs-Module — Runbook: `docs/mutation-testing.md`). Eigener CI-Job `mutation` (nur bei `pull_request`, nur auf geänderten Hotspot-Dateien, Score-Gate break 60 %).
-- **CI**: GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Request mit 9 Pflicht-Gates (typecheck, lint, `vitest run`, Architektur-Fitness-Functions, `npm audit`, e2e-smoke, Targeted-Coverage-Gates, OpenAPI-Drift). DB-/Server-Gates brauchen die Repo-Secrets `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` (werden sonst sauber übersprungen). `main` auf `SeniorEng/Dashboard` ist branch-protected (Required-Checks `static-analysis`/`tests`/`e2e-smoke`). Vollständiges Runbook (alle 9 Gates, Neon-Proxy in CI, Test-User-Seed, Branch-Protection): [`docs/ci-pipeline.md`](docs/ci-pipeline.md).
-- **Env Vars**: vollständige Liste siehe Tabelle unten. (WhatsApp läuft ebenfalls über die Twilio-Credentials; Meta-Cloud-API-Token werden nicht mehr benötigt.)
-- **Dependencies / Renovate**: Dependency-Updates werden automatisch über den [Renovate-Bot](https://docs.renovatebot.com/) (`renovate.json`) gemanagt — gruppierte Wochen-PRs, nur grüne **Patch**-Updates auf **Dev-Dependencies** auto-mergen, Vulnerability-Alerts sofort. Renovate läuft als self-hosted Action `.github/workflows/renovate.yml` (Repo-Secret `RENOVATE_TOKEN` als PAT nötig). Vollständiges Runbook (Gruppierung, Auto-Merge-Regeln, Pausieren, PAT-Anforderungen): [`docs/dependency-management.md`](docs/dependency-management.md).
+- **Run Dev**: `npm run dev` (client & server) · **Run Server**: `npm run start` · **Build**: `npm run build` · **Typecheck**: `npm run check` · **DB Push**: `drizzle-kit push`
+- **Test**: `npm run test` (= `vitest run`). Zwei Projects: `unit` (reine Logik-/Fitness-Tests aus `tests/unit/` + `tests/architecture/`, parallel, kein Server/DB; `vitest run --project unit`) und `integration` (übrige `tests/**`). Die Workflows `test`/`e2e-smoke` laufen über den Orchestrator `scripts/with-ephemeral-db.ts` (isolierte Wegwerf-DBs + dedizierte App-Server), NICHT gegen die Dev-DB. Runbook: [`docs/test-infrastructure.md`](docs/test-infrastructure.md). Flakes: [`docs/flaky-tests.md`](docs/flaky-tests.md).
+- **Mutation Test**: `npm run mutation` (Stryker, Incremental, nur kritische pure Berechnungs-Module; CI-Job nur bei `pull_request`, Score-Gate 60 %). Runbook: [`docs/mutation-testing.md`](docs/mutation-testing.md).
+- **CI**: `.github/workflows/ci.yml` — 9 Pflicht-Gates (typecheck, lint, `vitest run`, Architektur-Fitness, `npm audit`, e2e-smoke, Coverage-Gates, OpenAPI-Drift). DB-/Server-Gates brauchen Repo-Secrets `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` (sonst sauber übersprungen). `main` branch-protected. Runbook: [`docs/ci-pipeline.md`](docs/ci-pipeline.md).
+- **Dependencies / Renovate**: `renovate.json` + self-hosted Action `.github/workflows/renovate.yml` (Repo-Secret `RENOVATE_TOKEN`). Gruppierte Wochen-PRs, nur grüne Patch-Updates auf Dev-Deps auto-merge. Runbook: [`docs/dependency-management.md`](docs/dependency-management.md).
+- **Env Vars**: vollständige Liste siehe Tabelle unten. (WhatsApp läuft über die Twilio-Credentials; Meta-Cloud-API-Token werden nicht mehr benötigt.)
 
 ### Environment Variables
 
@@ -47,44 +43,34 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 
 ## Stack
 - **Frontend**: React 19, TypeScript, Vite, Wouter, `shadcn/ui`, Tailwind CSS v4, TanStack Query
-- **Backend**: Express.js, TypeScript, Zod
-- **Database**: PostgreSQL (Neon serverless)
-- **ORM**: Drizzle ORM
-- **Validation**: Zod (with German error map)
-- **Build Tool**: esbuild (server), Vite (client)
+- **Backend**: Express.js, TypeScript, Zod (German error map)
+- **Database**: PostgreSQL (Neon serverless) · **ORM**: Drizzle ORM
+- **Build**: esbuild (server), Vite (client)
 
 ## Where things live
-- **Frontend Source**: `client/src/`
-- **Backend Source**: `server/src/`
-- **Shared Code**: `shared/` (domain logic, API types, schemas)
-- **DB Schema**: `shared/schema/`
-- **API Contracts**: `shared/api/`
-- **OpenAPI Spec (Schema-First)**: `docs/api/openapi.json` (generiert aus den Zod-Schemas in `shared/api/openapi.ts` via `npm run gen:openapi`; Drift-Gate `npm run gen:openapi -- --check`). Die Zod-Schemas spiegeln die TS-Interfaces in `shared/api/` und werden per Compile-Time-`Exact<…>`-Assertions gegen Drift abgesichert (bricht `tsc`).
-- **Theme/Design System**: `client/src/design-system/`, `client/src/index.css`
-- **Component Library**: `client/src/components/ui/`
-- **Server Routes**: `server/routes/` (modular, e.g., `server/routes/admin/customers/`)
-- **DB Storage Layer**: `server/storage/`
-- **Startup Migrations**: `server/startup/`
-- **Tests**: `tests/` (Vitest)
-- **Deployment Config**: `.replit`
+- **Frontend**: `client/src/` (Design System `client/src/design-system/` + `client/src/index.css`; UI lib `client/src/components/ui/`)
+- **Backend**: `server/src/`; Routes `server/routes/` (modular, e.g. `server/routes/admin/customers/`); Storage `server/storage/`; Startup-Migrations `server/startup/`
+- **Shared**: `shared/` (domain logic, API contracts `shared/api/`, schemas `shared/schema/`)
+- **OpenAPI**: `docs/api/openapi.json`, generiert aus den Zod-Schemas in `shared/api/openapi.ts` via `npm run gen:openapi` (Drift-Gate `--check`). Zod-Schemas sind per Compile-Time-`Exact<…>`-Assertions gegen die TS-Interfaces abgesichert (bricht `tsc`).
+- **Tests**: `tests/` (Vitest) · **Deployment Config**: `.replit`
 
 ## Architecture decisions
-- **Mobile-First & Accessibility**: Responsive design with `shadcn/ui` (Radix UI primitives), touch-optimized. UI components use `fixed inset-0 flex items-center justify-center` for dialogs/overlays for sharp text rendering.
-- **Strict Data Consistency**: Centralized TanStack Query invalidation via `invalidateRelated()` (`@/lib/query-invalidation`) to maintain cross-domain consistency. All mutation `onSuccess` handlers must use this helper instead of calling `queryClient.invalidateQueries()` directly. Legitimate exceptions (e.g. record-id-scoped keys not covered by a domain) must be marked with a `// invalidate-direct-allowed: <reason>` comment on the line above. The discipline is enforced by `tests/query-invalidation-discipline.test.ts`. `RELATED_DOMAINS` ist **nicht-transitiv** — Aufrufer müssen alle berührten Domains aufzählen. Budget-Spezifika (Customer-Scoping, Refetch-vor-UI-Schließen) siehe [`docs/architecture/budget.md`](docs/architecture/budget.md#query-invalidation-budget-spezifika).
-- **GoBD Compliance**: Extensive use of soft-deletes, historization, audit logging for all critical operations (budget mutations, customer changes), server-side PDF generation with integrity hashing. Budget-Tabellen-Historisierung (`budget_allocations` no-resurrect, `customer_budget_type_settings` append-only, Startup-Migration) siehe [`docs/architecture/budget.md`](docs/architecture/budget.md#gobd-historisierung-budget-tabellen).
-- **Centralized Logic**: Key functionalities like phone/address formatting, error handling, logging, and access control are centralized in shared utilities or middleware for consistency and maintainability.
-- **Budget-Domäne**: Three-Pot-Ledger (§45b/§45a/§39+§42a) mit Cascading-Allocation, FIFO für §45b, virtuellem Auto-Renewal-Modell und Selbstzahler-Routing. Detaillierte Architektur, Pot-spezifische Regeln (Startwert/Carryover/„Unser Anteil") und aktuelle SSoT-Konsolidierung siehe [`docs/architecture/budget.md`](docs/architecture/budget.md).
-- **Automatischer Monatsabschluss**: Cutoff = 8. des Folgemonats (auf vorherigen Werktag verschoben bei Wochenende/bundeseinheitlichem Feiertag, siehe `shared/utils/month-close-cutoff.ts`). Auto-Close läuft täglich im `month-close-scheduler` (server/services/month-close-scheduler.ts) und schließt am Cutoff-Tag um 23:00 Berlin-Zeit alle Mitarbeiter mit Aktivität im Vormonat. Reminder-Wellen T-3, T-1 und T-0 (WhatsApp + Email + In-App-Banner). Undokumentierte Termine werden auf Status `expired_unsigned` ("Nicht abgerechnet") gesetzt, automatisch aus Lexware-Export & Statistiken ausgeschlossen (Filter `status='completed'`). Nach dem Auto-Close können nur Superadmins (`isSuperAdmin`) Termine/Zeiteinträge im geschlossenen Monat ändern oder den Monat mit Pflicht-Begründung (≥10 Zeichen, im Audit-Log dokumentiert) wieder öffnen.
+- **Mobile-First & Accessibility**: Responsive `shadcn/ui` (Radix), touch-optimiert; Dialoge/Overlays via `fixed inset-0 flex items-center justify-center` für scharfen Text.
+- **Strict Data Consistency**: Zentrale TanStack-Query-Invalidierung via `invalidateRelated()` (`@/lib/query-invalidation`) — alle Mutation-`onSuccess` MÜSSEN diesen Helper nutzen, nicht `queryClient.invalidateQueries()` direkt. Legitime Ausnahmen mit `// invalidate-direct-allowed: <reason>` markieren. Enforced durch `tests/query-invalidation-discipline.test.ts`. `RELATED_DOMAINS` ist nicht-transitiv (alle berührten Domains aufzählen). Budget-Spezifika: [`docs/architecture/budget.md`](docs/architecture/budget.md#query-invalidation-budget-spezifika).
+- **GoBD Compliance**: Soft-Deletes, Historisierung, Audit-Logging aller kritischen Operationen, server-seitige PDF-Generierung mit Integritäts-Hash. Budget-Historisierung: [`docs/architecture/budget.md`](docs/architecture/budget.md#gobd-historisierung-budget-tabellen).
+- **Centralized Logic**: Telefon-/Adress-Formatierung, Error-Handling, Logging und Access-Control liegen zentral in shared Utilities / Middleware.
+- **Budget-Domäne**: Three-Pot-Ledger (§45b/§45a/§39+§42a) mit Cascading-Allocation, FIFO für §45b, Auto-Renewal und Selbstzahler-Routing. Detail: [`docs/architecture/budget.md`](docs/architecture/budget.md).
+- **Automatischer Monatsabschluss**: Cutoff = 8. des Folgemonats (auf vorherigen Werktag verschoben bei Wochenende/Feiertag, `shared/utils/month-close-cutoff.ts`). `month-close-scheduler` schließt am Cutoff-Tag 23:00 Berlin alle Mitarbeiter mit Vormonats-Aktivität; Reminder T-3/T-1/T-0 (WhatsApp+Email+Banner). Undokumentierte Termine → Status `expired_unsigned` (aus Export & Statistik ausgeschlossen, Filter `status='completed'`). Nach Auto-Close ändern/öffnen nur Superadmins (Wieder-Öffnen mit Pflicht-Begründung ≥10 Zeichen, Audit-Log).
 
 ## Product
-- **Core Functionality**: Appointment scheduling, tracking, and documentation (with digital signatures).
-- **Customer Management**: Multi-step customer creation, detailed customer views, German-specific validation (Pflegegrad), deactivation, anonymization (DSGVO Art. 17).
-- **Employee Management**: Time tracking (client/non-client work, vacation), pro-rata vacation entitlement, availability, blockers, bulk handover.
-- **Financials**: Budgeting (three-pot system with historization), customer-specific temporal pricing, invoicing (GoBD compliant, ZUGFeRD/XRechnung), Qonto bank integration for payment matching.
-- **Document Management**: HTML-based templates with placeholders, server-side PDF generation, trigger-based document requirements, employee document proofs, digital signing.
-- **Lead Management**: Prospect pipeline with 9 statuses, automatic email replies, Twilio-based call bridge for new leads.
-- **Reporting & Statistics**: Dashboard day view, hours overview, comprehensive statistics page (Cockpit, Team, Kunden, Planung).
-- **Compliance**: Adherence to German labor laws (ArbZG for auto-breaks), GoBD for data historization and auditing.
+- **Core**: Terminplanung, Tracking und Dokumentation (digitale Unterschriften).
+- **Customer Management**: Multi-Step-Anlage, Detailansichten, DE-Validierung (Pflegegrad), Deaktivierung, Anonymisierung (DSGVO Art. 17).
+- **Employee Management**: Zeiterfassung (Kunde/Nicht-Kunde, Urlaub), Pro-Rata-Urlaub, Verfügbarkeit, Blocker, Bulk-Handover.
+- **Financials**: Budgetierung (Three-Pot), kundenspezifische temporale Preise, GoBD-konforme Rechnungen (ZUGFeRD/XRechnung), Qonto-Payment-Matching.
+- **Document Management**: HTML-Templates mit Platzhaltern, server-seitige PDFs, trigger-basierte Dokumentpflichten, Mitarbeiter-Nachweise, digitales Signing.
+- **Lead Management**: Prospect-Pipeline (9 Status), automatische E-Mail-Antworten, Twilio-Call-Bridge.
+- **Reporting & Statistics**: Dashboard-Tagesansicht, Stunden-Übersicht, Statistik-Seite (Cockpit, Team, Kunden, Planung).
+- **Compliance**: DE-Arbeitsrecht (ArbZG Auto-Pausen), GoBD für Historisierung/Audit.
 
 ## User preferences
 - Preferred communication style: Simple, everyday language
@@ -94,33 +80,27 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - Standard-Unterschrift-Komponente: Für ALLE Unterschriften im System MUSS die zentrale `SignaturePad`-Komponente (`@/components/ui/signature-pad.tsx`) verwendet werden. KEINE eigenen Signature-Dialoge, Canvas-Implementierungen oder alternative Unterschriftenlösungen bauen. `SignaturePad` bietet eine konsistente Fullscreen-Unterschriftserfahrung mit „Tippen zum Unterschreiben"-Platzhalter, X-Markierung und einheitlichem Styling. Wird verwendet in: Kundenanlage (signatures-step), Leistungsnachweis-Unterschrift, digitaler Dokumentenfluss.
 
 ## Gotchas
-- **Database Unique Constraints**: When adding `unique` constraints in Drizzle that match existing PostgreSQL unique indexes (e.g., those ending in `_key`), use `unique("constraint_name").on(col)` instead of `.unique()` to prevent `drizzle-kit push` from attempting to create duplicate constraints.
-- **Drizzle ORM Bundling**: `drizzle-orm`, `drizzle-zod`, `@neondatabase/serverless`, and `ws` must NOT be bundled by esbuild for the server build, as bundling `drizzle-orm` breaks SQL template fragment composition.
-- **Company Settings Encryption**: API secrets in `company_settings` are AES-256-GCM encrypted at-rest. `ENCRYPTION_KEY` env var is required for encryption/decryption. Graceful fallback if not present, but secrets will be stored/read unencrypted.
-- **Sensitive Column Annotation**: Sensitive Spalten werden im Drizzle-Schema mit `encryptedText("col_name")` aus `shared/schema/encrypted-columns.ts` deklariert statt mit `text(...)`. Der Storage-Layer ver-/entschlüsselt diese Felder via `encryptRow`/`decryptRow` (`server/lib/encrypted-row.ts`) automatisch — KEINE manuelle Allow-Liste pflegen. CI-Test `tests/architecture/sensitive-columns.test.ts` failed, wenn eine neue Spalte mit Namen `/secret|token|password|key/i` ohne `encryptedText` oder Allowlist-Eintrag (`ALLOWED_PLAINTEXT_COLUMNS`) angelegt wird.
-- **Test Data Hygiene**: Test cleanup scripts exist but require careful execution (`--apply` flag, hostname guard). Do not run cleanup scripts directly on production. Seit der Umstellung auf isolierte Wegwerf-Test-DBs pro Lauf räumt `globalSetup` keine stale Test-Daten mehr auf; die Bulk-Purge-Routen (`purge-prospects`/`purge-customers`/`purge-test-users`, Superadmin-only, in Prod deaktiviert) bleiben als manuelle Werkzeuge. Detail: [`docs/test-infrastructure.md`](docs/test-infrastructure.md#test-daten-hygiene--bulk-purge).
-- **Legacy Schema Fields**: Several fields and tables are marked as "legacy" but are still actively used for migration paths or specific functionalities. Do not remove them without thorough dependency checks.
-- **Chromium / PDF-Rendering (Tasks #544/#550)**: `server/services/pdf-generator.ts` löst den Chromium-Pfad zur Laufzeit auf (`CHROMIUM_PATH` → `which chromium` → `/usr/bin/chromium*`, KEIN hartcodierter Nix-Store-Hash); beim Boot prüft `runChromiumPreflight()` die Ausführbarkeit (exponiert unter `/api/health → chromium`). Fehlendes/nicht-startfähiges Binary → schneller `ChromiumUnavailableError` statt Hänger, Startup-PDF-Backfill überspringt sich. Rechnungs-PDFs werden im Hintergrund persistiert; Cache-Miss rendert on-demand. Diagnose: `npm run chromium:smoke`. Detail (Launch-Härtung, `--single-process`-Schalter, Ring-Buffer-Diagnose): [`docs/pdf-chromium.md`](docs/pdf-chromium.md).
-- **Rechnungs-Line-Item-Mengen (Task #561)**: Kilometer-Lines (`serviceCode IN ('travel_km','customer_km')`) MÜSSEN über `shared/domain/invoice-line-items.ts` quantisiert werden — `quantizeKm` (2 NK) speist denselben Wert in `totalCents` UND ins PDF. Niemals `km * rate` ungerundet rechnen und parallel `Math.round(km)` anzeigen (Drift-Bug RE-2026-0003). Detail (persistierte Spalten, GoBD-Fallback, Drift-Detektor): [`docs/invoice-line-items.md`](docs/invoice-line-items.md).
-- **KM-/Geo-Spalten = `numeric`, nicht `real` (Task #678)**: Alle Kilometer-Spalten sind `numeric(10,3)`, alle Geo-Spalten (Lat/Lng) `numeric(9,6)`, gebunden via `numeric(..., { mode: "number" })` (Runtime-Typ bleibt JS-`number`, Storage = exakte Dezimalarithmetik). Migration idempotent im Startup-Hook `server/startup/migrate-km-geo-to-numeric.ts`, KEIN `drizzle-kit push` für diese Spalten. Betroffene Spalten, Audit-/Backfill-Plan: [`docs/migration-km-geo-numeric.md`](docs/migration-km-geo-numeric.md).
-- **Rechnungs-Split pro Topf (Task #759)**: Ein Abrechnungslauf mit Anteilen aus mehreren Budget-Töpfen erzeugt N Rechnungen (eine pro `budget_type` + optional Selbstzahler-Rest), verbunden über `invoices.billing_run_id`. Σ-Drift-Garantie via `shared/domain/budget-invoice-split.ts` (Largest-Remainder). Spalten/Tabelle idempotent via `server/startup/ensure-invoice-per-pot-columns.ts`, KEIN `drizzle-kit push`. Detail (Empfänger-Auflösung, Cascade-Storno, PDF/ZUGFeRD): [`docs/architecture/budget.md`](docs/architecture/budget.md) → „Rechnungs-Split pro Topf".
-- **WhatsApp-Provider = Twilio**: Versand ausschließlich über die Twilio WhatsApp Content API (`twilio` SDK); `whatsapp_notification_rules.templateName` enthält Twilio Content SIDs (`HX…`), keine Meta-Template-Namen mehr. Detail (veraltete Spalten, Token-Override): [`docs/whatsapp-twilio.md`](docs/whatsapp-twilio.md).
+- **Database Unique Constraints**: Bei `unique`-Constraints, die existierende PG-Indizes (Endung `_key`) matchen, `unique("constraint_name").on(col)` statt `.unique()` nutzen, sonst versucht `drizzle-kit push` einen Duplikat-Constraint.
+- **Drizzle ORM Bundling**: `drizzle-orm`, `drizzle-zod`, `@neondatabase/serverless`, `ws` dürfen vom esbuild-Server-Build NICHT gebundlet werden (bricht SQL-Template-Komposition).
+- **Company Settings Encryption**: API-Secrets in `company_settings` sind AES-256-GCM at-rest; `ENCRYPTION_KEY` nötig (Graceful Fallback unverschlüsselt, nicht für Prod).
+- **Sensitive Column Annotation**: Sensible Spalten via `encryptedText("col")` (`shared/schema/encrypted-columns.ts`) deklarieren, nicht `text(...)`; Storage ver-/entschlüsselt via `encryptRow`/`decryptRow` automatisch — keine manuelle Allow-Liste. Neue Spalte `/secret|token|password|key/i` ohne `encryptedText`/Allowlist → `tests/architecture/sensitive-columns.test.ts` failed.
+- **Legacy Schema Fields**: Mehrere als "legacy" markierte Felder/Tabellen sind weiterhin aktiv (Migration/Sonderfälle) — nicht ohne Dependency-Check entfernen.
+- **Chromium / PDF-Rendering**: Chromium-Pfad zur Laufzeit aufgelöst (`CHROMIUM_PATH` → `which chromium` → `/usr/bin/chromium*`, kein hartcodierter Hash); Boot-Preflight unter `/api/health → chromium`; fehlendes Binary → schneller `ChromiumUnavailableError`. Diagnose: `npm run chromium:smoke`. Detail: [`docs/pdf-chromium.md`](docs/pdf-chromium.md).
+- **Rechnungs-Line-Item-Mengen**: Kilometer-Lines (`travel_km`/`customer_km`) MÜSSEN über `shared/domain/invoice-line-items.ts` quantisiert werden (`quantizeKm`, 2 NK, identisch in `totalCents` UND PDF) — nie `km*rate` ungerundet + `Math.round(km)` parallel. Detail: [`docs/invoice-line-items.md`](docs/invoice-line-items.md).
+- **KM-/Geo-Spalten = `numeric`**: KM-Spalten `numeric(10,3)`, Geo (Lat/Lng) `numeric(9,6)`, gebunden via `numeric(..., { mode: "number" })`. Migration idempotent in `server/startup/migrate-km-geo-to-numeric.ts`, KEIN `drizzle-kit push`. Detail: [`docs/migration-km-geo-numeric.md`](docs/migration-km-geo-numeric.md).
+- **Rechnungs-Split pro Topf**: Multi-Pot-Lauf → N Rechnungen (pro `budget_type` + optional Selbstzahler-Rest), verbunden über `invoices.billing_run_id`; Σ-Garantie via `shared/domain/budget-invoice-split.ts`. Spalten idempotent via `server/startup/ensure-invoice-per-pot-columns.ts`, KEIN `drizzle-kit push`. Detail: [`docs/architecture/budget.md`](docs/architecture/budget.md).
+- **WhatsApp-Provider = Twilio**: Versand nur über Twilio WhatsApp Content API; `whatsapp_notification_rules.templateName` enthält Twilio Content SIDs (`HX…`). Detail: [`docs/whatsapp-twilio.md`](docs/whatsapp-twilio.md).
+- **Test Data Hygiene**: Cleanup-Skripte brauchen `--apply` + Hostname-Guard; nie auf Prod. `globalSetup` räumt seit den Wegwerf-DBs keine stale Daten mehr; Bulk-Purge-Routen (Superadmin-only, in Prod deaktiviert) sind manuelle Werkzeuge. Detail: [`docs/test-infrastructure.md`](docs/test-infrastructure.md#test-daten-hygiene--bulk-purge).
 
 ## Pointers
-- **Budget-Architektur (Detail)**: `docs/architecture/budget.md` (Pot-Regeln, Historisierung, Selbstzahler, §45b-Spezifika, laufende SSoT-Konsolidierung)
-- **Budget-SSoT-Inventur & Beschlüsse**: `docs/budget-ssot-inventory.md` (Konflikt-Matrix, Drei-View-Vorschlag, Phasen-Reihenfolge 1.1 → 1.2 → 1.3 → 2)
-- **Audit Methodology**: `.agents/skills/deep-analysis/SKILL.md`
-- **Error Handling Conventions**: `.agents/skills/error-handling-audit/SKILL.md`
-- **Page-Size Guideline**: `docs/page-size-guideline.md` (≤500 LOC soft, 800 LOC hard limit; pages are thin wrappers, domain code lives in `client/src/features/<domain>/`)
-- **Pre-Publish Backup Runbook**: `docs/pre-publish-backup-runbook.md`
+- **Budget-Architektur**: [`docs/architecture/budget.md`](docs/architecture/budget.md) (Pot-Regeln, Historisierung, Selbstzahler, §45b, SSoT). Inventur/Beschlüsse: `docs/budget-ssot-inventory.md`.
+- **Audit Methodology**: `.agents/skills/deep-analysis/SKILL.md` · **Error Handling Conventions**: `.agents/skills/error-handling-audit/SKILL.md`
+- **Page-Size Guideline**: `docs/page-size-guideline.md` (≤500 LOC soft, 800 hard; Pages sind dünne Wrapper, Domain-Code in `client/src/features/<domain>/`)
 - **Test Coverage Matrix**: `tests/README.md`
-- **Targeted-Coverage-Gates** (Task #771): `script/coverage-gate.ts` — Per-File-Coverage-Gates statt globalem Gate. Aktuell abgedeckte Module: `billing` (`server/routes/billing.ts`), `qonto` (`server/services/qonto.ts`), `consumption-engine` (`server/storage/budget/consumption-engine.ts`), `month-close-scheduler` (`server/services/month-close-scheduler.ts`). Zwei Modi: `server` (instrumentierter HTTP-Server + c8) und `vitest` (`@vitest/coverage-v8`). Neues Gate = Eintrag in `MODULES` (Schwelle = Ist − ~5 %, kalibrierbar via `COVERAGE_MEASURE_ONLY=1`) + eigener CI-Step in `.github/workflows/ci.yml`. Details: `tests/README.md`.
-- **Drift-Detektoren "Anzeige vs. Buchung"** (Task #427): `tests/helpers/equality-check.ts` plus `tests/equality/*` (5 Hotspots: §45b-Cap, Pflegegrad-Preise, Reisekosten, Pro-Rata-Urlaub, Monatsabschluss-Cutoff) und `tests/architecture/calculations-in-shared.test.ts` (verhindert neue `calculate*`/`compute*`-Funktionen außerhalb `shared/domain/`). Property-Based-Detektoren (Task #773, reine fast-check-Properties seed=42/numRuns=100, kein DB-/Server-Setup): `tests/equality/zugferd-roundtrip.test.ts` (ZUGFeRD-XML rendern → parsen → Beträge/Steuersätze/Empfänger/BT-22-Note bit-genau) und `tests/equality/storno-symmetrie.test.ts` (Storno + identische Neuanlage → Σ-Aggregate unverändert, Pot-/Termin-/Kunden-Saldo).
-- **E2E Edit-Persistence Smoke-Suite**: `e2e/smoke/edit-persistence.spec.ts` (Playwright, `npm run test:e2e:smoke`). Jedes neue Bearbeitungsformular braucht einen Round-Trip-Test über `expectFieldPersisted` (`e2e/helpers/round-trip.ts`). Pflicht: nach dem Save vollständiger `page.reload()`, sonst wird nur Frontend-State getestet.
-- **Mutation-Testing-Runbook**: `docs/mutation-testing.md` (Stryker, Scope/Out-of-scope, CI-Gate, neue Module aufnehmen)
-- **E-Rechnungs-Validierung (ZUGFeRD/Factur-X EN 16931)**: `docs/erechnung-validation.md` — `npm run validate:erechnung` (Mustang/KoSIT EN-16931 + veraPDF PDF/A-3b, ohne Java sauberer Skip), CI-Gate `erechnung-validation`. Standard-Profil seit Task #1073 = `en16931` (vorher `basic`); Non-Strict-Fallback wird per Audit-Log `invoice_zugferd_nonstrict_seal` protokolliert. **Abgrenzung**: die eingebettete XML ist die USt-/menschenlesbare Rechnung (EN 16931), NICHT der §105 SGB XI / §302 SGB V Sozialdaten-Austausch. Detail: `docs/architecture/budget.md` → „E-Rechnung … Abgrenzung & Validierung".
-- **Sozialdaten-Austausch §105 SGB XI / §302 SGB V (Sondierung)**: `docs/research/sgb-datenaustausch-302-105.md` — Entscheidungsvorlage (KEINE Implementierung): Rechtsgrundlage, Daten-Gap (Stammdaten ~70 % da; es fehlen AC/TK, Positionsnummern, ITSG-Zertifikate, konforme XML-Erzeugung + Übertragung), 3 Wege (Abrechnungszentrum/Portal/in-house). Empfehlung: **Abrechnungszentrum (z. B. DMRZ)**. Strikt getrennt von der vorhandenen ZUGFeRD-Rechnung.
-- **Deployment Log**: `docs/deployment-log.md`
-- **Knip Configuration**: `knip.json` (for dead code detection)
-- **Tailwind Config**: `tailwind.config.ts`
-- **Vite Config**: `vite.config.ts`
+- **Targeted-Coverage-Gates**: `script/coverage-gate.ts` — Per-File-Gates (aktuell `billing`, `qonto`, `consumption-engine`, `month-close-scheduler`). Modi `server` (c8) / `vitest`. Neues Gate = Eintrag in `MODULES` + CI-Step. Details: `tests/README.md`.
+- **Drift-Detektoren "Anzeige vs. Buchung"**: `tests/helpers/equality-check.ts` + `tests/equality/*` (5 Hotspots); `tests/architecture/calculations-in-shared.test.ts` verbietet `calculate*`/`compute*` außerhalb `shared/domain/`. Property-Based: `tests/equality/zugferd-roundtrip.test.ts`, `tests/equality/storno-symmetrie.test.ts`.
+- **E2E Edit-Persistence Smoke-Suite**: `e2e/smoke/edit-persistence.spec.ts` (`npm run test:e2e:smoke`). Jedes neue Bearbeitungsformular braucht einen Round-Trip-Test über `expectFieldPersisted` (`e2e/helpers/round-trip.ts`) mit vollständigem `page.reload()` nach Save.
+- **E-Rechnungs-Validierung (ZUGFeRD/Factur-X EN 16931)**: `docs/erechnung-validation.md` — `npm run validate:erechnung` (Mustang/KoSIT + veraPDF, ohne Java sauberer Skip), CI-Gate `erechnung-validation`. Standard-Profil = `en16931`; Non-Strict-Fallback per Audit-Log `invoice_zugferd_nonstrict_seal`. **Abgrenzung**: die eingebettete XML ist die EN-16931-USt-Rechnung, NICHT der §105 SGB XI / §302 SGB V Sozialdaten-Austausch.
+- **Sozialdaten-Austausch §105 SGB XI / §302 SGB V (Sondierung)**: `docs/research/sgb-datenaustausch-302-105.md` — Entscheidungsvorlage (keine Implementierung), Empfehlung Abrechnungszentrum (z.B. DMRZ), strikt getrennt von der ZUGFeRD-Rechnung.
+- **Runbooks**: Mutation-Testing `docs/mutation-testing.md` · Pre-Publish-Backup `docs/pre-publish-backup-runbook.md` · Deployment-Log `docs/deployment-log.md`
+- **Configs**: `knip.json` (Dead-Code), `tailwind.config.ts`, `vite.config.ts`
