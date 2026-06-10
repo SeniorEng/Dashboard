@@ -67,6 +67,7 @@ import {
   runCleanup,
   uniqueId,
 } from "../test-utils";
+import { getLxHttpCalls, setLxSetjobResponse } from "../helpers/letterxpress";
 
 async function pageCount(buf: Buffer): Promise<number> {
   const { PDFDocument } = await import("pdf-lib");
@@ -1900,18 +1901,16 @@ describe("Task #1040 — LN-Stammadresse auf dem Stapel-Versand-Render (send-bat
 // LetterXpress v2 spricht über `node:https` direkt (GET /balance braucht einen
 // Body, den `fetch`/undici verbietet) — ein `vi.stubGlobal("fetch", …)` fängt
 // den Aufruf daher NICHT ab. Stattdessen mocken wir die Transport-Schicht
-// `letterxpress-http` selbst: jeder `lxHttpRequest` wird aufgezeichnet und mit
-// einer kanonischen setjob-Erfolgsantwort beantwortet.
-const lxHttpMock = vi.hoisted(() => ({
-  calls: [] as Array<{ url: string; body: string }>,
-  responseText: "",
-}));
-vi.mock("../../server/services/letterxpress-http", () => ({
-  lxHttpRequest: vi.fn(async (opts: { url: string; method: string; body: string }) => {
-    lxHttpMock.calls.push({ url: opts.url, body: opts.body });
-    return { status: 200, text: lxHttpMock.responseText };
-  }),
-}));
+// `letterxpress-http` selbst über den geteilten Helper `tests/helpers/letterxpress`:
+// jeder `lxHttpRequest` wird aufgezeichnet und mit einer konfigurierbaren,
+// kanonischen setjob-Erfolgsantwort beantwortet. Der `vi.mock` MUSS hier im
+// Testfile stehen (vitest hebt `vi.mock` nur im aufrufenden File an); die
+// dynamische `import()`-Factory teilt sich die Modulinstanz — und damit Recorder
+// + Mock — mit den statischen Helper-Imports unten.
+vi.mock("../../server/services/letterxpress-http", async () => {
+  const lx = await import("../helpers/letterxpress");
+  return { lxHttpRequest: lx.lxHttpRequest };
+});
 
 // ---------------------------------------------------------------------------
 // Task #1046 — Postversand der Kunden-KOPIE (Brief) trägt die Patient-
@@ -1970,8 +1969,8 @@ describe("Task #1046 — Post-Kopie an Kunde: LN trägt Stammadresse, Empfänger
   const LX_HOST = "api.letterxpress.de";
   const LX_LETTER_ID = `lx-1046-${Date.now()}`;
   let realFetch: typeof fetch;
-  // Aufzeichnung der LetterXpress-Transport-Aufrufe (s. `lxHttpMock` oben).
-  const lxCalls = lxHttpMock.calls;
+  // Aufzeichnung der LetterXpress-Transport-Aufrufe (geteilter Helper-Recorder).
+  const lxCalls = getLxHttpCalls();
   const dispatchFetch = ((input: unknown, init?: unknown) => {
     const url =
       typeof input === "string" ? input
@@ -2111,14 +2110,10 @@ describe("Task #1046 — Post-Kopie an Kunde: LN trägt Stammadresse, Empfänger
     });
     expect(settingsRes.status, `settings: ${JSON.stringify(settingsRes.data)}`).toBe(200);
 
-    // LetterXpress-Transport (node:https) wird über `lxHttpMock` gemockt; hier
-    // die kanonische setjob-Erfolgsantwort (LXP v2 liefert die Job-ID unter
-    // `data.id`) hinterlegen.
-    lxHttpMock.responseText = JSON.stringify({
-      status: 200,
-      message: "OK",
-      data: { id: LX_LETTER_ID },
-    });
+    // LetterXpress-Transport (node:https) wird über den geteilten Helper
+    // gemockt; hier die kanonische setjob-Erfolgsantwort hinterlegen (LXP v2
+    // liefert die Job-ID unter `data.id`).
+    setLxSetjobResponse(LX_LETTER_ID);
     realFetch = globalThis.fetch.bind(globalThis);
     await startInProcessBilling();
     vi.stubGlobal("fetch", dispatchFetch);

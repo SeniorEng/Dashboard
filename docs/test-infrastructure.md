@@ -87,6 +87,38 @@ in `tests/unit/template-cache.test.ts` gepinnt.
 Manuelle Werkzeuge: `npm run test:sweep-dbs` (verwaiste DBs aufräumen),
 `npm run test:verify-cache` (Warm-/Kalt-Pfad messen).
 
+## LetterXpress mocken (node:https, NICHT fetch)
+
+Der LetterXpress-v2-Postversand-Transport (`server/services/letterxpress-http.ts`)
+spricht bewusst über `node:https` direkt — weil die LXP-v2-API einen Request-Body
+auch an `GET /v2/balance` verlangt, was `fetch`/undici verbietet. **Folge:** Ein
+`vi.stubGlobal("fetch", …)` fängt LetterXpress-Aufrufe NICHT ab. Ein Test, der
+einen Postversand auslöst (Anschreiben, Rechnungs-Kopie, Leistungsnachweis-Brief),
+trifft sonst still die ECHTE LetterXpress-API und schlägt mit 401 fehl.
+
+Mock daher IMMER auf der Transport-Schicht `letterxpress-http`, nicht über fetch.
+Dafür gibt es den geteilten Helper `tests/helpers/letterxpress.ts`: er stellt eine
+`lxHttpRequest`-Mock-Implementierung bereit, die jeden Aufruf aufzeichnet und eine
+konfigurierbare setjob-/balance-Antwort zurückgibt.
+
+```ts
+import { vi } from "vitest";
+// vi.mock MUSS im Testfile stehen (vitest hebt es nur dort an, nicht in
+// importierten Modulen). Die dynamische import()-Factory teilt sich die
+// Modulinstanz — und damit Recorder + Mock — mit den statischen Helper-Imports.
+vi.mock("../../server/services/letterxpress-http", async () => {
+  const lx = await import("../helpers/letterxpress");
+  return { lxHttpRequest: lx.lxHttpRequest };
+});
+import { getLxHttpCalls, resetLxHttpMock, setLxSetjobResponse } from "../helpers/letterxpress";
+
+beforeEach(() => resetLxHttpMock());
+// ... setLxSetjobResponse("L-123"); → Aufruf auslösen → getLxHttpCalls() prüfen.
+```
+
+Referenz-Nutzung: `tests/billing/invoice-pdf-orchestrator-e2e.test.ts` (Brief-Kopie,
+Task #1046).
+
 ## Test-Daten-Hygiene & Bulk-Purge
 
 Test cleanup scripts exist but require careful execution (e.g., `--apply` flag, hostname guard). Do not run cleanup scripts directly on production.
