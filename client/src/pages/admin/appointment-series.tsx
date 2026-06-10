@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ChevronLeft, Repeat, Calendar, User, Clock, ArrowRight, Loader2, CalendarPlus, CalendarMinus, XCircle } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useLocation, Link } from "wouter";
@@ -24,6 +25,7 @@ import {
   formatWeekdays,
   WEEKDAY_LABELS,
 } from "@/features/appointments/hooks/use-appointment-series";
+import { CustomerAppointmentsTab } from "@/features/appointments/components/customer-appointments-tab";
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("de-DE", {
@@ -112,10 +114,17 @@ export default function AdminAppointmentSeries() {
           <h1 className={componentStyles.pageTitle}>Serientermine</h1>
         </div>
         <p className="text-muted-foreground text-sm mt-1">
-          Übersicht aller aktiven Terminserien, gruppiert nach Kunde
+          Terminserien verwalten und Einzeltermine pro Kunde einsehen
         </p>
       </div>
 
+      <Tabs defaultValue="series" className="space-y-6">
+        <TabsList data-testid="tabs-appointment-series">
+          <TabsTrigger value="series" data-testid="tab-series">Serientermine</TabsTrigger>
+          <TabsTrigger value="by-customer" data-testid="tab-by-customer">Termine pro Kunde</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="series">
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className={`${iconSize.lg} animate-spin text-primary`} />
@@ -252,6 +261,12 @@ export default function AdminAppointmentSeries() {
           )}
         </div>
       )}
+        </TabsContent>
+
+        <TabsContent value="by-customer">
+          <CustomerAppointmentsTab />
+        </TabsContent>
+      </Tabs>
 
       <AlertDialog open={!!actionDialog} onOpenChange={(open) => { if (!open) setActionDialog(null); }}>
         <AlertDialogContent>

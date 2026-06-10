@@ -38,6 +38,24 @@ export function useAppointments(date?: string) {
   });
 }
 
+async function fetchAppointmentsByCustomer(customerId: number): Promise<AppointmentWithCustomer[]> {
+  const result = await api.get<AppointmentWithCustomer[]>(`/appointments/by-customer?customerId=${customerId}`);
+  return unwrapResult(result);
+}
+
+/**
+ * Task #1144 — Admin-only: alle Einzeltermine eines Kunden (read-only).
+ * Liefert Vergangenheit + Zukunft, aufsteigend nach Datum/Uhrzeit sortiert.
+ */
+export function useCustomerAppointments(customerId: number | null) {
+  return useQuery({
+    queryKey: [QUERY_KEY, "by-customer", customerId],
+    queryFn: () => fetchAppointmentsByCustomer(customerId!),
+    enabled: !!customerId && customerId > 0,
+    staleTime: 30000,
+  });
+}
+
 async function fetchAppointmentCounts(dates: string[], viewAsEmployeeId?: number | null): Promise<Record<string, number>> {
   const params = new URLSearchParams();
   params.set("dates", dates.join(","));

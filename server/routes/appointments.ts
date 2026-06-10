@@ -532,6 +532,25 @@ router.get("/undocumented/by-customer", asyncHandler("Fehler beim Laden der offe
   res.json(appointments);
 }));
 
+// Task #1144 — Admin-only: alle Einzeltermine eines Kunden (Vergangenheit + Zukunft),
+// read-only für die „Termine pro Kunde"-Ansicht der Serientermine-Seite.
+router.get("/by-customer", asyncHandler("Fehler beim Laden der Kundentermine", async (req, res) => {
+  const user = req.user!;
+  if (!user.isAdmin) {
+    return sendForbidden(res, "ACCESS_DENIED", "Nur Administratoren dürfen die Termine pro Kunde einsehen.");
+  }
+  const customerId = req.query.customerId ? parseInt(req.query.customerId as string, 10) : NaN;
+  if (!Number.isFinite(customerId) || customerId <= 0) {
+    return sendBadRequest(res, "Ungültige Kunden-ID");
+  }
+  const appointments = await storage.getAppointmentsWithCustomers(undefined, [customerId]);
+  appointments.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    return (a.scheduledStart ?? "").localeCompare(b.scheduledStart ?? "");
+  });
+  res.json(appointments);
+}));
+
 router.get("/batch-services", asyncHandler("Fehler beim Laden der Batch-Services", async (req, res) => {
   const user = req.user!;
   const idsParam = req.query.ids as string | undefined;
