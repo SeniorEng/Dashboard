@@ -31,6 +31,7 @@
  */
 import { validateInvoiceXsd, DEFAULT_ZUGFERD_PROFILE } from "../server/lib/zugferd";
 import type { InvoicePdfData } from "../server/lib/pdf-generator";
+import { quantizeKm, computeKmLineTotalCents } from "../shared/domain/invoice-line-items";
 
 const LOG = "[validate-erechnung-strict]";
 
@@ -154,6 +155,121 @@ function buildSelbstzahlerData(): InvoicePdfData {
   } as unknown as Partial<InvoicePdfData>);
 }
 
+/**
+ * Pflegekassen-Rechnung MIT Fahrtkosten-Zeilen (`travel_km` / `customer_km`,
+ * Einheit KMT, Dezimal-Mengen). Diese nehmen in `buildZugferdData` den
+ * km-Branch (`unitCode = "KMT"`) und werden bei kumulierter Aggregation zu EINER
+ * Fahrtkosten-Zeile zusammengefasst. Die km werden GoBD-konform über
+ * `quantizeKm`/`computeKmLineTotalCents` quantisiert, damit Menge × Satz == Summe.
+ */
+function buildKmLineData(): InvoicePdfData {
+  const KM_RATE_CENTS = 30;
+  const travelKm = quantizeKm(12.345);
+  const customerKm = quantizeKm(5.5);
+  const travelTotal = computeKmLineTotalCents(12.345, KM_RATE_CENTS);
+  const customerTotal = computeKmLineTotalCents(5.5, KM_RATE_CENTS);
+  const serviceTotal = 4500;
+  const net = serviceTotal + travelTotal + customerTotal;
+  return buildBaseInvoiceData({
+    invoiceNumber: "MUSTER-STRICT-KM-0001",
+    budgetType: "entlastungsbetrag_45b",
+    netAmountCents: net,
+    vatAmountCents: 0,
+    grossAmountCents: net,
+    vatRate: 0,
+    lineItems: [
+      {
+        appointmentId: 401,
+        appointmentDate: "2026-01-06",
+        startTime: "09:00",
+        endTime: "10:00",
+        serviceCode: "hauswirtschaft",
+        serviceDescription: "Hauswirtschaft",
+        durationMinutes: 60,
+        quantityRaw: 1,
+        quantityUnit: "hours",
+        unitPriceCents: 4500,
+        totalCents: serviceTotal,
+        employeeName: "Anna Beispiel",
+        appointmentNotes: null,
+        serviceDetails: null,
+      },
+      {
+        appointmentId: 401,
+        appointmentDate: "2026-01-06",
+        startTime: "09:00",
+        endTime: "10:00",
+        serviceCode: "travel_km",
+        serviceDescription: "Anfahrt",
+        durationMinutes: Math.round(travelKm),
+        quantityRaw: travelKm,
+        quantityUnit: "km",
+        unitPriceCents: KM_RATE_CENTS,
+        totalCents: travelTotal,
+        employeeName: "Anna Beispiel",
+        appointmentNotes: null,
+        serviceDetails: null,
+      },
+      {
+        appointmentId: 402,
+        appointmentDate: "2026-01-13",
+        startTime: "11:00",
+        endTime: "12:00",
+        serviceCode: "customer_km",
+        serviceDescription: "Begleitfahrt",
+        durationMinutes: Math.round(customerKm),
+        quantityRaw: customerKm,
+        quantityUnit: "km",
+        unitPriceCents: KM_RATE_CENTS,
+        totalCents: customerTotal,
+        employeeName: "Bernd Beispiel",
+        appointmentNotes: null,
+        serviceDetails: null,
+      },
+    ],
+  } as unknown as Partial<InvoicePdfData>);
+}
+
+/**
+ * Beihilfe-/Split-Rechnung pro Topf: privat Versicherte/r mit Beihilfe-
+ * Berechtigung, deren Termine über mehrere Budget-Töpfe aufgeteilt abgerechnet
+ * werden (`billing_run_id` verbindet die N Topf-Rechnungen). Hier modellieren
+ * wir EINE dieser Topf-Rechnungen (§45a-Topf) mit einer anteiligen Termin-
+ * Position (ein Termin, der über Töpfe gesplittet wurde).
+ */
+function buildBeihilfeSplitData(): InvoicePdfData {
+  return buildBaseInvoiceData({
+    invoiceNumber: "MUSTER-STRICT-BEIHILFE-45A-0001",
+    billingType: "pflegekasse_privat",
+    budgetType: "umwandlung_45a",
+    beihilfeBerechtigt: true,
+    netAmountCents: 6000,
+    vatAmountCents: 0,
+    grossAmountCents: 6000,
+    vatRate: 0,
+    lineItems: [
+      {
+        // Termin #501 wurde über Töpfe gesplittet — diese Topf-Rechnung trägt
+        // nur den auf §45a entfallenden Anteil (0,75 h von 1,0 h).
+        appointmentId: 501,
+        appointmentDate: "2026-01-09",
+        startTime: "14:00",
+        endTime: "15:00",
+        serviceCode: "alltagsbegleitung",
+        serviceDescription: "Alltagsbegleitung",
+        durationMinutes: 45,
+        quantityRaw: 0.75,
+        quantityUnit: "hours",
+        unitPriceCents: 8000,
+        totalCents: 6000,
+        employeeName: "Anna Beispiel",
+        appointmentNotes: null,
+        serviceDetails: null,
+      },
+    ],
+  } as unknown as Partial<InvoicePdfData>);
+}
+
 function buildScenarios(): Scenario[] {
   return [
     {
@@ -180,6 +296,14 @@ function buildScenarios(): Scenario[] {
     {
       name: "Selbstzahler (19 % USt)",
       data: buildSelbstzahlerData(),
+    },
+    {
+      name: "Fahrtkosten-Zeilen (travel_km/customer_km, KMT, Pflegekasse)",
+      data: buildKmLineData(),
+    },
+    {
+      name: "Beihilfe/Split pro Topf (§45a, pflegekasse_privat)",
+      data: buildBeihilfeSplitData(),
     },
     {
       name: "Stornorechnung (§45b, USt-befreit)",
