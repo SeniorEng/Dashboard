@@ -191,6 +191,73 @@ describe("Task #1111 — EN-16931-Konformitäts-Wächter (kein Java nötig)", ()
     expect(lineSection).not.toContain("LineTotalAmount");
   });
 
+  it("Selbstzahler: Header-USt hat CategoryCode S, korrekten Satz und nicht-null CalculatedAmount", async () => {
+    // Task #1115 — Private/Selbstzahler-Rechnungen nehmen die regelbesteuerte
+    // Form: 19% USt, Steuer-CategoryCode "S", ein nicht-null CalculatedAmount
+    // und KEIN Befreiungsgrund. `vatRate` ist in Basispunkten gespeichert
+    // (STANDARD_VAT_RATE_BP = 1900 ⇒ RateApplicablePercent 19, vgl.
+    // server/services/invoice-calc.ts).
+    const xml = await generateZugferdXml(
+      buildConformantPdfData({
+        invoiceNumber: "RE-2026-1115",
+        invoiceType: "selbstzahler",
+        billingType: "selbstzahler",
+        budgetType: null,
+        netAmountCents: 10000,
+        vatAmountCents: 1900,
+        grossAmountCents: 11900,
+        vatRate: 1900,
+        // Selbstzahler-Rechnungen haben keine Versicherten-/Kassen-Daten:
+        insuranceIkNummer: "",
+        versichertennummer: "",
+        ikNummer: "",
+        ustId: "DE123456789",
+        lineItems: [
+          {
+            appointmentId: 101,
+            appointmentDate: "2026-01-05",
+            startTime: "09:00",
+            endTime: "10:00",
+            serviceCode: "hauswirtschaft",
+            serviceDescription: "Hauswirtschaft",
+            durationMinutes: 60,
+            quantityRaw: 1,
+            quantityUnit: "hours",
+            unitPriceCents: 10000,
+            totalCents: 10000,
+            employeeName: "Anna Beispiel",
+            appointmentNotes: null,
+            serviceDetails: null,
+          },
+        ],
+      } as unknown as Partial<InvoicePdfData>),
+    );
+    expect(xml).not.toBeNull();
+    const x = xml as string;
+
+    // BG-23 USt-Aufschlüsselung MUSS im Settlement-HEADER stehen.
+    const headerStart = x.indexOf("ApplicableHeaderTradeSettlement");
+    expect(headerStart).toBeGreaterThan(-1);
+    const headerTaxIdx = x.indexOf("ApplicableTradeTax", headerStart);
+    expect(headerTaxIdx).toBeGreaterThan(-1);
+
+    const headerTaxBlock = x.slice(headerTaxIdx, headerTaxIdx + 400);
+    expect(headerTaxBlock).toContain("<ram:TypeCode>VAT</ram:TypeCode>");
+    // Regelbesteuert (BR-S-*): Kategorie S, 19% Satz, nicht-null Steuerbetrag.
+    expect(headerTaxBlock).toContain("<ram:CategoryCode>S</ram:CategoryCode>");
+    expect(headerTaxBlock).toMatch(/<ram:RateApplicablePercent>19<\/ram:RateApplicablePercent>/);
+    expect(headerTaxBlock).toMatch(/<ram:BasisAmount>100\.00<\/ram:BasisAmount>/);
+    expect(headerTaxBlock).toMatch(/<ram:CalculatedAmount>19\.00<\/ram:CalculatedAmount>/);
+    // Kein Befreiungsgrund bei Regelbesteuerung (der ist Kategorie E vorbehalten).
+    expect(headerTaxBlock).not.toContain("Umsatzsteuerbefreit");
+
+    // Verkäufer-IBAN bleibt unter PayeePartyCreditorFinancialAccount erhalten.
+    expect(x).toContain("PayeePartyCreditorFinancialAccount");
+    expect(x).toMatch(
+      /<ram:PayeePartyCreditorFinancialAccount>\s*<ram:IBANID>DE89370400440532013000<\/ram:IBANID>/,
+    );
+  });
+
   it("XMP-Namespace-Reparatur (rdf:about) ist im eingebetteten PDF/A angewendet", async () => {
     const blank = await makeBlankPdf();
     const result = await embedZugferdXml(blank, buildConformantPdfData(), { strict: false });
