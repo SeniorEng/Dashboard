@@ -1,0 +1,101 @@
+# Replit-AI-Ticket: Budget-Integrität & Monatsabschluss-Vereinheitlichung (Session-1-Befunde, 10.06.2026)
+
+**Kontext:** E2E-Test + Code-Audit gegen Commit `d853005` (Dev). Vier neue Bugs + ein Architektur-Dualismus, alle mit Live-Repro auf der Dev-Instanz verifiziert. Beweis-Datensätze: Kunde 203050 (ZZ-Test Session1-Regression), Transaktionen 510349–510353, Test-MA 114674. **Bitte Beweis-Daten erst nach Fix-Verifikation löschen.**
+
+**Bearbeitungsreihenfolge:** TICKET A → B → C (Budget-Integrität, eng verwandt, gemeinsame Testfälle), dann D (Monatsabschluss), E (Cleanup) zuletzt/parallel.
+
+---
+
+## TICKET A — 🔴 Server validiert gesetzliche Budget-Maxima nur für §45b (BUG-15)
+
+**Problem:** `PUT /api/budget/:customerId/type-settings` (`server/routes/budget.ts:786ff`) prüft nur `entlastungsbetrag_45b.monthlyLimitCents` gegen das gesetzliche Maximum (Task #603). Für `umwandlung_45a.monthlyLimitCents` und `ersatzpflege_39_42a.yearlyLimitCents` fehlt die äquivalente Prüfung. Der Kundenanlage-Wizard (Schritt „Budgets") nutzt denselben Pfad: rote Client-Meldung „Maximal 3539.00 €/Jahr erlaubt" erscheint, aber „Weiter"/Anlegen funktioniert trotzdem.
+
+**Live-Beweis (Kunde 203050):** `customer_budget_type_settings.yearly_limit_cents = 500000` persistiert; zusätzlich Allokation über 5.000 €. Overview-API liefert gleichzeitig `yearlyBudgetCents: 500000`, `currentYearAllocatedCents: 500000`, `currentYearAvailableCents: 353900`; UI zeigt „Jahresbudget 5.000,00 €" neben „Verfügbar 3.539,00 €". Nur das Lese-Clamping (Task #441) verhindert Überbuchung.
+
+**Fix:**
+1. PUT-Handler + Customer-Create-Pfad: `umwandlung_45a.monthlyLimitCents ≤ resolve45aMonthlyLimitCents(pflegegrad)` und `ersatzpflege_39_42a.yearlyLimitCents ≤ BUDGET_39_42A_MAX_YEARLY_CENTS` → sonst 400 mit deutscher Meldung (analog Task #603).
+2. Wizard: „Weiter"-Button bei aktiver Validierungsmeldung deaktivieren.
+3. `budget_allocations` bei Anlage aus dem geklemmten Wert speisen, nie aus dem Rohwert.
+4. Anzeige `yearlyBudgetCents` aus geklemmtem Wert (eine Wahrheit).
+
+**Akzeptanz:** PUT mit 500000 für §42a → 400. Wizard lässt überhöhten Wert nicht durch. Bestandsdaten: Migrations-Script klemmt vorhandene Über-Limit-Zeilen (mind. Kunde 203050) und loggt sie.
+
+---
+
+## TICKET B — 🔴 Budget-Typ-Settings: Upsert ersetzt statt historisiert → GoBD-forDate-Lesepfad ohne Datenbasis (BUG-16, BUG-9-Komplex)
+
+**Problem:** `upsertBudgetTypeSettings` (`server/storage/budget/preferences-storage.ts`) hält pro Kunde+Topf genau **eine** Zeile und überschreibt/ersetzt sie bei jedem PUT.
+
+**Live-Repro (Kunde 203050, §42a):**
+1. Ausgangszeile id 361120 (`yearly=500000, validFrom=NULL`).
+2. PUT mit `{yearlyLimitCents: 353900, validFrom: '2026-07-01'}` → Zeile 361120 **gelöscht**, neue Zeile 361121 ab 01.07. Für den Zeitraum davor existiert keine Konfigurationszeile mehr.
+3. PUT ohne `validFrom` mit `{yearlyLimitCents: 340000}` → Zeile 361121 wird auf `validFrom='2026-06-10'` (heute) **umdatiert** und überschrieben.
+
+**Konsequenz:** „Welches Limit galt am Datum X" ist nicht rekonstruierbar. Der `forDate`-Lesepfad (Task #440/#754) und jede Prüfung historischer Buchungen gegen die damalige Konfiguration laufen ins Leere. Umbuchungen vergangener Termine nach Settings-Änderung rechnen mit der heutigen statt der damaligen Konfiguration (verwandt: Audit-Befund Rebook-Preview `forEdit` vs. Buchung `forDate`, `rebook-storage.ts:154` vs. `consumption-engine.ts:399ff`).
+
+**Fix:** Echte Versionierung: Bei Übergang Alt-Zeile `validTo = validFrom_neu − 1 Tag` setzen (nie löschen), neue Zeile anlegen; PUT ohne validFrom = „ab heute" als **neuer** Versionssatz, nicht Umdatierung; `forDate`-Reads wählen die Zeile mit `validFrom ≤ date ≤ validTo`. Transition-Audit-Log (Task #440) beibehalten.
+
+**Akzeptanz:** Obige 3-Schritt-Sequenz erzeugt 3 Zeilen mit lückenloser Gültigkeitskette; `forDate('2026-06-09')` liefert 500000-Zeile (bzw. geklemmt per Ticket A); kein DELETE auf `customer_budget_type_settings` im Übergangspfad. Bestehende Tests BUG-9/BUG-13 (Block C des E2E-Protokolls vom 28.05.) müssen grün bleiben.
+
+---
+
+## TICKET C — 🔴 Reversal-einer-Reversal möglich; drei Lesepfade widersprechen sich (BUG-17)
+
+**Live-Repro:** Consumption 510349 (−6.475) → `POST /transactions/510349/reverse` → 510350 (+6.475, korrekt). Dann `POST /transactions/510350/reverse` → **201**, erzeugt 510351 (−6.475, Wiederverbrauch ohne zugehörige Dokumentation!). Danach gleichzeitig: Σ Transaktionen = −6.475 · FIFO-Breakdown `totalConsumedCents: 0` · Overview `availableCents: 52400` **und** `totalUsedCents: 6475`. UI zeigt volle Verfügbarkeit. Kette beliebig fortsetzbar (510352 als Gegenbeweis angelegt).
+
+**Zusatz:** Doppel-Reverse derselben Tx antwortet idempotent mit der bestehenden Zeile, aber Status **201** statt 200/409.
+
+**Fix:**
+1. Reverse-Handler (`server/routes/budget.ts`, `/transactions/:transactionId/reverse`): `if (original.transactionType === 'reversal') → 400 REVERSAL_NOT_REVERSIBLE`.
+2. Idempotenter Doppel-Reverse → 409 (oder 200 mit Hinweis), nicht 201.
+3. Drift-Detektor als Invariante (Test + optional Admin-Check): je Kunde+Topf muss gelten Σ(amountCents) ≙ FIFO.totalConsumed ≙ Overview.totalUsed.
+4. Daten-Reparatur: Reversal-Ketten-Scan im Bestand (`reversed_transaction_id` zeigt auf Zeile mit `transactionType='reversal'`) → Report; 510351/510352 als Referenz.
+
+**Akzeptanz:** Reverse auf Reversal → 400. Invarianten-Test grün auf Kunde 203050 nach Reparatur.
+
+---
+
+## TICKET D — 🔴 Monatsabschluss: zwei Mechanismen, drei „dokumentiert"-Definitionen vereinheitlichen (C-11–C-15, Prod-Vorfall)
+
+**Befund (Code + Live-Beleg 10.06.):**
+- **Mechanismus A** `employee_month_closings` (persistent, pro MA+Monat, sperrt via Policies) vs. **Mechanismus B** `computeMonthCloseCutoff()` (stateless, global, Banner/Reminder + Auslöser von A um 23:00 am Cutoff-Tag). Auto-Close 08.06. 21:00 UTC schloss korrekt genau 2 MA (User 11, 6) für Mai — Scope von A stimmt.
+- **Inkonsistente Kriterien (live demonstriert, Test-MA 114674):** Admin-Close (`POST /time-entries/admin/close-month`) lehnte ab: erst „keine Zeiteinträge oder abgeschlossenen Termine" (geplanter Mai-Termin zählt nicht), nach Dokumentation „1 Termin(e) ohne Unterschrift". **Auto-Close hätte in beiden Zuständen geschlossen** (`autoCloseMonthForCutoff` zählt alle Termine als Activity und blockiert nicht bei fehlender Unterschrift; `month-close-scheduler.ts:189–260` vs. `getMonthClosingReadiness`/`getAdminMonthClosingReadiness` in `time-tracking/month-closing.ts:32–280`). Drei „dokumentiert"-Definitionen in `server/lib/appointment-signed.ts:32–53` werden uneinheitlich verwendet.
+- Folge: Welche MA-Monate zu sind, hängt davon ab, **wer/was** geschlossen hat → vom Vorstand beobachtetes inkonsistentes Verhalten („alle Termine gesperrt", Status liest dokumentierte geplante Zeiten nicht sauber).
+- Nebenbefunde: Backup-Employees erhalten keine Reminder, ihre Monate werden aber geschlossen (`month-close-scheduler.ts:101–106`); zwei getrennte Sperren `isMonthClosed` (403) vs. `isAppointmentLocked` (409) brauchen klar unterscheidbare UI-Meldungen.
+
+**Fix:**
+1. **Eine** gemeinsame Readiness-Funktion (Activity-Definition + Blocker-Kriterien) für Auto-Close, Admin-Close und Batch-Close; Entscheidung dokumentieren: Blockiert fehlende Unterschrift den Auto-Close (empfohlen: ja, mit Eskalation an Admin) oder nicht (dann darf Admin-Close sie auch nicht blockieren).
+2. Banner/Reminder (Mechanismus B) ausschließlich aus A + gemeinsamer Readiness ableiten.
+3. Backup-MA in Reminder-Zielgruppe aufnehmen oder von Auto-Close ausnehmen (eine Linie).
+4. Fehlertexte: 403 „Monat abgeschlossen" vs. 409 „Termin auf signiertem Leistungsnachweis" eindeutig.
+
+**Akzeptanz:** Für jeden MA×Monat liefern Auto-Close-Simulation und Admin-Readiness identische Entscheidung + identische Begründung; Regressionstest mit den drei Zuständen des Test-MA 114674 (kein Termin / geplant / completed-unsigned).
+
+---
+
+## TICKET E — 🟡 Testdaten-Müll in Dev-Produktivtabellen (BUG-18)
+
+~176 Services `tlsicht_*`/`tlwrite_*` (35 €/Std., Team-Lead-Tests ~26.04.) in jeder Kundenanlage und Preisvereinbarung sichtbar (Services-API: 180 Einträge, 4 echte); mind. ein Müll-**Pflichtdokumenttyp** `DOC6_1777740879740_o27v3` in Schritt 7 der Kundenanlage.
+
+**Fix:** `server/routes/admin/test-cleanup.ts` um Purge für Test-Services (`tlsicht_%`, `tlwrite_%`, ohne Termin-/Preis-Referenzen sonst soft-deaktivieren) und Test-Dokumenttypen (`DOC%_17777%`) erweitern; einmalig ausführen; Testläufe auf isolierte DB/Transaktions-Rollback umstellen (vgl. Test-Suite-Audit Q7-Empfehlung).
+
+**Akzeptanz:** Services-API liefert nur echte Services; Kundenanlage Schritt 4/7 ohne Müll-Einträge; neue Testläufe hinterlassen keine Einträge.
+
+---
+
+## Nachtrag Session 2 (gleicher Tag) — drei weitere Tickets
+
+### TICKET F — 🔴 Create-Pfad umgeht Budget-Intent-Validierung (BUG-19)
+`POST /api/admin/customers` mit `billingType:'selbstzahler'` aktiviert §45b (Kunde 203052, `enabled=true`), obwohl der PUT-Pfad dasselbe korrekt mit 409 ablehnt. **Fix:** `rejectBudgetIntent` auch im Create-Pfad (API + Wizard); Bestands-Scan auf Selbstzahler mit aktiven §-Töpfen.
+
+### TICKET G — 🔴 §39/§42a für PG 1 nicht blockiert (BUG-20, Forderungsausfall-Risiko)
+`PUT /api/budget/203051/type-settings` mit `ersatzpflege_39_42a enabled` auf PG-1-Kunde → 200, Kunde hatte 3.539 € Verhinderungspflege verfügbar. **Ursache:** PUT-Handler prüft nur `wants45b`/`wants45a` (`server/routes/budget.ts:786ff`), `wants42a` fehlt. **Fix:** analoger Block (PG ≥ 2) in PUT + Create. Testzustand wurde zurückgesetzt.
+
+### TICKET H — 🔴 Monatslimits wirken im Buchungspfad nicht; Verbrauch wird bei Limit-Rechnung nicht angerechnet (BUG-21, Display ≠ Booking)
+Kunde 203050, §45b-Monatslimit 5.000 / §45a 2.000 Cents gesetzt (persistiert bestätigt): 2h-Termin (7.600) und 1h-Termin (3.800) wurden **komplett aus §45b** gebucht (Juni-Verbrauch 15.375 ≫ Limit); Overview zeigte gleichzeitig `currentMonthUsedCents: 0` und `availableCents: 15570` (Herkunft unklar). 10h-Termin (38.000) kaskadierte dann an der falschen Grenze: Legs 15.570 (§45b) + 2.000 (§45a, = Limit) + 20.430 (§42a), Σ exakt 38.000. **Diagnose:** Limit-Verfügbarkeitspfad rechnet Monatsverbrauch nicht an → kleine Buchungen passen immer, große splitten falsch. **Akzeptanz:** Cascade ab exakt (Limit − Monatsverbrauch); `currentMonthUsedCents` korrekt; Drift-Detektor (UI-Verfügbarkeit = exakt buchbarer Betrag, Rest 0) grün je Topf. Repro-Zustand (Limits bei 203050) wurde absichtlich belassen. Wechselwirkung mit TICKET B beachten.
+
+Details, Zahlen und API-Sequenzen: `EngelDesk-E2E-Protokoll-Session2-2026-06-10.md`.
+
+## Generelle Leitplanke (gilt für alle Tickets)
+
+Kein neuer Dualismus: Pro Frage (verfügbar? dokumentiert? Monat zu? Limit?) existiert genau **eine** Quelle der Wahrheit, alle Anzeige- und Schreibpfade importieren dieselbe Funktion. Bestehende Invarianten-Tests erweitern statt neue Parallel-Logik zu bauen. Alle Beträge bleiben Integer-Cents.
