@@ -113,9 +113,13 @@ function buildPdfData(overrides: Partial<InvoicePdfData> = {}): InvoicePdfData {
 }
 
 // Szenarien, die die Versiegelung pro Topf/USt-Satz abdecken müssen.
-const SCENARIOS: { name: string; data: InvoicePdfData }[] = [
+// `expectedNote` (optional): erwartete BT-22-§-Note der Pot-Rechnung
+// (Variant C, `server/lib/zugferd.ts` budgetType → IncludedNote). Selbstzahler-
+// und Storno-Szenarien tragen keine topf-spezifische §-Note.
+const SCENARIOS: { name: string; data: InvoicePdfData; expectedNote?: string }[] = [
   {
-    name: "umsatzsteuerfreie Pflegekassen-Rechnung (0 %, § 4 Nr. 16 UStG)",
+    name: "umsatzsteuerfreie Pflegekassen-Rechnung §45b (0 %, § 4 Nr. 16 UStG)",
+    expectedNote: "§ 45b SGB XI — Entlastungsbetrag",
     data: buildPdfData({
       invoiceType: "pflegekasse_gesetzlich",
       budgetType: "entlastungsbetrag_45b",
@@ -131,6 +135,52 @@ const SCENARIOS: { name: string; data: InvoicePdfData }[] = [
           quantityUnit: "hours",
           unitPriceCents: 6550,
           totalCents: 13100,
+        }),
+      ],
+    } as Partial<InvoicePdfData>),
+  },
+  {
+    name: "umsatzsteuerfreie Pflegekassen-Rechnung §45a Umwandlungsanspruch (0 %)",
+    expectedNote: "§ 45a SGB XI — Umwandlungsanspruch",
+    data: buildPdfData({
+      invoiceType: "pflegekasse_gesetzlich",
+      budgetType: "umwandlung_45a",
+      invoiceNumber: "RE-2026-0108-45A",
+      netAmountCents: 8000,
+      vatAmountCents: 0,
+      grossAmountCents: 8000,
+      vatRate: 0,
+      lineItems: [
+        lineItem({
+          serviceCode: "alltagsbegleitung",
+          serviceDescription: "Alltagsbegleitung",
+          quantityRaw: 2,
+          quantityUnit: "hours",
+          unitPriceCents: 4000,
+          totalCents: 8000,
+        }),
+      ],
+    } as Partial<InvoicePdfData>),
+  },
+  {
+    name: "umsatzsteuerfreie Pflegekassen-Rechnung §§39/42a Verhinderungspflege (0 %)",
+    expectedNote: "§§ 39 / 42a SGB XI — Verhinderungspflege",
+    data: buildPdfData({
+      invoiceType: "pflegekasse_gesetzlich",
+      budgetType: "ersatzpflege_39_42a",
+      invoiceNumber: "RE-2026-0108-39",
+      netAmountCents: 12000,
+      vatAmountCents: 0,
+      grossAmountCents: 12000,
+      vatRate: 0,
+      lineItems: [
+        lineItem({
+          serviceCode: "verhinderungspflege",
+          serviceDescription: "Verhinderungspflege",
+          quantityRaw: 3,
+          quantityUnit: "hours",
+          unitPriceCents: 4000,
+          totalCents: 12000,
         }),
       ],
     } as Partial<InvoicePdfData>),
@@ -223,6 +273,18 @@ describe("Task #1108 — frische E-Rechnungen bestehen die XSD-Strict-Versiegelu
       // (BG-23) emittieren — sonst hätte node-zugferd nur das alte, verworfene
       // Format erzeugt und die Validierung wäre trivial.
       expect(settlementHeaderBlock(xml as string)).toContain("<ram:ApplicableTradeTax>");
+
+      // Variant C: Pot-Rechnungen tragen die topf-spezifische BT-22-§-Note
+      // (IncludedNote/BG-1, subjectCode REG). Eine Regression im
+      // budgetType → IncludedNote-Mapping (`server/lib/zugferd.ts`) würde die
+      // §-Zuordnung der §45a-/§§39/42a-Folgerechnungen still verlieren.
+      if (scenario.expectedNote) {
+        const noteBlock = xml as string;
+        expect(noteBlock).toContain(scenario.expectedNote);
+        expect(noteBlock).toMatch(
+          /<ram:IncludedNote>[\s\S]*?<ram:SubjectCode>REG<\/ram:SubjectCode>[\s\S]*?<\/ram:IncludedNote>/,
+        );
+      }
     });
   }
 
