@@ -27,11 +27,12 @@ export async function getBudgetPreferences(customerId: number, _tx?: DbClient): 
   return result[0];
 }
 
-export async function upsertBudgetPreferences(preferences: InsertBudgetPreferences, _userId?: number): Promise<CustomerBudgetPreferences> {
-  const existing = await getBudgetPreferences(preferences.customerId);
+export async function upsertBudgetPreferences(preferences: InsertBudgetPreferences, _userId?: number, _tx?: DbClient): Promise<CustomerBudgetPreferences> {
+  const d = _tx ?? db;
+  const existing = await getBudgetPreferences(preferences.customerId, _tx);
 
   if (existing) {
-    const result = await db.update(customerBudgetPreferences)
+    const result = await d.update(customerBudgetPreferences)
       .set({
         monthlyLimitCents: preferences.monthlyLimitCents,
         budgetStartDate: preferences.budgetStartDate,
@@ -44,7 +45,7 @@ export async function upsertBudgetPreferences(preferences: InsertBudgetPreferenc
     return result[0];
   }
 
-  const result = await db.insert(customerBudgetPreferences)
+  const result = await d.insert(customerBudgetPreferences)
     .values(preferences)
     .returning();
   return result[0];

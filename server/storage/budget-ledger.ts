@@ -48,7 +48,7 @@ interface BudgetLedgerStorage {
   getMonthlyHistory(customerId: number, opts?: history.GetMonthlyHistoryOptions): Promise<MonthlyHistoryBucket[]>;
 
   getBudgetPreferences(customerId: number, _tx?: DbClient): Promise<CustomerBudgetPreferences | undefined>;
-  upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number): Promise<CustomerBudgetPreferences>;
+  upsertBudgetPreferences(preferences: InsertBudgetPreferences, userId?: number, tx?: DbClient): Promise<CustomerBudgetPreferences>;
   // Task #716 — Konsolidierter Lese-Einstiegspunkt (SSoT). Overload-Set
   // spiegelt die drei Modi 1:1 wider, damit Caller den exakten Element-Typ
   // bekommen (ohne Conditional-Type-Narrowing-Probleme).

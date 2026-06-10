@@ -565,10 +565,21 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
 
   if (budgetType === "entlastungsbetrag_45b") {
     const existingPrefs = await budgetLedgerStorage.getBudgetPreferences(customerId);
-    if (!existingPrefs?.budgetStartDate || validFromDate < existingPrefs.budgetStartDate) {
+    // Task #1143 — Der kunden-weite `budget_start_date` wird von ALLEN Töpfen
+    // gelesen (§45a/§39 roh, §45b origin-aware gekappt). Ein explizit manuell
+    // gesetzter Anker ('manual') ist eine bewusste Admin-Entscheidung und gewinnt
+    // IMMER — er wird hier nicht überschrieben. Ansonsten wird der Anker nur nach
+    // VORNE (früher) gezogen und IMMER mit Origin 'derived_pflegegrad' geschrieben
+    // (analog zum /initial-budget-Pfad). Ohne Origin bliebe die Spalte NULL, der
+    // §45b-Lesepfad könnte den Anker weder auf den Jan-1-Floor kappen noch den
+    // Pflegegrad-Fallback nutzen — er pinnte das §45b-Budget fälschlich auf den
+    // Stichmonat (#209: 131 € statt voller Ansammlung).
+    const isManualAnchor = existingPrefs?.budgetStartDateOrigin === "manual";
+    if (!isManualAnchor && (!existingPrefs?.budgetStartDate || validFromDate < existingPrefs.budgetStartDate)) {
       await budgetLedgerStorage.upsertBudgetPreferences({
         customerId,
         budgetStartDate: validFromDate,
+        budgetStartDateOrigin: "derived_pflegegrad",
         monthlyLimitCents: existingPrefs?.monthlyLimitCents ?? null,
         notes: existingPrefs?.notes ?? null,
       }, userId);
@@ -662,6 +673,34 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
       && (r.source === "initial_balance" || r.source === "carryover")
     ) {
       await budgetLedgerStorage.clearLegacyInitialBalanceFromSettings(customerId, r.budgetType, tx, userId);
+
+      // Task #1143 — Ein §45b-Startwert/Carryover kann den kunden-weiten
+      // `budget_start_date` auf den Stichmonat gepinnt haben (Origin
+      // 'derived_pflegegrad', siehe POST initial-balance). Wird er gelöscht, muss
+      // der Anker neu aus dem Pflegegrad-Beginn abgeleitet werden — sonst bliebe
+      // das §45b-Budget auf dem (jetzt gelöschten) Stichmonat hängen statt ab
+      // Pflegegrad-Beginn anzusammeln. Wir setzen den Anker auf den frühesten
+      // Pflegegrad-Beginn (RAW, identisch zum /initial-budget-Pfad): §45a/§39
+      // lesen ihn weiterhin roh (kanonischer Pflegegrad-Anker, unverändert), §45b
+      // kappt ihn beim Lesen auf den Jan-1-Floor. Idempotent, wenn der Anker schon
+      // am Pflegegrad-Beginn steht. Ein manuell gesetzter Anker ('manual') bleibt
+      // unangetastet; fehlt jede Pflegegrad-Historie, lassen wir den Anker stehen,
+      // um §45a/§39 nicht zu verändern.
+      const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId, tx);
+      if (prefs?.budgetStartDateOrigin === "derived_pflegegrad") {
+        const { getCustomerCareLevelHistory } = await import("../storage/customer-mgmt/care-level");
+        const careLevelHistory = await getCustomerCareLevelHistory(customerId);
+        const earliestPflegegradStart = resolve45bAccrualAnchor(careLevelHistory, "");
+        if (earliestPflegegradStart && earliestPflegegradStart !== prefs.budgetStartDate) {
+          await budgetLedgerStorage.upsertBudgetPreferences({
+            customerId,
+            budgetStartDate: earliestPflegegradStart,
+            budgetStartDateOrigin: "derived_pflegegrad",
+            monthlyLimitCents: prefs.monthlyLimitCents ?? null,
+            notes: prefs.notes ?? null,
+          }, userId, tx);
+        }
+      }
     }
 
     return r;
