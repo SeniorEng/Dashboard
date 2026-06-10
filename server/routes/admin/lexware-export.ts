@@ -8,7 +8,7 @@ import { employeeTimeEntriesRepo } from "../../repos";
 import { asyncHandler } from "../../lib/errors";
 import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
-import { documentedAndSignedSqlRaw, completedButUnsignedSqlRaw } from "../../lib/appointment-signed";
+import { documentedAndSignedSqlRaw, completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
 
 const router = Router();
 
@@ -329,14 +329,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       COUNT(DISTINCT a.id) as unsigned_count,
       COALESCE(SUM(svc_minutes.minutes), 0) as unsigned_minutes
     FROM appointments a
-    LEFT JOIN LATERAL (
-      SELECT SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
-      FROM appointment_services asvc
-      JOIN services s ON s.id = asvc.service_id
-      WHERE asvc.appointment_id = a.id
-        AND s.unit_type = 'hours'
-        AND s.code IN ('hauswirtschaft', 'alltagsbegleitung', 'erstberatung')
-    ) svc_minutes ON true
+    ${unsignedServiceMinutesLateralRaw('a', 'svc_minutes')}
     WHERE ${completedButUnsignedSqlRaw('a')}
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
@@ -525,14 +518,7 @@ router.get("/hours-overview/unsigned-appointments", asyncHandler("Nicht untersch
       COALESCE(svc_minutes.minutes, 0) as minutes
     FROM appointments a
     JOIN customers c ON c.id = a.customer_id
-    LEFT JOIN LATERAL (
-      SELECT SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
-      FROM appointment_services asvc
-      JOIN services s ON s.id = asvc.service_id
-      WHERE asvc.appointment_id = a.id
-        AND s.unit_type = 'hours'
-        AND s.code IN ('hauswirtschaft', 'alltagsbegleitung', 'erstberatung')
-    ) svc_minutes ON true
+    ${unsignedServiceMinutesLateralRaw('a', 'svc_minutes')}
     WHERE ${completedButUnsignedSqlRaw('a')}
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}

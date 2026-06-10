@@ -82,3 +82,47 @@ export function completedButUnsignedSqlRaw(alias: string): SQL {
       AND msr.status IN ('employee_signed', 'completed')
   ))`;
 }
+
+/**
+ * Service-Codes, die als bezahlte „Dienst-Minuten" der unsignierten Termine
+ * gezählt werden (Stunden-basierte Leistungen). SSoT für die LATERAL-Subquery in
+ * `unsignedServiceMinutesLateralRaw`.
+ */
+export const UNSIGNED_SERVICE_MINUTE_CODES = [
+  "hauswirtschaft",
+  "alltagsbegleitung",
+  "erstberatung",
+] as const;
+
+/**
+ * Roh-SQL-Fragment für die LATERAL-Subquery, die die bezahlten Dienst-Minuten
+ * eines (unsignierten) Termins aus `appointment_services` aggregiert. Liefert
+ * eine abgeleitete Tabelle mit Spalte `minutes` und dem übergebenen Result-Alias.
+ *
+ * Genutzt von beiden Endpoints in `server/routes/admin/lexware-export.ts`
+ * (Warnung `/api/admin/hours-overview` und aufklappbare Liste
+ * `/api/admin/hours-overview/unsigned-appointments`), damit die Minuten-Berechnung
+ * nur EINE Quelle hat und nicht per Konvention auseinanderdriftet.
+ *
+ * @param apptAlias  Alias der `appointments`-Tabelle im äußeren Query (z.B. `a`).
+ * @param resultAlias Alias der abgeleiteten Tabelle (z.B. `svc_minutes`).
+ */
+export function unsignedServiceMinutesLateralRaw(
+  apptAlias: string,
+  resultAlias: string,
+): SQL {
+  const a = sql.raw(apptAlias);
+  const r = sql.raw(resultAlias);
+  const codes = sql.join(
+    UNSIGNED_SERVICE_MINUTE_CODES.map((c) => sql`${c}`),
+    sql`, `,
+  );
+  return sql`LEFT JOIN LATERAL (
+      SELECT SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
+      FROM appointment_services asvc
+      JOIN services s ON s.id = asvc.service_id
+      WHERE asvc.appointment_id = ${a}.id
+        AND s.unit_type = 'hours'
+        AND s.code IN (${codes})
+    ) ${r} ON true`;
+}
