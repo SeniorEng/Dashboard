@@ -46,11 +46,17 @@ actually ran for the first time.
    an env-gated branch in `db.ts` to disable secure WS / set `wsProxy` when
    targeting the proxy — production path (real neon host) must stay untouched.
 
-2. **Repo is stale vs the live Replit project.** GitHub `main` ≈ last
-   "Published your App" snapshot; post-publish work (e.g. the seed script) was
-   missing. So CI tests older code and e.g. the **OpenAPI drift gate**
-   (`gen:openapi --check`) is red from drift. A fresh publish is the real sync;
-   hand-pushing individual files is only a band-aid.
+2. **Repo-staleness — RESOLVED + decision recorded.** GitHub `main` used to track
+   the last "Published your App" snapshot, so post-publish work was missing and
+   the **OpenAPI drift gate** (`gen:openapi -- --check`) went red purely from
+   drift. Fixed by pushing the full local `main` (not hand-picking files). The
+   recorded sync decision: **periodic `git push origin main:main` is the
+   canonical CI-sync path, NOT publish** (publish lags day-to-day work and
+   conflates deploy with CI-sync). Repeatable runbook lives in
+   `docs/ci-pipeline.md` → "GitHub-Sync (Repo ↔ Replit-Projekt)". Quick local
+   drift check before pushing: `npm run gen:openapi -- --check` (green = spec
+   consistent, push will keep the CI gate green). Code/doc-only pushes use the
+   normal connector token; only `.github/workflows/*` pushes still need the PAT.
 
 **Consequence:** because branch protection requires `static-analysis`, `tests`,
 `e2e-smoke` (strict), and those are red, PRs are still blocked from merging until
