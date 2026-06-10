@@ -529,6 +529,17 @@ jobs:
   erechnung-validation:
     name: erechnung-validation
     runs-on: ubuntu-latest
+    # Die externen Validatoren sind auf FESTE Versionen gepinnt (vorher
+    # dynamisch aus den Maven-Metadaten / `verapdf-installer.zip` = latest).
+    # Ein Versionssprung am Host kann das (branch-protected) Gate damit nicht
+    # mehr unbemerkt brechen, und beide Artefakte werden über `actions/cache`
+    # (Key = gepinnte Version) wiederverwendet — ein transienter Download-
+    # Hänger redet die Fetches nicht jedes Mal neu. Bump: hier die Version
+    # erhöhen, der Cache-Key zieht automatisch nach.
+    env:
+      MUSTANG_VERSION: "2.23.1"
+      VERAPDF_VERSION: "1.30.2"
+      VALIDATOR_CACHE_DIR: ${{ github.workspace }}/.erechnung-validators
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -563,32 +574,78 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Mustang-CLI als shaded JAR von Maven Central (Version dynamisch aus den
-      # Maven-Metadaten, damit der Pin nicht veraltet).
+      # Gepinnte Validator-Artefakte aus dem Cache wiederverwenden. Cache-Key =
+      # gepinnte Version, daher: Versions-Bump (oben in env) ⇒ neuer Key ⇒
+      # frischer Download; sonst Cache-Hit ⇒ KEIN externer Fetch. Mustang-JAR
+      # und veraPDF-Installation liegen unter VALIDATOR_CACHE_DIR.
+      - name: Cache Mustang CLI (pinned)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VALIDATOR_CACHE_DIR }}/mustang-cli-${{ env.MUSTANG_VERSION }}.jar
+          key: mustang-cli-${{ env.MUSTANG_VERSION }}
+
+      - name: Cache veraPDF (pinned)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VALIDATOR_CACHE_DIR }}/verapdf-${{ env.VERAPDF_VERSION }}
+          key: verapdf-${{ runner.os }}-${{ env.VERAPDF_VERSION }}
+
+      # Mustang-CLI als shaded JAR von Maven Central, auf MUSTANG_VERSION gepinnt.
+      # Bei Cache-Hit wird der Download komplett übersprungen. Schlägt der Fetch
+      # fehl (Host-Ausfall / Version entfernt), bricht der Step mit einer KLAREN
+      # Infrastruktur-Fehlermeldung ab — abgegrenzt von „Rechnung wirklich
+      # ungültig" (das meldet erst der validate-Step unten).
       - name: Download Mustang CLI
         id: mustang
         run: |
           set -euo pipefail
-          BASE="https://repo1.maven.org/maven2/org/mustangproject/Mustang-CLI"
-          VER=$(curl -sfL "$BASE/maven-metadata.xml" | grep -oPm1 "(?<=<release>)[^<]+")
-          echo "Resolved Mustang-CLI version: $VER"
-          curl -sfL -o "$RUNNER_TEMP/mustang-cli.jar" "$BASE/$VER/Mustang-CLI-$VER.jar"
-          echo "jar=$RUNNER_TEMP/mustang-cli.jar" >> "$GITHUB_OUTPUT"
+          JAR="$VALIDATOR_CACHE_DIR/mustang-cli-$MUSTANG_VERSION.jar"
+          mkdir -p "$VALIDATOR_CACHE_DIR"
+          if [ -s "$JAR" ]; then
+            echo "Cache-Hit: Mustang-CLI $MUSTANG_VERSION ($JAR) — kein Download nötig."
+            echo "jar=$JAR" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          URL="https://repo1.maven.org/maven2/org/mustangproject/Mustang-CLI/$MUSTANG_VERSION/Mustang-CLI-$MUSTANG_VERSION.jar"
+          echo "Cache-Miss: lade Mustang-CLI $MUSTANG_VERSION von $URL"
+          if ! curl -fL --retry 4 --retry-delay 5 --retry-all-errors --connect-timeout 20 -o "$JAR" "$URL"; then
+            rm -f "$JAR"
+            echo "::error title=Externer Download nicht verfügbar (Mustang)::Mustang-CLI $MUSTANG_VERSION konnte nicht von Maven Central geladen werden ($URL). Das ist ein EXTERNES Infrastruktur-Problem (Host-Ausfall oder entfernte Version) — KEIN Konformitätsfehler der Rechnung. Das Java-freie WASM-XSD-Strict-Gate ist bereits als Backstop gelaufen. Job erneut starten, sobald Maven Central erreichbar ist; bei dauerhaft entfernter Version MUSTANG_VERSION in ci.yml anheben."
+            exit 1
+          fi
+          echo "jar=$JAR" >> "$GITHUB_OUTPUT"
 
-      # veraPDF headless installieren (IzPack-Auto-Install).
+      # veraPDF headless installieren (IzPack-Auto-Install), auf VERAPDF_VERSION
+      # gepinnt. Bei Cache-Hit wird Download + Installation übersprungen.
       - name: Install veraPDF
         id: verapdf
         run: |
           set -euo pipefail
-          curl -sfL -o "$RUNNER_TEMP/verapdf-installer.zip" https://software.verapdf.org/releases/verapdf-installer.zip
-          unzip -q "$RUNNER_TEMP/verapdf-installer.zip" -d "$RUNNER_TEMP/verapdf-installer"
+          DEST="$VALIDATOR_CACHE_DIR/verapdf-$VERAPDF_VERSION"
+          BIN="$DEST/verapdf"
+          if [ -x "$BIN" ]; then
+            echo "Cache-Hit: veraPDF $VERAPDF_VERSION ($BIN) — keine Installation nötig."
+            echo "bin=$BIN" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$VALIDATOR_CACHE_DIR"
+          # Versioniertes Installer-Archiv (nicht das floatende `verapdf-installer.zip`).
+          MINOR="${VERAPDF_VERSION%.*}"
+          URL="https://software.verapdf.org/releases/$MINOR/verapdf-greenfield-$VERAPDF_VERSION-installer.zip"
+          ZIP="$RUNNER_TEMP/verapdf-installer.zip"
+          echo "Cache-Miss: lade veraPDF $VERAPDF_VERSION von $URL"
+          if ! curl -fL --retry 4 --retry-delay 5 --retry-all-errors --connect-timeout 20 -o "$ZIP" "$URL"; then
+            echo "::error title=Externer Download nicht verfügbar (veraPDF)::veraPDF $VERAPDF_VERSION konnte nicht von software.verapdf.org geladen werden ($URL). Das ist ein EXTERNES Infrastruktur-Problem (Host-Ausfall oder entfernte Version) — KEIN Konformitätsfehler der Rechnung. Das Java-freie WASM-XSD-Strict-Gate ist bereits als Backstop gelaufen. Job erneut starten, sobald der Host erreichbar ist; bei dauerhaft entfernter Version VERAPDF_VERSION in ci.yml anheben."
+            exit 1
+          fi
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/verapdf-installer"
           INSTALLER_DIR=$(find "$RUNNER_TEMP/verapdf-installer" -mindepth 1 -maxdepth 1 -type d -name 'verapdf-*' | head -n1)
           cat > "$RUNNER_TEMP/verapdf-auto-install.xml" <<XML
           <?xml version="1.0" encoding="UTF-8" standalone="no"?>
           <AutomatedInstallation langpack="eng">
             <com.izforge.izpack.panels.htmlhello.HTMLHelloPanel id="welcome"/>
             <com.izforge.izpack.panels.target.TargetPanel id="install_dir">
-              <installpath>$RUNNER_TEMP/verapdf</installpath>
+              <installpath>$DEST</installpath>
             </com.izforge.izpack.panels.target.TargetPanel>
             <com.izforge.izpack.panels.packs.PacksPanel id="sdk_pack_select">
               <pack index="0" name="veraPDF GUI" selected="true"/>
@@ -600,7 +657,7 @@ jobs:
           </AutomatedInstallation>
           XML
           "$INSTALLER_DIR/verapdf-install" "$RUNNER_TEMP/verapdf-auto-install.xml"
-          echo "bin=$RUNNER_TEMP/verapdf/verapdf" >> "$GITHUB_OUTPUT"
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
 
       - name: Validate sample EN 16931 e-invoice (Mustang + veraPDF)
         env:

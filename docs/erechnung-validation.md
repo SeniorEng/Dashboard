@@ -72,15 +72,44 @@ npm run validate:erechnung
 
 Eigener Job `erechnung-validation` in `.github/workflows/ci.yml`:
 
-1. `actions/setup-java` (Temurin 17).
-2. Mustang-CLI-JAR von Maven Central laden (Version dynamisch aus den
-   Maven-Metadaten).
-3. veraPDF headless installieren (IzPack-Auto-Install).
+1. **Java-freies WASM-XSD-Strict-Gate** (`npm run validate:erechnung:strict`) —
+   läuft als erstes, **vor** jedem externen Download, und ist damit der
+   always-on-Backstop (siehe unten).
+2. `actions/setup-java` (Temurin 17).
+3. **Gepinnte, gecachte Validatoren** (siehe „Resilienz" unten):
+   `actions/cache` lädt das Mustang-CLI-JAR (`MUSTANG_VERSION`) und die
+   veraPDF-Installation (`VERAPDF_VERSION`) aus dem Cache; nur bei Cache-Miss
+   wird real heruntergeladen.
 4. `ERECHNUNG_REQUIRE_VALIDATORS=1 npm run validate:erechnung`.
 
 Das Gate ist seit **2026-06-10 branch-protected**: `erechnung-validation` ist
 ein Required-Status-Check auf `main` (neben `static-analysis`/`tests`/`e2e-smoke`),
 ein Konformitätsbruch **blockiert** also den Merge. Es läuft bei jedem Push/PR.
+
+### Resilienz gegen externe Download-Ausfälle (Task #1157)
+
+Weil das Gate `strict=true` branch-protected ist, würde ein transienter Ausfall
+oder ein Versionssprung bei **Maven Central** (Mustang) oder **software.verapdf.org**
+(veraPDF) sonst **alle** Merges nach `main` blockieren — nicht nur einen PR. Drei
+Schutzmaßnahmen:
+
+- **Gepinnte Versionen** statt „latest": `MUSTANG_VERSION` und `VERAPDF_VERSION`
+  stehen als Job-`env` in `ci.yml`. Vorher zog der Job die Mustang-Version
+  dynamisch aus den Maven-Metadaten und veraPDF über das floatende
+  `verapdf-installer.zip` (= latest) — ein Upstream-Release hätte das Gate
+  unbemerkt brechen können. **Bump:** Version im `env`-Block anheben; der
+  Cache-Key zieht automatisch nach.
+- **`actions/cache` (Key = gepinnte Version):** Mustang-JAR und veraPDF-Install
+  liegen unter `VALIDATOR_CACHE_DIR`. Bei Cache-Hit wird der externe Fetch
+  **komplett übersprungen** — ein Download-Hänger redet die Artefakte nicht jedes
+  Mal neu, solange die Version unverändert bleibt.
+- **Klare, schnelle Fehlermeldung:** Schlägt ein nötiger Download fehl (nach
+  `curl --retry 4 --retry-all-errors`), bricht der Step mit einer
+  `::error::`-Annotation ab, die **„Externer Download nicht verfügbar"** explizit
+  von **„Rechnung wirklich ungültig"** abgrenzt (Letzteres meldet erst der
+  `validate`-Step über seinen Exit-Code). Reviewer sehen sofort, dass es ein
+  Infrastruktur-Problem ist — und dass das WASM-XSD-Strict-Gate als Backstop
+  bereits grün gelaufen ist.
 
 Voraussetzung dafür war, dass der Job auf GitHub-Runnern erstmals real grün lief.
 Zwei Stolpersteine mussten dafür raus: (a) `npm ci` scheiterte am Replit-internen
