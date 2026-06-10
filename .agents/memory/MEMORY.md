@@ -69,3 +69,4 @@
 - [EN16931 backfill decision](en16931-backfill-decision.md) — old BASIC invoices are NOT force-re-sealed to en16931 (BASIC already EN-16931-conformant + GoBD-sealed); contingency = storno+reissue, not in-place re-seal.
 - [Kasse "missing pot" invariant trigger](invoice-missing-pot-invariant.md) — generateInvoiceCore pot-unresolved 400 only fires on EMPTY line items (kasse no-show = no line item); single private pot reclassifies to selbstzahler, §45a-only is correctly stamped not blocked.
 - [audit_log INSERT schema trap](audit-log-insert-schema-trap.md) — real cols are metadata(jsonb)+user_id NOT NULL FK; the old startup-migration `changes`/user_id=NULL copy-paste INSERT silently no-ops; resolve a system actor + use metadata.
+- [Customer-detail route split](customer-detail-route-split.md) — two distinct detail pages: §45b FIFO bar only on /customer/:id (pages/customer-detail.tsx), NOT /admin/customers/:id (pages/admin/customer-detail.tsx).
