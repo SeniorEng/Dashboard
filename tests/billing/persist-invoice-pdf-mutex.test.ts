@@ -65,7 +65,9 @@ vi.mock("../../server/replit_integrations/object_storage/objectStorage", () => (
         save: vi.fn(async () => {
           state.storageSaveCalls += 1;
         }),
-        exists: vi.fn(async () => [false]),
+        // Bereits versiegelte Pfade existieren im Storage — verhindert, dass der
+        // Self-Heal-Pfad (Task #1066) im Cache-Hit-Test fälschlich re-rendert.
+        exists: vi.fn(async () => [true]),
         download: vi.fn(async () => [Buffer.alloc(0)]),
       }),
     }),
@@ -83,14 +85,23 @@ vi.mock("../../server/lib/object-storage-helpers", () => ({
 }));
 
 vi.mock("../../server/lib/db", () => ({
+  // Task #1074 — `persistInvoicePdfInner` umschließt Re-Check + Render + Write
+  // mit `db.transaction(...)` (Advisory-Lock auf die Rechnungs-ID). Der Mock
+  // führt den Callback synchron mit einem `tx`-Stub aus; der Schreibpfad nutzt
+  // `tx.update(...)`, der Lock `tx.execute(...)`.
   db: {
-    update: () => ({
-      set: () => ({
-        where: vi.fn(async () => {
-          state.dbUpdateCalls += 1;
+    transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+      cb({
+        execute: vi.fn(async () => undefined),
+        update: () => ({
+          set: () => ({
+            where: vi.fn(async () => {
+              state.dbUpdateCalls += 1;
+            }),
+          }),
         }),
       }),
-    }),
+    ),
   },
 }));
 

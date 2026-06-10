@@ -58,7 +58,7 @@ import {
 } from "../storage/billing-storage";
 import { auditService } from "../services/audit";
 import { withAudit } from "../lib/with-audit";
-import { readTestFaults } from "../lib/test-fault-injector";
+import { readTestFaults, readTestFailInvoicePdfIds } from "../lib/test-fault-injector";
 import { deliveryStorage } from "../storage/deliveries";
 import type { InvoicePdfData } from "../lib/pdf-generator";
 import {
@@ -1968,8 +1968,16 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
     payerLabel: string;
   };
   const rendered: Rendered[] = [];
+  // BP-3 — invoice-zielgenauer Render-Fault (nur NODE_ENV=test, sonst leer).
+  const failInvoicePdfIds = readTestFailInvoicePdfIds(req);
   for (const inv of drafts) {
     try {
+      if (failInvoicePdfIds.has(inv.id)) {
+        throw classifyPdfRenderError(
+          new Error(`Test-Fault: erzwungener Render-Fehler für Rechnung ${inv.invoiceNumber}`),
+          `Rechnungs-PDF ${inv.invoiceNumber}`,
+        );
+      }
       let invoicePdf = await loadInvoicePdfFromStorage(inv);
       let lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
       const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";

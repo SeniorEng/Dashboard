@@ -42,6 +42,14 @@ const ALLOWLIST: Record<string, WriteOffView> = {
   // Topf-Sicht.
   "server/storage/budget/consumption-engine.ts": "allocation-view",
 
+  // Task #1129 — §45b FIFO-Aufschlüsselung (read-only Visualisierung). Der
+  // Übertrags-Verbrauch pro Carryover-Allokation summiert
+  //   transactionType IN ('consumption', 'write_off')
+  // — exakt die Topf-/Allocation-Sicht von `getAvailableCarryoverCents`
+  // (write_off hat den Topf entwertet, zählt also als Used). Reine FIFO-
+  // Verteilung auf die zwei Töpfe, keine eigene Cap-/Fenster-Mathematik.
+  "server/storage/budget/fifo-breakdown.ts": "allocation-view",
+
   // Topf-Bewegungs-Aggregate ÜBER `consumption/write_off/reversal` und
   // Schreib-Stelle der `processExpiredCarryover`-Verfallsbuchung.
   "server/storage/budget/allocation-storage.ts": "allocation-view",

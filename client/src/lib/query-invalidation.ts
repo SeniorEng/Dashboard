@@ -68,6 +68,7 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["budget-overview"],
     ["budget-type-settings"],
     ["budget-transactions"],
+    ["budget-fifo-breakdown"],
     ["initial-balances"],
     ["budget-rebook-preview"],
     ["budget-cost-estimate"],

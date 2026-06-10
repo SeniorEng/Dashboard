@@ -296,15 +296,21 @@ async function bulkPrint(body: {
   billingYear: number;
   insuranceProviderId?: number;
   groupByPayer?: boolean;
-}): Promise<{ status: number; contentType: string | null; summary: BulkPrintSummary | null; buffer: Buffer }> {
+}, opts?: { failInvoicePdfIds?: number[] }): Promise<{ status: number; contentType: string | null; summary: BulkPrintSummary | null; buffer: Buffer }> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Cookie: cookieHeader,
+    "x-csrf-token": auth.csrfToken,
+  };
+  // BP-3 — gezielter Render-Fault: nur diese Rechnungs-IDs scheitern in der
+  // Render-Phase (Self-Heal kann einen bloß kaputten pdfPath sonst reparieren).
+  if (opts?.failInvoicePdfIds?.length) {
+    headers["x-test-fail-invoice-pdf"] = opts.failInvoicePdfIds.join(",");
+  }
   const res = await fetch(`${BASE_URL}/api/billing/bulk-print`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Cookie: cookieHeader,
-      "x-csrf-token": auth.csrfToken,
-    },
+    headers,
     body: JSON.stringify(body),
   });
   const buffer = Buffer.from(await res.arrayBuffer());
@@ -468,10 +474,13 @@ describe("BP: Sammeldruck (POST /api/billing/bulk-print)", () => {
     // Gute, renderbare Selbstzahler-Rechnung.
     const { invoiceId: goodInv } = await createSelbstzahlerDraft(year, month, "E-GOOD");
 
-    // Kaputte Entwurfs-Rechnung: bogus pdfPath ⇒ Render-Phase lädt das PDF
-    // nicht (Selbstzahler braucht kein LN ⇒ persistInvoicePdf rendert nicht
-    // neu) ⇒ „Rechnungs-PDF konnte nicht geladen werden". Direkter INSERT ist
-    // GoBD-konform (Trigger sperren nur UPDATE/DELETE finalisierter Zeilen).
+    // Kaputte Entwurfs-Rechnung: ein gezielter Render-Fault (Header
+    // `x-test-fail-invoice-pdf`, s.u.) lässt NUR diese Rechnung in der
+    // Render-Phase scheitern ⇒ „Rechnungs-PDF konnte nicht geladen werden".
+    // Ein bloß kaputter pdfPath taugt seit dem Self-Heal-Re-Render nicht mehr
+    // als Fixture (persistInvoicePdf erzeugt das fehlende Objekt neu). Direkter
+    // INSERT ist GoBD-konform (Trigger sperren nur UPDATE/DELETE finalisierter
+    // Zeilen).
     const brokenCustomerId = await createCustomer({
       vorname: "BP-BROKEN",
       nachname: `Privat-E-BAD-${uniqueId()}`,
@@ -509,7 +518,7 @@ describe("BP: Sammeldruck (POST /api/billing/bulk-print)", () => {
       billingMonth: month,
       billingYear: year,
       groupByPayer: false,
-    });
+    }, { failInvoicePdfIds: [brokenInv] });
 
     // Lauf NICHT abgebrochen: gültiges PDF trotz Einzel-Fehler.
     expect(out.status).toBe(200);

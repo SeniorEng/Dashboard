@@ -122,6 +122,10 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
     "budgetAllocationsRepo",
     "customersRepo",
   ],
+  "server/storage/budget/fifo-breakdown.ts": [
+    "appointmentsRepo",
+    "budgetAllocationsRepo",
+  ],
   "server/storage/budget/km-rebook.ts": [
     "appointmentsRepo",
   ],

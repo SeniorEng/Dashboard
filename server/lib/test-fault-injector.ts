@@ -28,3 +28,27 @@ export function maybeFail(name: string, faults?: Set<string>): void {
   if (!faults || !faults.has(name)) return;
   throw new Error(`Test fault injected: ${name}`);
 }
+
+/**
+ * Invoice-zielgenauer Render-Fault für den Sammeldruck (`/bulk-print`). Liest
+ * aus dem Header `x-test-fail-invoice-pdf` eine kommaseparierte Liste von
+ * Rechnungs-IDs, deren PDF-Render gezielt fehlschlagen soll — OHNE die anderen
+ * Rechnungen desselben Laufs zu beeinflussen.
+ *
+ * Hintergrund: Ein bloß „kaputter" `pdfPath` taugt seit dem Self-Heal-Re-Render
+ * (`persistInvoicePdf` erzeugt fehlende Objekte neu) nicht mehr als Fixture für
+ * eine nicht-renderbare Rechnung. Der globale `x-test-inject-fault`-Header würde
+ * dagegen ALLE Rechnungen treffen. Dieser Header faultet exakt die genannten
+ * IDs. Nur in NODE_ENV=test aktiv.
+ */
+export function readTestFailInvoicePdfIds(req: Request): Set<number> {
+  if (!ENABLED) return new Set();
+  const header = req.headers["x-test-fail-invoice-pdf"];
+  if (typeof header !== "string" || header.length === 0) return new Set();
+  return new Set(
+    header
+      .split(",")
+      .map(s => Number(s.trim()))
+      .filter(n => Number.isInteger(n)),
+  );
+}

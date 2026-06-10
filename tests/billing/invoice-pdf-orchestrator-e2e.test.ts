@@ -1897,6 +1897,22 @@ describe("Task #1040 — LN-Stammadresse auf dem Stapel-Versand-Render (send-bat
   }, 240_000);
 });
 
+// LetterXpress v2 spricht über `node:https` direkt (GET /balance braucht einen
+// Body, den `fetch`/undici verbietet) — ein `vi.stubGlobal("fetch", …)` fängt
+// den Aufruf daher NICHT ab. Stattdessen mocken wir die Transport-Schicht
+// `letterxpress-http` selbst: jeder `lxHttpRequest` wird aufgezeichnet und mit
+// einer kanonischen setjob-Erfolgsantwort beantwortet.
+const lxHttpMock = vi.hoisted(() => ({
+  calls: [] as Array<{ url: string; body: string }>,
+  responseText: "",
+}));
+vi.mock("../../server/services/letterxpress-http", () => ({
+  lxHttpRequest: vi.fn(async (opts: { url: string; method: string; body: string }) => {
+    lxHttpMock.calls.push({ url: opts.url, body: opts.body });
+    return { status: 200, text: lxHttpMock.responseText };
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // Task #1046 — Postversand der Kunden-KOPIE (Brief) trägt die Patient-
 // Stammadresse, und die Zustell-Empfänger-Adresse ist der KUNDE (NICHT die
@@ -1954,7 +1970,8 @@ describe("Task #1046 — Post-Kopie an Kunde: LN trägt Stammadresse, Empfänger
   const LX_HOST = "api.letterxpress.de";
   const LX_LETTER_ID = `lx-1046-${Date.now()}`;
   let realFetch: typeof fetch;
-  const lxCalls: Array<{ url: string; body: string }> = [];
+  // Aufzeichnung der LetterXpress-Transport-Aufrufe (s. `lxHttpMock` oben).
+  const lxCalls = lxHttpMock.calls;
   const dispatchFetch = ((input: unknown, init?: unknown) => {
     const url =
       typeof input === "string" ? input
@@ -2094,6 +2111,14 @@ describe("Task #1046 — Post-Kopie an Kunde: LN trägt Stammadresse, Empfänger
     });
     expect(settingsRes.status, `settings: ${JSON.stringify(settingsRes.data)}`).toBe(200);
 
+    // LetterXpress-Transport (node:https) wird über `lxHttpMock` gemockt; hier
+    // die kanonische setjob-Erfolgsantwort (LXP v2 liefert die Job-ID unter
+    // `data.id`) hinterlegen.
+    lxHttpMock.responseText = JSON.stringify({
+      status: 200,
+      message: "OK",
+      data: { id: LX_LETTER_ID },
+    });
     realFetch = globalThis.fetch.bind(globalThis);
     await startInProcessBilling();
     vi.stubGlobal("fetch", dispatchFetch);
@@ -2198,8 +2223,8 @@ describe("Task #1046 — Post-Kopie an Kunde: LN trägt Stammadresse, Empfänger
     const postResult = (sendJson.results ?? []).find((r: any) => r.customerCopy && r.status === "post_sent");
     expect(postResult, `Post-Kopie-Ergebnis: ${JSON.stringify(sendJson.results)}`).toBeTruthy();
     expect(postResult!.letterxpressLetterId, "Letter-ID vom LetterXpress-Stub").toBe(LX_LETTER_ID);
-    expect(lxCalls.length, "genau ein LetterXpress-/setJob-Aufruf").toBe(1);
-    expect(lxCalls[0].url, "LetterXpress-Pfad /setJob").toContain("/setJob");
+    expect(lxCalls.length, "genau ein LetterXpress-/setjob-Aufruf").toBe(1);
+    expect(lxCalls[0].url, "LetterXpress-Pfad /setjob").toContain("/setjob");
 
     // (2) Der kombinierte Brief (Anschreiben + Rechnung + LN) enthält die
     //     Kunden-Stammadresse (Anschreiben-Adressfenster + LN-Leistungsempfänger).
