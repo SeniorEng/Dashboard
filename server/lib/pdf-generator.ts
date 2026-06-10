@@ -364,7 +364,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     return `
     <tr>
       ${dateTimeCells}
-      <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}${freeHint}</td>
+      <td class="col-service" style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.serviceDescription)}${freeHint}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${quantityDisplay}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayUnitPrice)}${unitLabel}</td>
       <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: ${isStorno ? 'bold; color: #dc2626' : '500'};">${formatCents(displayTotal)}</td>
@@ -402,11 +402,17 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
     /* Task #1072 — Mengen-robuste Seitenumbrüche: Bei vielen Positionen bricht
        die Tabelle geordnet über mehrere Seiten um. table-header-group wiederholt
        den Spaltenkopf auf jeder Folgeseite, break-inside:avoid auf den Zeilen
-       verhindert mittig durchgeschnittene Zeilen, overflow-wrap lässt lange
-       Beschreibungen sauber umbrechen statt aus der Zelle zu laufen. */
+       verhindert mittig durchgeschnittene Zeilen. */
     table.items thead { display: table-header-group; }
     table.items tr { page-break-inside: avoid; break-inside: avoid; }
-    table.items td { word-break: break-word; overflow-wrap: anywhere; }
+    /* Task #1132 — Saubere Umbrüche: schmale Wert-Spalten (Datum, Uhrzeit,
+       Dauer, Satz, Betrag) bleiben einzeilig und brechen nie mitten im Wert
+       (white-space: nowrap). Nur die Leistungs-Spalte bricht bei langem Text
+       sauber auf Wortgrenzen um und bekommt den restlichen Platz. */
+    table.items td, table.items th { white-space: nowrap; }
+    table.items td.col-service, table.items th.col-service {
+      white-space: normal; overflow-wrap: break-word; word-break: normal; width: 100%;
+    }
     .totals { margin-left: auto; width: 300px; page-break-inside: avoid; break-inside: avoid; }
     .totals td { padding: 4px 8px; white-space: nowrap; }
     .totals td:last-child { text-align: right; }
@@ -497,7 +503,7 @@ export function generateInvoiceHtml(data: InvoicePdfData): string {
       <tr>
         ${aggregate ? "" : `<th>Datum</th>
         <th>Uhrzeit</th>`}
-        <th>Leistung</th>
+        <th class="col-service">Leistung</th>
         <th${aggregate ? ' style="text-align: right;"' : ""}>Dauer</th>
         <th${aggregate ? ' style="text-align: right;"' : ""}>Satz${isStandard ? " (brutto)" : ""}</th>
         <th${aggregate ? ' style="text-align: right;"' : ""}>Betrag${isStandard ? " (brutto)" : ""}</th>
@@ -673,8 +679,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <tr>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.date : ""}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${showDateCol ? group.time : ""}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(svc.serviceDescription)}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 9pt;">${svc.serviceDetails ? escapeHtml(svc.serviceDetails) : ""}</td>
+          <td class="col-service" style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(svc.serviceDescription)}</td>
+          <td class="col-desc" style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 9pt;">${svc.serviceDetails ? escapeHtml(svc.serviceDetails) : ""}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatMinutes(svc.durationMinutes)}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayUnitPrice)}/Std.</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayTotal)}</td>
@@ -697,8 +703,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <tr>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${kmDate}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${kmDescription}</td>
-          <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
+          <td class="col-service" style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;">${kmDescription}</td>
+          <td class="col-desc" style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb;"></td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${kmQuantityDisplay}</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayKmUnitPrice)}/km</td>
           <td style="padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCents(displayKmTotal)}</td>
@@ -866,8 +872,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
             <tr>
               <th>Datum</th>
               <th>Uhrzeit</th>
-              <th>Leistung</th>
-              <th>Beschreibung</th>
+              <th class="col-service">Leistung</th>
+              <th class="col-desc">Beschreibung</th>
               <th>Dauer/Km</th>
               <th>Einzelpreis${isStandard ? " (brutto)" : ""}</th>
               <th>Betrag${isStandard ? " (brutto)" : ""}</th>
@@ -903,8 +909,8 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
         <tr>
           <th>Datum</th>
           <th>Uhrzeit</th>
-          <th>Leistung</th>
-          <th>Beschreibung</th>
+          <th class="col-service">Leistung</th>
+          <th class="col-desc">Beschreibung</th>
           <th>Dauer/Km</th>
           <th>Einzelpreis${isStandard ? " (brutto)" : ""}</th>
           <th>Betrag${isStandard ? " (brutto)" : ""}</th>
@@ -963,12 +969,22 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     table.items th:nth-child(5), table.items th:nth-child(6), table.items th:nth-child(7) { text-align: right; }
     /* Task #1072 — Mengen-robuste Seitenumbrüche (siehe Rechnungs-Template):
        Spaltenkopf wird auf jeder Folgeseite wiederholt, Positionszeilen werden
-       nicht mittig geteilt, lange Beschreibungen brechen sauber innerhalb der
-       Zelle. So läuft ein Abschnitt mit sehr vielen Terminen geordnet über
-       mehrere Seiten statt am Footer-Rand überzulaufen. */
+       nicht mittig geteilt. So läuft ein Abschnitt mit sehr vielen Terminen
+       geordnet über mehrere Seiten statt am Footer-Rand überzulaufen. */
     table.items thead { display: table-header-group; }
     table.items tr { page-break-inside: avoid; break-inside: avoid; }
-    table.items td { word-break: break-word; overflow-wrap: anywhere; }
+    /* Task #1132 — Saubere Umbrüche: schmale Wert-Spalten (Datum, Uhrzeit,
+       Dauer/Km, Einzelpreis, Betrag) bleiben einzeilig und brechen nie mitten
+       im Wert (white-space: nowrap). Nur Leistung und Beschreibung brechen bei
+       langem Text sauber auf Wortgrenzen um und teilen sich den restlichen
+       Platz; die Zeilenhöhe wächst dabei mit. */
+    table.items td, table.items th { white-space: nowrap; }
+    table.items td.col-service, table.items th.col-service,
+    table.items td.col-desc, table.items th.col-desc {
+      white-space: normal; overflow-wrap: break-word; word-break: normal;
+    }
+    table.items th.col-service { width: 26%; }
+    table.items th.col-desc { width: 34%; }
     /* Task #571: kompakte Tabellen-Variante für Abschnitte mit vielen Zeilen,
        damit Kopf + Tabelle + Bestätigung + Unterschriften auf eine Seite passen.
        Task #1072: bei noch mehr Zeilen ist der Mehrseiten-Umbruch der Fallback. */
