@@ -1,15 +1,14 @@
 ---
-name: GitHub Actions CI — on the repo now, but DB-gates can't go green yet
-description: State of CI on SeniorEng/Dashboard after the workflow file was finally pushed, and the two remaining blockers that keep the DB-backed gates red
+name: GitHub Actions CI — live on the repo; tokens, and the re-publish durability trap
+description: How CI got onto SeniorEng/Dashboard, the connector-vs-PAT token split for editing it, the two GitHub-runner-only blockers the erechnung-validation gate hit, and why GitHub-direct ci.yml edits regress unless mirrored into the isolated env.
 ---
 
-# CI workflow IS now on the GitHub repo (was previously missing)
+# CI workflow is live on GitHub `SeniorEng/Dashboard`
 
-`.github/workflows/ci.yml` and `scripts/ci-seed-superadmin.ts` are now present on
-`SeniorEng/Dashboard` `main`, the workflow is **registered + active**
-(`GET /actions/workflows` total_count = 1), and it runs on every push/PR.
-Branch protection correctly gates merges on the checks (a PR with a red required
-check shows `mergeable_state: blocked`).
+`.github/workflows/ci.yml` runs on every push/PR. Branch protection on `main` is
+`strict:true` and requires `static-analysis`, `tests`, `e2e-smoke`, and (since
+2026-06-10) `erechnung-validation`. GitHub matches a required check by the job's
+`name:`, which is kept identical to the job id.
 
 **How it got there:** the connected GitHub OAuth token has no `workflow` scope, so
 adding any path under `.github/workflows/` via the API 404s (and a `git push` that
@@ -30,23 +29,33 @@ files — if you need to re-push, request a PAT again.
   "Invalid username or token. Password authentication is not supported." even
   though the same token returns 200 on `/rate_limit`.
 
-## Two remaining blockers keep `tests` / `e2e-smoke` / `static-analysis` red
+## Editing CI files: two different tokens
 
-These are NOT the "file missing" problem — they only became visible once CI
-actually ran for the first time.
+- **Connector token** (`listConnections('github')[0].settings.access_token`): has
+  `repo` scope but NO `workflow` scope. Use it for branch protection and for
+  reading/writing NON-workflow files (docs, `replit.md`) via the contents API,
+  and for reading runs/jobs/logs.
+- **`GITHUB_WORKFLOW_PAT`** (present in the SHELL env only, NOT in the code-exec
+  sandbox): a classic PAT with `repo`+`workflow`. The ONLY way to PUT anything
+  under `.github/workflows/`. Drive it from a `.mjs` script run via the bash tool
+  (`process.env.GITHUB_WORKFLOW_PAT`); the bash tool rejects `cat`-heredocs and
+  many inline `node -e`/`grep`/`rg` one-liners, so write a file then run it.
 
-1. **Neon serverless driver vs CI's plain Postgres.** `server/lib/db.ts` uses
-   `@neondatabase/serverless` with `useSecureWebSocket = true` (WebSocket/TLS).
-   CI provisions a plain `postgres:16` service container and sets
-   `DATABASE_URL=postgres://...@localhost:5432/...`. The driver tries a secure
-   WebSocket and gets `ECONNREFUSED`, so the **Seed test superadmin** step (and
-   any server/test step using the app DB layer) fails before any real test runs.
-   Note `drizzle-kit push` works fine (it uses a direct pg connection, not the
-   neon driver). Fix needs a CI WebSocket proxy (e.g. local-neon-http-proxy) +
-   an env-gated branch in `db.ts` to disable secure WS / set `wsProxy` when
-   targeting the proxy — production path (real neon host) must stay untouched.
+## Two GitHub-runner-only blockers the erechnung-validation job hit
 
-2. **Repo-staleness — RESOLVED + decision recorded.** GitHub `main` used to track
+The job had never actually run on GitHub before being made mandatory; both fixes
+live in `ci.yml`:
+
+1. **`npm ci` → EAI_AGAIN.** `package-lock.json` resolves a few packages via
+   `http://package-firewall.replit.local/npm/...`, a host that only resolves
+   inside Replit. Every `npm ci` step now runs a `sed` first that rewrites those
+   URLs to `https://registry.npmjs.org/` (identical tarballs, integrity hashes
+   still valid). This blocked ALL jobs, not just erechnung.
+2. **veraPDF install → exit 127.** The installer zip extracts to a
+   `verapdf-greenfield-<ver>/` subdir, but the dir-finding `find` used
+   `-maxdepth 1` which also matched the parent `verapdf-installer` dir itself, so
+   `$INSTALLER_DIR/verapdf-install` didn't exist. Fix: add `-mindepth 1`.
+3. **Repo-staleness — RESOLVED + decision recorded.** GitHub `main` used to track
    the last "Published your App" snapshot, so post-publish work was missing and
    the **OpenAPI drift gate** (`gen:openapi -- --check`) went red purely from
    drift. Fixed by pushing the full local `main` (not hand-picking files). The
@@ -58,7 +67,26 @@ actually ran for the first time.
    consistent, push will keep the CI gate green). Code/doc-only pushes use the
    normal connector token; only `.github/workflows/*` pushes still need the PAT.
 
-**Consequence:** because branch protection requires `static-analysis`, `tests`,
-`e2e-smoke` (strict), and those are red, PRs are still blocked from merging until
-the two blockers above are resolved. This was also true before (checks absent),
-so it's not a regression — but "checks are green and merges flow" needs both fixes.
+## The re-publish durability trap (important)
+
+I am in an ISOLATED task env; its files merge to the Replit "main app" (main env),
+and the user separately PUBLISHES main env → GitHub. **A fix made ONLY on GitHub
+via the API will be silently reverted the next time the user re-publishes**, because
+the publish overwrites GitHub with the main-env copy.
+
+**Why:** publish direction is main-env → GitHub, so any GitHub-only edit not present
+in main-env is lost on the next publish.
+
+**How to apply:** for any `ci.yml` (or other) fix you push directly to GitHub, apply
+the SAME edit to the file in your isolated env so it propagates main env via the
+task merge. Prefer minimal TARGETED edits (not a whole-file replace): the isolated
+copy is usually behind main env (e.g. it lacked the WASM-XSD strict step), and a
+targeted add lets the 3-way merge keep main-env-only content while layering your fix.
+
+## What the gate actually validates (not a soft-skip)
+
+CI sets `ERECHNUNG_REQUIRE_VALIDATORS=1`, so the job fails (not skips) unless both
+real validators pass: Mustang/KoSIT reports EN-16931 `XML:valid` with 0 Schematron
+errors, and veraPDF reports PDF/A-3b `isCompliant=true`. A separate Java-free
+WASM-XSD strict step runs first so a strict-path regression goes red even if the
+Mustang/veraPDF downloads hiccup.

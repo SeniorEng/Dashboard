@@ -7,7 +7,7 @@ Dependency-Automatisierung siehe [`dependency-management.md`](dependency-managem
 
 ## Pflicht-Gates
 
-GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Request mit 9 Pflicht-Gates:
+GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Request mit 10 Pflicht-Gates:
 
 1. `npm ci`
 2. `tsc --noEmit`
@@ -18,8 +18,13 @@ GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Reque
 7. `npm run test:e2e:smoke` (Playwright)
 8. Targeted-Coverage-Gates `tsx script/coverage-gate.ts <key>` (je ein CI-Step für `billing`, `qonto`, `consumption-engine`, `month-close-scheduler`)
 9. `npm run gen:openapi -- --check` (OpenAPI-Spec-Drift, statisch im `static-analysis`-Job)
+10. `npm run validate:erechnung` (E-Rechnungs-Validierung EN 16931 + PDF/A-3b, eigener Job `erechnung-validation` — Mustang/KoSIT EN-16931 + veraPDF PDF/A-3b; Detail: [`erechnung-validation.md`](erechnung-validation.md))
 
-Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` (Login gegen den in CI gestarteten App-Server) — fehlen sie (z.B. in Forks), werden diese Schritte sauber übersprungen, die statischen Gates (1, 2, 3, 6) laufen immer.
+Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` (Login gegen den in CI gestarteten App-Server) — fehlen sie (z.B. in Forks), werden diese Schritte sauber übersprungen, die statischen Gates (1, 2, 3, 6, 10) laufen immer (Gate 10 lädt zur Laufzeit Mustang + veraPDF und braucht Java, aber keine Test-User-Secrets).
+
+## npm-Registry-Normalisierung (package-firewall)
+
+`package-lock.json` löst einige Pakete über den Replit-internen Mirror `http://package-firewall.replit.local/npm/…` auf. Dieser Host ist NUR innerhalb von Replit erreichbar — auf GitHub-Runnern bricht `npm ci` sonst mit `EAI_AGAIN` ab und legt damit ALLE Jobs lahm. Jeder `npm ci`-Step in `ci.yml` führt deshalb vorher ein idempotentes `sed` aus, das diese URLs auf `https://registry.npmjs.org/` umschreibt (identische Tarballs, die Integrity-Hashes bleiben gültig). Wird das Lockfile in Replit neu erzeugt, kehren die `.replit.local`-URLs zurück — der `sed`-Schritt fängt das bei jedem Lauf automatisch ab, eine manuelle Lockfile-Korrektur ist nicht nötig.
 
 ## Neon-Proxy in CI (Task #798)
 
@@ -91,4 +96,4 @@ Der lokale `npm run gen:openapi -- --check` ist der schnellste Frühindikator: l
 
 ## Branch-Protection (aktiv)
 
-`main` auf `SeniorEng/Dashboard` erzwingt die Required-Status-Checks `static-analysis`, `tests` und `e2e-smoke` (strict / „branch up to date") vor jedem Merge; Force-Pushes und Branch-Löschung sind gesperrt. PR-Reviews werden nicht erzwungen, damit Renovate grüne Patch-Updates weiterhin auto-mergen kann; `enforce_admins` ist aus (Admin-Notfall-Override möglich). Wichtig: Die CI-Job-Namen (`name:`) sind bewusst identisch mit den Job-IDs (`static-analysis`/`tests`/`e2e-smoke`), weil GitHub den Required-Check-Kontext über den Job-**Namen** matcht — bei abweichenden Anzeigenamen würden die Checks nie „grün" und jeder Merge (inkl. Renovate) bliebe blockiert. Eingerichtet via GitHub-API am 2026-05-28, bestätigt durch Repo-Admin `SeniorEng`. Verwaltung: Repo → Settings → Branches.
+`main` auf `SeniorEng/Dashboard` erzwingt die Required-Status-Checks `static-analysis`, `tests`, `e2e-smoke` und `erechnung-validation` (strict / „branch up to date") vor jedem Merge; Force-Pushes und Branch-Löschung sind gesperrt. PR-Reviews werden nicht erzwungen, damit Renovate grüne Patch-Updates weiterhin auto-mergen kann; `enforce_admins` ist aus (Admin-Notfall-Override möglich). Wichtig: Die CI-Job-Namen (`name:`) sind bewusst identisch mit den Job-IDs (`static-analysis`/`tests`/`e2e-smoke`/`erechnung-validation`), weil GitHub den Required-Check-Kontext über den Job-**Namen** matcht — bei abweichenden Anzeigenamen würden die Checks nie „grün" und jeder Merge (inkl. Renovate) bliebe blockiert. Eingerichtet via GitHub-API am 2026-05-28, bestätigt durch Repo-Admin `SeniorEng`; `erechnung-validation` als vierter Required-Check ergänzt am 2026-06-10 (nachdem der Job erstmals real grün lief). Verwaltung: Repo → Settings → Branches.
