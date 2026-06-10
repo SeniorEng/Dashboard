@@ -148,6 +148,49 @@ describe("Task #1111 — EN-16931-Konformitäts-Wächter (kein Java nötig)", ()
     expect(x.indexOf("ApplicableTradeTax", headerStart)).toBe(-1);
   });
 
+  it("Task #1116 — jede Zeile trägt BT-131 LineTotalAmount (includeLineTotalAmount: true)", async () => {
+    // node-zugferd verwirft den Pro-Zeilen-Betrag STILL, wenn der falsche
+    // Schlüssel (`totalAmount`) benutzt wird; BT-131 muss als `lineTotalAmount`
+    // emittiert werden. Eine frische Rechnung setzt `includeLineTotalAmount` und
+    // MUSS pro Zeile ein `SpecifiedTradeSettlementLineMonetarySummation` mit
+    // `LineTotalAmount` führen. Ein Refactor, der wieder auf `totalAmount`
+    // zurückfällt, fliegt hier auf (sonst nur im CI-Mustang/veraPDF-Gate mit Java).
+    const xml = await generateZugferdXml(buildConformantPdfData());
+    expect(xml).not.toBeNull();
+    const x = xml as string;
+
+    // Anker innerhalb der Zeile (vor dem Settlement-Header), damit der
+    // Header-`monetarySummation.lineTotalAmount` (BT-106) den Test nicht
+    // fälschlich grün macht.
+    const headerStart = x.indexOf("ApplicableHeaderTradeSettlement");
+    expect(headerStart).toBeGreaterThan(-1);
+    const lineSection = x.slice(0, headerStart);
+
+    expect(lineSection).toContain("SpecifiedTradeSettlementLineMonetarySummation");
+    expect(lineSection).toMatch(
+      /<ram:SpecifiedTradeSettlementLineMonetarySummation>\s*<ram:LineTotalAmount>45\.00<\/ram:LineTotalAmount>/,
+    );
+  });
+
+  it("Negativ-Kontrolle: ohne includeLineTotalAmount fehlt BT-131 in den Zeilen (byte-stabiler Bestandspfad)", async () => {
+    // Beweist, dass der Anker echt am `lineTotalAmount`-Schlüssel hängt: der
+    // Bestandspfad (`totalAmount`) wird von node-zugferd still verworfen, sodass
+    // weder `LineTotalAmount` noch das umschließende
+    // `SpecifiedTradeSettlementLineMonetarySummation` im Zeilenblock erscheinen.
+    const xml = await generateZugferdXml(
+      buildConformantPdfData({ includeLineTotalAmount: false }),
+    );
+    expect(xml).not.toBeNull();
+    const x = xml as string;
+
+    const headerStart = x.indexOf("ApplicableHeaderTradeSettlement");
+    expect(headerStart).toBeGreaterThan(-1);
+    const lineSection = x.slice(0, headerStart);
+
+    expect(lineSection).not.toContain("SpecifiedTradeSettlementLineMonetarySummation");
+    expect(lineSection).not.toContain("LineTotalAmount");
+  });
+
   it("XMP-Namespace-Reparatur (rdf:about) ist im eingebetteten PDF/A angewendet", async () => {
     const blank = await makeBlankPdf();
     const result = await embedZugferdXml(blank, buildConformantPdfData(), { strict: false });
