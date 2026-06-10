@@ -53,6 +53,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
+      # Gate 0: Lockfile-Guard (Task #1163) — MUSS vor `npm ci` laufen. Ein
+      # Lockfile mit Replit-internen `package-firewall.replit.local`-URLs ist
+      # auf GitHub-Runnern nicht auflösbar und würde `npm ci` mit EAI_AGAIN
+      # abbrechen, BEVOR irgendein Gate greift. Reiner Node-Bordmittel-Check,
+      # braucht keine installierten Dependencies.
+      - name: Lockfile registry guard (no package-firewall URLs)
+        run: node scripts/normalize-lockfile.mjs --check
+
       # Gate 1: deterministische Installation via package-lock.json
       - name: Install dependencies
         run: npm ci
