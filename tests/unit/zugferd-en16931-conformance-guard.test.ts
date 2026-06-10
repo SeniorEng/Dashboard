@@ -258,6 +258,158 @@ describe("Task #1111 — EN-16931-Konformitäts-Wächter (kein Java nötig)", ()
     );
   });
 
+  it("Storno (exempt): BT-3 TypeCode 384 + negative Settlement-Totals + IBAN", async () => {
+    // Task #1137 — Stornorechnungen nehmen `invoiceType: "stornorechnung"`,
+    // wodurch buildZugferdData den Dokument-`typeCode` "384" (Gutschrift/Storno)
+    // statt "380" emittiert und negative Monetär-Beträge führt. Ein Refactor der
+    // typeCode-/Vorzeichen-Logik würde sonst nur im CI-Mustang/veraPDF-Gate (Java)
+    // auffliegen. Dieser reine Unit-Test verankert beides direkt am XML.
+    const xml = await generateZugferdXml(
+      buildConformantPdfData({
+        invoiceNumber: "ST-2026-1137E",
+        invoiceType: "stornorechnung",
+        // Storno = negative Beträge (Anzeige UND Buchung kehren das Vorzeichen um).
+        netAmountCents: -4500,
+        vatAmountCents: 0,
+        grossAmountCents: -4500,
+        lineItems: [
+          {
+            appointmentId: 101,
+            appointmentDate: "2026-01-05",
+            startTime: "09:00",
+            endTime: "10:00",
+            serviceCode: "hauswirtschaft",
+            serviceDescription: "Hauswirtschaft",
+            durationMinutes: 60,
+            quantityRaw: 1,
+            quantityUnit: "hours",
+            unitPriceCents: -4500,
+            totalCents: -4500,
+            employeeName: "Anna Beispiel",
+            appointmentNotes: null,
+            serviceDetails: null,
+          },
+        ],
+      } as unknown as Partial<InvoicePdfData>),
+    );
+    expect(xml).not.toBeNull();
+    const x = xml as string;
+
+    // BT-3 Dokumenttyp = 384 (Gutschrift/Storno). Anker am ExchangedDocument,
+    // damit ein anderer TypeCode (z.B. "58" Zahlungsweg, "VAT" USt) den Test
+    // nicht fälschlich grün macht. `ExchangedDocumentContext` (ohne TypeCode)
+    // wird übersprungen, indem ab dem öffnenden `<rsm:ExchangedDocument>`-Tag
+    // gesucht wird.
+    const docStart = x.indexOf("<rsm:ExchangedDocument>");
+    expect(docStart).toBeGreaterThan(-1);
+    const docTypeIdx = x.indexOf("<ram:TypeCode>", docStart);
+    expect(docTypeIdx).toBeGreaterThan(-1);
+    expect(x.slice(docTypeIdx, docTypeIdx + 40)).toContain(
+      "<ram:TypeCode>384</ram:TypeCode>",
+    );
+
+    // Negative Settlement-Totals (BT-106/BT-109/BT-112/BT-115) bleiben erhalten.
+    const sumStart = x.indexOf("SpecifiedTradeSettlementHeaderMonetarySummation");
+    expect(sumStart).toBeGreaterThan(-1);
+    const sumBlock = x.slice(sumStart, sumStart + 600);
+    expect(sumBlock).toContain("<ram:LineTotalAmount>-45.00</ram:LineTotalAmount>");
+    expect(sumBlock).toContain("<ram:TaxBasisTotalAmount>-45.00</ram:TaxBasisTotalAmount>");
+    expect(sumBlock).toContain("<ram:GrandTotalAmount>-45.00</ram:GrandTotalAmount>");
+    expect(sumBlock).toContain("<ram:DuePayableAmount>-45.00</ram:DuePayableAmount>");
+
+    // Header-USt bleibt umsatzsteuerbefreit (Kategorie E), Basis negativ.
+    const headerStart = x.indexOf("ApplicableHeaderTradeSettlement");
+    const headerTaxIdx = x.indexOf("ApplicableTradeTax", headerStart);
+    expect(headerTaxIdx).toBeGreaterThan(-1);
+    const headerTaxBlock = x.slice(headerTaxIdx, headerTaxIdx + 400);
+    expect(headerTaxBlock).toContain("<ram:CategoryCode>E</ram:CategoryCode>");
+    expect(headerTaxBlock).toMatch(/<ram:BasisAmount>-45\.00<\/ram:BasisAmount>/);
+
+    // Verkäufer-IBAN bleibt unter PayeePartyCreditorFinancialAccount erhalten.
+    expect(x).toMatch(
+      /<ram:PayeePartyCreditorFinancialAccount>\s*<ram:IBANID>DE89370400440532013000<\/ram:IBANID>/,
+    );
+  });
+
+  it("Storno (regelbesteuert): TypeCode 384 + negative USt-Beträge (CategoryCode S, 19%)", async () => {
+    // Task #1137 — Auch die regelbesteuerte Storno-Form (Selbstzahler/privat,
+    // 19% USt) muss TypeCode 384 und durchgehend negative Beträge führen — inkl.
+    // negativem CalculatedAmount (BT-117) in der USt-Aufschlüsselung.
+    const xml = await generateZugferdXml(
+      buildConformantPdfData({
+        invoiceNumber: "ST-2026-1137S",
+        invoiceType: "stornorechnung",
+        billingType: "selbstzahler",
+        budgetType: null,
+        netAmountCents: -10000,
+        vatAmountCents: -1900,
+        grossAmountCents: -11900,
+        vatRate: 1900,
+        insuranceIkNummer: "",
+        versichertennummer: "",
+        ikNummer: "",
+        ustId: "DE123456789",
+        lineItems: [
+          {
+            appointmentId: 101,
+            appointmentDate: "2026-01-05",
+            startTime: "09:00",
+            endTime: "10:00",
+            serviceCode: "hauswirtschaft",
+            serviceDescription: "Hauswirtschaft",
+            durationMinutes: 60,
+            quantityRaw: 1,
+            quantityUnit: "hours",
+            unitPriceCents: -10000,
+            totalCents: -10000,
+            employeeName: "Anna Beispiel",
+            appointmentNotes: null,
+            serviceDetails: null,
+          },
+        ],
+      } as unknown as Partial<InvoicePdfData>),
+    );
+    expect(xml).not.toBeNull();
+    const x = xml as string;
+
+    // BT-3 Dokumenttyp = 384.
+    const docStart = x.indexOf("<rsm:ExchangedDocument>");
+    expect(docStart).toBeGreaterThan(-1);
+    const docTypeIdx = x.indexOf("<ram:TypeCode>", docStart);
+    expect(x.slice(docTypeIdx, docTypeIdx + 40)).toContain(
+      "<ram:TypeCode>384</ram:TypeCode>",
+    );
+
+    // Negative Settlement-Totals inkl. negativer Steuersumme.
+    const sumStart = x.indexOf("SpecifiedTradeSettlementHeaderMonetarySummation");
+    const sumBlock = x.slice(sumStart, sumStart + 600);
+    expect(sumBlock).toContain("<ram:GrandTotalAmount>-119.00</ram:GrandTotalAmount>");
+    expect(sumBlock).toContain("<ram:DuePayableAmount>-119.00</ram:DuePayableAmount>");
+
+    // Header-USt: regelbesteuert (Kategorie S, 19%), negativer Steuerbetrag.
+    const headerStart = x.indexOf("ApplicableHeaderTradeSettlement");
+    const headerTaxIdx = x.indexOf("ApplicableTradeTax", headerStart);
+    expect(headerTaxIdx).toBeGreaterThan(-1);
+    const headerTaxBlock = x.slice(headerTaxIdx, headerTaxIdx + 400);
+    expect(headerTaxBlock).toContain("<ram:CategoryCode>S</ram:CategoryCode>");
+    expect(headerTaxBlock).toMatch(/<ram:RateApplicablePercent>19<\/ram:RateApplicablePercent>/);
+    expect(headerTaxBlock).toMatch(/<ram:BasisAmount>-100\.00<\/ram:BasisAmount>/);
+    expect(headerTaxBlock).toMatch(/<ram:CalculatedAmount>-19\.00<\/ram:CalculatedAmount>/);
+  });
+
+  it("Negativ-Kontrolle: normale Rechnung trägt TypeCode 380 (nicht 384)", async () => {
+    // Beweist, dass der 384-Anker echt am Storno-Branch hängt und nicht trivial
+    // wahr ist: eine reguläre Rechnung emittiert TypeCode 380.
+    const xml = await generateZugferdXml(buildConformantPdfData());
+    expect(xml).not.toBeNull();
+    const x = xml as string;
+    const docStart = x.indexOf("<rsm:ExchangedDocument>");
+    const docTypeIdx = x.indexOf("<ram:TypeCode>", docStart);
+    const docTypeBlock = x.slice(docTypeIdx, docTypeIdx + 40);
+    expect(docTypeBlock).toContain("<ram:TypeCode>380</ram:TypeCode>");
+    expect(docTypeBlock).not.toContain("384");
+  });
+
   it("XMP-Namespace-Reparatur (rdf:about) ist im eingebetteten PDF/A angewendet", async () => {
     const blank = await makeBlankPdf();
     const result = await embedZugferdXml(blank, buildConformantPdfData(), { strict: false });
