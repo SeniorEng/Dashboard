@@ -12,10 +12,11 @@ let cacheTimestamp = 0;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
 /**
- * Loads the raw logo bytes + content-type from object storage. Shared by
- * `resolveLogoToDataUrl` (PDF/document inline data-URLs) and the email layer
- * (inline `cid:` attachments — Task #1092). Results are cached per path for
- * CACHE_TTL_MS so repeated sends in one batch hit the bucket only once.
+ * Loads the raw logo bytes + content-type from object storage. Shared by the
+ * email layer (inline `cid:` attachments via `buildLogoInlineAttachment` —
+ * Task #1092/#1104/#1107) across billing, lead auto-reply and document-delivery
+ * mails. Results are cached per path for CACHE_TTL_MS so repeated sends in one
+ * batch hit the bucket only once.
  */
 export async function loadLogoBytes(logoPath: string | null | undefined): Promise<LogoBytes | null> {
   if (!logoPath) return null;
@@ -58,10 +59,4 @@ export async function loadLogoBytes(logoPath: string | null | undefined): Promis
     console.error("Logo-Auflösung fehlgeschlagen:", err instanceof Error ? err.message : err);
     return null;
   }
-}
-
-export async function resolveLogoToDataUrl(logoPath: string | null | undefined): Promise<string | null> {
-  const bytes = await loadLogoBytes(logoPath);
-  if (!bytes) return null;
-  return `data:${bytes.contentType};base64,${bytes.content.toString("base64")}`;
 }

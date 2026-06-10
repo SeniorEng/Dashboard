@@ -1,10 +1,9 @@
-import { sendEmail } from "./email-service";
+import { sendEmail, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "./email-service";
 import { sendLetterxpressLetter } from "./letterxpress-service";
 import { getDocumentPdfBuffer } from "./document-pdf";
 import { renderEmailSubject, renderEmailHtml, renderCoverLetterPdf } from "./cover-letter";
 import { deliveryStorage } from "../storage/deliveries";
 import { storage } from "../storage";
-import { resolveLogoToDataUrl } from "./logo-resolver";
 import type { CompanySettings } from "@shared/schema";
 
 interface DeliveryOptions {
@@ -140,15 +139,18 @@ async function deliverByEmail(
     })
   );
 
-  const resolvedLogo = await resolveLogoToDataUrl(settings.logoUrl);
+  // Task #1107 — Firmenlogo MUSS als Inline-`cid:`-Anhang mitgeschickt werden
+  // (nicht als `data:`-URI, die GMX/Outlook/Gmail blocken). Identische Verdrahtung
+  // wie Abrechnungs- und Lead-Mails: `buildLogoInlineAttachment` + `EMAIL_LOGO_SRC`.
+  const logoAttachment = await buildLogoInlineAttachment(settings.logoUrl);
   const subject = renderEmailSubject(settings, placeholderData);
-  const html = renderEmailHtml(settings, placeholderData, resolvedLogo);
+  const html = renderEmailHtml(settings, placeholderData, logoAttachment ? EMAIL_LOGO_SRC : null);
 
   await sendEmail(settings, {
     to: customer.email,
     subject,
     html,
-    attachments,
+    attachments: logoAttachment ? [logoAttachment, ...attachments] : attachments,
   });
 }
 

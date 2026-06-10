@@ -124,7 +124,7 @@ vi.mock("../server/services/cover-letter", () => ({
 }));
 
 vi.mock("../server/services/logo-resolver", () => ({
-  resolveLogoToDataUrl: vi.fn(async () => null),
+  loadLogoBytes: vi.fn(async () => null),
 }));
 
 vi.mock("../server/services/cache", () => ({
@@ -134,6 +134,8 @@ vi.mock("../server/services/cache", () => ({
 vi.mock("../server/services/email-service", () => ({
   sendEmail: vi.fn(async () => ({ messageId: "<stub>" })),
   testSmtpConnection: vi.fn(),
+  buildLogoInlineAttachment: vi.fn(async () => null),
+  EMAIL_LOGO_SRC: "cid:company-logo",
 }));
 
 // The LetterXpress HTTP boundary is mocked at the transport layer (node:https
