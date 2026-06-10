@@ -6,7 +6,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, CalendarClock, Lock, Repeat, Merge,
+  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, CalendarClock, Lock, Repeat,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -165,15 +165,6 @@ export default function AdminDashboard() {
       iconBg: "bg-blue-100",
       title: "Kundenverwaltung",
       description: "Kunden anlegen, bearbeiten und verwalten",
-      permissionKey: "customers",
-    },
-    {
-      href: "/admin/customers/duplicates",
-      testId: "card-duplicates",
-      icon: <Merge className={`${iconSize.lg} text-amber-600`} />,
-      iconBg: "bg-amber-100",
-      title: "Duplikate zusammenführen",
-      description: "Doppelte Kunden erkennen und zu einem Datensatz vereinen",
       permissionKey: "customers",
     },
     {

@@ -33,7 +33,6 @@ import budgetsRouter from "./customers/budgets";
 import detailsRouter from "./customers/details";
 import contractsRouter from "./customers/contracts";
 import workflowsRouter from "./customers/workflows";
-import duplicatesRouter from "./customers/duplicates";
 
 const router = Router();
 
@@ -75,7 +74,6 @@ async function computeBudgetSetupMarkers(customer: Customer): Promise<{
   };
 }
 
-router.use("/", duplicatesRouter);
 router.use("/", assignmentsRouter);
 router.use("/", budgetsRouter);
 router.use("/", detailsRouter);
