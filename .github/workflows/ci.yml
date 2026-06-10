@@ -55,12 +55,7 @@ jobs:
 
       # Gate 1: deterministische Installation via package-lock.json
       - name: Install dependencies
-        run: |
-          # Normalize Replit-internal package-firewall URLs to the public npm
-          # registry so npm ci works on GitHub runners (the .replit.local host
-          # only resolves inside Replit). See docs/ci-pipeline.md.
-          sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json
-          npm ci
+        run: npm ci
 
       # Gate 2: Typecheck
       - name: Typecheck (tsc --noEmit)
@@ -140,12 +135,7 @@ jobs:
 
       # Gate 1: deterministische Installation
       - name: Install dependencies
-        run: |
-          # Normalize Replit-internal package-firewall URLs to the public npm
-          # registry so npm ci works on GitHub runners (the .replit.local host
-          # only resolves inside Replit). See docs/ci-pipeline.md.
-          sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json
-          npm ci
+        run: npm ci
 
       - name: Push DB schema (drizzle-kit push)
         if: ${{ env.TEST_USER_PASSWORD != '' }}
@@ -276,12 +266,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          # Normalize Replit-internal package-firewall URLs to the public npm
-          # registry so npm ci works on GitHub runners (the .replit.local host
-          # only resolves inside Replit). See docs/ci-pipeline.md.
-          sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json
-          npm ci
+        run: npm ci
 
       # Playwright-Browser-Cache: keyed auf package-lock, damit Folge-Runs
       # den Chromium-Download überspringen.
@@ -407,12 +392,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          # Normalize Replit-internal package-firewall URLs to the public npm
-          # registry so npm ci works on GitHub runners (the .replit.local host
-          # only resolves inside Replit). See docs/ci-pipeline.md.
-          sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json
-          npm ci
+        run: npm ci
 
       # Die feste Proxy-Ziel-DB (careconnect) braucht ein Schema, damit die
       # Neon-getriebenen Seed-Skripte im KALTEN Lauf nicht an fehlenden Tabellen
@@ -454,12 +434,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          # Normalize Replit-internal package-firewall URLs to the public npm
-          # registry so npm ci works on GitHub runners (the .replit.local host
-          # only resolves inside Replit). See docs/ci-pipeline.md.
-          sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json
-          npm ci
+        run: npm ci
 
       # Incremental-Report über Läufe hinweg cachen — Stryker prüft dann nur
       # Mutanten erneut, die von Code-/Test-Änderungen betroffen sind.
@@ -551,12 +526,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          # Normalize Replit-internal package-firewall URLs to the public npm
-          # registry so npm ci works on GitHub runners (the .replit.local host
-          # only resolves inside Replit). See docs/ci-pipeline.md.
-          sed -i 's#http://package-firewall.replit.local/npm/#https://registry.npmjs.org/#g' package-lock.json
-          npm ci
+        run: npm ci
 
       # Task #1109: Java-freies Strict-Gate. Validiert die WASM-XSD-Strict-
       # Versiegelung (validateZugferdXsd) gegen reale Pot-/USt-Szenarien und

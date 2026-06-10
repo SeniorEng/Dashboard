@@ -26,7 +26,8 @@
     "chromium:smoke": "tsx scripts/smoke-chromium.ts",
     "validate:erechnung": "tsx scripts/validate-erechnung.ts",
     "validate:erechnung:strict": "tsx scripts/validate-erechnung-strict.ts",
-    "mutation": "node scripts/run-mutation.mjs"
+    "mutation": "node scripts/run-mutation.mjs",
+    "postinstall": "node scripts/normalize-lockfile.mjs"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",

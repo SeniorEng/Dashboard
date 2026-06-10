@@ -113,8 +113,10 @@ Schutzmaßnahmen:
 
 Voraussetzung dafür war, dass der Job auf GitHub-Runnern erstmals real grün lief.
 Zwei Stolpersteine mussten dafür raus: (a) `npm ci` scheiterte am Replit-internen
-`package-firewall.replit.local`-Mirror im Lockfile — jeder `npm ci`-Step
-normalisiert die URLs jetzt per `sed` auf `registry.npmjs.org` (Detail:
+`package-firewall.replit.local`-Mirror im Lockfile — das Lockfile wird jetzt
+direkt an der Quelle (postinstall) auf `registry.npmjs.org` normalisiert, sodass
+das committete `package-lock.json` dauerhaft sauber bleibt und CI kein per-Step-
+`sed` mehr braucht (Detail:
 [`ci-pipeline.md`](ci-pipeline.md)); (b) der veraPDF-Installer entpackt in einen
 `verapdf-greenfield-<ver>/`-Unterordner — die Verzeichnissuche braucht
 `find -mindepth 1`, sonst zeigt sie auf den falschen Ordner (Exit 127).

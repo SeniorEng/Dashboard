@@ -24,7 +24,11 @@ Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_US
 
 ## npm-Registry-Normalisierung (package-firewall)
 
-`package-lock.json` löst einige Pakete über den Replit-internen Mirror `http://package-firewall.replit.local/npm/…` auf. Dieser Host ist NUR innerhalb von Replit erreichbar — auf GitHub-Runnern bricht `npm ci` sonst mit `EAI_AGAIN` ab und legt damit ALLE Jobs lahm. Jeder `npm ci`-Step in `ci.yml` führt deshalb vorher ein idempotentes `sed` aus, das diese URLs auf `https://registry.npmjs.org/` umschreibt (identische Tarballs, die Integrity-Hashes bleiben gültig). Wird das Lockfile in Replit neu erzeugt, kehren die `.replit.local`-URLs zurück — der `sed`-Schritt fängt das bei jedem Lauf automatisch ab, eine manuelle Lockfile-Korrektur ist nicht nötig.
+In Replit löst npm Pakete über den internen Mirror `http://package-firewall.replit.local/npm/…` auf. Dieser Host ist NUR innerhalb von Replit erreichbar — stünde er in den `resolved`-URLs des committeten `package-lock.json`, bräche `npm ci` auf GitHub-Runnern mit `EAI_AGAIN` ab und legte ALLE Jobs lahm.
+
+Die URLs landen im Lockfile, weil die `npm_config_registry`-Env-Var in Replit auf die Firewall zeigt UND der Firewall-Mirror die Tarball-URLs seiner Packuments bereits mit Firewall-Host ausliefert. Ein `.npmrc registry`-Override oder `replace-registry-host` reicht deshalb NICHT — die Env-Var übersteuert die `.npmrc`, und der Host steckt schon in den Tarball-URLs.
+
+Stattdessen normalisiert ein **postinstall-Hook** (`scripts/normalize-lockfile.mjs`, verdrahtet als `postinstall` in `package.json`) das Lockfile direkt an der Quelle: nach jeder Installation werden `http://package-firewall.replit.local/npm/`-URLs idempotent auf `https://registry.npmjs.org/` zurückgeschrieben (identische Tarballs, die Integrity-Hashes bleiben gültig). So bleibt das committete `package-lock.json` dauerhaft sauber — CI braucht KEIN per-Step-`sed` mehr, `npm ci` läuft auf den Runnern direkt durch. Lokale Replit-Installationen funktionieren unverändert (Fetch weiter über die Firewall via Env-Var, nur das Lockfile wird im Anschluss normalisiert). `registry.npmjs.org` ist sowohl aus Replit als auch aus CI erreichbar. Ein zusätzliches `.npmrc` setzt die öffentliche Registry als Repo-Default (greift außerhalb von Replit, wo keine Env-Var gesetzt ist).
 
 ## Neon-Proxy in CI (Task #798)
 
