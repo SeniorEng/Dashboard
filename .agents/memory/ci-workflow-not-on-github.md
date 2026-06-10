@@ -12,11 +12,23 @@ Branch protection correctly gates merges on the checks (a PR with a red required
 check shows `mergeable_state: blocked`).
 
 **How it got there:** the connected GitHub OAuth token has no `workflow` scope, so
-adding any path under `.github/workflows/` via the API 404s. The fix was a
+adding any path under `.github/workflows/` via the API 404s (and a `git push` that
+touches `.github/workflows/*` is rejected with GH013). The fix was a
 user-supplied classic **PAT with `repo` + `workflow` scopes** (stored as secret
-`GITHUB_WORKFLOW_PAT`), used once to PUT the files via the contents API. The
-default connector token still cannot push workflow files — if you need to
-re-push, request a PAT again.
+`GITHUB_WORKFLOW_PAT`). The default connector token still cannot push workflow
+files — if you need to re-push, request a PAT again.
+
+**Two gotchas when (re-)pushing with the PAT:**
+- A freshly-updated secret is NOT picked up by the already-running agent shell —
+  `$GITHUB_WORKFLOW_PAT` in bash stays stale (old value) until you re-request it
+  via `requestEnvVar`. Symptom: a brand-new valid token still 401s in bash while
+  you can't explain why. Verify freshness by hashing the value (it should change).
+- Embed the token directly in the push URL:
+  `git push https://x-access-token:$PAT@github.com/SeniorEng/Dashboard.git main:main`.
+  Do NOT use `https://git:@github.com/...` + GIT_ASKPASS — the empty password after
+  the colon makes git skip askpass entirely and send an empty password →
+  "Invalid username or token. Password authentication is not supported." even
+  though the same token returns 200 on `/rate_limit`.
 
 ## Two remaining blockers keep `tests` / `e2e-smoke` / `static-analysis` red
 
