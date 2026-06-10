@@ -1,0 +1,78 @@
+# EngelDesk Admin-Bereich: Restrukturierungs-Vorschlag (10.06.2026)
+
+**Anlass:** „Fühlt sich unfassbar komplex und nicht prozessgeleitet an" (Alrik) · **Basis:** Code-Inventar (`client/src/pages/admin/`, 27 Seiten), UI-Walkthrough, Online-Recherche (NN/g, GOV.UK Design System, Medifox DAN, euregon snap, Jobber — Quellen am Ende)
+
+---
+
+## 1. Befund: Warum es sich komplex anfühlt
+
+**a) Objekt-Kacheln statt Prozesse.** Die Startseite ist eine Navigationswand: 22 Karten in 5 Gruppen (Personal & Team, Terminplanung, Kunden & Verträge, Abrechnung & Finanzen, System). Jede Karte ist ein *Objekt* (Kunden, Rechnungen, Dokumente) — der Prozess („erst Nachweise prüfen, dann Monat abschließen, dann abrechnen, dann Zahlungen zuordnen") existiert nur in deinem Kopf. Genau diese IA-Form bewertet die NN/g-Forschung als am schwersten erlernbar.
+
+**b) Karten ohne Status.** Keine Karte zeigt, ob dort Arbeit wartet („3 Nachweise offen", „2 Zahlungen unzugeordnet"). Alles sieht gleich wichtig aus; einzige Ausnahme ist das rote Monatsabschluss-Banner — bezeichnenderweise das einzige Element, das sich „prozessgeleitet" anfühlt.
+
+**c) Drei parallele Navigationssysteme.** Haupt-Tabs (Termine/Kunden/Aufgaben/Nachweise/Zeiten) + Schnellzugriff-Leiste (5 Admin-Links) + Kachelwand. Dieselben Ziele sind mehrfach erreichbar, jeweils anders gruppiert.
+
+**d) Zerschnittene Prozessketten.** Der Monats-Zyklus (Doku prüfen → Monatsabschluss → Leistungsnachweise → Rechnungen → Qonto-Zahlungszuordnung → Lexware-Export) liegt verteilt über 6 Karten in 2 Gruppen. Die Kundenaufnahme (Interessent → Erstberatung → Anlage → Unterschriften → Mitarbeiter-Zuordnung) über 4 Karten in 3 Gruppen.
+
+**e) Inkonsistente Zuordnung.** „Geburtstage" (Kunden-Geburtstage!) unter *Personal & Team*; „Statistiken" unter *Personal*; „Termin-Import" unter *System*; „Serientermine" als eigene Admin-Seite, obwohl Termine ein Haupt-Tab sind.
+
+**f) Monolithische Mega-Flows.** Kundenanlage = 9 Pflichtschritte am Stück (Session-1-Test: Validierung hält nicht, Müll-Inhalte in Schritt 4/7). Dabei existiert im Backend bereits eine `setup-pending`-Infrastruktur (`/customers/:id/setup-pending/:step`) — sie wird vom UI nur nicht als Checkliste genutzt.
+
+**Wichtig:** Funktional fehlt fast nichts. Das Problem ist Anordnung, nicht Umfang.
+
+## 2. Leitprinzip (aus der Recherche)
+
+Für einen kleinen Dienst (1 Admin-Vorstand + Teamleads) empfiehlt sich ein **Hybrid**: *Inbox-zentriertes Dashboard als Einstieg, dahinter Prozess-Hubs, Objektlisten nur als Nachschlagewerk.* Belege: NN/g (task-based IA für interne Tools), GOV.UK Task-List-Pattern (mehrstufige Anträge), Medifox DAN & euregon snap (Branchenführer navigieren nach Prozessmodulen, euregon startet mit „Aufgabenübersicht"), Jobber vs. ServiceTitan (Kleinbetriebe kaufen radikale Einfachheit).
+
+Die Kernfrage der Startseite muss lauten: **„Was muss heute erledigt werden?"** — nicht „Wo ist welche Verwaltungsfunktion?"
+
+## 3. Soll-Struktur
+
+### Ebene 1 — Admin-Startseite als Cockpit (ersetzt die Kachelwand)
+
+**Oben: „Jetzt fällig"-Inbox** (Queue, klickbar, je Item direkt in die abarbeitbare Liste):
+Monatsabschluss-Status (heutiges Banner, verallgemeinert) · fehlende Dokumentationen/Unterschriften · zu prüfende Leistungsnachweise · zu prüfende Dokument-Nachweise · unzugeordnete Qonto-Zahlungen · Kunden mit offenen Anlage-Schritten · überfällige Erstberatungen.
+
+**Darunter: 6 Statuskarten** (Zahl + Trend, klickbar):
+1. Offene Posten / überfällige Rechnungen (€, Anzahl)
+2. Abrechnungsfortschritt lfd. Monat (erbracht vs. abgerechnet)
+3. Unzugeordnete Zahlungen (Qonto)
+4. §45b-Restbudgets mit Verfall 30.06. (Umsatzpotenzial!)
+5. Termine heute / unbesetzt diese Woche
+6. Pipeline: Interessenten → in Aufnahme → aktiv
+
+### Ebene 2 — fünf Prozess-Hubs (ersetzen die 5 Objekt-Gruppen)
+
+| Hub | Enthält (heutige Kacheln) | Charakter |
+|---|---|---|
+| **1. Aufnahme** (Lead → aktiver Kunde) | Interessenten, Erstberatungen, Verfügbarkeiten, Kundenanlage, Dokument-Unterschriften | Pipeline-Ansicht mit Phasen; pro Neukunde **GOV.UK-Task-List** (s. 4a) |
+| **2. Betrieb** (laufender Monat) | Serientermine, Termin-Import, Zeiterfassung, Dokument-Prüfung | Listen mit „offen/erledigt"-Fokus |
+| **3. Monatsabschluss & Abrechnung** (der Monats-Zyklus) | Monatsabschluss, Leistungsnachweis-Prüfung, Stundenübersicht, Abrechnung, Zahlungen & Qonto, Lexware-Export | **Geführter Lauf** (s. 4b) — eine Seite, sechs Stationen in Reihenfolge |
+| **4. Stammdaten** (Nachschlagewerk) | Kundenverwaltung, Benutzerverwaltung, Kostenträger, Dienstleistungen, Dokumente & Vorlagen | klassische Objektlisten — hier sind sie richtig |
+| **5. System & Auswertung** (selten) | Einstellungen, WhatsApp, Audit-Log, Statistiken, Geburtstage | per Progressive Disclosure eingeklappt; Geburtstage ggf. als Inbox-Item („5 Karten diese Woche fällig") statt eigener Seite |
+
+Schnellzugriff-Leiste: auf die 5 Hubs umstellen (statt 5 willkürlicher Einzelseiten) → ein Navigationssystem weniger.
+
+## 4. Drei Leuchtturm-Umbauten (größter Hebel)
+
+**a) Kundenaufnahme: Wizard → Task-List.** Statt 9 Schritte am Stück: Kunde mit Minimaldaten anlegen (Name, Typ, Kontakt — 1 Schritt), danach Checklisten-Seite pro Kunde: „Vertrag ✓ · Pflegekasse ✓ · Budgets ⚠ offen · Unterschriften 2/4 · Mitarbeiter-Zuordnung offen · Versand offen". Jeder Schritt einzeln speicherbar, unterbrechbar, delegierbar; „Kunden in Anlage" als Inbox-Item. Das Backend (`setup-pending`-Routen) kann das heute schon — es fehlt nur die UI. Nebeneffekt: Die BUG-15-Klasse (Validierung über 9 Schritte verschleppt) wird strukturell entschärft, weil jeder Schritt für sich validiert und speichert.
+
+**b) Monatsabschluss & Abrechnung als geführter Lauf.** Eine Seite mit 6 Stationen: ① Doku/Unterschriften vollständig? (Liste der Blocker je MA) → ② Monatsabschluss je MA (mit **einheitlicher** Readiness, vgl. Ticket D!) → ③ Leistungsnachweise prüfen → ④ Rechnungslauf → ⑤ Qonto-Zahlungen zuordnen → ⑥ Lexware-Export. Jede Station zeigt „n offen / erledigt", erst wenn ① grün ist, wird ② aktiv (Staged Disclosure). Das rote Banner verlinkt mitten in diesen Lauf. **Synergie:** Dieser Umbau erzwingt genau die eine gemeinsame Readiness-Funktion, die Ticket D ohnehin fordert — UI-Umbau und Bugfix validieren sich gegenseitig.
+
+**c) Statuszähler auf allem.** Übergangsweise (vor jedem Umbau umsetzbar): Badges auf die bestehenden Kacheln („Leistungsnachweis-Prüfung **(7)**"), Karten ohne offene Arbeit visuell dimmen. Geringer Aufwand, sofort spürbar weniger „Wo muss ich hin?".
+
+## 5. Roadmap (inkrementell, kein Big-Bang)
+
+| Phase | Inhalt | Aufwand (Replit-AI-Tickets) |
+|---|---|---|
+| **0 — Quick Wins** (sofort) | Badges/Zähler auf Kacheln (4c) · Fehlzuordnungen beheben (Geburtstage→Kunden o. Inbox, Statistiken→Auswertung, Termin-Import→Betrieb) · Schnellzugriff = 5 Gruppen | S |
+| **1 — Cockpit** | „Jetzt fällig"-Inbox + 6 Statuskarten als neue /admin-Startseite; Kachelwand rutscht darunter (nichts geht verloren) | M |
+| **2 — Abrechnungs-Lauf** | Hub 3 als geführte Strecke (nach Fix von Ticket D/H, gemeinsame Readiness) | M–L |
+| **3 — Aufnahme-Task-List** | Kundenanlage auf Checklisten-Pattern, Pipeline-Ansicht Interessenten→Kunde (nach Fix Ticket A/F) | M–L |
+| **4 — Aufräumen** | Alte Kachelwand entfernen, Hubs als einzige Navigation, Rollensichten (Teamlead sieht nur Hub 1–2) | S–M |
+
+**Leitplanken für Replit-AI** (Dualismus-Vermeidung, vgl. Master-Testplan §7): Die Inbox-Items und Statuskarten müssen aus **denselben** Funktionen gespeist werden wie die Ziel-Listen (kein zweiter „offene Nachweise"-Zähler neben der Nachweis-Liste). Phase 2 erst nach Ticket D, Phase 3 erst nach Ticket A/F — sonst wird fehlerhafte Logik in neues UI gegossen.
+
+## 6. Quellen
+
+NN/g Intranet-IA (nngroup.com/articles/intranet-information-architecture-ia) · NN/g Progressive Disclosure · GOV.UK Task-List & Step-by-step (design-system.service.gov.uk/patterns/complete-multiple-tasks) · Medifox DAN MD Ambulant Prozessmodule (medifoxdan.de) · euregon snap „Aufgabenübersicht" + STARTER (euregon.de) · Jobber vs. ServiceTitan (fieldpulse.com, selecthub.com) · Pflege-Controlling-KPIs (solidaris.de Pflege-Cockpit, datenpioniere.de, myneva.eu)
