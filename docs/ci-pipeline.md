@@ -86,7 +86,15 @@ GitHub Actions kann den Sync NICHT übernehmen: ein Actions-Workflow läuft auf 
 3. Schedule: z.B. stündlich (`0 * * * *`) — fängt vergessene Pushes innerhalb einer Stunde ab.
 4. Sicherstellen, dass das Secret `GITHUB_WORKFLOW_PAT` im Deployment verfügbar ist (deckt als universeller Fallback alle Fälle inkl. Workflow-Dateien ab; `GITHUB_PERSONAL_ACCESS_TOKEN` ist im Deployment evtl. nicht gesetzt).
 
-Die Logs des Scheduled Deployments zeigen pro Lauf das Drift-Signal und ob gepusht wurde. Einmalig vom Nutzer einzurichten (Publish), danach läuft der Sync ohne manuelle Schritte.
+Die Logs des Scheduled Deployments zeigen pro Lauf das Drift-Signal und ob gepusht wurde. Einmalig vom Nutzer einzurichten (Publish), danach läuft der Sync ohne manuelle Schritte. Ein Task-Agent kann KEIN Deployment anlegen (Publish ist Nutzer-Aktion) und das `.replit`-`[deployment]`-Feld trägt bereits das Autoscale-Web-App-Deployment — das Scheduled Deployment ist ein **separates** Deployment-Objekt, das im Publishing-Tool erstellt wird, nicht in `.replit`.
+
+#### Einmaliger Divergenz-Reconcile (wenn GitHub `main` bereits abgedriftet ist)
+
+Im Normalbetrieb ist jeder Sync-Push ein Fast-Forward (GitHub `main` ist Vorfahre des lokalen Stands) — das Skript reicht. Ist GitHub `main` aber bereits *divergiert* (eigene GitHub-only-Commits, die nicht in der lokalen Historie liegen, z.B. ein direkt auf GitHub editierter Commit), wird der normale Push als `non-fast-forward` abgelehnt. Dann gilt:
+
+1. **Divergenz prüfen:** GitHub-only-Commits gegen den lokalen Stand vergleichen (Merge-Base + `git log local..github`) und entscheiden, ob ihr Inhalt schon durch lokale Commits abgedeckt/abgelöst ist (dann verwerfbar) oder noch gewollt ist (dann zuerst lokal übernehmen).
+2. **Force-Push nötig:** Damit der *Steady-State*-Sync weiter über Fast-Forward funktioniert, muss GitHub `main` exakt auf den lokalen SHA gesetzt werden (kein Merge-Commit — der würde künftige Fast-Forward-Pushes brechen, da der nächste lokale Commit nicht von einem GitHub-seitigen Merge-Knoten abstammt). Das erfordert einen Force-Push.
+3. **Branch-Protection blockt Force-Push — auch für Admins.** `allow_force_pushes=false` lehnt den Force-Push per Pre-Receive-Hook mit `GH006` ab, selbst mit Admin-Token und `enforce_admins=false` (Admin-Override gilt für Required-Checks/Reviews, NICHT für Force-Push). Reconcile daher: per GitHub-API kurzzeitig `allow_force_pushes=true` setzen (vollständiges Protection-Objekt via `PUT …/branches/main/protection` — alle anderen Felder, v.a. die Required-Check-Kontexte + `app_id`s, unverändert lassen), Force-Push mit `--force-with-lease` ausführen, dann `allow_force_pushes` sofort wieder auf `false` zurücksetzen. Verifizieren, dass Remote-SHA == lokaler SHA und die Protection wieder im Ausgangszustand ist.
 
 > **Hinweis Workflow-Scope-Henne-Ei:** Ein *neues* `.github/workflows/*.yml` würde über den normalen Connector-Sync nie auf GitHub landen (kein `workflow`-Scope). Deshalb wurde der Sync bewusst Replit-seitig als Skript + Scheduled Deployment gebaut, nicht als GitHub-Actions-Workflow. Bestehende Workflow-Dateien werden über den PAT-Fallback des Skripts mitgepusht.
 

@@ -32,3 +32,28 @@ has no `workflow` scope → GH013), so a GitHub-Actions-based sync is self-defea
   setup (Publishing → Scheduled, run `bash scripts/github-sync.sh push`); after
   that the sync runs with no manual steps. Full runbook in
   `docs/ci-pipeline.md` → "Automatisierter Sync".
+
+## One-time divergence reconcile (force-push through branch protection)
+
+Steady-state pushes are fast-forwards. If GitHub `main` has *diverged* (GitHub-only
+commits not in local history), a plain push is rejected `non-fast-forward`. To keep
+the steady-state sync working you must set GitHub `main` to EXACTLY the local SHA — a
+merge commit is wrong (the next local commit descends from the local SHA, not from a
+GitHub-side merge node, so the following push would also be non-ff). That requires a
+**force-push**.
+
+Branch protection blocks force-push for EVERYONE incl. admins: `allow_force_pushes=false`
+rejects with `GH006` even with an admin PAT and `enforce_admins=false` (admin override
+covers required-checks/reviews, NOT force-push). Procedure: GET the full protection
+object, `PUT …/branches/main/protection` with `allow_force_pushes:true` and every other
+field byte-identical (esp. required_status_checks contexts + their `app_id`s, e.g.
+`erechnung-validation` app_id 15368), `git push --force-with-lease`, then immediately PUT
+again with `allow_force_pushes:false`. Verify remote SHA == local SHA and protection
+restored.
+
+**Caveat — green local suite ≠ green CI.** The DB/server CI gates (`tests`, `e2e-smoke`,
+`template-cache-verify`) and `static-analysis` (`npm audit --audit-level=high`) can be red
+even when the local suite passes: `npm audit` tracks the external advisory DB (a moving
+target), and the CI seed path has its own bugs independent of the test code (FK seed
+order, missing service-catalog rows). Pushing a "green local main" does NOT imply CI goes
+green — check the actual run, don't assume.
