@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express, { type Request, type Response, type NextFunction } from "express";
 import type { AddressInfo } from "net";
 import { PDFDocument } from "pdf-lib";
-import type { LxHttpResponse } from "../server/services/letterxpress-http";
 import type {
   CompanySettings,
   Customer,
@@ -138,13 +137,25 @@ vi.mock("../server/services/email-service", () => ({
   EMAIL_LOGO_SRC: "cid:company-logo",
 }));
 
-// The LetterXpress HTTP boundary is mocked at the transport layer (node:https
-// based, see server/services/letterxpress-http.ts) so the full route → service →
-// storage → letterxpress wiring is exercised without real network access.
-const lxHttpRequest = vi.fn<(opts: { url: string; method: string; body: string; timeoutMs: number }) => Promise<LxHttpResponse>>();
-vi.mock("../server/services/letterxpress-http", () => ({
-  lxHttpRequest: (opts: { url: string; method: string; body: string; timeoutMs: number }) => lxHttpRequest(opts),
-}));
+// Die LetterXpress-Transport-Schicht (`node:https`-basiert, siehe
+// server/services/letterxpress-http.ts) wird über den GETEILTEN Helper
+// `tests/helpers/letterxpress` gemockt — identisch zur Rechnungs-Kopie-Suite
+// (Task #1155), damit ALLE Postversand-Pfade hinter EINEM Stand-in laufen. So
+// wird die volle Verdrahtung route → service → storage → letterxpress ohne
+// echten Netzzugriff geprüft. Der `vi.mock` MUSS hier im Testfile stehen
+// (vitest hebt `vi.mock` nur im aufrufenden File an); die dynamische
+// `import()`-Factory teilt sich dieselbe Modulinstanz — und damit Recorder +
+// Mock — mit den statischen Helper-Imports unten.
+vi.mock("../server/services/letterxpress-http", async () => {
+  const lx = await import("./helpers/letterxpress");
+  return { lxHttpRequest: lx.lxHttpRequest };
+});
+import {
+  getLxHttpCalls,
+  resetLxHttpMock,
+  setLxSetjobResponse,
+  setLxRawResponse,
+} from "./helpers/letterxpress";
 
 let server: import("http").Server;
 let baseUrl: string;
@@ -171,7 +182,7 @@ async function startTestServer(): Promise<void> {
 
 beforeEach(async () => {
   deliveryRows.length = 0;
-  lxHttpRequest.mockReset();
+  resetLxHttpMock();
   await startTestServer();
 });
 
@@ -180,10 +191,6 @@ afterEach(async () => {
     server.close((err) => (err ? reject(err) : resolve())),
   );
 });
-
-function lxResponse(body: unknown, status = 200): LxHttpResponse {
-  return { status, text: JSON.stringify(body) };
-}
 
 interface SendResponseSuccess {
   status: string;
@@ -198,9 +205,7 @@ interface SendResponseError {
 
 describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
   it("happy path: route → service → storage → letterxpress writes a 'sent' delivery row with the returned letterxpress_letter_id", async () => {
-    lxHttpRequest.mockResolvedValueOnce(
-      lxResponse({ status: 200, message: "OK", data: { id: "lx-987" } }),
-    );
+    setLxSetjobResponse("lx-987");
 
     const res = await fetch(`${baseUrl}/api/admin/document-delivery/send`, {
       method: "POST",
@@ -217,8 +222,9 @@ describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
     expect(body.status).toBe("sent");
     expect(typeof body.deliveryId).toBe("number");
 
-    expect(lxHttpRequest).toHaveBeenCalledTimes(1);
-    const opts = lxHttpRequest.mock.calls[0][0];
+    const lxCalls = getLxHttpCalls();
+    expect(lxCalls).toHaveLength(1);
+    const opts = lxCalls[0];
     expect(opts.method).toBe("POST");
     expect(String(opts.url)).toContain("/setjob");
     const lxBody = JSON.parse(opts.body) as {
@@ -254,9 +260,7 @@ describe("POST /api/admin/document-delivery/send (LetterXpress E2E)", () => {
   });
 
   it("failure path: LetterXpress 4xx → delivery row is marked 'error' with the German error message", async () => {
-    lxHttpRequest.mockResolvedValueOnce(
-      lxResponse({ status: 401, message: "Unauthorized" }, 401),
-    );
+    setLxRawResponse(JSON.stringify({ status: 401, message: "Unauthorized" }), 401);
 
     const res = await fetch(`${baseUrl}/api/admin/document-delivery/send`, {
       method: "POST",

@@ -117,7 +117,8 @@ beforeEach(() => resetLxHttpMock());
 ```
 
 Referenz-Nutzung: `tests/billing/invoice-pdf-orchestrator-e2e.test.ts` (Brief-Kopie,
-Task #1046).
+Task #1046) und `tests/document-delivery-letterxpress-e2e.test.ts` (Anschreiben-/
+Cover-Letter-Postversand über `POST /api/admin/document-delivery/send`).
 
 ## Test-Daten-Hygiene & Bulk-Purge
 
