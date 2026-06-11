@@ -1,6 +1,6 @@
 ---
 name: §45b onboarding baseline (Vorjahr = aufgebraucht)
-description: Why the whole §45b runtime path floors the runtime-derived anchor to the current year, and which helper is now unit-test-only.
+description: Why the whole §45b runtime path floors the runtime-derived anchor to the current year via floorAutoAnchor45bToCurrentYear (the only surviving anchor helper; the prior-year-window helpers were removed).
 ---
 
 # §45b Onboarding-Baseline
@@ -17,8 +17,10 @@ des laufenden Jahres mit `floorAutoAnchor45bToCurrentYear` — gilt für Lesepfa
 `/initial-budget`-§45b-Write. Es gibt keinen persistierten Anker und keine
 `'manual'`-Sonderbehandlung mehr (Task #1204 — siehe 45b-anchor-origin-stamp.md).
 `clampDerived45bAnchor`/`earliest45bRelevantAnchor` (rechtliches Vorjahres-Fenster
-bis 30.06.) sind NICHT mehr im Runtime-Pfad — sie bleiben nur als unit-getestete
-Helfer (`tests/unit/budget-45b-anchor.test.ts`) erhalten.
+bis 30.06.) und `resolveBudgetAnchor` (`shared/domain/budget/budget-anchor.ts`)
+waren seither nicht mehr im Runtime-Pfad und wurden ersatzlos entfernt — nur
+`floorAutoAnchor45bToCurrentYear` bleibt. Der §45b-Verfalls-Boden lebt inline in
+`allocation-storage.ts` (`expiryFloorAnchorYear`).
 
 **Why:** Ein automatischer Vorjahres-Übertrag (bis 12 × 131 €) hat beim
 Onboarding keine fachliche Grundlage und führte zu Geister-Carryovers (nach dem

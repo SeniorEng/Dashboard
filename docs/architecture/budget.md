@@ -209,7 +209,7 @@ Beide §45b-Lesepfad-Blöcke (`calculateAllocated45b` und `ensureYearlyCarryover
 
 **FORWARD-ONLY (keine Datenmigration):** Bestehende `budget_allocations`-Zeilen werden NICHT umgeschrieben; nur künftige Recomputes lesen den runtime-abgeleiteten Anker. Die idempotente Spalten-Migration `server/startup/drop-budget-start-date-columns.ts` entfernt die alten Anker-Spalten beim Startup.
 
-**Legacy-Helfer:** `clampDerived45bAnchor` / `earliest45bRelevantAnchor` (`shared/domain/budgets.ts`) bilden das rechtliche §45b-Vorjahres-Fenster (laufendes Jahr + Vorjahr bis 30.06.) ab und bleiben als unit-getestete Helfer erhalten (`tests/unit/budget-45b-anchor.test.ts`), werden im Runtime-Pfad aber **NICHT mehr** verwendet. Drift-Guard gegen ein Wiedereinführen des persistierten Ankers: `tests/architecture/budget-anchor-ssot.test.ts`.
+**Entfernte Legacy-Helfer:** `clampDerived45bAnchor` / `earliest45bRelevantAnchor` (`shared/domain/budgets.ts`) und `resolveBudgetAnchor` (`shared/domain/budget/budget-anchor.ts`) wurden ersatzlos entfernt — sie waren seit dem zur Laufzeit pro Topf abgeleiteten Anker (Task #1204) nicht mehr im Runtime-Pfad und überlebten nur in Unit-Tests bzw. im obsoleten Anker-Backfill-Skript (das gegen die gedroppten `budget_start_date`-Spalten schrieb und mitsamt Wrapper/Runbook entfernt wurde). Der §45b-Verfalls-Boden lebt inline in `allocation-storage.ts`; der Auto-Fallback bodet über `floorAutoAnchor45bToCurrentYear`. Drift-Guard gegen ein Wiedereinführen des persistierten Ankers: `tests/architecture/budget-anchor-ssot.test.ts`.
 
 ## Storno / Reversal — Service-Cent-Spiegel-Konvention (Task #754)
 

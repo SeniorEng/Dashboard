@@ -738,7 +738,7 @@ async function calculateAllocated45b(
   // Task #959 — §45b-Verfalls-Boden (universell, für JEDEN Kunden). Zum Horizont
   // (heute oder Forecast-Datum) trägt nur noch das rechtlich relevante Fenster
   // zum verfügbaren Budget bei: im 1. Halbjahr Vorjahr + laufendes Jahr, ab Juli
-  // nur das laufende Jahr (`earliest45bRelevantAnchor`). Wir heben `allocStart`
+  // nur das laufende Jahr (siehe `expiryFloorAnchorYear` unten). Wir heben `allocStart`
   // auf diesen Boden an — ein weit zurückliegender (manueller/Legacy-)Anker
   // akkumuliert damit KEINE jahrelang nicht-verfallenden Monatsbeträge mehr,
   // selbst wenn (noch) kein Carryover materialisiert wurde. Der Boden wird per

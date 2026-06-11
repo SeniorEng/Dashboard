@@ -8,45 +8,17 @@ import { formatEuroDE } from "../utils/money";
 export const BUDGET_45B_MAX_MONTHLY_CENTS = 13100; // 131€ max per month
 
 /**
- * Frühestes Datum, dessen §45b-Monatsbetrag zum Stichtag (`curYear`/`curMonth`,
- * 1-basiert) rechtlich noch zum verfügbaren Budget beitragen kann.
- *
- * §45b: Der laufende Monatsbetrag des aktuellen Kalenderjahres ist immer gültig;
- * nicht verbrauchte Beträge des Vorjahres bleiben nur bis zum 30.06. des Folge-
- * jahres erhalten (SGB XI §45b Abs. 3). Liegt der Stichtag im 1. Halbjahr
- * (Januar–Juni), zählt also noch das Vorjahr als Anker; ab Juli nur noch das
- * laufende Jahr.
- */
-export function earliest45bRelevantAnchor(curYear: number, curMonth: number): string {
-  const anchorYear = curMonth <= 6 ? curYear - 1 : curYear;
-  return `${anchorYear}-01-01`;
-}
-
-/**
- * Begrenzt ein aus dem Pflegegrad-Beginn abgeleitetes §45b-Startdatum so, dass
- * ein weit zurückliegender Pflegegrad nicht jahrelange 131€-Beträge rückwirkend
- * akkumuliert. Ein Datum, das früher als das rechtlich relevante Fenster liegt,
- * wird auf den Fensteranfang angehoben; ein späteres (auch zukünftiges) Datum
- * bleibt unverändert. Die eigentliche Verfalls-/Carryover-Logik bleibt davon
- * unberührt — der Clamp verhindert nur den unbegrenzten Rückwärts-Backfill.
- */
-export function clampDerived45bAnchor(derivedISO: string, curYear: number, curMonth: number): string {
-  const earliest = earliest45bRelevantAnchor(curYear, curMonth);
-  return derivedISO < earliest ? earliest : derivedISO;
-}
-
-/**
  * Anker für den AUTO-Fallback (Kunde ohne expliziten Budget-Start: kein
- * `budgetStartDate`, kein Startwert, keine Monats-/Carryover-Zeile). Hier wird
- * der Pflegegrad-Beginn nur INNERHALB des laufenden Jahres als Anker genutzt;
- * ein Datum vor dem 1.1. des laufenden Jahres wird auf den Jahresanfang
- * angehoben. Begründung: Für einen nie eingerichteten Kunden gibt es keine
- * fachliche Grundlage, einen Vorjahres-Carryover (12 × 131 €) automatisch zu
- * materialisieren — das Vorjahres-Fenster (`clampDerived45bAnchor`) bleibt den
- * EXPLIZITEN, audit-pflichtigen Pfaden (Startwert-Eingabe, Korrektur-Skript)
- * vorbehalten. So bleibt der laufende Jahresanteil ab Pflegegrad-Beginn sichtbar
- * (z. B. Pflegegrad seit März → ab März), ohne dass ein weit zurückliegender
- * Pflegegrad rückwirkend einen Übertrag erzeugt.
+ * Startwert, keine Monats-/Carryover-Zeile). Hier wird der zur Laufzeit aus der
+ * Pflegegrad-Historie abgeleitete Beginn nur INNERHALB des laufenden Jahres als
+ * Anker genutzt; ein Datum vor dem 1.1. des laufenden Jahres wird auf den
+ * Jahresanfang angehoben. Begründung: Für einen nie eingerichteten Kunden gibt
+ * es keine fachliche Grundlage, einen Vorjahres-Carryover (12 × 131 €)
+ * automatisch zu materialisieren — ein echtes Restguthaben trägt der Operator
+ * explizit (audit-pflichtig) als Übertrag ein. So bleibt der laufende
+ * Jahresanteil ab Pflegegrad-Beginn sichtbar (z. B. Pflegegrad seit März → ab
+ * März), ohne dass ein weit zurückliegender Pflegegrad rückwirkend einen
+ * Übertrag erzeugt.
  */
 export function floorAutoAnchor45bToCurrentYear(derivedISO: string, curYear: number): string {
   const floor = `${curYear}-01-01`;
