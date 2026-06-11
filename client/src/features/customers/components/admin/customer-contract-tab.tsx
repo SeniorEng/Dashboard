@@ -17,7 +17,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { customerKeys } from "@/features/customers";
+import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -37,6 +46,7 @@ import {
   UserX,
   Calendar,
   Euro,
+  ShieldAlert,
 } from "lucide-react";
 import type { CustomerDetail } from "@/lib/api/types";
 
@@ -95,6 +105,11 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
 
   const [deactivationReason, setDeactivationReason] = useState("");
   const [deactivationNote, setDeactivationNote] = useState("");
+
+  const { user } = useAuth();
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
+  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
 
   const contract = customer.currentContract;
 
@@ -260,10 +275,11 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
   };
 
   const completeDeactivation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (override?: { overrideBillingGates: true; overrideReason: string }) => {
       const result = await api.post(`/admin/customers/${customerId}/complete-deactivation`, {
         deactivationReason,
         deactivationNote: deactivationNote.trim() || undefined,
+        ...(override ? { overrideBillingGates: true, overrideReason: override.overrideReason } : {}),
       });
       return unwrapResult(result);
     },
@@ -272,6 +288,8 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
       toast({ title: "Vertrag beendet & Kunde deaktiviert", description: "Der Kunde wurde erfolgreich deaktiviert." });
       setDeactivationReason("");
       setDeactivationNote("");
+      setOverrideReason("");
+      setOverrideDialogOpen(false);
     },
     onError: (err: Error) => {
       toast({ title: "Fehler", description: err.message, variant: "destructive" });
@@ -607,7 +625,7 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 </div>
                 <Button
                   variant="destructive"
-                  onClick={() => completeDeactivation.mutate()}
+                  onClick={() => completeDeactivation.mutate(undefined)}
                   disabled={
                     !deactivationReason ||
                     (deactivationReason === "sonstiges" && !deactivationNote.trim()) ||
@@ -624,13 +642,114 @@ export function CustomerContractTab({ customer, customerId }: CustomerContractTa
                 </Button>
               </div>
             ) : deactivationReadiness && !deactivationReadiness.ready ? (
-              <div className="pt-3 border-t">
-                <p className="text-sm text-gray-500">
-                  Bitte schließen Sie alle offenen Punkte ab, bevor der Kunde deaktiviert werden kann.
-                </p>
-              </div>
+              (() => {
+                const checkMet = (key: string) =>
+                  deactivationReadiness.checks.find((c) => c.key === key)?.met ?? false;
+                const hardGatesMet = checkMet("contractEndReached") && checkMet("allDocumented");
+                const onlyBillingGatesOpen =
+                  hardGatesMet && (!checkMet("allServiceRecords") || !checkMet("allInvoiced"));
+                const canOverride = isSuperAdmin && onlyBillingGatesOpen;
+                return (
+                  <div className="pt-3 border-t space-y-3">
+                    <p className="text-sm text-gray-500">
+                      Bitte schließen Sie alle offenen Punkte ab, bevor der Kunde deaktiviert werden kann.
+                    </p>
+                    {canOverride && (
+                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 space-y-2">
+                        <div className="flex items-start gap-2">
+                          <ShieldAlert className={`${iconSize.sm} text-amber-600 mt-0.5 shrink-0`} />
+                          <div>
+                            <p className="text-sm font-medium text-amber-900">
+                              Superadmin-Override verfügbar
+                            </p>
+                            <p className="text-xs text-amber-700 mt-0.5">
+                              Vertragsende und Dokumentation sind erfüllt. Sie können die offenen Leistungsnachweis-/Rechnungs-Prüfungen mit Begründung überspringen — z. B. wenn die Monate extern abgerechnet wurden.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setOverrideDialogOpen(true)}
+                          data-testid="button-open-override-deactivation"
+                        >
+                          <ShieldAlert className={`${iconSize.sm} mr-2`} />
+                          Abrechnungs-Prüfungen überspringen
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
             ) : null}
           </div>
+
+          <Dialog open={overrideDialogOpen} onOpenChange={(open) => { if (!completeDeactivation.isPending) setOverrideDialogOpen(open); }}>
+            <DialogContent data-testid="dialog-override-deactivation">
+              <DialogHeader>
+                <DialogTitle>Abrechnungs-Prüfungen überspringen</DialogTitle>
+                <DialogDescription>
+                  Sie überspringen als Hauptadministrator die Prüfung auf Leistungsnachweise und/oder Rechnungen. Vertragsende und vollständige Dokumentation bleiben verpflichtend. Der Vorgang wird vollständig protokolliert.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="override-deact-reason">Deaktivierungsgrund *</Label>
+                  <Select value={deactivationReason} onValueChange={setDeactivationReason}>
+                    <SelectTrigger id="override-deact-reason" data-testid="select-override-deactivation-reason">
+                      <SelectValue placeholder="Grund auswählen..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEACTIVATION_REASON_SELECT_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value} data-testid={`option-override-reason-${opt.value}`}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="override-reason">Begründung für den Override * (mind. 10 Zeichen)</Label>
+                  <Textarea
+                    id="override-reason"
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    placeholder="z. B. Monate 01–03/2026 wurden vor der Migration extern über DMRZ abgerechnet."
+                    maxLength={1000}
+                    rows={3}
+                    data-testid="textarea-override-reason"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setOverrideDialogOpen(false)}
+                  disabled={completeDeactivation.isPending}
+                  data-testid="button-cancel-override"
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => completeDeactivation.mutate({ overrideBillingGates: true, overrideReason: overrideReason.trim() })}
+                  disabled={
+                    !deactivationReason ||
+                    overrideReason.trim().length < 10 ||
+                    completeDeactivation.isPending
+                  }
+                  data-testid="button-confirm-override-deactivation"
+                >
+                  {completeDeactivation.isPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                  ) : (
+                    <UserX className={`${iconSize.sm} mr-2`} />
+                  )}
+                  Override & Kunden deaktivieren
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </SectionCard>
       )}
 

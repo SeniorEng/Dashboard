@@ -281,7 +281,20 @@ router.get("/customers/:id/deactivation-readiness", asyncHandler("Deaktivierungs
 const completeDeactivationSchema = z.object({
   deactivationReason: z.string().min(1, "Grund ist erforderlich"),
   deactivationNote: z.string().max(1000).optional(),
-});
+  // Task #1220: Superadmin-Override, der ausschließlich die Leistungsnachweis-
+  // und Rechnungs-Gates überspringt (Vertragsende + Dokumentation bleiben hart).
+  // Erfordert Superadmin-Rechte (Server-Check) UND eine Pflicht-Begründung
+  // (≥10 Zeichen), die im Audit-Log und an der Deaktivierungs-Notiz hinterlegt
+  // wird.
+  overrideBillingGates: z.boolean().optional().default(false),
+  overrideReason: z.string().max(1000).optional(),
+}).refine(
+  (data) => !data.overrideBillingGates || (data.overrideReason?.trim().length ?? 0) >= 10,
+  {
+    message: "Eine Begründung (≥10 Zeichen) ist für den Override erforderlich",
+    path: ["overrideReason"],
+  },
+);
 
 router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung fehlgeschlagen", async (req: Request, res: Response) => {
   const id = requireIntParam(req.params.id, res);
@@ -304,11 +317,20 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     return;
   }
 
-  const { deactivationReason, deactivationNote } = completeDeactivationSchema.parse(req.body);
+  const { deactivationReason, deactivationNote, overrideBillingGates, overrideReason } = completeDeactivationSchema.parse(req.body);
+
+  // Task #1220: Der Override (LN-/Rechnungs-Gates überspringen) ist
+  // ausschließlich Superadmins vorbehalten. Reguläre Admins erhalten weiterhin
+  // den harten Block.
+  if (overrideBillingGates && !req.user!.isSuperAdmin) {
+    res.status(403).json({ error: "FORBIDDEN", message: "Nur der Hauptadministrator kann die Abrechnungs-Prüfungen überspringen." });
+    return;
+  }
 
   const contractEnd = currentContract.contractEnd;
   const today = todayISO();
 
+  // Hartes Gate (auch per Override nicht überspringbar): Vertragsende erreicht.
   if (contractEnd > today) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: "Vertragsende noch nicht erreicht. Deaktivierung erst nach Vertragsende möglich." });
     return;
@@ -321,6 +343,7 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
       appointmentsRepo.activeOnly(),
       ne(appointments.status, "cancelled"),
     ));
+  // Hartes Gate (auch per Override nicht überspringbar): alle Termine dokumentiert.
   const undocumented = appointmentsBeforeEnd.filter(a => a.status !== "completed");
   if (undocumented.length > 0) {
     res.status(400).json({ error: "VALIDATION_ERROR", message: `${undocumented.length} Termin(e) noch nicht dokumentiert. Bitte alle Termine vor dem Vertragsende abschließen.` });
@@ -334,6 +357,10 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     months.add(`${y}-${m}`);
   }
 
+  // Fehlende Monate ohne Leistungsnachweis bzw. ohne Rechnung ermitteln. Diese
+  // werden entweder als harter Block (ohne Override) genutzt oder — beim
+  // Superadmin-Override — für den Audit-Trail festgehalten.
+  const monthsWithoutServiceRecord: string[] = [];
   for (const ym of months) {
     const [y, m] = ym.split("-").map(Number);
     const records = await monthlyServiceRecordsRepo.selectColumnsFrom({ id: monthlyServiceRecords.id })
@@ -345,11 +372,11 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
       ))
       .limit(1);
     if (records.length === 0) {
-      res.status(400).json({ error: "VALIDATION_ERROR", message: `Leistungsnachweis für ${m}/${y} fehlt. Bitte alle Leistungsnachweise erstellen.` });
-      return;
+      monthsWithoutServiceRecord.push(`${m}/${y}`);
     }
   }
 
+  const monthsWithoutInvoice: string[] = [];
   for (const ym of months) {
     const [y, m] = ym.split("-").map(Number);
     const existingInvoices = await db.select({ id: invoicesTable.id })
@@ -362,10 +389,35 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
       ))
       .limit(1);
     if (existingInvoices.length === 0) {
-      res.status(400).json({ error: "VALIDATION_ERROR", message: `Rechnung für ${m}/${y} fehlt. Bitte alle Rechnungen erstellen.` });
+      monthsWithoutInvoice.push(`${m}/${y}`);
+    }
+  }
+
+  if (!overrideBillingGates) {
+    // Reguläre Pfad: LN- und Rechnungs-Gates sind harte Blocker.
+    if (monthsWithoutServiceRecord.length > 0) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: `Leistungsnachweis für ${monthsWithoutServiceRecord[0]} fehlt. Bitte alle Leistungsnachweise erstellen.` });
+      return;
+    }
+    if (monthsWithoutInvoice.length > 0) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: `Rechnung für ${monthsWithoutInvoice[0]} fehlt. Bitte alle Rechnungen erstellen.` });
       return;
     }
   }
+
+  const skippedGates: string[] = [];
+  if (overrideBillingGates) {
+    if (monthsWithoutServiceRecord.length > 0) skippedGates.push("allServiceRecords");
+    if (monthsWithoutInvoice.length > 0) skippedGates.push("allInvoiced");
+  }
+
+  const trimmedOverrideReason = overrideReason?.trim() || null;
+  // Begründung des Overrides zusätzlich nachvollziehbar an der Deaktivierungs-
+  // Notiz hinterlegen (Task #1220).
+  const baseNote = deactivationNote?.trim() || "";
+  const persistedNote = overrideBillingGates && trimmedOverrideReason
+    ? `${baseNote ? `${baseNote}\n\n` : ""}[Superadmin-Override Abrechnungs-Gates] ${trimmedOverrideReason}`
+    : (baseNote || null);
 
   const updated = await db.transaction(async (tx) => {
     await tx.update(customerContracts)
@@ -380,7 +432,7 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
         status: "inaktiv",
         inaktivAb: currentContract.contractEnd,
         deactivationReason,
-        deactivationNote: deactivationNote || null,
+        deactivationNote: persistedNote,
         updatedAt: new Date(),
       })
       .where(eq(customers.id, id))
@@ -396,6 +448,13 @@ router.post("/customers/:id/complete-deactivation", asyncHandler("Deaktivierung 
     deactivationReason,
     previousStatus: "aktiv",
     newStatus: "inaktiv",
+    ...(overrideBillingGates ? {
+      override: true,
+      skippedGates,
+      monthsWithoutServiceRecord,
+      monthsWithoutInvoice,
+      overrideReason: trimmedOverrideReason,
+    } : {}),
   }, req.ip);
 
   birthdaysCache.invalidateAll();
