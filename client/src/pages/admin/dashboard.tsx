@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
   GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, CalendarClock, Lock, Repeat,
+  ChevronDown,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { cn } from "@/lib/utils";
@@ -74,20 +76,72 @@ function AdminCard({ href, testId, icon, iconBg, title, description, count }: Ad
   );
 }
 
-interface SectionProps {
+// Ein „Hub" ist eine Prozess-Gruppe. Die 5 Hubs sind das einzige
+// Navigationssystem des Admin-Bereichs (Phase 4): jede Admin-Seite ist genau
+// einem Hub zugeordnet. Sichtbarkeit ist rollen-/berechtigungsgebunden — ein
+// Hub erscheint nur, wenn der Admin mindestens eine seiner Karten sehen darf
+// (Berechtigungsschlüssel aus der Benutzerverwaltung). Superadmins sehen alles.
+interface Hub {
+  id: string;
   title: string;
-  children: React.ReactNode;
+  icon: React.ReactNode;
+  cards: AdminCardData[];
+  // Selten genutzte Hubs werden hinter Progressive Disclosure eingeklappt.
+  collapsible?: boolean;
 }
 
-function Section({ title, children }: SectionProps) {
+interface HubSectionProps {
+  hub: Hub;
+  cards: AdminCardData[];
+  counts: Record<string, number | undefined>;
+}
+
+function HubSection({ hub, cards, counts }: HubSectionProps) {
+  const [open, setOpen] = useState(false);
+  const grid = (
+    <div className="grid gap-4 md:grid-cols-2 auto-rows-fr">
+      {cards.map((card) => (
+        <AdminCard key={card.testId} {...card} count={counts[card.testId]} />
+      ))}
+    </div>
+  );
+
+  if (hub.collapsible) {
+    return (
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex items-center gap-2 w-full text-left group"
+          data-testid={`section-toggle-${hub.id}`}
+        >
+          <span className="text-gray-500">{hub.icon}</span>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider" data-testid={`section-${hub.id}`}>
+            {hub.title}
+          </h2>
+          <Badge variant="secondary" className="shrink-0">{cards.length}</Badge>
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 text-gray-400 ml-auto transition-transform group-hover:text-gray-600",
+              open && "rotate-180",
+            )}
+          />
+        </button>
+        {open && grid}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider" data-testid={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}>
-        {title}
-      </h2>
-      <div className="grid gap-4 md:grid-cols-2 auto-rows-fr">
-        {children}
+      <div className="flex items-center gap-2">
+        <span className="text-gray-500">{hub.icon}</span>
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider" data-testid={`section-${hub.id}`}>
+          {hub.title}
+        </h2>
       </div>
+      {grid}
     </div>
   );
 }
@@ -113,224 +167,251 @@ export default function AdminDashboard() {
     "card-qonto": qontoUnmatched?.total,
   };
 
-  const personalCards: AdminCardData[] = [
+  // Hub-Definitionen (Reihenfolge = Prozess-Reihenfolge). Jede Admin-Seite
+  // genau einmal; Sichtbarkeit über die Berechtigungsschlüssel aus der
+  // Benutzerverwaltung (siehe ADMIN_PERMISSION_KEYS).
+  const hubs: Hub[] = [
     {
-      href: "/admin/users",
-      testId: "card-users",
-      icon: <Users className={`${iconSize.lg} text-teal-600`} />,
-      iconBg: "bg-teal-100",
-      title: "Benutzerverwaltung",
-      description: "Mitarbeiter hinzufügen, bearbeiten und Rollen zuweisen",
-      permissionKey: "users",
+      id: "aufnahme",
+      title: "Aufnahme",
+      icon: <UserPlus className={iconSize.md} />,
+      cards: [
+        {
+          href: "/admin/prospects",
+          testId: "card-prospects",
+          icon: <UserPlus className={`${iconSize.lg} text-violet-600`} />,
+          iconBg: "bg-violet-100",
+          title: "Interessenten",
+          description: "Lead-Pipeline, Kontaktverfolgung und Erstberatungs-Konvertierung",
+          permissionKey: "prospects",
+        },
+        {
+          href: "/admin/planned-consultations",
+          testId: "card-planned-consultations",
+          icon: <CalendarClock className={`${iconSize.lg} text-teal-600`} />,
+          iconBg: "bg-teal-100",
+          title: "Erstberatungen",
+          description: "Geplante und überfällige Erstberatungstermine im Blick",
+          permissionKey: "customers",
+        },
+        {
+          href: "/admin/availability",
+          testId: "card-availability",
+          icon: <CalendarCheck className={`${iconSize.lg} text-emerald-600`} />,
+          iconBg: "bg-emerald-100",
+          title: "Verfügbarkeiten",
+          description: "Wochenübersicht freie Zeiten für Erstberatungen",
+          permissionKey: "users",
+        },
+      ],
     },
     {
-      href: "/admin/time-entries",
-      testId: "card-time-entries",
-      icon: <Clock className={`${iconSize.lg} text-green-600`} />,
-      iconBg: "bg-green-100",
-      title: "Zeiterfassung",
-      description: "Zeiten nachtragen, Urlaub & Krankheit verwalten",
-      permissionKey: "time_entries",
+      id: "betrieb",
+      title: "Betrieb",
+      icon: <CalendarCheck className={iconSize.md} />,
+      cards: [
+        {
+          href: "/admin/appointment-series",
+          testId: "card-appointment-series",
+          icon: <Repeat className={`${iconSize.lg} text-purple-600`} />,
+          iconBg: "bg-purple-100",
+          title: "Serientermine",
+          description: "Aktive Terminserien pro Kunde verwalten, verlängern oder beenden",
+          permissionKey: "customers",
+        },
+        {
+          href: "/admin/time-entries",
+          testId: "card-time-entries",
+          icon: <Clock className={`${iconSize.lg} text-green-600`} />,
+          iconBg: "bg-green-100",
+          title: "Zeiterfassung",
+          description: "Zeiten nachtragen, Urlaub & Krankheit verwalten",
+          permissionKey: "time_entries",
+        },
+        {
+          href: "/admin/proof-review",
+          testId: "card-document-review",
+          icon: <GraduationCap className={`${iconSize.lg} text-orange-600`} />,
+          iconBg: "bg-orange-100",
+          title: "Dokument-Prüfung",
+          description: "Hochgeladene Dokumentennachweise prüfen und freigeben",
+          permissionKey: "users",
+        },
+        {
+          href: "/admin/birthday-cards",
+          testId: "card-birthday-cards",
+          icon: <Gift className={`${iconSize.lg} text-rose-600`} />,
+          iconBg: "bg-rose-100",
+          title: "Geburtstage",
+          description: "Karten & Gutscheine verwalten",
+          permissionKey: "birthday_cards",
+        },
+        {
+          href: "/admin/import-appointments",
+          testId: "card-import-appointments",
+          icon: <FileSpreadsheet className={`${iconSize.lg} text-amber-600`} />,
+          iconBg: "bg-amber-100",
+          title: "Termin-Import",
+          description: "Historische Termine aus Excel-Datei importieren",
+          permissionKey: "super_admin_only",
+        },
+      ],
     },
     {
-      href: "/admin/proof-review",
-      testId: "card-document-review",
-      icon: <GraduationCap className={`${iconSize.lg} text-orange-600`} />,
-      iconBg: "bg-orange-100",
-      title: "Dokument-Prüfung",
-      description: "Hochgeladene Dokumentennachweise prüfen und freigeben",
-      permissionKey: "users",
-    },
-  ];
-
-  const schedulingCards: AdminCardData[] = [
-    {
-      href: "/admin/availability",
-      testId: "card-availability",
-      icon: <CalendarCheck className={`${iconSize.lg} text-emerald-600`} />,
-      iconBg: "bg-emerald-100",
-      title: "Verfügbarkeiten",
-      description: "Wochenübersicht freie Zeiten für Erstberatungen",
-      permissionKey: "users",
-    },
-    {
-      href: "/admin/planned-consultations",
-      testId: "card-planned-consultations",
-      icon: <CalendarClock className={`${iconSize.lg} text-teal-600`} />,
-      iconBg: "bg-teal-100",
-      title: "Erstberatungen",
-      description: "Geplante und überfällige Erstberatungstermine im Blick",
-      permissionKey: "customers",
-    },
-    {
-      href: "/admin/appointment-series",
-      testId: "card-appointment-series",
-      icon: <Repeat className={`${iconSize.lg} text-purple-600`} />,
-      iconBg: "bg-purple-100",
-      title: "Serientermine",
-      description: "Aktive Terminserien pro Kunde verwalten, verlängern oder beenden",
-      permissionKey: "customers",
-    },
-    {
-      href: "/admin/import-appointments",
-      testId: "card-import-appointments",
-      icon: <FileSpreadsheet className={`${iconSize.lg} text-amber-600`} />,
-      iconBg: "bg-amber-100",
-      title: "Termin-Import",
-      description: "Historische Termine aus Excel-Datei importieren",
-      permissionKey: "super_admin_only",
-    },
-  ];
-
-  const kundenCards: AdminCardData[] = [
-    {
-      href: "/admin/prospects",
-      testId: "card-prospects",
-      icon: <UserPlus className={`${iconSize.lg} text-violet-600`} />,
-      iconBg: "bg-violet-100",
-      title: "Interessenten",
-      description: "Lead-Pipeline, Kontaktverfolgung und Erstberatungs-Konvertierung",
-      permissionKey: "prospects",
-    },
-    {
-      href: "/admin/customers",
-      testId: "card-customers",
-      icon: <Contact2 className={`${iconSize.lg} text-blue-600`} />,
-      iconBg: "bg-blue-100",
-      title: "Kundenverwaltung",
-      description: "Kunden anlegen, bearbeiten und verwalten",
-      permissionKey: "customers",
-    },
-    {
-      href: "/admin/insurance-providers",
-      testId: "card-insurance-providers",
-      icon: <Building2 className={`${iconSize.lg} text-pink-600`} />,
-      iconBg: "bg-pink-100",
-      title: "Kostenträger",
-      description: "Pflegekassen anlegen und verwalten",
-      permissionKey: "insurance_providers",
-    },
-    {
-      href: "/admin/documents",
-      testId: "card-documents",
-      icon: <FileText className={`${iconSize.lg} text-amber-600`} />,
-      iconBg: "bg-amber-100",
-      title: "Dokumente & Vorlagen",
-      description: "Dokumententypen, Vertragsvorlagen und Prüffristen",
-      permissionKey: "documents",
-    },
-    {
-      href: "/admin/services",
-      testId: "card-services",
-      icon: <ClipboardList className={`${iconSize.lg} text-cyan-600`} />,
-      iconBg: "bg-cyan-100",
-      title: "Dienstleistungen",
-      description: "Leistungskatalog und Standardpreise verwalten",
-      permissionKey: "services",
-    },
-    {
-      href: "/admin/birthday-cards",
-      testId: "card-birthday-cards",
-      icon: <Gift className={`${iconSize.lg} text-rose-600`} />,
-      iconBg: "bg-rose-100",
-      title: "Geburtstage",
-      description: "Karten & Gutscheine verwalten",
-      permissionKey: "birthday_cards",
-    },
-  ];
-
-  const abrechnungCards: AdminCardData[] = [
-    {
-      href: "/admin/month-close-run",
-      testId: "card-month-close-run",
-      icon: <CalendarCheck className={`${iconSize.lg} text-teal-600`} />,
-      iconBg: "bg-teal-100",
+      id: "abrechnung",
       title: "Monatsabschluss & Abrechnung",
-      description: "Geführter Lauf: Abschluss, Prüfung, Rechnungen, Zahlungen, Export",
-      permissionKey: "billing",
+      icon: <Receipt className={iconSize.md} />,
+      cards: [
+        {
+          href: "/admin/month-close-run",
+          testId: "card-month-close-run",
+          icon: <CalendarCheck className={`${iconSize.lg} text-teal-600`} />,
+          iconBg: "bg-teal-100",
+          title: "Monatsabschluss & Abrechnung",
+          description: "Geführter Lauf: Abschluss, Prüfung, Rechnungen, Zahlungen, Export",
+          permissionKey: "billing",
+        },
+        {
+          href: "/admin/month-closing",
+          testId: "card-month-closing",
+          icon: <Lock className={`${iconSize.lg} text-teal-600`} />,
+          iconBg: "bg-teal-100",
+          title: "Monatsabschluss",
+          description: "Monate zentral für alle Mitarbeiter prüfen und abschließen",
+          permissionKey: "time_entries",
+        },
+        {
+          href: "/admin/billing",
+          testId: "card-billing",
+          icon: <Receipt className={`${iconSize.lg} text-emerald-600`} />,
+          iconBg: "bg-emerald-100",
+          title: "Abrechnung",
+          description: "Rechnungen erstellen, Leistungsnachweise und Storno",
+          permissionKey: "billing",
+        },
+        {
+          href: "/admin/proof-review",
+          testId: "card-proof-review",
+          icon: <FileCheck className={`${iconSize.lg} text-sky-600`} />,
+          iconBg: "bg-sky-100",
+          title: "Leistungsnachweis-Prüfung",
+          description: "Eingereichte Leistungsnachweise prüfen und freigeben",
+          permissionKey: "billing",
+        },
+        {
+          href: "/admin/hours-overview",
+          testId: "card-hours-overview",
+          icon: <Clock className={`${iconSize.lg} text-cyan-600`} />,
+          iconBg: "bg-cyan-100",
+          title: "Stundenübersicht",
+          description: "Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter",
+          permissionKey: "hours_overview",
+        },
+      ],
     },
     {
-      href: "/admin/month-closing",
-      testId: "card-month-closing",
-      icon: <Lock className={`${iconSize.lg} text-teal-600`} />,
-      iconBg: "bg-teal-100",
-      title: "Monatsabschluss",
-      description: "Monate zentral für alle Mitarbeiter prüfen und abschließen",
-      permissionKey: "time_entries",
+      id: "stammdaten",
+      title: "Stammdaten",
+      icon: <Contact2 className={iconSize.md} />,
+      cards: [
+        {
+          href: "/admin/customers",
+          testId: "card-customers",
+          icon: <Contact2 className={`${iconSize.lg} text-blue-600`} />,
+          iconBg: "bg-blue-100",
+          title: "Kundenverwaltung",
+          description: "Kunden anlegen, bearbeiten und verwalten",
+          permissionKey: "customers",
+        },
+        {
+          href: "/admin/users",
+          testId: "card-users",
+          icon: <Users className={`${iconSize.lg} text-teal-600`} />,
+          iconBg: "bg-teal-100",
+          title: "Benutzerverwaltung",
+          description: "Mitarbeiter hinzufügen, bearbeiten und Rollen zuweisen",
+          permissionKey: "users",
+        },
+        {
+          href: "/admin/insurance-providers",
+          testId: "card-insurance-providers",
+          icon: <Building2 className={`${iconSize.lg} text-pink-600`} />,
+          iconBg: "bg-pink-100",
+          title: "Kostenträger",
+          description: "Pflegekassen anlegen und verwalten",
+          permissionKey: "insurance_providers",
+        },
+        {
+          href: "/admin/services",
+          testId: "card-services",
+          icon: <ClipboardList className={`${iconSize.lg} text-cyan-600`} />,
+          iconBg: "bg-cyan-100",
+          title: "Dienstleistungen",
+          description: "Leistungskatalog und Standardpreise verwalten",
+          permissionKey: "services",
+        },
+        {
+          href: "/admin/documents",
+          testId: "card-documents",
+          icon: <FileText className={`${iconSize.lg} text-amber-600`} />,
+          iconBg: "bg-amber-100",
+          title: "Dokumente & Vorlagen",
+          description: "Dokumententypen, Vertragsvorlagen und Prüffristen",
+          permissionKey: "documents",
+        },
+      ],
     },
     {
-      href: "/admin/billing",
-      testId: "card-billing",
-      icon: <Receipt className={`${iconSize.lg} text-emerald-600`} />,
-      iconBg: "bg-emerald-100",
-      title: "Abrechnung",
-      description: "Rechnungen erstellen, Leistungsnachweise und Storno",
-      permissionKey: "billing",
-    },
-    {
-      href: "/admin/hours-overview",
-      testId: "card-hours-overview",
-      icon: <Clock className={`${iconSize.lg} text-cyan-600`} />,
-      iconBg: "bg-cyan-100",
-      title: "Stundenübersicht",
-      description: "Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter",
-      permissionKey: "hours_overview",
-    },
-    {
-      href: "/admin/proof-review",
-      testId: "card-proof-review",
-      icon: <FileCheck className={`${iconSize.lg} text-sky-600`} />,
-      iconBg: "bg-sky-100",
-      title: "Leistungsnachweis-Prüfung",
-      description: "Eingereichte Leistungsnachweise prüfen und freigeben",
-      permissionKey: "billing",
-    },
-    {
-      href: "/admin/statistics",
-      testId: "card-statistics",
-      icon: <BarChart3 className={`${iconSize.lg} text-indigo-600`} />,
-      iconBg: "bg-indigo-100",
-      title: "Statistiken",
-      description: "Kennzahlen, Umsatz und Performance-Analysen",
-      permissionKey: "statistics",
+      id: "system",
+      title: "System & Auswertung",
+      icon: <Settings className={iconSize.md} />,
+      collapsible: true,
+      cards: [
+        {
+          href: "/admin/statistics",
+          testId: "card-statistics",
+          icon: <BarChart3 className={`${iconSize.lg} text-indigo-600`} />,
+          iconBg: "bg-indigo-100",
+          title: "Statistiken",
+          description: "Kennzahlen, Umsatz und Performance-Analysen",
+          permissionKey: "statistics",
+        },
+        {
+          href: "/admin/settings",
+          testId: "card-settings",
+          icon: <Settings className={`${iconSize.lg} text-purple-600`} />,
+          iconBg: "bg-purple-100",
+          title: "Einstellungen",
+          description: "Firmendaten, E-Mail-Versand und Systemkonfiguration",
+          permissionKey: "settings",
+        },
+        {
+          href: "/admin/whatsapp",
+          testId: "card-whatsapp",
+          icon: <MessageSquare className={`${iconSize.lg} text-green-600`} />,
+          iconBg: "bg-green-100",
+          title: "WhatsApp",
+          description: "WhatsApp-Benachrichtigungen konfigurieren und verwalten",
+          permissionKey: "whatsapp",
+        },
+        {
+          href: "/admin/audit-log",
+          testId: "card-audit-log",
+          icon: <Shield className={`${iconSize.lg} text-red-600`} />,
+          iconBg: "bg-red-100",
+          title: "Audit-Log",
+          description: "Unveränderliches Protokoll aller Unterschriften und Änderungen",
+          permissionKey: "audit_log",
+        },
+      ],
     },
   ];
 
-  const systemCards: AdminCardData[] = [
-    {
-      href: "/admin/settings",
-      testId: "card-settings",
-      icon: <Settings className={`${iconSize.lg} text-purple-600`} />,
-      iconBg: "bg-purple-100",
-      title: "Einstellungen",
-      description: "Firmendaten, E-Mail-Versand und Systemkonfiguration",
-      permissionKey: "settings",
-    },
-    {
-      href: "/admin/whatsapp",
-      testId: "card-whatsapp",
-      icon: <MessageSquare className={`${iconSize.lg} text-green-600`} />,
-      iconBg: "bg-green-100",
-      title: "WhatsApp",
-      description: "WhatsApp-Benachrichtigungen konfigurieren und verwalten",
-      permissionKey: "whatsapp",
-    },
-    {
-      href: "/admin/audit-log",
-      testId: "card-audit-log",
-      icon: <Shield className={`${iconSize.lg} text-red-600`} />,
-      iconBg: "bg-red-100",
-      title: "Audit-Log",
-      description: "Unveränderliches Protokoll aller Unterschriften und Änderungen",
-      permissionKey: "audit_log",
-    },
-  ];
-
-  const filterCards = (cards: AdminCardData[]) =>
-    cards.filter((card) => hasAdminPermission(card.permissionKey));
-
+  // Zahlungen & Qonto bleibt Geschäftsführung (Superadmin) vorbehalten und
+  // wird in den Abrechnungs-Hub eingehängt, sobald ein Superadmin angemeldet ist.
   if (isSuperAdmin) {
-    abrechnungCards.push({
+    const abrechnung = hubs.find((h) => h.id === "abrechnung");
+    abrechnung?.cards.push({
       href: "/admin/qonto",
       testId: "card-qonto",
       icon: <Landmark className={`${iconSize.lg} text-sky-600`} />,
@@ -340,12 +421,6 @@ export default function AdminDashboard() {
       permissionKey: "billing",
     });
   }
-
-  const visiblePersonal = filterCards(personalCards);
-  const visibleScheduling = filterCards(schedulingCards);
-  const visibleKunden = filterCards(kundenCards);
-  const visibleAbrechnung = filterCards(abrechnungCards);
-  const visibleSystem = filterCards(systemCards);
 
   return (
     <Layout variant="admin">
@@ -364,45 +439,13 @@ export default function AdminDashboard() {
       <AdminCockpit isSuperAdmin={isSuperAdmin} can={hasAdminPermission} />
 
       <div className="space-y-8 mt-8">
-        {visiblePersonal.length > 0 && (
-          <Section title="Personal & Team">
-            {visiblePersonal.map((card) => (
-              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
-            ))}
-          </Section>
-        )}
-
-        {visibleScheduling.length > 0 && (
-          <Section title="Terminplanung">
-            {visibleScheduling.map((card) => (
-              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
-            ))}
-          </Section>
-        )}
-
-        {visibleKunden.length > 0 && (
-          <Section title="Kunden & Verträge">
-            {visibleKunden.map((card) => (
-              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
-            ))}
-          </Section>
-        )}
-
-        {visibleAbrechnung.length > 0 && (
-          <Section title="Abrechnung & Finanzen">
-            {visibleAbrechnung.map((card) => (
-              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
-            ))}
-          </Section>
-        )}
-
-        {visibleSystem.length > 0 && (
-          <Section title="System & Sicherheit">
-            {visibleSystem.map((card) => (
-              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
-            ))}
-          </Section>
-        )}
+        {hubs.map((hub) => {
+          const visibleCards = hub.cards.filter((card) => hasAdminPermission(card.permissionKey));
+          if (visibleCards.length === 0) return null;
+          return (
+            <HubSection key={hub.id} hub={hub} cards={visibleCards} counts={tileCounts} />
+          );
+        })}
       </div>
     </Layout>
   );
