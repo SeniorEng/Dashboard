@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { usePendingProofs, usePlannedConsultations } from "@/features/admin/hooks/use-admin-work-queues";
 import { useBudgetSetupMissingCount } from "@/features/customers/hooks/use-customers";
 import { useQontoStatus, useQontoTransactions } from "@/features/qonto/hooks/use-qonto-queries";
+import { AdminCockpit } from "@/features/admin/components/admin-cockpit";
 
 interface AdminCardData {
   href: string;
@@ -351,7 +352,9 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="space-y-8">
+      <AdminCockpit isSuperAdmin={isSuperAdmin} can={hasAdminPermission} />
+
+      <div className="space-y-8 mt-8">
         {visiblePersonal.length > 0 && (
           <Section title="Personal & Team">
             {visiblePersonal.map((card) => (
