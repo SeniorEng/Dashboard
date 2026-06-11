@@ -1,27 +1,25 @@
 /**
  * Task #1177 (Phase 3) — Übergeordnete Pipeline-Ansicht:
- * Interessent → In Anlage → Aktiv.
+ * Interessent → Aktiv.
  *
- * Zeigt die drei Lebenszyklus-Stufen eines Kunden als Funnel. Die Zahlen
- * werden aus vorhandenen Quellen abgeleitet (Prospect-Stats, „in Anlage"-
- * Zähler, aktive Kunden mit Vertrag) — kein neuer Status-Store.
+ * Zeigt die Lebenszyklus-Stufen eines Kunden als Funnel. Die Zahlen
+ * werden aus vorhandenen Quellen abgeleitet (Prospect-Stats, aktive Kunden
+ * mit Vertrag) — kein neuer Status-Store.
  */
 import { useMemo } from "react";
 import { useLocation } from "wouter";
-import { ChevronRight, Users, ClipboardList, UserCheck } from "lucide-react";
+import { ChevronRight, Users, UserCheck } from "lucide-react";
 import { iconSize } from "@/design-system";
-import { useCustomers, useInIntakeCount } from "@/features/customers";
+import { useCustomers } from "@/features/customers";
 
 export function PipelineFunnel({ prospectStats }: { prospectStats?: Record<string, number> }) {
   const [, navigate] = useLocation();
-  const { data: inIntakeData } = useInIntakeCount();
   const { data: activeData } = useCustomers({ status: "aktiv", hasActiveContract: "true", limit: 1 });
 
   const prospectCount = useMemo(
     () => Object.values(prospectStats ?? {}).reduce((sum, n) => sum + (n || 0), 0),
     [prospectStats],
   );
-  const inIntakeCount = inIntakeData?.count ?? 0;
   const activeCount = activeData?.total ?? 0;
 
   const stages = [
@@ -32,14 +30,6 @@ export function PipelineFunnel({ prospectStats }: { prospectStats?: Record<strin
       icon: Users,
       onClick: () => navigate("/admin/prospects"),
       classes: "bg-blue-50 border-blue-200 text-blue-800",
-    },
-    {
-      key: "in-intake",
-      label: "In Anlage",
-      count: inIntakeCount,
-      icon: ClipboardList,
-      onClick: () => navigate("/admin/customers"),
-      classes: "bg-teal-50 border-teal-200 text-teal-800",
     },
     {
       key: "active",

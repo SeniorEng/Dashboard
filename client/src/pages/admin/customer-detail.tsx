@@ -76,7 +76,6 @@ import {
   BudgetSetupRequiredBanner,
   BudgetsTabContent,
 } from "@/features/customers/components/admin/customer-detail-sections";
-import { IntakeChecklist } from "@/features/customers/components/admin/intake-checklist";
 
 export default function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -306,14 +305,6 @@ export default function AdminCustomerDetail() {
             pflegegrad={customer.pflegegrad ?? null}
             onSetup={() => handleTabChange("budgets")}
           />
-
-          {customer.status === "aktiv" && (
-            <IntakeChecklist
-              customer={customer}
-              customerId={customerId}
-              onOpenStep={handleTabChange}
-            />
-          )}
 
           {customer.status === "aktiv" && customer.inaktivAb && (
             <SectionCard className="mb-4 border-blue-200 bg-blue-50">

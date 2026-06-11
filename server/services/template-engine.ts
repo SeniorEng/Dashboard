@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { getCustomerCurrentInsurance, getInsuranceProvider } from "../storage/customer-mgmt/insurance";
 import { formatDateISO, formatDateForDisplay } from "@shared/utils/datetime";
 import { BILLING_TYPE_LABELS, type BillingType, CONTACT_TYPE_LABELS } from "@shared/domain/customers";
+import type { Customer, CustomerInsuranceHistory, InsuranceProvider } from "@shared/schema";
 
 interface TemplatePlaceholders {
   [key: string]: string;
@@ -311,13 +312,19 @@ export async function renderTemplateFromFormData(
   };
 }
 
-export async function buildPlaceholders(
-  customerId: number,
+/**
+ * Baut die Platzhalter aus einem BEREITS geladenen Kundensatz (+ optionaler
+ * Versicherung). Im Gegensatz zu {@link buildPlaceholders} liest diese Variante
+ * den Kunden NICHT erneut aus der DB — entscheidend für den atomaren Kunden-
+ * Anlage-Flow (`POST /customers`), in dem der Kunde innerhalb derselben, noch
+ * nicht committeten Transaktion entsteht und ein erneuter `storage.getCustomer`
+ * den Datensatz nicht sähe.
+ */
+export async function buildPlaceholdersFromCustomer(
+  customer: Customer,
+  insurance: (Pick<CustomerInsuranceHistory, "versichertennummer"> & { provider: InsuranceProvider }) | null | undefined,
   overrides: TemplatePlaceholders = {}
 ): Promise<TemplatePlaceholders> {
-  const customer = await storage.getCustomer(customerId);
-  if (!customer) throw new Error("Kunde nicht gefunden");
-
   const today = new Date();
   const todayDE = formatDateForDisplay(formatDateISO(today));
 
@@ -360,7 +367,7 @@ export async function buildPlaceholders(
     kontaktperson_festnetz: "",
     kontaktperson_email: "",
     kontaktperson_typ: "",
-    mandatsreferenz: `SE-${customerId}-${today.getFullYear()}`,
+    mandatsreferenz: `SE-${customer.id}-${today.getFullYear()}`,
     current_date: todayDE,
     heute: todayDE,
     ...COMPANY_PLACEHOLDER_DEFAULTS,
@@ -368,27 +375,40 @@ export async function buildPlaceholders(
 
   await applyCompanySettings(placeholders);
 
-  try {
-    const insurance = await getCustomerCurrentInsurance(customerId);
-    if (insurance) {
-      placeholders.versichertennummer = insurance.versichertennummer || "";
-      placeholders.insurance_name = insurance.provider.name || "";
-      placeholders.ik_nummer = insurance.provider.ikNummer || "";
-      placeholders.insurance_empfaenger = insurance.provider.empfaenger || insurance.provider.name || "";
-      placeholders.insurance_strasse = [insurance.provider.strasse, insurance.provider.hausnummer].filter(Boolean).join(" ");
-      placeholders.insurance_plz = insurance.provider.plz || "";
-      placeholders.insurance_stadt = insurance.provider.stadt || "";
-      placeholders.insurance_address = [
-        insurance.provider.strasse ? `${insurance.provider.strasse} ${insurance.provider.hausnummer || ""}`.trim() : "",
-        [insurance.provider.plz, insurance.provider.stadt].filter(Boolean).join(" "),
-      ].filter(Boolean).join(", ");
-    }
-  } catch (_e) {
+  if (insurance) {
+    placeholders.versichertennummer = insurance.versichertennummer || "";
+    placeholders.insurance_name = insurance.provider.name || "";
+    placeholders.ik_nummer = insurance.provider.ikNummer || "";
+    placeholders.insurance_empfaenger = insurance.provider.empfaenger || insurance.provider.name || "";
+    placeholders.insurance_strasse = [insurance.provider.strasse, insurance.provider.hausnummer].filter(Boolean).join(" ");
+    placeholders.insurance_plz = insurance.provider.plz || "";
+    placeholders.insurance_stadt = insurance.provider.stadt || "";
+    placeholders.insurance_address = [
+      insurance.provider.strasse ? `${insurance.provider.strasse} ${insurance.provider.hausnummer || ""}`.trim() : "",
+      [insurance.provider.plz, insurance.provider.stadt].filter(Boolean).join(" "),
+    ].filter(Boolean).join(", ");
   }
 
   Object.assign(placeholders, overrides);
 
   return placeholders;
+}
+
+export async function buildPlaceholders(
+  customerId: number,
+  overrides: TemplatePlaceholders = {}
+): Promise<TemplatePlaceholders> {
+  const customer = await storage.getCustomer(customerId);
+  if (!customer) throw new Error("Kunde nicht gefunden");
+
+  let insurance: (CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined;
+  try {
+    insurance = await getCustomerCurrentInsurance(customerId);
+  } catch (_e) {
+    insurance = undefined;
+  }
+
+  return buildPlaceholdersFromCustomer(customer, insurance ?? null, overrides);
 }
 
 export function renderTemplate(htmlContent: string, placeholders: TemplatePlaceholders): string {

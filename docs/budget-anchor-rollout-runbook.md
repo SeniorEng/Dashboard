@@ -1,6 +1,13 @@
 # Budget-Anker-Production-Rollout — Operator-Runbook (Task #1209)
 
-**Zweck:** Den Budget-Anker-Backfill (`server/scripts/backfill-budget-anchor.ts`,
+> **⚠️ OBSOLET (Task #1204).** Der persistierte kunden-weite Budget-Anker
+> (`customer_budget_preferences.budget_start_date`/`_origin`) wurde entfernt; der
+> Anker wird seither zur Laufzeit pro Topf aus der Pflegegrad-Historie abgeleitet.
+> Der zugehörige Backfill (`server/scripts/backfill-budget-anchor.ts`) und der
+> Wrapper (`scripts/prod-budget-anchor-rollout.sh`) wurden gelöscht — dieses
+> Runbook ist nur noch als Historie erhalten. **Nicht mehr ausführen.**
+
+**Zweck (historisch):** Den Budget-Anker-Backfill (`server/scripts/backfill-budget-anchor.ts`,
 Task #1203) **sicher gegen die Live-Production-DB** ausrollen — mit Pre-Rollout-
 Backup, intaktem Prod-Guard, menschlich-gegateter REVIEW-Stufe und GoBD-Audit.
 

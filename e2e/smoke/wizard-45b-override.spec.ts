@@ -120,9 +120,9 @@ async function fillUntilBudgets(
 
   await page.goto("/admin/customers/new", { waitUntil: "domcontentloaded" });
 
-  // Task #1177 — Minimal-Create ist der Standard; den vollständigen Wizard
-  // (mit §45b-Anlage-Override) zuerst über den Umschalter sichtbar machen.
-  await page.locator("[data-testid='button-toggle-all-steps']").click();
+  // Task #1213 — Es gibt nur noch EINEN vollständigen Schritt-für-Schritt-Wizard
+  // (kein Minimal-/Schnellanlage-Umschalter mehr). Der §45b-Anlage-Override ist
+  // damit immer Teil des Budget-Schritts.
 
   // Schritt 1: Kundentyp (auto-advance ~150ms nach Klick)
   await page.locator("[data-testid='card-billing-type-pflegekasse_gesetzlich']").click();

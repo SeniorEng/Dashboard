@@ -149,22 +149,6 @@ export function useUnassignedCustomerCount() {
   });
 }
 
-// Task #1177 — Zähler für „Kunden in Anlage" (aktiv, aber noch ohne aktiven
-// Vertrag) für die Cockpit-Inbox bzw. den Kundenlisten-Banner.
-export function useInIntakeCount() {
-  return useQuery({
-    queryKey: [...customerKeys.all, "in-intake-count"] as const,
-    queryFn: async ({ signal }) => {
-      const result = await api.get<{ count: number }>(
-        "/admin/customers/in-intake-count",
-        signal
-      );
-      return unwrapResult(result);
-    },
-    staleTime: 30000,
-  });
-}
-
 // Task #1194 — Aufteilung der aktiven Kunden in „laufend" vs. „gekündigt"
 // (gesamt, nicht nur die aktuelle Seite) für Split-Badge + Filter-Chips der
 // server-paginierten Admin-Kundenliste.

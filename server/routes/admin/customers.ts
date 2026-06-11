@@ -12,6 +12,7 @@ import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-v
 import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
 import { validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
+import { BudgetInitialSetupError } from "../../services/budget-initial-setup";
 import { findCustomerDuplicates, findCustomerByVersichertennummer } from "../../lib/duplicate-check";
 import { readTestFaults } from "../../lib/test-fault-injector";
 import { hashPayload, reserveIdempotencyKey, finalizeIdempotencyReservation, releaseIdempotencyReservation, findRecentDuplicates } from "../../lib/idempotency";
@@ -193,18 +194,6 @@ router.get("/customers/budget-setup-missing-count", asyncHandler("Zählung konnt
   res.json({ count: result.total });
 }));
 
-// Task #1177 — Zähler für „Kunden in Anlage" (Cockpit-Inbox). Ein Kunde gilt
-// als „in Anlage", wenn er aktiv ist, aber noch keinen aktiven Vertrag hat —
-// der zentrale Onboarding-Meilenstein. Kein eigener Status-Store, abgeleitet
-// aus den vorhandenen Daten (Status + aktiver Vertrag).
-router.get("/customers/in-intake-count", asyncHandler("Zählung konnte nicht geladen werden", async (_req: Request, res: Response) => {
-  const result = await customerManagementStorage.getCustomersPaginated(
-    { status: "aktiv", hasActiveContract: false },
-    { limit: 1, offset: 0 },
-  );
-  res.json({ count: result.total });
-}));
-
 // Task #1194 — Aufteilung der aktiven Kunden in „laufend" vs. „gekündigt"
 // (gesamt, nicht nur die aktuelle Seite). Spiegelt die reine Klassifikation in
 // shared/domain/customers/lifecycle.ts. Speist die Filter-Chips + Split-Badge
@@ -307,7 +296,25 @@ const simpleCreateCustomerSchema = z.object({
     pflegesachleistungen36: z.number(),
     validFrom: z.string(),
     carryoverAmountCents: z.number().min(0, "Betrag darf nicht negativ sein").optional(),
+    // Task #1213 — §45b-Restguthaben-Override (laufendes Jahr) als initial_balance,
+    // sowie der zugehörige Stichmonat-Start (`YYYY-MM-01`). Ersetzt den früheren
+    // separaten `POST /budget/:id/initial-budget`-Aufruf des Frontends.
+    override45bCents: z.number().min(0, "Betrag darf nicht negativ sein").optional(),
+    override45bStichmonatStart: z.string().optional().nullable(),
   }).optional(),
+  // Task #1213 — Unterschriften + hochgeladene Dokumente fließen in DENSELBEN
+  // Anlage-Request; PDFs werden server-seitig innerhalb der Anlage-Transaktion
+  // generiert (kein separater Folge-Aufruf mehr).
+  signatures: z.array(z.object({
+    templateSlug: z.string().min(1),
+    customerSignatureData: z.string().regex(/^data:image\/(png|jpeg);base64,/, "Ungültiges Signaturformat"),
+  })).optional(),
+  signingLocation: z.string().optional().nullable(),
+  documents: z.array(z.object({
+    documentTypeId: z.number().int(),
+    fileName: z.string().min(1),
+    objectPath: z.string().min(1),
+  })).optional(),
   contract: z.object({
     contractStart: z.string(),
     contractDate: z.string().optional(),
@@ -549,23 +556,45 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
   // pro Kunde explizit konfiguriert. Wird `data.budgets` weggelassen,
   // bleiben die Töpfe absichtlich leer und müssen im Folgeschritt erfasst
   // werden — `createCustomerRelatedData` legt nichts implizit an.
-  const { customer, warnings } = await db.transaction(async (tx) => {
-    const created = await customerManagementStorage.createCustomerDirect(customerData, tx);
-    const w = await createCustomerRelatedData({
-      customerId: created.id,
-      userId,
-      logPrefix: "POST /customers",
-      pflegegrad: data.pflegegrad,
-      pflegegradSeit: data.pflegegradSeit,
-      insurance: data.insurance,
-      contacts: data.contacts,
-      budgets: data.budgets,
-      contract: data.contract,
-      tx,
-      testFaults,
+  let customer: Awaited<ReturnType<typeof customerManagementStorage.createCustomerDirect>>;
+  let warnings: string[];
+  try {
+    const result = await db.transaction(async (tx) => {
+      const created = await customerManagementStorage.createCustomerDirect(customerData, tx);
+      const w = await createCustomerRelatedData({
+        customerId: created.id,
+        userId,
+        logPrefix: "POST /customers",
+        billingType: data.billingType,
+        pflegegrad: data.pflegegrad,
+        pflegegradSeit: data.pflegegradSeit,
+        insurance: data.insurance,
+        contacts: data.contacts,
+        budgets: data.budgets,
+        contract: data.contract,
+        customer: created,
+        signatures: data.signatures,
+        signingLocation: data.signingLocation,
+        signingIp: req.ip || req.socket.remoteAddress || null,
+        documents: data.documents,
+        tx,
+        testFaults,
+      });
+      return { customer: created, warnings: w };
     });
-    return { customer: created, warnings: w };
-  });
+    customer = result.customer;
+    warnings = result.warnings;
+  } catch (err) {
+    // Task #1213 — Typisierte Startbudget-Fehler (Selbstzahler-/Pflegegrad-/
+    // §45b-Kappung) ins einheitliche Wire-Format übersetzen. Die Transaktion
+    // ist bereits zurückgerollt — kein Orphan-Customer.
+    if (err instanceof BudgetInitialSetupError) {
+      await releaseIfNeeded();
+      res.status(err.httpStatus).json({ error: err.code, code: err.code, message: err.message });
+      return;
+    }
+    throw err;
+  }
 
   // Task #724 (Option B) — Strukturierte Markierung im Response, wenn ein
   // pflegekassenberechtigter Kunde (Pflegegrad ≥ 2) ohne Budget-Daten

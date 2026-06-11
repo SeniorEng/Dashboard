@@ -7,11 +7,10 @@ import { requireIntParam } from "../lib/params";
 import { 
   insertBudgetAllocationSchema, 
   insertBudgetPreferencesSchema,
-  type BudgetAllocation,
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
-import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
+import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
 import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
@@ -19,12 +18,11 @@ import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-valid
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
 import {
-  eligible45bCarryoverMonths,
-  max45bCarryoverCents,
   max45bStartValueCents,
   resolve45bAccrualAnchor,
   validate45bInitialBalanceNotPriorYear,
 } from "@shared/domain/budget/carryover-eligibility";
+import { applyInitialBudget, BudgetInitialSetupError } from "../services/budget-initial-setup";
 import type { BudgetOverviewDTO } from "@shared/api/budget";
 
 /**
@@ -929,171 +927,41 @@ router.post("/:customerId/initial-budget", asyncHandler("Startbudget konnte nich
     return;
   }
 
-  const { budgetType, carryoverAmountCents, currentMonthAmountCents } = result.data;
+  const { budgetType, carryoverAmountCents, currentMonthAmountCents, budgetStartDate } = result.data;
   const userId = req.user?.id;
-  // Task #856 — §45b wird ab dem Pflegegrad-Beginn angesetzt. Damit ein weit
-  // zurückliegender Pflegegrad nicht jahrelange 131€-Beträge rückwirkend
-  // akkumuliert, kappt der Server NUR die §45b-Allokationszeilen (Startwert +
-  // Carryover) aufs rechtliche §45b-Carryover-/Verfalls-Fenster (aktuelles Jahr +
-  // Vorjahr bis 30.06.).
-  // Task #1204 — Es gibt keinen persistierten kunden-weiten `budget_start_date`
-  // mehr; jeder Topf leitet seinen Anker zur Laufzeit aus der Pflegegrad-Historie
-  // ab (§45a/§39 roh, §45b aufs laufende Jahr gebodet). `budgetStartDate` hier ist
-  // NUR der `/initial-budget`-Request-Body-Parameter (Stichmonat der
-  // initial_balance-Zeile), kein Anker. `rawBudgetStartDate` dient unten
-  // ausschließlich als Fallback für den §45b-Accrual-Anker-Cap.
-  const rawBudgetStartDate = result.data.budgetStartDate;
-  let budgetStartDate = rawBudgetStartDate;
-  if (budgetType === "entlastungsbetrag_45b") {
-    // Task #860 — §45b-Onboarding-Baseline: Startwert- und Carryover-Zeilen werden
-    // auf das LAUFENDE Jahr gebodet (1.1. curYear), identisch zum §45b-Lesepfad
-    // (`calculateAllocated45b`/`ensureYearlyCarryover45b`). So liegt eine evtl.
-    // angelegte initial_balance-Zeile im selben Jahr wie der Accrual-Start und ein
-    // operator-erfasster Übertrag bekommt validFrom=1.1./expiresAt=30.06. des
-    // laufenden Jahres. Das Vorjahr gilt beim Onboarding als aufgebraucht.
-    const now = parseLocalDate(todayISO());
-    budgetStartDate = floorAutoAnchor45bToCurrentYear(budgetStartDate, now.getFullYear());
-  }
-  const startDate = parseLocalDate(budgetStartDate);
-  const year = startDate.getFullYear();
 
-  // Task #705 — Selbstzahler-Routing (Variante A): §45b ist eine Pflege­
-  // kassenleistung und für Selbstzahler nicht buchbar. Statt diese Topf-
-  // Anlage stillschweigend zu akzeptieren (Folgefehler im Wizard/Booking),
-  // antworten wir mit 409.
   const customer = await storage.getCustomer(customerId);
   if (!customer) {
     res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
     return;
   }
-  // Task #705 / #716 / #722 — Selbstzahler- und Pflegegrad-Block via shared
-  // Validatoren. `customer` ist hier bereits geladen, daher direkt
-  // `rejectBudgetIntent` statt der DB-lesenden Wrapper-Funktion.
-  if (rejectBudgetIntent(
-    { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType },
-    res,
-  )) return;
 
-  // Task #959 — §45b-Akkumulations-Obergrenze (Gap 3). Ein §45b-Startwert
-  // (`initial_balance`) repräsentiert das bis zum Startmonat angesammelte, noch
-  // nicht verbrauchte Guthaben; er darf höchstens (berechtigte Monate ab
-  // Accrual-Anker bis Startmonat) × 131 € betragen. Der Vorjahres-Übertrag wird
-  // separat über die im Vorjahr berechtigten Monate begrenzt. Beide Caps
-  // verhindern, dass beim Onboarding mehr §45b-Budget erfasst wird, als rechtlich
-  // je hätte entstehen können. Accrual-Anker = frühester Pflegegrad-Beginn
-  // (Care-Level-Historie), Fallback = RAW-Budget-Start.
-  if (budgetType === "entlastungsbetrag_45b") {
-    const { getCustomerCareLevelHistory } = await import("../storage/customer-mgmt/care-level");
-    const careLevelHistory = await getCustomerCareLevelHistory(customerId);
-    const accrualAnchor = resolve45bAccrualAnchor(careLevelHistory, rawBudgetStartDate);
-
-    if (currentMonthAmountCents > 0) {
-      const startCap = max45bStartValueCents(accrualAnchor, budgetStartDate);
-      if (currentMonthAmountCents > startCap) {
-        res.status(400).json({
-          error: "VALIDATION_ERROR",
-          code: "BUDGET_45B_START_VALUE_EXCEEDED",
-          message: `§45b-Startguthaben darf höchstens ${formatEuroDE(startCap)} betragen (rechtlich mögliche Ansammlung bis zum Startmonat). Eingegeben: ${formatEuroDE(currentMonthAmountCents)}.`,
-        });
-        return;
-      }
-    }
-
-    if (carryoverAmountCents > 0) {
-      const carryoverCap = max45bCarryoverCents(
-        eligible45bCarryoverMonths(accrualAnchor, year),
-      );
-      if (carryoverAmountCents > carryoverCap) {
-        res.status(400).json({
-          error: "VALIDATION_ERROR",
-          code: "BUDGET_45B_CARRYOVER_EXCEEDED",
-          message: `§45b-Übertrag aus ${year - 1} darf höchstens ${formatEuroDE(carryoverCap)} betragen (im Vorjahr berechtigte Monate). Eingegeben: ${formatEuroDE(carryoverAmountCents)}.`,
-        });
-        return;
-      }
-    }
-  }
-
-  // Task #705 — Bug 5: Für §45a/§39_42a setzt das Wizard-Flow ein
-  // `initial_balance` per `/initial-budget`, ohne dass die zugehörigen
-  // `customer_budget_type_settings` `enabled=true` sind. Read-Pfade
-  // (`getActiveBudgetTypeSettings`) filtern dann den Topf raus und der
-  // Startwert taucht im UI nicht auf. Vor dem Anlegen prüfen wir, ob die
-  // Settings existieren und enabled sind — sonst legen wir sie idempotent
-  // mit gesetzlichen Defaults an (Priority anhängend, keine
-  // monthly/yearlyLimit-Caps).
-  if ((budgetType === "umwandlung_45a" || budgetType === "ersatzpflege_39_42a") && currentMonthAmountCents > 0) {
-    // Task #876 — In-place-Aktivierung in den Storage-Layer gefoldet
-    // (`ensureBudgetTypeEnabledInPlace`); kein direkter db.*-Zugriff mehr in
-    // der Route. Begründung/GoBD-Hinweis siehe dort.
-    await budgetLedgerStorage.ensureBudgetTypeEnabledInPlace(customerId, budgetType, budgetStartDate);
-  }
-
-  const allocations: BudgetAllocation[] = [];
-
-  if (currentMonthAmountCents > 0) {
-    const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
-    const startMonth = startDate.getMonth() + 1;
-    await budgetLedgerStorage.upsertInitialBalanceAllocation({
-      customerId,
-      budgetType,
-      year,
-      month: startMonth,
-      amountCents: currentMonthAmountCents,
-      validFrom: budgetStartDate,
-      expiresAt,
-      notes: `Startguthaben ${year}`,
-    }, userId);
-    const allAllocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
-    if (allAllocations.length > 0) allocations.push(allAllocations[0]);
-  }
-
-  if (carryoverAmountCents > 0 && budgetType === "entlastungsbetrag_45b") {
-    // validFrom auf Jahresanfang setzen, damit der Carryover auch für
-    // rückwirkende Buchungen/Imports im Stichjahr verfügbar ist (Task #116).
-    // Ein an `budgetStartDate` gebundener Carryover wäre für Importmonate VOR
-    // diesem Datum unsichtbar und würde fälschlich zu Monatscap-Kürzungen führen.
-    // Task #601 — `year` = Zieljahr (Jahr, in dem der Übertrag verfügbar ist),
-    // konsistent zu `ensureYearlyCarryover45b`. Vorher: `year - 1` (Quelljahr) —
-    // dadurch matchte der Auto-Dedup in `ensureYearlyCarryover45b`
-    // (`existingCarryoverYears.has(y + 1)`) die manuell aus dem Wizard
-    // angelegte Zeile nicht, und beim ersten `PUT /type-settings` wurde
-    // zusätzlich ein 2. Carryover (12 × monthly) angelegt → Doppelzählung.
-    const carryoverAllocation = await budgetLedgerStorage.createBudgetAllocation({
-      customerId,
-      budgetType: "entlastungsbetrag_45b",
-      year,
-      month: null,
-      amountCents: carryoverAmountCents,
-      source: "carryover",
-      validFrom: `${year}-01-01`,
-      expiresAt: `${year}-06-30`,
-      notes: `Übertrag aus ${year - 1}`,
-    }, userId);
-    allocations.push(carryoverAllocation);
-  }
-
-  // Task #1204 — Kein kunden-weiter `budget_start_date` mehr: der Anker wird zur
-  // Laufzeit pro Topf aus der Pflegegrad-Historie abgeleitet (§45a/§39 roh, §45b
-  // aufs laufende Jahr gebodet). Hier wird daher keine Anker-Zeile mehr
-  // geschrieben; der `initial_balance`-Startwert oben trägt den Stichmonat selbst.
-
-  if (userId) {
-    const ip = req.ip || req.socket.remoteAddress;
-    await auditService.log(userId, "budget_initial_setup", "budget", customerId, {
+  // Task #1213 — Erfassungs-Logik (§45b-Kappung, §45a/§39-Aktivierung,
+  // initial_balance, Carryover, Anker-Preferences) liegt zentral in
+  // `applyInitialBudget` (SSoT, auch vom atomaren Kunden-Anlage-Flow genutzt).
+  // Die Route übersetzt nur typisierte Fehler ins Wire-Format.
+  try {
+    const allocations = await applyInitialBudget({
       customerId,
       budgetType,
       currentMonthAmountCents,
       carryoverAmountCents,
       budgetStartDate,
-      allocationIds: allocations.map(a => a.id),
-    }, ip);
+      customer: { billingType: customer.billingType, pflegegrad: customer.pflegegrad },
+      userId,
+      ip: req.ip || req.socket.remoteAddress || null,
+    });
+    res.status(201).json({
+      message: "Startbudget erfolgreich erfasst",
+      allocations,
+    });
+  } catch (err) {
+    if (err instanceof BudgetInitialSetupError) {
+      res.status(err.httpStatus).json({ error: err.code, code: err.code, message: err.message });
+      return;
+    }
+    throw err;
   }
-
-  res.status(201).json({
-    message: "Startbudget erfolgreich erfasst",
-    allocations,
-  });
 }));
 
 router.put("/:customerId/preferences", asyncHandler("Budget-Einstellungen konnten nicht gespeichert werden", async (req: Request, res: Response) => {

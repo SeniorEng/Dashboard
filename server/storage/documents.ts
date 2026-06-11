@@ -98,7 +98,7 @@ interface IDocumentStorage {
   getDocumentHistory(employeeId: number, documentTypeId: number): Promise<EmployeeDocument[]>;
   getEmployeeDocumentsDueSoon(leadTimeDays?: number): Promise<(EmployeeDocument & { documentType: DocumentType; employee: { id: number; displayName: string } })[]>;
 
-  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }): Promise<CustomerDocument>;
+  uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string; tx?: DbOrTx }): Promise<CustomerDocument>;
   getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]>;
   getGroupedCustomerDocuments(customerId: number): Promise<GroupedDocumentsByType[]>;
   getCustomerDocumentHistory(customerId: number, documentTypeId: number): Promise<CustomerDocument[]>;
@@ -328,10 +328,10 @@ class DocumentStorage implements IDocumentStorage {
     return docs.map(d => ({ ...d.doc, documentType: d.docType, employee: d.employee }));
   }
 
-  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }): Promise<CustomerDocument> {
+  async uploadCustomerDocument(data: InsertCustomerDocument, uploadedByUserId: number, options?: { skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string; tx?: DbOrTx }): Promise<CustomerDocument> {
     const reviewDueDate = await this.calculateReviewDueDate(data.documentTypeId);
 
-    return db.transaction(async (tx) => {
+    const run = async (tx: DbOrTx): Promise<CustomerDocument> => {
       if (!options?.skipDeactivation) {
         await tx
           .update(customerDocuments)
@@ -352,7 +352,12 @@ class DocumentStorage implements IDocumentStorage {
       }).returning();
 
       return result;
-    });
+    };
+
+    // Wenn eine äußere Transaktion übergeben wird (atomarer Kunden-Anlage-Flow),
+    // laufen Deaktivierung + Insert darin mit; sonst eine eigene Transaktion.
+    if (options?.tx) return run(options.tx);
+    return db.transaction(run);
   }
 
   async getCurrentCustomerDocuments(customerId: number): Promise<(CustomerDocument & { documentType: DocumentType })[]> {
@@ -557,8 +562,8 @@ class DocumentStorage implements IDocumentStorage {
     return rows.map(r => ({ ...r.doc, template: r.template }));
   }
 
-  async createGeneratedDocument(data: InsertGeneratedDocument, generatedByUserId: number): Promise<GeneratedDocument> {
-    const [result] = await db.insert(generatedDocuments).values({
+  async createGeneratedDocument(data: InsertGeneratedDocument, generatedByUserId: number, tx?: DbOrTx): Promise<GeneratedDocument> {
+    const [result] = await (tx ?? db).insert(generatedDocuments).values({
       customerId: data.customerId ?? null,
       employeeId: data.employeeId ?? null,
       templateId: data.templateId,

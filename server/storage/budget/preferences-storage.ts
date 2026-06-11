@@ -736,12 +736,14 @@ export async function ensureBudgetTypeEnabledInPlace(
   customerId: number,
   budgetType: string,
   validFrom: string,
+  tx?: DbClient,
 ): Promise<void> {
-  const active = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() });
+  const d = tx ?? db;
+  const active = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }, tx);
   const matching = active.find((s) => s.budgetType === budgetType);
   if (matching && matching.enabled) return;
   if (matching) {
-    await db.update(customerBudgetTypeSettings)
+    await d.update(customerBudgetTypeSettings)
       .set({ enabled: true, validFrom, updatedAt: sql`now()` })
       .where(and(
         eq(customerBudgetTypeSettings.customerId, customerId),
@@ -750,7 +752,7 @@ export async function ensureBudgetTypeEnabledInPlace(
       ));
   } else {
     const nextPriority = (active.reduce((max: number, s) => Math.max(max, s.priority), 0) || 0) + 1;
-    await db.insert(customerBudgetTypeSettings).values({
+    await d.insert(customerBudgetTypeSettings).values({
       customerId,
       budgetType,
       enabled: true,

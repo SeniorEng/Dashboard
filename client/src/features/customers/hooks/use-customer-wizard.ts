@@ -268,11 +268,6 @@ export function useCustomerWizard() {
     });
   }, []);
 
-  // Task #1177 — Frühanlage (Minimal-Create). Wird die Anlage direkt nach dem
-  // Personenschritt ausgelöst (statt am letzten Wizard-Schritt), muss der
-  // Duplikat-Dialog „Trotzdem anlegen" erstellen statt weiterzuschalten.
-  const createIntentRef = useRef(false);
-
   const handleCreate = (forceSkipDuplicate = false) => {
     const today = todayISO();
     
@@ -369,6 +364,12 @@ export function useCustomerWizard() {
       pflegesachleistungen36: is45aEnabled ? (Math.round(parseFloat(formData.pflegesachleistungen36) * 100) || 0) : 0,
       validFrom: today,
       carryoverAmountCents: carryoverAmount > 0 ? carryoverAmount : undefined,
+      // Task #1213 — §45b-Restguthaben-Override (laufendes Jahr) + Stichmonat-Start
+      // fließen jetzt in DENSELBEN Anlage-Request; der Server bucht das
+      // initial_balance innerhalb der Anlage-Transaktion (kein separater
+      // `POST /budget/:id/initial-budget` mehr).
+      override45bCents: override45bCents > 0 ? override45bCents : undefined,
+      override45bStichmonatStart: override45bStichmonatStart || undefined,
     };
     const budgets = budgetValues.entlastungsbetrag45b > 0 || budgetValues.verhinderungspflege39 > 0 || budgetValues.pflegesachleistungen36 > 0
       ? budgetValues
@@ -386,6 +387,26 @@ export function useCustomerWizard() {
       : undefined;
 
     const isPflegekasse = isPflegekasseCustomer(formData.billingType);
+
+    // Task #1213 — Unterschriften + hochgeladene Dokumente fließen in DENSELBEN
+    // Anlage-Request. Der Server generiert die Signatur-PDFs und persistiert
+    // alle Datensätze innerhalb der Anlage-Transaktion (kein separater
+    // Folge-Aufruf mehr).
+    const signedSlugs = Object.entries(customerSignaturesRef.current)
+      .filter(([, data]) => data && data.startsWith("data:image/"));
+    const signatures = signedSlugs.length > 0
+      ? signedSlugs.map(([slug, signatureData]) => ({
+          templateSlug: slug,
+          customerSignatureData: signatureData,
+        }))
+      : undefined;
+    const documents = uploadedDocumentsRef.current.length > 0
+      ? uploadedDocumentsRef.current.map((d) => ({
+          documentTypeId: d.documentTypeId,
+          fileName: d.fileName,
+          objectPath: d.objectPath,
+        }))
+      : undefined;
 
     const payload = {
       billingType: formData.billingType || undefined,
@@ -414,161 +435,27 @@ export function useCustomerWizard() {
       contacts: contacts.length > 0 ? contacts : undefined,
       budgets: isPflegekasse ? budgets : undefined,
       contract,
+      signatures,
+      signingLocation: signatures ? signingLocationRef.current : undefined,
+      documents,
+      primaryEmployeeId: formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : undefined,
+      backupEmployeeId: formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : undefined,
+      backupEmployeeId2: formData.backupEmployeeId2 ? parseInt(formData.backupEmployeeId2) : undefined,
       skipDuplicateCheck: duplicateCheckedRef.current || forceSkipDuplicate,
       acknowledgeRecentDuplicate: acknowledgeRecentDuplicateRef.current,
       __idempotencyKey: idempotencyKeyRef.current,
     };
 
-    const warnings: string[] = [];
-    // Pending-Payloads für Folgeschritte (Banner + Retry auf Kundenseite).
-    const pendingPayload: { signatures?: unknown; documents?: unknown; budgets?: unknown; delivery?: unknown } = {};
     createMutation.mutate(payload, {
-      onSuccess: async (customer) => {
+      onSuccess: (customer) => {
+        // Task #1213 — Single atomic submit: Stammdaten, Versicherung, Budgets,
+        // Vertrag, Kontakte, Mitarbeiter-Zuordnung, Unterschriften und Dokumente
+        // werden allesamt server-seitig in EINER Transaktion persistiert. Keine
+        // sekundären Folge-Aufrufe mehr — entweder alles committet oder gar
+        // nichts (kein „halbangelegter" Kunde).
         createdRef.current = true;
         clearDraft();
-        const primaryId = formData.primaryEmployeeId ? parseInt(formData.primaryEmployeeId) : null;
-        const backupId = formData.backupEmployeeId ? parseInt(formData.backupEmployeeId) : null;
-        const backupId2 = formData.backupEmployeeId2 ? parseInt(formData.backupEmployeeId2) : null;
-        if (primaryId || backupId || backupId2) {
-          try {
-            await api.patch(`/admin/customers/${customer.id}/assign`, {
-              primaryEmployeeId: primaryId,
-              backupEmployeeId: backupId,
-              backupEmployeeId2: backupId2,
-            });
-          } catch (assignError) {
-            console.error("Mitarbeiter-Zuordnung fehlgeschlagen:", assignError);
-            warnings.push("Mitarbeiter-Zuordnung konnte nicht gespeichert werden");
-          }
-        }
-
-        const signaturesSnapshot = customerSignaturesRef.current;
-        const signedSlugs = Object.entries(signaturesSnapshot).filter(([, data]) => data && data.startsWith("data:image/"));
-        if (signedSlugs.length > 0) {
-          try {
-            await api.post(`/customers/${customer.id}/signatures`, {
-              signatures: signedSlugs.map(([slug, signatureData]) => ({
-                templateSlug: slug,
-                customerSignatureData: signatureData,
-              })),
-              signingLocation: signingLocationRef.current,
-            });
-          } catch (sigError) {
-            console.error("Unterschriften-Speicherung fehlgeschlagen:", sigError);
-            warnings.push("Unterschriften konnten nicht gespeichert werden");
-            pendingPayload.signatures = {
-              items: signedSlugs.map(([slug, signatureData]) => ({
-                templateSlug: slug,
-                customerSignatureData: signatureData,
-              })),
-              signingLocation: signingLocationRef.current,
-            };
-          }
-        }
-
-        const uploadsSnapshot = uploadedDocumentsRef.current;
-        if (uploadsSnapshot.length > 0) {
-          try {
-            for (const doc of uploadsSnapshot) {
-              await api.post(`/customers/${customer.id}/documents`, {
-                documentTypeId: doc.documentTypeId,
-                fileName: doc.fileName,
-                objectPath: doc.objectPath,
-              });
-            }
-          } catch (docError) {
-            console.error("Dokument-Upload-Speicherung fehlgeschlagen:", docError);
-            warnings.push("Hochgeladene Dokumente konnten nicht gespeichert werden");
-            pendingPayload.documents = {
-              items: uploadsSnapshot.map(d => ({
-                documentTypeId: d.documentTypeId,
-                fileName: d.fileName,
-                objectPath: d.objectPath,
-              })),
-            };
-          }
-        }
-
-        if (formData.documentDeliveryMethod) {
-          try {
-            await api.post(`/admin/document-delivery/send-for-customer/${customer.id}`, {});
-          } catch (deliveryError) {
-            console.error("Dokumentenversand fehlgeschlagen:", deliveryError);
-            warnings.push("Dokumentenversand konnte nicht ausgelöst werden");
-            pendingPayload.delivery = { method: formData.documentDeliveryMethod };
-          }
-        }
-
-        if (isPflegekasse && budgets) {
-          // Task #856 — Das Budget (insb. der §45b-Entlastungsbetrag) wird ab
-          // dem Pflegegrad-Beginn angesetzt, nicht ab Vertragsbeginn. Liegt der
-          // Pflegegrad-Start vor dem Vertrag, werden so die anrechenbaren Monate
-          // vor Vertragsbeginn berücksichtigt. Den rechtlichen §45b-Carryover-/
-          // Verfalls-Clamp übernimmt der Server (/initial-budget).
-          const budgetStart = formData.pflegegradSeit || today;
-          const budgetTypes: Array<{ type: string; cents: number; budgetStartDate: string }> = [];
-          // Task #960 — §45b wird auch ohne Eurobetrag gepostet (cents = 0), damit
-          // Carryover + Anker (Preferences) gesetzt werden, ohne ein redundantes
-          // initial_balance zu erzeugen. Nur der aktive Override bucht einen
-          // Startwert (für den gewählten Stichmonat als validFrom/budgetStartDate).
-          if (is45bEnabled) {
-            budgetTypes.push({
-              type: "entlastungsbetrag_45b",
-              cents: override45bCents,
-              budgetStartDate: override45bStichmonatStart || budgetStart,
-            });
-          }
-          if (budgets.pflegesachleistungen36 > 0) budgetTypes.push({ type: "umwandlung_45a", cents: budgets.pflegesachleistungen36, budgetStartDate: budgetStart });
-          if (budgets.verhinderungspflege39 > 0) budgetTypes.push({ type: "ersatzpflege_39_42a", cents: budgets.verhinderungspflege39, budgetStartDate: budgetStart });
-
-          const typeLabels: Record<string, string> = {
-            entlastungsbetrag_45b: "§45b Entlastungsbetrag",
-            umwandlung_45a: "§45a Umwandlungsanspruch",
-            ersatzpflege_39_42a: "§39/§42a Verhinderungspflege",
-          };
-          const failedBudgetItems: Array<{ budgetType: string; currentMonthAmountCents: number; carryoverAmountCents: number; budgetStartDate: string }> = [];
-          for (const bt of budgetTypes) {
-            const carryover = bt.type === "entlastungsbetrag_45b" ? (carryoverAmount || 0) : 0;
-            const trackFailure = () => {
-              warnings.push(`Startbudget für ${typeLabels[bt.type] || bt.type} konnte nicht gespeichert werden — bitte manuell unter Budget-Einstellungen nachtragen`);
-              failedBudgetItems.push({ budgetType: bt.type, currentMonthAmountCents: bt.cents, carryoverAmountCents: carryover, budgetStartDate: bt.budgetStartDate });
-            };
-            try {
-              const result = await api.post(`/budget/${customer.id}/initial-budget`, {
-                budgetType: bt.type,
-                currentMonthAmountCents: bt.cents,
-                carryoverAmountCents: carryover,
-                budgetStartDate: bt.budgetStartDate,
-              });
-              if (!result.success) {
-                console.error(`Budget-Initialisierung (${bt.type}) fehlgeschlagen:`, result.error);
-                trackFailure();
-              }
-            } catch (budgetErr) {
-              console.error(`Budget-Initialisierung (${bt.type}) fehlgeschlagen:`, budgetErr);
-              trackFailure();
-            }
-          }
-          if (failedBudgetItems.length > 0) {
-            pendingPayload.budgets = { items: failedBudgetItems };
-          }
-        }
-
-        // Pending-Status auf dem Server hinterlegen, damit das Banner auf
-        // der Kundenseite gezielt anzeigen kann, was wiederholt werden muss.
-        if (Object.keys(pendingPayload).length > 0) {
-          try {
-            await api.post(`/admin/customers/${customer.id}/setup-pending`, pendingPayload);
-          } catch (err) {
-            console.warn("Pending-Status konnte nicht gespeichert werden:", err);
-          }
-        }
-
-        if (warnings.length > 0) {
-          toast({ title: "Kunde erstellt mit Hinweisen", description: warnings.join("; ") });
-        } else {
-          toast({ title: "Kunde erfolgreich erstellt" });
-        }
+        toast({ title: "Kunde erfolgreich erstellt" });
         setLocation(`/admin/customers/${customer.id}`);
       },
       onError: (error: Error) => {
@@ -730,7 +617,6 @@ export function useCustomerWizard() {
   }, [formData.vorname, formData.nachname, formData.geburtsdatum]);
 
   const handleNext = async () => {
-    createIntentRef.current = false;
     if (currentStepId === "contacts") {
       const emptyContacts = formData.contacts.filter(c => !c.vorname.trim() && !c.nachname.trim());
       if (emptyContacts.length > 0) {
@@ -799,43 +685,7 @@ export function useCustomerWizard() {
 
   const findStepIndex = (stepId: string) => steps.findIndex((s) => s.id === stepId);
 
-  // Task #1177 — Minimal-Create: nur die Pflichtfelder der Frühanlage prüfen
-  // (Typ, Stammdaten, ggf. Pflegegrad + Versichertennummer). Alle übrigen
-  // Onboarding-Schritte werden später über die Intake-Checkliste nachgeholt.
-  const getEarlyCreateErrors = useCallback((): string[] => {
-    const errors: string[] = [];
-    errors.push(...getStepErrors("customerType"));
-    errors.push(...getStepErrors("personal"));
-    errors.push(...getStepErrors("insurance"));
-    if (isPflegekasseCustomer(formData.billingType)) {
-      const pg = parseInt(formData.pflegegrad);
-      if (!pg || pg < 1 || pg > 5) errors.push("Pflegegrad fehlt");
-    }
-    return errors;
-    // getStepErrors liest formData direkt, daher als Dep aufführen.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData]);
-
-  const canCreateEarly = getEarlyCreateErrors().length === 0;
-
-  const handleEarlyCreate = useCallback(() => {
-    const errors = getEarlyCreateErrors();
-    if (errors.length > 0) {
-      toast({
-        title: "Bitte korrigieren",
-        description: errors.join(" · "),
-        variant: "destructive",
-      });
-      return;
-    }
-    createIntentRef.current = true;
-    handleCreate();
-    // handleCreate/getEarlyCreateErrors lesen formData direkt.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getEarlyCreateErrors]);
-
   const handleSubmit = () => {
-    createIntentRef.current = false;
     const stepsToValidate = ["personal", "insurance", "budgets", "contract", "delivery", "matching"];
     for (const stepId of stepsToValidate) {
       const idx = findStepIndex(stepId);
@@ -863,12 +713,6 @@ export function useCustomerWizard() {
     duplicateCheckedRef.current = true;
     acknowledgeRecentDuplicateRef.current = true;
     setDuplicateWarning(null);
-    // Task #1177 — Bei Frühanlage immer erstellen (nicht weiterschalten),
-    // unabhängig vom aktuellen Schritt.
-    if (createIntentRef.current) {
-      handleCreate(true);
-      return;
-    }
     if (currentStep < steps.length - 1) {
       goToStep(currentStep + 1);
     } else {
@@ -902,7 +746,6 @@ export function useCustomerWizard() {
   }, [formData, setLocation]);
 
   const handleDuplicateCancel = useCallback(() => {
-    createIntentRef.current = false;
     setDuplicateWarning(null);
   }, []);
 
@@ -945,8 +788,6 @@ export function useCustomerWizard() {
     handleNext,
     handleBack,
     handleSubmit,
-    handleEarlyCreate,
-    canCreateEarly,
     restoreDraft,
     discardDraft,
     handleCancel,

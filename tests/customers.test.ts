@@ -797,10 +797,12 @@ describe("KV-24: DSGVO-Anonymisierung inaktiver Kunden", () => {
   });
 });
 
-// KV-TX (Task #267): Atomare Customer-Anlage. Diese Tests verifizieren, dass
-// Pflicht-Cascade-Schritte (Pflegegrad/Insurance/Budget-Type-Settings/Vertrag)
-// die Anlage hart abbrechen und vollständig zurückrollen, während Soft-Schritte
-// (Kontakte, Carryover) nur als Warnings durchgereicht werden.
+// KV-TX (Task #267 / #1213): Atomare Customer-Anlage. Diese Tests verifizieren,
+// dass Pflicht-Cascade-Schritte (Pflegegrad/Insurance/Budget-Type-Settings/
+// Carryover/Startbudgets/Vertrag/Unterschriften/Dokumente) die Anlage hart
+// abbrechen und vollständig zurückrollen. Seit Task #1213 ist auch der
+// Carryover-Sync ein Pflicht-Schritt; nur Kontakte bleiben als Soft-Schritt
+// mit Warning durchgereicht.
 //
 // Tests laufen gegen einen separaten Server-Prozess; Stubbing mit vi.spyOn
 // funktioniert daher nicht. Statt dessen wird über den Header
@@ -890,7 +892,11 @@ describe("KV-TX: Atomare Customer-Anlage (Task #267)", () => {
     }
   });
 
-  it("KV-TX.3 – Soft-Fail bei Carryover (Test-Fault) → 201 mit Warning, Customer existiert", async () => {
+  it("KV-TX.3 – Hard-Fail bei Carryover (Test-Fault) → kein Customer in DB", async () => {
+    // Task #1213: Der Carryover-/Verfalls-Sync ist jetzt Teil der atomaren
+    // Anlage. Ein Fehler rollt die gesamte Transaktion zurück — es bleibt kein
+    // halbangelegter Kunde mit inkonsistentem §45b-Carryover zurück (früher
+    // Soft-Fail mit 201 + Warning).
     const nachname = "TXCO-" + uniqueId();
     const payload = validCustomerPayload({
       nachname,
@@ -900,20 +906,20 @@ describe("KV-TX: Atomare Customer-Anlage (Task #267)", () => {
         verhinderungspflege39: 0,
         pflegesachleistungen36: 0,
         validFrom: "2024-01-01",
-        carryoverAmountCents: 50000, // löst den optional-Pfad in createCustomerRelatedData aus
+        carryoverAmountCents: 50000,
       },
     });
 
     const res = await postCustomerWithFaults(payload, ["carryover"]);
-    expect(res.status).toBe(201);
-    expect(res.data?.id).toBeDefined();
-    createdCustomerIds.push(res.data.id);
-
-    expect(Array.isArray(res.data?.warnings)).toBe(true);
-    expect(res.data.warnings.some((w: string) => w.toLowerCase().includes("übertrag") || w.toLowerCase().includes("vorjahr"))).toBe(true);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(600);
 
     const exists = await customerExistsByNachname(nachname);
-    expect(exists).toBe(true);
+    expect(exists).toBe(false);
+
+    if (res.status === 201 && res.data?.id) {
+      createdCustomerIds.push(res.data.id);
+    }
   });
 });
 

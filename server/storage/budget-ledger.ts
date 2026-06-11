@@ -61,13 +61,13 @@ interface BudgetLedgerStorage {
   getLatestBudgetTypeSettingsWithTransition(customerId: number, _tx?: DbClient): Promise<preferences.BudgetTypeSettingWithTransition[]>;
   upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>, tx?: DbClient, userId?: number): Promise<CustomerBudgetTypeSetting[]>;
 
-  upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number): Promise<void>;
+  upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number, tx?: DbClient): Promise<void>;
   upsertCarryoverAllocation(params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string }, userId?: number): Promise<void>;
-  getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]>;
+  getInitialBalanceAllocations(customerId: number, budgetType: string, tx?: DbClient): Promise<BudgetAllocation[]>;
   clearLegacyInitialBalanceFromSettings(customerId: number, budgetType: string, tx: DbClient, userId?: number): Promise<boolean>;
   // Task #876 — In-place-Aktivierung für den Initial-Balance-Flow (vorher
   // direkte db.*-Zugriffe in routes/budget.ts).
-  ensureBudgetTypeEnabledInPlace(customerId: number, budgetType: string, validFrom: string): Promise<void>;
+  ensureBudgetTypeEnabledInPlace(customerId: number, budgetType: string, validFrom: string, tx?: DbClient): Promise<void>;
 
   calculateAppointmentCost(params: {
     customerId: number;

@@ -89,9 +89,11 @@ export async function getBudgetAllocations(customerId: number, year?: number): P
 
 export async function upsertInitialBalanceAllocation(
   params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string },
-  userId?: number
+  userId?: number,
+  tx?: DbClient,
 ): Promise<void> {
-  const allExisting = await budgetAllocationsRepo.selectColumnsFrom({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt }, db)
+  const d = tx ?? db;
+  const allExisting = await budgetAllocationsRepo.selectColumnsFrom({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt }, d)
     .where(and(
       eq(budgetAllocations.customerId, params.customerId),
       eq(budgetAllocations.budgetType, params.budgetType),
@@ -105,7 +107,7 @@ export async function upsertInitialBalanceAllocation(
   const deleted = allExisting.filter(e => !!e.deletedAt);
 
   if (active.length > 0) {
-    await db.update(budgetAllocations)
+    await d.update(budgetAllocations)
       .set({
         amountCents: params.amountCents,
         month: params.month,
@@ -116,7 +118,7 @@ export async function upsertInitialBalanceAllocation(
       .where(eq(budgetAllocations.id, active[0].id));
 
     for (let i = 1; i < active.length; i++) {
-      await db.update(budgetAllocations)
+      await d.update(budgetAllocations)
         .set({ deletedAt: new Date() })
         .where(eq(budgetAllocations.id, active[i].id));
       if (userId != null) {
@@ -135,7 +137,7 @@ export async function upsertInitialBalanceAllocation(
     // die alte Soft-Delete-Historie bleibt unverändert nachvollziehbar. Der
     // partielle UNIQUE-Index `budget_allocations_auto_unique_idx`
     // (`WHERE deleted_at IS NULL`) lässt die Neuanlage zu.
-    const inserted = await db.insert(budgetAllocations)
+    const inserted = await d.insert(budgetAllocations)
       .values({
         customerId: params.customerId,
         budgetType: params.budgetType,
@@ -163,7 +165,7 @@ export async function upsertInitialBalanceAllocation(
       });
     }
   } else {
-    await db.insert(budgetAllocations)
+    await d.insert(budgetAllocations)
       .values({
         customerId: params.customerId,
         budgetType: params.budgetType,
@@ -287,7 +289,7 @@ export async function upsertCarryoverAllocation(
   }
 }
 
-export async function getInitialBalanceAllocations(customerId: number, budgetType: string): Promise<BudgetAllocation[]> {
+export async function getInitialBalanceAllocations(customerId: number, budgetType: string, tx?: DbClient): Promise<BudgetAllocation[]> {
   // Task #608: Für §45b zusätzlich `carryover`-Allokationen ausliefern, damit
   // der Übertrag aus dem Vorjahr im UI „Startwert anpassen" sichtbar und
   // löschbar wird. Vor #608 entstand sonst ein Geister-Übertrag, der zwar in
@@ -301,7 +303,7 @@ export async function getInitialBalanceAllocations(customerId: number, budgetTyp
     ? sql`${budgetAllocations.source} IN ('initial_balance', 'carryover')`
     : eq(budgetAllocations.source, "initial_balance");
 
-  return budgetAllocationsRepo.selectFrom(db)
+  return budgetAllocationsRepo.selectFrom(tx ?? db)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),

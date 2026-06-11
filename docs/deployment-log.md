@@ -31,7 +31,9 @@ Neueste Einträge oben.
 
 ---
 
-### Geplant — Sicherer Production-Rollout des Budget-Anker-Backfills (Task #1209)
+### ~~Geplant — Sicherer Production-Rollout des Budget-Anker-Backfills (Task #1209)~~ — OBSOLET (Task #1204)
+
+> **Storniert:** Task #1204 hat den persistierten kunden-weiten Budget-Anker (`customer_budget_preferences.budget_start_date`/`_origin`) entfernt — der Anker wird seither zur Laufzeit aus der Pflegegrad-Historie abgeleitet. Backfill-Skript und Rollout-Wrapper wurden gelöscht; dieser Rollout entfällt ersatzlos. Eintrag nur als Historie erhalten.
 
 **Anlass:** Der Budget-Anker-Backfill (`server/scripts/backfill-budget-anchor.ts`, Task #1203) ist auf DEV gelaufen und muss noch gegen die **Live-Production-DB** ausgerollt werden. Dieser Workspace hat nur Read-Only-Production-Zugriff — der scharfe `--apply`-Lauf darf nicht aus einer unverifizierten Shell hier passieren.
 

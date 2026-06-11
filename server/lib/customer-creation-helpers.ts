@@ -1,10 +1,15 @@
 import { customerManagementStorage } from "../storage/customer-management";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
-import { parseLocalDate, todayISO } from "@shared/utils/datetime";
-import type { InsertCustomer } from "@shared/schema";
+import { todayISO } from "@shared/utils/datetime";
+import type { Customer, InsertCustomer, CustomerInsuranceHistory, InsuranceProvider } from "@shared/schema";
 import type { DbOrTx } from "./db";
 import type { DbClient } from "../storage/budget/types";
 import { maybeFail } from "./test-fault-injector";
+import { applyInitialBudget } from "../services/budget-initial-setup";
+import { generateAndStorePdf } from "../services/document-pdf";
+import { buildPlaceholdersFromCustomer } from "../services/template-engine";
+import { documentStorage } from "../storage/documents";
+import { getInsuranceProvider } from "../storage/customer-mgmt/insurance";
 
 interface CustomerBaseFields {
   vorname: string;
@@ -88,6 +93,21 @@ interface BudgetInput {
   pflegesachleistungen36: number;
   validFrom: string;
   carryoverAmountCents?: number;
+  /** §45b-Restguthaben-Override (laufendes Jahr) als initial_balance, Cents. */
+  override45bCents?: number;
+  /** Stichmonat-Start (`YYYY-MM-01`) für den §45b-Override; null = kein Override. */
+  override45bStichmonatStart?: string | null;
+}
+
+interface SignatureInput {
+  templateSlug: string;
+  customerSignatureData: string;
+}
+
+interface DocumentInput {
+  documentTypeId: number;
+  fileName: string;
+  objectPath: string;
 }
 
 interface ContractInput {
@@ -103,6 +123,8 @@ interface CreateRelatedDataInput {
   customerId: number;
   userId: number;
   logPrefix: string;
+  /** Abrechnungsart des Kunden — für die Budget-Intent-Validierung nötig. */
+  billingType?: string | null;
   pflegegrad?: number | null;
   pflegegradSeit?: string;
   insurance?: InsuranceInput;
@@ -110,11 +132,26 @@ interface CreateRelatedDataInput {
   budgets?: BudgetInput;
   contract?: ContractInput;
   /**
+   * Bereits angelegter Kunden-Datensatz (innerhalb derselben Tx erzeugt). Wird
+   * für den Aufbau der Unterschrifts-/Dokument-Platzhalter via
+   * `buildPlaceholdersFromCustomer` benötigt — ohne erneuten (uncommitted) Read.
+   */
+  customer?: Customer;
+  /** Unterschriften (Template-Slug + Signatur-Bild) — generieren PDFs in der Tx. */
+  signatures?: SignatureInput[];
+  /** Unterschriftsort (gemeinsam für alle Unterschriften). */
+  signingLocation?: string | null;
+  /** IP für das Signatur-Audit (optional). */
+  signingIp?: string | null;
+  /** Bereits ins Object-Storage hochgeladene Dokumente — Metadaten in die Tx. */
+  documents?: DocumentInput[];
+  /**
    * Optionale äußere Transaktion. Wenn gesetzt, laufen alle Pflicht-Cascade-
-   * Schritte (Pflegegrad, Insurance, Budget-Type-Settings, Vertrag/Raten)
-   * darin und werfen bei Fehler hart, sodass die Transaktion zurückrollt.
-   * Soft-Schritte (Kontakte, Carryover, syncCarryoverAndExpiry) werden weiter
-   * mit try/catch eingefangen und tauchen nur als Warnings auf.
+   * Schritte (Pflegegrad, Insurance, Budget-Type-Settings, Vertrag/Raten,
+   * Startbudgets, Unterschriften, Dokumente) darin und werfen bei Fehler hart,
+   * sodass die Transaktion zurückrollt.
+   * Soft-Schritte (Kontakte, syncCarryoverAndExpiry) werden weiter mit
+   * try/catch eingefangen und tauchen nur als Warnings auf.
    */
   tx?: DbOrTx & DbClient;
   /**
@@ -206,50 +243,70 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
         await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, typeSettings, tx, userId);
       }
 
-      // Soft: Carryover-Sync. Best-Effort — bei Fehler weiter, aber als
-      // Warning hochgereicht.
+      // Pflicht (Task #1213): Carryover-/Verfalls-Sync ist Teil der atomaren
+      // Anlage. Schlägt er fehl, rollt die gesamte Transaktion zurück (kein
+      // Soft-Fail/Warning mehr) — der Kunde wird sonst mit inkonsistentem
+      // §45b-Carryover persistiert.
       if (typeSettings.length > 0) {
-        try {
-          await budgetLedgerStorage.syncCarryoverAndExpiry(customerId, tx);
-        } catch (err) {
-          console.error(`[${logPrefix}] Budget-Sync fehlgeschlagen für Kunde ${customerId}:`, err);
-        }
+        maybeFail("carryover", testFaults);
+        await budgetLedgerStorage.syncCarryoverAndExpiry(customerId, tx);
       }
 
-      // Soft: Carryover-Allokation aus Vorjahr. Bleibt als Warning
-      // tolerierbar, weil der Customer ohne Carryover funktional weiter
-      // nutzbar ist (manueller Nachtrag später möglich).
-      if (input.budgets.carryoverAmountCents && input.budgets.carryoverAmountCents > 0) {
-        try {
-          maybeFail("carryover", testFaults);
-          const validFrom = input.budgets.validFrom || todayISO();
-          const validFromDate = parseLocalDate(validFrom);
-          const currentYear = validFromDate.getFullYear();
-          // validFrom des Carryover wird auf Jahresanfang gesetzt, damit
-          // rückwirkende Buchungen/Importe im Stichjahr den Übertrag sehen
-          // (Task #116). Andernfalls wäre der Übertrag für Monate VOR dem
-          // Anlagedatum unsichtbar und würde Monatscap-Kürzungen erzeugen.
-          // Task #601 — `year` = Zieljahr (Jahr, in dem der Übertrag verfügbar
-          // ist), konsistent zu `ensureYearlyCarryover45b`. Vorher:
-          // `currentYear - 1` (Quelljahr) — dadurch matchte der Auto-Dedup
-          // die Zeile nicht und beim ersten `syncCarryoverAndExpiry` (z.B.
-          // über `PUT /type-settings`) wurde ein zweiter Carryover für das
-          // Zieljahr angelegt → Doppelzählung im Budget-Overview.
-          await budgetLedgerStorage.createBudgetAllocation({
-            customerId,
-            budgetType: "entlastungsbetrag_45b",
-            year: currentYear,
-            month: null,
-            amountCents: input.budgets.carryoverAmountCents,
-            source: "carryover",
-            validFrom: `${currentYear}-01-01`,
-            expiresAt: `${currentYear}-06-30`,
-            notes: `Übertrag aus ${currentYear - 1}`,
-          }, userId, tx);
-        } catch (err) {
-          console.error(`[${logPrefix}] Carryover-Allocation fehlgeschlagen für Kunde ${customerId}:`, err);
-          warnings.push("Übertrag aus Vorjahr konnte nicht gespeichert werden");
-        }
+      // Pflicht: Startbudgets pro Topf — gefaltet aus dem früheren separaten
+      // Frontend-Aufruf `POST /budget/:id/initial-budget`. Läuft jetzt INNERHALB
+      // der Anlage-Transaktion über die SSoT `applyInitialBudget` (typisierte
+      // Fehler → Rollback, kein Orphan-Customer). §45b-Kappung, Selbstzahler-/
+      // Pflegegrad-Validierung und der RAW-Anker liegen dort zentral.
+      //
+      // Reihenfolge §45b → §45a → §39: `applyInitialBudget` schreibt jeweils die
+      // Anker-Preferences (last-write-wins). §45b nutzt ggf. den Stichmonat als
+      // Anker, §45a/§39 den `budgetStart` — durch die Reihenfolge endet der
+      // persistierte Anker beim `budgetStart` (Pflegegrad-Beginn), identisch
+      // zum bisherigen Frontend-Verhalten.
+      const budgetStart = input.pflegegradSeit || todayISO();
+      const customerForBudget = { billingType: input.billingType, pflegegrad: input.pflegegrad };
+      const carryover = input.budgets.carryoverAmountCents ?? 0;
+
+      if (input.budgets.entlastungsbetrag45b > 0) {
+        maybeFail("initial_budget", testFaults);
+        await applyInitialBudget({
+          customerId,
+          budgetType: "entlastungsbetrag_45b",
+          // §45b: nur der aktive Restguthaben-Override bucht ein initial_balance;
+          // sonst 0 (rein auto-renewal-getrieben), Carryover + Anker via Preferences.
+          currentMonthAmountCents: input.budgets.override45bCents ?? 0,
+          carryoverAmountCents: carryover,
+          budgetStartDate: input.budgets.override45bStichmonatStart || budgetStart,
+          customer: customerForBudget,
+          userId,
+          tx,
+        });
+      }
+
+      if (input.budgets.pflegesachleistungen36 > 0) {
+        maybeFail("initial_budget", testFaults);
+        await applyInitialBudget({
+          customerId,
+          budgetType: "umwandlung_45a",
+          currentMonthAmountCents: input.budgets.pflegesachleistungen36,
+          budgetStartDate: budgetStart,
+          customer: customerForBudget,
+          userId,
+          tx,
+        });
+      }
+
+      if (input.budgets.verhinderungspflege39 > 0) {
+        maybeFail("initial_budget", testFaults);
+        await applyInitialBudget({
+          customerId,
+          budgetType: "ersatzpflege_39_42a",
+          currentMonthAmountCents: input.budgets.verhinderungspflege39,
+          budgetStartDate: budgetStart,
+          customer: customerForBudget,
+          userId,
+          tx,
+        });
       }
     }
   }
@@ -276,6 +333,64 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
           hourlyRateCents: rate.hourlyRateCents,
           validFrom: input.contract!.contractStart,
         }, userId, tx);
+      }
+    }
+  }
+
+  // Pflicht: Unterschriften + hochgeladene Dokumente — gefaltet aus den früheren
+  // separaten Frontend-Aufrufen (`POST /customers/:id/signatures`,
+  // `POST /customers/:id/documents`). Laufen jetzt INNERHALB der Anlage-Tx und
+  // werfen bei Fehler hart → Rollback, kein Orphan-Customer. (Die Puppeteer-PDF-
+  // Generierung läuft bewusst, während die Tx offen ist — akzeptierter Tradeoff.)
+  if ((input.signatures && input.signatures.length > 0) || (input.documents && input.documents.length > 0)) {
+    if (!input.customer) {
+      throw new Error("Kunden-Datensatz für Unterschriften/Dokumente fehlt");
+    }
+
+    if (input.signatures && input.signatures.length > 0) {
+      // Platzhalter EINMAL aus dem (noch nicht committeten) Kunden-Datensatz
+      // aufbauen — kein erneuter `storage.getCustomer`, der die offene Tx nicht
+      // sähe. Versicherung aus dem Anlage-Input auflösen (Provider = Stammdaten).
+      let resolvedInsurance:
+        | (Pick<CustomerInsuranceHistory, "versichertennummer"> & { provider: InsuranceProvider })
+        | null = null;
+      if (input.insurance) {
+        const provider = await getInsuranceProvider(input.insurance.providerId);
+        if (provider) {
+          resolvedInsurance = { versichertennummer: input.insurance.versichertennummer, provider };
+        }
+      }
+      const prebuiltPlaceholders = await buildPlaceholdersFromCustomer(input.customer, resolvedInsurance);
+
+      for (const sig of input.signatures) {
+        maybeFail("signatures", testFaults);
+        const template = await documentStorage.getDocumentTemplateBySlug(sig.templateSlug);
+        if (!template) {
+          throw new Error(`Vorlage "${sig.templateSlug}" nicht gefunden`);
+        }
+        await generateAndStorePdf({
+          template,
+          customerId,
+          customerSignatureData: sig.customerSignatureData,
+          prebuiltPlaceholders,
+          generatedByUserId: userId,
+          signingStatus: "complete",
+          signingIp: input.signingIp ?? null,
+          signingLocation: input.signingLocation ?? null,
+          tx,
+        });
+      }
+    }
+
+    if (input.documents && input.documents.length > 0) {
+      for (const doc of input.documents) {
+        maybeFail("documents", testFaults);
+        await documentStorage.uploadCustomerDocument({
+          customerId,
+          documentTypeId: doc.documentTypeId,
+          fileName: doc.fileName,
+          objectPath: doc.objectPath,
+        }, userId, { tx });
       }
     }
   }

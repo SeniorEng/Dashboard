@@ -9,6 +9,7 @@ import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
 import type { DocumentTemplate } from "@shared/schema";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { badRequest } from "../lib/errors";
+import type { DbOrTx } from "../lib/db";
 import type { Request, Response } from "express";
 
 const RESERVED_RAW_HTML_PLACEHOLDERS = ["customer_signature", "employee_signature", "company_logo"] as const;
@@ -92,10 +93,19 @@ export async function generateAndStorePdf(options: {
   customerSignatureData?: string | null;
   employeeSignatureData?: string | null;
   placeholderOverrides?: Record<string, string>;
+  /**
+   * Bereits aufgebaute Basis-Platzhalter. Wird gesetzt, wenn der Kunde noch in
+   * einer offenen Transaktion lebt und daher NICHT über `buildPlaceholders`
+   * (eigener DB-Read) aufgelöst werden kann — siehe `buildPlaceholdersFromCustomer`.
+   * Signatur-Overrides werden weiterhin hier ergänzt.
+   */
+  prebuiltPlaceholders?: Record<string, string>;
   generatedByUserId: number;
   signingStatus?: "complete" | "pending_employee_signature";
   signingIp?: string | null;
   signingLocation?: string | null;
+  /** Optionale äußere Transaktion für das `generated_documents`-Insert. */
+  tx?: DbOrTx;
 }): Promise<{
   objectPath: string;
   fileName: string;
@@ -103,7 +113,7 @@ export async function generateAndStorePdf(options: {
   renderedHtml: string;
   generatedDocId: number;
 }> {
-  const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, generatedByUserId, signingStatus = "complete", signingIp, signingLocation } = options;
+  const { template, customerId, employeeId, customerSignatureData, employeeSignatureData, placeholderOverrides, prebuiltPlaceholders, generatedByUserId, signingStatus = "complete", signingIp, signingLocation, tx } = options;
 
   // Task #749 — Leere/winzige Signaturen früh ablehnen, bevor das PDF
   // gerendert und im Object-Storage abgelegt wird.
@@ -119,7 +129,9 @@ export async function generateAndStorePdf(options: {
   }
 
   let placeholders: Record<string, string>;
-  if (customerId) {
+  if (prebuiltPlaceholders) {
+    placeholders = { ...prebuiltPlaceholders, ...overrides };
+  } else if (customerId) {
     placeholders = await buildPlaceholders(customerId, overrides);
   } else {
     placeholders = { ...overrides };
@@ -193,7 +205,7 @@ export async function generateAndStorePdf(options: {
     integrityHash: combinedHash,
     signingIp: signingIp ?? null,
     signingLocation: signingLocation ?? null,
-  }, generatedByUserId);
+  }, generatedByUserId, tx);
 
   return {
     objectPath,
