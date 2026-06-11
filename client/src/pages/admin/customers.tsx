@@ -13,7 +13,7 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { DataList, DataListItem } from "@/components/patterns/data-list";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer, useUnassignedCustomerCount, useBudgetSetupMissingCount, useInIntakeCount } from "@/features/customers";
+import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer, useUnassignedCustomerCount, useBudgetSetupMissingCount, useInIntakeCount, useCustomerLifecycleCounts } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import { isChild } from "@shared/utils/datetime";
@@ -38,6 +38,11 @@ import {
   ClipboardList,
 } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
+import {
+  classifyActiveCustomerLifecycle,
+  ACTIVE_CUSTOMER_LIFECYCLE_LABELS,
+  type ActiveCustomerLifecycle,
+} from "@shared/domain/customers";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
 import type { CustomerListItem } from "@/lib/api/types";
 
@@ -46,6 +51,19 @@ const ROLE_LABELS: Record<string, string> = {
   backup: "1. Vertretung",
   backup2: "2. Vertretung",
 };
+
+// Task #1194 — Lebenszyklus aktiver Kunden über die zentrale, reine
+// Klassifikation ableiten. `contractTerminated` wird auf den Vertragsstatus
+// abgebildet, den der Classifier erwartet.
+type LifecycleFilter = "alle" | ActiveCustomerLifecycle;
+
+function customerLifecycle(c: CustomerListItem): ActiveCustomerLifecycle | null {
+  return classifyActiveCustomerLifecycle({
+    status: c.status,
+    contractEnd: c.contractEnd,
+    contractStatus: c.contractTerminated ? "terminated" : null,
+  });
+}
 
 export default function AdminCustomers() {
   const [, setLocation] = useLocation();
@@ -60,6 +78,8 @@ export default function AdminCustomers() {
   const [budgetSetupMissingFilter, setBudgetSetupMissingFilter] = useState<boolean>(false);
   // Task #1177 — Toggle für „Kunden in Anlage"-Filter (aktiv, noch ohne Vertrag).
   const [inIntakeFilter, setInIntakeFilter] = useState<boolean>(false);
+  // Task #1194 — Unterfilter der aktiven Kunden: laufend vs. gekündigt.
+  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("alle");
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortOrder, setSortOrder] = useState<string>("asc");
@@ -89,6 +109,11 @@ export default function AdminCustomers() {
   const budgetSetupMissingCount = budgetSetupMissingData?.count ?? 0;
   const { data: inIntakeData } = useInIntakeCount();
   const inIntakeCount = inIntakeData?.count ?? 0;
+  const { data: lifecycleCountsData } = useCustomerLifecycleCounts();
+  const lifecycleCounts = {
+    laufend: lifecycleCountsData?.laufend ?? 0,
+    gekuendigt: lifecycleCountsData?.gekuendigt ?? 0,
+  };
 
   const employeeFilterOptions = useMemo(() => [
     { value: "all", label: "Alle Mitarbeiter" },
@@ -124,11 +149,12 @@ export default function AdminCustomers() {
     insuranceProviderId: insuranceProviderFilter || undefined,
     budgetSetupMissing: budgetSetupMissingFilter ? "true" : undefined,
     hasActiveContract: inIntakeFilter ? "false" : undefined,
+    lifecycle: lifecycleFilter !== "alle" ? lifecycleFilter : undefined,
     sortBy: sortBy || undefined,
     sortOrder: sortOrder || undefined,
     page: currentPage,
     limit: 15,
-  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, inIntakeFilter, sortBy, sortOrder, currentPage]);
+  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, inIntakeFilter, lifecycleFilter, sortBy, sortOrder, currentPage]);
 
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
@@ -152,7 +178,14 @@ export default function AdminCustomers() {
       setInsuranceProviderFilter(value === "all" ? "" : value);
     } else if (type === "status") {
       setStatusFilter(value === "all" ? "" : value);
+      // Lebenszyklus-Unterfilter gilt nur für aktive Kunden — bei Statuswechsel zurücksetzen.
+      setLifecycleFilter("alle");
     }
+    setCurrentPage(1);
+  }, []);
+
+  const handleLifecycleFilterChange = useCallback((value: LifecycleFilter) => {
+    setLifecycleFilter(value);
     setCurrentPage(1);
   }, []);
 
@@ -171,6 +204,7 @@ export default function AdminCustomers() {
     setInsuranceProviderFilter("");
     setBudgetSetupMissingFilter(false);
     setInIntakeFilter(false);
+    setLifecycleFilter("alle");
     setSortBy("name");
     setSortOrder("asc");
     setSearchQuery("");
@@ -368,6 +402,39 @@ export default function AdminCustomers() {
               </button>
             ))}
           </div>
+
+          {/* Task #1194 — Aufteilung der aktiven Kunden in „laufend" vs. „gekündigt".
+              Nur sichtbar, wenn der Status-Filter auf „Aktiv" steht. */}
+          {statusFilter === "aktiv" && (
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs text-muted-foreground" data-testid="text-customers-lifecycle-split">
+                  {lifecycleCounts.laufend} laufend · {lifecycleCounts.gekuendigt} gekündigt
+                </span>
+              </div>
+              <div className="flex gap-1 bg-white rounded-lg p-1 border" data-testid="lifecycle-filter">
+                {[
+                  { key: "alle" as const, label: "Alle" },
+                  { key: "laufend" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.laufend, count: lifecycleCounts.laufend },
+                  { key: "gekuendigt" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt, count: lifecycleCounts.gekuendigt },
+                ].map((chip) => (
+                  <button
+                    key={chip.key}
+                    onClick={() => handleLifecycleFilterChange(chip.key)}
+                    className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                      lifecycleFilter === chip.key
+                        ? "bg-teal-600 text-white"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
+                    data-testid={`chip-lifecycle-${chip.key}`}
+                  >
+                    {chip.label}
+                    {"count" in chip && chip.count !== undefined ? ` (${chip.count})` : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-3 mb-6">
             <div className="flex-1 relative">
@@ -598,6 +665,9 @@ export default function AdminCustomers() {
                         )}
                     </div>
                     <div className="flex flex-col items-end gap-2">
+                      {customerLifecycle(customer) === "gekuendigt" && (
+                        <StatusBadge type="warning" value={ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt} data-testid={`badge-customer-lifecycle-${customer.id}`} />
+                      )}
                       {customer.status === "inaktiv" && (
                         <StatusBadge type="warning" value="Inaktiv" data-testid={`badge-status-${customer.id}`} />
                       )}

@@ -107,6 +107,13 @@ function CustomersContent({ qs, year, month }: { qs: string; year: number; month
             <FunnelStep label="Inaktiv" value={data.funnel.inactive} testId="funnel-inactive" />
             <FunnelStep label="Gekündigt" value={data.funnel.terminated} testId="funnel-terminated" />
           </div>
+          {/* Task #1194 — Aufschlüsselung der aktiven Kunden in laufend vs.
+              gekündigt. Funnel-Zahlen oben bleiben unverändert. */}
+          <p className="text-xs text-muted-foreground" data-testid="text-active-breakdown">
+            Davon {data.activeBreakdown.laufend.toLocaleString("de-DE")} laufend
+            {" · "}
+            {data.activeBreakdown.gekuendigt.toLocaleString("de-DE")} gekündigt
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs" data-testid="funnel-conversion-rates">
             <ConversionStep
               label="Interessent → In Beratung"

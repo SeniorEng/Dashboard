@@ -916,3 +916,72 @@ describe("KV-TX: Atomare Customer-Anlage (Task #267)", () => {
     expect(exists).toBe(true);
   });
 });
+
+describe("KV-LC: Lebenszyklus-Filter aktiver Kunden (laufend/gekündigt) — Task #1194", () => {
+  it("KV-LC.1 – laufend umfasst aktive Kunden OHNE Vertrag; gekündigt nur beendete/terminierte", async () => {
+    const token = "LCY" + uniqueId();
+
+    // (1) aktiver Kunde OHNE Vertrag → muss "laufend" sein (Regression:
+    //     NULL-Vertragsstatus darf den Kunden nicht aus laufend kippen).
+    const ohneVertrag = await apiPost<any>("/api/admin/customers", validCustomerPayload({ nachname: token + "-ohne" }));
+    expect(ohneVertrag.status).toBe(201);
+    createdCustomerIds.push(ohneVertrag.data.id);
+
+    // (2) aktiver Kunde mit gesetztem Vertragsende → "gekündigt".
+    const mitEnde = await apiPost<any>("/api/admin/customers", validCustomerPayload({ nachname: token + "-ende" }));
+    expect(mitEnde.status).toBe(201);
+    createdCustomerIds.push(mitEnde.data.id);
+    const c2 = await apiPost(`/api/admin/customers/${mitEnde.data.id}/contract`, {
+      contractStart: "2024-01-01",
+      contractEnd: "2026-01-31",
+    });
+    expect(c2.status).toBe(201);
+
+    // (3) aktiver Kunde mit terminiertem Vertrag → "gekündigt".
+    const terminiert = await apiPost<any>("/api/admin/customers", validCustomerPayload({ nachname: token + "-term" }));
+    expect(terminiert.status).toBe(201);
+    createdCustomerIds.push(terminiert.data.id);
+    const c3 = await apiPost(`/api/admin/customers/${terminiert.data.id}/contract`, {
+      contractStart: "2024-01-01",
+    });
+    expect(c3.status).toBe(201);
+    const c3term = await apiPatch(`/api/admin/customers/${terminiert.data.id}/contract`, { status: "terminated" });
+    expect(c3term.status).toBe(200);
+
+    const laufend = await apiGet<any>(`/api/admin/customers?status=aktiv&lifecycle=laufend&search=${token}`);
+    expect(laufend.status).toBe(200);
+    const laufendIds = laufend.data.data.map((c: any) => c.id);
+    expect(laufendIds).toContain(ohneVertrag.data.id);
+    expect(laufendIds).not.toContain(mitEnde.data.id);
+    expect(laufendIds).not.toContain(terminiert.data.id);
+
+    const gekuendigt = await apiGet<any>(`/api/admin/customers?status=aktiv&lifecycle=gekuendigt&search=${token}`);
+    expect(gekuendigt.status).toBe(200);
+    const gekuendigtIds = gekuendigt.data.data.map((c: any) => c.id);
+    expect(gekuendigtIds).toContain(mitEnde.data.id);
+    expect(gekuendigtIds).toContain(terminiert.data.id);
+    expect(gekuendigtIds).not.toContain(ohneVertrag.data.id);
+
+    // Ohne Lifecycle-Filter erscheinen alle drei (alle sind status='aktiv').
+    const alle = await apiGet<any>(`/api/admin/customers?status=aktiv&search=${token}`);
+    expect(alle.status).toBe(200);
+    const alleIds = alle.data.data.map((c: any) => c.id);
+    expect(alleIds).toEqual(
+      expect.arrayContaining([ohneVertrag.data.id, mitEnde.data.id, terminiert.data.id]),
+    );
+
+    // Summen-Invariante: laufend + gekündigt == gesamt aktiv (search-gescopt).
+    expect(laufend.data.total + gekuendigt.data.total).toBe(alle.data.total);
+  });
+
+  it("KV-LC.2 – /lifecycle-counts ist additiv: laufend + gekündigt == gesamt aktiv", async () => {
+    const counts = await apiGet<any>("/api/admin/customers/lifecycle-counts");
+    expect(counts.status).toBe(200);
+    expect(typeof counts.data.laufend).toBe("number");
+    expect(typeof counts.data.gekuendigt).toBe("number");
+
+    const aktivGesamt = await apiGet<any>("/api/admin/customers?status=aktiv&limit=1");
+    expect(aktivGesamt.status).toBe(200);
+    expect(counts.data.laufend + counts.data.gekuendigt).toBe(aktivGesamt.data.total);
+  });
+});

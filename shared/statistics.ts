@@ -125,10 +125,22 @@ interface ProjectedGrowthRange {
   sampleSize: number;
 }
 
+/**
+ * Task #1194 — Aufschlüsselung der aktiven Kunden in „laufend" (ohne
+ * Vertragsende / nicht gekündigt) vs. „gekündigt" (aktiv, aber Vertrag beendet
+ * oder gekündigt). Summe entspricht `funnel.active`; die Funnel-Zahlen selbst
+ * bleiben unverändert.
+ */
+interface ActiveCustomerBreakdown {
+  laufend: number;
+  gekuendigt: number;
+}
+
 export interface CustomerStatsResponse {
   period: StatisticsPeriod;
   funnel: CustomerFunnel;
   funnelConversionRates: FunnelConversionRates;
+  activeBreakdown: ActiveCustomerBreakdown;
   activeCustomers: KpiValue;
   conversionRatePct: KpiValue;
   avgDaysConsultationToFirstAppointment: number | null;

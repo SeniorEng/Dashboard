@@ -402,6 +402,13 @@
           "budgetSetupMissing": {
             "type": "boolean"
           },
+          "contractEnd": {
+            "type": "string",
+            "nullable": true
+          },
+          "contractTerminated": {
+            "type": "boolean"
+          },
           "createdAt": {
             "type": "string"
           }
@@ -428,6 +435,8 @@
           "hasBetreuer",
           "rechnungAnKunde",
           "budgetSetupMissing",
+          "contractEnd",
+          "contractTerminated",
           "createdAt"
         ]
       },
@@ -459,6 +468,9 @@
             "type": "string"
           },
           "budgetSetupMissing": {
+            "type": "string"
+          },
+          "lifecycle": {
             "type": "string"
           },
           "sortBy": {
@@ -1859,6 +1871,14 @@
             },
             "required": false,
             "name": "budgetSetupMissing",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "lifecycle",
             "in": "query"
           },
           {

@@ -79,6 +79,14 @@ export interface CustomerListFilters {
    * `scripts/audit-customers-without-budget-init.ts`.
    */
   budgetSetupMissing?: boolean;
+  /**
+   * Task #1194 — Filtert aktive Kunden nach Lebenszyklus: "laufend"
+   * (aktiv ohne beendeten/gekündigten Vertrag) oder "gekuendigt" (aktiv mit
+   * beendetem Vertrag ODER Vertragsstatus 'terminated'). Greift nur sinnvoll
+   * zusammen mit `status: "aktiv"` (die Unterscheidung gilt innerhalb der
+   * aktiven Kohorte).
+   */
+  lifecycle?: "laufend" | "gekuendigt";
   sortBy?: "name" | "contractStart" | "createdAt";
   sortOrder?: "asc" | "desc";
 }
@@ -112,6 +120,10 @@ interface CustomerListItem {
   matchedRole?: "primary" | "backup" | "backup2";
   hasActiveContract: boolean;
   hasBetreuer: boolean;
+  rechnungAnKunde: boolean;
+  // Task #1194 — Vertragsende + Kündigungs-Status des jüngsten Vertrags.
+  contractEnd: string | null;
+  contractTerminated: boolean;
   createdAt: Date;
 }
 
@@ -239,6 +251,23 @@ class CustomerManagementStorage {
       .groupBy(customerContracts.customerId)
       .as('active_contracts');
 
+    // Task #1194 — Jüngster Vertrag pro Kunde (nach contractStart, dann id).
+    // Liefert Vertragsende + Vertragsstatus für die Lebenszyklus-Klassifikation
+    // (laufend vs. gekündigt) aktiver Kunden.
+    const latestContractSubquery = db
+      .selectDistinctOn([customerContracts.customerId], {
+        customerId: customerContracts.customerId,
+        contractEnd: customerContracts.contractEnd,
+        contractStatus: customerContracts.status,
+      })
+      .from(customerContracts)
+      .orderBy(
+        customerContracts.customerId,
+        desc(customerContracts.contractStart),
+        desc(customerContracts.id),
+      )
+      .as('latest_contract');
+
     const betreuerSubquery = db
       .select({
         customerId: customerContacts.customerId,
@@ -289,10 +318,28 @@ class CustomerManagementStorage {
       fullConditions.push(sqlBuilder`COALESCE(${customers.pflegegrad}, 0) >= 2`);
       fullConditions.push(isNull(activeBudgetSettingsSubquery.customerId));
     }
+    // Task #1194 — Lebenszyklus-Filter (laufend/gekündigt). „gekündigt" =
+    // jüngster Vertrag mit Vertragsende ODER Vertragsstatus 'terminated';
+    // „laufend" = alle übrigen aktiven Kunden (inkl. ohne Vertrag). Spiegelt
+    // die reine Klassifikation in shared/domain/customers/lifecycle.ts.
+    // NULL-sicher: Kunden ohne (jüngsten) Vertrag haben contractStatus = NULL.
+    // Ohne COALESCE liefert `… = 'terminated'` SQL-NULL, wodurch `NOT (…)` für
+    // den laufend-Filter ebenfalls NULL ergibt und vertragslose (Intake-)Kunden
+    // fälschlich aus „laufend" herausfallen würden.
+    const gekuendigtExpr = sqlBuilder<boolean>`COALESCE(
+      ${latestContractSubquery.contractEnd} IS NOT NULL
+      OR ${latestContractSubquery.contractStatus} = 'terminated'
+    , false)`;
+    if (filters?.lifecycle === "gekuendigt") {
+      fullConditions.push(gekuendigtExpr);
+    } else if (filters?.lifecycle === "laufend") {
+      fullConditions.push(sqlBuilder`NOT ${gekuendigtExpr}`);
+    }
     const fullWhereClause = fullConditions.length > 0 ? and(...fullConditions) : undefined;
 
     let countQueryBuilder = customersRepo.selectColumnsFrom({ count: count() }, db)
       .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
+      .leftJoin(latestContractSubquery, eq(customers.id, latestContractSubquery.customerId))
       .leftJoin(activeBudgetSettingsSubquery, eq(customers.id, activeBudgetSettingsSubquery.customerId));
     if (insuranceSubquery) {
       countQueryBuilder = countQueryBuilder.leftJoin(insuranceSubquery, eq(customers.id, insuranceSubquery.customerId)) as any;
@@ -329,11 +376,14 @@ class CustomerManagementStorage {
         hasActiveContract: activeContractSubquery.hasContract,
         hasBetreuer: betreuerSubquery.hasBetreuer,
         budgetSetupMissing: budgetSetupMissingExpr,
+        contractEnd: latestContractSubquery.contractEnd,
+        contractStatus: latestContractSubquery.contractStatus,
       }, db)
       .leftJoin(users, eq(customers.primaryEmployeeId, users.id))
       .leftJoin(backupUser, eq(customers.backupEmployeeId, backupUser.id))
       .leftJoin(backupUser2, eq(customers.backupEmployeeId2, backupUser2.id))
       .leftJoin(activeContractSubquery, eq(customers.id, activeContractSubquery.customerId))
+      .leftJoin(latestContractSubquery, eq(customers.id, latestContractSubquery.customerId))
       .leftJoin(betreuerSubquery, eq(customers.id, betreuerSubquery.customerId))
       .leftJoin(activeBudgetSettingsSubquery, eq(customers.id, activeBudgetSettingsSubquery.customerId));
     if (insuranceSubquery) {
@@ -412,6 +462,8 @@ class CustomerManagementStorage {
         hasActiveContract: r.hasActiveContract === true,
         hasBetreuer: r.hasBetreuer === true,
         budgetSetupMissing: r.budgetSetupMissing === true,
+        contractEnd: r.contractEnd ? String(r.contractEnd) : null,
+        contractTerminated: r.contractStatus === "terminated",
         createdAt: r.createdAt,
       };
     });

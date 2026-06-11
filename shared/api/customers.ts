@@ -29,6 +29,17 @@ export interface CustomerListItem {
    * „Budget-Einrichtung steht noch aus"-UI.
    */
   budgetSetupMissing: boolean;
+  /**
+   * Task #1194 — Vertragsende des jüngsten Vertrags (`customer_contracts.contract_end`).
+   * `null` = unbefristet/laufend. Zusammen mit `contractTerminated` Basis für die
+   * Lebenszyklus-Klassifikation aktiver Kunden (laufend vs. gekündigt).
+   */
+  contractEnd: string | null;
+  /**
+   * Task #1194 — true, wenn der jüngste Vertrag den Status `terminated` hat.
+   * Aktiver Kunde mit `contractEnd` ODER `contractTerminated` ⇒ „gekündigt".
+   */
+  contractTerminated: boolean;
   createdAt: string;
 }
 
@@ -40,6 +51,12 @@ export interface CustomerListParams extends PaginationParams {
   insuranceProviderId?: string;
   budgetSetupMissing?: string;
   hasActiveContract?: string;
+  /**
+   * Task #1194 — Filtert aktive Kunden nach Lebenszyklus: `laufend`
+   * (aktiv ohne beendeten Vertrag) oder `gekuendigt` (aktiv mit beendetem/
+   * gekündigtem Vertrag). Greift nur innerhalb der aktiven Kohorte.
+   */
+  lifecycle?: string;
   sortBy?: string;
   sortOrder?: string;
 }

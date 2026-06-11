@@ -25,8 +25,26 @@ import { useAuth } from "@/hooks/use-auth";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import type { CustomerWithAccess } from "@/features/appointments";
 import type { BirthdayEntry } from "@shared/types";
+import {
+  classifyActiveCustomerLifecycle,
+  ACTIVE_CUSTOMER_LIFECYCLE_LABELS,
+  type ActiveCustomerLifecycle,
+} from "@shared/domain/customers";
 
 type CustomerTab = "kunden" | "geburtstage";
+
+// Task #1194 — Lebenszyklus aktiver Kunden über die zentrale, reine
+// Klassifikation ableiten. `contractTerminated` wird auf den Vertragsstatus
+// abgebildet, den der Classifier erwartet.
+type LifecycleFilter = "alle" | ActiveCustomerLifecycle;
+
+function customerLifecycle(c: CustomerWithAccess): ActiveCustomerLifecycle | null {
+  return classifyActiveCustomerLifecycle({
+    status: c.status,
+    contractEnd: c.contractEnd,
+    contractStatus: c.contractTerminated ? "terminated" : null,
+  });
+}
 
 const BIRTHDAY_HORIZON_DAYS = 30;
 
@@ -63,6 +81,7 @@ function groupBirthdays(birthdays: BirthdayEntry[]): Record<string, BirthdayEntr
 export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState<CustomerTab>("kunden");
   const [searchQuery, setSearchQuery] = useState("");
+  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("alle");
   const { user } = useAuth();
   const { viewAsEmployeeId } = useViewAsEmployee();
 
@@ -82,10 +101,25 @@ export default function CustomersPage() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Task #1194 — Aufteilung der aktiven Kunden in "laufend" vs. "gekuendigt".
+  const lifecycleCounts = useMemo(() => {
+    let laufend = 0;
+    let gekuendigt = 0;
+    for (const c of customers) {
+      const lc = customerLifecycle(c);
+      if (lc === "laufend") laufend++;
+      else if (lc === "gekuendigt") gekuendigt++;
+    }
+    return { laufend, gekuendigt };
+  }, [customers]);
+
   const filteredCustomers = useMemo(() => {
-    if (!searchQuery.trim()) return customers;
-    const query = searchQuery.toLowerCase();
+    const query = searchQuery.trim().toLowerCase();
     return customers.filter(customer => {
+      if (lifecycleFilter !== "alle" && customerLifecycle(customer) !== lifecycleFilter) {
+        return false;
+      }
+      if (!query) return true;
       const fullName = customer.name.toLowerCase();
       const address = formatAddress(customer).toLowerCase();
       const phone = customer.telefon?.toLowerCase() || "";
@@ -95,7 +129,7 @@ export default function CustomersPage() {
       const vnr = customer.versichertennummer?.toLowerCase() || "";
       return fullName.includes(query) || address.includes(query) || phone.includes(query) || vnr.includes(query);
     });
-  }, [customers, searchQuery]);
+  }, [customers, searchQuery, lifecycleFilter]);
 
   const sortedCustomers = useMemo(() => {
     return [...filteredCustomers].sort((a, b) => {
@@ -141,8 +175,13 @@ export default function CustomersPage() {
             Kunden
           </h1>
           {activeTab === "kunden" && customers.length > 0 && (
-            <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-customers-subtitle">
-              {customers.length}
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs font-medium px-2.5 py-1 bg-primary/10 text-primary rounded-full" data-testid="text-customers-subtitle">
+                {customers.length}
+              </span>
+              <span className="text-xs text-muted-foreground" data-testid="text-customers-lifecycle-split">
+                {lifecycleCounts.laufend} laufend · {lifecycleCounts.gekuendigt} gekündigt
+              </span>
             </span>
           )}
         </div>
@@ -185,6 +224,29 @@ export default function CustomersPage() {
               className="pl-9"
               data-testid="input-customer-search"
             />
+          </div>
+
+          {/* Task #1194 — Filter-Chips: Alle / Laufend / Gekündigt */}
+          <div className="flex items-center gap-2 mb-4" data-testid="filter-customer-lifecycle">
+            {([
+              { key: "alle" as const, label: "Alle", count: customers.length },
+              { key: "laufend" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.laufend, count: lifecycleCounts.laufend },
+              { key: "gekuendigt" as const, label: ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt, count: lifecycleCounts.gekuendigt },
+            ]).map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setLifecycleFilter(chip.key)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-full transition-all ${
+                  lifecycleFilter === chip.key
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+                data-testid={`chip-lifecycle-${chip.key}`}
+              >
+                {chip.label} ({chip.count})
+              </button>
+            ))}
           </div>
 
           {sortedCustomers.length === 0 ? (
@@ -350,6 +412,9 @@ const CustomerCard = memo(function CustomerCard({ customer }: { customer: Custom
                 {customer.name}
               </h3>
               <div className="flex items-center gap-1.5 shrink-0">
+                {customerLifecycle(customer) === "gekuendigt" && (
+                  <StatusBadge type="warning" value={ACTIVE_CUSTOMER_LIFECYCLE_LABELS.gekuendigt} size="sm" data-testid={`badge-customer-lifecycle-${customer.id}`} />
+                )}
                 {isLegacy && (
                   <StatusBadge type="warning" value="Frühere Zuordnung" size="sm" data-testid={`badge-customer-legacy-${customer.id}`} />
                 )}

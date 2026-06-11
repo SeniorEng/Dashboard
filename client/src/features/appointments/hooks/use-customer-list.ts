@@ -8,6 +8,10 @@ export type CustomerWithAccess = Customer & {
   // aus customer_insurance_history mit validTo IS NULL, damit der mobile
   // Filter clientseitig auch nach VNR suchen kann.
   versichertennummer?: string | null;
+  // Task #1194 — Vertragsende + Kündigungs-Status des jüngsten Vertrags für
+  // die Lebenszyklus-Klassifikation (laufend vs. gekündigt) aktiver Kunden.
+  contractEnd?: string | null;
+  contractTerminated?: boolean;
 };
 
 export function useCustomerList(status?: string) {

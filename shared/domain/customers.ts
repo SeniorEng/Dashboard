@@ -2,6 +2,17 @@ import { CONTACT_TYPES as CONTACT_TYPE_VALUES, LEGACY_CONTACT_TYPES } from "../s
 
 export { LEGACY_CONTACT_TYPES };
 
+// Lebenszyklus aktiver Kunden (Task #1194): laufend vs. gekündigt.
+export {
+  classifyActiveCustomerLifecycle,
+  isGekuendigterAktiverKunde,
+  isLaufenderAktiverKunde,
+  ACTIVE_CUSTOMER_LIFECYCLE_LABELS,
+  TERMINATED_CONTRACT_STATUS,
+  type ActiveCustomerLifecycle,
+  type ActiveLifecycleInput,
+} from "./customers/lifecycle";
+
 export const BILLING_TYPES = [
   "pflegekasse_gesetzlich",
   "pflegekasse_privat",

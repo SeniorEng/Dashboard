@@ -106,7 +106,7 @@ router.get("/customers/check-duplicate", asyncHandler("Duplikatprüfung fehlgesc
 }));
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const { search, pflegegrad, responsibleEmployeeId, primaryEmployeeId, status, billingType, insuranceProviderId, budgetSetupMissing, hasActiveContract, page, limit, sortBy, sortOrder } = req.query;
+  const { search, pflegegrad, responsibleEmployeeId, primaryEmployeeId, status, billingType, insuranceProviderId, budgetSetupMissing, hasActiveContract, lifecycle, page, limit, sortBy, sortOrder } = req.query;
   
   const validSortBy = ["name", "contractStart", "createdAt"].includes(sortBy as string)
     ? (sortBy as "name" | "contractStart" | "createdAt")
@@ -148,6 +148,12 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     // (aktiv, aber noch ohne aktiven Vertrag); `true` nur mit Vertrag.
     hasActiveContract:
       hasActiveContract === "true" ? true : hasActiveContract === "false" ? false : undefined,
+    // Task #1194 — Lebenszyklus-Filter aktiver Kunden: „laufend" vs.
+    // „gekuendigt". Andere Werte werden ignoriert.
+    lifecycle:
+      lifecycle === "laufend" ? "laufend" as const
+        : lifecycle === "gekuendigt" ? "gekuendigt" as const
+        : undefined,
     sortBy: validSortBy,
     sortOrder: validSortOrder,
   };
@@ -197,6 +203,24 @@ router.get("/customers/in-intake-count", asyncHandler("Zählung konnte nicht gel
     { limit: 1, offset: 0 },
   );
   res.json({ count: result.total });
+}));
+
+// Task #1194 — Aufteilung der aktiven Kunden in „laufend" vs. „gekündigt"
+// (gesamt, nicht nur die aktuelle Seite). Spiegelt die reine Klassifikation in
+// shared/domain/customers/lifecycle.ts. Speist die Filter-Chips + Split-Badge
+// der server-paginierten Admin-Kundenliste.
+router.get("/customers/lifecycle-counts", asyncHandler("Zählung konnte nicht geladen werden", async (_req: Request, res: Response) => {
+  const [laufendResult, gekuendigtResult] = await Promise.all([
+    customerManagementStorage.getCustomersPaginated(
+      { status: "aktiv", lifecycle: "laufend" },
+      { limit: 1, offset: 0 },
+    ),
+    customerManagementStorage.getCustomersPaginated(
+      { status: "aktiv", lifecycle: "gekuendigt" },
+      { limit: 1, offset: 0 },
+    ),
+  ]);
+  res.json({ laufend: laufendResult.total, gekuendigt: gekuendigtResult.total });
 }));
 
 // Einzelkunden-Lesen läuft über `GET /api/customers/:id` (server/routes/customers.ts,

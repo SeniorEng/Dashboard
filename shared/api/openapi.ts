@@ -218,6 +218,8 @@ export const CustomerListItemSchema = component(
     hasBetreuer: z.boolean(),
     rechnungAnKunde: z.boolean(),
     budgetSetupMissing: z.boolean(),
+    contractEnd: nullableString(),
+    contractTerminated: z.boolean(),
     createdAt: z.string(),
   }),
 );
@@ -234,6 +236,7 @@ export const CustomerListParamsSchema = component(
     status: z.string().optional(),
     insuranceProviderId: z.string().optional(),
     budgetSetupMissing: z.string().optional(),
+    lifecycle: z.string().optional(),
     sortBy: z.string().optional(),
     sortOrder: z.string().optional(),
   }),

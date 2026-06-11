@@ -2,20 +2,21 @@ import {
   type Customer,
   type InsertCustomer,
   customers,
+  customerContracts,
   customerInsuranceHistory,
   prospects,
   appointments,
   users,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
-import { eq, count, sql as sqlBuilder, and, or, ilike, inArray, isNull, isNotNull, exists } from "drizzle-orm";
+import { eq, count, sql as sqlBuilder, and, or, ilike, inArray, isNull, isNotNull, exists, desc } from "drizzle-orm";
 import { customerIdsCache } from "../services/cache";
 import { db } from "../lib/db";
 import { appointmentWithCustomerSelectFields, mapAppointmentRow } from "./appointment-helpers";
 import type { SearchOptions } from "../storage";
 import { appointmentsRepo, customersRepo } from "../repos";
 
-export async function getCustomers(options?: { status?: string; search?: string }): Promise<(Customer & { versichertennummer: string | null })[]> {
+export async function getCustomers(options?: { status?: string; search?: string }): Promise<(Customer & { versichertennummer: string | null; contractEnd: string | null; contractTerminated: boolean })[]> {
   const conditions = [isNull(customers.deletedAt)];
 
   if (options?.status) {
@@ -51,7 +52,8 @@ export async function getCustomers(options?: { status?: string; search?: string 
   }
 
   const rows = await customersRepo.selectFrom(db).where(and(...conditions)).orderBy(customers.name);
-  return await enrichWithCurrentVersichertennummer(rows);
+  const withVnr = await enrichWithCurrentVersichertennummer(rows);
+  return await enrichWithLatestContract(withVnr);
 }
 
 async function enrichWithCurrentVersichertennummer<T extends { id: number }>(
@@ -69,6 +71,44 @@ async function enrichWithCurrentVersichertennummer<T extends { id: number }>(
   const vnrMap = new Map<number, string>();
   for (const r of vnrRows) vnrMap.set(r.customerId, r.versichertennummer);
   return rows.map(r => ({ ...r, versichertennummer: vnrMap.get(r.id) ?? null }));
+}
+
+/**
+ * Task #1194 — Reichert Kundenzeilen mit Vertragsende + Kündigungs-Status des
+ * jüngsten Vertrags an (nach contractStart, dann id). Basis für die
+ * Lebenszyklus-Klassifikation aktiver Kunden (laufend vs. gekündigt) in der
+ * Mitarbeiter-/Admin-Listenansicht.
+ */
+async function enrichWithLatestContract<T extends { id: number }>(
+  rows: T[],
+): Promise<(T & { contractEnd: string | null; contractTerminated: boolean })[]> {
+  if (rows.length === 0) return [];
+  const ids = rows.map(r => r.id);
+  const contractRows = await db
+    .selectDistinctOn([customerContracts.customerId], {
+      customerId: customerContracts.customerId,
+      contractEnd: customerContracts.contractEnd,
+      contractStatus: customerContracts.status,
+    })
+    .from(customerContracts)
+    .where(inArray(customerContracts.customerId, ids))
+    .orderBy(
+      customerContracts.customerId,
+      desc(customerContracts.contractStart),
+      desc(customerContracts.id),
+    );
+  const map = new Map<number, { contractEnd: string | null; contractStatus: string }>();
+  for (const r of contractRows) {
+    map.set(r.customerId, { contractEnd: r.contractEnd ?? null, contractStatus: r.contractStatus });
+  }
+  return rows.map(r => {
+    const c = map.get(r.id);
+    return {
+      ...r,
+      contractEnd: c?.contractEnd ?? null,
+      contractTerminated: c?.contractStatus === "terminated",
+    };
+  });
 }
 
 export async function getCustomer(id: number): Promise<Customer | undefined> {
@@ -169,7 +209,7 @@ export async function getAssignedCustomerIds(employeeId: number): Promise<number
   return ids;
 }
 
-export async function getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean; versichertennummer: string | null })[]> {
+export async function getCustomersForEmployee(employeeId: number): Promise<(Customer & { isCurrentlyAssigned: boolean; versichertennummer: string | null; contractEnd: string | null; contractTerminated: boolean })[]> {
   const assignedIds = await getAssignedCustomerIds(employeeId);
   if (assignedIds.length === 0) return [];
 
@@ -177,7 +217,8 @@ export async function getCustomersForEmployee(employeeId: number): Promise<(Cust
     .where(and(inArray(customers.id, assignedIds), isNull(customers.deletedAt)))
     .orderBy(customers.nachname, customers.vorname);
 
-  const enriched = await enrichWithCurrentVersichertennummer(customerRows);
+  const withVnr = await enrichWithCurrentVersichertennummer(customerRows);
+  const enriched = await enrichWithLatestContract(withVnr);
 
   return enriched.map(c => ({
     ...c,

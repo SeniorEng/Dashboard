@@ -48,6 +48,7 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.insuranceProviderId) searchParams.set("insuranceProviderId", params.insuranceProviderId);
   if (params.budgetSetupMissing) searchParams.set("budgetSetupMissing", params.budgetSetupMissing);
   if (params.hasActiveContract) searchParams.set("hasActiveContract", params.hasActiveContract);
+  if (params.lifecycle) searchParams.set("lifecycle", params.lifecycle);
   if (params.sortBy) searchParams.set("sortBy", params.sortBy);
   if (params.sortOrder) searchParams.set("sortOrder", params.sortOrder);
   const qs = searchParams.toString();
@@ -156,6 +157,23 @@ export function useInIntakeCount() {
     queryFn: async ({ signal }) => {
       const result = await api.get<{ count: number }>(
         "/admin/customers/in-intake-count",
+        signal
+      );
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
+  });
+}
+
+// Task #1194 — Aufteilung der aktiven Kunden in „laufend" vs. „gekündigt"
+// (gesamt, nicht nur die aktuelle Seite) für Split-Badge + Filter-Chips der
+// server-paginierten Admin-Kundenliste.
+export function useCustomerLifecycleCounts() {
+  return useQuery({
+    queryKey: [...customerKeys.all, "lifecycle-counts"] as const,
+    queryFn: async ({ signal }) => {
+      const result = await api.get<{ laufend: number; gekuendigt: number }>(
+        "/admin/customers/lifecycle-counts",
         signal
       );
       return unwrapResult(result);
