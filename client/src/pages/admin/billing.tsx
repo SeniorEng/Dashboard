@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import { ArrowLeft } from "lucide-react";
 import type { InvoiceItem } from "@shared/api";
+import { isBulkActionableDraft, isPflegekasseBatchDraft } from "@shared/domain/billing-drafts";
 import {
   useBillingInvoices,
   useEligibleCustomers,
@@ -151,19 +152,19 @@ export default function AdminBilling() {
     }
   }, [generateAllProgress, generateAllOpen, generateAllMutation.isPending]);
 
-  const draftPflegekasseInvoices = invoices?.filter(
-    (inv) => inv.status === "entwurf" && inv.billingType === "pflegekasse_gesetzlich"
-  ) || [];
+  // Task #1198: Storno-Belege (invoiceType "stornorechnung") sind Gutschriften
+  // und dürfen NICHT in die Massen-Versand-/Druck-Zähler bzw. -Mengen wandern —
+  // konsistent mit der standardmäßig ausgeblendeten Liste. Sonst behaupten die
+  // Buttons z.B. „29 Rechnungen", obwohl die Liste leer ist, und die Massen-
+  // Aktionen würden reale Storno-Belege mitverarbeiten. Die Prädikate liegen
+  // zentral in @shared/domain/billing-drafts, damit Zähler und verarbeitete
+  // Mengen nicht auseinanderdriften.
+  const draftPflegekasseInvoices = invoices?.filter(isPflegekasseBatchDraft) || [];
 
   // Task #534: Alle Entwürfe, die im typenübergreifenden Bulk-Versand
-  // verarbeitet werden — Selbstzahler + beide Pflegekassen-Varianten.
-  const draftBulkInvoices = invoices?.filter(
-    (inv) => inv.status === "entwurf" && (
-      inv.billingType === "selbstzahler"
-      || inv.billingType === "pflegekasse_gesetzlich"
-      || inv.billingType === "pflegekasse_privat"
-    )
-  ) || [];
+  // verarbeitet werden — Selbstzahler + beide Pflegekassen-Varianten
+  // (ohne Storno-Belege, s.o.).
+  const draftBulkInvoices = invoices?.filter(isBulkActionableDraft) || [];
 
   const handleBatchSend = () => {
     if (draftPflegekasseInvoices.length === 0) {

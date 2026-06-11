@@ -138,6 +138,13 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["billing-invoices"],
     ["billing-invoice-detail"],
     ["billing-delivery-history"],
+    // Task #1198: Die „Alle offenen erstellen (N)"-Zahl stammt aus
+    // eligible-customers, das Kassen-Dropdown aus payers. Beide MÜSSEN bei
+    // jeder Billing-Mutation (Stornieren/Verwerfen/Erstellen/Versenden)
+    // miterneuert werden, sonst bleiben die Zähler bis zum manuellen Neuladen
+    // auf dem alten Wert hängen.
+    ["billing-eligible-customers"],
+    ["billing-payers"],
   ],
   qonto: [
     ["qonto"],
