@@ -1,0 +1,52 @@
+# Replit-AI-Ticket: Budget-Anker (budgetStartDate) grundlegend aufräumen — eine Regel, alle Pfade
+
+**Datum:** 11.06.2026 · **Prio:** 🔴 HOCH (Prod-Fall, betrifft echte Abrechnungen) · **Ersetzt/erweitert:** TICKET I (BUG-22) aus `Replit-AI-Ticket-Session1-Befunde-2026-06-10.md`
+**Referenz-Fall (Prod):** Kundin 182 (Mentke): PG 2 seit 01.02.2025, angelegt 06.05.2026 → `customer_budget_preferences.budgetStartDate = '2026-05-01'`, `budgetStartDateOrigin = NULL` → System alloziert 2026 nur Mai+Juni (2×131 €) statt Jan–Jun (6×131 €). Anzeige „Gesamt zugewiesen 1.145,55 €" statt erwarteter 1.669,55 € (Carryover 883,55 € + 786 €).
+
+---
+
+## 1. Problem
+
+`budgetStartDate` (der Anker, ab dem virtuelle Monats-Allokationen laufen) wird je nach Pfad unterschiedlich oder gar nicht gesetzt:
+
+- Kundenanlage setzt den Anker teils auf den **Anlagemonat** statt auf den Pflegegrad-Beginn (Referenz-Fall: origin NULL → der Floor aus Task #860 greift nie).
+- Der Floor auf den 1.1. des laufenden Jahres (`floorAutoAnchor45bToCurrentYear`) existiert, wirkt aber nur bei `origin = 'derived_pflegegrad'` — Altbestand und andere Create-Pfade laufen daran vorbei.
+- Die Pflegegrad-Historie (`customer_care_level_history`) sagt fachlich „Anspruch seit 02/2025", der Anker sagt „05/2026" — zwei Wahrheiten, die UI zeigt den Anker nirgends an. Niemand kann sehen, *warum* Monate fehlen.
+- Beim Löschen eines Startwerts (initial_balance) entsteht stillschweigend eine Allokationslücke vor dem Anker (genau so entstand der Mentke-Fall).
+
+## 2. Soll-Regeln (fachlich entschieden von Alrik, 11.06.2026)
+
+**R1 — Neukundenanlage:** Der Anker wird aus dem Pflegegrad-Startdatum abgeleitet: `budgetStartDate = max(pflegegradSeit, 01.01. des laufenden Jahres)`, `origin = 'derived_pflegegrad'`. (Liegt der PG-Beginn im Vorjahr oder früher → Anker = 01.01. laufendes Jahr; Vorjahres-Ansprüche werden ausschließlich über einen **manuell erfassten Carryover** abgebildet, niemals automatisch.) Diese Regel gilt für **alle** Anlage-Pfade: Wizard, `POST /api/admin/customers`, Excel-Import, Prospect-Konversion, `/initial-budget`.
+
+**R2 — Pflegegrad-Änderung bei Bestandskunden:** Eine PG-Änderung (Hoch-/Runterstufung, neue Historien-Zeile) erzeugt **niemals** einen neuen Anker und verschiebt den bestehenden nicht — die Ansprüche aus dem vorherigen PG bestehen fort. Es ändern sich nur die **Beträge** ab Wirksamkeitsdatum der neuen Phase (§45a-Monats-Cap etc.; im Wechselmonat gilt der neue PG, Entscheidung F-A3 vom 10.06.).
+
+**R3 — Erstmaliger PG bei Bestandskunde** (z. B. bisher Selbstzahler ohne PG, jetzt PG bewilligt): Anker wird gesetzt wie bei R1 (max(pflegegradSeit, 01.01. lfd. Jahr)) — aber nur, wenn noch **kein** Anker existiert. Existiert bereits einer, bleibt er (R2).
+
+**R4 — Kein manueller Anker, keine UI (Entscheidung Alrik 11.06.):** Der Anker ist eine **rein interne Größe** und wird ausschließlich von der Automatik (R1–R3) bestimmt. Es gibt keine UI zum Anzeigen oder Pflegen, kein `origin='manual'`, nichts zu administrieren. Die einzigen manuellen Budget-Instrumente bleiben **Startwert** und **Carryover** — alles andere läuft im Hintergrund sauber aus der Pflegegrad-Historie. Bevorzugte Umsetzung: Anker zur **Laufzeit ableiten** (`resolveBudgetAnchor(careLevelHistory, today)`) statt ihn als pflegbares Feld zu persistieren; `customer_budget_preferences.budgetStartDate`/`budgetStartDateOrigin` werden deprecated (höchstens als Cache, nie als Quelle der Wahrheit). Damit kann das Feld nie wieder falsch stehen bleiben.
+
+**R5 — Kein stilles Lücken-Erzeugen:** Beim Löschen eines Startwerts oder Ändern eines Carryovers entsteht keine Lücke mehr, weil die Allokation sofort wieder aus R1–R3 abgeleitet wird (der Mentke-Fall wird damit konstruktionsbedingt unmöglich). Übergangsweise — solange das persistierte Feld noch existiert — wird es bei solchen Operationen automatisch auf das R1-Datum zurückgesetzt.
+
+**Leitplanke:** Genau **eine** Funktion `resolveBudgetAnchor(careLevelHistory, today)` implementiert R1–R3 und wird von allen Pfaden importiert (Wizard, API-Create, Import, Konversion, initial-budget, Verfügbarkeitsrechnung, Backfill). Keine Pfad-eigenen Kopien — das war die Ursache des Problems.
+
+## 3. Bestandsdaten-Bereinigung (Backfill)
+
+1. **Report zuerst** (kein Auto-Fix): Alle Kunden mit aktiven §-Töpfen listen, bei denen `budgetStartDate > max(pflegegradSeit, 01.01. lfd. Jahr)` und `origin IS NULL` — Spalten: Kunde, PG seit, Anker, fehlende Monate, fehlender Betrag in €, vorhandene Startwerte/Carryover. (Erwarteter Treffer: Kundin 182 mit 4 Monaten / 524 €.)
+2. Nach Freigabe durch Alrik: Bulk-Korrektur der freigegebenen Fälle auf das R1-Datum (bzw. Umstellung auf Laufzeit-Ableitung), Audit-Log je Änderung.
+3. Kundin 182 ist der Verifikationsfall: Nach Korrektur muss „Gesamt zugewiesen" = 1.669,55 € sein (883,55 Carryover + 6×131), Verfügbarkeit entsprechend.
+
+## 4. Akzeptanzkriterien / Tests
+
+1. **Neuanlage, PG seit Vorjahr** (Mentke-Konstellation): Kunde anlegen mit pflegegradSeit 01.02.2025 → Anker = 01.01.2026, `currentYearAllocatedCents` = Monate Jan–heute × 131 €. Kein automatischer Vorjahres-Carryover.
+2. **Neuanlage, PG seit laufendem Jahr:** pflegegradSeit 01.03.2026, Anlage im Juni → Anker = 01.03.2026, Allokation = 4×131 (bestehender Dev-Test R-07 bleibt grün).
+3. **PG-Wechsel:** Bestandskunde PG 2→3 mit validFrom 01.07. → Anker unverändert; §45a-Cap ab Juli = PG-3-Wert; Allokationen vor Juli unverändert (R2).
+4. **PG-Ersterfassung Bestandskunde:** Kunde ohne Töpfe bekommt PG → Anker nach R1 gesetzt; zweiter PG-Eintrag ändert ihn nicht mehr (R3).
+5. **Startwert-Löschung:** Kunde mit Startwert April → nach Löschen werden die Monate ab R1-Anker (z. B. Jan–Jun) automatisch wieder einzeln alloziert — keine Lücke, keine Nutzer-Interaktion nötig (R5; exakte Mentke-Repro als Test).
+6. **Alle Create-Pfade:** Wizard, API, Import, Prospect-Konversion erzeugen identische Anker für identische Eingaben (Parametrisierter Test über `resolveBudgetAnchor`).
+7. **Backfill-Report** läuft read-only und listet Kundin 182 mit 524 € Differenz.
+8. **Drift-Guard:** Architektur-Test, dass kein Code-Pfad `budgetStartDate` schreibt oder liest außer `resolveBudgetAnchor` (bzw. das Feld nach Migration ganz entfernt ist).
+
+## 5. Abhängigkeiten / Wechselwirkungen
+
+- **TICKET B (BUG-16, Settings-Historisierung)** und **TICKET H (BUG-21, Monatslimit-Drift)** aus dem Session-Ticket berühren dieselben Lese-Pfade (`allocation-storage.ts`) — Anker-Umbau bitte **nach** B/H oder gemeinsam, mit gemeinsamer Regressionssuite.
+- UI-Sichtbarkeit des Ankers (R4) passt zur geplanten Budget-Tab-Überarbeitung; Anzeige „Gesamt zugewiesen" muss die Anker-Herkunft als Tooltip erklären können.
+- GoBD: Anker-Änderungen sind konfigurationswirksam für Verfügbarkeitsrechnungen → Audit-Pflicht (siehe Leitplanke), keine rückwirkende Veränderung bereits fakturierter Zeiträume ohne Beleg.
