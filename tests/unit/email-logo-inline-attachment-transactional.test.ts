@@ -324,19 +324,39 @@ describe("Task #1139 — Firmenlogo als Inline-cid-Anhang in transaktionalen E-M
       return computeMonthCloseCutoff(closingYear, closingMonth);
     }
 
-    // DB-/Repo-Ergebnisse in Await-Reihenfolge bereitstellen:
-    //   db.select  #1 → aktive Mitarbeiter
-    //   appt-repo  #1 → offene (nicht dokumentierte) Termine
-    //   appt-repo  #2 → unterschriebene-fehlt Termine
-    //   db.select  #2 → reminderAlreadySent → leer (noch nicht versendet)
+    // Task #1195: Der Scheduler leitet die Reminder-Blocker aus der EINEN
+    // geteilten Readiness-Definition `getAdminMonthClosingReadiness` ab (jetzt
+    // direkt aus dem Blatt-Modul importiert, nicht mehr über die Facade). Wir
+    // seeden die gemockten DB-/Repo-Ergebnisse in der echten Await-Reihenfolge
+    // dieser Funktion + des nachgelagerten Reminder-Versands:
+    //   db.select  #1 → aktive Mitarbeiter (readiness)
+    //   appt-repo  #1 → offene (nicht dokumentierte) Termine (readiness)
+    //   appt-repo  #2 → unterschrieben-fehlt Termine (readiness)
+    //   appt-repo  #3 → abgeschlossene Termine (Aktivitäts-Count, readiness)
+    //   db.select  #2 → bestehende Monatsabschlüsse (readiness)
+    //   db.select  #3 → E-Mail-Adressen der blockierten Mitarbeiter
+    //   db.select  #4 → reminderAlreadySent → leer (noch nicht versendet)
+    // (employeeTimeEntriesRepo ist global auf [] gemockt.)
     function seedReminderQueries(): void {
       h.state.dbResults = [
-        [{ id: 1, displayName: "Test Mitarbeiter", email: EMP_EMAIL }],
-        [],
+        [{ id: 1, displayName: "Test Mitarbeiter" }], // aktive Mitarbeiter
+        [],                                            // bestehende Abschlüsse
+        [{ id: 1, email: EMP_EMAIL }],                 // E-Mail-Lookup
+        [],                                            // reminderAlreadySent
       ];
       h.state.apptResults = [
-        [{ employeeId: 1, count: 2 }],
-        [],
+        // ein offener (nicht dokumentierter) Termin für Mitarbeiter 1 → Blocker
+        [{
+          employeeId: 1,
+          id: 101,
+          date: "2026-01-15",
+          scheduledStart: null,
+          status: "scheduled",
+          customerId: 5,
+          customerName: "Test Kunde",
+        }],
+        [], // keine unsignierten Termine
+        [], // keine abgeschlossenen Termine (Aktivitäts-Count)
       ];
     }
 

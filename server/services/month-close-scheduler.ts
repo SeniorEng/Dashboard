@@ -17,7 +17,19 @@ import { auditService } from "./audit";
 import { createNotification, hasRecentNotification } from "../storage/notifications";
 import { notificationService } from "./notification-service";
 import { storage } from "../storage";
-import { timeTrackingStorage } from "../storage/time-tracking";
+// Task #1195: Direkt das Blatt-Modul importieren (gehostete Funktions-
+// Deklarationen), NICHT über die `timeTrackingStorage`-Facade. Die Facade ist
+// ein Objekt-Literal, dessen Methoden-Referenzen zum Init-Zeitpunkt eingefroren
+// werden; unter der Modul-Init-/Zirkular-Import-Reihenfolge konnte
+// `getAdminMonthClosingReadiness` daher zur Aufrufzeit `undefined` sein
+// ("is not a function"). Der Scheduler bindet hier — konsistent mit
+// `../storage/notifications` und `../storage/tasks` — direkt an die Quelle.
+import {
+  getAdminMonthClosingReadiness,
+  getMonthClosingReadiness,
+  getMonthClosing,
+  closeMonth,
+} from "../storage/time-tracking/month-closing";
 import { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "./email-service";
 import { ensureMonthClosingTask, completeMonthClosingTask } from "../storage/tasks";
 import { generateAutoBreaksForMonth, insertAutoBreaks } from "./auto-breaks";
@@ -86,7 +98,7 @@ async function getEmployeesWithMonthBlockers(year: number, month: number): Promi
   // Damit zählen Banner, Reminder, Auto-Close und Admin-Close exakt dieselben
   // offenen/unsignierten Termine (inkl. LN-bewusster „unsigniert"-Definition und
   // einheitlicher Verantwortlichkeits-Attribution).
-  const readiness = await timeTrackingStorage.getAdminMonthClosingReadiness(year, month);
+  const readiness = await getAdminMonthClosingReadiness(year, month);
   const blocked = readiness.filter(
     (e) => !e.isClosed && (e.openAppointments.length > 0 || e.unsignedAppointments.length > 0),
   );
@@ -172,7 +184,7 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
   // die Abschluss-Entscheidung pro Mitarbeiter zwischen Auto-, Admin- und
   // Batch-Pfad per Konstruktion identisch (gleiche Aktivitäts-, Offen- und
   // LN-bewusste „unsigniert"-Logik, gleiche Verantwortlichkeits-Attribution).
-  const readiness = await timeTrackingStorage.getAdminMonthClosingReadiness(year, month);
+  const readiness = await getAdminMonthClosingReadiness(year, month);
 
   // Admins/Superadmins, die bei blockiertem Auto-Close zur manuellen Prüfung
   // eskaliert werden (lazy geladen, nur wenn tatsächlich ein Blocker auftritt).
@@ -240,14 +252,14 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
     // Ready → schließen, mit Parität zum Admin-/Batch-Close: Auto-Pausen
     // generieren+einfügen, Closing schreiben, Aufgabe abschließen.
     const existing = emp.closingId
-      ? await timeTrackingStorage.getMonthClosing(emp.userId, year, month)
+      ? await getMonthClosing(emp.userId, year, month)
       : null;
 
     const autoBreaks = await generateAutoBreaksForMonth(emp.userId, year, month);
 
     const insertedCount = await db.transaction(async (tx) => {
       const inserted = await insertAutoBreaks(emp.userId, autoBreaks, tx);
-      await timeTrackingStorage.closeMonth(emp.userId, year, month, systemActorId, existing?.id, tx);
+      await closeMonth(emp.userId, year, month, systemActorId, existing?.id, tx);
       await ensureMonthClosingTask(emp.userId, month, year, tx);
       await completeMonthClosingTask(emp.userId, month, year, tx);
       return inserted;
@@ -413,7 +425,7 @@ export async function getMonthCloseBanner(userId: number): Promise<{
   // für „abgeschlossen" + `getMonthClosingReadiness` für die Blocker). Keine
   // parallele Banner-eigene SQL mehr — Banner, Reminder und Abschluss zählen
   // damit garantiert dasselbe.
-  const readiness = await timeTrackingStorage.getMonthClosingReadiness(userId, year, month);
+  const readiness = await getMonthClosingReadiness(userId, year, month);
 
   const [closing] = await db
     .select()

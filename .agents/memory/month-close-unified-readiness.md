@@ -34,3 +34,13 @@ silently skip and it NEVER overwrites appointment status. Auto-close logs
 /document-no-show):** locked (= on a signed Leistungsnachweis) → 409 `conflict()`
 (`APPOINTMENT_LOCKED`); month closed → 403 `forbidden("MONTH_CLOSED")`. The
 read-only `/:id/no-show-preview` stays a uniform 403 IDOR guard on purpose.
+
+**Facade-init fragility (services):** the scheduler must import the readiness
+functions DIRECTLY from the leaf `month-closing` module, NOT via the
+`timeTrackingStorage` object-literal facade (`server/storage/time-tracking.ts`).
+The facade freezes its method references at module-init; under circular-import
+ordering those refs can still be `undefined` when a service that loads early
+calls them → runtime `…getAdminMonthClosingReadiness is not a function`. Prefer
+direct leaf imports in services (same pattern as `../storage/notifications`,
+`../storage/tasks`). **Why:** Task #1172 moved the scheduler onto the facade and
+this exact TypeError surfaced at reminder time.
