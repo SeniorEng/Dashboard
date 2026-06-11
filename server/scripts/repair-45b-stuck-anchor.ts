@@ -1,56 +1,66 @@
 /**
- * Task #1148 — Datenfix: §45b-Budget hängt bei Bestandskunden auf einem Monat fest.
+ * Task #1193 — Report + idempotenter Bulk-Fix für „auf den Stichmonat
+ * festhängende" Budget-Anker bei Bestandskunden.
  *
- * Hintergrund: Task #1143 hat den §45b-Akkumulations-Bug NACH VORNE behoben
- * (POST /initial-balance + DELETE schreiben/erneuern jetzt den kunden-weiten
- * `budget_start_date` mit Origin 'derived_pflegegrad'). Kunden, die VOR diesem
- * Fix angelegt wurden, behalten aber einen Anker, der
- *   - auf den Stichmonat gepinnt ist (statt am Pflegegrad-Beginn) und
- *   - `budget_start_date_origin = NULL` trägt.
+ * Hintergrund: Der Budget-Anker (`customer_budget_preferences.budget_start_date`)
+ * wurde historisch je nach Anlage-Pfad unterschiedlich gesetzt. Bei Altkunden,
+ * die VOR dem Anker-SSoT (Task #1192/#1143) angelegt wurden, steht er häufig
+ *   - auf dem KREATIONS-/Stichmonat (statt am Pflegegrad-Beginn / 01.01.) und
+ *   - mit `budget_start_date_origin = NULL`.
  * Der §45b-Lesepfad (`calculateAllocated45b`) bodet/kappt einen Anker NUR, wenn
  * Origin = 'derived_pflegegrad' ist (`floorAutoAnchor45bToCurrentYear`). Bei
- * NULL liest er den Anker ROH — das §45b-Budget bleibt auf dem Stichmonat
- * hängen und zeigt ~131 € statt der vollen Jahres-Ansammlung (Prod-Kunde
- * "Valdorf, Gerhard" #209).
+ * NULL liest er den Anker ROH — die §45b-Monatsansammlung beginnt erst im
+ * Stichmonat statt im Januar, das Budget zeigt nur einen Bruchteil der
+ * Jahresansammlung (Prod-Repro: Kunde "Mentke" #182 → 4 Monate / 524 € fehlen).
  *
- * Was der Fix tut (idempotent, GoBD-konform, FORWARD-ONLY für die Anzeige):
- *  1. Kandidaten = Kunden mit §45b AKTIV, `budget_start_date_origin IS NULL`,
- *     `budget_start_date` gesetzt UND vorhandener Pflegegrad-Historie.
- *  2. Re-derivierter Anker = frühester Pflegegrad-Beginn
- *     (`resolve45bAccrualAnchor`, identisch zum DELETE-/Wizard-Pfad).
- *  3. BETROFFEN ist nur, wessen re-derivierter Anker FRÜHER liegt als der aktuell
- *     gepinnte (`derived < current`) — also genau die „auf einen Monat
- *     festhängenden" Kunden. Ein manuell auf ein FRÜHERES Datum gesetzter Anker
- *     wird so nie nach hinten gezogen; absichtlich `manual` markierte Anker
- *     werden ohnehin ausgeschlossen (nur `origin IS NULL`).
- *  4. Schreibt `budget_start_date = re-derivierter Anker` und
- *     `budget_start_date_origin = 'derived_pflegegrad'` (über
- *     `upsertBudgetPreferences`). §45a/§39 lesen den Anker weiterhin ROH — der
- *     re-derivierte Wert IST der kanonische Pflegegrad-Anker, den §45a/§39 ohnehin
- *     nutzen sollen (vor/nach im Report sichtbar). §45b kappt ihn beim Lesen.
- *  5. Audit-Eintrag `budget_initial_setup` (GoBD).
+ * Geregelter Fluss (Report → Freigabe → Korrektur) — ERSETZT das ad-hoc
+ * Repair-Tooling:
  *
- * Es werden KEINE `budget_allocations` angefasst (kein Verschieben von Startwert-
- * Zeilen — das ist der separate #856-Pfad `fix-customer-45b-anchor.ts`). Hat ein
- * Kunde einen §45b-Startwert (`initial_balance`), der nach der Anker-Korrektur den
- * Akkumulations-Start weiterhin verschiebt, warnt der Report und verweist dorthin.
+ *  1. REPORT (Dry-Run = Default): listet alle Kunden mit aktiven §-Töpfen,
+ *     deren Anker `origin IS NULL` trägt UND später liegt als der per SSoT
+ *     abgeleitete Soll-Anker (`budget_start_date > resolveBudgetAnchor(...)`).
+ *     Spalten: Kunde · PG seit · aktueller Anker · Soll-Anker · fehlende
+ *     Monate · fehlender Betrag € · vorhandene Startwerte/Carryover.
+ *
+ *  2. SOLL-ANKER: ausschließlich über die Anker-SSoT
+ *     `resolveBudgetAnchor(careLevelHistory, today)` (Task #1192) =
+ *     `max(frühester pflegegradSeit, 01.01. laufendes Jahr)`. KEINE eigene
+ *     Anker-Mathematik in diesem Skript.
+ *
+ *  3. KORREKTUR (`--apply`): setzt für die freigegebenen Fälle
+ *     `budget_start_date = Soll-Anker` und `budget_start_date_origin =
+ *     'derived_pflegegrad'` (über `upsertBudgetPreferences`) und schreibt EINEN
+ *     GoBD-Audit-Eintrag pro Änderung. Idempotent: ein zweiter Lauf findet die
+ *     Fälle nicht mehr (Origin ist nicht mehr NULL).
+ *
+ *  4. KORREKTUR-GATE: nur Kunden mit AKTIVEM §45b werden geschrieben — nur dort
+ *     hängt die Ansammlung am gebodeten Anker. Reine §45a/§39-Kunden bleiben
+ *     UNANGETASTET (ihr Anker wird nicht angefasst). Bei Kunden mit §45b UND
+ *     §45a/§39 ist der geschriebene Wert der kanonische Pflegegrad-Anker, den
+ *     §45a/§39 ohnehin nutzen sollen.
+ *
+ * Es werden KEINE `budget_allocations` angefasst (kein Verschieben von Startwert-/
+ * Carryover-Zeilen). Hat ein Kunde einen §45b-Startwert (`initial_balance`), der
+ * nach der Anker-Korrektur den Akkumulations-Start weiterhin verschiebt, warnt
+ * der Report.
  *
  * DRY-RUN: Ohne `--apply` wird die Korrektur in einer Transaktion ausgeführt,
  * das tatsächliche §45b-Allocated vorher/nachher via `calculateAllocatedCents`
- * gemessen und die Transaktion am Ende bewusst zurückgerollt — der Report zeigt
- * also exakt, WAS ein scharfer Lauf ändern WÜRDE, ohne zu schreiben.
+ * gemessen (→ fehlende Monate/Betrag) und die Transaktion am Ende bewusst
+ * zurückgerollt — der Report zeigt also exakt, WAS ein scharfer Lauf ändern
+ * WÜRDE, ohne zu schreiben.
  *
- * SICHERHEIT: Anders als die Test-Cleanup-Skripte DARF dieser Fix auf Produktion
- * laufen (er repariert Prod-Bestandskunden). Damit das nicht VERSEHENTLICH gegen
- * die falsche DB passiert, verlangt ein scharfer Lauf gegen einen prod-aussehenden
- * DB-Host (oder NODE_ENV=production) zusätzlich `--confirm-prod`. Der DB-Host wird
- * immer prominent ausgegeben.
+ * SICHERHEIT: Dieser Fix DARF auf Produktion laufen (er repariert Prod-
+ * Bestandskunden). Damit das nicht VERSEHENTLICH gegen die falsche DB passiert,
+ * verlangt ein scharfer Lauf gegen einen prod-aussehenden DB-Host (oder
+ * NODE_ENV=production) zusätzlich `--confirm-prod`. Der DB-Host wird immer
+ * prominent ausgegeben.
  *
  * Aufruf:
- *   tsx server/scripts/repair-45b-stuck-anchor.ts                       # Dry-Run, alle betroffenen
+ *   tsx server/scripts/repair-45b-stuck-anchor.ts                       # Dry-Run, nur betroffene
  *   tsx server/scripts/repair-45b-stuck-anchor.ts --all                 # Dry-Run, auch unbetroffene listen
- *   tsx server/scripts/repair-45b-stuck-anchor.ts --customer=209        # Dry-Run, nur Kunde #209
- *   tsx server/scripts/repair-45b-stuck-anchor.ts --customer=209 --apply
+ *   tsx server/scripts/repair-45b-stuck-anchor.ts --customer=182        # Dry-Run, nur Kunde #182
+ *   tsx server/scripts/repair-45b-stuck-anchor.ts --customer=182 --apply
  *   tsx server/scripts/repair-45b-stuck-anchor.ts --apply --confirm-prod  # scharf auf Produktion
  */
 import { and, asc, eq, isNull, isNotNull } from "drizzle-orm";
@@ -63,15 +73,29 @@ import {
   budgetAllocations,
   users,
 } from "@shared/schema";
-import { floorAutoAnchor45bToCurrentYear } from "@shared/domain/budgets";
-import { resolve45bAccrualAnchor } from "@shared/domain/budget/carryover-eligibility";
+import { resolveBudgetAnchor } from "@shared/domain/budget/budget-anchor";
+import { BUDGET_45B_MAX_MONTHLY_CENTS } from "@shared/domain/budgets";
 import { calculateAllocatedCents } from "../storage/budget/allocation-storage";
 import { budgetLedgerStorage } from "../storage/budget-ledger";
 import { auditService } from "../services/audit";
-import { currentYearAndMonth, todayISO } from "@shared/utils/datetime";
+import { todayISO } from "@shared/utils/datetime";
 
 const BUDGET_TYPE = "entlastungsbetrag_45b" as const;
 const euro = (c: number) => `${(c / 100).toFixed(2)} €`;
+
+/**
+ * Reine Hilfsfunktion: Anzahl §45b-Monate, die die Allocated-Differenz abbildet.
+ * Default-Monatsbetrag = gesetzlicher §45b-Maximalbetrag (131 €). Wird gegen
+ * den Standardbetrag gerundet — eine reine Anzeige-Approximation für den Report,
+ * keine Buchungslogik.
+ */
+export function missingMonthsFromCents(
+  missingCents: number,
+  monthlyCents: number = BUDGET_45B_MAX_MONTHLY_CENTS,
+): number {
+  if (monthlyCents <= 0) return 0;
+  return Math.round(missingCents / monthlyCents);
+}
 
 /** Sentinel, der die Dry-Run-Transaktion sauber zurückrollt. */
 class DryRunRollback extends Error {
@@ -128,14 +152,14 @@ async function findOperatorUserId(): Promise<number | null> {
   return u?.id ?? null;
 }
 
-interface Candidate {
+interface NullOriginCustomer {
   customerId: number;
   name: string;
   currentAnchor: string;
   origin: string | null;
 }
 
-async function loadCandidates(onlyCustomer: number | null): Promise<Candidate[]> {
+async function loadNullOriginCustomers(onlyCustomer: number | null): Promise<NullOriginCustomer[]> {
   const whereParts = [
     isNull(customerBudgetPreferences.budgetStartDateOrigin),
     isNotNull(customerBudgetPreferences.budgetStartDate),
@@ -156,7 +180,7 @@ async function loadCandidates(onlyCustomer: number | null): Promise<Candidate[]>
     .orderBy(asc(customerBudgetPreferences.customerId));
 
   return rows
-    .filter((r): r is Candidate => !!r.currentAnchor)
+    .filter((r): r is NullOriginCustomer => !!r.currentAnchor)
     .map((r) => ({
       customerId: r.customerId,
       name: r.name ?? "",
@@ -165,10 +189,44 @@ async function loadCandidates(onlyCustomer: number | null): Promise<Candidate[]>
     }));
 }
 
-async function is45bEnabled(customerId: number): Promise<boolean> {
-  // Datumsunabhängig (analog calculateAllocated45b): irgendeine §45b-Zeile aktiv.
+/** Frühester Pflegegrad-Beginn (für die Report-Spalte „PG seit", roh). */
+async function earliestPflegegradStart(customerId: number): Promise<string | null> {
   const rows = await db
-    .select({ enabled: customerBudgetTypeSettings.enabled })
+    .select({ validFrom: customerCareLevelHistory.validFrom })
+    .from(customerCareLevelHistory)
+    .where(eq(customerCareLevelHistory.customerId, customerId));
+  const sorted = rows
+    .map((r) => r.validFrom)
+    .filter((v): v is string => !!v)
+    .sort();
+  return sorted[0] ?? null;
+}
+
+/** Pflegegrad-Historie als SSoT-Input (reihenfolge-unabhängig). */
+async function careLevelHistoryRows(customerId: number): Promise<{ validFrom: string | null }[]> {
+  return db
+    .select({ validFrom: customerCareLevelHistory.validFrom })
+    .from(customerCareLevelHistory)
+    .where(eq(customerCareLevelHistory.customerId, customerId));
+}
+
+/** Irgendein §-Topf aktiv (datumsunabhängig). */
+async function hasActivePot(customerId: number): Promise<boolean> {
+  const rows = await db
+    .select({ id: customerBudgetTypeSettings.id })
+    .from(customerBudgetTypeSettings)
+    .where(and(
+      eq(customerBudgetTypeSettings.customerId, customerId),
+      eq(customerBudgetTypeSettings.enabled, true),
+    ))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** §45b aktiv (datumsunabhängig, analog calculateAllocated45b). */
+async function is45bEnabled(customerId: number): Promise<boolean> {
+  const rows = await db
+    .select({ id: customerBudgetTypeSettings.id })
     .from(customerBudgetTypeSettings)
     .where(and(
       eq(customerBudgetTypeSettings.customerId, customerId),
@@ -179,24 +237,36 @@ async function is45bEnabled(customerId: number): Promise<boolean> {
   return rows.length > 0;
 }
 
-async function earliestPflegegradStart(customerId: number): Promise<string | null> {
+/** Summe vorhandener §45b-Startwerte und Carryover (Report-Spalte). */
+async function existing45bSources(customerId: number): Promise<{
+  initialBalanceCents: number;
+  carryoverCents: number;
+}> {
   const rows = await db
-    .select({ validFrom: customerCareLevelHistory.validFrom })
-    .from(customerCareLevelHistory)
-    .where(eq(customerCareLevelHistory.customerId, customerId));
-  // Reihenfolge-unabhängig (frühestes validFrom) — fallbackISO = "" markiert
-  // „keine Historie" (resolve gibt dann "" zurück, das wir als null behandeln).
-  const resolved = resolve45bAccrualAnchor(rows, "");
-  return resolved || null;
+    .select({
+      source: budgetAllocations.source,
+      amountCents: budgetAllocations.amountCents,
+    })
+    .from(budgetAllocations)
+    .where(and(
+      eq(budgetAllocations.customerId, customerId),
+      eq(budgetAllocations.budgetType, BUDGET_TYPE),
+      isNull(budgetAllocations.deletedAt),
+    ));
+  let initialBalanceCents = 0;
+  let carryoverCents = 0;
+  for (const r of rows) {
+    if (r.source === "initial_balance") initialBalanceCents += r.amountCents;
+    else if (r.source === "carryover") carryoverCents += r.amountCents;
+  }
+  return { initialBalanceCents, carryoverCents };
 }
 
+/** Aktiver §45b-Startwert mit Monat >= korrigiertem Anker (Unvollständigkeits-Warnung). */
 async function has45bInitialBalanceAtOrAfter(
   customerId: number,
   effectiveAnchor: string,
 ): Promise<boolean> {
-  // Ein aktiver §45b-Startwert verschiebt den Akkumulations-Start im Lesepfad
-  // (initialBalanceMonths-Shift). Liegt sein Monat >= dem korrigierten,
-  // gebodeten Anker, kann die reine Anker-Korrektur unvollständig bleiben.
   const rows = await db
     .select({ validFrom: budgetAllocations.validFrom })
     .from(budgetAllocations)
@@ -209,72 +279,184 @@ async function has45bInitialBalanceAtOrAfter(
   return rows.some((r) => r.validFrom >= effectiveAnchor);
 }
 
-interface Plan {
-  candidate: Candidate;
-  enabled: boolean;
-  derivedAnchor: string | null;
-  effectiveBefore: string; // §45b-effektiver Anker bei origin NULL (= roh)
-  effectiveAfter: string | null; // §45b-effektiver Anker nach Fix (gebodet)
-  affected: boolean;
+export interface AnchorRepairRow {
+  customerId: number;
+  name: string;
+  /** Frühester Pflegegrad-Beginn (roh). */
+  pgSeit: string | null;
+  /** Aktueller (gepinnter) Anker. */
+  currentAnchor: string;
+  origin: string | null;
+  /** Soll-Anker per resolveBudgetAnchor (SSoT) oder null (keine PG-Historie). */
+  sollAnchor: string | null;
+  hasActivePot: boolean;
+  enabled45b: boolean;
+  /** In der Report-Population: origin NULL, aktiver Topf, currentAnchor > sollAnchor. */
+  inPopulation: boolean;
+  /**
+   * Korrektur-Kandidat: inPopulation + §45b aktiv. Diese Kunden werden gelistet,
+   * gezählt UND (bei --apply) geschrieben — UNABHÄNGIG davon, ob sich der
+   * §45b-Allocated-Betrag dadurch ändert (die Origin-Korrektur NULL →
+   * 'derived_pflegegrad' ist für sich genommen schon eine GoBD-relevante
+   * Reparatur, die künftige Lesepfade stabilisiert).
+   */
+  willCorrect: boolean;
+  missingMonths: number;
+  missingCents: number;
+  existingInitialBalanceCents: number;
+  existingCarryoverCents: number;
   ibWarning: boolean;
+  beforeCents: number;
+  afterCents: number;
 }
 
-async function planFor(candidate: Candidate, curYear: number): Promise<Plan> {
-  const enabled = await is45bEnabled(candidate.customerId);
-  const derivedAnchor = await earliestPflegegradStart(candidate.customerId);
+export interface AnchorRepairResult {
+  rows: AnchorRepairRow[];
+  checked: number;
+  affectedCount: number;
+  totalDeltaCents: number;
+}
 
-  // §45b liest bei origin NULL den Anker ROH; nach dem Fix (origin derived) wird
-  // er auf den 1.1. des laufenden Jahres gebodet.
-  const effectiveBefore = candidate.currentAnchor;
-  const effectiveAfter = derivedAnchor
-    ? floorAutoAnchor45bToCurrentYear(derivedAnchor, curYear)
-    : null;
+export interface AnchorRepairOptions {
+  onlyCustomer?: number | null;
+  apply?: boolean;
+  /** Auch nicht-betroffene NULL-Origin-Kunden in den Rows behalten. */
+  includeUnaffected?: boolean;
+  /** „heute" für den SSoT-Floor (Default todayISO()). */
+  today?: string;
+  /** Mess-Stichtag für §45b-Allocated vorher/nachher (Default = today). */
+  asOfDate?: string;
+  /** Operator für Audit-Log (Default = erster Superadmin). */
+  operatorUserId?: number | null;
+}
 
-  // Betroffen = §45b aktiv, ableitbarer Anker liegt FRÜHER als der gepinnte
-  // (Kunde hängt zu spät fest) UND der effektive §45b-Anker ändert sich dadurch.
-  const affected =
-    enabled
-    && derivedAnchor != null
-    && derivedAnchor < candidate.currentAnchor
-    && effectiveAfter != null
-    && effectiveAfter !== effectiveBefore;
+/**
+ * Kern-Routine: ermittelt Kandidaten, misst §45b vorher/nachher und (bei
+ * `apply`) schreibt Anker + Origin + Audit. Wird sowohl von der CLI als auch
+ * vom Integrationstest verwendet.
+ */
+export async function runBudgetAnchorRepair(
+  opts: AnchorRepairOptions = {},
+): Promise<AnchorRepairResult> {
+  const apply = opts.apply ?? false;
+  const includeUnaffected = opts.includeUnaffected ?? false;
+  const today = opts.today ?? todayISO();
+  const asOfDate = opts.asOfDate ?? today;
 
-  let ibWarning = false;
-  if (affected && effectiveAfter) {
-    ibWarning = await has45bInitialBalanceAtOrAfter(candidate.customerId, effectiveAfter);
+  let operatorUserId = opts.operatorUserId ?? null;
+  if (operatorUserId == null) {
+    operatorUserId = await findOperatorUserId();
+  }
+  if (apply && operatorUserId == null) {
+    throw new Error("Kein Superadmin gefunden — Operator für Audit-Log fehlt.");
   }
 
-  return { candidate, enabled, derivedAnchor, effectiveBefore, effectiveAfter, affected, ibWarning };
+  const nullOrigin = await loadNullOriginCustomers(opts.onlyCustomer ?? null);
+  const rows: AnchorRepairRow[] = [];
+  let affectedCount = 0;
+  let totalDeltaCents = 0;
+
+  for (const c of nullOrigin) {
+    const [pgSeit, history, activePot, enabled45b, sources] = await Promise.all([
+      earliestPflegegradStart(c.customerId),
+      careLevelHistoryRows(c.customerId),
+      hasActivePot(c.customerId),
+      is45bEnabled(c.customerId),
+      existing45bSources(c.customerId),
+    ]);
+
+    const sollAnchor = resolveBudgetAnchor(history, today);
+
+    // Population (Report): origin NULL, aktiver Topf, Anker liegt SPÄTER als der
+    // Soll-Anker (Kunde hängt zu spät fest). ISO-Strings lexikografisch.
+    const inPopulation =
+      activePot
+      && sollAnchor != null
+      && c.currentAnchor > sollAnchor;
+
+    // Korrektur-Kandidat = Population + §45b aktiv. Die Entscheidung, OB
+    // geschrieben/gelistet/gezählt wird, hängt AUSSCHLIESSLICH an diesem
+    // Kriterium — NICHT daran, ob sich der Allocated-Betrag ändert. Sonst
+    // könnte ein Anker im Apply-Modus still korrigiert + auditiert werden,
+    // ohne im Report aufzutauchen (Verstoß gegen Report → Freigabe → Korrektur).
+    const willCorrect = inPopulation && enabled45b && sollAnchor != null;
+
+    let beforeCents = 0;
+    let afterCents = 0;
+    let ibWarning = false;
+
+    if (willCorrect && sollAnchor != null) {
+      ibWarning = await has45bInitialBalanceAtOrAfter(c.customerId, sollAnchor);
+      const measured = await measureAndApply(
+        { customerId: c.customerId, currentAnchor: c.currentAnchor, origin: c.origin, sollAnchor },
+        apply,
+        operatorUserId,
+        asOfDate,
+      );
+      beforeCents = measured.before;
+      afterCents = measured.after;
+    }
+
+    // Differenz ist rein informativ (Report-Spalte) und darf 0 sein.
+    const missingCents = willCorrect ? Math.max(0, afterCents - beforeCents) : 0;
+    const row: AnchorRepairRow = {
+      customerId: c.customerId,
+      name: c.name,
+      pgSeit,
+      currentAnchor: c.currentAnchor,
+      origin: c.origin,
+      sollAnchor,
+      hasActivePot: activePot,
+      enabled45b,
+      inPopulation,
+      willCorrect,
+      missingMonths: missingMonthsFromCents(missingCents),
+      missingCents,
+      existingInitialBalanceCents: sources.initialBalanceCents,
+      existingCarryoverCents: sources.carryoverCents,
+      ibWarning,
+      beforeCents,
+      afterCents,
+    };
+
+    if (willCorrect) {
+      affectedCount++;
+      totalDeltaCents += missingCents;
+    }
+
+    if (willCorrect || (includeUnaffected && c.currentAnchor)) {
+      rows.push(row);
+    }
+  }
+
+  return { rows, checked: nullOrigin.length, affectedCount, totalDeltaCents };
 }
 
 async function measureAndApply(
-  plan: Plan,
+  target: { customerId: number; currentAnchor: string; origin: string | null; sollAnchor: string },
   apply: boolean,
   operatorUserId: number | null,
   asOfDate: string,
 ): Promise<{ before: number; after: number }> {
-  const { candidate, derivedAnchor } = plan;
-  if (!derivedAnchor) return { before: 0, after: 0 };
-
   let before = 0;
   let after = 0;
   try {
     await db.transaction(async (tx) => {
       before = await calculateAllocatedCents(
-        candidate.customerId,
+        target.customerId,
         BUDGET_TYPE,
         { asOfDate },
         tx,
       );
 
       await budgetLedgerStorage.upsertBudgetPreferences({
-        customerId: candidate.customerId,
-        budgetStartDate: derivedAnchor,
+        customerId: target.customerId,
+        budgetStartDate: target.sollAnchor,
         budgetStartDateOrigin: "derived_pflegegrad",
       }, operatorUserId ?? undefined, tx);
 
       after = await calculateAllocatedCents(
-        candidate.customerId,
+        target.customerId,
         BUDGET_TYPE,
         { asOfDate },
         tx,
@@ -285,20 +467,23 @@ async function measureAndApply(
           operatorUserId ?? 0,
           "budget_initial_setup",
           "budget",
-          candidate.customerId,
+          target.customerId,
           {
-            customerId: candidate.customerId,
+            customerId: target.customerId,
             budgetType: BUDGET_TYPE,
-            budgetStartDate: derivedAnchor,
-            previousBudgetStartDate: candidate.currentAnchor,
-            previousOrigin: candidate.origin,
+            budgetStartDate: target.sollAnchor,
+            previousBudgetStartDate: target.currentAnchor,
+            previousOrigin: target.origin,
             newOrigin: "derived_pflegegrad",
             allocatedBeforeCents: before,
             allocatedAfterCents: after,
             reason:
-              "Task #1148: §45b-Anker am Pflegegrad-Beginn verankert + Origin "
-              + "'derived_pflegegrad' gesetzt (Bestandskunde hing auf einem Monat fest).",
+              "Task #1193: Budget-Anker per Anker-SSoT (resolveBudgetAnchor) am "
+              + "Pflegegrad-Beginn/01.01. verankert + Origin 'derived_pflegegrad' "
+              + "gesetzt (Bestandskunde hing auf dem Stichmonat fest).",
           },
+          undefined,
+          tx,
         );
       } else {
         throw new DryRunRollback();
@@ -315,86 +500,85 @@ async function main() {
   const confirmProd = process.argv.includes("--confirm-prod");
   const showAll = process.argv.includes("--all");
   const onlyCustomer = parseCustomerId();
+  const today = todayISO();
 
-  const { year: curYear, month: curMonth } = currentYearAndMonth();
-  const asOfDate = todayISO();
-
-  console.log(`\n=== §45b-„hängt auf einem Monat"-Anker-Fix · Task #1148 ===`);
+  console.log(`\n=== Budget-Anker-Reparatur (festhängender Stichmonat) · Task #1193 ===`);
   await safetyChecks(apply, confirmProd);
   console.log(
-    `Stichtag: ${curYear}-${String(curMonth).padStart(2, "0")} · `
+    `Heute: ${today} · `
     + `${showAll ? "ALLE NULL-Origin-Kandidaten" : "nur betroffene"}`
     + `${onlyCustomer ? ` · nur Kunde #${onlyCustomer}` : ""}\n`,
   );
-
-  const candidates = await loadCandidates(onlyCustomer);
-  if (candidates.length === 0) {
-    console.log("Keine Kandidaten (origin IS NULL + budget_start_date gesetzt) gefunden.");
-    return;
-  }
 
   const operatorUserId = await findOperatorUserId();
   if (apply && operatorUserId == null) {
     throw new Error("Kein Superadmin gefunden — Operator für Audit-Log fehlt.");
   }
 
-  let affectedCount = 0;
-  let totalDelta = 0;
+  const result = await runBudgetAnchorRepair({
+    onlyCustomer,
+    apply,
+    includeUnaffected: showAll,
+    today,
+    operatorUserId,
+  });
 
-  for (const candidate of candidates) {
-    const plan = await planFor(candidate, curYear);
+  if (result.checked === 0) {
+    console.log("Keine Kandidaten (origin IS NULL + budget_start_date gesetzt) gefunden.");
+    return;
+  }
 
-    if (!plan.affected && !showAll) continue;
+  // Tabellen-Header.
+  console.log(
+    `   ${"Kunde".padEnd(28)} ${"PG seit".padEnd(11)} ${"Anker".padEnd(11)} `
+    + `${"Soll".padEnd(11)} ${"fehlt".padStart(6)} ${"Betrag".padStart(11)} `
+    + `${"Startwert".padStart(11)} ${"Carryover".padStart(11)}`,
+  );
 
-    const { before, after } = plan.affected
-      ? await measureAndApply(plan, apply, operatorUserId, asOfDate)
-      : { before: 0, after: 0 };
-
-    if (plan.affected) {
-      affectedCount++;
-      totalDelta += after - before;
-    }
-
-    const flag = plan.affected ? (apply ? "✓" : "Δ") : " ";
-    const enabledMark = plan.enabled ? "§45b aktiv" : "§45b inaktiv";
-    const derived = plan.derivedAnchor ?? "(keine PG-Historie)";
-    const deltaStr = plan.affected
-      ? ` · ${enabledMark} · Allocated ${euro(before)} → ${euro(after)} (${after - before >= 0 ? "+" : ""}${euro(after - before)})`
-      : ` · ${enabledMark}`;
-
+  for (const r of result.rows) {
+    if (!r.willCorrect && !showAll) continue;
+    const flag = r.willCorrect ? (apply ? "✓" : "Δ") : " ";
+    const potMark = r.enabled45b ? "" : (r.hasActivePot ? " (§45a/§39 only)" : " (kein Topf)");
     console.log(
-      `${flag} #${candidate.customerId} ${(candidate.name).slice(0, 26).padEnd(26)} `
-      + `Anker ${candidate.currentAnchor} → ${derived} `
-      + `(§45b effektiv ${plan.effectiveBefore} → ${plan.effectiveAfter ?? "—"})${deltaStr}`,
+      `${flag} #${String(r.customerId).padEnd(5)} ${(r.name).slice(0, 20).padEnd(20)} `
+      + `${(r.pgSeit ?? "—").padEnd(11)} ${r.currentAnchor.padEnd(11)} `
+      + `${(r.sollAnchor ?? "—").padEnd(11)} ${String(r.missingMonths).padStart(6)} `
+      + `${euro(r.missingCents).padStart(11)} `
+      + `${euro(r.existingInitialBalanceCents).padStart(11)} `
+      + `${euro(r.existingCarryoverCents).padStart(11)}${potMark}`,
     );
-    if (plan.ibWarning) {
+    if (r.ibWarning) {
       console.log(
         `    ⚠ Kunde hat einen aktiven §45b-Startwert >= korrigiertem Anker — die reine `
-        + `Anker-Korrektur kann unvollständig bleiben. Bitte fix-customer-45b-anchor.ts (#856) prüfen.`,
+        + `Anker-Korrektur kann unvollständig bleiben.`,
       );
     }
   }
 
   console.log(`\n--- Zusammenfassung ---`);
-  console.log(`Geprüfte NULL-Origin-Kandidaten: ${candidates.length}`);
-  console.log(`Davon betroffen (festhängend):   ${affectedCount}`);
-  console.log(`Σ §45b-Allocated-Differenz:      ${totalDelta >= 0 ? "+" : ""}${euro(totalDelta)}`);
-  if (affectedCount === 0) {
+  console.log(`Geprüfte NULL-Origin-Kandidaten: ${result.checked}`);
+  console.log(`Davon betroffen (festhängend):   ${result.affectedCount}`);
+  console.log(`Σ §45b-Allocated-Differenz:      ${result.totalDeltaCents >= 0 ? "+" : ""}${euro(result.totalDeltaCents)}`);
+  if (result.affectedCount === 0) {
     console.log(`\n✓ Kein Kunde betroffen — nichts zu reparieren.`);
   } else if (apply) {
-    console.log(`\n✓ ${affectedCount} Kunde(n) repariert (Anker + Origin gesetzt, Audit geschrieben).`);
+    console.log(`\n✓ ${result.affectedCount} Kunde(n) repariert (Anker + Origin gesetzt, Audit geschrieben).`);
   } else {
-    console.log(`\n⚠ ${affectedCount} Kunde(n) würden repariert. Mit --apply scharf ausführen`
+    console.log(`\n⚠ ${result.affectedCount} Kunde(n) würden repariert. Mit --apply scharf ausführen`
       + ` (auf Produktion zusätzlich --confirm-prod).`);
   }
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    if (err instanceof DryRunRollback) {
-      process.exit(0);
-    }
-    console.error(err);
-    process.exit(1);
-  });
+// Nur als CLI ausführen, nicht beim Import aus dem Test.
+const invokedDirectly = process.argv[1]?.includes("repair-45b-stuck-anchor");
+if (invokedDirectly) {
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      if (err instanceof DryRunRollback) {
+        process.exit(0);
+      }
+      console.error(err);
+      process.exit(1);
+    });
+}
