@@ -18,14 +18,22 @@
 // ---------------------------------------------------------------------------
 import { inArray, eq, and, sql } from "drizzle-orm";
 import { db } from "../lib/db";
-import { appointmentsRepo, prospectsRepo, customersRepo } from "../repos";
+import { appointmentsRepo, prospectsRepo, customersRepo, customerServicePricesRepo } from "../repos";
 import { customers } from "@shared/schema";
-import { appointments, appointmentSeries } from "@shared/schema";
+import { appointments, appointmentSeries, appointmentServices } from "@shared/schema";
 import { invoices, invoiceLineItems } from "@shared/schema";
 import { budgetTransactions } from "@shared/schema";
 import { prospects } from "@shared/schema";
 import { qontoTransactions, paymentAdviceItems } from "@shared/schema";
 import { documentDeliveries } from "@shared/schema";
+import { services, customerServicePrices } from "@shared/schema";
+import {
+  documentTypes,
+  employeeDocuments,
+  customerDocuments,
+  generatedDocuments,
+} from "@shared/schema";
+import { qualificationDocuments, employeeDocumentProofs } from "@shared/schema/qualifications";
 import { users } from "@shared/schema/users";
 
 export function isProductionEnv(): boolean {
@@ -629,4 +637,164 @@ export async function runTestDataCleanup(): Promise<TestDataCleanupSummary> {
     usersRejected,
     usersBlocked,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Test-Service-Purge (Task #1173)
+//
+// Räumt Test-„Müll"-Services aus den Dev-Tabellen, die historische Testläufe
+// hinterlassen haben (Team-Lead-Tests `tlsicht_*`/`tlwrite_*`, ältere
+// `*_test_*` / `qs-test-*`-Marker). Strategie nach Vorgabe:
+//   - Services OHNE Termin-/Preis-Referenz werden HART gelöscht (service_budget_pots
+//     hängen per ON DELETE CASCADE dran und fallen mit).
+//   - Services MIT Termin- (`appointment_services`, FK = NO ACTION) ODER Preis-
+//     Referenz (`customer_service_prices`, FK = CASCADE) werden NUR soft-
+//     deaktiviert (`is_active = false`), damit keine FK-Brüche entstehen und
+//     historische Preisvereinbarungen erhalten bleiben.
+//
+// ids optional: ohne ids wird der KOMPLETTE Test-Service-Backlog (Pattern)
+// verarbeitet; mit ids wird zusätzlich auf diese gescopt. Der Pattern-Filter
+// ist die Sicherheits-Schranke — Produktiv-Services mit „test" im Freitext
+// werden NICHT getroffen.
+// ---------------------------------------------------------------------------
+
+// Unverkennbare Test-Marker in Name ODER Code. Unterstriche via ESCAPE '#'
+// neutralisiert, damit sie literal matchen (nicht als LIKE-Wildcard).
+export const SERVICE_TEST_FILTER = sql`(
+  LOWER(${services.name}) LIKE '%#_test#_%' ESCAPE '#'
+  OR LOWER(${services.code}) LIKE 'qs-test-%'
+  OR LOWER(${services.name}) LIKE 'tlsicht#_%' ESCAPE '#'
+  OR LOWER(${services.name}) LIKE 'tlwrite#_%' ESCAPE '#'
+  OR LOWER(${services.code}) LIKE 'tlsicht#_%' ESCAPE '#'
+  OR LOWER(${services.code}) LIKE 'tlwrite#_%' ESCAPE '#'
+)`;
+
+export interface PurgeServicesResult {
+  deleted: number[];
+  deactivated: number[];
+  rejected: number[];
+}
+
+export async function purgeTestServices(ids?: number[]): Promise<PurgeServicesResult> {
+  const where = ids && ids.length > 0
+    ? and(inArray(services.id, ids), SERVICE_TEST_FILTER)
+    : SERVICE_TEST_FILTER;
+
+  const candidates = await db.select({ id: services.id }).from(services).where(where);
+  const candidateIds = candidates.map((s) => s.id);
+  const rejected = ids ? ids.filter((i) => !candidateIds.includes(i)) : [];
+  if (candidateIds.length === 0) {
+    return { deleted: [], deactivated: [], rejected };
+  }
+
+  const apptRefs = await db
+    .selectDistinct({ id: appointmentServices.serviceId })
+    .from(appointmentServices)
+    .where(inArray(appointmentServices.serviceId, candidateIds));
+  // selectColumnsFrom OHNE activeOnly() → bewusst inkl. soft-gelöschter Preis-
+  // Zeilen, denn auch eine soft-gelöschte Zeile hält physisch den FK auf den
+  // Service und würde ein hartes DELETE brechen.
+  const priceRefs = await customerServicePricesRepo
+    .selectColumnsFrom({ id: customerServicePrices.serviceId })
+    .where(inArray(customerServicePrices.serviceId, candidateIds));
+  const referenced = new Set<number>(
+    [...apptRefs.map((r) => r.id), ...priceRefs.map((r) => r.id)].filter(
+      (i): i is number => i !== null,
+    ),
+  );
+
+  const deletable = candidateIds.filter((i) => !referenced.has(i));
+  const toDeactivate = candidateIds.filter((i) => referenced.has(i));
+
+  await db.transaction(async (tx) => {
+    if (deletable.length > 0) {
+      // service_budget_pots = ON DELETE CASCADE. customer_service_prices der
+      // deletable-Services existieren per Definition nicht (sonst referenced).
+      await tx.delete(services).where(inArray(services.id, deletable));
+    }
+    if (toDeactivate.length > 0) {
+      await tx
+        .update(services)
+        .set({ isActive: false })
+        .where(inArray(services.id, toDeactivate));
+    }
+  });
+
+  return { deleted: deletable, deactivated: toDeactivate, rejected };
+}
+
+// ---------------------------------------------------------------------------
+// Test-Dokumenttyp-Purge (Task #1173)
+//
+// Entfernt Test-„Müll"-Dokumenttypen (`DOC%_17777%`), die historische Testläufe
+// als Pflichtdokumenttypen angelegt haben und die in Schritt 7 der Kundenanlage
+// auftauchen. Strategie analog zu den Services:
+//   - Dokumenttypen OHNE echte Dokument-Referenz werden HART gelöscht
+//     (`document_type_triggers`/`document_templates`/`generated_documents` hängen
+//     per CASCADE bzw. SET NULL dran und werden sauber mitgeräumt).
+//   - Dokumenttypen MIT echter Dokument-Referenz (hochgeladene/erzeugte/Nachweis-
+//     Dokumente) werden NUR soft-deaktiviert (`is_active = false`), damit keine
+//     realen Dokumente per CASCADE verloren gehen.
+// ---------------------------------------------------------------------------
+
+// Pattern aus Audit-Ticket E: `DOC%_17777%` (z.B. `DOC6_1777740879740_o27v3`).
+export const DOCUMENT_TYPE_TEST_FILTER = sql`(${documentTypes.name} LIKE 'DOC%_17777%')`;
+
+export interface PurgeDocumentTypesResult {
+  deleted: number[];
+  deactivated: number[];
+  rejected: number[];
+}
+
+export async function purgeTestDocumentTypes(ids?: number[]): Promise<PurgeDocumentTypesResult> {
+  const where = ids && ids.length > 0
+    ? and(inArray(documentTypes.id, ids), DOCUMENT_TYPE_TEST_FILTER)
+    : DOCUMENT_TYPE_TEST_FILTER;
+
+  const candidates = await db.select({ id: documentTypes.id }).from(documentTypes).where(where);
+  const candidateIds = candidates.map((d) => d.id);
+  const rejected = ids ? ids.filter((i) => !candidateIds.includes(i)) : [];
+  if (candidateIds.length === 0) {
+    return { deleted: [], deactivated: [], rejected };
+  }
+
+  // Echte Dokument-Referenzen (alle CASCADE/SET-NULL-Tabellen, die NUTZER-Daten
+  // tragen — Trigger/Templates sind reine Konfiguration und werden beim Löschen
+  // ohnehin mitgeräumt, zählen daher NICHT als „referenziert").
+  const referenced = new Set<number>();
+  const refTables = [
+    { col: employeeDocuments.documentTypeId, table: employeeDocuments },
+    { col: customerDocuments.documentTypeId, table: customerDocuments },
+    { col: generatedDocuments.documentTypeId, table: generatedDocuments },
+    { col: qualificationDocuments.documentTypeId, table: qualificationDocuments },
+    { col: employeeDocumentProofs.documentTypeId, table: employeeDocumentProofs },
+  ] as const;
+  for (const { col, table } of refTables) {
+    const rows = await db
+      .selectDistinct({ id: col })
+      .from(table)
+      .where(inArray(col, candidateIds));
+    for (const r of rows) {
+      if (r.id !== null) referenced.add(r.id);
+    }
+  }
+
+  const deletable = candidateIds.filter((i) => !referenced.has(i));
+  const toDeactivate = candidateIds.filter((i) => referenced.has(i));
+
+  await db.transaction(async (tx) => {
+    if (deletable.length > 0) {
+      // document_type_triggers = CASCADE, document_templates/generated_documents
+      // = SET NULL — keine FK-Brüche.
+      await tx.delete(documentTypes).where(inArray(documentTypes.id, deletable));
+    }
+    if (toDeactivate.length > 0) {
+      await tx
+        .update(documentTypes)
+        .set({ isActive: false })
+        .where(inArray(documentTypes.id, toDeactivate));
+    }
+  });
+
+  return { deleted: deletable, deactivated: toDeactivate, rejected };
 }

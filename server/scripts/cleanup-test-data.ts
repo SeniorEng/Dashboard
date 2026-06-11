@@ -26,7 +26,7 @@ import { db, pool } from "../lib/db";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-type Scope = "customers" | "prospects" | "services" | "users" | "orphans" | "all";
+type Scope = "customers" | "prospects" | "services" | "documenttypes" | "users" | "orphans" | "all";
 
 interface Args {
   apply: boolean;
@@ -38,7 +38,7 @@ function parseArgs(): Args {
   const apply = argv.includes("--apply");
   const scopeArg = argv.find((a) => a.startsWith("--scope="));
   const scope = (scopeArg ? scopeArg.split("=")[1] : "all") as Scope;
-  const validScopes: Scope[] = ["customers", "prospects", "services", "users", "orphans", "all"];
+  const validScopes: Scope[] = ["customers", "prospects", "services", "documenttypes", "users", "orphans", "all"];
   if (!validScopes.includes(scope)) {
     throw new Error(`Ungültiger --scope=${scope}. Erlaubt: ${validScopes.join(", ")}`);
   }
@@ -151,16 +151,29 @@ const USER_TEST_CONDITION = sql`(
   OR LOWER(nachname) LIKE 'testemp#_%' ESCAPE '#'
 )`;
 
+// MUSS deckungsgleich mit SERVICE_TEST_FILTER in
+// server/services/test-data-cleanup.ts bleiben (gleiche Marker, nur ohne die
+// Drizzle-Spaltenrefs). Neue Marker hier UND dort ergänzen.
 const SERVICE_TEST_CONDITION = sql`(
   LOWER(name) LIKE '%#_test#_%' ESCAPE '#'
   OR LOWER(code) LIKE 'qs-test-%'
+  OR LOWER(name) LIKE 'tlsicht#_%' ESCAPE '#'
+  OR LOWER(name) LIKE 'tlwrite#_%' ESCAPE '#'
+  OR LOWER(code) LIKE 'tlsicht#_%' ESCAPE '#'
+  OR LOWER(code) LIKE 'tlwrite#_%' ESCAPE '#'
 )`;
+
+// Test-„Müll"-Dokumenttypen (Audit-Ticket E): `DOC%_17777%`,
+// z.B. `DOC6_1777740879740_o27v3`. MUSS deckungsgleich mit
+// DOCUMENT_TYPE_TEST_FILTER in server/services/test-data-cleanup.ts bleiben.
+const DOCUMENT_TYPE_TEST_CONDITION = sql`(name LIKE 'DOC%_17777%')`;
 
 interface Snapshot {
   realCustomers: number;
   realProspects: number;
   realUsers: number;
   realServices: number;
+  realDocumentTypes: number;
   realInvoices: number;
   softDeletedAppointmentsRealCust: number;
   softDeletedTimeEntriesRealUser: number;
@@ -200,6 +213,7 @@ async function takeSnapshot(label: string): Promise<Snapshot> {
       (SELECT COUNT(*)::int FROM prospects WHERE NOT ${PROSPECT_TEST_CONDITION}) AS "realProspects",
       (SELECT COUNT(*)::int FROM users WHERE NOT ${USER_TEST_CONDITION}) AS "realUsers",
       (SELECT COUNT(*)::int FROM services WHERE NOT ${SERVICE_TEST_CONDITION}) AS "realServices",
+      (SELECT COUNT(*)::int FROM document_types WHERE NOT ${DOCUMENT_TYPE_TEST_CONDITION}) AS "realDocumentTypes",
       (SELECT COUNT(*)::int FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE NOT ${CUSTOMER_TEST_C}) AS "realInvoices",
       (SELECT COUNT(*)::int FROM appointments a JOIN customers c ON c.id = a.customer_id WHERE a.deleted_at IS NOT NULL AND NOT ${CUSTOMER_TEST_C}) AS "softDeletedAppointmentsRealCust",
       (SELECT COUNT(*)::int FROM employee_time_entries e JOIN users u ON u.id = e.user_id WHERE e.deleted_at IS NOT NULL AND NOT ${USER_TEST_U}) AS "softDeletedTimeEntriesRealUser",
@@ -213,6 +227,7 @@ async function takeSnapshot(label: string): Promise<Snapshot> {
   log(`   echte Interessenten:                       ${row.realProspects}`);
   log(`   echte Mitarbeiter:                         ${row.realUsers}`);
   log(`   echte Services:                            ${row.realServices}`);
+  log(`   echte Dokumenttypen:                       ${row.realDocumentTypes}`);
   log(`   Rechnungen echter Kunden:                  ${row.realInvoices}`);
   log(`   weich-gelöschte Termine echter Kunden:     ${row.softDeletedAppointmentsRealCust}`);
   log(`   weich-gelöschte Zeit-Einträge echter User: ${row.softDeletedTimeEntriesRealUser}`);
@@ -224,7 +239,7 @@ async function takeSnapshot(label: string): Promise<Snapshot> {
 
 function assertWhitelistUnchanged(before: Snapshot, after: Snapshot): void {
   const fields: Array<keyof Snapshot> = [
-    "realCustomers", "realProspects", "realUsers", "realServices",
+    "realCustomers", "realProspects", "realUsers", "realServices", "realDocumentTypes",
     "realInvoices", "softDeletedAppointmentsRealCust", "softDeletedTimeEntriesRealUser",
     "realAppointmentSeries", "realMonthlyServiceRecords", "realCustomerAssignmentHistory",
   ];
@@ -241,15 +256,17 @@ async function countTestEntities(): Promise<{
   prospects: number;
   users: number;
   services: number;
+  documentTypes: number;
 }> {
-  const r = await db.execute<{ customers: number; prospects: number; users: number; services: number }>(sql`
+  const r = await db.execute<{ customers: number; prospects: number; users: number; services: number; documentTypes: number }>(sql`
     SELECT
       (SELECT COUNT(*)::int FROM customers WHERE ${CUSTOMER_TEST_CONDITION}) AS customers,
       (SELECT COUNT(*)::int FROM prospects WHERE ${PROSPECT_TEST_CONDITION}) AS prospects,
       (SELECT COUNT(*)::int FROM users WHERE ${USER_TEST_CONDITION}) AS users,
-      (SELECT COUNT(*)::int FROM services WHERE ${SERVICE_TEST_CONDITION}) AS services
+      (SELECT COUNT(*)::int FROM services WHERE ${SERVICE_TEST_CONDITION}) AS services,
+      (SELECT COUNT(*)::int FROM document_types WHERE ${DOCUMENT_TYPE_TEST_CONDITION}) AS "documentTypes"
   `);
-  return (r as unknown as { rows: Array<{ customers: number; prospects: number; users: number; services: number }> }).rows[0];
+  return (r as unknown as { rows: Array<{ customers: number; prospects: number; users: number; services: number; documentTypes: number }> }).rows[0];
 }
 
 /**
@@ -362,19 +379,22 @@ async function purgeTestServices(apply: boolean): Promise<void> {
   log(`Gefunden: ${all.length} Test-Services`);
   if (all.length === 0) return;
 
-  // Nur appointment_services blockt (NO ACTION). customer_service_prices und
-  // service_budget_pots haben CASCADE und werden automatisch mitgelöscht – das
-  // ist OK, weil sie reine Preis-Override-Einträge sind, die durch Test-Services
-  // entstanden sind und nach deren Entfernung sowieso ungültig wären.
+  // Referenziert = in appointment_services (NO ACTION) ODER customer_service_prices
+  // (CASCADE). Solche Services werden NUR deaktiviert (Fallback), nicht gelöscht,
+  // damit historische Termine UND Preisvereinbarungen erhalten bleiben. Nur
+  // service_budget_pots (CASCADE) fallen beim Hart-Löschen unreferenzierter
+  // Services mit. (Deckungsgleich mit purgeTestServices im Service-Modul.)
   const idList = sql.join(all.map((r) => sql`${r.id}`), sql`, `);
   const refsRes = await db.execute<{ id: number }>(sql`
-    SELECT DISTINCT service_id AS id FROM appointment_services WHERE service_id IN (${idList})
+    SELECT service_id AS id FROM appointment_services WHERE service_id IN (${idList})
+    UNION
+    SELECT service_id AS id FROM customer_service_prices WHERE service_id IN (${idList})
   `);
   const referenced = new Set((refsRes as unknown as { rows: Array<{ id: number }> }).rows.map((r) => r.id));
   const deletable = all.filter((s) => !referenced.has(s.id));
   const referencedList = all.filter((s) => referenced.has(s.id));
-  log(`  davon in Terminen referenziert: ${referencedList.length} (Fallback: is_active=false statt löschen)`);
-  log(`  davon hart löschbar:            ${deletable.length} (CASCADE räumt Preis-Overrides auf)`);
+  log(`  davon in Terminen/Preisen referenziert: ${referencedList.length} (Fallback: is_active=false statt löschen)`);
+  log(`  davon hart löschbar:                    ${deletable.length} (CASCADE räumt service_budget_pots auf)`);
 
   if (!apply) {
     if (deletable.length > 0) log("DRY-RUN: würde " + deletable.length + " unreferenzierte Test-Services löschen.");
@@ -398,6 +418,51 @@ async function purgeTestServices(apply: boolean): Promise<void> {
     }
   });
   log(`Phase 3 fertig: ${deletable.length} Services gelöscht, ${referencedList.length} deaktiviert.`);
+}
+
+async function purgeTestDocumentTypes(apply: boolean): Promise<void> {
+  header("Phase 6: Test-Dokumenttypen (DOC%_17777% — unreferenzierte löschen, referenzierte deaktivieren)");
+  const idsRes = await db.execute<{ id: number; name: string }>(sql`SELECT id, name FROM document_types WHERE ${DOCUMENT_TYPE_TEST_CONDITION} ORDER BY id`);
+  const all = (idsRes as unknown as { rows: Array<{ id: number; name: string }> }).rows;
+  log(`Gefunden: ${all.length} Test-Dokumenttypen`);
+  if (all.length === 0) return;
+
+  // Referenziert = echte hochgeladene/erzeugte/Nachweis-Dokumente. Trigger
+  // (document_type_triggers, CASCADE) und Templates/generated_documents
+  // (SET NULL) sind reine Konfiguration und werden beim Löschen ohnehin sauber
+  // mitgeräumt — sie zählen NICHT als „referenziert". (Deckungsgleich mit
+  // purgeTestDocumentTypes im Service-Modul.)
+  const idList = sql.join(all.map((r) => sql`${r.id}`), sql`, `);
+  const refsRes = await db.execute<{ id: number }>(sql`
+    SELECT document_type_id AS id FROM employee_documents WHERE document_type_id IN (${idList})
+    UNION SELECT document_type_id AS id FROM customer_documents WHERE document_type_id IN (${idList})
+    UNION SELECT document_type_id AS id FROM generated_documents WHERE document_type_id IN (${idList})
+    UNION SELECT document_type_id AS id FROM qualification_documents WHERE document_type_id IN (${idList})
+    UNION SELECT document_type_id AS id FROM employee_document_proofs WHERE document_type_id IN (${idList})
+  `);
+  const referenced = new Set((refsRes as unknown as { rows: Array<{ id: number }> }).rows.map((r) => r.id));
+  const deletable = all.filter((d) => !referenced.has(d.id));
+  const referencedList = all.filter((d) => referenced.has(d.id));
+  log(`  davon in echten Dokumenten referenziert: ${referencedList.length} (Fallback: is_active=false statt löschen)`);
+  log(`  davon hart löschbar:                     ${deletable.length} (CASCADE/SET-NULL räumt Trigger/Templates auf)`);
+
+  if (!apply) {
+    if (deletable.length > 0) log("DRY-RUN: würde " + deletable.length + " unreferenzierte Test-Dokumenttypen löschen.");
+    if (referencedList.length > 0) log("DRY-RUN: würde " + referencedList.length + " referenzierte Test-Dokumenttypen auf is_active=false setzen.");
+    return;
+  }
+
+  await db.transaction(async (tx) => {
+    if (deletable.length > 0) {
+      const dList = sql.join(deletable.map((d) => sql`${d.id}`), sql`, `);
+      await tx.execute(sql`DELETE FROM document_types WHERE id IN (${dList})`);
+    }
+    if (referencedList.length > 0) {
+      const rList = sql.join(referencedList.map((d) => sql`${d.id}`), sql`, `);
+      await tx.execute(sql`UPDATE document_types SET is_active = false WHERE id IN (${rList})`);
+    }
+  });
+  log(`Phase 6 fertig: ${deletable.length} Dokumenttypen gelöscht, ${referencedList.length} deaktiviert.`);
 }
 
 async function purgeTestUsers(apply: boolean): Promise<void> {
@@ -623,11 +688,13 @@ async function main(): Promise<void> {
   log(`   Test-Interessenten:${cntBefore.prospects}`);
   log(`   Test-Mitarbeiter:  ${cntBefore.users}`);
   log(`   Test-Services:     ${cntBefore.services}`);
+  log(`   Test-Dokumenttypen:${cntBefore.documentTypes}`);
 
   try {
     if (args.scope === "customers" || args.scope === "all") await purgeTestCustomers(args.apply);
     if (args.scope === "prospects" || args.scope === "all") await purgeTestProspects(args.apply);
     if (args.scope === "services" || args.scope === "all") await purgeTestServices(args.apply);
+    if (args.scope === "documenttypes" || args.scope === "all") await purgeTestDocumentTypes(args.apply);
     if (args.scope === "users" || args.scope === "all") await purgeTestUsers(args.apply);
     if (args.scope === "orphans" || args.scope === "all") await purgeOrphans(args.apply);
   } catch (err) {
@@ -644,6 +711,7 @@ async function main(): Promise<void> {
     log(`   Test-Interessenten:${cntBefore.prospects} → ${cntAfter.prospects}`);
     log(`   Test-Mitarbeiter:  ${cntBefore.users} → ${cntAfter.users}`);
     log(`   Test-Services:     ${cntBefore.services} → ${cntAfter.services}`);
+    log(`   Test-Dokumenttypen:${cntBefore.documentTypes} → ${cntAfter.documentTypes}`);
   } else {
     log("\nDRY-RUN abgeschlossen. Mit --apply scharf ausführen.");
   }

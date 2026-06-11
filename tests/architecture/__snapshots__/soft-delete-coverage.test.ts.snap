@@ -93,6 +93,7 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
   ],
   "server/services/test-data-cleanup.ts": [
     "appointmentsRepo",
+    "customerServicePricesRepo",
     "customersRepo",
     "prospectsRepo",
   ],

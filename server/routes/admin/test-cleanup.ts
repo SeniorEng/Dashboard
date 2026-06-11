@@ -9,8 +9,6 @@ import { customers } from "@shared/schema";
 import { appointments } from "@shared/schema";
 import { budgetTransactions } from "@shared/schema";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
-import { services } from "@shared/schema";
-import { appointmentServices } from "@shared/schema";
 import { customerServicePrices } from "@shared/schema";
 import {
   purgeTestCustomersBulk,
@@ -18,6 +16,8 @@ import {
   purgeTestUsersByIds,
   purgeAllTestUsers,
   findTestCustomerIds,
+  purgeTestServices,
+  purgeTestDocumentTypes,
 } from "../../services/test-data-cleanup";
 
 const router = Router();
@@ -232,11 +232,16 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// Test-Service-Cleanup: löscht nur Services, die in keinem Termin mehr
-// referenziert werden (Preis-Overrides werden via CASCADE entfernt).
+// Test-Service-Cleanup (Task #183, erweitert in Task #1173):
+// löscht referenzlose Test-Services hart und soft-deaktiviert termin-/preis-
+// referenzierte (keine FK-Brüche). Erfasst die Marker `*_test_*`, `qs-test-*`
+// sowie die historischen Team-Lead-Test-Services `tlsicht_*`/`tlwrite_*`.
+// ids optional: ohne ids wird der komplette Test-Service-Backlog (Pattern)
+// verarbeitet, mit ids wird zusätzlich darauf gescopt. Die eigentliche Logik
+// lebt im wiederverwendbaren Service `server/services/test-data-cleanup.ts`.
 // ---------------------------------------------------------------------------
 const purgeServicesSchema = z.object({
-  ids: z.array(z.number().int().positive()).min(1).max(500),
+  ids: z.array(z.number().int().positive()).max(20000).optional(),
 });
 
 router.post(
@@ -247,42 +252,32 @@ router.post(
       res.status(403).json({ error: "FORBIDDEN", message: "Test-Cleanup ist in Produktion deaktiviert" });
       return;
     }
-    const { ids } = purgeServicesSchema.parse(req.body);
+    const { ids } = purgeServicesSchema.parse(req.body ?? {});
+    const result = await purgeTestServices(ids);
+    res.json(result);
+  })
+);
 
-    // Nur Services mit Test-Pattern berücksichtigen.
-    const testServices = await db
-      .select({ id: services.id })
-      .from(services)
-      .where(and(
-        inArray(services.id, ids),
-        // Eng gefasst (Task #183 Spec): nur unverkennbare Test-Marker im Namen
-        // ODER Code. NICHT generisches "test" Substring, sonst würden Produktiv-
-        // Services mit "test" im Namen versehentlich gelöscht.
-        sql`(LOWER(${services.name}) LIKE '%#_test#_%' ESCAPE '#' OR LOWER(${services.code}) LIKE 'qs-test-%')`,
-      ));
-    const candidateIds = testServices.map((s) => s.id);
-    if (candidateIds.length === 0) {
-      res.json({ deleted: [], skippedReferenced: [], rejected: ids });
+// ---------------------------------------------------------------------------
+// Test-Dokumenttyp-Cleanup (Task #1173): löscht referenzlose Test-Dokumenttypen
+// (`DOC%_17777%`) hart und soft-deaktiviert solche mit echten Dokument-Referenzen
+// (keine FK-Brüche). ids optional (Backlog-Purge ohne ids). Logik im Service.
+// ---------------------------------------------------------------------------
+const purgeDocumentTypesSchema = z.object({
+  ids: z.array(z.number().int().positive()).max(20000).optional(),
+});
+
+router.post(
+  "/test-cleanup/purge-test-document-types",
+  requireSuperAdmin,
+  asyncHandler("Test-Dokumenttyp-Cleanup fehlgeschlagen", async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === "production") {
+      res.status(403).json({ error: "FORBIDDEN", message: "Test-Cleanup ist in Produktion deaktiviert" });
       return;
     }
-
-    // Filter: nicht in appointment_services referenziert
-    const refs = await db
-      .selectDistinct({ id: appointmentServices.serviceId })
-      .from(appointmentServices)
-      .where(inArray(appointmentServices.serviceId, candidateIds));
-    const referenced = new Set(refs.map((r) => r.id).filter((id): id is number => id !== null));
-    const deletable = candidateIds.filter((i) => !referenced.has(i));
-
-    if (deletable.length > 0) {
-      await db.delete(services).where(inArray(services.id, deletable));
-    }
-
-    res.json({
-      deleted: deletable,
-      skippedReferenced: candidateIds.filter((i) => referenced.has(i)),
-      rejected: ids.filter((i) => !candidateIds.includes(i)),
-    });
+    const { ids } = purgeDocumentTypesSchema.parse(req.body ?? {});
+    const result = await purgeTestDocumentTypes(ids);
+    res.json(result);
   })
 );
 

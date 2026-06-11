@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   apiGet,
   apiPost,
+  apiPut,
   apiPatch,
   getAuthCookie,
   createTestEmployee,
@@ -207,5 +208,109 @@ describe("CLEAN-1: Test-Cleanup-Filter löschen niemals echte Datensätze", () =
     // Aufräumen des echten Kunden über die (ungefilterte) Kunden-Purge-Route.
     await apiPost(`/api/admin/test-cleanup/purge-customers`, { ids: [realCustomerId] });
     leftoverCustomerIds.length = 0;
+  });
+
+  it("CLEAN-1.4 – purge-test-services löscht nur Test-Services (inkl. tlsicht/tlwrite), echte werden abgelehnt", async () => {
+    const sfx = realSuffix();
+
+    // Echter Service: Name trifft KEIN Test-Pattern.
+    const realRes = await apiPost<{ id: number; name: string }>("/api/services", {
+      name: `Echtleistung ${sfx}`,
+      unitType: "hours",
+      defaultPriceCents: 3500,
+      isActive: true,
+    });
+    expect(realRes.status).toBe(201);
+    const realServiceId = realRes.data.id;
+
+    // Test-Service 1: `*_test_*`-Marker.
+    const testRes = await apiPost<{ id: number; name: string }>("/api/services", {
+      name: `cleanguard_test_${sfx}`,
+      unitType: "hours",
+      defaultPriceCents: 3500,
+      isActive: true,
+    });
+    expect(testRes.status).toBe(201);
+    const testServiceId = testRes.data.id;
+
+    // Test-Service 2: der NEUE tlsicht/tlwrite-Marker (Task #1173).
+    const tlRes = await apiPost<{ id: number; name: string }>("/api/services", {
+      name: `tlsicht_${sfx}`,
+      unitType: "hours",
+      defaultPriceCents: 3500,
+      isActive: true,
+    });
+    expect(tlRes.status).toBe(201);
+    const tlServiceId = tlRes.data.id;
+
+    const purge = await apiPost<{ deleted: number[]; deactivated: number[]; rejected: number[] }>(
+      "/api/admin/test-cleanup/purge-test-services",
+      { ids: [realServiceId, testServiceId, tlServiceId] },
+    );
+    expect(purge.status).toBe(200);
+    // Test-Services (unreferenziert) werden hart gelöscht.
+    expect(purge.data.deleted).toContain(testServiceId);
+    expect(purge.data.deleted).toContain(tlServiceId);
+    // Echter Service ist kein Kandidat → wird abgelehnt, nicht gelöscht/deaktiviert.
+    expect(purge.data.rejected).toContain(realServiceId);
+    expect(purge.data.deleted).not.toContain(realServiceId);
+    expect(purge.data.deactivated).not.toContain(realServiceId);
+
+    // Gegenprobe: echter Service noch aktiv da, Test-Services weg.
+    const list = await apiGet("/api/services/all");
+    const services = toArray<{ id: number; isActive?: boolean }>(list.data);
+    const ids = new Set(services.map((s) => s.id));
+    expect(ids.has(realServiceId)).toBe(true);
+    expect(ids.has(testServiceId)).toBe(false);
+    expect(ids.has(tlServiceId)).toBe(false);
+
+    // Aufräumen des echten Service (deaktivieren; harte Löschung greift nur bei Test-Pattern).
+    await apiPut(`/api/services/${realServiceId}`, { isActive: false }).catch(() => {});
+  });
+
+  it("CLEAN-1.5 – purge-test-document-types löscht nur DOC%_17777%-Typen, echte werden abgelehnt", async () => {
+    const sfx = realSuffix();
+
+    // Echter Dokumenttyp: Name trifft KEIN Test-Pattern.
+    const realRes = await apiPost<{ id: number; name: string }>("/api/admin/document-types", {
+      name: `Echtdokument ${sfx}`,
+      targetType: "customer",
+      inputMethod: "upload",
+      isActive: true,
+    });
+    expect(realRes.status).toBe(201);
+    const realDocTypeId = realRes.data.id;
+
+    // Test-Dokumenttyp: Name trifft das `DOC%_17777%`-Pattern (Audit-Ticket E).
+    const testRes = await apiPost<{ id: number; name: string }>("/api/admin/document-types", {
+      name: `DOC6_1777740879740_${sfx}`,
+      targetType: "customer",
+      inputMethod: "upload",
+      isActive: true,
+    });
+    expect(testRes.status).toBe(201);
+    const testDocTypeId = testRes.data.id;
+
+    const purge = await apiPost<{ deleted: number[]; deactivated: number[]; rejected: number[] }>(
+      "/api/admin/test-cleanup/purge-test-document-types",
+      { ids: [realDocTypeId, testDocTypeId] },
+    );
+    expect(purge.status).toBe(200);
+    // Unreferenzierter Test-Dokumenttyp wird hart gelöscht.
+    expect(purge.data.deleted).toContain(testDocTypeId);
+    // Echter Dokumenttyp ist kein Kandidat → abgelehnt, nicht gelöscht/deaktiviert.
+    expect(purge.data.rejected).toContain(realDocTypeId);
+    expect(purge.data.deleted).not.toContain(realDocTypeId);
+    expect(purge.data.deactivated).not.toContain(realDocTypeId);
+
+    // Gegenprobe über die Liste (inkl. inaktiver): echter Typ da, Test-Typ weg.
+    const list = await apiGet("/api/admin/document-types?includeInactive=true");
+    const ids = new Set(toArray<{ id: number }>(list.data).map((d) => d.id));
+    expect(ids.has(realDocTypeId)).toBe(true);
+    expect(ids.has(testDocTypeId)).toBe(false);
+
+    // Aufräumen des echten Dokumenttyps über die Update→Pattern→Purge-Route.
+    await apiPatch(`/api/admin/document-types/${realDocTypeId}`, { name: `DOC0_1777700000000_${sfx}` }).catch(() => {});
+    await apiPost(`/api/admin/test-cleanup/purge-test-document-types`, { ids: [realDocTypeId] }).catch(() => {});
   });
 });
