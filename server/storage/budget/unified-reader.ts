@@ -21,13 +21,15 @@
  * `calculateAllocatedCents`). Er ruft KEIN `syncCarryoverAndExpiry` auf, damit
  * er prod-sicher im Conservation-Verifier-Stil laufen kann.
  */
-import { budgetTransactions, budgetReservations } from "@shared/schema";
+import { budgetTransactions, budgetReservations, customers } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "../../lib/db";
+import { customersRepo } from "../../repos";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
 import { calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
+import { defaultStatutoryPotEnabled } from "@shared/domain/budget-selbstzahler-validator";
 
 /**
  * Task #875 (Phase 5): aktive Hard-Holds (`budget_reservations.state = 'hold'`)
@@ -175,17 +177,23 @@ export async function readUnifiedBudgetAvailability(
 ): Promise<UnifiedBudgetAvailability> {
   const d = tx ?? db;
 
-  const [typeSettings, preferences] = await Promise.all([
+  const [typeSettings, preferences, customerRows] = await Promise.all([
     readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }, tx),
     getBudgetPreferences(customerId, tx),
+    customersRepo.selectColumnsFrom({ billingType: customers.billingType }, d).where(eq(customers.id, customerId)),
   ]);
+  const billingType = customerRows[0]?.billingType;
 
   const settingsMap = new Map(typeSettings.map((s) => [s.budgetType, s]));
   const txYear = parseInt(asOfDate.slice(0, 4), 10);
 
   // ---- §45b (Jahrestopf ohne statutarischen Fenster-Cap) ----
   const s45b = settingsMap.get("entlastungsbetrag_45b");
-  const enabled45b = s45b ? s45b.enabled : true;
+  // BUG-19-Rest: Default-Aktivierung (keine persistierte Zeile) MUSS den
+  // Selbstzahler-Anspruchs-Gate durchlaufen — Selbstzahler haben keinen §45b-
+  // Anspruch. Persistierte Zeilen behalten ihren `enabled`-Wert (Datenpflege via
+  // PUT type-settings). Kein Silent-Fallback auf "kein Selbstzahler" bei Load-Fehler.
+  const enabled45b = s45b ? s45b.enabled : defaultStatutoryPotEnabled("entlastungsbetrag_45b", billingType);
   const inRange45b = !s45b ? true : isInRange(asOfDate, s45b.validFrom, s45b.validTo);
   let pot45b = emptyPot("entlastungsbetrag_45b", enabled45b, inRange45b);
   if (enabled45b && inRange45b) {

@@ -2,13 +2,16 @@ import {
   budgetAllocations,
   budgetTransactions,
   customerBudgetTypeSettings,
+  customers,
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
 import { clampToStatutoryMax } from "@shared/domain/budgets";
+import { defaultStatutoryPotEnabled } from "@shared/domain/budget-selbstzahler-validator";
 import { db } from "../../lib/db";
+import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow } from "./allocation-storage";
@@ -97,10 +100,12 @@ async function getAvailableCarryoverCents(customerId: number, asOfDate: string, 
 }
 
 export async function getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate: string = todayISO()): Promise<BudgetSummary> {
-  const [preferences, typeSettings] = await Promise.all([
+  const [preferences, typeSettings, customerRows] = await Promise.all([
     _preferences !== undefined ? _preferences : getBudgetPreferences(customerId),
     _typeSettings ?? readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate }),
+    customersRepo.selectColumnsFrom({ billingType: customers.billingType }, db).where(eq(customers.id, customerId)),
   ]);
+  const billingType = customerRows[0]?.billingType;
 
   // Task #911 — Stichtag respektieren: alle Monats-/Jahres-/Fenster-Ableitungen
   // hängen an `today`, das jetzt der übergebene Stichtag ist (Default = heute,
@@ -239,8 +244,10 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   }
 
   const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+  // BUG-19-Rest: fehlende §45b-Zeile = Default-Aktivierung → muss den
+  // Selbstzahler-Anspruchs-Gate durchlaufen (keine eigene Zweitprüfung).
   const isCurrentlyActive = !s45b
-    ? true
+    ? defaultStatutoryPotEnabled("entlastungsbetrag_45b", billingType)
     : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
 
   // §45b ist ein Jahrestopf — kein harter Monats-Cap. Die "Verfügbar diesen

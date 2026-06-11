@@ -13,7 +13,7 @@ import { todayISO, parseLocalDate } from "@shared/utils/datetime";
 import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
-import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
+import { validateSelbstzahlerBudget, defaultStatutoryPotEnabled } from "@shared/domain/budget-selbstzahler-validator";
 import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
@@ -442,10 +442,17 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   // weiterhin `getActiveBudgetTypeSettings(transactionDate)`.
   // Task #703 — Latest-Intent + `effectiveToday` für UI-Übergangs-Erkennung.
   const settings = await budgetLedgerStorage.readBudgetTypeSettings(customerId, { kind: "withTransition" });
+  // BUG-19-Rest: Der Default-Aktivierungszustand der gesetzlichen Töpfe MUSS
+  // denselben Anspruchs-Gate durchlaufen wie alle Schreibpfade — Selbstzahler
+  // haben keinen Anspruch auf §45b/§45a/§39 (`defaultStatutoryPotEnabled` →
+  // `validateSelbstzahlerBudget`). Greift VOR beiden Branches, da `defaults`
+  // im Nicht-Leer-Branch via `settingsMap`-Fallback (`s || {...d}`) weiterwirkt.
+  const customer = await storage.getCustomer(customerId);
+  const billingType = customer?.billingType;
   const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null; effectiveToday: null }[] = [
-    { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
-    { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
-    { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
+    { budgetType: "entlastungsbetrag_45b", enabled: defaultStatutoryPotEnabled("entlastungsbetrag_45b", billingType), priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
+    { budgetType: "umwandlung_45a", enabled: defaultStatutoryPotEnabled("umwandlung_45a", billingType), priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
+    { budgetType: "ersatzpflege_39_42a", enabled: defaultStatutoryPotEnabled("ersatzpflege_39_42a", billingType), priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null, effectiveToday: null },
   ];
   if (settings.length === 0) {
     const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId);

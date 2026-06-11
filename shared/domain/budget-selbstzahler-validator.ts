@@ -70,3 +70,31 @@ export function validateSelbstzahlerBudget(
     ],
   };
 }
+
+/**
+ * BUG-19-Rest — Default-Aktivierungszustand eines Topfes, wenn KEINE
+ * persistierte `customer_budget_type_settings`-Zeile existiert. SSoT für alle
+ * Lese-Defaults (GET type-settings, unified-reader, getBudgetSummary).
+ *
+ * §45b (Entlastungsbetrag) ist als einziger Topf grundsätzlich default-aktiv —
+ * ABER nur für anspruchsberechtigte Kunden. Selbstzahler haben keinen Anspruch;
+ * der Gate ist EXAKT derselbe wie auf allen Schreibpfaden
+ * (`validateSelbstzahlerBudget`, keine Zweitprüfung). §45a/§39+§42a sind
+ * grundsätzlich default-deaktiviert (Opt-in pro Kunde).
+ *
+ * Pure: kein DB-Zugriff. `billingType` = `customers.billingType`-Spalte.
+ */
+const STATUTORY_POT_DEFAULT_ENABLED: Record<string, boolean> = {
+  entlastungsbetrag_45b: true,
+  umwandlung_45a: false,
+  ersatzpflege_39_42a: false,
+};
+
+export function defaultStatutoryPotEnabled(
+  budgetType: string,
+  billingType: string | null | undefined,
+): boolean {
+  const base = STATUTORY_POT_DEFAULT_ENABLED[budgetType] ?? false;
+  if (!base) return false;
+  return validateSelbstzahlerBudget({ billingType, intent: { budgetType } }).ok;
+}

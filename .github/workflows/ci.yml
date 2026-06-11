@@ -200,6 +200,14 @@ jobs:
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx tsx script/coverage-gate.ts month-close-scheduler
 
+      # Nachhaltigkeits-Guard (BUG-18): nach dem vollen Vitest-Lauf darf kein
+      # Test-Müll (Services `%_test_%` / Dokumenttypen `^DOC[0-9]+_[0-9]+_`) in
+      # der DB verbleiben. Importiert dieselben Filter-Konstanten wie der
+      # Purge-Service. Exit 1 zwingt zu sauberer Test-Cleanup-Disziplin.
+      - name: No-test-junk guard (services/doc-types)
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npm run check:no-test-junk
+
       - name: Stop app server
         if: ${{ always() && env.SERVER_PID != '' }}
         run: kill "$SERVER_PID" || true

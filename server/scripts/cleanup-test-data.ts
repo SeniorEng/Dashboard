@@ -163,10 +163,15 @@ const SERVICE_TEST_CONDITION = sql`(
   OR LOWER(code) LIKE 'tlwrite#_%' ESCAPE '#'
 )`;
 
-// Test-„Müll"-Dokumenttypen (Audit-Ticket E): `DOC%_17777%`,
-// z.B. `DOC6_1777740879740_o27v3`. MUSS deckungsgleich mit
-// DOCUMENT_TYPE_TEST_FILTER in server/services/test-data-cleanup.ts bleiben.
-const DOCUMENT_TYPE_TEST_CONDITION = sql`(name LIKE 'DOC%_17777%')`;
+// Test-„Müll"-Dokumenttypen (BUG-18): generierte Marker folgen dem Schema
+// `DOC<n>_<epoch-ms>_<rand>` (z.B. `DOC6_1777740879740_o27v3`). Der frühere
+// LIKE `DOC%_17777%` traf nur ein schmales Epoch-Fenster — der POSIX-Regex
+// `^DOC[0-9]+_[0-9]+_` deckt ALLE generierten Marker ab und schlägt bei KEINEM
+// echten deutschen Dokumenttyp-Namen an. MUSS deckungsgleich mit
+// DOCUMENT_TYPE_TEST_NAME_PATTERN/DOCUMENT_TYPE_TEST_FILTER in
+// server/services/test-data-cleanup.ts bleiben (gleiches Muster, nur ohne die
+// Drizzle-Spaltenref).
+const DOCUMENT_TYPE_TEST_CONDITION = sql`(name ~ '^DOC[0-9]+_[0-9]+_')`;
 
 interface Snapshot {
   realCustomers: number;
@@ -421,7 +426,7 @@ async function purgeTestServices(apply: boolean): Promise<void> {
 }
 
 async function purgeTestDocumentTypes(apply: boolean): Promise<void> {
-  header("Phase 6: Test-Dokumenttypen (DOC%_17777% — unreferenzierte löschen, referenzierte deaktivieren)");
+  header("Phase 6: Test-Dokumenttypen (^DOC<n>_<epoch>_ — unreferenzierte löschen, referenzierte deaktivieren)");
   const idsRes = await db.execute<{ id: number; name: string }>(sql`SELECT id, name FROM document_types WHERE ${DOCUMENT_TYPE_TEST_CONDITION} ORDER BY id`);
   const all = (idsRes as unknown as { rows: Array<{ id: number; name: string }> }).rows;
   log(`Gefunden: ${all.length} Test-Dokumenttypen`);

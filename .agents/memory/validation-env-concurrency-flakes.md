@@ -43,6 +43,14 @@ from an unrelated task; confirm zero coupling (grep that your change isn't impor
 billing) and skip it. Same for `billing-flow.test.ts` `list.data.find is not a function`
 and `bulk-print` count `0 >= 1` — pre-existing billing-suite breakage in this env.
 
+**Two orchestrators = template clone-race (spurious `test` FAILED):** running your OWN
+`with-ephemeral-db.ts` run while the harness's `test`/`e2e-smoke` workflows are live
+makes the harness's parallel 2-worker `CREATE DATABASE … TEMPLATE per_run_tmpl` fail
+with `source database … is being accessed by other users / There is 1 other session`.
+That FAILED is an infra clone-race, NOT a test-logic failure and NOT your code. Never
+run a second orchestrator; kill yours (`pkill -f "with-ephemeral-db.ts <port>"`) and
+let the harness/CI `test` run be the signal.
+
 **Running the ephemeral orchestrator manually (Chromium/PDF integration files that
 NEED a throwaway DB, so the raw-vitest-vs-dev-server trick above doesn't apply):**
 - `setsid`/`nohup &` detached runs STALL forever at the esbuild "Baue

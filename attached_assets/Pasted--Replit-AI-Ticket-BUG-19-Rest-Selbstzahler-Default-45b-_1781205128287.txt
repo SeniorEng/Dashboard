@@ -1,0 +1,40 @@
+# Replit-AI-Ticket: BUG-19-Rest (Selbstzahler-Default-§45b) + BUG-18-Purge ausführen
+
+**Datum:** 11.06.2026 · **Prio:** 🟡 MITTEL (klein, klar umrissen) · **Quelle:** Retest-Protokoll 11.06. (`EngelDesk-Retest-Protokoll-2026-06-11.md`), Befunde 2 + 3
+
+---
+
+## Teil 1 — BUG-19-Rest: Default-Auto-Enable von §45b umgeht Selbstzahler-/PG-Gates
+
+**Befund (Retest 11.06., Dev, Code `55eb2c6`):** `POST /api/admin/customers` mit `billingType: 'selbstzahler'` und **ohne** `budgets`-Objekt im Payload legt den Kunden mit `entlastungsbetrag_45b.enabled = true` an. Live-Beweis: Kunde **203058** (ZZ-Test SZ-Retest).
+
+**Ursache:** Die #1168/#1213-Validierung (`server/routes/admin/customers.ts:498ff`) baut `budgetIntents` nur aus explizit übergebenen `data.budgets`-Beträgen — der **Default-Pfad**, der §45b bei der Anlage automatisch aktiviert, läuft an `validateSelbstzahlerBudget`/PG-Gates vorbei. Per PUT ist derselbe Zustand korrekt unerreichbar (409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER).
+
+**Fix:**
+1. Die Default-Topf-Aktivierung bei Kundenanlage durch **dieselben** Gates schicken wie explizite Intents (eine gemeinsame Funktion — keine zweite Prüf-Kopie): Selbstzahler ⇒ kein §-Topf enabled; PG-Gates analog.
+2. Gilt für alle Create-Pfade (Admin-API, Wizard, Excel-Import, Prospect-Konversion) — bitte je Pfad mit Test belegen.
+3. Bestands-Scan: Selbstzahler-Kunden mit `enabled=true` auf §-Töpfen listen (Dev: mind. 203052, 203058) und nach Review deaktivieren.
+
+**Akzeptanz:**
+- `POST /api/admin/customers` (selbstzahler, ohne budgets) ⇒ alle drei §-Töpfe `enabled=false`.
+- Gleicher Payload mit `budgets.entlastungsbetrag45b > 0` ⇒ 409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER.
+- PG-1-Kunde ohne budgets ⇒ §45a/§42a disabled, §45b enabled (rechtmäßig).
+- Bestands-Scan-Report liegt vor; Dev-Fälle bereinigt.
+
+## Teil 2 — BUG-18: Purge ausführen (war in #1173 gebaut, lief aber nicht)
+
+**Befund (Retest 11.06.):** `GET /api/services` liefert in Dev weiterhin **180** Einträge (davon ~176 `tlsicht_*`/`tlwrite_*`); die Müll-Pflichtdokumenttypen (`DOC*_17777*`) erscheinen weiterhin in der Kundenanlage. Der in Task #1173 gebaute Purge wurde offenbar nicht (gegen diese DB) ausgeführt.
+
+**Aufgaben:**
+1. Purge in **Dev** ausführen (Services `tlsicht_%`/`tlwrite_%`, Test-Dokumenttypen inkl. Trigger-/Pflicht-Verknüpfungen; Einträge mit Termin-/Preis-Referenzen nicht löschen, sondern deaktivieren + reporten).
+2. Purge in **Prod** ausführen — nur nach Vorab-Report an Alrik (Anzahl + Liste der zu löschenden Einträge, Bestätigung abwarten).
+3. Nachhaltigkeit: CI-/Startup-Check, der bei Vorhandensein von `tl*`-Mustern in `services` oder `DOC*_17777*` in `document_types` fehlschlägt (Wächter gegen Wiederauftreten); Testläufe schreiben nur noch in isolierte Test-DB bzw. räumen per Rollback auf.
+
+**Akzeptanz:**
+- Dev + Prod: `GET /api/services` liefert nur echte Services (Erwartung ≤10: Alltagsbegleitung, Hauswirtschaft, Anfahrts-/Kundenkilometer + ggf. wenige echte weitere).
+- Kundenanlage Schritt „Vertrag" und „Unterschriften" ohne Müll-Einträge.
+- Wächter-Check aktiv; zwei volle Testlauf-Durchgänge hinterlassen 0 neue Einträge.
+
+## Leitplanken
+
+Keine Schema-Änderungen, keine Berechnungslogik anfassen. Teil 1 nutzt die existierenden Validatoren (eine Funktion, keine Kopie — Ersetzungs-Regel). Prod-Purge (Teil 2.2) ausschließlich nach Freigabe durch Alrik. Beweis-Testdaten 203052/203058 erst nach Claude-Retest dieses Tickets endgültig löschen.

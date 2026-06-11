@@ -15,6 +15,7 @@
     "sync:github": "bash scripts/github-sync.sh push",
     "sync:check": "bash scripts/github-sync.sh check",
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
+    "check:no-test-junk": "tsx scripts/check-no-test-junk.ts",
     "test:sweep-dbs": "tsx scripts/sweep-test-dbs.ts",
     "test:verify-cache": "tsx scripts/verify-template-cache.ts",
     "test:verify-concurrent-cache": "tsx scripts/verify-concurrent-cache-build.ts",

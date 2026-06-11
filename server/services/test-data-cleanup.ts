@@ -737,8 +737,20 @@ export async function purgeTestServices(ids?: number[]): Promise<PurgeServicesRe
 //     realen Dokumente per CASCADE verloren gehen.
 // ---------------------------------------------------------------------------
 
-// Pattern aus Audit-Ticket E: `DOC%_17777%` (z.B. `DOC6_1777740879740_o27v3`).
-export const DOCUMENT_TYPE_TEST_FILTER = sql`(${documentTypes.name} LIKE 'DOC%_17777%')`;
+// BUG-18: Generierte Test-Dokumenttypen folgen dem Schema
+// `DOC<n>_<epoch-ms>_<rand>` (z.B. `DOC6_1777740879740_o27v3`). Der frühere
+// LIKE `DOC%_17777%` traf nur ein schmales Epoch-Fenster (~125 von 2030). Der
+// POSIX-Regex `^DOC[0-9]+_[0-9]+_` deckt ALLE generierten Marker ab und schlägt
+// bei KEINEM der echten deutschen Dokumenttyp-Namen an (keiner beginnt mit
+// `DOC<Ziffer>_<Ziffer>_`). Bewusst case-sensitiv (Müll ist immer `DOC...`).
+//
+// SSoT: Das reine Namensmuster wird separat als String exportiert, damit der
+// Nachhaltigkeits-Guard (`scripts/check-no-test-junk.ts`) und der Unit-Test
+// (`tests/document-type-test-filter-regex.test.ts`) EXAKT dasselbe Muster
+// gegen JS-`RegExp` prüfen können. POSIX-`~` (Postgres) und JS-`RegExp`
+// stimmen für dieses Muster zeichengenau überein.
+export const DOCUMENT_TYPE_TEST_NAME_PATTERN = "^DOC[0-9]+_[0-9]+_";
+export const DOCUMENT_TYPE_TEST_FILTER = sql`(${documentTypes.name} ~ ${DOCUMENT_TYPE_TEST_NAME_PATTERN}::text)`;
 
 export interface PurgeDocumentTypesResult {
   deleted: number[];

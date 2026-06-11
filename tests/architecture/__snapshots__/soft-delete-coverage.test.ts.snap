@@ -137,6 +137,10 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
   ],
   "server/storage/budget/summary-queries.ts": [
     "budgetAllocationsRepo",
+    "customersRepo",
+  ],
+  "server/storage/budget/unified-reader.ts": [
+    "customersRepo",
   ],
   "server/storage/customer-management.ts": [
     "customersRepo",
