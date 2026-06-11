@@ -239,9 +239,14 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
   }
   const validatedData = insertTimeEntrySchema.parse(entryData);
   
-  // For urlaub and krankheit with date range, create entries for each day
-  if (endDate && typeof endDate === "string" && endDate.trim() && 
-      (validatedData.entryType === "urlaub" || validatedData.entryType === "krankheit")) {
+  // For urlaub, krankheit and full-day blocker with a date range, create one
+  // entry per day. Urlaub/Krankheit überspringen Wochenenden; ein ganztägiger
+  // Blocker (Abwesenheit) deckt dagegen ALLE Tage inkl. Wochenenden ab.
+  const isMultiDayRangeType =
+    validatedData.entryType === "urlaub" ||
+    validatedData.entryType === "krankheit" ||
+    (validatedData.entryType === "blocker" && (validatedData.isFullDay ?? false));
+  if (endDate && typeof endDate === "string" && endDate.trim() && isMultiDayRangeType) {
     
     // Validate endDate format
     if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -257,7 +262,9 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     // Feiertagen, der Tag wird (wie bisher) trotzdem dokumentiert.
     const weekdayDates = validatedData.entryType === "urlaub"
       ? timeTrackingStorage.collectVacationWorkdays(validatedData.entryDate, endDate)
-      : timeTrackingStorage.collectWeekdayDates(validatedData.entryDate, endDate);
+      : validatedData.entryType === "krankheit"
+      ? timeTrackingStorage.collectWeekdayDates(validatedData.entryDate, endDate)
+      : timeTrackingStorage.collectAllDatesInRange(validatedData.entryDate, endDate);
 
     if (weekdayDates.length === 0) {
       const msg = validatedData.entryType === "urlaub"
@@ -355,8 +362,9 @@ router.post("/", asyncHandler("Zeiteintrag konnte nicht erstellt werden", async 
     }
   }
 
-  // Single day entry - block weekends
-  if (isWeekend(validatedData.entryDate)) {
+  // Single day entry - block weekends. Ausnahme: Blocker/Abwesenheit darf
+  // auch am Wochenende liegen, damit ganze Abwesenheitszeiträume eintragbar sind.
+  if (isWeekend(validatedData.entryDate) && validatedData.entryType !== "blocker") {
     return res.status(400).json({ error: "Zeiteinträge können nicht an Samstagen oder Sonntagen erstellt werden." });
   }
   
@@ -450,8 +458,10 @@ router.put("/:id", asyncHandler("Zeiteintrag konnte nicht aktualisiert werden", 
     }
   }
 
-  // Block weekend dates on update
-  if (isWeekend(dateToCheck)) {
+  // Block weekend dates on update. Ausnahme: Blocker/Abwesenheit darf am
+  // Wochenende liegen (siehe POST). Ein Wochenend-Eintrag in einen
+  // Nicht-Blocker-Typ umzuwandeln bleibt verboten.
+  if (isWeekend(dateToCheck) && updatedEntryType !== "blocker") {
     return res.status(400).json({ error: "Zeiteinträge können nicht auf Samstage oder Sonntage gelegt werden." });
   }
   

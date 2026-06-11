@@ -53,6 +53,38 @@ export function getAppointmentEndMinutes(appt: {
 
 export const FULL_DAY_ENTRY_TYPES = ["urlaub", "krankheit"] as const;
 
+/**
+ * Eintragsarten, bei denen der Nutzer zwischen „ganztägig" und einer
+ * konkreten Uhrzeit-Spanne umschalten kann. `blocker` (Abwesenheit /
+ * nicht verfügbar) lässt sich so als ganzer Tag — auch über mehrere Tage
+ * inklusive Wochenenden — eintragen, ohne Urlaub abzuziehen.
+ */
+export const OPTIONAL_FULL_DAY_ENTRY_TYPES = ["blocker"] as const;
+
+export function entrySupportsFullDayToggle(entryType: string): boolean {
+  return (OPTIONAL_FULL_DAY_ENTRY_TYPES as readonly string[]).includes(entryType);
+}
+
+/**
+ * „Effektiv ganztägig": entweder eine erzwungene Ganztags-Art
+ * (Urlaub/Krankheit) oder eine umschaltbare Art, die aktuell auf
+ * ganztägig steht (ganztägiger Blocker).
+ */
+export function isEffectiveFullDay(entryType: string, isFullDay: boolean): boolean {
+  return (
+    (FULL_DAY_ENTRY_TYPES as readonly string[]).includes(entryType) ||
+    (entrySupportsFullDayToggle(entryType) && isFullDay)
+  );
+}
+
+/**
+ * Ein mehrtägiger Von–Bis-Bereich wird angeboten, sobald der Eintrag
+ * effektiv ganztägig ist (Urlaub, Krankheit, ganztägiger Blocker).
+ */
+export function entrySupportsDateRange(entryType: string, isFullDay: boolean): boolean {
+  return isEffectiveFullDay(entryType, isFullDay);
+}
+
 const TIME_HHMM_REGEX = /^\d{2}:\d{2}(:\d{2})?$/;
 
 export type TimeRangeValidation =

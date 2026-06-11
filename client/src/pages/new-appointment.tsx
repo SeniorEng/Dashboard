@@ -172,6 +172,7 @@ export default function NewAppointment() {
                 isSubmitting={createEntryMutation.isPending}
                 isFullDayType={entryForm.isFullDayType}
                 supportsDateRange={entryForm.supportsDateRange}
+                supportsFullDayToggle={entryForm.supportsFullDayToggle}
                 submitLabel="Eintrag erstellen"
                 testIdPrefix="entry"
                 isAdmin={isAdmin}

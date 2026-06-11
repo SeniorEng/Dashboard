@@ -10,7 +10,13 @@
 import { useState, useCallback } from "react";
 import type { TimeEntryType, CreateTimeEntryRequest } from "@/lib/api/types";
 import { todayISO, currentTimeHHMM } from "@shared/utils/datetime";
-import { FULL_DAY_ENTRY_TYPES, entryTypeSupportsKilometers } from "@shared/domain/time-entries";
+import {
+  FULL_DAY_ENTRY_TYPES,
+  entryTypeSupportsKilometers,
+  entrySupportsFullDayToggle,
+  isEffectiveFullDay,
+  entrySupportsDateRange,
+} from "@shared/domain/time-entries";
 
 function getCurrentTimeRounded(): string {
   const time = currentTimeHHMM();
@@ -68,7 +74,7 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
 
       if (field === "entryType") {
         const newType = value as TimeEntryType;
-        const isFullDayType = FULL_DAY_TYPES.includes(newType);
+        const isFullDayType = FULL_DAY_TYPES.includes(newType) || entrySupportsFullDayToggle(newType);
         
         if (!isFullDayType && !prev.startTime && !prev.endTime) {
           const start = getCurrentTimeRounded();
@@ -85,6 +91,21 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
           ...updated,
           isFullDay: isFullDayType ? true : prev.isFullDay,
           endDate: isFullDayType ? prev.endDate : undefined,
+        };
+      }
+
+      if (field === "isFullDay") {
+        const fullDay = value as boolean;
+        if (fullDay) {
+          return { ...updated, isFullDay: true, startTime: undefined, endTime: undefined };
+        }
+        const start = prev.startTime ?? getCurrentTimeRounded();
+        return {
+          ...updated,
+          isFullDay: false,
+          endDate: undefined,
+          startTime: start,
+          endTime: prev.endTime ?? addOneHour(start),
         };
       }
 
@@ -154,8 +175,9 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
     };
   }, [formState]);
 
-  const isFullDayType = FULL_DAY_TYPES.includes(formState.entryType);
-  const supportsDateRange = isFullDayType;
+  const supportsFullDayToggle = entrySupportsFullDayToggle(formState.entryType);
+  const isFullDayType = isEffectiveFullDay(formState.entryType, formState.isFullDay);
+  const supportsDateRange = entrySupportsDateRange(formState.entryType, formState.isFullDay);
 
   return {
     formState,
@@ -166,5 +188,6 @@ export function useTimeEntryForm(initialState?: Partial<TimeEntryFormState>) {
     toUpdateRequest,
     isFullDayType,
     supportsDateRange,
+    supportsFullDayToggle,
   };
 }

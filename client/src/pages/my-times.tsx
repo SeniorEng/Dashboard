@@ -245,6 +245,7 @@ export default function MyTimes() {
             isSubmitting={updateMutation.isPending}
             isFullDayType={editForm.isFullDayType}
             supportsDateRange={editForm.supportsDateRange}
+            supportsFullDayToggle={editForm.supportsFullDayToggle}
             testIdPrefix="edit"
           />
 

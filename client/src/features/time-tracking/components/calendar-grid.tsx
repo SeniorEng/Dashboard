@@ -45,30 +45,39 @@ const DayCell = memo(function DayCell({
   onDayClick,
 }: DayCellProps) {
   const isHoliday = !!holidayName && isCurrentMonth;
-  const isBlocked = (isWeekend || isHoliday) && isCurrentMonth;
+  const hasEntries = hasAppointments || hasOtherEntries || hasAvailability;
+  // Wochenenden und Feiertage sind für die NEUanlage gesperrt. Liegen dort aber
+  // bereits Einträge (z.B. ein ganztägiger Blocker/Abwesenheit über das
+  // Wochenende), bleibt der Tag anklickbar, damit man die Einträge ansehen und
+  // löschen kann.
+  const isCreationBlocked = (isWeekend || isHoliday) && isCurrentMonth;
+  const isDisabled = isCreationBlocked && !hasEntries;
 
   return (
     <button
       onClick={() => onDayClick(date)}
-      disabled={isBlocked}
+      disabled={isDisabled}
       className={`
         relative p-2 min-h-[60px] rounded-lg text-sm transition-colors
         ${isCurrentMonth ? "bg-white" : "bg-gray-50 text-gray-500"}
-        ${isWeekend && isCurrentMonth ? "bg-gray-100 opacity-50 cursor-not-allowed" : ""}
+        ${isWeekend && isCurrentMonth ? "bg-gray-100" : ""}
+        ${isWeekend && isCurrentMonth && isDisabled ? "opacity-50" : ""}
         ${isWeekend && !isCurrentMonth ? "opacity-30" : ""}
-        ${isHoliday ? "bg-red-50 ring-1 ring-red-200 opacity-60 cursor-not-allowed" : ""}
+        ${isHoliday ? "bg-red-50 ring-1 ring-red-200" : ""}
+        ${isHoliday && isDisabled ? "opacity-60" : ""}
+        ${isDisabled ? "cursor-not-allowed" : ""}
         ${isToday && !isHoliday ? "ring-2 ring-teal-500" : ""}
         ${isToday && isHoliday ? "ring-2 ring-red-400" : ""}
-        ${isSelected && !isBlocked ? "ring-2 ring-teal-600" : ""}
-        ${!isSelected && !isBlocked ? "hover:bg-gray-100" : ""}
+        ${isSelected && !isDisabled ? "ring-2 ring-teal-600" : ""}
+        ${!isSelected && !isDisabled ? "hover:bg-gray-100" : ""}
         ${hasMissingBreak && !isHoliday ? "bg-blue-50 border-2 border-blue-300" : ""}
       `}
       data-testid={`calendar-day-${date}`}
       title={
         isWeekend && isCurrentMonth
-          ? "Wochenende – keine Einträge möglich"
+          ? (hasEntries ? "Wochenende – vorhandene Einträge ansehen" : "Wochenende – keine neuen Einträge möglich")
           : isHoliday
-            ? `Feiertag: ${holidayName} – keine Einträge möglich`
+            ? (hasEntries ? `Feiertag: ${holidayName} – vorhandene Einträge ansehen` : `Feiertag: ${holidayName} – keine neuen Einträge möglich`)
             : hasMissingBreak
               ? "Fehlende Pausendokumentation"
               : undefined
@@ -80,12 +89,12 @@ const DayCell = memo(function DayCell({
           <Coffee className={`${iconSize.xs} text-blue-500`} />
         </div>
       )}
-      {isHoliday && (
+      {isHoliday && !hasEntries && (
         <div className="absolute bottom-1 left-1/2 -translate-x-1/2">
           <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
         </div>
       )}
-      {!isHoliday && (hasAppointments || hasOtherEntries || hasAvailability) && (
+      {hasEntries && (
         <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex gap-0.5">
           {hasAppointments && (
             <div className="w-1.5 h-1.5 rounded-full bg-teal-500" title="Kundentermine" />

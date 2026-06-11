@@ -24,7 +24,7 @@ export const TIME_ENTRY_TYPE_CONFIG: Record<TimeEntryType, { label: string; icon
 
 const FULL_DAY_TYPES = FULL_DAY_ENTRY_TYPES as unknown as TimeEntryType[];
 
-export const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+export const WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 export const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",

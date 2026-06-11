@@ -472,6 +472,7 @@ export default function AdminTimeEntries() {
             isSubmitting={createMutation.isPending}
             isFullDayType={createForm.isFullDayType}
             supportsDateRange={createForm.supportsDateRange}
+            supportsFullDayToggle={createForm.supportsFullDayToggle}
             submitLabel="Erstellen"
             testIdPrefix="admin-create"
           />
@@ -487,6 +488,7 @@ export default function AdminTimeEntries() {
             isSubmitting={updateMutation.isPending}
             isFullDayType={editForm.isFullDayType}
             supportsDateRange={false}
+            supportsFullDayToggle={editForm.supportsFullDayToggle}
             submitLabel="Speichern"
             testIdPrefix="admin-edit"
           />

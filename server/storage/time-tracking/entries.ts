@@ -73,6 +73,24 @@ export function collectWeekdayDates(startDate: string, endDate: string): string[
   return dates;
 }
 
+/**
+ * Liefert ALLE Kalendertage zwischen `startDate` und `endDate` (inklusive).
+ * Im Gegensatz zu `collectWeekdayDates` werden Wochenenden NICHT
+ * übersprungen — genutzt für mehrtägige Blocker-/Abwesenheits-Einträge,
+ * die auch Wochenenden abdecken sollen.
+ */
+export function collectAllDatesInRange(startDate: string, endDate: string): string[] {
+  const start = parseLocalDate(startDate);
+  const end = parseLocalDate(endDate);
+  const dates: string[] = [];
+  const cursor = new Date(start.getTime());
+  while (cursor <= end) {
+    dates.push(formatDateISO(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
 export interface VacationRangeBreakdown {
   workdays: string[];
   weekendDates: string[];

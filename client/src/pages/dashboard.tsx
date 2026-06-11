@@ -36,6 +36,7 @@ import { ErrorState } from "@/components/patterns/error-state";
 import type { TimeEntry, TimeEntryType } from "@/lib/api/types";
 import { useAppointmentCoverage } from "@/features/appointments/hooks/use-appointment-coverage";
 import { FULL_DAY_TYPES, type TimelineItem, CoverageBanner, TimeEntryCard, WeekStrip } from "@/features/dashboard";
+import { entrySupportsFullDayToggle } from "@shared/domain/time-entries";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -117,7 +118,7 @@ export default function Dashboard() {
   }, [deleteTarget, deleteMutation]);
 
   const handleOpenCreate = useCallback((entryType: TimeEntryType) => {
-    const isFullDayType = FULL_DAY_TYPES.includes(entryType);
+    const isFullDayType = FULL_DAY_TYPES.includes(entryType) || entrySupportsFullDayToggle(entryType);
     let startTime: string | undefined;
     let endTime: string | undefined;
     if (!isFullDayType) {
@@ -350,6 +351,7 @@ export default function Dashboard() {
         isSubmitting={updateMutation.isPending}
         isFullDayType={editForm.isFullDayType}
         supportsDateRange={false}
+        supportsFullDayToggle={editForm.supportsFullDayToggle}
         submitLabel="Speichern"
         testIdPrefix="dashboard-edit"
       />
@@ -365,6 +367,7 @@ export default function Dashboard() {
         isSubmitting={createMutation.isPending}
         isFullDayType={createForm.isFullDayType}
         supportsDateRange={createForm.supportsDateRange}
+        supportsFullDayToggle={createForm.supportsFullDayToggle}
         submitLabel="Speichern"
         testIdPrefix="dashboard-create"
       />

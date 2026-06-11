@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { DatePicker } from "@/components/ui/date-picker";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Loader2, AlertCircle, Users } from "lucide-react";
@@ -33,6 +34,7 @@ export interface TimeEntryFormContentProps {
   isSubmitting: boolean;
   isFullDayType: boolean;
   supportsDateRange: boolean;
+  supportsFullDayToggle?: boolean;
   submitLabel?: string;
   cancelLabel?: string;
   testIdPrefix?: string;
@@ -52,6 +54,7 @@ export interface TimeEntryDialogProps {
   isSubmitting: boolean;
   isFullDayType: boolean;
   supportsDateRange: boolean;
+  supportsFullDayToggle?: boolean;
   submitLabel?: string;
   testIdPrefix?: string;
   isAdmin?: boolean;
@@ -67,6 +70,7 @@ export function TimeEntryFormContent({
   isSubmitting,
   isFullDayType,
   supportsDateRange,
+  supportsFullDayToggle = false,
   submitLabel = "Speichern",
   cancelLabel = "Abbrechen",
   testIdPrefix = "",
@@ -118,6 +122,25 @@ export function TimeEntryFormContent({
         </Select>
       </div>
 
+      {supportsFullDayToggle && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 p-3">
+          <div className="space-y-0.5">
+            <Label htmlFor={`${prefix}toggle-full-day`} className="cursor-pointer">
+              Ganztägig
+            </Label>
+            <p className="text-xs text-gray-500">
+              Ganze Tage als „nicht verfügbar" eintragen statt einer Uhrzeit-Spanne
+            </p>
+          </div>
+          <Switch
+            id={`${prefix}toggle-full-day`}
+            checked={formState.isFullDay}
+            onCheckedChange={(checked) => onFieldChange("isFullDay", checked)}
+            data-testid={`${prefix}toggle-full-day`}
+          />
+        </div>
+      )}
+
       {supportsDateRange ? (
         <>
           <div className="space-y-2">
@@ -125,7 +148,7 @@ export function TimeEntryFormContent({
             <DatePicker
               value={formState.entryDate || null}
               onChange={(val) => onFieldChange("entryDate", val || "")}
-              disableWeekends
+              disableWeekends={formState.entryType !== "blocker"}
               disableHolidays={disableHolidays}
               data-testid={`${prefix}input-entry-date`}
             />
@@ -136,7 +159,7 @@ export function TimeEntryFormContent({
               value={formState.endDate || formState.entryDate || null}
               minDate={formState.entryDate ? parseLocalDate(formState.entryDate) : undefined}
               onChange={(val) => onFieldChange("endDate", val || undefined)}
-              disableWeekends
+              disableWeekends={formState.entryType !== "blocker"}
               disableHolidays={disableHolidays}
               data-testid={`${prefix}input-end-date`}
             />
@@ -147,6 +170,13 @@ export function TimeEntryFormContent({
             endDate={formState.endDate || formState.entryDate}
             testIdPrefix={prefix}
           />
+          {formState.entryType === "blocker" && (
+            <BlockerRangePreview
+              startDate={formState.entryDate}
+              endDate={formState.endDate || formState.entryDate}
+              testIdPrefix={prefix}
+            />
+          )}
         </>
       ) : (
         <>
@@ -155,7 +185,7 @@ export function TimeEntryFormContent({
             <DatePicker
               value={formState.entryDate || null}
               onChange={(val) => onFieldChange("entryDate", val || "")}
-              disableWeekends
+              disableWeekends={formState.entryType !== "blocker"}
               disableHolidays={disableHolidays}
               data-testid={`${prefix}input-entry-date`}
             />
@@ -351,6 +381,48 @@ function VacationRangePreview({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * Mehrtages-Vorschau für Blocker-Abwesenheiten. Zählt ALLE Kalendertage
+ * (inklusive Wochenenden) im gewählten Bereich — Blocker werden, anders
+ * als Urlaub/Krankheit, auch an Wochenenden angelegt.
+ */
+function BlockerRangePreview({
+  startDate,
+  endDate,
+  testIdPrefix,
+}: {
+  startDate: string;
+  endDate: string;
+  testIdPrefix: string;
+}) {
+  const count = useMemo(() => {
+    if (!startDate || !endDate || endDate < startDate) return 0;
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
+    let days = 0;
+    const cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      days += 1;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return days;
+  }, [startDate, endDate]);
+
+  if (count <= 0) return null;
+
+  return (
+    <div
+      className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-900"
+      data-testid={`${testIdPrefix}blocker-range-preview`}
+    >
+      <span className="font-semibold" data-testid={`${testIdPrefix}blocker-days-count`}>
+        {count} {count === 1 ? "Tag" : "Tage"}
+      </span>{" "}
+      werden als „nicht verfügbar" eingetragen (Wochenenden eingeschlossen).
     </div>
   );
 }

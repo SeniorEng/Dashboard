@@ -78,6 +78,7 @@ export const timeTrackingStorage = {
   createTimeEntry: entriesModule.createTimeEntry,
   createTimeEntriesForDates: entriesModule.createTimeEntriesForDates,
   collectWeekdayDates: entriesModule.collectWeekdayDates,
+  collectAllDatesInRange: entriesModule.collectAllDatesInRange,
   collectVacationWorkdays: entriesModule.collectVacationWorkdays,
   collectVacationRangeBreakdown: entriesModule.collectVacationRangeBreakdown,
   updateTimeEntry: entriesModule.updateTimeEntry,

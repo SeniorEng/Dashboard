@@ -336,6 +336,80 @@ describe("TE-BIZ-5: Mehrtägiger Urlaub überspringt Wochenenden", () => {
   });
 });
 
+describe("TE-BIZ-5b: Blocker-Abwesenheit (ganztägig, inkl. Wochenende)", () => {
+  it("TE-BIZ-5b.1 – Ganztägiger Blocker am Samstag wird angelegt (201)", async () => {
+    const today = new Date();
+    const daysUntilSat = (6 - today.getDay() + 7) % 7 || 7;
+    const sat = new Date(today);
+    sat.setDate(sat.getDate() + daysUntilSat + 21);
+    const satStr = sat.toISOString().split("T")[0];
+    await clearDateEntries(satStr);
+
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: satStr,
+      entryType: "blocker",
+      isFullDay: true,
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.entryType).toBe("blocker");
+    expect(res.data.isFullDay).toBe(true);
+    cleanupIds.push(res.data.id);
+  });
+
+  it("TE-BIZ-5b.2 – Mehrtägiger Blocker (Montag-Sonntag) legt ALLE 7 Tage an", async () => {
+    const start = new Date();
+    start.setDate(start.getDate() + 600);
+    while (start.getDay() !== 1) {
+      start.setDate(start.getDate() + 1);
+    }
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    const startStr = start.toISOString().split("T")[0];
+    const endStr = end.toISOString().split("T")[0];
+
+    const cur = new Date(start);
+    while (cur <= end) {
+      await clearDateEntries(cur.toISOString().split("T")[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const res = await apiPost<any>("/api/time-entries", {
+      entryDate: startStr,
+      endDate: endStr,
+      entryType: "blocker",
+      isFullDay: true,
+    });
+    expect(res.status).toBe(201);
+    expect(res.data._multiDay, "Mehrtägiger Blocker muss _multiDay-Info enthalten").toBeDefined();
+    expect(res.data._multiDay.count).toBe(7);
+    if (res.data.id) cleanupIds.push(res.data.id);
+  });
+
+  it("TE-BIZ-5b.3 – Bestehender Wochenend-Blocker kann bearbeitet werden (PUT 200)", async () => {
+    const today = new Date();
+    const daysUntilSun = (7 - today.getDay()) % 7 || 7;
+    const sun = new Date(today);
+    sun.setDate(sun.getDate() + daysUntilSun + 28);
+    const sunStr = sun.toISOString().split("T")[0];
+    await clearDateEntries(sunStr);
+
+    const created = await apiPost<any>("/api/time-entries", {
+      entryDate: sunStr,
+      entryType: "blocker",
+      isFullDay: true,
+      notes: "Abwesend",
+    });
+    expect(created.status).toBe(201);
+    cleanupIds.push(created.data.id);
+
+    const updated = await apiPut<any>(`/api/time-entries/${created.data.id}`, {
+      notes: "Abwesend (aktualisiert)",
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.data.notes).toBe("Abwesend (aktualisiert)");
+  });
+});
+
 describe("TE-BIZ-6: Krankheitseintrag", () => {
   async function findFreeFutureWeekday(startOffset: number): Promise<string> {
     for (let off = startOffset; off < startOffset + 30; off++) {
