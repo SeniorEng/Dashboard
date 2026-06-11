@@ -2,7 +2,6 @@ import {
   budgetAllocations,
   budgetTransactions,
   customerBudgetTypeSettings,
-  customerCareLevelHistory,
   customers,
   type BudgetAllocation,
   type InsertBudgetAllocation,
@@ -17,6 +16,7 @@ import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings } from "./preferences-storage";
+import { getEarliestCareLevelStart } from "../customer-mgmt/care-level";
 import {
   carryoverWindowFor,
   buildCarryoverDedupSets,
@@ -61,26 +61,6 @@ export function pickEffective45bSettingRow(
     if (startsByMonthEnd && endsAfterMonthStart) return r;
   }
   return undefined;
-}
-
-/**
- * Task #856 — Frühester Pflegegrad-Beginn des Kunden aus der historisierten
- * Pflegegrad-Historie (`customer_care_level_history`). Dient als Anker für die
- * §45b-Auto-Allokation, wenn (noch) kein explizites Budget-Startdatum und keine
- * bestehenden Allokationen vorliegen — so profitieren auch Bestandskunden ohne
- * gespeichertes Startdatum vom Pflegegrad-Anker. Rückgabe `null`, wenn keine
- * Pflegegrad-Historie existiert.
- */
-async function earliestCareLevelStart(
-  customerId: number,
-  d: Pick<typeof db, "select">,
-): Promise<string | null> {
-  const rows = await d.select({ validFrom: customerCareLevelHistory.validFrom })
-    .from(customerCareLevelHistory)
-    .where(eq(customerCareLevelHistory.customerId, customerId))
-    .orderBy(asc(customerCareLevelHistory.validFrom))
-    .limit(1);
-  return rows[0]?.validFrom ?? null;
 }
 
 export async function createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation> {
@@ -464,7 +444,7 @@ export async function calculateAllocatedCents(
  *
  *   1. Bestimme `allocStartYear/Month` (Startpunkt der Aufstockung) aus:
  *      - dem zur Laufzeit aus der Pflegegrad-Historie abgeleiteten Anker
- *        (`earliestCareLevelStart`, §45b auf das laufende Jahr gebodet),
+ *        (`getEarliestCareLevelStart`, §45b auf das laufende Jahr gebodet),
  *      - frühestem `initial_balance.validFrom`,
  *      - frühestem persistierten `monthly_auto`/`monthly`/`carryover`,
  *      - bzw. `s45b.validFrom` (überschreibt nach oben).
@@ -555,7 +535,7 @@ async function calculateAllocated45b(
   // persistierte Mittel (initial_balance/monthly/carryover) ankern weiterhin
   // unabhängig vom Gate über die Fallbacks unten.
   const s45bEnabled = all45bSettings.some(s => s.enabled);
-  const pgStart = await earliestCareLevelStart(customerId, d);
+  const pgStart = await getEarliestCareLevelStart(customerId, d);
   if (pgStart && s45bEnabled) {
     budgetStartDate = floorAutoAnchor45bToCurrentYear(pgStart, curYear);
   }
@@ -872,7 +852,7 @@ async function calculateAllocated45a(
   // Task #1204 — Anker = roher (ungekappter) Pflegegrad-Beginn zur Laufzeit
   // statt eines persistierten `budget_start_date`. §45a/§39 lesen den
   // ungekappten Beginn; die setting.validFrom-Klammer unten begrenzt vorwärts.
-  let startDateStr: string | null = await earliestCareLevelStart(customerId, d);
+  let startDateStr: string | null = await getEarliestCareLevelStart(customerId, d);
 
   const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
@@ -1002,7 +982,7 @@ async function calculateAllocated39_42a(
   const { year: curYear } = currentYearAndMonth();
 
   // Task #1204 — Anker = roher (ungekappter) Pflegegrad-Beginn zur Laufzeit.
-  let startDateStr: string | null = await earliestCareLevelStart(customerId, d);
+  let startDateStr: string | null = await getEarliestCareLevelStart(customerId, d);
 
   if (!startDateStr) {
     const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
@@ -1148,7 +1128,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   // aus der Pflegegrad-Historie darf nur greifen, wenn §45b aktiviert ist, sonst
   // legte ein nie eingerichteter Topf einen Phantom-Anker an.
   const s45bEnabledCarry = !!typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-  const pgStartCarry = await earliestCareLevelStart(customerId, d);
+  const pgStartCarry = await getEarliestCareLevelStart(customerId, d);
   if (pgStartCarry && s45bEnabledCarry) {
     budgetStartDate = floorAutoAnchor45bToCurrentYear(pgStartCarry, curYear);
   }

@@ -46,7 +46,7 @@ import {
 } from "@shared/domain/budget/carryover-eligibility";
 import { todayISO, currentYearAndMonth } from "@shared/utils/datetime";
 import { calculateAllocatedCents } from "../storage/budget/allocation-storage";
-import { getCustomerCareLevelHistory } from "../storage/customer-mgmt/care-level";
+import { getEarliestCareLevelStart } from "../storage/customer-mgmt/care-level";
 
 const BUDGET_TYPE = "entlastungsbetrag_45b" as const;
 const euro = (c: number) => `${(c / 100).toFixed(2)} €`;
@@ -92,19 +92,6 @@ function legalCeilingCents(
   return ceiling;
 }
 
-async function earliestCareLevelStart(customerId: number): Promise<string | null> {
-  try {
-    const history = await getCustomerCareLevelHistory(customerId);
-    if (!history || history.length === 0) return null;
-    const sorted = [...history]
-      .filter(h => !!h.validFrom)
-      .sort((a, b) => (a.validFrom < b.validFrom ? 1 : a.validFrom > b.validFrom ? -1 : 0));
-    return sorted.length > 0 ? sorted[sorted.length - 1].validFrom : null;
-  } catch {
-    return null;
-  }
-}
-
 async function main() {
   const showAll = process.argv.includes("--all");
   const today = todayISO();
@@ -148,7 +135,7 @@ async function main() {
         isNull(budgetAllocations.deletedAt),
       ));
 
-    const anchor = await earliestCareLevelStart(customerId);
+    const anchor = await getEarliestCareLevelStart(customerId).catch(() => null);
     const computed = await calculateAllocatedCents(customerId, BUDGET_TYPE, { asOfDate: today });
     const ceiling = legalCeilingCents(anchor, curYear, curMonth);
     const overage = computed - ceiling;
