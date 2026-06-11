@@ -2,11 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
 import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter } from "../types";
 
-export function useQontoStatus() {
+export function useQontoStatus(enabled: boolean = true) {
   return useQuery<QontoStatus>({
     queryKey: ["qonto", "status"],
     queryFn: async () => unwrapResult(await api.get("/admin/qonto/status")),
     staleTime: 30000,
+    enabled,
   });
 }
 

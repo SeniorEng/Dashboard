@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import {
@@ -9,6 +10,10 @@ import {
   GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, CalendarClock, Lock, Repeat,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
+import { cn } from "@/lib/utils";
+import { usePendingProofs, usePlannedConsultations } from "@/features/admin/hooks/use-admin-work-queues";
+import { useBudgetSetupMissingCount } from "@/features/customers/hooks/use-customers";
+import { useQontoStatus, useQontoTransactions } from "@/features/qonto/hooks/use-qonto-queries";
 
 interface AdminCardData {
   href: string;
@@ -27,19 +32,38 @@ interface AdminCardProps {
   iconBg: string;
   title: string;
   description: string;
+  // Anzahl offener Vorgänge für diese Kachel. `undefined` = keine
+  // Arbeitsliste hinterlegt (normale Navigationskachel, kein Badge/Dimmen).
+  // Quelle ist immer dieselbe Query, die auch die Zielliste speist.
+  count?: number;
 }
 
-function AdminCard({ href, testId, icon, iconBg, title, description }: AdminCardProps) {
+function AdminCard({ href, testId, icon, iconBg, title, description, count }: AdminCardProps) {
+  const hasQueue = count !== undefined;
+  const isEmpty = hasQueue && count === 0;
   return (
     <Link href={href} className="block h-full">
-      <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full" data-testid={testId}>
+      <Card
+        className={cn(
+          "cursor-pointer hover:shadow-lg transition-shadow h-full",
+          isEmpty && "opacity-60",
+        )}
+        data-testid={testId}
+      >
         <CardHeader>
           <div className="flex items-center gap-3">
             <div className={`p-2 rounded-lg ${iconBg}`}>
               {icon}
             </div>
-            <div>
-              <CardTitle>{title}</CardTitle>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <CardTitle>{title}</CardTitle>
+                {hasQueue && count > 0 && (
+                  <Badge variant="destructive" className="shrink-0" data-testid={`badge-count-${testId}`}>
+                    {count}
+                  </Badge>
+                )}
+              </div>
               <CardDescription>{description}</CardDescription>
             </div>
           </div>
@@ -69,6 +93,24 @@ function Section({ title, children }: SectionProps) {
 
 export default function AdminDashboard() {
   const { user, hasAdminPermission } = useAuth();
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
+
+  // Offene-Arbeit-Zähler: Jeder Zähler stammt aus exakt derselben Query, die
+  // auch die jeweilige Zielliste speist (Anti-Dualismus, kein zweiter Pfad).
+  const { data: pendingProofs } = usePendingProofs();
+  const { data: overdueConsultations } = usePlannedConsultations("overdue");
+  const { data: budgetSetupMissing } = useBudgetSetupMissingCount();
+  const { data: qontoStatus } = useQontoStatus(isSuperAdmin);
+  const qontoConfigured = qontoStatus?.configured ?? false;
+  const { data: qontoUnmatched } = useQontoTransactions("unmatched", isSuperAdmin && qontoConfigured);
+
+  const tileCounts: Record<string, number | undefined> = {
+    "card-document-review": pendingProofs?.length,
+    "card-proof-review": pendingProofs?.length,
+    "card-planned-consultations": overdueConsultations?.length,
+    "card-customers": budgetSetupMissing?.count,
+    "card-qonto": qontoUnmatched?.total,
+  };
 
   const personalCards: AdminCardData[] = [
     {
@@ -90,15 +132,6 @@ export default function AdminDashboard() {
       permissionKey: "time_entries",
     },
     {
-      href: "/admin/birthday-cards",
-      testId: "card-birthday-cards",
-      icon: <Gift className={`${iconSize.lg} text-rose-600`} />,
-      iconBg: "bg-rose-100",
-      title: "Geburtstage",
-      description: "Karten & Gutscheine verwalten",
-      permissionKey: "birthday_cards",
-    },
-    {
       href: "/admin/proof-review",
       testId: "card-document-review",
       icon: <GraduationCap className={`${iconSize.lg} text-orange-600`} />,
@@ -106,15 +139,6 @@ export default function AdminDashboard() {
       title: "Dokument-Prüfung",
       description: "Hochgeladene Dokumentennachweise prüfen und freigeben",
       permissionKey: "users",
-    },
-    {
-      href: "/admin/statistics",
-      testId: "card-statistics",
-      icon: <BarChart3 className={`${iconSize.lg} text-indigo-600`} />,
-      iconBg: "bg-indigo-100",
-      title: "Statistiken",
-      description: "Kennzahlen, Umsatz und Performance-Analysen",
-      permissionKey: "statistics",
     },
   ];
 
@@ -145,6 +169,15 @@ export default function AdminDashboard() {
       title: "Serientermine",
       description: "Aktive Terminserien pro Kunde verwalten, verlängern oder beenden",
       permissionKey: "customers",
+    },
+    {
+      href: "/admin/import-appointments",
+      testId: "card-import-appointments",
+      icon: <FileSpreadsheet className={`${iconSize.lg} text-amber-600`} />,
+      iconBg: "bg-amber-100",
+      title: "Termin-Import",
+      description: "Historische Termine aus Excel-Datei importieren",
+      permissionKey: "super_admin_only",
     },
   ];
 
@@ -194,6 +227,15 @@ export default function AdminDashboard() {
       description: "Leistungskatalog und Standardpreise verwalten",
       permissionKey: "services",
     },
+    {
+      href: "/admin/birthday-cards",
+      testId: "card-birthday-cards",
+      icon: <Gift className={`${iconSize.lg} text-rose-600`} />,
+      iconBg: "bg-rose-100",
+      title: "Geburtstage",
+      description: "Karten & Gutscheine verwalten",
+      permissionKey: "birthday_cards",
+    },
   ];
 
   const abrechnungCards: AdminCardData[] = [
@@ -233,6 +275,15 @@ export default function AdminDashboard() {
       description: "Eingereichte Leistungsnachweise prüfen und freigeben",
       permissionKey: "billing",
     },
+    {
+      href: "/admin/statistics",
+      testId: "card-statistics",
+      icon: <BarChart3 className={`${iconSize.lg} text-indigo-600`} />,
+      iconBg: "bg-indigo-100",
+      title: "Statistiken",
+      description: "Kennzahlen, Umsatz und Performance-Analysen",
+      permissionKey: "statistics",
+    },
   ];
 
   const systemCards: AdminCardData[] = [
@@ -263,21 +314,10 @@ export default function AdminDashboard() {
       description: "Unveränderliches Protokoll aller Unterschriften und Änderungen",
       permissionKey: "audit_log",
     },
-    {
-      href: "/admin/import-appointments",
-      testId: "card-import-appointments",
-      icon: <FileSpreadsheet className={`${iconSize.lg} text-amber-600`} />,
-      iconBg: "bg-amber-100",
-      title: "Termin-Import",
-      description: "Historische Termine aus Excel-Datei importieren",
-      permissionKey: "super_admin_only",
-    },
   ];
 
   const filterCards = (cards: AdminCardData[]) =>
     cards.filter((card) => hasAdminPermission(card.permissionKey));
-
-  const isSuperAdmin = user?.isSuperAdmin ?? false;
 
   if (isSuperAdmin) {
     abrechnungCards.push({
@@ -315,7 +355,7 @@ export default function AdminDashboard() {
         {visiblePersonal.length > 0 && (
           <Section title="Personal & Team">
             {visiblePersonal.map((card) => (
-              <AdminCard key={card.testId} {...card} />
+              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
             ))}
           </Section>
         )}
@@ -323,7 +363,7 @@ export default function AdminDashboard() {
         {visibleScheduling.length > 0 && (
           <Section title="Terminplanung">
             {visibleScheduling.map((card) => (
-              <AdminCard key={card.testId} {...card} />
+              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
             ))}
           </Section>
         )}
@@ -331,7 +371,7 @@ export default function AdminDashboard() {
         {visibleKunden.length > 0 && (
           <Section title="Kunden & Verträge">
             {visibleKunden.map((card) => (
-              <AdminCard key={card.testId} {...card} />
+              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
             ))}
           </Section>
         )}
@@ -339,7 +379,7 @@ export default function AdminDashboard() {
         {visibleAbrechnung.length > 0 && (
           <Section title="Abrechnung & Finanzen">
             {visibleAbrechnung.map((card) => (
-              <AdminCard key={card.testId} {...card} />
+              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
             ))}
           </Section>
         )}
@@ -347,7 +387,7 @@ export default function AdminDashboard() {
         {visibleSystem.length > 0 && (
           <Section title="System & Sicherheit">
             {visibleSystem.map((card) => (
-              <AdminCard key={card.testId} {...card} />
+              <AdminCard key={card.testId} {...card} count={tileCounts[card.testId]} />
             ))}
           </Section>
         )}

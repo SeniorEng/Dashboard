@@ -26,20 +26,7 @@ import {
 import { Link } from "wouter";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
-
-interface PendingProof {
-  id: number;
-  employeeId: number;
-  qualificationId: number | null;
-  documentTypeId: number;
-  status: string;
-  fileName: string | null;
-  objectPath: string | null;
-  uploadedAt: string | null;
-  documentType: { id: number; name: string };
-  qualification: { id: number; name: string } | null;
-  employee: { id: number; displayName: string };
-}
+import { usePendingProofs, type PendingProof } from "@/features/admin/hooks/use-admin-work-queues";
 
 export default function ProofReviewPage() {
   return (
@@ -55,10 +42,7 @@ function ProofReviewContent() {
   const [rejectingProof, setRejectingProof] = useState<PendingProof | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
-  const { data: proofs, isLoading } = useQuery<PendingProof[]>({
-    queryKey: ["admin", "pending-proofs"],
-    queryFn: async () => unwrapResult(await api.get<PendingProof[]>("/admin/proofs/pending-review")),
-  });
+  const { data: proofs, isLoading } = usePendingProofs();
 
   const reviewMutation = useMutation({
     mutationFn: async ({ proofId, approved, rejectionReason }: { proofId: number; approved: boolean; rejectionReason?: string }) =>

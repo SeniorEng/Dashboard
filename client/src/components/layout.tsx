@@ -256,31 +256,18 @@ interface AdminShortcut {
   match: (loc: string) => boolean;
 }
 
+// Reihenfolge spiegelt die 5 Dashboard-Gruppen: Personal & Team (Benutzer),
+// Terminplanung (Verfügbarkeiten), dann Kunden & Verträge
+// (Interessenten → Kundenverwaltung → Geburtstage, in Dashboard-Reihenfolge).
 const ADMIN_SHORTCUTS: AdminShortcut[] = [
   {
-    href: "/admin/customers",
-    label: "Kundenverwaltung",
-    shortLabel: "Kunden",
-    icon: Contact2,
-    testId: "customers",
-    permissionKey: "customers",
-    match: (loc) => loc === "/admin/customers" || loc.startsWith("/admin/customers/"),
-  },
-  {
-    href: "/admin/prospects",
-    label: "Interessenten",
-    icon: UserPlus,
-    testId: "prospects",
-    permissionKey: "prospects",
-    match: (loc) => loc.startsWith("/admin/prospects"),
-  },
-  {
-    href: "/admin/birthday-cards",
-    label: "Geburtstage",
-    icon: Gift,
-    testId: "birthdays",
-    permissionKey: "birthday_cards",
-    match: (loc) => loc.startsWith("/admin/birthday-cards"),
+    href: "/admin/users",
+    label: "Benutzerverwaltung",
+    shortLabel: "Benutzer",
+    icon: Users,
+    testId: "users",
+    permissionKey: "users",
+    match: (loc) => loc.startsWith("/admin/users"),
   },
   {
     href: "/admin/availability",
@@ -292,13 +279,29 @@ const ADMIN_SHORTCUTS: AdminShortcut[] = [
     match: (loc) => loc.startsWith("/admin/availability"),
   },
   {
-    href: "/admin/users",
-    label: "Benutzerverwaltung",
-    shortLabel: "Benutzer",
-    icon: Users,
-    testId: "users",
-    permissionKey: "users",
-    match: (loc) => loc.startsWith("/admin/users"),
+    href: "/admin/prospects",
+    label: "Interessenten",
+    icon: UserPlus,
+    testId: "prospects",
+    permissionKey: "prospects",
+    match: (loc) => loc.startsWith("/admin/prospects"),
+  },
+  {
+    href: "/admin/customers",
+    label: "Kundenverwaltung",
+    shortLabel: "Kunden",
+    icon: Contact2,
+    testId: "customers",
+    permissionKey: "customers",
+    match: (loc) => loc === "/admin/customers" || loc.startsWith("/admin/customers/"),
+  },
+  {
+    href: "/admin/birthday-cards",
+    label: "Geburtstage",
+    icon: Gift,
+    testId: "birthdays",
+    permissionKey: "birthday_cards",
+    match: (loc) => loc.startsWith("/admin/birthday-cards"),
   },
 ];
 

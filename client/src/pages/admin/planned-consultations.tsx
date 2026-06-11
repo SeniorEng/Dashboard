@@ -1,15 +1,13 @@
 import { useMemo } from "react";
 import { Link, useSearch } from "wouter";
-import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
 import { AppointmentCard } from "@/features/appointments/components/appointment-card";
 import { ArrowLeft, Loader2, CalendarCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import { ErrorState } from "@/components/patterns/error-state";
 import { cn } from "@/lib/utils";
-import type { AppointmentWithCustomer } from "@shared/types";
+import { usePlannedConsultations } from "@/features/admin/hooks/use-admin-work-queues";
 
 type FilterValue = "overdue" | "upcoming" | "all";
 
@@ -40,13 +38,7 @@ export default function PlannedConsultations() {
     return "overdue";
   }, [search]);
 
-  const { data: appointments, isLoading, error, refetch } = useQuery<AppointmentWithCustomer[]>({
-    queryKey: ["appointments", "planned-consultations", filter],
-    queryFn: async () => {
-      const result = await api.get<AppointmentWithCustomer[]>(`/appointments/planned-consultations?filter=${filter}`);
-      return unwrapResult(result);
-    },
-  });
+  const { data: appointments, isLoading, error, refetch } = usePlannedConsultations(filter);
 
   const list = appointments ?? [];
 
