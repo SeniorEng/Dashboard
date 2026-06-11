@@ -70,7 +70,7 @@ export interface RebookKmResult {
  * `plannedDurationMinutes` zurück, wenn `actualDurationMinutes` (noch)
  * nicht gesetzt ist.
  */
-async function loadCurrentServiceMinutes(
+export async function loadCurrentServiceMinutes(
   appointmentId: number,
   tx: DbClient,
 ): Promise<{ hwMinutes: number; abMinutes: number }> {

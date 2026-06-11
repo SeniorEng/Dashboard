@@ -857,6 +857,7 @@ export async function executeImport(
         // werden (Soft-Delete-Coverage-Architektur, Task #454).
         const [beforeAppt] = await appointmentsRepo
           .selectColumnsFrom({
+            status: appointments.status,
             assignedEmployeeId: appointments.assignedEmployeeId,
             scheduledEnd: appointments.scheduledEnd,
             durationPromised: appointments.durationPromised,
@@ -937,10 +938,56 @@ export async function executeImport(
             details: `Import: ${row.serviceType}`,
           });
 
-          const info = await rebookAppointmentConsumption(
+          // Task #1190: `rebookAppointmentConsumption` ist ein No-Op (Storno+
+          // Neuanlage), wenn es bereits Consumption-Txs gibt. Bei einem
+          // `completed` Termin OHNE jegliche Consumption-Tx (z.B. weil ein
+          // früherer Import-Lauf den Termin nur als Datensatz anlegte, aber
+          // keine Budget-Buchung erzeugte) würde der Rebook still gar nichts
+          // buchen. Daher: existiert noch keine Consumption, legen wir sie
+          // erstmalig an (gleiche Erstbuchung wie der Upgrade-Pfad, inkl.
+          // §45b-FIFO/Kaskade über `createConsumptionTransaction`).
+          const existingConsumption = await tx
+            .select({ id: budgetTransactions.id })
+            .from(budgetTransactions)
+            .where(and(
+              eq(budgetTransactions.appointmentId, appointmentId),
+              eq(budgetTransactions.transactionType, "consumption"),
+            ))
+            .limit(1);
+
+          let info = await rebookAppointmentConsumption(
             { appointmentId, userId },
             tx,
           );
+          let freshlyBooked = false;
+
+          if (
+            existingConsumption.length === 0 &&
+            !info.rebooked &&
+            beforeAppt.status === "completed"
+          ) {
+            const isHauswirtschaft = isHauswirtschaftArt(row.serviceType);
+            await budgetLedgerStorage.createConsumptionTransaction(
+              {
+                customerId: row.customerId!,
+                appointmentId,
+                transactionDate: row.date,
+                hauswirtschaftMinutes: isHauswirtschaft ? row.durationMinutes : 0,
+                alltagsbegleitungMinutes: isHauswirtschaft ? 0 : row.durationMinutes,
+                travelKilometers: row.kilometers,
+                customerKilometers: 0,
+                userId,
+              },
+              tx,
+            );
+            freshlyBooked = true;
+            info = {
+              ...info,
+              hauswirtschaftMinutes: isHauswirtschaft ? row.durationMinutes : 0,
+              alltagsbegleitungMinutes: isHauswirtschaft ? 0 : row.durationMinutes,
+              transactionDate: row.date,
+            };
+          }
 
           // Task #819: neu gebuchte Budget-Consumption mit dem Batch verknüpfen.
           if (importBatchId != null) {
@@ -950,10 +997,10 @@ export async function executeImport(
               .where(eq(budgetTransactions.appointmentId, appointmentId));
           }
 
-          return info;
+          return { ...info, freshlyBooked };
         });
 
-        if (rebookInfo.rebooked && row.customerId != null) {
+        if ((rebookInfo.rebooked || rebookInfo.freshlyBooked) && row.customerId != null) {
           await auditService.log(
             userId,
             "appointment_km_rebooked",
@@ -962,6 +1009,9 @@ export async function executeImport(
             {
               customerId: row.customerId,
               trigger: REBOOK_TRIGGERS.import.update,
+              // Task #1190: Erstbuchung statt Storno+Neuanlage (Termin hatte
+              // keine Consumption-Tx). Im Audit-Trail unterscheidbar.
+              firstTimeBooking: rebookInfo.freshlyBooked,
               previousTransactionDate: rebookInfo.previousTransactionDate,
               transactionDate: rebookInfo.transactionDate,
               previousTravelKm: rebookInfo.previousTravelKm,
