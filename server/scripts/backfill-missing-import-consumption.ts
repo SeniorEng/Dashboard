@@ -158,6 +158,13 @@ export interface MissingConsumptionRow {
 export async function findMissingConsumptionAppointments(opts: {
   customerIds?: number[];
   batchId?: number;
+  /**
+   * Nur Termine, die aus einem Excel-Import stammen (`import_batch_id IS NOT
+   * NULL`). Genutzt vom automatischen Startup-Backfill, der ausschließlich die
+   * Import-Population korrigiert (nicht jeden beliebigen Termin ohne
+   * Consumption).
+   */
+  onlyImported?: boolean;
 } = {}): Promise<MissingConsumptionRow[]> {
   const conditions = [
     isNull(appointments.deletedAt),
@@ -178,6 +185,9 @@ export async function findMissingConsumptionAppointments(opts: {
   }
   if (opts.batchId !== undefined) {
     conditions.push(eq(appointments.importBatchId, opts.batchId));
+  }
+  if (opts.onlyImported) {
+    conditions.push(sql`${appointments.importBatchId} IS NOT NULL`);
   }
 
   const rows = await db

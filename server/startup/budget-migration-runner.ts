@@ -201,6 +201,9 @@ export async function runBudgetDataMigrations(): Promise<void> {
   const { backfillTask685RelinkOrphanCarryoverTx } = await import(
     "./backfill-task-685-relink-orphan-carryover-tx"
   );
+  const { backfillMissingImportConsumption } = await import(
+    "./backfill-missing-import-consumption"
+  );
 
   // Reihenfolge ist relevant: #685 hängt von der Keep-Wahl aus #684 ab.
   // Alle vier Carryover-/Drift-Backfills setzen voraus, dass
@@ -228,6 +231,11 @@ export async function runBudgetDataMigrations(): Promise<void> {
       name: "backfill-task-685-relink-orphan-carryover-tx",
       version: "1",
       migrate: backfillTask685RelinkOrphanCarryoverTx,
+    },
+    {
+      name: "backfill-missing-import-consumption-1191",
+      version: "1",
+      migrate: backfillMissingImportConsumption,
     },
   ];
 
