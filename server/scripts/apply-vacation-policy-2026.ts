@@ -42,15 +42,15 @@ import { timeTrackingStorage } from "../storage/time-tracking";
 
 const APPLY = process.argv.includes("--apply");
 
-const TARGET_YEAR = 2026;
-const TARGET_MONTH = 1; // Januar 2026
+export const TARGET_YEAR = 2026;
+export const TARGET_MONTH = 1; // Januar 2026
 
-interface PolicyTarget {
+export interface PolicyTarget {
   vacationDaysPerYear: number;
   weeklyWorkDays: number;
 }
 
-const POLICY_BY_EMPLOYMENT_TYPE: Record<EmploymentType, PolicyTarget> = {
+export const POLICY_BY_EMPLOYMENT_TYPE: Record<EmploymentType, PolicyTarget> = {
   minijobber: { vacationDaysPerYear: 12, weeklyWorkDays: 2 },
   sozialversicherungspflichtig: { vacationDaysPerYear: 30, weeklyWorkDays: 5 },
 };
@@ -59,7 +59,7 @@ const POLICY_BY_EMPLOYMENT_TYPE: Record<EmploymentType, PolicyTarget> = {
 // Diese Mitarbeitenden werden vom Skript komplett übersprungen, damit ein
 // erneuter Lauf ihre individuell zugesagten Werte nicht auf den pauschalen
 // Anstellungsart-Wert zurücksetzt. Schlüssel = userId, Wert = Begründung.
-const INDIVIDUAL_EXCEPTIONS: Record<number, string> = {
+export const INDIVIDUAL_EXCEPTIONS: Record<number, string> = {
   11: "Ursula Ullmann — individuell vereinbart: 33 Urlaubstage/Jahr",
 };
 
@@ -81,7 +81,7 @@ async function safetyChecks(apply: boolean): Promise<void> {
   console.log(`Sicherheits-Checks ok. DB-Host: ${host || "(unbekannt)"} · Modus: ${apply ? "APPLY (schreibend)" : "DRY-RUN"}`);
 }
 
-async function resolveActorUserId(): Promise<number | null> {
+export async function resolveActorUserId(): Promise<number | null> {
   const [admin] = await db
     .select({ id: users.id })
     .from(users)
@@ -90,7 +90,7 @@ async function resolveActorUserId(): Promise<number | null> {
   return admin?.id ?? null;
 }
 
-interface EmployeePlan {
+export interface EmployeePlan {
   userId: number;
   displayName: string;
   employmentType: EmploymentType;
@@ -107,6 +107,35 @@ interface CategoryCounts {
   profiles: number;
   historyEntries: number;
   allowances: number;
+}
+
+export interface PolicyEmployeeRow {
+  id: number;
+  displayName: string | null;
+  employmentType: string;
+  vacationDaysPerYear: number | null;
+  weeklyWorkDays: number;
+  eintrittsdatum: string | null;
+}
+
+/**
+ * Lädt alle Mitarbeitenden, die unter die pauschale Regelung fallen:
+ * NUR aktive (`isActive = true`) mit `employmentStatus = "aktiv"` — analog zum
+ * `syncVacationCarryover`-Job. Inaktive / nicht-"aktiv" Mitarbeitende werden
+ * bewusst NICHT angefasst.
+ */
+export async function selectActivePolicyEmployees(): Promise<PolicyEmployeeRow[]> {
+  return db
+    .select({
+      id: users.id,
+      displayName: users.displayName,
+      employmentType: users.employmentType,
+      vacationDaysPerYear: users.vacationDaysPerYear,
+      weeklyWorkDays: users.weeklyWorkDays,
+      eintrittsdatum: users.eintrittsdatum,
+    })
+    .from(users)
+    .where(and(eq(users.isActive, true), eq(users.employmentStatus, "aktiv")));
 }
 
 async function buildPlanForEmployee(emp: {
@@ -180,7 +209,7 @@ async function buildPlanForEmployee(emp: {
   };
 }
 
-async function applyPlan(plan: EmployeePlan, actorUserId: number | null): Promise<void> {
+export async function applyPlan(plan: EmployeePlan, actorUserId: number | null): Promise<void> {
   // 1. Profil
   if (plan.profileChange) {
     await db
@@ -233,47 +262,108 @@ async function applyPlan(plan: EmployeePlan, actorUserId: number | null): Promis
   }
 }
 
-function planHasChanges(plan: EmployeePlan): boolean {
+export function planHasChanges(plan: EmployeePlan): boolean {
   return plan.profileChange !== null || plan.historyChange !== null || plan.allowanceChange !== null;
+}
+
+export interface BuildPlansResult {
+  plans: EmployeePlan[];
+  /** userIds, die wegen einer individuellen Ausnahme übersprungen wurden. */
+  skippedExceptions: number[];
+  /** userIds, die wegen unbekannter Anstellungsart übersprungen wurden. */
+  skippedUnknownType: number[];
+}
+
+/**
+ * Baut für jede aktive Mitarbeitendenzeile den Soll/Ist-Plan. Mitarbeitende mit
+ * individueller Ausnahme oder unbekannter Anstellungsart werden ausgelassen
+ * (und in den jeweiligen `skipped*`-Listen zurückgegeben). Reine Berechnung —
+ * KEINE Schreiboperationen, daher in Dry-Run und Apply identisch nutzbar.
+ */
+export async function buildVacationPolicyPlans(
+  employees: PolicyEmployeeRow[],
+): Promise<BuildPlansResult> {
+  const plans: EmployeePlan[] = [];
+  const skippedExceptions: number[] = [];
+  const skippedUnknownType: number[] = [];
+  for (const emp of employees) {
+    if (emp.id in INDIVIDUAL_EXCEPTIONS) {
+      skippedExceptions.push(emp.id);
+      continue;
+    }
+    if (!(emp.employmentType in POLICY_BY_EMPLOYMENT_TYPE)) {
+      skippedUnknownType.push(emp.id);
+      continue;
+    }
+    plans.push(await buildPlanForEmployee(emp));
+  }
+  return { plans, skippedExceptions, skippedUnknownType };
+}
+
+export interface RunVacationPolicyResult {
+  activeCount: number;
+  plans: EmployeePlan[];
+  changing: EmployeePlan[];
+  skippedExceptions: number[];
+  skippedUnknownType: number[];
+  applied: boolean;
+}
+
+/**
+ * Kernlogik des Skripts ohne Konsolen-Reporting/Safety-Checks: lädt die aktiven
+ * Mitarbeitenden, plant die Änderungen und wendet sie bei `apply = true` an. Die
+ * Funktion ist idempotent (ein zweiter Lauf liefert `changing.length === 0`) und
+ * dient sowohl `main()` als auch dem automatisierten Test als Single-Source.
+ */
+export async function runVacationPolicy2026(
+  options: { apply: boolean } = { apply: false },
+): Promise<RunVacationPolicyResult> {
+  const employees = await selectActivePolicyEmployees();
+  const { plans, skippedExceptions, skippedUnknownType } =
+    await buildVacationPolicyPlans(employees);
+  const changing = plans.filter(planHasChanges);
+
+  if (options.apply && changing.length > 0) {
+    const actorUserId = await resolveActorUserId();
+    for (const p of changing) {
+      await applyPlan(p, actorUserId);
+    }
+  }
+
+  return {
+    activeCount: employees.length,
+    plans,
+    changing,
+    skippedExceptions,
+    skippedUnknownType,
+    applied: options.apply,
+  };
 }
 
 async function main(): Promise<void> {
   await safetyChecks(APPLY);
 
-  const activeEmployees = await db
-    .select({
-      id: users.id,
-      displayName: users.displayName,
-      employmentType: users.employmentType,
-      vacationDaysPerYear: users.vacationDaysPerYear,
-      weeklyWorkDays: users.weeklyWorkDays,
-      eintrittsdatum: users.eintrittsdatum,
-    })
-    .from(users)
-    .where(and(eq(users.isActive, true), eq(users.employmentStatus, "aktiv")));
+  const employees = await selectActivePolicyEmployees();
 
-  if (activeEmployees.length === 0) {
+  if (employees.length === 0) {
     console.log("Keine aktiven Mitarbeitenden gefunden. Nichts zu tun.");
     return;
   }
 
-  const plans: EmployeePlan[] = [];
-  for (const emp of activeEmployees) {
-    if (emp.id in INDIVIDUAL_EXCEPTIONS) {
-      console.log(`↷ Mitarbeiter ${emp.id} übersprungen (Ausnahme: ${INDIVIDUAL_EXCEPTIONS[emp.id]}).`);
-      continue;
-    }
-    if (!(emp.employmentType in POLICY_BY_EMPLOYMENT_TYPE)) {
-      console.warn(`⚠ Mitarbeiter ${emp.id} hat unbekannte Anstellungsart '${emp.employmentType}' — übersprungen.`);
-      continue;
-    }
-    plans.push(await buildPlanForEmployee(emp));
+  const { plans, skippedExceptions, skippedUnknownType } =
+    await buildVacationPolicyPlans(employees);
+
+  for (const id of skippedExceptions) {
+    console.log(`↷ Mitarbeiter ${id} übersprungen (Ausnahme: ${INDIVIDUAL_EXCEPTIONS[id]}).`);
+  }
+  for (const id of skippedUnknownType) {
+    console.warn(`⚠ Mitarbeiter ${id} hat unbekannte Anstellungsart — übersprungen.`);
   }
 
   const changing = plans.filter(planHasChanges);
 
   console.log(
-    `\n${activeEmployees.length} aktive Mitarbeitende geprüft · ${changing.length} mit ausstehenden Änderungen.\n`,
+    `\n${employees.length} aktive Mitarbeitende geprüft · ${changing.length} mit ausstehenden Änderungen.\n`,
   );
 
   for (const p of changing) {
@@ -339,9 +429,13 @@ async function main(): Promise<void> {
   console.log(`\nFertig. ${changing.length} Mitarbeitende aktualisiert.`);
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+// Nur als Skript ausführen, NICHT wenn die Kernlogik (z.B. im Test) importiert
+// wird. Vergleich gegen das via Node aufgerufene Modul (`process.argv[1]`).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+}
