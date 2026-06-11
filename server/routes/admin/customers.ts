@@ -103,7 +103,7 @@ router.get("/customers/check-duplicate", asyncHandler("Duplikatprüfung fehlgesc
 }));
 
 router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", async (req: Request, res: Response) => {
-  const { search, pflegegrad, responsibleEmployeeId, primaryEmployeeId, status, billingType, insuranceProviderId, budgetSetupMissing, page, limit, sortBy, sortOrder } = req.query;
+  const { search, pflegegrad, responsibleEmployeeId, primaryEmployeeId, status, billingType, insuranceProviderId, budgetSetupMissing, hasActiveContract, page, limit, sortBy, sortOrder } = req.query;
   
   const validSortBy = ["name", "contractStart", "createdAt"].includes(sortBy as string)
     ? (sortBy as "name" | "contractStart" | "createdAt")
@@ -141,6 +141,10 @@ router.get("/customers", asyncHandler("Kunden konnten nicht geladen werden", asy
     // Kunden (PG ≥ 2) ohne aktive Topf-Settings ein. Andere Werte werden
     // ignoriert (kein impliziter Inverse-Filter).
     budgetSetupMissing: budgetSetupMissing === "true" ? true : undefined,
+    // Task #1177 — `?hasActiveContract=false` listet Kunden „in Anlage"
+    // (aktiv, aber noch ohne aktiven Vertrag); `true` nur mit Vertrag.
+    hasActiveContract:
+      hasActiveContract === "true" ? true : hasActiveContract === "false" ? false : undefined,
     sortBy: validSortBy,
     sortOrder: validSortOrder,
   };
@@ -175,6 +179,18 @@ router.get("/customers/unassigned-count", asyncHandler("Zählung konnte nicht ge
 router.get("/customers/budget-setup-missing-count", asyncHandler("Zählung konnte nicht geladen werden", async (_req: Request, res: Response) => {
   const result = await customerManagementStorage.getCustomersPaginated(
     { budgetSetupMissing: true, status: "active" },
+    { limit: 1, offset: 0 },
+  );
+  res.json({ count: result.total });
+}));
+
+// Task #1177 — Zähler für „Kunden in Anlage" (Cockpit-Inbox). Ein Kunde gilt
+// als „in Anlage", wenn er aktiv ist, aber noch keinen aktiven Vertrag hat —
+// der zentrale Onboarding-Meilenstein. Kein eigener Status-Store, abgeleitet
+// aus den vorhandenen Daten (Status + aktiver Vertrag).
+router.get("/customers/in-intake-count", asyncHandler("Zählung konnte nicht geladen werden", async (_req: Request, res: Response) => {
+  const result = await customerManagementStorage.getCustomersPaginated(
+    { status: "aktiv", hasActiveContract: false },
     { limit: 1, offset: 0 },
   );
   res.json({ count: result.total });

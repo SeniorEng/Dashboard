@@ -47,6 +47,7 @@ function buildQueryString(params: CustomerListParams): string {
   if (params.status) searchParams.set("status", params.status);
   if (params.insuranceProviderId) searchParams.set("insuranceProviderId", params.insuranceProviderId);
   if (params.budgetSetupMissing) searchParams.set("budgetSetupMissing", params.budgetSetupMissing);
+  if (params.hasActiveContract) searchParams.set("hasActiveContract", params.hasActiveContract);
   if (params.sortBy) searchParams.set("sortBy", params.sortBy);
   if (params.sortOrder) searchParams.set("sortOrder", params.sortOrder);
   const qs = searchParams.toString();
@@ -139,6 +140,22 @@ export function useUnassignedCustomerCount() {
     queryFn: async ({ signal }) => {
       const result = await api.get<{ count: number }>(
         "/admin/customers/unassigned-count",
+        signal
+      );
+      return unwrapResult(result);
+    },
+    staleTime: 30000,
+  });
+}
+
+// Task #1177 — Zähler für „Kunden in Anlage" (aktiv, aber noch ohne aktiven
+// Vertrag) für die Cockpit-Inbox bzw. den Kundenlisten-Banner.
+export function useInIntakeCount() {
+  return useQuery({
+    queryKey: [...customerKeys.all, "in-intake-count"] as const,
+    queryFn: async ({ signal }) => {
+      const result = await api.get<{ count: number }>(
+        "/admin/customers/in-intake-count",
         signal
       );
       return unwrapResult(result);

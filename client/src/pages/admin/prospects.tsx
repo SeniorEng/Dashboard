@@ -76,6 +76,7 @@ import { formatAddress } from "@shared/utils/format";
 
 import { StatusBadge } from "@/features/prospects/components/status-badge";
 import { PipelineStats } from "@/features/prospects/components/pipeline-stats";
+import { PipelineFunnel } from "@/features/prospects/components/pipeline-funnel";
 import { CreateProspectSheet } from "@/features/prospects/components/create-prospect-sheet";
 import { ProspectDetailSheet } from "@/features/prospects/components/prospect-detail-sheet";
 
@@ -123,6 +124,8 @@ export default function AdminProspects() {
           <UserPlus className="h-4 w-4 mr-1" /> Neu
         </Button>
       </div>
+
+      <PipelineFunnel prospectStats={stats} />
 
       {stats && <PipelineStats stats={stats} activeStatus={statusFilter} onStatusClick={(status) => setStatusFilter(prev => prev === status ? "all" : status)} />}
 

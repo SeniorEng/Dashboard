@@ -120,6 +120,10 @@ async function fillUntilBudgets(
 
   await page.goto("/admin/customers/new", { waitUntil: "domcontentloaded" });
 
+  // Task #1177 — Minimal-Create ist der Standard; den vollständigen Wizard
+  // (mit §45b-Anlage-Override) zuerst über den Umschalter sichtbar machen.
+  await page.locator("[data-testid='button-toggle-all-steps']").click();
+
   // Schritt 1: Kundentyp (auto-advance ~150ms nach Klick)
   await page.locator("[data-testid='card-billing-type-pflegekasse_gesetzlich']").click();
   await expect(page.locator("[data-testid='input-vorname']")).toBeVisible();

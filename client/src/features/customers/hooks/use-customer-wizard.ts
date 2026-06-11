@@ -268,6 +268,11 @@ export function useCustomerWizard() {
     });
   }, []);
 
+  // Task #1177 — Frühanlage (Minimal-Create). Wird die Anlage direkt nach dem
+  // Personenschritt ausgelöst (statt am letzten Wizard-Schritt), muss der
+  // Duplikat-Dialog „Trotzdem anlegen" erstellen statt weiterzuschalten.
+  const createIntentRef = useRef(false);
+
   const handleCreate = (forceSkipDuplicate = false) => {
     const today = todayISO();
     
@@ -725,6 +730,7 @@ export function useCustomerWizard() {
   }, [formData.vorname, formData.nachname, formData.geburtsdatum]);
 
   const handleNext = async () => {
+    createIntentRef.current = false;
     if (currentStepId === "contacts") {
       const emptyContacts = formData.contacts.filter(c => !c.vorname.trim() && !c.nachname.trim());
       if (emptyContacts.length > 0) {
@@ -793,7 +799,43 @@ export function useCustomerWizard() {
 
   const findStepIndex = (stepId: string) => steps.findIndex((s) => s.id === stepId);
 
+  // Task #1177 — Minimal-Create: nur die Pflichtfelder der Frühanlage prüfen
+  // (Typ, Stammdaten, ggf. Pflegegrad + Versichertennummer). Alle übrigen
+  // Onboarding-Schritte werden später über die Intake-Checkliste nachgeholt.
+  const getEarlyCreateErrors = useCallback((): string[] => {
+    const errors: string[] = [];
+    errors.push(...getStepErrors("customerType"));
+    errors.push(...getStepErrors("personal"));
+    errors.push(...getStepErrors("insurance"));
+    if (isPflegekasseCustomer(formData.billingType)) {
+      const pg = parseInt(formData.pflegegrad);
+      if (!pg || pg < 1 || pg > 5) errors.push("Pflegegrad fehlt");
+    }
+    return errors;
+    // getStepErrors liest formData direkt, daher als Dep aufführen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData]);
+
+  const canCreateEarly = getEarlyCreateErrors().length === 0;
+
+  const handleEarlyCreate = useCallback(() => {
+    const errors = getEarlyCreateErrors();
+    if (errors.length > 0) {
+      toast({
+        title: "Bitte korrigieren",
+        description: errors.join(" · "),
+        variant: "destructive",
+      });
+      return;
+    }
+    createIntentRef.current = true;
+    handleCreate();
+    // handleCreate/getEarlyCreateErrors lesen formData direkt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getEarlyCreateErrors]);
+
   const handleSubmit = () => {
+    createIntentRef.current = false;
     const stepsToValidate = ["personal", "insurance", "budgets", "contract", "delivery", "matching"];
     for (const stepId of stepsToValidate) {
       const idx = findStepIndex(stepId);
@@ -821,6 +863,12 @@ export function useCustomerWizard() {
     duplicateCheckedRef.current = true;
     acknowledgeRecentDuplicateRef.current = true;
     setDuplicateWarning(null);
+    // Task #1177 — Bei Frühanlage immer erstellen (nicht weiterschalten),
+    // unabhängig vom aktuellen Schritt.
+    if (createIntentRef.current) {
+      handleCreate(true);
+      return;
+    }
     if (currentStep < steps.length - 1) {
       goToStep(currentStep + 1);
     } else {
@@ -854,6 +902,7 @@ export function useCustomerWizard() {
   }, [formData, setLocation]);
 
   const handleDuplicateCancel = useCallback(() => {
+    createIntentRef.current = false;
     setDuplicateWarning(null);
   }, []);
 
@@ -896,6 +945,8 @@ export function useCustomerWizard() {
     handleNext,
     handleBack,
     handleSubmit,
+    handleEarlyCreate,
+    canCreateEarly,
     restoreDraft,
     discardDraft,
     handleCancel,

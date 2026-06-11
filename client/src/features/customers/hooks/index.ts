@@ -5,6 +5,7 @@ export {
   useAssignCustomer,
   useUnassignedCustomerCount,
   useBudgetSetupMissingCount,
+  useInIntakeCount,
   customerKeys,
 } from './use-customers';
 

@@ -39,6 +39,7 @@ export interface CustomerListParams extends PaginationParams {
   status?: string;
   insuranceProviderId?: string;
   budgetSetupMissing?: string;
+  hasActiveContract?: string;
   sortBy?: string;
   sortOrder?: string;
 }

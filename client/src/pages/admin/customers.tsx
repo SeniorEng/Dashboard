@@ -13,7 +13,7 @@ import { SectionCard } from "@/components/patterns/section-card";
 import { DataList, DataListItem } from "@/components/patterns/data-list";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer, useUnassignedCustomerCount, useBudgetSetupMissingCount } from "@/features/customers";
+import { useCustomers, useEmployees, useInsuranceProviders, useAssignCustomer, useUnassignedCustomerCount, useBudgetSetupMissingCount, useInIntakeCount } from "@/features/customers";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, getPflegegradColors, componentStyles } from "@/design-system";
 import { isChild } from "@shared/utils/datetime";
@@ -35,6 +35,7 @@ import {
   UserX,
   CheckCircle2,
   Wallet,
+  ClipboardList,
 } from "lucide-react";
 import { PFLEGEGRAD_SELECT_OPTIONS, BILLING_TYPE_SELECT_OPTIONS } from "@shared/domain/customers";
 import { formatPhoneForDisplay } from "@shared/utils/phone";
@@ -57,6 +58,8 @@ export default function AdminCustomers() {
   const [insuranceProviderFilter, setInsuranceProviderFilter] = useState<string>("");
   // Task #729 — Toggle für „Budget-Einrichtung steht aus"-Filter.
   const [budgetSetupMissingFilter, setBudgetSetupMissingFilter] = useState<boolean>(false);
+  // Task #1177 — Toggle für „Kunden in Anlage"-Filter (aktiv, noch ohne Vertrag).
+  const [inIntakeFilter, setInIntakeFilter] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortOrder, setSortOrder] = useState<string>("asc");
@@ -84,6 +87,8 @@ export default function AdminCustomers() {
   const unassignedCount = unassignedData?.count ?? 0;
   const { data: budgetSetupMissingData } = useBudgetSetupMissingCount();
   const budgetSetupMissingCount = budgetSetupMissingData?.count ?? 0;
+  const { data: inIntakeData } = useInIntakeCount();
+  const inIntakeCount = inIntakeData?.count ?? 0;
 
   const employeeFilterOptions = useMemo(() => [
     { value: "all", label: "Alle Mitarbeiter" },
@@ -118,11 +123,12 @@ export default function AdminCustomers() {
     responsibleEmployeeId: employeeFilter || undefined,
     insuranceProviderId: insuranceProviderFilter || undefined,
     budgetSetupMissing: budgetSetupMissingFilter ? "true" : undefined,
+    hasActiveContract: inIntakeFilter ? "false" : undefined,
     sortBy: sortBy || undefined,
     sortOrder: sortOrder || undefined,
     page: currentPage,
     limit: 15,
-  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, sortBy, sortOrder, currentPage]);
+  }), [debouncedSearch, statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, inIntakeFilter, sortBy, sortOrder, currentPage]);
 
   const { data, isLoading, error, refetch } = useCustomers(queryParams);
 
@@ -164,6 +170,7 @@ export default function AdminCustomers() {
     setEmployeeFilter("");
     setInsuranceProviderFilter("");
     setBudgetSetupMissingFilter(false);
+    setInIntakeFilter(false);
     setSortBy("name");
     setSortOrder("asc");
     setSearchQuery("");
@@ -179,9 +186,10 @@ export default function AdminCustomers() {
     if (employeeFilter) count++;
     if (insuranceProviderFilter) count++;
     if (budgetSetupMissingFilter) count++;
+    if (inIntakeFilter) count++;
     if (sortBy !== "name" || sortOrder !== "asc") count++;
     return count;
-  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, sortBy, sortOrder]);
+  }, [statusFilter, pflegegradFilter, billingTypeFilter, employeeFilter, insuranceProviderFilter, budgetSetupMissingFilter, inIntakeFilter, sortBy, sortOrder]);
 
   const startEditing = useCallback((customer: CustomerListItem, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -304,6 +312,35 @@ export default function AdminCustomers() {
                   className="ml-auto bg-amber-200 text-amber-800 hover:bg-amber-300 cursor-pointer"
                   onClick={(e) => { e.stopPropagation(); setBudgetSetupMissingFilter(false); setCurrentPage(1); }}
                   data-testid="badge-clear-budget-setup-missing-filter"
+                >
+                  Filter aufheben
+                </Badge>
+              )}
+            </button>
+          )}
+
+          {inIntakeCount > 0 && (
+            <button
+              onClick={() => {
+                setInIntakeFilter((prev) => !prev);
+                setCurrentPage(1);
+              }}
+              className={`w-full mb-4 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                inIntakeFilter
+                  ? "bg-teal-100 border border-teal-400 text-teal-800"
+                  : "bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 cursor-pointer"
+              }`}
+              data-testid="banner-in-intake-list"
+            >
+              <ClipboardList className={iconSize.sm} />
+              <span>
+                {inIntakeCount} {inIntakeCount === 1 ? "Kunde in Anlage" : "Kunden in Anlage"} (noch ohne aktiven Vertrag)
+              </span>
+              {inIntakeFilter && (
+                <Badge
+                  className="ml-auto bg-teal-200 text-teal-800 hover:bg-teal-300 cursor-pointer"
+                  onClick={(e) => { e.stopPropagation(); setInIntakeFilter(false); setCurrentPage(1); }}
+                  data-testid="badge-clear-in-intake-filter"
                 >
                   Filter aufheben
                 </Badge>

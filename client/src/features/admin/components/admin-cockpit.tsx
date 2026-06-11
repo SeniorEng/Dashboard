@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2, ChevronRight, FileCheck, FileText,
   Landmark, CalendarClock, Contact2, Receipt, Banknote, ShieldAlert,
-  CalendarDays, UserPlus, TrendingUp, TrendingDown,
+  CalendarDays, UserPlus, TrendingUp, TrendingDown, ClipboardList,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { formatCurrency } from "@shared/utils/format";
 import type { CockpitResponse } from "@shared/statistics";
 import type { AlertItem } from "@/pages/admin/statistics/helpers";
 import { usePendingProofs, usePlannedConsultations } from "@/features/admin/hooks/use-admin-work-queues";
-import { useBudgetSetupMissingCount } from "@/features/customers/hooks/use-customers";
+import { useBudgetSetupMissingCount, useInIntakeCount } from "@/features/customers/hooks/use-customers";
 import { useQontoStatus, useQontoTransactions, useMatchableInvoices } from "@/features/qonto/hooks/use-qonto-queries";
 import { useAppointments } from "@/features/appointments/hooks/use-appointments";
 import { useAppointmentCoverage } from "@/features/appointments/hooks/use-appointment-coverage";
@@ -76,6 +76,7 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
   const { data: pendingProofs } = usePendingProofs();
   const { data: overdueConsultations } = usePlannedConsultations("overdue");
   const { data: budgetSetupMissing } = useBudgetSetupMissingCount();
+  const { data: inIntake } = useInIntakeCount();
 
   const { data: qontoStatus } = useQontoStatus(isSuperAdmin);
   const qontoConfigured = qontoStatus?.configured ?? false;
@@ -166,6 +167,15 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
       label: "Kunden mit offenem Setup",
       subtitle: "Budget-Einrichtung noch unvollständig",
       count: budgetSetupMissing?.count ?? 0,
+      href: "/admin/customers",
+      show: can("customers"),
+    },
+    {
+      testId: "inbox-in-intake",
+      icon: <ClipboardList className={iconSize.md} />,
+      label: "Kunden in Anlage",
+      subtitle: "Aktive Kunden ohne abgeschlossenen Vertrag",
+      count: inIntake?.count ?? 0,
       href: "/admin/customers",
       show: can("customers"),
     },
