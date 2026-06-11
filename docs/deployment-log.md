@@ -8,6 +8,24 @@ Neueste Einträge oben.
 
 ---
 
+### Geplant — Sicherer Production-Rollout des Budget-Anker-Backfills (Task #1209)
+
+**Anlass:** Der Budget-Anker-Backfill (`server/scripts/backfill-budget-anchor.ts`, Task #1203) ist auf DEV gelaufen und muss noch gegen die **Live-Production-DB** ausgerollt werden. Dieser Workspace hat nur Read-Only-Production-Zugriff — der scharfe `--apply`-Lauf darf nicht aus einer unverifizierten Shell hier passieren.
+
+**Lieferumfang (kein Publish durch den Task-Agent — nur Werkzeug + Runbook):**
+- Wrapper `scripts/prod-budget-anchor-rollout.sh` (Subcommands `dry-run` | `safe` | `review`). Kapselt **Pre-Rollout-Backup → Dry-Run → gewählte Stufe Apply → Idempotenz-Re-Check**. Reimplementiert die Backfill-Logik NICHT — Prod-Guard, SAFE/REVIEW-Klassifikation und GoBD-Audit bleiben im tsx-Skript.
+- Mehrschichtige Sicherheit: Backup-Gate (nicht-leerer Custom-Dump verifiziert, sonst Abbruch VOR Apply); `--confirm-prod` nur im Apply-Pfad weitergereicht (DB-Host-Guard des tsx-Skripts bleibt voll intakt); die REVIEW-Stufe (§45a/§39-Fenster-Shift, aktuell nur Kunde #164, §39 `2026-04-07 → 2026-01-01`) verlangt explizites Opt-in `--i-reviewed-164` / `CONFIRM_WINDOW_SHIFTS=1` — der Default-Job `safe` fasst #164 NIE an.
+- Idempotenz-Re-Check: erneuter Dry-Run; nach SAFE muss `SAFE = 0` (REVIEW #164 bleibt offen), nach REVIEW `SAFE = 0` UND `REVIEW = 0`.
+- Operator-Runbook `docs/budget-anchor-rollout-runbook.md` (Job als separates Scheduled/One-Off Deployment einrichten — analog GitHub-Sync, NICHT in `.replit`; #164 prüfen; REVIEW-Stufe anwenden; Idempotenz bestätigen).
+
+**Erwartete Production-Klassifikation (Dry-Run):** ~6 reine Origin-Stempel + ~61 §45b-Korrekturen (SAFE) + 1 REVIEW-Kunde (#164).
+
+**Backup:** vor jedem Apply `scripts/backup-prod-db.sh` (Label `-pre-budget-anchor-rollout`); SHA256 + Pfad hier nach dem Lauf nachtragen.
+
+**Publish-Status:** ⏳ ausstehend — Nutzer richtet das Deployment ein und triggert den Rollout (zuerst `dry-run`, dann `safe`, dann nach #164-Review `review --i-reviewed-164`).
+
+---
+
 ### 2026-05-28 (d) — RE-2026-0010-Folge: Backfill-Audit leerer Unterschriften gegen Production (Task #751, kein Publish)
 
 **Anlass:** Folge zu RE-2026-0010 / Task #749 — Bestands-Service-Records, die VOR der Validator-Hardening-Welle aus #749 mit „signed but visually empty" Signaturen abgeschlossen wurden, müssen identifiziert und manuell nachversorgt werden (Re-Sign bei Entwurfs-Rechnungen, Storno + Neuanlage bei versendeten/bezahlten).
