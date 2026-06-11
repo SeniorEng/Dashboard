@@ -424,13 +424,38 @@ export async function upsertBudgetTypeSettings(
       //   Standardpfade behandeln das korrekt (In-Place wenn noch nie in
       //   Kraft, sonst Transition).
       const explicitVf = s.validFrom ?? null;
-      const isPhaseAppend = explicitVf != null
+      const isExplicitPhaseAppend = explicitVf != null
         && explicitVf > today
         && (!current || (current.validFrom ?? null) !== explicitVf);
 
+      // Task #1169 — GoBD-Härtung: Ein PUT OHNE explizites `validFrom` auf eine
+      // noch zukunfts-datierte offene Zeile, HINTER der bereits eine in Kraft
+      // befindliche Vorgängerphase steht (eine andere Zeile, die `today`
+      // überdeckt), ist KEIN Pull-Forward. Der Pull-Forward (Task #754/BUG-13)
+      // würde die offene Zukunftszeile auf `today` umdatieren — dadurch
+      // überlappte sie mit der noch gültigen Vorgängerzeile (zwei aktive
+      // Versionen am selben Stichtag) und die ursprünglich geplante
+      // Zukunftsphase ginge verloren. Stattdessen behandeln wir das als neuen
+      // Versionssatz „ab heute": Vorgänger auf `validTo = heute-1` schließen,
+      // neue Zeile `[heute .. Zukunft-1]` einklemmen, die Zukunftsphase bleibt
+      // unangetastet. Fehlt eine solche Vorgängerphase (klassischer BUG-13:
+      // einzige Zeile liegt in der Zukunft), bleibt es beim Pull-Forward weiter
+      // unten.
+      const currentIsFutureOpen = !!current && current.validFrom != null && current.validFrom > today;
+      const hasInForcePredecessor = currentIsFutureOpen
+        && (rowsByType.get(s.budgetType) ?? []).some(r =>
+          r.id !== current!.id
+          && (r.validFrom == null || r.validFrom <= today)
+          && (r.validTo == null || r.validTo >= today));
+      const isNewVersionTodayAppend = explicitVf == null && hasInForcePredecessor;
+
+      const isPhaseAppend = isExplicitPhaseAppend || isNewVersionTodayAppend;
+      // Stichtag der neuen Phase: explizit aus dem Payload, sonst „ab heute".
+      const appendVf = isExplicitPhaseAppend ? explicitVf! : today;
+
       if (isPhaseAppend) {
         const allOfType = rowsByType.get(s.budgetType) ?? [];
-        const dayBefore = addDays(explicitVf, -1);
+        const dayBefore = addDays(appendVf, -1);
 
         // 0) Exakter Treffer auf validFrom (über ALLE Zeilen, nicht nur die
         //    offene): "Wird derselbe validFrom zweimal mit unterschiedlichen
@@ -438,7 +463,7 @@ export async function upsertBudgetTypeSettings(
         //    wenn die Zeile inzwischen durch einen Nachfolger geschlossen
         //    wurde — wir aktualisieren die Felder in-place, validTo bleibt
         //    durch den Nachfolger weiterhin geklemmt.
-        const exactMatch = allOfType.find(r => r.validFrom === explicitVf) ?? null;
+        const exactMatch = allOfType.find(r => r.validFrom === appendVf) ?? null;
         if (exactMatch) {
           if (!settingsEqual(exactMatch, s)) {
             await executor.update(customerBudgetTypeSettings)
@@ -452,24 +477,24 @@ export async function upsertBudgetTypeSettings(
                 updatedAt: sql`now()`,
               })
               .where(eq(customerBudgetTypeSettings.id, exactMatch.id));
-            auditEntries.push({ kind: "in_place_update", budgetType: s.budgetType, before: exactMatch, after: s, nextValidFrom: explicitVf });
+            auditEntries.push({ kind: "in_place_update", budgetType: s.budgetType, before: exactMatch, after: s, nextValidFrom: appendVf });
           }
           continue;
         }
 
-        // 1) Vorgänger = Zeile mit größtem validFrom < explicitVf, deren
+        // 1) Vorgänger = Zeile mit größtem validFrom < appendVf, deren
         //    Gültigkeit den neuen Stichtag noch überdeckt. NULL-validFrom
         //    zählt als "rückwirkend ab Beginn" (= -∞) und ist ein gültiger
-        //    Kandidat, wenn die Zeile noch offen ist oder bis >= explicitVf
+        //    Kandidat, wenn die Zeile noch offen ist oder bis >= appendVf
         //    reicht. Ohne diese Behandlung würde eine offene NULL-Baseline
         //    nicht geschlossen → zwei offene Zeilen → Unique-Index-Verletzung.
         let predecessor: CustomerBudgetTypeSetting | null = null;
         for (const r of allOfType) {
           const rvf = r.validFrom;
-          // Kandidaten-Filter: validFrom < explicitVf (NULL = -∞).
-          if (rvf != null && rvf >= explicitVf) continue;
-          // Coverage: validTo NULL ODER >= explicitVf.
-          if (r.validTo != null && r.validTo < explicitVf) continue;
+          // Kandidaten-Filter: validFrom < appendVf (NULL = -∞).
+          if (rvf != null && rvf >= appendVf) continue;
+          // Coverage: validTo NULL ODER >= appendVf.
+          if (r.validTo != null && r.validTo < appendVf) continue;
           if (!predecessor) {
             predecessor = r;
             continue;
@@ -480,11 +505,11 @@ export async function upsertBudgetTypeSettings(
           else if (pvf != null && rvf != null && pvf < rvf) predecessor = r;
         }
 
-        // 2) Nachfolger = Zeile mit kleinstem validFrom > explicitVf.
+        // 2) Nachfolger = Zeile mit kleinstem validFrom > appendVf.
         let successor: CustomerBudgetTypeSetting | null = null;
         for (const r of allOfType) {
           const rvf = r.validFrom;
-          if (rvf == null || rvf <= explicitVf) continue;
+          if (rvf == null || rvf <= appendVf) continue;
           if (!successor || rvf < successor.validFrom!) successor = r;
         }
 
@@ -506,10 +531,10 @@ export async function upsertBudgetTypeSettings(
 
         await executor.insert(customerBudgetTypeSettings).values({
           ...baseValues,
-          validFrom: explicitVf,
+          validFrom: appendVf,
           validTo: newValidTo,
         });
-        auditEntries.push({ kind: "create", budgetType: s.budgetType, before: null, after: s, nextValidFrom: explicitVf });
+        auditEntries.push({ kind: "create", budgetType: s.budgetType, before: null, after: s, nextValidFrom: appendVf });
         continue;
       }
 

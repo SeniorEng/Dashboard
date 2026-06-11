@@ -303,7 +303,26 @@ Explizites `validFrom` im Payload hat weiterhin Vorrang und triggert wie
 zuvor entweder den Phasen-Append-Pfad (Zukunftsdatum) oder die
 Transitions-/In-Place-Logik (heutiges/gestriges Datum).
 
-Regressions-Test: `tests/budget/type-settings-future-row-overwrite.test.ts`
+**Abgrenzung — Vorgängerphase vorhanden (Task #1169, GoBD-Härtung):** Der
+Pull-Forward greift nur, wenn die zukunftsdatierte Zeile die **einzige** den
+Stichtag betreffende Konfiguration ist (klassischer BUG-13: keine andere Zeile
+überdeckt `today`). Steht **hinter** der offenen Zukunftszeile bereits eine
+in Kraft befindliche Vorgängerphase (eine andere Zeile mit
+`validFrom <= today` und `validTo IS NULL OR validTo >= today`), wäre ein
+Pull-Forward revisions-schädlich: er würde die geplante Zukunftsphase
+überschreiben und die Zukunftszeile mit der noch gültigen Vorgängerzeile am
+selben Stichtag überlappen lassen (zwei aktive Versionen). Daher wird ein PUT
+**ohne** `validFrom` in dieser Konstellation als **neuer Versionssatz „ab
+heute"** behandelt: der Vorgänger wird auf `validTo = today - 1` geschlossen,
+eine neue Zeile `[today .. Zukunft - 1]` eingeklemmt, und die Zukunftsphase
+bleibt unangetastet. So bleibt für jeden Tag X genau eine aktive Zeile
+rekonstruierbar. Dies läuft über denselben Phasen-Append-Pfad (kein zweiter
+Versionierungs-Codepfad), nur mit Stichtag `today` statt einem expliziten
+Zukunftsdatum.
+
+Regressions-Tests: `tests/budget/type-settings-future-row-overwrite.test.ts`
+(BUG-13 Pull-Forward) und `tests/budget/task-1169-settings-revisionssicher.test.ts`
+(Versionssatz-ab-heute-Abgrenzung + 3-Schritt-Audit-Sequenz).
 
 ## Rechnungs-Split pro Topf (Task #759, Variant C)
 
