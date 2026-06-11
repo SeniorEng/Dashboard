@@ -1,7 +1,12 @@
 import { describe, it, expect, afterAll } from "vitest";
+import { asc, eq } from "drizzle-orm";
+import { db } from "../../server/lib/db";
+import { customerBudgetTypeSettings } from "@shared/schema";
+import { upsertBudgetTypeSettings } from "../../server/storage/budget/preferences-storage";
 import {
   apiGet,
   apiPost,
+  apiPut,
   createTestCustomer,
   cleanupCustomer,
   uniqueId,
@@ -106,5 +111,77 @@ describe("BUG-19-Rest — §45b Lese-Default nach billingType (Anlage-Pfade)", (
     expect(res.status).toBe(409);
     expect(res.data?.code).toBe("BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER");
     if (res.data?.id) createdIds.push(res.data.id);
+  });
+
+  // Task #1225 — Bestands-Altlast (selbstzahler mit persistierter, offener
+  // §45b-`enabled=true`-Zeile) muss sich über die reguläre Route deaktivieren
+  // lassen. Die Zeile wird direkt über die Storage-Schicht geseedet, weil der
+  // Route-Schreib-Gate (validateSelbstzahlerBudget) das Anlegen einer
+  // §45b-Zeile für Selbstzahler hart blockt — genau diese Konstellation
+  // existiert aber als Altbestand in Prod (Kunde 41).
+  it("Selbstzahler mit persistierter enabled-§45b-Zeile lässt sich deaktivieren (200, append-only)", async () => {
+    const c = await createTestCustomer({
+      billingType: "selbstzahler",
+      acceptsPrivatePayment: false,
+    });
+    const customerId = c.id as number;
+    createdIds.push(customerId);
+
+    // Altlast seeden: offene, bereits seit einem vergangenen Stichtag in Kraft
+    // befindliche §45b-Zeile (enabled=true) — bypassed den Route-Schreib-Gate.
+    // Ein vergangenes `validFrom` spiegelt die echte Prod-Altlast (Kunde 41)
+    // und erzwingt beim Deaktivieren den GoBD-Transitions-Pfad (Vorgänger
+    // schließen + neue Zeile), nicht den Same-Day-In-Place-Pfad.
+    await upsertBudgetTypeSettings(customerId, [
+      { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, validFrom: "2024-06-15" },
+    ]);
+
+    const before = await apiGet<TypeSetting[]>(`/api/budget/${customerId}/type-settings`);
+    expect(before.status).toBe(200);
+    expect(enabledOf(before.data, "entlastungsbetrag_45b")).toBe(true);
+
+    // Deaktivier-Payload über die reguläre Route.
+    const put = await apiPut<any>(`/api/budget/${customerId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null },
+      ],
+    });
+    expect(put.status).toBe(200);
+
+    const after = await apiGet<TypeSetting[]>(`/api/budget/${customerId}/type-settings`);
+    expect(after.status).toBe(200);
+    expect(enabledOf(after.data, "entlastungsbetrag_45b")).toBe(false);
+
+    // Append-only-Garantie: die ursprüngliche enabled=true-Zeile bleibt
+    // erhalten (kein rohes UPDATE/DELETE), sie wird nur über `validTo`
+    // geschlossen; daneben existiert die neue enabled=false-Zeile.
+    const rows = await db
+      .select()
+      .from(customerBudgetTypeSettings)
+      .where(eq(customerBudgetTypeSettings.customerId, customerId))
+      .orderBy(asc(customerBudgetTypeSettings.id))
+      .then(r => r.filter(x => x.budgetType === "entlastungsbetrag_45b"));
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows.some(r => r.enabled === true && r.validTo != null)).toBe(true);
+    const open = rows.filter(r => r.validTo == null);
+    expect(open).toHaveLength(1);
+    expect(open[0].enabled).toBe(false);
+  });
+
+  // Task #1225 — eigentliche Prod-Regression: ein reiner Deaktivier-Payload
+  // (alle Töpfe enabled:false) auf eine NICHT existierende Kunden-ID lief
+  // früher blind in den Append-/Insert-Pfad und löste eine FK-Verletzung (500)
+  // aus. Erwartung jetzt: sauberer 404 „Kunde nicht gefunden", kein 500.
+  it("Deaktivier-Payload auf nicht existierenden Kunden → 404, nicht 500", async () => {
+    const nonExistentId = 999_000_000 + Math.floor(Math.random() * 1_000_000);
+    const put = await apiPut<any>(`/api/budget/${nonExistentId}/type-settings`, {
+      settings: [
+        { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null },
+        { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null },
+        { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, yearlyLimitCents: null },
+      ],
+    });
+    expect(put.status).toBe(404);
+    expect(put.data?.error).toBe("NOT_FOUND");
   });
 });

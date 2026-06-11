@@ -799,22 +799,28 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     return;
   }
 
+  const enabledTypes = new Set(
+    result.data.settings.filter(s => s.enabled).map(s => s.budgetType),
+  );
+  // Task #1225 — Kunden-Existenzprüfung für JEDEN Payload, nicht nur wenn ein
+  // Topf aktiviert wird. Früher lief diese Prüfung nur bei `enabledTypes.size
+  // > 0`; ein reiner Deaktivier-Payload (alle Töpfe enabled:false) auf eine
+  // nicht existierende Kunden-ID rauschte blind in den Append-/Insert-Pfad und
+  // erzeugte eine Foreign-Key-Verletzung (500). Jetzt: Kunde einmal laden, bei
+  // fehlendem Kunden sauber mit 404 antworten, bevor der Schreibpfad erreicht
+  // wird. Der geladene Kunde wird unten für die PG-abhängige Limit-Validierung
+  // wiederverwendet.
+  const customer = await storage.getCustomer(customerId);
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
   // Task #705 / #716 / #722 / #1168 — Selbstzahler-/Pflegegrad-Block via shared
   // Validatoren. Greift pro Topf nur, wenn der Save eine `enabled=true`-Zeile
   // für genau diesen Topf enthält (Deaktivieren bleibt immer erlaubt, damit
   // Bestandskunden ihre falsch angelegte Konfiguration jederzeit zurückbauen
-  // können). Der Kunde wird einmal geladen und für die Betrags-Validierung
-  // (PG-abhängiges §45a-Maximum) unten wiederverwendet.
-  const enabledTypes = new Set(
-    result.data.settings.filter(s => s.enabled).map(s => s.budgetType),
-  );
-  let customer: Awaited<ReturnType<typeof storage.getCustomer>> | undefined;
+  // können).
   if (enabledTypes.size > 0) {
-    customer = await storage.getCustomer(customerId);
-    if (!customer) {
-      res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
-      return;
-    }
     for (const budgetType of ["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"] as const) {
       if (enabledTypes.has(budgetType) && rejectBudgetIntent(
         { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType },
