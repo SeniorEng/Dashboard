@@ -41,3 +41,19 @@ the §45b/§45a/§39/§4Nr16 calculations exactly as-is and leave the rule unuse
 - The persisted `customer_budget_preferences.budget_start_date(_origin)` column and
   the `'manual'` origin enum value remain live (baseline behavior); they are read
   by the §45a/§39/§45b paths as before.
+
+## Backfill tool: split-by-risk, NOT a no-op cache sync
+A maintenance backfill (`server/scripts/backfill-budget-anchor.ts`) re-derives the
+persisted anchor for every `customer_budget_preferences` row via `resolveBudgetAnchor`
+and stamps `origin = 'derived_pflegegrad'`. Because the pot readers read the column
+DIRECTLY (no runtime rule), writing the Jan-1-floored anchor **changes §45a/§39
+accumulation windows** for customers whose Pflegegrad began before the current year —
+it is NOT a cosmetic cache sync, despite how the task was framed.
+**Decision:** the tool classifies each affected customer by *measuring* §45a/§39
+allocated before/after inside a rolled-back txn: SAFE = side pots unchanged (applied
+by default), REVIEW = side pots shift (only with explicit `--include-window-shifts`).
+Dry-run default; `--apply`; prod needs `--confirm-prod`; audit action
+`budget_preferences_updated`. Customers without care-level history are skipped.
+**How to apply:** never bulk-overwrite `budget_start_date` to the floored anchor for
+all customers at once — keep the SAFE/REVIEW split, and treat any §45a/§39 allocated
+movement as a deliberate, reviewed change.
