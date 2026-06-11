@@ -13,6 +13,8 @@ import {
   BUDGET_39_42A_MAX_YEARLY_CENTS,
   BUDGET_45A_MAX_BY_PFLEGEGRAD,
   BUDGET_45B_MAX_MONTHLY_CENTS,
+  validate39_42aAmount,
+  validate45aAmount,
   type BudgetType,
 } from "@shared/domain/budgets";
 import type { BillingType } from "@shared/domain/customers";
@@ -397,14 +399,43 @@ export async function setupBudgetScenario(
       );
     }
   }
-  const typesRes = await apiPut<ServerTypeSetting[]>(
-    `/api/budget/${customerId}/type-settings`,
-    { settings: serverTypeSettings },
-  );
-  if (typesRes.status !== 200) {
-    throw new Error(
-      `setupBudgetScenario: type-settings fehlgeschlagen (status=${typesRes.status})`,
+  // Task #1168 — §45a-Monatslimit (PG-abhängig) und §39/§42a-Jahreslimit über
+  // dem gesetzlichen Maximum lehnt die echte Route seit Task #1168 mit 400 ab.
+  // Solche Über-Limit-Zeilen existieren in Prod nur als Altdaten; die
+  // Anzeige-vs-Buchung-Clamp-Tests (45a-cap, *-overview-statutory-clamp,
+  // properties-display-vs-booking) stellen sie aber BEWUSST her, um zu prüfen,
+  // dass der LESEPFAD (clampToStatutoryMax / computeCapSlot) herunterklemmt.
+  // Sie werden daher — analog zum §45b-Startwert oben — DIREKT über den Storage
+  // geseedet und umgehen so NUR die Routen-Validierung, nicht die Lese-/
+  // Buchungslogik. Das Prädikat spiegelt die Routen-Ablehnung exakt (gleiche
+  // Validatoren, nur `enabled`-Zeilen). Innerhalb des Limits bleibt es beim
+  // echten HTTP-PUT, damit der Normalpfad der Route weiter abgedeckt ist.
+  const wouldRouteReject = (s: ServerTypeSetting): boolean => {
+    if (!s.enabled) return false;
+    if (s.budgetType === "umwandlung_45a" && s.monthlyLimitCents != null) {
+      return validate45aAmount(s.monthlyLimitCents, pflegegrad) !== null;
+    }
+    if (s.budgetType === "ersatzpflege_39_42a" && s.yearlyLimitCents != null) {
+      return validate39_42aAmount(s.yearlyLimitCents) !== null;
+    }
+    return false;
+  };
+
+  if (serverTypeSettings.some(wouldRouteReject)) {
+    const { upsertBudgetTypeSettings } = await import(
+      "../../server/storage/budget/preferences-storage"
     );
+    await upsertBudgetTypeSettings(customerId, serverTypeSettings);
+  } else {
+    const typesRes = await apiPut<ServerTypeSetting[]>(
+      `/api/budget/${customerId}/type-settings`,
+      { settings: serverTypeSettings },
+    );
+    if (typesRes.status !== 200) {
+      throw new Error(
+        `setupBudgetScenario: type-settings fehlgeschlagen (status=${typesRes.status})`,
+      );
+    }
   }
 
   const manualAdjustmentTxIds: number[] = [];
