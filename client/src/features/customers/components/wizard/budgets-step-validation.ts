@@ -14,6 +14,7 @@
  */
 import { isPflegekasseCustomer } from "@shared/domain/customers";
 import { centsToEuroNumber } from "@shared/utils/money";
+import { validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import {
   eligible45bCarryoverMonths,
   max45bCarryoverCents,
@@ -69,6 +70,40 @@ export function budgetsStepErrors(
       const maxStartCents = max45bStartValueCents(formData.pflegegradSeit, `${stichmonat}-01`);
       if (Math.round(rest * 100) > maxStartCents) {
         errors.push(max45bStartValueExceededMessage(maxStartCents));
+      }
+    }
+  }
+
+  // Task #1168 — §45a-/§39/§42a-Voraussetzungen + statutorische Obergrenzen
+  // bereits im Wizard blocken, mit derselben Quelle wie der Server
+  // (`validate45aAmount` prüft PG-Gate UND PG-Maximum; §39/§42a braucht den
+  // PG-Gate separat, `validate39_42aAmount` deckt nur das 3.539-€-Maximum ab).
+  // Nur prüfen, wenn der Topf im Wizard wirklich aktiviert ist — sonst würde
+  // der Default-Wert (§39/§42a = 3.539 €) einen PG-1-Kunden fälschlich am
+  // "Weiter" hindern, obwohl der Create-Payload den Topf gar nicht sendet.
+  {
+    const pg = formData.pflegegrad ? parseInt(formData.pflegegrad, 10) : 0;
+    const is45aEnabled =
+      formData.budgetTypeSettings.find(s => s.budgetType === "umwandlung_45a")?.enabled ?? false;
+    const is39Enabled =
+      formData.budgetTypeSettings.find(s => s.budgetType === "ersatzpflege_39_42a")?.enabled ?? false;
+
+    if (is45aEnabled) {
+      const v45a = parseFloat(formData.pflegesachleistungen36);
+      if (!isNaN(v45a) && v45a > 0) {
+        const msg = validate45aAmount(Math.round(v45a * 100), pg);
+        if (msg) errors.push(msg);
+      }
+    }
+    if (is39Enabled) {
+      const v39 = parseFloat(formData.verhinderungspflege39);
+      if (!isNaN(v39) && v39 > 0) {
+        if (pg < 2) {
+          errors.push("§39/§42a (Verhinderungspflege/Kurzzeitpflege) ist erst ab Pflegegrad 2 verfügbar");
+        } else {
+          const msg = validate39_42aAmount(Math.round(v39 * 100));
+          if (msg) errors.push(msg);
+        }
       }
     }
   }

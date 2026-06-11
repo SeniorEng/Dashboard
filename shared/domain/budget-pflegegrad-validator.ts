@@ -1,16 +1,16 @@
 /**
- * Task #722 — Pure Validator: §45a Umwandlungsanspruch ist erst ab
- * Pflegegrad 2 verfügbar (SGB XI §45a setzt eine vorhandene
- * Pflegesachleistung gem. §36 SGB XI voraus; Pflegegrad 1 hat keinen
- * Anspruch auf Pflegesachleistungen).
+ * Task #722 / #1168 — Pure Validator: §45a Umwandlungsanspruch UND §39/§42a
+ * Verhinderungs-/Kurzzeitpflege sind erst ab Pflegegrad 2 verfügbar.
  *
- * Analog zu `validateSelbstzahler45b` (#705/#716): zentral, pure,
- * Wire-stabiler Error-Code, deutscher Fehlertext — damit Backend-Routen
- * (Activate, Startwert, Carryover, manuelle Korrektur, direkte
- * Allocation) und ggf. das Frontend dieselbe Quelle nutzen.
+ * - §45a setzt eine vorhandene Pflegesachleistung gem. §36 SGB XI voraus;
+ *   Pflegegrad 1 hat darauf keinen Anspruch.
+ * - §39/§42a (Verhinderungspflege/Kurzzeitpflege) setzt ebenfalls mindestens
+ *   Pflegegrad 2 voraus; Pflegegrad 1 erhält nur den §45b-Entlastungsbetrag.
  *
- * Out of scope (eigene Anspruchsregeln, ggf. Folge-Task):
- *   - §39/§42a Verhinderungspflege/Kurzzeitpflege.
+ * Analog zu `validateSelbstzahlerBudget`: zentral, pure, Wire-stabiler
+ * Error-Code, deutscher Fehlertext — damit Backend-Routen (Activate, Startwert,
+ * Carryover, manuelle Korrektur, direkte Allocation, PUT type-settings,
+ * Create-Pfad) und das Frontend dieselbe Quelle nutzen.
  *
  * GoBD-Anmerkung: Wird der Pflegegrad eines Kunden nachträglich auf < 2
  * abgesenkt, bleiben historisch angelegte Allokationen erhalten — neue
@@ -45,23 +45,40 @@ export interface PflegegradValidationInput {
   };
 }
 
-const MESSAGE_45A = "§45a Umwandlungsanspruch ist erst ab Pflegegrad 2 verfügbar";
-const REASONS_45A = [
-  "§45a setzt eine vorhandene Pflegesachleistung gem. §36 SGB XI voraus.",
-  "Pflegegrad 1 hat keinen Anspruch auf Pflegesachleistungen.",
-];
+/**
+ * Töpfe, die mindestens Pflegegrad 2 voraussetzen, mit pot-spezifischem
+ * deutschem Fehlertext + Begründungen. §45b fehlt bewusst (ab PG1 verfügbar).
+ */
+const PG2_REQUIRED_POTS: Record<string, { message: string; reasons: string[] }> = {
+  umwandlung_45a: {
+    message: "§45a Umwandlungsanspruch ist erst ab Pflegegrad 2 verfügbar",
+    reasons: [
+      "§45a setzt eine vorhandene Pflegesachleistung gem. §36 SGB XI voraus.",
+      "Pflegegrad 1 hat keinen Anspruch auf Pflegesachleistungen.",
+    ],
+  },
+  ersatzpflege_39_42a: {
+    message:
+      "§39/§42a (Verhinderungspflege/Kurzzeitpflege) ist erst ab Pflegegrad 2 verfügbar",
+    reasons: [
+      "§39/§42a setzt mindestens Pflegegrad 2 voraus.",
+      "Pflegegrad 1 hat keinen Anspruch auf Verhinderungs-/Kurzzeitpflege.",
+    ],
+  },
+};
 
-export function validatePflegegrad45a(
+export function validatePflegegradBudget(
   input: PflegegradValidationInput,
 ): PflegegradValidationResult {
-  if (input.intent.budgetType !== "umwandlung_45a") return { ok: true };
+  const spec = PG2_REQUIRED_POTS[input.intent.budgetType];
+  if (!spec) return { ok: true };
   const pg = input.pflegegrad ?? 0;
   if (pg >= 2) return { ok: true };
   return {
     ok: false,
     code: "BUDGET_NOT_AVAILABLE_FOR_PFLEGEGRAD",
     httpStatus: 409,
-    message: MESSAGE_45A,
-    reasons: REASONS_45A,
+    message: spec.message,
+    reasons: spec.reasons,
   };
 }

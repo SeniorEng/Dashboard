@@ -11,11 +11,11 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
-import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear } from "@shared/domain/budgets";
+import { BUDGET_TYPES, BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import { formatEuroDE, centsToEuroNumber } from "@shared/utils/money";
 import { auditService } from "../services/audit";
-import { validateSelbstzahler45b } from "@shared/domain/budget-selbstzahler-validator";
-import { validatePflegegrad45a } from "@shared/domain/budget-pflegegrad-validator";
+import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
+import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
 import {
@@ -66,7 +66,7 @@ function rejectBudgetIntent(
   },
   res: Response,
 ): boolean {
-  const sz = validateSelbstzahler45b({
+  const sz = validateSelbstzahlerBudget({
     billingType: args.billingType,
     intent: { budgetType: args.budgetType },
   });
@@ -74,7 +74,7 @@ function rejectBudgetIntent(
     res.status(sz.httpStatus).json({ error: sz.code, code: sz.code, message: sz.message });
     return true;
   }
-  const pg = validatePflegegrad45a({
+  const pg = validatePflegegradBudget({
     pflegegrad: args.pflegegrad,
     intent: { budgetType: args.budgetType },
   });
@@ -838,30 +838,25 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     return;
   }
 
-  // Task #705 / #716 / #722 — Selbstzahler- und Pflegegrad-Block via shared
+  // Task #705 / #716 / #722 / #1168 — Selbstzahler-/Pflegegrad-Block via shared
   // Validatoren. Greift pro Topf nur, wenn der Save eine `enabled=true`-Zeile
   // für genau diesen Topf enthält (Deaktivieren bleibt immer erlaubt, damit
   // Bestandskunden ihre falsch angelegte Konfiguration jederzeit zurückbauen
-  // können).
-  {
-    const wants45b = result.data.settings.some(
-      s => s.budgetType === "entlastungsbetrag_45b" && s.enabled,
-    );
-    const wants45a = result.data.settings.some(
-      s => s.budgetType === "umwandlung_45a" && s.enabled,
-    );
-    if (wants45b || wants45a) {
-      const customer = await storage.getCustomer(customerId);
-      if (!customer) {
-        res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
-        return;
-      }
-      if (wants45b && rejectBudgetIntent(
-        { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType: "entlastungsbetrag_45b" },
-        res,
-      )) return;
-      if (wants45a && rejectBudgetIntent(
-        { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType: "umwandlung_45a" },
+  // können). Der Kunde wird einmal geladen und für die Betrags-Validierung
+  // (PG-abhängiges §45a-Maximum) unten wiederverwendet.
+  const enabledTypes = new Set(
+    result.data.settings.filter(s => s.enabled).map(s => s.budgetType),
+  );
+  let customer: Awaited<ReturnType<typeof storage.getCustomer>> | undefined;
+  if (enabledTypes.size > 0) {
+    customer = await storage.getCustomer(customerId);
+    if (!customer) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+      return;
+    }
+    for (const budgetType of ["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"] as const) {
+      if (enabledTypes.has(budgetType) && rejectBudgetIntent(
+        { billingType: customer.billingType, pflegegrad: customer.pflegegrad, budgetType },
         res,
       )) return;
     }
@@ -881,6 +876,25 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
         message: `§45b: Unser Anteil darf maximal ${formatEuroDE(BUDGET_45B_MAX_MONTHLY_CENTS)}/Monat betragen (gesetzliches Maximum).`,
       });
       return;
+    }
+    // Task #1168 — §45a-Monatslimit gegen das PG-abhängige Maximum und
+    // §39/§42a-Jahreslimit gegen das gesetzliche Maximum (3.539 €) hart
+    // ablehnen. Nur für `enabled`-Zeilen (Deaktivieren bleibt erlaubt;
+    // Bestands-Über-Limit-Werte räumt das Klemm-Skript auf, der Lesepfad
+    // klemmt ohnehin via `clampToStatutoryMax`).
+    if (s.enabled && s.budgetType === "umwandlung_45a" && s.monthlyLimitCents != null) {
+      const msg = validate45aAmount(s.monthlyLimitCents, customer?.pflegegrad ?? null);
+      if (msg) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: msg });
+        return;
+      }
+    }
+    if (s.enabled && s.budgetType === "ersatzpflege_39_42a" && s.yearlyLimitCents != null) {
+      const msg = validate39_42aAmount(s.yearlyLimitCents);
+      if (msg) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: msg });
+        return;
+      }
     }
   }
 

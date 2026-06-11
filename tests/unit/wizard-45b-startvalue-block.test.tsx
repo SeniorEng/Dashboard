@@ -165,3 +165,85 @@ describe("budgetsStepErrors — 'Weiter' blockiert (Task #982)", () => {
     expect(errors).toHaveLength(0);
   });
 });
+
+// Task #1168 — Der Wizard blockt §45a-/§39-§42a-Eingaben mit derselben
+// Quelle wie der Server (`validate45aAmount`/`validate39_42aAmount`), aber NUR
+// wenn der jeweilige Topf wirklich aktiviert ist. So darf der §39/§42a-Default
+// (3.539 €) einen PG-1-Kunden nicht fälschlich am "Weiter" hindern.
+function withBudgetTypes(
+  enabled: Partial<Record<(typeof BUDGET_TYPES)[number], boolean>>,
+) {
+  return BUDGET_TYPES.map((bt) => ({
+    budgetType: bt,
+    enabled: enabled[bt] ?? bt === "entlastungsbetrag_45b",
+    monthlyLimitCents: "",
+    yearlyLimitCents: "",
+  }));
+}
+
+describe("budgetsStepErrors — §45a/§39-§42a-Voraussetzungen (Task #1168)", () => {
+  it("blockiert §45a über dem Pflegegrad-Maximum (PG2 → 318,40 €), wenn §45a aktiviert ist", () => {
+    const errors = budgetsStepErrors(
+      makeFormData({
+        pflegegrad: "2",
+        pflegesachleistungen36: "400",
+        budgetTypeSettings: withBudgetTypes({ umwandlung_45a: true }),
+      }),
+      CURRENT_YEAR,
+      TODAY,
+    );
+    expect(errors.some((e) => /§45a/.test(e) && /Pflegegrad\s*2/.test(e))).toBe(true);
+  });
+
+  it("blockiert §45a NICHT, wenn der Topf deaktiviert ist (selbst bei Über-Limit-Wert)", () => {
+    const errors = budgetsStepErrors(
+      makeFormData({
+        pflegegrad: "2",
+        pflegesachleistungen36: "400",
+        budgetTypeSettings: withBudgetTypes({ umwandlung_45a: false }),
+      }),
+      CURRENT_YEAR,
+      TODAY,
+    );
+    expect(errors.some((e) => /§45a/.test(e))).toBe(false);
+  });
+
+  it("blockiert §39/§42a bei Pflegegrad 1, wenn der Topf aktiviert ist", () => {
+    const errors = budgetsStepErrors(
+      makeFormData({
+        pflegegrad: "1",
+        verhinderungspflege39: "3539",
+        budgetTypeSettings: withBudgetTypes({ ersatzpflege_39_42a: true }),
+      }),
+      CURRENT_YEAR,
+      TODAY,
+    );
+    expect(errors.some((e) => /§39\/§42a/.test(e) && /Pflegegrad\s*2/.test(e))).toBe(true);
+  });
+
+  it("blockiert §39/§42a über dem Jahresmaximum (3.539 €) bei PG≥2", () => {
+    const errors = budgetsStepErrors(
+      makeFormData({
+        pflegegrad: "3",
+        verhinderungspflege39: "5000",
+        budgetTypeSettings: withBudgetTypes({ ersatzpflege_39_42a: true }),
+      }),
+      CURRENT_YEAR,
+      TODAY,
+    );
+    expect(errors.some((e) => /§39\/§42a/.test(e) && /3\.539/.test(e))).toBe(true);
+  });
+
+  it("blockiert NICHT durch den §39/§42a-Default (3.539 €) bei PG1, solange der Topf deaktiviert ist", () => {
+    const errors = budgetsStepErrors(
+      makeFormData({
+        pflegegrad: "1",
+        verhinderungspflege39: "3539",
+        budgetTypeSettings: withBudgetTypes({ ersatzpflege_39_42a: false }),
+      }),
+      CURRENT_YEAR,
+      TODAY,
+    );
+    expect(errors.some((e) => /§39\/§42a/.test(e))).toBe(false);
+  });
+});

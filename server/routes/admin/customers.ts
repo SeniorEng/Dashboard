@@ -8,6 +8,9 @@ import { geocodeCustomer } from "../../services/geocoding";
 import { refreshDraftInvoicesForCustomerAddress } from "../../services/invoice-address-refresh";
 import { validateGeburtsdatum } from "@shared/utils/datetime";
 import { isPflegekasseCustomer, isSelbstzahlerCustomer } from "@shared/domain/customers";
+import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
+import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
+import { validate45aAmount, validate39_42aAmount } from "@shared/domain/budgets";
 import { createCustomerRelatedData, buildCustomerInsertData } from "../../lib/customer-creation-helpers";
 import { findCustomerDuplicates, findCustomerByVersichertennummer } from "../../lib/duplicate-check";
 import { readTestFaults } from "../../lib/test-fault-injector";
@@ -453,17 +456,58 @@ router.post("/customers", asyncHandler("Kunde konnte nicht erstellt werden", asy
 
   const userId = req.user!.id;
 
-  // Task #705 — Selbstzahler-Routing (Variante A) auch im Kundenanlage-
-  // Wizard durchsetzen: §45b ist eine Pflegekassenleistung und für
-  // Selbstzahler nicht buchbar. Sonst würde der Topf hier still angelegt
-  // und erst beim ersten Booking-Versuch krachen.
-  if (data.billingType === "selbstzahler" && data.budgets && (data.budgets.entlastungsbetrag45b ?? 0) > 0) {
-    res.status(409).json({
-      error: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-      code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
-      message: "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.",
-    });
-    return;
+  // Task #705 / #722 / #1168 — Statutorische Budget-Voraussetzungen auch im
+  // Kundenanlage-Wizard / Create-Pfad durchsetzen, über dieselben shared
+  // Validatoren wie PUT type-settings. Sonst würden ungültige Töpfe hier still
+  // angelegt und erst beim ersten Booking-Versuch krachen:
+  //  - §45b/§45a/§39-§42a sind Pflegekassenleistungen → für Selbstzahler tabu.
+  //  - §45a/§39-§42a setzen Pflegegrad ≥ 2 voraus.
+  //  - §45a-Monatslimit ≤ PG-Maximum, §39/§42a-Jahreslimit ≤ 3.539 €.
+  // `data.budgets`-Beträge sind bereits in Cent normalisiert.
+  if (data.budgets) {
+    const pg = data.pflegegrad ?? null;
+    // Pro Topf nur prüfen, wenn der Create-Payload ihn wirklich aktiviert
+    // (Betrag > 0). amountError ist der pot-spezifische statutorische
+    // Obergrenzen-Check (null = kein Betragslimit für diesen Topf).
+    const budgetIntents: Array<{ budgetType: string; amountError: string | null }> = [];
+    if ((data.budgets.entlastungsbetrag45b ?? 0) > 0) {
+      budgetIntents.push({ budgetType: "entlastungsbetrag_45b", amountError: null });
+    }
+    if ((data.budgets.pflegesachleistungen36 ?? 0) > 0) {
+      budgetIntents.push({
+        budgetType: "umwandlung_45a",
+        amountError: validate45aAmount(data.budgets.pflegesachleistungen36!, pg),
+      });
+    }
+    if ((data.budgets.verhinderungspflege39 ?? 0) > 0) {
+      budgetIntents.push({
+        budgetType: "ersatzpflege_39_42a",
+        amountError: validate39_42aAmount(data.budgets.verhinderungspflege39!),
+      });
+    }
+
+    for (const intent of budgetIntents) {
+      const sz = validateSelbstzahlerBudget({
+        billingType: data.billingType,
+        intent: { budgetType: intent.budgetType },
+      });
+      if (!sz.ok) {
+        res.status(sz.httpStatus).json({ error: sz.code, code: sz.code, message: sz.message });
+        return;
+      }
+      const pgCheck = validatePflegegradBudget({
+        pflegegrad: pg,
+        intent: { budgetType: intent.budgetType },
+      });
+      if (!pgCheck.ok) {
+        res.status(pgCheck.httpStatus).json({ error: pgCheck.code, code: pgCheck.code, message: pgCheck.message });
+        return;
+      }
+      if (intent.amountError) {
+        res.status(400).json({ error: "VALIDATION_ERROR", message: intent.amountError });
+        return;
+      }
+    }
   }
 
   const customerData = buildCustomerInsertData(data, userId);

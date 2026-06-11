@@ -1,12 +1,15 @@
 /**
- * Task #705 / #716 — Pure Validator: Selbstzahler dürfen §45b
- * (Entlastungsbetrag) nicht aktivieren, keinen Startwert/Carryover anlegen,
- * keine manuelle Korrektur fahren und keine direkte Allocation schreiben.
+ * Task #705 / #716 / #1168 — Pure Validator: Selbstzahler dürfen die
+ * gesetzlichen Pflegekassen-Töpfe (§45b Entlastungsbetrag, §45a
+ * Umwandlungsanspruch, §39/§42a Verhinderungs-/Kurzzeitpflege) nicht
+ * aktivieren, keinen Startwert/Carryover anlegen, keine manuelle Korrektur
+ * fahren und keine direkte Allocation schreiben.
  *
- * §45b ist eine Pflegekassenleistung (SGB XI). Wer privat zahlt
+ * Diese Töpfe sind Pflegekassenleistungen (SGB XI). Wer privat zahlt
  * (`billingType === "selbstzahler"`), hat keinen Anspruch — die Regel lebt
- * deshalb zentral hier, damit Backend-Routen UND Frontend-Formular denselben
- * Code (und denselben deutschen Fehlertext) aufrufen.
+ * deshalb zentral hier, damit Backend-Routen (PUT type-settings, Create-Pfad,
+ * initial-budget) UND Frontend-Formular denselben Code (und denselben
+ * deutschen Fehlertext) aufrufen.
  *
  * Pure: kein DB-Zugriff, kein Cache. Eingabe ist die `billingType`-Spalte des
  * Kunden plus die Buchungs-/Edit-Intent-Beschreibung.
@@ -39,22 +42,31 @@ export interface SelbstzahlerValidationInput {
   };
 }
 
-const MESSAGE = "§45b Entlastungsbetrag ist für Selbstzahler nicht verfügbar.";
-const REASONS = [
-  "§45b ist eine gesetzliche Pflegekassenleistung (SGB XI).",
-  "Selbstzahler haben keinen Anspruch auf den Entlastungsbetrag.",
-];
+/**
+ * Deutsche Bezeichnung pro gesetzlichem Topf. Nur diese Töpfe sind für
+ * Selbstzahler gesperrt — Schlüssel dient gleichzeitig als „ist gesetzlicher
+ * Topf?"-Whitelist.
+ */
+const STATUTORY_POT_LABELS: Record<string, string> = {
+  entlastungsbetrag_45b: "§45b Entlastungsbetrag",
+  umwandlung_45a: "§45a Umwandlungsanspruch",
+  ersatzpflege_39_42a: "§39/§42a Gemeinsamer Jahresbetrag",
+};
 
-export function validateSelbstzahler45b(
+export function validateSelbstzahlerBudget(
   input: SelbstzahlerValidationInput,
 ): SelbstzahlerValidationResult {
-  if (input.intent.budgetType !== "entlastungsbetrag_45b") return { ok: true };
+  const label = STATUTORY_POT_LABELS[input.intent.budgetType];
+  if (!label) return { ok: true };
   if (input.billingType !== "selbstzahler") return { ok: true };
   return {
     ok: false,
     code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER",
     httpStatus: 409,
-    message: MESSAGE,
-    reasons: REASONS,
+    message: `${label} ist für Selbstzahler nicht verfügbar.`,
+    reasons: [
+      `${label} ist eine gesetzliche Pflegekassenleistung (SGB XI).`,
+      "Selbstzahler haben darauf keinen Anspruch.",
+    ],
   };
 }
