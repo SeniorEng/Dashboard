@@ -15,6 +15,9 @@ import {
   detectPhantomDoubleStornos,
   classifyOrphanStornos,
   isPhantomCorrectionFor,
+  detectReversalChains,
+  buildReversalChainCorrectionNote,
+  isReversalChainCorrectionFor,
   type PhantomLedgerRow,
 } from "@shared/domain/budget/phantom-storno";
 
@@ -159,5 +162,53 @@ describe("Task #987 — isPhantomCorrectionFor (Idempotenz)", () => {
     expect(isPhantomCorrectionFor(note, 11)).toBe(false);
     expect(isPhantomCorrectionFor(note, 1150)).toBe(false);
     expect(isPhantomCorrectionFor(null, 115)).toBe(false);
+  });
+});
+
+describe("Task #1170 — detectReversalChains (Storno eines Stornos)", () => {
+  it("erkennt eine Reversal-Zeile, die auf eine andere Reversal zeigt", () => {
+    // Proof-Form Kunde 203050: #510350 verbraucht, #510351 reversiert verknüpft,
+    // #510352 ist die Storno-Storno-Zeile (zeigt auf die Reversal #510351).
+    const rows: PhantomLedgerRow[] = [
+      consumption(510350, { appointmentId: 9001, amountCents: -2282 }),
+      linkedReversal(510351, 510350),
+      linkedReversal(510352, 510351, { amountCents: -2282 }),
+    ];
+    const chains = detectReversalChains(rows);
+    expect(chains).toHaveLength(1);
+    expect(chains[0].reversalId).toBe(510352);
+    expect(chains[0].reversedReversalId).toBe(510351);
+    expect(chains[0].amountCents).toBe(-2282);
+  });
+
+  it("schlägt NICHT an für ein legitimes Storno einer Consumption", () => {
+    const rows: PhantomLedgerRow[] = [
+      consumption(114, { appointmentId: 7 }),
+      linkedReversal(693, 114),
+    ];
+    expect(detectReversalChains(rows)).toHaveLength(0);
+  });
+
+  it("ignoriert verwaiste Reversals ohne auflösbare Referenz", () => {
+    const rows: PhantomLedgerRow[] = [
+      consumption(50, { appointmentId: 3 }),
+      orphanReversal(51, 50),
+    ];
+    expect(detectReversalChains(rows)).toHaveLength(0);
+  });
+});
+
+describe("Task #1170 — isReversalChainCorrectionFor (Idempotenz)", () => {
+  it("matcht exakt auf die Storno-Storno-ID und vermeidet Präfix-Kollisionen", () => {
+    const note = buildReversalChainCorrectionNote(510352, 510351);
+    expect(isReversalChainCorrectionFor(note, 510352)).toBe(true);
+    expect(isReversalChainCorrectionFor(note, 51035)).toBe(false);
+    expect(isReversalChainCorrectionFor(note, 5103520)).toBe(false);
+    expect(isReversalChainCorrectionFor(null, 510352)).toBe(false);
+  });
+
+  it("die Korrektur-Notiz wird NICHT als Storno-Referenz fehlinterpretiert", () => {
+    const note = buildReversalChainCorrectionNote(510352, 510351);
+    expect(parseStornoReference(note)).toBeNull();
   });
 });

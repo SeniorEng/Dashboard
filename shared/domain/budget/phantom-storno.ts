@@ -169,6 +169,76 @@ export function classifyOrphanStornos(input: ClassifyOrphanInput): ClassifiedOrp
   return out;
 }
 
+/**
+ * Task #1170 — Reversal-Ketten-Erkennung ("Storno eines Stornos").
+ *
+ * Eine Reversal-Zeile darf NUR eine `consumption` (oder `write_off`)
+ * stornieren — niemals eine andere `reversal`. Geschieht das doch (Import-
+ * Altbestand, vor dem Schreib-Guard von #1170), entsteht ohne zugehörige
+ * Dokumentation Wieder-Verbrauch: Die Reversal-Zeile R2 zeigt per
+ * `reversed_transaction_id` auf eine Zeile R1, die selbst `transaction_type =
+ * 'reversal'` ist. R2 trägt das umgekehrte Vorzeichen von R1 und hebt damit
+ * eine legitime Gutschrift wieder auf, ohne dass ein realer Termin neu
+ * dokumentiert wurde. Die drei Lesepfade (Σ Transaktionen, FIFO-Breakdown,
+ * Overview) widersprechen sich dann.
+ *
+ * Rein (kein DB-/IO-Zugriff), damit Schreib-Guard, Reparatur-Skript und
+ * Drift-Test denselben Code teilen (SSoT).
+ */
+export interface ReversalChainLink {
+  /** R2 — die Reversal-Zeile, die fälschlich eine Reversal storniert. */
+  reversalId: number;
+  /** R1 — die referenzierte Zeile, die selbst eine Reversal ist. */
+  reversedReversalId: number;
+  customerId: number;
+  budgetType: string;
+  amountCents: number;
+}
+
+/**
+ * Findet alle Reversal-Ketten: verknüpfte Reversal-Zeilen, deren
+ * `reversedTransactionId` auf eine Zeile mit `transactionType === 'reversal'`
+ * zeigt. Erwartet ALLE Ledger-Zeilen der betrachteten Kunden, damit die
+ * Referenz auflösbar ist.
+ */
+export function detectReversalChains(rows: PhantomLedgerRow[]): ReversalChainLink[] {
+  const byId = new Map<number, PhantomLedgerRow>(rows.map((r) => [r.id, r]));
+  const out: ReversalChainLink[] = [];
+  for (const r of rows) {
+    if (r.transactionType !== "reversal") continue;
+    if (r.reversedTransactionId == null) continue;
+    const target = byId.get(r.reversedTransactionId);
+    if (target && target.transactionType === "reversal") {
+      out.push({
+        reversalId: r.id,
+        reversedReversalId: r.reversedTransactionId,
+        customerId: r.customerId,
+        budgetType: r.budgetType,
+        amountCents: r.amountCents,
+      });
+    }
+  }
+  return out;
+}
+
+/** Eindeutige Notiz der Reversal-Ketten-Gegenbuchung — trägt die Idempotenz-Markierung. */
+export function buildReversalChainCorrectionNote(reversalId: number, reversedReversalId: number): string {
+  return (
+    `Reversal-Ketten-Korrektur (Task #1170): Gegenbuchung zur Storno-Storno-Zeile ` +
+    `#${reversalId} (storniert #${reversedReversalId}).`
+  );
+}
+
+/**
+ * Idempotenz-Check: existiert bereits eine Gegenbuchung für genau diese
+ * Reversal-Ketten-Zeile? Matcht exakt auf "Storno-Storno-Zeile #<id> (" und
+ * vermeidet damit Präfix-Kollisionen (#11 vs. #115).
+ */
+export function isReversalChainCorrectionFor(notes: string | null | undefined, reversalId: number): boolean {
+  if (!notes) return false;
+  return notes.includes(`Storno-Storno-Zeile #${reversalId} (`);
+}
+
 /** Eindeutige Notiz der Ausgleichsbuchung — trägt die Idempotenz-Markierung. */
 export function buildPhantomCorrectionNote(orphanId: number, referencedConsumptionId: number): string {
   return (

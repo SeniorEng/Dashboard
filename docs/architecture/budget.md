@@ -247,6 +247,47 @@ Spalten geschrieben wurden, werden NICHT in-place korrigiert. Falls bei
 Audit Produktivdaten betroffen, separater Korrektur-Task: Storno der
 beschädigten Reversal + Neuanlage mit korrekten Spiegel-Werten.
 
+## Storno-Integrität — kein „Storno eines Stornos" (Task #1170)
+
+Eine Reversal-Zeile darf nur eine `consumption`/`write_off` zurücknehmen,
+**niemals eine andere `reversal`**. Würde R2 die Reversal R1 stornieren, hebt R2
+(mit umgekehrtem Vorzeichen von R1) die legitime Storno-Gutschrift wieder auf —
+ohne dass ein realer Termin neu dokumentiert wurde. Folge: Wieder-Verbrauch ohne
+Beleg; die drei Lesepfade (Σ Transaktionen / FIFO-Breakdown / Overview) driften
+auseinander.
+
+**Schreib-Guard** (`reverseBudgetTransactionWithOutcome` in
+`server/storage/budget/transaction-storage.ts`, durchgereicht vom Route-Handler
+`POST /api/budget/transactions/:id/reverse`):
+- Original ist `reversal` → `400 REVERSAL_NOT_REVERSIBLE` (deutsche Meldung).
+- Original ist bereits storniert (verknüpft ODER Note-Waise) → `409 ALREADY_REVERSED`,
+  **keine** zweite Reversal-Zeile, **kein** zweiter Audit-Eintrag (idempotent).
+- Original existiert nicht → `404 NOT_FOUND`.
+- sonst → `201` mit neuer Reversal-Zeile + Audit `budget_reversal`.
+
+Die Bestands-Signatur `reverseBudgetTransaction` (Bulk-Aufrufer: Termin-/
+Rechnungs-Storno, Import-Reconcile, Rebook) bleibt `BudgetTransaction |
+undefined` und ist ein dünner Wrapper; sie stornieren ausschließlich
+`consumption`-Zeilen und treffen den Guard daher nie — er bleibt Sicherheitsnetz.
+
+**Invarianten-Test** (Drift-Detektor, erweitert die bestehende FIFO-/Equality-
+Suite, KEINE parallele Suite):
+`tests/equality/45b-fifo-breakdown-consistency.test.ts` — nach Storno gilt
+`−Σ(amountCents über consumption/write_off/reversal, transactionDate≤asOf)` ≙
+`FIFO.totalConsumedCents` ≙ `Overview.totalUsedCents` (ohne `manual_adjustment`,
+Phase-6-Schatten-Drift bewusst ausgeklammert). Reine Detektor-Logik (SSoT):
+`shared/domain/budget/phantom-storno.ts` (`detectReversalChains`), getestet in
+`tests/architecture/phantom-storno-detector.test.ts`.
+
+**Bestandsdaten-Reparatur** (GoBD append-only, Trockenlauf-Default):
+`server/scripts/reconcile-reversal-chains.ts` findet Reversal-Ketten (R2 → R1,
+R1 selbst `reversal`) und schreibt pro Kette eine inverse Ausgleichs-
+`consumption` (alle Spalten vorzeichen-invertiert, Σ R2 + Korrektur = 0). Wie
+das Phantom-Storno-Skript: `--apply` erfordert `--user=<superadmin>` +
+`--reason` (≥10 Zeichen), idempotent über die eindeutige Korrektur-Notiz,
+Audit pro Korrektur + Sammel-Eintrag. R2 bleibt unangetastet stehen
+(Revisionssicherheit). Proof-Daten: Kunde 203050, Tx 510351/510352.
+
 ## PUT `/type-settings` ohne `validFrom` auf Zukunfts-Zeile (BUG-13 / Task #754)
 
 Liegt für einen Topf eine offene Zeile mit `validFrom > today` vor und sendet

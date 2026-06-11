@@ -31,6 +31,7 @@ interface BudgetLedgerStorage {
   getTransactionsByAppointmentId(appointmentId: number, txClient?: DbClient): Promise<BudgetTransaction[]>;
   getTransactionByAppointmentId(appointmentId: number, _tx?: DbClient): Promise<BudgetTransaction | undefined>;
   reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined>;
+  reverseBudgetTransactionWithOutcome(transactionId: number, userId?: number, txClient?: DbClient): Promise<transaction.ReverseTransactionOutcome>;
 
   syncCarryoverAndExpiry(customerId: number, _tx?: DbClient): Promise<void>;
   getBudgetSummary(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate?: string): Promise<BudgetSummary>;
@@ -116,6 +117,7 @@ export const budgetLedgerStorage: BudgetLedgerStorage = {
   getTransactionsByAppointmentId: transaction.getTransactionsByAppointmentId,
   getTransactionByAppointmentId: transaction.getTransactionByAppointmentId,
   reverseBudgetTransaction: transaction.reverseBudgetTransaction,
+  reverseBudgetTransactionWithOutcome: transaction.reverseBudgetTransactionWithOutcome,
 
   syncCarryoverAndExpiry: allocation.syncCarryoverAndExpiry,
   getBudgetSummary: summary.getBudgetSummary,

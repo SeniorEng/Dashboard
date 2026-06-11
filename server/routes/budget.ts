@@ -1277,15 +1277,40 @@ router.post("/transactions/:transactionId/reverse", asyncHandler("Storno konnte 
   if (transactionId === null) return;
 
   const userId = req.user?.id;
-  const reversal = await budgetLedgerStorage.reverseBudgetTransaction(transactionId, userId);
-  
-  if (!reversal) {
+  const outcome = await budgetLedgerStorage.reverseBudgetTransactionWithOutcome(transactionId, userId);
+
+  if (outcome.status === "not_found") {
     res.status(404).json({
       error: "NOT_FOUND",
       message: "Transaktion nicht gefunden",
     });
     return;
   }
+
+  // Task #1170 — ein Storno kann NICHT storniert werden (kein „Storno eines
+  // Stornos"). Sonst entstünde ohne Termin-Dokumentation Wieder-Verbrauch.
+  if (outcome.status === "not_reversible") {
+    res.status(400).json({
+      error: "REVERSAL_NOT_REVERSIBLE",
+      message: "Eine Storno-Buchung kann nicht erneut storniert werden. Stattdessen muss der ursprüngliche Vorgang neu gebucht werden.",
+    });
+    return;
+  }
+
+  // Task #1170 — Doppel-Storno derselben Original-Buchung ist idempotent: KEINE
+  // zweite Reversal-Zeile, KEIN erneuter Audit-Eintrag, Status 409 (Konflikt)
+  // statt fälschlich 201 (Created). Die bereits existierende Reversal wird
+  // zurückgegeben, damit Clients das Ergebnis kennen.
+  if (outcome.status === "already_reversed") {
+    res.status(409).json({
+      error: "ALREADY_REVERSED",
+      message: "Diese Transaktion wurde bereits storniert.",
+      reversal: outcome.reversal,
+    });
+    return;
+  }
+
+  const reversal = outcome.reversal;
 
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;

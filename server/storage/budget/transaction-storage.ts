@@ -80,14 +80,49 @@ export async function getTransactionsByAppointmentId(appointmentId: number, txCl
     ));
 }
 
-export async function reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined> {
+/**
+ * Task #1170 — explizites Ergebnis des Storno-Pfades, damit der Route-Handler
+ * den korrekten Statuscode liefern kann:
+ *   - `created`         — neue Reversal-Zeile geschrieben (201).
+ *   - `already_reversed`— Transaktion war bereits storniert; KEINE zweite Zeile
+ *                         (Idempotenz, 409 statt fälschlich 201).
+ *   - `not_reversible`  — Versuch, eine Reversal selbst zu stornieren (400,
+ *                         `REVERSAL_NOT_REVERSIBLE`).
+ *   - `not_found`       — Transaktion existiert nicht (404).
+ */
+export type ReverseTransactionOutcome =
+  | { status: "created"; reversal: BudgetTransaction }
+  | { status: "already_reversed"; reversal: BudgetTransaction }
+  | { status: "not_reversible" }
+  | { status: "not_found" };
+
+/**
+ * Storniert eine Budget-Transaktion und liefert ein strukturiertes Ergebnis.
+ * Der dünne Wrapper `reverseBudgetTransaction` (Bestands-Signatur) leitet hier
+ * durch und mappt auf `BudgetTransaction | undefined` für die Bulk-Aufrufer.
+ */
+export async function reverseBudgetTransactionWithOutcome(
+  transactionId: number,
+  userId?: number,
+  txClient?: DbClient,
+): Promise<ReverseTransactionOutcome> {
   const d = txClient ?? db;
   const original = await d.select()
     .from(budgetTransactions)
     .where(eq(budgetTransactions.id, transactionId))
     .limit(1);
 
-  if (!original[0]) return undefined;
+  if (!original[0]) return { status: "not_found" };
+
+  // Task #1170 (BUG-17) — Storno eines Stornos ablehnen. Eine Reversal-Zeile
+  // darf nur eine `consumption`/`write_off` zurücknehmen, niemals eine andere
+  // `reversal`. Sonst entstünde ohne Termin-Dokumentation Wieder-Verbrauch und
+  // die drei Lesepfade (Σ Transaktionen / FIFO-Breakdown / Overview) drifteten
+  // auseinander. Drift-Schutz: `tests/equality/45b-fifo-breakdown-consistency.test.ts`,
+  // Bestands-Reparatur: `server/scripts/reconcile-reversal-chains.ts`.
+  if (original[0].transactionType === "reversal") {
+    return { status: "not_reversible" };
+  }
 
   const existingReversal = await d.select()
     .from(budgetTransactions)
@@ -97,7 +132,7 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
     ))
     .limit(1);
 
-  if (existingReversal.length > 0) return existingReversal[0];
+  if (existingReversal.length > 0) return { status: "already_reversed", reversal: existingReversal[0] };
 
   // Task #987 — auch NOTE-basierte Waisen-Stornos (`reversed_transaction_id`
   // NULL) für DIESELBE Original-Buchung erkennen. Der Partial-Unique-Index
@@ -117,7 +152,7 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
     ))
     .limit(1);
 
-  if (orphanStorno.length > 0) return orphanStorno[0];
+  if (orphanStorno.length > 0) return { status: "already_reversed", reversal: orphanStorno[0] };
 
   // Task #754 (BUG-14 / BUG-10b) — Service-Cent-/Minuten-/km-Spalten der
   // Original-Consumption werden auf die Reversal-Tx GESPIEGELT und dabei
@@ -171,8 +206,22 @@ export async function reverseBudgetTransaction(transactionId: number, userId?: n
         eq(budgetTransactions.transactionType, "reversal")
       ))
       .limit(1);
-    return existing[0];
+    return { status: "already_reversed", reversal: existing[0] };
   }
 
-  return reversal[0];
+  return { status: "created", reversal: reversal[0] };
+}
+
+/**
+ * Bestands-Signatur (Bulk-Aufrufer): liefert die Reversal-Zeile oder
+ * `undefined`. `not_found` UND `not_reversible` werden zu `undefined` —
+ * Bulk-Pfade (Termin-Storno, Rechnungs-Storno, Import-Reconcile) stornieren
+ * ausschließlich `consumption`-Zeilen und treffen den Reversal-Guard daher nie;
+ * der Guard bleibt ein zusätzliches Sicherheitsnetz. Der Statuscode-sensitive
+ * Route-Handler nutzt stattdessen `reverseBudgetTransactionWithOutcome`.
+ */
+export async function reverseBudgetTransaction(transactionId: number, userId?: number, txClient?: DbClient): Promise<BudgetTransaction | undefined> {
+  const outcome = await reverseBudgetTransactionWithOutcome(transactionId, userId, txClient);
+  if (outcome.status === "created" || outcome.status === "already_reversed") return outcome.reversal;
+  return undefined;
 }
