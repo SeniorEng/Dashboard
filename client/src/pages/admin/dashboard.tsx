@@ -241,6 +241,15 @@ export default function AdminDashboard() {
 
   const abrechnungCards: AdminCardData[] = [
     {
+      href: "/admin/month-close-run",
+      testId: "card-month-close-run",
+      icon: <CalendarCheck className={`${iconSize.lg} text-teal-600`} />,
+      iconBg: "bg-teal-100",
+      title: "Monatsabschluss & Abrechnung",
+      description: "Geführter Lauf: Abschluss, Prüfung, Rechnungen, Zahlungen, Export",
+      permissionKey: "billing",
+    },
+    {
       href: "/admin/month-closing",
       testId: "card-month-closing",
       icon: <Lock className={`${iconSize.lg} text-teal-600`} />,

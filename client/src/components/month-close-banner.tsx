@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { api, unwrapResult } from "@/lib/api/client";
+import { useAuth } from "@/hooks/use-auth";
 import { CalendarClock, Lock, AlertTriangle } from "lucide-react";
 
 interface BannerData {
@@ -17,6 +18,10 @@ interface BannerData {
 const MONTH_NAMES = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
 export function MonthCloseBanner() {
+  const { user } = useAuth();
+  // Admins landen im geführten Lauf (Station ① Dokumentation); der Hub ist
+  // admin-only, daher gehen alle anderen in ihre eigene Zeiterfassung.
+  const blockerHref = user?.isAdmin ? "/admin/month-close-run" : "/my-times";
   const { data } = useQuery<{ banner: BannerData | null }>({
     queryKey: ["month-close-banner"],
     queryFn: async () => {
@@ -100,7 +105,7 @@ export function MonthCloseBanner() {
     if (hasBlockers) {
       return (
         <Link
-          href="/time-entries"
+          href={blockerHref}
           className="block px-4 py-2 border-b text-sm hover:opacity-90 bg-rose-50 border-rose-200 text-rose-800"
           data-testid="banner-month-close-overdue"
         >
@@ -157,7 +162,7 @@ export function MonthCloseBanner() {
 
   return (
     <Link
-      href="/time-entries"
+      href={blockerHref}
       className={`block px-4 py-2 border-b text-sm hover:opacity-90 ${
         isUrgent
           ? "bg-rose-50 border-rose-200 text-rose-800"
