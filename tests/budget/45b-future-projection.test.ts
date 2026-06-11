@@ -46,7 +46,7 @@ describe("Task #704 — §45b zeitliche Projektion (projectFuture)", () => {
     const scenario: BudgetScenarioHandle = await setupBudgetScenario({
       customerNamePrefix: "T704-DEFAULT",
       pflegegrad: 3,
-      preferences: { budgetStartDate: startDate },
+      pflegegradSeit: startDate,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null, validFrom: startDate },
         { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -83,7 +83,7 @@ describe("Task #704 — §45b zeitliche Projektion (projectFuture)", () => {
     const scenario: BudgetScenarioHandle = await setupBudgetScenario({
       customerNamePrefix: "T704-FORECAST",
       pflegegrad: 3,
-      preferences: { budgetStartDate: startDate },
+      pflegegradSeit: startDate,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null, validFrom: startDate },
         { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -126,7 +126,7 @@ describe("Task #704 — §45b zeitliche Projektion (projectFuture)", () => {
     const scenario: BudgetScenarioHandle = await setupBudgetScenario({
       customerNamePrefix: "T704-CARRYEXPIRY",
       pflegegrad: 3,
-      preferences: { budgetStartDate: startDate },
+      pflegegradSeit: startDate,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null, validFrom: startDate },
         { type: "umwandlung_45a", priority: 2, enabled: false },

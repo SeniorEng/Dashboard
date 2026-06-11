@@ -65,7 +65,7 @@ describe("Equality Σ Leg-Spalten == |amountCents| (Task #441 Subtract-Last)", (
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: true,
-      preferences: { budgetStartDate: "2024-01-01" },
+      pflegegradSeit: "2024-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -118,7 +118,7 @@ describe("Equality Σ Leg-Spalten == |amountCents| (Task #441 Subtract-Last)", (
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: true,
-      preferences: { budgetStartDate: "2024-01-01" },
+      pflegegradSeit: "2024-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false },

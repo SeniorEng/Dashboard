@@ -66,7 +66,7 @@ describe("Equality §45a statutorischer Default (Task #954)", () => {
       pflegegrad,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: firstOfCurrentMonth() },
+      pflegegradSeit: firstOfCurrentMonth(),
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         // monthlyLimitCents EXPLIZIT null = aktiviert, aber unkonfiguriert.
@@ -125,7 +125,7 @@ describe("Equality §45a statutorischer Default (Task #954)", () => {
       pflegegrad,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: firstOfCurrentMonth() },
+      pflegegradSeit: firstOfCurrentMonth(),
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: explicit },

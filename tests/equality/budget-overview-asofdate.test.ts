@@ -162,7 +162,7 @@ describe("Task #911 — Budget-Overview Stichtag (?date=) + §45b monthlyLimit P
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: startDate },
+      pflegegradSeit: startDate,
       types: [
         {
           type: "entlastungsbetrag_45b",
@@ -239,7 +239,7 @@ describe("Task #911 — Budget-Overview Stichtag (?date=) + §45b monthlyLimit P
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: firstOfMonth },
+      pflegegradSeit: firstOfMonth,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, validFrom: firstOfMonth },
         { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -330,7 +330,7 @@ describe("Task #911 — Budget-Overview Stichtag (?date=) + §45b monthlyLimit P
       pflegegrad: 3, // §45a erst ab Pflegegrad 2 (Task #722)
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: startDate },
+      pflegegradSeit: startDate,
       types: [
         { type: "entlastungsbetrag_45b", priority: 2, enabled: false },
         { type: "umwandlung_45a", priority: 1, enabled: true, validFrom: startDate },
@@ -436,7 +436,7 @@ describe("Task #911 — Budget-Overview Stichtag (?date=) + §45b monthlyLimit P
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: startDate },
+      pflegegradSeit: startDate,
       types: [
         { type: "entlastungsbetrag_45b", priority: 2, enabled: false },
         { type: "umwandlung_45a", priority: 3, enabled: false },

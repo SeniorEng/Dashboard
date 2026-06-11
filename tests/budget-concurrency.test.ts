@@ -43,6 +43,7 @@ describe("BC-K4: Advisory-Lock serialisiert parallele Konsumbuchungen", () => {
       vorname: "Konkurrenz",
       nachname: `Lock-K4-${Date.now()}`,
       pflegegrad: 3,
+      pflegegradSeit: "2099-01-01",
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
     });
@@ -83,15 +84,12 @@ describe("BC-K4: Advisory-Lock serialisiert parallele Konsumbuchungen", () => {
     const dateStr = apptAnchor.toISOString().split("T")[0];
     const yyyymm = dateStr.substring(0, 7);
 
-    // Damit nicht zusätzlich monatliche §45b-Allokationen entstehen, setzen wir
-    // budgetStartDate weit in die Zukunft. Die manual_adjustment-Allokation
-    // bleibt aktiv, weil source='manual_adjustment' unabhängig vom Startdatum
-    // gezählt wird (siehe consumeFifo special allocations).
-    await apiPut(`/api/budget/${customerId}/preferences`, {
-      customerId,
-      budgetStartDate: "2099-01-01",
-      monthlyLimitCents: null,
-    });
+    // Damit keine monatlichen §45b-Allokationen entstehen, liegt pflegegradSeit
+    // (oben bei der Anlage) weit in der Zukunft (2099) — der zur Laufzeit aus dem
+    // Pflegegrad-Beginn abgeleitete §45b-Anker ist dann ebenfalls in der Zukunft,
+    // also akkumuliert §45b im laufenden Jahr nichts. Die manual_adjustment-
+    // Allokation bleibt aktiv, weil source='manual_adjustment' unabhängig vom
+    // Anker gezählt wird (siehe consumeFifo special allocations).
 
     // Direkter DB-Insert einer manual_adjustment-Allokation = 100 €.
     await db.insert(budgetAllocations).values({

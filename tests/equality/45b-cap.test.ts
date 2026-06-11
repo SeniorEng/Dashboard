@@ -97,7 +97,7 @@ describe("Equality §45b — Cost-Estimate vs ECHTE Engine-Buchung", () => {
         pflegegrad: 2,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: false,
-        preferences: { budgetStartDate: "2026-01-01" },
+        pflegegradSeit: "2026-01-01",
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -202,7 +202,7 @@ describe("Equality §45b — SET-Monatslimit cappt Anzeige UND Buchung (Task #11
         billingType: "pflegekasse_gesetzlich",
         // Überlauf über den §45b-Cap muss irgendwo hin → uncapped Selbstzahler-Topf.
         acceptsPrivatePayment: true,
-        preferences: { budgetStartDate: "2026-01-01" },
+        pflegegradSeit: "2026-01-01",
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: SET_LIMIT_CENTS },
           { type: "umwandlung_45a", priority: 2, enabled: false },

@@ -33,7 +33,6 @@ export interface BudgetTypeSettingSpec {
 }
 
 export interface BudgetScenarioPreferencesSpec {
-  budgetStartDate?: string;
   monthlyLimitCents?: number | null;
   notes?: string | null;
 }
@@ -77,6 +76,13 @@ export interface BudgetScenarioManualAdjustmentSpec {
 export interface BudgetScenarioSpec {
   customerNamePrefix?: string;
   pflegegrad?: Pflegegrad;
+  /**
+   * Pflegegrad-Beginn (ISO `YYYY-MM-DD`). Task #1204 — der Budget-Anker wird zur
+   * Laufzeit aus der Pflegegrad-Historie abgeleitet; dies ist daher der einzige
+   * Hebel, um den §45a/§39/§45b-Anker eines Szenarios zu steuern (default
+   * `2024-01-01`).
+   */
+  pflegegradSeit?: string;
   billingType?: BillingType;
   acceptsPrivatePayment?: boolean;
   preferences?: BudgetScenarioPreferencesSpec;
@@ -245,7 +251,7 @@ export async function setupBudgetScenario(
     vorname: namePrefix,
     nachname: `Scenario-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     pflegegrad,
-    pflegegradSeit: "2024-01-01",
+    pflegegradSeit: spec.pflegegradSeit ?? "2024-01-01",
     billingType,
     acceptsPrivatePayment,
   });
@@ -272,7 +278,6 @@ export async function setupBudgetScenario(
       `/api/budget/${customerId}/preferences`,
       {
         customerId,
-        budgetStartDate: spec.preferences.budgetStartDate ?? null,
         monthlyLimitCents: spec.preferences.monthlyLimitCents ?? null,
         notes: spec.preferences.notes ?? null,
       },
@@ -368,6 +373,13 @@ export async function setupBudgetScenario(
         `setupBudgetScenario: initial-budget fehlgeschlagen (status=${res.status})`,
       );
     }
+  } else if (carry && carry.type === "entlastungsbetrag_45b") {
+    // §45b-Carryover als direkte Fixture (analog zum ib&&carry-Pfad oben):
+    // Task #1204 bodet den §45b-Anker zur Laufzeit aus der Pflegegrad-Historie;
+    // Fixtures mit Zukunfts-`pflegegradSeit` (zum Abschalten der monatlichen
+    // Ansammlung) hätten sonst einen Carryover-Cap von 0 und die Route lehnte den
+    // bewusst geseedeten Übertrag ab. Die Direkt-Fixture umgeht NUR den Routen-Cap.
+    await seed45bCarryoverDirect(carry.year, carry.amountCents);
   } else if (carry) {
     const res = await apiPost<InitialBudgetResponse>(
       `/api/budget/${customerId}/initial-budget`,

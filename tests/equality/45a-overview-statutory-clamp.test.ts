@@ -55,7 +55,7 @@ describe("Equality §45a Overview — statutorischer Cap greift in der Anzeige",
       pflegegrad,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: firstOfMonth },
+      pflegegradSeit: firstOfMonth,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: overshootMonthlyLimit },

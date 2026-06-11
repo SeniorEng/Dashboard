@@ -114,13 +114,10 @@ export const customerBudgetPreferences = pgTable("customer_budget_preferences", 
   id: serial("id").primaryKey(),
   customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }).unique(),
   monthlyLimitCents: integer("monthly_limit_cents"), // Desired monthly usage limit (null = no limit, use full 131€)
-  budgetStartDate: date("budget_start_date"), // When customer started using budget (for pro-rata calculation)
-  // Task #856 — Herkunft des budgetStartDate: 'derived_pflegegrad' = automatisch
-  // aus dem Pflegegrad-Beginn abgeleitet (Wizard/initial-budget) → §45b-Lesepfad
-  // kappt den Anker aufs rechtliche Fenster. 'manual' = explizit vom Admin
-  // gesetzt (PUT /preferences) → niemals kappen (manuell gewinnt immer). NULL =
-  // Altbestand vor #856, wird wie 'manual' behandelt (kein stilles Umrechnen).
-  budgetStartDateOrigin: text("budget_start_date_origin"),
+  // Task #1204 — `budget_start_date` + `budget_start_date_origin` entfernt: der
+  // Budget-Anker wird zur Laufzeit PRO TOPF aus der Pflegegrad-Historie
+  // abgeleitet (§45a/§39 roh, §45b aufs laufende Jahr gebodet), nicht mehr
+  // persistiert. Siehe server/storage/budget/allocation-storage.ts.
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -314,8 +311,6 @@ export type InsertBudgetTransaction = z.infer<typeof insertBudgetTransactionSche
 export const insertBudgetPreferencesSchema = z.object({
   customerId: z.number(),
   monthlyLimitCents: z.number().min(0, "Wert darf nicht negativ sein").nullable().optional(),
-  budgetStartDate: z.string().nullable().optional(),
-  budgetStartDateOrigin: z.enum(["derived_pflegegrad", "manual"]).nullable().optional(),
   notes: z.string().max(500, "Maximal 500 Zeichen").nullable().optional(),
 });
 

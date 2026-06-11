@@ -32,7 +32,7 @@ describe("budget-scenarios DSL — smoke", () => {
     let scenario: BudgetScenarioHandle;
     const spec: BudgetScenarioSpec = {
       customerNamePrefix: "TEST-DSL-Smoke-PG3",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "entlastungsbetrag_45b", enabled: true, priority: 1 },
         { type: "umwandlung_45a", enabled: true, priority: 2 },

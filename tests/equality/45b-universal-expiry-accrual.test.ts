@@ -5,12 +5,16 @@
  * mehr §45b zeigen konnten, als rechtlich möglich ist:
  *
  *   (1) Legacy/Manueller Anker → unbegrenzte Monatsaufstockung über Jahre.
- *       Fix: Verfalls-Boden im Lesepfad bodet `allocStart` auf das relevante
- *       Fenster (1. Halbjahr: Vorjahr + laufendes Jahr; ab Juli: laufendes Jahr).
+ *       Fix (Task #1204): Der §45b-Anker wird zur Laufzeit aus der Pflegegrad-
+ *       Historie abgeleitet und auf den 1.1. des LAUFENDEN Jahres gebodet
+ *       (`floorAutoAnchor45bToCurrentYear`) — ein alter Pflegegrad akkumuliert
+ *       damit keine jahrelang nicht-verfallenden Monatsbeträge mehr.
  *   (2) Vorjahres-Startwert (`initial_balance`) jenseits des Fensters wird weiter
  *       gezählt. Fix: IB-Supersession (`year < ibFloorYear` → ausgeschlossen).
- *   (4) Jahr mit Startwert rollte sein Restguthaben NICHT in einen Carryover.
- *       Fix: `ensureYearlyCarryover45b` verarbeitet IB-Jahre wieder.
+ *   (4) Onboarding-Baseline (Task #1204/#860): das Vorjahr gilt als aufgebraucht,
+ *       es wird KEIN automatischer Vorjahres-Carryover fabriziert. Der gebodete
+ *       Anker (eligibilityStartYear = laufendes Jahr) supersediert das frühere
+ *       Auto-Übertrags-Modell (Task #959/#101).
  *   (3) Start-/Übertragswert über der Obergrenze bei der Anlage. Fix:
  *       `/initial-budget` weist zu hohe Werte mit 400 ab (Cap-SSoT).
  *
@@ -26,7 +30,6 @@ import {
   syncCarryoverAndExpiry,
   upsertInitialBalanceAllocation,
 } from "../../server/storage/budget/allocation-storage";
-import { upsertBudgetPreferences } from "../../server/storage/budget/preferences-storage";
 import {
   apiPost,
   createTestCustomer,
@@ -74,41 +77,30 @@ async function fresh45b(prefix: string): Promise<number> {
 }
 
 describe("Task #959 — universeller §45b-Verfall & Akkumulations-Cap", () => {
-  it("Lücke 1: Legacy-Anker (2020) akkumuliert NICHT jahrelang — Boden = Vorjahr im 1. Halbjahr", async () => {
+  it("Lücke 1 (Task #1204): Pflegegrad-Historie wird auf das laufende Jahr gebodet — keine jahrelange Akkumulation", async () => {
     const customerId = await fresh45b("T959-LEGACY");
 
-    // Legacy-/Altbestand-Anker weit in der Vergangenheit (manuell gesetzt → wird
-    // NICHT auf das laufende Jahr gebodet, nur der Verfalls-Boden greift).
-    await upsertBudgetPreferences({
-      customerId,
-      budgetType: "entlastungsbetrag_45b",
-      monthlyLimitCents: null,
-      budgetStartDate: "2020-01-01",
-    });
-
+    // Die Pflegegrad-Historie des Test-Kunden beginnt 2024-01-01
+    // (createTestCustomer-Default). Task #1204 leitet den §45b-Anker zur Laufzeit
+    // daraus ab und bodet ihn auf den 1.1. des laufenden Jahres (2026-01-01).
     const total = await calculateAllocatedCents(
       customerId,
       "entlastungsbetrag_45b",
       { asOfDate: "2026-05-27" },
     );
 
-    // Fenster im 1. Halbjahr 2026 = Jan 2025 .. Mai 2026 = 17 Monate × 131 €.
-    // KEINE Akkumulation seit 2020 (das wären 77 Monate).
-    expect(total).toBe(17 * MONTHLY);
-    expect(total).not.toBe(77 * MONTHLY);
+    // Gebodeter Anker 2026-01 → Jan .. Mai 2026 = 5 Monate × 131 €. KEINE
+    // Akkumulation seit dem ungebodeten Pflegegrad-Beginn 2024-01 (das wären
+    // 29 Monate bis Mai 2026).
+    expect(total).toBe(5 * MONTHLY);
+    expect(total).not.toBe(29 * MONTHLY);
   });
 
   it("Lücke 2: Vorjahres-Startwert für ein abgelaufenes Jahr (2024) trägt 0 € bei", async () => {
     const customerId = await fresh45b("T959-STALE-IB");
 
-    // Aktueller Accrual-Anker im laufenden Jahr ...
-    await upsertBudgetPreferences({
-      customerId,
-      budgetType: "entlastungsbetrag_45b",
-      monthlyLimitCents: null,
-      budgetStartDate: "2026-01-01",
-    });
-    // ... aber ein alter Startwert von 2024 liegt noch herum (vor dem Boden 2025).
+    // Accrual-Anker = gebodete Pflegegrad-Historie (2024 → 2026-01-01, Task #1204).
+    // Ein alter Startwert von 2024 liegt noch herum (vor dem Boden 2025).
     await upsertInitialBalanceAllocation({
       customerId,
       budgetType: "entlastungsbetrag_45b",
@@ -125,24 +117,21 @@ describe("Task #959 — universeller §45b-Verfall & Akkumulations-Cap", () => {
       { asOfDate: "2026-05-27" },
     );
 
-    // Accrual startet 2026-01 (budgetStartDate) → Jan .. Mai 2026 = 5 × 131 €.
+    // Accrual startet 2026-01 (gebodeter Anker) → Jan .. Mai 2026 = 5 × 131 €.
     // Der 2024er-Startwert (99.999) liegt unter dem Boden 2025 und wird per
     // IB-Supersession ausgeschlossen (alt: 65.500 + 99.999 = Doppel-Verfügbarkeit).
     expect(total).toBe(5 * MONTHLY);
     expect(total).not.toBe(5 * MONTHLY + 99_999);
   });
 
-  it("Lücke 4: ein Jahr mit Startwert rollt sein Restguthaben in genau einen Carryover", async () => {
+  it("Lücke 4 (Task #1204): gebodeter Onboarding-Anker ⇒ KEIN automatischer Vorjahres-Carryover", async () => {
     const customerId = await fresh45b("T959-IB-ROLL");
 
-    // Anker im Vorjahr 2025 + Startwert für 2025 → 2025 ist ein abgelaufenes
-    // Jahr mit unverbrauchtem Guthaben, das in einen 2026er-Carryover gehört.
-    await upsertBudgetPreferences({
-      customerId,
-      budgetType: "entlastungsbetrag_45b",
-      monthlyLimitCents: null,
-      budgetStartDate: "2025-01-01",
-    });
+    // Test-Kunde hat eine Pflegegrad-Historie ab 2024 → §45b-Anker wird auf
+    // 2026-01-01 gebodet (Task #1204). Ein per Korrekturpfad gesetzter Vorjahres-
+    // Startwert für 2025 rollt damit NICHT mehr automatisch in einen 2026er-
+    // Carryover: das Vorjahr gilt als aufgebraucht (Onboarding-Baseline). Das
+    // supersediert das frühere Auto-Übertrags-Modell (Task #959/#101).
     await upsertInitialBalanceAllocation({
       customerId,
       budgetType: "entlastungsbetrag_45b",
@@ -153,7 +142,6 @@ describe("Task #959 — universeller §45b-Verfall & Akkumulations-Cap", () => {
       expiresAt: null,
     });
 
-    // Vorher (Task #101): kein Carryover, weil 2025 einen Startwert hatte.
     await syncCarryoverAndExpiry(customerId);
 
     const carryovers = await db
@@ -166,11 +154,10 @@ describe("Task #959 — universeller §45b-Verfall & Akkumulations-Cap", () => {
         isNull(budgetAllocations.deletedAt),
       ));
 
+    // eligibilityStartYear = laufendes Jahr (gebodeter Anker) ⇒ die Carryover-
+    // Schleife verarbeitet kein abgelaufenes Jahr ⇒ kein Auto-Carryover.
     const carryover2026 = carryovers.filter(c => c.year === 2026);
-    expect(carryover2026).toHaveLength(1);
-    expect(carryover2026[0].amountCents).toBeGreaterThan(0);
-    expect(carryover2026[0].validFrom).toBe("2026-01-01");
-    expect(carryover2026[0].expiresAt).toBe("2026-06-30");
+    expect(carryover2026).toHaveLength(0);
   });
 
   it("Lücke 3: /initial-budget weist einen §45b-Startwert über der Obergrenze mit 400 ab", async () => {

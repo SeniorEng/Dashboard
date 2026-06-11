@@ -88,7 +88,7 @@ describe("Race K4 — parallele Dokumentation auf knappes §45b-Restbudget", () 
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: true,
-      preferences: { budgetStartDate },
+      pflegegradSeit: budgetStartDate,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: BUDGET_45B_MAX_MONTHLY_CENTS },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },

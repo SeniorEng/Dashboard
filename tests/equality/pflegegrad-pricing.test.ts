@@ -56,7 +56,7 @@ describe("Equality Pflegegrad-Preise — Cost-Estimate vs ECHTE Buchung", () => 
         pflegegrad: c.pg,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: true,
-        preferences: { budgetStartDate: "2024-01-01" },
+        pflegegradSeit: "2024-01-01",
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },

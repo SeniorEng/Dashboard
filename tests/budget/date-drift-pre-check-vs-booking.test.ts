@@ -97,7 +97,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         pflegegrad: 2,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: false,
-        preferences: { budgetStartDate: "2026-01-01" },
+        pflegegradSeit: "2026-01-01",
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -171,7 +171,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         pflegegrad: 2,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: false,
-        preferences: { budgetStartDate: "2026-01-01" },
+        pflegegradSeit: "2026-01-01",
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -248,7 +248,7 @@ describe("Task #424 — Date-Drift zwischen Pre-Check und Buchung", () => {
         pflegegrad: 2,
         billingType: "pflegekasse_gesetzlich",
         acceptsPrivatePayment: false,
-        preferences: { budgetStartDate: "2026-01-01" },
+        pflegegradSeit: "2026-01-01",
         types: [
           { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
           { type: "umwandlung_45a", priority: 2, enabled: false },

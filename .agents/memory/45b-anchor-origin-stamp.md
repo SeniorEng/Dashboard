@@ -1,59 +1,42 @@
 ---
-name: §45b/budget anchor — resolveBudgetAnchor exists but is NOT wired into pot math
-description: a pure runtime anchor rule (resolveBudgetAnchor) exists as a tested SSoT, but deliberately drives NONE of the §45b/§45a/§39 pot calculations; the legally-correct per-pot anchor handling is left untouched. Do not wire the rule into the readers.
+name: §45b/§45a/§39 budget anchor — computed at runtime PER POT from Pflegegrad history
+description: There is NO persisted budget anchor anymore. Each pot derives its anchor at runtime from the earliest Pflegegrad start — §45a/§39 raw (uncapped), §45b floored to current-year Jan1. There is no single shared anchor and no 'manual' override.
 ---
 
-# §45b/budget anchor — SSoT rule kept inert on purpose
+# §45b/§45a/§39 budget anchor — runtime, per pot (Task #1204)
 
-`shared/domain/budget/budget-anchor.ts → resolveBudgetAnchor(careLevelHistory, today)`
-is a pure, unit-tested rule (`tests/budget/budget-anchor.test.ts`). It computes
-`max(earliest pflegegradSeit, Jan-1 of today's year)`, never shifts on a PG
-*change* (always earliest PG), `null` if no PG history.
+The budget anchor is a **pure runtime function of the Pflegegrad (care-level)
+history**, recomputed on every read. There is **no persisted anchor**: the
+columns `customer_budget_preferences.budget_start_date` +
+`budget_start_date_origin` and the origin value `'manual'` were **removed**.
 
-**It is intentionally wired into NOTHING in production.** All four budget readers
-in `server/storage/budget/allocation-storage.ts` (§45b `calculateAllocated45b`,
-§45a `umwandlung_45a`, §39 `ersatzpflege_39_42a`, and the §45b carryover) and the
-budget routes / customer-creation helper keep their **original, legally-correct**
-anchor handling:
-- §45a / §39 read the raw `preferences?.budgetStartDate` (ungekappter
-  Pflegegrad-Beginn), with their existing initial-balance / Jan-1 fallbacks.
-- §45b reads `preferences?.budgetStartDate` and only floors it to the current year
-  via `floorAutoAnchor45bToCurrentYear` when origin === `derived_pflegegrad`
-  (see `45b-onboarding-baseline.md`).
-- `PUT /preferences` may still write `budgetStartDate` / `'manual'` origin; the
-  delete/reset paths do NOT audit-log a `budget_anchor_reset` action.
+Source of truth at runtime is `earliestCareLevelStart(customerId, asOfDate)` in
+`server/storage/budget/allocation-storage.ts` (earliest entry in
+`care_level_history`). Each pot applies it differently:
 
-**Why (the trap that got reverted):** an earlier attempt wired
-`resolveBudgetAnchor` into all four readers + the write sites. Its `max(…, Jan-1)`
-floor is correct for the §45b auto-anchor but is **wrong for §45a/§39** (they need
-the uncapped Pflegegrad start) and for §45b accrual edge cases — it broke ~18
-budget tests across all three pots. The user explicitly chose the SAFE path: keep
-the §45b/§45a/§39/§4Nr16 calculations exactly as-is and leave the rule unused.
+- **§45a (`umwandlung_45a`) / §39+§42a (`ersatzpflege_39_42a`)** — read the
+  **RAW** earliest Pflegegrad start, **uncapped**, with their existing fallbacks
+  (initial_balance/setting anchor → `1.1.` of current year). A PG far in the past
+  counts in full (these pots are uncapped).
+- **§45b (`entlastungsbetrag_45b`)** — read the SAME earliest PG start but
+  **floored to current-year Jan-1** via `floorAutoAnchor45bToCurrentYear`
+  (`shared/domain/budgets.ts`). A date before Jan-1 is raised; a future date is
+  left. Applied in BOTH `calculateAllocated45b` AND `ensureYearlyCarryover45b`,
+  and the `/initial-budget` §45b write floors its Stichmonat param identically.
+
+**Why one shared floored anchor is WRONG:** an earlier attempt unified all pots
+onto one `max(earliest PG, Jan-1)` anchor — correct for §45b but wrong for
+§45a/§39 (they need the uncapped PG start). Keep them per-pot.
 
 **How to apply:**
-- Do NOT replace `preferences?.budgetStartDate` reads in the pot readers with
-  `resolveBudgetAnchor`. There is NO single floored anchor that is correct for all
-  three pots simultaneously — §45a/§39 are uncapped, §45b is year-floored.
-- If a future task (the budget-anchor unification follow-ups) wires the rule in,
-  it must do so PER POT with pot-specific capping, not one shared floored value,
-  and re-run the full budget suite (§45b accrual, §45a/§39 overview, historization,
-  task-1143 accumulation) before trusting it.
-- The persisted `customer_budget_preferences.budget_start_date(_origin)` column and
-  the `'manual'` origin enum value remain live (baseline behavior); they are read
-  by the §45a/§39/§45b paths as before.
-
-## Backfill tool: split-by-risk, NOT a no-op cache sync
-A maintenance backfill (`server/scripts/backfill-budget-anchor.ts`) re-derives the
-persisted anchor for every `customer_budget_preferences` row via `resolveBudgetAnchor`
-and stamps `origin = 'derived_pflegegrad'`. Because the pot readers read the column
-DIRECTLY (no runtime rule), writing the Jan-1-floored anchor **changes §45a/§39
-accumulation windows** for customers whose Pflegegrad began before the current year —
-it is NOT a cosmetic cache sync, despite how the task was framed.
-**Decision:** the tool classifies each affected customer by *measuring* §45a/§39
-allocated before/after inside a rolled-back txn: SAFE = side pots unchanged (applied
-by default), REVIEW = side pots shift (only with explicit `--include-window-shifts`).
-Dry-run default; `--apply`; prod needs `--confirm-prod`; audit action
-`budget_preferences_updated`. Customers without care-level history are skipped.
-**How to apply:** never bulk-overwrite `budget_start_date` to the floored anchor for
-all customers at once — keep the SAFE/REVIEW split, and treat any §45a/§39 allocated
-movement as a deliberate, reviewed change.
+- Never reintroduce a persisted `budget_start_date`/origin column or a `'manual'`
+  override. The drift-guard `tests/architecture/budget-anchor-ssot.test.ts`
+  fails if the persisted anchor returns.
+- §45a/§39 read raw `earliestCareLevelStart`; only §45b floors. Keep all three
+  §45b sites (read, carryover, /initial-budget write) on the same floor or the
+  displayed sum and the materialized carryover rows drift apart.
+- FORWARD-ONLY: existing `budget_allocations` are NOT rewritten; only future
+  recomputes read the runtime anchor. Startup column drop:
+  `server/startup/drop-budget-start-date-columns.ts`.
+- `clampDerived45bAnchor` / `earliest45bRelevantAnchor` still exist but are
+  unit-test-only helpers, NOT in the runtime path (see 45b-onboarding-baseline.md).

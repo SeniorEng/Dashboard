@@ -149,7 +149,7 @@ describe("Budget Property-Tests (P1–P5)", () => {
             customerNamePrefix: "PROP-P1",
             pflegegrad: 3,
             acceptsPrivatePayment: false,
-            preferences: { budgetStartDate: "2099-01-01" },
+            pflegegradSeit: "2099-01-01",
             types: [
               { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
               { type: "umwandlung_45a", priority: 2, enabled: false },
@@ -407,7 +407,7 @@ describe("Budget Property-Tests (P1–P5)", () => {
             customerNamePrefix: "PROP-P4",
             pflegegrad: 3,
             acceptsPrivatePayment: true,
-            preferences: { budgetStartDate: "2099-01-01" },
+            pflegegradSeit: "2099-01-01",
             types: [
               { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
               { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: 5000 },

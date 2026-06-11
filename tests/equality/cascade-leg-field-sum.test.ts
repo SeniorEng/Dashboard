@@ -88,7 +88,7 @@ describe("Equality Σ Service-Felder == appointment-Total über alle Cascade-Leg
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: true,
-      preferences: { budgetStartDate: "2024-01-01" },
+      pflegegradSeit: "2024-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: 1000 },
@@ -174,7 +174,7 @@ describe("Equality Σ Service-Felder == appointment-Total über alle Cascade-Leg
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: true,
-      preferences: { budgetStartDate: "2024-01-01" },
+      pflegegradSeit: "2024-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: 500 },

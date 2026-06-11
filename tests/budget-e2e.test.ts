@@ -13,7 +13,7 @@ import {
   type BudgetScenarioHandle,
 } from "./helpers/budget-scenarios";
 import { freezeTime, thawTime } from "./helpers/frozen-clock";
-import { processExpiredCarryover } from "../server/storage/budget/allocation-storage";
+import { processExpiredCarryover, upsertCarryoverAllocation } from "../server/storage/budget/allocation-storage";
 import { getBudgetSummary } from "../server/storage/budget/summary-queries";
 import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
@@ -77,7 +77,8 @@ describe("INT-1: §45b Allokation und Summary", () => {
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-1",
-      preferences: { budgetStartDate: "2026-01-01", notes: "Integrationstest" },
+      pflegegradSeit: "2026-01-01",
+      preferences: { notes: "Integrationstest" },
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -99,10 +100,19 @@ describe("INT-1: §45b Allokation und Summary", () => {
     expect(s45b.priority).toBe(1);
   });
 
-  it("INT-1.2 – Budget-Startdatum 2026-01-01 ist gesetzt", async () => {
-    const prefRes = await apiGet<any>(`/api/budget/${scenario.customerId}/preferences`);
-    expect(prefRes.status).toBe(200);
-    expect(prefRes.data.budgetStartDate).toBe("2026-01-01");
+  it("INT-1.2 – §45b-Anker wird zur Laufzeit aus pflegegradSeit (2026-01-01) abgeleitet", async () => {
+    // Seit Task #1204 gibt es keine gespeicherte budget_start_date-Spalte mehr.
+    // Der §45b-Anker leitet sich zur Laufzeit aus dem Pflegegrad-Beginn ab und
+    // wird aufs laufende Jahr gebodet. pflegegradSeit = 2026-01-01 (laufendes
+    // Jahr) ⇒ §45b sammelt ab Januar an: bis zum heutigen Stichtag genau
+    // (Monatsindex) × 13100 ct.
+    const res = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
+    expect(res.status).toBe(200);
+    const today = new Date();
+    const startDate = new Date("2026-01-01");
+    const expectedMonths = (today.getFullYear() - startDate.getFullYear()) * 12
+      + (today.getMonth() + 1) - (startDate.getMonth() + 1) + 1;
+    expect(res.data.entlastungsbetrag45b.totalAllocatedCents).toBe(expectedMonths * 13100);
   });
 
   it("INT-1.3 – Overview enthält §45b mit korrektem totalAllocatedCents", async () => {
@@ -272,7 +282,7 @@ describe("INT-4: Manuelle Korrektur und Storno", () => {
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-4",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -331,7 +341,7 @@ describe("INT-5: Kostenschaetzung", () => {
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-5",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -371,7 +381,7 @@ describe("INT-6: Kaskadenverbrauch ueber Termin-Dokumentation", () => {
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-6",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -451,7 +461,7 @@ describe("INT-7: Doppelbuchungsschutz", () => {
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-7",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -577,7 +587,7 @@ describe("INT-10: Alle drei Toepfe zusammen (vollstaendige Kaskade)", () => {
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-10",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "umwandlung_45a", priority: 1, enabled: true, monthlyLimitCents: 59880 },
         { type: "entlastungsbetrag_45b", priority: 2, enabled: true, monthlyLimitCents: null },
@@ -633,7 +643,8 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
     const validFromMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-11",
-      preferences: { budgetStartDate: "2026-01-01", notes: "T2.3 EB Limit Test" },
+      pflegegradSeit: "2026-01-01",
+      preferences: { notes: "T2.3 EB Limit Test" },
       initialBalance: {
         type: "umwandlung_45a",
         amountCents: 50000,
@@ -735,7 +746,7 @@ describe("INT-12: T3.1/T3.2 Storno FIFO-Rueckgabe und Neubuchung", () => {
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-12",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -841,13 +852,34 @@ describe("INT-13: T1.2 Carryover-Erstellung und Verfall (Juni-Deadline)", () => 
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-13",
-      preferences: { budgetStartDate: "2024-01-01", notes: "T1.2 Test" },
+      pflegegradSeit: "2024-01-01",
+      preferences: { notes: "T1.2 Test" },
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
     });
+    // Task #1204: Ein Vorjahres-Anker erzeugt KEINEN automatischen §45b-Carryover
+    // mehr (der Anker wird zur Laufzeit aufs laufende Jahr gebodet). Der Übertrag
+    // entsteht jetzt durch bewusste Operator-/Storage-Eingabe. Wir seeden beide
+    // Carryover-Zeilen direkt: sourceYear 2024 → Zieljahr 2025 (abgelaufen, wird
+    // unten abgeschrieben) und sourceYear 2025 → Zieljahr 2026 (noch gültig).
+    await upsertCarryoverAllocation({
+      customerId: scenario.customerId,
+      budgetType: "entlastungsbetrag_45b",
+      sourceYear: 2024,
+      amountCents: 13100,
+    });
+    await upsertCarryoverAllocation({
+      customerId: scenario.customerId,
+      budgetType: "entlastungsbetrag_45b",
+      sourceYear: 2025,
+      amountCents: 13100,
+    });
+    // Abgelaufenen 2025er-Übertrag (expiresAt 2025-06-30) abschreiben.
+    await processExpiredCarryover(scenario.customerId);
+    await apiGet<any>(`/api/budget/${scenario.customerId}/overview`); // Sync triggern
   });
 
   afterAll(async () => {
@@ -960,14 +992,21 @@ describe("INT-14: T1.3 FIFO-Verbrauchsreihenfolge (altes Geld zuerst)", () => {
   let carryoverAllocationId: number | null = null;
 
   beforeAll(async () => {
+    // Task #1204: Der §45b-Anker wird zur Laufzeit aus pflegegradSeit abgeleitet.
+    // Damit der FIFO-Verbrauch deterministisch das ÄLTESTE Geld (den Carryover)
+    // trifft, schalten wir die monatliche §45b-Ansammlung über einen Zukunfts-
+    // Anker (pflegegradSeit 2099) ab — das einzige verfügbare §45b-Geld ist dann
+    // der explizit geseedete Übertrag (Zieljahr 2026).
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-14",
-      preferences: { budgetStartDate: "2025-01-01", notes: "T1.3 FIFO Test" },
+      pflegegradSeit: "2099-01-01",
+      preferences: { notes: "T1.3 FIFO Test" },
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
+      carryover: { type: "entlastungsbetrag_45b", year: 2025, amountCents: 13100 },
       appointments: [
         {
           date: pastWeekday(),
@@ -1031,7 +1070,7 @@ describe("INT-15: Storno-Netting currentMonthUsedCents (§45b im aktuellen Monat
   beforeAll(async () => {
     scenario = await setupBudgetScenario({
       customerNamePrefix: "INT-15",
-      preferences: { budgetStartDate: "2026-01-01" },
+      pflegegradSeit: "2026-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
@@ -1508,8 +1547,9 @@ describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abg
       ],
     });
     // Wizard-Onboarding emuliert: /initial-budget mit Vorjahres-Anker, ohne
-    // Startguthaben und ohne Übertrag. Der Endpoint setzt
-    // budgetStartDateOrigin = 'derived_pflegegrad'.
+    // Startguthaben und ohne Übertrag. Seit Task #1204 gibt es keine gespeicherte
+    // budget_start_date-Spalte mehr — ohne Startguthaben/Übertrag entsteht also
+    // keine §45b-Allokation (Anker wird zur Laufzeit aufs laufende Jahr gebodet).
     const res = await apiPost<any>(`/api/budget/${scenario.customerId}/initial-budget`, {
       budgetType: "entlastungsbetrag_45b",
       currentMonthAmountCents: 0,
@@ -1521,15 +1561,6 @@ describe("INT-18: §45b Onboarding-Baseline – kein Vorjahres-Carryover bei abg
 
   afterAll(async () => {
     await scenario.cleanup();
-  });
-
-  it("INT-18.1 – Anker-Origin ist 'derived_pflegegrad' mit Vorjahres-RAW-Datum", async () => {
-    const prefRes = await apiGet<any>(`/api/budget/${scenario.customerId}/preferences`);
-    expect(prefRes.status).toBe(200);
-    // RAW-Anker bleibt im Vorjahr (für §45a/§39), Origin markiert ihn als
-    // abgeleitet — genau dieser Origin triggert die §45b-Kappung im Lesepfad.
-    expect(prefRes.data.budgetStartDate).toBe(derivedAnchor);
-    expect(prefRes.data.budgetStartDateOrigin).toBe("derived_pflegegrad");
   });
 
   it("INT-18.2 – KEINE automatisch materialisierte §45b-Carryover-Zeile (Vor- und laufendes Jahr)", async () => {

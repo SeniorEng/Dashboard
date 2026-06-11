@@ -42,7 +42,7 @@ describe("Equality §39_42a Overview — statutorischer Jahres-Cap greift in der
       pflegegrad: 2,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: firstOfYear },
+      pflegegradSeit: firstOfYear,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         { type: "umwandlung_45a", priority: 2, enabled: false },

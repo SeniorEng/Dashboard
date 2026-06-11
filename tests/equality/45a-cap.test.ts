@@ -40,7 +40,7 @@ describe("Equality §45a — initial_balance + monthlyLimitCents Dedup (Task #70
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: firstOfMonth },
+      pflegegradSeit: firstOfMonth,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         { type: "umwandlung_45a", priority: 2, enabled: true, monthlyLimitCents: 74360 },

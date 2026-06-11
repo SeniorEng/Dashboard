@@ -86,7 +86,7 @@ describe("Task #623 — Boot-Audit ist nach Korrektur-Skript leer", () => {
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: budgetStart },
+      pflegegradSeit: budgetStart,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false },

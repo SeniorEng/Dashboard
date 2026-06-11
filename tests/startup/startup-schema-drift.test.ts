@@ -83,7 +83,6 @@ import {
   CBTS_UNIQUE_INDEX_SQL,
   BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL,
 } from "../../server/startup/backfill-budget-historization";
-import { BUDGET_START_DATE_ORIGIN_COLUMN_SQL } from "../../server/startup/ensure-budget-start-date-origin";
 import { COMPANY_BANK_ACCOUNT_HOLDER_COLUMN_SQL } from "../../server/startup/ensure-company-bank-account-holder";
 import { INVOICE_FINGERPRINT_COLUMNS_SQL } from "../../server/startup/ensure-invoice-fingerprint-columns";
 import { INVOICE_LEISTUNGSNACHWEIS_COLUMNS_SQL } from "../../server/startup/ensure-invoice-leistungsnachweis-columns";
@@ -398,13 +397,6 @@ const ALTER_SOURCES: AlterSource[] = [
     realTable: "audit_log",
     drizzleTable: auditLog,
     columns: ["parent_deletion_id"],
-  },
-  {
-    label: "ensure-budget-start-date-origin: customer_budget_preferences.budget_start_date_origin",
-    rawSql: BUDGET_START_DATE_ORIGIN_COLUMN_SQL,
-    realTable: "customer_budget_preferences",
-    drizzleTable: customerBudgetPreferences,
-    columns: ["budget_start_date_origin"],
   },
   {
     label: "ensure-company-bank-account-holder: company_settings.bank_account_holder",

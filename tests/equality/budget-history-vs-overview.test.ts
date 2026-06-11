@@ -66,7 +66,7 @@ describe("Equality — BudgetHistoryView monatlich === BudgetOverview Snapshot (
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: firstOfMonth },
+      pflegegradSeit: firstOfMonth,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true },
         { type: "umwandlung_45a", priority: 2, enabled: false },

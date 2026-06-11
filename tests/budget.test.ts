@@ -65,6 +65,7 @@ describe("BB – API-/Response-Shape-Tests (per-Test-Kunde)", () => {
       vorname: "Budget",
       nachname: `BB-PG3-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       pflegegrad: 3,
+      pflegegradSeit: "2026-01-01",
       billingType: "pflegekasse_gesetzlich",
     });
     testCustomerId = created.id as number;
@@ -75,18 +76,15 @@ describe("BB – API-/Response-Shape-Tests (per-Test-Kunde)", () => {
       backupEmployeeId2: null,
     });
 
-    // Default-Konfiguration: §45b Prio 1 aktiv, §45a/§39/42a aus, Budget-Start
-    // 2026-01-01. Tests, die andere Töpfe brauchen, überschreiben gezielt.
+    // Default-Konfiguration: §45b Prio 1 aktiv, §45a/§39/42a aus. Der §45b-Anker
+    // wird seit Task #1204 zur Laufzeit aus pflegegradSeit (2026-01-01, laufendes
+    // Jahr) abgeleitet. Tests, die andere Töpfe brauchen, überschreiben gezielt.
     await apiPut(`/api/budget/${testCustomerId}/type-settings`, {
       settings: [
         { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
         { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
-    });
-    await apiPut(`/api/budget/${testCustomerId}/preferences`, {
-      customerId: testCustomerId,
-      budgetStartDate: "2026-01-01",
     });
   });
 
@@ -501,18 +499,21 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
     expect(initialBalances.length).toBe(1);
   });
 
-  it("BUD-IB-DEDUP-2 – Genau EIN automatischer Carryover, wenn Vorjahres-Startwert existiert (exactly-once)", async () => {
-    // Task #959: Der Vorjahres-Startwert rollt seinen Rest forward-only in
-    // GENAU EINEN Carryover fürs laufende Jahr (validFrom 1.1., expiresAt 30.6.).
-    // Der ursprüngliche initial_balance wird dabei in der Aggregat-Sicht
-    // verdrängt (IB-Supersession) → keine Doppelzählung (siehe BUD-IB-DEDUP-3).
+  it("BUD-IB-DEDUP-2 – Vorjahres-Startwert erzeugt KEINEN automatischen Carryover (Floor-Modell)", async () => {
+    // Task #1204: Der §45b-Anker wird zur Laufzeit aus der Pflegegrad-Historie
+    // abgeleitet und auf den 1.1. des laufenden Jahres gebodet. Die
+    // Carryover-Eligibilität (`eligibilityStartYear`) bodet damit ebenfalls aufs
+    // laufende Jahr — ein reiner Vorjahres-Startwert rollt seinen Rest also NICHT
+    // mehr automatisch in einen Folgejahres-Carryover (Vorjahr gilt als
+    // aufgebraucht). Der bewusste Übertrag läuft jetzt über die Operator-Eingabe
+    // (/initial-budget mit carryoverAmountCents, siehe BUD-IB-DEDUP-4).
     await apiGet<any>(`/api/budget/${dedupCustomerId}/overview`);
     const allocRes = await apiGet<any[]>(`/api/budget/${dedupCustomerId}/allocations`);
     expect(allocRes.status).toBe(200);
     const autoCarryover = allocRes.data.filter(
       (a: any) => a.budgetType === "entlastungsbetrag_45b" && a.source === "carryover"
     );
-    expect(autoCarryover.length).toBe(1);
+    expect(autoCarryover.length).toBe(0);
   });
 
   it("BUD-IB-DEDUP-3 – totalAllocatedCents = Startwert + Auto-Allokationen ab Folgemonat", async () => {
@@ -545,10 +546,18 @@ describe("BUD-IB-DEDUP: Startwert §45b – keine Doppelzählung mit Carryover",
         { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
     });
-    await apiPut<any>(`/api/budget/${coCustomerId}/preferences`, {
-      customerId: coCustomerId,
+    // Task #1204: Ein Vorjahres-Anker erzeugt KEINEN automatischen §45b-Carryover
+    // mehr (der Anker wird zur Laufzeit aufs laufende Jahr gebodet). Der
+    // klassische Übertrag entsteht jetzt durch eine bewusste Operator-Eingabe
+    // (/initial-budget mit carryoverAmountCents) und landet als Carryover-Zeile
+    // im laufenden Jahr.
+    const coRes = await apiPost<any>(`/api/budget/${coCustomerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 0,
+      carryoverAmountCents: 13100,
       budgetStartDate: `${previousYear}-01-01`,
     });
+    expect([200, 201]).toContain(coRes.status);
 
     await apiGet<any>(`/api/budget/${coCustomerId}/overview`);
     const allocRes = await apiGet<any[]>(`/api/budget/${coCustomerId}/allocations`);
@@ -592,11 +601,17 @@ describe("BB-18: Carryover Response-Shape", () => {
         { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
       ],
     });
-    // Budget-Start im Vorjahr ⇒ syncCarryoverAndExpiry erzeugt Carryover-Allokation.
-    await apiPut(`/api/budget/${carryoverCustomerId}/preferences`, {
-      customerId: carryoverCustomerId,
+    // Task #1204: Operator-erfasster Übertrag (/initial-budget carryoverAmountCents)
+    // erzeugt die Carryover-Allokation; sie landet im laufenden Jahr mit
+    // expiresAt = 30.06. Ein Vorjahres-Anker triggert seit dem Wegfall der
+    // budget_start_date-Spalte KEINEN automatischen Carryover mehr.
+    const coRes = await apiPost(`/api/budget/${carryoverCustomerId}/initial-budget`, {
+      budgetType: "entlastungsbetrag_45b",
+      currentMonthAmountCents: 0,
+      carryoverAmountCents: 13100,
       budgetStartDate: `${previousYear}-01-01`,
     });
+    expect([200, 201]).toContain(coRes.status);
     await apiGet<any>(`/api/budget/${carryoverCustomerId}/overview`); // triggert Sync
   });
 

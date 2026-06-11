@@ -1,16 +1,16 @@
 /**
  * Task #1192 — SSoT für den Budget-Anker.
  *
- * Der Budget-Anker (`customer_budget_preferences.budget_start_date`) ist das
- * Datum, ab dem virtuelle §45b-Monatsallokationen laufen und ab dem §45a/§39
- * ihre Monats-/Jahresansammlung zählen. Er wurde historisch je nach Pfad
- * unterschiedlich, falsch oder gar nicht gesetzt (`/initial-budget` →
- * 'derived_pflegegrad', `PUT /preferences` → 'manual', API-/Import-Pfad → NULL).
- * Das führte zu uneinheitlichen Ankern und stillen Allokationslücken.
+ * Der Budget-Anker ist das Datum, ab dem virtuelle §45b-Monatsallokationen
+ * laufen und ab dem §45a/§39 ihre Monats-/Jahresansammlung zählen. Er wurde
+ * historisch je nach Pfad unterschiedlich, falsch oder gar nicht persistiert.
+ * Seit Task #1204 wird er NICHT mehr gespeichert, sondern zur LAUFZEIT pro Topf
+ * aus der Pflegegrad-Historie abgeleitet (siehe
+ * `server/storage/budget/allocation-storage.ts`).
  *
- * Diese eine reine Funktion ersetzt alle pfad-eigenen Kopien. Sie leitet den
- * Anker AUSSCHLIESSLICH aus der Pflegegrad-Historie ab — es gibt keinen
- * manuellen Anker mehr (R4).
+ * Diese eine reine Funktion ist die SSoT-Definition der Anker-Regeln R1–R3. Sie
+ * leitet den Anker AUSSCHLIESSLICH aus der Pflegegrad-Historie ab — es gibt
+ * keinen manuellen Anker mehr (R4).
  *
  * Regeln:
  *  - **R1 (Neuanlage):** Anker = `max(frühester pflegegradSeit, 01.01. des

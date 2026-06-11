@@ -91,7 +91,7 @@ describe("Series-Exception Auto-Rebook (Task #627)", () => {
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: true,
-      preferences: { budgetStartDate: "2024-01-01" },
+      pflegegradSeit: "2024-01-01",
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false },

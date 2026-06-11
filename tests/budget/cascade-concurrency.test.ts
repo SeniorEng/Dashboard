@@ -45,7 +45,7 @@ describe("Race — paralleler Cascade-Consume (Task #494)", () => {
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate },
+      pflegegradSeit: budgetStartDate,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: 0 },
         { type: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },

@@ -41,7 +41,7 @@ describe("Equality §39/§42a — initial_balance + yearlyLimitCents Dedup (Task
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: startOfYear },
+      pflegegradSeit: startOfYear,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: false },
         { type: "umwandlung_45a", priority: 2, enabled: false },

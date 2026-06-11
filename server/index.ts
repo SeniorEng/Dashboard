@@ -453,13 +453,14 @@ async function runStartupTasks() {
       log(`Drift-Spaltentyp-Reconciliation fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #856 — customer_budget_preferences.budget_start_date_origin (Herkunft
-    // des §45b-Ankers: derived_pflegegrad → kappen, manual → nie kappen).
-    const { ensureBudgetStartDateOrigin } = await import("./startup/ensure-budget-start-date-origin");
+    // Task #1204 — customer_budget_preferences.budget_start_date(_origin)
+    // entfernt: der Anker wird zur Laufzeit pro Topf aus der Pflegegrad-Historie
+    // abgeleitet, nicht mehr persistiert.
+    const { dropBudgetStartDateColumns } = await import("./startup/drop-budget-start-date-columns");
     try {
-      await ensureBudgetStartDateOrigin();
+      await dropBudgetStartDateColumns();
     } catch (err) {
-      log(`Budget-Start-Date-Origin-Migration fehlgeschlagen: ${err}`, "startup");
+      log(`Budget-Start-Date-Spalten-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #819 — Import-Batch-Tabelle + import_batch_id-Spalten.

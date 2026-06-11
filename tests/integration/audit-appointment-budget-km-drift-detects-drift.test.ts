@@ -76,7 +76,7 @@ describe("Task #628 — Boot-Audit meldet vorhandene km-Drift", () => {
       pflegegrad: 3,
       billingType: "pflegekasse_gesetzlich",
       acceptsPrivatePayment: false,
-      preferences: { budgetStartDate: budgetStart },
+      pflegegradSeit: budgetStart,
       types: [
         { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: null },
         { type: "umwandlung_45a", priority: 2, enabled: false },

@@ -11,12 +11,12 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
-import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, earliest45bRelevantAnchor, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
+import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
 import { formatEuroDE } from "@shared/utils/money";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
-import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
+import { readBudgetTypeSettings } from "./preferences-storage";
 import {
   carryoverWindowFor,
   buildCarryoverDedupSets,
@@ -417,15 +417,14 @@ export async function calculateAllocatedCents(
 ): Promise<number> {
   const d = _tx ?? db;
   const typeSettings = _typeSettings ?? await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }, _tx);
-  const preferences = _preferences !== undefined ? _preferences : await getBudgetPreferences(customerId, _tx);
 
   let calculated = 0;
   if (budgetType === "entlastungsbetrag_45b") {
-    calculated = await calculateAllocated45b(customerId, opts, d, preferences, typeSettings);
+    calculated = await calculateAllocated45b(customerId, opts, d, typeSettings);
   } else if (budgetType === "umwandlung_45a") {
-    calculated = await calculateAllocated45a(customerId, opts, d, preferences, typeSettings);
+    calculated = await calculateAllocated45a(customerId, opts, d, typeSettings);
   } else if (budgetType === "ersatzpflege_39_42a") {
-    calculated = await calculateAllocated39_42a(customerId, opts, d, preferences, typeSettings);
+    calculated = await calculateAllocated39_42a(customerId, opts, d, typeSettings);
   }
 
   const manualAdjustments = await budgetAllocationsRepo.selectFrom(d)
@@ -464,7 +463,8 @@ export async function calculateAllocatedCents(
  * pro Aufruf rein **rechnerisch** ermittelt:
  *
  *   1. Bestimme `allocStartYear/Month` (Startpunkt der Aufstockung) aus:
- *      - `preferences.budgetStartDate`,
+ *      - dem zur Laufzeit aus der Pflegegrad-Historie abgeleiteten Anker
+ *        (`earliestCareLevelStart`, §45b auf das laufende Jahr gebodet),
  *      - frühestem `initial_balance.validFrom`,
  *      - frühestem persistierten `monthly_auto`/`monthly`/`carryover`,
  *      - bzw. `s45b.validFrom` (überschreibt nach oben).
@@ -519,7 +519,6 @@ async function calculateAllocated45b(
   customerId: number,
   opts: { year?: number; asOfDate?: string; projectFuture?: boolean },
   d: Pick<typeof db, 'select'>,
-  preferences: CustomerBudgetPreferences | undefined,
   typeSettings: CustomerBudgetTypeSetting[]
 ): Promise<number> {
   const { year: curYear, month: curMonth } = currentYearAndMonth();
@@ -539,19 +538,26 @@ async function calculateAllocated45b(
     ))
     .orderBy(asc(customerBudgetTypeSettings.validFrom));
 
-  let budgetStartDate = preferences?.budgetStartDate ?? null;
-  // Task #860 — §45b-Onboarding-Baseline: Ein automatisch aus dem Pflegegrad-
-  // Beginn abgeleiteter Anker (Origin 'derived_pflegegrad', vom Wizard/
-  // initial-budget gesetzt) wird auf den 1.1. des LAUFENDEN Jahres gebodet. Das
-  // Vorjahr gilt beim Onboarding als aufgebraucht (Default-Übertrag 0 €) — es
-  // wird also weder ein voller Vorjahres-Anspruch gutgeschrieben noch ein
-  // automatischer Vorjahres-Carryover fabriziert (der sonst zum 30.06. mit
-  // sichtbarem Write-off verfiele). Ein manuell gesetzter Anker ('manual') und
-  // Altbestand (NULL) bleiben unangetastet — manuell gewinnt immer. Identisch in
-  // `ensureYearlyCarryover45b` und im /initial-budget-§45b-Write, sonst driften
-  // Summe und Carryover-Anlage.
-  if (budgetStartDate && preferences?.budgetStartDateOrigin === "derived_pflegegrad") {
-    budgetStartDate = floorAutoAnchor45bToCurrentYear(budgetStartDate, curYear);
+  // Task #1204 — §45b-Anker wird zur Laufzeit aus der Pflegegrad-Historie
+  // abgeleitet (kein persistierter `budget_start_date` mehr) und auf den 1.1.
+  // des LAUFENDEN Jahres gebodet (Onboarding-Baseline, Task #860): das Vorjahr
+  // gilt als aufgebraucht, es wird kein automatischer Vorjahres-Übertrag
+  // fabriziert. Identisch in `ensureYearlyCarryover45b` und im
+  // /initial-budget-§45b-Pfad. Die Allokations-Fallbacks unten greifen nur,
+  // wenn KEINE Pflegegrad-Historie existiert.
+  let budgetStartDate: string | null = null;
+  // Task #724 — Der automatisch aus der Pflegegrad-Historie abgeleitete Anker
+  // darf den Eligibility-Gate NICHT umgehen: §45b akkumuliert nur, wenn der
+  // Topf in mindestens einer Phase aktiviert ist. Ein Pflegekasse-Kunde MIT
+  // Pflegegrad-Historie, aber OHNE §45b-Einrichtung (kein type-setting) zeigte
+  // sonst einen Phantom-Topf — 131 €/Monat ist ein fixer statutorischer Betrag,
+  // anders als §45a greift hier KEIN `monthlyAmount==0`-Schutz. Echte
+  // persistierte Mittel (initial_balance/monthly/carryover) ankern weiterhin
+  // unabhängig vom Gate über die Fallbacks unten.
+  const s45bEnabled = all45bSettings.some(s => s.enabled);
+  const pgStart = await earliestCareLevelStart(customerId, d);
+  if (pgStart && s45bEnabled) {
+    budgetStartDate = floorAutoAnchor45bToCurrentYear(pgStart, curYear);
   }
 
   if (!budgetStartDate) {
@@ -583,17 +589,9 @@ async function calculateAllocated45b(
     // verschwände komplett. Wir prüfen daher gegen ALLE §45b-Zeilen
     // (`all45bSettings`, datumsunabhängig). Das Windowing übernimmt weiterhin
     // der allocStart/end-Shift weiter unten (validFrom/validTo-Klammer).
-    const s45bEnabled = all45bSettings.some(s => s.enabled);
     if (!s45bEnabled) return 0;
-    // Task #856 — Auto-Fallback (Kunde ohne expliziten Budget-Start): Anker am
-    // Pflegegrad-Beginn, aber NUR innerhalb des laufenden Jahres. Ein weit
-    // zurückliegender Pflegegrad fabriziert KEINEN Vorjahres-Übertrag (das
-    // Vorjahres-Fenster bleibt den expliziten Pfaden vorbehalten). Identisch in
-    // `ensureYearlyCarryover45b`, sonst driften Summe und Carryover-Anlage.
-    const pgStart = await earliestCareLevelStart(customerId, d);
-    budgetStartDate = pgStart
-      ? floorAutoAnchor45bToCurrentYear(pgStart, curYear)
-      : `${curYear}-01-01`;
+    // Task #1204 — kein Pflegegrad und keine Allokation: Jahresanfang als Anker.
+    budgetStartDate = `${curYear}-01-01`;
   }
 
   const startDate = parseLocalDate(budgetStartDate);
@@ -867,12 +865,14 @@ async function calculateAllocated45a(
   customerId: number,
   opts: { year?: number; asOfDate?: string },
   d: Pick<typeof db, 'select'>,
-  preferences: CustomerBudgetPreferences | undefined,
   typeSettings: CustomerBudgetTypeSetting[]
 ): Promise<number> {
   const { year: curYear, month: curMonth } = currentYearAndMonth();
 
-  let startDateStr = preferences?.budgetStartDate ?? null;
+  // Task #1204 — Anker = roher (ungekappter) Pflegegrad-Beginn zur Laufzeit
+  // statt eines persistierten `budget_start_date`. §45a/§39 lesen den
+  // ungekappten Beginn; die setting.validFrom-Klammer unten begrenzt vorwärts.
+  let startDateStr: string | null = await earliestCareLevelStart(customerId, d);
 
   const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
@@ -997,12 +997,12 @@ async function calculateAllocated39_42a(
   customerId: number,
   opts: { year?: number; asOfDate?: string },
   d: Pick<typeof db, 'select'>,
-  preferences: CustomerBudgetPreferences | undefined,
   typeSettings: CustomerBudgetTypeSetting[]
 ): Promise<number> {
   const { year: curYear } = currentYearAndMonth();
 
-  let startDateStr = preferences?.budgetStartDate ?? null;
+  // Task #1204 — Anker = roher (ungekappter) Pflegegrad-Beginn zur Laufzeit.
+  let startDateStr: string | null = await earliestCareLevelStart(customerId, d);
 
   if (!startDateStr) {
     const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
@@ -1129,7 +1129,6 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     })),
   );
 
-  const preferences = await getBudgetPreferences(customerId, _tx);
   const typeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: todayISO() }, _tx);
 
   const allAllocations = await budgetAllocationsRepo.selectFrom(d)
@@ -1141,15 +1140,17 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
 
   let eligibilityStartYear = curYear;
 
-  let budgetStartDate = preferences?.budgetStartDate ?? null;
-  // Task #860 — §45b-Onboarding-Baseline, identisch zu `calculateAllocated45b`:
-  // ein abgeleiteter Anker ('derived_pflegegrad') wird auf den 1.1. des laufenden
-  // Jahres gebodet, damit `eligibilityStartYear` = curYear bleibt und KEIN
-  // automatischer Vorjahres-Übertrag mehr erzeugt wird (Vorjahr gilt beim
-  // Onboarding als aufgebraucht; nur operator-erfasste Überträge zählen).
-  // Manuell ('manual') und Altbestand (NULL) bleiben unangetastet.
-  if (budgetStartDate && preferences?.budgetStartDateOrigin === "derived_pflegegrad") {
-    budgetStartDate = floorAutoAnchor45bToCurrentYear(budgetStartDate, curYear);
+  // Task #1204 — §45b-Anker zur Laufzeit aus der Pflegegrad-Historie, auf das
+  // laufende Jahr gebodet (Onboarding-Baseline, Task #860). Identisch zu
+  // `calculateAllocated45b`, sonst driften Summe und Carryover-Anlage.
+  let budgetStartDate: string | null = null;
+  // Task #724 — Eligibility-Gate wie in `calculateAllocated45b`: der Auto-Anker
+  // aus der Pflegegrad-Historie darf nur greifen, wenn §45b aktiviert ist, sonst
+  // legte ein nie eingerichteter Topf einen Phantom-Anker an.
+  const s45bEnabledCarry = !!typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+  const pgStartCarry = await earliestCareLevelStart(customerId, d);
+  if (pgStartCarry && s45bEnabledCarry) {
+    budgetStartDate = floorAutoAnchor45bToCurrentYear(pgStartCarry, curYear);
   }
   if (!budgetStartDate) {
     const ibEntries = allAllocations.filter(a => a.source === "initial_balance" && a.validFrom);
@@ -1166,16 +1167,13 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     }
   }
   if (!budgetStartDate) {
-    const s45bEnabled = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-    if (!s45bEnabled) return [];
-    // Task #856 — Auto-Fallback identisch zu `calculateAllocated45b`: Anker am
-    // Pflegegrad-Beginn, aber NUR im laufenden Jahr. Kein automatischer Vorjahres-
-    // Übertrag für nie eingerichtete Kunden (sonst driften Summe und Carryover-
-    // Anlage UND der Auto-Pfad materialisiert 12 × 131 € ohne fachliche Grundlage).
-    const pgStart = await earliestCareLevelStart(customerId, d);
-    budgetStartDate = pgStart
-      ? floorAutoAnchor45bToCurrentYear(pgStart, curYear)
-      : `${curYear}-01-01`;
+    if (!s45bEnabledCarry) return [];
+    // Task #856 — Auto-Fallback identisch zu `calculateAllocated45b`: ohne
+    // Pflegegrad-Historie (pgStartCarry == null) und ohne Allokation ankern wir
+    // auf den 1.1. des laufenden Jahres. Kein automatischer Vorjahres-Übertrag
+    // für nie eingerichtete Kunden (sonst driften Summe und Carryover-Anlage UND
+    // der Auto-Pfad materialisiert 12 × 131 € ohne fachliche Grundlage).
+    budgetStartDate = `${curYear}-01-01`;
   }
   eligibilityStartYear = parseLocalDate(budgetStartDate).getFullYear();
 
@@ -1288,7 +1286,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   for (const year of yearsToProcess) {
     const targetYear = year + 1;
 
-    const yearAllocatedCents = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year }, _tx, preferences, typeSettings);
+    const yearAllocatedCents = await calculateAllocatedCents(customerId, "entlastungsbetrag_45b", { year }, _tx, undefined, typeSettings);
 
     const carryoverIntoThisYear = carryoverAllocations.filter(a => a.year === year);
     const totalCarryoverIn = carryoverIntoThisYear.reduce((sum, a) => sum + a.amountCents, 0);

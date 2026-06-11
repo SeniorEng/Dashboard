@@ -35,8 +35,6 @@ export async function upsertBudgetPreferences(preferences: InsertBudgetPreferenc
     const result = await d.update(customerBudgetPreferences)
       .set({
         monthlyLimitCents: preferences.monthlyLimitCents,
-        budgetStartDate: preferences.budgetStartDate,
-        budgetStartDateOrigin: preferences.budgetStartDateOrigin,
         notes: preferences.notes,
         updatedAt: sql`now()`,
       })
