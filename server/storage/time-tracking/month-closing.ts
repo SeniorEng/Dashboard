@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, inArray, isNull, or, asc, notInArray, count, sql as sqlBuilder } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, isNull, asc, notInArray, count, sql as sqlBuilder } from "drizzle-orm";
 import {
   appointments,
   customers,
@@ -7,7 +7,12 @@ import {
   users,
 } from "@shared/schema";
 import { db, type DbOrTx } from "../../lib/db";
-import { employeeVisibleAppointmentsFilter } from "../appointment-helpers";
+import {
+  employeeMonthClosingResponsibilityFilter,
+  employeesMonthClosingResponsibilityFilter,
+  monthClosingResponsibilityCoalesce,
+} from "../appointment-helpers";
+import { appointmentCompletedButUnsignedCondition } from "../../lib/appointment-signed";
 import { monthDateRange } from "./shared";
 import { appointmentsRepo, employeeTimeEntriesRepo } from "../../repos";
 
@@ -31,7 +36,7 @@ export async function isMonthClosed(userId: number, dateStr: string): Promise<bo
 
 export async function getMonthClosingReadiness(userId: number, year: number, month: number) {
   const { startDate, endDate } = monthDateRange(year, month);
-  const employeeFilter = employeeVisibleAppointmentsFilter(userId);
+  const employeeFilter = employeeMonthClosingResponsibilityFilter(userId);
 
   const openAppointments = await appointmentsRepo.selectColumnsFrom({
       id: appointments.id,
@@ -68,8 +73,7 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        eq(appointments.status, "completed"),
-        isNull(appointments.signatureData),
+        appointmentCompletedButUnsignedCondition(),
       ),
     )
     .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
@@ -129,9 +133,11 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
 
   const employeeIds = activeEmployees.map(e => e.id);
 
+  const responsibilityMembership = employeesMonthClosingResponsibilityFilter(employeeIds);
+
   const [allOpenAppts, allUnsignedAppts, allTimeEntryCounts, allCompletedCounts, allClosings] = await Promise.all([
     appointmentsRepo.selectColumnsFrom({
-        employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
+        employeeId: monthClosingResponsibilityCoalesce().as('employee_id'),
         id: appointments.id,
         date: appointments.date,
         scheduledStart: appointments.scheduledStart,
@@ -146,23 +152,13 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
           notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
-          or(
-            inArray(appointments.assignedEmployeeId, employeeIds),
-            and(
-              isNull(appointments.assignedEmployeeId),
-              or(
-                inArray(customers.primaryEmployeeId, employeeIds),
-                inArray(customers.backupEmployeeId, employeeIds),
-                inArray(customers.backupEmployeeId2, employeeIds),
-              ),
-            ),
-          ),
+          responsibilityMembership,
         ),
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart)),
 
     appointmentsRepo.selectColumnsFrom({
-        employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
+        employeeId: monthClosingResponsibilityCoalesce().as('employee_id'),
         id: appointments.id,
         date: appointments.date,
         scheduledStart: appointments.scheduledStart,
@@ -176,19 +172,8 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
-          eq(appointments.status, "completed"),
-          isNull(appointments.signatureData),
-          or(
-            inArray(appointments.assignedEmployeeId, employeeIds),
-            and(
-              isNull(appointments.assignedEmployeeId),
-              or(
-                inArray(customers.primaryEmployeeId, employeeIds),
-                inArray(customers.backupEmployeeId, employeeIds),
-                inArray(customers.backupEmployeeId2, employeeIds),
-              ),
-            ),
-          ),
+          appointmentCompletedButUnsignedCondition(),
+          responsibilityMembership,
         ),
       )
       .orderBy(asc(appointments.date), asc(appointments.scheduledStart)),
@@ -208,7 +193,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
       .groupBy(employeeTimeEntries.userId),
 
     appointmentsRepo.selectColumnsFrom({
-        employeeId: sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`.as('employee_id'),
+        employeeId: monthClosingResponsibilityCoalesce().as('employee_id'),
         count: count(),
       }, db)
       .innerJoin(customers, eq(appointments.customerId, customers.id))
@@ -218,20 +203,10 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
           inArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
-          or(
-            inArray(appointments.assignedEmployeeId, employeeIds),
-            and(
-              isNull(appointments.assignedEmployeeId),
-              or(
-                inArray(customers.primaryEmployeeId, employeeIds),
-                inArray(customers.backupEmployeeId, employeeIds),
-                inArray(customers.backupEmployeeId2, employeeIds),
-              ),
-            ),
-          ),
+          responsibilityMembership,
         ),
       )
-      .groupBy(sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`),
+      .groupBy(monthClosingResponsibilityCoalesce()),
 
     db
       .select()

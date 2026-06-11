@@ -1,13 +1,18 @@
 /**
- * Task #1119 — Regressionsschutz: Der automatische Monatsabschluss überschreibt
- * KEINEN Termin-Status mehr auf `expired_unsigned`.
+ * Task #1119 / #1172 — Regressionsschutz: Der automatische Monatsabschluss
+ * überschreibt KEINEN Termin-Status (insbesondere nicht auf `expired_unsigned`).
  *
  * Die Periodensperre hängt allein an `employee_month_closings`. „Nicht
- * abgerechnet" ist ein abgeleitetes Anzeige-Label und wird zur Laufzeit über
- * `deriveAppointmentDisplayStatus` erzeugt — nie persistiert. Dieser Test
- * stellt sicher, dass ein nicht dokumentiert+unterschriebener Termin nach dem
- * Auto-Close unverändert seinen wahren Lebenszyklus-Status behält und der
- * Monat dennoch geschlossen wird.
+ * abgerechnet" ist ein abgeleitetes Anzeige-Label (`deriveAppointmentDisplayStatus`)
+ * und wird NIE persistiert.
+ *
+ * Task #1172 verschärft zusätzlich die Policy: Ein nicht dokumentiert+
+ * unterschriebener (hier: offener) Termin BLOCKIERT den automatischen Abschluss
+ * und wird an die Geschäftsführung eskaliert — identische Entscheidung wie beim
+ * manuellen Admin-Close. Dieser Test stellt sicher, dass dabei
+ *   (1) der Termin-Status unverändert bleibt (kein Schreibvorgang),
+ *   (2) KEINE Periodensperre geschrieben wird (Monat bleibt offen),
+ *   (3) eine Eskalation (`month_auto_close_blocked`) protokolliert wird.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
@@ -32,10 +37,10 @@ async function getSeededServiceId(): Promise<number> {
 const TARGET_YEAR = 2023;
 const TARGET_MONTH = 3;
 
-describe("Task #1119: Auto-Close überschreibt keinen Termin-Status", () => {
+describe("Task #1119/#1172: Auto-Close überschreibt keinen Termin-Status", () => {
   let customerId: number;
   let employeeId: number;
-  let appointmentId: number;
+  let openAppointmentId: number;
 
   beforeAll(async () => {
     const customer = await createTestCustomer();
@@ -45,15 +50,27 @@ describe("Task #1119: Auto-Close überschreibt keinen Termin-Status", () => {
     employeeId = employee.id;
     await assignEmployeeToCustomer(customerId, employeeId);
 
-    const { appointmentId: aId } = await createAndDocumentAppointment(
-      customerId,
-      serviceId,
-      { assignedEmployeeId: employeeId },
-    );
-    appointmentId = aId;
+    // Aktivität im Zielmonat: ein completed+unterschriebener Termin macht den
+    // Mitarbeiter überhaupt erst zum Abschluss-Kandidaten (Aktivitäts-Gate).
+    const signed = await createAndDocumentAppointment(customerId, serviceId, {
+      assignedEmployeeId: employeeId,
+      date: `${TARGET_YEAR}-0${TARGET_MONTH}-10`,
+    });
+    await db.execute(sql`
+      UPDATE appointments
+      SET performed_by_employee_id = ${employeeId},
+          assigned_employee_id = ${employeeId},
+          signature_data = 'data:image/png;base64,NOOVERWRITE_SIGNED'
+      WHERE id = ${signed.appointmentId}
+    `);
 
-    // Termin in den Zielmonat verschieben, dem Mitarbeiter zuordnen und sicher
-    // in den Status `documenting` (nicht dokumentiert+unterschrieben) bringen.
+    // Blocker: ein offener (nicht abgeschlossener) Termin, der den Auto-Close
+    // blockieren MUSS — und dessen Status NICHT überschrieben werden darf.
+    const open = await createAndDocumentAppointment(customerId, serviceId, {
+      assignedEmployeeId: employeeId,
+      date: `${TARGET_YEAR}-0${TARGET_MONTH}-15`,
+    });
+    openAppointmentId = open.appointmentId;
     await db.execute(sql`
       UPDATE appointments
       SET date = ${`${TARGET_YEAR}-0${TARGET_MONTH}-15`},
@@ -61,7 +78,7 @@ describe("Task #1119: Auto-Close überschreibt keinen Termin-Status", () => {
           signature_data = NULL,
           performed_by_employee_id = ${employeeId},
           assigned_employee_id = ${employeeId}
-      WHERE id = ${appointmentId}
+      WHERE id = ${openAppointmentId}
     `);
   });
 
@@ -69,21 +86,30 @@ describe("Task #1119: Auto-Close überschreibt keinen Termin-Status", () => {
     await cleanupCustomer(customerId);
   });
 
-  it("schließt den Monat, lässt den Termin-Status aber unangetastet", async () => {
+  it("blockiert+eskaliert statt zu schließen und lässt den Termin-Status unangetastet", async () => {
     const cutoff = computeMonthCloseCutoff(TARGET_YEAR, TARGET_MONTH);
     const result = await autoCloseMonthForCutoff(cutoff);
 
     expect(result.skipped).toBe(false);
 
-    // Termin-Status bleibt der wahre Lebenszyklus-Status — NICHT expired_unsigned.
-    const statusRes = await db.execute(sql`SELECT status FROM appointments WHERE id = ${appointmentId}`);
+    // (1) Termin-Status bleibt der wahre Lebenszyklus-Status — NICHT expired_unsigned.
+    const statusRes = await db.execute(sql`SELECT status FROM appointments WHERE id = ${openAppointmentId}`);
     expect((statusRes.rows?.[0] as { status: string }).status).toBe("documenting");
 
-    // Die Periodensperre wurde gesetzt (employee_month_closings-Zeile existiert).
+    // (2) KEINE Periodensperre geschrieben — der Monat bleibt offen.
     const closingRes = await db.execute(sql`
       SELECT 1 FROM employee_month_closings
       WHERE user_id = ${employeeId} AND year = ${TARGET_YEAR} AND month = ${TARGET_MONTH}
     `);
-    expect(closingRes.rows.length).toBe(1);
+    expect(closingRes.rows.length).toBe(0);
+
+    // (3) Eskalation protokolliert.
+    const auditRes = await db.execute(sql`
+      SELECT COUNT(*)::int AS c FROM audit_log
+      WHERE action = 'month_auto_close_blocked'
+        AND entity_type = 'month_closing'
+        AND entity_id = ${employeeId}
+    `);
+    expect(Number((auditRes.rows?.[0] as { c: number }).c)).toBeGreaterThan(0);
   });
 });

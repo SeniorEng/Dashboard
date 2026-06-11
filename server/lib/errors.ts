@@ -60,6 +60,10 @@ export function forbidden(error: string, message: string): AppError {
   return new AppError(403, ErrorCodes.FORBIDDEN, message, error);
 }
 
+export function conflict(error: string, message: string): AppError {
+  return new AppError(409, ErrorCodes.CONFLICT, message, error);
+}
+
 type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<any>;
 
 function extractUserFriendlyDbError(error: unknown): string | null {

@@ -38,6 +38,41 @@ export function employeeWorkedAppointmentsFilter(userId: number): SQL {
   return sqlBuilder`(${appointments.assignedEmployeeId} = ${userId} OR ${appointments.performedByEmployeeId} = ${userId})`;
 }
 
+/**
+ * SSoT-Attribution für den Monatsabschluss (Task #1172).
+ *
+ * Genau EIN Mitarbeiter ist für einen Termin im Monatsabschluss
+ * „verantwortlich": der durchführende Mitarbeiter (`performedByEmployeeId`),
+ * sonst der zugewiesene (`assignedEmployeeId`), sonst der Primärbetreuer des
+ * Kunden (`primaryEmployeeId`).
+ *
+ * WICHTIG — eine bewusste Linie für Vertretungen (Backups):
+ *   Backup-Mitarbeiter sind NICHT für den Monatsabschluss verantwortlich, es
+ *   sei denn sie haben den Termin tatsächlich durchgeführt (→ performedBy) oder
+ *   wurden ihm direkt zugewiesen (→ assigned). Das hält Auto-Close, Admin-Close,
+ *   Batch-Close, Banner und Reminder auf EINER konsistenten Linie.
+ *
+ * Da sowohl der Einzel-Filter (`= userId`) als auch das Batch-Grouping über
+ * EXAKT diesen COALESCE-Ausdruck laufen, sind Einzel- und Batch-Readiness per
+ * Konstruktion deckungsgleich.
+ *
+ * Vorausgesetzt: die `customers`-Tabelle ist gejoint.
+ */
+export function monthClosingResponsibilityCoalesce(): SQL {
+  return sqlBuilder`COALESCE(${appointments.performedByEmployeeId}, ${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`;
+}
+
+/** Einzel-Filter „dieser Mitarbeiter ist für den Termin verantwortlich". */
+export function employeeMonthClosingResponsibilityFilter(userId: number): SQL {
+  return sqlBuilder`${monthClosingResponsibilityCoalesce()} = ${userId}`;
+}
+
+/** Batch-Filter „die Verantwortung liegt bei einem dieser Mitarbeiter". */
+export function employeesMonthClosingResponsibilityFilter(userIds: number[]): SQL {
+  const ids = sqlBuilder.join(userIds.map((id) => sqlBuilder`${id}`), sqlBuilder`, `);
+  return sqlBuilder`${monthClosingResponsibilityCoalesce()} IN (${ids})`;
+}
+
 const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
 
 // Derived from appointment_services + services.lohnart_kategorie. Returns the

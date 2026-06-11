@@ -3,9 +3,7 @@ import { db } from "../lib/db";
 import {
   appointments,
   auditLog,
-  customers,
   employeeMonthClosings,
-  employeeTimeEntries,
   users,
 } from "@shared/schema";
 import { log } from "../lib/log";
@@ -16,16 +14,15 @@ import {
   previousMonth,
 } from "@shared/utils/month-close-cutoff";
 import { auditService } from "./audit";
-import { createNotification } from "../storage/notifications";
+import { createNotification, hasRecentNotification } from "../storage/notifications";
 import { notificationService } from "./notification-service";
 import { storage } from "../storage";
+import { timeTrackingStorage } from "../storage/time-tracking";
 import { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC } from "./email-service";
 import { ensureMonthClosingTask, completeMonthClosingTask } from "../storage/tasks";
-import { appointmentsRepo, employeeTimeEntriesRepo } from "../repos";
-import {
-  appointmentCompletedButUnsignedCondition,
-  appointmentNotDocumentedAndSignedCondition,
-} from "../lib/appointment-signed";
+import { generateAutoBreaksForMonth, insertAutoBreaks } from "./auto-breaks";
+import { appointmentsRepo } from "../repos";
+import { appointmentNotDocumentedAndSignedCondition } from "../lib/appointment-signed";
 
 const POLL_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
@@ -84,78 +81,31 @@ interface EmployeeBlocker {
 }
 
 async function getEmployeesWithMonthBlockers(year: number, month: number): Promise<EmployeeBlocker[]> {
-  const { startDate, endDate } = monthDateRange(year, month);
-
-  const activeEmployees = await db
-    .select({
-      id: users.id,
-      displayName: users.displayName,
-      email: users.email,
-    })
-    .from(users)
-    .where(and(eq(users.isActive, true), eq(users.isAdmin, false)));
-
-  if (activeEmployees.length === 0) return [];
-  const employeeIds = activeEmployees.map((e) => e.id);
-
-  // Reminders are attributed to the assigned employee, or — if no assignment
-  // exists — to the customer's primary employee. Backup employees do NOT
-  // receive month-close reminders because they are not responsible for
-  // documenting the appointment; they only serve as fallback contacts.
-  const employeeOr = or(
-    inArray(appointments.assignedEmployeeId, employeeIds),
-    and(
-      isNull(appointments.assignedEmployeeId),
-      inArray(customers.primaryEmployeeId, employeeIds),
-    ),
+  // Task #1172: Reminder-Blocker werden aus der EINEN geteilten Readiness-Definition
+  // abgeleitet (`getAdminMonthClosingReadiness`), nicht mehr aus paralleler SQL.
+  // Damit zählen Banner, Reminder, Auto-Close und Admin-Close exakt dieselben
+  // offenen/unsignierten Termine (inkl. LN-bewusster „unsigniert"-Definition und
+  // einheitlicher Verantwortlichkeits-Attribution).
+  const readiness = await timeTrackingStorage.getAdminMonthClosingReadiness(year, month);
+  const blocked = readiness.filter(
+    (e) => !e.isClosed && (e.openAppointments.length > 0 || e.unsignedAppointments.length > 0),
   );
+  if (blocked.length === 0) return [];
 
-  const openRows = await appointmentsRepo.selectColumnsFrom({
-      employeeId: sqlBuilder<number>`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`,
-      count: sqlBuilder<number>`COUNT(*)::int`,
-    }, db)
-    .innerJoin(customers, eq(appointments.customerId, customers.id))
-    .where(
-      and(
-        gte(appointments.date, startDate),
-        lte(appointments.date, endDate),
-        isNull(appointments.deletedAt),
-        notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
-        employeeOr,
-      ),
-    )
-    .groupBy(sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`);
+  const blockedIds = blocked.map((e) => e.userId);
+  const emailRows = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(inArray(users.id, blockedIds));
+  const emailMap = new Map(emailRows.map((r) => [r.id, r.email]));
 
-  const unsignedRows = await appointmentsRepo.selectColumnsFrom({
-      employeeId: sqlBuilder<number>`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`,
-      count: sqlBuilder<number>`COUNT(*)::int`,
-    }, db)
-    .innerJoin(customers, eq(appointments.customerId, customers.id))
-    .where(
-      and(
-        gte(appointments.date, startDate),
-        lte(appointments.date, endDate),
-        isNull(appointments.deletedAt),
-        appointmentCompletedButUnsignedCondition(),
-        employeeOr,
-      ),
-    )
-    .groupBy(sqlBuilder`COALESCE(${appointments.assignedEmployeeId}, ${customers.primaryEmployeeId})`);
-
-  const openMap = new Map<number, number>();
-  for (const row of openRows) openMap.set(Number(row.employeeId), Number(row.count));
-  const unsignedMap = new Map<number, number>();
-  for (const row of unsignedRows) unsignedMap.set(Number(row.employeeId), Number(row.count));
-
-  return activeEmployees
-    .map((e) => ({
-      userId: e.id,
-      displayName: e.displayName,
-      email: e.email,
-      openCount: openMap.get(e.id) ?? 0,
-      unsignedCount: unsignedMap.get(e.id) ?? 0,
-    }))
-    .filter((e) => e.openCount > 0 || e.unsignedCount > 0);
+  return blocked.map((e) => ({
+    userId: e.userId,
+    displayName: e.displayName,
+    email: emailMap.get(e.userId) ?? null,
+    openCount: e.openAppointments.length,
+    unsignedCount: e.unsignedAppointments.length,
+  }));
 }
 
 async function findSystemActorId(): Promise<number | null> {
@@ -184,23 +134,23 @@ async function findSystemActorId(): Promise<number | null> {
   return any[0]?.id ?? null;
 }
 
-export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: number; expired: number; skipped: boolean }> {
+export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: number; expired: number; blocked: number; skipped: boolean }> {
   const { year, month } = previousMonth(today);
   if (!isCutoffDay(today, year, month)) {
-    return { closed: 0, expired: 0, skipped: true };
+    return { closed: 0, expired: 0, blocked: 0, skipped: true };
   }
 
   const systemActorId = await findSystemActorId();
   if (systemActorId === null) {
     log("Auto-Close übersprungen: Kein Superadmin/Admin gefunden", "month-close");
-    return { closed: 0, expired: 0, skipped: true };
+    return { closed: 0, expired: 0, blocked: 0, skipped: true };
   }
 
   const { startDate, endDate } = monthDateRange(year, month);
 
   // Task #1119: Der Monatsabschluss überschreibt KEINEN Termin-Status mehr auf
-  // `expired_unsigned`. Die Periodensperre hängt allein an `employee_month_closings`
-  // (Step 2). „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label
+  // `expired_unsigned`. Die Periodensperre hängt allein an `employee_month_closings`.
+  // „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label
   // (`deriveAppointmentDisplayStatus`), kein gespeicherter Status.
   //
   // Wir ermitteln die Zahl der nicht dokumentiert+unterschriebenen Termine nur noch
@@ -217,106 +167,109 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
     );
   const expiredCount = Number(expiredAgg?.count ?? 0);
 
-  // Step 2: Close month for each active employee with activity in prev month
-  const activeEmployees = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.isActive, true), eq(users.isAdmin, false)));
+  // Task #1172: Auto-Close nutzt EXAKT dieselbe Readiness-Definition wie der
+  // manuelle Admin-/Batch-Abschluss (`getAdminMonthClosingReadiness`). Damit ist
+  // die Abschluss-Entscheidung pro Mitarbeiter zwischen Auto-, Admin- und
+  // Batch-Pfad per Konstruktion identisch (gleiche Aktivitäts-, Offen- und
+  // LN-bewusste „unsigniert"-Logik, gleiche Verantwortlichkeits-Attribution).
+  const readiness = await timeTrackingStorage.getAdminMonthClosingReadiness(year, month);
+
+  // Admins/Superadmins, die bei blockiertem Auto-Close zur manuellen Prüfung
+  // eskaliert werden (lazy geladen, nur wenn tatsächlich ein Blocker auftritt).
+  let cachedAdminIds: number[] | null = null;
+  const loadAdminIds = async (): Promise<number[]> => {
+    if (cachedAdminIds === null) {
+      const rows = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.isActive, true), or(eq(users.isAdmin, true), eq(users.isSuperAdmin, true))));
+      cachedAdminIds = rows.map((r) => r.id);
+    }
+    return cachedAdminIds;
+  };
 
   let closedCount = 0;
+  let blockedCount = 0;
 
-  for (const emp of activeEmployees) {
-    const [hasTimeEntry] = await employeeTimeEntriesRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
-      .where(
-        and(
-          eq(employeeTimeEntries.userId, emp.id),
-          gte(employeeTimeEntries.entryDate, startDate),
-          lte(employeeTimeEntries.entryDate, endDate),
-          isNull(employeeTimeEntries.deletedAt),
-        ),
-      );
+  for (const emp of readiness) {
+    // Keine Aktivität im Vormonat → nichts abzuschließen.
+    if (!emp.hasTimeEntries) continue;
+    // Idempotent: bereits (nicht wieder geöffnet) geschlossen.
+    if (emp.isClosed) continue;
 
-    // Activity = appointment direkt zugewiesen / ausgeführt ODER unassigned
-    // Termin auf einem Kunden mit dieser Person als Primärbetreuung. Damit
-    // ist die Attribution konsistent mit Reminder-/Banner-Aggregation
-    // (assigned ∪ primary-fallback).
-    const [hasAppointment] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
-      .leftJoin(customers, eq(appointments.customerId, customers.id))
-      .where(
-        and(
-          gte(appointments.date, startDate),
-          lte(appointments.date, endDate),
-          isNull(appointments.deletedAt),
-          or(
-            eq(appointments.assignedEmployeeId, emp.id),
-            eq(appointments.performedByEmployeeId, emp.id),
-            and(
-              isNull(appointments.assignedEmployeeId),
-              eq(customers.primaryEmployeeId, emp.id),
-            ),
-          ),
-        ),
-      );
+    if (!emp.ready) {
+      // Task #1172 Policy: Eine fehlende Unterschrift (oder ein offener Termin)
+      // BLOCKIERT den automatischen Abschluss und wird an die Geschäftsführung
+      // eskaliert — identische Entscheidung+Begründung wie beim manuellen
+      // Admin-Close (der hier ebenfalls einen Fehler werfen würde).
+      blockedCount += 1;
 
-    const hasActivity = Number(hasTimeEntry?.count ?? 0) > 0 || Number(hasAppointment?.count ?? 0) > 0;
-    if (!hasActivity) continue;
-
-    // Idempotent: Skip if already closed (and not reopened)
-    const [existing] = await db
-      .select()
-      .from(employeeMonthClosings)
-      .where(
-        and(
-          eq(employeeMonthClosings.userId, emp.id),
-          eq(employeeMonthClosings.year, year),
-          eq(employeeMonthClosings.month, month),
-        ),
-      )
-      .limit(1);
-
-    if (existing && !existing.reopenedAt) continue;
-
-    await db.transaction(async (tx) => {
-      if (existing) {
-        await tx
-          .update(employeeMonthClosings)
-          .set({
-            closedAt: new Date(),
-            closedByUserId: systemActorId,
-            reopenedAt: null,
-            reopenedByUserId: null,
-          })
-          .where(eq(employeeMonthClosings.id, existing.id));
-      } else {
-        await tx.insert(employeeMonthClosings).values({
-          userId: emp.id,
+      await auditService.log(
+        systemActorId,
+        "month_auto_close_blocked",
+        "month_closing",
+        emp.userId,
+        {
           year,
           month,
-          closedByUserId: systemActorId,
-        });
-      }
+          autoClose: true,
+          openAppointments: emp.openAppointments.length,
+          unsignedAppointments: emp.unsignedAppointments.length,
+        },
+      );
 
-      await ensureMonthClosingTask(emp.id, month, year, tx);
-      await completeMonthClosingTask(emp.id, month, year, tx);
+      const adminIds = await loadAdminIds();
+      for (const adminId of adminIds) {
+        if (await hasRecentNotification(adminId, "month_auto_close_blocked", emp.userId)) continue;
+        try {
+          await createNotification({
+            userId: adminId,
+            type: "month_auto_close_blocked",
+            title: `Monatsabschluss blockiert: ${emp.displayName}`,
+            message: `${emp.displayName} konnte für ${month}/${year} nicht automatisch abgeschlossen werden (${emp.openAppointments.length} offene, ${emp.unsignedAppointments.length} unsignierte Termine). Bitte manuell prüfen und abschließen.`,
+            referenceType: "employee",
+            referenceId: emp.userId,
+          });
+        } catch (err) {
+          console.error("[month-close] Eskalations-Benachrichtigung fehlgeschlagen:", err);
+        }
+      }
+      continue;
+    }
+
+    // Ready → schließen, mit Parität zum Admin-/Batch-Close: Auto-Pausen
+    // generieren+einfügen, Closing schreiben, Aufgabe abschließen.
+    const existing = emp.closingId
+      ? await timeTrackingStorage.getMonthClosing(emp.userId, year, month)
+      : null;
+
+    const autoBreaks = await generateAutoBreaksForMonth(emp.userId, year, month);
+
+    const insertedCount = await db.transaction(async (tx) => {
+      const inserted = await insertAutoBreaks(emp.userId, autoBreaks, tx);
+      await timeTrackingStorage.closeMonth(emp.userId, year, month, systemActorId, existing?.id, tx);
+      await ensureMonthClosingTask(emp.userId, month, year, tx);
+      await completeMonthClosingTask(emp.userId, month, year, tx);
+      return inserted;
     });
 
     await auditService.log(
       systemActorId,
       "month_auto_closed",
       "month_closing",
-      emp.id,
-      { year, month, autoClose: true, expiredAppointmentsTotal: expiredCount },
+      emp.userId,
+      { year, month, autoClose: true, autoBreaksInserted: insertedCount, expiredAppointmentsTotal: expiredCount },
     );
 
     closedCount += 1;
   }
 
   log(
-    `Auto-Close für ${month}/${year}: ${closedCount} Mitarbeiter geschlossen, ${expiredCount} Termine nicht dokumentiert+unterschrieben (abgeleitet „Nicht abgerechnet", kein Status-Schreibvorgang)`,
+    `Auto-Close für ${month}/${year}: ${closedCount} Mitarbeiter geschlossen, ${blockedCount} blockiert+eskaliert, ${expiredCount} Termine nicht dokumentiert+unterschrieben (abgeleitet „Nicht abgerechnet", kein Status-Schreibvorgang)`,
     "month-close",
   );
 
-  return { closed: closedCount, expired: expiredCount, skipped: false };
+  return { closed: closedCount, expired: expiredCount, blocked: blockedCount, skipped: false };
 }
 
 type ReminderWave = "T-3" | "T-1" | "T-0";
@@ -452,46 +405,15 @@ export async function getMonthCloseBanner(userId: number): Promise<{
 } | null> {
   const today = todayBerlinIso();
   const { year, month } = previousMonth(today);
-  const { startDate, endDate } = monthDateRange(year, month);
   const cutoff = computeMonthCloseCutoff(year, month);
   const days = daysUntilCutoff(today, year, month);
 
-  const employeeFilter = or(
-    eq(appointments.assignedEmployeeId, userId),
-    eq(appointments.performedByEmployeeId, userId),
-    and(
-      isNull(appointments.assignedEmployeeId),
-      or(
-        eq(customers.primaryEmployeeId, userId),
-        eq(customers.backupEmployeeId, userId),
-        eq(customers.backupEmployeeId2, userId),
-      ),
-    ),
-  );
-
-  const [openCount] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
-    .innerJoin(customers, eq(appointments.customerId, customers.id))
-    .where(
-      and(
-        gte(appointments.date, startDate),
-        lte(appointments.date, endDate),
-        isNull(appointments.deletedAt),
-        notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
-        employeeFilter,
-      ),
-    );
-
-  const [unsignedCount] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
-    .innerJoin(customers, eq(appointments.customerId, customers.id))
-    .where(
-      and(
-        gte(appointments.date, startDate),
-        lte(appointments.date, endDate),
-        isNull(appointments.deletedAt),
-        appointmentCompletedButUnsignedCondition(),
-        employeeFilter,
-      ),
-    );
+  // Task #1172: Das Banner leitet offene/unsignierte Termine aus der EINEN
+  // geteilten Readiness-Definition ab (Mechanism A: `employee_month_closings`
+  // für „abgeschlossen" + `getMonthClosingReadiness` für die Blocker). Keine
+  // parallele Banner-eigene SQL mehr — Banner, Reminder und Abschluss zählen
+  // damit garantiert dasselbe.
+  const readiness = await timeTrackingStorage.getMonthClosingReadiness(userId, year, month);
 
   const [closing] = await db
     .select()
@@ -507,8 +429,8 @@ export async function getMonthCloseBanner(userId: number): Promise<{
 
   const isClosed = !!(closing && !closing.reopenedAt);
 
-  let open = Number(openCount?.count ?? 0);
-  let unsigned = Number(unsignedCount?.count ?? 0);
+  let open = readiness.openAppointments.length;
+  let unsigned = readiness.unsignedAppointments.length;
   let expired = 0;
 
   // Task #1119: „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label. Ist der

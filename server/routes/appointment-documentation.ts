@@ -6,7 +6,7 @@ import { documentAppointmentSchema, documentNoShowSchema, customers as customers
 import { appointmentService } from "../services/appointments";
 import { auditService } from "../services/audit";
 import { computeDataHash } from "../services/signature-integrity";
-import { asyncHandler, badRequest, notFound, forbidden, AppError, ErrorMessages } from "../lib/errors";
+import { asyncHandler, badRequest, notFound, forbidden, conflict, AppError, ErrorMessages } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { timeTrackingStorage } from "../storage/time-tracking";
@@ -56,11 +56,14 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
     toPolicyAppointment(appointment, { isLocked, isMonthClosed }),
   );
   if (!decision.allowed) {
+    // Task #1172: Termin auf einem unterschriebenen Leistungsnachweis → 409
+    // (Konflikt mit bestehendem signierten Dokument), abgeschlossener Monat → 403
+    // (Periodensperre). Beide Pfade haben dedizierte, unterscheidbare Texte.
     if (isLocked) {
-      throw forbidden("APPOINTMENT_LOCKED", decision.reason);
+      throw conflict("APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr geändert werden.");
     }
     if (isMonthClosed) {
-      throw forbidden("MONTH_CLOSED", decision.reason);
+      throw forbidden("MONTH_CLOSED", "Monat abgeschlossen: Dieser Termin liegt in einem bereits abgeschlossenen Monat und kann nur von der Geschäftsführung geändert werden.");
     }
     throw forbidden("ACCESS_DENIED", decision.reason);
   }
@@ -375,8 +378,9 @@ router.post("/:id/document-no-show", asyncHandler("Fehler beim Speichern der Ver
     toPolicyAppointment(appointment, { isLocked, isMonthClosed }),
   );
   if (!decision.allowed) {
-    if (isLocked) throw forbidden("APPOINTMENT_LOCKED", decision.reason);
-    if (isMonthClosed) throw forbidden("MONTH_CLOSED", decision.reason);
+    // Task #1172: identische Unterscheidung wie im Dokumentations-Pfad.
+    if (isLocked) throw conflict("APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr geändert werden.");
+    if (isMonthClosed) throw forbidden("MONTH_CLOSED", "Monat abgeschlossen: Dieser Termin liegt in einem bereits abgeschlossenen Monat und kann nur von der Geschäftsführung geändert werden.");
     throw forbidden("ACCESS_DENIED", decision.reason);
   }
 
