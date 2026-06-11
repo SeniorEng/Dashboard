@@ -8,6 +8,29 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-06-11 — REVIEW-Verifikation Kunde #164 (Budget-Fenster-Shift) freigegeben (Task #1210, kein Publish)
+
+**Anlass:** Vorbereitung der menschlich-gegateten REVIEW-Stufe des Budget-Anker-Rollouts (Task #1209/#1203). Der einzelne REVIEW-Kunde #164 verschiebt beim Re-Derivieren des Ankers das §39-Ansammlungsfenster (`2026-04-07 → 2026-01-01`) und braucht daher eine fachliche Freigabe, bevor `review --i-reviewed-164` scharf läuft.
+
+**Read-only-Verifikation gegen die Production-Replica (Replit `environment: "production"`):**
+- Kunde #164 = „Benz, Ria". Aktuell persistierter Anker `budget_start_date = 2026-04-07`, `budget_start_date_origin = NULL` (Alt-/Import-Pfad, nie SSoT-gestempelt).
+- Pflegegrad-Historie: eine Zeile, **Pflegegrad 2 seit `valid_from = 2025-03-25`** (kein `valid_to`, weiterhin aktiv; `created_at = 2026-04-08`).
+- SSoT-Regel `resolveBudgetAnchor(history, today)` = `max(frühester PG-Beginn, 01.01. lfd. Jahr)` = `max(2025-03-25, 2026-01-01)` = **`2026-01-01`**. Das deckt sich exakt mit dem im Runbook gemeldeten §39-Fenster-Shift `2026-04-07 → 2026-01-01`.
+- **Fachliches Urteil: korrekt / freigegeben.** Der Kunde trug bereits im Vorjahr (seit 25.03.2025) Pflegegrad 2; §39/§42a ist ein Jahresanspruch, der für eine Person mit bestehendem Pflegegrad ab dem 01.01. des laufenden Jahres ansammelt — nicht erst ab dem April-Onboarding-Datum, das das Altsystem als Anker gesetzt hatte. Der gebodete 01.01.-Anker zieht das §39-Fenster fachlich gewollt nach vorne.
+
+**Wichtiger Vorzustand (Production, 2026-06-11):** Die **SAFE-Stufe (Task #1209) ist auf Production NOCH NICHT angewandt** — `customer_budget_preferences` zeigt 66× `origin = NULL` und nur 4× `derived_pflegegrad`, und es existieren **0** `budget_preferences_updated`-Audit-Einträge. Der `review`-Subcommand (`--apply --include-window-shifts`) schreibt SAFE-Rest **und** #164-Shift gemeinsam; alternativ erst `safe`, dann `review --i-reviewed-164`.
+
+**Warum kein scharfer Lauf aus diesem Workspace:** Dieser Task-Agent hat nur **Read-Only**-Production-Zugriff (DB-Host der Arbeits-DB = `helium`, nicht Prod) und kann kein Deployment anlegen/triggern (Publish ist Nutzer-Aktion). Der scharfe `--apply --include-window-shifts --confirm-prod`-Lauf MUSS im Production-Deployment-Kontext laufen — siehe Runbook §2/§3.4.
+
+**Offene Operator-Schritte (Nutzer, im Prod-Deployment-Kontext):**
+1. `bash scripts/prod-budget-anchor-rollout.sh review --i-reviewed-164` (zieht Pre-Rollout-Backup, Dry-Run, schreibt SAFE-Rest + #164-Shift, Idempotenz-Re-Check).
+2. Backup-SHA256 + Pfad (`tmp/db-backups/prod-…-pre-budget-anchor-rollout.dump`) hier nachtragen.
+3. Re-Check-Ergebnis bestätigen: **SAFE = 0 UND REVIEW = 0** und hier festhalten.
+
+**Publish-Status:** ⏳ #164-Review **abgeschlossen & freigegeben**; scharfer REVIEW-Apply ausstehend (Nutzer triggert das Deployment).
+
+---
+
 ### Geplant — Sicherer Production-Rollout des Budget-Anker-Backfills (Task #1209)
 
 **Anlass:** Der Budget-Anker-Backfill (`server/scripts/backfill-budget-anchor.ts`, Task #1203) ist auf DEV gelaufen und muss noch gegen die **Live-Production-DB** ausgerollt werden. Dieser Workspace hat nur Read-Only-Production-Zugriff — der scharfe `--apply`-Lauf darf nicht aus einer unverifizierten Shell hier passieren.

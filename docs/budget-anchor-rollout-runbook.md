@@ -146,7 +146,7 @@ Mutationen append-only auditiert sind, lässt sich der Eingriff zudem über das
 - [ ] `dry-run` gelaufen, Klassifikation ≈ erwartet (~6 + ~61 SAFE, #164 REVIEW).
 - [ ] Backup-SHA256 + Pfad in `docs/deployment-log.md` notiert.
 - [ ] `safe` gelaufen, Re-Check `SAFE = 0`.
-- [ ] #164 §39-Fenster-Shift manuell geprüft & freigegeben.
+- [x] #164 §39-Fenster-Shift manuell geprüft & freigegeben (2026-06-11, Read-only-Verifikation gegen Prod-Replica; Befund im Deployment-Logbuch).
 - [ ] `review --i-reviewed-164` gelaufen, Re-Check `SAFE = 0` UND `REVIEW = 0`.
 - [ ] Finaler `dry-run` meldet `Kein Kunde betroffen` (Idempotenz).
 - [ ] Ergebnis in `docs/deployment-log.md` dokumentiert.
