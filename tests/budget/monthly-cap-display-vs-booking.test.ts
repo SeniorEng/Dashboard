@@ -5,11 +5,19 @@
  * (Topf-Rest) und `currentMonthAvailableCents` (Cap-Rest). Cost-Estimate und
  * Engine mussten denselben Cap-Wert nutzen.
  *
- * Nachher (Task #425): §45b hat keinen Monats-Cap mehr.
- *  - `monthlyLimitCents` ist im Summary fix `null`.
+ * Nachher (Task #425): §45b OHNE gesetztes Monatslimit (`monthlyLimitCents`
+ * null oder 0 = Sentinel „Jahrestopf ohne monatliche Aufstockung") hat KEINEN
+ * Monats-Cap.
+ *  - `monthlyLimitCents` ist im Summary `null`.
  *  - `currentMonthAvailableCents == availableCents` (gleicher Pot).
  *  - Cost-Estimate nutzt `availableCents` direkt — keine Drift möglich.
  *  - Termine im Folgemonat dürfen die zusätzliche Aufstockung mitnutzen.
+ *
+ * Abgrenzung Task #1171: Ein AUSDRÜCKLICH gesetztes Monatslimit (> 0) wirkt
+ * seither sehr wohl als Fenster-Cap — in Anzeige UND Buchung über denselben
+ * SSoT (`computeCapSlot`/`cap-math`). Dieses File deckt bewusst nur den
+ * Null-/Sentinel-Fall (kein Cap) ab; die SET-Limit-Cap-Wirkung ist in
+ * `tests/equality/45b-cap.test.ts` und `tests/budget/cap-math.test.ts` fixiert.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
@@ -151,11 +159,12 @@ describe("Task #425 — §45b Jahrestopf: Anzeige == Buchung", () => {
     expect(nextRes.data.isHardBlock).toBe(false);
   });
 
-  it("type-settings persistiert keinen Monats-Cap mehr für §45b (PUT mit Wert wird ignoriert)", async () => {
-    // Auch wenn ein Client (Legacy) noch monthlyLimitCents schickt, darf das
-    // Backend den §45b-Cap NICHT mehr in den Verfügbarkeitsberechnungen
-    // berücksichtigen. Wir prüfen das indirekt über das Overview-Feld
-    // monthlyLimitCents, das vom Summary fix auf null gesetzt wird.
+  it("§45b ohne gesetztes Monatslimit (null) liefert overview.monthlyLimitCents=null (kein Cap)", async () => {
+    // Dieses Szenario setzt KEIN Monatslimit (monthlyLimitCents=null). In dem
+    // Fall bleibt §45b der reine Jahrestopf ohne Fenster-Cap und das Overview-
+    // Feld monthlyLimitCents ist null. (Ein ausdrücklich gesetztes Limit > 0
+    // wirkt seit Task #1171 sehr wohl als Cap — abgedeckt in
+    // tests/equality/45b-cap.test.ts, nicht hier.)
     const overview = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overview.status).toBe(200);
     expect(overview.data.entlastungsbetrag45b.monthlyLimitCents).toBeNull();

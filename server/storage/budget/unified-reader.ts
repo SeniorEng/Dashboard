@@ -199,7 +199,26 @@ export async function readUnifiedBudgetAvailability(
     );
     const consumedNet = await netConsumedUpToDate(customerId, "entlastungsbetrag_45b", asOfDate, d);
     const holds = await activeHoldsCents(customerId, "entlastungsbetrag_45b", asOfDate, "year", d);
-    const available = Math.max(0, allocated - holds - consumedNet);
+    const potRemaining = Math.max(0, allocated - holds - consumedNet);
+
+    // Task #1171 (Audit-Ticket H) — Ohne konfiguriertes Monatslimit bleibt §45b
+    // der Jahrestopf ohne Fenster-Cap (Task #425). Ist ein Monatslimit gesetzt,
+    // greift derselbe Cap-SSoT (`computeCapSlot`) wie für §45a/§39, sodass die
+    // angezeigte Verfügbarkeit exakt der beim Buchen kaskadierten entspricht
+    // (`Math.min(Topf-Rest, Monats-Cap-Rest)`).
+    let capRemaining = Infinity;
+    let available = potRemaining;
+    if (s45b?.monthlyLimitCents != null) {
+      const cap = await computeCapSlot({
+        customerId,
+        budgetType: "entlastungsbetrag_45b",
+        transactionDate: asOfDate,
+        monthlyLimitCents: s45b.monthlyLimitCents,
+        yearlyLimitCents: null,
+      }, tx);
+      capRemaining = cap.capRemainingCents;
+      available = Math.min(potRemaining, cap.capRemainingCents);
+    }
     pot45b = {
       budgetType: "entlastungsbetrag_45b",
       enabled: enabled45b,
@@ -207,7 +226,7 @@ export async function readUnifiedBudgetAvailability(
       allocatedCents: allocated,
       consumedNetCents: consumedNet,
       holdsActiveCents: holds,
-      capRemainingCents: Infinity,
+      capRemainingCents: capRemaining,
       availableCents: available,
     };
   }

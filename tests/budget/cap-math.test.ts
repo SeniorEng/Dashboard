@@ -14,17 +14,57 @@ import {
   BUDGET_45A_MAX_BY_PFLEGEGRAD,
 } from "@shared/domain/budgets";
 
-describe("computeCapRemaining — §45b (Jahrestopf, kein Fenster-Cap)", () => {
-  it("liefert immer POSITIVE_INFINITY als capRemaining", () => {
+describe("computeCapRemaining — §45b (Jahrestopf + optionaler Monats-Cap, Task #1171)", () => {
+  it("ohne Monatslimit (null) bleibt §45b ein Jahrestopf ohne Fenster-Cap → POSITIVE_INFINITY", () => {
     const out = computeCapRemaining({
       budgetType: "entlastungsbetrag_45b",
       pflegegrad: 3,
-      monthlyLimitCents: 13100,
+      monthlyLimitCents: null,
       yearlyLimitCents: null,
       carryoverCents: 5000,
       netUsedInWindowCents: 9999,
     });
     expect(out.capRemainingCents).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("monthlyLimitCents=0 ist das Sentinel fuer keine monatliche Aufstockung und liefert keinen Fenster-Cap (POSITIVE_INFINITY, NICHT 0)", () => {
+    // Task #425/#1171 — 0 bedeutet „Jahrestopf ohne monatliche Aufstockung",
+    // NICHT „Cap auf 0". 0 verhält sich daher exakt wie null.
+    const out = computeCapRemaining({
+      budgetType: "entlastungsbetrag_45b",
+      pflegegrad: 3,
+      monthlyLimitCents: 0,
+      yearlyLimitCents: null,
+      carryoverCents: 5000,
+      netUsedInWindowCents: 9999,
+    });
+    expect(out.capRemainingCents).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("mit gesetztem Monatslimit (>0) wirkt es als Fenster-Cap: Limit − netUsed (Task #1171)", () => {
+    const out = computeCapRemaining({
+      budgetType: "entlastungsbetrag_45b",
+      pflegegrad: 3,
+      monthlyLimitCents: 13100,
+      yearlyLimitCents: null,
+      // Carryover wird beim §45b-Monats-Cap bewusst NICHT aufaddiert
+      // (der Topf-Rest ist die zweite Schranke beim Aufrufer → kein Doppelzählen).
+      carryoverCents: 5000,
+      netUsedInWindowCents: 9999,
+    });
+    expect(out.capRemainingCents).toBe(13100 - 9999);
+  });
+
+  it("§45b-Monats-Cap wird bei Überverbrauch auf 0 geklemmt (nie negativ)", () => {
+    const out = computeCapRemaining({
+      budgetType: "entlastungsbetrag_45b",
+      pflegegrad: 3,
+      monthlyLimitCents: 13100,
+      yearlyLimitCents: null,
+      carryoverCents: 0,
+      netUsedInWindowCents: 20000,
+    });
+    expect(out.capRemainingCents).toBe(0);
   });
 
   it("klemmt das Monatslimit auf den gesetzlichen Maximalwert", () => {
@@ -37,6 +77,7 @@ describe("computeCapRemaining — §45b (Jahrestopf, kein Fenster-Cap)", () => {
       netUsedInWindowCents: 0,
     });
     expect(out.clampedMonthlyLimitCents).toBe(BUDGET_45B_MAX_MONTHLY_CENTS);
+    expect(out.capRemainingCents).toBe(BUDGET_45B_MAX_MONTHLY_CENTS);
   });
 });
 

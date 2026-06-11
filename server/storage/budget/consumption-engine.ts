@@ -486,13 +486,16 @@ export async function createCascadeConsumption(params: {
 
       let capacity = availability.totalAvailable;
 
-      // §45b ist seit Task #425 ein Jahrestopf ohne Monats-Cap. Die FIFO-
-      // Konsumtion wird nur durch die bis zum transactionDate aufgelaufene
-      // Allocation (siehe calculateAllocated45b) begrenzt — kein zusätzlicher
-      // Window-Cap mehr.
+      // §45b ist standardmäßig ein Jahrestopf ohne Monats-Cap (Task #425): die
+      // FIFO-Konsumtion wird nur durch die bis zum transactionDate aufgelaufene
+      // Allocation begrenzt. Task #1171 (Audit-Ticket H) — ist für §45b jedoch
+      // ein Monatslimit konfiguriert, greift derselbe Cap-SSoT (`computeCapSlot`)
+      // wie für §45a/§39, sodass die Kaskade beim BUCHEN exakt dasselbe
+      // Monatslimit respektiert wie die Anzeige (kein „Display ≠ Booking").
       const isCappedBudget =
         pot.budgetType === "umwandlung_45a" ||
-        pot.budgetType === "ersatzpflege_39_42a";
+        pot.budgetType === "ersatzpflege_39_42a" ||
+        pot.budgetType === "entlastungsbetrag_45b";
       const hasCap =
         pot.monthlyLimitCents !== null || pot.yearlyLimitCents !== null;
 

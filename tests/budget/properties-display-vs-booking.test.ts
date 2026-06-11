@@ -89,19 +89,49 @@ describe("Property §45b — Anzeige (verfügbar) ≥ Gebucht (Engine-Konsum)", 
               { type: "ersatzpflege_39_42a", priority: carryoverPriorityFirst ? 3 : 1, enabled: false },
             ],
             initialBalance: { type: "entlastungsbetrag_45b", amountCents: potCents, validFrom: "2024-01-01" },
-            appointments: priorConsumedMinutes > 0
-              ? [
-                  {
-                    date,
-                    scheduledStart: "07:00",
-                    services: [{ code: "hauswirtschaft", durationMinutes: priorConsumedMinutes }],
-                    document: true,
-                    notes: "T427 Property prior consumption",
-                  },
-                ]
-              : [],
+            appointments: [],
           });
           try {
+            // Optionaler Vorverbrauch im aktuellen Monat. Seit Task #1171 ist das
+            // §45b-Monatslimit auch beim BUCHEN wirksam: Übersteigt der
+            // Vorverbrauch den Monats-Cap und es gibt keinen Folge-Topf bzw.
+            // keine Selbstzahler-Option, lehnt die Engine korrekt ab. Das ist
+            // ein gültiges Szenario (= effektiv kein Vorverbrauch), kein
+            // Setup-Fehler — daher hier tolerant gebucht statt über den
+            // strikten Helper, der jeden 400 als Setup-Abbruch wirft.
+            if (priorConsumedMinutes > 0) {
+              const [priorAppt] = await db
+                .insert(appointments)
+                .values({
+                  customerId: scenario.customerId,
+                  assignedEmployeeId: scenario.employeeId,
+                  appointmentType: "kundentermin",
+                  date,
+                  scheduledStart: "07:00:00",
+                  scheduledEnd: "08:00:00",
+                  durationPromised: priorConsumedMinutes,
+                  status: "scheduled",
+                  notes: "T427 Property prior consumption",
+                })
+                .returning();
+              try {
+                await createConsumptionTransaction({
+                  customerId: scenario.customerId,
+                  appointmentId: priorAppt.id,
+                  transactionDate: date,
+                  hauswirtschaftMinutes: priorConsumedMinutes,
+                  alltagsbegleitungMinutes: 0,
+                  travelKilometers: 0,
+                  customerKilometers: 0,
+                  userId: auth.user.id,
+                });
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                if (!/Budget reicht nicht|Budget unzureichend|insufficient budget/i.test(msg)) {
+                  throw e;
+                }
+              }
+            }
             // 1) ANZEIGE: was die UI dem Nutzer als verfügbar zeigt.
             const displayed = await getDisplayedAvailableCents(scenario.customerId, date);
 

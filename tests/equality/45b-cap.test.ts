@@ -65,7 +65,10 @@ function weekdayInCurrentMonth(): string {
 }
 
 interface OverviewResponse {
-  entlastungsbetrag45b: { availableCents: number };
+  entlastungsbetrag45b: {
+    availableCents: number;
+    currentMonthUsedCents: number;
+  };
 }
 
 interface EstimateResponse {
@@ -157,6 +160,124 @@ describe("Equality §45b — Cost-Estimate vs ECHTE Engine-Buchung", () => {
           availableBefore - availableAfter,
           `overview.availableCents Δ (${availableBefore}→${availableAfter}=${availableBefore - availableAfter}) ` +
           `weicht von tatsächlich gebucht=${booking.totalBookedAbsCents} ab`,
+        ).toBe(booking.totalBookedAbsCents);
+      } finally {
+        await scenario.cleanup();
+      }
+    }, 120_000);
+  }
+});
+
+/**
+ * Task #1171 (Audit-Ticket H / BUG-21) — Ein GESETZTES §45b-Monatslimit (> 0)
+ * muss ab jetzt nicht nur die Anzeige, sondern auch die ECHTE Buchung kappen.
+ *
+ * Vorher: das Monatslimit reduzierte nur die Aufstockung, beim Buchen wurde
+ * §45b aber bis zum gesamten Topf-Rest gezogen (Display ≠ Booking, sobald ein
+ * Limit gesetzt war). Jetzt teilen Anzeige (`overview.availableCents` /
+ * cost-estimate) UND Buchung (Cascade-Engine) DENSELBEN Cap-SSoT
+ * (`computeCapSlot` → `computeCapRemaining`): §45b wird je Monat höchstens bis
+ * (geklemmtes Limit − Monatsverbrauch) gefüllt, der Rest kaskadiert weiter
+ * (hier in den uncapped Selbstzahler-Topf).
+ *
+ * Regression über 2h/1h/10h: deckt „Kosten unter Cap" (kein Überlauf) und
+ * „Kosten über Cap" (Überlauf in Selbstzahler) in einem Lauf ab.
+ */
+describe("Equality §45b — SET-Monatslimit cappt Anzeige UND Buchung (Task #1171)", () => {
+  const SET_LIMIT_CENTS = 5000; // 50 €/Monat (≤ gesetzliches §45b-Maximum)
+  const POT_CENTS = 50000; // Topf weit über dem Monats-Cap → Cap ist die Schranke
+  const setCases: Array<{ name: string; hwMin: number }> = [
+    { name: "1h HW", hwMin: 60 },
+    { name: "2h HW", hwMin: 120 },
+    { name: "10h HW", hwMin: 600 },
+  ];
+
+  for (const c of setCases) {
+    it(`[${c.name}] §45b-Anzeige zeigt Cap; Buchung kappt §45b auf (Limit − Monatsverbrauch), Rest kaskadiert`, async () => {
+      const auth = await getAuthCookie();
+      const date = weekdayInCurrentMonth();
+      const scenario: BudgetScenarioHandle = await setupBudgetScenario({
+        customerNamePrefix: "T1171-45B-CAP",
+        pflegegrad: 3,
+        billingType: "pflegekasse_gesetzlich",
+        // Überlauf über den §45b-Cap muss irgendwo hin → uncapped Selbstzahler-Topf.
+        acceptsPrivatePayment: true,
+        preferences: { budgetStartDate: "2026-01-01" },
+        types: [
+          { type: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: SET_LIMIT_CENTS },
+          { type: "umwandlung_45a", priority: 2, enabled: false },
+          { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
+        ],
+        initialBalance: { type: "entlastungsbetrag_45b", amountCents: POT_CENTS, validFrom: "2026-01-01" },
+      });
+      try {
+        const today = getTodayDate();
+        const estBefore = await apiGet<EstimateResponse>(
+          `/api/budget/${scenario.customerId}/cost-estimate?date=${today}` +
+            `&hauswirtschaftMinutes=${c.hwMin}&alltagsbegleitungMinutes=0` +
+            `&travelKilometers=0&customerKilometers=0`,
+        );
+        const ov0 = await apiGet<OverviewResponse>(
+          `/api/budget/${scenario.customerId}/overview`,
+        );
+        const displayedTotal = estBefore.data.totalCents;
+        const availBefore = ov0.data.entlastungsbetrag45b.availableCents;
+        const monthUsedBefore = ov0.data.entlastungsbetrag45b.currentMonthUsedCents;
+
+        // ANZEIGE: §45b ist auf den SET-Cap begrenzt — NICHT den vollen Topf.
+        expect(
+          availBefore,
+          `§45b availableCents=${availBefore} muss dem SET-Cap=${SET_LIMIT_CENTS} ` +
+          `entsprechen (Topf-Rest ${POT_CENTS}+ wird durch den Monats-Cap überschrieben)`,
+        ).toBe(SET_LIMIT_CENTS);
+        expect(monthUsedBefore).toBe(0);
+
+        // ECHTE BUCHUNG via Engine (selber Pfad wie Dokumentation).
+        const booking = await bookConsumption({
+          customerId: scenario.customerId,
+          employeeId: scenario.employeeId,
+          date,
+          hwMinutes: c.hwMin,
+          abMinutes: 0,
+          travelKm: 0,
+          customerKm: 0,
+          userId: auth.user.id,
+        });
+
+        const ov1 = await apiGet<OverviewResponse>(
+          `/api/budget/${scenario.customerId}/overview`,
+        );
+        const availAfter = ov1.data.entlastungsbetrag45b.availableCents;
+        const monthUsedAfter = ov1.data.entlastungsbetrag45b.currentMonthUsedCents;
+
+        // §45b trägt höchstens den Cap; der Rest geht in den Selbstzahler-Topf.
+        const expected45bPortion = Math.min(displayedTotal, SET_LIMIT_CENTS);
+
+        // Invariante A: Anzeige der GESAMT-Termin-Kosten == real gebuchter Betrag
+        // (über alle Cascade-Töpfe). Display == Booking bleibt exakt.
+        expect(
+          booking.totalBookedAbsCents,
+          `cost-estimate.totalCents=${displayedTotal} weicht von ` +
+          `Engine-Buchung=${booking.totalBookedAbsCents} ab`,
+        ).toBe(displayedTotal);
+
+        // Invariante B: §45b-Topf-Rest fällt um exakt den gecappten Anteil.
+        expect(
+          availBefore - availAfter,
+          `§45b availableCents-Δ (${availBefore}→${availAfter}) muss dem ` +
+          `gecappten §45b-Anteil=${expected45bPortion} entsprechen`,
+        ).toBe(expected45bPortion);
+        expect(availAfter).toBe(SET_LIMIT_CENTS - expected45bPortion);
+
+        // Invariante C: §45b-Monatsverbrauch reagiert exakt um den gecappten Anteil.
+        expect(monthUsedAfter - monthUsedBefore).toBe(expected45bPortion);
+
+        // Invariante D: Σ exakt in Integer-Cents über alle Cascade-Töpfe.
+        expect(
+          booking.transactionAmountsCents.every((n) => Number.isInteger(n)),
+        ).toBe(true);
+        expect(
+          booking.transactionAmountsCents.reduce((s, n) => s + n, 0),
         ).toBe(booking.totalBookedAbsCents);
       } finally {
         await scenario.cleanup();
