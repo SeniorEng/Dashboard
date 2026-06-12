@@ -25,5 +25,11 @@
     "@stryker-mutator/vitest-runner",
     "jszip"
   ],
+  "ignoreBinaries": [
+    "psql",
+    "java",
+    "tail",
+    "which"
+  ],
   "ignoreExportsUsedInFile": true
 }

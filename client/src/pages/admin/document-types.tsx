@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Layout } from "@/components/layout";
 import {
   Dialog,
   DialogContent,
@@ -179,13 +178,5 @@ export function DocumentTypesContent() {
         </DialogContent>
       </Dialog>
     </>
-  );
-}
-
-export default function AdminDocumentTypes() {
-  return (
-    <Layout variant="admin">
-      <DocumentTypesContent />
-    </Layout>
   );
 }
