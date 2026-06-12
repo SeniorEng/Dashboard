@@ -1,0 +1,43 @@
+# Replit-AI-Ticket — Vereinfachung Phase 1: Tote und giftige Last entfernen
+
+**Stand: 12.06.2026 (v2 — ersetzt Fassung vom 11.06.)** · **Voraussetzung:** Phase 0 abgeschlossen und validiert (Claude-Report 12.06.: Invarianten, Wächter, Reseed-Runbook — alles grün).
+
+*Änderungen ggü. v1: Paket 1.2 (BUG-18) ist bereits erledigt und entfällt; Paket 1.4 (Prod-Snapshot) entfällt zugunsten der #1239-Entscheidung (synthetischer Seed, DSGVO); Paket 1.1 um Analyse-Stufe erweitert, da `budget_ledger` entgegen dem Stand vom 10.06. produktive Code-Referenzen hat.*
+
+---
+
+## Paket 1.1 — Budget-Leichen entfernen + Transaktions-Härtung
+
+**Entscheidung Alrik (11.06.2026):** `budget_ledger` wird NICHT migriert, sondern entfernt. GoBD-Unveränderbarkeit wird direkt auf `budget_transactions` erzwungen.
+
+**⚠️ Neue Faktenlage (Code-Review 12.06., `0d961b6`):** `budget_ledger`/`budget_reservations`/`budget_migrations` stehen noch im Schema und `budget_ledger` wird in mehreren Modulen referenziert: `appointment-import.ts`, `appointment-import-reconcile.ts`, `budget-initial-setup.ts`, `storage/budget-ledger.ts`, `reservation-storage.ts`, `startup/sync-budget-allocations.ts`, `startup/backfill-missing-import-consumption.ts`. Außerdem hat Phase 0 Wächter DARAUF gebaut (`startup/ensure-budget-ledger-immutability.ts`, Arch-Test `budget-ledger-write-path.test.ts`, `schema-table-allowlist.test.ts`).
+
+**Daher zweistufig:**
+
+1. **Analyse (read-only):** Je Referenz belegen: schreibt/liest sie `budget_ledger` produktiv, oder ist es toter/duplizierter Pfad neben `budget_transactions`? Ergebnis als kurze Tabelle (Datei → Pfad → Urteil → Beweis) unter `docs/`. **Stopp + Rückfrage an Alrik, falls ein produktiver Lesepfad existiert, der NICHT durch `budget_transactions` ersetzbar ist.**
+2. **Umsetzung (nach Analyse-Freigabe):**
+   - DB-Trigger/Policy auf `budget_transactions`: kein UPDATE, kein DELETE — Ausnahme-Whitelist nur für definierte Reconcile-Pfade, jede Nutzung schreibt `audit_log`. Korrekturen ausschließlich als neue Reversal-/Korrektur-Zeilen.
+   - `budget_ledger`, `budget_reservations`, `budget_migrations` entfernen (Tabellen, Schema, Storage-Code, Routen-Reste) — **inkl. Umbau der Phase-0-Wächter**: `budget-ledger-write-path.test.ts` zielt danach auf `budget_transactions`, `ensure-budget-ledger-immutability` wird zu `ensure-budget-transactions-immutability`, `schema-table-allowlist` um die drei Tabellen reduziert (Ersetzungs-Regel: Wächter wandern mit, werden nicht dupliziert).
+   - Der stille Skip im Final-Reconcile (`consumption-engine.ts`, Befund C-02) bekommt einen `audit_log`-Eintrag statt `return;`.
+
+**Akzeptanz:** Analyse-Tabelle liegt vor; Migrationen laufen; Buchung/Storno/Umbuchung/Rechnung im Regressionstest unverändert; manueller UPDATE/DELETE-Versuch auf `budget_transactions` via SQL schlägt fehl (+ Arch-Test-Negativbeweis); Invarianten-Suite grün; Schema-Allowlist um genau 3 Tabellen kleiner.
+
+## ~~Paket 1.2 — Testdaten-Müll purgen (BUG-18)~~ ERLEDIGT
+
+Bereits umgesetzt und am 12.06. validiert: Dev-Services = 5 echte, Dokumenttypen sauber, `check:no-test-junk` + Test-DB-Isolation (`sweep-test-dbs`, ephemeral DBs) aktiv. **Einziger Rest (außerhalb dieses Tickets):** Prod-Purge der `DOC*`-Dokumenttypen — Dry-Run-Report liegt unter `docs/bug-18-junk-purge-dry-run-…`, Ausführung nach Freigabe Alrik.
+
+## Paket 1.2 (neu) — Toten Code löschen (knip-Report)
+
+1. Aktuellen knip-Report (CI-Artefakt `knip-report.json`) abarbeiten: ungenutzte Exporte, Komponenten, Routen entfernen. Konservativ: nur, was knip UND manuelle Referenz-Suche bestätigen. (`docs/dead-code-report.md` vom 28.04. ist als Zweitquelle nutzbar, aber veraltet — nicht blind folgen.)
+2. Statistik-Altstand: `client/src/pages/admin/statistics/` enthält `v2/` neben `helpers.ts` — wenn v2 produktiv ist, v1-Reste löschen (sonst umgekehrt). Eine Statistik-Implementierung.
+3. Triage: `probe-pdf-determinism.ts`, `repro_tmp.mts`, `tmp/`-Artefakte (`cleanup-*.out`), ungenutzte Skripte in `script(s)/` — behalten (dokumentieren) oder löschen.
+
+**Akzeptanz:** knip clean (0 ungenutzte Exporte oder dokumentierte Ausnahmen); Bundle-Size-Vergleich im PR; alle CI-Gates (Arch-Tests, Invarianten, Lint, Coverage) grün.
+
+## ~~Paket 1.4 — Dev-Daten-Parität via Prod-Snapshot~~ ENTFÄLLT
+
+Revidiert durch #1239 (12.06.): Dev-DB läuft bewusst auf synthetischem Seed (DSGVO/GoBD — Pflegedaten sind echte PII). Falls Tests realistische Datenmengen brauchen, stattdessen: **synthetischen Volumen-Seed** erweitern (~200 Kunden, Termine, Rechnungen aus Generator) — als separates Ticket, wenn Bedarf nachgewiesen.
+
+## Leitplanken
+
+Reihenfolge 1.1 → 1.2, je eigener Commit + DB-Checkpoint davor (`db:backup-dev`). Nach jedem abgeschlossenen Task: `npm run sync:github` (GitHub hinkte am 12.06. ~19 h hinterher). Nichts in diesem Ticket ändert Berechnungslogik — wenn ein Löschkandidat doch referenziert wird: stoppen, reporten, nicht umbauen. Ersetzungs-Regel gilt: Wächter/Funktionen wandern mit, keine Duplikate.
