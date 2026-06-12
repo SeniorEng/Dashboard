@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Loader2, Calendar, Clock, User, Plus, Users, UserCheck, Phone, UserPlus, Pencil, Check, X, Home, Mail, Search } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { AppointmentSummary } from "@/features/appointments";
@@ -425,12 +426,10 @@ export function NewAppointmentErstberatungTab({ form, onBack }: { form: Appointm
                       <Label htmlFor="eb-start">
                         <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit *
                       </Label>
-                      <Input
+                      <TimePicker
                         id="eb-start"
-                        type="time"
                         value={form.ebStartTime}
-                        onChange={(e) => form.setEbStartTime(e.target.value)}
-                        className="text-base"
+                        onChange={(val) => form.setEbStartTime(val)}
                         data-testid="input-eb-start"
                       />
                     </div>

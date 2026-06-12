@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { DatePicker } from "@/components/ui/date-picker";
+import { TimePicker } from "@/components/ui/time-picker";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Loader2, AlertCircle, Users } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -202,21 +203,19 @@ export function TimeEntryFormContent({
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <Label>Startzeit</Label>
-            <Input
-              type="time"
+            <TimePicker
               value={formState.startTime || ""}
-              onChange={(e) => onFieldChange("startTime", e.target.value)}
-              className={`text-base ${validation.timeError ? "border-red-500" : ""}`}
+              onChange={(val) => onFieldChange("startTime", val)}
+              className={validation.timeError ? "border-red-500" : ""}
               data-testid={`${prefix}input-start-time`}
             />
           </div>
           <div className="space-y-2">
             <Label>Endzeit</Label>
-            <Input
-              type="time"
+            <TimePicker
               value={formState.endTime || ""}
-              onChange={(e) => onFieldChange("endTime", e.target.value)}
-              className={`text-base ${validation.timeError ? "border-red-500" : ""}`}
+              onChange={(val) => onFieldChange("endTime", val)}
+              className={validation.timeError ? "border-red-500" : ""}
               data-testid={`${prefix}input-end-time`}
             />
           </div>

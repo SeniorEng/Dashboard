@@ -1,6 +1,6 @@
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Calendar, Clock } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { EmployeeAvailability } from "./employee-availability";
@@ -48,12 +48,10 @@ export function EditAppointmentDateTimeFields({
             <Clock className={`${iconSize.sm} inline mr-1`} />{" "}
             {isErstberatung ? "Startzeit *" : "Startzeit / Abholzeit"}
           </Label>
-          <Input
+          <TimePicker
             id="time"
-            type="time"
             value={time}
-            onChange={(e) => setTime(e.target.value)}
-            className="text-base"
+            onChange={(val) => setTime(val)}
             disabled={ebFullyLocked}
             data-testid="input-time"
           />

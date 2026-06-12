@@ -1,11 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Loader2, Calendar, Clock, Users, Repeat } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { WEEKDAYS } from "@shared/schema/appointments";
@@ -80,12 +80,10 @@ export function NewAppointmentKundenterminTab({ form, onBack }: { form: Appointm
                   <Label htmlFor="kt-time">
                     <Clock className={`${iconSize.sm} inline mr-1`} /> Startzeit / Abholzeit
                   </Label>
-                  <Input
+                  <TimePicker
                     id="kt-time"
-                    type="time"
                     value={form.ktTime}
-                    onChange={(e) => form.setKtTime(e.target.value)}
-                    className="text-base"
+                    onChange={(val) => form.setKtTime(val)}
                     data-testid="input-kt-time"
                   />
                 </div>

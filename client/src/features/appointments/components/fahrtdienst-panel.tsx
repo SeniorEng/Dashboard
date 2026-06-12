@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
@@ -193,12 +194,10 @@ export function FahrtdienstDetails({
             <Label htmlFor="fd-doctor-time">
               <Clock className={`${iconSize.sm} inline mr-1`} /> Arzt-Termin Uhrzeit *
             </Label>
-            <Input
+            <TimePicker
               id="fd-doctor-time"
-              type="time"
               value={fahrtdienst.doctorAppointmentTime}
-              onChange={(e) => updateField("doctorAppointmentTime", e.target.value)}
-              className="text-base"
+              onChange={(val) => updateField("doctorAppointmentTime", val)}
               data-testid="input-doctor-time"
             />
             {errors?.doctorAppointmentTime && (

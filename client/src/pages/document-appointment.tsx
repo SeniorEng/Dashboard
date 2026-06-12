@@ -4,6 +4,7 @@ import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -176,12 +177,10 @@ export default function DocumentAppointment() {
               <div className="flex items-center gap-4">
                 <div className="flex-1">
                   <Label htmlFor="actualStart">Startzeit</Label>
-                  <Input
+                  <TimePicker
                     id="actualStart"
-                    type="time"
-                    className="min-h-[44px] text-base"
                     value={formData.actualStart}
-                    onChange={(e) => setFormData(prev => ({ ...prev, actualStart: e.target.value }))}
+                    onChange={(val) => setFormData(prev => ({ ...prev, actualStart: val }))}
                     data-testid="input-actual-start"
                   />
                 </div>
