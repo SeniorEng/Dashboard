@@ -47,6 +47,23 @@ const NONPROD_PDF_PREFIX = "_nonprod";
 // ohne gegenseitiges Überschreiben teilen. Produktion ist davon unberührt.
 const RUN_ID_ENV = "EPHEMERAL_RUN_ID";
 
+// Task #1263: Pro-WORKER-Isolation zusätzlich zur Pro-Lauf-Isolation.
+//
+// Ein einzelner Testlauf provisioniert mehrere Worker (Default 2), jeder mit
+// EIGENER, frisch geklonter Wegwerf-DB. Aus diesen frischen DBs vergeben die
+// Worker jeweils DIESELBEN Rechnungsnummern (`RE-2026-0001` …). Da sie sich die
+// EINE Lauf-ID (`EPHEMERAL_RUN_ID`) teilen, würden ihre PDF-Objektschlüssel
+// kollidieren → parallele Worker überschreiben sich gegenseitig die Bucket-
+// Objekte (PDF-Hash-/Re-Render-Tests werden flaky).
+//
+// Lösung: Der Orchestrator vergibt jedem Worker eine 0-basierte Worker-ID und
+// exportiert sie via `EPHEMERAL_WORKER_ID` an BEIDE Seiten desselben Workers —
+// den Worker-App-Server UND den gepaarten Vitest-Fork (tests/setup.ts mappt die
+// `VITEST_POOL_ID` auf denselben Index). Ist sie gesetzt, wird der Nicht-Prod-
+// Prefix um ein `w-<id>`-Segment erweitert, sodass Worker innerhalb desselben
+// Laufs disjunkte Key-Räume schreiben. Produktion ist davon unberührt.
+const WORKER_ID_ENV = "EPHEMERAL_WORKER_ID";
+
 /**
  * True, wenn die laufende Umgebung die Produktion ist. Nur in der Produktion
  * werden PDFs unter den nackten Produktions-Key-Space geschrieben.
@@ -66,13 +83,21 @@ export function isProductionPdfEnv(): boolean {
 export function getInvoicePdfKeyPrefix(): string {
   if (isProductionPdfEnv()) return "";
   const env = process.env.NODE_ENV || "unknown";
-  const base = `${NONPROD_PDF_PREFIX}/${env}`;
+  let prefix = `${NONPROD_PDF_PREFIX}/${env}`;
   const rawRunId = process.env[RUN_ID_ENV];
   if (rawRunId) {
     const safeRunId = rawRunId.replace(/[^a-z0-9_-]/gi, "_");
-    if (safeRunId) return `${base}/run-${safeRunId}`;
+    if (safeRunId) prefix = `${prefix}/run-${safeRunId}`;
   }
-  return base;
+  // Task #1263: Innerhalb eines Laufs zusätzlich pro Worker scopen, damit
+  // parallele Worker (eigene DBs, gleiche Rechnungsnummern) disjunkte Key-Räume
+  // schreiben und sich nicht gegenseitig die Bucket-Objekte überschreiben.
+  const rawWorkerId = process.env[WORKER_ID_ENV];
+  if (rawWorkerId) {
+    const safeWorkerId = rawWorkerId.replace(/[^a-z0-9_-]/gi, "_");
+    if (safeWorkerId) prefix = `${prefix}/w-${safeWorkerId}`;
+  }
+  return prefix;
 }
 
 /**

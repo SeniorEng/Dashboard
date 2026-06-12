@@ -1,19 +1,34 @@
 ---
-name: Object storage bucket is shared across ephemeral test DBs (now run-scoped)
-description: Why invoice-PDF integration tests USED to flake under concurrent harness runs; non-prod PDF keys now carry a per-run id so the bucket is logically isolated.
+name: Object storage bucket is shared across ephemeral test DBs (now run+worker-scoped)
+description: Why invoice-PDF integration tests USED to flake under concurrent harness runs; non-prod PDF keys now carry a per-run AND per-worker id so the bucket is logically isolated.
 ---
 
-# Object storage bucket is shared, but non-prod PDF keys are now per-run scoped
+# Object storage bucket is shared, but non-prod PDF keys are now per-run + per-worker scoped
 
-**Update:** non-prod invoice/LN PDF object keys now include a per-run component.
-`getInvoicePdfKeyPrefix()` (`server/lib/object-storage-helpers.ts`) appends
-`/run-<sanitized EPHEMERAL_RUN_ID>` to the `_nonprod/<NODE_ENV>/` prefix when the
-`EPHEMERAL_RUN_ID` env var is set; the orchestrator (`scripts/with-ephemeral-db.ts`)
-exports that var (its `runId`) into `baseEnv` so every worker app-server AND the
-vitest process inherit it. Production is unaffected (prefix stays `""`). This means
-two concurrent test runs no longer clobber each other's PDF objects even though the
-underlying bucket is still physically shared. The history below explains the failure
-mode this prevents.
+**Update:** non-prod invoice/LN PDF object keys now include BOTH a per-run AND a
+per-worker component. `getInvoicePdfKeyPrefix()`
+(`server/lib/object-storage-helpers.ts`) builds the `_nonprod/<NODE_ENV>/` prefix,
+then appends `/run-<sanitized EPHEMERAL_RUN_ID>` when `EPHEMERAL_RUN_ID` is set,
+then appends `/w-<EPHEMERAL_WORKER_ID>` when `EPHEMERAL_WORKER_ID` is set.
+Production is unaffected (prefix stays `""`).
+
+**Why the worker segment was needed:** the per-run scope alone was NOT enough.
+Multiple workers WITHIN one run each get their own throwaway DB, so they all mint
+the SAME invoice numbers (e.g. RE-2026-0001) and — before the worker segment —
+produced the SAME object key → they clobbered each other inside a single `test`
+run. The orchestrator (`scripts/with-ephemeral-db.ts`) now passes
+`EPHEMERAL_WORKER_ID: String(workerIndex)` into each worker app-server's spawn env,
+and `tests/setup.ts` sets it per vitest fork (idx = `(VITEST_POOL_ID-1) % baseUrls.length`,
+matching the orchestrator's positional worker indexing) so in-process renders /
+direct object-storage writes land on the same prefix as their paired app-server.
+Both sides agree on a 0-based index; segment format is `w-<id>`.
+
+**Related provisioning fix (same task):** worker DB clones from the per-run
+template are now SERIAL (a for-loop calling `cloneDbFromTemplate`, which retries 8×
+on "source database … is being accessed by other users") BEFORE the parallel
+worker-server boot, instead of cloning all workers concurrently via `Promise.all`.
+Concurrent clones of one template intermittently hit the "being accessed by other
+users" Postgres error.
 
 The ephemeral-DB orchestrator (`scripts/with-ephemeral-db.ts`) gives each
 run/worker its own throwaway Postgres DB, but the **object storage bucket is the

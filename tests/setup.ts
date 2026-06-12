@@ -36,6 +36,12 @@ if (!process.env.TEST_USER_PASSWORD && process.env.TEST_USER_PASSWORD_INTERNAL) 
     if (dbUrls.length > 0) {
       process.env.DATABASE_URL = dbUrls[idx % dbUrls.length];
     }
+    // Task #1263: Denselben Worker-Index wie der gepaarte App-Server setzen, damit
+    // In-Process-PDF-Renders bzw. Direkt-Object-Storage-Writes dieses Forks unter
+    // DEMSELBEN `_nonprod/<env>/run-<id>/w-<index>`-Prefix landen wie die HTTP-
+    // erzeugten PDFs. Sonst kollidieren parallele Worker (eigene DBs, gleiche
+    // Rechnungsnummern) im geteilten Bucket und überschreiben sich gegenseitig.
+    process.env.EPHEMERAL_WORKER_ID = String(idx);
   }
 }
 

@@ -28,6 +28,7 @@ import {
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 const ORIGINAL_RUN_ID = process.env.EPHEMERAL_RUN_ID;
+const ORIGINAL_WORKER_ID = process.env.EPHEMERAL_WORKER_ID;
 
 function setEnv(value: string | undefined): void {
   if (value === undefined) {
@@ -45,17 +46,27 @@ function setRunId(value: string | undefined): void {
   }
 }
 
+function setWorkerId(value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env.EPHEMERAL_WORKER_ID;
+  } else {
+    process.env.EPHEMERAL_WORKER_ID = value;
+  }
+}
+
 // Diese Suite läuft selbst unter dem Ephemeral-Orchestrator, der
-// `EPHEMERAL_RUN_ID` setzt (Task #1051). Für die umgebungs-genauen Prefix-
-// Assertions die Run-ID standardmäßig entfernen; die Run-ID-Scoping-Tests
-// setzen sie explizit.
+// `EPHEMERAL_RUN_ID` UND `EPHEMERAL_WORKER_ID` setzt (Task #1051/#1263). Für die
+// umgebungs-genauen Prefix-Assertions Run- und Worker-ID standardmäßig
+// entfernen; die Scoping-Tests setzen sie explizit.
 beforeEach(() => {
   setRunId(undefined);
+  setWorkerId(undefined);
 });
 
 afterEach(() => {
   setEnv(ORIGINAL_NODE_ENV);
   setRunId(ORIGINAL_RUN_ID);
+  setWorkerId(ORIGINAL_WORKER_ID);
 });
 
 describe("Invoice PDF storage isolation (Task #1042)", () => {
@@ -173,6 +184,63 @@ describe("Invoice PDF storage per-run isolation (Task #1051)", () => {
   it("Produktion ignoriert EPHEMERAL_RUN_ID (nackter Key-Space bleibt)", () => {
     setEnv("production");
     setRunId("should-be-ignored");
+    expect(getInvoicePdfKeyPrefix()).toBe("");
+    expect(buildInvoicePdfObjectKey("RE-2026-0034")).toBe("invoices/RE-2026-0034.pdf");
+  });
+});
+
+describe("Invoice PDF storage per-worker isolation (Task #1263)", () => {
+  it("EPHEMERAL_WORKER_ID hängt ein w-<id>-Segment an den lauf-gescopten Prefix", () => {
+    setEnv("test");
+    setRunId("run-xyz");
+    setWorkerId("0");
+    expect(getInvoicePdfKeyPrefix()).toBe("_nonprod/test/run-run-xyz/w-0");
+    expect(buildInvoicePdfObjectKey("RE-2026-0034")).toBe(
+      "_nonprod/test/run-run-xyz/w-0/invoices/RE-2026-0034.pdf",
+    );
+    expect(buildInvoicePdfObjectKey("RE-2026-0034", { leistungsnachweis: true })).toBe(
+      "_nonprod/test/run-run-xyz/w-0/invoices/RE-2026-0034-leistungsnachweis.pdf",
+    );
+  });
+
+  it("zwei Worker DESSELBEN Laufs schreiben dieselbe Rechnungsnummer auf verschiedene Keys", () => {
+    setEnv("test");
+    setRunId("same-run");
+    setWorkerId("0");
+    const keyW0 = buildInvoicePdfObjectKey("RE-2026-0001");
+    setWorkerId("1");
+    const keyW1 = buildInvoicePdfObjectKey("RE-2026-0001");
+    expect(keyW0).not.toBe(keyW1);
+    expect(keyW0).toBe("_nonprod/test/run-same-run/w-0/invoices/RE-2026-0001.pdf");
+    expect(keyW1).toBe("_nonprod/test/run-same-run/w-1/invoices/RE-2026-0001.pdf");
+  });
+
+  it("der Schreib-Guard akzeptiert den worker-gescopten Key und lehnt fremde Worker ab", () => {
+    setEnv("test");
+    setRunId("guard-run");
+    setWorkerId("0");
+    const key = buildInvoicePdfObjectKey("RE-2026-0034");
+    expect(() => assertInvoicePdfWriteKeyAllowed(key)).not.toThrow();
+    // Ein Key eines anderen Workers (oder des nackten Lauf-Prefix) wird abgelehnt.
+    expect(() =>
+      assertInvoicePdfWriteKeyAllowed("_nonprod/test/run-guard-run/w-1/invoices/RE-2026-0034.pdf"),
+    ).toThrow(/Object-Storage-Isolation/);
+    expect(() =>
+      assertInvoicePdfWriteKeyAllowed("_nonprod/test/run-guard-run/invoices/RE-2026-0034.pdf"),
+    ).toThrow(/Object-Storage-Isolation/);
+  });
+
+  it("ohne EPHEMERAL_WORKER_ID bleibt der Prefix unverändert (kein w-Segment)", () => {
+    setEnv("test");
+    setRunId("no-worker");
+    setWorkerId(undefined);
+    expect(getInvoicePdfKeyPrefix()).toBe("_nonprod/test/run-no-worker");
+  });
+
+  it("Produktion ignoriert EPHEMERAL_WORKER_ID (nackter Key-Space bleibt)", () => {
+    setEnv("production");
+    setRunId("ignored");
+    setWorkerId("3");
     expect(getInvoicePdfKeyPrefix()).toBe("");
     expect(buildInvoicePdfObjectKey("RE-2026-0034")).toBe("invoices/RE-2026-0034.pdf");
   });

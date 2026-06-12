@@ -540,14 +540,8 @@ interface WorkerHandle {
   baseUrl: string;
 }
 
-async function startWorker(dbName: string): Promise<WorkerHandle> {
+async function startWorker(dbName: string, workerIndex: number): Promise<WorkerHandle> {
   const dbUrl = urlForDb(dbName);
-
-  // Worker-DB aus der geseedeten Template klonen (schnell, kein erneuter Push).
-  const cloned = psql(adminUrl!, `CREATE DATABASE "${dbName}" TEMPLATE "${templateDb}"`);
-  if (!cloned.ok) {
-    throw new Error(`CREATE DATABASE ${dbName} TEMPLATE fehlgeschlagen: ${cloned.stdout}`);
-  }
 
   const port = await findFreePort();
   const baseUrl = `http://localhost:${port}`;
@@ -578,7 +572,18 @@ async function startWorker(dbName: string): Promise<WorkerHandle> {
     `[ephemeral-db] Starte App-Server (${dbName}) auf Port ${port} via ${spawnCmd} ${spawnArgs.join(" ")} (Logs: ${logPath}) ...`,
   );
   const child = spawn(spawnCmd, spawnArgs, {
-    env: { ...baseEnv, ...extraEnv, DATABASE_URL: dbUrl, PORT: String(port) },
+    // Task #1263: EPHEMERAL_WORKER_ID isoliert den PDF-Objektschlüssel-Raum pro
+    // Worker (zusätzlich zu EPHEMERAL_RUN_ID). Der gepaarte Vitest-Fork setzt in
+    // tests/setup.ts denselben Wert (über die VITEST_POOL_ID → Index-Zuordnung),
+    // sodass App-Server und Direkt-DB-/In-Process-Renders denselben
+    // `_nonprod/<env>/run-<id>/w-<index>`-Prefix bilden.
+    env: {
+      ...baseEnv,
+      ...extraEnv,
+      DATABASE_URL: dbUrl,
+      PORT: String(port),
+      EPHEMERAL_WORKER_ID: String(workerIndex),
+    },
     stdio: ["ignore", logFd, logFd],
   });
   serverChildren.push(child);
@@ -692,9 +697,24 @@ async function main(): Promise<number> {
     await clientBuildPromise;
   }
 
-  // 2) Worker-DBs aus der Template klonen + je einen App-Server starten (parallel).
+  // 2) Worker-DBs aus der Template klonen + je einen App-Server starten.
+  //
+  // Task #1263: Das Klonen läuft SERIELL, das Server-Booten danach parallel.
+  // `CREATE DATABASE ... TEMPLATE <src>` verlangt, dass NIEMAND sonst auf die
+  // Quelle zugreift — und ein laufendes Klonen zählt selbst als Zugriff. Zwei
+  // GLEICHZEITIGE Klone aus DERSELBEN Per-Lauf-Template (so wie es das frühere
+  // `Promise.all(map(startWorker))` tat) scheiterten daher sporadisch mit
+  // „source database ... is being accessed by other users". Serielles Klonen
+  // (über `cloneDbFromTemplate` mit Retry als zusätzliche Absicherung) entfernt
+  // die Race; das anschließende parallele Booten kostet keine zusätzliche
+  // Wall-Clock-Zeit, da es nicht mehr gegen die Quelle konkurriert.
   console.log(`[ephemeral-db] Provisioniere ${workerCount} Worker (DB + Server) ...`);
-  const handles = await Promise.all(workerDbs.map((db) => startWorker(db)));
+  for (const db of workerDbs) {
+    cloneDbFromTemplate(db, templateDb);
+  }
+  const handles = await Promise.all(
+    workerDbs.map((db, i) => startWorker(db, i)),
+  );
   const baseUrls = handles.map((h) => h.baseUrl);
 
   console.log(
