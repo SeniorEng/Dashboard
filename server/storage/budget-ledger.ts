@@ -23,7 +23,7 @@ import * as fifoBreakdown from "./budget/fifo-breakdown";
 import type { MonthlyHistoryBucket } from "@shared/domain/budget/history-aggregation";
 
 interface BudgetLedgerStorage {
-  createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation>;
+  createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient, options?: { allowStatutoryForSelbstzahler?: boolean }): Promise<BudgetAllocation>;
   getBudgetAllocations(customerId: number, year?: number): Promise<BudgetAllocation[]>;
 
   createBudgetTransaction(transaction: InsertBudgetTransaction, userId?: number): Promise<BudgetTransaction>;
@@ -61,8 +61,8 @@ interface BudgetLedgerStorage {
   getLatestBudgetTypeSettingsWithTransition(customerId: number, _tx?: DbClient): Promise<preferences.BudgetTypeSettingWithTransition[]>;
   upsertBudgetTypeSettings(customerId: number, settings: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents?: number | null; yearlyLimitCents?: number | null; validFrom?: string | null; validTo?: string | null }>, tx?: DbClient, userId?: number, options?: { allowStatutoryForSelbstzahler?: boolean }): Promise<CustomerBudgetTypeSetting[]>;
 
-  upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number, tx?: DbClient): Promise<void>;
-  upsertCarryoverAllocation(params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string }, userId?: number): Promise<void>;
+  upsertInitialBalanceAllocation(params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string }, userId?: number, tx?: DbClient, options?: { allowStatutoryForSelbstzahler?: boolean }): Promise<void>;
+  upsertCarryoverAllocation(params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string }, userId?: number, options?: { allowStatutoryForSelbstzahler?: boolean }): Promise<void>;
   getInitialBalanceAllocations(customerId: number, budgetType: string, tx?: DbClient): Promise<BudgetAllocation[]>;
   clearLegacyInitialBalanceFromSettings(customerId: number, budgetType: string, tx: DbClient, userId?: number): Promise<boolean>;
   // Task #876 — In-place-Aktivierung für den Initial-Balance-Flow (vorher

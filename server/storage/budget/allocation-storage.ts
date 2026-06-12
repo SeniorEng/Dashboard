@@ -23,8 +23,50 @@ import {
 } from "@shared/domain/budget-carryover-dedup";
 import { auditService } from "../../services/audit";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
+import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
+import { SelbstzahlerStatutoryPotError } from "./preferences-storage";
 
 const DEFAULT_MONTHLY_BUDGET_CENTS = BUDGET_45B_MAX_MONTHLY_CENTS;
+
+/**
+ * Task #1234 — Defense-in-Depth (Schwester zu Task #1233 auf dem
+ * type-settings-Pfad): Selbstzahler (`billingType='selbstzahler'`) dürfen
+ * NIE Geld aus einem gesetzlichen Pflegekassen-Topf (§45b/§45a/§39+§42a)
+ * bekommen. Der type-settings-Schreibpfad (`upsertBudgetTypeSettings`) gatet
+ * das bereits; dieselbe Invariante muss aber auch für die Allokations-/
+ * Startwert-Schreibpfade gelten — ein direkter Storage-Aufrufer (Skript,
+ * Import, künftige Route), der die Route umgeht, könnte sonst einen
+ * gesetzlichen Startwert/Allokation auf einen Selbstzahler seeden und die
+ * Invariante wieder aufweichen.
+ *
+ * Topf-Erkennung: ausschließlich über den SSoT-Validator
+ * (`validateSelbstzahlerBudget`) — ein Probe-Aufruf mit
+ * `billingType:"selbstzahler"` ist genau dann `!ok`, wenn der Topf ein
+ * gesperrter gesetzlicher Topf ist (keine zweite Whitelist).
+ *
+ * Greift NICHT, wenn der Aufrufer `allowStatutoryForSelbstzahler` setzt
+ * (legitime Korrektur-/Seed-/Migrations-Pfade) — identische Escape-Hatch-
+ * Konvention wie auf dem type-settings-Pfad.
+ */
+async function assertSelbstzahlerStatutoryAllocationAllowed(
+  customerId: number,
+  budgetType: string,
+  executor: DbClient,
+  allow?: boolean,
+): Promise<void> {
+  if (allow) return;
+  // Schneller Vorab-Check: handelt es sich überhaupt um einen gesetzlichen
+  // Topf? Wenn nicht, ist nichts zu prüfen (kein DB-Roundtrip nötig).
+  if (validateSelbstzahlerBudget({ billingType: "selbstzahler", intent: { budgetType } }).ok) {
+    return;
+  }
+  const cust = await customersRepo.findByIdIncludingDeleted(customerId, executor);
+  const v = validateSelbstzahlerBudget({
+    billingType: cust?.billingType,
+    intent: { budgetType },
+  });
+  if (!v.ok) throw new SelbstzahlerStatutoryPotError(v.message);
+}
 
 /**
  * Task #911 — Phasen-bewusste Auswahl der für einen Monat wirksamen §45b-
@@ -63,8 +105,19 @@ export function pickEffective45bSettingRow(
   return undefined;
 }
 
-export async function createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient): Promise<BudgetAllocation> {
+export async function createBudgetAllocation(
+  allocation: InsertBudgetAllocation,
+  userId?: number,
+  tx?: DbClient,
+  options?: { allowStatutoryForSelbstzahler?: boolean },
+): Promise<BudgetAllocation> {
   const executor = tx ?? db;
+  await assertSelbstzahlerStatutoryAllocationAllowed(
+    allocation.customerId,
+    allocation.budgetType,
+    executor,
+    options?.allowStatutoryForSelbstzahler,
+  );
   const result = await executor.insert(budgetAllocations).values({
     ...allocation,
     createdByUserId: userId,
@@ -91,8 +144,15 @@ export async function upsertInitialBalanceAllocation(
   params: { customerId: number; budgetType: string; year: number; month: number; amountCents: number; validFrom: string; expiresAt: string | null; notes?: string },
   userId?: number,
   tx?: DbClient,
+  options?: { allowStatutoryForSelbstzahler?: boolean },
 ): Promise<void> {
   const d = tx ?? db;
+  await assertSelbstzahlerStatutoryAllocationAllowed(
+    params.customerId,
+    params.budgetType,
+    d,
+    options?.allowStatutoryForSelbstzahler,
+  );
   const allExisting = await budgetAllocationsRepo.selectColumnsFrom({ id: budgetAllocations.id, deletedAt: budgetAllocations.deletedAt }, d)
     .where(and(
       eq(budgetAllocations.customerId, params.customerId),
@@ -198,8 +258,15 @@ export async function upsertInitialBalanceAllocation(
  */
 export async function upsertCarryoverAllocation(
   params: { customerId: number; budgetType: string; sourceYear: number; amountCents: number; notes?: string },
-  userId?: number
+  userId?: number,
+  options?: { allowStatutoryForSelbstzahler?: boolean },
 ): Promise<void> {
+  await assertSelbstzahlerStatutoryAllocationAllowed(
+    params.customerId,
+    params.budgetType,
+    db,
+    options?.allowStatutoryForSelbstzahler,
+  );
   // Task #716 — Fenster aus shared SSoT, damit Auto-/Manual-Pfad nicht
   // driften (siehe `ensureYearlyCarryover45b`).
   const { targetYear, validFrom, expiresAt } = carryoverWindowFor(params.sourceYear);
