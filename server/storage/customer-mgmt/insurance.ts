@@ -99,7 +99,7 @@ export async function getActiveCustomerCountForProvider(providerId: number): Pro
 // es gibt kein ON DELETE CASCADE auf insurance_providers, ein Löschen würde
 // ohnehin am FK scheitern).
 // ---------------------------------------------------------------------------
-const isUnusedInsuranceProvider = () =>
+export const isUnusedInsuranceProvider = () =>
   and(
     notExists(
       db
@@ -131,24 +131,35 @@ export async function getUnusedInsuranceProviderStats(): Promise<UnusedInsurance
   return { total, private: priv, statutory: total - priv };
 }
 
+/**
+ * Löscht die aktuell unbenutzten Pflegekassen über den bereitgestellten
+ * Executor (db ODER tx). Das DELETE matched NUR Zeilen, die zum Lösch-Zeitpunkt
+ * unreferenziert sind. Beim Aufruf mit einer Transaktion (z. B. der einmalige
+ * Prod-Startup-Cleanup) wird Auswertung+Löschung Teil der umschließenden
+ * Transaktion — es wird KEINE eigene/innere Transaktion geöffnet.
+ */
+export async function deleteUnusedInsuranceProvidersWithin(
+  exec: DbOrTx,
+): Promise<UnusedInsuranceProviderStats & { deletedIds: number[] }> {
+  const deleted = await exec
+    .delete(insuranceProviders)
+    .where(isUnusedInsuranceProvider())
+    .returning({ id: insuranceProviders.id, isPrivate: insuranceProviders.isPrivate });
+  const deletedIds = deleted.map((r) => r.id);
+  const priv = deleted.filter((r) => r.isPrivate).length;
+  return {
+    total: deleted.length,
+    private: priv,
+    statutory: deleted.length - priv,
+    deletedIds,
+  };
+}
+
 export async function deleteUnusedInsuranceProviders(): Promise<UnusedInsuranceProviderStats & { deletedIds: number[] }> {
   // Innerhalb EINER Transaktion neu auswerten und löschen: das DELETE matched nur
   // Zeilen, die zum Lösch-Zeitpunkt unreferenziert sind (Schutz gegen Race-
   // Conditions mit gleichzeitigen Zuweisungen/Rechnungen).
-  return await db.transaction(async (tx) => {
-    const deleted = await tx
-      .delete(insuranceProviders)
-      .where(isUnusedInsuranceProvider())
-      .returning({ id: insuranceProviders.id, isPrivate: insuranceProviders.isPrivate });
-    const deletedIds = deleted.map((r) => r.id);
-    const priv = deleted.filter((r) => r.isPrivate).length;
-    return {
-      total: deleted.length,
-      private: priv,
-      statutory: deleted.length - priv,
-      deletedIds,
-    };
-  });
+  return await db.transaction((tx) => deleteUnusedInsuranceProvidersWithin(tx));
 }
 
 export async function getCustomerCurrentInsurance(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {

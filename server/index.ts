@@ -351,6 +351,21 @@ async function runStartupTasks() {
       log(`Migrations-Ledger-Setup fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1262: Unbenutzte Pflegekassen in PRODUKTION GENAU EINMAL aufräumen
+    // (Ledger-gegated, exactly-once). In Dev/Test ein No-Op — dort bleibt das
+    // manuelle "Aufräumen" über die Superadmin-Route erhalten. Gelöschte Kassen
+    // tauchen beim täglichen EDIFACT-Reimport NICHT wieder auf (Insert-Guard in
+    // import-pflegekassen.ts). Läuft NACH importPflegekassen/seedPkvProviders
+    // und NACH ensureMigrationLedger (Ledger-Tabelle muss existieren).
+    const { cleanupUnusedInsuranceProvidersOnStartup } = await import(
+      "./startup/cleanup-unused-insurance-providers"
+    );
+    try {
+      await cleanupUnusedInsuranceProvidersOnStartup();
+    } catch (err) {
+      log(`Unbenutzte-Pflegekassen-Cleanup fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { migrateInvoiceStornoRefs } = await import("./startup/migrate-invoice-storno-refs");
     try {
       await migrateInvoiceStornoRefs();

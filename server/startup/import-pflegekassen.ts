@@ -2,6 +2,7 @@ import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { insuranceProviders } from "@shared/schema";
 import { log } from "../lib/log";
+import { hasUnusedInsuranceCleanupRun } from "./cleanup-unused-insurance-providers";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -154,10 +155,14 @@ export async function importPflegekassen(): Promise<void> {
     // Ausnahmen, bei denen Inserts erlaubt sind:
     //  - leere Tabelle (Erst-Onboarding / frische Test-DB) → volle Massen-Anlage,
     //  - explizit via `INSURANCE_PROVIDER_IMPORT_INSERT=1` erzwungen.
+    // Task #1262: Sobald der einmalige Prod-Cleanup gelaufen ist (Ledger-Zeile),
+    // wird selbst die leere Tabelle NICHT mehr massen-befüllt — sonst würden alle
+    // soeben gelöschten Kassen beim nächsten Boot wieder auftauchen.
     const forceInsert = ["1", "true"].includes(
       (process.env.INSURANCE_PROVIDER_IMPORT_INSERT ?? "").toLowerCase(),
     );
-    const allowInsert = forceInsert || existing.length === 0;
+    const cleanupHasRun = await hasUnusedInsuranceCleanupRun();
+    const allowInsert = forceInsert || (existing.length === 0 && !cleanupHasRun);
 
     let created = 0;
     let updated = 0;

@@ -2,6 +2,7 @@ import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { insuranceProviders } from "@shared/schema";
 import { log } from "../lib/log";
+import { hasUnusedInsuranceCleanupRun } from "./cleanup-unused-insurance-providers";
 
 interface PkvProviderSeed {
   name: string;
@@ -278,6 +279,9 @@ export async function seedPkvProviders(): Promise<void> {
     // Ausnahmen, bei denen Inserts erlaubt sind:
     //  - noch KEIN bekannter PKV-Anbieter vorhanden (Erst-Seeding / frische Test-DB),
     //  - explizit via `INSURANCE_PROVIDER_IMPORT_INSERT=1` erzwungen.
+    // Task #1262: Nach dem einmaligen Prod-Cleanup (Ledger-Zeile vorhanden) NIE
+    // wieder Massen-Inserts — sonst würden gelöschte PKV-Anbieter beim nächsten
+    // Boot wieder auftauchen, sobald kein verbliebener PKV-Anbieter existiert.
     const forceInsert = ["1", "true"].includes(
       (process.env.INSURANCE_PROVIDER_IMPORT_INSERT ?? "").toLowerCase(),
     );
@@ -286,7 +290,8 @@ export async function seedPkvProviders(): Promise<void> {
       .select({ name: insuranceProviders.name })
       .from(insuranceProviders);
     const anyPkvExists = allNames.some(r => knownNames.has((r.name ?? "").toLowerCase()));
-    const allowInsert = forceInsert || !anyPkvExists;
+    const cleanupHasRun = await hasUnusedInsuranceCleanupRun();
+    const allowInsert = forceInsert || (!anyPkvExists && !cleanupHasRun);
 
     let created = 0;
     let updated = 0;
