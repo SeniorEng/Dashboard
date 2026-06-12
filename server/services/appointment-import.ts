@@ -1047,10 +1047,25 @@ export async function executeImport(
             ))
             .limit(1);
 
-          let info = await rebookAppointmentConsumption(
-            { appointmentId, userId },
-            tx,
-          );
+          // Task #1243: Vorjahres-Pflegekasse-Dokumentation MUSS budget-neutral
+          // bleiben — `rebookAppointmentConsumption` würde sonst bei Drift
+          // Storno-/Neu-Buchungen schreiben. Für Dokumentations-Zeilen daher
+          // GAR KEINE Budget-Ledger-Mutation (No-Op-Result statt Rebook).
+          let info: Awaited<ReturnType<typeof rebookAppointmentConsumption>> =
+            isDocOnlyRow(row)
+              ? {
+                  rebooked: false,
+                  reversedTransactionIds: [],
+                  transactionDate: null,
+                  hauswirtschaftMinutes: 0,
+                  alltagsbegleitungMinutes: 0,
+                  previousTravelKm: 0,
+                  previousCustomerKm: 0,
+                  previousTransactionDate: null,
+                  previousHauswirtschaftMinutes: 0,
+                  previousAlltagsbegleitungMinutes: 0,
+                }
+              : await rebookAppointmentConsumption({ appointmentId, userId }, tx);
           let freshlyBooked = false;
 
           if (

@@ -237,6 +237,9 @@ router.post(
         status: trusted.status,
         budgetTrimInfo: r.budgetTrimInfo ?? null,
         diff: r.diff ?? null,
+        // Task #1243: Der Dokumentations-Entscheid wird in `executeImport`
+        // serverseitig neu berechnet (Defense-in-depth); hier nur Default.
+        documentationImport: false,
       };
     });
 
