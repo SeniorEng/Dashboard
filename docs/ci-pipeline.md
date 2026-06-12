@@ -83,6 +83,15 @@ bash scripts/github-sync.sh push    # Pusht main nach GitHub, falls Drift; No-op
 - **Token-Handling:** Das Skript pusht zuerst mit dem Standard-Connector-Token (`GITHUB_PERSONAL_ACCESS_TOKEN`) für reine Code-/Doku-Pushes. Scheitert der Push am fehlenden `workflow`-Scope (GH013 bei `.github/workflows/*`) **oder** ist kein Connector-Token vorhanden (z.B. im Deployment), fällt es automatisch auf den `GITHUB_WORKFLOW_PAT` (Classic-PAT mit `repo`+`workflow`) zurück. Nach erfolgreichem Push verifiziert es die Remote-SHA.
 - **Idempotenz:** Ist GitHub bereits auf dem lokalen Stand, ist `push` ein No-op (kein leerer Push, kein Fehler) — gefahrlos beliebig oft ausführbar.
 
+#### Zwei Auslöser im Arbeitsrhythmus (Task #1249)
+
+Der Sync ist fest in den Rhythmus eingebunden und läuft über **zwei sich ergänzende Auslöser**:
+
+1. **Nach jedem Merge (Post-Merge):** `scripts/post-merge.sh` ruft am Ende `bash scripts/github-sync.sh push` auf. Das ersetzt den manuellen, leicht zu vergessenden `git push` nach einem gemergten Task. Der Aufruf ist **best-effort**: er läuft unter einem 60-s-Timeout und mit `|| true`, ein Sync-Fehler (fehlender Token im Merge-Kontext, GitHub kurz nicht erreichbar) blockiert den Merge also NIE — die stündliche Kadenz holt ihn dann nach.
+2. **Stündliche Kadenz (Scheduled Deployment):** fängt alles auf, was der Post-Merge-Push ausgelassen hat (z.B. direkte Commits ohne Merge oder ein im Merge fehlgeschlagener Sync). Siehe unten.
+
+Drift-Signal jederzeit manuell prüfbar: `npm run sync:check` (= `bash scripts/github-sync.sh check`, read-only). Empfohlene Kadenz für das Scheduled Deployment: **stündlich** (`0 * * * *`).
+
 #### Cadence: Replit Scheduled Deployment
 
 GitHub Actions kann den Sync NICHT übernehmen: ein Actions-Workflow läuft auf GitHub und kann den Replit-Projekt-Stand nicht „herziehen" — der Push muss von der Replit-Seite ausgehen (nur dort liegen Arbeitskopie + Connector-Token). Die kanonische, wiederkehrende Cadence auf Replit ist deshalb ein **Scheduled Deployment** (separat vom Web-App-Deployment):
