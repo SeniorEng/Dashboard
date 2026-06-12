@@ -1,0 +1,11 @@
+Ticket: Test-Isolation komplettieren — Testläufe dürfen KEINE Kunden in der Dev-DB hinterlassen
+
+Befund (Claude-Validierung 12.06., Dev): Nach den heutigen Testläufen stehen 8 Test-Kunden in der langlebigen Dev-DB (IDs 4–11: T723-CASC/T723-PRIV-Scenario-*, T642-CASE1–3 in ZWEI Generationen = zwei Läufe hinterlassen je 3 Kunden). Kunden 4+5 haben überbuchte §45a/§42a-Töpfe und machen den Invarianten-Report dauerhaft rot (3 Conservation-Verletzungen: 5|umwandlung_45a, 4|umwandlung_45a, 4|ersatzpflege_39_42a). Das verletzt die Phase-0/BUG-18-Akzeptanz „zwei volle Testläufe hinterlassen 0 neue Einträge" — der bestehende Wächter (check:no-test-junk) prüft nur Services/Dokumenttypen, nicht Kunden.
+
+Aufgaben:
+1. Ursache: Identifizieren, welche Suiten (T723-Cascade, T642) gegen DATABASE_URL statt gegen die ephemere Test-DB (scripts/with-ephemeral-db.ts) laufen, und sie auf ephemere DB bzw. Transaktions-Rollback umstellen. Kein Suite-Skip, kein Test löschen.
+2. Wächter erweitern: check:no-test-junk (oder Startup-/CI-Check) schlägt zusätzlich fehl bei Kunden, deren vorname/nachname den Test-Mustern entspricht (T723-%, T642%, ZZ-E2E-% — Muster als gepflegte Konstante neben SERVICE_TEST_FILTER, eine Quelle, Ersetzungs-Regel). Ausnahme: dokumentierte ZZ-Test-Kunden von Alrik/Claude (Präfix "ZZ-Test ") bleiben erlaubt.
+3. Cleanup: Test-Kunden 4–11 inkl. abhängiger Daten (Termine, Budget-Zeilen, Settings) über den bestehenden Test-Cleanup-Pfad entfernen (referenzierte Einträge: deaktivieren + Report statt Hard-Delete). Danach Invarianten-Report wieder 0 Verletzungen.
+4. Beweis: Zwei volle Testlauf-Durchgänge (vitest + e2e-smoke) → 0 neue Kunden/Services/Dokumenttypen in der Dev-DB (Wächter grün), Invarianten-Report grün.
+
+Leitplanken: Keine Änderung an Produktiv-/Berechnungslogik. Nicht in server/storage/budget/* eingreifen (dort arbeitet #1253 — Konfliktvermeidung). ZZ-Test-Kunden 1–3 (SZ-Phase0-Retest, PG1-Phase0, PG2-Phase0) NICHT löschen. Falls eine Suite ohne langlebige DB nicht lauffähig ist: stoppen + reporten, nicht aufweichen.
