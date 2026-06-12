@@ -2,6 +2,8 @@
 
 **Zweck:** Sicherstellen, dass vor jedem Publish, das Schema-Drops auf die Production-DB anwendet, ein vollständiger und überprüfbarer Backup-Snapshot existiert. Erstellt als Reaktion auf Task #237 / Sprint #228.
 
+> **Abgrenzung:** Dieses Runbook betrifft die **Production-DB** (`PROD_DATABASE_URL`). Für die **Entwicklungs-DB** — Reseed auf eine saubere synthetische Basis (`npm run db:reseed-dev`) und Pre-Phase-Backup (`npm run db:backup-dev`) — siehe [`dev-database-runbook.md`](dev-database-runbook.md).
+
 > **Wichtig:** Replit/Neon liefert für die produktive Datenbank **automatische Point-in-Time-Recovery (PITR)** mit. Dieses Runbook ergänzt PITR um einen lokal kontrollierten `pg_dump`, damit
 > 1. ein Restore auch ohne Replit-Support möglich ist und
 > 2. die genau betroffenen Spalten/Tabellen einzeln wiederhergestellt werden können.

@@ -37,10 +37,6 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Start application"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "typecheck"
 
 [[workflows.workflow.tasks]]
@@ -55,17 +51,9 @@ args = "lint"
 task = "workflow.run"
 args = "e2e-smoke"
 
-[[workflows.workflow]]
-name = "Start application"
-author = "agent"
-
 [[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "NODE_ENV=test tsx server/index.ts"
-waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
+task = "workflow.run"
+args = "Start application"
 
 [[workflows.workflow]]
 name = "typecheck"
@@ -110,6 +98,18 @@ args = "npx tsx scripts/with-ephemeral-db.ts 5051 npm run test:e2e:smoke"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "NODE_ENV=test tsx server/index.ts"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [agent]
 mockupState = "FULLSTACK"

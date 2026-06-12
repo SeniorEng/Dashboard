@@ -54,7 +54,7 @@ Die ursprüngliche Volltext-Suche aus dem Dead-Code-Bericht (§6a) wurde 1:1 rep
 | Paket | Bucket | Trefferort(e) | Kommentar |
 |-------|:------:|---------------|-----------|
 | `@google-cloud/storage` | genutzt | `server/replit_integrations/object_storage/**` | Object-Storage-Integration. |
-| `@neondatabase/serverless` | genutzt | `server/lib/db.ts:1`, `script/seed.ts:1` | Neon-Postgres-Driver. |
+| `@neondatabase/serverless` | genutzt | `server/lib/db.ts:1` | Neon-Postgres-Driver. |
 | `@radix-ui/react-alert-dialog` | genutzt | `client/src/components/ui/alert-dialog.tsx`, `vite.config.ts` (manualChunks) | shadcn-Wrapper. |
 | `@radix-ui/react-checkbox` | genutzt | `client/src/components/ui/checkbox.tsx` | shadcn-Wrapper. |
 | `@radix-ui/react-dialog` | genutzt | `client/src/components/ui/dialog.tsx` (+ command.tsx, sheet.tsx) | shadcn-Wrapper. |

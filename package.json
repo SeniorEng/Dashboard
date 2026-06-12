@@ -11,6 +11,8 @@
     "check": "tsc",
     "test": "vitest run",
     "db:push": "drizzle-kit push",
+    "db:backup-dev": "bash scripts/backup-dev-db.sh",
+    "db:reseed-dev": "bash scripts/reseed-dev-db.sh",
     "gen:openapi": "tsx script/gen-openapi.ts",
     "sync:github": "bash scripts/github-sync.sh push",
     "sync:check": "bash scripts/github-sync.sh check",
