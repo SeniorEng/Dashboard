@@ -1,19 +1,28 @@
 /**
- * BUG-19-Rest / T003 — Bestands-Scan: persistierte §45b-Zeilen bei Selbstzahler-
- * Kunden deaktivieren (Dev-Datenbereinigung).
+ * BUG-19-Rest / T003 + Task #1226 — Bestands-Scan: persistierte §45b-Zeilen bei
+ * Selbstzahler-Kunden deaktivieren.
  *
- * Selbstzahler haben keinen Anspruch auf §45b/§45a/§39. Drei Bestandskunden
+ * Selbstzahler haben keinen Anspruch auf §45b/§45a/§39. Betroffene Bestandskunden
  * tragen eine persistierte, offene §45b-`enabled=true`-Zeile. Dieses Skript
  * deaktiviert sie über den regulären PUT-/type-settings-Pfad (append-only via
  * `upsertBudgetTypeSettings`, GoBD-konforme Transition + Audit mit Superadmin-
- * Akteur + `syncCarryoverAndExpiry`). KEINE Roh-UPDATEs.
+ * Akteur + `syncCarryoverAndExpiry`). KEINE Roh-UPDATEs, KEIN Delete (#1169).
+ *
+ * Zwei getrennte Ziel-Listen, je nach BASE_URL automatisch gewählt:
+ *  - `DEV_TARGETS` (localhost): die ursprüngliche Dev-Bereinigung
+ *    (138911/145919/203042) — bereits erledigt, bleibt als No-Op-Referenz.
+ *  - `PROD_TARGETS` (remote): Task #1226 — Kunde 41 ("Testkundin, Erika",
+ *    Selbstzahler) mit genau EINER offenen §45b-Zeile (id 25, validFrom
+ *    1970-01-01) ohne Buchungen/Rechnungen (read-only verifiziert, siehe
+ *    `docs/research/prod-report-kunde-41-45b.md`).
  *
  * WICHTIG: Die FULL settings list pro Kunde wird aus den AKTUELL OFFENEN
  * persistierten Zeilen gebaut (nicht aus der GET-Antwort, die synthetische
  * Default-Zeilen mit `id:null` mischt) — so werden keine §45a/§39-Default-Zeilen
  * materialisiert. §45b wird auf `enabled=false` gekippt, die übrigen offenen
  * Töpfe werden unverändert mitgeschickt (No-Op via `settingsEqual`), damit der
- * Partial-Payload-Pfad sie nicht schließt.
+ * Partial-Payload-Pfad sie nicht schließt. Kunde 41 hat NUR den §45b-Topf, daher
+ * ist die eine Zeile bereits die vollständige Liste.
  *
  * Proof-Kunden 203052/203058 werden NICHT angefasst (haben ohnehin keine
  * persistierten Zeilen).
@@ -58,7 +67,9 @@ type SettingPayload = {
 
 // FULL settings list pro Kunde = aktuell OFFENE persistierte Zeilen (valid_to IS
 // NULL), §45b auf enabled=false. Werte exakt aus der DB übernommen.
-const TARGETS: Record<number, SettingPayload[]> = {
+
+// Dev-Bereinigung (bereits erledigt) — bleibt als No-Op-Referenz für localhost.
+const DEV_TARGETS: Record<number, SettingPayload[]> = {
   138911: [
     { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: "1970-01-01", validTo: null },
     { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: "1970-01-01", validTo: null },
@@ -73,6 +84,17 @@ const TARGETS: Record<number, SettingPayload[]> = {
     { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: "2024-06-15", validTo: null },
   ],
 };
+
+// Prod-Altlast (Task #1226) — Kunde 41 hat NUR den §45b-Topf (id 25, offen,
+// validFrom 1970-01-01); die eine Zeile ist bereits die vollständige Liste.
+const PROD_TARGETS: Record<number, SettingPayload[]> = {
+  41: [
+    { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: "1970-01-01", validTo: null },
+  ],
+};
+
+// Ziel-Liste automatisch nach BASE_URL: localhost → Dev, remote → Prod.
+const TARGETS: Record<number, SettingPayload[]> = isLocalHost(BASE_URL) ? DEV_TARGETS : PROD_TARGETS;
 
 const FORBIDDEN = new Set([203052, 203058]);
 
