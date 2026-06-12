@@ -82,6 +82,22 @@ jobs:
       - name: Security audit (npm audit --audit-level=high)
         run: npm audit --audit-level=high
 
+      # Dead-Code-Report (Task #1238, Phase 0.2): knip läuft NUR als
+      # Warning-Artefakt — `continue-on-error: true` lässt das Gate niemals
+      # rot werden (das Aufräumen toter Dateien ist Phase 1, NICHT dieser Task).
+      # Version exakt gepinnt auf die 5.x-Linie, die knip.json adressiert.
+      - name: Dead-code report (knip — warning-only artifact)
+        continue-on-error: true
+        run: npx --yes knip@5.88.1 --reporter json > knip-report.json
+
+      - name: Upload knip report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knip-report
+          path: knip-report.json
+          if-no-files-found: ignore
+
   # -------------------------------------------------------------------------
   # DB-/Server-abhängige Gates: Vitest, Architektur-Fitness-Functions und
   # das Billing-Coverage-Gate. Brauchen Postgres + laufenden App-Server.
