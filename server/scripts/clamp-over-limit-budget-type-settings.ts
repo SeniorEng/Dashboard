@@ -238,6 +238,10 @@ async function main(): Promise<void> {
       p.clampedPayload,
       undefined,
       actorUserId,
+      // Task #1233 — Korrektur-Pfad: klemmt nur Über-Limit-Werte BESTEHENDER
+      // Zeilen; eine etwaige Selbstzahler-Altlast (Kunde 41) muss klemmbar
+      // bleiben, ohne am Defense-in-Depth-Guard zu scheitern.
+      { allowStatutoryForSelbstzahler: true },
     );
     await auditService.log(actorUserId, "budget_type_settings_updated", "budget", p.customerId, {
       reason: "statutory-clamp",

@@ -134,7 +134,7 @@ describe("BUG-19-Rest — §45b Lese-Default nach billingType (Anlage-Pfade)", (
     // schließen + neue Zeile), nicht den Same-Day-In-Place-Pfad.
     await upsertBudgetTypeSettings(customerId, [
       { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, validFrom: "2024-06-15" },
-    ]);
+    ], undefined, undefined, { allowStatutoryForSelbstzahler: true });
 
     const before = await apiGet<TypeSetting[]>(`/api/budget/${customerId}/type-settings`);
     expect(before.status).toBe(200);

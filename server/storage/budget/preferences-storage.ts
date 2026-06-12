@@ -7,9 +7,27 @@ import {
 } from "@shared/schema";
 import { and, asc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { addDays, formatDateISO, todayISO } from "@shared/utils/datetime";
+import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
 import { db } from "../../lib/db";
+import { customersRepo } from "../../repos";
 import type { DbClient } from "./types";
 import { auditService } from "../../services/audit";
+
+/**
+ * Task #1233 — Defense-in-Depth-Fehler: ein direkter Storage-Schreibpfad hat
+ * versucht, einem Selbstzahler einen gesetzlichen Pflegekassen-Topf
+ * (§45b/§45a/§39+§42a) mit `enabled=true` anzulegen. Der `code` ist
+ * wire-stabil identisch zur Route (`rejectBudgetIntent`), damit aufrufende
+ * Routen denselben 409-Fehlercode durchreichen können.
+ */
+export class SelbstzahlerStatutoryPotError extends Error {
+  readonly code: "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER";
+  constructor(message: string) {
+    super(message);
+    this.name = "SelbstzahlerStatutoryPotError";
+    this.code = "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER";
+  }
+}
 
 /**
  * Task #608 / #716: Backfill-Sentinel für `customer_budget_type_settings.validFrom`.
@@ -360,11 +378,45 @@ export async function upsertBudgetTypeSettings(
   settings: SettingPayload[],
   tx?: DbClient,
   userId?: number,
+  options?: { allowStatutoryForSelbstzahler?: boolean },
 ): Promise<CustomerBudgetTypeSetting[]> {
   const today = todayISO();
   const tomorrow = addDays(today, 1);
 
   const run = async (executor: DbClient): Promise<CustomerBudgetTypeSetting[]> => {
+    // Task #1233 — Defense-in-Depth: Selbstzahler dürfen NIE einen gesetzlichen
+    // Pflegekassen-Topf (§45b/§45a/§39+§42a) mit `enabled=true` bekommen. Die
+    // Route (PUT type-settings) und der Create-Pfad gaten das bereits über
+    // `rejectBudgetIntent`; dieser Backstop sichert dieselbe Invariante auch
+    // für direkte Storage-Aufrufer, die die Route umgehen, und gegen ein
+    // versehentliches Aufweichen der Route-Validierung. Greift NUR für
+    // `enabled=true`-Zeilen — Deaktivieren/Schließen bleibt immer erlaubt,
+    // damit Bestands-Altlasten (Prod-Kunde 41) zurückgebaut werden können.
+    // Legitime Korrektur-/Seed-Pfade (Altlast-Seed im Test, Klemm-Skript für
+    // Über-Limit-Werte) setzen `allowStatutoryForSelbstzahler`.
+    //
+    // Erkennung „gesetzlicher Topf?": ein Probe-Aufruf des SSoT-Validators mit
+    // `billingType:"selbstzahler"` ist genau dann `!ok`, wenn der Topf ein
+    // gesperrter Pflegekassen-Topf ist — so bleibt die Topf-Whitelist
+    // ausschließlich im Validator (keine zweite Kopie hier).
+    if (!options?.allowStatutoryForSelbstzahler) {
+      const hasEnabledStatutory = settings.some(s =>
+        s.enabled &&
+        !validateSelbstzahlerBudget({ billingType: "selbstzahler", intent: { budgetType: s.budgetType } }).ok,
+      );
+      if (hasEnabledStatutory) {
+        const cust = await customersRepo.findByIdIncludingDeleted(customerId, executor);
+        for (const s of settings) {
+          if (!s.enabled) continue;
+          const v = validateSelbstzahlerBudget({
+            billingType: cust?.billingType,
+            intent: { budgetType: s.budgetType },
+          });
+          if (!v.ok) throw new SelbstzahlerStatutoryPotError(v.message);
+        }
+      }
+    }
+
     const allRowsForCustomer = await executor.select()
       .from(customerBudgetTypeSettings)
       .where(eq(customerBudgetTypeSettings.customerId, customerId));
