@@ -30,6 +30,25 @@ const restrictInvalidateQueries = {
     "Direct queryClient.invalidateQueries() is forbidden. Use invalidateRelated() from '@/lib/query-invalidation' to keep cross-domain cache consistency. If a call is intentionally scoped to a single record (e.g. by ID), add an '// invalidate-direct-allowed: <reason>' comment on the line above AND '// eslint-disable-next-line no-restricted-syntax' to opt out.",
 };
 
+// BUG-19 (Facette A) — `DEFAULT_BUDGET_POT_ORDER` ist modul-privat in
+// `shared/domain/budgets.ts` und liefert nur den UNGEGATETEN Roh-Default
+// (§45b an, §45a/§39 aus). Wer den effektiven Default eines Kunden braucht,
+// MUSS `effectiveDefaultPots(customer)` nutzen, das den Selbstzahler-/
+// Anspruchs-Gate (`defaultStatutoryPotEnabled`) anwendet. Ein direkter Import
+// der Konstante umgeht den Gate (z. B. §45b fälschlich für Selbstzahler aktiv)
+// und ist deshalb verboten. Cross-Tree-Guard: `tests/architecture/
+// budget-default-pots-ssot.test.ts`.
+const restrictDefaultPotOrderImport = {
+  paths: [
+    {
+      name: "@shared/domain/budgets",
+      importNames: ["DEFAULT_BUDGET_POT_ORDER"],
+      message:
+        "DEFAULT_BUDGET_POT_ORDER is module-private. Use effectiveDefaultPots(customer) from '@shared/domain/budgets' instead — it applies the Selbstzahler/eligibility gate (defaultStatutoryPotEnabled). A raw import bypasses the gate (e.g. §45b wrongly default-active for Selbstzahler).",
+    },
+  ],
+};
+
 export default [
   {
     ignores: [
@@ -59,6 +78,7 @@ export default [
     },
     rules: {
       "no-restricted-syntax": ["error", restrictInvalidateQueries],
+      "no-restricted-imports": ["error", restrictDefaultPotOrderImport],
       "react-hooks/rules-of-hooks": "error",
     },
   },
@@ -87,6 +107,7 @@ export default [
     },
     rules: {
       "no-restricted-syntax": ["error", restrictSoftDeleteFrom],
+      "no-restricted-imports": ["error", restrictDefaultPotOrderImport],
     },
   },
 ];

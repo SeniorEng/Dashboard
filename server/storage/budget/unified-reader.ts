@@ -29,7 +29,7 @@ import type { DbClient } from "./types";
 import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
 import { calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
-import { defaultStatutoryPotEnabled } from "@shared/domain/budget-selbstzahler-validator";
+import { effectiveDefaultPots } from "@shared/domain/budgets";
 
 /**
  * Task #875 (Phase 5): aktive Hard-Holds (`budget_reservations.state = 'hold'`)
@@ -187,13 +187,20 @@ export async function readUnifiedBudgetAvailability(
   const settingsMap = new Map(typeSettings.map((s) => [s.budgetType, s]));
   const txYear = parseInt(asOfDate.slice(0, 4), 10);
 
+  // BUG-19 (Facette A): Default-Aktivierung (keine persistierte Zeile) kommt aus
+  // der SSoT `effectiveDefaultPots(customer)`, die denselben Selbstzahler-/
+  // Anspruchs-Gate durchläuft — Selbstzahler haben keinen §45b-Anspruch, §45a/§39
+  // sind grundsätzlich default-deaktiviert. Persistierte Zeilen behalten ihren
+  // `enabled`-Wert (Datenpflege via PUT type-settings). Kein Silent-Fallback auf
+  // "kein Selbstzahler" bei Load-Fehler. `pflegegrad` ist für den Default
+  // irrelevant (nur §45b/billingType-abhängig), daher hier nicht geladen.
+  const defaultEnabled = new Map(
+    effectiveDefaultPots({ billingType, pflegegrad: null }).map((p) => [p.budgetType, p.enabled]),
+  );
+
   // ---- §45b (Jahrestopf ohne statutarischen Fenster-Cap) ----
   const s45b = settingsMap.get("entlastungsbetrag_45b");
-  // BUG-19-Rest: Default-Aktivierung (keine persistierte Zeile) MUSS den
-  // Selbstzahler-Anspruchs-Gate durchlaufen — Selbstzahler haben keinen §45b-
-  // Anspruch. Persistierte Zeilen behalten ihren `enabled`-Wert (Datenpflege via
-  // PUT type-settings). Kein Silent-Fallback auf "kein Selbstzahler" bei Load-Fehler.
-  const enabled45b = s45b ? s45b.enabled : defaultStatutoryPotEnabled("entlastungsbetrag_45b", billingType);
+  const enabled45b = s45b ? s45b.enabled : (defaultEnabled.get("entlastungsbetrag_45b") ?? false);
   const inRange45b = !s45b ? true : isInRange(asOfDate, s45b.validFrom, s45b.validTo);
   let pot45b = emptyPot("entlastungsbetrag_45b", enabled45b, inRange45b);
   if (enabled45b && inRange45b) {
@@ -241,7 +248,7 @@ export async function readUnifiedBudgetAvailability(
 
   // ---- §45a (Monats-Cap via computeCapSlot) ----
   const s45a = settingsMap.get("umwandlung_45a");
-  const enabled45a = s45a ? s45a.enabled : false;
+  const enabled45a = s45a ? s45a.enabled : (defaultEnabled.get("umwandlung_45a") ?? false);
   const inRange45a = !s45a ? true : isInRange(asOfDate, s45a.validFrom, s45a.validTo);
   let pot45a = emptyPot("umwandlung_45a", enabled45a, inRange45a);
   if (enabled45a && inRange45a) {
@@ -276,7 +283,7 @@ export async function readUnifiedBudgetAvailability(
 
   // ---- §39/§42a (Jahres-Cap via computeCapSlot) ----
   const s39 = settingsMap.get("ersatzpflege_39_42a");
-  const enabled39 = s39 ? s39.enabled : false;
+  const enabled39 = s39 ? s39.enabled : (defaultEnabled.get("ersatzpflege_39_42a") ?? false);
   const inRange39 = !s39 ? true : isInRange(asOfDate, s39.validFrom, s39.validTo);
   let pot39 = emptyPot("ersatzpflege_39_42a", enabled39, inRange39);
   if (enabled39 && inRange39) {

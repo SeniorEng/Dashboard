@@ -2,7 +2,7 @@ import { badRequest } from "../lib/errors";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
 import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment, type SplitReversalRow } from "@shared/domain/budget-invoice-split";
-import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
+import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, customerServicePrices, budgetTransactions } from "@shared/schema";
@@ -10,7 +10,7 @@ import { eq, and, isNull, inArray, ne, desc, or } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
-import { monthlyServiceRecordsRepo, appointmentsRepo, customerServicePricesRepo } from "../repos";
+import { monthlyServiceRecordsRepo, appointmentsRepo, customerServicePricesRepo, customersRepo } from "../repos";
 
 export interface BuildLineItem extends Record<string, unknown> {
   appointmentId: number;
@@ -544,8 +544,20 @@ async function rederiveSplitFromCurrentAllocation(
   .where(and(inArray(appointments.id, apptIds), appointmentsRepo.activeOnly()));
   const dateByAppt = new Map(apptRows.map((a) => [a.id, a.date]));
 
-  // Standard-Cascade-Priorität (§45b → §45a → §39/§42a).
-  const orderedPots = [...DEFAULT_BUDGET_POT_ORDER]
+  // BUG-19 (Facette A) — Standard-Cascade-Priorität (§45b → §45a → §39/§42a)
+  // über die SSoT `effectiveDefaultPots` (mit Kundenkontext), nicht über die
+  // jetzt modul-private Konstante. Für die reine Reihenfolge ist der `enabled`-
+  // Zustand zwar irrelevant, der Resolver bleibt aber die einzige Default-Quelle.
+  const [splitCustomer] = await customersRepo
+    .selectColumnsFrom({
+      billingType: customersTable.billingType,
+      pflegegrad: customersTable.pflegegrad,
+    })
+    .where(eq(customersTable.id, customerId));
+  const orderedPots = effectiveDefaultPots({
+    billingType: splitCustomer?.billingType,
+    pflegegrad: splitCustomer?.pflegegrad,
+  })
     .sort((a, b) => a.priority - b.priority)
     .map((p) => p.budgetType as CappedBudgetPot);
 

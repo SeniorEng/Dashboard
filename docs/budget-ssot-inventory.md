@@ -216,7 +216,7 @@
 | `BUDGET_45A_MAX_BY_PFLEGEGRAD` | PG-abhängige §45a-Maxima | `clampToStatutoryMax`, Wizard, Settings-Validierung |
 | `BUDGET_39_42A_MAX_YEARLY_CENTS = 353900` | §39+42a Jahres-Cap | Cap-Calculator, Validierung |
 | `BUDGET_TYPES` | Pot-Enum | Schema, API, UI |
-| `DEFAULT_BUDGET_POT_ORDER` | Cascade-Standardreihenfolge | Consumption-Engine (Task #441) |
+| `effectiveDefaultPots(customer)` | Default-Töpfe (Reihenfolge + anspruchs-gegateter `enabled`-Zustand) ohne persistierte type-settings-Zeile; einzige Default-Quelle (BUG-19 Facette A). Roh-Reihenfolge-Konstante `DEFAULT_BUDGET_POT_ORDER` ist modul-privat. | Consumption-Engine, Invoice-Split, Budget-Route (Read-Default) |
 | `validate45bAmount` / `validate45aAmount` / `validate39_42aAmount` | Eingabe-Validierung | API + Form |
 | `get45aMaxForPflegegrad` | Statutorischer §45a-Resolver | `clampToStatutoryMax` |
 | `clampToStatutoryMax` | Zentrale Klemme an Cap | Cap-Calculator, Allocation-Storage |

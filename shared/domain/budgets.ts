@@ -1,6 +1,7 @@
 // shared/domain/budgets.ts
 // Central source of truth for all budget rules per German care law (SGB XI, PUEG 2025)
 import { formatEuroDE } from "../utils/money";
+import { defaultStatutoryPotEnabled } from "./budget-selbstzahler-validator";
 
 // ============================================
 // §45b Entlastungsbetrag
@@ -146,8 +147,17 @@ export function resolve45aMonthlyLimitCents(
  * keine kunden-spezifische `customer_budget_type_settings.priority`-Override
  * existiert. Hardcoded-Listen an anderen Stellen sind verboten — wer eine
  * neue Reihenfolge braucht, ändert hier zentral.
+ *
+ * BUG-19 (Facette A): Die Konstante ist bewusst MODUL-PRIVAT (kein `export`).
+ * Der `enabled`-Wert hier ist der reine strukturelle Roh-Default (§45b an,
+ * §45a/§39 aus) OHNE Anspruchs-Gate. Wer den effektiven Default eines Kunden
+ * braucht, MUSS `effectiveDefaultPots(customer)` nutzen — das den
+ * Selbstzahler-/Anspruchs-Gate (`defaultStatutoryPotEnabled`) anwendet. Ein
+ * direkter Import dieser Konstante ist per eslint (`no-restricted-imports`) und
+ * Architektur-Test verboten, weil er den Gate umgeht (z. B. §45b fälschlich
+ * für Selbstzahler aktiv).
  */
-export const DEFAULT_BUDGET_POT_ORDER: ReadonlyArray<{
+const DEFAULT_BUDGET_POT_ORDER: ReadonlyArray<{
   budgetType: BudgetType;
   enabled: boolean;
   priority: number;
@@ -156,6 +166,46 @@ export const DEFAULT_BUDGET_POT_ORDER: ReadonlyArray<{
   { budgetType: "umwandlung_45a", enabled: false, priority: 2 },
   { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3 },
 ];
+
+/** Minimaler Kunden-Kontext, den `effectiveDefaultPots` für den Gate braucht. */
+export interface DefaultPotCustomer {
+  /** `customers.billingType` — `"selbstzahler"` ⇒ kein Anspruch auf §45b/§45a/§39. */
+  billingType: string | null | undefined;
+  /** `customers.pflegegrad` — §45a/§39 sind erst ab PG 2 verfügbar. */
+  pflegegrad: number | null | undefined;
+}
+
+/** Ein effektiver Default-Topf: Reihenfolge (priority) + anspruchs-gegateter `enabled`-Zustand. */
+export interface EffectiveDefaultPot {
+  budgetType: BudgetType;
+  enabled: boolean;
+  priority: number;
+}
+
+/**
+ * BUG-19 (Facette A) — Single Source of Truth für die Default-Töpfe eines
+ * Kunden, wenn KEINE persistierte `customer_budget_type_settings`-Zeile
+ * existiert. Ersetzt jede direkte Nutzung von `DEFAULT_BUDGET_POT_ORDER`.
+ *
+ * Reihenfolge (priority) stammt aus der modul-privaten `DEFAULT_BUDGET_POT_ORDER`.
+ * Der `enabled`-Zustand wird AUSSCHLIESSLICH über den bereits existierenden
+ * Gate (`defaultStatutoryPotEnabled` → `validateSelbstzahlerBudget`) berechnet —
+ * KEINE zweite Prüf-Kopie:
+ *  - §45b ist default-aktiv, ABER nur für anspruchsberechtigte Kunden
+ *    (Selbstzahler ⇒ aus).
+ *  - §45a/§39+§42a sind grundsätzlich default-deaktiviert (Opt-in pro Kunde)
+ *    und damit auch für Pflegegrad < 2 nie aktiv.
+ *
+ * Pure: kein DB-Zugriff. Anzeige- und Buchungspfad rufen denselben Resolver,
+ * damit kein „Anzeige vs. Buchung"-Drift der Default-Aktivierung entsteht.
+ */
+export function effectiveDefaultPots(customer: DefaultPotCustomer): EffectiveDefaultPot[] {
+  return DEFAULT_BUDGET_POT_ORDER.map((pot) => ({
+    budgetType: pot.budgetType,
+    priority: pot.priority,
+    enabled: defaultStatutoryPotEnabled(pot.budgetType, customer.billingType),
+  }));
+}
 
 // ============================================
 // Statutorische Cap-Clamping (Task #441)

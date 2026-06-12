@@ -14,7 +14,7 @@ import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
-import { DEFAULT_BUDGET_POT_ORDER } from "@shared/domain/budgets";
+import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
@@ -402,11 +402,26 @@ export async function createCascadeConsumption(params: {
 
     await syncCarryoverAndExpiry(params.customerId, tx);
 
-    // Task #441 — Single Source of Truth aus `shared/domain/budgets`.
-    // Keine hardcoded Reihenfolge mehr — alle Aufrufer (Cascade, Preview,
-    // Reset-Flows) lesen aus `DEFAULT_BUDGET_POT_ORDER`.
+    // Task #441 / BUG-19 (Facette A) — Single Source of Truth aus
+    // `shared/domain/budgets`. Keine hardcoded Reihenfolge mehr — alle Aufrufer
+    // (Cascade, Preview, Reset-Flows) lesen über `effectiveDefaultPots`, das den
+    // Selbstzahler-/Anspruchs-Gate anwendet. Ohne persistierte type-settings-Zeile
+    // darf §45b so nicht fälschlich für Selbstzahler default-aktiv sein.
+    const [defaultPotCustomer] = await customersRepo
+      .selectColumnsFrom(
+        {
+          billingType: customers.billingType,
+          pflegegrad: customers.pflegegrad,
+        },
+        tx,
+      )
+      .where(eq(customers.id, params.customerId))
+      .limit(1);
     const defaultPriority: Array<{ budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null }> =
-      DEFAULT_BUDGET_POT_ORDER.map(d => ({ ...d, monthlyLimitCents: null }));
+      effectiveDefaultPots({
+        billingType: defaultPotCustomer?.billingType,
+        pflegegrad: defaultPotCustomer?.pflegegrad,
+      }).map(d => ({ ...d, monthlyLimitCents: null }));
 
     let priorityOrder: Array<{ budgetType: string; enabled: boolean; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null }>;
 

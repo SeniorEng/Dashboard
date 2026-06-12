@@ -8,8 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
-import { clampToStatutoryMax } from "@shared/domain/budgets";
-import { defaultStatutoryPotEnabled } from "@shared/domain/budget-selbstzahler-validator";
+import { clampToStatutoryMax, effectiveDefaultPots } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
 import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
@@ -244,10 +243,14 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   }
 
   const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-  // BUG-19-Rest: fehlende §45b-Zeile = Default-Aktivierung → muss den
-  // Selbstzahler-Anspruchs-Gate durchlaufen (keine eigene Zweitprüfung).
+  // BUG-19 (Facette A): fehlende §45b-Zeile = Default-Aktivierung → aus der SSoT
+  // `effectiveDefaultPots(customer)`, die den Selbstzahler-Anspruchs-Gate
+  // durchläuft (keine eigene Zweitprüfung). `pflegegrad` ist für den §45b-Default
+  // irrelevant (nur billingType-abhängig).
+  const default45bEnabled = effectiveDefaultPots({ billingType, pflegegrad: null })
+    .find(p => p.budgetType === "entlastungsbetrag_45b")?.enabled ?? false;
   const isCurrentlyActive = !s45b
-    ? defaultStatutoryPotEnabled("entlastungsbetrag_45b", billingType)
+    ? default45bEnabled
     : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
 
   // §45b ist ein Jahrestopf — kein harter Monats-Cap. Die "Verfügbar diesen
