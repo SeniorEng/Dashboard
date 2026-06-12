@@ -8,7 +8,7 @@ import {
   type CustomerBudgetPreferences,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
-import { eq, and, sql, lte, gte, isNull, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, isNull, isNotNull, desc, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, currentYearAndMonth, lastDayOfMonth } from "@shared/utils/datetime";
 import { BUDGET_45B_MAX_MONTHLY_CENTS, floorAutoAnchor45bToCurrentYear, clampToStatutoryMax, resolve45aMonthlyLimitCents } from "@shared/domain/budgets";
 import { enumerate45bStatutoryMonths, sum45bStatutoryMonths } from "@shared/domain/budget/statutory-45b";
@@ -624,6 +624,38 @@ async function calculateAllocated45b(
       .filter(a => (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom);
     if (monthlyEntries.length > 0) {
       budgetStartDate = monthlyEntries.reduce((min, a) =>
+        a.validFrom < min.validFrom ? a : min
+      ).validFrom;
+    }
+  }
+
+  // Task #1262 — Anker-Fallback aus SOFT-GELÖSCHTEN initial_balance-Zeilen.
+  //
+  // Ein soft-gelöschter Startwert ist weiterhin Beleg dafür, dass §45b für
+  // diesen Kunden eingerichtet wurde. Ohne diesen Fallback verlöre die
+  // Allocation nach dem Soft-Delete ALLER aktiven Startwerte ihren Anker:
+  // `existingAllocations` (nur aktive Zeilen) wäre §45b-leer, und ohne
+  // aktivierte `customer_budget_type_settings` (`s45bEnabled = false`) griffe
+  // unten das Eligibility-Gate → harter `return 0`. Der gelöschte Monat würde
+  // damit die reguläre 131-€-Monatsaufstockung DAUERHAFT blockieren (Task
+  // #642), obwohl ein gelöschter Startwert exakt dorthin zurückkehren muss.
+  //
+  // Wir ankern daher zusätzlich an der frühesten `validFrom` aller (auch
+  // soft-gelöschter) Startwerte. Das Skip-Set unten (`initialBalanceMonths`)
+  // zählt unverändert nur AKTIVE Startwerte, sodass gelöschte Monate wieder
+  // die Monatsaufstockung erhalten und ein noch aktiver Startwert seinen
+  // Monat weiterhin belegt (Doppelzählungsschutz aus Task #101 bleibt).
+  if (!budgetStartDate) {
+    const deletedInitialBalances = await budgetAllocationsRepo.selectFrom(d)
+      .where(and(
+        eq(budgetAllocations.customerId, customerId),
+        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
+        eq(budgetAllocations.source, "initial_balance"),
+        isNotNull(budgetAllocations.deletedAt),
+      ));
+    const withValidFrom = deletedInitialBalances.filter(a => a.validFrom);
+    if (withValidFrom.length > 0) {
+      budgetStartDate = withValidFrom.reduce((min, a) =>
         a.validFrom < min.validFrom ? a : min
       ).validFrom;
     }
