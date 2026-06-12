@@ -1,38 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { DOCUMENT_TYPE_TEST_NAME_PATTERN } from "../server/services/test-data-cleanup";
+import {
+  isDocumentTypeTestJunk,
+  DOCUMENT_TYPE_WHITELIST,
+} from "../server/services/test-data-cleanup";
 
-// BUG-18 — Der broadened Purge-Filter (`^DOC[0-9]+_[0-9]+_`) MUSS jeden
-// generierten Test-Müll-Dokumenttyp treffen, aber KEINEN der echten deutschen
-// Dokumenttyp-Namen. Beide Seiten werden hier gepinnt, damit eine spätere
-// Filter-Verengung/-Verbreiterung nicht versehentlich echte Stammdaten erfasst
-// oder Müll durchrutschen lässt. Importiert das EXAKTE Muster aus dem
-// Purge-Service (SSoT) und prüft es gegen JS-`RegExp` (zeichengleich zu POSIX
-// `~`).
-
-const REAL_DOC_TYPE_NAMES = [
-  "Abtretungserklärung",
-  "Arbeitsunterweisung",
-  "Arbeitsvertrag",
-  "Auskunftsvollmacht zur Budgetabfrage (SGB XI)",
-  "Betreuungsvertrag (Pflegekasse)",
-  "Datenschutzerklärung",
-  "Datenschutzvereinbarung",
-  "Dienstleistungsvertrag (Selbstzahler)",
-  "Einwilligungserklärung",
-  "Erste Hilfe Zertifikat",
-  "Forderungsabtretung",
-  "Führerschein",
-  "Führungszeugnis - einfach",
-  "Führungszeugnis - erweitert",
-  "Kundenvertrag",
-  "Personenbeförderungsschein",
-  "Pflegegradbescheid",
-  "SEPA-Lastschriftmandat",
-  "Schlüsselübergabeprotokoll",
-  "Sonstiges Dokument",
-  "Vollmacht",
-  "Ärztliche Verordnung",
-];
+// BUG-18 (Task #1230) — Der Purge-/Guard-Filter folgt jetzt einem WHITELIST-
+// Ansatz statt einer Namens-Pattern-Blacklist: Test-Müll ist JEDER Dokumenttyp
+// mit DOC-Prefix, der NICHT in der zentralen `DOCUMENT_TYPE_WHITELIST` steht.
+// Dieser Test pinnt beide Seiten — die 22 echten Stammdaten-Typen dürfen NIE
+// als Müll klassifiziert werden, jeder generierte/abweichende `DOC*`-Typ MUSS.
+// Importiert die EXAKTE Klassifikation (`isDocumentTypeTestJunk`) aus dem
+// Purge-Service (SSoT, zeichengleich zum SQL-Filter `LIKE 'DOC%' AND NOT IN …`).
 
 const GENERATED_JUNK_NAMES = [
   "DOC6_1777740879740_o27v3",
@@ -40,20 +18,37 @@ const GENERATED_JUNK_NAMES = [
   "DOC42_1234567890_zz",
   "DOC0_0_x",
   "DOC2030_1699999999999_carecon",
+  // Bewusst abweichende DOC*-Varianten, die eine reine Epoch-Pattern-Blacklist
+  // hätte durchrutschen lassen — die Whitelist fängt sie ab:
+  "DOCabc",
+  "DOC_freihand",
+  "DOCXYZ_violation",
 ];
 
-describe("BUG-18 — DOCUMENT_TYPE_TEST_NAME_PATTERN", () => {
-  const re = new RegExp(DOCUMENT_TYPE_TEST_NAME_PATTERN);
-
-  it("trifft ALLE generierten Test-Müll-Dokumenttypen", () => {
+describe("BUG-18 — isDocumentTypeTestJunk (Whitelist)", () => {
+  it("klassifiziert ALLE generierten/abweichenden DOC*-Typen als Müll", () => {
     for (const name of GENERATED_JUNK_NAMES) {
-      expect(re.test(name), `sollte matchen: ${name}`).toBe(true);
+      expect(isDocumentTypeTestJunk(name), `sollte Müll sein: ${name}`).toBe(true);
     }
   });
 
-  it("trifft KEINEN der 22 echten deutschen Dokumenttyp-Namen", () => {
-    for (const name of REAL_DOC_TYPE_NAMES) {
-      expect(re.test(name), `darf NICHT matchen: ${name}`).toBe(false);
+  it("klassifiziert KEINEN der 22 echten Whitelist-Dokumenttypen als Müll", () => {
+    for (const name of DOCUMENT_TYPE_WHITELIST) {
+      expect(isDocumentTypeTestJunk(name), `darf NICHT Müll sein: ${name}`).toBe(false);
+    }
+  });
+
+  it("schont Nicht-DOC-Namen (z.B. admin-angelegte Sonder-Typen ohne DOC-Prefix)", () => {
+    for (const name of ["Sonstiges", "Mein eigener Typ", "Datenschutz-Sonderfall", "Dokument X"]) {
+      expect(isDocumentTypeTestJunk(name), `darf NICHT Müll sein: ${name}`).toBe(false);
+    }
+  });
+
+  it("enthält genau 22 echte Dokumenttypen ohne DOC-Prefix", () => {
+    expect(DOCUMENT_TYPE_WHITELIST).toHaveLength(22);
+    expect(new Set(DOCUMENT_TYPE_WHITELIST).size).toBe(22);
+    for (const name of DOCUMENT_TYPE_WHITELIST) {
+      expect(name.startsWith("DOC"), `Whitelist-Eintrag sollte nicht mit DOC beginnen: ${name}`).toBe(false);
     }
   });
 });

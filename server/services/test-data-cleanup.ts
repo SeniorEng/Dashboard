@@ -737,20 +737,68 @@ export async function purgeTestServices(ids?: number[]): Promise<PurgeServicesRe
 //     realen Dokumente per CASCADE verloren gehen.
 // ---------------------------------------------------------------------------
 
-// BUG-18: Generierte Test-Dokumenttypen folgen dem Schema
-// `DOC<n>_<epoch-ms>_<rand>` (z.B. `DOC6_1777740879740_o27v3`). Der frühere
-// LIKE `DOC%_17777%` traf nur ein schmales Epoch-Fenster (~125 von 2030). Der
-// POSIX-Regex `^DOC[0-9]+_[0-9]+_` deckt ALLE generierten Marker ab und schlägt
-// bei KEINEM der echten deutschen Dokumenttyp-Namen an (keiner beginnt mit
-// `DOC<Ziffer>_<Ziffer>_`). Bewusst case-sensitiv (Müll ist immer `DOC...`).
+// BUG-18 (Task #1230): WHITELIST-Ansatz statt Namens-Pattern-Blacklist.
 //
-// SSoT: Das reine Namensmuster wird separat als String exportiert, damit der
-// Nachhaltigkeits-Guard (`scripts/check-no-test-junk.ts`) und der Unit-Test
-// (`tests/document-type-test-filter-regex.test.ts`) EXAKT dasselbe Muster
-// gegen JS-`RegExp` prüfen können. POSIX-`~` (Postgres) und JS-`RegExp`
-// stimmen für dieses Muster zeichengenau überein.
-export const DOCUMENT_TYPE_TEST_NAME_PATTERN = "^DOC[0-9]+_[0-9]+_";
-export const DOCUMENT_TYPE_TEST_FILTER = sql`(${documentTypes.name} ~ ${DOCUMENT_TYPE_TEST_NAME_PATTERN}::text)`;
+// Historische Testläufe haben generierte „Müll"-Dokumenttypen mit DOC-Prefix
+// (`DOC<n>_<epoch-ms>_<rand>`, z.B. `DOC6_1777740879740_o27v3`) als
+// Pflichtdokumenttypen angelegt. Eine nachzuschärfende Namens-Blacklist
+// (früher `DOC%_17777%`, dann `^DOC[0-9]+_[0-9]+_`) ließ immer wieder Müll
+// durchrutschen. Stattdessen fixieren wir die ECHTEN Dokumenttypen als
+// Whitelist (SSoT, aus Dev abgeleitet, mit Alrik abzugleichen): Test-Müll ist
+// JEDER Dokumenttyp mit DOC-Prefix, der NICHT in der Whitelist steht.
+//
+// Echte Typen beginnen NIE mit „DOC"; die `NOT IN`-Whitelist ist daher
+// zusätzlicher Gürtel-und-Hosenträger-Schutz, falls je ein echter Typ mit
+// DOC-Prefix angelegt würde. Bewusst case-sensitiv (Müll ist immer `DOC...`).
+//
+// SSoT: Whitelist + Prefix + reine Klassifikation werden exportiert, damit der
+// Nachhaltigkeits-Guard (`scripts/check-no-test-junk.ts`), das CLI-Skript
+// (`server/scripts/cleanup-test-data.ts`), das Prod-Migrations-Skript
+// (`server/startup/purge-junk-master-data.ts`) und der Unit-Test EXAKT dieselbe
+// Klassifikation nutzen. SQL-`LIKE 'DOC%'` (case-sensitiv) ≡ JS-`startsWith`.
+export const DOCUMENT_TYPE_WHITELIST: readonly string[] = [
+  "Führerschein",
+  "Arbeitsvertrag",
+  "Arbeitsunterweisung",
+  "Kundenvertrag",
+  "Forderungsabtretung",
+  "Datenschutzerklärung",
+  "Erste Hilfe Zertifikat",
+  "Führungszeugnis - einfach",
+  "Führungszeugnis - erweitert",
+  "Personenbeförderungsschein",
+  "Schlüsselübergabeprotokoll",
+  "Vollmacht",
+  "Einwilligungserklärung",
+  "Sonstiges Dokument",
+  "Ärztliche Verordnung",
+  "Pflegegradbescheid",
+  "Betreuungsvertrag (Pflegekasse)",
+  "Dienstleistungsvertrag (Selbstzahler)",
+  "Datenschutzvereinbarung",
+  "SEPA-Lastschriftmandat",
+  "Abtretungserklärung",
+  "Auskunftsvollmacht zur Budgetabfrage (SGB XI)",
+] as const;
+
+// Case-sensitiver Müll-Marker-Prefix.
+export const DOCUMENT_TYPE_JUNK_PREFIX = "DOC";
+
+const DOCUMENT_TYPE_WHITELIST_SET = new Set<string>(DOCUMENT_TYPE_WHITELIST);
+
+// Reine Klassifikation (für Guard/Unit-Test ohne DB): DOC-Prefix UND nicht
+// gewhitelistet. Zeichengleich zum SQL-Filter darunter.
+export function isDocumentTypeTestJunk(name: string): boolean {
+  return name.startsWith(DOCUMENT_TYPE_JUNK_PREFIX) && !DOCUMENT_TYPE_WHITELIST_SET.has(name);
+}
+
+export const DOCUMENT_TYPE_TEST_FILTER = sql`(
+  ${documentTypes.name} LIKE 'DOC%'
+  AND ${documentTypes.name} NOT IN (${sql.join(
+    DOCUMENT_TYPE_WHITELIST.map((n) => sql`${n}`),
+    sql`, `,
+  )})
+)`;
 
 export interface PurgeDocumentTypesResult {
   deleted: number[];

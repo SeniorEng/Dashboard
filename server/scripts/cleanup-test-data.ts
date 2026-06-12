@@ -23,6 +23,7 @@
 
 import { sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
+import { DOCUMENT_TYPE_WHITELIST } from "../services/test-data-cleanup";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -163,15 +164,18 @@ const SERVICE_TEST_CONDITION = sql`(
   OR LOWER(code) LIKE 'tlwrite#_%' ESCAPE '#'
 )`;
 
-// Test-„Müll"-Dokumenttypen (BUG-18): generierte Marker folgen dem Schema
-// `DOC<n>_<epoch-ms>_<rand>` (z.B. `DOC6_1777740879740_o27v3`). Der frühere
-// LIKE `DOC%_17777%` traf nur ein schmales Epoch-Fenster — der POSIX-Regex
-// `^DOC[0-9]+_[0-9]+_` deckt ALLE generierten Marker ab und schlägt bei KEINEM
-// echten deutschen Dokumenttyp-Namen an. MUSS deckungsgleich mit
-// DOCUMENT_TYPE_TEST_NAME_PATTERN/DOCUMENT_TYPE_TEST_FILTER in
-// server/services/test-data-cleanup.ts bleiben (gleiches Muster, nur ohne die
-// Drizzle-Spaltenref).
-const DOCUMENT_TYPE_TEST_CONDITION = sql`(name ~ '^DOC[0-9]+_[0-9]+_')`;
+// Test-„Müll"-Dokumenttypen (BUG-18, Task #1230): WHITELIST-Ansatz. Müll ist
+// JEDER Dokumenttyp mit DOC-Prefix, der NICHT in der zentralen
+// DOCUMENT_TYPE_WHITELIST steht. Die Whitelist wird direkt aus
+// server/services/test-data-cleanup.ts importiert (SSoT, keine Duplikat-Drift).
+// Zeichengleich zu DOCUMENT_TYPE_TEST_FILTER dort (LIKE 'DOC%' AND NOT IN …).
+const DOCUMENT_TYPE_TEST_CONDITION = sql`(
+  name LIKE 'DOC%'
+  AND name NOT IN (${sql.join(
+    DOCUMENT_TYPE_WHITELIST.map((n) => sql`${n}`),
+    sql`, `,
+  )})
+)`;
 
 interface Snapshot {
   realCustomers: number;

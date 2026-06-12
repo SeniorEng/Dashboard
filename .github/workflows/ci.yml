@@ -201,7 +201,8 @@ jobs:
         run: npx tsx script/coverage-gate.ts month-close-scheduler
 
       # Nachhaltigkeits-Guard (BUG-18): nach dem vollen Vitest-Lauf darf kein
-      # Test-Müll (Services `%_test_%` / Dokumenttypen `^DOC[0-9]+_[0-9]+_`) in
+      # Test-Müll (Services `tlsicht_%`/`tlwrite_%`/`qs-test-%`/`%_test_%` /
+      # Dokumenttypen mit `DOC`-Prefix außerhalb der DOCUMENT_TYPE_WHITELIST) in
       # der DB verbleiben. Importiert dieselben Filter-Konstanten wie der
       # Purge-Service. Exit 1 zwingt zu sauberer Test-Cleanup-Disziplin.
       - name: No-test-junk guard (services/doc-types)
