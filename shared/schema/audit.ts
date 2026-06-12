@@ -102,6 +102,7 @@ export const AUDIT_ACTIONS = [
   "invoice_creation_pot_unresolved",
   "insurance_providers_cleanup",
   "appointment_status_restored_from_expired",
+  "budget_reconcile_skipped",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

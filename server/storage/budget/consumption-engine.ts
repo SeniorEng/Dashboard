@@ -2,6 +2,7 @@ import {
   budgetAllocations,
   budgetTransactions,
   customers,
+  users,
   type BudgetTransaction,
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
@@ -20,6 +21,7 @@ import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
 import { budgetAllocationsRepo, customersRepo } from "../../repos";
+import { auditService } from "../../services/audit";
 
 type ConsumptionParams = {
   appointmentId?: number;
@@ -636,12 +638,21 @@ export async function createCascadeConsumption(params: {
     // Bleibt ein Rest (`remaining > 0`), gibt es KEINEN privaten Topf
     // (Pflegekasse ohne Privatzahlung) → der Aufrufer wirft den Hard-Block.
     if (remaining === 0 && allTransactions.length > 0) {
-      await reconcileAppointmentLegFieldDrift(tx, allTransactions, {
-        hauswirtschaftCents: params.hauswirtschaftCents,
-        alltagsbegleitungCents: params.alltagsbegleitungCents,
-        travelCents: params.travelCents,
-        customerKilometersCents: params.customerKilometersCents,
-      });
+      await reconcileAppointmentLegFieldDrift(
+        tx,
+        allTransactions,
+        {
+          hauswirtschaftCents: params.hauswirtschaftCents,
+          alltagsbegleitungCents: params.alltagsbegleitungCents,
+          travelCents: params.travelCents,
+          customerKilometersCents: params.customerKilometersCents,
+        },
+        {
+          customerId: params.customerId,
+          appointmentId: params.appointmentId,
+          userId: params.userId,
+        },
+      );
     }
 
     return {
@@ -687,6 +698,7 @@ async function reconcileAppointmentLegFieldDrift(
     travelCents: number;
     customerKilometersCents: number;
   },
+  ctx: { customerId: number; appointmentId: number; userId?: number },
 ): Promise<void> {
   const consumptions = appointmentTxs.filter(
     (t) => t.transactionType === "consumption",
@@ -713,9 +725,31 @@ async function reconcileAppointmentLegFieldDrift(
 
   // Schutz: Σ Δ muss 0 sein, sonst verschiebt der UPDATE die pro-Tx-
   // Betragsinvariante. Bei Drift ≠ 0 liegt eine tiefere Inkonsistenz vor
-  // (Cascade hat nicht vollständig konsumiert) — lautlos auslassen statt
-  // falsch zu korrigieren.
-  if (dHw + dAb + dTv + dCk !== 0) return;
+  // (Cascade hat nicht vollständig konsumiert) — wir korrigieren bewusst
+  // NICHT (das würde die pro-Tx-Betragsinvariante brechen). Statt die
+  // Anomalie wie früher lautlos zu verschlucken (Befund C-02), wird sie mit
+  // vollem Kontext in `audit_log` protokolliert; die Buchung selbst bleibt
+  // unverändert.
+  if (dHw + dAb + dTv + dCk !== 0) {
+    await logReconcileSkip(tx, ctx, {
+      expected: full,
+      actual: {
+        hauswirtschaftCents: sumHw,
+        alltagsbegleitungCents: sumAb,
+        travelCents: sumTv,
+        customerKilometersCents: sumCk,
+      },
+      deltas: {
+        hauswirtschaftCents: dHw,
+        alltagsbegleitungCents: dAb,
+        travelCents: dTv,
+        customerKilometersCents: dCk,
+      },
+      deltaSumCents: dHw + dAb + dTv + dCk,
+      consumptionTxIds: consumptions.map((c) => c.id),
+    });
+    return;
+  }
 
   const last = consumptions[consumptions.length - 1];
   const newHw = (last.hauswirtschaftCents ?? 0) + dHw;
@@ -740,6 +774,84 @@ async function reconcileAppointmentLegFieldDrift(
   (last as { alltagsbegleitungCents: number | null }).alltagsbegleitungCents = newAb;
   (last as { travelCents: number | null }).travelCents = newTv;
   (last as { customerKilometersCents: number | null }).customerKilometersCents = newCk;
+}
+
+/**
+ * Befund C-02 — protokolliert den Fall, dass der Final-Reconcile eine
+ * Service-Feld-Drift mit Σ Δ ≠ 0 vorfindet (tiefere Inkonsistenz: die Cascade
+ * hat den Termin nicht vollständig konsumiert). Dieser Zweig korrigiert
+ * absichtlich NICHTS und mutiert keine Buchung — er schreibt nur einen
+ * Audit-Eintrag mit vollem Kontext, damit die Anomalie nicht mehr lautlos
+ * verschwindet.
+ *
+ * Best-Effort (kein `exec=tx`): Ein gestörter Audit-Insert darf die bereits
+ * gebuchte Konsumtion NICHT zurückrollen. `auditService.log` ohne `exec`
+ * schluckt Fehler intern und schreibt nur in die Konsole — passend für reine
+ * Beobachtbarkeit ohne begleitende Mutation.
+ *
+ * Bekannte Grenze: Der Insert committet auf einer eigenen Verbindung, während
+ * die äußere Buchungs-Tx noch offen ist. Rollt diese später zurück (z.B. in
+ * `rebookDisabledBudgetTransactions`, das viele Buchungen in EINER Tx schleift),
+ * bleibt ein Eintrag stehen, der „Anomalie BEOBACHTET" bedeutet — nicht
+ * „Anomalie committet". Für einen Anomalie-Melder ist das akzeptabel.
+ */
+async function logReconcileSkip(
+  tx: DbClient,
+  ctx: { customerId: number; appointmentId: number; userId?: number },
+  detail: {
+    expected: {
+      hauswirtschaftCents: number;
+      alltagsbegleitungCents: number;
+      travelCents: number;
+      customerKilometersCents: number;
+    };
+    actual: {
+      hauswirtschaftCents: number;
+      alltagsbegleitungCents: number;
+      travelCents: number;
+      customerKilometersCents: number;
+    };
+    deltas: {
+      hauswirtschaftCents: number;
+      alltagsbegleitungCents: number;
+      travelCents: number;
+      customerKilometersCents: number;
+    };
+    deltaSumCents: number;
+    consumptionTxIds: number[];
+  },
+): Promise<void> {
+  let actorUserId = ctx.userId ?? null;
+  if (actorUserId == null) {
+    // Kein expliziter Aufrufer (z.B. System-/Backfill-Pfad): ältesten aktiven
+    // Benutzer als System-Actor nehmen, damit die NOT-NULL-FK auf `users` hält.
+    const [sys] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.isActive, true))
+      .orderBy(asc(users.id))
+      .limit(1);
+    actorUserId = sys?.id ?? null;
+  }
+  if (actorUserId == null) {
+    console.error(
+      "[reconcileAppointmentLegFieldDrift] C-02 Skip ohne auflösbaren Audit-Actor",
+      { ...ctx, ...detail },
+    );
+    return;
+  }
+
+  await auditService.log(
+    actorUserId,
+    "budget_reconcile_skipped",
+    "appointment",
+    ctx.appointmentId,
+    {
+      customerId: ctx.customerId,
+      reason: "leg_field_drift_sum_nonzero",
+      ...detail,
+    },
+  );
 }
 
 export async function createConsumptionTransaction(params: {
