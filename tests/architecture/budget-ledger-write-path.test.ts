@@ -29,8 +29,14 @@ const WHITELIST = new Set<string>([]);
 /** Drizzle-Schreibpfad: `db.update(budgetLedger)` / `db.delete(budgetLedger)`. */
 const DRIZZLE_WRITE_RE = /\.(?:update|delete)\s*\(\s*budgetLedger\b/;
 
-/** Rohes SQL: `UPDATE budget_ledger …` / `DELETE FROM budget_ledger …`. */
-const RAW_SQL_WRITE_RE = /\b(?:UPDATE\s+budget_ledger|DELETE\s+FROM\s+budget_ledger)\b/i;
+/**
+ * Rohes SQL: `UPDATE budget_ledger …` / `DELETE FROM budget_ledger …`.
+ * Erfasst auch zitierte (`"budget_ledger"`) und schema-qualifizierte
+ * (`public.budget_ledger`) Schreibweisen, damit der Append-only-Schutz nicht
+ * trivial umgangen werden kann. Der `\b` direkt hinter `budget_ledger` hält die
+ * Regel präzise (matcht NICHT `budget_ledger_archive` o. ä.).
+ */
+const RAW_SQL_WRITE_RE = /\b(?:UPDATE|DELETE\s+FROM)\s+(?:public\.)?"?budget_ledger\b/i;
 
 export function detectLedgerWritePathViolations(files: ScanFile[]): GuardViolation[] {
   const out: GuardViolation[] = [];
@@ -83,12 +89,32 @@ describe("Architektur — budget_ledger Append-only-Wächter (Task #1238)", () =
         rel: "server/scripts/fake-raw-sql.ts",
         content: "await db.execute(sql`DELETE FROM budget_ledger WHERE id = 1`);",
       },
+      {
+        rel: "server/scripts/fake-raw-quoted.ts",
+        content: 'await db.execute(sql`UPDATE "budget_ledger" SET service_cost_cents = 0`);',
+      },
+      {
+        rel: "server/scripts/fake-raw-qualified.ts",
+        content: "await db.execute(sql`DELETE FROM public.budget_ledger WHERE id = 2`);",
+      },
     ];
     const v = detectLedgerWritePathViolations(synthetic);
     expect(v.map((h) => h.file).sort()).toEqual([
+      "server/scripts/fake-raw-qualified.ts",
+      "server/scripts/fake-raw-quoted.ts",
       "server/scripts/fake-raw-sql.ts",
       "server/storage/budget/fake-delete.ts",
       "server/storage/budget/fake-update.ts",
     ]);
+  });
+
+  it("Negativ: matcht NICHT eine ähnlich benannte Tabelle (budget_ledger_archive)", () => {
+    const synthetic: ScanFile[] = [
+      {
+        rel: "server/scripts/fake-similar-table.ts",
+        content: "await db.execute(sql`DELETE FROM budget_ledger_archive WHERE id = 1`);",
+      },
+    ];
+    expect(detectLedgerWritePathViolations(synthetic)).toEqual([]);
   });
 });
