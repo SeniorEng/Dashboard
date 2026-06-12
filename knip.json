@@ -3,6 +3,8 @@
   "entry": [
     "tests/**/*.test.ts",
     "server/scripts/**/*.ts",
+    "scripts/**/*.{ts,mjs}",
+    "script/**/*.{ts,mjs}",
     "client/src/features/*/hooks/index.ts"
   ],
   "project": [
@@ -12,11 +14,16 @@
   ],
   "ignore": [
     "client/src/components/ui/**",
-    "server/replit_integrations/**"
+    "server/replit_integrations/**",
+    ".cache/**"
   ],
   "ignoreDependencies": [
     "tailwindcss",
-    "node-zugferd",
-    "tw-animate-css"
-  ]
+    "tw-animate-css",
+    "c8",
+    "@stryker-mutator/core",
+    "@stryker-mutator/vitest-runner",
+    "jszip"
+  ],
+  "ignoreExportsUsedInFile": true
 }
