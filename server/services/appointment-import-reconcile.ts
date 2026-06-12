@@ -468,8 +468,6 @@ export async function executeReconcile(params: {
   return { batchId, cancelled, reversedTransactions, excluded, errors };
 }
 
-// Test-Helper: ausschließlich für Vitest-Suites verwendet.
-export const __testing = { buildExcelKeySet };
 // storage import bewahrt die etablierte Service-Schicht-Kopplung (für
 // zukünftige Wiederverwendung von z.B. soft-delete-Helfern).
 void storage;

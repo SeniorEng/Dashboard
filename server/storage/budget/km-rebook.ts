@@ -36,15 +36,6 @@ import type { DbClient } from "./types";
 import { db } from "../../lib/db";
 import { appointmentsRepo } from "../../repos";
 
-export interface RebookKmParams {
-  appointmentId: number;
-  customerId: number;
-  /** Neue km-Werte aus dem AKTUELLEN Termin (nach dem Update). */
-  travelKilometers: number;
-  customerKilometers: number;
-  userId?: number;
-}
-
 export interface RebookKmResult {
   /** true wenn Storno+Neu ausgeführt wurde, false wenn kein Rebook nötig war. */
   rebooked: boolean;
@@ -91,16 +82,6 @@ export async function loadCurrentServiceMinutes(
     else if (r.kategorie === "alltagsbegleitung") ab += m;
   }
   return { hwMinutes: hw, abMinutes: ab };
-}
-
-export async function rebookAppointmentConsumptionForKm(
-  params: RebookKmParams,
-  tx: DbClient,
-): Promise<RebookKmResult> {
-  return rebookAppointmentConsumption(
-    { appointmentId: params.appointmentId, userId: params.userId },
-    tx,
-  );
 }
 
 /**

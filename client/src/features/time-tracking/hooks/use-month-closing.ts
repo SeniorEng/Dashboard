@@ -14,14 +14,6 @@ export interface MonthClosingStatus {
   reopenedByUserId: number | null;
 }
 
-export interface AutoBreakPreview {
-  date: string;
-  totalWorkMinutes: number;
-  existingBreakMinutes: number;
-  requiredBreakMinutes: number;
-  autoBreakMinutes: number;
-}
-
 export interface OpenAppointment {
   id: number;
   date: string;

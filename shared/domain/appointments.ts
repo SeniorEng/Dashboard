@@ -13,8 +13,6 @@ import { isHoliday } from "../utils/holidays";
 // Spalte `appointments.status` geschrieben werden.
 export type AppointmentStatus = "scheduled" | "documenting" | "completed" | "cancelled" | "expired_unsigned" | "customer_no_show";
 
-/** Persistierbare Lebenszyklus-Status (ohne das Anzeige-Label `expired_unsigned`). */
-export type PersistedAppointmentStatus = Exclude<AppointmentStatus, "expired_unsigned">;
 export type ServiceType = "Hauswirtschaft" | "Alltagsbegleitung" | "Erstberatung";
 export type TravelOriginType = "home" | "appointment";
 

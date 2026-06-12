@@ -120,8 +120,3 @@ export function loadReconcilePreview(token: string, userId: number): ReconcilePr
 export function consumePreview(token: string): void {
   cache.delete(token);
 }
-
-/** Nur für Tests. */
-export function __clearPreviewCache(): void {
-  cache.clear();
-}

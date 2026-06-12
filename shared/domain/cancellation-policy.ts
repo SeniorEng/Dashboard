@@ -25,12 +25,6 @@ export const CANCELLATION_POLICY_TYPES = [
 
 export type CancellationPolicyType = typeof CANCELLATION_POLICY_TYPES[number];
 
-export const CANCELLATION_POLICY_LABELS: Record<CancellationPolicyType, string> = {
-  none: "Keine Verrechnung",
-  flat_amount: "Pauschalbetrag",
-  travel_plus_wait: "Anfahrt + Wartezeit",
-};
-
 export interface CancellationPolicy {
   type: CancellationPolicyType;
   flatCents?: number | null;

@@ -299,10 +299,6 @@ function workloadSql(params: {
 const GLOBAL_AVG_TTL_MS = 5 * 60 * 1000;
 let globalAvgCache: { value: number; expiresAt: number } | null = null;
 
-export function clearGlobalAvgCache(): void {
-  globalAvgCache = null;
-}
-
 /**
  * Pure helper: errechnet aus den SQL-Aggregaten den Ø Stunden je Kunde je Monat.
  * - customerMonths == 0 → 0 (keine Datenbasis).

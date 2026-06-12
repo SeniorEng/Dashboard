@@ -57,18 +57,3 @@ export function buildCarryoverDedupSets(
     windows: new Set(existing.map(a => `${a.validFrom}|${a.expiresAt ?? ""}`)),
   };
 }
-
-/**
- * Soll der Auto-Carryover für `sourceYear` einen Insert sparen, weil schon
- * eine Zeile (aktiv oder soft-deleted) für dieses Fenster existiert?
- */
-export function shouldSkipAutoCarryover(
-  existing: ReadonlyArray<ExistingCarryoverRow>,
-  sourceYear: number,
-): boolean {
-  const win = carryoverWindowFor(sourceYear);
-  const windowKey = `${win.validFrom}|${win.expiresAt}`;
-  return existing.some(
-    a => a.year === win.targetYear || `${a.validFrom}|${a.expiresAt ?? ""}` === windowKey,
-  );
-}

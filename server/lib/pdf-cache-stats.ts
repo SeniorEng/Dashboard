@@ -85,8 +85,3 @@ export function getPdfCacheStatsSnapshot(): PdfCacheStatsSnapshot {
     lastEventAt: lastAt > 0 ? new Date(lastAt).toISOString() : null,
   };
 }
-
-export function resetPdfCacheStats(): void {
-  ring.length = 0;
-  cursor = 0;
-}

@@ -91,9 +91,6 @@ export const fmtHoursDelta = (abs: number): string => {
 export const fmtIntDelta = (abs: number): string =>
   `${abs > 0 ? "+" : ""}${abs.toLocaleString("de-DE")}`;
 
-export const fmtDecimalDelta = (abs: number): string =>
-  `${abs > 0 ? "+" : ""}${abs.toLocaleString("de-DE", { maximumFractionDigits: 1 })}`;
-
 export const fmtPctPointDelta = (abs: number): string =>
   `${abs > 0 ? "+" : ""}${abs.toLocaleString("de-DE", { maximumFractionDigits: 1 })} %-Pkt.`;
 

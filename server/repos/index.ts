@@ -227,6 +227,14 @@ export const paymentAdvicesRepo = {
 };
 
 // -- qualifications ------------------------------------------------------
+/**
+ * Bewusst erhalten, obwohl aktuell kein Runtime-Aufrufer existiert (Task #1254
+ * toter-Code-Scan): `tests/architecture/soft-delete-coverage.test.ts` leitet aus
+ * `SOFT_DELETABLE_TABLE_IDENTS` den Namen `${table}Repo` ab und die ESLint-Regel
+ * `restrict-soft-delete-from` verweist Entwickler hierher, sobald `qualifications`
+ * soft-deleted angefasst wird. Löschen bräche die 1:1-Invariante Tabelle→Repo.
+ * @public — von knip als verwendet behandelt (Ausnahme zum toter-Code-Scan).
+ */
 export const qualificationsRepo = {
   table: qualifications,
   activeOnly: (): SQL => activeOnly(qualifications),
@@ -246,6 +254,13 @@ export const qualificationsRepo = {
 };
 
 // -- employeeQualifications ----------------------------------------------
+/**
+ * Bewusst erhalten, obwohl aktuell kein Runtime-Aufrufer existiert (Task #1254
+ * toter-Code-Scan): identische Guardrail-Invariante wie `qualificationsRepo` —
+ * `soft-delete-coverage.test.ts` + `restrict-soft-delete-from` verweisen auf
+ * `${table}Repo` für die soft-deletable `employee_qualifications`-Tabelle.
+ * @public — von knip als verwendet behandelt (Ausnahme zum toter-Code-Scan).
+ */
 export const employeeQualificationsRepo = {
   table: employeeQualifications,
   activeOnly: (): SQL => activeOnly(employeeQualifications),

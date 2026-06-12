@@ -42,8 +42,3 @@ export const REBOOK_TRIGGERS = {
     fromExcel: "appointment_import:reconcile",
   },
 } as const;
-
-export type RebookTrigger =
-  | (typeof REBOOK_TRIGGERS.edit)[keyof typeof REBOOK_TRIGGERS.edit]
-  | (typeof REBOOK_TRIGGERS.import)[keyof typeof REBOOK_TRIGGERS.import]
-  | (typeof REBOOK_TRIGGERS.reconcile)[keyof typeof REBOOK_TRIGGERS.reconcile];

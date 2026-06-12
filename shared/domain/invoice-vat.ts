@@ -87,13 +87,6 @@ export function distributeVatAcrossLines(lineNetCents: number[], totalVatCents: 
   return out;
 }
 
-/** Pro-Zeile-Aufschlüsselung netto/USt/brutto. */
-export interface VatLineBreakdown {
-  netCents: number;
-  vatCents: number;
-  grossCents: number;
-}
-
 /**
  * Rundet einen Netto-(Einzel-)Preis für die ANZEIGE auf brutto hoch. Nur für
  * die informative „Satz/Einzelpreis (brutto)"-Spalte — die summierte

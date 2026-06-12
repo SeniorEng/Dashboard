@@ -14,8 +14,6 @@ export const periodQuerySchema = z.object({
   path: ["from"],
 });
 
-export type PeriodQueryInput = z.infer<typeof periodQuerySchema>;
-
 export interface ResolvedPeriod {
   year: number;
   month: number | null;

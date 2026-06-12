@@ -36,9 +36,9 @@ export class BudgetHardBlockError extends Error {
  * übersteigen (cross-pot overflow) UND der Kunde NICHT privatzahlungsfähig ist.
  * Im Gegensatz zu `BudgetHardBlockError` (Hard-Block beim Planen/Buchen)
  * beschreibt dieser Fehler bereits GELEISTETE Arbeit, die nicht still
- * verschwinden darf (I20 „kein Limbo"): Der Operator muss explizit auflösen
- * (siehe `OVER_BUDGET_RESOLUTIONS`) — eine `manual_adjustment`-Allocation
- * anlegen, die Leistung herabstufen oder einen dokumentierten Write-off buchen.
+ * verschwinden darf (I20 „kein Limbo"): Der Operator muss explizit auflösen —
+ * eine `manual_adjustment`-Allocation anlegen, die Leistung herabstufen oder
+ * einen dokumentierten Write-off buchen.
  * Bis dahin bleibt der offene Hold vom Orphan-Sweep (R6) sichtbar.
  */
 export class OverBudgetCompletionError extends Error {
@@ -62,15 +62,3 @@ export class OverBudgetCompletionError extends Error {
     this.budgetType = budgetType;
   }
 }
-
-/**
- * Die einzigen erlaubten Operator-Auflösungen eines `OverBudgetCompletionError`
- * (N7). Dokumentiert + maschinenlesbar, damit nichts in Limbo landet (I20).
- */
-export const OVER_BUDGET_RESOLUTIONS = [
-  "manual_adjustment", // zusätzliche Allocation anlegen (Aufstockung)
-  "downgrade_service", // dokumentierte Leistung herabstufen
-  "documented_write_off", // dokumentierter Write-off
-] as const;
-
-export type OverBudgetResolution = (typeof OVER_BUDGET_RESOLUTIONS)[number];

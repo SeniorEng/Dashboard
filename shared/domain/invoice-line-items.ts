@@ -76,25 +76,6 @@ export function isKmLineItem(serviceCode: string | null | undefined): boolean {
 }
 
 /**
- * Rohwert der Menge für ein Line-Item — Stunden (Dezimal) oder Kilometer
- * (zwei Nachkommastellen). Wird in das neue `quantity_raw`-Feld persistiert
- * und ist die einzige Quelle für PDF-Anzeige und ZUGFeRD-Quantity.
- *
- * - Für Stunden: `durationMinutes / 60` (kann viele Nachkommastellen haben).
- * - Für Kilometer: `quantizeKm(km)`.
- */
-export function deriveQuantityRaw(
-  unit: LineItemQuantityUnit,
-  args: { durationMinutes?: number | null; km?: number | null },
-): number {
-  if (unit === "km") {
-    return quantizeKm(args.km ?? 0);
-  }
-  const minutes = args.durationMinutes ?? 0;
-  return minutes / 60;
-}
-
-/**
  * Anzeige-Helper für ein persistiertes Line-Item. Bevorzugt die neuen
  * Felder `quantityRaw`/`quantityUnit` (Task #561). Fällt auf
  * `durationMinutes` + `serviceCode` zurück, damit bestehende

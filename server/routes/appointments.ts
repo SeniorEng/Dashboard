@@ -186,31 +186,6 @@ async function checkCustomerAccess(
 }
 
 /**
- * Schreibrecht für Termin-Mutationen, die nur dem durchführenden
- * Mitarbeiter (oder Admin) erlaubt sind: start/end/reopen/document.
- * Delegiert an `canDocumentAppointment` ohne Lock/Monatsabschluss-Flags
- * (die werden weiterhin in den Routen separat geprüft mit den frischen DB-Werten).
- */
-export async function checkAppointmentWriteAccess(
-  user: { id: number; isAdmin: boolean; isSuperAdmin?: boolean | null; isTeamLead?: boolean | null; isActive?: boolean | null; isAnonymized?: boolean | null; roles?: readonly string[] },
-  appointment: { assignedEmployeeId: number | null; performedByEmployeeId?: number | null; customerId: number | null },
-  res: Response,
-): Promise<boolean> {
-  const policyUser = toPolicyUser(user);
-  // Wer-Frage: Admin oder zugewiesener Mitarbeiter (Teamleiter NICHT —
-  // dokumentieren ist eine persönliche Tätigkeit und darf nicht im Namen
-  // anderer durchgeführt werden).
-  const adminLike = policyUser.isAdmin || policyUser.isSuperAdmin;
-  const isAssigned = appointment.assignedEmployeeId === user.id
-    || appointment.performedByEmployeeId === user.id;
-  if (!adminLike && !isAssigned) {
-    sendForbidden(res, "ACCESS_DENIED", "Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");
-    return false;
-  }
-  return true;
-}
-
-/**
  * Schreibrecht für PATCH /api/appointments/:id (Reassign / Bearbeiten).
  * Teamleiter besitzen firmenweite Admin-Sicht (flacher Marker) und dürfen
  * jeden Termin bearbeiten/zuordnen/umplanen. Start/end/reopen/delete bleiben
