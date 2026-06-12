@@ -85,11 +85,15 @@ async function seedCompanySettings(): Promise<void> {
     return;
   }
   // updatedByUserId referenziert users.id (nullable). Wir hängen die Seed-Zeile
-  // an den zuvor geseedeten Superadmin, falls vorhanden.
+  // an den zuvor geseedeten Superadmin, falls vorhanden. Existiert (noch) KEIN
+  // User — z.B. im CI-Job `template-cache-verify`, der mangels Login-Secrets
+  // den Superadmin-Seed überspringt —, MUSS die Spalte NULL bleiben. Ein
+  // Fallback auf 0 würde die users-FK verletzen und den ganzen Seed mit exit 1
+  // abbrechen (Task #1250).
   const { db } = await import("../server/lib/db");
   const { users } = await import("@shared/schema");
   const [firstUser] = await db.select({ id: users.id }).from(users).limit(1);
-  const seederId = firstUser?.id ?? 0;
+  const seederId = firstUser?.id ?? null;
   await storage.updateCompanySettings(
     {
       companyName: "Seniorenengel Alltagsbegleitung Test GmbH",

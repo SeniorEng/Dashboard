@@ -24,6 +24,7 @@
  *      Rechnungs-Datensatz + reale Bucket-Objekte vollständig durchläuft.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { hasObjectStorageEnv } from "../helpers/object-storage";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import {
@@ -135,7 +136,7 @@ async function deleteObject(storedPath: string): Promise<void> {
   if (exists) await file.delete();
 }
 
-describe("regenerateClobberedInvoicePdfs — Object-Restore", () => {
+describe.skipIf(!hasObjectStorageEnv)("regenerateClobberedInvoicePdfs — Object-Restore", () => {
   let customerId: number;
   let superadminId: number;
   let invoiceId: number;

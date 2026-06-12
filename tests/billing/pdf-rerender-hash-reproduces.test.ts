@@ -30,7 +30,8 @@
  * (isolierten) DB versiegelten Hash. Zusätzlich werden eindeutige
  * Rechnungsnummern verwendet, sodass kein Bucket-Clobbering auftritt.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { describe } from "../helpers/object-storage";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { invoices as invoicesTable, users, type InvoiceRenderSnapshot } from "@shared/schema";

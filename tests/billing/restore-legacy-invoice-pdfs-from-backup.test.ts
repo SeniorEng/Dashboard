@@ -28,6 +28,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { hasObjectStorageEnv } from "../helpers/object-storage";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import {
@@ -162,7 +163,7 @@ async function deleteObject(storedPath: string): Promise<void> {
   if (exists) await file.delete();
 }
 
-describe("restoreLegacyInvoicePdfsFromBackup — Object-Restore", () => {
+describe.skipIf(!hasObjectStorageEnv)("restoreLegacyInvoicePdfsFromBackup — Object-Restore", () => {
   let customerId: number;
   let superadminId: number;
   let invoiceId: number;

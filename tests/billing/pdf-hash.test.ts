@@ -16,7 +16,8 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  *   PDF-Hash → it.fails (heute pdf_hash=NULL, kippt nach Persistenz-Fix)
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describe } from "../helpers/object-storage";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { invoices as invoicesTable } from "../../shared/schema";

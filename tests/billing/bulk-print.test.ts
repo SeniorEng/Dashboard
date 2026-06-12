@@ -22,7 +22,8 @@
  * dort, wo per Kassen-Filter exakt isoliert wird.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describe } from "../helpers/object-storage";
 import {
   apiGet,
   apiPost,

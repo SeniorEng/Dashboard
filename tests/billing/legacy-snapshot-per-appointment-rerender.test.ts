@@ -37,7 +37,8 @@
  * Objekt zurück — er vergleicht IN-MEMORY-Re-Render-Hashes mit dem in der
  * (isolierten) DB versiegelten Hash und nutzt eindeutige Rechnungsnummern.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { describe } from "../helpers/object-storage";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { invoices as invoicesTable, users, type InvoiceRenderSnapshot } from "@shared/schema";

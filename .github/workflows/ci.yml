@@ -171,6 +171,14 @@ jobs:
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx tsx scripts/ci-seed-superadmin.ts
 
+      # Frische CI-DB hat keine Referenz-Stammdaten (Basis-Services wie
+      # "Hauswirtschaft", company_settings, Standard-Budget-Vorlagen). Ohne diese
+      # schlagen Tests fehl, die seedete Services/Settings voraussetzen. Seedet
+      # dieselben Daten wie der lokale Template-Cache (Task #1250).
+      - name: Seed test reference data
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx scripts/seed-test-reference-data.ts
+
       - name: Start app server
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: |
@@ -323,6 +331,14 @@ jobs:
       - name: Seed test superadmin
         if: ${{ env.TEST_USER_PASSWORD != '' }}
         run: npx tsx scripts/ci-seed-superadmin.ts
+
+      # Frische CI-DB hat keine Referenz-Stammdaten (Basis-Services wie
+      # "Hauswirtschaft", company_settings, Standard-Budget-Vorlagen). Die
+      # E2E-Smoke-Flows setzen diese voraus. Seedet dieselben Daten wie der
+      # lokale Template-Cache (Task #1250).
+      - name: Seed test reference data
+        if: ${{ env.TEST_USER_PASSWORD != '' }}
+        run: npx tsx scripts/seed-test-reference-data.ts
 
       - name: Start app server
         if: ${{ env.TEST_USER_PASSWORD != '' }}

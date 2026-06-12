@@ -21,7 +21,8 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  *      eine Stornorechnung NICHT. Ein Storno-Dokument hat damit exakt EINE
  *      LN-Seite (kein Beihilfe-Duplikat).
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { describe } from "../helpers/object-storage";
 import express, { type Request, type Response, type NextFunction } from "express";
 import type { AddressInfo } from "net";
 import type { Server } from "http";

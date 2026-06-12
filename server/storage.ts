@@ -145,7 +145,7 @@ export interface IStorage {
 
   // Company Settings
   getCompanySettings(): Promise<CompanySettings>;
-  updateCompanySettings(data: Partial<CompanySettings>, userId: number): Promise<CompanySettings>;
+  updateCompanySettings(data: Partial<CompanySettings>, userId: number | null): Promise<CompanySettings>;
 
   // Billing / Invoices
   getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<InvoiceWithCustomer[]>;
@@ -283,7 +283,7 @@ class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async updateCompanySettings(data: Partial<CompanySettings>, userId: number): Promise<CompanySettings> {
+  async updateCompanySettings(data: Partial<CompanySettings>, userId: number | null): Promise<CompanySettings> {
     this.companySettingsCache = null;
     const { companySettings } = await import("@shared/schema");
     const encryptedData = encryptRow(companySettings, data);

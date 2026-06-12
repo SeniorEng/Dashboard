@@ -22,7 +22,8 @@
  * eigene Kunden an und räumt im afterAll auf.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describe } from "../helpers/object-storage";
 import {
   apiGet,
   apiPost,

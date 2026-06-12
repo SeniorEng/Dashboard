@@ -23,7 +23,8 @@
  * `company_settings.logoUrl` referenziert; der Versand-Pfad lädt es via
  * `loadLogoBytes` und hängt es über `buildLogoInlineAttachment` an.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { describe } from "../helpers/object-storage";
 import { objectStorageClient } from "../../server/replit_integrations/object_storage/objectStorage";
 import { getPrivateDir, parseObjectPath } from "../../server/lib/object-storage-helpers";
 import { validSignatureDataUrl } from "../helpers/valid-signature";

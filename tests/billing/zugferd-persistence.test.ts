@@ -22,7 +22,8 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  * gegen Drift-Repair-Interferenz darf echte Drift NICHT schlucken.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { it, expect, beforeAll, afterAll } from "vitest";
+import { describe } from "../helpers/object-storage";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { invoices as invoicesTable } from "../../shared/schema";

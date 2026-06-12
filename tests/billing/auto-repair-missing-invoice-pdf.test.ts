@@ -31,7 +31,8 @@
  * (nur die DB ist es). Deshalb werden eindeutige Rechnungsnummern verwendet
  * (kein Bucket-Clobbering) und die Objekte am Ende best-effort gelöscht.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { describe } from "../helpers/object-storage";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import {
