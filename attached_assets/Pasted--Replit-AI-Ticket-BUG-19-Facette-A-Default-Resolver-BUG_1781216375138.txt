@@ -1,0 +1,41 @@
+# Replit-AI-Ticket: BUG-19 Facette A (Default-Resolver) + BUG-18 Purge
+
+**Datum:** 12.06.2026 · **Prio:** 🟡 MITTEL · **Nachfolger von #1225** (500-Fix, Dev-Altlasten, Prod-Report Kunde 41 — alles erledigt; Kunde-41-Remediation läuft separat als #1226)
+
+---
+
+## Teil 1 — BUG-19 Facette A: Default-Resolver statt statischer Konstante
+
+**Befund (Retest 11.06., Code `55eb2c6`):** Selbstzahler-Kunden **ohne** persistierte Settings-Zeile (Dev-Beweis: 203052, 203058) zeigen `entlastungsbetrag_45b.enabled = true`. Quelle ist NICHT der Create-Schreibpfad, sondern `DEFAULT_BUDGET_POT_ORDER` (`shared/domain/budgets.ts:155`) — §45b ist dort statisch enabled. Der Default läuft an `validateSelbstzahlerBudget`/PG-Gates vorbei. Per PUT ist derselbe Zustand korrekt unerreichbar (409).
+
+**Fix:**
+1. Neue Funktion `effectiveDefaultPots(customer)` in `shared/domain/budgets.ts`: liefert §45b nur für Nicht-Selbstzahler, §45a/§42a nur bei PG ≥ 2. EINE Funktion — keine zweite Prüf-Kopie (Ersetzungs-Regel).
+2. Sie ersetzt die statische Konstante **überall**: GET-Merge, Buchungs-/Cascade-Pfad, Anzeige, alle Create-Pfade (Admin-API, Wizard, Excel-Import, Prospect-Konversion).
+3. `DEFAULT_BUDGET_POT_ORDER` danach nicht mehr direkt importierbar (eslint `no-restricted-imports`); einzige erlaubte Nutzung intern in `effectiveDefaultPots`.
+
+**Akzeptanz:**
+- Selbstzahler ohne Settings-Zeile (203052/203058): §45b `enabled=false` in GET **und** Buchung wird hart geblockt (beides als Test).
+- `POST /api/admin/customers` (selbstzahler, ohne budgets) ⇒ alle drei §-Töpfe disabled; mit `budgets.entlastungsbetrag45b > 0` ⇒ 409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER.
+- PG-1-Kunde ohne budgets ⇒ §45a/§42a disabled, §45b enabled (rechtmäßig).
+- Architektur-Test: `effectiveDefaultPots` ist einzige Default-Quelle; Lint-Verstoß bei Direktimport der Konstante bricht CI.
+
+## Teil 2 — BUG-18: Purge ausführen (in #1173 gebaut, lief nie)
+
+### 2a. Dev: Junk-Services (175 Stück, nur Dev — Prod hat 0)
+- Identifikation ausschließlich über `services.name LIKE 'tlsicht\_%' / 'tlwrite\_%'` — **`code` ist bei allen NULL**, ein Filter auf `code` findet 0! Der vorhandene `SERVICE_TEST_FILTER` (`test-data-cleanup.ts:663ff`) matcht korrekt.
+- Ausführen: `POST /api/admin/test-cleanup/purge-test-services` (ohne ids) in Dev. Einträge mit Termin-/Preis-Referenzen nicht löschen, sondern deaktivieren + reporten.
+- **Erwartung danach:** genau 5 echte Services (Alltagsbegleitung, Anfahrtskilometer, Erstberatung, Hauswirtschaft, Kundenkilometer).
+
+### 2b. Prod: Junk-Dokumenttypen (~2.030 `DOC*`-Typen, nur ~22 echte)
+- **Whitelist statt Pattern-Blacklist:** echte Typen-Liste fixieren (aus Dev: 22 echte; mit Alrik abgleichen), alles andere mit `DOC`-Präfix purgen — referenzlos hart löschen, referenziert deaktivieren + Report.
+- **Prod-Blocker beachten:** test-cleanup-Routen sind bei `NODE_ENV=production` hart 403. Daher: einmaliges, idempotentes Migrations-Skript mit Conservation-Pre/Post-Check (Muster Task #895). **Dry-Run-Report zuerst an Alrik (Anzahl + Liste), Ausführung erst nach Freigabe.** Dev-Route NICHT in Prod freischalten.
+
+### 2c. Wächter gegen Wiederauftreten
+- CI-/Startup-Check: schlägt fehl bei `tlsicht_%`/`tlwrite_%` in `services` oder Nicht-Whitelist-`DOC*` in `document_types`.
+- Testläufe schreiben nur noch in isolierte Test-DB bzw. räumen per Rollback auf; zwei volle Testlauf-Durchgänge hinterlassen 0 neue Einträge.
+
+**Akzeptanz:** Dev `GET /api/services` = 5 echte; Kundenanlage Schritt „Vertrag"/„Unterschriften" ohne Müll; Prod-Dry-Run-Report archiviert unter `docs/`, Ausführung nach Freigabe; Wächter aktiv und per absichtlichem Verstoß bewiesen.
+
+## Leitplanken
+
+Keine Schema-Änderungen, keine Berechnungslogik anfassen. Beträge Integer-Cents. Prod-Purge (2b) ausschließlich nach Alriks Freigabe des Dry-Run-Reports. Beweis-Testdaten 203052/203058 erst nach Claude-Retest dieses Tickets löschen. Bei Bestandsbefunden außerhalb des Scopes: nur reporten, nicht mitfixen.
