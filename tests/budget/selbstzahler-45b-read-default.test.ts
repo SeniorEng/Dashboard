@@ -184,4 +184,24 @@ describe("BUG-19-Rest — §45b Lese-Default nach billingType (Anlage-Pfade)", (
     expect(put.status).toBe(404);
     expect(put.data?.error).toBe("NOT_FOUND");
   });
+
+  // Task #1246 — GET muss sich wie PUT verhalten: eine nicht existierende
+  // Kunden-ID liefert 404 mit derselben Fehler-Form, statt still 200 mit
+  // Default-Töpfen. Existierende Kunden bekommen weiterhin unverändert 200.
+  it("GET type-settings: nicht existierender Kunde → 404, existierender → 200", async () => {
+    const nonExistentId = 999_000_000 + Math.floor(Math.random() * 1_000_000);
+    const missing = await apiGet<any>(`/api/budget/${nonExistentId}/type-settings`);
+    expect(missing.status).toBe(404);
+    expect(missing.data?.error).toBe("NOT_FOUND");
+    expect(missing.data?.message).toBe("Kunde nicht gefunden");
+
+    const c = await createTestCustomer({
+      billingType: "pflegekasse_gesetzlich",
+      pflegegrad: 1,
+    });
+    createdIds.push(c.id as number);
+    const present = await apiGet<TypeSetting[]>(`/api/budget/${c.id}/type-settings`);
+    expect(present.status).toBe(200);
+    expect(enabledOf(present.data, "entlastungsbetrag_45b")).toBe(true);
+  });
 });

@@ -449,6 +449,12 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   // `validateSelbstzahlerBudget`). Greift VOR beiden Branches, da `defaults`
   // im Nicht-Leer-Branch via `settingsMap`-Fallback (`s || {...d}`) weiterwirkt.
   const customer = await storage.getCustomer(customerId);
+  // Task #1246 — Konsistenz mit PUT: Eine nicht existierende Kunden-ID liefert
+  // 404 (gleiche Fehler-Form wie PUT), statt still `200` mit Default-Töpfen.
+  if (!customer) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Kunde nicht gefunden" });
+    return;
+  }
   const defaults: { budgetType: string; enabled: boolean; priority: number; monthlyLimitCents: number | null; yearlyLimitCents: number | null; validFrom: string | null; validTo: string | null; effectiveToday: null }[] =
     effectiveDefaultPots({ billingType: customer?.billingType, pflegegrad: customer?.pflegegrad }).map((p) => ({
       budgetType: p.budgetType,
