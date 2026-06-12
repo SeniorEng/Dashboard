@@ -1,0 +1,54 @@
+# EngelDesk — Phase-0-Validierung (12.06.2026)
+
+**Geprüft:** Dev-Runtime (Live-API, frische DB) + Code-Basis (GitHub `main` @ `0d961b6`, 12.06. 13:54)
+**Ergebnis: Phase 0 BESTANDEN — alle 4 Pakete umgesetzt, inkl. Negativ-Beweisen. Zusätzlich BUG-19 Facette A und BUG-18 im Retest bestätigt.**
+
+---
+
+## Runtime-Retest (Dev)
+
+| Check | Ergebnis |
+|---|---|
+| POST Selbstzahler ohne budgets → alle §-Töpfe disabled | ✅ (Kunde 1) |
+| POST Selbstzahler mit 45b-Budget → 409 BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER | ✅ |
+| POST PG1 ohne budgets → §45b enabled, §45a/§42a disabled | ✅ (Kunde 2) |
+| POST PG2 gesetzlich → §45b enabled | ✅ (Kunde 3) |
+| PUT 45b-enable auf Selbstzahler → 409 | ✅ |
+| PUT Deaktivier-Payload auf nicht existenten Kunden → 404 statt 500 (#1225) | ✅ |
+| `GET /api/services` = 5 echte Services (BUG-18) | ✅ |
+| Dokumenttypen = 6 echte, kein `DOC*`-Müll (Dev) | ✅ |
+| `GET /api/admin/invariants-report` → wohlgeformt, 0 Verletzungen | ✅ (auf leerer DB „leer-grün"; Wirksamkeit per Fixture-Test im Code belegt, s. u.) |
+
+## Code-Validierung je Paket
+
+**0.1 Invarianten-Suite ✅** — `server/lib/invariants.ts`: `checkBudgetLedgerConsistency`, `checkBookingCompleteness`, `checkInvoiceNumberIntegrity`, `runInvariantSuite`. Endpoint `GET /api/admin/invariants-report` (SuperAdmin). `tests/invariants/invariant-suite.test.ts` mit Positiv- UND Negativ-Fixture („kaputter Ledger: Über-Storno + baumelnde Referenz, den der No-Overdraw-Clamp verschluckt" → Check schlägt nachweislich an). Abweichung von der Ticket-Formulierung: geseedete Fixtures statt fixer BUG-17-IDs — nach dem DB-Reseed die robustere Lösung.
+
+**0.2 Architektur-Wächter ✅** — `tests/architecture/` (läuft als eigener CI-Step „architecture fitness-functions"):
+- `ssot-imports.test.ts` (#1238): Cap-Math nur aus Cap-SSoT (A1), Readiness nur im Monatsabschluss-Modul (A2), „dokumentiert" nur aus `server/lib/appointment-signed.ts` — je mit Negativ-Test.
+- `budget-ledger-write-path.test.ts` (#1238): kein UPDATE/DELETE auf `budget_ledger`, Negativ-Tests (Drizzle + rohes SQL) + Nicht-Match-Probe (`budget_ledger_archive`).
+- `schema-table-allowlist.test.ts` (#1238): pgTable-Definitionen exakt gegen Allowlist, Negativ-Test für hinzugefügte UND entfernte Tabelle.
+- `budget-default-pots-ssot.test.ts` (BUG-19): `DEFAULT_BUDGET_POT_ORDER` modul-privat; zusätzlich eslint `no-restricted-imports` mit erklärender Message.
+- knip läuft in CI als Warn-Artefakt (`knip-report.json`); Lint mit `--max-warnings 0`.
+
+**0.3 Ersetzungs-Regel ✅** — in `replit.md` (Z. 86), inhaltlich vollständig (ersetzen statt hinzufügen, Rückfrage an Alrik, gilt auch für die KI). Wird gelebt: `reseed-dev-db.sh` dokumentiert im Header explizit, was es ERSETZT.
+
+**0.4 Dev-Datenbasis & Backups ✅ (mit bewusster, guter Abweichung)** — `scripts/backup-dev-db.sh` + `scripts/reseed-dev-db.sh` (npm: `db:backup-dev`, `db:reseed-dev`), `docs/dev-database-runbook.md`; Prod-Backups separat (`pre-publish-backup-runbook.md`, Skripte verweigern bei `NODE_ENV=production`). **Abweichung:** synthetischer Seed statt Prod-Snapshot — begründet mit DSGVO/GoBD (Pflegedaten = echte PII). Richtige Entscheidung. Das erklärt die leere Dev-DB und den „CI Superadmin"-Account.
+
+## BUG-19 Facette A (Code) ✅
+
+`effectiveDefaultPots(customer)` ist einzige Default-Quelle und wird in allen relevanten Pfaden genutzt: `unified-reader.ts` (GET-Merge), `consumption-engine.ts` (Buchung!), `summary-queries.ts`, `invoice-data.ts`, `routes/budget.ts`.
+
+## Offene Kleinigkeiten (kein Blocker)
+
+1. **GET type-settings für nicht existente Kunden → 200 mit Defaults** statt 404 (PUT macht es seit #1225 richtig). Mini-Ticket fürs nächste Bündel.
+2. **Buchungs-Hard-Block-E2E** (Termin gegen §45b bei Selbstzahler) noch nicht im Live-Retest geprüft — Code-Pfad via `consumption-engine` + Architektur-Test abgedeckt; nachholen, sobald Dev-DB Termine hat.
+3. **Prod-Purge Dokumenttypen (BUG-18 Teil 2b):** Dry-Run-Report `docs/bug-18-junk-purge-dry-run-…md` liegt vor — Prod-Ausführung nach Alriks Freigabe noch offen (verifizieren!).
+4. **GitHub-Sync:** heute hinkte `main` der Replit-Arbeit ~19 h hinterher. Es gibt `npm run sync:github` / `sync:check` — in den Arbeitsrhythmus aufnehmen (z. B. Push nach jedem abgeschlossenen Task).
+
+## Testdaten
+
+Neu angelegt (ZZ-Test, Dev): Kunden 1 (SZ-Phase0-Retest), 2 (PG1-Phase0), 3 (PG2-Phase0) — können bleiben oder per `cleanup:test-data` weg.
+
+## Empfehlung
+
+Phase 0 ist tragfähig → **Phase 1 (`Replit-AI-Phase1-Tote-Last.md`) kann eingereicht werden.** Davor Architektur-Entscheid A/B formal bestätigen (Empfehlung A; die Wächter arbeiten bereits auf `budget_transactions`/`budget_ledger`-Härtung). PAT nach der Session auf GitHub löschen.

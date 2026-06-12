@@ -57,6 +57,9 @@ router.post(
       beyondCutoff: matched.filter((r) => r.status === "beyond_cutoff").length,
       error: matched.filter((r) => r.status === "error").length,
       budgetTrimmed: matched.filter((r) => r.budgetTrimInfo !== null).length,
+      // Task #1243: Vorjahres-Termine echter Pflegekassen-Kunden, die nur als
+      // Dokumentation (ohne Budgetverbrauch) importiert werden.
+      documentationOnly: matched.filter((r) => r.documentationOnly === true).length,
     };
 
     // Task #708: Server-trusted Snapshot — Cutoff aus den vom Server selbst

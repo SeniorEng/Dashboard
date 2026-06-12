@@ -14,6 +14,7 @@ import { parseGermanDecimal } from "@shared/utils/parse-german-decimal";
 import { appointmentsRepo, customersRepo } from "../repos";
 import { excelServiceArtToCategory, isHauswirtschaftArt } from "@shared/domain/excel-service-art";
 import { computeLastExcelMonth, isBeyondCutoff, type ExcelCutoff } from "@shared/domain/import-cutoff";
+import { isDocumentationOnlyImport } from "@shared/domain/import-documentation-only";
 
 interface ImportRow {
   rowIndex: number;
@@ -67,6 +68,12 @@ export interface MatchedRow extends ImportRow {
   budgetTrimInfo: BudgetTrimInfo | null;
   /** Task #647: strukturierter Diff für die Vorschau-UI. */
   diff: ImportRowDiff | null;
+  /**
+   * Task #1243: Vorjahres-Termin eines Pflegekassen-Kunden ohne
+   * Privatzahlung → wird nur als Dokumentation (ohne Budgetverbrauch)
+   * importiert. SSoT: `isDocumentationOnlyImport`.
+   */
+  documentationOnly?: boolean;
 }
 
 interface ImportAction {
@@ -84,6 +91,11 @@ interface ImportResult {
   trimmed: number;
   /** Task #708: durch Cutoff-Schutz blockierte Mutationen. */
   cutoffProtected: number;
+  /**
+   * Task #1243: Als reine Dokumentation (ohne Budgetverbrauch) importierte
+   * Vorjahres-Termine. SSoT: `isDocumentationOnlyImport`.
+   */
+  documentationOnly: number;
   errors: { rowIndex: number; error: string }[];
 }
 
@@ -610,11 +622,19 @@ async function computeVerifiedTrimmedMinutes(
   return 0;
 }
 
-export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
-  const customerIds = [...new Set(
-    rows.filter(r => r.customerId && r.status === "new").map(r => r.customerId!)
-  )];
-
+/**
+ * SSoT für "akzeptiert dieser Kunde Privatzahlung?" — wird sowohl von der
+ * Vorschau (`enrichWithBudgetInfo`) als auch von der Ausführung
+ * (`executeImport`) genutzt, damit Trim-/Dokumentations-Entscheidung in beiden
+ * Pfaden identisch ausfällt.
+ *
+ * Task #588: Selbstzahler zahlen per Definition immer privat — der Import darf
+ * sie deshalb NICHT als "Budget reicht nicht"-Fall behandeln, genauso wenig wie
+ * der interaktive Doku-Pfad in der Consumption-Engine.
+ */
+async function loadPrivatePaymentAllowed(
+  customerIds: number[],
+): Promise<Map<number, boolean>> {
   const privatePaymentMap = new Map<number, boolean>();
   for (const customerId of customerIds) {
     const [customer] = await customersRepo
@@ -627,18 +647,39 @@ export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
       )
       .where(eq(customers.id, customerId))
       .limit(1);
-    // Task #588: Selbstzahler zahlen per Definition immer privat — der
-    // Import darf sie deshalb NICHT als "Budget reicht nicht"-Fall trimmen,
-    // genauso wenig wie der interaktive Doku-Pfad in der Consumption-Engine.
     const isPrivateAllowed =
       (customer?.acceptsPrivatePayment ?? false) ||
       customer?.billingType === "selbstzahler";
     privatePaymentMap.set(customerId, isPrivateAllowed);
   }
+  return privatePaymentMap;
+}
+
+export async function enrichWithBudgetInfo(rows: MatchedRow[]): Promise<void> {
+  const customerIds = [...new Set(
+    rows.filter(r => r.customerId && r.status === "new").map(r => r.customerId!)
+  )];
+
+  const privatePaymentMap = await loadPrivatePaymentAllowed(customerIds);
 
   for (const row of rows) {
     row.budgetTrimInfo = null;
+    row.documentationOnly = false;
     if (!row.customerId || row.status !== "new") continue;
+
+    // Task #1243: Vorjahres-Termine echter Pflegekassen-Kunden werden nur als
+    // Dokumentation importiert (kein Budgetverbrauch) — also auch keine
+    // Kürzungs-Berechnung. SSoT: `isDocumentationOnlyImport`.
+    if (
+      isDocumentationOnlyImport({
+        date: row.date,
+        isPrivatePaymentAllowed: privatePaymentMap.get(row.customerId) ?? false,
+      })
+    ) {
+      row.documentationOnly = true;
+      continue;
+    }
+
     if (privatePaymentMap.get(row.customerId)) continue;
 
     try {
@@ -680,6 +721,13 @@ async function importSingleRow(
   durationMinutes: number,
   notes: string,
   importBatchId?: number | null,
+  /**
+   * Task #1243: Bei reinen Dokumentations-Importen (Vorjahres-Termin echter
+   * Pflegekasse) wird der Termin angelegt, aber KEINE Consumption gebucht —
+   * für solche Daten ist das gesetzliche Budget = 0, eine Buchung würde immer
+   * hart blocken.
+   */
+  skipBudgetConsumption = false,
 ): Promise<void> {
   if (isWeekend(row.date)) {
     throw new Error("Termine an Samstagen oder Sonntagen sind nicht erlaubt");
@@ -720,6 +768,13 @@ async function importSingleRow(
       actualDurationMinutes: durationMinutes,
       details: `Import: ${row.serviceType}`,
     });
+
+    // Task #1243: Dokumentations-Import legt nur den Termin-Datensatz an, keine
+    // Budget-Buchung — daher hier (und beim Batch-Link, der ohnehin nichts
+    // träfe) früh aussteigen.
+    if (skipBudgetConsumption) {
+      return;
+    }
 
     const isHauswirtschaft = isHauswirtschaftArt(row.serviceType);
     const hwMinutes = isHauswirtschaft ? durationMinutes : 0;
@@ -765,12 +820,25 @@ export async function executeImport(
   /** Task #819: Verknüpft alle erzeugten/aktualisierten Datensätze mit dem Import-Batch. */
   importBatchId?: number | null,
 ): Promise<ImportResult> {
-  const result: ImportResult = { imported: 0, updated: 0, upgraded: 0, skipped: 0, trimmed: 0, cutoffProtected: 0, errors: [] };
+  const result: ImportResult = { imported: 0, updated: 0, upgraded: 0, skipped: 0, trimmed: 0, cutoffProtected: 0, documentationOnly: 0, errors: [] };
 
   const actionMap = new Map<number, ImportAction>();
   for (const a of actions) {
     actionMap.set(a.rowIndex, a);
   }
+
+  // Task #1243: Privatzahlungs-Status aller betroffenen Kunden EINMAL vorab
+  // laden (gleiche SSoT wie die Vorschau), um pro Zeile zu entscheiden, ob sie
+  // nur als Dokumentation (ohne Budgetverbrauch) importiert wird.
+  const privatePaymentMap = await loadPrivatePaymentAllowed([
+    ...new Set(matchedRows.filter((r) => r.customerId).map((r) => r.customerId!)),
+  ]);
+  const isDocOnlyRow = (row: MatchedRow): boolean =>
+    row.customerId != null &&
+    isDocumentationOnlyImport({
+      date: row.date,
+      isPrivatePaymentAllowed: privatePaymentMap.get(row.customerId) ?? false,
+    });
 
   // Task #708: Defense-in-depth — Cutoff aus den preview-matched Zeilen
   // erneut berechnen und JEDE Mutation (Import/Update/Upgrade) jenseits
@@ -805,6 +873,30 @@ export async function executeImport(
     if (action.action === "import") {
       if (!row.customerId || !effectiveEmployeeId || !row.serviceId) {
         result.errors.push({ rowIndex: row.rowIndex, error: "Fehlende IDs für Import" });
+        continue;
+      }
+
+      // Task #1243: Vorjahres-Termin echter Pflegekasse → nur Dokumentation,
+      // kein Budgetverbrauch. Notes-Präfix bleibt "Import aus Altdaten", damit
+      // `createServiceRecordsForImported` (Notes-LIKE-Filter) diese Termine
+      // weiterhin in synthetische Leistungsnachweise aufnimmt. KEIN Trim-Retry —
+      // es gibt nichts zu kürzen.
+      if (isDocOnlyRow(row)) {
+        try {
+          await importSingleRow(
+            row,
+            effectiveEmployeeId,
+            userId,
+            row.durationMinutes,
+            "Import aus Altdaten (Dokumentation, ohne Budgetverbrauch)",
+            importBatchId,
+            true,
+          );
+          result.documentationOnly++;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          result.errors.push({ rowIndex: row.rowIndex, error: msg });
+        }
         continue;
       }
 
@@ -964,7 +1056,11 @@ export async function executeImport(
           if (
             existingConsumption.length === 0 &&
             !info.rebooked &&
-            beforeAppt.status === "completed"
+            beforeAppt.status === "completed" &&
+            // Task #1243: Vorjahres-Termin echter Pflegekasse → keine
+            // (Erst-)Buchung nachziehen, sonst würde der Backfill an genau dem
+            // §45b-Null-Budget hart blocken, das wir vermeiden wollen.
+            !isDocOnlyRow(row)
           ) {
             const isHauswirtschaft = isHauswirtschaftArt(row.serviceType);
             await budgetLedgerStorage.createConsumptionTransaction(
@@ -1089,6 +1185,9 @@ export async function executeImport(
         const hwMinutes = isHauswirtschaft ? row.durationMinutes : 0;
         const abMinutes = isHauswirtschaft ? 0 : row.durationMinutes;
         const signedAt = new Date();
+        // Task #1243: Vorjahres-Upgrade echter Pflegekasse → Termin auf
+        // `completed` heben, aber keine Consumption buchen (Budget = 0).
+        const upgradeDocOnly = isDocOnlyRow(row);
 
         await db.transaction(async (tx) => {
           await tx
@@ -1119,19 +1218,21 @@ export async function executeImport(
             details: `Import-Upgrade: ${row.serviceType}`,
           });
 
-          await budgetLedgerStorage.createConsumptionTransaction(
-            {
-              customerId: row.customerId!,
-              appointmentId,
-              transactionDate: row.date,
-              hauswirtschaftMinutes: hwMinutes,
-              alltagsbegleitungMinutes: abMinutes,
-              travelKilometers: row.kilometers,
-              customerKilometers: 0,
-              userId,
-            },
-            tx,
-          );
+          if (!upgradeDocOnly) {
+            await budgetLedgerStorage.createConsumptionTransaction(
+              {
+                customerId: row.customerId!,
+                appointmentId,
+                transactionDate: row.date,
+                hauswirtschaftMinutes: hwMinutes,
+                alltagsbegleitungMinutes: abMinutes,
+                travelKilometers: row.kilometers,
+                customerKilometers: 0,
+                userId,
+              },
+              tx,
+            );
+          }
 
           // Task #819: Upgrade-Consumption mit dem Import-Batch verknüpfen.
           if (importBatchId != null) {
@@ -1163,6 +1264,9 @@ export async function executeImport(
             newAssignedEmployeeId: effectiveEmployeeId,
             previousDurationMinutes: beforeAppt.durationPromised ?? 0,
             newDurationMinutes: row.durationMinutes,
+            // Task #1243: macht im Audit-Trail sichtbar, dass dieser Upgrade
+            // bewusst KEINE Budget-Buchung erzeugt hat (Vorjahres-Dokumentation).
+            documentationOnly: upgradeDocOnly,
           },
         );
 

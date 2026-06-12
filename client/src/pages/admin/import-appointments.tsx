@@ -56,6 +56,8 @@ interface MatchedRow {
   differences: string[];
   budgetTrimInfo: BudgetTrimInfo | null;
   diff: ImportRowDiff | null;
+  /** Task #1243: Vorjahres-Termin echter Pflegekasse → nur Dokumentation, kein Budgetverbrauch. */
+  documentationOnly?: boolean;
 }
 
 function serviceCodeLabel(code: string | null | undefined): string {
@@ -75,7 +77,7 @@ interface DuplicateImportWarning {
 
 interface PreviewResponse {
   rows: MatchedRow[];
-  summary: { total: number; new: number; duplicate: number; upgrade: number; beyondCutoff: number; error: number; budgetTrimmed: number };
+  summary: { total: number; new: number; duplicate: number; upgrade: number; beyondCutoff: number; error: number; budgetTrimmed: number; documentationOnly: number };
   /** Task #708: Server-Token für Trust-Boundary im Execute. */
   previewToken: string;
   /** Task #819: SHA-256 des Datei-Puffers (Doppel-Import-Erkennung). */
@@ -93,6 +95,8 @@ interface ImportResult {
   trimmed: number;
   /** Task #708: durch Cutoff-Schutz blockierte Mutationen. */
   cutoffProtected: number;
+  /** Task #1243: als reine Dokumentation (ohne Budgetverbrauch) importierte Vorjahres-Termine. */
+  documentationOnly: number;
   errors: { rowIndex: number; error: string }[];
 }
 
@@ -447,7 +451,12 @@ export default function ImportAppointmentsPage() {
                           />
                         </td>
                         <td className="p-2">
-                          {row.status === "new" && !isBudgetTrimmed && (
+                          {row.status === "new" && row.documentationOnly && (
+                            <Badge variant="outline" className="text-teal-700 border-teal-300 bg-teal-50 text-[10px]" data-testid={`status-documentation-only-${row.rowIndex}`}>
+                              Dokumentation
+                            </Badge>
+                          )}
+                          {row.status === "new" && !isBudgetTrimmed && !row.documentationOnly && (
                             <Badge variant="outline" className="text-green-700 border-green-300 text-[10px]" data-testid={`status-new-${row.rowIndex}`}>
                               Neu
                             </Badge>
@@ -672,6 +681,12 @@ export default function ImportAppointmentsPage() {
                   <div className="p-3 rounded bg-orange-50 border border-orange-200" data-testid="text-result-trimmed">
                     <div className="font-medium text-orange-800">Davon gekürzt</div>
                     <div className="text-2xl font-bold text-orange-700">{importResult.trimmed}</div>
+                  </div>
+                )}
+                {importResult.documentationOnly > 0 && (
+                  <div className="p-3 rounded bg-teal-50 border border-teal-200" data-testid="text-result-documentation-only">
+                    <div className="font-medium text-teal-800">Als Dokumentation</div>
+                    <div className="text-2xl font-bold text-teal-700">{importResult.documentationOnly}</div>
                   </div>
                 )}
                 <div className="p-3 rounded bg-blue-50 border border-blue-200" data-testid="text-result-updated">
