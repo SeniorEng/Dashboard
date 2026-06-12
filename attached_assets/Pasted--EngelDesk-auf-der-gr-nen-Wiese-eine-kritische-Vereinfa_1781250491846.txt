@@ -1,0 +1,61 @@
+# EngelDesk auf der grünen Wiese — eine kritische Vereinfachungs-Analyse (11.06.2026)
+
+**Frage:** Wenn ich EngelDesk heute neu bauen müsste — was würde ich anders machen, und wo steckt Vereinfachungspotenzial?
+**Basis:** Vollständige Code-Analyse (Commit `d853005`, ~60 Tabellen, 32 Routen-Module, 317 Testdateien), zwei E2E-Sessions, Prod-Fall Mentke.
+
+---
+
+## 1. Die unbequeme Kernthese
+
+EngelDesk löst ein **kleines Problem mit einem großen System**. Das essenzielle Geschäft ist ein einziger Monats-Loop für einen Betrieb mit einer Handvoll Mitarbeitern und vier echten Dienstleistungen:
+
+> Kunde hat gesetzlichen Anspruch → Termin wird erbracht & dokumentiert → Anspruch wird verbraucht → Monat wird abgeschlossen → Kasse bekommt Nachweis + Rechnung → Zahlung wird zugeordnet.
+
+Das ist fachlich anspruchsvoll (SGB XI, GoBD), aber strukturell schmal. Die heutige Codebasis trägt jedoch die Komplexität eines Systems für 50 Mitarbeiter und 20 Module. Fast alle Bugs, die wir gefunden haben (BUG-15 bis BUG-22, Monatsabschluss-Dualismus), sind **zufällige Komplexität** — sie entstehen nicht aus dem Fachproblem, sondern aus der Bauweise: abgeleitete Werte werden gespeichert statt berechnet, und dasselbe Konzept existiert mehrfach.
+
+## 2. Fünf Greenfield-Prinzipien (und was sie eliminieren würden)
+
+**P1 — Fakten speichern, alles andere berechnen.** Die DB enthält nur, was passiert ist: Pflegegrad-Historie, Termine + Dokumentationen, manuelle Korrekturen (Startwert/Carryover), Rechnungen, Zahlungen. Budget-Verfügbarkeit ist eine **pure Funktion** `verfügbar(PG-Historie, Buchungen, Korrekturen, Datum)` — kein gespeicherter Anker, keine materialisierten Allokationen, keine kopierten Settings.
+*Eliminiert:* `budget_allocations` (virtuell vs. persistiert!), `budget_reservations`, `budget_migrations`, das ungenutzte `budget_ledger`, `customer_budget_preferences` (der Mentke-Anker!), große Teile von `customer_budget_type_settings`. **Die gesamte Bug-Klasse BUG-15/16/21/22 ist konstruktionsbedingt unmöglich** — ein Wert, der nicht gespeichert wird, kann nicht falsch stehen bleiben oder driften. Pure Funktionen sind zudem trivial property-testbar.
+
+**P2 — Ein Konzept, ein Ort.** Pro Frage genau eine Implementierung: *eine* „dokumentiert"-Definition (heute drei), *eine* Monatsabschluss-Readiness (heute zwei), *eine* Verfügbarkeitsrechnung (heute Display- vs. Buchungspfad), *ein* Schreibpfad pro Entität (heute: Wizard validiert anders als API, BUG-19).
+*Eliminiert:* den kompletten Monatsabschluss-Vorfall, die „drei Wahrheiten"-Befunde, die Hälfte der Regressionstests, die heute Dualismen gegeneinander absichern.
+
+**P3 — Statik ist Code, nicht Datenbank.** Gesetzliche Beträge (131 €, 318,40 €, 3.539 €) sind heute schon Konstanten — gut. Aber auch der **Dienstleistungskatalog** (4 echte Services!) gehört als Konfiguration in den Code, nicht als frei anlegbare Entität mit drei parallelen Preistabellen (`service_rates`, `customer_service_prices`, `customer_contract_rates` → eine Preisliste mit Kunden-Override und validFrom genügt).
+*Eliminiert:* 176 Müll-Services (BUG-18) wären unmöglich gewesen; zwei von drei Preistabellen.
+
+**P4 — Explizite Zustandsmaschinen.** Termin-Lifecycle, Monatsabschluss und Rechnung sind heute implizite Zustände über Status-Strings, Datums-Cutoffs und Tabellen-Existenz verteilt. Greenfield: drei kleine, explizite State Machines mit definierten Übergängen — „Storno eines Stornos" (BUG-17) ist dann kein Validierungs-Patch, sondern ein nicht existierender Übergang.
+
+**P5 — Workflow statt Module.** Das UI folgt dem Monats-Loop (vgl. Admin-Restrukturierungs-Vorschlag vom 10.06.): Cockpit mit „Jetzt fällig", fünf Prozess-Hubs. Objektverwaltung ist Nachschlagewerk, nicht Navigation.
+
+## 3. Konkrete Streichliste (Funktionalität, die ich nicht bauen würde)
+
+| Heute | Greenfield-Urteil |
+|---|---|
+| ~60 Tabellen | **~20 Tabellen** decken denselben Funktionsumfang |
+| Interessenten als eigenes Modul (`prospects`, `prospect_notes`, `prospect_offers`, Erstberatungs-Sonderroute) | Kunde mit `status = lead → in_aufnahme → aktiv → inaktiv`. Pipeline = Statusfeld + eine Ansicht. Konversions-Bugs (Waisen-Datensätze) unmöglich |
+| 9-Schritte-Anlage-Wizard | Minimal-Anlage (5 Felder) + Checkliste am Kunden (`setup-pending` existiert ja schon) |
+| 14 Admin-Permission-Keys | 3 Rollen: Admin, Teamlead, Mitarbeiter. Für 1–2 Admins ist ein Permission-System pro Karte reine Pflege-Last |
+| 7 `document_*`-Tabellen (Types, Templates, Triggers, Deliveries, Tokens…) | 2–3: Vorlagen als Code/Dateien, signierte PDFs als Belege, ein Versand-Log. Müll-Pflichtdokumenttypen unmöglich |
+| Geburtstags-Modul mit eigener Tracking-Tabelle | Eine Abfrage über Kunden + Inbox-Eintrag „5 Karten diese Woche". Kein Modul |
+| Statistiken v1 + v2 (eigener Unterordner) | 6–8 KPIs als SQL-Views fürs Cockpit. Auswertung gehört nicht zweimal gebaut |
+| `budget_reservations`, `budget_ledger`, `budget_migrations` | Ersatzlos (Ledger-Funktion übernimmt die Buchungstabelle selbst, append-only per DB-Constraint) |
+| Knowledge-Graph-Pilot (Reflexionspapier 27.05.) | Nicht bauen. Falsche Gewichtsklasse für dieses Problem |
+| WhatsApp/Twilio, Qonto, Lexware, LetterXpress | **Behalten** — echte Prozess-Entlastung. Aber als dünne Adapter mit Idempotenz, nicht als Subsysteme |
+
+**Was seine Komplexität verdient und bleibt:** Cents-Integer-Arithmetik, Advisory-Locks, GoBD-Rechnungskette (fortlaufende Nummern, Storno statt Löschung, Snapshots), PG-Historie, Audit-Log, der Cascade-Algorithmus selbst (Subtract-Last) — das ist essenzielle Komplexität, und sie ist heute gut gebaut.
+
+## 4. Der Test-Befund als Symptom
+
+317 Testdateien / ~46.000 Zeilen Tests für diesen Funktionsumfang sind kein Qualitätsbeweis, sondern ein **Komplexitäts-Symptom**: Ein Großteil sichert Dualismen gegeneinander ab (Drift-Detektoren, Equality-Tests „Display = Buchung", Reconciliation-Tests). Im Greenfield-Design ist das meiste davon überflüssig, weil es die abzusichernden Doppelpfade nicht gibt — übrig blieben Property-Tests auf die Budget-Funktion, State-Machine-Tests und eine schlanke E2E-Suite über den Monats-Loop. Geschätzt: **gleicher Funktionsumfang mit ~40 % des Codes.**
+
+## 5. Was das praktisch heißt (kein Rewrite!)
+
+Ein Greenfield-Rewrite wäre trotzdem ein Fehler: Die GoBD-Daten müssen migriert werden, die Test-Suite ist ein Asset, und das System funktioniert im Kern. Die Analyse taugt als **Nordstern für gezielten Rückbau** (Strangler-Muster) — und die laufenden Tickets zahlen exakt darauf ein:
+
+1. **Anker-Ticket (11.06.)** = P1 angewandt auf den Budget-Anker (berechnen statt speichern).
+2. **Ticket D Monatsabschluss** = P2 (eine Readiness-Funktion).
+3. **Admin-Restrukturierung** = P5.
+4. Nächste Kandidaten in dieser Logik: Allokationen vollständig virtuell machen (P1, größter Einzelhebel), Preistabellen konsolidieren (P3), Prospects in den Kunden-Status falten (Streichliste), `budget_ledger`/`reservations` entfernen (tote Infrastruktur), Permission-Keys auf 3 Rollen reduzieren.
+
+**Dazu eine stehende Regel für jede künftige Replit-AI-Aufgabe:** Jedes neue Feature muss beantworten: *„Welche bestehende Tabelle/Funktion ersetzt das?"* Wenn die Antwort „keine, es kommt dazu" lautet, ist der Default **Nein**. Replit-AI baut von Natur aus additiv — die Gegenkraft muss im Prozess verankert sein, sonst wächst die zufällige Komplexität schneller nach, als wir sie abbauen.

@@ -1,0 +1,43 @@
+# Replit-AI-Ticket — Vereinfachung Phase 0: Schutzgeländer
+
+**Kontext:** EngelDesk wird in 5 Phasen vereinfacht (Plan: `EngelDesk-Vereinfachungsplan-2026-06-11.md`). Phase 0 baut das Sicherheitsnetz, bevor irgendetwas zurückgebaut wird. **Kein Feature, kein Rückbau in diesem Ticket** — nur Absicherung.
+**Voraussetzung:** Die Bugfix-Tickets aus `Replit-AI-Ticket-Session1-Befunde-2026-06-10.md` (A–I) und `Replit-AI-Ticket-Budget-Anker-2026-06-11.md` sind abgeschlossen oder werden vor Phase 1 abgeschlossen.
+
+---
+
+## Paket 0.1 — Invarianten-Suite (CI-Test + Admin-Report)
+
+Eine Datei `server/lib/invariants.ts` mit drei puren Prüf-Funktionen, genutzt von (a) einem Integrationstest in CI und (b) einem read-only Admin-Endpoint `GET /api/admin/invariants` (SuperAdmin, JSON-Report):
+
+1. **Budget-Konsistenz** je Kunde × Topf: `SUM(budget_transactions.amountCents)` muss mit FIFO-Breakdown (`totalConsumedCents`) und Overview (`totalUsedCents`) übereinstimmen. Toleranz: 0 Cent.
+2. **Leg-Vollständigkeit** je dokumentiertem Termin: Σ aller zugehörigen consumption-Legs (abzgl. Reversals) = berechnete Termin-Kosten; keine Buchung mit `appointment_id IS NULL` außer manuellen Korrekturen (`source`-Whitelist).
+3. **Rechnungsnummern**: lückenlos aufsteigend pro Nummernkreis, keine Dubletten; jede stornierte Rechnung hat eine Storno-Rechnung.
+
+**Akzeptanz:** Test läuft in CI gegen die Dev-DB und ist grün; auf den bekannten BUG-17-Testdaten (Kunde 203050, Reversal-Kette 510349–510353) schlägt Check 1 nachweislich an (Fixture-Test). Report-Endpoint liefert pro Verletzung Kunde/Topf/Differenz.
+
+## Paket 0.2 — Architektur-Wächter
+
+1. **SSoT-Import-Regeln** (eslint `no-restricted-imports` oder dependency-cruiser): Verfügbarkeits-/Cap-Logik darf nur aus `shared/domain/budget/*` importiert werden; Readiness nur aus dem (in Ticket D entstehenden) gemeinsamen Modul; „dokumentiert"-Bedingungen nur aus `server/lib/appointment-signed.ts`. Direkte Re-Implementierungen (eigene SQL-Bedingungen auf `status='completed'` außerhalb dieses Moduls) schlagen im Lint fehl.
+2. **knip in CI** (Konfiguration `knip.json` existiert): ungenutzte Exporte/Dateien als CI-Warnung, Report als Artefakt — Grundlage für Phase 1.3.
+3. **Schema-Wächter:** CI-Check, der die Anzahl Tabellen und die Existenz verbotener Schreibpfade (UPDATE/DELETE auf `budget_transactions` außerhalb der Whitelist) überwacht — vorbereitend für Phase 1.1.
+
+**Akzeptanz:** Ein absichtlicher Verstoß (Test-Branch: eigene `status='completed'`-Query in einer Route) bricht die CI.
+
+## Paket 0.3 — Ersetzungs-Regel in replit.md
+
+In `replit.md` (Replit-AI-Arbeitsanweisung) dauerhaft ergänzen:
+
+> **Ersetzungs-Regel:** Jedes neue Feature/jede neue Tabelle/jeder neue Mechanismus muss benennen, welche bestehende Tabelle/Funktion er ERSETZT. Lautet die Antwort „keine, kommt hinzu", wird NICHT gebaut, sondern bei Alrik rückgefragt. Pro fachlicher Frage (verfügbar? dokumentiert? Monat zu? Preis?) existiert genau EINE Funktion — Anzeige- und Schreibpfade importieren dieselbe. Beträge sind ausnahmslos Integer-Cents.
+
+**Akzeptanz:** Regel steht in replit.md; Stichprobe: Replit-AI referenziert sie bei der nächsten Aufgabe.
+
+## Paket 0.4 — Dev-Datenbasis & Backup-Routine
+
+1. Dokumentierter Befehl/Workflow: Dev-DB aus Prod-Snapshot refreshen (anonymisiert, falls nötig) — statt der aktuellen Parallelwelt mit 7.752 Import-Kunden.
+2. Vor jeder Vereinfachungs-Phase: automatischer DB-Checkpoint (Replit-Checkpoint oder pg_dump-Artefakt), Aufbewahrung der letzten 5.
+
+**Akzeptanz:** Refresh + Checkpoint je einmal erfolgreich durchgeführt und in `docs/` beschrieben.
+
+## Leitplanken
+
+Keine Verhaltesänderung am Produktivcode außer den Lint-/CI-Regeln. Alle Pakete einzeln committen. Bei Invarianten-Verletzungen im Bestand (außer den bekannten Testdaten): nur reporten, nicht „mitfixen" — Befunde an Alrik/Claude zur Triage.
