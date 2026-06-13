@@ -16,7 +16,7 @@
 // `isTest*`-Heuristiken aus `tests/globalSetup.ts`, sodass NIEMALS echte
 // Kunden/Interessenten/User getroffen werden können.
 // ---------------------------------------------------------------------------
-import { inArray, eq, and, sql } from "drizzle-orm";
+import { inArray, eq, and, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { db } from "../lib/db";
 import { appointmentsRepo, prospectsRepo, customersRepo, customerServicePricesRepo } from "../repos";
 import { customers } from "@shared/schema";
@@ -44,27 +44,64 @@ export function isProductionEnv(): boolean {
 // SQL-Test-Pattern-Filter — gespiegelt aus tests/globalSetup.ts (isTest*).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// SSoT — Test-Kunden-Namens-Präfixe der Isolations-/Equality-Suiten (Task #1265)
+//
+// Die Isolations-Suiten legen Kunden mit festen vorname-Präfixen an
+// (`T723-…`, `T642…`, `ZZ-E2E-…`). Diese eine Präfix-Liste ist die EINZIGE
+// Quelle, aus der ALLE drei gespiegelten Kunden-Filter ihr Match-Fragment
+// ableiten (Drizzle `CUSTOMER_TEST_FILTER` hier + Roh-SQL
+// `CUSTOMER_TEST_CONDITION` und der `c.`-aliasierte `CUSTOMER_TEST_C` in
+// `server/scripts/cleanup-test-data.ts`) — ebenso der Wächter
+// `scripts/check-no-test-junk.ts`. Neue Isolations-Präfixe NUR hier ergänzen
+// (Ersetzungs-Regel: ersetzt verstreute Pattern-Kopien durch eine Quelle).
+//
+// Ausnahme: dokumentierte Hand-Test-Kunden mit vorname-Präfix „ZZ-Test" bleiben
+// IMMER erhalten. Der Ausschluss umklammert den GESAMTEN Filter, weil bereits
+// das bestehende `%test%` ein „ZZ-Test" fängt.
+export const CUSTOMER_ISOLATION_TEST_PREFIXES = ["t723-", "t642", "zz-e2e-"] as const;
+export const CUSTOMER_PRESERVE_VORNAME_PREFIX = "zz-test";
+
+// „vorname matcht eines der Isolations-Präfixe" — für eine beliebige
+// vorname-Spalten-SQL (Drizzle-Spaltenref ODER sql.raw("vorname")/("c.vorname")).
+export function customerIsolationMatchSql(vornameExpr: SQL | SQLWrapper): SQL {
+  const ors = CUSTOMER_ISOLATION_TEST_PREFIXES.map(
+    (p) => sql`LOWER(${vornameExpr}) LIKE ${p + "%"}`,
+  );
+  return sql`(${sql.join(ors, sql` OR `)})`;
+}
+
+// „vorname gehört zu einem erhaltenen ZZ-Test-Kunden" (Ausschluss-Prädikat).
+export function customerPreserveSql(vornameExpr: SQL | SQLWrapper): SQL {
+  return sql`LOWER(${vornameExpr}) LIKE ${CUSTOMER_PRESERVE_VORNAME_PREFIX + "%"}`;
+}
+
 // Mirror von isTestCustomer(). Unterstriche in LIKE müssen via ESCAPE neutralisiert
-// werden (auto_ → 'auto#_%').
+// werden (auto_ → 'auto#_%'). Der Isolations-Präfix-Match (Task #1265) hängt an
+// derselben OR-Kette; die ZZ-Test-Ausnahme umklammert den GESAMTEN Filter.
 export const CUSTOMER_TEST_FILTER = sql`(
-  LOWER(${customers.vorname}) LIKE '%test%'
-  OR LOWER(${customers.nachname}) LIKE '%test%'
-  OR LOWER(${customers.nachname}) LIKE 'auto#_%' ESCAPE '#'
-  OR LOWER(${customers.vorname}) LIKE 'sz-%'
-  OR LOWER(${customers.vorname}) LIKE 'pv-%'
-  OR LOWER(${customers.vorname}) LIKE 'fd-%'
-  OR LOWER(${customers.vorname}) LIKE 'eb-%'
-  OR LOWER(${customers.vorname}) LIKE 'pg1-%'
-  OR LOWER(${customers.vorname}) LIKE 'qs-%'
-  OR LOWER(${customers.vorname}) LIKE 'status-%'
-  OR LOWER(${customers.nachname}) LIKE 'privat-%'
-  OR LOWER(${customers.nachname}) LIKE 'fahrtdienst-%'
-  OR LOWER(${customers.nachname}) LIKE 'integ-%'
-  OR LOWER(${customers.nachname}) LIKE 'mustermann-%'
-  OR LOWER(${customers.nachname}) LIKE 'importtrim-%'
-  OR LOWER(${customers.nachname}) LIKE 'notrim-%'
-  OR LOWER(${customers.nachname}) LIKE 'reconcile-%'
-  OR LOWER(${customers.nachname}) LIKE 'aligned-%'
+  (
+    LOWER(${customers.vorname}) LIKE '%test%'
+    OR LOWER(${customers.nachname}) LIKE '%test%'
+    OR LOWER(${customers.nachname}) LIKE 'auto#_%' ESCAPE '#'
+    OR LOWER(${customers.vorname}) LIKE 'sz-%'
+    OR LOWER(${customers.vorname}) LIKE 'pv-%'
+    OR LOWER(${customers.vorname}) LIKE 'fd-%'
+    OR LOWER(${customers.vorname}) LIKE 'eb-%'
+    OR LOWER(${customers.vorname}) LIKE 'pg1-%'
+    OR LOWER(${customers.vorname}) LIKE 'qs-%'
+    OR LOWER(${customers.vorname}) LIKE 'status-%'
+    OR LOWER(${customers.nachname}) LIKE 'privat-%'
+    OR LOWER(${customers.nachname}) LIKE 'fahrtdienst-%'
+    OR LOWER(${customers.nachname}) LIKE 'integ-%'
+    OR LOWER(${customers.nachname}) LIKE 'mustermann-%'
+    OR LOWER(${customers.nachname}) LIKE 'importtrim-%'
+    OR LOWER(${customers.nachname}) LIKE 'notrim-%'
+    OR LOWER(${customers.nachname}) LIKE 'reconcile-%'
+    OR LOWER(${customers.nachname}) LIKE 'aligned-%'
+    OR ${customerIsolationMatchSql(customers.vorname)}
+  )
+  AND NOT ${customerPreserveSql(customers.vorname)}
 )`;
 
 // Mirror von isTestProspect().
@@ -132,8 +169,13 @@ export async function purgeCustomerCascade(id: number): Promise<void> {
     await tx.delete(appointmentSeries).where(eq(appointmentSeries.customerId, id));
 
     if (apptIds.length > 0) {
-      await tx.update(budgetTransactions)
-        .set({ appointmentId: null })
+      // FK budget_transactions.appointment_id → appointments lösen, bevor die
+      // Termine hart gelöscht werden. NICHT auf NULL setzen: der CHECK
+      // `budget_transactions_appointment_required_check` verlangt für
+      // consumption-/reversal-Zeilen ein gesetztes appointment_id. Diese Zeilen
+      // gehören demselben Kunden und werden ohnehin gleich gelöscht — daher
+      // direkt entfernen statt detachen.
+      await tx.delete(budgetTransactions)
         .where(inArray(budgetTransactions.appointmentId, apptIds));
       await tx.update(appointments)
         .set({ travelFromAppointmentId: null })
@@ -224,8 +266,13 @@ export async function purgeCustomerCascadeBulk(ids: number[]): Promise<void> {
     await tx.delete(appointmentSeries).where(inArray(appointmentSeries.customerId, ids));
 
     if (apptIds.length > 0) {
-      await tx.update(budgetTransactions)
-        .set({ appointmentId: null })
+      // FK budget_transactions.appointment_id → appointments lösen, bevor die
+      // Termine hart gelöscht werden. NICHT auf NULL setzen: der CHECK
+      // `budget_transactions_appointment_required_check` verlangt für
+      // consumption-/reversal-Zeilen ein gesetztes appointment_id. Diese Zeilen
+      // gehören den zu löschenden Kunden und werden ohnehin gleich gelöscht —
+      // daher direkt entfernen statt detachen.
+      await tx.delete(budgetTransactions)
         .where(inArray(budgetTransactions.appointmentId, apptIds));
       await tx.update(appointments)
         .set({ travelFromAppointmentId: null })

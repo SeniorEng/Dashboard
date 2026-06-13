@@ -23,7 +23,11 @@
 
 import { sql } from "drizzle-orm";
 import { db, pool } from "../lib/db";
-import { DOCUMENT_TYPE_WHITELIST } from "../services/test-data-cleanup";
+import {
+  DOCUMENT_TYPE_WHITELIST,
+  customerIsolationMatchSql,
+  customerPreserveSql,
+} from "../services/test-data-cleanup";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -127,17 +131,24 @@ async function listWhitelistEntities(): Promise<void> {
 
 // SQL-Bedingungen für Test-Pattern (gespiegelt aus tests/globalSetup.ts).
 // Wir nutzen `#` als ESCAPE-Zeichen, um Backslash-Escape-Probleme zu vermeiden.
+// Isolations-Präfix-Match (Task #1265) + ZZ-Test-Ausnahme aus der SSoT in
+// server/services/test-data-cleanup.ts ableiten — der Ausschluss umklammert den
+// GESAMTEN Filter, weil bereits `%test%` ein „ZZ-Test" fängt.
 const CUSTOMER_TEST_CONDITION = sql`(
-  LOWER(vorname) LIKE '%test%' OR LOWER(nachname) LIKE '%test%'
-  OR LOWER(nachname) LIKE 'auto#_%' ESCAPE '#'
-  OR LOWER(nachname) LIKE 'privat-%' OR LOWER(nachname) LIKE 'fahrtdienst-%' OR LOWER(nachname) LIKE 'integ-%'
-  OR LOWER(vorname) LIKE 'sz-%' OR LOWER(vorname) LIKE 'pv-%' OR LOWER(vorname) LIKE 'fd-%'
-  OR LOWER(vorname) LIKE 'eb-%' OR LOWER(vorname) LIKE 'pg1-%' OR LOWER(vorname) LIKE 'qs-%'
-  OR LOWER(vorname) LIKE 'status-%'
-  -- Import-Test-Patterns (Marvin/Bertha/Idem/Cap mit nachname-Timestamps)
-  OR LOWER(nachname) LIKE 'importtrim-%' OR LOWER(nachname) LIKE 'notrim-%'
-  OR LOWER(nachname) LIKE 'reconcile-%' OR LOWER(nachname) LIKE 'aligned-%'
-  OR LOWER(nachname) LIKE 'mustermann-%'
+  (
+    LOWER(vorname) LIKE '%test%' OR LOWER(nachname) LIKE '%test%'
+    OR LOWER(nachname) LIKE 'auto#_%' ESCAPE '#'
+    OR LOWER(nachname) LIKE 'privat-%' OR LOWER(nachname) LIKE 'fahrtdienst-%' OR LOWER(nachname) LIKE 'integ-%'
+    OR LOWER(vorname) LIKE 'sz-%' OR LOWER(vorname) LIKE 'pv-%' OR LOWER(vorname) LIKE 'fd-%'
+    OR LOWER(vorname) LIKE 'eb-%' OR LOWER(vorname) LIKE 'pg1-%' OR LOWER(vorname) LIKE 'qs-%'
+    OR LOWER(vorname) LIKE 'status-%'
+    -- Import-Test-Patterns (Marvin/Bertha/Idem/Cap mit nachname-Timestamps)
+    OR LOWER(nachname) LIKE 'importtrim-%' OR LOWER(nachname) LIKE 'notrim-%'
+    OR LOWER(nachname) LIKE 'reconcile-%' OR LOWER(nachname) LIKE 'aligned-%'
+    OR LOWER(nachname) LIKE 'mustermann-%'
+    OR ${customerIsolationMatchSql(sql.raw("vorname"))}
+  )
+  AND NOT ${customerPreserveSql(sql.raw("vorname"))}
 )`;
 
 const PROSPECT_TEST_CONDITION = sql`(
@@ -198,15 +209,19 @@ interface Snapshot {
 // Spalten-Aliase mit `c.` Prefix unterscheiden sich. Wenn du oben ein
 // neues Pattern hinzufügst, hier ebenfalls!
 const CUSTOMER_TEST_C = sql`(
-  LOWER(c.vorname) LIKE '%test%' OR LOWER(c.nachname) LIKE '%test%'
-  OR LOWER(c.nachname) LIKE 'auto#_%' ESCAPE '#'
-  OR LOWER(c.nachname) LIKE 'privat-%' OR LOWER(c.nachname) LIKE 'fahrtdienst-%' OR LOWER(c.nachname) LIKE 'integ-%'
-  OR LOWER(c.vorname) LIKE 'sz-%' OR LOWER(c.vorname) LIKE 'pv-%' OR LOWER(c.vorname) LIKE 'fd-%'
-  OR LOWER(c.vorname) LIKE 'eb-%' OR LOWER(c.vorname) LIKE 'pg1-%' OR LOWER(c.vorname) LIKE 'qs-%'
-  OR LOWER(c.vorname) LIKE 'status-%'
-  OR LOWER(c.nachname) LIKE 'importtrim-%' OR LOWER(c.nachname) LIKE 'notrim-%'
-  OR LOWER(c.nachname) LIKE 'reconcile-%' OR LOWER(c.nachname) LIKE 'aligned-%'
-  OR LOWER(c.nachname) LIKE 'mustermann-%'
+  (
+    LOWER(c.vorname) LIKE '%test%' OR LOWER(c.nachname) LIKE '%test%'
+    OR LOWER(c.nachname) LIKE 'auto#_%' ESCAPE '#'
+    OR LOWER(c.nachname) LIKE 'privat-%' OR LOWER(c.nachname) LIKE 'fahrtdienst-%' OR LOWER(c.nachname) LIKE 'integ-%'
+    OR LOWER(c.vorname) LIKE 'sz-%' OR LOWER(c.vorname) LIKE 'pv-%' OR LOWER(c.vorname) LIKE 'fd-%'
+    OR LOWER(c.vorname) LIKE 'eb-%' OR LOWER(c.vorname) LIKE 'pg1-%' OR LOWER(c.vorname) LIKE 'qs-%'
+    OR LOWER(c.vorname) LIKE 'status-%'
+    OR LOWER(c.nachname) LIKE 'importtrim-%' OR LOWER(c.nachname) LIKE 'notrim-%'
+    OR LOWER(c.nachname) LIKE 'reconcile-%' OR LOWER(c.nachname) LIKE 'aligned-%'
+    OR LOWER(c.nachname) LIKE 'mustermann-%'
+    OR ${customerIsolationMatchSql(sql.raw("c.vorname"))}
+  )
+  AND NOT ${customerPreserveSql(sql.raw("c.vorname"))}
 )`;
 
 const USER_TEST_U = sql`(
@@ -308,7 +323,13 @@ async function purgeCustomerCascade(id: number): Promise<void> {
     await tx.execute(sql`DELETE FROM appointment_series WHERE customer_id = ${id}`);
 
     if (apptIds.length > 0) {
-      await tx.execute(sql`UPDATE budget_transactions SET appointment_id = NULL WHERE appointment_id IN (${sql.join(apptIds.map((i) => sql`${i}`), sql`, `)})`);
+      // FK budget_transactions.appointment_id → appointments lösen, bevor die
+      // Termine hart gelöscht werden. NICHT auf NULL setzen: der CHECK
+      // `budget_transactions_appointment_required_check` verlangt für
+      // consumption-/reversal-Zeilen ein gesetztes appointment_id. Die Zeilen
+      // gehören demselben Kunden und werden ohnehin gleich gelöscht — daher
+      // direkt entfernen statt detachen.
+      await tx.execute(sql`DELETE FROM budget_transactions WHERE appointment_id IN (${sql.join(apptIds.map((i) => sql`${i}`), sql`, `)})`);
       await tx.execute(sql`UPDATE appointments SET travel_from_appointment_id = NULL WHERE travel_from_appointment_id IN (${sql.join(apptIds.map((i) => sql`${i}`), sql`, `)})`);
       await tx.execute(sql`DELETE FROM appointment_services WHERE appointment_id IN (${sql.join(apptIds.map((i) => sql`${i}`), sql`, `)})`);
       await tx.execute(sql`DELETE FROM appointments WHERE customer_id = ${id}`);

@@ -12,12 +12,14 @@
 // Der eigentliche Prod-Purge läuft ausschließlich manuell über die geprüfte,
 // freigegebene Scope-Liste (siehe Ticket).
 // ---------------------------------------------------------------------------
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../server/lib/db";
-import { services, documentTypes, customerServicePrices } from "@shared/schema";
+import { services, documentTypes, customerServicePrices, customers } from "@shared/schema";
 import {
   SERVICE_TEST_FILTER,
   DOCUMENT_TYPE_TEST_FILTER,
+  customerIsolationMatchSql,
+  customerPreserveSql,
 } from "../server/services/test-data-cleanup";
 
 const MAX_SAMPLE = 25;
@@ -46,6 +48,22 @@ async function main(): Promise<void> {
     .from(documentTypes)
     .where(and(DOCUMENT_TYPE_TEST_FILTER, eq(documentTypes.isActive, true)));
 
+  // Task #1265: zusätzlich AKTIVE Kunden nach dem gepflegten Isolations-Test-
+  // Muster (T723-/T642/ZZ-E2E-, SSoT in test-data-cleanup.ts) anschlagen. Die
+  // dokumentierten ZZ-Test-Kunden sind über `customerPreserveSql` bewusst
+  // ausgenommen. „Aktiv" = status='aktiv' (deaktivierte/gekündigte Kunden sind
+  // GoBD-historisiert und kein aktionierbarer Müll).
+  const junkCustomers = await db
+    .select({ id: customers.id, vorname: customers.vorname, nachname: customers.nachname })
+    .from(customers)
+    .where(
+      and(
+        customerIsolationMatchSql(customers.vorname),
+        sql`NOT ${customerPreserveSql(customers.vorname)}`,
+        eq(customers.status, "aktiv"),
+      ),
+    );
+
   let junkCspCount = 0;
   if (junkServices.length > 0) {
     const rows = await db
@@ -62,6 +80,7 @@ async function main(): Promise<void> {
 
   console.log(
     `[check-no-test-junk] Services=${junkServices.length}, Dokumenttypen=${junkDocTypes.length}, ` +
+      `aktive Test-Kunden=${junkCustomers.length}, ` +
       `customer_service_prices an Müll-Services=${junkCspCount}`,
   );
   if (junkServices.length > 0) {
@@ -82,8 +101,17 @@ async function main(): Promise<void> {
         .join(", "),
     );
   }
+  if (junkCustomers.length > 0) {
+    console.log(
+      "  Kunden:",
+      junkCustomers
+        .slice(0, MAX_SAMPLE)
+        .map((c) => `#${c.id} ${c.vorname} ${c.nachname}`)
+        .join(", "),
+    );
+  }
 
-  const total = junkServices.length + junkDocTypes.length;
+  const total = junkServices.length + junkDocTypes.length + junkCustomers.length;
   if (total > 0) {
     console.error(
       `[check-no-test-junk] FEHLGESCHLAGEN: ${total} Test-Müll-Stammdaten gefunden. ` +

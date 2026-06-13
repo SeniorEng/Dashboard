@@ -29,6 +29,7 @@ import {
   getAuthCookie,
   getTodayDate,
   runCleanup,
+  cleanupCustomer,
 } from "../test-utils";
 import { setupBudgetScenario } from "../helpers/budget-scenarios";
 import { bookConsumption } from "../helpers/budget-booking";
@@ -36,11 +37,22 @@ import { db } from "../../server/lib/db";
 import { budgetTransactions } from "@shared/schema";
 import { calculateAppointmentCost } from "../../server/storage/budget/appointment-cost-calculator";
 
+// Task #1265 — Teardown-Härtung: jede angelegte Szenario-Kunden-ID wird hier
+// registriert und in afterAll garantiert hart gepurgt. Der per-Test-`finally`
+// (scenario.cleanup()) bleibt als schneller Pfad bestehen; dieser afterAll ist
+// das Sicherheitsnetz, falls cleanup() teilweise fehlschlägt — sonst blieben
+// die T723-CASC/PRIV-Kunden samt Cascade-Buchungen in der Dev-DB liegen und
+// erzeugten Budget-Conservation-Verletzungen.
+const createdCustomerIds: number[] = [];
+
 beforeAll(async () => {
   await getAuthCookie();
 });
 
 afterAll(async () => {
+  for (const id of createdCustomerIds.splice(0).reverse()) {
+    await cleanupCustomer(id);
+  }
   await runCleanup();
 });
 
@@ -95,6 +107,7 @@ describe("Equality Σ Service-Felder == appointment-Total über alle Cascade-Leg
         { type: "ersatzpflege_39_42a", priority: 3, enabled: true, yearlyLimitCents: 2000 },
       ],
     });
+    createdCustomerIds.push(scenario.customerId);
     try {
       const hwMinutes = 47;
       const abMinutes = 31;
@@ -181,6 +194,7 @@ describe("Equality Σ Service-Felder == appointment-Total über alle Cascade-Leg
         { type: "ersatzpflege_39_42a", priority: 3, enabled: false },
       ],
     });
+    createdCustomerIds.push(scenario.customerId);
     try {
       const hwMinutes = 60;
       const abMinutes = 30;

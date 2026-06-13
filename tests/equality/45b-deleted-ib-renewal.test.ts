@@ -26,11 +26,22 @@ import {
   calculateAllocatedCents,
   upsertInitialBalanceAllocation,
 } from "../../server/storage/budget/allocation-storage";
-import { createTestCustomer, getAuthCookie, runCleanup } from "../test-utils";
+import { createTestCustomer, getAuthCookie, runCleanup, cleanupCustomer } from "../test-utils";
 import { upsertBudgetPreferences } from "../../server/storage/budget/preferences-storage";
 
+// Task #1265 — Teardown-Härtung: jeder über `freshCustomer` angelegte Kunde
+// wird hier registriert und in afterAll garantiert hart gepurgt. Zuvor legte
+// `freshCustomer` Kunden an, ohne sie je per `trackCleanup` zu erfassen → die
+// T642-CASE*-Kunden blieben dauerhaft in der langlebigen Dev-DB liegen.
+const createdCustomerIds: number[] = [];
+
 beforeAll(async () => { await getAuthCookie(); });
-afterAll(async () => { await runCleanup(); });
+afterAll(async () => {
+  for (const id of createdCustomerIds.splice(0).reverse()) {
+    await cleanupCustomer(id);
+  }
+  await runCleanup();
+});
 
 const BUDGET_TYPE = "entlastungsbetrag_45b";
 const MONTHLY_CENTS = 13100; // 131 € gesetzlicher Default
@@ -53,6 +64,7 @@ async function freshCustomer(prefix: string): Promise<number> {
     billingType: "pflegekasse_gesetzlich",
     acceptsPrivatePayment: false,
   });
+  createdCustomerIds.push(c.id);
   return c.id;
 }
 
