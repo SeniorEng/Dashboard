@@ -45,6 +45,7 @@ async function main(): Promise<number> {
   console.log(`\n--- (2) Reservation ↔ Ledger Kreuzcheck ---`);
   for (const d of result.crossDetails) console.log(`✗ ${d}`);
   console.log(`\n  Ledger/Reservation-Kreuzcheck-Verletzungen: ${result.crossViolations}`);
+  console.log(`  davon Dual-Link-Divergenzen (Task #1272): ${result.linkDivergences}`);
 
   console.log(`\n--- Zusammenfassung ---`);
   if (result.total === 0) {

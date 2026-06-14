@@ -55,6 +55,14 @@ export interface ConservationResult {
   crossViolations: number;
   /** Menschenlesbare Detailmeldungen der Kreuzcheck-Verletzungen. */
   crossDetails: string[];
+  /**
+   * Task #1272 (Stufe A) — Dual-Link-Divergenzen: captured Reservierungen, bei
+   * denen `captured_ledger_id` UND `captured_transaction_id` gesetzt sind, aber
+   * auf UNTERSCHIEDLICHE fachliche Datensätze (Termin/Topf/Betrag) zeigen.
+   * Teilmenge von `crossViolations` (die Detailzeilen stecken in `crossDetails`).
+   * Divergenz > 0 ⇒ STOPPEN + Report (Gate A→B).
+   */
+  linkDivergences: number;
   /** Summe potViolationKeys.length + crossViolations. */
   total: number;
 }
@@ -106,7 +114,7 @@ async function computePotConservation(exec: DbOrTx): Promise<PotConservationRow[
 /** (2) Reservation ↔ Ledger Kreuzcheck (in Phase 1 trivially grün). */
 async function checkLedgerReservationCrosslinks(
   exec: DbOrTx,
-): Promise<{ violations: number; details: string[] }> {
+): Promise<{ violations: number; details: string[]; divergences: number }> {
   const details: string[] = [];
 
   const orphanCaptured = await exec
@@ -134,7 +142,63 @@ async function checkLedgerReservationCrosslinks(
     }
   }
 
-  return { violations: details.length, details };
+  // Task #1272 (Stufe A) — Dual-Link-Divergenz: für captured Reservierungen, bei
+  // denen BEIDE Links gesetzt sind, müssen die referenzierte Ledger-Zeile und die
+  // referenzierte budget_transactions-Zeile auf denselben fachlichen Datensatz
+  // (Termin + Topf + Betrag) zeigen. Reservierungen mit noch leerem
+  // captured_transaction_id (Bestand vor Backfill) sind KEINE Divergenz.
+  let divergences = 0;
+  const dualLinked = await exec
+    .select({
+      reservationId: budgetReservations.id,
+      capturedLedgerId: budgetReservations.capturedLedgerId,
+      capturedTransactionId: budgetReservations.capturedTransactionId,
+      ledgerAppointmentId: budgetLedger.appointmentId,
+      ledgerBudgetType: budgetLedger.budgetType,
+      ledgerAmountCents: budgetLedger.amountCents,
+      txAppointmentId: budgetTransactions.appointmentId,
+      txBudgetType: budgetTransactions.budgetType,
+      txAmountCents: budgetTransactions.amountCents,
+    })
+    .from(budgetReservations)
+    .leftJoin(budgetLedger, eq(budgetLedger.id, budgetReservations.capturedLedgerId))
+    .leftJoin(budgetTransactions, eq(budgetTransactions.id, budgetReservations.capturedTransactionId))
+    .where(
+      and(
+        eq(budgetReservations.state, "captured"),
+        sql`${budgetReservations.capturedLedgerId} IS NOT NULL`,
+        sql`${budgetReservations.capturedTransactionId} IS NOT NULL`,
+      ),
+    );
+
+  for (const r of dualLinked) {
+    if (r.txBudgetType === null && r.txAmountCents === null) {
+      // captured_transaction_id zeigt auf keine existierende budget_transactions-Zeile.
+      divergences++;
+      details.push(
+        `Reservation #${r.reservationId}: Dual-Link-Divergenz — capturedTransactionId=${r.capturedTransactionId ?? "NULL"} zeigt auf keine budget_transactions-Zeile`,
+      );
+      continue;
+    }
+    const mismatches: string[] = [];
+    if (r.ledgerAppointmentId !== r.txAppointmentId) {
+      mismatches.push(`Termin ${r.ledgerAppointmentId ?? "NULL"}≠${r.txAppointmentId ?? "NULL"}`);
+    }
+    if (r.ledgerBudgetType !== r.txBudgetType) {
+      mismatches.push(`Topf ${r.ledgerBudgetType ?? "NULL"}≠${r.txBudgetType ?? "NULL"}`);
+    }
+    if (r.ledgerAmountCents !== r.txAmountCents) {
+      mismatches.push(`Betrag ${r.ledgerAmountCents ?? "NULL"}≠${r.txAmountCents ?? "NULL"}`);
+    }
+    if (mismatches.length > 0) {
+      divergences++;
+      details.push(
+        `Reservation #${r.reservationId}: Dual-Link-Divergenz (Ledger #${r.capturedLedgerId} vs. Transaktion #${r.capturedTransactionId}) — ${mismatches.join(", ")}`,
+      );
+    }
+  }
+
+  return { violations: details.length, details, divergences };
 }
 
 /**
@@ -156,6 +220,7 @@ export async function checkBudgetConservation(exec: DbOrTx): Promise<Conservatio
     potViolationKeys,
     crossViolations: cross.violations,
     crossDetails: cross.details,
+    linkDivergences: cross.divergences,
     total: potViolationKeys.length + cross.violations,
   };
 }

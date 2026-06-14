@@ -29,6 +29,7 @@ function conservation(potViolationKeys: string[], crossDetails: string[] = []): 
     potViolationKeys,
     crossViolations: crossDetails.length,
     crossDetails,
+    linkDivergences: 0,
     total: potViolationKeys.length + crossDetails.length,
   };
 }

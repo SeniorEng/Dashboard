@@ -39,6 +39,7 @@ import { db } from "../../server/lib/db";
 import {
   appointments,
   budgetAllocations,
+  budgetReservations,
   budgetTransactions,
   customers,
   customerBudgetPreferences,
@@ -79,6 +80,7 @@ import {
   AUDIT_PARENT_DELETION_INDEX_SQL,
 } from "../../server/startup/ensure-audit-parent-deletion";
 import { QONTO_MATCH_UNIQUE_INDEX_SQL } from "../../server/startup/ensure-qonto-match-idempotency";
+import { RESERVATION_CAPTURED_TX_INDEX_SQL } from "../../server/startup/ensure-reservation-captured-transaction-link";
 import {
   CBTS_UNIQUE_INDEX_SQL,
   BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL,
@@ -719,6 +721,15 @@ const INDEX_SOURCES: IndexSource[] = [
     realTable: "qonto_transactions",
     drizzleTable: qontoTransactions,
     tempColumns: "matched_invoice_id integer",
+  },
+  {
+    label:
+      "ensure-reservation-captured-transaction-link: budget_reservations_captured_transaction_idx",
+    rawSql: RESERVATION_CAPTURED_TX_INDEX_SQL,
+    indexName: "budget_reservations_captured_transaction_idx",
+    realTable: "budget_reservations",
+    drizzleTable: budgetReservations,
+    tempColumns: "captured_transaction_id integer",
   },
   {
     label:

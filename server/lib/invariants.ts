@@ -70,6 +70,8 @@ export interface BudgetLedgerConsistencyResult {
     overdrawnKeys: string[];
     crossViolations: number;
     crossDetails: string[];
+    /** Task #1272 — Dual-Link-Divergenzen (Teilmenge von crossViolations). */
+    linkDivergences: number;
   };
   /** Layer 2 — Storno-Ketten-Integrität (neu; das was L1-Clamp verschluckt). */
   reversalChain: {
@@ -252,6 +254,7 @@ export async function checkBudgetLedgerConsistency(
       overdrawnKeys: conservation.potViolationKeys,
       crossViolations: conservation.crossViolations,
       crossDetails: conservation.crossDetails,
+      linkDivergences: conservation.linkDivergences,
     },
     reversalChain: {
       checkedReversals: reversal.checked,

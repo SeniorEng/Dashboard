@@ -235,6 +235,11 @@ export const budgetReservations = pgTable("budget_reservations", {
   idempotencyKey: text("idempotency_key").notNull(),
   expiresAt: timestamp("expires_at"),
   capturedLedgerId: integer("captured_ledger_id").references(() => budgetLedger.id),
+  // Task #1272 (Budget-Ledger Stufe A) — zweiter, direkter Link auf die
+  // gespiegelte budget_transactions-Zeile. Nullable; per Capture gesetzt +
+  // Bestand per idempotentem Backfill. ERSETZT mittelfristig den Umweg über
+  // capturedLedgerId/budget_ledger (Stufe B/C). KEINE zweite Berechnung.
+  capturedTransactionId: integer("captured_transaction_id").references(() => budgetTransactions.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
@@ -244,6 +249,7 @@ export const budgetReservations = pgTable("budget_reservations", {
   index("budget_reservations_allocation_idx").on(table.allocationId),
   index("budget_reservations_state_idx").on(table.customerId, table.state),
   uniqueIndex("budget_reservations_idempotency_key_idx").on(table.idempotencyKey),
+  index("budget_reservations_captured_transaction_idx").on(table.capturedTransactionId),
 ]);
 
 // budget_ledger / budget_reservations schemas + types

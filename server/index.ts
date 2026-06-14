@@ -276,6 +276,18 @@ async function runStartupTasks() {
       log(`Budget-Ledger-Immutability-Self-Check fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1272 (Stufe A) — zweiter Capture-Link
+    // budget_reservations.captured_transaction_id → budget_transactions.id
+    // idempotent anlegen (nullable FK + Index). Muss laufen, bevor der
+    // Capture-Pfad die Spalte schreibt. GoBD-Bestandsmuster: Startup-Schritt,
+    // kein drizzle-kit push.
+    const { ensureReservationCapturedTransactionLink } = await import("./startup/ensure-reservation-captured-transaction-link");
+    try {
+      await ensureReservationCapturedTransactionLink();
+    } catch (err) {
+      log(`Reservation-capturedTransactionId-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { ensureQontoMatchIdempotency } = await import("./startup/ensure-qonto-match-idempotency");
     try {
       await ensureQontoMatchIdempotency();
@@ -510,6 +522,17 @@ async function runStartupTasks() {
       await backfillStornoTransactionDate();
     } catch (err) {
       log(`Storno-transactionDate-Backfill fehlgeschlagen: ${err}`, "startup");
+    }
+
+    // Task #1272 (Stufe A) — Bestand des zweiten Capture-Links
+    // budget_reservations.captured_transaction_id über den captureKey/
+    // idempotencyKey-Bezug nachfüllen. Idempotent; nicht mappbare Zeilen werden
+    // NUR berichtet (Gate-A→B-Triage durch Alrik), nicht heuristisch repariert.
+    const { backfillReservationCapturedTransactionId } = await import("./startup/backfill-reservation-captured-transaction-id");
+    try {
+      await backfillReservationCapturedTransactionId();
+    } catch (err) {
+      log(`Reservation-capturedTransactionId-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #988/#993/#994 — Die einmalige Phantom-Storno-Import-Drift-Korrektur

@@ -480,6 +480,10 @@ export async function captureHolds(
   // Ledger spiegelt JEDE Legacy-Konsumtionszeile (I13). Idempotent pro Zeile.
   const ledgerIds: number[] = [];
   const ledgerByType = new Map<string, number>();
+  // Task #1272 — pro Topf die budget_transactions-id DERSELBEN Konsum-Zeile,
+  // aus der die gespiegelte Ledger-Zeile entstand (Dual-Link). Mirror der
+  // ledgerByType-Semantik: erste Konsum-Zeile eines Topfes gewinnt.
+  const txByType = new Map<string, number>();
   for (const c of consumptionRows) {
     const inserted = await tx
       .insert(budgetLedger)
@@ -508,14 +512,20 @@ export async function captureHolds(
       .returning({ id: budgetLedger.id });
     if (inserted[0]) {
       ledgerIds.push(inserted[0].id);
-      if (!ledgerByType.has(c.budgetType)) ledgerByType.set(c.budgetType, inserted[0].id);
+      if (!ledgerByType.has(c.budgetType)) {
+        ledgerByType.set(c.budgetType, inserted[0].id);
+        txByType.set(c.budgetType, c.id);
+      }
     } else {
       const [row] = await tx
         .select({ id: budgetLedger.id })
         .from(budgetLedger)
         .where(eq(budgetLedger.idempotencyKey, captureKey(params.appointmentId, occurrenceId, c.budgetType, c.id)))
         .limit(1);
-      if (row && !ledgerByType.has(c.budgetType)) ledgerByType.set(c.budgetType, row.id);
+      if (row && !ledgerByType.has(c.budgetType)) {
+        ledgerByType.set(c.budgetType, row.id);
+        txByType.set(c.budgetType, c.id);
+      }
     }
   }
 
@@ -538,6 +548,7 @@ export async function captureHolds(
   let releasedCount = 0;
   for (const hold of holds) {
     const ledgerId = ledgerByType.get(hold.budgetType);
+    const txId = txByType.get(hold.budgetType);
     const target = ledgerId != null ? "captured" : "released";
     assertReservationTransition("hold", target);
     const capturedAmount =
@@ -549,6 +560,9 @@ export async function captureHolds(
       .set({
         state: target,
         capturedLedgerId: ledgerId ?? null,
+        // Task #1272 — Dual-Link: beide Verweise zeigen auf DENSELBEN
+        // fachlichen Datensatz (Ledger-Zeile ⇔ ihre Konsum-Quelle).
+        capturedTransactionId: txId ?? null,
         amountCents: capturedAmount,
         updatedAt: new Date(),
       })
