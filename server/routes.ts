@@ -46,10 +46,10 @@ export async function registerRoutes(
     );
     const auditLogImmutability =
       getAuditLogImmutabilityStatus() ?? (await verifyAuditLogImmutable());
-    const { getBudgetLedgerImmutabilityStatus, verifyBudgetLedgerImmutable } =
-      await import("./startup/ensure-budget-ledger-immutability");
-    const budgetLedgerImmutability =
-      getBudgetLedgerImmutabilityStatus() ?? (await verifyBudgetLedgerImmutable());
+    const { getBudgetTransactionsImmutabilityStatus, verifyBudgetTransactionsImmutable } =
+      await import("./startup/ensure-budget-transactions-immutability");
+    const budgetTransactionsImmutability =
+      getBudgetTransactionsImmutabilityStatus() ?? (await verifyBudgetTransactionsImmutable());
     // Task #953: Budget-Hard-Block-Scharfschaltung (BUDGET_HARD_HOLDS) im
     // Health-Endpoint sichtbar machen, damit ein Operator/Monitoring sofort
     // sieht, ob der Overdraft-Schutz in der laufenden (Prod-)Instanz aktiv ist.
@@ -66,7 +66,7 @@ export async function registerRoutes(
         chromium: chromiumStatus,
         pdfCache,
         auditLogImmutability,
-        budgetLedgerImmutability,
+        budgetTransactionsImmutability,
         budgetHardHolds,
       });
     } catch (error) {
@@ -79,7 +79,7 @@ export async function registerRoutes(
         chromium: chromiumStatus,
         pdfCache,
         auditLogImmutability,
-        budgetLedgerImmutability,
+        budgetTransactionsImmutability,
         budgetHardHolds,
       });
     }

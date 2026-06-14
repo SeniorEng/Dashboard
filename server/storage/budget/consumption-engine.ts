@@ -757,6 +757,11 @@ async function reconcileAppointmentLegFieldDrift(
   const newTv = (last.travelCents ?? 0) + dTv;
   const newCk = (last.customerKilometersCents ?? 0) + dCk;
 
+  // Task #1273: budget_transactions ist seit Stufe B per BEFORE-Trigger
+  // GoBD-unveränderbar. Dieser Final-Reconcile korrigiert die zuletzt gebuchte
+  // Konsum-Zeile auf den tatsächlichen Ist-Betrag (legitime, interne
+  // Buchhaltungs-Korrektur). Bypass transaktions-lokal freischalten.
+  await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
   await tx
     .update(budgetTransactions)
     .set({

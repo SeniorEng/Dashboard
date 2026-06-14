@@ -95,6 +95,10 @@ export async function backfillStornoTransactionDate(
     }
 
     await db.transaction(async (tx) => {
+      // Task #1273: budget_transactions ist seit Stufe B per BEFORE-Trigger
+      // GoBD-immutable. Diese Korrektur ist audit-begleitet (siehe unten) —
+      // Bypass transaktions-lokal freischalten.
+      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
       await tx
         .update(budgetTransactions)
         .set({ transactionDate: row.originalDate })

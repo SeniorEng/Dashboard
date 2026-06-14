@@ -1,43 +1,46 @@
 /**
- * Task #871 — GoBD: technische Unveränderbarkeit der finanziellen
- * `budget_ledger`-Tabelle (Budget GF Phase 1).
+ * Task #871 / Task #1273 — GoBD: technische Unveränderbarkeit der finanziellen
+ * Budget-Buchungstabelle.
  *
- * Verifiziert die BEFORE-Trigger aus
- * `server/startup/ensure-budget-ledger-immutability.ts`:
- *  - budget_ledger: append-only — UPDATE und DELETE schlagen fehl; Bypass-GUC
- *    `app.allow_gobd_mutation` erlaubt beides.
+ * Stufe B (#1273) hat den GoBD-Immutability-Installer von `budget_ledger` auf
+ * `budget_transactions` umgezogen (der `budget_ledger`-Spiegel wird nicht mehr
+ * geschrieben). Dieser Negativ-Beweis verifiziert die BEFORE-Trigger aus
+ * `server/startup/ensure-budget-transactions-immutability.ts`:
+ *  - budget_transactions: append-only — UPDATE und DELETE schlagen fehl; der
+ *    Bypass-GUC `app.allow_gobd_mutation` erlaubt beides.
  *  - budget_reservations: BEWUSST mutierbar — UPDATE/DELETE bleiben erlaubt
  *    (operative Holds, nicht GoBD-relevant).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { db } from "../server/lib/db";
-import { budgetLedger, budgetReservations } from "@shared/schema";
+import { budgetTransactions, budgetReservations } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { createTestCustomer, uniqueId } from "./test-utils";
 
 let customerId: number;
-let ledgerId: number;
+let transactionId: number;
 let reservationId: number;
 
 beforeAll(async () => {
   const c = await createTestCustomer({
     vorname: "GoBD",
-    nachname: "Ledger-" + uniqueId(),
+    nachname: "Tx-" + uniqueId(),
   });
   customerId = c.id as number;
 
-  const [led] = await db
-    .insert(budgetLedger)
+  // manual_adjustment-Buchung ohne appointmentId — unterliegt nicht dem
+  // appointment-required-CHECK (nur consumption/reversal brauchen ein Termin).
+  const [tx] = await db
+    .insert(budgetTransactions)
     .values({
       customerId,
       budgetType: "entlastungsbetrag_45b",
       transactionDate: "2026-01-15",
-      state: "consumed",
+      transactionType: "manual_adjustment",
       amountCents: -5000,
-      idempotencyKey: "test-ledger-" + uniqueId(),
     })
-    .returning({ id: budgetLedger.id });
-  ledgerId = led.id;
+    .returning({ id: budgetTransactions.id });
+  transactionId = tx.id;
 
   const [res] = await db
     .insert(budgetReservations)
@@ -56,43 +59,49 @@ afterAll(async () => {
   await db.transaction(async (tx) => {
     await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
     await tx.delete(budgetReservations).where(eq(budgetReservations.customerId, customerId));
-    await tx.delete(budgetLedger).where(eq(budgetLedger.customerId, customerId));
+    await tx.delete(budgetTransactions).where(eq(budgetTransactions.customerId, customerId));
   });
 });
 
-describe("budget_ledger: append-only (UPDATE & DELETE gesperrt)", () => {
+describe("budget_transactions: append-only (UPDATE & DELETE gesperrt)", () => {
   it("UPDATE schlägt fehl", async () => {
     await expect(
-      db.update(budgetLedger).set({ amountCents: -1 }).where(eq(budgetLedger.id, ledgerId)),
+      db.update(budgetTransactions).set({ amountCents: -1 }).where(eq(budgetTransactions.id, transactionId)),
     ).rejects.toThrow();
     const rows = await db
-      .select({ amountCents: budgetLedger.amountCents })
-      .from(budgetLedger)
-      .where(eq(budgetLedger.id, ledgerId));
+      .select({ amountCents: budgetTransactions.amountCents })
+      .from(budgetTransactions)
+      .where(eq(budgetTransactions.id, transactionId));
     expect(rows[0]?.amountCents).toBe(-5000);
   });
 
   it("DELETE schlägt fehl", async () => {
     await expect(
-      db.delete(budgetLedger).where(eq(budgetLedger.id, ledgerId)),
+      db.delete(budgetTransactions).where(eq(budgetTransactions.id, transactionId)),
     ).rejects.toThrow();
-    const rows = await db.select({ id: budgetLedger.id }).from(budgetLedger).where(eq(budgetLedger.id, ledgerId));
+    const rows = await db
+      .select({ id: budgetTransactions.id })
+      .from(budgetTransactions)
+      .where(eq(budgetTransactions.id, transactionId));
     expect(rows.length).toBe(1);
   });
 
   it("Mit Bypass-GUC sind UPDATE und DELETE möglich", async () => {
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
-      await tx.update(budgetLedger).set({ amountCents: -1 }).where(eq(budgetLedger.id, ledgerId));
-      await tx.delete(budgetLedger).where(eq(budgetLedger.id, ledgerId));
+      await tx.update(budgetTransactions).set({ amountCents: -1 }).where(eq(budgetTransactions.id, transactionId));
+      await tx.delete(budgetTransactions).where(eq(budgetTransactions.id, transactionId));
     });
-    const rows = await db.select({ id: budgetLedger.id }).from(budgetLedger).where(eq(budgetLedger.id, ledgerId));
+    const rows = await db
+      .select({ id: budgetTransactions.id })
+      .from(budgetTransactions)
+      .where(eq(budgetTransactions.id, transactionId));
     expect(rows.length).toBe(0);
   });
 });
 
 describe("budget_reservations: operativ mutierbar (kein GoBD-Lock)", () => {
-  it("UPDATE (State-Übergang hold → captured) ist erlaubt", async () => {
+  it("UPDATE (State-Übergang hold → released) ist erlaubt", async () => {
     await db
       .update(budgetReservations)
       .set({ state: "released" })

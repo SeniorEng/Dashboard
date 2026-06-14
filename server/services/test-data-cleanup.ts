@@ -498,6 +498,11 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
       // wir die Mutation transaktions-lokal frei. `SET LOCAL` gilt ausschließlich
       // innerhalb dieser Transaktion und wird beim Commit/Rollback verworfen.
       await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
+      // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+      // (BEFORE-Trigger) — wie budget_allocations/invoices unten löst dieser
+      // User-Cleanup created_by_user_id/appointment_id-Refs. Bypass
+      // transaktions-lokal freischalten.
+      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
       // Task #906: Ziel-User VOR jedem Child-Delete mit FOR UPDATE sperren.
       // Unter paralleler Test-Last (Task #894) legt der live laufende
       // Worker-App-Server u.U. zwischen Child-Delete und `DELETE FROM users`

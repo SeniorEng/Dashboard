@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { budgetTransactions, users } from "@shared/schema";
 import { auditService } from "../services/audit";
@@ -122,6 +122,10 @@ export async function backfillOrphanReversalAppointmentId(
     }
 
     await db.transaction(async (tx) => {
+      // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+      // (BEFORE-Trigger). Dieser Backfill ist audit-begleitet — Bypass
+      // transaktions-lokal freischalten.
+      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
       await tx
         .update(budgetTransactions)
         .set({ appointmentId })

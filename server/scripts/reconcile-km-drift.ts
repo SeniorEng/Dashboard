@@ -61,7 +61,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { eq, and, isNull, inArray } from "drizzle-orm";
+import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
   appointments,
@@ -349,6 +349,9 @@ async function reconcileOne(
     //     Re-Lauf-Idempotenz) zählt doppelt. Reversal-Zeilen behalten ihre
     //     appointmentId (Audit-Trail); die stornierte Buchung bleibt über
     //     `reversedTransactionId` rückführbar.
+    // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+    // (BEFORE-Trigger) — Bypass transaktions-lokal freischalten.
+    await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
     await tx.update(budgetTransactions)
       .set({ appointmentId: null })
       .where(inArray(budgetTransactions.id, existingTxs.map(t => t.id)));

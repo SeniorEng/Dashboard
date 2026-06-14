@@ -126,7 +126,7 @@ import {
   renderCreateTriggerSql,
 } from "../../server/startup/trigger-spec";
 import { AUDIT_LOG_TRIGGERS } from "../../server/startup/ensure-audit-log-immutable";
-import { BUDGET_LEDGER_TRIGGERS } from "../../server/startup/ensure-budget-ledger-immutability";
+import { BUDGET_TRANSACTIONS_TRIGGERS } from "../../server/startup/ensure-budget-transactions-immutability";
 import { GOBD_TABLE_TRIGGERS } from "../../server/startup/ensure-gobd-table-immutability";
 
 // ===========================================================================
@@ -1142,7 +1142,7 @@ describe("Startup CHECK-Constraint-Drift (server/startup/**)", () => {
 
 const ALL_STARTUP_TRIGGER_SPECS: StartupTriggerSpec[] = [
   ...AUDIT_LOG_TRIGGERS,
-  ...BUDGET_LEDGER_TRIGGERS,
+  ...BUDGET_TRANSACTIONS_TRIGGERS,
   ...GOBD_TABLE_TRIGGERS,
 ];
 

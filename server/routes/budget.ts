@@ -1318,8 +1318,15 @@ router.post("/admin/repair-orphaned-transactions", requireAdmin, asyncHandler("B
 
     for (const dr of (duplicateReversals.rows || []) as any[]) {
       try {
-        await drizzleDb.delete(budgetTransactions)
-          .where(eq(budgetTransactions.id, dr.id));
+        // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+        // (BEFORE-Trigger). Das Aufräumen einer Duplikat-Reversal-Zeile braucht
+        // den Bypass — dieser muss innerhalb EINER Transaktion gesetzt werden
+        // (`SET LOCAL`), daher den Delete in eine Tx kapseln.
+        await drizzleDb.transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
+          await tx.delete(budgetTransactions)
+            .where(eq(budgetTransactions.id, dr.id));
+        });
         deletedDuplicates++;
       } catch (err) {
         errors.push({ txId: dr.id, error: err instanceof Error ? err.message : String(err) });

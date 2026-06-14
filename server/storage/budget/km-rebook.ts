@@ -29,7 +29,7 @@
  * Audit-Trail erkennbar bleibt.
  */
 
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { appointments, appointmentServices, budgetTransactions, services } from "@shared/schema";
 import { createConsumptionTransaction } from "./consumption-engine";
 import type { DbClient } from "./types";
@@ -219,6 +219,9 @@ export async function rebookAppointmentConsumption(
   // naive `type='consumption' AND appointmentId=X`-Aggregationen nur noch die
   // neue (lebende) Buchung und nicht zusätzlich die stornierte Alt-Zeile.
   // Die Reversal-Zeilen behalten ihre `appointmentId` (Audit-Trail).
+  // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable (BEFORE-
+  // Trigger) — Bypass transaktions-lokal freischalten.
+  await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
   await tx.update(budgetTransactions)
     .set({ appointmentId: null })
     .where(inArray(budgetTransactions.id, existingTxs.map((t) => t.id)));

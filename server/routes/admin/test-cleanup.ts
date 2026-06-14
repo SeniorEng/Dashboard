@@ -133,6 +133,11 @@ router.post(
     let appointmentsDeleted = 0;
 
     await db.transaction(async (tx) => {
+      // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+      // (BEFORE-Trigger). Dieser nur in Nicht-Prod erreichbare Test-Cleanup
+      // löst die appointment_id der betroffenen Buchungen — Bypass
+      // transaktions-lokal freischalten.
+      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
       const teResult = await tx
         .update(employeeTimeEntries)
         .set({ deletedAt: new Date() })

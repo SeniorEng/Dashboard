@@ -21,12 +21,11 @@
  * strikte Gleichheit würde dort fälschlich anschlagen. Die Erhaltung, die immer
  * hält, ist „kein Topf wird über seine Allocation hinaus konsumiert".
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DbOrTx } from "./db";
 import {
   budgetTransactions,
   budgetAllocations,
-  budgetLedger,
   budgetReservations,
 } from "@shared/schema";
 
@@ -56,11 +55,14 @@ export interface ConservationResult {
   /** Menschenlesbare Detailmeldungen der Kreuzcheck-Verletzungen. */
   crossDetails: string[];
   /**
-   * Task #1272 (Stufe A) — Dual-Link-Divergenzen: captured Reservierungen, bei
-   * denen `captured_ledger_id` UND `captured_transaction_id` gesetzt sind, aber
-   * auf UNTERSCHIEDLICHE fachliche Datensätze (Termin/Topf/Betrag) zeigen.
+   * Task #1273 (Stufe B) — Link-Divergenzen: captured Reservierungen, deren
+   * `captured_transaction_id` zwar gesetzt ist, aber auf keine existierende
+   * `budget_transactions`-Zeile zeigt ODER auf eine Zeile mit abweichendem
+   * Kunden/Topf. `budget_ledger` wird ab Stufe B NICHT mehr konsultiert (der
+   * Dual-Link ist auf den einen `captured_transaction_id`-Link reduziert).
    * Teilmenge von `crossViolations` (die Detailzeilen stecken in `crossDetails`).
-   * Divergenz > 0 ⇒ STOPPEN + Report (Gate A→B).
+   * Reservierungen mit leerem `captured_transaction_id` (Bestand vor Stage-A-
+   * Backfill) sind KEINE Divergenz. Divergenz > 0 ⇒ STOPPEN + Report.
    */
   linkDivergences: number;
   /** Summe potViolationKeys.length + crossViolations. */
@@ -111,90 +113,107 @@ async function computePotConservation(exec: DbOrTx): Promise<PotConservationRow[
   return rows;
 }
 
-/** (2) Reservation ↔ Ledger Kreuzcheck (in Phase 1 trivially grün). */
+/**
+ * (2) Reservation ↔ Transaction Kreuzcheck (Stufe B, Task #1273).
+ *
+ * Ab Stufe B ist `budget_transactions` die eine append-only Finanz-Schicht und
+ * `captured_transaction_id` der EINE Capture-Link. `budget_ledger` wird NICHT
+ * mehr konsultiert. Geprüft werden dieselben fachlichen Aussagen wie vorher auf
+ * der neuen Quelle:
+ *  - Orphan-Capture: captured Reservierung, deren gesetzter
+ *    `captured_transaction_id` auf keine `budget_transactions`-Zeile zeigt.
+ *  - Link-Divergenz: captured Reservierung, deren referenzierte Transaktion
+ *    einen anderen Kunden/Topf trägt (Betrag NICHT verglichen — die Reservierung
+ *    hält den Hold-/Ist-Betrag, die Konsum-Zeile das negative Pendant).
+ *  - Reversal-Ketten-Integrität: jede `reversal`-Zeile muss auf eine existierende
+ *    `budget_transactions`-Zeile (`reversed_transaction_id`) verweisen.
+ * Reservierungen mit leerem `captured_transaction_id` (Legacy) sind KEINE
+ * Verletzung.
+ */
 async function checkLedgerReservationCrosslinks(
   exec: DbOrTx,
 ): Promise<{ violations: number; details: string[]; divergences: number }> {
   const details: string[] = [];
-
-  const orphanCaptured = await exec
-    .select({
-      id: budgetReservations.id,
-      capturedLedgerId: budgetReservations.capturedLedgerId,
-    })
-    .from(budgetReservations)
-    .leftJoin(budgetLedger, eq(budgetLedger.id, budgetReservations.capturedLedgerId))
-    .where(and(eq(budgetReservations.state, "captured"), isNull(budgetLedger.id)));
-
-  for (const r of orphanCaptured) {
-    details.push(
-      `Reservation #${r.id} ist 'captured', aber capturedLedgerId=${r.capturedLedgerId ?? "NULL"} zeigt auf keine Ledger-Zeile`,
-    );
-  }
-
-  const ledgerRows = await exec
-    .select({ id: budgetLedger.id, reversesLedgerId: budgetLedger.reversesLedgerId })
-    .from(budgetLedger);
-  const ledgerIds = new Set(ledgerRows.map((r) => r.id));
-  for (const r of ledgerRows) {
-    if (r.reversesLedgerId !== null && !ledgerIds.has(r.reversesLedgerId)) {
-      details.push(`Ledger-Storno #${r.id} verweist auf nicht existierende Ledger-Zeile ${r.reversesLedgerId}`);
-    }
-  }
-
-  // Task #1272 (Stufe A) — Dual-Link-Divergenz: für captured Reservierungen, bei
-  // denen BEIDE Links gesetzt sind, müssen die referenzierte Ledger-Zeile und die
-  // referenzierte budget_transactions-Zeile auf denselben fachlichen Datensatz
-  // (Termin + Topf + Betrag) zeigen. Reservierungen mit noch leerem
-  // captured_transaction_id (Bestand vor Backfill) sind KEINE Divergenz.
   let divergences = 0;
-  const dualLinked = await exec
+
+  const captured = await exec
     .select({
       reservationId: budgetReservations.id,
-      capturedLedgerId: budgetReservations.capturedLedgerId,
+      customerId: budgetReservations.customerId,
+      budgetType: budgetReservations.budgetType,
       capturedTransactionId: budgetReservations.capturedTransactionId,
-      ledgerAppointmentId: budgetLedger.appointmentId,
-      ledgerBudgetType: budgetLedger.budgetType,
-      ledgerAmountCents: budgetLedger.amountCents,
-      txAppointmentId: budgetTransactions.appointmentId,
+      txCustomerId: budgetTransactions.customerId,
       txBudgetType: budgetTransactions.budgetType,
-      txAmountCents: budgetTransactions.amountCents,
     })
     .from(budgetReservations)
-    .leftJoin(budgetLedger, eq(budgetLedger.id, budgetReservations.capturedLedgerId))
-    .leftJoin(budgetTransactions, eq(budgetTransactions.id, budgetReservations.capturedTransactionId))
+    .leftJoin(
+      budgetTransactions,
+      eq(budgetTransactions.id, budgetReservations.capturedTransactionId),
+    )
     .where(
       and(
         eq(budgetReservations.state, "captured"),
-        sql`${budgetReservations.capturedLedgerId} IS NOT NULL`,
         sql`${budgetReservations.capturedTransactionId} IS NOT NULL`,
       ),
     );
 
-  for (const r of dualLinked) {
-    if (r.txBudgetType === null && r.txAmountCents === null) {
-      // captured_transaction_id zeigt auf keine existierende budget_transactions-Zeile.
+  for (const r of captured) {
+    if (r.txCustomerId === null && r.txBudgetType === null) {
+      // Orphan-Capture: capturedTransactionId zeigt ins Leere.
       divergences++;
       details.push(
-        `Reservation #${r.reservationId}: Dual-Link-Divergenz — capturedTransactionId=${r.capturedTransactionId ?? "NULL"} zeigt auf keine budget_transactions-Zeile`,
+        `Reservation #${r.reservationId} ist 'captured', aber capturedTransactionId=${r.capturedTransactionId ?? "NULL"} zeigt auf keine budget_transactions-Zeile`,
       );
       continue;
     }
     const mismatches: string[] = [];
-    if (r.ledgerAppointmentId !== r.txAppointmentId) {
-      mismatches.push(`Termin ${r.ledgerAppointmentId ?? "NULL"}≠${r.txAppointmentId ?? "NULL"}`);
+    if (r.txCustomerId !== r.customerId) {
+      mismatches.push(`Kunde ${r.customerId}≠${r.txCustomerId ?? "NULL"}`);
     }
-    if (r.ledgerBudgetType !== r.txBudgetType) {
-      mismatches.push(`Topf ${r.ledgerBudgetType ?? "NULL"}≠${r.txBudgetType ?? "NULL"}`);
-    }
-    if (r.ledgerAmountCents !== r.txAmountCents) {
-      mismatches.push(`Betrag ${r.ledgerAmountCents ?? "NULL"}≠${r.txAmountCents ?? "NULL"}`);
+    if (r.txBudgetType !== r.budgetType) {
+      mismatches.push(`Topf ${r.budgetType}≠${r.txBudgetType ?? "NULL"}`);
     }
     if (mismatches.length > 0) {
       divergences++;
       details.push(
-        `Reservation #${r.reservationId}: Dual-Link-Divergenz (Ledger #${r.capturedLedgerId} vs. Transaktion #${r.capturedTransactionId}) — ${mismatches.join(", ")}`,
+        `Reservation #${r.reservationId}: Link-Divergenz (Transaktion #${r.capturedTransactionId}) — ${mismatches.join(", ")}`,
       );
+    }
+  }
+
+  // Reversal-Ketten-Integrität auf budget_transactions (umgezogen von
+  // budget_ledger): jede reversal-Zeile muss eine existierende Originalzeile
+  // referenzieren.
+  const reversalRows = await exec
+    .select({
+      id: budgetTransactions.id,
+      reversedTransactionId: budgetTransactions.reversedTransactionId,
+    })
+    .from(budgetTransactions)
+    .where(eq(budgetTransactions.transactionType, "reversal"));
+
+  const refIds = Array.from(
+    new Set(
+      reversalRows
+        .map((r) => r.reversedTransactionId)
+        .filter((id): id is number => id !== null),
+    ),
+  );
+  if (refIds.length > 0) {
+    const existing = new Set(
+      (
+        await exec
+          .select({ id: budgetTransactions.id })
+          .from(budgetTransactions)
+          .where(inArray(budgetTransactions.id, refIds))
+      ).map((r) => r.id),
+    );
+    for (const r of reversalRows) {
+      if (r.reversedTransactionId !== null && !existing.has(r.reversedTransactionId)) {
+        details.push(
+          `Storno #${r.id} verweist auf nicht existierende Transaktion ${r.reversedTransactionId}`,
+        );
+      }
     }
   }
 

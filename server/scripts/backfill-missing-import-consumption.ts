@@ -308,6 +308,9 @@ export async function backfillOne(
       // Erzeugte Consumption (Kaskade über mehrere Töpfe möglich) mit dem
       // Import-Batch des Termins verknüpfen, falls vorhanden.
       if (row.importBatchId != null) {
+        // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+        // (BEFORE-Trigger) — Bypass transaktions-lokal freischalten.
+        await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
         await tx
           .update(budgetTransactions)
           .set({ importBatchId: row.importBatchId })

@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../lib/db";
 import { budgetTransactions, users } from "@shared/schema";
 import { findMissingConsumptionAppointments } from "../scripts/backfill-missing-import-consumption";
@@ -142,6 +142,9 @@ export async function backfillMissingImportConsumption(
         // Erzeugte Consumption(en) (Kaskade über mehrere Töpfe möglich) mit
         // dem Import-Batch des Termins verknüpfen.
         if (row.importBatchId != null) {
+          // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+          // (BEFORE-Trigger) — Bypass savepoint-lokal freischalten.
+          await sp.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
           await sp
             .update(budgetTransactions)
             .set({ importBatchId: row.importBatchId })

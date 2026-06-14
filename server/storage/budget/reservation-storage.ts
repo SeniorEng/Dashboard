@@ -391,16 +391,18 @@ export async function planHold(
 export interface CaptureHoldsResult {
   capturedCount: number;
   releasedCount: number;
-  ledgerIds: number[];
+  /** Stufe B (Task #1273) — IDs der budget_transactions-Konsum-Zeilen, auf die
+   *  die captured Reservierungen dieses Termins verlinken (ehemals `ledgerIds`). */
+  transactionIds: number[];
   reconciliationCase: "partial_capture" | "same_pot_extend" | "cross_pot_overflow" | "none";
 }
 
 /**
- * Bucht beim Abschluss die Holds in den Ledger (N2/R5/I13/I15). MUSS in
- * derselben Transaktion laufen, in der die Legacy-Konsumtion
- * (`budget_transactions`) bereits geschrieben wurde — der Ledger spiegelt diese
- * 1:1 (getreuer Schatten), Holds werden auf captured/released überführt.
- * Idempotent über UNIQUE-`idempotencyKey` der Ledger-Zeilen.
+ * Überführt beim Abschluss die Holds (N2/R5/I13/I15). MUSS in derselben
+ * Transaktion laufen, in der die Legacy-Konsumtion (`budget_transactions`)
+ * bereits geschrieben wurde — ab Stufe B (Task #1273) ist `budget_transactions`
+ * selbst die append-only Finanz-Schicht (kein budget_ledger-Spiegel mehr); Holds
+ * werden auf captured (mit captured_transaction_id) / released überführt.
  */
 export async function captureHolds(
   params: {
@@ -427,7 +429,7 @@ export async function captureHolds(
       ),
     );
   if (holds.length === 0) {
-    return { capturedCount: 0, releasedCount: 0, ledgerIds: [], reconciliationCase: "none" };
+    return { capturedCount: 0, releasedCount: 0, transactionIds: [], reconciliationCase: "none" };
   }
 
   // Legacy-Konsumtionszeilen dieses Termins (in derselben Tx geschrieben) =
@@ -477,55 +479,16 @@ export async function captureHolds(
     throw new OverBudgetCompletionError(params.appointmentId, recon.overflowCents, lastStatutory);
   }
 
-  // Ledger spiegelt JEDE Legacy-Konsumtionszeile (I13). Idempotent pro Zeile.
-  const ledgerIds: number[] = [];
-  const ledgerByType = new Map<string, number>();
-  // Task #1272 — pro Topf die budget_transactions-id DERSELBEN Konsum-Zeile,
-  // aus der die gespiegelte Ledger-Zeile entstand (Dual-Link). Mirror der
-  // ledgerByType-Semantik: erste Konsum-Zeile eines Topfes gewinnt.
+  // Stufe B (Task #1273) — der budget_ledger-Spiegel-INSERT entfällt:
+  // `budget_transactions` IST ab Stufe B die append-only Finanz-Schicht. Der
+  // Capture-Link zeigt direkt auf die Konsum-Zeile (captured_transaction_id);
+  // pro Topf gewinnt die erste Konsum-Zeile dieses Topfes.
+  const transactionIds: number[] = [];
   const txByType = new Map<string, number>();
   for (const c of consumptionRows) {
-    const inserted = await tx
-      .insert(budgetLedger)
-      .values({
-        customerId: c.customerId,
-        appointmentId: c.appointmentId,
-        occurrenceId,
-        allocationId: c.allocationId,
-        budgetType: c.budgetType,
-        period: c.transactionDate.slice(0, 7),
-        transactionDate: c.transactionDate,
-        state: "consumed",
-        amountCents: c.amountCents,
-        hauswirtschaftMinutes: c.hauswirtschaftMinutes,
-        hauswirtschaftCents: c.hauswirtschaftCents,
-        alltagsbegleitungMinutes: c.alltagsbegleitungMinutes,
-        alltagsbegleitungCents: c.alltagsbegleitungCents,
-        travelKilometers: c.travelKilometers,
-        travelCents: c.travelCents,
-        customerKilometers: c.customerKilometers,
-        customerKilometersCents: c.customerKilometersCents,
-        idempotencyKey: captureKey(params.appointmentId, occurrenceId, c.budgetType, c.id),
-        createdByUserId: params.userId,
-      })
-      .onConflictDoNothing()
-      .returning({ id: budgetLedger.id });
-    if (inserted[0]) {
-      ledgerIds.push(inserted[0].id);
-      if (!ledgerByType.has(c.budgetType)) {
-        ledgerByType.set(c.budgetType, inserted[0].id);
-        txByType.set(c.budgetType, c.id);
-      }
-    } else {
-      const [row] = await tx
-        .select({ id: budgetLedger.id })
-        .from(budgetLedger)
-        .where(eq(budgetLedger.idempotencyKey, captureKey(params.appointmentId, occurrenceId, c.budgetType, c.id)))
-        .limit(1);
-      if (row && !ledgerByType.has(c.budgetType)) {
-        ledgerByType.set(c.budgetType, row.id);
-        txByType.set(c.budgetType, c.id);
-      }
+    transactionIds.push(c.id);
+    if (!txByType.has(c.budgetType)) {
+      txByType.set(c.budgetType, c.id);
     }
   }
 
@@ -541,15 +504,14 @@ export async function captureHolds(
     );
   }
 
-  // Holds überführen: gibt es Konsum im selben Topf → captured (+ Ledger-Link,
-  // amountCents auf den reconcilierten Ist-Betrag dieses Topfes gesetzt);
+  // Holds überführen: gibt es Konsum im selben Topf → captured (+ Transaktions-
+  // Link, amountCents auf den reconcilierten Ist-Betrag dieses Topfes gesetzt);
   // sonst (Topf blieb ungenutzt, case a Teil-Capture) → released.
   let capturedCount = 0;
   let releasedCount = 0;
   for (const hold of holds) {
-    const ledgerId = ledgerByType.get(hold.budgetType);
     const txId = txByType.get(hold.budgetType);
-    const target = ledgerId != null ? "captured" : "released";
+    const target = txId != null ? "captured" : "released";
     assertReservationTransition("hold", target);
     const capturedAmount =
       target === "captured"
@@ -559,9 +521,9 @@ export async function captureHolds(
       .update(budgetReservations)
       .set({
         state: target,
-        capturedLedgerId: ledgerId ?? null,
-        // Task #1272 — Dual-Link: beide Verweise zeigen auf DENSELBEN
-        // fachlichen Datensatz (Ledger-Zeile ⇔ ihre Konsum-Quelle).
+        // Stufe B (Task #1273) — der Capture-Link zeigt direkt auf die
+        // budget_transactions-Konsum-Zeile dieses Topfes. capturedLedgerId wird
+        // nicht mehr gesetzt (Spalte bleibt für Stufe C bestehen).
         capturedTransactionId: txId ?? null,
         amountCents: capturedAmount,
         updatedAt: new Date(),
@@ -574,7 +536,7 @@ export async function captureHolds(
   return {
     capturedCount,
     releasedCount,
-    ledgerIds,
+    transactionIds,
     reconciliationCase: recon.case,
   };
 }

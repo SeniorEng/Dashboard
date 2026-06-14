@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Tx } from "../lib/db";
 import { budgetAllocations, budgetTransactions, users } from "@shared/schema";
 import { auditService } from "../services/audit";
@@ -166,6 +166,10 @@ export async function backfillTask685RelinkOrphanCarryoverTx(tx: Tx): Promise<Bu
       // die Umhängung dieses Dupes zurückrollen (GoBD: keine Mutation ohne
       // Audit-Eintrag).
       await tx.transaction(async (sp) => {
+        // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+        // (BEFORE-Trigger). Diese Umhängung ist audit-begleitet — Bypass
+        // savepoint-lokal freischalten.
+        await sp.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
         await sp
           .update(budgetTransactions)
           .set({ allocationId: keep.id })

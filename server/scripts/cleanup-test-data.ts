@@ -563,6 +563,11 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
     // (SET LOCAL, gilt nur innerhalb der folgenden Transaktion).
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
+      // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+      // (BEFORE-Trigger) — wie budget_allocations/invoices unten löst dieser
+      // User-Cleanup created_by_user_id-Refs. Bypass transaktions-lokal
+      // freischalten.
+      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
       // Hard-delete child rows in tables with NO ACTION + non-nullable FK to test users.
       // (Test-Daten ohne Wert für echte Kunden – verifiziert vor dem Lauf.)
       await tx.execute(sql`DELETE FROM employee_time_entries WHERE user_id IN (${idList})`);
@@ -673,6 +678,9 @@ async function purgeOrphans(apply: boolean): Promise<void> {
 
   if (orphApptsCnt > 0) {
     await db.transaction(async (tx) => {
+      // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+      // (BEFORE-Trigger) — Bypass transaktions-lokal freischalten.
+      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
       const ids = await tx.execute<{ id: number }>(sql`
         SELECT a.id FROM appointments a LEFT JOIN customers c ON c.id = a.customer_id
         WHERE a.deleted_at IS NOT NULL AND a.customer_id IS NOT NULL AND c.id IS NULL

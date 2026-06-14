@@ -257,23 +257,24 @@ async function runStartupTasks() {
       log(`GoBD-Tabellen-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Budget GF Phase 1 (Task #871): budget_ledger ist GoBD-immutable
-    // (append-only). Trigger lehnen UPDATE/DELETE/TRUNCATE ab (Bypass-GUC
-    // app.allow_gobd_mutation). budget_reservations bleibt bewusst mutierbar.
-    const { ensureBudgetLedgerImmutability, assertBudgetLedgerImmutable } = await import("./startup/ensure-budget-ledger-immutability");
+    // Budget-Ledger Stufe B (Task #1273): die GoBD-Immutability ist von
+    // budget_ledger auf budget_transactions UMGEZOGEN (append-only). Trigger
+    // lehnen UPDATE/DELETE/TRUNCATE ab (Bypass-GUC app.allow_gobd_mutation).
+    // budget_reservations bleibt bewusst mutierbar.
+    const { ensureBudgetTransactionsImmutability, assertBudgetTransactionsImmutable } = await import("./startup/ensure-budget-transactions-immutability");
     try {
-      await ensureBudgetLedgerImmutability();
+      await ensureBudgetTransactionsImmutability();
     } catch (err) {
-      log(`Budget-Ledger-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
+      log(`Budget-Transactions-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
     }
     // Self-Check gegen die LAUFENDE DB, dass die Trigger wirklich aktiv sind
     // (z.B. nach DB-Restore oder wenn die Migration oben übersprungen/
     // fehlgeschlagen ist). Ergebnis landet im /api/health-Endpoint; eine Lücke
     // wird laut ins Log gewarnt.
     try {
-      await assertBudgetLedgerImmutable();
+      await assertBudgetTransactionsImmutable();
     } catch (err) {
-      log(`Budget-Ledger-Immutability-Self-Check fehlgeschlagen: ${err}`, "startup");
+      log(`Budget-Transactions-Immutability-Self-Check fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #1272 (Stufe A) — zweiter Capture-Link

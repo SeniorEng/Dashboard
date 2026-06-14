@@ -17,7 +17,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
-import { budgetReservations, budgetLedger } from "@shared/schema";
+import { budgetReservations, budgetTransactions } from "@shared/schema";
 import {
   planHold,
   captureHolds,
@@ -260,34 +260,47 @@ describe("Task #875 — Hard-Hold-Engine (gated)", () => {
       captureHolds({ customerId, appointmentId }, tx),
     );
     expect(capture.capturedCount).toBeGreaterThan(0);
-    expect(capture.ledgerIds.length).toBeGreaterThan(0);
+    expect(capture.transactionIds.length).toBeGreaterThan(0);
 
     const captured = (await holdRows(appointmentId)).filter((r) => r.state === "captured");
     expect(captured.length).toBeGreaterThan(0);
 
-    const ledgerAfterFirst = await db
+    // Stufe B (Task #1273): es gibt keinen budget_ledger-Spiegel mehr — die
+    // Ist-Buchung steht direkt in budget_transactions (consumption-Zeilen).
+    const consumptionAfterFirst = await db
       .select()
-      .from(budgetLedger)
-      .where(and(eq(budgetLedger.appointmentId, appointmentId), eq(budgetLedger.state, "consumed")));
-    expect(ledgerAfterFirst.length).toBeGreaterThan(0);
+      .from(budgetTransactions)
+      .where(
+        and(
+          eq(budgetTransactions.appointmentId, appointmentId),
+          eq(budgetTransactions.transactionType, "consumption"),
+        ),
+      );
+    expect(consumptionAfterFirst.length).toBeGreaterThan(0);
 
     // Reconciliation auf Reservierungs-Ebene: der captured Hold trägt den
     // tatsächlich gebuchten Ist-Betrag seines Topfes (nicht mehr den Hold-Schätzwert).
     const actualByType = new Map<string, number>();
-    for (const l of ledgerAfterFirst) {
+    for (const l of consumptionAfterFirst) {
       actualByType.set(l.budgetType, (actualByType.get(l.budgetType) ?? 0) + Math.abs(l.amountCents));
     }
     for (const c of captured) {
       expect(c.amountCents).toBe(actualByType.get(c.budgetType));
     }
 
-    // Replay → keine zusätzlichen Ledger-Zeilen (idempotencyKey UNIQUE).
+    // Replay → keine zusätzlichen Konsum-Zeilen (Capture ist idempotent, bucht
+    // selbst nichts in budget_transactions).
     await db.transaction((tx) => captureHolds({ customerId, appointmentId }, tx));
-    const ledgerAfterReplay = await db
+    const consumptionAfterReplay = await db
       .select()
-      .from(budgetLedger)
-      .where(and(eq(budgetLedger.appointmentId, appointmentId), eq(budgetLedger.state, "consumed")));
-    expect(ledgerAfterReplay.length).toBe(ledgerAfterFirst.length);
+      .from(budgetTransactions)
+      .where(
+        and(
+          eq(budgetTransactions.appointmentId, appointmentId),
+          eq(budgetTransactions.transactionType, "consumption"),
+        ),
+      );
+    expect(consumptionAfterReplay.length).toBe(consumptionAfterFirst.length);
   });
 
   it("releaseHolds überführt aktive Holds auf released (idempotent)", async () => {

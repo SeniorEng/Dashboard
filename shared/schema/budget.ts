@@ -155,15 +155,17 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
 // ============================================
 //
 // `budget_allocations` (oben) = "was existiert" (Credits).
-// `budget_ledger`            = finanzielle Buchungen (GoBD-immutable, append-only).
+// `budget_transactions`      = finanzielle Buchungen (GoBD-immutable, append-only;
+//                              ab Budget-Ledger Stufe B, Task #1273).
+// `budget_ledger`            = ehemalige Finanz-Spiegelschicht; ab Stufe B wird
+//                              NICHT mehr hineingeschrieben (Spiegel-Write entfernt),
+//                              Entfernung folgt in Stufe C.
 // `budget_reservations`      = operative Holds (NICHT GoBD, mutierbar, audit-logged).
 //
-// Phase 1 ist FOUNDATIONS-ONLY: die Tabellen existieren, der Ledger ist per
-// Startup-Trigger append-only (server/startup/ensure-budget-ledger-immutability.ts),
-// aber es schreibt noch KEIN Pfad in sie. Die Buchung läuft weiter ausschließlich
-// über `budget_transactions` (Legacy-Engine), jetzt über die pure `planCascade`
-// (shared/domain/budget/plan-cascade.ts) geroutet — byte-identisch. Reservations
-// (Phase 5) und §45b-Materialisierung (Phase 2) sind explizit NICHT Teil von Phase 1.
+// Die Buchung läuft ausschließlich über `budget_transactions` (Legacy-Engine),
+// über die pure `planCascade` (shared/domain/budget/plan-cascade.ts) geroutet.
+// Die GoBD-Immutability-Trigger liegen ab Stufe B auf `budget_transactions`
+// (server/startup/ensure-budget-transactions-immutability.ts).
 
 // budget_ledger / budget_reservations Zustände
 export const BUDGET_LEDGER_STATES = ["consumed", "reversed"] as const;
