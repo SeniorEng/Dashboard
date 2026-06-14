@@ -257,10 +257,10 @@ async function runStartupTasks() {
       log(`GoBD-Tabellen-Immutability-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Budget-Ledger Stufe B (Task #1273): die GoBD-Immutability ist von
-    // budget_ledger auf budget_transactions UMGEZOGEN (append-only). Trigger
-    // lehnen UPDATE/DELETE/TRUNCATE ab (Bypass-GUC app.allow_gobd_mutation).
-    // budget_reservations bleibt bewusst mutierbar.
+    // Budget-Ledger Stufe B (Task #1273): die GoBD-Immutability ist von der
+    // früheren Spiegel-Tabelle auf budget_transactions UMGEZOGEN (append-only).
+    // Trigger lehnen UPDATE/DELETE/TRUNCATE ab (Bypass-GUC
+    // app.allow_gobd_mutation). budget_reservations bleibt bewusst mutierbar.
     const { ensureBudgetTransactionsImmutability, assertBudgetTransactionsImmutable } = await import("./startup/ensure-budget-transactions-immutability");
     try {
       await ensureBudgetTransactionsImmutability();
@@ -525,15 +525,15 @@ async function runStartupTasks() {
       log(`Storno-transactionDate-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #1272 (Stufe A) — Bestand des zweiten Capture-Links
-    // budget_reservations.captured_transaction_id über den captureKey/
-    // idempotencyKey-Bezug nachfüllen. Idempotent; nicht mappbare Zeilen werden
-    // NUR berichtet (Gate-A→B-Triage durch Alrik), nicht heuristisch repariert.
-    const { backfillReservationCapturedTransactionId } = await import("./startup/backfill-reservation-captured-transaction-id");
+    // Task #1274 (Stufe C) — finale Entfernung des früheren budget_ledger-
+    // Spiegels: erst die FK-Spalte budget_reservations.captured_ledger_id,
+    // dann die Tabelle budget_ledger. Idempotent, ohne drizzle-kit push. Der
+    // EINE verbleibende Capture-Link ist captured_transaction_id (Stufe A).
+    const { dropBudgetLedger } = await import("./startup/drop-budget-ledger");
     try {
-      await backfillReservationCapturedTransactionId();
+      await dropBudgetLedger();
     } catch (err) {
-      log(`Reservation-capturedTransactionId-Backfill fehlgeschlagen: ${err}`, "startup");
+      log(`Budget-Ledger-Drop (Stufe C) fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #988/#993/#994 — Die einmalige Phantom-Storno-Import-Drift-Korrektur

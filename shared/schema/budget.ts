@@ -155,11 +155,9 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
 // ============================================
 //
 // `budget_allocations` (oben) = "was existiert" (Credits).
-// `budget_transactions`      = finanzielle Buchungen (GoBD-immutable, append-only;
-//                              ab Budget-Ledger Stufe B, Task #1273).
-// `budget_ledger`            = ehemalige Finanz-Spiegelschicht; ab Stufe B wird
-//                              NICHT mehr hineingeschrieben (Spiegel-Write entfernt),
-//                              Entfernung folgt in Stufe C.
+// `budget_transactions`      = finanzielle Buchungen (GoBD-immutable, append-only).
+//                              ERSETZT seit Budget-Ledger Stufe C (Task #1274) das
+//                              ersatzlos entfernte `budget_ledger`.
 // `budget_reservations`      = operative Holds (NICHT GoBD, mutierbar, audit-logged).
 //
 // Die Buchung läuft ausschließlich über `budget_transactions` (Legacy-Engine),
@@ -167,52 +165,9 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
 // Die GoBD-Immutability-Trigger liegen ab Stufe B auf `budget_transactions`
 // (server/startup/ensure-budget-transactions-immutability.ts).
 
-// budget_ledger / budget_reservations Zustände
-export const BUDGET_LEDGER_STATES = ["consumed", "reversed"] as const;
-export type BudgetLedgerState = typeof BUDGET_LEDGER_STATES[number];
-
+// budget_reservations Zustände
 export const BUDGET_RESERVATION_STATES = ["hold", "captured", "released", "expired"] as const;
 export type BudgetReservationState = typeof BUDGET_RESERVATION_STATES[number];
-
-// budget_ledger — finanzielle Bookings (GoBD-immutable, append-only).
-// Nur `consumed`/`reversed`-Zeilen; eine Korrektur ist eine NEUE `reversed`-Zeile
-// plus eine frische `consumed`-Zeile, niemals ein In-Place-Edit.
-export const budgetLedger = pgTable("budget_ledger", {
-  id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
-  appointmentId: integer("appointment_id").references(() => appointments.id),
-  occurrenceId: text("occurrence_id"), // recurring-series occurrence (null = single)
-  allocationId: integer("allocation_id").references(() => budgetAllocations.id),
-  budgetType: text("budget_type").notNull(),
-  period: text("period"), // z.B. "2026-05" (Monat) oder "2026" (Jahr); informativ
-  transactionDate: date("transaction_date").notNull(),
-  state: text("state").notNull(), // consumed | reversed
-  amountCents: integer("amount_cents").notNull(), // negativ für consumed
-  hauswirtschaftMinutes: integer("hauswirtschaft_minutes"),
-  hauswirtschaftCents: integer("hauswirtschaft_cents"),
-  alltagsbegleitungMinutes: integer("alltagsbegleitung_minutes"),
-  alltagsbegleitungCents: integer("alltagsbegleitung_cents"),
-  travelKilometers: numeric("travel_kilometers", { precision: 10, scale: 3, mode: "number" }),
-  travelCents: integer("travel_cents"),
-  customerKilometers: numeric("customer_kilometers", { precision: 10, scale: 3, mode: "number" }),
-  customerKilometersCents: integer("customer_kilometers_cents"),
-  reversesLedgerId: integer("reverses_ledger_id"), // → budget_ledger.id der stornierten Buchung
-  idempotencyKey: text("idempotency_key").notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
-}, (table) => [
-  index("budget_ledger_customer_idx").on(table.customerId),
-  index("budget_ledger_customer_date_idx").on(table.customerId, table.transactionDate),
-  index("budget_ledger_appointment_idx").on(table.appointmentId),
-  index("budget_ledger_allocation_idx").on(table.allocationId),
-  // Idempotenz (R5): jede Ledger-mutierende Operation trägt einen eindeutigen Key.
-  uniqueIndex("budget_ledger_idempotency_key_idx").on(table.idempotencyKey),
-  // Post-or-void-once: pro stornierter Buchung höchstens eine reversal-Zeile.
-  uniqueIndex("budget_ledger_reverses_unique_idx")
-    .on(table.reversesLedgerId)
-    .where(sql`reverses_ledger_id IS NOT NULL`),
-]);
 
 // budget_reservations — operative Holds (NICHT GoBD). Mutierbar, jeder
 // State-Übergang wird audit-logged. Aus GoBD-/Finanz-Exporten ausgeschlossen.
@@ -236,11 +191,10 @@ export const budgetReservations = pgTable("budget_reservations", {
   state: text("state").notNull().default("hold"), // hold | captured | released | expired
   idempotencyKey: text("idempotency_key").notNull(),
   expiresAt: timestamp("expires_at"),
-  capturedLedgerId: integer("captured_ledger_id").references(() => budgetLedger.id),
-  // Task #1272 (Budget-Ledger Stufe A) — zweiter, direkter Link auf die
-  // gespiegelte budget_transactions-Zeile. Nullable; per Capture gesetzt +
-  // Bestand per idempotentem Backfill. ERSETZT mittelfristig den Umweg über
-  // capturedLedgerId/budget_ledger (Stufe B/C). KEINE zweite Berechnung.
+  // Budget-Ledger Stufe A→C — direkter Link auf die budget_transactions-
+  // Konsum-Zeile dieses Topfes (per Capture gesetzt). ERSETZT den in Stufe C
+  // (Task #1274) entfernten Umweg über das frühere `budget_ledger`.
+  // KEINE zweite Berechnung.
   capturedTransactionId: integer("captured_transaction_id").references(() => budgetTransactions.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -254,17 +208,7 @@ export const budgetReservations = pgTable("budget_reservations", {
   index("budget_reservations_captured_transaction_idx").on(table.capturedTransactionId),
 ]);
 
-// budget_ledger / budget_reservations schemas + types
-export const insertBudgetLedgerSchema = createInsertSchema(budgetLedger).omit({
-  id: true,
-  createdAt: true,
-}).extend({
-  state: z.enum(BUDGET_LEDGER_STATES),
-});
-
-export type BudgetLedgerRow = typeof budgetLedger.$inferSelect;
-export type InsertBudgetLedger = z.infer<typeof insertBudgetLedgerSchema>;
-
+// budget_reservations schemas + types
 export const insertBudgetReservationSchema = createInsertSchema(budgetReservations).omit({
   id: true,
   createdAt: true,

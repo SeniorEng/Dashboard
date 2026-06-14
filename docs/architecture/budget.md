@@ -58,6 +58,40 @@ Der Overdraft-Hard-Block (Termin-Anlage, die einen nicht-privat-zahlenden Kunden
 - **Testserver bleibt Legacy:** Der Ephemeral-DB-Orchestrator (`scripts/with-ephemeral-db.ts`) entfernt `BUDGET_HARD_HOLDS` aus dem Test-Server-Env, damit `tests/budget/hard-holds-engine.test.ts` die Engine weiter direkt gegen die DB treibt (HTTP-Pfad legacy). In CI ist das Flag nie gesetzt.
 - **Publish-Hinweis:** Die Env-Änderung greift erst nach einem Re-Publish des Deployments (aus der Main-Version, nach Merge dieses Tasks).
 
+## Budget-Ledger-Konsolidierung — Stufe A → C (Task #1272–#1274)
+
+Der frühere `budget_ledger` war zuletzt nur noch ein reiner Spiegel von
+`budget_transactions` (Capture-Insert im Hard-Hold-Pfad). Er wurde **gestaffelt
+und ohne Big-Bang-Drop** entfernt, wobei der Hard-Block-Pfad durchgehend scharf
+blieb:
+
+- **Stufe A (Task #1272):** `budget_reservations` bekam den EINEN Capture-Link
+  `captured_transaction_id` (→ `budget_transactions.id`) zusätzlich zum alten
+  `captured_ledger_id`; dual-write + Backfill.
+- **Stufe B (Task #1273):** Die GoBD-Immutability und die
+  Conservation-/Invarianten-Checks (`server/lib/budget-conservation.ts`,
+  `server/lib/invariants.ts`) wurden auf `budget_transactions` umgezogen — es ist
+  damit die EINE append-only Finanz-Schicht. Die DB-Trigger laufen über
+  `server/startup/ensure-budget-transactions-immutability.ts`.
+- **Stufe C (Task #1274):** Die redundante Spiegel-Tabelle `budget_ledger` UND
+  der alte Zweit-Link `budget_reservations.captured_ledger_id` wurden idempotent
+  per rohem SQL entfernt (`server/startup/drop-budget-ledger.ts` →
+  `dropBudgetLedger()`, Aufruf im Startup; **kein `drizzle-kit push`**). Erst die
+  FK-Spalte, dann die Tabelle. Der Drift-Wächter
+  `tests/startup/startup-schema-drift.test.ts` introspiziert die gedroppte Spalte
+  über die DROP-Registry `DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID`.
+
+**Append-only-Wächter (retargetet):**
+`tests/architecture/budget-transactions-write-path.test.ts` (vormals
+`budget-ledger-write-path`) bewacht jetzt `budget_transactions`: ein direkter
+`db.update/delete(budgetTransactions)` bzw. rohes
+`UPDATE/DELETE budget_transactions` ist nur erlaubt, wenn dieselbe Datei den
+audit-pflichtigen Bypass-GUC `app.allow_gobd_mutation` setzt (= bewusster
+Korrektur-/Cleanup-Pfad). Fehlt der Bypass, ist es ein stiller Schreibpfad und
+damit eine Verletzung. `budget_reservations` (Live-Holds, auf jeder
+Verfügbarkeits-Berechnung gelesen) und `budget_migrations` (Once-only-Journal)
+bleiben PERMANENT erhalten.
+
 ## Query-Invalidation (Budget-Spezifika)
 
 Allgemeine Konvention zu `invalidateRelated()` siehe [`replit.md → Architecture decisions → Strict Data Consistency`](../../replit.md#architecture-decisions).

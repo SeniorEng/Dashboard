@@ -11,21 +11,14 @@ import {
   isValidReservationTransition,
   isTerminalReservationState,
   assertReservationTransition,
-  isValidLedgerTransition,
-  assertLedgerTransition,
 } from "@shared/domain/budget/reservation-state-machine";
-import {
-  BUDGET_RESERVATION_STATES,
-  BUDGET_LEDGER_STATES,
-} from "@shared/schema/budget";
+import { BUDGET_RESERVATION_STATES } from "@shared/schema/budget";
 
 const ALLOWED_RESERVATION: ReadonlyArray<[string, string]> = [
   ["hold", "captured"],
   ["hold", "released"],
   ["hold", "expired"],
 ];
-
-const ALLOWED_LEDGER: ReadonlyArray<[string, string]> = [["consumed", "reversed"]];
 
 describe("Budget GF Phase 5 — Reservation state machine (I3, Task #875)", () => {
   it("erlaubt GENAU die north-star-Reservierungs-Übergänge", () => {
@@ -57,16 +50,5 @@ describe("Budget GF Phase 5 — Reservation state machine (I3, Task #875)", () =
     for (const [from, to] of ALLOWED_RESERVATION) {
       expect(() => assertReservationTransition(from as never, to as never)).not.toThrow();
     }
-  });
-
-  it("Ledger: nur consumed→reversed erlaubt; reversed ist terminal", () => {
-    for (const from of BUDGET_LEDGER_STATES) {
-      for (const to of BUDGET_LEDGER_STATES) {
-        const expected = ALLOWED_LEDGER.some(([f, t]) => f === from && t === to);
-        expect(isValidLedgerTransition(from, to)).toBe(expected);
-      }
-    }
-    expect(() => assertLedgerTransition("reversed", "consumed")).toThrow(/Ungültiger Ledger-Übergang/);
-    expect(() => assertLedgerTransition("consumed", "reversed")).not.toThrow();
   });
 });

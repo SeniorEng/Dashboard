@@ -108,6 +108,7 @@ import { RECONCILE_COLUMN_TYPE_TARGETS } from "../../server/startup/reconcile-dr
 // --- DROP registries -------------------------------------------------------
 import { DROPPED_APPOINTMENTS_SERVICE_TYPE } from "../../server/startup/drop-appointments-service-type";
 import { DROPPED_AUA_APPROVAL_COLUMNS } from "../../server/startup/drop-aua-approval-columns";
+import { DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID } from "../../server/startup/drop-budget-ledger";
 
 // --- CHECK-constraint raw-SQL sources --------------------------------------
 import {
@@ -134,6 +135,7 @@ import { GOBD_TABLE_TRIGGERS } from "../../server/startup/ensure-gobd-table-immu
 // ===========================================================================
 const DRIZZLE_TABLES: Record<string, PgTable> = {
   appointments,
+  budget_reservations: budgetReservations,
   budget_transactions: budgetTransactions,
   customers,
   customer_budget_preferences: customerBudgetPreferences,
@@ -625,6 +627,16 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
           false,
         );
       }
+    });
+
+    it("drop-budget-ledger: budget_reservations.captured_ledger_id ist weg", () => {
+      const table =
+        DRIZZLE_TABLES[DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID.table];
+      const cols = drizzleColumnsByDbName(table);
+      expect(
+        cols.has(DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID.column),
+        "budget_reservations.captured_ledger_id darf nicht im Modell sein",
+      ).toBe(false);
     });
   });
 });

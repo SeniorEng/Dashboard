@@ -1,11 +1,11 @@
 ---
-name: Budget-Ledger dual-link (Stufe A)
-description: budget_reservations now carries BOTH captured_ledger_id AND captured_transaction_id; how the second link is derived and why budget_ledger still exists.
+name: Budget-Ledger dual-link (Stufe A→C, abgeschlossen)
+description: How captured_transaction_id became the ONE capture link; budget_ledger + captured_ledger_id are now removed (Stufe C).
 ---
 
-# Budget-Ledger Dual-Link (Ablösung von `budget_ledger`, Stufe A)
+# Budget-Ledger Dual-Link → Single-Link (Ablösung von `budget_ledger`, A→C)
 
-`budget_ledger` ist ein reiner Spiegel von `budget_transactions` (Capture-Insert im Hard-Hold-Pfad). Sein einziger produktiver Zweck war der Link `budget_reservations.captured_ledger_id`. Der mehrstufige Plan (Ticket #1253) löst die Tabelle ab: Stufe A führt einen ZWEITEN direkten Link auf die gespiegelte `budget_transactions`-Zeile ein, Stufe B stellt Conservation/Invarianten von `budget_ledger` auf `budget_transactions` um, Stufe C baut die Tabelle (und `captured_ledger_id`) zurück.
+`budget_ledger` war ein reiner Spiegel von `budget_transactions` (Capture-Insert im Hard-Hold-Pfad). Sein einziger produktiver Zweck war der Link `budget_reservations.captured_ledger_id`. Der mehrstufige Plan hat die Tabelle abgelöst: Stufe A führte einen ZWEITEN direkten Link auf die gespiegelte `budget_transactions`-Zeile ein, Stufe B stellte Conservation/Invarianten von `budget_ledger` auf `budget_transactions` um, **Stufe C (Task #1274) hat die Tabelle `budget_ledger` UND `captured_ledger_id` entfernt** — `captured_transaction_id` ist seither der EINE Capture-Link.
 
 ## Wie der zweite Link OHNE Raten entsteht
 Beim Capture wird pro Topf die `id` DERSELBEN Konsum-Zeile, aus der die Ledger-Zeile gespiegelt wurde, als `captured_transaction_id` gesetzt (Mirror der `ledgerByType`-Semantik: erste Konsum-Zeile eines Topfes gewinnt). Der Bestand wird über den `captureKey`/`idempotencyKey` der Ledger-Zeile gemappt: Format `capture:a{appt}:o{occ}:{budgetType}:l{legacyTxId}`, wobei `legacyTxId` exakt die `budget_transactions.id` ist (`:l(\d+)$` parsen, gegen Kunde+Topf verifizieren).
@@ -17,8 +17,7 @@ Beim Capture wird pro Topf die `id` DERSELBEN Konsum-Zeile, aus der die Ledger-Z
 
 **How to apply:** Wer eine neue `ConservationResult`-Konstruktion baut (z.B. Test-Helper `conservation()`), MUSS `linkDivergences` mitführen, sonst bricht `tsc`. In Stufe B wandert die Conservation-Leserseite auf `budget_transactions`; den Spiegel-INSERT NICHT vorher entfernen.
 
-## Was NICHT angefasst werden darf (bis Stufe B/C)
-- KEIN Entfernen des Spiegel-INSERTs in `budget_ledger`.
-- KEINE Immutability-Trigger auf `budget_transactions`, kein Umzug von `ensure-budget-ledger-immutability`.
-- KEIN `DROP TABLE budget_ledger`, kein Entfernen von `captured_ledger_id`.
-- Hard-Block (`BUDGET_HARD_HOLDS`) liest über `readUnifiedBudgetAvailability` aus `budget_transactions` + `budget_reservations`, hängt NICHT an `budget_ledger` — muss scharf bleiben.
+## Endzustand (nach Stufe C)
+- `budget_ledger` + `captured_ledger_id` sind ENTFERNT (`server/startup/drop-budget-ledger.ts`, idempotent rohes SQL, kein `drizzle-kit push`). `captured_transaction_id` ist der EINE Capture-Link.
+- GoBD-Immutability liegt auf `budget_transactions` (`ensure-budget-transactions-immutability.ts`); Append-only-Wächter retargetet auf `tests/architecture/budget-transactions-write-path.test.ts`.
+- Hard-Block (`BUDGET_HARD_HOLDS`) liest über `readUnifiedBudgetAvailability` aus `budget_transactions` + `budget_reservations`, hing NIE an `budget_ledger` — muss scharf bleiben.

@@ -58,8 +58,9 @@ export interface ConservationResult {
    * Task #1273 (Stufe B) — Link-Divergenzen: captured Reservierungen, deren
    * `captured_transaction_id` zwar gesetzt ist, aber auf keine existierende
    * `budget_transactions`-Zeile zeigt ODER auf eine Zeile mit abweichendem
-   * Kunden/Topf. `budget_ledger` wird ab Stufe B NICHT mehr konsultiert (der
-   * Dual-Link ist auf den einen `captured_transaction_id`-Link reduziert).
+   * Kunden/Topf. Der frühere `budget_ledger`-Spiegel ist seit Stufe C
+   * (Task #1274) entfernt; der Dual-Link ist auf den einen
+   * `captured_transaction_id`-Link reduziert.
    * Teilmenge von `crossViolations` (die Detailzeilen stecken in `crossDetails`).
    * Reservierungen mit leerem `captured_transaction_id` (Bestand vor Stage-A-
    * Backfill) sind KEINE Divergenz. Divergenz > 0 ⇒ STOPPEN + Report.
@@ -117,9 +118,9 @@ async function computePotConservation(exec: DbOrTx): Promise<PotConservationRow[
  * (2) Reservation ↔ Transaction Kreuzcheck (Stufe B, Task #1273).
  *
  * Ab Stufe B ist `budget_transactions` die eine append-only Finanz-Schicht und
- * `captured_transaction_id` der EINE Capture-Link. `budget_ledger` wird NICHT
- * mehr konsultiert. Geprüft werden dieselben fachlichen Aussagen wie vorher auf
- * der neuen Quelle:
+ * `captured_transaction_id` der EINE Capture-Link. Der frühere
+ * `budget_ledger`-Spiegel ist seit Stufe C (Task #1274) entfernt. Geprüft
+ * werden dieselben fachlichen Aussagen wie vorher auf der neuen Quelle:
  *  - Orphan-Capture: captured Reservierung, deren gesetzter
  *    `captured_transaction_id` auf keine `budget_transactions`-Zeile zeigt.
  *  - Link-Divergenz: captured Reservierung, deren referenzierte Transaktion
@@ -181,9 +182,9 @@ async function checkLedgerReservationCrosslinks(
     }
   }
 
-  // Reversal-Ketten-Integrität auf budget_transactions (umgezogen von
-  // budget_ledger): jede reversal-Zeile muss eine existierende Originalzeile
-  // referenzieren.
+  // Reversal-Ketten-Integrität auf budget_transactions (umgezogen vom seit
+  // Stufe C entfernten budget_ledger-Spiegel): jede reversal-Zeile muss eine
+  // existierende Originalzeile referenzieren.
   const reversalRows = await exec
     .select({
       id: budgetTransactions.id,

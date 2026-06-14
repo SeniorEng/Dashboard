@@ -27,8 +27,10 @@ import { log } from "../lib/log";
  * bleiben unangetastet (GoBD). Jede Korrektur wird mit
  * `storno_transaction_date_backfilled` auditiert.
  *
- * `budget_transactions` ist NICHT durch die GoBD-Immutability-Trigger geschützt
- * (die liegen auf der separaten `budget_ledger`-Tabelle) — kein Bypass nötig.
+ * Hinweis: Dieser einmalige Bestands-Backfill datiert NUR ältere, fehl-datierte
+ * Reversal-Zeilen um und lief vor der GoBD-Härtung von `budget_transactions`
+ * (Stufe B, Task #1273). Neuere Korrekturen an der jetzt immutable Tabelle
+ * laufen über den Bypass-GUC `app.allow_gobd_mutation`.
  *
  * Vollständig idempotent (nach einem Lauf gibt es keine abweichenden Reversal-
  * Daten mehr). Mit `dryRun = true` (oder Env

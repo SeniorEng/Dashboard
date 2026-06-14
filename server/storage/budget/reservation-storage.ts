@@ -2,7 +2,7 @@
  * Task #875 (Budget GF Phase 5) — Hard-hold reservation engine.
  *
  * Operative Holds (`budget_reservations`) reservieren Budget beim PLANEN eines
- * Termins, werden beim ABSCHLUSS in den Ledger (`budget_ledger`) gebucht
+ * Termins, werden beim ABSCHLUSS gegen `budget_transactions` verbucht
  * (captured) und bei Storno/Reschedule/Reopen freigegeben (released). Der ganze
  * Layer ist hinter dem Feature-Flag `BUDGET_HARD_HOLDS` gegated
  * (`hardHoldsEnabled()`): aus = es wird KEIN Hold geschrieben, der unified
@@ -26,7 +26,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   budgetReservations,
-  budgetLedger,
   budgetTransactions,
   appointments,
   customers,
@@ -400,9 +399,9 @@ export interface CaptureHoldsResult {
 /**
  * Überführt beim Abschluss die Holds (N2/R5/I13/I15). MUSS in derselben
  * Transaktion laufen, in der die Legacy-Konsumtion (`budget_transactions`)
- * bereits geschrieben wurde — ab Stufe B (Task #1273) ist `budget_transactions`
- * selbst die append-only Finanz-Schicht (kein budget_ledger-Spiegel mehr); Holds
- * werden auf captured (mit captured_transaction_id) / released überführt.
+ * bereits geschrieben wurde — `budget_transactions` ist die append-only Finanz-
+ * Schicht (das frühere `budget_ledger` ist in Stufe C, Task #1274, entfernt);
+ * Holds werden auf captured (mit captured_transaction_id) / released überführt.
  */
 export async function captureHolds(
   params: {
@@ -433,7 +432,7 @@ export async function captureHolds(
   }
 
   // Legacy-Konsumtionszeilen dieses Termins (in derselben Tx geschrieben) =
-  // autoritative Ist-Buchung. Der Ledger spiegelt sie.
+  // autoritative Ist-Buchung.
   const consumptionRows = await tx
     .select()
     .from(budgetTransactions)
@@ -479,10 +478,10 @@ export async function captureHolds(
     throw new OverBudgetCompletionError(params.appointmentId, recon.overflowCents, lastStatutory);
   }
 
-  // Stufe B (Task #1273) — der budget_ledger-Spiegel-INSERT entfällt:
-  // `budget_transactions` IST ab Stufe B die append-only Finanz-Schicht. Der
-  // Capture-Link zeigt direkt auf die Konsum-Zeile (captured_transaction_id);
-  // pro Topf gewinnt die erste Konsum-Zeile dieses Topfes.
+  // `budget_transactions` IST die append-only Finanz-Schicht (kein
+  // budget_ledger-Spiegel mehr; Stufe C, Task #1274). Der Capture-Link zeigt
+  // direkt auf die Konsum-Zeile (captured_transaction_id); pro Topf gewinnt die
+  // erste Konsum-Zeile dieses Topfes.
   const transactionIds: number[] = [];
   const txByType = new Map<string, number>();
   for (const c of consumptionRows) {
@@ -521,9 +520,9 @@ export async function captureHolds(
       .update(budgetReservations)
       .set({
         state: target,
-        // Stufe B (Task #1273) — der Capture-Link zeigt direkt auf die
-        // budget_transactions-Konsum-Zeile dieses Topfes. capturedLedgerId wird
-        // nicht mehr gesetzt (Spalte bleibt für Stufe C bestehen).
+        // Der Capture-Link zeigt direkt auf die budget_transactions-Konsum-
+        // Zeile dieses Topfes (das frühere capturedLedgerId/budget_ledger ist in
+        // Stufe C, Task #1274, entfernt).
         capturedTransactionId: txId ?? null,
         amountCents: capturedAmount,
         updatedAt: new Date(),

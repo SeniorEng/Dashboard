@@ -10,8 +10,9 @@ import { log } from "../lib/log";
  * ADD COLUMN IF NOT EXISTS + bedingter FK + Index, KEIN `drizzle-kit push`.
  *
  * Die Spalte ist nullable — Bestands-Reservierungen bleiben unverändert (NULL)
- * und werden erst über den separaten Backfill befüllt. Jeder neue Capture setzt
- * sie zusätzlich zur bestehenden `captured_ledger_id`.
+ * und werden erst über den separaten Backfill befüllt. Sie ist seit Stufe C
+ * (Task #1274) der EINE Capture-Link (der frühere `captured_ledger_id` auf den
+ * `budget_ledger`-Spiegel ist entfernt).
  *
  * Der FK wird SPALTEN-basiert (nicht namens-basiert) geprüft, damit die
  * Migration unabhängig von einer eventuell von `drizzle-kit` abweichenden

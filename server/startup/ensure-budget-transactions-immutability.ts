@@ -10,8 +10,8 @@ import {
 // Task #1273 (Budget-Ledger Stufe B) — die GoBD-Härtung ist von `budget_ledger`
 // auf `budget_transactions` UMGEZOGEN (umbenannt + Ziel-Tabelle gewechselt,
 // NICHT dupliziert). `budget_transactions` ist ab Stufe B die EINE append-only
-// Finanz-Schicht; `budget_ledger` wird nicht mehr beschrieben (Spiegel-Write
-// entfernt) und in Stufe C entfernt.
+// Finanz-Schicht; der frühere `budget_ledger`-Spiegel ist in Stufe C
+// (Task #1274) ersatzlos entfernt.
 export const BUDGET_TRANSACTIONS_PREVENT_UPDATE_FN_SQL = `
     CREATE OR REPLACE FUNCTION budget_transactions_prevent_update()
     RETURNS trigger AS $$

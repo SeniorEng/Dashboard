@@ -64,7 +64,6 @@ const EXPECTED_TABLES: readonly string[] = [
   "audit_log",
   "birthday_card_tracking",
   "budget_allocations",
-  "budget_ledger",
   "budget_migrations",
   "budget_reservations",
   "budget_transactions",

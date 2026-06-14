@@ -19,7 +19,7 @@ import {
   budgetTransactions,
 } from "@shared/schema";
 import {
-  checkBudgetLedgerConsistency,
+  checkBudgetTransactionsConsistency,
   checkBookingCompleteness,
 } from "../../server/lib/invariants";
 import {
@@ -144,7 +144,7 @@ describe("Invarianten-Suite (Task #1237)", () => {
       reversedTransactionId: consId,
     });
 
-    const ledger = await checkBudgetLedgerConsistency(db);
+    const ledger = await checkBudgetTransactionsConsistency(db);
     const booking = await checkBookingCompleteness(db);
 
     const prefix = `${customer.id}|`;
@@ -202,7 +202,7 @@ describe("Invarianten-Suite (Task #1237)", () => {
       reversedTransactionId: 999_999_999,
     });
 
-    const ledger = await checkBudgetLedgerConsistency(db);
+    const ledger = await checkBudgetTransactionsConsistency(db);
 
     const ownReversalViolations = ledger.reversalChain.violations.filter(
       (v) => v.customerId === customer.id,
@@ -231,7 +231,7 @@ describe("Invarianten-Suite (Task #1237)", () => {
     const res = await apiGetAs<{
       ok: boolean;
       generatedAt: string;
-      budgetLedger: { violationCount: number };
+      budgetConsistency: { violationCount: number };
       bookingCompleteness: { violationCount: number };
       invoiceNumbering: { violationCount: number };
       totalViolations: number;
@@ -240,7 +240,7 @@ describe("Invarianten-Suite (Task #1237)", () => {
     expect(res.status).toBe(200);
     expect(typeof res.data.ok).toBe("boolean");
     expect(typeof res.data.generatedAt).toBe("string");
-    expect(typeof res.data.budgetLedger.violationCount).toBe("number");
+    expect(typeof res.data.budgetConsistency.violationCount).toBe("number");
     expect(typeof res.data.bookingCompleteness.violationCount).toBe("number");
     expect(typeof res.data.invoiceNumbering.violationCount).toBe("number");
     expect(typeof res.data.totalViolations).toBe("number");

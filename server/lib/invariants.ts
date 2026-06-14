@@ -1,7 +1,7 @@
 /**
  * Task #1237 (Phase 0.1) — Read-only Invarianten-Suite.
  *
- * Dieses Modul bündelt drei read-only Konsistenz-Checks über den Budget-Ledger,
+ * Dieses Modul bündelt drei read-only Konsistenz-Checks über die Budget-Buchungen,
  * die Termin-Buchungen und den Rechnungs-Nummernkreis. Es ist die gemeinsame
  * SSoT für den CI-Integrationstest UND den SuperAdmin-Report-Endpoint
  * (`GET /api/admin/invariants-report`).
@@ -16,7 +16,7 @@
  * Jeder Check spiegelt die Transaktionstyp-Semantik der jeweiligen Reader exakt
  * wider (statt naiver `SUM === reader`-Vergleiche mit 0-Toleranz):
  *  - `manual_adjustment` erzeugt bewusst eine bekannte Schatten-Drift zwischen
- *    Ledger-Summe und Karten-Anzeige (Phase-6-Thema) und wird NICHT „übermalt".
+ *    Transaktions-Summe und Karten-Anzeige (Phase-6-Thema) und wird NICHT „übermalt".
  *  - `write_off` zählt in der Topf-/Allocation-Sicht als „used", NICHT in der
  *    Fenster-Cap-Sicht (Asymmetrie). Check 1 nutzt deshalb den bestehenden
  *    No-Overdraw-Verifier statt einer eigenen Cap-Mathematik.
@@ -37,7 +37,7 @@ import { appointmentDocumentedAndSignedCondition } from "./appointment-signed";
 import { readBudget45bFifoBreakdown } from "../storage/budget/fifo-breakdown";
 
 // ---------------------------------------------------------------------------
-// Check 1 — Budget-Ledger-Konsistenz pro (Kunde × Topf)
+// Check 1 — Budget-Transactions-Konsistenz pro (Kunde × Topf)
 // ---------------------------------------------------------------------------
 
 export interface ReversalChainViolation {
@@ -61,7 +61,7 @@ export interface FifoUnifiedViolation {
   totalCents: number;
 }
 
-export interface BudgetLedgerConsistencyResult {
+export interface BudgetTransactionsConsistencyResult {
   ok: boolean;
   /** Layer 1 — No-Overdraw (wiederverwendeter Conservation-Verifier). */
   conservation: {
@@ -234,9 +234,9 @@ async function checkFifoUnifiedEquality(
   return { checked: customers.length, violations };
 }
 
-export async function checkBudgetLedgerConsistency(
+export async function checkBudgetTransactionsConsistency(
   exec: DbOrTx,
-): Promise<BudgetLedgerConsistencyResult> {
+): Promise<BudgetTransactionsConsistencyResult> {
   const conservation = await checkBudgetConservation(exec);
   const reversal = await checkReversalChains(exec);
   const fifo = await checkFifoUnifiedEquality(exec);
@@ -587,7 +587,7 @@ export async function checkInvoiceNumberIntegrity(
 export interface InvariantSuiteReport {
   ok: boolean;
   generatedAt: string;
-  budgetLedger: BudgetLedgerConsistencyResult;
+  budgetConsistency: BudgetTransactionsConsistencyResult;
   bookingCompleteness: BookingCompletenessResult;
   invoiceNumbering: InvoiceNumberIntegrityResult;
   totalViolations: number;
@@ -596,19 +596,19 @@ export interface InvariantSuiteReport {
 export async function runInvariantSuite(
   exec: DbOrTx,
 ): Promise<InvariantSuiteReport> {
-  const budgetLedger = await checkBudgetLedgerConsistency(exec);
+  const budgetConsistency = await checkBudgetTransactionsConsistency(exec);
   const bookingCompleteness = await checkBookingCompleteness(exec);
   const invoiceNumbering = await checkInvoiceNumberIntegrity(exec);
 
   const totalViolations =
-    budgetLedger.violationCount +
+    budgetConsistency.violationCount +
     bookingCompleteness.violationCount +
     invoiceNumbering.violationCount;
 
   return {
     ok: totalViolations === 0,
     generatedAt: new Date().toISOString(),
-    budgetLedger,
+    budgetConsistency,
     bookingCompleteness,
     invoiceNumbering,
     totalViolations,
