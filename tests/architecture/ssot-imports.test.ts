@@ -114,6 +114,18 @@ export function detectReadinessDefinitionViolations(files: ScanFile[]): GuardVio
  * Die einzige Datei mit der rohen Unterschrift-Null-Prüfung ist die SSoT selbst;
  * die Migration `migrate-expired-unsigned-appointments.ts` ist eine bewusste,
  * dokumentierte Einmal-Korrektur (kein Request-Pfad).
+ *
+ * Verifikation (Task #1279, Phase 2/2.2): Bestätigt, dass die fachliche Frage
+ * „Termin dokumentiert & unterschrieben?" genau EINE Quelle hat
+ * (`server/lib/appointment-signed.ts` + reines Prädikat in
+ * `shared/domain/appointments.ts`). Alle realen Konsumenten importieren sie:
+ * Lexware-Export (`documentedAndSignedSqlRaw`/`completedButUnsignedSqlRaw`),
+ * Monatsabschluss-Scheduler (`appointmentNotDocumentedAndSignedCondition`),
+ * Monatsabschluss-Storage (`appointmentCompletedButUnsignedCondition`) und
+ * Invarianten (`appointmentDocumentedAndSignedCondition`). Der A3-Test unten ist
+ * ein HARTER, build-brechender CI-Gate (`expect.fail`, kein Warning) — Teil der
+ * Architektur-Fitness-Functions in der CI-Pflicht. Eine bewusst eingeschleuste
+ * Eigen-Prüfung bricht ihn (siehe A3-Negativ-Test).
  */
 const DOCUMENTED_PREDICATE_ALLOWLIST = new Set<string>([
   "server/lib/appointment-signed.ts",
