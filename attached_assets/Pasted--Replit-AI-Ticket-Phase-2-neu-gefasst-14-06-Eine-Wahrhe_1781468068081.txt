@@ -1,0 +1,38 @@
+# Replit-AI-Ticket — Phase 2 (neu gefasst 14.06.): Eine Wahrheit pro Frage — Restwerk
+
+**Voraussetzung:** Phase 1 abgeschlossen & validiert. **Wichtig:** Eine Code-Prüfung (14.06., HEAD `0b640a2`) hat ergeben, dass 3 der 5 ursprünglichen Pakete bereits umgesetzt sind. Dieses Ticket enthält nur das **echte Restwerk** (2.1 + 2.3) plus drei reine **Verifikations-Aufgaben**.
+
+**Definition „eine Wahrheit":** Pro fachlicher Frage genau eine exportierte Funktion in einem SSoT-Modul; alle Anzeige-/Schreib-/Report-Pfade importieren sie; ein Architektur-Wächter (Phase 0.2) erzwingt es dauerhaft.
+
+---
+
+## Paket 2.1 — Monatsabschluss-Readiness: Durchsetzung + fachliche Festlegung
+
+**Stand (verifiziert):** Die zentrale Readiness-/Blocker-Entscheidung existiert bereits (`getMonthClosingReadiness` / `getAdminMonthClosingReadiness` in `server/storage/time-tracking/month-closing.ts`, genutzt von Scheduler, Admin-Route, Banner) und die „dokumentiert/unsigniert"-Bedingung kommt zentral aus `server/lib/appointment-signed.ts`. `isMonthClosed()` + der `monthCloseCache` in `appointment-import-reconcile.ts` sind nur „Monat geschlossen?"-Boolean-Lookups (orthogonal, kein Duplikat) — bitte NICHT umbauen, nur bestätigen.
+
+**Echtes Restwerk:**
+1. **Architektur-Wächter** (analog Phase 0.2): Die Monatsabschluss-Entscheidung (Activity-Definition + Blocker-Liste: offene Termine, fehlende Unterschriften, offene Zeiteinträge) darf nur aus dem einen Readiness-Modul stammen. Ein Test, der eine bewusst eingebaute zweite Blocker-/Activity-Definition außerhalb des Moduls erkennt (Positiv + Negativ-Beweis). `isMonthClosed`-Lookup explizit per Allowlist ausnehmen.
+2. **Fachliche Festlegung (Alrik bestätigt):** Fehlende Unterschrift blockiert auch den **Auto-Close**; stattdessen Eskalations-Notification an Admin am Cutoff-Tag. Falls im Code schon so — als Regressionstest absichern; falls nicht — angleichen.
+
+**Akzeptanz:** Die drei Zustände eines Test-MA (kein Termin / geplanter Termin / completed-unsigned) liefern bei Auto- und Admin-Close **identische** Entscheidung + Begründung (Regressionstest); Architektur-Test erkennt eine eingeschleuste Zweit-Definition; Eskalations-Notification bei unsigniertem Cutoff getestet.
+
+## Paket 2.3 — Ein Budget-Schreibpfad: Wächter + Wizard-UI
+
+**Stand (verifiziert):** Der zentrale Schreibpfad existiert (`upsertBudgetTypeSettings`, `server/storage/budget/preferences-storage.ts:376`) inkl. Selbstzahler-Block; Default-Töpfe laufen seit BUG-19 über `effectiveDefaultPots`. Genutzt von PUT-Route, Kundenanlage/Wizard (`customer-creation-helpers.ts`), Cleanup-/Clamp-Skripten. Einziger Direktzugriff außerhalb: `customer-deletion-service.ts:177` — legitimer Soft-Delete (`validTo` setzen) bei Kundenlöschung.
+
+**Echtes Restwerk:**
+1. **Architektur-Wächter:** Kein direkter `db.insert/update(customerBudgetTypeSettings)` außerhalb von `preferences-storage.ts`. Den Soft-Delete in `customer-deletion-service.ts` als dokumentierte **Allowlist**-Ausnahme führen (eine gepflegte Liste). Positiv- + Negativ-Beweis. Optional dieselbe Regel als eslint `no-restricted-syntax` (wie bei Soft-Delete-/InvalidateQueries-Regeln).
+2. **Vollständigkeit der Intent-Validierung** im Schreibpfad bestätigen/ergänzen: Selbstzahler-Block, PG-Gates für §45a **und** §42a (PG ≥ 2), gesetzliche Maxima §45b/§45a/§42a — als parametrisierter Test über **alle** Aufrufer (PUT, Wizard, POST /api/admin/customers, Excel-Import, Prospect-Konversion, /initial-budget): identische Eingaben ⇒ identischer DB-Zustand.
+3. **Wizard-UI (BUG-15-UI-Teil):** „Weiter" bei **Validierungsfehler im Feld** deaktivieren — nicht nur der Save-Button während der Mutation. Client-seitige Vorab-Validierung der Budget-Beträge (Maxima/Selbstzahler) vor dem Speicherversuch.
+
+**Akzeptanz:** Architektur-Test rot bei eingeschleustem Direkt-Write; parametrisierter Cross-Pfad-Test grün (identischer DB-Zustand); Wizard sperrt „Weiter" bei ungültigem Budget-Feld; Retests BUG-15/19/20 grün.
+
+## Verifikation only — bereits erledigt, bitte nur bestätigen (kein Umbau)
+
+- **2.2 „dokumentiert"-SSoT:** `server/lib/appointment-signed.ts` ist einzige Quelle (Lexware-Export, month-closing, Statistik nutzen es). Bitte bestätigen, dass die Lint-/Architektur-Regel dafür auf **error** steht; falls noch warning → scharf schalten.
+- **2.4 Reversal-Statemachine (BUG-17):** `reverseBudgetTransactionWithOutcome` (`transaction-storage.ts`) liefert `not_reversible` (400) bzw. `already_reversed` (409). Bitte bestätigen, dass die Route diese Outcomes auf die HTTP-Codes mappt und ein Test es abdeckt.
+- **2.5 Budget-Anker zur Laufzeit:** Spalten `budget_start_date`/`budgetStartDateOrigin` entfernt, Anker via careLevelHistory (`resolve45bAccrualAnchor`), Architektur-Test `budget-anchor-ssot.test.ts`. Bitte den Prod-Verifikationsfall **Kundin 182 = 1.669,55 € gesamt** als Regressions-/Smoke-Assertion festhalten.
+
+## Leitplanken
+
+Pro Paket ein PR + Claude-Retest. Reihenfolge: erst die 3 Verifikationen (schnell, sichern den Ist-Zustand ab), dann 2.3 (Prod-relevant), dann 2.1. **Keine neuen Tabellen, keine neuen Mechanismen** — ausschließlich Konsolidierung + Wächter. Ersetzungs-Regel gilt. Nach jedem Merge `npm run sync:github`. Bei Fund einer echten Zweit-Implementierung, die nicht trivial ersetzbar ist: stoppen + an Alrik reporten.
