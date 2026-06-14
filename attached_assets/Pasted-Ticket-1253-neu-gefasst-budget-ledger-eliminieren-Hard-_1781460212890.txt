@@ -1,0 +1,27 @@
+Ticket #1253 (neu gefasst): budget_ledger eliminieren — Hard-Block bleibt durchgehend scharf
+
+Scope-Korrektur: NUR budget_ledger wird abgelöst. budget_reservations (Hard-Block #875/#953) und budget_migrations (Migrations-Journal) BLEIBEN ausdrücklich. budget_ledger ist ein reiner Spiegel von budget_transactions (Capture-Insert in reservation-storage.ts:485, einziger produktiver Zweck = budget_reservations.capturedLedgerId; Leser nur budget-conservation.ts + invariants.ts). Der Hard-Block (planHold/captureHolds/classifyReconciliation, BUDGET_HARD_HOLDS) darf zu KEINEM Zeitpunkt deaktiviert werden.
+
+Vorgehen in 3 Stufen, je eigener Commit + DB-Checkpoint (db:backup-dev) + sync:github danach:
+
+STUFE A — Dual-Link + Backfill (keine Verhaltensänderung)
+1. Neue Spalte budget_reservations.captured_transaction_id (FK → budget_transactions.id, nullable).
+2. Capture-Pfad setzt BEIDE Links: Ledger wie bisher + die Transaktions-ID der gespiegelten Konsum-Zeile (im Capture bereits als c.id bekannt — kein Raten).
+3. Backfill Bestand: budget_ledger-Zeile → budget_transactions-Zeile über den vorhandenen idempotencyKey-Bezug (captureKey enthält bereits c.id). Skript idempotent, Report: gemappt / nicht mappbar.
+4. Conservation-Check erweitern: prüft, dass beide Links auf denselben Datensatz zeigen (Divergenz-Zähler).
+Gate A→B: Backfill 100 % gemappt (oder nicht mappbare Fälle einzeln triagiert + von Alrik freigegeben); Divergenz-Zähler 0 über mehrere Tage Dev + ein voller E2E-Lauf.
+
+STUFE B — Leser umziehen, Spiegel-Write abschalten, Transaktionen härten
+1. budget-conservation.ts + Invarianten-Check lesen über captured_transaction_id/budget_transactions statt budget_ledger.
+2. Spiegel-INSERT im Capture entfernen; capturedLedgerId wird nicht mehr gesetzt (Spalte bleibt vorerst).
+3. Härtung (ursprüngliches Ziel): DB-Trigger/Policy auf budget_transactions — kein UPDATE/DELETE; Ausnahme-Whitelist nur definierte Reconcile-Pfade, jede Nutzung schreibt audit_log; Korrekturen nur als neue Reversal-/Korrektur-Zeilen. ensure-budget-ledger-immutability → ensure-budget-transactions-immutability (umziehen, nicht duplizieren).
+Gate B→C: Invarianten-Suite + Conservation grün über mehrere Tage Dev + E2E; manueller SQL-UPDATE/DELETE-Versuch auf budget_transactions schlägt nachweislich fehl.
+
+STUFE C — Rückbau
+1. DROP TABLE budget_ledger; Spalte captured_ledger_id entfernen; Schema-/Storage-/Typ-Reste löschen.
+2. Wächter mitziehen: budget-ledger-write-path.test.ts zielt auf budget_transactions (+ Negativ-Beweise); schema-table-allowlist −1 Tabelle; Invarianten-Typen angepasst.
+3. Doku: kurzer Eintrag in docs/architecture/ (was ersetzt wurde, warum reservations + migrations bleiben).
+
+Akzeptanz gesamt: Buchung/Storno/Umbuchung/Abschluss/Rechnung regressionsfrei (bestehende Suiten + E2E-Smoke #1247); Hard-Block-Verhalten identisch (Über-Budget-Buchung blockt weiterhin, Beweis-Test); Invarianten + Conservation grün; budget_ledger existiert nicht mehr; keine neue Tabelle/Funktion ohne Ersetzungs-Nachweis.
+
+Leitplanken: Hard-Block nie deaktivieren (BUDGET_HARD_HOLDS unangetastet). Keine Änderung an Berechnungslogik/Topf-Reihenfolge. Bei nicht mappbaren Backfill-Fällen oder Divergenz > 0: stoppen, Report an Alrik, nicht heuristisch reparieren. Prod-Rollout je Stufe erst nach D

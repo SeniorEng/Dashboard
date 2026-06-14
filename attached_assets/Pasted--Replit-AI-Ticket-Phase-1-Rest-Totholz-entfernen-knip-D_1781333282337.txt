@@ -1,0 +1,28 @@
+# Replit-AI-Ticket — Phase 1 (Rest): Totholz entfernen (knip)
+
+**Datum:** 12.06.2026 · **Prio:** 🟢 NIEDRIG (risikoarm, reine Löschung) · **Voraussetzung:** läuft NICHT parallel in `server/storage/budget/*` (dort arbeitet #1253 — Konfliktvermeidung; dieses Ticket betrifft primär `client/` + Skripte).
+
+## Kontext / Korrektur zur alten Planung
+
+Die ursprüngliche Annahme „Statistik v1 vs. v2 — eine Implementierung behalten" ist **überholt**: `client/src/pages/admin/statistics.tsx` ist bereits eine reine v2-Hülle (importiert nur `./statistics/v2/*`-Sektionen). Es gibt **kein v1 mehr**; `page-shell.tsx` und `drill-down-table.tsx` sind aktiv von den v2-Seiten referenziert. **Kein Statistik-Rückbau nötig** — bitte hier NICHT nach „v1-Resten" suchen oder die v2-Dateien anfassen.
+
+## Aufgaben
+
+1. **knip-Report als Quelle:** Den aktuellen CI-Report `knip-report.json` (Artefakt aus dem static-analysis-Job, Phase 0.2) als verbindliche Liste nehmen — nicht den veralteten `docs/dead-code-report.md` (28.04.). Falls das Artefakt nicht frisch vorliegt: `npx knip@5.88.1 --reporter json` einmal sauber gegen `main` laufen lassen und das Ergebnis als Ausgangsbasis dokumentieren.
+
+2. **Konservativ abarbeiten:** Nur entfernen, was knip UND eine manuelle ripgrep-Referenzsuche übereinstimmend als ungenutzt bestätigen (ungenutzte Exporte, Komponenten, Helper, Routen). Bei jedem Zweifel: behalten + in einer kurzen Liste „knip meldet, aber referenziert/unklar" an Alrik reporten, nicht löschen.
+
+3. **Skript-/Artefakt-Triage:** `probe-pdf-determinism.ts`, `repro_tmp.mts` und die `tmp/`-Ablagen (`cleanup-*.out` etc.) sowie offensichtlich tote Skripte in `script(s)/` entweder löschen oder, falls noch nützlich, mit einem Einzeiler-Kommentar dokumentieren. Generierte/temporäre Dateien zusätzlich in `.gitignore` aufnehmen, damit sie nicht erneut eingecheckt werden.
+
+4. **knip-Gate verschärfen (optional, wenn sauber):** Wenn nach der Bereinigung 0 ungenutzte Exporte übrig sind, den CI-knip-Step von „warning-only" auf „fehlerhaft bei Neufunden" hochstufen — sonst dokumentierte Ausnahmen in `knip.json` pflegen (eine Quelle).
+
+## Akzeptanz
+
+- knip clean (0 ungenutzte Exporte/Dateien) ODER jede verbleibende Meldung hat eine dokumentierte Ausnahme in `knip.json`.
+- Bundle-Size-Vergleich (vorher/nachher) im PR.
+- Alle CI-Gates grün: Architektur-Fitness-Tests, Invarianten-Suite, Lint (`--max-warnings 0`), Coverage, E2E-Smoke (#1247). Funktional sichtbar: Statistik-Seiten (`/admin/statistics` + Unterrouten) laden unverändert.
+- `npm run sync:github` nach dem Merge.
+
+## Leitplanken
+
+Keine Änderung an Berechnungs-/Budgetlogik. `server/storage/budget/*` unangetastet lassen (Revier von #1253). Statistik-v2-Dateien nicht „aufräumen". Wenn ein Löschkandidat doch referenziert wird: stoppen, reporten, nicht umbauen. Ersetzungs-Regel gilt.
