@@ -146,6 +146,7 @@ export interface IStorage {
   // Company Settings
   getCompanySettings(): Promise<CompanySettings>;
   updateCompanySettings(data: Partial<CompanySettings>, userId: number | null): Promise<CompanySettings>;
+  invalidateCompanySettingsCache(): void;
 
   // Billing / Invoices
   getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string }): Promise<InvoiceWithCustomer[]>;
@@ -265,6 +266,17 @@ class DatabaseStorage implements IStorage {
   // Company Settings
   private companySettingsCache: { data: CompanySettings; expiresAt: number } | null = null;
   private static COMPANY_SETTINGS_TTL_MS = 5 * 60 * 1000;
+
+  /**
+   * Verwirft den prozess-lokalen Company-Settings-Cache. Im Normalbetrieb wird
+   * der Cache von `updateCompanySettings` selbst invalidiert; diese Methode
+   * existiert für Fälle, in denen die `company_settings`-Zeile AUSSERHALB dieses
+   * Prozesses geändert wurde (z.B. Tests, die über einen separaten App-Server
+   * seeden und danach gegen den in-process gemounteten Router lesen).
+   */
+  invalidateCompanySettingsCache(): void {
+    this.companySettingsCache = null;
+  }
 
   async getCompanySettings(): Promise<CompanySettings> {
     if (this.companySettingsCache && Date.now() < this.companySettingsCache.expiresAt) {

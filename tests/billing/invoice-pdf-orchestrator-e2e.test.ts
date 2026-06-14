@@ -2201,7 +2201,15 @@ describe("Task #1046 — Post-Kopie an Kunde: LN trägt Stammadresse, Empfänger
     expect(cold!.leistungsnachweisPath ?? null, "LN-Cache muss vor /send leer sein (Cache-MISS)").toBeNull();
 
     // Test-Prozess-Caches/Outbox/LX-Aufrufe zurücksetzen, damit die in-process
-    // Route SMTP+LetterXpress frisch aus der DB lädt.
+    // Route SMTP+LetterXpress frisch aus der DB lädt. WICHTIG: Die Creds wurden
+    // über den separaten Orchestrator-App-Server (`apiPatch` → BASE_URL) geseedet,
+    // nicht über diesen Prozess. Deshalb MÜSSEN beide Caches im Test-Prozess
+    // verworfen werden: der Service-Tier-Cache (`companySettingsCache`) UND der
+    // prozess-lokale Storage-Tier-Cache (5-Min-TTL), den ein früherer in-process
+    // Read mit einem Pre-Seed-Snapshot (ohne LetterXpress-Creds) gefüllt haben
+    // kann. Ohne Letzteres liest `/send` stale → "LetterXpress-Konfiguration
+    // unvollständig" (intermittierender Fehler im vollen Lauf).
+    storage.invalidateCompanySettingsCache();
     companySettingsCache.invalidate();
     clearLocalOutbox();
     lxCalls.length = 0;
