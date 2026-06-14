@@ -28,7 +28,7 @@ import {
   serviceRecordAppointments,
 } from "@shared/schema";
 import { auditService } from "./audit";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { storage } from "../storage";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { appointmentsRepo } from "../repos";
@@ -415,13 +415,13 @@ export async function executeReconcile(params: {
         }
       }
 
-      const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(appointmentId, tx);
+      const transactions = await budgetStorage.getTransactionsByAppointmentId(appointmentId, tx);
       let reversedHere = 0;
 
       for (const t of transactions) {
         // Nur consumption-Txs storno-bedürftig; reversal-Txs ignorieren.
         if (t.transactionType !== "consumption") continue;
-        await budgetLedgerStorage.reverseBudgetTransaction(t.id, userId, tx);
+        await budgetStorage.reverseBudgetTransaction(t.id, userId, tx);
         reversedHere++;
       }
       await tx

@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { db } from "../lib/db";
 import { customers, users, appointments, appointmentServices, services, monthlyServiceRecords, budgetTransactions } from "@shared/schema";
 import { eq, and, isNull, sql, inArray } from "drizzle-orm";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { storage } from "../storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { getAvailableForDate } from "../storage/budget/import-availability";
@@ -780,7 +780,7 @@ async function importSingleRow(
     const hwMinutes = isHauswirtschaft ? durationMinutes : 0;
     const abMinutes = isHauswirtschaft ? 0 : durationMinutes;
 
-    await budgetLedgerStorage.createConsumptionTransaction(
+    await budgetStorage.createConsumptionTransaction(
       {
         customerId: row.customerId!,
         appointmentId: appt.id,
@@ -1081,7 +1081,7 @@ export async function executeImport(
             !isDocOnlyRow(row)
           ) {
             const isHauswirtschaft = isHauswirtschaftArt(row.serviceType);
-            await budgetLedgerStorage.createConsumptionTransaction(
+            await budgetStorage.createConsumptionTransaction(
               {
                 customerId: row.customerId!,
                 appointmentId,
@@ -1240,7 +1240,7 @@ export async function executeImport(
           });
 
           if (!upgradeDocOnly) {
-            await budgetLedgerStorage.createConsumptionTransaction(
+            await budgetStorage.createConsumptionTransaction(
               {
                 customerId: row.customerId!,
                 appointmentId,

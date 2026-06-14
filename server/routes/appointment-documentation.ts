@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { storage } from "../storage";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { OverBudgetCompletionError } from "@shared/domain/budget/over-budget-error";
 import { documentAppointmentSchema, documentNoShowSchema, customers as customersTable } from "@shared/schema";
 import { appointmentService } from "../services/appointments";
@@ -135,11 +135,11 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
         // gebucht ist. Wir prüfen daher VOR dem Buchungsversuch, ob bereits
         // eine nicht-stornierte Consumption für den Termin existiert, und
         // verwenden diese als `budgetTransaction`-Antwort.
-        const existing = await budgetLedgerStorage.getTransactionByAppointmentId(id, tx);
+        const existing = await budgetStorage.getTransactionByAppointmentId(id, tx);
         if (existing) {
           budgetTransaction = existing;
         } else {
-        budgetTransaction = await budgetLedgerStorage.createConsumptionTransaction({
+        budgetTransaction = await budgetStorage.createConsumptionTransaction({
           customerId: appointment.customerId!,
           appointmentId: id,
           transactionDate: appointment.date,
@@ -160,8 +160,8 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
         // Task #875 (gated) — Hard-Hold-Capture: überführt die beim Planen
         // geschriebenen Holds in derselben ACID-Tx in den Ledger (getreuer
         // Schatten der gerade gebuchten Legacy-Konsumtion). Flag aus = No-op.
-        if (budgetLedgerStorage.hardHoldsEnabled()) {
-          await budgetLedgerStorage.captureHolds(
+        if (budgetStorage.hardHoldsEnabled()) {
+          await budgetStorage.captureHolds(
             {
               customerId: appointment.customerId!,
               appointmentId: id,

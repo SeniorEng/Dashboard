@@ -22,7 +22,7 @@ import * as reservation from "./budget/reservation-storage";
 import * as fifoBreakdown from "./budget/fifo-breakdown";
 import type { MonthlyHistoryBucket } from "@shared/domain/budget/history-aggregation";
 
-interface BudgetLedgerStorage {
+interface BudgetStorage {
   createBudgetAllocation(allocation: InsertBudgetAllocation, userId?: number, tx?: DbClient, options?: { allowStatutoryForSelbstzahler?: boolean }): Promise<BudgetAllocation>;
   getBudgetAllocations(customerId: number, year?: number): Promise<BudgetAllocation[]>;
 
@@ -108,7 +108,7 @@ interface BudgetLedgerStorage {
   sweepOrphanHolds: typeof reservation.sweepOrphanHolds;
 }
 
-export const budgetLedgerStorage: BudgetLedgerStorage = {
+export const budgetStorage: BudgetStorage = {
   createBudgetAllocation: allocation.createBudgetAllocation,
   getBudgetAllocations: allocation.getBudgetAllocations,
 

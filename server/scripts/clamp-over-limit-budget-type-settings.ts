@@ -41,7 +41,7 @@ import {
   type CustomerBudgetTypeSetting,
 } from "@shared/schema";
 import { clampToStatutoryMax } from "@shared/domain/budgets";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { auditService } from "../services/audit";
 
 const APPLY = process.argv.includes("--apply");
@@ -233,7 +233,7 @@ async function main(): Promise<void> {
 
   let repaired = 0;
   for (const p of plans) {
-    await budgetLedgerStorage.upsertBudgetTypeSettings(
+    await budgetStorage.upsertBudgetTypeSettings(
       p.customerId,
       p.clampedPayload,
       undefined,

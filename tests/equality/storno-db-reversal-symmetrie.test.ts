@@ -37,7 +37,7 @@ import { db } from "../../server/lib/db";
 import { appointments, budgetTransactions, type BudgetTransaction } from "@shared/schema";
 import { todayISO } from "@shared/utils/datetime";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
-import { budgetLedgerStorage } from "../../server/storage/budget-ledger";
+import { budgetStorage } from "../../server/storage/budget-storage";
 import { apiPost, createTestCustomer, getAuthCookie, runCleanup } from "../test-utils";
 
 beforeAll(async () => {
@@ -118,7 +118,7 @@ async function allTxs(customerId: number): Promise<BudgetTransaction[]> {
 /**
  * Spiegelt den Budget-Reversal-Teil von `performStorno`
  * (server/routes/billing.ts, ~Zeile 1810): pro Termin alle Consumption-Tx
- * laden und über `reverseBudgetTransaction` (via budgetLedgerStorage)
+ * laden und über `reverseBudgetTransaction` (via budgetStorage)
  * zurückbuchen.
  */
 async function performStornoReversal(appointmentId: number, userId: number): Promise<void> {
@@ -129,7 +129,7 @@ async function performStornoReversal(appointmentId: number, userId: number): Pro
       eq(budgetTransactions.transactionType, "consumption"),
     ));
   for (const t of txs) {
-    await budgetLedgerStorage.reverseBudgetTransaction(t.id, userId);
+    await budgetStorage.reverseBudgetTransaction(t.id, userId);
   }
 }
 
@@ -187,7 +187,7 @@ describe("Task #781 — DB-Reversal Storno-Symmetrie je Topf/Allocation/Kunde", 
     const today = todayISO();
 
     // §45b knapp → Cascade muss in §45a überlaufen (Multi-Topf-Konsumtion).
-    await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, [
+    await budgetStorage.upsertBudgetTypeSettings(customerId, [
       { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null },
       { budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: 31840 },
       { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, yearlyLimitCents: null },

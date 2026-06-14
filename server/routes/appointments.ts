@@ -36,7 +36,7 @@ import { requireAuth } from "../middleware/auth";
 import { requireIntParam } from "../lib/params";
 import { notificationService } from "../services/notification-service";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { getPlannedHoldInputs } from "../storage/budget/appointment-cost-calculator";
 import { rebookAppointmentConsumption, type RebookKmResult } from "../storage/budget/km-rebook";
 import { buildBudgetWarning } from "../lib/budget-warning";
@@ -726,10 +726,10 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     // Task #875 (gated) — Hard-Hold beim Planen: reserviert Budget in derselben
     // Transaktion wie die Terminanlage. Wirft planHold einen Hard-Block, rollt
     // der ganze Termin zurück (Overdraft unmöglich, R3/I14). Flag aus = No-op.
-    if (budgetLedgerStorage.hardHoldsEnabled()) {
+    if (budgetStorage.hardHoldsEnabled()) {
       const planned = await getPlannedHoldInputs(created.id, tx);
       if (planned) {
-        await budgetLedgerStorage.planHold(
+        await budgetStorage.planHold(
           {
             customerId: planned.customerId,
             appointmentId: created.id,
@@ -776,12 +776,12 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     // Retry transiente Connection-Fehler — Budget-Warnung ist idempotenter Read,
     // soll aber bei einem Neon-Cold-Start nicht lautlos verschwinden (Task #536).
     await withDbRetry(
-      () => budgetLedgerStorage.syncCarryoverAndExpiry(validatedData.customerId),
+      () => budgetStorage.syncCarryoverAndExpiry(validatedData.customerId),
       { label: "syncCarryoverAndExpiry" },
     );
     const budgetSummary = await withDbRetry(
       // Task #874 — Serving-Pfad: Budget-Warnung nutzt unified Verfügbarkeit.
-      () => budgetLedgerStorage.getBudgetSummaryServed(validatedData.customerId),
+      () => budgetStorage.getBudgetSummaryServed(validatedData.customerId),
       { label: "getBudgetSummaryServed" },
     );
     _warning = buildBudgetWarning(budgetSummary, { appointmentDates: [validatedData.date] }) ?? undefined;
@@ -1167,10 +1167,10 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       // mit den neuen geplanten Mengen neu reservieren, in DERSELBEN Tx wie das
       // Termin-Update. Hard-Block beim Neu-Planen rollt das ganze Edit zurück
       // (alte Holds bleiben). Flag aus = No-op.
-      if (budgetLedgerStorage.hardHoldsEnabled()) {
+      if (budgetStorage.hardHoldsEnabled()) {
         const planned = await getPlannedHoldInputs(id, tx);
         if (planned) {
-          await budgetLedgerStorage.rescheduleHold(
+          await budgetStorage.rescheduleHold(
             {
               customerId: planned.customerId,
               appointmentId: id,
@@ -1189,7 +1189,7 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
           // werden (release-only, kein Replan), sonst hängen tote Holds am Termin
           // und blähen das reservierte Budget künstlich auf, bis der Orphan-Sweep
           // greift. Idempotent (wirkt nur auf state='hold').
-          await budgetLedgerStorage.releaseHolds(id, req.user?.id, tx);
+          await budgetStorage.releaseHolds(id, req.user?.id, tx);
         }
       }
     }
@@ -1549,17 +1549,17 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
   const decision = policyCanReopen(toPolicyUser(req.user!), policyAppt);
   if (!decision.allowed) return denyByPolicy(res, decision, "ACCESS_DENIED");
 
-  const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
+  const transactions = await budgetStorage.getTransactionsByAppointmentId(id);
 
   const updatedAppointment = await db.transaction(async (txClient) => {
     for (const tx of transactions) {
-      await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
+      await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
     }
 
     // Task #875 (gated) — beim Reopen lingering Holds freigeben; die Re-Doku
     // legt beim erneuten Abschluss frische Buchungen an. Flag aus = No-op.
-    if (budgetLedgerStorage.hardHoldsEnabled()) {
-      await budgetLedgerStorage.releaseHolds(id, req.user!.id, txClient);
+    if (budgetStorage.hardHoldsEnabled()) {
+      await budgetStorage.releaseHolds(id, req.user!.id, txClient);
     }
 
     const result = await storage.updateAppointment(id, {
@@ -1631,16 +1631,16 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   const ip = req.ip || req.socket.remoteAddress;
 
   let reversedTransactions = 0;
-  const transactions = await budgetLedgerStorage.getTransactionsByAppointmentId(id);
+  const transactions = await budgetStorage.getTransactionsByAppointmentId(id);
 
-  if (transactions.length > 0 || budgetLedgerStorage.hardHoldsEnabled()) {
+  if (transactions.length > 0 || budgetStorage.hardHoldsEnabled()) {
     await db.transaction(async (txClient) => {
       for (const tx of transactions) {
-        await budgetLedgerStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
+        await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
       }
       // Task #875 (gated) — aktive Holds des Termins freigeben (R6). Flag aus = No-op.
-      if (budgetLedgerStorage.hardHoldsEnabled()) {
-        await budgetLedgerStorage.releaseHolds(id, req.user!.id, txClient);
+      if (budgetStorage.hardHoldsEnabled()) {
+        await budgetStorage.releaseHolds(id, req.user!.id, txClient);
       }
       const deleted = await storage.deleteAppointment(id, txClient);
       if (!deleted) {

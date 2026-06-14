@@ -20,7 +20,7 @@ import { appointments, budgetTransactions } from "@shared/schema";
 import { todayISO } from "@shared/utils/datetime";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import { reverseBudgetTransaction } from "../../server/storage/budget/transaction-storage";
-import { budgetLedgerStorage } from "../../server/storage/budget-ledger";
+import { budgetStorage } from "../../server/storage/budget-storage";
 import { rebookDisabledBudgetTransactions } from "../../server/storage/budget/rebook-storage";
 import { apiPost, createTestCustomer, getAuthCookie, runCleanup } from "../test-utils";
 
@@ -60,7 +60,7 @@ describe("Task #754 — Reversal Service-Cent-Spiegel", () => {
     const userId = await actorId();
 
     // §45b-Topf mit reichlich Budget anlegen.
-    await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, [
+    await budgetStorage.upsertBudgetTypeSettings(customerId, [
       { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null },
       { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null },
       { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, yearlyLimitCents: null },
@@ -133,7 +133,7 @@ describe("Task #754 — Reversal Service-Cent-Spiegel", () => {
     const today = todayISO();
 
     // Alle drei Töpfe aktiv, niedriges §45b → Cascade muss in §45a/§39 überlaufen.
-    await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, [
+    await budgetStorage.upsertBudgetTypeSettings(customerId, [
       { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null },
       { budgetType: "umwandlung_45a", enabled: true, priority: 2, monthlyLimitCents: 31840 },
       { budgetType: "ersatzpflege_39_42a", enabled: true, priority: 3, yearlyLimitCents: 161200 },
@@ -182,7 +182,7 @@ describe("Task #754 — Reversal Service-Cent-Spiegel", () => {
     expect(consumptions.length).toBeGreaterThanOrEqual(2);
 
     // Jetzt §45a + §39 deaktivieren → rebook-Pfad legt Reversals an.
-    await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, [
+    await budgetStorage.upsertBudgetTypeSettings(customerId, [
       { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null },
       { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: 31840 },
       { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, yearlyLimitCents: 161200 },

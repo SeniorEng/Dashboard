@@ -50,7 +50,7 @@ import {
   customers,
   users,
 } from "@shared/schema";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { calculateAppointmentCost } from "../storage/budget/appointment-cost-calculator";
 import { loadCurrentServiceMinutes } from "../storage/budget/km-rebook";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
@@ -291,7 +291,7 @@ export async function backfillOne(
         .limit(1);
       if (existing.length > 0) return false;
 
-      await budgetLedgerStorage.createConsumptionTransaction(
+      await budgetStorage.createConsumptionTransaction(
         {
           customerId: row.customerId,
           appointmentId: row.appointmentId,

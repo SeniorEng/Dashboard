@@ -39,7 +39,7 @@ import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
 import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc, sql } from "drizzle-orm";
@@ -1095,7 +1095,7 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
             eq(budgetTransactions.transactionType, "consumption"),
           ));
         for (const t of txs) {
-          await budgetLedgerStorage.reverseBudgetTransaction(t.id, req.user!.id, tx);
+          await budgetStorage.reverseBudgetTransaction(t.id, req.user!.id, tx);
         }
       }
 

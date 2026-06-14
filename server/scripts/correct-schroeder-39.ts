@@ -29,7 +29,7 @@ import {
   users,
 } from "@shared/schema";
 import { appointmentsRepo } from "../repos";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { auditService } from "../services/audit";
 import { isHauswirtschaftArt } from "@shared/domain/excel-service-art";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
@@ -221,7 +221,7 @@ async function upgradeAppointment(plan: UpgradePlan, operatorUserId: number, app
       details: `Schröder-Korrektur: ${plan.art}`,
     });
 
-    await budgetLedgerStorage.createConsumptionTransaction(
+    await budgetStorage.createConsumptionTransaction(
       {
         customerId: CUSTOMER_ID,
         appointmentId: plan.appointmentId,

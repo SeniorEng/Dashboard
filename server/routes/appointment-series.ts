@@ -8,7 +8,7 @@ import * as seriesStorage from "../storage/appointment-series-storage";
 import { validateSeriesDates, createSeriesAppointments } from "../services/appointment-series";
 import { storage } from "../storage";
 import { timeTrackingStorage } from "../storage/time-tracking";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { buildBudgetWarning } from "../lib/budget-warning";
 import { notificationService } from "../services/notification-service";
 import { todayISO, addMinutesToTimeHHMMSS, isWeekend, parseLocalDate } from "@shared/utils/datetime";
@@ -261,9 +261,9 @@ router.post("/", asyncHandler("Serie konnte nicht erstellt werden", async (req, 
 
   let _budgetWarning: string | undefined;
   try {
-    await budgetLedgerStorage.syncCarryoverAndExpiry(input.customerId);
+    await budgetStorage.syncCarryoverAndExpiry(input.customerId);
     // Task #874 — Serving-Pfad: Budget-Warnung nutzt unified Verfügbarkeit.
-    const budgetSummary = await budgetLedgerStorage.getBudgetSummaryServed(input.customerId);
+    const budgetSummary = await budgetStorage.getBudgetSummaryServed(input.customerId);
     _budgetWarning = buildBudgetWarning(budgetSummary, {
       appointmentDates: validation.validDates,
     }) ?? undefined;
@@ -792,11 +792,11 @@ router.post("/:id/extend", asyncHandler("Serie konnte nicht verlängert werden",
   }
 
   try {
-    await budgetLedgerStorage.syncCarryoverAndExpiry(series.customerId);
+    await budgetStorage.syncCarryoverAndExpiry(series.customerId);
     // Task #876 — Serving-Pfad nutzt die unified Verfügbarkeit (wie der
     // Create-Series-Pfad), damit die Budget-Warnung beim Verlängern dieselbe
     // Zahl zeigt wie Übersicht und Anlage.
-    const budgetSummary = await budgetLedgerStorage.getBudgetSummaryServed(series.customerId);
+    const budgetSummary = await budgetStorage.getBudgetSummaryServed(series.customerId);
     _budgetWarning = buildBudgetWarning(budgetSummary, {
       appointmentDates: validation.validDates,
     }) ?? undefined;

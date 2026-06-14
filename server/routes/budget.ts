@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { requireAuth, requireAdmin, requireCustomerAccess } from "../middleware/auth";
 import { storage } from "../storage";
 import { asyncHandler } from "../lib/errors";
@@ -119,10 +119,10 @@ router.get("/:customerId/summary", checkCustomerAccess, asyncHandler("Budget-Üb
   if (customerId === null) return;
   const asOfDate = parseAsOfDateQuery(req, res);
   if (asOfDate === null) return;
-  await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
+  await budgetStorage.syncCarryoverAndExpiry(customerId);
   // Task #874 — Serving-Pfad: Verfügbarkeit aus dem EINEN unified Reader.
   // Task #911 (NS-1) — optionaler Stichtag (?date=, Default heute).
-  const summary = await budgetLedgerStorage.getBudgetSummaryServed(customerId, asOfDate);
+  const summary = await budgetStorage.getBudgetSummaryServed(customerId, asOfDate);
   res.json(summary);
 }));
 
@@ -134,8 +134,8 @@ router.get("/:customerId/fifo-breakdown", checkCustomerAccess, asyncHandler("§4
   if (customerId === null) return;
   const asOfDate = parseAsOfDateQuery(req, res);
   if (asOfDate === null) return;
-  await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
-  const breakdown = await budgetLedgerStorage.readBudget45bFifoBreakdown(customerId, asOfDate);
+  await budgetStorage.syncCarryoverAndExpiry(customerId);
+  const breakdown = await budgetStorage.readBudget45bFifoBreakdown(customerId, asOfDate);
   res.json(breakdown);
 }));
 
@@ -144,7 +144,7 @@ router.get("/:customerId/allocations", checkCustomerAccess, asyncHandler("Budget
   if (customerId === null) return;
   const year = req.query.year ? parseInt(req.query.year as string) : undefined;
 
-  const allocations = await budgetLedgerStorage.getBudgetAllocations(customerId, year);
+  const allocations = await budgetStorage.getBudgetAllocations(customerId, year);
   res.json(allocations);
 }));
 
@@ -155,7 +155,7 @@ router.get("/:customerId/transactions", checkCustomerAccess, asyncHandler("Budge
   const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
 
   const budgetType = req.query.budgetType as string | undefined;
-  const transactions = await budgetLedgerStorage.getBudgetTransactions(customerId, { year, limit, budgetType });
+  const transactions = await budgetStorage.getBudgetTransactions(customerId, { year, limit, budgetType });
   res.json(transactions);
 }));
 
@@ -163,7 +163,7 @@ router.get("/:customerId/preferences", checkCustomerAccess, asyncHandler("Budget
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
 
-  const preferences = await budgetLedgerStorage.getBudgetPreferences(customerId);
+  const preferences = await budgetStorage.getBudgetPreferences(customerId);
   res.json(preferences || { customerId, monthlyLimitCents: null, notes: null });
 }));
 
@@ -224,7 +224,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       const travelKilometers = parseFloat(req.query.travelKilometers as string) || 0;
       const customerKilometers = parseFloat(req.query.customerKilometers as string) || 0;
       
-      const costs = await budgetLedgerStorage.calculateAppointmentCost({
+      const costs = await budgetStorage.calculateAppointmentCost({
         customerId,
         hauswirtschaftMinutes,
         alltagsbegleitungMinutes,
@@ -313,7 +313,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   // werden hier nur Nicht-Verfügbarkeits-Felder (`currentMonthUsedCents`,
   // `monthlyLimitCents`); das verfügbare Budget kommt weiterhin aus
   // `getAvailableForDate` (datum-genau, gleiche SSoT wie der Buchungspfad).
-  const summaries = await budgetLedgerStorage.getAllBudgetSummariesServed(customerId);
+  const summaries = await budgetStorage.getAllBudgetSummariesServed(customerId);
   const summary45b = summaries.entlastungsbetrag45b;
 
   const totalAvailable = dateAware.totalCents;
@@ -331,7 +331,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   // viel des verfügbaren Budgets bereits reserviert ist. Flag aus = 0 (das
   // Feld bleibt 0 ⇒ UI rendert keinen Reservierungs-Hinweis, byte-identisch).
   let holdsActiveCents = 0;
-  if (budgetLedgerStorage.hardHoldsEnabled()) {
+  if (budgetStorage.hardHoldsEnabled()) {
     const { readUnifiedBudgetAvailability } = await import("../storage/budget/unified-reader");
     const unified = await readUnifiedBudgetAvailability(customerId, date);
     holdsActiveCents = unified.totalHoldsCents;
@@ -372,7 +372,7 @@ router.get("/:customerId/history", checkCustomerAccess, asyncHandler("Budget-His
     : Array.isArray(budgetTypeParam)
       ? budgetTypeParam.filter((s): s is string => typeof s === "string")
       : undefined;
-  const buckets = await budgetLedgerStorage.getMonthlyHistory(customerId, { from, to, budgetTypes });
+  const buckets = await budgetStorage.getMonthlyHistory(customerId, { from, to, budgetTypes });
   res.json({ buckets });
 }));
 
@@ -385,7 +385,7 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
   // (`readUnifiedBudgetAvailability`). Das Legacy-Gerüst liefert nur noch die
   // Nicht-Verfügbarkeits-Felder (Carryover, Planung, Limit, totalUsedCents).
   // Task #911 (NS-1) — optionaler Stichtag (?date=, Default heute).
-  const summaries = await budgetLedgerStorage.getAllBudgetSummariesServed(customerId, asOfDate);
+  const summaries = await budgetStorage.getAllBudgetSummariesServed(customerId, asOfDate);
 
   const s45b = summaries.entlastungsbetrag45b;
   // Task #720 — explizite Typannotation gegen `BudgetOverviewDTO`
@@ -441,7 +441,7 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   // bereits, der Equality-Check sieht keine Änderung). Booking-Pfade nutzen
   // weiterhin `getActiveBudgetTypeSettings(transactionDate)`.
   // Task #703 — Latest-Intent + `effectiveToday` für UI-Übergangs-Erkennung.
-  const settings = await budgetLedgerStorage.readBudgetTypeSettings(customerId, { kind: "withTransition" });
+  const settings = await budgetStorage.readBudgetTypeSettings(customerId, { kind: "withTransition" });
   // BUG-19 (Facette A): Der Default-Aktivierungszustand der gesetzlichen Töpfe
   // kommt aus der SSoT `effectiveDefaultPots(customer)`, die denselben
   // Anspruchs-Gate durchläuft wie alle Schreibpfade — Selbstzahler haben keinen
@@ -467,7 +467,7 @@ router.get("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
       effectiveToday: null,
     }));
   if (settings.length === 0) {
-    const prefs = await budgetLedgerStorage.getBudgetPreferences(customerId);
+    const prefs = await budgetStorage.getBudgetPreferences(customerId);
     if (prefs?.monthlyLimitCents !== null && prefs?.monthlyLimitCents !== undefined) {
       defaults[0].monthlyLimitCents = prefs.monthlyLimitCents;
     }
@@ -496,7 +496,7 @@ router.get("/:customerId/initial-balances/:budgetType", asyncHandler("Startwert-
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
   const budgetType = req.params.budgetType;
-  const allocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
+  const allocations = await budgetStorage.getInitialBalanceAllocations(customerId, budgetType);
   res.json(allocations);
 }));
 
@@ -569,7 +569,7 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
     }
   }
 
-  await budgetLedgerStorage.upsertInitialBalanceAllocation({
+  await budgetStorage.upsertInitialBalanceAllocation({
     customerId,
     budgetType,
     year,
@@ -594,7 +594,7 @@ router.post("/:customerId/initial-balance/:budgetType", requireAdmin, asyncHandl
     }, ip);
   }
 
-  const allocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
+  const allocations = await budgetStorage.getInitialBalanceAllocations(customerId, budgetType);
   res.json(allocations);
 }));
 
@@ -670,7 +670,7 @@ router.delete("/:customerId/initial-balance/:allocationId", requireAdmin, asyncH
       r.budgetType === "entlastungsbetrag_45b"
       && (r.source === "initial_balance" || r.source === "carryover")
     ) {
-      await budgetLedgerStorage.clearLegacyInitialBalanceFromSettings(customerId, r.budgetType, tx, userId);
+      await budgetStorage.clearLegacyInitialBalanceFromSettings(customerId, r.budgetType, tx, userId);
       // Task #1204 — Kein kunden-weiter `budget_start_date` mehr: der §45b-Anker
       // wird zur Laufzeit aus der Pflegegrad-Historie abgeleitet, daher ist beim
       // Löschen eines Startwerts/Carryovers keine Anker-Neuableitung nötig.
@@ -758,7 +758,7 @@ router.post("/:customerId/carryover/:budgetType", requireAdmin, asyncHandler("Re
   const window = carryoverWindowFor(sourceYear);
   const userId = req.user?.id;
 
-  await budgetLedgerStorage.upsertCarryoverAllocation({
+  await budgetStorage.upsertCarryoverAllocation({
     customerId,
     budgetType,
     sourceYear,
@@ -779,7 +779,7 @@ router.post("/:customerId/carryover/:budgetType", requireAdmin, asyncHandler("Re
     }, ip);
   }
 
-  const allocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType);
+  const allocations = await budgetStorage.getInitialBalanceAllocations(customerId, budgetType);
   res.json(allocations);
 }));
 
@@ -880,9 +880,9 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
   const userId = req.user?.id;
   // userId an Storage durchreichen, damit jede Settings-Transition GoBD-konform
   // ein `budget_type_settings_transition`-Audit-Log mit Akteur bekommt (Task #440).
-  const saved = await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, result.data.settings, undefined, userId);
+  const saved = await budgetStorage.upsertBudgetTypeSettings(customerId, result.data.settings, undefined, userId);
 
-  await budgetLedgerStorage.syncCarryoverAndExpiry(customerId);
+  await budgetStorage.syncCarryoverAndExpiry(customerId);
 
   if (userId) {
     const ip = req.ip || req.socket.remoteAddress;
@@ -921,7 +921,7 @@ router.post("/:customerId/allocations", asyncHandler("Budget-Zuweisung konnte ni
   if (await rejectIfSelbstzahler45b(customerId, result.data.budgetType, res)) return;
 
   const userId = req.user?.id;
-  const allocation = await budgetLedgerStorage.createBudgetAllocation(result.data, userId);
+  const allocation = await budgetStorage.createBudgetAllocation(result.data, userId);
   res.status(201).json(allocation);
 }));
 
@@ -1004,7 +1004,7 @@ router.put("/:customerId/preferences", asyncHandler("Budget-Einstellungen konnte
   }
 
   const userId = req.user?.id;
-  const preferences = await budgetLedgerStorage.upsertBudgetPreferences(
+  const preferences = await budgetStorage.upsertBudgetPreferences(
     result.data,
     userId,
   );
@@ -1052,7 +1052,7 @@ router.post("/:customerId/manual-adjustment", asyncHandler("Manuelle Korrektur k
 
   if (amountCents > 0) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${currentYear}-12-31` : null;
-    const allocation = await budgetLedgerStorage.createBudgetAllocation({
+    const allocation = await budgetStorage.createBudgetAllocation({
       customerId,
       budgetType,
       year: currentYear,
@@ -1078,7 +1078,7 @@ router.post("/:customerId/manual-adjustment", asyncHandler("Manuelle Korrektur k
 
     res.status(201).json({ type: "allocation", data: allocation });
   } else {
-    const transaction = await budgetLedgerStorage.createBudgetTransaction({
+    const transaction = await budgetStorage.createBudgetTransaction({
       customerId,
       budgetType,
       transactionDate: today,
@@ -1108,7 +1108,7 @@ router.post("/transactions/:transactionId/reverse", asyncHandler("Storno konnte 
   if (transactionId === null) return;
 
   const userId = req.user?.id;
-  const outcome = await budgetLedgerStorage.reverseBudgetTransactionWithOutcome(transactionId, userId);
+  const outcome = await budgetStorage.reverseBudgetTransactionWithOutcome(transactionId, userId);
 
   if (outcome.status === "not_found") {
     res.status(404).json({
@@ -1175,7 +1175,7 @@ router.post("/:customerId/rebook-transaction", requireAdmin, asyncHandler("Einze
   const { transactionId, targetBudgetType } = result.data;
   const userId = req.user!.id;
 
-  const rebookResult = await budgetLedgerStorage.rebookSingleTransaction(customerId, transactionId, targetBudgetType, userId);
+  const rebookResult = await budgetStorage.rebookSingleTransaction(customerId, transactionId, targetBudgetType, userId);
 
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   await auditService.log(userId, "budget_rebook_single", "budget", customerId, {
@@ -1193,7 +1193,7 @@ router.get("/:customerId/rebook-preview", requireAdmin, asyncHandler("Umbuchungs
   const customerId = requireIntParam(req.params.customerId, res);
   if (customerId === null) return;
 
-  const preview = await budgetLedgerStorage.getRebookPreview(customerId);
+  const preview = await budgetStorage.getRebookPreview(customerId);
   res.json(preview);
 }));
 
@@ -1202,7 +1202,7 @@ router.post("/:customerId/rebook", requireAdmin, asyncHandler("Umbuchung konnte 
   if (customerId === null) return;
 
   const userId = req.user!.id;
-  const result = await budgetLedgerStorage.rebookDisabledBudgetTransactions(customerId, userId);
+  const result = await budgetStorage.rebookDisabledBudgetTransactions(customerId, userId);
 
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   await auditService.log(userId, "budget_rebook", "budget", customerId, {
@@ -1309,7 +1309,7 @@ router.post("/admin/repair-orphaned-transactions", requireAdmin, asyncHandler("B
 
     for (const oc of orphanedConsumptions) {
       try {
-        await budgetLedgerStorage.reverseBudgetTransaction(oc.txId, userId);
+        await budgetStorage.reverseBudgetTransaction(oc.txId, userId);
         reversedCount++;
       } catch (err) {
         errors.push({ txId: oc.txId, error: err instanceof Error ? err.message : String(err) });

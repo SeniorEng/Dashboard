@@ -16,7 +16,7 @@
  * geblockt.
  *
  * Dieser Test fährt den ECHTEN DB-Reversal-Pfad (`reverseBudgetTransaction` via
- * `budgetLedgerStorage`) und prüft beides:
+ * `budgetStorage`) und prüft beides:
  *   (A) Unit-Invariante: die Reversal-Zeile erbt exakt das `transactionDate` der
  *       stornierten Consumption (datum-unabhängig, immer geprüft).
  *   (B) Verhalten: eine Stichtag-Abfrage AM (vergangenen) Termindatum sieht nach
@@ -30,7 +30,7 @@ import { db } from "../../server/lib/db";
 import { appointments, budgetTransactions } from "@shared/schema";
 import { todayISO } from "@shared/utils/datetime";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
-import { budgetLedgerStorage } from "../../server/storage/budget-ledger";
+import { budgetStorage } from "../../server/storage/budget-storage";
 import { apiGet, apiPost, createTestCustomer, getAuthCookie, runCleanup } from "../test-utils";
 
 interface OverviewResponse {
@@ -91,7 +91,7 @@ describe("Task #963 — Storno erbt transactionDate der Originalbuchung", () => 
 
     // Nur §45b aktiv; großzügiges Anfangsbudget, damit die Konsumtion sicher
     // hineinpasst (Cascade in andere Töpfe vermeiden).
-    await budgetLedgerStorage.upsertBudgetTypeSettings(
+    await budgetStorage.upsertBudgetTypeSettings(
       customerId,
       [
         { budgetType: "entlastungsbetrag_45b", enabled: true, priority: 1, monthlyLimitCents: null, validFrom: startDate },
@@ -165,7 +165,7 @@ describe("Task #963 — Storno erbt transactionDate der Originalbuchung", () => 
 
     // 2) Storno über den echten Reversal-Pfad (heute ausgeführt).
     for (const t of consumptions) {
-      await budgetLedgerStorage.reverseBudgetTransaction(t.id, userId);
+      await budgetStorage.reverseBudgetTransaction(t.id, userId);
     }
 
     // (A) Unit-Invariante: jede Reversal-Zeile erbt das transactionDate ihrer

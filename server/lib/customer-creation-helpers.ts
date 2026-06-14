@@ -1,5 +1,5 @@
 import { customerManagementStorage } from "../storage/customer-management";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { todayISO } from "@shared/utils/datetime";
 import type { Customer, InsertCustomer, CustomerInsuranceHistory, InsuranceProvider } from "@shared/schema";
 import type { DbOrTx } from "./db";
@@ -240,7 +240,7 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
       // monatliche Auto-Allokation noch Carryover korrekt berechnen.
       if (typeSettings.length > 0) {
         maybeFail("budget_settings", testFaults);
-        await budgetLedgerStorage.upsertBudgetTypeSettings(customerId, typeSettings, tx, userId);
+        await budgetStorage.upsertBudgetTypeSettings(customerId, typeSettings, tx, userId);
       }
 
       // Pflicht (Task #1213): Carryover-/Verfalls-Sync ist Teil der atomaren
@@ -249,7 +249,7 @@ export async function createCustomerRelatedData(input: CreateRelatedDataInput): 
       // §45b-Carryover persistiert.
       if (typeSettings.length > 0) {
         maybeFail("carryover", testFaults);
-        await budgetLedgerStorage.syncCarryoverAndExpiry(customerId, tx);
+        await budgetStorage.syncCarryoverAndExpiry(customerId, tx);
       }
 
       // Pflicht: Startbudgets pro Topf — gefaltet aus dem früheren separaten

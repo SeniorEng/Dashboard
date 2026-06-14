@@ -1,4 +1,4 @@
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import type { DbClient } from "../storage/budget/types";
 import type { BudgetAllocation } from "@shared/schema";
 import { todayISO, parseLocalDate } from "@shared/utils/datetime";
@@ -126,7 +126,7 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
   // §45a/§39_42a: Topf idempotent in-place aktivieren, damit der Read-Pfad den
   // Startwert nicht herausfiltert (Task #705/#876).
   if ((budgetType === "umwandlung_45a" || budgetType === "ersatzpflege_39_42a") && currentMonthAmountCents > 0) {
-    await budgetLedgerStorage.ensureBudgetTypeEnabledInPlace(customerId, budgetType, budgetStartDate, tx);
+    await budgetStorage.ensureBudgetTypeEnabledInPlace(customerId, budgetType, budgetStartDate, tx);
   }
 
   const allocations: BudgetAllocation[] = [];
@@ -134,7 +134,7 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
   if (currentMonthAmountCents > 0) {
     const expiresAt = budgetType === "ersatzpflege_39_42a" ? `${year}-12-31` : null;
     const startMonth = startDate.getMonth() + 1;
-    await budgetLedgerStorage.upsertInitialBalanceAllocation({
+    await budgetStorage.upsertInitialBalanceAllocation({
       customerId,
       budgetType,
       year,
@@ -144,14 +144,14 @@ export async function applyInitialBudget(params: ApplyInitialBudgetParams): Prom
       expiresAt,
       notes: `Startguthaben ${year}`,
     }, userId, tx);
-    const allAllocations = await budgetLedgerStorage.getInitialBalanceAllocations(customerId, budgetType, tx);
+    const allAllocations = await budgetStorage.getInitialBalanceAllocations(customerId, budgetType, tx);
     if (allAllocations.length > 0) allocations.push(allAllocations[0]);
   }
 
   if (carryoverAmountCents > 0 && budgetType === "entlastungsbetrag_45b") {
     // validFrom auf Jahresanfang (Task #116/#601), Zieljahr-konsistent zu
     // `ensureYearlyCarryover45b` (verhindert Doppel-Carryover via Auto-Dedup).
-    const carryoverAllocation = await budgetLedgerStorage.createBudgetAllocation({
+    const carryoverAllocation = await budgetStorage.createBudgetAllocation({
       customerId,
       budgetType: "entlastungsbetrag_45b",
       year,

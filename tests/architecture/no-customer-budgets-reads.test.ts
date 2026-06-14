@@ -70,7 +70,7 @@ describe("Architektur — keine customer_budgets-Zugriffe (Task #876, Phase 6)",
         `Folgende Stellen greifen auf die stillgelegte Legacy-Tabelle 'customer_budgets' zu:\n` +
         `${msg}\n\n` +
         `Die Tabelle wurde mit Task #743 gedroppt. SSoT für Topf-Konfiguration ist ` +
-        `'customer_budget_type_settings' (via budgetLedgerStorage). Entferne den Zugriff ` +
+        `'customer_budget_type_settings' (via budgetStorage). Entferne den Zugriff ` +
         `oder — falls die Datei die Tabelle nur droppt — trage sie in ALLOWED_FILES ein.`,
       );
     }

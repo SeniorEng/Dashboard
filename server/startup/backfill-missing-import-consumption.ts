@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../lib/db";
 import { budgetTransactions, users } from "@shared/schema";
 import { findMissingConsumptionAppointments } from "../scripts/backfill-missing-import-consumption";
-import { budgetLedgerStorage } from "../storage/budget-ledger";
+import { budgetStorage } from "../storage/budget-storage";
 import { isMonthClosed } from "../storage/time-tracking/month-closing";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { auditService } from "../services/audit";
@@ -125,7 +125,7 @@ export async function backfillMissingImportConsumption(
           monthClosed = await isMonthClosed(row.employeeId, row.date);
         }
 
-        await budgetLedgerStorage.createConsumptionTransaction(
+        await budgetStorage.createConsumptionTransaction(
           {
             customerId: row.customerId,
             appointmentId: row.appointmentId,

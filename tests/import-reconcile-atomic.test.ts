@@ -7,7 +7,7 @@
  * reconcileter, GoBD-relevanter Inkonsistenz-Zustand.
  *
  * Dieser Test erzwingt einen Fehler mitten im Lauf (über einen Spy auf
- * `budgetLedgerStorage.getTransactionsByAppointmentId`, der beim ZWEITEN Termin
+ * `budgetStorage.getTransactionsByAppointmentId`, der beim ZWEITEN Termin
  * wirft, nachdem der erste bereits im selben Tx verarbeitet wurde) und prüft:
  *   1. `executeReconcile` wirft (kein stilles Teil-Ergebnis).
  *   2. KEIN Termin ist hinterher storniert/soft-gelöscht (vollständiger
@@ -74,7 +74,7 @@ describe("Task #834 — Reconcile ist atomar (all-or-nothing)", () => {
     const { executeReconcile } = await import(
       "../server/services/appointment-import-reconcile"
     );
-    const { budgetLedgerStorage } = await import("../server/storage/budget-ledger");
+    const { budgetStorage } = await import("../server/storage/budget-storage");
 
     const apptIds = [appt1.appointmentId, appt2.appointmentId];
 
@@ -108,11 +108,11 @@ describe("Task #834 — Reconcile ist atomar (all-or-nothing)", () => {
 
     // Spy: realer Aufruf für den ERSTEN Termin (damit er im Tx tatsächlich
     // verarbeitet + storniert wird), harter Fehler beim ZWEITEN Termin.
-    const realGetTx = budgetLedgerStorage.getTransactionsByAppointmentId.bind(
-      budgetLedgerStorage,
+    const realGetTx = budgetStorage.getTransactionsByAppointmentId.bind(
+      budgetStorage,
     );
     const spy = vi
-      .spyOn(budgetLedgerStorage, "getTransactionsByAppointmentId")
+      .spyOn(budgetStorage, "getTransactionsByAppointmentId")
       .mockImplementation(async (id: number, tx?: any) => {
         if (id === appt2.appointmentId) {
           throw new Error("Injizierter Mid-Run-Fehler (Task #834)");

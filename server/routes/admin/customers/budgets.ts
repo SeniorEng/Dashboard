@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { budgetLedgerStorage } from "../../../storage/budget-ledger";
+import { budgetStorage } from "../../../storage/budget-storage";
 import { computeDataHash } from "../../../services/signature-integrity";
 import { auditService } from "../../../services/audit";
 import { asyncHandler } from "../../../lib/errors";
@@ -140,7 +140,7 @@ router.post("/budget/backfill-transactions", asyncHandler("Budget-Nachbuchung fe
     }
 
     try {
-      await budgetLedgerStorage.createConsumptionTransaction({
+      await budgetStorage.createConsumptionTransaction({
         customerId: appt.customerId!,
         appointmentId: appt.id,
         transactionDate: String(appt.date),
