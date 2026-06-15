@@ -287,10 +287,10 @@ test.describe("@smoke §45b Restguthaben-Override (Wizard)", () => {
     // dem "€", was ein Literal-Space-Regex nie matchen würde.
     await expect(page.locator("[data-testid='error-exceeds-cap-restguthaben-45b']")).toBeVisible();
 
-    // Weiter-Klick wird geblockt (getStepErrors verhindert den Schrittwechsel):
-    // der Wizard bleibt auf dem Budgets-Schritt stehen.
-    await page.locator("[data-testid='button-step-next']").click();
-    // Kurz warten, damit ein etwaiger (fehlerhafter) Schrittwechsel sichtbar würde.
+    // Weiter ist deaktiviert, solange getStepErrors(Budgets) Fehler meldet
+    // (Task #1282 Deliverable 3): der Schrittwechsel ist dadurch unmöglich.
+    await expect(page.locator("[data-testid='button-step-next']")).toBeDisabled();
+    // Der Wizard bleibt zwangsläufig auf dem Budgets-Schritt stehen.
     await page.waitForTimeout(500);
     await expect(page.locator("[data-testid='input-restguthaben-45b']")).toBeVisible();
     await expect(page.locator("[data-testid='select-pflegegrad-budget']")).toBeVisible();

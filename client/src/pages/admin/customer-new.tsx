@@ -15,6 +15,12 @@ import { useCustomerWizard } from "@/features/customers/hooks/use-customer-wizar
 
 export default function AdminCustomerNew() {
   const wizard = useCustomerWizard();
+  const isLastStep = wizard.currentStep === wizard.steps.length - 1;
+  // Task #1282 — „Weiter" wird disabled, sobald der aktuelle Schritt
+  // Validierungsfehler hat (SSoT `getStepErrors`), statt erst beim Klick einen
+  // Toast zu werfen. Die Fehlerliste dient zusätzlich als sichtbares Feedback.
+  const stepErrors = isLastStep ? [] : wizard.getStepErrors(wizard.currentStepId);
+  const nextDisabled = wizard.duplicateChecking || stepErrors.length > 0;
 
   return (
     <Layout variant="admin">
@@ -108,7 +114,7 @@ export default function AdminCustomerNew() {
               Zurück
             </Button>
 
-            {wizard.currentStep === wizard.steps.length - 1 ? (
+            {isLastStep ? (
               <Button
                 className="bg-teal-600 hover:bg-teal-700"
                 onClick={wizard.handleSubmit}
@@ -131,7 +137,7 @@ export default function AdminCustomerNew() {
               <Button
                 className="bg-teal-600 hover:bg-teal-700"
                 onClick={wizard.handleNext}
-                disabled={wizard.duplicateChecking}
+                disabled={nextDisabled}
                 data-testid="button-step-next"
               >
                 {wizard.duplicateChecking ? (
@@ -148,6 +154,25 @@ export default function AdminCustomerNew() {
               </Button>
             )}
           </div>
+
+          {!isLastStep && stepErrors.length > 0 && (
+            <div
+              className="mt-3 text-sm text-red-600"
+              role="alert"
+              data-testid="text-step-errors"
+            >
+              <span className="font-medium">
+                Bitte vor dem Fortfahren korrigieren:
+              </span>
+              <ul className="list-disc list-inside mt-1">
+                {stepErrors.map((err, i) => (
+                  <li key={i} data-testid={`text-step-error-${i}`}>
+                    {err}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </CardContent>
       </Card>
     </Layout>

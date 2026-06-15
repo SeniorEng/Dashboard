@@ -785,6 +785,7 @@ export function useCustomerWizard() {
     handleUploadedDocumentsChange,
     handleBillingTypeChange,
     handleInsuranceProviderCreated,
+    getStepErrors,
     handleNext,
     handleBack,
     handleSubmit,
