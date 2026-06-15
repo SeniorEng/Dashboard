@@ -156,8 +156,7 @@ async function main() {
     }
 
     const elapsedYearsWithLeftover = allocs
-      .filter(a => (a.source === "initial_balance" || a.source === "monthly" || a.source === "monthly_auto")
-        && a.year < curYear)
+      .filter(a => a.source === "initial_balance" && a.year < curYear)
       .map(a => a.year);
     const missingCarryoverYears = [...new Set(elapsedYearsWithLeftover)]
       .filter(y => !carryoverYears.includes(y + 1));

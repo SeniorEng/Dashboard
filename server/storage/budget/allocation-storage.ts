@@ -515,7 +515,8 @@ export async function calculateAllocatedCents(
  *      - dem zur Laufzeit aus der Pflegegrad-Historie abgeleiteten Anker
  *        (`getEarliestCareLevelStart`, §45b auf das laufende Jahr gebodet),
  *      - frühestem `initial_balance.validFrom`,
- *      - frühestem persistierten `monthly_auto`/`monthly`/`carryover`,
+ *      - frühestem persistierten `carryover` (Altlast-Quellen `monthly_auto`/
+ *        `monthly` als Anker entfernt — Task #1289),
  *      - bzw. `s45b.validFrom` (überschreibt nach oben).
  *      Liegt ein manueller Startwert vor, beginnt das Auto-Renewal erst im
  *      Folgemonat (siehe `latestIbMonth + 1`-Logik), damit der Stichmonat des
@@ -601,7 +602,7 @@ async function calculateAllocated45b(
   // Pflegegrad-Historie, aber OHNE §45b-Einrichtung (kein type-setting) zeigte
   // sonst einen Phantom-Topf — 131 €/Monat ist ein fixer statutorischer Betrag,
   // anders als §45a greift hier KEIN `monthlyAmount==0`-Schutz. Echte
-  // persistierte Mittel (initial_balance/monthly/carryover) ankern weiterhin
+  // persistierte Mittel (initial_balance/carryover) ankern weiterhin
   // unabhängig vom Gate über die Fallbacks unten.
   const s45bEnabled = all45bSettings.some(s => s.enabled);
   const pgStart = await getEarliestCareLevelStart(customerId, d);
@@ -620,10 +621,10 @@ async function calculateAllocated45b(
   }
 
   if (!budgetStartDate) {
-    const monthlyEntries = existingAllocations
-      .filter(a => (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom);
-    if (monthlyEntries.length > 0) {
-      budgetStartDate = monthlyEntries.reduce((min, a) =>
+    const carryoverEntries = existingAllocations
+      .filter(a => a.source === "carryover" && a.validFrom);
+    if (carryoverEntries.length > 0) {
+      budgetStartDate = carryoverEntries.reduce((min, a) =>
         a.validFrom < min.validFrom ? a : min
       ).validFrom;
     }
@@ -973,7 +974,7 @@ async function calculateAllocated45a(
 
   if (!startDateStr) {
     const otherEntries = existingAllocations.filter(a =>
-      (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom
+      (a.source === "carryover") && a.validFrom
     );
     if (otherEntries.length > 0) {
       startDateStr = otherEntries.reduce((min, a) =>
@@ -1100,7 +1101,7 @@ async function calculateAllocated39_42a(
     }
     if (!startDateStr) {
       const otherEntries = existingAllocations.filter(a =>
-        (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom
+        (a.source === "carryover") && a.validFrom
       );
       if (otherEntries.length > 0) {
         startDateStr = otherEntries.reduce((min, a) =>
@@ -1241,7 +1242,7 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
   }
   if (!budgetStartDate) {
     const otherEntries = allAllocations.filter(a =>
-      (a.source === "monthly_auto" || a.source === "monthly" || a.source === "carryover") && a.validFrom
+      (a.source === "carryover") && a.validFrom
     );
     if (otherEntries.length > 0) {
       budgetStartDate = otherEntries.reduce((min, a) => a.validFrom < min.validFrom ? a : min).validFrom;

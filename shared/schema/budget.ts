@@ -16,13 +16,17 @@ import { appointments } from "./appointments";
 // Konfiguration ist `customer_budget_type_settings`.
 
 // Budget allocation sources
+//
+// Task #1289 (Phase 3.1): Die Altlast-Quellen `monthly_auto`/`yearly_auto`/
+// `statutory_monthly` sind entfernt. Monatliche/jährliche Aufstockungen werden
+// rein rechnerisch zur Laufzeit ermittelt (virtuelle Allocation, siehe
+// `calculateAllocated45b`/`…45a`/`…39_42a`), NICHT mehr als Allocation-Zeilen
+// materialisiert. `budget_allocations` enthält damit ausschließlich MANUELLE
+// Fakten (Startwert, Übertrag, Korrektur).
 export const BUDGET_ALLOCATION_SOURCES = [
-  "monthly_auto",      // Regular monthly auto-allocation
   "carryover",         // Carryover from previous year (expires June 30)
   "initial_balance",   // Initial balance when customer joins
   "manual_adjustment", // Manual correction/adjustment
-  "yearly_auto",       // Yearly auto-allocation (for §39/§42a)
-  "statutory_monthly", // Materialized §45b monthly statutory top-up (Task #872)
 ] as const;
 
 export type BudgetAllocationSource = typeof BUDGET_ALLOCATION_SOURCES[number];
@@ -35,7 +39,7 @@ export const budgetAllocations = pgTable("budget_allocations", {
   year: integer("year").notNull(),
   month: integer("month"), // null for carryover/initial entries
   amountCents: integer("amount_cents").notNull(), // Amount in cents (e.g., 13100 = 131€)
-  source: text("source").notNull(), // monthly_auto, carryover, initial_balance, manual_adjustment, yearly_auto
+  source: text("source").notNull(), // carryover, initial_balance, manual_adjustment (Task #1289: Altlast-Quellen entfernt)
   validFrom: date("valid_from").notNull(), // When this allocation becomes available
   expiresAt: date("expires_at"), // null = never expires, set for carryover (June 30)
   notes: text("notes"),

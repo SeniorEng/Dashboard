@@ -243,7 +243,7 @@ describe("BB – API-/Response-Shape-Tests (per-Test-Kunde)", () => {
       expect(res.status).toBe(200);
       expect(Array.isArray(res.data)).toBe(true);
       expect(res.data.length).toBeGreaterThan(0);
-      const validSources = ["monthly_auto", "carryover", "manual_adjustment", "yearly_auto", "initial_balance"];
+      const validSources = ["carryover", "manual_adjustment", "initial_balance"];
       for (const alloc of res.data) {
         expect(alloc).toHaveProperty("id");
         expect(alloc).toHaveProperty("customerId");
