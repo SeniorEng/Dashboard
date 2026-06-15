@@ -43,9 +43,31 @@ Die Verdrahtung ist also value-neutral; es ändert sich kein berechneter Preis.
 | Skript | Zweck |
 |---|---|
 | `server/scripts/report-price-consolidation-conflicts.ts` | Liest alle drei Quellen (`customer_service_prices`, `customer_contract_rates`, `service_rates`), erstellt die verlustfreie Migrations-Vorschau, listet 0-/Gratis-Zeilen explizit auf und meldet Konflikte (beide Kundenquellen aktiv mit abweichendem Betrag) sowie unzuordenbare Zeilen. Optionaler `--csv=`. |
-| `server/scripts/shadow-diff-price-for.ts` | Vergleicht `priceFor` (SSoT) gegen einen **unabhängigen** Referenz-Resolver über reale Termin-Tupel der letzten N Monate (`--months=`, Default 12). Bricht mit Exit 2 ab, wenn der Datensatz keinen echten 0-Override-Kunden enthält (Constraint #1). |
+| `server/scripts/shadow-diff-price-for.ts` | **Gate 1.** Vergleicht `priceFor` (SSoT) gegen einen **unabhängigen** Referenz-Resolver über reale Termin-Tupel der letzten N Monate (`--months=`, Default 12). Bricht mit Exit 2 ab, wenn der Datensatz keinen echten 0-Override-Kunden enthält (Constraint #1). |
+| `server/scripts/shadow-diff-price-for-consolidated.ts` | **Gate 2.** Vergleicht die **fertig KONSOLIDIERTE** Auflösung (Standard-Scope aus `service_rates` + `customer_contract_rates` eingespielt) gegen das **heutige Live-Verhalten** (= derselbe unabhängige Legacy-Resolver). Abdeckung breiter als Termine: zusätzlich ALLE `(Kunde, Service)`-Paare aus `customer_contract_rates` und ALLE Services aus `service_rates` am Stichtag (`--asof=`). Optionaler `--csv=`. |
 
-Beide Skripte sind strikt lesend (kein `--apply`) und schreiben nichts.
+Alle Skripte sind strikt lesend (kein `--apply`) und schreiben nichts.
+
+### Zwei-Gate-Freigabekriterium (vor jeder Löschung)
+
+Die bestehende Schatten-Verdrahtung (Gate 1) beweist nur `priceFor == heute`
+**im Schattenmodus** — also solange der Standard-Scope leer ist und `service_rates`
+/ `customer_contract_rates` für die Preisbildung schlafen. Das genügt NICHT als
+Lösch-Gate, weil das Aktivieren dieser dormanten Quellen Preise legitim ändern
+kann. Vor dem Löschen müssen daher BEIDE Gates erfüllt sein:
+
+- **Gate 1 — `priceFor == heute` (Schatten):** `shadow-diff-price-for.ts == 0`.
+- **Gate 2 — konsolidiert `priceFor == heute` (0-Cent):** `shadow-diff-price-for-consolidated.ts`.
+  - Baseline = **unabhängiger Legacy-Resolver** (`customer_service_prices` →
+    Katalog-Default), NICHT die konsolidierte `priceFor` (kein Selbstvergleich).
+  - Simulierte Präzedenz: `csp` (Kunde) → `ccr` (Kunde) → `service_rates` (Standard)
+    → Katalog-Default. `csp`-gewinnt hält Paare mit heutigem Kunden-Override stabil;
+    verschattete `ccr` (csp & ccr aktiv, abweichend) werden separat ausgewiesen.
+  - **Jede Abweichung = eine aktivierte dormante Quelle.** Sie wird NICHT
+    auto-aufgelöst, sondern geht **einzeln** an Alrik: die `ccr`/`service_rates`-Zeile
+    **soll gelten** (Änderung akzeptieren) ODER wird **verworfen** (aus der
+    Konsolidierung herausnehmen, Verhalten bleibt identisch). Löschen erst, wenn der
+    Diff 0 Cent ist ODER jede Restabweichung eine dokumentierte Alrik-Entscheidung hat.
 
 ## Regressionstests (schattenmodus-unabhängig)
 
@@ -67,13 +89,21 @@ Beide Skripte sind strikt lesend (kein `--apply`) und schreiben nichts.
   (`customerServicePricesRepo.activeOnly()`), nie roh über gelöschte Zeilen.
 - Die Diagnose-Skripte sind read-only; sie verändern keine Buchungen/Belege.
 
-## Noch offen — menschlich freigegeben (Step 4, NICHT Teil dieser Phase)
+## Noch offen — menschlich freigegeben (destruktiver Cutover, NICHT Teil dieser Phase)
 
-Erst **nach Alriks Freigabe** auf Basis der Diagnose-Reports:
+Erst **nach BEIDEN Gates** (Gate 1 grün UND Gate 2 sauber, d. h. 0 Cent oder jede
+Restabweichung von Alrik je Zeile entschieden):
 
 1. Konsolidierung der drei Tabellen in eine `prices`-Tabelle (Standard-Scope
    befüllen) — verlustfreie Migration BEIDER Kundenquellen inkl. 0-/Gratis-Zeilen.
-2. Löschen der Alt-Tabellen.
-3. Aktivierung eines Architektur-Guards (analog `tests/architecture/ssot-imports.test.ts`),
-   der eigene `customer_service_prices`/`service_rates`-Reads außerhalb der SSoT
-   verbietet.
+2. **Schreibpfad migrieren, nicht nur Lesepfad.** `customer_contract_rates` und
+   `service_rates` werden auch geschrieben, nicht nur gelesen:
+   `server/storage/customer-mgmt/contracts.ts` schreibt Vertragssätze
+   (`addContractRate` → `customerContractRates` update + insert) und Standard-Sätze
+   (`addServiceRate` → `serviceRates`). Dieses Raten-CRUD muss VOR dem Löschen der
+   Alt-Tabellen **entfernt oder auf `prices` umgeleitet** werden — sonst bricht die
+   Vertragsverwaltung. `contracts.ts` ist damit **Reader UND Writer**.
+3. Löschen der Alt-Tabellen.
+4. Aktivierung eines Architektur-Guards (analog `tests/architecture/ssot-imports.test.ts`),
+   der eigene `customer_service_prices`/`customer_contract_rates`/`service_rates`-
+   Zugriffe (**Reads UND Writes**) außerhalb der SSoT verbietet.

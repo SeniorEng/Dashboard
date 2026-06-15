@@ -1,0 +1,22 @@
+Make the budget safety-check understand auto-calculated top-ups, then clean up the old rows
+What & Why
+Task #1295 (Aufräumen der übrig gebliebenen Legacy-Budget-Allocation-Zeilen in der Produktion) ist blockiert und wurde nach Alriks Entscheidung zurückgestellt. Der Produktions-Dry-Run zeigte: Das Löschen der automatisch erzeugten Altzeilen (Quellen monthly_auto / yearly_auto, 493 aktive Zeilen ≈ €108.102) würde 22 Budget-Töpfe (19× §45b, 3× §39) neu als überzogen markieren.
+
+Ursache: Phase 3.1 hat den App-Reader umgestellt, sodass er die §45b/§45a/§39-Monats-/Jahres-Aufstockungen zur Laufzeit berechnet (calculateAllocated45b / …45a / …39_42a in shared/domain/budget/). Der Conservation-Verifier checkBudgetConservation (server/lib/budget-conservation.ts) liest aber weiterhin nur die roh-materialisierten budget_allocations-Zeilen. Für §45b/§39 sind die Altzeilen aktuell die einzige/wesentliche materialisierte Deckung echter gebuchter Consumption — also tragend für das No-Overdraw-Invariant. Ihr Löschen reißt genau den Guard, den das Cleanup-Skript nutzt, sodass --apply sich selbst abbricht.
+
+Done looks like
+checkBudgetConservation bewertet einen Topf nur dann als überzogen, wenn die Consumption die projizierte Verfügbarkeit übersteigt (gleiche On-the-fly-Projektion wie der App-Reader), nicht die roh-materialisierten Zeilen.
+Der Produktions-Dry-Run von Task #1295 läuft sauber (0 neu überzogene Töpfe).
+Anschließend kann die Cleanup-Sequenz für #1295 sicher fortgesetzt werden: Sign-off → Pre-Publish-Backup → --apply.
+Out of scope
+Das eigentliche Löschen der Produktionszeilen (bleibt Teil von #1295, erst nach sauberem Dry-Run + Sign-off + Backup).
+Änderungen an der Projektionslogik selbst (calculate*-Funktionen) — nur der Verifier soll dieselbe SSoT konsumieren, keine zweite Berechnung einführen.
+Steps
+Conservation-Check projektionsfähig machen: er soll dieselbe SSoT-Projektion wie der App-Reader konsumieren (keine parallele/zweite Berechnung), sodass „überzogen" gegen die projizierte Verfügbarkeit statt gegen roh-materialisierte Zeilen geprüft wird.
+Dry-Run-Replikation in simulatePostDeleteViolations an den projektionsbewussten Check angleichen, sodass beide denselben SSoT nutzen.
+Produktions-Dry-Run von #1295 erneut fahren und Sauberkeit (0 neu überzogene Töpfe) bestätigen; Report aktualisieren/archivieren.
+Relevant files
+server/lib/budget-conservation.ts
+server/scripts/cleanup-legacy-allocation-sources.ts
+shared/domain/budget/
+docs/reports/task-1295-cleanup-legacy-allocations-dryrun-2026-06-15.md
