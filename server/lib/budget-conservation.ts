@@ -27,12 +27,28 @@ import {
   budgetTransactions,
   budgetAllocations,
   budgetReservations,
+  customerBudgetTypeSettings,
+  customerCareLevelHistory,
+  customers,
 } from "@shared/schema";
+import { todayISO } from "@shared/utils/datetime";
+import {
+  readUnifiedBudgetAvailability,
+  type CappedBudgetPot,
+} from "../storage/budget/unified-reader";
+import type { DbClient } from "../storage/budget/types";
 
 /** Der Selbstzahler-Overflow-Topf hat per Design KEINE Allocation — er
  *  absorbiert den Cascade-Rest (uncapped). Für die No-Overdraw-Invariante ist
  *  er irrelevant. */
 export const UNCAPPED_POTS = new Set(["private", "selbstzahler"]);
+
+/** Die statutarischen Töpfe, die der eine Verfügbarkeits-Reader modelliert. */
+const CAPPED_POTS: readonly CappedBudgetPot[] = [
+  "entlastungsbetrag_45b",
+  "umwandlung_45a",
+  "ersatzpflege_39_42a",
+];
 
 export interface PotConservationRow {
   customerId: number;
@@ -70,46 +86,134 @@ export interface ConservationResult {
   total: number;
 }
 
-/** (1) Kein Topf überzogen: NettoKonsum ≤ Σ Allocated je (Kunde, Topf). */
-async function computePotConservation(exec: DbOrTx): Promise<PotConservationRow[]> {
-  const consumedRows = await exec
+/**
+ * Task #1298 — Projektions-bewusste Enumeration der zu prüfenden
+ * (Kunde, Topf)-Population.
+ *
+ * Seit die monatliche/jährliche Aufstockung NICHT mehr in `budget_allocations`
+ * materialisiert, sondern rein rechnerisch projiziert wird (Task #1289/#1295),
+ * darf die Conservation-Population NICHT mehr aus den roh-materialisierten
+ * Allocation-Zeilen abgeleitet werden — sonst fiele ein rein projizierter
+ * §45b/§39-Topf (Anspruch ohne materialisierte Zeile) nach dem Aufräumen der
+ * Altlast-Zeilen aus der Prüfung heraus und der Guard ginge „blind" (falsches
+ * „0 überzogen").
+ *
+ * Die Population ist deshalb die Vereinigung aus
+ *   - CONSUMPTION:   jede (Kunde, Topf)-Kombination mit `budget_transactions`,
+ *   - ANSPRUCH:      §45b default-an für Nicht-Selbstzahler mit Pflegegrad-
+ *                    Historie (Projektions-Anker, identisch zur Reader-SSoT);
+ *                    §45a/§39 nur bei aktivierten Type-Settings,
+ *   - sowie defensiv jede noch materialisierte Allocation-Zeile (manuelle Fakten
+ *     bleiben; deckt zusätzlich Altlast vor dem #1295-Cleanup ab).
+ *
+ * Uncapped Töpfe (Selbstzahler-Overflow) werden ausgeschlossen.
+ */
+export async function enumerateConservationPopulation(
+  exec: DbOrTx,
+): Promise<Map<number, Set<string>>> {
+  const population = new Map<number, Set<string>>();
+  const add = (customerId: number, budgetType: string) => {
+    if (UNCAPPED_POTS.has(budgetType)) return;
+    const set = population.get(customerId) ?? new Set<string>();
+    set.add(budgetType);
+    population.set(customerId, set);
+  };
+
+  // (a) Consumption — alle tatsächlich gebuchten Töpfe.
+  const consumptionPots = await exec
     .select({
       customerId: budgetTransactions.customerId,
       budgetType: budgetTransactions.budgetType,
-      consumed: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})) FILTER (WHERE ${budgetTransactions.transactionType} IN ('consumption','write_off')), 0)`,
-      reversed: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})) FILTER (WHERE ${budgetTransactions.transactionType} = 'reversal'), 0)`,
     })
     .from(budgetTransactions)
     .groupBy(budgetTransactions.customerId, budgetTransactions.budgetType);
+  for (const r of consumptionPots) add(r.customerId, r.budgetType);
 
-  const allocatedRows = await exec
+  // (b) Noch materialisierte Allocation-Fakten (manual/initial_balance/carryover
+  //     sowie verbliebene Altlast vor dem #1295-Cleanup).
+  const allocationPots = await exec
     .select({
       customerId: budgetAllocations.customerId,
       budgetType: budgetAllocations.budgetType,
-      allocated: sql<number>`COALESCE(SUM(${budgetAllocations.amountCents}), 0)`,
     })
     .from(budgetAllocations)
     .where(isNull(budgetAllocations.deletedAt))
     .groupBy(budgetAllocations.customerId, budgetAllocations.budgetType);
+  for (const r of allocationPots) add(r.customerId, r.budgetType);
 
-  const allocatedMap = new Map<string, number>();
-  for (const r of allocatedRows) {
-    allocatedMap.set(`${r.customerId}|${r.budgetType}`, Number(r.allocated));
+  // (c) Aktivierte Type-Settings (Anspruch für §45a/§39, die default-aus sind).
+  const enabledSettings = await exec
+    .select({
+      customerId: customerBudgetTypeSettings.customerId,
+      budgetType: customerBudgetTypeSettings.budgetType,
+    })
+    .from(customerBudgetTypeSettings)
+    .where(eq(customerBudgetTypeSettings.enabled, true))
+    .groupBy(
+      customerBudgetTypeSettings.customerId,
+      customerBudgetTypeSettings.budgetType,
+    );
+  for (const r of enabledSettings) add(r.customerId, r.budgetType);
+
+  // (d) §45b-Anspruch aus der Pflegegrad-Historie (Projektions-Anker) für jeden
+  //     Nicht-Selbstzahler — identisch zum Default-Gate der Reader-SSoT.
+  const careLevelCustomers = await exec
+    .select({
+      customerId: customerCareLevelHistory.customerId,
+      billingType: customers.billingType,
+    })
+    .from(customerCareLevelHistory)
+    .innerJoin(customers, eq(customers.id, customerCareLevelHistory.customerId))
+    .groupBy(customerCareLevelHistory.customerId, customers.billingType);
+  for (const r of careLevelCustomers) {
+    if (r.billingType !== "selbstzahler") {
+      add(r.customerId, "entlastungsbetrag_45b");
+    }
   }
 
+  return population;
+}
+
+/**
+ * (1) Kein Topf überzogen: NettoKonsum ≤ PROJIZIERTE Allocation je (Kunde, Topf).
+ *
+ * Task #1298 — Die Allocation wird NICHT mehr aus den roh-materialisierten
+ * `budget_allocations`-Zeilen summiert, sondern über DENSELBEN
+ * Verfügbarkeits-Reader (`readUnifiedBudgetAvailability`) projiziert, den auch
+ * die App nutzt (SSoT). Ein Topf gilt genau dann als überzogen, wenn der
+ * Netto-Konsum die projizierte Allocation übersteigt — bewertet zum heutigen
+ * Stichtag (`todayISO()`), exakt wie die App-Anzeige. Damit ist die Prüfung
+ * invariant gegen das Aufräumen der nicht mehr gelesenen Altlast-Quellen
+ * (`monthly_auto` etc.), die ohnehin NICHT in die Projektion eingehen.
+ */
+async function computePotConservation(exec: DbOrTx): Promise<PotConservationRow[]> {
+  const population = await enumerateConservationPopulation(exec);
+  // Der Reader ist rein lesend und ruft kein `.transaction` auf; der zur
+  // Laufzeit übergebene Executor (db oder offene Tx) erfüllt DbClient.
+  const reader = exec as DbClient;
+  const asOfDate = todayISO();
+
   const rows: PotConservationRow[] = [];
-  for (const r of consumedRows) {
-    if (UNCAPPED_POTS.has(r.budgetType)) continue;
-    const allocated = allocatedMap.get(`${r.customerId}|${r.budgetType}`) ?? 0;
-    const netConsumed = Math.max(0, Number(r.consumed) - Number(r.reversed));
-    rows.push({
-      customerId: r.customerId,
-      budgetType: r.budgetType,
-      allocatedCents: allocated,
-      netConsumedCents: netConsumed,
-      availableCents: allocated - netConsumed,
-      overdrawn: netConsumed > allocated,
-    });
+  for (const [customerId, pots] of population) {
+    const availability = await readUnifiedBudgetAvailability(
+      customerId,
+      asOfDate,
+      reader,
+    );
+    for (const pot of CAPPED_POTS) {
+      if (!pots.has(pot)) continue;
+      const p = availability.pots[pot];
+      const allocated = p.allocatedCents;
+      const netConsumed = p.consumedNetCents;
+      rows.push({
+        customerId,
+        budgetType: pot,
+        allocatedCents: allocated,
+        netConsumedCents: netConsumed,
+        availableCents: allocated - netConsumed,
+        overdrawn: netConsumed > allocated,
+      });
+    }
   }
   return rows;
 }

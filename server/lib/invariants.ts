@@ -28,11 +28,13 @@ import type { DbOrTx } from "./db";
 import {
   appointments,
   auditLog,
-  budgetAllocations,
   budgetTransactions,
   invoices,
 } from "@shared/schema";
-import { checkBudgetConservation } from "./budget-conservation";
+import {
+  checkBudgetConservation,
+  enumerateConservationPopulation,
+} from "./budget-conservation";
 import { appointmentDocumentedAndSignedCondition } from "./appointment-signed";
 import { readBudget45bFifoBreakdown } from "../storage/budget/fifo-breakdown";
 
@@ -191,16 +193,15 @@ async function checkReversalChains(
 async function checkFifoUnifiedEquality(
   exec: DbOrTx,
 ): Promise<{ checked: number; violations: FifoUnifiedViolation[] }> {
-  const customers = await exec
-    .select({ customerId: budgetAllocations.customerId })
-    .from(budgetAllocations)
-    .where(
-      and(
-        eq(budgetAllocations.budgetType, "entlastungsbetrag_45b"),
-        isNull(budgetAllocations.deletedAt),
-      ),
-    )
-    .groupBy(budgetAllocations.customerId);
+  // Task #1298 — Die §45b-Population kommt aus der projektions-bewussten SSoT
+  // (Consumption ∪ Anspruch), NICHT mehr aus den roh-materialisierten
+  // `budget_allocations`-Zeilen. Sonst fiele ein rein projizierter §45b-Topf
+  // (Anspruch ohne materialisierte Zeile) nach dem #1295-Cleanup aus der
+  // Gleichheitsprüfung heraus.
+  const population = await enumerateConservationPopulation(exec);
+  const customers = Array.from(population.entries())
+    .filter(([, pots]) => pots.has("entlastungsbetrag_45b"))
+    .map(([customerId]) => ({ customerId }));
 
   const violations: FifoUnifiedViolation[] = [];
   for (const c of customers) {

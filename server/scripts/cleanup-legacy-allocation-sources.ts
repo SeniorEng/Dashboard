@@ -92,8 +92,21 @@ async function loadLegacyRows(): Promise<LegacyRow[]> {
 const euro = (cents: number) => `${(cents / 100).toFixed(2)} €`;
 
 /**
- * Cent-exakter Schatten-Diff: simuliert die Conservation NACH dem Entfernen der
- * aktiven Altlast-Zeilen und meldet jeden Topf, der dadurch NEU überzogen wäre.
+ * Schatten-Diff: prognostiziert, welche Töpfe durch das Entfernen der aktiven
+ * Altlast-Zeilen NEU überzogen würden.
+ *
+ * Task #1298 — Der Conservation-Verifier bewertet eine Überziehung jetzt gegen
+ * die PROJIZIERTE Verfügbarkeit (`readUnifiedBudgetAvailability` / SSoT), nicht
+ * gegen die roh-materialisierten Allocation-Zeilen. Die hier gelöschten
+ * Altlast-Quellen (`monthly_auto`/`monthly`/`yearly_auto`/`statutory_monthly`)
+ * gehen NICHT in die Projektion ein — diese liest ausschließlich
+ * `initial_balance`/`carryover`/`manual_adjustment` + den Pflegegrad-Anker.
+ * Die projizierte Allocation ist daher invariant gegen ihre Löschung
+ * (`allocatedAfter == allocatedBefore`), und es entsteht KEINE neue
+ * Verletzung. `pre.potRows` trägt bereits die projizierten Werte; ein Topf, der
+ * darin schon überzogen ist (`row.overdrawn`), ist KEINE „neue" Verletzung der
+ * Löschung. Der verbindliche In-Transaktions-PRE/POST-Check (`--apply`) prüft
+ * die Projektion zusätzlich gegen den real gelöschten Zustand.
  */
 function simulatePostDeleteViolations(
   pre: ConservationResult,
@@ -109,7 +122,9 @@ function simulatePostDeleteViolations(
     const key = `${row.customerId}|${row.budgetType}`;
     const removed = activeLegacyByPot.get(key) ?? 0;
     if (removed === 0) continue;
-    const allocatedAfter = row.allocatedCents - removed;
+    // Projektion ist deletion-invariant für Altlast-Quellen: allocatedAfter
+    // entspricht der projizierten allocatedBefore.
+    const allocatedAfter = row.allocatedCents;
     const overdrawnAfter = row.netConsumedCents > allocatedAfter;
     if (overdrawnAfter && !row.overdrawn) {
       newViolations.push({

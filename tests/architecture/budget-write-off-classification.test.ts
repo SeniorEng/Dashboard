@@ -60,11 +60,13 @@ const ALLOWLIST: Record<string, WriteOffView> = {
   // Phase 4 nur noch hierhin und referenziert `write_off` selbst nicht mehr.
   "server/storage/budget/unified-reader.ts": "allocation-view",
 
-  // Task #895 — Read-only Conservation-Verifier (I13, kein Topf überzogen).
-  // Topf-/Allocation-Sicht: NettoKonsum = consumption + write_off − reversal ≤
-  // Σ Allocated. write_off zählt als Used (Geld ist aus dem Topf raus). Genutzt
-  // vom Migrations-Guard (Pre-/Post-Check) und dem CLI-Verifier.
-  "server/lib/budget-conservation.ts": "allocation-view",
+  // Task #1298 — `budget-conservation.ts` klassifiziert `write_off` NICHT mehr
+  // selbst: der Conservation-Verifier (I13) liest Verfügbarkeit/NettoKonsum jetzt
+  // ausschließlich über den unified Reader (`readUnifiedBudgetAvailability`), der
+  // die write_off-Asymmetrie kapselt (§45b allocation-view, §45a/§39
+  // Fenster-Cap-Sicht). Deshalb steht die Datei NICHT mehr in dieser Allowlist
+  // (kein `'write_off'`-Literal mehr). Audit-Tabelle in
+  // docs/budget-ssot-inventory.md entsprechend angepasst.
 
   // Phase 1.3 — pure History-Aggregation exponiert beide Sichten gleichzeitig
   // (Topologie ist „both"): die Entscheidung, welche Sicht eine UI verwendet,

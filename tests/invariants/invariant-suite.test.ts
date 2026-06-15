@@ -12,6 +12,7 @@
  * Verletzung verschluckt.
  */
 import { describe, it, expect, afterAll } from "vitest";
+import { eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import {
   appointments,
@@ -22,6 +23,7 @@ import {
   checkBudgetTransactionsConsistency,
   checkBookingCompleteness,
 } from "../../server/lib/invariants";
+import { enumerateConservationPopulation } from "../../server/lib/budget-conservation";
 import {
   createTestCustomer,
   cleanupCustomer,
@@ -224,6 +226,58 @@ describe("Invarianten-Suite (Task #1237)", () => {
 
     // Globaler Suite-Status ist damit insgesamt nicht mehr „ok".
     expect(ledger.ok).toBe(false);
+  });
+
+  it("flaggt eine echte projektions-überzogene §45b-Buchung (Detection bleibt scharf)", async () => {
+    const customer = await createTestCustomer();
+    customerIds.push(customer.id);
+
+    // Eine kleine materialisierte Allocation; die §45b-Verfügbarkeit ist auch
+    // mit Projektion auf den Jahres-Cap (~hunderte €) gedeckelt.
+    const allocId = await seed45bAllocation(customer.id, 13100);
+    const apptId = await seedAppointment(customer.id);
+    // Konsum WEIT über jeder denkbaren projizierten §45b-Allocation (€99.000).
+    await seedConsumption({
+      customerId: customer.id,
+      allocationId: allocId,
+      appointmentId: apptId,
+      amountCents: -9_900_000,
+      hauswirtschaftCents: 9_900_000,
+    });
+
+    const ledger = await checkBudgetTransactionsConsistency(db);
+
+    expect(
+      ledger.conservation.overdrawnKeys.filter((k) =>
+        k.startsWith(`${customer.id}|`),
+      ),
+    ).toContain(`${customer.id}|entlastungsbetrag_45b`);
+  });
+
+  it("enumeriert einen rein projizierten §45b-Topf OHNE materialisierte Allocation (Guard nicht blind nach #1295)", async () => {
+    // Nicht-Selbstzahler mit Pflegegrad-Historie, aber KEINE budget_allocations
+    // und KEINE Consumption: der §45b-Anspruch existiert ausschließlich über die
+    // Projektion. Vor Task #1298 (Enumeration aus budget_allocations) wäre dieser
+    // Topf nach dem #1295-Cleanup aus der Prüfung gefallen.
+    const projected = await createTestCustomer();
+    customerIds.push(projected.id);
+
+    const ownAllocations = await db
+      .select({ id: budgetAllocations.id })
+      .from(budgetAllocations)
+      .where(eq(budgetAllocations.customerId, projected.id));
+    expect(ownAllocations).toEqual([]);
+
+    const population = await enumerateConservationPopulation(db);
+    expect(population.get(projected.id)?.has("entlastungsbetrag_45b")).toBe(true);
+
+    // Ein Selbstzahler mit identischer Pflegegrad-Historie hat KEINEN §45b-
+    // Anspruch und darf nicht über die Projektion enumeriert werden.
+    const selfPayer = await createTestCustomer({ billingType: "selbstzahler" });
+    customerIds.push(selfPayer.id);
+    expect(population.get(selfPayer.id)?.has("entlastungsbetrag_45b")).not.toBe(
+      true,
+    );
   });
 
   it("liefert über GET /api/admin/invariants-report einen wohlgeformten Report (SuperAdmin)", async () => {
