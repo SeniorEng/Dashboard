@@ -25,6 +25,7 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { hasObjectStorageEnv } from "../helpers/object-storage";
 import { eq, and, inArray, asc } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { invoices as invoicesTable, auditLog, documentDeliveries } from "../../shared/schema";
@@ -214,7 +215,7 @@ afterAll(async () => {
   }
 });
 
-describe("Task #560 — Batch-Send bricht pro Item bei ZUGFeRD-Fehler sauber ab", () => {
+describe.skipIf(!hasObjectStorageEnv)("Task #560 — Batch-Send bricht pro Item bei ZUGFeRD-Fehler sauber ab", () => {
   it("Pro-Item-Error, kein Versand committet, Audit-Einträge mit batchSend=true", async () => {
     // 1. Zwei unabhängige PV-Rechnungen anlegen.
     const a = await createPvInvoice("A");

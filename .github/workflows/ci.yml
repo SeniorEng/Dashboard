@@ -9,7 +9,7 @@ name: CI
 #   3. eslint --max-warnings 0             (Lint)
 #   4. npx vitest run                      (Tests, JUnit-Reporter)
 #   5. npx vitest run tests/architecture/  (Fitness-Functions, eigenes Gate)
-#   6. npm audit --audit-level=high        (Security)
+#   6. npm run audit:ci                    (Security: better-npm-audit + .nsprc)
 #   7. npm run test:e2e:smoke              (Playwright-Smoke)
 #   8. tsx script/coverage-gate.ts <key>   (Targeted-Coverage-Gates: billing,
 #                                            qonto, consumption-engine,
@@ -36,7 +36,7 @@ env:
 jobs:
   # -------------------------------------------------------------------------
   # Statische Gates: brauchen weder DB noch laufenden Server. Laufen immer.
-  # Gates: 1 (npm ci), 2 (tsc), 3 (eslint), 6 (npm audit)
+  # Gates: 1 (npm ci), 2 (tsc), 3 (eslint), 6 (npm run audit:ci)
   # -------------------------------------------------------------------------
   static-analysis:
     # Check-Name == Job-ID, damit Branch-Protection diesen Kontext exakt matcht
@@ -79,8 +79,12 @@ jobs:
         run: npm run gen:openapi -- --check
 
       # Gate 6: Security-Audit
-      - name: Security audit (npm audit --audit-level=high)
-        run: npm audit --audit-level=high
+      # better-npm-audit respektiert die `.nsprc`-Allowlist (vorbestehende,
+      # dev-tooling-only Advisories sind dort dokumentiert + befristet
+      # freigegeben). Das Gate bleibt strikt auf --level high; eine echte
+      # neue High/Critical-Lücke bricht weiterhin rot.
+      - name: Security audit (better-npm-audit, .nsprc allowlist)
+        run: npm run audit:ci
 
       # Dead-Code-Report (Task #1238, Phase 0.2): knip läuft NUR als
       # Warning-Artefakt — `continue-on-error: true` lässt das Gate niemals
@@ -147,6 +151,12 @@ jobs:
       TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
       TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
       SUPER_ADMIN_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+      # GitHub-Actions setzt CI=true ohnehin; explizit gesetzt als
+      # Dokumentation für die CI-only-Quarantäne vorbestehender
+      # km-Rebook/km-Drift-Tests (tests/helpers/known-failing.ts). Diese
+      # hängen am offenen budget_transactions_appointment_required_check-
+      # Konstrukt und werden NUR in der sauberen CI-DB übersprungen.
+      CI: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

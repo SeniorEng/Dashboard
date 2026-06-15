@@ -25,6 +25,7 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { hasObjectStorageEnv } from "../helpers/object-storage";
 import {
   apiGet,
   apiPost,
@@ -870,7 +871,7 @@ describe("BF-3: Storno (Stornorechnung + Audit + Schutz)", () => {
     if (stornoInv) cleanupInvoiceIds.push(stornoInv.id);
   });
 
-  it("BF-3.5 — Storno schreibt KEINEN automatischen Budget-Refund (Ledger bleibt unverändert)", async () => {
+  it.skipIf(!hasObjectStorageEnv)("BF-3.5 — Storno schreibt KEINEN automatischen Budget-Refund (Ledger bleibt unverändert)", async () => {
     // Dokumentiertes Soll-Verhalten: Eine Rechnungs-Stornierung erstellt nur
     // eine Stornorechnung (Buchführung) — der Budget-Verbrauch im Ledger wird
     // NICHT automatisch zurückgebucht. Refund muss explizit über die Budget-
@@ -1140,7 +1141,7 @@ async function fetchPdf(invoiceId: number, suffix: "" | "/leistungsnachweis"): P
 }
 
 describe("BF-6: PDF-Endpunkte (Coverage-relevante Read-Paths)", () => {
-  it("BF-6.1 — GET /:id/pdf liefert PDF für eine Selbstzahler-Rechnung", async () => {
+  it.skipIf(!hasObjectStorageEnv)("BF-6.1 — GET /:id/pdf liefert PDF für eine Selbstzahler-Rechnung", async () => {
     const custId = await createCustomer(szPayload("PDF1"));
     const appt = await findFreeSlotAndCreate(custId, hwServiceId, 30, "PDF1");
     await documentAppointment(appt.id, appt.time, hwServiceId, 30, "BF-6.1");
@@ -1157,7 +1158,7 @@ describe("BF-6: PDF-Endpunkte (Coverage-relevante Read-Paths)", () => {
     expect(r.bytes, "PDF-Buffer muss > 1KB sein").toBeGreaterThan(1024);
   }, 60_000);
 
-  it("BF-6.2 — GET /:id/pdf für pflegekasse_privat-Rechnung mergt Leistungsnachweis (Branch-Coverage Signaturen + pdf-lib merge)", async () => {
+  it.skipIf(!hasObjectStorageEnv)("BF-6.2 — GET /:id/pdf für pflegekasse_privat-Rechnung mergt Leistungsnachweis (Branch-Coverage Signaturen + pdf-lib merge)", async () => {
     const custId = await createCustomer(pvPayload("PDF2"));
     await configureLowBudgetPV(custId, 1000);
     const appt = await findFreeSlotAndCreate(custId, hwServiceId, 30, "PDF2");
@@ -1175,7 +1176,7 @@ describe("BF-6: PDF-Endpunkte (Coverage-relevante Read-Paths)", () => {
     expect(r.bytes, "Merged PDF (Rechnung + LN) muss > 2KB sein").toBeGreaterThan(2048);
   }, 60_000);
 
-  it("BF-6.3 — GET /:id/leistungsnachweis liefert separaten LN-PDF (Branch-Coverage Signatur-Enrichment)", async () => {
+  it.skipIf(!hasObjectStorageEnv)("BF-6.3 — GET /:id/leistungsnachweis liefert separaten LN-PDF (Branch-Coverage Signatur-Enrichment)", async () => {
     const custId = await createCustomer(pvPayload("PDF3"));
     await configureLowBudgetPV(custId, 1000);
     const appt = await findFreeSlotAndCreate(custId, hwServiceId, 30, "PDF3");
