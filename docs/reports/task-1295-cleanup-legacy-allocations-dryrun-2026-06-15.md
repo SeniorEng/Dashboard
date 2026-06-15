@@ -1,7 +1,13 @@
 # Dry-Run Report — Cleanup Legacy-Allocation-Quellen (Task #1295)
 
-  **Status:** ⛔ ZURÜCKGESTELLT (DEFERRED) — Trockenlauf NICHT sauber, keine Löschung ausgeführt, kein `--apply`, kein Backup, kein Code geändert.
-  **Nächster Schritt:** Folgeaufgabe #1298 (Conservation-Check projektionsfähig machen), danach Dry-Run wiederholen → Sign-off → Pre-Publish-Backup → `--apply`.
+  > **⚠️ ARCHIVIERT / ABGELÖST:** Dieser Lauf entstand VOR #1298. Die hier gemeldeten 22 neuen
+  > Verletzungen waren **Guard-Artefakte** des alten, nicht-projektionsbewussten Verifiers.
+  > Maßgeblich ist der Re-Run nach #1298:
+  > [`task-1295-cleanup-legacy-allocations-dryrun-rerun-2026-06-15.md`](task-1295-cleanup-legacy-allocations-dryrun-rerun-2026-06-15.md)
+  > (Ergebnis: **0 neue Verletzungen**, Vorbedingung erfüllt).
+
+  **Status:** ⛔ ZURÜCKGESTELLT (DEFERRED) — Trockenlauf NICHT sauber, keine Löschung ausgeführt, kein `--apply`, kein Backup, kein Code geändert. **→ Abgelöst durch den #1298-Re-Run (s. o.).**
+  **Nächster Schritt:** Folgeaufgabe #1298 (Conservation-Check projektionsfähig machen), danach Dry-Run wiederholen → Sign-off → Pre-Publish-Backup → `--apply`. **(#1298 gemerged, Re-Run erfolgt.)**
   **Erzeugt:** 2026-06-15T12:03:54.056Z
   **Quelle:** Production read replica (read-only, `executeSql environment:"production"`)
   **Skript-Logik repliziert:** `server/scripts/cleanup-legacy-allocation-sources.ts` (`checkBudgetConservation` + `simulatePostDeleteViolations`)
