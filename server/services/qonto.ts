@@ -166,9 +166,12 @@ class QontoService {
   async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number }> {
     const unmatched = await qontoStorage.getUnmatchedTransactions();
 
+    // Task #1284 — "avis_erhalten" zählt als offen: ein Qonto-Zahlungseingang
+    // darf eine bereits über ein Avis als "avis_erhalten" markierte Rechnung
+    // auf "bezahlt" hochstufen.
     const openInvoices = await db.select()
       .from(invoices)
-      .where(inArray(invoices.status, ["versendet", "entwurf"]));
+      .where(inArray(invoices.status, ["versendet", "avis_erhalten", "entwurf"]));
 
     const invoiceByNumber = new Map(openInvoices.map(inv => [inv.invoiceNumber.toLowerCase(), inv]));
     const invoiceByAmount = new Map<number, typeof openInvoices>();
@@ -237,7 +240,7 @@ class QontoService {
           .set({ status: "bezahlt", paidAt: qtx.emittedAt })
           .where(and(
             eq(invoices.id, match.invoiceId),
-            eq(invoices.status, "versendet"),
+            inArray(invoices.status, ["versendet", "avis_erhalten"]),
           ))
           .returning({ id: invoices.id });
 

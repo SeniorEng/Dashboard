@@ -525,6 +525,15 @@ async function runStartupTasks() {
       log(`Storno-transactionDate-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1284 — bereits zugeordnete (aber noch "versendet") Rechnungen mit
+    // aktivem Zahlungsavis auf den neuen Zwischenstatus "avis_erhalten" anheben.
+    const { backfillAvisReceivedStatus } = await import("./startup/backfill-avis-received-status");
+    try {
+      await backfillAvisReceivedStatus();
+    } catch (err) {
+      log(`Avis-Received-Backfill fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #1274 (Stufe C) — finale Entfernung des früheren budget_ledger-
     // Spiegels: erst die FK-Spalte budget_reservations.captured_ledger_id,
     // dann die Tabelle budget_ledger. Idempotent, ohne drizzle-kit push. Der

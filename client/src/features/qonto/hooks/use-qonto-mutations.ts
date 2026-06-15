@@ -111,5 +111,17 @@ export function useAdviceMutations({ onCreateSuccess }: { onCreateSuccess: () =>
     },
   });
 
-  return { createMutation, deleteMutation };
+  const markPaidMutation = useMutation({
+    mutationFn: async (id: number) =>
+      unwrapResult(await api.post<{ paid: number }>(`/admin/qonto/payment-advices/${id}/mark-paid`, {})),
+    onSuccess: (data) => {
+      toast({ title: `${data.paid} Rechnung(en) als bezahlt markiert` });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return { createMutation, deleteMutation, markPaidMutation };
 }

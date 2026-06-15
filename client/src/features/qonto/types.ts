@@ -61,6 +61,8 @@ export interface PaymentAdvice {
   kuerzungCents: number;
   uploadedAt: string;
   items: PaymentAdviceItem[];
+  matchedInvoiceCount?: number;
+  unpaidMatchedCount?: number;
 }
 
 export type Tab = "status" | "transactions" | "advices";

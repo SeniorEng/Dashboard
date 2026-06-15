@@ -70,6 +70,8 @@ export const AUDIT_ACTIONS = [
   "month_close_reminder_sent",
   "invoice_payment_reconciled",
   "invoice_payment_unreconciled",
+  "invoice_avis_received",
+  "invoice_avis_reverted",
   "call_bridge_failed",
   "budget_allocation_resurrected",
   "budget_allocation_soft_deleted",

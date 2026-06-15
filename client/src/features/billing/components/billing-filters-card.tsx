@@ -101,6 +101,7 @@ export function BillingFiltersCard({
                 <SelectItem value="alle">Alle</SelectItem>
                 <SelectItem value="entwurf">Entwurf</SelectItem>
                 <SelectItem value="versendet">Versendet</SelectItem>
+                <SelectItem value="avis_erhalten">Avis erhalten</SelectItem>
                 <SelectItem value="bezahlt">Bezahlt</SelectItem>
                 <SelectItem value="storniert">Storniert</SelectItem>
               </SelectContent>

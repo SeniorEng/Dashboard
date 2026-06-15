@@ -5,12 +5,13 @@ import { customers } from "./customers";
 import { users } from "./users";
 import { appointments } from "./appointments";
 
-export const INVOICE_STATUSES = ["entwurf", "versendet", "bezahlt", "storniert"] as const;
+export const INVOICE_STATUSES = ["entwurf", "versendet", "avis_erhalten", "bezahlt", "storniert"] as const;
 export type InvoiceStatus = typeof INVOICE_STATUSES[number];
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   entwurf: "Entwurf",
   versendet: "Versendet",
+  avis_erhalten: "Avis erhalten",
   bezahlt: "Bezahlt",
   storniert: "Storniert",
 };

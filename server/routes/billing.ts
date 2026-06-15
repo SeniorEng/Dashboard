@@ -964,9 +964,14 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
   const { status, cascadeRun } = parsed.data;
   const currentStatus = invoice.status;
 
+  // Task #1284 — Lebenszyklus: Entwurf → Versendet → Avis erhalten → Bezahlt
+  // (+Storniert). "avis_erhalten" liegt zwischen Versendet und Bezahlt. Manuell
+  // darf von versendet/avis_erhalten direkt auf bezahlt gesprungen werden;
+  // bezahlt/storniert werden nie herabgestuft.
   const allowedTransitions: Record<string, string[]> = {
     entwurf: ["versendet", "storniert"],
-    versendet: ["bezahlt", "storniert"],
+    versendet: ["avis_erhalten", "bezahlt", "storniert"],
+    avis_erhalten: ["bezahlt", "storniert"],
     bezahlt: ["storniert"],
     storniert: [],
   };

@@ -32,7 +32,7 @@ export function AdvicesTab() {
 
   const advicesQuery = useQontoAdvices();
 
-  const { createMutation, deleteMutation } = useAdviceMutations({
+  const { createMutation, deleteMutation, markPaidMutation } = useAdviceMutations({
     onCreateSuccess: () => setNotes(""),
   });
 
@@ -264,6 +264,19 @@ export function AdvicesTab() {
                       )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {(advice.unpaidMatchedCount ?? 0) > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-green-700 border-green-200 hover:bg-green-50"
+                          onClick={(e) => { e.stopPropagation(); markPaidMutation.mutate(advice.id); }}
+                          disabled={markPaidMutation.isPending}
+                          data-testid={`button-mark-paid-advice-${advice.id}`}
+                        >
+                          <CheckCircle2 className={`${iconSize.sm} mr-1`} />
+                          Als bezahlt markieren
+                        </Button>
+                      )}
                       {advice.objectPath && (
                         <Button
                           variant="ghost"

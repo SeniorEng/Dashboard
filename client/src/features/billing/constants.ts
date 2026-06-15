@@ -6,6 +6,7 @@ export const MONTH_NAMES = [
 export const STATUS_LABELS: Record<string, string> = {
   entwurf: "Entwurf",
   versendet: "Versendet",
+  avis_erhalten: "Avis erhalten",
   bezahlt: "Bezahlt",
   storniert: "Storniert",
 };
@@ -13,6 +14,7 @@ export const STATUS_LABELS: Record<string, string> = {
 export const STATUS_COLORS: Record<string, string> = {
   entwurf: "bg-amber-50 text-amber-700 border-amber-200",
   versendet: "bg-blue-50 text-blue-700 border-blue-200",
+  avis_erhalten: "bg-purple-50 text-purple-700 border-purple-200",
   bezahlt: "bg-green-50 text-green-700 border-green-200",
   storniert: "bg-red-50 text-red-700 border-red-200",
 };

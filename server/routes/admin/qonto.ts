@@ -7,14 +7,36 @@ import { qontoStorage } from "../../storage/qonto";
 import { parseAvisCsv } from "../../services/avis-parser";
 import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
-import { db } from "../../lib/db";
-import { invoices, qontoTransactions } from "@shared/schema";
-import { eq, and, ilike, isNull } from "drizzle-orm";
+import { db, type DbOrTx } from "../../lib/db";
+import { invoices, qontoTransactions, paymentAdviceItems, paymentAdvices } from "@shared/schema";
+import { eq, and, ilike, isNull, inArray } from "drizzle-orm";
 import { withAudit } from "../../lib/with-audit";
 import { readTestFaults } from "../../lib/test-fault-injector";
+import { parseLocalDate } from "@shared/utils/datetime";
 
 const router = Router();
 router.use(requireSuperAdmin);
+
+// Task #1284 — Hat eine Rechnung noch eine aktive (nicht soft-deletete) Avis-
+// Zuordnung, ist ihr "zurückgesetzter" Status `avis_erhalten`, sonst
+// `versendet`. Wird beim Aufheben einer Zahlungs-Zuordnung (Qonto-Unmatch /
+// Avis-Löschen) genutzt, damit eine Rechnung nicht versehentlich an einer noch
+// vorhandenen Avis-Zuordnung vorbei auf `versendet` herabfällt.
+async function resolveAvisBackedStatus(
+  exec: DbOrTx,
+  invoiceId: number,
+): Promise<"avis_erhalten" | "versendet"> {
+  const rows = await exec
+    .select({ id: paymentAdviceItems.id })
+    .from(paymentAdviceItems)
+    .innerJoin(paymentAdvices, eq(paymentAdviceItems.paymentAdviceId, paymentAdvices.id))
+    .where(and(
+      eq(paymentAdviceItems.matchedInvoiceId, invoiceId),
+      isNull(paymentAdvices.deletedAt),
+    ))
+    .limit(1);
+  return rows.length > 0 ? "avis_erhalten" : "versendet";
+}
 
 router.get("/status", asyncHandler("Qonto-Status konnte nicht geladen werden", async (_req, res) => {
   const configured = await qontoService.isConfigured();
@@ -82,13 +104,15 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
       throw badRequest("Transaktion wurde zwischenzeitlich einer anderen Rechnung zugeordnet.");
     }
 
+    // Task #1284 — Qonto-Zahlungseingang setzt bezahlt, auch wenn die Rechnung
+    // bereits über ein Zahlungsavis auf "avis_erhalten" stand.
     const invoiceUpdate = await dbTx.update(invoices)
       .set({ status: "bezahlt", paidAt: tx.emittedAt })
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")))
+      .where(and(eq(invoices.id, invoiceId), inArray(invoices.status, ["versendet", "avis_erhalten"])))
       .returning({ id: invoices.id });
 
     if (invoiceUpdate.length === 0) {
-      throw badRequest("Rechnung ist nicht im Status 'versendet' und kann nicht abgeglichen werden.");
+      throw badRequest("Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
     }
 
     audit.record({
@@ -141,9 +165,12 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
       throw badRequest("Zuordnung wurde zwischenzeitlich verändert.");
     }
 
+    // Task #1284 — Zurücksetzen darf bezahlt/storniert nicht herabstufen und
+    // muss eine noch bestehende Avis-Zuordnung respektieren (→ avis_erhalten).
+    const resetStatus = await resolveAvisBackedStatus(dbTx, previousInvoiceId);
     await dbTx.update(invoices)
-      .set({ status: "versendet", paidAt: null })
-      .where(eq(invoices.id, previousInvoiceId));
+      .set({ status: resetStatus, paidAt: null })
+      .where(and(eq(invoices.id, previousInvoiceId), eq(invoices.status, "bezahlt")));
 
     audit.record({
       userId: req.user!.id,
@@ -193,7 +220,11 @@ router.post("/transactions/import-csv", asyncHandler("CSV-Import fehlgeschlagen"
   res.json({ imported, updated, skipped: skippedRows });
 }));
 
-async function autoMatchAvisItems(items: Array<{ id: number; rechnungsNummer: string | null }>) {
+async function autoMatchAvisItems(
+  items: Array<{ id: number; rechnungsNummer: string | null }>,
+  userId: number,
+  ipAddress?: string,
+) {
   let matched = 0;
   for (const item of items) {
     if (!item.rechnungsNummer) continue;
@@ -212,8 +243,34 @@ async function autoMatchAvisItems(items: Array<{ id: number; rechnungsNummer: st
     }
 
     if (invoiceRows.length > 0) {
-      await qontoStorage.updatePaymentAdviceItemMatch(item.id, invoiceRows[0].id);
+      const invoiceId = invoiceRows[0].id;
+      await qontoStorage.updatePaymentAdviceItemMatch(item.id, invoiceId);
       matched++;
+
+      // Task #1284 — Avis-Treffer setzt die Rechnung von "versendet" auf
+      // "avis_erhalten". Bereits bezahlte/stornierte Rechnungen werden NICHT
+      // herabgestuft (Guard auf status='versendet'), audit-protokolliert.
+      await withAudit(async (dbTx, audit) => {
+        const flipped = await dbTx.update(invoices)
+          .set({ status: "avis_erhalten" })
+          .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")))
+          .returning({ id: invoices.id });
+
+        if (flipped.length > 0) {
+          audit.record({
+            userId,
+            action: "invoice_avis_received",
+            entityType: "invoice",
+            entityId: invoiceId,
+            metadata: {
+              paymentAdviceItemId: item.id,
+              rechnungsNummer: searchNum,
+              matchedBy: "avis",
+            },
+            ipAddress,
+          });
+        }
+      });
     }
   }
   return matched;
@@ -297,7 +354,7 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     const itemsToMatch = advice.items
       .filter(i => i.rechnungsNummer)
       .map(i => ({ id: i.id, rechnungsNummer: i.rechnungsNummer }));
-    const matchCount = await autoMatchAvisItems(itemsToMatch);
+    const matchCount = await autoMatchAvisItems(itemsToMatch, req.user!.id, req.ip);
 
     const refreshed = await qontoStorage.getPaymentAdviceById(advice.id);
     res.json({ advice: refreshed, matched: matchCount });
@@ -337,7 +394,30 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
 
 router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen werden", async (_req, res) => {
   const advices = await qontoStorage.getPaymentAdvices();
-  res.json(advices);
+
+  // Task #1284 — Pro Avis anreichern, wie viele zugeordnete Rechnungen es gibt
+  // und wie viele davon noch offen (versendet/avis_erhalten) sind. Das FE blendet
+  // den "Als bezahlt markieren"-Button nur ein, wenn offene Treffer existieren.
+  const matchedInvoiceIds = Array.from(new Set(
+    advices.flatMap(a => a.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null)),
+  ));
+  const statusById = new Map<number, string>();
+  if (matchedInvoiceIds.length > 0) {
+    const rows = await db.select({ id: invoices.id, status: invoices.status })
+      .from(invoices)
+      .where(inArray(invoices.id, matchedInvoiceIds));
+    for (const row of rows) statusById.set(row.id, row.status);
+  }
+
+  const enriched = advices.map(a => {
+    const matchedIds = a.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null);
+    const unpaidMatchedCount = matchedIds.filter(
+      id => statusById.get(id) === "versendet" || statusById.get(id) === "avis_erhalten",
+    ).length;
+    return { ...a, matchedInvoiceCount: matchedIds.length, unpaidMatchedCount };
+  });
+
+  res.json(enriched);
 }));
 
 router.get("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht geladen werden", async (req, res) => {
@@ -348,11 +428,102 @@ router.get("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht gelad
   res.json(advice);
 }));
 
+// Task #1284 — "Avis als bezahlt markieren": setzt alle dem Avis zugeordneten,
+// noch offenen Rechnungen (versendet/avis_erhalten) auf "bezahlt". paidAt kommt
+// aus dem Zahlungsdatum des Avis (Fallback: jetzt). Bereits bezahlte/stornierte
+// Rechnungen werden übersprungen (nie herabstufen). GoBD-auditiert.
+router.post("/payment-advices/:id/mark-paid", asyncHandler("Avis konnte nicht als bezahlt markiert werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const advice = await qontoStorage.getPaymentAdviceById(id);
+  if (!advice) throw notFound("Zahlungsavis nicht gefunden");
+
+  const matchedInvoiceIds = Array.from(new Set(
+    advice.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null),
+  ));
+
+  const paidAt = advice.zahlungsDatum ? parseLocalDate(advice.zahlungsDatum) : new Date();
+
+  let paid = 0;
+  if (matchedInvoiceIds.length > 0) {
+    await withAudit(async (dbTx, audit) => {
+      const updatedRows = await dbTx.update(invoices)
+        .set({ status: "bezahlt", paidAt })
+        .where(and(
+          inArray(invoices.id, matchedInvoiceIds),
+          inArray(invoices.status, ["versendet", "avis_erhalten"]),
+        ))
+        .returning({ id: invoices.id });
+
+      for (const row of updatedRows) {
+        audit.record({
+          userId: req.user!.id,
+          action: "invoice_payment_reconciled",
+          entityType: "invoice",
+          entityId: row.id,
+          metadata: {
+            paymentAdviceId: id,
+            matchedBy: "avis",
+            zahlungsDatum: advice.zahlungsDatum,
+          },
+          ipAddress: req.ip,
+        });
+      }
+
+      paid = updatedRows.length;
+    }, { faults: readTestFaults(req) });
+  }
+
+  res.json({ paid });
+}));
+
 router.delete("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht gelöscht werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
-  const deleted = await qontoStorage.deletePaymentAdvice(id);
-  if (!deleted) throw notFound("Zahlungsavis nicht gefunden");
+
+  const advice = await qontoStorage.getPaymentAdviceById(id);
+  if (!advice) throw notFound("Zahlungsavis nicht gefunden");
+
+  const matchedInvoiceIds = Array.from(new Set(
+    advice.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null),
+  ));
+
+  await withAudit(async (dbTx, audit) => {
+    const deletedRows = await dbTx.update(paymentAdvices)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(paymentAdvices.id, id), isNull(paymentAdvices.deletedAt)))
+      .returning({ id: paymentAdvices.id });
+
+    if (deletedRows.length === 0) {
+      throw notFound("Zahlungsavis nicht gefunden");
+    }
+
+    // Task #1284 — Löschen eines Avis nimmt den von ihm gesetzten
+    // "avis_erhalten"-Status zurück (→ versendet). Bezahlte/stornierte
+    // Rechnungen bleiben unangetastet.
+    if (matchedInvoiceIds.length > 0) {
+      const resetRows = await dbTx.update(invoices)
+        .set({ status: "versendet" })
+        .where(and(
+          inArray(invoices.id, matchedInvoiceIds),
+          eq(invoices.status, "avis_erhalten"),
+        ))
+        .returning({ id: invoices.id });
+
+      for (const row of resetRows) {
+        audit.record({
+          userId: req.user!.id,
+          action: "invoice_avis_reverted",
+          entityType: "invoice",
+          entityId: row.id,
+          metadata: { paymentAdviceId: id, reason: "advice_deleted" },
+          ipAddress: req.ip,
+        });
+      }
+    }
+  }, { faults: readTestFaults(req) });
+
   res.json({ success: true });
 }));
 
