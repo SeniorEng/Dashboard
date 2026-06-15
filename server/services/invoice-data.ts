@@ -5,12 +5,13 @@ import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetS
 import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
-import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, customerServicePrices, budgetTransactions } from "@shared/schema";
+import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, budgetTransactions } from "@shared/schema";
 import { eq, and, isNull, inArray, ne, desc, or } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
-import { monthlyServiceRecordsRepo, appointmentsRepo, customerServicePricesRepo, customersRepo } from "../repos";
+import { loadCustomerPriceContext } from "../storage/pricing/price-for";
+import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
 
 export interface BuildLineItem extends Record<string, unknown> {
   appointmentId: number;
@@ -136,47 +137,10 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
   .where(inArray(appointmentServicesTable.appointmentId, apptIds));
 
   const resolvedCustomerId = customerId ?? appts[0]?.customerId;
-  let allCustomerPrices: { id: number; serviceId: number; priceCents: number; validFrom: Date | null; validTo: Date | null }[] = [];
-  if (resolvedCustomerId) {
-    allCustomerPrices = await customerServicePricesRepo.selectColumnsFrom({
-      id: customerServicePrices.id,
-      serviceId: customerServicePrices.serviceId,
-      priceCents: customerServicePrices.priceCents,
-      validFrom: customerServicePrices.validFrom,
-      validTo: customerServicePrices.validTo,
-    })
-    .where(and(
-      eq(customerServicePrices.customerId, resolvedCustomerId),
-      customerServicePricesRepo.activeOnly(),
-    ));
-  }
-
-  function toDateStr(d: Date | string | null): string {
-    if (!d) return "";
-    if (d instanceof Date) {
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    }
-    return String(d).substring(0, 10);
-  }
-
-  function getCustomerPrice(serviceId: number, appointmentDate: string): number | undefined {
-    const matching = allCustomerPrices.filter(p => {
-      if (p.serviceId !== serviceId) return false;
-      const fromDate = p.validFrom ? toDateStr(p.validFrom) : "0000-01-01";
-      const toDate = p.validTo ? toDateStr(p.validTo) : "9999-12-31";
-      return appointmentDate >= fromDate && appointmentDate <= toDate;
-    });
-    if (matching.length === 0) return undefined;
-    matching.sort((a, b) => {
-      const aFrom = a.validFrom ? new Date(a.validFrom).getTime() : 0;
-      const bFrom = b.validFrom ? new Date(b.validFrom).getTime() : 0;
-      if (bFrom !== aFrom) return bFrom - aFrom;
-      // Tiebreaker für identisches validFrom (Race-Condition / Parallel-Insert):
-      // Höchste id (= zuletzt eingefügt) gewinnt deterministisch.
-      return b.id - a.id;
-    });
-    return matching[0].priceCents;
-  }
+  // Task #1291 — Preis-Auflösung ausschließlich über die `priceFor`-SSoT
+  // (Kunden-Override → Standard → Katalog-Default, zeitversioniert, Existenz
+  // der Kundenzeile gewinnt auch bei cents = 0).
+  const priceCtx = await loadCustomerPriceContext(resolvedCustomerId ?? null);
 
   const employeeIds = [...new Set(appts.map(a => a.assignedEmployeeId || a.performedByEmployeeId).filter((id): id is number => id != null))];
   const employeeMap = new Map<number, { displayName: string }>();
@@ -268,8 +232,7 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
 
     for (const svc of apptServices) {
       const durationMinutes = Math.round(svc.actualDurationMinutes ?? svc.plannedDurationMinutes ?? 0);
-      const customerPrice = getCustomerPrice(svc.serviceId, apptDate);
-      const pricePer60Min = customerPrice ?? svc.defaultPriceCents;
+      const pricePer60Min = priceCtx.resolveById(svc.serviceId, apptDate)?.cents ?? null;
       if (pricePer60Min == null) {
         throw badRequest(`Kein Preis hinterlegt für Dienstleistung "${svc.serviceName || svc.serviceCode}". Bitte prüfen Sie den Dienstleistungskatalog.`);
       }
@@ -311,12 +274,12 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
     for (const kmEntry of kmEntries) {
       const kmSvc = kmServiceMap.get(kmEntry.code);
       if (!kmSvc) continue;
-      const kmCustomerPrice = getCustomerPrice(kmSvc.id, apptDate);
+      const kmCustomerPrice = priceCtx.resolveById(kmSvc.id, apptDate)?.cents ?? null;
       // Task #1033 — Kein stiller, festkodierter Kilometer-Fallback-Preis:
       // analog zum Stunden-Preis (oben) wird ein fehlender km-Satz als klarer
       // Konfigurationsfehler gemeldet statt mit einem irreführenden Default
       // (vorher `?? 35`) abgerechnet, der nicht zur Preisliste passt.
-      const pricePerKm = kmCustomerPrice ?? kmSvc.defaultPriceCents;
+      const pricePerKm = kmCustomerPrice;
       if (pricePerKm == null) {
         throw badRequest(`Kein Kilometer-Preis hinterlegt für "${kmSvc.name || kmEntry.code}". Bitte prüfen Sie den Dienstleistungskatalog.`);
       }

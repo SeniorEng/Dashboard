@@ -186,17 +186,9 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
       const serviceIds = serviceIdsParam.split(",").map(Number);
       const durations = serviceDurationsParam.split(",").map(Number);
 
-      const { sql: sqlTag } = await import("drizzle-orm");
-      const { db: dbInstance } = await import("../lib/db");
-      const cspResult = await dbInstance.execute(sqlTag`
-        SELECT service_id AS "serviceId", price_cents AS "priceCents"
-        FROM customer_service_prices
-        WHERE customer_id = ${customerId}
-          AND deleted_at IS NULL
-          AND valid_from::date <= ${date}::date
-          AND (valid_to IS NULL OR valid_to::date >= ${date}::date)
-      `);
-      const cspMap = new Map((cspResult.rows as any[]).map(r => [r.serviceId, r.priceCents]));
+      // Task #1291 — Preis-Auflösung ausschließlich über die `priceFor`-SSoT.
+      const { loadCustomerPriceContext } = await import("../storage/pricing/price-for");
+      const priceCtx = await loadCustomerPriceContext(customerId);
 
       const allServices = await serviceCatalogStorage.getServicesByIds(serviceIds);
       const serviceMap = new Map(allServices.map(s => [s.id, s]));
@@ -206,7 +198,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
         if (!service || !service.isBillable) continue;
         
         const durationMinutes = durations[i] || 0;
-        const effectivePrice = cspMap.get(service.id) ?? service.defaultPriceCents;
+        const effectivePrice = priceCtx.resolveById(service.id, date)?.cents ?? service.defaultPriceCents;
         let costCents = 0;
         if (service.unitType === "hours") {
           costCents = Math.round((durationMinutes / 60) * effectivePrice);

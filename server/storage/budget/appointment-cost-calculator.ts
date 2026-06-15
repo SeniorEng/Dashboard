@@ -1,8 +1,8 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { DbClient } from "./types";
-import { serviceCatalogStorage } from "../service-catalog";
 import { computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
+import { loadCustomerPriceContext } from "../pricing/price-for";
 
 /**
  * Task #875 — Geplante Mengen (Hauswirtschaft/Alltagsbegleitung-Minuten + km)
@@ -80,37 +80,21 @@ export async function calculateAppointmentCost(params: {
   customerKilometersCents: number;
   totalCents: number;
 }> {
-  const [hwService, abService, travelKmService, customerKmService] = await Promise.all([
-    serviceCatalogStorage.getServiceByCode("hauswirtschaft"),
-    serviceCatalogStorage.getServiceByCode("alltagsbegleitung"),
-    serviceCatalogStorage.getServiceByCode("travel_km"),
-    serviceCatalogStorage.getServiceByCode("customer_km"),
-  ]);
+  // Task #1291 — Preis-Auflösung ausschließlich über die `priceFor`-SSoT.
+  const priceCtx = await loadCustomerPriceContext(params.customerId);
+  const hwRes = priceCtx.resolveByCode("hauswirtschaft", params.date);
+  const abRes = priceCtx.resolveByCode("alltagsbegleitung", params.date);
+  const travelRes = priceCtx.resolveByCode("travel_km", params.date);
+  const customerKmRes = priceCtx.resolveByCode("customer_km", params.date);
 
-  if (!hwService && !abService && !travelKmService && !customerKmService) {
+  if (hwRes === null && abRes === null && travelRes === null && customerKmRes === null) {
     throw new Error(`Keine Preisvereinbarung für Kunde ${params.customerId} zum Datum ${params.date} gefunden`);
   }
 
-  const customerPrices = await db.execute(sql`
-    SELECT s.code AS "serviceCode", csp.price_cents AS "priceCents"
-    FROM customer_service_prices csp
-    INNER JOIN services s ON s.id = csp.service_id
-    WHERE csp.customer_id = ${params.customerId}
-      AND csp.deleted_at IS NULL
-      AND csp.valid_from::date <= ${params.date}::date
-      AND (csp.valid_to IS NULL OR csp.valid_to::date >= ${params.date}::date)
-  `);
-
-  const cpMap = new Map((customerPrices.rows as Array<{ serviceCode: string; priceCents: number }>).map(cp => [cp.serviceCode, cp.priceCents]));
-
-  const hauswirtschaftRateCents = cpMap.get("hauswirtschaft")
-    ?? ((hwService?.isBillable !== false) ? (hwService?.defaultPriceCents || 0) : 0);
-  const alltagsbegleitungRateCents = cpMap.get("alltagsbegleitung")
-    ?? ((abService?.isBillable !== false) ? (abService?.defaultPriceCents || 0) : 0);
-  const travelKmRateCents = cpMap.get("travel_km")
-    ?? ((travelKmService?.isBillable !== false) ? (travelKmService?.defaultPriceCents || 0) : 0);
-  const customerKmRateCents = cpMap.get("customer_km")
-    ?? ((customerKmService?.isBillable !== false) ? (customerKmService?.defaultPriceCents || 0) : 0);
+  const hauswirtschaftRateCents = hwRes?.cents ?? 0;
+  const alltagsbegleitungRateCents = abRes?.cents ?? 0;
+  const travelKmRateCents = travelRes?.cents ?? 0;
+  const customerKmRateCents = customerKmRes?.cents ?? 0;
 
   // Task #616 — Single Source of Truth: km-Cent via `computeKmLineTotalCents`,
   // damit Budget-Preview, Verbrauchsbuchung und Rechnungs-Line-Items (Task #561)
