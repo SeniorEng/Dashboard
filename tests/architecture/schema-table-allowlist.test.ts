@@ -105,6 +105,7 @@ const EXPECTED_TABLES: readonly string[] = [
   "password_reset_tokens",
   "payment_advice_items",
   "payment_advices",
+  "prices",
   "prospect_notes",
   "prospect_offers",
   "prospects",

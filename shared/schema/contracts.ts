@@ -2,6 +2,7 @@ import { pgTable, text, integer, serial, date, index } from "drizzle-orm/pg-core
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
+import { services } from "./services";
 import { users } from "./users";
 
 // ============================================
@@ -107,3 +108,63 @@ export const insertContractRateSchema = z.object({
 
 export type CustomerContractRate = typeof customerContractRates.$inferSelect;
 export type InsertContractRate = z.infer<typeof insertContractRateSchema>;
+
+// ============================================
+// KONSOLIDIERTE PREIS-TABELLE (Task #1301)
+// ============================================
+// `prices` ist die EINE zeitversionierte Preisquelle hinter der `priceFor`-SSoT
+// (`shared/domain/pricing/price-for.ts`). Sie ERSETZT mittelfristig die drei
+// getrennten Alt-Tabellen:
+//   - customer_service_prices  → scope="customer" (Kunden-Override pro Service)
+//   - customer_contract_rates  → scope="customer" (Vertrags-/Stundensatz pro Kunde)
+//   - service_rates            → scope="standard" (firmenweiter Standard)
+// In dieser Phase wird sie NUR additiv aufgebaut (befüllt + hinter einem
+// Default-OFF-Flag gelesen); die drei Alt-Tabellen bleiben unangetastet, bis der
+// Cutover (Task #1303) durch Alrik freigegeben wird.
+export const PRICE_SCOPES = ["standard", "customer"] as const;
+export type PriceScopeKind = typeof PRICE_SCOPES[number];
+
+// Herkunfts-Diskriminator für die NICHT-destruktive Parallel-Phase (Task #1301):
+// `prices` spiegelt additiv alle drei Alt-Tabellen. Solange noch parallel gelesen
+// wird, ersetzt diese Spalte die frühere Tabellen-IDENTITÄT als Provenienz —
+// damit der Vertragssatz-Pfad NUR seine eigenen (`customer_contract_rates`)
+// Zeilen anfasst und nicht versehentlich `customer_service_prices`-Zeilen
+// desselben (Kunde, Service) mitschließt/liest. Beim Cutover (#1303) entfällt die
+// Mehrfach-Herkunft je (Kunde, Service).
+export const PRICE_ORIGINS = ["service_rates", "customer_service_prices", "customer_contract_rates"] as const;
+export type PriceOriginKind = typeof PRICE_ORIGINS[number];
+
+export const prices = pgTable("prices", {
+  id: serial("id").primaryKey(),
+  // "standard" = firmenweit (customerId NULL) · "customer" = Kunden-Override.
+  scope: text("scope").notNull(),
+  // Alt-Tabellen-Herkunft (s. PRICE_ORIGINS) — Provenienz in der Parallel-Phase.
+  origin: text("origin").notNull(),
+  // NULL bei scope="standard"; gesetzt bei scope="customer".
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "cascade" }),
+  serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  // Integer-Cents (SSoT-Geldregel) — Existenz der Zeile gewinnt, auch cents=0.
+  cents: integer("cents").notNull(),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"), // null = offenes Ende (aktiv)
+  // Soft-Delete (verlustfreier Ersatz des customer_service_prices-Modells).
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("prices_scope_service_idx").on(table.scope, table.serviceId),
+  index("prices_customer_service_idx").on(table.customerId, table.serviceId),
+]);
+
+export const insertPriceSchema = z.object({
+  scope: z.enum(PRICE_SCOPES),
+  origin: z.enum(PRICE_ORIGINS),
+  customerId: z.number().int().nullable().optional(),
+  serviceId: z.number().int(),
+  cents: z.number().int().min(0, "Betrag darf nicht negativ sein"),
+  validFrom: z.string(),
+  validTo: z.string().nullable().optional(),
+});
+
+export type Price = typeof prices.$inferSelect;
+export type InsertPrice = z.infer<typeof insertPriceSchema>;

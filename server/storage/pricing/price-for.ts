@@ -11,8 +11,8 @@
  * `prices`-Tabelle freigegeben ist, fällt die Auflösung wertneutral vom
  * Kunden-Preis direkt auf den Katalog-Default — exakt das heutige Verhalten.
  */
-import { and, eq } from "drizzle-orm";
-import { customerServicePrices, services as servicesTable } from "@shared/schema";
+import { and, eq, isNull } from "drizzle-orm";
+import { customerServicePrices, prices, services as servicesTable } from "@shared/schema";
 import { db, type DbOrTx } from "../../lib/db";
 import { customerServicePricesRepo } from "../../repos";
 import {
@@ -37,6 +37,19 @@ function toDateStr(d: Date | string | null): string | null {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   return String(d).substring(0, 10);
+}
+
+/**
+ * Task #1301 — Default-OFF-Schalter für den Standard-Scope aus der konsolidierten
+ * `prices`-Tabelle. AUS (Default) ⇒ `standardRows` bleibt leer und die Auflösung
+ * fällt wertneutral vom Kunden-Preis direkt auf den Katalog-Default (= heutiges
+ * Live-Verhalten). EIN ⇒ der firmenweite Standard wird aus `prices`
+ * (scope="standard") gelesen. Muster identisch zu `BUDGET_HARD_HOLDS`; der
+ * Cutover (Task #1303) wird durch Alrik freigegeben.
+ */
+export function pricesStandardScopeEnabled(): boolean {
+  const v = (process.env.PRICES_STANDARD_SCOPE ?? "").trim().toLowerCase();
+  return v === "1" || v === "true";
 }
 
 /**
@@ -105,10 +118,37 @@ export async function loadCustomerPriceContext(
     }
   }
 
+  // Standard-Scope (firmenweit, zeitversioniert) — NUR wenn das Default-OFF-Flag
+  // aktiv ist; sonst leer (= heutiges Live-Verhalten). Quelle: konsolidierte
+  // `prices`-Tabelle (scope="standard"), gruppiert nach Service.
+  const standardByServiceId = new Map<number, VersionedPriceRow[]>();
+  if (pricesStandardScopeEnabled()) {
+    const stdRows = await tx
+      .select({
+        id: prices.id,
+        serviceId: prices.serviceId,
+        cents: prices.cents,
+        validFrom: prices.validFrom,
+        validTo: prices.validTo,
+      })
+      .from(prices)
+      .where(and(eq(prices.scope, "standard"), isNull(prices.deletedAt)));
+    for (const raw of stdRows) {
+      const list = standardByServiceId.get(raw.serviceId) ?? [];
+      list.push({
+        id: Number(raw.id),
+        priceCents: Number(raw.cents),
+        validFrom: toDateStr(raw.validFrom),
+        validTo: toDateStr(raw.validTo),
+      });
+      standardByServiceId.set(raw.serviceId, list);
+    }
+  }
+
   function resolveForServiceId(serviceId: number | undefined, catalog: PriceCatalogEntry | undefined, date: string): PriceResolution | null {
     const customerRows = serviceId != null ? (customerByServiceId.get(serviceId) ?? []) : [];
-    // Standard-Scope: Schatten-Hook, heute leer (siehe Modul-Doku).
-    return resolvePriceFor({ date, customerRows, standardRows: [], catalog });
+    const standardRows = serviceId != null ? (standardByServiceId.get(serviceId) ?? []) : [];
+    return resolvePriceFor({ date, customerRows, standardRows, catalog });
   }
 
   return {
