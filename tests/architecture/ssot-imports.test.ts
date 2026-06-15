@@ -107,6 +107,74 @@ export function detectReadinessDefinitionViolations(files: ScanFile[]): GuardVio
 }
 
 // ---------------------------------------------------------------------------
+// A2b — Readiness-Blocker-Aggregation (Definitions-Rand, struktureller Scan)
+// ---------------------------------------------------------------------------
+
+/**
+ * A2 oben erkennt eine zweite Readiness nur am FUNKTIONSNAMEN
+ * (`…MonthClosingReadiness`). Drift entsteht aber auch ohne diesen Namen: indem
+ * irgendwo die DREI Monatsabschluss-Blocker — offene Termine, fehlende
+ * Unterschriften, offene Zeiteinträge — erneut zu einer eigenen
+ * „abschließbar?"-Entscheidung zusammengebaut werden. Genau diese Aggregation
+ * IST die Readiness-Berechnung und lebt ausschließlich im SSoT-Modul.
+ *
+ * Dieser Detektor erkennt eine parallele Aggregation STRUKTURELL (nicht über den
+ * Namen): ein File außerhalb des SSoT-Moduls, das den Offene-Termine-Blocker
+ * (Status-Ausschluss `notInArray(… "completed"/"cancelled"/"customer_no_show")`)
+ * mit MINDESTENS einem weiteren Blocker-Signal kombiniert — der
+ * „fehlende Unterschrift"-Bedingung ODER der Zeiteinträge-Aktivitäts-Aggregation.
+ *
+ * Bewusst NICHT erfasst (orthogonale Frage „Monat zu?"): reine
+ * `isMonthClosed(...)` / `monthCloseCache`-Boolean-Lookups (z. B.
+ * `server/services/appointment-import-reconcile.ts`). Sie LESEN den bereits
+ * gefällten Abschluss-Status und bauen KEINE eigene Blocker-Aggregation — sie
+ * sind damit per Konstruktion ausgenommen (siehe A2b-Negativ-Test, der das
+ * explizit beweist).
+ */
+const READINESS_AGGREGATION_ALLOWLIST = new Set<string>([READINESS_CANONICAL]);
+
+/** Offene-Termine-Blocker: Status-Ausschluss über das „erledigt"-Triple. */
+function hasOpenAppointmentsBlocker(code: string): boolean {
+  const excludes = /\bnotInArray\b/.test(code) || /\bNOT\s+IN\b/i.test(code);
+  return (
+    excludes &&
+    /["']completed["']/.test(code) &&
+    /["']cancelled["']/.test(code) &&
+    /["']customer_no_show["']/.test(code)
+  );
+}
+
+/** „Fehlende Unterschrift"-Blocker-Bedingung (dokumentiert-SSoT-Prädikate). */
+const UNSIGNED_BLOCKER_RE =
+  /\b(?:appointmentCompletedButUnsignedCondition|completedButUnsignedSqlRaw|appointmentNotDocumentedAndSignedCondition|documentedAndSignedSqlRaw)\b/;
+
+/** Zeiteinträge-Aktivitäts-Aggregation. */
+const TIME_ENTRY_AGG_RE = /\b(?:employeeTimeEntries|employee_time_entries)\b/;
+
+export function detectReadinessAggregationViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (READINESS_AGGREGATION_ALLOWLIST.has(rel)) continue;
+    const code = stripComments(content);
+    if (!hasOpenAppointmentsBlocker(code)) continue;
+    const unsigned = UNSIGNED_BLOCKER_RE.test(code);
+    const timeEntries = TIME_ENTRY_AGG_RE.test(code);
+    if (!unsigned && !timeEntries) continue;
+    const signals = [
+      "Offene-Termine-Status-Ausschluss",
+      unsigned ? "„fehlende Unterschrift\u201c-Bedingung" : null,
+      timeEntries ? "Zeiteinträge-Aktivitäts-Aggregation" : null,
+    ].filter(Boolean).join(" + ");
+    out.push({
+      file: rel,
+      detail: `aggregiert Monatsabschluss-Blocker erneut (${signals}) außerhalb des Readiness-SSoT-Moduls`,
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // A3 — „Dokumentiert?"-SSoT (Query-Rand)
 // ---------------------------------------------------------------------------
 
@@ -214,6 +282,45 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
     const v = detectReadinessDefinitionViolations(synthetic);
     expect(v.length).toBeGreaterThan(0);
     expect(v[0].file).toBe("server/routes/fake-readiness.ts");
+  });
+
+  it("A2b: keine zweite Readiness-Blocker-Aggregation außerhalb des SSoT-Moduls", () => {
+    const v = detectReadinessAggregationViolations(readinessScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Readiness-SSoT verletzt — Monatsabschluss-Blocker außerhalb des SSoT-Moduls erneut aggregiert:\n" +
+          formatViolations(v) +
+          "\n\nDie Frage „abschließbar?\u201c (offene Termine + fehlende Unterschriften + " +
+          "Zeiteinträge-Aktivität) wird ausschließlich in " +
+          "server/storage/time-tracking/month-closing.ts beantwortet. Lies das Ergebnis " +
+          "über `get(Admin)MonthClosingReadiness`, statt die Blocker selbst zusammenzubauen. " +
+          "Reine `isMonthClosed`/`monthCloseCache`-Lookups (Frage „Monat zu?\u201c) sind hiervon " +
+          "ausgenommen.",
+      );
+    }
+  });
+
+  it("A2b (Negativ): eine eingeschleuste Blocker-Aggregation wird erkannt, reine isMonthClosed-Lookups nicht", () => {
+    const synthetic: ScanFile[] = [
+      {
+        rel: "server/routes/fake-readiness-aggregation.ts",
+        content:
+          `const open = await db.select().from(appointments).where(` +
+          `notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]));\n` +
+          `const unsigned = await db.select().from(appointments).where(appointmentCompletedButUnsignedCondition());\n` +
+          `const activity = await db.select().from(employeeTimeEntries);\n` +
+          `const ready = open.length === 0 && unsigned.length === 0 && activity.length > 0;`,
+      },
+      {
+        rel: "server/services/fake-month-closed-lookup.ts",
+        content:
+          `const monthCloseCache = new Map<string, boolean>();\n` +
+          `const closed = await isMonthClosed(employeeId, dateStr);\n` +
+          `if (closed) return;`,
+      },
+    ];
+    const v = detectReadinessAggregationViolations(synthetic);
+    expect(v.map((h) => h.file)).toEqual(["server/routes/fake-readiness-aggregation.ts"]);
   });
 
   it("A3: keine eigene `signature_data`-/`signatureData`-Bedingung außerhalb der dokumentiert-SSoT", () => {

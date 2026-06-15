@@ -35,6 +35,16 @@ silently skip and it NEVER overwrites appointment status. Auto-close logs
 (`APPOINTMENT_LOCKED`); month closed → 403 `forbidden("MONTH_CLOSED")`. The
 read-only `/:id/no-show-preview` stays a uniform 403 IDOR guard on purpose.
 
+**Architecture guard (two layers, `tests/architecture/ssot-imports.test.ts`):**
+A2 catches a second readiness by FUNCTION NAME (`…MonthClosingReadiness`); A2b
+catches a structural re-aggregation of the blockers WITHOUT that name. A2b keys on
+the open-appointments status-exclusion triple (`notInArray(... "completed" +
+"cancelled" + "customer_no_show")`) — which is UNIQUE to the SSoT module in the
+real tree — combined with at least one more blocker signal (the unsigned predicate
+or `employeeTimeEntries`). **How to apply:** any new file legitimately querying
+that status triple must be allowlisted in `READINESS_AGGREGATION_ALLOWLIST`; pure
+`isMonthClosed`/`monthCloseCache` lookups (orthogonal "Monat zu?") never trip it.
+
 **Facade-init fragility (services):** the scheduler must import the readiness
 functions DIRECTLY from the leaf `month-closing` module, NOT via the
 `timeTrackingStorage` object-literal facade (`server/storage/time-tracking.ts`).
