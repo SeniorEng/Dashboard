@@ -7,9 +7,6 @@ import { customers } from "./customers";
 export const SERVICE_UNIT_TYPES = ["hours", "kilometers", "flat"] as const;
 export type ServiceUnitType = typeof SERVICE_UNIT_TYPES[number];
 
-export const SYSTEM_SERVICE_CODES = ["travel_km", "customer_km"] as const;
-export type SystemServiceCode = typeof SYSTEM_SERVICE_CODES[number];
-
 export const services = pgTable("services", {
   id: serial("id").primaryKey(),
   code: text("code").unique(),
@@ -83,8 +80,6 @@ export const insertServiceSchema = z.object({
   sortOrder: z.number().int().default(0),
   budgetPots: z.array(z.enum(["entlastungsbetrag_45b", "umwandlung_45a", "ersatzpflege_39_42a"])).default([]),
 });
-
-export const updateServiceSchema = insertServiceSchema.partial();
 
 export type Service = typeof services.$inferSelect;
 export type InsertService = z.infer<typeof insertServiceSchema>;

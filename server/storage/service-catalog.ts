@@ -3,85 +3,40 @@ import { log } from "../lib/log";
 import {
   services,
   serviceBudgetPots,
-  SYSTEM_SERVICE_CODES,
   type Service,
-  type InsertService,
   type ServiceBudgetPot,
 } from "@shared/schema";
+import {
+  SERVICE_CATALOG,
+  SERVICE_CATALOG_CODES,
+} from "@shared/config/services";
 import { db } from "../lib/db";
-
-interface SystemServiceDefinition {
-  code: string;
-  name: string;
-  description: string;
-  unitType: string;
-  defaultPriceCents: number;
-  vatRate: number;
-  isBillable: boolean;
-  employeeRateCents: number;
-  sortOrder: number;
-  budgetPots: string[];
-}
-
-const SYSTEM_SERVICE_DEFINITIONS: SystemServiceDefinition[] = [
-  {
-    code: "travel_km",
-    name: "Anfahrtskilometer",
-    description: "Kilometer für die Anfahrt zum Kunden",
-    unitType: "kilometers",
-    defaultPriceCents: 30,
-    vatRate: 19,
-    isBillable: true,
-    employeeRateCents: 30,
-    sortOrder: 90,
-    budgetPots: ["entlastungsbetrag_45b", "umwandlung_45a"],
-  },
-  {
-    code: "customer_km",
-    name: "Kundenkilometer",
-    description: "Kilometer mit/für den Kunden gefahren",
-    unitType: "kilometers",
-    defaultPriceCents: 30,
-    vatRate: 19,
-    isBillable: true,
-    employeeRateCents: 30,
-    sortOrder: 91,
-    budgetPots: ["entlastungsbetrag_45b", "umwandlung_45a"],
-  },
-  {
-    code: "erstberatung",
-    name: "Erstberatung",
-    description: "Erstberatung für neue Kunden",
-    unitType: "hours",
-    defaultPriceCents: 0,
-    vatRate: 19,
-    isBillable: false,
-    employeeRateCents: 2000,
-    sortOrder: 0,
-    budgetPots: [],
-  },
-];
 
 interface IServiceCatalogStorage {
   getAllServices(includeInactive?: boolean): Promise<Service[]>;
   getServiceById(id: number): Promise<Service | null>;
   getServicesByIds(ids: number[]): Promise<Service[]>;
   getServiceByCode(code: string): Promise<Service | null>;
-  createService(data: InsertService): Promise<Service>;
-  updateService(id: number, data: Partial<InsertService>): Promise<Service | null>;
   getServiceBudgetPots(serviceId: number): Promise<ServiceBudgetPot[]>;
   getAllServiceBudgetPots(): Promise<ServiceBudgetPot[]>;
-  ensureSystemServices(): Promise<void>;
+  syncServiceCatalog(): Promise<void>;
 }
 
 class ServiceCatalogStorage implements IServiceCatalogStorage {
   async getAllServices(includeInactive = false): Promise<Service[]> {
-    if (includeInactive) {
-      return db.select().from(services).orderBy(asc(services.name));
-    }
-    return db.select().from(services)
-      .where(eq(services.isActive, true))
-      .orderBy(asc(services.name));
+    const rows = includeInactive
+      ? await db.select().from(services).orderBy(asc(services.name))
+      : await db.select().from(services)
+          .where(eq(services.isActive, true))
+          .orderBy(asc(services.name));
+    // Die Konfig (`shared/config/services.ts`) ist die EINZIGE Quelle. DB-Extras
+    // (etwa FK-referenzierte Alt-Datensätze, die der Startup-Sync nicht löschen
+    // darf, sondern als "Startfehler" loggt) werden hier NIE ausgeliefert —
+    // Katalog-Listen enthalten by construction ausschließlich Konfig-Services.
+    // `getServiceById/byIds/byCode` bleiben bewusst ungefiltert, damit
+    // bestehende Appointment-/Preis-FKs auf solche Alt-Datensätze intakt bleiben.
+    const allowed = new Set<string>(SERVICE_CATALOG_CODES);
+    return rows.filter((s) => s.code !== null && allowed.has(s.code));
   }
 
   async getServiceById(id: number): Promise<Service | null> {
@@ -99,84 +54,6 @@ class ServiceCatalogStorage implements IServiceCatalogStorage {
     return result[0] || null;
   }
 
-  async createService(data: InsertService): Promise<Service> {
-    const { budgetPots, ...serviceData } = data;
-    const [service] = await db.insert(services).values({
-      code: serviceData.code ?? null,
-      name: serviceData.name,
-      description: serviceData.description ?? null,
-      unitType: serviceData.unitType,
-      defaultPriceCents: serviceData.defaultPriceCents,
-      vatRate: serviceData.vatRate ?? 19,
-      minDurationMinutes: serviceData.minDurationMinutes ?? null,
-      isActive: serviceData.isActive ?? true,
-      isBillable: serviceData.isBillable ?? true,
-      employeeRateCents: serviceData.employeeRateCents ?? 0,
-      sortOrder: serviceData.sortOrder ?? 0,
-    }).returning();
-
-    if (budgetPots && budgetPots.length > 0) {
-      await db.insert(serviceBudgetPots).values(
-        budgetPots.map(budgetType => ({
-          serviceId: service.id,
-          budgetType,
-        }))
-      );
-    }
-
-    return service;
-  }
-
-  async updateService(id: number, data: Partial<InsertService>): Promise<Service | null> {
-    const existing = await this.getServiceById(id);
-    if (!existing) return null;
-
-    const { budgetPots, ...rest } = data;
-    const updateData: Record<string, unknown> = {};
-
-    if (existing.isSystem) {
-      if (rest.defaultPriceCents !== undefined) updateData.defaultPriceCents = rest.defaultPriceCents;
-      if (rest.vatRate !== undefined) updateData.vatRate = rest.vatRate;
-      if (rest.isBillable !== undefined) updateData.isBillable = rest.isBillable;
-      if (rest.employeeRateCents !== undefined) updateData.employeeRateCents = rest.employeeRateCents;
-      if (rest.description !== undefined) updateData.description = rest.description;
-    } else {
-      if (rest.name !== undefined) updateData.name = rest.name;
-      if (rest.description !== undefined) updateData.description = rest.description;
-      if (rest.unitType !== undefined) updateData.unitType = rest.unitType;
-      if (rest.defaultPriceCents !== undefined) updateData.defaultPriceCents = rest.defaultPriceCents;
-      if (rest.vatRate !== undefined) updateData.vatRate = rest.vatRate;
-      if (rest.minDurationMinutes !== undefined) updateData.minDurationMinutes = rest.minDurationMinutes;
-      if (rest.isActive !== undefined) updateData.isActive = rest.isActive;
-      if (rest.isBillable !== undefined) updateData.isBillable = rest.isBillable;
-      if (rest.employeeRateCents !== undefined) updateData.employeeRateCents = rest.employeeRateCents;
-      if (rest.sortOrder !== undefined) updateData.sortOrder = rest.sortOrder;
-      if (rest.code !== undefined) updateData.code = rest.code;
-    }
-
-    let updated: Service | null = null;
-    if (Object.keys(updateData).length > 0) {
-      const [result] = await db.update(services).set(updateData).where(eq(services.id, id)).returning();
-      updated = result || null;
-    } else {
-      updated = existing;
-    }
-
-    if (budgetPots !== undefined && updated) {
-      await db.delete(serviceBudgetPots).where(eq(serviceBudgetPots.serviceId, id));
-      if (budgetPots.length > 0) {
-        await db.insert(serviceBudgetPots).values(
-          budgetPots.map(budgetType => ({
-            serviceId: id,
-            budgetType,
-          }))
-        );
-      }
-    }
-
-    return updated;
-  }
-
   async getServiceBudgetPots(serviceId: number): Promise<ServiceBudgetPot[]> {
     return db.select().from(serviceBudgetPots).where(eq(serviceBudgetPots.serviceId, serviceId));
   }
@@ -185,36 +62,80 @@ class ServiceCatalogStorage implements IServiceCatalogStorage {
     return db.select().from(serviceBudgetPots);
   }
 
-  async ensureSystemServices(): Promise<void> {
-    for (const def of SYSTEM_SERVICE_DEFINITIONS) {
+  /**
+   * Gleicht die `services`-Tabelle gegen die EINZIGE Quelle
+   * (`shared/config/services.ts`) ab: fehlende Katalog-Services werden angelegt,
+   * vorhandene werden auf die Konfig-Attribute (inkl. Budget-Töpfe) gehoben — die
+   * Konfig ist autoritativ. Anschließend wird auf Abweichungen geprüft: jeder
+   * DB-Service, der NICHT in der Konfig steht (oder ohne Code), ist ein
+   * Startfehler — neue Services entstehen nur per Code-Änderung mit Review.
+   */
+  async syncServiceCatalog(): Promise<void> {
+    for (const def of SERVICE_CATALOG) {
       const existing = await this.getServiceByCode(def.code);
-      if (!existing) {
-        const [service] = await db.insert(services).values({
-          code: def.code,
-          name: def.name,
-          description: def.description,
-          unitType: def.unitType,
-          defaultPriceCents: def.defaultPriceCents,
-          vatRate: def.vatRate,
-          isActive: true,
-          isSystem: true,
-          isBillable: def.isBillable,
-          employeeRateCents: def.employeeRateCents,
-          sortOrder: def.sortOrder,
-        }).returning();
+      const values = {
+        code: def.code,
+        name: def.name,
+        description: def.description,
+        unitType: def.unitType,
+        defaultPriceCents: def.defaultPriceCents,
+        vatRate: def.vatRate,
+        minDurationMinutes: def.minDurationMinutes,
+        isActive: true,
+        isDefault: def.isDefault,
+        isSystem: def.isSystem,
+        isBillable: def.isBillable,
+        employeeRateCents: def.employeeRateCents,
+        lohnartKategorie: def.lohnartKategorie,
+        sortOrder: def.sortOrder,
+      };
 
-        if (def.budgetPots.length > 0) {
-          await db.insert(serviceBudgetPots).values(
-            def.budgetPots.map(budgetType => ({
-              serviceId: service.id,
-              budgetType,
-            }))
-          );
-        }
-        log(`System-Service "${def.name}" (${def.code}) angelegt.`, "startup");
-      } else if (!existing.isSystem) {
-        await db.update(services).set({ isSystem: true }).where(eq(services.id, existing.id));
-        log(`Service "${def.name}" (${def.code}) als System-Service markiert.`, "startup");
+      let serviceId: number;
+      if (!existing) {
+        const [created] = await db.insert(services).values(values).returning();
+        serviceId = created.id;
+        log(`Katalog-Service "${def.name}" (${def.code}) angelegt.`, "startup");
+      } else {
+        serviceId = existing.id;
+        await db.update(services).set(values).where(eq(services.id, existing.id));
+      }
+      await this.reconcileBudgetPots(serviceId, def.budgetPots);
+    }
+
+    const all = await db.select({
+      id: services.id,
+      code: services.code,
+      name: services.name,
+    }).from(services);
+    const extras = all.filter((s) => !s.code || !SERVICE_CATALOG_CODES.includes(s.code));
+    if (extras.length > 0) {
+      const details = extras
+        .map((e) => `#${e.id} "${e.name}" (${e.code ?? "ohne Code"})`)
+        .join(", ");
+      throw new Error(
+        `Service-Katalog-Abweichung: ${extras.length} Service(s) in der DB sind nicht in ` +
+          `shared/config/services.ts definiert: ${details}. Neue Services entstehen nur durch ` +
+          `eine Code-Änderung mit Review — bitte die Konfiguration ergänzen oder die DB bereinigen.`,
+      );
+    }
+  }
+
+  private async reconcileBudgetPots(serviceId: number, desired: readonly string[]): Promise<void> {
+    const existing = await db.select().from(serviceBudgetPots)
+      .where(eq(serviceBudgetPots.serviceId, serviceId));
+    const existingTypes = new Set(existing.map((p) => p.budgetType));
+    const desiredSet = new Set(desired);
+
+    const toAdd = desired.filter((d) => !existingTypes.has(d));
+    if (toAdd.length > 0) {
+      await db.insert(serviceBudgetPots).values(
+        toAdd.map((budgetType) => ({ serviceId, budgetType })),
+      );
+    }
+
+    for (const p of existing) {
+      if (!desiredSet.has(p.budgetType)) {
+        await db.delete(serviceBudgetPots).where(eq(serviceBudgetPots.id, p.id));
       }
     }
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { apiPost, apiPatch, apiDelete, uniqueId, createTestCustomer, cleanupCustomer } from "./test-utils";
+import { apiGet, apiPost, apiPatch, apiDelete, createTestCustomer, cleanupCustomer } from "./test-utils";
 import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
 
@@ -33,14 +33,12 @@ describe("Kundenpreis-Audit ohne Rechnungsbezug (Task #836)", () => {
   }
 
   beforeAll(async () => {
-    const svcRes = await apiPost<any>("/api/services", {
-      name: "QS-Audit-NoInvoice_" + uniqueId(),
-      unitType: "hours",
-      defaultPriceCents: 5000,
-      vatRate: 19,
-    });
-    expect(svcRes.status).toBe(201);
-    svcId = svcRes.data.id;
+    // Phase 3.4: Katalog ist konfigurationsgesteuert — keine POST /api/services
+    // mehr. Wir nutzen die vom Startup-Sync geseedete 'hauswirtschaft'-Leistung.
+    const { data } = await apiGet<any[]>("/api/services");
+    const hw = data.find((s) => s.code === "hauswirtschaft");
+    expect(hw, "Katalog-Leistung 'hauswirtschaft' muss vorhanden sein").toBeDefined();
+    svcId = hw.id as number;
 
     const cust = await createTestCustomer();
     custId = cust.id;
@@ -50,11 +48,6 @@ describe("Kundenpreis-Audit ohne Rechnungsbezug (Task #836)", () => {
     try {
       for (const pid of createdPriceIds) {
         await db.execute(sql`UPDATE customer_service_prices SET deleted_at = NOW() WHERE id = ${pid}`);
-      }
-    } catch {}
-    try {
-      if (svcId) {
-        await db.execute(sql`UPDATE services SET is_active = false WHERE id = ${svcId}`);
       }
     } catch {}
     await cleanupCustomer(custId);

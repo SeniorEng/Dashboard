@@ -17,20 +17,3 @@ export interface ServiceWithPots {
   budgetPots: string[];
   createdAt: string;
 }
-
-export interface ServiceFormData {
-  name: string;
-  code: string;
-  description: string;
-  unitType: string;
-  defaultPriceCents: string;
-  vatRate: string;
-  minDurationMinutes: string;
-  isBillable: boolean;
-  employeeRateCents: string;
-  lohnartKategorie: string;
-  budgetPots: string[];
-  isDefault: boolean;
-  isActive: boolean;
-  sortOrder: string;
-}

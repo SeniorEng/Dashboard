@@ -298,9 +298,9 @@ async function runStartupTasks() {
 
     const { serviceCatalogStorage } = await import("./storage/service-catalog");
     try {
-      await serviceCatalogStorage.ensureSystemServices();
+      await serviceCatalogStorage.syncServiceCatalog();
     } catch (err) {
-      log(`System-Services-Seed fehlgeschlagen: ${err}`, "startup");
+      log(`Service-Katalog-Sync fehlgeschlagen (Startfehler): ${err}`, "startup");
     }
 
     const { documentStorage } = await import("./storage/documents");

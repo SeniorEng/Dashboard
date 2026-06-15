@@ -8,7 +8,7 @@
  * äußeren try/catch, bricht eine einzige Exception die GANZE Restkette ab —
  * der Server bootet trotzdem und bedient gegen ein halb-migriertes Schema.
  * Vier Schritte waren historisch nicht einzeln gewrappt:
- *   - serviceCatalogStorage.ensureSystemServices()
+ *   - serviceCatalogStorage.syncServiceCatalog()
  *   - documentStorage.ensureCustomerDocumentTypes()
  *   - dropAppointmentsServiceTypeColumn()
  *   - importPflegekassen()
@@ -26,7 +26,7 @@ const INDEX_TS = join(process.cwd(), "server", "index.ts");
 
 /** Schritt-Aufrufe, die einzeln (eigener try/catch) abgesichert sein MÜSSEN. */
 const GUARDED_STEP_CALLS = [
-  "await serviceCatalogStorage.ensureSystemServices()",
+  "await serviceCatalogStorage.syncServiceCatalog()",
   "await documentStorage.ensureCustomerDocumentTypes()",
   "await dropAppointmentsServiceTypeColumn()",
   "await importPflegekassen()",

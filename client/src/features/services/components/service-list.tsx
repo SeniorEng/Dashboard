@@ -1,8 +1,6 @@
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/patterns/status-badge";
-import { Plus, Pencil, Loader2, ClipboardList } from "lucide-react";
-import { iconSize, componentStyles } from "@/design-system";
+import { Loader2, ClipboardList } from "lucide-react";
 import { formatCurrency } from "@shared/utils/format";
 import type { ServiceWithPots } from "../types";
 import { UNIT_TYPE_LABELS, UNIT_SUFFIX } from "../constants";
@@ -11,11 +9,9 @@ import { formatPrice } from "../utils";
 interface ServiceListProps {
   services: ServiceWithPots[] | undefined;
   isLoading: boolean;
-  onCreate: () => void;
-  onEdit: (service: ServiceWithPots) => void;
 }
 
-export function ServiceList({ services, isLoading, onCreate, onEdit }: ServiceListProps) {
+export function ServiceList({ services, isLoading }: ServiceListProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -29,11 +25,7 @@ export function ServiceList({ services, isLoading, onCreate, onEdit }: ServiceLi
       <Card>
         <CardContent className="py-12 text-center">
           <ClipboardList className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-          <p className="text-gray-500 mb-4">Noch keine Dienstleistungen angelegt</p>
-          <Button onClick={onCreate} className={componentStyles.btnPrimary} data-testid="button-add-first-service">
-            <Plus className={`${iconSize.sm} mr-1`} />
-            Dienstleistung hinzufügen
-          </Button>
+          <p className="text-gray-500">Keine Dienstleistungen vorhanden</p>
         </CardContent>
       </Card>
     );
@@ -46,8 +38,7 @@ export function ServiceList({ services, isLoading, onCreate, onEdit }: ServiceLi
         return (
           <Card
             key={service.id}
-            className={`cursor-pointer border ${!service.isActive ? "opacity-60" : ""}`}
-            onClick={() => onEdit(service)}
+            className={`border ${!service.isActive ? "opacity-60" : ""}`}
             data-testid={`card-service-${service.id}`}
           >
             <CardContent className="py-4">
@@ -88,7 +79,6 @@ export function ServiceList({ services, isLoading, onCreate, onEdit }: ServiceLi
                     <p className="text-xs text-gray-500 mt-1 truncate" data-testid={`text-description-${service.id}`}>{service.description}</p>
                   )}
                 </div>
-                <Pencil className={`${iconSize.sm} text-gray-500 shrink-0`} />
               </div>
             </CardContent>
           </Card>

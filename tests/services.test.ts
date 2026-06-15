@@ -1,18 +1,38 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
-  getAuthCookie,
   apiGet,
   apiPost,
   apiPut,
   apiDelete,
-  uniqueId,
   getFutureDate,
+  createTestCustomer,
+  cleanupCustomer,
 } from "./test-utils";
+import { SERVICE_CATALOG_CODES } from "@shared/config/services";
 
-let createdServiceId: number;
+// Phase 3.4: Der Dienstleistungskatalog ist konfigurationsgesteuert
+// (`shared/config/services.ts`). Es gibt keinen API-Schreibweg mehr — Anlage/
+// Änderung passiert ausschließlich per Code-Änderung + Startup-Sync. Die Tests
+// arbeiten daher gegen die vom Katalog geseedete `hauswirtschaft`-Leistung
+// statt eine eigene Wegwerf-Leistung anzulegen.
+let hauswirtschaftId: number;
 let createdOverrideId: number;
-let testServiceName: string;
 let firstCustomerId: number;
+
+beforeAll(async () => {
+  const { status, data } = await apiGet<any[]>("/api/services");
+  expect(status).toBe(200);
+  const hw = data.find((s) => s.code === "hauswirtschaft");
+  expect(hw, "Katalog-Leistung 'hauswirtschaft' muss vom Startup-Sync vorhanden sein").toBeDefined();
+  hauswirtschaftId = hw.id;
+
+  // Dedizierter Test-Kunde: die Sonderpreis-Tests dürfen nicht auf vorab
+  // existierende Kunden bauen (frische Wegwerf-DB hat keine) und müssen gegen
+  // Quer-Kontamination anderer Test-Dateien isoliert sein, da der Katalog-
+  // Service 'hauswirtschaft' nun geteilt ist.
+  const cust = await createTestCustomer();
+  firstCustomerId = cust.id;
+});
 
 afterAll(async () => {
   try {
@@ -20,11 +40,7 @@ afterAll(async () => {
       await apiDelete(`/api/customers/${firstCustomerId}/service-prices/${createdOverrideId}`);
     }
   } catch {}
-  try {
-    if (createdServiceId) {
-      await apiPut(`/api/services/${createdServiceId}`, { isActive: true });
-    }
-  } catch {}
+  await cleanupCustomer(firstCustomerId);
 });
 
 describe("Dienstleistungskatalog", () => {
@@ -51,120 +67,60 @@ describe("Dienstleistungskatalog", () => {
       expect(Array.isArray(data)).toBe(true);
       expect(data.length).toBeGreaterThan(0);
     });
+
+    it("sollte deckungsgleich mit dem konfigurierten Katalog sein (keine Fremd-/Fehl-Leistungen)", async () => {
+      const { status, data } = await apiGet<any[]>("/api/services/all");
+      expect(status).toBe(200);
+      const dbCodes = data.map((s: any) => s.code).filter((c: any): c is string => !!c).sort();
+      const configCodes = [...SERVICE_CATALOG_CODES].sort();
+      expect(dbCodes).toEqual(configCodes);
+      // Es darf keine Leistung ohne code (Alt-/Fremddaten) übrig sein.
+      expect(data.every((s: any) => !!s.code)).toBe(true);
+    });
   });
 
-  describe("POST /api/services", () => {
-    it("sollte eine neue Dienstleistung erstellen", async () => {
-      testServiceName = "QS-Test-Service_" + uniqueId();
+  describe("Schreibwege gesperrt (konfigurationsgesteuerter Katalog)", () => {
+    it("POST /api/services liefert 403 SERVICE_CATALOG_READONLY", async () => {
       const { status, data } = await apiPost<any>("/api/services", {
-        name: testServiceName,
+        name: "QS-Test-Service",
         unitType: "hours",
         defaultPriceCents: 5000,
         vatRate: 19,
       });
-      expect(status).toBe(201);
-      expect(data).toHaveProperty("id");
-      expect(data.name).toBe(testServiceName);
-      expect(data.unitType).toBe("hours");
-      expect(data.defaultPriceCents).toBe(5000);
-      expect(data.vatRate).toBe(19);
-      expect(data.isActive).toBe(true);
-      createdServiceId = data.id;
+      expect(status).toBe(403);
+      expect(data?.error).toBe("SERVICE_CATALOG_READONLY");
+      expect(typeof data?.message).toBe("string");
     });
-  });
 
-  describe("PUT /api/services/:id", () => {
-    it("sollte Name und Preis einer Dienstleistung aktualisieren", async () => {
-      const updatedName = "QS-Test-Service-Updated_" + uniqueId();
-      const { status, data } = await apiPut<any>(`/api/services/${createdServiceId}`, {
-        name: updatedName,
+    it("PUT /api/services/:id liefert 403 SERVICE_CATALOG_READONLY", async () => {
+      const { status, data } = await apiPut<any>(`/api/services/${hauswirtschaftId}`, {
+        name: "QS-Test-Service-Updated",
         defaultPriceCents: 7500,
       });
-      expect(status).toBe(200);
-      expect(data.name).toBe(updatedName);
-      expect(data.defaultPriceCents).toBe(7500);
-      testServiceName = updatedName;
-    });
-
-    it("sollte eine Dienstleistung deaktivieren können", async () => {
-      const { status, data } = await apiPut<any>(`/api/services/${createdServiceId}`, {
-        isActive: false,
-      });
-      expect(status).toBe(200);
-      expect(data.isActive).toBe(false);
-    });
-  });
-
-  describe("Deaktivierte Dienstleistung filtern", () => {
-    it("GET /api/services sollte die deaktivierte Dienstleistung NICHT enthalten", async () => {
-      const { status, data } = await apiGet<any[]>("/api/services");
-      expect(status).toBe(200);
-      const found = data.find((s: any) => s.id === createdServiceId);
-      expect(found).toBeUndefined();
-    });
-
-    it("GET /api/services/all sollte die deaktivierte Dienstleistung enthalten", async () => {
-      const { status, data } = await apiGet<any[]>("/api/services/all");
-      expect(status).toBe(200);
-      const found = data.find((s: any) => s.id === createdServiceId);
-      expect(found).toBeDefined();
-      expect(found.isActive).toBe(false);
-    });
-  });
-
-  describe("Service-Katalog: Preis 0 erlauben, negativ ablehnen (Task #563)", () => {
-    it("erlaubt defaultPriceCents = 0 bei Anlage", async () => {
-      const name = "QS-Test-Service-Zero_" + uniqueId();
-      const { status, data } = await apiPost<any>("/api/services", {
-        name,
-        unitType: "hours",
-        defaultPriceCents: 0,
-        vatRate: 19,
-      });
-      expect(status).toBe(201);
-      expect(data.defaultPriceCents).toBe(0);
-      try {
-        await apiPut(`/api/services/${data.id}`, { isActive: false });
-      } catch {}
-    });
-
-    it("lehnt defaultPriceCents = -1 mit 400 ab", async () => {
-      const name = "QS-Test-Service-Negative_" + uniqueId();
-      const { status } = await apiPost<any>("/api/services", {
-        name,
-        unitType: "hours",
-        defaultPriceCents: -1,
-        vatRate: 19,
-      });
-      expect(status).toBe(400);
+      expect(status).toBe(403);
+      expect(data?.error).toBe("SERVICE_CATALOG_READONLY");
     });
   });
 
   describe("Kunden-Sonderpreise mit Preis 0 (Task #563)", () => {
     it("akzeptiert priceCents=0 (kostenlose Leistung für diesen Kunden)", async () => {
-      await apiPut(`/api/services/${createdServiceId}`, { isActive: true });
-      const customersRes = await apiGet<any[]>("/api/customers");
-      expect(customersRes.status).toBe(200);
-      const custId = customersRes.data[0].id;
       const futureDate = getFutureDate(120);
       const { status, data } = await apiPost<any>(
-        `/api/customers/${custId}/service-prices`,
-        { serviceId: createdServiceId, priceCents: 0, validFrom: futureDate },
+        `/api/customers/${firstCustomerId}/service-prices`,
+        { serviceId: hauswirtschaftId, priceCents: 0, validFrom: futureDate },
       );
       expect(status).toBe(200);
       expect(data.priceCents).toBe(0);
       try {
-        await apiDelete(`/api/customers/${custId}/service-prices/${data.id}`);
+        await apiDelete(`/api/customers/${firstCustomerId}/service-prices/${data.id}`);
       } catch {}
     });
 
     it("lehnt priceCents=-1 mit 400 weiterhin ab", async () => {
-      const customersRes = await apiGet<any[]>("/api/customers");
-      const custId = customersRes.data[0].id;
       const futureDate = getFutureDate(125);
       const { status } = await apiPost<any>(
-        `/api/customers/${custId}/service-prices`,
-        { serviceId: createdServiceId, priceCents: -1, validFrom: futureDate },
+        `/api/customers/${firstCustomerId}/service-prices`,
+        { serviceId: hauswirtschaftId, priceCents: -1, validFrom: futureDate },
       );
       expect(status).toBe(400);
     });
@@ -172,18 +128,11 @@ describe("Dienstleistungskatalog", () => {
 
   describe("Kunden-Sonderpreise", () => {
     it("sollte einen Sonderpreis für den ersten Kunden anlegen", async () => {
-      await apiPut(`/api/services/${createdServiceId}`, { isActive: true });
-
-      const customersRes = await apiGet<any[]>("/api/customers");
-      expect(customersRes.status).toBe(200);
-      expect(customersRes.data.length).toBeGreaterThan(0);
-      firstCustomerId = customersRes.data[0].id;
-
       const futureDate = getFutureDate(30);
       const { status, data } = await apiPost<any>(
         `/api/customers/${firstCustomerId}/service-prices`,
         {
-          serviceId: createdServiceId,
+          serviceId: hauswirtschaftId,
           priceCents: 3500,
           validFrom: futureDate,
         }
@@ -191,7 +140,7 @@ describe("Dienstleistungskatalog", () => {
       expect(status).toBe(200);
       expect(data).toHaveProperty("id");
       expect(data.priceCents).toBe(3500);
-      expect(data.serviceId).toBe(createdServiceId);
+      expect(data.serviceId).toBe(hauswirtschaftId);
       expect(data.customerId).toBe(firstCustomerId);
       createdOverrideId = data.id;
     });
@@ -215,7 +164,7 @@ describe("Dienstleistungskatalog", () => {
       );
       expect(status).toBe(200);
       expect(Array.isArray(data)).toBe(true);
-      const resolved = data.find((p: any) => p.serviceId === createdServiceId);
+      const resolved = data.find((p: any) => p.serviceId === hauswirtschaftId);
       expect(resolved).toBeDefined();
       expect(resolved.priceCents).toBe(3500);
     });
@@ -226,14 +175,14 @@ describe("Dienstleistungskatalog", () => {
       const conflictDate = getFutureDate(45);
       const first = await apiPost<any>(
         `/api/customers/${firstCustomerId}/service-prices`,
-        { serviceId: createdServiceId, priceCents: 4200, validFrom: conflictDate }
+        { serviceId: hauswirtschaftId, priceCents: 4200, validFrom: conflictDate }
       );
       expect(first.status).toBe(200);
       const firstId = first.data.id as number;
 
       const conflict = await apiPost<any>(
         `/api/customers/${firstCustomerId}/service-prices`,
-        { serviceId: createdServiceId, priceCents: 4900, validFrom: conflictDate }
+        { serviceId: hauswirtschaftId, priceCents: 4900, validFrom: conflictDate }
       );
       expect(conflict.status).toBe(409);
       expect(conflict.data?.code).toBe("PRICE_CONFLICT");
@@ -249,7 +198,7 @@ describe("Dienstleistungskatalog", () => {
 
       const replace = await apiPost<any>(
         `/api/customers/${firstCustomerId}/service-prices`,
-        { serviceId: createdServiceId, priceCents: 4900, validFrom: conflictDate, confirmReplace: true }
+        { serviceId: hauswirtschaftId, priceCents: 4900, validFrom: conflictDate, confirmReplace: true }
       );
       expect(replace.status).toBe(200);
       expect(replace.data.priceCents).toBe(4900);
@@ -273,7 +222,7 @@ describe("Dienstleistungskatalog", () => {
       expect(replaceEntry, "Audit-Log muss Eintrag für ersetzten Preis enthalten").toBeDefined();
       expect(replaceEntry.metadata.oldPriceCents).toBe(4200);
       expect(replaceEntry.metadata.newPriceCents).toBe(4900);
-      expect(replaceEntry.metadata.serviceId).toBe(createdServiceId);
+      expect(replaceEntry.metadata.serviceId).toBe(hauswirtschaftId);
 
       await apiDelete(`/api/customers/${firstCustomerId}/service-prices/${newId}`);
     });
@@ -283,11 +232,11 @@ describe("Dienstleistungskatalog", () => {
       const [r1, r2] = await Promise.all([
         apiPost<any>(
           `/api/customers/${firstCustomerId}/service-prices`,
-          { serviceId: createdServiceId, priceCents: 6100, validFrom: conflictDate }
+          { serviceId: hauswirtschaftId, priceCents: 6100, validFrom: conflictDate }
         ),
         apiPost<any>(
           `/api/customers/${firstCustomerId}/service-prices`,
-          { serviceId: createdServiceId, priceCents: 6200, validFrom: conflictDate }
+          { serviceId: hauswirtschaftId, priceCents: 6200, validFrom: conflictDate }
         ),
       ]);
       const successes = [r1, r2].filter((r) => r.status === 200);
@@ -300,7 +249,7 @@ describe("Dienstleistungskatalog", () => {
         `/api/customers/${firstCustomerId}/service-prices/all`
       );
       const activeSameDay = after.data.filter(
-        (p: any) => p.serviceId === createdServiceId && String(p.validFrom).startsWith(conflictDate)
+        (p: any) => p.serviceId === hauswirtschaftId && String(p.validFrom).startsWith(conflictDate)
       );
       expect(activeSameDay.length, "Höchstens ein aktiver Preis pro Stichtag").toBe(1);
 

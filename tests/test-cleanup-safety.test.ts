@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { eq, inArray } from "drizzle-orm";
 import {
   apiGet,
   apiPost,
@@ -9,6 +10,8 @@ import {
   createTestCustomer,
   assignEmployeeToCustomer,
 } from "./test-utils";
+import { db } from "../server/lib/db";
+import { services } from "@shared/schema";
 
 // ---------------------------------------------------------------------------
 // Task #796: Guard-Test für die Sicherheits-Filter des Test-Daten-Cleanups.
@@ -213,35 +216,36 @@ describe("CLEAN-1: Test-Cleanup-Filter löschen niemals echte Datensätze", () =
   it("CLEAN-1.4 – purge-test-services löscht nur Test-Services (inkl. tlsicht/tlwrite), echte werden abgelehnt", async () => {
     const sfx = realSuffix();
 
+    // Der Service-Katalog ist konfigurationsgesteuert (POST /api/services → 403),
+    // daher werden die Fixtures direkt in die DB geseedet. Sie sind bewusst
+    // KEINE Konfig-Services (Code null) — genau der Fall, den die Purge-Route
+    // anhand der Namens-Pattern unterscheiden muss.
     // Echter Service: Name trifft KEIN Test-Pattern.
-    const realRes = await apiPost<{ id: number; name: string }>("/api/services", {
+    const [realRow] = await db.insert(services).values({
       name: `Echtleistung ${sfx}`,
       unitType: "hours",
       defaultPriceCents: 3500,
       isActive: true,
-    });
-    expect(realRes.status).toBe(201);
-    const realServiceId = realRes.data.id;
+    }).returning({ id: services.id });
+    const realServiceId = realRow.id;
 
     // Test-Service 1: `*_test_*`-Marker.
-    const testRes = await apiPost<{ id: number; name: string }>("/api/services", {
+    const [testRow] = await db.insert(services).values({
       name: `cleanguard_test_${sfx}`,
       unitType: "hours",
       defaultPriceCents: 3500,
       isActive: true,
-    });
-    expect(testRes.status).toBe(201);
-    const testServiceId = testRes.data.id;
+    }).returning({ id: services.id });
+    const testServiceId = testRow.id;
 
     // Test-Service 2: der NEUE tlsicht/tlwrite-Marker (Task #1173).
-    const tlRes = await apiPost<{ id: number; name: string }>("/api/services", {
+    const [tlRow] = await db.insert(services).values({
       name: `tlsicht_${sfx}`,
       unitType: "hours",
       defaultPriceCents: 3500,
       isActive: true,
-    });
-    expect(tlRes.status).toBe(201);
-    const tlServiceId = tlRes.data.id;
+    }).returning({ id: services.id });
+    const tlServiceId = tlRow.id;
 
     const purge = await apiPost<{ deleted: number[]; deactivated: number[]; rejected: number[] }>(
       "/api/admin/test-cleanup/purge-test-services",
@@ -256,16 +260,21 @@ describe("CLEAN-1: Test-Cleanup-Filter löschen niemals echte Datensätze", () =
     expect(purge.data.deleted).not.toContain(realServiceId);
     expect(purge.data.deactivated).not.toContain(realServiceId);
 
-    // Gegenprobe: echter Service noch aktiv da, Test-Services weg.
-    const list = await apiGet("/api/services/all");
-    const services = toArray<{ id: number; isActive?: boolean }>(list.data);
-    const ids = new Set(services.map((s) => s.id));
+    // Gegenprobe direkt gegen die DB: echter Service existiert noch (Purge hat
+    // ihn abgelehnt), Test-Services sind weg. NICHT über die Katalog-Leseliste,
+    // weil diese konfigurationsgesteuert ist und Nicht-Konfig-Services (auch den
+    // hier geseedeten "echten") bewusst nicht mehr ausliefert.
+    const remaining = await db
+      .select({ id: services.id })
+      .from(services)
+      .where(inArray(services.id, [realServiceId, testServiceId, tlServiceId]));
+    const ids = new Set(remaining.map((s) => s.id));
     expect(ids.has(realServiceId)).toBe(true);
     expect(ids.has(testServiceId)).toBe(false);
     expect(ids.has(tlServiceId)).toBe(false);
 
-    // Aufräumen des echten Service (deaktivieren; harte Löschung greift nur bei Test-Pattern).
-    await apiPut(`/api/services/${realServiceId}`, { isActive: false }).catch(() => {});
+    // Aufräumen des echten Service (direkt löschen; ist kein Konfig-Service).
+    await db.delete(services).where(eq(services.id, realServiceId));
   });
 
   it("CLEAN-1.5 – purge-test-document-types löscht nur DOC%_17777%-Typen, echte werden abgelehnt", async () => {

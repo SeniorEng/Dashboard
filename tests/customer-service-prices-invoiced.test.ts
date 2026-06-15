@@ -1,7 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { apiPost, apiPatch, apiDelete, uniqueId, createTestCustomer, cleanupCustomer } from "./test-utils";
+import { apiGet, apiPost, apiPatch, apiDelete, uniqueId, createTestCustomer, cleanupCustomer } from "./test-utils";
 import { db } from "../server/lib/db";
 import { sql } from "drizzle-orm";
+
+// Phase 3.4: Der Dienstleistungskatalog ist konfigurationsgesteuert; es gibt
+// keinen POST /api/services mehr. Die Tests nutzen die vom Startup-Sync
+// geseedete Katalog-Leistung 'hauswirtschaft'.
+async function getCatalogServiceId(): Promise<number> {
+  const { data } = await apiGet<any[]>("/api/services");
+  const hw = data.find((s) => s.code === "hauswirtschaft");
+  expect(hw, "Katalog-Leistung 'hauswirtschaft' muss vorhanden sein").toBeDefined();
+  return hw.id as number;
+}
 
 let createdServiceId: number = 0;
 let createdCustomerId: number = 0;
@@ -10,15 +20,7 @@ let createdPriceIds: number[] = [];
 
 describe("Schutz gegen versehentliches Verlängern abgelaufener Kundenpreise (Task #191)", () => {
   beforeAll(async () => {
-    const serviceName = "QS-Pricing-Guard_" + uniqueId();
-    const svcRes = await apiPost<any>("/api/services", {
-      name: serviceName,
-      unitType: "hours",
-      defaultPriceCents: 5000,
-      vatRate: 19,
-    });
-    expect(svcRes.status).toBe(201);
-    createdServiceId = svcRes.data.id;
+    createdServiceId = await getCatalogServiceId();
 
     const cust = await createTestCustomer();
     createdCustomerId = cust.id;
@@ -52,11 +54,6 @@ describe("Schutz gegen versehentliches Verlängern abgelaufener Kundenpreise (Ta
     try {
       if (createdInvoiceId) {
         await db.execute(sql`DELETE FROM invoices WHERE id = ${createdInvoiceId}`);
-      }
-    } catch {}
-    try {
-      if (createdServiceId) {
-        await db.execute(sql`UPDATE services SET is_active = false WHERE id = ${createdServiceId}`);
       }
     } catch {}
     await cleanupCustomer(createdCustomerId);
@@ -148,14 +145,7 @@ describe("Schutz gegen direktes PATCH-Update von Kundenpreisen in abgerechneten 
   let priceId: number = 0;
 
   beforeAll(async () => {
-    const svcRes = await apiPost<any>("/api/services", {
-      name: "QS-Pricing-Patch_" + uniqueId(),
-      unitType: "hours",
-      defaultPriceCents: 5000,
-      vatRate: 19,
-    });
-    expect(svcRes.status).toBe(201);
-    svcId = svcRes.data.id;
+    svcId = await getCatalogServiceId();
 
     const cust = await createTestCustomer();
     custId = cust.id;
@@ -199,11 +189,6 @@ describe("Schutz gegen direktes PATCH-Update von Kundenpreisen in abgerechneten 
     try {
       if (invId) {
         await db.execute(sql`DELETE FROM invoices WHERE id = ${invId}`);
-      }
-    } catch {}
-    try {
-      if (svcId) {
-        await db.execute(sql`UPDATE services SET is_active = false WHERE id = ${svcId}`);
       }
     } catch {}
     await cleanupCustomer(custId);
