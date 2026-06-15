@@ -91,7 +91,7 @@ export async function loadCurrentServiceMinutes(
  * Txs + Neu-Buchung über `createConsumptionTransaction`.
  */
 export async function rebookAppointmentConsumption(
-  params: { appointmentId: number; userId?: number },
+  params: { appointmentId: number; userId?: number; force?: boolean },
   tx: DbClient,
 ): Promise<RebookKmResult> {
   const empty: RebookKmResult = {
@@ -154,7 +154,13 @@ export async function rebookAppointmentConsumption(
   const minutesDrift = prevHw !== newHw || prevAb !== newAb;
   const dateDrift = prevDate !== newDate;
 
-  if (!kmDrift && !minutesDrift && !dateDrift) {
+  // `force` (Task #1296) — erzwingt Storno + Neu-Buchung auch ohne km/Minuten/
+  // Datums-Drift. Genutzt vom einmaligen Reklassifizierungs-Migrationspfad:
+  // nach einer Topf-Umstellung (z.B. Selbstzahler → §45b) müssen bestehende,
+  // drift-freie Consumptions über die Kaskade in den neuen Topf umgebucht
+  // werden. Alle regulären Aufrufer übergeben kein `force` → unveränderter
+  // No-Op bei fehlendem Drift.
+  if (!params.force && !kmDrift && !minutesDrift && !dateDrift) {
     return {
       ...empty,
       previousTravelKm: prevTravelKm,

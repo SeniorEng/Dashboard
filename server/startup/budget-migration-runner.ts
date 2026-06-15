@@ -204,6 +204,9 @@ export async function runBudgetDataMigrations(): Promise<void> {
   const { backfillMissingImportConsumption } = await import(
     "./backfill-missing-import-consumption"
   );
+  const { reclassifyCustomer202To45b } = await import(
+    "./reclassify-customer-202-to-45b"
+  );
 
   // Reihenfolge ist relevant: #685 hängt von der Keep-Wahl aus #684 ab.
   // Alle vier Carryover-/Drift-Backfills setzen voraus, dass
@@ -238,6 +241,30 @@ export async function runBudgetDataMigrations(): Promise<void> {
       migrate: backfillMissingImportConsumption,
     },
   ];
+
+  // Task #1296 — Diese Migration korrigiert PRODUKTIV-Echtdaten eines einzelnen
+  // Kunden (#202) und erfordert ausdrückliche Freigabe ("sign-off") VOR dem
+  // Lauf. Sie wird daher NUR registriert, wenn das Approval-Flag
+  // `APPROVED_RECLASSIFY_CUSTOMER_202_45B` (=1/true) gesetzt ist. Default =
+  // nicht registriert ⇒ kein Ledger-Eintrag ⇒ die Migration kann nach erteilter
+  // Freigabe beim nächsten Boot noch laufen (kein vorzeitiges "applied").
+  const reclassifyApproved = /^(1|true)$/i.test(
+    (process.env.APPROVED_RECLASSIFY_CUSTOMER_202_45B ?? "").trim(),
+  );
+  if (reclassifyApproved) {
+    migrations.push({
+      name: "reclassify-customer-202-to-45b-1296",
+      version: "1",
+      migrate: reclassifyCustomer202To45b,
+    });
+  } else {
+    log(
+      "[budget-migration] 'reclassify-customer-202-to-45b-1296' übersprungen: " +
+        "Freigabe-Flag APPROVED_RECLASSIFY_CUSTOMER_202_45B nicht gesetzt " +
+        "(Sign-off erforderlich, kein Ledger-Eintrag).",
+      "startup",
+    );
+  }
 
   for (const m of migrations) {
     try {
