@@ -20,6 +20,9 @@ playwright-report/
 
 # Stryker mutation testing (Task #770)
 reports/
+# ...but keep audit/dry-run documentation under docs/reports/ tracked (GoBD-Auditspur)
+!docs/reports/
+!docs/reports/**
 # Throwaway Stryker sandbox copies of the whole codebase (Task #935):
 # .stryker-tmp/ (default) plus the per-profile tempDirName overrides
 # (.stryker-tmp-command / .stryker-tmp-vitest from stryker.*.conf.mjs).
