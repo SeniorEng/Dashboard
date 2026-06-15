@@ -1,0 +1,49 @@
+# Replit-AI-Ticket — Phase 3 (neu gefasst 15.06.): Berechnen statt Speichern
+
+**Voraussetzung:** Phase 2 abgeschlossen & validiert, Invarianten grün. **Code-Prüfung 15.06. (HEAD `c0d44ff`) ergab:** Paket 3.2 ist bereits vollständig; Paket 3.1 ist **rechnerisch schon umgesetzt** (Monats-Anspruch wird zur Laufzeit berechnet, keine `monthly_auto`-Zeilen werden mehr geschrieben) — es bleibt nur Aufräumen/Absichern. Echtes Neuland ist nur **3.3** (Preistabellen). Reihenfolge daher angepasst.
+
+**Schattenmodus bleibt Pflicht** für alles, was eine Berechnung ODER Migration mit Wertwirkung umschaltet (v. a. 3.3): neue Logik parallel hinter Flag → Diff-Job über alle Prod-Kopie-Kunden (Abweichung in Cents) → Gate 0 Cent (oder von Alrik erklärte Alt-Fehler) → erst dann umschalten + Altes löschen. Muster existiert (Task #750).
+
+---
+
+## Paket 3.1 — Allokationen: Altlasten entfernen + Schreibsperre (NICHT mehr Rechen-Umstellung!)
+
+**Verifizierter Ist-Zustand:** `budget_allocations` bekommt nur noch `initial_balance` + `carryover` als Inserts (allocation-storage.ts). Der gesetzliche Monats-Anspruch kommt bereits aus der Laufzeit-Rechnung (`calculateAllocatedCents` / `monthlyAmountFor`, allocation-storage.ts:459/774). `monthly_auto`/`yearly_auto`/`statutory_monthly` werden **nirgends mehr geschrieben** (server-weit verifiziert).
+
+**Restwerk (risikoarm, kein Rechen-Switch):**
+1. **Lese-Fallbacks bereinigen:** 4 Stellen lesen noch Altlast-Zeilen als Anker-Fallback (`a.source === "monthly_auto" || "monthly"` in allocation-storage.ts:624/976/1103/1244). Auf die SSoT-Anker-Ableitung (`resolve45bAccrualAnchor` aus careLevelHistory, Phase 2.5) umstellen; die source-Fallbacks entfernen.
+2. **Bestands-Migration (Schattenmodus als Verifikation):** Vor dem Löschen ein Diff-Job: für jeden Kunden die persistierten `monthly_auto`/`statutory_monthly`/`yearly_auto`-Zeilen vs. die Laufzeit-Rechnung — Report jeder Cent-Abweichung an Alrik. Gate 0 (oder erklärte Alt-Fehler). **Erst nach Freigabe** die Altlast-Zeilen löschen (Dev zuerst, Prod nach Report).
+3. **source-Enum bereinigen:** nach der Migration `monthly_auto`/`yearly_auto`/`statutory_monthly` aus `BUDGET_ALLOCATION_SOURCES` entfernen; übrig bleiben `initial_balance`, `carryover`, `manual_adjustment`.
+4. **Schreibsperre (Architektur-Wächter, analog #1282):** kein `db.insert/update(budgetAllocations)` außerhalb der Startwert-/Carryover-Verwaltung — Positiv- + Negativ-Beweis.
+
+**Akzeptanz:** Diff-Report = 0 (bzw. erklärte Alt-Fehler) archiviert; Altlast-Zeilen in Dev+Prod weg; Tabelle enthält nur noch manuelle Fakten; Enum bereinigt; Architektur-Test rot bei Fremd-Write; Mentke-/R-07 + BUG-21-Limit-Drift als Regressions-/Property-Test (fast-check: Monotonie, Jahresgrenzen, PG-Wechsel-Monate, 30.06.-Carryover-Fenster, Clamping).
+
+## Paket 3.3 — Eine Preistabelle (DAS eigentliche Phase-3-Stück, volle Schattenmodus-Strenge)
+
+**Verifizierter Ist-Zustand:** Drei getrennte Preis-Quellen — `service_rates` (Standard, contracts.ts), `customer_service_prices` (Kunden-Override, versioniert, services.ts), `customer_contract_rates` (contracts.ts, **ohne** `deletedAt`). Kein zentraler Resolver; `appointment-cost-calculator.ts` macht ad-hoc-Lookups + Fallback auf `services.defaultPriceCents`.
+
+1. **SSoT-Lesefunktion `priceFor(customerId, serviceCode, date)`** als einzige Preisquelle (Termine, Cascade, Leistungsnachweis, Rechnung, Anzeige). Auflösung: Kunden-Preis vor Standard, jeweils zeitversioniert; `defaultPriceCents` nur als unterster Fallback (oder explizit migrieren).
+2. **Konsolidierung** der drei Tabellen zu einer `prices(scope:'standard'|'customer', customerId NULL bei standard, serviceCode, cents, validFrom, validTo)` — mit **Konflikt-Report** (wo widersprechen sich die Quellen heute? → Alrik entscheidet je Konflikt). `customer_contract_rates` braucht beim Übergang sauberes Versionsende statt fehlendem `deletedAt`.
+3. **Schattenmodus** über alle dokumentierten Termine der letzten 12 Monate: `priceFor`-Ergebnis == gebuchter Preis. Diff-Report an Alrik, Gate 0 (bzw. erklärte Alt-Fehler).
+4. **GoBD:** bereits fakturierte Beträge bleiben unberührt (Snapshots in Rechnung/Leistungsnachweis, nicht neu berechnen).
+5. **Architektur-Wächter:** Preis-Lookups nur über `priceFor`.
+
+**Akzeptanz:** Schatten-Diff = 0 (bzw. erklärte Alt-Fehler) archiviert; zwei Preistabellen gelöscht; `priceFor` einzige Quelle (Arch-Test); fakturierte Snapshots unverändert.
+
+## Paket 3.4 — Service-Katalog als Konfiguration
+
+**Verifizierter Ist-Zustand:** Services sind DB-CRUD (`services`-Tabelle, POST/PUT `/api/services`, `requireAdmin`). System-Services sind als Inline-Array `SYSTEM_SERVICE_DEFINITIONS` (service-catalog.ts) hartkodiert und per `ensureSystemServices()` geseedet — aber keine externe Konfig-Datei; `isSystem`-Flag schützt nur Updates, nicht Create.
+
+1. **`shared/config/services.ts`** als einzige Quelle der echten Services (Code, Name, Einheit, Budget-Topf-Fähigkeit, Standardpreis). `SYSTEM_SERVICE_DEFINITIONS` dorthin verschieben (umziehen, nicht duplizieren).
+2. Beim Start aus der Konfig synchronisieren (Seed/Abgleich); Abweichung Konfig↔DB = Startfehler. DB-Tabelle bleibt nur als FK-Ziel.
+3. UI-CRUD/Schreibrouten für Services entfernen oder strikt auf „nichts Neues anlegbar" sperren (neuer Service = Code-Änderung mit Review). Konsistent mit dem BUG-18-Wächter (kein `tl*`-Müll möglich).
+
+**Akzeptanz:** `GET /api/services` liefert exakt die Konfig-Einträge; neuer Service nur per Code+Review; Müll-Services konstruktionsbedingt unmöglich; bestehende Termin-/Preis-FKs intakt.
+
+## Paket 3.2 — Settings versioniert: ERLEDIGT (nur Verifikation)
+
+Bereits vollständig: `customer_budget_type_settings` versioniert (validFrom/validTo, partial-unique auf offene Zeile, append-only), `effectiveDefaultPots` als Gesetz⊕Override-Resolver (shared/domain/budgets.ts), `forDate`-Lesepfad (preferences-storage.ts:216), Schreibpfad-Wächter (#1282). **Bitte nur bestätigen**, dass Rebook-Preview und Buchung denselben stichtagsbezogenen Stand sehen (Befund C-03) — `forEdit` vs. `forDate` sauber abgegrenzt.
+
+## Leitplanken
+
+Reihenfolge: **3.2-Verifikation → 3.1 (Aufräumen) → 3.4 → 3.3** (3.3 zuletzt, weil größter Migrations-/Wertaufwand; davor ist alles Drumherum stabil). Je Paket: Checkpoint (`db:backup-dev`) → Schattenmodus/Diff-Report → Alrik-Freigabe → Umschaltung → Claude-Retest → `sync:github`. Während Phase 3 keine parallelen Feature-Tickets. Jede Migration mit Restore-Pfad aus Checkpoint. Bei Diff ≠ 0: Paket stoppen, Report — nicht „schnell fixen".

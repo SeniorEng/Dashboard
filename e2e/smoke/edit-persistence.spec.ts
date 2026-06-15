@@ -221,10 +221,15 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     try {
       await page.goto(`/edit-appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
 
-      // Zeit ändern.
+      // Zeit ändern (TimePicker: Button-Trigger öffnet Popover mit Stunde-/
+      // Minute-Spalten + "Übernehmen"; kein freitextiges Input-Feld mehr).
+      const [newHour, newMinute] = newTime.split(":");
       const timeField = page.locator("[data-testid='input-time']");
       await expect(timeField).toBeVisible({ timeout: 10000 });
-      await timeField.fill(newTime);
+      await timeField.click();
+      await page.locator(`[data-testid='btn-hour-${newHour}']`).click();
+      await page.locator(`[data-testid='btn-minute-${newMinute}']`).click();
+      await page.locator("[data-testid='btn-confirm-time']").click();
 
       // Mitarbeiter wechseln (SearchableSelect → Option per generierter testid).
       await page.locator("[data-testid='select-kt-employee']").click();
@@ -236,7 +241,8 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
 
       // Vollständige Re-Navigation.
       await page.goto(`/edit-appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
-      await expect(page.locator("[data-testid='input-time']")).toHaveValue(newTime);
+      // TimePicker zeigt den Wert als Button-Text "HH:MM Uhr" an (kein .value).
+      await expect(page.locator("[data-testid='input-time']")).toContainText(newTime);
 
       // Persistenz des Mitarbeiter-Wechsels per API absichern (UI-State des
       // SearchableSelect ist nach Re-Mount ohne Anzeige-Wert schwer zu lesen).
