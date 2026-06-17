@@ -58,10 +58,7 @@ export function detectOldPriceTableReadViolations(
  * Alt-Tabellen-Leser (Migrations-/Report-Skripte etc.). Heute nur ein Platzhalter
  * — der Real-Tree-Test ist entschärft (`it.skip`).
  */
-const POST_CUTOVER_ALLOWLIST = new Set<string>([
-  "server/scripts/report-price-consolidation-conflicts.ts",
-  "server/scripts/populate-prices.ts",
-]);
+const POST_CUTOVER_ALLOWLIST = new Set<string>();
 
 describe("Architektur — Preis-Lese-Pfad-SSoT (Task #1301, entschärft)", () => {
   const scanFiles = collectScanFiles(["server", "shared", "client/src"], { includeTsx: true });
@@ -99,10 +96,10 @@ describe("Architektur — Preis-Lese-Pfad-SSoT (Task #1301, entschärft)", () =>
     ]);
   });
 
-  // SCHARF erst beim Cutover (Task #1303): von `it.skip` auf `it` umstellen und
-  // POST_CUTOVER_ALLOWLIST final ziehen. Heute entschärft, da die Alt-Tabellen
-  // noch bewusst additiv parallel gelesen werden.
-  it.skip("(SCHARF erst beim Cutover) keine direkten Alt-Preis-Tabellen-Reads außerhalb der SSoT", () => {
+  // SCHARF seit dem Cutover (Task #1325): die drei Alt-Preis-Tabellen sind
+  // gelöscht, alle Reads laufen über die konsolidierte `prices`-Tabelle hinter
+  // der `priceFor`-SSoT. Allowlist ist leer.
+  it("keine direkten Alt-Preis-Tabellen-Reads außerhalb der SSoT", () => {
     const v = detectOldPriceTableReadViolations(scanFiles, POST_CUTOVER_ALLOWLIST);
     if (v.length > 0) {
       expect.fail(

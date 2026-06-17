@@ -4,17 +4,16 @@
  * Lädt einmal pro Kunde alle aktiven Kunden-Preiszeilen + den Service-Katalog
  * und stellt die reine Auflösung aus `shared/domain/pricing/price-for.ts` als
  * batched Lookup bereit. ALLE Live-Preis-Lookups (Termin-Kostenrechner,
- * Rechnungs-/LN-Line-Items, Budget-Vorschau) gehen hierdurch — keine eigenen
- * `customer_service_prices`-Reads mehr.
+ * Rechnungs-/LN-Line-Items, Budget-Vorschau) gehen hierdurch.
  *
- * Standard-Scope ist aktuell leer (Schattenmodus): bis die konsolidierte
- * `prices`-Tabelle freigegeben ist, fällt die Auflösung wertneutral vom
- * Kunden-Preis direkt auf den Katalog-Default — exakt das heutige Verhalten.
+ * Task #1325 — Quelle ist ausschließlich die konsolidierte `prices`-SSoT:
+ * Kunden-Override (scope="customer", alle Provenienzen) und firmenweiter
+ * Standard (scope="standard"). Die drei Alt-Tabellen sind nach dem Cutover
+ * (Task #1324) entfernt.
  */
 import { and, eq, isNull } from "drizzle-orm";
-import { customerServicePrices, prices, services as servicesTable } from "@shared/schema";
+import { prices, services as servicesTable } from "@shared/schema";
 import { db, type DbOrTx } from "../../lib/db";
-import { customerServicePricesRepo } from "../../repos";
 import {
   resolvePriceFor,
   type PriceResolution,
@@ -37,19 +36,6 @@ function toDateStr(d: Date | string | null): string | null {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   return String(d).substring(0, 10);
-}
-
-/**
- * Task #1301 — Default-OFF-Schalter für den Standard-Scope aus der konsolidierten
- * `prices`-Tabelle. AUS (Default) ⇒ `standardRows` bleibt leer und die Auflösung
- * fällt wertneutral vom Kunden-Preis direkt auf den Katalog-Default (= heutiges
- * Live-Verhalten). EIN ⇒ der firmenweite Standard wird aus `prices`
- * (scope="standard") gelesen. Muster identisch zu `BUDGET_HARD_HOLDS`; der
- * Cutover (Task #1303) wird durch Alrik freigegeben.
- */
-export function pricesStandardScopeEnabled(): boolean {
-  const v = (process.env.PRICES_STANDARD_SCOPE ?? "").trim().toLowerCase();
-  return v === "1" || v === "true";
 }
 
 /**
@@ -87,79 +73,41 @@ export async function loadCustomerPriceContext(
   }
 
   // Aktive Kunden-Preiszeilen (zeitversioniert), gruppiert nach Service.
-  //
-  // Quelle ist an denselben Default-OFF-Schalter gebunden wie der Standard-Scope
-  // (`PRICES_STANDARD_SCOPE`), weil der Konsolidierungs-Cutover (Task #1303) beide
-  // gemeinsam umlegt: er befüllt `prices` (scope="customer", Provenienz csp+ccr),
-  // schaltet das Flag ein und DROPpt danach `customer_service_prices`. AUS
-  // (Default) ⇒ Lesen aus der Alt-Tabelle (heutiges Live-Verhalten, Tests grün).
-  // EIN ⇒ Lesen aus `prices` (scope="customer"); wertgleich GENAU DANN, wenn
-  // Gate-2 0 Abweichungen bestätigt hat (Vorbedingung des Cutovers).
+  // Quelle: konsolidierte `prices`-SSoT (scope="customer", alle Provenienzen).
   const customerByServiceId = new Map<number, VersionedPriceRow[]>();
   if (customerId != null) {
-    if (pricesStandardScopeEnabled()) {
-      const rows = await tx
-        .select({
-          id: prices.id,
-          serviceId: prices.serviceId,
-          cents: prices.cents,
-          validFrom: prices.validFrom,
-          validTo: prices.validTo,
-        })
-        .from(prices)
-        .where(
-          and(
-            eq(prices.scope, "customer"),
-            eq(prices.customerId, customerId),
-            isNull(prices.deletedAt),
-          ),
-        );
-      for (const raw of rows) {
-        const list = customerByServiceId.get(raw.serviceId) ?? [];
-        list.push({
-          id: Number(raw.id),
-          priceCents: Number(raw.cents),
-          validFrom: toDateStr(raw.validFrom),
-          validTo: toDateStr(raw.validTo),
-        });
-        customerByServiceId.set(raw.serviceId, list);
-      }
-    } else {
-      const rows = await customerServicePricesRepo
-        .selectColumnsFrom(
-          {
-            id: customerServicePrices.id,
-            serviceId: customerServicePrices.serviceId,
-            priceCents: customerServicePrices.priceCents,
-            validFrom: customerServicePrices.validFrom,
-            validTo: customerServicePrices.validTo,
-          },
-          tx,
-        )
-        .where(
-          and(
-            eq(customerServicePrices.customerId, customerId),
-            customerServicePricesRepo.activeOnly(),
-          ),
-        );
-      for (const raw of rows) {
-        const list = customerByServiceId.get(raw.serviceId) ?? [];
-        list.push({
-          id: Number(raw.id),
-          priceCents: Number(raw.priceCents),
-          validFrom: toDateStr(raw.validFrom),
-          validTo: toDateStr(raw.validTo),
-        });
-        customerByServiceId.set(raw.serviceId, list);
-      }
+    const rows = await tx
+      .select({
+        id: prices.id,
+        serviceId: prices.serviceId,
+        cents: prices.cents,
+        validFrom: prices.validFrom,
+        validTo: prices.validTo,
+      })
+      .from(prices)
+      .where(
+        and(
+          eq(prices.scope, "customer"),
+          eq(prices.customerId, customerId),
+          isNull(prices.deletedAt),
+        ),
+      );
+    for (const raw of rows) {
+      const list = customerByServiceId.get(raw.serviceId) ?? [];
+      list.push({
+        id: Number(raw.id),
+        priceCents: Number(raw.cents),
+        validFrom: toDateStr(raw.validFrom),
+        validTo: toDateStr(raw.validTo),
+      });
+      customerByServiceId.set(raw.serviceId, list);
     }
   }
 
-  // Standard-Scope (firmenweit, zeitversioniert) — NUR wenn das Default-OFF-Flag
-  // aktiv ist; sonst leer (= heutiges Live-Verhalten). Quelle: konsolidierte
-  // `prices`-Tabelle (scope="standard"), gruppiert nach Service.
+  // Standard-Scope (firmenweit, zeitversioniert). Quelle: konsolidierte
+  // `prices`-SSoT (scope="standard"), gruppiert nach Service.
   const standardByServiceId = new Map<number, VersionedPriceRow[]>();
-  if (pricesStandardScopeEnabled()) {
+  {
     const stdRows = await tx
       .select({
         id: prices.id,

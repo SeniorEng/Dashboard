@@ -409,7 +409,7 @@ async function purgeTestServices(apply: boolean): Promise<void> {
   log(`Gefunden: ${all.length} Test-Services`);
   if (all.length === 0) return;
 
-  // Referenziert = in appointment_services (NO ACTION) ODER customer_service_prices
+  // Referenziert = in appointment_services (NO ACTION) ODER prices
   // (CASCADE). Solche Services werden NUR deaktiviert (Fallback), nicht gelöscht,
   // damit historische Termine UND Preisvereinbarungen erhalten bleiben. Nur
   // service_budget_pots (CASCADE) fallen beim Hart-Löschen unreferenzierter
@@ -418,7 +418,7 @@ async function purgeTestServices(apply: boolean): Promise<void> {
   const refsRes = await db.execute<{ id: number }>(sql`
     SELECT service_id AS id FROM appointment_services WHERE service_id IN (${idList})
     UNION
-    SELECT service_id AS id FROM customer_service_prices WHERE service_id IN (${idList})
+    SELECT service_id AS id FROM prices WHERE service_id IN (${idList})
   `);
   const referenced = new Set((refsRes as unknown as { rows: Array<{ id: number }> }).rows.map((r) => r.id));
   const deletable = all.filter((s) => !referenced.has(s.id));
@@ -432,8 +432,8 @@ async function purgeTestServices(apply: boolean): Promise<void> {
     return;
   }
 
-  // service_rates hat keinen FK auf services (Kategorie-basierend), service_budget_pots
-  // und customer_service_prices haben CASCADE — daher reicht der reine DELETE auf services.
+  // service_budget_pots und prices haben CASCADE auf services — daher reicht der
+  // reine DELETE auf services.
   await db.transaction(async (tx) => {
     if (deletable.length > 0) {
       const dList = sql.join(deletable.map((s) => sql`${s.id}`), sql`, `);
@@ -592,7 +592,7 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
       await tx.execute(sql`UPDATE company_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE system_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE payment_advices SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
-      await tx.execute(sql`UPDATE service_rates SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
+      await tx.execute(sql`UPDATE prices SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE prospect_notes SET user_id = NULL WHERE user_id IN (${idList})`);
       await tx.execute(sql`UPDATE prospect_offers SET created_by = NULL WHERE created_by IN (${idList})`);
       await tx.execute(sql`UPDATE prospects SET assigned_employee_id = NULL WHERE assigned_employee_id IN (${idList})`);
@@ -617,7 +617,6 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
       await tx.execute(sql`UPDATE customer_assignment_history SET changed_by_user_id = NULL WHERE changed_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_assignment_history SET employee_id = NULL WHERE employee_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_care_level_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-      await tx.execute(sql`UPDATE customer_contract_rates SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_contracts SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_documents SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_insurance_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);

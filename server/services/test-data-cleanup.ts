@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 import { inArray, eq, and, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { db } from "../lib/db";
-import { appointmentsRepo, prospectsRepo, customersRepo, customerServicePricesRepo } from "../repos";
+import { appointmentsRepo, prospectsRepo, customersRepo } from "../repos";
 import { customers } from "@shared/schema";
 import { appointments, appointmentSeries, appointmentServices } from "@shared/schema";
 import { invoices, invoiceLineItems } from "@shared/schema";
@@ -26,7 +26,7 @@ import { budgetTransactions } from "@shared/schema";
 import { prospects } from "@shared/schema";
 import { qontoTransactions, paymentAdviceItems } from "@shared/schema";
 import { documentDeliveries } from "@shared/schema";
-import { services, customerServicePrices } from "@shared/schema";
+import { services, prices } from "@shared/schema";
 import {
   documentTypes,
   employeeDocuments,
@@ -535,7 +535,7 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
       await tx.execute(sql`UPDATE company_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE system_settings SET updated_by_user_id = NULL WHERE updated_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE payment_advices SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
-      await tx.execute(sql`UPDATE service_rates SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
+      await tx.execute(sql`UPDATE prices SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE prospect_notes SET user_id = NULL WHERE user_id IN (${idList})`);
       await tx.execute(sql`UPDATE prospect_offers SET created_by = NULL WHERE created_by IN (${idList})`);
       await tx.execute(sql`UPDATE prospects SET assigned_employee_id = NULL WHERE assigned_employee_id IN (${idList})`);
@@ -558,7 +558,6 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
       await tx.execute(sql`UPDATE customer_assignment_history SET changed_by_user_id = NULL WHERE changed_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_assignment_history SET employee_id = NULL WHERE employee_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_care_level_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-      await tx.execute(sql`UPDATE customer_contract_rates SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_contracts SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_documents SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_insurance_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
@@ -746,9 +745,10 @@ export async function purgeTestServices(ids?: number[]): Promise<PurgeServicesRe
   // selectColumnsFrom OHNE activeOnly() → bewusst inkl. soft-gelöschter Preis-
   // Zeilen, denn auch eine soft-gelöschte Zeile hält physisch den FK auf den
   // Service und würde ein hartes DELETE brechen.
-  const priceRefs = await customerServicePricesRepo
-    .selectColumnsFrom({ id: customerServicePrices.serviceId })
-    .where(inArray(customerServicePrices.serviceId, candidateIds));
+  const priceRefs = await db
+    .select({ id: prices.serviceId })
+    .from(prices)
+    .where(inArray(prices.serviceId, candidateIds));
   const referenced = new Set<number>(
     [...apptRefs.map((r) => r.id), ...priceRefs.map((r) => r.id)].filter(
       (i): i is number => i !== null,

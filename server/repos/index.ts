@@ -21,7 +21,6 @@ import {
   customers,
   appointments,
   prospects,
-  customerServicePrices,
   employeeTimeEntries,
   employeeDocuments,
   customerDocuments,
@@ -91,25 +90,6 @@ export const prospectsRepo = {
   selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(prospects),
   selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
     tx.select(columns).from(prospects),
-};
-
-// -- customerServicePrices ----------------------------------------------
-export const customerServicePricesRepo = {
-  table: customerServicePrices,
-  activeOnly: (): SQL => activeOnly(customerServicePrices),
-  withActive: (extra?: SQL | undefined): SQL => withActive(customerServicePrices, extra),
-  async findById(id: number, tx: DbOrTx = db) {
-    const rows = await tx.select().from(customerServicePrices)
-      .where(and(eq(customerServicePrices.id, id), isNull(customerServicePrices.deletedAt))).limit(1);
-    return rows[0] ?? null;
-  },
-  async findByIdIncludingDeleted(id: number, tx: DbOrTx = db) {
-    const rows = await tx.select().from(customerServicePrices).where(eq(customerServicePrices.id, id)).limit(1);
-    return rows[0] ?? null;
-  },
-  selectFrom: (tx: Pick<typeof db, "select"> = db) => tx.select().from(customerServicePrices),
-  selectColumnsFrom: <C extends Parameters<DbOrTx["select"]>[0] & object>(columns: C, tx: Pick<typeof db, "select"> = db) =>
-    tx.select(columns).from(customerServicePrices),
 };
 
 // -- employeeTimeEntries -------------------------------------------------

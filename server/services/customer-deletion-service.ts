@@ -7,7 +7,7 @@ import {
   tasks,
   customerDocuments,
   customerContracts,
-  customerServicePrices,
+  prices,
   budgetAllocations,
   budgetTransactions,
   customerBudgetTypeSettings,
@@ -148,10 +148,15 @@ export async function softDeleteCustomerWithCascade(args: {
 
   // Custom Pricing (Kundenpreise)
   {
-    const rows = await tx.update(customerServicePrices)
+    const rows = await tx.update(prices)
       .set({ deletedAt: now })
-      .where(and(eq(customerServicePrices.customerId, customerId), isNull(customerServicePrices.deletedAt)))
-      .returning({ id: customerServicePrices.id });
+      .where(and(
+        eq(prices.scope, "customer"),
+        eq(prices.origin, "customer_service_prices"),
+        eq(prices.customerId, customerId),
+        isNull(prices.deletedAt),
+      ))
+      .returning({ id: prices.id });
     targets.push({ table: "customer_service_prices", action: "customer_child_soft_deleted", entityType: "customer", ids: rows.map(r => r.id) });
   }
 

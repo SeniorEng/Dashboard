@@ -24,7 +24,7 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/lib/db";
-import { customerServicePrices } from "@shared/schema";
+import { prices } from "@shared/schema";
 import {
   apiGet,
   apiPost,
@@ -89,11 +89,13 @@ beforeAll(async () => {
   // Prod-Kilometersatz war 0,35 €/km (Test-Seed liefert nur 0,30 €/km) →
   // kundenspezifischer travel_km-Preis = 35 ct, damit Verbrauchsbuchung UND
   // Rechnung den exakten Prod-Satz verwenden.
-  await db.insert(customerServicePrices).values({
+  await db.insert(prices).values({
+    scope: "customer",
+    origin: "customer_service_prices",
     customerId,
     serviceId: travelKmServiceId,
-    priceCents: 35,
-    validFrom: new Date("2024-01-01"),
+    cents: 35,
+    validFrom: "2024-01-01",
   });
 
   const emp = await createTestEmployee({ vorname: "Marcel", nachnamePrefix: "Fiebag_Integ" });

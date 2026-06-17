@@ -36,7 +36,6 @@ exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pr
   ],
   "server/routes/billing.ts": [
     "appointmentsRepo",
-    "customerServicePricesRepo",
     "monthlyServiceRecordsRepo",
   ],
   "server/routes/budget.ts": [
@@ -93,7 +92,6 @@ exports[`Architektur — Soft-Delete-Coverage in server/services/** (Task #454) 
   ],
   "server/services/test-data-cleanup.ts": [
     "appointmentsRepo",
-    "customerServicePricesRepo",
     "customersRepo",
     "prospectsRepo",
   ],
@@ -156,9 +154,6 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
     "customerDocumentsRepo",
     "employeeDocumentProofsRepo",
     "employeeDocumentsRepo",
-  ],
-  "server/storage/pricing/price-for.ts": [
-    "customerServicePricesRepo",
   ],
   "server/storage/prospects.ts": [
     "appointmentsRepo",

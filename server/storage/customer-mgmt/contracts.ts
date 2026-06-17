@@ -7,7 +7,6 @@ import {
   type InsertServiceRate,
   SERVICE_CATEGORIES,
   customerContracts,
-  serviceRates,
   prices,
   services,
 } from "@shared/schema";
@@ -196,27 +195,74 @@ export async function updateCustomerContract(contractId: number, data: Partial<{
 }
 
 export async function getCurrentServiceRates(): Promise<ServiceRate[]> {
-  return await db
+  // Task #1325 — firmenweite Standardsätze leben in der `prices`-SSoT
+  // (scope="standard", origin="service_rates"). Service-KATEGORIE ↔ Katalog-
+  // Service-ID über `services.code` (Code == Kategorie).
+  const { categoryByServiceId } = await rateCategoryServiceMaps(db);
+  const rows = await db
     .select()
-    .from(serviceRates)
-    .where(isNull(serviceRates.validTo));
+    .from(prices)
+    .where(and(
+      eq(prices.scope, "standard"),
+      eq(prices.origin, "service_rates"),
+      isNull(prices.validTo),
+      isNull(prices.deletedAt),
+    ));
+  return rows
+    .filter((r) => categoryByServiceId.has(r.serviceId))
+    .map((r) => ({
+      id: r.id,
+      serviceCategory: categoryByServiceId.get(r.serviceId)!,
+      hourlyRateCents: r.cents,
+      validFrom: r.validFrom,
+      validTo: r.validTo,
+      createdAt: r.createdAt,
+      createdByUserId: r.createdByUserId,
+    }));
 }
 
 export async function addServiceRate(data: InsertServiceRate, userId?: number): Promise<ServiceRate> {
   const today = todayISO();
-  
+
+  // serviceCategory → Katalog-Service-ID.
+  const { serviceIdByCategory } = await rateCategoryServiceMaps(db);
+  const serviceId = serviceIdByCategory.get(data.serviceCategory);
+  if (serviceId === undefined) {
+    throw new Error(
+      `Service-Kategorie '${data.serviceCategory}' hat keinen Katalog-Service — Standardsatz kann nicht gespeichert werden.`,
+    );
+  }
+
+  // Vorherige offene Standard-Zeile dieses Service schließen (Zeitversionierung).
   await db
-    .update(serviceRates)
+    .update(prices)
     .set({ validTo: today })
     .where(and(
-      eq(serviceRates.serviceCategory, data.serviceCategory),
-      isNull(serviceRates.validTo)
+      eq(prices.scope, "standard"),
+      eq(prices.origin, "service_rates"),
+      eq(prices.serviceId, serviceId),
+      isNull(prices.validTo),
+      isNull(prices.deletedAt),
     ));
-  
-  const result = await db.insert(serviceRates).values({
-    ...data,
+
+  const [inserted] = await db.insert(prices).values({
+    scope: "standard",
+    origin: "service_rates",
+    customerId: null,
+    serviceId,
+    cents: data.hourlyRateCents,
+    validFrom: data.validFrom,
+    validTo: data.validTo ?? null,
     createdByUserId: userId,
   }).returning();
-  
-  return result[0];
+
+  return {
+    id: inserted.id,
+    serviceCategory: data.serviceCategory,
+    hourlyRateCents: inserted.cents,
+    validFrom: inserted.validFrom,
+    validTo: inserted.validTo,
+    createdAt: inserted.createdAt,
+    createdByUserId: inserted.createdByUserId,
+  };
 }

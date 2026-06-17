@@ -31,7 +31,6 @@ import {
   invoiceLineItems,
   monthlyServiceRecords,
   serviceRecordAppointments,
-  customerServicePrices,
   budgetTransactions,
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
@@ -48,7 +47,7 @@ import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp, addDays } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
-import { monthlyServiceRecordsRepo, appointmentsRepo, customerServicePricesRepo } from "../repos";
+import { monthlyServiceRecordsRepo, appointmentsRepo } from "../repos";
 import {
   getNextInvoiceNumberTx,
   createInvoiceTx,

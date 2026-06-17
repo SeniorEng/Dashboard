@@ -33,7 +33,7 @@ import {
   DOCUMENT_TYPE_TEST_FILTER,
   DOCUMENT_TYPE_WHITELIST,
 } from "../services/test-data-cleanup";
-import { services, customerServicePrices, appointmentServices } from "@shared/schema";
+import { services, prices, appointmentServices } from "@shared/schema";
 import {
   documentTypes,
   employeeDocuments,
@@ -96,9 +96,9 @@ async function classifyJunkServices(exec: DbOrTx): Promise<JunkTablePlan> {
   // Bewusst OHNE active-Filter: auch eine soft-gelöschte Preis-Zeile hält
   // physisch den FK und würde ein hartes DELETE brechen.
   const priceRefs = await exec
-    .select({ id: customerServicePrices.serviceId })
-    .from(customerServicePrices)
-    .where(inArray(customerServicePrices.serviceId, ids));
+    .select({ id: prices.serviceId })
+    .from(prices)
+    .where(inArray(prices.serviceId, ids));
   const referenced = new Set<number>(
     [...apptRefs.map((r) => r.id), ...priceRefs.map((r) => r.id)].filter(
       (i): i is number => i !== null,

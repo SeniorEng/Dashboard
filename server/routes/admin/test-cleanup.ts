@@ -9,7 +9,7 @@ import { customers } from "@shared/schema";
 import { appointments } from "@shared/schema";
 import { budgetTransactions } from "@shared/schema";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
-import { customerServicePrices } from "@shared/schema";
+import { prices } from "@shared/schema";
 import {
   purgeTestCustomersBulk,
   purgeTestProspectsByIds,
@@ -309,19 +309,21 @@ router.post(
       return;
     }
     const parsed = insertCustomerPriceRawSchema.parse(req.body);
-    const inserted = await db.insert(customerServicePrices).values({
+    const inserted = await db.insert(prices).values({
+      scope: "customer",
+      origin: "customer_service_prices",
       customerId: parsed.customerId,
       serviceId: parsed.serviceId,
-      priceCents: parsed.priceCents,
-      validFrom: new Date(parsed.validFrom + "T00:00:00Z"),
-      validTo: parsed.validTo ? new Date(parsed.validTo + "T00:00:00Z") : null,
+      cents: parsed.priceCents,
+      validFrom: parsed.validFrom,
+      validTo: parsed.validTo ?? null,
     }).returning({
-      id: customerServicePrices.id,
-      customerId: customerServicePrices.customerId,
-      serviceId: customerServicePrices.serviceId,
-      priceCents: customerServicePrices.priceCents,
-      validFrom: customerServicePrices.validFrom,
-      validTo: customerServicePrices.validTo,
+      id: prices.id,
+      customerId: prices.customerId,
+      serviceId: prices.serviceId,
+      priceCents: prices.cents,
+      validFrom: prices.validFrom,
+      validTo: prices.validTo,
     });
     res.json(inserted[0]);
   })

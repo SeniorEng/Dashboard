@@ -1,4 +1,5 @@
-import { pgTable, text, integer, serial, date, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, date, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -42,30 +43,12 @@ export const SERVICE_CATEGORIES = [
 
 export type ServiceCategory = typeof SERVICE_CATEGORIES[number];
 
-// Default service rates (company-wide, historized)
-export const serviceRates = pgTable("service_rates", {
-  id: serial("id").primaryKey(),
-  serviceCategory: text("service_category").notNull(), // hauswirtschaft, alltagsbegleitung
-  hourlyRateCents: integer("hourly_rate_cents").notNull(), // Rate in cents
-  validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"), // null = current
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
-});
-
-// Customer-specific rate overrides (historized)
-export const customerContractRates = pgTable("customer_contract_rates", {
-  id: serial("id").primaryKey(),
-  contractId: integer("contract_id").notNull().references(() => customerContracts.id, { onDelete: "cascade" }),
-  serviceCategory: text("service_category").notNull(), // hauswirtschaft, alltagsbegleitung
-  hourlyRateCents: integer("hourly_rate_cents").notNull(), // Rate in cents (overrides default)
-  validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"), // null = current
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
-}, (table) => [
-  index("customer_contract_rates_contract_idx").on(table.contractId),
-]);
+// Task #1325 — Die Tabellen `service_rates` (firmenweiter Standardsatz) und
+// `customer_contract_rates` (Vertrags-/Stundensatz pro Kunde) sind nach dem
+// Konsolidierungs-Cutover (Task #1324) entfernt. Beide leben jetzt in der
+// `prices`-SSoT: service_rates → scope="standard" (origin="service_rates"),
+// customer_contract_rates → scope="customer" (origin="customer_contract_rates").
+// Die Zod-Schemas + Domain-Typen bleiben als API-Contract erhalten.
 
 // Contract schemas
 export const CONTRACT_PERIOD_TYPES = ["week", "month", "year"] as const;
@@ -94,7 +77,17 @@ export const insertServiceRateSchema = z.object({
   validTo: z.string().optional().nullable(),
 });
 
-export type ServiceRate = typeof serviceRates.$inferSelect;
+// Task #1325 — explizite Domain-Form (früher `serviceRates.$inferSelect`),
+// rekonstruiert aus der `prices`-SSoT (scope="standard").
+export interface ServiceRate {
+  id: number;
+  serviceCategory: string;
+  hourlyRateCents: number;
+  validFrom: string;
+  validTo: string | null;
+  createdAt: Date;
+  createdByUserId: number | null;
+}
 export type InsertServiceRate = z.infer<typeof insertServiceRateSchema>;
 
 // Customer Contract Rate schemas
@@ -106,7 +99,18 @@ export const insertContractRateSchema = z.object({
   validTo: z.string().optional().nullable(),
 });
 
-export type CustomerContractRate = typeof customerContractRates.$inferSelect;
+// Task #1325 — explizite Domain-Form (früher `customerContractRates.$inferSelect`),
+// rekonstruiert aus der `prices`-SSoT (scope="customer", origin="customer_contract_rates").
+export interface CustomerContractRate {
+  id: number;
+  contractId: number;
+  serviceCategory: string;
+  hourlyRateCents: number;
+  validFrom: string;
+  validTo: string | null;
+  createdAt: Date;
+  createdByUserId: number | null;
+}
 export type InsertContractRate = z.infer<typeof insertContractRateSchema>;
 
 // ============================================
@@ -154,6 +158,12 @@ export const prices = pgTable("prices", {
 }, (table) => [
   index("prices_scope_service_idx").on(table.scope, table.serviceId),
   index("prices_customer_service_idx").on(table.customerId, table.serviceId),
+  // Verhindert zwei aktive Preise mit identischem validFrom je (scope, origin,
+  // Kunde, Service) — Nachfolger des alten csp_customer_service_validfrom_active_idx.
+  // scope+origin verhindern Fehl-Kollisionen zwischen verschiedenen Preis-Herkünften.
+  uniqueIndex("prices_active_validfrom_uniq")
+    .on(table.scope, table.origin, table.customerId, table.serviceId, table.validFrom)
+    .where(sql`deleted_at IS NULL`),
 ]);
 
 export const insertPriceSchema = z.object({

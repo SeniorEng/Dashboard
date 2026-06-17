@@ -10,7 +10,6 @@ export const SOFT_DELETABLE_TABLE_IDENTS = Object.freeze([
   "customers",
   "appointments",
   "prospects",
-  "customerServicePrices",
   "employeeTimeEntries",
   "employeeDocuments",
   "customerDocuments",

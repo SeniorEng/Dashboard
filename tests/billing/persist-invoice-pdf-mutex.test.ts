@@ -131,7 +131,6 @@ vi.mock("../../server/lib/zugferd", () => ({
 vi.mock("../../server/repos", () => ({
   monthlyServiceRecordsRepo: {},
   appointmentsRepo: {},
-  customerServicePricesRepo: {},
 }));
 
 

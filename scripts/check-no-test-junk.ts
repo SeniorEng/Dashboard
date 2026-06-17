@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../server/lib/db";
-import { services, documentTypes, customerServicePrices, customers } from "@shared/schema";
+import { services, documentTypes, prices, customers } from "@shared/schema";
 import {
   SERVICE_TEST_FILTER,
   DOCUMENT_TYPE_TEST_FILTER,
@@ -67,11 +67,11 @@ async function main(): Promise<void> {
   let junkCspCount = 0;
   if (junkServices.length > 0) {
     const rows = await db
-      .select({ id: customerServicePrices.id })
-      .from(customerServicePrices)
+      .select({ id: prices.id })
+      .from(prices)
       .where(
         inArray(
-          customerServicePrices.serviceId,
+          prices.serviceId,
           junkServices.map((s) => s.id),
         ),
       );
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   console.log(
     `[check-no-test-junk] Services=${junkServices.length}, Dokumenttypen=${junkDocTypes.length}, ` +
       `aktive Test-Kunden=${junkCustomers.length}, ` +
-      `customer_service_prices an Müll-Services=${junkCspCount}`,
+      `prices an Müll-Services=${junkCspCount}`,
   );
   if (junkServices.length > 0) {
     console.log(

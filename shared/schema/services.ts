@@ -1,5 +1,4 @@
 import { pgTable, text, integer, serial, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -37,23 +36,11 @@ export const serviceBudgetPots = pgTable("service_budget_pots", {
   uniqueIndex("service_budget_pots_unique_idx").on(table.serviceId, table.budgetType),
 ]);
 
-export const customerServicePrices = pgTable("customer_service_prices", {
-  id: serial("id").primaryKey(),
-  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
-  serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
-  priceCents: integer("price_cents").notNull(),
-  validFrom: timestamp("valid_from").notNull().defaultNow(),
-  validTo: timestamp("valid_to"),
-  deletedAt: timestamp("deleted_at"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (table) => [
-  index("csp_customer_service_idx").on(table.customerId, table.serviceId),
-  uniqueIndex("csp_customer_service_active_idx").on(table.customerId, table.serviceId, table.validTo),
-  uniqueIndex("csp_customer_service_validfrom_active_idx")
-    .on(table.customerId, table.serviceId, table.validFrom)
-    .where(sql`deleted_at IS NULL`),
-]);
-
+// Task #1325 — Die Tabelle `customer_service_prices` ist nach dem
+// Konsolidierungs-Cutover (Task #1324) entfernt; Kunden-Preise leben jetzt in
+// der `prices`-SSoT (scope="customer", origin="customer_service_prices").
+// `insertCustomerServicePriceSchema` bleibt als Request-Validierung der
+// Service-Preis-Route erhalten.
 export const insertCustomerServicePriceSchema = z.object({
   customerId: z.number().int(),
   serviceId: z.number().int(),
@@ -61,7 +48,6 @@ export const insertCustomerServicePriceSchema = z.object({
   validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein").optional(),
 });
 
-export type CustomerServicePrice = typeof customerServicePrices.$inferSelect;
 export type InsertCustomerServicePrice = z.infer<typeof insertCustomerServicePriceSchema>;
 
 export const insertServiceSchema = z.object({

@@ -15,8 +15,8 @@ function perAppointmentCte(p: ResolvedPeriod) {
         a.appointment_type, a.status, a.date::date AS d,
         SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
           COALESCE(
-            (SELECT csp.price_cents FROM customer_service_prices csp
-             WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+            (SELECT csp.cents FROM prices csp
+             WHERE csp.scope = 'customer' AND csp.origin = 'customer_service_prices' AND csp.customer_id = a.customer_id AND csp.service_id = s.id
                AND csp.deleted_at IS NULL
                AND csp.valid_from::date <= a.date::date
                AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
@@ -84,8 +84,8 @@ async function stageSparklines(year: number) {
       SELECT EXTRACT(MONTH FROM a.date::date)::int AS m, a.id, a.status,
         SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
           COALESCE(
-            (SELECT csp.price_cents FROM customer_service_prices csp
-             WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+            (SELECT csp.cents FROM prices csp
+             WHERE csp.scope = 'customer' AND csp.origin = 'customer_service_prices' AND csp.customer_id = a.customer_id AND csp.service_id = s.id
                AND csp.deleted_at IS NULL
                AND csp.valid_from::date <= a.date::date
                AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
@@ -323,8 +323,8 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
           SELECT a.id,
             SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
               COALESCE(
-                (SELECT csp.price_cents FROM customer_service_prices csp
-                 WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+                (SELECT csp.cents FROM prices csp
+                 WHERE csp.scope = 'customer' AND csp.origin = 'customer_service_prices' AND csp.customer_id = a.customer_id AND csp.service_id = s.id
                    AND csp.deleted_at IS NULL
                    AND csp.valid_from::date <= a.date::date
                    AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
@@ -369,8 +369,8 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
           a.duration_promised AS minutes,
           SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
             COALESCE(
-              (SELECT csp.price_cents FROM customer_service_prices csp
-               WHERE csp.customer_id = a.customer_id AND csp.service_id = s.id
+              (SELECT csp.cents FROM prices csp
+               WHERE csp.scope = 'customer' AND csp.origin = 'customer_service_prices' AND csp.customer_id = a.customer_id AND csp.service_id = s.id
                  AND csp.deleted_at IS NULL
                  AND csp.valid_from::date <= a.date::date
                  AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)

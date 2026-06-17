@@ -21,7 +21,6 @@ import {
   customers,
   customerInsuranceHistory,
   customerContracts,
-  customerContractRates,
   customerContacts,
   customerNeedsAssessments,
   customerCareLevelHistory,
