@@ -29,7 +29,12 @@ Allein das Löschen von `.config/chromium` reichte **nicht** — bei 4,0 GiB Res
 1. **`.replitignore` neu angelegt** (dauerhafte Lösung): schließt Dev-/Test-/Tooling-Ballast vom Deployment-Image aus (`.git/`, `.local/`, `.cache/`, `.config/`, `tmp/`, `test-results/`, `coverage/`, `reports/`, `.stryker-tmp*/`, `tests/`, `e2e/`, …). Nichts davon wird von der Produktions-Runtime (`node dist/index.cjs`) oder dem Build (`npm run build`) gebraucht. Reduziert die Repl-Layer von ~4,0 GiB auf ~0,9 GiB. **Dokumentierte offizielle Methode** zur Image-Verkleinerung.
 2. **Puppeteer-`userDataDir` nach `/tmp` verlegt** (`server/services/pdf-generator.ts`, Defense-in-Depth): Chromium schreibt sein Profil künftig pro-Prozess-eindeutig nach `os.tmpdir()/careconnect-chromium-<pid>` — **außerhalb** des Workspaces, sodass der Ordner nie wieder ins Image wandert. Verifiziert: typecheck + lint grün, e2e-smoke „Bündel-Druck liefert PDF" grün.
 
-**Status:** Fixes angewendet, **Re-Publish über den normalen Publish-Button** ausstehend (nicht „Copy dev schema & data to production"). DB-Diff unverändert sauber/additiv.
+**Status:** ✅ **ERFOLGREICH veröffentlicht.** Re-Publish über den normalen Publish-Button (nicht „Copy dev schema & data to production").
+- **Erfolgreicher Build:** `94b24fe9-cb9b-4a91-a32f-210ec3162689` (erstellt 2026-06-17T10:20:41Z, fertig 10:24:21Z) — Status `success`. Die drei direkt davor liegenden Builds (09:30 / 10:01 / 10:10) sind die fehlgeschlagenen Versuche **vor** dem Fix.
+- **Prod-Hochlauf bestätigt:** Runtime-Logs `10:24:02 AM [express] serving on port 5000` + normale Startup-Sequenz; Live-Seite `https://senioren-engel.replit.app/login` antwortet. Die Health-Check-`connection refused`/`500`-Zeilen davor sind reines Kaltstart-Verhalten (Probe pingt während Startup-Migrationen/Pflegekassen-Import/Geocoding), danach grün.
+- Der **§45b-Juli-Fix** ist damit in Produktion.
+- DB-Diff unverändert sauber/additiv — kein Schema-Risiko.
+- **Hinweis:** Beim Prod-Start erscheint eine harmlose Pre-Publish-Backup-Erinnerung (kein Fehler): „In tmp/db-backups/ wurde keine Datei gefunden, die jünger als 24 Stunden ist." — erwartbar, da `tmp/` nun via `.replitignore` nicht mehr ins Image wandert und das Prod-Dateisystem ohnehin flüchtig ist.
 
 ---
 
