@@ -1168,3 +1168,20 @@ Sign-Konvention für Reversal-Tx ab #754: `amountCents` invertiert (wie
 bisher), Service-Cents/-Minuten/-km ebenfalls invertiert (NEU). Lexware-/
 Statistik-Aggregatoren, die `SUM(serviceCent)` über consumption + reversal
 ausrechnen, sehen 0 für stornierte Termine.
+
+## 2026-06-17 — Pre-Publish-Backup PROD (Vorbereitung, kein Publish)
+
+- **Anlass:** Vorbereitendes Vollbackup der Produktions-DB vor den geplanten irreversiblen Prod-Operationen (Budget-Hard-Delete-Reklassifikation und Preis-Tabellen-Cutover/Drop #1303). Reines Backup, **kein Publish**.
+- **Werkzeug:** `scripts/backup-prod-db.sh` mit `BACKUP_LABEL="-pre-pricing-cutover"`, `PROD_DATABASE_URL` aus dem Replit-Publishing-Tab (Neon `neondb`).
+- **Zeitstempel (UTC):** 2026-06-17T07:46:19Z
+- **Artefakte (in `tmp/db-backups/`, müssen an einen sicheren Ort außerhalb der Repl kopiert werden):**
+  - `prod-2026-06-17T07-46-19Z-pre-pricing-cutover.dump` (Custom-Format, 5,9 MB)
+    - SHA256: `470a7ac23f174cc8afd390f0726a72754aff4ef82c64dea20df311eb1c853919`
+  - `prod-2026-06-17T07-46-19Z-pre-pricing-cutover.sql.gz` (Plain-SQL, 5,6 MB)
+    - SHA256: `4e8028ec3511d974903538998dfbf18cab33c94a4910d41d8a0accd5dbc7ffd2`
+- **Integritätsprüfung:** `pg_restore --list` auf den Custom-Dump erfolgreich — Archiv vollständig lesbar, 70 Tabellen mit Daten enthalten (inkl. der für die geplanten Drops relevanten `customer_contract_rates` und Budget-Tabellen). SHA256 nach erneutem `sha256sum` unverändert.
+- **Lokaler Ablageort (außerhalb der Repl):** _⏳ nachzutragen nach Download durch Alrik._
+- **Replit/Neon-Auto-Backup (PITR ≤ 1 h):** _⏳ vor einem etwaigen Publish in Tools → Database → Backups verifizieren und Timestamp hier nachtragen._
+- **Durchgeführt von:** Alrik (manuell im Replit-Shell), unterstützt durch Replit Agent.
+- **Publish-Status:** ⏳ kein Publish — reine Backup-Vorbereitung.
+- **Sicherheitshinweis:** Der vollständige Neon-Prod-Connection-String inkl. Passwort (`neondb_owner`) war in Chat-Screenshots sichtbar → Neon-DB-Passwort nach Abschluss rotieren.
