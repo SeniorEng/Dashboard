@@ -1,37 +1,42 @@
 ---
 name: Additive-only publish diff strategy
-description: Replit publish auto-diff can emit a redundant DROP for an already-removed object and fail; keep each publish additive and verify dev vs the prod replica.
+description: Why Replit publish breaks on dev-DB objects absent from prod, and how to keep each publish additive + data-safe.
 ---
 
-# Replit publish auto-diff: keep it additive, verify against the prod replica
+Replit's "Publish" diffs the **actual dev DB ↔ actual prod DB** (introspection),
+NOT the Drizzle schema TS. It applies the generated DDL **hard, in a migration
+step BEFORE the app starts** — so it bypasses any runtime guard in the app's own
+startup migrations.
 
-When a schema change removes a DB object that another object cascade-depends on,
-Replit's publish auto-diff can generate a migration that **first** cascade-removes
-the dependent FK/object and **then** emits a *separate explicit* `DROP CONSTRAINT`/
-`DROP` for that same object → the second statement fails with "… does not exist"
-and the whole publish aborts. Nothing is applied (safe), but the deploy is blocked.
+**Two failure classes seen (both same root cause = dev-DB has an object prod
+lacks, added by a conditional/idempotent startup hook):**
 
-**Rule:** make every individual publish's schema diff **purely additive** (only
-ADD table/column/FK/index, zero drops/alters of existing objects). If a removal is
-needed, do it in a *separate, dedicated* later publish whose diff contains only that
-removal. To turn a drop-containing diff additive, temporarily **restore the legacy
-objects in the dev schema** (re-add the pgTable / column + FK) and neutralize any
-startup DDL that drops them; defer the real cleanup.
+1. **Redundant DROP ordering** — dropping a table + its inbound FK in the same
+   publish emits a `DROP CONSTRAINT` in the wrong order → publish aborts.
+   Fix: keep the legacy objects in dev (restore them), defer removal to a later
+   FK-free clean publish. (budget_ledger / captured_ledger_id.)
 
-**Why:** the failure is in Replit's generated migration ordering, not in our code;
-we can only control it by controlling what the diff contains.
+2. **CHECK/constraint validated against legacy prod rows** — a startup hook adds
+   a CHECK constraint only when dev data is clean (skips on violations). After a
+   dev reseed, dev HAS it, prod (with legacy rows) does NOT → publish tries to
+   add it hard → "violated by some row" abort. The startup hook's skip-guard and
+   its prerequisite backfill run only at app start, i.e. AFTER the failing
+   migration step, so they can't help the publish.
+   Fix: neutralize the startup hook call (keep the file: SQL constant + function
+   + drift-guard test stay green) AND `DROP CONSTRAINT IF EXISTS` it from the
+   dev DB, then restart so it isn't re-added. Defer constraint+data-remediation
+   to a dedicated follow-up. (budget_transactions_appointment_required_check:
+   99 legacy import rows = 51 consumption + 48 reversal w/ NULL appointment_id.)
 
-**How to verify the additive-only guarantee (do NOT trust the schema TS alone):**
-diff dev against the **read-only prod replica** via `executeSql({environment:"production"})`
-on `information_schema`/`pg_*`:
-- tables + columns present in PROD but missing in DEV ⇒ would be DROPPED (must be empty)
-- indexes / constraints / enum labels present in PROD but missing in DEV ⇒ DROPPED (empty)
-- per-column `data_type|is_nullable|column_default` drift on shared columns ⇒ ALTER
-Adds (in DEV not PROD) are safe. Two known noise sources: the prod replica appends a
-trailing `ROLLBACK` line to query output (not a real constraint), and numeric default
-literals differ cosmetically (`0` vs `'0'::numeric`, a harmless `SET DEFAULT` at worst).
+**Verification before telling the user to publish — check BOTH directions:**
+- DROPs (prod-not-in-dev) for accidental data loss.
+- ADDs (dev-not-in-prod): a new CHECK/UNIQUE/FK/NOT-NULL on an EXISTING table is
+  DDL-additive but can FAIL on existing prod rows. New empty tables + brand-new
+  nullable columns + their FK/index/pkey are always safe.
+Compare via `executeSql` (dev) vs `executeSql({environment:"production"})`
+(READ-ONLY replica — strip the wrapper's `START TRANSACTION`/`ROLLBACK` lines;
+GROUP-BY/`||` concat queries sometimes return only those wrapper lines on the
+replica, so fall back to plain column selects).
 
-**Gotcha:** the project's `timestamp` in `shared/schema/common.ts` is a wrapper that
-already sets `withTimezone:true` and takes only a name — restoring a legacy timestamptz
-column must call `timestamp("col")` (no options arg) or `tsc` breaks while `drizzle-kit
-push` still works (JS ignores the extra arg), masking the type error.
+**Always tell the user: use the normal Publish button, NEVER "Copy dev schema &
+data to production".**

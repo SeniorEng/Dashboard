@@ -508,12 +508,21 @@ async function runStartupTasks() {
       log(`Orphan-Reversal-Backfill fehlgeschlagen: ${err}`, "startup");
     }
 
-    const { ensureBudgetTxAppointmentConstraint } = await import("./startup/ensure-budget-tx-appointment-constraint");
-    try {
-      await ensureBudgetTxAppointmentConstraint();
-    } catch (err) {
-      log(`Budget-Tx-Appointment-Constraint-Migration fehlgeschlagen: ${err}`, "startup");
-    }
+    // INTERIM (Publish-Fenster) — Die GoBD-CHECK-Constraint
+    // `budget_transactions_appointment_required_check` wird VORÜBERGEHEND NICHT
+    // mehr beim Startup angelegt. Grund: Der automatische Replit-Publish-Diff
+    // vergleicht Dev-DB ↔ Prod-DB direkt und wendet die Constraint HART (ohne
+    // den Skip-Schutz dieses Hooks) im Migrations-Schritt VOR dem App-Start an.
+    // Die Prod-DB enthält 99 legitime Alt-Import-Zeilen (51 consumption +
+    // 48 reversal ohne appointment_id), die die Constraint verletzen → der
+    // Publish bricht ab. Da der Backfill erst beim App-Start (nach dem
+    // Migrations-Schritt) liefe, kann die Constraint im selben Publish nicht
+    // greifen. Für ein rein additives, datensicheres Publish-Fenster hält dev
+    // die Constraint daher NICHT mehr vor (Drop in der Dev-DB). Die Datei
+    // server/startup/ensure-budget-tx-appointment-constraint.ts (SQL-Konstante +
+    // Funktion + Drift-Wächter) bleibt erhalten und wird im dedizierten
+    // Folge-Task (Orphan-Backfill der 99 Zeilen → DANN Constraint) wieder
+    // scharfgeschaltet. Analog zur pausierten dropBudgetLedger()-Stufe unten.
 
     // Task #963 — fehl-datierte Storno-Reversals auf das Original-transactionDate
     // umdatieren, damit stichtagsbezogene Budget-Checks Verbrauch + Storno korrekt
