@@ -677,6 +677,24 @@ async function runStartupTasks() {
       log(`Legacy-Preis-Tabellen-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1334 — Beim Cutover-Publish hat der Schema-Diff die drei Alt-Preis-
+    // Tabellen in PRODUKTION gedroppt, BEVOR `populate-prices-from-legacy-1329`
+    // lief; diese lief dadurch als No-Op und ist im Ledger als „applied" verbucht.
+    // Ergebnis: `prices` ist in Prod leer. Diese Migration stellt die 4 aktiven
+    // Zeilen aus dem 07:46-Vollbackup über FIXE Konstanten wieder her (reine
+    // Insert-Migration, droppt nichts, legt keine Alt-Tabelle an — verhindert
+    // einen erneuten Schema-Diff-Drop-Race). Ledger-gegated unter eigenem Namen
+    // `recover-prices-from-backup` (NICHT flag-gegated); harte Soll-Wert-
+    // Verifikation rollt bei Abweichung zurück (kein Serving mit falschen Preisen).
+    const { runRecoverPricesFromBackup } = await import(
+      "./startup/recover-prices-from-backup"
+    );
+    try {
+      await runRecoverPricesFromBackup();
+    } catch (err) {
+      log(`Prices-Wiederherstellung aus Backup fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #721 — Idempotenter Read-Only-Audit der Phasen-Kette in
     // customer_budget_type_settings. Schreibt nur Log, korrigiert nichts
     // (verlorene Phasen sind nicht rekonstruierbar; Überlappungen sind

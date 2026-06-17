@@ -70,7 +70,7 @@ type LegacyOrigin =
   | "customer_service_prices";
 
 /** Eine kanonische Zielzeile für `prices` (aus einer Alt-Zeile abgeleitet). */
-interface TargetPriceRow {
+export interface TargetPriceRow {
   scope: "standard" | "customer";
   origin: LegacyOrigin;
   customerId: number | null;
@@ -323,7 +323,7 @@ export class PricePopulationConflictError extends Error {
  * bei einer In-Batch-Index-Key-Kollision mit abweichendem Wert hart ab
  * (Rollback statt stillem Überschreiben).
  */
-async function applyPricePopulation(exec: Tx, targetRows: TargetPriceRow[]): Promise<number> {
+export async function applyPricePopulation(exec: Tx, targetRows: TargetPriceRow[]): Promise<number> {
   // Bereits aktive prices-Zeilen der drei Provenienzen einmal laden.
   const existingActive = await exec
     .select({

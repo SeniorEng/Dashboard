@@ -38,6 +38,23 @@ Compare via `executeSql` (dev) vs `executeSql({environment:"production"})`
 GROUP-BY/`||` concat queries sometimes return only those wrapper lines on the
 replica, so fall back to plain column selects).
 
+3. **Data-dependent populate migration silently ledger-marked as no-op** — a
+   startup data-migration that READS a legacy table to populate a new SSoT table
+   gets bypassed when the same publish DROPs that legacy table FIRST (DDL step
+   before app start). The migration then runs against the already-gone table,
+   hits its own "source absent → clean no-op" guard, returns changed=0, AND the
+   ledger records it as **applied** → it never retries. Prod SSoT ends up empty.
+   Fix/recovery: a SEPARATE one-time ledger-gated insert migration with the lost
+   rows as **hardcoded backup constants** (do NOT read the dropped tables),
+   resolving entities at runtime (contract→customer, code→service id), skipping
+   missing entities (clean no-op in dev/test), idempotent via the same
+   soft-delete-before-insert + partial-unique-index discipline, plus a hard
+   SOLL-value priceFor verification that rolls back on deviation. (recover-prices
+   -from-backup vs the no-op'd populate-prices-from-legacy.)
+   **Lesson:** order any populate-from-legacy migration to run BEFORE the legacy
+   DROP within the same release, OR make the populate abort-without-ledger (not
+   no-op-applied) when it expected source rows but found none.
+
 **Always tell the user: use the normal Publish button, NEVER "Copy dev schema &
 data to production".**
 
