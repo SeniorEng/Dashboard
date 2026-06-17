@@ -13,7 +13,7 @@ import type { DbClient, CascadeResult } from "./types";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { getTransactionByAppointmentId } from "./transaction-storage";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { syncCarryoverAndExpiry, calculateAllocatedCents } from "./allocation-storage";
+import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
@@ -159,7 +159,7 @@ export async function computeFifoAvailability(
   const d = _tx ?? db;
   const today = transactionDate;
 
-  const specialAllocations = await budgetAllocationsRepo.selectFrom(d)
+  let specialAllocations = await budgetAllocationsRepo.selectFrom(d)
     .where(and(
       eq(budgetAllocations.customerId, customerId),
       eq(budgetAllocations.budgetType, budgetType),
@@ -185,6 +185,24 @@ export async function computeFifoAvailability(
   // für ein historisches Datum verwenden.
   const historicalTypeSettings = await readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today }, _tx);
   const totalAllocated = await calculateAllocatedCents(customerId, budgetType, { asOfDate: today }, _tx, undefined, historicalTypeSettings);
+
+  // Task #1306 — §45b-Symmetrie (gleicher Fix wie im unified-reader): Verbrauch,
+  // der gegen einen aus `Allocated` herausgefallenen Topf (abgelaufener Übertrag
+  // / per IB-Supersession verdrängte `initial_balance`) gebucht wurde, darf den
+  // laufenden Topf nicht doppelt belasten. (a) Wir filtern diese Allocations aus
+  // der FIFO-Verteilung (sonst würden NEUE Buchungen gegen die verdrängte
+  // `initial_balance` „gratis" laufen, weil der Reader ihren Verbrauch wieder
+  // herausrechnet); (b) wir ziehen ihren bisherigen Netto-Verbrauch vom
+  // totalNetConsumed ab. Exklusions-IDs aus derselben SSoT wie `totalAllocated`.
+  let excludedConsumedNetCents = 0;
+  if (budgetType === "entlastungsbetrag_45b") {
+    const excluded = await getExcluded45bConsumption(customerId, today, d, historicalTypeSettings);
+    excludedConsumedNetCents = excluded.excludedConsumedNetCents;
+    if (excluded.excludedSpecialAllocationIds.length > 0) {
+      const excludedSet = new Set(excluded.excludedSpecialAllocationIds);
+      specialAllocations = specialAllocations.filter(a => !excludedSet.has(a.id));
+    }
+  }
 
   if (totalAllocated <= 0 && specialAllocations.length === 0) {
     return { totalAvailable: 0, specialAllocations, consumedBySpecial: new Map(), reversalBySpecial: new Map() };
@@ -262,7 +280,15 @@ export async function computeFifoAvailability(
       ...txDateFilters
     ));
 
-  const totalNetConsumed = Math.max(0, Number(totalConsumedResult[0]?.total ?? 0) - Number(totalReversalsResult[0]?.total ?? 0));
+  // Task #1306 — `excludedConsumedNetCents` (Verbrauch gegen abgelaufenen
+  // Übertrag / verdrängte `initial_balance`) wird symmetrisch zur `Allocated`-
+  // Seite abgezogen, damit der laufende §45b-Topf nicht doppelt belastet wird.
+  const totalNetConsumed = Math.max(
+    0,
+    Number(totalConsumedResult[0]?.total ?? 0)
+      - Number(totalReversalsResult[0]?.total ?? 0)
+      - excludedConsumedNetCents,
+  );
   const totalAvailable = Math.max(0, totalAllocated - totalNetConsumed);
 
   return { totalAvailable, specialAllocations, consumedBySpecial, reversalBySpecial };

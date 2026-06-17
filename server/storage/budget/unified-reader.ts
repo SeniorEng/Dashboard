@@ -27,7 +27,7 @@ import { db } from "../../lib/db";
 import { customersRepo } from "../../repos";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
-import { calculateAllocatedCents } from "./allocation-storage";
+import { calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
 import { effectiveDefaultPots } from "@shared/domain/budgets";
 
@@ -212,7 +212,14 @@ export async function readUnifiedBudgetAvailability(
       preferences,
       typeSettings,
     );
-    const consumedNet = await netConsumedUpToDate(customerId, "entlastungsbetrag_45b", asOfDate, d);
+    // Task #1306 — symmetrische ConsumedNet-Korrektur: Verbrauch, der gegen
+    // einen aus `Allocated` herausgefallenen Topf (abgelaufener Übertrag / per
+    // IB-Supersession verdrängte `initial_balance`) gebucht wurde, darf den
+    // laufenden Topf nicht doppelt belasten. Die Exklusions-IDs kommen aus
+    // derselben SSoT (`calculateAllocated45b`) wie `allocated`.
+    const rawConsumedNet = await netConsumedUpToDate(customerId, "entlastungsbetrag_45b", asOfDate, d);
+    const { excludedConsumedNetCents } = await getExcluded45bConsumption(customerId, asOfDate, d, typeSettings);
+    const consumedNet = Math.max(0, rawConsumedNet - excludedConsumedNetCents);
     const holds = await activeHoldsCents(customerId, "entlastungsbetrag_45b", asOfDate, "year", d);
     const potRemaining = Math.max(0, allocated - holds - consumedNet);
 

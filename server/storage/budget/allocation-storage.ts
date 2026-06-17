@@ -469,7 +469,7 @@ export async function calculateAllocatedCents(
 
   let calculated = 0;
   if (budgetType === "entlastungsbetrag_45b") {
-    calculated = await calculateAllocated45b(customerId, opts, d, typeSettings);
+    calculated = (await calculateAllocated45b(customerId, opts, d, typeSettings)).allocatedCents;
   } else if (budgetType === "umwandlung_45a") {
     calculated = await calculateAllocated45a(customerId, opts, d, typeSettings);
   } else if (budgetType === "ersatzpflege_39_42a") {
@@ -565,12 +565,26 @@ export async function calculateAllocatedCents(
  *    FIFO-Buchung (mit `asOfDate = todayISO()` für §45b, sonst
  *    `transactionDate`).
  */
+/**
+ * Task #1306 — §45b-Allocation plus die Liste der NICHT gezählten Spezial-
+ * Allocations (abgelaufener Übertrag / per IB-Supersession verdrängte
+ * `initial_balance`). Letztere ist die SSoT für die symmetrische ConsumedNet-
+ * Korrektur: Verbrauch, der gegen einen aus `Allocated` entfernten Topf gebucht
+ * wurde, darf nicht weiter vom laufenden Topf abgezogen werden. Nur im
+ * `asOfDate`/Default-Modus relevant — der `{year}`-Pool-Modus liefert eine leere
+ * Liste.
+ */
+interface Allocated45bResult {
+  allocatedCents: number;
+  excludedSpecialAllocationIds: number[];
+}
+
 async function calculateAllocated45b(
   customerId: number,
   opts: { year?: number; asOfDate?: string; projectFuture?: boolean },
   d: Pick<typeof db, 'select'>,
   typeSettings: CustomerBudgetTypeSetting[]
-): Promise<number> {
+): Promise<Allocated45bResult> {
   const { year: curYear, month: curMonth } = currentYearAndMonth();
 
   const existingAllocations = await budgetAllocationsRepo.selectFrom(d)
@@ -671,7 +685,7 @@ async function calculateAllocated45b(
     // verschwände komplett. Wir prüfen daher gegen ALLE §45b-Zeilen
     // (`all45bSettings`, datumsunabhängig). Das Windowing übernimmt weiterhin
     // der allocStart/end-Shift weiter unten (validFrom/validTo-Klammer).
-    if (!s45bEnabled) return 0;
+    if (!s45bEnabled) return { allocatedCents: 0, excludedSpecialAllocationIds: [] };
     // Task #1204 — kein Pflegegrad und keine Allokation: Jahresanfang als Anker.
     budgetStartDate = `${curYear}-01-01`;
   }
@@ -901,7 +915,10 @@ async function calculateAllocated45b(
     const yearMonthlyTotal = sum45bStatutoryMonths(
       statutoryMonths.filter(s => s.year === opts.year),
     );
-    return yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year);
+    return {
+      allocatedCents: yearMonthlyTotal + sumInitialBalancesForYear(existingAllocations, opts.year),
+      excludedSpecialAllocationIds: [],
+    };
   }
 
   const totalCalculated = sum45bStatutoryMonths(statutoryMonths);
@@ -928,13 +945,90 @@ async function calculateAllocated45b(
   // IB-Supersession (oben) aus `initialBalanceTotal` entfernt, sodass Carryover
   // + Startwert sich nicht mehr doppeln. Es zählen nur noch nicht verfallene
   // Überträge (validFrom <= Stichtag, expiresAt >= Stichtag).
+  const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null }) =>
+    a.source === "carryover" &&
+    a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
+    (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`));
   const carryoverTotal = existingAllocations
-    .filter(a => a.source === "carryover" &&
-      a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
-      (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`)))
+    .filter(carryoverCounted)
     .reduce((sum, a) => sum + a.amountCents, 0);
 
-  return totalCalculated + initialBalanceTotal + carryoverTotal;
+  // Task #1306 — Symmetrie-Anker: Spezial-Allocations (Übertrag /
+  // `initial_balance`), die NACH den obigen Zähl-Prädikaten NICHT mehr zum
+  // verfügbaren Budget beitragen (abgelaufener Übertrag bzw. per
+  // IB-Supersession verdrängter Vorjahres-Startwert). `getExcluded45bConsumption`
+  // nutzt diese IDs, damit der gegen sie gebuchte Verbrauch nicht weiter vom
+  // laufenden Topf abgezogen wird (Allocated und ConsumedNet folgen denselben
+  // Fenster-/Supersession-Regeln).
+  const ibCounted = (a: { source: string; validFrom: string; year: number }) =>
+    a.source === "initial_balance" && a.validFrom <= ibDateLimit && a.year >= ibFloorYear;
+  const excludedSpecialAllocationIds = existingAllocations
+    .filter(a =>
+      (a.source === "initial_balance" && !ibCounted(a)) ||
+      (a.source === "carryover" && !carryoverCounted(a)),
+    )
+    .map(a => a.id);
+
+  return {
+    allocatedCents: totalCalculated + initialBalanceTotal + carryoverTotal,
+    excludedSpecialAllocationIds,
+  };
+}
+
+/**
+ * Task #1306 — Symmetrische §45b-ConsumedNet-Korrektur (SSoT).
+ *
+ * Liefert (a) die IDs der zum `asOfDate` NICHT gezählten Spezial-Allocations
+ * (abgelaufener Übertrag / verdrängte `initial_balance`) und (b) den Netto-
+ * Verbrauch (Σ|consumption|+Σ|write_off|−Σ|reversal|, bis `asOfDate`), der gegen
+ * GENAU diese Allocations gebucht wurde. Beide Verfügbarkeits-Reader
+ * (`unified-reader`, `consumption-engine`) ziehen (b) vom rohen Netto-Verbrauch
+ * ab, sodass Verbrauch gegen einen aus `Allocated` entfernten Topf nicht länger
+ * den laufenden Topf belastet. KEINE zweite Verfügbarkeits-Mathematik — die
+ * Exklusions-Regel kommt ausschließlich aus `calculateAllocated45b`.
+ */
+export async function getExcluded45bConsumption(
+  customerId: number,
+  asOfDate: string,
+  d: Pick<typeof db, 'select'>,
+  typeSettings: CustomerBudgetTypeSetting[],
+): Promise<{ excludedSpecialAllocationIds: number[]; excludedConsumedNetCents: number }> {
+  const { excludedSpecialAllocationIds } = await calculateAllocated45b(
+    customerId,
+    { asOfDate },
+    d,
+    typeSettings,
+  );
+  if (excludedSpecialAllocationIds.length === 0) {
+    return { excludedSpecialAllocationIds, excludedConsumedNetCents: 0 };
+  }
+
+  const [consumed, reversed] = await Promise.all([
+    d.select({
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+      sql`${budgetTransactions.transactionType} IN ('consumption', 'write_off')`,
+      inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds),
+      lte(budgetTransactions.transactionDate, asOfDate),
+    )),
+    d.select({
+      total: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    }).from(budgetTransactions).where(and(
+      eq(budgetTransactions.customerId, customerId),
+      eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+      eq(budgetTransactions.transactionType, "reversal"),
+      inArray(budgetTransactions.allocationId, excludedSpecialAllocationIds),
+      lte(budgetTransactions.transactionDate, asOfDate),
+    )),
+  ]);
+
+  const excludedConsumedNetCents = Math.max(
+    0,
+    Number(consumed[0]?.total ?? 0) - Number(reversed[0]?.total ?? 0),
+  );
+  return { excludedSpecialAllocationIds, excludedConsumedNetCents };
 }
 
 function sumInitialBalancesForYear(allocations: { source: string; year: number; amountCents: number }[], year: number): number {
