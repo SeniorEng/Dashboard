@@ -95,7 +95,8 @@ vi.mock("../../server/replit_integrations/object_storage/objectStorage", () => (
   },
 }));
 
-vi.mock("../../server/lib/object-storage-helpers", () => ({
+vi.mock("../../server/lib/object-storage-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../server/lib/object-storage-helpers")>()),
   parseObjectPath: (p: string) => ({ bucketName: "b", objectName: p }),
   getPrivateDir: () => "/private",
   buildInvoicePdfObjectKey: (safeNumber: string, opts?: { leistungsnachweis?: boolean }) =>

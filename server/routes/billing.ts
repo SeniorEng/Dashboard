@@ -123,7 +123,7 @@ function classifyPdfRenderError(err: unknown, subject: string): AppError {
 }
 
 router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (req, res) => {
-  const filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number } = {};
+  const filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number; dateFrom?: string; dateTo?: string } = {};
   if (req.query.year) filters.year = Number(req.query.year);
   if (req.query.month) filters.month = Number(req.query.month);
   if (req.query.customerId) filters.customerId = Number(req.query.customerId);
@@ -131,6 +131,16 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   if (req.query.insuranceProviderId) {
     const ipid = Number(req.query.insuranceProviderId);
     if (Number.isFinite(ipid) && ipid > 0) filters.insuranceProviderId = ipid;
+  }
+  // Task #1317: Optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd). Nur
+  // wohlgeformte Werte werden durchgereicht — ungültige Eingaben werden
+  // still ignoriert (Filter wirkt dann nicht), nie als 400.
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  if (typeof req.query.dateFrom === "string" && isoDate.test(req.query.dateFrom)) {
+    filters.dateFrom = req.query.dateFrom;
+  }
+  if (typeof req.query.dateTo === "string" && isoDate.test(req.query.dateTo)) {
+    filters.dateTo = req.query.dateTo;
   }
   const invoices = await storage.getInvoices(filters);
   res.json(invoices);
@@ -264,13 +274,56 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     filteredCustomerRows = customerRows.filter(c => allowed.has(c.id));
   }
 
-  // Task #996: Kunden mit bereits existierender aktiver (nicht stornierter)
-  // Rechnung für diesen Monat ausschließen — spiegelt die Idempotenz-Prüfung
-  // aus `POST /generate-all` (hasActive), damit der „Alle offenen erstellen
-  // (N)"-Counter exakt die Kunden zählt, für die die Massenerstellung
-  // tatsächlich eine Rechnung anlegt (und nicht überspringt).
+  // Task #1317: Optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd) — nur
+  // wohlgeformte Werte zählen. Ist er gesetzt, muss der Counter den auf den
+  // Bereich verengten Scope spiegeln (siehe unten).
+  const isoDateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const dateFromQ = typeof req.query.dateFrom === "string" && isoDateRe.test(req.query.dateFrom) ? req.query.dateFrom : undefined;
+  const dateToQ = typeof req.query.dateTo === "string" && isoDateRe.test(req.query.dateTo) ? req.query.dateTo : undefined;
+
   const candidateIds = filteredCustomerRows.map(c => c.id);
-  if (candidateIds.length > 0) {
+  if (candidateIds.length > 0 && (dateFromQ || dateToQ)) {
+    // Task #1317: Mit Datumsbereich erlaubt die Massenerstellung Teil-
+    // Abrechnung innerhalb des Monats. Der grobe „hat irgendeine Rechnung im
+    // Monat"-Ausschluss würde einen Kunden mit Teil-Rechnung fälschlich aus
+    // dem Counter werfen. Stattdessen: berechtigt ist, wer im gewählten
+    // Bereich mindestens einen dokumentierten Termin hat, der noch nicht
+    // abgerechnet ist (Termin-Ebene = dieselbe Idempotenz wie generate-all).
+    const rangeConds = [
+      inArray(appointments.customerId, candidateIds),
+      eq(appointments.status, "completed"),
+      appointmentsRepo.activeOnly(),
+    ];
+    if (dateFromQ) rangeConds.push(gte(appointments.date, dateFromQ));
+    if (dateToQ) rangeConds.push(lte(appointments.date, dateToQ));
+    const rangeAppts = await appointmentsRepo.selectColumnsFrom({
+      id: appointments.id,
+      customerId: appointments.customerId,
+    }).where(and(...rangeConds));
+
+    const invoicedRows = await db.select({ appointmentId: invoiceLineItems.appointmentId })
+      .from(invoiceLineItems)
+      .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+      .where(and(
+        inArray(invoicesTable.customerId, candidateIds),
+        eq(invoicesTable.billingYear, year),
+        eq(invoicesTable.billingMonth, month),
+        ne(invoicesTable.status, "storniert"),
+        ne(invoicesTable.invoiceType, "stornorechnung"),
+      ));
+    const invoicedApptIds = new Set(invoicedRows.map(r => r.appointmentId));
+
+    const eligibleByRange = new Set<number>();
+    for (const a of rangeAppts) {
+      if (a.customerId != null && !invoicedApptIds.has(a.id)) eligibleByRange.add(a.customerId);
+    }
+    filteredCustomerRows = filteredCustomerRows.filter(c => eligibleByRange.has(c.id));
+  } else if (candidateIds.length > 0) {
+    // Task #996: Ohne Datumsbereich — Kunden mit bereits existierender aktiver
+    // (nicht stornierter) Rechnung für diesen Monat ausschließen — spiegelt die
+    // Idempotenz-Prüfung aus `POST /generate-all` (hasActive), damit der „Alle
+    // offenen erstellen (N)"-Counter exakt die Kunden zählt, für die die
+    // Massenerstellung tatsächlich eine Rechnung anlegt (und nicht überspringt).
     const existingInvoices = await db.select({
       customerId: invoicesTable.customerId,
     })
@@ -2175,9 +2228,15 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     // dieser aktiven Pflegekasse. Frontend übergibt das nur, wenn der
     // Kassen-Filter auf der Abrechnungsseite gesetzt ist.
     insuranceProviderId: z.number().int().positive().optional(),
+    // Task #1317: Optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd). Engt die
+    // Massenerstellung auf Termine innerhalb des Bereichs ein (Teil-Abrechnung
+    // innerhalb des Monats). Leer = ganzer Monat (Bestandsverhalten).
+    dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
-  const { billingMonth, billingYear, insuranceProviderId } = parsed.data;
+  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo } = parsed.data;
+  const hasDateRange = !!(dateFrom || dateTo);
   // Task #586 — Strukturiertes Start-/Ende-Log + Voll-Stack im inneren
   // Catch, damit der nächste 500-Vorfall in Prod im Server-Log sofort
   // nachvollziehbar ist (Monat/Jahr, Customer-Count, created/skipped/errors,
@@ -2232,18 +2291,25 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     try {
       // Idempotenz: existiert bereits eine aktive (nicht stornierte)
       // Rechnung dieses Monats, überspringen.
-      const existing = await storage.getInvoicesForCustomerMonth(customerId, billingYear, billingMonth);
-      const hasActive = existing.some(inv => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung");
-      if (hasActive) {
-        results.push({ customerId, status: "skipped", message: "Bereits abgerechnet" });
-        continue;
+      // Task #1317: Mit Datumsbereich ist Teil-Abrechnung gewollt — der grobe
+      // „hat irgendeine Rechnung im Monat"-Skip würde den zweiten Bereich
+      // blockieren. Wir überspringen den Grob-Filter dann und überlassen die
+      // Idempotenz der Termin-Ebene in `buildInvoiceDraft` (bereits
+      // abgerechnete Termine fallen raus → „bereits abgerechnet" = Skip).
+      if (!hasDateRange) {
+        const existing = await storage.getInvoicesForCustomerMonth(customerId, billingYear, billingMonth);
+        const hasActive = existing.some(inv => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung");
+        if (hasActive) {
+          results.push({ customerId, status: "skipped", message: "Bereits abgerechnet" });
+          continue;
+        }
       }
 
       // Direkter In-Process-Aufruf der Kern-Logik — kein HTTP-Self-Call,
       // kein Cookie-Forwarding, kein Host-Header-SSRF-Risiko.
       try {
         const result = await generateInvoiceCore(
-          { customerId, billingMonth, billingYear },
+          { customerId, billingMonth, billingYear, dateFrom, dateTo },
           {
             userId: req.user!.id,
             ipAddress: req.ip,

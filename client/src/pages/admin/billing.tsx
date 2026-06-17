@@ -23,6 +23,7 @@ import {
   GenerateAllDialog,
   NewInvoiceDialog,
   StornoDialog,
+  MarkPaidDialog,
   DiscardDraftsDialog,
 } from "@/features/billing";
 
@@ -32,6 +33,10 @@ export default function AdminBilling() {
   const [selectedMonth, setSelectedMonth] = useState(today.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
   const [statusFilter, setStatusFilter] = useState("alle");
+  // Task #1317: optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd, leer = ganzer
+  // Monat). Wirkt server-seitig auf Liste UND Massenerstellung.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   // Krankenkassen-Filter: "alle" oder die insuranceProviderId als String.
   // Wirkt server-seitig auf Liste, eligible-customers, generate-all und
   // bestimmt zusätzlich die Sichtbarkeit der Bündel-Download-Buttons.
@@ -45,6 +50,8 @@ export default function AdminBilling() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<number | null>(null);
   const [stornoTarget, setStornoTarget] = useState<InvoiceItem | null>(null);
+  // Task #1317: Ziel des „Als bezahlt markieren"-Bestätigungsdialogs.
+  const [markPaidTarget, setMarkPaidTarget] = useState<InvoiceItem | null>(null);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [generateAllOpen, setGenerateAllOpen] = useState(false);
   // Task #762/#790: Fokus-Management für den „Schließen"-Button des
@@ -64,6 +71,8 @@ export default function AdminBilling() {
     selectedMonth,
     statusFilter,
     payerFilter,
+    dateFrom,
+    dateTo,
   );
 
   // Task #990: Client-seitiger Stornos-Filter — entfernt stornierte Rechnungen
@@ -75,7 +84,7 @@ export default function AdminBilling() {
       )
     : invoices;
 
-  const { data: customers } = useEligibleCustomers(selectedYear, selectedMonth, payerFilter);
+  const { data: customers } = useEligibleCustomers(selectedYear, selectedMonth, payerFilter, dateFrom, dateTo);
 
   const previewCustomerId = selectedCustomerId ? parseInt(selectedCustomerId, 10) : null;
   const {
@@ -125,6 +134,8 @@ export default function AdminBilling() {
     selectedYear,
     statusFilter,
     payerFilter,
+    dateFrom,
+    dateTo,
     setStatusFilter,
     onGenerateSuccess: () => {
       setDialogOpen(false);
@@ -224,6 +235,10 @@ export default function AdminBilling() {
         setStatusFilter={setStatusFilter}
         payerFilter={payerFilter}
         setPayerFilter={setPayerFilter}
+        dateFrom={dateFrom}
+        setDateFrom={setDateFrom}
+        dateTo={dateTo}
+        setDateTo={setDateTo}
         hideStornos={hideStornos}
         setHideStornos={setHideStornos}
         payers={payers}
@@ -253,6 +268,7 @@ export default function AdminBilling() {
         markSentMutation={markSentMutation}
         statusMutation={statusMutation}
         onStorno={setStornoTarget}
+        onMarkPaid={setMarkPaidTarget}
       />
 
       <BulkSendDialog
@@ -317,6 +333,12 @@ export default function AdminBilling() {
       <StornoDialog
         stornoTarget={stornoTarget}
         onOpenChange={(open) => !open && setStornoTarget(null)}
+        statusMutation={statusMutation}
+      />
+
+      <MarkPaidDialog
+        markPaidTarget={markPaidTarget}
+        onOpenChange={(open) => !open && setMarkPaidTarget(null)}
         statusMutation={statusMutation}
       />
 

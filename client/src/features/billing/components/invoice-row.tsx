@@ -20,6 +20,8 @@ import {
   Eye,
   Printer,
   MoreHorizontal,
+  MailCheck,
+  Banknote,
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
@@ -49,6 +51,9 @@ interface InvoiceRowProps {
   markSentMutation: UseMutationResult<unknown, Error, number, unknown>;
   statusMutation: UseMutationResult<unknown, Error, { id: number; status: string }, unknown>;
   onStorno: (invoice: InvoiceItem) => void;
+  // Task #1317: „Bezahlt" ist eine bewusste, bestätigungspflichtige Aktion —
+  // der Row meldet nur den Wunsch, die Bestätigung läuft im MarkPaidDialog.
+  onMarkPaid: (invoice: InvoiceItem) => void;
 }
 
 export function InvoiceRow({
@@ -63,6 +68,7 @@ export function InvoiceRow({
   markSentMutation,
   statusMutation,
   onStorno,
+  onMarkPaid,
 }: InvoiceRowProps) {
   const pdfStatus = getPdfStatus(invoice);
   const customerDisplay = getInvoiceCustomerDisplayName(invoice);
@@ -226,20 +232,6 @@ export function InvoiceRow({
                 </Button>
               )}
 
-              {invoice.status === "versendet" && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                  onClick={() => statusMutation.mutate({ id: invoice.id, status: "bezahlt" })}
-                  disabled={statusMutation.isPending}
-                  data-testid={`button-status-bezahlt-${invoice.id}`}
-                >
-                  <Check className={`${iconSize.sm} mr-1`} />
-                  <span>Bezahlt</span>
-                </Button>
-              )}
-
               {canStorno && (
                 <Button
                   variant="ghost"
@@ -310,6 +302,36 @@ export function InvoiceRow({
                       Drucken (Rechnung + Nachweis)
                     </a>
                   </DropdownMenuItem>
+                  {/* Task #1317: Zahlungs-Lebenszyklus — „Avis erhalten" und
+                      „Bezahlt" sind bewusste Aktionen ab Status „versendet".
+                      „Avis erhalten" (Zahlungsavis der Kasse) ist ein
+                      Zwischenschritt ohne Bestätigung; „Als bezahlt markieren"
+                      ist endgültig und läuft über den Bestätigungsdialog. So
+                      kann „versendet" nie still zu „bezahlt" werden. */}
+                  {(invoice.status === "versendet" || invoice.status === "avis_erhalten") && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {invoice.status === "versendet" && (
+                        <DropdownMenuItem
+                          onSelect={() => statusMutation.mutate({ id: invoice.id, status: "avis_erhalten" })}
+                          disabled={statusMutation.isPending}
+                          data-testid={`button-status-avis-${invoice.id}`}
+                        >
+                          <MailCheck className={`${iconSize.sm} mr-2`} />
+                          Avis erhalten
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        onSelect={() => onMarkPaid(invoice)}
+                        disabled={statusMutation.isPending}
+                        className="text-green-700 focus:text-green-700"
+                        data-testid={`button-status-bezahlt-${invoice.id}`}
+                      >
+                        <Banknote className={`${iconSize.sm} mr-2`} />
+                        Als bezahlt markieren
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   {/* Task #533: „Als versendet markieren" für gesetzliche
                       Pflegekassen-Entwürfe ist dort eine Sekundär-Aktion
                       (Primär = „An Kasse senden") und lebt daher im Menü. */}

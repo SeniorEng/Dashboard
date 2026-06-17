@@ -7,4 +7,5 @@ export { BulkPrintDialog } from "./bulk-print-dialog";
 export { GenerateAllDialog } from "./generate-all-dialog";
 export { NewInvoiceDialog } from "./new-invoice-dialog";
 export { StornoDialog } from "./storno-dialog";
+export { MarkPaidDialog } from "./mark-paid-dialog";
 export { DiscardDraftsDialog } from "./discard-drafts-dialog";

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { iconSize } from "@/design-system";
 import { Plus, Send, Loader2, FileText, Printer, Layers } from "lucide-react";
 import type { BillingCustomerItem, InvoiceItem, PayerSummary } from "@shared/api";
@@ -18,6 +19,12 @@ interface BillingFiltersCardProps {
   setStatusFilter: (status: string) => void;
   payerFilter: string;
   setPayerFilter: (payer: string) => void;
+  // Task #1317: optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd, leer = ganzer
+  // Monat). Engt Liste UND Massenerstellung innerhalb des Monats ein.
+  dateFrom: string;
+  setDateFrom: (date: string) => void;
+  dateTo: string;
+  setDateTo: (date: string) => void;
   hideStornos: boolean;
   setHideStornos: (hide: boolean) => void;
   payers: PayerSummary[] | undefined;
@@ -44,6 +51,10 @@ export function BillingFiltersCard({
   setStatusFilter,
   payerFilter,
   setPayerFilter,
+  dateFrom,
+  setDateFrom,
+  dateTo,
+  setDateTo,
   hideStornos,
   setHideStornos,
   payers,
@@ -59,6 +70,13 @@ export function BillingFiltersCard({
   onOpenGenerateAll,
   onOpenNewInvoice,
 }: BillingFiltersCardProps) {
+  // Task #1317: Datums-Picker auf den gewählten Monat begrenzen, damit der
+  // von–bis-Bereich nur INNERHALB des Monats verengt (nie darüber hinaus).
+  const pad2 = (n: number) => n.toString().padStart(2, "0");
+  const monthStart = `${selectedYear}-${pad2(selectedMonth)}-01`;
+  const monthEnd = `${selectedYear}-${pad2(selectedMonth)}-${pad2(
+    new Date(selectedYear, selectedMonth, 0).getDate(),
+  )}`;
   return (
     <Card className="mb-6">
       <CardContent className="p-4">
@@ -125,6 +143,45 @@ export function BillingFiltersCard({
                 ))}
               </SelectContent>
             </Select>
+
+            <span className="text-sm text-gray-500">Zeitraum:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="date"
+                value={dateFrom}
+                min={monthStart}
+                max={dateTo || monthEnd}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full max-w-[170px]"
+                aria-label="Zeitraum von"
+                data-testid="input-billing-date-from"
+              />
+              <span className="text-sm text-gray-400">–</span>
+              <Input
+                type="date"
+                value={dateTo}
+                min={dateFrom || monthStart}
+                max={monthEnd}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full max-w-[170px]"
+                aria-label="Zeitraum bis"
+                data-testid="input-billing-date-to"
+              />
+              {(dateFrom || dateTo) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-500"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                  data-testid="button-clear-date-range"
+                >
+                  Zurücksetzen
+                </Button>
+              )}
+            </div>
 
             <span className="text-sm text-gray-500">Stornos:</span>
             <div className="flex items-center gap-2">

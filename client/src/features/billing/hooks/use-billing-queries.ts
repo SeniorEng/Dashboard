@@ -15,15 +15,22 @@ export function useBillingInvoices(
   selectedMonth: number,
   statusFilter: string,
   payerFilter: string,
+  // Task #1317: Optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd). Leer = ganzer
+  // Monat. Liegt im QueryKey NACH payerFilter, damit die `refetchWithPoll`-
+  // Prefix-Keys aus den Mutations weiterhin matchen.
+  dateFrom = "",
+  dateTo = "",
 ) {
   return useQuery({
-    queryKey: ["billing-invoices", selectedYear, selectedMonth, statusFilter, payerFilter],
+    queryKey: ["billing-invoices", selectedYear, selectedMonth, statusFilter, payerFilter, dateFrom, dateTo],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       if (statusFilter !== "alle") params.set("status", statusFilter);
       if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
       const result = await api.get<InvoiceItem[]>(`/billing?${params.toString()}`, signal);
       return unwrapResult(result);
     },
@@ -34,14 +41,19 @@ export function useEligibleCustomers(
   selectedYear: number,
   selectedMonth: number,
   payerFilter: string,
+  // Task #1317: siehe useBillingInvoices — Datumsbereich am Ende des QueryKeys.
+  dateFrom = "",
+  dateTo = "",
 ) {
   return useQuery({
-    queryKey: ["billing-eligible-customers", selectedYear, selectedMonth, payerFilter],
+    queryKey: ["billing-eligible-customers", selectedYear, selectedMonth, payerFilter, dateFrom, dateTo],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       params.set("month", selectedMonth.toString());
       params.set("year", selectedYear.toString());
       if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
       const result = await api.get<BillingCustomerItem[]>(`/billing/eligible-customers?${params.toString()}`, signal);
       return unwrapResult(result);
     },

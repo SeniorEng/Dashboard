@@ -6,7 +6,7 @@ import {
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import type { InvoiceWithCustomer } from "../storage";
 
-export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number }): Promise<InvoiceWithCustomer[]> {
+export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number; dateFrom?: string; dateTo?: string }): Promise<InvoiceWithCustomer[]> {
   const { invoices, customers } = await import("@shared/schema");
   const { eq, and, asc, desc, sql } = await import("drizzle-orm");
   const conditions: Array<ReturnType<typeof eq> | ReturnType<typeof sql>> = [];
@@ -14,6 +14,20 @@ export async function getInvoices(filters: { year?: number; month?: number; cust
   if (filters.month) conditions.push(eq(invoices.billingMonth, filters.month));
   if (filters.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
   if (filters.status) conditions.push(eq(invoices.status, filters.status as string));
+  // Task #1317: Optionaler Datumsbereich (von–bis) — engt die Liste auf
+  // Rechnungen ein, die mindestens eine Leistungszeile mit einem
+  // Termindatum im gewählten Bereich tragen. Wirkt ZUSÄTZLICH zu
+  // Monat/Jahr/Status/Kasse (Verfeinerung innerhalb des Monats). Beide
+  // Grenzen sind unabhängig optional (nur „von", nur „bis" oder beide).
+  if (filters.dateFrom || filters.dateTo) {
+    const parts = [sql`ili.invoice_id = ${invoices.id}`];
+    if (filters.dateFrom) parts.push(sql`ili.appointment_date >= ${filters.dateFrom}`);
+    if (filters.dateTo) parts.push(sql`ili.appointment_date <= ${filters.dateTo}`);
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM invoice_line_items ili
+      WHERE ${sql.join(parts, sql` AND `)}
+    )`);
+  }
   // Krankenkassen-Filter: matched gegen den aktuell aktiven Insurance-History-
   // Eintrag des Kunden (validTo IS NULL). Selbstzahler-Rechnungen haben keinen
   // Eintrag und fallen damit automatisch raus, was dem Filter-Intent entspricht.

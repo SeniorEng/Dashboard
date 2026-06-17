@@ -19,6 +19,10 @@ interface UseBillingMutationsArgs {
   selectedYear: number;
   statusFilter: string;
   payerFilter: string;
+  // Task #1317: optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd, leer = ganzer
+  // Monat) — engt die Massenerstellung auf den Bereich ein.
+  dateFrom?: string;
+  dateTo?: string;
   setStatusFilter: (status: string) => void;
   // Dialog-/Auswahl-State, das die Mutationen bei Erfolg zurücksetzen:
   onGenerateSuccess: () => void;
@@ -31,6 +35,8 @@ export function useBillingMutations({
   selectedYear,
   statusFilter,
   payerFilter,
+  dateFrom = "",
+  dateTo = "",
   setStatusFilter,
   onGenerateSuccess,
   onDiscardSettled,
@@ -188,6 +194,8 @@ export function useBillingMutations({
         billingMonth: selectedMonth,
         billingYear: selectedYear,
         ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
+        ...(dateFrom ? { dateFrom } : {}),
+        ...(dateTo ? { dateTo } : {}),
       });
       return unwrapResult(result);
     },

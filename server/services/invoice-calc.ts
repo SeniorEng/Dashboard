@@ -4,7 +4,7 @@ import type { BudgetType } from "@shared/domain/budgets";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import { appointments, invoices as invoicesTable, type Invoice } from "@shared/schema";
-import { eq, and, gte, lt, ne } from "drizzle-orm";
+import { eq, and, gte, lt, lte, ne, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { todayISO, addDays } from "@shared/utils/datetime";
 import { STANDARD_VAT_RATE_BP } from "@shared/domain/invoice-vat";
@@ -124,8 +124,13 @@ export async function buildInvoiceDraft(input: {
   customerId: number;
   billingMonth: number;
   billingYear: number;
+  // Task #1317: Optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd). Engt die
+  // abzurechnenden Termine auf den Bereich ein (Teil-Abrechnung innerhalb des
+  // Monats). Leer = ganzer Monat (Bestandsverhalten).
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<InvoiceDraft> {
-  const { customerId, billingMonth, billingYear } = input;
+  const { customerId, billingMonth, billingYear, dateFrom, dateTo } = input;
 
   const customer = await storage.getCustomer(customerId);
   if (!customer) throw notFound("Kunde nicht gefunden");
@@ -195,11 +200,30 @@ export async function buildInvoiceDraft(input: {
   const stornoRefsForInsert: number[] | null =
     referencedStornoInvoiceIds.length > 0 ? referencedStornoInvoiceIds : null;
 
-  const apptIds = alreadyInvoicedIds.length > 0
+  let apptIds = alreadyInvoicedIds.length > 0
     ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
     : allApptIds;
   if (apptIds.length === 0) {
     throw badRequest("Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.");
+  }
+
+  // Task #1317: Optionaler von–bis-Datumsbereich — engt die abzurechnenden
+  // Termine auf den gewählten Bereich innerhalb des Monats ein. Beide Grenzen
+  // unabhängig optional; leer = ganzer Monat (oben unverändert).
+  if (dateFrom || dateTo) {
+    const rangeConds = [
+      inArray(appointments.id, apptIds),
+      appointmentsRepo.activeOnly(),
+    ];
+    if (dateFrom) rangeConds.push(gte(appointments.date, dateFrom));
+    if (dateTo) rangeConds.push(lte(appointments.date, dateTo));
+    const inRangeRows = await appointmentsRepo.selectColumnsFrom({ id: appointments.id })
+      .where(and(...rangeConds));
+    const inRangeIds = new Set(inRangeRows.map(r => r.id));
+    apptIds = apptIds.filter(id => inRangeIds.has(id));
+    if (apptIds.length === 0) {
+      throw badRequest("Im gewählten Datumsbereich gibt es keine abrechenbaren Termine.");
+    }
   }
 
   const billingType = customer.billingType || "selbstzahler";
@@ -341,10 +365,10 @@ export async function buildInvoiceDraft(input: {
 // Kein HTTP-Self-Call, kein Forwarden von Session-Cookies, kein
 // Host-Header-SSRF-Risiko. /generate ist nur noch ein dünner Wrapper.
 export async function generateInvoiceCore(
-  input: { customerId: number; billingMonth: number; billingYear: number },
+  input: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string },
   ctx: { userId: number; ipAddress?: string; testFaults: Set<string> },
 ): Promise<GenerateInvoiceResult> {
-  const { customerId, billingMonth, billingYear } = input;
+  const { customerId, billingMonth, billingYear, dateFrom, dateTo } = input;
   // Lokales Shadow-`req`-Objekt, damit der unten kopierte Body unverändert
   // bleibt (`req.user!.id`, `req.ip`, `readTestFaults(req)` lesen weiterhin).
   const req = {
@@ -361,7 +385,7 @@ export async function generateInvoiceCore(
 
   // Task #750: gemeinsame Berechnung mit Preview — derselbe Helper, derselbe
   // Pfad. Verhindert Drift zwischen „Vorschau im Dialog" und finaler Rechnung.
-  let draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear });
+  let draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo });
 
   // Task #1014: Netto-null-belegte Termine (alle Konsum-Buchungen storniert,
   // z.B. nach Rechnungs-Storno) werden bei der ERSTELLUNG — nicht in der
@@ -379,7 +403,7 @@ export async function generateInvoiceCore(
       userId: ctx.userId,
     });
     if (rebookedAppointmentIds.length > 0) {
-      draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear });
+      draft = await buildInvoiceDraft({ customerId, billingMonth, billingYear, dateFrom, dateTo });
     }
   }
   const {

@@ -18,6 +18,7 @@ interface InvoiceListProps {
   markSentMutation: UseMutationResult<unknown, Error, number, unknown>;
   statusMutation: UseMutationResult<unknown, Error, { id: number; status: string }, unknown>;
   onStorno: (invoice: InvoiceItem) => void;
+  onMarkPaid: (invoice: InvoiceItem) => void;
 }
 
 export function InvoiceList({
@@ -33,6 +34,7 @@ export function InvoiceList({
   markSentMutation,
   statusMutation,
   onStorno,
+  onMarkPaid,
 }: InvoiceListProps) {
   if (invoicesLoading) {
     return (
@@ -59,6 +61,7 @@ export function InvoiceList({
             markSentMutation={markSentMutation}
             statusMutation={statusMutation}
             onStorno={onStorno}
+            onMarkPaid={onMarkPaid}
           />
         ))}
       </div>
