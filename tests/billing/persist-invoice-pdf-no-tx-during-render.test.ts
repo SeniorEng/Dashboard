@@ -104,6 +104,8 @@ vi.mock("../../server/lib/object-storage-helpers", () => ({
       : `invoices/${safeNumber}.pdf`,
   assertInvoicePdfWriteKeyAllowed: () => {},
   isObjectStorageConfigured: () => true,
+  isProductionPdfEnv: () => false,
+  getInvoicePdfKeyPrefix: () => "invoices/",
 }));
 
 vi.mock("../../server/lib/db", () => {
