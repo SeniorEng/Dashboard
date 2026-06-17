@@ -1,0 +1,78 @@
+ FAIL   integration  tests/billing/invoice-pdf-margins.test.ts > Task #1066 — effektive Rechnungs-/LN-Seitenränder > Rechnungs-Template: konfigurierte Margin verkleinert den Inhaltskasten um exakt das Margin-Verhältnis
+Error: The browser is already running for /tmp/careconnect-chromium-5452. Use a different `userDataDir` or stop the running browser first.
+ ❯ ChromeLauncher.launch node_modules/puppeteer-core/src/node/BrowserLauncher.ts:236:14
+ ❯ launchBrowser server/services/pdf-generator.ts:309:15
+    307|   let browser: Browser;
+    308|   try {
+    309|     browser = await Promise.race([launchPromiseInner, timeoutPromise]);
+       |               ^
+    310|   } catch (err) {
+    311|     const dump = getChromiumLogSnapshot(40);
+ ❯ server/services/pdf-generator.ts:338:17
+ ❯ withFreshPage server/services/pdf-generator.ts:496:25
+ ❯ generatePdf server/lib/pdf-generator.ts:1110:18
+ ❯ measureContentBox tests/billing/invoice-pdf-margins.test.ts:181:22
+ ❯ tests/billing/invoice-pdf-margins.test.ts:197:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL   integration  tests/billing/invoice-pdf-margins.test.ts > Task #1066 — effektive Rechnungs-/LN-Seitenränder > Leistungsnachweis-Template: konfigurierte Margin verkleinert den Inhaltskasten um exakt das Margin-Verhältnis
+Error: The browser is already running for /tmp/careconnect-chromium-5452. Use a different `userDataDir` or stop the running browser first.
+ ❯ ChromeLauncher.launch node_modules/puppeteer-core/src/node/BrowserLauncher.ts:236:14
+ ❯ launchBrowser server/services/pdf-generator.ts:309:15
+    307|   let browser: Browser;
+    308|   try {
+    309|     browser = await Promise.race([launchPromiseInner, timeoutPromise]);
+       |               ^
+    310|   } catch (err) {
+    311|     const dump = getChromiumLogSnapshot(40);
+ ❯ server/services/pdf-generator.ts:338:17
+ ❯ withFreshPage server/services/pdf-generator.ts:496:25
+ ❯ generatePdf server/lib/pdf-generator.ts:1110:18
+ ❯ measureContentBox tests/billing/invoice-pdf-margins.test.ts:181:22
+ ❯ tests/billing/invoice-pdf-margins.test.ts:225:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL   integration  tests/billing/invoice-pdf-margins.test.ts > Task #1072 — Rechnung/LN: mengen-robuste Seitenumbrüche (großer Monat) > Rechnung mit 60 Positionen bricht mehrseitig um und wiederholt den Tabellenkopf
+Error: The browser is already running for /tmp/careconnect-chromium-5452. Use a different `userDataDir` or stop the running browser first.
+ ❯ ChromeLauncher.launch node_modules/puppeteer-core/src/node/BrowserLauncher.ts:236:14
+ ❯ launchBrowser server/services/pdf-generator.ts:309:15
+    307|   let browser: Browser;
+    308|   try {
+    309|     browser = await Promise.race([launchPromiseInner, timeoutPromise]);
+       |               ^
+    310|   } catch (err) {
+    311|     const dump = getChromiumLogSnapshot(40);
+ ❯ server/services/pdf-generator.ts:338:17
+ ❯ withFreshPage server/services/pdf-generator.ts:496:25
+ ❯ generatePdf server/lib/pdf-generator.ts:1110:18
+ ❯ tests/billing/invoice-pdf-margins.test.ts:335:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL   integration  tests/billing/invoice-pdf-margins.test.ts > Task #1072 — Rechnung/LN: mengen-robuste Seitenumbrüche (großer Monat) > Leistungsnachweis mit 60 Terminen bricht mehrseitig um, wiederholt den Kopf und hält den Unterschriftsblock zusammen
+Error: The browser is already running for /tmp/careconnect-chromium-5452. Use a different `userDataDir` or stop the running browser first.
+ ❯ ChromeLauncher.launch node_modules/puppeteer-core/src/node/BrowserLauncher.ts:236:14
+ ❯ launchBrowser server/services/pdf-generator.ts:309:15
+    307|   let browser: Browser;
+    308|   try {
+    309|     browser = await Promise.race([launchPromiseInner, timeoutPromise]);
+       |               ^
+    310|   } catch (err) {
+    311|     const dump = getChromiumLogSnapshot(40);
+ ❯ server/services/pdf-generator.ts:338:17
+ ❯ withFreshPage server/services/pdf-generator.ts:496:25
+ ❯ generatePdf server/lib/pdf-generator.ts:1110:18
+ ❯ tests/billing/invoice-pdf-margins.test.ts:360:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed | 337 passed | 19 skipped (357)
+      Tests  4 failed | 2397 passed | 1 expected fail | 71 skipped (2489)
+   Start at  10:29:13
+   Duration  677.87s (transform 7.65s, setup 7.83s, import 83.62s, tests 555.68s, environment 5.27s)
+
+JUNIT report written to /home/runner/work/Dashboard/Dashboard/test-results/vitest-junit.xml
+Error: Process completed with exit code 1.
