@@ -45,7 +45,7 @@
 
 import { writeFileSync } from "node:fs";
 import { and, eq, gte, isNull } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { appointments, appointmentServices, services } from "@shared/schema";
 import { resolvePriceFor, type VersionedPriceRow, type PriceCatalogEntry } from "@shared/domain/pricing/price-for";
 import { buildConsolidationReport } from "./report-price-consolidation-conflicts";
@@ -105,10 +105,14 @@ export interface Gate2Result {
   }>;
 }
 
-export async function runGate2Diff(months: number, asOf: string): Promise<Gate2Result> {
+export async function runGate2Diff(
+  months: number,
+  asOf: string,
+  exec: DbOrTx = db,
+): Promise<Gate2Result> {
   // EINE Lade-/Mapping-Quelle für alle drei Tabellen (Soft-Delete-konform,
   // Kategorie→Service-ID gemappt) — wiederverwendet aus dem Konflikt-Report.
-  const report = await buildConsolidationReport(asOf);
+  const report = await buildConsolidationReport(asOf, exec);
 
   // Gruppieren nach Quelle in zeitversionierte Zeilen.
   const cspByKey = new Map<string, VersionedPriceRow[]>(); // `${cust}:${svc}`
@@ -132,7 +136,7 @@ export async function runGate2Diff(months: number, asOf: string): Promise<Gate2R
   }
 
   // Katalog (Default + billable).
-  const catalogRows = await db
+  const catalogRows = await exec
     .select({ id: services.id, defaultPriceCents: services.defaultPriceCents, isBillable: services.isBillable })
     .from(services);
   const catalogById = new Map<number, PriceCatalogEntry>(
@@ -165,7 +169,7 @@ export async function runGate2Diff(months: number, asOf: string): Promise<Gate2R
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - months);
   const cutoffStr = toDateStr(cutoff)!;
-  const appts = await db
+  const appts = await exec
     .select({ customerId: appointments.customerId, date: appointments.date, serviceId: appointmentServices.serviceId })
     .from(appointments)
     .innerJoin(appointmentServices, eq(appointmentServices.appointmentId, appointments.id))

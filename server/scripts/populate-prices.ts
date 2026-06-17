@@ -21,7 +21,7 @@
  *   Trockenlauf (Default):  tsx server/scripts/populate-prices.ts
  *   Scharf ausführen:       tsx server/scripts/populate-prices.ts --apply
  */
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { prices, PRICE_ORIGINS, type PriceOriginKind } from "@shared/schema";
 import { buildConsolidationReport } from "./report-price-consolidation-conflicts";
 
@@ -76,24 +76,24 @@ function assertNotProduction(): void {
   console.log(`Sicherheits-Check ok. DB-Host: ${host || "(unbekannt)"}`);
 }
 
-async function main(): Promise<void> {
-  const apply = process.argv.includes("--apply");
-  assertNotProduction();
+export interface PricePopulationPlan {
+  asOf: string;
+  sourceRowCount: number;
+  eligibleCount: number;
+  existingCount: number;
+  toInsert: TargetRow[];
+  unmapped: { source: string; sourceRowId: number; serviceLabel: string; customerId: number | null }[];
+  droppedNoValidFrom: TargetRow[];
+}
 
-  const asOf = toDateStr(new Date())!;
-  const report = await buildConsolidationReport(asOf);
+/**
+ * Plant die additive `prices`-Befüllung READ-ONLY über den gegebenen Executor
+ * (DB oder offene Transaktion). Schreibt NICHTS. Liefert die Liste der noch
+ * fehlenden Zeilen (`toInsert`) sowie Diagnose-Zähler.
+ */
+export async function planPricePopulation(exec: DbOrTx, asOf: string): Promise<PricePopulationPlan> {
+  const report = await buildConsolidationReport(asOf, exec);
 
-  if (report.unmapped.length > 0) {
-    console.warn(
-      `WARNUNG: ${report.unmapped.length} Zeile(n) ohne Katalog-Service (serviceId == null) — ` +
-        "werden NICHT eingespielt (Verlust-Risiko). Quellen:",
-    );
-    for (const u of report.unmapped) {
-      console.warn(`  - ${u.source} #${u.sourceRowId} (${u.serviceLabel}, customerId=${u.customerId ?? "—"})`);
-    }
-  }
-
-  // Quelle → Ziel-Zeile. serviceId-null wurde oben gewarnt und wird hier gefiltert.
   const droppedNoValidFrom: TargetRow[] = [];
   const targets: TargetRow[] = [];
   for (const r of report.rows) {
@@ -107,12 +107,9 @@ async function main(): Promise<void> {
     }
     targets.push({ scope, origin, customerId, serviceId: r.serviceId, cents: r.priceCents, validFrom: r.validFrom, validTo: r.validTo });
   }
-  if (droppedNoValidFrom.length > 0) {
-    console.warn(`WARNUNG: ${droppedNoValidFrom.length} Zeile(n) ohne validFrom übersprungen (validFrom ist NOT NULL).`);
-  }
 
   // Bereits vorhandene `prices`-Zeilen → Natural-Key-Set für Idempotenz.
-  const existing = await db
+  const existing = await exec
     .select({
       scope: prices.scope,
       origin: prices.origin,
@@ -147,9 +144,73 @@ async function main(): Promise<void> {
     toInsert.push(t);
   }
 
+  return {
+    asOf,
+    sourceRowCount: report.rows.length,
+    eligibleCount: targets.length,
+    existingCount: existing.length,
+    toInsert,
+    unmapped: report.unmapped.map((u) => ({
+      source: u.source,
+      sourceRowId: u.sourceRowId,
+      serviceLabel: u.serviceLabel,
+      customerId: u.customerId,
+    })),
+    droppedNoValidFrom,
+  };
+}
+
+export interface PricePopulationResult {
+  inserted: number;
+  plan: PricePopulationPlan;
+}
+
+/**
+ * Additive, idempotente `prices`-Befüllung über den gegebenen Executor. Innerhalb
+ * einer Transaktion aufrufbar (z. B. aus der Konsolidierungs-Migration), damit
+ * Befüllung + Gate-2 + Drop atomar laufen. Schreibt nur fehlende Natural-Keys.
+ */
+export async function populatePricesInto(exec: DbOrTx, asOf: string): Promise<PricePopulationResult> {
+  const plan = await planPricePopulation(exec, asOf);
+  if (plan.toInsert.length > 0) {
+    await exec.insert(prices).values(
+      plan.toInsert.map((t) => ({
+        scope: t.scope,
+        origin: t.origin,
+        customerId: t.customerId,
+        serviceId: t.serviceId,
+        cents: t.cents,
+        validFrom: t.validFrom,
+        validTo: t.validTo,
+      })),
+    );
+  }
+  return { inserted: plan.toInsert.length, plan };
+}
+
+async function main(): Promise<void> {
+  const apply = process.argv.includes("--apply");
+  assertNotProduction();
+
+  const asOf = toDateStr(new Date())!;
+  const plan = await planPricePopulation(db, asOf);
+
+  if (plan.unmapped.length > 0) {
+    console.warn(
+      `WARNUNG: ${plan.unmapped.length} Zeile(n) ohne Katalog-Service (serviceId == null) — ` +
+        "werden NICHT eingespielt (Verlust-Risiko). Quellen:",
+    );
+    for (const u of plan.unmapped) {
+      console.warn(`  - ${u.source} #${u.sourceRowId} (${u.serviceLabel}, customerId=${u.customerId ?? "—"})`);
+    }
+  }
+  if (plan.droppedNoValidFrom.length > 0) {
+    console.warn(`WARNUNG: ${plan.droppedNoValidFrom.length} Zeile(n) ohne validFrom übersprungen (validFrom ist NOT NULL).`);
+  }
+
   console.log(
-    `Report asOf=${asOf}: Quellzeilen=${report.rows.length} · einspielbar=${targets.length} · ` +
-      `bereits vorhanden=${existing.length} · NEU=${toInsert.length}`,
+    `Report asOf=${asOf}: Quellzeilen=${plan.sourceRowCount} · einspielbar=${plan.eligibleCount} · ` +
+      `bereits vorhanden=${plan.existingCount} · NEU=${plan.toInsert.length}`,
   );
 
   if (!apply) {
@@ -157,28 +218,20 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (toInsert.length === 0) {
+  if (plan.toInsert.length === 0) {
     console.log("Nichts zu tun — `prices` ist bereits aktuell.");
     return;
   }
 
-  await db.insert(prices).values(
-    toInsert.map((t) => ({
-      scope: t.scope,
-      origin: t.origin,
-      customerId: t.customerId,
-      serviceId: t.serviceId,
-      cents: t.cents,
-      validFrom: t.validFrom,
-      validTo: t.validTo,
-    })),
-  );
-  console.log(`Fertig: ${toInsert.length} Zeile(n) in \`prices\` eingefügt.`);
+  const result = await populatePricesInto(db, asOf);
+  console.log(`Fertig: ${result.inserted} Zeile(n) in \`prices\` eingefügt.`);
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+}

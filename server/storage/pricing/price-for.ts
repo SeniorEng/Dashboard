@@ -87,34 +87,71 @@ export async function loadCustomerPriceContext(
   }
 
   // Aktive Kunden-Preiszeilen (zeitversioniert), gruppiert nach Service.
+  //
+  // Quelle ist an denselben Default-OFF-Schalter gebunden wie der Standard-Scope
+  // (`PRICES_STANDARD_SCOPE`), weil der Konsolidierungs-Cutover (Task #1303) beide
+  // gemeinsam umlegt: er befüllt `prices` (scope="customer", Provenienz csp+ccr),
+  // schaltet das Flag ein und DROPpt danach `customer_service_prices`. AUS
+  // (Default) ⇒ Lesen aus der Alt-Tabelle (heutiges Live-Verhalten, Tests grün).
+  // EIN ⇒ Lesen aus `prices` (scope="customer"); wertgleich GENAU DANN, wenn
+  // Gate-2 0 Abweichungen bestätigt hat (Vorbedingung des Cutovers).
   const customerByServiceId = new Map<number, VersionedPriceRow[]>();
   if (customerId != null) {
-    const rows = await customerServicePricesRepo
-      .selectColumnsFrom(
-        {
-          id: customerServicePrices.id,
-          serviceId: customerServicePrices.serviceId,
-          priceCents: customerServicePrices.priceCents,
-          validFrom: customerServicePrices.validFrom,
-          validTo: customerServicePrices.validTo,
-        },
-        tx,
-      )
-      .where(
-        and(
-          eq(customerServicePrices.customerId, customerId),
-          customerServicePricesRepo.activeOnly(),
-        ),
-      );
-    for (const raw of rows) {
-      const list = customerByServiceId.get(raw.serviceId) ?? [];
-      list.push({
-        id: Number(raw.id),
-        priceCents: Number(raw.priceCents),
-        validFrom: toDateStr(raw.validFrom),
-        validTo: toDateStr(raw.validTo),
-      });
-      customerByServiceId.set(raw.serviceId, list);
+    if (pricesStandardScopeEnabled()) {
+      const rows = await tx
+        .select({
+          id: prices.id,
+          serviceId: prices.serviceId,
+          cents: prices.cents,
+          validFrom: prices.validFrom,
+          validTo: prices.validTo,
+        })
+        .from(prices)
+        .where(
+          and(
+            eq(prices.scope, "customer"),
+            eq(prices.customerId, customerId),
+            isNull(prices.deletedAt),
+          ),
+        );
+      for (const raw of rows) {
+        const list = customerByServiceId.get(raw.serviceId) ?? [];
+        list.push({
+          id: Number(raw.id),
+          priceCents: Number(raw.cents),
+          validFrom: toDateStr(raw.validFrom),
+          validTo: toDateStr(raw.validTo),
+        });
+        customerByServiceId.set(raw.serviceId, list);
+      }
+    } else {
+      const rows = await customerServicePricesRepo
+        .selectColumnsFrom(
+          {
+            id: customerServicePrices.id,
+            serviceId: customerServicePrices.serviceId,
+            priceCents: customerServicePrices.priceCents,
+            validFrom: customerServicePrices.validFrom,
+            validTo: customerServicePrices.validTo,
+          },
+          tx,
+        )
+        .where(
+          and(
+            eq(customerServicePrices.customerId, customerId),
+            customerServicePricesRepo.activeOnly(),
+          ),
+        );
+      for (const raw of rows) {
+        const list = customerByServiceId.get(raw.serviceId) ?? [];
+        list.push({
+          id: Number(raw.id),
+          priceCents: Number(raw.priceCents),
+          validFrom: toDateStr(raw.validFrom),
+          validTo: toDateStr(raw.validTo),
+        });
+        customerByServiceId.set(raw.serviceId, list);
+      }
     }
   }
 

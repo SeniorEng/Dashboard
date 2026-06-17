@@ -34,7 +34,7 @@
 
 import { writeFileSync } from "node:fs";
 import { eq, and, isNull } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import {
   customerServicePrices,
   customerContracts,
@@ -89,11 +89,14 @@ export interface ConsolidationReport {
  * Liest alle drei Quellen READ-ONLY und baut die Migrations-Vorschau + Konflikt-
  * /Verlust-Analyse. Keine Schreibzugriffe.
  */
-export async function buildConsolidationReport(asOf: string): Promise<ConsolidationReport> {
+export async function buildConsolidationReport(
+  asOf: string,
+  exec: DbOrTx = db,
+): Promise<ConsolidationReport> {
   // Katalog: Service-Code ↔ Service-ID. Die Kategorie-Quellen (contract/service
   // rates) referenzieren `service_category`, das per Code auf den Katalog-Service
   // gemappt wird (hauswirtschaft/alltagsbegleitung/erstberatung).
-  const catalog = await db.select({ id: services.id, code: services.code }).from(services);
+  const catalog = await exec.select({ id: services.id, code: services.code }).from(services);
   const serviceIdByCode = new Map<string, number>();
   const codeByServiceId = new Map<number, string>();
   for (const s of catalog) {
@@ -106,7 +109,7 @@ export async function buildConsolidationReport(asOf: string): Promise<Consolidat
   const rows: UnifiedPriceRow[] = [];
 
   // 1. customer_service_prices (nicht soft-deleted).
-  const csp = await db
+  const csp = await exec
     .select({
       id: customerServicePrices.id,
       customerId: customerServicePrices.customerId,
@@ -131,7 +134,7 @@ export async function buildConsolidationReport(asOf: string): Promise<Consolidat
   }
 
   // 2. customer_contract_rates → customerId über customer_contracts.
-  const ccr = await db
+  const ccr = await exec
     .select({
       id: customerContractRates.id,
       customerId: customerContracts.customerId,
@@ -157,7 +160,7 @@ export async function buildConsolidationReport(asOf: string): Promise<Consolidat
   }
 
   // 3. service_rates (firmenweiter Standard, kein Kunde).
-  const sr = await db
+  const sr = await exec
     .select({
       id: serviceRates.id,
       serviceCategory: serviceRates.serviceCategory,

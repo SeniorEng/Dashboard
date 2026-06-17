@@ -207,6 +207,12 @@ export async function runBudgetDataMigrations(): Promise<void> {
   const { reclassifyCustomer202To45b } = await import(
     "./reclassify-customer-202-to-45b"
   );
+  const { cleanupLegacyAllocationSources } = await import(
+    "./cleanup-legacy-allocation-sources-migration"
+  );
+  const { priceTableConsolidationCutover } = await import(
+    "./price-table-consolidation-cutover"
+  );
 
   // Reihenfolge ist relevant: #685 hängt von der Keep-Wahl aus #684 ab.
   // Alle vier Carryover-/Drift-Backfills setzen voraus, dass
@@ -261,6 +267,54 @@ export async function runBudgetDataMigrations(): Promise<void> {
     log(
       "[budget-migration] 'reclassify-customer-202-to-45b-1296' übersprungen: " +
         "Freigabe-Flag APPROVED_RECLASSIFY_CUSTOMER_202_45B nicht gesetzt " +
+        "(Sign-off erforderlich, kein Ledger-Eintrag).",
+      "startup",
+    );
+  }
+
+  // Task #1324 (A) — Hard-Delete der aktiven Altlast-Auto-Allocation-Zeilen
+  // (`monthly_auto`/`yearly_auto`). Mutiert GoBD-historisierte Daten ⇒ nur bei
+  // ausdrücklicher Freigabe `APPROVED_CLEANUP_LEGACY_ALLOCATIONS` registriert
+  // (Default = nicht registriert, kein Ledger-Eintrag). Transaktional +
+  // Conservation-/GoBD-Guard über den Wrapper (Defaults true).
+  const cleanupApproved = /^(1|true)$/i.test(
+    (process.env.APPROVED_CLEANUP_LEGACY_ALLOCATIONS ?? "").trim(),
+  );
+  if (cleanupApproved) {
+    migrations.push({
+      name: "cleanup-legacy-allocation-sources-1324",
+      version: "1",
+      migrate: cleanupLegacyAllocationSources,
+    });
+  } else {
+    log(
+      "[budget-migration] 'cleanup-legacy-allocation-sources-1324' übersprungen: " +
+        "Freigabe-Flag APPROVED_CLEANUP_LEGACY_ALLOCATIONS nicht gesetzt " +
+        "(Sign-off erforderlich, kein Ledger-Eintrag).",
+      "startup",
+    );
+  }
+
+  // Task #1324 (B) — Preis-Konsolidierungs-Cutover: befüllt `prices`, Gate-2-
+  // Paritäts-Guard (0-Cent), aktiviert PRICES_STANDARD_SCOPE und DROPpt die drei
+  // Alt-Tabellen — alles in EINER Transaktion. EIGENES Flag
+  // `APPROVED_PRICE_TABLE_CONSOLIDATION` (Default = nicht registriert). Kein
+  // GoBD-Bypass / Conservation-Check (betrifft nur Preis-Tabellen).
+  const priceCutoverApproved = /^(1|true)$/i.test(
+    (process.env.APPROVED_PRICE_TABLE_CONSOLIDATION ?? "").trim(),
+  );
+  if (priceCutoverApproved) {
+    migrations.push({
+      name: "price-table-consolidation-cutover-1324",
+      version: "1",
+      gobdBypass: false,
+      conservationCheck: false,
+      migrate: priceTableConsolidationCutover,
+    });
+  } else {
+    log(
+      "[budget-migration] 'price-table-consolidation-cutover-1324' übersprungen: " +
+        "Freigabe-Flag APPROVED_PRICE_TABLE_CONSOLIDATION nicht gesetzt " +
         "(Sign-off erforderlich, kein Ledger-Eintrag).",
       "startup",
     );
