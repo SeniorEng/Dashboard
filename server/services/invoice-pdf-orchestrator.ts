@@ -681,56 +681,99 @@ export function persistInvoicePdf(invoiceId: number): Promise<void> {
   return p;
 }
 
-async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
-  // Task #1074 — Mehr-Instanz-Rennschutz: Ein DB-seitiger Advisory-Lock auf die
-  // Rechnungs-ID serialisiert Lock + Re-Check + Render + Write über ALLE
-  // Server-Instanzen hinweg (der in-process-Mutex `persistInvoicePdfInFlight`
-  // schützt nur EINEN Prozess). Der xact-Lock wird bei Commit/Rollback
-  // automatisch freigegeben. Nach Lock-Erwerb wird die Rechnung FRISCH gelesen:
-  // Hat eine andere Instanz inzwischen persistiert (`pdfPath` gesetzt), ist der
-  // Re-Check ein No-op — kein Doppel-Render, kein Hash-/Blob-Auseinanderlaufen.
-  await db.transaction(async (tx) => {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`invoice_pdf_${invoiceId}`})::int8)`);
-  const invoice = await storage.getInvoice(invoiceId);
-  if (!invoice) return;
-  const companySettings = await getCachedCompanySettings();
-  if (!companySettings) return;
+// Task #1305 — Render-/Upload-Artefakte zwischen Plan- (tx1) und Commit-Phase
+// (tx2). Die teuren Schritte (Puppeteer-Render + Object-Storage-Upload) laufen
+// dazwischen OHNE gehaltene DB-Verbindung; diese Strukturen tragen die fertig
+// gerenderten Bytes-Hashes/Pfade in die kurze Commit-Transaktion.
+type RenderedInvoiceArtifact = {
+  pdfPath: string;
+  pdfHash: string;
+  pdfDataFingerprint: string;
+  zugferdXml: string | null;
+  usedStrictMode: boolean;
+  strictModeReason: string | null;
+  zugferdProfile: ZugferdProfileId;
+  customerSnapshot: InvoiceRenderSnapshot["customer"];
+  invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]>;
+  pdfCreationDate: string;
+};
+type RenderedLnArtifact = { path: string; hash: string; fingerprint: string | null };
 
-  const isPflegekasseInvoice = invoice.billingType === "pflegekasse_privat"
-    || invoice.billingType === "pflegekasse_gesetzlich";
+type PersistPlan = {
+  invoice: Invoice;
+  companySettings: CompanySettings;
+  isPflegekasseInvoice: boolean;
+  needsInvoicePdf: boolean;
+  needsLeistungsnachweis: boolean;
+  isInvoiceRecovery: boolean;
+  isLnRecovery: boolean;
+  safeNumber: string;
+};
 
-  // Task #1066 — Self-Heal: Ein bereits gesetzter Pfad, dessen Object-Storage-
-  // Objekt fehlt (z.B. nach der Legacy-Key-Space-Migration oder einem gelöschten
-  // Bucket-Objekt), wird wie ein fehlendes Artefakt behandelt und aus dem
-  // eingefrorenen Render-Snapshot neu gerendert. Für Rechnungen ab #1047 ist das
-  // byte-genau reproduzierbar; ältere Bestände bekommen einen frischen
-  // Erzeugungszeitpunkt — die geänderte Versiegelung wird dann per Audit-Log
-  // dokumentiert (NIEMALS still).
-  const invoicePdfObjectMissing = await storedObjectIsMissing(invoice.pdfPath);
-  const lnObjectMissing = isPflegekasseInvoice
-    && await storedObjectIsMissing(invoice.leistungsnachweisPath ?? null);
+/**
+ * Task #1305 — Phase 1 (transaktional): Advisory-Lock + Frische-Re-Check. NUR
+ * schnelle DB-/Object-Storage-Metadaten-Reads (kein Render), damit die gepoolte
+ * DB-Verbindung sofort wieder freigegeben wird. Liefert `null`, wenn nichts zu
+ * tun ist (Cache-Hit, fehlende Rechnung/Settings).
+ *
+ * Der `pg_advisory_xact_lock` serialisiert diese Plan-Phase über alle
+ * Server-Instanzen; er wird mit dem Commit der kurzen Transaktion wieder
+ * freigegeben. Die eigentliche Render-Idempotenz garantiert die Commit-Phase
+ * (Phase 3) per erneutem Lock + Frische-Re-Check gegen die DB-Zeile.
+ */
+async function planInvoicePdfPersist(invoiceId: number): Promise<PersistPlan | null> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`invoice_pdf_${invoiceId}`})::int8)`);
+    const invoice = await storage.getInvoice(invoiceId);
+    if (!invoice) return null;
+    const companySettings = await getCachedCompanySettings();
+    if (!companySettings) return null;
 
-  const needsInvoicePdf = !invoice.pdfPath || invoicePdfObjectMissing;
-  const needsLeistungsnachweis = isPflegekasseInvoice
-    && (!invoice.leistungsnachweisPath || lnObjectMissing);
-  if (!needsInvoicePdf && !needsLeistungsnachweis) return;
+    const isPflegekasseInvoice = invoice.billingType === "pflegekasse_privat"
+      || invoice.billingType === "pflegekasse_gesetzlich";
 
-  // Recovery = ein bereits versiegelter Pfad zeigt ins Leere (Self-Heal), im
-  // Gegensatz zur Erstanlage (Pfad noch nie gesetzt).
-  const isInvoiceRecovery = !!invoice.pdfPath && invoicePdfObjectMissing;
-  const isLnRecovery = !!invoice.leistungsnachweisPath && lnObjectMissing;
+    // Task #1066 — Self-Heal: Ein bereits gesetzter Pfad, dessen Object-Storage-
+    // Objekt fehlt (z.B. nach der Legacy-Key-Space-Migration oder einem gelöschten
+    // Bucket-Objekt), wird wie ein fehlendes Artefakt behandelt und aus dem
+    // eingefrorenen Render-Snapshot neu gerendert.
+    const invoicePdfObjectMissing = await storedObjectIsMissing(invoice.pdfPath);
+    const lnObjectMissing = isPflegekasseInvoice
+      && await storedObjectIsMissing(invoice.leistungsnachweisPath ?? null);
 
-  const safeNumber = invoice.invoiceNumber.replace(/[^a-z0-9_-]/gi, "_");
-  const updateData: {
-    pdfPath?: string;
-    pdfHash?: string;
-    pdfDataFingerprint?: string;
-    zugferdXml?: string;
-    renderSnapshot?: InvoiceRenderSnapshot;
-    leistungsnachweisPath?: string;
-    leistungsnachweisHash?: string;
-    leistungsnachweisDataFingerprint?: string;
-  } = {};
+    const needsInvoicePdf = !invoice.pdfPath || invoicePdfObjectMissing;
+    const needsLeistungsnachweis = isPflegekasseInvoice
+      && (!invoice.leistungsnachweisPath || lnObjectMissing);
+    if (!needsInvoicePdf && !needsLeistungsnachweis) return null;
+
+    // Recovery = ein bereits versiegelter Pfad zeigt ins Leere (Self-Heal), im
+    // Gegensatz zur Erstanlage (Pfad noch nie gesetzt).
+    const isInvoiceRecovery = !!invoice.pdfPath && invoicePdfObjectMissing;
+    const isLnRecovery = !!invoice.leistungsnachweisPath && lnObjectMissing;
+
+    return {
+      invoice,
+      companySettings,
+      isPflegekasseInvoice,
+      needsInvoicePdf,
+      needsLeistungsnachweis,
+      isInvoiceRecovery,
+      isLnRecovery,
+      safeNumber: invoice.invoiceNumber.replace(/[^a-z0-9_-]/gi, "_"),
+    };
+  });
+}
+
+/**
+ * Task #1305 — Phase 2 (OHNE Transaktion / OHNE gepoolte DB-Verbindung): der
+ * teure Puppeteer-Render + Object-Storage-Upload. Hier wird KEINE DB-Verbindung
+ * gehalten, damit ein Burst paralleler Rechnungserzeugungen den 20er-Pool nicht
+ * über mehrere Sekunden pro Render belegt und unbeteiligte Requests aushungert.
+ */
+async function renderAndUploadInvoiceArtifacts(
+  plan: PersistPlan,
+): Promise<{ invoice?: RenderedInvoiceArtifact; ln?: RenderedLnArtifact }> {
+  const { invoice, companySettings, needsInvoicePdf, needsLeistungsnachweis, safeNumber } = plan;
+  const out: { invoice?: RenderedInvoiceArtifact; ln?: RenderedLnArtifact } = {};
 
   if (needsInvoicePdf) {
     // Voll-Build: Invoice + XML + optional LN. Bei Recovery (Self-Heal) wird der
@@ -748,76 +791,19 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
       contentType: "application/pdf",
       metadata: { invoiceNumber: invoice.invoiceNumber, pdfHash },
     });
-    updateData.pdfPath = `/objects/${fileName}`;
-    if (isInvoiceRecovery) {
-      // Self-Heal eines bereits versiegelten PDFs: den `pdf_hash` nur dann
-      // ändern, wenn die neu gerenderten Bytes tatsächlich abweichen (Pre-#1047-
-      // Bestand ohne eingefrorenen Erzeugungszeitpunkt). Die geänderte
-      // Versiegelung wird per Audit-Log dokumentiert — niemals still. Der
-      // Inhalts-Fingerprint bleibt unangetastet (bereits versiegelt).
-      if (invoice.pdfHash && invoice.pdfHash !== pdfHash) {
-        updateData.pdfHash = pdfHash;
-        await logPdfReseal(invoice, "invoice", invoice.pdfHash, pdfHash);
-      } else if (!invoice.pdfHash) {
-        updateData.pdfHash = pdfHash;
-      }
-    } else {
-      updateData.pdfHash = pdfHash;
-      updateData.pdfDataFingerprint = pdfDataFingerprint;
-    }
-    // Tier-A3: ZUGFeRD-XML nur beim ersten Schreiben (GoBD-Immutabilität).
-    if (zugferdXml && !invoice.zugferdXml) {
-      updateData.zugferdXml = zugferdXml;
-      // Task #1073 — Non-Strict-Versiegelung dokumentieren statt still
-      // schlucken. node-zugferd konnte die XSD-Strict-Validierung nicht
-      // ausführen (fehlende `xsd-schema-validator`/Java-Runtime) ODER das XML
-      // bestand sie nicht; in beiden Fällen wurde die XML im Non-Strict-Pfad
-      // versiegelt. Die rechtsverbindliche EN-16931-/PDF-A-3-Konformitätsprüfung
-      // übernimmt das externe Validierungs-Gate (`scripts/validate-erechnung.ts`
-      // / CI). Wir hard-rejecten hier bewusst NICHT, da das den gesamten
-      // Rechnungslauf in Umgebungen ohne Java-Runtime blockieren würde.
-      if (!usedStrictMode) {
-        await logZugferdNonStrictSeal(invoice, zugferdProfile, strictModeReason);
-      }
-    }
-    // Task #593: Render-Snapshot zusammen mit der erstmaligen XML-/PDF-
-    // Persistierung schreiben. Idempotent: nur setzen, wenn die Rechnung
-    // noch keinen Snapshot hat — historische Bestände bleiben unangetastet.
-    if (!invoice.renderSnapshot) {
-      updateData.renderSnapshot = {
-        companySettings: sanitizeCompanySettingsForSnapshot(companySettings),
-        customer: customerSnapshot,
-        // Task #654: friert das Anzeige-Datum (de-DE) und das Fälligkeits-
-        // datum ein, das beim Erst-Persist tatsächlich in `buildPdfData`
-        // einging — sonst driftet `invoiceDate` beim Re-Render gegen das
-        // bereits in `zugferd_xml` versiegelte XML, sobald `sentAt`
-        // nachträglich gesetzt wird oder sich `todayISO()` ändert.
-        invoice: invoiceSnapshot,
-        // Task #1047: eingefrorener PDF-Erzeugungszeitpunkt — ermöglicht das
-        // byte-genaue Re-Render (Integritäts-Verifier / Clobbered-PDF-Restore).
-        pdfCreationDate,
-        // Task #1073: eingefrorenes ZUGFeRD-Profil — das Re-Render reproduziert
-        // das eingebettete XML mit exakt diesem Profil (byte-genau).
-        profile: zugferdProfile,
-        // Task #1083: eingefrorener Positions-Aggregationsmodus. Neu erzeugte
-        // Rechnungen werden kumuliert versiegelt; das Re-Render reproduziert
-        // PDF + ZUGFeRD-XML byte-genau (Integritäts-Verifier).
-        lineAggregation: "cumulative",
-        // Task #1098: eingefrorenes BT-131-Flag. Neu erzeugte Rechnungen werden
-        // MIT Pro-Zeilen-Betrag (`LineTotalAmount`) versiegelt; das Re-Render
-        // reproduziert das eingebettete EN-16931-XML byte-genau.
-        includeLineTotalAmount: true,
-        // Task #1105: eingefrorenes Settlement-Flag. Neu erzeugte Rechnungen
-        // werden mit der korrekten Header-USt-/Zahlungs-Aufschlüsselung (BG-16/
-        // BG-23) versiegelt (XSD-strict-konform); das Re-Render reproduziert das
-        // eingebettete EN-16931-XML byte-genau.
-        strictSettlement: true,
-        // Task #1106: eingefrorenes XMP-Reparatur-Flag (PDF/A-3b). Neu erzeugte
-        // Rechnungen werden mit repariertem XMP-Namespace versiegelt; das
-        // Re-Render reproduziert das PDF byte-genau.
-        includeConformantSettlement: true,
-      };
-    }
+    out.invoice = {
+      pdfPath: `/objects/${fileName}`,
+      pdfHash,
+      pdfDataFingerprint,
+      zugferdXml,
+      usedStrictMode,
+      strictModeReason,
+      zugferdProfile,
+      customerSnapshot,
+      invoiceSnapshot,
+      pdfCreationDate,
+    };
+
     if (leistungsnachweisPdf && needsLeistungsnachweis) {
       const lnHash = computeDataHash(leistungsnachweisPdf as unknown as string);
       const lnFileName = buildInvoicePdfObjectKey(safeNumber, { leistungsnachweis: true });
@@ -828,20 +814,7 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         contentType: "application/pdf",
         metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
       });
-      updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
-      if (isLnRecovery) {
-        if (invoice.leistungsnachweisHash && invoice.leistungsnachweisHash !== lnHash) {
-          updateData.leistungsnachweisHash = lnHash;
-          await logPdfReseal(invoice, "leistungsnachweis", invoice.leistungsnachweisHash, lnHash);
-        } else if (!invoice.leistungsnachweisHash) {
-          updateData.leistungsnachweisHash = lnHash;
-        }
-      } else {
-        updateData.leistungsnachweisHash = lnHash;
-        if (leistungsnachweisDataFingerprint) {
-          updateData.leistungsnachweisDataFingerprint = leistungsnachweisDataFingerprint;
-        }
-      }
+      out.ln = { path: `/objects/${lnFileName}`, hash: lnHash, fingerprint: leistungsnachweisDataFingerprint };
     }
   } else if (needsLeistungsnachweis) {
     // GoBD-sicher: Invoice-PDF bleibt unangetastet, nur LN-PDF wird erzeugt.
@@ -856,26 +829,148 @@ async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
         contentType: "application/pdf",
         metadata: { invoiceNumber: invoice.invoiceNumber, leistungsnachweisHash: lnHash },
       });
-      updateData.leistungsnachweisPath = `/objects/${lnFileName}`;
-      if (isLnRecovery) {
-        if (invoice.leistungsnachweisHash && invoice.leistungsnachweisHash !== lnHash) {
-          updateData.leistungsnachweisHash = lnHash;
-          await logPdfReseal(invoice, "leistungsnachweis", invoice.leistungsnachweisHash, lnHash);
-        } else if (!invoice.leistungsnachweisHash) {
-          updateData.leistungsnachweisHash = lnHash;
-        }
-      } else {
-        updateData.leistungsnachweisHash = lnHash;
-        updateData.leistungsnachweisDataFingerprint = ln.fingerprint;
-      }
+      out.ln = { path: `/objects/${lnFileName}`, hash: lnHash, fingerprint: ln.fingerprint };
     }
   }
 
-  if (Object.keys(updateData).length === 0) return;
-  await tx.update(invoicesTable)
-    .set(updateData)
-    .where(eq(invoicesTable.id, invoiceId));
+  return out;
+}
+
+async function persistInvoicePdfInner(invoiceId: number): Promise<void> {
+  // Task #1305 — Drei Phasen, damit der teure Render NICHT mehr eine gepoolte
+  // DB-Verbindung über Sekunden belegt:
+  //   1. planInvoicePdfPersist  — kurze Transaktion: Advisory-Lock +
+  //      Frische-Re-Check (nur schnelle Metadaten-Reads).
+  //   2. renderAndUploadInvoiceArtifacts — OHNE Transaktion: Puppeteer-Render +
+  //      Object-Storage-Upload (keine DB-Verbindung gehalten).
+  //   3. kurze Commit-Transaktion: Advisory-Lock + Frische-Re-Check gegen die
+  //      DB-Zeile + Write. Der Re-Check garantiert die GoBD-Idempotenz (kein
+  //      Überschreiben eines bereits versiegelten `pdf_hash`), falls eine andere
+  //      Instanz während des Renders persistiert hat.
+  // Mehr-Instanz-Hinweis: schlägt Phase 1 bei zwei Instanzen gleichzeitig an
+  // (z.B. ein konkurrierender Send-Cache-Miss), kann es zu einem doppelten
+  // Render kommen — die Bytes sind für versiegelte Rechnungen (ab #1047) jedoch
+  // byte-identisch und die Commit-Phase schreibt nur einmal. Brandneue
+  // Rechnungen persistiert ohnehin nur die erzeugende Instanz; der in-process-
+  // Mutex `persistInvoicePdfInFlight` dedupliziert innerhalb eines Prozesses.
+  const plan = await planInvoicePdfPersist(invoiceId);
+  if (!plan) return;
+
+  const artifacts = await renderAndUploadInvoiceArtifacts(plan);
+  if (!artifacts.invoice && !artifacts.ln) return;
+
+  // Audit-Logs werden NACH der Commit-Transaktion (best effort) geschrieben,
+  // damit sie keine zweite Verbindung parallel zur Schreib-Transaktion ziehen.
+  const pendingReseals: Array<{ artifact: "invoice" | "leistungsnachweis"; oldHash: string; newHash: string }> = [];
+  const pendingNonStrict: Array<{ profile: ZugferdProfileId; reason: string | null }> = [];
+
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`invoice_pdf_${invoiceId}`})::int8)`);
+    // Frische-Re-Check gegen die DB-Zeile: Hat eine andere Instanz während des
+    // Renders bereits persistiert, werden die betroffenen Felder NICHT
+    // überschrieben (GoBD-Immutabilität).
+    const fresh = await storage.getInvoice(invoiceId);
+    if (!fresh) return;
+
+    const updateData: {
+      pdfPath?: string;
+      pdfHash?: string;
+      pdfDataFingerprint?: string;
+      zugferdXml?: string;
+      renderSnapshot?: InvoiceRenderSnapshot;
+      leistungsnachweisPath?: string;
+      leistungsnachweisHash?: string;
+      leistungsnachweisDataFingerprint?: string;
+    } = {};
+
+    const applyLn = (ln: RenderedLnArtifact) => {
+      updateData.leistungsnachweisPath = ln.path;
+      if (plan.isLnRecovery) {
+        if (fresh.leistungsnachweisHash && fresh.leistungsnachweisHash !== ln.hash) {
+          updateData.leistungsnachweisHash = ln.hash;
+          pendingReseals.push({ artifact: "leistungsnachweis", oldHash: fresh.leistungsnachweisHash, newHash: ln.hash });
+        } else if (!fresh.leistungsnachweisHash) {
+          updateData.leistungsnachweisHash = ln.hash;
+        }
+      } else {
+        updateData.leistungsnachweisHash = ln.hash;
+        if (ln.fingerprint) updateData.leistungsnachweisDataFingerprint = ln.fingerprint;
+      }
+    };
+
+    if (artifacts.invoice) {
+      const a = artifacts.invoice;
+      // Erstanlage-Rennschutz: Hat eine andere Instanz die Rechnung während des
+      // Renders erstmalig versiegelt (`pdfPath` jetzt gesetzt, war es bei der
+      // Planung nicht), überschreiben wir NICHTS — das vermeidet ein
+      // Auseinanderlaufen von Hash/Snapshot/XML.
+      const concurrentInitialWon = !plan.isInvoiceRecovery && !!fresh.pdfPath;
+      if (!concurrentInitialWon) {
+        updateData.pdfPath = a.pdfPath;
+        if (plan.isInvoiceRecovery) {
+          // Self-Heal eines bereits versiegelten PDFs: `pdf_hash` nur ändern,
+          // wenn die neu gerenderten Bytes abweichen (Pre-#1047 ohne
+          // eingefrorenen Erzeugungszeitpunkt). Reseal wird auditiert.
+          if (fresh.pdfHash && fresh.pdfHash !== a.pdfHash) {
+            updateData.pdfHash = a.pdfHash;
+            pendingReseals.push({ artifact: "invoice", oldHash: fresh.pdfHash, newHash: a.pdfHash });
+          } else if (!fresh.pdfHash) {
+            updateData.pdfHash = a.pdfHash;
+          }
+        } else {
+          updateData.pdfHash = a.pdfHash;
+          updateData.pdfDataFingerprint = a.pdfDataFingerprint;
+        }
+        // Tier-A3: ZUGFeRD-XML nur beim ersten Schreiben (GoBD-Immutabilität).
+        if (a.zugferdXml && !fresh.zugferdXml) {
+          updateData.zugferdXml = a.zugferdXml;
+          // Task #1073 — Non-Strict-Versiegelung dokumentieren statt still
+          // schlucken (siehe logZugferdNonStrictSeal). Wir hard-rejecten hier
+          // bewusst NICHT, da das den Rechnungslauf ohne Java-Runtime blockierte.
+          if (!a.usedStrictMode) pendingNonStrict.push({ profile: a.zugferdProfile, reason: a.strictModeReason });
+        }
+        // Task #593: Render-Snapshot zusammen mit der erstmaligen Persistierung
+        // schreiben. Idempotent: nur setzen, wenn noch kein Snapshot existiert.
+        if (!fresh.renderSnapshot) {
+          updateData.renderSnapshot = {
+            companySettings: sanitizeCompanySettingsForSnapshot(plan.companySettings),
+            customer: a.customerSnapshot,
+            // Task #654: friert Anzeige-/Fälligkeitsdatum ein, damit `invoiceDate`
+            // beim Re-Render nicht gegen das in `zugferd_xml` versiegelte XML driftet.
+            invoice: a.invoiceSnapshot,
+            // Task #1047: eingefrorener PDF-Erzeugungszeitpunkt (byte-genaues Re-Render).
+            pdfCreationDate: a.pdfCreationDate,
+            // Task #1073: eingefrorenes ZUGFeRD-Profil.
+            profile: a.zugferdProfile,
+            // Task #1083: eingefrorener Positions-Aggregationsmodus (kumuliert).
+            lineAggregation: "cumulative",
+            // Task #1098: eingefrorenes BT-131-Flag (LineTotalAmount).
+            includeLineTotalAmount: true,
+            // Task #1105: eingefrorenes Settlement-Flag (BG-16/BG-23, XSD-strict).
+            strictSettlement: true,
+            // Task #1106: eingefrorenes XMP-Reparatur-Flag (PDF/A-3b).
+            includeConformantSettlement: true,
+          };
+        }
+        if (artifacts.ln && plan.needsLeistungsnachweis) applyLn(artifacts.ln);
+      }
+    } else if (artifacts.ln && plan.needsLeistungsnachweis) {
+      applyLn(artifacts.ln);
+    }
+
+    if (Object.keys(updateData).length === 0) return;
+    await tx.update(invoicesTable)
+      .set(updateData)
+      .where(eq(invoicesTable.id, invoiceId));
   });
+
+  // Phase 4 — Audit-Logs (best effort, außerhalb der Schreib-Transaktion).
+  for (const r of pendingReseals) {
+    await logPdfReseal(plan.invoice, r.artifact, r.oldHash, r.newHash);
+  }
+  for (const ns of pendingNonStrict) {
+    await logZugferdNonStrictSeal(plan.invoice, ns.profile, ns.reason);
+  }
 }
 
 export async function loadInvoicePdfFromStorage(invoice: Invoice): Promise<Buffer | null> {
