@@ -34,6 +34,7 @@ import {
   apiGet,
   apiPost,
   apiPatch,
+  apiPut,
   apiDelete,
   getAuthCookie,
   uniqueId,
@@ -44,6 +45,7 @@ import {
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testEmployeeId: number;
 let hwServiceId: number;
+let insuranceProviderId: number;
 
 const cleanupCustomerIds: number[] = [];
 const cleanupServiceRecordIds: number[] = [];
@@ -195,6 +197,78 @@ async function createSelbstzahlerCustomer(tag: string): Promise<number> {
   return id;
 }
 
+/**
+ * Legt einen Pflegekasse-Kunden (pflegekasse_privat) MIT aktiver Pflegekasse
+ * (`insuranceProviderId`) an und weist den Test-Admin zu. Dadurch greift der
+ * Kassen-Filter (`insuranceProviderId`) in eligible-customers / generate-all.
+ */
+async function createPflegekasseCustomer(tag: string): Promise<number> {
+  const res = await apiPost<any>("/api/admin/customers", {
+    vorname: "DRF",
+    nachname: `Privat-${tag}-${uniqueId()}`,
+    geburtsdatum: "1938-05-12",
+    email: `drf-${tag}-${uniqueId()}@test.local`,
+    strasse: "Teststraße",
+    nr: "5",
+    plz: "10117",
+    stadt: "Berlin",
+    pflegegrad: 3,
+    pflegegradSeit: "2024-01-01",
+    billingType: "pflegekasse_privat",
+    acceptsPrivatePayment: true,
+    insurance: {
+      providerId: insuranceProviderId,
+      versichertennummer: "A" + String(Math.floor(100000000 + Math.random() * 900000000)),
+      validFrom: "2024-01-01",
+    },
+    contacts: [
+      {
+        contactType: "familie",
+        isPrimary: true,
+        vorname: "Kontakt",
+        nachname: "DRF",
+        mobilnummer: "+4917600000011",
+      },
+    ],
+    budgets: {
+      // Werte in CENTS. Voller §45b-Topf als Default — wird unten via
+      // configureLowBudgetPV auf ein niedriges Monatslimit überschrieben.
+      entlastungsbetrag45b: 13100,
+      verhinderungspflege39: 0,
+      pflegesachleistungen36: 0,
+      validFrom: "2024-01-01",
+    },
+  });
+  if (res.status !== 201) {
+    throw new Error(`createPflegekasseCustomer failed: ${res.status} ${JSON.stringify(res.data)}`);
+  }
+  const id = res.data.id as number;
+  cleanupCustomerIds.push(id);
+  await apiPatch<any>(`/api/admin/customers/${id}/assign`, {
+    primaryEmployeeId: auth.user.id,
+    backupEmployeeId: testEmployeeId,
+    backupEmployeeId2: null,
+  });
+  return id;
+}
+
+/**
+ * Setzt ein sehr niedriges §45b-Monatslimit (1 €/Monat). Der §45b-Topf
+ * akkumuliert ab Januar (Stichtag = heute), bleibt damit klar unter den Kosten
+ * eines 60-min-HW-Termins (~35 €) und erzwingt deterministisch den Pot-Split
+ * (kleiner §45b-Anteil + privater Überlauf) — identisch zur Split-Konfiguration
+ * in billing-flow.test.ts.
+ */
+async function configureLowBudgetPV(customerId: number): Promise<void> {
+  await apiPut(`/api/budget/${customerId}/type-settings`, {
+    settings: [
+      { budgetType: "entlastungsbetrag_45b", priority: 1, enabled: true, monthlyLimitCents: 100 },
+      { budgetType: "umwandlung_45a", priority: 2, enabled: false, monthlyLimitCents: null },
+      { budgetType: "ersatzpflege_39_42a", priority: 3, enabled: false, yearlyLimitCents: null },
+    ],
+  });
+}
+
 async function listInvoices(
   customerId: number,
   range?: { from: string; to: string },
@@ -211,9 +285,11 @@ async function listInvoices(
 async function eligibleContains(
   customerId: number,
   range?: { from: string; to: string },
+  providerId?: number,
 ): Promise<boolean> {
   let url = `/api/billing/eligible-customers?month=${BILLING_MONTH}&year=${BILLING_YEAR}`;
   if (range) url += `&dateFrom=${range.from}&dateTo=${range.to}`;
+  if (providerId) url += `&insuranceProviderId=${providerId}`;
   const res = await apiGet<any[]>(url);
   if (res.status !== 200) {
     throw new Error(`eligible-customers failed: ${res.status} ${JSON.stringify(res.data)}`);
@@ -221,12 +297,16 @@ async function eligibleContains(
   return res.data.some((c: any) => c.id === customerId);
 }
 
-async function generateAll(range?: { from: string; to: string }): Promise<any> {
+async function generateAll(
+  range?: { from: string; to: string },
+  providerId?: number,
+): Promise<any> {
   const body: Record<string, any> = { billingMonth: BILLING_MONTH, billingYear: BILLING_YEAR };
   if (range) {
     body.dateFrom = range.from;
     body.dateTo = range.to;
   }
+  if (providerId) body.insuranceProviderId = providerId;
   const res = await apiPost<any>("/api/billing/generate-all", body);
   if (res.status !== 200) {
     throw new Error(`generate-all failed: ${res.status} ${JSON.stringify(res.data)}`);
@@ -258,6 +338,12 @@ beforeAll(async () => {
   const hw = servicesRes.data.find((s: any) => s.code === "hauswirtschaft");
   if (!hw) throw new Error("Pflicht-Service hauswirtschaft fehlt in der Test-DB");
   hwServiceId = hw.id;
+
+  const provRes = await apiGet<any[]>("/api/admin/insurance-providers");
+  if (provRes.status !== 200 || provRes.data.length === 0) {
+    throw new Error("Keine Versicherer in der Test-DB vorhanden");
+  }
+  insuranceProviderId = provRes.data[0].id;
 
   const emp = await createTestEmployee({ nachnamePrefix: "TestDRF" });
   testEmployeeId = emp.id;
@@ -415,5 +501,121 @@ describe("DRF-3: Klare Fehlermeldung bei leerem Bereich (keine abrechenbaren Ter
     // Es darf keine Rechnung für diesen Kunden entstanden sein.
     const all = await listInvoices(customerId);
     expect(all.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DRF-4: Pflegekasse-Kunde — Kassen-Filter (insuranceProviderId) UND
+// Datumsbereich (dateFrom/dateTo) komponieren, auch wenn ein Lauf eine
+// Pot-Split-Rechnung (mehrere Belege über billing_run_id) erzeugt (Task #1319).
+//
+// Aufbau:
+//   - PV-Kunde (pflegekasse_privat, aktive Pflegekasse, niedriges §45b-Limit)
+//     mit je einem dokumentierten Werktags-Termin in früher (Tag 1–14) und
+//     später (Tag 15–Monatsende) Hälfte. Niedriges §45b erzwingt den Split
+//     (kleiner Kassen-Anteil + privater Überlauf) für den ZUERST dokumentierten
+//     (frühen) Termin.
+//   - Selbstzahler-Kunde (KEINE Pflegekasse) mit einem frühen Termin als
+//     Negativ-Kontrolle für den Kassen-Filter.
+// ---------------------------------------------------------------------------
+
+describe("DRF-4: Pflegekasse — Kassen-Filter + Datumsbereich + Pot-Split komponieren", () => {
+  let fundCustomerId: number; // Pflegekasse-Kunde mit gewählter Kasse
+  let szCustomerId: number;   // Selbstzahler ohne Kasse (Negativ-Kontrolle)
+  let earlyApptId: number;
+  let lateApptId: number;
+
+  beforeAll(async () => {
+    // Pflegekasse-Kunde: niedriges §45b → Split. Frühen Termin ZUERST
+    // dokumentieren, damit er den kleinen §45b-Topf greift und splittet.
+    fundCustomerId = await createPflegekasseCustomer("fund");
+    await configureLowBudgetPV(fundCustomerId);
+    const early = await createApptInDayRange(fundCustomerId, 60, 1, 14, "fund-early");
+    const late = await createApptInDayRange(fundCustomerId, 60, 15, LAST_DAY, "fund-late");
+    earlyApptId = early.id;
+    lateApptId = late.id;
+    await documentAppointment(early.id, early.time, 60, "fund-early");
+    await documentAppointment(late.id, late.time, 60, "fund-late");
+    await createAndSignServiceRecord(fundCustomerId);
+
+    // Selbstzahler: hat einen frühen, im Bereich liegenden, abrechenbaren
+    // Termin — darf aber NIE im Kassen-gefilterten Lauf auftauchen.
+    szCustomerId = await createSelbstzahlerCustomer("fund-sz");
+    const szEarly = await createApptInDayRange(szCustomerId, 30, 1, 14, "fund-sz-early");
+    await documentAppointment(szEarly.id, szEarly.time, 30, "fund-sz-early");
+    await createAndSignServiceRecord(szCustomerId);
+  });
+
+  it("DRF-4.1 — eligible-customers mit Kasse+Bereich: Kassen-Kunde berechtigt, Selbstzahler ausgeschlossen", async () => {
+    // Frühe Hälfte + Kassen-Filter: Pflegekasse-Kunde drin, Selbstzahler raus.
+    expect(await eligibleContains(fundCustomerId, { from: EARLY_FROM, to: EARLY_TO }, insuranceProviderId)).toBe(true);
+    expect(await eligibleContains(szCustomerId, { from: EARLY_FROM, to: EARLY_TO }, insuranceProviderId)).toBe(false);
+
+    // Gegenprobe: OHNE Kassen-Filter ist der Selbstzahler im Bereich berechtigt
+    // (der Ausschluss kommt also wirklich vom Kassen-Filter, nicht vom Bereich).
+    expect(await eligibleContains(szCustomerId, { from: EARLY_FROM, to: EARLY_TO })).toBe(true);
+  });
+
+  it("DRF-4.2 — generate-all (Kasse + frühe Hälfte) erzeugt einen Pot-Split, der NUR den frühen Termin enthält", async () => {
+    const ga = await generateAll({ from: EARLY_FROM, to: EARLY_TO }, insuranceProviderId);
+
+    // Selbstzahler darf durch den Kassen-Filter nicht abgerechnet worden sein.
+    expect(resultFor(ga, szCustomerId)).toBeUndefined();
+    const szInvoices = await listInvoices(szCustomerId);
+    expect(szInvoices.length).toBe(0);
+
+    // Pflegekasse-Kunde: Split → invoiceCount = 2 (Kasse + Privat).
+    const r = resultFor(ga, fundCustomerId);
+    expect(r?.status).toBe("created");
+    expect(r?.invoiceCount).toBe(2);
+
+    // Genau zwei Rechnungen in der frühen Hälfte, beide über dieselbe
+    // billing_run_id verbunden, aus Kasse + Privat bestehend.
+    const earlyList = await listInvoices(fundCustomerId, { from: EARLY_FROM, to: EARLY_TO });
+    expect(earlyList.length).toBe(2);
+
+    const runIds = new Set(earlyList.map((inv) => inv.billingRunId));
+    expect(runIds.size).toBe(1);
+    expect([...runIds][0]).toBeTruthy();
+
+    const billingTypes = earlyList.map((inv) => inv.billingType).sort();
+    expect(billingTypes).toEqual(["pflegekasse_privat", "selbstzahler"]);
+
+    // Beide Split-Belege referenzieren NUR den frühen Termin — der späte
+    // Termin liegt außerhalb des Bereichs und darf nirgendwo auftauchen.
+    for (const inv of earlyList) {
+      const apptIds = await lineItemAppointmentIds(inv.id);
+      expect(apptIds).toContain(earlyApptId);
+      expect(apptIds).not.toContain(lateApptId);
+    }
+  });
+
+  it("DRF-4.3 — nach Abrechnung der frühen Hälfte verengt sich der Berechtigt-Scope (früh nicht mehr, spät weiterhin)", async () => {
+    expect(await eligibleContains(fundCustomerId, { from: EARLY_FROM, to: EARLY_TO }, insuranceProviderId)).toBe(false);
+    expect(await eligibleContains(fundCustomerId, { from: LATE_FROM, to: LATE_TO }, insuranceProviderId)).toBe(true);
+  });
+
+  it("DRF-4.4 — generate-all (Kasse + späte Hälfte) rechnet den verbleibenden späten Termin separat ab", async () => {
+    const ga = await generateAll({ from: LATE_FROM, to: LATE_TO }, insuranceProviderId);
+    const r = resultFor(ga, fundCustomerId);
+    expect(r?.status).toBe("created");
+
+    const lateList = await listInvoices(fundCustomerId, { from: LATE_FROM, to: LATE_TO });
+    expect(lateList.length).toBeGreaterThanOrEqual(1);
+
+    // Alle Belege der späten Hälfte referenzieren NUR den späten Termin.
+    for (const inv of lateList) {
+      const apptIds = await lineItemAppointmentIds(inv.id);
+      expect(apptIds).toContain(lateApptId);
+      expect(apptIds).not.toContain(earlyApptId);
+    }
+
+    // Die späten Belege tragen eine ANDERE billing_run_id als die frühen
+    // (zwei getrennte Teil-Abrechnungs-Läufe).
+    const earlyList = await listInvoices(fundCustomerId, { from: EARLY_FROM, to: EARLY_TO });
+    const earlyRunIds = new Set(earlyList.map((inv) => inv.billingRunId));
+    for (const inv of lateList) {
+      expect(earlyRunIds.has(inv.billingRunId)).toBe(false);
+    }
   });
 });
