@@ -1,0 +1,54 @@
+1:44:17 PM [express] POST /api/admin/users/369/deactivate 200 in 14ms
+ ✓  integration  tests/billing/billing-flow.test.ts (31 tests | 4 skipped) 20968ms
+     ✓ BF-1.1 — Selbstzahler-Rechnung enthält MwSt 19% und ist im Status entwurf  791ms
+     ✓ BF-1.2 — Privatversicherte-Kassenrechnung ist MwSt-frei (ohne Split)  553ms
+     ✓ BF-2.1 — Niedriges Budget erzeugt 2 Rechnungen, beide in Response verlinkt  641ms
+     ✓ BF-2.2 — Summe Netto-Beträge Kasse + Privat entspricht Summe der Termin-Kosten  744ms
+     ✓ BF-2.3a — Pflegekasse OHNE Private Zuzahlung wird weiterhin geblockt (kein Regress)  601ms
+     ✓ BF-2.3b — Selbstzahler-Doku läuft ohne Budget-Block durch (Task #588)  522ms
+     ✓ BF-2.4 — Split-Erzeugung ist atomar in einer DB-Transaktion gewrappt  858ms
+     ✓ BF-2.5 — §45b-Limit = 0 → keine Kassenrechnung, alle Kosten als Privatrechnung  857ms
+     ✓ BF-2.6 — 1-Cent-Restbudget landet exakt als 1-Cent-Position auf der Privatrechnung  924ms
+     ✓ BF-3.1 — Storno erzeugt Stornorechnung mit gespiegelten negativen Beträgen  861ms
+     ✓ BF-3.2 — Stornorechnung kann NICHT erneut storniert werden  889ms
+     ✓ BF-3.3 — Storno schreibt Audit-Eintrag invoice_cancelled mit Storno-IDs  869ms
+     ✓ BF-3.4 — Storno einer Split-Rechnung lässt die Pärchen-Rechnung unangetastet (manuelles Handling erforderlich)  1015ms
+     ✓ BF-4.1 — Zweiter Termin im selben Monat erzeugt zusätzliche Rechnung mit nur dem neuen Termin  1115ms
+     ✓ BF-4.2 — Keine appointmentId erscheint in beiden Rechnungen desselben Monats  1193ms
+     ✓ BF-5.2 — Re-Generierung wenn alle Termine schon abgerechnet → 400  842ms
+     ✓ BF-5.3 — Nach Storno können dieselben Termine erneut abgerechnet werden  1014ms
+     ✓ BF-7.1 — Send auf nicht-Entwurf-Rechnung → 400  891ms
+     ✓ BF-7.2 — Send auf Selbstzahler-Rechnung → 400 (nur Pflegekasse erlaubt)  839ms
+     ✓ BF-7.3 — Send auf PV-Rechnung ohne Kunden-E-Mail → 400  970ms
+     ✓ BF-8.1 — Selbstzahler: Preview-Zahlen stimmen mit erzeugter Rechnung überein und Preview persistiert nichts  902ms
+     ✓ BF-8.2 — Split (PV + niedriges Budget): Preview-Brutto == Summe beider Folgerechnungen  968ms
+     ✓ BF-8.3 — Preview liefert klaren Fehler, wenn kein signierter LN vorhanden ist  700ms
+
+ Test Files  1 passed (1)
+      Tests  27 passed | 4 skipped (31)
+   Start at  13:43:53
+   Duration  23.77s (transform 150ms, setup 49ms, import 144ms, tests 20.97s, environment 0ms)
+
+▶ Beende Server (SIGTERM) — V8 schreibt Coverage-Profile
+1:44:17 PM [express] SIGTERM received, shutting down gracefully...
+1:44:17 PM [call-scheduler] Poller stopped
+1:44:17 PM [express] Puppeteer browser closed
+1:44:17 PM [express] Database pool drained
+▶ [billing] Erzeuge c8-Report für server/routes/billing.ts
+------------|---------|----------|---------|---------|----------------------------------------------
+File        | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s                            
+------------|---------|----------|---------|---------|----------------------------------------------
+All files   |   23.65 |    44.18 |      50 |   23.65 |                                              
+ billing.ts |   23.65 |    44.18 |      50 |   23.65 | ...7,1779-1827,1838-1953,1969-2222,2229-2373 
+------------|---------|----------|---------|---------|----------------------------------------------
+
+=============================== Coverage summary ===============================
+Statements   : 23.65% ( 562/2376 )
+Branches     : 44.18% ( 38/86 )
+Functions    : 50% ( 1/2 )
+Lines        : 23.65% ( 562/2376 )
+================================================================================
+▶ [billing] Gemessen: Lines 23.65% / Branches 44.18%
+✖ [billing] Lines 23.65% < 55%
+✖ [billing] Branches 44.18% < 45%
+Error: Process completed with exit code 1.
