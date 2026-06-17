@@ -645,6 +645,21 @@ async function runStartupTasks() {
       log(`Customer-Budgets-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1326 — Verwaiste Legacy-Preis-Tabellen (`customer_service_prices`,
+    // `customer_contract_rates`, `service_rates`) endgültig droppen. Vorbedingung
+    // (Task #1325): Preis-Konsolidierung nach `prices`-SSoT ist abgeschlossen, kein
+    // Leser/Schreiber greift mehr auf die drei Tabellen zu. Idempotent +
+    // datensicher: droppt nur, wenn die Zeilen bereits in `prices` (passende
+    // `origin`) repräsentiert sind, sonst Skip + Warnung (kein Datenverlust).
+    const { dropLegacyPriceTables } = await import(
+      "./startup/drop-legacy-price-tables"
+    );
+    try {
+      await dropLegacyPriceTables();
+    } catch (err) {
+      log(`Legacy-Preis-Tabellen-Drop fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #721 — Idempotenter Read-Only-Audit der Phasen-Kette in
     // customer_budget_type_settings. Schreibt nur Log, korrigiert nichts
     // (verlorene Phasen sind nicht rekonstruierbar; Überlappungen sind
