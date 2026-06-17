@@ -1,0 +1,23 @@
+#1332 — Recovery: fehlende Kundenpreise in Prod prices wiederherstellen (Datenverlust nach Cutover-Drop-Race)
+Was/Warum: Beim Preis-Cutover-Publish hat der Replit-Schema-Diff die 3 Alt-Preistabellen gedroppt, BEVOR populate-prices-from-legacy lief → Migration lief als No-Op → Prod-prices ist leer. Alle kundenspezifischen Preise fehlen live (inkl. 0-Override „keine Anfahrt" = Kunde 205). Fakturierte Rechnungen sind sicher (GoBD-Snapshots); falsch ist nur die Preisbildung neuer Termine der betroffenen Kunden. Die Daten liegen vollständig im Backup prod-2026-06-17T07-46-19Z-pre-pricing-cutover.dump.
+Genau diese 4 aktiven Zeilen in Prod prices einfügen (alle scope=customer, deleted_at NULL), korrekt gemappt:
+
+origin=customer_service_prices, Kunde 205, Service „Anfahrtskilometer" (id 17), cents=0, validFrom=2026-06-01, validTo=NULL  ← der 0-Override
+origin=customer_service_prices, Kunde 39, Service „Hauswirtschaft" (id 15), cents=3800, validFrom=2026-03-19, validTo=2026-05-26
+origin=customer_contract_rates, Vertrag 9 → dessen Kunde, Kategorie Hauswirtschaft, cents=3800, validFrom=2025-05-13, validTo=NULL
+origin=customer_contract_rates, Vertrag 9 → dessen Kunde, Kategorie Alltagsbegleitung, cents=4200, validFrom=2025-05-13, validTo=NULL
+
+(service_rates war leer → 0 Zeilen, korrekt. Die soft-gelöschten csp id3/id4 NICHT migrieren.)
+Umsetzung:
+
+Neue einmalige idempotente Startup-Migration, neuer Ledger-Name (z. B. recover-prices-from-backup-1332) — die alte populate-prices-from-legacy-1329 ist als applied/changed=0 verbucht und läuft nicht erneut.
+Werte exakt wie oben (Quelle: das 07:46-Backup). Vertrag 9 → customerId und Kategorie → serviceId zur Laufzeit über services.code / customer_contracts auflösen; cents/validFrom/validTo exakt übernehmen.
+Idempotent: Dedup über vollständigen Natural Key inkl. origin; partiellen Unique-Index respektieren (Soft-Delete-vor-Insert). Mehrfachlauf = No-Op.
+KEINE Neuanlage der Alt-Tabellen in Prod → diese Migration droppt nichts, fügt nur ein → kein erneuter Schema-Diff-Drop-Race.
+
+Verifikation (read-only, nach Insert):
+
+count(*) prices je origin: customer_service_prices=2, customer_contract_rates=2, service_rates=0.
+Stichprobe: Kunde 205, Service 17 (Anfahrt) → priceFor = 0 Cent, scope=customer.
+Vertrag-9-Kunde: Hauswirtschaft=3800, Alltagsbegleitung=4200.
+Startup-Log: Verifikations-/„GATE 2 GRÜN"-Zeilen.
