@@ -40,3 +40,15 @@ replica, so fall back to plain column selects).
 
 **Always tell the user: use the normal Publish button, NEVER "Copy dev schema &
 data to production".**
+
+**Recurring drift trap — post-merge `drizzle-kit push` drops startup-hook
+objects from dev:** any constraint/index added by a startup hook (NOT present in
+the Drizzle schema TS) is seen as "extra" by `drizzle-kit push` and DROPPED from
+the dev DB on every post-merge run. That makes the dev↔prod publish diff want to
+DROP those GoBD constraints from prod (e.g. appointments_prospect_or_customer_check,
+audit_log_parent_deletion_id_fkey, budget_transactions_appointment_required_check).
+**Fix: restart "Start application" so the startup ensure-hooks re-create them in
+dev, THEN re-verify the diff (no drops) immediately before publishing.** If
+another task is merged between the restart and the publish, the drift returns —
+re-restart + re-verify. Neutralized hooks (e.g. the deferred budget_tx CHECK)
+correctly stay dropped, which is what we want for the additive window.
