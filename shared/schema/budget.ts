@@ -173,6 +173,62 @@ export const customerBudgetTypeSettings = pgTable("customer_budget_type_settings
 export const BUDGET_RESERVATION_STATES = ["hold", "captured", "released", "expired"] as const;
 export type BudgetReservationState = typeof BUDGET_RESERVATION_STATES[number];
 
+// ---------------------------------------------------------------------------
+// INTERIM (Budget-Ledger Stufe C — rein additiver Prod-Publish):
+// Die finale Entfernung von `budget_ledger` + der FK-Spalte
+// `budget_reservations.captured_ledger_id` ist HIER VORÜBERGEHEND
+// ZURÜCKGENOMMEN. Grund: Der automatische Replit-Publish-Diff erzeugt beim
+// gemeinsamen Droppen von Tabelle + Spalte einen redundanten
+// `DROP CONSTRAINT … _fk` in falscher Reihenfolge (PostgreSQL hat die FK durch
+// den vorausgehenden Spalten-/Tabellen-Drop bereits kaskadiert entfernt) →
+// die Publish-Validierung bricht ab. Indem dev diese beiden Alt-Objekte
+// behält, enthält der nächste Publish NULL Drops (nur ADDs) und geht sauber
+// durch. Die endgültige Entfernung erfolgt danach in EINEM separaten,
+// dedizierten Folge-Publish (dann FK-frei → ein einziges sauberes
+// `DROP TABLE`). Es wird NICHT in `budget_ledger` geschrieben; SSoT der
+// Buchungen bleibt ausschließlich `budget_transactions`. Der Startup-Drop in
+// server/startup/drop-budget-ledger.ts ist für dieses Fenster pausiert.
+export const BUDGET_LEDGER_STATES = ["consumed", "reversed"] as const;
+export type BudgetLedgerState = typeof BUDGET_LEDGER_STATES[number];
+
+export const budgetLedger = pgTable("budget_ledger", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  appointmentId: integer("appointment_id").references(() => appointments.id),
+  occurrenceId: text("occurrence_id"),
+  allocationId: integer("allocation_id").references(() => budgetAllocations.id),
+  budgetType: text("budget_type").notNull(),
+  period: text("period"),
+  transactionDate: date("transaction_date").notNull(),
+  state: text("state").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  hauswirtschaftMinutes: integer("hauswirtschaft_minutes"),
+  hauswirtschaftCents: integer("hauswirtschaft_cents"),
+  alltagsbegleitungMinutes: integer("alltagsbegleitung_minutes"),
+  alltagsbegleitungCents: integer("alltagsbegleitung_cents"),
+  travelKilometers: numeric("travel_kilometers", { precision: 10, scale: 3, mode: "number" }),
+  travelCents: integer("travel_cents"),
+  customerKilometers: numeric("customer_kilometers", { precision: 10, scale: 3, mode: "number" }),
+  customerKilometersCents: integer("customer_kilometers_cents"),
+  reversesLedgerId: integer("reverses_ledger_id"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  notes: text("notes"),
+  // Prod-Bestand ist timestamptz (now()). withTimezone MUSS gesetzt sein, sonst
+  // erzeugt drizzle-kit push hier timestamp-OHNE-TZ → der Publish-Diff wäre
+  // NICHT additiv (würde die Spalte altern wollen).
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("budget_ledger_customer_idx").on(table.customerId),
+  index("budget_ledger_customer_date_idx").on(table.customerId, table.transactionDate),
+  index("budget_ledger_appointment_idx").on(table.appointmentId),
+  index("budget_ledger_allocation_idx").on(table.allocationId),
+  uniqueIndex("budget_ledger_idempotency_key_idx").on(table.idempotencyKey),
+  uniqueIndex("budget_ledger_reverses_unique_idx")
+    .on(table.reversesLedgerId)
+    .where(sql`reverses_ledger_id IS NOT NULL`),
+]);
+
 // budget_reservations — operative Holds (NICHT GoBD). Mutierbar, jeder
 // State-Übergang wird audit-logged. Aus GoBD-/Finanz-Exporten ausgeschlossen.
 export const budgetReservations = pgTable("budget_reservations", {
@@ -195,6 +251,10 @@ export const budgetReservations = pgTable("budget_reservations", {
   state: text("state").notNull().default("hold"), // hold | captured | released | expired
   idempotencyKey: text("idempotency_key").notNull(),
   expiresAt: timestamp("expires_at"),
+  // INTERIM (siehe budgetLedger oben): Alt-FK vorübergehend wiederhergestellt,
+  // damit der nächste Prod-Publish rein additiv ist. Unbenutzt (kein Code liest/
+  // schreibt sie); wird im Folge-Publish zusammen mit budget_ledger entfernt.
+  capturedLedgerId: integer("captured_ledger_id").references(() => budgetLedger.id),
   // Budget-Ledger Stufe A→C — direkter Link auf die budget_transactions-
   // Konsum-Zeile dieses Topfes (per Capture gesetzt). ERSETZT den in Stufe C
   // (Task #1274) entfernten Umweg über das frühere `budget_ledger`.

@@ -535,15 +535,16 @@ async function runStartupTasks() {
     }
 
     // Task #1274 (Stufe C) — finale Entfernung des früheren budget_ledger-
-    // Spiegels: erst die FK-Spalte budget_reservations.captured_ledger_id,
-    // dann die Tabelle budget_ledger. Idempotent, ohne drizzle-kit push. Der
-    // EINE verbleibende Capture-Link ist captured_transaction_id (Stufe A).
-    const { dropBudgetLedger } = await import("./startup/drop-budget-ledger");
-    try {
-      await dropBudgetLedger();
-    } catch (err) {
-      log(`Budget-Ledger-Drop (Stufe C) fehlgeschlagen: ${err}`, "startup");
-    }
+    // Spiegels (FK-Spalte budget_reservations.captured_ledger_id + Tabelle
+    // budget_ledger) ist VORÜBERGEHEND PAUSIERT. Der automatische
+    // Replit-Publish-Diff bricht ab, wenn Tabelle + inbound-FK im selben
+    // Publish gedroppt werden (redundanter DROP CONSTRAINT in falscher
+    // Reihenfolge). Für ein rein additives Publish-Fenster behält dev diese
+    // Alt-Objekte (siehe shared/schema/budget.ts „INTERIM"), daher wird
+    // dropBudgetLedger() hier NICHT aufgerufen. Die Datei
+    // server/startup/drop-budget-ledger.ts bleibt erhalten und wird im
+    // separaten Folge-Publish (FK-frei → sauberes DROP TABLE) wieder
+    // scharfgeschaltet.
 
     // Task #988/#993/#994 — Die einmalige Phantom-Storno-Import-Drift-Korrektur
     // (#987) lief beim Prod-(Re-)Deploy einmalig scharf durch und ist bestätigt

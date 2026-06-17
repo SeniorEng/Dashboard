@@ -108,7 +108,12 @@ import { RECONCILE_COLUMN_TYPE_TARGETS } from "../../server/startup/reconcile-dr
 // --- DROP registries -------------------------------------------------------
 import { DROPPED_APPOINTMENTS_SERVICE_TYPE } from "../../server/startup/drop-appointments-service-type";
 import { DROPPED_AUA_APPROVAL_COLUMNS } from "../../server/startup/drop-aua-approval-columns";
-import { DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID } from "../../server/startup/drop-budget-ledger";
+// INTERIM (rein additiver Prod-Publish): budget_reservations.captured_ledger_id
+// + budget_ledger sind vorübergehend im Schema wiederhergestellt und der
+// Startup-Drop ist pausiert (siehe shared/schema/budget.ts + server/index.ts).
+// Der zugehörige DROP-Drift-Test ist daher für dieses Fenster ausgesetzt; er
+// wird im Folge-Publish (endgültige Entfernung) zusammen mit dem Import und der
+// Scharfschaltung von drop-budget-ledger.ts wieder aktiviert.
 
 // --- CHECK-constraint raw-SQL sources --------------------------------------
 import {
@@ -629,15 +634,8 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
       }
     });
 
-    it("drop-budget-ledger: budget_reservations.captured_ledger_id ist weg", () => {
-      const table =
-        DRIZZLE_TABLES[DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID.table];
-      const cols = drizzleColumnsByDbName(table);
-      expect(
-        cols.has(DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID.column),
-        "budget_reservations.captured_ledger_id darf nicht im Modell sein",
-      ).toBe(false);
-    });
+    // INTERIM: drop-budget-ledger-Assertion ausgesetzt — captured_ledger_id ist
+    // für das additive Publish-Fenster bewusst wieder im Modell (s. Import-Notiz).
   });
 });
 
