@@ -22,6 +22,12 @@ GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Reque
 
 Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` (Login gegen den in CI gestarteten App-Server) — fehlen sie (z.B. in Forks), werden diese Schritte sauber übersprungen, die statischen Gates (1, 2, 3, 6, 10) laufen immer (Gate 10 lädt zur Laufzeit Mustang + veraPDF und braucht Java, aber keine Test-User-Secrets).
 
+### Targeted-Coverage-Gates: Skip ohne Object Storage (Task #1330)
+
+Object-storage-abhängige Coverage-Gates (Gate 8, aktuell `billing`) skippen sauber, wenn kein Object Storage konfiguriert ist. Die GitHub-Actions-CI hat **keinen** Object-Storage-Sidecar (dokumentierte Entscheidung), deshalb sind `PRIVATE_OBJECT_DIR`/`PUBLIC_OBJECT_SEARCH_PATHS` dort nicht gesetzt und die PDF-/Leistungsnachweis-Tests in `tests/billing/billing-flow.test.ts` skippen via `it.skipIf(!hasObjectStorageEnv)`. Ohne diese Tests bricht die gemessene Coverage von `server/routes/billing.ts` von ~55 % auf ~24 % ein — was den (mit Object Storage kalibrierten) Floor verfehlen würde, obwohl es nur die Umgebungslücke spiegelt und keine echte Regression ist.
+
+`script/coverage-gate.ts` markiert solche Gates mit `requiresObjectStorage: true` und überspringt sie dann mit einer expliziten Log-Zeile und **Exit 0** — gleiches CI-Muster wie „erechnung ohne Java" / „ci-seed ohne Secrets". **In der Replit-Dev-Umgebung (Object Storage vorhanden) läuft das Gate unverändert und erzwingt die Schwellen (Lines ≥55 % / Branches ≥45 %).** Die Object-Storage-Erkennung ist identisch zu `tests/helpers/object-storage.ts`. Nicht-object-storage-abhängige Gates (`qonto`, `consumption-engine`, `month-close-scheduler`) sind unberührt. Schwellen-Details und das Hinzufügen neuer Gates: [`../tests/README.md`](../tests/README.md).
+
 ## npm-Registry-Normalisierung (package-firewall)
 
 In Replit löst npm Pakete über den internen Mirror `http://package-firewall.replit.local/npm/…` auf. Dieser Host ist NUR innerhalb von Replit erreichbar — stünde er in den `resolved`-URLs des committeten `package-lock.json`, bräche `npm ci` auf GitHub-Runnern mit `EAI_AGAIN` ab und legte ALLE Jobs lahm.

@@ -211,6 +211,22 @@ COVERAGE_MEASURE_ONLY=1 npx tsx script/coverage-gate.ts month-close-scheduler
 Zeilen** hat (Profile nicht geschrieben / Pfad falsch). `c8 --check-coverage`
 allein wertet 0/0 als „bestanden" und wird daher NICHT verwendet.
 
+**Skip ohne Object Storage (Task #1330):** Gates, deren abdeckende Tests echten
+Object-Storage-Zugriff brauchen (aktuell `billing` — die PDF-/Leistungs­nachweis-/
+pdf-lib-Merge-Pfade von `server/routes/billing.ts`), sind im `MODULES`-Eintrag
+mit `requiresObjectStorage: true` markiert. Ist kein Object Storage konfiguriert
+(`PRIVATE_OBJECT_DIR` + `PUBLIC_OBJECT_SEARCH_PATHS` fehlen, z.B. in der
+GitHub-Actions-CI ohne Object-Storage-Sidecar), **skippt** das Gate sauber mit
+einer expliziten Log-Zeile und **Exit 0** — gleiches CI-Muster wie „erechnung
+ohne Java" / „ci-seed ohne Secrets". Hintergrund: ohne Object Storage skippen
+die PDF-Tests in `billing-flow.test.ts` selbst (`it.skipIf(!hasObjectStorageEnv)`),
+wodurch die großen PDF-Bereiche der Ziel-Datei nicht ausgeführt werden und die
+Coverage auf ~24 % fällt — ein Floor-Verstoß, der nur die Umgebungslücke
+spiegelt, keine echte Regression. **Die Floors (Lines ≥55 % / Branches ≥45 %)
+sind bewusst MIT Object Storage (Replit-Dev) kalibriert**; dort läuft das Gate
+unverändert und erzwingt die Schwellen. Die Object-Storage-Notion ist identisch
+zu `tests/helpers/object-storage.ts`.
+
 **Neues Gate hinzufügen:** Eintrag in `MODULES` ergänzen (`key`, `mode`,
 `target`, `tests`, `lines`, `branches`), Schwelle per `COVERAGE_MEASURE_ONLY=1`
 am Ist-Wert minus ~5 % kalibrieren und in `.github/workflows/ci.yml` einen
