@@ -213,10 +213,11 @@ export const budgetLedger = pgTable("budget_ledger", {
   reversesLedgerId: integer("reverses_ledger_id"),
   idempotencyKey: text("idempotency_key").notNull(),
   notes: text("notes"),
-  // Prod-Bestand ist timestamptz (now()). withTimezone MUSS gesetzt sein, sonst
-  // erzeugt drizzle-kit push hier timestamp-OHNE-TZ → der Publish-Diff wäre
-  // NICHT additiv (würde die Spalte altern wollen).
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Prod-Bestand ist timestamptz (now()). Der `timestamp`-Wrapper aus ./common
+  // setzt withTimezone:true selbst, daher kein zweites Argument — sonst erzeugt
+  // drizzle-kit push timestamp-OHNE-TZ → der Publish-Diff wäre NICHT additiv
+  // (würde die Spalte altern wollen).
+  createdAt: timestamp("created_at").notNull().defaultNow(),
   createdByUserId: integer("created_by_user_id").references(() => users.id),
 }, (table) => [
   index("budget_ledger_customer_idx").on(table.customerId),
