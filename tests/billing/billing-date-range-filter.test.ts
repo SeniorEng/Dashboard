@@ -314,6 +314,28 @@ async function generateAll(
   return res.data;
 }
 
+/**
+ * Task #1320: Einzel-Pfad — `POST /api/billing/generate` mit optionalem
+ * von–bis-Datumsbereich. Gibt das rohe Response-Objekt zurück (kein Throw bei
+ * 400), damit Tests sowohl Erfolg als auch fachliche Fehler prüfen können.
+ */
+async function generateSingle(
+  customerId: number,
+  range?: { from: string; to: string },
+): Promise<{ status: number; data: any }> {
+  const body: Record<string, any> = {
+    customerId,
+    billingMonth: BILLING_MONTH,
+    billingYear: BILLING_YEAR,
+  };
+  if (range) {
+    body.dateFrom = range.from;
+    body.dateTo = range.to;
+  }
+  const res = await apiPost<any>("/api/billing/generate", body);
+  return { status: res.status, data: res.data };
+}
+
 function resultFor(gaData: any, customerId: number): any {
   return (gaData.results ?? []).find((r: any) => r.customerId === customerId);
 }
@@ -617,5 +639,81 @@ describe("DRF-4: Pflegekasse — Kassen-Filter + Datumsbereich + Pot-Split kompo
     for (const inv of lateList) {
       expect(earlyRunIds.has(inv.billingRunId)).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DRF-5: POST /api/billing/generate (Einzel-Pfad) respektiert den
+// Datumsbereich (dateFrom/dateTo) genauso wie der generate-all-Pfad (Task #1320).
+// ---------------------------------------------------------------------------
+
+describe("DRF-5: POST /api/billing/generate (Einzel-Pfad) respektiert den Datumsbereich (Task #1320)", () => {
+  let customerId: number;
+  let earlyApptId: number;
+  let lateApptId: number;
+
+  beforeAll(async () => {
+    customerId = await createSelbstzahlerCustomer("single");
+    const early = await createApptInDayRange(customerId, 30, 1, 14, "single-early");
+    const late = await createApptInDayRange(customerId, 30, 15, LAST_DAY, "single-late");
+    earlyApptId = early.id;
+    lateApptId = late.id;
+    await documentAppointment(early.id, early.time, 30, "single-early");
+    await documentAppointment(late.id, late.time, 30, "single-late");
+    await createAndSignServiceRecord(customerId);
+  });
+
+  it("DRF-5.1 — Einzel-Generierung der frühen Hälfte rechnet NUR den frühen Termin ab", async () => {
+    const res = await generateSingle(customerId, { from: EARLY_FROM, to: EARLY_TO });
+    expect(res.status).toBe(200);
+
+    const earlyList = await listInvoices(customerId, { from: EARLY_FROM, to: EARLY_TO });
+    expect(earlyList.length).toBe(1);
+    const apptIds = await lineItemAppointmentIds(earlyList[0].id);
+    expect(apptIds).toContain(earlyApptId);
+    expect(apptIds).not.toContain(lateApptId);
+  });
+
+  it("DRF-5.2 — nach der frühen Teil-Rechnung kann der späte Termin einzeln nachberechnet werden", async () => {
+    const res = await generateSingle(customerId, { from: LATE_FROM, to: LATE_TO });
+    expect(res.status).toBe(200);
+
+    const lateList = await listInvoices(customerId, { from: LATE_FROM, to: LATE_TO });
+    expect(lateList.length).toBe(1);
+    const apptIds = await lineItemAppointmentIds(lateList[0].id);
+    expect(apptIds).toContain(lateApptId);
+    expect(apptIds).not.toContain(earlyApptId);
+
+    // Insgesamt zwei getrennte Belege (frühe + späte Teil-Abrechnung).
+    const all = await listInvoices(customerId);
+    expect(all.length).toBe(2);
+  });
+});
+
+describe("DRF-6: Einzel-Pfad ohne Bereich rechnet weiterhin den ganzen Monat ab", () => {
+  let customerId: number;
+  let earlyApptId: number;
+  let lateApptId: number;
+
+  beforeAll(async () => {
+    customerId = await createSelbstzahlerCustomer("single-full");
+    const early = await createApptInDayRange(customerId, 30, 1, 14, "single-full-early");
+    const late = await createApptInDayRange(customerId, 30, 15, LAST_DAY, "single-full-late");
+    earlyApptId = early.id;
+    lateApptId = late.id;
+    await documentAppointment(early.id, early.time, 30, "single-full-early");
+    await documentAppointment(late.id, late.time, 30, "single-full-late");
+    await createAndSignServiceRecord(customerId);
+  });
+
+  it("DRF-6.1 — ohne Datumsbereich enthält die eine Rechnung beide Termine des Monats", async () => {
+    const res = await generateSingle(customerId);
+    expect(res.status).toBe(200);
+
+    const all = await listInvoices(customerId);
+    expect(all.length).toBe(1);
+    const apptIds = await lineItemAppointmentIds(all[0].id);
+    expect(apptIds).toContain(earlyApptId);
+    expect(apptIds).toContain(lateApptId);
   });
 });

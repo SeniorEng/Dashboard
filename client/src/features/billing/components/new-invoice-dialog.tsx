@@ -53,7 +53,7 @@ interface NewInvoiceDialogProps {
   blockingDrafts: BlockingDraftInvoice[] | undefined;
   onDiscardClick: () => void;
   discardDraftsMutation: UseMutationResult<DiscardDraftsResponse, Error, { customerId: number; month: number; year: number }, unknown>;
-  generateMutation: UseMutationResult<GenerateInvoiceResponse, Error, { customerId: number; billingMonth: number; billingYear: number }, unknown>;
+  generateMutation: UseMutationResult<GenerateInvoiceResponse, Error, { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string }, unknown>;
   onGenerate: () => void;
 }
 

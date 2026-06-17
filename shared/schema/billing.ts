@@ -169,6 +169,12 @@ export const createInvoiceSchema = z.object({
   customerId: z.number().int().positive("Kunden-ID ist erforderlich"),
   billingMonth: z.number().int().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
   billingYear: z.number().int().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
+  // Task #1320: optionaler von–bis-Datumsfilter (analog `POST /generate-all`).
+  // Schränkt die abzurechnenden Termine auf das Fenster ein, damit der
+  // Einzel-Pfad nach einer Teilabrechnung (Bulk) nicht erneut den ganzen Monat
+  // abrechnet. Ohne Range = ganzer Monat (Rückwärtskompatibilität).
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datum (YYYY-MM-DD)").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Datum (YYYY-MM-DD)").optional(),
 });
 
 export const updateInvoiceStatusSchema = z.object({

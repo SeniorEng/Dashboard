@@ -92,7 +92,7 @@ export default function AdminBilling() {
     isLoading: previewLoading,
     isError: previewError,
     error: previewErrorObj,
-  } = useInvoicePreview(previewCustomerId, selectedYear, selectedMonth, dialogOpen);
+  } = useInvoicePreview(previewCustomerId, selectedYear, selectedMonth, dialogOpen, dateFrom, dateTo);
 
   const { data: blockingDrafts } = useBlockingDrafts(
     previewCustomerId,
@@ -204,6 +204,10 @@ export default function AdminBilling() {
       customerId: parseInt(selectedCustomerId),
       billingMonth: selectedMonth,
       billingYear: selectedYear,
+      // Task #1320: Einzel-Pfad respektiert denselben von–bis-Datumsbereich wie
+      // die Massenerstellung — leer = ganzer Monat.
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
     });
   };
 

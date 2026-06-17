@@ -52,7 +52,7 @@ export function useBillingMutations({
   const [bulkPrintResult, setBulkPrintResult] = useState<BulkPrintSummary | null>(null);
 
   const generateMutation = useMutation({
-    mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number }) => {
+    mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string }) => {
       // Task #544: harter Client-Timeout (60s) gegen endlose "Wird erstellt..."-Spinner.
       // Der Server rendert das PDF inzwischen im Hintergrund, der Request sollte
       // in < 3s zurückkommen — wenn nicht, ist etwas grundlegend kaputt.

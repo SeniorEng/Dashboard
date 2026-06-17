@@ -363,7 +363,13 @@ router.get("/preview", asyncHandler("Vorschau konnte nicht erstellt werden", asy
     || !Number.isFinite(year) || year < 2000 || year > 2100) {
     throw badRequest("Ungültige Parameter — customerId, month (1-12) und year sind erforderlich.");
   }
-  const draft = await buildInvoiceDraft({ customerId, billingMonth: month, billingYear: year });
+  // Task #1320: optionaler von–bis-Datumsfilter (analog `POST /generate`),
+  // damit die Einzel-Vorschau dasselbe Fenster zeigt, das der nachfolgende
+  // Generierungslauf abrechnet.
+  const previewIsoDateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const previewDateFrom = typeof req.query.dateFrom === "string" && previewIsoDateRe.test(req.query.dateFrom) ? req.query.dateFrom : undefined;
+  const previewDateTo = typeof req.query.dateTo === "string" && previewIsoDateRe.test(req.query.dateTo) ? req.query.dateTo : undefined;
+  const draft = await buildInvoiceDraft({ customerId, billingMonth: month, billingYear: year, dateFrom: previewDateFrom, dateTo: previewDateTo });
   const response: BillingInvoicePreview = {
     serviceRecordCount: draft.signedRecordCount,
     coveredAppointments: draft.apptIds.length,

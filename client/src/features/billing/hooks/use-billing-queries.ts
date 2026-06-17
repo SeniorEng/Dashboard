@@ -69,14 +69,21 @@ export function useInvoicePreview(
   selectedYear: number,
   selectedMonth: number,
   enabled: boolean,
+  // Task #1320: optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd). Leer = ganzer
+  // Monat. Spiegelt das Fenster, das der nachfolgende `POST /generate` abrechnet,
+  // damit Vorschau und erzeugte Rechnung nicht auseinanderdriften.
+  dateFrom = "",
+  dateTo = "",
 ) {
   return useQuery({
-    queryKey: ["billing", "preview", previewCustomerId, selectedYear, selectedMonth],
+    queryKey: ["billing", "preview", previewCustomerId, selectedYear, selectedMonth, dateFrom, dateTo],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       params.set("customerId", String(previewCustomerId));
       params.set("month", String(selectedMonth));
       params.set("year", String(selectedYear));
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
       const result = await api.get<BillingInvoicePreview>(`/billing/preview?${params.toString()}`, signal);
       return unwrapResult(result);
     },
