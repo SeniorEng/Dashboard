@@ -1,0 +1,37 @@
+# Exclude dev/test/tooling artifacts from the deployment image so it stays
+# under the 8 GiB Cloud Run limit. None of these are needed by the production
+# runtime (`node dist/index.cjs`) or the build step (`npm run build`).
+# Root cause of the "image size is over the limit of 8 GiB" publish failures:
+# multi-GiB dev caches (Chromium user-data-dir, Playwright browsers, test
+# client dirs, git history) were being packed into the Repl image layer.
+# See docs/deployment-log.md.
+
+# Version control history
+.git/
+
+# Agent skills, agent state, and stale per-test client dirs
+.local/
+
+# Tooling caches: Playwright browsers, TypeScript incremental cache, etc.
+.cache/
+
+# Tool config incl. the multi-GiB Chromium user-data-dir
+# (regenerates automatically; production renders into /tmp instead)
+.config/
+
+# Temp files and pre-publish DB backups
+tmp/
+
+# Test, mutation, and coverage output
+test-results/
+playwright-report/
+coverage/
+reports/
+.stryker-tmp/
+.stryker-tmp-command/
+.stryker-tmp-vitest/
+exports/
+
+# Test source (not imported by the production bundle)
+tests/
+e2e/

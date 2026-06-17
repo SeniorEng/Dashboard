@@ -8,6 +8,31 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-06-17 — Publish-Fehler "image size is over the limit of 8 GiB" behoben (kein Schema-Risiko)
+
+**Anlass:** Mehrere Publish-Versuche (Builds 09:30 / 10:01 / 10:10 UTC) schlugen fehl. Die Replit-UI zeigte nur „deployment build failed". Über die echten Build-Logs (`getDeploymentBuild`) war die eigentliche Fehlerzeile sichtbar:
+
+```
+Created Repl layer
+error: image size is over the limit of 8 GiB
+```
+
+Das ist **kein** DB-/Schema-Problem — der DB-Diff ist sauber additiv, `npm run build` ist grün. Der Fehler tritt erst beim Packen des Deployment-Images auf.
+
+**Wurzelursache:** Der gesamte Workspace wird in die „Repl layer" des Images gepackt. Über die Zeit waren mehrere GiB reiner Dev-/Test-Ballast angewachsen, v.a.:
+- `.config/chromium` — Puppeteer/Chromium-User-Data-Dir, **5,4 GiB** (Hauptursache; Chromium hatte kein eigenes `userDataDir` → Default `$HOME/.config/chromium` **innerhalb** des Workspaces).
+- `.local` (1,8 GiB, Agent-/Test-Artefakte), `.cache/ms-playwright` (622 MB), `.git` (397 MB), `tmp` (179 MB).
+
+Allein das Löschen von `.config/chromium` reichte **nicht** — bei 4,0 GiB Restworkspace blieb das Image >8 GiB (Basis-Image aus den Nix-Modulen inkl. `java-graalvm22.3`/`python-3.11`/`postgresql-16` + Repl-Layer).
+
+**Behebung (zwei Ebenen):**
+1. **`.replitignore` neu angelegt** (dauerhafte Lösung): schließt Dev-/Test-/Tooling-Ballast vom Deployment-Image aus (`.git/`, `.local/`, `.cache/`, `.config/`, `tmp/`, `test-results/`, `coverage/`, `reports/`, `.stryker-tmp*/`, `tests/`, `e2e/`, …). Nichts davon wird von der Produktions-Runtime (`node dist/index.cjs`) oder dem Build (`npm run build`) gebraucht. Reduziert die Repl-Layer von ~4,0 GiB auf ~0,9 GiB. **Dokumentierte offizielle Methode** zur Image-Verkleinerung.
+2. **Puppeteer-`userDataDir` nach `/tmp` verlegt** (`server/services/pdf-generator.ts`, Defense-in-Depth): Chromium schreibt sein Profil künftig pro-Prozess-eindeutig nach `os.tmpdir()/careconnect-chromium-<pid>` — **außerhalb** des Workspaces, sodass der Ordner nie wieder ins Image wandert. Verifiziert: typecheck + lint grün, e2e-smoke „Bündel-Druck liefert PDF" grün.
+
+**Status:** Fixes angewendet, **Re-Publish über den normalen Publish-Button** ausstehend (nicht „Copy dev schema & data to production"). DB-Diff unverändert sauber/additiv.
+
+---
+
 ### 2026-06-11 — REVIEW-Verifikation Kunde #164 (Budget-Fenster-Shift) freigegeben (Task #1210, kein Publish)
 
 **Anlass:** Vorbereitung der menschlich-gegateten REVIEW-Stufe des Budget-Anker-Rollouts (Task #1209/#1203). Der einzelne REVIEW-Kunde #164 verschiebt beim Re-Derivieren des Ankers das §39-Ansammlungsfenster (`2026-04-07 → 2026-01-01`) und braucht daher eine fachliche Freigabe, bevor `review --i-reviewed-164` scharf läuft.

@@ -1,9 +1,32 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import crypto from "crypto";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import os from "os";
+import path from "path";
 import { wrapInPrintableHtml } from "./template-engine";
+
+// Chromium legt sein User-Data-Dir sonst nach $HOME/.config/chromium INNERHALB
+// des Workspaces ab (mehrere GiB Profil-/Cache-Müll). Beim Replit-Publish wird
+// der gesamte Workspace ins Deployment-Image gepackt → das Image sprengt die
+// 8-GiB-Cloud-Run-Grenze ("image size is over the limit of 8 GiB").
+// Lösung: User-Data-Dir bewusst NACH /tmp (außerhalb des Workspaces, ephemer,
+// wird NICHT mitdeployt). Pro-Prozess eindeutig (process.pid), damit parallele
+// App-Server-Prozesse (Test-Orchestrator / Autoscale-Instanzen) sich nicht über
+// einen gemeinsamen Chromium-SingletonLock blockieren.
+const CHROMIUM_USER_DATA_DIR = path.join(
+  os.tmpdir(),
+  `careconnect-chromium-${process.pid}`,
+);
+
+function ensureChromiumUserDataDir(): string {
+  try {
+    mkdirSync(CHROMIUM_USER_DATA_DIR, { recursive: true });
+  } catch {
+    // mkdir best-effort; Puppeteer legt das Verzeichnis sonst selbst an.
+  }
+  return CHROMIUM_USER_DATA_DIR;
+}
 
 // Task #521: harte Timeouts gegen "Network.enable timed out" Hänger.
 // In Produktion zeigte sich: Puppeteer-CDP-Verbindungen können nach längerer
@@ -263,6 +286,7 @@ async function launchBrowser(): Promise<Browser> {
   const launchPromiseInner = puppeteer.launch({
     executablePath,
     headless: true,
+    userDataDir: ensureChromiumUserDataDir(),
     protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
     timeout: BROWSER_LAUNCH_TIMEOUT_MS,
     // Task #550: dumpio = true, damit Chromium-stderr im Ring-Buffer landet

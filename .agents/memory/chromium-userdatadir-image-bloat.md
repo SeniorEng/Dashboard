@@ -1,33 +1,46 @@
 ---
-name: Chromium user-data-dir bloats the deploy image past 8 GiB
-description: Why publish fails with "image size is over the limit of 8 GiB" and how to fix it
+name: Publish fails "image size over 8 GiB" — workspace dev-cruft packed into the image
+description: Why Replit publish fails with the 8 GiB image limit and the durable .replitignore fix
 ---
 
-# Chromium user-data-dir bloats the deployment image
+# Publish fails: "image size is over the limit of 8 GiB"
 
 **Symptom:** Replit publish (autoscale / cloud_run) fails at the very end with
-`error: image size is over the limit of 8 GiB`. This is NOT a build-phase or
-DB-migration failure — `npm run build` is green and the schema diff is clean. The
-build log shows the size error AFTER "Created Repl layer".
+`error: image size is over the limit of 8 GiB`, right after `Created Repl layer`.
+The UI only shows a generic "deployment build failed". This is NOT a build-phase
+or DB-migration failure — `npm run build` is green and the schema diff is clean
+& additive.
 
-**Root cause:** `server/services/pdf-generator.ts` launches Puppeteer WITHOUT a
-`userDataDir`, so Chromium defaults to `$HOME/.config/chromium`, which resolves
-INSIDE the workspace (`/home/runner/workspace/.config/chromium`). Heavy PDF
-rendering + tests grow that dir to several GiB. The whole workspace is packed
-into the deploy image, so the runtime cruft pushes the image over the 8 GiB
-Cloud Run limit. (Last good publish was small; it crept over the limit later.)
+**How to see the real cause:** use the deployment skill's `listDeploymentBuilds`
++ `getDeploymentBuild(id)` (via code_execution) and read the LAST log lines —
+that's where the size error appears. Then `du -sh ./* ./.[^.]*` at the workspace
+root to find the bloat.
 
-**How to diagnose:** use the deployment skill's `listDeploymentBuilds` +
-`getDeploymentBuild(id)` to read the REAL build-log tail — the user only sees a
-generic "build failed". Then `du -sh ./* ./.[^.]*` in the workspace root; the
-giant offender is usually `.config/chromium` (and to a lesser degree
-`.cache/ms-playwright`, `.local/test-client-*`).
+**Root cause:** the ENTIRE workspace is packed into the image's "Repl layer".
+Dev/test cruft accumulates there over time. Worst offenders seen:
+- `.config/chromium` (5.4 GiB!) — Puppeteer launched WITHOUT a `userDataDir`, so
+  Chromium defaulted to `$HOME/.config/chromium`, i.e. INSIDE the workspace.
+- `.local` (agent + per-test client dirs), `.cache/ms-playwright`, `.git`, `tmp`.
 
-**Immediate fix:** `rm -rf .config/chromium` (regenerates on next launch). That
-alone dropped the workspace from ~9+ GiB to ~4 GiB. Publish right after, before
-it regrows.
+**Key lesson:** deleting `.config/chromium` alone is NOT enough. Even at a 4.0 GiB
+workspace the image stayed > 8 GiB, because the base image (Nix `modules` incl.
+`java-graalvm22.3` + `python-3.11` + `postgresql-16`) is itself several GiB and
+adds to the Repl layer.
 
-**Durable fix (not yet applied):** set Puppeteer `userDataDir` to an ephemeral
-path OUTSIDE the workspace (e.g. under `os.tmpdir()`), so Chromium profile data
-never lands in the deployable workspace again. Touches the critical invoice/PDF
-path — change carefully and test PDF rendering.
+**Durable fix (applied):**
+1. **`.replitignore` at repo root** — the documented official way to exclude
+   files/folders from the deployment image. Exclude `.git/ .local/ .cache/
+   .config/ tmp/ test-results/ coverage/ reports/ .stryker-tmp*/ tests/ e2e/`
+   etc. None are needed by the prod runtime (`node dist/index.cjs`) or the build
+   (`npm run build`). Drops the Repl layer from ~4.0 → ~0.9 GiB. (`.gitignore` is
+   NOT used by the deploy image; `.replitignore` is the lever.)
+2. **Puppeteer `userDataDir` → `os.tmpdir()/careconnect-chromium-<pid>`** in
+   `server/services/pdf-generator.ts` (per-process unique to avoid Chromium
+   SingletonLock across parallel app-server processes). Keeps the profile OUT of
+   the workspace permanently. Note: `scripts/smoke-chromium.ts` and Playwright
+   (`playwright.config.ts`) launch their own Chromium and still write
+   `.config/chromium` in dev — harmless because `.config/` is in `.replitignore`.
+
+**If it still fails after `.replitignore`:** consider trimming unused Nix
+`modules` from `.replit` (GraalVM is the biggest), but that also affects dev
+tooling (Java e-invoice validation, ephemeral-PG tests) — coordinate first.
