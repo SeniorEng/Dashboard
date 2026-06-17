@@ -25,6 +25,20 @@ import {
 const creds = getAdminCreds();
 test.skip(!creds, "TEST_USER_EMAIL/TEST_USER_PASSWORD nicht gesetzt — Smoke-Suite übersprungen.");
 
+// Der Bündel-Druck (`GET /api/billing/:id/bundle`) liest die persistierten
+// Rechnungs-/Leistungsnachweis-PDFs aus dem Object Storage. Lokal/Replit ist der
+// Sidecar vorhanden (`PRIVATE_OBJECT_DIR`/`PUBLIC_OBJECT_SEARCH_PATHS` gesetzt) und
+// der Test läuft voll durch; in der GitHub-Actions-CI existiert der Sidecar NICHT
+// (Vitest skippt PDF-Tests über `tests/helpers/object-storage.ts`, Playwright kennt
+// diesen Helper aber nicht). Ohne Bucket persistiert `persistInvoicePdf` bewusst kein
+// PDF, der Bündel-Endpoint liefert daher 404 — deshalb hier dasselbe Skip-Kriterium.
+const hasObjectStorage =
+  !!process.env.PRIVATE_OBJECT_DIR && !!process.env.PUBLIC_OBJECT_SEARCH_PATHS;
+test.skip(
+  !hasObjectStorage,
+  "Object Storage (PRIVATE_OBJECT_DIR/PUBLIC_OBJECT_SEARCH_PATHS) nicht verfügbar — Bündel-Druck-Smoke übersprungen (kein Sidecar in CI).",
+);
+
 let session: ApiSession;
 
 test.beforeAll(async () => {

@@ -12,7 +12,7 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   import { DEFAULT_ZUGFERD_PROFILE, type ZugferdProfileId } from "../lib/zugferd";
   import { computeDataHash } from "./signature-integrity";
   import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
-  import { parseObjectPath, getPrivateDir, buildInvoicePdfObjectKey, assertInvoicePdfWriteKeyAllowed } from "../lib/object-storage-helpers";
+  import { parseObjectPath, getPrivateDir, buildInvoicePdfObjectKey, assertInvoicePdfWriteKeyAllowed, isObjectStorageConfigured } from "../lib/object-storage-helpers";
   import { eq, and, inArray, sql } from "drizzle-orm";
   import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
   import { storage } from "../storage";
@@ -52,6 +52,12 @@ const BACKGROUND_PDF_MAX_ATTEMPTS = 3;
 const BACKGROUND_PDF_RETRY_DELAY_MS = 30_000;
 
 export function schedulePdfPersistInBackground(invoiceId: number): void {
+  // Ohne Object Storage (z.B. GitHub-Actions-CI ohne Sidecar) gibt es kein Ziel
+  // für das PDF. Das Hintergrund-Persistieren würde nur eine DB-Transaktion +
+  // Puppeteer-Render starten, an der Bucket-Anbindung scheitern und mit 3×30s-
+  // Retries den Connection-Pool leersaugen — und damit unbeteiligte Requests
+  // (Session-Validierung, Kundenanlage) in 15s-Connect-Timeouts laufen lassen.
+  if (!isObjectStorageConfigured()) return;
   setImmediate(() => {
     void runPdfPersistWithRetry(invoiceId);
   });
@@ -661,6 +667,11 @@ function sanitizeCompanySettingsForSnapshot(
 }
 
 export function persistInvoicePdf(invoiceId: number): Promise<void> {
+  // SSoT-Kurzschluss (auch für die synchronen GET-/pdf/-Aufrufer): Ohne
+  // konfiguriertes Object Storage kann kein PDF persistiert werden — kein
+  // Render, keine offene Transaktion, kein Pool-Druck. Lokal/Replit/Prod ist
+  // der Bucket immer gesetzt, also ein No-op nur in der CI ohne Sidecar.
+  if (!isObjectStorageConfigured()) return Promise.resolve();
   const existing = persistInvoicePdfInFlight.get(invoiceId);
   if (existing) return existing;
   const p = persistInvoicePdfInner(invoiceId).finally(() => {

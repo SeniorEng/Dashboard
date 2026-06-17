@@ -11,6 +11,17 @@ export function getPrivateDir(): string {
   return dir;
 }
 
+// Object-Storage ist konfiguriert, wenn beide Such-Pfad-Secrets gesetzt sind
+// (identisches Kriterium wie `hasObjectStorageEnv` in `tests/helpers/object-storage.ts`).
+// In Dev/Replit/Prod sind sie immer gesetzt; in der GitHub-Actions-CI existiert
+// der Object-Storage-Sidecar NICHT und beide Variablen bleiben bewusst leer.
+// Schreib-/Render-Pfade, die ohne Bucket ohnehin scheitern würden, sollen damit
+// sauber abkürzen statt teure (DB-Transaktion + Puppeteer-Render + Retries)
+// Arbeit ins Leere zu leisten und den Connection-Pool zu erschöpfen.
+export function isObjectStorageConfigured(): boolean {
+  return !!process.env.PRIVATE_OBJECT_DIR && !!process.env.PUBLIC_OBJECT_SEARCH_PATHS;
+}
+
 // Task #1042: Object-Storage-Isolation pro Umgebung für Rechnungs-/
 // Leistungsnachweis-PDFs.
 //
