@@ -31,3 +31,33 @@ bringt eine native Binary mit; ein separates CLI ist nicht nötig — das Parsen
 in-process im Vitest-Test.
 
 Die übrigen Fitness-Functions nutzen weiterhin Regex; ein Rollout ist optional.
+
+## vi.mock-Vollständigkeit (Task #1309)
+
+`mock-export-completeness.test.ts` verhindert, dass eine partielle
+`vi.mock("<modul>", factory)`-Factory still aus dem Tritt mit den echten
+Modul-Exports gerät. Bekommt der Produktionscode einen neuen Export auf einem
+gelisteten Helper-Modul, wirft Vitest sonst zur Laufzeit
+*"No '<name>' export is defined on the mock"* und Tests fallen reaktiv aus.
+
+Geprüft wird nur eine kleine, explizite Allowlist `GUARDED_MODULES` (aktuell
+`server/lib/object-storage-helpers`). Für jeden `vi.mock(...)`-Aufruf eines
+gelisteten Moduls in `tests/**` werden die statisch sichtbaren Rückgabe-Keys
+via AST extrahiert; sie MÜSSEN eine Obermenge der echten Funktions-Exports sein.
+
+Automatisch erfüllt (kein Eintrag nötig):
+
+- `vi.mock("<modul>")` ohne Factory — Vitest auto-mockt alle Exports.
+- Das **`importOriginal`-Spread-Muster** — erbt alle echten Exports und
+  überschreibt nur die für den Test nötigen:
+
+  ```ts
+  vi.mock("../../server/lib/object-storage-helpers", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../server/lib/object-storage-helpers")>()),
+    // nur die für den Test nötigen Overrides
+  }));
+  ```
+
+**Erweitern:** einen Eintrag in `GUARDED_MODULES` (Datei
+`mock-export-completeness.test.ts`) ergänzen — repo-relativer Pfad ohne Endung
+plus kurzer Begründungs-Kommentar.

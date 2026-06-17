@@ -74,7 +74,12 @@ vi.mock("../../server/replit_integrations/object_storage/objectStorage", () => (
   },
 }));
 
-vi.mock("../../server/lib/object-storage-helpers", () => ({
+// Task #1309 — `importOriginal`-Spread-Muster: erbt alle echten Exports und
+// überschreibt nur die für diesen Test nötigen. Dadurch fällt der Mock NICHT
+// aus dem Tritt, wenn `object-storage-helpers` einen neuen Export bekommt
+// (erzwungen durch tests/architecture/mock-export-completeness.test.ts).
+vi.mock("../../server/lib/object-storage-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../server/lib/object-storage-helpers")>()),
   parseObjectPath: (p: string) => ({ bucketName: "b", objectName: p }),
   getPrivateDir: () => "/private",
   buildInvoicePdfObjectKey: (safeNumber: string, opts?: { leistungsnachweis?: boolean }) =>
