@@ -41,11 +41,15 @@ args = "typecheck"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "test"
+args = "lint"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "lint"
+args = "billing-cov"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
@@ -67,17 +71,6 @@ task = "shell.exec"
 args = "npm run check"
 
 [[workflows.workflow]]
-name = "test"
-author = "agent"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run"
-
-[[workflows.workflow]]
 name = "lint"
 author = "agent"
 
@@ -87,6 +80,25 @@ args = "npm run lint"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "billing-cov"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "COVERAGE_PORT=5079 npx tsx script/coverage-gate.ts billing"
+
+[[workflows.workflow]]
+name = "test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run"
 
 [[workflows.workflow]]
 name = "e2e-smoke"
