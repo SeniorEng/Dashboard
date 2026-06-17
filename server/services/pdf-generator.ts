@@ -1,6 +1,6 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import crypto from "crypto";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, rmSync } from "fs";
 import { execFileSync } from "child_process";
 import os from "os";
 import path from "path";
@@ -11,21 +11,45 @@ import { wrapInPrintableHtml } from "./template-engine";
 // der gesamte Workspace ins Deployment-Image gepackt → das Image sprengt die
 // 8-GiB-Cloud-Run-Grenze ("image size is over the limit of 8 GiB").
 // Lösung: User-Data-Dir bewusst NACH /tmp (außerhalb des Workspaces, ephemer,
-// wird NICHT mitdeployt). Pro-Prozess eindeutig (process.pid), damit parallele
-// App-Server-Prozesse (Test-Orchestrator / Autoscale-Instanzen) sich nicht über
-// einen gemeinsamen Chromium-SingletonLock blockieren.
-const CHROMIUM_USER_DATA_DIR = path.join(
-  os.tmpdir(),
-  `careconnect-chromium-${process.pid}`,
-);
+// wird NICHT mitdeployt).
+//
+// Task #1323: Pro `puppeteer.launch()` ein EIGENES Verzeichnis (pid + monoton
+// steigender Zähler + Zufallssuffix). Ein nur aus `process.pid` abgeleitetes
+// Dir ist über alle Browser-Starts EINES Prozesses hinweg konstant — wird der
+// Browser nach einem recoverable Error verworfen und neu gestartet, hält der
+// alte Chromium-Prozess den `SingletonLock` im selben Profilordner noch und der
+// nächste Launch bricht mit „browser is already running" ab. Eindeutige Dirs
+// pro Launch umgehen den Lock; verwaiste Dirs werden beim Verwerfen/Beenden des
+// Browsers best-effort aufgeräumt, damit /tmp nicht zumüllt.
+let chromiumUserDataDirCounter = 0;
 
-function ensureChromiumUserDataDir(): string {
+// Verknüpft jede Browser-Instanz mit ihrem Profilordner, damit
+// discardBrowser() und der `disconnected`-Handler ihn wieder löschen können.
+const browserUserDataDirs = new WeakMap<Browser, string>();
+
+function makeChromiumUserDataDir(): string {
+  const dir = path.join(
+    os.tmpdir(),
+    `careconnect-chromium-${process.pid}-${chromiumUserDataDirCounter++}-${crypto
+      .randomBytes(4)
+      .toString("hex")}`,
+  );
   try {
-    mkdirSync(CHROMIUM_USER_DATA_DIR, { recursive: true });
+    mkdirSync(dir, { recursive: true });
   } catch {
     // mkdir best-effort; Puppeteer legt das Verzeichnis sonst selbst an.
   }
-  return CHROMIUM_USER_DATA_DIR;
+  return dir;
+}
+
+function cleanupChromiumUserDataDir(dir: string | undefined): void {
+  if (!dir) return;
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // best-effort; Profilordner liegt in os.tmpdir() und wird sonst beim
+    // nächsten /tmp-Cleanup entfernt.
+  }
 }
 
 // Task #521: harte Timeouts gegen "Network.enable timed out" Hänger.
@@ -282,11 +306,12 @@ async function launchBrowser(): Promise<Browser> {
     throw new ChromiumUnavailableError();
   }
   const args = getLaunchArgs();
+  const userDataDir = makeChromiumUserDataDir();
   const restoreOutput = capturePuppeteerOutput();
   const launchPromiseInner = puppeteer.launch({
     executablePath,
     headless: true,
-    userDataDir: ensureChromiumUserDataDir(),
+    userDataDir,
     protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
     timeout: BROWSER_LAUNCH_TIMEOUT_MS,
     // Task #550: dumpio = true, damit Chromium-stderr im Ring-Buffer landet
@@ -313,15 +338,21 @@ async function launchBrowser(): Promise<Browser> {
       `[pdf-generator] Browser-Launch fehlgeschlagen (executablePath=${executablePath}, args=${JSON.stringify(args)}): ${err}` +
         (dump ? `\n[pdf-generator] Chromium-Output (letzte ${dump.split("\n").length} Zeilen):\n${dump}` : "\n[pdf-generator] Chromium-Output: (leer)"),
     );
+    // Launch fehlgeschlagen → das eben angelegte (verwaiste) Profilverzeichnis
+    // wieder entfernen, damit /tmp bei wiederholten Fehlversuchen nicht wächst.
+    cleanupChromiumUserDataDir(userDataDir);
     throw err;
   } finally {
     if (timer) clearTimeout(timer);
     restoreOutput();
   }
+  browserUserDataDirs.set(browser, userDataDir);
   browser.on("disconnected", () => {
     if (browserInstance === browser) {
       browserInstance = null;
     }
+    cleanupChromiumUserDataDir(browserUserDataDirs.get(browser));
+    browserUserDataDirs.delete(browser);
   });
   return browser;
 }
@@ -354,6 +385,11 @@ export async function discardBrowser(): Promise<void> {
     } catch {
       // ignore; Prozess ist evtl. schon weg
     }
+    // Profilordner explizit entfernen. Der `disconnected`-Handler räumt zwar
+    // ebenfalls auf, aber bei einem hängenden/abgestürzten Browser feuert er
+    // evtl. nicht zuverlässig; rmSync ist idempotent (force:true).
+    cleanupChromiumUserDataDir(browserUserDataDirs.get(b));
+    browserUserDataDirs.delete(b);
   }
 }
 
