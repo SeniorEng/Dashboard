@@ -645,6 +645,23 @@ async function runStartupTasks() {
       log(`Customer-Budgets-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1329 — `prices`-SSoT verlustfrei aus den drei Alt-Preis-Tabellen
+    // befüllen, BEVOR `dropLegacyPriceTables` läuft. Ledger-gegated (einmalig über
+    // `budget_migrations`), aber NICHT flag-gegated — additiver Daten-Transport.
+    // Direkt nach der Befüllung läuft ein harter Gate-2-Paritäts-Selbstcheck:
+    // weicht die konsolidierte priceFor-Auflösung vom unabhängigen Legacy-Verhalten
+    // ab (≠ 0 Cent), schlägt der Migrations-Lauf fehl (Rollback, kein Ledger-
+    // Eintrag, Retry beim nächsten Boot) statt mit falschen Preisen zu servicen.
+    // MUSS vor dem DROP unten laufen (sonst löscht der DROP die Quelle).
+    const { runPopulatePricesFromLegacy } = await import(
+      "./startup/populate-prices-from-legacy"
+    );
+    try {
+      await runPopulatePricesFromLegacy();
+    } catch (err) {
+      log(`Prices-Befüllung aus Alt-Tabellen fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #1326 — Verwaiste Legacy-Preis-Tabellen (`customer_service_prices`,
     // `customer_contract_rates`, `service_rates`) endgültig droppen. Vorbedingung
     // (Task #1325): Preis-Konsolidierung nach `prices`-SSoT ist abgeschlossen, kein

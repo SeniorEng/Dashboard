@@ -23,3 +23,28 @@ losing the source identity is irreversible distortion of GoBD-relevant pricing d
 **How to apply:** any new per-source consumer of the unified price table must add its
 `origin` filter; at the eventual cutover, harden with a DB-level CHECK coupling
 scope/customerId and the allowed origin set.
+
+## Populate-before-drop ordering (startup)
+
+The startup step that POPULATES `prices` from the three legacy tables MUST run BEFORE
+the step that DROPs those legacy tables — the drop step otherwise removes the data
+source and prod ends up with an empty `prices` table (the original bug: the drop
+migration was merged but nothing populated `prices`). The populate step is
+**ledger-gated** (one-shot via `budget_migrations`) but **NOT flag-gated** — it is a
+pure additive data transport, not a behaviour cutover needing sign-off.
+
+It self-verifies with a hard Gate-2 parity check immediately after populating:
+resolve `priceFor` over full coverage (recent appointments + every customer/service
+pair + every standard service) twice — once from an INDEPENDENT legacy resolve, once
+from the live `prices` rows — and throw on any ≠0-cent diff so a bad migration rolls
+back (no ledger row → retries next boot) instead of serving wrong prices.
+
+**Why:** prices feed GoBD invoices; a silent empty/incorrect `prices` table in prod is
+irreversible financial distortion. Sequencing + a transactional self-check is the
+guard.
+
+**How to apply:** missing legacy tables (e.g. dev after the drop already ran) ⇒ clean
+no-op, not an error. Rows without `validFrom` or without a catalog service mapping are
+LOGGED, never silently dropped. Respect the partial unique index
+`prices_active_validfrom_uniq` (soft-delete-before-insert per index key; in-batch
+index-key collisions with differing values throw + roll back).
