@@ -23,6 +23,7 @@ import { resolvePriceFor } from "@shared/domain/pricing/price-for";
 import {
   populatePricesFromLegacy,
   Gate2ParityError,
+  PricePopulationConflictError,
 } from "../../server/startup/populate-prices-from-legacy";
 
 async function serviceIdByCode(code: string): Promise<number> {
@@ -194,6 +195,44 @@ describe("Task #1329 — prices aus Alt-Tabellen befüllen", () => {
     });
     expect(resolution?.cents).toBe(0);
     expect(resolution?.scope).toBe("customer");
+  });
+
+  it("bricht hart ab (PricePopulationConflictError + Rollback), wenn zwei Alt-Zeilen denselben Index-Key mit abweichendem Betrag teilen", async () => {
+    await createLegacyTables();
+    const customerId = await createCustomer(`T1332 Konflikt ${Date.now()}`);
+    createdCustomerIds.push(customerId);
+    const travelKmId = await serviceIdByCode("travel_km");
+
+    // Zwei Alt-Zeilen teilen denselben Index-Key (scope=customer, origin=
+    // customer_service_prices, Kunde, Service, validFrom), haben aber
+    // ABWEICHENDE Beträge (1234 vs 5678 ct) → der partielle Unique-Index ließe
+    // nur EINE aktiv zu ⇒ stiller Datenverlust. Die Befüllung MUSS abbrechen.
+    await db.execute(sql`
+      INSERT INTO customer_service_prices (customer_id, service_id, price_cents, valid_from)
+      VALUES (${customerId}, ${travelKmId}, 1234, '2024-01-01')
+    `);
+    await db.execute(sql`
+      INSERT INTO customer_service_prices (customer_id, service_id, price_cents, valid_from)
+      VALUES (${customerId}, ${travelKmId}, 5678, '2024-01-01')
+    `);
+
+    await expect(
+      db.transaction((tx) => populatePricesFromLegacy(tx)),
+    ).rejects.toBeInstanceOf(PricePopulationConflictError);
+
+    // Transaktion zurückgerollt: KEINE prices-Zeile aus diesem Lauf persistiert.
+    const persisted = await db
+      .select({ id: prices.id })
+      .from(prices)
+      .where(
+        and(
+          eq(prices.origin, "customer_service_prices"),
+          eq(prices.customerId, customerId),
+          eq(prices.serviceId, travelKmId),
+          isNull(prices.deletedAt),
+        ),
+      );
+    expect(persisted).toHaveLength(0);
   });
 
   it("Gate2ParityError ist exportiert und verständlich", () => {
