@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
-import { useAppointment } from "@/features/appointments";
+import { useAppointment, useAppointmentBudgetFit } from "@/features/appointments";
 import { useDeleteAppointment } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/patterns/status-badge";
@@ -90,6 +90,11 @@ export default function AppointmentDetail() {
 
   const seriesId = appointment?.seriesId ?? undefined;
   const { data: seriesDetail } = useAppointmentSeriesDetail(seriesId ?? 0);
+
+  // Task #707 — passt dieser geplante Termin im eigenen Monat noch in das
+  // verfügbare §45b-Kontingent? Map enthält nur §45b-aktive Kunden.
+  const { data: budgetFit } = useAppointmentBudgetFit(appointment?.customerId ?? null);
+  const budgetOverrun = budgetFit?.get(id)?.fitsInMonthlyBudget === false;
 
   const seriesCancelMutation = useMutation({
     mutationFn: async (data: { mode: "single" | "this_and_future" | "all_future" }) => {
@@ -247,6 +252,17 @@ export default function AppointmentDetail() {
                 </Button>
               </Link>
             )}
+          </div>
+        </div>
+      )}
+
+      {budgetOverrun && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg" data-testid="banner-budget-overrun">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className={`${iconSize.sm} text-red-600 shrink-0`} />
+            <p className="text-sm text-red-700">
+              Dieser Termin überschreitet das verfügbare §45b-Budget in seinem Monat.
+            </p>
           </div>
         </div>
       )}

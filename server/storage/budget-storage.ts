@@ -44,6 +44,9 @@ interface BudgetStorage {
   // Task #1129 — read-only §45b FIFO-Aufschlüsselung (Übertrag → laufendes Jahr).
   readBudget45bFifoBreakdown: typeof fifoBreakdown.readBudget45bFifoBreakdown;
   getPlannedCostCents(customerId: number): Promise<number>;
+  // Task #707 — pro geplantem Kundentermin: passt er im eigenen Monat in das
+  // verfügbare §45b-Kontingent? (Marker für Termin-Liste + Detail.)
+  getMonthlyBudgetFitByAppointment: typeof summary.getMonthlyBudgetFitByAppointment;
   // Task #727 — Phase 1.3: monatliche History-Aggregation (Allocations- und
   // Fenster-Cap-Sicht) über die pure `aggregateHistoryByMonth`.
   getMonthlyHistory(customerId: number, opts?: history.GetMonthlyHistoryOptions): Promise<MonthlyHistoryBucket[]>;
@@ -126,6 +129,7 @@ export const budgetStorage: BudgetStorage = {
   getAllBudgetSummariesServed: summary.getAllBudgetSummariesServed,
   readBudget45bFifoBreakdown: fifoBreakdown.readBudget45bFifoBreakdown,
   getPlannedCostCents: pricing.getPlannedCostCents,
+  getMonthlyBudgetFitByAppointment: summary.getMonthlyBudgetFitByAppointment,
   getMonthlyHistory: history.getMonthlyHistory,
 
   getBudgetPreferences: preferences.getBudgetPreferences,

@@ -44,7 +44,7 @@ export {
 // RE-EXPORTS FROM API TYPES
 // ============================================
 
-export type { AppointmentWithCustomer } from "./api/appointments";
+export type { AppointmentWithCustomer, AppointmentBudgetFit } from "./api/appointments";
 export type { PaginatedResult } from "./api/pagination";
 export type { MissingBreakDay, OpenTasksSummary } from "./api/labor-law";
 export type { BirthdayEntry } from "./api/birthdays";

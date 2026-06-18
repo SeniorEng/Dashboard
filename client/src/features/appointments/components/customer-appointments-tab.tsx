@@ -6,7 +6,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Calendar, Loader2, User } from "lucide-react";
 import { iconSize } from "@/design-system";
 import { useCustomers } from "@/features/customers";
-import { useCustomerAppointments } from "../hooks/use-appointments";
+import { useCustomerAppointments, useAppointmentBudgetFit } from "../hooks/use-appointments";
 import { AppointmentCard } from "./appointment-card";
 
 type AppointmentFilter = "upcoming" | "past" | "all";
@@ -50,6 +50,7 @@ export function CustomerAppointmentsTab() {
 
   const customerId = selectedCustomerId ? parseInt(selectedCustomerId, 10) : null;
   const { data: appointments = [], isLoading: appointmentsLoading } = useCustomerAppointments(customerId);
+  const { data: budgetFit } = useAppointmentBudgetFit(customerId);
 
   const today = todayISO();
   const filteredAppointments = useMemo(() => {
@@ -129,6 +130,7 @@ export function CustomerAppointmentsTab() {
               key={appointment.id}
               appointment={appointment}
               showDate
+              budgetOverrun={budgetFit?.get(appointment.id)?.fitsInMonthlyBudget === false}
             />
           ))}
         </div>

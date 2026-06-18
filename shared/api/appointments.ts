@@ -16,6 +16,21 @@ export interface AppointmentWithCustomer extends Appointment {
   serviceType: string | null;
 }
 
+/**
+ * Task #707 — Pro geplantem Kundentermin: passt er im eigenen Monat noch in das
+ * verfügbare §45b-Kontingent? Wird vom Endpoint `GET /api/appointments/budget-fit`
+ * geliefert und am Termin (Liste + Detail) als Warn-Indikator angezeigt.
+ */
+export interface AppointmentBudgetFit {
+  appointmentId: number;
+  date: string;
+  plannedCostCents: number;
+  /** false ⇒ der Termin hebt den kumulierten §45b-Verbrauch über die Allokation. */
+  fitsInMonthlyBudget: boolean;
+  /** Fehlbetrag in Cent zum Zeitpunkt, an dem dieser Termin gebucht würde (0 = passt). */
+  shortfallCents: number;
+}
+
 interface CoverageUncoveredCustomer {
   id: number;
   name: string;

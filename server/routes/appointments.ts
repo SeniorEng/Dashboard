@@ -526,6 +526,20 @@ router.get("/by-customer", asyncHandler("Fehler beim Laden der Kundentermine", a
   res.json(appointments);
 }));
 
+// Task #707 — pro geplantem Kundentermin: passt er im eigenen Monat noch in
+// das verfügbare §45b-Kontingent? Liefert nur Marker für §45b-aktive Kunden
+// (sonst leeres Array). MUSS vor `/:id` stehen (sonst matcht `/:id` "budget-fit").
+router.get("/budget-fit", asyncHandler("Fehler beim Laden der Budget-Prüfung", async (req, res) => {
+  const user = req.user!;
+  const customerId = req.query.customerId ? parseInt(req.query.customerId as string, 10) : NaN;
+  if (!Number.isFinite(customerId) || customerId <= 0) {
+    return sendBadRequest(res, "Ungültige Kunden-ID");
+  }
+  if (!(await checkCustomerAccess(user, customerId, res))) return;
+  const fits = await budgetStorage.getMonthlyBudgetFitByAppointment(customerId);
+  res.json(fits);
+}));
+
 router.get("/batch-services", asyncHandler("Fehler beim Laden der Batch-Services", async (req, res) => {
   const user = req.user!;
   const idsParam = req.query.ids as string | undefined;

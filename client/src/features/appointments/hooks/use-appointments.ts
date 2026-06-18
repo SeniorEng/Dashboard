@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { AppointmentWithCustomer } from "@shared/types";
+import type { AppointmentWithCustomer, AppointmentBudgetFit } from "@shared/types";
 import { api, unwrapResult } from "@/lib/api/client";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -51,6 +51,28 @@ export function useCustomerAppointments(customerId: number | null) {
   return useQuery({
     queryKey: [QUERY_KEY, "by-customer", customerId],
     queryFn: () => fetchAppointmentsByCustomer(customerId!),
+    enabled: !!customerId && customerId > 0,
+    staleTime: 30000,
+  });
+}
+
+async function fetchAppointmentBudgetFit(customerId: number): Promise<AppointmentBudgetFit[]> {
+  const result = await api.get<AppointmentBudgetFit[]>(`/appointments/budget-fit?customerId=${customerId}`);
+  return unwrapResult(result);
+}
+
+/**
+ * Task #707 — §45b-Budget-Fit pro geplantem Kundentermin als Map
+ * `appointmentId → AppointmentBudgetFit`. Liefert nur für §45b-aktive Kunden
+ * Einträge; sonst eine leere Map (kein Marker).
+ */
+export function useAppointmentBudgetFit(customerId: number | null) {
+  return useQuery({
+    queryKey: [QUERY_KEY, "budget-fit", customerId],
+    queryFn: async () => {
+      const fits = await fetchAppointmentBudgetFit(customerId!);
+      return new Map(fits.map((f) => [f.appointmentId, f]));
+    },
     enabled: !!customerId && customerId > 0,
     staleTime: 30000,
   });

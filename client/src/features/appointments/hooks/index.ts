@@ -1,4 +1,4 @@
-export { useAppointments, useAppointment, useDeleteAppointment, useWeekAppointmentCounts } from "./use-appointments";
+export { useAppointments, useAppointment, useDeleteAppointment, useWeekAppointmentCounts, useAppointmentBudgetFit } from "./use-appointments";
 export { useEditAppointment } from "./use-edit-appointment-form";
 export { useEditAppointmentMutations } from "./use-edit-appointment-mutations";
 export {

@@ -16,6 +16,11 @@ interface AppointmentCardProps {
   isSubstitute?: boolean;
   /** Optionaler Query-String (ohne führendes `?`), der an `/appointment/:id` angehängt wird, z. B. `from=/service-records/open?...`. */
   linkQuery?: string;
+  /**
+   * Task #707 — true ⇒ dieser geplante Termin hebt den kumulierten §45b-Verbrauch
+   * im eigenen Monat über das verfügbare Kontingent. Zeigt einen Warn-Marker.
+   */
+  budgetOverrun?: boolean;
 }
 
 function getStatusIcon(status: string) {
@@ -29,7 +34,7 @@ function getStatusIcon(status: string) {
   }
 }
 
-function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQuery }: AppointmentCardProps) {
+function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQuery, budgetOverrun }: AppointmentCardProps) {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -165,6 +170,16 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQue
                 >
                   <AlertCircle className="w-3 h-3" />
                   Doku unvollständig
+                </span>
+              )}
+              {budgetOverrun && !isSubstitute && (
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 text-[10px] font-bold uppercase tracking-wide shrink-0"
+                  data-testid={`pill-budget-overrun-${appointment.id}`}
+                  title="Überschreitet das verfügbare §45b-Budget in diesem Monat"
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  Budget überschritten
                 </span>
               )}
               {getStatusIcon(appointment.status)}

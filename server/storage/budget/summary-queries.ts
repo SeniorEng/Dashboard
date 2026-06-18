@@ -12,6 +12,7 @@ import { clampToStatutoryMax, effectiveDefaultPots } from "@shared/domain/budget
 import { db } from "../../lib/db";
 import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
+import type { AppointmentBudgetFit } from "@shared/types";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
 import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow } from "./allocation-storage";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
@@ -316,6 +317,117 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     isCurrentlyActive,
     plannedShortfallMonth: isCurrentlyActive ? plannedShortfallMonth : null,
   };
+}
+
+/**
+ * Task #707 — Pro geplantem Kundentermin: passt er im eigenen Monat noch in das
+ * verfügbare §45b-Kontingent?
+ *
+ * Wiederverwendung statt Neubau (Ersetzungs-Regel): identische zeitliche
+ * §45b-Projektion wie `getBudgetSummary` (Task #704) — `getPlannedCostByAppointment`
+ * + `calculateAllocatedCents({ projectFuture: true })` — nur per-Termin aufgelöst.
+ * Termine werden chronologisch nach Monat gruppiert; innerhalb der zeitlichen
+ * Reihenfolge wird der kumulierte Verbrauch (`netUsedCents` + bisherige geplante
+ * Kosten) gegen die bis zum jeweiligen Monatsende aufgelaufene Allokation geprüft.
+ * Der Termin, der den kumulierten Verbrauch über die Allokation hebt, wird (samt
+ * aller folgenden) als `fitsInMonthlyBudget: false` markiert.
+ *
+ * Liefert NUR Marker für Kunden mit aktivem §45b-Topf; sonst leeres Array
+ * (Selbstzahler / §45b deaktiviert ⇒ kein Kontingent-Limit ⇒ kein Marker).
+ */
+export async function getMonthlyBudgetFitByAppointment(
+  customerId: number,
+  asOfDate: string = todayISO(),
+): Promise<AppointmentBudgetFit[]> {
+  const today = asOfDate;
+
+  const [preferences, typeSettings, customerRows] = await Promise.all([
+    getBudgetPreferences(customerId),
+    readBudgetTypeSettings(customerId, { kind: "forDate", asOfDate: today }),
+    customersRepo.selectColumnsFrom({ billingType: customers.billingType }, db).where(eq(customers.id, customerId)),
+  ]);
+  const billingType = customerRows[0]?.billingType;
+
+  // §45b-Aktivität identisch zu getBudgetSummary (BUG-19 Facette A): fehlende
+  // Zeile ⇒ Default-Aktivierung über effectiveDefaultPots (Selbstzahler-Gate).
+  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+  const default45bEnabled = effectiveDefaultPots({ billingType, pflegegrad: null })
+    .find(p => p.budgetType === "entlastungsbetrag_45b")?.enabled ?? false;
+  const isCurrentlyActive = !s45b
+    ? default45bEnabled
+    : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
+  if (!isCurrentlyActive) return [];
+
+  const plannedByAppt = await getPlannedCostByAppointment(customerId);
+  if (plannedByAppt.length === 0) return [];
+
+  // netUsedCents = Allocation-Sicht aller §45b-Buchungen bis zum Stichtag
+  // (identische Basis wie die Projektion in getBudgetSummary).
+  const txResult = await db.select({
+    transactionType: budgetTransactions.transactionType,
+    absTotal: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
+    rawTotal: sql<number>`COALESCE(SUM(${budgetTransactions.amountCents}), 0)`,
+  }).from(budgetTransactions).where(and(
+    eq(budgetTransactions.customerId, customerId),
+    eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
+    lte(budgetTransactions.transactionDate, today),
+  )).groupBy(budgetTransactions.transactionType);
+  const txMap = new Map<string, { absTotal: number; rawTotal: number }>();
+  for (const row of txResult) {
+    txMap.set(row.transactionType, { absTotal: Number(row.absTotal), rawTotal: Number(row.rawTotal) });
+  }
+  const netUsedCents =
+    (txMap.get("consumption")?.absTotal ?? 0)
+    + (txMap.get("write_off")?.absTotal ?? 0)
+    + (txMap.get("manual_adjustment")?.absTotal ?? 0)
+    - (txMap.get("reversal")?.rawTotal ?? 0);
+
+  const todayMonthPrefix = today.slice(0, 7);
+
+  // Vergangene Termine sind bereits in netUsedCents enthalten bzw. fallen über
+  // expired_unsigned aus der Planung — kein Marker (fits=true).
+  const result: AppointmentBudgetFit[] = [];
+  const futureAppts: typeof plannedByAppt = [];
+  for (const p of plannedByAppt) {
+    if (p.date.slice(0, 7) < todayMonthPrefix) {
+      result.push({ appointmentId: p.appointmentId, date: p.date, plannedCostCents: p.costCents, fitsInMonthlyBudget: true, shortfallCents: 0 });
+    } else {
+      futureAppts.push(p);
+    }
+  }
+
+  // Allokation pro Monatsende vorberechnen (projectFuture, wie getBudgetSummary).
+  const allocAtEndByMonth = new Map<string, number>();
+  for (const ym of [...new Set(futureAppts.map(p => p.date.slice(0, 7)))]) {
+    const [y, m] = ym.split("-").map(Number);
+    const monthEnd = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+    allocAtEndByMonth.set(ym, await calculateAllocatedCents(
+      customerId,
+      "entlastungsbetrag_45b",
+      { asOfDate: monthEnd, projectFuture: true },
+      undefined,
+      preferences,
+      typeSettings,
+    ));
+  }
+
+  // futureAppts ist chronologisch sortiert (getPlannedCostByAppointment).
+  let cumulativeUsed = netUsedCents;
+  for (const p of futureAppts) {
+    const allocAtEnd = allocAtEndByMonth.get(p.date.slice(0, 7))!;
+    cumulativeUsed += p.costCents;
+    const remaining = allocAtEnd - cumulativeUsed;
+    const fits = remaining >= 0;
+    result.push({
+      appointmentId: p.appointmentId,
+      date: p.date,
+      plannedCostCents: p.costCents,
+      fitsInMonthlyBudget: fits,
+      shortfallCents: fits ? 0 : -remaining,
+    });
+  }
+
+  return result;
 }
 
 export async function getBudgetSummary45a(customerId: number, _preferences?: CustomerBudgetPreferences | undefined, _amounts?: { pflegesachleistungen36: number; verhinderungspflege39: number }, _typeSettings?: CustomerBudgetTypeSetting[], asOfDate: string = todayISO()): Promise<Budget45aSummary> {
