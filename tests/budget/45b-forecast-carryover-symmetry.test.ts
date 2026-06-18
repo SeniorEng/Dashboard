@@ -26,7 +26,7 @@ import { db } from "../../server/lib/db";
 import { appointments, appointmentServices } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
 import { upsertCarryoverAllocation } from "../../server/storage/budget/allocation-storage";
-import { getBudgetSummary } from "../../server/storage/budget/summary-queries";
+import { getBudgetSummary, getMonthlyBudgetFitByAppointment } from "../../server/storage/budget/summary-queries";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { getAuthCookie, runCleanup, apiGet } from "../test-utils";
 
@@ -208,5 +208,79 @@ describe("Task #1340 — §45b Forecast Carryover-Verfalls-Symmetrie", () => {
     // wegrechnen) und exakt im Juli-Monat verortet sein.
     expect(summary.availableAfterPlannedCents).toBeLessThan(0);
     expect(summary.plannedShortfallMonth).toBe(`${YEAR}-07`);
+  });
+});
+
+/**
+ * Task #1340 (korrigiert) — dieselbe Carryover-Verfalls-Symmetrie im PRO-TERMIN-
+ * Marker (Forecast #2, `getMonthlyBudgetFitByAppointment`, Task #707). Vor dem Fix
+ * rechnete diese Schleife `allocAtEnd - cumulativeUsed` ohne die SSoT-Exklusion →
+ * der gegen den ab Juli verfallenen Übertrag gebuchte H1-Verbrauch belastete den
+ * laufenden Topf doppelt → der Juli-Termin wurde fälschlich `fitsInMonthlyBudget:
+ * false` markiert. Diese Tests pinnen Symmetrie, Juni-No-Over-Correction, echte
+ * Juli-Lücke-bleibt-sichtbar UND die Kopplung Forecast #1 == Forecast #2.
+ */
+function julyMarker(fits: Awaited<ReturnType<typeof getMonthlyBudgetFitByAppointment>>) {
+  return fits.find((f) => f.date.slice(0, 7) === `${YEAR}-07`);
+}
+
+describe("Task #1340 (korrigiert) — §45b Forecast #2 (Pro-Termin-Marker) Carryover-Symmetrie", () => {
+  it("Juli-Marker: H1-Verbrauch gegen den abgelaufenen Übertrag drückt den Termin NICHT auf fits=false (consumed == control)", async () => {
+    const consumed = await makeCustomer("T1340F2-CONSUMED");
+    const control = await makeCustomer("T1340F2-CONTROL");
+
+    for (const h of [consumed, control]) {
+      await addPlannedAppt(h.customerId, h.employeeId, JUNE_PLAN_DATE, CONSUMPTION_MINUTES);
+      await addPlannedAppt(h.customerId, h.employeeId, JULY_PLAN_DATE, CONSUMPTION_MINUTES);
+    }
+    const consumedCents = await bookH1Consumption(consumed.customerId, consumed.employeeId);
+    expect(consumedCents).toBeGreaterThan(0);
+    expect(consumedCents).toBeLessThan(CARRYOVER_CENTS);
+
+    const fitConsumed = await getMonthlyBudgetFitByAppointment(consumed.customerId, AS_OF_JUNE);
+    const fitControl = await getMonthlyBudgetFitByAppointment(control.customerId, AS_OF_JUNE);
+
+    const jc = julyMarker(fitConsumed);
+    const kc = julyMarker(fitControl);
+    expect(jc).toBeDefined();
+    expect(kc).toBeDefined();
+    // Kernaussage: der Verbrauch gegen den ab Juli entfernten Übertrag darf den
+    // Juli-Termin nicht anders bewerten als bei der sonst identischen Control.
+    expect(jc!.fitsInMonthlyBudget).toBe(kc!.fitsInMonthlyBudget);
+    expect(jc!.fitsInMonthlyBudget).toBe(true);
+    expect(jc!.shortfallCents).toBe(kc!.shortfallCents);
+  });
+
+  it("Juni-Marker: dort gültiger Übertrag → keine Über-Korrektur (Verbrauch zählt regulär, Termin passt weiterhin)", async () => {
+    // Im Juni ist der Übertrag (5000) noch gültig und deckt H1-Verbrauch + den
+    // kleinen Juni-Termin locker → fits=true; der Fix verändert die Juni-Seite
+    // NICHT (Exklusion leer).
+    const consumed = await makeCustomer("T1340F2-JUN");
+    await addPlannedAppt(consumed.customerId, consumed.employeeId, JUNE_PLAN_DATE, CONSUMPTION_MINUTES);
+    await bookH1Consumption(consumed.customerId, consumed.employeeId);
+
+    const fit = await getMonthlyBudgetFitByAppointment(consumed.customerId, AS_OF_JUNE);
+    const juneMarker = fit.find((f) => f.date.slice(0, 7) === `${YEAR}-06`);
+    expect(juneMarker).toBeDefined();
+    expect(juneMarker!.fitsInMonthlyBudget).toBe(true);
+    expect(juneMarker!.shortfallCents).toBe(0);
+  });
+
+  it("Kopplung & echte Lücke: Forecast #1-Fehlbetrag (Juli) ⟺ Forecast #2 markiert den Juli-Termin fits=false", async () => {
+    const customer = await makeCustomer("T1340F2-SHORTFALL");
+    await bookH1Consumption(customer.customerId, customer.employeeId);
+    await addPlannedAppt(customer.customerId, customer.employeeId, JULY_PLAN_DATE, 600);
+
+    const summary = await getBudgetSummary(customer.customerId, undefined, undefined, AS_OF_JUNE);
+    const fit = await getMonthlyBudgetFitByAppointment(customer.customerId, AS_OF_JUNE);
+
+    // Forecast #1 meldet die echte Juli-Lücke …
+    expect(summary.plannedShortfallMonth).toBe(`${YEAR}-07`);
+    // … und Forecast #2 markiert konsistent denselben Juli-Termin als nicht passend
+    // (der Fix darf reale Lücken nicht wegrechnen).
+    const jm = julyMarker(fit);
+    expect(jm).toBeDefined();
+    expect(jm!.fitsInMonthlyBudget).toBe(false);
+    expect(jm!.shortfallCents).toBeGreaterThan(0);
   });
 });

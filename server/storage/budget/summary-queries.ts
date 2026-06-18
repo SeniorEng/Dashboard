@@ -425,7 +425,20 @@ export async function getMonthlyBudgetFitByAppointment(
   }
 
   // Allokation pro Monatsende vorberechnen (projectFuture, wie getBudgetSummary).
+  //
+  // Task #1340 (korrigiert) — Carryover-Verfalls-Symmetrie. Identisch zur Topf-
+  // Ebenen-Vorausschau in `getBudgetSummary` (Forecast #1): `allocAtEnd` lässt
+  // für Monate nach dem 30.06. den Übertrag (bzw. per IB-Supersession verdrängte
+  // `initial_balance`) wegfallen; der GEGEN genau diese Allokation gebuchte
+  // Verbrauch muss dann ebenfalls aus `cumulativeUsed` herausfallen, sonst
+  // belastet er den laufenden Topf doppelt → falsches `fitsInMonthlyBudget`.
+  // Quelle ist dieselbe SSoT (`getExcluded45bConsumption` → `calculateAllocated45b`)
+  // wie in `unified-reader`/Forecast #1, MIT `projectFuture: true`, damit
+  // Allocation- und Exklusions-Fenster pro Monatsende identisch sind. Solange der
+  // Übertrag gültig ist (z.B. im Juni), bleibt die Exklusion leer → keine
+  // Über-Korrektur an der Juni-Seite des Boundary.
   const allocAtEndByMonth = new Map<string, number>();
+  const excludedByMonth = new Map<string, number>();
   for (const ym of [...new Set(futureAppts.map(p => p.date.slice(0, 7)))]) {
     const [y, m] = ym.split("-").map(Number);
     const monthEnd = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
@@ -437,14 +450,23 @@ export async function getMonthlyBudgetFitByAppointment(
       preferences,
       typeSettings,
     ));
+    const { excludedConsumedNetCents } = await getExcluded45bConsumption(
+      customerId,
+      monthEnd,
+      db,
+      typeSettings,
+      { projectFuture: true },
+    );
+    excludedByMonth.set(ym, excludedConsumedNetCents);
   }
 
   // futureAppts ist chronologisch sortiert (getPlannedCostByAppointment).
   let cumulativeUsed = netUsedCents;
   for (const p of futureAppts) {
-    const allocAtEnd = allocAtEndByMonth.get(p.date.slice(0, 7))!;
+    const ym = p.date.slice(0, 7);
+    const allocAtEnd = allocAtEndByMonth.get(ym)!;
     cumulativeUsed += p.costCents;
-    const remaining = allocAtEnd - cumulativeUsed;
+    const remaining = allocAtEnd - (cumulativeUsed - excludedByMonth.get(ym)!);
     const fits = remaining >= 0;
     result.push({
       appointmentId: p.appointmentId,

@@ -56,3 +56,31 @@ futurePlannedTotal`. Default `projectFuture` (undefined) keeps the
 reader/booking-path behaviour unchanged. Regression test:
 `tests/budget/45b-forecast-carryover-symmetry.test.ts` (consumed-vs-control pair,
 June no-over-correction guard, real-July-shortfall-still-flagged guard).
+
+### There are TWO forecasts — both need the exclusion (recurring trap)
+
+§45b has two independent "available after planning" projections that BOTH derive
+`allocAtEnd − consumed` and so BOTH must subtract the exclusion in lockstep:
+- the topf-level summary forecast (`getBudgetSummary`), and
+- the per-appointment marker (`getMonthlyBudgetFitByAppointment`, the
+  `fitsInMonthlyBudget` field).
+
+The first round of this fix patched only the topf-level forecast; the
+per-appointment marker still did naive `allocAtEnd − cumulativeUsed` → July
+appointments were falsely flagged `fitsInMonthlyBudget:false`. The marker now
+precomputes an `excludedByMonth` map (same `getExcluded45bConsumption(monthEnd,
+{projectFuture:true})`) keyed by `YYYY-MM` and subtracts it per appointment. When
+touching either forecast, fix BOTH or the asymmetry returns.
+
+### Full consolidation onto one availability fn is deliberately DEFERRED
+
+**Why:** the obvious "one `netAvailable45bAt` for reader + both forecasts" cleanup
+is NOT safe to do as a side effect, because the two layers compute "used"
+differently on purpose: the forecasts' `netUsedCents` INCLUDES `manual_adjustment`
+and ignores holds, while `unified-reader`'s `netConsumedUpToDate` EXCLUDES
+`manual_adjustment` and subtracts active holds. Merging them would silently change
+accounting/GoBD-relevant forecast numbers in edge cases (existing tests have no
+such corrections/holds, so they would NOT catch it). This is the deferred "Phase 6"
+manual_adjustment shadow drift. **How to apply:** keep the per-forecast exclusion
+fix as the durable guarantee; only consolidate as its own approved task with a
+shadow-mode cent-diff over real customers signed off first.
