@@ -1,0 +1,42 @@
+#1340 (korrigiert) — §45b „Verfügbar nach Planung": Carryover-Symmetrie in BEIDEN Forecasts
+Was/Warum: Der §45b-Forecast lässt nach dem 30.06.-Carryover-Verfall den Übertrag aus der projizierten Allokation korrekt wegfallen, schleppt aber den gegen ihn gebuchten Verbrauch weiter mit (cumulativeUsed = netUsedCents, roh, ohne Ausschluss) → der laufende Topf wird doppelt belastet → falsche „Budget reicht nicht"-Warnung / negatives „Verfügbar (nach Planung)" (Catrin-Barz-Fall). Die Lese-/Buchungspfade (unified-reader.ts:221, consumption-engine.ts:199) wenden die Symmetrie-Korrektur aus #1306 (getExcluded45bConsumption) schon an; der Forecast nicht. Wichtig: Es gibt ZWEI fehlerhafte Forecast-Kopien, beide müssen gefixt werden:
+
+Forecast #1 (Topf-Ebene, getBudgetSummary): summary-queries.ts ~Zeilen 224–242.
+Forecast #2 (pro Termin, §45b-Monatsmarker, Task #707): summary-queries.ts ~Zeilen 399–419 — speist fitsInMonthlyBudget pro Termin.
+
+Done looks like:
+
+In beiden Forecast-Schleifen wird je projiziertem Monatsende der gegen verfallene/verdrängte Spezial-Allocations gebuchte Verbrauch aus cumulativeUsed herausgerechnet — über dieselbe SSoT (getExcluded45bConsumption bzw. die excludedSpecialAllocationIds aus calculateAllocated45b), exakt wie unified-reader. allocAtEnd und der abgezogene Verbrauch folgen denselben Fenster-/Verfalls-/Supersession-Regeln.
+Der betroffene Kunde (und ein gespiegeltes Test-Setup: Gesamt 2.227 €, Übertrag 1.572 € exp. 30.06., Verbraucht 59,52 €, Geplant 190 €) zeigt im Juni keine falsche Warnung und ein korrektes, nicht-negatives „Verfügbar (nach Planung)" — UND der per-Termin-Marker (fitsInMonthlyBudget) ist für dieselben Termine korrekt.
+Unter dem 30.06. (Übertrag gültig) ändert sich nichts (Exklusions-Menge leer); erst ab Juli entfällt der Carryover-Verbrauch — konsistent zwischen Forecast #1, Forecast #2, Overview und Buchung (Anzeige == Buchung).
+
+Out of scope: andere Töpfe (§45a/§39 — kein 30.06.-Verfall); Serien-Materialisierung; neue Tabelle/Spalte. Verfalls-/Exklusionsregel ausschließlich aus calculateAllocated45b / getExcluded45bConsumption.
+Steps:
+
+Test zuerst (gespiegelte Prod-Zahlen, Datumsanker berechnet, nicht hartkodiert, damit der Test nicht an der 30.06.-Grenze kippt): asserten, dass aktuell sowohl availableAfterPlannedCents (Forecast #1) als auch der per-Termin-fitsInMonthlyBudget (Forecast #2) falsch sind.
+Beide Schleifen symmetrisch machen: cumulativeUsed je Monatsende um excludedConsumedNetCents(monthEnd) reduzieren (gleiche SSoT, gleiches Fenster wie allocAtEnd).
+Verifizieren: Juni unverändert (keine Über-Korrektur an der Boundary); ab Juli Carryover-Verbrauch entfällt; Forecast #1 == Forecast #2 == Overview am selben Datum.
+Gegen-Test: ein echter Engpass nach dem 30.06. (auch gültige Aufstockung deckt die Planung nicht) wird weiterhin als Fehlbetrag mit plannedShortfallMonth ausgewiesen — kein Maskieren.
+
+Relevant files: server/storage/budget/summary-queries.ts (Forecast #1 ~224–242, Forecast #2 ~399–419), allocation-storage.ts (getExcluded45bConsumption :990, calculateAllocated45b ~640–980), unified-reader.ts:207–252 (Referenz-Implementierung).
+
+#1341 (Folge) — §45b-Verfügbarkeit auf EINE Funktion konsolidieren + Invarianten festschreiben
+Was/Warum: Die symmetrische Verfügbarkeitsformel existiert korrekt nur in unified-reader; die zwei Forecasts re-implementieren allokation(D) − verbrauch(D) von Hand — das ist die Wurzel der wiederkehrenden 30.06.-Fehler. Eine einzige Funktion macht die Asymmetrie strukturell unmöglich.
+Done looks like:
+
+Neue reine/DB-Funktion netAvailable45bAt(customerId, D, { projectFuture }) = allocatedCents(D) − holds(D) − max(0, rohVerbrauch(D) − excludedConsumedNetCents(D)). Einzige Stelle, die §45b-Netto-Verfügbarkeit-an-einem-Datum beantwortet.
+unified-reader und beide Forecasts (aus #1340) rufen sie auf — keine handgerollte allocAtEnd − cumulativeUsed-Mathematik mehr. (Cap-/Import-Pfade als optionaler Folgeschritt benennen, nicht erzwingen.)
+Property-based Invarianten-Test (fast-check) über zufällige Anker/Übertrag-mit-expiresAt/FIFO-Verbrauch/geplante Termine, der festschreibt:
+
+Forecast(D) == netAvailable45bAt(D) für jedes Monatsende;
+unter dem 30.06. keine Über-Korrektur (Exklusion leer);
+Kopplung: Übertrag fällt aus Allokation ⟺ sein Verbrauch fällt aus consumedNet;
+Forecast-Startpunkt (heute) == unified-reader.availableCents;
+echter Engpass nach 30.06. bleibt als Fehlbetrag sichtbar;
+Forecast #1 == Forecast #2 für denselben Kunden.
+
+
+Architektur-Wächter (analog ssot-imports/budget-single-reader): §45b-Verfügbarkeits-Mathematik nur in netAvailable45bAt; ein handgerolltes allocated − consumed außerhalb schlägt im Test fehl (Positiv- + Negativ-Beweis).
+
+Out of scope: §45a/§39-Konsolidierung (kein 30.06.-Verfall); keine Schema-Änderung.
+Reihenfolge: #1340 (beide Stellen) zuerst als Sofort-Entlastung des Betriebs ausliefern; #1341 direkt danach als der dauerhafte Fix — danach ist die 30.06.-Naht geschlossen.
