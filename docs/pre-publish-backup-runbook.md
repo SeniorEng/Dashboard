@@ -159,9 +159,13 @@ psql "$PROD_DATABASE_URL" \
 
 ## 7. Checkliste vor „Publish" klicken
 
+- [ ] `PROD_DATABASE_URL` aus dem Publishing-Tab gesetzt (für den Replica-Diff Pflicht)
+- [ ] `node script/preflight-publish.mjs` **mit Exit-Code 0** durchgelaufen (§8.2 — blockierend)
 - [ ] `scripts/backup-prod-db.sh` erfolgreich gelaufen, SHA256 notiert
 - [ ] `scripts/backup-affected-tables.sh` erfolgreich gelaufen, Row-Count-Report geprüft
 - [ ] `tmp/db-backups/` lokal heruntergeladen / in sicherem Cloud-Storage abgelegt
+- [ ] Jeder destruktive DROP einzeln verstanden & via `PUBLISH_ACK_DROPS` bestätigt (§8.3)
+- [ ] Expand-Migrate-Contract eingehalten — kein noch referenziertes Objekt wird gedroppt (§8.4)
 - [ ] Replit/Neon-Auto-Backup ≤ 1 h alt verifiziert
 - [ ] Eintrag in `docs/deployment-log.md` ergänzt
 - [ ] `unset PROD_DATABASE_URL` in der aktuellen Shell
@@ -170,11 +174,15 @@ Erst danach: Publish.
 
 ---
 
-## 8. Automatischer Backup-Gate (Task #240)
+## 8. Automatische Publish-Sicherheitsnetze (Task #240, gehärtet in #1339)
 
-Damit der manuelle Schritt nicht vergessen wird, gibt es zwei Sicherheitsnetze:
+Damit der manuelle Schritt nicht vergessen wird, greifen mehrere gestaffelte
+Sicherheitsnetze — eine **nicht** blockierende Build-Warnung (§8.1), der
+**blockierende** Operator-Preflight inkl. Schema-vs-Prod-Replica-Diff,
+Per-DROP-Bestätigung und Expand-Migrate-Contract (§8.2–§8.4) sowie ein
+prozess-internes Boot-Time-Hard-Gate für kritische SSoT-Tabellen (§8.5–§8.6):
 
-### 8.1 Build-Warnung
+### 8.1 Build-Warnung (Reminder, NICHT blockierend)
 
 Sowohl `npm run build` (`script/build.ts`) als auch der Deployment-Startup-Check
 (`script/check-build.mjs`) führen am Ende `script/check-pre-publish-backup.mjs` aus.
@@ -184,21 +192,130 @@ und prüft `tmp/db-backups/` auf eine Datei, die **jünger als 24 Stunden** ist.
 - Keine destruktive Migration → keine Warnung.
 - Destruktive Migration + frisches Backup vorhanden → Hinweis mit Pfad und Alter.
 - Destruktive Migration + **kein** frisches Backup → deutliche Warnung mit Verweis
-  auf dieses Runbook. **Der Build bricht NICHT ab** (Backups werden bewusst nicht
+  auf dieses Runbook. **Der Build bricht bewusst NICHT ab** (Backups werden nicht
   ins Repo eingecheckt — der Warnhinweis ist ein Reminder, kein Fehler).
 
-### 8.2 Pre-Publish-Checkliste auf der Konsole
+Der harte Stopp passiert stattdessen im Operator-Preflight (§8.2) — dort, wo
+`PROD_DATABASE_URL` verfügbar ist und gegen die echte Prod verglichen werden kann.
 
-Vor dem Klick auf „Publish" empfohlen:
+### 8.2 Pre-Publish-Preflight (Task #1339, BLOCKIEREND)
+
+Vor dem Klick auf „Publish" verpflichtend — mit gesetztem `PROD_DATABASE_URL`:
 
 ```bash
+PROD_DATABASE_URL="<prod-conn-string>" node script/preflight-publish.mjs
+```
+
+Das Skript (`script/preflight-publish.mjs`) kombiniert zwei Detektoren und
+**beendet sich mit Exit-Code 1, sobald irgendein blockierender Punkt offen ist**
+(d.h. der Operator merkt den Stopp, ein einfaches „weiter klicken" gibt es nicht):
+
+1. **Migrations-Grep** (`DROP COLUMN`/`DROP TABLE` in der jüngsten Migration) —
+   schneller, prod-unabhängiger Erst-Indikator.
+2. **Schema-vs-Prod-Replica-Diff** (`script/schema-replica-diff.mjs`) — die
+   eigentliche Wahrheitsquelle: vergleicht das **Ziel-Schema** (Dev-/Drizzle-DB
+   über `DATABASE_URL`) Tabelle für Tabelle, Spalte für Spalte gegen die
+   **Prod-Replica** (`PROD_DATABASE_URL`). Alles, was in Prod existiert, aber im
+   Ziel fehlt, würde der Publish-Diff **droppen** → echte Datenverlust-Kandidaten.
+   Das ist absichtlich KEIN `grep` über `migrations/` (Migrationsdateien lügen
+   über den realen Drift; nur der Replica-Vergleich sieht ihn).
+
+Blockierende Fehler (Exit 1):
+
+- Destruktive Änderung erkannt **und** kein frisches Backup (< 24 h) in `tmp/db-backups/`.
+- **Nicht bestätigte** destruktive Drops (siehe §8.3).
+- **Expand-Migrate-Contract**-Verletzung (siehe §8.4).
+- Destruktive Migration erkannt, aber `PROD_DATABASE_URL` fehlt / Replica nicht
+  erreichbar → der Diff kann nicht verifiziert werden ⇒ sicherheitshalber Stopp.
+
+Ohne destruktive Änderung läuft der Preflight grün durch (Exit 0) und listet nur
+die manuellen Restpunkte (Replit-Auto-Backup, `docs/deployment-log.md`,
+`unset PROD_DATABASE_URL`).
+
+### 8.3 Per-DROP-Bestätigung (`PUBLISH_ACK_DROPS`)
+
+Ein Sammel-„OK" für alle Drops gibt es nicht — **jeder** destruktive DROP muss
+einzeln bestätigt werden. Der Preflight listet die erkannten Drops mit ihrem
+stabilen Key auf:
+
+- Tabelle: `table:<tabelle>` (z. B. `table:service_rates`)
+- Spalte:  `column:<tabelle>.<spalte>` (z. B. `column:prices.legacy_amount`)
+
+Bestätigung über die Env-Variable (Komma- oder Whitespace-getrennt):
+
+```bash
+PUBLISH_ACK_DROPS="table:service_rates,column:prices.legacy_amount" \
+PROD_DATABASE_URL="<prod-conn-string>" \
 node script/preflight-publish.mjs
 ```
 
-Das Skript hakt automatisch ab, was es prüfen kann (Backup-Datei < 24 h alt,
-destruktive Statements in der jüngsten Migration), und listet die manuellen
-Restpunkte (Replit-Auto-Backup verifizieren, Eintrag in `docs/deployment-log.md`,
-`unset PROD_DATABASE_URL`) auf.
+Jeder erkannte Drop, der **nicht** in `PUBLISH_ACK_DROPS` steht, ist ein
+blockierender Fehler. So kann kein unbeabsichtigter Drop „mitrutschen".
+
+### 8.4 Expand-Migrate-Contract (EMC)
+
+Destruktive Schema-Änderungen müssen dem Muster *expand → migrate → contract*
+folgen: erst das neue Ziel anlegen + Daten umziehen, **dann** in einem späteren
+Schritt das Alte droppen. Der Preflight bricht ab, wenn eine Tabelle gedroppt
+werden soll, die zur Laufzeit **noch von einem Startup-Migrations-Pfad gelesen
+wird** (`STARTUP_MIGRATION_REFERENCED_TABLES` in `script/schema-replica-diff.mjs`,
+aktuell die drei Alt-Preis-Tabellen `service_rates`, `customer_contract_rates`,
+`customer_service_prices`, die in die konsolidierte `prices`-SSoT einlaufen).
+Drop erst, wenn der referenzierende Pfad entfernt wurde — dann den Tabellennamen
+aus `STARTUP_MIGRATION_REFERENCED_TABLES` streichen.
+
+### 8.5 Boot-Time-Hard-Gate für kritische SSoT (Task #1339)
+
+Zweites, prozess-internes Sicherheitsnetz für den Fall, dass ein Drop trotz
+Preflight in Prod ankommt: `server/startup/critical-ssot-boot-gate.ts` läuft im
+Server-Start (in `server/index.ts`, **vor** `httpServer.listen`) und ersetzt den
+früheren stillen No-op der Preis-Befüllung durch ein lautes Gate.
+
+Pro Eintrag der Registry `CRITICAL_SSOT_TARGETS` (aktuell nur `prices`) prüft die
+reine Funktion `evaluateCriticalSsotGate(...)`:
+
+| Situation | Verhalten |
+|---|---|
+| Ziel-Tabelle hat Zeilen | **pass** |
+| Ziel leer, aber Quell-Tabellen noch vorhanden (Befüllung kann laufen) | **pass** |
+| Ziel leer & Quellen weg, aber kein Leser hängt davon ab | **pass** |
+| Ziel leer & Quellen weg & Leser vorhanden — **in Produktion** | **fail → `CriticalSsotDataLossError`, `process.exit(1)`** |
+| dieselbe Kombination außerhalb Produktion (Dev/Test) | **laute Warnung**, Boot läuft weiter |
+
+> **Warum production-scoped?** Die Dev-/Wegwerf-Test-DB läuft legitim mit leerer
+> `prices`-Tabelle. Ein harter Boot-Fail in jeder Umgebung würde Dev- und
+> Test-Start brechen. Deshalb wirft das Gate **nur in Produktion** und warnt sonst.
+
+### 8.6 Manifest-Escape-Hatch (`docs/db-backup-manifest.json`)
+
+Soll eine kritische Tabelle bewusst leer in Prod gehen (z. B. unmittelbar nach
+einem Restore-/Re-Seed-Plan), legitimiert ein Manifest-Eintrag den Zustand —
+aber nur passgenau zum aktuellen Schema:
+
+```json
+{
+  "entries": [
+    {
+      "target": "prices",
+      "backupId": "prod-2026-06-17-0746.dump",
+      "schemaHash": "<aktueller Schema-Hash>",
+      "timestamp": "2026-06-17T07:46:19Z"
+    }
+  ]
+}
+```
+
+Das Gate akzeptiert den Eintrag nur, wenn der `schemaHash` zum laufenden Schema
+passt. Ändert sich das Schema, ist der Eintrag automatisch **entwertet** und das
+Gate greift wieder — ein veralteter Freifahrtschein kann nicht stehen bleiben.
+
+### 8.7 Plattform-Grenze
+
+Beide Netze sind operator-/laufzeit-seitig. Der eigentliche Publish-Schema-Diff
+wird von der Replit-Plattform erzeugt und ist nicht programmatisch abfangbar:
+Der Preflight (§8.2) bildet ihn über den Prod-Replica-Vergleich **nach**, ersetzt
+ihn aber nicht. Bei einem von der Plattform angebotenen Rename-/Drop-Prompt im
+Publish-Dialog im Zweifel **„No, create new table"** wählen und additiv bleiben.
 
 ---
 

@@ -137,6 +137,22 @@ function isNeonDriverBug(message: string): boolean {
 }
 
 (async () => {
+  // Task #1339 — Critical-SSoT-Boot-Gate VOR dem Serving. Bricht den Boot in
+  // Produktion hart ab, wenn eine kritische SSoT (z.B. `prices`) leer ist, ihre
+  // Quell-Tabellen fehlen und Leser davon abhängen (der stille #1334-No-Op-
+  // Datenverlust). In Dev/Test wird nur laut gewarnt (Dev-DB läuft legitim mit
+  // leerer prices-Tabelle). Bewusst NICHT fault-isoliert: ein Fehlschlag MUSS
+  // den Prozess beenden (Exit≠0 ⇒ Deploy schlägt fehl ⇒ alte Version bleibt).
+  try {
+    const { runCriticalSsotBootGate } = await import(
+      "./startup/critical-ssot-boot-gate"
+    );
+    await runCriticalSsotBootGate();
+  } catch (err) {
+    log(`[FATAL] Critical-SSoT-Boot-Gate: ${err}`, "startup");
+    process.exit(1);
+  }
+
   await registerRoutes(httpServer, app);
 
   // Task #705 — API-Catch-All vor Vite/Static-Fallback. Vor diesem Handler

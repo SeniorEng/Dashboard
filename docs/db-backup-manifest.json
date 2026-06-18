@@ -1,0 +1,4 @@
+{
+  "$comment": "Task #1339 — Container-lesbares Backup-/Recovery-Manifest für das Critical-SSoT-Boot-Gate. tmp/db-backups/ liegt NICHT im Deploy-Container; das Boot-Gate kann nur committete Dateien lesen. Ein Eintrag bestätigt, dass ein leerer Critical-SSoT-Zustand operator-verifiziert ist (verifiziertes Backup vorhanden) und legitimiert so den Boot trotz leerem Ziel. Felder pro Eintrag: target (Tabelle), backupId (Datei-/Snapshot-Name des verifizierten Backups), schemaHash (Spalten-Hash des Ziels zum Verifikationszeitpunkt — eine spätere Schemaänderung entwertet die Bestätigung), timestamp (ISO-UTC), acknowledgedBy. Runbook: docs/pre-publish-backup-runbook.md §8.",
+  "entries": []
+}
