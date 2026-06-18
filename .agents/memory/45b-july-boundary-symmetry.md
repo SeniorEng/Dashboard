@@ -36,3 +36,23 @@ Regression test: `tests/budget/45b-july-boundary-symmetry.test.ts` (uses a
 no-consumption control customer as the source of truth for the uncollapsed July
 accrual instead of hardcoding month×monthly — the carryover shifts allocStart so
 the accrual is not simply 7×monthly).
+
+## Same symmetry also required in the "Verfügbar nach Planung" forecast
+
+`getBudgetSummary` (`server/storage/budget/summary-queries.ts`) projects future
+months with `calculateAllocatedCents(..., {projectFuture:true})`, which already
+drops the expired carryover from `allocAtEnd` for months after 30.06. But the
+consumption booked against that carryover stayed in `cumulativeUsed`/`netUsedCents`
+→ same double-charge as the readers, surfacing as false negative
+`availableAfterPlannedCents` / bogus `plannedShortfallMonth`.
+
+**How to apply:** `getExcluded45bConsumption` takes an `opts.projectFuture` flag
+that MUST match the `projectFuture` of the paired allocation call (else the
+allocation window and the exclusion window drift). The forecast loop subtracts the
+per-month `excludedConsumedNetCents` from `cumulativeUsed` (`remaining = allocAtEnd
+− (cumulativeUsed − excludedConsumedNetCents)`) and tracks `excludedAtHorizon` so
+`projectedAvailable = allocAtHorizon − (netUsedCents − excludedAtHorizon) −
+futurePlannedTotal`. Default `projectFuture` (undefined) keeps the
+reader/booking-path behaviour unchanged. Regression test:
+`tests/budget/45b-forecast-carryover-symmetry.test.ts` (consumed-vs-control pair,
+June no-over-correction guard, real-July-shortfall-still-flagged guard).

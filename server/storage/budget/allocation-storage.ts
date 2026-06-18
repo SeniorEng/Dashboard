@@ -992,10 +992,17 @@ export async function getExcluded45bConsumption(
   asOfDate: string,
   d: Pick<typeof db, 'select'>,
   typeSettings: CustomerBudgetTypeSetting[],
+  opts?: { projectFuture?: boolean },
 ): Promise<{ excludedSpecialAllocationIds: number[]; excludedConsumedNetCents: number }> {
+  // Task #1340 — `projectFuture` MUSS denselben Wert haben wie der zugehörige
+  // `calculateAllocatedCents`-Aufruf, dessen Verbrauch wir symmetrisch
+  // herausrechnen. Sonst driften Allocated- und Exklusions-Fenster auseinander
+  // (z.B. Forecast-Projektion in `getBudgetSummary` rechnet mit
+  // `projectFuture: true`). Default (undefined) = bisheriges Verhalten der
+  // Lese-/Buchungs-Pfade (`unified-reader`, `consumption-engine`).
   const { excludedSpecialAllocationIds } = await calculateAllocated45b(
     customerId,
-    { asOfDate },
+    { asOfDate, projectFuture: opts?.projectFuture },
     d,
     typeSettings,
   );

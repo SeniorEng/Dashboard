@@ -14,7 +14,7 @@ import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import type { AppointmentBudgetFit } from "@shared/types";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow } from "./allocation-storage";
+import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow, getExcluded45bConsumption } from "./allocation-storage";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
 import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
@@ -220,6 +220,11 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   let worstShortfallCents = 0;
   let plannedShortfallMonth: string | null = null;
   let allocAtHorizon = totalAllocatedCents;
+  // Task #1340 — Verbrauch, der gegen einen zum projizierten Monatsende NICHT
+  // mehr gezählten Übertrag / verdrängte `initial_balance` gebucht wurde, am
+  // Horizont (für `projectedAvailable`). Default 0 (keine Exklusion / kein
+  // Forecast).
+  let excludedAtHorizon = 0;
   if (sortedMonths.length > 0) {
     let cumulativeUsed = netUsedCents;
     for (const ym of sortedMonths) {
@@ -233,13 +238,31 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
         preferences,
         typeSettings,
       );
+      // Task #1340 — Carryover-Verfalls-Symmetrie. `allocAtEnd` lässt für Monate
+      // nach dem 30.06. den Übertrag wegfallen; der gegen GENAU diesen Übertrag
+      // (bzw. per IB-Supersession verdrängte `initial_balance`) gebuchte
+      // Verbrauch muss dann ebenfalls aus `cumulativeUsed` herausfallen — sonst
+      // belastet er den laufenden Topf doppelt (künstlicher Fehlbetrag). Quelle
+      // ist dieselbe SSoT (`getExcluded45bConsumption` → `calculateAllocated45b`)
+      // wie in `unified-reader`/`consumption-engine`, MIT `projectFuture: true`,
+      // damit Allocation- und Exklusions-Fenster identisch sind. Solange der
+      // Übertrag noch gültig ist (z.B. im Juni), bleibt die Exklusion leer →
+      // keine Über-Korrektur an der Juni-Seite des Boundary.
+      const { excludedConsumedNetCents } = await getExcluded45bConsumption(
+        customerId,
+        monthEnd,
+        db,
+        typeSettings,
+        { projectFuture: true },
+      );
       cumulativeUsed += futureCostsByMonth.get(ym)!;
-      const remaining = allocAtEnd - cumulativeUsed;
+      const remaining = allocAtEnd - (cumulativeUsed - excludedConsumedNetCents);
       if (remaining < 0 && -remaining > worstShortfallCents) {
         worstShortfallCents = -remaining;
         if (plannedShortfallMonth === null) plannedShortfallMonth = ym;
       }
       allocAtHorizon = allocAtEnd;
+      excludedAtHorizon = excludedConsumedNetCents;
     }
   }
 
@@ -293,8 +316,13 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   // Restdeckung. Bei einer Lücke spiegelt sie den größten kumulierten
   // Fehlbetrag (negativ); ohne Lücke fällt sie auf den nach allen Buchungen
   // verbleibenden Topf am Horizont zurück.
+  //
+  // Task #1340 — Am Horizont gilt dieselbe Carryover-Verfalls-Symmetrie wie in
+  // der Schleife: `allocAtHorizon` lässt einen abgelaufenen Übertrag wegfallen,
+  // also muss der gegen ihn gebuchte Verbrauch (`excludedAtHorizon`) auch von
+  // `netUsedCents` abgezogen werden, sonst entsteht ein künstlicher Fehlbetrag.
   const projectedAvailable = sortedMonths.length > 0
-    ? allocAtHorizon - netUsedCents - futurePlannedTotal
+    ? allocAtHorizon - (netUsedCents - excludedAtHorizon) - futurePlannedTotal
     : availableCents - plannedCents;
   const availableAfterPlannedCents = worstShortfallCents > 0
     ? -worstShortfallCents
