@@ -132,13 +132,32 @@ export function parseAckList(raw) {
 }
 
 /**
+ * Leitet die `pg`-SSL-Option aus dem Connection-String ab. Prod-Neon nutzt
+ * `sslmode=require` ⇒ tolerantes SSL (Neon-Zertifikat, `rejectUnauthorized:false`).
+ * Lokale/Proxy-DBs ohne TLS (`sslmode=disable`, z.B. die Wegwerf-Test-DBs auf
+ * dem lokalen Postgres) DÜRFEN NICHT mit erzwungenem SSL verbunden werden —
+ * `pg` bricht sonst gegen einen Server ohne SSL hart ab. Damit ist der echte
+ * DB-Fetch-Pfad integration-testbar, ohne das Prod-Verhalten zu ändern.
+ */
+export function resolveSchemaSnapshotSsl(connectionString) {
+  try {
+    if (new URL(connectionString).searchParams.get("sslmode") === "disable") {
+      return false;
+    }
+  } catch {
+    // Kein parsebarer URL → konservativ tolerantes SSL.
+  }
+  return { rejectUnauthorized: false };
+}
+
+/**
  * Liest das öffentliche Schema (Tabellen + Spalten) aus einer Postgres-DB.
- * Nutzt `pg` mit toleranter TLS-Einstellung (Neon-Hosts verlangen SSL).
+ * SSL wird aus dem Connection-String abgeleitet (siehe `resolveSchemaSnapshotSsl`).
  */
 export async function fetchSchemaSnapshot(connectionString) {
   const client = new pg.Client({
     connectionString,
-    ssl: { rejectUnauthorized: false },
+    ssl: resolveSchemaSnapshotSsl(connectionString),
   });
   await client.connect();
   try {
