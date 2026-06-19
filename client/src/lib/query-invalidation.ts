@@ -14,6 +14,7 @@ type Domain =
   | "employee-documents"
   | "employee-proofs"
   | "customer-service-prices"
+  | "standard-prices"
   | "customer-insurance"
   | "customer-documents"
   | "profile"
@@ -106,6 +107,11 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["customer-service-prices-future"],
     ["customer-service-prices-all"],
   ],
+  "standard-prices": [
+    ["standard-prices"],
+    ["standard-prices-future"],
+    ["standard-prices-all"],
+  ],
   "customer-insurance": [
     ["customer-insurance-history"],
   ],
@@ -186,6 +192,7 @@ const RELATED_DOMAINS: Record<Domain, Domain[]> = {
   "employee-documents": ["employee-proofs"],
   "employee-proofs": ["employee-documents"],
   "customer-service-prices": [],
+  "standard-prices": [],
   "customer-insurance": ["customers"],
   "customer-documents": [],
   profile: ["auth"],

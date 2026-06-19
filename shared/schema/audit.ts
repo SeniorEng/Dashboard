@@ -66,6 +66,10 @@ export const AUDIT_ACTIONS = [
   "user_team_lead_set",
   "user_team_lead_unset",
   "customer_price_history_consolidated",
+  "standard_price_created",
+  "standard_price_replaced",
+  "standard_price_deleted",
+  "standard_price_changed_invoiced",
   "month_auto_closed",
   "appointment_expired_unsigned",
   "month_close_reminder_sent",
@@ -122,6 +126,7 @@ export const AUDIT_ENTITY_TYPES = [
   "prospect",
   "employee",
   "insurance_provider",
+  "service",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

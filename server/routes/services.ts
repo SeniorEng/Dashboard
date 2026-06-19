@@ -4,8 +4,14 @@ import { requireAdmin } from "../middleware/auth";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
+import standardPricesRouter from "./standard-prices";
 
 const router = Router();
+
+// Task #1357 — firmenweite Standardpreise (zeitversioniert, editierbar). Die
+// Katalog-IDENTITÄT bleibt read-only (siehe 403-Routen unten); nur die
+// `standard`-Preiszeilen in der `prices`-SSoT sind über diese Routen pflegbar.
+router.use(standardPricesRouter);
 
 /**
  * Der Dienstleistungskatalog ist konfigurationsgesteuert
