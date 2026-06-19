@@ -1,5 +1,5 @@
 /**
- * Task #1342 — Live-Integrationstest für den Publish-Schema-Diff-Detektor.
+ * Task #1342 / #1367 — Live-Integrationstest für den Publish-Schema-Diff-Detektor.
  *
  * Die reine Diff-/Vertrags-/Bestätigungs-Logik ist DB-frei unit-getestet
  * (`tests/unit/schema-replica-diff.test.ts`). Der TATSÄCHLICHE DB-Fetch-Pfad
@@ -11,9 +11,15 @@
  * ZWEI echte Wegwerf-Datenbanken auf demselben lokalen Postgres-Server —
  *   - `target` (= Dev/Drizzle-Ziel des Publish) und
  *   - `prod`   (= read-only Prod-Replica) MIT je einer Extra-Tabelle/-Spalte —
- * fahren den vollen Detektor dagegen und prüfen, dass die gedroppte Tabelle UND
- * die gedroppte Spalte gemeldet werden, inkl. Expand-Migrate-Contract-Verletzung
- * für eine noch referenzierte Tabelle.
+ * fahren den vollen Detektor dagegen und prüfen über den ECHTEN DB-Lese-Pfad:
+ *   1. Drop-Treffer: gedroppte Tabelle UND gedroppte Spalte werden gemeldet
+ *      (in `prod`, fehlt im Ziel) — Task #1342.
+ *   2. Kein Fehlalarm bei ADDITIVER Änderung: eine Tabelle und eine Spalte, die
+ *      NUR im Ziel existieren, tauchen NICHT in `drops` auf — Task #1367 (a).
+ *   3. Expand-Migrate-Contract-Verletzung: eine noch von einem Startup-
+ *      Migrations-Pfad referenzierte Tabelle (`STARTUP_MIGRATION_REFERENCED_TABLES`),
+ *      die in `prod` existiert und im Ziel fehlt, erscheint in
+ *      `contractViolations` — Task #1367 (b).
  *
  * Skippt sauber, wenn keine DB verfügbar ist oder `CREATE DATABASE` nicht
  * gelingt (z.B. fehlende Rechte / Neon-Proxy ohne per-DB-Routing in CI).
@@ -82,9 +88,12 @@ beforeAll(async () => {
     await admin.query(`CREATE DATABASE "${TARGET_DB}"`);
     await admin.query(`CREATE DATABASE "${PROD_DB}"`);
 
-    // Ziel-Schema (= Dev/Drizzle): nur die Basis.
+    // Ziel-Schema (= Dev/Drizzle): die Basis PLUS eine rein ADDITIVE Tabelle und
+    // Spalte, die in der Prod-Replica NICHT existieren (Task #1367 (a)). Diese
+    // dürfen NICHT als Drop gemeldet werden — sie sind ein normaler Expand-Schritt.
     await runSql(urlForDb(TARGET_DB), [
-      `CREATE TABLE kept_table (id integer PRIMARY KEY, kept_col text)`,
+      `CREATE TABLE kept_table (id integer PRIMARY KEY, kept_col text, target_only_col text)`,
+      `CREATE TABLE target_only_table (id integer PRIMARY KEY)`,
     ]);
 
     // Prod-Replica: Basis + EINE Extra-Spalte + EINE Extra-Tabelle + eine noch
@@ -155,6 +164,63 @@ describe("Task #1342 — detectDestructiveSchemaDiffAgainstProd (live, zwei DBs)
     // Flache Drop-Liste enthält beide Drop-Arten.
     expect(result.drops).toContainEqual({ table: "dropped_table" });
     expect(result.drops).toContainEqual({ table: "kept_table", column: "extra_col" });
+  });
+
+  it("Task #1367 (a): meldet additive Tabelle/Spalte (nur im Ziel) NICHT als Drop", async (ctx) => {
+    if (!ready) {
+      ctx.skip("Keine zweite DB verfügbar");
+      return;
+    }
+
+    // Das Ziel enthält `target_only_table` und `kept_table.target_only_col`, die
+    // beide in der Prod-Replica fehlen. Eine rein additive Erweiterung des Schemas
+    // ist KEIN destruktiver Schritt — der Detektor darf hier NICHT Alarm schlagen.
+    const result = await detectDestructiveSchemaDiffAgainstProd({
+      targetUrl: urlForDb(TARGET_DB),
+      prodUrl: urlForDb(PROD_DB),
+    });
+
+    expect(result.available).toBe(true);
+
+    // Die additive Tabelle taucht weder als gedroppte Tabelle noch in der flachen
+    // Drop-Liste auf.
+    expect(result.droppedTables).not.toContain("target_only_table");
+    expect(result.drops).not.toContainEqual({ table: "target_only_table" });
+
+    // Die additive Spalte taucht weder als gedroppte Spalte noch in der flachen
+    // Drop-Liste auf.
+    expect(result.droppedColumns).not.toContainEqual({
+      table: "kept_table",
+      column: "target_only_col",
+    });
+    expect(result.drops).not.toContainEqual({
+      table: "kept_table",
+      column: "target_only_col",
+    });
+
+    // Additive Elemente lösen auch keine (vermeintliche) Contract-Verletzung aus.
+    expect(result.contractViolations).not.toContain("target_only_table");
+  });
+
+  it("Task #1367 (b): meldet eine noch referenzierte, nur in Prod existierende Tabelle als Contract-Verletzung", async (ctx) => {
+    if (!ready) {
+      ctx.skip("Keine zweite DB verfügbar");
+      return;
+    }
+
+    // `REFERENCED_TABLE` steht in STARTUP_MIGRATION_REFERENCED_TABLES und existiert
+    // nur in der Prod-Replica. Ihr Wegfall im Ziel würde Expand-Migrate-Contract
+    // verletzen (ein noch gelesener Startup-Migrations-Pfad verlöre seine Quelle).
+    const result = await detectDestructiveSchemaDiffAgainstProd({
+      targetUrl: urlForDb(TARGET_DB),
+      prodUrl: urlForDb(PROD_DB),
+    });
+
+    expect(result.available).toBe(true);
+    // Erscheint sowohl als gedroppte Tabelle …
+    expect(result.droppedTables).toContain(REFERENCED_TABLE);
+    // … als auch explizit als Contract-Verletzung.
+    expect(result.contractViolations).toContain(REFERENCED_TABLE);
   });
 
   it("meldet KEINE Drops, wenn das Ziel-Schema die Prod-Replica vollständig enthält", async (ctx) => {
