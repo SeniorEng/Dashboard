@@ -201,6 +201,117 @@ export interface RevenueStatsResponse {
     proven: SparklinePoint[];
     invoiced: SparklinePoint[];
   };
+  /** Task #1355 — Erlös-Trichter zusätzlich in Minuten (Geplant/Dokumentiert/
+   *  Nachgewiesen/Berechnet), Teil des Wirtschaftlichkeits-Blocks. */
+  stageHours: RevenueStageHours;
+  /** Task #1355 — Wirtschaftlichkeits-Aufstellung (Personalkosten,
+   *  km, Deckungsbeitrag) für den gewählten Zeitraum. */
+  economics: EconomicsBreakdown;
+}
+
+export interface RevenueStageHours {
+  plannedMinutes: number;
+  documentedMinutes: number;
+  provenMinutes: number;
+  invoicedMinutes: number;
+}
+
+// ============================================================
+// Task #1355 — Wirtschaftlichkeit (SSoT, siehe shared/domain/statistics/economics.ts)
+// ============================================================
+
+/** Sätze ausschließlich aus dem Service-Katalog (Integer-Cents). */
+export interface EconomicsRatesCents {
+  /** employee_rate_cents — an Mitarbeiter ausgezahlte Stundensätze. */
+  hauswirtschaftRateCents: number;
+  alltagsbegleitungRateCents: number;
+  erstberatungRateCents: number;
+  /** employee_rate_cents pro km — an Mitarbeiter ausgezahlt (Kosten). */
+  travelKmRateCents: number;
+  customerKmRateCents: number;
+  /** default_price_cents pro km — dem Kunden berechnet (Erlös). */
+  travelKmPriceCents: number;
+  customerKmPriceCents: number;
+}
+
+export interface EconomicsInput {
+  rates: EconomicsRatesCents;
+  hauswirtschaftMinutes: number;
+  alltagsbegleitungMinutes: number;
+  erstberatungMinutes: number;
+  nonBillable: { category: string; minutes: number }[];
+  travelKm: number;
+  customerKm: number;
+  timeEntryKm: number;
+  /** Dokumentierter Service-Erlös (Stunden-Leistungen, ohne km). */
+  documentedServiceRevenueCents: number;
+}
+
+export interface EconomicsCostGroup {
+  minutes: number;
+  costCents: number;
+}
+
+export interface EconomicsNonBillableCategory {
+  category: string;
+  label: string;
+  minutes: number;
+  costCents: number;
+}
+
+export interface EconomicsKmRow {
+  km: number;
+  /** dem Kunden berechnet (Erlös). */
+  chargedCents: number;
+  /** an Mitarbeiter ausgezahlt (Kosten). */
+  paidCents: number;
+}
+
+export interface EconomicsBreakdown {
+  rates: EconomicsRatesCents;
+  personnel: {
+    hauswirtschaft: EconomicsCostGroup;
+    alltagsbegleitung: EconomicsCostGroup;
+    /** Hauswirtschaft + Alltagsbegleitung. */
+    billable: EconomicsCostGroup;
+    erstberatung: EconomicsCostGroup;
+    nonBillable: EconomicsCostGroup & { byCategory: EconomicsNonBillableCategory[] };
+    totalMinutes: number;
+    totalCostCents: number;
+  };
+  km: {
+    travel: EconomicsKmRow;
+    customer: EconomicsKmRow;
+    /** Mitarbeiter-km aus der Zeiterfassung (nur Kostenseite). */
+    timeEntry: EconomicsKmRow;
+    totalChargedCents: number;
+    totalPaidCents: number;
+  };
+  result: {
+    /** Dokumentierter Service-Erlös + dem Kunden berechnete km. */
+    revenueCents: number;
+    documentedRevenueCents: number;
+    kmChargedCents: number;
+    personnelCostCents: number;
+    kmPaidCents: number;
+    totalCostCents: number;
+    marginCents: number;
+    marginPercent: number;
+    /** Kundennahe Wertschöpfung (abrechenbar + Erstberatung + km). */
+    productiveCostCents: number;
+    /** Bezahlter Overhead (Büro/Vertrieb/Sonstiges/Krank/Urlaub). */
+    nonBillableCostCents: number;
+  };
+}
+
+/** Drill-down-Zeile: nicht-abrechenbare Stunden je Mitarbeiter + Kategorie. */
+export interface EconomicsNonBillableDrillRow {
+  employeeId: number;
+  employeeName: string;
+  category: string;
+  categoryLabel: string;
+  minutes: number;
+  costCents: number;
 }
 
 export interface PlannedRevenueTotals {

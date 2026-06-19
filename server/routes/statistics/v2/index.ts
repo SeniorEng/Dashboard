@@ -16,6 +16,7 @@ import {
   listDocumentedWithoutProven,
   listProvenWithoutInvoiced,
 } from "../../../storage/statistics/revenue";
+import { listNonBillableHours } from "../../../storage/statistics/economics";
 import { getPerformanceStats } from "../../../storage/statistics/performance";
 import { getBudgetStats } from "../../../storage/statistics/budgets";
 import { getOperationsAlerts } from "../../../storage/statistics/alerts";
@@ -76,6 +77,11 @@ router.get("/revenue/gaps/documented-without-proven",
 router.get("/revenue/gaps/proven-without-invoiced",
   asyncHandler("Drill-Down konnte nicht geladen werden", async (req, res) => {
     res.json(await listProvenWithoutInvoiced(resolvePeriod(req.query)));
+  }));
+
+router.get("/revenue/economics/non-billable",
+  asyncHandler("Drill-Down konnte nicht geladen werden", async (req, res) => {
+    res.json(await listNonBillableHours(resolvePeriod(req.query)));
   }));
 
 router.get("/performance", asyncHandler("Leistungs-Statistiken konnten nicht geladen werden", async (req, res) => {

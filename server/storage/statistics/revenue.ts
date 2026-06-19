@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { RevenueStatsResponse, RevenueGapRow, PlannedRevenueTotals } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
+import { getEconomics } from "./economics";
+import { marginPercent } from "@shared/domain/statistics/economics";
 
 function perAppointmentCte(p: ResolvedPeriod) {
   const dFilter = dateFilter(p, sql`a.date::date`);
@@ -143,7 +145,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
   const dFilter = dateFilter(period, sql`a.date::date`);
   const invFilter = billingPeriodFilter(period, sql`i.billing_year`, sql`i.billing_month`);
 
-  const [stagesCur, stagesPrev, stagesYoy, byServiceTypeRow, byEmployeeRow, byCustomerRow, gapsRow, ttdRows, ttiRows, forecast, travelRow, travelByEmpRow, plannedRow, sparkRows] = await Promise.all([
+  const [stagesCur, stagesPrev, stagesYoy, byServiceTypeRow, byEmployeeRow, byCustomerRow, gapsRow, ttdRows, ttiRows, forecast, travelRow, travelByEmpRow, plannedRow, sparkRows, economicsResult] = await Promise.all([
     computeStages(period),
     computeStages(prev),
     computeStages(prevY),
@@ -416,6 +418,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       WHERE u.is_active = true AND u.is_anonymized = false AND COALESCE(d.revenue, 0) > 0
     `),
     stageSparklines(period.year),
+    getEconomics(period),
   ]);
 
   const gaps = gapsRow.rows[0] as Record<string, unknown>;
@@ -470,7 +473,7 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
         revenueCents,
         costCents,
         marginCents,
-        marginPercent: revenueCents > 0 ? Math.round((marginCents / revenueCents) * 100) : 0,
+        marginPercent: marginPercent(revenueCents, marginCents),
         totalMinutes: num(p?.total_minutes),
         appointments: num(p?.appointments),
         customers: num(p?.customers),
@@ -490,6 +493,8 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       proven: sparkRows.map((s) => ({ period: s.period, value: s.proven })),
       invoiced: sparkRows.map((s) => ({ period: s.period, value: s.invoiced })),
     },
+    stageHours: economicsResult.stageHours,
+    economics: economicsResult.economics,
   };
 }
 

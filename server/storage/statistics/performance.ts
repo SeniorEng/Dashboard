@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { PerformanceStatsResponse, ProfitabilityBreakdown } from "@shared/statistics";
 import { buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
+import { marginPercent } from "@shared/domain/statistics/economics";
 
 interface UtilizationCounts { productive: number; overhead: number; sickVac: number; revenue: number; minutes: number; }
 
@@ -236,7 +237,7 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
           revenueCents,
           costCents,
           marginCents,
-          marginPercent: revenueCents > 0 ? Math.round((marginCents / revenueCents) * 100) : 0,
+          marginPercent: marginPercent(revenueCents, marginCents),
           totalMinutes: num(r.minutes),
           appointments: num(r.appointments),
         };
@@ -254,7 +255,7 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
           priceCents,
           rateCents,
           marginCents,
-          marginPercent: priceCents > 0 ? Math.round((marginCents / priceCents) * 100) : 0,
+          marginPercent: marginPercent(priceCents, marginCents),
         };
       });
       return {
@@ -262,7 +263,7 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
           revenueCents: totalRevenueCents,
           costCents: totalCostCents,
           marginCents: totalMarginCents,
-          marginPercent: totalRevenueCents > 0 ? Math.round((totalMarginCents / totalRevenueCents) * 100) : 0,
+          marginPercent: marginPercent(totalRevenueCents, totalMarginCents),
         },
         byEmployee,
         servicePrices,
