@@ -1,0 +1,13 @@
+) Auftrag: §45b-Forecasts auf netAvailable45bAt umstellen (Konsolidierung abschließen)
+Was/Warum: netAvailable45bAt ist bereits die SSoT und wird vom Reader genutzt — die beiden Forecasts in summary-queries.ts rechnen aber weiter handgerollt (allocAtEnd − (cumulativeUsed − excludedConsumedNetCents); Forecast #1 ~Z. 229–264, Forecast #2 per Termin ~Z. 430–440). Diese Duplikation ist die Wurzel der wiederkehrenden 30.06.-Fehler. Die fachlichen Entscheidungen sind bereits getroffen (Prod-Re-Diff war sauber): Holds kontextabhängig (Forecast zieht KEINE Holds ab → keine Doppelzählung mit geplanten Kosten), Flooring auf 0 (Option A; Überzug erscheint als Fehlbetrag in availableAfterPlanned), Cap bleibt erhalten. Dies ist die reine Verdrahtung + Absicherung, keine neue Untersuchung.
+Done looks like:
+
+netAvailable45bAt bekommt explizite Kontext-Parameter ({ projectFuture, subtractHolds }): Reader → subtractHolds: true; Forecast → subtractHolds: false. Floor auf 0 in beiden.
+Beide Forecast-Schleifen (getBudgetSummary #1 + per-Termin #2) rufen pro Monatsende netAvailable45bAt(…, { asOfDate: monthEnd, projectFuture: true, subtractHolds: false }) statt handgerollt. Das Carryover-Exklusions-Verhalten (#1340) steckt dann in der Funktion, nicht mehr dupliziert.
+Cap unverändert (wie heute; falls der Forecast den Cap anwendet, über dieselbe Math.min-Schicht wie der Reader).
+Verdrahtungs-Diff: nach der Umstellung bestätigen, dass der verdrahtete Forecast == alter Forecast ist, AUSSER der gewollten Flooring-Änderung (überzogene Kunden zeigen jetzt 0 + Fehlbetrag) — über alle Prod-Kunden, Δ sonst = 0.
+Property-based Invariante (fast-check): Forecast(D) == netAvailable45bAt(D, Forecast-Kontext) an jedem Monatsende; unter dem 30.06. keine Über-Korrektur; Kopplung Übertrag fällt ⟺ sein Verbrauch fällt; echter Engpass nach dem 30.06. bleibt sichtbar; Holds-Kunden Δ=0 zum heutigen Forecast.
+Arch-Wächter (analog budget-single-reader): §45b-Verfügbarkeits-Mathematik (allocated − consumed/holds) nur in netAvailable45bAt; ein handgerolltes allocAtEnd − cumulativeUsed in summary-queries schlägt im Test fehl (Positiv- + Negativ-Beweis).
+
+Out of scope: §45a/§39; Schema-Änderung; Reader-Verhalten (nutzt die Funktion schon). Vor Publish: Schema-Diff prüfen (kein DROP) + frisches Backup.
+Relevant files: server/storage/budget/net-available-45b.ts, server/storage/budget/summary-queries.ts (#1 ~229–264, #2 ~430–440), server/storage/budget/unified-reader.ts (Referenz-Kontext), Tests (property-based + Arch-Guard).
