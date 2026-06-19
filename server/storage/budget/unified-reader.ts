@@ -27,8 +27,9 @@ import { db } from "../../lib/db";
 import { customersRepo } from "../../repos";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
-import { calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
+import { calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
+import { netAvailable45bAt } from "./net-available-45b";
 import { effectiveDefaultPots } from "@shared/domain/budgets";
 
 /**
@@ -49,7 +50,7 @@ export const HOLDS_ACTIVE_CENTS_PHASE4 = 0 as const;
  *   - §45b / §39+§42a: gesamtes Kalenderjahr von `asOfDate` (`period` = 'YYYY-MM').
  *   - §45a: exakt der Kalendermonat von `asOfDate`.
  */
-async function activeHoldsCents(
+export async function activeHoldsCents(
   customerId: number,
   budgetType: string,
   asOfDate: string,
@@ -117,7 +118,7 @@ export interface UnifiedBudgetAvailability {
  * die §45b-Verfügbarkeit ist „aufgelaufene Allocation minus bereits gebuchter
  * Beträge bis zum Buchungsdatum".
  */
-async function netConsumedUpToDate(
+export async function netConsumedUpToDate(
   customerId: number,
   budgetType: string,
   asOfDate: string,
@@ -144,7 +145,7 @@ async function netConsumedUpToDate(
   return Math.max(0, Number(consumed[0]?.total ?? 0) - Number(reversed[0]?.total ?? 0));
 }
 
-function isInRange(
+export function isInRange(
   asOfDate: string,
   validFrom: string | null | undefined,
   validTo: string | null | undefined,
@@ -204,30 +205,21 @@ export async function readUnifiedBudgetAvailability(
   const inRange45b = !s45b ? true : isInRange(asOfDate, s45b.validFrom, s45b.validTo);
   let pot45b = emptyPot("entlastungsbetrag_45b", enabled45b, inRange45b);
   if (enabled45b && inRange45b) {
-    const allocated = await calculateAllocatedCents(
+    // Task #1348 — §45b-Verfügbarkeits-SSoT: die Erhaltungs-Identität
+    // `max(0, allocated − holds − consumedNet)` (inkl. der #1306/#1340-Exklusion
+    // von Verbrauch gegen herausgefallene Töpfe) lebt jetzt AUSSCHLIESSLICH in
+    // `netAvailable45bAt`. Reader-Kontext zieht die aktiven Hard-Holds ab
+    // (`holds: "subtract"`). Der per-Kunde-Monats-Cap (Task #1171/#425) bleibt
+    // bewusst HIER im Reader (`Math.min(Topf-Rest, Cap-Rest)`) — er ist nicht
+    // Teil der §45b-Verfügbarkeits-Funktion.
+    const net = await netAvailable45bAt(
       customerId,
-      "entlastungsbetrag_45b",
-      { asOfDate },
+      asOfDate,
+      { holds: "subtract", typeSettings },
       tx,
-      preferences,
-      typeSettings,
     );
-    // Task #1306 — symmetrische ConsumedNet-Korrektur: Verbrauch, der gegen
-    // einen aus `Allocated` herausgefallenen Topf (abgelaufener Übertrag / per
-    // IB-Supersession verdrängte `initial_balance`) gebucht wurde, darf den
-    // laufenden Topf nicht doppelt belasten. Die Exklusions-IDs kommen aus
-    // derselben SSoT (`calculateAllocated45b`) wie `allocated`.
-    const rawConsumedNet = await netConsumedUpToDate(customerId, "entlastungsbetrag_45b", asOfDate, d);
-    const { excludedConsumedNetCents } = await getExcluded45bConsumption(customerId, asOfDate, d, typeSettings);
-    const consumedNet = Math.max(0, rawConsumedNet - excludedConsumedNetCents);
-    const holds = await activeHoldsCents(customerId, "entlastungsbetrag_45b", asOfDate, "year", d);
-    const potRemaining = Math.max(0, allocated - holds - consumedNet);
+    const potRemaining = net.availableCents;
 
-    // Task #1171 (Audit-Ticket H) — Ohne konfiguriertes Monatslimit bleibt §45b
-    // der Jahrestopf ohne Fenster-Cap (Task #425). Ist ein Monatslimit gesetzt,
-    // greift derselbe Cap-SSoT (`computeCapSlot`) wie für §45a/§39, sodass die
-    // angezeigte Verfügbarkeit exakt der beim Buchen kaskadierten entspricht
-    // (`Math.min(Topf-Rest, Monats-Cap-Rest)`).
     let capRemaining = Infinity;
     let available = potRemaining;
     if (s45b?.monthlyLimitCents != null) {
@@ -245,9 +237,9 @@ export async function readUnifiedBudgetAvailability(
       budgetType: "entlastungsbetrag_45b",
       enabled: enabled45b,
       inRange: inRange45b,
-      allocatedCents: allocated,
-      consumedNetCents: consumedNet,
-      holdsActiveCents: holds,
+      allocatedCents: net.allocatedCents,
+      consumedNetCents: net.consumedNetCents,
+      holdsActiveCents: net.holdsCents,
       capRemainingCents: capRemaining,
       availableCents: available,
     };

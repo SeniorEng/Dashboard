@@ -161,3 +161,9 @@ id = "z1owmVtant_Vo-6QxYk9E"
 uri = "file://exports/Termine_Nico_Richter.xlsx"
 type = "table"
 title = "Termine Nico Richter (52 Termine, 54 Zeilen)"
+
+[[outputs]]
+id = "_3EH_DbLIP6BaFrtJjBzi"
+uri = "file://.local/reports/diff-net-available-45b.txt"
+type = "text"
+title = "§45b Schattenmodus-Diff (READ-ONLY) — netAvailable45bAt vs. Forecast & Reader"
