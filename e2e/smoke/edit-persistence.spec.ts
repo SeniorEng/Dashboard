@@ -1381,4 +1381,127 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       }
     }
   });
+
+  // ---------- 11. Firmenweiter Standardpreis (Task #1360) ----------
+  // Round-Trip für die "Standardpreise"-Sektion der Admin-Service-Seite
+  // (Task #1357 hat die Editier-Oberfläche eingeführt). Deckt das Anlegen
+  // eines firmenweiten Standardpreises MIT Stichtag und den
+  // PRICE_CONFLICT-Confirm-Replace-Pfad ab. Die Standardpreis-Zeilen sind
+  // firmenweit (kein Kunde) — daher Stichtag weit in der Zukunft wählen
+  // (kein Einfluss auf die heute aktive Preisauflösung / Schwester-Tests)
+  // und in `finally` per API wieder soft-löschen.
+  test("Standardpreis anlegen + ersetzen (PRICE_CONFLICT) persistiert nach Reload", async ({ page }) => {
+    const serviceId = await getServiceIdByCode(session, "hauswirtschaft");
+
+    // Eindeutiger Zukunfts-Stichtag pro Lauf — verhindert, dass ein
+    // hängengebliebener (nicht aufgeräumter) Eintrag aus einem früheren Lauf
+    // einen unerwarteten PRICE_CONFLICT bereits beim ersten Speichern auslöst.
+    const stamp = Date.now();
+    const farYear = new Date().getFullYear() + 11;
+    const month = String((stamp % 12) + 1).padStart(2, "0");
+    const day = String((stamp % 28) + 1).padStart(2, "0");
+    const validFrom = `${farYear}-${month}-${day}`;
+
+    const createdPriceIds: number[] = [];
+
+    const waitForCreatedPrice = async (clickAction: Promise<void>): Promise<number> => {
+      const [resp] = await Promise.all([
+        page.waitForResponse(
+          (r) =>
+            r.ok() &&
+            r.request().method() === "POST" &&
+            r.url().includes("/api/services/standard-prices") &&
+            !r.url().includes("/future") &&
+            !r.url().includes("/all"),
+          { timeout: 15000 },
+        ),
+        clickAction,
+      ]);
+      const body = (await resp.json()) as { id?: number };
+      expect(body.id, "POST /standard-prices muss die angelegte Preis-Zeile zurückgeben").toBeTruthy();
+      return body.id!;
+    };
+
+    try {
+      // --- Schritt 1: Standardpreis 111,11 € mit Zukunfts-Stichtag anlegen ---
+      await page.goto("/admin/services", { waitUntil: "domcontentloaded" });
+
+      const row = page.locator(`[data-testid='pricing-row-${serviceId}']`);
+      await expect(row).toBeVisible({ timeout: 15000 });
+
+      await page.locator(`[data-testid='btn-edit-price-${serviceId}']`).click();
+      const priceField = page.locator(`[data-testid='input-price-${serviceId}']`);
+      await expect(priceField).toBeVisible({ timeout: 10000 });
+      await priceField.fill("111,11");
+      await page.locator(`[data-testid='input-valid-from-${serviceId}']`).fill(validFrom);
+
+      const firstId = await waitForCreatedPrice(
+        page.locator(`[data-testid='btn-save-price-${serviceId}']`).click(),
+      );
+      createdPriceIds.push(firstId);
+
+      // --- Reload + Persistenz-Check (Zukunfts-Preis sichtbar) ---
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const futureEntry = page.locator(`[data-testid='future-price-${firstId}']`);
+      await expect(futureEntry).toBeVisible({ timeout: 10000 });
+      await expect(futureEntry).toContainText("111,11");
+
+      // API-Verifikation: Zeile existiert mit korrektem Stichtag + Preis.
+      const futures = (await session.api
+        .get("/api/services/standard-prices/future")
+        .then((r) => (r.ok() ? r.json() : []))) as Array<{
+        id: number;
+        priceCents: number;
+        validFrom: string;
+      }>;
+      const persisted = futures.find((f) => f.id === firstId);
+      expect(persisted, `Standardpreis ${firstId} nicht in /future persistiert`).toBeTruthy();
+      expect(persisted!.priceCents).toBe(11111);
+
+      // --- Schritt 2: Gleicher Stichtag → PRICE_CONFLICT → "Ja, ersetzen" ---
+      await page.locator(`[data-testid='btn-edit-price-${serviceId}']`).click();
+      const priceField2 = page.locator(`[data-testid='input-price-${serviceId}']`);
+      await expect(priceField2).toBeVisible({ timeout: 10000 });
+      await priceField2.fill("222,22");
+      await page.locator(`[data-testid='input-valid-from-${serviceId}']`).fill(validFrom);
+
+      // Speichern löst zunächst den 409 PRICE_CONFLICT aus → Ersetzen-Dialog.
+      await page.locator(`[data-testid='btn-save-price-${serviceId}']`).click();
+      const replaceDialog = page.locator("[data-testid='dialog-replace-price']");
+      await expect(replaceDialog).toBeVisible({ timeout: 10000 });
+      await expect(page.locator("[data-testid='text-new-price']")).toContainText("222,22");
+
+      const replacedId = await waitForCreatedPrice(
+        page.locator("[data-testid='btn-confirm-replace']").click(),
+      );
+      createdPriceIds.push(replacedId);
+
+      // --- Reload + Persistenz-Check (ersetzter Preis sichtbar, alter weg) ---
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const replacedEntry = page.locator(`[data-testid='future-price-${replacedId}']`);
+      await expect(replacedEntry).toBeVisible({ timeout: 10000 });
+      await expect(replacedEntry).toContainText("222,22");
+      await expect(
+        page.locator(`[data-testid='future-price-${firstId}']`),
+      ).toHaveCount(0);
+
+      const futuresAfter = (await session.api
+        .get("/api/services/standard-prices/future")
+        .then((r) => (r.ok() ? r.json() : []))) as Array<{
+        id: number;
+        priceCents: number;
+      }>;
+      expect(futuresAfter.find((f) => f.id === replacedId)?.priceCents).toBe(22222);
+      expect(futuresAfter.some((f) => f.id === firstId)).toBe(false);
+    } finally {
+      // Firmenweite Zeilen wieder entfernen (Zukunfts-Stichtag ⇒ Soft-Delete).
+      for (const id of createdPriceIds) {
+        await session.api
+          .delete(`/api/services/standard-prices/${id}`)
+          .catch(() => {
+            /* best-effort */
+          });
+      }
+    }
+  });
 });
