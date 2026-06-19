@@ -1696,6 +1696,10 @@
           },
           "isCurrentlyActive": {
             "type": "boolean"
+          },
+          "plannedShortfallMonth": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -1710,7 +1714,8 @@
           "carryoverCents",
           "carryoverExpiresAt",
           "currentYearAllocatedCents",
-          "isCurrentlyActive"
+          "isCurrentlyActive",
+          "plannedShortfallMonth"
         ]
       },
       "BudgetOverview45aDTO": {

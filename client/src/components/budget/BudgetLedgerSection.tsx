@@ -85,6 +85,25 @@ function getTransactionTypeLabel(type: string): string {
   return labels[type] || type;
 }
 
+/**
+ * Task #706 — Formatiert `plannedShortfallMonth` ("YYYY-MM") menschenlesbar
+ * als "Februar 2027". Gibt `null` zurück, wenn kein Monat prognostiziert ist
+ * oder der Wert kein gültiges YYYY-MM-Format hat (Fallback auf generische
+ * Warnung).
+ */
+export function formatShortfallMonth(month: string | null): string | null {
+  if (!month) return null;
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  if (monthIndex < 0 || monthIndex > 11) return null;
+  return new Date(year, monthIndex, 1).toLocaleDateString("de-DE", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
 interface BudgetLedgerSectionProps {
   customerId: number;
   customerName: string;
@@ -278,6 +297,7 @@ function BudgetPot45b({
 
   const hasPlanned = data.plannedCents > 0;
   const budgetExceeded = data.availableAfterPlannedCents < 0;
+  const shortfallMonthLabel = formatShortfallMonth(data.plannedShortfallMonth);
 
   const hasData = data.totalAllocatedCents > 0;
 
@@ -294,8 +314,10 @@ function BudgetPot45b({
       {budgetExceeded && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200" data-testid="warning-budget-exceeded">
           <AlertTriangle className={`${iconSize.sm} text-red-600 flex-shrink-0`} />
-          <p className="text-sm text-red-700 font-medium">
-            Budget reicht nicht für alle geplanten Termine ({formatCurrency(Math.abs(data.availableAfterPlannedCents))} über Budget)
+          <p className="text-sm text-red-700 font-medium" data-testid="text-budget-exceeded-warning">
+            {shortfallMonthLabel
+              ? `Budget reicht ab ${shortfallMonthLabel} nicht mehr für alle geplanten Termine (${formatCurrency(Math.abs(data.availableAfterPlannedCents))} über Budget)`
+              : `Budget reicht nicht für alle geplanten Termine (${formatCurrency(Math.abs(data.availableAfterPlannedCents))} über Budget)`}
           </p>
         </div>
       )}

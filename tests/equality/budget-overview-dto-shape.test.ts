@@ -43,6 +43,7 @@ const EXPECTED_KEYS: Record<keyof BudgetOverviewDTO, string[]> = {
     "carryoverExpiresAt",
     "currentYearAllocatedCents",
     "isCurrentlyActive",
+    "plannedShortfallMonth",
   ],
   umwandlung45a: [
     "monthlyBudgetCents",

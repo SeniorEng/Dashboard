@@ -674,6 +674,7 @@ export const BudgetOverview45bDTOSchema = component(
     carryoverExpiresAt: nullableString(),
     currentYearAllocatedCents: z.number().int(),
     isCurrentlyActive: z.boolean(),
+    plannedShortfallMonth: nullableString(),
   }),
 );
 

@@ -398,6 +398,7 @@ router.get("/:customerId/overview", checkCustomerAccess, asyncHandler("Budget-Ü
       carryoverExpiresAt: s45b.carryoverExpiresAt,
       currentYearAllocatedCents: s45b.currentYearAllocatedCents,
       isCurrentlyActive: s45b.isCurrentlyActive,
+      plannedShortfallMonth: s45b.plannedShortfallMonth,
     },
     umwandlung45a: {
       monthlyBudgetCents: summaries.umwandlung45a.monthlyBudgetCents,

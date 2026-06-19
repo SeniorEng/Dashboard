@@ -35,6 +35,13 @@ export interface BudgetOverview45bDTO {
   carryoverExpiresAt: string | null;
   currentYearAllocatedCents: number;
   isCurrentlyActive: boolean;
+  /**
+   * Task #706 — Erster Monat (YYYY-MM), in dem die §45b-Projektion
+   * (kumulative Monatsaufstockungen + ablaufende Carryover) die bis dahin
+   * geplanten Termine nicht mehr deckt. `null` = keine Lücke prognostiziert.
+   * Das Warnbanner nennt diesen Monat menschenlesbar.
+   */
+  plannedShortfallMonth: string | null;
 }
 
 /** §45a Umwandlungsanspruch — Monatstopf, PG-abhängiges Maximum. */
