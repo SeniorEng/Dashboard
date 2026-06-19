@@ -137,6 +137,42 @@ function isNeonDriverBug(message: string): boolean {
 }
 
 (async () => {
+  // Task #1339 (Reihenfolge-Fix) — Die `prices`-SSoT MUSS befüllt/wiederhergestellt
+  // sein, BEVOR der Critical-SSoT-Boot-Gate sie prüft. Vorher liefen die Befüll-
+  // (#1329) und Recovery-Migration (#1334) erst in `runStartupTasks`, also NACH
+  // `httpServer.listen` — und damit NACH dem Gate. In Produktion fand der Gate
+  // dadurch die leere `prices`-Tabelle vor und beendete den Prozess
+  // (`process.exit(1)`), BEVOR die Wiederherstellung je laufen konnte: ein Boot-
+  // Deadlock, der jeden Publish scheitern ließ. Diese Migrationen sind
+  // ledger-gegated + idempotent und laufen daher hier (vor dem Serving). Sie sind
+  // fault-isoliert: bleibt `prices` trotzdem leer, entscheidet der nachfolgende
+  // Gate hart (Prod-Abbruch / Dev-Warnung). Der Ledger wird vorab sichergestellt,
+  // da der Guarded-Runner ihn liest.
+  try {
+    const { ensureMigrationLedger } = await import(
+      "./startup/ensure-migration-ledger"
+    );
+    await ensureMigrationLedger();
+  } catch (err) {
+    log(`[startup] Migrations-Ledger sicherstellen fehlgeschlagen: ${err}`, "startup");
+  }
+  try {
+    const { runPopulatePricesFromLegacy } = await import(
+      "./startup/populate-prices-from-legacy"
+    );
+    await runPopulatePricesFromLegacy();
+  } catch (err) {
+    log(`Prices-Befüllung aus Alt-Tabellen fehlgeschlagen: ${err}`, "startup");
+  }
+  try {
+    const { runRecoverPricesFromBackup } = await import(
+      "./startup/recover-prices-from-backup"
+    );
+    await runRecoverPricesFromBackup();
+  } catch (err) {
+    log(`Prices-Wiederherstellung aus Backup fehlgeschlagen: ${err}`, "startup");
+  }
+
   // Task #1339 — Critical-SSoT-Boot-Gate VOR dem Serving. Bricht den Boot in
   // Produktion hart ab, wenn eine kritische SSoT (z.B. `prices`) leer ist, ihre
   // Quell-Tabellen fehlen und Leser davon abhängen (der stille #1334-No-Op-
@@ -661,22 +697,12 @@ async function runStartupTasks() {
       log(`Customer-Budgets-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #1329 — `prices`-SSoT verlustfrei aus den drei Alt-Preis-Tabellen
-    // befüllen, BEVOR `dropLegacyPriceTables` läuft. Ledger-gegated (einmalig über
-    // `budget_migrations`), aber NICHT flag-gegated — additiver Daten-Transport.
-    // Direkt nach der Befüllung läuft ein harter Gate-2-Paritäts-Selbstcheck:
-    // weicht die konsolidierte priceFor-Auflösung vom unabhängigen Legacy-Verhalten
-    // ab (≠ 0 Cent), schlägt der Migrations-Lauf fehl (Rollback, kein Ledger-
-    // Eintrag, Retry beim nächsten Boot) statt mit falschen Preisen zu servicen.
-    // MUSS vor dem DROP unten laufen (sonst löscht der DROP die Quelle).
-    const { runPopulatePricesFromLegacy } = await import(
-      "./startup/populate-prices-from-legacy"
-    );
-    try {
-      await runPopulatePricesFromLegacy();
-    } catch (err) {
-      log(`Prices-Befüllung aus Alt-Tabellen fehlgeschlagen: ${err}`, "startup");
-    }
+    // Task #1339 (Reihenfolge-Fix) — `runPopulatePricesFromLegacy` (#1329) und
+    // `runRecoverPricesFromBackup` (#1334) laufen jetzt VOR dem Critical-SSoT-Boot-
+    // Gate (oben in der Boot-IIFE, vor `httpServer.listen`), damit `prices` bereits
+    // befüllt ist, wenn der Gate prüft. Beide sind ledger-gegated/idempotent und
+    // damit hier bewusst NICHT mehr dupliziert. `dropLegacyPriceTables` bleibt hier
+    // (kein Pre-Serving-Bedarf; läuft weiterhin NACH der Befüllung).
 
     // Task #1326 — Verwaiste Legacy-Preis-Tabellen (`customer_service_prices`,
     // `customer_contract_rates`, `service_rates`) endgültig droppen. Vorbedingung
@@ -691,24 +717,6 @@ async function runStartupTasks() {
       await dropLegacyPriceTables();
     } catch (err) {
       log(`Legacy-Preis-Tabellen-Drop fehlgeschlagen: ${err}`, "startup");
-    }
-
-    // Task #1334 — Beim Cutover-Publish hat der Schema-Diff die drei Alt-Preis-
-    // Tabellen in PRODUKTION gedroppt, BEVOR `populate-prices-from-legacy-1329`
-    // lief; diese lief dadurch als No-Op und ist im Ledger als „applied" verbucht.
-    // Ergebnis: `prices` ist in Prod leer. Diese Migration stellt die 4 aktiven
-    // Zeilen aus dem 07:46-Vollbackup über FIXE Konstanten wieder her (reine
-    // Insert-Migration, droppt nichts, legt keine Alt-Tabelle an — verhindert
-    // einen erneuten Schema-Diff-Drop-Race). Ledger-gegated unter eigenem Namen
-    // `recover-prices-from-backup` (NICHT flag-gegated); harte Soll-Wert-
-    // Verifikation rollt bei Abweichung zurück (kein Serving mit falschen Preisen).
-    const { runRecoverPricesFromBackup } = await import(
-      "./startup/recover-prices-from-backup"
-    );
-    try {
-      await runRecoverPricesFromBackup();
-    } catch (err) {
-      log(`Prices-Wiederherstellung aus Backup fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #721 — Idempotenter Read-Only-Audit der Phasen-Kette in
