@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { apiGet, getAuthCookie } from "./test-utils";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { apiGet, apiPost, apiDelete, getAuthCookie, createTestEmployee, deactivateTestEmployee } from "./test-utils";
+import { costForMinutes } from "@shared/domain/statistics/economics";
+import { getEntryTypeLabel } from "@shared/domain/time-entries";
+import type { EconomicsNonBillableDrillRow } from "@shared/statistics";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -7,6 +10,25 @@ beforeAll(async () => {
 
 const year = new Date().getFullYear();
 const month = new Date().getMonth() + 1;
+
+/** Hauswirtschafts-Stundensatz = Bewertungssatz für nicht-abrechenbare Zeit. */
+const HW_RATE_CENTS = 1600;
+
+/**
+ * Liefert ein YYYY-MM-DD im aktuellen Monat, das garantiert ein Werktag ist
+ * (Zeiterfassungen außer Blocker werden am Wochenende abgelehnt). Der aktuelle
+ * Monat ist nie monatsabgeschlossen, daher sind die Einträge anlegbar.
+ */
+function weekdayInCurrentMonth(dayOfMonth: number): string {
+  const d = new Date(year, month - 1, dayOfMonth);
+  const dow = d.getDay();
+  if (dow === 6) d.setDate(d.getDate() + 2);
+  else if (dow === 0) d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 function expectKpi(obj: any) {
   expect(obj).toHaveProperty("current");
@@ -128,5 +150,92 @@ describe("STAT-V2: /api/statistics/v2 endpoints", () => {
     expect(Array.isArray(res.data.aggregateByStatus)).toBe(true);
     expectKpi(res.data.totalUsedCents);
     expectKpi(res.data.totalAllocatedCents);
+  });
+
+  describe("STAT-V2.9 – non-billable hours drill-down", () => {
+    let employeeId: number;
+    const createdEntryIds: number[] = [];
+    const dateA = weekdayInCurrentMonth(10);
+    const dateB = weekdayInCurrentMonth(12);
+    // Vielfache von 60 Minuten ⇒ HW-Satz-Bewertung exakt ohne Rundungsrest.
+    const bueroMinutes = 120;
+    const vertriebMinutes = 180;
+
+    beforeAll(async () => {
+      const emp = await createTestEmployee({ nachnamePrefix: "NonBillDrill" });
+      employeeId = emp.id;
+      for (const [entryType, minutes, date] of [
+        ["bueroarbeit", bueroMinutes, dateA],
+        ["vertrieb", vertriebMinutes, dateB],
+      ] as const) {
+        const res = await apiPost<any>("/api/time-entries", {
+          targetUserId: employeeId,
+          entryType,
+          entryDate: date,
+          durationMinutes: minutes,
+        });
+        expect(res.status, `seed ${entryType}: ${JSON.stringify(res.data)}`).toBe(201);
+        createdEntryIds.push(res.data.id);
+      }
+    });
+
+    afterAll(async () => {
+      for (const id of createdEntryIds) {
+        try {
+          await apiDelete(`/api/time-entries/${id}`);
+        } catch {}
+      }
+      await deactivateTestEmployee(employeeId);
+    });
+
+    it("requires admin (employees are forbidden)", async () => {
+      const emp = await createTestEmployee({ nachnamePrefix: "NonBillForbidden" });
+      try {
+        const { loginAs, apiGetAs } = await import("./test-utils");
+        const auth = await loginAs(emp.email, emp.password);
+        const res = await apiGetAs(auth, "/api/statistics/v2/revenue/economics/non-billable");
+        expect(res.status).toBe(403);
+      } finally {
+        await deactivateTestEmployee(emp.id);
+      }
+    });
+
+    it("groups rows by employee + category with HW-rate valuation", async () => {
+      const res = await apiGet<EconomicsNonBillableDrillRow[]>(
+        `/api/statistics/v2/revenue/economics/non-billable?from=${dateA}&to=${dateB}`,
+      );
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.data)).toBe(true);
+
+      const mine = res.data.filter((r) => r.employeeId === employeeId);
+      expect(mine).toHaveLength(2);
+
+      const buero = mine.find((r) => r.category === "bueroarbeit");
+      const vertrieb = mine.find((r) => r.category === "vertrieb");
+      expect(buero, "bueroarbeit row").toBeDefined();
+      expect(vertrieb, "vertrieb row").toBeDefined();
+
+      expect(buero!.minutes).toBe(bueroMinutes);
+      expect(vertrieb!.minutes).toBe(vertriebMinutes);
+
+      expect(buero!.categoryLabel).toBe(getEntryTypeLabel("bueroarbeit"));
+      expect(vertrieb!.categoryLabel).toBe(getEntryTypeLabel("vertrieb"));
+
+      expect(buero!.costCents).toBe(costForMinutes(bueroMinutes, HW_RATE_CENTS));
+      expect(vertrieb!.costCents).toBe(costForMinutes(vertriebMinutes, HW_RATE_CENTS));
+
+      for (const row of mine) {
+        expect(row.employeeName.length).toBeGreaterThan(0);
+      }
+    });
+
+    it("excludes the period when the date filter does not cover the entries", async () => {
+      const otherYear = year - 1;
+      const res = await apiGet<EconomicsNonBillableDrillRow[]>(
+        `/api/statistics/v2/revenue/economics/non-billable?from=${otherYear}-01-01&to=${otherYear}-01-31`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.data.some((r) => r.employeeId === employeeId)).toBe(false);
+    });
   });
 });
