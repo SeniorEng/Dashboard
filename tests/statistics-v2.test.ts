@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { apiGet, apiPost, apiDelete, getAuthCookie, createTestEmployee, deactivateTestEmployee } from "./test-utils";
-import { costForMinutes } from "@shared/domain/statistics/economics";
+import { costForMinutes, nonBillableRateCents } from "@shared/domain/statistics/economics";
 import { getEntryTypeLabel } from "@shared/domain/time-entries";
-import type { EconomicsNonBillableDrillRow } from "@shared/statistics";
+import type { EconomicsBreakdown, EconomicsNonBillableDrillRow } from "@shared/statistics";
 
 beforeAll(async () => {
   await getAuthCookie();
@@ -10,9 +10,6 @@ beforeAll(async () => {
 
 const year = new Date().getFullYear();
 const month = new Date().getMonth() + 1;
-
-/** Hauswirtschafts-Stundensatz = Bewertungssatz für nicht-abrechenbare Zeit. */
-const HW_RATE_CENTS = 1600;
 
 /**
  * Liefert ein YYYY-MM-DD im aktuellen Monat, das garantiert ein Werktag ist
@@ -221,11 +218,49 @@ describe("STAT-V2: /api/statistics/v2 endpoints", () => {
       expect(buero!.categoryLabel).toBe(getEntryTypeLabel("bueroarbeit"));
       expect(vertrieb!.categoryLabel).toBe(getEntryTypeLabel("vertrieb"));
 
-      expect(buero!.costCents).toBe(costForMinutes(bueroMinutes, HW_RATE_CENTS));
-      expect(vertrieb!.costCents).toBe(costForMinutes(vertriebMinutes, HW_RATE_CENTS));
-
       for (const row of mine) {
         expect(row.employeeName.length).toBeGreaterThan(0);
+      }
+
+      // SSoT-Kreuzprüfung statt Magic-Number: Der Drill-Down und die
+      // Economics-Zusammenfassung müssen denselben Bewertungssatz (den
+      // Hauswirtschafts-Stundensatz aus dem Service-Katalog) verwenden. Wir
+      // ziehen den Satz aus derselben Quelle wie die Anzeige (economics.rates)
+      // und vergleichen den Drill-Down außerdem direkt gegen die byCategory-
+      // Kosten der Zusammenfassung für DENSELBEN Zeitraum.
+      const revRes = await apiGet<{ economics: EconomicsBreakdown }>(
+        `/api/statistics/v2/revenue?from=${dateA}&to=${dateB}`,
+      );
+      expect(revRes.status).toBe(200);
+      const economics = revRes.data.economics;
+
+      // Der Bewertungssatz für nicht-abrechenbare Zeit IST der HW-Satz.
+      const nbRate = nonBillableRateCents(economics.rates);
+      expect(nbRate).toBe(economics.rates.hauswirtschaftRateCents);
+
+      // Drill-Down-Kosten == costForMinutes(Minuten, abgeleiteter Satz).
+      expect(buero!.costCents).toBe(costForMinutes(bueroMinutes, nbRate));
+      expect(vertrieb!.costCents).toBe(costForMinutes(vertriebMinutes, nbRate));
+
+      // Drill-Down (pro Kategorie aufsummiert) == Economics-byCategory-Kosten
+      // für denselben Zeitraum — eine einzige Quelle der Wahrheit.
+      const byCategory = new Map(
+        economics.personnel.nonBillable.byCategory.map((c) => [c.category, c]),
+      );
+      const drillByCategory = new Map<string, { minutes: number; costCents: number }>();
+      for (const row of res.data) {
+        const agg = drillByCategory.get(row.category) ?? { minutes: 0, costCents: 0 };
+        agg.minutes += row.minutes;
+        agg.costCents += row.costCents;
+        drillByCategory.set(row.category, agg);
+      }
+      for (const category of ["bueroarbeit", "vertrieb"] as const) {
+        const summary = byCategory.get(category);
+        const drill = drillByCategory.get(category);
+        expect(summary, `economics byCategory ${category}`).toBeDefined();
+        expect(drill, `drill-down ${category}`).toBeDefined();
+        expect(summary!.minutes).toBe(drill!.minutes);
+        expect(summary!.costCents).toBe(drill!.costCents);
       }
     });
 
