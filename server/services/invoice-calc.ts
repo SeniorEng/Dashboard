@@ -1,5 +1,6 @@
 import { badRequest, notFound } from "../lib/errors";
 import { splitLineItemsAcrossPots, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
+import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
 import type { BudgetType } from "@shared/domain/budgets";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
@@ -29,10 +30,40 @@ import type { BuildLineItem } from "./invoice-data";
 export function splitLineItemsByPot(
   lineItems: BuildLineItem[],
   budgetSplit: Map<number, BudgetSplitForAppointment>,
+  options: { allowPrivatePot?: boolean } = {},
 ): Map<InvoicePotKey, BuildLineItem[]> {
   const shares = splitLineItemsAcrossPots(lineItems, budgetSplit, {
     fallbackPot: "private",
   });
+
+  // Task #1353 — Backstop gegen verbotene Privatanteile. Reine Pflegekassen-
+  // Kunden ohne `acceptsPrivatePayment` (kein Selbstzahler) dürfen NIE einen
+  // privaten (Selbstzahler-)Anteil erhalten — weder über die `fallbackPot`-
+  // Zuordnung (Termin ohne Budget-Mapping) noch über einen vom Split selbst
+  // ermittelten Privat-Anteil. Entsteht hier dennoch ein Privatanteil, ist das
+  // ein Fehler (z.B. ein „Rest", der nicht in die gesetzlichen Töpfe passt) und
+  // MUSS laut blockieren (klare Sperre) statt still eine 19%-Privatrechnung
+  // auszustellen (Jungnickel-/AOK-Fall). Das Gate ist dieselbe zentrale SSoT
+  // wie auf dem Buchungs-/Rebook-Pfad (`isPrivatePaymentAllowed`).
+  if (options.allowPrivatePot === false) {
+    const forbiddenPrivateApptIds = [
+      ...new Set(
+        shares
+          .filter((s) => s.potKey === "private" && s.totalCents !== 0)
+          .map((s) => s.item.appointmentId),
+      ),
+    ];
+    if (forbiddenPrivateApptIds.length > 0) {
+      throw badRequest(
+        `Rechnung kann nicht erstellt werden: Für die Termine ` +
+        `${forbiddenPrivateApptIds.join(", ")} entstünde ein privater ` +
+        `(Selbstzahler-)Anteil, obwohl dieser Kunde nicht privat zahlt. ` +
+        `Eine Privatabrechnung ist hier nicht zulässig. Bitte prüfen Sie ` +
+        `die Budget-Konfiguration und Buchungen für diesen Zeitraum.`,
+      );
+    }
+  }
+
   const byPot = new Map<InvoicePotKey, BuildLineItem[]>();
   for (const share of shares) {
     const list = byPot.get(share.potKey) ?? [];
@@ -267,7 +298,16 @@ export async function buildInvoiceDraft(input: {
   const { lineItems: allLineItems, totalNetCents: singleNetCents, totalVatCents: singleVatCents } =
     await buildLineItemsFromAppointments(apptIds, customerId, billingType);
 
-  const potItems = splitLineItemsByPot(allLineItems, budgetSplit);
+  const potItems = splitLineItemsByPot(allLineItems, budgetSplit, {
+    // Task #1353 — Gate gegen verbotene Privatanteile (siehe
+    // `splitLineItemsByPot`). Quelle ist dieselbe zentrale SSoT wie auf dem
+    // Buchungs-/Rebook-Pfad: nur Selbstzahler oder `acceptsPrivatePayment`
+    // dürfen einen privaten Anteil/Topf bekommen.
+    allowPrivatePot: isPrivatePaymentAllowed({
+      billingType: customer.billingType,
+      acceptsPrivatePayment: customer.acceptsPrivatePayment,
+    }),
+  });
 
   // Selbstzahler-Kunden: Konsumption schreibt keinen Pot, alle Items
   // landen via fallbackPot=`"private"` in einem Eintrag → derselbe

@@ -3,6 +3,7 @@ import {
   appointments,
   appointmentServices,
   services,
+  customers,
   type BudgetTransaction,
 } from "@shared/schema";
 import { eq, and, sql, or, inArray, isNotNull } from "drizzle-orm";
@@ -13,7 +14,11 @@ import { todayISO } from "@shared/utils/datetime";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { consumeFifo, createCascadeConsumption } from "./consumption-engine";
 import { formatEuroDE } from "@shared/utils/money";
-import { appointmentsRepo } from "../../repos";
+import { appointmentsRepo, customersRepo } from "../../repos";
+import {
+  isPrivatePaymentAllowed,
+  isSelbstzahlerBillingType,
+} from "@shared/domain/budget-selbstzahler-validator";
 
 export async function rebookSingleTransaction(
   customerId: number,
@@ -503,12 +508,42 @@ export async function rebookNetZeroAppointmentConsumption(params: {
       });
       if (costs.totalCents <= 0) return false;
 
-      // Cascade gegen die heute verfügbaren Töpfe + privater uncapped-Topf als
-      // Terminal — spiegelt exakt die read-only Re-Derivation des Splits
-      // (rederiveSplitFromCurrentAllocation): §45b → §45a → §39/§42a, Rest
-      // privat. Der private Terminal-Topf absorbiert jeden Rest → kein
-      // outstandingCents, kein Hard-Block.
-      await createCascadeConsumption({
+      // Task #1353 — Privat-Topf-Gate identisch zum normalen Buchungspfad
+      // (`createConsumptionTransaction`): Der frühere bedingungslose
+      // `privatePot: { statutoryExcluded: false, noteKind: "privatzahlung" }`
+      // hat JEDEN Kunden einen uncapped Privattopf gegeben, sodass ein Rest
+      // (der bei der Re-Ableitung gegen den aktuellen Ledger entstehen kann)
+      // still als 19%-Privatrechnung abgerechnet wurde — auch bei reinen
+      // Pflegekassen-Kunden ohne `acceptsPrivatePayment` (Jungnickel-/AOK-Fall).
+      // Jetzt entscheidet derselbe zentrale Gate (`isPrivatePaymentAllowed`),
+      // ob ein privater Terminal-Topf zulässig ist:
+      //   - Selbstzahler        → nur privat (statutorisch ausgelassen),
+      //   - Pflegekasse + privat → statutorische Töpfe + uncapped Privattopf,
+      //   - Pflegekasse o. privat → KEIN Privattopf; bleibt ein Rest, blockiert
+      //                            der Lauf laut (klare Sperre) statt eine
+      //                            verbotene Privatrechnung zu erzeugen.
+      const [customer] = await customersRepo
+        .selectColumnsFrom(
+          {
+            billingType: customers.billingType,
+            acceptsPrivatePayment: customers.acceptsPrivatePayment,
+          },
+          tx,
+        )
+        .where(eq(customers.id, customerId))
+        .limit(1);
+      const isSelbstzahler = isSelbstzahlerBillingType(customer?.billingType);
+      const isPrivateAllowed = isPrivatePaymentAllowed({
+        billingType: customer?.billingType,
+        acceptsPrivatePayment: customer?.acceptsPrivatePayment,
+      });
+      const privatePot = isSelbstzahler
+        ? { statutoryExcluded: true, noteKind: "selbstzahler" as const }
+        : isPrivateAllowed
+          ? { statutoryExcluded: false, noteKind: "privatzahlung" as const }
+          : undefined;
+
+      const cascadeResult = await createCascadeConsumption({
         customerId,
         appointmentId,
         transactionDate: txDate,
@@ -523,8 +558,23 @@ export async function rebookNetZeroAppointmentConsumption(params: {
         customerKilometersCents: costs.customerKilometersCents,
         userId,
         skipExistingCheck: true,
-        privatePot: { statutoryExcluded: false, noteKind: "privatzahlung" },
+        privatePot,
       }, tx);
+
+      // Reiner Pflegekassen-Kunde (kein Privattopf) und die gesetzlichen Töpfe
+      // reichen nicht → outstandingCents > 0. Statt still privat abzurechnen,
+      // bricht die Re-Abrechnung laut ab (Transaktion rollt zurück). Die
+      // Rechnungserstellung scheitert mit klarer Meldung, der/die Bearbeiter:in
+      // muss die Budget-Konfiguration/Buchungen für diesen Termin prüfen.
+      if (cascadeResult.outstandingCents > 0) {
+        throw new Error(
+          `Re-Abrechnung nicht möglich: Termin #${appointmentId} kann nicht ` +
+          `vollständig aus den gesetzlichen Pflegekassen-Töpfen abgerechnet ` +
+          `werden (${formatEuroDE(cascadeResult.outstandingCents)} ohne ` +
+          `Deckung). Eine Privatabrechnung ist für diesen Kunden nicht ` +
+          `zulässig. Bitte prüfen Sie die Budget-Konfiguration und Buchungen.`,
+        );
+      }
 
       return true;
     });

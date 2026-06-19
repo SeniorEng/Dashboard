@@ -197,3 +197,95 @@ describe("rebookNetZeroAppointmentConsumption (Task #1014)", () => {
     expect(await liveConsumptions(netZeroAppt)).toHaveLength(1);
   }, 120_000);
 });
+
+/**
+ * Task #1353 — Re-Buchung darf für reine Pflegekassen-Kunden (kein
+ * Selbstzahler, `acceptsPrivatePayment=false`) NIE still einen 19%-Privat-Rest
+ * abrechnen. Reichen die gesetzlichen Töpfe beim Re-Book nicht aus, MUSS der
+ * Lauf laut abbrechen (Sperre mit der betroffenen Termin-Nummer) statt einen
+ * verbotenen Privattopf zu buchen. Selbstzahler/`acceptsPrivatePayment=true`
+ * bleiben unberührt (eigene Suiten).
+ */
+describe("rebookNetZeroAppointmentConsumption Privat-Sperre (Task #1353)", () => {
+  it("blockiert reinen Pflegekassen-Kunden mit echtem Rest, nennt die Termin-Nummer", async () => {
+    // Eigener Kunde: Pflegekasse, KEIN Privatzahler, KEINE gesetzlichen Töpfe
+    // (alle deaktiviert) → ein netto-null-Termin lässt sich nicht decken.
+    const custRes = await apiPost<{ id: number }>("/api/admin/customers", {
+      vorname: "Rebook",
+      nachname: `NoPrivate-${uniqueId()}`,
+      geburtsdatum: "1940-03-03",
+      email: `rebook-noprivate-${uniqueId()}@test.local`,
+      strasse: "Musterweg",
+      nr: "7",
+      plz: "01067",
+      stadt: "Dresden",
+      telefon: "+4917600000009",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+    });
+    expect(custRes.status, `create customer: ${JSON.stringify(custRes.data)}`).toBe(201);
+    const noPrivateCustomerId = custRes.data.id;
+
+    try {
+      const assignRes = await apiPatch(`/api/admin/customers/${noPrivateCustomerId}/assign`, {
+        primaryEmployeeId: employeeId,
+        backupEmployeeId: null,
+        backupEmployeeId2: null,
+      });
+      expect(assignRes.status, `assign: ${JSON.stringify(assignRes.data)}`).toBe(200);
+
+      // Alle gesetzlichen Töpfe deaktiviert → keine Deckung beim Re-Book.
+      const typesRes = await apiPut(`/api/budget/${noPrivateCustomerId}/type-settings`, {
+        settings: [
+          { budgetType: "entlastungsbetrag_45b", enabled: false, priority: 1, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+          { budgetType: "umwandlung_45a", enabled: false, priority: 2, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+          { budgetType: "ersatzpflege_39_42a", enabled: false, priority: 3, monthlyLimitCents: null, yearlyLimitCents: null, validFrom: null, validTo: null },
+        ],
+      });
+      expect(typesRes.status, `type-settings: ${JSON.stringify(typesRes.data)}`).toBe(200);
+
+      const apptRes = await apiPost<{ id: number }>("/api/appointments/kundentermin", {
+        customerId: noPrivateCustomerId,
+        date: APPT_DATE,
+        scheduledStart: "15:00",
+        scheduledEnd: "15:30",
+        notes: `Rebook-NoPrivate-${uniqueId()}`,
+        assignedEmployeeId: employeeId,
+        services: [{ serviceId: abServiceId, durationMinutes: 30 }],
+      });
+      expect(apptRes.status, `create appt: ${JSON.stringify(apptRes.data)}`).toBe(201);
+      const restAppt = apptRes.data.id;
+      cleanupApptIds.push(restAppt);
+      await db.update(appointmentServices)
+        .set({ actualDurationMinutes: 30 })
+        .where(eq(appointmentServices.appointmentId, restAppt));
+
+      // Netto-null-Zustand herstellen: rohe §45b-Konsumption + sofortige Storno.
+      const [orig] = await db.insert(budgetTransactions).values({
+        customerId: noPrivateCustomerId, budgetType: "entlastungsbetrag_45b",
+        transactionDate: APPT_DATE, transactionType: "consumption",
+        amountCents: -2380, appointmentId: restAppt, notes: "§45b (wird storniert)",
+      }).returning({ id: budgetTransactions.id });
+      await db.insert(budgetTransactions).values({
+        customerId: noPrivateCustomerId, budgetType: "entlastungsbetrag_45b",
+        transactionDate: APPT_DATE, transactionType: "reversal", amountCents: 2380,
+        appointmentId: restAppt, reversedTransactionId: orig.id, notes: "Storno §45b",
+      });
+
+      // Re-Book MUSS laut abbrechen (kein Privattopf, echter Rest) und die
+      // Termin-Nummer nennen.
+      await expect(rebookNetZeroAppointmentConsumption({
+        customerId: noPrivateCustomerId,
+        appointmentIds: [restAppt],
+        userId,
+      })).rejects.toThrow(new RegExp(`Termin #${restAppt}`));
+
+      // Sperre rollt zurück → keine neue (private) Live-Konsumption gebucht.
+      expect(await liveConsumptions(restAppt)).toHaveLength(0);
+    } finally {
+      await cleanupCustomer(noPrivateCustomerId);
+    }
+  }, 120_000);
+});

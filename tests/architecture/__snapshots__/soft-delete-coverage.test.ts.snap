@@ -127,11 +127,15 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
   "server/storage/budget/km-rebook.ts": [
     "appointmentsRepo",
   ],
+  "server/storage/budget/net-available-45b.ts": [
+    "customersRepo",
+  ],
   "server/storage/budget/preferences-storage.ts": [
     "customersRepo",
   ],
   "server/storage/budget/rebook-storage.ts": [
     "appointmentsRepo",
+    "customersRepo",
   ],
   "server/storage/budget/reservation-storage.ts": [
     "customersRepo",

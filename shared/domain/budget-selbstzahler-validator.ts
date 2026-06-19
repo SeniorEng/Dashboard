@@ -98,3 +98,41 @@ export function defaultStatutoryPotEnabled(
   if (!base) return false;
   return validateSelbstzahlerBudget({ billingType, intent: { budgetType } }).ok;
 }
+
+/**
+ * Task #1353 — Pure SSoT für die Frage „Darf dieser Kunde einen privaten
+ * (Selbstzahler-)Anteil bekommen?". Ein privater Anteil/Topf ist NUR erlaubt,
+ * wenn der Kunde grundsätzlich privat zahlt:
+ *   - `billingType === "selbstzahler"` (zahlt per Definition immer privat,
+ *     unabhängig vom Flag `acceptsPrivatePayment`, das im UI für Selbstzahler
+ *     gar nicht setzbar ist), ODER
+ *   - `acceptsPrivatePayment === true` (Pflegekassen-Kunde, der Mehrkosten
+ *     ausdrücklich privat tragen darf).
+ *
+ * Für reine Pflegekassen-Kunden ohne `acceptsPrivatePayment` ist ein privater
+ * Anteil verboten — ein „Rest", der nicht in die gesetzlichen Töpfe passt,
+ * MUSS blockieren (klare Sperre) statt still auf eine 19%-Privatrechnung zu
+ * fallen (Jungnickel-/AOK-Fall).
+ *
+ * Diese Funktion ist die EINE Definition des Gates; alle Buchungs-/Rebook-/
+ * Reservierungs-/Import-/Rechnungssplit-Pfade importieren sie, statt die
+ * Formel (`acceptsPrivatePayment || selbstzahler`) parallel zu wiederholen.
+ *
+ * Pure: kein DB-Zugriff. Eingaben sind die `customers`-Spalten `billingType`
+ * und `acceptsPrivatePayment`.
+ */
+export function isSelbstzahlerBillingType(
+  billingType: string | null | undefined,
+): boolean {
+  return billingType === "selbstzahler";
+}
+
+export function isPrivatePaymentAllowed(input: {
+  billingType: string | null | undefined;
+  acceptsPrivatePayment: boolean | null | undefined;
+}): boolean {
+  return (
+    (input.acceptsPrivatePayment ?? false) ||
+    isSelbstzahlerBillingType(input.billingType)
+  );
+}

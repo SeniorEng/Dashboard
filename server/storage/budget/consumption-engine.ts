@@ -17,6 +17,7 @@ import { syncCarryoverAndExpiry, calculateAllocatedCents, getExcluded45bConsumpt
 import { computeCapSlot, type CappedBudgetType } from "./cap-calculator";
 import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade } from "@shared/domain/budget/plan-cascade";
+import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/domain/budget-selbstzahler-validator";
 import { BudgetHardBlockError } from "@shared/domain/budget/over-budget-error";
 import { quantizeKm } from "@shared/domain/invoice-line-items";
 import { formatEuroDE } from "@shared/utils/money";
@@ -923,13 +924,16 @@ export async function createConsumptionTransaction(params: {
       )
       .where(eq(customers.id, params.customerId))
       .limit(1);
-    // Task #588: `selbstzahler` ist die kanonische Quelle dafür, dass der
-    // Kunde grundsätzlich privat zahlt — unabhängig vom Flag
+    // Task #588 / #1353: `selbstzahler` ist die kanonische Quelle dafür, dass
+    // der Kunde grundsätzlich privat zahlt — unabhängig vom Flag
     // `acceptsPrivatePayment`, das im UI für Selbstzahler gar nicht setzbar
-    // ist und per Default `false` bleibt.
-    const isSelbstzahler = customer?.billingType === "selbstzahler";
-    const isPrivateAllowed =
-      (customer?.acceptsPrivatePayment ?? false) || isSelbstzahler;
+    // ist und per Default `false` bleibt. Gate zentral in
+    // `isPrivatePaymentAllowed` (eine Definition, kein paralleler Code).
+    const isSelbstzahler = isSelbstzahlerBillingType(customer?.billingType);
+    const isPrivateAllowed = isPrivatePaymentAllowed({
+      billingType: customer?.billingType,
+      acceptsPrivatePayment: customer?.acceptsPrivatePayment,
+    });
 
     const hasUsage = costs.totalCents > 0;
 

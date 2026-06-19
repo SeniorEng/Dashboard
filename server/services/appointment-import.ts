@@ -15,6 +15,7 @@ import { appointmentsRepo, customersRepo } from "../repos";
 import { excelServiceArtToCategory, isHauswirtschaftArt } from "@shared/domain/excel-service-art";
 import { computeLastExcelMonth, isBeyondCutoff, type ExcelCutoff } from "@shared/domain/import-cutoff";
 import { isDocumentationOnlyImport } from "@shared/domain/import-documentation-only";
+import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
 
 interface ImportRow {
   rowIndex: number;
@@ -647,9 +648,10 @@ async function loadPrivatePaymentAllowed(
       )
       .where(eq(customers.id, customerId))
       .limit(1);
-    const isPrivateAllowed =
-      (customer?.acceptsPrivatePayment ?? false) ||
-      customer?.billingType === "selbstzahler";
+    const isPrivateAllowed = isPrivatePaymentAllowed({
+      billingType: customer?.billingType,
+      acceptsPrivatePayment: customer?.acceptsPrivatePayment,
+    });
     privatePaymentMap.set(customerId, isPrivateAllowed);
   }
   return privatePaymentMap;

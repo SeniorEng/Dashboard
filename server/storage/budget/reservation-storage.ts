@@ -40,6 +40,7 @@ import {
   OverBudgetCompletionError,
 } from "@shared/domain/budget/over-budget-error";
 import { classifyReconciliation } from "@shared/domain/budget/reconciliation";
+import { isPrivatePaymentAllowed, isSelbstzahlerBillingType } from "@shared/domain/budget-selbstzahler-validator";
 import { assertReservationTransition } from "@shared/domain/budget/reservation-state-machine";
 import { calculateAppointmentCost } from "./appointment-cost-calculator";
 import { calculateAllocatedCents } from "./allocation-storage";
@@ -157,8 +158,11 @@ async function getPrivateCapability(
     )
     .where(eq(customers.id, customerId))
     .limit(1);
-  const isSelbstzahler = customer?.billingType === "selbstzahler";
-  const isPrivateAllowed = (customer?.acceptsPrivatePayment ?? false) || isSelbstzahler;
+  const isSelbstzahler = isSelbstzahlerBillingType(customer?.billingType);
+  const isPrivateAllowed = isPrivatePaymentAllowed({
+    billingType: customer?.billingType,
+    acceptsPrivatePayment: customer?.acceptsPrivatePayment,
+  });
   return { isSelbstzahler, isPrivateAllowed };
 }
 
