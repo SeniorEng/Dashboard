@@ -3,6 +3,7 @@ import { db } from "../../lib/db";
 import type { PerformanceStatsResponse, ProfitabilityBreakdown } from "@shared/statistics";
 import { buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
 import { marginPercent } from "@shared/domain/statistics/economics";
+import { getEconomics } from "./economics";
 
 interface UtilizationCounts { productive: number; overhead: number; sickVac: number; revenue: number; minutes: number; }
 
@@ -56,7 +57,7 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
   const prevY = previousYearPeriod(period);
   const dFilter = dateFilter(period, sql`a.date::date`);
 
-  const [minutesByMonthRow, avgDurationRow, revPerHourRow, profitabilityRow, servicePricesRow, cur, pre, yoy] = await Promise.all([
+  const [minutesByMonthRow, avgDurationRow, revPerHourRow, profitabilityRow, servicePricesRow, cur, pre, yoy, economicsResult] = await Promise.all([
     db.execute(sql`
       WITH appt_category AS (
         SELECT DISTINCT ON (a.id)
@@ -190,6 +191,7 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
     utilizationAndRevenue(period),
     utilizationAndRevenue(prev),
     utilizationAndRevenue(prevY),
+    getEconomics(period),
   ]);
 
   const total = cur.productive + cur.overhead + cur.sickVac;
@@ -269,5 +271,6 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
         servicePrices,
       };
     })(),
+    economics: economicsResult.economics,
   };
 }

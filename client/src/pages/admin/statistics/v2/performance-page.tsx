@@ -8,6 +8,7 @@ import type { PerformanceStatsResponse } from "@shared/statistics";
 import { cents, hours, compareLabel, pickDelta, fmtCentsDelta, fmtHoursDelta } from "../helpers";
 import { StatsPageShell, StatsLoading, StatsError, buildPeriodQs } from "./page-shell";
 import { DrillDownTable } from "./drill-down-table";
+import { EconomicsBlock } from "./economics-block";
 
 type MinutesRow = PerformanceStatsResponse["minutesByMonth"][number];
 type AvgDurationRow = PerformanceStatsResponse["avgDurationByServiceType"][number];
@@ -244,6 +245,8 @@ function PerformanceContent({ qs, year, month }: { qs: string; year: number; mon
           />
         </CardContent>
       </Card>
+
+      <EconomicsBlock economics={data.economics} qs={qs} year={year} testId="performance" />
     </div>
   );
 }

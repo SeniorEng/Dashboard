@@ -351,6 +351,10 @@ export interface PerformanceStatsResponse {
   /** Deckungsbeitrag pro Mitarbeiter + Kalkulationsgrundlage (HW/AB Erlös vs.
    *  Mitarbeiterkosten je Stunde). Migriert aus dem alten Team-Tab. */
   profitability: ProfitabilityBreakdown;
+  /** Task #1358 — Wirtschaftlichkeits-Aufstellung (Personalkosten-Split +
+   *  km-Block) für den gewählten Zeitraum, identisch zum Umsatz-Dashboard
+   *  (gemeinsame SSoT getEconomics / buildEconomics). */
+  economics: EconomicsBreakdown;
 }
 
 interface ProfitabilityEmployeeRow {
