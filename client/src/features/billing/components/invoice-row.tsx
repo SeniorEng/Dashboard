@@ -1,7 +1,11 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ToastAction } from "@/components/ui/toast";
+import { useToast } from "@/hooks/use-toast";
+import { api } from "@/lib/api/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,6 +74,62 @@ export function InvoiceRow({
   onStorno,
   onMarkPaid,
 }: InvoiceRowProps) {
+  const { toast } = useToast();
+  // Task #1349: Öffnet ein Dokument-PDF (Rechnung / Leistungsnachweis / Bündel)
+  // robust statt über einen rohen `<a target="_blank">`-Link. Bei einem
+  // vorübergehend nicht erreichbaren Speicher (503) oder einem anderen Fehler
+  // wird KEINE rohe Fehlerseite im neuen Tab geöffnet, sondern eine klare
+  // Meldung mit „Erneut versuchen"-Aktion angezeigt. Der Tab wird synchron im
+  // Klick-Gesten-Kontext geöffnet (Popup-Blocker-sicher) und erst gefüllt, wenn
+  // die Bytes da sind — bei Fehler wieder geschlossen.
+  const [openingPath, setOpeningPath] = useState<string | null>(null);
+
+  async function openDocument(path: string, label: string) {
+    if (openingPath) return;
+    setOpeningPath(path);
+    const win = window.open("about:blank", "_blank");
+    if (win) win.opener = null;
+    try {
+      const result = await api.getBlob(path);
+      if (!result.success) {
+        if (win && !win.closed) win.close();
+        const isStorageUnavailable =
+          result.error.code === "STORAGE_UNAVAILABLE" || result.error.status === 503;
+        toast({
+          title: isStorageUnavailable
+            ? "Speicher vorübergehend nicht erreichbar"
+            : `${label} konnte nicht geöffnet werden`,
+          description: isStorageUnavailable
+            ? "Bitte in wenigen Minuten erneut versuchen — das PDF ist sicher gespeichert."
+            : result.error.message,
+          variant: "destructive",
+          action: (
+            <ToastAction altText="Erneut versuchen" onClick={() => openDocument(path, label)}>
+              Erneut versuchen
+            </ToastAction>
+          ),
+        });
+        return;
+      }
+      const url = URL.createObjectURL(result.data.blob);
+      if (win && !win.closed) {
+        win.location.href = url;
+      } else {
+        // Popup wurde geblockt: als Datei-Download nachreichen.
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = result.data.fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      // Blob-URL erst nach dem Laden im neuen Tab freigeben.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } finally {
+      setOpeningPath(null);
+    }
+  }
+
   const pdfStatus = getPdfStatus(invoice);
   const customerDisplay = getInvoiceCustomerDisplayName(invoice);
   const showSeparateRecipient =
@@ -268,39 +328,30 @@ export function InvoiceRow({
                     Details
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <a
-                      href={`/api/billing/${invoice.id}/pdf`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      data-testid={`button-pdf-${invoice.id}`}
-                    >
-                      <FileText className={`${iconSize.sm} mr-2`} />
-                      PDF herunterladen
-                    </a>
+                  <DropdownMenuItem
+                    onSelect={() => openDocument(`/billing/${invoice.id}/pdf`, "Rechnungs-PDF")}
+                    disabled={openingPath !== null}
+                    data-testid={`button-pdf-${invoice.id}`}
+                  >
+                    <FileText className={`${iconSize.sm} mr-2`} />
+                    PDF herunterladen
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <a
-                      href={`/api/billing/${invoice.id}/leistungsnachweis`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      data-testid={`button-leistungsnachweis-${invoice.id}`}
-                    >
-                      <FileCheck2 className={`${iconSize.sm} mr-2`} />
-                      Leistungsnachweis
-                    </a>
+                  <DropdownMenuItem
+                    onSelect={() => openDocument(`/billing/${invoice.id}/leistungsnachweis`, "Leistungsnachweis")}
+                    disabled={openingPath !== null}
+                    data-testid={`button-leistungsnachweis-${invoice.id}`}
+                  >
+                    <FileCheck2 className={`${iconSize.sm} mr-2`} />
+                    Leistungsnachweis
                   </DropdownMenuItem>
                   {/* Task #533: Bündel-Druck — Rechnung + Leistungsnachweis als ein PDF. */}
-                  <DropdownMenuItem asChild>
-                    <a
-                      href={`/api/billing/${invoice.id}/bundle`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      data-testid={`button-bundle-${invoice.id}`}
-                    >
-                      <Printer className={`${iconSize.sm} mr-2`} />
-                      Drucken (Rechnung + Nachweis)
-                    </a>
+                  <DropdownMenuItem
+                    onSelect={() => openDocument(`/billing/${invoice.id}/bundle`, "Druck-Bündel")}
+                    disabled={openingPath !== null}
+                    data-testid={`button-bundle-${invoice.id}`}
+                  >
+                    <Printer className={`${iconSize.sm} mr-2`} />
+                    Drucken (Rechnung + Nachweis)
                   </DropdownMenuItem>
                   {/* Task #1317: Zahlungs-Lebenszyklus — „Avis erhalten" und
                       „Bezahlt" sind bewusste Aktionen ab Status „versendet".

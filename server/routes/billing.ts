@@ -121,6 +121,70 @@ function classifyPdfRenderError(err: unknown, subject: string): AppError {
   );
 }
 
+// Task #1349 — Erkennt einen *vorübergehenden* Object-Storage-Zugriffsfehler
+// (Speicher-Identität/Auth gerade nicht verfügbar, z.B. "could not read token
+// from /tmp/replidentity" / "failed to get signing authority" oder der
+// Storage-Sidecar 127.0.0.1:1106 ist nicht erreichbar). Das ist KEIN fehlendes
+// Objekt — ein fehlendes Objekt liefert `null` (file.exists() → false) — sondern
+// ein transienter Infrastruktur-Fehler, der sich nach einem Republish / in
+// wenigen Minuten von selbst behebt. Das bereits gespeicherte PDF ist sicher,
+// nur der Lesezugriff scheitert gerade. Rückgabe: ein retryable 503er mit
+// klarer deutscher Meldung, oder `null`, wenn der Fehler nicht in diese Klasse
+// fällt (dann greift die bestehende Render-/Not-Found-Klassifikation).
+const STORAGE_ACCESS_ERROR_PATTERNS: RegExp[] = [
+  /replidentity/i,
+  /signing authority/i,
+  /could not read token/i,
+  /failed to get signing/i,
+  /127\.0\.0\.1:1106/i,
+  /sidecar/i,
+  /external_account/i,
+  /token_url/i,
+  /could not (refresh|load) .*token/i,
+  /getUniverseDomain/i,
+];
+
+function collectErrorText(err: unknown, depth = 0): string {
+  if (err === null || err === undefined || depth > 5) return "";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) {
+    const cause = (err as Error & { cause?: unknown }).cause;
+    return `${err.message} ${collectErrorText(cause, depth + 1)}`;
+  }
+  if (typeof err === "object") {
+    const obj = err as Record<string, unknown>;
+    const parts = [obj.message, obj.error, obj.cause]
+      .map((part) => collectErrorText(part, depth + 1))
+      .filter(Boolean);
+    return parts.join(" ");
+  }
+  return String(err);
+}
+
+function classifyStorageAccessError(err: unknown, subject: string): AppError | null {
+  const haystack = collectErrorText(err);
+  if (STORAGE_ACCESS_ERROR_PATTERNS.some((re) => re.test(haystack))) {
+    return new AppError(
+      503,
+      "STORAGE_UNAVAILABLE",
+      `${subject}: Der Dokumentenspeicher ist vorübergehend nicht erreichbar — bitte in wenigen Minuten erneut versuchen. Das PDF ist sicher gespeichert.`,
+    );
+  }
+  return null;
+}
+
+// Task #1349 — Reiner Cache-Lesepfad (Objekt liegt bereits in Object Storage):
+// Hier wird NICHT gerendert. Ein fehlendes Objekt liefert `null`, daher ist
+// JEDER geworfene Fehler ein Speicher-Zugriffs-/Identitätsproblem → 503
+// retryable. `subject` benennt das Artefakt für die Meldung.
+function storageReadUnavailable(subject: string): AppError {
+  return new AppError(
+    503,
+    "STORAGE_UNAVAILABLE",
+    `${subject}: Der Dokumentenspeicher ist vorübergehend nicht erreichbar — bitte in wenigen Minuten erneut versuchen. Das PDF ist sicher gespeichert.`,
+  );
+}
+
 router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (req, res) => {
   const filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number; dateFrom?: string; dateTo?: string } = {};
   if (req.query.year) filters.year = Number(req.query.year);
@@ -1255,7 +1319,15 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht erzeugt werden — bitte i
 
   // T01/PDF-Hash: Wenn die Rechnung bereits einen persistierten PDF-Pfad hat,
   // liefere die hashstabilen Bytes direkt aus Object Storage aus.
-  const cached = await loadInvoicePdfFromStorage(invoice);
+  // Task #1349: Ein geworfener Fehler beim reinen Cache-Lesen bedeutet, dass der
+  // Speicher gerade nicht erreichbar ist (fehlendes Objekt → null), daher 503.
+  let cached: Buffer | null;
+  try {
+    cached = await loadInvoicePdfFromStorage(invoice);
+  } catch (err) {
+    console.error(`[billing/pdf] Speicher-Zugriff für Rechnung ${id} fehlgeschlagen:`, err);
+    throw storageReadUnavailable(`Rechnungs-PDF ${invoice.invoiceNumber}`);
+  }
   if (cached) {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
@@ -1278,14 +1350,18 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht erzeugt werden — bitte i
 
   // Task #521: Legacy-Rechnungen ohne persistiertes PDF — on-demand erzeugen,
   // persistieren und aus dem Cache ausliefern (Backfill-Effekt).
+  const subject = `Rechnungs-PDF ${invoice.invoiceNumber}`;
+  let fresh: Buffer | null;
   try {
     await persistInvoicePdf(id);
+    const refreshed = await storage.getInvoice(id);
+    fresh = refreshed ? await loadInvoicePdfFromStorage(refreshed) : null;
   } catch (err) {
     console.error(`[billing/pdf] PDF-Persistierung für Rechnung ${id} fehlgeschlagen:`, err);
-    throw err;
+    // Task #1349: Transienter Speicher-Zugriffsfehler → 503 retryable; sonst
+    // die bestehende Render-Klassifikation (Chromium 503 / Timeout 504 / 404).
+    throw classifyStorageAccessError(err, subject) ?? classifyPdfRenderError(err, subject);
   }
-  const refreshed = await storage.getInvoice(id);
-  const fresh = refreshed ? await loadInvoicePdfFromStorage(refreshed) : null;
   if (!fresh) {
     throw notFound("PDF konnte nicht aus dem Speicher gelesen werden — bitte erneut versuchen.");
   }
@@ -1302,7 +1378,14 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
 
   // Task #521: Wenn der LN bereits in Object Storage liegt, direkt
   // ausliefern (kein Puppeteer-Round-Trip).
-  const cachedLn = await loadLeistungsnachweisPdfFromStorage(invoice);
+  // Task #1349: Cache-Lesefehler = Speicher vorübergehend nicht erreichbar → 503.
+  let cachedLn: Buffer | null;
+  try {
+    cachedLn = await loadLeistungsnachweisPdfFromStorage(invoice);
+  } catch (err) {
+    console.error(`[billing/leistungsnachweis] Speicher-Zugriff für Rechnung ${id} fehlgeschlagen:`, err);
+    throw storageReadUnavailable(`Leistungsnachweis ${invoice.invoiceNumber}`);
+  }
   if (cachedLn) {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
@@ -1331,14 +1414,18 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   // sowohl Rechnungs-PDF als auch LN-PDF gebackfillt werden, und dann aus dem
   // Storage ausliefern.
   if (isPflegekasseInvoice) {
+    let fresh: Buffer | null;
     try {
       await persistInvoicePdf(id);
+      const refreshed = await storage.getInvoice(id);
+      fresh = refreshed ? await loadLeistungsnachweisPdfFromStorage(refreshed) : null;
     } catch (err) {
       console.error(`[billing/leistungsnachweis] LN-Persistierung für Rechnung ${id} fehlgeschlagen:`, err);
-      throw err;
+      // Task #1349: Transienter Speicher-Zugriffsfehler → 503 retryable; sonst
+      // die bestehende Render-Klassifikation (Chromium 503 / Timeout 504 / 404).
+      const subject = `Leistungsnachweis ${invoice.invoiceNumber}`;
+      throw classifyStorageAccessError(err, subject) ?? classifyPdfRenderError(err, subject);
     }
-    const refreshed = await storage.getInvoice(id);
-    const fresh = refreshed ? await loadLeistungsnachweisPdfFromStorage(refreshed) : null;
     if (fresh) {
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);

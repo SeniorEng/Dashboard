@@ -465,6 +465,44 @@ export const api = {
     }
   },
 
+  /**
+   * GET mit binärer Antwort (PDF/ZIP-Download/Inline-Anzeige). Liefert den `Blob`
+   * und den aus `Content-Disposition` geparsten Dateinamen. Bei einem Fehler wird
+   * der strukturierte Server-Fehler (`code`, `message`, `status`) zurückgegeben,
+   * sodass der Aufrufer z.B. einen 503 „Speicher vorübergehend nicht erreichbar"
+   * von einem echten 404 unterscheiden kann — statt eine rohe Fehlerseite in
+   * einem neuen Tab zu öffnen (Task #1349).
+   */
+  getBlob: async (
+    endpoint: string,
+    signal?: AbortSignal,
+  ): Promise<ApiResult<{ blob: Blob; fileName: string }>> => {
+    try {
+      const response = await fetch(`/api${endpoint}`, {
+        method: 'GET',
+        credentials: 'include',
+        signal,
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        const error = await parseErrorResponse(response);
+        return { success: false, error };
+      }
+
+      const blob = await response.blob();
+      const cd = response.headers.get('Content-Disposition') || '';
+      const match = /filename="?([^"]+)"?/i.exec(cd);
+      const fileName = match ? match[1] : 'download';
+      return { success: true, data: { blob, fileName } };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return { success: false, error: { code: 'ABORTED', message: 'Anfrage wurde abgebrochen' } };
+      }
+      return { success: false, error: { code: 'NETWORK_ERROR', message: 'Netzwerkfehler: Bitte prüfen Sie Ihre Internetverbindung' } };
+    }
+  },
+
   put: <T, B = unknown>(endpoint: string, body: B, signal?: AbortSignal) =>
     apiRequest<T, B>(endpoint, { method: 'PUT', body, signal }),
 
