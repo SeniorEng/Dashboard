@@ -1,0 +1,26 @@
+#1353 (neu gefasst) — Verbotene Privatrechnung: Phantom-Rest durch Heute-Neuableitung + fehlender Selbstzahler-Gate
+Was/Warum: Für Antje Jungnickel (Pflegekasse, acceptsPrivatePayment = false, kein selbstzahler) wurde neben der korrekten AOK-Rechnung (RE-2026-0104, 797,69 €) fälschlich eine Privatrechnung (19 %, RE-2026-0105, 109,77 €) erzeugt. Das sind zwei Fehler, und der Gate ist nur der zweite:
+
+Eigentlicher Verursacher (Datums-Pinning): Der Net-Zero-Rebook leitet den Verbrauch gegen die HEUTIGE statutarische Verfügbarkeit neu ab (rebook-storage.ts, Kommentar „re-derives against today's statutory availability"), statt die ursprüngliche Allokation zum Termindatum zu reproduzieren. Ein Termin, der zum Buchungszeitpunkt ins Budget passte, zeigt heute einen Rest, wenn die Verfügbarkeit inzwischen kleiner ist (z. B. §45b-Carryover am 30.06. verfallen, oder spätere Termine haben den Topf belegt). Dieser Phantom-Rest läuft in den privaten Terminal-Topf über. Ein Net-Zero-Rebook (Storno+Neuausstellung / Re-Bill bei Rechnungserzeugung) MUSS wertneutral die Originalbuchung reproduzieren — also dieselbe datums-gepinnte Verfügbarkeit nutzen wie Reader/Buchung (forDate/asOfDate = Termindatum), nicht „heute".
+Fehlender Backstop (Gate): rebook-storage.ts:526 übergibt privatePot unbedingt — der acceptsPrivatePayment/selbstzahler-Gate (vorhanden in consumption-engine, import, reservation) fehlt hier und im Split-Fallback. Selbst wenn ein Rest legitim wäre, darf für einen Nicht-Selbstzahler nie eine Privatzeile/Privatrechnung entstehen.
+
+Done looks like:
+
+Net-Zero-Rebook ist datums-gepinnt: Er reproduziert die ursprüngliche Allokation (Verfügbarkeit zum Termindatum, nicht heute) → ein Termin, der ursprünglich ins Budget passte, erzeugt beim Re-Bill keinen Rest und keine Privatzeile.
+Selbstzahler-Gate als Backstop überall: Bleibt nach dem Pinning doch ein echter Rest und ist der Kunde nicht privat-fähig → klarer blockierender Fehler mit Nennung der betroffenen Termine, statt einer fabrizierten Privatzeile — im Rebook-Schreibpfad UND im Billing/Split-Fallback (fallbackPot:"private" für Nicht-Selbstzahler verboten).
+Echte selbstzahler und acceptsPrivatePayment = true unverändert (inkl. Budget=0-Einzel-Privatrechnung, Task #812).
+Der Gate kommt aus einem geteilten Helfer (consumption-engine, rebook, reservation, split nutzen dieselbe Definition) — keine zweite Parallel-Definition.
+
+Steps:
+
+Diagnose Antje zuerst (Prod, read-only — Replica-Zugang wiederherstellen): billing_run_id von RE-2026-0104/0105 finden, Termine der Topf-Gruppe + ihre budget_transactions prüfen. Entscheidende Frage: Passte der/die Termin(e) zum Termindatum ins statutarische Budget und überläuft nur, weil heute neu abgeleitet wird (⇒ Datums-Bug, Phantom-Rest)? Oder echter Überzug? Existiert eine Privat-consumption-Zeile „Privatzahlung: …" (Rebook-Pfad) oder nur Split-Fallback (fehlende statutarische Zeilen)? acceptsPrivatePayment jetzt/historisch. Befund in die Task-Notizen.
+Primär-Fix — Rebook datums-pinnen: In rebookNetZeroAppointmentConsumption (und rebookDisabledBudgetTransactions/rebookSingleTransaction auf dasselbe Muster prüfen) die Verfügbarkeit gegen das ursprüngliche Termin-/Buchungsdatum ableiten (gleiche date-pinned SSoT wie Reader/Buchung), sodass der Net-Zero-Rebook die Originalbuchung reproduziert — kein Heute-Rest.
+Geteilter Gate: isSelbstzahler/isPrivateAllowed (inline in consumption-engine, nicht-exportiert in reservation) in einen wiederverwendbaren Helfer ziehen.
+Backstop Rebook-Schreibpfad: privatePot nur wenn der geteilte Gate „privat-fähig" sagt; sonst blockierender Fehler mit Termin-Nennung (wie Hard-Block der consumption-engine).
+Backstop Billing/Split: Für Pflegekasse + nicht privat-fähig keine Privatrechnung über den Fallback; nicht zuordenbare Position → klarer blockierender Billing-Fehler mit Termin-Nennung.
+Erhalten: selbstzahler / acceptsPrivatePayment = true + Budget=0-Fall (Task #812) unverändert.
+Regressionstests: (a) Net-Zero-Rebook eines ursprünglich passenden Termins (Pflegekasse) → keine Privatzeile, kein Rest (Datums-Pinning); (b) echter Rest bei Nicht-Selbstzahler → blockierender Fehler statt Privatzeile (Rebook + Split); (c) selbstzahler/privat-fähig splitten weiter privat wie bisher.
+Operator-Follow-up dokumentieren: RE-2026-0105 per „Stornieren" im App durch den Operator (kein Prod-Schreibzugriff in dieser Aufgabe), nachdem Ursache/Doku korrigiert.
+
+Out of scope: Verhalten für selbstzahler/privat-fähige Kunden ändern; Schema/neues Flag (acceptsPrivatePayment/billingType bleiben SSoT); tatsächlicher Prod-Storno (macht Operator).
+Relevant files: rebook-storage.ts:412-536,203-382, consumption-engine.ts:916-996, reservation-storage.ts:146-162, appointment-import.ts:643-653, invoice-calc.ts:275-282,598, shared/domain/budget-invoice-split.ts, shared/domain/budget-selbstzahler-validator.ts.
