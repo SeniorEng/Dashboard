@@ -14,7 +14,8 @@ import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
 import type { AppointmentBudgetFit } from "@shared/types";
 import { getBudgetPreferences, readBudgetTypeSettings } from "./preferences-storage";
-import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow, getExcluded45bConsumption } from "./allocation-storage";
+import { getCustomerBudgetAmounts, syncCarryoverAndExpiry, calculateAllocatedCents, pickEffective45bSettingRow } from "./allocation-storage";
+import { netAvailable45bAt } from "./net-available-45b";
 import { getPlannedCostCents, getPlannedCostByAppointment } from "./appointment-cost-calculator";
 import { computeCapSlot } from "./cap-calculator";
 import { readUnifiedBudgetAvailability, type PotAvailability, type UnifiedBudgetAvailability } from "./unified-reader";
@@ -217,52 +218,47 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   }
   const sortedMonths = [...futureCostsByMonth.keys()].sort();
 
+  // Task #1366 — Forecast #1 (Topf-Ebene) liest die §45b-Verfügbarkeit pro
+  // projiziertem Monatsende aus der EINEN SSoT `netAvailable45bAt`
+  // (`{ projectFuture: true, holds: "ignore" }`) statt eigener
+  // `allocAtEnd − (cumulativeUsed − excluded)`-Mathe. Die #1340-Carryover-
+  // Verfalls-Exklusion UND der Floor leben damit ausschließlich in
+  // `netAvailable45bAt` / `computeNetAvailable45b`. Holds werden bewusst NICHT
+  // abgezogen (`holds: "ignore"`): der Forecast zählt die geplanten Termin-
+  // Kosten ohnehin selbst — ein zusätzlicher Hold-Abzug würde Holds UND
+  // geplante Kosten doppelt zählen (#1340).
+  //
+  // WICHTIG (Alrik-Gate, #95): Der Fehlbetrag MUSS aus den ROHEN, vorzeichen-
+  // behafteten Kompositions-Feldern (`allocatedCents − consumedNetCents`)
+  // abgeleitet werden, NIE aus dem auf 0 gefloorten `availableCents` — sonst
+  // verschwindet die Über-Planung aus `worstShortfallCents` /
+  // `availableAfterPlannedCents`.
   let worstShortfallCents = 0;
   let plannedShortfallMonth: string | null = null;
-  let allocAtHorizon = totalAllocatedCents;
-  // Task #1340 — Verbrauch, der gegen einen zum projizierten Monatsende NICHT
-  // mehr gezählten Übertrag / verdrängte `initial_balance` gebucht wurde, am
-  // Horizont (für `projectedAvailable`). Default 0 (keine Exklusion / kein
-  // Forecast).
-  let excludedAtHorizon = 0;
+  // Vorzeichenbehaftete §45b-Verfügbarkeit am Horizont VOR Abzug der geplanten
+  // Kosten (für `projectedAvailable`). Default = der heutige Stand.
+  let signedAvailableAtHorizon = availableCents;
   if (sortedMonths.length > 0) {
-    let cumulativeUsed = netUsedCents;
+    let cumulativePlanned = 0;
     for (const ym of sortedMonths) {
       const [y, m] = ym.split("-").map(Number);
       const monthEnd = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-      const allocAtEnd = await calculateAllocatedCents(
-        customerId,
-        "entlastungsbetrag_45b",
-        { asOfDate: monthEnd, projectFuture: true },
-        undefined,
-        preferences,
-        typeSettings,
-      );
-      // Task #1340 — Carryover-Verfalls-Symmetrie. `allocAtEnd` lässt für Monate
-      // nach dem 30.06. den Übertrag wegfallen; der gegen GENAU diesen Übertrag
-      // (bzw. per IB-Supersession verdrängte `initial_balance`) gebuchte
-      // Verbrauch muss dann ebenfalls aus `cumulativeUsed` herausfallen — sonst
-      // belastet er den laufenden Topf doppelt (künstlicher Fehlbetrag). Quelle
-      // ist dieselbe SSoT (`getExcluded45bConsumption` → `calculateAllocated45b`)
-      // wie in `unified-reader`/`consumption-engine`, MIT `projectFuture: true`,
-      // damit Allocation- und Exklusions-Fenster identisch sind. Solange der
-      // Übertrag noch gültig ist (z.B. im Juni), bleibt die Exklusion leer →
-      // keine Über-Korrektur an der Juni-Seite des Boundary.
-      const { excludedConsumedNetCents } = await getExcluded45bConsumption(
+      const net = await netAvailable45bAt(
         customerId,
         monthEnd,
-        db,
-        typeSettings,
-        { projectFuture: true },
+        { projectFuture: true, holds: "ignore", typeSettings },
       );
-      cumulativeUsed += futureCostsByMonth.get(ym)!;
-      const remaining = allocAtEnd - (cumulativeUsed - excludedConsumedNetCents);
+      // Rohe (ungefloorte) Verfügbarkeit am Monatsende = allocated − consumedNet
+      // (consumedNet trägt bereits die #1340-Exklusion). NICHT der gefloorte
+      // `net.availableCents` (Alrik-Gate).
+      const signedAvailable = net.allocatedCents - net.consumedNetCents;
+      cumulativePlanned += futureCostsByMonth.get(ym)!;
+      const remaining = signedAvailable - cumulativePlanned;
       if (remaining < 0 && -remaining > worstShortfallCents) {
         worstShortfallCents = -remaining;
         if (plannedShortfallMonth === null) plannedShortfallMonth = ym;
       }
-      allocAtHorizon = allocAtEnd;
-      excludedAtHorizon = excludedConsumedNetCents;
+      signedAvailableAtHorizon = signedAvailable;
     }
   }
 
@@ -317,12 +313,13 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
   // Fehlbetrag (negativ); ohne Lücke fällt sie auf den nach allen Buchungen
   // verbleibenden Topf am Horizont zurück.
   //
-  // Task #1340 — Am Horizont gilt dieselbe Carryover-Verfalls-Symmetrie wie in
-  // der Schleife: `allocAtHorizon` lässt einen abgelaufenen Übertrag wegfallen,
-  // also muss der gegen ihn gebuchte Verbrauch (`excludedAtHorizon`) auch von
-  // `netUsedCents` abgezogen werden, sonst entsteht ein künstlicher Fehlbetrag.
+  // Task #1366 — Am Horizont ist `signedAvailableAtHorizon` bereits die rohe
+  // §45b-Verfügbarkeit (allocated − consumedNet) am letzten projizierten
+  // Monatsende aus `netAvailable45bAt` — inkl. der #1340-Carryover-Verfalls-
+  // Symmetrie (ein abgelaufener Übertrag UND der gegen ihn gebuchte Verbrauch
+  // fallen synchron weg). Davon werden die gesamten geplanten Kosten abgezogen.
   const projectedAvailable = sortedMonths.length > 0
-    ? allocAtHorizon - (netUsedCents - excludedAtHorizon) - futurePlannedTotal
+    ? signedAvailableAtHorizon - futurePlannedTotal
     : availableCents - plannedCents;
   const availableAfterPlannedCents = worstShortfallCents > 0
     ? -worstShortfallCents
@@ -389,31 +386,10 @@ export async function getMonthlyBudgetFitByAppointment(
   const plannedByAppt = await getPlannedCostByAppointment(customerId);
   if (plannedByAppt.length === 0) return [];
 
-  // netUsedCents = Allocation-Sicht aller §45b-Buchungen bis zum Stichtag
-  // (identische Basis wie die Projektion in getBudgetSummary).
-  const txResult = await db.select({
-    transactionType: budgetTransactions.transactionType,
-    absTotal: sql<number>`COALESCE(SUM(ABS(${budgetTransactions.amountCents})), 0)`,
-    rawTotal: sql<number>`COALESCE(SUM(${budgetTransactions.amountCents}), 0)`,
-  }).from(budgetTransactions).where(and(
-    eq(budgetTransactions.customerId, customerId),
-    eq(budgetTransactions.budgetType, "entlastungsbetrag_45b"),
-    lte(budgetTransactions.transactionDate, today),
-  )).groupBy(budgetTransactions.transactionType);
-  const txMap = new Map<string, { absTotal: number; rawTotal: number }>();
-  for (const row of txResult) {
-    txMap.set(row.transactionType, { absTotal: Number(row.absTotal), rawTotal: Number(row.rawTotal) });
-  }
-  const netUsedCents =
-    (txMap.get("consumption")?.absTotal ?? 0)
-    + (txMap.get("write_off")?.absTotal ?? 0)
-    + (txMap.get("manual_adjustment")?.absTotal ?? 0)
-    - (txMap.get("reversal")?.rawTotal ?? 0);
-
   const todayMonthPrefix = today.slice(0, 7);
 
-  // Vergangene Termine sind bereits in netUsedCents enthalten bzw. fallen über
-  // expired_unsigned aus der Planung — kein Marker (fits=true).
+  // Vergangene Termine sind im §45b-Verbrauch (consumption) bereits enthalten
+  // bzw. fallen über expired_unsigned aus der Planung — kein Marker (fits=true).
   const result: AppointmentBudgetFit[] = [];
   const futureAppts: typeof plannedByAppt = [];
   for (const p of plannedByAppt) {
@@ -424,49 +400,37 @@ export async function getMonthlyBudgetFitByAppointment(
     }
   }
 
-  // Allokation pro Monatsende vorberechnen (projectFuture, wie getBudgetSummary).
-  //
-  // Task #1340 (korrigiert) — Carryover-Verfalls-Symmetrie. Identisch zur Topf-
-  // Ebenen-Vorausschau in `getBudgetSummary` (Forecast #1): `allocAtEnd` lässt
-  // für Monate nach dem 30.06. den Übertrag (bzw. per IB-Supersession verdrängte
-  // `initial_balance`) wegfallen; der GEGEN genau diese Allokation gebuchte
-  // Verbrauch muss dann ebenfalls aus `cumulativeUsed` herausfallen, sonst
-  // belastet er den laufenden Topf doppelt → falsches `fitsInMonthlyBudget`.
-  // Quelle ist dieselbe SSoT (`getExcluded45bConsumption` → `calculateAllocated45b`)
-  // wie in `unified-reader`/Forecast #1, MIT `projectFuture: true`, damit
-  // Allocation- und Exklusions-Fenster pro Monatsende identisch sind. Solange der
-  // Übertrag gültig ist (z.B. im Juni), bleibt die Exklusion leer → keine
-  // Über-Korrektur an der Juni-Seite des Boundary.
-  const allocAtEndByMonth = new Map<string, number>();
-  const excludedByMonth = new Map<string, number>();
+  // Task #1366 — Verfügbarkeit pro Monatsende aus der EINEN SSoT
+  // `netAvailable45bAt` (`{ projectFuture: true, holds: "ignore" }`)
+  // vorberechnen — identisch zur Topf-Ebenen-Vorausschau in `getBudgetSummary`
+  // (Forecast #1). Die rohe (ungefloorte) Verfügbarkeit vor Abzug der geplanten
+  // Kosten ist `allocatedCents − consumedNetCents`; `consumedNetCents` trägt
+  // bereits die #1340-Carryover-Verfalls-Exklusion (ein nach dem 30.06.
+  // entfallender Übertrag UND der gegen ihn gebuchte Verbrauch fallen synchron
+  // weg → kein künstliches `fitsInMonthlyBudget: false`). Floor und Exklusion
+  // leben damit ausschließlich in der SSoT, nicht mehr hier.
+  const signedAvailBeforePlannedByMonth = new Map<string, number>();
   for (const ym of [...new Set(futureAppts.map(p => p.date.slice(0, 7)))]) {
     const [y, m] = ym.split("-").map(Number);
     const monthEnd = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-    allocAtEndByMonth.set(ym, await calculateAllocatedCents(
-      customerId,
-      "entlastungsbetrag_45b",
-      { asOfDate: monthEnd, projectFuture: true },
-      undefined,
-      preferences,
-      typeSettings,
-    ));
-    const { excludedConsumedNetCents } = await getExcluded45bConsumption(
+    const net = await netAvailable45bAt(
       customerId,
       monthEnd,
-      db,
-      typeSettings,
-      { projectFuture: true },
+      { projectFuture: true, holds: "ignore", typeSettings },
     );
-    excludedByMonth.set(ym, excludedConsumedNetCents);
+    signedAvailBeforePlannedByMonth.set(ym, net.allocatedCents - net.consumedNetCents);
   }
 
-  // futureAppts ist chronologisch sortiert (getPlannedCostByAppointment).
-  let cumulativeUsed = netUsedCents;
+  // futureAppts ist chronologisch sortiert (getPlannedCostByAppointment). Die
+  // geplanten Kosten werden kumulativ über alle Termine abgezogen; der Termin,
+  // der den kumulierten Bedarf über die zum Monatsende verfügbare (rohe)
+  // Deckung hebt, wird (samt aller folgenden) als nicht-passend markiert.
+  let cumulativePlanned = 0;
   for (const p of futureAppts) {
     const ym = p.date.slice(0, 7);
-    const allocAtEnd = allocAtEndByMonth.get(ym)!;
-    cumulativeUsed += p.costCents;
-    const remaining = allocAtEnd - (cumulativeUsed - excludedByMonth.get(ym)!);
+    const signedAvail = signedAvailBeforePlannedByMonth.get(ym)!;
+    cumulativePlanned += p.costCents;
+    const remaining = signedAvail - cumulativePlanned;
     const fits = remaining >= 0;
     result.push({
       appointmentId: p.appointmentId,

@@ -152,6 +152,11 @@ describe("Architektur — EIN Budget-Verfügbarkeits-Reader (Task #874 I1)", () 
   const ALLOWLIST_45B = new Set<string>([
     "server/storage/budget/net-available-45b.ts", // Definition (die §45b-SSoT).
     "server/storage/budget/unified-reader.ts", // DER eine Reader (delegiert §45b).
+    // Task #1366 — die §45b-Forecast-Vorausschau (`getBudgetSummary` /
+    // `getMonthlyBudgetFitByAppointment`) liest pro projiziertem Monatsende über
+    // die SSoT `netAvailable45bAt` ({ projectFuture: true, holds: "ignore" })
+    // statt eigener `allocated − consumed`-Mathe.
+    "server/storage/budget/summary-queries.ts",
   ]);
 
   it("§45b-Verfügbarkeit nur über die SSoT `netAvailable45bAt` (Task #1348)", () => {
@@ -261,5 +266,39 @@ describe("Architektur — EIN Budget-Verfügbarkeits-Reader (Task #874 I1)", () 
     // Negativ: andere Töpfe (§45a/§39) sind eigene Mathe und dürfen NICHT matchen.
     expect(computeCallRe.test("const r = computeNetAvailable45a({ allocatedCents: a });")).toBe(false);
     expect(/netAvailable45bAt\s*\(/.test("computeCapSlot(input).netUsedInWindowCents;")).toBe(false);
+  });
+
+  // Task #1366 — die §45b-Forecast-Vorausschau (`getBudgetSummary` /
+  // `getMonthlyBudgetFitByAppointment` in `summary-queries.ts`) darf die
+  // #1340-Carryover-Verfalls-Exklusion NICHT mehr selbst aus
+  // `getExcluded45bConsumption` zusammenrechnen. Die Exklusion (und der Floor)
+  // leben ausschließlich in der SSoT `netAvailable45bAt` /
+  // `computeNetAvailable45b`; der Forecast liest nur noch deren Ergebnis. Dieser
+  // Guard ist bewusst NUR auf `summary-queries.ts` gescoped — andere Aufrufer
+  // (z.B. `consumption-engine.ts`) nutzen `getExcluded45bConsumption` legitim und
+  // werden hier NICHT verboten.
+  it("§45b-Forecast (summary-queries) rollt keine eigene Exklusions-Mathe via `getExcluded45bConsumption` (Task #1366)", () => {
+    const rel = "server/storage/budget/summary-queries.ts";
+    const content = readFileSync(join(ROOT, rel), "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    const callsExcluded = /getExcluded45bConsumption\s*\(/.test(content);
+
+    if (callsExcluded) {
+      expect.fail(
+        `${rel} ruft \`getExcluded45bConsumption(\` auf und rollt damit die ` +
+          `#1340-Carryover-Verfalls-Exklusion erneut selbst aus.\n\n` +
+          `Kontext: §45b-Verfügbarkeit im Forecast gibt es nur EINMAL — über ` +
+          `\`netAvailable45bAt({ projectFuture: true, holds: "ignore" })\`. Lies ` +
+          `\`allocatedCents − consumedNetCents\` aus dem SSoT-Ergebnis, statt ` +
+          `Allokation/Exklusion erneut zu kombinieren (Task #1366).`,
+      );
+    }
+  });
+
+  it("Negativ-Detektor `getExcluded45bConsumption` matcht Aufruf, ignoriert Import", () => {
+    const excludedCallRe = /getExcluded45bConsumption\s*\(/;
+    expect(excludedCallRe.test("const { excludedConsumedNetCents } = await getExcluded45bConsumption(id, d);")).toBe(true);
+    expect(excludedCallRe.test("import { getExcluded45bConsumption } from './allocation-storage';")).toBe(false);
   });
 });
