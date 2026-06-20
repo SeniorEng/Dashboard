@@ -1,0 +1,75 @@
+Fix-Brief für die Replit-KI — Bündel-PDF Layout
+
+Datei analysiert: Buendel-AOK_Plus-05-2026.pdf — 58 Seiten, 21 Rechnungen (je Rechnung + Leistungsnachweise) für AOK PLUS, Mai 2026.
+
+Die Beobachtung „Pagination off, doppelte Summen überall" stimmt. Es sind fünf konkrete Bugs, alle reproduzierbar. Sie kommen daher, dass der Generator zwei verschiedene Leistungsnachweis-Templates mischt und Seitenumbrüche nicht kontrolliert.
+
+
+Bug 1 — Doppelte Summe auf einer Seite (das auffälligste Problem)
+
+Bei Einzel-Termin-Nachweisen mit einer Leistung wird der Betrag zweimal direkt untereinander gedruckt:
+
+Gesamt            40,16 €     ← Tabellen-Fußzeile
+Gesamtbetrag:     40,16 €     ← zusätzliche Zeile darunter
+
+Betroffen u. a. Seiten 6, 11, 17, 22, 24, 26, 36, 42, 44, 47, 50, 56, 58 — also der Großteil.
+
+Fix: Pro Leistungsnachweis genau eine Summenzeile. Wenn die Tabelle bereits eine Summenzeile hat, darf die separate Gesamtbetrag:-Zeile nicht zusätzlich gerendert werden.
+
+Bug 2 — Uneinheitliches Summen-Label: „Summe" vs. „Gesamt"
+
+Das Tabellen-Total heißt mal „Summe" (Template A, Seiten 2–4, 8, 13, 19, 32–34, 38, 40, 52–54) und mal „Gesamt" (Template B, Seiten 6, 11, 17, 22 …). Das ist dieselbe Zeile in zwei Templates.
+
+Fix: Auf ein Template und ein Label einigen. Empfehlung: pro Einzeltermin „Summe", pro Rechnung „Gesamtbetrag". Niemals beide für denselben Wert.
+
+Bug 3 — „Gesamtbetrag" steht mal hier, mal da (die eigentliche „Pagination"-Sache)
+
+Der Rechnungs-Gesamtbetrag erscheint unkontrolliert:
+
+
+bei Mehr-Termin-Bündeln nur auf dem letzten Nachweis, unten reingequetscht (Seiten 4, 20, 34, 54)
+bei Ein-Termin-Bündeln direkt unter der Summe (Bug 1)
+mal auf der Unterschriftsseite, mal nicht (Seite 15 hat ihn, Seite 27 nicht)
+
+
+Fix: Der Gesamtbetrag der Rechnung gehört nur auf die Rechnung (Seite 1 des Kunden), nicht auf die Leistungsnachweise. Jeder Nachweis zeigt nur seine eigene Termin-Summe. Das beseitigt „Summen überall" komplett.
+
+Bug 4 — Verwaiste Seiten: Unterschrift/Fußzeile rutscht allein auf eine neue Seite
+
+Seiten 15, 27, 39, 45, 48 enthalten nur den Abtretungs-/Unterschriftsblock + Fußzeile — die Tabelle davor war zu hoch, sodass der Abschluss auf eine fast leere Folgeseite gedrückt wurde. Das sind 5 von 58 Seiten reine Verschwendung und sieht unprofessionell aus.
+
+Fix: Unterschriftsblock als zusammenhängenden Block behandeln (CSS break-inside: avoid / WeasyPrint page-break-inside: avoid, bei ReportLab KeepTogether). Wenn Tabelle + Unterschrift nicht zusammen auf eine Seite passen, soll der Umbruch vor dem letzten passenden Tabellenblock erfolgen, nicht mitten im Abschluss.
+
+Bug 5 — Zwei Template-Varianten gemischt + uneinheitlicher Kopf
+
+
+Manche Nachweise haben den Untertitel „Einzeltermin-Leistungsnachweis", andere nicht.
+Versicherung im Kopf mal „AOK Plus (IK: 107299005)", mal nur „AOK Plus" (Seite 6).
+Kundenname uneinheitlich: meist „Nachname, Vorname" (Krawalski, Lothar), bei 3 Kunden aber „Vorname Nachname" (Gertraude Falk, Christine Klewer) → vermutlich Datenfeld-/Parsing-Problem, nicht Layout.
+
+
+Fix: Genau ein Leistungsnachweis-Template verwenden. Kopf-Felder (IK-Nummer, Namensformat) immer aus denselben Datenfeldern und in fester Schreibweise rendern. Namensformat zentral normalisieren (z. B. immer Nachname, Vorname).
+
+
+Konkrete Anweisung zum Einfügen in Replit
+
+
+Überarbeite den PDF-Generator für das Rechnungs-Bündel:
+
+
+Nutze ein einziges Leistungsnachweis-Template. Entferne die zweite Variante.
+Jeder Leistungsnachweis zeigt genau eine Summenzeile (Label „Summe") für seine eigenen Termin-Positionen. Entferne jede zusätzliche Gesamtbetrag:-Zeile aus dem Leistungsnachweis.
+Der Gesamtbetrag der Rechnung wird ausschließlich auf der Rechnungsseite gerendert, nie auf einem Leistungsnachweis.
+Lege Tabelle und Unterschrifts-/Abtretungsblock in einen Container mit page-break-inside: avoid (bzw. KeepTogether), damit keine reinen Unterschriftsseiten mehr entstehen.
+Rendere Kopf-Felder (IK-Nummer, Versicherung, Kundenname) immer aus denselben Feldern in fester Schreibweise; normalisiere den Namen auf „Nachname, Vorname".
+Teste mit dem Mai-2026-Bündel: Erwartet werden keine Doppel-Summen, kein „Gesamtbetrag" auf Nachweisen und keine verwaisten Unterschriftsseiten.
+
+
+
+
+Schnelltest nach dem Fix
+
+
+Kein Vorkommen von „Gesamt"/„Gesamtbetrag" zweimal mit gleichem Betrag auf einer Seite.
+Keine Seite, die mit „Ich bestätige hiermit…" beginnt (= verwaiste Unterschriftsseite).
+„Gesamtbetrag:" taucht nur auf Rechnungsseiten auf.
