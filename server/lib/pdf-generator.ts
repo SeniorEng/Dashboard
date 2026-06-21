@@ -58,6 +58,14 @@ export interface InvoicePdfData {
   
   // Customer info (always needed for reference)
   customerName: string;
+  // Task #1372 — Leistungsnachweis-spezifischer, zentral normalisierter
+  // Kundenname im Format „Nachname, Vorname". Wird im Orchestrator aus den
+  // Snapshot-Stammfeldern (vorname/nachname) abgeleitet — deterministisch und
+  // für versiegelte Rechnungen eingefroren. NUR der Leistungsnachweis liest
+  // dieses Feld; `customerName` bleibt für die Rechnungs-PDF (GoBD-Byte-
+  // Stabilität der „Versicherte/r"-Zeile) unangetastet. Fehlt das Feld, fällt
+  // der LN-Renderer auf `customerName` zurück.
+  customerNameLastFirst?: string;
   customerAddress: string | null;
   customerGeburtsdatum: string | null;
 
@@ -621,7 +629,6 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   const lineGrossByRef = new Map<typeof data.lineItems[0], number>();
   data.lineItems.forEach((it, idx) => lineGrossByRef.set(it, it.totalCents + lineVatCents[idx]));
   const grossOf = (item: typeof data.lineItems[0]) => lineGrossByRef.get(item) ?? item.totalCents;
-  const displayGrossCents = isStandard ? data.grossAmountCents : data.netAmountCents;
 
   const KM_CODES = ["travel_km", "customer_km"];
   const isKmItem = (item: typeof data.lineItems[0]) => KM_CODES.includes(item.serviceCode || "");
@@ -755,6 +762,13 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     return dataUrl.replace(/\s/g, "");
   }
 
+  // Task #1372 — Kundenname im Leistungsnachweis einheitlich „Nachname, Vorname".
+  // Quelle ist das zentral normalisierte, eingefrorene Orchestrator-Feld; fehlt
+  // es (Bestandsdaten/Tests), bleibt der bisherige `customerName`. Wird in Kopf,
+  // Summen-/Signaturblock UND in den signaturgerenderten Pfaden (renderSignature)
+  // identisch verwendet, damit Single- und Multi-LN nicht auseinanderdriften.
+  const displayCustomerName = data.customerNameLastFirst ?? data.customerName;
+
   function renderSignature(sig: NonNullable<InvoicePdfData["signatures"]>[0], fallbackEmployeeLabel: string): string {
     const custSigValid = isMeaningfulSignatureForRender(sig.customerSignatureData);
     const empSigValid = isMeaningfulSignatureForRender(sig.employeeSignatureData);
@@ -768,11 +782,11 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
             <img src="${custSigClean}" class="signature-img" />
           </div>
           <div class="signature-line signature-line-signed">
-            ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || data.customerName)}<br>
+            ${escapeHtml(sig.customerSignedAt || "")}, ${escapeHtml(sig.customerName || displayCustomerName)}<br>
             <span style="color: #4b5563;">(Leistungsempfänger/in)</span>
           </div>
         ` : `
-          <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #4b5563;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
+          <div class="signature-line">${escapeHtml(displayCustomerName)}<br><span style="color: #4b5563;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
         `}
       </div>
       <div class="signature-box">
@@ -795,55 +809,37 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   const employeeNames = Array.from(new Set(allSorted.map(i => i.employeeName).filter(Boolean))) as string[];
   const employeeLabel = employeeNames.length > 0 ? employeeNames.map(escapeHtml).join(", ") : "Leistungserbringer/in";
 
-  const hasMultipleLNs = data.signatures && data.signatures.length > 1 && data.signatures.some(s => s.appointmentIds.length > 0);
-
-  let sectionsHtml: string;
-
-  if (hasMultipleLNs && data.signatures) {
-    const sections: string[] = [];
-
-    for (let idx = 0; idx < data.signatures.length; idx++) {
-      const sig = data.signatures[idx];
-      const apptIdSet = new Set(sig.appointmentIds);
-      const sectionItems = sortItems(allSorted.filter(item => item.appointmentId !== null && apptIdSet.has(item.appointmentId)));
-
-      if (sectionItems.length === 0) continue;
-
-      const groups = groupByAppointment(sectionItems);
-      const tableRowsHtml = renderTableRows(groups);
-      const tableClass = tableClassForGroups(groups);
-      const sectionCents = sectionItems.reduce((sum, item) => sum + grossOf(item), 0);
-
-      const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
-      const sectionEmployeeName = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
-      const sectionEmployeeQual = sig.employeeName && data.employeeQualifications ? data.employeeQualifications.get(sig.employeeName) || "" : "";
-
-      sections.push(`
-      ${sections.length > 0 ? '<div style="page-break-before: always;"></div>' : ''}
-
-      <section class="ln-section">
+  // Task #1372 — Einheitlicher LN-Kopf (Firma + IK-Nr., Untertitel/LN-Typ,
+  // Versicherung inkl. Kassen-IK). Wird von Einzel- UND Mehrfach-LN identisch
+  // verwendet, damit Single- und Multi-Branch nicht auseinanderdriften.
+  function renderLnSectionHead(opts: {
+    sectionLabel: string;
+    employeeValueHtml: string;
+    employeeQualHtml: string;
+  }): string {
+    return `
         <div class="ln-section-head">
         <div class="header">
           <div class="title">LEISTUNGSNACHWEIS</div>
           <div style="font-size: 9pt; color: #1f2937;">
-            ${data.companyName || ""} | ${data.ikNummer ? `IK-Nr.: ${data.ikNummer}` : ""}
+            ${escapeHtml(data.companyName || "")}${data.ikNummer ? ` | IK-Nr.: ${escapeHtml(data.ikNummer)}` : ""}
           </div>
           <div style="font-size: 10pt; font-weight: bold; color: #0d9488; margin-top: 4px;">
-            ${sectionLabel}
+            ${escapeHtml(opts.sectionLabel)}
           </div>
         </div>
 
         <div class="info-grid">
           <div class="info-box">
             <div class="info-label">Leistungsempfänger/in</div>
-            <div class="info-value">${escapeHtml(data.customerName)}</div>
+            <div class="info-value">${escapeHtml(displayCustomerName)}</div>
             ${data.customerAddress ? `<div style="font-size: 9pt;">${escapeHtml(data.customerAddress).replace(/\n/g, "<br>")}</div>` : ""}
             ${data.customerGeburtsdatum ? `<div style="font-size: 9pt;">Geb.: ${formatDate(data.customerGeburtsdatum)}</div>` : ""}
           </div>
           <div class="info-box">
             <div class="info-label">Leistungserbringer/in</div>
-            <div class="info-value">${sectionEmployeeName}</div>
-            ${sectionEmployeeQual ? `<div style="font-size: 9pt; color: #0d9488;">${escapeHtml(sectionEmployeeQual)}</div>` : ""}
+            <div class="info-value">${opts.employeeValueHtml}</div>
+            ${opts.employeeQualHtml}
           </div>
         </div>
         <div class="info-grid">
@@ -851,7 +847,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
             <div class="info-label">Versicherung</div>
             ${data.versichertennummer ? `<div class="info-value">${escapeHtml(data.versichertennummer)}</div>` : ""}
             ${data.pflegegrad ? `<div style="font-size: 9pt;">Pflegegrad: ${data.pflegegrad}</div>` : ""}
-            ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${data.insuranceIkNummer})` : ""}</div>` : `<div style="font-size: 9pt; color: #4b5563;">Selbstzahler</div>`}
+            ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}${data.insuranceIkNummer ? ` (IK: ${escapeHtml(data.insuranceIkNummer)})` : ""}</div>` : `<div style="font-size: 9pt; color: #4b5563;">Selbstzahler</div>`}
           </div>
           <div class="info-box">
             <div class="info-label">Zeitraum</div>
@@ -865,8 +861,15 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
             <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType, data.budgetType))}</div>
           </div>
         </div>
-        </div>
+        </div>`;
+  }
 
+  // Task #1372 — Positionstabelle mit GENAU EINER Summenzeile (Label „Summe")
+  // je LN. Der frühere Single-Branch nutzte „Gesamt" + eine zusätzliche
+  // Gesamtbetrag-Box (Rechnungssumme); beides entfällt.
+  function renderLnTable(groups: AppointmentGroup[], sectionCents: number): string {
+    const tableClass = tableClassForGroups(groups);
+    return `
         <table class="${tableClass}">
           <thead>
             <tr>
@@ -880,72 +883,117 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
             </tr>
           </thead>
           <tbody>
-            ${tableRowsHtml}
+            ${renderTableRows(groups)}
             <tr class="total-row">
               <td colspan="6">Summe${isStandard ? " (inkl. MwSt.)" : ""}</td>
               <td style="text-align: right; white-space: nowrap;">${formatCents(sectionCents)}</td>
             </tr>
           </tbody>
-        </table>
+        </table>`;
+  }
+
+  // Task #1372 — Ein vollständiger LN-Abschnitt (Kopf + Tabelle + Bestätigung/
+  // Unterschriften). Identisch für Einzel- und Mehrfach-LN; nur Mehrfach-LN
+  // setzt einen page-break VOR jeden Abschnitt ab dem zweiten.
+  function renderLnSection(opts: {
+    isFirst: boolean;
+    groups: AppointmentGroup[];
+    sectionCents: number;
+    sectionLabel: string;
+    employeeValueHtml: string;
+    employeeQualHtml: string;
+    signaturesHtml: string;
+  }): string {
+    return `
+      ${opts.isFirst ? "" : '<div style="page-break-before: always;"></div>'}
+
+      <section class="ln-section">
+        ${renderLnSectionHead({ sectionLabel: opts.sectionLabel, employeeValueHtml: opts.employeeValueHtml, employeeQualHtml: opts.employeeQualHtml })}
+
+        ${renderLnTable(opts.groups, opts.sectionCents)}
 
         <div class="confirm-signature-block">
           ${renderConfirmationBlock()}
-          ${renderSignature(sig, sectionEmployeeName)}
+          ${opts.signaturesHtml}
         </div>
-      </section>
-      `);
-    }
+      </section>`;
+  }
 
-    sectionsHtml = sections.join("");
+  // Qualifikations-Zeile für den Einzel-LN (mehrere Mitarbeiter im selben
+  // Beleg möglich → ggf. „Name: Qualifikation"-Liste).
+  function singleEmployeeQualHtml(): string {
+    if (!data.employeeQualifications || data.employeeQualifications.size === 0) return "";
+    const quals = employeeNames.map(n => data.employeeQualifications!.get(n)).filter(Boolean) as string[];
+    if (quals.length === 0) return "";
+    const uniqueQuals = Array.from(new Set(quals));
+    if (employeeNames.length <= 1 || uniqueQuals.length === 1) {
+      return `<div style="font-size: 9pt; color: #0d9488;">${uniqueQuals.map(escapeHtml).join(", ")}</div>`;
+    }
+    return `<div style="font-size: 9pt; color: #0d9488;">${employeeNames.map(n => { const q = data.employeeQualifications!.get(n); return q ? `${escapeHtml(n)}: ${escapeHtml(q)}` : ""; }).filter(Boolean).join("; ")}</div>`;
+  }
+
+  // Task #1072 — Mehrfach-LN: ein eigener Abschnitt je Unterschrift/Topf.
+  // Task #1372 — beide Branches bauen jetzt dieselbe `sections[]` über
+  // `renderLnSection`; der Body gibt nur noch `sections.join("")` aus
+  // (kein separater Body-Kopf, keine verwaiste Unterschriftsseite mehr).
+  const hasMultipleLNs = data.signatures && data.signatures.length > 1 && data.signatures.some(s => s.appointmentIds.length > 0);
+
+  const sections: string[] = [];
+
+  if (hasMultipleLNs && data.signatures) {
+    for (let idx = 0; idx < data.signatures.length; idx++) {
+      const sig = data.signatures[idx];
+      const apptIdSet = new Set(sig.appointmentIds);
+      const sectionItems = sortItems(allSorted.filter(item => item.appointmentId !== null && apptIdSet.has(item.appointmentId)));
+
+      if (sectionItems.length === 0) continue;
+
+      const groups = groupByAppointment(sectionItems);
+      const sectionCents = sectionItems.reduce((sum, item) => sum + grossOf(item), 0);
+
+      const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
+      const sectionEmployeeName = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
+      const sectionEmployeeQual = sig.employeeName && data.employeeQualifications ? data.employeeQualifications.get(sig.employeeName) || "" : "";
+
+      sections.push(renderLnSection({
+        isFirst: sections.length === 0,
+        groups,
+        sectionCents,
+        sectionLabel,
+        employeeValueHtml: sectionEmployeeName,
+        employeeQualHtml: sectionEmployeeQual ? `<div style="font-size: 9pt; color: #0d9488;">${escapeHtml(sectionEmployeeQual)}</div>` : "",
+        signaturesHtml: renderSignature(sig, sectionEmployeeName),
+      }));
+    }
   } else {
     const groups = groupByAppointment(allSorted);
-    const tableRowsHtml = renderTableRows(groups);
-    const tableClass = tableClassForGroups(groups);
-    const totalCentsAll = allSorted.reduce((sum, item) => sum + grossOf(item), 0);
-
-    sectionsHtml = `
-    <table class="${tableClass}">
-      <thead>
-        <tr>
-          <th>Datum</th>
-          <th>Uhrzeit</th>
-          <th class="col-service">Leistung</th>
-          <th class="col-desc">Beschreibung</th>
-          <th>Dauer/Km</th>
-          <th>Einzelpreis${isStandard ? " (brutto)" : ""}</th>
-          <th>Betrag${isStandard ? " (brutto)" : ""}</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tableRowsHtml}
-        <tr class="total-row">
-          <td colspan="6">Gesamt${isStandard ? " (inkl. MwSt.)" : ""}</td>
-          <td style="text-align: right; white-space: nowrap;">${formatCents(totalCentsAll)}</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div style="margin-top: 8px; page-break-inside: avoid; break-inside: avoid;">
-      <table style="width: 300px; margin-left: auto;">
-        <tr><td style="padding: 3px 8px;">Gesamtbetrag${isStandard ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(displayGrossCents)}</td></tr>
-      </table>
-    </div>
-
-    <div class="confirm-signature-block">
-      ${renderConfirmationBlock()}
-
-      ${data.signatures && data.signatures.length > 0 ? data.signatures.map(s => renderSignature(s, employeeLabel)).join("") : `
+    const sectionCents = allSorted.reduce((sum, item) => sum + grossOf(item), 0);
+    const singleSig = data.signatures && data.signatures.length > 0 ? data.signatures[0] : null;
+    const sectionLabel = singleSig && singleSig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
+    const signaturesHtml = data.signatures && data.signatures.length > 0
+      ? data.signatures.map(s => renderSignature(s, employeeLabel)).join("")
+      : `
       <div class="signature-area">
         <div class="signature-box">
-          <div class="signature-line">${escapeHtml(data.customerName)}<br><span style="color: #4b5563;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
+          <div class="signature-line">${escapeHtml(displayCustomerName)}<br><span style="color: #4b5563;">(Leistungsempfänger/in oder gesetzl. Vertreter/in)</span></div>
         </div>
         <div class="signature-box">
           <div class="signature-line">${employeeLabel}<br><span style="color: #4b5563;">(Leistungserbringer/in)</span></div>
         </div>
-      </div>
-      `}
-    </div>`;
+      </div>`;
+
+    sections.push(renderLnSection({
+      isFirst: true,
+      groups,
+      sectionCents,
+      sectionLabel,
+      employeeValueHtml: employeeLabel,
+      employeeQualHtml: singleEmployeeQualHtml(),
+      signaturesHtml,
+    }));
   }
+
+  const sectionsHtml = sections.join("");
 
   return `<!DOCTYPE html>
 <html lang="de">
@@ -1001,8 +1049,14 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
        Absatz direkt über den Unterschriften — keine farbigen Doppel-Kästen mehr. */
     .confirm-block { margin-top: 12px; padding: 8px 0 4px 0; border-top: 1px solid #e5e7eb; font-size: 9pt; line-height: 1.45; color: #1f2937; text-align: justify; }
     /* Task #571: Bestätigungstext + Unterschriften dürfen nicht über Seiten
-       umbrechen — sie bleiben immer zusammen. */
-    .confirm-signature-block { page-break-inside: avoid; break-inside: avoid; }
+       umbrechen — sie bleiben immer zusammen.
+       Task #1372: zusätzlich break-before:avoid — der Block darf nicht als
+       erstes Element auf eine sonst leere Folgeseite verdrängt werden. Damit
+       schiebt Chromium den Seitenumbruch VOR den letzten passenden Tabellen-
+       block (Zeilen sind ohnehin break-inside:avoid), sodass Tabellenende +
+       Bestätigung/Unterschriften zusammen auf die Folgeseite wandern — keine
+       verwaiste Unterschriftsseite mehr. */
+    .confirm-signature-block { page-break-inside: avoid; break-inside: avoid; page-break-before: avoid; break-before: avoid; }
     /* Task #1072 — Mengen-robustes Umbruchverhalten: Ein Leistungsnachweis-
        Abschnitt darf NICHT mehr zwangsweise auf einer Seite gehalten werden
        (früher page-break-inside:avoid auf .ln-section). Bei sehr vielen Terminen
@@ -1018,70 +1072,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
   </style>
 </head>
 <body>
-  ${hasMultipleLNs ? sectionsHtml : `
-  <section class="ln-section">
-  <div class="ln-section-head">
-  <div class="header">
-    <div class="title">LEISTUNGSNACHWEIS</div>
-    <div style="font-size: 9pt; color: #1f2937;">
-      ${data.companyName || ""} | ${data.ikNummer ? `IK-Nr.: ${data.ikNummer}` : ""}
-    </div>
-  </div>
-
-  <div class="info-grid">
-    <div class="info-box">
-      <div class="info-label">Leistungsempfänger/in</div>
-      <div class="info-value">${escapeHtml(data.customerName)}</div>
-      ${data.customerAddress ? `<div style="font-size: 9pt;">${escapeHtml(data.customerAddress).replace(/\n/g, "<br>")}</div>` : ""}
-      ${data.customerGeburtsdatum ? `<div style="font-size: 9pt;">Geb.: ${formatDate(data.customerGeburtsdatum)}</div>` : ""}
-    </div>
-    <div class="info-box">
-      <div class="info-label">Leistungserbringer/in</div>
-      <div class="info-value">${employeeLabel}</div>
-      ${(() => {
-        if (!data.employeeQualifications || data.employeeQualifications.size === 0) return "";
-        const quals = employeeNames.map(n => data.employeeQualifications!.get(n)).filter(Boolean) as string[];
-        if (quals.length === 0) return "";
-        const uniqueQuals = Array.from(new Set(quals));
-        if (employeeNames.length <= 1 || uniqueQuals.length === 1) {
-          return `<div style="font-size: 9pt; color: #0d9488;">${uniqueQuals.map(escapeHtml).join(", ")}</div>`;
-        }
-        return `<div style="font-size: 9pt; color: #0d9488;">${employeeNames.map(n => { const q = data.employeeQualifications!.get(n); return q ? `${escapeHtml(n)}: ${escapeHtml(q)}` : ""; }).filter(Boolean).join("; ")}</div>`;
-      })()}
-    </div>
-  </div>
-  <div class="info-grid">
-    <div class="info-box">
-      <div class="info-label">Versicherung</div>
-      ${data.versichertennummer ? `<div class="info-value">${escapeHtml(data.versichertennummer)}</div>` : ""}
-      ${data.pflegegrad ? `<div style="font-size: 9pt;">Pflegegrad: ${data.pflegegrad}</div>` : ""}
-      ${data.insuranceProviderName ? `<div style="font-size: 9pt;">${escapeHtml(data.insuranceProviderName)}</div>` : `<div style="font-size: 9pt; color: #4b5563;">Selbstzahler</div>`}
-    </div>
-    <div class="info-box">
-      <div class="info-label">Zeitraum</div>
-      <div class="info-value">${escapeHtml(periodLabel)}</div>
-      <div style="font-size: 9pt;">Rechnungsnr.: ${escapeHtml(data.invoiceNumber)}</div>
-    </div>
-  </div>
-  <div class="info-grid">
-    <div class="info-box" style="flex: 1;">
-      <div class="info-label">Abrechnungsgrundlage</div>
-      <div class="info-value" style="font-size: 9pt;">${escapeHtml(getBudgettopfLabel(data.billingType, data.budgetType))}</div>
-    </div>
-  </div>
-  </div>
-
   ${sectionsHtml}
-  </section>
-  `}
-
-  ${hasMultipleLNs ? `
-  <div style="margin-top: 30px; border-top: 2px solid #0d9488; padding-top: 10px;">
-    <table style="width: 300px; margin-left: auto;">
-      <tr><td style="padding: 3px 8px; font-weight: bold;">Gesamtbetrag${isStandard ? " (inkl. MwSt.)" : ""}:</td><td style="text-align: right; font-weight: bold; white-space: nowrap;">${formatCents(displayGrossCents)}</td></tr>
-    </table>
-  </div>
-  ` : ''}
 </body>
 </html>`;
 }

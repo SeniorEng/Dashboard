@@ -1,4 +1,5 @@
 import { formatPhoneForDisplay } from "@shared/utils/phone";
+  import { formatCustomerNameLastFirst } from "@shared/utils/format";
   import {
     users,
     userRoles,
@@ -473,6 +474,19 @@ export async function buildInvoicePdfData(
     pdfData.recipientName = fullName;
     pdfData.recipientAddress = addr || pdfData.recipientAddress;
   }
+
+  // Task #1372 — Leistungsnachweis-Kundenname einheitlich „Nachname, Vorname".
+  // Quelle sind die strukturierten Stammfelder aus `customerSnapshot`
+  // (vorname/nachname) — live für Entwürfe, via Render-Snapshot eingefroren für
+  // versendete/stornierte Rechnungen (deterministisch). NUR der LN liest dieses
+  // Feld; `pdfData.customerName` (Rechnungs-„Versicherte/r", GoBD-Byte-Stabilität)
+  // bleibt unangetastet. Fehlen vorname/nachname, fällt der Helper auf den
+  // zusammengesetzten Namen zurück.
+  pdfData.customerNameLastFirst = formatCustomerNameLastFirst(
+    customerSnapshot.vorname,
+    customerSnapshot.nachname,
+    customerSnapshot.name ?? pdfData.customerName,
+  );
 
   // Task #1041 — LN-Adress-Korrektur über die EINZIGE Quelle (siehe
   // `applyLeistungsnachweisCustomerAddress`). Persist-/Cache-/Bundle-Pfad und

@@ -393,3 +393,166 @@ describe("Task #1072 — Rechnung/LN: mengen-robuste Seitenumbrüche (großer Mo
     expect(lnHtml).toMatch(/\.confirm-signature-block\s*\{[^}]*break-inside:\s*avoid/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task #1372 — Leistungsnachweis-Layout vereinheitlicht (Single- + Multi-LN
+// teilen jetzt einen Renderpfad): genau EINE Summenzeile „Summe" je LN, kein
+// Rechnungs-Gesamtbetrag im LN, kein verwaister Unterschriftsblock,
+// einheitlicher Kopf (LN-Typ + Kassen-IK), Kundenname „Nachname, Vorname".
+// ---------------------------------------------------------------------------
+
+function buildSignature(
+  overrides: Partial<NonNullable<InvoicePdfData["signatures"]>[number]> = {},
+): NonNullable<InvoicePdfData["signatures"]>[number] {
+  return {
+    employeeSignatureData: null,
+    employeeSignedAt: null,
+    employeeName: null,
+    customerSignatureData: null,
+    customerSignedAt: null,
+    customerName: null,
+    appointmentIds: [1],
+    recordType: "monthly",
+    ...overrides,
+  };
+}
+
+// Zwei Termine (zwei Topf-Abschnitte) für die Mehrfach-LN-Tests.
+function buildTwoApptLineItems(): InvoicePdfData["lineItems"] {
+  return [1, 2].map((id) => ({
+    appointmentId: id,
+    serviceCode: "HW",
+    serviceDescription: "Hauswirtschaft",
+    durationMinutes: 60,
+    unitPriceCents: 5000,
+    totalCents: 5000,
+    appointmentDate: `2026-01-1${id}`,
+    startTime: "09:00:00",
+    endTime: "10:00:00",
+    employeeName: "Anna Helfer",
+    appointmentNotes: null,
+    serviceDetails: null,
+  })) as InvoicePdfData["lineItems"];
+}
+
+describe("Task #1372 — Leistungsnachweis-Layout (Single + Multi vereinheitlicht)", () => {
+  it("Einzel-LN: genau EINE Summenzeile mit Label Summe, kein Rechnungs-Gesamtbetrag", () => {
+    const html = generateLeistungsnachweisHtml(buildPdfData({ billingType: "pflegekasse_privat" }));
+    // Genau eine Summen-/Total-Zeile.
+    expect(countOccurrences(html, 'class="total-row"')).toBe(1);
+    // Label ist „Summe", nicht „Gesamt".
+    expect(html).toMatch(/total-row[^>]*>\s*<td colspan="6">Summe/);
+    // Der Rechnungs-Gesamtbetrag erscheint im LN NICHT mehr.
+    expect(html).not.toContain("Gesamtbetrag");
+  });
+
+  it("Mehrfach-LN: genau EINE Summe-Zeile pro Abschnitt, kein Gesamtbetrag, je Abschnitt ein Kopf", () => {
+    const html = generateLeistungsnachweisHtml(buildPdfData({
+      billingType: "pflegekasse_privat",
+      lineItems: buildTwoApptLineItems(),
+      signatures: [
+        buildSignature({ appointmentIds: [1], recordType: "single", employeeName: "Anna Helfer" }),
+        buildSignature({ appointmentIds: [2], recordType: "monthly", employeeName: "Bert Bauer" }),
+      ],
+    }));
+    // Zwei Abschnitte ⇒ zwei „Summe"-Zeilen, je Abschnitt eine.
+    expect(countOccurrences(html, 'class="total-row"')).toBe(2);
+    expect(countOccurrences(html, '<td colspan="6">Summe')).toBe(2);
+    // Kein Rechnungs-Gesamtbetrag.
+    expect(html).not.toContain("Gesamtbetrag");
+    // Pro Abschnitt ein eigener Kopf (zwei LEISTUNGSNACHWEIS-Titel).
+    expect(countOccurrences(html, "LEISTUNGSNACHWEIS")).toBe(2);
+    // Beide LN-Typen als Untertitel.
+    expect(html).toContain("Einzeltermin-Leistungsnachweis");
+    expect(html).toContain("Monatlicher Leistungsnachweis");
+  });
+
+  it("Einheitlicher Kopf: Untertitel (LN-Typ) + Versicherung inkl. Kassen-IK in BEIDEN Branches", () => {
+    const single = generateLeistungsnachweisHtml(buildPdfData({
+      billingType: "pflegekasse_privat",
+      insuranceProviderName: "AOK PLUS",
+      insuranceIkNummer: "107299005",
+    }));
+    expect(single).toContain("AOK PLUS (IK: 107299005)");
+    expect(single).toContain("Monatlicher Leistungsnachweis");
+
+    const multi = generateLeistungsnachweisHtml(buildPdfData({
+      billingType: "pflegekasse_privat",
+      insuranceProviderName: "AOK PLUS",
+      insuranceIkNummer: "107299005",
+      lineItems: buildTwoApptLineItems(),
+      signatures: [
+        buildSignature({ appointmentIds: [1], recordType: "single" }),
+        buildSignature({ appointmentIds: [2], recordType: "monthly" }),
+      ],
+    }));
+    // Kassen-IK in JEDEM Abschnitt.
+    expect(countOccurrences(multi, "AOK PLUS (IK: 107299005)")).toBe(2);
+  });
+
+  it("Kundenname im LN als Nachname, Vorname; die Rechnung bleibt unverändert", () => {
+    const data = buildPdfData({
+      billingType: "pflegekasse_privat",
+      customerName: "Max Mustermann",
+      customerNameLastFirst: "Mustermann, Max",
+    });
+    const ln = generateLeistungsnachweisHtml(data);
+    expect(ln).toContain("Mustermann, Max");
+
+    // GoBD: die Rechnungs-PDF (Versicherte/r) liest weiterhin `customerName`
+    // und darf NICHT auf „Nachname, Vorname" umschlagen (Byte-Stabilität).
+    const invoice = generateInvoiceHtml(buildPdfData({
+      customerName: "Max Mustermann",
+      customerNameLastFirst: "Mustermann, Max",
+    }));
+    expect(invoice).toContain("Max Mustermann");
+    expect(invoice).not.toContain("Mustermann, Max");
+  });
+
+  it("Kundenname auch im signaturgerenderten Pfad als Nachname, Vorname (kein alter Format-Rückfall)", () => {
+    // LN MIT signatures ⇒ Rendering läuft durch renderSignature(); der
+    // Kundenname-Fallback (signiert wie unsigniert) MUSS das normalisierte
+    // „Nachname, Vorname" zeigen, nicht den rohen `customerName`.
+    const ln = generateLeistungsnachweisHtml(buildPdfData({
+      billingType: "pflegekasse_privat",
+      customerName: "Max Mustermann",
+      customerNameLastFirst: "Mustermann, Max",
+      lineItems: buildTwoApptLineItems(),
+      signatures: [
+        buildSignature({ appointmentIds: [1], recordType: "single", customerName: null, customerSignatureData: null }),
+        buildSignature({ appointmentIds: [2], recordType: "monthly", customerName: null, customerSignatureData: null }),
+      ],
+    }));
+    expect(ln).toContain("Mustermann, Max");
+    // Der rohe (nicht normalisierte) Name darf nirgendwo im LN auftauchen.
+    expect(ln).not.toContain("Max Mustermann");
+  });
+
+  it("statischer Wächter: .confirm-signature-block trägt break-before: avoid (keine verwaiste Unterschriftsseite)", () => {
+    const html = generateLeistungsnachweisHtml(buildPdfData({ billingType: "pflegekasse_privat" }));
+    expect(html).toMatch(/\.confirm-signature-block\s*\{[^}]*break-before:\s*avoid/i);
+  });
+
+  it("kleiner Einzel-LN rendert genau eine Seite (kein Orphan-Unterschriftsblock)", async () => {
+    const html = generateLeistungsnachweisHtml(buildPdfData({ billingType: "pflegekasse_privat" }));
+    const footer = buildLeistungsnachweisFooterTemplate(buildPdfData({ billingType: "pflegekasse_privat" }));
+    const { buffer } = await generatePdf(html, { margin: LEISTUNGSNACHWEIS_PDF_MARGIN, footerHtml: footer });
+    expect(await pageCount(buffer)).toBe(1);
+  });
+
+  it("kleiner Mehrfach-LN rendert genau eine Seite pro Abschnitt (kein verwaister Folge-Blatt)", async () => {
+    const data = buildPdfData({
+      billingType: "pflegekasse_privat",
+      lineItems: buildTwoApptLineItems(),
+      signatures: [
+        buildSignature({ appointmentIds: [1], recordType: "single" }),
+        buildSignature({ appointmentIds: [2], recordType: "monthly" }),
+      ],
+    });
+    const html = generateLeistungsnachweisHtml(data);
+    const footer = buildLeistungsnachweisFooterTemplate(data);
+    const { buffer } = await generatePdf(html, { margin: LEISTUNGSNACHWEIS_PDF_MARGIN, footerHtml: footer });
+    // Zwei Abschnitte mit page-break-before ⇒ genau zwei Seiten, kein Orphan.
+    expect(await pageCount(buffer)).toBe(2);
+  });
+});

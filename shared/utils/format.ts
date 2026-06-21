@@ -73,6 +73,31 @@ export function formatVacationDays(days: number | string | null | undefined): st
   });
 }
 
+/**
+ * Task #1372 — Normalisiert einen Personennamen einheitlich auf
+ * „Nachname, Vorname". Verwendet im Leistungsnachweis, damit alle Belege
+ * dieselbe Schreibweise tragen (statt mal „Krawalski, Lothar", mal
+ * „Gertraude Falk").
+ *
+ * Sind `vorname` UND `nachname` vorhanden, wird „Nachname, Vorname"
+ * zusammengesetzt. Fehlt eines (Bestandsdaten ohne strukturierte Felder),
+ * fällt die Funktion auf den `fallback` (i.d.R. der zusammengesetzte
+ * `name`) zurück, damit nie ein leerer oder unvollständiger Name entsteht.
+ */
+export function formatCustomerNameLastFirst(
+  vorname: string | null | undefined,
+  nachname: string | null | undefined,
+  fallback: string | null | undefined,
+): string {
+  const v = (vorname ?? "").trim();
+  const n = (nachname ?? "").trim();
+  if (v && n) return `${n}, ${v}`;
+  const fb = (fallback ?? "").trim();
+  if (fb) return fb;
+  // Letzter Rückfall: einzeln vorhandener Teil (besser als leer).
+  return n || v;
+}
+
 export function formatAddress(entity: {
   strasse?: string | null;
   nr?: string | null;
