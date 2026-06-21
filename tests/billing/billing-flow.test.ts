@@ -1784,4 +1784,43 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(bulk.data.summary.sent).toBe(0);
     expect(bulk.data.summary.markedSent).toBe(0);
   });
+
+  // ----------------------------------------------------------------
+  // BF-10.16–BF-10.18 — Monat/Jahr-Grenzen des monatlichen Sammeldrucks
+  // (Task #1388). Anders als die invoiceIds-gebundenen Endpunkte nimmt
+  // POST /api/billing/bulk-print billingMonth/billingYear und begrenzt sie
+  // per Zod auf month min(1).max(12) und year min(2000).max(2100). Diese
+  // Grenzen waren bisher ungetestet — eine Regression, die sie lockert,
+  // würde Unsinns-Perioden (Monat 0/13, Jahr 1999/2101) durchlassen und
+  // potenziell leere/fehlerhafte Sammel-PDFs erzeugen. Geprüft werden beide
+  // Grenzen je Achse (außerhalb → 400), plus ein gültiger In-Range-Request
+  // als Regressions-Wächter, der NICHT vom Schema abgelehnt werden darf.
+  // ----------------------------------------------------------------
+
+  it("BF-10.16 — bulk-print lehnt einen Monat außerhalb 1–12 mit 400 ab", async () => {
+    const low = await apiPost<any>("/api/billing/bulk-print", { billingMonth: 0, billingYear: 2026 });
+    expect(low.status, `bulk-print month=0: ${JSON.stringify(low.data)}`).toBe(400);
+
+    const high = await apiPost<any>("/api/billing/bulk-print", { billingMonth: 13, billingYear: 2026 });
+    expect(high.status, `bulk-print month=13: ${JSON.stringify(high.data)}`).toBe(400);
+  });
+
+  it("BF-10.17 — bulk-print lehnt ein Jahr außerhalb 2000–2100 mit 400 ab", async () => {
+    const low = await apiPost<any>("/api/billing/bulk-print", { billingMonth: 6, billingYear: 1999 });
+    expect(low.status, `bulk-print year=1999: ${JSON.stringify(low.data)}`).toBe(400);
+
+    const high = await apiPost<any>("/api/billing/bulk-print", { billingMonth: 6, billingYear: 2101 });
+    expect(high.status, `bulk-print year=2101: ${JSON.stringify(high.data)}`).toBe(400);
+  });
+
+  it("BF-10.18 — bulk-print: ein gültiger In-Range-Request ohne Entwürfe wird NICHT vom Schema abgelehnt", async () => {
+    // Regressions-Wächter: Monat/Jahr liegen innerhalb der inklusiven Grenzen.
+    // Für eine ferne, garantiert leere Periode existieren keine Entwurfs-
+    // Rechnungen → der Endpunkt antwortet mit 404 (keine Entwürfe gefunden),
+    // ausdrücklich NICHT mit 400. Das belegt, dass das Schema gültige Werte
+    // passieren lässt und nur die Verarbeitung (nicht die Validierung) greift.
+    const res = await apiPost<any>("/api/billing/bulk-print", { billingMonth: 1, billingYear: 2099 });
+    expect(res.status, `bulk-print valid empty period: ${JSON.stringify(res.data)}`).not.toBe(400);
+    expect(res.status, `bulk-print valid empty period: ${JSON.stringify(res.data)}`).toBe(404);
+  });
 });
