@@ -1619,4 +1619,59 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(res.data.results[0].status).toBe("skipped");
     expect(res.data.results[0].reason).toMatch(/nicht gefunden/i);
   });
+
+  // ----------------------------------------------------------------
+  // BF-10.6 — Sicherheits-Grenzen der invoiceIds-Liste (Task #1384).
+  // Beide Sammel-Endpunkte begrenzen das Array per Zod auf min(1).max(200).
+  // Eine Regression, die diese Grenzen lockert (leere oder unbegrenzte
+  // Liste), würde sonst unbemerkt durchrutschen. Geprüft werden beide
+  // Grenzen (leer + >200) für bulk-delete UND bulk-status, plus ein
+  // gültiger In-Range-Request als Regressions-Wächter.
+  // ----------------------------------------------------------------
+
+  /** Erzeugt N synthetische, garantiert nicht existierende positive IDs.
+   *  Reicht für die Schema-Grenzprüfung, die VOR jeder DB-Berührung greift. */
+  function syntheticIds(count: number): number[] {
+    return Array.from({ length: count }, (_, i) => 900_000_000 + i);
+  }
+
+  it("BF-10.6 — bulk-delete lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/bulk-delete", { invoiceIds: [] });
+    expect(res.status, `bulk-delete leer: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.7 — bulk-delete lehnt eine Liste über 200 IDs mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/bulk-delete", { invoiceIds: syntheticIds(201) });
+    expect(res.status, `bulk-delete >200: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.8 — bulk-status lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/bulk-status", { invoiceIds: [], status: "versendet" });
+    expect(res.status, `bulk-status leer: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.9 — bulk-status lehnt eine Liste über 200 IDs mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/bulk-status", { invoiceIds: syntheticIds(201), status: "versendet" });
+    expect(res.status, `bulk-status >200: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.10 — gültige In-Range-Listen am oberen Limit (200) werden NICHT abgelehnt", async () => {
+    // Regressions-Wächter: exakt 200 IDs liegt innerhalb der Grenze und darf
+    // NICHT als 400 abgewiesen werden. Die IDs sind unbekannt → alle skipped,
+    // der Request läuft aber sauber durch (200). Das belegt, dass die Grenze
+    // inklusiv ist und nur das Schema (nicht die Verarbeitung) ablehnt.
+    const ids = syntheticIds(200);
+
+    const del = await apiPost<any>("/api/billing/bulk-delete", { invoiceIds: ids });
+    expect(del.status, `bulk-delete 200: ${JSON.stringify(del.data)}`).toBe(200);
+    expect(del.data.summary.total).toBe(200);
+    expect(del.data.summary.skipped).toBe(200);
+    expect(del.data.summary.deleted).toBe(0);
+
+    const st = await apiPost<any>("/api/billing/bulk-status", { invoiceIds: ids, status: "versendet" });
+    expect(st.status, `bulk-status 200: ${JSON.stringify(st.data)}`).toBe(200);
+    expect(st.data.summary.total).toBe(200);
+    expect(st.data.summary.skipped).toBe(200);
+    expect(st.data.summary.updated).toBe(0);
+  });
 });
