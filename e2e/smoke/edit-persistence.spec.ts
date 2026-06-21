@@ -221,8 +221,9 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     try {
       await page.goto(`/edit-appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
 
-      // Zeit ändern (TimePicker: Button-Trigger öffnet Popover mit Stunde-/
-      // Minute-Spalten + "Übernehmen"; kein freitextiges Input-Feld mehr).
+      // Zeit ändern (TimePicker: Button-Trigger öffnet Popover mit Uhr-Dial;
+      // Stunden-/Minuten-Zahlen tragen weiterhin testids btn-hour-*/btn-minute-*,
+      // Bestätigung über "Übernehmen"; kein freitextiges Input-Feld).
       const [newHour, newMinute] = newTime.split(":");
       const timeField = page.locator("[data-testid='input-time']");
       await expect(timeField).toBeVisible({ timeout: 10000 });
