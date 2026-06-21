@@ -37,6 +37,9 @@ import {
   createTestEmployee,
   deactivateTestEmployee,
 } from "../test-utils";
+import { db } from "../../server/lib/db";
+import { auditLog } from "@shared/schema";
+import { and, eq, inArray } from "drizzle-orm";
 
 let auth: Awaited<ReturnType<typeof getAuthCookie>>;
 let testEmployeeId: number;
@@ -1429,5 +1432,191 @@ describe("BF-9: Neue Rechnungen sind immer Entwurf (Task #1376)", () => {
       expect(detail.status, "Jede Split-Rechnung muss entwurf sein").toBe("entwurf");
       expect(detail.sentAt ?? null, "entwurf darf kein sentAt tragen").toBeNull();
     }
+  });
+});
+
+// ============================================================
+// BF-10: Sammel-Aktionen für Rechnungen (Task #1376/#1379)
+// ============================================================
+//
+// Deckt die beiden neuen Sammel-Endpunkte ab:
+//   POST /api/billing/bulk-delete  — löscht ausschließlich Entwürfe (GoBD).
+//   POST /api/billing/bulk-status  — setzt Status nur über erlaubte Übergänge.
+//
+// Geprüft werden die GoBD-kritischen Garantien:
+//   1. Finalisierte Rechnungen werden NIE per Sammel-Löschung hart entfernt,
+//      sondern als "skipped" gemeldet; nur Entwürfe verschwinden.
+//   2. Ungültige Status-Übergänge werden übersprungen (gemeinsame SSoT
+//      `isAllowedInvoiceStatusTransition`), gültige angewendet.
+//   3. Die "X aktualisiert/gelöscht, Y übersprungen"-Summenzähler stimmen.
+//   4. Pro tatsächlich betroffener Zeile wird genau ein Audit-Eintrag
+//      geschrieben (invoice_draft_discarded / invoice_status_changed).
+
+/** Legt einen Selbstzahler-Kunden + dokumentierten Termin + signierten LN an
+ *  und generiert genau eine Entwurf-Rechnung. Liefert die Rechnung zurück. */
+async function createDraftSzInvoice(tag: string): Promise<{ id: number; invoiceNumber: string }> {
+  const custId = await createCustomer(szPayload(tag));
+  const appt = await findFreeSlotAndCreate(custId, hwServiceId, 30, tag);
+  await documentAppointment(appt.id, appt.time, hwServiceId, 30, `BF-10 ${tag}`);
+  const d = new Date(appt.date);
+  const srId = await createServiceRecord(custId, d.getFullYear(), d.getMonth() + 1);
+  await signServiceRecord(srId);
+  const { invoices, isSplit } = await generateInvoice(custId, d.getFullYear(), d.getMonth() + 1);
+  expect(isSplit, "Selbstzahler darf nicht splitten").toBe(false);
+  const inv = invoices[0];
+  expect(inv?.id, "Entwurf-Rechnung muss erzeugt sein").toBeDefined();
+  return { id: inv.id, invoiceNumber: inv.invoiceNumber };
+}
+
+/** Setzt eine Rechnung über den Einzel-Statuswechsel auf den Zielstatus.
+ *  Folgt der erlaubten Kette (entwurf → versendet → bezahlt). */
+async function finalizeInvoice(invoiceId: number, target: "versendet" | "bezahlt"): Promise<void> {
+  const steps: ("versendet" | "bezahlt")[] = target === "bezahlt" ? ["versendet", "bezahlt"] : ["versendet"];
+  for (const step of steps) {
+    const res = await apiPatch<any>(`/api/billing/${invoiceId}/status`, { status: step });
+    expect(res.status, `Statuswechsel auf ${step} muss erfolgreich sein: ${JSON.stringify(res.data)}`).toBe(200);
+  }
+}
+
+/** Zählt Audit-Einträge einer Aktion für eine Menge an Rechnungs-IDs. */
+async function countAuditFor(action: string, invoiceIds: number[]): Promise<number> {
+  if (invoiceIds.length === 0) return 0;
+  const rows = await db
+    .select({ id: auditLog.id })
+    .from(auditLog)
+    .where(and(
+      eq(auditLog.action, action),
+      eq(auditLog.entityType, "invoice"),
+      inArray(auditLog.entityId, invoiceIds),
+    ));
+  return rows.length;
+}
+
+describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
+  it("BF-10.1 — bulk-delete entfernt nur Entwürfe, finalisierte werden übersprungen", async () => {
+    const draftA = await createDraftSzInvoice("BULKDEL-A");
+    const draftB = await createDraftSzInvoice("BULKDEL-B");
+    const finalized = await createDraftSzInvoice("BULKDEL-F");
+    await finalizeInvoice(finalized.id, "versendet");
+
+    const res = await apiPost<any>("/api/billing/bulk-delete", {
+      invoiceIds: [draftA.id, draftB.id, finalized.id],
+    });
+    expect(res.status, `bulk-delete: ${JSON.stringify(res.data)}`).toBe(200);
+
+    // Summen-Zähler.
+    expect(res.data.summary.deleted).toBe(2);
+    expect(res.data.summary.skipped).toBe(1);
+    expect(res.data.summary.total).toBe(3);
+    expect(res.data.invoiceNumbers.sort()).toEqual([draftA.invoiceNumber, draftB.invoiceNumber].sort());
+
+    // Pro-Zeile-Ergebnis.
+    const byId = new Map<number, any>(res.data.results.map((r: any) => [r.invoiceId, r]));
+    expect(byId.get(draftA.id).status).toBe("deleted");
+    expect(byId.get(draftB.id).status).toBe("deleted");
+    expect(byId.get(finalized.id).status).toBe("skipped");
+    expect(byId.get(finalized.id).reason, "Skip-Grund muss auf 'nur Entwürfe' hinweisen").toMatch(/Entw(u|ü)rfe/i);
+
+    // GoBD: Entwürfe sind weg, finalisierte Rechnung existiert unverändert.
+    const goneA = await apiGet<any>(`/api/billing/${draftA.id}`);
+    const goneB = await apiGet<any>(`/api/billing/${draftB.id}`);
+    expect(goneA.status, "gelöschter Entwurf A muss 404 sein").toBe(404);
+    expect(goneB.status, "gelöschter Entwurf B muss 404 sein").toBe(404);
+    const stillThere = await apiGet<any>(`/api/billing/${finalized.id}`);
+    expect(stillThere.status, "finalisierte Rechnung darf NICHT gelöscht sein").toBe(200);
+    expect(stillThere.data.status).toBe("versendet");
+
+    // Audit: genau ein invoice_draft_discarded pro tatsächlich gelöschter Zeile,
+    // KEINER für die übersprungene finalisierte Rechnung.
+    expect(await countAuditFor("invoice_draft_discarded", [draftA.id, draftB.id])).toBe(2);
+    expect(await countAuditFor("invoice_draft_discarded", [finalized.id])).toBe(0);
+  });
+
+  it("BF-10.2 — bulk-delete: doppelte und unbekannte IDs werden sauber als skipped gezählt", async () => {
+    const draft = await createDraftSzInvoice("BULKDEL-DUP");
+    // Duplikat-ID + nicht existierende ID. Die Route dedupliziert (Set), die
+    // unbekannte ID trifft den WHERE-Guard nicht → skip.
+    const res = await apiPost<any>("/api/billing/bulk-delete", {
+      invoiceIds: [draft.id, draft.id, 999_999_999],
+    });
+    expect(res.status, `bulk-delete: ${JSON.stringify(res.data)}`).toBe(200);
+    // Nach Dedup bleiben 2 eindeutige IDs: 1 gelöscht, 1 (unbekannt) skipped.
+    expect(res.data.summary.total).toBe(2);
+    expect(res.data.summary.deleted).toBe(1);
+    expect(res.data.summary.skipped).toBe(1);
+    expect(res.data.invoiceNumbers).toEqual([draft.invoiceNumber]);
+  });
+
+  it("BF-10.3 — bulk-status wendet nur erlaubte Übergänge an und zählt korrekt", async () => {
+    // Gültige Quelle: Entwurf → versendet.
+    const draft = await createDraftSzInvoice("BULKST-OK");
+    // Ungültige Quelle 1: bereits versendet → versendet ist NICHT in der SSoT.
+    const alreadySent = await createDraftSzInvoice("BULKST-SENT");
+    await finalizeInvoice(alreadySent.id, "versendet");
+    // Ungültige Quelle 2: bezahlt → versendet ist ein Downgrade, verboten.
+    const paid = await createDraftSzInvoice("BULKST-PAID");
+    await finalizeInvoice(paid.id, "bezahlt");
+
+    const res = await apiPost<any>("/api/billing/bulk-status", {
+      invoiceIds: [draft.id, alreadySent.id, paid.id],
+      status: "versendet",
+    });
+    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(200);
+
+    expect(res.data.summary.updated).toBe(1);
+    expect(res.data.summary.skipped).toBe(2);
+    expect(res.data.summary.total).toBe(3);
+
+    const byId = new Map<number, any>(res.data.results.map((r: any) => [r.invoiceId, r]));
+    expect(byId.get(draft.id).status).toBe("updated");
+    expect(byId.get(alreadySent.id).status).toBe("skipped");
+    expect(byId.get(alreadySent.id).reason).toMatch(/nicht erlaubt/i);
+    expect(byId.get(paid.id).status).toBe("skipped");
+    expect(byId.get(paid.id).reason).toMatch(/nicht erlaubt/i);
+
+    // Nur die gültige Rechnung trägt jetzt den neuen Status.
+    const draftAfter = await apiGet<any>(`/api/billing/${draft.id}`);
+    expect(draftAfter.data.status).toBe("versendet");
+    const paidAfter = await apiGet<any>(`/api/billing/${paid.id}`);
+    expect(paidAfter.data.status, "bezahlte Rechnung darf nicht herabgestuft werden").toBe("bezahlt");
+
+    // Audit: genau ein invoice_status_changed für die einzige geänderte Zeile,
+    // KEINER für die beiden übersprungenen Rechnungen.
+    expect(await countAuditFor("invoice_status_changed", [draft.id])).toBe(1);
+    expect(await countAuditFor("invoice_status_changed", [alreadySent.id, paid.id])).toBe(0);
+  });
+
+  it("BF-10.4 — bulk-status führt eine gültige Kette versendet → bezahlt aus", async () => {
+    const a = await createDraftSzInvoice("BULKST-CHAIN-A");
+    const b = await createDraftSzInvoice("BULKST-CHAIN-B");
+    await finalizeInvoice(a.id, "versendet");
+    await finalizeInvoice(b.id, "versendet");
+
+    const res = await apiPost<any>("/api/billing/bulk-status", {
+      invoiceIds: [a.id, b.id],
+      status: "bezahlt",
+    });
+    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(200);
+    expect(res.data.summary.updated).toBe(2);
+    expect(res.data.summary.skipped).toBe(0);
+    expect(res.data.summary.total).toBe(2);
+
+    for (const inv of [a, b]) {
+      const after = await apiGet<any>(`/api/billing/${inv.id}`);
+      expect(after.data.status).toBe("bezahlt");
+    }
+    expect(await countAuditFor("invoice_status_changed", [a.id, b.id])).toBe(2);
+  });
+
+  it("BF-10.5 — bulk-status meldet unbekannte Rechnungen als 'nicht gefunden'", async () => {
+    const res = await apiPost<any>("/api/billing/bulk-status", {
+      invoiceIds: [999_999_998],
+      status: "versendet",
+    });
+    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(200);
+    expect(res.data.summary.updated).toBe(0);
+    expect(res.data.summary.skipped).toBe(1);
+    expect(res.data.results[0].status).toBe("skipped");
+    expect(res.data.results[0].reason).toMatch(/nicht gefunden/i);
   });
 });
