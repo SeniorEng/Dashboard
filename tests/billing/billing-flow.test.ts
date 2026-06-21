@@ -1728,4 +1728,60 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(st.data.summary.skipped).toBe(200);
     expect(st.data.summary.updated).toBe(0);
   });
+
+  // ----------------------------------------------------------------
+  // BF-10.11 — Sicherheits-Grenzen der invoiceIds-Liste für die beiden
+  // Sammel-Versand-Endpunkte (Task #1386). Beide haben eigene Zod-Grenzen,
+  // die bisher ungetestet waren:
+  //   - POST /api/billing/send-batch  → invoiceIds min(1).max(50)
+  //   - POST /api/billing/send-bulk   → invoiceIds min(1).max(200)
+  // (Letzterer ist der invoiceIds-gebundene Bulk-Versand bei ~Zeile 2053;
+  //  das eigentliche /bulk-print nimmt billingMonth/billingYear, KEIN
+  //  invoiceIds-Array, hat also keine zu prüfende Listen-Grenze.)
+  // Eine Regression, die diese Grenzen lockert (leere oder zu lange Liste),
+  // würde sonst unbemerkt durchrutschen. Geprüft werden beide Grenzen
+  // (leer + über Max) je Endpunkt, plus je ein gültiger In-Range-Request
+  // am oberen Limit als Regressions-Wächter.
+  // ----------------------------------------------------------------
+
+  it("BF-10.11 — send-batch lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/send-batch", { invoiceIds: [] });
+    expect(res.status, `send-batch leer: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.12 — send-batch lehnt eine Liste über 50 IDs mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/send-batch", { invoiceIds: syntheticIds(51) });
+    expect(res.status, `send-batch >50: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.13 — send-bulk lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/send-bulk", { invoiceIds: [] });
+    expect(res.status, `send-bulk leer: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.14 — send-bulk lehnt eine Liste über 200 IDs mit 400 ab", async () => {
+    const res = await apiPost<any>("/api/billing/send-bulk", { invoiceIds: syntheticIds(201) });
+    expect(res.status, `send-bulk >200: ${JSON.stringify(res.data)}`).toBe(400);
+  });
+
+  it("BF-10.15 — gültige In-Range-Listen am oberen Limit werden NICHT abgelehnt", async () => {
+    // Regressions-Wächter: exakt am Max (send-batch=50, send-bulk=200) liegt
+    // innerhalb der Grenze und darf NICHT als 400 abgewiesen werden. Die IDs
+    // sind unbekannt → jede Rechnung wird sauber als nicht gefunden gemeldet,
+    // der Request läuft aber durch (200). Das belegt, dass die Grenze inklusiv
+    // ist und nur das Schema (nicht die Verarbeitung) ablehnt.
+    const batchIds = syntheticIds(50);
+    const batch = await apiPost<any>("/api/billing/send-batch", { invoiceIds: batchIds });
+    expect(batch.status, `send-batch 50: ${JSON.stringify(batch.data)}`).toBe(200);
+    expect(batch.data.summary.total).toBe(50);
+    expect(batch.data.summary.sent).toBe(0);
+
+    const bulkIds = syntheticIds(200);
+    const bulk = await apiPost<any>("/api/billing/send-bulk", { invoiceIds: bulkIds });
+    expect(bulk.status, `send-bulk 200: ${JSON.stringify(bulk.data)}`).toBe(200);
+    expect(bulk.data.summary.total).toBe(200);
+    expect(bulk.data.summary.skipped).toBe(200);
+    expect(bulk.data.summary.sent).toBe(0);
+    expect(bulk.data.summary.markedSent).toBe(0);
+  });
 });
