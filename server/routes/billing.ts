@@ -9,6 +9,7 @@ import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line
 import {
   splitLineItemsAcrossPots,
   sumSharesByPot,
+  toPotKey,
   POT_ORDER,
   type InvoicePotKey,
   type BudgetSplitForAppointment,
@@ -1204,9 +1205,23 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
       // und war die Ursache für die verschwundenen Kunden (Prod-IDs
       // 108/117, 22.05.2026).
 
-      // T04/K2: Storno-Reversal — alle §45b/Privat-Budget-Transaktionen der
-      // Original-Rechnungs-Termine werden in derselben Transaktion zurückgebucht,
-      // damit der §45b-Topf wieder als verfügbar angezeigt wird.
+      // T04/K2: Storno-Reversal — die Budget-Transaktionen der Original-
+      // Rechnungs-Termine werden in derselben Transaktion zurückgebucht,
+      // damit der jeweilige Topf wieder als verfügbar angezeigt wird.
+      //
+      // Task #1377 — Pot-bewusster Storno: Bei einer per-Topf-Split-Rechnung
+      // (`billingRunId` gesetzt) trägt EIN Termin Konsumptionen in mehreren
+      // Töpfen (z.B. §45b + privat), die als getrennte Rechnungen pro Topf
+      // ausgestellt sind. Der Storno EINER Topf-Rechnung darf deshalb nur die
+      // Konsumptionen DIESES Topfes zurückbuchen — sonst entwertet er
+      // stillschweigend den Verbrauch der noch lebenden Geschwister-Rechnung
+      // im anderen Topf. Der Topf der Rechnung ergibt sich aus `budgetType`
+      // (NULL = Selbstzahler-/Privat-Anteil, vgl. `toPotKey`).
+      //
+      // Bestands-/Single-Pot-Rechnungen (`billingRunId` NULL) verhalten sich
+      // unverändert und buchen ALLE Konsumptionen der Termine zurück.
+      const isPotSplitInvoice = locked.billingRunId != null;
+      const invoicePotKey = toPotKey(locked.budgetType ?? "private");
       const apptIdsForReversal = Array.from(
         new Set(
           lineItems
@@ -1222,6 +1237,9 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
             eq(budgetTransactions.transactionType, "consumption"),
           ));
         for (const t of txs) {
+          if (isPotSplitInvoice && toPotKey(t.budgetType) !== invoicePotKey) {
+            continue; // anderer Topf — Geschwister-Rechnung bleibt lebend
+          }
           await budgetStorage.reverseBudgetTransaction(t.id, req.user!.id, tx);
         }
       }
