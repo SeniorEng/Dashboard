@@ -51,6 +51,16 @@ That FAILED is an infra clone-race, NOT a test-logic failure and NOT your code. 
 run a second orchestrator; kill yours (`pkill -f "with-ephemeral-db.ts <port>"`) and
 let the harness/CI `test` run be the signal.
 
+**Post-merge `npm install` SIGABRT (exit 134) under the same load:** the auto post-merge
+setup (`scripts/post-merge.sh`) runs WHILE these heavy workflows are live, so its first
+step `npm install` can crash with SIGABRT / "Aborted" (native thread creation fails on
+resource exhaustion) — NOT a real dependency error. A bare `runPostMergeSetup()` retry
+usually succeeds once load eases. Durable fix already in the script: `npm install` is
+wrapped in a bounded 3× retry with backoff so one transient abort doesn't fail the merge;
+it only hard-fails after all retries. Same root cause can surface as a river
+`code: CANCEL` (orchestration cancelled the whole run) instead of a script error — also
+transient, also retry. Don't "fix" the script for these beyond the retry; it's the env.
+
 **Running the ephemeral orchestrator manually (Chromium/PDF integration files that
 NEED a throwaway DB, so the raw-vitest-vs-dev-server trick above doesn't apply):**
 - `setsid`/`nohup &` detached runs STALL forever at the esbuild "Baue
