@@ -12,6 +12,7 @@ import { Loader2, Receipt, Trash2, ChevronDown } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
 import { InvoiceRow } from "./invoice-row";
+import type { BulkActionProgress } from "../hooks/use-billing-mutations";
 
 // Task #1376: Sammel-Statuswechsel ist bewusst auf die fortschreitenden
 // Lebenszyklus-Status begrenzt — „storniert" ist KEINE Sammelaktion (Storno
@@ -43,6 +44,8 @@ interface InvoiceListProps {
   onBulkDelete: () => void;
   onBulkStatus: (status: "versendet" | "avis_erhalten" | "bezahlt") => void;
   bulkActionPending: boolean;
+  // Task #1380: laufender Fortschritt der blockweisen Sammelaktion.
+  bulkActionProgress: BulkActionProgress | null;
 }
 
 export function InvoiceList({
@@ -65,6 +68,7 @@ export function InvoiceList({
   onBulkDelete,
   onBulkStatus,
   bulkActionPending,
+  bulkActionProgress,
 }: InvoiceListProps) {
   if (invoicesLoading) {
     return (
@@ -99,6 +103,19 @@ export function InvoiceList({
               <span className="text-sm font-medium text-gray-900" data-testid="text-selection-count">
                 {selectedCount} ausgewählt
               </span>
+              {/* Task #1380: laufendes Fortschritts-Feedback bei großen
+                  Auswahlen — zeigt "X von Y verarbeitet", solange Blöcke
+                  abgearbeitet werden. */}
+              {bulkActionProgress && (
+                <span
+                  className="flex items-center gap-1.5 text-sm text-gray-600"
+                  data-testid="text-bulk-progress"
+                  aria-live="polite"
+                >
+                  <Loader2 className={`${iconSize.sm} animate-spin text-teal-600`} />
+                  {bulkActionProgress.processed} von {bulkActionProgress.total} verarbeitet
+                </span>
+              )}
               <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

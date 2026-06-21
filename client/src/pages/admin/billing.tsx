@@ -150,6 +150,7 @@ export default function AdminBilling() {
     setBulkSendResult,
     bulkPrintResult,
     setBulkPrintResult,
+    bulkActionProgress,
   } = useBillingMutations({
     selectedMonth,
     selectedYear,
@@ -350,6 +351,7 @@ export default function AdminBilling() {
         onBulkDelete={() => setPendingBulkAction({ type: "delete" })}
         onBulkStatus={(status) => setPendingBulkAction({ type: "status", status })}
         bulkActionPending={bulkActionPending}
+        bulkActionProgress={bulkActionProgress}
       />
 
       <AlertDialog

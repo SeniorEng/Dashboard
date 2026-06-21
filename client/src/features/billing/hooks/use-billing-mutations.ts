@@ -16,6 +16,20 @@ import type {
 } from "@shared/api";
 import type { GenerateAllResponse } from "../types";
 
+// Task #1380: Sammelaktionen (Löschen / Statuswechsel) verarbeiten bis zu 200
+// Rechnungen pro Aufruf. Um bei großen Auswahlen ein laufendes Fortschritts-
+// Feedback zu geben (statt eines einzigen langen Requests ohne Rückmeldung),
+// zerlegen wir die Auswahl in Blöcke und melden nach jedem Block den
+// Fortschritt. Die Block-Ergebnisse werden zu einem Gesamt-Summary
+// zusammengeführt, sodass der Abschluss-Toast weiterhin "X aktualisiert,
+// Y übersprungen" über die komplette Auswahl berichtet.
+const BULK_CHUNK_SIZE = 25;
+
+export interface BulkActionProgress {
+  processed: number;
+  total: number;
+}
+
 interface UseBillingMutationsArgs {
   selectedMonth: number;
   selectedYear: number;
@@ -55,6 +69,9 @@ export function useBillingMutations({
   const [generateAllProgress, setGenerateAllProgress] = useState<GenerateAllResponse | null>(null);
   const [bulkSendResult, setBulkSendResult] = useState<BulkSendInvoiceResponse | null>(null);
   const [bulkPrintResult, setBulkPrintResult] = useState<BulkPrintSummary | null>(null);
+  // Task #1380: laufender Fortschritt der blockweisen Sammelaktionen
+  // (Löschen / Statuswechsel). `null` = keine Aktion läuft.
+  const [bulkActionProgress, setBulkActionProgress] = useState<BulkActionProgress | null>(null);
 
   const generateMutation = useMutation({
     mutationFn: async (data: { customerId: number; billingMonth: number; billingYear: number; dateFrom?: string; dateTo?: string }) => {
@@ -411,8 +428,25 @@ export function useBillingMutations({
   // serverseitig übersprungen und im Summary als "übersprungen" gemeldet.
   const bulkDeleteMutation = useMutation({
     mutationFn: async (invoiceIds: number[]) => {
-      const result = await api.post<BulkDeleteResponse>("/billing/bulk-delete", { invoiceIds });
-      return unwrapResult(result);
+      // Task #1380: blockweise verarbeiten + Fortschritt melden, Block-Summaries
+      // zu einem Gesamt-Summary zusammenführen.
+      setBulkActionProgress({ processed: 0, total: invoiceIds.length });
+      const merged: BulkDeleteResponse = {
+        summary: { deleted: 0, skipped: 0, total: invoiceIds.length },
+        invoiceNumbers: [],
+        results: [],
+      };
+      for (let i = 0; i < invoiceIds.length; i += BULK_CHUNK_SIZE) {
+        const chunk = invoiceIds.slice(i, i + BULK_CHUNK_SIZE);
+        const result = await api.post<BulkDeleteResponse>("/billing/bulk-delete", { invoiceIds: chunk });
+        const data = unwrapResult(result);
+        merged.summary.deleted += data.summary.deleted;
+        merged.summary.skipped += data.summary.skipped;
+        merged.invoiceNumbers.push(...data.invoiceNumbers);
+        merged.results.push(...data.results);
+        setBulkActionProgress({ processed: Math.min(i + chunk.length, invoiceIds.length), total: invoiceIds.length });
+      }
+      return merged;
     },
     onSuccess: (data: BulkDeleteResponse) => {
       const { summary } = data;
@@ -426,6 +460,9 @@ export function useBillingMutations({
     onError: (error: Error) => {
       toast({ title: "Sammel-Löschen fehlgeschlagen", description: error.message, variant: "destructive" });
     },
+    onSettled: () => {
+      setBulkActionProgress(null);
+    },
   });
 
   // Task #1376: Sammel-Statuswechsel (versendet/avis_erhalten/bezahlt). Nutzt
@@ -433,8 +470,23 @@ export function useBillingMutations({
   // Übergänge werden übersprungen und gemeldet.
   const bulkStatusMutation = useMutation({
     mutationFn: async ({ invoiceIds, status }: { invoiceIds: number[]; status: string }) => {
-      const result = await api.post<BulkStatusResponse>("/billing/bulk-status", { invoiceIds, status });
-      return unwrapResult(result);
+      // Task #1380: blockweise verarbeiten + Fortschritt melden, Block-Summaries
+      // zu einem Gesamt-Summary zusammenführen.
+      setBulkActionProgress({ processed: 0, total: invoiceIds.length });
+      const merged: BulkStatusResponse = {
+        summary: { updated: 0, skipped: 0, total: invoiceIds.length },
+        results: [],
+      };
+      for (let i = 0; i < invoiceIds.length; i += BULK_CHUNK_SIZE) {
+        const chunk = invoiceIds.slice(i, i + BULK_CHUNK_SIZE);
+        const result = await api.post<BulkStatusResponse>("/billing/bulk-status", { invoiceIds: chunk, status });
+        const data = unwrapResult(result);
+        merged.summary.updated += data.summary.updated;
+        merged.summary.skipped += data.summary.skipped;
+        merged.results.push(...data.results);
+        setBulkActionProgress({ processed: Math.min(i + chunk.length, invoiceIds.length), total: invoiceIds.length });
+      }
+      return merged;
     },
     onSuccess: async (data: BulkStatusResponse) => {
       const { summary } = data;
@@ -485,5 +537,6 @@ export function useBillingMutations({
     setBulkSendResult,
     bulkPrintResult,
     setBulkPrintResult,
+    bulkActionProgress,
   };
 }
