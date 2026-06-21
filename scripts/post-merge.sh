@@ -1,7 +1,27 @@
 #!/bin/bash
 set -e
 
-npm install --prefer-offline --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund
+# Der Post-Merge-Lauf konkurriert mit den schweren Agent-Harness-Workflows
+# (test/e2e-smoke/billing-cov/typecheck laufen parallel). Unter dieser Last
+# bricht `npm install` gelegentlich mit SIGABRT (Exit 134, native
+# Thread-Erzeugung scheitert / Ressourcen-Engpass) ab — KEIN echter
+# Dependency-Fehler. Darum bis zu 3 Versuche mit kurzem Backoff, bevor der
+# Schritt den Merge scheitern lässt. Idempotent: bei bereits installierten
+# Deps ist jeder Versuch ein schneller No-Op.
+install_deps() {
+  local attempt
+  for attempt in 1 2 3; do
+    if npm install --prefer-offline --no-audit --no-fund 2>/dev/null \
+      || npm install --no-audit --no-fund; then
+      return 0
+    fi
+    echo "[post-merge] npm install Versuch $attempt fehlgeschlagen (vermutlich Ressourcen-Engpass) — neuer Versuch in 5s"
+    sleep 5
+  done
+  echo "[post-merge] npm install nach 3 Versuchen fehlgeschlagen"
+  return 1
+}
+install_deps
 
 # Task #50: Add service_details column to invoice_line_items
 psql "$DATABASE_URL" -c "ALTER TABLE invoice_line_items ADD COLUMN IF NOT EXISTS service_details TEXT;" 2>/dev/null || true
