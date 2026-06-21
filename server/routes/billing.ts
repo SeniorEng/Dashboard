@@ -15,6 +15,7 @@ import {
   type BudgetSplitForAppointment,
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
+import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import {
@@ -36,7 +37,7 @@ import {
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
-import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse } from "@shared/api";
+import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse, BulkDeleteResultItem, BulkDeleteResponse, BulkStatusResultItem, BulkStatusResponse } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
 import { budgetStorage } from "../storage/budget-storage";
@@ -548,6 +549,122 @@ router.post("/discard-drafts", asyncHandler("Entwürfe konnten nicht verworfen w
   const response: DiscardDraftsResponse = {
     discarded: discardedNumbers.length,
     invoiceNumbers: discardedNumbers,
+  };
+  res.json(response);
+}));
+
+// Task #1376 — Sammel-Löschen: löscht ausschließlich Entwürfe (GoBD).
+// Finalisierte Rechnungen (versendet/avis_erhalten/bezahlt/storniert) und
+// Storno-Belege werden defensiv per WHERE-Guard übersprungen und im Ergebnis
+// als "skipped" gemeldet — niemals hart gelöscht (die werden storniert).
+router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht werden", async (req, res) => {
+  const parsed = z.object({
+    invoiceIds: z.array(z.number().int().positive()).min(1).max(200),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+  const { invoiceIds } = parsed.data;
+  const uniqueIds = Array.from(new Set(invoiceIds));
+
+  const { results, deletedNumbers } = await withAudit(async (tx, audit) => {
+    const items: BulkDeleteResultItem[] = [];
+    const numbers: string[] = [];
+    for (const id of uniqueIds) {
+      // Guard: nur Entwurf + kein Storno-Beleg. Trifft der Guard nicht zu
+      // (finalisiert/storniert/bereits weg), löscht das DELETE nichts → skip.
+      const deleted = await tx.delete(invoicesTable)
+        .where(and(
+          eq(invoicesTable.id, id),
+          eq(invoicesTable.status, "entwurf"),
+          ne(invoicesTable.invoiceType, "stornorechnung"),
+        ))
+        .returning({ id: invoicesTable.id, invoiceNumber: invoicesTable.invoiceNumber, grossAmountCents: invoicesTable.grossAmountCents, billingRunId: invoicesTable.billingRunId });
+      if (deleted.length === 0) {
+        items.push({ invoiceId: id, invoiceNumber: null, status: "skipped", reason: "Nur Entwürfe können gelöscht werden." });
+        continue;
+      }
+      numbers.push(deleted[0].invoiceNumber);
+      items.push({ invoiceId: id, invoiceNumber: deleted[0].invoiceNumber, status: "deleted" });
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_draft_discarded",
+        entityType: "invoice",
+        entityId: id,
+        metadata: {
+          invoiceNumber: deleted[0].invoiceNumber,
+          grossAmountCents: deleted[0].grossAmountCents,
+          billingRunId: deleted[0].billingRunId,
+          reason: "bulk_delete",
+        },
+        ipAddress: req.ip,
+      });
+    }
+    return { results: items, deletedNumbers: numbers };
+  }, { faults: readTestFaults(req) });
+
+  const deleted = results.filter((r) => r.status === "deleted").length;
+  const response: BulkDeleteResponse = {
+    summary: { deleted, skipped: results.length - deleted, total: results.length },
+    invoiceNumbers: deletedNumbers,
+    results,
+  };
+  res.json(response);
+}));
+
+// Task #1376 — Sammel-Statuswechsel auf "versendet"/"avis_erhalten"/"bezahlt".
+// "storniert" ist NICHT erlaubt (Sammel-Storno ist eine separate Aufgabe und
+// erfordert die Cascade-Logik aus `PATCH /:id/status`). Pro Rechnung gilt
+// dieselbe Übergangs-SSoT wie der Einzel-Statuswechsel; ungültige Übergänge
+// werden übersprungen und gemeldet. Audit analog zum Einzelpfad.
+router.post("/bulk-status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
+  const parsed = z.object({
+    invoiceIds: z.array(z.number().int().positive()).min(1).max(200),
+    status: z.enum(["versendet", "avis_erhalten", "bezahlt"]),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest(fromError(parsed.error).toString());
+  }
+  const { invoiceIds, status } = parsed.data;
+  const uniqueIds = Array.from(new Set(invoiceIds));
+
+  const results = await withAudit(async (tx, audit) => {
+    const items: BulkStatusResultItem[] = [];
+    for (const id of uniqueIds) {
+      // Re-Read mit FOR UPDATE: serialisiert parallele Statuswechsel und liest
+      // den tatsächlichen Ist-Status (Race-Schutz, wie der Einzelpfad).
+      const locked = await getInvoiceForUpdateTx(tx, id);
+      if (!locked) {
+        items.push({ invoiceId: id, invoiceNumber: "", status: "skipped", reason: "Rechnung nicht gefunden." });
+        continue;
+      }
+      if (!isAllowedInvoiceStatusTransition(locked.status, status)) {
+        items.push({ invoiceId: id, invoiceNumber: locked.invoiceNumber, status: "skipped", reason: `Übergang von "${locked.status}" nicht erlaubt.` });
+        continue;
+      }
+      await updateInvoiceStatusTx(tx, id, status, req.user!.id);
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_status_changed",
+        entityType: "invoice",
+        entityId: id,
+        metadata: {
+          invoiceNumber: locked.invoiceNumber,
+          previousStatus: locked.status,
+          newStatus: status,
+          reason: "bulk_status",
+        },
+        ipAddress: req.ip,
+      });
+      items.push({ invoiceId: id, invoiceNumber: locked.invoiceNumber, status: "updated" });
+    }
+    return items;
+  }, { faults: readTestFaults(req) });
+
+  const updated = results.filter((r) => r.status === "updated").length;
+  const response: BulkStatusResponse = {
+    summary: { updated, skipped: results.length - updated, total: results.length },
+    results,
   };
   res.json(response);
 }));
@@ -1087,19 +1204,11 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
   const { status, cascadeRun } = parsed.data;
   const currentStatus = invoice.status;
 
-  // Task #1284 — Lebenszyklus: Entwurf → Versendet → Avis erhalten → Bezahlt
-  // (+Storniert). "avis_erhalten" liegt zwischen Versendet und Bezahlt. Manuell
-  // darf von versendet/avis_erhalten direkt auf bezahlt gesprungen werden;
-  // bezahlt/storniert werden nie herabgestuft.
-  const allowedTransitions: Record<string, string[]> = {
-    entwurf: ["versendet", "storniert"],
-    versendet: ["avis_erhalten", "bezahlt", "storniert"],
-    avis_erhalten: ["bezahlt", "storniert"],
-    bezahlt: ["storniert"],
-    storniert: [],
-  };
-
-  if (!allowedTransitions[currentStatus]?.includes(status)) {
+  // Task #1284/#1376 — Lebenszyklus Entwurf → Versendet → Avis erhalten →
+  // Bezahlt (+Storniert). Erlaubte Übergänge liegen zentral in
+  // @shared/domain/invoice-status (SSoT, geteilt mit dem Sammel-Statuswechsel
+  // `POST /billing/bulk-status`).
+  if (!isAllowedInvoiceStatusTransition(currentStatus, status)) {
     throw badRequest(`Statuswechsel von "${currentStatus}" zu "${status}" ist nicht erlaubt.`);
   }
 

@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api/client";
@@ -58,6 +59,9 @@ interface InvoiceRowProps {
   // Task #1317: „Bezahlt" ist eine bewusste, bestätigungspflichtige Aktion —
   // der Row meldet nur den Wunsch, die Bestätigung läuft im MarkPaidDialog.
   onMarkPaid: (invoice: InvoiceItem) => void;
+  // Task #1376: Mehrfachauswahl für Sammelaktionen.
+  selected: boolean;
+  onToggleSelect: (invoiceId: number, checked: boolean) => void;
 }
 
 export function InvoiceRow({
@@ -73,6 +77,8 @@ export function InvoiceRow({
   statusMutation,
   onStorno,
   onMarkPaid,
+  selected,
+  onToggleSelect,
 }: InvoiceRowProps) {
   const { toast } = useToast();
   // Task #1349: Öffnet ein Dokument-PDF (Rechnung / Leistungsnachweis / Bündel)
@@ -158,6 +164,13 @@ export function InvoiceRow({
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             {/* Kopf: Nummer + Typ/Status-Badges, am Handy zusätzlich der Betrag rechts */}
             <div className="flex items-center gap-2 sm:shrink-0">
+              {/* Task #1376: Auswahl-Checkbox für Sammelaktionen. */}
+              <Checkbox
+                checked={selected}
+                onCheckedChange={(checked) => onToggleSelect(invoice.id, checked === true)}
+                aria-label={`Rechnung ${invoice.invoiceNumber} auswählen`}
+                data-testid={`checkbox-select-${invoice.id}`}
+              />
               <span className="font-medium text-gray-900 text-sm">{invoice.invoiceNumber}</span>
               <Badge
                 variant="outline"

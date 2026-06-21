@@ -141,6 +141,35 @@ export interface DiscardDraftsResponse {
   invoiceNumbers: string[];
 }
 
+// Task #1376 — Sammel-Löschen (nur Entwürfe). `status: "deleted"` für tatsächlich
+// gelöschte Entwürfe, `"skipped"` (mit `reason`) für finalisierte/Storno-Belege,
+// die per GoBD nicht hart gelöscht werden dürfen.
+export interface BulkDeleteResultItem {
+  invoiceId: number;
+  invoiceNumber: string | null;
+  status: "deleted" | "skipped";
+  reason?: string;
+}
+export interface BulkDeleteResponse {
+  summary: { deleted: number; skipped: number; total: number };
+  invoiceNumbers: string[];
+  results: BulkDeleteResultItem[];
+}
+
+// Task #1376 — Sammel-Statuswechsel (versendet/avis_erhalten/bezahlt). Pro
+// Rechnung gilt dieselbe Übergangs-SSoT wie beim Einzel-Statuswechsel;
+// ungültige Übergänge werden als `"skipped"` mit `reason` gemeldet.
+export interface BulkStatusResultItem {
+  invoiceId: number;
+  invoiceNumber: string;
+  status: "updated" | "skipped";
+  reason?: string;
+}
+export interface BulkStatusResponse {
+  summary: { updated: number; skipped: number; total: number };
+  results: BulkStatusResultItem[];
+}
+
 export interface SendInvoiceResponse {
   message: string;
   invoice?: InvoiceItem;

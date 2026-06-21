@@ -11,6 +11,8 @@ import type {
   BulkSendInvoiceResponse,
   BulkPrintSummary,
   DiscardDraftsResponse,
+  BulkDeleteResponse,
+  BulkStatusResponse,
 } from "@shared/api";
 import type { GenerateAllResponse } from "../types";
 
@@ -28,6 +30,8 @@ interface UseBillingMutationsArgs {
   onGenerateSuccess: () => void;
   onDiscardSettled: () => void;
   onStatusSuccess: () => void;
+  // Task #1376: Auswahl zurücksetzen, nachdem eine Sammelaktion durchlief.
+  onBulkActionSuccess?: () => void;
 }
 
 export function useBillingMutations({
@@ -41,6 +45,7 @@ export function useBillingMutations({
   onGenerateSuccess,
   onDiscardSettled,
   onStatusSuccess,
+  onBulkActionSuccess,
 }: UseBillingMutationsArgs) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -402,10 +407,70 @@ export function useBillingMutations({
     },
   });
 
+  // Task #1376: Sammel-Löschen (nur Entwürfe). Finalisierte Rechnungen werden
+  // serverseitig übersprungen und im Summary als "übersprungen" gemeldet.
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (invoiceIds: number[]) => {
+      const result = await api.post<BulkDeleteResponse>("/billing/bulk-delete", { invoiceIds });
+      return unwrapResult(result);
+    },
+    onSuccess: (data: BulkDeleteResponse) => {
+      const { summary } = data;
+      toast({
+        title: "Sammel-Löschen abgeschlossen",
+        description: `${summary.deleted} gelöscht, ${summary.skipped} übersprungen`,
+      });
+      invalidateRelated(queryClient, "billing");
+      onBulkActionSuccess?.();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Sammel-Löschen fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Task #1376: Sammel-Statuswechsel (versendet/avis_erhalten/bezahlt). Nutzt
+  // serverseitig dieselbe Übergangs-SSoT wie der Einzel-Statuswechsel; ungültige
+  // Übergänge werden übersprungen und gemeldet.
+  const bulkStatusMutation = useMutation({
+    mutationFn: async ({ invoiceIds, status }: { invoiceIds: number[]; status: string }) => {
+      const result = await api.post<BulkStatusResponse>("/billing/bulk-status", { invoiceIds, status });
+      return unwrapResult(result);
+    },
+    onSuccess: async (data: BulkStatusResponse) => {
+      const { summary } = data;
+      toast({
+        title: "Sammel-Statuswechsel abgeschlossen",
+        description: `${summary.updated} aktualisiert, ${summary.skipped} übersprungen`,
+      });
+      invalidateRelated(queryClient, "billing");
+      onBulkActionSuccess?.();
+
+      // Replika-Lag-Schutz: aktualisierte IDs auf den neuen Status pollen.
+      const updatedIds = new Set(
+        data.results.filter((r) => r.status === "updated").map((r) => r.invoiceId),
+      );
+      if (updatedIds.size > 0) {
+        await refetchWithPoll<InvoiceItem[]>(
+          queryClient,
+          ["billing-invoices", selectedYear, selectedMonth, statusFilter],
+          (list) => {
+            if (!list) return true;
+            return !list.some((inv) => updatedIds.has(inv.id) && inv.status === "entwurf");
+          },
+        );
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Sammel-Statuswechsel fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
   return {
     generateMutation,
     discardDraftsMutation,
     statusMutation,
+    bulkDeleteMutation,
+    bulkStatusMutation,
     sendInvoiceMutation,
     markSentMutation,
     generateAllMutation,

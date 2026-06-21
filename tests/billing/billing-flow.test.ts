@@ -1380,3 +1380,54 @@ describe("BF-8: GET /billing/preview — Drift gegen /generate", () => {
     expect(String(res.data?.message || res.data?.error || "")).toMatch(/Leistungsnachweis/i);
   });
 });
+
+// ============================================================
+// BF-9: Neue Rechnungen landen IMMER im Status "entwurf" (Task #1376)
+// ============================================================
+//
+// Regressionsschutz: Frisch generierte Rechnungen dürfen niemals direkt
+// "versendet" (oder einen anderen finalen Status) tragen. "versendet" wird
+// ausschließlich über explizite Aktionen gesetzt (Status-Wechsel, Versand,
+// Bulk-Statuswechsel). Wir prüfen das für ALLE Rechnungs-Erzeugungspfade:
+// Selbstzahler (eine Rechnung), Kasse-only (eine Rechnung) und Split
+// (Kasse + Privat-Rest → beide Rechnungen müssen "entwurf" sein).
+describe("BF-9: Neue Rechnungen sind immer Entwurf (Task #1376)", () => {
+  it("BF-9.1 — Selbstzahler-Rechnung wird als entwurf erzeugt", async () => {
+    const custId = await createCustomer(szPayload("DRAFT-SZ"));
+    const appt = await findFreeSlotAndCreate(custId, hwServiceId, 60, "DRAFT-SZ");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "BF-9.1 Hauswirtschaft");
+
+    const apptDate = new Date(appt.date);
+    const srId = await createServiceRecord(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    await signServiceRecord(srId);
+
+    const { invoices } = await generateInvoice(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    expect(invoices.length).toBeGreaterThanOrEqual(1);
+    for (const inv of invoices) {
+      const detail = await loadInvoiceWithLineItems(inv.id);
+      expect(detail.status, "Frische Selbstzahler-Rechnung muss entwurf sein").toBe("entwurf");
+      expect(detail.sentAt ?? null, "entwurf darf kein sentAt tragen").toBeNull();
+    }
+  });
+
+  it("BF-9.2 — Split-Lauf (Kasse + Privat-Rest) erzeugt ausschließlich entwurf-Rechnungen", async () => {
+    // Niedriges §45b-Limit erzwingt den Split: §45b-Kassenrechnung + Privat-Rest.
+    const custId = await createCustomer(pvPayload("DRAFT-PV"));
+    await configureLowBudgetPV(custId, 100);
+    const appt = await findFreeSlotAndCreate(custId, hwServiceId, 60, "DRAFT-PV");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 60, "BF-9.2 Hauswirtschaft");
+
+    const apptDate = new Date(appt.date);
+    const srId = await createServiceRecord(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    await signServiceRecord(srId);
+
+    const { invoices, isSplit } = await generateInvoice(custId, apptDate.getFullYear(), apptDate.getMonth() + 1);
+    expect(isSplit, "Niedriges §45b-Budget muss splitten").toBe(true);
+    expect(invoices.length).toBe(2);
+    for (const inv of invoices) {
+      const detail = await loadInvoiceWithLineItems(inv.id);
+      expect(detail.status, "Jede Split-Rechnung muss entwurf sein").toBe("entwurf");
+      expect(detail.sentAt ?? null, "entwurf darf kein sentAt tragen").toBeNull();
+    }
+  });
+});

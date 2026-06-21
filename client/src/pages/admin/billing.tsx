@@ -2,6 +2,16 @@ import { useState, useRef, useEffect } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 import { ArrowLeft } from "lucide-react";
@@ -62,6 +72,15 @@ export default function AdminBilling() {
   const [bulkSendOpen, setBulkSendOpen] = useState(false);
   // Task #996: Sammeldruck-Dialog (gebündelter PDF/ZIP-Druck der Entwürfe).
   const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
+  // Task #1376: Mehrfachauswahl für Sammelaktionen (Löschen / Statuswechsel).
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // Pending Sammelaktion für den Bestätigungsdialog: entweder Löschen oder
+  // ein Statuswechsel auf einen der fortschreitenden Lebenszyklus-Status.
+  const [pendingBulkAction, setPendingBulkAction] = useState<
+    | { type: "delete" }
+    | { type: "status"; status: "versendet" | "avis_erhalten" | "bezahlt" }
+    | null
+  >(null);
 
   const currentYear = today.getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
@@ -115,6 +134,8 @@ export default function AdminBilling() {
     generateMutation,
     discardDraftsMutation,
     statusMutation,
+    bulkDeleteMutation,
+    bulkStatusMutation,
     sendInvoiceMutation,
     markSentMutation,
     generateAllMutation,
@@ -143,6 +164,8 @@ export default function AdminBilling() {
     },
     onDiscardSettled: () => setDiscardConfirmOpen(false),
     onStatusSuccess: () => setStornoTarget(null),
+    // Task #1376: nach jeder Sammelaktion die Auswahl leeren.
+    onBulkActionSuccess: () => setSelectedIds(new Set()),
   });
 
   // Task #762 / #790: Wenn der Confirm-Button nach dem Lauf disabled wird,
@@ -215,6 +238,54 @@ export default function AdminBilling() {
     setExpandedInvoiceId(expandedInvoiceId === invoiceId ? null : invoiceId);
   };
 
+  // Task #1376: Auswahl zurücksetzen, sobald sich der sichtbare Listenumfang
+  // ändert (Monat/Jahr/Status/Kasse/Datumsbereich/Storno-Filter) — sonst blieben
+  // unsichtbare Rechnungen ausgewählt und würden bei einer Sammelaktion still
+  // mitverarbeitet.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [selectedMonth, selectedYear, statusFilter, payerFilter, dateFrom, dateTo, hideStornos]);
+
+  const handleToggleSelect = (invoiceId: number, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(invoiceId);
+      else next.delete(invoiceId);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set((visibleInvoices ?? []).map((inv) => inv.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const bulkActionPending = bulkDeleteMutation.isPending || bulkStatusMutation.isPending;
+
+  const handleConfirmBulkAction = () => {
+    if (!pendingBulkAction) return;
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      setPendingBulkAction(null);
+      return;
+    }
+    if (pendingBulkAction.type === "delete") {
+      bulkDeleteMutation.mutate(ids);
+    } else {
+      bulkStatusMutation.mutate({ invoiceIds: ids, status: pendingBulkAction.status });
+    }
+    setPendingBulkAction(null);
+  };
+
+  const STATUS_ACTION_LABELS: Record<"versendet" | "avis_erhalten" | "bezahlt", string> = {
+    versendet: "Versendet",
+    avis_erhalten: "Avis erhalten",
+    bezahlt: "Bezahlt",
+  };
+
   return (
     <Layout variant="wide">
       <div className="flex items-center gap-4 mb-6">
@@ -273,7 +344,53 @@ export default function AdminBilling() {
         statusMutation={statusMutation}
         onStorno={setStornoTarget}
         onMarkPaid={setMarkPaidTarget}
+        selectedIds={selectedIds}
+        onToggleSelect={handleToggleSelect}
+        onToggleSelectAll={handleToggleSelectAll}
+        onBulkDelete={() => setPendingBulkAction({ type: "delete" })}
+        onBulkStatus={(status) => setPendingBulkAction({ type: "status", status })}
+        bulkActionPending={bulkActionPending}
       />
+
+      <AlertDialog
+        open={pendingBulkAction !== null}
+        onOpenChange={(open) => !open && setPendingBulkAction(null)}
+      >
+        <AlertDialogContent data-testid="dialog-bulk-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingBulkAction?.type === "delete"
+                ? "Rechnungen löschen?"
+                : "Status ändern?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingBulkAction?.type === "delete" ? (
+                <>
+                  {selectedIds.size} ausgewählte Rechnung(en). Es werden nur Entwürfe
+                  gelöscht — bereits finalisierte Rechnungen werden übersprungen
+                  (GoBD). Dieser Schritt kann nicht rückgängig gemacht werden.
+                </>
+              ) : pendingBulkAction?.type === "status" ? (
+                <>
+                  {selectedIds.size} ausgewählte Rechnung(en) auf „
+                  {STATUS_ACTION_LABELS[pendingBulkAction.status]}" setzen. Ungültige
+                  Übergänge und finalisierte Rechnungen werden übersprungen.
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-bulk-confirm-cancel">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmBulkAction}
+              className={pendingBulkAction?.type === "delete" ? "bg-red-600 hover:bg-red-700" : undefined}
+              data-testid="button-bulk-confirm"
+            >
+              {pendingBulkAction?.type === "delete" ? "Löschen" : "Status ändern"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <BulkSendDialog
         open={bulkSendOpen}
