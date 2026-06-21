@@ -32,6 +32,8 @@ import {
   apiPatch,
   apiDelete,
   apiPut,
+  apiPostAs,
+  loginAs,
   getAuthCookie,
   uniqueId,
   createTestEmployee,
@@ -1620,8 +1622,60 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(res.data.results[0].reason).toMatch(/nicht gefunden/i);
   });
 
+  // BF-10.6 — Access-Control (Threat-Model: Broken Access Control, Task #1383).
+  // Beide Sammel-Endpunkte hängen unter `router.use(requireAdmin)`. Ein
+  // Nicht-Admin-Mitarbeiter MUSS 403 erhalten und DARF nichts mutieren —
+  // weder löschen (bulk-delete) noch Status ändern (bulk-status). Anschließend
+  // wird belegt, dass der Admin-Pfad weiterhin funktioniert (Regression-Guard).
+  it("BF-10.6 — Nicht-Admin darf NICHT sammel-löschen oder sammel-Status ändern (403, keine Mutation)", async () => {
+    // Vorbedingungen als Admin anlegen: ein löschbarer Entwurf + ein
+    // versendeter Beleg, dessen Status ein Nicht-Admin nicht kippen darf.
+    const draft = await createDraftSzInvoice("ACL-DRAFT");
+    const sent = await createDraftSzInvoice("ACL-SENT");
+    await finalizeInvoice(sent.id, "versendet");
+
+    // Als Nicht-Admin-Mitarbeiter einloggen.
+    const emp = await createTestEmployee({ isAdmin: false, nachnamePrefix: "Integ-ACL" });
+    const empAuth = await loginAs(emp.email, emp.password);
+
+    // bulk-delete als Mitarbeiter → 403.
+    const delRes = await apiPostAs<any>(empAuth, "/api/billing/bulk-delete", {
+      invoiceIds: [draft.id],
+    });
+    expect([401, 403], `bulk-delete als Nicht-Admin muss abgelehnt werden: ${JSON.stringify(delRes.data)}`).toContain(delRes.status);
+
+    // bulk-status als Mitarbeiter → 403.
+    const stRes = await apiPostAs<any>(empAuth, "/api/billing/bulk-status", {
+      invoiceIds: [draft.id],
+      status: "versendet",
+    });
+    expect([401, 403], `bulk-status als Nicht-Admin muss abgelehnt werden: ${JSON.stringify(stRes.data)}`).toContain(stRes.status);
+
+    // Nichts wurde mutiert: Der Entwurf existiert unverändert, der versendete
+    // Beleg behält seinen Status. (Lese-Checks laufen über die Admin-Session.)
+    const draftAfter = await apiGet<any>(`/api/billing/${draft.id}`);
+    expect(draftAfter.status, "Entwurf darf NICHT gelöscht worden sein").toBe(200);
+    expect(draftAfter.data.status).toBe("entwurf");
+    const sentAfter = await apiGet<any>(`/api/billing/${sent.id}`);
+    expect(sentAfter.data.status, "Status darf vom Nicht-Admin NICHT geändert worden sein").toBe("versendet");
+
+    // Kein Audit-Eintrag durch den verweigerten Zugriff.
+    expect(await countAuditFor("invoice_draft_discarded", [draft.id])).toBe(0);
+    expect(await countAuditFor("invoice_status_changed", [draft.id])).toBe(0);
+
+    // Regression-Guard: Der Admin-Pfad funktioniert weiterhin und löscht den
+    // Entwurf jetzt tatsächlich.
+    const adminDel = await apiPost<any>("/api/billing/bulk-delete", {
+      invoiceIds: [draft.id],
+    });
+    expect(adminDel.status, `Admin-bulk-delete muss erfolgreich sein: ${JSON.stringify(adminDel.data)}`).toBe(200);
+    expect(adminDel.data.summary.deleted).toBe(1);
+    const goneDraft = await apiGet<any>(`/api/billing/${draft.id}`);
+    expect(goneDraft.status, "Admin muss den Entwurf löschen können").toBe(404);
+  });
+
   // ----------------------------------------------------------------
-  // BF-10.6 — Sicherheits-Grenzen der invoiceIds-Liste (Task #1384).
+  // BF-10.7–BF-10.11 — Sicherheits-Grenzen der invoiceIds-Liste (Task #1384).
   // Beide Sammel-Endpunkte begrenzen das Array per Zod auf min(1).max(200).
   // Eine Regression, die diese Grenzen lockert (leere oder unbegrenzte
   // Liste), würde sonst unbemerkt durchrutschen. Geprüft werden beide
@@ -1635,27 +1689,27 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     return Array.from({ length: count }, (_, i) => 900_000_000 + i);
   }
 
-  it("BF-10.6 — bulk-delete lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
+  it("BF-10.7 — bulk-delete lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
     const res = await apiPost<any>("/api/billing/bulk-delete", { invoiceIds: [] });
     expect(res.status, `bulk-delete leer: ${JSON.stringify(res.data)}`).toBe(400);
   });
 
-  it("BF-10.7 — bulk-delete lehnt eine Liste über 200 IDs mit 400 ab", async () => {
+  it("BF-10.8 — bulk-delete lehnt eine Liste über 200 IDs mit 400 ab", async () => {
     const res = await apiPost<any>("/api/billing/bulk-delete", { invoiceIds: syntheticIds(201) });
     expect(res.status, `bulk-delete >200: ${JSON.stringify(res.data)}`).toBe(400);
   });
 
-  it("BF-10.8 — bulk-status lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
+  it("BF-10.9 — bulk-status lehnt eine leere invoiceIds-Liste mit 400 ab", async () => {
     const res = await apiPost<any>("/api/billing/bulk-status", { invoiceIds: [], status: "versendet" });
     expect(res.status, `bulk-status leer: ${JSON.stringify(res.data)}`).toBe(400);
   });
 
-  it("BF-10.9 — bulk-status lehnt eine Liste über 200 IDs mit 400 ab", async () => {
+  it("BF-10.10 — bulk-status lehnt eine Liste über 200 IDs mit 400 ab", async () => {
     const res = await apiPost<any>("/api/billing/bulk-status", { invoiceIds: syntheticIds(201), status: "versendet" });
     expect(res.status, `bulk-status >200: ${JSON.stringify(res.data)}`).toBe(400);
   });
 
-  it("BF-10.10 — gültige In-Range-Listen am oberen Limit (200) werden NICHT abgelehnt", async () => {
+  it("BF-10.11 — gültige In-Range-Listen am oberen Limit (200) werden NICHT abgelehnt", async () => {
     // Regressions-Wächter: exakt 200 IDs liegt innerhalb der Grenze und darf
     // NICHT als 400 abgewiesen werden. Die IDs sind unbekannt → alle skipped,
     // der Request läuft aber sauber durch (200). Das belegt, dass die Grenze
