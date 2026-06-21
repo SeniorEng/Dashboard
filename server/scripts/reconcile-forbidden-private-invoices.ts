@@ -43,6 +43,20 @@
  * zurückbuchen. Die Ledger-Korrektur der überflüssigen `private`-Konsumption
  * ist NICHT Teil dieses Dokument-Stornos (siehe Hinweis am Ende der Ausgabe).
  *
+ * NACHTRAG (Task #1371 — separate Ledger-Bewertung Jungnickel/Termin 1184):
+ * Die oben offen gelassene „separate Bewertung" der überflüssigen
+ * `private`-Konsumption für Termin 1184 (Kundin 92, Antje Jungnickel) wurde
+ * durchgeführt (Read-only-Prüfung gegen die Prod-DB). Ergebnis: Die private
+ * Konsumption (`budget_transactions` #2445, −92,24 €) ist BEREITS append-only
+ * gegengebucht (Reversal #2472, +92,24 €, `reversed_transaction_id=2445`,
+ * gleiches `transaction_date`, notes „Storno von Transaktion #2445", GoBD-
+ * konform). Der private Topf der Kundin steht damit netto auf 0 € — es ist
+ * KEINE weitere Ledger-Korrektur nötig. Hintergrund: zwischenzeitlich wurde
+ * auch die §45b-Kassenrechnung #105 storniert, sodass ALLE Konsumptionen des
+ * Termins 1184 (§45b UND private) gegengebucht sind; der Ledger ist konsistent
+ * zum Rechnungsstatus (beide Rechnungen `storniert`). Die Idempotenz-Guards in
+ * `reverseBudgetTransaction` haben dabei eine Doppel-Gutschrift verhindert.
+ *
  * Sicherheit / GoBD
  * -----------------
  *   - Trockenlauf ist Default; `--apply` schreibt erst nach explizitem Opt-in.
