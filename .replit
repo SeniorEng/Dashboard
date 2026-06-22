@@ -53,15 +53,15 @@ args = "lint"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
+args = "test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
 args = "billing-cov"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "e2e-smoke"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test"
 
 [[workflows.workflow]]
 name = "Start application"
@@ -98,6 +98,17 @@ args = "npm run lint"
 outputType = "console"
 
 [[workflows.workflow]]
+name = "test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
 name = "billing-cov"
 author = "agent"
 
@@ -115,17 +126,6 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx tsx scripts/with-ephemeral-db.ts 5051 npm run test:e2e:smoke"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow]]
-name = "test"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run"
 
 [workflows.workflow.metadata]
 outputType = "console"
