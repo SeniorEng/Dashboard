@@ -742,24 +742,35 @@ async function calculateAllocated45b(
   // `initialBalanceTotal` herausgerechnet (kein Doppelzählen). So bekommt JEDER
   // Kunde (neu, alt, manuell) exakt EINEN ablaufenden Übertrag pro Jahr.
   //
-  // WICHTIG (Task #959): Der Shift darf nur Carryovers berücksichtigen, die zum
-  // Lese-Stichtag (`opts.asOfDate`) bereits gültig sind — exakt dieselbe Schranke,
-  // die unten `carryoverTotal` (Zeile ~825) zählt. Sonst zieht ein in die ZUKUNFT
-  // materialisierter Carryover (z.B. Zieljahr 2026, `validFrom = 2026-01-01`) den
-  // `allocStart` einer RÜCKWIRKENDEN Buchung (`asOfDate = 2024-06-15`) fälschlich
-  // auf 2026 vor → `allocStart > end` → §45b-Verfügbarkeit fällt auf 0 und die
-  // historische Buchung kippt in den nächsten Topf (GoBD-Regression bei
-  // backdated Bookings). Mit der Schranke bleibt der Shift mit dem tatsächlich
-  // gezählten Carryover-Bestand konsistent.
-  const carryoverCountLimit = opts.asOfDate ?? `${curYear}-12-31`;
-  const countedCarryoverYears = existingAllocations
-    .filter(a => a.source === "carryover" && a.validFrom <= carryoverCountLimit)
+  // WICHTIG (Task #959/#1392): Der Shift darf nur GÜLTIGE Überträge
+  // berücksichtigen — bereits in Kraft (`validFrom <= Stichtag`) UND noch nicht
+  // verfallen (`expiresAt >= Stichtag`). Das ist exakt dasselbe `carryoverCounted`-
+  // Prädikat, das unten `carryoverTotal` zählt; so sieht der allocStart-Shift
+  // denselben Übertragsbestand wie die Summe (keine Drift).
+  //
+  // Zwei Fälle, die dieses Prädikat abfängt:
+  //  - Ein in die ZUKUNFT materialisierter Übertrag (Zieljahr 2026,
+  //    `validFrom = 2026-01-01`) darf den `allocStart` einer RÜCKWIRKENDEN
+  //    Buchung (`asOfDate = 2024-06-15`) nicht auf 2026 vorziehen → sonst
+  //    `allocStart > end` → §45b fällt auf 0, GoBD-Regression bei backdated
+  //    Bookings (Task #959).
+  //  - Ein VERFALLENER Übertrag (z.B. stale/weitergerollt) darf `allocStart`
+  //    NICHT mehr nach vorn ziehen (Task #1392): sein Quelljahr ist über den
+  //    `expiryFloor` ohnehin ausgeblendet und sein Verbrauch wird symmetrisch
+  //    herausgerechnet. Damit kann ein abgelaufener Übertrag weder allocStart
+  //    noch den Startwert-Boden verfälschen (Entkopplung Startwert↔Übertrag).
+  const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null }) =>
+    a.source === "carryover" &&
+    a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
+    (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`));
+  const validCarryoverTargetYears = existingAllocations
+    .filter(carryoverCounted)
     .map(a => a.year);
-  const latestCountedCarryoverYear = countedCarryoverYears.length > 0
-    ? Math.max(...countedCarryoverYears)
+  const latestValidCarryoverYear = validCarryoverTargetYears.length > 0
+    ? Math.max(...validCarryoverTargetYears)
     : null;
-  if (latestCountedCarryoverYear != null && latestCountedCarryoverYear > allocStartYear) {
-    allocStartYear = latestCountedCarryoverYear;
+  if (latestValidCarryoverYear != null && latestValidCarryoverYear > allocStartYear) {
+    allocStartYear = latestValidCarryoverYear;
     allocStartMonth = 1;
   }
 
@@ -923,45 +934,54 @@ async function calculateAllocated45b(
 
   const totalCalculated = sum45bStatutoryMonths(statutoryMonths);
 
-  // Task #959 — IB-Supersession + Verfall. Ein Startwert (`initial_balance`)
-  // für ein Jahr, das vor dem aktuellen Verfalls-Fenster liegt, trägt nicht mehr
-  // zum verfügbaren Budget bei: Entweder kondensiert ihn ein materialisierter
-  // Carryover (Quelljahr < spätestes Carryover-Zieljahr → der Carryover bildet
-  // das Restguthaben bereits ab, doppelt zählen = verboten) ODER er ist schlicht
-  // verfallen (Jahr < Verfalls-Boden, z.B. Vorjahr ab Juli). Wir behalten nur
-  // Startwerte ab `ibFloorYear = max(Verfalls-Boden, spätestes Carryover-Jahr)`.
-  // Im laufenden/Vorjahres-Fenster ohne kondensierenden Carryover bleibt der
-  // Startwert sichtbar (Vorjahr im 1. Halbjahr noch gültig).
+  // Task #959/#1392 — IB-Supersession + Verfall: Startwert-Boden ENTKOPPELT vom
+  // Übertrags-Jahr. Früher zog
+  // `ibFloorYear = max(expiryFloor, latestCountedCarryoverYear)` den Boden an
+  // EINEN (evtl. stale/abgelaufenen) Übertrag und verdrängte legitime Startwerte
+  // PAUSCHAL (jeder Startwert unterhalb des spätesten Übertrags-Zieljahrs fiel
+  // raus). Das ließ einen weitergerollten Übertrag den Startwert + die
+  // Monatsaufstockungen unsichtbar machen → falsch-negative §45b-Anzeige.
+  //
+  // Jetzt zwei getrennte, klar begründete Regeln:
+  //  (1) Boden = allein das rechtliche Verfalls-Fenster (`expiryFloorAnchorYear`).
+  //      Ein Startwert im gültigen Fenster bleibt sichtbar, auch wenn ein
+  //      Übertrag verfallen ist.
+  //  (2) GEZIELTE IB-Supersession gegen ECHTE Doppelzählung: ein Startwert wird
+  //      nur dann herausgerechnet, wenn ein GÜLTIGER Übertrag GENAU sein
+  //      Quelljahr kondensiert. Übertrag für Zieljahr T bildet das Restguthaben
+  //      des Quelljahrs (T-1) ab; der Startwert für (T-1) zählt sonst doppelt.
+  //      `carryoverCounted` (oben definiert, dieselbe Schranke wie
+  //      `carryoverTotal`) liefert die gültigen Überträge.
   const ibDateLimit = opts.asOfDate ?? `${curYear}-12-31`;
-  const ibFloorYear = Math.max(expiryFloorAnchorYear, latestCountedCarryoverYear ?? 0);
-  const initialBalanceTotal = existingAllocations
-    .filter(a => a.source === "initial_balance"
-      && a.validFrom <= ibDateLimit
-      && a.year >= ibFloorYear)
-    .reduce((sum, a) => sum + a.amountCents, 0);
+  const ibFloorYear = expiryFloorAnchorYear;
+  const supersededIbYears = new Set(
+    existingAllocations.filter(carryoverCounted).map(a => a.year - 1),
+  );
 
-  // Task #959 — Carryover wird IMMER gezählt (frühere `ibYears`-Ausnahme aus
-  // Task #101 entfällt): Der Startwert desselben Quelljahrs ist jetzt per
-  // IB-Supersession (oben) aus `initialBalanceTotal` entfernt, sodass Carryover
-  // + Startwert sich nicht mehr doppeln. Es zählen nur noch nicht verfallene
-  // Überträge (validFrom <= Stichtag, expiresAt >= Stichtag).
-  const carryoverCounted = (a: { source: string; validFrom: string; expiresAt: string | null }) =>
-    a.source === "carryover" &&
-    a.validFrom <= (opts.asOfDate ?? `${curYear}-12-31`) &&
-    (!a.expiresAt || a.expiresAt >= (opts.asOfDate ?? `${curYear}-01-01`));
+  // Task #959/#1392 — Carryover wird IMMER gezählt (frühere `ibYears`-Ausnahme
+  // aus Task #101 entfällt): Der Startwert desselben Quelljahrs ist per
+  // gezielter IB-Supersession (oben) aus `initialBalanceTotal` entfernt, sodass
+  // Carryover + Startwert sich nicht mehr doppeln. Es zählen nur noch nicht
+  // verfallene Überträge (validFrom <= Stichtag, expiresAt >= Stichtag).
   const carryoverTotal = existingAllocations
     .filter(carryoverCounted)
     .reduce((sum, a) => sum + a.amountCents, 0);
 
-  // Task #1306 — Symmetrie-Anker: Spezial-Allocations (Übertrag /
-  // `initial_balance`), die NACH den obigen Zähl-Prädikaten NICHT mehr zum
-  // verfügbaren Budget beitragen (abgelaufener Übertrag bzw. per
-  // IB-Supersession verdrängter Vorjahres-Startwert). `getExcluded45bConsumption`
-  // nutzt diese IDs, damit der gegen sie gebuchte Verbrauch nicht weiter vom
-  // laufenden Topf abgezogen wird (Allocated und ConsumedNet folgen denselben
+  // Task #1306/#1392 — Symmetrie-Anker: Spezial-Allocations (Übertrag /
+  // `initial_balance`), die NACH den Zähl-Prädikaten NICHT mehr zum verfügbaren
+  // Budget beitragen (abgelaufener Übertrag bzw. per gezielter IB-Supersession
+  // verdrängter Quelljahres-Startwert). `getExcluded45bConsumption` nutzt diese
+  // IDs, damit der gegen sie gebuchte Verbrauch nicht weiter vom laufenden Topf
+  // abgezogen wird (Allocated und ConsumedNet folgen denselben
   // Fenster-/Supersession-Regeln).
   const ibCounted = (a: { source: string; validFrom: string; year: number }) =>
-    a.source === "initial_balance" && a.validFrom <= ibDateLimit && a.year >= ibFloorYear;
+    a.source === "initial_balance" &&
+    a.validFrom <= ibDateLimit &&
+    a.year >= ibFloorYear &&
+    !supersededIbYears.has(a.year);
+  const initialBalanceTotal = existingAllocations
+    .filter(ibCounted)
+    .reduce((sum, a) => sum + a.amountCents, 0);
   const excludedSpecialAllocationIds = existingAllocations
     .filter(a =>
       (a.source === "initial_balance" && !ibCounted(a)) ||
@@ -1486,8 +1506,22 @@ async function ensureYearlyCarryover45b(customerId: number, _tx?: DbClient): Pro
     const totalConsumed = linkedConsumed + (unlinkedConsumptionByYear.get(year) ?? 0);
     const totalReversed = linkedReversed + (unlinkedReversalByYear.get(year) ?? 0);
     const netConsumed = Math.max(0, totalConsumed - totalReversed);
-    const totalPool = yearAllocatedCents + totalCarryoverIn;
-    const unused = Math.max(0, totalPool - netConsumed);
+
+    // Task #1392 — KEIN Carryover-Chaining. Es rollt ausschließlich das im Jahr
+    // `year` SELBST entstandene Restguthaben (`yearAllocatedCents` =
+    // Monatsaufstockung + Startwert + manuelle Anpassung des Jahres) in den
+    // Folgejahres-Übertrag. Ein bereits aus (year-1) hereingerollter Übertrag
+    // (`totalCarryoverIn`) verfällt zu SEINER eigenen Frist (30.06.`year`) über
+    // `processExpiredCarryover` und darf NICHT erneut weitergerollt werden —
+    // andernfalls überlebt ein Rest aus Quelljahr Y rechtswidrig über den
+    // 30.06.(Y+1) hinaus (Chaining: Y → Übertrag in Y+1 → Übertrag in Y+2 …).
+    //
+    // Verbrauch ist FIFO (hereingerollter Übertrag wird zuerst aufgezehrt, da er
+    // früher verfällt): nur Verbrauch ÜBER `totalCarryoverIn` hinaus belastet das
+    // eigene Jahresguthaben. So bleibt der Übertrag die Differenz aus dem
+    // EIGENEN Jahresanspruch minus dem darauf entfallenden Verbrauch.
+    const consumedAgainstOwnYear = Math.max(0, netConsumed - totalCarryoverIn);
+    const unused = Math.max(0, yearAllocatedCents - consumedAgainstOwnYear);
 
     if (unused <= 0) continue;
 

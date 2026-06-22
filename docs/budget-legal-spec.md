@@ -26,6 +26,11 @@ Alle Beträge sind ausnahmslos **Integer-Cents** (keine Floats/Euro-Strings).
   des Kalenderjahres übertragbar (Carryover), Rest des Vorjahres verfällt zum
   30.06. des Folgejahres (§45b-Verfallslogik, siehe
   [`docs/architecture/budget.md`](architecture/budget.md)).
+- **Kein Chaining (Task #1392):** Ein Restguthaben aus Quelljahr Y verfällt zu
+  **seiner eigenen** Frist 30.06.(Y+1) und rollt **niemals** weiter in einen
+  Y+2-Übertrag. Nur das im jeweiligen Jahr selbst entstandene Guthaben ist
+  übertragbar; ein bereits hereingerollter Übertrag wird nicht erneut
+  weitergerollt. Übertrag und Startwert desselben Quelljahrs zählen genau einmal.
 - **Onboarding-Baseline:** Für einen nie eingerichteten Kunden wird der zur
   Laufzeit aus der Pflegegrad-Historie abgeleitete Anker auf den 1.1. des
   laufenden Jahres gebodet (`floorAutoAnchor45bToCurrentYear`) — es wird kein

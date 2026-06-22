@@ -44,7 +44,13 @@ ist DER eine Verfügbarkeits-Reader. Er delegiert:
   [`shared/domain/budget/net-available-45b.ts`](../shared/domain/budget/net-available-45b.ts)
   (`computeNetAvailable45b`), DB-Reader
   [`server/storage/budget/net-available-45b.ts`](../server/storage/budget/net-available-45b.ts)
-  (`netAvailable45bAt`).
+  (`netAvailable45bAt`). Die `allocated`-Seite (`calculateAllocated45b`) ist
+  Teil desselben SSoT: **kein Carryover-Chaining** (Quelljahr-Y-Rest verfällt zu
+  30.06.(Y+1), rollt nie nach Y+2) und **Startwert(IB) vom Übertrag entkoppelt**
+  (IB-Boden = `expiryFloorAnchorYear`, gezielte Supersession nur des
+  Übertrags-Quelljahrs) — Task #1392, abgesichert durch
+  [`tests/budget/45b-carryover-verfall-root.test.ts`](../tests/budget/45b-carryover-verfall-root.test.ts).
+  Read-only-Drift-Report: `server/scripts/verify-45b-carryover-verfall.ts`.
 
 **Date-Pinning:** alle Reader sind `asOfDate`-/`forDate`-gebunden; die §45b-
 Forecast-Vorausschau projiziert pro Monatsende via
