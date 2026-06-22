@@ -53,11 +53,11 @@ args = "lint"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "billing-cov"
+args = "test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "test"
+args = "billing-cov"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
@@ -98,23 +98,23 @@ args = "npm run lint"
 outputType = "console"
 
 [[workflows.workflow]]
-name = "billing-cov"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "COVERAGE_PORT=5079 npx tsx script/coverage-gate.ts billing"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow]]
 name = "test"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "billing-cov"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "COVERAGE_PORT=5079 npx tsx script/coverage-gate.ts billing"
 
 [workflows.workflow.metadata]
 outputType = "console"
