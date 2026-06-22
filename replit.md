@@ -100,7 +100,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Test Data Hygiene**: Cleanup-Skripte brauchen `--apply` + Hostname-Guard; nie auf Prod. `globalSetup` räumt seit den Wegwerf-DBs keine stale Daten mehr; Bulk-Purge-Routen (Superadmin-only, in Prod deaktiviert) sind manuelle Werkzeuge. Detail: [`docs/test-infrastructure.md`](docs/test-infrastructure.md#test-daten-hygiene--bulk-purge).
 
 ## Pointers
-- **Budget-Architektur**: [`docs/architecture/budget.md`](docs/architecture/budget.md) (Pot-Regeln, Historisierung, Selbstzahler, §45b, SSoT). Inventur/Beschlüsse: `docs/budget-ssot-inventory.md`.
+- **Budget-Architektur**: [`docs/architecture/budget.md`](docs/architecture/budget.md) (Pot-Regeln, Historisierung, Selbstzahler, §45b, SSoT). Inventur/Beschlüsse: `docs/budget-ssot-inventory.md`. Rechts-Spezifikation (gesetzliche Beträge R-45B/45A/39/SZ, Stand 2026): `docs/budget-legal-spec.md`. SSoT-Vollständigkeits-Audit (welcher Code beantwortet welche der 4 Fragen + Guards): `docs/budget-ssot-audit.md`.
 - **Audit Methodology**: `.agents/skills/deep-analysis/SKILL.md` · **Error Handling Conventions**: `.agents/skills/error-handling-audit/SKILL.md`
 - **Page-Size Guideline**: `docs/page-size-guideline.md` (≤500 LOC soft, 800 hard; Pages sind dünne Wrapper, Domain-Code in `client/src/features/<domain>/`)
 - **Test Coverage Matrix**: `tests/README.md`

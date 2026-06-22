@@ -127,6 +127,9 @@ export function isSelbstzahlerBillingType(
   return billingType === "selbstzahler";
 }
 
+// R-SZ (siehe docs/budget-legal-spec.md): Selbstzahler haben keinen Anspruch auf
+// die gesetzlichen Pflegekassen-Töpfe; ein privater (19 %-)Anteil ist nur erlaubt,
+// wenn der Kunde grundsätzlich privat zahlt.
 export function isPrivatePaymentAllowed(input: {
   billingType: string | null | undefined;
   acceptsPrivatePayment: boolean | null | undefined;

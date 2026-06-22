@@ -6,6 +6,7 @@ import { defaultStatutoryPotEnabled } from "./budget-selbstzahler-validator";
 // ============================================
 // §45b Entlastungsbetrag
 // ============================================
+// R-45B (siehe docs/budget-legal-spec.md): max. 131 €/Monat Entlastungsbetrag.
 export const BUDGET_45B_MAX_MONTHLY_CENTS = 13100; // 131€ max per month
 
 /**
@@ -31,6 +32,7 @@ export function floorAutoAnchor45bToCurrentYear(derivedISO: string, curYear: num
 // ============================================
 // Max monthly amounts per Pflegegrad (in cents)
 // These are 40% of the Sachleistung amounts per §36 SGB XI
+// R-45A (siehe docs/budget-legal-spec.md): 40 % der §36-Sachleistung je Pflegegrad.
 export const BUDGET_45A_MAX_BY_PFLEGEGRAD: Record<number, number> = {
   1: 0,      // PG1: not eligible
   2: 31840,  // PG2: 318.40€ (40% of 796€)
@@ -42,6 +44,7 @@ export const BUDGET_45A_MAX_BY_PFLEGEGRAD: Record<number, number> = {
 // ============================================
 // §39/§42a Gemeinsamer Jahresbetrag
 // ============================================
+// R-39 (siehe docs/budget-legal-spec.md): gemeinsamer Jahresbetrag §39/§42a.
 export const BUDGET_39_42A_MAX_YEARLY_CENTS = 353900; // 3,539€/year (from July 2025)
 
 // ============================================

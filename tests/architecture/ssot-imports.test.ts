@@ -15,6 +15,17 @@
  *   A3  „Dokumentiert?" — keine eigene `signature_data IS [NOT] NULL`- bzw.
  *       `isNull/isNotNull(signatureData)`-Bedingung außerhalb der dokumentiert-SSoT
  *       (`server/lib/appointment-signed.ts`).
+ *   A4  „Verteilung über Töpfe?" / Kaskade — `planCascade` (Cascade-SSoT) darf nur
+ *       Budget-intern AUFGERUFEN werden (Definition + Buchung/Reservierung/Re-
+ *       Derivation); kein neuer Aufrufer baut eine eigene Topf-Verteilung.
+ *   A5  „Privatanteil erlaubt?" — keine eigene `acceptsPrivatePayment || selbstzahler`-
+ *       Formel außerhalb der Privatzahler-SSoT (`isPrivatePaymentAllowed` in
+ *       `shared/domain/budget-selbstzahler-validator.ts`).
+ *
+ * Zusammen mit den Schwester-Wächtern (`budget-single-reader.test.ts` für die
+ * §45b-/Cap-Verfügbarkeits-SSoT, `budget-default-pots-ssot.test.ts` für die
+ * Default-Aktivierung) decken diese fünf Detektoren die vier fachlichen Budget-
+ * Fragen ab — Bestandsaufnahme: docs/budget-ssot-audit.md.
  *
  * Jeder Detektor ist PUR und wird vom Real-Tree-Scan UND vom Negativ-Test mit
  * DERSELBEN Funktion aufgerufen — der Negativ-Test beweist nachweislich, dass
@@ -220,6 +231,83 @@ export function detectDocumentedPredicateViolations(files: ScanFile[]): GuardVio
 }
 
 // ---------------------------------------------------------------------------
+// A4 — Cascade-/Verteilungs-SSoT (Aufruf-Rand)
+// ---------------------------------------------------------------------------
+
+/**
+ * `planCascade` (shared/domain/budget/plan-cascade.ts) ist die EINE pure
+ * Verteilungs-Funktion: Sie schichtet einen Termin-/Rechnungs-Betrag
+ * deterministisch über die statutorischen Töpfe (Cascading-Allocation) plus den
+ * terminalen Selbstzahler-/Privat-Topf. Damit nicht erneut eine parallele
+ * Topf-Verteilung entsteht, ist der PRODUKTIVE Aufruf auf eine Allowlist
+ * beschränkt: die Definition selbst, der Buchungs-Pfad (`consumption-engine`),
+ * der Reservierungs-/Hold-Pfad (`reservation-storage`) und die netto-null-
+ * Re-Derivation der Rechnung (`invoice-data`). Ein reiner Import/Doku-Hinweis
+ * (kein `(`) triggert bewusst nicht.
+ */
+const CASCADE_CALL_ALLOWLIST = new Set<string>([
+  "shared/domain/budget/plan-cascade.ts", // Definition (die Verteilungs-SSoT).
+  "server/storage/budget/consumption-engine.ts", // Buchung.
+  "server/storage/budget/reservation-storage.ts", // Reservierung / Hold.
+  "server/services/invoice-data.ts", // netto-null Re-Derivation.
+]);
+
+const CASCADE_CALL_RE = /\bplanCascade\s*\(/;
+
+export function detectCascadeCallViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (CASCADE_CALL_ALLOWLIST.has(rel)) continue;
+    const code = stripComments(content);
+    if (CASCADE_CALL_RE.test(code)) {
+      out.push({
+        file: rel,
+        detail: "ruft `planCascade` (Cascade-/Verteilungs-SSoT) außerhalb der Budget-internen Allowlist auf",
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// A5 — Privatzahler-Entscheidungs-SSoT (Formel-Rand)
+// ---------------------------------------------------------------------------
+
+/**
+ * Die Frage „Darf dieser Kunde einen privaten (19 %-)Anteil bekommen?" wird
+ * ausschließlich von `isPrivatePaymentAllowed`
+ * (shared/domain/budget-selbstzahler-validator.ts) beantwortet — die EINE
+ * Definition der Formel `acceptsPrivatePayment || billingType === "selbstzahler"`.
+ * Drift entsteht, sobald ein Buchungs-/Rebook-/Reservierungs-/Import-/Split-Pfad
+ * diese Oder-Verknüpfung selbst hinschreibt, statt die SSoT aufzurufen. Der
+ * Detektor erkennt genau diese hand-gerollte Formel (beide Token in einer
+ * `||`-Verknüpfung auf einer logischen Zeile) außerhalb der SSoT-Datei.
+ */
+const PRIVATE_PAYMENT_FORMULA_ALLOWLIST = new Set<string>([
+  "shared/domain/budget-selbstzahler-validator.ts",
+]);
+
+const PRIVATE_FORMULA_RE_A = /acceptsPrivatePayment[^;\n]{0,80}\|\|[^;\n]{0,80}selbstzahler/;
+const PRIVATE_FORMULA_RE_B = /selbstzahler[^;\n]{0,80}\|\|[^;\n]{0,80}acceptsPrivatePayment/;
+
+export function detectPrivatePaymentFormulaViolations(files: ScanFile[]): GuardViolation[] {
+  const out: GuardViolation[] = [];
+  for (const { rel, content } of files) {
+    if (rel.startsWith("tests/")) continue;
+    if (PRIVATE_PAYMENT_FORMULA_ALLOWLIST.has(rel)) continue;
+    const code = stripComments(content);
+    if (PRIVATE_FORMULA_RE_A.test(code) || PRIVATE_FORMULA_RE_B.test(code)) {
+      out.push({
+        file: rel,
+        detail: "baut die Privatanteil-Formel (`acceptsPrivatePayment || selbstzahler`) selbst statt `isPrivatePaymentAllowed`",
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -352,6 +440,73 @@ describe("Architektur — SSoT-Import-Wächter (Task #1238)", () => {
     expect(v.map((h) => h.file).sort()).toEqual([
       "server/routes/fake-doc-drizzle.ts",
       "server/routes/fake-doc-raw.ts",
+    ]);
+  });
+
+  it("A4: `planCascade` wird nur Budget-intern aufgerufen", () => {
+    const v = detectCascadeCallViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Cascade-SSoT verletzt — die folgende(n) Datei(en) rufen `planCascade` außerhalb der Allowlist auf:\n" +
+          formatViolations(v) +
+          "\n\nDie Verteilung eines Betrags über die Töpfe (Cascading-Allocation + " +
+          "Selbstzahler-Rest) gibt es nur EINMAL — `planCascade` " +
+          "(shared/domain/budget/plan-cascade.ts). Buche/reserviere/derive über die " +
+          "bestehenden Pfade, statt eine eigene Topf-Verteilung zu bauen. Ist die Datei " +
+          "ein bewusst neuer Budget-interner Aufrufer, ergänze die Allowlist hier UND " +
+          "dokumentiere ihn in docs/budget-ssot-audit.md.",
+      );
+    }
+  });
+
+  it("A4 (Negativ): ein bewusst eingebauter `planCascade`-Aufruf wird erkannt, ein Import nicht", () => {
+    const synthetic: ScanFile[] = [
+      {
+        rel: "server/routes/fake-cascade-route.ts",
+        content: `const { splits } = planCascade(cost, pots);`,
+      },
+      {
+        rel: "server/routes/fake-cascade-import.ts",
+        content: `import { planCascade } from "@shared/domain/budget/plan-cascade";`,
+      },
+    ];
+    const v = detectCascadeCallViolations(synthetic);
+    expect(v.map((h) => h.file)).toEqual(["server/routes/fake-cascade-route.ts"]);
+  });
+
+  it("A5: keine eigene `acceptsPrivatePayment || selbstzahler`-Formel außerhalb der Privatzahler-SSoT", () => {
+    const v = detectPrivatePaymentFormulaViolations(regexScanFiles);
+    if (v.length > 0) {
+      expect.fail(
+        "Privatzahler-SSoT verletzt — hand-gerollte Privatanteil-Formel gefunden:\n" +
+          formatViolations(v) +
+          "\n\nDie Frage „Privatanteil erlaubt?\u201c gehört ausschließlich in " +
+          "`isPrivatePaymentAllowed` (shared/domain/budget-selbstzahler-validator.ts). " +
+          "Importiere/rufe sie auf, statt `acceptsPrivatePayment || selbstzahler` selbst " +
+          "zu kombinieren.",
+      );
+    }
+  });
+
+  it("A5 (Negativ): eine bewusst eingebaute Privatanteil-Formel wird erkannt, der SSoT-Aufruf nicht", () => {
+    const synthetic: ScanFile[] = [
+      {
+        rel: "server/routes/fake-private-a.ts",
+        content: `const allowed = customer.acceptsPrivatePayment || customer.billingType === "selbstzahler";`,
+      },
+      {
+        rel: "server/routes/fake-private-b.ts",
+        content: `const allowed = billingType === "selbstzahler" || acceptsPrivatePayment;`,
+      },
+      {
+        rel: "server/routes/fake-private-ssot.ts",
+        content: `const allowed = isPrivatePaymentAllowed({ billingType, acceptsPrivatePayment });`,
+      },
+    ];
+    const v = detectPrivatePaymentFormulaViolations(synthetic);
+    expect(v.map((h) => h.file).sort()).toEqual([
+      "server/routes/fake-private-a.ts",
+      "server/routes/fake-private-b.ts",
     ]);
   });
 });
