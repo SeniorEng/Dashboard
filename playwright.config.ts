@@ -23,7 +23,14 @@ export default defineConfig({
   // "flaky" (eigener Status neben passed/failed), die JUnit-XML enthält die
   // Retry-Attempts. So ist die Flake-Rate aus den CI-Artifacts ablesbar.
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 1 : undefined,
+  // Task #541: Im Replit-Workspace (begrenzter RAM) auf 1 Worker begrenzen, um
+  // Workspace-Überlastung/OOM zu vermeiden. In CI ohnehin 1 Worker. Nur außerhalb
+  // beider Umgebungen (z.B. lokale Entwickler-Maschine) lässt Playwright die
+  // Worker-Anzahl frei (undefined = Default ≈ halbe CPU-Kerne).
+  workers:
+    process.env.CI || process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN
+      ? 1
+      : undefined,
   // In CI zusätzlich JUnit-XML für Flake-Tracking-Tooling schreiben; lokal
   // bleibt die kompakte Listen-Ausgabe.
   reporter: process.env.CI

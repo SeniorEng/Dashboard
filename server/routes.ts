@@ -55,12 +55,22 @@ export async function registerRoutes(
     // sieht, ob der Overdraft-Schutz in der laufenden (Prod-)Instanz aktiv ist.
     const { hardHoldsEnabled } = await import("./storage/budget/reservation-storage");
     const budgetHardHolds = { enabled: hardHoldsEnabled() };
+    // Task #541: Prozess-Speicher (RSS/Heap) und Uptime im Health-Endpoint
+    // exponieren, damit ein Operator/Monitoring eine drohende
+    // Workspace-Überlastung (OOM) sieht, bevor der Prozess gekillt wird.
+    const { getProcessMemorySnapshot } = await import("./lib/memory-watchdog");
+    const memSnap = getProcessMemorySnapshot();
+    const memory = {
+      rssMB: memSnap.rssMB,
+      heapMB: memSnap.heapMB,
+      heapTotalMB: memSnap.heapTotalMB,
+    };
     try {
       await db.execute(sql`SELECT 1`);
       res.json({
         status: "ok",
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
+        uptime: memSnap.uptimeSec,
         bootedAt: SERVER_BOOTED_AT,
         startupComplete: isStartupComplete(),
         chromium: chromiumStatus,
@@ -68,19 +78,21 @@ export async function registerRoutes(
         auditLogImmutability,
         budgetTransactionsImmutability,
         budgetHardHolds,
+        memory,
       });
     } catch (error) {
       res.status(503).json({
         status: "error",
         message: "Database unavailable",
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
+        uptime: memSnap.uptimeSec,
         bootedAt: SERVER_BOOTED_AT,
         chromium: chromiumStatus,
         pdfCache,
         auditLogImmutability,
         budgetTransactionsImmutability,
         budgetHardHolds,
+        memory,
       });
     }
   });

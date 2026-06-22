@@ -2,6 +2,7 @@
 Streamlines elderly care service management for caregivers, enhancing efficiency and data integrity.
 
 ## Run & Operate
+- ⚠️ Workflow 'Project' ist legacy — NICHT klicken. Einzeln-Workflows aus dem Panel nutzen. Siehe Replit-Workspace-Overload-Prevention-Plan.md
 - **Run Dev**: `npm run dev` (client & server)
 - **Run Server**: `npm run start` (server only)
 - **Build**: `npm run build`
@@ -45,6 +46,18 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 | `STATS_HEALTH_YELLOW` | Optional | `5` | Schwellwert (Tage) für gelben Health-Status in Statistik-Cockpit. |
 | `STATS_HEALTH_RED` | Optional | `20` | Schwellwert (Tage) für roten Health-Status in Statistik-Cockpit. |
 | `NEON_LOCAL_WS_PROXY` | Optional (nur CI/Local) | unset | Host:Port eines Neon-WebSocket-Proxys (z.B. `localhost:4444`). Gesetzt = `server/lib/db.ts` schaltet Secure-WS/TLS-Pipelining ab und routet den WebSocket über den Proxy, um gegen plain Postgres zu testen. NICHT in Produktion setzen (echter Neon-Host braucht Secure-WS). |
+
+## Workspace-Boot & Stabilität
+⚠️ **Boot-Disziplin (Task #541):** Beim Start des Workspaces darf NUR der Workflow `Start application` automatisch booten. Die fünf Check-Workflows (`typecheck`, `lint`, `test`, `billing-cov`, `e2e-smoke`) und `Full QA Check` sind **On-Demand** — einzeln aus dem Workflow-Panel starten, nie alle gleichzeitig. Der Sammel-Workflow `Project` (startet alles parallel) ist **Legacy — NICHT klicken**, sonst überlastet der Workspace (RAM/OOM, Preview-Disconnect). Der Run-Button muss auf `Start application` zeigen (einmalig im Run-Dropdown gesetzt → dauerhaft in `.replit`). Verriegelt durch die Fitness-Function `tests/architecture/replit-boot-path.test.ts`. Voller RCA-Plan: [`Replit-Workspace-Overload-Prevention-Plan.md`](Replit-Workspace-Overload-Prevention-Plan.md).
+
+**Schutzschichten:** Playwright im Workspace/CI auf 1 Worker gedrosselt (`playwright.config.ts`); Memory-Watchdog (`server/lib/memory-watchdog.ts`) warnt im Log vor RAM-Knappheit (Schwellen `MEMORY_WATCHDOG_WARN_MB` / `MEMORY_WATCHDOG_INTERVAL_MS`); `/api/health` meldet live `memory.rssMB`/`heapMB`/`heapTotalMB` + `uptime`.
+
+### Emergency-Restart-Playbook
+Workspace hängt / Preview tot / `spawn EAGAIN`:
+1. Laufende Heavy-Workflows im Panel stoppen (`test`, `billing-cov`, `e2e-smoke`, ggf. `typecheck`/`lint`); `Project` NICHT starten.
+2. `Start application` neu starten (Run-Button oder Panel).
+3. Gesundheit prüfen: `curl -s localhost:5000/api/health | jq '.memory'` — `rssMB` deutlich unter dem Container-Limit.
+4. Checks danach einzeln laufen lassen, oder `Full QA Check` für sequentiell `typecheck → lint → test`.
 
 ## Stack
 - **Frontend**: React 19, TypeScript, Vite, Wouter, `shadcn/ui`, Tailwind CSS v4, TanStack Query

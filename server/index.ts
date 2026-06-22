@@ -15,6 +15,7 @@ import { errorMiddleware } from "./lib/errors";
 import { pool, db, logPoolStats } from "./lib/db";
 import { sql as sqlBuilder } from "drizzle-orm";
 import { closeBrowser } from "./services/pdf-generator";
+import { startMemoryWatchdog } from "./lib/memory-watchdog";
 const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
@@ -246,6 +247,9 @@ function isNeonDriverBug(message: string): boolean {
     () => {
       log(`serving on port ${port}`);
       logPoolStats("db");
+      // Task #541: Memory-Watchdog früh starten, damit Boot-Spitzen erfasst
+      // werden. unref()'d, daher kein Block beim Graceful-Shutdown.
+      intervals.push(startMemoryWatchdog(log));
       runStartupTasks();
     },
   );
