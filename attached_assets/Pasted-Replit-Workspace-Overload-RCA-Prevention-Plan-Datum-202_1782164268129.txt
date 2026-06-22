@@ -1,0 +1,242 @@
+Replit-Workspace Overload — RCA + Prevention-Plan
+
+Datum: 2026-06-22
+Trigger: Replit-AI hat akute Symptome behoben (3 Workflows auto-start deaktiviert). Dauerhaft fixen + Re-Occur verhindern.
+Aktueller Server-Status: ✅ Replit-Dev läuft (uptime 258 s), GoBD-Trigger ok, budgetHardHolds.enabled: true (Phase 5 inzwischen scharfgeschaltet).
+
+
+A. Verifizierter Root-Cause
+
+Datei .replit, Zeilen 32–58 definieren einen Workflow "Project" mit mode = "parallel", der 6 Tasks gleichzeitig beim Workspace-Boot startet:
+
+TaskBefehlRessource-KostenStart applicationNODE_ENV=test tsx server/index.ts1 Node-Process + Postgres-Pool + Chromium-Singletontypechecknpm run check (tsc)RAM-Spike (TypeScript-AST aller 2000+ Files)lintnpm run lint (ESLint)CPU-Bursttestnpx tsx scripts/with-ephemeral-db.ts 5050 npx vitest runEigener Postgres-Container auf Port 5050 + 176 Test-Filesbilling-covCOVERAGE_PORT=5079 npx tsx script/coverage-gate.ts billingEigener Postgres-Container auf Port 5079 + Coverage-Reportere2e-smokenpm run test:e2e:smokeN Chromium-Browser parallel (Playwright fullyParallel: true, workers: undefined → alle CPU-Cores)
+
+Der eigentliche Killer: e2e-smoke mit playwright.config.ts:19 workers: process.env.CI ? 1 : undefined — im CI = 1 Worker (richtig), im Replit-Workspace = alle Cores parallel = N parallel laufende Chromium-Instanzen. Plus with-ephemeral-db startet zwei zusätzliche Postgres-Container.
+
+Folge:
+
+
+Workspace-Boot allokiert RAM für: 1× App-Chromium + N× E2E-Chromium + 3× Postgres + 1× tsc + 1× eslint + 1× coverage-tsx
+→ OOM-Risiko, Preview-Disconnects, Build-Failures
+Replit-AI's Workaround (auto-launch off für 3 Jobs) lebt nur im Replit-Workspace-UI, ist NICHT im Repo committed — beim nächsten Workspace-Reset/Branch-Switch ist alles wieder da.
+
+
+
+B. Layered Prevention Plan
+
+L1 — Sofort-Fix: .replit korrigieren (committed) 🔴
+
+Was: Den "Project"-Workflow umbauen, sodass nur Start application per Default beim Boot läuft. Die anderen Workflows bleiben als Run-Buttons verfügbar, starten aber nicht automatisch.
+
+Konkrete Änderung in .replit (Zeilen 30–58 ersetzen):
+
+toml# VORHER:
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+# ... 5 weitere parallel-Tasks
+
+# NACHHER:
+[workflows]
+runButton = "Start application"  # ← Default Run-Button = nur die App
+
+# Optionaler Composite-Workflow für „lokaler Vollcheck" — manuell triggerbar
+[[workflows.workflow]]
+name = "Full QA Check"          # Im Workflow-Panel auswählbar
+mode = "sequential"             # ← KEIN parallel mehr; sequenziell
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "typecheck"
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "lint"
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test"
+
+# e2e-smoke + billing-cov NIE im Composite — die sind on-demand-only
+
+Effekt: Beim Workspace-Boot startet nur die App. Wer "Full QA" will, klickt's manuell — und auch dann sequenziell statt parallel. e2e-smoke + billing-cov bleiben als einzelne Workflows verfügbar, aber niemals im Auto-Pfad.
+
+Aufwand: 0.25 PT. Wer: Du committest .replit. Wie testen: Branch-Switch + Workspace-Reset → nur App startet.
+
+
+L2 — Robustheits-Fix: Playwright-Worker-Cap auch außerhalb CI 🟡
+
+Was: playwright.config.ts:19 — workers: process.env.CI ? 1 : undefined ergänzen, sodass auch auf Replit gecappt wird.
+
+ts// VORHER (playwright.config.ts:19):
+workers: process.env.CI ? 1 : undefined,
+
+// NACHHER:
+workers: process.env.CI || process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN
+  ? 1
+  : undefined,
+
+Replit setzt automatisch REPL_ID und REPLIT_DEV_DOMAIN — beide existieren in der Codebase (siehe vite-plugin-meta-images.ts:40-44). Damit wird auch ein manuelles e2e-smoke im Workspace nur 1 Browser-Worker spawnen.
+
+Aufwand: 0.1 PT. Wer: Replit-AI. Wie testen: Workflow „e2e-smoke" manuell starten + ps aux | grep chromium → 1 Prozess statt N.
+
+
+L3 — Detektion: Memory-Watchdog im App-Boot 🟡
+
+Was: Im server/index.ts-Boot-Pfad einen einfachen Memory-Sampler einbauen, der bei kritischer Memory-Auslastung einen WARN-Log schreibt + im /api/health exposed:
+
+ts// server/index.ts (am Ende, nach app.listen)
+setInterval(() => {
+  const mem = process.memoryUsage();
+  const heapPct = (mem.heapUsed / mem.heapTotal) * 100;
+  const rssMB = Math.round(mem.rss / 1024 / 1024);
+  if (heapPct > 85 || rssMB > 1500) {
+    log(`MEM-WARN heap=${heapPct.toFixed(0)}% rss=${rssMB}MB`, "system");
+  }
+}, 30_000);
+
+Plus im /api/health Response:
+
+tsprocess: {
+  rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+  heapMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+  uptime: process.uptime(),
+}
+
+Wozu: Nächster Overload-Vorfall ist im Log + Health-Endpoint sofort sichtbar, nicht erst durch Preview-Disconnect.
+
+Aufwand: 0.25 PT. Wer: Replit-AI.
+
+
+L4 — Architektur-Test: .replit darf keine schweren Auto-Start-Tasks haben 🟢
+
+Was: Einen kleinen Architektur-Test, der .replit parst und sicherstellt, dass e2e-smoke, billing-cov, test nie im runButton-Composite-Workflow stehen:
+
+tests/architecture/replit-workflow-no-heavy-autostart.test.ts:
+
+tsimport { readFileSync } from "fs";
+import { describe, it, expect } from "vitest";
+
+describe("Architecture: .replit darf keine schweren Auto-Start-Tasks haben", () => {
+  it("runButton verweist nicht auf parallel mode mit e2e/test/coverage", () => {
+    const replit = readFileSync(".replit", "utf-8");
+    // Heuristik: finde runButton-Wert, dann finde dessen workflow, dann verbotene tasks
+    const runButtonMatch = replit.match(/runButton\s*=\s*"([^"]+)"/);
+    expect(runButtonMatch).toBeTruthy();
+    const runButton = runButtonMatch![1];
+    if (runButton === "Start application") return; // safe path
+    // Sonst: Workflow muss sequential UND ohne e2e-smoke/billing-cov/test sein
+    const section = extractWorkflowSection(replit, runButton);
+    expect(section).not.toMatch(/mode\s*=\s*"parallel"/);
+    for (const heavy of ["e2e-smoke", "billing-cov", "test"]) {
+      expect(section).not.toContain(heavy);
+    }
+  });
+});
+
+Wozu: Verhindert, dass jemand (oder Replit-AI) das .replit wieder „komfortabel" macht und die Workspace-Boot-Performance kaputt.
+
+Aufwand: 0.5 PT. Wer: Replit-AI oder Du. Läuft mit npm run test.
+
+
+L5 — Recovery: Health-basiertes Auto-Wake aus diesem Tool 🟢
+
+Was: Wenn der Replit-Dev hibernated, brauche ich (Cowork-Claude) einen Weg zum automatischen Wake-Up statt User-Manual-Klick.
+
+Befund: Replit-Dev wacht bei ANY HTTP-Request automatisch auf — aber wenn der Build kaputt ist (wie hier passiert), bleibt es stuck. Es gibt KEINEN externen API-Endpoint zum „Restart". Replit-AI muss es manuell tun, oder Du im Workspace.
+
+Empfehlung: Wenn das nochmal passiert:
+
+
+In Replit Console: kill -9 $(pgrep -f "node|chromium") + npm run dev neu starten
+Falls Build kaputt: in .replit run = "npm run dev" prüfen, ggf. npm ci triggern
+Notfall: Workspace-Snapshot-Restore (Replit-Feature: Versions-Historie)
+
+
+Diese Schritte würde ich in replit.md als „Emergency Restart Playbook" festhalten.
+
+Aufwand: 0.25 PT (Doku). Wer: Du oder Replit-AI.
+
+
+L6 — Dokumentation: replit.md ergänzen 🟢
+
+Sektion ergänzen:
+
+markdown## Workspace Bootup Discipline
+
+**WICHTIG:** Der Workspace-Boot startet NUR `Start application`. Alle Heavy-Jobs
+sind on-demand:
+
+- `test` (176 unit/integration tests, eigener Postgres) — manuell, Workflow-Panel
+- `billing-cov` (Coverage-Gate billing-modules) — manuell, vor PR
+- `e2e-smoke` (Playwright, Chromium) — manuell, vor Release
+
+**Warum:** Replit-Workspace hat 2-4 Cores / 4-8 GB RAM. Parallel-Spawn
+von Chromium + 3 Postgres + tsc + eslint + coverage triggert OOM und
+verhindert Preview-Restart.
+
+Composite-Workflow `Full QA Check` (sequenziell) ist die einzige zulässige
+Kette für lokale Vollvalidierung. Pre-Push: nur `npm run check && npm run test`.
+
+Aufwand: 0.1 PT.
+
+
+C. Implementierungs-Reihenfolge
+
+#FixEffortWerTrigger1L1 — .replit runButton + Workflow-Composite umbauen0.25 PTDu committestSofort2L4 — Architektur-Test, dass .replit heavy-Tasks fernhält0.5 PTReplit-AImit L13L2 — Playwright-Worker-Cap auf Replit-Detection0.1 PTReplit-AImit L14L3 — Memory-Watchdog + Health-Endpoint-Felder0.25 PTReplit-AIFolge-PR5L6 — replit.md ergänzen0.1 PTReplit-AI oder Dumit L16L5 — Emergency-Restart-Playbook0.25 PTReplit-AIFolge-PR
+
+Gesamt: 1.45 PT. Davon kritisch (verhindert Re-Occur): L1+L4 = 0.75 PT.
+
+
+D. Test des Fixes (so prüfst Du es)
+
+
+Vor dem Commit: .replit Patch-Diff lokal lesen, sicherstellen dass runButton = "Start application" und der Project-Workflow entfernt oder ohne parallel-mode ist.
+Nach dem Commit:
+
+Browser → Replit-Workspace öffnen
+Workspace-Reset oder Branch-Switch erzwingen (z.B. git checkout main && git pull)
+Workflow-Panel öffnen → sehen, dass NUR Start application läuft
+Preview prüfen → muss stabil laufen, kein Disconnect
+In Replit-Shell: top oder htop → nur 1 Node-Process + 1 Chromium-Singleton
+
+
+
+Manuelles Full-Check-Run:
+
+Klick Full QA Check → sequenziell typecheck → lint → test
+Klick e2e-smoke separat → mit Playwright-Worker-Cap = 1 Browser
+
+
+
+Architektur-Test: npm run test tests/architecture/replit-workflow-no-heavy-autostart.test.ts → grün
+
+
+
+E. Was ist NICHT die Lösung
+
+
+❌ Replit-AI's Workaround „auto-launch off im UI" — lebt nur in der Replit-Workspace-State, geht beim nächsten Reset verloren
+❌ Server-Größe erhöhen — wäre Geldverbrennung, das Problem ist die Workflow-Definition
+❌ Workflows ganz löschen — die Jobs sind nützlich, sollen halt nicht auto-starten
+❌ Manuelle „nur die App starten"-Disziplin — wird vergessen, neue Devs verstehen es nicht
+
+
+Die Kombination aus .replit-Patch (L1) + Architektur-Test (L4) + Doku (L6) macht es dauerhaft committed + selbst-überwachend + erklärt.
+
+
+F. Bonus-Beobachtung (außerhalb des akuten Scopes)
+
+Beim Health-Check sah ich gerade:
+
+json"budgetHardHolds": {"enabled": true}
+"budgetTransactionsImmutability": {"ok": true, "presentTriggers": [3x]}
+
+→ Phase 5 (Hard-Holds) ist inzwischen aktiviert. Mein Re-Test vom 2026-06-03 hatte das noch als „gegated, off" identifiziert. Inzwischen rolled out. Wenn Du willst, kann ich einen neuen Live-Test fahren um zu verifizieren, dass die ursprünglich offenen Bugs (NS-1 asOfDate, NS-3 §45a-Default) jetzt erledigt sind.
