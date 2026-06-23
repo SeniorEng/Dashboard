@@ -506,7 +506,6 @@ export const BulkSendInvoiceResponseSchema = component(
   z.object({
     summary: z.object({
       total: z.number().int(),
-      sent: z.number().int(),
       markedSent: z.number().int(),
       skipped: z.number().int(),
       errors: z.number().int(),
@@ -517,7 +516,7 @@ export const BulkSendInvoiceResponseSchema = component(
         invoiceNumber: z.string(),
         customerId: z.number().int(),
         billingType: z.string(),
-        status: z.enum(["sent", "marked_sent", "skipped", "error"]),
+        status: z.enum(["marked_sent", "skipped", "error"]),
         message: z.string().optional(),
       }),
     ),

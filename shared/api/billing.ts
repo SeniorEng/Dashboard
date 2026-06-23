@@ -182,9 +182,11 @@ export interface BatchSendInvoiceResponse {
   results: { invoiceId: number; invoiceNumber: string; status: string; error?: string; recipientEmail?: string }[];
 }
 
-// Task #534: Typenübergreifender Bulk-Versand. Pflegekassen-Entwürfe werden
-// manuell als „versendet" markiert (kein TI-Anschluss), Selbstzahler-Entwürfe
-// erhalten den Status „versendet" über den regulären Status-Pfad.
+// Task #534/#1403: Typenübergreifender Bulk-Versand. ALLE Entwürfe
+// (Pflegekassen gesetzlich + privat UND Selbstzahler) werden einheitlich
+// manuell als „versendet" markiert (kein TI-Anschluss, kein realer
+// E-Mail-Versand). Selbstzahler haben keinen eigenen „versendet"-Spezial-Pfad
+// mehr; daher kennt die Antwort nur noch `markedSent` (kein `sent`).
 // Krankenkassen-Filter: Liste der Pflegekassen, die im gewählten Monat/Jahr
 // mindestens eine Rechnung haben. Wird im Filter-Dropdown der
 // Abrechnungs-Seite angezeigt; `invoiceCount` dient als Hilfs-Label.
@@ -197,7 +199,6 @@ export interface PayerSummary {
 export interface BulkSendInvoiceResponse {
   summary: {
     total: number;
-    sent: number;
     markedSent: number;
     skipped: number;
     errors: number;
@@ -207,7 +208,7 @@ export interface BulkSendInvoiceResponse {
     invoiceNumber: string;
     customerId: number;
     billingType: string;
-    status: "sent" | "marked_sent" | "skipped" | "error";
+    status: "marked_sent" | "skipped" | "error";
     message?: string;
   }>;
 }

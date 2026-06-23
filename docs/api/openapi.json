@@ -1232,9 +1232,6 @@
               "total": {
                 "type": "integer"
               },
-              "sent": {
-                "type": "integer"
-              },
               "markedSent": {
                 "type": "integer"
               },
@@ -1247,7 +1244,6 @@
             },
             "required": [
               "total",
-              "sent",
               "markedSent",
               "skipped",
               "errors"
@@ -1273,7 +1269,6 @@
                 "status": {
                   "type": "string",
                   "enum": [
-                    "sent",
                     "marked_sent",
                     "skipped",
                     "error"

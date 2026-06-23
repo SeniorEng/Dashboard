@@ -276,7 +276,12 @@ export function InvoiceRow({
                 </Button>
               )}
 
-              {invoice.status === "entwurf" && invoice.billingType === "pflegekasse_privat" && (
+              {/* Task #1403: Privat-Kassen UND Selbstzahler nutzen denselben
+                  manuellen „Als versendet markieren"-Pfad — kein Spezial-Pfad
+                  mehr für Selbstzahler. Nur gesetzliche Kassen haben oben
+                  „An Kasse senden" als Primär-Aktion (Mark-Sent dort sekundär
+                  im Menü). */}
+              {invoice.status === "entwurf" && invoice.billingType !== "pflegekasse_gesetzlich" && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -288,20 +293,6 @@ export function InvoiceRow({
                 >
                   <Check className={`${iconSize.sm} mr-1`} />
                   <span>Als versendet markieren</span>
-                </Button>
-              )}
-
-              {invoice.status === "entwurf" && invoice.billingType !== "pflegekasse_gesetzlich" && invoice.billingType !== "pflegekasse_privat" && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                  onClick={() => statusMutation.mutate({ id: invoice.id, status: "versendet" })}
-                  disabled={statusMutation.isPending}
-                  data-testid={`button-status-versendet-${invoice.id}`}
-                >
-                  <Send className={`${iconSize.sm} mr-1`} />
-                  <span>Versendet</span>
                 </Button>
               )}
 

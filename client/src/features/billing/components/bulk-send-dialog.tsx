@@ -52,7 +52,7 @@ export function BulkSendDialog({
           <DialogTitle>Alle Rechnungen versenden</DialogTitle>
           <DialogDescription>
             Für {MONTH_NAMES[selectedMonth - 1]} {selectedYear} werden alle Entwürfe sequenziell verarbeitet.
-            Selbstzahler werden auf „versendet" gesetzt, Pflegekassen-Entwürfe manuell als versendet markiert
+            Alle Rechnungen (Pflegekassen und Selbstzahler) werden manuell als versendet markiert
             (solange kein TI-Anschluss besteht). Bereits versendete Rechnungen werden übersprungen.
           </DialogDescription>
         </DialogHeader>
@@ -88,10 +88,7 @@ export function BulkSendDialog({
                   <div className="font-medium text-gray-800 mb-1">Ergebnis</div>
                   <ul className="text-gray-700 space-y-0.5">
                     <li>
-                      <span className="text-green-700 font-medium">{bulkSendResult.summary.sent}</span> versendet (Selbstzahler)
-                    </li>
-                    <li>
-                      <span className="text-blue-700 font-medium">{bulkSendResult.summary.markedSent}</span> als versendet markiert (Pflegekassen)
+                      <span className="text-blue-700 font-medium">{bulkSendResult.summary.markedSent}</span> als versendet markiert
                     </li>
                     <li>
                       <span className="text-gray-600 font-medium">{bulkSendResult.summary.skipped}</span> übersprungen
@@ -153,16 +150,13 @@ export function BulkSendDialog({
                     <ul className="max-h-48 overflow-y-auto divide-y divide-gray-200 border border-gray-200 rounded bg-white">
                       {nonFailedResults.map((r) => {
                         const dotColor =
-                          r.status === "sent" ? "bg-green-500"
-                          : r.status === "marked_sent" ? "bg-blue-500"
+                          r.status === "marked_sent" ? "bg-blue-500"
                           : "bg-gray-400";
                         const labelColor =
-                          r.status === "sent" ? "text-green-700"
-                          : r.status === "marked_sent" ? "text-blue-700"
+                          r.status === "marked_sent" ? "text-blue-700"
                           : "text-gray-600";
                         const labelText =
-                          r.status === "sent" ? "versendet"
-                          : r.status === "marked_sent" ? "als versendet markiert"
+                          r.status === "marked_sent" ? "als versendet markiert"
                           : "übersprungen";
                         const label = r.invoiceNumber || `Rechnung #${r.invoiceId}`;
                         return (

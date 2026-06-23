@@ -2021,13 +2021,18 @@ router.post("/:id/mark-sent", asyncHandler("Status konnte nicht aktualisiert wer
     throw badRequest(`Rechnung hat Status "${invoice.status}" — nur Entwürfe können manuell als versendet markiert werden.`);
   }
 
-  // Task #533: Manuelles Markieren ist explizit ein Workaround, solange der
-  // TI-Anschluss fehlt. Selbstzahler- und Privat-Rechnungen werden bereits
-  // über `/:id/status` (Versand-Buttons) auf „versendet" gesetzt; das hier
-  // ist ausdrücklich Pflegekassen-Versand. Server-seitige Einschränkung,
-  // damit das Endpoint nicht als Generalumgehung benutzt werden kann.
-  if (invoice.billingType !== "pflegekasse_gesetzlich" && invoice.billingType !== "pflegekasse_privat") {
-    throw badRequest("Manuelles Markieren ist nur für Pflegekassen-Rechnungen vorgesehen. Selbstzahler-Rechnungen werden über den regulären Versand-Status verwaltet.");
+  // Task #533/#1403: Manuelles Markieren ist explizit ein Workaround, solange
+  // der TI-Anschluss fehlt. Es gilt einheitlich für alle Entwurfs-Rechnungen,
+  // die NICHT real per E-Mail versendet werden — also Pflegekassen (gesetzlich
+  // + privat) UND Selbstzahler. Selbstzahler haben keinen eigenen „Versendet"-
+  // Spezial-Pfad mehr, sie laufen genau wie Privat-Kassen über dieses Endpoint.
+  // Andere/unbekannte Rechnungstypen bleiben ausgeschlossen, damit das Endpoint
+  // nicht als Generalumgehung benutzt werden kann.
+  const isManualMarkType = invoice.billingType === "pflegekasse_gesetzlich"
+    || invoice.billingType === "pflegekasse_privat"
+    || invoice.billingType === "selbstzahler";
+  if (!isManualMarkType) {
+    throw badRequest("Manuelles Markieren ist nur für Pflegekassen- und Selbstzahler-Rechnungen vorgesehen.");
   }
 
   // Task #552: PDF-Cache nach dem Status-Übergang im Hintergrund versiegeln.
@@ -2077,7 +2082,7 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
   const { invoiceIds } = parsed.data;
 
-  type ResultStatus = "sent" | "marked_sent" | "skipped" | "error";
+  type ResultStatus = "marked_sent" | "skipped" | "error";
   const results: Array<{
     invoiceId: number;
     invoiceNumber: string;
@@ -2114,11 +2119,15 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
         continue;
       }
 
-      const isPflegekasse = invoice.billingType === "pflegekasse_gesetzlich"
-        || invoice.billingType === "pflegekasse_privat";
-      const isSelbstzahler = invoice.billingType === "selbstzahler";
+      // Task #1403: Alle bulk-verarbeiteten Entwürfe (Pflegekassen gesetzlich +
+      // privat UND Selbstzahler) werden einheitlich manuell „als versendet
+      // markiert" — kein realer E-Mail-Versand, kein Selbstzahler-Spezial-Pfad.
+      // Nur unbekannte Rechnungstypen werden übersprungen.
+      const isMarkSentType = invoice.billingType === "pflegekasse_gesetzlich"
+        || invoice.billingType === "pflegekasse_privat"
+        || invoice.billingType === "selbstzahler";
 
-      if (!isPflegekasse && !isSelbstzahler) {
+      if (!isMarkSentType) {
         results.push({
           invoiceId,
           invoiceNumber: invoice.invoiceNumber,
@@ -2142,7 +2151,7 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
           .where(eq(invoicesTable.id, invoiceId));
         audit.record({
           userId: req.user!.id,
-          action: isPflegekasse ? "invoice_marked_sent_manually" : "invoice_status_changed",
+          action: "invoice_marked_sent_manually",
           entityType: "invoice",
           entityId: invoiceId,
           metadata: {
@@ -2152,7 +2161,7 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
             oldStatus: invoice.status,
             newStatus: "versendet",
             source: "bulk_send",
-            ...(isPflegekasse ? { reason: "manual_mark_sent_no_ti" } : {}),
+            reason: "manual_mark_sent_no_ti",
           },
           ipAddress: req.ip,
         });
@@ -2163,7 +2172,7 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
         invoiceNumber: invoice.invoiceNumber,
         customerId: invoice.customerId,
         billingType: invoice.billingType,
-        status: isPflegekasse ? "marked_sent" : "sent",
+        status: "marked_sent",
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
@@ -2178,13 +2187,12 @@ router.post("/send-bulk", asyncHandler("Bulk-Versand fehlgeschlagen", async (req
     }
   }
 
-  const sent = results.filter(r => r.status === "sent").length;
   const markedSent = results.filter(r => r.status === "marked_sent").length;
   const skipped = results.filter(r => r.status === "skipped").length;
   const errors = results.filter(r => r.status === "error").length;
 
   res.json({
-    summary: { total: results.length, sent, markedSent, skipped, errors },
+    summary: { total: results.length, markedSent, skipped, errors },
     results,
   });
 }));
@@ -2393,7 +2401,6 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
   let marked = 0;
   for (const r of rendered) {
     const inv = r.invoice;
-    const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
     try {
       schedulePdfPersistInBackground(inv.id);
       await withAudit(async (tx, audit) => {
@@ -2401,9 +2408,12 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
         await tx.update(invoicesTable)
           .set({ sentAt: new Date() })
           .where(eq(invoicesTable.id, inv.id));
+        // Task #1403: Sammeldruck markiert ALLE enthaltenen Entwürfe einheitlich
+        // manuell als versendet (Pflegekassen + Selbstzahler) — kein realer
+        // E-Mail-Versand, kein Selbstzahler-Spezial-Pfad.
         audit.record({
           userId: req.user!.id,
-          action: isPflegekasse ? "invoice_marked_sent_manually" : "invoice_status_changed",
+          action: "invoice_marked_sent_manually",
           entityType: "invoice",
           entityId: inv.id,
           metadata: {
@@ -2413,7 +2423,7 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
             oldStatus: inv.status,
             newStatus: "versendet",
             source: "bulk_print",
-            ...(isPflegekasse ? { reason: "manual_mark_sent_no_ti" } : {}),
+            reason: "manual_mark_sent_no_ti",
           },
           ipAddress: req.ip,
         });

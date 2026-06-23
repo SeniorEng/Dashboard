@@ -1781,8 +1781,45 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(bulk.status, `send-bulk 200: ${JSON.stringify(bulk.data)}`).toBe(200);
     expect(bulk.data.summary.total).toBe(200);
     expect(bulk.data.summary.skipped).toBe(200);
-    expect(bulk.data.summary.sent).toBe(0);
     expect(bulk.data.summary.markedSent).toBe(0);
+  });
+
+  // ----------------------------------------------------------------
+  // BF-10.15b/c — Selbstzahler-Rechnungen werden genau wie Privat-Kassen
+  // manuell „als versendet markiert" (Task #1403). Es gibt KEINEN eigenen
+  // Selbstzahler-„versendet"-Spezial-Pfad mehr; /:id/mark-sent akzeptiert
+  // Selbstzahler-Entwürfe und send-bulk meldet sie als `marked_sent`.
+  // ----------------------------------------------------------------
+
+  it("BF-10.15b — /:id/mark-sent markiert einen Selbstzahler-Entwurf als versendet", async () => {
+    const draft = await createDraftSzInvoice("MARKSENT-SZ");
+
+    const res = await apiPost<any>(`/api/billing/${draft.id}/mark-sent`, {});
+    expect(res.status, `mark-sent Selbstzahler: ${JSON.stringify(res.data)}`).toBe(200);
+
+    const after = await apiGet<any>(`/api/billing/${draft.id}`);
+    expect(after.data.status).toBe("versendet");
+    expect(after.data.sentAt, "sentAt muss gesetzt sein").toBeTruthy();
+
+    // Audit: einheitliche Aktion (kein Selbstzahler-Spezial-Status mehr).
+    expect(await countAuditFor("invoice_marked_sent_manually", [draft.id])).toBe(1);
+  });
+
+  it("BF-10.15c — send-bulk meldet einen Selbstzahler-Entwurf als marked_sent", async () => {
+    const draft = await createDraftSzInvoice("BULKSENT-SZ");
+
+    const res = await apiPost<any>("/api/billing/send-bulk", { invoiceIds: [draft.id] });
+    expect(res.status, `send-bulk Selbstzahler: ${JSON.stringify(res.data)}`).toBe(200);
+    expect(res.data.summary.total).toBe(1);
+    expect(res.data.summary.markedSent).toBe(1);
+    expect(res.data.summary.skipped).toBe(0);
+    expect(res.data.summary.errors).toBe(0);
+
+    const row = res.data.results.find((r: any) => r.invoiceId === draft.id);
+    expect(row?.status).toBe("marked_sent");
+
+    const after = await apiGet<any>(`/api/billing/${draft.id}`);
+    expect(after.data.status).toBe("versendet");
   });
 
   // ----------------------------------------------------------------

@@ -327,14 +327,14 @@ export function useBillingMutations({
       const { summary } = data;
       toast({
         title: "Bulk-Versand abgeschlossen",
-        description: `${summary.sent + summary.markedSent} versendet, ${summary.skipped} übersprungen, ${summary.errors} Fehler`,
+        description: `${summary.markedSent} als versendet markiert, ${summary.skipped} übersprungen, ${summary.errors} Fehler`,
       });
 
       const expectMonth = selectedMonth;
       const expectYear = selectedYear;
       const sentIds = new Set(
         data.results
-          .filter((r) => r.status === "sent" || r.status === "marked_sent")
+          .filter((r) => r.status === "marked_sent")
           .map((r) => r.invoiceId),
       );
 
