@@ -1,33 +1,55 @@
 ---
-name: §45b forecast prod symptom vs deployment lag
-description: When a §45b "Verfügbar nach Planung" negative-value bug is reported in PROD but current code + prod data are clean, suspect an older deployed build, not a new logic defect.
+name: §45b forecast prod symptom — deployment-lag vs served-assembler bug
+description: A negative §45b "Verfügbar nach Planung" in PROD has TWO possible causes — an old deployed build (lag) OR a real bug in the SERVED assembler. Reproduce via the served path, not just the isolated readers.
 ---
 
-# §45b Forecast: Prod-Symptom ≠ neuer Code-Bug
+# §45b Forecast: same prod symptom, two distinct root causes
 
-A negative §45b „Verfügbar (nach Planung)" reported on the LIVE site (typical
-shape: a carryover still valid at the month horizon + a small Startwert + one H1
+A negative §45b „Verfügbar (nach Planung)" reported on LIVE (typical shape: a
+carryover still valid at the month horizon + a small Startwert + one H1
 consumption booked against the carryover, all open appts inside that month, yet
-shown as a negative remainder) is the **signature of the OLD asymmetric forecast
-math** — projected month-end allocation dropped the (still-valid-at-horizon)
-carryover/Startwert while the H1 consumption against it stayed, double-charging
-the running pot.
+shown as a negative remainder) can come from **either** of two unrelated causes.
+Do not stop at the first.
 
-That asymmetry was already fixed: forecast allocation and consumption-exclusion
-windows must come from the ONE SSoT `netAvailable45bAt(..., {projectFuture:true})`
-(symmetric carryover-expiry exclusion). Current repo code computes the correct
-**positive** value for that exact data.
+## Cause 1 — deployment lag (old asymmetric forecast math)
+The classic shape is the signature of the OLD asymmetric forecast: projected
+month-end allocation dropped the still-valid carryover/Startwert while the H1
+consumption against it stayed, double-charging the pot. That was fixed: forecast
+allocation + consumption-exclusion both come from the ONE SSoT
+`netAvailable45bAt(..., {projectFuture:true})`. If current repo code yields the
+correct **positive** value for the exact prod data ⇒ classify as deployment lag,
+re-publish, no new logic.
 
-**Why:** the live symptom persisted *after* the fix was merged because the
-deployed build predated it — a deployment-lag, not a new defect. Re-deriving a
-"new" fix would have been wasted work on already-correct code.
+## Cause 2 — served assembler leaks the §45b monthly cap into the forecast
+The §45b path is assembled by TWO layers: the isolated reader
+(`getBudgetSummary`) **and** the served merge (`getAllBudgetSummariesServed` →
+`mergeServed45b`). The unified reader intentionally monthly-caps
+`pot.availableCents` to the per-customer §45b monthly limit (a deliberate hard
+THIS-MONTH booking cap where display==booking). `mergeServed45b` then shifts the
+year-horizon `availableAfterPlannedCents` by a delta — and that delta MUST be
+derived from the **uncapped** pot remaining
+(`pot.allocatedCents − pot.consumedNetCents`, the same expression legacy uses
+for `signedAvailable`), so it reduces to the manual_adjustment exclusion (plus,
+in post-carryover-expiry windows, the symmetric carryover-expiry exclusion). If
+the delta is taken from the monthly-**capped** `pot.availableCents`, the (large)
+monthly-cap subtraction contaminates the year horizon and the forecast flips
+falsely negative — even though `getBudgetSummary` alone is correct.
 
-**How to apply:** before re-investigating a §45b forecast bug from a prod
-screenshot:
-1. Pull the customer's §45b allocations + transactions + open-appointment dates
-   read-only from prod (`PROD_DATABASE_URL` + `pg`, `BEGIN TRANSACTION READ ONLY`).
-2. Reproduce against DEV by seeding that exact data and calling the REAL
-   `calculateAllocatedCents` / `netAvailable45bAt` / `getBudgetSummary`.
-3. If current code yields the correct value and prod data is clean ⇒ classify as
-   **deployment lag → re-publish**, no prod data change, no new logic. Only chase a
-   code fix if the reproduction is actually negative.
+**Why:** a per-customer §45b monthly limit makes the served `availableCents`
+(this-month cap) and the legacy `availableCents` (yearly pot) diverge by a large
+amount; the merge was originally written assuming the only divergence was the
+small manual_adjustment exclusion. Customers with a §45b monthly limit are the
+trigger.
+
+## How to apply (before re-investigating from a prod screenshot)
+1. Pull the customer's §45b type-settings (incl. `monthlyLimitCents`),
+   allocations, transactions, and open-appt dates read-only from prod
+   (`PROD_DATABASE_URL` + `pg`, `BEGIN TRANSACTION READ ONLY`).
+2. Reproduce in DEV by seeding that exact data and calling **both**
+   `getBudgetSummary` AND `getAllBudgetSummariesServed` at the same asOfDate.
+3. If `getBudgetSummary` is positive but `getAllBudgetSummariesServed` is
+   negative ⇒ it's the served-assembler bug (Cause 2), not deployment lag. A
+   regression test that only drives the isolated readers will NOT catch it — it
+   must drive `getAllBudgetSummariesServed`.
+4. Only classify as deployment lag (Cause 1) when BOTH paths are correct on
+   current code for the real prod data.

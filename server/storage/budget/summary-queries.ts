@@ -586,22 +586,44 @@ export async function getAllBudgetSummaries(customerId: number, asOfDate: string
 
 /**
  * §45b: Legacy-Gerüst + unified Available. `availableCents`,
- * `currentMonthAvailableCents` kommen 1:1 aus dem unified Reader; die
- * Planungs-Projektion `availableAfterPlannedCents` wird um exakt die Differenz
- * (= im Wesentlichen der nicht mehr abgezogene `manual_adjustment`)
- * verschoben, damit „Verfügbar" und „Verfügbar nach Planung" konsistent auf
- * derselben Basis stehen.
+ * `currentMonthAvailableCents` kommen 1:1 aus dem unified Reader (inkl. des
+ * per-Kunde §45b-Monats-Buchungs-Caps, Task #1171) — sie beantworten „wieviel
+ * §45b ist DIESEN Monat noch buchbar".
+ *
+ * Die Planungs-Projektion `availableAfterPlannedCents` ist dagegen der JAHRES-
+ * Horizont (Task #704/#1366, `netAvailable45bAt` mit `projectFuture`). Sie wird
+ * NUR um die `manual_adjustment`-Exklusion verschoben (der unified Reader
+ * schließt `manual_adjustment` bewusst aus, das Legacy-Gerüst zieht es ab) —
+ * NICHT um den Monats-Cap.
+ *
+ * Task #1397 — Vorher wurde der Verschiebungs-Delta aus dem MONATS-GEKAPPTEN
+ * `pot.availableCents` abgeleitet (`pot.availableCents − legacy.availableCents`).
+ * Bei Kunden mit konfiguriertem §45b-Monatslimit zog das den (großen) Monats-
+ * Cap-Abzug in die Jahres-Projektion und kippte „Verfügbar nach Planung"
+ * fälschlich negativ (Kretlow-Inzident: −184,02 € trotz +1715,48 € Jahres-Topf;
+ * jeder Folgemonat erhält ohnehin einen frischen Monats-Cap, der Cap gehört
+ * also NICHT in den Jahres-Horizont). Der Delta wird daher aus der UNGEKAPPTEN
+ * Topf-Verfügbarkeit (`allocatedCents − consumedNetCents` — exakt der Ausdruck,
+ * den auch der Legacy-Forecast in `getBudgetSummary` für `signedAvailable`
+ * nutzt) gegen die Legacy-`availableCents` gebildet. Beide Seiten teilen
+ * Allokation und Konsum; der Delta ist damit Holds- und Monats-Cap-FREI. Im
+ * Normalfall reduziert er sich auf den nicht mehr abgezogenen
+ * `manual_adjustment`; in Rand-Stichtagen (abgelaufener Übertrag,
+ * `excludedConsumedNetCents > 0`) trägt er zusätzlich die #1340-Carryover-
+ * Verfalls-Symmetrie — das ist gewollt, weil so die ausgelieferte Projektion
+ * exakt der symmetrischen Legacy-Projektion folgt.
  */
 export function mergeServed45b(legacy: BudgetSummary, pot: PotAvailability): BudgetSummary {
   if (!legacy.isCurrentlyActive) {
     return { ...legacy, availableCents: 0, currentMonthAvailableCents: 0, availableAfterPlannedCents: 0 };
   }
-  const availableDelta = pot.availableCents - legacy.availableCents;
+  const uncappedPotRemainingCents = pot.allocatedCents - pot.consumedNetCents;
+  const manualAdjustmentDelta = uncappedPotRemainingCents - legacy.availableCents;
   return {
     ...legacy,
     availableCents: pot.availableCents,
     currentMonthAvailableCents: Math.max(0, pot.availableCents),
-    availableAfterPlannedCents: legacy.availableAfterPlannedCents + availableDelta,
+    availableAfterPlannedCents: legacy.availableAfterPlannedCents + manualAdjustmentDelta,
   };
 }
 

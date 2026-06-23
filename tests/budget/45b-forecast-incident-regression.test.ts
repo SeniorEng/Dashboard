@@ -31,7 +31,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../server/lib/db";
 import { appointments, appointmentServices } from "@shared/schema";
 import { createConsumptionTransaction } from "../../server/storage/budget/consumption-engine";
-import { getBudgetSummary } from "../../server/storage/budget/summary-queries";
+import { getBudgetSummary, getAllBudgetSummariesServed } from "../../server/storage/budget/summary-queries";
 import { netAvailable45bAt } from "../../server/storage/budget/net-available-45b";
 import { setupBudgetScenario, type BudgetScenarioHandle } from "../helpers/budget-scenarios";
 import { getAuthCookie, runCleanup, apiGet } from "../test-utils";
@@ -181,5 +181,43 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
     // entstehen.
     expect(summary.availableAfterPlannedCents).toBeGreaterThan(0);
     expect(summary.plannedShortfallMonth).toBeNull();
+  });
+
+  // Task #1397 — Der AUSGELIEFERTE Pfad (`getAllBudgetSummariesServed` →
+  // `mergeServed45b`), nicht nur die isolierten Reader. Auf LIVE zeigte exakt
+  // dieser Assembler den -184,02-€-Wert: der unified Reader kappt §45b auf den
+  // per-Kunde Monats-Buchungs-Cap (Task #1171), und der alte Merge zog diesen
+  // (großen) Monats-Cap-Abzug fälschlich in die JAHRES-Projektion
+  // `availableAfterPlannedCents`. Der #1395-Test trieb diesen Pfad NICHT.
+  it("Served-Pfad: §45b-Monats-Cap bleibt auf „Verfügbar“, verschmutzt aber NICHT die Jahres-Projektion (nie -184,02 €)", async () => {
+    const h = await makeIncidentCustomer();
+    await bookH1Consumption(h.customerId, h.employeeId, 30);
+    for (const p of JUNE_PLAN) {
+      await addPlannedAppt(h.customerId, h.employeeId, p.date, p.minutes);
+    }
+
+    const legacy = await getBudgetSummary(h.customerId, undefined, undefined, AS_OF_JUNE);
+    const served = await getAllBudgetSummariesServed(h.customerId, AS_OF_JUNE);
+    const s45b = served.entlastungsbetrag45b;
+
+    // Regressionskern: die ausgelieferte Projektion bleibt klar positiv und
+    // niemals der negative Inzident-Wert.
+    expect(s45b.availableAfterPlannedCents).toBeGreaterThan(0);
+    expect(s45b.plannedShortfallMonth).toBeNull();
+
+    // Ohne `manual_adjustment` ist der Merge-Delta exakt 0 ⇒ die ausgelieferte
+    // Jahres-Projektion ist BYTE-IDENTISCH zur Legacy-Projektion. Das pinnt,
+    // dass der Monats-Cap NICHT mehr in den Forecast leakt.
+    expect(s45b.availableAfterPlannedCents).toBe(legacy.availableAfterPlannedCents);
+
+    // Der per-Kunde §45b-Monats-Cap (Task #1171) bleibt bewusst auf der
+    // „Verfügbar (diesen Monat)"-Sicht: die ausgelieferte `availableCents` ist
+    // auf das Monatslimit geklemmt (≪ der ungekappte Jahres-Topf) — und damit
+    // strikt KLEINER als die Jahres-Projektion. Genau diese (legitime)
+    // Diskrepanz hatte der alte Merge in den Forecast gespiegelt.
+    expect(s45b.availableCents).toBeLessThanOrEqual(MONTHLY_45B_CENTS);
+    expect(s45b.availableCents).toBeLessThan(legacy.availableCents);
+    expect(s45b.availableCents).toBeLessThan(s45b.availableAfterPlannedCents);
+    expect(s45b.currentMonthAvailableCents).toBe(Math.max(0, s45b.availableCents));
   });
 });
