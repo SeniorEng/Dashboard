@@ -2,62 +2,18 @@
 Streamlines elderly care service management for caregivers, enhancing efficiency and data integrity.
 
 ## Run & Operate
-- ⚠️ Workflow 'Project' ist legacy — NICHT klicken. Einzeln-Workflows aus dem Panel nutzen. Siehe Replit-Workspace-Overload-Prevention-Plan.md
-- **Run Dev**: `npm run dev` (client & server)
-- **Run Server**: `npm run start` (server only)
-- **Build**: `npm run build`
-- **Typecheck**: `npm run check`
-- **Test**: `npm run test` (= `vitest run`). Vitest ist in zwei Projects getrennt: `unit` (reine Logik-/Fitness-Tests aus `tests/unit/` + `tests/architecture/`, **parallel**, kein Server/DB) und `integration` (alle übrigen `tests/**`). Einzelnes Project: `vitest run --project unit`. Die Workflows `test`/`e2e-smoke` laufen über den Orchestrator `scripts/with-ephemeral-db.ts` (isolierte Wegwerf-DBs pro Worker + dedizierte App-Server + geseedeter Template-Cache), NICHT gegen die Dev-DB. Vollständiges Runbook (Configs, Orchestrator, Template-Cache, Env-Schalter): [`docs/test-infrastructure.md`](docs/test-infrastructure.md). Bekannte Flakes + Policy: [`docs/flaky-tests.md`](docs/flaky-tests.md).
-- **DB Push**: `drizzle-kit push`
-- **Dev-DB Backup/Reseed**: `npm run db:backup-dev` (Pre-Phase-Snapshot der Dev-DB, hält letzte 5 pro Format vor) · `npm run db:reseed-dev` (Trockenlauf; `-- --apply` setzt die Dev-DB auf saubere synthetische Basis zurück, danach `Start application`-Workflow neu starten). NUR Dev, nie Prod (Guards). Runbook: [`docs/dev-database-runbook.md`](docs/dev-database-runbook.md).
-- **Mutation Test**: `npm run mutation` (Stryker, Incremental-Mode, nur die kritischen puren Berechnungs-Module — Runbook: `docs/mutation-testing.md`). Eigener CI-Job `mutation` (nur bei `pull_request`, nur auf geänderten Hotspot-Dateien, Score-Gate break 60 %).
-- **CI**: GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Request mit 10 Pflicht-Gates (typecheck, lint, `vitest run`, Architektur-Fitness-Functions, `npm run audit:ci` (better-npm-audit + `.nsprc`-Allowlist), e2e-smoke, Targeted-Coverage-Gates, OpenAPI-Drift, E-Rechnung-Validierung EN 16931/PDF/A-3). DB-/Server-Gates brauchen die Repo-Secrets `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` (werden sonst sauber übersprungen). `main` auf `SeniorEng/Dashboard` ist branch-protected (Required-Checks `static-analysis`/`tests`/`e2e-smoke`/`erechnung-validation`). Vollständiges Runbook (alle 10 Gates, Neon-Proxy in CI, Test-User-Seed, Branch-Protection): [`docs/ci-pipeline.md`](docs/ci-pipeline.md).
-- **Env Vars**: vollständige Liste siehe Tabelle unten. (WhatsApp läuft ebenfalls über die Twilio-Credentials; Meta-Cloud-API-Token werden nicht mehr benötigt.)
-- **Dependencies / Renovate**: Dependency-Updates werden automatisch über den [Renovate-Bot](https://docs.renovatebot.com/) (`renovate.json`) gemanagt — gruppierte Wochen-PRs, nur grüne **Patch**-Updates auf **Dev-Dependencies** auto-mergen, Vulnerability-Alerts sofort. Renovate läuft als self-hosted Action `.github/workflows/renovate.yml` (Repo-Secret `RENOVATE_TOKEN` als PAT nötig). Vollständiges Runbook (Gruppierung, Auto-Merge-Regeln, Pausieren, PAT-Anforderungen): [`docs/dependency-management.md`](docs/dependency-management.md).
-
-### Environment Variables
-
-| Name | Required/Optional | Default | Zweck |
-|---|---|---|---|
-| `DATABASE_URL` | Required | — | PostgreSQL-Connection-String (Neon serverless). |
-| `ENCRYPTION_KEY` | Required | — | 64-char Hex-Key für AES-256-GCM-Verschlüsselung sensibler Spalten (`encryptedText`) und `company_settings`-API-Secrets. Fehlt der Key, werden Secrets unverschlüsselt gespeichert/gelesen (Graceful Fallback, nicht für Prod). |
-| `NODE_ENV` | Required | — | `development` / `production` / `test`. Steuert u.a. Puppeteer-Launch-Flags (`--single-process` AUS in Prod) und Logging. |
-| `TWILIO_ACCOUNT_SID` | Required | — | Twilio-Account-SID (Voice-Call-Bridge + WhatsApp Content API). |
-| `TWILIO_AUTH_TOKEN` | Required | — | Twilio-Auth-Token. Per Kunde via `whatsapp_access_token` in `company_settings` overridebar. |
-| `TWILIO_PHONE_NUMBER` | Required | — | Twilio-Absendernummer für Voice-Call-Bridge / Lead-Anrufe. |
-| `QONTO_SECRET_KEY` | Required | — | Qonto-Bank-API Secret für Payment-Matching. |
-| `QONTO_LOGIN` | Required | — | Qonto-Bank-API Login. |
-| `LETTEREXPRESS_API_KEY` | Required | — | LetterExpress API-Key für postalischen Dokumentversand. |
-| `APP_URL` | Optional | `""` | Öffentliche Basis-URL für ausgehende Links (WhatsApp-Buttons etc.). Fallback hinter `REPLIT_DEV_DOMAIN`. |
-| `REPLIT_DOMAINS` | Optional (Replit-Runtime) | — | Komma-separierte Prod-Domains. Erste Domain wird für E-Mail-Absender und Twilio-Webhook-URLs verwendet. |
-| `REPLIT_DEV_DOMAIN` | Optional (Replit-Runtime) | — | Dev-Domain-Hostname als Fallback hinter `REPLIT_DOMAINS` für E-Mails / WhatsApp-Links. |
-| `REPL_OWNER` | Optional (Replit-Runtime) | — | Repl-Owner-Slug für Twilio-Call-Bridge-Webhook-URL-Generierung. |
-| `REPL_SLUG` | Optional (Replit-Runtime) | — | Repl-Slug für Twilio-Call-Bridge-Webhook-URL-Generierung. |
-| `PORT` | Optional | `5000` | HTTP-Listen-Port des Express-Servers. |
-| `SUPER_ADMIN_EMAIL` | Optional | — | E-Mail eines Users, der beim Startup automatisch zum Superadmin promoted wird. Fehlt = Promotion übersprungen. |
-| `EMAIL_TRANSPORT` | Optional | Auto (stub in Dev/Test, real in Prod) | `real` erzwingt echten SMTP-Versand, `stub` erzwingt In-Memory-Stub. |
-| `EMAIL_WEBHOOK_SECRET` | Optional | — | Shared Secret für Inbound-E-Mail-Webhook (`/api/webhook/inbound-email`). Fehlt = Webhook akzeptiert keine Requests. |
-| `PUBLIC_OBJECT_SEARCH_PATHS` | Required für Object Storage | — | Komma-separierte Such-Pfade für öffentliche Assets im Object-Storage-Bucket. |
-| `PRIVATE_OBJECT_DIR` | Required für Object Storage | — | Pfad für private Uploads (Dokumente, Signaturen, generierte PDFs) im Object-Storage-Bucket. |
-| `CHROMIUM_PATH` | Optional | Auto (`which chromium` / `which chromium-browser` / `/usr/bin/chromium*`) | Override für Chromium-Binary-Pfad (Puppeteer). In Deployments empfohlen zu setzen. |
-| `PUPPETEER_SINGLE_PROCESS` | Optional | `1` in Dev/Test, `0` in Prod | `1`/`true` erzwingt `--single-process`, `0`/`false` verbietet es. |
-| `PUPPETEER_NO_ZYGOTE` | Optional | unset | `1`/`true` erzwingt `--no-zygote`, `0`/`false` verbietet es. |
-| `PDF_RENDER_CONCURRENCY` | Optional | `2` | Max. paralleler PDF-Renderings (ein laufender + ein wartender bei Default). |
-| `STATS_HEALTH_YELLOW` | Optional | `5` | Schwellwert (Tage) für gelben Health-Status in Statistik-Cockpit. |
-| `STATS_HEALTH_RED` | Optional | `20` | Schwellwert (Tage) für roten Health-Status in Statistik-Cockpit. |
-| `NEON_LOCAL_WS_PROXY` | Optional (nur CI/Local) | unset | Host:Port eines Neon-WebSocket-Proxys (z.B. `localhost:4444`). Gesetzt = `server/lib/db.ts` schaltet Secure-WS/TLS-Pipelining ab und routet den WebSocket über den Proxy, um gegen plain Postgres zu testen. NICHT in Produktion setzen (echter Neon-Host braucht Secure-WS). |
+- ⚠️ Workflow `Project` ist Legacy — **NICHT klicken** (startet alles parallel → Workspace-Overload). Nur `Start application` bootet automatisch; Checks einzeln aus dem Panel. Siehe [Workspace-Boot](#workspace-boot--stabilität).
+- **Run Dev**: `npm run dev` (client & server) · **Run Server**: `npm run start` (server only)
+- **Build**: `npm run build` · **Typecheck**: `npm run check` · **DB Push**: `drizzle-kit push`
+- **Test**: `npm run test` (= `vitest run`). Zwei Vitest-Projects (`unit` parallel, kein Server/DB · `integration` über Ephemeral-DB-Orchestrator). Runbook: [`docs/test-infrastructure.md`](docs/test-infrastructure.md) · Flakes: [`docs/flaky-tests.md`](docs/flaky-tests.md).
+- **Dev-DB Backup/Reseed**: `npm run db:backup-dev` · `npm run db:reseed-dev` (`-- --apply` scharf). NUR Dev (Guards). Runbook: [`docs/dev-database-runbook.md`](docs/dev-database-runbook.md).
+- **Mutation Test**: `npm run mutation` (Stryker, nur pure Berechnungs-Module). Runbook: [`docs/mutation-testing.md`](docs/mutation-testing.md).
+- **CI**: GitHub Actions (`.github/workflows/ci.yml`), 10 Pflicht-Gates; `main` auf `SeniorEng/Dashboard` ist branch-protected. Runbook: [`docs/ci-pipeline.md`](docs/ci-pipeline.md).
+- **Dependencies**: Renovate-Bot (`renovate.json`), gruppierte Wochen-PRs + Vulnerability-Alerts. Runbook: [`docs/dependency-management.md`](docs/dependency-management.md).
+- **Env Vars**: vollständige Tabelle (Zweck, Defaults, Required/Optional) in [`docs/environment-variables.md`](docs/environment-variables.md).
 
 ## Workspace-Boot & Stabilität
-⚠️ **Boot-Disziplin (Task #541):** Beim Start des Workspaces darf NUR der Workflow `Start application` automatisch booten. Die fünf Check-Workflows (`typecheck`, `lint`, `test`, `billing-cov`, `e2e-smoke`) und `Full QA Check` sind **On-Demand** — einzeln aus dem Workflow-Panel starten, nie alle gleichzeitig. Der Sammel-Workflow `Project` (startet alles parallel) ist **Legacy — NICHT klicken**, sonst überlastet der Workspace (RAM/OOM, Preview-Disconnect). Der Run-Button muss auf `Start application` zeigen (einmalig im Run-Dropdown gesetzt → dauerhaft in `.replit`). Verriegelt durch die Fitness-Function `tests/architecture/replit-boot-path.test.ts`. Voller RCA-Plan: [`Replit-Workspace-Overload-Prevention-Plan.md`](Replit-Workspace-Overload-Prevention-Plan.md).
-
-**Schutzschichten:** Playwright im Workspace/CI auf 1 Worker gedrosselt (`playwright.config.ts`); Memory-Watchdog (`server/lib/memory-watchdog.ts`) warnt im Log vor RAM-Knappheit (Schwellen `MEMORY_WATCHDOG_WARN_MB` / `MEMORY_WATCHDOG_INTERVAL_MS`); `/api/health` meldet live `memory.rssMB`/`heapMB`/`heapTotalMB` + `uptime`.
-
-### Emergency-Restart-Playbook
-Workspace hängt / Preview tot / `spawn EAGAIN`:
-1. Laufende Heavy-Workflows im Panel stoppen (`test`, `billing-cov`, `e2e-smoke`, ggf. `typecheck`/`lint`); `Project` NICHT starten.
-2. `Start application` neu starten (Run-Button oder Panel).
-3. Gesundheit prüfen: `curl -s localhost:5000/api/health | jq '.memory'` — `rssMB` deutlich unter dem Container-Limit.
-4. Checks danach einzeln laufen lassen, oder `Full QA Check` für sequentiell `typecheck → lint → test`.
+⚠️ **Boot-Disziplin:** Beim Workspace-Start darf **nur** `Start application` automatisch booten. Die Check-Workflows (`typecheck`, `lint`, `test`, `billing-cov`, `e2e-smoke`, `Full QA Check`) sind **On-Demand** — einzeln starten, nie alle gleichzeitig. Der Sammel-Workflow `Project` ist **Legacy — NICHT klicken** (RAM/OOM, Preview-Disconnect). Der Run-Button muss auf `Start application` zeigen; verriegelt durch `tests/architecture/replit-boot-path.test.ts`. Vollständiger RCA-Plan, Schutzschichten (Playwright 1 Worker, Memory-Watchdog, `/api/health`-Memory) und Emergency-Restart-Playbook: [`Replit-Workspace-Overload-Prevention-Plan.md`](Replit-Workspace-Overload-Prevention-Plan.md).
 
 ## Stack
 - **Frontend**: React 19, TypeScript, Vite, Wouter, `shadcn/ui`, Tailwind CSS v4, TanStack Query
@@ -78,7 +34,7 @@ Workspace hängt / Preview tot / `spawn EAGAIN`:
 - **GoBD Compliance**: Soft-Deletes, Historisierung, Audit-Logging aller kritischen Operationen, server-seitige PDF-Generierung mit Integritäts-Hash. Budget-Historisierung: [`docs/architecture/budget.md`](docs/architecture/budget.md#gobd-historisierung-budget-tabellen).
 - **Centralized Logic**: Telefon-/Adress-Formatierung, Error-Handling, Logging und Access-Control liegen zentral in shared Utilities / Middleware.
 - **Budget-Domäne**: Three-Pot-Ledger (§45b/§45a/§39+§42a) mit Cascading-Allocation, FIFO für §45b, Auto-Renewal und Selbstzahler-Routing. Detail: [`docs/architecture/budget.md`](docs/architecture/budget.md).
-- **Automatischer Monatsabschluss**: Cutoff = 8. des Folgemonats (auf vorherigen Werktag verschoben bei Wochenende/Feiertag, `shared/utils/month-close-cutoff.ts`). `month-close-scheduler` schließt am Cutoff-Tag 23:00 Berlin alle Mitarbeiter mit Vormonats-Aktivität; Reminder T-3/T-1/T-0 (WhatsApp+Email+Banner). Undokumentierte Termine → Status `expired_unsigned` (aus Export & Statistik ausgeschlossen, Filter `status='completed'`). Nach Auto-Close ändern/öffnen nur Superadmins (Wieder-Öffnen mit Pflicht-Begründung ≥10 Zeichen, Audit-Log).
+- **Automatischer Monatsabschluss**: Cutoff = 8. des Folgemonats (Werktags-Verschiebung), Auto-Close 23:00 Berlin am Cutoff-Tag, Reminder T-3/T-1/T-0, undokumentierte Termine → `expired_unsigned` (aus Export/Statistik ausgeschlossen). Nach Auto-Close ändern/öffnen nur Superadmins. Runbook: [`docs/month-close-automation-runbook.md`](docs/month-close-automation-runbook.md).
 
 ## Product
 - **Core**: Terminplanung, Tracking und Dokumentation (digitale Unterschriften).
@@ -122,5 +78,5 @@ Workspace hängt / Preview tot / `spawn EAGAIN`:
 - **E2E Edit-Persistence Smoke-Suite**: `e2e/smoke/edit-persistence.spec.ts` (`npm run test:e2e:smoke`). Jedes neue Bearbeitungsformular braucht einen Round-Trip-Test über `expectFieldPersisted` (`e2e/helpers/round-trip.ts`) mit vollständigem `page.reload()` nach Save.
 - **E-Rechnungs-Validierung (ZUGFeRD/Factur-X EN 16931)**: `docs/erechnung-validation.md` — `npm run validate:erechnung` (Mustang/KoSIT + veraPDF, ohne Java sauberer Skip), CI-Gate `erechnung-validation`. Standard-Profil = `en16931`; Non-Strict-Fallback per Audit-Log `invoice_zugferd_nonstrict_seal`. **Abgrenzung**: die eingebettete XML ist die EN-16931-USt-Rechnung, NICHT der §105 SGB XI / §302 SGB V Sozialdaten-Austausch.
 - **Sozialdaten-Austausch §105 SGB XI / §302 SGB V (Sondierung)**: `docs/research/sgb-datenaustausch-302-105.md` — Entscheidungsvorlage (keine Implementierung), Empfehlung Abrechnungszentrum (z.B. DMRZ), strikt getrennt von der ZUGFeRD-Rechnung.
-- **Runbooks**: Mutation-Testing `docs/mutation-testing.md` · Pre-Publish-Backup (Prod) `docs/pre-publish-backup-runbook.md` · Dev-DB-Reseed/Backup `docs/dev-database-runbook.md` · Deployment-Log `docs/deployment-log.md`
-- **Configs**: `knip.json` (Dead-Code), `tailwind.config.ts`, `vite.config.ts`
+- **Runbooks**: Test-Infrastruktur `docs/test-infrastructure.md` · CI-Pipeline `docs/ci-pipeline.md` · Dependency-Management `docs/dependency-management.md` · Mutation-Testing `docs/mutation-testing.md` · Monatsabschluss `docs/month-close-automation-runbook.md` · Pre-Publish-Backup (Prod) `docs/pre-publish-backup-runbook.md` · Dev-DB-Reseed/Backup `docs/dev-database-runbook.md` · Deployment-Log `docs/deployment-log.md`
+- **Configs**: `knip.json` (Dead-Code), `vite.config.ts`; Tailwind v4 wird CSS-seitig in `client/src/index.css` (`@theme`) via `@tailwindcss/vite` konfiguriert (kein `tailwind.config.ts`).
