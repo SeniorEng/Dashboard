@@ -1,0 +1,307 @@
+Antworten auf die 8 Reviewer-Fragen zum SSoT-Plan
+
+Rolle: Independent Reviewing AI
+Plan-Stand: Hybrid-D1 + Lock-Symbol-D2 + Visual-Skip-D3 + 6 Ergänzungen
+Datum: 2026-06-22
+
+
+Q1 — €-Doppelzählung bei Status-Duplikation
+
+Regel: „Eine Card kann in N Stages erscheinen, aber jeder € lebt in genau einer Stage."
+
+Trenne Cases (zählen = die offene Arbeit, darf duplizieren) von € (rechnen = Geld, darf NICHT duplizieren).
+
+Konkrete Attribution:
+
+€ pro Stage = Σ aller Atomic-Units (Termine VOR Topf-Split, Rechnungen NACH Topf-Split),
+              deren aktueller Status genau dieser Stage entspricht
+
+Beispiel — Kunde Müller, Mai:
+
+
+4 Termine in „Offen" → erscheinen unter Offen mit € der 4 Termine
+2 Termine in „Dokumentiert" → erscheinen unter Dokumentiert mit € der 2
+1 Rechnung in „Versendet" für §45b (3 dokumentierte+signierte Termine) → erscheint unter Versendet mit € der Rechnung
+Müller-Card erscheint in allen 3 Stages, aber jeder € wird genau einmal gezählt
+
+
+KPI-Strip-Regel:
+
+AnzeigeQuelle„47 Cases in Dokumentiert"dedupe (customer, monat) — kann <Σ(Cases) sein„2.847 € in Dokumentiert"Σ(termin.€ where stage='Dokumentiert') — exakt„Gesamtumsatz Mai 156.234 €"Σ(€ über alle Stages) — muss matchen mit klassischer Umsatz-Statistik
+
+Gegenprobe: Σ(€ über alle Stages + Side-Badges) === Monatsumsatz-Statistik. Diese Equality-Invariante als Architektur-Test verankern.
+
+
+Q2 — Hybrid-Bruchkante (D1) — Verzweigung Kunde×Monat → Pot-Cards
+
+Das ist explizit ein Feature, kein Bug — aber muss visuell sauber kommuniziert werden.
+
+Bei partiellem Invoiced (Müller, 3 Töpfe, Topf §45b schon Rechnung):
+
+StageWas erscheintUnterschrieben (LN)Müller-Card mit Progress-Badge „1/3 Töpfe abgerechnet" + Inline-Action „Restliche Töpfe abrechnen"Rechnung erstelltMüller-§45b-Card (die fertige Rechnung)
+
+Wenn der User auf der „Unterschrieben"-Card auf „Restliche Töpfe abrechnen" klickt, verzweigt es weiter: die Card verschwindet aus „Unterschrieben" (alle Töpfe sind jetzt mindestens „Rechnung erstellt"), 3 Pot-Cards stehen in „Rechnung erstellt".
+
+Counts/Navigation:
+
+
+„1/3"-Badge ist self-explanatory
+Klick auf die Müller-Card öffnet das Detail-Layer mit Pot-Übersicht-Tabelle (3 Zeilen — eine pro Topf, mit aktuellem Topf-Stage)
+Cross-Linker (aus Empfehlung #1) highlights ALLE Cards mit customerId=Müller, month=05 cross-stage — der User sieht den ganzen Fall auf einen Blick
+
+
+Was NICHT machen: keine „Master/Detail"-Card. Das wäre eine 3. Hierarchie-Ebene → NN/G-Grenze (>2 Layer Progressive Disclosure verboten).
+
+
+Q3 — Zwei Achsen: Close (Mitarbeiter×Monat) vs. Billing (Kunde×Monat)
+
+Das ist die wichtigste konzeptionelle Frage im ganzen Plan. Mein Vorschlag: Side-Panel-Pattern statt Inline-Merge.
+
+Mein Vorschlag:
+
+┌──────────────────────────────────────────────────┐
+│ KPI-Strip (Kunden-Achse)                          │
+├──────────────────────────────────────────────────┤
+│ 🟡 Schließungs-Status-Banner (Mitarbeiter-Achse) │  ← AGGREGAT
+│ „3 von 12 Mitarbeitern haben Mai noch nicht      │
+│  geschlossen — blockiert 47 Termine, 18 Kunden"  │
+│ [Details öffnen] [Reminder an alle senden]       │
+├──────────────────────────────────────────────────┤
+│ Kanban-Board (Kunde × Monat)                      │
+│                                                    │
+│ Pro betroffener Kunden-Card:                      │
+│  „🔒 1 MA hat noch nicht geschlossen"-Mini-Badge   │
+└──────────────────────────────────────────────────┘
+
+Warum nicht inline mischen:
+
+
+Mitarbeiter-Schließung ist aggregat-Information über Termine eines Mitarbeiters, nicht über einen Kunden
+Eskalations-Adressaten sind Mitarbeiter, nicht Kunden → Aktion gehört zur Mitarbeiter-Achse
+Folding der Eskalationen in Customer-Cards würde 5 Cards des Müller mit „MA-A blockiert"-Badge fluten, der eigentliche Bottleneck ist EIN MA mit 47 Termin → MA-View ist effizienter
+
+
+„Details öffnen" → Sub-View „Mitarbeiter-Schliessungen":
+
+
+Tab/Modal im selben Board
+Zeigt N Mitarbeiter × Mai-Schliessungsstatus
+Inline-Action „Reminder schicken"
+Per-MA-Card expandiert zu „seine 7 offenen Termine bei 3 Kunden"
+
+
+Damit bleibt die Customer-Achse clean im Haupt-Board, die MA-Achse hat einen klaren Ort.
+
+Spezial-Fall: nach Batch-Close. Lock-Symbol pro Kunden-Card (aus Plan-Update D2) zeigt es — aber die Lock-Ursache liegt auf MA-Achse. Klick auf Lock-Icon → Tooltip „Geschlossen durch MA-X am 03.06., Reopen?"
+
+
+Q4 — Composed Reader vs. Re-Query
+
+Ein composed billing-pipeline-reader ist richtig, aber mit drei Regeln:
+
+1. Batched Composition, kein N+1.
+Der composed Reader macht eine Query pro Quell-System (alle Kunden eines Monats auf einmal), nicht eine pro Card.
+
+typescriptasync function readBillingPipeline(month, year, filters): Promise<PipelineSnapshot> {
+  // Vier batched Queries parallel:
+  const [appts, records, invoices, budgetStates] = await Promise.all([
+    appointmentsForMonth(month, year, filters),        // 1 query
+    serviceRecordsForMonth(month, year, filters),       // 1 query
+    invoicesForMonth(month, year, filters),             // 1 query
+    budgetStatesForMonth(month, year, filters),         // 1 query (composed via unified-reader)
+  ]);
+  // In-Memory join + Stage-Assignment pro Card
+  return assemblePipeline(appts, records, invoices, budgetStates);
+}
+
+2. Drift-Schutz via Snapshot-Time.
+Der Reader stempelt jeden Snapshot mit asOfDate=now() und gibt das im Response zurück. UI zeigt „Stand 14:23 Uhr [⟳]" — kein silent staleness.
+
+3. KPI-Strip-Cache mit kurzer TTL.
+KPI-Aggregate (€-Summen, Counts) cachen 30s im Server-Memory. Card-Details (Detail-Layer ②) lazy-load fresh bei Klick. Damit ist Page-Load schnell, Detail-Daten frisch.
+
+Was NICHT tun: materialisierte View — overkill, würde eigene Drift-Probleme schaffen. Postgres-View (non-materialized) als read-helper ist OK falls Query zu komplex.
+
+Drift-Risiko zwischen Komponenten:
+
+
+Wenn der Budget-unified-Reader und der Invoice-Reader unterschiedliche Wahrheiten liefern (z.B. Budget zeigt Termin als „verbraucht", Invoice-Reader sieht ihn nicht abgerechnet) — dann ist das ein DATEN-Bug, nicht ein UI-Bug. Der composed Reader sollte solche Drift-Cases als „inconsistent state" badge zeigen (separates Signal vom „X-Pdf-Drift")
+Architektur-Test: für jeden Termin im Monat muss gelten: appointment.status='completed' ⇒ Σ(budget_transactions.appointment_id=X) > 0 (sonst Drift)
+
+
+
+Q5 — Aging-Anker pro Kostenträger
+
+Pflegekasse hat keinen klassischen Due-Date — sie zahlt via Avis-Verfahren mit eigener Bearbeitungszeit. Selbstzahler hat einen.
+
+Empfehlung — drei separate Aging-Modelle:
+
+Selbstzahler
+
+
+Anker: invoice.dueDate (= Rechnungsdatum + 30 Tage, lt. App-Default)
+Buckets:
+
+🟢 0–14 Tage vor Fälligkeit
+🟡 0–14 Tage über Fälligkeit (Mahnstufe 0 — Erinnerung)
+🟠 15–30 Tage (Mahnstufe 1)
+🔴 31+ Tage (Mahnstufe 2 / Inkasso)
+
+
+
+
+
+Pflegekasse — vor Avis
+
+
+Anker: invoice.versendetAm
+Buckets:
+
+🟢 0–21 Tage (übliche Bearbeitungszeit Pflegekasse)
+🟡 22–45 Tage (Nachhaken bei Kasse)
+🔴 46+ Tage (Eskalation, ggf. Verzugszinsen-Pfad)
+
+
+
+
+
+Pflegekasse — Avis erhalten, Bezahlt noch nicht
+
+
+Anker: avisErhaltenAm (Datum des Avis)
+Buckets:
+
+🟢 0–14 Tage (normaler Überweisungs-Lag)
+🟡 15–30 Tage (Nachhaken — Zahlungseingang prüfen)
+🔴 31+ Tage (klären, evtl. erneut bei Kasse)
+
+
+
+
+
+Pflegekasse hat zusätzlich: „Tage seit Versendet" als sekundärer Indikator IMMER sichtbar, auch wenn schon Avis da ist (für KPI „durchschnittliche Pflegekassen-Bearbeitungszeit").
+
+Backend: Aging-Color-Code wird im composed Reader pro Card berechnet, nicht im Client. Reduziert Datenmenge + verhindert Drift.
+
+Code-Realität: Im aktuellen Schema gibt es invoice.versendetAm (ggf. sentAt), invoice.avisErhaltenAm (oder Status-Wechsel-Timestamp via audit-log). Falls nicht direkt: aus audit_log joinen.
+
+
+Q6 — Drift-Badge: Nutzen vs. Kosten
+
+Empfehlung: Stamp-on-write, nicht Compute-on-read.
+
+Heute: computeLiveInvoiceFingerprints wird bei JEDEM PDF-Abruf neu berechnet. Das ist heavy. Für die Pipeline-Board-Ansicht wäre das ein massiver Performance-Killer.
+
+Lösung — drei-stufig:
+
+Stufe 1 — Stamp at Source:
+Wenn relevante Stammdaten (Customer.name, address, insurance, pflegegrad, ...) sich ändern, setzt ein DB-Trigger oder Update-Hook invoice.has_drift = true auf allen invoices mit customerId=X AND status != 'storniert'.
+
+sql-- Pseudocode trigger
+ON customers UPDATE WHEN affected_columns IN drift_relevant_set:
+  UPDATE invoices SET has_drift_flag = true
+  WHERE customer_id = NEW.id AND status != 'storniert';
+
+Stufe 2 — Reader liest nur Flag:
+Der billing-pipeline-reader liest invoice.has_drift_flag direkt (Spalte) — keine Fingerprint-Berechnung beim Page-Load. O(1) pro Card.
+
+Stufe 3 — Inspect on Demand:
+Klick auf Drift-Badge → öffnet Detail-Modal, das computeLiveInvoiceFingerprints einmalig aufruft + diff zeigt + Action „Drift akzeptieren" oder „PDF neu rendern".
+
+KPI-Strip: zeigt aggregierte „X Cards mit Drift" via COUNT(*) WHERE has_drift_flag=true — single query.
+
+Welche Signals lohnen sich überhaupt:
+
+
+✅ Stammdaten-Drift (B.1 aus Rechnungs-Analyse) — GoBD-relevant, ja unbedingt
+❌ Preis-Drift — Preise sind in Line-Items snapshotted, sollten nicht driften. Falls doch = DB-Bug, eigener Alarm-Pfad
+⚠️ Signature-Hash-Drift — schon im Code (audit/route.ts), gehört auf eigenes Audit-Tab, nicht ins Pipeline-Board
+
+
+→ Nur Stammdaten-Drift im Pipeline-Board-Badge. Rest lebt im Audit-View.
+
+
+Q7 — Mobile-Tragfähigkeit
+
+Klare Antwort: 7-Stage-Board auf Phone funktioniert NICHT. Mobile braucht ein anderes mentales Modell.
+
+Empfehlung — Mobile-Default = „Inbox-Style Action-Queue":
+
+┌─────────────────────────────────┐
+│ [Mai 2026 ▼]    [Filter ⚙]       │
+├─────────────────────────────────┤
+│ 🔴 ÜBERFÄLLIG (3)               │
+│  Hengst — Versand seit 32 T.    │
+│  Müller — Versand seit 28 T.    │
+│  Schulz — Avis seit 18 T.       │
+│                                  │
+│ 🟡 HEUTE FÄLLIG (5)             │
+│  Schmidt — Termin dokumentieren │
+│  Weber — LN unterschreiben      │
+│  ...                             │
+│                                  │
+│ 🟢 DIESE WOCHE (12)             │
+│  ...                             │
+│                                  │
+│ ✓ ALLES OK (134)                 │
+│  [Zeigen]                        │
+└─────────────────────────────────┘
+
+Prinzip: Mobile zeigt „was muss ich tun?", nicht „wo steht alles?". Action-Queue priorisiert nach Dringlichkeit, nicht nach Pipeline-Position.
+
+Pro Eintrag (kompakte Mobile-Card):
+
+
+Kunde + nächste Aktion (z.B. „LN unterschreiben")
+1 großer Action-Button (default-Aktion)
+Kebab-Menu für sekundäre Aktionen
+Stage-Indikator als Mini-Badge (4-Buchstaben-Code „LN" oder Mini-Pipeline)
+
+
+Filter-Optionen: Stage, Kostenträger, Kunde — aber default = alle.
+
+Tablet quer: der 7-Spalten-Board passt, Standard-Pipeline-View.
+Tablet hoch: 3 Stages sichtbar + Horizontal-Scroll oder kollabierbar.
+
+Begründung: Mobile-User ist meistens Mitarbeiter unterwegs (Termin dokumentieren, LN unterschreiben lassen), nicht Backoffice-User (Rechnungen versenden, Avis matchen). Backoffice-Workflows brauchen Desktop. Mobile-Workflow ist linear ("was als nächstes?").
+
+
+Q8 — Skalierung
+
+Realistic worst case: 200 Kunden × 3 Töpfe + Side-States = ~700 Cards pro Monat. Plus Process-Health-Side-Lookups + Aging-Compute + Drift-Flags.
+
+Erwartete Bottlenecks in Reihenfolge:
+
+#BottleneckWann1Stage-Assignment-Logik in-memory (State Machine pro Card)bei 700 Cards: ~50–150 ms reine Compute2Aging-Color-Compute (3 verschiedene Aging-Modelle pro Card mit Date-Math)ähnliche Zone wie #13N+1 Joins falls naiv implementiertkann 5–10× langsamer machen4KPI-Strip-Re-Render bei Filter-Change (alles neu berechnen)spürbar bei Slow-Network5Initial Bundle-Size (React rendert 700 Cards in Virtual-DOM)<50 ms wenn virtualized, >500 ms sonst
+
+Mitigations (Implementierungs-Reihenfolge):
+
+
+Server-side Pagination ab Stage-Level — pro Stage max 50 Cards initial, „Weitere laden" Button. KPI-Strip zeigt Gesamtcount, aber Card-Liste lazy.
+Virtual Scrolling (react-virtuoso oder react-window) für die expandierten Stage-Listen.
+KPI-Cache TTL 30s server-seitig — Filter-Change re-fetched nicht alle Daten, nur Cards.
+Indexed columns auf appointments.status, service_records.status, invoices.status, invoices.has_drift_flag, (customer_id, month, year)-Composite-Indices.
+SLO definieren: Page-Load < 2 s p95, Filter-Change < 500 ms p95, Action-Trigger < 1 s p95. Wenn Pipeline diese SLOs reisst → Bottleneck-Analyse, nicht raten.
+
+
+Welcher Bottleneck zuerst aufschlägt: vermutlich Stage-Assignment + Aging-Compute (zwei CPU-intensive In-Memory-Operationen pro Card). Lösung: in Server-Code (Node) und nicht im Client (Browser) ausführen → Antwort ist eine schmale BillingCard[] mit stage und agingBucket bereits gesetzt. Browser rendert nur.
+
+Erst messen, dann optimieren. Set up console.time("pipeline-render") + Server-Endpoint-Timing in /api/billing/pipeline, dann mit Test-Daten (siehe Replit-Dev Cust 203047 + ähnliche) simulieren.
+
+
+Empfehlung
+
+Diese 8 Antworten sollten direkt an Replit-AI gehen. Sie sind konkret genug, dass Replit-AI den Plan auf v3 setzen kann ohne weitere Rückfragen.
+
+Falls Replit-AI eine Klärung will: Q3 (Close-vs-Billing-Achsen) ist der konzeptionell anspruchsvollste Teil — dort sind Iterationen wahrscheinlich.
+
+Vor dem Build-Ticket nochmal Status-Check:
+
+
+✅ D1+D2+D3 final geklärt
+✅ 6 strukturelle Ergänzungen im Plan
+✅ 8 Reviewer-Fragen beantwortet
+⏳ Architektur-Test-Setup definiert? (€-Conservation, Stage-Identity, Drift-Flag-Korrektheit)
+
+
+Letzter Punkt ist mein einziges noch-offenes Anliegen vor Build-Start.
