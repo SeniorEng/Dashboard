@@ -746,6 +746,22 @@ async function runStartupTasks() {
     // Vorbedingungen brauchen und der transaktions-lokale GoBD-Bypass gegen
     // aktive Trigger greifen muss. Der Ledger wurde bereits weiter oben
     // (ensureMigrationLedger) angelegt.
+    // Task #1402 (TEIL B) — Read-only Preflight VOR der Migrations-Registry:
+    // erkennt einen Flag-Scope-Mismatch einer gegateten destruktiven Cleanup-
+    // Migration (Flag fehlt, aber pending Altlast-Zeilen + nicht im Ledger) und
+    // WARNT LAUT. Der Ledger ist zu diesem Zeitpunkt bereits sichergestellt
+    // (ensureMigrationLedger, oben). Bewusst VOR runBudgetDataMigrations, damit
+    // der approved-Fall hier als `pending-approved` (keine Warnung) erscheint und
+    // die anschließende Registry ihn regulär anwendet — keine Doppel-Warnung.
+    const { assertNoPendingDestructiveMismatch } = await import(
+      "./startup/pending-destructive-migrations-preflight"
+    );
+    try {
+      await assertNoPendingDestructiveMismatch();
+    } catch (err) {
+      log(`Preflight ausstehende destruktive Migrationen fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { runBudgetDataMigrations } = await import("./startup/budget-migration-runner");
     try {
       await runBudgetDataMigrations();

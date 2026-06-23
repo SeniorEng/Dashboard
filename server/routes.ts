@@ -55,6 +55,18 @@ export async function registerRoutes(
     // sieht, ob der Overdraft-Schutz in der laufenden (Prod-)Instanz aktiv ist.
     const { hardHoldsEnabled } = await import("./storage/budget/reservation-storage");
     const budgetHardHolds = { enabled: hardHoldsEnabled() };
+    // Task #1402: Preflight für ausstehende destruktive Cleanup-Migrationen im
+    // Health-Endpoint sichtbar machen, damit ein Flag-Scope-Mismatch (Flag fehlt,
+    // aber pending Altlast-Zeilen + nicht im Ledger) auch nach dem Boot
+    // diagnostizierbar bleibt. Gecachtes Startup-Ergebnis; nur wenn es noch nicht
+    // existiert (z.B. Health vor Abschluss der Startup-Tasks), on-demand prüfen.
+    const {
+      getPendingDestructiveMigrationsStatus,
+      verifyPendingDestructiveMigrations,
+    } = await import("./startup/pending-destructive-migrations-preflight");
+    const pendingDestructiveMigrations =
+      getPendingDestructiveMigrationsStatus() ??
+      (await verifyPendingDestructiveMigrations());
     // Task #541: Prozess-Speicher (RSS/Heap) und Uptime im Health-Endpoint
     // exponieren, damit ein Operator/Monitoring eine drohende
     // Workspace-Überlastung (OOM) sieht, bevor der Prozess gekillt wird.
@@ -78,6 +90,7 @@ export async function registerRoutes(
         auditLogImmutability,
         budgetTransactionsImmutability,
         budgetHardHolds,
+        pendingDestructiveMigrations,
         memory,
       });
     } catch (error) {
@@ -92,6 +105,7 @@ export async function registerRoutes(
         auditLogImmutability,
         budgetTransactionsImmutability,
         budgetHardHolds,
+        pendingDestructiveMigrations,
         memory,
       });
     }
