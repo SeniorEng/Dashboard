@@ -19,6 +19,13 @@ export const STATUS_COLORS: Record<string, string> = {
   storniert: "bg-red-50 text-red-700 border-red-200",
 };
 
+// Abrechnungstyp eines Kunden lesbar machen (Selbstzahler / Pflegekasse).
+export const BILLING_TYPE_LABELS: Record<string, string> = {
+  selbstzahler: "Selbstzahler",
+  pflegekasse_gesetzlich: "Pflegekasse (gesetzlich)",
+  pflegekasse_privat: "Pflegekasse (privat)",
+};
+
 // Task #585: "nachberechnung" wurde abgeschafft — historische Zeilen werden
 // einheitlich als "Rechnung" angezeigt.
 export const TYPE_LABELS: Record<string, string> = {

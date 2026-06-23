@@ -28,6 +28,7 @@ import {
   useBillingMutations,
   BillingFiltersCard,
   InvoiceList,
+  PendingInvoicesCard,
   BulkSendDialog,
   BulkPrintDialog,
   GenerateAllDialog,
@@ -103,7 +104,7 @@ export default function AdminBilling() {
       )
     : invoices;
 
-  const { data: customers } = useEligibleCustomers(selectedYear, selectedMonth, payerFilter, dateFrom, dateTo);
+  const { data: customers, isLoading: customersLoading } = useEligibleCustomers(selectedYear, selectedMonth, payerFilter, dateFrom, dateTo);
 
   const previewCustomerId = selectedCustomerId ? parseInt(selectedCustomerId, 10) : null;
   const {
@@ -235,6 +236,13 @@ export default function AdminBilling() {
     });
   };
 
+  // Task #1398: „Erstellen" aus der „Noch zu erstellen"-Liste öffnet denselben
+  // Vorschau-/Erstellen-Dialog mit vorausgewähltem Kunden.
+  const handleCreateForCustomer = (customerId: number) => {
+    setSelectedCustomerId(String(customerId));
+    setDialogOpen(true);
+  };
+
   const handleToggleDetail = (invoiceId: number) => {
     setExpandedInvoiceId(expandedInvoiceId === invoiceId ? null : invoiceId);
   };
@@ -329,6 +337,12 @@ export default function AdminBilling() {
         onOpenBulkPrint={() => { setBulkPrintResult(null); setBulkPrintOpen(true); }}
         onOpenGenerateAll={() => { setGenerateAllProgress(null); setGenerateAllOpen(true); }}
         onOpenNewInvoice={() => setDialogOpen(true)}
+      />
+
+      <PendingInvoicesCard
+        customers={customers}
+        isLoading={customersLoading}
+        onCreateForCustomer={handleCreateForCustomer}
       />
 
       <InvoiceList

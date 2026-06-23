@@ -5,6 +5,7 @@ export { BillingFiltersCard } from "./billing-filters-card";
 export { BulkSendDialog } from "./bulk-send-dialog";
 export { BulkPrintDialog } from "./bulk-print-dialog";
 export { GenerateAllDialog } from "./generate-all-dialog";
+export { PendingInvoicesCard } from "./pending-invoices-card";
 export { NewInvoiceDialog } from "./new-invoice-dialog";
 export { StornoDialog } from "./storno-dialog";
 export { MarkPaidDialog } from "./mark-paid-dialog";
