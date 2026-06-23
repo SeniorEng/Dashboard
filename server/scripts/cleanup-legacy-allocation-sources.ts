@@ -14,9 +14,14 @@
  *    Kunde/Topf (Summe aktiver Altlast-Zeilen) und SIMULIERT die Konservierung
  *    NACH der Löschung. Erzeugt die Löschung eine NEUE Conservation-Verletzung
  *    (Topf würde überzogen), wird sie im Report markiert. Rein lesend.
- *  - `--apply`: löscht in EINER Transaktion mit GoBD-Bypass
- *    (`app.allow_gobd_mutation`), prüft Conservation PRE/POST und ROLLT ZURÜCK,
- *    sobald eine neue Verletzung entsteht. Jede Löschung wird im Audit-Log
+ *  - `--apply`: räumt in EINER Transaktion mit GoBD-Bypass
+ *    (`app.allow_gobd_mutation`) per FK-Null-dann-Delete auf — ZUERST wird der
+ *    interne FK-Zeiger der referenzierenden GoBD-Buchungen genullt
+ *    (`budget_transactions.allocation_id = NULL`, defensiv auch
+ *    `budget_reservations`/`budget_ledger`), DANN werden die Altlast-Allocation-
+ *    Zeilen hart gelöscht. Es wird NIE eine `budget_transactions`-Zeile gelöscht
+ *    (GoBD append-only). Conservation wird PRE/POST geprüft und ROLLT ZURÜCK,
+ *    sobald eine neue Verletzung entsteht. Jede Mutation wird im Audit-Log
  *    protokolliert.
  *
  * ## Betriebs-Reihenfolge (verbindlich)
@@ -35,7 +40,14 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { db } from "../lib/db";
-import { budgetAllocations, customers, users } from "@shared/schema";
+import {
+  budgetAllocations,
+  budgetTransactions,
+  budgetReservations,
+  budgetLedger,
+  customers,
+  users,
+} from "@shared/schema";
 import { auditService } from "../services/audit";
 import {
   checkBudgetConservation,
@@ -208,6 +220,35 @@ async function main() {
     );
   }
 
+  // Betroffene GoBD-Buchungen (deren interner FK-Zeiger genullt — NICHT gelöscht
+  // — wird). Rein lesend, auch im Dry-Run sichtbar.
+  const allIds = legacy.map((r) => r.id);
+  const refTx = await db
+    .select({
+      id: budgetTransactions.id,
+      customerId: budgetTransactions.customerId,
+      budgetType: budgetTransactions.budgetType,
+      transactionType: budgetTransactions.transactionType,
+      allocationId: budgetTransactions.allocationId,
+    })
+    .from(budgetTransactions)
+    .where(inArray(budgetTransactions.allocationId, allIds))
+    .orderBy(asc(budgetTransactions.id));
+
+  console.log("=== FK-Zeiger (budget_transactions) — werden genullt, NICHT gelöscht ===");
+  if (refTx.length === 0) {
+    console.log("✓ Keine referenzierenden Buchungen.\n");
+  } else {
+    console.log(`Betroffene Buchungen: ${refTx.length}`);
+    for (const t of refTx) {
+      console.log(
+        `  - tx#${t.id} Kunde#${t.customerId} ${t.budgetType} ` +
+          `${t.transactionType} → allocation_id ${t.allocationId} ⇒ NULL`,
+      );
+    }
+    console.log("");
+  }
+
   if (!apply) {
     console.log("Trockenlauf abgeschlossen. Report archivieren + abnehmen lassen, dann --apply.");
     return;
@@ -232,9 +273,59 @@ async function main() {
   }
 
   const ids = legacy.map((r) => r.id);
+
+  // FK-Null-dann-Delete: ZUERST die internen FK-Zeiger der GoBD-Buchungen (und
+  // defensiv der operativen/interim Tabellen) nullen, DANN die Allocation hart
+  // löschen. Es wird NIE eine budget_transactions-Zeile gelöscht (GoBD).
+  let clearedTx: { id: number; customerId: number; budgetType: string; allocationId: number | null }[] = [];
+  let clearedReservations = 0;
+  let clearedLedger = 0;
   await db.transaction(async (tx) => {
-    // GoBD-Immutability-Trigger für budget_allocations transaktions-lokal lösen.
+    // GoBD-Immutability-Trigger transaktions-lokal lösen (deckt das
+    // budget_transactions-UPDATE UND den budget_allocations-DELETE).
     await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
+
+    clearedTx = await tx
+      .select({
+        id: budgetTransactions.id,
+        customerId: budgetTransactions.customerId,
+        budgetType: budgetTransactions.budgetType,
+        allocationId: budgetTransactions.allocationId,
+      })
+      .from(budgetTransactions)
+      .where(inArray(budgetTransactions.allocationId, ids))
+      .orderBy(asc(budgetTransactions.id));
+
+    const refReservations = await tx
+      .select({ id: budgetReservations.id })
+      .from(budgetReservations)
+      .where(inArray(budgetReservations.allocationId, ids));
+    const refLedger = await tx
+      .select({ id: budgetLedger.id })
+      .from(budgetLedger)
+      .where(inArray(budgetLedger.allocationId, ids));
+    clearedReservations = refReservations.length;
+    clearedLedger = refLedger.length;
+
+    if (clearedTx.length > 0) {
+      await tx
+        .update(budgetTransactions)
+        .set({ allocationId: null })
+        .where(inArray(budgetTransactions.id, clearedTx.map((t) => t.id)));
+    }
+    if (refReservations.length > 0) {
+      await tx
+        .update(budgetReservations)
+        .set({ allocationId: null })
+        .where(inArray(budgetReservations.id, refReservations.map((r) => r.id)));
+    }
+    if (refLedger.length > 0) {
+      await tx
+        .update(budgetLedger)
+        .set({ allocationId: null })
+        .where(inArray(budgetLedger.id, refLedger.map((r) => r.id)));
+    }
+
     await tx.delete(budgetAllocations).where(inArray(budgetAllocations.id, ids));
 
     // Verbindlicher Post-Check INNERHALB der Transaktion — Rollback bei neuer Verletzung.
@@ -249,6 +340,23 @@ async function main() {
   });
 
   if (admin) {
+    for (const t of clearedTx) {
+      await auditService.log(
+        admin.id,
+        "budget_legacy_allocation_link_cleared",
+        "budget",
+        t.customerId,
+        {
+          customerId: t.customerId,
+          transactionId: t.id,
+          previousAllocationId: t.allocationId,
+          budgetType: t.budgetType,
+          reason:
+            "Task #1409 — interner FK-Zeiger auf Altlast-Allocation genullt (Buchungs-Zeile bleibt GoBD-konform erhalten).",
+        },
+        undefined,
+      );
+    }
     for (const r of legacy.filter((x) => x.active)) {
       await auditService.log(
         admin.id,
@@ -264,14 +372,20 @@ async function main() {
           month: r.month,
           amountCents: r.amountCents,
           reason:
-            "Task #1289 Phase 3.1 — Altlast-Allocation-Quelle entfernt (virtuelle Aufstockung ersetzt Materialisierung).",
+            "Task #1409 — Altlast-Allocation-Quelle entfernt (virtuelle Aufstockung ersetzt Materialisierung).",
         },
         undefined,
       );
     }
   }
 
-  console.log(`\n✓ Gelöscht: ${ids.length} Altlast-Allocation-Zeile(n). Conservation unverändert.`);
+  console.log(
+    `\n✓ Gelöscht: ${ids.length} Altlast-Allocation-Zeile(n) ` +
+      `(genullte Buchungen=${clearedTx.length}` +
+      (clearedReservations > 0 ? `, Reservierungen=${clearedReservations}` : "") +
+      (clearedLedger > 0 ? `, Ledger=${clearedLedger}` : "") +
+      `). Conservation unverändert.`,
+  );
 }
 
 main()

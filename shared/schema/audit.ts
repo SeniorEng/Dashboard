@@ -54,6 +54,7 @@ export const AUDIT_ACTIONS = [
   "customer_merged",
   "budget_carryover_cleanup_soft_deleted",
   "budget_legacy_allocation_source_deleted",
+  "budget_legacy_allocation_link_cleared",
   "budget_repair_orphaned",
   "import_trim_reconciled",
   "import_trim_reconciled_batch",

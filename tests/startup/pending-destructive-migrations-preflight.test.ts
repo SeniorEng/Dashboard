@@ -2,7 +2,7 @@
 // No-Op-Falle gegateter destruktiver Cleanup-Migrationen.
 //
 // Geprüft werden die drei relevanten Zustände der bekannten gegateten Migration
-// `cleanup-legacy-allocation-sources-1324`:
+// `cleanup-legacy-auto-allocations-1409`:
 //   (a) Flag FEHLT + pending Altlast-Zeilen + nicht im Ledger
 //       ⇒ status 'mismatch', ok=false, LAUTE Warnung im Log.
 //   (b) Flag gesetzt ⇒ Migration läuft GENAU EINMAL (ein Ledger-Eintrag),
@@ -22,13 +22,13 @@ import {
   getPendingDestructiveMigrationsStatus,
 } from "../../server/startup/pending-destructive-migrations-preflight";
 import {
-  cleanupLegacyAllocationSources,
-} from "../../server/startup/cleanup-legacy-allocation-sources-migration";
+  cleanupLegacyAutoAllocations,
+} from "../../server/startup/cleanup-legacy-auto-allocations-migration";
 import { runGuardedBudgetMigration } from "../../server/startup/budget-migration-runner";
 import { createTestCustomer, cleanupCustomer } from "../test-utils";
 
-const MIGRATION_NAME = "cleanup-legacy-allocation-sources-1324";
-const FLAG = "APPROVED_CLEANUP_LEGACY_ALLOCATIONS";
+const MIGRATION_NAME = "cleanup-legacy-auto-allocations-1409";
+const FLAG = "APPROVED_CLEANUP_LEGACY_AUTO_ALLOCATIONS_1409";
 
 /** Anzahl Ledger-Einträge für die Cleanup-Migration. */
 async function ledgerCount(): Promise<number> {
@@ -150,7 +150,7 @@ describe("Pending-Destructive-Migrations-Preflight (Task #1402 TEIL B)", () => {
     // Conservation-Pre-/Post-Check). Wirft bei Conservation-Verletzung.
     const outcome = await runGuardedBudgetMigration({
       name: MIGRATION_NAME,
-      migrate: cleanupLegacyAllocationSources,
+      migrate: cleanupLegacyAutoAllocations,
     });
     expect(outcome).toBe("applied");
     expect(await ledgerCount()).toBe(1);
@@ -158,7 +158,7 @@ describe("Pending-Destructive-Migrations-Preflight (Task #1402 TEIL B)", () => {
     // Re-Lauf ⇒ Ledger verhindert zweite Ausführung (exactly-once).
     const second = await runGuardedBudgetMigration({
       name: MIGRATION_NAME,
-      migrate: cleanupLegacyAllocationSources,
+      migrate: cleanupLegacyAutoAllocations,
     });
     expect(second).toBe("skipped");
     expect(await ledgerCount()).toBe(1);

@@ -8,7 +8,7 @@ import { log } from "../lib/log";
  * destruktiver Cleanup-Migrationen.
  *
  * Eine gegatete destruktive Cleanup-Migration (z.B.
- * `cleanup-legacy-allocation-sources-1324`) wird NUR registriert, wenn ihr
+ * `cleanup-legacy-auto-allocations-1409`) wird NUR registriert, wenn ihr
  * Freigabe-Flag (`APPROVED_*`) im aktiven Scope gesetzt ist. Fehlt das Flag,
  * läuft sie still als No-Op durch — es erscheint nur eine beiläufige
  * `übersprungen`-Logzeile. Beim #1303-Publish blieb dadurch unbemerkt, dass das
@@ -57,10 +57,10 @@ interface DestructiveCleanupDescriptor {
  */
 const DESTRUCTIVE_CLEANUP_DESCRIPTORS: DestructiveCleanupDescriptor[] = [
   {
-    migrationName: "cleanup-legacy-allocation-sources-1324",
-    flagEnvVar: "APPROVED_CLEANUP_LEGACY_ALLOCATIONS",
+    migrationName: "cleanup-legacy-auto-allocations-1409",
+    flagEnvVar: "APPROVED_CLEANUP_LEGACY_AUTO_ALLOCATIONS_1409",
     description:
-      "Hard-Delete aktiver Altlast-Auto-Allocation-Zeilen (monthly_auto/yearly_auto)",
+      "FK-Null-dann-Hard-Delete aktiver Altlast-Auto-Allocation-Zeilen (monthly_auto/yearly_auto)",
     countPending: async (exec) => {
       const rows = await exec
         .select({ id: budgetAllocations.id })

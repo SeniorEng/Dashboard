@@ -207,8 +207,8 @@ export async function runBudgetDataMigrations(): Promise<void> {
   const { reclassifyCustomer202To45b } = await import(
     "./reclassify-customer-202-to-45b"
   );
-  const { cleanupLegacyAllocationSources } = await import(
-    "./cleanup-legacy-allocation-sources-migration"
+  const { cleanupLegacyAutoAllocations } = await import(
+    "./cleanup-legacy-auto-allocations-migration"
   );
 
   // Reihenfolge ist relevant: #685 hängt von der Keep-Wahl aus #684 ab.
@@ -269,24 +269,27 @@ export async function runBudgetDataMigrations(): Promise<void> {
     );
   }
 
-  // Task #1324 (A) — Hard-Delete der aktiven Altlast-Auto-Allocation-Zeilen
-  // (`monthly_auto`/`yearly_auto`). Mutiert GoBD-historisierte Daten ⇒ nur bei
-  // ausdrücklicher Freigabe `APPROVED_CLEANUP_LEGACY_ALLOCATIONS` registriert
-  // (Default = nicht registriert, kein Ledger-Eintrag). Transaktional +
-  // Conservation-/GoBD-Guard über den Wrapper (Defaults true).
+  // Task #1409 — Hard-Delete der aktiven Altlast-Auto-Allocation-Zeilen
+  // (`monthly_auto`/`yearly_auto`) über den GoBD-konformen
+  // FK-Null-dann-Delete-Pfad (ERSETZT die frühere
+  // `cleanup-legacy-allocation-sources-1324`). Mutiert GoBD-historisierte Daten
+  // ⇒ nur bei ausdrücklicher Freigabe
+  // `APPROVED_CLEANUP_LEGACY_AUTO_ALLOCATIONS_1409` registriert (Default = nicht
+  // registriert, kein Ledger-Eintrag). Transaktional + Conservation-/GoBD-Guard
+  // über den Wrapper (Defaults true).
   const cleanupApproved = /^(1|true)$/i.test(
-    (process.env.APPROVED_CLEANUP_LEGACY_ALLOCATIONS ?? "").trim(),
+    (process.env.APPROVED_CLEANUP_LEGACY_AUTO_ALLOCATIONS_1409 ?? "").trim(),
   );
   if (cleanupApproved) {
     migrations.push({
-      name: "cleanup-legacy-allocation-sources-1324",
+      name: "cleanup-legacy-auto-allocations-1409",
       version: "1",
-      migrate: cleanupLegacyAllocationSources,
+      migrate: cleanupLegacyAutoAllocations,
     });
   } else {
     log(
-      "[budget-migration] 'cleanup-legacy-allocation-sources-1324' übersprungen: " +
-        "Freigabe-Flag APPROVED_CLEANUP_LEGACY_ALLOCATIONS nicht gesetzt " +
+      "[budget-migration] 'cleanup-legacy-auto-allocations-1409' übersprungen: " +
+        "Freigabe-Flag APPROVED_CLEANUP_LEGACY_AUTO_ALLOCATIONS_1409 nicht gesetzt " +
         "(Sign-off erforderlich, kein Ledger-Eintrag).",
       "startup",
     );
