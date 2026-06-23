@@ -57,6 +57,7 @@ import {
   getInvoiceLineItemsTx,
   getInvoiceForUpdateTx,
 } from "../storage/billing-storage";
+import { readBillingPipeline } from "../storage/billing/pipeline-reader";
 import { auditService } from "../services/audit";
 import { withAudit } from "../lib/with-audit";
 import { readTestFaults, readTestFailInvoicePdfIds } from "../lib/test-fault-injector";
@@ -209,6 +210,27 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   }
   const invoices = await storage.getInvoices(filters);
   res.json(invoices);
+}));
+
+// Task #1405 — Abrechnungs-Pipeline-Board (SSoT-Reader). Liefert den
+// vollständigen Monats-Lebenszyklus (Offen → … → Bezahlt) als Stufen-Aggregat
+// inkl. Side-Badges und €-Konservierung. `date` (ISO yyyy-mm-dd) ist optional
+// und steuert nur den Aging-Stichtag (Default: heute).
+router.get("/pipeline", asyncHandler("Abrechnungs-Pipeline konnte nicht geladen werden", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw badRequest("Jahr ist erforderlich (2020–2100).");
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw badRequest("Monat ist erforderlich (1–12).");
+  }
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const asOfDate = typeof req.query.date === "string" && isoDate.test(req.query.date)
+    ? req.query.date
+    : todayISO();
+  const result = await readBillingPipeline(year, month, asOfDate);
+  res.json(result);
 }));
 
 // Krankenkassen-Filter — liefert die Liste der Pflegekassen, die im
