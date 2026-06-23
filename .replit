@@ -145,7 +145,11 @@ ENCRYPTION_KEY = "16cd865645bc85fca814fa59a9d1e9c4734a9420cf65f8769a70e0eedfd866
 
 [userenv.production]
 BUDGET_HARD_HOLDS = "1"
+APPROVED_CLEANUP_LEGACY_ALLOCATIONS = "true"
 
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 180000
+
+[objectStorage]
+defaultBucketID = "replit-objstore-a173a466-82e8-48ad-ba73-76f740ac99ca"
