@@ -204,7 +204,7 @@ export const GOBD_TABLE_TRIGGERS: StartupTriggerSpec[] = [
  *                                  eingefroren: kein UPDATE/DELETE, kein TRUNCATE.
  *
  * Legitime Test-/Cleanup-/Merge-Pfade (Kunden-Merge, Test-Daten-Purge,
- * `migrate-budget-sources`) setzen transaktions-lokal
+ * gegatete Budget-Daten-Migrationen) setzen transaktions-lokal
  * `SET LOCAL app.allow_gobd_mutation = 'on'`, womit die Trigger die Mutation
  * für genau diese Transaktion durchlassen. In Produktion wird dieses GUC nie
  * gesetzt → jeder verbotene Schreibzugriff schlägt fehl.

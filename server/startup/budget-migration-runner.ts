@@ -188,7 +188,6 @@ export async function runGuardedBudgetMigration(m: GuardedBudgetMigration): Prom
  * die übrigen Migrationen oder den Boot abzubrechen.
  */
 export async function runBudgetDataMigrations(): Promise<void> {
-  const { migrateBudgetSources } = await import("./migrate-budget-sources");
   const { backfillImportUpdateBudgetDrift } = await import(
     "./backfill-import-update-budget-drift"
   );
@@ -217,7 +216,6 @@ export async function runBudgetDataMigrations(): Promise<void> {
   // budget_allocations) bereits gelaufen ist — der Entry-Point wird in
   // `server/index.ts` daher NACH der Historisierung aufgerufen (Task #896).
   const migrations: GuardedBudgetMigration[] = [
-    { name: "migrate-budget-sources", version: "2", migrate: migrateBudgetSources },
     {
       name: "backfill-import-update-budget-drift",
       version: "1",

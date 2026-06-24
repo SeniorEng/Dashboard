@@ -12,10 +12,10 @@ import { log } from "../lib/log";
 import type { BudgetMigrationSummary } from "./budget-migration-runner";
 
 /**
- * Task #1409 — Gegatete Startup-Variante des manuellen Cleanup-Skripts
- * `server/scripts/cleanup-legacy-allocation-sources.ts`. ERSETZT die frühere
- * `cleanup-legacy-allocation-sources-1324`-Migration (nackter Delete) durch den
- * GoBD-konformen FK-Null-dann-Delete-Pfad.
+ * Task #1409 — Gegatete Startup-Variante des früheren manuellen Cleanup-Skripts
+ * (`server/scripts/cleanup-legacy-allocation-sources.ts`, seit Task #1416
+ * entfernt). ERSETZT die frühere `cleanup-legacy-allocation-sources-1324`-
+ * Migration (nackter Delete) durch den GoBD-konformen FK-Null-dann-Delete-Pfad.
  *
  * `budget_allocations` soll nur noch MANUELLE Fakten enthalten
  * (`initial_balance`/`carryover`/`manual_adjustment`). Die früher zusätzlich

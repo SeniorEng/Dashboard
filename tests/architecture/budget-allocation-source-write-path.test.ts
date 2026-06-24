@@ -26,9 +26,15 @@
  *   2. **Keine Altlast-Quelle** (Sekundär-Check): Kein Produktionscode nennt die
  *      entfernten Quellen-Werte als String-Literal.
  *
- * Ausgeschlossen sind Nicht-Request-Pfade (Tests, Einmal-Skripte inkl. des
- * gated Cleanup-Skripts, Startup-Migrationen) — sie sind dokumentierte
- * Sonderwerkzeuge und behandeln Altlast-Werte / Bulk-Writes bewusst.
+ * Scope-Unterschied der beiden Detektoren:
+ *   - Detektor 1 (Schreibpfad) schließt Nicht-Request-Pfade pauschal aus (Tests,
+ *     Einmal-Skripte, Startup-Migrationen) — dort sind Bulk-Writes auf
+ *     `budget_allocations` legitim und breit.
+ *   - Detektor 2 (Altlast-Literale) ist ENGER (Task #1416): er scannt auch
+ *     `server/startup/` und `server/scripts/` und lässt die entfernten
+ *     Quellen-Werte NUR in zwei explizit allowgelisteten Dateien zu — der live
+ *     `-1409`-Cleanup-Migration und der Destructive-Migrations-Preflight-Probe.
+ *     Jeder andere Treffer (auch in Startup/Skript) ist eine Verletzung.
  *
  * Beide Detektoren sind PUR und werden vom Real-Tree-Scan UND vom Negativ-Test
  * mit DERSELBEN Funktion aufgerufen — der Negativ-Test beweist nachweislich,
@@ -67,10 +73,10 @@ const WRITE_ALLOWLIST = new Set<string>([
 ]);
 
 /**
- * Nicht-Request-Pfade: Tests, manuelle Einmal-Skripte (inkl. des gated
- * Legacy-Cleanup-Skripts) und Startup-Migrationen sind dokumentierte
- * Sonderwerkzeuge (kein Produktions-Request-Pfad) und werden vom Scope
- * ausgenommen.
+ * Schreibpfad-Scope (Detektor 1): Nicht-Request-Pfade — Tests, manuelle
+ * Einmal-Skripte und Startup-Migrationen — sind dokumentierte Sonderwerkzeuge
+ * (kein Produktions-Request-Pfad) und schreiben `budget_allocations` legitim per
+ * Bulk; sie werden vom Schreibpfad-Detektor ausgenommen.
  */
 const EXCLUDED_PREFIXES = [
   "tests/",
@@ -81,6 +87,24 @@ const EXCLUDED_PREFIXES = [
 
 function inScope(rel: string): boolean {
   return !EXCLUDED_PREFIXES.some((p) => rel.startsWith(p));
+}
+
+/**
+ * Literal-Scope (Detektor 2, Task #1416): KEIN Blanket-Ausschluss für
+ * `server/startup/` oder `server/scripts/` mehr — nur Tests sind außen vor.
+ * Die entfernten Altlast-Quellen-Werte dürfen ausschließlich in diesen beiden
+ * legitimen Dateien als String-Literal vorkommen:
+ *   - die live `-1409`-Cleanup-Migration (löscht die Altlast-Auto-Zeilen),
+ *   - die Destructive-Migrations-Preflight-Probe (zählt die offenen Zeilen).
+ * Jeder andere Treffer in `server`/`shared` ist eine Verletzung.
+ */
+const LEGACY_SOURCE_LITERAL_ALLOWLIST = new Set<string>([
+  "server/startup/cleanup-legacy-auto-allocations-migration.ts",
+  "server/startup/pending-destructive-migrations-preflight.ts",
+]);
+
+function inLiteralScope(rel: string): boolean {
+  return !rel.startsWith("tests/");
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +177,8 @@ export function detectLegacyAllocationSourceLiterals(
 ): GuardViolation[] {
   const out: GuardViolation[] = [];
   for (const { rel, content } of files) {
-    if (!inScope(rel)) continue;
+    if (!inLiteralScope(rel)) continue;
+    if (LEGACY_SOURCE_LITERAL_ALLOWLIST.has(rel)) continue;
     const code = stripComments(content);
     code.split("\n").forEach((line, idx) => {
       const m = line.match(LEGACY_SOURCE_LITERAL_RE);
@@ -237,7 +262,7 @@ describe("Architektur — EIN Budget-Allocation-Schreibpfad + keine Altlast-Quel
         content: "await db.insert(budgetAllocations).values({ customerId: 1 });",
       },
       {
-        rel: "server/scripts/cleanup-legacy-allocation-sources.ts",
+        rel: "server/scripts/some-budget-cleanup.ts",
         content: "await tx.delete(budgetAllocations).where(inArray(budgetAllocations.id, ids));",
       },
     ];
@@ -278,9 +303,9 @@ describe("Architektur — EIN Budget-Allocation-Schreibpfad + keine Altlast-Quel
           "`initial_balance`/`carryover`/`manual_adjustment` sein. Monatliche/" +
           "jährliche Aufstockung wird rein rechnerisch ermittelt (siehe " +
           "`calculateAllocated45b`/`…45a`/`…39_42a`), nicht materialisiert. " +
-          "Ist dies ein bewusst dokumentierter Sonderfall (Migration/Cleanup), " +
-          "gehört der Code unter einen ausgeschlossenen Pfad (server/scripts/, " +
-          "server/startup/) — siehe EXCLUDED_PREFIXES in " +
+          "Die entfernten Quellen-Werte dürfen NUR in den beiden allowgelisteten " +
+          "Dateien (live `-1409`-Cleanup-Migration, Destructive-Migrations-" +
+          "Preflight-Probe) vorkommen — siehe LEGACY_SOURCE_LITERAL_ALLOWLIST in " +
           "tests/architecture/budget-allocation-source-write-path.test.ts.",
       );
     }
@@ -305,18 +330,36 @@ describe("Architektur — EIN Budget-Allocation-Schreibpfad + keine Altlast-Quel
     ]);
   });
 
-  it("Negativ-Ausnahme: dasselbe Literal in einem ausgeschlossenen Pfad ist KEINE Verletzung", () => {
+  it("Allowlist: die beiden legitimen Startup-Dateien dürfen die Altlast-Literale nennen", () => {
     const synthetic: ScanFile[] = [
       {
-        rel: "server/startup/migrate-budget-sources.ts",
-        content: `await db.execute(sql\`UPDATE budget_allocations SET source='monthly_auto'\`);`,
+        rel: "server/startup/cleanup-legacy-auto-allocations-migration.ts",
+        content: `const LEGACY_AUTO_SOURCES = ["monthly_auto", "yearly_auto"] as const;`,
       },
       {
-        rel: "server/scripts/cleanup-legacy-allocation-sources.ts",
-        content: `const LEGACY = ["monthly_auto", "yearly_auto", "statutory_monthly"];`,
+        rel: "server/startup/pending-destructive-migrations-preflight.ts",
+        content: `inArray(budgetAllocations.source, ["monthly_auto", "yearly_auto"]);`,
       },
     ];
     expect(detectLegacyAllocationSourceLiterals(synthetic)).toEqual([]);
+  });
+
+  it("Verschärfung (Task #1416): ein anderer Startup-/Skript-Pfad mit Altlast-Literal IST jetzt eine Verletzung", () => {
+    const synthetic: ScanFile[] = [
+      {
+        rel: "server/startup/some-other-migration.ts",
+        content: `await db.execute(sql\`UPDATE budget_allocations SET source='monthly_auto'\`);`,
+      },
+      {
+        rel: "server/scripts/some-budget-cleanup.ts",
+        content: `const LEGACY = ["monthly_auto", "yearly_auto", "statutory_monthly"];`,
+      },
+    ];
+    const v = detectLegacyAllocationSourceLiterals(synthetic);
+    expect(v.map((h) => h.file).sort()).toEqual([
+      "server/scripts/some-budget-cleanup.ts",
+      "server/startup/some-other-migration.ts",
+    ]);
   });
 
   it("erlaubte Quellen lösen keinen Treffer aus", () => {

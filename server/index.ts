@@ -303,9 +303,9 @@ async function runStartupTasks() {
     // historisierungskritischer Tabellen (budget_allocations no-resurrect/
     // no-delete, customer_budget_type_settings append-only, invoices/
     // invoice_line_items für finalisierte Rechnungen) via BEFORE-Trigger mit
-    // transaktions-lokalem Bypass-GUC `app.allow_gobd_mutation`. Läuft VOR
-    // migrate-budget-sources, damit dessen legitimer Hard-Delete den Bypass
-    // bereits gegen aktive Trigger nutzt.
+    // transaktions-lokalem Bypass-GUC `app.allow_gobd_mutation`. Läuft VOR den
+    // Budget-Daten-Migrationen, damit deren legitime Hard-Deletes den Bypass
+    // bereits gegen aktive Trigger nutzen.
     const { ensureGobdTableImmutability } = await import("./startup/ensure-gobd-table-immutability");
     try {
       await ensureGobdTableImmutability();
