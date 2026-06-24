@@ -208,8 +208,12 @@ export function canDeleteAppointment(
 
   if (!adminLike) {
     if (lead) {
-      if (appt.isStarted) {
-        return deny("Bereits gestartete oder abgeschlossene Termine können nicht mehr gelöscht werden.");
+      // Teamleitung: firmenweite Reichweite nur für noch nicht gestartete
+      // Termine. Eigene (zugewiesene/durchgeführte) Termine werden wie beim
+      // Mitarbeiter behandelt — also auch im gestarteten Zustand löschbar,
+      // solange die `completed`/`cancelled`-Sperre weiter unten nicht greift.
+      if (appt.isStarted && !isAssignedEmployee(user, appt)) {
+        return deny("Bereits gestartete oder abgeschlossene Termine anderer Mitarbeiter können nicht mehr gelöscht werden.");
       }
     } else if (!isAssignedEmployee(user, appt)) {
       return deny("Nur der zugewiesene Mitarbeiter darf diesen Termin bearbeiten.");

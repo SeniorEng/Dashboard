@@ -237,10 +237,42 @@ describe("Berechtigungs-Matrix Termine", () => {
     expect(canDocumentAppointment(ROLES.team_lead, documenting).allowed).toBe(false);
     const completed = buildAppointment("team_lead", "completed", flags);
     expect(canReopenAppointment(ROLES.team_lead, completed).allowed).toBe(false);
-    // Teamleiter darf nur nicht-gestartete Termine löschen.
+    // Teamleiter darf fremde Termine nur löschen, solange nicht gestartet.
     expect(canDeleteAppointment(ROLES.team_lead, completed).allowed).toBe(false);
     const scheduled = buildAppointment("team_lead", "scheduled", flags);
     expect(canDeleteAppointment(ROLES.team_lead, scheduled).allowed).toBe(true);
+  });
+
+  it("Teamleitung darf eigene gestartete Termine löschen — wie ein Mitarbeiter", () => {
+    const flags: ScenarioFlags = { isLocked: false, isMonthClosed: false };
+    const leadId = ROLES.team_lead.id;
+    // Eigener Termin: assignedEmployeeId == Teamleitung.
+    const ownAppt = (status: AppointmentStatus): PolicyAppointment => ({
+      assignedEmployeeId: leadId,
+      performedByEmployeeId: leadId,
+      customerId: 100,
+      status,
+      date: "2026-05-01",
+      appointmentType: "Kundentermin",
+      isStarted: status !== "scheduled",
+      isLocked: flags.isLocked,
+      isMonthClosed: flags.isMonthClosed,
+      hasSignature: status === "completed",
+    });
+
+    // Eigener, in Dokumentation befindlicher (gestarteter) Termin → erlaubt.
+    expect(canDeleteAppointment(ROLES.team_lead, ownAppt("documenting")).allowed).toBe(true);
+    // Eigener, nicht gestarteter Termin → erlaubt.
+    expect(canDeleteAppointment(ROLES.team_lead, ownAppt("scheduled")).allowed).toBe(true);
+    // Eigener, abgeschlossener Termin → weiterhin verboten (Nicht-Admin-Sperre).
+    expect(canDeleteAppointment(ROLES.team_lead, ownAppt("completed")).allowed).toBe(false);
+
+    // Fremder, in Dokumentation befindlicher Termin → weiterhin verboten.
+    const foreignDocumenting = buildAppointment("team_lead", "documenting", flags);
+    expect(canDeleteAppointment(ROLES.team_lead, foreignDocumenting).allowed).toBe(false);
+    // Fremder, nicht gestarteter Termin → weiterhin erlaubt (firmenweite Reichweite).
+    const foreignScheduled = buildAppointment("team_lead", "scheduled", flags);
+    expect(canDeleteAppointment(ROLES.team_lead, foreignScheduled).allowed).toBe(true);
   });
 
   it("Erstberatung-Create benötigt Erstberater-Rolle (außer Admin/TL)", () => {
