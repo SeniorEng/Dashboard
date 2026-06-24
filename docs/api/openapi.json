@@ -1212,15 +1212,11 @@
           },
           "name": {
             "type": "string"
-          },
-          "invoiceCount": {
-            "type": "integer"
           }
         },
         "required": [
           "insuranceProviderId",
-          "name",
-          "invoiceCount"
+          "name"
         ]
       },
       "BulkSendInvoiceResponse": {

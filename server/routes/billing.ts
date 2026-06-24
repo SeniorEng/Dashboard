@@ -248,7 +248,6 @@ router.get("/payers", asyncHandler("Krankenkassen-Liste konnte nicht geladen wer
     .select({
       insuranceProviderId: insuranceProviders.id,
       name: insuranceProviders.name,
-      invoiceCount: sql<number>`COUNT(DISTINCT ${invoicesTable.id})::int`,
     })
     .from(invoicesTable)
     .innerJoin(

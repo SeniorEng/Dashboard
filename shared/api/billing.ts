@@ -189,11 +189,10 @@ export interface BatchSendInvoiceResponse {
 // mehr; daher kennt die Antwort nur noch `markedSent` (kein `sent`).
 // Krankenkassen-Filter: Liste der Pflegekassen, die im gewählten Monat/Jahr
 // mindestens eine Rechnung haben. Wird im Filter-Dropdown der
-// Abrechnungs-Seite angezeigt; `invoiceCount` dient als Hilfs-Label.
+// Abrechnungs-Seite angezeigt.
 export interface PayerSummary {
   insuranceProviderId: number;
   name: string;
-  invoiceCount: number;
 }
 
 export interface BulkSendInvoiceResponse {

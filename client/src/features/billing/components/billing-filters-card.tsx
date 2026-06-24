@@ -138,7 +138,7 @@ export function BillingFiltersCard({
                     value={p.insuranceProviderId.toString()}
                     data-testid={`select-payer-option-${p.insuranceProviderId}`}
                   >
-                    {p.name} ({p.invoiceCount})
+                    {p.name}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -497,7 +497,6 @@ export const PayerSummarySchema = component(
   z.object({
     insuranceProviderId: z.number().int(),
     name: z.string(),
-    invoiceCount: z.number().int(),
   }),
 );
 
