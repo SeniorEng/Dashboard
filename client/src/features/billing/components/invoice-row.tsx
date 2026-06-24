@@ -30,11 +30,13 @@ import {
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
+import type { AgingBucket } from "@shared/domain/billing-pipeline";
 import {
   STATUS_LABELS,
   STATUS_COLORS,
   TYPE_LABELS,
   TYPE_COLORS,
+  AGING_BADGE,
 } from "../constants";
 import {
   formatAmount,
@@ -62,6 +64,9 @@ interface InvoiceRowProps {
   // Task #1376: Mehrfachauswahl für Sammelaktionen.
   selected: boolean;
   onToggleSelect: (invoiceId: number, checked: boolean) => void;
+  // Task #1412: Aging-Bucket (Ampel) für die wartenden Cluster. `none`/`green`
+  // → kein Badge; nur mahnende Stufen werden hervorgehoben.
+  aging?: AgingBucket;
 }
 
 export function InvoiceRow({
@@ -79,6 +84,7 @@ export function InvoiceRow({
   onMarkPaid,
   selected,
   onToggleSelect,
+  aging = "none",
 }: InvoiceRowProps) {
   const { toast } = useToast();
   // Task #1349: Öffnet ein Dokument-PDF (Rechnung / Leistungsnachweis / Bündel)
@@ -184,6 +190,17 @@ export function InvoiceRow({
               >
                 {STATUS_LABELS[invoice.status] || invoice.status}
               </Badge>
+              {/* Task #1412: Aging-Ampel-Badge — nur mahnende Stufen
+                  (gelb/orange/rot) werden sichtbar gemacht. */}
+              {aging !== "none" && aging !== "green" && (
+                <Badge
+                  variant="outline"
+                  className={AGING_BADGE[aging].className}
+                  data-testid={`badge-aging-${aging}-${invoice.id}`}
+                >
+                  {AGING_BADGE[aging].label}
+                </Badge>
+              )}
               {invoice.billingRunId && (
                 <Badge
                   variant="outline"

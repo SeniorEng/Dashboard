@@ -177,6 +177,92 @@ export function assignInvoiceStage(input: InvoicePipelineInput): PipelineAssignm
 }
 
 // ============================================
+// HANDLUNGS-CLUSTER (Rechnungsliste) — Sicht auf bestehende Status
+// ============================================
+
+/**
+ * Handlungs-Cluster der Rechnungsliste (Task #1412). Reine SICHT auf die
+ * bestehenden Rechnungs-Status + den Zahler-Typ — KEIN neues Status-/Datenmodell.
+ * Jede Rechnung gehört GENAU einem Cluster an (total + disjunkt):
+ *
+ *  - `zu_versenden`        — Entwurf (`entwurf`), noch nicht raus.
+ *  - `avis_ausstehend`     — an Pflegekassen versendete Rechnung (`versendet`),
+ *                            Zahlungsavis steht noch aus.
+ *  - `zahlung_ausstehend`  — Selbstzahler/Privat versendet (`versendet`) ODER
+ *                            Pflegekasse mit eingegangenem Avis (`avis_erhalten`).
+ *  - `abgeschlossen`       — bezahlt (`bezahlt`).
+ *  - `storniert`           — stornierte Rechnung / Gutschrift (Side-Zustand der
+ *                            Pipeline). Standardmäßig ausgeblendet (Stornos-Filter),
+ *                            hier nur, damit die Zuordnung total bleibt.
+ */
+export const INVOICE_ACTION_CLUSTERS = [
+  "zu_versenden",
+  "avis_ausstehend",
+  "zahlung_ausstehend",
+  "abgeschlossen",
+  "storniert",
+] as const;
+export type InvoiceActionCluster = (typeof INVOICE_ACTION_CLUSTERS)[number];
+
+export const INVOICE_ACTION_CLUSTER_LABELS: Record<InvoiceActionCluster, string> = {
+  zu_versenden: "Noch zu versenden",
+  avis_ausstehend: "Avis ausstehend",
+  zahlung_ausstehend: "Zahlung ausstehend",
+  abgeschlossen: "Abgeschlossen",
+  storniert: "Storniert",
+};
+
+export interface InvoiceClusterInput {
+  /** Rechnungs-Status (`INVOICE_STATUSES`). */
+  status: string;
+  /** Rechnungs-Typ (`INVOICE_TYPES`). */
+  invoiceType: string;
+  /** Zahler-Typ (`billingType`): selbstzahler | pflegekasse_gesetzlich | pflegekasse_privat. */
+  billingType: string;
+}
+
+/**
+ * Ordnet eine Rechnung GENAU einem Handlungs-Cluster zu (total + disjunkt).
+ *
+ * KOMPONIERT die bestehende `assignInvoiceStage`-SSoT und den Zahler-Typ-Pfad
+ * aus `agingModelForBillingType` — es wird KEINE zweite, parallele Status-Logik
+ * erfunden. Verankert in
+ * `tests/architecture/billing-pipeline-stage-identity.test.ts`.
+ */
+export function assignInvoiceActionCluster(input: InvoiceClusterInput): InvoiceActionCluster {
+  const assignment = assignInvoiceStage({
+    status: input.status,
+    invoiceType: input.invoiceType,
+  });
+  // assignInvoiceStage liefert für Rechnungen als einzigen Side-Zustand
+  // „storniert" (Storno-Status oder Gutschrift-Typ). Der `excluded`-Ausgang
+  // tritt für Rechnungen nicht auf (nur Termin-Pfad) — wird aber, falls er je
+  // entstünde, ebenfalls dem Storniert-Cluster zugeordnet, damit die Zuordnung
+  // total bleibt.
+  if (assignment.kind !== "stage") return "storniert";
+
+  switch (assignment.stage) {
+    case "rechnung_erstellt":
+      return "zu_versenden";
+    case "versendet":
+      // Selbstzahler/Privat warten direkt auf Zahlung; Pflegekassen warten
+      // zuerst auf die Zahlungsavis.
+      return agingModelForBillingType(input.billingType) === "selbstzahler"
+        ? "zahlung_ausstehend"
+        : "avis_ausstehend";
+    case "avis_erhalten":
+      return "zahlung_ausstehend";
+    case "bezahlt":
+      return "abgeschlossen";
+    default:
+      // Termin-Stufen (offen/dokumentiert/unterschrieben) treten für Rechnungen
+      // nicht auf; konservativ als „zu_versenden" behandeln, damit die Zuordnung
+      // total bleibt (kein stiller Verlust einer Rechnung).
+      return "zu_versenden";
+  }
+}
+
+// ============================================
 // AGING-AMPEL (Q5) — drei getrennte Modelle, pur berechnet
 // ============================================
 
@@ -189,6 +275,22 @@ export type AgingBucket = "none" | "green" | "yellow" | "orange" | "red";
  *  - `pflegekasse_post_avis`— Anker `avisErhaltenAm` (nach Avis, vor Zahlung).
  */
 export type AgingModel = "selbstzahler" | "pflegekasse_pre_avis" | "pflegekasse_post_avis";
+
+/**
+ * Leitet das Aging-Modell (und damit den Zahler-Typ-Pfad) aus dem `billingType`
+ * einer Rechnung ab. Dies ist die EINE Quelle für die fachliche Unterscheidung
+ * „rechnet direkt gegen den Kunden ab (Selbstzahler/Privat) vs. läuft über den
+ * Pflegekassen-Avis-Pfad". Der Abrechnungs-Pipeline-Reader (`server/storage/
+ * billing/pipeline-reader.ts`) UND die Handlungs-Cluster der Rechnungsliste
+ * (`assignInvoiceActionCluster`) lesen dieselbe Funktion, damit Aging-Anker und
+ * Cluster-Zuordnung nie auseinanderdriften.
+ */
+export function agingModelForBillingType(billingType: string): AgingModel {
+  // Selbstzahler/Privat rechnen direkt gegen den Kunden ab (Fälligkeits-Aging).
+  if (billingType === "selbstzahler" || billingType === "privat") return "selbstzahler";
+  // Pflegekasse: vor Avis-Eingang am Versanddatum verankert.
+  return "pflegekasse_pre_avis";
+}
 
 /** Ganztägige Differenz `asOf - anchor` in Tagen (kann negativ sein). */
 export function daysBetweenIso(anchorIso: string, asOfIso: string): number {

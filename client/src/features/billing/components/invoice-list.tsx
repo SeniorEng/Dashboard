@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -8,11 +9,32 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { iconSize } from "@/design-system";
-import { Loader2, Receipt, Trash2, ChevronDown } from "lucide-react";
+import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
+import {
+  INVOICE_ACTION_CLUSTERS,
+  INVOICE_ACTION_CLUSTER_LABELS,
+  type InvoiceActionCluster,
+} from "@shared/domain/billing-pipeline";
 import { InvoiceRow } from "./invoice-row";
+import { invoiceActionCluster, invoiceAgingBucket, formatAmount } from "../utils";
 import type { BulkActionProgress } from "../hooks/use-billing-mutations";
+
+// Task #1412: Reihenfolge der Handlungs-Cluster in der Liste (handlungs-
+// orientiert: was zuerst Arbeit braucht, steht oben). „Abgeschlossen" und
+// „Storniert" sind standardmäßig eingeklappt (Archiv-Charakter).
+const CLUSTER_ORDER: InvoiceActionCluster[] = [...INVOICE_ACTION_CLUSTERS];
+const DEFAULT_COLLAPSED: InvoiceActionCluster[] = ["abgeschlossen", "storniert"];
+
+// Kurze Erklärzeile je Cluster — sagt dem Nutzer, welche Handlung ansteht.
+const CLUSTER_HINTS: Record<InvoiceActionCluster, string> = {
+  zu_versenden: "Entwürfe — an Kasse senden oder als versendet markieren",
+  avis_ausstehend: "An Pflegekassen versendet — auf Zahlungsavis warten",
+  zahlung_ausstehend: "Auf Zahlungseingang warten",
+  abgeschlossen: "Bezahlt — abgeschlossen",
+  storniert: "Stornierte Rechnungen und Gutschriften",
+};
 
 // Task #1376: Sammel-Statuswechsel ist bewusst auf die fortschreitenden
 // Lebenszyklus-Status begrenzt — „storniert" ist KEINE Sammelaktion (Storno
@@ -70,6 +92,35 @@ export function InvoiceList({
   bulkActionPending,
   bulkActionProgress,
 }: InvoiceListProps) {
+  // Task #1412: Eingeklappte Cluster (Standard: Archiv-Cluster). Reine
+  // Anzeige-Präferenz, kein Datenmodell.
+  const [collapsed, setCollapsed] = useState<Set<InvoiceActionCluster>>(
+    () => new Set(DEFAULT_COLLAPSED),
+  );
+
+  // Task #1412: Rechnungen in Handlungs-Cluster gruppieren (eine SICHT über die
+  // SSoT `assignInvoiceActionCluster`). Pro Cluster: Zeilen (in Eingangs-
+  // Reihenfolge), €-Summe, Aging je Zeile und Anzahl überfälliger Rechnungen.
+  const grouped = useMemo(() => {
+    const byCluster = new Map<
+      InvoiceActionCluster,
+      { items: InvoiceItem[]; totalCents: number; overdue: number; aging: Map<number, ReturnType<typeof invoiceAgingBucket>> }
+    >();
+    for (const cluster of CLUSTER_ORDER) {
+      byCluster.set(cluster, { items: [], totalCents: 0, overdue: 0, aging: new Map() });
+    }
+    for (const inv of invoices ?? []) {
+      const cluster = invoiceActionCluster(inv);
+      const bucket = byCluster.get(cluster)!;
+      bucket.items.push(inv);
+      bucket.totalCents += inv.grossAmountCents;
+      const aging = invoiceAgingBucket(inv);
+      bucket.aging.set(inv.id, aging);
+      if (aging === "orange" || aging === "red") bucket.overdue += 1;
+    }
+    return byCluster;
+  }, [invoices]);
+
   if (invoicesLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -83,10 +134,20 @@ export function InvoiceList({
     const allSelected = invoices.every((inv) => selectedIds.has(inv.id));
     const someSelected = selectedCount > 0 && !allSelected;
 
+    const toggleCluster = (cluster: InvoiceActionCluster) => {
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        if (next.has(cluster)) next.delete(cluster);
+        else next.add(cluster);
+        return next;
+      });
+    };
+
     return (
       <div className="flex flex-col gap-3">
         {/* Task #1376: Auswahl-Kopfzeile mit „Alle auswählen" + kontextueller
-            Sammelaktions-Leiste (nur sichtbar, wenn etwas ausgewählt ist). */}
+            Sammelaktions-Leiste (nur sichtbar, wenn etwas ausgewählt ist).
+            Bleibt global über alle Cluster (Auswahl spannt clusterübergreifend). */}
         <div className="flex flex-wrap items-center gap-3 px-3 py-2 rounded-md border border-gray-200 bg-gray-50">
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
             <Checkbox
@@ -160,25 +221,79 @@ export function InvoiceList({
           )}
         </div>
 
-        {invoices.map((invoice) => (
-          <InvoiceRow
-            key={invoice.id}
-            invoice={invoice}
-            isExpanded={expandedInvoiceId === invoice.id}
-            onToggleDetail={onToggleDetail}
-            expandedDetail={expandedDetail}
-            detailLoading={detailLoading}
-            deliveryHistory={deliveryHistory}
-            sendingInvoiceId={sendingInvoiceId}
-            sendInvoiceMutation={sendInvoiceMutation}
-            markSentMutation={markSentMutation}
-            statusMutation={statusMutation}
-            onStorno={onStorno}
-            onMarkPaid={onMarkPaid}
-            selected={selectedIds.has(invoice.id)}
-            onToggleSelect={onToggleSelect}
-          />
-        ))}
+        {/* Task #1412: Handlungs-Cluster statt flacher Liste. Leere Cluster
+            werden ausgeblendet; jeder Cluster zeigt Anzahl + €-Summe und ist
+            ein-/ausklappbar. */}
+        {CLUSTER_ORDER.map((cluster) => {
+          const group = grouped.get(cluster)!;
+          if (group.items.length === 0) return null;
+          const isCollapsed = collapsed.has(cluster);
+          return (
+            <section key={cluster} data-testid={`cluster-${cluster}`} className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => toggleCluster(cluster)}
+                aria-expanded={!isCollapsed}
+                className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-left hover:bg-gray-50"
+                data-testid={`button-cluster-toggle-${cluster}`}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className={`${iconSize.sm} text-gray-400`} />
+                ) : (
+                  <ChevronDown className={`${iconSize.sm} text-gray-400`} />
+                )}
+                <span className="font-semibold text-gray-900 text-sm">
+                  {INVOICE_ACTION_CLUSTER_LABELS[cluster]}
+                </span>
+                <span
+                  className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+                  data-testid={`text-cluster-count-${cluster}`}
+                >
+                  {group.items.length}
+                </span>
+                {group.overdue > 0 && (
+                  <span
+                    className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-200"
+                    data-testid={`text-cluster-overdue-${cluster}`}
+                  >
+                    {group.overdue} überfällig
+                  </span>
+                )}
+                <span className="hidden sm:inline text-xs text-gray-400">
+                  {CLUSTER_HINTS[cluster]}
+                </span>
+                <span
+                  className={`ml-auto text-sm font-medium tabular-nums ${group.totalCents < 0 ? "text-red-600" : "text-gray-900"}`}
+                  data-testid={`text-cluster-sum-${cluster}`}
+                >
+                  {formatAmount(group.totalCents)}
+                </span>
+              </button>
+
+              {!isCollapsed &&
+                group.items.map((invoice) => (
+                  <InvoiceRow
+                    key={invoice.id}
+                    invoice={invoice}
+                    isExpanded={expandedInvoiceId === invoice.id}
+                    onToggleDetail={onToggleDetail}
+                    expandedDetail={expandedDetail}
+                    detailLoading={detailLoading}
+                    deliveryHistory={deliveryHistory}
+                    sendingInvoiceId={sendingInvoiceId}
+                    sendInvoiceMutation={sendInvoiceMutation}
+                    markSentMutation={markSentMutation}
+                    statusMutation={statusMutation}
+                    onStorno={onStorno}
+                    onMarkPaid={onMarkPaid}
+                    selected={selectedIds.has(invoice.id)}
+                    onToggleSelect={onToggleSelect}
+                    aging={group.aging.get(invoice.id)}
+                  />
+                ))}
+            </section>
+          );
+        })}
       </div>
     );
   }

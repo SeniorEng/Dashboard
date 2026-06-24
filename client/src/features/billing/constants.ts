@@ -44,3 +44,13 @@ export const TYPE_COLORS: Record<string, string> = {
 // PDF_PENDING_THRESHOLD_MS noch kein `pdfPath` gesetzt, gehen wir von einem
 // Fehler aus und zeigen einen roten Hinweis-Badge.
 export const PDF_PENDING_THRESHOLD_MS = 5 * 60 * 1000;
+
+// Task #1412: Aging-Ampel-Badge für die „Avis ausstehend"- und „Zahlung
+// ausstehend"-Gruppen. `green`/`none` erhalten KEIN Badge (alles im Plan); nur
+// die mahnenden Stufen werden sichtbar hervorgehoben. Quelle der Einstufung ist
+// `resolveAgingBucket` (shared) — hier nur die Darstellung.
+export const AGING_BADGE: Record<"yellow" | "orange" | "red", { label: string; className: string }> = {
+  yellow: { label: "Nachhaken", className: "bg-amber-50 text-amber-700 border-amber-200" },
+  orange: { label: "Überfällig", className: "bg-orange-50 text-orange-700 border-orange-200" },
+  red: { label: "Stark überfällig", className: "bg-red-50 text-red-700 border-red-200" },
+};

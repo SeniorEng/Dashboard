@@ -39,6 +39,11 @@ export interface InvoiceItem {
   status: string;
   // Task #533: Versanddatum für Listenanzeige (Badge „Versendet seit ...").
   sentAt: string | null;
+  // Task #1412: Fälligkeitsdatum (ISO yyyy-mm-dd). Anker für das Selbstzahler-/
+  // Privat-Aging in der „Zahlung ausstehend"-Gruppe der Rechnungsliste (mirror
+  // des Pipeline-Reader-Aging). Wird bereits roh vom Listen-Endpunkt geliefert,
+  // hier nur typisiert.
+  dueDate: string | null;
   // Task #546: PDF-Persistierungs-Status. `pdfPath` ist NULL solange das
   // Hintergrund-Rendering läuft (oder fehlgeschlagen ist); `createdAt` dient
   // dem Frontend zur Unterscheidung zwischen „noch in Arbeit" und „Fehler".

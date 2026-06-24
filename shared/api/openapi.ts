@@ -376,6 +376,7 @@ export const InvoiceItemSchema = component(
     vatRate: z.number().nullable(),
     status: z.string(),
     sentAt: nullableString(),
+    dueDate: nullableString(),
     pdfPath: nullableString(),
     createdAt: z.string(),
     billingRunId: nullableString(),

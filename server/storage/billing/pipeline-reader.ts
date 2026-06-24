@@ -28,6 +28,7 @@ import { num } from "../statistics/common";
 import { documentedAndSignedSqlRaw } from "../../lib/appointment-signed";
 import { getInvoices } from "../billing-storage";
 import {
+  agingModelForBillingType,
   assignAppointmentStage,
   assignInvoiceStage,
   resolveAgingBucket,
@@ -40,7 +41,6 @@ import {
   type PipelineSideState,
   type PipelineAtomicUnit,
   type AgingBucket,
-  type AgingModel,
 } from "@shared/domain/billing-pipeline";
 import type { AppointmentStatus } from "@shared/domain/appointments";
 import type {
@@ -52,14 +52,6 @@ import type {
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
-}
-
-/** Aging-Modell aus dem `billingType` der Rechnung ableiten. */
-function agingModelForBillingType(billingType: string): AgingModel {
-  // Selbstzahler/Privat rechnen direkt gegen den Kunden ab (Fälligkeits-Aging).
-  if (billingType === "selbstzahler" || billingType === "privat") return "selbstzahler";
-  // Pflegekasse: vor Avis-Eingang am Versanddatum verankert.
-  return "pflegekasse_pre_avis";
 }
 
 interface MutableStageGroup {

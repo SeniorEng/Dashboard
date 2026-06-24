@@ -22,8 +22,10 @@ import { describe, it, expect } from "vitest";
 import {
   PIPELINE_STAGES,
   PIPELINE_SIDE_STATES,
+  INVOICE_ACTION_CLUSTERS,
   assignAppointmentStage,
   assignInvoiceStage,
+  assignInvoiceActionCluster,
   summarizePipelineCents,
   type PipelineAssignment,
   type AppointmentPipelineInput,
@@ -135,5 +137,59 @@ describe("billing-pipeline stage identity (total + disjunkt)", () => {
     expect(summary.grandTotalCents).toBe(3500 + 9999);
     // excluded-€ (invoiced/cancelled) tauchen in keiner Summe auf
     expect(summary.grandTotalCents).not.toBe(3500 + 9999 + 123456 + 777);
+  });
+});
+
+// Task #1412 — Handlungs-Cluster der Rechnungsliste sind eine reine SICHT auf
+// die bestehende `assignInvoiceStage`-Zuordnung + den Zahler-Typ. Die Zuordnung
+// MUSS total (jede Rechnung landet in genau einem Cluster) und disjunkt sein,
+// damit beim Gruppieren keine Rechnung still verschwindet oder doppelt erscheint.
+const ALL_BILLING_TYPES = [
+  "selbstzahler",
+  "privat",
+  "pflegekasse_gesetzlich",
+  "pflegekasse_privat",
+];
+
+const CLUSTER_SET = new Set<string>(INVOICE_ACTION_CLUSTERS);
+
+describe("billing action clusters (total + disjunkt, reine Sicht)", () => {
+  it("assignInvoiceActionCluster bildet jede (Status × Typ × Zahler)-Kombination auf genau einen Cluster ab", () => {
+    for (const status of INVOICE_STATUSES) {
+      for (const invoiceType of INVOICE_TYPES) {
+        for (const billingType of ALL_BILLING_TYPES) {
+          const cluster = assignInvoiceActionCluster({ status, invoiceType, billingType });
+          expect(CLUSTER_SET.has(cluster)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("Cluster-Mapping respektiert die fachliche Tabelle (komponiert assignInvoiceStage + Zahler-Typ)", () => {
+    // Entwurf → noch zu versenden
+    expect(assignInvoiceActionCluster({ status: "entwurf", invoiceType: "rechnung", billingType: "selbstzahler" }))
+      .toBe("zu_versenden");
+    expect(assignInvoiceActionCluster({ status: "entwurf", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
+      .toBe("zu_versenden");
+    // versendet: Pflegekasse → Avis ausstehend, Selbstzahler/Privat → Zahlung ausstehend
+    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
+      .toBe("avis_ausstehend");
+    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "pflegekasse_privat" }))
+      .toBe("avis_ausstehend");
+    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "selbstzahler" }))
+      .toBe("zahlung_ausstehend");
+    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "rechnung", billingType: "privat" }))
+      .toBe("zahlung_ausstehend");
+    // avis_erhalten (immer Pflegekasse) → Zahlung ausstehend
+    expect(assignInvoiceActionCluster({ status: "avis_erhalten", invoiceType: "rechnung", billingType: "pflegekasse_gesetzlich" }))
+      .toBe("zahlung_ausstehend");
+    // bezahlt → abgeschlossen
+    expect(assignInvoiceActionCluster({ status: "bezahlt", invoiceType: "rechnung", billingType: "selbstzahler" }))
+      .toBe("abgeschlossen");
+    // storniert / Gutschrift → eigener Storniert-Cluster (Totalität)
+    expect(assignInvoiceActionCluster({ status: "storniert", invoiceType: "rechnung", billingType: "selbstzahler" }))
+      .toBe("storniert");
+    expect(assignInvoiceActionCluster({ status: "versendet", invoiceType: "stornorechnung", billingType: "pflegekasse_gesetzlich" }))
+      .toBe("storniert");
   });
 });
