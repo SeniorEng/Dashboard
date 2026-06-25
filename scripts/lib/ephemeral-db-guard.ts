@@ -8,11 +8,18 @@
 // greift dann NICHT (es hängt an `TEST_DATABASE_URLS`) und ALLE Tests würden
 // still in die Dev-DB schreiben und sie mit Test-Daten fluten.
 //
-// Diese Datei enthält die reine, testbare Entscheidungslogik (kein DB-Zugriff);
-// `assertEphemeralTestDb` wird in `tests/globalSetup.ts` aufgerufen und bricht
-// den Lauf VOR den Integrationstests mit einer klaren Meldung ab.
+// Diese Datei enthält die reine, testbare Entscheidungslogik (kein DB-Zugriff).
+// Sie ist die EINE Quelle der Allow-List ("ist das eine erlaubte Wegwerf-DB?")
+// und wird an zwei Stellen wiederverwendet:
+//   - `tests/globalSetup.ts` (`assertEphemeralTestDb`) bricht den Vitest-Lauf VOR
+//     den Integrationstests ab.
+//   - der App-Server-Boot (Task #1429, `server/startup/assert-ephemeral-test-db.ts`)
+//     verweigert den Start, wenn er in `NODE_ENV=test` gegen eine Nicht-Wegwerf-DB
+//     hochfahren würde (z.B. die Dev-`Start application`-Konfiguration).
+// Sie liegt daher hier in `scripts/lib/` (neben dem Prefix-SSoT
+// `ephemeral-db-sweep.ts`) — neutral importierbar von Tests UND vom Server.
 // ---------------------------------------------------------------------------
-import { DB_PREFIX } from "../../scripts/lib/ephemeral-db-sweep.ts";
+import { DB_PREFIX } from "./ephemeral-db-sweep.ts";
 
 function dbNameOf(url: string | undefined): string | null {
   if (!url) return null;

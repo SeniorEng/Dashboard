@@ -138,6 +138,20 @@ function isNeonDriverBug(message: string): boolean {
 }
 
 (async () => {
+  // Task #1429 — Boot-Guard: In NODE_ENV=test darf der Server NUR gegen eine
+  // Wegwerf-/Ephemeral-DB hochfahren, nie gegen die Dev-/Prod-DB. Muss VOR jeder
+  // DB-Arbeit (Migrationen/Seeds) laufen. Bewusst NICHT fault-isoliert: ein
+  // Fehlschlag MUSS den Prozess beenden (kein Test-Server gegen die Dev-DB).
+  try {
+    const { assertTestModeUsesEphemeralDb } = await import(
+      "./startup/assert-ephemeral-test-db"
+    );
+    assertTestModeUsesEphemeralDb();
+  } catch (err) {
+    log(`[FATAL] Test-Mode-DB-Guard: ${err}`, "startup");
+    process.exit(1);
+  }
+
   // Task #1339 (Reihenfolge-Fix) — Die `prices`-SSoT MUSS befüllt/wiederhergestellt
   // sein, BEVOR der Critical-SSoT-Boot-Gate sie prüft. Vorher liefen die Befüll-
   // (#1329) und Recovery-Migration (#1334) erst in `runStartupTasks`, also NACH

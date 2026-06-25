@@ -1,4 +1,4 @@
-import { assertEphemeralTestDb } from "./helpers/ephemeral-db-guard";
+import { assertEphemeralTestDb } from "../scripts/lib/ephemeral-db-guard";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 

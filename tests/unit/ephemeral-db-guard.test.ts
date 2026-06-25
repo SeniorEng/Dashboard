@@ -10,7 +10,7 @@ import { DB_PREFIX } from "../../scripts/lib/ephemeral-db-sweep.ts";
 import {
   assertEphemeralTestDb,
   evaluateTestDbTarget,
-} from "../helpers/ephemeral-db-guard";
+} from "../../scripts/lib/ephemeral-db-guard";
 
 const DEV_URL = "postgres://user:pw@helium/heliumdb";
 const EPHEMERAL_URL = `postgres://user:pw@localhost:5432/${DB_PREFIX}abc123_w0`;
