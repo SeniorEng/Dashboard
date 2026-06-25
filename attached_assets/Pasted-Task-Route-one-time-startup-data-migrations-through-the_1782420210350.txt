@@ -1,0 +1,12 @@
+Task: Route one-time startup data-migrations through the existing exactly-once ledger
+Goal — Stop ~12 one-time data migrations in server/startup/ from re-scanning/re-updating the DB on every boot. Route them through the project's existing exactly-once ledger so each runs once then self-skips via an indexed lookup. Boot-cost + readability cleanup, no behavior change on a fresh DB. No deletions in this task.
+
+Pattern to reuse (already in the codebase) — The budget migrations already do this right: ledger table budget_migrations (ensure-migration-ledger.ts) + guarded runner runGuardedBudgetMigration() / runBudgetDataMigrations() (budget-migration-runner.ts). Each migration recorded by name; a fast SELECT 1 skips it forever after. The non-budget migrations below don't touch GoBD-historized tables, so gate them with conservationCheck:false, gobdBypass:false — ledger gate only, not the financial guard rails.
+
+Scope — gate exactly these 15 verified one-time data migrations: cleanup-vacation-on-holidays (worst — full table scan every boot), migrate-task-status-in-progress, migrate-prospect-statuses, migrate-schulung-besprechung-to-sonstiges, migrate-erstberatung-customers, cleanup-orphan-erstberatung-customers, migrate-in-progress-appointments, migrate-expired-unsigned-appointments, clear-45b-monthly-limits, migrate-km-geo-to-numeric, migrate-monthly-work-hours-to-numeric, backfill-avis-received-status, backfill-storno-transaction-date, backfill-orphan-reversal-appointment-id, restore-storno-deleted-service-records. Prefer collapsing the ~12+ direct await import blocks in server/index.ts into one gated registry loop.
+
+Do NOT touch — idempotent DDL guards (migrate-invoice-storno-refs, -zugferd-xml, -legacy-invoice-pdf-paths, all ensure-*/drop-*); trigger-spec.ts (load-bearing — imported by 3 active immutability scripts); purge-junk-master-data.ts (paired SSoT twin of test-data-cleanup.ts); the paused drop-budget-ledger.ts + ensure-budget-tx-appointment-constraint.ts; the already-gated budget migrations.
+
+Acceptance — second boot does no scan/UPDATE for gated scripts (only indexed skip, visible in logs); fresh DB applies each once + records a ledger row; index.ts no longer calls them directly; tests pass + a once-then-skip test added; develop on claude/clever-carson-ry9izk, no PR unless asked.
+
+Out of scope (follow-up) — actually deleting any migration; that needs production-applied confirmation first (this codebase has documented prod-lag history).
