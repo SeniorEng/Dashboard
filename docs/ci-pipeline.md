@@ -19,8 +19,15 @@ GitHub Actions (`.github/workflows/ci.yml`) läuft bei jedem Push und Pull-Reque
 8. Targeted-Coverage-Gates `tsx script/coverage-gate.ts <key>` (je ein CI-Step für `billing`, `qonto`, `consumption-engine`, `month-close-scheduler`)
 9. `npm run gen:openapi -- --check` (OpenAPI-Spec-Drift, statisch im `static-analysis`-Job)
 10. `npm run validate:erechnung` (E-Rechnungs-Validierung EN 16931 + PDF/A-3b, eigener Job `erechnung-validation` — Mustang/KoSIT EN-16931 + veraPDF PDF/A-3b; Detail: [`erechnung-validation.md`](erechnung-validation.md))
+11. `vitest run tests/architecture/dev-db-scripts-guard.test.ts` (Dev-DB-Skript-Prod-Guards, statisch, **immer** — eigener Step im `static-analysis`-Job; Detail siehe unten)
 
-Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` (Login gegen den in CI gestarteten App-Server) — fehlen sie (z.B. in Forks), werden diese Schritte sauber übersprungen, die statischen Gates (1, 2, 3, 6, 10) laufen immer (Gate 10 lädt zur Laufzeit Mustang + veraPDF und braucht Java, aber keine Test-User-Secrets).
+Die DB-/Server-abhängigen Gates (4, 5, 7, 8) brauchen die Repo-Secrets `TEST_USER_EMAIL` + `TEST_USER_PASSWORD` (Login gegen den in CI gestarteten App-Server) — fehlen sie (z.B. in Forks), werden diese Schritte sauber übersprungen, die statischen Gates (1, 2, 3, 6, 10, 11) laufen immer (Gate 10 lädt zur Laufzeit Mustang + veraPDF und braucht Java, aber keine Test-User-Secrets).
+
+### Dev-DB-Skript-Prod-Guards als eigenes Gate (Task #1436)
+
+Die Dev-DB-Helfer `scripts/backup-dev-db.sh` und `scripts/reseed-dev-db.sh` sind **zerstörerisch** (Reseed = `DROP SCHEMA public CASCADE`). Ihre Prod-Schutz-Guards (Abbruch bei `NODE_ENV=production`, prod-aussehendem DB-Host, nicht extrahierbarem Host = fail-closed, sowie `DATABASE_URL`-Host == `PROD_DATABASE_URL`-Host) werden vom Black-Box-Guard-Test `tests/architecture/dev-db-scripts-guard.test.ts` (Task #1435) abgesichert.
+
+Dieser Test liegt im `tests/architecture/`-Verzeichnis (Vitest-Project `unit`) und liefe daher ohnehin in Gate 4 (`vitest run`) und Gate 5 (`vitest run tests/architecture/`) mit — **aber** beide sind DB-/Server-Gates und auf gesetzte `TEST_USER_*`-Secrets gegated; in Forks ohne Secrets würden sie übersprungen. Damit eine Regression der Prod-Guards den Merge **deterministisch** blockiert, läuft der Schutz-Check zusätzlich als eigener, klar benannter Step **`Dev-DB scripts prod-guard (dev-db-scripts-guard)`** im immer laufenden `static-analysis`-Job. Der Test braucht weder DB noch Server (Fake-`.example`-Hosts lösen als NXDOMAIN auf), nur `bash` + `pg_dump`/`psql` (auf `ubuntu-latest` vorinstalliert), und ist damit deterministisch grün/rot.
 
 ### Targeted-Coverage-Gates: Skip ohne Object Storage (Task #1330)
 

@@ -15,11 +15,16 @@ name: CI
 #                                            qonto, consumption-engine,
 #                                            month-close-scheduler)
 #   9. npm run gen:openapi -- --check      (OpenAPI-Drift, statisch)
+#  11. vitest run tests/architecture/dev-db-scripts-guard.test.ts
+#                                          (Dev-DB-Skript-Prod-Guards, statisch,
+#                                           immer — Task #1436)
+#
+# (Gate 10 = E-Rechnungs-Validierung, eigener Job `erechnung-validation`.)
 #
 # Die DB-/Server-abhängigen Gates (4, 5, 7, 8) benötigen Repo-Secrets
 # (`TEST_USER_EMAIL`, `TEST_USER_PASSWORD`). Fehlen diese (z.B. in Forks),
 # werden die betroffenen Schritte sauber übersprungen statt hart zu failen —
-# die statischen Gates (1, 2, 3, 6) laufen immer.
+# die statischen Gates (1, 2, 3, 6, 11) laufen immer.
 
 on:
   push:
@@ -72,6 +77,21 @@ jobs:
       # Gate 3: Lint (max-warnings 0)
       - name: Lint (eslint --max-warnings 0)
         run: npm run lint
+
+      # Gate 11: Dev-DB-Skript-Schutz-Guards (Task #1436). Der Guard-Test
+      # `tests/architecture/dev-db-scripts-guard.test.ts` (Task #1435) übt die
+      # Prod-Schutz-Guards der ZERSTÖRERISCHEN Dev-DB-Skripte
+      # (`scripts/backup-dev-db.sh` + `scripts/reseed-dev-db.sh`, Reseed =
+      # DROP SCHEMA) als Black-Box aus. Er läuft zwar ohnehin im vollen
+      # `vitest run` (Gate 4) und in `vitest run tests/architecture/` (Gate 5),
+      # diese DB-/Server-Gates sind aber auf gesetzte Secrets gegated und würden
+      # in Forks ohne Secrets übersprungen. Da eine Regression der Prod-Guards
+      # ein Backup/Reseed auf eine Nicht-Dev-DB richten könnte, läuft dieser
+      # Schutz-Check als eigenes, IMMER laufendes Gate im statischen Job: Der
+      # Test braucht weder DB noch Server (Fake-`.example`-Hosts → NXDOMAIN),
+      # nur `bash` + `pg_dump`/`psql` (auf ubuntu-latest vorinstalliert).
+      - name: Dev-DB scripts prod-guard (dev-db-scripts-guard)
+        run: npx vitest run tests/architecture/dev-db-scripts-guard.test.ts --reporter=default
 
       # Gate 9: OpenAPI-Drift — committete Spec muss mit der frisch aus den
       # Zod-Schemas generierten übereinstimmen (Task #775).
