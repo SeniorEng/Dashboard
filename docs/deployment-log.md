@@ -8,6 +8,37 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-06-25 (b) — Re-Publish §45b-Anzeige/Konsolidierung vorbereitet & verifiziert (Task #1422) — Publish ausstehend (Nutzer)
+
+**Anlass:** Der letzte Production-Publish war am **2026-06-17** (Build `94b24fe9-…`, enthielt den §45b-Juli-Buchungs-Fix #1306). Mehrere danach gemergte §45b-**Folge-Arbeiten** sind noch **nicht** live und betreffen ausschließlich die Budget-**Anzeige** + Code-Konsolidierung (NICHT den Buchungs-Pfad, der seit 06-17 korrekt ist):
+- **#1340 / #1366** — Korrektur des Forecasts „Verfügbar (nach Planung)" (symmetrische Carryover-Verfalls-Exklusion über die Juli-Grenze; ohne den Fix kann die Übersicht eine irreführend negative Zahl zeigen, obwohl die Buchung funktioniert).
+- **#1348 / #1392** — Konsolidierung des §45b-Readers auf EINE Verfügbarkeits-SSoT (`netAvailable45bAt` / `computeNetAvailable45b`, IB-Supersession-Logik).
+
+**Code-Verifikation (HEAD, aus dem Task-Agent):**
+- §45b-Forecast-SSoT vorhanden + verdrahtet: `server/storage/budget/net-available-45b.ts` (`netAvailable45bAt` + `getExcluded45bConsumption`-Exklusion, #1340) wird von beiden Forecast-Schleifen in `server/storage/budget/summary-queries.ts` über `signedAvailable = allocatedCents − consumedNetCents` benutzt.
+- Reader-Konsolidierung (#1348) vorhanden, `unified-reader` verdrahtet (Δreader = 0 abgenommen).
+- Deterministische Regression grün: `tests/unit/45b-forecast-signed-available.test.ts` (5/5).
+
+**Publish-Sicherheit (read-only gegen Production, `PROD_DATABASE_URL`, nur `SELECT`/`BEGIN READ ONLY`):**
+- `node script/schema-replica-diff.mjs` (Ziel-Schema vs. Prod-Replica) = **sauber** (Exit 0, keine Drop-Kandidaten) → der Publish ist **rein additiv**, **kein** `PUBLISH_ACK_DROPS` nötig.
+- Die vom Datei-Heuristik-Grep (`script/preflight-publish.mjs`) als „destruktiv" gemeldete jüngste Migration `0021_remove_aua_approval.sql` (DROP `customers.aua_approval_ref`/`aua_approval_date`) sowie `0018` (DROP `company_settings.anerkennungsnummer_45a`/`anerkennungs_bundesland`) sind in Prod **bereits angewandt** — die Spalten existieren dort nicht mehr (read-only `information_schema.columns` = leer). Das ist exakt der im Runbook §8.2 beschriebene Fall „Migrationsdateien lügen über den realen Drift; nur der Replica-Vergleich sieht ihn". Real-Drop durch diesen Publish = **0**.
+- Restliche Schema-Änderungen seit 06-17 (`0019` WhatsApp, `0020` no-show-Outcome) sind additiv.
+
+**Acceptance-Vorschau (Kunde 170 = Forbrig, Regina, PG2, `pflegekasse_gesetzlich`, aktiv):** Prod-§45b-Datenstand deckt sich exakt mit der #1421-Nachrechnung — Allocation 786 (carryover 393 €, läuft 30.06. ab), 789 (initial_balance 121,45 €, aktiv), 701 (393 € initial, soft-deleted 27.05.), H1-Verbrauch teils gegen den ablaufenden Carryover 786 gebucht. Mit dem #1340-Fix wird dieser H1-Verbrauch ab Juli symmetrisch herausgerechnet → projizierter Juli-Forecast **≈ +112 € (nicht-negativ)** statt der alten, fälschlich negativen Anzeige.
+
+**Operator-Schritte (Nutzer, im Main-/Publish-Kontext nach dem Merge):**
+1. `PROD_DATABASE_URL` aus dem Publishing-Tab setzen.
+2. Pre-Publish-Backup nach `docs/pre-publish-backup-runbook.md`: `bash scripts/backup-prod-db.sh` (SHA256 + Pfad hier nachtragen). Hinweis: der Replica-Diff ist sauber (0 Real-Drops), das Backup ist die stehende Vorsichtsregel + Neon-PITR deckt zusätzlich ab.
+3. `PROD_DATABASE_URL=… node script/preflight-publish.mjs` — der Grep meldet `0021` als „destruktiv"; das ist der oben erklärte False-Positive (Spalten in Prod bereits weg). Nach frischem Backup (<24 h) ist die einzige verbleibende Blockade erfüllt; **keine** `PUBLISH_ACK_DROPS` nötig, da der Replica-Diff keine echten Drops findet.
+4. Publish über den normalen Publish-Button (NICHT „Copy dev schema & data to production"). Bei einem Plattform-Rename-/Drop-Prompt im Zweifel „No, create new table" (additiv bleiben).
+5. `unset PROD_DATABASE_URL`.
+
+**Post-Publish-Verifikation (Nutzer):** Budget-Übersicht Kunde 170 öffnen → „Verfügbar (nach Planung)" für Juli zeigt eine plausible, **nicht-negative** Zahl (~112 €). Ergebnis + Backup-SHA256 hier nachtragen.
+
+**Publish-Status:** ⏳ ausstehend — Agent kann nicht publishen; Re-Publish ist eine Nutzer-Aktion (Alrik) aus der Hauptversion nach dem Merge dieses Tasks.
+
+---
+
 ### 2026-06-25 — Verifikation Task #1421 (Forbrig Juli-Termin): bereits in Produktion gelöst, KEIN Publish nötig
 
 **Anlass:** Meldung, dass Mitarbeiterin Nadine für Kundin Forbrig (Kunde 170, PG2, §45b) **keinen Juli-Termin** anlegen kann (vermutete §45b-Budget-Sperre). Task #1421 ging von einem Deployment-Lag aus (Fix gemergt, aber nie veröffentlicht) → Remedy = Re-Publish.
