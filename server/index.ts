@@ -488,24 +488,26 @@ async function runStartupTasks() {
       log(`Invoice-Line-Item-Quantity-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #678: KM-/Geo-Spalten von `real` (float) auf präzises `numeric`
-    // migrieren. Muss NACH `ensureInvoiceLineItemQuantityColumns` laufen,
-    // weil dort u.a. `quantity_raw` als `real` angelegt wird (Bestand).
-    const { migrateKmGeoToNumeric } = await import("./startup/migrate-km-geo-to-numeric");
+    // Task #1428 — Einmalige, NICHT-Budget Daten-Migrationen, PHASE pre-budget.
+    // Ledger-gegated (exactly-once über `budget_migrations`): auf frischer DB
+    // läuft jede genau einmal + protokolliert eine Ledger-Zeile, jeder spätere
+    // Boot macht nur einen billigen indizierten `SELECT 1`-Skip (kein Scan).
+    // ERSETZT die zuvor einzeln verdrahteten `await import(...)`-Blöcke für:
+    // migrate-km-geo-to-numeric (#678, läuft wie bisher direkt NACH
+    // `ensureInvoiceLineItemQuantityColumns` und VOR
+    // `reconcileDriftedColumnTypes`), migrate-monthly-work-hours-to-numeric
+    // (#833), backfill-orphan-reversal-appointment-id (#819),
+    // backfill-storno-transaction-date (#963), backfill-avis-received-status
+    // (#1284), clear-45b-monthly-limits (#603), migrate-in-progress-appointments,
+    // migrate-task-status-in-progress, migrate-expired-unsigned-appointments —
+    // allesamt VOR dem Budget-Migrations-Block (`backfillBudgetHistorization` +
+    // `runBudgetDataMigrations`). Reihenfolge bewahrt; fault-isoliert pro
+    // Migration. Registry: `server/startup/data-migration-runner.ts`.
+    const { runOneTimeDataMigrations } = await import("./startup/data-migration-runner");
     try {
-      await migrateKmGeoToNumeric();
+      await runOneTimeDataMigrations("pre-budget");
     } catch (err) {
-      log(`KM/Geo-Numeric-Migration fehlgeschlagen: ${err}`, "startup");
-    }
-
-    // Task #833: users.monthly_work_hours von `real` (float) auf exaktes
-    // `numeric(6,2)` migrieren — verhindert IEEE-754-Drift in Pro-Rata-Urlaub
-    // und Stunden-Statistiken.
-    const { migrateMonthlyWorkHoursToNumeric } = await import("./startup/migrate-monthly-work-hours-to-numeric");
-    try {
-      await migrateMonthlyWorkHoursToNumeric();
-    } catch (err) {
-      log(`monthly_work_hours-Numeric-Migration fehlgeschlagen: ${err}`, "startup");
+      log(`Einmalige Daten-Migrationen (pre-budget) fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #593: Render-Snapshot-Spalte (companySettings + Kunden-Snapshot) für
@@ -569,15 +571,6 @@ async function runStartupTasks() {
       log(`Import-Batch-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #819 — GoBD: verwaiste NULL-appointment_id-Reversals auflösen
-    // (MUSS vor der CHECK-Constraint laufen), danach Constraint anlegen.
-    const { backfillOrphanReversalAppointmentId } = await import("./startup/backfill-orphan-reversal-appointment-id");
-    try {
-      await backfillOrphanReversalAppointmentId();
-    } catch (err) {
-      log(`Orphan-Reversal-Backfill fehlgeschlagen: ${err}`, "startup");
-    }
-
     // INTERIM (Publish-Fenster) — Die GoBD-CHECK-Constraint
     // `budget_transactions_appointment_required_check` wird VORÜBERGEHEND NICHT
     // mehr beim Startup angelegt. Grund: Der automatische Replit-Publish-Diff
@@ -593,25 +586,6 @@ async function runStartupTasks() {
     // Funktion + Drift-Wächter) bleibt erhalten und wird im dedizierten
     // Folge-Task (Orphan-Backfill der 99 Zeilen → DANN Constraint) wieder
     // scharfgeschaltet. Analog zur pausierten dropBudgetLedger()-Stufe unten.
-
-    // Task #963 — fehl-datierte Storno-Reversals auf das Original-transactionDate
-    // umdatieren, damit stichtagsbezogene Budget-Checks Verbrauch + Storno korrekt
-    // verrechnen (kein fälschlicher Hard-Block dokumentierbarer Termine).
-    const { backfillStornoTransactionDate } = await import("./startup/backfill-storno-transaction-date");
-    try {
-      await backfillStornoTransactionDate();
-    } catch (err) {
-      log(`Storno-transactionDate-Backfill fehlgeschlagen: ${err}`, "startup");
-    }
-
-    // Task #1284 — bereits zugeordnete (aber noch "versendet") Rechnungen mit
-    // aktivem Zahlungsavis auf den neuen Zwischenstatus "avis_erhalten" anheben.
-    const { backfillAvisReceivedStatus } = await import("./startup/backfill-avis-received-status");
-    try {
-      await backfillAvisReceivedStatus();
-    } catch (err) {
-      log(`Avis-Received-Backfill fehlgeschlagen: ${err}`, "startup");
-    }
 
     // Task #1274 (Stufe C) — finale Entfernung des früheren budget_ledger-
     // Spiegels (FK-Spalte budget_reservations.captured_ledger_id + Tabelle
@@ -652,34 +626,6 @@ async function runStartupTasks() {
       await migrateWhatsAppToTwilio();
     } catch (err) {
       log(`WhatsApp-Twilio-Migration fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { clear45bMonthlyLimits } = await import("./startup/clear-45b-monthly-limits");
-    try {
-      await clear45bMonthlyLimits();
-    } catch (err) {
-      log(`§45b-Monatslimit-Bereinigung fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { migrateInProgressAppointments } = await import("./startup/migrate-in-progress-appointments");
-    try {
-      await migrateInProgressAppointments();
-    } catch (err) {
-      log(`In-Progress-Termin-Migration fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { migrateTaskStatusInProgress } = await import("./startup/migrate-task-status-in-progress");
-    try {
-      await migrateTaskStatusInProgress();
-    } catch (err) {
-      log(`Task-Status-In-Progress-Migration fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { migrateExpiredUnsignedAppointments } = await import("./startup/migrate-expired-unsigned-appointments");
-    try {
-      await migrateExpiredUnsignedAppointments();
-    } catch (err) {
-      log(`Expired-Unsigned-Termin-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #616: Termin-vs-Budget-km-Drift auditieren (Screenshot-Fall
@@ -783,31 +729,23 @@ async function runStartupTasks() {
       log(`Budget-Daten-Migrationen fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #576: Idempotente Korrektur — durch den entfernten Storno-
-    // Side-Effekt fälschlich soft-gelöschte Leistungsnachweise reaktivieren
-    // (Prod-IDs 8 und 48, 22.05.2026). Greift nur, solange die Ziel-IDs
-    // tatsächlich noch `deleted_at IS NOT NULL` haben.
-    const { restoreStornoDeletedServiceRecords } = await import(
-      "./startup/restore-storno-deleted-service-records"
-    );
+    // Einmalige, NICHT-Budget Daten-Migrationen NACH dem Budget-Block
+    // (`backfillBudgetHistorization` + `runBudgetDataMigrations`).
+    // Ledger-gegated (exactly-once über `budget_migrations`): auf frischer DB
+    // läuft jede genau einmal + protokolliert eine Ledger-Zeile, jeder spätere
+    // Boot macht nur einen billigen indizierten `SELECT 1`-Skip (kein Scan).
+    // ERSETZT die zuvor einzeln verdrahteten `await import(...)`-Blöcke für:
+    // restore-storno-deleted-service-records (#576),
+    // migrate-erstberatung-customers, cleanup-orphan-erstberatung-customers
+    // (MUSS nach migrate-erstberatung-customers laufen — Waisen entstehen aus
+    // der Migration), migrate-prospect-statuses (läuft VOR dem nicht-gegateten
+    // `matchProspectsToCustomers`), migrate-schulung-besprechung-to-sonstiges,
+    // cleanup-vacation-on-holidays. Reihenfolge bewahrt; fault-isoliert pro
+    // Migration. Registry: `server/startup/data-migration-runner.ts`.
     try {
-      await restoreStornoDeletedServiceRecords();
+      await runOneTimeDataMigrations("post-budget");
     } catch (err) {
-      log(`Storno-LN-Reaktivierung fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { migrateErstberatungCustomers } = await import("./startup/migrate-erstberatung-customers");
-    try {
-      await migrateErstberatungCustomers();
-    } catch (err) {
-      log(`Erstberatung-Kunden-Migration fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { cleanupOrphanErstberatungCustomers } = await import("./startup/cleanup-orphan-erstberatung-customers");
-    try {
-      await cleanupOrphanErstberatungCustomers();
-    } catch (err) {
-      log(`Erstberatung-Waisen-Bereinigung fehlgeschlagen: ${err}`, "startup");
+      log(`Einmalige Daten-Migrationen (post-budget) fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #510-Constraint per Startup-DDL deaktiviert: Die Skill
@@ -821,33 +759,12 @@ async function runStartupTasks() {
     // auf; das Constraint kann später deklarativ in shared/schema/
     // customers.ts ergänzt werden, sobald Prod sauber ist.
 
-    const { migrateProspectStatuses } = await import("./startup/migrate-prospect-statuses");
-    try {
-      await migrateProspectStatuses();
-    } catch (err) {
-      log(`Prospect-Status-Migration fehlgeschlagen: ${err}`, "startup");
-    }
-
     const { matchProspectsToCustomers } = await import("./startup/prospect-customer-matching");
     try {
       const matched = await matchProspectsToCustomers();
       if (matched > 0) log(`Prospect-Kunden-Abgleich: ${matched} Interessenten als gewonnen markiert`, "startup");
     } catch (err) {
       log(`Prospect-Kunden-Abgleich fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { migrateSchulungBesprechungToSonstiges } = await import("./startup/migrate-schulung-besprechung-to-sonstiges");
-    try {
-      await migrateSchulungBesprechungToSonstiges();
-    } catch (err) {
-      log(`Schulung/Besprechung-Migration fehlgeschlagen: ${err}`, "startup");
-    }
-
-    const { cleanupVacationOnHolidays } = await import("./startup/cleanup-vacation-on-holidays");
-    try {
-      await cleanupVacationOnHolidays();
-    } catch (err) {
-      log(`Urlaubs-Feiertags-Bereinigung fehlgeschlagen: ${err}`, "startup");
     }
 
     const { syncAppointmentServiceDurations } = await import("./startup/sync-appointment-service-durations");

@@ -1,5 +1,5 @@
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { budgetTransactions, users } from "@shared/schema";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
@@ -38,10 +38,11 @@ import { log } from "../lib/log";
  */
 export async function backfillStornoTransactionDate(
   dryRun = process.env.BACKFILL_STORNO_TX_DATE_DRY_RUN === "1",
+  exec: DbOrTx = db,
 ): Promise<void> {
   const orig = sql`orig`;
   const rows = (
-    await db.execute(sql`
+    await exec.execute(sql`
       SELECT
         rev.id AS "id",
         rev.customer_id AS "customerId",
@@ -66,7 +67,7 @@ export async function backfillStornoTransactionDate(
   if (rows.length === 0) return;
 
   // System-Actor (Super-/Admin) für die Audit-Einträge.
-  const [superActor] = await db
+  const [superActor] = await exec
     .select({ id: users.id })
     .from(users)
     .where(eq(users.isSuperAdmin, true))
@@ -74,7 +75,7 @@ export async function backfillStornoTransactionDate(
     .limit(1);
   let systemActorId: number | null = superActor?.id ?? null;
   if (systemActorId == null) {
-    const [adminActor] = await db
+    const [adminActor] = await exec
       .select({ id: users.id })
       .from(users)
       .where(eq(users.isAdmin, true))
@@ -86,6 +87,15 @@ export async function backfillStornoTransactionDate(
   let correctedCount = 0;
   let skippedNoActorCount = 0;
 
+  // budget_transactions ist GoBD-immutable (BEFORE-Trigger). Der transaktions-
+  // lokale GoBD-Bypass wird hier explizit auf der bereitgestellten Transaktion
+  // (`exec`) gesetzt; der aufrufende runGuardedBudgetMigration-Runner setzt ihn
+  // zusätzlich (gobdBypass: true) — doppeltes `SET LOCAL` im selben Tx ist ein
+  // No-Op. Macht den audit-pflichtigen Korrekturpfad in dieser Datei explizit.
+  if (!dryRun) {
+    await exec.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
+  }
+
   for (const row of rows) {
     if (dryRun) {
       correctedCount++;
@@ -96,39 +106,38 @@ export async function backfillStornoTransactionDate(
       continue;
     }
 
-    await db.transaction(async (tx) => {
-      // Task #1273: budget_transactions ist seit Stufe B per BEFORE-Trigger
-      // GoBD-immutable. Diese Korrektur ist audit-begleitet (siehe unten) —
-      // Bypass transaktions-lokal freischalten.
-      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
-      await tx
-        .update(budgetTransactions)
-        .set({ transactionDate: row.originalDate })
-        .where(
-          and(
-            eq(budgetTransactions.id, row.id),
-            eq(budgetTransactions.transactionType, "reversal"),
-            isNotNull(budgetTransactions.reversedTransactionId),
-          ),
-        );
-
-      await auditService.log(
-        systemActorId!,
-        "storno_transaction_date_backfilled",
-        "budget",
-        row.id,
-        {
-          task: "#963",
-          customerId: row.customerId,
-          transactionId: row.id,
-          reversedTransactionId: row.reversedTransactionId,
-          previousTransactionDate: row.reversalDate,
-          correctedTransactionDate: row.originalDate,
-        },
-        undefined,
-        tx,
+    // Task #1273: budget_transactions ist seit Stufe B per BEFORE-Trigger
+    // GoBD-immutable. Der GoBD-Bypass (`app.allow_gobd_mutation`) wird vom
+    // aufrufenden `runGuardedBudgetMigration`-Runner transaktions-lokal gesetzt
+    // (gobdBypass: true). Update + Audit laufen in DESSEN Transaktion gemeinsam
+    // mit dem Ledger-Eintrag (exactly-once, atomar).
+    await exec
+      .update(budgetTransactions)
+      .set({ transactionDate: row.originalDate })
+      .where(
+        and(
+          eq(budgetTransactions.id, row.id),
+          eq(budgetTransactions.transactionType, "reversal"),
+          isNotNull(budgetTransactions.reversedTransactionId),
+        ),
       );
-    });
+
+    await auditService.log(
+      systemActorId!,
+      "storno_transaction_date_backfilled",
+      "budget",
+      row.id,
+      {
+        task: "#963",
+        customerId: row.customerId,
+        transactionId: row.id,
+        reversedTransactionId: row.reversedTransactionId,
+        previousTransactionDate: row.reversalDate,
+        correctedTransactionDate: row.originalDate,
+      },
+      undefined,
+      exec,
+    );
     correctedCount++;
   }
 

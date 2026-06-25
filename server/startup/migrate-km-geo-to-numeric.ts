@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 
@@ -69,8 +69,9 @@ export const KM_GEO_COLUMNS: KmGeoColumnSpec[] = [
 async function getCurrentColumnType(
   table: string,
   column: string,
+  exec: DbOrTx = db,
 ): Promise<string | null> {
-  const res = await db.execute(sql`
+  const res = await exec.execute(sql`
     SELECT data_type, numeric_precision, numeric_scale
     FROM information_schema.columns
     WHERE table_schema = current_schema()
@@ -84,7 +85,7 @@ async function getCurrentColumnType(
   return String(row.data_type ?? "");
 }
 
-export async function migrateKmGeoToNumeric(): Promise<void> {
+export async function migrateKmGeoToNumeric(exec: DbOrTx = db): Promise<void> {
   let changed = 0;
   let skipped = 0;
   let missing = 0;
@@ -92,7 +93,7 @@ export async function migrateKmGeoToNumeric(): Promise<void> {
   for (const spec of KM_GEO_COLUMNS) {
     let dataType: string | null;
     try {
-      dataType = await getCurrentColumnType(spec.table, spec.column);
+      dataType = await getCurrentColumnType(spec.table, spec.column, exec);
     } catch (err) {
       log(
         `KM/Geo-Migration: Typ-Check ${spec.table}.${spec.column} fehlgeschlagen — übersprungen (${(err as Error).message})`,
@@ -117,11 +118,11 @@ export async function migrateKmGeoToNumeric(): Promise<void> {
       // ROUND(value::numeric, 3) bildet `quantizeKm` (2 NK) konservativ ab —
       // wir behalten 3 NK Speicher-Auflösung, damit Routing-Roh-km nicht
       // bereits beim Migrieren ihre dritte Stelle verlieren.
-      await db.execute(sql.raw(
+      await exec.execute(sql.raw(
         `ALTER TABLE "${spec.table}" ALTER COLUMN "${spec.column}" TYPE numeric(${KM_NUMERIC_PRECISION},${KM_NUMERIC_SCALE}) USING ROUND("${spec.column}"::numeric, ${KM_NUMERIC_SCALE})`,
       ));
     } else {
-      await db.execute(sql.raw(
+      await exec.execute(sql.raw(
         `ALTER TABLE "${spec.table}" ALTER COLUMN "${spec.column}" TYPE numeric(${GEO_NUMERIC_PRECISION},${GEO_NUMERIC_SCALE}) USING ROUND("${spec.column}"::numeric, ${GEO_NUMERIC_SCALE})`,
       ));
     }

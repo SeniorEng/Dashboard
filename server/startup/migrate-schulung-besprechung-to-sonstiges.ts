@@ -1,9 +1,9 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 
-export async function migrateSchulungBesprechungToSonstiges(): Promise<void> {
-  const check = await db.execute(sql`
+export async function migrateSchulungBesprechungToSonstiges(exec: DbOrTx = db): Promise<void> {
+  const check = await exec.execute(sql`
     SELECT COUNT(*) as cnt FROM employee_time_entries
     WHERE entry_type IN ('schulung', 'besprechung')
   `);
@@ -12,7 +12,7 @@ export async function migrateSchulungBesprechungToSonstiges(): Promise<void> {
 
   log(`Time-Entry-Migration: ${pending} Einträge mit entry_type 'schulung'/'besprechung' gefunden`, "startup");
 
-  const result: { rowCount?: number | null } = await db.execute(sql`
+  const result: { rowCount?: number | null } = await exec.execute(sql`
     UPDATE employee_time_entries
     SET entry_type = 'sonstiges'
     WHERE entry_type IN ('schulung', 'besprechung')
@@ -20,7 +20,7 @@ export async function migrateSchulungBesprechungToSonstiges(): Promise<void> {
 
   const migrated = result.rowCount ?? 0;
 
-  const verify = await db.execute(sql`
+  const verify = await exec.execute(sql`
     SELECT COUNT(*) as cnt FROM employee_time_entries
     WHERE entry_type IN ('schulung', 'besprechung')
   `);

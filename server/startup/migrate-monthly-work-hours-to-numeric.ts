@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 
@@ -38,8 +38,9 @@ export const MONTHLY_WORK_HOURS_TARGET = {
 async function getColumnType(
   table: string,
   column: string,
+  exec: DbOrTx = db,
 ): Promise<string | null> {
-  const res = await db.execute(sql`
+  const res = await exec.execute(sql`
     SELECT data_type
     FROM information_schema.columns
     WHERE table_schema = current_schema()
@@ -53,10 +54,10 @@ async function getColumnType(
   return String(row.data_type ?? "");
 }
 
-export async function migrateMonthlyWorkHoursToNumeric(): Promise<void> {
+export async function migrateMonthlyWorkHoursToNumeric(exec: DbOrTx = db): Promise<void> {
   let dataType: string | null;
   try {
-    dataType = await getColumnType("users", "monthly_work_hours");
+    dataType = await getColumnType("users", "monthly_work_hours", exec);
   } catch (err) {
     log(
       `monthly_work_hours-Migration: Typ-Check fehlgeschlagen — übersprungen (${(err as Error).message})`,
@@ -75,7 +76,7 @@ export async function migrateMonthlyWorkHoursToNumeric(): Promise<void> {
     return;
   }
 
-  await db.execute(sql.raw(
+  await exec.execute(sql.raw(
     `ALTER TABLE "${MONTHLY_WORK_HOURS_TARGET.table}" ALTER COLUMN "${MONTHLY_WORK_HOURS_TARGET.column}" TYPE numeric(${MONTHLY_WORK_HOURS_TARGET.precision},${MONTHLY_WORK_HOURS_TARGET.scale}) USING ROUND("${MONTHLY_WORK_HOURS_TARGET.column}"::numeric, ${MONTHLY_WORK_HOURS_TARGET.scale})`,
   ));
   log(

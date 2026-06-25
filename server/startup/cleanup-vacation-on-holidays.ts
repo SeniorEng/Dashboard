@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { employeeTimeEntries } from "@shared/schema";
 import { getVacationHolidayDates } from "@shared/utils/holidays";
@@ -13,8 +13,8 @@ import { log } from "../lib/log";
  * `vacation_holiday_cleanup`. Wenn alle betroffenen Einträge bereits
  * weggeräumt sind, ist der Aufruf ein No-Op.
  */
-export async function cleanupVacationOnHolidays(): Promise<number> {
-  const candidates = await db
+export async function cleanupVacationOnHolidays(exec: DbOrTx = db): Promise<number> {
+  const candidates = await exec
     .select({
       id: employeeTimeEntries.id,
       userId: employeeTimeEntries.userId,
@@ -49,7 +49,7 @@ export async function cleanupVacationOnHolidays(): Promise<number> {
   if (toDelete.length === 0) return 0;
 
   const ids = toDelete.map((c) => c.id);
-  await db
+  await exec
     .update(employeeTimeEntries)
     .set({ deletedAt: sql`NOW()` })
     .where(inArray(employeeTimeEntries.id, ids));

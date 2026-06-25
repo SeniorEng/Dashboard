@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 
@@ -34,13 +34,11 @@ interface QueryResult {
  * Idempotent: läuft mehrfach ohne Schaden, da nach erfolgreichem Lauf keine
  * Waisen mehr existieren.
  */
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
 async function createSyntheticProspectForOrphan(
-  tx: Tx,
+  exec: DbOrTx,
   customerId: number,
 ): Promise<number | null> {
-  const customerRows = await tx.execute(sql`
+  const customerRows = await exec.execute(sql`
     SELECT id, name, vorname, nachname, email, telefon, festnetz,
            strasse, nr, plz, stadt, pflegegrad
     FROM customers
@@ -84,7 +82,7 @@ async function createSyntheticProspectForOrphan(
   const telefon = row.telefon ?? row.festnetz ?? null;
   const plz = row.plz && /^\d{5}$/.test(row.plz) ? row.plz : null;
 
-  const inserted = await db.execute(sql`
+  const inserted = await exec.execute(sql`
     INSERT INTO prospects (
       vorname, nachname, telefon, email,
       strasse, nr, plz, stadt, pflegegrad,
@@ -102,8 +100,8 @@ async function createSyntheticProspectForOrphan(
   return typeof newId === "number" ? newId : null;
 }
 
-export async function cleanupOrphanErstberatungCustomers(): Promise<void> {
-  const orphans = await db.execute(sql`
+export async function cleanupOrphanErstberatungCustomers(exec: DbOrTx = db): Promise<void> {
+  const orphans = await exec.execute(sql`
     SELECT c.id, c.name
     FROM customers c
     WHERE c.status = 'erstberatung'
@@ -126,68 +124,75 @@ export async function cleanupOrphanErstberatungCustomers(): Promise<void> {
   let cleanedUp = 0;
 
   for (const customer of rows) {
-    // Pro Kunde eine eigene Transaktion: Prospect-Lookup, ggf. synthetische
-    // Anlage, Termin-Umhängung, Kunden-Soft-Delete und Prospect-Reset laufen
-    // atomar. Bricht ein Schritt, bleibt KEIN halb-erstellter synthetischer
-    // Prospect ohne Customer-Cleanup zurück — und der nächste Startup-Lauf
-    // findet den Waisen-Kunden erneut und versucht es sauber wieder.
+    // Pro Kunde ein eigener SAVEPOINT INNERHALB der vom
+    // `runGuardedBudgetMigration`-Runner gehaltenen Migrations-Transaktion:
+    // Prospect-Lookup, ggf. synthetische Anlage, Termin-Umhängung,
+    // Kunden-Soft-Delete und Prospect-Reset laufen atomar. Bricht ein Schritt,
+    // wird NUR dieser SAVEPOINT zurückgerollt (kein halb-erstellter
+    // synthetischer Prospect ohne Customer-Cleanup); die übrigen Kunden und der
+    // Ledger-Eintrag bleiben erhalten. Der nächste Startup-Lauf findet den
+    // Waisen-Kunden erneut und versucht es sauber wieder.
+    const savepoint = `orphan_erstb_${customer.id}`;
     try {
-      await db.transaction(async (tx) => {
-        const prospectRows = await tx.execute(sql`
-          SELECT id FROM prospects
-          WHERE converted_customer_id = ${customer.id}
-            AND deleted_at IS NULL
-          LIMIT 1
-        `);
-        let prospectId: number | null = null;
-        let synthetic = false;
-        if ((prospectRows.rows as Array<{ id: number }>).length > 0) {
-          prospectId = (prospectRows.rows as Array<{ id: number }>)[0].id;
+      await exec.execute(sql.raw(`SAVEPOINT ${savepoint}`));
+
+      const prospectRows = await exec.execute(sql`
+        SELECT id FROM prospects
+        WHERE converted_customer_id = ${customer.id}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `);
+      let prospectId: number | null = null;
+      let synthetic = false;
+      if ((prospectRows.rows as Array<{ id: number }>).length > 0) {
+        prospectId = (prospectRows.rows as Array<{ id: number }>)[0].id;
+      }
+
+      if (!prospectId) {
+        const created = await createSyntheticProspectForOrphan(exec, customer.id);
+        if (!created) {
+          throw new Error(
+            `Kunde ${customer.id} (${customer.name}) hat keinen verknüpften Prospect und konnte nicht synthetisch erzeugt werden`,
+          );
         }
+        prospectId = created;
+        synthetic = true;
+      }
 
-        if (!prospectId) {
-          const created = await createSyntheticProspectForOrphan(tx, customer.id);
-          if (!created) {
-            throw new Error(
-              `Kunde ${customer.id} (${customer.name}) hat keinen verknüpften Prospect und konnte nicht synthetisch erzeugt werden`,
-            );
-          }
-          prospectId = created;
-          synthetic = true;
-        }
+      const movedResult = (await exec.execute(sql`
+        UPDATE appointments
+        SET prospect_id = ${prospectId},
+            customer_id = NULL
+        WHERE customer_id = ${customer.id}
+          AND deleted_at IS NULL
+          AND appointment_type = 'Erstberatung'
+      `)) as unknown as QueryResult;
+      const movedCount = movedResult.rowCount ?? 0;
 
-        const movedResult = (await tx.execute(sql`
-          UPDATE appointments
-          SET prospect_id = ${prospectId},
-              customer_id = NULL
-          WHERE customer_id = ${customer.id}
-            AND deleted_at IS NULL
-            AND appointment_type = 'Erstberatung'
-        `)) as unknown as QueryResult;
-        const movedCount = movedResult.rowCount ?? 0;
+      await exec.execute(sql`
+        UPDATE prospects
+        SET status = 'erstberatung_durchgeführt',
+            converted_customer_id = NULL,
+            updated_at = NOW()
+        WHERE id = ${prospectId}
+      `);
 
-        await tx.execute(sql`
-          UPDATE prospects
-          SET status = 'erstberatung_durchgeführt',
-              converted_customer_id = NULL,
-              updated_at = NOW()
-          WHERE id = ${prospectId}
-        `);
+      await exec.execute(sql`
+        UPDATE customers
+        SET deleted_at = NOW(),
+            status = 'inaktiv'
+        WHERE id = ${customer.id}
+      `);
 
-        await tx.execute(sql`
-          UPDATE customers
-          SET deleted_at = NOW(),
-              status = 'inaktiv'
-          WHERE id = ${customer.id}
-        `);
+      await exec.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
 
-        log(
-          `Erstberatung-Waisen-Bereinigung: Kunde ${customer.id} (${customer.name}) → Prospect ${prospectId}${synthetic ? " (synthetisch)" : ""}, ${movedCount} Termine umgehängt`,
-          "startup",
-        );
-      });
+      log(
+        `Erstberatung-Waisen-Bereinigung: Kunde ${customer.id} (${customer.name}) → Prospect ${prospectId}${synthetic ? " (synthetisch)" : ""}, ${movedCount} Termine umgehängt`,
+        "startup",
+      );
       cleanedUp++;
     } catch (err) {
+      await exec.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`)).catch(() => {});
       warnings.push(
         `Kunde ${customer.id} (${customer.name}) konnte nicht bereinigt werden: ${err instanceof Error ? err.message : String(err)}`,
       );

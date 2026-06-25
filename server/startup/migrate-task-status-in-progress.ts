@@ -8,11 +8,11 @@
  * idempotent auf `tasks_in_progress` umbenannt.
  */
 import { sql } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { log } from "../lib/log";
 
-export async function migrateTaskStatusInProgress(): Promise<void> {
-  const result = await db.execute(sql`
+export async function migrateTaskStatusInProgress(exec: DbOrTx = db): Promise<void> {
+  const result = await exec.execute(sql`
     WITH updated AS (
       UPDATE tasks
       SET status = 'tasks_in_progress'

@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { sql } from "drizzle-orm";
 import { log } from "../lib/log";
 
@@ -18,8 +18,8 @@ export const APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL = `
     CHECK (prospect_id IS NOT NULL OR customer_id IS NOT NULL)
   `;
 
-async function ensureCheckConstraint(): Promise<void> {
-  const existing = await db.execute(sql`
+async function ensureCheckConstraint(exec: DbOrTx = db): Promise<void> {
+  const existing = await exec.execute(sql`
     SELECT 1 FROM pg_constraint c
     JOIN pg_class t ON c.conrelid = t.oid
     WHERE c.conname = 'appointments_prospect_or_customer_check'
@@ -30,7 +30,7 @@ async function ensureCheckConstraint(): Promise<void> {
     return;
   }
 
-  const violating = await db.execute(sql`
+  const violating = await exec.execute(sql`
     SELECT COUNT(*) as cnt FROM appointments
     WHERE prospect_id IS NULL AND customer_id IS NULL
   `);
@@ -41,12 +41,12 @@ async function ensureCheckConstraint(): Promise<void> {
     return;
   }
 
-  await db.execute(sql.raw(APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL));
+  await exec.execute(sql.raw(APPOINTMENTS_PROSPECT_OR_CUSTOMER_CHECK_SQL));
   log("CHECK-Constraint für appointments (prospect_id OR customer_id) hinzugefügt", "startup");
 }
 
-async function createSyntheticProspectForOrphan(customerId: number): Promise<number | null> {
-  const customerRows = await db.execute(sql`
+async function createSyntheticProspectForOrphan(customerId: number, exec: DbOrTx = db): Promise<number | null> {
+  const customerRows = await exec.execute(sql`
     SELECT id, name, vorname, nachname, email, telefon, festnetz,
            strasse, nr, plz, stadt, pflegegrad, created_at
     FROM customers
@@ -90,7 +90,7 @@ async function createSyntheticProspectForOrphan(customerId: number): Promise<num
   const telefon = row.telefon ?? row.festnetz ?? null;
   const plz = row.plz && /^\d{5}$/.test(row.plz) ? row.plz : null;
 
-  const inserted = await db.execute(sql`
+  const inserted = await exec.execute(sql`
     INSERT INTO prospects (
       vorname, nachname, telefon, email,
       strasse, nr, plz, stadt, pflegegrad,
@@ -108,10 +108,10 @@ async function createSyntheticProspectForOrphan(customerId: number): Promise<num
   return typeof newId === "number" ? newId : null;
 }
 
-export async function migrateErstberatungCustomers(): Promise<void> {
-  await ensureCheckConstraint();
+export async function migrateErstberatungCustomers(exec: DbOrTx = db): Promise<void> {
+  await ensureCheckConstraint(exec);
 
-  const erstberatungCustomers = await db.execute(sql`
+  const erstberatungCustomers = await exec.execute(sql`
     SELECT c.id, c.name, c.converted_from_prospect_id
     FROM customers c
     WHERE c.status = 'erstberatung'
@@ -137,7 +137,7 @@ export async function migrateErstberatungCustomers(): Promise<void> {
     let prospectId: number | null = customer.converted_from_prospect_id;
 
     if (!prospectId) {
-      const prospectRows = await db.execute(sql`
+      const prospectRows = await exec.execute(sql`
         SELECT id FROM prospects
         WHERE converted_customer_id = ${customer.id}
           AND deleted_at IS NULL
@@ -149,7 +149,7 @@ export async function migrateErstberatungCustomers(): Promise<void> {
     }
 
     if (!prospectId) {
-      const synthetic = await createSyntheticProspectForOrphan(customer.id);
+      const synthetic = await createSyntheticProspectForOrphan(customer.id, exec);
       if (!synthetic) {
         warnings.push(`Kunde ${customer.id} (${customer.name}) hat keinen verknüpften Prospect und konnte nicht synthetisch erzeugt werden — übersprungen`);
         continue;
@@ -175,39 +175,40 @@ export async function migrateErstberatungCustomers(): Promise<void> {
     return;
   }
 
-  await db.transaction(async (tx) => {
-    for (const pair of customerProspectPairs) {
-      const movedResult = await tx.execute(sql`
-        UPDATE appointments
-        SET prospect_id = ${pair.prospectId},
-            customer_id = NULL
-        WHERE customer_id = ${pair.customerId}
-          AND deleted_at IS NULL
-          AND appointment_type = 'Erstberatung'
-      `) as unknown as QueryResult;
-      const movedCount = movedResult.rowCount ?? 0;
+  // Alle Umhängungen laufen in der vom `runGuardedBudgetMigration`-Runner
+  // gehaltenen Transaktion gemeinsam mit dem Ledger-Eintrag (exactly-once,
+  // atomar) — kein eigenes db.transaction mehr.
+  for (const pair of customerProspectPairs) {
+    const movedResult = await exec.execute(sql`
+      UPDATE appointments
+      SET prospect_id = ${pair.prospectId},
+          customer_id = NULL
+      WHERE customer_id = ${pair.customerId}
+        AND deleted_at IS NULL
+        AND appointment_type = 'Erstberatung'
+    `) as unknown as QueryResult;
+    const movedCount = movedResult.rowCount ?? 0;
 
-      await tx.execute(sql`
-        UPDATE prospects
-        SET status = 'erstberatung_durchgeführt',
-            converted_customer_id = NULL,
-            updated_at = NOW()
-        WHERE id = ${pair.prospectId}
-      `);
+    await exec.execute(sql`
+      UPDATE prospects
+      SET status = 'erstberatung_durchgeführt',
+          converted_customer_id = NULL,
+          updated_at = NOW()
+      WHERE id = ${pair.prospectId}
+    `);
 
-      await tx.execute(sql`
-        UPDATE customers
-        SET deleted_at = NOW(),
-            status = 'inaktiv'
-        WHERE id = ${pair.customerId}
-      `);
+    await exec.execute(sql`
+      UPDATE customers
+      SET deleted_at = NOW(),
+          status = 'inaktiv'
+      WHERE id = ${pair.customerId}
+    `);
 
-      log(
-        `Erstberatung-Migration: Kunde ${pair.customerId} (${pair.customerName}) → Prospect ${pair.prospectId}, ${movedCount} Termine umgehängt`,
-        "startup"
-      );
-    }
-  });
+    log(
+      `Erstberatung-Migration: Kunde ${pair.customerId} (${pair.customerName}) → Prospect ${pair.prospectId}, ${movedCount} Termine umgehängt`,
+      "startup"
+    );
+  }
 
   log(
     `Erstberatung-Migration abgeschlossen: ${customerProspectPairs.length} migriert, ${warnings.length} übersprungen`,

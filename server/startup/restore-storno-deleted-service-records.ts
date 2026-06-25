@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { monthlyServiceRecords, users, auditLog } from "@shared/schema";
 import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { log } from "../lib/log";
@@ -60,6 +60,7 @@ export interface RestoreOptions {
  */
 export async function restoreServiceRecordsByTuples(
   opts: RestoreOptions = {},
+  exec: DbOrTx = db,
 ): Promise<RestoreResult> {
   const expected = opts.expectedRecords ?? EXPECTED_RECORDS;
   const windowStart = opts.incidentWindow?.start ?? INCIDENT_WINDOW_START;
@@ -70,7 +71,7 @@ export async function restoreServiceRecordsByTuples(
     return { restoredIds: [], skipReason: "no_candidates" };
   }
 
-  const candidates = await db
+  const candidates = await exec
     .select({
       id: monthlyServiceRecords.id,
       customerId: monthlyServiceRecords.customerId,
@@ -113,7 +114,7 @@ export async function restoreServiceRecordsByTuples(
   // One-Shot-Guard: prüfen, ob für eine dieser IDs bereits ein
   // service_record_resurrected-Audit existiert. Wenn ja, hat die
   // Migration für diese ID schon einmal gegriffen — niemals erneut.
-  const priorAudits = await db
+  const priorAudits = await exec
     .select({ entityId: auditLog.entityId })
     .from(auditLog)
     .where(and(
@@ -128,7 +129,7 @@ export async function restoreServiceRecordsByTuples(
   }
 
   // Mandatory Audit: ohne Akteur keine Mutation.
-  const [superActor] = await db
+  const [superActor] = await exec
     .select({ id: users.id })
     .from(users)
     .where(eq(users.isSuperAdmin, true))
@@ -136,7 +137,7 @@ export async function restoreServiceRecordsByTuples(
     .limit(1);
   let actorId: number | null = superActor?.id ?? null;
   if (actorId == null) {
-    const [adminActor] = await db
+    const [adminActor] = await exec
       .select({ id: users.id })
       .from(users)
       .where(eq(users.isAdmin, true))
@@ -154,37 +155,39 @@ export async function restoreServiceRecordsByTuples(
 
   const restoredIds: number[] = [];
   for (const row of toRestore) {
-    await db.transaction(async (tx) => {
-      await tx
-        .update(monthlyServiceRecords)
-        .set({ deletedAt: null, updatedAt: sql`NOW()` })
-        .where(and(
-          eq(monthlyServiceRecords.id, row.id),
-          eq(monthlyServiceRecords.customerId, row.customerId),
-          isNotNull(monthlyServiceRecords.deletedAt),
-        ));
+    // Update + Audit laufen in der vom `runGuardedBudgetMigration`-Runner
+    // gehaltenen Transaktion gemeinsam mit dem Ledger-Eintrag (exactly-once,
+    // atomar). monthly_service_records ist nicht GoBD-trigger-geschützt, daher
+    // kein Bypass nötig (gobdBypass: false).
+    await exec
+      .update(monthlyServiceRecords)
+      .set({ deletedAt: null, updatedAt: sql`NOW()` })
+      .where(and(
+        eq(monthlyServiceRecords.id, row.id),
+        eq(monthlyServiceRecords.customerId, row.customerId),
+        isNotNull(monthlyServiceRecords.deletedAt),
+      ));
 
-      await tx.insert(auditLog).values({
-        userId: actorId!,
-        action: "service_record_resurrected",
-        entityType: "service_record",
-        entityId: row.id,
-        metadata: {
-          customerId: row.customerId,
-          employeeId: row.employeeId,
-          year: row.year,
-          month: row.month,
-          previousStatus: row.status,
-          previousDeletedAt: row.deletedAt?.toISOString() ?? null,
-          reason:
-            "Task #576 — Korrektur Storno-Side-Effekt T05/K3: LN durch Storno fälschlich soft-gelöscht, Kunde verschwand aus /eligible-customers.",
-          migration: "restore-storno-deleted-service-records",
-          incidentWindow: {
-            start: windowStart.toISOString(),
-            end: windowEnd.toISOString(),
-          },
+    await exec.insert(auditLog).values({
+      userId: actorId!,
+      action: "service_record_resurrected",
+      entityType: "service_record",
+      entityId: row.id,
+      metadata: {
+        customerId: row.customerId,
+        employeeId: row.employeeId,
+        year: row.year,
+        month: row.month,
+        previousStatus: row.status,
+        previousDeletedAt: row.deletedAt?.toISOString() ?? null,
+        reason:
+          "Task #576 — Korrektur Storno-Side-Effekt T05/K3: LN durch Storno fälschlich soft-gelöscht, Kunde verschwand aus /eligible-customers.",
+        migration: "restore-storno-deleted-service-records",
+        incidentWindow: {
+          start: windowStart.toISOString(),
+          end: windowEnd.toISOString(),
         },
-      });
+      },
     });
 
     restoredIds.push(row.id);
@@ -197,6 +200,6 @@ export async function restoreServiceRecordsByTuples(
   return { restoredIds, skipReason: null };
 }
 
-export async function restoreStornoDeletedServiceRecords(): Promise<void> {
-  await restoreServiceRecordsByTuples();
+export async function restoreStornoDeletedServiceRecords(exec: DbOrTx = db): Promise<void> {
+  await restoreServiceRecordsByTuples({}, exec);
 }

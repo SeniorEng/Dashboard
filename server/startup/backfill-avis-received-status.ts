@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { invoices, paymentAdviceItems, paymentAdvices, users } from "@shared/schema";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
@@ -25,22 +25,23 @@ import { log } from "../lib/log";
  * Änderung wird mit `invoice_avis_received` auditiert. Vollständig idempotent
  * (nach einem Lauf gibt es keine passenden "versendet"-Rechnungen mehr).
  */
-export async function backfillAvisReceivedStatus(): Promise<void> {
+export async function backfillAvisReceivedStatus(exec: DbOrTx = db): Promise<void> {
   // Kandidaten: versendete Rechnungen mit aktiver Avis-Zuordnung.
-  const candidates = await db
-    .selectDistinct({ id: invoices.id })
+  const candidates = await exec
+    .select({ id: invoices.id })
     .from(invoices)
     .innerJoin(paymentAdviceItems, eq(paymentAdviceItems.matchedInvoiceId, invoices.id))
     .innerJoin(paymentAdvices, eq(paymentAdviceItems.paymentAdviceId, paymentAdvices.id))
     .where(and(
       eq(invoices.status, "versendet"),
       isNull(paymentAdvices.deletedAt),
-    ));
+    ))
+    .groupBy(invoices.id);
 
   if (candidates.length === 0) return;
 
   // System-Actor (Super-/Admin) für die Audit-Einträge.
-  const [superActor] = await db
+  const [superActor] = await exec
     .select({ id: users.id })
     .from(users)
     .where(eq(users.isSuperAdmin, true))
@@ -48,7 +49,7 @@ export async function backfillAvisReceivedStatus(): Promise<void> {
     .limit(1);
   let systemActorId: number | null = superActor?.id ?? null;
   if (systemActorId == null) {
-    const [adminActor] = await db
+    const [adminActor] = await exec
       .select({ id: users.id })
       .from(users)
       .where(eq(users.isAdmin, true))
@@ -68,28 +69,30 @@ export async function backfillAvisReceivedStatus(): Promise<void> {
   const candidateIds = candidates.map(c => c.id);
   let updatedCount = 0;
 
-  // Pro Rechnung transaktional: geguarded auf status='versendet', danach Audit.
+  // Geguarded auf status='versendet', danach Audit. invoices ist GoBD-immutable;
+  // der GoBD-Bypass (`app.allow_gobd_mutation`) wird vom aufrufenden
+  // `runGuardedBudgetMigration`-Runner transaktions-lokal gesetzt
+  // (gobdBypass: true). Update + Audit laufen in DESSEN Transaktion gemeinsam
+  // mit dem Ledger-Eintrag (exactly-once, atomar).
   for (const invoiceId of candidateIds) {
-    await db.transaction(async (tx) => {
-      const updated = await tx
-        .update(invoices)
-        .set({ status: "avis_erhalten" })
-        .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")))
-        .returning({ id: invoices.id });
+    const updated = await exec
+      .update(invoices)
+      .set({ status: "avis_erhalten" })
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "versendet")))
+      .returning({ id: invoices.id });
 
-      if (updated.length === 0) return;
+    if (updated.length === 0) continue;
 
-      await auditService.log(
-        systemActorId!,
-        "invoice_avis_received",
-        "invoice",
-        invoiceId,
-        { task: "#1284", matchedBy: "avis", reason: "backfill" },
-        undefined,
-        tx,
-      );
-      updatedCount++;
-    });
+    await auditService.log(
+      systemActorId!,
+      "invoice_avis_received",
+      "invoice",
+      invoiceId,
+      { task: "#1284", matchedBy: "avis", reason: "backfill" },
+      undefined,
+      exec,
+    );
+    updatedCount++;
   }
 
   log(

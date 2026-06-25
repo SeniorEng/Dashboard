@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { budgetTransactions, users } from "@shared/schema";
 import { auditService } from "../services/audit";
 import { log } from "../lib/log";
@@ -35,8 +35,9 @@ import { log } from "../lib/log";
  */
 export async function backfillOrphanReversalAppointmentId(
   dryRun = process.env.BACKFILL_ORPHAN_REVERSAL_DRY_RUN === "1",
+  exec: DbOrTx = db,
 ): Promise<void> {
-  const orphans = await db
+  const orphans = await exec
     .select({
       id: budgetTransactions.id,
       customerId: budgetTransactions.customerId,
@@ -54,7 +55,7 @@ export async function backfillOrphanReversalAppointmentId(
   if (orphans.length === 0) return;
 
   // System-Actor (Super-/Admin) für die Audit-Einträge.
-  const [superActor] = await db
+  const [superActor] = await exec
     .select({ id: users.id })
     .from(users)
     .where(eq(users.isSuperAdmin, true))
@@ -62,7 +63,7 @@ export async function backfillOrphanReversalAppointmentId(
     .limit(1);
   let systemActorId: number | null = superActor?.id ?? null;
   if (systemActorId == null) {
-    const [adminActor] = await db
+    const [adminActor] = await exec
       .select({ id: users.id })
       .from(users)
       .where(eq(users.isAdmin, true))
@@ -90,7 +91,7 @@ export async function backfillOrphanReversalAppointmentId(
       }
     }
     for (const origId of candidateIds) {
-      const [orig] = await db
+      const [orig] = await exec
         .select({ appointmentId: budgetTransactions.appointmentId })
         .from(budgetTransactions)
         .where(eq(budgetTransactions.id, origId))
@@ -99,6 +100,15 @@ export async function backfillOrphanReversalAppointmentId(
     }
     return null;
   };
+
+  // budget_transactions ist GoBD-immutable (BEFORE-Trigger). Der transaktions-
+  // lokale GoBD-Bypass wird hier explizit auf der bereitgestellten Transaktion
+  // (`exec`) gesetzt; der aufrufende runGuardedBudgetMigration-Runner setzt ihn
+  // zusätzlich (gobdBypass: true) — doppeltes `SET LOCAL` im selben Tx ist ein
+  // No-Op. Macht den audit-pflichtigen Korrekturpfad in dieser Datei explizit.
+  if (!dryRun) {
+    await exec.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
+  }
 
   for (const orphan of orphans) {
     const appointmentId = await resolveAppointmentId(
@@ -121,37 +131,36 @@ export async function backfillOrphanReversalAppointmentId(
       continue;
     }
 
-    await db.transaction(async (tx) => {
-      // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
-      // (BEFORE-Trigger). Dieser Backfill ist audit-begleitet — Bypass
-      // transaktions-lokal freischalten.
-      await tx.execute(sql`SET LOCAL app.allow_gobd_mutation = 'on'`);
-      await tx
-        .update(budgetTransactions)
-        .set({ appointmentId })
-        .where(
-          and(
-            eq(budgetTransactions.id, orphan.id),
-            isNull(budgetTransactions.appointmentId),
-          ),
-        );
-
-      await auditService.log(
-        systemActorId!,
-        "orphaned_tx_appointment_id_backfilled",
-        "budget",
-        orphan.id,
-        {
-          task: "#819",
-          customerId: orphan.customerId,
-          transactionId: orphan.id,
-          reversedTransactionId: orphan.reversedTransactionId,
-          resolvedAppointmentId: appointmentId,
-        },
-        undefined,
-        tx,
+    // Task #1273: budget_transactions ist seit Stufe B GoBD-immutable
+    // (BEFORE-Trigger). Der GoBD-Bypass (`app.allow_gobd_mutation`) wird vom
+    // aufrufenden `runGuardedBudgetMigration`-Runner transaktions-lokal gesetzt
+    // (gobdBypass: true). Update + Audit laufen in DESSEN Transaktion gemeinsam
+    // mit dem Ledger-Eintrag (exactly-once, atomar).
+    await exec
+      .update(budgetTransactions)
+      .set({ appointmentId })
+      .where(
+        and(
+          eq(budgetTransactions.id, orphan.id),
+          isNull(budgetTransactions.appointmentId),
+        ),
       );
-    });
+
+    await auditService.log(
+      systemActorId!,
+      "orphaned_tx_appointment_id_backfilled",
+      "budget",
+      orphan.id,
+      {
+        task: "#819",
+        customerId: orphan.customerId,
+        transactionId: orphan.id,
+        reversedTransactionId: orphan.reversedTransactionId,
+        resolvedAppointmentId: appointmentId,
+      },
+      undefined,
+      exec,
+    );
     resolvedCount++;
   }
 

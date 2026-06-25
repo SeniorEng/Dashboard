@@ -6,11 +6,11 @@
  * Audit-Eintrag pro Termin geschrieben.
  */
 import { sql } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { log } from "../lib/log";
 
-export async function migrateInProgressAppointments(): Promise<void> {
-  const result = await db.execute(sql`
+export async function migrateInProgressAppointments(exec: DbOrTx = db): Promise<void> {
+  const result = await exec.execute(sql`
     WITH updated AS (
       UPDATE appointments
       SET status = 'documenting'
