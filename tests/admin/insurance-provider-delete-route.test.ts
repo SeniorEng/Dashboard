@@ -13,6 +13,9 @@
  *   - ein normaler Admin wird abgewiesen (403 FORBIDDEN),
  *   - ein Mitarbeiter wird abgewiesen (403 FORBIDDEN),
  *   - eine noch zugewiesene Kasse liefert 409 (in use),
+ *   - eine NUR als Rechnungsempfänger (customer_budget_recipients /
+ *     "Rechnungsbezug") referenzierte Kasse liefert 409 (in use) — der zweite
+ *     Grund der SSoT `isUnusedInsuranceProvider()`,
  *   - eine nicht existierende ID liefert 404,
  *   - eine unbenutzte Kasse wird gelöscht (200) und schreibt einen
  *     `insurance_provider_deleted`-Audit-Eintrag.
@@ -21,7 +24,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { db } from "../../server/lib/db";
-import { customers, insuranceProviders, customerInsuranceHistory } from "@shared/schema";
+import {
+  customers,
+  insuranceProviders,
+  customerInsuranceHistory,
+  customerBudgetRecipients,
+} from "@shared/schema";
 import {
   apiDelete,
   apiDeleteAs,
@@ -35,6 +43,7 @@ import {
 const TAG = `t1425-${uniqueId()}`;
 
 let referencedProviderId: number;
+let invoiceRefProviderId: number;
 let unusedProviderId: number;
 let authGuardProviderId: number;
 let customerId: number;
@@ -77,6 +86,12 @@ beforeAll(async () => {
     .returning({ id: insuranceProviders.id });
   unusedProviderId = unused.id;
 
+  const [invoiceRef] = await db
+    .insert(insuranceProviders)
+    .values({ name: `Rechnungsbezug-${TAG}`, isPrivate: false } as any)
+    .returning({ id: insuranceProviders.id });
+  invoiceRefProviderId = invoiceRef.id;
+
   const [guard] = await db
     .insert(insuranceProviders)
     .values({ name: `AuthGuard-${TAG}`, isPrivate: true } as any)
@@ -102,9 +117,26 @@ beforeAll(async () => {
     versichertennummer: `VN-${TAG}`,
     validFrom: "2024-01-01",
   } as any);
+
+  // Bindet die RECHNUNGSBEZUG-Kasse NUR als Rechnungsempfänger
+  // (customer_budget_recipients) — KEINE customer_insurance_history-Zeile.
+  // Damit greift ausschließlich der zweite Grund der SSoT
+  // `isUnusedInsuranceProvider()` (Rechnungsbezug).
+  await db.insert(customerBudgetRecipients).values({
+    customerId,
+    budgetType: "selbstzahler",
+    insuranceProviderId: invoiceRefProviderId,
+    recipientName: `Rechnungsbezug-${TAG}`,
+    validFrom: "2024-01-01",
+  } as any);
 });
 
 afterAll(async () => {
+  try {
+    await db
+      .delete(customerBudgetRecipients)
+      .where(eq(customerBudgetRecipients.customerId, customerId));
+  } catch {}
   try {
     await db.delete(customers).where(eq(customers.id, customerId));
   } catch {}
@@ -114,6 +146,7 @@ afterAll(async () => {
       .where(
         inArray(insuranceProviders.id, [
           referencedProviderId,
+          invoiceRefProviderId,
           unusedProviderId,
           authGuardProviderId,
         ]),
@@ -154,6 +187,14 @@ describe("Task #1425 — DELETE /api/admin/insurance-providers/:id", () => {
     expect((res.data as DeleteResponse).error).toBe("CONFLICT");
 
     expect(await providerExists(referencedProviderId)).toBe(true);
+  });
+
+  it("liefert 409 für eine nur als Rechnungsempfänger referenzierte Kasse (Rechnungsbezug, in use)", async () => {
+    const res = await apiDelete(`/api/admin/insurance-providers/${invoiceRefProviderId}`);
+    expect(res.status).toBe(409);
+    expect((res.data as DeleteResponse).error).toBe("CONFLICT");
+
+    expect(await providerExists(invoiceRefProviderId)).toBe(true);
   });
 
   it("liefert 404 für eine nicht existierende ID", async () => {
