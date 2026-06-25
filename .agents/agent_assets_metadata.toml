@@ -167,3 +167,9 @@ id = "_3EH_DbLIP6BaFrtJjBzi"
 uri = "file://.local/reports/diff-net-available-45b.txt"
 type = "text"
 title = "§45b Schattenmodus-Diff (READ-ONLY) — netAvailable45bAt vs. Forecast & Reader"
+
+[[outputs]]
+id = "XFacgIhg8onKWbVs3DpUq"
+uri = "file://.local/tasks/engeldesk-cleanup-surface-inventory.md"
+type = "text"
+title = "EngelDesk Cleanup-Surface Inventory + Phased Drop Plan"
