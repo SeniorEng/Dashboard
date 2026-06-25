@@ -21,4 +21,11 @@ export interface InsuranceProviderItem {
   zahlungsart: string | null;
   isActive: boolean;
   createdAt: string;
+  /**
+   * Abgeleitetes Flag (kein DB-Feld): true, wenn die Kasse einem Kunden
+   * zugewiesen ODER als Rechnungsempfänger referenziert ist. Quelle ist die
+   * eine SSoT `isUnusedInsuranceProvider()`. Optional, weil nur die
+   * Listen-Endpunkte es berechnen.
+   */
+  isUsed?: boolean;
 }

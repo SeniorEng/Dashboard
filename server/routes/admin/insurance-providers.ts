@@ -11,19 +11,19 @@ const router = Router();
 
 // ---------------------------------------------------------------------------
 // Cleanup unbenutzter Pflegekassen (Task #1000), Superadmin-only.
-// Das Löschen ist in Produktion deaktiviert (konsistent mit den Bulk-Purge-
-// Werkzeugen) — die Vorschau-Zählung bleibt überall verfügbar.
+// Das Löschen ist auch in Produktion erlaubt (Superadmin-only, Bestätigung im
+// UI, Audit-Log). Eine Kasse gilt nur als löschbar, solange sie WEDER einem
+// Kunden zugewiesen NOCH als Rechnungsempfänger referenziert ist (SSoT
+// `isUnusedInsuranceProvider()`); referenzierte Zeilen bleiben unangetastet.
 // WICHTIG: Diese Routen MÜSSEN vor "/insurance-providers/:id" registriert
 // werden, sonst würde "cleanup" als :id interpretiert.
 // ---------------------------------------------------------------------------
-const isProduction = () => process.env.NODE_ENV === "production";
-
 router.get(
   "/insurance-providers/cleanup/unused-count",
   requireSuperAdmin,
   asyncHandler("Unbenutzte Pflegekassen konnten nicht ermittelt werden", async (_req: Request, res: Response) => {
     const stats = await customerManagementStorage.getUnusedInsuranceProviderStats();
-    res.json({ ...stats, cleanupEnabled: !isProduction() });
+    res.json({ ...stats, cleanupEnabled: true });
   }),
 );
 
@@ -31,14 +31,6 @@ router.post(
   "/insurance-providers/cleanup/unused",
   requireSuperAdmin,
   asyncHandler("Unbenutzte Pflegekassen konnten nicht gelöscht werden", async (req: Request, res: Response) => {
-    if (isProduction()) {
-      res.status(403).json({
-        error: "FORBIDDEN",
-        message: "Das Aufräumen unbenutzter Pflegekassen ist in der Produktivumgebung deaktiviert.",
-      });
-      return;
-    }
-
     const result = await customerManagementStorage.deleteUnusedInsuranceProviders();
 
     if (result.total > 0) {
@@ -160,5 +152,47 @@ router.put("/insurance-providers/:id", asyncHandler("Pflegekasse konnte nicht ak
   }
   res.json(provider);
 }));
+
+// Einzelne unbenutzte Pflegekasse löschen (Superadmin-only, Audit-Log).
+// Löscht nur, wenn die Kasse weder zugewiesen noch als Rechnungsempfänger
+// referenziert ist (gleiche SSoT wie der Bulk-Cleanup); sonst 409.
+router.delete(
+  "/insurance-providers/:id",
+  requireSuperAdmin,
+  asyncHandler("Pflegekasse konnte nicht gelöscht werden", async (req: Request, res: Response) => {
+    const id = requireIntParam(req.params.id, res);
+    if (id === null) return;
+
+    const result = await customerManagementStorage.deleteInsuranceProviderIfUnused(id);
+
+    if (result.status === "not_found") {
+      res.status(404).json({ error: "NOT_FOUND", message: "Pflegekasse nicht gefunden" });
+      return;
+    }
+    if (result.status === "in_use") {
+      res.status(409).json({
+        error: "CONFLICT",
+        message:
+          "Diese Pflegekasse wird verwendet (Kundenzuweisung oder Rechnungsbezug) und kann nicht gelöscht werden.",
+      });
+      return;
+    }
+
+    await auditService.log(
+      req.user!.id,
+      "insurance_provider_deleted",
+      "insurance_provider",
+      id,
+      {
+        name: result.provider.name,
+        ikNummer: result.provider.ikNummer,
+        isPrivate: result.provider.isPrivate,
+      },
+      req.ip,
+    );
+
+    res.json({ deleted: true });
+  }),
+);
 
 export default router;

@@ -49,11 +49,21 @@ const insuranceHistoryWithProviderSelect = {
   },
 };
 
-export async function getInsuranceProviders(activeOnly = true): Promise<InsuranceProvider[]> {
-  if (activeOnly) {
-    return await db.select().from(insuranceProviders).where(eq(insuranceProviders.isActive, true));
-  }
-  return await db.select().from(insuranceProviders);
+export type InsuranceProviderWithUsage = InsuranceProvider & { isUsed: boolean };
+
+// Liefert alle (bzw. nur aktive) Pflegekassen inkl. abgeleitetem `isUsed`-Flag.
+// `isUsed` ist die Negation der einen SSoT `isUnusedInsuranceProvider()` und
+// versorgt die Admin-Verwaltung (Badge "Unbenutzt" + Lösch-Gate). Die
+// Auswahl-Picker ignorieren das Feld einfach.
+export async function getInsuranceProviders(activeOnly = true): Promise<InsuranceProviderWithUsage[]> {
+  const rows = await db
+    .select({
+      row: insuranceProviders,
+      isUsed: sql<boolean>`NOT (${isUnusedInsuranceProvider()!})`,
+    })
+    .from(insuranceProviders)
+    .where(activeOnly ? eq(insuranceProviders.isActive, true) : undefined);
+  return rows.map((r) => ({ ...r.row, isUsed: Boolean(r.isUsed) }));
 }
 
 export async function getInsuranceProvider(id: number): Promise<InsuranceProvider | undefined> {
@@ -160,6 +170,35 @@ export async function deleteUnusedInsuranceProviders(): Promise<UnusedInsuranceP
   // Zeilen, die zum Lösch-Zeitpunkt unreferenziert sind (Schutz gegen Race-
   // Conditions mit gleichzeitigen Zuweisungen/Rechnungen).
   return await db.transaction((tx) => deleteUnusedInsuranceProvidersWithin(tx));
+}
+
+export type DeleteInsuranceProviderResult =
+  | { status: "deleted"; provider: InsuranceProvider }
+  | { status: "not_found" }
+  | { status: "in_use" };
+
+/**
+ * Löscht EINE Pflegekasse per ID — aber NUR, wenn sie zum Lösch-Zeitpunkt
+ * unbenutzt ist (gleiche SSoT `isUnusedInsuranceProvider()` wie der Bulk-
+ * Cleanup). Die Auswertung+Löschung läuft in EINER Transaktion (Race-Schutz):
+ * Das DELETE matched die Zeile nur, solange keine Zuweisung/Rechnung existiert.
+ */
+export async function deleteInsuranceProviderIfUnused(id: number): Promise<DeleteInsuranceProviderResult> {
+  return await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(insuranceProviders)
+      .where(eq(insuranceProviders.id, id));
+    if (!existing) return { status: "not_found" };
+
+    const deleted = await tx
+      .delete(insuranceProviders)
+      .where(and(eq(insuranceProviders.id, id), isUnusedInsuranceProvider()))
+      .returning();
+    if (deleted.length === 0) return { status: "in_use" };
+
+    return { status: "deleted", provider: deleted[0] };
+  });
 }
 
 export async function getCustomerCurrentInsurance(customerId: number): Promise<(CustomerInsuranceHistory & { provider: InsuranceProvider }) | undefined> {

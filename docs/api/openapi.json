@@ -169,6 +169,9 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "isUsed": {
+            "type": "boolean"
           }
         },
         "required": [

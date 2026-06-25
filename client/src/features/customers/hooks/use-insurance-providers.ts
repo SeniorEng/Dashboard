@@ -120,6 +120,27 @@ export function useCleanupUnusedInsuranceProviders() {
   });
 }
 
+export function useDeleteInsuranceProvider() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const result = await api.delete<{ deleted: boolean }>(
+        `/admin/insurance-providers/${id}`,
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: () => {
+      invalidateRelated(queryClient, "insurance-providers");
+      toast({ title: "Erfolg", description: "Pflegekasse wurde gelöscht" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
 export function useUpdateInsuranceProvider() {
   const queryClient = useQueryClient();
   const { toast } = useToast();

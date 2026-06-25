@@ -22,6 +22,7 @@ export {
   useInsuranceProviders, 
   useCreateInsuranceProvider,
   useUpdateInsuranceProvider,
+  useDeleteInsuranceProvider,
   useUnusedInsuranceProviderCount,
   useCleanupUnusedInsuranceProviders,
   insuranceProviderKeys,

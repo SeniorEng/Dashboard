@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DatePicker } from "@/components/ui/date-picker";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -13,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useInsuranceProviders, customerKeys } from "@/features/customers";
+import { useInsuranceProviders, useCreateInsuranceProvider, customerKeys } from "@/features/customers";
 import { api, unwrapResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -23,7 +24,7 @@ import {
   VERSICHERTENNUMMER_GKV_REGEX,
   VERSICHERTENNUMMER_FLEX_REGEX,
 } from "@shared/schema/common";
-import { Heart, Loader2, Clock, Plus, ArrowRightLeft } from "lucide-react";
+import { Heart, Loader2, Clock, Plus, ArrowRightLeft, X } from "lucide-react";
 import type { InsuranceProviderItem } from "@/lib/api/types";
 
 interface InsuranceHistoryEntry {
@@ -65,7 +66,15 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
   const [validFrom, setValidFrom] = useState(todayISO());
   const [vnError, setVnError] = useState<string | null>(null);
 
+  // Inline-Anlage einer neuen Pflegekasse direkt im Wechsel-Dialog, damit das
+  // Onboarding nie blockiert, wenn die Kasse noch nicht existiert.
+  const [showNewProvider, setShowNewProvider] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newIsPrivate, setNewIsPrivate] = useState(false);
+  const [newIk, setNewIk] = useState("");
+
   const { data: providers } = useInsuranceProviders();
+  const createProviderMutation = useCreateInsuranceProvider();
 
   const { data: history, isLoading: historyLoading } = useQuery<InsuranceHistoryEntry[]>({
     queryKey: ["customer-insurance-history", customerId],
@@ -104,6 +113,39 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
     setVersichertennummer("");
     setValidFrom(todayISO());
     setVnError(null);
+    setShowNewProvider(false);
+    setNewName("");
+    setNewIsPrivate(false);
+    setNewIk("");
+  };
+
+  const handleCreateProvider = () => {
+    if (!newName.trim()) {
+      toast({ title: "Suchbegriff ist erforderlich", variant: "destructive" });
+      return;
+    }
+    if (!newIsPrivate) {
+      if (!/^\d{9}$/.test(newIk)) {
+        toast({ title: "Ungültige IK-Nummer", description: "Die IK-Nummer muss genau 9 Ziffern enthalten.", variant: "destructive" });
+        return;
+      }
+    } else if (newIk.trim() && !/^\d{9}$/.test(newIk)) {
+      toast({ title: "Ungültige IK-Nummer", description: "Falls angegeben, muss die IK-Nummer genau 9 Ziffern enthalten.", variant: "destructive" });
+      return;
+    }
+
+    createProviderMutation.mutate(
+      { name: newName.trim(), isPrivate: newIsPrivate, ikNummer: newIk.trim() },
+      {
+        onSuccess: (provider) => {
+          setInsuranceProviderId(provider.id.toString());
+          setShowNewProvider(false);
+          setNewName("");
+          setNewIsPrivate(false);
+          setNewIk("");
+        },
+      },
+    );
   };
 
   const openDialog = () => {
@@ -277,20 +319,104 @@ export function CustomerInsuranceTab({ customerId, customerBillingType, currentI
 
           <div className="space-y-4 mt-2">
             <div className="space-y-2">
-              <Label>Pflegekasse *</Label>
-              <SearchableSelect
-                options={providerOptions}
-                value={insuranceProviderId}
-                onValueChange={setInsuranceProviderId}
-                placeholder="Pflegekasse auswählen..."
-                searchPlaceholder="Suchen..."
-                emptyText="Keine Pflegekasse gefunden."
-                data-testid="select-insurance-provider"
-              />
-              {!providers?.length && (
-                <p className="text-xs text-amber-600">
-                  Noch keine Kostenträger angelegt. Bitte zuerst unter Administration → Kostenträger anlegen.
-                </p>
+              <div className="flex items-center justify-between">
+                <Label>Pflegekasse *</Label>
+                {!showNewProvider && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-teal-700"
+                    onClick={() => setShowNewProvider(true)}
+                    data-testid="button-new-provider-inline"
+                  >
+                    <Plus className={`${iconSize.sm} mr-1`} />
+                    Neu
+                  </Button>
+                )}
+              </div>
+
+              {showNewProvider ? (
+                <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-3" data-testid="form-new-provider-inline">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-teal-900">Neue Pflegekasse anlegen</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewProvider(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                      data-testid="button-cancel-new-provider-inline"
+                    >
+                      <X className={iconSize.sm} />
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-provider-name" className="text-xs">Suchbegriff / Name *</Label>
+                    <Input
+                      id="new-provider-name"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="z. B. DAK"
+                      data-testid="input-new-provider-name"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="new-provider-private" className="text-xs cursor-pointer">Private Krankenversicherung (PKV)</Label>
+                    <Switch
+                      id="new-provider-private"
+                      checked={newIsPrivate}
+                      onCheckedChange={setNewIsPrivate}
+                      data-testid="switch-new-provider-private"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-provider-ik" className="text-xs">
+                      IK-Nummer {newIsPrivate ? "(optional)" : "*"}
+                    </Label>
+                    <Input
+                      id="new-provider-ik"
+                      value={newIk}
+                      onChange={(e) => setNewIk(e.target.value.replace(/\D/g, ""))}
+                      placeholder="9 Ziffern"
+                      maxLength={9}
+                      inputMode="numeric"
+                      data-testid="input-new-provider-ik"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className={`w-full ${componentStyles.btnPrimary}`}
+                    onClick={handleCreateProvider}
+                    disabled={createProviderMutation.isPending}
+                    data-testid="button-save-new-provider-inline"
+                  >
+                    {createProviderMutation.isPending ? (
+                      <>
+                        <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                        Anlegen...
+                      </>
+                    ) : (
+                      "Pflegekasse anlegen & auswählen"
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <SearchableSelect
+                    options={providerOptions}
+                    value={insuranceProviderId}
+                    onValueChange={setInsuranceProviderId}
+                    placeholder="Pflegekasse auswählen..."
+                    searchPlaceholder="Suchen..."
+                    emptyText="Keine Pflegekasse gefunden."
+                    data-testid="select-insurance-provider"
+                  />
+                  {!providers?.length && (
+                    <p className="text-xs text-amber-600">
+                      Noch keine Kostenträger angelegt. Über „Neu" direkt hier anlegen.
+                    </p>
+                  )}
+                </>
               )}
             </div>
 

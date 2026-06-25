@@ -29,6 +29,7 @@ import {
   useInsuranceProviders,
   useCreateInsuranceProvider,
   useUpdateInsuranceProvider,
+  useDeleteInsuranceProvider,
   useUnusedInsuranceProviderCount,
   useCleanupUnusedInsuranceProviders,
   type InsuranceProviderFormData,
@@ -43,7 +44,7 @@ import {
 } from "@shared/schema";
 import { formatAddress } from "@shared/utils/format";
 import { api, unwrapResult } from "@/lib/api";
-import { ArrowLeft, Plus, Pencil, Loader2, Building2, AlertTriangle, Search, X, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Loader2, Building2, AlertTriangle, Search, X, ShieldCheck, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { iconSize, componentStyles } from "@/design-system";
 
@@ -81,12 +82,14 @@ export default function AdminInsuranceProviders() {
   const updateMutation = useUpdateInsuranceProvider();
   const { data: unusedCount } = useUnusedInsuranceProviderCount(isSuperAdmin);
   const cleanupMutation = useCleanupUnusedInsuranceProviders();
+  const deleteMutation = useDeleteInsuranceProvider();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<InsuranceProviderItem | null>(null);
   const [form, setForm] = useState<InsuranceProviderFormData>(EMPTY_FORM);
   const [deactivateConfirm, setDeactivateConfirm] = useState<{ count: number; payload: InsuranceProviderFormData } | null>(null);
   const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<InsuranceProviderItem | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
@@ -391,6 +394,15 @@ export default function AdminInsuranceProviders() {
                               {!provider.isActive && (
                                 <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">Inaktiv</span>
                               )}
+                              {provider.isUsed === false && (
+                                <span
+                                  className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium"
+                                  title="Keiner Kundenzuweisung und keinem Rechnungsbezug — kann gelöscht werden"
+                                  data-testid={`badge-unused-${provider.id}`}
+                                >
+                                  Unbenutzt
+                                </span>
+                              )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
                               {provider.ikNummer ? (
@@ -410,7 +422,23 @@ export default function AdminInsuranceProviders() {
                               </div>
                             )}
                           </div>
-                          <Pencil className={`${iconSize.sm} text-gray-500 shrink-0`} />
+                          <div className="flex items-center gap-1 shrink-0">
+                            {isSuperAdmin && provider.isUsed === false && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget(provider);
+                                }}
+                                className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                title="Unbenutzte Pflegekasse löschen"
+                                data-testid={`button-delete-provider-${provider.id}`}
+                              >
+                                <Trash2 className={iconSize.sm} />
+                              </button>
+                            )}
+                            <Pencil className={`${iconSize.sm} text-gray-500`} />
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -767,6 +795,37 @@ export default function AdminInsuranceProviders() {
                 setCleanupConfirmOpen(false);
               }}
               data-testid="button-confirm-cleanup"
+            >
+              Endgültig löschen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className={`${iconSize.md} text-red-500`} />
+              Pflegekasse löschen?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deleteTarget?.name}</strong> ist keiner Kundenzuweisung und keinem
+              Rechnungsbezug zugeordnet und wird <strong>endgültig gelöscht</strong>.
+              Diese Aktion kann nicht rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-provider">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                if (deleteTarget) {
+                  deleteMutation.mutate(deleteTarget.id);
+                  setDeleteTarget(null);
+                }
+              }}
+              data-testid="button-confirm-delete-provider"
             >
               Endgültig löschen
             </AlertDialogAction>

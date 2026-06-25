@@ -142,6 +142,7 @@ export const InsuranceProviderItemSchema = component(
     zahlungsart: nullableString(),
     isActive: z.boolean(),
     createdAt: z.string(),
+    isUsed: z.boolean().optional(),
   }),
 );
 

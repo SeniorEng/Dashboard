@@ -109,6 +109,7 @@ export const AUDIT_ACTIONS = [
   "invoice_draft_discarded",
   "invoice_creation_pot_unresolved",
   "insurance_providers_cleanup",
+  "insurance_provider_deleted",
   "appointment_status_restored_from_expired",
   "budget_reconcile_skipped",
 ] as const;
