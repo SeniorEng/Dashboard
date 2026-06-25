@@ -17,6 +17,7 @@
     "sync:github": "bash scripts/github-sync.sh push",
     "sync:check": "bash scripts/github-sync.sh check",
     "cleanup:test-data": "tsx server/scripts/cleanup-test-data.ts",
+    "db:sweep-dev": "tsx server/scripts/sweep-dev-test-data.ts",
     "purge:junk-master-data": "tsx server/scripts/purge-junk-master-data.ts",
     "cleanup:selbstzahler-statutory": "tsx server/scripts/cleanup-selbstzahler-statutory-budgets.ts",
     "check:no-test-junk": "tsx scripts/check-no-test-junk.ts",

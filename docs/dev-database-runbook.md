@@ -1,4 +1,4 @@
-# Dev-Datenbank-Runbook (Reseed & Backup)
+# Dev-Datenbank-Runbook (Reseed, Backup & Test-Daten-Sweep)
 
 **Zweck:** Die langlebige **Entwicklungs-DB** (`DATABASE_URL`) reproduzierbar auf eine
 saubere, **synthetische** Basis zurücksetzen und vor jeder Vereinfachungs-Phase einen
@@ -114,7 +114,65 @@ aktive DB-Verbindungen (z.B. der laufende Dev-Server) erkannt werden.
 
 ---
 
-## 5. Restore aus einem Backup
+## 5. Test-Daten-Sweep (`npm run db:sweep-dev`)
+
+**Zweck:** Den auf der langlebigen Dev-DB angesammelten **Test-Pattern-Backlog**
+(Test-Kunden/-Interessenten/-User) periodisch wieder abräumen, damit der in
+Task #1427 einmalig entfernte Rückstau (3281 Test-Kunden) nicht erneut anwächst.
+Anders als der Reseed (Abschnitt 4) wird die DB **nicht** geleert/neu aufgebaut —
+echte Daten und die `ZZ-Test`-Whitelist bleiben unangetastet.
+
+> **Ersetzungs-Regel:** Dieses Skript ERSETZT den wiederkehrenden manuellen Lauf
+> von `npm run cleanup:test-data -- --apply` für den Kunden-/Interessenten-/
+> User-Backlog. Es ist ein dünner Wrapper um den existierenden SSoT-Runner
+> `runTestDataCleanup()` (`server/services/test-data-cleanup.ts`) und nutzt den
+> schnellen **set-based Bulk-Purge** (`purgeTestCustomersBulk`) statt des
+> langsamen per-Kunde-Cascades in `cleanup-test-data.ts`.
+
+### 5.1 Trockenlauf (Default — verändert nichts)
+
+```bash
+npm run db:sweep-dev
+```
+
+Zählt die Test-Pattern-Kunden/-Interessenten/-User, die ein scharfer Lauf
+entfernen würde. Löscht **nichts**.
+
+### 5.2 Scharf ausführen
+
+```bash
+npm run db:sweep-dev -- --apply
+```
+
+Führt `runTestDataCleanup()` aus: Bulk-Purge der Test-Kunden (in Batches),
+Backlog-Purge der Test-Interessenten und Batch-Purge der Test-User. Gibt am Ende
+eine Zusammenfassung (gelöscht/fehlgeschlagen/abgelehnt) aus.
+
+### 5.3 Periodisch automatisieren (Scheduled Deployment)
+
+Für den **automatischen** Sweep eine **Scheduled Deployment** anlegen (Replit →
+Deployments → Scheduled), die in gewünschtem Intervall (z.B. wöchentlich) den
+scharfen Befehl ausführt:
+
+```bash
+npm run db:sweep-dev -- --apply
+```
+
+Wichtig: Die Scheduled Deployment muss gegen die **Dev-DB** (`DATABASE_URL`)
+laufen, nicht gegen Produktion — die Guards (Abschnitt 7) brechen sonst ab.
+
+### 5.4 Whitelist & Schutz
+
+- Erhalten bleibt jeder Kunde mit `vorname`-Präfix `ZZ-Test`
+  (`CUSTOMER_PRESERVE_VORNAME_PREFIX`) — der Ausschluss steckt im
+  `CUSTOMER_TEST_FILTER` und greift automatisch.
+- Test-User, die mit **echten** Kunden verflochten sind, werden vom Runner
+  entkoppelt bzw. (im Notfall) geblockt statt echte Daten zu zerstören.
+- In `NODE_ENV=production` ist der Runner zusätzlich ein No-op.
+
+---
+
+## 6. Restore aus einem Backup
 
 Custom-Format (selektiv möglich):
 
@@ -134,7 +192,7 @@ Nach dem Restore den `Start application`-Workflow neu starten.
 
 ---
 
-## 6. Sicherheits-Guards (beide Skripte)
+## 7. Sicherheits-Guards (alle Skripte)
 
 - Abbruch bei `NODE_ENV=production`.
 - Abbruch, wenn der DB-Host nach Produktion aussieht (Regex auf den Hostnamen, gespiegelt

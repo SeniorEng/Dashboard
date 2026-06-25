@@ -6,7 +6,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Run Dev**: `npm run dev` (client & server) · **Run Server**: `npm run start` (server only)
 - **Build**: `npm run build` · **Typecheck**: `npm run check` · **DB Push**: `drizzle-kit push`
 - **Test**: `npm run test` (= `vitest run`). Zwei Vitest-Projects (`unit` parallel, kein Server/DB · `integration` über Ephemeral-DB-Orchestrator). Runbook: [`docs/test-infrastructure.md`](docs/test-infrastructure.md) · Flakes: [`docs/flaky-tests.md`](docs/flaky-tests.md).
-- **Dev-DB Backup/Reseed**: `npm run db:backup-dev` · `npm run db:reseed-dev` (`-- --apply` scharf). NUR Dev (Guards). Runbook: [`docs/dev-database-runbook.md`](docs/dev-database-runbook.md).
+- **Dev-DB Backup/Reseed/Sweep**: `npm run db:backup-dev` · `npm run db:reseed-dev` (`-- --apply` scharf) · `npm run db:sweep-dev` (Test-Pattern-Backlog abräumen, `-- --apply` scharf; ZZ-Test-Whitelist bleibt). NUR Dev (Guards). Runbook: [`docs/dev-database-runbook.md`](docs/dev-database-runbook.md).
 - **Mutation Test**: `npm run mutation` (Stryker, nur pure Berechnungs-Module). Runbook: [`docs/mutation-testing.md`](docs/mutation-testing.md).
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`), 10 Pflicht-Gates; `main` auf `SeniorEng/Dashboard` ist branch-protected. Runbook: [`docs/ci-pipeline.md`](docs/ci-pipeline.md).
 - **Dependencies**: Renovate-Bot (`renovate.json`), gruppierte Wochen-PRs + Vulnerability-Alerts. Runbook: [`docs/dependency-management.md`](docs/dependency-management.md).
