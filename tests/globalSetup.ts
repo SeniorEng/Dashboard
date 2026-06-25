@@ -1,3 +1,5 @@
+import { assertEphemeralTestDb } from "./helpers/ephemeral-db-guard";
+
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 
 // Task #894: Jeder Integrationslauf bekommt seine eigene wegwerf-DB plus einen
@@ -51,5 +53,10 @@ export async function setup() {
     console.warn("[globalSetup] Skipping in production environment");
     return;
   }
+  // Task #1427: Fail-fast, BEVOR irgendein Integrationstest gegen die DB
+  // schreibt. Läuft `vitest run` ohne den Ephemeral-DB-Orchestrator, zeigt die
+  // geerbte DATABASE_URL auf die Dev-DB — der Lauf wird hier hart abgebrochen,
+  // statt die Dev-DB mit Test-Daten zu fluten.
+  assertEphemeralTestDb();
   await waitForServer();
 }
