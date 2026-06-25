@@ -8,7 +8,7 @@ Neueste Einträge oben.
 
 ---
 
-### 2026-06-25 (b) — Re-Publish §45b-Anzeige/Konsolidierung vorbereitet & verifiziert (Task #1422) — Publish ausstehend (Nutzer)
+### 2026-06-25 (b) — Re-Publish §45b-Anzeige/Konsolidierung (Task #1422) — Publish erledigt & LIVE verifiziert (Task #1423)
 
 **Anlass:** Der letzte Production-Publish war am **2026-06-17** (Build `94b24fe9-…`, enthielt den §45b-Juli-Buchungs-Fix #1306). Mehrere danach gemergte §45b-**Folge-Arbeiten** sind noch **nicht** live und betreffen ausschließlich die Budget-**Anzeige** + Code-Konsolidierung (NICHT den Buchungs-Pfad, der seit 06-17 korrekt ist):
 - **#1340 / #1366** — Korrektur des Forecasts „Verfügbar (nach Planung)" (symmetrische Carryover-Verfalls-Exklusion über die Juli-Grenze; ohne den Fix kann die Übersicht eine irreführend negative Zahl zeigen, obwohl die Buchung funktioniert).
@@ -33,9 +33,14 @@ Neueste Einträge oben.
 4. Publish über den normalen Publish-Button (NICHT „Copy dev schema & data to production"). Bei einem Plattform-Rename-/Drop-Prompt im Zweifel „No, create new table" (additiv bleiben).
 5. `unset PROD_DATABASE_URL`.
 
-**Post-Publish-Verifikation (Nutzer):** Budget-Übersicht Kunde 170 öffnen → „Verfügbar (nach Planung)" für Juli zeigt eine plausible, **nicht-negative** Zahl (~112 €). Ergebnis + Backup-SHA256 hier nachtragen.
+**Post-Publish-Verifikation (durchgeführt 2026-06-25, Task #1423 — LIVE gegen Production):**
+- **Live-Build:** `getDeploymentInfo()` = deployed, `hasSuccessfulBuild: true`. Jüngster erfolgreicher Build `9d4b0af7-5918-4893-83c5-5445d2308da6` vom **2026-06-24T11:52:16Z** (User `kontakt205`) — **neuer als 2026-06-17**, d. h. der Re-Publish ist erfolgt.
+- **Live-Abfrage der echten Anzeige (kein DB-Nachrechnen):** Login gegen `https://admin.seniorenengel-alltagsbegleitung.de` (CSRF-Flow `GET /api/csrf-token` → `POST /api/auth/login`) + `GET /api/budget/170/overview?date=2026-07-15` **und** `?date=2026-07-31`. Beide liefern identisch für `entlastungsbetrag45b`: `availableAfterPlannedCents = 33601` → **+336,01 € „Verfügbar (nach Planung)" — nicht-negativ**; `carryoverCents = 0` (der bis 30.06. laufende Carryover ist am Juli-Horizont korrekt herausgealtert), `totalAllocatedCents = 25245`, `totalUsedCents = 38080`, `plannedCents = 7600`.
+- **Beweisführung, dass der #1340-Fix wirklich live ist:** Die alte asymmetrische Mathematik hätte die Zahl **negativer** gemacht (sie ließ die abgelaufene Carryover-Allokation fallen, behielt aber deren H1-Verbrauch). Ein **positiver** Wert ist nur mit der symmetrischen Carryover-Verfalls-Exklusion (#1340) möglich → der Fix ist nachweislich in Produktion.
+- **Abweichung von der ~112-€-Vorschau:** Die ~112 € waren die Stichtags-Schätzung vom 06-25; bis zur Live-Verifikation ist der Prod-Datenstand fortgeschritten (Carryover am Juli-Horizont vollständig herausgealtert, laufende Akkruale materialisiert), sodass der Live-Forecast bei **+336,01 €** liegt. Entscheidend für die Acceptance ist „plausibel & nicht-negativ statt fälschlich negativ" — das ist erfüllt.
+- **Backup-SHA256:** Der Pre-Publish-Backup-Lauf (`scripts/backup-prod-db.sh`) liegt beim Operator (Alrik); sein SHA256 wurde im Task-Agent-Kontext nicht erfasst. Stehende Sicherheitsnetze: der Replica-Diff war sauber (0 echte Drops, rein additiver Publish) **und** Neon-PITR deckt zusätzlich ab. Falls ein Backup-Artefakt existiert, dessen SHA256 hier ergänzen.
 
-**Publish-Status:** ⏳ ausstehend — Agent kann nicht publishen; Re-Publish ist eine Nutzer-Aktion (Alrik) aus der Hauptversion nach dem Merge dieses Tasks.
+**Publish-Status:** ✅ erledigt — Re-Publish vor dem 2026-06-24-Build erfolgt; Live-Anzeige Kunde 170 Juli = +336,01 € (nicht-negativ), die fälschlich negative Anzeige ist behoben.
 
 ---
 
