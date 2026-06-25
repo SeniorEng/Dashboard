@@ -8,6 +8,26 @@ Neueste Einträge oben.
 
 ---
 
+### 2026-06-25 — Verifikation Task #1421 (Forbrig Juli-Termin): bereits in Produktion gelöst, KEIN Publish nötig
+
+**Anlass:** Meldung, dass Mitarbeiterin Nadine für Kundin Forbrig (Kunde 170, PG2, §45b) **keinen Juli-Termin** anlegen kann (vermutete §45b-Budget-Sperre). Task #1421 ging von einem Deployment-Lag aus (Fix gemergt, aber nie veröffentlicht) → Remedy = Re-Publish.
+
+**Read-only-Verifikation gegen Production (`PROD_DATABASE_URL`, nur `SELECT`):**
+- **Empirischer Beweis, dass der Buchungs-Pfad LIVE funktioniert:** Forbrig hat einen **erfolgreich angelegten Juli-Termin 1859 (2026-07-02, 60 Min, Kundentermin), erstellt am 2026-06-25 16:09 UTC**, mit aktivem §45b-Hold (Reservierung 315, 38 €, `budget_type=entlastungsbetrag_45b`). Ein zweiter §45b-Hold 305 (Termin 1849, 29.06., 38 €) wurde am selben Tag 09:47 UTC angelegt. Beide Holds = `planHold` lief ohne `BudgetHardBlockError` → die Produktion sperrt normale Juli-Termine **nicht**.
+- **Echte App-Buchung (kein manueller DB-Write):** Beide Holds tragen `created_by_user_id=23` (existierender App-User) und den App-eigenen Idempotency-Key der `planHold`-Logik (`hold:a1859:o_:en…`) → die Reservierung entstand über den regulären, hard-hold-gegateten Buchungs-Pfad, nicht out-of-band.
+- **Abgrenzung:** Bewiesen ist „normale Juli-Termine werden NICHT pauschal gesperrt". Ein einzelner Versuch kann weiterhin legitim scheitern (z. B. Termin teurer als die ~112,33 € Restbudget, Überschneidung, Monatssperre). Falls Nadine erneut blockiert wird, die konkreten Termin-Eingaben (Datum, Leistungen, Minuten, km) erfassen und Kosten vs. Verfügbar zum Zeitpunkt nachrechnen.
+- **§45b-Datenstand Kunde 170** (deckungsgleich zur Code-Nachrechnung): Allocation 701 (initial_balance 393 €, **soft-deleted** 27.05. — ihre 195,12 € Mai-Verbrauch bleiben im Roh-Verbrauch), 786 (carryover 393 €, **läuft 30.06. ab** — ihre 185,68 € Juni-Verbrauch werden ab Juli symmetrisch herausgerechnet, Task #1306), 789 (initial_balance 121,45 €, **aktiv**). Daraus ergibt Juli (projiziert): allocated ≈ 383,45 − consumedNet 195,12 − Holds 76 = **≈ 112,33 € frei** → ein normaler Forbrig-Termin (38–77 €) passt.
+
+**Reconciliation:** Der §45b-Juli-Fix (#1306) ist seit dem **Publish 2026-06-17** in Produktion (siehe Eintrag unten). Der ursprüngliche Block stammte vom alten Pre-06-17-Stand (asymmetrische §45b-Mathematik); seit dem 06-17-Publish funktioniert die Juli-Buchung — heute durch den erfolgreich angelegten Termin 1859 empirisch belegt.
+
+**Ergebnis:** Task #1421 ist **gegenstandslos** — die Sperre ist in Produktion bereits behoben, ein Re-Publish ist für dieses Problem **nicht erforderlich**. Kein Code-Eingriff, keine Forbrig-Datenänderung (Out-of-Scope eingehalten).
+
+**Hinweis (separat, nicht Teil dieses Tasks):** Die §45b-Folge-Arbeiten nach dem 06-17-Publish (#1340 Forecast-Anzeige „Verfügbar nach Planung", #1348/#1392 Reader-Konsolidierung) sind noch **nicht** live. Sie betreffen die Budget-**Anzeige**/Konsolidierung, nicht den hier verifizierten Buchungs-Pfad — ein eigener Publish-Entscheid, kein Blocker für Forbrig.
+
+**Publish-Status:** — kein Publish (reine Verifikation/Dokumentation).
+
+---
+
 ### 2026-06-17 — Publish-Fehler "image size is over the limit of 8 GiB" behoben (kein Schema-Risiko)
 
 **Anlass:** Mehrere Publish-Versuche (Builds 09:30 / 10:01 / 10:10 UTC) schlugen fehl. Die Replit-UI zeigte nur „deployment build failed". Über die echten Build-Logs (`getDeploymentBuild`) war die eigentliche Fehlerzeile sichtbar:

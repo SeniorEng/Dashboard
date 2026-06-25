@@ -53,3 +53,19 @@ trigger.
    must drive `getAllBudgetSummariesServed`.
 4. Only classify as deployment lag (Cause 1) when BOTH paths are correct on
    current code for the real prod data.
+
+## Booking-block symptom ≠ forecast-display symptom (and the strongest check)
+A "cannot create the appointment" report is a BOOKING block (planHold →
+`BudgetHardBlockError`), NOT the forecast/served-assembler display. The booking
+path does not use `getAllBudgetSummariesServed`, so Cause 2 (served-assembler)
+cannot explain it. Before assuming a deployment-lag re-publish will fix a booking
+block, get EMPIRICAL proof from prod, not just commit/reader analysis: query for a
+recently-succeeded equivalent operation. A fresh `budget_reservations` row
+(`state='hold'`, correct `budget_type`, recent `created_at`) for that customer in
+the disputed month PROVES the live booking path already lets the booking through —
+planHold ran without throwing. If such a hold exists, the issue is already resolved
+on the running build (whatever its commit), and re-publishing will not change it;
+the remaining cause is a genuinely-too-large appointment, not a bug. Also reconcile
+against the deployment log: a "fix is in production" entry + a successful live
+booking together close out a presumed-lag task as moot, even if LATER follow-up
+commits remain unpublished (those are separate display/consolidation work).
