@@ -45,9 +45,9 @@ import { prospects } from "@shared/schema";
 
 // Prod-Pattern auf dem Hostnamen — zeichengleich zu den Shell-Guards in
 // scripts/reseed-dev-db.sh und scripts/backup-dev-db.sh.
-const PROD_HOST_PATTERN = /(^|[.-])prod([.-]|$)|production/;
+export const PROD_HOST_PATTERN = /(^|[.-])prod([.-]|$)|production/;
 
-function dbHostOf(url: string): string {
+export function dbHostOf(url: string): string {
   let host = "";
   try {
     host = new URL(url).hostname.toLowerCase();
@@ -59,7 +59,7 @@ function dbHostOf(url: string): string {
   return host;
 }
 
-function assertDevDatabase(): void {
+export function assertDevDatabase(): void {
   if (isProductionEnv()) {
     throw new Error("ABBRUCH: NODE_ENV=production. db:sweep-dev läuft nur gegen die Dev-DB.");
   }
@@ -90,8 +90,7 @@ async function countProspects(): Promise<number> {
   return rows.length;
 }
 
-async function main(): Promise<void> {
-  const apply = process.argv.slice(2).includes("--apply");
+export async function runSweep(apply: boolean): Promise<void> {
   assertDevDatabase();
   console.log(`Modus: ${apply ? "APPLY (scharf)" : "DRY-RUN (zählt nur)"}`);
 
@@ -125,6 +124,11 @@ async function main(): Promise<void> {
   if (summary.usersBlocked) {
     console.warn("   WARNUNG: Mindestens ein User-Batch wurde geblockt (Verflechtung mit echten Kunden).");
   }
+}
+
+async function main(): Promise<void> {
+  const apply = process.argv.slice(2).includes("--apply");
+  await runSweep(apply);
 }
 
 // Nur als CLI ausführen — ein versehentlicher Import darf main() nicht triggern
