@@ -35,7 +35,6 @@
 import { fileURLToPath } from "node:url";
 import { db, pool } from "../lib/db";
 import {
-  isProductionEnv,
   runTestDataCleanup,
   findTestCustomerIds,
   findTestUserIds,
@@ -43,47 +42,15 @@ import {
 } from "../services/test-data-cleanup";
 import { prospects } from "@shared/schema";
 
-// Prod-Pattern auf dem Hostnamen — zeichengleich zu den Shell-Guards in
-// scripts/reseed-dev-db.sh und scripts/backup-dev-db.sh.
-export const PROD_HOST_PATTERN = /(^|[.-])prod([.-]|$)|production/;
-
-export function dbHostOf(url: string): string {
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    // Fallback: postgres://user:pass@host:port/db ohne valides URL-Schema.
-    const m = url.match(/@([^:/?#]+)/);
-    host = (m ? m[1] : "").toLowerCase();
-  }
-  return host;
-}
-
-export function assertDevDatabase(): void {
-  if (isProductionEnv()) {
-    throw new Error("ABBRUCH: NODE_ENV=production. db:sweep-dev läuft nur gegen die Dev-DB.");
-  }
-  const url = process.env.DATABASE_URL || "";
-  if (!url) {
-    throw new Error("ABBRUCH: DATABASE_URL ist nicht gesetzt.");
-  }
-  const devHost = dbHostOf(url);
-  // Fail-closed: ohne ermittelbaren Host können die Prod-Guards nicht greifen.
-  if (!devHost) {
-    throw new Error("ABBRUCH: DB-Host konnte aus DATABASE_URL nicht extrahiert werden (fail-closed).");
-  }
-  if (PROD_HOST_PATTERN.test(devHost)) {
-    throw new Error(`ABBRUCH: DB-Host '${devHost}' sieht nach Produktion aus. Verweigert.`);
-  }
-  const prodUrl = process.env.PROD_DATABASE_URL || "";
-  if (prodUrl) {
-    const prodHost = dbHostOf(prodUrl);
-    if (prodHost && devHost === prodHost) {
-      throw new Error(`ABBRUCH: DATABASE_URL-Host == PROD_DATABASE_URL-Host ('${devHost}'). Verweigert.`);
-    }
-  }
-  console.log(`Sicherheits-Checks ok. Dev-DB-Host: ${devHost}`);
-}
+// Prod-Schutz-Guards liegen DB-frei in `../lib/dev-db-guard` (Ersetzungs-Regel:
+// von hier herausgelöst, damit ein IMMER laufendes CI-Gate sie ohne DB-Import
+// abdecken kann). Re-export für Rückwärtskompatibilität der Importeure.
+export {
+  PROD_HOST_PATTERN,
+  dbHostOf,
+  assertDevDatabase,
+} from "../lib/dev-db-guard";
+import { assertDevDatabase } from "../lib/dev-db-guard";
 
 async function countProspects(): Promise<number> {
   const rows = await db.select({ id: prospects.id }).from(prospects).where(PROSPECT_TEST_FILTER);

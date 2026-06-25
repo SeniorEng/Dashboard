@@ -18,13 +18,16 @@ name: CI
 #  11. vitest run tests/architecture/dev-db-scripts-guard.test.ts
 #                                          (Dev-DB-Skript-Prod-Guards, statisch,
 #                                           immer — Task #1436)
+#  12. vitest run tests/architecture/sweep-dev-guard.test.ts
+#                                          (Sweep-Skript-Prod-Guards, DB-frei,
+#                                           statisch, immer — Task #1439)
 #
 # (Gate 10 = E-Rechnungs-Validierung, eigener Job `erechnung-validation`.)
 #
 # Die DB-/Server-abhängigen Gates (4, 5, 7, 8) benötigen Repo-Secrets
 # (`TEST_USER_EMAIL`, `TEST_USER_PASSWORD`). Fehlen diese (z.B. in Forks),
 # werden die betroffenen Schritte sauber übersprungen statt hart zu failen —
-# die statischen Gates (1, 2, 3, 6, 11) laufen immer.
+# die statischen Gates (1, 2, 3, 6, 11, 12) laufen immer.
 
 on:
   push:
@@ -92,6 +95,20 @@ jobs:
       # nur `bash` + `pg_dump`/`psql` (auf ubuntu-latest vorinstalliert).
       - name: Dev-DB scripts prod-guard (dev-db-scripts-guard)
         run: npx vitest run tests/architecture/dev-db-scripts-guard.test.ts --reporter=default
+
+      # Gate 12: Sweep-Skript-Schutz-Guards (Task #1439). Schwester zu Gate 11:
+      # `tests/architecture/sweep-dev-guard.test.ts` übt die Prod-Schutz-Guards
+      # des ebenso ZERSTÖRERISCHEN Sweep-Skripts
+      # (`server/scripts/sweep-dev-test-data.ts`, npm `db:sweep-dev`) ab. Die
+      # reine CLI-Guard-Logik liegt DB-frei in `server/lib/dev-db-guard.ts`, der
+      # Test importiert NICHT `server/lib/db` und braucht weder DB noch Server.
+      # Der DB-gebundene DRY-RUN-Teil bleibt im integration-Test
+      # `tests/test-data-cleanup-sweep-guard.test.ts` (Secret-gegatete Gates 4/5).
+      # Eine Regression der Sweep-Prod-Guards könnte den Bulk-Purge auf eine
+      # Nicht-Dev-DB richten — daher läuft dieser Schutz-Check als eigenes, IMMER
+      # laufendes Gate im statischen Job.
+      - name: Sweep script prod-guard (sweep-dev-guard)
+        run: npx vitest run tests/architecture/sweep-dev-guard.test.ts --reporter=default
 
       # Gate 9: OpenAPI-Drift — committete Spec muss mit der frisch aus den
       # Zod-Schemas generierten übereinstimmen (Task #775).
