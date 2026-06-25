@@ -25,8 +25,10 @@ import {
   usePayers,
   useInvoiceDetail,
   useDeliveryHistory,
+  useBillingPipeline,
   useBillingMutations,
   BillingFiltersCard,
+  BillingOverviewCard,
   InvoiceList,
   PendingInvoicesCard,
   BulkSendDialog,
@@ -79,7 +81,7 @@ export default function AdminBilling() {
   // ein Statuswechsel auf einen der fortschreitenden Lebenszyklus-Status.
   const [pendingBulkAction, setPendingBulkAction] = useState<
     | { type: "delete" }
-    | { type: "status"; status: "versendet" | "avis_erhalten" | "bezahlt" }
+    | { type: "status"; status: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt" }
     | null
   >(null);
 
@@ -122,6 +124,8 @@ export default function AdminBilling() {
   );
 
   const { data: payers } = usePayers(selectedYear, selectedMonth);
+  // Task #1434: Wirtschaftlicher Überblick oben (liest nur den Pipeline-Reader).
+  const { data: pipeline, isLoading: pipelineLoading } = useBillingPipeline(selectedYear, selectedMonth);
 
   const activePayer = payerFilter !== "alle"
     ? payers?.find((p) => p.insuranceProviderId.toString() === payerFilter) ?? null
@@ -289,7 +293,8 @@ export default function AdminBilling() {
     setPendingBulkAction(null);
   };
 
-  const STATUS_ACTION_LABELS: Record<"versendet" | "avis_erhalten" | "bezahlt", string> = {
+  const STATUS_ACTION_LABELS: Record<"entwurf" | "versendet" | "avis_erhalten" | "bezahlt", string> = {
+    entwurf: "Auf Entwurf zurücksetzen",
     versendet: "Versendet",
     avis_erhalten: "Avis erhalten",
     bezahlt: "Bezahlt",
@@ -308,6 +313,13 @@ export default function AdminBilling() {
           <p className="text-gray-600">Rechnungen erstellen und verwalten</p>
         </div>
       </div>
+
+      <BillingOverviewCard
+        pipeline={pipeline}
+        isLoading={pipelineLoading}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+      />
 
       <BillingFiltersCard
         selectedMonth={selectedMonth}

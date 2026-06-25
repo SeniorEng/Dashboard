@@ -11,10 +11,16 @@
  * "avis_erhalten" liegt zwischen Versendet und Bezahlt. Manuell darf von
  * versendet/avis_erhalten direkt auf bezahlt gesprungen werden;
  * bezahlt/storniert werden nie herabgestuft.
+ *
+ * Task #1434: "versendet" darf zusätzlich auf "entwurf" ZURÜCKGESETZT werden
+ * (Korrektur eines versehentlich/zu früh markierten Versands). Beim Rücksetzen
+ * wird `sentAt` wieder geleert (siehe `updateInvoiceStatusTx`). Bewusst NUR von
+ * "versendet" aus — aus "avis_erhalten"/"bezahlt"/"storniert" gibt es kein
+ * Zurück (diese Status implizieren bereits eingetretene Folgewirkungen).
  */
 export const INVOICE_STATUS_TRANSITIONS: Record<string, string[]> = {
   entwurf: ["versendet", "storniert"],
-  versendet: ["avis_erhalten", "bezahlt", "storniert"],
+  versendet: ["entwurf", "avis_erhalten", "bezahlt", "storniert"],
   avis_erhalten: ["bezahlt", "storniert"],
   bezahlt: ["storniert"],
   storniert: [],

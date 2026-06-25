@@ -633,15 +633,18 @@ router.post("/bulk-delete", asyncHandler("Rechnungen konnten nicht gelöscht wer
   res.json(response);
 }));
 
-// Task #1376 — Sammel-Statuswechsel auf "versendet"/"avis_erhalten"/"bezahlt".
-// "storniert" ist NICHT erlaubt (Sammel-Storno ist eine separate Aufgabe und
-// erfordert die Cascade-Logik aus `PATCH /:id/status`). Pro Rechnung gilt
-// dieselbe Übergangs-SSoT wie der Einzel-Statuswechsel; ungültige Übergänge
+// Task #1376 — Sammel-Statuswechsel auf "entwurf"/"versendet"/"avis_erhalten"/
+// "bezahlt". "storniert" ist NICHT erlaubt (Sammel-Storno ist eine separate
+// Aufgabe und erfordert die Cascade-Logik aus `PATCH /:id/status`). Pro Rechnung
+// gilt dieselbe Übergangs-SSoT wie der Einzel-Statuswechsel; ungültige Übergänge
 // werden übersprungen und gemeldet. Audit analog zum Einzelpfad.
+// Task #1434: "entwurf" ist als Sammel-Ziel erlaubt — setzt versehentlich als
+// versendet markierte Rechnungen zurück (nur "versendet" → "entwurf" laut SSoT;
+// alle anderen Quellstatus werden als ungültiger Übergang übersprungen).
 router.post("/bulk-status", asyncHandler("Status konnte nicht aktualisiert werden", async (req, res) => {
   const parsed = z.object({
     invoiceIds: z.array(z.number().int().positive()).min(1).max(200),
-    status: z.enum(["versendet", "avis_erhalten", "bezahlt"]),
+    status: z.enum(["entwurf", "versendet", "avis_erhalten", "bezahlt"]),
   }).safeParse(req.body);
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());

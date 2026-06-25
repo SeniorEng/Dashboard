@@ -129,6 +129,9 @@ export async function updateInvoiceStatusTx(
   const { eq } = await import("drizzle-orm");
   const updateData: Partial<Invoice> = { status: status as Invoice["status"] };
   if (status === "versendet") updateData.sentAt = new Date();
+  // Task #1434: Zurücksetzen auf "entwurf" leert das Versanddatum wieder, damit
+  // Liste/PDF/Status konsistent bleiben (kein "Versendet am …" auf einem Entwurf).
+  if (status === "entwurf") updateData.sentAt = null;
   if (status === "bezahlt") updateData.paidAt = new Date();
   if (status === "storniert") updateData.storniertAt = new Date();
   const [updated] = await exec.update(invoices).set(updateData).where(eq(invoices.id, id)).returning();

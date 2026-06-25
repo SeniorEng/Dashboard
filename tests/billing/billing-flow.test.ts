@@ -1610,6 +1610,72 @@ describe("BF-10: Sammel-Aktionen (Task #1376/#1379)", () => {
     expect(await countAuditFor("invoice_status_changed", [a.id, b.id])).toBe(2);
   });
 
+  // BF-10.7 — Task #1434: „versendet" → „entwurf" zurücksetzen (Korrektur eines
+  // versehentlich/zu früh markierten Versands). Einzelpfad MUSS den Status
+  // zurücksetzen, `sentAt` wieder leeren und genau einen Audit-Eintrag schreiben.
+  it("BF-10.7 — Einzel-PATCH setzt versendet → entwurf zurück, leert sentAt und auditet", async () => {
+    const inv = await createDraftSzInvoice("RESET-SINGLE");
+    await finalizeInvoice(inv.id, "versendet");
+
+    const sentBefore = await apiGet<any>(`/api/billing/${inv.id}`);
+    expect(sentBefore.data.status).toBe("versendet");
+    expect(sentBefore.data.sentAt, "versendete Rechnung muss ein Versanddatum tragen").toBeTruthy();
+
+    const res = await apiPatch<any>(`/api/billing/${inv.id}/status`, { status: "entwurf" });
+    expect(res.status, `Rücksetzen muss erfolgreich sein: ${JSON.stringify(res.data)}`).toBe(200);
+
+    const after = await apiGet<any>(`/api/billing/${inv.id}`);
+    expect(after.data.status).toBe("entwurf");
+    expect(after.data.sentAt, "Rücksetzen muss das Versanddatum leeren").toBeFalsy();
+
+    expect(await countAuditFor("invoice_status_changed", [inv.id])).toBe(1);
+  });
+
+  // BF-10.8 — Task #1434: Aus „bezahlt"/„avis_erhalten" gibt es laut SSoT KEIN
+  // Zurück auf „entwurf". Der Einzelpfad MUSS solche Übergänge ablehnen (400).
+  it("BF-10.8 — Einzel-PATCH lehnt bezahlt → entwurf ab (kein Zurück, 400)", async () => {
+    const inv = await createDraftSzInvoice("RESET-PAID-DENY");
+    await finalizeInvoice(inv.id, "bezahlt");
+
+    const res = await apiPatch<any>(`/api/billing/${inv.id}/status`, { status: "entwurf" });
+    expect(res.status, `bezahlt → entwurf muss abgelehnt werden: ${JSON.stringify(res.data)}`).toBe(400);
+
+    const after = await apiGet<any>(`/api/billing/${inv.id}`);
+    expect(after.data.status, "bezahlte Rechnung darf NICHT zurückgesetzt werden").toBe("bezahlt");
+  });
+
+  // BF-10.9 — Task #1434: Sammel-Rücksetzen wendet „entwurf" nur auf versendete
+  // Rechnungen an; bezahlte werden als ungültiger Übergang übersprungen.
+  it("BF-10.9 — bulk-status setzt nur versendete Rechnungen auf entwurf zurück", async () => {
+    const sent = await createDraftSzInvoice("RESET-BULK-SENT");
+    await finalizeInvoice(sent.id, "versendet");
+    const paid = await createDraftSzInvoice("RESET-BULK-PAID");
+    await finalizeInvoice(paid.id, "bezahlt");
+
+    const res = await apiPost<any>("/api/billing/bulk-status", {
+      invoiceIds: [sent.id, paid.id],
+      status: "entwurf",
+    });
+    expect(res.status, `bulk-status: ${JSON.stringify(res.data)}`).toBe(200);
+    expect(res.data.summary.updated).toBe(1);
+    expect(res.data.summary.skipped).toBe(1);
+    expect(res.data.summary.total).toBe(2);
+
+    const byId = new Map<number, any>(res.data.results.map((r: any) => [r.invoiceId, r]));
+    expect(byId.get(sent.id).status).toBe("updated");
+    expect(byId.get(paid.id).status).toBe("skipped");
+    expect(byId.get(paid.id).reason).toMatch(/nicht erlaubt/i);
+
+    const sentAfter = await apiGet<any>(`/api/billing/${sent.id}`);
+    expect(sentAfter.data.status).toBe("entwurf");
+    expect(sentAfter.data.sentAt, "zurückgesetzte Rechnung darf kein Versanddatum mehr tragen").toBeFalsy();
+    const paidAfter = await apiGet<any>(`/api/billing/${paid.id}`);
+    expect(paidAfter.data.status).toBe("bezahlt");
+
+    expect(await countAuditFor("invoice_status_changed", [sent.id])).toBe(1);
+    expect(await countAuditFor("invoice_status_changed", [paid.id])).toBe(0);
+  });
+
   it("BF-10.5 — bulk-status meldet unbekannte Rechnungen als 'nicht gefunden'", async () => {
     const res = await apiPost<any>("/api/billing/bulk-status", {
       invoiceIds: [999_999_998],

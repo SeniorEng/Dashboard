@@ -39,10 +39,15 @@ const CLUSTER_HINTS: Record<InvoiceActionCluster, string> = {
 // Task #1376: Sammel-Statuswechsel ist bewusst auf die fortschreitenden
 // Lebenszyklus-Status begrenzt — „storniert" ist KEINE Sammelaktion (Storno
 // läuft cascade-sicher über den Einzelpfad).
-const BULK_STATUS_OPTIONS: { value: "versendet" | "avis_erhalten" | "bezahlt"; label: string }[] = [
+// Task #1434: „Auf Entwurf zurücksetzen" ergänzt die Sammelaktionen — setzt
+// versendete Rechnungen zurück (greift laut SSoT nur bei Quellstatus
+// „versendet", alle anderen werden serverseitig als ungültiger Übergang
+// übersprungen).
+const BULK_STATUS_OPTIONS: { value: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt"; label: string }[] = [
   { value: "versendet", label: "Versendet" },
   { value: "avis_erhalten", label: "Avis erhalten" },
   { value: "bezahlt", label: "Bezahlt" },
+  { value: "entwurf", label: "Auf Entwurf zurücksetzen" },
 ];
 
 interface InvoiceListProps {
@@ -64,7 +69,7 @@ interface InvoiceListProps {
   onToggleSelect: (invoiceId: number, checked: boolean) => void;
   onToggleSelectAll: (checked: boolean) => void;
   onBulkDelete: () => void;
-  onBulkStatus: (status: "versendet" | "avis_erhalten" | "bezahlt") => void;
+  onBulkStatus: (status: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt") => void;
   bulkActionPending: boolean;
   // Task #1380: laufender Fortschritt der blockweisen Sammelaktion.
   bulkActionProgress: BulkActionProgress | null;

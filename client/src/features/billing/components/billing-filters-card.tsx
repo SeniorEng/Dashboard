@@ -4,8 +4,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { iconSize } from "@/design-system";
-import { Plus, Send, Loader2, FileText, Printer, Layers } from "lucide-react";
+import { Plus, Send, Loader2, FileText, Printer, Layers, ChevronDown } from "lucide-react";
 import type { BillingCustomerItem, InvoiceItem, PayerSummary } from "@shared/api";
 import { MONTH_NAMES } from "../constants";
 
@@ -235,16 +241,52 @@ export function BillingFiltersCard({
                 </a>
               </>
             )}
-            {draftBulkInvoices.length > 0 && (
-              <Button
-                variant="outline"
-                className="text-purple-700 border-purple-200 hover:bg-purple-50 w-full sm:w-auto"
-                onClick={onOpenBulkSend}
-                data-testid="button-bulk-send"
-              >
-                <Send className={`${iconSize.sm} mr-1`} />
-                <span className="hidden sm:inline">Alle </span>versenden{payerSuffix} ({draftBulkInvoices.length} {draftBulkInvoices.length === 1 ? "Rechnung" : "Rechnungen"})
-              </Button>
+            {/* Task #1434: Die zwei vorher getrennten Versand-Buttons sind zu
+                EINEM „Versenden"-Menü zusammengefasst (Entzerrung der
+                Aktionsleiste). Beide Pfade bleiben fachlich getrennt erreichbar:
+                „Alle als versendet markieren" (Selbstzahler/Privat, kein TI) und
+                „Per E-Mail an Pflegekassen" (echter PDF/ZUGFeRD-Versand). Die
+                bestehenden Test-IDs bleiben auf den Menüpunkten erhalten. */}
+            {(draftBulkInvoices.length > 0 || draftPflegekasseInvoices.length > 0) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="text-purple-700 border-purple-200 hover:bg-purple-50 w-full sm:w-auto"
+                    disabled={batchSending}
+                    data-testid="button-send-menu"
+                  >
+                    {batchSending ? (
+                      <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                    ) : (
+                      <Send className={`${iconSize.sm} mr-1`} />
+                    )}
+                    Versenden{payerSuffix}
+                    <ChevronDown className={`${iconSize.sm} ml-1`} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {draftBulkInvoices.length > 0 && (
+                    <DropdownMenuItem
+                      onSelect={onOpenBulkSend}
+                      data-testid="button-bulk-send"
+                    >
+                      <Send className={`${iconSize.sm} mr-2`} />
+                      Alle als versendet markieren ({draftBulkInvoices.length})
+                    </DropdownMenuItem>
+                  )}
+                  {draftPflegekasseInvoices.length > 0 && (
+                    <DropdownMenuItem
+                      onSelect={onBatchSend}
+                      disabled={batchSending}
+                      data-testid="button-batch-send"
+                    >
+                      <Send className={`${iconSize.sm} mr-2`} />
+                      Per E-Mail an Pflegekassen ({draftPflegekasseInvoices.length})
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             {draftBulkInvoices.length > 0 && (
               <Button
@@ -255,27 +297,6 @@ export function BillingFiltersCard({
               >
                 <Printer className={`${iconSize.sm} mr-1`} />
                 Sammeldruck{payerSuffix} ({draftBulkInvoices.length} {draftBulkInvoices.length === 1 ? "Rechnung" : "Rechnungen"})
-              </Button>
-            )}
-            {draftPflegekasseInvoices.length > 0 && (
-              <Button
-                variant="outline"
-                className="text-blue-600 border-blue-200 hover:bg-blue-50 w-full sm:w-auto"
-                onClick={onBatchSend}
-                disabled={batchSending}
-                data-testid="button-batch-send"
-              >
-                {batchSending ? (
-                  <>
-                    <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
-                    Versende...
-                  </>
-                ) : (
-                  <>
-                    <Send className={`${iconSize.sm} mr-1`} />
-                    <span className="hidden sm:inline">Alle an </span>Pflegekassen senden{payerSuffix} ({draftPflegekasseInvoices.length})
-                  </>
-                )}
               </Button>
             )}
             {customers && customers.length > 0 && (

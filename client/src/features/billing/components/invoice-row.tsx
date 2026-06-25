@@ -27,6 +27,7 @@ import {
   MoreHorizontal,
   MailCheck,
   Banknote,
+  Undo2,
 } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
@@ -402,6 +403,20 @@ export function InvoiceRow({
                         <Banknote className={`${iconSize.sm} mr-2`} />
                         Als bezahlt markieren
                       </DropdownMenuItem>
+                      {/* Task #1434: Versehentlich/zu früh als versendet
+                          markierte Rechnung zurück auf „Entwurf" setzen.
+                          Bewusst NUR ab Status „versendet" (SSoT) — leert das
+                          Versanddatum wieder. */}
+                      {invoice.status === "versendet" && (
+                        <DropdownMenuItem
+                          onSelect={() => statusMutation.mutate({ id: invoice.id, status: "entwurf" })}
+                          disabled={statusMutation.isPending}
+                          data-testid={`button-status-entwurf-${invoice.id}`}
+                        >
+                          <Undo2 className={`${iconSize.sm} mr-2`} />
+                          Auf Entwurf zurücksetzen
+                        </DropdownMenuItem>
+                      )}
                     </>
                   )}
                   {/* Task #533: „Als versendet markieren" für gesetzliche

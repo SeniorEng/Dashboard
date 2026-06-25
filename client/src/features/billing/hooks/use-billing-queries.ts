@@ -8,7 +8,26 @@ import type {
   InvoiceDetail,
   DeliveryRecord,
   PayerSummary,
+  BillingPipelineResponse,
 } from "@shared/api";
+
+// Task #1434: Wirtschafts-Überblick oben auf der Abrechnungsseite. Liest
+// AUSSCHLIESSLICH den bestehenden Pipeline-Reader (`GET /billing/pipeline`) —
+// keine eigene Berechnung. Der QueryKey beginnt mit "billing", damit
+// `invalidateRelated(qc, "billing")` (nach jedem Statuswechsel/Versand) auch
+// diese Kachel automatisch neu lädt.
+export function useBillingPipeline(selectedYear: number, selectedMonth: number) {
+  return useQuery({
+    queryKey: ["billing", "pipeline", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      const result = await api.get<BillingPipelineResponse>(`/billing/pipeline?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
 
 export function useBillingInvoices(
   selectedYear: number,
