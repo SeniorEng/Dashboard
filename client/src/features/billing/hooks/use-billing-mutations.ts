@@ -10,6 +10,7 @@ import type {
   BatchSendInvoiceResponse as BatchSendResponse,
   BulkSendInvoiceResponse,
   BulkPrintSummary,
+  LexwareExportSummary,
   DiscardDraftsResponse,
   BulkDeleteResponse,
   BulkStatusResponse,
@@ -69,6 +70,8 @@ export function useBillingMutations({
   const [generateAllProgress, setGenerateAllProgress] = useState<GenerateAllResponse | null>(null);
   const [bulkSendResult, setBulkSendResult] = useState<BulkSendInvoiceResponse | null>(null);
   const [bulkPrintResult, setBulkPrintResult] = useState<BulkPrintSummary | null>(null);
+  // Task #1459: Ergebnis des letzten Lexware-Exports (READ-ONLY, kein State-Change).
+  const [lexwareExportResult, setLexwareExportResult] = useState<LexwareExportSummary | null>(null);
   // Task #1380: laufender Fortschritt der blockweisen Sammelaktionen
   // (Löschen / Statuswechsel). `null` = keine Aktion läuft.
   const [bulkActionProgress, setBulkActionProgress] = useState<BulkActionProgress | null>(null);
@@ -472,6 +475,46 @@ export function useBillingMutations({
     },
   });
 
+  // Task #1459: Lexware-PDF-Export. Lädt ein ZIP mit je einer LN-freien PDF pro
+  // ausgewählter Rechnung (Dateiname Rechnungsnummer_Kunde_Datum.pdf).
+  // READ-ONLY: KEIN Status-Change, KEINE Markierung als „versendet", daher
+  // bewusst KEIN invalidateRelated/refetch (nichts hat sich serverseitig
+  // geändert). Auswahl per Rechnungs-IDs.
+  const lexwareExportMutation = useMutation({
+    mutationFn: async (invoiceIds: number[]) => {
+      setLexwareExportResult(null);
+      const result = await api.postBlob<LexwareExportSummary>(
+        "/billing/lexware-export",
+        { invoiceIds },
+        "X-Lexware-Export-Summary",
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      // Browser-Download des ZIP auslösen.
+      const url = URL.createObjectURL(data.blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setLexwareExportResult(data.summary);
+      const s = data.summary;
+      toast({
+        title: "Lexware-Export erstellt",
+        description: s
+          ? `${s.exported} exportiert, ${s.errors} Fehler`
+          : "Download wurde gestartet.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Lexware-Export fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
   // Task #1376: Sammel-Löschen (nur Entwürfe). Finalisierte Rechnungen werden
   // serverseitig übersprungen und im Summary als "übersprungen" gemeldet.
   const bulkDeleteMutation = useMutation({
@@ -578,6 +621,7 @@ export function useBillingMutations({
     batchSendMutation,
     bulkSendMutation,
     bulkPrintMutation,
+    lexwareExportMutation,
     sendingInvoiceId,
     batchSending,
     generateAllProgress,
@@ -586,6 +630,8 @@ export function useBillingMutations({
     setBulkSendResult,
     bulkPrintResult,
     setBulkPrintResult,
+    lexwareExportResult,
+    setLexwareExportResult,
     bulkActionProgress,
   };
 }

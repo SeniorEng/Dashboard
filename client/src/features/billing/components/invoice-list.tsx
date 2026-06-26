@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { iconSize } from "@/design-system";
-import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight, FileDown } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
 import {
@@ -70,6 +70,9 @@ interface InvoiceListProps {
   onToggleSelectAll: (checked: boolean) => void;
   onBulkDelete: () => void;
   onBulkStatus: (status: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt") => void;
+  // Task #1459: Lexware-PDF-Export der ausgewählten Rechnungen (READ-ONLY).
+  onBulkLexwareExport: () => void;
+  lexwareExportPending: boolean;
   bulkActionPending: boolean;
   // Task #1380: laufender Fortschritt der blockweisen Sammelaktion.
   bulkActionProgress: BulkActionProgress | null;
@@ -94,6 +97,8 @@ export function InvoiceList({
   onToggleSelectAll,
   onBulkDelete,
   onBulkStatus,
+  onBulkLexwareExport,
+  lexwareExportPending,
   bulkActionPending,
   bulkActionProgress,
 }: InvoiceListProps) {
@@ -210,6 +215,22 @@ export function InvoiceList({
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
+                {/* Task #1459: Lexware-PDF-Export der Auswahl (READ-ONLY — kein
+                    Status-Change). Lädt ein ZIP mit je einer LN-freien PDF. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onBulkLexwareExport}
+                  disabled={lexwareExportPending}
+                  data-testid="button-bulk-lexware-export"
+                >
+                  {lexwareExportPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                  ) : (
+                    <FileDown className={`${iconSize.sm} mr-1`} />
+                  )}
+                  Lexware-Export
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

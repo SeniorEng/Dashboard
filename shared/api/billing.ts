@@ -235,3 +235,20 @@ export interface BulkPrintSummary {
     message?: string;
   }>;
 }
+
+// Task #1459 — Lexware-Export: Zusammenfassung, die der binäre
+// `/billing/lexware-export` ZIP-Download im `X-Lexware-Export-Summary`-Header
+// (URL-encodiertes JSON) mitliefert. READ-ONLY — KEIN Status-/Markierungs-Feld
+// (anders als BulkPrintSummary: kein `marked`), da der Export NICHTS mutiert.
+export interface LexwareExportSummary {
+  total: number;
+  exported: number;
+  errors: number;
+  results: Array<{
+    invoiceId: number;
+    invoiceNumber: string;
+    customerId: number;
+    status: "exported" | "error";
+    message?: string;
+  }>;
+}

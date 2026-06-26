@@ -16,6 +16,7 @@ import {
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
+import { buildLexwareExportFilename, dedupeExportFilenames } from "@shared/domain/lexware-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import {
@@ -85,6 +86,7 @@ import {
     loadOrRenderSendablePdfs,
     renderLeistungsnachweisOnTheFly,
     shouldAppendStandaloneLeistungsnachweis,
+    storedInvoicePdfContainsLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
 import { getBlockingDraftInvoices } from "../services/invoice-data";
@@ -2560,6 +2562,185 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
   res.setHeader("Content-Type", contentType);
   res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
   res.setHeader("X-Bulk-Print-Summary", encodeURIComponent(JSON.stringify(summary)));
+  res.send(outputBuffer);
+}));
+
+// Task #1459 — Phase 3: Lexware-PDF-Export. Der Admin wählt Rechnungen
+// (per IDs und/oder Zeitraum) und lädt ein ZIP, in dem JEDE Rechnung eine
+// eigene LN-FREIE PDF mit Lexware-freundlichem Dateinamen
+// (`Rechnungsnummer_Kunde_Datum.pdf`) ist.
+//
+// READ-ONLY / status-neutral — ANDERS als /bulk-print:
+//   - KEINE Status-Änderung (kein „versendet"), KEIN sentAt, KEIN Audit-Mark.
+//   - KEINE DB-Mutation; die versiegelten Originale (`pdf_path`/`pdf_hash`)
+//     werden NIE angefasst, kein Re-Seal.
+//
+// LN-frei-Beschaffung pro Rechnung (verzweigt über
+// `storedInvoicePdfContainsLeistungsnachweis`):
+//   - FALSE (Kasse gesetzlich / Selbstzahler): versiegeltes PDF ist bereits
+//     LN-frei → Bytes 1:1 ausliefern (kein Re-Render).
+//   - TRUE (kundenadressiert: privat / rechnungAnKunde / Beihilfe): versiegeltes
+//     PDF ist Rechnung+LN gemergt → frisch invoice-only RE-RENDERN
+//     (`buildInvoicePdfBytes(..., { invoiceOnly:true })`), NIE per Seiten-Strip.
+//     Diese Bytes sind Wegwerf-Export-Kopien (Zeitstempel ≠ versiegelter Hash —
+//     erwartet, der Export wird NICHT auf Hash-Reproduktion geprüft).
+//
+// Stornorechnungen: wie in den Bündel-Routen (reine Stornos ausgeschlossen).
+// Render läuft AUSSERHALB jeder db.transaction/withAudit (Pool-Starvation,
+// Arch-Test no-render-inside-transaction).
+router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstellt werden", async (req, res) => {
+  const parsed = z.object({
+    invoiceIds: z.array(z.number().int().positive()).optional(),
+    billingMonth: z.number().int().min(1).max(12).optional(),
+    billingYear: z.number().int().min(2000).max(2100).optional(),
+    insuranceProviderId: z.number().int().positive().optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
+  const { invoiceIds, billingMonth, billingYear, insuranceProviderId } = parsed.data;
+
+  // Rechnungen entweder über explizite IDs oder über einen Zeitraum (Monat/Jahr,
+  // optional Kassen-Filter) auswählen. Mindestens eine Quelle ist erforderlich.
+  const hasIds = !!invoiceIds && invoiceIds.length > 0;
+  const hasPeriod = billingMonth !== undefined && billingYear !== undefined;
+  if (!hasIds && !hasPeriod) {
+    throw badRequest("Bitte Rechnungs-IDs oder einen Zeitraum (Monat und Jahr) angeben.");
+  }
+
+  type ExportInvoice = Awaited<ReturnType<typeof storage.getInvoices>>[number];
+  let candidates: ExportInvoice[] = [];
+  if (hasIds) {
+    const loaded = await Promise.all(invoiceIds!.map((id) => storage.getInvoice(id)));
+    candidates = loaded.filter((inv): inv is ExportInvoice => inv !== undefined && inv !== null);
+  } else {
+    candidates = await storage.getInvoices({ year: billingYear, month: billingMonth, insuranceProviderId });
+  }
+
+  // Reine Stornorechnungen wie in /bundle-by-payer ausschließen (kein
+  // Storno-Beleg im Buchhaltungs-Export); stabil nach Rechnungsnummer sortiert.
+  const invoices = candidates
+    .filter((inv) => inv.invoiceType !== "stornorechnung")
+    .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+
+  if (invoices.length === 0) {
+    throw notFound("Keine exportierbaren Rechnungen für die Auswahl gefunden.");
+  }
+
+  const companySettings = await getCachedCompanySettings();
+
+  type ResultEntry = {
+    invoiceId: number;
+    invoiceNumber: string;
+    customerId: number;
+    status: "exported" | "error";
+    message?: string;
+  };
+  const results: ResultEntry[] = [];
+
+  // Phase 1 — LN-freie PDF-Bytes je Rechnung beschaffen (KEIN State-Change).
+  type Rendered = { invoice: ExportInvoice; invoicePdf: Buffer };
+  const rendered: Rendered[] = [];
+  for (const inv of invoices) {
+    try {
+      const containsLn = await storedInvoicePdfContainsLeistungsnachweis(inv);
+      let invoicePdf: Buffer | null = null;
+      if (!containsLn) {
+        // Versiegeltes PDF ist bereits LN-frei → 1:1 ausliefern. Cache-Miss →
+        // einmalig nachpersistieren (idempotent, mutex-serialisiert) und erneut
+        // aus Storage lesen (verbatim auf dem versiegelten Key).
+        invoicePdf = await loadInvoicePdfFromStorage(inv);
+        if (!invoicePdf) {
+          let persistError: unknown = null;
+          try {
+            await persistInvoicePdf(inv.id);
+          } catch (err) {
+            persistError = err;
+            console.error(`[billing/lexware-export] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
+          }
+          const refreshed = await storage.getInvoice(inv.id);
+          if (refreshed) invoicePdf = await loadInvoicePdfFromStorage(refreshed);
+          if (!invoicePdf) throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${inv.invoiceNumber}`);
+        }
+      } else {
+        // Kundenadressiert (gemergt) → invoice-only frisch re-rendern aus dem
+        // versiegelten Render-Snapshot (GoBD-reproduzierbar, Wegwerf-Kopie).
+        const snapshot = (inv.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
+        try {
+          const built = await buildInvoicePdfBytes(inv, companySettings, { snapshot, invoiceOnly: true });
+          invoicePdf = built.pdf;
+        } catch (err) {
+          throw classifyPdfRenderError(err, `Rechnungs-PDF ${inv.invoiceNumber}`);
+        }
+      }
+      rendered.push({ invoice: inv, invoicePdf });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
+      console.error(`[billing/lexware-export] Export für Rechnung ${inv.id} fehlgeschlagen:`, err);
+      results.push({
+        invoiceId: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        customerId: inv.customerId,
+        status: "error",
+        message: msg,
+      });
+    }
+  }
+
+  if (rendered.length === 0) {
+    throw new AppError(
+      500,
+      "Keine der ausgewählten Rechnungen konnte für den Lexware-Export gerendert werden.",
+      "LEXWARE_EXPORT_RENDER_FAILED",
+    );
+  }
+
+  // Phase 2 — ZIP bauen (eine PDF pro Rechnung). Lexware-freundliche
+  // Dateinamen, kollisionsfrei innerhalb des Archivs.
+  const baseNames = rendered.map((r) => buildLexwareExportFilename({
+    invoiceNumber: r.invoice.invoiceNumber,
+    customerName: r.invoice.customerName,
+    date: formatDateISO(r.invoice.sentAt ?? r.invoice.createdAt),
+  }));
+  const fileNames = dedupeExportFilenames(baseNames);
+
+  const archiver = (await import("archiver")).default;
+  const archive = archiver("zip", { zlib: { level: 6 } });
+  const chunks: Buffer[] = [];
+  archive.on("data", (c: Buffer) => chunks.push(c));
+  const done = new Promise<void>((resolve, reject) => {
+    archive.on("end", () => resolve());
+    archive.on("error", (err: Error) => reject(err));
+  });
+  rendered.forEach((r, i) => {
+    archive.append(r.invoicePdf, { name: fileNames[i] });
+    results.push({
+      invoiceId: r.invoice.id,
+      invoiceNumber: r.invoice.invoiceNumber,
+      customerId: r.invoice.customerId,
+      status: "exported",
+    });
+  });
+  await archive.finalize();
+  await done;
+  const outputBuffer = Buffer.concat(chunks);
+
+  const errors = results.filter((r) => r.status === "error").length;
+  const summary = {
+    total: invoices.length,
+    exported: rendered.length,
+    errors,
+    results,
+  };
+  log(
+    `lexware-export done total=${invoices.length} exported=${rendered.length} errors=${errors} userId=${req.user?.id ?? "?"}`,
+    "billing",
+  );
+
+  const zipName = hasPeriod && !hasIds
+    ? `Lexware-Export-${String(billingMonth).padStart(2, "0")}-${billingYear}.zip`
+    : `Lexware-Export-${todayISO()}.zip`;
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="${zipName}"`);
+  res.setHeader("X-Lexware-Export-Summary", encodeURIComponent(JSON.stringify(summary)));
   res.send(outputBuffer);
 }));
 

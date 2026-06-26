@@ -156,6 +156,7 @@ export default function AdminBilling() {
     batchSendMutation,
     bulkSendMutation,
     bulkPrintMutation,
+    lexwareExportMutation,
     sendingInvoiceId,
     batchSending,
     generateAllProgress,
@@ -231,6 +232,18 @@ export default function AdminBilling() {
   const handleBulkPrint = (groupByPayer: boolean) => {
     if (draftBulkInvoices.length === 0) return;
     bulkPrintMutation.mutate({ groupByPayer });
+  };
+
+  // Task #1459: Lexware-PDF-Export der aktuell ausgewählten Rechnungen
+  // (READ-ONLY — kein Status-Change). Reine Stornorechnungen werden
+  // serverseitig zusätzlich gefiltert.
+  const handleBulkLexwareExport = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      toast({ title: "Keine Rechnungen ausgewählt", variant: "destructive" });
+      return;
+    }
+    lexwareExportMutation.mutate(ids);
   };
 
   const handleGenerate = () => {
@@ -403,6 +416,8 @@ export default function AdminBilling() {
         onToggleSelectAll={handleToggleSelectAll}
         onBulkDelete={() => setPendingBulkAction({ type: "delete" })}
         onBulkStatus={(status) => setPendingBulkAction({ type: "status", status })}
+        onBulkLexwareExport={handleBulkLexwareExport}
+        lexwareExportPending={lexwareExportMutation.isPending}
         bulkActionPending={bulkActionPending}
         bulkActionProgress={bulkActionProgress}
       />

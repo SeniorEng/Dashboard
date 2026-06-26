@@ -503,7 +503,7 @@ export async function buildInvoicePdfData(
 export async function buildInvoicePdfBytes(
   invoice: Invoice,
   companySettings: CompanySettings,
-  options?: { snapshot?: InvoiceRenderSnapshot | null },
+  options?: { snapshot?: InvoiceRenderSnapshot | null; invoiceOnly?: boolean },
 ): Promise<{ pdf: Buffer; xml: string | null; leistungsnachweisPdf: Buffer | null; pdfDataFingerprint: string; leistungsnachweisDataFingerprint: string | null; customerSnapshot: InvoiceRenderSnapshot["customer"]; invoiceSnapshot: NonNullable<InvoiceRenderSnapshot["invoice"]>; pdfCreationDate: string; zugferdProfile: ZugferdProfileId; usedStrictMode: boolean; strictModeReason: string | null }> {
   const { pdfData, isCustomerInvoice, isPflegekasseInvoice, customerSnapshot, invoiceSnapshot } = await buildInvoicePdfData(invoice, companySettings, options);
 
@@ -545,7 +545,13 @@ export async function buildInvoicePdfBytes(
   // gecached werden kann (verhindert Re-Render bei jedem /leistungsnachweis-Abruf).
   let leistungsnachweisPdf: Buffer | null = null;
   let leistungsnachweisDataFingerprint: string | null = null;
-  if (isPflegekasseInvoice) {
+  // Task #1459 — `invoiceOnly` (Lexware-Export): das Rechnungs-PDF wird
+  // OHNE Leistungsnachweis erzeugt. Den LN-Render überspringen lässt
+  // `leistungsnachweisPdf` null und damit auch den Merge-Block unten aus, sodass
+  // der reine ZUGFeRD-Invoice-Buffer zurückkommt — auch für kundenadressierte
+  // Rechnungen (privat / rechnungAnKunde / Beihilfe), deren versiegeltes PDF
+  // sonst gemergt wäre. Wegwerf-Export-Kopie: kein Re-Seal, keine Persistierung.
+  if (isPflegekasseInvoice && !options?.invoiceOnly) {
     await enrichPdfDataWithSignatures(pdfData, invoice);
     const lnHtml = generateLeistungsnachweisHtml(pdfData);
     const { buffer: lnPdfBuf } = await generatePdf(lnHtml, { footerHtml: buildLeistungsnachweisFooterTemplate(pdfData), margin: LEISTUNGSNACHWEIS_PDF_MARGIN });
