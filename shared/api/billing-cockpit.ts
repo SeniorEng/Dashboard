@@ -65,18 +65,45 @@ export interface CockpitReviewBuckets {
   zahlungsverzug: CockpitOverdueInvoiceItem[];
 }
 
+/**
+ * READ-ONLY-Cockpit-Übersicht (Zone A + C). Liefert NUR die billigen Aggregate
+ * (Trichter, Lohn-Readiness, Ampel, „Zu prüfen"-Buckets) — die potenziell
+ * tausenden Drill-Zeilen werden NICHT mehr inline mitgeliefert, sondern erst
+ * beim Klick auf eine Trichter-Stufe lazy über `GET /billing/cockpit/drill`
+ * (siehe `CockpitDrillResponse`) nachgeladen.
+ */
 export interface BillingCockpitResponse {
   asOfDate: string;
   billingYear: number;
   billingMonth: number;
   /** Trichter-Leiste: die 5 Stufen (immer alle 5, auch leer). */
   funnel: CockpitStageSummary[];
-  /** Flache Drill-down-Zeilen; clientseitig gruppierbar (Mitarbeiter/Rechnung/Kunde). */
-  rows: CockpitDrillRow[];
   /** Lohn-Readiness („X lohnreif, Y in Prüfung"). */
   lohnReadiness: LohnReadinessSummary;
   /** Cockpit-Ampel grün/gelb/rot. */
   ampel: CockpitAmpel;
   /** Die vier „Zu prüfen"-Buckets (Zone C). */
   buckets: CockpitReviewBuckets;
+}
+
+/**
+ * READ-ONLY-Drill-down einer EINZELNEN Trichter-Stufe (Zone B), lazy/paginiert.
+ * Wird erst beim Klick auf eine Trichter-Stufe geladen, mit Default-Limit und
+ * „mehr laden" (wachsendes `limit`, Offset 0). Geldbeträge sind Integer-Cents.
+ */
+export interface CockpitDrillResponse {
+  billingYear: number;
+  billingMonth: number;
+  asOfDate: string;
+  /** Die abgefragte Trichter-Stufe. */
+  stage: CockpitFunnelStage;
+  /** Die zurückgelieferte (paginierte) Zeilen-Seite. */
+  rows: CockpitDrillRow[];
+  /** Gesamtzahl der Zeilen dieser Stufe (für „X von Y" / „mehr laden"). */
+  total: number;
+  /** Angefordertes Limit/Offset (gespiegelt). */
+  limit: number;
+  offset: number;
+  /** True, wenn weitere Zeilen jenseits `offset + rows.length` existieren. */
+  hasMore: boolean;
 }

@@ -109,19 +109,37 @@ export interface CockpitStageSummary {
 }
 
 /**
- * Verdichtet die Drill-down-Zeilen zu den 5 Trichter-Stufen (immer alle 5,
- * auch wenn leer — für eine stabile Trichter-Leiste).
+ * Ein bereits (z. B. serverseitig per SQL-`GROUP BY`) voraggregierter Beitrag
+ * zu einer Trichter-Stufe. Erlaubt es, den Trichter zu summieren, OHNE jede
+ * einzelne Drill-Zeile in den App-Prozess zu laden — das Stufen-Mapping bleibt
+ * dieselbe SSoT (`mapPipelineStageToFunnel`), nur die Summierung arbeitet auf
+ * gröberen Beiträgen statt auf Einzelzeilen.
  */
-export function summarizeCockpitFunnel(rows: CockpitDrillRow[]): CockpitStageSummary[] {
+export interface CockpitStageContribution {
+  stage: CockpitFunnelStage;
+  itemCount: number;
+  totalMinutes: number;
+  totalCents: number;
+}
+
+/**
+ * Verdichtet voraggregierte Stufen-Beiträge zu den 5 Trichter-Stufen (immer
+ * alle 5, auch wenn leer — für eine stabile Trichter-Leiste). Reine,
+ * assoziative Summierung: das Ergebnis ist identisch dazu, jede Einzelzeile
+ * einzeln beizutragen (€-Konservierung).
+ */
+export function summarizeCockpitFunnelContributions(
+  contributions: CockpitStageContribution[],
+): CockpitStageSummary[] {
   const byStage = new Map<CockpitFunnelStage, { itemCount: number; totalMinutes: number; totalCents: number }>();
   for (const stage of COCKPIT_FUNNEL_STAGES) {
     byStage.set(stage, { itemCount: 0, totalMinutes: 0, totalCents: 0 });
   }
-  for (const row of rows) {
-    const acc = byStage.get(row.stage)!;
-    acc.itemCount += 1;
-    acc.totalMinutes += row.minutes;
-    acc.totalCents += row.cents;
+  for (const c of contributions) {
+    const acc = byStage.get(c.stage)!;
+    acc.itemCount += c.itemCount;
+    acc.totalMinutes += c.totalMinutes;
+    acc.totalCents += c.totalCents;
   }
   return COCKPIT_FUNNEL_STAGES.map((stage) => {
     const acc = byStage.get(stage)!;
@@ -133,6 +151,22 @@ export function summarizeCockpitFunnel(rows: CockpitDrillRow[]): CockpitStageSum
       totalCents: acc.totalCents,
     };
   });
+}
+
+/**
+ * Verdichtet die Drill-down-Zeilen zu den 5 Trichter-Stufen (immer alle 5,
+ * auch wenn leer — für eine stabile Trichter-Leiste). Dünner Wrapper über
+ * `summarizeCockpitFunnelContributions` (jede Zeile = ein Beitrag mit Count 1).
+ */
+export function summarizeCockpitFunnel(rows: CockpitDrillRow[]): CockpitStageSummary[] {
+  return summarizeCockpitFunnelContributions(
+    rows.map((row) => ({
+      stage: row.stage,
+      itemCount: 1,
+      totalMinutes: row.minutes,
+      totalCents: row.cents,
+    })),
+  );
 }
 
 // ============================================

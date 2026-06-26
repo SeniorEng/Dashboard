@@ -8,5 +8,6 @@ export {
   useDeliveryHistory,
   useBillingPipeline,
   useBillingCockpit,
+  useBillingCockpitDrill,
 } from "./use-billing-queries";
 export { useBillingMutations } from "./use-billing-mutations";

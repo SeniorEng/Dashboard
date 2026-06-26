@@ -15,11 +15,14 @@ import type { CockpitFunnelStage } from "@shared/api";
 import type { CockpitGroupDimension } from "@shared/domain/billing-cockpit";
 import {
   useBillingCockpit,
+  useBillingCockpitDrill,
   CockpitFunnelBar,
   CockpitDrillTable,
   CockpitReviewBuckets,
   MONTH_NAMES,
 } from "@/features/billing";
+
+const DRILL_PAGE_SIZE = 50;
 
 // Task #1444 — Abrechnung-Cockpit (PHASE 1, READ-ONLY). Dünner Wrapper: liest
 // ausschließlich `GET /billing/cockpit` und rendert die drei Zonen
@@ -41,24 +44,35 @@ export default function AdminCockpit() {
   const [activeStage, setActiveStage] = useState<CockpitFunnelStage | null>(null);
   // null = der stufen-abhängige Default greift; sonst explizite Nutzer-Wahl.
   const [groupOverride, setGroupOverride] = useState<CockpitGroupDimension | null>(null);
+  // Wachsendes Limit für die lazy nachgeladene Drill-Stufe (offset 0).
+  const [drillLimit, setDrillLimit] = useState(DRILL_PAGE_SIZE);
 
   const currentYear = today.getFullYear();
   const years = [currentYear, currentYear - 1, currentYear - 2];
 
-  const { data: cockpit, isLoading } = useBillingCockpit(selectedYear, selectedMonth);
+  const {
+    data: cockpit,
+    isLoading,
+    isError,
+    refetch,
+  } = useBillingCockpit(selectedYear, selectedMonth);
+
+  const {
+    data: drill,
+    isFetching: isDrillFetching,
+    isError: isDrillError,
+    refetch: refetchDrill,
+  } = useBillingCockpitDrill(selectedYear, selectedMonth, activeStage, drillLimit);
 
   const dimension = groupOverride ?? defaultDimensionForStage(activeStage);
 
   const handleStageClick = (stage: CockpitFunnelStage) => {
     setActiveStage((prev) => (prev === stage ? null : stage));
     setGroupOverride(null);
+    setDrillLimit(DRILL_PAGE_SIZE);
   };
 
-  const visibleRows = cockpit
-    ? activeStage
-      ? cockpit.rows.filter((row) => row.stage === activeStage)
-      : cockpit.rows
-    : [];
+  const drillRows = drill?.rows ?? [];
 
   return (
     <Layout variant="wide">
@@ -101,9 +115,16 @@ export default function AdminCockpit() {
         </Select>
       </div>
 
-      {isLoading || !cockpit ? (
+      {isLoading ? (
         <div className="flex items-center justify-center py-16" data-testid="status-cockpit-loading">
           <Loader2 className={`${iconSize.lg} animate-spin text-gray-400`} />
+        </div>
+      ) : isError || !cockpit ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-16" data-testid="status-cockpit-error">
+          <p className="text-sm text-gray-600">Das Cockpit konnte nicht geladen werden.</p>
+          <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-cockpit-retry">
+            Erneut versuchen
+          </Button>
         </div>
       ) : (
         <>
@@ -116,14 +137,21 @@ export default function AdminCockpit() {
           />
 
           <CockpitDrillTable
-            rows={visibleRows}
+            rows={drillRows}
             activeStage={activeStage}
             dimension={dimension}
             onDimensionChange={setGroupOverride}
             onClearStage={() => {
               setActiveStage(null);
               setGroupOverride(null);
+              setDrillLimit(DRILL_PAGE_SIZE);
             }}
+            isLoading={isDrillFetching}
+            isError={isDrillError}
+            total={drill?.total ?? 0}
+            hasMore={drill?.hasMore ?? false}
+            onLoadMore={() => setDrillLimit((prev) => prev + DRILL_PAGE_SIZE)}
+            onRetry={() => refetchDrill()}
           />
 
           <CockpitReviewBuckets buckets={cockpit.buckets} />

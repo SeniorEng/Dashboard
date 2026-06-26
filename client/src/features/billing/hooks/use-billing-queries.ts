@@ -10,6 +10,8 @@ import type {
   PayerSummary,
   BillingPipelineResponse,
   BillingCockpitResponse,
+  CockpitDrillResponse,
+  CockpitFunnelStage,
 } from "@shared/api";
 
 // Task #1434: Wirtschafts-Überblick oben auf der Abrechnungsseite. Liest
@@ -42,6 +44,34 @@ export function useBillingCockpit(selectedYear: number, selectedMonth: number) {
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       const result = await api.get<BillingCockpitResponse>(`/billing/cockpit?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+// Task #1450: Lazy/paginierte Drill-Daten EINER Trichter-Stufe (`GET
+// /billing/cockpit/drill`). Wird erst geladen, wenn eine Stufe ausgewählt ist
+// (`enabled: stage !== null`). Paginierung über ein wachsendes Limit (offset 0,
+// limit += Seitengröße) → ein einziger Cache-Eintrag pro (Monat/Stufe/Limit),
+// damit „Mehr laden" die bisherigen Zeilen nicht flackernd ersetzt. QueryKey
+// beginnt mit "billing".
+export function useBillingCockpitDrill(
+  selectedYear: number,
+  selectedMonth: number,
+  stage: CockpitFunnelStage | null,
+  limit: number,
+) {
+  return useQuery({
+    queryKey: ["billing", "cockpit", "drill", selectedYear, selectedMonth, stage, limit],
+    enabled: stage !== null,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      params.set("stage", stage as string);
+      params.set("limit", limit.toString());
+      params.set("offset", "0");
+      const result = await api.get<CockpitDrillResponse>(`/billing/cockpit/drill?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });
