@@ -13,6 +13,7 @@ import type {
   CockpitDrillResponse,
   CockpitFunnelStage,
   BillingBreakdownResponse,
+  BillingReviewClustersResponse,
 } from "@shared/api";
 
 // Task #1434: Wirtschafts-Überblick oben auf der Abrechnungsseite. Liest
@@ -65,6 +66,25 @@ export function useBillingBreakdown(selectedYear: number, selectedMonth: number)
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       const result = await api.get<BillingBreakdownResponse>(`/billing/breakdown?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+// Task #1456: Pre-Commit-Review-Cluster (Phase 2). Liest AUSSCHLIESSLICH den
+// neuen Review-Reader (`GET /billing/review-clusters`) — pro Kunde die
+// Phase-1-Spalten plus Eligibilität (eligible/blocked + Begründung). Der Client
+// gruppiert clientseitig nach Kunde ODER Kasse, daher kein Refetch beim
+// Umschalten. QueryKey beginnt mit "billing" ⇒ `invalidateRelated(qc,"billing")`
+// nach jeder Erstellung lädt die Kachel automatisch neu.
+export function useBillingReviewClusters(selectedYear: number, selectedMonth: number) {
+  return useQuery({
+    queryKey: ["billing", "review-clusters", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      const result = await api.get<BillingReviewClustersResponse>(`/billing/review-clusters?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });

@@ -4,6 +4,7 @@ export { InvoiceList } from "./invoice-list";
 export { BillingFiltersCard } from "./billing-filters-card";
 export { BillingOverviewCard } from "./billing-overview-card";
 export { BillingBreakdownCard } from "./billing-breakdown-card";
+export { BillingReviewClusterCard } from "./billing-review-cluster-card";
 export { BulkSendDialog } from "./bulk-send-dialog";
 export { BulkPrintDialog } from "./bulk-print-dialog";
 export { GenerateAllDialog } from "./generate-all-dialog";

@@ -27,10 +27,12 @@ import {
   useDeliveryHistory,
   useBillingPipeline,
   useBillingBreakdown,
+  useBillingReviewClusters,
   useBillingMutations,
   BillingFiltersCard,
   BillingOverviewCard,
   BillingBreakdownCard,
+  BillingReviewClusterCard,
   InvoiceList,
   PendingInvoicesCard,
   BulkSendDialog,
@@ -130,6 +132,8 @@ export default function AdminBilling() {
   const { data: pipeline, isLoading: pipelineLoading } = useBillingPipeline(selectedYear, selectedMonth);
   // Task #1453: Leistungs-Aufschlüsselung (liest nur den Breakdown-Reader).
   const { data: breakdown, isLoading: breakdownLoading } = useBillingBreakdown(selectedYear, selectedMonth);
+  // Task #1456: Pre-Commit-Review-Cluster (liest nur den Review-Reader).
+  const { data: review, isLoading: reviewLoading } = useBillingReviewClusters(selectedYear, selectedMonth);
 
   const activePayer = payerFilter !== "alle"
     ? payers?.find((p) => p.insuranceProviderId.toString() === payerFilter) ?? null
@@ -141,6 +145,7 @@ export default function AdminBilling() {
 
   const {
     generateMutation,
+    reviewGenerateMutation,
     discardDraftsMutation,
     statusMutation,
     bulkDeleteMutation,
@@ -330,6 +335,17 @@ export default function AdminBilling() {
         isLoading={breakdownLoading}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
+      />
+
+      <BillingReviewClusterCard
+        review={review}
+        isLoading={reviewLoading}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        isGenerating={reviewGenerateMutation.isPending}
+        onGenerate={(customerIds, onDone) =>
+          reviewGenerateMutation.mutate(customerIds, { onSuccess: onDone })
+        }
       />
 
       <BillingFiltersCard

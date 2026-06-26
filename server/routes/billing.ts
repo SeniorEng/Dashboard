@@ -60,6 +60,7 @@ import {
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
 import { readBillingCockpit, readBillingCockpitDrill } from "../storage/billing/cockpit-reader";
 import { readBillingBreakdown } from "../storage/billing/breakdown-reader";
+import { readBillingReviewClusters } from "../services/billing-review-reader";
 import { COCKPIT_FUNNEL_STAGES, type CockpitFunnelStage } from "@shared/domain/billing-cockpit";
 import { auditService } from "../services/audit";
 import { withAudit } from "../lib/with-audit";
@@ -305,6 +306,23 @@ router.get("/breakdown", asyncHandler("Abrechnungs-Aufschlüsselung konnte nicht
     throw badRequest("Monat ist erforderlich (1–12).");
   }
   const result = await readBillingBreakdown(year, month);
+  res.json(result);
+}));
+
+// Task #1456 — Pre-Commit-Review-Cluster: pro Kunde die Phase-1-Spalten
+// (HW/AB/km/€) plus Eligibilität (eligible/blocked + Begründung). Reine Sicht —
+// die Erstellung läuft über den bestehenden Generate-Pfad (POST /generate).
+// Client gruppiert clientseitig nach Kunde ODER Kasse (kein Refetch).
+router.get("/review-clusters", asyncHandler("Abrechnungs-Review konnte nicht geladen werden", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw badRequest("Jahr ist erforderlich (2020–2100).");
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw badRequest("Monat ist erforderlich (1–12).");
+  }
+  const result = await readBillingReviewClusters(year, month);
   res.json(result);
 }));
 

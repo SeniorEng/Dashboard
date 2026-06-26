@@ -108,6 +108,54 @@ export function useBillingMutations({
     },
   });
 
+  // Task #1456: Pre-Commit-Review-Cluster — erstellt Rechnungen für die im
+  // Review markierten (berechtigten) Kunden. Wir nutzen den BESTEHENDEN
+  // Einzel-Generate-Pfad (`POST /billing/generate`) pro Kunde im Loop (KEINE
+  // neue Engine, keine Änderung an generateInvoiceCore), weil `generate-all`
+  // eine beliebig markierte Teilmenge nicht scopen kann. Ganzer Monat je Kunde,
+  // damit die Erstellung sich exakt mit der Review-Eligibilität deckt.
+  const reviewGenerateMutation = useMutation({
+    mutationFn: async (customerIds: number[]) => {
+      const results: { customerId: number; status: "created" | "error"; message?: string }[] = [];
+      for (const customerId of customerIds) {
+        try {
+          const result = await api.post<GenerateResponse>("/billing/generate", {
+            customerId,
+            billingMonth: selectedMonth,
+            billingYear: selectedYear,
+          });
+          unwrapResult(result);
+          results.push({ customerId, status: "created" });
+        } catch (err) {
+          results.push({
+            customerId,
+            status: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      return results;
+    },
+    onSuccess: (results) => {
+      const created = results.filter((r) => r.status === "created").length;
+      const errors = results.length - created;
+      toast({
+        title: "Rechnungserstellung abgeschlossen",
+        description: `${created} erstellt${errors > 0 ? `, ${errors} Fehler` : ""}`,
+        ...(errors > 0 ? { variant: "destructive" as const } : {}),
+      });
+      // Status-Filter defensiv auf "alle" zurücksetzen, damit frische Entwürfe
+      // garantiert sichtbar sind (analog Massenerstellung).
+      if (created > 0 && statusFilter !== "alle" && statusFilter !== "entwurf") {
+        setStatusFilter("alle");
+      }
+      invalidateRelated(queryClient, "billing");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
   // Task #817: Verwaiste Entwurfs-Rechnungen verwerfen, damit die Termine
   // wieder frei werden und die Vorschau echte Werte liefert.
   const discardDraftsMutation = useMutation({
@@ -519,6 +567,7 @@ export function useBillingMutations({
 
   return {
     generateMutation,
+    reviewGenerateMutation,
     discardDraftsMutation,
     statusMutation,
     bulkDeleteMutation,

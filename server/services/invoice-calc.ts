@@ -1,6 +1,11 @@
 import { badRequest, notFound } from "../lib/errors";
 import { splitLineItemsAcrossPots, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment } from "@shared/domain/budget-invoice-split";
 import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
+import {
+  BILLING_BLOCK_MESSAGES,
+  isPflegekasseBillingType,
+  isServiceRecordSignedForBilling,
+} from "@shared/domain/billing-eligibility";
 import type { BudgetType } from "@shared/domain/budgets";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
@@ -193,25 +198,25 @@ export async function buildInvoiceDraft(input: {
   //    bestätigten Leistungsnachweis.
   //  • Selbstzahler: `employee_signed` bleibt zulässig (keine Kassen-Vorgabe),
   //    `completed` selbstverständlich ebenso.
-  const isPflegekasseBilling = customer.billingType === "pflegekasse_gesetzlich"
-    || customer.billingType === "pflegekasse_privat";
+  // Task #1456 — Signatur-Akzeptanz aus der gemeinsamen Eligibilitäts-SSoT
+  // (`shared/domain/billing-eligibility.ts`). Dieselben Helfer/Meldungen nutzt
+  // der Pre-Commit-Review, damit „eligible" im Review ⇔ akzeptiert hier gilt.
+  const isPflegekasseBilling = isPflegekasseBillingType(customer.billingType);
   const signedRecords = serviceRecords.filter(sr =>
-    isPflegekasseBilling
-      ? sr.status === "completed"
-      : sr.status === "completed" || sr.status === "employee_signed"
+    isServiceRecordSignedForBilling(customer.billingType, sr.status)
   );
   if (signedRecords.length === 0) {
     throw badRequest(
       isPflegekasseBilling
-        ? "Bei Pflegekassen-Abrechnung muss der Leistungsnachweis vom Kunden unterschrieben sein — eine reine Mitarbeiter-Unterschrift genügt nicht."
-        : "Der Leistungsnachweis wurde noch nicht unterschrieben. Bitte lassen Sie den Leistungsnachweis zuerst vom Mitarbeiter unterschreiben.",
+        ? BILLING_BLOCK_MESSAGES.customer_signature_required
+        : BILLING_BLOCK_MESSAGES.not_signed,
     );
   }
 
   const serviceRecordIds = signedRecords.map(sr => sr.id);
   const allApptIds = await getAppointmentIdsFromServiceRecords(serviceRecordIds);
   if (allApptIds.length === 0) {
-    throw badRequest("Der Leistungsnachweis enthält keine Termine.");
+    throw badRequest(BILLING_BLOCK_MESSAGES.no_appointments);
   }
 
   const alreadyInvoicedIds = await getAlreadyInvoicedAppointmentIds(customerId, billingYear, billingMonth);
@@ -235,7 +240,7 @@ export async function buildInvoiceDraft(input: {
     ? allApptIds.filter(id => !alreadyInvoicedIds.includes(id))
     : allApptIds;
   if (apptIds.length === 0) {
-    throw badRequest("Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.");
+    throw badRequest(BILLING_BLOCK_MESSAGES.already_billed);
   }
 
   // Task #1317: Optionaler von–bis-Datumsbereich — engt die abzurechnenden
