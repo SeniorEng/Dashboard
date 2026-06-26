@@ -186,12 +186,14 @@ export async function enumerateConservationPopulation(
  * invariant gegen das Aufräumen der nicht mehr gelesenen Altlast-Quellen
  * (`monthly_auto` etc.), die ohnehin NICHT in die Projektion eingehen.
  */
-async function computePotConservation(exec: DbOrTx): Promise<PotConservationRow[]> {
+async function computePotConservation(
+  exec: DbOrTx,
+  asOfDate: string = todayISO(),
+): Promise<PotConservationRow[]> {
   const population = await enumerateConservationPopulation(exec);
   // Der Reader ist rein lesend und ruft kein `.transaction` auf; der zur
   // Laufzeit übergebene Executor (db oder offene Tx) erfüllt DbClient.
   const reader = exec as DbClient;
-  const asOfDate = todayISO();
 
   const rows: PotConservationRow[] = [];
   for (const [customerId, pots] of population) {
@@ -329,9 +331,17 @@ async function checkLedgerReservationCrosslinks(
  * Read-only Conservation-Check gegen den übergebenen Executor (DB oder offene
  * Transaktion). Wirft NICHT — gibt das strukturierte Ergebnis zurück, damit
  * Aufrufer (CLI vs. Migrations-Guard) selbst über die Reaktion entscheiden.
+ *
+ * `asOfDate` ist der Stichtag, zu dem die projizierte Allocation/Konsum-Sicht
+ * jedes Topfes bewertet wird (Default: heute, wie die App-Anzeige). Period-
+ * bewusste Aufrufer (z. B. das „Was hängt"-Panel) übergeben den Monatsstichtag,
+ * damit die Überzogen-Aussage zum gewählten Zeitraum passt.
  */
-export async function checkBudgetConservation(exec: DbOrTx): Promise<ConservationResult> {
-  const potRows = await computePotConservation(exec);
+export async function checkBudgetConservation(
+  exec: DbOrTx,
+  asOfDate: string = todayISO(),
+): Promise<ConservationResult> {
+  const potRows = await computePotConservation(exec, asOfDate);
   const cross = await checkLedgerReservationCrosslinks(exec);
 
   const potViolationKeys = potRows

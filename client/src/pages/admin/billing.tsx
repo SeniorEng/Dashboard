@@ -27,11 +27,13 @@ import {
   useDeliveryHistory,
   useBillingPipeline,
   useBillingBreakdown,
+  useBillingBlockers,
   useBillingReviewClusters,
   useBillingMutations,
   BillingFiltersCard,
   BillingOverviewCard,
   BillingBreakdownCard,
+  BillingBlockersCard,
   BillingReviewClusterCard,
   InvoiceList,
   PendingInvoicesCard,
@@ -132,6 +134,8 @@ export default function AdminBilling() {
   const { data: pipeline, isLoading: pipelineLoading } = useBillingPipeline(selectedYear, selectedMonth);
   // Task #1453: Leistungs-Aufschlüsselung (liest nur den Breakdown-Reader).
   const { data: breakdown, isLoading: breakdownLoading } = useBillingBreakdown(selectedYear, selectedMonth);
+
+  const { data: blockers, isLoading: blockersLoading } = useBillingBlockers(selectedYear, selectedMonth);
   // Task #1456: Pre-Commit-Review-Cluster (liest nur den Review-Reader).
   const { data: review, isLoading: reviewLoading } = useBillingReviewClusters(selectedYear, selectedMonth);
 
@@ -346,6 +350,13 @@ export default function AdminBilling() {
       <BillingBreakdownCard
         breakdown={breakdown}
         isLoading={breakdownLoading}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+      />
+
+      <BillingBlockersCard
+        blockers={blockers}
+        isLoading={blockersLoading}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
       />

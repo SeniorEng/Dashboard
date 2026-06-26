@@ -59,10 +59,9 @@ import {
   getInvoiceForUpdateTx,
 } from "../storage/billing-storage";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
-import { readBillingCockpit, readBillingCockpitDrill } from "../storage/billing/cockpit-reader";
+import { readBillingBlockers } from "../storage/billing/blockers-reader";
 import { readBillingBreakdown } from "../storage/billing/breakdown-reader";
 import { readBillingReviewClusters } from "../services/billing-review-reader";
-import { COCKPIT_FUNNEL_STAGES, type CockpitFunnelStage } from "@shared/domain/billing-cockpit";
 import { auditService } from "../services/audit";
 import { withAudit } from "../lib/with-audit";
 import { readTestFaults, readTestFailInvoicePdfIds } from "../lib/test-fault-injector";
@@ -239,10 +238,10 @@ router.get("/pipeline", asyncHandler("Abrechnungs-Pipeline konnte nicht geladen 
   res.json(result);
 }));
 
-// Task #1444 — Abrechnung-Cockpit (Phase 1): READ-ONLY-Funnel & Dashboard.
-// Komponiert dieselben SSoTs wie /pipeline (gröber auf 5 Trichter-Stufen
-// abgebildet) plus Lohn-Readiness und die vier „Zu prüfen"-Buckets.
-router.get("/cockpit", asyncHandler("Abrechnung-Cockpit konnte nicht geladen werden", async (req, res) => {
+// Task #1462 — „Was hängt"-Panel (Phase 4, Teil A, READ-ONLY). Komponiert genau
+// ZWEI bestehende SSoTs (Doku-Readiness + Budget-Konservierung) zu zwei
+// Blocker-Gruppen für den Monat. Reine Sicht — keine Mutation.
+router.get("/blockers", asyncHandler("Abrechnungs-Blocker konnten nicht geladen werden", async (req, res) => {
   const year = Number(req.query.year);
   const month = Number(req.query.month);
   if (!Number.isInteger(year) || year < 2020 || year > 2100) {
@@ -255,42 +254,7 @@ router.get("/cockpit", asyncHandler("Abrechnung-Cockpit konnte nicht geladen wer
   const asOfDate = typeof req.query.date === "string" && isoDate.test(req.query.date)
     ? req.query.date
     : todayISO();
-  const result = await readBillingCockpit(year, month, asOfDate);
-  res.json(result);
-}));
-
-// Task #1450 — Drill-down EINER Trichter-Stufe (READ-ONLY), lazy/paginiert.
-// Wird erst beim Klick auf eine Trichter-Stufe geladen, damit die Übersicht
-// nicht mehr tausende Zeilen inline mitschleppt. Default-Limit + „mehr laden".
-router.get("/cockpit/drill", asyncHandler("Cockpit-Detailzeilen konnten nicht geladen werden", async (req, res) => {
-  const year = Number(req.query.year);
-  const month = Number(req.query.month);
-  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
-    throw badRequest("Jahr ist erforderlich (2020–2100).");
-  }
-  if (!Number.isInteger(month) || month < 1 || month > 12) {
-    throw badRequest("Monat ist erforderlich (1–12).");
-  }
-  const stage = req.query.stage;
-  if (typeof stage !== "string" || !(COCKPIT_FUNNEL_STAGES as readonly string[]).includes(stage)) {
-    throw badRequest("Ungültige Trichter-Stufe.");
-  }
-  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
-  const asOfDate = typeof req.query.date === "string" && isoDate.test(req.query.date)
-    ? req.query.date
-    : todayISO();
-  const limitRaw = Number(req.query.limit);
-  const limit = Number.isInteger(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offsetRaw = Number(req.query.offset);
-  const offset = Number.isInteger(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
-  const result = await readBillingCockpitDrill(
-    year,
-    month,
-    asOfDate,
-    stage as CockpitFunnelStage,
-    limit,
-    offset,
-  );
+  const result = await readBillingBlockers(year, month, asOfDate);
   res.json(result);
 }));
 

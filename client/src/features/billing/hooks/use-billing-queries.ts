@@ -9,10 +9,8 @@ import type {
   DeliveryRecord,
   PayerSummary,
   BillingPipelineResponse,
-  BillingCockpitResponse,
-  CockpitDrillResponse,
-  CockpitFunnelStage,
   BillingBreakdownResponse,
+  BillingBlockersResponse,
   BillingReviewClustersResponse,
 } from "@shared/api";
 
@@ -29,23 +27,6 @@ export function useBillingPipeline(selectedYear: number, selectedMonth: number) 
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       const result = await api.get<BillingPipelineResponse>(`/billing/pipeline?${params.toString()}`, signal);
-      return unwrapResult(result);
-    },
-  });
-}
-
-// Task #1444: Abrechnung-Cockpit (Phase 1, READ-ONLY). Liest ausschließlich den
-// neuen Cockpit-Reader (`GET /billing/cockpit`) — er komponiert dieselben SSoTs
-// wie die Pipeline (gröber auf 5 Trichter-Stufen) plus Lohn-Readiness und die
-// vier „Zu prüfen"-Buckets. QueryKey beginnt mit "billing".
-export function useBillingCockpit(selectedYear: number, selectedMonth: number) {
-  return useQuery({
-    queryKey: ["billing", "cockpit", selectedYear, selectedMonth],
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("year", selectedYear.toString());
-      params.set("month", selectedMonth.toString());
-      const result = await api.get<BillingCockpitResponse>(`/billing/cockpit?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });
@@ -71,6 +52,25 @@ export function useBillingBreakdown(selectedYear: number, selectedMonth: number)
   });
 }
 
+// Task #1462: „Was hängt"-Panel (Phase 4, Teil A, READ-ONLY). Liest
+// AUSSCHLIESSLICH den neuen Blocker-Reader (`GET /billing/blockers`), der genau
+// ZWEI bestehende SSoTs komponiert (Doku-Readiness + Budget-Konservierung) und
+// die beiden Blocker-Gruppen mit Anzahl + Posten liefert. QueryKey beginnt mit
+// "billing", damit `invalidateRelated(qc, "billing")` (nach Statuswechsel/
+// Doku/Budget-Mutation) das Panel automatisch neu lädt. Keine Mutation.
+export function useBillingBlockers(selectedYear: number, selectedMonth: number) {
+  return useQuery({
+    queryKey: ["billing", "blockers", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      const result = await api.get<BillingBlockersResponse>(`/billing/blockers?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
 // Task #1456: Pre-Commit-Review-Cluster (Phase 2). Liest AUSSCHLIESSLICH den
 // neuen Review-Reader (`GET /billing/review-clusters`) — pro Kunde die
 // Phase-1-Spalten plus Eligibilität (eligible/blocked + Begründung). Der Client
@@ -85,34 +85,6 @@ export function useBillingReviewClusters(selectedYear: number, selectedMonth: nu
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       const result = await api.get<BillingReviewClustersResponse>(`/billing/review-clusters?${params.toString()}`, signal);
-      return unwrapResult(result);
-    },
-  });
-}
-
-// Task #1450: Lazy/paginierte Drill-Daten EINER Trichter-Stufe (`GET
-// /billing/cockpit/drill`). Wird erst geladen, wenn eine Stufe ausgewählt ist
-// (`enabled: stage !== null`). Paginierung über ein wachsendes Limit (offset 0,
-// limit += Seitengröße) → ein einziger Cache-Eintrag pro (Monat/Stufe/Limit),
-// damit „Mehr laden" die bisherigen Zeilen nicht flackernd ersetzt. QueryKey
-// beginnt mit "billing".
-export function useBillingCockpitDrill(
-  selectedYear: number,
-  selectedMonth: number,
-  stage: CockpitFunnelStage | null,
-  limit: number,
-) {
-  return useQuery({
-    queryKey: ["billing", "cockpit", "drill", selectedYear, selectedMonth, stage, limit],
-    enabled: stage !== null,
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("year", selectedYear.toString());
-      params.set("month", selectedMonth.toString());
-      params.set("stage", stage as string);
-      params.set("limit", limit.toString());
-      params.set("offset", "0");
-      const result = await api.get<CockpitDrillResponse>(`/billing/cockpit/drill?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });
