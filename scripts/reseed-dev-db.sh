@@ -68,35 +68,10 @@ for bin in psql pg_dump npx; do
 done
 
 # --- Guards: niemals gegen Produktion ------------------------------------
-if [[ "${NODE_ENV:-}" == "production" ]]; then
-  echo "ABBRUCH: NODE_ENV=production. reseed-dev-db.sh darf nie auf Produktion laufen." >&2
-  exit 1
-fi
-# Credentials (user:pass@) sind optional, damit auch Connection-Strings OHNE
-# Anmeldedaten korrekt geparst werden (sonst Host leer → Guards greifen nicht).
-db_host_of() {
-  local url="$1" h
-  h="$(printf '%s' "$url" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^@/?#]*@)?([^:/?#]+).*$#\2#p')"
-  printf '%s' "${h,,}"
-}
-DEV_HOST="$(db_host_of "$DATABASE_URL")"
-# Fail-closed: Lässt sich der Host nicht bestimmen, können die Prod-Guards nicht
-# greifen → lieber abbrechen als blind eine unbekannte DB löschen.
-if [[ -z "$DEV_HOST" ]]; then
-  echo "ABBRUCH: DB-Host konnte aus DATABASE_URL nicht extrahiert werden. Verweigert (fail-closed)." >&2
-  exit 1
-fi
-if printf '%s' "$DEV_HOST" | grep -Eq '(^|[.-])prod([.-]|$)|production'; then
-  echo "ABBRUCH: DB-Host '$DEV_HOST' sieht nach Produktion aus. Verweigert." >&2
-  exit 1
-fi
-if [[ -n "${PROD_DATABASE_URL:-}" ]]; then
-  PROD_HOST="$(db_host_of "$PROD_DATABASE_URL")"
-  if [[ -n "$PROD_HOST" && "$DEV_HOST" == "$PROD_HOST" ]]; then
-    echo "ABBRUCH: DATABASE_URL-Host == PROD_DATABASE_URL-Host ('$DEV_HOST'). Verweigert." >&2
-    exit 1
-  fi
-fi
+# Geteilte Guard-Logik (Task #1437) — setzt bei Erfolg DEV_HOST.
+# shellcheck source=scripts/lib/assert-dev-db.sh
+source "$SCRIPT_DIR/lib/assert-dev-db.sh"
+assert_dev_db "reseed-dev-db.sh"
 
 # --- Preflight: Login-Credentials MÜSSEN vorhanden sein ------------------
 # ci-seed-superadmin.ts ist ein No-Op (exit 0), wenn die Credentials fehlen.

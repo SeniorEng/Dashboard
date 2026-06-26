@@ -32,6 +32,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # --- Voraussetzungen ------------------------------------------------------
 if [[ -z "${DATABASE_URL:-}" ]]; then
   echo "FEHLER: DATABASE_URL ist nicht gesetzt." >&2
@@ -43,40 +45,13 @@ if ! command -v pg_dump >/dev/null 2>&1; then
 fi
 
 # --- Sicherheits-Guards: niemals gegen Produktion -------------------------
+# Geteilte Guard-Logik (Task #1437) — setzt bei Erfolg DEV_HOST.
+# shellcheck source=scripts/lib/assert-dev-db.sh
+source "$SCRIPT_DIR/lib/assert-dev-db.sh"
 if [[ "${NODE_ENV:-}" == "production" ]]; then
-  echo "ABBRUCH: NODE_ENV=production. backup-dev-db.sh ist nur für die Dev-DB." >&2
   echo "Für Prod-Backups: scripts/backup-prod-db.sh (docs/pre-publish-backup-runbook.md)." >&2
-  exit 1
 fi
-
-# Hostname (nicht Substring) aus dem Connection-String extrahieren und gegen
-# prod-Pattern prüfen — gespiegelt aus server/scripts/cleanup-test-data.ts.
-# Credentials (user:pass@) sind optional, damit auch Connection-Strings OHNE
-# Anmeldedaten korrekt geparst werden (sonst Host leer → Guards greifen nicht).
-db_host_of() {
-  local url="$1" h
-  h="$(printf '%s' "$url" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^@/?#]*@)?([^:/?#]+).*$#\2#p')"
-  printf '%s' "${h,,}"
-}
-DEV_HOST="$(db_host_of "$DATABASE_URL")"
-# Fail-closed: Lässt sich der Host nicht bestimmen, können die Prod-Guards nicht
-# greifen → lieber abbrechen als blind eine unbekannte DB sichern.
-if [[ -z "$DEV_HOST" ]]; then
-  echo "ABBRUCH: DB-Host konnte aus DATABASE_URL nicht extrahiert werden. Verweigert (fail-closed)." >&2
-  exit 1
-fi
-if printf '%s' "$DEV_HOST" | grep -Eq '(^|[.-])prod([.-]|$)|production'; then
-  echo "ABBRUCH: DB-Host '$DEV_HOST' sieht nach Produktion aus. Verweigert." >&2
-  exit 1
-fi
-# Falls PROD_DATABASE_URL ebenfalls gesetzt ist: niemals denselben Host wie Prod sichern.
-if [[ -n "${PROD_DATABASE_URL:-}" ]]; then
-  PROD_HOST="$(db_host_of "$PROD_DATABASE_URL")"
-  if [[ -n "$PROD_HOST" && "$DEV_HOST" == "$PROD_HOST" ]]; then
-    echo "ABBRUCH: DATABASE_URL-Host == PROD_DATABASE_URL-Host ('$DEV_HOST'). Verweigert." >&2
-    exit 1
-  fi
-fi
+assert_dev_db "backup-dev-db.sh"
 
 BACKUP_DIR="${BACKUP_DIR:-tmp/db-backups/dev}"
 BACKUP_LABEL="${BACKUP_LABEL:-}"
