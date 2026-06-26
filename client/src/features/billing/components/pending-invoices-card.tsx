@@ -5,6 +5,7 @@ import { Loader2, FileText, CheckCircle2, ClipboardList } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
 import { BILLING_TYPE_LABELS } from "../constants";
 import { getCustomerName } from "../utils";
+import { useRowCap } from "../hooks/use-row-cap";
 
 interface PendingInvoicesCardProps {
   customers: BillingCustomerItem[] | undefined;
@@ -22,6 +23,11 @@ export function PendingInvoicesCard({
   isLoading,
   onCreateForCustomer,
 }: PendingInvoicesCardProps) {
+  // Task #1465: lange Kundenliste begrenzen — reine Darstellung; der `(N)`-Zähler
+  // oben nutzt weiterhin `customers.length` (volle Datenbasis).
+  const { visible, showAll, setShowAll, hiddenCount, capped, total } = useRowCap(
+    customers ?? [],
+  );
   return (
     <Card className="mb-6" data-testid="card-pending-invoices">
       <CardHeader className="pb-3">
@@ -53,8 +59,9 @@ export function PendingInvoicesCard({
             Für diesen Zeitraum ist alles abgerechnet.
           </div>
         ) : (
+          <>
           <ul className="divide-y divide-gray-100">
-            {customers.map((c) => {
+            {visible.map((c) => {
               // Partial-Signing-Hinweis: weniger Termine durch einen aktiven
               // Leistungsnachweis abgedeckt als dokumentiert wurden.
               const partial =
@@ -109,6 +116,21 @@ export function PendingInvoicesCard({
               );
             })}
           </ul>
+          {capped && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setShowAll(!showAll)}
+                className="text-xs font-medium text-teal-700 hover:text-teal-800"
+                data-testid="button-pending-show-more"
+              >
+                {showAll
+                  ? "Weniger anzeigen"
+                  : `Alle ${total} anzeigen (${hiddenCount} weitere)`}
+              </button>
+            </div>
+          )}
+          </>
         )}
       </CardContent>
     </Card>

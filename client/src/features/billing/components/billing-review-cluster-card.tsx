@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, ClipboardCheck } from "lucide-react";
 import { iconSize } from "@/design-system";
@@ -11,6 +10,7 @@ import type {
 } from "@shared/api";
 import { formatAmount, formatHoursFromMinutes } from "../utils";
 import { MONTH_NAMES } from "../constants";
+import { CollapsibleCard } from "./collapsible-card";
 
 interface BillingReviewClusterCardProps {
   review: BillingReviewClustersResponse | undefined;
@@ -91,42 +91,43 @@ export function BillingReviewClusterCard({
   const blockedCount = items.length - eligibleCount;
   const allEligibleMarked = eligibleCount > 0 && allEligibleIds.every((id) => effectiveMarked.has(id));
 
-  return (
-    <Card className="mb-6" data-testid="card-billing-review">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <ClipboardCheck className={`${iconSize.md} text-teal-600`} />
-            <h2 className="text-sm font-semibold text-gray-900">
-              Rechnungs-Review — {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-            </h2>
-          </div>
-          <div className="inline-flex rounded-md border border-gray-200 p-0.5" role="group">
-            <button
-              type="button"
-              onClick={() => setDimension("kunde")}
-              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                dimension === "kunde" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-              data-testid="button-review-by-kunde"
-              aria-pressed={dimension === "kunde"}
-            >
-              Nach Kunde
-            </button>
-            <button
-              type="button"
-              onClick={() => setDimension("kasse")}
-              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                dimension === "kasse" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-              data-testid="button-review-by-kasse"
-              aria-pressed={dimension === "kasse"}
-            >
-              Nach Kasse
-            </button>
-          </div>
-        </div>
+  const dimensionToggle = (
+    <div className="inline-flex rounded-md border border-gray-200 p-0.5" role="group">
+      <button
+        type="button"
+        onClick={() => setDimension("kunde")}
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          dimension === "kunde" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
+        }`}
+        data-testid="button-review-by-kunde"
+        aria-pressed={dimension === "kunde"}
+      >
+        Nach Kunde
+      </button>
+      <button
+        type="button"
+        onClick={() => setDimension("kasse")}
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          dimension === "kasse" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
+        }`}
+        data-testid="button-review-by-kasse"
+        aria-pressed={dimension === "kasse"}
+      >
+        Nach Kasse
+      </button>
+    </div>
+  );
 
+  return (
+    <CollapsibleCard
+      storageKey="review"
+      testId="card-billing-review"
+      toggleTestId="button-toggle-review"
+      icon={<ClipboardCheck className={`${iconSize.md} text-teal-600`} />}
+      title={`Rechnungs-Review — ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+      headerRight={dimensionToggle}
+    >
+      <>
         {isLoading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
             <Loader2 className={`${iconSize.sm} animate-spin text-teal-600`} />
@@ -138,7 +139,7 @@ export function BillingReviewClusterCard({
           </div>
         ) : (
           <>
-            <div className="mt-3 overflow-x-auto">
+            <div className="mt-3 overflow-auto max-h-[32rem]">
               <table className="w-full text-sm" data-testid="table-billing-review">
                 <thead>
                   <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
@@ -218,8 +219,8 @@ export function BillingReviewClusterCard({
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+      </>
+    </CollapsibleCard>
   );
 }
 

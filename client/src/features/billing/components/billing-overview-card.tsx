@@ -1,9 +1,9 @@
-import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, TrendingUp } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { BillingPipelineResponse } from "@shared/api";
 import { formatAmount } from "../utils";
 import { MONTH_NAMES } from "../constants";
+import { CollapsibleCard } from "./collapsible-card";
 
 interface BillingOverviewCardProps {
   pipeline: BillingPipelineResponse | undefined;
@@ -23,26 +23,25 @@ export function BillingOverviewCard({
   selectedYear,
 }: BillingOverviewCardProps) {
   return (
-    <Card className="mb-6" data-testid="card-billing-overview">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <TrendingUp className={`${iconSize.md} text-teal-600`} />
-            <h2 className="text-sm font-semibold text-gray-900">
-              Wirtschaftlicher Überblick — {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-            </h2>
-          </div>
-          <div className="text-right">
-            <div className="text-xs text-gray-500">Gesamt-Umsatz (Pipeline + Sonderfälle)</div>
-            <div
-              className="text-lg font-semibold tabular-nums text-gray-900"
-              data-testid="text-overview-grand-total"
-            >
-              {isLoading || !pipeline ? "—" : formatAmount(pipeline.totals.grandTotalCents)}
-            </div>
+    <CollapsibleCard
+      storageKey="overview"
+      testId="card-billing-overview"
+      toggleTestId="button-toggle-overview"
+      icon={<TrendingUp className={`${iconSize.md} text-teal-600`} />}
+      title={`Wirtschaftlicher Überblick — ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+      headerRight={
+        <div className="text-right">
+          <div className="text-xs text-gray-500">Gesamt-Umsatz (Pipeline + Sonderfälle)</div>
+          <div
+            className="text-lg font-semibold tabular-nums text-gray-900"
+            data-testid="text-overview-grand-total"
+          >
+            {isLoading || !pipeline ? "—" : formatAmount(pipeline.totals.grandTotalCents)}
           </div>
         </div>
-
+      }
+    >
+      <>
         {isLoading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
             <Loader2 className={`${iconSize.sm} animate-spin text-teal-600`} />
@@ -106,7 +105,7 @@ export function BillingOverviewCard({
             Kein wirtschaftlicher Überblick verfügbar.
           </div>
         )}
-      </CardContent>
-    </Card>
+      </>
+    </CollapsibleCard>
   );
 }

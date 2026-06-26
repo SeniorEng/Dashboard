@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, Table2 } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type { BillingBreakdownResponse } from "@shared/api";
@@ -10,6 +9,8 @@ import {
 } from "@shared/domain/billing-breakdown";
 import { formatAmount, formatHoursFromMinutes } from "../utils";
 import { MONTH_NAMES } from "../constants";
+import { useRowCap } from "../hooks/use-row-cap";
+import { CollapsibleCard } from "./collapsible-card";
 
 interface BillingBreakdownCardProps {
   breakdown: BillingBreakdownResponse | undefined;
@@ -43,43 +44,47 @@ export function BillingBreakdownCard({
     [breakdown, dimension],
   );
   const totals = useMemo(() => summarizeBreakdownRows(rows), [rows]);
+  // Task #1465: lange Listen begrenzen — nur die DARSTELLUNG der Detailzeilen
+  // wird gekappt; `totals` rechnet weiterhin über ALLE `rows`.
+  const { visible, showAll, setShowAll, hiddenCount, capped, total } = useRowCap(rows);
+
+  const dimensionToggle = (
+    <div className="inline-flex rounded-md border border-gray-200 p-0.5" role="group">
+      <button
+        type="button"
+        onClick={() => setDimension("kunde")}
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          dimension === "kunde" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
+        }`}
+        data-testid="button-breakdown-by-kunde"
+        aria-pressed={dimension === "kunde"}
+      >
+        Nach Kunde
+      </button>
+      <button
+        type="button"
+        onClick={() => setDimension("kasse")}
+        className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+          dimension === "kasse" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
+        }`}
+        data-testid="button-breakdown-by-kasse"
+        aria-pressed={dimension === "kasse"}
+      >
+        Nach Kasse
+      </button>
+    </div>
+  );
 
   return (
-    <Card className="mb-6" data-testid="card-billing-breakdown">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Table2 className={`${iconSize.md} text-teal-600`} />
-            <h2 className="text-sm font-semibold text-gray-900">
-              Leistungs-Aufschlüsselung — {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-            </h2>
-          </div>
-          <div className="inline-flex rounded-md border border-gray-200 p-0.5" role="group">
-            <button
-              type="button"
-              onClick={() => setDimension("kunde")}
-              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                dimension === "kunde" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-              data-testid="button-breakdown-by-kunde"
-              aria-pressed={dimension === "kunde"}
-            >
-              Nach Kunde
-            </button>
-            <button
-              type="button"
-              onClick={() => setDimension("kasse")}
-              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                dimension === "kasse" ? "bg-teal-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-              data-testid="button-breakdown-by-kasse"
-              aria-pressed={dimension === "kasse"}
-            >
-              Nach Kasse
-            </button>
-          </div>
-        </div>
-
+    <CollapsibleCard
+      storageKey="breakdown"
+      testId="card-billing-breakdown"
+      toggleTestId="button-toggle-breakdown"
+      icon={<Table2 className={`${iconSize.md} text-teal-600`} />}
+      title={`Leistungs-Aufschlüsselung — ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+      headerRight={dimensionToggle}
+    >
+      <>
         {isLoading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
             <Loader2 className={`${iconSize.sm} animate-spin text-teal-600`} />
@@ -90,6 +95,7 @@ export function BillingBreakdownCard({
             Keine abrechenbaren Leistungen in diesem Monat.
           </div>
         ) : (
+          <>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm" data-testid="table-billing-breakdown">
               <thead>
@@ -104,7 +110,7 @@ export function BillingBreakdownCard({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {visible.map((row) => (
                   <tr
                     key={row.key}
                     className="border-b border-gray-100 last:border-0"
@@ -175,8 +181,23 @@ export function BillingBreakdownCard({
               </tfoot>
             </table>
           </div>
+          {capped && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setShowAll(!showAll)}
+                className="text-xs font-medium text-teal-700 hover:text-teal-800"
+                data-testid="button-breakdown-show-more"
+              >
+                {showAll
+                  ? "Weniger anzeigen"
+                  : `Alle ${total} anzeigen (${hiddenCount} weitere)`}
+              </button>
+            </div>
+          )}
+          </>
         )}
-      </CardContent>
-    </Card>
+      </>
+    </CollapsibleCard>
   );
 }

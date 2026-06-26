@@ -1,4 +1,3 @@
-import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, FileWarning, Wallet } from "lucide-react";
 import { iconSize } from "@/design-system";
 import type {
@@ -8,6 +7,7 @@ import type {
 } from "@shared/api";
 import { formatAmount } from "../utils";
 import { MONTH_NAMES } from "../constants";
+import { CollapsibleCard } from "./collapsible-card";
 
 interface BillingBlockersCardProps {
   blockers: BillingBlockersResponse | undefined;
@@ -48,15 +48,14 @@ export function BillingBlockersCard({
   const budget = blockers?.budget;
 
   return (
-    <Card className="mb-6" data-testid="card-billing-blockers">
-      <CardContent className="p-4">
-        <div className="flex items-center gap-2">
-          <FileWarning className={`${iconSize.md} text-amber-600`} />
-          <h2 className="text-sm font-semibold text-gray-900">
-            Was hängt — {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-          </h2>
-        </div>
-
+    <CollapsibleCard
+      storageKey="blockers"
+      testId="card-billing-blockers"
+      toggleTestId="button-toggle-blockers"
+      icon={<FileWarning className={`${iconSize.md} text-amber-600`} />}
+      title={`Was hängt — ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+    >
+      <>
         {isLoading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
             <Loader2 className={`${iconSize.sm} animate-spin text-amber-600`} />
@@ -68,8 +67,8 @@ export function BillingBlockersCard({
             <BudgetGroup items={budget?.items ?? []} count={budget?.count ?? 0} />
           </div>
         )}
-      </CardContent>
-    </Card>
+      </>
+    </CollapsibleCard>
   );
 }
 

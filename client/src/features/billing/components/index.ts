@@ -1,3 +1,4 @@
+export { CollapsibleCard } from "./collapsible-card";
 export { InvoiceDetail } from "./invoice-detail";
 export { InvoiceRow } from "./invoice-row";
 export { InvoiceList } from "./invoice-list";

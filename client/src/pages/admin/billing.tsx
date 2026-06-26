@@ -340,6 +340,39 @@ export default function AdminBilling() {
         </div>
       </div>
 
+      {/* Task #1465: Filter-/Aktionsleiste nach oben gezogen — vor den großen
+          Analyse-Karten, damit Zeitraum-Wechsel & Aktionen ohne Scrollen
+          erreichbar sind. */}
+      <BillingFiltersCard
+        selectedMonth={selectedMonth}
+        setSelectedMonth={setSelectedMonth}
+        selectedYear={selectedYear}
+        setSelectedYear={setSelectedYear}
+        years={years}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        payerFilter={payerFilter}
+        setPayerFilter={setPayerFilter}
+        dateFrom={dateFrom}
+        setDateFrom={setDateFrom}
+        dateTo={dateTo}
+        setDateTo={setDateTo}
+        hideStornos={hideStornos}
+        setHideStornos={setHideStornos}
+        payers={payers}
+        activePayer={activePayer}
+        payerSuffix={payerSuffix}
+        draftBulkInvoices={draftBulkInvoices}
+        draftPflegekasseInvoices={draftPflegekasseInvoices}
+        customers={customers}
+        batchSending={batchSending}
+        onBatchSend={handleBatchSend}
+        onOpenBulkSend={() => { setBulkSendResult(null); setBulkSendOpen(true); }}
+        onOpenBulkPrint={() => { setBulkPrintResult(null); setBulkPrintOpen(true); }}
+        onOpenGenerateAll={() => { setGenerateAllProgress(null); setGenerateAllOpen(true); }}
+        onOpenNewInvoice={() => setDialogOpen(true)}
+      />
+
       <BillingOverviewCard
         pipeline={pipeline}
         isLoading={pipelineLoading}
@@ -370,36 +403,6 @@ export default function AdminBilling() {
         onGenerate={(customerIds, onDone) =>
           reviewGenerateMutation.mutate(customerIds, { onSuccess: onDone })
         }
-      />
-
-      <BillingFiltersCard
-        selectedMonth={selectedMonth}
-        setSelectedMonth={setSelectedMonth}
-        selectedYear={selectedYear}
-        setSelectedYear={setSelectedYear}
-        years={years}
-        statusFilter={statusFilter}
-        setStatusFilter={setStatusFilter}
-        payerFilter={payerFilter}
-        setPayerFilter={setPayerFilter}
-        dateFrom={dateFrom}
-        setDateFrom={setDateFrom}
-        dateTo={dateTo}
-        setDateTo={setDateTo}
-        hideStornos={hideStornos}
-        setHideStornos={setHideStornos}
-        payers={payers}
-        activePayer={activePayer}
-        payerSuffix={payerSuffix}
-        draftBulkInvoices={draftBulkInvoices}
-        draftPflegekasseInvoices={draftPflegekasseInvoices}
-        customers={customers}
-        batchSending={batchSending}
-        onBatchSend={handleBatchSend}
-        onOpenBulkSend={() => { setBulkSendResult(null); setBulkSendOpen(true); }}
-        onOpenBulkPrint={() => { setBulkPrintResult(null); setBulkPrintOpen(true); }}
-        onOpenGenerateAll={() => { setGenerateAllProgress(null); setGenerateAllOpen(true); }}
-        onOpenNewInvoice={() => setDialogOpen(true)}
       />
 
       <PendingInvoicesCard
