@@ -587,17 +587,16 @@ async function runStartupTasks() {
     // Folge-Task (Orphan-Backfill der 99 Zeilen → DANN Constraint) wieder
     // scharfgeschaltet. Analog zur pausierten dropBudgetLedger()-Stufe unten.
 
-    // Task #1274 (Stufe C) — finale Entfernung des früheren budget_ledger-
-    // Spiegels (FK-Spalte budget_reservations.captured_ledger_id + Tabelle
-    // budget_ledger) ist VORÜBERGEHEND PAUSIERT. Der automatische
-    // Replit-Publish-Diff bricht ab, wenn Tabelle + inbound-FK im selben
-    // Publish gedroppt werden (redundanter DROP CONSTRAINT in falscher
-    // Reihenfolge). Für ein rein additives Publish-Fenster behält dev diese
-    // Alt-Objekte (siehe shared/schema/budget.ts „INTERIM"), daher wird
-    // dropBudgetLedger() hier NICHT aufgerufen. Die Datei
-    // server/startup/drop-budget-ledger.ts bleibt erhalten und wird im
-    // separaten Folge-Publish (FK-frei → sauberes DROP TABLE) wieder
-    // scharfgeschaltet.
+    // Task #1274 (Stufe C) / #1443 / #1446 — Die finale Entfernung des früheren
+    // budget_ledger-Spiegels (FK-Spalte budget_reservations.captured_ledger_id +
+    // Tabelle budget_ledger) ist KEIN direkter Aufruf mehr hier, sondern als
+    // gegatete Guarded-Migration `drop-budget-ledger-1443` in
+    // runBudgetDataMigrations() registriert — scharf NUR bei gesetztem
+    // Freigabe-Flag APPROVED_DROP_BUDGET_LEDGER (Deployment/Production-Scope).
+    // Ohne Flag = sauberer No-Op (kein Schema-/DB-Change). Der Drop selbst läuft
+    // erst, wenn Alrik das Flag setzt + publisht (separater, review-gateter
+    // Schritt). Die INTERIM-Schema-Marker (shared/schema/budget.ts) bleiben bis
+    // zum bestätigten Prod-Drop bestehen, damit das Publish-Fenster additiv ist.
 
     // Task #988/#993/#994 — Die einmalige Phantom-Storno-Import-Drift-Korrektur
     // (#987) lief beim Prod-(Re-)Deploy einmalig scharf durch und ist bestätigt

@@ -49,7 +49,22 @@ dem **Lesepfad jeder Budget-Verfügbarkeit** abgefragt.
 
 ---
 
-## Tabelle: `budget_ledger` — **PRODUKTIV (Lesen + Schreiben) → NO-GO**
+## Tabelle: `budget_ledger` — **GO (redundanter Spiegel, #1443 verifiziert)**
+
+> **Update 26.06.2026 (#1443/#1446):** Diese Tabelle wurde von **NO-GO auf GO**
+> revidiert. Die Stufen A→C (Tasks #1272–#1274) haben `budget_ledger`
+> schrittweise zu einem reinen Spiegel von `budget_transactions` reduziert: die
+> GoBD-Immutability liegt seit Stufe B auf `budget_transactions`, jede captured
+> Reservierung trägt seit Stufe A den EINEN Capture-Link
+> `budget_reservations.captured_transaction_id`, und `checkBudgetConservation`
+> liest `budget_ledger`/`capturedLedgerId` nicht mehr (Kreuzcheck über
+> `captured_transaction_id → budget_transactions`). Die #1443-Verifikation
+> (`.local/tasks/budget-ledger-drop-verification-report.md`) bestätigte: 62/62
+> Prod-Zeilen 1:1 gespiegelt, kein Live-Reader/Writer, FK-sicherer
+> Zwei-Schritt-Drop. Der Drop ist seit #1446 als gegatete Guarded-Migration
+> `drop-budget-ledger-1443` hinter `APPROVED_DROP_BUDGET_LEDGER` scharfgeschaltet
+> (Default-OFF, läuft erst bei gesetztem Flag im Deployment-Scope + Publish). Die
+> ursprüngliche NO-GO-Analyse unten beschreibt den Stand VOR den Stufen A→C.
 
 GoBD-immutable, append-only Finanz-Schicht (`consumed | reversed`). Ziel der
 Hard-Hold-**Capture** und Quelle der Conservation-/Invarianten-Prüfungen.
@@ -90,13 +105,19 @@ geguardete Migration läuft bei jedem Boot erneut. Nicht ersetzbar.
 | Tabelle | produktiv-lesend | produktiv-schreibend | durch `budget_transactions` ersetzbar | Urteil |
 |---|---|---|---|---|
 | `budget_reservations` | **ja (ungated, jeder Read)** | ja (flag-gated) | nein | **NO-GO** |
-| `budget_ledger` | **ja** | ja (flag-gated) | nein | **NO-GO** |
+| `budget_ledger` | nein (nach Stufen A→C nur noch Spiegel) | nein (Capture-Insert auf budget_transactions) | ja | **GO (#1443/#1446)** |
 | `budget_migrations` | ja | ja | nein | **NO-GO** |
 
-Die harte Stopp-Bedingung der Analyse ist **erfüllt**: alle drei Tabellen haben
-produktive Lesepfade, die **nicht** durch `budget_transactions` (oder eine
-andere bestehende Tabelle) ersetzbar sind. Die Annahme „tote/giftige
-Schatten-Tabellen" trifft nicht zu.
+> **Update 26.06.2026 (#1443/#1446):** Für `budget_ledger` gilt dieser
+> Ursprungsbefund nach den Stufen A→C **nicht mehr** — die Tabelle ist auf einen
+> reinen Spiegel reduziert und damit GO (Drop scharfgeschaltet hinter
+> `APPROVED_DROP_BUDGET_LEDGER`). Für `budget_reservations` und
+> `budget_migrations` bleibt es bei **NO-GO**.
+
+Zum Zeitpunkt der Ursprungsanalyse galt: alle drei Tabellen hatten produktive
+Lesepfade, die **nicht** durch `budget_transactions` (oder eine andere
+bestehende Tabelle) ersetzbar waren. Die Annahme „tote/giftige
+Schatten-Tabellen" traf in dieser Pauschalität nicht zu.
 
 ## Entscheidender Kontext: BUDGET_HARD_HOLDS ist in PRODUKTION aktiv
 

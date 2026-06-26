@@ -1,6 +1,7 @@
-import { db } from "../lib/db";
 import { sql } from "drizzle-orm";
+import type { Tx } from "../lib/db";
 import { log } from "../lib/log";
+import type { BudgetMigrationSummary } from "./budget-migration-runner";
 
 /**
  * Task #1274 — Budget-Ledger Stufe C (finale Entfernung).
@@ -35,11 +36,28 @@ export const DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID = {
   column: "captured_ledger_id",
 } as const;
 
-export async function dropBudgetLedger(): Promise<void> {
-  await db.execute(sql.raw(DROP_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID_SQL));
-  await db.execute(sql.raw(DROP_BUDGET_LEDGER_TABLE_SQL));
-  log(
-    "budget_reservations.captured_ledger_id + Tabelle budget_ledger entfernt (Stufe C)",
-    "startup",
-  );
+/**
+ * Task #1446 — Scharfgeschaltete, gegatete Variante des budget_ledger-Drops.
+ *
+ * Läuft als `GuardedBudgetMigration` (Name `drop-budget-ledger-1443`) über
+ * `runGuardedBudgetMigration`, registriert NUR bei gesetztem Freigabe-Flag
+ * `APPROVED_DROP_BUDGET_LEDGER`. Über den Wrapper erbt der Drop für umsonst:
+ * exactly-once-Ledger-Insert in der Tx, `pg_advisory_xact_lock`, EINE
+ * Transaktion und PRE/POST-`checkBudgetConservation` mit Auto-Rollback.
+ *
+ * Die beiden rohen SQL-Statements laufen gegen die bereitgestellte `tx`
+ * (FK-sicher: ZUERST die Spalte `captured_ledger_id`, sonst verhindert der FK
+ * das `DROP TABLE`). `checkBudgetConservation` liest `budget_ledger`/
+ * `capturedLedgerId` nicht mehr (Kreuzcheck über `captured_transaction_id →
+ * budget_transactions`), daher ist der POST-Check in derselben Transaktion auch
+ * nach dem Drop gültig. SQL-Text/Reihenfolge und die `DROPPED_*`-Registry
+ * bleiben unverändert (der Drift-Wächter introspiziert sie).
+ */
+export async function dropBudgetLedger(tx: Tx): Promise<BudgetMigrationSummary> {
+  await tx.execute(sql.raw(DROP_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID_SQL));
+  await tx.execute(sql.raw(DROP_BUDGET_LEDGER_TABLE_SQL));
+  const note =
+    "budget_reservations.captured_ledger_id + Tabelle budget_ledger entfernt (Stufe C)";
+  log(note, "startup");
+  return { changed: 1, note };
 }
