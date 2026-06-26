@@ -9,8 +9,14 @@
 #   gepflegt werden (statt an mehreren Stellen synchron).
 #
 # Sinngleiche Logik existiert (in TypeScript) auch in
-# server/scripts/sweep-dev-test-data.ts; diese Datei deckt die beiden
-# Shell-Skripte ab.
+# server/lib/dev-db-guard.ts (re-exportiert von
+# server/scripts/sweep-dev-test-data.ts); diese Datei deckt die beiden
+# Shell-Skripte ab. Da ein TS-Modul keine Shell-Funktion sourcen kann (und
+# umgekehrt), wird das Auseinanderdriften beider Welten durch den
+# Cross-Language-Paritäts-Test tests/architecture/dev-db-guard-parity.test.ts
+# abgesichert: er reicht EINE Fixtures-Tabelle durch BEIDE Implementierungen.
+# Wer hier die Host-/Prod-Erkennung ändert, muss sie auch in dev-db-guard.ts
+# nachziehen, sonst bricht der Paritäts-Test.
 #
 # Verwendung (in einem Skript mit `set -euo pipefail`):
 #   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

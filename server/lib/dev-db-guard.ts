@@ -19,7 +19,15 @@
  * als IMMER laufendes CI-Gate (`static-analysis`-Job) absichern.
  *
  * Die Schutz-Logik ist zeichengleich zu den Shell-Guards in
- * `scripts/backup-dev-db.sh` und `scripts/reseed-dev-db.sh`.
+ * `scripts/lib/assert-dev-db.sh` (gesourcet von `scripts/backup-dev-db.sh` und
+ * `scripts/reseed-dev-db.sh`). Da ein TS-Modul keine Shell-Funktion sourcen
+ * kann (und umgekehrt), lässt sich die Logik nicht physisch teilen; das
+ * Auseinanderdriften beider Welten wird stattdessen durch den
+ * Cross-Language-Paritäts-Test
+ * `tests/architecture/dev-db-guard-parity.test.ts` abgesichert, der EINE
+ * Fixtures-Tabelle durch BEIDE Implementierungen reicht. Wer hier die Host-/
+ * Prod-Erkennung ändert, muss sie auch in `scripts/lib/assert-dev-db.sh`
+ * nachziehen, sonst bricht der Paritäts-Test.
  */
 
 // Prod-Pattern auf dem Hostnamen — zeichengleich zu den Shell-Guards in
