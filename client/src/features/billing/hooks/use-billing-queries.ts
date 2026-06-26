@@ -9,6 +9,7 @@ import type {
   DeliveryRecord,
   PayerSummary,
   BillingPipelineResponse,
+  BillingCockpitResponse,
 } from "@shared/api";
 
 // Task #1434: Wirtschafts-Überblick oben auf der Abrechnungsseite. Liest
@@ -24,6 +25,23 @@ export function useBillingPipeline(selectedYear: number, selectedMonth: number) 
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       const result = await api.get<BillingPipelineResponse>(`/billing/pipeline?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+// Task #1444: Abrechnung-Cockpit (Phase 1, READ-ONLY). Liest ausschließlich den
+// neuen Cockpit-Reader (`GET /billing/cockpit`) — er komponiert dieselben SSoTs
+// wie die Pipeline (gröber auf 5 Trichter-Stufen) plus Lohn-Readiness und die
+// vier „Zu prüfen"-Buckets. QueryKey beginnt mit "billing".
+export function useBillingCockpit(selectedYear: number, selectedMonth: number) {
+  return useQuery({
+    queryKey: ["billing", "cockpit", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      const result = await api.get<BillingCockpitResponse>(`/billing/cockpit?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });

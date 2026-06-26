@@ -13,6 +13,13 @@ export function formatAmount(cents: number): string {
   return formatEuroDE(cents);
 }
 
+// Task #1444: Minuten → Stunden-Anzeige (eine Nachkommastelle, DE-Komma) für
+// die Cockpit-Trichterleiste. Reine Darstellung, keine Geld-/Domänen-Mathematik.
+export function formatHoursFromMinutes(minutes: number): string {
+  const hours = minutes / 60;
+  return `${hours.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`;
+}
+
 // Task #1412: Heutiger Stichtag als ISO yyyy-mm-dd (lokale Zeitzone), Anker für
 // die Aging-Einstufung.
 function todayIso(): string {

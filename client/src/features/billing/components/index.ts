@@ -11,3 +11,6 @@ export { NewInvoiceDialog } from "./new-invoice-dialog";
 export { StornoDialog } from "./storno-dialog";
 export { MarkPaidDialog } from "./mark-paid-dialog";
 export { DiscardDraftsDialog } from "./discard-drafts-dialog";
+export { CockpitFunnelBar } from "./cockpit-funnel-bar";
+export { CockpitDrillTable } from "./cockpit-drill-table";
+export { CockpitReviewBuckets } from "./cockpit-review-buckets";

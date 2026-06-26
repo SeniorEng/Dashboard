@@ -58,6 +58,7 @@ import {
   getInvoiceForUpdateTx,
 } from "../storage/billing-storage";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
+import { readBillingCockpit } from "../storage/billing/cockpit-reader";
 import { auditService } from "../services/audit";
 import { withAudit } from "../lib/with-audit";
 import { readTestFaults, readTestFailInvoicePdfIds } from "../lib/test-fault-injector";
@@ -230,6 +231,26 @@ router.get("/pipeline", asyncHandler("Abrechnungs-Pipeline konnte nicht geladen 
     ? req.query.date
     : todayISO();
   const result = await readBillingPipeline(year, month, asOfDate);
+  res.json(result);
+}));
+
+// Task #1444 — Abrechnung-Cockpit (Phase 1): READ-ONLY-Funnel & Dashboard.
+// Komponiert dieselben SSoTs wie /pipeline (gröber auf 5 Trichter-Stufen
+// abgebildet) plus Lohn-Readiness und die vier „Zu prüfen"-Buckets.
+router.get("/cockpit", asyncHandler("Abrechnung-Cockpit konnte nicht geladen werden", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw badRequest("Jahr ist erforderlich (2020–2100).");
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw badRequest("Monat ist erforderlich (1–12).");
+  }
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const asOfDate = typeof req.query.date === "string" && isoDate.test(req.query.date)
+    ? req.query.date
+    : todayISO();
+  const result = await readBillingCockpit(year, month, asOfDate);
   res.json(result);
 }));
 

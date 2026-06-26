@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2, ChevronRight, FileCheck, FileText,
   Landmark, CalendarClock, Contact2, Receipt, Banknote, ShieldAlert,
-  CalendarDays, UserPlus, TrendingUp, TrendingDown,
+  CalendarDays, UserPlus, TrendingUp, TrendingDown, Gauge,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -238,6 +238,16 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
           ? { up: invoicedDelta > 0, label: `${invoicedDelta > 0 ? "+" : ""}${formatCurrency(invoicedDelta)} vs. Vormonat` }
           : null,
       href: "/admin/billing",
+      show: can("billing"),
+    },
+    {
+      testId: "status-cockpit",
+      icon: <Gauge className={`${iconSize.lg} text-violet-600`} />,
+      iconBg: "bg-violet-100",
+      title: "Abrechnung-Cockpit",
+      value: `${billingPct} %`,
+      subtitle: "Trichter & Prüf-Buckets (Vorschau)",
+      href: "/admin/cockpit",
       show: can("billing"),
     },
     {
