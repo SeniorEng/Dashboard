@@ -12,6 +12,7 @@ import type {
   BillingCockpitResponse,
   CockpitDrillResponse,
   CockpitFunnelStage,
+  BillingBreakdownResponse,
 } from "@shared/api";
 
 // Task #1434: Wirtschafts-Überblick oben auf der Abrechnungsseite. Liest
@@ -44,6 +45,26 @@ export function useBillingCockpit(selectedYear: number, selectedMonth: number) {
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       const result = await api.get<BillingCockpitResponse>(`/billing/cockpit?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+// Task #1453: Abrechnungs-Breakdown (Phase 1, READ-ONLY). Liest ausschließlich
+// den neuen Breakdown-Reader (`GET /billing/breakdown`) — er spiegelt dieselbe
+// Hybrid-Bruchkante wie die Pipeline (keine Doppelzählung) und liefert die
+// Stunden je Leistungsart inkl. der abgerechneten Termine (Fix des 0,0h-Bugs).
+// Vor-aggregiert pro (Kunde × Abrechnungstyp); die Gruppierung nach Kunde/Kasse
+// passiert clientseitig (kein Refetch beim Umschalten). QueryKey beginnt mit
+// "billing", damit `invalidateRelated(qc, "billing")` die Tabelle mit aktualisiert.
+export function useBillingBreakdown(selectedYear: number, selectedMonth: number) {
+  return useQuery({
+    queryKey: ["billing", "breakdown", selectedYear, selectedMonth],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      const result = await api.get<BillingBreakdownResponse>(`/billing/breakdown?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });

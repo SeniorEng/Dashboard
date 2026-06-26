@@ -26,9 +26,11 @@ import {
   useInvoiceDetail,
   useDeliveryHistory,
   useBillingPipeline,
+  useBillingBreakdown,
   useBillingMutations,
   BillingFiltersCard,
   BillingOverviewCard,
+  BillingBreakdownCard,
   InvoiceList,
   PendingInvoicesCard,
   BulkSendDialog,
@@ -126,6 +128,8 @@ export default function AdminBilling() {
   const { data: payers } = usePayers(selectedYear, selectedMonth);
   // Task #1434: Wirtschaftlicher Überblick oben (liest nur den Pipeline-Reader).
   const { data: pipeline, isLoading: pipelineLoading } = useBillingPipeline(selectedYear, selectedMonth);
+  // Task #1453: Leistungs-Aufschlüsselung (liest nur den Breakdown-Reader).
+  const { data: breakdown, isLoading: breakdownLoading } = useBillingBreakdown(selectedYear, selectedMonth);
 
   const activePayer = payerFilter !== "alle"
     ? payers?.find((p) => p.insuranceProviderId.toString() === payerFilter) ?? null
@@ -317,6 +321,13 @@ export default function AdminBilling() {
       <BillingOverviewCard
         pipeline={pipeline}
         isLoading={pipelineLoading}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+      />
+
+      <BillingBreakdownCard
+        breakdown={breakdown}
+        isLoading={breakdownLoading}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
       />

@@ -6,6 +6,7 @@ export * from "./time-tracking";
 export * from "./billing";
 export * from "./billing-pipeline";
 export * from "./billing-cockpit";
+export * from "./billing-breakdown";
 export * from "./appointments";
 export * from "./labor-law";
 export * from "./birthdays";

@@ -59,6 +59,7 @@ import {
 } from "../storage/billing-storage";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
 import { readBillingCockpit, readBillingCockpitDrill } from "../storage/billing/cockpit-reader";
+import { readBillingBreakdown } from "../storage/billing/breakdown-reader";
 import { COCKPIT_FUNNEL_STAGES, type CockpitFunnelStage } from "@shared/domain/billing-cockpit";
 import { auditService } from "../services/audit";
 import { withAudit } from "../lib/with-audit";
@@ -287,6 +288,23 @@ router.get("/cockpit/drill", asyncHandler("Cockpit-Detailzeilen konnten nicht ge
     limit,
     offset,
   );
+  res.json(result);
+}));
+
+// Task #1453 — Abrechnungs-Breakdown (Phase 1, READ-ONLY): Leistungsart-
+// Aufschlüsselung pro Monat, vor-aggregiert pro (Kunde × Abrechnungstyp). Der
+// Client gruppiert clientseitig nach Kunde ODER Kasse (kein Refetch beim
+// Umschalten). Reine Sicht — keine Mutation, kein Generate-All.
+router.get("/breakdown", asyncHandler("Abrechnungs-Aufschlüsselung konnte nicht geladen werden", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw badRequest("Jahr ist erforderlich (2020–2100).");
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw badRequest("Monat ist erforderlich (1–12).");
+  }
+  const result = await readBillingBreakdown(year, month);
   res.json(result);
 }));
 

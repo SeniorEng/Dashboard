@@ -7,6 +7,7 @@ export {
   useInvoiceDetail,
   useDeliveryHistory,
   useBillingPipeline,
+  useBillingBreakdown,
   useBillingCockpit,
   useBillingCockpitDrill,
 } from "./use-billing-queries";
