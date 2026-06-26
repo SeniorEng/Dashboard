@@ -36,16 +36,23 @@ export const PROD_HOST_PATTERN = /(^|[.-])prod([.-]|$)|production/;
 
 /**
  * Extrahiert den (lowercased) Hostnamen aus einer Connection-URL. Fällt bei
- * nicht-parsebarer URL auf eine `@host`-Regex zurück und liefert einen leeren
- * String, wenn kein Host ermittelbar ist (→ fail-closed im Aufrufer).
+ * nicht-parsebarer URL auf eine schema-gebundene Regex zurück (gespiegelt aus
+ * der Shell-Lib) und liefert einen leeren String, wenn kein Host ermittelbar
+ * ist (→ fail-closed im Aufrufer).
  */
 export function dbHostOf(url: string): string {
   let host = "";
   try {
     host = new URL(url).hostname.toLowerCase();
   } catch {
-    // Fallback: postgres://user:pass@host:port/db ohne valides URL-Schema.
-    const m = url.match(/@([^:/?#]+)/);
+    // Fallback: parse-bar nur mit GÜLTIGEM Schema (`scheme://`), exakt
+    // gespiegelt aus der sed-Regex in scripts/lib/assert-dev-db.sh. Wichtig für
+    // die Cross-Language-Parität: ein malformter Scheme-Prefix (z.B.
+    // `postgres ://user@host` mit Leerzeichen) darf KEINEN Host liefern, sondern
+    // muss — wie die Shell — leer zurückkommen (→ fail-closed im Aufrufer).
+    // Eine reine `@host`-Regex würde hier fälschlich den Host extrahieren und
+    // die Guards passieren lassen, während die Shell abbricht.
+    const m = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(?:[^@/?#]*@)?([^:/?#]+)/);
     host = (m ? m[1] : "").toLowerCase();
   }
   return host;

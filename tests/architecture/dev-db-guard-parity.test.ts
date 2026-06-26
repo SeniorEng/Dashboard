@@ -103,6 +103,8 @@ const HOST_URLS = [
   "postgresql://user:pass@shared-host.example:5432/dev",
   "garbage-without-host", // kein extrahierbarer Host → ""
   "", // leer → ""
+  "postgres ://user@db.dev.example:5432/app", // malformtes Schema (Leerzeichen) → "" (fail-closed)
+  "user@db.dev.example:5432/app", // kein Schema, nur @host → "" (fail-closed)
 ] as const;
 
 interface GuardFixture {
@@ -152,6 +154,18 @@ const GUARD_FIXTURES: GuardFixture[] = [
     name: "fail-closed: leere DATABASE_URL bricht ab",
     NODE_ENV: "development",
     DATABASE_URL: "",
+    expectAbort: true,
+  },
+  {
+    name: "fail-closed: malformtes Schema (Leerzeichen) bricht ab",
+    NODE_ENV: "development",
+    DATABASE_URL: "postgres ://user@db.dev.example:5432/app",
+    expectAbort: true,
+  },
+  {
+    name: "fail-closed: kein Schema, nur @host bricht ab",
+    NODE_ENV: "development",
+    DATABASE_URL: "user@db.dev.example:5432/app",
     expectAbort: true,
   },
   {
