@@ -58,11 +58,30 @@ function cleanupChromiumUserDataDir(dir: string | undefined): void {
 // selbst aufgibt. Wir setzen den Protocol-Timeout deutlich niedriger (45s)
 // und verwerfen den Browser bei jedem ProtocolError, sodass der nächste
 // Render eine frische Instanz hochfährt.
-const BROWSER_PROTOCOL_TIMEOUT_MS = 45_000;
-const PAGE_RENDER_TIMEOUT_MS = 30_000;
+// Task #1467: Launch-Timeout env-konfigurierbar mit höherem Production-Default.
+// Production-Cold-Starts in der Autoscale-Umgebung emittieren die WS-Endpoint-URL
+// teils erst NACH den bisherigen 20s (`DevTools listening on ws://…` taucht im
+// Log nach der Deadline auf — Chromium startet, nur zu langsam). Der 20s-Timeout
+// ließ damit JEDEN Render scheitern. Wir heben den Default in Production auf 60s
+// an (Dev/Test bleiben bei 20s für schnelles Feedback) und machen ihn per
+// `BROWSER_LAUNCH_TIMEOUT_MS` überschreibbar.
+function resolveBrowserLaunchTimeoutMs(): number {
+  const raw = process.env.BROWSER_LAUNCH_TIMEOUT_MS;
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return process.env.NODE_ENV === "production" ? 60_000 : 20_000;
+}
+
 // Task #544: harter Launch-Timeout, damit Puppeteer nicht 30s+ auf eine
 // WS-Endpoint-URL eines nie startenden Prozesses wartet.
-const BROWSER_LAUNCH_TIMEOUT_MS = 20_000;
+const BROWSER_LAUNCH_TIMEOUT_MS = resolveBrowserLaunchTimeoutMs();
+// Der Protocol-Timeout (einzelne CDP-Calls, u.a. während des Launch-Handshakes)
+// darf nicht UNTER dem Launch-Timeout liegen, sonst würde er bei langsamen
+// Cold-Starts zur neuen Engstelle. Mindestens 45s (Task #521), sonst Launch-Wert.
+const BROWSER_PROTOCOL_TIMEOUT_MS = Math.max(45_000, BROWSER_LAUNCH_TIMEOUT_MS);
+const PAGE_RENDER_TIMEOUT_MS = 30_000;
 
 let browserInstance: Browser | null = null;
 let launchPromise: Promise<Browser> | null = null;
@@ -406,7 +425,12 @@ export function isRecoverablePuppeteerError(err: unknown): boolean {
     // Task #594: "Navigating frame was detached" tritt unter paralleler
     // Render-Last auf (mehrere setImmediate-Persist-Calls + Test-Requests
     // teilen einen Browser). Page-Level transient — Browser bleibt nutzbar.
-    /Network\.enable|Protocol error|Target closed|Connection closed|Session closed|timed out|Requesting main frame too early|frame was detached|Navigating frame|Frame got detached/i.test(message)
+    // Task #1467: "Execution context was destroyed, most likely because of a
+    // navigation." ist ein Navigations-Race während des Renders — die CDP-
+    // Verbindung ist danach unzuverlässig. Wir behandeln ihn als recoverable:
+    // Browser verwerfen, recyceln und neu rendern, statt den Persist-Versuch zu
+    // verbrennen. Ebenso "Navigation failed"/getrennte Browser-Verbindungen.
+    /Network\.enable|Protocol error|Target closed|Connection closed|Session closed|timed out|Requesting main frame too early|frame was detached|Navigating frame|Frame got detached|Execution context was destroyed|Navigation failed|browser has disconnected|Connection terminated/i.test(message)
   );
 }
 

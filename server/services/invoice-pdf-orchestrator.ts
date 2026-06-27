@@ -49,8 +49,23 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
  * Audit-Log-Eintrag (`invoice_pdf_persist_failed`) geschrieben, damit
  * Superadmins fehlerhafte PDFs nicht erst beim nächsten Druckauftrag bemerken.
  */
-const BACKGROUND_PDF_MAX_ATTEMPTS = 3;
-const BACKGROUND_PDF_RETRY_DELAY_MS = 30_000;
+// Task #1467: Retry-Budget env-konfigurierbar und auf 4 Versuche angehoben.
+// Hintergrund: Ein langsamer Production-Cold-Start des Chromium kann den ersten
+// (oder mehrere) Persist-Versuche verschlucken. `withFreshPage` recycelt den
+// Browser zwar schon intern bei recoverable Fehlern, aber wenn der allererste
+// Launch nach Deploy generell träge ist, gibt ein zusätzlicher Außen-Versuch
+// dem Container Zeit, warmzulaufen. Der finale Fehlschlag schreibt weiterhin den
+// `invoice_pdf_persist_failed`-Audit-Eintrag (siehe unten).
+function envIntDefault(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return fallback;
+}
+const BACKGROUND_PDF_MAX_ATTEMPTS = envIntDefault("BACKGROUND_PDF_MAX_ATTEMPTS", 4);
+const BACKGROUND_PDF_RETRY_DELAY_MS = envIntDefault("BACKGROUND_PDF_RETRY_DELAY_MS", 30_000);
 
 export function schedulePdfPersistInBackground(invoiceId: number): void {
   // Ohne Object Storage (z.B. GitHub-Actions-CI ohne Sidecar) gibt es kein Ziel
