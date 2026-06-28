@@ -61,6 +61,8 @@ import {
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
 import { readBillingBlockers } from "../storage/billing/blockers-reader";
 import { readBillingBreakdown } from "../storage/billing/breakdown-reader";
+import { readBillingEconomics } from "../storage/billing/economics-reader";
+import { readBillingTermine } from "../storage/billing/termine-reader";
 import { readBillingReviewClusters } from "../services/billing-review-reader";
 import { auditService } from "../services/audit";
 import { withAudit } from "../lib/with-audit";
@@ -289,6 +291,55 @@ router.get("/review-clusters", asyncHandler("Abrechnungs-Review konnte nicht gel
     throw badRequest("Monat ist erforderlich (1–12).");
   }
   const result = await readBillingReviewClusters(year, month);
+  res.json(result);
+}));
+
+// Task #1473 — Wirtschaftlicher Überblick (READ-ONLY): billing-scoped
+// Aggregation der Economics-SSoT (Monat/Jahr + optional Mitarbeiter:in + Kasse).
+// Headline-KPIs und Zeilen stammen aus DEMSELBEN buildEconomics-Aufruf, sodass
+// Σ(Zeilen) === Headline gilt. Reine Sicht — keine Mutation.
+router.get("/economics", asyncHandler("Wirtschaftlicher Überblick konnte nicht geladen werden", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw badRequest("Jahr ist erforderlich (2020–2100).");
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw badRequest("Monat ist erforderlich (1–12).");
+  }
+  const employeeId = req.query.employeeId !== undefined ? Number(req.query.employeeId) : undefined;
+  if (employeeId !== undefined && (!Number.isInteger(employeeId) || employeeId <= 0)) {
+    throw badRequest("Ungültige Mitarbeiter-ID.");
+  }
+  const insuranceProviderId = req.query.insuranceProviderId !== undefined ? Number(req.query.insuranceProviderId) : undefined;
+  if (insuranceProviderId !== undefined && (!Number.isInteger(insuranceProviderId) || insuranceProviderId <= 0)) {
+    throw badRequest("Ungültige Kassen-ID.");
+  }
+  const result = await readBillingEconomics(year, month, { employeeId, insuranceProviderId });
+  res.json(result);
+}));
+
+// Task #1473 — „Termine End-to-End"-Liste (READ-ONLY): Termine des Monats pro
+// Mitarbeiter:in gruppiert, Stufe über die Pipeline-SSoT (vor Rechnung) bzw. den
+// Rechnungsstatus (nach Rechnung). Side-States gehören nicht in die Liste.
+router.get("/termine", asyncHandler("Termine konnten nicht geladen werden", async (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw badRequest("Jahr ist erforderlich (2020–2100).");
+  }
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw badRequest("Monat ist erforderlich (1–12).");
+  }
+  const employeeId = req.query.employeeId !== undefined ? Number(req.query.employeeId) : undefined;
+  if (employeeId !== undefined && (!Number.isInteger(employeeId) || employeeId <= 0)) {
+    throw badRequest("Ungültige Mitarbeiter-ID.");
+  }
+  const insuranceProviderId = req.query.insuranceProviderId !== undefined ? Number(req.query.insuranceProviderId) : undefined;
+  if (insuranceProviderId !== undefined && (!Number.isInteger(insuranceProviderId) || insuranceProviderId <= 0)) {
+    throw badRequest("Ungültige Kassen-ID.");
+  }
+  const result = await readBillingTermine(year, month, { employeeId, insuranceProviderId });
   res.json(result);
 }));
 
@@ -2520,6 +2571,223 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
   };
   log(
     `bulk-print done month=${billingMonth}/${billingYear} total=${drafts.length} printed=${rendered.length} marked=${marked} errors=${errors} groupByPayer=${groupByPayer} userId=${req.user?.id ?? "?"}`,
+    "billing",
+  );
+
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.setHeader("X-Bulk-Print-Summary", encodeURIComponent(JSON.stringify(summary)));
+  res.send(outputBuffer);
+}));
+
+// Task #1473 — Sammeldruck-VORSCHAU (READ-ONLY): bündelt dieselben Rechnungen
+// eines Monats wie /bulk-print (Rechnung + optional Leistungsnachweis je
+// Rechnung), führt aber KEINE Status-Mutation aus — KEIN „versendet", KEIN
+// sentAt, KEIN Audit-Mark. Phase 1 (PDF-Beschaffung) ist identisch mit
+// /bulk-print; Phase 2 (Mark-Sent) entfällt bewusst.
+//   - groupByPayer=false → ein zusammengeführtes Gesamt-PDF (application/pdf)
+//   - groupByPayer=true  → ZIP mit einem PDF je Krankenkasse
+//   - includeLeistungsnachweise=false → keine LN anhängen (nur Rechnungs-PDFs)
+// Die Zusammenfassung kommt im `X-Bulk-Print-Summary`-Header (marked=0).
+router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nicht erstellt werden", async (req, res) => {
+  const parsed = z.object({
+    billingMonth: z.number().int().min(1).max(12),
+    billingYear: z.number().int().min(2000).max(2100),
+    insuranceProviderId: z.number().int().positive().optional(),
+    groupByPayer: z.boolean().optional().default(false),
+    includeLeistungsnachweise: z.boolean().optional().default(true),
+  }).safeParse(req.body);
+  if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
+  const { billingMonth, billingYear, insuranceProviderId, groupByPayer, includeLeistungsnachweise } = parsed.data;
+
+  const allDrafts = await storage.getInvoices({
+    year: billingYear,
+    month: billingMonth,
+    status: "entwurf",
+    insuranceProviderId,
+  });
+  const drafts = allDrafts
+    .filter(inv => inv.invoiceType !== "stornorechnung")
+    .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+
+  if (drafts.length === 0) {
+    throw notFound(
+      `Keine Entwurfs-Rechnungen für ${String(billingMonth).padStart(2, "0")}/${billingYear} gefunden.`,
+    );
+  }
+
+  // Krankenkassen-Zuordnung je Kunde (für groupByPayer + Dateinamen).
+  const customerIds = Array.from(new Set(drafts.map(d => d.customerId)));
+  const payerRows = await db.select({
+    customerId: customerInsuranceHistory.customerId,
+    providerId: insuranceProviders.id,
+    providerName: insuranceProviders.name,
+  })
+    .from(customerInsuranceHistory)
+    .innerJoin(insuranceProviders, eq(insuranceProviders.id, customerInsuranceHistory.insuranceProviderId))
+    .where(and(
+      inArray(customerInsuranceHistory.customerId, customerIds),
+      isNull(customerInsuranceHistory.validTo),
+    ));
+  const payerByCustomer = new Map(payerRows.map(r => [r.customerId, { id: r.providerId, name: r.providerName }]));
+
+  type PreviewResultEntry = {
+    invoiceId: number;
+    invoiceNumber: string;
+    customerId: number;
+    status: "printed" | "error";
+    message?: string;
+  };
+  const results: PreviewResultEntry[] = [];
+
+  // Phase 1 — PDFs beschaffen (kein State-Change), identisch zu /bulk-print.
+  type DraftInvoice = Awaited<ReturnType<typeof storage.getInvoices>>[number];
+  type RenderedPreview = {
+    invoice: DraftInvoice;
+    invoicePdf: Buffer;
+    lnPdf: Buffer | null;
+    appendLn: boolean;
+    payerKey: string;
+    payerLabel: string;
+  };
+  const rendered: RenderedPreview[] = [];
+  const failInvoicePdfIds = readTestFailInvoicePdfIds(req);
+  for (const inv of drafts) {
+    try {
+      if (failInvoicePdfIds.has(inv.id)) {
+        throw classifyPdfRenderError(
+          new Error(`Test-Fault: erzwungener Render-Fehler für Rechnung ${inv.invoiceNumber}`),
+          `Rechnungs-PDF ${inv.invoiceNumber}`,
+        );
+      }
+      let invoicePdf = await loadInvoicePdfFromStorage(inv);
+      let lnPdf = includeLeistungsnachweise ? await loadLeistungsnachweisPdfFromStorage(inv) : null;
+      const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
+      let persistError: unknown = null;
+      if (!invoicePdf || (includeLeistungsnachweise && !lnPdf && isPflegekasse)) {
+        try {
+          await persistInvoicePdf(inv.id);
+        } catch (err) {
+          persistError = err;
+          console.error(`[billing/bulk-print-preview] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
+        }
+        const refreshed = await storage.getInvoice(inv.id);
+        if (refreshed) {
+          invoicePdf = await loadInvoicePdfFromStorage(refreshed) ?? invoicePdf;
+          if (includeLeistungsnachweise) {
+            lnPdf = await loadLeistungsnachweisPdfFromStorage(refreshed) ?? lnPdf;
+          }
+        }
+      }
+      if (!invoicePdf) {
+        throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${inv.invoiceNumber}`);
+      }
+      const appendLn = includeLeistungsnachweise && await shouldAppendStandaloneLeistungsnachweis(inv);
+      if (includeLeistungsnachweise && !lnPdf && appendLn) {
+        try {
+          lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+        } catch (err) {
+          throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
+        }
+      }
+      const payer = payerByCustomer.get(inv.customerId);
+      rendered.push({
+        invoice: inv,
+        invoicePdf,
+        lnPdf,
+        appendLn,
+        payerKey: payer ? `kasse-${payer.id}` : "selbstzahler",
+        payerLabel: payer ? payer.name : "Selbstzahler",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
+      console.error(`[billing/bulk-print-preview] Render für Rechnung ${inv.id} fehlgeschlagen:`, err);
+      results.push({
+        invoiceId: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        customerId: inv.customerId,
+        status: "error",
+        message: msg,
+      });
+    }
+  }
+
+  if (rendered.length === 0) {
+    throw new AppError(
+      500,
+      "BULK_PRINT_PREVIEW_RENDER_FAILED",
+      "Keine der Entwurfs-Rechnungen konnte für die Sammeldruck-Vorschau gerendert werden.",
+    );
+  }
+
+  const monthSlug = `${String(billingMonth).padStart(2, "0")}-${billingYear}`;
+  let outputBuffer: Buffer;
+  let contentType: string;
+  let fileName: string;
+
+  if (groupByPayer) {
+    const groups = new Map<string, { label: string; pairs: RenderedPreview[] }>();
+    for (const r of rendered) {
+      const g = groups.get(r.payerKey) ?? { label: r.payerLabel, pairs: [] };
+      g.pairs.push(r);
+      groups.set(r.payerKey, g);
+    }
+    const archiver = (await import("archiver")).default;
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    const chunks: Buffer[] = [];
+    archive.on("data", (c: Buffer) => chunks.push(c));
+    const done = new Promise<void>((resolve, reject) => {
+      archive.on("end", () => resolve());
+      archive.on("error", (err: Error) => reject(err));
+    });
+    for (const [, g] of groups) {
+      const flat: Buffer[] = [];
+      for (const p of g.pairs) {
+        flat.push(p.invoicePdf);
+        if (p.lnPdf && p.appendLn) flat.push(p.lnPdf);
+      }
+      const mergedGroup = await combinePdfBuffers(flat);
+      const slug = g.label.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Kasse";
+      archive.append(mergedGroup, { name: `Sammeldruck-Vorschau-${slug}-${monthSlug}.pdf` });
+    }
+    await archive.finalize();
+    await done;
+    outputBuffer = Buffer.concat(chunks);
+    contentType = "application/zip";
+    fileName = `Sammeldruck-Vorschau-${monthSlug}.zip`;
+  } else {
+    const flat: Buffer[] = [];
+    for (const r of rendered) {
+      flat.push(r.invoicePdf);
+      if (r.lnPdf && r.appendLn) flat.push(r.lnPdf);
+    }
+    outputBuffer = await combinePdfBuffers(flat);
+    contentType = "application/pdf";
+    fileName = `Sammeldruck-Vorschau-${monthSlug}.pdf`;
+  }
+
+  // READ-ONLY: keine Status-Mutation. Alle erfolgreich gerenderten Rechnungen
+  // gelten als „printed"; marked bleibt 0.
+  for (const r of rendered) {
+    results.push({
+      invoiceId: r.invoice.id,
+      invoiceNumber: r.invoice.invoiceNumber,
+      customerId: r.invoice.customerId,
+      status: "printed",
+    });
+  }
+
+  const errors = results.filter(r => r.status === "error").length;
+  const summary = {
+    total: drafts.length,
+    printed: rendered.length,
+    marked: 0,
+    errors,
+    groupedByPayer: groupByPayer,
+    results,
+  };
+  log(
+    `bulk-print-preview done month=${billingMonth}/${billingYear} total=${drafts.length} printed=${rendered.length} errors=${errors} groupByPayer=${groupByPayer} includeLN=${includeLeistungsnachweise} userId=${req.user?.id ?? "?"}`,
     "billing",
   );
 

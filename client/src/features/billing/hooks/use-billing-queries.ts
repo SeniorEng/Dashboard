@@ -12,7 +12,18 @@ import type {
   BillingBreakdownResponse,
   BillingBlockersResponse,
   BillingReviewClustersResponse,
+  BillingEconomicsResponse,
+  BillingTermineResponse,
 } from "@shared/api";
+
+// Task #1473: aktive Mitarbeiter:innen für den Mitarbeiter-Filter der
+// Abrechnungsseite (gleiche Quelle wie die Termin-/Zeit-Übersicht).
+export interface ActiveEmployee {
+  id: number;
+  displayName: string;
+  isTeamLead: boolean;
+  roles: string[];
+}
 
 // Task #1434: Wirtschafts-Überblick oben auf der Abrechnungsseite. Liest
 // AUSSCHLIESSLICH den bestehenden Pipeline-Reader (`GET /billing/pipeline`) —
@@ -220,6 +231,67 @@ export function useInvoiceDetail(expandedInvoiceId: number | null) {
       return unwrapResult(result);
     },
     enabled: !!expandedInvoiceId,
+  });
+}
+
+// Task #1473: billing-scoped Wirtschaftlicher Überblick (per-Leistung +
+// per-Mitarbeiter inkl. Drill). Liest AUSSCHLIESSLICH den neuen Economics-Reader
+// (`GET /billing/economics`), der die bestehende Economics-SSoT billing-scoped
+// aggregiert. Monat/Jahr + Mitarbeiter:in + Kasse scopen die Sicht. QueryKey
+// beginnt mit "billing" ⇒ `invalidateRelated(qc,"billing")` lädt die Kachel neu.
+export function useBillingEconomics(
+  selectedYear: number,
+  selectedMonth: number,
+  employeeFilter: string,
+  payerFilter: string,
+) {
+  return useQuery({
+    queryKey: ["billing", "economics", selectedYear, selectedMonth, employeeFilter, payerFilter],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      if (employeeFilter !== "alle") params.set("employeeId", employeeFilter);
+      if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
+      const result = await api.get<BillingEconomicsResponse>(`/billing/economics?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+// Task #1473: „Termine End-to-End"-Liste (pro Mitarbeiter:in). Liest
+// AUSSCHLIESSLICH den neuen Termine-Reader (`GET /billing/termine`); Stufe je
+// Termin folgt der Pipeline-/Attribution-SSoT. Monat/Jahr + Mitarbeiter:in +
+// Kasse scopen die Liste. QueryKey beginnt mit "billing".
+export function useBillingTermine(
+  selectedYear: number,
+  selectedMonth: number,
+  employeeFilter: string,
+  payerFilter: string,
+) {
+  return useQuery({
+    queryKey: ["billing", "termine", selectedYear, selectedMonth, employeeFilter, payerFilter],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams();
+      params.set("year", selectedYear.toString());
+      params.set("month", selectedMonth.toString());
+      if (employeeFilter !== "alle") params.set("employeeId", employeeFilter);
+      if (payerFilter !== "alle") params.set("insuranceProviderId", payerFilter);
+      const result = await api.get<BillingTermineResponse>(`/billing/termine?${params.toString()}`, signal);
+      return unwrapResult(result);
+    },
+  });
+}
+
+// Task #1473: aktive Mitarbeiter:innen für das Mitarbeiter-Dropdown des
+// Filters. Quelle = bestehender `GET /appointments/active-employees`.
+export function useActiveEmployees() {
+  return useQuery({
+    queryKey: ["billing", "active-employees"],
+    queryFn: async ({ signal }) => {
+      const result = await api.get<ActiveEmployee[]>(`/appointments/active-employees`, signal);
+      return unwrapResult(result);
+    },
   });
 }
 

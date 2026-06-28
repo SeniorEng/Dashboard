@@ -475,6 +475,49 @@ export function useBillingMutations({
     },
   });
 
+  // Task #1473: Print-only Sammeldruck. Erzeugt EXAKT dasselbe gebündelte
+  // PDF/ZIP wie `bulk-print`, ändert aber KEINEN Status (kein „versendet"). Der
+  // Statuswechsel bleibt den expliziten Aktionen „An Kasse senden" / „Als
+  // versendet markieren" vorbehalten. Zwei Optionen: nur Rechnungen oder
+  // Rechnungen + Leistungsnachweise. READ-ONLY ⇒ kein invalidate/refetch.
+  const bulkPrintPreviewMutation = useMutation({
+    mutationFn: async (opts: { groupByPayer: boolean; includeLeistungsnachweise: boolean }) => {
+      setBulkPrintResult(null);
+      const result = await api.postBlob<BulkPrintSummary>(
+        "/billing/bulk-print-preview",
+        {
+          billingMonth: selectedMonth,
+          billingYear: selectedYear,
+          groupByPayer: opts.groupByPayer,
+          includeLeistungsnachweise: opts.includeLeistungsnachweise,
+          ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
+        },
+        "X-Bulk-Print-Summary",
+      );
+      return unwrapResult(result);
+    },
+    onSuccess: (data) => {
+      const url = URL.createObjectURL(data.blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setBulkPrintResult(data.summary);
+      const s = data.summary;
+      toast({
+        title: "Sammeldruck erstellt",
+        description: s ? `${s.printed} gedruckt, ${s.errors} Fehler` : "Download wurde gestartet.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Sammeldruck fehlgeschlagen", description: error.message, variant: "destructive" });
+    },
+  });
+
   // Task #1459: Lexware-PDF-Export. Lädt ein ZIP mit je einer LN-freien PDF pro
   // ausgewählter Rechnung (Dateiname Rechnungsnummer_Kunde_Datum.pdf).
   // READ-ONLY: KEIN Status-Change, KEINE Markierung als „versendet", daher
@@ -621,6 +664,7 @@ export function useBillingMutations({
     batchSendMutation,
     bulkSendMutation,
     bulkPrintMutation,
+    bulkPrintPreviewMutation,
     lexwareExportMutation,
     sendingInvoiceId,
     batchSending,

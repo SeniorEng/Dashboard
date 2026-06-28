@@ -20,6 +20,26 @@ export function formatHoursFromMinutes(minutes: number): string {
   return `${hours.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`;
 }
 
+// Task #1473: Kilometer-Anzeige (DE-Komma, max. 1 NK) für die Economics-Tabelle.
+// Reine Darstellung — die km-Mengen kommen fertig aus dem Reader.
+export function formatKm(km: number): string {
+  return `${km.toLocaleString("de-DE", { maximumFractionDigits: 1 })} km`;
+}
+
+// Task #1473: Anzeige-Satz pro Einheit (Integer-Cents → "38,00 €" / "0,35 €").
+// Reine Darstellung; delegiert an die Geld-SSoT formatEuroDE.
+export function formatRate(cents: number): string {
+  return formatEuroDE(cents);
+}
+
+// Task #1473: Margen-Gesundheits-Farbe (ganze Prozent): ≥50 grün, 35–49 amber,
+// <35 rosé. Reine Darstellung der bereits berechneten Marge.
+export function marginHealthTextColor(percent: number): string {
+  if (percent >= 50) return "text-green-700";
+  if (percent >= 35) return "text-amber-700";
+  return "text-rose-700";
+}
+
 // Task #1412: Heutiger Stichtag als ISO yyyy-mm-dd (lokale Zeitzone), Anker für
 // die Aging-Einstufung.
 function todayIso(): string {

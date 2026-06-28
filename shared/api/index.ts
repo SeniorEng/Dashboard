@@ -8,6 +8,8 @@ export * from "./billing-pipeline";
 export * from "./billing-breakdown";
 export * from "./billing-blockers";
 export * from "./billing-review";
+export * from "./billing-economics";
+export * from "./billing-termine";
 export * from "./appointments";
 export * from "./labor-law";
 export * from "./birthdays";
