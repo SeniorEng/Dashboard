@@ -14,12 +14,13 @@ import { formatPhoneForDisplay } from "@shared/utils/phone";
   import { computeDataHash } from "./signature-integrity";
   import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
   import { parseObjectPath, getPrivateDir, buildInvoicePdfObjectKey, assertInvoicePdfWriteKeyAllowed, isObjectStorageConfigured } from "../lib/object-storage-helpers";
-  import { eq, and, inArray, sql } from "drizzle-orm";
+  import { eq, and, or, inArray, sql } from "drizzle-orm";
   import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
   import { storage } from "../storage";
   import { db } from "../lib/db";
   import { monthlyServiceRecordsRepo } from "../repos";
   import { auditService } from "./audit";
+  import { createNotification, hasRecentNotification } from "../storage/notifications";
   import type { InvoicePdfData } from "../lib/pdf-generator";
   import {
     computeInvoicePdfFingerprint,
@@ -116,11 +117,63 @@ async function runPdfPersistWithRetry(invoiceId: number): Promise<void> {
         error: message.slice(0, 500),
       },
     );
+
+    // Task #1468: Aktive Benachrichtigung. Der Audit-Eintrag allein wird erst
+    // bemerkt, wenn jemand die „PDF-Fehler"-Badge in der Abrechnung sieht.
+    // Damit Operatoren reagieren BEVOR Kunden/Kassen betroffen sind, wird hier
+    // zusätzlich eine In-App-Benachrichtigung an alle aktiven Superadmins
+    // erzeugt — mit Rechnungsnummer und Fehlergrund.
+    await notifySuperadminsOfPdfFailure(invoiceId, invoice.invoiceNumber, message);
   } catch (auditErr) {
     console.error(
-      `[billing/generate] Audit-Log für PDF-Persist-Fehler (Rechnung ${invoiceId}) konnte nicht geschrieben werden:`,
+      `[billing/generate] Audit-Log/Benachrichtigung für PDF-Persist-Fehler (Rechnung ${invoiceId}) konnte nicht geschrieben werden:`,
       auditErr,
     );
+  }
+}
+
+/**
+ * Task #1468: Benachrichtigt alle aktiven Superadmins aktiv (In-App-Bell),
+ * wenn ein Rechnungs-PDF nach Ausschöpfen des kompletten Retry-Budgets nicht
+ * persistiert werden konnte. Die Nachricht nennt die Rechnungsnummer und den
+ * Fehlergrund. Pro Rechnung wird innerhalb von 24h nur einmal benachrichtigt
+ * (Dedupe über `hasRecentNotification`), damit ein erneuter Generierungs- bzw.
+ * Persist-Versuch nicht zur Benachrichtigungsflut führt.
+ */
+export async function notifySuperadminsOfPdfFailure(
+  invoiceId: number,
+  invoiceNumber: string,
+  errorMessage: string,
+): Promise<void> {
+  const superadmins = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.isActive, true), or(eq(users.isSuperAdmin, true), eq(users.isAdmin, true))));
+
+  // In der Nachricht (max. 1000 Zeichen) bleibt genug Platz für die
+  // Rechnungsnummer + einen aussagekräftigen Fehlerauszug.
+  const reason = errorMessage.slice(0, 300);
+  const message =
+    `Das PDF für Rechnung ${invoiceNumber} konnte nach ${BACKGROUND_PDF_MAX_ATTEMPTS} Versuchen nicht erzeugt werden. ` +
+    `Grund: ${reason}. Bitte die Rechnung in der Abrechnung erneut drucken/prüfen.`;
+
+  for (const sa of superadmins) {
+    try {
+      if (await hasRecentNotification(sa.id, "invoice_pdf_persist_failed", invoiceId)) continue;
+      await createNotification({
+        userId: sa.id,
+        type: "invoice_pdf_persist_failed",
+        title: `PDF-Fehler: Rechnung ${invoiceNumber}`,
+        message,
+        referenceType: "invoice",
+        referenceId: invoiceId,
+      });
+    } catch (notifyErr) {
+      console.error(
+        `[billing/generate] PDF-Fehler-Benachrichtigung an Superadmin ${sa.id} (Rechnung ${invoiceId}) fehlgeschlagen:`,
+        notifyErr,
+      );
+    }
   }
 }
 
