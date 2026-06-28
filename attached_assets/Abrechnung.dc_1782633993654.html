@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#e9ddc8;font-family:'Outfit',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;color:#26303f}
+select,input,button{font-family:inherit}
+</style>
+</helmet>
+
+<div style="max-width:1180px;margin:0 auto;padding:30px 26px 64px">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px;gap:16px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#9a8a64;text-transform:uppercase;letter-spacing:.1em">Senioren Engel · Care Connect</div>
+      <h1 style="font-size:27px;font-weight:700;color:#26303f;margin:5px 0 0;letter-spacing:-.02em">Abrechnung</h1>
+    </div>
+    <div style="font-size:13.5px;color:#8a7f6a">Stand 28.06.2026</div>
+  </div>
+
+  <!-- ============ FILTER (TOP — scopes everything) ============ -->
+  <div style="background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 26px rgba(28,28,40,.05);padding:18px 22px;margin-bottom:16px">
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#9a8a64;text-transform:uppercase;letter-spacing:.06em;padding-bottom:11px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>Filter
+      </div>
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8a8170;font-weight:500">Monat
+        <select value="{{ month }}" onChange="{{ setMonth }}" style="min-width:128px;padding:9px 12px;border:1px solid #e3e6ea;border-radius:10px;font-size:14px;color:#26303f;background:#fff">
+          <option>Januar</option><option>Februar</option><option>März</option><option>April</option><option>Mai</option><option>Juni</option><option>Juli</option><option>August</option><option>September</option><option>Oktober</option><option>November</option><option>Dezember</option>
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8a8170;font-weight:500">Jahr
+        <select style="padding:9px 12px;border:1px solid #e3e6ea;border-radius:10px;font-size:14px;color:#26303f;background:#fff"><option>2026</option><option>2025</option></select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8a8170;font-weight:500">Mitarbeiter:in
+        <select style="padding:9px 12px;border:1px solid #e3e6ea;border-radius:10px;font-size:14px;color:#26303f;background:#fff"><option>Alle Mitarbeiter</option><option>Anja Schäfer</option><option>Celine Minuth</option><option>Christiane Fiebag</option></select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8a8170;font-weight:500;flex:1;min-width:180px">Kasse
+        <select style="padding:9px 12px;border:1px solid #e3e6ea;border-radius:10px;font-size:14px;color:#26303f;background:#fff;width:100%"><option>Alle Krankenkassen</option><option>AOK PLUS</option><option>Techniker Krankenkasse</option><option>Siemens BKK (SBK)</option></select>
+      </label>
+    </div>
+  </div>
+
+  <!-- ============ WIRTSCHAFTLICHER ÜBERBLICK ============ -->
+  <div style="background:#fff;border-radius:20px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 12px 30px rgba(28,28,40,.05);padding:24px 28px;margin-bottom:16px">
+    <div onClick="{{ toggleCollapsed }}" style="display:flex;align-items:center;gap:14px;cursor:pointer">
+      <span style="width:38px;height:38px;border-radius:11px;background:#e8f3f1;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg>
+      </span>
+      <div>
+        <div style="font-size:19px;font-weight:700;color:#26303f;letter-spacing:-.01em">Wirtschaftlicher Überblick</div>
+        <div style="font-size:13px;color:#8a8170;margin-top:1px">Umsatz, Lohnkosten &amp; Marge — {{ monthLabel }}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:18px">
+        <sc-if value="{{ collapsed }}" hint-placeholder-val="{{ false }}">
+          <span style="font-size:14px;color:#5a6573;font-weight:500">{{ miniKpi }}</span>
+        </sc-if>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9aa0a8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .22s;transform:rotate({{ chevDeg }}deg)"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </div>
+    </div>
+
+    <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+    <div style="margin-top:22px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+        <div style="background:#f7f8fa;border:1px solid #eceef2;border-radius:15px;padding:17px 19px">
+          <div style="font-size:13.5px;color:#7a8290;font-weight:500">Umsatz</div>
+          <div style="font-size:29px;font-weight:700;color:#26303f;margin-top:7px;letter-spacing:-.02em">{{ kUmsatz }}</div>
+          <div style="font-size:12px;color:#9aa0aa;margin-top:3px">brutto, alle Leistungen</div>
+        </div>
+        <div style="background:#f7f8fa;border:1px solid #eceef2;border-radius:15px;padding:17px 19px">
+          <div style="font-size:13.5px;color:#7a8290;font-weight:500">Lohnkosten</div>
+          <div style="font-size:29px;font-weight:700;color:#5a6573;margin-top:7px;letter-spacing:-.02em">{{ kLohn }}</div>
+          <div style="font-size:12px;color:#9aa0aa;margin-top:3px">an Mitarbeiter:innen</div>
+        </div>
+        <div style="background:#effaf6;border:1px solid #cdeee4;border-radius:15px;padding:17px 19px">
+          <div style="font-size:13.5px;color:#3f8b78;font-weight:600">Deckungsbeitrag</div>
+          <div style="font-size:29px;font-weight:700;color:#0f766e;margin-top:7px;letter-spacing:-.02em">{{ kMarge }}</div>
+          <div style="font-size:12px;color:#6fa392;margin-top:3px">Umsatz − Lohnkosten</div>
+        </div>
+        <div style="background:#f7f8fa;border:1px solid #eceef2;border-radius:15px;padding:17px 19px">
+          <div style="font-size:13.5px;color:#7a8290;font-weight:500">Marge</div>
+          <div style="font-size:29px;font-weight:700;margin-top:7px;letter-spacing:-.02em;color:{{ kMargeColor }}">{{ kPct }}</div>
+          <div style="height:6px;border-radius:4px;background:#e9ecf0;margin-top:9px;overflow:hidden"><div style="height:100%;border-radius:4px;width:{{ kPctNum }}%;background:{{ kMargeColor }}"></div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;margin-top:24px;gap:16px;flex-wrap:wrap">
+        <div style="display:inline-flex;gap:5px;background:#f1f2f5;border-radius:13px;padding:5px">
+          <button onClick="{{ setLeistung }}" style="{{ leistungStyle }}">Nach Leistung</button>
+          <button onClick="{{ setMitarbeiter }}" style="{{ mitarbeiterStyle }}">Nach Mitarbeiter</button>
+        </div>
+      </div>
+
+      <sc-if value="{{ isLeistung }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top:14px">
+        <div style="display:grid;grid-template-columns:minmax(170px,1.7fr) 120px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 92px;gap:20px;padding:0 0 10px;font-size:11.5px;color:#9aa0aa;font-weight:600;text-transform:uppercase;letter-spacing:.05em">
+          <div>Leistung</div><div style="text-align:right">Menge</div><div style="text-align:right">Umsatz</div><div style="text-align:right">Lohnkosten</div><div style="text-align:right">Marge</div><div style="text-align:right">%</div>
+        </div>
+        <sc-for list="{{ services }}" as="svc" hint-placeholder-count="3">
+          <div style="display:grid;grid-template-columns:minmax(170px,1.7fr) 120px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 92px;gap:20px;align-items:center;padding:15px 0;border-top:1px solid #f0f1f4">
+            <div>
+              <div style="font-weight:600;color:#26303f;font-size:15px">{{ svc.label }}</div>
+              <div style="font-size:11.5px;color:#9aa0aa;margin-top:2px">{{ svc.rateSub }}</div>
+            </div>
+            <div style="text-align:right;font-size:14px;color:#5a6573">{{ svc.units }}</div>
+            <div style="text-align:right;font-size:14.5px;font-weight:600;color:#26303f">{{ svc.rev }}</div>
+            <div style="text-align:right;font-size:14px;color:#8a909a">{{ svc.cost }}</div>
+            <div style="text-align:right;font-size:14.5px;font-weight:700;color:#26303f">{{ svc.marge }}</div>
+            <div style="text-align:right;font-size:13.5px;font-weight:600;color:{{ svc.pctColor }}">{{ svc.pct }}</div>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isMitarbeiter }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:14px">
+        <div style="display:grid;grid-template-columns:minmax(200px,1.8fr) 110px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 92px;gap:20px;padding:0 0 10px;font-size:11.5px;color:#9aa0aa;font-weight:600;text-transform:uppercase;letter-spacing:.05em">
+          <div>Mitarbeiter:in</div><div style="text-align:right">Menge</div>
+          <div onClick="{{ sortUmsatz }}" style="text-align:right;cursor:pointer;user-select:none">Umsatz {{ sortUmsatzArrow }}</div>
+          <div style="text-align:right">Lohnkosten</div>
+          <div onClick="{{ sortMarge }}" style="text-align:right;cursor:pointer;user-select:none">Marge {{ sortMargeArrow }}</div>
+          <div style="text-align:right">%</div>
+        </div>
+        <sc-for list="{{ employees }}" as="emp" hint-placeholder-count="8">
+          <div style="border-top:1px solid #f0f1f4">
+            <div onClick="{{ emp.onToggle }}" style="display:grid;grid-template-columns:minmax(200px,1.8fr) 110px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 92px;gap:20px;align-items:center;padding:13px 0;cursor:pointer">
+              <div style="display:flex;align-items:center;gap:11px;min-width:0">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b3b9c2" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;transition:transform .18s;transform:rotate({{ emp.chevDeg }}deg)"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                <span style="width:33px;height:33px;border-radius:50%;background:#e8f3f1;color:#0f766e;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;flex-shrink:0">{{ emp.initials }}</span>
+                <span style="font-weight:600;color:#26303f;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ emp.name }}</span>
+              </div>
+              <div style="text-align:right">
+                <div style="font-weight:600;color:#3a4658;font-size:14px">{{ emp.std }}</div>
+                <div style="font-size:11.5px;color:#9aa0aa">{{ emp.km }}</div>
+              </div>
+              <div style="text-align:right;font-size:14.5px;font-weight:600;color:#26303f">{{ emp.rev }}</div>
+              <div style="text-align:right;font-size:14px;color:#8a909a">{{ emp.cost }}</div>
+              <div style="text-align:right;font-size:14.5px;font-weight:700;color:#26303f">{{ emp.marge }}</div>
+              <div style="text-align:right;font-size:13.5px;font-weight:600;color:{{ emp.pctColor }}">{{ emp.pct }}</div>
+            </div>
+            <sc-if value="{{ emp.expanded }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#f8f9fb;border:1px solid #eef0f3;border-radius:13px;padding:6px 16px;margin:2px 0 14px">
+              <sc-for list="{{ emp.per }}" as="p" hint-placeholder-count="3">
+                <div style="display:grid;grid-template-columns:minmax(140px,1.5fr) 96px 1fr 1fr 1fr 64px;gap:14px;align-items:center;padding:10px 0;border-bottom:1px solid #eef0f3">
+                  <div style="font-size:13.5px;color:#5a6573;font-weight:500">{{ p.label }}</div>
+                  <div style="text-align:right;font-size:13px;color:#8a909a">{{ p.units }}</div>
+                  <div style="text-align:right;font-size:13.5px;color:#3a4658">{{ p.rev }}</div>
+                  <div style="text-align:right;font-size:13px;color:#9aa0aa">{{ p.cost }}</div>
+                  <div style="text-align:right;font-size:13.5px;font-weight:600;color:#26303f">{{ p.marge }}</div>
+                  <div style="text-align:right;font-size:12.5px;font-weight:600;color:{{ p.pctColor }}">{{ p.pct }}</div>
+                </div>
+              </sc-for>
+            </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+  </div>
+
+  <!-- ============ PIPELINE (shared overview, cross-links into tabs) ============ -->
+  <div style="background:#fff;border-radius:20px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 12px 30px rgba(28,28,40,.05);padding:24px 28px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <span style="width:38px;height:38px;border-radius:11px;background:#eef2ff;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><polyline points="10 5 6 9 10 13"></polyline><polyline points="14 11 18 15 14 19"></polyline></svg>
+      </span>
+      <div>
+        <div style="font-size:19px;font-weight:700;color:#26303f;letter-spacing:-.01em">Status der Termine &amp; Rechnungen</div>
+        <div style="font-size:13px;color:#8a8170;margin-top:1px">Status anklicken, um direkt zur passenden Liste zu springen</div>
+      </div>
+    </div>
+
+    <sc-if value="{{ isFlow }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;gap:22px;align-items:stretch;flex-wrap:wrap">
+      <div style="flex:1;min-width:300px">
+        <div style="font-size:11.5px;font-weight:700;color:#9aa0aa;text-transform:uppercase;letter-spacing:.08em;margin-bottom:9px">Termine</div>
+        <div style="display:flex;gap:9px;align-items:stretch">
+          <sc-for list="{{ stagesT }}" as="s" hint-placeholder-count="3">
+            <div onClick="{{ s.onPick }}" style="flex:1;min-width:96px;background:{{ s.c.bg }};border:1px solid {{ s.c.br }};border-radius:14px;padding:13px 13px;cursor:pointer;transition:transform .12s" style-hover="transform:translateY(-2px)">
+              <div style="font-size:12.5px;font-weight:600;color:{{ s.c.text }};line-height:1.2">{{ s.label }}</div>
+              <div style="font-size:10.5px;color:#9aa4b0;margin-top:2px;min-height:13px">{{ s.sub }}</div>
+              <div style="font-size:25px;font-weight:700;color:#26303f;margin-top:9px;letter-spacing:-.02em">{{ s.countStr }}</div>
+              <div style="font-size:12px;font-weight:600;color:{{ s.c.text }};margin-top:1px">{{ s.eurStr }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;padding-top:24px;color:#c4b9a4">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+      </div>
+      <div style="flex:1.3;min-width:380px">
+        <div style="font-size:11.5px;font-weight:700;color:#9aa0aa;text-transform:uppercase;letter-spacing:.08em;margin-bottom:9px">Rechnungen</div>
+        <div style="display:flex;gap:9px;align-items:stretch">
+          <sc-for list="{{ stagesR }}" as="s" hint-placeholder-count="4">
+            <div onClick="{{ s.onPick }}" style="flex:1;min-width:90px;background:{{ s.c.bg }};border:1px solid {{ s.c.br }};border-radius:14px;padding:13px 13px;cursor:pointer;transition:transform .12s" style-hover="transform:translateY(-2px)">
+              <div style="font-size:12.5px;font-weight:600;color:{{ s.c.text }};line-height:1.2">{{ s.label }}</div>
+              <div style="font-size:10.5px;color:#9aa4b0;margin-top:2px;min-height:13px">{{ s.sub }}</div>
+              <div style="font-size:25px;font-weight:700;color:#26303f;margin-top:9px;letter-spacing:-.02em">{{ s.countStr }}</div>
+              <div style="font-size:12px;font-weight:600;color:{{ s.c.text }};margin-top:1px">{{ s.eurStr }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isFunnel }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <sc-for list="{{ stagesAll }}" as="s" hint-placeholder-count="7">
+        <div onClick="{{ s.onPick }}" style="display:grid;grid-template-columns:170px 1fr 70px 110px;gap:14px;align-items:center;cursor:pointer;padding:4px 0">
+          <div style="font-size:13.5px;font-weight:600;color:{{ s.c.text }}">{{ s.label }}</div>
+          <div style="height:26px;border-radius:8px;background:#f3f4f6;overflow:hidden"><div style="height:100%;border-radius:8px;width:{{ s.w }}%;background:{{ s.c.bar }};opacity:.85"></div></div>
+          <div style="text-align:right;font-size:15px;font-weight:700;color:#26303f">{{ s.countStr }}</div>
+          <div style="text-align:right;font-size:13px;color:#8a909a">{{ s.eurStr }}</div>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+
+    <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+      <sc-for list="{{ sideStates }}" as="ss" hint-placeholder-count="2">
+        <div style="display:inline-flex;align-items:center;gap:8px;background:#f7f8fa;border:1px solid #eceef2;border-radius:10px;padding:8px 13px;font-size:13px;color:#8a909a">
+          {{ ss.label }} <strong style="color:#5a6573;font-weight:600">{{ ss.eurStr }}</strong> <span style="color:#a8aeb8">({{ ss.countStr }})</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ============ TABS: TERMINE | RECHNUNGEN ============ -->
+  <div style="background:#fff;border-radius:20px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 12px 30px rgba(28,28,40,.05);padding:22px 28px 26px">
+    <div style="display:flex;gap:10px;margin-bottom:22px;flex-wrap:wrap">
+      <button onClick="{{ setTermine }}" style="{{ termineTabStyle }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        Termine — End-to-End <span style="{{ termineBadge }}">{{ totalApptStr }}</span>
+      </button>
+      <button onClick="{{ setRechnungen }}" style="{{ rechnungenTabStyle }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
+        Rechnungen verwalten <span style="{{ rechnungenBadge }}">{{ rechnungenOpenStr }} offen</span>
+      </button>
+    </div>
+
+    <!-- ===== TAB: TERMINE ===== -->
+    <sc-if value="{{ isTermine }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:17px;font-weight:700;color:#26303f">Termine nach Mitarbeiter &amp; Status</div>
+          <div style="font-size:13px;color:#8a8170;margin-top:1px">{{ totalApptStr }} Termine im {{ monthLabel }} · aufklappen &amp; einzelnen Termin öffnen</div>
+        </div>
+        <sc-if value="{{ filterActive }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ clearFilter }}" style="margin-left:auto;padding:8px 14px;border:1px solid #e3e6ea;background:#fff;color:#5a6573;border-radius:10px;font-size:13px;font-weight:500;cursor:pointer">Status-Filter zurücksetzen ✕</button>
+        </sc-if>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <sc-for list="{{ chips }}" as="chip" hint-placeholder-count="7">
+          <button onClick="{{ chip.onPick }}" style="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:11px;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid {{ chip.borderCol }};background:{{ chip.bgCol }};color:{{ chip.textCol }}">
+            {{ chip.label }} <span style="font-size:12px;font-weight:600;opacity:.75">{{ chip.countStr }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+        <sc-for list="{{ panels }}" as="p" hint-placeholder-count="6">
+          <div style="border:1px solid #ecedf0;border-radius:14px;overflow:hidden">
+            <div onClick="{{ p.onToggle }}" style="display:flex;align-items:center;gap:12px;padding:15px 18px;cursor:pointer;background:#fcfcfd">
+              <span style="width:34px;height:34px;border-radius:50%;background:#eef1f4;color:#5a6573;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;flex-shrink:0">{{ p.initials }}</span>
+              <span style="font-weight:600;color:#26303f;font-size:15.5px">{{ p.name }}</span>
+              <div style="display:flex;gap:7px;flex-wrap:wrap">
+                <sc-for list="{{ p.pills }}" as="pill" hint-placeholder-count="2">
+                  <span style="display:inline-flex;align-items:center;font-size:12px;font-weight:600;border-radius:999px;padding:3px 10px;color:{{ pill.c.text }};background:{{ pill.c.bg }};border:1px solid {{ pill.c.br }}">{{ pill.label }}</span>
+                </sc-for>
+              </div>
+              <span style="margin-left:auto;display:flex;align-items:center;gap:12px">
+                <span style="font-size:13px;color:#9aa0aa">{{ p.totalStr }} Termine</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b3b9c2" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .18s;transform:rotate({{ p.chevDeg }}deg)"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </span>
+            </div>
+            <sc-if value="{{ p.expanded }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:6px 18px 16px;background:#fff;border-top:1px solid #f0f1f4">
+              <sc-for list="{{ p.groups }}" as="g" hint-placeholder-count="2">
+                <div style="margin-top:14px">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;line-height:1.35">
+                    <span style="width:8px;height:8px;border-radius:50%;background:{{ g.c.bar }};flex-shrink:0"></span>
+                    <span style="font-size:13.5px;font-weight:600;color:{{ g.c.text }}">{{ g.countStr }} {{ g.groupLabel }}</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <sc-for list="{{ g.appts }}" as="a" hint-placeholder-count="3">
+                      <div style="display:flex;align-items:center;gap:14px;padding:11px 14px;border-radius:10px;cursor:pointer;background:{{ a.c.soft }};border:1px solid {{ a.c.br }};transition:background .12s" style-hover="background:{{ a.c.bg }}">
+                        <span style="font-variant-numeric:tabular-nums;font-size:13.5px;font-weight:600;color:{{ a.c.text }};white-space:nowrap">{{ a.date }} {{ a.time }}</span>
+                        <span style="font-size:14px;color:#3a4658">{{ a.client }}</span>
+                        <span style="font-size:11.5px;color:#9aa0aa;border:1px solid #e6e8ec;border-radius:6px;padding:1px 7px">{{ a.serviceLabel }}</span>
+                        <span style="margin-left:auto;display:inline-flex;align-items:center;gap:7px">
+                          <span style="font-size:12px;font-weight:600;color:{{ a.c.text }};background:{{ a.c.bg }};border:1px solid {{ a.c.br }};border-radius:999px;padding:3px 10px">{{ a.pill }}</span>
+                          <span style="display:inline-flex;align-items:center;gap:3px;font-size:12.5px;font-weight:600;color:#0d9488">Öffnen
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                          </span>
+                        </span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ===== TAB: RECHNUNGEN ===== -->
+    <sc-if value="{{ isRechnungen }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap">
+        <div onClick="{{ toggleSelectAll }}" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+          <span style="width:21px;height:21px;border-radius:6px;border:2px solid {{ allCheckBorder }};background:{{ allCheckBg }};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <sc-if value="{{ allChecked }}" hint-placeholder-val="{{ false }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></sc-if>
+          </span>
+          <span style="font-size:14px;color:#5a6573;font-weight:500">Alle auswählen</span>
+        </div>
+        <sc-if value="{{ hasSelection }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:10px;margin-left:4px">
+            <span style="font-size:13.5px;color:#0f766e;font-weight:600">{{ selectedCountStr }} ausgewählt</span>
+            <span style="position:relative;display:inline-flex;align-items:center">
+              <select onChange="{{ bulkStatus }}" style="appearance:none;-webkit-appearance:none;padding:9px 36px 9px 16px;border:none;background:#0d9488;color:#fff;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer">
+                <option value="">Status ändern …</option>
+                <option>An Kasse senden</option>
+                <option>Als versendet markieren</option>
+                <option>Als bezahlt markieren</option>
+                <option>Stornieren</option>
+              </select>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;right:13px;pointer-events:none"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </span>
+            <span style="position:relative;display:inline-flex;align-items:center">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:14px;pointer-events:none"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+              <select onChange="{{ sammeldruck }}" style="appearance:none;-webkit-appearance:none;padding:9px 36px 9px 38px;border:1px solid #cdeee7;background:#fff;color:#0f766e;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer">
+                <option value="">Sammeldruck …</option>
+                <option>Nur Rechnungen</option>
+                <option>Rechnungen + Leistungsnachweise</option>
+              </select>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;right:13px;pointer-events:none"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </span>
+            <button onClick="{{ clearSelection }}" style="padding:9px 12px;border:none;background:transparent;color:#9aa0aa;border-radius:10px;font-size:13.5px;cursor:pointer">Aufheben</button>
+          </div>
+        </sc-if>
+        <button style="margin-left:auto;display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border:none;background:#0d9488;color:#fff;border-radius:11px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(13,148,136,.28)">+ Neue Rechnung</button>
+      </div>
+
+      <!-- Noch zu erstellen -->
+      <div style="border:1px solid #ecedf0;border-radius:14px;overflow:hidden;margin-bottom:12px">
+        <div onClick="{{ toggleErstellen }}" style="display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;background:#f0fdfa">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .18s;transform:rotate({{ erstellenChev }}deg)"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          <span style="font-weight:700;color:#0f766e;font-size:15.5px">Noch zu erstellen</span>
+          <span style="font-size:12.5px;font-weight:700;color:#0f766e;background:#cdeee7;border-radius:999px;padding:2px 10px">7</span>
+          <span style="font-size:13px;color:#8a8170;margin-left:2px">Leistungsnachweis unterschrieben — Rechnung fehlt</span>
+        </div>
+        <sc-if value="{{ erstellenOpen }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <sc-for list="{{ erstellenList }}" as="c" hint-placeholder-count="7">
+            <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;border-top:1px solid #f2f3f6">
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span style="font-weight:600;color:#26303f;font-size:15px">{{ c.name }}</span>
+                  <span style="font-size:12px;color:#7a8290;background:#f1f2f5;border-radius:7px;padding:2px 9px">{{ c.kasse }}</span>
+                </div>
+                <sc-if value="{{ c.warn }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12.5px;color:#b45309;margin-top:4px;font-weight:500">{{ c.warnText }}</div>
+                </sc-if>
+              </div>
+              <button style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border:1px solid #cdeee7;background:#fff;color:#0f766e;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>Erstellen</button>
+            </div>
+          </sc-for>
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- Bill status groups -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <sc-for list="{{ billGroups }}" as="g" hint-placeholder-count="3">
+          <div style="border:1px solid #ecedf0;border-radius:14px;overflow:hidden">
+            <div onClick="{{ g.onToggle }}" style="display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;background:{{ g.c.soft }}">
+              <sc-if value="{{ g.hasSelect }}" hint-placeholder-val="{{ true }}">
+                <span onClick="{{ g.onGroupSelect }}" style="width:20px;height:20px;border-radius:6px;border:2px solid {{ g.gCheckBorder }};background:{{ g.gCheckBg }};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">
+                  <sc-if value="{{ g.groupChecked }}" hint-placeholder-val="{{ false }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></sc-if>
+                </span>
+              </sc-if>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{ g.c.text }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .18s;transform:rotate({{ g.chev }}deg)"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              <span style="font-weight:700;color:{{ g.c.text }};font-size:15.5px">{{ g.label }}</span>
+              <span style="font-size:12.5px;font-weight:700;color:{{ g.c.text }};background:{{ g.c.bg }};border:1px solid {{ g.c.br }};border-radius:999px;padding:2px 10px">{{ g.countStr }}</span>
+              <span style="font-size:13px;color:#8a8170;margin-left:2px">{{ g.sub }}</span>
+              <span style="margin-left:auto;font-size:15px;font-weight:700;color:#26303f">{{ g.sumStr }}</span>
+            </div>
+            <sc-if value="{{ g.open }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:8px 14px 12px">
+              <sc-for list="{{ g.rows }}" as="b" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:13px;padding:12px 12px;border-radius:11px;border:1px solid #eef0f3;margin-top:7px">
+                  <span onClick="{{ b.onSel }}" style="width:20px;height:20px;border-radius:6px;border:2px solid {{ b.checkBorder }};background:{{ b.checkBg }};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">
+                    <sc-if value="{{ b.checked }}" hint-placeholder-val="{{ false }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></sc-if>
+                  </span>
+                  <span style="font-weight:600;color:#26303f;font-size:14px;min-width:128px">{{ b.id }}</span>
+                  <span style="font-size:12px;font-weight:600;color:#0f766e;border:1px solid #cdeee7;border-radius:7px;padding:2px 9px">Rechnung</span>
+                  <span style="font-size:12px;font-weight:600;color:{{ b.sc.text }};background:{{ b.sc.bg }};border:1px solid {{ b.sc.br }};border-radius:7px;padding:2px 9px">{{ b.statusLabel }}</span>
+                  <span style="font-size:14px;color:#3a4658;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:150px">{{ b.client }} <span style="color:#9aa0aa">{{ b.kasseArrow }}</span></span>
+                  <span style="text-align:right;white-space:nowrap">
+                    <span style="font-size:14.5px;font-weight:700;color:#26303f">{{ b.amountStr }}</span>
+                    <span style="font-size:11.5px;color:#9aa0aa"> {{ b.mwstLabel }}</span>
+                  </span>
+                  <span style="font-size:13px;font-weight:600;min-width:158px;text-align:right;color:{{ b.actionColor }}">{{ b.actionLabel }}</span>
+                  <span style="display:inline-flex;align-items:center;gap:5px;font-size:13px;color:#c0556a;font-weight:500;cursor:pointer">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"></line></svg>Stornieren</span>
+                  <span style="color:#b3b9c2;cursor:pointer;font-size:20px;letter-spacing:1px">⋯</span>
+                </div>
+              </sc-for>
+              <sc-if value="{{ g.hasMore }}" hint-placeholder-val="{{ false }}">
+                <div style="text-align:center;padding:12px;font-size:13.5px;color:#0d9488;font-weight:600;cursor:pointer">+ {{ g.moreStr }} weitere Rechnungen anzeigen</div>
+              </sc-if>
+              <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}">
+                <div style="text-align:center;padding:18px;font-size:13.5px;color:#9aa0aa">Keine Rechnungen in diesem Status.</div>
+              </sc-if>
+            </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:1500},&quot;defaultView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;leistung&quot;,&quot;mitarbeiter&quot;],&quot;default&quot;:&quot;leistung&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wirtschaftlicher Überblick&quot;},&quot;marginHealthColors&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Wirtschaftlicher Überblick&quot;},&quot;pipelineStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;flow&quot;,&quot;funnel&quot;],&quot;default&quot;:&quot;flow&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Status &amp; Termine&quot;}}">
+class Component extends DCLogic {
+  state = {
+    collapsed: false,
+    view: null,
+    expandedEmp: null,
+    sortKey: 'marge',
+    sortDesc: true,
+    month: 'Juni',
+    hideStornos: true,
+    statusFilter: 'alle',
+    expandedAppt: 'Anja Schäfer',
+    tab: 'termine',
+    selected: {},
+    erstellenOpen: true,
+    openGroups: { entwurf: true, versendet: true, bezahlt: false, storniert: false },
+  };
+
+  renderVals() {
+    const r2 = (n, d) => n.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const f = (n) => r2(n, 2) + '\u00A0€';
+    const fn = (n) => n.toLocaleString('de-DE');
+    const fp = (n) => r2(n, 1) + '\u00A0%';
+
+    const rates = {
+      hw: { rev: 38, cost: 16, label: 'Hauswirtschaft', unit: 'Std', dec: 0 },
+      ab: { rev: 42, cost: 18, label: 'Alltagsbegleitung', unit: 'Std', dec: 0 },
+      km: { rev: 0.35, cost: 0.30, label: 'Kilometer', unit: 'km', dec: 2 },
+    };
+    const raw = [
+      { name: 'Anja Schäfer', hw: 64, ab: 12, km: 420 },
+      { name: 'Celine Minuth', hw: 48, ab: 30, km: 380 },
+      { name: 'Christiane Fiebag', hw: 20, ab: 56, km: 510 },
+      { name: 'Janet Klitzsch', hw: 72, ab: 8, km: 290 },
+      { name: 'Sabine Vogt', hw: 36, ab: 40, km: 460 },
+      { name: 'Markus Bauer', hw: 52, ab: 18, km: 330 },
+      { name: 'Yusuf Demir', hw: 28, ab: 48, km: 540 },
+      { name: 'Tomasz Nowak', hw: 40, ab: 24, km: 300 },
+    ];
+    const keys = ['hw', 'ab', 'km'];
+
+    const st = {}; keys.forEach(k => st[k] = { u: 0, rev: 0, cost: 0 });
+    raw.forEach(e => keys.forEach(k => { st[k].u += e[k]; st[k].rev += e[k] * rates[k].rev; st[k].cost += e[k] * rates[k].cost; }));
+    let tRev = 0, tCost = 0; keys.forEach(k => { tRev += st[k].rev; tCost += st[k].cost; });
+    const tMarge = tRev - tCost, tPct = tRev ? tMarge / tRev * 100 : 0;
+    const maxRev = Math.max(...keys.map(k => st[k].rev));
+
+    const scale = this.props.barScale ?? 'revenue';
+    const healthOn = this.props.marginHealthColors ?? true;
+    const health = (p) => !healthOn ? '#0f766e' : (p >= 50 ? '#15803d' : (p >= 35 ? '#b45309' : '#be123c'));
+
+    const services = keys.map(k => {
+      const rev = st[k].rev, cost = st[k].cost, marge = rev - cost, pct = rev ? marge / rev * 100 : 0;
+      const outer = scale === 'ratio' ? 100 : rev / maxRev * 100;
+      return {
+        key: k, label: rates[k].label,
+        rateSub: r2(rates[k].rev, rates[k].dec) + '\u00A0€ / ' + r2(rates[k].cost, rates[k].dec) + '\u00A0€ pro ' + rates[k].unit,
+        units: fn(st[k].u) + '\u00A0' + rates[k].unit,
+        rev: f(rev), cost: f(cost), marge: f(marge), pct: fp(pct), pctColor: health(pct),
+        costW: outer * cost / rev, margeW: outer * marge / rev,
+      };
+    });
+
+    let emps = raw.map(e => {
+      const per = keys.map(k => {
+        const rev = e[k] * rates[k].rev, cost = e[k] * rates[k].cost, marge = rev - cost, pct = rates[k].rev ? (rates[k].rev - rates[k].cost) / rates[k].rev * 100 : 0;
+        return { key: k, label: rates[k].label, units: fn(e[k]) + '\u00A0' + rates[k].unit, rev: f(rev), cost: f(cost), marge: f(marge), pct: fp(pct), pctColor: health(pct) };
+      });
+      const rev = e.hw * 38 + e.ab * 42 + e.km * 0.35;
+      const cost = e.hw * 16 + e.ab * 18 + e.km * 0.30;
+      const marge = rev - cost, pct = rev ? marge / rev * 100 : 0;
+      return { name: e.name, initials: e.name.split(' ').map(s => s[0]).slice(0, 2).join(''), std: fn(e.hw + e.ab) + '\u00A0Std', km: fn(e.km) + '\u00A0km', revN: rev, costN: cost, margeN: marge, rev: f(rev), cost: f(cost), marge: f(marge), pct: fp(pct), pctColor: health(pct), per };
+    });
+    const maxEmpRev = Math.max(...emps.map(e => e.revN));
+    const sk = this.state.sortKey, sd = this.state.sortDesc;
+    emps.sort((a, b) => { if (sk === 'umsatz') return sd ? b.revN - a.revN : a.revN - b.revN; return sd ? b.margeN - a.margeN : a.margeN - b.margeN; });
+    const expN = this.state.expandedEmp;
+    emps = emps.map(e => {
+      const outer = scale === 'ratio' ? 100 : e.revN / maxEmpRev * 100;
+      return { ...e, expanded: e.name === expN, chevDeg: e.name === expN ? 90 : 0, costW: outer * e.costN / e.revN, margeW: outer * e.margeN / e.revN, onToggle: () => this.setState(s => ({ expandedEmp: s.expandedEmp === e.name ? null : e.name })) };
+    });
+
+    const T = {
+      rose: { bg: '#fff1f2', soft: '#fff6f6', text: '#be123c', bar: '#f43f5e', br: '#fecdd3' },
+      amber: { bg: '#fffbeb', soft: '#fffdf6', text: '#b45309', bar: '#f59e0b', br: '#fde68a' },
+      teal: { bg: '#f0fdfa', soft: '#f5fffd', text: '#0f766e', bar: '#14b8a6', br: '#99f6e4' },
+      sky: { bg: '#f0f9ff', soft: '#f7fbff', text: '#0369a1', bar: '#38bdf8', br: '#bae6fd' },
+      violet: { bg: '#f5f3ff', soft: '#faf9ff', text: '#6d28d9', bar: '#8b5cf6', br: '#ddd6fe' },
+      indigo: { bg: '#eef2ff', soft: '#f6f8ff', text: '#4338ca', bar: '#6366f1', br: '#c7d2fe' },
+      green: { bg: '#f0fdf4', soft: '#f7fef9', text: '#15803d', bar: '#22c55e', br: '#bbf7d0' },
+      gray: { bg: '#f3f4f6', soft: '#fafbfc', text: '#6b7280', bar: '#9ca3af', br: '#e5e7eb' },
+    };
+
+    const billGroupForStage = { erstellt: 'entwurf', versendet: 'versendet', avis: 'versendet', bezahlt: 'bezahlt' };
+    const pipeRaw = [
+      { key: 'offen', label: 'Offen', sub: 'noch nicht dokumentiert', count: 32, eur: 2295.00, tone: 'rose', phase: 'Termine' },
+      { key: 'doku', label: 'Dokumentiert', sub: 'ohne Unterschrift', count: 25, eur: 3559.00, tone: 'amber', phase: 'Termine' },
+      { key: 'nachweis', label: 'Leistungsnachweis', sub: 'unterschrieben', count: 20, eur: 1848.50, tone: 'teal', phase: 'Termine' },
+      { key: 'erstellt', label: 'Rechnung erstellt', sub: 'Entwurf', count: 5, eur: 763.73, tone: 'sky', phase: 'Rechnung' },
+      { key: 'versendet', label: 'Versendet', sub: 'an Kasse', count: 81, eur: 11728.82, tone: 'violet', phase: 'Rechnung' },
+      { key: 'avis', label: 'Avis erhalten', sub: 'Zahlungsavis', count: 0, eur: 0, tone: 'indigo', phase: 'Rechnung' },
+      { key: 'bezahlt', label: 'Bezahlt', sub: 'abgeschlossen', count: 0, eur: 0, tone: 'green', phase: 'Rechnung' },
+    ];
+    const maxC = Math.max(...pipeRaw.map(s => s.count));
+    const mkStage = (s) => {
+      const onPick = s.phase === 'Termine'
+        ? () => this.setState({ tab: 'termine', statusFilter: s.key, expandedAppt: null })
+        : () => this.setState(stt => ({ tab: 'rechnungen', openGroups: { ...stt.openGroups, [billGroupForStage[s.key]]: true } }));
+      return { ...s, c: T[s.tone], countStr: fn(s.count), eurStr: f(s.eur), w: Math.max(s.count / maxC * 100, 2), onPick };
+    };
+    const stagesT = pipeRaw.filter(s => s.phase === 'Termine').map(mkStage);
+    const stagesR = pipeRaw.filter(s => s.phase === 'Rechnung').map(mkStage);
+    const stagesAll = pipeRaw.map(mkStage);
+    const sideStates = [{ label: 'Storniert', countStr: '10', eurStr: f(0) }, { label: 'Kunde nicht angetroffen', countStr: '3', eurStr: f(127.50) }];
+
+    // ----- appointments -----
+    const clients = ['Ramona Kraft', 'Catrin Barz', 'Renate Krause', 'Christoph Hennig', 'Ursula Neuber', 'Günter Hofmann', 'Helga Trojahn', 'Klaus J. Ebeling'];
+    const dist = ['versendet', 'doku', 'versendet', 'nachweis', 'offen', 'versendet', 'doku', 'erstellt', 'versendet', 'nachweis', 'offen', 'doku', 'versendet', 'bezahlt'];
+    const SM = {
+      offen: { label: 'Offen', pill: 'Geplant', groupLabel: 'offene(r) Termin(e)', tone: 'rose' },
+      doku: { label: 'Dokumentiert', pill: 'Dokumentiert', groupLabel: 'Termin(e) ohne Unterschrift', tone: 'amber' },
+      nachweis: { label: 'Leistungsnachweis', pill: 'Unterschrieben', groupLabel: 'Termin(e) im Leistungsnachweis', tone: 'teal' },
+      erstellt: { label: 'Rechnung erstellt', pill: 'Entwurf', groupLabel: 'Termin(e) — Rechnung erstellt', tone: 'sky' },
+      versendet: { label: 'Versendet', pill: 'Versendet', groupLabel: 'Termin(e) — versendet', tone: 'violet' },
+      bezahlt: { label: 'Bezahlt', pill: 'Bezahlt', groupLabel: 'Termin(e) — bezahlt', tone: 'green' },
+    };
+    const lifecycle = ['offen', 'doku', 'nachweis', 'erstellt', 'versendet', 'bezahlt'];
+    const appts = [];
+    raw.forEach((e, i) => {
+      const N = 8 + (i % 4) * 2;
+      for (let j = 0; j < N; j++) {
+        const status = dist[(i * 3 + j) % dist.length];
+        const day = ((i * 5 + j * 3) % 27) + 1;
+        const time = ['13:30', '14:00', '17:00'][(i + j) % 3];
+        const client = clients[(i + j) % clients.length];
+        const service = (j % 3 === 0) ? 'ab' : 'hw';
+        appts.push({ emp: e.name, status, date: ('0' + day).slice(-2) + '.06.2026', time, client, service, dd: day });
+      }
+    });
+    const statusFilter = this.state.statusFilter;
+    const totalAppts = appts.length;
+    const chipsRaw = [{ key: 'alle', label: 'Alle', count: totalAppts, tone: 'gray' }].concat(lifecycle.map(k => ({ key: k, label: SM[k].label, count: appts.filter(a => a.status === k).length, tone: SM[k].tone })));
+    const chips = chipsRaw.map(c => {
+      const active = statusFilter === c.key, cc = T[c.tone];
+      return { ...c, active, countStr: fn(c.count), bgCol: active ? cc.bg : '#fff', textCol: active ? cc.text : '#5a6573', borderCol: active ? cc.br : '#e3e6ea', onPick: () => this.setState({ statusFilter: c.key, expandedAppt: c.key === 'alle' ? 'Anja Schäfer' : null }) };
+    });
+    let panels = raw.map((e) => {
+      const mine = appts.filter(a => a.emp === e.name);
+      const counts = {}; lifecycle.forEach(k => counts[k] = mine.filter(a => a.status === k).length);
+      const groupsKeys = lifecycle.filter(k => counts[k] > 0 && (statusFilter === 'alle' || statusFilter === k));
+      const groups = groupsKeys.map(k => {
+        const list = mine.filter(a => a.status === k).sort((x, y) => x.dd - y.dd);
+        const m = SM[k], c = T[m.tone];
+        return { key: k, groupLabel: m.groupLabel, countStr: fn(list.length), c, appts: list.map(a => ({ date: a.date, time: a.time, client: a.client, serviceLabel: a.service === 'hw' ? 'Hausw.' : 'Alltagsb.', c, pill: m.pill })) };
+      });
+      const pills = [];
+      if (counts.offen > 0) pills.push({ label: fn(counts.offen) + ' offen', c: T.rose });
+      if (counts.doku > 0) pills.push({ label: fn(counts.doku) + ' ohne Nachweis', c: T.amber });
+      const done = counts.versendet + counts.bezahlt; if (done > 0) pills.push({ label: fn(done) + ' abgerechnet', c: T.violet });
+      const expanded = statusFilter !== 'alle' ? true : (e.name === this.state.expandedAppt);
+      return { name: e.name, initials: e.name.split(' ').map(s => s[0]).slice(0, 2).join(''), totalStr: fn(mine.length), expanded, chevDeg: expanded ? 180 : 0, pills, groups, hasGroups: groups.length > 0, onToggle: () => this.setState(s => ({ expandedAppt: s.expandedAppt === e.name ? null : e.name })) };
+    });
+    if (statusFilter !== 'alle') panels = panels.filter(p => p.hasGroups);
+
+    // ----- bills -----
+    const erstellenRaw = [
+      { name: 'Luzia Pohlers' }, { name: 'Gudrun Hentschel' },
+      { name: 'Maxim Nicolai Käthe', warn: 'Nur 1/2 dokumentierte Termine im Leistungsnachweis' },
+      { name: 'Eckhard Schwerdtfeger' }, { name: 'Cornelia Posern' }, { name: 'Frank Lairitz' }, { name: 'Uwe Carsten Oehme' },
+    ];
+    const erstellenList = erstellenRaw.map(c => ({ name: c.name, kasse: 'Pflegekasse (gesetzlich)', warn: !!c.warn, warnText: c.warn || '' }));
+
+    const billsRaw = [
+      { id: 'RE-2026-0307', client: 'Christoph Hennig', kasse: null, amount: 38.88, status: 'entwurf', mwst: false },
+      { id: 'RE-2026-0302', client: 'Anita Theuermeister', kasse: null, amount: 291.56, status: 'entwurf', mwst: true },
+      { id: 'RE-2026-0263', client: 'Ursula Neuber', kasse: 'Siemens BKK (SBK)', amount: 304.91, status: 'entwurf', mwst: false },
+      { id: 'RE-2026-0252', client: 'Günter Hofmann', kasse: null, amount: 79.85, status: 'entwurf', mwst: false },
+      { id: 'RE-2026-0250', client: 'Helga Trojahn', kasse: null, amount: 49.17, status: 'entwurf', mwst: true },
+      { id: 'RE-2026-0305', client: 'Christine Proßwimmer', kasse: 'AOK PLUS', amount: 157.43, status: 'versendet', sent: '26.06.2026' },
+      { id: 'RE-2026-0303', client: 'Martin Schmidt', kasse: 'Techniker Krankenkasse', amount: 118.10, status: 'versendet', sent: '26.06.2026' },
+      { id: 'RE-2026-0301', client: 'Klaus Jürgen Ebeling', kasse: 'Pflegekasse AOK Rheinland/Hamburg', amount: 296.94, status: 'versendet', sent: '26.06.2026' },
+      { id: 'RE-2026-0298', client: 'Renate Krause', kasse: 'AOK PLUS', amount: 204.30, status: 'versendet', sent: '25.06.2026' },
+      { id: 'RE-2026-0296', client: 'Ramona Kraft', kasse: 'BARMER', amount: 262.08, status: 'versendet', sent: '25.06.2026' },
+      { id: 'RE-2026-0241', client: 'Dieter Falk', kasse: null, amount: 0, status: 'storniert' },
+      { id: 'RE-2026-0238', client: 'Margot Seidel', kasse: null, amount: 0, status: 'storniert' },
+    ];
+    const billStatusMeta = { entwurf: { label: 'Entwurf', tone: 'amber' }, versendet: { label: 'Versendet', tone: 'violet' }, bezahlt: { label: 'Bezahlt', tone: 'green' }, storniert: { label: 'Storniert', tone: 'gray' } };
+    const sel = this.state.selected;
+    const mkBillRow = (b) => {
+      const sm = billStatusMeta[b.status], c = T[sm.tone];
+      let actionLabel = '', actionColor = '#8a909a';
+      if (b.status === 'entwurf') { actionLabel = b.kasse ? 'An Kasse senden →' : 'Als versendet markieren'; actionColor = b.kasse ? '#2563eb' : '#0f766e'; }
+      else if (b.status === 'versendet') { actionLabel = 'Versendet ' + b.sent; actionColor = '#8a909a'; }
+      else if (b.status === 'bezahlt') { actionLabel = 'Bezahlt ' + b.paid; actionColor = '#15803d'; }
+      else { actionLabel = 'Storniert'; actionColor = '#9aa0aa'; }
+      const checked = !!sel[b.id];
+      return {
+        id: b.id, client: b.client, statusLabel: sm.label, sc: c,
+        kasseArrow: b.kasse ? '→ ' + b.kasse : '', amountStr: f(b.amount), mwstLabel: b.mwst ? 'inkl. MwSt.' : '',
+        actionLabel, actionColor, checked, checkBg: checked ? '#0d9488' : '#fff', checkBorder: checked ? '#0d9488' : '#cfd4da',
+        onSel: () => this.setState(s => ({ selected: { ...s.selected, [b.id]: !s.selected[b.id] } })),
+      };
+    };
+    const og = this.state.openGroups;
+    const groupRows = (status) => billsRaw.filter(b => b.status === status).map(mkBillRow);
+    const mkGroup = (key, label, sub, count, sum, rows, more) => {
+      const ids = billsRaw.filter(b => b.status === key).map(b => b.id);
+      const hasSelect = ids.length > 0;
+      const groupChecked = hasSelect && ids.every(id => sel[id]);
+      return {
+        key, label, sub, countStr: fn(count), sumStr: f(sum), c: T[billStatusMeta[key].tone],
+        open: !!og[key], chev: og[key] ? 90 : 0, rows, hasMore: more > 0, moreStr: fn(more || 0), empty: rows.length === 0,
+        hasSelect, groupChecked, gCheckBg: groupChecked ? '#0d9488' : '#fff', gCheckBorder: groupChecked ? '#0d9488' : '#cfd4da',
+        onGroupSelect: (e) => { if (e && e.stopPropagation) e.stopPropagation(); const ns = { ...sel }; if (groupChecked) ids.forEach(id => delete ns[id]); else ids.forEach(id => ns[id] = true); this.setState({ selected: ns }); },
+        onToggle: () => this.setState(s => ({ openGroups: { ...s.openGroups, [key]: !s.openGroups[key] } })),
+      };
+    };
+    const billGroups = [
+      mkGroup('entwurf', 'Noch zu versenden', 'Entwürfe — an Kasse senden oder als versendet markieren', 5, 764.37, groupRows('entwurf'), 0),
+      mkGroup('versendet', 'Avis ausstehend', 'An Pflegekassen versendet — auf Zahlungsavis warten', 81, 11728.82, groupRows('versendet'), 76),
+      mkGroup('bezahlt', 'Bezahlt', 'abgeschlossen — kein offener Betrag', 0, 0, [], 0),
+      mkGroup('storniert', 'Storniert', 'stornierte Rechnungen', 10, 0, groupRows('storniert'), 8),
+    ];
+
+    const selectableIds = billsRaw.filter(b => b.status !== 'bezahlt').map(b => b.id);
+    const selectedCount = Object.keys(sel).filter(k => sel[k]).length;
+    const allChecked = selectedCount > 0 && selectedCount === selectableIds.length;
+
+    // ----- tabs -----
+    const tab = this.state.tab;
+    const rechnungenOpen = 7 + 5;
+    const tabBase = 'display:inline-flex;align-items:center;gap:9px;padding:12px 22px;border-radius:13px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;';
+    const tabOn = tabBase + 'background:#0d9488;color:#fff;box-shadow:0 3px 10px rgba(13,148,136,.26);';
+    const tabOff = tabBase + 'background:#f1f2f5;color:#5a6573;';
+    const badgeOn = 'display:inline-flex;align-items:center;font-size:12px;font-weight:700;border-radius:999px;padding:1px 9px;background:rgba(255,255,255,.25);color:#fff;';
+    const badgeOff = 'display:inline-flex;align-items:center;font-size:12px;font-weight:700;border-radius:999px;padding:1px 9px;background:#fff;color:#5a6573;';
+
+    const view = this.state.view ?? (this.props.defaultView ?? 'leistung');
+    const pStyle = this.props.pipelineStyle ?? 'flow';
+    const segBase = 'padding:9px 20px;border-radius:10px;font-size:14px;cursor:pointer;border:1px solid transparent;transition:all .15s;';
+    const segOn = segBase + 'background:#fff;color:#0f766e;border-color:#cdeee7;box-shadow:0 1px 2px rgba(20,30,40,.10);font-weight:600;';
+    const segOff = segBase + 'background:transparent;color:#6b7280;font-weight:500;';
+
+    return {
+      monthLabel: (this.state.month || 'Juni') + ' 2026',
+      kUmsatz: f(tRev), kLohn: f(tCost), kMarge: f(tMarge), kPct: fp(tPct), kPctNum: Math.round(tPct), kMargeColor: health(tPct),
+      miniKpi: 'Umsatz ' + f(tRev) + '\u00A0\u00A0·\u00A0\u00A0Marge ' + f(tMarge) + ' (' + fp(tPct) + ')',
+      collapsed: this.state.collapsed, expanded: !this.state.collapsed, chevDeg: this.state.collapsed ? 0 : 180,
+      isLeistung: view === 'leistung', isMitarbeiter: view === 'mitarbeiter',
+      leistungStyle: view === 'leistung' ? segOn : segOff, mitarbeiterStyle: view === 'mitarbeiter' ? segOn : segOff,
+      services, employees: emps,
+      isFlow: pStyle === 'flow', isFunnel: pStyle === 'funnel',
+      stagesT, stagesR, stagesAll, sideStates,
+      chips, panels, totalApptStr: fn(totalAppts),
+      sortMargeArrow: sk === 'marge' ? (sd ? '↓' : '↑') : '', sortUmsatzArrow: sk === 'umsatz' ? (sd ? '↓' : '↑') : '',
+      // tabs
+      isTermine: tab === 'termine', isRechnungen: tab === 'rechnungen',
+      termineTabStyle: tab === 'termine' ? tabOn : tabOff, rechnungenTabStyle: tab === 'rechnungen' ? tabOn : tabOff,
+      termineBadge: tab === 'termine' ? badgeOn : badgeOff, rechnungenBadge: tab === 'rechnungen' ? badgeOn : badgeOff,
+      rechnungenOpenStr: fn(rechnungenOpen),
+      setTermine: () => this.setState({ tab: 'termine' }), setRechnungen: () => this.setState({ tab: 'rechnungen' }),
+      // bills
+      erstellenList, erstellenOpen: this.state.erstellenOpen, erstellenChev: this.state.erstellenOpen ? 90 : 0,
+      toggleErstellen: () => this.setState(s => ({ erstellenOpen: !s.erstellenOpen })),
+      billGroups,
+      allChecked, allCheckBg: allChecked ? '#0d9488' : '#fff', allCheckBorder: allChecked ? '#0d9488' : '#cfd4da',
+      toggleSelectAll: () => { const all = {}; if (!allChecked) selectableIds.forEach(id => all[id] = true); this.setState({ selected: all }); },
+      hasSelection: selectedCount > 0, selectedCountStr: fn(selectedCount), clearSelection: () => this.setState({ selected: {} }),
+      bulkStatus: (e) => { if (e.target.value) this.setState({ selected: {} }); },
+      sammeldruck: (e) => { e.target.value = ''; },
+      // filters
+      month: this.state.month, setMonth: (e) => this.setState({ month: e.target.value }),
+      hideStornos: this.state.hideStornos, toggleStornos: () => this.setState(s => ({ hideStornos: !s.hideStornos })),
+      stornosLabel: this.state.hideStornos ? 'Stornos ausblenden' : 'Stornos einblenden',
+      stornosBg: this.state.hideStornos ? '#0d9488' : '#cfd4da', stornosX: this.state.hideStornos ? 21 : 3,
+      statusFilter, clearFilter: () => this.setState({ statusFilter: 'alle', expandedAppt: 'Anja Schäfer' }), filterActive: statusFilter !== 'alle',
+      // collapse / sort / view
+      toggleCollapsed: () => this.setState(s => ({ collapsed: !s.collapsed })),
+      setLeistung: () => this.setState({ view: 'leistung' }), setMitarbeiter: () => this.setState({ view: 'mitarbeiter' }),
+      sortMarge: () => this.setState(s => ({ sortKey: 'marge', sortDesc: s.sortKey === 'marge' ? !s.sortDesc : true })),
+      sortUmsatz: () => this.setState(s => ({ sortKey: 'umsatz', sortDesc: s.sortKey === 'umsatz' ? !s.sortDesc : true })),
+    };
+  }
+}
+</script>
+</body>
+</html>
