@@ -173,3 +173,9 @@ id = "XFacgIhg8onKWbVs3DpUq"
 uri = "file://.local/tasks/engeldesk-cleanup-surface-inventory.md"
 type = "text"
 title = "EngelDesk Cleanup-Surface Inventory + Phased Drop Plan"
+
+[[outputs]]
+id = "7WDVdU6hFqQWWBlNvWRbE"
+uri = "file://.local/tasks/monatsabschluss-removal-assessment.md"
+type = "text"
+title = "Monatsabschluss Removal Assessment"
