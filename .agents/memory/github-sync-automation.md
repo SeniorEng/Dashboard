@@ -33,6 +33,27 @@ has no `workflow` scope → GH013), so a GitHub-Actions-based sync is self-defea
   that the sync runs with no manual steps. Full runbook in
   `docs/ci-pipeline.md` → "Automatisierter Sync".
 
+## GITHUB_WORKFLOW_PAT expires; false "WARNUNG" after a good push
+
+`GITHUB_WORKFLOW_PAT` (and `GITHUB_PERSONAL_ACCESS_TOKEN`) are manually-minted
+classic PATs that **expire** — when they do, the Scheduled-Deployment sync fails
+silently and the backlog grows (40-commit catch-up was a stalled sync). The fix
+is purely a fresh classic PAT with `repo`+`workflow` scopes; no code change.
+Diagnose before chasing the script: `curl -H "Authorization: Bearer $TOKEN"
+https://api.github.com/user` → 401 = dead token, `x-oauth-scopes` shows scopes.
+The OAuth connector token (`listConnections('github')[0].settings.access_token`)
+is always fresh but has `repo` only (no `workflow`), so it hits GH013 on any
+commit touching `.github/workflows/*` — it cannot replace the PAT.
+
+**Script gotcha:** after a *successful* PAT push, `github-sync.sh` may still print
+`WARNUNG: Remote-SHA ... unbekannt` because its `remote_sha`/`verify_pushed` read
+uses the (often-expired) connector token FIRST. Don't trust that warning — verify
+independently with `git fetch origin main` + `git rev-list --count origin/main..HEAD`.
+
+**Agent env note:** newly-added secrets ARE live in freshly-spawned bash tool
+processes (proven with a `setEnvVars` probe round-trip) — a 401 on a just-added
+token is the token being bad, not a stale env.
+
 ## One-time divergence reconcile (force-push through branch protection)
 
 Steady-state pushes are fast-forwards. If GitHub `main` has *diverged* (GitHub-only
