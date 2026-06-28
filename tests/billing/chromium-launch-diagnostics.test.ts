@@ -39,6 +39,7 @@ const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 const ORIGINAL_CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ORIGINAL_SINGLE_PROCESS = process.env.PUPPETEER_SINGLE_PROCESS;
 const ORIGINAL_NO_ZYGOTE = process.env.PUPPETEER_NO_ZYGOTE;
+const ORIGINAL_LAUNCH_TIMEOUT = process.env.BROWSER_LAUNCH_TIMEOUT_MS;
 
 beforeEach(() => {
   existsSyncMock.mockReset();
@@ -47,6 +48,7 @@ beforeEach(() => {
   delete process.env.CHROMIUM_PATH;
   delete process.env.PUPPETEER_SINGLE_PROCESS;
   delete process.env.PUPPETEER_NO_ZYGOTE;
+  delete process.env.BROWSER_LAUNCH_TIMEOUT_MS;
 });
 
 afterEach(() => {
@@ -57,6 +59,8 @@ afterEach(() => {
   else process.env.PUPPETEER_SINGLE_PROCESS = ORIGINAL_SINGLE_PROCESS;
   if (ORIGINAL_NO_ZYGOTE === undefined) delete process.env.PUPPETEER_NO_ZYGOTE;
   else process.env.PUPPETEER_NO_ZYGOTE = ORIGINAL_NO_ZYGOTE;
+  if (ORIGINAL_LAUNCH_TIMEOUT === undefined) delete process.env.BROWSER_LAUNCH_TIMEOUT_MS;
+  else process.env.BROWSER_LAUNCH_TIMEOUT_MS = ORIGINAL_LAUNCH_TIMEOUT;
 });
 
 describe("runChromiumPreflight (Task #550)", () => {
@@ -200,5 +204,83 @@ describe("Launch-Timeout — Chromium-Output landet im Fehler-Log (Task #550)", 
     );
     expect(dumpLogged).toBe(true);
     errorSpy.mockRestore();
+  });
+});
+
+describe("isRecoverablePuppeteerError — Navigations-Race (Task #1467)", () => {
+  it("behandelt 'Execution context was destroyed, ... navigation.' als recoverable", async () => {
+    const { isRecoverablePuppeteerError } = await freshModule();
+    const err = new Error(
+      "Execution context was destroyed, most likely because of a navigation.",
+    );
+    expect(isRecoverablePuppeteerError(err)).toBe(true);
+  });
+
+  it("erkennt den Navigations-Race auch ohne Error-Instanz (nur message-Feld)", async () => {
+    const { isRecoverablePuppeteerError } = await freshModule();
+    expect(
+      isRecoverablePuppeteerError({
+        message: "Execution context was destroyed, most likely because of a navigation.",
+      }),
+    ).toBe(true);
+  });
+
+  it("klassifiziert einen unverwandten Fehler weiterhin als NICHT recoverable", async () => {
+    const { isRecoverablePuppeteerError } = await freshModule();
+    expect(isRecoverablePuppeteerError(new Error("Totally unrelated boom"))).toBe(false);
+  });
+});
+
+describe("Launch-Timeout-Default & Override (Task #1467)", () => {
+  // Hilfsfunktion: triggert genau EINEN Browser-Launch und gibt das an
+  // puppeteer.launch übergebene Optionen-Objekt zurück. So prüfen wir, dass
+  // der aufgelöste Timeout TATSÄCHLICH bis zum Launch-Aufruf durchgereicht
+  // wird (statt nur einen internen Helper isoliert zu testen).
+  async function captureLaunchOptions(): Promise<{ timeout: number; protocolTimeout: number }> {
+    existsSyncMock.mockImplementation((p: string) => p === "/usr/bin/chromium");
+    execFileSyncMock.mockImplementation((bin: string, args: string[]) => {
+      if (bin === "which") throw new Error("not found");
+      if (bin === "/usr/bin/chromium" && args[0] === "--version") return "Chromium 1.2.3";
+      throw new Error("unexpected");
+    });
+    const fakeBrowser = { on: vi.fn(), connected: true };
+    launchMock.mockResolvedValue(fakeBrowser as never);
+    const { getBrowser } = await freshModule();
+    await getBrowser();
+    expect(launchMock).toHaveBeenCalledTimes(1);
+    return launchMock.mock.calls[0][0] as { timeout: number; protocolTimeout: number };
+  }
+
+  it("nutzt in Production den höheren Default von 60s", async () => {
+    process.env.NODE_ENV = "production";
+    const opts = await captureLaunchOptions();
+    expect(opts.timeout).toBe(60_000);
+  });
+
+  it("bleibt in Development/Test beim schnellen 20s-Default", async () => {
+    process.env.NODE_ENV = "development";
+    const opts = await captureLaunchOptions();
+    expect(opts.timeout).toBe(20_000);
+  });
+
+  it("respektiert BROWSER_LAUNCH_TIMEOUT_MS als Override (auch in Production)", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.BROWSER_LAUNCH_TIMEOUT_MS = "90000";
+    const opts = await captureLaunchOptions();
+    expect(opts.timeout).toBe(90_000);
+  });
+
+  it("ignoriert ungültige BROWSER_LAUNCH_TIMEOUT_MS-Werte und fällt auf den Default zurück", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.BROWSER_LAUNCH_TIMEOUT_MS = "nonsense";
+    const opts = await captureLaunchOptions();
+    expect(opts.timeout).toBe(60_000);
+  });
+
+  it("hält den Protocol-Timeout mindestens auf Launch-Timeout-Höhe (kein neuer Engpass)", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.BROWSER_LAUNCH_TIMEOUT_MS = "90000";
+    const opts = await captureLaunchOptions();
+    expect(opts.protocolTimeout).toBeGreaterThanOrEqual(opts.timeout);
   });
 });
