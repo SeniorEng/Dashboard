@@ -395,6 +395,46 @@ export async function getBrowser(): Promise<Browser> {
   return launchPromise;
 }
 
+// Task #1479: Chromium beim Boot vorwärmen (PDF-Cold-Start vermeiden).
+// Heute startet der Browser LAZY beim ersten PDF-Render — im Autoscale zahlt
+// damit die erste echte PDF-Anfrage einer frischen Instanz den pathologisch
+// langsamen Chromium-Cold-Launch (Binary-Erstzugriff aus /nix/store) auf dem
+// kritischen Request-Pfad, wo das Launch-Timeout zuschlägt. Diese Funktion
+// stößt EINEN Launch über das bestehende Singleton (`getBrowser`) an, sodass
+// der Cost einmal beim Boot bezahlt wird.
+//
+// Garantien:
+//  - WIRFT NIE (Fehler werden nur zurückgegeben, nie geworfen) — der Aufrufer
+//    soll sie non-blocking nach dem HTTP-Listener anstoßen können.
+//  - Kein Doppel-Launch, wenn bereits ein Browser verbunden ist.
+//  - Bei nicht verfügbarem Chromium (kein Binary / ChromiumUnavailableError)
+//    sauberer, leiser Abbruch ohne Launch-Versuch.
+//  - Nutzt `getBrowser()` (Singleton + Single-in-flight-`launchPromise`):
+//    rennt das Pre-Warm gegen einen gleichzeitigen ersten Render, teilen sich
+//    beide denselben `launchPromise` → genau ein Launch.
+export async function prewarmBrowser(): Promise<
+  { ok: true; skipped?: boolean } | { ok: false; error: string }
+> {
+  // Bereits verbunden → nichts vorzuwärmen, kein zweiter Launch.
+  if (browserInstance && browserInstance.connected) {
+    return { ok: true, skipped: true };
+  }
+  // Chromium-Binary nicht auffindbar → leise abbrechen, keinen Launch wagen.
+  if (!isChromiumAvailable()) {
+    return { ok: false, error: "Chromium-Binary nicht verfügbar" };
+  }
+  try {
+    await getBrowser();
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ChromiumUnavailableError) {
+      return { ok: false, error: "Chromium-Binary nicht verfügbar" };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
+  }
+}
+
 export async function discardBrowser(): Promise<void> {
   const b = browserInstance;
   browserInstance = null;

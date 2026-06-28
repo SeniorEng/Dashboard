@@ -319,6 +319,93 @@ describe("withFreshPage — Recovery von 'Navigating frame was detached' unter L
   });
 });
 
+describe("prewarmBrowser — Boot-Pre-Warm (Task #1479)", () => {
+  const ORIGINAL_CHROMIUM_PATH = process.env.CHROMIUM_PATH;
+
+  beforeEach(() => {
+    // `resolveChromiumPath()` nimmt CHROMIUM_PATH als erste Quelle und prüft
+    // nur, ob der Pfad existiert. Der Node-Prozess-Pfad existiert garantiert,
+    // sodass `isChromiumAvailable()` true liefert — der eigentliche Launch ist
+    // über `puppeteer-core` gemockt, es wird also nie Node als Chromium gestartet.
+    process.env.CHROMIUM_PATH = process.execPath;
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_CHROMIUM_PATH === undefined) delete process.env.CHROMIUM_PATH;
+    else process.env.CHROMIUM_PATH = ORIGINAL_CHROMIUM_PATH;
+  });
+
+  it("löst genau einen Launch aus; ein folgender withFreshPage-Render teilt den Browser (kein 2. Launch)", async () => {
+    const { prewarmBrowser, withFreshPage } = await freshModule();
+
+    const page = makePage();
+    const browser = makeBrowser(async () => page);
+    launchMock.mockResolvedValue(browser);
+
+    const warm = await prewarmBrowser();
+    expect(warm.ok).toBe(true);
+    // Genau EIN Launch durch das Pre-Warm.
+    expect(launchMock).toHaveBeenCalledTimes(1);
+    // Pre-Warm öffnet keine Page — es fährt nur das Singleton hoch.
+    expect(browser.newPage).not.toHaveBeenCalled();
+
+    // Die erste echte PDF-Anfrage findet den vorgewärmten Browser verbunden vor.
+    const result = await withFreshPage(async (p) => {
+      expect(p).toBe(page);
+      return "rendered-ok";
+    });
+
+    expect(result).toBe("rendered-ok");
+    // KEIN zweiter Launch — geteiltes Browser-Singleton.
+    expect(launchMock).toHaveBeenCalledTimes(1);
+    expect(browser.newPage).toHaveBeenCalledTimes(1);
+    expect(page.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("ist idempotent: ein 2. Pre-Warm bei verbundenem Browser löst keinen weiteren Launch aus", async () => {
+    const { prewarmBrowser } = await freshModule();
+
+    const browser = makeBrowser(async () => makePage());
+    launchMock.mockResolvedValue(browser);
+
+    const first = await prewarmBrowser();
+    expect(first).toEqual({ ok: true });
+    const second = await prewarmBrowser();
+    expect(second).toMatchObject({ ok: true, skipped: true });
+    expect(launchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("zwei parallele Render nach Pre-Warm teilen denselben Browser (genau ein Launch, je eigene Page, beide geschlossen)", async () => {
+    const { prewarmBrowser, withFreshPage } = await freshModule();
+
+    const allPages: FakePage[] = [];
+    const browser = makeBrowser(async () => {
+      const page = makePage();
+      allPages.push(page);
+      return page;
+    });
+    launchMock.mockResolvedValue(browser);
+
+    await prewarmBrowser();
+    expect(launchMock).toHaveBeenCalledTimes(1);
+
+    const [a, b] = await Promise.all([
+      withFreshPage(async () => "a"),
+      withFreshPage(async () => "b"),
+    ]);
+
+    expect(a).toBe("a");
+    expect(b).toBe("b");
+    // Genau ein Launch (vom Pre-Warm) — die parallelen Render teilen ihn.
+    expect(launchMock).toHaveBeenCalledTimes(1);
+    expect(browser.newPage).toHaveBeenCalledTimes(2);
+    expect(allPages).toHaveLength(2);
+    for (const p of allPages) {
+      expect(p.close).toHaveBeenCalledTimes(1);
+    }
+  });
+});
+
 describe("withFreshPage — Race-Timeout gegen hängendes Chromium (Task #521)", () => {
   it("bricht hängenden Render nach PAGE_RENDER_TIMEOUT_MS mit klarer Fehlermeldung ab", async () => {
     const { withFreshPage } = await freshModule();

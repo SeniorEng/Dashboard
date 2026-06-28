@@ -804,10 +804,35 @@ async function runStartupTasks() {
     // Ausführbarkeit, damit Backfill/Render nicht in N × 30s-Timeouts gegen
     // ein totes Binary laufen. Ergebnis landet im /api/health-Endpoint.
     try {
-      const { runChromiumPreflight } = await import("./services/pdf-generator");
+      const { runChromiumPreflight, prewarmBrowser } = await import("./services/pdf-generator");
       const result = runChromiumPreflight();
       if (result.ok) {
         log(`Chromium-Pre-Flight OK (${result.version}) @ ${result.path}`, "startup");
+        // Task #1479: Chromium NACH dem Listener non-blocking vorwärmen, damit
+        // der pathologisch langsame Cold-Launch einmal beim Boot bezahlt wird
+        // und nicht auf dem kritischen Pfad der ersten PDF-Anfrage zuschlägt.
+        // Kein `await` — Readiness/`/api/health` bleiben unabhängig vom Warm-up-
+        // Status. `prewarmBrowser()` wirft nie; Fehler werden nur geloggt. Nur
+        // anstoßen, wenn der Preflight Chromium als verfügbar meldet.
+        log("Chromium wird vorgewärmt …", "startup");
+        prewarmBrowser()
+          .then((warm) => {
+            if (warm.ok) {
+              log(
+                warm.skipped
+                  ? "Chromium vorgewärmt — bereits verbunden, kein erneuter Launch."
+                  : "Chromium vorgewärmt — Browser bereit für die erste PDF-Anfrage.",
+                "startup",
+              );
+            } else {
+              log(
+                `Chromium-Vorwärmen fehlgeschlagen: ${warm.error}. ` +
+                  "Die erste PDF-Anfrage trägt den Cold-Launch; das Retry-Sicherheitsnetz bleibt aktiv.",
+                "startup",
+              );
+            }
+          })
+          .catch((err) => log(`Chromium-Vorwärmen Fehler: ${err}`, "startup"));
       } else {
         log(
           `Chromium-Pre-Flight FEHLGESCHLAGEN @ ${result.path ?? "—"}: ${result.error}. ` +
