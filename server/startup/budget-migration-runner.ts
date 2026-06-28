@@ -209,7 +209,6 @@ export async function runBudgetDataMigrations(): Promise<void> {
   const { cleanupLegacyAutoAllocations } = await import(
     "./cleanup-legacy-auto-allocations-migration"
   );
-  const { dropBudgetLedger } = await import("./drop-budget-ledger");
 
   // Reihenfolge ist relevant: #685 hängt von der Keep-Wahl aus #684 ab.
   // Alle vier Carryover-/Drift-Backfills setzen voraus, dass
@@ -294,33 +293,13 @@ export async function runBudgetDataMigrations(): Promise<void> {
     );
   }
 
-  // Task #1443/#1446 — Finale Entfernung des redundanten budget_ledger-Spiegels
-  // (FK-Spalte budget_reservations.captured_ledger_id + Tabelle budget_ledger).
-  // Die #1443-Verifikation gab GO (62/62 Prod-Zeilen 1:1 gespiegelt, kein
-  // Live-Reader/Writer, FK-sicherer Zwei-Schritt-Drop bestätigt). Droppt
-  // GoBD-historisierte Struktur ⇒ nur bei ausdrücklicher Freigabe
-  // `APPROVED_DROP_BUDGET_LEDGER` registriert (Default = nicht registriert, kein
-  // Ledger-Eintrag ⇒ kann nach erteilter Freigabe beim nächsten Boot noch
-  // laufen). Über den Wrapper: EINE Transaktion, advisory-lock, exactly-once-
-  // Ledger-Insert und PRE/POST-Conservation mit Auto-Rollback (Defaults true).
-  // Das Flag MUSS im Deployment/Production-Scope gesetzt werden (nicht dev).
-  const dropLedgerApproved = /^(1|true)$/i.test(
-    (process.env.APPROVED_DROP_BUDGET_LEDGER ?? "").trim(),
-  );
-  if (dropLedgerApproved) {
-    migrations.push({
-      name: "drop-budget-ledger-1443",
-      version: "1",
-      migrate: dropBudgetLedger,
-    });
-  } else {
-    log(
-      "[budget-migration] 'drop-budget-ledger-1443' übersprungen: " +
-        "Freigabe-Flag APPROVED_DROP_BUDGET_LEDGER nicht gesetzt " +
-        "(Sign-off erforderlich, kein Ledger-Eintrag).",
-      "startup",
-    );
-  }
+  // Task #1443/#1446/#1486 — Die finale Entfernung des redundanten
+  // budget_ledger-Spiegels (FK-Spalte budget_reservations.captured_ledger_id +
+  // Tabelle budget_ledger) ist in Prod über die gegatete Guarded-Migration
+  // `drop-budget-ledger-1443` abgeschlossen. Das Drop-Gerüst (Migration, Flag
+  // APPROVED_DROP_BUDGET_LEDGER, Preflight-Deskriptor, Schema-Deklaration) wurde
+  // danach in Task #1486 entfernt — SoT der Buchungen ist allein
+  // `budget_transactions` mit `captured_transaction_id` als einzigem Capture-Link.
 
   for (const m of migrations) {
     try {

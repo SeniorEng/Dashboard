@@ -4,7 +4,6 @@ import {
   budgetAllocations,
   budgetTransactions,
   budgetReservations,
-  budgetLedger,
   users,
 } from "@shared/schema";
 import { auditService } from "../services/audit";
@@ -43,10 +42,9 @@ import type { BudgetMigrationSummary } from "./budget-migration-runner";
  * Nullen der FK als auch das Löschen der Auto-Zeilen lassen damit jede
  * (Kunde, Topf)-Verfügbarkeit unverändert ⇒ Conservation-Δ=0.
  *
- * Defensiv werden auch `budget_reservations`/`budget_ledger` geprüft und ihre
- * `allocation_id` genullt, falls sie referenzieren — sonst blockiert die FK den
- * Delete. In Prod ist das 0 Zeilen; diese beiden Tabellen tragen KEINEN
- * GoBD-Immutability-Trigger.
+ * Defensiv wird auch `budget_reservations` geprüft und seine `allocation_id`
+ * genullt, falls es referenziert — sonst blockiert die FK den Delete. In Prod ist
+ * das 0 Zeilen; diese Tabelle trägt KEINEN GoBD-Immutability-Trigger.
  *
  * ## Sicherheit / Lauf-Garantien (über `runGuardedBudgetMigration`)
  *   - EINE Transaktion mit transaktions-lokalem GoBD-Bypass
@@ -117,15 +115,11 @@ export async function cleanupLegacyAutoAllocations(
     .where(inArray(budgetTransactions.allocationId, ids))
     .orderBy(asc(budgetTransactions.id));
 
-  // Defensiv: operative/interim Tabellen, deren FK den Delete sonst blockt.
+  // Defensiv: operative Tabelle, deren FK den Delete sonst blockt.
   const refReservations = await tx
     .select({ id: budgetReservations.id })
     .from(budgetReservations)
     .where(inArray(budgetReservations.allocationId, ids));
-  const refLedger = await tx
-    .select({ id: budgetLedger.id })
-    .from(budgetLedger)
-    .where(inArray(budgetLedger.allocationId, ids));
 
   // 3. Pflicht-Audit-Akteur (ältester Superadmin, Fallback ältester Admin).
   const [superActor] = await tx
@@ -155,8 +149,8 @@ export async function cleanupLegacyAutoAllocations(
   const auditActorId = actorId;
 
   // 4. INTERNEN FK-Zeiger nullen — ZUERST auf den GoBD-Buchungen, defensiv auch
-  //    auf den operativen/interim Tabellen. budget_reservations/budget_ledger
-  //    tragen keinen Trigger. Der GoBD-Bypass des Wrappers deckt das
+  //    auf der operativen Tabelle. budget_reservations trägt keinen Trigger. Der
+  //    GoBD-Bypass des Wrappers deckt das
   //    budget_transactions-UPDATE bereits; wir setzen den Bypass-GUC hier
   //    transaktions-lokal NOCHMALS explizit (idempotent) — bewusster,
   //    audit-pflichtiger Korrekturpfad, sichtbar für den Append-only-Wächter.
@@ -180,17 +174,6 @@ export async function cleanupLegacyAutoAllocations(
         inArray(
           budgetReservations.id,
           refReservations.map((r) => r.id),
-        ),
-      );
-  }
-  if (refLedger.length > 0) {
-    await tx
-      .update(budgetLedger)
-      .set({ allocationId: null })
-      .where(
-        inArray(
-          budgetLedger.id,
-          refLedger.map((r) => r.id),
         ),
       );
   }
@@ -254,8 +237,7 @@ export async function cleanupLegacyAutoAllocations(
     `genullte Buchungen=${refTx.length}` +
     (refReservations.length > 0
       ? `, Reservierungen=${refReservations.length}`
-      : "") +
-    (refLedger.length > 0 ? `, Ledger=${refLedger.length}` : "");
+      : "");
   log(`[budget-migration] cleanup-legacy-auto-allocations: ${note}`, "startup");
 
   return { changed: ids.length, note };

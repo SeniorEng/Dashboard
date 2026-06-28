@@ -85,20 +85,6 @@ let customerId: number;
 beforeAll(async () => {
   const customer = await createTestCustomer();
   customerId = customer.id as number;
-  // Task #1446 — Die Registry enthält seit #1446 einen zweiten Deskriptor
-  // (`drop-budget-ledger-1443`), dessen `countPending` 1 liefert, solange die
-  // (im Dev/Test-Schema noch vorhandene) Tabelle `budget_ledger` existiert. Ohne
-  // gesetztes Freigabe-Flag wäre dieser Eintrag IMMER `mismatch` und würde die
-  // hier geprüfte AGGREGAT-`status.ok`-Semantik der CLEANUP-Migration
-  // verfälschen. Wir setzen das Drop-Flag für die Dauer dieser Suite, sodass der
-  // budget_ledger-Eintrag als `pending-approved` (ok-neutral, keine Warnung)
-  // erscheint und die Tests ausschließlich das Verhalten von
-  // `cleanup-legacy-auto-allocations-1409` messen.
-  process.env.APPROVED_DROP_BUDGET_LEDGER = "1";
-});
-
-afterAll(() => {
-  delete process.env.APPROVED_DROP_BUDGET_LEDGER;
 });
 
 afterEach(async () => {
@@ -224,40 +210,5 @@ describe("Pending-Destructive-Migrations-Preflight (Task #1402 TEIL B)", () => {
     // getStatus liefert das gecachte Ergebnis (für /api/health).
     const cached = getPendingDestructiveMigrationsStatus();
     expect(cached?.ok).toBe(true);
-  });
-
-  it("(d) #1446 budget_ledger: Drop-Flag fehlt + Tabelle existiert + nicht im Ledger ⇒ mismatch + laute Warnung", async () => {
-    const DROP_FLAG = "APPROVED_DROP_BUDGET_LEDGER";
-    const DROP_MIGRATION = "drop-budget-ledger-1443";
-    // Für diesen Test das (suite-weit gesetzte) Drop-Flag bewusst entfernen, um
-    // den Scope-Mismatch zu provozieren. Danach wiederherstellen, damit die
-    // Aggregat-Semantik der übrigen Tests unberührt bleibt.
-    delete process.env[DROP_FLAG];
-
-    const captured: string[] = [];
-    const original = console.log;
-    console.log = (...args: unknown[]) => {
-      captured.push(args.map(String).join(" "));
-    };
-    let status;
-    try {
-      status = await assertNoPendingDestructiveMismatch();
-    } finally {
-      console.log = original;
-      process.env[DROP_FLAG] = "1";
-    }
-
-    const entry = status.entries.find((e) => e.migrationName === DROP_MIGRATION)!;
-    expect(entry.status).toBe("mismatch");
-    expect(entry.flagSet).toBe(false);
-    expect(entry.appliedInLedger).toBe(false);
-    // countPending = 1, solange die Tabelle budget_ledger noch existiert.
-    expect(entry.pendingRows).toBe(1);
-    expect(status.ok).toBe(false);
-
-    const loud = captured.join("\n");
-    expect(loud).toContain("PREFLIGHT-WARNUNG: AUSSTEHENDE DESTRUKTIVE MIGRATION");
-    expect(loud).toContain(DROP_MIGRATION);
-    expect(loud).toContain(DROP_FLAG);
   });
 });

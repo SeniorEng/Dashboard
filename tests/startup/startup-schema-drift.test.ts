@@ -36,6 +36,7 @@ import { sql, getTableColumns } from "drizzle-orm";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import type { PgTable, PgColumn } from "drizzle-orm/pg-core";
 import { db } from "../../server/lib/db";
+import * as schema from "@shared/schema";
 import {
   appointments,
   budgetAllocations,
@@ -108,12 +109,6 @@ import { RECONCILE_COLUMN_TYPE_TARGETS } from "../../server/startup/reconcile-dr
 // --- DROP registries -------------------------------------------------------
 import { DROPPED_APPOINTMENTS_SERVICE_TYPE } from "../../server/startup/drop-appointments-service-type";
 import { DROPPED_AUA_APPROVAL_COLUMNS } from "../../server/startup/drop-aua-approval-columns";
-// INTERIM (rein additiver Prod-Publish): budget_reservations.captured_ledger_id
-// + budget_ledger sind vorübergehend im Schema wiederhergestellt und der
-// Startup-Drop ist pausiert (siehe shared/schema/budget.ts + server/index.ts).
-// Der zugehörige DROP-Drift-Test ist daher für dieses Fenster ausgesetzt; er
-// wird im Folge-Publish (endgültige Entfernung) zusammen mit dem Import und der
-// Scharfschaltung von drop-budget-ledger.ts wieder aktiviert.
 
 // --- CHECK-constraint raw-SQL sources --------------------------------------
 import {
@@ -634,8 +629,18 @@ describe("Startup Schema-Drift (server/startup/**)", () => {
       }
     });
 
-    // INTERIM: drop-budget-ledger-Assertion ausgesetzt — captured_ledger_id ist
-    // für das additive Publish-Fenster bewusst wieder im Modell (s. Import-Notiz).
+    // Task #1486 — Finaler Zustand nach dem abgeschlossenen Prod-Drop des
+    // redundanten budget_ledger-Spiegels: weder die FK-Spalte noch die Tabelle
+    // dürfen im Drizzle-Modell verbleiben, sonst legt der nächste
+    // `drizzle-kit push` sie wieder an.
+    it("drop-budget-ledger: budget_reservations.captured_ledger_id ist aus dem Modell entfernt", () => {
+      const cols = drizzleColumnsByDbName(budgetReservations);
+      expect(cols.has("captured_ledger_id")).toBe(false);
+    });
+
+    it("drop-budget-ledger: die Tabelle budget_ledger ist aus dem Schema entfernt", () => {
+      expect("budgetLedger" in schema).toBe(false);
+    });
   });
 });
 

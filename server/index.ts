@@ -585,18 +585,14 @@ async function runStartupTasks() {
     // server/startup/ensure-budget-tx-appointment-constraint.ts (SQL-Konstante +
     // Funktion + Drift-Wächter) bleibt erhalten und wird im dedizierten
     // Folge-Task (Orphan-Backfill der 99 Zeilen → DANN Constraint) wieder
-    // scharfgeschaltet. Analog zur pausierten dropBudgetLedger()-Stufe unten.
+    // scharfgeschaltet.
 
-    // Task #1274 (Stufe C) / #1443 / #1446 — Die finale Entfernung des früheren
-    // budget_ledger-Spiegels (FK-Spalte budget_reservations.captured_ledger_id +
-    // Tabelle budget_ledger) ist KEIN direkter Aufruf mehr hier, sondern als
-    // gegatete Guarded-Migration `drop-budget-ledger-1443` in
-    // runBudgetDataMigrations() registriert — scharf NUR bei gesetztem
-    // Freigabe-Flag APPROVED_DROP_BUDGET_LEDGER (Deployment/Production-Scope).
-    // Ohne Flag = sauberer No-Op (kein Schema-/DB-Change). Der Drop selbst läuft
-    // erst, wenn Alrik das Flag setzt + publisht (separater, review-gateter
-    // Schritt). Die INTERIM-Schema-Marker (shared/schema/budget.ts) bleiben bis
-    // zum bestätigten Prod-Drop bestehen, damit das Publish-Fenster additiv ist.
+    // Task #1274 (Stufe C) / #1443 / #1446 / #1486 — Der frühere budget_ledger-
+    // Spiegel (FK-Spalte budget_reservations.captured_ledger_id + Tabelle
+    // budget_ledger) ist in Prod über die gegatete Guarded-Migration
+    // `drop-budget-ledger-1443` entfernt; das Drop-Gerüst (Migration, Flag,
+    // Schema-Marker) wurde danach in Task #1486 abgebaut. SoT der Buchungen ist
+    // allein budget_transactions mit captured_transaction_id als Capture-Link.
 
     // Task #988/#993/#994 — Die einmalige Phantom-Storno-Import-Drift-Korrektur
     // (#987) lief beim Prod-(Re-)Deploy einmalig scharf durch und ist bestätigt

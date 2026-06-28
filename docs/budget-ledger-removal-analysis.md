@@ -1,21 +1,25 @@
 # Budget-Ledger Referenz-Analyse (Paket 1.1 — Vorprüfung)
 
-> **Status (aktualisiert 26.06.2026):**
-> - **`budget_ledger` = GO** — der frühere Spiegel ist durch die gestaffelte
->   Stufe A→C entfernt (Capture schreibt nach `budget_transactions`,
->   Conservation/Invarianten lesen `captured_transaction_id`, GoBD-Immutability
->   liegt auf `budget_transactions`). Drop bleibt ein **separater, review-
->   gegateter, FK-freier Folge-Publish** (siehe Operative Leitplanken unten).
+> **Status (abgeschlossen 28.06.2026 — Task #1486):**
+> - **`budget_ledger` = ENTFERNT** — der frühere Spiegel UND der Zweit-Link
+>   `budget_reservations.captured_ledger_id` sind über die freigabe-gegatete
+>   Guarded-Migration `drop-budget-ledger-1443` in Prod gedroppt; nach dem
+>   bestätigten Prod-Drop wurde in Task #1486 das gesamte Drop-Gerüst
+>   (Migrationsdatei, Flag `APPROVED_DROP_BUDGET_LEDGER`, Preflight-Deskriptor,
+>   Schema-Deklaration) abgebaut. SoT der Buchungen ist allein
+>   `budget_transactions` mit `captured_transaction_id` als einzigem Capture-Link.
+>   Der Drift-Wächter `tests/startup/startup-schema-drift.test.ts` prüft seither
+>   den Endzustand (weder Tabelle noch FK-Spalte dürfen wiederkehren).
 > - **`budget_reservations` = NO-GO** (produktive Live-Holds, jeder Verfügbar-
 >   keits-Read) und **`budget_migrations` = NO-GO** (Migrations-Bookkeeping) —
 >   unverändert.
 >
-> Ursprüngliche Read-only-Analyse vom 12.06.2026. Das `budget_ledger`-Urteil
-> wurde am 26.06.2026 auf Basis der Drop-Verifikation
-> (`.local/tasks/budget-ledger-drop-verification-report.md`, Verdikt **GO**)
-> aktualisiert: kein Live-Reader/Writer mehr, alle 62 Prod-Zeilen 1:1 in
-> `budget_transactions` gespiegelt (struktureller + deterministischer ID-Match,
-> null Info-Verlust), Drop-Reihenfolge FK-sicher.
+> Ursprüngliche Read-only-Analyse vom 12.06.2026, `budget_ledger`-GO-Urteil vom
+> 26.06.2026 auf Basis der Drop-Verifikation
+> (`.local/tasks/budget-ledger-drop-verification-report.md`): kein
+> Live-Reader/Writer mehr, alle 62 Prod-Zeilen 1:1 in `budget_transactions`
+> gespiegelt (struktureller + deterministischer ID-Match, null Info-Verlust),
+> Drop-Reihenfolge FK-sicher. Der Drop ist seit 28.06.2026 vollzogen.
 
 ## Frage
 
@@ -93,7 +97,7 @@ weg/umgehängt):
 | `budget-conservation.ts` `leftJoin(budgetLedger)` (Conservation-**Read**) | **Umgehängt.** Der Kreuzcheck liest jetzt `captured_transaction_id` → `budget_transactions`; kein `budget_ledger`-Zugriff mehr. |
 | `invariants.ts` `checkBudgetLedgerConsistency` (Invarianten-**Read**) | **Umgehängt.** Keine `budget_ledger`/`capturedLedger`-Referenz mehr; läuft über `checkBudgetConservation` auf `budget_transactions`. |
 | `ensure-budget-ledger-immutability.ts` (GoBD-Trigger auf `budget_ledger`) | **Ersetzt.** Datei existiert nicht mehr; GoBD-BEFORE-Trigger liegen auf `budget_transactions` (`server/startup/ensure-budget-transactions-immutability.ts`). |
-| `shared/schema/budget.ts` `budget_ledger`-Def + FK `captured_ledger_id` | **INTERIM wieder im Schema** — nur, damit der nächste Prod-Publish rein additiv ist; kein Code liest/schreibt sie. Final entfernt im FK-freien Folge-Publish. |
+| `shared/schema/budget.ts` `budget_ledger`-Def + FK `captured_ledger_id` | **Entfernt (Task #1486).** Nach dem bestätigten Prod-Drop aus dem Drizzle-Modell genommen; kein Code liest/schreibt sie mehr. |
 
 **Konservierung (Prod-Verifikation, read-only):** alle **62** `budget_ledger`-
 Zeilen (alle `consumed`, 0 Reversal-Zeilen) sind **1:1** in `budget_transactions`
@@ -101,24 +105,22 @@ gespiegelt — doppelt bestätigt strukturell **und** über den deterministische
 ID-Link im `idempotency_key` (`…:l<budget_transactions.id>`). Keine Zeile trägt
 Information, die nicht in `budget_transactions` steht → **null Info-Verlust**.
 
-**FK-/Drop-Reihenfolge (FK-sicher):** einziger inbound-FK ist
-`budget_reservations.captured_ledger_id → budget_ledger.id`. Der pausierte
-`server/startup/drop-budget-ledger.ts` droppt deshalb zuerst die Spalte
-`captured_ledger_id`, danach `DROP TABLE budget_ledger` — idempotentes rohes
-`IF EXISTS`-SQL über `sql.raw`, **kein** `drizzle-kit push`. Die DDL-Konstanten
-sind für den Drift-Wächter exportiert.
+**FK-/Drop-Reihenfolge (FK-sicher, vollzogen):** einziger inbound-FK war
+`budget_reservations.captured_ledger_id → budget_ledger.id`. Die Guarded-Migration
+`drop-budget-ledger-1443` droppte deshalb zuerst die Spalte `captured_ledger_id`,
+danach `DROP TABLE budget_ledger` — idempotentes rohes `IF EXISTS`-SQL, **kein**
+`drizzle-kit push`. Nach dem Prod-Drop wurde das gesamte Drop-Gerüst in Task #1486
+entfernt.
 
 | Datei → Pfad/Funktion | Urteil | Beweis |
 |---|---|---|
-| `shared/schema/budget.ts:194-231,258` | Definition (INTERIM re-add) | Tabelle + FK-Spalte `captured_ledger_id` nur fürs additive Publish-Fenster zurück; kein Code liest/schreibt sie. |
-| `server/startup/drop-budget-ledger.ts` | pausiertes Drop-Skript | FK-freie Zwei-Schritt-Reihenfolge, idempotent, raw-SQL; aktuell NICHT vom Boot aufgerufen. |
-| `server/startup/cleanup-legacy-auto-allocations-migration.ts:127,188` | defensiv-only (genau-einmal-Guard) | Nullt `allocation_id` auf evtl. referenzierenden Ledger-Zeilen, damit ein Legacy-Auto-Allocation-Delete nicht blockt; in Prod bereits gelaufen (0 Treffer), feuert nicht erneut. |
-| `tests/startup/startup-schema-drift.test.ts:111,637` | Test (INTERIM ausgesetzt) | DROP-Drift-Import + Assertion für dieses additive Fenster ausgesetzt; wird im Folge-Publish reaktiviert. |
+| `shared/schema/budget.ts` | Definition entfernt (#1486) | Tabelle + FK-Spalte `captured_ledger_id` nach dem Prod-Drop aus dem Modell genommen. |
+| `server/startup/cleanup-legacy-auto-allocations-migration.ts` | Ledger-Bezug entfernt (#1486) | Nullt nur noch `allocation_id` auf referenzierenden `budget_reservations`; in Prod bereits gelaufen (0 Treffer). |
+| `tests/startup/startup-schema-drift.test.ts` | Endzustand-Assertion | Prüft, dass weder Tabelle `budget_ledger` noch Spalte `captured_ledger_id` im Modell verbleiben. |
 
-**Go/No-Go:** **GO.** `budget_ledger` ist conservation-neutral und reader-frei.
-Der Drop bleibt eine **separate, review-gegatete, FK-freie Folge-Publish-
-Operation** (siehe Operative Leitplanken) — NICHT Teil dieses Schritts und nicht
-mit einer abhängigen Migration im selben Publish kombiniert.
+**Go/No-Go:** **GO — vollzogen.** `budget_ledger` ist conservation-neutral und
+reader-frei und wurde in Prod gedroppt; das Drop-Gerüst ist in Task #1486
+abgebaut.
 
 ---
 
@@ -144,10 +146,10 @@ geguardete Migration läuft bei jedem Boot erneut. Nicht ersetzbar.
 | `budget_ledger` | nein (nach Stufen A→C nur noch Spiegel) | nein (Capture-Insert auf budget_transactions) | ja | **GO (#1443/#1446)** |
 | `budget_migrations` | ja | ja | nein | **NO-GO** |
 
-> **Update 26.06.2026 (#1443/#1446):** Für `budget_ledger` gilt dieser
-> Ursprungsbefund nach den Stufen A→C **nicht mehr** — die Tabelle ist auf einen
-> reinen Spiegel reduziert und damit GO (Drop scharfgeschaltet hinter
-> `APPROVED_DROP_BUDGET_LEDGER`). Für `budget_reservations` und
+> **Update (#1443/#1446 → #1486):** Für `budget_ledger` gilt dieser
+> Ursprungsbefund nach den Stufen A→C **nicht mehr** — die Tabelle war auf einen
+> reinen Spiegel reduziert (GO) und ist inzwischen in Prod gedroppt; das
+> Drop-Gerüst wurde in Task #1486 abgebaut. Für `budget_reservations` und
 > `budget_migrations` bleibt es bei **NO-GO**.
 
 Zum Zeitpunkt der Ursprungsanalyse galt: alle drei Tabellen hatten produktive
@@ -155,44 +157,44 @@ Lesepfade, die **nicht** durch `budget_transactions` (oder eine andere
 bestehende Tabelle) ersetzbar waren. Die Annahme „tote/giftige
 Schatten-Tabellen" traf in dieser Pauschalität nicht zu.
 
-## Operative Leitplanken für den separaten, review-gegateten Publish (NICHT hier ausgeführt)
+## Operative Leitplanken des Drop-Publishs (vollzogen)
 
-Der eigentliche Drop/Publish/Flag-Schritt ist **nicht** Teil dieser Aufgabe. Er
-ist Alriks operativer Folge-Schritt und läuft erst nach Review/Freigabe. Wenn er
-läuft, gelten verbindlich:
+Der Drop/Publish/Flag-Schritt ist in Prod abgeschlossen. Verbindlich galten und
+wurden eingehalten:
 
 - **Frischer Prod-Backup** unmittelbar vor dem Publish.
 - **Read-only Prod-Replica Schema-Diff VOR und NACH** dem Drop (Tabellen, Spalten,
-  Indexe, Constraints, Enums, Defaults) — bestätigt, dass **genau** die Spalte
-  `captured_ledger_id` + die Tabelle `budget_ledger` verschwinden und sonst nichts.
-- **Genau ein Drop pro Publish** — niemals mit einer abhängigen Migration im
-  selben Publish kombinieren (sonst erzeugt der Auto-Diff einen redundanten
-  `DROP CONSTRAINT … _fk` in falscher Reihenfolge und bricht ab).
+  Indexe, Constraints, Enums, Defaults) — bestätigte, dass **genau** die Spalte
+  `captured_ledger_id` + die Tabelle `budget_ledger` verschwanden und sonst nichts.
+- **Genau ein Drop pro Publish** — nicht mit einer abhängigen Migration im selben
+  Publish kombiniert.
 - **Append-only-Immutability bleibt auf `budget_transactions`** (GoBD-Trigger sind
   bereits von `budget_ledger` umgezogen).
-- **PRE/POST Conservation-Check** (no-overdraw + Capture-Link-Integrität) muss vor
-  UND nach dem Drop grün sein.
-- **Bekannter Nicht-Blocker (schriftlich festgehalten):** 57 historische
-  `captured` Reservierungen tragen ihren Capture-Link nur über `captured_ledger_id`
-  und gehen nach dem Spalten-Drop auf **NULL** (kein Backfill auf
-  `captured_transaction_id` existiert). Das ist **kein** Verstoß: die verbrauchten
-  Beträge liegen sicher in `budget_transactions`, jede Reservierung behält ihren
-  eigenen `amount_cents`, und der Conservation-Check filtert
-  `captured_transaction_id IS NOT NULL`, behandelt NULL also als toleranten
-  Legacy-Zustand.
+- **PRE/POST Conservation-Check** (no-overdraw + Capture-Link-Integrität) war vor
+  UND nach dem Drop grün.
+- **Bekannter Nicht-Blocker (schriftlich festgehalten):** historische `captured`
+  Reservierungen trugen ihren Capture-Link nur über `captured_ledger_id` und gingen
+  nach dem Spalten-Drop auf **NULL** (kein Backfill auf `captured_transaction_id`).
+  Das ist **kein** Verstoß: die verbrauchten Beträge liegen sicher in
+  `budget_transactions`, jede Reservierung behält ihren eigenen `amount_cents`, und
+  der Conservation-Check filtert `captured_transaction_id IS NOT NULL`, behandelt
+  NULL also als toleranten Legacy-Zustand.
 
-### Re-Arming-Schritte im Folge-Publish (Gaps, hier NICHT ausgeführt)
+### Post-Drop-Cleanup (Task #1486, vollzogen)
 
-Das Drop-Skript selbst ist korrekt und vollständig. Für die endgültige
-Entfernung sind im dedizierten Folge-Publish zusätzlich zu erledigen:
+Nach dem bestätigten Prod-Drop wurde das Drop-Gerüst abgebaut, sodass
+`budget_transactions` + `captured_transaction_id` die einzige sichtbare Wahrheit
+sind:
 
-1. Die INTERIM-Wiederherstellung in `shared/schema/budget.ts` (Tabelle
-   `budget_ledger` + FK-Spalte `captured_ledger_id`) zurücknehmen.
-2. `dropBudgetLedger()` aus `server/index.ts` (Boot-Pfad) wieder aufrufen — der
-   Aufruf ist dort aktuell auskommentiert/pausiert.
-3. Den DROP-Drift-Test wieder scharfschalten:
-   `tests/startup/startup-schema-drift.test.ts` Import (~Z.111) +
-   DROP-COLUMN-Assertion (~Z.637) für `captured_ledger_id` reaktivieren.
+1. Schema-Deklaration `budgetLedger` + FK-Spalte `captured_ledger_id` aus
+   `shared/schema/budget.ts` entfernt.
+2. Drop-Migrationsdatei `server/startup/drop-budget-ledger.ts` gelöscht; Import +
+   Registrierung + Freigabe-Flag `APPROVED_DROP_BUDGET_LEDGER` aus dem
+   Migrations-Runner und dem Preflight-Deskriptor entfernt; Boot-Kommentar in
+   `server/index.ts` auf den Endzustand aktualisiert.
+3. Der Drift-Test `tests/startup/startup-schema-drift.test.ts` prüft jetzt den
+   Endzustand (weder Tabelle `budget_ledger` noch Spalte `captured_ledger_id`
+   dürfen im Modell wiederkehren).
 
 ## Entscheidender Kontext: BUDGET_HARD_HOLDS ist in PRODUKTION aktiv
 

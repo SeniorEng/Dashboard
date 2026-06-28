@@ -53,9 +53,10 @@ interface DestructiveCleanupDescriptor {
 
 /**
  * Bekannte gegatete destruktive Cleanup-Migrationen. Weitere lassen sich additiv
- * ergänzen, ohne die Boot-/Health-Verdrahtung zu ändern. Aktuell zwei:
- * `cleanup-legacy-auto-allocations-1409` (zählt pending Altlast-Zeilen) und
- * `drop-budget-ledger-1443` (zählt die Existenz der redundanten Spiegel-Tabelle).
+ * ergänzen, ohne die Boot-/Health-Verdrahtung zu ändern. Aktuell eine:
+ * `cleanup-legacy-auto-allocations-1409` (zählt pending Altlast-Zeilen). Der
+ * frühere `drop-budget-ledger-1443`-Deskriptor wurde nach dem abgeschlossenen
+ * Prod-Drop in Task #1486 entfernt.
  */
 const DESTRUCTIVE_CLEANUP_DESCRIPTORS: DestructiveCleanupDescriptor[] = [
   {
@@ -74,22 +75,6 @@ const DESTRUCTIVE_CLEANUP_DESCRIPTORS: DestructiveCleanupDescriptor[] = [
           ),
         );
       return rows.length;
-    },
-  },
-  {
-    migrationName: "drop-budget-ledger-1443",
-    flagEnvVar: "APPROVED_DROP_BUDGET_LEDGER",
-    description:
-      "FK-sicherer Zwei-Schritt-Drop des redundanten budget_ledger-Spiegels (Spalte budget_reservations.captured_ledger_id, dann Tabelle budget_ledger)",
-    countPending: async (exec) => {
-      // Rohe Existenz-Probe via to_regclass — KEINE Drizzle-Query gegen die
-      // möglicherweise bereits gedroppte Tabelle. 1 = Tabelle existiert noch
-      // (pending), 0 = bereits weg.
-      const result = await exec.execute(
-        sql`SELECT to_regclass('public.budget_ledger') IS NOT NULL AS exists`,
-      );
-      const rows = (result as { rows?: { exists?: boolean }[] }).rows ?? [];
-      return rows[0]?.exists ? 1 : 0;
     },
   },
 ];

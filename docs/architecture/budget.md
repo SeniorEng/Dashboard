@@ -79,13 +79,19 @@ blieb:
   `server/lib/invariants.ts`) wurden auf `budget_transactions` umgezogen — es ist
   damit die EINE append-only Finanz-Schicht. Die DB-Trigger laufen über
   `server/startup/ensure-budget-transactions-immutability.ts`.
-- **Stufe C (Task #1274):** Die redundante Spiegel-Tabelle `budget_ledger` UND
-  der alte Zweit-Link `budget_reservations.captured_ledger_id` wurden idempotent
-  per rohem SQL entfernt (`server/startup/drop-budget-ledger.ts` →
-  `dropBudgetLedger()`, Aufruf im Startup; **kein `drizzle-kit push`**). Erst die
-  FK-Spalte, dann die Tabelle. Der Drift-Wächter
-  `tests/startup/startup-schema-drift.test.ts` introspiziert die gedroppte Spalte
-  über die DROP-Registry `DROPPED_BUDGET_RESERVATIONS_CAPTURED_LEDGER_ID`.
+- **Stufe C (Task #1274 → #1443/#1446 → #1486):** Die redundante Spiegel-Tabelle
+  `budget_ledger` UND der alte Zweit-Link
+  `budget_reservations.captured_ledger_id` wurden FK-sicher (erst die FK-Spalte,
+  dann die Tabelle) über die freigabe-gegatete Guarded-Migration
+  `drop-budget-ledger-1443` in Prod entfernt (**kein `drizzle-kit push`**). Nach
+  dem bestätigten Prod-Drop wurde in **Task #1486** das komplette Drop-Gerüst
+  abgebaut (Migrationsdatei, Freigabe-Flag `APPROVED_DROP_BUDGET_LEDGER`,
+  Preflight-Deskriptor, Schema-Deklaration `budgetLedger`/`capturedLedgerId`). Der
+  Drift-Wächter `tests/startup/startup-schema-drift.test.ts` prüft seither den
+  Endzustand: weder die Tabelle `budget_ledger` noch die Spalte
+  `captured_ledger_id` dürfen im Drizzle-Modell verbleiben. SoT der Buchungen ist
+  allein `budget_transactions` mit `captured_transaction_id` als einzigem
+  Capture-Link.
 
 **Append-only-Wächter (retargetet):**
 `tests/architecture/budget-transactions-write-path.test.ts` (vormals

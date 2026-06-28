@@ -64,9 +64,6 @@ const EXPECTED_TABLES: readonly string[] = [
   "audit_log",
   "birthday_card_tracking",
   "budget_allocations",
-  // INTERIM (rein additiver Prod-Publish): budget_ledger ist vorübergehend
-  // wiederhergestellt; wird im separaten Folge-Publish endgültig entfernt.
-  "budget_ledger",
   "budget_migrations",
   "budget_reservations",
   "budget_transactions",
