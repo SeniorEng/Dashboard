@@ -1,9 +1,21 @@
 # Budget-Ledger Referenz-Analyse (Paket 1.1 — Vorprüfung)
 
-> **Status: NO-GO für die Tabellen-Löschung. Rückfrage an Alrik erforderlich.**
-> Read-only-Analyse vom 12.06.2026. Keine Code-/Schema-/Test-Änderung.
-> Grundlage für die nachgelagerte Umsetzungs-Aufgabe „Budget-Transactions
-> härten, Ledger entfernen" — diese bleibt blockiert, bis Alrik entschieden hat.
+> **Status (aktualisiert 26.06.2026):**
+> - **`budget_ledger` = GO** — der frühere Spiegel ist durch die gestaffelte
+>   Stufe A→C entfernt (Capture schreibt nach `budget_transactions`,
+>   Conservation/Invarianten lesen `captured_transaction_id`, GoBD-Immutability
+>   liegt auf `budget_transactions`). Drop bleibt ein **separater, review-
+>   gegateter, FK-freier Folge-Publish** (siehe Operative Leitplanken unten).
+> - **`budget_reservations` = NO-GO** (produktive Live-Holds, jeder Verfügbar-
+>   keits-Read) und **`budget_migrations` = NO-GO** (Migrations-Bookkeeping) —
+>   unverändert.
+>
+> Ursprüngliche Read-only-Analyse vom 12.06.2026. Das `budget_ledger`-Urteil
+> wurde am 26.06.2026 auf Basis der Drop-Verifikation
+> (`.local/tasks/budget-ledger-drop-verification-report.md`, Verdikt **GO**)
+> aktualisiert: kein Live-Reader/Writer mehr, alle 62 Prod-Zeilen 1:1 in
+> `budget_transactions` gespiegelt (struktureller + deterministischer ID-Match,
+> null Info-Verlust), Drop-Reihenfolge FK-sicher.
 
 ## Frage
 
@@ -66,23 +78,47 @@ dem **Lesepfad jeder Budget-Verfügbarkeit** abgefragt.
 > (Default-OFF, läuft erst bei gesetztem Flag im Deployment-Scope + Publish). Die
 > ursprüngliche NO-GO-Analyse unten beschreibt den Stand VOR den Stufen A→C.
 
-GoBD-immutable, append-only Finanz-Schicht (`consumed | reversed`). Ziel der
-Hard-Hold-**Capture** und Quelle der Conservation-/Invarianten-Prüfungen.
+> **Aktualisiert 26.06.2026.** Die ursprüngliche NO-GO-Begründung (12.06.2026)
+> ist überholt: jeder damals als „produktiv" gelistete Code-Pfad wurde durch die
+> gestaffelte Stufe A→C entfernt oder umgehängt. `budget_ledger` war zuletzt nur
+> noch ein reiner, append-only **Spiegel** von `budget_transactions` und trägt
+> heute **keine** eindeutige Information mehr.
+
+Was sich seit der NO-GO-Analyse geändert hat (jeder frühere „productive" Hit ist
+weg/umgehängt):
+
+| Früherer Pfad (NO-GO-Beleg) | Heutiger Stand |
+|---|---|
+| `reservation-storage.ts` `captureHolds` `.insert(budgetLedger)` (Capture-**Write**) | **Entfernt.** Capture schreibt nur noch nach `budget_transactions` und setzt `budget_reservations.captured_transaction_id` (→ `budget_transactions.id`). Kein `.insert/.update/.delete(budgetLedger)` mehr im Code. |
+| `budget-conservation.ts` `leftJoin(budgetLedger)` (Conservation-**Read**) | **Umgehängt.** Der Kreuzcheck liest jetzt `captured_transaction_id` → `budget_transactions`; kein `budget_ledger`-Zugriff mehr. |
+| `invariants.ts` `checkBudgetLedgerConsistency` (Invarianten-**Read**) | **Umgehängt.** Keine `budget_ledger`/`capturedLedger`-Referenz mehr; läuft über `checkBudgetConservation` auf `budget_transactions`. |
+| `ensure-budget-ledger-immutability.ts` (GoBD-Trigger auf `budget_ledger`) | **Ersetzt.** Datei existiert nicht mehr; GoBD-BEFORE-Trigger liegen auf `budget_transactions` (`server/startup/ensure-budget-transactions-immutability.ts`). |
+| `shared/schema/budget.ts` `budget_ledger`-Def + FK `captured_ledger_id` | **INTERIM wieder im Schema** — nur, damit der nächste Prod-Publish rein additiv ist; kein Code liest/schreibt sie. Final entfernt im FK-freien Folge-Publish. |
+
+**Konservierung (Prod-Verifikation, read-only):** alle **62** `budget_ledger`-
+Zeilen (alle `consumed`, 0 Reversal-Zeilen) sind **1:1** in `budget_transactions`
+gespiegelt — doppelt bestätigt strukturell **und** über den deterministischen
+ID-Link im `idempotency_key` (`…:l<budget_transactions.id>`). Keine Zeile trägt
+Information, die nicht in `budget_transactions` steht → **null Info-Verlust**.
+
+**FK-/Drop-Reihenfolge (FK-sicher):** einziger inbound-FK ist
+`budget_reservations.captured_ledger_id → budget_ledger.id`. Der pausierte
+`server/startup/drop-budget-ledger.ts` droppt deshalb zuerst die Spalte
+`captured_ledger_id`, danach `DROP TABLE budget_ledger` — idempotentes rohes
+`IF EXISTS`-SQL über `sql.raw`, **kein** `drizzle-kit push`. Die DDL-Konstanten
+sind für den Drift-Wächter exportiert.
 
 | Datei → Pfad/Funktion | Urteil | Beweis |
 |---|---|---|
-| `shared/schema/budget.ts:178` | Definition | Tabelle + Insert-Schema/Typen (`:250,257`); FK `budget_reservations.capturedLedgerId → budget_ledger.id` (`:237`). |
-| `server/storage/budget/reservation-storage.ts:485,508,514-516` `captureHolds` | **produktiv-schreibend (flag-gated)** | `.insert(budgetLedger)` schreibt `consumed`-Zeilen beim Capture; Idempotenz-Re-Read `.from(budgetLedger)`. |
-| `server/lib/budget-conservation.ts:118,128-129` `checkBudgetConservation` | **produktiv-lesend** | `leftJoin(budgetLedger)` + `reversesLedgerId`-Ketten-Integrität. **Konsumenten:** (1) CLI `verify-budget-conservation.ts` / `report-budget-exposure.ts` (prod-runnable), (2) `server/lib/invariants.ts:238` → HTTP-Route `GET /api/admin/invariants-report` (`server/routes/admin/invariants.ts`), (3) `budget-migration-runner.ts:166,170` Pre-/Post-Guard um **jede** budgetdaten-mutierende Startup-Migration. |
-| `server/lib/invariants.ts:587,596,608` `checkBudgetLedgerConsistency` | produktiv-lesend (indirekt) | Result-Feld `budgetLedger`; Tabellen-Zugriff über `checkBudgetConservation`. Über SuperAdmin-Report-Endpoint erreichbar. |
-| `server/startup/ensure-budget-ledger-immutability.ts` | produktiv (DDL + Self-Check) | Legt bei jedem Boot die GoBD-BEFORE-Trigger (UPDATE/DELETE/TRUNCATE) auf `budget_ledger` an; Laufzeit-Verifikation unter `/api/health → budgetLedgerImmutability`. |
-| `tests/budget-ledger-immutability.test.ts`, `tests/budget/hard-holds-engine.test.ts`, `tests/architecture/budget-ledger-write-path.test.ts`, `tests/invariants/invariant-suite.test.ts` | Test | Immutability-, Engine- und Write-Path-Architektur-Tests. |
+| `shared/schema/budget.ts:194-231,258` | Definition (INTERIM re-add) | Tabelle + FK-Spalte `captured_ledger_id` nur fürs additive Publish-Fenster zurück; kein Code liest/schreibt sie. |
+| `server/startup/drop-budget-ledger.ts` | pausiertes Drop-Skript | FK-freie Zwei-Schritt-Reihenfolge, idempotent, raw-SQL; aktuell NICHT vom Boot aufgerufen. |
+| `server/startup/cleanup-legacy-auto-allocations-migration.ts:127,188` | defensiv-only (genau-einmal-Guard) | Nullt `allocation_id` auf evtl. referenzierenden Ledger-Zeilen, damit ein Legacy-Auto-Allocation-Delete nicht blockt; in Prod bereits gelaufen (0 Treffer), feuert nicht erneut. |
+| `tests/startup/startup-schema-drift.test.ts:111,637` | Test (INTERIM ausgesetzt) | DROP-Drift-Import + Assertion für dieses additive Fenster ausgesetzt; wird im Folge-Publish reaktiviert. |
 
-**Go/No-Go:** **NO-GO.** `budget_ledger` ist das GoBD-immutable Capture-Ziel der
-Hard-Hold-Engine **und** die Datenquelle der Conservation-/Invarianten-Checks.
-Es läuft **parallel** zu `budget_transactions` (Legacy-SSoT für ConsumedNet) —
-ein Wegfall ist keine Dead-Code-Löschung, sondern ein **Rückbau der
-Hard-Hold-Funktion**.
+**Go/No-Go:** **GO.** `budget_ledger` ist conservation-neutral und reader-frei.
+Der Drop bleibt eine **separate, review-gegatete, FK-freie Folge-Publish-
+Operation** (siehe Operative Leitplanken) — NICHT Teil dieses Schritts und nicht
+mit einer abhängigen Migration im selben Publish kombiniert.
 
 ---
 
@@ -119,11 +155,50 @@ Lesepfade, die **nicht** durch `budget_transactions` (oder eine andere
 bestehende Tabelle) ersetzbar waren. Die Annahme „tote/giftige
 Schatten-Tabellen" traf in dieser Pauschalität nicht zu.
 
+## Operative Leitplanken für den separaten, review-gegateten Publish (NICHT hier ausgeführt)
+
+Der eigentliche Drop/Publish/Flag-Schritt ist **nicht** Teil dieser Aufgabe. Er
+ist Alriks operativer Folge-Schritt und läuft erst nach Review/Freigabe. Wenn er
+läuft, gelten verbindlich:
+
+- **Frischer Prod-Backup** unmittelbar vor dem Publish.
+- **Read-only Prod-Replica Schema-Diff VOR und NACH** dem Drop (Tabellen, Spalten,
+  Indexe, Constraints, Enums, Defaults) — bestätigt, dass **genau** die Spalte
+  `captured_ledger_id` + die Tabelle `budget_ledger` verschwinden und sonst nichts.
+- **Genau ein Drop pro Publish** — niemals mit einer abhängigen Migration im
+  selben Publish kombinieren (sonst erzeugt der Auto-Diff einen redundanten
+  `DROP CONSTRAINT … _fk` in falscher Reihenfolge und bricht ab).
+- **Append-only-Immutability bleibt auf `budget_transactions`** (GoBD-Trigger sind
+  bereits von `budget_ledger` umgezogen).
+- **PRE/POST Conservation-Check** (no-overdraw + Capture-Link-Integrität) muss vor
+  UND nach dem Drop grün sein.
+- **Bekannter Nicht-Blocker (schriftlich festgehalten):** 57 historische
+  `captured` Reservierungen tragen ihren Capture-Link nur über `captured_ledger_id`
+  und gehen nach dem Spalten-Drop auf **NULL** (kein Backfill auf
+  `captured_transaction_id` existiert). Das ist **kein** Verstoß: die verbrauchten
+  Beträge liegen sicher in `budget_transactions`, jede Reservierung behält ihren
+  eigenen `amount_cents`, und der Conservation-Check filtert
+  `captured_transaction_id IS NOT NULL`, behandelt NULL also als toleranten
+  Legacy-Zustand.
+
+### Re-Arming-Schritte im Folge-Publish (Gaps, hier NICHT ausgeführt)
+
+Das Drop-Skript selbst ist korrekt und vollständig. Für die endgültige
+Entfernung sind im dedizierten Folge-Publish zusätzlich zu erledigen:
+
+1. Die INTERIM-Wiederherstellung in `shared/schema/budget.ts` (Tabelle
+   `budget_ledger` + FK-Spalte `captured_ledger_id`) zurücknehmen.
+2. `dropBudgetLedger()` aus `server/index.ts` (Boot-Pfad) wieder aufrufen — der
+   Aufruf ist dort aktuell auskommentiert/pausiert.
+3. Den DROP-Drift-Test wieder scharfschalten:
+   `tests/startup/startup-schema-drift.test.ts` Import (~Z.111) +
+   DROP-COLUMN-Assertion (~Z.637) für `captured_ledger_id` reaktivieren.
+
 ## Entscheidender Kontext: BUDGET_HARD_HOLDS ist in PRODUKTION aktiv
 
-`budget_ledger` + `budget_reservations` bilden die Phase-5-Hard-Hold-Schicht.
-Diese ist hinter `BUDGET_HARD_HOLDS` (`hardHoldsEnabled()`) gegated und **in der
-Produktion eingeschaltet**:
+Die Phase-5-Hard-Hold-Schicht beruht **weiterhin** auf `budget_reservations`
+(Live-Holds) und ist hinter `BUDGET_HARD_HOLDS` (`hardHoldsEnabled()`) gegated und
+**in der Produktion eingeschaltet**:
 
 - `server/index.ts:890-906` warnt beim Prod-Start **laut**, wenn das Flag fehlt,
   und loggt „Budget-Hard-Block aktiv in Produktion", wenn es gesetzt ist.
@@ -131,27 +206,26 @@ Produktion eingeschaltet**:
   schlägt fehl, wenn weder der Prod- noch der Shared-Scope das Flag truthy setzt.
 - Sichtbar zur Laufzeit unter `/api/health → budgetHardHolds.enabled`.
 
-Damit ist `budget_ledger` aktuell das **aktive** Capture-Ziel einer in Produktion
-scharfgeschalteten Funktion, und `budget_transactions` läuft als Legacy-SSoT
-**parallel** dazu (Doppel-Buchung). Ein Löschen der drei Tabellen ist deshalb
-**kein Aufräumen**, sondern ein **bewusster Rückbau / eine Stilllegung der
-Hard-Hold-Funktion** inkl. Produktions-Verhalten.
+Wichtig: **`budget_ledger` ist NICHT mehr das Capture-Ziel** dieser Funktion. Seit
+Stufe A→C schreibt der Capture-Pfad direkt in `budget_transactions` und verlinkt
+über `budget_reservations.captured_transaction_id`. Die Stilllegung von
+`budget_ledger` ist deshalb **kein** Rückbau der Hard-Hold-Funktion — die bleibt
+auf `budget_reservations` + `budget_transactions` unverändert aktiv. **Das
+`BUDGET_HARD_HOLDS`-Flag wird in dieser Aufgabe NICHT geändert.**
 
-## Offene Rückfrage an Alrik (Umsetzung blockiert)
+## Offene Rückfrage an Alrik (nur noch für `budget_reservations`/`budget_migrations`)
 
-Paket 1.1 in der jetzigen Form („3 Tabellen löschen, GoBD direkt auf
-`budget_transactions`") setzt eine Vorentscheidung voraus, die nicht im
-Aufräum-Scope liegt:
+Für `budget_ledger` ist die Rückfrage **geklärt → GO** (siehe oben). Offen bleibt:
 
 1. **Soll die Hard-Hold-Funktion (BUDGET_HARD_HOLDS) in Produktion
-   zurückgebaut werden?** Nur dann werden `budget_reservations` + `budget_ledger`
-   überhaupt entbehrlich. Reihenfolge wäre dann: Flag in Prod aus → Engine +
-   `unified-reader`-Holds-Read + Capture entfernen → Conservation-/Invarianten-
-   Checks auf `budget_transactions` umstellen → erst danach Tabellen droppen.
+   zurückgebaut werden?** Nur dann würde `budget_reservations` überhaupt
+   entbehrlich. Reihenfolge wäre dann: Flag in Prod aus → Engine +
+   `unified-reader`-Holds-Read entfernen → erst danach `budget_reservations`
+   droppen. Bis dahin: **NO-GO**.
 2. **`budget_migrations`** ist davon unabhängig produktive Infrastruktur
    (Migrations-Guard) und sollte unabhängig vom Hard-Hold-Thema **bestehen
    bleiben**, außer der Migrations-Runner selbst wird ersetzt.
 
-Bis zu dieser Entscheidung bleibt die nachgelagerte Umsetzungs-Aufgabe
-(Tabellen entfernen, Wächter umbauen, Schema-Allowlist um genau diese 3 Tabellen
-schrumpfen) **blockiert**.
+Für `budget_ledger` bleibt nur der separate, review-gegatete, FK-freie
+Folge-Publish (oben), der Tabelle + Spalte droppt und die Re-Arming-Schritte
+ausführt.
