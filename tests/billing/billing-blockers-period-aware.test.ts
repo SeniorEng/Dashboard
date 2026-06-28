@@ -5,13 +5,13 @@ import { createTestCustomer, cleanupCustomer } from "../test-utils";
 import { upsertBudgetTypeSettings } from "../../server/storage/budget/preferences-storage";
 import { checkBudgetConservation } from "../../server/lib/budget-conservation";
 
-// Task #1462 — Regression-Guard für die Periode-Bewusstheit der Budget-Blocker
-// im „Was hängt"-Panel (/admin/billing).
+// Task #1462 — Regression-Guard für die Periode-Bewusstheit der
+// Budget-Konservierung (`checkBudgetConservation`).
 //
-// Der Reader (`server/storage/billing/blockers-reader.ts`) übergibt
-// `checkBudgetConservation` den MONATSSTICHTAG, nicht „heute". Würde jemand das
-// wieder auf `todayISO()` zurückdrehen, wäre die Überzogen-Aussage für ältere/
-// andere Zeiträume falsch. Dieser Test sichert direkt die SSoT-Naht ab:
+// `checkBudgetConservation` MUSS die Überzogen-Aussage am übergebenen
+// MONATSSTICHTAG treffen, nicht an „heute". Würde jemand den Aufruf wieder auf
+// `todayISO()` zurückdrehen, wäre die Aussage für ältere/andere Zeiträume
+// falsch. Dieser Test sichert direkt die SSoT-Naht ab:
 // derselbe Kunde muss zu einem frühen Stichtag überzogen, zu einem späteren
 // Stichtag aber sauber gemeldet werden — weil die projizierte §45b-Aufstockung
 // über die Monate wächst.

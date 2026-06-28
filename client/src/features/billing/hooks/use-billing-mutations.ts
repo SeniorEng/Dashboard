@@ -111,54 +111,6 @@ export function useBillingMutations({
     },
   });
 
-  // Task #1456: Pre-Commit-Review-Cluster — erstellt Rechnungen für die im
-  // Review markierten (berechtigten) Kunden. Wir nutzen den BESTEHENDEN
-  // Einzel-Generate-Pfad (`POST /billing/generate`) pro Kunde im Loop (KEINE
-  // neue Engine, keine Änderung an generateInvoiceCore), weil `generate-all`
-  // eine beliebig markierte Teilmenge nicht scopen kann. Ganzer Monat je Kunde,
-  // damit die Erstellung sich exakt mit der Review-Eligibilität deckt.
-  const reviewGenerateMutation = useMutation({
-    mutationFn: async (customerIds: number[]) => {
-      const results: { customerId: number; status: "created" | "error"; message?: string }[] = [];
-      for (const customerId of customerIds) {
-        try {
-          const result = await api.post<GenerateResponse>("/billing/generate", {
-            customerId,
-            billingMonth: selectedMonth,
-            billingYear: selectedYear,
-          });
-          unwrapResult(result);
-          results.push({ customerId, status: "created" });
-        } catch (err) {
-          results.push({
-            customerId,
-            status: "error",
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-      return results;
-    },
-    onSuccess: (results) => {
-      const created = results.filter((r) => r.status === "created").length;
-      const errors = results.length - created;
-      toast({
-        title: "Rechnungserstellung abgeschlossen",
-        description: `${created} erstellt${errors > 0 ? `, ${errors} Fehler` : ""}`,
-        ...(errors > 0 ? { variant: "destructive" as const } : {}),
-      });
-      // Status-Filter defensiv auf "alle" zurücksetzen, damit frische Entwürfe
-      // garantiert sichtbar sind (analog Massenerstellung).
-      if (created > 0 && statusFilter !== "alle" && statusFilter !== "entwurf") {
-        setStatusFilter("alle");
-      }
-      invalidateRelated(queryClient, "billing");
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    },
-  });
-
   // Task #817: Verwaiste Entwurfs-Rechnungen verwerfen, damit die Termine
   // wieder frei werden und die Vorschau echte Werte liefert.
   const discardDraftsMutation = useMutation({
@@ -410,71 +362,6 @@ export function useBillingMutations({
     },
   });
 
-  // Task #996: Sammeldruck — bündelt alle Entwurfs-Rechnungen des Monats
-  // (Rechnung + Leistungsnachweis) in ein PDF (bzw. ZIP je Krankenkasse),
-  // löst den Datei-Download im Browser aus und markiert die enthaltenen
-  // Rechnungen serverseitig als „versendet". Das Ergebnis-Summary kommt im
-  // `X-Bulk-Print-Summary`-Header und wird im Dialog angezeigt.
-  const bulkPrintMutation = useMutation({
-    mutationFn: async (opts: { groupByPayer: boolean }) => {
-      setBulkPrintResult(null);
-      const result = await api.postBlob<BulkPrintSummary>(
-        "/billing/bulk-print",
-        {
-          billingMonth: selectedMonth,
-          billingYear: selectedYear,
-          groupByPayer: opts.groupByPayer,
-          ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
-        },
-        "X-Bulk-Print-Summary",
-      );
-      return unwrapResult(result);
-    },
-    onSuccess: async (data) => {
-      // Browser-Download des gebündelten PDF/ZIP auslösen.
-      const url = URL.createObjectURL(data.blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = data.fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-
-      setBulkPrintResult(data.summary);
-      const s = data.summary;
-      toast({
-        title: "Sammeldruck erstellt",
-        description: s
-          ? `${s.printed} gedruckt, ${s.marked} als versendet markiert, ${s.errors} Fehler`
-          : "Download wurde gestartet.",
-      });
-
-      invalidateRelated(queryClient, "billing");
-
-      // Replika-Lag-Schutz: erfolgreich markierte Rechnungen dürfen nicht mehr
-      // als `entwurf` in der Liste auftauchen.
-      if (s) {
-        const markedIds = new Set(
-          s.results.filter((r) => r.status === "printed").map((r) => r.invoiceId),
-        );
-        if (markedIds.size > 0) {
-          await refetchWithPoll<InvoiceItem[]>(
-            queryClient,
-            ["billing-invoices", selectedYear, selectedMonth, statusFilter],
-            (list) => {
-              if (!list) return true;
-              return !list.some((inv) => markedIds.has(inv.id) && inv.status === "entwurf");
-            },
-          );
-        }
-      }
-    },
-    onError: (error: Error) => {
-      toast({ title: "Sammeldruck fehlgeschlagen", description: error.message, variant: "destructive" });
-    },
-  });
-
   // Task #1473: Print-only Sammeldruck. Erzeugt EXAKT dasselbe gebündelte
   // PDF/ZIP wie `bulk-print`, ändert aber KEINEN Status (kein „versendet"). Der
   // Statuswechsel bleibt den expliziten Aktionen „An Kasse senden" / „Als
@@ -653,7 +540,6 @@ export function useBillingMutations({
 
   return {
     generateMutation,
-    reviewGenerateMutation,
     discardDraftsMutation,
     statusMutation,
     bulkDeleteMutation,
@@ -663,7 +549,6 @@ export function useBillingMutations({
     generateAllMutation,
     batchSendMutation,
     bulkSendMutation,
-    bulkPrintMutation,
     bulkPrintPreviewMutation,
     lexwareExportMutation,
     sendingInvoiceId,

@@ -9,9 +9,6 @@ import type {
   DeliveryRecord,
   PayerSummary,
   BillingPipelineResponse,
-  BillingBreakdownResponse,
-  BillingBlockersResponse,
-  BillingReviewClustersResponse,
   BillingEconomicsResponse,
   BillingTermineResponse,
 } from "@shared/api";
@@ -38,64 +35,6 @@ export function useBillingPipeline(selectedYear: number, selectedMonth: number) 
       params.set("year", selectedYear.toString());
       params.set("month", selectedMonth.toString());
       const result = await api.get<BillingPipelineResponse>(`/billing/pipeline?${params.toString()}`, signal);
-      return unwrapResult(result);
-    },
-  });
-}
-
-// Task #1453: Abrechnungs-Breakdown (Phase 1, READ-ONLY). Liest ausschließlich
-// den neuen Breakdown-Reader (`GET /billing/breakdown`) — er spiegelt dieselbe
-// Hybrid-Bruchkante wie die Pipeline (keine Doppelzählung) und liefert die
-// Stunden je Leistungsart inkl. der abgerechneten Termine (Fix des 0,0h-Bugs).
-// Vor-aggregiert pro (Kunde × Abrechnungstyp); die Gruppierung nach Kunde/Kasse
-// passiert clientseitig (kein Refetch beim Umschalten). QueryKey beginnt mit
-// "billing", damit `invalidateRelated(qc, "billing")` die Tabelle mit aktualisiert.
-export function useBillingBreakdown(selectedYear: number, selectedMonth: number) {
-  return useQuery({
-    queryKey: ["billing", "breakdown", selectedYear, selectedMonth],
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("year", selectedYear.toString());
-      params.set("month", selectedMonth.toString());
-      const result = await api.get<BillingBreakdownResponse>(`/billing/breakdown?${params.toString()}`, signal);
-      return unwrapResult(result);
-    },
-  });
-}
-
-// Task #1462: „Was hängt"-Panel (Phase 4, Teil A, READ-ONLY). Liest
-// AUSSCHLIESSLICH den neuen Blocker-Reader (`GET /billing/blockers`), der genau
-// ZWEI bestehende SSoTs komponiert (Doku-Readiness + Budget-Konservierung) und
-// die beiden Blocker-Gruppen mit Anzahl + Posten liefert. QueryKey beginnt mit
-// "billing", damit `invalidateRelated(qc, "billing")` (nach Statuswechsel/
-// Doku/Budget-Mutation) das Panel automatisch neu lädt. Keine Mutation.
-export function useBillingBlockers(selectedYear: number, selectedMonth: number) {
-  return useQuery({
-    queryKey: ["billing", "blockers", selectedYear, selectedMonth],
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("year", selectedYear.toString());
-      params.set("month", selectedMonth.toString());
-      const result = await api.get<BillingBlockersResponse>(`/billing/blockers?${params.toString()}`, signal);
-      return unwrapResult(result);
-    },
-  });
-}
-
-// Task #1456: Pre-Commit-Review-Cluster (Phase 2). Liest AUSSCHLIESSLICH den
-// neuen Review-Reader (`GET /billing/review-clusters`) — pro Kunde die
-// Phase-1-Spalten plus Eligibilität (eligible/blocked + Begründung). Der Client
-// gruppiert clientseitig nach Kunde ODER Kasse, daher kein Refetch beim
-// Umschalten. QueryKey beginnt mit "billing" ⇒ `invalidateRelated(qc,"billing")`
-// nach jeder Erstellung lädt die Kachel automatisch neu.
-export function useBillingReviewClusters(selectedYear: number, selectedMonth: number) {
-  return useQuery({
-    queryKey: ["billing", "review-clusters", selectedYear, selectedMonth],
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("year", selectedYear.toString());
-      params.set("month", selectedMonth.toString());
-      const result = await api.get<BillingReviewClustersResponse>(`/billing/review-clusters?${params.toString()}`, signal);
       return unwrapResult(result);
     },
   });
