@@ -134,23 +134,25 @@ describe("runChromiumPreflight (Task #550)", () => {
 });
 
 describe("getLaunchArgs (Task #550)", () => {
-  it("enthält in Production NICHT --single-process (Hauptverdacht für WS-Endpoint-Timeout)", async () => {
+  it("enthält in Production weder --single-process noch --no-zygote (Container-Startup-Hänger, Task #1482)", async () => {
     process.env.NODE_ENV = "production";
     const { getLaunchArgs } = await freshModule();
     const args = getLaunchArgs();
     expect(args).not.toContain("--single-process");
-    expect(args).toContain("--no-zygote");
+    // Task #1482: --no-zygote ist kein Default mehr (Startup-Hänger im Container,
+    // verstärkte den WS-Transport-Fehlermodus). Nur per Env-Override aktivierbar.
+    expect(args).not.toContain("--no-zygote");
     expect(args).toContain("--disable-software-rasterizer");
     expect(args).toContain("--disable-extensions");
     expect(args).toContain("--mute-audio");
   });
 
-  it("enthält in Development weiterhin --single-process (Status quo, lokale Stabilität)", async () => {
+  it("enthält in Development weiterhin --single-process, aber kein --no-zygote (Task #1482)", async () => {
     process.env.NODE_ENV = "development";
     const { getLaunchArgs } = await freshModule();
     const args = getLaunchArgs();
     expect(args).toContain("--single-process");
-    expect(args).toContain("--no-zygote");
+    expect(args).not.toContain("--no-zygote");
   });
 
   it("respektiert PUPPETEER_SINGLE_PROCESS=1 als Override in Production", async () => {
@@ -160,7 +162,14 @@ describe("getLaunchArgs (Task #550)", () => {
     expect(getLaunchArgs()).toContain("--single-process");
   });
 
-  it("respektiert PUPPETEER_NO_ZYGOTE=0 als Override (no-zygote entfernen)", async () => {
+  it("respektiert PUPPETEER_NO_ZYGOTE=1 als Override (no-zygote wieder erzwingen, Task #1482)", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.PUPPETEER_NO_ZYGOTE = "1";
+    const { getLaunchArgs } = await freshModule();
+    expect(getLaunchArgs()).toContain("--no-zygote");
+  });
+
+  it("respektiert PUPPETEER_NO_ZYGOTE=0 als expliziten Override (bleibt aus)", async () => {
     process.env.NODE_ENV = "production";
     process.env.PUPPETEER_NO_ZYGOTE = "0";
     const { getLaunchArgs } = await freshModule();
@@ -197,12 +206,17 @@ describe("Launch-Timeout — Chromium-Output landet im Fehler-Log (Task #550)", 
     const snapshot = getChromiumLogSnapshot();
     expect(snapshot).toMatch(/libnss3\.so/);
 
-    // console.error wurde mit den Chromium-Output-Zeilen aufgerufen.
+    // Task #1482: Der Fehler-Header und JEDE Chromium-Ausgabezeile werden als
+    // eigene console.error-Aufrufe geschrieben (statt eines einzelnen Mehrzeilen-
+    // Dumps hinter einem Header), damit sie in den Deployment-Logs einzeln
+    // auffindbar und nicht abgeschnitten sind.
     const calls = errorSpy.mock.calls.map((c) => c.join(" "));
-    const dumpLogged = calls.some(
-      (c) => c.includes("Browser-Launch fehlgeschlagen") && c.includes("libnss3"),
+    const headerLogged = calls.some((c) => c.includes("Browser-Launch fehlgeschlagen"));
+    const stderrLineLogged = calls.some(
+      (c) => c.includes("[pdf-generator][chromium-stderr]") && c.includes("libnss3"),
     );
-    expect(dumpLogged).toBe(true);
+    expect(headerLogged).toBe(true);
+    expect(stderrLineLogged).toBe(true);
     errorSpy.mockRestore();
   });
 });

@@ -268,7 +268,16 @@ export function getLaunchArgs(): string[] {
   // in Dev/Test bleibt das alte Verhalten erhalten, damit der lokale Stack
   // sich verhält wie vor #544.
   const useSingleProcess = singleProcessOverride !== null ? singleProcessOverride : !isProd;
-  const useNoZygote = noZygoteOverride !== null ? noZygoteOverride : true;
+  // Task #1482: --no-zygote standardmäßig NICHT mehr setzen. Das Flag ist eine
+  // bekannte Puppeteer-in-Container-Falle: In Verbindung mit dem WS-Endpoint-
+  // über-stdout-Transport hängt der Container-Startup, sodass Chromium die
+  // DevTools-URL nicht zuverlässig in <60s nach stdout schreibt (Symptom:
+  // "waiting for the WS endpoint URL to appear in stdout" / 60s-Timeout). Der
+  // per-Env-Override (PUPPETEER_NO_ZYGOTE=1) bleibt erhalten, falls es bewusst
+  // wieder erzwungen werden soll. Risiko: ohne --no-zygote startet der Zygote-
+  // Helfer-Prozess — in unserer Headless-Render-Last unproblematisch und der
+  // Trade-off gegen den deterministischen Startup-Hänger.
+  const useNoZygote = noZygoteOverride !== null ? noZygoteOverride : false;
 
   const args = [
     "--no-sandbox",
@@ -333,6 +342,16 @@ async function launchBrowser(): Promise<Browser> {
     userDataDir,
     protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
     timeout: BROWSER_LAUNCH_TIMEOUT_MS,
+    // Task #1482: CDP-Verbindung über File-Descriptors (3/4) statt über die
+    // WS-URL-Zeile in stdout. Damit entfällt der Prod-Fehlermodus „waiting for
+    // the WS endpoint URL to appear in stdout" strukturell — Puppeteer wartet
+    // nicht mehr darauf, dass Chromium seine DevTools-WebSocket-URL nach stdout
+    // schreibt (was im Autoscale-Container unzuverlässig erst nach 60s passierte
+    // oder ganz ausblieb). Kompatibel mit dumpio/headless/userDataDir: stdout/
+    // stderr bleiben frei fürs Diagnose-Logging, der Protokoll-Kanal liegt auf
+    // den Pipes. getBrowser()-Singleton, disconnected-Handler, withFreshPage
+    // und Pre-Warm (#1479) sind transport-agnostisch und bleiben unverändert.
+    pipe: true,
     // Task #550: dumpio = true, damit Chromium-stderr im Ring-Buffer landet
     // und beim Launch-Timeout zusammen mit der Fehlermeldung geloggt wird.
     dumpio: true,
@@ -352,11 +371,26 @@ async function launchBrowser(): Promise<Browser> {
   try {
     browser = await Promise.race([launchPromiseInner, timeoutPromise]);
   } catch (err) {
-    const dump = getChromiumLogSnapshot(40);
     console.error(
-      `[pdf-generator] Browser-Launch fehlgeschlagen (executablePath=${executablePath}, args=${JSON.stringify(args)}): ${err}` +
-        (dump ? `\n[pdf-generator] Chromium-Output (letzte ${dump.split("\n").length} Zeilen):\n${dump}` : "\n[pdf-generator] Chromium-Output: (leer)"),
+      `[pdf-generator] Browser-Launch fehlgeschlagen (executablePath=${executablePath}, args=${JSON.stringify(args)}, pipe=true): ${err}`,
     );
+    // Task #1482: Den VOLLSTÄNDIGEN Chromium-Ring-Buffer (bis 200 Zeilen) aus-
+    // geben — jede Ausgabezeile als eigene, eindeutig prefixte Log-Zeile, statt
+    // nur „letzte ~40 Zeilen" hinter einem Header. So sind die Zeilen in den
+    // Deployment-Logs einzeln auffindbar und werden nicht abgeschnitten, sodass
+    // die echte Ursache aus den Prod-Logs ablesbar ist: fehlende .so-Bibliothek,
+    // Crash/Segfault, OOM oder reine Langsamkeit — statt nur des generischen
+    // TimeoutError. dumpio bleibt aktiv (Chromium-stderr fließt in den Buffer).
+    const dump = getChromiumLogSnapshot(CHROMIUM_LOG_BUFFER_MAX_LINES);
+    if (dump) {
+      for (const line of dump.split("\n")) {
+        console.error(`[pdf-generator][chromium-stderr] ${line}`);
+      }
+    } else {
+      console.error(
+        "[pdf-generator][chromium-stderr] (leer — Chromium hat nichts auf stdout/stderr geschrieben)",
+      );
+    }
     // Launch fehlgeschlagen → das eben angelegte (verwaiste) Profilverzeichnis
     // wieder entfernen, damit /tmp bei wiederholten Fehlversuchen nicht wächst.
     cleanupChromiumUserDataDir(userDataDir);

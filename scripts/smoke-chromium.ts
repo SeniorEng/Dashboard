@@ -54,6 +54,11 @@ async function main(): Promise<void> {
       puppeteer.launch({
         executablePath: path,
         headless: true,
+        // Task #1482: identischer Pipe-Transport wie der Produktionscode —
+        // CDP über File-Descriptors (3/4) statt WS-URL-über-stdout. So testet
+        // der Smoke denselben Launch-Pfad, der in Prod den 60s-WS-Timeout
+        // verursachte.
+        pipe: true,
         dumpio: true,
         timeout: 15_000,
         protocolTimeout: 15_000,
@@ -85,7 +90,15 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error("[smoke-chromium] Unerwarteter Fehler:", err);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    // Task #1482: Mit dem Pipe-Transport halten die CDP-File-Descriptors die
+    // Event-Loop nach `browser.close()` u.U. kurz offen. Der Smoke ist ein
+    // einmaliger Diagnose-Lauf — sauber mit Exit-Code 0 beenden, statt auf das
+    // natürliche Leerlaufen der Event-Loop zu warten.
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error("[smoke-chromium] Unerwarteter Fehler:", err);
+    process.exit(1);
+  });
