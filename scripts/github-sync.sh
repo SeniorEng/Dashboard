@@ -40,18 +40,57 @@ local_sha() {
   git rev-parse HEAD 2>/dev/null || cat ".git/refs/heads/${BRANCH}" 2>/dev/null || true
 }
 
-# Remote main-SHA via GitHub-API (read-only). Erstes 40-stelliges Hex == object.sha.
-remote_sha() {
-  local token="${GITHUB_PERSONAL_ACCESS_TOKEN:-${GITHUB_WORKFLOW_PAT:-}}"
-  if [ -z "$token" ]; then
-    log "Weder GITHUB_PERSONAL_ACCESS_TOKEN noch GITHUB_WORKFLOW_PAT gesetzt — kann Remote-SHA nicht lesen."
+# Remote-SHA-Lesung mit EINEM konkreten Token. Exit-Codes:
+#   0  Erfolg (gibt die 40-stellige Remote-SHA auf stdout aus)
+#   2  kein Token übergeben
+#   3  Authentifizierung fehlgeschlagen (401/403 — Token abgelaufen/ungültig)
+#   1  sonstiger Fehler (Netzwerk/Transport oder unerwarteter HTTP-Status)
+remote_sha_with_token() {
+  local token="$1"
+  [ -z "$token" ] && return 2
+  local response http_code body
+  if ! response="$(curl -sS -w $'\n%{http_code}' \
+      -H "Authorization: Bearer ${token}" \
+      -H "Accept: application/vnd.github+json" \
+      "${API_REF}" 2>/dev/null)"; then
     return 1
   fi
-  curl -fsS \
-    -H "Authorization: Bearer ${token}" \
-    -H "Accept: application/vnd.github+json" \
-    "${API_REF}" \
-    | grep -oE '[0-9a-f]{40}' | head -1
+  http_code="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  case "$http_code" in
+    200)
+      printf '%s\n' "$body" | grep -oE '[0-9a-f]{40}' | head -1
+      return 0
+      ;;
+    401|403) return 3 ;;
+    *)       return 1 ;;
+  esac
+}
+
+# Remote main-SHA via GitHub-API (read-only). Probiert die verfügbaren Token und
+# nutzt denjenigen, der tatsächlich 200 liefert — so maskiert ein abgelaufener
+# Connector-Token kein erfolgreiches Lesen über einen anderen Token mehr.
+# Optionaler $1: bevorzugter Token (z.B. der, der den Push authentifiziert hat),
+# wird zuerst probiert.
+remote_sha() {
+  local preferred="${1:-}"
+  local token rc auth_failed=0 sha
+  for token in "$preferred" "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" "${GITHUB_WORKFLOW_PAT:-}"; do
+    [ -z "$token" ] && continue
+    if sha="$(remote_sha_with_token "$token")"; then
+      printf '%s\n' "$sha"
+      return 0
+    else
+      rc=$?
+      [ "$rc" = "3" ] && auth_failed=1
+    fi
+  done
+  if [ "$auth_failed" = "1" ]; then
+    log "Remote-SHA-Lesung scheiterte an Authentifizierung (401/403) — Token abgelaufen/ungültig? GITHUB_WORKFLOW_PAT erneuern."
+  else
+    log "Remote-SHA konnte mit keinem verfügbaren Token gelesen werden (kein Token gesetzt oder Netzwerkfehler)."
+  fi
+  return 1
 }
 
 # OpenAPI-Spec-Drift (committete Spec vs. frisch aus den Zod-Schemas generiert).
@@ -96,6 +135,12 @@ do_push() {
   git push "https://x-access-token:${token}@github.com/${REPO}.git" "HEAD:${BRANCH}" 2>&1
 }
 
+# Erkennt an der git-Ausgabe, ob ein Push-Fehler ein Auth-/Token-Problem ist
+# (abgelaufener/ungültiger Token) und nicht ein bloßer Netzwerkfehler.
+looks_like_auth_failure() {
+  printf '%s' "$1" | grep -qiE 'Authentication failed|Invalid username or password|Bad credentials|could not read Username|remote: (Invalid|Permission)|HTTP (401|403)|403 Forbidden|401 Unauthorized'
+}
+
 cmd_push() {
   local lsha rsha
   lsha="$(local_sha)"
@@ -112,15 +157,18 @@ cmd_push() {
   local pat="${GITHUB_WORKFLOW_PAT:-}"
   local out=""
 
+  local auth_seen=0
+
   # 1) Standard-Connector-Token (Code/Doku-Pushes).
   if [ -n "$connector" ]; then
     if out="$(do_push "$connector")"; then
       log "Push mit Connector-Token erfolgreich."
-      verify_pushed "$lsha"
+      verify_pushed "$lsha" "$connector"
       return 0
     fi
     log "Connector-Token-Push fehlgeschlagen:"
     printf '%s\n' "$out" >&2
+    looks_like_auth_failure "$out" && auth_seen=1
     if printf '%s' "$out" | grep -qiE 'GH013|workflow|refusing to allow'; then
       log "Workflow-Scope-Problem (.github/workflows/*) erkannt — versuche GITHUB_WORKFLOW_PAT."
     fi
@@ -132,27 +180,40 @@ cmd_push() {
   if [ -n "$pat" ]; then
     if out="$(do_push "$pat")"; then
       log "Push mit GITHUB_WORKFLOW_PAT erfolgreich."
-      verify_pushed "$lsha"
+      verify_pushed "$lsha" "$pat"
       return 0
     fi
     log "PAT-Push fehlgeschlagen:"
     printf '%s\n' "$out" >&2
+    looks_like_auth_failure "$out" && auth_seen=1
   else
     log "Kein GITHUB_WORKFLOW_PAT gesetzt — Workflow-Dateien können nicht gepusht werden (GH013)."
   fi
 
-  log "FEHLER: Push fehlgeschlagen (siehe Ausgabe oben)."
+  log "FEHLER: GitHub-Sync-Push fehlgeschlagen — GitHub main bleibt zurück (Backlog wächst)."
+  if [ "$auth_seen" = "1" ]; then
+    log "→ Ursache: Token ungültig/abgelaufen. GITHUB_WORKFLOW_PAT (Scope repo+workflow) in den Deployment-Secrets erneuern."
+  else
+    log "→ Push wurde von keinem Token akzeptiert (siehe Ausgabe oben). Token/Secrets und Netzwerk prüfen."
+  fi
   return 1
 }
 
 # Nach dem Push verifizieren, dass die Remote-SHA der gepushten entspricht.
+# $2 (optional): der Token, der den Push authentifiziert hat — wird zum
+# Gegenlesen bevorzugt, damit ein abgelaufener Connector-Token keine falsche
+# WARNUNG nach einem in Wahrheit erfolgreichen Push erzeugt.
 verify_pushed() {
-  local expected="$1" got
-  got="$(remote_sha || true)"
+  local expected="$1" worked_token="${2:-}" got
+  got="$(remote_sha "$worked_token" || true)"
   if [ -n "$got" ] && [ "$got" = "$expected" ]; then
     log "Verifiziert: GitHub main steht jetzt auf ${got}."
+    return 0
+  fi
+  if [ -z "$got" ]; then
+    log "HINWEIS: Push war erfolgreich, aber die Remote-SHA konnte nicht gegengelesen werden (Leserecht/Netzwerk). Der Push gilt trotzdem als erfolgreich."
   else
-    log "WARNUNG: Remote-SHA nach Push (${got:-unbekannt}) != erwartete (${expected})."
+    log "WARNUNG: Remote-SHA nach Push (${got}) != erwartete (${expected})."
   fi
 }
 

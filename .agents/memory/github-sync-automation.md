@@ -45,10 +45,17 @@ The OAuth connector token (`listConnections('github')[0].settings.access_token`)
 is always fresh but has `repo` only (no `workflow`), so it hits GH013 on any
 commit touching `.github/workflows/*` — it cannot replace the PAT.
 
-**Script gotcha:** after a *successful* PAT push, `github-sync.sh` may still print
-`WARNUNG: Remote-SHA ... unbekannt` because its `remote_sha`/`verify_pushed` read
-uses the (often-expired) connector token FIRST. Don't trust that warning — verify
-independently with `git fetch origin main` + `git rev-list --count origin/main..HEAD`.
+**Script gotcha (RESOLVED):** the post-push read must use the token that
+authenticated the push, not always the connector token first — otherwise an
+expired connector token returns 401 on the read and prints a false
+`WARNUNG: Remote-SHA ... unbekannt` after a fully successful push. `remote_sha`
+now takes an optional preferred-token arg, `verify_pushed` passes the token that
+worked, and the reader tries both tokens and accepts only HTTP 200. If no token
+can read back, it logs a neutral `HINWEIS` (push still counts), never `WARNUNG`.
+A failed push (dead/expired PAT) now exits non-zero with an actionable
+"refresh GITHUB_WORKFLOW_PAT" message so the Scheduled Deployment marks the run
+failed instead of the backlog growing silently. Any future change here must keep
+the read-token preference tied to the push-token, not hardcode connector-first.
 
 **Agent env note:** newly-added secrets ARE live in freshly-spawned bash tool
 processes (proven with a `setEnvVars` probe round-trip) — a 401 on a just-added
