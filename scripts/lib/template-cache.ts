@@ -138,3 +138,21 @@ export function advisoryLockKey(name: string = CACHE_DB_NAME): bigint {
 }
 
 export const CACHE_BUILD_LOCK_KEY = advisoryLockKey();
+
+// Task #1489: Clusterweites Worker-Slot-Gate gegen Übersubskription des
+// cgroup-pids-Limits. Der Agent-/Validation-Harness fährt teils MEHRERE
+// Orchestrator-Läufe gleichzeitig (`test`, `e2e-smoke`) — jeder will seine
+// Default-Worker (je eigener App-Server + Chromium) starten, in Summe sprengt
+// das die PIDs. Wir vergeben daher clusterweit nur ein begrenztes GEMEINSAMES
+// Worker-Budget über Postgres-Advisory-Locks: Slot i belegt den Schlüssel
+// `WORKER_SLOT_LOCK_BASE + i`. Jeder Lauf reserviert per `pg_try_advisory_lock`
+// so viele Slots wie er Worker will (mind. 1), gedeckelt durch das Budget — der
+// zweite parallele Lauf bekommt dann automatisch weniger und überschreitet das
+// PID-Limit nicht. Advisory-Locks sind session-/clusterweit und werden bei
+// Verbindungsabbruch automatisch freigegeben (kein verwaister Lock).
+export const WORKER_SLOT_LOCK_BASE = advisoryLockKey("cc_test_worker_slot");
+
+// Konservativer, dokumentierter Default für das gemeinsame Worker-Budget über
+// ALLE gleichzeitig laufenden Orchestrator-Läufe hinweg. Override via
+// `EPHEMERAL_GLOBAL_WORKER_BUDGET`; `0` deaktiviert das Gate (volle Worker-Zahl).
+export const DEFAULT_GLOBAL_WORKER_BUDGET = 4;

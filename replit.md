@@ -6,6 +6,7 @@ Streamlines elderly care service management for caregivers, enhancing efficiency
 - **Run Dev**: `npm run dev` (client & server) · **Run Server**: `npm run start` (server only)
 - **Build**: `npm run build` · **Typecheck**: `npm run check` · **DB Push**: `drizzle-kit push`
 - **Test**: `npm run test` (= `vitest run`). Zwei Vitest-Projects (`unit` parallel, kein Server/DB · `integration` über Ephemeral-DB-Orchestrator). Runbook: [`docs/test-infrastructure.md`](docs/test-infrastructure.md) · Flakes: [`docs/flaky-tests.md`](docs/flaky-tests.md).
+- **Test-Unblock (PID-Limit)**: Bei `spawn EAGAIN` / erschöpftem cgroup-PID-Limit `npm run test:unblock` (räumt verwaiste Test-DBs/-Logs/-Prozesse inkl. Chromium-Enkel ab, meldet PID-Auslastung). Auto-Sweep + PID-Preflight laufen ohnehin beim Orchestrator-Start. Detail: [`docs/test-infrastructure.md`](docs/test-infrastructure.md#pid-limit--verwaiste-prozesse-task-1489).
 - **Dev-DB Backup/Reseed/Sweep**: `npm run db:backup-dev` · `npm run db:reseed-dev` (`-- --apply` scharf) · `npm run db:sweep-dev` (Test-Pattern-Backlog abräumen, `-- --apply` scharf; ZZ-Test-Whitelist bleibt). NUR Dev (Guards). Runbook: [`docs/dev-database-runbook.md`](docs/dev-database-runbook.md).
 - **Mutation Test**: `npm run mutation` (Stryker, nur pure Berechnungs-Module). Runbook: [`docs/mutation-testing.md`](docs/mutation-testing.md).
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`), 11 Pflicht-Gates; `main` auf `SeniorEng/Dashboard` ist branch-protected. Runbook: [`docs/ci-pipeline.md`](docs/ci-pipeline.md).

@@ -52,10 +52,19 @@ import { randomBytes } from "node:crypto";
 import { createWriteStream, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve as resolvePath } from "node:path";
-import { DB_PREFIX, sweepOrphanLogs, sweepOrphans } from "./lib/ephemeral-db-sweep.ts";
+import {
+  DB_PREFIX,
+  evaluatePidPreflight,
+  readPidStats,
+  sweepOrphanLogs,
+  sweepOrphanProcesses,
+  sweepOrphans,
+} from "./lib/ephemeral-db-sweep.ts";
 import {
   CACHE_BUILD_LOCK_KEY,
   CACHE_DB_NAME,
+  DEFAULT_GLOBAL_WORKER_BUDGET,
+  WORKER_SLOT_LOCK_BASE,
   computeTemplateHash,
   isCacheFresh,
 } from "./lib/template-cache.ts";
@@ -102,7 +111,17 @@ const provisionOnly = process.env.EPHEMERAL_PROVISION_ONLY === "1";
 
 const runId = `${Date.now().toString(36)}_${process.pid}_${randomBytes(4).toString("hex")}`;
 const templateDb = `${DB_PREFIX}${runId}_tmpl`;
-const workerDbs = Array.from({ length: workerCount }, (_, i) => `${DB_PREFIX}${runId}_w${i}`);
+// Task #1489: Die effektive Worker-Anzahl kann durch das clusterweite Worker-Slot-
+// Gate (acquireWorkerSlots) nach unten gedeckelt werden, wenn parallel weitere
+// Orchestrator-Läufe (Auto-Run + Validation) aktiv sind. Deshalb erst in main()
+// final befüllt, nachdem die Slots reserviert sind. dropAllDbs() liest die Liste
+// zur Aufrufzeit (DROP ... IF EXISTS ist für nie angelegte Namen ein No-op).
+let workerDbs: string[] = [];
+
+// Task #1489: Freigabe-Handle für die clusterweit reservierten Worker-Slots
+// (acquireWorkerSlots). Wird im teardown() aufgerufen, damit Schwester-Läufe die
+// Slots zurückbekommen — auch bei Signal/Abbruch.
+let releaseWorkerSlots: () => void = () => {};
 
 // Task #903/#908: Wir bündeln den Server EINMAL pro Lauf via esbuild (API-only)
 // und booten die Worker mit plain `node` statt `tsx`. Das senkt den Boot pro
@@ -177,14 +196,25 @@ function dropAllDbs(): void {
   }
 }
 
+// Task #1489: Worker-App-Server werden in einer EIGENEN Prozessgruppe gestartet
+// (spawn detached:true → pgid === pid). Deshalb killen wir hier den GANZEN Baum
+// über die negative PID (`kill(-pid)`), damit die vom Server für die PDF-
+// Generierung gestarteten Chromium-ENKEL mitsterben — ein reines `child.kill()`
+// am Node-Server würde sie sonst auf init umhängen und als Waisen zurücklassen
+// (genau die PID-Fresser, die dieser Task beseitigt). Der Einzel-Kill folgt als
+// Fallback, falls keine Gruppe existiert (alter tsx-Boot / schon beendet).
 function killServers(): void {
   for (const child of serverChildren) {
-    if (child && !child.killed) {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // ignore
-      }
+    if (!child || child.killed || child.pid == null) continue;
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // keine Prozessgruppe / schon weg → Einzel-Kill versuchen.
+    }
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // ignore
     }
   }
 }
@@ -212,6 +242,12 @@ function teardown(): void {
   dropAllDbs();
   cleanupBundle();
   cleanupClient();
+  // Task #1489: Clusterweite Worker-Slots zurückgeben (No-op, wenn nie reserviert).
+  try {
+    releaseWorkerSlots();
+  } catch {
+    // Freigabe darf den Teardown nie scheitern lassen.
+  }
 }
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -220,6 +256,20 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     process.exit(1);
   });
 }
+
+// Task #1489: Letzter Best-Effort-Reaper. Auch wenn der Lauf über einen anderen
+// Pfad endet (unerwarteter Throw, manueller process.exit irgendwo), schießen wir
+// im `exit`-Handler die Server-Prozessgruppen noch synchron ab, damit keine
+// Chromium-Enkel zurückbleiben. Hier ist nur SYNCHRONE Arbeit erlaubt — killServers()
+// ist rein synchron (process.kill), DB-/Datei-Cleanup übernimmt der reguläre
+// teardown() im .then/.catch von main(). Idempotent (child.killed-Guard).
+process.on("exit", () => {
+  try {
+    killServers();
+  } catch {
+    // exit-Handler darf niemals selbst werfen.
+  }
+});
 
 const baseEnv: NodeJS.ProcessEnv = {
   ...process.env,
@@ -533,6 +583,109 @@ function ensureCacheTemplate(hash: string): "warm" | "cold" {
   return "cold";
 }
 
+// Task #1489: Reserviert clusterweit bis zu `desired` Worker-Slots aus einem
+// GEMEINSAMEN Budget per Postgres-Advisory-Locks (siehe WORKER_SLOT_LOCK_BASE in
+// template-cache.ts). Mehrere gleichzeitige Orchestrator-Läufe (Auto-Run +
+// Validation) teilen sich so das Budget und sprengen das cgroup-pids-Limit nicht.
+//
+// Die Locks werden — wie acquireCacheBuildLock — über eine PERSISTENTE psql-
+// Session gehalten (Advisory-Locks gelten für die Session-Dauer); die zurück-
+// gegebene `release`-Funktion beendet die Session (auch ein harter Abbruch gibt
+// die Locks via Verbindungsabbruch frei). FAIL-SAFE: bei jedem Fehler/Timeout
+// läuft der Lauf mit der vollen `desired`-Zahl weiter (Tests nie blockieren).
+function acquireWorkerSlots(
+  desired: number,
+  budget: number,
+  timeoutMs = 30_000,
+): Promise<{ granted: number; release: () => void }> {
+  return new Promise((resolve) => {
+    const noop = () => {};
+    const fallbackFull = () => resolve({ granted: desired, release: noop });
+
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("psql", [adminUrl!, "-X", "-q", "-tA", "-v", "ON_ERROR_STOP=1"], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      fallbackFull();
+      return;
+    }
+
+    let out = "";
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+      fallbackFull();
+    }, timeoutMs);
+    timer.unref?.();
+
+    child.stdout?.on("data", (buf: Buffer) => {
+      out += buf.toString();
+      if (settled || !out.includes("SLOTS_DONE")) return;
+      settled = true;
+      clearTimeout(timer);
+
+      // psql -tA liefert je Zeile `i|t` bzw. `i|f`.
+      const acquired: number[] = [];
+      for (const line of out.split("\n")) {
+        const m = line.match(/^(\d+)\|(t|f)$/);
+        if (m && m[2] === "t") acquired.push(Number(m[1]));
+      }
+      const target = Math.min(desired, acquired.length);
+      const surplus = acquired.slice(target);
+      // Überschüssig belegte Slots sofort wieder freigeben, damit Schwester-Läufe
+      // sie bekommen (wir wollten nur `desired`).
+      if (surplus.length > 0 && child.stdin) {
+        child.stdin.write(
+          surplus.map((i) => `SELECT pg_advisory_unlock(${WORKER_SLOT_LOCK_BASE} + ${i});`).join("\n") +
+            "\n",
+        );
+      }
+      // Mind. 1 Worker, auch wenn alle Slots vergeben waren (Tests nie blocken).
+      const granted = target > 0 ? target : 1;
+      resolve({
+        granted,
+        release: () => {
+          try {
+            child.stdin?.end();
+          } catch {
+            // ignore
+          }
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            // ignore
+          }
+        },
+      });
+    });
+    child.on("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fallbackFull();
+    });
+    child.on("exit", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fallbackFull();
+    });
+
+    child.stdin?.write(
+      `SELECT i, pg_try_advisory_lock(${WORKER_SLOT_LOCK_BASE} + i) FROM generate_series(0, ${budget - 1}) AS i;\n\\echo SLOTS_DONE\n`,
+    );
+  });
+}
+
 interface WorkerHandle {
   dbName: string;
   dbUrl: string;
@@ -585,7 +738,14 @@ async function startWorker(dbName: string, workerIndex: number): Promise<WorkerH
       EPHEMERAL_WORKER_ID: String(workerIndex),
     },
     stdio: ["ignore", logFd, logFd],
+    // Task #1489: Eigene Prozessgruppe (pgid === pid), damit killServers() per
+    // `kill(-pid)` den GANZEN Baum inkl. der Chromium-Enkel (PDF-Rendering) als
+    // Gruppe beendet — sonst verwaisen die Enkel auf init und fressen PIDs.
+    detached: true,
   });
+  // Wir warten/teardownen den Prozess selbst; nicht am Eltern-Event-Loop hängen
+  // lassen (detached). Referenz bleibt über serverChildren erhalten.
+  child.unref();
   serverChildren.push(child);
   child.on("exit", (code, signal) => {
     if (!droppedAlready && code != null && code !== 0) {
@@ -617,6 +777,43 @@ async function main(): Promise<number> {
   // Schwester-Läufe schreiben fortlaufend (frische mtime) → geschützt; die N
   // jüngsten werden ohnehin behalten.
   sweepOrphanLogs({ log: (m) => console.log(`[ephemeral-db] ${m}`) });
+
+  // Task #1489: ... und die zurückgebliebenen VERWAISTEN PROZESSE (Test-App-
+  // Server + deren Chromium-Enkel) aus hart abgebrochenen Läufen — die eigentlichen
+  // PID-Fresser. Nur an init reparentete, marker-eindeutige Test-Prozesse werden
+  // angefasst; ein parallel laufender Schwester-Lauf (PPID ≠ 1) bleibt verschont.
+  // Fail-safe: blockiert den Lauf nie.
+  const procSweep = sweepOrphanProcesses({ log: (m) => console.log(`[ephemeral-db] ${m}`) });
+  if (procSweep.killed.length > 0) {
+    console.log(
+      `[ephemeral-db] Prozess-Sweep: ${procSweep.killed.length} verwaiste Test-Prozess(e) beendet.`,
+    );
+  }
+
+  // Task #1489: PID-Preflight. NACH dem Sweep (der erst PIDs freigibt) prüfen, ob
+  // das cgroup-pids-Limit immer noch (fast) ausgeschöpft ist. Wenn ja, sofort mit
+  // klarer Anleitung abbrechen, statt später mitten im Lauf an `spawn EAGAIN` zu
+  // zerschellen. Abschaltbar via EPHEMERAL_PID_PREFLIGHT=0; Schwelle via
+  // EPHEMERAL_PID_PREFLIGHT_RATIO (Default 0.8). Im Provision-Only-Modus (CI-
+  // Verify) übersprungen — dort wird kein Server-/Chromium-Baum gestartet.
+  if (!provisionOnly && process.env.EPHEMERAL_PID_PREFLIGHT !== "0") {
+    const ratio = Number(process.env.EPHEMERAL_PID_PREFLIGHT_RATIO || "0.8") || 0.8;
+    const pre = evaluatePidPreflight(readPidStats(), ratio);
+    if (pre.max != null) {
+      console.log(
+        `[ephemeral-db] PID-Auslastung: ${pre.current}/${pre.max} (${((pre.ratio ?? 0) * 100).toFixed(0)}%, Schwelle ${(ratio * 100).toFixed(0)}%).`,
+      );
+    }
+    if (!pre.ok) {
+      fail(
+        `Abbruch: Die Prozess-/PID-Auslastung des Workspaces ist zu hoch ` +
+          `(${pre.current}/${pre.max}, über ${(ratio * 100).toFixed(0)}%). Ein Start würde ` +
+          `mitten im Lauf an „spawn EAGAIN“ scheitern. Bitte zuerst aufräumen:\n` +
+          `    npm run test:unblock\n` +
+          `Das beendet verwaiste Test-Prozesse/-DBs/-Logs. Danach den Lauf erneut starten.`,
+      );
+    }
+  }
 
   // Task #908: Den Vite-Client-Build (e2e) JETZT als eigenen Prozess starten,
   // damit er PARALLEL zur (synchron blockierenden) DB-Provisionierung + dem
@@ -708,7 +905,36 @@ async function main(): Promise<number> {
   // (über `cloneDbFromTemplate` mit Retry als zusätzliche Absicherung) entfernt
   // die Race; das anschließende parallele Booten kostet keine zusätzliche
   // Wall-Clock-Zeit, da es nicht mehr gegen die Quelle konkurriert.
-  console.log(`[ephemeral-db] Provisioniere ${workerCount} Worker (DB + Server) ...`);
+  // Task #1489: Clusterweites Worker-Slot-Gate. Laufen parallel weitere
+  // Orchestrator-Läufe (Auto-Run + Validation), teilen sich alle EIN gemeinsames
+  // Worker-Budget; dieser Lauf bekommt dann ggf. weniger Worker und überschreitet
+  // das cgroup-pids-Limit nicht. Budget via EPHEMERAL_GLOBAL_WORKER_BUDGET
+  // (Default DEFAULT_GLOBAL_WORKER_BUDGET); `0` deaktiviert das Gate. Fail-safe:
+  // bei Fehler/Timeout volle workerCount.
+  const globalWorkerBudget = Number(
+    process.env.EPHEMERAL_GLOBAL_WORKER_BUDGET ?? String(DEFAULT_GLOBAL_WORKER_BUDGET),
+  );
+  let effectiveWorkerCount = workerCount;
+  if (Number.isFinite(globalWorkerBudget) && globalWorkerBudget > 0) {
+    const slots = await acquireWorkerSlots(workerCount, globalWorkerBudget);
+    releaseWorkerSlots = slots.release;
+    effectiveWorkerCount = Math.max(1, Math.min(workerCount, slots.granted));
+    if (effectiveWorkerCount < workerCount) {
+      console.log(
+        `[ephemeral-db] Worker-Slot-Gate: ${effectiveWorkerCount}/${workerCount} Worker ` +
+          `(gemeinsames Budget ${globalWorkerBudget}, parallele Läufe aktiv).`,
+      );
+    }
+  }
+
+  // Worker-DB-Namen erst JETZT festlegen — nach dem Slot-Gate, das die effektive
+  // Worker-Zahl deckelt. dropAllDbs() liest workerDbs zur Aufrufzeit.
+  workerDbs = Array.from(
+    { length: effectiveWorkerCount },
+    (_, i) => `${DB_PREFIX}${runId}_w${i}`,
+  );
+
+  console.log(`[ephemeral-db] Provisioniere ${effectiveWorkerCount} Worker (DB + Server) ...`);
   for (const db of workerDbs) {
     cloneDbFromTemplate(db, templateDb);
   }
@@ -734,7 +960,7 @@ async function main(): Promise<number> {
     TEST_BASE_URL: baseUrls[0],
     // Vollständige Liste für die Per-Worker-Zuordnung in tests/setup.ts.
     TEST_BASE_URLS: baseUrls.join(","),
-    EPHEMERAL_DB_WORKERS: String(workerCount),
+    EPHEMERAL_DB_WORKERS: String(effectiveWorkerCount),
     PORT: String(handles[0].port),
   };
   const res = spawnSync(command[0], command.slice(1), { env: testEnv, stdio: "inherit" });

@@ -53,11 +53,24 @@ Boot-Pfad des `runButton` (inkl. `workflow.run`-Komposita) auf und schlägt fehl
 sobald ein schweres Test-/Check-/Coverage-Kommando beim Boot mitläuft. So kann
 niemand versehentlich wieder auf den parallelen `Project`-Boot zurückfallen.
 
-### L5 — Dokumentation
+### L5 — PID-Limit-Schutz (verwaiste Test-Prozesse, Task #1489)
+Hart abgebrochene Testläufe ließen Test-App-Server **und deren Chromium-Enkel**
+(PDF-Rendering) als Waisen zurück; sie fraßen PIDs bis zum cgroup-Limit
+(`pids.max`, typ. 1024), wodurch neue Läufe an `spawn EAGAIN` scheiterten. Der
+Orchestrator (`scripts/with-ephemeral-db.ts`) räumt deshalb beim Start zusätzlich
+zu DBs/Logs auch **verwaiste Test-Prozesse** ab (nur eindeutig markierte, auf init
+reparentete; Schwester-Läufe bleiben unberührt), startet Worker in **eigener
+Prozessgruppe** (Gruppen-Kill nimmt Chromium-Enkel mit, plus `exit`-Reaper), bricht
+bei zu hoher **PID-Auslastung** mit Anleitung (`npm run test:unblock`) ab und
+deckelt parallele Läufe über ein **gemeinsames Worker-Budget**
+(`EPHEMERAL_GLOBAL_WORKER_BUDGET`). Alles fail-safe (blockiert Tests nie). Details:
+[`docs/test-infrastructure.md`](docs/test-infrastructure.md#pid-limit--verwaiste-prozesse-task-1489).
+
+### L6 — Dokumentation
 Boot-Disziplin und das Emergency-Restart-Playbook stehen in `replit.md`
 (Abschnitt „Workspace-Boot & Stabilität").
 
-### L6 — Dieser Präventionsplan
+### L7 — Dieser Präventionsplan
 Diese Datei ist die zentrale Referenz für Ursache, Schutzschichten und Betrieb.
 
 ## Emergency-Restart-Playbook
@@ -68,9 +81,11 @@ Wenn der Workspace hängt / Preview tot ist / `spawn EAGAIN` auftritt:
    `billing-cov`, `e2e-smoke` (und ggf. `typecheck`/`lint`) per **Stop**
    beenden. `Project` **nicht** starten.
 2. **App neu starten:** `Start application` neu starten (Run-Button oder Panel).
-3. **Gesundheit prüfen:** `curl -s localhost:5000/api/health | jq '.memory'`
+3. **Bei `spawn EAGAIN` / PID-Erschöpfung:** `npm run test:unblock` ausführen
+   (räumt verwaiste Test-DBs/-Logs/-Prozesse ab und meldet die PID-Auslastung).
+4. **Gesundheit prüfen:** `curl -s localhost:5000/api/health | jq '.memory'`
    — `rssMB` sollte deutlich unter dem Container-Limit liegen.
-4. **Checks danach einzeln** laufen lassen, oder `Full QA Check` für einen
+5. **Checks danach einzeln** laufen lassen, oder `Full QA Check` für einen
    sequentiellen `typecheck → lint → test`-Lauf.
 
 ## Nicht im Scope

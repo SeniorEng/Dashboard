@@ -84,8 +84,39 @@ von `shared/schema/**`, `drizzle.config.ts` und den beiden Seed-Skripten
 automatisch — kein manuelles Drop nötig. Die reine Entscheidungs-/Hash-Logik ist
 in `tests/unit/template-cache.test.ts` gepinnt.
 
-Manuelle Werkzeuge: `npm run test:sweep-dbs` (verwaiste DBs aufräumen),
-`npm run test:verify-cache` (Warm-/Kalt-Pfad messen).
+Manuelle Werkzeuge: `npm run test:sweep-dbs` (verwaiste DBs/Logs/Prozesse aufräumen),
+`npm run test:unblock` (= `--force`: PID-Limit-Notfall-Aufräumung, ignoriert die
+Altersgrenze), `npm run test:verify-cache` (Warm-/Kalt-Pfad messen).
+
+## PID-Limit & verwaiste Prozesse (Task #1489)
+
+Der Workspace-Container hat ein cgroup-PID-Limit (`pids.max`, typ. 1024). Hart
+abgebrochene Testläufe (SIGKILL, Container-Crash) ließen früher ihre Test-App-
+Server **und deren Chromium-Enkel** (PDF-Rendering) als Waisen zurück — sie wurden
+auf init reparentet und fraßen PIDs, bis neue Läufe an `spawn EAGAIN` scheiterten.
+
+Schutz (alles fail-safe, blockiert Tests nie):
+- **Auto-Prozess-Sweep**: Der Orchestrator (`scripts/with-ephemeral-db.ts`) killt
+  beim Start zusätzlich zu DBs/Logs auch verwaiste Test-Prozesse. Erkannt werden
+  NUR eindeutig markierte Test-Prozesse (`.local/test-server-*.cjs`-Bundle bzw.
+  Chromium-User-Data-Dir `careconnect-chromium-test-`), die auf init reparentet
+  sind (PPID 1) und die Altersgrenze überschreiten. Ein laufender Schwester-Lauf
+  (PPID ≠ 1) bleibt unberührt; der eigene Prozess/init nie.
+- **Eigene Prozessgruppe**: Worker-Server werden `detached` gestartet; `killServers`
+  killt per `kill(-pid)` die ganze Gruppe inkl. Chromium-Enkel, plus ein
+  `process.on("exit")`-Reaper als letzte Absicherung.
+- **PID-Preflight**: Nach dem Sweep prüft der Orchestrator die PID-Auslastung
+  (`EPHEMERAL_PID_PREFLIGHT_RATIO`, Default 0.8); ist sie weiterhin zu hoch, bricht
+  er mit Anleitung (`npm run test:unblock`) ab statt mitten im Lauf zu scheitern.
+  Abschaltbar via `EPHEMERAL_PID_PREFLIGHT=0`.
+- **Worker-Slot-Gate**: Mehrere gleichzeitige Orchestrator-Läufe (Auto-Run +
+  Validation) teilen sich ein gemeinsames Worker-Budget per Postgres-Advisory-Lock
+  (`EPHEMERAL_GLOBAL_WORKER_BUDGET`, Default 4; `0` deaktiviert), damit ihre
+  Worker-Server-/Chromium-Bäume in Summe das PID-Limit nicht sprengen.
+
+Die reine Entscheidungslogik (`selectOrphanProcesses`, `evaluatePidPreflight`,
+`parsePsOutput`, `classifyTestProcess`) ist in
+`tests/unit/ephemeral-db-process-sweep.test.ts` gepinnt.
 
 ## LetterXpress mocken (node:https, NICHT fetch)
 

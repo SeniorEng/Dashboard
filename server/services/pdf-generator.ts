@@ -28,9 +28,16 @@ let chromiumUserDataDirCounter = 0;
 const browserUserDataDirs = new WeakMap<Browser, string>();
 
 function makeChromiumUserDataDir(): string {
+  // Task #1489: Im Test (NODE_ENV=test) ein eindeutiges `test-`-Segment einziehen,
+  // damit der Prozess-Orphan-Sweep (scripts/lib/ephemeral-db-sweep.ts) AUSSCHLIESS-
+  // LICH test-gestartete Chromium-Instanzen erkennt und tötet — Dev/Prod-Chromium
+  // trägt den Marker `careconnect-chromium-test-` NICHT und ist damit per
+  // Konstruktion vom Sweep ausgeschlossen.
+  const prefix =
+    process.env.NODE_ENV === "test" ? "careconnect-chromium-test-" : "careconnect-chromium-";
   const dir = path.join(
     os.tmpdir(),
-    `careconnect-chromium-${process.pid}-${chromiumUserDataDirCounter++}-${crypto
+    `${prefix}${process.pid}-${chromiumUserDataDirCounter++}-${crypto
       .randomBytes(4)
       .toString("hex")}`,
   );
