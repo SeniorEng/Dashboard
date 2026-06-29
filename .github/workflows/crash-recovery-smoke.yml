@@ -43,6 +43,14 @@ concurrency:
   group: crash-recovery-smoke
   cancel-in-progress: false
 
+# Der Alert-Mechanismus (siehe letzte Steps) öffnet/aktualisiert/schließt ein
+# Tracking-Issue, damit ein nächtlicher Fehlschlag NICHT nur als leicht
+# überseh­bare rote Scheduled-Run-Mail untergeht. Dafür braucht der Job
+# Schreibrecht auf Issues; `contents: read` reicht fürs Checkout.
+permissions:
+  contents: read
+  issues: write
+
 env:
   NODE_VERSION: "20"
 
@@ -142,3 +150,109 @@ jobs:
           path: restart-smoke.log
           if-no-files-found: ignore
           retention-days: 14
+
+      # Lauter, nachverfolgbarer Alarm bei Fehlschlag: Da dieser Job nächtlich/manuell
+      # läuft und KEIN Required-Status-Check ist, würde ein roter Lauf sonst nur als
+      # leicht überseh­bare GitHub-Standard-Mail untergehen und tagelang unbemerkt
+      # bleiben (genau das Szenario, das das Testnetz verhindern soll). Deshalb öffnen
+      # wir bei Fehlschlag ein Tracking-Issue (oder kommentieren das bereits offene),
+      # mit Link auf den Lauf + Hinweis auf das `crash-recovery-smoke-log`-Artefakt.
+      # Erkannt wird das Issue über das eindeutige Label `crash-recovery-smoke-alert`,
+      # damit nie mehrere parallele Alarm-Issues entstehen.
+      - name: Open or update alert issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = 'crash-recovery-smoke-alert';
+            const title = '🔴 crash-recovery-smoke nightly failing';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              'Der nächtliche `crash-recovery-smoke`-Lauf ist **fehlgeschlagen**.',
+              '',
+              'Das bedeutet: Das Test-Runner-Sicherheitsnetz gegen PID-Erschöpfung',
+              '(Orphan-Sweep + PID-Preflight) ist möglicherweise regrediert — die',
+              'Gesamt-Garantie aus Task #1492 hält nicht mehr.',
+              '',
+              `- Fehlgeschlagener Lauf: ${runUrl}`,
+              '- Orchestrator-Ausgabe: Artefakt `crash-recovery-smoke-log` am Lauf.',
+              '- Runbook: `docs/test-infrastructure.md` (PID-Limit) · `docs/ci-pipeline.md`.',
+              '',
+              'Dieses Issue wird automatisch geschlossen, sobald ein nächtlicher Lauf',
+              'wieder grün ist.',
+            ].join('\n');
+
+            // Stelle das Label sicher (idempotent — ignoriere "existiert bereits").
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: 'b60205',
+                description: 'Automatischer Alarm: nächtlicher crash-recovery-smoke fehlgeschlagen',
+              });
+            } catch (e) {
+              if (e.status !== 422) throw e;
+            }
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+              per_page: 1,
+            });
+
+            if (existing.data.length > 0) {
+              const number = existing.data[0].number;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                body: `Erneut fehlgeschlagen: ${runUrl}`,
+              });
+              core.notice(`crash-recovery-smoke-Alarm aktualisiert: Issue #${number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: [label],
+              });
+              core.notice(`crash-recovery-smoke-Alarm geöffnet: Issue #${created.data.number}`);
+            }
+
+      # Entwarnung: Ein grüner Lauf schließt ein ggf. offenes Alarm-Issue wieder,
+      # damit es nicht weiter nervt (Done-Kriterium: „a subsequent green run clears
+      # the alert"). Läuft auf jedem Erfolg — ist kein Issue offen, ist es ein No-op.
+      - name: Resolve alert issue on success
+        if: ${{ success() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = 'crash-recovery-smoke-alert';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+              per_page: 100,
+            });
+            for (const issue of open.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `✅ Wieder grün — automatisch geschlossen: ${runUrl}`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+              core.notice(`crash-recovery-smoke-Alarm geschlossen: Issue #${issue.number}`);
+            }
