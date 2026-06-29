@@ -810,9 +810,77 @@ async function runStartupTasks() {
         // Kein `await` — Readiness/`/api/health` bleiben unabhängig vom Warm-up-
         // Status. `prewarmBrowser()` wirft nie; Fehler werden nur geloggt. Nur
         // anstoßen, wenn der Preflight Chromium als verfügbar meldet.
-        log("Chromium wird vorgewärmt …", "startup");
-        prewarmBrowser()
-          .then((warm) => {
+        //
+        // Task #1494 (WURZEL): Das Boot-Pre-Warm NICHT mehr auf allen Autoscale-
+        // Instanzen im selben Moment feuern. Mehrere Instanzen, die gleichzeitig
+        // Chromium kalt aus /nix/store wärmen, konkurrieren um Disk-I/O → jeder
+        // Launch wird so langsam, dass er den 60s-Timeout reißt (Cold-Start-
+        // Stampede). Zwei Entzerrungs-Hebel, beide non-blocking & best-effort:
+        //   (1) Jitter: zufällige, beschränkte Verzögerung vor dem Pre-Warm.
+        //   (2) Advisory-Lock: die DB ist die EINZIGE geteilte Ressource der
+        //       Autoscale-Instanzen — wer den Lock bekommt, wärmt sofort; die
+        //       anderen warten ein beschränktes Fenster und wärmen dann verzögert.
+        // Der Boot hängt NIE am Lock (pg_try_advisory_lock ist nicht-blockierend;
+        // jeder Fehler/Engpass = leise weiter). In Dev/Test sind Jitter & Lock-
+        // Wartefenster 0 → kein verzögerter Boot.
+        const coordinateChromiumPrewarm = async (): Promise<void> => {
+          const isProd = process.env.NODE_ENV === "production";
+          const resolveEnvMs = (name: string, prodDefault: number): number => {
+            const raw = process.env[name];
+            if (raw !== undefined && raw !== "") {
+              const parsed = Number.parseInt(raw, 10);
+              if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+            }
+            return isProd ? prodDefault : 0;
+          };
+
+          // (1) Jitter — alle Instanzen lesen NICHT gleichzeitig aus /nix/store.
+          const maxJitterMs = resolveEnvMs("CHROMIUM_PREWARM_JITTER_MS", 8_000);
+          if (maxJitterMs > 0) {
+            const jitterMs = Math.floor(Math.random() * maxJitterMs);
+            if (jitterMs > 0) {
+              log(`Chromium-Vorwärmen wird um ${jitterMs}ms entzerrt (Jitter) …`, "startup");
+              await new Promise((resolve) => setTimeout(resolve, jitterMs));
+            }
+          }
+
+          // (2) Advisory-Lock — instanzübergreifende Serialisierung über die DB,
+          // streng best-effort. pg_try_advisory_lock liefert sofort true/false;
+          // wir blockieren NIE auf dem Lock selbst, sondern warten — falls eine
+          // andere Instanz gerade wärmt — nur ein beschränktes, festes Fenster.
+          const lockWaitMs = resolveEnvMs("CHROMIUM_PREWARM_LOCK_WAIT_MS", 6_000);
+          // Fester 32-bit-Schlüssel für „Chromium-Boot-Pre-Warm" (CCPW =
+          // CareConnect Pre-Warm). pg_try_advisory_lock erwartet bigint — als
+          // String-Param übergeben, um Präzisionsverlust zu vermeiden.
+          const CHROMIUM_PREWARM_LOCK_KEY = String(0x43435057); // "CCPW"
+          let lockClient: import("@neondatabase/serverless").PoolClient | null = null;
+          let gotLock = false;
+          if (lockWaitMs > 0) {
+            try {
+              lockClient = await pool.connect();
+              const res = await lockClient.query<{ locked: boolean }>(
+                "SELECT pg_try_advisory_lock($1) AS locked",
+                [CHROMIUM_PREWARM_LOCK_KEY],
+              );
+              gotLock = res.rows?.[0]?.locked === true;
+              if (gotLock) {
+                log("Chromium-Vorwärmen hält den Boot-Lock — wärmt sofort.", "startup");
+              } else {
+                log(
+                  `Eine andere Instanz wärmt Chromium — warte ${lockWaitMs}ms (Entzerrung) …`,
+                  "startup",
+                );
+                await new Promise((resolve) => setTimeout(resolve, lockWaitMs));
+              }
+            } catch (err) {
+              // DB-Engpass/Fehler → Koordination überspringen, einfach wärmen.
+              log(`Chromium-Pre-Warm-Lock übersprungen (best-effort): ${err}`, "startup");
+            }
+          }
+
+          try {
+            log("Chromium wird vorgewärmt …", "startup");
+            const warm = await prewarmBrowser();
             if (warm.ok) {
               log(
                 warm.skipped
@@ -827,8 +895,28 @@ async function runStartupTasks() {
                 "startup",
               );
             }
-          })
-          .catch((err) => log(`Chromium-Vorwärmen Fehler: ${err}`, "startup"));
+          } finally {
+            if (lockClient) {
+              try {
+                if (gotLock) {
+                  await lockClient.query("SELECT pg_advisory_unlock($1)", [
+                    CHROMIUM_PREWARM_LOCK_KEY.toString(),
+                  ]);
+                }
+              } catch {
+                /* Lock fällt spätestens mit dem Verbindungsende — best-effort */
+              }
+              try {
+                lockClient.release();
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+        };
+        coordinateChromiumPrewarm().catch((err) =>
+          log(`Chromium-Vorwärmen Fehler: ${err}`, "startup"),
+        );
       } else {
         log(
           `Chromium-Pre-Flight FEHLGESCHLAGEN @ ${result.path ?? "—"}: ${result.error}. ` +

@@ -406,6 +406,101 @@ describe("prewarmBrowser — Boot-Pre-Warm (Task #1479)", () => {
   });
 });
 
+describe("Cold-Start-Stampede-Entzerrung (Task #1494)", () => {
+  const ENV_KEYS = [
+    "CHROMIUM_PATH",
+    "CHROMIUM_PREWARM_MAX_ATTEMPTS",
+    "CHROMIUM_PREWARM_RETRY_DELAY_MS",
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) saved[k] = process.env[k];
+    // Existiert garantiert → isChromiumAvailable()/resolveChromiumPath() liefern
+    // einen gültigen Pfad; der eigentliche Launch ist gemockt.
+    process.env.CHROMIUM_PATH = process.execPath;
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k]!;
+    }
+  });
+
+  it("warmChromiumBinaryCache() wirft nie und ist idempotent (2. Aufruf = skipped)", async () => {
+    const { warmChromiumBinaryCache } = await freshModule();
+
+    const first = warmChromiumBinaryCache();
+    expect(first.ok).toBe(true);
+    // Mindestens das Binary selbst wurde in den Page-Cache gelesen.
+    expect(first.warmedFiles).toBeGreaterThanOrEqual(1);
+    expect(first.skipped).toBeUndefined();
+
+    // Idempotent: pro Prozess nur einmal nötig.
+    const second = warmChromiumBinaryCache();
+    expect(second).toMatchObject({ ok: true, skipped: true, warmedFiles: 0 });
+  });
+
+  it("warmChromiumBinaryCache() meldet ok:false ohne auffindbares Binary statt zu werfen", async () => {
+    delete process.env.CHROMIUM_PATH;
+    const { warmChromiumBinaryCache } = await freshModule();
+    // Kein CHROMIUM_PATH + (i.d.R.) kein System-Chromium im Test-Container.
+    const res = warmChromiumBinaryCache();
+    if (!res.ok) {
+      expect(res.warmedFiles).toBe(0);
+      expect(res.error).toBeTruthy();
+    } else {
+      // Falls die Umgebung doch ein Chromium auflöst: niemals geworfen.
+      expect(res.warmedFiles).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("prewarmBrowser() überlebt eine verlorene Cold-Start-Welle: 1× Fehlschlag → Retry → Erfolg, am Ende EIN verbundener Browser", async () => {
+    process.env.CHROMIUM_PREWARM_MAX_ATTEMPTS = "3";
+    process.env.CHROMIUM_PREWARM_RETRY_DELAY_MS = "0"; // kein realer Backoff im Test
+    const { prewarmBrowser, withFreshPage } = await freshModule();
+
+    const page = makePage();
+    const goodBrowser = makeBrowser(async () => page);
+    launchMock
+      // Erster Versuch reißt den Launch-Timeout (verlorene Cold-Start-Welle).
+      .mockRejectedValueOnce(Object.assign(new Error("Timed out after 60000 ms while trying to connect to the browser")))
+      // Zweiter Versuch (nach Discard + Backoff) gelingt.
+      .mockResolvedValueOnce(goodBrowser);
+
+    const warm = await prewarmBrowser();
+    expect(warm).toEqual({ ok: true });
+    // Genau zwei Launch-Versuche: 1 Fehlschlag + 1 Erfolg.
+    expect(launchMock).toHaveBeenCalledTimes(2);
+
+    // Der nachfolgende echte Render teilt den vorgewärmten Browser — kein 3.
+    // Launch (Singleton-Hebel bleibt intakt trotz Retry-Logik).
+    const result = await withFreshPage(async (p) => {
+      expect(p).toBe(page);
+      return "ok";
+    });
+    expect(result).toBe("ok");
+    expect(launchMock).toHaveBeenCalledTimes(2);
+    expect(goodBrowser.newPage).toHaveBeenCalledTimes(1);
+    expect(page.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("prewarmBrowser() gibt nach erschöpften Versuchen sauber {ok:false} zurück (kein Throw, kein Endlos-Loop)", async () => {
+    process.env.CHROMIUM_PREWARM_MAX_ATTEMPTS = "2";
+    process.env.CHROMIUM_PREWARM_RETRY_DELAY_MS = "0";
+    const { prewarmBrowser } = await freshModule();
+
+    launchMock.mockRejectedValue(new Error("Network service crashed, restarting service"));
+
+    const warm = await prewarmBrowser();
+    expect(warm.ok).toBe(false);
+    if (!warm.ok) expect(warm.error).toMatch(/Network service crashed/);
+    // Genau so viele Launch-Versuche wie konfiguriert — kein unbeschränkter Loop.
+    expect(launchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("withFreshPage — Race-Timeout gegen hängendes Chromium (Task #521)", () => {
   it("bricht hängenden Render nach PAGE_RENDER_TIMEOUT_MS mit klarer Fehlermeldung ab", async () => {
     const { withFreshPage } = await freshModule();

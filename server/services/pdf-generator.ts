@@ -1,6 +1,6 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import crypto from "crypto";
-import { existsSync, mkdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, rmSync, openSync, readSync, closeSync } from "fs";
 import { execFileSync } from "child_process";
 import os from "os";
 import path from "path";
@@ -257,6 +257,19 @@ export class ChromiumUnavailableError extends Error {
  * Env-Overrides (akzeptieren "1"/"true"/"0"/"false"):
  *   PUPPETEER_SINGLE_PROCESS — erzwingt/verbietet `--single-process`
  *   PUPPETEER_NO_ZYGOTE      — erzwingt/verbietet `--no-zygote`
+ *
+ * Task #1494: Die in den Prod-Logs auftauchende Zeile
+ * `network_service_instance_impl.cc … Network service crashed, restarting
+ * service` ist ein SYMPTOM der Cold-Start-Überlast (Disk-I/O-Contention beim
+ * gleichzeitigen /nix/store-Cold-Read mehrerer Autoscale-Instanzen), NICHT die
+ * Ursache. `--single-process` würde diesen Restart höchstens kaschieren, ist
+ * aber laut der Doku oben unter Memory-Druck selbst eine bekannte Crash-Quelle
+ * — daher bleibt es bewusst ein reiner Env-Override (Default in Prod AUS). Die
+ * Wurzel adressieren stattdessen das Boot-Pre-Warm-Entzerren (Jitter +
+ * Advisory-Lock in server/index.ts) und das Page-Cache-Warming
+ * (`warmChromiumBinaryCache`). Strukturelle Wurzel-Elimination wäre der Wechsel
+ * von Autoscale auf eine Reserved VM (dauerhaft warme Instanz ⇒ kein Boot-
+ * Stampede) — reine Kosten-/Ops-Entscheidung, siehe docs/pdf-chromium.md.
  */
 function envFlag(name: string): boolean | null {
   const v = process.env[name];
@@ -436,6 +449,111 @@ export async function getBrowser(): Promise<Browser> {
   return launchPromise;
 }
 
+// Task #1494 (WURZEL-nah): Chromium-Binary + dynamische Shared-Libs EINMAL in
+// den OS-Page-Cache lesen, bevor der erste `puppeteer.launch` läuft.
+//
+// Hintergrund (Stampede-Wurzel): In der Autoscale-Umgebung booten mehrere
+// Instanzen gleichzeitig und lesen denselben Chromium-Image-Layer KALT aus
+// `/nix/store`. Die simultanen Cold-Reads konkurrieren um Disk-I/O → jeder
+// einzelne Launch wird so langsam, dass er den 60s-Launch-Timeout reißt. Diese
+// Funktion senkt die Kosten JEDES Cold-Launch, indem sie das Binary und seine
+// `.so`-Abhängigkeiten vorab in den Page-Cache zieht — der erste echte Launch
+// trägt dann nicht mehr die volle Cold-Read-Latenz.
+//
+// Garantien: best-effort, WIRFT NIE, fügt keine Boot-Blockade hinzu (rein
+// sequentielles Lesen mit konstantem Speicher, danach idempotent übersprungen).
+let chromiumCacheWarmed = false;
+
+function warmFileIntoPageCache(file: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = openSync(file, "r");
+    // 1-MiB-Fenster → konstanter Speicher, kein voller Binary-Buffer (~200 MiB).
+    const buf = Buffer.allocUnsafe(1 << 20);
+    // Sequentiell durchlesen; die Bytes interessieren uns nicht — allein der
+    // Lesezugriff zieht die Datei-Pages in den OS-Page-Cache.
+    while (readSync(fd, buf, 0, buf.length, null) > 0) {
+      /* discard */
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+export function warmChromiumBinaryCache(): {
+  ok: boolean;
+  warmedFiles: number;
+  skipped?: boolean;
+  error?: string;
+} {
+  // Idempotent: pro Prozess nur einmal nötig (Pages bleiben gecached).
+  if (chromiumCacheWarmed) return { ok: true, warmedFiles: 0, skipped: true };
+  const binary = resolveChromiumPath();
+  if (!binary) {
+    return { ok: false, warmedFiles: 0, error: "Chromium-Binary nicht gefunden" };
+  }
+  const files = new Set<string>([binary]);
+  // `ldd` listet die dynamischen Abhängigkeiten — die Cold-Reads dieser `.so`-
+  // Dateien aus /nix/store sind ein Großteil der Launch-Latenz. best-effort:
+  // fehlt `ldd` (oder ist das Binary statisch), wärmen wir nur das Binary.
+  try {
+    const lddOut = execFileSync("ldd", [binary], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    for (const line of lddOut.split("\n")) {
+      // Format: "libnss3.so => /nix/store/.../libnss3.so (0x00007f…)" oder
+      //         "/lib64/ld-linux-x86-64.so.2 (0x00007f…)". Der Pfad endet am
+      //         Whitespace vor der "(0x…)"-Adresse.
+      const viaArrow = line.match(/=>\s*(\/\S+)/);
+      if (viaArrow) {
+        files.add(viaArrow[1]);
+        continue;
+      }
+      const direct = line.trim().match(/^(\/\S+)/);
+      if (direct) files.add(direct[1]);
+    }
+  } catch {
+    /* ldd nicht verfügbar / statisches Binary — nur das Binary wärmen */
+  }
+  let warmed = 0;
+  for (const f of files) {
+    if (warmFileIntoPageCache(f)) warmed++;
+  }
+  chromiumCacheWarmed = true;
+  return { ok: true, warmedFiles: warmed };
+}
+
+// Nur für Tests: erlaubt das Zurücksetzen des Idempotenz-Flags.
+export function _resetChromiumCacheWarmedForTest(): void {
+  chromiumCacheWarmed = false;
+}
+
+// Task #1494 (SYMPTOM-Linderung): Boot-Pre-Warm resilient gegen eine einzelne
+// verlorene Cold-Start-Welle machen — beschränkter Retry mit jitterndem Backoff.
+// Das ist NICHT die Wurzel (die adressieren Jitter + Advisory-Lock beim Boot in
+// server/index.ts sowie das Page-Cache-Warming oben), sondern ein Sicherheits-
+// netz: reißt der erste Launch trotz Entzerrung den Timeout, bleibt die Instanz
+// nicht dauerhaft kalt. Env-tunebar.
+const PREWARM_MAX_ATTEMPTS = Math.max(
+  1,
+  Number.parseInt(process.env.CHROMIUM_PREWARM_MAX_ATTEMPTS ?? "3", 10) || 3,
+);
+const PREWARM_RETRY_BASE_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(process.env.CHROMIUM_PREWARM_RETRY_DELAY_MS ?? "2000", 10) || 2000,
+);
+
 // Task #1479: Chromium beim Boot vorwärmen (PDF-Cold-Start vermeiden).
 // Heute startet der Browser LAZY beim ersten PDF-Render — im Autoscale zahlt
 // damit die erste echte PDF-Anfrage einer frischen Instanz den pathologisch
@@ -464,16 +582,42 @@ export async function prewarmBrowser(): Promise<
   if (!isChromiumAvailable()) {
     return { ok: false, error: "Chromium-Binary nicht verfügbar" };
   }
+  // Task #1494 (WURZEL-nah): Binary + Shared-Libs in den Page-Cache ziehen,
+  // BEVOR der erste echte Launch läuft — best-effort, wirft nie, sodass der
+  // Cold-Launch nicht die volle Cold-Read-Latenz aus /nix/store trägt.
   try {
-    await getBrowser();
-    return { ok: true };
-  } catch (err) {
-    if (err instanceof ChromiumUnavailableError) {
-      return { ok: false, error: "Chromium-Binary nicht verfügbar" };
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: message };
+    warmChromiumBinaryCache();
+  } catch {
+    /* per Contract best-effort — den Pre-Warm nie daran scheitern lassen */
   }
+  // Task #1494 (SYMPTOM-Linderung): beschränkter Retry mit jitterndem Backoff,
+  // damit eine einzelne verlorene Cold-Start-Welle die Instanz nicht dauerhaft
+  // kalt lässt. Kein Doppel-Launch — jeder Versuch geht durch das
+  // getBrowser()-Singleton (Hebel c bleibt unangetastet); zwischen Versuchen
+  // wird eine evtl. halb-gestartete/verwaiste Instanz verworfen, dann gejittert
+  // gewartet, damit der nächste Versuch nicht in dieselbe Cold-Start-Welle läuft.
+  let lastError = "Pre-Warm fehlgeschlagen";
+  for (let attempt = 0; attempt < PREWARM_MAX_ATTEMPTS; attempt++) {
+    try {
+      await getBrowser();
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof ChromiumUnavailableError) {
+        return { ok: false, error: "Chromium-Binary nicht verfügbar" };
+      }
+      lastError = err instanceof Error ? err.message : String(err);
+      const lastAttempt = attempt === PREWARM_MAX_ATTEMPTS - 1;
+      if (lastAttempt) break;
+      await discardBrowser();
+      const backoff =
+        PREWARM_RETRY_BASE_DELAY_MS * (attempt + 1) +
+        Math.floor(Math.random() * PREWARM_RETRY_BASE_DELAY_MS);
+      if (backoff > 0) {
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+  }
+  return { ok: false, error: lastError };
 }
 
 export async function discardBrowser(): Promise<void> {

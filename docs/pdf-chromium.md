@@ -20,3 +20,26 @@ Production-Cold-Starts in der Autoscale-Umgebung emittieren die WS-Endpoint-URL 
 - **`BACKGROUND_PDF_MAX_ATTEMPTS`** (Default **4**) und **`BACKGROUND_PDF_RETRY_DELAY_MS`** (Default 30s, linear ×Versuch) im `invoice-pdf-orchestrator` sind env-konfigurierbar. Der letzte Fehlschlag schreibt weiterhin den `invoice_pdf_persist_failed`-Audit-Eintrag.
 
 **Stuck-Rechnungen reparieren:** Der Startup-Backfill `backfillInvoicePdfs()` rendert pro Boot bis zu 20 Rechnungen mit leerem `pdfPath` (GoBD-byte-stabil aus dem `render_snapshot`) neu — nach dem Publish des Launch-Fixes löst er die Badges von RE-2026-0309 (#309), #310 und Geschwistern auf. Größere Rückstände in mehreren Boots. **Verifikation nach Publish:** `/api/health → chromium` muss `ok` melden, eine frisch erzeugte Rechnung darf den Badge nicht zeigen, und die zuvor steckengebliebenen Rechnungen haben jetzt ein PDF.
+
+## Cold-Start-Stampede entzerren (Task #1494)
+
+**Symptom:** In Production (Autoscale) reißt *jede* PDF-Generierung den 60s-Launch-Timeout. In den Logs taucht u.a. `network_service_instance_impl.cc … Network service crashed, restarting service` auf — das ist ein **Symptom**, nicht die Ursache.
+
+**Wurzel:** Autoscale skaliert auf 0 und startet bei Last mehrere Instanzen **gleichzeitig**. Jede Instanz wärmt beim Boot Chromium an und liest das Binary + dessen Shared-Libs **kalt** aus demselben `/nix/store`-Image-Layer. Die simultanen Cold-Reads konkurrieren um Disk-I/O (und CPU), sodass jeder einzelne `puppeteer.launch` so langsam wird, dass er den (bewusst nicht gesenkten) 60s-Timeout reißt. Das ist ein klassischer **Cold-Start-Stampede**.
+
+**Gebaute Hebel** (alle non-blocking, best-effort, env-tunebar; Defaults greifen nur in Production, in Dev/Test = 0/aus):
+
+| Hebel | Wo | Default (Prod) | Env |
+| --- | --- | --- | --- |
+| (a) **Jitter** vor dem Boot-Pre-Warm | `server/index.ts` | 0–8000ms zufällig | `CHROMIUM_PREWARM_JITTER_MS` |
+| (b) **Advisory-Lock** über die DB (instanzübergreifend) | `server/index.ts` | Lock-Inhaber wärmt sofort, andere warten 6000ms | `CHROMIUM_PREWARM_LOCK_WAIT_MS` |
+| (c) **Page-Cache-Warming** von Binary + `ldd`-Libs | `warmChromiumBinaryCache()` in `pdf-generator.ts` | immer (vor 1. Launch) | — |
+| (d) **Retry mit jitterndem Backoff** im Pre-Warm | `prewarmBrowser()` | 3 Versuche, Basis 2000ms | `CHROMIUM_PREWARM_MAX_ATTEMPTS`, `CHROMIUM_PREWARM_RETRY_DELAY_MS` |
+
+- (a)+(b) sorgen dafür, dass nicht alle Instanzen denselben Layer im selben Moment kalt lesen. Die DB ist die einzige geteilte Ressource der Autoscale-Instanzen → `pg_try_advisory_lock` (nicht-blockierend) koordiniert das Pre-Warm instanzübergreifend; der Boot hängt **nie** am Lock (jeder DB-Fehler/Engpass = leise weiter wärmen).
+- (c) senkt die Kosten **jedes** Cold-Launch, indem Binary + `.so`-Dateien vorab in den OS-Page-Cache gelesen werden (1-MiB-Fenster, konstanter Speicher, idempotent pro Prozess).
+- (d) ist ein Sicherheitsnetz: reißt der erste Launch trotz Entzerrung, bleibt die Instanz nicht dauerhaft kalt. Kein Doppel-Launch — jeder Versuch geht durch das `getBrowser()`-Singleton; zwischen Versuchen wird eine verwaiste Instanz verworfen.
+
+**Bewusst NICHT angefasst** (Determinismus/GoBD): Render-Pfad, `pdf_hash`/ZUGFeRD-Byte-Stabilität, `pipe=true`, `getBrowser`-Singleton, `withFreshPage`-Retries, Render-Semaphor (`PDF_RENDER_CONCURRENCY`), Background-Retry, der 60s-Launch-Timeout und der Chromium-stderr-Ring-Buffer. `--single-process` bleibt reiner Env-Override (Default in Prod AUS, siehe oben) — es würde den Network-Service-Restart höchstens kaschieren und ist unter Memory-Druck selbst eine Crash-Quelle.
+
+**Strukturelle Wurzel-Elimination (out of scope, nur dokumentiert):** Der Stampede entsteht nur, weil Autoscale kalt aus 0 hochfährt. Eine **Reserved VM** (dauerhaft warme Instanz) hätte gar keinen Boot-Stampede — Chromium wäre nach dem ersten Pre-Warm permanent heiß. Das ist eine reine Kosten-/Ops-Entscheidung (Reserved VM kostet auch im Leerlauf) und wird hier nur als Option festgehalten, nicht umgesetzt.
