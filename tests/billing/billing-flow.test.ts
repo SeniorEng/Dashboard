@@ -696,20 +696,26 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
     expect(kasse.length, "Kein Kassen-Anteil darf entstehen, wenn das §45b-Budget 0 ist").toBe(0);
   });
 
-  it("BF-2.6 — 1-Cent-Restbudget landet exakt als 1-Cent-Position auf der Privatrechnung", async () => {
-    // 30 min Hauswirtschaft = 1900 Cent (Preis 3800 Cent/h). Setzen wir das
-    // Monatslimit auf 1899 Cent, fällt genau 1 Cent als Privat-Anteil an.
-    // Damit prüfen wir die Genauigkeit der Restbudget-Berechnung am Rand.
+  it("BF-2.6 — Split-Rest landet cent-genau auf der Privatrechnung (akkumulierter §45b-Topf)", async () => {
+    // 30 min Hauswirtschaft = 1900 Cent (Preis 3800 Cent/h).
+    //
+    // §45b ist KEIN per-Kalendermonat gedeckelter Topf mehr (Alrik-Direktive):
+    // das Monatslimit ist nur die Aufstockungsrate, der Topf akkumuliert ab
+    // Januar. Mit der kleinen Default-Rate (1 €/Monat) bleibt der bis zum
+    // Termin-Monat akkumulierte §45b-Betrag (Monatsindex × 100 ct, höchstens
+    // 1200 ct im Dezember) immer unter den 1900 ct der Buchung. Dadurch entsteht
+    // deterministisch ein echter Split, dessen Privat-Rest cent-genau dem
+    // Differenzbetrag entspricht (Summen-Identität, kein verlorener Cent).
     const custId = await createCustomer(pvPayload("SP6"));
-    await configureLowBudgetPV(custId, 1899);
+    await configureLowBudgetPV(custId);
     const appt = await findFreeSlotAndCreate(custId, hwServiceId, 30, "SP6");
-    await documentAppointment(appt.id, appt.time, hwServiceId, 30, "BF-2.6 OneCent");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 30, "BF-2.6 Rest");
     const d = new Date(appt.date);
     const srId = await createServiceRecord(custId, d.getFullYear(), d.getMonth() + 1);
     await signServiceRecord(srId);
     const { invoices, isSplit } = await generateInvoice(custId, d.getFullYear(), d.getMonth() + 1);
 
-    expect(isSplit, "1-Cent-Rest muss einen echten Split erzeugen").toBe(true);
+    expect(isSplit, "Akkumulierter §45b-Topf < Kosten muss einen echten Split erzeugen").toBe(true);
     expect(invoices.length).toBe(2);
     const kasse = invoices.find((i: any) => i.billingType === "pflegekasse_privat");
     const privat = invoices.find((i: any) => i.billingType === "selbstzahler");
@@ -719,17 +725,10 @@ describe("BF-2: Split-Rechnung (Kasse + Privat bei Budgetüberschreitung)", () =
     const detailKasse = await loadInvoiceWithLineItems(kasse.id);
     const detailPrivat = await loadInvoiceWithLineItems(privat.id);
 
-    // Privat-Netto ist exakt 1 Cent (Restbetrag).
-    expect(
-      detailPrivat.netAmountCents,
-      `Privat-Anteil muss exakt 1 Cent sein, ist ${detailPrivat.netAmountCents}`,
-    ).toBe(1);
-    // Kassen-Netto ist exakt das verfügbare Limit.
-    expect(
-      detailKasse.netAmountCents,
-      `Kassen-Anteil muss exakt 1899 Cent (Budget-Limit) sein, ist ${detailKasse.netAmountCents}`,
-    ).toBe(1899);
-    // Summen-Identität: kasse + privat = volle Leistung.
+    // Beide Töpfe tragen einen echten Anteil (§45b verbraucht, Rest privat).
+    expect(detailKasse.netAmountCents, "Kassen-Anteil (§45b) muss > 0 sein").toBeGreaterThan(0);
+    expect(detailPrivat.netAmountCents, "Privat-Rest muss > 0 sein").toBeGreaterThan(0);
+    // Summen-Identität: kasse + privat = volle Leistung, cent-genau (kein verlorener Cent).
     expect(detailKasse.netAmountCents + detailPrivat.netAmountCents).toBe(1900);
   });
 });
@@ -1259,7 +1258,10 @@ describe("BF-7: /send-Fehlerpfade (Coverage)", () => {
 
   it("BF-7.3 — Send auf PV-Rechnung ohne Kunden-E-Mail → 400", async () => {
     const custId = await createCustomer(pvPayload("SND3"));
-    await configureLowBudgetPV(custId, 1000);
+    // §45b mit kleiner Default-Aufstockungsrate (1 €/Monat) hält den akkumulierten
+    // Topf unter den Kosten der 30-min-HW-Buchung → erzwingt deterministisch den
+    // Split (Kasse + Privat), den dieser Send-Fehlerpfad-Test braucht.
+    await configureLowBudgetPV(custId);
     // Kunden-E-Mail explizit entfernen (PV/Privatrechnung-Pfad braucht Kunden-Mail).
     const upd = await apiPatch<any>(`/api/customers/${custId}`, { email: null });
     expect([200, 204]).toContain(upd.status);

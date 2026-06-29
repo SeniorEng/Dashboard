@@ -55,7 +55,7 @@
 
 | Stelle | Was | Wofür | Inputs | Drift-Hinweis |
 |---|---|---|---|---|
-| `computeCapSlot` (L106–171) | Restkapazität eines Cap-Fensters (Monat §45a / Jahr §39+42a; §45b = ∞) inkl. statutorischer Klemme | **Booking** (`createCascadeConsumption`) UND **Preview** (`getAvailableForDate`) — explizit als SSoT geteilt | `budget_transactions` (`consumption` − `reversal` im Fenster), `customer_budget_type_settings`, `customers.pflegegrad` (für §45a-Clamp), `getTotalCarryoverCents` für §45b | **Bewusst dedupliziert**: Booking und Preview MÜSSEN diesen Helper aufrufen, sonst driften sie. Soll-Zustand. |
+| `computeCapSlot` (L106–171) | Restkapazität eines Cap-Fensters (Monat §45a / Jahr §39+42a; §45b = ∞ — das §45b-Monatslimit ist nur die akkumulierende Aufstockungsrate, KEIN Buchungs-Cap, siehe budget.md „§45b hat KEINEN Fenster-Cap") inkl. statutorischer Klemme | **Booking** (`createCascadeConsumption`) UND **Preview** (`getAvailableForDate`) — explizit als SSoT geteilt | `budget_transactions` (`consumption` − `reversal` im Fenster), `customer_budget_type_settings`, `customers.pflegegrad` (für §45a-Clamp), `getTotalCarryoverCents` für §45b | **Bewusst dedupliziert**: Booking und Preview MÜSSEN diesen Helper aufrufen, sonst driften sie. Soll-Zustand. |
 | `netConsumedInRange` (L46–74) | Netto-Verbrauch (`consumption − reversal`, OHNE `write_off`) in einem Datumsfenster | Helper für `computeCapSlot` | `budget_transactions` | Bewusste Asymmetrie zu `import-availability.netConsumedUpToDate` (das `write_off` mitzählt) — siehe 1.4 |
 
 #### `server/storage/budget/summary-queries.ts`

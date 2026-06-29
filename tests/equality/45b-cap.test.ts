@@ -169,38 +169,45 @@ describe("Equality §45b — Cost-Estimate vs ECHTE Engine-Buchung", () => {
 });
 
 /**
- * Task #1171 (Audit-Ticket H / BUG-21) — Ein GESETZTES §45b-Monatslimit (> 0)
- * muss ab jetzt nicht nur die Anzeige, sondern auch die ECHTE Buchung kappen.
+ * §45b-Monatslimit = Aufstockungsrate, KEIN Buchungs-Cap (Ersatz für Task #1171).
  *
- * Vorher: das Monatslimit reduzierte nur die Aufstockung, beim Buchen wurde
- * §45b aber bis zum gesamten Topf-Rest gezogen (Display ≠ Booking, sobald ein
- * Limit gesetzt war). Jetzt teilen Anzeige (`overview.availableCents` /
- * cost-estimate) UND Buchung (Cascade-Engine) DENSELBEN Cap-SSoT
- * (`computeCapSlot` → `computeCapRemaining`): §45b wird je Monat höchstens bis
- * (geklemmtes Limit − Monatsverbrauch) gefüllt, der Rest kaskadiert weiter
- * (hier in den uncapped Selbstzahler-Topf).
+ * Alrik-Direktive: ein reines Monatslimit darf es NICHT geben; das §45b-Limit
+ * muss bis zum Stichtag akkumulieren „wie das Budget akkumuliert". Das
+ * konfigurierte §45b-Monatslimit ("Unser Anteil") wirkt daher AUSSCHLIESSLICH
+ * als akkumulierende monatliche Aufstockungsrate in der Allocation
+ * (`allocation-storage.monthlyAmountFor`) — NICHT als per-Kalendermonat-
+ * Reset-Cap beim Buchen.
  *
- * Regression über 2h/1h/10h: deckt „Kosten unter Cap" (kein Überlauf) und
- * „Kosten über Cap" (Überlauf in Selbstzahler) in einem Lauf ab.
+ * Der frühere zweite Fenster-Cap (Task #1171/BUG-21) legte dasselbe Limit ein
+ * ZWEITES Mal auf den bereits akkumulierten Topf (Doppel-Anwendung) und war die
+ * Wurzel des wiederkehrenden §45b-Hard-Blocks beim Dokumentieren — derselbe
+ * Symptom-Fall, den der Datenfix Task #423 (monthly_limit_cents → NULL) pro
+ * Kunde reparierte. Er ist entfernt.
+ *
+ * Regression: ein Termin, dessen Kosten den per-Monat-Betrag (Limit) ÜBER-
+ * steigen, aber im akkumulierten Jahrestopf Platz haben, muss VOLLSTÄNDIG aus
+ * §45b gebucht werden — KEIN Überlauf in den Selbstzahler-Topf, KEIN Hard-Block.
  */
-describe("Equality §45b — SET-Monatslimit cappt Anzeige UND Buchung (Task #1171)", () => {
-  const SET_LIMIT_CENTS = 5000; // 50 €/Monat (≤ gesetzliches §45b-Maximum)
-  const POT_CENTS = 50000; // Topf weit über dem Monats-Cap → Cap ist die Schranke
+describe("Equality §45b — Monatslimit ist Aufstockungsrate, KEIN Buchungs-Cap", () => {
+  const SET_LIMIT_CENTS = 5000; // 50 €/Monat Aufstockungsrate (≤ gesetzliches §45b-Maximum)
+  const POT_CENTS = 50000; // akkumulierter Jahrestopf weit über der Monatsrate
   const setCases: Array<{ name: string; hwMin: number }> = [
-    { name: "1h HW", hwMin: 60 },
-    { name: "2h HW", hwMin: 120 },
-    { name: "10h HW", hwMin: 600 },
+    { name: "1h HW (unter Monatsrate)", hwMin: 60 },
+    { name: "2h HW (ueber Monatsrate)", hwMin: 120 },
+    { name: "10h HW (weit ueber Monatsrate, im Jahrestopf)", hwMin: 600 },
   ];
 
   for (const c of setCases) {
-    it(`[${c.name}] §45b-Anzeige zeigt Cap; Buchung kappt §45b auf (Limit − Monatsverbrauch), Rest kaskadiert`, async () => {
+    it(`[${c.name}] §45b bucht voll aus dem akkumulierten Topf, kein Monats-Cap, kein Selbstzahler-Ueberlauf`, async () => {
       const auth = await getAuthCookie();
       const date = weekdayInCurrentMonth();
       const scenario: BudgetScenarioHandle = await setupBudgetScenario({
-        customerNamePrefix: "T1171-45B-CAP",
+        customerNamePrefix: "T45B-NOCAP",
         pflegegrad: 3,
         billingType: "pflegekasse_gesetzlich",
-        // Überlauf über den §45b-Cap muss irgendwo hin → uncapped Selbstzahler-Topf.
+        // Selbstzahler-Topf BEWUSST verfügbar: würde ein per-Monat-Cap noch
+        // existieren, flösse der Überschuss hierher — der Test beweist, dass das
+        // NICHT passiert (alles bleibt in §45b).
         acceptsPrivatePayment: true,
         pflegegradSeit: "2026-01-01",
         types: [
@@ -224,12 +231,13 @@ describe("Equality §45b — SET-Monatslimit cappt Anzeige UND Buchung (Task #11
         const availBefore = ov0.data.entlastungsbetrag45b.availableCents;
         const monthUsedBefore = ov0.data.entlastungsbetrag45b.currentMonthUsedCents;
 
-        // ANZEIGE: §45b ist auf den SET-Cap begrenzt — NICHT den vollen Topf.
+        // ANZEIGE: §45b zeigt den AKKUMULIERTEN Topf-Rest, NICHT die Monatsrate.
+        // (Wäre der alte Monats-Cap aktiv, stünde hier exakt SET_LIMIT_CENTS.)
         expect(
           availBefore,
-          `§45b availableCents=${availBefore} muss dem SET-Cap=${SET_LIMIT_CENTS} ` +
-          `entsprechen (Topf-Rest ${POT_CENTS}+ wird durch den Monats-Cap überschrieben)`,
-        ).toBe(SET_LIMIT_CENTS);
+          `§45b availableCents=${availBefore} muss den akkumulierten Topf zeigen ` +
+          `(deutlich > Monatsrate ${SET_LIMIT_CENTS}), kein per-Monat-Cap`,
+        ).toBeGreaterThan(SET_LIMIT_CENTS);
         expect(monthUsedBefore).toBe(0);
 
         // ECHTE BUCHUNG via Engine (selber Pfad wie Dokumentation).
@@ -250,29 +258,27 @@ describe("Equality §45b — SET-Monatslimit cappt Anzeige UND Buchung (Task #11
         const availAfter = ov1.data.entlastungsbetrag45b.availableCents;
         const monthUsedAfter = ov1.data.entlastungsbetrag45b.currentMonthUsedCents;
 
-        // §45b trägt höchstens den Cap; der Rest geht in den Selbstzahler-Topf.
-        const expected45bPortion = Math.min(displayedTotal, SET_LIMIT_CENTS);
-
-        // Invariante A: Anzeige der GESAMT-Termin-Kosten == real gebuchter Betrag
-        // (über alle Cascade-Töpfe). Display == Booking bleibt exakt.
+        // Invariante A: Anzeige der Termin-Kosten == real gebuchter Betrag.
         expect(
           booking.totalBookedAbsCents,
           `cost-estimate.totalCents=${displayedTotal} weicht von ` +
           `Engine-Buchung=${booking.totalBookedAbsCents} ab`,
         ).toBe(displayedTotal);
 
-        // Invariante B: §45b-Topf-Rest fällt um exakt den gecappten Anteil.
+        // Invariante B: §45b-Topf-Rest fällt um den VOLLEN Betrag — der gesamte
+        // Termin wird aus §45b gebucht, NICHTS läuft in den Selbstzahler-Topf
+        // (kein per-Monat-Cap, der bei >Monatsrate kaskadieren würde).
         expect(
           availBefore - availAfter,
-          `§45b availableCents-Δ (${availBefore}→${availAfter}) muss dem ` +
-          `gecappten §45b-Anteil=${expected45bPortion} entsprechen`,
-        ).toBe(expected45bPortion);
-        expect(availAfter).toBe(SET_LIMIT_CENTS - expected45bPortion);
+          `§45b availableCents-Δ (${availBefore}→${availAfter}) muss dem vollen ` +
+          `Termin-Betrag=${booking.totalBookedAbsCents} entsprechen (kein Überlauf)`,
+        ).toBe(booking.totalBookedAbsCents);
 
-        // Invariante C: §45b-Monatsverbrauch reagiert exakt um den gecappten Anteil.
-        expect(monthUsedAfter - monthUsedBefore).toBe(expected45bPortion);
+        // Invariante C: §45b-Monatsverbrauch steigt um den VOLLEN Betrag — er ist
+        // NICHT auf die Monatsrate gedeckelt.
+        expect(monthUsedAfter - monthUsedBefore).toBe(booking.totalBookedAbsCents);
 
-        // Invariante D: Σ exakt in Integer-Cents über alle Cascade-Töpfe.
+        // Invariante D: Σ exakt in Integer-Cents.
         expect(
           booking.transactionAmountsCents.every((n) => Number.isInteger(n)),
         ).toBe(true);

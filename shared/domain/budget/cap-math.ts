@@ -79,33 +79,20 @@ export function computeCapRemaining(input: CapMathInput): CapMathResult {
         ? Number.POSITIVE_INFINITY
         : Math.max(0, clamped.yearlyLimitCents - input.netUsedInWindowCents);
   } else if (input.budgetType === "entlastungsbetrag_45b") {
-    // §45b ist standardmäßig ein Jahrestopf mit monatlicher Aufstockung —
-    // OHNE konfiguriertes Monatslimit gibt es KEINEN Fenster-Cap (Task #425):
-    // Verfügbarkeit folgt allein aus der aufgelaufenen Allokation.
+    // §45b ist ein akkumulierender Jahrestopf mit monatlicher Aufstockung und
+    // hat KEINEN Fenster-Cap. Das per-Kunde konfigurierte §45b-Monatslimit
+    // ("Unser Anteil") ist KEIN Buchungs-Cap, sondern allein die monatliche
+    // Aufstockungsrate, die in der Allocation akkumuliert wird
+    // (allocation-storage `monthlyAmountFor` → `enumerate45bStatutoryMonths`).
     //
-    // Task #1171 (Audit-Ticket H / BUG-21) — Sobald ein §45b-Monatslimit
-    // konfiguriert ist (> 0), wirkt es ab jetzt als harter Monats-Buchungs-Cap
-    // (analog §45a), gerechnet über DENSELBEN SSoT, den Anzeige UND Buchung
-    // teilen. Damit ist „Display ≠ Booking" ausgeschlossen: ein Topf wird
-    // genau bis (Limit − Monatsverbrauch) gefüllt, der Rest kaskadiert weiter.
-    // Der laufende Topf-Rest (inkl. Carryover) wird vom Aufrufer separat als
-    // zweite Schranke per `Math.min` berücksichtigt — der Carryover wird daher
-    // hier bewusst NICHT auf das Limit addiert (kein Doppelzählen).
-    //
-    // WICHTIG: `monthlyLimitCents === 0` ist KEIN Null-Cap, sondern das
-    // etablierte Sentinel „keine monatliche Aufstockung" (Task #425) — §45b
-    // bleibt dann ein reiner Jahrestopf, dessen Verfügbarkeit allein aus der
-    // aufgelaufenen Allokation (Initial-Balance/Carryover/manual_adjustment)
-    // folgt. 0 verhält sich daher wie `null` (KEIN Fenster-Cap). Nur ein
-    // POSITIVES Limit klemmt monatlich.
-    if (clamped.monthlyLimitCents === null || clamped.monthlyLimitCents === 0) {
-      capRemainingCents = Number.POSITIVE_INFINITY;
-    } else {
-      capRemainingCents = Math.max(
-        0,
-        clamped.monthlyLimitCents - input.netUsedInWindowCents,
-      );
-    }
+    // Der frühere zweite Fenster-Cap (Task #1171/BUG-21) hat dasselbe Limit ein
+    // ZWEITES Mal als per-Kalendermonat-Reset-Cap auf den bereits akkumulierten
+    // Topf gelegt (Doppel-Anwendung). Das ist die Wurzel des wiederkehrenden
+    // §45b-Hard-Blocks beim Dokumentieren (vgl. Datenfix Task #423, der das
+    // Limit pro Kunde auf NULL setzte). §45b führt daher NIE einen Fenster-Cap:
+    // Verfügbarkeit folgt allein aus der bis zum Stichtag aufgelaufenen
+    // Allokation (Reader/Buchung lesen denselben akkumulierten Topf).
+    capRemainingCents = Number.POSITIVE_INFINITY;
   } else {
     // §45a Monats-Cap, ggf. plus Carryover (für §45a aktuell 0).
     // Task #954 — ohne expliziten Kunden-Wert greift der gesetzliche §45a-

@@ -13,11 +13,13 @@
  *  - Cost-Estimate nutzt `availableCents` direkt — keine Drift möglich.
  *  - Termine im Folgemonat dürfen die zusätzliche Aufstockung mitnutzen.
  *
- * Abgrenzung Task #1171: Ein AUSDRÜCKLICH gesetztes Monatslimit (> 0) wirkt
- * seither sehr wohl als Fenster-Cap — in Anzeige UND Buchung über denselben
- * SSoT (`computeCapSlot`/`cap-math`). Dieses File deckt bewusst nur den
- * Null-/Sentinel-Fall (kein Cap) ab; die SET-Limit-Cap-Wirkung ist in
- * `tests/equality/45b-cap.test.ts` und `tests/budget/cap-math.test.ts` fixiert.
+ * §45b hat NIE einen Fenster-Cap (Alrik-Direktive, Ersatz für Task #1171):
+ * ein AUSDRÜCKLICH gesetztes Monatslimit (> 0) ist NUR die akkumulierende
+ * Aufstockungsrate (`allocation-storage.monthlyAmountFor`), KEIN per-Monat-
+ * Buchungs-Cap. Dieses File deckt den Null-/Sentinel-Fall ab; dass auch ein
+ * gesetztes Limit ungekappt bleibt (voll aus dem akkumulierten Topf, kein
+ * Überlauf), ist in `tests/equality/45b-cap.test.ts` und
+ * `tests/budget/cap-math.test.ts` fixiert.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
@@ -160,10 +162,10 @@ describe("Task #425 — §45b Jahrestopf: Anzeige == Buchung", () => {
   });
 
   it("§45b ohne gesetztes Monatslimit (null) liefert overview.monthlyLimitCents=null (kein Cap)", async () => {
-    // Dieses Szenario setzt KEIN Monatslimit (monthlyLimitCents=null). In dem
-    // Fall bleibt §45b der reine Jahrestopf ohne Fenster-Cap und das Overview-
-    // Feld monthlyLimitCents ist null. (Ein ausdrücklich gesetztes Limit > 0
-    // wirkt seit Task #1171 sehr wohl als Cap — abgedeckt in
+    // Dieses Szenario setzt KEIN Monatslimit (monthlyLimitCents=null). §45b ist
+    // ohnehin immer ein akkumulierender Jahrestopf ohne Fenster-Cap; das
+    // Overview-Feld monthlyLimitCents ist hier null. (Auch ein gesetztes Limit > 0
+    // ist kein Cap, nur die Aufstockungsrate — abgedeckt in
     // tests/equality/45b-cap.test.ts, nicht hier.)
     const overview = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overview.status).toBe(200);

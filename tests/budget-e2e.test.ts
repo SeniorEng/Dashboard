@@ -630,7 +630,7 @@ describe("INT-10: Alle drei Toepfe zusammen (vollstaendige Kaskade)", () => {
 });
 
 
-describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () => {
+describe("INT-11: §45b-Monatslimit ist KEIN Buchungs-Cap (akkumulierter Jahrestopf, kein Überlauf)", () => {
   let scenario: BudgetScenarioHandle;
   let limitAppointmentId: number | null = null;
   let limitTransactionIds: number[] = [];
@@ -645,8 +645,14 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
       customerNamePrefix: "INT-11",
       pflegegradSeit: "2026-01-01",
       preferences: { notes: "T2.3 EB Limit Test" },
+      // §45b bekommt einen großen Startwert, damit der Topf in JEDEM Lauf-Monat
+      // (auch im Januar, wo die reine Aufstockung erst 1×5000 ct beträgt) die
+      // Kosten der 120-min-HW-Buchung (~7600 ct) sicher deckt. Nur so ist die
+      // „kein Überlauf"-Aussage monatsunabhängig robust. §45a bleibt aktiviert
+      // (Prio 2) mit Allokation aus dem gesetzlichen Default (PG3) — der Topf
+      // wäre als Auffang verfügbar, wird aber bewusst NICHT angesprochen.
       initialBalance: {
-        type: "umwandlung_45a",
+        type: "entlastungsbetrag_45b",
         amountCents: 50000,
         validFrom: validFromMonth,
       },
@@ -665,7 +671,7 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
     await scenario.cleanup();
   });
 
-  it("INT-11.1 – Setup: §45b mit 50€ Monatslimit Prio 1, §45a als Auffang Prio 2", async () => {
+  it("INT-11.1 – Setup: §45b mit 50€/Monat Aufstockung Prio 1, §45a Prio 2 (kein Überlauf-Auffang mehr)", async () => {
     const overviewRes = await apiGet<any>(`/api/budget/${scenario.customerId}/overview`);
     expect(overviewRes.status).toBe(200);
     expect(overviewRes.data.entlastungsbetrag45b.totalAllocatedCents).toBeGreaterThan(0);
@@ -708,7 +714,7 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
     limitTransactionIds.push(docRes.data.budgetTransaction.id);
   });
 
-  it("INT-11.3 – §45b-Anteil wird durch effektives Monatslimit gedeckelt", async () => {
+  it("INT-11.3 – §45b deckt den vollen Termin aus dem akkumulierten Topf (KEIN Überlauf in §45a trotz Monatslimit)", async () => {
     if (!limitAppointmentId) return;
 
     const txRes = await apiGet<any[]>(`/api/budget/${scenario.customerId}/transactions?limit=5000`);
@@ -726,13 +732,17 @@ describe("INT-11: T2.3 User-Monatslimit EB (Ueberlauf in naechsten Topf)", () =>
     const total45aCents = eb45a.reduce((sum: number, t: any) => sum + Math.abs(t.amountCents), 0);
     const totalCents = total45bCents + total45aCents;
 
+    // Alrik-Direktive: Das §45b-Monatslimit ist KEIN Buchungs-Cap, sondern nur die
+    // monatliche Aufstockungsrate. Der §45b-Topf akkumuliert ab Januar (hier
+    // 5000 ct/Monat) und ist bis zum Termin-Monat weit über die Kosten der
+    // 120-min-HW-Buchung (~7600 ct) angewachsen. Daher deckt §45b den vollen
+    // Termin — KEIN Überlauf in §45a, obwohl ein Monatslimit gesetzt ist.
     expect(totalCents).toBeGreaterThan(0);
-    expect(total45bCents).toBeGreaterThan(0);
-    expect(total45bCents).toBeLessThanOrEqual(effectiveLimitCents);
-
-    if (totalCents > effectiveLimitCents) {
-      expect(total45aCents).toBeGreaterThan(0);
-    }
+    expect(total45bCents).toBe(totalCents); // alles aus §45b
+    expect(total45aCents).toBe(0); // kein Überlauf in den nachgelagerten Topf
+    // Beweis, dass der frühere per-Kalendermonat-Cap weg ist: §45b bucht MEHR als
+    // das gesetzte Monatslimit (vorher hätte der Cap bei effectiveLimitCents gedeckelt).
+    expect(total45bCents).toBeGreaterThan(effectiveLimitCents);
   });
 });
 

@@ -185,11 +185,13 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
 
   // Task #1397 — Der AUSGELIEFERTE Pfad (`getAllBudgetSummariesServed` →
   // `mergeServed45b`), nicht nur die isolierten Reader. Auf LIVE zeigte exakt
-  // dieser Assembler den -184,02-€-Wert: der unified Reader kappt §45b auf den
-  // per-Kunde Monats-Buchungs-Cap (Task #1171), und der alte Merge zog diesen
-  // (großen) Monats-Cap-Abzug fälschlich in die JAHRES-Projektion
-  // `availableAfterPlannedCents`. Der #1395-Test trieb diesen Pfad NICHT.
-  it("Served-Pfad: §45b-Monats-Cap bleibt auf „Verfügbar“, verschmutzt aber NICHT die Jahres-Projektion (nie -184,02 €)", async () => {
+  // dieser Assembler den -184,02-€-Wert. Der alte unified Reader kappte §45b
+  // zusätzlich auf einen per-Kunde Monats-Buchungs-Cap (Task #1171); dieser
+  // Fenster-Cap ist entfernt (Alrik-Direktive: das Monatslimit ist nur die
+  // akkumulierende Aufstockungsrate, kein Cap). §45b zeigt jetzt durchgängig
+  // den akkumulierten Topf — die Jahres-Projektion bleibt sauber. Der
+  // #1395-Test trieb diesen Pfad NICHT.
+  it("Served-Pfad: §45b ist ungekappt (kein Monats-Cap) und die Jahres-Projektion bleibt byte-identisch zur Legacy", async () => {
     const h = await makeIncidentCustomer();
     await bookH1Consumption(h.customerId, h.employeeId, 30);
     for (const p of JUNE_PLAN) {
@@ -207,17 +209,16 @@ describe("Task #1395 — §45b Forecast Prod-Inzident (Übertrag + Startwert, Ju
 
     // Ohne `manual_adjustment` ist der Merge-Delta exakt 0 ⇒ die ausgelieferte
     // Jahres-Projektion ist BYTE-IDENTISCH zur Legacy-Projektion. Das pinnt,
-    // dass der Monats-Cap NICHT mehr in den Forecast leakt.
+    // dass nichts in den Forecast leakt.
     expect(s45b.availableAfterPlannedCents).toBe(legacy.availableAfterPlannedCents);
 
-    // Der per-Kunde §45b-Monats-Cap (Task #1171) bleibt bewusst auf der
-    // „Verfügbar (diesen Monat)"-Sicht: die ausgelieferte `availableCents` ist
-    // auf das Monatslimit geklemmt (≪ der ungekappte Jahres-Topf) — und damit
-    // strikt KLEINER als die Jahres-Projektion. Genau diese (legitime)
-    // Diskrepanz hatte der alte Merge in den Forecast gespiegelt.
-    expect(s45b.availableCents).toBeLessThanOrEqual(MONTHLY_45B_CENTS);
-    expect(s45b.availableCents).toBeLessThan(legacy.availableCents);
-    expect(s45b.availableCents).toBeLessThan(s45b.availableAfterPlannedCents);
+    // §45b ist NICHT mehr auf das Monatslimit geklemmt: die ausgelieferte
+    // `availableCents` zeigt den akkumulierten Topf (Übertrag + Startwert +
+    // Aufstockung − Verbrauch) und ist damit weit GRÖSSER als die Monatsrate.
+    // (Stünde hier ≤ MONTHLY_45B_CENTS, wäre der alte Fenster-Cap zurück.)
+    expect(s45b.availableCents).toBeGreaterThan(MONTHLY_45B_CENTS);
+    expect(s45b.availableCents).toBeGreaterThan(150000);
+    // „Verfügbar (diesen Monat)" spiegelt denselben ungekappten Topf-Rest 1:1.
     expect(s45b.currentMonthAvailableCents).toBe(Math.max(0, s45b.availableCents));
   });
 });

@@ -92,13 +92,13 @@ describe("Property §45b — Anzeige (verfügbar) ≥ Gebucht (Engine-Konsum)", 
             appointments: [],
           });
           try {
-            // Optionaler Vorverbrauch im aktuellen Monat. Seit Task #1171 ist das
-            // §45b-Monatslimit auch beim BUCHEN wirksam: Übersteigt der
-            // Vorverbrauch den Monats-Cap und es gibt keinen Folge-Topf bzw.
-            // keine Selbstzahler-Option, lehnt die Engine korrekt ab. Das ist
-            // ein gültiges Szenario (= effektiv kein Vorverbrauch), kein
-            // Setup-Fehler — daher hier tolerant gebucht statt über den
-            // strikten Helper, der jeden 400 als Setup-Abbruch wirft.
+            // Optionaler Vorverbrauch im aktuellen Monat. §45b hat KEINEN
+            // Monats-Cap (das Monatslimit ist nur die Aufstockungsrate); ein 400
+            // entsteht hier nur, wenn der akkumulierte Topf zu klein ist und es
+            // keinen Folge-Topf bzw. keine Selbstzahler-Option gibt. Das ist ein
+            // gültiges Szenario (= effektiv kein Vorverbrauch), kein Setup-Fehler
+            // — daher hier tolerant gebucht statt über den strikten Helper, der
+            // jeden 400 als Setup-Abbruch wirft.
             if (priorConsumedMinutes > 0) {
               const [priorAppt] = await db
                 .insert(appointments)

@@ -207,32 +207,25 @@ export async function readUnifiedBudgetAvailability(
   if (enabled45b && inRange45b) {
     // Task #1348 — §45b-Verfügbarkeits-SSoT: die Erhaltungs-Identität
     // `max(0, allocated − holds − consumedNet)` (inkl. der #1306/#1340-Exklusion
-    // von Verbrauch gegen herausgefallene Töpfe) lebt jetzt AUSSCHLIESSLICH in
+    // von Verbrauch gegen herausgefallene Töpfe) lebt AUSSCHLIESSLICH in
     // `netAvailable45bAt`. Reader-Kontext zieht die aktiven Hard-Holds ab
-    // (`holds: "subtract"`). Der per-Kunde-Monats-Cap (Task #1171/#425) bleibt
-    // bewusst HIER im Reader (`Math.min(Topf-Rest, Cap-Rest)`) — er ist nicht
-    // Teil der §45b-Verfügbarkeits-Funktion.
+    // (`holds: "subtract"`).
+    //
+    // KEIN per-Monat-Cap: §45b ist ein akkumulierender Jahrestopf. Das per-Kunde
+    // konfigurierte §45b-Monatslimit ("Unser Anteil") wirkt AUSSCHLIESSLICH als
+    // akkumulierende Aufstockungsrate in der Allocation (allocation-storage
+    // `monthlyAmountFor` → `enumerate45bStatutoryMonths`). Der frühere zweite
+    // Fenster-Cap (Task #1171/BUG-21) hat dasselbe Limit ein ZWEITES Mal als
+    // monatlichen Reset-Cap auf den bereits akkumulierten Topf gelegt
+    // (Doppel-Anwendung → falscher Hard-Block beim Dokumentieren, identisch zum
+    // Datenfix Task #423). Er ist entfernt: Verfügbarkeit = akkumulierter
+    // Topf-Rest, der bis zum Stichtag aufläuft.
     const net = await netAvailable45bAt(
       customerId,
       asOfDate,
       { holds: "subtract", typeSettings },
       tx,
     );
-    const potRemaining = net.availableCents;
-
-    let capRemaining = Infinity;
-    let available = potRemaining;
-    if (s45b?.monthlyLimitCents != null) {
-      const cap = await computeCapSlot({
-        customerId,
-        budgetType: "entlastungsbetrag_45b",
-        transactionDate: asOfDate,
-        monthlyLimitCents: s45b.monthlyLimitCents,
-        yearlyLimitCents: null,
-      }, tx);
-      capRemaining = cap.capRemainingCents;
-      available = Math.min(potRemaining, cap.capRemainingCents);
-    }
     pot45b = {
       budgetType: "entlastungsbetrag_45b",
       enabled: enabled45b,
@@ -240,8 +233,8 @@ export async function readUnifiedBudgetAvailability(
       allocatedCents: net.allocatedCents,
       consumedNetCents: net.consumedNetCents,
       holdsActiveCents: net.holdsCents,
-      capRemainingCents: capRemaining,
-      availableCents: available,
+      capRemainingCents: Infinity,
+      availableCents: net.availableCents,
     };
   }
 

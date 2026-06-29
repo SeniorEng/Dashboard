@@ -268,6 +268,19 @@ Zwei Wurzeln führten zu falschen §45b-Anzeigen (z.B. „−2.012 €", obwohl 
 
 **Entfernte Legacy-Helfer:** `clampDerived45bAnchor` / `earliest45bRelevantAnchor` (`shared/domain/budgets.ts`) und `resolveBudgetAnchor` (`shared/domain/budget/budget-anchor.ts`) wurden ersatzlos entfernt — sie waren seit dem zur Laufzeit pro Topf abgeleiteten Anker (Task #1204) nicht mehr im Runtime-Pfad und überlebten nur in Unit-Tests bzw. im obsoleten Anker-Backfill-Skript (das gegen die gedroppten `budget_start_date`-Spalten schrieb und mitsamt Wrapper/Runbook entfernt wurde). Der §45b-Verfalls-Boden lebt inline in `allocation-storage.ts`; der Auto-Fallback bodet über `floorAutoAnchor45bToCurrentYear`. Drift-Guard gegen ein Wiedereinführen des persistierten Ankers: `tests/architecture/budget-anchor-ssot.test.ts`.
 
+### §45b hat KEINEN Fenster-Cap — Monatslimit = akkumulierende Aufstockungsrate
+
+**Entscheidung (Alrik-Direktive):** Für §45b darf es **kein reines Monatslimit** (per-Kalendermonat-Buchungs-Cap) geben. Das §45b-Budget akkumuliert bis zum Stichtag; das per-Kunde konfigurierte §45b-Monatslimit („Unser Anteil") wirkt **ausschließlich** als die monatliche **Aufstockungsrate**, die in die Allocation einfließt (`server/storage/budget/allocation-storage.ts` → `monthlyAmountFor` / `enumerate45bStatutoryMonths`). Es ist **kein** zweiter Buchungs-Cap.
+
+**Warum:** Der frühere §45b-Fenster-Cap (Task #1171/BUG-21) hat genau dieses Limit ein **zweites** Mal angewandt — als per-Kalendermonat-Reset-Cap auf den bereits akkumulierten Topf. Diese Doppel-Anwendung ist die Wurzel des wiederkehrenden §45b-**Hard-Blocks beim Dokumentieren** (ein Termin, dessen Kosten die Monatsrate übersteigen, aber im Jahrestopf Platz haben, wurde fälschlich geblockt bzw. in den Selbstzahler-Topf umgeleitet). Derselbe Symptom-Fall wurde zuvor pro Kunde per Datenfix (`server/scripts/fix-customer-182-budget-cap.ts`, Task #423: `monthly_limit_cents → NULL`) repariert — der Cap regressierte aber strukturell immer wieder.
+
+**Wo umgesetzt (SSoT, kein Parallel-Pfad):**
+- `shared/domain/budget/cap-math.ts` — der §45b-Zweig liefert **immer** `Number.POSITIVE_INFINITY` (der Statutory-Clamp berechnet weiterhin `clampedMonthlyLimitCents` informativ/für die Aufstockungsrate, erzeugt aber keinen Cap).
+- `server/storage/budget/consumption-engine.ts` — §45b ist **nicht** mehr in `isCappedBudget` (nur §45a/§39 behalten ihren legitimen statutorischen Fenster-Cap).
+- `server/storage/budget/unified-reader.ts` — der §45b-Block setzt `capRemainingCents = Infinity`, `availableCents` folgt allein der bis zum Stichtag aufgelaufenen Allokation (`net-available-45b.ts`, der bereits cap-freie Pre-Cap-SSoT, bleibt unverändert).
+
+**Akzeptanz-Tests:** `tests/budget/cap-math.test.ts` (§45b immer ∞), `tests/equality/45b-cap.test.ts` (gesetztes Limit → §45b bucht voll aus dem akkumulierten Topf, kein Selbstzahler-Überlauf, kein Hard-Block), `tests/budget/45b-forecast-incident-regression.test.ts` (Served-Pfad ungekappt, Forecast byte-identisch zur Legacy).
+
 ## Storno / Reversal — Service-Cent-Spiegel-Konvention (Task #754)
 
 Jede Reversal-TX SPIEGELT die Service-Cent-, Minuten- und Kilometer-Spalten

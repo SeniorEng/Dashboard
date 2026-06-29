@@ -14,8 +14,16 @@ import {
   BUDGET_45A_MAX_BY_PFLEGEGRAD,
 } from "@shared/domain/budgets";
 
-describe("computeCapRemaining — §45b (Jahrestopf + optionaler Monats-Cap, Task #1171)", () => {
-  it("ohne Monatslimit (null) bleibt §45b ein Jahrestopf ohne Fenster-Cap → POSITIVE_INFINITY", () => {
+describe("computeCapRemaining — §45b (akkumulierender Jahrestopf, KEIN Fenster-Cap)", () => {
+  // §45b hat NIE einen Fenster-Cap. Das per-Kunde konfigurierte Monatslimit
+  // ("Unser Anteil") wirkt allein als akkumulierende Aufstockungsrate in der
+  // Allocation (allocation-storage `monthlyAmountFor` → `enumerate45bStatutoryMonths`),
+  // NICHT als Buchungs-Cap. Der frühere zweite Fenster-Cap (Task #1171/BUG-21)
+  // legte dasselbe Limit ein zweites Mal als per-Kalendermonat-Reset-Cap an
+  // (Doppel-Anwendung) und war die Wurzel des wiederkehrenden §45b-Hard-Blocks
+  // beim Dokumentieren (vgl. Datenfix Task #423). Er ist entfernt: §45b liefert
+  // immer POSITIVE_INFINITY, unabhängig vom Monatslimit.
+  it("ohne Monatslimit (null) → POSITIVE_INFINITY", () => {
     const out = computeCapRemaining({
       budgetType: "entlastungsbetrag_45b",
       pflegegrad: 3,
@@ -27,9 +35,7 @@ describe("computeCapRemaining — §45b (Jahrestopf + optionaler Monats-Cap, Tas
     expect(out.capRemainingCents).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it("monthlyLimitCents=0 ist das Sentinel fuer keine monatliche Aufstockung und liefert keinen Fenster-Cap (POSITIVE_INFINITY, NICHT 0)", () => {
-    // Task #425/#1171 — 0 bedeutet „Jahrestopf ohne monatliche Aufstockung",
-    // NICHT „Cap auf 0". 0 verhält sich daher exakt wie null.
+  it("monthlyLimitCents=0 (Sentinel „keine monatliche Aufstockung“) → POSITIVE_INFINITY", () => {
     const out = computeCapRemaining({
       budgetType: "entlastungsbetrag_45b",
       pflegegrad: 3,
@@ -41,21 +47,20 @@ describe("computeCapRemaining — §45b (Jahrestopf + optionaler Monats-Cap, Tas
     expect(out.capRemainingCents).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it("mit gesetztem Monatslimit (>0) wirkt es als Fenster-Cap: Limit − netUsed (Task #1171)", () => {
+  it("mit gesetztem Monatslimit (>0) bleibt §45b ungekappt → POSITIVE_INFINITY (kein Fenster-Cap mehr)", () => {
+    // Das Limit ist die Aufstockungsrate, NICHT ein per-Monat-Buchungs-Cap.
     const out = computeCapRemaining({
       budgetType: "entlastungsbetrag_45b",
       pflegegrad: 3,
       monthlyLimitCents: 13100,
       yearlyLimitCents: null,
-      // Carryover wird beim §45b-Monats-Cap bewusst NICHT aufaddiert
-      // (der Topf-Rest ist die zweite Schranke beim Aufrufer → kein Doppelzählen).
       carryoverCents: 5000,
       netUsedInWindowCents: 9999,
     });
-    expect(out.capRemainingCents).toBe(13100 - 9999);
+    expect(out.capRemainingCents).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it("§45b-Monats-Cap wird bei Überverbrauch auf 0 geklemmt (nie negativ)", () => {
+  it("auch bei hohem Vorverbrauch im Fenster bleibt §45b ungekappt → POSITIVE_INFINITY (nie 0)", () => {
     const out = computeCapRemaining({
       budgetType: "entlastungsbetrag_45b",
       pflegegrad: 3,
@@ -64,10 +69,12 @@ describe("computeCapRemaining — §45b (Jahrestopf + optionaler Monats-Cap, Tas
       carryoverCents: 0,
       netUsedInWindowCents: 20000,
     });
-    expect(out.capRemainingCents).toBe(0);
+    expect(out.capRemainingCents).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it("klemmt das Monatslimit auf den gesetzlichen Maximalwert", () => {
+  it("clampedMonthlyLimitCents spiegelt weiterhin den gesetzlichen Maximalwert, capRemaining bleibt POSITIVE_INFINITY", () => {
+    // Der Statutory-Clamp läuft weiter (informativ / für die Aufstockungsrate),
+    // erzeugt aber KEINEN Fenster-Cap mehr.
     const out = computeCapRemaining({
       budgetType: "entlastungsbetrag_45b",
       pflegegrad: 3,
@@ -77,7 +84,7 @@ describe("computeCapRemaining — §45b (Jahrestopf + optionaler Monats-Cap, Tas
       netUsedInWindowCents: 0,
     });
     expect(out.clampedMonthlyLimitCents).toBe(BUDGET_45B_MAX_MONTHLY_CENTS);
-    expect(out.capRemainingCents).toBe(BUDGET_45B_MAX_MONTHLY_CENTS);
+    expect(out.capRemainingCents).toBe(Number.POSITIVE_INFINITY);
   });
 });
 
