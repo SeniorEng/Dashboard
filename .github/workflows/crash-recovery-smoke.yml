@@ -1,0 +1,144 @@
+name: crash-recovery-smoke
+
+# Nächtlicher Schutz für das Test-Runner-Sicherheitsnetz selbst (Task #1493).
+#
+# Hintergrund: Task #1489/#1490 haben die EINZELNEN Schutzschichten gegen
+# PID-Erschöpfung (Prozess-/DB-/Log-/Artefakt-Sweep + PID-Preflight) abgesichert,
+# Task #1492 die GESAMT-Garantie als Smoke-Test
+# (`tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts`): ein kompletter
+# Orchestrator-Lauf, der NACH einem simulierten Hart-Abbruch (verwaister, auf init
+# reparenteter Test-Server-Prozess + verwaiste `cc_test_`-Wegwerf-DB) trotzdem grün
+# durchläuft, weil Sweep + PID-Preflight beim Start greifen.
+#
+# Dieser Smoke-Test ist bewusst NICHT im Standard-`npm run test` (Gate 4) aktiv: er
+# bootet einen echten App-Server und wartet > 30s, bis der gepflanzte Waisen-Prozess
+# alt genug für den Sweep ist. Im per-PR-Fast-Path wäre er zu schwer — und ein
+# zweiter Orchestrator IM Orchestrator. Folge: Eine Regression der Sweep-/PID-
+# Preflight-Maschinerie (genau das, was das ganze Testnetz unblockbar hält) bliebe
+# unbemerkt, bis sie tatsächlich einen Entwickler blockiert.
+#
+# Deshalb läuft der Smoke-Check hier als EIGENER, niederfrequenter Job:
+#   - nächtlich (cron) + manuell (workflow_dispatch),
+#   - in EINEM dedizierten Workflow (nicht in `ci.yml`), damit er NIE gleichzeitig
+#     mit den schweren `tests`/`e2e-smoke`-Jobs läuft — konkurrierende Orchestratoren
+#     würden ihn aushungern (siehe Test-Header + docs/flaky-tests.md,
+#     validation-env-concurrency).
+#   - bei Fehlschlag rot, mit angehängter Orchestrator-Ausgabe (Log-Artefakt),
+#     damit die Ursache sofort sichtbar ist.
+#
+# Runbook: docs/test-infrastructure.md (PID-Limit) · docs/ci-pipeline.md.
+
+on:
+  schedule:
+    # Täglich 04:00 UTC — bewusst NACH dem Renovate-Job (03:00 UTC), damit beide
+    # nicht denselben Runner-Zeitslot teilen. Per-PR/Push läuft dieser Job NICHT.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    # Manueller Trigger über die Actions-UI (z.B. nach Änderungen an der
+    # Sweep-/PID-Preflight-Maschinerie, um die Gesamt-Garantie sofort zu prüfen).
+
+# Nie zwei dieser Läufe gleichzeitig (ein zweiter Orchestrator würde den ersten
+# über das gemeinsame Cluster-Worker-Budget / PID-Limit aushungern).
+concurrency:
+  group: crash-recovery-smoke
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  crash-recovery-smoke:
+    name: crash-recovery-smoke
+    runs-on: ubuntu-latest
+    # Großzügiges Hard-Limit: der Smoke-Test wartet > 30s auf die Prozess-Sweep-
+    # Altersgrenze und bootet einen echten App-Server; sollte er hängen, killt das
+    # Limit den Lauf, statt einen Runner stundenlang zu belegen.
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: careconnect
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # Neon-WebSocket-Proxy vor dem plain Postgres-Container (siehe `tests`-Job in
+      # ci.yml). Der Neon-Serverless-Treiber (server/lib/db.ts) spricht nur
+      # Secure-WS/TLS — der Proxy terminiert die WS-Verbindung und reicht SQL an
+      # Postgres durch. Der vom Orchestrator gebootete Test-App-Server routet
+      # darüber; CREATE/DROP DATABASE + drizzle-kit push gehen direkt nach 5432.
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy:main
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/careconnect
+        ports:
+          - 4444:4444
+    env:
+      NODE_ENV: test
+      # Admin-/Cluster-URL: der Orchestrator nutzt sie für CREATE/DROP DATABASE
+      # (verwaiste-DB-Sweep + Wegwerf-DB-Klon) und drizzle-kit push (direkt nach
+      # 5432); der App-Server routet über NEON_LOCAL_WS_PROXY.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/careconnect
+      NEON_LOCAL_WS_PROXY: localhost:4444
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      SKIP_SERVER_FRESHNESS_CHECK: "1"
+      CI: "true"
+      TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+      TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+      SUPER_ADMIN_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Die feste Proxy-Ziel-DB (careconnect) braucht ein Schema, damit der vom
+      # Orchestrator gebootete App-Server beim Health-Check nicht an fehlenden
+      # Tabellen scheitert (der Neon-Proxy ignoriert den DB-Namen in DATABASE_URL
+      # und routet stets auf careconnect — bekannte CI-Eigenheit). Der Klon der
+      # Wegwerf-DB selbst läuft direkt per psql-Template.
+      - name: Push DB schema (drizzle-kit push)
+        run: npx drizzle-kit push --force
+
+      # Frische CI-DB hat keinen User/Stammdaten — idempotent seeden (ohne Secrets
+      # überspringen sich beide Skripte sauber), damit der App-Server-Boot dieselbe
+      # Basis vorfindet wie die regulären CI-Jobs.
+      - name: Seed test superadmin
+        run: npx tsx scripts/ci-seed-superadmin.ts
+
+      - name: Seed test reference data
+        run: npx tsx scripts/seed-test-reference-data.ts
+
+      # Der eigentliche Gesamt-Garantie-Smoke (Task #1492): simuliert den Zustand
+      # nach einem Hart-Abbruch und fährt danach einen echten, kleinen Orchestrator-
+      # Lauf hoch, der grün enden MUSS. Die komplette Orchestrator-Ausgabe wird in
+      # ein Log geschrieben (und unten als Artefakt hochgeladen), damit ein
+      # Fehlschlag ohne Re-Run analysierbar ist. `pipefail` erhält den Exit-Code des
+      # Test-Laufs trotz `tee`.
+      - name: Crash-recovery smoke (test:restart-smoke)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:restart-smoke 2>&1 | tee restart-smoke.log
+
+      - name: Upload smoke log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-recovery-smoke-log
+          path: restart-smoke.log
+          if-no-files-found: ignore
+          retention-days: 14

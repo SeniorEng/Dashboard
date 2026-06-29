@@ -131,6 +131,16 @@ Beweis, dass Sweep + PID-Preflight beim Start greifen und der Lauf nicht an
 die Prozess-Sweep-Altersgrenze wartet, läuft er **nicht** im Standard-`npm run test`,
 sondern nur on-demand: `npm run test:restart-smoke` (= `EPHEMERAL_RESTART_SMOKE=1`).
 
+Damit eine Regression dieser Sweep-/PID-Preflight-Maschinerie nicht erst auffällt,
+wenn sie real einen Entwickler blockiert, läuft der Smoke-Check zusätzlich
+**automatisch nächtlich** als eigener GitHub-Actions-Workflow
+`.github/workflows/crash-recovery-smoke.yml` (Task #1493, cron `0 4 * * *` +
+`workflow_dispatch`). Er ist bewusst ein **eigener** Workflow (nur `schedule`/
+`workflow_dispatch`), damit er nie gleichzeitig mit den schweren `tests`/`e2e-smoke`-
+Jobs läuft — konkurrierende Orchestratoren würden ihn aushungern. Bei Fehlschlag
+hängt der Job die komplette Orchestrator-Ausgabe als Artefakt
+`crash-recovery-smoke-log` an. Detail: [`ci-pipeline.md`](ci-pipeline.md#crash-recovery-smoke-als-nächtlicher-eigen-job-task-1493).
+
 ## LetterXpress mocken (node:https, NICHT fetch)
 
 Der LetterXpress-v2-Postversand-Transport (`server/services/letterxpress-http.ts`)
