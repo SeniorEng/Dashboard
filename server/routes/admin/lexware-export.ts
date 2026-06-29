@@ -8,7 +8,7 @@ import { employeeTimeEntriesRepo } from "../../repos";
 import { asyncHandler } from "../../lib/errors";
 import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
-import { documentedAndSignedSqlRaw, completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
+import { documentedSqlRaw, completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
 
 const router = Router();
 
@@ -156,7 +156,7 @@ async function getMonthlyHoursBatch(
     FROM appointments a
     JOIN appointment_services asvc ON asvc.appointment_id = a.id
     JOIN services s ON s.id = asvc.service_id
-    WHERE ${documentedAndSignedSqlRaw('a')}
+    WHERE ${documentedSqlRaw('a')}
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
       AND a.date <= ${endDate}
@@ -185,7 +185,7 @@ async function getMonthlyHoursBatch(
       EXTRACT(MONTH FROM date::date) as month_num,
       SUM(COALESCE(travel_minutes, 0)) as total_travel_minutes
     FROM appointments a
-    WHERE ${documentedAndSignedSqlRaw('a')}
+    WHERE ${documentedSqlRaw('a')}
       AND deleted_at IS NULL
       AND date >= ${startDate}
       AND date <= ${endDate}
@@ -351,7 +351,7 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
       COALESCE(SUM(COALESCE(travel_kilometers, 0)), 0) as travel_km,
       COALESCE(SUM(COALESCE(customer_kilometers, 0)), 0) as customer_km
     FROM appointments a
-    WHERE ${documentedAndSignedSqlRaw('a')}
+    WHERE ${documentedSqlRaw('a')}
       AND deleted_at IS NULL
       AND date >= ${startDate}
       AND date <= ${endDate}

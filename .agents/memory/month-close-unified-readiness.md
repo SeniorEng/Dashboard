@@ -1,21 +1,46 @@
 ---
-name: Month-close unified readiness (auto/admin/batch)
-description: One readiness SSoT decides month-close across auto-close, single admin-close, and batch-close; missing signature BLOCKS auto-close and escalates.
+name: Month-close readiness + 8th-only unconditional close (Task #1496)
+description: The 8th auto-close is the ONLY close mechanism; it is UNCONDITIONAL (never blocks/overwrites status), missing signatures are followed-up not blocked, and "documented" is decoupled from "signed".
 ---
 
-# Unified month-close readiness
+# Month-close: 8th-only unconditional close (Task #1496)
 
-All three close paths MUST share ONE readiness definition: `getMonthClosingReadiness`
-(single) and `getAdminMonthClosingReadiness` (batch) in
-`server/storage/time-tracking/month-closing.ts`; `autoCloseMonthForCutoff`
-(`server/services/month-close-scheduler.ts`) consumes the admin readiness so its
-per-employee decision is identical by construction.
+**Policy (current, Task #1496 — supersedes the old blocking/escalating model):**
+The 8th auto-close is the ONLY close mechanism — there is NO manual close, NO
+batch close, and NO reopen. All HTTP routes in `server/routes/month-closing.ts`
+are read-only GET. `autoCloseMonthForCutoff` closes EVERY employee with prior-month
+activity UNCONDITIONALLY (regardless of open/unsigned/undocumented appts), and it
+NEVER overwrites appointment status. The period lock lives solely in
+`employee_month_closings`. "Nicht abgerechnet" (`expired_unsigned`) is a runtime
+DISPLAY label only (`deriveAppointmentDisplayStatus(status,{isMonthClosed})`),
+never persisted.
+
+**Documented vs documented&signed (decoupled):** "documented?" = `status==='completed'`
+(`isAppointmentDocumented` / `appointmentDocumentedCondition` / `documentedSqlRaw`),
+INDEPENDENT of signature — drives "Nicht abgerechnet", Lexware wage export, and
+statistics exclusion. "documented & signed" (`isAppointmentDocumentedAndSigned` /
+`appointmentDocumentedAndSignedCondition`) is ONLY for customer/Pflegekasse billing
+and the billing pipeline. The two TS predicates (`shared/domain/appointments.ts`)
+and their SQL mirrors (`server/lib/appointment-signed.ts`) MUST stay byte-equivalent
+(arch tests). The old `appointmentNotDocumentedAndSignedCondition` was removed.
+
+**Missing signatures = follow-up, NOT a blocker:** after close, the scheduler emits
+one `month_close_missing_signature` notification per affected employee;
+`getMissingSignaturesInClosedMonths()` + read-only `GET /month-closing/missing-signatures`
++ the admin cockpit inbox + the month-closing page surface the open list. LN
+(Leistungsnachweis) create+sign stay ALLOWED after close; only LN delete keeps the
+month-closed gate (superadmin bypass).
+
+**Readiness is now read-only telemetry:** `getAdminMonthClosingReadiness` still
+computes activity/open/unsigned counts, but only for audit metadata + the follow-up
+list — it no longer gates the close. `autoCloseMonthForCutoff`
+(`server/services/month-close-scheduler.ts`) consumes it for per-employee iteration.
 
 **Readiness facts that bite:**
 - "Activity" (`hasTimeEntries`) = time-entries OR completed/cancelled/no_show
   appointments. A lone OPEN/`documenting` appointment is NOT activity → such an
-  employee is *skipped* (no candidate), not blocked. To test a BLOCK you need
-  activity PLUS a blocker.
+  employee is *skipped* (no candidate). Activity is the ONLY gate now — with
+  activity present the employee is closed unconditionally.
 - "unsigned" is LN-aware: `appointmentCompletedButUnsignedCondition()` =
   status='completed' AND signature_data IS NULL AND no signed LN
   (`server/lib/appointment-signed.ts`). Readiness only checks `signature_data IS NULL`
@@ -25,10 +50,6 @@ per-employee decision is identical by construction.
   through the admin auth cookie sets `performed_by_employee_id` to the ADMIN
   (excluded by the `isAdmin=false` readiness filter) → test setup MUST SQL-fix
   `performed_by_employee_id` to the test employee, or the appt vanishes from readiness.
-
-**Policy:** a missing signature (or open appt) BLOCKS auto-close — it does NOT
-silently skip and it NEVER overwrites appointment status. Auto-close logs
-`month_auto_close_blocked` (audit + admin notifications, deduped) instead of closing.
 
 **Error-code split (write paths in `appointment-documentation.ts` /document &
 /document-no-show):** locked (= on a signed Leistungsnachweis) → 409 `conflict()`

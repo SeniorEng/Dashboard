@@ -58,58 +58,37 @@ describe("Task #1119: isAppointmentDocumentedAndSigned", () => {
   });
 });
 
-describe("Task #1119: deriveAppointmentDisplayStatus", () => {
+describe("Task #1496: deriveAppointmentDisplayStatus (von Unterschrift entkoppelt)", () => {
   it("offener Monat ⇒ persistierter Status bleibt unverändert", () => {
     expect(
-      deriveAppointmentDisplayStatus("completed", {
-        documentedAndSigned: false,
-        isMonthClosed: false,
-      }),
+      deriveAppointmentDisplayStatus("completed", { isMonthClosed: false }),
     ).toBe("completed");
     expect(
-      deriveAppointmentDisplayStatus("scheduled", {
-        documentedAndSigned: false,
-        isMonthClosed: false,
-      }),
+      deriveAppointmentDisplayStatus("scheduled", { isMonthClosed: false }),
     ).toBe("scheduled");
   });
 
-  it("geschlossener Monat + nicht dokumentiert&unterschrieben ⇒ expired_unsigned (abgeleitet)", () => {
+  it("geschlossener Monat + NICHT dokumentiert (nicht completed) ⇒ expired_unsigned (abgeleitet)", () => {
     expect(
-      deriveAppointmentDisplayStatus("completed", {
-        documentedAndSigned: false,
-        isMonthClosed: true,
-      }),
+      deriveAppointmentDisplayStatus("scheduled", { isMonthClosed: true }),
     ).toBe("expired_unsigned");
     expect(
-      deriveAppointmentDisplayStatus("scheduled", {
-        documentedAndSigned: false,
-        isMonthClosed: true,
-      }),
+      deriveAppointmentDisplayStatus("documenting", { isMonthClosed: true }),
     ).toBe("expired_unsigned");
   });
 
-  it("geschlossener Monat + dokumentiert&unterschrieben ⇒ completed bleibt", () => {
+  it("geschlossener Monat + dokumentiert (completed) ⇒ bleibt completed, UNABHÄNGIG von Unterschrift", () => {
     expect(
-      deriveAppointmentDisplayStatus("completed", {
-        documentedAndSigned: true,
-        isMonthClosed: true,
-      }),
+      deriveAppointmentDisplayStatus("completed", { isMonthClosed: true }),
     ).toBe("completed");
   });
 
   it("cancelled / customer_no_show sind dokumentierte Terminal-Status — nie expired_unsigned", () => {
     expect(
-      deriveAppointmentDisplayStatus("cancelled", {
-        documentedAndSigned: false,
-        isMonthClosed: true,
-      }),
+      deriveAppointmentDisplayStatus("cancelled", { isMonthClosed: true }),
     ).toBe("cancelled");
     expect(
-      deriveAppointmentDisplayStatus("customer_no_show", {
-        documentedAndSigned: false,
-        isMonthClosed: true,
-      }),
+      deriveAppointmentDisplayStatus("customer_no_show", { isMonthClosed: true }),
     ).toBe("customer_no_show");
   });
 });

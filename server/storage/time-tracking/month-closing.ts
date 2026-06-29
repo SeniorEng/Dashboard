@@ -12,7 +12,7 @@ import {
   employeesMonthClosingResponsibilityFilter,
   monthClosingResponsibilityCoalesce,
 } from "../appointment-helpers";
-import { appointmentCompletedButUnsignedCondition } from "../../lib/appointment-signed";
+import { appointmentCompletedButUnsignedCondition, completedButUnsignedSqlRaw } from "../../lib/appointment-signed";
 import { monthDateRange } from "./shared";
 import { appointmentsRepo, employeeTimeEntriesRepo } from "../../repos";
 
@@ -269,6 +269,65 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
   });
 }
 
+/**
+ * Task #1496 — Aktive Liste „fehlende Unterschriften nach Abschluss".
+ *
+ * Liefert alle DOKUMENTIERTEN (status = 'completed'), aber noch NICHT
+ * unterschriebenen Termine, deren zuständiger Monat bereits ABGESCHLOSSEN ist
+ * (`employee_month_closings` ohne `reopened_at`). Rein abgeleitet aus der
+ * bestehenden „Dokumentiert"-Stufe, gefiltert auf geschlossene Monate — kein
+ * neues Datenmodell, kein neuer Status. Ein Eintrag verschwindet automatisch,
+ * sobald der Termin unterschrieben ist (direkt oder via Leistungsnachweis),
+ * weil dann `completedButUnsignedSqlRaw` nicht mehr greift.
+ *
+ * Die Monats-Zuständigkeit folgt exakt derselben SSoT wie Readiness/Reminder:
+ * `COALESCE(performed_by, assigned, primary_employee)`.
+ */
+export async function getMissingSignaturesInClosedMonths(): Promise<
+  Array<{
+    id: number;
+    date: string;
+    scheduledStart: string | null;
+    customerName: string;
+    employeeName: string;
+    year: number;
+    month: number;
+  }>
+> {
+  const result = await db.execute(sqlBuilder`
+    SELECT
+      a.id AS id,
+      a.date AS date,
+      a.scheduled_start AS scheduled_start,
+      COALESCE(c.vorname || ' ' || c.nachname, c.name) AS customer_name,
+      resp.display_name AS employee_name,
+      EXTRACT(YEAR FROM a.date)::int AS year,
+      EXTRACT(MONTH FROM a.date)::int AS month
+    FROM appointments a
+    JOIN customers c ON c.id = a.customer_id
+    JOIN users resp
+      ON resp.id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id, c.primary_employee_id)
+    JOIN employee_month_closings emc
+      ON emc.user_id = resp.id
+     AND emc.year = EXTRACT(YEAR FROM a.date)::int
+     AND emc.month = EXTRACT(MONTH FROM a.date)::int
+     AND emc.reopened_at IS NULL
+    WHERE a.deleted_at IS NULL
+      AND ${completedButUnsignedSqlRaw("a")}
+    ORDER BY a.date DESC, a.scheduled_start ASC
+  `);
+
+  return (result.rows as Array<Record<string, unknown>>).map((r) => ({
+    id: Number(r.id),
+    date: String(r.date),
+    scheduledStart: r.scheduled_start === null || r.scheduled_start === undefined ? null : String(r.scheduled_start),
+    customerName: String(r.customer_name ?? "Unbekannt"),
+    employeeName: String(r.employee_name ?? "Unbekannt"),
+    year: Number(r.year),
+    month: Number(r.month),
+  }));
+}
+
 export async function getMonthClosing(userId: number, year: number, month: number) {
   const rows = await db
     .select()
@@ -322,14 +381,4 @@ export async function closeMonth(
       closedByUserId,
     });
   }
-}
-
-export async function reopenMonth(closingId: number, reopenedByUserId: number) {
-  await db
-    .update(employeeMonthClosings)
-    .set({
-      reopenedAt: new Date(),
-      reopenedByUserId,
-    })
-    .where(eq(employeeMonthClosings.id, closingId));
 }

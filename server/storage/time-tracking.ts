@@ -108,9 +108,9 @@ export const timeTrackingStorage = {
   isMonthClosed: monthClosingModule.isMonthClosed,
   getMonthClosingReadiness: monthClosingModule.getMonthClosingReadiness,
   getAdminMonthClosingReadiness: monthClosingModule.getAdminMonthClosingReadiness,
+  getMissingSignaturesInClosedMonths: monthClosingModule.getMissingSignaturesInClosedMonths,
   getMonthClosing: monthClosingModule.getMonthClosing,
   getAdminMonthClosings: monthClosingModule.getAdminMonthClosings,
   closeMonth: monthClosingModule.closeMonth,
-  reopenMonth: monthClosingModule.reopenMonth,
 } as const;
 

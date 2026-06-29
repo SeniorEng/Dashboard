@@ -235,15 +235,12 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   const { customerId, year, month } = parsed.data;
   const effectiveEmployeeId = req.user!.isAdmin ? parsed.data.employeeId : userId;
 
-  if (!req.user!.isSuperAdmin) {
-    const monthEndIso = `${year}-${String(month).padStart(2, "0")}-${new Date(year, month, 0).getDate()}`;
-    if (await timeTrackingStorage.isMonthClosed(effectiveEmployeeId, monthEndIso)) {
-      return res.status(403).json({
-        error: "MONTH_CLOSED",
-        message: "Der Monat ist bereits abgeschlossen. Leistungsnachweise können nur noch von der Geschäftsführung erstellt werden.",
-      });
-    }
-  }
+  // Task #1496: Das Erstellen eines Leistungsnachweises ist nach Monatsabschluss
+  // bewusst NICHT mehr gesperrt. Ein LN bewegt kein Budget/Geld (Verbrauch wird
+  // bei der Dokumentation des Termins gebucht, nicht beim LN-Signieren), also
+  // dürfen dokumentierte Termine auch nach dem 8. noch nachsigniert/abgerechnet
+  // werden. Gesperrt bleibt nur das LÖSCHEN (Superadmin) und das Dokumentieren
+  // selbst (separater Gate).
 
   const hasAccess = await canAccessCustomer(
     userId,
@@ -373,14 +370,8 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   
   const appointmentEmployeeId = appointment.performedByEmployeeId || appointment.assignedEmployeeId || userId;
 
-  if (!req.user!.isSuperAdmin) {
-    if (await timeTrackingStorage.isMonthClosed(appointmentEmployeeId, appointment.date as string)) {
-      return res.status(403).json({
-        error: "MONTH_CLOSED",
-        message: "Der Monat ist bereits abgeschlossen. Leistungsnachweise können nur noch von der Geschäftsführung erstellt werden.",
-      });
-    }
-  }
+  // Task #1496: Einzel-Leistungsnachweis nach Monatsabschluss erlaubt (siehe oben).
+  // Die Vorbedingung „Termin ist abgeschlossen (completed)" bleibt aktiv.
 
   const record = await db.transaction(async (tx) => {
     const rec = await storage.createServiceRecord({
@@ -476,13 +467,9 @@ router.post("/:id/sign", requireAuth, asyncHandler("Unterschrift konnte nicht ge
     });
   }
 
-  const lockMsg = await ensureMonthOpenForRecord(
-    { employeeId: existingRecord.employeeId, year: existingRecord.year, month: existingRecord.month },
-    req.user!,
-  );
-  if (lockMsg) {
-    return sendForbidden(res, "MONTH_CLOSED", lockMsg);
-  }
+  // Task #1496: Unterschreiben eines Leistungsnachweises ist nach Monatsabschluss
+  // erlaubt — Signieren bewegt kein Budget/Geld. Die Vorbedingung, dass alle
+  // verknüpften Termine im Status 'completed' sind, bleibt unten erhalten.
 
   const parsed = signServiceRecordSchema.safeParse(req.body);
   if (!parsed.success) {

@@ -40,7 +40,6 @@ export const AUDIT_ACTIONS = [
   "admin_time_entry_updated",
   "admin_time_entry_deleted",
   "admin_month_closed",
-  "month_auto_close_blocked",
   "appointment_reopened",
   "initial_balance_set",
   "initial_balance_deleted",

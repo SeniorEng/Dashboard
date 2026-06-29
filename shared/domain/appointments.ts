@@ -68,18 +68,33 @@ export function isAppointmentDocumentedAndSigned(evidence: AppointmentSignatureE
 }
 
 /**
+ * EINZIGE Quelle der Wahrheit für „dokumentiert" (= Arbeit erbracht): Ein Termin
+ * gilt als dokumentiert, sobald sein Status `completed` ist — UNABHÄNGIG von einer
+ * Unterschrift (Task #1496). Die Unterschrift entscheidet nur über die Kunden-/
+ * Pflegekassen-Abrechnung (`isAppointmentDocumentedAndSigned`), nicht mehr über
+ * „Nicht abgerechnet"/Lohn.
+ *
+ * Die server-seitige SQL-Spiegelung liegt in `server/lib/appointment-signed.ts`
+ * (`appointmentDocumentedCondition`/`documentedSqlRaw`) und MUSS mit dieser Logik
+ * in lockstep bleiben.
+ */
+export function isAppointmentDocumented(status: AppointmentStatus | string): boolean {
+  return status === "completed";
+}
+
+/**
  * Leitet den ANZEIGE-Status eines Termins ab. `expired_unsigned` ("Nicht abgerechnet")
  * entsteht ausschließlich hier zur Laufzeit: wenn der Monat geschlossen ist und der
- * Termin nicht dokumentiert+unterschrieben ist — und er kein bereits dokumentiertes
- * Terminal-Ergebnis (`cancelled`/`customer_no_show`) ist. Der persistierte Status
- * bleibt unverändert.
+ * Termin NICHT dokumentiert ist (= nicht `completed`) — und er kein bereits
+ * dokumentiertes Terminal-Ergebnis (`cancelled`/`customer_no_show`) ist (Task #1496:
+ * von der Unterschrift entkoppelt). Der persistierte Status bleibt unverändert.
  */
 export function deriveAppointmentDisplayStatus(
   status: AppointmentStatus,
-  opts: { documentedAndSigned: boolean; isMonthClosed: boolean },
+  opts: { isMonthClosed: boolean },
 ): AppointmentStatus {
   if (status === "cancelled" || status === "customer_no_show") return status;
-  if (opts.isMonthClosed && !opts.documentedAndSigned) return "expired_unsigned";
+  if (opts.isMonthClosed && !isAppointmentDocumented(status)) return "expired_unsigned";
   return status;
 }
 

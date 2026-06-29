@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, isNull, inArray, notInArray, or, sql as sqlBuilder } from "drizzle-orm";
+import { and, eq, gte, lte, isNull, inArray, notInArray, sql as sqlBuilder } from "drizzle-orm";
 import { db } from "../lib/db";
 import {
   appointments,
@@ -14,7 +14,7 @@ import {
   previousMonth,
 } from "@shared/utils/month-close-cutoff";
 import { auditService } from "./audit";
-import { createNotification, hasRecentNotification } from "../storage/notifications";
+import { createNotification } from "../storage/notifications";
 import { notificationService } from "./notification-service";
 import { storage } from "../storage";
 // Task #1195: Direkt das Blatt-Modul importieren (gehostete Funktions-
@@ -34,7 +34,7 @@ import { sendEmail, buildEmailLayout, buildLogoInlineAttachment, EMAIL_LOGO_SRC 
 import { ensureMonthClosingTask, completeMonthClosingTask } from "../storage/tasks";
 import { generateAutoBreaksForMonth, insertAutoBreaks } from "./auto-breaks";
 import { appointmentsRepo } from "../repos";
-import { appointmentNotDocumentedAndSignedCondition } from "../lib/appointment-signed";
+import { appointmentNotDocumentedCondition } from "../lib/appointment-signed";
 
 const POLL_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
@@ -146,27 +146,26 @@ async function findSystemActorId(): Promise<number | null> {
   return any[0]?.id ?? null;
 }
 
-export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: number; expired: number; blocked: number; skipped: boolean }> {
+export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: number; expired: number; missingSignatures: number; skipped: boolean }> {
   const { year, month } = previousMonth(today);
   if (!isCutoffDay(today, year, month)) {
-    return { closed: 0, expired: 0, blocked: 0, skipped: true };
+    return { closed: 0, expired: 0, missingSignatures: 0, skipped: true };
   }
 
   const systemActorId = await findSystemActorId();
   if (systemActorId === null) {
     log("Auto-Close übersprungen: Kein Superadmin/Admin gefunden", "month-close");
-    return { closed: 0, expired: 0, blocked: 0, skipped: true };
+    return { closed: 0, expired: 0, missingSignatures: 0, skipped: true };
   }
 
   const { startDate, endDate } = monthDateRange(year, month);
 
-  // Task #1119: Der Monatsabschluss überschreibt KEINEN Termin-Status mehr auf
-  // `expired_unsigned`. Die Periodensperre hängt allein an `employee_month_closings`.
-  // „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label
-  // (`deriveAppointmentDisplayStatus`), kein gespeicherter Status.
-  //
-  // Wir ermitteln die Zahl der nicht dokumentiert+unterschriebenen Termine nur noch
-  // READ-ONLY, für Log/Return/Audit-Metadaten — ohne Schreibvorgang.
+  // Task #1496: „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label und
+  // von der Unterschrift ENTKOPPELT — es zählt allein die nicht dokumentierten
+  // Termine (status != 'completed'), nicht die unsignierten. Wir ermitteln die
+  // Zahl nur READ-ONLY, für Log/Return/Audit-Metadaten — ohne Schreibvorgang.
+  // Der Monatsabschluss überschreibt KEINEN Termin-Status; die Periodensperre
+  // hängt allein an `employee_month_closings`.
   const [expiredAgg] = await appointmentsRepo.selectColumnsFrom({ count: sqlBuilder<number>`COUNT(*)::int` }, db)
     .where(
       and(
@@ -174,34 +173,23 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
         notInArray(appointments.status, ["cancelled", "customer_no_show"]),
-        appointmentNotDocumentedAndSignedCondition(),
+        appointmentNotDocumentedCondition(),
       ),
     );
   const expiredCount = Number(expiredAgg?.count ?? 0);
 
-  // Task #1172: Auto-Close nutzt EXAKT dieselbe Readiness-Definition wie der
-  // manuelle Admin-/Batch-Abschluss (`getAdminMonthClosingReadiness`). Damit ist
-  // die Abschluss-Entscheidung pro Mitarbeiter zwischen Auto-, Admin- und
-  // Batch-Pfad per Konstruktion identisch (gleiche Aktivitäts-, Offen- und
-  // LN-bewusste „unsigniert"-Logik, gleiche Verantwortlichkeits-Attribution).
+  // Task #1496: Der Auto-Close ist die EINZIGE Abschluss-Mechanik und schließt
+  // BEDINGUNGSLOS — jeder Mitarbeiter mit Aktivität im Vormonat wird am Cutoff
+  // geschlossen, UNABHÄNGIG von offenen/undokumentierten/unsignierten Terminen.
+  // Es gibt keinen blockierenden/eskalierenden Pfad mehr; offene Termine werden
+  // zu „Nicht abgerechnet" (abgeleitet), fehlende Unterschriften wandern in die
+  // aktive „fehlende Unterschriften nach Abschluss"-Liste (siehe unten).
+  // `getAdminMonthClosingReadiness` liefert weiterhin Aktivitäts-/Offen-/
+  // Unsigniert-Zählungen für Audit-Metadaten und die Nachverfolgung.
   const readiness = await getAdminMonthClosingReadiness(year, month);
 
-  // Admins/Superadmins, die bei blockiertem Auto-Close zur manuellen Prüfung
-  // eskaliert werden (lazy geladen, nur wenn tatsächlich ein Blocker auftritt).
-  let cachedAdminIds: number[] | null = null;
-  const loadAdminIds = async (): Promise<number[]> => {
-    if (cachedAdminIds === null) {
-      const rows = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(eq(users.isActive, true), or(eq(users.isAdmin, true), eq(users.isSuperAdmin, true))));
-      cachedAdminIds = rows.map((r) => r.id);
-    }
-    return cachedAdminIds;
-  };
-
   let closedCount = 0;
-  let blockedCount = 0;
+  let missingSignatureEmployees = 0;
 
   for (const emp of readiness) {
     // Keine Aktivität im Vormonat → nichts abzuschließen.
@@ -209,47 +197,7 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
     // Idempotent: bereits (nicht wieder geöffnet) geschlossen.
     if (emp.isClosed) continue;
 
-    if (!emp.ready) {
-      // Task #1172 Policy: Eine fehlende Unterschrift (oder ein offener Termin)
-      // BLOCKIERT den automatischen Abschluss und wird an die Geschäftsführung
-      // eskaliert — identische Entscheidung+Begründung wie beim manuellen
-      // Admin-Close (der hier ebenfalls einen Fehler werfen würde).
-      blockedCount += 1;
-
-      await auditService.log(
-        systemActorId,
-        "month_auto_close_blocked",
-        "month_closing",
-        emp.userId,
-        {
-          year,
-          month,
-          autoClose: true,
-          openAppointments: emp.openAppointments.length,
-          unsignedAppointments: emp.unsignedAppointments.length,
-        },
-      );
-
-      const adminIds = await loadAdminIds();
-      for (const adminId of adminIds) {
-        if (await hasRecentNotification(adminId, "month_auto_close_blocked", emp.userId)) continue;
-        try {
-          await createNotification({
-            userId: adminId,
-            type: "month_auto_close_blocked",
-            title: `Monatsabschluss blockiert: ${emp.displayName}`,
-            message: `${emp.displayName} konnte für ${month}/${year} nicht automatisch abgeschlossen werden (${emp.openAppointments.length} offene, ${emp.unsignedAppointments.length} unsignierte Termine). Bitte manuell prüfen und abschließen.`,
-            referenceType: "employee",
-            referenceId: emp.userId,
-          });
-        } catch (err) {
-          console.error("[month-close] Eskalations-Benachrichtigung fehlgeschlagen:", err);
-        }
-      }
-      continue;
-    }
-
-    // Ready → schließen, mit Parität zum Admin-/Batch-Close: Auto-Pausen
+    // Bedingungslos schließen, mit Parität zum bisherigen Close: Auto-Pausen
     // generieren+einfügen, Closing schreiben, Aufgabe abschließen.
     const existing = emp.closingId
       ? await getMonthClosing(emp.userId, year, month)
@@ -270,18 +218,47 @@ export async function autoCloseMonthForCutoff(today: string): Promise<{ closed: 
       "month_auto_closed",
       "month_closing",
       emp.userId,
-      { year, month, autoClose: true, autoBreaksInserted: insertedCount, expiredAppointmentsTotal: expiredCount },
+      {
+        year,
+        month,
+        autoClose: true,
+        autoBreaksInserted: insertedCount,
+        expiredAppointmentsTotal: expiredCount,
+        openAppointments: emp.openAppointments.length,
+        missingSignatures: emp.unsignedAppointments.length,
+      },
     );
 
     closedCount += 1;
+
+    // Task #1496: Fehlende Unterschriften BLOCKIEREN den Abschluss nicht mehr,
+    // sondern werden NACH dem Abschluss aktiv nachgehalten. Für jeden geschlossenen
+    // Mitarbeiter mit dokumentierten, aber noch nicht unterschriebenen Terminen
+    // wird eine Benachrichtigung erzeugt, damit die Unterschrift nachgeholt wird
+    // (LN-Erstellung/-Signatur bleibt nach Abschluss erlaubt).
+    if (emp.unsignedAppointments.length > 0) {
+      missingSignatureEmployees += 1;
+      try {
+        await createNotification({
+          userId: emp.userId,
+          type: "month_close_missing_signature",
+          title: `Fehlende Unterschriften: ${month}/${year}`,
+          message: `Der Monat ${month}/${year} ist abgeschlossen, aber ${emp.unsignedAppointments.length} dokumentierte Termine sind noch nicht unterschrieben. Bitte hole die Unterschriften nach.`,
+          referenceType: "employee",
+          referenceId: emp.userId,
+        });
+      } catch (err) {
+        console.error("[month-close] Benachrichtigung fehlende Unterschrift fehlgeschlagen:", err);
+      }
+    }
   }
 
   log(
-    `Auto-Close für ${month}/${year}: ${closedCount} Mitarbeiter geschlossen, ${blockedCount} blockiert+eskaliert, ${expiredCount} Termine nicht dokumentiert+unterschrieben (abgeleitet „Nicht abgerechnet", kein Status-Schreibvorgang)`,
+    `Auto-Close für ${month}/${year}: ${closedCount} Mitarbeiter bedingungslos geschlossen, ${missingSignatureEmployees} mit fehlenden Unterschriften (nachgehalten), ${expiredCount} Termine nicht dokumentiert (abgeleitet „Nicht abgerechnet", kein Status-Schreibvorgang)`,
     "month-close",
   );
 
-  return { closed: closedCount, expired: expiredCount, blocked: blockedCount, skipped: false };
+  return { closed: closedCount, expired: expiredCount, missingSignatures: missingSignatureEmployees, skipped: false };
 }
 
 type ReminderWave = "T-3" | "T-1" | "T-0";
@@ -442,24 +419,26 @@ export async function getMonthCloseBanner(userId: number): Promise<{
   const isClosed = !!(closing && !closing.reopenedAt);
 
   let open = readiness.openAppointments.length;
-  let unsigned = readiness.unsignedAppointments.length;
+  const unsigned = readiness.unsignedAppointments.length;
   let expired = 0;
 
-  // Task #1119: „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label. Ist der
-  // Monat geschlossen, gelten die noch offenen/unsignierten Termine als verfallen
-  // (`expired`) — exakt wie zuvor, nur ohne gespeicherten Status. Vor dem Abschluss
-  // bleiben sie als offen/unsigniert sichtbar.
+  // Task #1496: „Nicht abgerechnet" ist ein abgeleitetes Anzeige-Label und von
+  // der Unterschrift ENTKOPPELT. Ist der Monat geschlossen, gelten nur noch die
+  // NICHT dokumentierten (offenen) Termine als verfallen (`expired`). Die
+  // dokumentierten, aber noch nicht unterschriebenen Termine (`unsigned`) bleiben
+  // als „fehlende Unterschriften" sichtbar und nachzuholen (LN nach Abschluss
+  // weiterhin erlaubt) — sie verfallen NICHT. Vor dem Abschluss bleiben offene
+  // Termine als offen sichtbar.
   if (isClosed) {
-    expired = open + unsigned;
+    expired = open;
     open = 0;
-    unsigned = 0;
   }
 
   // Show banner whenever:
-  //  - the previous month is closed (info row), OR
+  //  - the previous month is closed (info row + fehlende Unterschriften), OR
   //  - the cutoff window is still active (days >= 0) — countdown for everyone
   //    with the previous-month context, OR
-  //  - there are blockers / expired entries the user should see.
+  //  - there are open/unsigned entries the user should see.
   // Only hide if the cutoff has long passed AND there is nothing to show.
   if (!isClosed && days < 0 && open === 0 && unsigned === 0) {
     return null;

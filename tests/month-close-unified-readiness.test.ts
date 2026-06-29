@@ -1,21 +1,22 @@
 /**
- * Task #1172 — Monatsabschluss vereinheitlichen.
+ * Task #1172 / #1496 — Monatsabschluss vereinheitlichen & bedingungslos machen.
  *
- * Regressionsschutz: Auto-Close, Admin-Close (Einzel) und Batch-Close teilen
- * EINE Readiness-Definition. Für ein und denselben Mitarbeiter MUSS die
- * Abschluss-Entscheidung in allen drei Pfaden identisch sein:
- *   - Einzel-Readiness  → `getMonthClosingReadiness(userId, year, month)`
- *   - Batch-Readiness    → `getAdminMonthClosingReadiness(year, month)`
- *   - Auto-Close         → `autoCloseMonthForCutoff(cutoff)`
+ * Die Readiness-Definition bleibt EINE SSoT: Einzel-Readiness
+ * (`getMonthClosingReadiness`) und Batch-Readiness
+ * (`getAdminMonthClosingReadiness`) MÜSSEN pro Mitarbeiter identische
+ * Informations-Werte (ready/open/unsigned) liefern. Diese Werte sind seit
+ * Task #1496 reine Anzeige-Information — sie steuern den Abschluss NICHT mehr.
  *
- * Geprüft werden die drei Zustände von Test-MA 114674:
- *   (A) READY            — Aktivität vorhanden, alles dokumentiert+unterschrieben
- *   (B) BLOCKED_UNSIGNED — completed-Termin OHNE Unterschrift (fehlende Signatur)
- *   (C) BLOCKED_OPEN     — offener (nicht abgeschlossener) Termin
- *
- * Policy (Task #1172): Eine fehlende Unterschrift BLOCKIERT den automatischen
- * Abschluss und eskaliert an die Geschäftsführung — identische Entscheidung wie
- * beim manuellen Admin-Close. Der Termin-Status wird dabei NIE überschrieben.
+ * Der Auto-Close (`autoCloseMonthForCutoff`) ist die EINZIGE Abschluss-Mechanik
+ * und schließt BEDINGUNGSLOS jeden Mitarbeiter mit Aktivität im Vormonat:
+ *   (A) READY            — alles dokumentiert+unterschrieben → geschlossen
+ *   (B) DOKU-UNSIGNED    — completed-Termin OHNE Unterschrift → trotzdem
+ *                          geschlossen; Termin-Status bleibt `completed`;
+ *                          eine „fehlende Unterschrift"-Benachrichtigung entsteht
+ *   (C) OFFEN            — offener Termin → trotzdem geschlossen; Termin-Status
+ *                          bleibt `documenting` (kein Schreibvorgang)
+ *   (D) KEINE AKTIVITÄT  — nichts abzuschließen → NICHT geschlossen
+ * Kein Zustand blockiert oder eskaliert mehr.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
@@ -115,61 +116,80 @@ async function countAudit(action: string, employeeId: number): Promise<number> {
   return Number((res.rows?.[0] as { c: number })?.c ?? 0);
 }
 
+async function countMissingSignatureNotifications(employeeId: number): Promise<number> {
+  const res = await db.execute(sql`
+    SELECT COUNT(*)::int AS c FROM notifications
+    WHERE type = 'month_close_missing_signature' AND reference_id = ${employeeId}
+  `);
+  return Number((res.rows?.[0] as { c: number })?.c ?? 0);
+}
+
 async function apptStatus(appointmentId: number): Promise<string> {
   const res = await db.execute(sql`SELECT status FROM appointments WHERE id = ${appointmentId}`);
   return (res.rows?.[0] as { status: string }).status;
 }
 
-describe("Task #1172: Einheitliche Readiness — single == batch == auto-close", () => {
+describe("Task #1172/#1496: Readiness == Anzeige-SSoT, Auto-Close == bedingungslos", () => {
   let serviceId: number;
 
   // (A) READY
   let custReady: number;
   let empReady: number;
 
-  // (B) BLOCKED_UNSIGNED
+  // (B) DOKU-UNSIGNED
   let custUnsigned: number;
   let empUnsigned: number;
   let unsignedApptId: number;
 
-  // (C) BLOCKED_OPEN
+  // (C) OFFEN
   let custOpen: number;
   let empOpen: number;
   let openApptId: number;
 
+  // (D) KEINE AKTIVITÄT
+  let custNoAppt: number;
+  let empNoAppt: number;
+
   beforeAll(async () => {
     serviceId = await getSeededServiceId();
 
-    // (A) READY: Aktivität (completed) + unterschrieben → abschließbar.
+    // (A) READY: Aktivität (completed) + unterschrieben.
     const cA = await createTestCustomer();
     custReady = cA.id as number;
     empReady = (await createTestEmployee({ nachnamePrefix: "U1172Ready" })).id;
     await assignEmployeeToCustomer(custReady, empReady);
     await makeCompletedAppt(custReady, serviceId, empReady, `${TARGET_YEAR}-0${TARGET_MONTH}-10`, true);
 
-    // (B) BLOCKED_UNSIGNED: completed-Termin OHNE Unterschrift.
+    // (B) DOKU-UNSIGNED: completed-Termin OHNE Unterschrift.
     const cB = await createTestCustomer();
     custUnsigned = cB.id as number;
     empUnsigned = (await createTestEmployee({ nachnamePrefix: "U1172Unsigned" })).id;
     await assignEmployeeToCustomer(custUnsigned, empUnsigned);
     unsignedApptId = await makeCompletedAppt(custUnsigned, serviceId, empUnsigned, `${TARGET_YEAR}-0${TARGET_MONTH}-11`, false);
 
-    // (C) BLOCKED_OPEN: Aktivität (completed+signiert) + zusätzlich ein offener Termin.
+    // (C) OFFEN: Aktivität (completed+signiert) + zusätzlich ein offener Termin.
     const cC = await createTestCustomer();
     custOpen = cC.id as number;
     empOpen = (await createTestEmployee({ nachnamePrefix: "U1172Open" })).id;
     await assignEmployeeToCustomer(custOpen, empOpen);
     await makeCompletedAppt(custOpen, serviceId, empOpen, `${TARGET_YEAR}-0${TARGET_MONTH}-12`, true);
     openApptId = await makeOpenAppt(custOpen, serviceId, empOpen, `${TARGET_YEAR}-0${TARGET_MONTH}-13`);
+
+    // (D) KEINE AKTIVITÄT: zugeordnet, aber ohne Termin im Zielmonat.
+    const cD = await createTestCustomer();
+    custNoAppt = cD.id as number;
+    empNoAppt = (await createTestEmployee({ nachnamePrefix: "U1172NoAppt" })).id;
+    await assignEmployeeToCustomer(custNoAppt, empNoAppt);
   });
 
   afterAll(async () => {
     await cleanupCustomer(custReady);
     await cleanupCustomer(custUnsigned);
     await cleanupCustomer(custOpen);
+    await cleanupCustomer(custNoAppt);
   });
 
-  it("Einzel- und Batch-Readiness stimmen pro Mitarbeiter und Zustand überein", async () => {
+  it("Einzel- und Batch-Readiness stimmen pro Mitarbeiter und Zustand überein (Anzeige-SSoT)", async () => {
     const admin = await timeTrackingStorage.getAdminMonthClosingReadiness(TARGET_YEAR, TARGET_MONTH);
     const adminFor = (id: number) => {
       const row = admin.find((e) => e.userId === id);
@@ -183,40 +203,44 @@ describe("Task #1172: Einheitliche Readiness — single == batch == auto-close",
 
     // (A) READY
     expect(singleReady.ready).toBe(true);
-    expect(adminFor(empReady).ready).toBe(true);
     expect(singleReady.ready).toBe(adminFor(empReady).ready);
 
-    // (B) BLOCKED_UNSIGNED — fehlende Unterschrift blockiert.
-    expect(singleUnsigned.ready).toBe(false);
+    // (B) DOKU-UNSIGNED — fehlende Unterschrift ist sichtbar (Anzeige), blockiert aber nicht mehr.
     expect(singleUnsigned.unsignedAppointments.length).toBeGreaterThan(0);
-    expect(adminFor(empUnsigned).ready).toBe(false);
     expect(singleUnsigned.ready).toBe(adminFor(empUnsigned).ready);
+    expect(singleUnsigned.unsignedAppointments).toEqual(adminFor(empUnsigned).unsignedAppointments);
 
-    // (C) BLOCKED_OPEN — offener Termin blockiert.
-    expect(singleOpen.ready).toBe(false);
+    // (C) OFFEN — offener Termin ist sichtbar (Anzeige).
     expect(singleOpen.openAppointments.length).toBeGreaterThan(0);
-    expect(adminFor(empOpen).ready).toBe(false);
     expect(singleOpen.ready).toBe(adminFor(empOpen).ready);
+    expect(singleOpen.openAppointments).toEqual(adminFor(empOpen).openAppointments);
   });
 
-  it("Auto-Close trifft dieselbe Entscheidung wie die Readiness (schließen vs. blockieren+eskalieren)", async () => {
+  it("Auto-Close schließt bedingungslos jeden Mitarbeiter mit Aktivität (außer ohne Aktivität)", async () => {
     const cutoff = computeMonthCloseCutoff(TARGET_YEAR, TARGET_MONTH);
     const result = await autoCloseMonthForCutoff(cutoff);
     expect(result.skipped).toBe(false);
 
-    // (A) READY → geschlossen, Audit `month_auto_closed`, NICHT blockiert.
+    // (A) READY → geschlossen, Audit `month_auto_closed`.
     expect(await hasClosing(empReady)).toBe(true);
     expect(await countAudit("month_auto_closed", empReady)).toBeGreaterThan(0);
-    expect(await countAudit("month_auto_close_blocked", empReady)).toBe(0);
 
-    // (B) BLOCKED_UNSIGNED → NICHT geschlossen, eskaliert, Termin-Status unangetastet.
-    expect(await hasClosing(empUnsigned)).toBe(false);
-    expect(await countAudit("month_auto_close_blocked", empUnsigned)).toBeGreaterThan(0);
+    // (B) DOKU-UNSIGNED → TROTZDEM geschlossen; Termin-Status bleibt `completed`;
+    // eine „fehlende Unterschrift"-Benachrichtigung wird erzeugt.
+    expect(await hasClosing(empUnsigned)).toBe(true);
     expect(await apptStatus(unsignedApptId)).toBe("completed");
+    expect(await countMissingSignatureNotifications(empUnsigned)).toBeGreaterThan(0);
 
-    // (C) BLOCKED_OPEN → NICHT geschlossen, eskaliert, offener Termin unangetastet.
-    expect(await hasClosing(empOpen)).toBe(false);
-    expect(await countAudit("month_auto_close_blocked", empOpen)).toBeGreaterThan(0);
+    // (C) OFFEN → TROTZDEM geschlossen; offener Termin-Status bleibt `documenting`.
+    expect(await hasClosing(empOpen)).toBe(true);
     expect(await apptStatus(openApptId)).toBe("documenting");
+
+    // (D) KEINE AKTIVITÄT → NICHT geschlossen (nichts abzuschließen).
+    expect(await hasClosing(empNoAppt)).toBe(false);
+
+    // Es gibt keinen Eskalations-/Blockade-Pfad mehr.
+    for (const emp of [empReady, empUnsigned, empOpen, empNoAppt]) {
+      expect(await countAudit("month_auto_close_blocked", emp)).toBe(0);
+    }
   });
 });

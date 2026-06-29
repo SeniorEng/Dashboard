@@ -285,24 +285,6 @@ export async function completeMonthClosingTask(
   }
 }
 
-export async function reopenMonthClosingTask(
-  userId: number,
-  month: number,
-  year: number
-): Promise<void> {
-  const existing = await findMonthClosingTask(userId, month, year);
-  if (existing && existing.status === "completed") {
-    await db
-      .update(tasks)
-      .set({
-        status: "open",
-        completedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(tasks.id, existing.id));
-  }
-}
-
 const BIRTHDAY_MARKER_PREFIX = "[birthday:";
 
 function getBirthdayTaskTitle(personType: "customer" | "employee", name: string): string {

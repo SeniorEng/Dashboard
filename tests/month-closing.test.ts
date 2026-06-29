@@ -16,6 +16,10 @@ beforeAll(async () => {
   auth = await getAuthCookie();
 });
 
+// Task #1496: Der Monatsabschluss läuft ausschließlich automatisch am Cutoff.
+// Es gibt KEINE manuellen Abschluss-/Wiedereröffnungs-/Batch-Endpunkte mehr —
+// die Routen sind reine Lese-/Status-Endpunkte.
+
 describe("MC-1: Monatsabschluss laden", () => {
   it("MC-1.1 – GET month-closing liefert Status für eigenen Monat", async () => {
     const res = await apiGet<any>(`/api/time-entries/month-closing/${currentYear}/${currentMonth}`);
@@ -29,7 +33,7 @@ describe("MC-1: Monatsabschluss laden", () => {
   });
 });
 
-describe("MC-2: Bereitschaftsprüfung", () => {
+describe("MC-2: Bereitschaftsprüfung (Anzeige-Information)", () => {
   it("MC-2.1 – GET readiness liefert Bereitschaftsstatus", async () => {
     const res = await apiGet<any>(`/api/time-entries/month-closing/${currentYear}/${currentMonth}/readiness`);
     expect(res.status).toBe(200);
@@ -54,90 +58,52 @@ describe("MC-3: Admin-Monatsabschlüsse laden", () => {
   });
 });
 
-describe("MC-4: Admin-Monatsabschluss durchführen", () => {
-  it("MC-4.1 – Abschluss ohne Zeiteinträge wird abgelehnt", async () => {
-    const farFutureYear = currentYear + 5;
+describe("MC-4: Manuelle Abschluss-Endpunkte existieren NICHT mehr", () => {
+  it("MC-4.1 – POST admin/close-month ist entfernt (kein 2xx)", async () => {
     const res = await apiPost<any>("/api/time-entries/admin/close-month", {
-      year: farFutureYear,
+      year: currentYear + 5,
       month: 1,
       userId: auth.user.id,
     });
-    expect(res.status).toBe(400);
-    expect(res.data.message).toBeTruthy();
+    expect(res.status).not.toBe(200);
+    expect(res.status).not.toBe(201);
   });
 
-  it("MC-4.2 – Ungültige Eingabe wird abgelehnt", async () => {
-    const res = await apiPost<any>("/api/time-entries/admin/close-month", {});
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("MC-5: Monat wiedereröffnen", () => {
-  it("MC-5.1 – Wiedereröffnung eines nicht-abgeschlossenen Monats wird abgelehnt", async () => {
-    const farFutureYear = currentYear + 5;
+  it("MC-4.2 – POST reopen-month ist entfernt (kein 2xx)", async () => {
     const res = await apiPost<any>("/api/time-entries/reopen-month", {
-      year: farFutureYear,
+      year: currentYear + 5,
       month: 1,
       userId: auth.user.id,
+      reason: "sollte nicht existieren",
     });
-    expect(res.status).toBe(400);
+    expect(res.status).not.toBe(200);
+    expect(res.status).not.toBe(201);
   });
 
-  it("MC-5.2 – Ungültige Eingabe wird abgelehnt", async () => {
-    const res = await apiPost<any>("/api/time-entries/reopen-month", {});
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("MC-6: Batch-Monatsabschluss", () => {
-  it("MC-6.1 – Batch-Abschluss ohne bereite Mitarbeiter liefert Ergebnis", async () => {
-    const farFutureYear = currentYear + 5;
+  it("MC-4.3 – POST admin/batch-close-month ist entfernt (kein 2xx)", async () => {
     const res = await apiPost<any>("/api/time-entries/admin/batch-close-month", {
-      year: farFutureYear,
+      year: currentYear + 5,
       month: 1,
     });
-    expect(res.status).toBe(400);
-  });
-
-  it("MC-6.2 – Ungültige Eingabe wird abgelehnt", async () => {
-    const res = await apiPost<any>("/api/time-entries/admin/batch-close-month", {});
-    expect(res.status).toBe(400);
+    expect(res.status).not.toBe(200);
+    expect(res.status).not.toBe(201);
   });
 });
 
-describe("MC-7: Vorschau Auto-Pausen", () => {
-  it("MC-7.1 – GET preview liefert Vorschau für Monat", async () => {
+describe("MC-5: Vorschau Auto-Pausen", () => {
+  it("MC-5.1 – GET preview liefert Vorschau für Monat", async () => {
     const res = await apiGet<any>(`/api/time-entries/month-closing/${currentYear}/${currentMonth}/preview`);
     expect(res.status).toBe(200);
   });
 });
 
-describe("MC-8: Monatsabschluss-Lebenszyklus (Close → Reopen)", () => {
+describe("MC-6: Readiness-Lebenszyklus (ohne manuellen Close)", () => {
   const testYear = currentYear + 4;
   const testMonth = 6;
 
-  it("MC-8.1 – Readiness vor Zeiteinträgen: hasTimeEntries=false", async () => {
+  it("MC-6.1 – Readiness vor Zeiteinträgen: hasTimeEntries=false", async () => {
     const res = await apiGet<any>(`/api/time-entries/month-closing/${testYear}/${testMonth}/readiness`);
     expect(res.status).toBe(200);
     expect(res.data.hasTimeEntries).toBe(false);
-  });
-
-  it("MC-8.2 – Close ohne Zeiteinträge wird abgelehnt", async () => {
-    const res = await apiPost<any>("/api/time-entries/admin/close-month", {
-      year: testYear,
-      month: testMonth,
-      userId: auth.user.id,
-    });
-    expect(res.status).toBe(400);
-    expect(res.data.message).toContain("keine Zeiteinträge");
-  });
-
-  it("MC-8.3 – Batch-Close ohne bereite Mitarbeiter wird abgelehnt", async () => {
-    const res = await apiPost<any>("/api/time-entries/admin/batch-close-month", {
-      year: testYear,
-      month: testMonth,
-    });
-    expect(res.status).toBe(400);
-    expect(res.data.message).toContain("Keine Mitarbeiter");
   });
 });

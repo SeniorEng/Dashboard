@@ -73,6 +73,18 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
   const missingRecordsAlert = findAlert("Fehlende Leistungsnachweise");
   const overspendAlert = findAlert("Budget-Überschreitung");
 
+  // Task #1496: Aktive „fehlende Unterschriften nach Abschluss"-Liste — gleiche
+  // Quelle wie die Zielseite (/admin/month-closing), abgeleitet aus der
+  // „Dokumentiert"-Stufe gefiltert auf geschlossene Monate.
+  const { data: missingSignatures } = useQuery<{ items: unknown[] }>({
+    queryKey: ["month-closing-missing-signatures"],
+    queryFn: async () =>
+      unwrapResult(await api.get<{ items: unknown[] }>("/time-entries/month-closing/missing-signatures")),
+    staleTime: 5 * 60 * 1000,
+    enabled: can("time_entries"),
+  });
+  const missingSignatureCount = missingSignatures?.items.length ?? 0;
+
   const { data: pendingProofs } = usePendingProofs();
   const { data: overdueConsultations } = usePlannedConsultations("overdue");
   const { data: budgetSetupMissing } = useBudgetSetupMissingCount();
@@ -132,6 +144,15 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
       count: undocumentedAlert?.count ?? 0,
       href: undocumentedAlert?.link ?? "/admin/statistics/process-health/undocumented-appointments",
       show: can("time_entries") || can("statistics"),
+    },
+    {
+      testId: "inbox-missing-signatures",
+      icon: <FileCheck className={iconSize.md} />,
+      label: "Fehlende Unterschriften",
+      subtitle: "Dokumentierte Termine in abgeschlossenen Monaten ohne Unterschrift",
+      count: missingSignatureCount,
+      href: "/admin/month-closing",
+      show: can("time_entries"),
     },
     {
       testId: "inbox-missing-records",

@@ -33,20 +33,31 @@ export function appointmentDocumentedAndSignedCondition(): SQL {
 }
 
 /**
- * Drizzle-Bedingung „NICHT dokumentiert & unterschrieben" — alles, was in einem
- * abzuschließenden Monat eigentlich dokumentiert+unterschrieben sein müsste, es
- * aber nicht ist (= abgeleitetes Anzeige-Label „Nicht abgerechnet").
- */
-export function appointmentNotDocumentedAndSignedCondition(): SQL {
-  return sql`NOT ${appointmentDocumentedAndSignedCondition()}`;
-}
-
-/**
  * Drizzle-Bedingung „completed, aber unsigniert" — der Anteil der completed-Termine
  * ohne jegliche Unterschrift (weder direkt noch via Leistungsnachweis).
  */
 export function appointmentCompletedButUnsignedCondition(): SQL {
   return sql`(${appointments.status} = 'completed' AND ${appointments.signatureData} IS NULL AND NOT ${SIGNED_SR_EXISTS})`;
+}
+
+/**
+ * Drizzle-Bedingung „dokumentiert" (Task #1496) — Arbeit erbracht, UNABHÄNGIG von
+ * einer Unterschrift: status = 'completed'. SQL-Spiegel von `isAppointmentDocumented`
+ * (`shared/domain/appointments.ts`); MUSS mit diesem reinen TS-Prädikat in lockstep
+ * bleiben. Entscheidet über „Nicht abgerechnet"/Lohn — NICHT über die Kunden-/
+ * Pflegekassen-Abrechnung (dafür `appointmentDocumentedAndSignedCondition`).
+ */
+export function appointmentDocumentedCondition(): SQL {
+  return sql`(${appointments.status} = 'completed')`;
+}
+
+/**
+ * Drizzle-Bedingung „NICHT dokumentiert" — alles, was in einem abzuschließenden
+ * Monat eigentlich dokumentiert sein müsste, es aber nicht ist (= abgeleitetes
+ * Anzeige-Label „Nicht abgerechnet", Task #1496 von der Unterschrift entkoppelt).
+ */
+export function appointmentNotDocumentedCondition(): SQL {
+  return sql`NOT ${appointmentDocumentedCondition()}`;
 }
 
 /**
@@ -63,6 +74,18 @@ export function documentedAndSignedSqlRaw(alias: string): SQL {
       AND msr.deleted_at IS NULL
       AND msr.status IN ('employee_signed', 'completed')
   )))`;
+}
+
+/**
+ * Roh-SQL-Fragment „dokumentiert" (Task #1496) für `db.execute`-Queries mit
+ * Tabellen-Alias (z.B. `FROM appointments a`). Spiegelt `appointmentDocumentedCondition()`
+ * bzw. das reine TS-Prädikat `isAppointmentDocumented` und MUSS mit ihm in lockstep
+ * bleiben. Genutzt vom Lohn-/Lexware-Export (dokumentierte Arbeit ist zahlbar, auch
+ * ohne Unterschrift).
+ */
+export function documentedSqlRaw(alias: string): SQL {
+  const a = sql.raw(alias);
+  return sql`(${a}.status = 'completed')`;
 }
 
 /**

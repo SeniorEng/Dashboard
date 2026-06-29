@@ -157,7 +157,7 @@ function hasOpenAppointmentsBlocker(code: string): boolean {
 
 /** „Fehlende Unterschrift"-Blocker-Bedingung (dokumentiert-SSoT-Prädikate). */
 const UNSIGNED_BLOCKER_RE =
-  /\b(?:appointmentCompletedButUnsignedCondition|completedButUnsignedSqlRaw|appointmentNotDocumentedAndSignedCondition|documentedAndSignedSqlRaw)\b/;
+  /\b(?:appointmentCompletedButUnsignedCondition|completedButUnsignedSqlRaw|documentedAndSignedSqlRaw)\b/;
 
 /** Zeiteinträge-Aktivitäts-Aggregation. */
 const TIME_ENTRY_AGG_RE = /\b(?:employeeTimeEntries|employee_time_entries)\b/;
@@ -199,7 +199,8 @@ export function detectReadinessAggregationViolations(files: ScanFile[]): GuardVi
  * (`server/lib/appointment-signed.ts` + reines Prädikat in
  * `shared/domain/appointments.ts`). Alle realen Konsumenten importieren sie:
  * Lexware-Export (`documentedAndSignedSqlRaw`/`completedButUnsignedSqlRaw`),
- * Monatsabschluss-Scheduler (`appointmentNotDocumentedAndSignedCondition`),
+ * Monatsabschluss-Scheduler (`appointmentNotDocumentedCondition` +
+ * `completedButUnsignedSqlRaw` für die „fehlende Unterschrift"-Erinnerung),
  * Monatsabschluss-Storage (`appointmentCompletedButUnsignedCondition`) und
  * Invarianten (`appointmentDocumentedAndSignedCondition`). Der A3-Test unten ist
  * ein HARTER, build-brechender CI-Gate (`expect.fail`, kein Warning) — Teil der

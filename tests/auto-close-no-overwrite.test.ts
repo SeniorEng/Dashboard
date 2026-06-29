@@ -1,18 +1,18 @@
 /**
- * Task #1119 / #1172 — Regressionsschutz: Der automatische Monatsabschluss
+ * Task #1119 / #1496 — Regressionsschutz: Der automatische Monatsabschluss
  * überschreibt KEINEN Termin-Status (insbesondere nicht auf `expired_unsigned`).
  *
  * Die Periodensperre hängt allein an `employee_month_closings`. „Nicht
  * abgerechnet" ist ein abgeleitetes Anzeige-Label (`deriveAppointmentDisplayStatus`)
  * und wird NIE persistiert.
  *
- * Task #1172 verschärft zusätzlich die Policy: Ein nicht dokumentiert+
- * unterschriebener (hier: offener) Termin BLOCKIERT den automatischen Abschluss
- * und wird an die Geschäftsführung eskaliert — identische Entscheidung wie beim
- * manuellen Admin-Close. Dieser Test stellt sicher, dass dabei
+ * Task #1496 macht den Auto-Close zur EINZIGEN Abschluss-Mechanik und schließt
+ * BEDINGUNGSLOS: Auch wenn noch offene (nicht dokumentierte) oder unsignierte
+ * Termine existieren, wird der Monat geschlossen — es gibt keinen blockierenden/
+ * eskalierenden Pfad mehr. Dieser Test stellt sicher, dass dabei
  *   (1) der Termin-Status unverändert bleibt (kein Schreibvorgang),
- *   (2) KEINE Periodensperre geschrieben wird (Monat bleibt offen),
- *   (3) eine Eskalation (`month_auto_close_blocked`) protokolliert wird.
+ *   (2) die Periodensperre TROTZ offenem Termin geschrieben wird (Monat zu),
+ *   (3) KEINE Blockade-/Eskalations-Audits entstehen.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
@@ -37,7 +37,7 @@ async function getSeededServiceId(): Promise<number> {
 const TARGET_YEAR = 2023;
 const TARGET_MONTH = 3;
 
-describe("Task #1119/#1172: Auto-Close überschreibt keinen Termin-Status", () => {
+describe("Task #1119/#1496: Auto-Close schließt bedingungslos ohne Status-Überschreibung", () => {
   let customerId: number;
   let employeeId: number;
   let openAppointmentId: number;
@@ -64,8 +64,8 @@ describe("Task #1119/#1172: Auto-Close überschreibt keinen Termin-Status", () =
       WHERE id = ${signed.appointmentId}
     `);
 
-    // Blocker: ein offener (nicht abgeschlossener) Termin, der den Auto-Close
-    // blockieren MUSS — und dessen Status NICHT überschrieben werden darf.
+    // Ein offener (nicht abgeschlossener) Termin, der den Auto-Close NICHT mehr
+    // blockiert — dessen Status aber NICHT überschrieben werden darf.
     const open = await createAndDocumentAppointment(customerId, serviceId, {
       assignedEmployeeId: employeeId,
       date: `${TARGET_YEAR}-0${TARGET_MONTH}-15`,
@@ -86,7 +86,7 @@ describe("Task #1119/#1172: Auto-Close überschreibt keinen Termin-Status", () =
     await cleanupCustomer(customerId);
   });
 
-  it("blockiert+eskaliert statt zu schließen und lässt den Termin-Status unangetastet", async () => {
+  it("schließt bedingungslos und lässt den Termin-Status unangetastet", async () => {
     const cutoff = computeMonthCloseCutoff(TARGET_YEAR, TARGET_MONTH);
     const result = await autoCloseMonthForCutoff(cutoff);
 
@@ -96,20 +96,29 @@ describe("Task #1119/#1172: Auto-Close überschreibt keinen Termin-Status", () =
     const statusRes = await db.execute(sql`SELECT status FROM appointments WHERE id = ${openAppointmentId}`);
     expect((statusRes.rows?.[0] as { status: string }).status).toBe("documenting");
 
-    // (2) KEINE Periodensperre geschrieben — der Monat bleibt offen.
+    // (2) Periodensperre IST trotz offenem Termin geschrieben — der Monat ist zu.
     const closingRes = await db.execute(sql`
       SELECT 1 FROM employee_month_closings
       WHERE user_id = ${employeeId} AND year = ${TARGET_YEAR} AND month = ${TARGET_MONTH}
+        AND reopened_at IS NULL
     `);
-    expect(closingRes.rows.length).toBe(0);
+    expect(closingRes.rows.length).toBe(1);
 
-    // (3) Eskalation protokolliert.
-    const auditRes = await db.execute(sql`
+    // (3) Abschluss protokolliert, KEINE Blockade-/Eskalations-Audits.
+    const closedAudit = await db.execute(sql`
+      SELECT COUNT(*)::int AS c FROM audit_log
+      WHERE action = 'month_auto_closed'
+        AND entity_type = 'month_closing'
+        AND entity_id = ${employeeId}
+    `);
+    expect(Number((closedAudit.rows?.[0] as { c: number }).c)).toBeGreaterThan(0);
+
+    const blockedAudit = await db.execute(sql`
       SELECT COUNT(*)::int AS c FROM audit_log
       WHERE action = 'month_auto_close_blocked'
         AND entity_type = 'month_closing'
         AND entity_id = ${employeeId}
     `);
-    expect(Number((auditRes.rows?.[0] as { c: number }).c)).toBeGreaterThan(0);
+    expect(Number((blockedAudit.rows?.[0] as { c: number }).c)).toBe(0);
   });
 });

@@ -1,7 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api/client";
-import { invalidateRelated } from "@/lib/query-invalidation";
-import { useToast } from "@/hooks/use-toast";
 
 export interface MonthClosingStatus {
   id: number;
@@ -61,65 +59,7 @@ export function useAdminMonthClosingReadiness(year: number, month: number) {
   });
 }
 
-export function useAdminCloseMonth() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async ({ userId, year, month }: { userId: number; year: number; month: number }) => {
-      const result = await api.post<{ message: string; autoBreaksInserted: number }>(
-        "/time-entries/admin/close-month",
-        { userId, year, month }
-      );
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "time-entries");
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Monatsabschluss fehlgeschlagen", variant: "destructive" });
-    },
-  });
-}
-
-export function useAdminReopenMonth() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async ({ userId, year, month, reason }: { userId: number; year: number; month: number; reason: string }) => {
-      const result = await api.post<{ message: string }>(
-        "/time-entries/reopen-month",
-        { userId, year, month, reason }
-      );
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "time-entries");
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Monat konnte nicht wiedereröffnet werden", variant: "destructive" });
-    },
-  });
-}
-
-export function useAdminBatchCloseMonth() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async ({ year, month }: { year: number; month: number }) => {
-      const result = await api.post<{ message: string; closedCount: number; results: Array<{ userId: number; displayName: string; autoBreaksInserted: number }> }>(
-        "/time-entries/admin/batch-close-month",
-        { year, month }
-      );
-      return unwrapResult(result);
-    },
-    onSuccess: () => {
-      invalidateRelated(queryClient, "time-entries");
-    },
-    onError: (error: Error) => {
-      toast({ title: "Fehler", description: error.message || "Batch-Abschluss fehlgeschlagen", variant: "destructive" });
-    },
-  });
-}
+// Task #1496: useAdminCloseMonth / useAdminReopenMonth / useAdminBatchCloseMonth
+// wurden entfernt — der Monatsabschluss läuft ausschließlich automatisch am Cutoff
+// (kein manueller Einzel-/Batch-Abschluss, kein Wieder-Öffnen mehr). Diese Datei
+// stellt nur noch lesende Status-/Readiness-Queries bereit.
