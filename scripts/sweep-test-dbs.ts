@@ -29,6 +29,7 @@ import {
   ORPHAN_MIN_AGE_MS,
   evaluatePidPreflight,
   readPidStats,
+  sweepOrphanArtifacts,
   sweepOrphanLogs,
   sweepOrphanProcesses,
   sweepOrphans,
@@ -82,12 +83,29 @@ const procResult = sweepOrphanProcesses({
   log: (m) => console.log(m),
 });
 
+// Task #1492: ... und ZULETZT die verwaisten per-Run-BUILD-ARTEFAKTE (gebündelte
+// Server `.local/test-server-<runId>.cjs` + Client-Builds `.local/test-client-<runId>/`)
+// aus hart abgebrochenen Läufen — der größte Workspace-Platzfresser. Bewusst NACH
+// dem Prozess-Sweep, damit ein gerade beendeter verwaister Server seine runId
+// freigibt und dessen Artefakte im selben Lauf mit abgeräumt werden. Aktive Läufe
+// bleiben über die runId-Lebendigkeit geschützt; ein IMMER greifender Bootstrap-
+// Boden (ARTIFACT_FORCE_FLOOR_MS) schützt zusätzlich frisch startende Läufe auch
+// im Force-Modus.
+const artifactResult = sweepOrphanArtifacts({
+  minAgeMs,
+  dryRun,
+  log: (m) => console.log(m),
+});
+
 console.log(
   `[sweep] Fertig. ${dryRun ? "(dry-run) " : ""}` +
     `DBs gedroppt: ${result.dropped.length}, übersprungen: ${result.skipped.length}, ` +
     `fehlgeschlagen: ${result.failed.length}. ` +
     `Logs gelöscht: ${logResult.dropped.length}, übersprungen: ${logResult.skipped.length}, ` +
     `fehlgeschlagen: ${logResult.failed.length}. ` +
+    `Build-Artefakte entfernt: ${artifactResult.dropped.length}, ` +
+    `übersprungen: ${artifactResult.skipped.length}, ` +
+    `fehlgeschlagen: ${artifactResult.failed.length}. ` +
     `Prozesse beendet: ${procResult.killed.length}, ` +
     `fehlgeschlagen: ${procResult.failed.length}.`,
 );
@@ -107,5 +125,11 @@ if (pidStats.max != null) {
 }
 
 process.exit(
-  result.failed.length + logResult.failed.length + procResult.failed.length > 0 ? 1 : 0,
+  result.failed.length +
+    logResult.failed.length +
+    artifactResult.failed.length +
+    procResult.failed.length >
+    0
+    ? 1
+    : 0,
 );

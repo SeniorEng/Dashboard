@@ -11,10 +11,15 @@ import {
   DB_PREFIX,
   ORPHAN_MIN_AGE_MS,
   isTestServerLogName,
+  liveRunIdsFromProcesses,
+  parseArtifactRunId,
   parseDbCreatedAt,
+  selectOrphanArtifactsToDelete,
   selectOrphanLogsToDelete,
   shouldDropOrphan,
+  type ArtifactInfo,
   type LogFileInfo,
+  type ProcInfo,
 } from "../../scripts/lib/ephemeral-db-sweep.ts";
 
 const NOW = 10_000_000_000_000; // fixer „Jetzt"-Anker
@@ -149,5 +154,115 @@ describe("selectOrphanLogsToDelete", () => {
     expect(selectOrphanLogsToDelete(files, NOW, 0, 1)).toEqual([
       "test-server-1.log",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task #1492 — Sweep der verwaisten per-Run-Build-Artefakte
+// (`.local/test-server-<runId>.cjs` + `.local/test-client-<runId>/`).
+// Schutz ist die runId-Lebendigkeit (laufender Server-Prozess) + Altersgrenze.
+// ---------------------------------------------------------------------------
+function artifact(name: string, runId: string, kind: "bundle" | "client", mtimeMs: number): ArtifactInfo {
+  return { name, runId, kind, mtimeMs };
+}
+
+function proc(command: string): ProcInfo {
+  return { pid: 1234, ppid: 1, etimeSec: 60, command };
+}
+
+describe("parseArtifactRunId", () => {
+  it("erkennt Server-Bundles und liefert runId + kind", () => {
+    expect(parseArtifactRunId("test-server-mqzg32ph_318_6996850b.cjs")).toEqual({
+      runId: "mqzg32ph_318_6996850b",
+      kind: "bundle",
+    });
+  });
+
+  it("erkennt Client-Verzeichnisse und liefert runId + kind", () => {
+    expect(parseArtifactRunId("test-client-mqzg32ph_318_6996850b")).toEqual({
+      runId: "mqzg32ph_318_6996850b",
+      kind: "client",
+    });
+  });
+
+  it("matcht NICHT die per-Worker-Server-Logs (test-server-<port>.log)", () => {
+    expect(parseArtifactRunId("test-server-5050.log")).toBeNull();
+  });
+
+  it("fasst unbeteiligte Dateien nie an", () => {
+    expect(parseArtifactRunId(".env.local")).toBeNull();
+    expect(parseArtifactRunId("server.cjs")).toBeNull();
+    expect(parseArtifactRunId("test-results")).toBeNull();
+  });
+});
+
+describe("liveRunIdsFromProcesses", () => {
+  it("zieht die runId aus der Kommandozeile eines laufenden gebündelten Servers", () => {
+    const procs = [
+      proc("node .local/test-server-aaa_1_bbb.cjs"),
+      proc("npx tsx scripts/with-ephemeral-db.ts 5050 npx vitest run"),
+    ];
+    expect(liveRunIdsFromProcesses(procs)).toEqual(new Set(["aaa_1_bbb"]));
+  });
+
+  it("liefert eine leere Menge, wenn kein gebündelter Server läuft", () => {
+    expect(liveRunIdsFromProcesses([proc("node something-else.js")])).toEqual(
+      new Set(),
+    );
+  });
+});
+
+describe("selectOrphanArtifactsToDelete", () => {
+  it("löscht ausreichend alte Artefakte ohne lebende runId (Bundle UND Client)", () => {
+    const arts = [
+      artifact("test-server-dead.cjs", "dead", "bundle", NOW - 60 * 60_000),
+      artifact("test-client-dead", "dead", "client", NOW - 60 * 60_000),
+    ];
+    const deleted = selectOrphanArtifactsToDelete(arts, new Set(), NOW, ORPHAN_MIN_AGE_MS);
+    expect(new Set(deleted.map((a) => a.name))).toEqual(
+      new Set(["test-server-dead.cjs", "test-client-dead"]),
+    );
+  });
+
+  it("schützt Bundle UND Client eines laufenden Laufs — auch wenn das Bundle alt ist", () => {
+    // Bundle-mtime wird beim Lauf NICHT erneuert: ein 30-Min-Lauf hat ein altes
+    // Bundle, ist aber via runId-Lebendigkeit geschützt.
+    const arts = [
+      artifact("test-server-live.cjs", "live", "bundle", NOW - 30 * 60_000),
+      artifact("test-client-live", "live", "client", NOW - 30 * 60_000),
+    ];
+    const deleted = selectOrphanArtifactsToDelete(
+      arts,
+      new Set(["live"]),
+      NOW,
+      ORPHAN_MIN_AGE_MS,
+    );
+    expect(deleted).toEqual([]);
+  });
+
+  it("schützt frisch gestartete Läufe über die Altersgrenze, auch ohne sichtbaren Prozess", () => {
+    const arts = [
+      artifact("test-server-fresh.cjs", "fresh", "bundle", NOW - 1_000),
+    ];
+    expect(selectOrphanArtifactsToDelete(arts, new Set(), NOW, ORPHAN_MIN_AGE_MS)).toEqual([]);
+  });
+
+  it("löscht im Force-Modus (minAgeMs<=0) Waisen jenseits des Bootstrap-Bodens, schützt aber laufende runIds weiter", () => {
+    const arts = [
+      // älter als der 60s-Boden → im Force-Modus droppbar
+      artifact("test-server-orphan.cjs", "orphan", "bundle", NOW - 5 * 60_000),
+      artifact("test-server-live.cjs", "live", "bundle", NOW - 5 * 60_000),
+    ];
+    const deleted = selectOrphanArtifactsToDelete(arts, new Set(["live"]), NOW, 0);
+    expect(deleted.map((a) => a.name)).toEqual(["test-server-orphan.cjs"]);
+  });
+
+  it("schützt im Force-Modus ein gerade startendes Bundle innerhalb des Bootstrap-Bodens (Server noch nicht in ps)", () => {
+    const arts = [
+      artifact("test-server-booting.cjs", "booting", "bundle", NOW - 1_000),
+    ];
+    // minAgeMs=0 (force), aber das Artefakt ist jünger als ARTIFACT_FORCE_FLOOR_MS
+    // und die runId ist noch nicht via ps sichtbar → trotzdem geschützt.
+    expect(selectOrphanArtifactsToDelete(arts, new Set(), NOW, 0)).toEqual([]);
   });
 });

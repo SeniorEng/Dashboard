@@ -56,6 +56,7 @@ import {
   DB_PREFIX,
   evaluatePidPreflight,
   readPidStats,
+  sweepOrphanArtifacts,
   sweepOrphanLogs,
   sweepOrphanProcesses,
   sweepOrphans,
@@ -787,6 +788,23 @@ async function main(): Promise<number> {
   if (procSweep.killed.length > 0) {
     console.log(
       `[ephemeral-db] Prozess-Sweep: ${procSweep.killed.length} verwaiste Test-Prozess(e) beendet.`,
+    );
+  }
+
+  // Task #1492: ... und ZULETZT die zurückgebliebenen per-Run-BUILD-ARTEFAKTE
+  // (gebündelte Server `.local/test-server-<runId>.cjs` + statische Client-Builds
+  // `.local/test-client-<runId>/`) aus hart abgebrochenen Läufen — der größte
+  // Workspace-Platzfresser. Bewusst NACH dem Prozess-Sweep: ein gerade beendeter
+  // verwaister Server gibt seine runId frei, sodass dessen Artefakte im selben
+  // Durchlauf mit abgeräumt werden (frische Prozessliste). Ein laufender
+  // Schwester-Lauf (Server-Prozess hält die runId in der Kommandozeile) bleibt
+  // verschont. Fail-safe: blockiert nie.
+  const artifactSweep = sweepOrphanArtifacts({
+    log: (m) => console.log(`[ephemeral-db] ${m}`),
+  });
+  if (artifactSweep.dropped.length > 0) {
+    console.log(
+      `[ephemeral-db] Artefakt-Sweep: ${artifactSweep.dropped.length} verwaiste Build-Artefakt(e) entfernt.`,
     );
   }
 

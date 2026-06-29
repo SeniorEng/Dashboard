@@ -31,13 +31,21 @@
 //     mtime → geschützt).
 // ---------------------------------------------------------------------------
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 export const DB_PREFIX = "cc_test_";
 
 // Mindestalter (ms), ab dem eine verbindungslose Wegwerf-DB als „verwaist" gilt.
 export const ORPHAN_MIN_AGE_MS = 15 * 60 * 1000;
+
+// Untere Sicherheitsschwelle (ms) für den Build-Artefakt-Sweep, die IMMER greift
+// — auch im Force-Modus (`--force` / `minAgeMs<=0`). Zwischen dem Schreiben des
+// Bundles und dem Erscheinen des Server-Prozesses in `ps` existiert ein kurzes
+// Bootstrap-Fenster, in dem die runId-Lebendigkeit ein frisches Artefakt noch
+// NICHT schützt. Dieser Boden verhindert, dass ein paralleler `test:unblock`
+// genau in diesem Fenster die Artefakte eines gerade startenden Laufs löscht.
+export const ARTIFACT_FORCE_FLOOR_MS = 60 * 1000;
 
 export function psql(connUrl: string, sql: string): { ok: boolean; stdout: string } {
   const res = spawnSync("psql", [connUrl, "-v", "ON_ERROR_STOP=1", "-tAc", sql], {
@@ -241,6 +249,167 @@ export function sweepOrphanLogs(opts: LogSweepOptions = {}): SweepResult {
     } catch (e) {
       log(`[sweep] Konnte Log ${name} nicht löschen: ${e instanceof Error ? e.message : String(e)}`);
       result.failed.push(name);
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Artefakt-Sweep: verwaiste per-Run-Build-Artefakte (Task #1492)
+//
+// Jeder Lauf bündelt einen per-Worker-App-Server nach
+// `.local/test-server-<runId>.cjs` und legt dessen statisches Client-Build unter
+// `.local/test-client-<runId>/` ab. Auf dem Happy-Path räumt der Teardown beide
+// wieder weg (cleanupBundle/cleanupClient in with-ephemeral-db.ts). Wird ein Lauf
+// HART abgebrochen, bleiben sie liegen und summieren sich über viele Läufe zu
+// mehreren GB auf (Workspace-Overload — derselbe Wurzelgrund wie die Prozess-/
+// DB-/Log-Waisen).
+//
+// Anders als die Logs bekommt das `.cjs`-Bundle während des Laufs KEINE frische
+// mtime (es wird einmal beim Start geschrieben). Eine reine Altersgrenze würde
+// daher einen lang laufenden AKTIVEN Lauf fälschlich abräumen. Schutz ist deshalb
+// in erster Linie die runId-Lebendigkeit: solange ein laufender Server-Prozess
+// `.local/test-server-<runId>.cjs` in seiner Kommandozeile referenziert, bleiben
+// Bundle UND Client-Dir dieser runId unberührt. Zusätzlich schützt die
+// Altersgrenze frisch gestartete Läufe, deren Server-Prozess noch nicht in `ps`
+// sichtbar ist. Im Force-Modus (minAgeMs<=0, manueller „Unblock") sinkt die
+// Altersgrenze auf den IMMER greifenden Bootstrap-Boden ARTIFACT_FORCE_FLOOR_MS
+// (60s) — sie entfällt NICHT ganz; die runId-Lebendigkeit schützt aktive Läufe
+// ohnehin jederzeit.
+// ---------------------------------------------------------------------------
+
+// Nur exakt `test-server-<runId>.cjs` bzw. `test-client-<runId>` matchen. Der
+// Log-Pfad `test-server-<port>.log` endet auf `.log` und matcht hier NIE.
+const TEST_SERVER_BUNDLE_RE = /^test-server-(.+)\.cjs$/;
+const TEST_CLIENT_DIR_RE = /^test-client-(.+)$/;
+// runId aus der Kommandozeile eines laufenden gebündelten Servers ziehen.
+const TEST_SERVER_PROC_RUNID_RE = /\.local\/test-server-([^\s/]+)\.cjs/;
+
+export type ArtifactKind = "bundle" | "client";
+
+// Reine Klassifikation: runId + Art eines per-Run-Artefakts aus dem Dateinamen.
+// `null` = kein Test-Artefakt (wird nie angefasst).
+export function parseArtifactRunId(
+  name: string,
+): { runId: string; kind: ArtifactKind } | null {
+  const b = name.match(TEST_SERVER_BUNDLE_RE);
+  if (b) return { runId: b[1], kind: "bundle" };
+  const c = name.match(TEST_CLIENT_DIR_RE);
+  if (c) return { runId: c[1], kind: "client" };
+  return null;
+}
+
+// Reine Funktion: runIds aller aktuell laufenden gebündelten Test-Server.
+export function liveRunIdsFromProcesses(procs: ProcInfo[]): Set<string> {
+  const live = new Set<string>();
+  for (const p of procs) {
+    const m = p.command.match(TEST_SERVER_PROC_RUNID_RE);
+    if (m) live.add(m[1]);
+  }
+  return live;
+}
+
+export interface ArtifactInfo {
+  name: string;
+  runId: string;
+  kind: ArtifactKind;
+  /** Letzte-Änderungs-Zeit in ms (Date.now()-kompatibel). */
+  mtimeMs: number;
+}
+
+// Reine Entscheidungsfunktion: Welche Artefakte dürfen gelöscht werden? Ein
+// Artefakt wird NUR gelöscht, wenn (a) seine runId von keinem laufenden
+// Server-Prozess referenziert wird UND (b) sein letzter Schreibzugriff
+// mindestens das effektive Mindestalter zurückliegt. Das effektive Mindestalter
+// ist `max(minAgeMs, floorMs)`: im Normalbetrieb dominiert `minAgeMs`
+// (ORPHAN_MIN_AGE_MS = 15 min), im Force-Modus (`minAgeMs<=0`) bleibt der
+// IMMER greifende `floorMs`-Boden (ARTIFACT_FORCE_FLOOR_MS) erhalten, damit ein
+// paralleler `test:unblock` ein gerade startendes Bundle im kurzen Bootstrap-
+// Fenster (Server noch nicht in `ps`) nicht löscht. (a) schützt aktive Läufe
+// darüber hinaus jederzeit.
+export function selectOrphanArtifactsToDelete(
+  artifacts: ArtifactInfo[],
+  liveRunIds: Set<string>,
+  now: number,
+  minAgeMs: number,
+  floorMs: number = ARTIFACT_FORCE_FLOOR_MS,
+): ArtifactInfo[] {
+  const effectiveMinAge = Math.max(minAgeMs, floorMs);
+  return artifacts.filter(
+    (a) => !liveRunIds.has(a.runId) && now - a.mtimeMs >= effectiveMinAge,
+  );
+}
+
+export interface ArtifactSweepOptions extends SweepOptions {
+  /** Verzeichnis mit den Artefakten (Default TEST_SERVER_LOG_DIR = ".local"). */
+  dir?: string;
+  /** Vorab ermittelte Prozessliste (Default: live via enumerateProcesses()). */
+  procs?: ProcInfo[];
+}
+
+// Verwaiste per-Run-Build-Artefakte früherer (hart abgebrochener) Läufe abräumen
+// — analog zum Log-Sweep, aber inkl. Verzeichnissen und mit runId-Lebendigkeit
+// als Hauptschutz statt reiner Altersgrenze. Fail-safe: blockiert den Lauf nie.
+export function sweepOrphanArtifacts(
+  opts: ArtifactSweepOptions = {},
+): SweepResult {
+  const dir = opts.dir ?? TEST_SERVER_LOG_DIR;
+  const minAgeMs = opts.minAgeMs ?? ORPHAN_MIN_AGE_MS;
+  const log = opts.log ?? (() => {});
+  const result: SweepResult = { dropped: [], skipped: [], failed: [] };
+
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    // Verzeichnis existiert (noch) nicht → nichts zu tun.
+    return result;
+  }
+
+  const artifacts: ArtifactInfo[] = [];
+  for (const name of entries) {
+    const parsed = parseArtifactRunId(name);
+    if (!parsed) continue;
+    try {
+      artifacts.push({
+        name,
+        runId: parsed.runId,
+        kind: parsed.kind,
+        mtimeMs: statSync(join(dir, name)).mtimeMs,
+      });
+    } catch {
+      // Artefakt verschwand zwischen readdir und stat (Race mit Teardown) → ignorieren.
+    }
+  }
+  if (artifacts.length === 0) return result;
+
+  const procs = opts.procs ?? enumerateProcesses();
+  const liveRunIds = liveRunIdsFromProcesses(procs);
+  const now = Date.now();
+  const toDelete = new Set(
+    selectOrphanArtifactsToDelete(artifacts, liveRunIds, now, minAgeMs).map(
+      (a) => a.name,
+    ),
+  );
+  for (const a of artifacts) {
+    if (!toDelete.has(a.name)) {
+      result.skipped.push(a.name);
+      continue;
+    }
+    if (opts.dryRun) {
+      log(`[sweep] (dry-run) würde Artefakt löschen: ${a.name}`);
+      result.dropped.push(a.name);
+      continue;
+    }
+    try {
+      rmSync(join(dir, a.name), { recursive: true, force: true });
+      log(`[sweep] verwaistes Test-Artefakt gelöscht: ${a.name}`);
+      result.dropped.push(a.name);
+    } catch (e) {
+      log(
+        `[sweep] Konnte Artefakt ${a.name} nicht löschen: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      result.failed.push(a.name);
     }
   }
   return result;
