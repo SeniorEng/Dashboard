@@ -118,6 +118,19 @@ Die reine Entscheidungslogik (`selectOrphanProcesses`, `evaluatePidPreflight`,
 `parsePsOutput`, `classifyTestProcess`) ist in
 `tests/unit/ephemeral-db-process-sweep.test.ts` gepinnt.
 
+Den **echten Prozess-Kill** end-to-end (Double-Fork-Waise auf init, Marker-
+Erkennung, realer SIGKILL) deckt `tests/unit/ephemeral-db-process-sweep-e2e.test.ts`
+ab. Die **Gesamt-Garantie** — „ein abgestürzter Lauf blockiert den nächsten nicht" —
+liefert der Smoke-Test `tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts`
+(Task #1492): er simuliert den Zustand nach einem Hart-Abbruch (verwaister, auf init
+reparenteter, marker-tragender Test-Server-Prozess **und** eine verwaiste, alt genug
+datierte `cc_test_`-Wegwerf-DB) und startet danach einen echten, kleinen
+Orchestrator-Lauf (1 Worker, triviales Kommando, API-only-Pfad), der **grün** endet —
+Beweis, dass Sweep + PID-Preflight beim Start greifen und der Lauf nicht an
+`spawn EAGAIN` scheitert. Weil er einen vollständigen App-Server bootet und > 30s auf
+die Prozess-Sweep-Altersgrenze wartet, läuft er **nicht** im Standard-`npm run test`,
+sondern nur on-demand: `npm run test:restart-smoke` (= `EPHEMERAL_RESTART_SMOKE=1`).
+
 ## LetterXpress mocken (node:https, NICHT fetch)
 
 Der LetterXpress-v2-Postversand-Transport (`server/services/letterxpress-http.ts`)
