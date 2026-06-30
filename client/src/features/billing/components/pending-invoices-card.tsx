@@ -67,7 +67,16 @@ export function PendingInvoicesCard({
           </button>
         </CardTitle>
       </CardHeader>
-      {open && (
+      {/* Task #1501: weiches Ein-/Ausklappen via grid-rows-Transition — Inhalt
+          bleibt gemountet, daher keine harten Sprünge und kein CSS-Transform. */}
+      <div
+        className={`grid transition-[grid-template-rows,opacity] duration-200 ease-in-out ${
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        }`}
+        data-testid="region-pending-body"
+        aria-hidden={!open}
+      >
+        <div className="overflow-hidden">
       <CardContent className="pt-0">
         {isLoading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
@@ -157,7 +166,8 @@ export function PendingInvoicesCard({
           </>
         )}
       </CardContent>
-      )}
+        </div>
+      </div>
     </Card>
   );
 }
