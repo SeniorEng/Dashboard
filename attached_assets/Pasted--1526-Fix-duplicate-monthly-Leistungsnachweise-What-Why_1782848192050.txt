@@ -1,0 +1,106 @@
+#1526 - Fix duplicate monthly Leistungsnachweise
+What & Why
+The Nachweise (Leistungsnachweise) tab can silently hide already-created proofs and allow more than one monthly Leistungsnachweis for the same customer + employee + month. Investigated live (production) for employee Ute Ahnert, June 2026:
+
+Funke, Bernd, Jacobi, Sieglinde and Vavrin, Katrin each have two non-deleted record_type='monthly' records for June 2026. The tab shows only "1 monatl. LN" for each — the second monthly record is invisible.
+The overview maps records by customerId, so when two monthly records exist the last one processed overwrites the other in the displayed status (e.g. Funke's monthly #275 is still pending/unsigned with 3 completed appointments, while #299 is completed — the office only sees the "done" one).
+A customer with any uncovered completed appointment is bucketed only as "Bereit für LN", which hides their already-created proofs — including proofs waiting for the customer's signature (under-billing risk). Example: Löscher, Maria shows only "1 Termin bereit" while she actually has 4 single proofs, one of which (#339) is employee-signed but not customer-signed and is stuck/invisible.
+Root cause: No single source of truth for "the monthly proof of this customer+employee+month". No DB unique constraint and no application guard prevent a second monthly record. The creation flow only blocks when all documented appointments are already covered (400); if some are uncovered it always creates a brand-new monthly record for the leftovers. This fires whenever appointments are completed/added after a monthly proof was created or signed for that month.
+
+Follows the project's "one SSoT per question" and "replace, don't add" rules.
+
+Corrected understanding — a second monthly proof is NOT inherently a bug
+A signed monthly Leistungsnachweis is GoBD-sealed and must not be modified. If a new appointment happens with the same customer+employee after the monthly proof was signed, it CANNOT go on the sealed proof — a second monthly proof is the correct, necessary mechanism and the invoice for that appointment is based on it. Production confirms this: no appointment is on more than one proof (appt_on_multi_proof = 0, zero double-documentation); the multiple proofs split disjoint appointment sets.
+
+=> A hard DB unique constraint on (customer+employee+period) would be WRONG — it would block the legitimate post-signature proof and make those appointments un-billable. The earlier plan version's partial unique constraint is therefore dropped.
+
+The real defects are:
+
+Overview hides proofs — the Nachweise tab maps by customerId and overwrites, so the office only sees one proof when several exist (the newer/unsigned/stuck one disappears). This is the actual loophole behind missed/forgotten billing.
+Redundant duplicate only in the unsigned case — if the existing monthly proof is still pending, a new appointment should be added to it, not spawn a second pending proof (e.g. Käthe, Maxim: both proofs pending).
+Billing must cover ALL proofs of the month so a second-proof appointment is never forgotten.
+Invariant for counting/merge logic = customer_id + employee_id + period (a customer served by two employees legitimately has two proofs — never collapse that).
+
+Read-only financial finding — FULL June 2026 scope (already gathered — see Step 0)
+Scope is much wider than Ute Ahnert. 13 duplicate monthly-proof groups across 4 employees for June 2026 (same customer+employee+period, non-deleted, monthly):
+
+Mandy Buchmann (emp 21): 8 groups — Müller, Ingeborg (4 monthly proofs), Lawrenz, Margit (3), plus Berghold, Bánóczi, Jungnickel, Jänig, Mentke, Werner.
+Ute Ahnert (emp 12): 3 — Funke, Jacobi, Vavrin.
+Christiane Fiebag (emp 6): 1 — Schröder, Marvin.
+Yvonne Heidel (emp 17): 1 — Käthe, Maxim Nicolai. Out of 83 non-deleted June monthly proofs (67 distinct customer+employee), so the duplicates are a meaningful minority concentrated on one employee.
+No confirmed double-charging. 12 appointments appear on 3 invoices each, but every one is a legitimate storno + reissue correction cycle (original versendet → negative storno → reissue), net = a single billing, and none is paid. In several cases the reissue is larger than the original (e.g. Mentke €271.58 → €338.47, Koepp €197.11 → €274.55) — i.e. the office is already manually fixing the duplicate-proof mess by storno+reissue to capture appointments that the first proof missed.
+
+Realized harm today = manual storno rework + under-billing risk, not double charging: appointments stuck in a second proof that the first invoice didn't cover can be forgotten (lost revenue), and employee_signed/customer-unsigned proofs sit hidden behind "Bereit". (June is not closed yet — cutoff 8 July — so "not yet billed" is partly normal; the split-across-two-proofs is the root cause of the rework.) The structural double-billing risk remains for the future (each monthly proof can drive its own invoice).
+
+Done looks like
+Newly documented appointments for a period whose monthly proof is still pending are added to that proof (no second pending proof is spawned).
+When the existing monthly proof is signed/sealed, a new appointment correctly creates a new monthly proof (never mutates the sealed one) — this stays allowed.
+The Nachweise tab shows every customer's existing proofs with their real signature status, even when uncovered "Bereit" appointments also exist. Proofs waiting for the customer's signature are visible to the office (under-billing surfaced).
+The "monatl. LN" count is accurate and respects the customer+employee invariant.
+Weekly/partial billing within the same month is possible; no appointment is billed twice; no signed appointment stays silently unbilled.
+The four appointment states are clearly visible and kept separate:
+Nicht dokumentiert → employee documents (= existing #1496 "nicht dokumentiert").
+Dokumentiert, Unterschrift fehlt → collect customer signature (= "fehlende Unterschriften", not yet billable).
+Unterschrieben, noch nicht abgerechnet → the billable pool (free cadence).
+Abgerechnet → done, leaves the pool. Documentation status (1+2) is its own dimension, independent of billing (3→4).
+GoBD: sealed proofs/invoices are never mutated; corrections only via storno + re-issue.
+The existing production duplicate/stuck records have a documented, GoBD-safe remediation that Alrik has signed off on before any write.
+Out of scope
+Changing monthly auto-close mechanics or the single (Einzel) LN concept.
+Reworking invoice generation beyond preventing the duplicate-proof billing risk.
+Executing any production data cleanup of signed records without explicit sign-off.
+Steps
+Step 0 — Read-only investigation deliverable (DONE; gate for everything else)
+Already produced from production (read-only): per affected proof → signature state, covered appointments, generated invoices + status, plus per-case remediation proposal. No record is written until Alrik signs off.
+
+Step 0b — VERIFICATION: is billing appointment-precise & storno-aware? (DONE — YES)
+Read-only code trace result (file:line):
+
+Entry: server/services/invoice-calc.ts → generateInvoiceCore (L412) / shared buildInvoiceDraft (L159, used by preview AND generate).
+Pool gathering: buildInvoiceDraft reads signed proofs of the period (getServiceRecordsForPeriod L189 → getAppointmentIdsFromServiceRecords L217), i.e. candidate = appointments on customer-signed proofs.
+Appointment-level already-billed exclusion (storno-aware): server/services/invoice-data.ts → getAlreadyInvoicedAppointmentIds (L37-49) joins invoice_line_items ↔ invoices, filtered to the customer+billingYear+billingMonth, excluding status='storniert' (L45) and invoiceType='stornorechnung' (L46). invoice-calc.ts L239-241 removes those appointment IDs from the candidate set; L243 throws already_billed if none remain.
+Storno releases appointments: a cancelled invoice (status storniert) is ignored by the exclusion query → its appointments return to the pool (plus phantom-storno reverses the budget consumption so they can be re-billed correctly).
+Idempotent at appointment level: re-run bills only not-yet-invoiced appointments; same guard mirrored in server/routes/billing.ts (L443-445) and the LN-delete guard in server/routes/service-records.ts (L585-589, L630-634).
+Conclusion (per Alrik's decision tree): appointment-precise + storno-aware billing ALREADY EXISTS. Therefore flexible weekly/partial billing within a month is already double-safe. The remaining work is pool visibility + pending-merge + overview-fix, NOT building a new appointment-level "billed" SSoT. Step 2 shrinks accordingly.
+
+Step 1 — Pending-merge rule (avoid redundant unsigned duplicates) [HIGH]
+When a non-deleted monthly proof already exists for the period:
+If it is pending (unsigned): add newly documented appointments to it instead of creating a second pending proof.
+If it is signed/sealed (employee_signed or completed): treat as GoBD-sealed, NEVER mutate, and allow a new monthly proof for the later appointment (this is the correct, necessary behaviour — invoices for those appointments are based on it).
+employee_signed counts as "signed" for mutation purposes (half-signed proofs are not freely editable).
+No hard DB unique constraint — see "Corrected understanding". The guard is purely the pending-merge SSoT in the creation path.
+Step 2 — Appointment-level billing pool (mostly ALREADY in place — see Step 0b) [MEDIUM]
+Billing is appointment-genau, nicht monats-/proof-aggregiert. The maßgebliche invariant lives at the appointment level:
+
+Kein Doppelt: every appointment is billed exactly once. Once it sits on an active (non-storniert) invoice it leaves the billable pool — independent of cadence/proof. A storno releases it back. (Already enforced — Step 0b.)
+Nichts vergessen: billable pool = appointments on customer-signed (completed) proofs that are not yet billed — always visible as "noch abzurechnen".
+Freie Taktung: the office bills any subset of the pool whenever it wants (weekly, ad-hoc, monthly). Einzel- vs. Monatsnachweis is only the documentation/signature wrapper and does NOT constrain the billing cadence. (Already supported — generate pulls only unbilled appointments across all non-deleted proofs of the period.)
+No "ein Proof = eine Rechnung" and no "eine Rechnung pro Monat" enforcement — the earlier "aggregierte Monatsrechnung" wording is explicitly dropped.
+Remaining build (the gap Step 0b leaves open):
+
+Surface the pool ("noch abzurechnen", state 3) as a visible list for the office.
+Keep the documentation dimension (states 1+2) separate from billing (state 4).
+Confirm the pool gathers across all non-deleted proofs of the customer+period (Einzel + Monat), not a single proof — verify in buildInvoiceDraft.
+Step 3 — Overview visibility fix [MEDIUM]
+Remove the customerId-keyed overwrite so no monthly proof is hidden; show all proofs with real status even alongside uncovered "Bereit" appointments.
+Make stuck proofs (employee_signed, customer-unsigned) visible to the office. Check whether the existing #1496 "missing signatures after close" list already catches these and dock onto it instead of building a parallel list (review point 4).
+Keep the customer+employee invariant in the count (review point 6).
+Step 4 — Production remediation (read-only first, then gated writes) [MEDIUM]
+Most existing "duplicates" are legitimate signed proofs and need NO cleanup. The only true remediation cases (June 2026):
+
+Both-pending redundancy (e.g. Käthe, Maxim — both proofs pending): consolidate into one pending proof, only after a coverage check (no appointment orphaned).
+9 completed appointments with NO proof (undocumented — Kraft, Jungnickel C., Klewer, Mentke, Kretlow ×2, Bedziechowska, Löscher): surface so they get documented; do not auto-create.
+Stuck employee_signed proofs (customer-unsigned, hidden): the overview fix (Step 3) surfaces them; office chases the customer signature. No data rewrite.
+Optional consolidation of many signed proofs into one is GoBD storno+reissue only and is not required for correctness.
+STOP for Alrik's sign-off before any write. GoBD writes are env-scoped: dry-run in dev, --apply only in prod after sign-off.
+Step 5 — Tests [MEDIUM]
+Pending proof: new appointment is merged in (no second pending proof spawned).
+Signed proof: new appointment correctly creates a new monthly proof.
+Overview shows all proofs (incl. unsigned/stuck) alongside uncovered appointments.
+Billing gathers appointments across all proofs of the period.
+Accurate monthly count respecting the customer+employee invariant.
+Relevant files
+server/routes/service-records.ts
+server/storage/service-records-storage.ts
+shared/schema/service-records.ts
+client/src/pages/service-records.tsx

@@ -1,0 +1,20 @@
+#1526 (schlank) — Doppelte/versteckte Monats-Leistungsnachweise: Sichtbarkeit + Pending-Merge. KEIN Abrechnungs-Umbau.
+Verifiziert vorab (read-only, nicht neu aufrollen): Die Abrechnung ist termin-getrieben & storno-bewusst — Ausschluss bereits abgerechneter Termine via getAlreadyInvoicedAppointmentIds (invoice-data.ts:37-49), Kandidaten über alle signierten, nicht-gelöschten Proofs des Kunden+Periode (invoice-calc.ts:189/205-207/216-217). Flexible Wochen-/Teil-Abrechnung ist dadurch bereits doppelt-sicher und vollständig. ⇒ Es wird KEIN neuer „abgerechnet"-SSoT gebaut, KEINE Änderung an der Rechnungs-Engine, und KEIN harter Unique-Constraint (der würde legitime zweite Proofs nach Signatur blockieren).
+What & Why: Der einzige echte Defekt ist die Overview-Anzeige der Nachweise: sie mappt per customerId und überschreibt, sodass bei mehreren Proofs nur einer sichtbar ist — stuck/unsignierte Proofs verschwinden hinter „Bereit". Folge: das Büro übersieht offene/nicht-unterschriebene Nachweise → manuelle Storno-Nacharbeit + Unter-Abrechnungs-Risiko. Zweitens entsteht im unsignierten Fall ein redundanter zweiter pending-Proof, statt Termine dem bestehenden hinzuzufügen.
+Done looks like:
+
+Nachweise-Tab zeigt alle Proofs je Kunde mit echtem Signatur-Status — auch wenn der Kunde zusätzlich offene „Bereit"-Termine hat. Stuck-Proofs (employee_signed, kunde-unsigniert) sind sichtbar, sodass das Büro die Kundenunterschrift nachholen kann.
+„monatl. LN"-Zählung korrekt, Invariant Kunde+Mitarbeiter+Periode (ein Kunde mit zwei Mitarbeitern hat legitim zwei Proofs — nie zusammenfalten).
+Bei bestehendem pending Monats-Proof werden neu dokumentierte Termine dem bestehenden hinzugefügt, kein zweiter pending-Proof.
+Bei signiertem Proof (employee_signed/completed) bleibt ein neuer Proof für spätere Termine erlaubt (GoBD: versiegelten nie mutieren).
+Bestehende Prod-Duplikate haben eine dokumentierte, GoBD-sichere Remediation, die Alrik vor jedem Write freigegeben hat.
+
+Out of scope: Rechnungs-Engine/Kandidaten-Logik (bereits verifiziert korrekt), Auto-Close-Mechanik, Einzel-LN-Konzept, harter Unique-Constraint, Daten-Cleanup ohne Sign-off.
+Steps:
+
+Overview-Fix [Kern]: customerId-Overwrite entfernen; alle Proofs mit echtem Status zeigen; stuck/unsignierte sichtbar machen; korrekte Zählung mit Kunde+Mitarbeiter-Invariant. Prüfen, ob die #1496-„fehlende Unterschriften"-Liste die stuck-Fälle schon fängt → daran andocken statt parallel.
+Pending-Merge: im Erstellpfad bei vorhandenem pending Monats-Proof neue Termine anhängen statt zweiten pending-Proof anzulegen; employee_signed/completed = versiegelt → neuer Proof erlaubt, nie mutieren. (Optional, robustheitshalber: partieller Unique-Index nur auf status='pending' + deleted_at IS NULL, record_type='monthly' auf (Kunde,Mitarbeiter,Periode) — erst nach Konsolidierung des einen Both-Pending-Falls.)
+Mini-Remediation [read-only zuerst, Sign-off-Gate]: Both-Pending-Fall (Käthe Maxim) nach Coverage-Check konsolidieren; die 9 undokumentierten completed-Termine surfacen (nicht auto-anlegen); signierte „Duplikate" = legitim, kein Cleanup. STOP für Alriks Sign-off vor jedem Write; GoBD-Writes env-scoped (Dev dry-run, Prod --apply erst nach Freigabe).
+Tests: pending→Merge (kein zweiter pending), signed→neuer Proof erlaubt, Overview zeigt alle Proofs inkl. stuck neben „Bereit"-Terminen, korrekte Zählung mit Invariant.
+
+Relevant files: client/src/pages/service-records.tsx (Overview-Kern), server/routes/service-records.ts + server/storage/service-records-storage.ts (Pending-Merge), shared/schema/service-records.ts (optional pending-Index).

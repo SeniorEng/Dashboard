@@ -1,0 +1,38 @@
+Review/Präzisierung zu #1526 — Anforderung an die Abrechnung korrigiert. Bitte vor dem Build einarbeiten. Die übrigen Teile (Pending-Merge, legitime zweite Proofs nach Signatur, kein harter Constraint, Overview-Sichtbarkeit, GoBD-Remediation mit Sign-off) bleiben wie geplant.
+Kern-Korrektur: Abrechnung ist termin-genau, nicht monats-/proof-aggregiert.
+Der Betrieb will flexibel abrechnen (z. B. wöchentlich im Juni, gemischt Einzel- und Monatsnachweise) — nicht „eine Rechnung pro Monat". Eine frühere Formulierung „eine aggregierte Monatsrechnung" ist damit ausdrücklich verworfen. Das maßgebliche Invariant liegt auf Termin-Ebene:
+
+Kein Doppelt: Jeder Termin wird genau einmal abgerechnet. Sobald er auf einer aktiven (nicht stornierten) Rechnung liegt, fällt er aus dem abrechenbaren Pool — unabhängig von Taktung oder Proof. Ein Storno gibt den Termin wieder frei.
+Nichts vergessen: Der abrechenbare Pool = Termine auf kunden-unterschriebenen (completed) Proofs, die noch nicht abgerechnet sind — jederzeit als „noch abzurechnen" sichtbar.
+Freie Taktung: Das Büro rechnet eine beliebige Teilmenge des Pools ab, wann es will (wöchentlich, ad-hoc, monatlich). Einzel- vs. Monatsnachweis ist nur die Dokumentations-/Unterschrifts-Verpackung und schränkt die Abrechnungs-Taktung nicht ein.
+Mitarbeiter-Sicht getrennt halten: „Welche Termine noch zu dokumentieren sind" ist eine eigene Dimension (Dokumentations-Status), unabhängig von der Abrechnung.
+
+Vier klare Termin-Zustände, die Büro/Mitarbeiter sehen müssen:
+
+Nicht dokumentiert → Mitarbeiter dokumentiert (= bestehende #1496-„nicht dokumentiert"-Liste).
+Dokumentiert, Unterschrift fehlt → Kundenunterschrift einholen (= „fehlende Unterschriften"-Liste; noch nicht abrechenbar).
+Unterschrieben, noch nicht abgerechnet → der abrechenbare Pool (frei in der Taktung).
+Abgerechnet → fertig, fällt aus dem Pool.
+
+Step 0b — Verifikation ZUERST (read-only, blockierend):
+Klären und belegen (Datei:Zeile): Existiert heute ein termin-genauer „abgerechnet"-Status (z. B. über Rechnungs-Positionen invoice_line_items ↔ Termin, storno-bewusst), der einen Termin nach Abrechnung aus dem Pool nimmt? Oder ist die Abrechnung proof-/monatsbasiert (keyed auf einen Proof/Monat)? Davon hängt alles ab:
+
+Wenn termin-genau + storno-bewusst vorhanden → flexible Wochen-Abrechnung ist bereits doppelt-sicher; Aufgabe = Pool-Sichtbarkeit + Pending-Merge + Overview-Fix.
+Wenn proof-/monatsbasiert → die termin-genaue „abgerechnet"-Markierung als SSoT ist der eigentliche Bau (ohne sie ist die flexible Taktung NICHT doppelt-sicher).
+Ergebnis dieser Verifikation vor dem Weiterbauen vorlegen.
+
+Step 2 — neu geschnitten (ersetzt die bisherige Formulierung):
+Die Abrechnung operiert auf dem termin-genauen Pool „unterschrieben + noch nicht abgerechnet", idempotent (kein Doppel) und vollständig (nichts vergessen), in beliebiger Taktung:
+
+Beim Erzeugen einer Rechnung werden ausschließlich Termine aus dem Pool gezogen (completed-signiert, nicht bereits auf aktiver Rechnung), über alle nicht-gelöschten Proofs des Kunden hinweg (Einzel + Monat).
+Bereits abgerechnete Termine sind strukturell ausgeschlossen (Re-Run/zweiter Lauf erzeugt keine Doppel-Position).
+Storno gibt die betroffenen Termine wieder in den Pool frei.
+Keine Annahme „ein Proof = eine Rechnung" und keine „eine Rechnung pro Monat"-Erzwingung.
+
+Done looks like (ergänzt):
+
+Wöchentliche/partielle Abrechnung im selben Monat ist möglich; kein Termin wird doppelt abgerechnet; kein unterschriebener Termin bleibt unbemerkt unabgerechnet.
+„Noch abzurechnen" (Zustand 3) ist als Pool sichtbar; Zustände 1 + 2 bleiben den Mitarbeitern/Büro klar getrennt sichtbar.
+GoBD: versiegelte Proofs/Rechnungen werden nie mutiert; Korrekturen nur via Storno+Neuausstellung.
+
+Out of scope unverändert (Auto-Close-Mechanik, Einzel-LN-Konzept, Daten-Cleanup ohne Sign-off). Sign-off-Gate vor jedem Write/Prod-Constraint bleibt.
