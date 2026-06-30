@@ -33,6 +33,8 @@ import {
   walkTsFiles,
   parseSource,
   collectNamedFunctions,
+  collectNamedScopes,
+  enclosingScopeNames,
 } from "./ast-grep-helpers";
 
 // Hotspot-Schlüsselwörter: wenn der DEKLARIERTE Funktionsname auf eines
@@ -76,6 +78,125 @@ const ALLOWED_PATHS = [
 function shouldSkip(absPath: string): boolean {
   const rel = relative(ROOT, absPath).split(sep).join("/");
   return ALLOWED_PATHS.some((p) => rel.startsWith(p));
+}
+
+// ---------------------------------------------------------------------------
+// Task #1514 / #1517 / #1521 — Erkennung hartcodierter Preis-/Lohn-/km-Satz-
+// Magic-Numbers. Die Scan-Logik ist als pure Funktion herausgezogen, damit sie
+// (a) über das echte Repo läuft und (b) eine gepflanzte Verletzung im Test
+// gegen sie geprüft werden kann.
+// ---------------------------------------------------------------------------
+
+// Pfade, in denen Rate-Literale legitim leben.
+const RATE_LITERAL_ALLOWED_PATHS = [
+  "shared/config/services.ts", // die Katalog-SSoT selbst
+  "server/startup/recover-prices-from-backup.ts", // einmaliges Recovery (Soll-Wert-Asserts)
+  "server/scripts/", // einmalige Wartungs-/Reconcile-Skripte (kein Request-Flow)
+  "tests/",
+  "dist/",
+  "node_modules/",
+];
+
+// Distinktive Katalog-Cent-Werte (HW 3800/1600, AB 4200/1800). So markant,
+// dass sie überall auf der Zeile zünden dürfen.
+const distinctiveCentsRe = /\b(3800|1600|4200|1800)\b/;
+// Zuweisungs-/Fallback-/Return-Kontext-Präfix (Vergleichsoperatoren und
+// Dezimal-/Zahlfortsetzungen via Lookbehind ausgenommen).
+const assignPrefix = String.raw`(?:\?\?|\|\||return|(?<![<>=!.\d])[:=])\s*\(?\s*`;
+// km-Satz als Fallback/Zuweisung/Return, inkl. Euro-Schreibweise (0,35/0,30).
+const kmRateRe = new RegExp(assignPrefix + String.raw`(?:0\.3[05]|3[05])\b`);
+// Euro-Kurzschreibweise der Katalog-Raten (38/16/42/18) — nur im
+// Zuweisungs-/Fallback-/Return-Kontext, damit unverwandte 16/18 (z. B.
+// `fontSize: 16` ohne Raten-Stichwort) nicht stören.
+const euroShorthandRe = new RegExp(assignPrefix + String.raw`(?:38|16|42|18)\b`);
+// Geld-/Raten-Kontext (gate gegen Fehlalarme), zeilenweise.
+const moneyKeywordRe = /\b(cents?|rate|preis|price|lohn|wage|satz|kilometer|km)/i;
+
+// Task #1521 — Geld-/Raten-Stichwort im NAMEN der umschließenden Funktion/
+// Deklaration. Der Name wird in camelCase-/snake_case-Tokens zerlegt und Token
+// für Token geprüft, damit Substrings wie „rate" in „generate"/„iterate" NICHT
+// fälschlich zünden. Nur ein echtes Token (z. B. `housekeepingRate` →
+// ["housekeeping","rate"]) gilt als Geld-/Raten-Kontext.
+const moneyNameTokenRe =
+  /^(cents?|rate|rates|preis|preise|price|prices|lohn|loehne|wage|wages|satz|saetze|kilometer|kilometers|km|reisekost|reisekosten)$/i;
+
+function nameTokens(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function nameHasMoneyKeyword(name: string): boolean {
+  return nameTokens(name).some((t) => moneyNameTokenRe.test(t));
+}
+
+// Fenstergröße für die Stichwort-Suche rund um den Wert: ein nackter Wert
+// steht meist DIREKT unter seinem Bezeichner (mehrzeilige Zuweisung) oder
+// im Body knapp unter dem Funktionsnamen (`return 1600;`).
+const KEYWORD_WINDOW_BEFORE = 4;
+const KEYWORD_WINDOW_AFTER = 1;
+
+/**
+ * Scannt den Quelltext einer Datei nach hartcodierten Raten-Literalen und
+ * liefert die Treffer (1-basierte Zeile + Snippet). Ein Literal zählt nur als
+ * Treffer, wenn ein Geld-/Raten-Stichwort entweder
+ *   (a) im Zeilen-Fenster (±) um den Wert steht, ODER
+ *   (b) im NAMEN einer umschließenden Funktion/Deklaration vorkommt
+ *       (Task #1521 — AST-aware enclosing-node lookup, fängt Werte tief im
+ *       Body einer raten-benannten Funktion, jenseits des Zeilen-Fensters).
+ * Der Inline-Escape `// rate-literal-allowed:` (fenster-weit) unterdrückt
+ * Treffer weiterhin.
+ */
+function scanForRateLiterals(
+  content: string,
+  isTsx: boolean,
+): Array<{ line: number; snippet: string }> {
+  const lines = content.split("\n");
+
+  const isCommentLine = (t: string) =>
+    t.startsWith("*") || t.startsWith("//") || t.startsWith("/*");
+  const keywordLine = lines.map((l) => {
+    const t = l.trim();
+    if (isCommentLine(t)) return false;
+    return moneyKeywordRe.test(l.split("//")[0]);
+  });
+  const escapeLine = lines.map((l) => /rate-literal-allowed:/.test(l));
+
+  const inWindow = (i: number, flags: boolean[]) => {
+    const from = Math.max(0, i - KEYWORD_WINDOW_BEFORE);
+    const to = Math.min(lines.length - 1, i + KEYWORD_WINDOW_AFTER);
+    for (let j = from; j <= to; j++) if (flags[j]) return true;
+    return false;
+  };
+
+  // AST-aware: Namen der umschließenden Scopes pro verdächtiger Zeile auflösen.
+  const scopes = collectNamedScopes(parseSource(content, isTsx));
+  const enclosingHasKeyword = (i: number) =>
+    enclosingScopeNames(scopes, i + 1).some(nameHasMoneyKeyword);
+
+  const out: Array<{ line: number; snippet: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    // Reine Kommentar-/Doc-Zeilen ignorieren.
+    if (isCommentLine(trimmed)) continue;
+    // Inline-Escape (auf der Zeile oder fenster-weit) respektieren.
+    if (inWindow(i, escapeLine)) continue;
+    // Trailing-Zeilenkommentar abschneiden (Werte in Kommentaren zählen nicht).
+    const code = line.split("//")[0];
+    const isRateLiteral =
+      distinctiveCentsRe.test(code) ||
+      kmRateRe.test(code) ||
+      euroShorthandRe.test(code);
+    if (!isRateLiteral) continue;
+    // Geld-/Raten-Stichwort im Fenster ODER im umschließenden Funktionsnamen.
+    if (!inWindow(i, keywordLine) && !enclosingHasKeyword(i)) continue;
+    out.push({ line: i + 1, snippet: trimmed.slice(0, 140) });
+  }
+  return out;
 }
 
 describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
@@ -157,37 +278,6 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
    * Inline-Escape `// rate-literal-allowed: <Grund>` (gilt auch fenster-weit).
    */
   it("Keine hartcodierten Preis-/Lohn-/km-Satz-Magic-Numbers außerhalb der Katalog-SSoT (Task #1514)", () => {
-    // Pfade, in denen Rate-Literale legitim leben.
-    const RATE_LITERAL_ALLOWED_PATHS = [
-      "shared/config/services.ts", // die Katalog-SSoT selbst
-      "server/startup/recover-prices-from-backup.ts", // einmaliges Recovery (Soll-Wert-Asserts)
-      "server/scripts/", // einmalige Wartungs-/Reconcile-Skripte (kein Request-Flow)
-      "tests/",
-      "dist/",
-      "node_modules/",
-    ];
-
-    // Distinktive Katalog-Cent-Werte (HW 3800/1600, AB 4200/1800). So markant,
-    // dass sie überall auf der Zeile zünden dürfen.
-    const distinctiveCentsRe = /\b(3800|1600|4200|1800)\b/;
-    // Zuweisungs-/Fallback-/Return-Kontext-Präfix (Vergleichsoperatoren und
-    // Dezimal-/Zahlfortsetzungen via Lookbehind ausgenommen).
-    const assignPrefix = String.raw`(?:\?\?|\|\||return|(?<![<>=!.\d])[:=])\s*\(?\s*`;
-    // km-Satz als Fallback/Zuweisung/Return, inkl. Euro-Schreibweise (0,35/0,30).
-    const kmRateRe = new RegExp(assignPrefix + String.raw`(?:0\.3[05]|3[05])\b`);
-    // Euro-Kurzschreibweise der Katalog-Raten (38/16/42/18) — nur im
-    // Zuweisungs-/Fallback-/Return-Kontext, damit unverwandte 16/18 (z. B.
-    // `fontSize: 16` ohne Raten-Stichwort) nicht stören.
-    const euroShorthandRe = new RegExp(assignPrefix + String.raw`(?:38|16|42|18)\b`);
-    // Geld-/Raten-Kontext (gate gegen Fehlalarme).
-    const moneyKeywordRe = /\b(cents?|rate|preis|price|lohn|wage|satz|kilometer|km)/i;
-
-    // Fenstergröße für die Stichwort-Suche rund um den Wert: ein nackter Wert
-    // steht meist DIREKT unter seinem Bezeichner (mehrzeilige Zuweisung) oder
-    // im Body knapp unter dem Funktionsnamen (`return 1600;`).
-    const KEYWORD_WINDOW_BEFORE = 4;
-    const KEYWORD_WINDOW_AFTER = 1;
-
     const hits: Array<{ file: string; line: number; snippet: string }> = [];
     const scanRoots = ["server", "client/src", "shared"].map((p) => join(ROOT, p));
     for (const root of scanRoots) {
@@ -196,43 +286,8 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
         const rel = relative(ROOT, file).split(sep).join("/");
         if (RATE_LITERAL_ALLOWED_PATHS.some((p) => rel.startsWith(p))) continue;
         const content = readFileSync(file, "utf-8");
-        const lines = content.split("\n");
-
-        // Pro Zeile vorab bestimmen: enthält der Code (ohne Kommentar) ein
-        // Geld-/Raten-Stichwort? Und steht hier ein Inline-Escape?
-        const isCommentLine = (t: string) =>
-          t.startsWith("*") || t.startsWith("//") || t.startsWith("/*");
-        const keywordLine = lines.map((l) => {
-          const t = l.trim();
-          if (isCommentLine(t)) return false;
-          return moneyKeywordRe.test(l.split("//")[0]);
-        });
-        const escapeLine = lines.map((l) => /rate-literal-allowed:/.test(l));
-
-        const inWindow = (i: number, flags: boolean[]) => {
-          const from = Math.max(0, i - KEYWORD_WINDOW_BEFORE);
-          const to = Math.min(lines.length - 1, i + KEYWORD_WINDOW_AFTER);
-          for (let j = from; j <= to; j++) if (flags[j]) return true;
-          return false;
-        };
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const trimmed = line.trim();
-          // Reine Kommentar-/Doc-Zeilen ignorieren.
-          if (isCommentLine(trimmed)) continue;
-          // Inline-Escape (auf der Zeile oder fenster-weit) respektieren.
-          if (inWindow(i, escapeLine)) continue;
-          // Trailing-Zeilenkommentar abschneiden (Werte in Kommentaren zählen nicht).
-          const code = line.split("//")[0];
-          const isRateLiteral =
-            distinctiveCentsRe.test(code) ||
-            kmRateRe.test(code) ||
-            euroShorthandRe.test(code);
-          if (!isRateLiteral) continue;
-          // Geld-/Raten-Stichwort im Fenster verlangen.
-          if (!inWindow(i, keywordLine)) continue;
-          hits.push({ file: rel, line: i + 1, snippet: trimmed.slice(0, 140) });
+        for (const h of scanForRateLiterals(content, file.endsWith(".tsx"))) {
+          hits.push({ file: rel, line: h.line, snippet: h.snippet });
         }
       }
     }
@@ -248,6 +303,97 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
         `Dummy-Fallback. Für eine begründete Ausnahme: \`// rate-literal-allowed: <Grund>\`.`,
       );
     }
+  });
+
+  /**
+   * Task #1521 — Schließt die Lücke aus Task #1517: Liegt ein hartcodierter
+   * Raten-Wert MEHR als ein paar Zeilen unter einem raten-benannten Funktions-
+   * /Variablen-Namen (langer Funktions-Body), fällt das Stichwort aus dem
+   * Zeilen-Fenster und der Wert rutschte bislang durch. Die AST-aware
+   * enclosing-node-Auflösung erkennt das Geld-/Raten-Stichwort jetzt im NAMEN
+   * der umschließenden Deklaration — unabhängig von der Zeilen-Distanz.
+   */
+  describe("Hidden-rate-in-long-function-Erkennung (Task #1521)", () => {
+    it("erwischt einen Raten-Wert tief im Body einer raten-benannten Funktion (jenseits des Zeilen-Fensters)", () => {
+      // `1600` steht > 4 Zeilen unter dem Namen `resolveHousekeepingRateCents`,
+      // ohne ein Geld-Stichwort im Zeilen-Fenster — nur der Funktionsname trägt
+      // den Raten-Kontext.
+      const planted = [
+        "export function resolveHousekeepingRateCents(input: number): number {",
+        "  const a = input + 1;",
+        "  const b = a * 2;",
+        "  const c = b - 3;",
+        "  const d = c / 4;",
+        "  const e = d + 5;",
+        "  if (e > 0) {",
+        "    return 1600;",
+        "  }",
+        "  return 0;",
+        "}",
+      ].join("\n");
+
+      const hits = scanForRateLiterals(planted, false);
+      expect(hits.map((h) => h.line)).toContain(8);
+    });
+
+    it("lässt denselben Wert in einer NICHT-raten-benannten Funktion durch (kein Fehlalarm)", () => {
+      // Identische Struktur, aber der Funktionsname trägt keinen Raten-Kontext
+      // und kein Stichwort steht im Fenster → kein Treffer.
+      const clean = [
+        "export function buildSomethingUnrelated(input: number): number {",
+        "  const a = input + 1;",
+        "  const b = a * 2;",
+        "  const c = b - 3;",
+        "  const d = c / 4;",
+        "  const e = d + 5;",
+        "  if (e > 0) {",
+        "    return 1600;",
+        "  }",
+        "  return 0;",
+        "}",
+      ].join("\n");
+
+      expect(scanForRateLiterals(clean, false)).toHaveLength(0);
+    });
+
+    it("ein Token wie `rate` in `generate`/`iterate` zündet NICHT (camelCase-Token-Match)", () => {
+      // `generateReport` enthält die Zeichenfolge „rate", ist aber kein
+      // Raten-Kontext — der Token-Match darf hier nicht anschlagen.
+      const generate = [
+        "export function generateReport(input: number): number {",
+        "  const a = input + 1;",
+        "  const b = a * 2;",
+        "  const c = b - 3;",
+        "  const d = c / 4;",
+        "  const e = d + 5;",
+        "  if (e > 0) {",
+        "    return 1600;",
+        "  }",
+        "  return 0;",
+        "}",
+      ].join("\n");
+
+      expect(scanForRateLiterals(generate, false)).toHaveLength(0);
+    });
+
+    it("respektiert den Inline-Escape auch im langen-Funktions-Fall", () => {
+      const escaped = [
+        "export function resolveHousekeepingRateCents(input: number): number {",
+        "  const a = input + 1;",
+        "  const b = a * 2;",
+        "  const c = b - 3;",
+        "  const d = c / 4;",
+        "  const e = d + 5;",
+        "  if (e > 0) {",
+        "    // rate-literal-allowed: Test-Begründung",
+        "    return 1600;",
+        "  }",
+        "  return 0;",
+        "}",
+      ].join("\n");
+
+      expect(scanForRateLiterals(escaped, false)).toHaveLength(0);
+    });
   });
 
   it("Keine neuen Hotspot-`calculate*`/`compute*`-Funktionen außerhalb der Allowlist", () => {
