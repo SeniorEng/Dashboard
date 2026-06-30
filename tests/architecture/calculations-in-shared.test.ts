@@ -99,7 +99,34 @@ const RATE_LITERAL_ALLOWED_PATHS = [
 
 // Distinktive Katalog-Cent-Werte (HW 3800/1600, AB 4200/1800). So markant,
 // dass sie überall auf der Zeile zünden dürfen.
-const distinctiveCentsRe = /\b(3800|1600|4200|1800)\b/;
+const CATALOG_CENTS = new Set([3800, 1600, 4200, 1800]);
+// Euro-Kurzwerte derselben Raten (für die Arithmetik-Schreibweise × 100).
+const CATALOG_EUROS = [38, 16, 42, 18];
+
+// Task #1523 — Erkennt einen distinktiven Katalog-Cent-Wert auch dann, wenn er
+// als Arithmetik oder mit Ziffern-Separatoren/Hex geschrieben wurde, statt als
+// nackte Dezimalzahl. Ein Entwickler konnte 1600 bislang als `16 * 100`,
+// `38_00`, `3_800` oder `0x640` an der `\b3800\b`-Regex vorbeischmuggeln.
+//   (a) Numerische Literale (Dezimal mit `_`-Separatoren ODER Hex) werden auf
+//       ihren Zahlenwert normalisiert und gegen die distinktiven Cent-Werte
+//       geprüft — fängt 3800 ebenso wie 38_00, 3_800, 0xED8/0x640.
+//   (b) Die Euro-Rate × 100 (= Cents) als Produkt (`16 * 100` / `100 * 38`).
+//       Der `* 100`-Anker macht den Treffer distinktiv genug, um — wie die
+//       nackten Cent-Werte — ohne Zuweisungs-Präfix zu zünden.
+const euroTimes100Re = new RegExp(
+  String.raw`\b(?:${CATALOG_EUROS.join("|")})\s*\*\s*100\b` +
+    String.raw`|\b100\s*\*\s*(?:${CATALOG_EUROS.join("|")})\b`,
+);
+function lineEncodesCatalogCents(code: string): boolean {
+  const numRe = /0[xX][0-9a-fA-F][0-9a-fA-F_]*|\d[\d_]*/g;
+  let m: RegExpExecArray | null;
+  while ((m = numRe.exec(code)) !== null) {
+    const raw = m[0].replace(/_/g, "");
+    const val = /^0x/i.test(raw) ? parseInt(raw.slice(2), 16) : parseInt(raw, 10);
+    if (Number.isFinite(val) && CATALOG_CENTS.has(val)) return true;
+  }
+  return euroTimes100Re.test(code);
+}
 // Zuweisungs-/Fallback-/Return-Kontext-Präfix (Vergleichsoperatoren und
 // Dezimal-/Zahlfortsetzungen via Lookbehind ausgenommen).
 const assignPrefix = String.raw`(?:\?\?|\|\||return|(?<![<>=!.\d])[:=])\s*\(?\s*`;
@@ -188,7 +215,7 @@ function scanForRateLiterals(
     // Trailing-Zeilenkommentar abschneiden (Werte in Kommentaren zählen nicht).
     const code = line.split("//")[0];
     const isRateLiteral =
-      distinctiveCentsRe.test(code) ||
+      lineEncodesCatalogCents(code) ||
       kmRateRe.test(code) ||
       euroShorthandRe.test(code);
     if (!isRateLiteral) continue;
@@ -458,6 +485,72 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
         "};",
       ].join("\n");
 
+      expect(scanForRateLiterals(clean, false)).toHaveLength(0);
+    });
+  });
+
+  /**
+   * Task #1523 — Schließt die Arithmetik-/Separator-Lücke aus Task #1521: Ein
+   * Entwickler konnte einen Katalog-Cent-Wert als Ausdruck (`16 * 100`), mit
+   * Ziffern-Separatoren (`38_00`, `3_800`) oder als Hex (`0x640`) schreiben und
+   * so an der nackten `\b3800\b`-Regex vorbeikommen — auch in einer
+   * raten-benannten Funktion. `lineEncodesCatalogCents` normalisiert jetzt jeden
+   * numerischen Token (inkl. `_`-Separatoren/Hex) und erkennt zusätzlich die
+   * Euro-Rate × 100.
+   */
+  describe("Arithmetik-/Separator-Schreibweise der Raten (Task #1523)", () => {
+    it("erwischt `16 * 100` (Euro × 100 = Cents) in einer raten-benannten Funktion", () => {
+      // `16` steht hier hinter einem `+`, nicht hinter einem Zuweisungs-Präfix,
+      // d. h. der alte euroShorthand-Pfad würde NICHT zünden — nur die neue
+      // Arithmetik-Erkennung greift.
+      const planted = [
+        "export function resolveHousekeepingRateCents(base: number): number {",
+        "  return base + 16 * 100;",
+        "}",
+      ].join("\n");
+      expect(scanForRateLiterals(planted, false).map((h) => h.line)).toContain(2);
+    });
+
+    it("erwischt `38_00` (Ziffern-Separator = 3800) in einer raten-benannten Funktion", () => {
+      const planted = [
+        "export function resolveAssistanceRateCents(): number {",
+        "  return 38_00;",
+        "}",
+      ].join("\n");
+      expect(scanForRateLiterals(planted, false).map((h) => h.line)).toContain(2);
+    });
+
+    it("erwischt `3_800` und `0x640` (Separator-/Hex-Schreibweise) im Raten-Kontext", () => {
+      const sep = [
+        "export function resolveHousekeepingRateCents(): number {",
+        "  return 3_800;",
+        "}",
+      ].join("\n");
+      const hex = [
+        "export function resolveHousekeepingRateCents(): number {",
+        "  return 0x640;",
+        "}",
+      ].join("\n");
+      expect(scanForRateLiterals(sep, false).map((h) => h.line)).toContain(2);
+      expect(scanForRateLiterals(hex, false).map((h) => h.line)).toContain(2);
+    });
+
+    it("lässt einen NICHT-Katalog-Separator-Wert (`60_000`) auch im Raten-Kontext durch", () => {
+      // 60_000 ist kein Katalog-Cent-Wert → kein Fehlalarm trotz `rate` im Namen.
+      const clean = [
+        "export function resolveRateTimeoutMs(): number {",
+        "  return 60_000;",
+        "}",
+      ].join("\n");
+      expect(scanForRateLiterals(clean, false)).toHaveLength(0);
+    });
+
+    it("zündet NICHT für `16 * 100` ohne Raten-Kontext (Gate bleibt aktiv)", () => {
+      const clean = [
+        "export function buildSomethingUnrelated(base: number): number {",
+        "  return base + 16 * 100;",
+        "}",
+      ].join("\n");
       expect(scanForRateLiterals(clean, false)).toHaveLength(0);
     });
   });
