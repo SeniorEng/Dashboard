@@ -127,6 +127,86 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
     }
   });
 
+  /**
+   * Task #1514 — verbietet hartcodierte Preis-/Lohn-/km-Satz-Magic-Numbers
+   * außerhalb der Katalog-SSoT. Hintergrund: Der „Wirtschaftlicher Überblick"
+   * zeigte Raten (38,00 € / 16,00 € / 0,35 €), und ein App-weiter Audit musste
+   * sicherstellen, dass JEDE angezeigte/berechnete Rate ausschließlich aus den
+   * SSoT-Resolvern (`priceFor`/`wageFor`) bzw. der Katalog-/Preis-/Lohn-Tabelle
+   * stammt — NIE aus einer hartcodierten Zahl oder einem Dummy-Fallback.
+   *
+   * Geprüft werden die distinktiven Katalog-Cent-Werte (3800/1600/4200/1800)
+   * sowie km-Satz-Fallbacks/-Zuweisungen (35/30 ct bzw. 0,35/0,30 €), jeweils
+   * NUR wenn die Zeile zusätzlich ein Geld-/Raten-Stichwort
+   * (cents/rate/preis/price/lohn/wage/satz/km/kilometer) enthält — das hält
+   * Fehlalarme (Urlaubstage `?? 30`, Margin-Farben `>= 30`, Timeouts `1800`)
+   * heraus. Vergleichsoperatoren (`>=`/`<=`/`==`) werden bewusst ausgenommen.
+   *
+   * Legitime Heimat der Rate-Literale ist die Katalog-SSoT
+   * (`shared/config/services.ts`) und das einmalige Recovery-Skript
+   * (`recover-prices-from-backup.ts`, Soll-Wert-Assertions). Gesetzliche
+   * Konstanten (§45b 131 €, §39/§42a) und MwSt-Sätze haben andere Werte und
+   * sind nicht betroffen. Für seltene, begründete Ausnahmen gibt es den
+   * Inline-Escape `// rate-literal-allowed: <Grund>`.
+   */
+  it("Keine hartcodierten Preis-/Lohn-/km-Satz-Magic-Numbers außerhalb der Katalog-SSoT (Task #1514)", () => {
+    // Pfade, in denen Rate-Literale legitim leben.
+    const RATE_LITERAL_ALLOWED_PATHS = [
+      "shared/config/services.ts", // die Katalog-SSoT selbst
+      "server/startup/recover-prices-from-backup.ts", // einmaliges Recovery (Soll-Wert-Asserts)
+      "server/scripts/", // einmalige Wartungs-/Reconcile-Skripte (kein Request-Flow)
+      "tests/",
+      "dist/",
+      "node_modules/",
+    ];
+
+    // Distinktive Katalog-Cent-Werte (HW 3800/1600, AB 4200/1800).
+    const distinctiveCentsRe = /\b(3800|1600|4200|1800)\b/;
+    // km-Satz als Fallback (`?? 35`) oder Zuweisung (`= 35`, `: 30`), inkl.
+    // Euro-Schreibweise (0,35/0,30). Vergleichsoperatoren ausgenommen.
+    const kmRateRe = /(?:\?\?|\|\||(?<![<>=!])[:=])\s*(?:0\.3[05]|3[05])\b/;
+    // Geld-/Raten-Kontext auf der Zeile (gate gegen Fehlalarme).
+    const moneyKeywordRe = /\b(cents?|rate|preis|price|lohn|wage|satz|kilometer|km)/i;
+
+    const hits: Array<{ file: string; line: number; snippet: string }> = [];
+    const scanRoots = ["server", "client/src", "shared"].map((p) => join(ROOT, p));
+    for (const root of scanRoots) {
+      try { statSync(root); } catch { continue; }
+      for (const file of walkTsFiles(root)) {
+        const rel = relative(ROOT, file).split(sep).join("/");
+        if (RATE_LITERAL_ALLOWED_PATHS.some((p) => rel.startsWith(p))) continue;
+        const content = readFileSync(file, "utf-8");
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          // Inline-Escape für begründete Ausnahmen.
+          if (/rate-literal-allowed:/.test(line)) continue;
+          const trimmed = line.trim();
+          // Reine Kommentar-/Doc-Zeilen ignorieren.
+          if (trimmed.startsWith("*") || trimmed.startsWith("//") || trimmed.startsWith("/*")) continue;
+          // Trailing-Zeilenkommentar abschneiden (Werte in Kommentaren zählen nicht).
+          const code = line.split("//")[0];
+          if (!moneyKeywordRe.test(code)) continue;
+          if (distinctiveCentsRe.test(code) || kmRateRe.test(code)) {
+            hits.push({ file: rel, line: i + 1, snippet: trimmed.slice(0, 140) });
+          }
+        }
+      }
+    }
+
+    if (hits.length > 0) {
+      const msg = hits.map((h) => `  ${h.file}:${h.line} — ${h.snippet}`).join("\n");
+      expect.fail(
+        `Folgende Stellen enthalten hartcodierte Preis-/Lohn-/km-Satz-Werte ` +
+        `außerhalb der Katalog-SSoT:\n${msg}\n\n` +
+        `Raten MÜSSEN aus den SSoT-Resolvern (\`priceFor\`/\`wageFor\`) bzw. der ` +
+        `Katalog-/Preis-/Lohn-Tabelle (\`shared/config/services.ts\`, \`prices\`, ` +
+        `\`role_wage_rates\`) stammen — nie aus einer hartcodierten Zahl/einem ` +
+        `Dummy-Fallback. Für eine begründete Ausnahme: \`// rate-literal-allowed: <Grund>\`.`,
+      );
+    }
+  });
+
   it("Keine neuen Hotspot-`calculate*`/`compute*`-Funktionen außerhalb der Allowlist", () => {
     const hits: Array<{ file: string; line: number; match: string; reason: string }> = [];
 
