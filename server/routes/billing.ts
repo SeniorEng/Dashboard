@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import { requireAuth, requireAdmin, requireWageDataAccess } from "../middleware/auth";
 import { AppError, asyncHandler, badRequest, notFound } from "../lib/errors";
 import { log } from "../lib/log";
 import { requireIntParam } from "../lib/params";
@@ -241,7 +241,7 @@ router.get("/pipeline", asyncHandler("Abrechnungs-Pipeline konnte nicht geladen 
 // Aggregation der Economics-SSoT (Monat/Jahr + optional Mitarbeiter:in + Kasse).
 // Headline-KPIs und Zeilen stammen aus DEMSELBEN buildEconomics-Aufruf, sodass
 // Σ(Zeilen) === Headline gilt. Reine Sicht — keine Mutation.
-router.get("/economics", asyncHandler("Wirtschaftlicher Überblick konnte nicht geladen werden", async (req, res) => {
+router.get("/economics", requireWageDataAccess, asyncHandler("Wirtschaftlicher Überblick konnte nicht geladen werden", async (req, res) => {
   const year = Number(req.query.year);
   const month = Number(req.query.month);
   if (!Number.isInteger(year) || year < 2020 || year > 2100) {

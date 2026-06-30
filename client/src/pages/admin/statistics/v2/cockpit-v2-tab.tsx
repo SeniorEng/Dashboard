@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { KpiTile } from "@/components/charts";
@@ -38,6 +39,10 @@ function buildQueryString(year: number, month: string): string {
 }
 
 export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps) {
+  // Task #1512 — Profitabilität/Leistung pro Mitarbeiter ist Superadmin-only;
+  // für normale Admins führt die Kachel nicht auf die gesperrte Seite.
+  const { user } = useAuth();
+  const performanceHref = (user?.isSuperAdmin ?? false) ? "/admin/statistics/performance" : undefined;
   const [stage, setStage] = useState<RevenueStage>("documented");
   const qs = buildQueryString(selectedYear, selectedMonth);
 
@@ -209,7 +214,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           sparkline={sparkMin}
           sparklinePeriods={sparkMinPeriods}
           sparklineColor="#7c3aed"
-          href="/admin/statistics/performance"
+          href={performanceHref}
           testId="kpi-total-minutes"
         >
           <ServiceTypeBreakdown breakdown={cockpit.minutesByServiceType} />
@@ -226,7 +231,7 @@ export function CockpitV2Tab({ selectedYear, selectedMonth }: CockpitV2TabProps)
           sparkline={sparkApptsPerCust}
           sparklinePeriods={sparkApptsPerCustPeriods}
           sparklineColor="#0ea5e9"
-          href="/admin/statistics/performance"
+          href={performanceHref}
           testId="kpi-appointments-per-customer"
         />
 

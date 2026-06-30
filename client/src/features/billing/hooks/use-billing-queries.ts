@@ -183,8 +183,12 @@ export function useBillingEconomics(
   selectedMonth: number,
   employeeFilter: string,
   payerFilter: string,
+  // Task #1512 — Wirtschaftlichkeit pro Mitarbeiter (Lohn-/Personalkosten) ist
+  // Superadmin-only; für normale Admins gar nicht erst abfragen (sonst 403).
+  enabled = true,
 ) {
   return useQuery({
+    enabled,
     queryKey: ["billing", "economics", selectedYear, selectedMonth, employeeFilter, payerFilter],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();

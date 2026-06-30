@@ -8,6 +8,7 @@ import { employeeTimeEntries } from "@shared/schema/time-tracking";
 import { and, gte, lte, sql, inArray, eq, isNull } from "drizzle-orm";
 import { employeeTimeEntriesRepo } from "../../repos";
 import { asyncHandler } from "../../lib/errors";
+import { requireWageDataAccess } from "../../middleware/auth";
 import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { documentedSqlRaw, completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
@@ -275,7 +276,7 @@ async function getMonthlyHoursBatch(
   return result;
 }
 
-router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
+router.get("/hours-overview", requireWageDataAccess, asyncHandler("Stundenübersicht konnte nicht geladen werden", async (req: Request, res: Response) => {
   const year = parseInt(req.query.year as string);
   const month = parseInt(req.query.month as string);
 
@@ -577,7 +578,7 @@ interface UnsignedAppointmentRow {
 // Monat — Sprung-Ziel aus der Warnung „N Termine ohne Unterschrift" der
 // Stundenübersicht. Nutzt dasselbe Prädikat (`completedButUnsignedSqlRaw`) wie
 // die Warnzählung in `/hours-overview`, damit Liste und Zähler konsistent sind.
-router.get("/hours-overview/unsigned-appointments", asyncHandler("Nicht unterschriebene Termine konnten nicht geladen werden", async (req: Request, res: Response) => {
+router.get("/hours-overview/unsigned-appointments", requireWageDataAccess, asyncHandler("Nicht unterschriebene Termine konnten nicht geladen werden", async (req: Request, res: Response) => {
   const year = parseInt(req.query.year as string);
   const month = parseInt(req.query.month as string);
   const employeeId = parseInt(req.query.employeeId as string);

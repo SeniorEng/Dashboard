@@ -133,6 +133,30 @@ export function requireSuperAdmin(
   next();
 }
 
+/**
+ * Task #1512 — Zugriffsschranke für Lohn-/Vergütungsdaten.
+ *
+ * Semantischer Alias auf {@link requireSuperAdmin}: JEDER Endpunkt, der
+ * tatsächliche Lohn-/Auszahlungs-/Personalkosten-Beträge PRO MITARBEITER
+ * ausliefert (Lexware-Stundenübersicht, Profitabilität/Wirtschaftlichkeit pro
+ * Mitarbeiter, Lohnsatz-Matrix), MUSS diese Middleware verwenden — nicht
+ * `requireAdmin`/`requireAdminPermission`. So bleibt die Garantie „nur der
+ * Hauptadministrator sieht Lohndaten" an EINER Stelle gebündelt, und neue
+ * lohn-tragende Routen werden durch dieselbe Schranke gezwungen.
+ *
+ * Die Prüf-Logik wird bewusst NICHT dupliziert, sondern an `requireSuperAdmin`
+ * delegiert (eine SSoT pro fachlicher Frage). Aggregierte, nicht
+ * personenbezogene Kennzahlen (z.B. firmenweite Marge) bleiben Admin-sichtbar
+ * und laufen NICHT über diese Schranke.
+ */
+export function requireWageDataAccess(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  requireSuperAdmin(req, res, next);
+}
+
 export function requireAdminPermission(permissionKey: AdminPermissionKey) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user) {

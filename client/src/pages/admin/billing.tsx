@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { iconSize, componentStyles } from "@/design-system";
 import { ArrowLeft, CalendarDays, FileText, Printer } from "lucide-react";
 import type { InvoiceItem } from "@shared/api";
@@ -141,11 +142,15 @@ export default function AdminBilling() {
   // Status-Pipeline (liest nur den Pipeline-Reader).
   const { data: pipeline, isLoading: pipelineLoading } = useBillingPipeline(selectedYear, selectedMonth);
   // Wirtschaftlicher Überblick (liest nur den Economics-Reader).
+  // Task #1512 — Lohn-/Personalkosten pro Mitarbeiter sind Superadmin-only.
+  const { user } = useAuth();
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
   const { data: economics, isLoading: economicsLoading } = useBillingEconomics(
     selectedYear,
     selectedMonth,
     employeeFilter,
     payerFilter,
+    isSuperAdmin,
   );
   // Termine End-to-End (liest nur den Termine-Reader).
   const { data: termine, isLoading: termineLoading } = useBillingTermine(
@@ -340,12 +345,14 @@ export default function AdminBilling() {
         payers={payers}
       />
 
-      <EconomicsOverviewCard
-        economics={economics}
-        isLoading={economicsLoading}
-        selectedMonth={selectedMonth}
-        selectedYear={selectedYear}
-      />
+      {isSuperAdmin && (
+        <EconomicsOverviewCard
+          economics={economics}
+          isLoading={economicsLoading}
+          selectedMonth={selectedMonth}
+          selectedYear={selectedYear}
+        />
+      )}
 
       <StatusPipelineCard
         pipeline={pipeline}

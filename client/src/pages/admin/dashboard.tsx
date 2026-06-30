@@ -278,7 +278,8 @@ export default function AdminDashboard() {
           iconBg: "bg-cyan-100",
           title: "Stundenübersicht",
           description: "Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter",
-          permissionKey: "hours_overview",
+          // Task #1512 — Lexware-Auszahlungsdaten pro Mitarbeiter sind Superadmin-only.
+          permissionKey: "super_admin_only",
         },
       ],
     },

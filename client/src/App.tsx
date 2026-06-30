@@ -12,7 +12,7 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { ViewAsEmployeeProvider } from "@/hooks/use-view-as-employee";
 import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
-import { Loader2 } from "lucide-react";
+import { PageLoader, SuperAdminRoute } from "@/components/route-guards";
 import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 
 import NotFound from "@/pages/not-found";
@@ -68,14 +68,6 @@ const ProfilePage = lazy(() => import("@/pages/profile"));
 const HelpPage = lazy(() => import("@/pages/help"));
 const TeamWorkloadPage = lazy(() => import("@/pages/team-workload"));
 const PublicSigningPage = lazy(() => import("@/pages/public-signing"));
-
-function PageLoader() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5e6d3] to-[#e8d4c4]">
-      <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-    </div>
-  );
-}
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -275,7 +267,7 @@ function Router() {
         <AdminRoute component={AdminStatisticsRevenue} />
       </Route>
       <Route path="/admin/statistics/performance">
-        <AdminRoute component={AdminStatisticsPerformance} />
+        <SuperAdminRoute component={AdminStatisticsPerformance} />
       </Route>
       <Route path="/admin/statistics/budgets">
         <AdminRoute component={AdminStatisticsBudgets} />
@@ -287,7 +279,7 @@ function Router() {
         <AdminRoute component={AdminBilling} />
       </Route>
       <Route path="/admin/hours-overview">
-        <AdminRoute component={AdminHoursOverview} />
+        <SuperAdminRoute component={AdminHoursOverview} />
       </Route>
       <Route path="/admin/proof-review">
         <AdminRoute component={AdminProofReview} />

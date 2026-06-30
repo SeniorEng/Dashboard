@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { asyncHandler, forbidden } from "../../../lib/errors";
+import { requireWageDataAccess } from "../../../middleware/auth";
 import { resolvePeriod } from "../../../storage/statistics/common";
 import { getCockpit } from "../../../storage/statistics/cockpit";
 import {
@@ -84,7 +85,7 @@ router.get("/revenue/economics/non-billable",
     res.json(await listNonBillableHours(resolvePeriod(req.query)));
   }));
 
-router.get("/performance", asyncHandler("Leistungs-Statistiken konnten nicht geladen werden", async (req, res) => {
+router.get("/performance", requireWageDataAccess, asyncHandler("Leistungs-Statistiken konnten nicht geladen werden", async (req, res) => {
   res.json(await getPerformanceStats(resolvePeriod(req.query)));
 }));
 
