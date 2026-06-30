@@ -94,7 +94,7 @@ class AuditService {
   async serviceRecordCreated(
     userId: number,
     serviceRecordId: number,
-    metadata: { customerId: number; year: number; month: number; appointmentCount: number; recordType?: string; appointmentId?: number },
+    metadata: { customerId: number; year: number; month: number; appointmentCount: number; recordType?: string; appointmentId?: number; mergedIntoPending?: boolean },
     ipAddress?: string,
     exec?: DbOrTx,
   ): Promise<void> {

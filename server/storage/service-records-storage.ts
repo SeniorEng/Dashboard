@@ -97,6 +97,31 @@ export async function getServiceRecordByPeriod(customerId: number, employeeId: n
   return result[0];
 }
 
+// Task #1526: Wenn innerhalb einer Transaktion gelesen wird (Merge-Pfad in
+// POST /service-records), MUSS die gefundene pending-Zeile per `FOR UPDATE`
+// gesperrt werden. Sonst kann zwischen Lookup und Anhängen der Termine eine
+// parallele Unterschrift den LN versiegeln (employee_signed) — und wir würden
+// einen GoBD-versiegelten LN mutieren. Mit Lock blockiert das konkurrierende
+// UPDATE bis zum Commit; ein bereits versiegelter LN wird vom Status-Filter
+// gar nicht erst zurückgegeben (→ Aufrufer legt korrekt einen neuen LN an).
+export async function getPendingMonthlyServiceRecord(customerId: number, employeeId: number, year: number, month: number, txClient?: DbOrTx): Promise<MonthlyServiceRecord | undefined> {
+  const executor = txClient ?? db;
+  const query = monthlyServiceRecordsRepo.selectFrom(executor)
+    .where(and(
+      eq(monthlyServiceRecords.customerId, customerId),
+      eq(monthlyServiceRecords.employeeId, employeeId),
+      eq(monthlyServiceRecords.year, year),
+      eq(monthlyServiceRecords.month, month),
+      eq(monthlyServiceRecords.recordType, "monthly"),
+      eq(monthlyServiceRecords.status, "pending"),
+      isNull(monthlyServiceRecords.deletedAt),
+    ))
+    .orderBy(monthlyServiceRecords.id)
+    .limit(1);
+  const result = await (txClient ? query.for("update") : query);
+  return result[0];
+}
+
 export async function createServiceRecord(record: InsertServiceRecord, txClient?: DbOrTx): Promise<MonthlyServiceRecord> {
   const executor = txClient ?? db;
   const result = await executor.insert(monthlyServiceRecords)
@@ -490,12 +515,14 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
 
   const existingRecords = [...primaryRecords, ...backupRecords];
 
-  const monthlyRecordMap = new Map<number, { id: number; status: string }>();
+  const monthlyRecordsMap = new Map<number, { id: number; status: string }[]>();
   const singleRecordsMap = new Map<number, { id: number; status: string; recordType: string }[]>();
 
   for (const r of existingRecords) {
     if (r.recordType === "monthly") {
-      monthlyRecordMap.set(r.customerId, { id: r.id, status: r.status });
+      const existing = monthlyRecordsMap.get(r.customerId) ?? [];
+      existing.push({ id: r.id, status: r.status });
+      monthlyRecordsMap.set(r.customerId, existing);
     } else {
       const existing = singleRecordsMap.get(r.customerId) ?? [];
       existing.push({ id: r.id, status: r.status, recordType: r.recordType });
@@ -534,15 +561,16 @@ export async function getServiceRecordsOverview(employeeId: number, year: number
   return overviewData
     .filter(item => item.totalAppointments > 0 || customerHasAnyRecord.has(item.customerId))
     .map(item => {
-      const monthlyRecord = monthlyRecordMap.get(item.customerId);
+      const monthlyRecords = (monthlyRecordsMap.get(item.customerId) ?? [])
+        .slice()
+        .sort((a, b) => a.id - b.id);
       const singleRecords = singleRecordsMap.get(item.customerId) ?? [];
       const coveredBySingleCount = coveredBySingleByCustomer.get(item.customerId) ?? 0;
       const coveredByMonthlyCount = coveredByMonthlyByCustomer.get(item.customerId) ?? 0;
       return {
         customerId: item.customerId,
         customerName: `${item.vorname} ${item.nachname}`,
-        existingRecordId: monthlyRecord?.id ?? null,
-        existingRecordStatus: monthlyRecord?.status ?? null,
+        monthlyRecords,
         singleRecords,
         documentedCount: item.documentedCount,
         undocumentedCount: item.undocumentedCount,

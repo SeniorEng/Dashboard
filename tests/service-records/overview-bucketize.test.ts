@@ -8,7 +8,7 @@ function makeItem(overrides: Partial<CustomerOverviewItem>): CustomerOverviewIte
   return {
     customerId: 0,
     customerName: "",
-    existingRecord: null,
+    monthlyRecords: [],
     singleRecords: [],
     documentedCount: 0,
     undocumentedCount: 0,
@@ -27,7 +27,7 @@ describe("bucketize — Wolfgang/Rosali regression (Task #718)", () => {
   const wolfgang = makeItem({
     customerId: 1,
     customerName: "Wolfgang Seidel",
-    existingRecord: { id: 81, status: "pending" },
+    monthlyRecords: [{ id: 81, status: "pending" }],
     singleRecords: [],
     documentedCount: 3,
     undocumentedCount: 0,
@@ -39,7 +39,7 @@ describe("bucketize — Wolfgang/Rosali regression (Task #718)", () => {
   const rosali = makeItem({
     customerId: 2,
     customerName: "Rosali Demirev",
-    existingRecord: { id: 82, status: "pending" },
+    monthlyRecords: [{ id: 82, status: "pending" }],
     singleRecords: [{ id: 83, status: "completed", recordType: "single" }],
     documentedCount: 3,
     undocumentedCount: 0,
@@ -52,7 +52,7 @@ describe("bucketize — Wolfgang/Rosali regression (Task #718)", () => {
   const completedOnly = makeItem({
     customerId: 3,
     customerName: "Carla Completed",
-    existingRecord: { id: 90, status: "completed" },
+    monthlyRecords: [{ id: 90, status: "completed" }],
     documentedCount: 2,
     totalAppointments: 2,
     coveredByMonthlyCount: 2,
@@ -109,7 +109,7 @@ describe("bucketize — Wolfgang/Rosali regression (Task #718)", () => {
     const mixed = makeItem({
       customerId: 99,
       customerName: "Mixed Case",
-      existingRecord: { id: 999, status: "pending" },
+      monthlyRecords: [{ id: 999, status: "pending" }],
       documentedCount: 5,
       undocumentedCount: 0,
       totalAppointments: 5,

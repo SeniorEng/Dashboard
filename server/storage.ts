@@ -107,6 +107,7 @@ export interface IStorage {
   getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]>;
   getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined>;
   getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<MonthlyServiceRecord | undefined>;
+  getPendingMonthlyServiceRecord(customerId: number, employeeId: number, year: number, month: number, txClient?: import("./lib/db").DbOrTx): Promise<MonthlyServiceRecord | undefined>;
   createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
   signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined>;
   updateServiceRecord(id: number, data: Partial<typeof monthlyServiceRecords.$inferInsert>): Promise<MonthlyServiceRecord | undefined>;
@@ -161,8 +162,7 @@ export interface IStorage {
 export interface ServiceRecordOverviewItem {
   customerId: number;
   customerName: string;
-  existingRecordId: number | null;
-  existingRecordStatus: string | null;
+  monthlyRecords: { id: number; status: string }[];
   singleRecords: { id: number; status: string; recordType: string }[];
   documentedCount: number;
   undocumentedCount: number;
@@ -215,6 +215,7 @@ class DatabaseStorage implements IStorage {
   getServiceRecordsForCustomer = serviceRecordsStorage.getServiceRecordsForCustomer;
   getServiceRecord = serviceRecordsStorage.getServiceRecord;
   getServiceRecordByPeriod = serviceRecordsStorage.getServiceRecordByPeriod;
+  getPendingMonthlyServiceRecord = serviceRecordsStorage.getPendingMonthlyServiceRecord;
   createServiceRecord = serviceRecordsStorage.createServiceRecord;
   signServiceRecord = serviceRecordsStorage.signServiceRecord;
   updateServiceRecord = serviceRecordsStorage.updateServiceRecord;

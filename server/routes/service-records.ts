@@ -85,9 +85,16 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
   
   const overview = overviewData.map(item => {
     let status: "undocumented" | "ready" | "pending" | "employee_signed" | "completed";
-    
-    const hasSingleRecords = (item.singleRecords ?? []).length > 0;
-    const hasMonthlyRecord = !!item.existingRecordId;
+
+    const monthlyRecords = item.monthlyRecords ?? [];
+    const allRecords = [...monthlyRecords, ...(item.singleRecords ?? [])];
+    const hasAnyRecord = allRecords.length > 0;
+    // Representative status drives only the coarse server-side sort; the frontend
+    // re-buckets from the full monthlyRecords/singleRecords arrays. A customer can
+    // legitimately have several monthly proofs (one per employee, or an unsigned
+    // one alongside a finished one) — we surface the most actionable (= first
+    // not-yet-completed) so stuck proofs sort to the top.
+    const pendingRecord = allRecords.find(r => r.status !== "completed");
     const coveredCount = (item.coveredBySingleCount ?? 0) + (item.coveredByMonthlyCount ?? 0);
     const uncoveredDocumentedCount = Math.max(0, item.documentedCount - coveredCount);
 
@@ -95,23 +102,22 @@ router.get("/overview", requireAuth, asyncHandler("Übersicht konnte nicht gelad
       status = "undocumented";
     } else if (uncoveredDocumentedCount > 0) {
       status = "ready";
-    } else if (item.existingRecordId) {
-      status = item.existingRecordStatus as "pending" | "employee_signed" | "completed";
-    } else if (hasSingleRecords) {
-      const allCompleted = (item.singleRecords ?? []).every(r => r.status === "completed");
-      status = allCompleted ? "completed" : "pending";
+    } else if (pendingRecord) {
+      status = pendingRecord.status as "pending" | "employee_signed" | "completed";
+    } else if (hasAnyRecord) {
+      status = "completed";
     } else {
       status = "ready";
     }
-    
-    const canCreateRecord = item.undocumentedCount === 0 
-      && item.documentedCount > 0 
+
+    const canCreateRecord = item.undocumentedCount === 0
+      && item.documentedCount > 0
       && uncoveredDocumentedCount > 0;
 
     return {
       customerId: item.customerId,
       customerName: item.customerName,
-      existingRecord: item.existingRecordId ? { id: item.existingRecordId, status: item.existingRecordStatus } : null,
+      monthlyRecords,
       singleRecords: item.singleRecords ?? [],
       documentedCount: item.documentedCount,
       undocumentedCount: item.undocumentedCount,
@@ -312,7 +318,30 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   
   const appointmentIds = remainingAppointments.map(apt => apt.id);
 
+  // Task #1526: Wenn für diesen Kunden+Mitarbeiter+Monat bereits ein NICHT
+  // unterschriebener (pending) Monats-LN existiert, werden die neu dokumentierten
+  // Termine an diesen angehängt — statt einen zweiten pending-LN zu erzeugen.
+  // employee_signed/completed = versiegelt (GoBD): dann ist ein NEUER LN für die
+  // späteren Termine korrekt, der versiegelte wird nie mutiert.
+  //
+  // Der Lookup läuft INNERHALB der Transaktion mit `FOR UPDATE`-Sperre: so kann
+  // zwischen „pending gefunden" und „Termine angehängt" keine parallele
+  // Unterschrift den LN versiegeln (sonst würde ein GoBD-versiegelter LN mutiert).
   const record = await db.transaction(async (tx) => {
+    const ip = req.ip || req.socket.remoteAddress;
+    const existingPending = await storage.getPendingMonthlyServiceRecord(customerId, effectiveEmployeeId, year, month, tx);
+
+    if (existingPending) {
+      await storage.addAppointmentsToServiceRecord(existingPending.id, appointmentIds, tx);
+      await auditService.serviceRecordCreated(
+        userId,
+        existingPending.id,
+        { customerId, year, month, appointmentCount: appointmentIds.length, mergedIntoPending: true },
+        ip
+      );
+      return existingPending;
+    }
+
     const rec = await storage.createServiceRecord({
       customerId,
       employeeId: effectiveEmployeeId,
@@ -323,7 +352,6 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
 
     await storage.addAppointmentsToServiceRecord(rec.id, appointmentIds, tx);
 
-    const ip = req.ip || req.socket.remoteAddress;
     await auditService.serviceRecordCreated(
       userId,
       rec.id,

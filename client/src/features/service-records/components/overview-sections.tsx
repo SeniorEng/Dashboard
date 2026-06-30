@@ -16,7 +16,7 @@ import { computeDeadlineInfo, DeadlineHint } from "./deadline-hint";
 export interface CustomerOverviewItem {
   customerId: number;
   customerName: string;
-  existingRecord: { id: number; status: string } | null;
+  monthlyRecords: { id: number; status: string }[];
   singleRecords: { id: number; status: string; recordType: string }[];
   documentedCount: number;
   undocumentedCount: number;
@@ -70,7 +70,7 @@ export function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
     // one (Rosali-Demirev case). Customers with ONLY completed records stay in
     // the completed bucket.
     const hasPendingRecord =
-      (it.existingRecord !== null && it.existingRecord.status !== "completed") ||
+      it.monthlyRecords.some((r) => r.status !== "completed") ||
       it.singleRecords.some((r) => r.status !== "completed");
     if (hasPendingRecord) {
       awaitingSignature.push(it);
@@ -78,7 +78,7 @@ export function bucketize(items: CustomerOverviewItem[]): BucketedOverview {
     }
 
     const hasCompletedRecord =
-      it.existingRecord?.status === "completed" ||
+      it.monthlyRecords.some((r) => r.status === "completed") ||
       it.singleRecords.some((r) => r.status === "completed");
     // Without a completed record there is nothing to show in the completed
     // bucket — the customer simply has no relevant activity this month.
@@ -222,15 +222,18 @@ interface CompletedCardProps {
 
 function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
   const singleCount = item.singleRecords.length;
-  const hasMonthly = !!item.existingRecord;
-  const href = hasMonthly && item.existingRecord
-    ? `/service-records/${item.existingRecord.id}`
-    : `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
+  const monthlyCount = item.monthlyRecords.length;
+  const periodHref = `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
+  // A single monthly proof links straight to it; multiple proofs link to the
+  // period view so every one stays reachable.
+  const href = monthlyCount === 1
+    ? `/service-records/${item.monthlyRecords[0].id}`
+    : periodHref;
 
   const parts: string[] = [
     `${item.totalAppointments} ${item.totalAppointments === 1 ? "Termin" : "Termine"}`,
   ];
-  if (hasMonthly) parts.push("1 monatl. LN");
+  if (monthlyCount > 0) parts.push(`${monthlyCount} monatl. LN`);
   if (singleCount > 0) parts.push(`${singleCount} Einzel-LN`);
 
   return (
@@ -263,33 +266,38 @@ function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedC
   );
 }
 
-function AwaitingSignatureCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
-  // Prefer the monthly record; otherwise fall back to the first not-yet-completed
-  // single record. We always have at least one of those — bucketize put us here
-  // exactly because hasPendingRecord was true.
-  const pendingSingle = item.singleRecords.find((r) => r.status !== "completed");
-  const monthlyPending =
-    item.existingRecord && item.existingRecord.status !== "completed"
-      ? item.existingRecord
-      : null;
-  const target = monthlyPending ?? pendingSingle ?? item.existingRecord ?? null;
-  const href = target
-    ? `/service-records/${target.id}`
-    : `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
+interface PendingProof {
+  id: number;
+  status: string;
+  kind: "monthly" | "single";
+}
 
-  const singleCount = item.singleRecords.length;
-  const hasMonthly = !!item.existingRecord;
-  const parts: string[] = [
-    `${item.totalAppointments} ${item.totalAppointments === 1 ? "Termin" : "Termine"}`,
+// Each not-yet-completed proof becomes its own card so two pending monthly LNs
+// for the same customer (Task #1526) never collapse into one invisible entry.
+function pendingProofsOf(item: CustomerOverviewItem): PendingProof[] {
+  return [
+    ...item.monthlyRecords
+      .filter((r) => r.status !== "completed")
+      .map((r) => ({ id: r.id, status: r.status, kind: "monthly" as const })),
+    ...item.singleRecords
+      .filter((r) => r.status !== "completed")
+      .map((r) => ({ id: r.id, status: r.status, kind: "single" as const })),
   ];
-  if (hasMonthly) parts.push("1 monatl. LN");
-  if (singleCount > 0) parts.push(`${singleCount} Einzel-LN`);
+}
+
+function statusLabel(status: string): string {
+  return status === "employee_signed" ? "Kunden-Unterschrift offen" : "Unterschrift offen";
+}
+
+function AwaitingSignatureCard({ item, proof }: { item: CustomerOverviewItem; proof: PendingProof }) {
+  const href = `/service-records/${proof.id}`;
+  const kindLabel = proof.kind === "monthly" ? "Monats-LN" : "Einzel-LN";
 
   return (
     <Link href={href}>
       <Card
         className="border-yellow-200 bg-yellow-50/40"
-        data-testid={`card-awaiting-${item.customerId}`}
+        data-testid={`card-awaiting-${proof.id}`}
       >
         <CardContent className="p-3">
           <div className="flex items-center justify-between gap-3">
@@ -305,9 +313,9 @@ function AwaitingSignatureCard({ item, selectedYear, selectedMonth }: CompletedC
               </div>
               <p
                 className="text-xs text-yellow-700"
-                data-testid={`text-awaiting-${item.customerId}`}
+                data-testid={`text-awaiting-${proof.id}`}
               >
-                {parts.join(" · ")} · Unterschrift offen
+                {kindLabel} · {statusLabel(proof.status)}
               </p>
             </div>
             <ChevronRight className={`${iconSize.sm} text-muted-foreground shrink-0`} />
@@ -319,8 +327,8 @@ function AwaitingSignatureCard({ item, selectedYear, selectedMonth }: CompletedC
 }
 
 function OrphanRecordCard({ item, selectedYear, selectedMonth }: CompletedCardProps) {
-  const href = item.existingRecord
-    ? `/service-records/${item.existingRecord.id}`
+  const href = item.monthlyRecords.length > 0
+    ? `/service-records/${item.monthlyRecords[0].id}`
     : `/service-records?customerId=${item.customerId}&year=${selectedYear}&month=${selectedMonth}`;
   return (
     <Link href={href}>
@@ -363,6 +371,13 @@ export function OverviewSections({
   monthLabel,
 }: OverviewSectionsProps) {
   const buckets = useMemo(() => bucketize(overview), [overview]);
+  const awaitingProofs = useMemo(
+    () =>
+      buckets.awaitingSignature.flatMap((item) =>
+        pendingProofsOf(item).map((proof) => ({ item, proof })),
+      ),
+    [buckets.awaitingSignature],
+  );
   const completedTotal = buckets.completed.length + buckets.orphans.length;
   const allEmpty =
     buckets.needsDoc.length === 0 &&
@@ -424,19 +439,18 @@ export function OverviewSections({
         </OverviewSection>
       )}
 
-      {buckets.awaitingSignature.length > 0 && (
+      {awaitingProofs.length > 0 && (
         <OverviewSection
           title="Wartet auf Unterschrift"
           tone="yellow"
-          count={buckets.awaitingSignature.length}
+          count={awaitingProofs.length}
           testId="section-awaiting-signature"
         >
-          {buckets.awaitingSignature.map((item) => (
+          {awaitingProofs.map(({ item, proof }) => (
             <AwaitingSignatureCard
-              key={item.customerId}
+              key={`${proof.kind}-${proof.id}`}
               item={item}
-              selectedYear={selectedYear}
-              selectedMonth={selectedMonth}
+              proof={proof}
             />
           ))}
         </OverviewSection>

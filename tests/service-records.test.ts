@@ -595,3 +595,166 @@ describe("LN-13: Monatlicher LN – Positive Erstellung mit dokumentierten Termi
     expect(dupRes.status).toBe(400);
   });
 });
+
+// Task #1526: Monats-LN Pending-Merge.
+// Bug (Käthe/Maxim): ein zweiter Monatsabschnitt erzeugte einen ZWEITEN
+// pending-LN für denselben Kunden+Mitarbeiter+Monat → doppelte LN. Fix:
+// pending-LN ist mergebar (neue Termine anhängen), employee_signed/completed
+// ist GoBD-versiegelt → dann ist ein NEUER LN korrekt.
+describe("LN-14: Monats-LN Pending-Merge (Task #1526)", () => {
+  let mergeCustomerId: number;
+  let mergeYear: number;
+  let mergeMonth: number;
+  const mergeDates: string[] = [];
+  const mergeApptIds: number[] = [];
+  let firstPendingRecordId: number | null = null;
+  let sealedRecordId: number | null = null;
+  let newRecordIdAfterSeal: number | null = null;
+
+  beforeAll(async () => {
+    const cust = await createTestCustomer({ nachname: `LN-Merge_${Date.now()}` });
+    mergeCustomerId = cust.id;
+    // Der eingeloggte Superadmin wird PRIMARY → isPrimary=true liefert alle
+    // dokumentierten Termine des Kunden, und die Übersicht ist ohne viewAs sichtbar.
+    await apiPatch(`/api/admin/customers/${mergeCustomerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    // Drei Werktage im VOLLSTÄNDIG vergangenen Vormonat (alle dokumentierbar).
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    mergeYear = prev.getFullYear();
+    mergeMonth = prev.getMonth() + 1;
+    let day = 2;
+    while (mergeDates.length < 3 && day <= 28) {
+      const cur = new Date(mergeYear, mergeMonth - 1, day);
+      const dow = cur.getDay();
+      if (dow !== 0 && dow !== 6) {
+        mergeDates.push(
+          `${mergeYear}-${String(mergeMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+        );
+      }
+      day++;
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of mergeApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch {}
+    }
+  });
+
+  async function createAndDocumentOnDate(dateStr: string, time: string): Promise<number | null> {
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: mergeCustomerId,
+      date: dateStr,
+      scheduledStart: time,
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    if (createRes.status !== 201) return null;
+    mergeApptIds.push(createRes.data.id);
+    const docRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/document`, {
+      actualStart: time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "merge-test" }],
+    });
+    return docRes.status === 200 ? createRes.data.id : null;
+  }
+
+  it("LN-14.1 – erster dokumentierter Termin erzeugt pending Monats-LN", async () => {
+    expect(mergeDates.length, "Drei Vormonats-Werktage müssen verfügbar sein").toBe(3);
+    const apptId = await createAndDocumentOnDate(mergeDates[0], "09:00");
+    expect(apptId, "Erster Termin muss dokumentiert werden").toBeTruthy();
+
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: mergeCustomerId,
+      employeeId: auth.user.id,
+      year: mergeYear,
+      month: mergeMonth,
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.status).toBe("pending");
+    expect(res.data.recordType).toBe("monthly");
+    firstPendingRecordId = res.data.id;
+
+    const apptsRes = await apiGet<any>(`/api/service-records/${firstPendingRecordId}/appointments`);
+    expect(apptsRes.status).toBe(200);
+    expect(apptsRes.data.length).toBe(1);
+  });
+
+  it("LN-14.2 – zweiter Termin wird in den pending-LN gemerged (kein neuer LN)", async () => {
+    expect(firstPendingRecordId, "Erster pending-LN muss existieren").toBeTruthy();
+    const apptId = await createAndDocumentOnDate(mergeDates[1], "10:00");
+    expect(apptId, "Zweiter Termin muss dokumentiert werden").toBeTruthy();
+
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: mergeCustomerId,
+      employeeId: auth.user.id,
+      year: mergeYear,
+      month: mergeMonth,
+    });
+    expect(res.status).toBe(201);
+    // Merge: DIESELBE LN-Id, kein zweiter pending-LN.
+    expect(res.data.id).toBe(firstPendingRecordId);
+    expect(res.data.status).toBe("pending");
+
+    const apptsRes = await apiGet<any>(`/api/service-records/${firstPendingRecordId}/appointments`);
+    expect(apptsRes.status).toBe(200);
+    expect(apptsRes.data.length, "Beide Termine hängen am selben LN").toBe(2);
+  });
+
+  it("LN-14.3 – nach Mitarbeiter-Unterschrift (versiegelt) entsteht ein NEUER LN", async () => {
+    expect(firstPendingRecordId, "Erster pending-LN muss existieren").toBeTruthy();
+    sealedRecordId = firstPendingRecordId;
+
+    const signRes = await apiPost<any>(`/api/service-records/${sealedRecordId}/sign`, {
+      signatureData: validSignatureDataUrl(),
+      signerType: "employee",
+      signingLocation: "Vor Ort",
+    });
+    expect(signRes.status).toBe(200);
+
+    const apptId = await createAndDocumentOnDate(mergeDates[2], "11:00");
+    expect(apptId, "Dritter Termin muss dokumentiert werden").toBeTruthy();
+
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: mergeCustomerId,
+      employeeId: auth.user.id,
+      year: mergeYear,
+      month: mergeMonth,
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.status).toBe("pending");
+    // Versiegelter LN wird NICHT mutiert → neuer LN mit eigener Id.
+    expect(res.data.id).not.toBe(sealedRecordId);
+    newRecordIdAfterSeal = res.data.id;
+  });
+
+  it("LN-14.4 – Übersicht zeigt beide Monats-LN ohne Duplikat", async () => {
+    expect(sealedRecordId, "Versiegelter LN muss existieren").toBeTruthy();
+    expect(newRecordIdAfterSeal, "Neuer LN muss existieren").toBeTruthy();
+
+    const res = await apiGet<any>(
+      `/api/service-records/overview?year=${mergeYear}&month=${mergeMonth}`
+    );
+    expect(res.status).toBe(200);
+    const items: any[] = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
+    const item = items.find((i: any) => i.customerId === mergeCustomerId);
+    expect(item, "Merge-Kunde muss in der Übersicht erscheinen").toBeDefined();
+    expect(Array.isArray(item.monthlyRecords), "monthlyRecords muss ein Array sein").toBe(true);
+
+    const ids = item.monthlyRecords.map((r: any) => r.id);
+    expect(ids).toContain(sealedRecordId);
+    expect(ids).toContain(newRecordIdAfterSeal);
+    // Kein Duplikat: jede LN-Id genau einmal.
+    expect(new Set(ids).size).toBe(ids.length);
+    // Genau EIN pending-LN (der neue); der versiegelte ist employee_signed.
+    const pendingCount = item.monthlyRecords.filter((r: any) => r.status === "pending").length;
+    expect(pendingCount).toBe(1);
+  });
+});
