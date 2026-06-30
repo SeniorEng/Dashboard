@@ -3,7 +3,7 @@ import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
-import { useServices, ServiceList, StandardPricingSection } from "@/features/services";
+import { useServices, ServiceList, ServiceEconomicsSection } from "@/features/services";
 
 export default function AdminServices() {
   const { data: services, isLoading } = useServices();
@@ -21,13 +21,13 @@ export default function AdminServices() {
             <h1 className={componentStyles.pageTitle}>Dienstleistungskatalog</h1>
           </div>
           <p className="text-sm text-gray-600" data-testid="text-services-subtitle">
-            Leistungskatalog (Identität nur lesbar) und firmenweite Standardpreise (mit Stichtag pflegbar)
+            Leistungskatalog (Identität nur lesbar) sowie firmenweite Preise und Vergütung (mit Stichtag pflegbar)
           </p>
         </div>
 
         <div>
-          <h2 className="text-sm font-semibold text-gray-700 mb-2 px-1">Firmenweite Standardpreise</h2>
-          <StandardPricingSection services={services} isLoading={isLoading} />
+          <h2 className="text-sm font-semibold text-gray-700 mb-2 px-1">Firmenweite Preise &amp; Vergütung</h2>
+          <ServiceEconomicsSection services={services} isLoading={isLoading} />
         </div>
 
         <div>

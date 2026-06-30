@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAdmin } from "../middleware/auth";
+import { requireSuperAdmin } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { todayISO, addDays } from "@shared/utils/datetime";
@@ -113,7 +113,7 @@ function sendClosedPeriodConflict(res: any, message: string, months: AffectedClo
   });
 }
 
-router.get("/role-wage-rates", requireAdmin, asyncHandler("Lohnsätze konnten nicht geladen werden", async (req, res) => {
+router.get("/role-wage-rates", requireSuperAdmin, asyncHandler("Lohnsätze konnten nicht geladen werden", async (req, res) => {
   const dateParam = req.query.date as string | undefined;
   const targetDate = dateParam || todayISO();
   const result = await db.execute(sql`
@@ -131,7 +131,7 @@ router.get("/role-wage-rates", requireAdmin, asyncHandler("Lohnsätze konnten ni
   res.json(result.rows);
 }));
 
-router.get("/role-wage-rates/all", requireAdmin, asyncHandler("Lohnsatz-Historie konnte nicht geladen werden", async (_req, res) => {
+router.get("/role-wage-rates/all", requireSuperAdmin, asyncHandler("Lohnsatz-Historie konnte nicht geladen werden", async (_req, res) => {
   const result = await db.execute(sql`
     SELECT w.id, w.role, w.service_id AS "serviceId",
            w.cents, w.valid_from AS "validFrom", w.valid_to AS "validTo",
@@ -145,7 +145,7 @@ router.get("/role-wage-rates/all", requireAdmin, asyncHandler("Lohnsatz-Historie
   res.json(result.rows);
 }));
 
-router.get("/role-wage-rates/future", requireAdmin, asyncHandler("Zukünftige Lohnsätze konnten nicht geladen werden", async (_req, res) => {
+router.get("/role-wage-rates/future", requireSuperAdmin, asyncHandler("Zukünftige Lohnsätze konnten nicht geladen werden", async (_req, res) => {
   const today = todayISO();
   const result = await db.execute(sql`
     SELECT w.id, w.role, w.service_id AS "serviceId",
@@ -161,7 +161,7 @@ router.get("/role-wage-rates/future", requireAdmin, asyncHandler("Zukünftige Lo
   res.json(result.rows);
 }));
 
-router.post("/role-wage-rates", requireAdmin, asyncHandler("Lohnsatz konnte nicht gespeichert werden", async (req, res) => {
+router.post("/role-wage-rates", requireSuperAdmin, asyncHandler("Lohnsatz konnte nicht gespeichert werden", async (req, res) => {
   const confirmClosedOverride = req.body?.confirmClosedOverride === true;
   const confirmReplace = req.body?.confirmReplace === true;
   const parsed = insertRoleWageRateSchema.safeParse(req.body);
@@ -366,7 +366,7 @@ router.post("/role-wage-rates", requireAdmin, asyncHandler("Lohnsatz konnte nich
   res.json(result.rows[0]);
 }));
 
-router.delete("/role-wage-rates/:rateId", requireAdmin, asyncHandler("Lohnsatz konnte nicht gelöscht werden", async (req, res) => {
+router.delete("/role-wage-rates/:rateId", requireSuperAdmin, asyncHandler("Lohnsatz konnte nicht gelöscht werden", async (req, res) => {
   const rateId = requireIntParam(req.params.rateId, res);
   if (rateId === null) return;
   const today = todayISO();

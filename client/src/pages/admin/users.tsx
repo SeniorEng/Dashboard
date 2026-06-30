@@ -44,7 +44,6 @@ import { useAllVacationSummaries } from "@/features/time-tracking/hooks/use-vaca
 import { UserCard, type VacationSummary } from "@/features/team/components/user-card";
 import { UserForm } from "@/features/team/components/user-form";
 import { EmployeeDocumentsSection } from "@/features/team/components/employee-documents-section";
-import { EmployeeServiceRates } from "@/features/team/components/employee-service-rates";
 import { EmployeeDocumentRequirementsSection } from "@/features/team/components/employee-document-requirements-section";
 import { ResetPasswordForm } from "@/features/team/components/reset-password-form";
 import { ADMIN_PERMISSION_KEYS, ADMIN_PERMISSION_LABELS } from "@shared/schema";
@@ -432,7 +431,6 @@ export default function AdminUsers() {
               {isSuperAdmin && editingUser.isAdmin && (
                 <AdminPermissionsSection userId={editingUser.id} />
               )}
-              <EmployeeServiceRates />
               <EmployeeDocumentRequirementsSection employeeId={editingUser.id} />
               <EmployeeDocumentsSection employeeId={editingUser.id} userName={editingUser.displayName} isAdmin={true} />
             </>
