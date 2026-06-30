@@ -758,3 +758,57 @@ describe("LN-14: Monats-LN Pending-Merge (Task #1526)", () => {
     expect(pendingCount).toBe(1);
   });
 });
+
+// LN-15: Atomarer Status-Übergang gegen Doppel-Unterschrift (Task #1529).
+// Zwei fast zeitgleiche Mitarbeiter-Unterschriften dürfen den Übergang
+// pending -> employee_signed NUR EINMAL anwenden. Der bedingte UPDATE
+// (WHERE status = pending) lässt genau einen Request gewinnen; der zweite
+// trifft 0 Zeilen und scheitert mit 400, ohne den Status zu korrumpieren.
+describe("LN-15: Doppel-Unterschrift Atomarität (Task #1529)", () => {
+  let raceApptId: number | null = null;
+  let raceRecordId: number | null = null;
+
+  it("LN-15.1 – Termin + LN für Race-Test vorbereiten", async () => {
+    raceApptId = await createAndDocumentAppointment(
+      ["05:00", "05:30", "20:00", "20:30", "21:00"],
+      [2, 60]
+    );
+    expect(raceApptId, "Race-Termin muss erstellt und dokumentiert werden").toBeTruthy();
+    if (raceApptId) cleanupApptIds.push(raceApptId);
+
+    const res = await apiPost<any>("/api/service-records/single", {
+      customerId: testCustomerId,
+      appointmentId: raceApptId,
+    });
+    expect(res.status).toBe(201);
+    expect(res.data.status).toBe("pending");
+    raceRecordId = res.data.id;
+  });
+
+  it("LN-15.2 – Zwei zeitgleiche Mitarbeiter-Unterschriften: genau eine gewinnt", async () => {
+    expect(raceRecordId, "raceRecordId muss aus LN-15.1 gesetzt sein").toBeTruthy();
+
+    const signOnce = () =>
+      apiPost<any>(`/api/service-records/${raceRecordId}/sign`, {
+        signatureData: validSignatureDataUrl(),
+        signerType: "employee",
+        signingLocation: "Vor Ort",
+      });
+
+    const [a, b] = await Promise.all([signOnce(), signOnce()]);
+    const statuses = [a.status, b.status].sort();
+
+    // Genau ein 200 (Übergang angewendet) und ein 400 (bereits transitioniert).
+    expect(statuses).toEqual([200, 400]);
+
+    // Status wurde genau einmal angewendet: employee_signed, nicht weiter.
+    const fetchRes = await apiGet<any>(`/api/service-records/${raceRecordId}`);
+    expect(fetchRes.data.status).toBe("employee_signed");
+  });
+
+  afterAll(async () => {
+    if (raceRecordId) {
+      try { await apiDelete(`/api/service-records/${raceRecordId}`); } catch {}
+    }
+  });
+});

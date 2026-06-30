@@ -169,12 +169,16 @@ export async function signServiceRecord(id: number, signatureData: string, signe
   const now = new Date();
   const hash = computeDataHash(signatureData);
 
+  let expectedStatus: ServiceRecordStatus;
   let nextStatus: ServiceRecordStatus;
+  let outOfOrderMessage: string;
   let signatureFields: Partial<MonthlyServiceRecord>;
 
   if (signerType === 'employee') {
-    if (existing.status !== 'pending') {
-      throw new Error('Mitarbeiter kann nur bei Status "pending" unterschreiben');
+    expectedStatus = 'pending' as ServiceRecordStatus;
+    outOfOrderMessage = 'Mitarbeiter kann nur bei Status "pending" unterschreiben';
+    if (existing.status !== expectedStatus) {
+      throw new Error(outOfOrderMessage);
     }
     nextStatus = 'employee_signed' as ServiceRecordStatus;
     signatureFields = {
@@ -186,8 +190,10 @@ export async function signServiceRecord(id: number, signatureData: string, signe
       employeeSigningLocation: signingLocation ?? null,
     };
   } else if (signerType === 'customer') {
-    if (existing.status !== 'employee_signed') {
-      throw new Error('Kunde kann nur nach Mitarbeiter-Unterschrift unterschreiben');
+    expectedStatus = 'employee_signed' as ServiceRecordStatus;
+    outOfOrderMessage = 'Kunde kann nur nach Mitarbeiter-Unterschrift unterschreiben';
+    if (existing.status !== expectedStatus) {
+      throw new Error(outOfOrderMessage);
     }
     nextStatus = 'completed' as ServiceRecordStatus;
     signatureFields = {
@@ -203,14 +209,25 @@ export async function signServiceRecord(id: number, signatureData: string, signe
   }
 
   return await db.transaction(async (tx) => {
-    await tx.update(monthlyServiceRecords)
-      .set({ ...signatureFields, updatedAt: now })
-      .where(eq(monthlyServiceRecords.id, id));
-
+    // Atomarer Status-Übergang (Task #1529): Der Status wird in EINEM
+    // bedingten UPDATE geschrieben, das nur greift, solange der Datensatz noch
+    // im erwarteten Ausgangsstatus steht (`status = expectedStatus`). Damit
+    // kann eine zweite, fast zeitgleiche Unterschrift den Übergang nicht
+    // doppelt oder out-of-order anwenden — das frühere Read-then-Write
+    // (erst lesen, dann ohne Guard schreiben) war hier rennanfällig.
+    // 0 betroffene Zeilen ⇒ ein paralleler Request hat den Übergang bereits
+    // vollzogen; wir behandeln das wie den normalen Out-of-Order-Fehler.
     const result = await tx.update(monthlyServiceRecords)
-      .set({ status: nextStatus, updatedAt: now })
-      .where(eq(monthlyServiceRecords.id, id))
+      .set({ ...signatureFields, status: nextStatus, updatedAt: now })
+      .where(and(
+        eq(monthlyServiceRecords.id, id),
+        eq(monthlyServiceRecords.status, expectedStatus),
+      ))
       .returning();
+
+    if (result.length === 0) {
+      throw new Error(outOfOrderMessage);
+    }
 
     // Task #749 — Cache-Invalidierung: Sobald sich die Unterschriftslage
     // ändert (neu unterschrieben oder re-signed), können sowohl das
