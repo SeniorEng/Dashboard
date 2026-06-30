@@ -1,7 +1,43 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../lib/db";
 import type { ProcessHealthRow, ProcessHealthSummary, SparklinePoint } from "@shared/statistics";
 import { billingPeriodFilter, buildKpi, dateFilter, getHealthThresholds, num, periodToResponse, previousPeriod, previousYearPeriod, scoreFor, type ResolvedPeriod } from "./common";
+
+/**
+ * Task #1530 — Termin-genaues „noch abzurechnen"-Prädikat für einen
+ * Leistungsnachweis (monthly_service_records).
+ *
+ * Früher galt ein abgeschlossener Nachweis als abgerechnet, sobald für
+ * Kunde+Jahr+Monat IRGENDEINE aktive Rechnung existierte (period-grob). Damit
+ * verschwand ein zweiter unterschriebener Nachweis bzw. der Rest nach einer
+ * Teil-/Wochen-Abrechnung still aus der Liste, obwohl seine Termine nie
+ * abgerechnet wurden.
+ *
+ * Jetzt termin-genau: ein Nachweis bleibt „noch abzurechnen", solange er noch
+ * mindestens EINEN Termin hat, der auf KEINER aktiven Rechnung als Line-Item
+ * steht — unabhängig davon, ob für denselben Kunde+Monat bereits eine
+ * (Geschwister-)Rechnung existiert.
+ *
+ * Die Regel „Termin ist bereits abgerechnet" ist dieselbe, die auch die
+ * Abrechnungs-Engine nutzt (`getAlreadyInvoicedAppointmentIds` in
+ * `server/services/invoice-data.ts`, eine SSoT): ein Termin zählt genau dann
+ * als abgerechnet, wenn er ein Line-Item auf einer Rechnung hat, die weder
+ * `storniert` noch eine `stornorechnung` ist. Stornierte Rechnungen geben ihre
+ * Termine dadurch automatisch wieder in diese Liste frei.
+ */
+function recordHasUnbilledAppointment(msrIdCol: SQL): SQL {
+  return sql`EXISTS (
+    SELECT 1 FROM service_record_appointments sra
+    JOIN appointments a ON a.id = sra.appointment_id AND a.deleted_at IS NULL
+    WHERE sra.service_record_id = ${msrIdCol}
+      AND NOT EXISTS (
+        SELECT 1 FROM invoice_line_items ili
+        JOIN invoices i ON i.id = ili.invoice_id
+        WHERE ili.appointment_id = sra.appointment_id
+          AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
+      )
+  )`;
+}
 
 interface PeriodCounts {
   woEmployee: number;
@@ -39,11 +75,7 @@ async function periodCounts(p: ResolvedPeriod): Promise<PeriodCounts> {
       (SELECT COUNT(DISTINCT msr.id)::int FROM monthly_service_records msr
         WHERE msr.deleted_at IS NULL AND msr.status = 'completed'
           ${invFilter}
-          AND NOT EXISTS (
-            SELECT 1 FROM invoices i
-            WHERE i.customer_id = msr.customer_id AND i.billing_year = msr.year AND i.billing_month = msr.month
-              AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
-          )) AS records_wo_invoice
+          AND ${recordHasUnbilledAppointment(sql`msr.id`)}) AS records_wo_invoice
   `);
   const row = r.rows[0] as Record<string, unknown>;
   return {
@@ -96,11 +128,7 @@ async function monthlySparkRows(year: number): Promise<MonthlySparkRow[]> {
       COALESCE((SELECT COUNT(DISTINCT msr.id)::int FROM monthly_service_records msr
         WHERE msr.deleted_at IS NULL AND msr.status = 'completed'
           AND msr.year = ${year} AND msr.month = g.m
-          AND NOT EXISTS (
-            SELECT 1 FROM invoices i
-            WHERE i.customer_id = msr.customer_id AND i.billing_year = msr.year AND i.billing_month = msr.month
-              AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
-          )), 0)::int AS records_wo_inv
+          AND ${recordHasUnbilledAppointment(sql`msr.id`)}), 0)::int AS records_wo_inv
     FROM generate_series(1, 12) AS g(m)
     ORDER BY g.m
   `);
@@ -262,11 +290,7 @@ export async function listRecordsWithoutInvoice(p: ResolvedPeriod): Promise<Proc
     LEFT JOIN users u ON u.id = msr.employee_id
     WHERE msr.deleted_at IS NULL AND msr.status = 'completed'
       ${invFilter}
-      AND NOT EXISTS (
-        SELECT 1 FROM invoices i
-        WHERE i.customer_id = msr.customer_id AND i.billing_year = msr.year AND i.billing_month = msr.month
-          AND i.status != 'storniert' AND i.invoice_type != 'stornorechnung'
-      )
+      AND ${recordHasUnbilledAppointment(sql`msr.id`)}
     ORDER BY msr.year DESC, msr.month DESC LIMIT 500
   `);
   return r.rows.map((row: Record<string, unknown>) => ({
