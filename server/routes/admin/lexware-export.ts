@@ -138,6 +138,14 @@ function emptyBucket(): MonthlyHoursBucket {
 
 // Time-entry types that count as paid working time (consistent with employee "Meine Zeiten" view).
 // Excludes: urlaub, krankheit, pause, verfuegbar, blocker.
+//
+// Task #1508: `urlaub`/`krankheit` werden BEWUSST nicht als bezahlte Arbeitszeit
+// in den Brutto-Lohn (bruttoCents) aufgenommen, sondern weiter unten nur als
+// Tage-Anzahl (tageUrlaub/tageKrankheit) gemeldet. Die gesetzliche Entgelt-
+// fortzahlung (Lohnfortzahlung an Urlaubs-/Kranktagen) für Minijobber wird vom
+// Back Office in LEXWARE selbst aus diesen Tage-Anzahlen berechnet — die App
+// soll dafür KEINEN Geldbetrag liefern (mit dem Back Office bestätigt). Die
+// reine Tage-Meldung ist also gewolltes Verhalten, kein Lohn-Loch.
 const PAID_MANUAL_ENTRY_TYPES = new Set(["bueroarbeit", "vertrieb", "sonstiges"]);
 
 async function getMonthlyHoursBatch(
@@ -458,6 +466,10 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
 
   for (const entry of timeEntries) {
     const empId = entry.userId;
+    // Task #1508: Urlaub/Krankheit werden NUR als Tage gezählt und so an Lexware
+    // gemeldet. Die Entgeltfortzahlung (Lohnfortzahlung) für Minijobber rechnet
+    // Lexware aus diesen Tagen selbst — daher fließen sie bewusst NICHT in
+    // bruttoCents ein (siehe PAID_MANUAL_ENTRY_TYPES). Kein Geldbetrag hier.
     if (entry.entryType === "urlaub") {
       vacationDays[empId] = (vacationDays[empId] || 0) + 1;
     } else if (entry.entryType === "krankheit") {
