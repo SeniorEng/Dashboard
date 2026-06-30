@@ -76,6 +76,15 @@ const FUNCTION_VALUE = {
   any: [{ kind: "arrow_function" }, { kind: "function_expression" }],
 } as const;
 
+// Task #1522 — Objekt-Literal als Wert. Damit ein Geld-/Raten-Stichwort in
+// einem umschließenden Property-Key (`housekeepingRate: { … }`) bzw.
+// Const-Objekt-Namen (`const housekeepingRate = { … }`) auch Werte erwischt,
+// die TIEF in diesem Objekt verschachtelt sind — jenseits des Zeilen-Fensters
+// und jenseits eines Funktionsnamens.
+const OBJECT_VALUE = {
+  any: [{ kind: "object" }],
+} as const;
+
 /**
  * Sammelt alle benannten Funktions-Definitionen aus einem AST:
  *   - `function foo() {}` / `export async function foo() {}`
@@ -131,12 +140,22 @@ export interface NamedScope {
 }
 
 /**
- * Sammelt dieselben benannten Funktions-Definitionen wie
- * {@link collectNamedFunctions}, aber inkl. Zeilen-Bereich. Wird genutzt, um
- * die umschließende Funktion/Deklaration für eine verdächtige Zeile
- * aufzulösen (AST-aware enclosing-node lookup) — z. B. um einen hartcodierten
- * Raten-Wert zu erwischen, der tief im Body einer raten-benannten Funktion
- * steht (außerhalb eines reinen Zeilen-Fensters).
+ * Sammelt benannte Scopes inkl. Zeilen-Bereich. Wird genutzt, um den/die
+ * umschließenden Scope(s) für eine verdächtige Zeile aufzulösen (AST-aware
+ * enclosing-node lookup) — z. B. um einen hartcodierten Raten-Wert zu
+ * erwischen, der tief im Body/Objekt einer raten-benannten Deklaration steht
+ * (außerhalb eines reinen Zeilen-Fensters).
+ *
+ * Erfasst werden:
+ *   - dieselben benannten Funktions-Definitionen wie {@link collectNamedFunctions}
+ *     (Function-Declarations, Methoden, funktions-wertige Felder/Variablen/Pairs).
+ *   - Task #1522: zusätzlich OBJEKT-wertige Deklarationen, deren NAME/KEY den
+ *     Raten-Kontext trägt, aber deren Wert ein verschachteltes Objekt ist:
+ *       - `const housekeepingRate = { … 1600 … }` (Const-Objekt-Name)
+ *       - `{ housekeepingRate: { … 1600 … } }` (Property-Key über Objekt-Wert)
+ *     Damit liegt ein Raten-Wert, der eine Ebene tiefer in einem Config-Objekt
+ *     versteckt ist, im Scope des raten-benannten Keys — selbst wenn weder das
+ *     Zeilen-Fenster noch ein Funktionsname den Kontext liefert.
  */
 export function collectNamedScopes(root: SgNode): NamedScope[] {
   const out: NamedScope[] = [];
@@ -164,6 +183,15 @@ export function collectNamedScopes(root: SgNode): NamedScope[] {
     push(n, "name");
   }
   for (const n of root.findAll({ rule: { kind: "pair", has: { field: "value", ...FUNCTION_VALUE } } })) {
+    push(n, "key");
+  }
+
+  // Task #1522 — Objekt-wertige Deklarationen: Name/Key als Scope, damit tief
+  // verschachtelte Raten-Werte im Kontext des umschließenden Keys liegen.
+  for (const n of root.findAll({ rule: { kind: "variable_declarator", has: { field: "value", ...OBJECT_VALUE } } })) {
+    push(n, "name");
+  }
+  for (const n of root.findAll({ rule: { kind: "pair", has: { field: "value", ...OBJECT_VALUE } } })) {
     push(n, "key");
   }
 

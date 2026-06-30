@@ -396,6 +396,72 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
     });
   });
 
+  /**
+   * Task #1522 — Schließt die Lücke aus Task #1521: Ein Raten-Wert kann eine
+   * Ebene TIEFER verschachtelt sein — in einem Config-Objekt, dessen
+   * umschließender Property-Key (oder Const-Objekt-Name) — KEINE Funktion — den
+   * Geld-/Raten-Kontext trägt. Solche Werte liegen außerhalb des Zeilen-Fensters
+   * UND außerhalb der bisher aufgelösten Funktions-Scope-Namen. Die erweiterte
+   * Scope-Auflösung erkennt das Stichwort jetzt auch im umschließenden
+   * Objekt-Key/Const-Objekt-Namen.
+   */
+  describe("Hidden-rate-in-object-key/nested-object-Erkennung (Task #1522)", () => {
+    it("erwischt einen Raten-Wert tief in einem Objekt unter einem raten-benannten Property-Key", () => {
+      // `1600` steht ohne Geld-Stichwort im Zeilen-Fenster und in KEINER
+      // raten-benannten Funktion — nur der umschließende Objekt-Key
+      // `housekeepingRate` trägt den Raten-Kontext.
+      const planted = [
+        "export const billingConfig = {",
+        "  housekeepingRate: {",
+        "    a: 1,",
+        "    b: 2,",
+        "    c: 3,",
+        "    d: 4,",
+        "    e: 5,",
+        "    value: 1600,",
+        "  },",
+        "};",
+      ].join("\n");
+
+      const hits = scanForRateLiterals(planted, false);
+      expect(hits.map((h) => h.line)).toContain(8);
+    });
+
+    it("erwischt einen Raten-Wert tief in einem raten-benannten Const-Objekt", () => {
+      // Nur der Const-Objekt-Name `housekeepingRate` trägt den Kontext.
+      const planted = [
+        "const housekeepingRate = {",
+        "  a: 1,",
+        "  b: 2,",
+        "  c: 3,",
+        "  d: 4,",
+        "  e: 5,",
+        "  value: 1600,",
+        "};",
+      ].join("\n");
+
+      const hits = scanForRateLiterals(planted, false);
+      expect(hits.map((h) => h.line)).toContain(7);
+    });
+
+    it("lässt denselben Wert in einem NICHT-raten-benannten Objekt durch (kein Fehlalarm)", () => {
+      const clean = [
+        "export const layoutConfig = {",
+        "  spacing: {",
+        "    a: 1,",
+        "    b: 2,",
+        "    c: 3,",
+        "    d: 4,",
+        "    e: 5,",
+        "    value: 1600,",
+        "  },",
+        "};",
+      ].join("\n");
+
+      expect(scanForRateLiterals(clean, false)).toHaveLength(0);
+    });
+  });
+
   it("Keine neuen Hotspot-`calculate*`/`compute*`-Funktionen außerhalb der Allowlist", () => {
     const hits: Array<{ file: string; line: number; match: string; reason: string }> = [];
 
