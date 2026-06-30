@@ -29,9 +29,22 @@ excluded (→ new LN), and merge-vs-merge serializes on the same row.
 respect the sealed-never-mutated boundary and (b) take the pending row under FOR UPDATE in a
 tx. Any reader of the overview must treat `monthlyRecords` as an array.
 
-**Known remaining gap (deferred):** if NO pending row exists yet, two simultaneous creates
-can each make a pending LN (no DB uniqueness guard). Durable closure = a partial unique
-index on (customerId, employeeId, year, month) WHERE recordType='monthly' AND
-status='pending' AND deleted_at IS NULL (idempotent startup migration, not drizzle-kit push;
-requires cleaning existing prod duplicates first). `signServiceRecord` also has its own
-pre-existing read-before-write status-transition TOCTOU.
+**Sign+merge confirmed race-safe (tested).** The sign double-apply is resolved: signing is
+an atomic conditional `UPDATE … WHERE status=<expected>` (one racer transitions, the other
+hits 0 rows → 400), and merge takes the pending row under FOR UPDATE. Both PG READ-COMMITTED
+orderings leave the merged appointment on exactly one record (merge-first → appended then
+sealed; sign-first → sealed then merge makes a new pending LN). Covered by the LN-16
+concurrent merge+sign test in `tests/service-records.test.ts`.
+
+**Known remaining gaps (deferred, NOT a sign race):**
+1. **merge+merge double-create** — if NO pending row exists yet, two simultaneous *creates*
+   can each make a pending LN (FOR UPDATE can't lock a not-yet-existing row). Durable
+   closure = a partial unique index on (customerId, employeeId, year, month) WHERE
+   recordType='monthly' AND status='pending' AND deleted_at IS NULL (idempotent startup
+   migration, not drizzle-kit push; requires cleaning existing prod duplicates first).
+2. **appointment-MUTATION lock-check TOCTOU** — `isAppointmentLocked` is a correct pure read
+   of committed state, but callers in `server/routes/appointments.ts` /
+   `appointment-documentation.ts` / `appointment-series.ts` check-then-write: a concurrent
+   sign can seal the LN between the check and an edit/delete (junction has ON DELETE CASCADE
+   → would mutate a GoBD-sealed proof). Fix = lock the related monthlyServiceRecords rows in
+   the mutation tx and re-check inside it.
