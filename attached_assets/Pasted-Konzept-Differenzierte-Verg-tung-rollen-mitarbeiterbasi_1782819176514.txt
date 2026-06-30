@@ -1,0 +1,108 @@
+Konzept: Differenzierte Vergütung (rollen-/mitarbeiterbasierte Lohnsätze)
+
+Projekt: EngelDesk (Pflegeservice-Management, „Senioren Engel"), React/TypeScript + Node + Postgres, Repo SeniorEng/Dashboard.
+Zweck dieses Dokuments: Übergabe-Brief für eine KI/Entwickler, der dieses Feature konzipieren und umsetzen soll. Selbst-erklärend, ohne Vorwissen aus früheren Gesprächen.
+Status: Konzept / Diskussionsgrundlage. Noch nichts gebaut. Erst read-only Code-Inventur, dann Design-Review, dann Build.
+
+
+1. Business-Need
+
+Teamleitungen sollen anders vergütet werden als normale Mitarbeiter (z. B. höherer Stundensatz für dieselbe Leistung). Heute ist das nicht möglich — alle bekommen denselben Lohnsatz pro Leistung.
+
+2. Verifizierter Ist-Zustand (live in der App geprüft)
+
+Das System trennt sauber zwei Geld-Seiten:
+
+
+Verkaufspreis (Umsatz, was der Kunde/die Kasse zahlt) — z. B. Hauswirtschaft 38,00 €/Std., Alltagsbegleitung 42,00 €/Std., Kilometer 0,35 €/km.
+Vergütung (Lohnkosten, was der Mitarbeiter bekommt) — z. B. Hauswirtschaft 16,00 €/Std., Alltagsbegleitung 18,00 €/Std.
+
+
+Befund (in der laufenden App verifiziert):
+
+
+Die Vergütung ist eine Eigenschaft der LEISTUNG, nicht des Mitarbeiters. Im Admin → „Dienstleistungen" (Dienstleistungskatalog) steht je Leistung z. B. „Alltagsbegleitung — Preis 42,00 €/Std. — Vergütung: 18,00 €/Std.". Dieser Vergütungssatz gilt flach für alle Mitarbeiter.
+Im Admin → Benutzerverwaltung → Benutzer bearbeiten gibt es kein Vergütungs-/Stundensatz-Feld. Vorhanden sind nur: persönliche Daten, Beschäftigungsart, Arbeitstage/Woche, Monatsarbeitszeit (Vertragsstunden), Urlaub, Berechtigungen, Tätigkeitsbereiche.
+„Teamleitung" ist eine Berechtigungs-/Sichtrolle (Checkbox „Teamleitung", Beschreibung: „gleiche Sicht auf Termine und Kunden wie Administratoren"). Sie hat keinen Bezug zur Vergütung.
+
+
+Konsequenz: Eine Teamleitung, die Hauswirtschaft leistet, wird mit denselben 16 €/Std. verlohnt wie ein normaler Mitarbeiter. Differenzierte Vergütung ist aktuell nicht modelliert.
+
+3. Lösungsansatz (passt ins bestehende Muster)
+
+Es gibt im System bereits ein bewährtes Muster für kontextabhängige Sätze mit Vorrang-Reihenfolge und datierter Historisierung — nämlich bei den Verkaufspreisen:
+
+
+Reihenfolge laut App: kundenindividueller Preis ⟶ firmenweiter Standardpreis ⟶ Katalog-Default. Änderungen werden als neue Korrekturphase mit „gültig ab"-Stichtag angelegt; bestehende Historieneinträge bleiben revisionssicher (GoBD) und werden nicht überschrieben.
+
+
+
+Vorschlag: Dasselbe Muster auf die Vergütung übertragen — einen Vergütungs-Override mit analoger Auflösungs-Reihenfolge:
+
+Aufgelöster Lohnsatz (je Mitarbeiter × Leistung × Datum) =
+    1. mitarbeiter-individueller Vergütungs-Override   (optional, für Ausnahmen)
+    2. rollenbasierter Satz                            (z. B. „Teamleitung")
+    3. Leistungs-Standardvergütung                     (heutiger Katalog-Wert, Default)
+
+Da die Rolle „Teamleitung" bereits existiert, ist der rollenbasierte Satz der naheliegende erste Schritt: z. B. „Teamleitung: Hauswirtschaft 18 €, Alltagsbegleitung 20 €". Ein zusätzlicher mitarbeiter-individueller Override deckt Einzelfälle ab.
+
+4. Technische Ankerpunkte
+
+
+⚠️ App-verifiziert = in der laufenden Anwendung gesehen. Aus Erinnerung / zu verifizieren = vor dem Bauen im Code prüfen (Datei:Zeile), nicht ungeprüft übernehmen.
+
+
+
+
+App-verifiziert: Vergütung wird im Dienstleistungskatalog je Leistung gepflegt (Feld „Vergütung €/Std."). Verkaufs-Standardpreise dort ebenfalls (mit „gültig ab"-Stichtag, GoBD-Historie).
+App-verifiziert: Benutzer-Modell hat Rollen/Berechtigungen (u. a. Teamleitung, Administrator-Rechte) und Tätigkeitsbereiche (Hauswirtschaft, Alltagsbegleitung, Erstberatung, Personenbeförderung, Kinderbetreuung), aber kein Vergütungsfeld.
+Aus Erinnerung / zu verifizieren: Lohnkosten-SSoT heißt vermutlich employee_rate_cents (Cent-Wert je Leistung). Genaue Herkunft im Code prüfen: liegt der Wert an der services/Leistungskatalog-Tabelle (= flach, passt zum Befund) oder woanders?
+Aus Erinnerung / zu verifizieren: Die Wirtschafts-/Lohnkosten-Berechnung (Umsatz/Lohnkosten/Deckungsbeitrag/Marge der „Wirtschaftlicher Überblick"-Karte) liegt vermutlich in shared/domain/statistics/economics.ts. Dort und in der Abrechnungs-Breakdown-Logik wird der Lohnsatz konsumiert.
+Zu verifizieren: Alle weiteren Konsumenten des Lohnsatzes — insb. Lohn-/Lexware-Export, Stundenübersicht (Monatliche Stunden/KM je Mitarbeiter), ggf. Team-Auslastung.
+
+
+5. UI-Andockpunkt
+
+Zwei plausible Optionen (zu entscheiden):
+
+
+(a) Rollen-Vergütungsmatrix als eigene Pflege-Ansicht (z. B. im Dienstleistungskatalog eine zusätzliche Spalte/Sektion „Vergütung je Rolle") — Standardvergütung + Teamleitungs-Vergütung je Leistung.
+(b) Pro-Mitarbeiter-Override als optionales Feld im „Benutzer bearbeiten"-Formular (Abschnitt Beschäftigungsverhältnis), das den Rollen-/Standardwert überschreibt.
+
+
+Empfehlung: mit (a) rollenbasiert starten (deckt den eigentlichen Bedarf „Teamleitung anders"), (b) optional als Ausnahme-Override ergänzen.
+
+6. GoBD / Historisierung (Pflicht, analog zu den Preisen)
+
+
+Vergütungs-Sätze datiert führen (gültig-ab-Stichtag).
+Eine Änderung ist eine neue Korrekturphase ab Datum; bestehende Historie bleibt unverändert/revisionssicher.
+Bereits abgeschlossene Monate / fakturierte Lohnläufe dürfen nicht rückwirkend verändert werden — der zum Leistungszeitpunkt gültige Satz zählt.
+
+
+7. Offene Entscheidungen (mit dem User durchsprechen)
+
+
+Granularität: Nur rollenbasiert (Teamleitung), oder auch echt mitarbeiter-individuell?
+Satz-Form: Absoluter Satz je Rolle×Leistung (Teamleitung HW = 18 €) oder Aufschlag (z. B. +2 €/Std bzw. +X % auf den Standard)? Absolut ist transparenter, Aufschlag pflegeleichter.
+Je Leistung oder pauschal? Teamleitungs-Satz je Leistung (HW/AB unterschiedlich) oder ein pauschaler Teamleitungs-Aufschlag auf alle Leistungen?
+Welche Rollen bekommen eigene Sätze? Nur Teamleitung, oder auch Geschäftsführung u. a.?
+Wirkung: ausschließlich ab Stichtag (GoBD) — bestätigen.
+Mehrfachrollen: Wenn jemand mehrere Rollen hätte — welche gewinnt? (Vermutlich höchste/spezifischste; festlegen.)
+
+
+8. Constraints / Out of Scope
+
+
+Nicht die Verkaufspreis-/Umsatz-Seite anfassen (Kundenpreise, priceFor-Auflösung bleiben unverändert).
+GoBD-Immutabilität wahren (siehe §6).
+Falls TS-Prädikate mit SQL-Spiegeln existieren (das Projekt nutzt „Drift-Guards", die TS↔SQL byte-gleich halten), müssen neue Berechnungspfade dieselbe Lockstep-Disziplin einhalten.
+Der aufgelöste Satz muss überall genutzt werden, wo Lohnkosten erscheinen (Wirtschaftsübersicht, Stundenübersicht, Lohn-/Lexware-Export) — sonst driften Anzeige und Export auseinander.
+
+
+9. Empfohlene Vorgehensweise (read-only zuerst)
+
+
+Inventur (read-only): Im Code belegen, (a) wo der Lohnsatz tatsächlich herkommt (employee_rate_cents / Leistungskatalog), (b) an welchen Stellen er konsumiert wird (economics, Stundenübersicht, Lohn-/Lexware-Export), (c) wie die bestehende Kundenpreis-Override-Auflösung (priceFor, datiert, GoBD) genau funktioniert — denn die ist die Blaupause.
+Design-Review: Datenmodell für Rollen-/Mitarbeiter-Override + Auflösungsfunktion (Reihenfolge §3) + UI-Andockpunkt (§5), entlang der Entscheidungen aus §7.
+Build erst nach Freigabe; Tests inkl. Auflösungs-Reihenfolge, Stichtags-Historie, und Konsistenz zwischen Anzeige und Export
