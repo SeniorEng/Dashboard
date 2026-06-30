@@ -1,0 +1,17 @@
+Geprüft — gut und sinnvoll, der Audit ist die richtige Antwort auf deine ursprüngliche „38/16 – aus der Tabelle oder hartcodiert?"-Frage. Solide gescoped. GO mit ein paar wichtigen Leitplanken, weil der Task neben dem (harmlosen) Audit auch reparieren soll — und Reparaturen auf den Geld-Pfaden sind heikel.
+Was gut ist:
+
+Richtiges Ziel: app-weiter Beweis, dass Preise/Löhne/km ausschließlich aus priceFor/wageFor bzw. Katalog/Tabellen kommen, keine || 38-Fallbacks/Dummies.
+Korrekt ausgeklammert: Rechts-Konstanten (§45b 131 €, §39/§42a, MwSt) sind ausdrücklich keine konfigurierbaren Sätze — wichtige, richtige Abgrenzung.
+Durabel: Verankerung am Arch-Guard calculations-in-shared.test.ts + Erweiterung, damit künftige hartcodierte Sätze auffallen — nicht nur Einmal-Audit.
+Inventur zuerst (Step 1, read-only), dann reparieren — richtige Reihenfolge.
+
+Leitplanken (priorisiert):
+
+[HOCH] Geld-Pfad: Quelle reparieren ≠ Werte ändern. Die Relevant-Files enthalten die Buchungs-/Rechnungs-Pfade (invoice-data.ts, invoice-line-items.ts, appointment-cost-calculator.ts). Kritisch: Wenn ein hartcodierter Wert gleich dem Tabellenwert ist → reines Refactoring, sicher. Wenn er abweicht → das ist ein echter Bug, und ihn zu „beheben" ändert einen Geldbetrag. Solche Fälle müssen als Befund gemeldet und bewusst entschieden werden, NICHT still umgestellt — und bereits versiegelte Rechnungen / abgeschlossene Perioden dürfen rückwirkend NICHT verändert werden (GoBD). Der Plan sagt „Werte nicht anpassen", aber genau hier steckt der Widerspruch: Quelle-fixen kann den Wert ändern. Das muss der Agent explizit trennen.
+[MITTEL] Fallback-Entfernung absichern: Vor dem Löschen eines || 1600-Defaults verifizieren, dass der SSoT/Katalog für jede Leistung einen Wert liefert — sonst tauscht man einen hartcodierten Default gegen 0/NaN ein.
+[MITTEL] Label-Semantik (genau dein 38/16-Punkt): Nicht nur prüfen „kommt aus der Tabelle", sondern auch „ist es der richtige Satz für das, was das Label behauptet" — Katalog-Standard vs. kundenaufgelöst. Ein „38 €"-Label, das den Standard zeigt, während ein konkreter Kunde 42 € zahlt, ist technisch „aus der Tabelle", aber irreführend. Der Audit soll je Anzeige dokumentieren, was der Satz bedeutet.
+[NIEDRIG] Guard-Regel präzise: Die Erweiterung muss Rechts-Konstanten/MwSt explizit allowlisten, sonst false-positives; und echte Magic-Number-Sätze (3800/1600/35…) zuverlässig fangen.
+
+Empfehlung: Lass den Agenten zuerst nur die Inventur + Klassifizierung liefern (je Fund: „gleicher Wert = kosmetisch" vs. „Wert weicht ab = echter Bug") und vor dem Anfassen der Geld-Pfade / wertändernden Fälle pausieren für deine Freigabe. Die rein kosmetischen Refactorings (gleicher Wert) kann er durchziehen; alles, was einen Betrag ändern würde, entscheidest du.
+Verdikt: GO — wenn der Agent Punkt 1 (Klassifizieren + Geld-Pfad/GoBD-Schutz) und die Inventur-Pause aufnimmt. Soll ich diese Leitplanken als kurzen Review-Kommentar für den Agenten formulieren (v. a. „kosmetisch vs. wertändernd trennen, versiegelte/abgeschlossene Perioden nie rückwirkend ändern, Inventur zuerst zur Freigabe")?
