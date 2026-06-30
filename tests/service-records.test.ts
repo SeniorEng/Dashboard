@@ -812,3 +812,99 @@ describe("LN-15: Doppel-Unterschrift Atomarität (Task #1529)", () => {
     }
   });
 });
+
+// Task #1528: Race-Schutz gegen Doppel-Monats-LN bei gleichzeitigen Requests.
+// Wenn NOCH KEIN pending-LN existiert und zwei Create-Requests gleichzeitig
+// eintreffen (Doppel-Klick / zwei Tabs), sehen beide „kein pending" und würden
+// ohne DB-Garantie je einen pending-LN anlegen. Der partielle Unique-Index
+// monthly_service_records_pending_unique_idx erzwingt genau EINEN; der Verlierer
+// läuft in 23505 und merged in den Sieger. Ergebnis: GENAU ein pending-LN.
+describe("LN-16: Monats-LN Concurrency-Schutz (Task #1528)", () => {
+  let raceCustomerId: number;
+  let raceYear: number;
+  let raceMonth: number;
+  const raceApptIds: number[] = [];
+
+  beforeAll(async () => {
+    const cust = await createTestCustomer({ nachname: `LN-Race_${Date.now()}` });
+    raceCustomerId = cust.id;
+    await apiPatch(`/api/admin/customers/${raceCustomerId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    // Ein dokumentierter Werktag im vollständig vergangenen Vormonat.
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    raceYear = prev.getFullYear();
+    raceMonth = prev.getMonth() + 1;
+    let dateStr: string | null = null;
+    for (let day = 2; day <= 28 && !dateStr; day++) {
+      const cur = new Date(raceYear, raceMonth - 1, day);
+      const dow = cur.getDay();
+      if (dow !== 0 && dow !== 6) {
+        dateStr = `${raceYear}-${String(raceMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+    }
+    expect(dateStr, "Ein Vormonats-Werktag muss verfügbar sein").toBeTruthy();
+
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: raceCustomerId,
+      date: dateStr,
+      scheduledStart: "09:00",
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(createRes.status).toBe(201);
+    raceApptIds.push(createRes.data.id);
+    const docRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/document`, {
+      actualStart: "09:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "race-test" }],
+    });
+    expect(docRes.status).toBe(200);
+  });
+
+  afterAll(async () => {
+    for (const id of raceApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch {}
+    }
+  });
+
+  it("LN-16.1 – zwei parallele Create-Requests ohne bestehenden pending-LN ⇒ genau EIN pending-LN", async () => {
+    const body = {
+      customerId: raceCustomerId,
+      employeeId: auth.user.id,
+      year: raceYear,
+      month: raceMonth,
+    };
+
+    // Beide Requests gleichzeitig abfeuern (Doppel-Submit-Simulation).
+    const [resA, resB] = await Promise.all([
+      apiPost<any>("/api/service-records", body),
+      apiPost<any>("/api/service-records", body),
+    ]);
+
+    // Beide müssen erfolgreich sein: der Sieger legt an, der Verlierer merged.
+    expect(resA.status, "Erster Request muss 201 liefern").toBe(201);
+    expect(resB.status, "Zweiter Request muss 201 liefern (Merge, kein 500)").toBe(201);
+
+    // Exakt EIN pending Monats-LN für diesen Kunde+Mitarbeiter+Monat.
+    const listRes = await apiGet<any>(
+      `/api/service-records?customerId=${raceCustomerId}&year=${raceYear}&month=${raceMonth}`
+    );
+    expect(listRes.status).toBe(200);
+    const records: any[] = Array.isArray(listRes.data) ? listRes.data : (listRes.data?.data ?? []);
+    const pendingMonthly = records.filter(
+      (r: any) => r.recordType === "monthly" && r.status === "pending"
+    );
+    expect(pendingMonthly.length, "Es darf nur EINEN pending Monats-LN geben").toBe(1);
+
+    // Beide Antworten zeigen auf denselben LN.
+    expect(resA.data.id).toBe(resB.data.id);
+    expect(resA.data.id).toBe(pendingMonthly[0].id);
+  });
+});

@@ -13,6 +13,24 @@ import { getPrimaryCustomerIds } from "../storage/customers-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { timeTrackingStorage } from "../storage/time-tracking";
 
+function hasPgCode(value: unknown): value is { code: string } {
+  return typeof value === "object" && value !== null && "code" in value
+    && typeof (value as { code: unknown }).code === "string";
+}
+
+// Task #1528 — Doppel-Monats-LN-Schutz auf DB-Ebene: der partielle Unique-Index
+// monthly_service_records_pending_unique_idx wirft 23505, wenn zwei parallele
+// Create-Requests beide einen pending-LN für denselben Kunde+Mitarbeiter+Monat
+// anlegen wollen. Der Verlierer fängt das ab und merged stattdessen.
+function isUniqueViolation(err: unknown): boolean {
+  if (hasPgCode(err) && err.code === "23505") return true;
+  if (typeof err === "object" && err !== null && "cause" in err) {
+    const cause = (err as { cause: unknown }).cause;
+    if (hasPgCode(cause) && cause.code === "23505") return true;
+  }
+  return false;
+}
+
 async function ensureMonthOpenForRecord(
   record: { employeeId: number; year: number; month: number },
   user: { isSuperAdmin?: boolean | null },
@@ -327,8 +345,9 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   // Der Lookup läuft INNERHALB der Transaktion mit `FOR UPDATE`-Sperre: so kann
   // zwischen „pending gefunden" und „Termine angehängt" keine parallele
   // Unterschrift den LN versiegeln (sonst würde ein GoBD-versiegelter LN mutiert).
-  const record = await db.transaction(async (tx) => {
-    const ip = req.ip || req.socket.remoteAddress;
+  const ip = req.ip || req.socket.remoteAddress;
+
+  const runCreateOrMerge = () => db.transaction(async (tx) => {
     const existingPending = await storage.getPendingMonthlyServiceRecord(customerId, effectiveEmployeeId, year, month, tx);
 
     if (existingPending) {
@@ -361,6 +380,19 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
 
     return rec;
   });
+
+  // Task #1528: Trifft ein gleichzeitiger Create ohne bestehenden pending-LN
+  // ein, sehen beide „kein pending" und versuchen zu inserten. Der partielle
+  // Unique-Index lässt nur EINEN gewinnen; der zweite läuft in 23505. Wir
+  // wiederholen die Transaktion EINMAL — diesmal findet der FOR-UPDATE-Lookup
+  // den inzwischen committeten pending-LN und merged korrekt hinein.
+  let record;
+  try {
+    record = await runCreateOrMerge();
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    record = await runCreateOrMerge();
+  }
 
   res.status(201).json(record);
 }));

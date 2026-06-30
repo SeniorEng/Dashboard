@@ -1,4 +1,5 @@
-import { pgTable, text, integer, serial, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, unique, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -55,6 +56,15 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   index("service_records_period_idx").on(table.year, table.month),
   index("service_records_status_idx").on(table.status),
   index("service_records_type_idx").on(table.recordType),
+  // Task #1528 — Höchstens EIN offener (pending) Monats-LN pro
+  // Kunde+Mitarbeiter+Monat. Schließt das verbleibende Race: zwei
+  // gleichzeitige Create-Requests ohne bestehenden pending-LN würden sonst
+  // beide einen anlegen (Doppel-LN). Versiegelte (employee_signed/completed)
+  // und gelöschte (deleted_at) Datensätze sind bewusst ausgenommen, damit ein
+  // neuer LN für spätere Termine korrekt angelegt werden kann.
+  uniqueIndex("monthly_service_records_pending_unique_idx")
+    .on(table.customerId, table.employeeId, table.year, table.month)
+    .where(sql`record_type = 'monthly' AND status = 'pending' AND deleted_at IS NULL`),
 ]);
 
 // Join table to link appointments to service records
