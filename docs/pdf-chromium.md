@@ -42,4 +42,17 @@ Production-Cold-Starts in der Autoscale-Umgebung emittieren die WS-Endpoint-URL 
 
 **Bewusst NICHT angefasst** (Determinismus/GoBD): Render-Pfad, `pdf_hash`/ZUGFeRD-Byte-Stabilität, `pipe=true`, `getBrowser`-Singleton, `withFreshPage`-Retries, Render-Semaphor (`PDF_RENDER_CONCURRENCY`), Background-Retry, der 60s-Launch-Timeout und der Chromium-stderr-Ring-Buffer. `--single-process` bleibt reiner Env-Override (Default in Prod AUS, siehe oben) — es würde den Network-Service-Restart höchstens kaschieren und ist unter Memory-Druck selbst eine Crash-Quelle.
 
-**Strukturelle Wurzel-Elimination (out of scope, nur dokumentiert):** Der Stampede entsteht nur, weil Autoscale kalt aus 0 hochfährt. Eine **Reserved VM** (dauerhaft warme Instanz) hätte gar keinen Boot-Stampede — Chromium wäre nach dem ersten Pre-Warm permanent heiß. Das ist eine reine Kosten-/Ops-Entscheidung (Reserved VM kostet auch im Leerlauf) und wird hier nur als Option festgehalten, nicht umgesetzt.
+## Strukturelle Wurzel-Elimination — Entscheidung: Autoscale bleibt (Task #1499)
+
+Der Stampede entsteht nur, weil Autoscale kalt aus 0 hochfährt. Eine **Reserved VM** (dauerhaft warme Instanz) hätte gar keinen Boot-Stampede — Chromium wäre nach dem ersten Pre-Warm permanent heiß und die ganze Cold-Start-Klasse (#544, #1467, #1494) verschwände strukturell statt nur entzerrt zu sein.
+
+**Bewertete Optionen:**
+
+| Option | Vorteil | Nachteil |
+| --- | --- | --- |
+| **Reserved VM** (`deploymentTarget = "vm"`) | Chromium permanent heiß → Cold-Start-Stampede strukturell beseitigt; keine PDF-Fehler-Badges mehr aus diesem Grund | Läuft rund um die Uhr kostenpflichtig (auch im Leerlauf nachts/Wochenende); eine feste Instanz, kein Auto-Scale (bei dem überschaubaren Nutzerprofil aber unkritisch) |
+| **Autoscale** (Status quo, `deploymentTarget = "autoscale"`) | Skaliert auf 0, zahlt nur bei Last → deutlich günstiger | Cold-Start durch die #1494-Hebel nur entzerrt, nicht beseitigt; unter ungünstigem Timing weiterhin Verzögerung/Retry möglich |
+
+**Entscheidung (Alrik, 2026-06-30): Autoscale bleibt.** Der Kostenvorteil wiegt schwerer als die verbleibende Cold-Start-Restwahrscheinlichkeit; ein gelegentlicher Render-Retry ist akzeptabel. Die in #1494 gebauten Hebel (Jitter, instanzübergreifender Advisory-Lock, Page-Cache-Warming, Retry-Backoff) **sind damit der bewusst gewählte, akzeptierte Ansatz** — nicht nur ein Provisorium bis zu einer VM-Migration. Das Sicherheitsnetz (Hintergrund-Retry im `invoice-pdf-orchestrator` + Startup-Backfill `backfillInvoicePdfs()`) fängt verbleibende Fehlschläge auf. `.replit` (`[deployment] deploymentTarget = "autoscale"`) bleibt unverändert.
+
+**Re-Evaluierung sinnvoll, falls** sich das Lastprofil ändert (deutlich höhere PDF-Frequenz / mehr gleichzeitige Nutzer), die #1494-Hebel die Cold-Start-Fehler nicht mehr ausreichend dämpfen, oder Reserved-VM-Kosten/Plan-Konditionen die Rechnung kippen. Dann ist der Umzug ein reiner `deployConfig({ deploymentTarget: "vm", run: [...] })`-Schritt (Run-Command aus dem `[deployment]`-Block übernehmen) plus erneuter Publish.
