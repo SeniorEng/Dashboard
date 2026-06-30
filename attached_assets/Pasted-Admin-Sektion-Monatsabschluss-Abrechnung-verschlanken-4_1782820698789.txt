@@ -1,0 +1,32 @@
+Admin-Sektion „Monatsabschluss & Abrechnung" verschlanken (4 Kacheln → 1). PLAN ONLY — bitte NICHT bauen, ich reviewe den Plan zuerst.
+What & Why
+
+Die Admin-Dashboard-Sektion „Monatsabschluss & Abrechnung" hat heute 4 Kacheln, aber nach zwei vorherigen Änderungen trägt nur noch eine echten Wert:
+
+Der Monatsabschluss läuft seit Kurzem vollautomatisch am 8. (workday-shifted), unbedingt, ohne manuelles Abschließen/Wiedereröffnen — die Abschluss-Seite ist read-only.
+Es gibt keinen Leistungsnachweis-Review-Schritt: der Mitarbeiter erstellt den LN mit dem Kunden = fertig; nichts wird zentral „geprüft/freigegeben".
+Die „Abrechnung" wurde zum zentralen Arbeitsplatz umgebaut (Rechnungserstellung, Breakdown HW/AB-Std + km, fehlende-Unterschriften, Lexware-Export).
+
+Ziel: die Sektion auf eine Kachel „Abrechnung" zusammenführen (Konsolidierung, „ersetzen statt hinzufügen"). Überflüssige Einstiegspunkte + ihr toter Code/Routes werden entfernt.
+Die 4 Kacheln (Soll):
+
+„Abrechnung" (Rechnungen erstellen, Leistungsnachweise, Storno) → bleibt, ist der Arbeitsplatz.
+„Monatsabschluss & Abrechnung — Geführter Lauf" (Abschluss/Prüfung/Rechnungen/Zahlungen/Export) → entfernen: reine Ceremony-Schicht über Teilschritten, die es einzeln schon gibt (Abschluss = automatisch; Rechnungen = Abrechnung; Zahlungen = Zahlungen & Qonto; Export = Lexware). Nur löschen, wenn die Inventur bestätigt, dass kein Schritt etwas kann, das im Arbeitsplatz fehlt.
+„Monatsabschluss" (read-only Status) → hineinfalten/entfernen: seit dem Auto-Abschluss nur noch Status; wertvolle Teile (fehlende Unterschriften, nicht-dokumentierte Termine) stehen schon im Dashboard/Arbeitsplatz.
+„Leistungsnachweis-Prüfung" (eingereichte LN prüfen und freigeben) → entfernen: es gibt keinen Review-Schritt; konzeptionell tot.
+
+Steps
+
+Read-only Inventur (zuerst, nichts löschen). Für die 3 Streich-Kacheln je Route + Page-Komponente + Backend-Endpunkte ermitteln: was sie real tun und wer darauf verlinkt/davon abhängt. Explizit belegen, dass „Geführter Lauf" und „LN-Prüfung" keinen einzigartigen Wert mehr haben und nichts Lebendes (insb. keine mitarbeiterseitige Ansicht) daran hängt. Fundstellen (Datei:Zeile) auflisten.
+Eindeutig Totes entfernen: „Leistungsnachweis-Prüfung" (Kachel + Route + Page + etwaige Review-/Freigabe-Endpunkte/Queue + Request-Schemas + Tests) und „Geführter Lauf" (nach Inventur-Bestätigung) inkl. zugehöriger Frontend-Hooks/Komponenten. Dead-Code-Check nach jeder Entfernung.
+„Monatsabschluss" falten: entscheiden und umsetzen, ob der Auto-Abschluss-Info-Banner + optional ein schlanker Status in die Abrechnung übernommen wird; Rest entfernen.
+Sektion glätten: Dashboard-Sektion auf nur „Abrechnung" reduzieren (ggf. Sektionsname anpassen). Alte Routen auf /admin/billing redirecten (kein 404 für Lesezeichen/Deep-Links).
+Tests & Guards: Tests der gelöschten Flows entfernen; sicherstellen, dass keine Verweise/Imports verwaisen; Dead-Code-/Arch-Check grün; Smoke, dass „Abrechnung" + die übernommenen Statusteile funktionieren.
+
+Out of scope / Guardrails
+
+„Ersetzen statt hinzufügen": keine neue Parallel-Fläche; alte Einstiege löschen, Links auf den Arbeitsplatz lenken.
+Nichts löschen vor der Phase-1-Inventur.
+GoBD/Daten unberührt: reine UI-/Route-/Dead-Code-Entfernung — keine versiegelten Rechnungen, keine budget_/invoice-Daten anfassen.
+Auto-Abschluss-Logik, Reminder, Abrechnung-Arbeitsplatz selbst, und der LN-Erstell-/Signier-Pfad (Mitarbeiter) bleiben unverändert — nur die zentralen „Prüf/Abschließ"-Einstiegspunkte entfallen.
+PLAN ONLY: Plan-Deliverable = Inventur (Datei:Zeile) + konkrete Entfernungs-/Faltungs-Liste mit Begründung je Posten + Redirect-Strategie + Testanpassungen. Ich reviewe vor dem Build.
