@@ -1,7 +1,14 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { iconSize } from "@/design-system";
-import { Loader2, FileText, CheckCircle2, ClipboardList } from "lucide-react";
+import {
+  Loader2,
+  FileText,
+  CheckCircle2,
+  ClipboardList,
+  ChevronDown,
+} from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
 import { BILLING_TYPE_LABELS } from "../constants";
 import { getCustomerName } from "../utils";
@@ -28,22 +35,39 @@ export function PendingInvoicesCard({
   const { visible, showAll, setShowAll, hiddenCount, capped, total } = useRowCap(
     customers ?? [],
   );
+  // Task #1501: Karte einklappbar — der Kopf dient als Toggle, der Zähler bleibt
+  // auch im eingeklappten Zustand sichtbar. Standard: aufgeklappt.
+  const [open, setOpen] = useState(true);
   return (
     <Card className="mb-6" data-testid="card-pending-invoices">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <ClipboardList className={`${iconSize.sm} text-teal-600`} />
-          Noch zu erstellen
-          {customers && customers.length > 0 && (
-            <span
-              className="ml-1 inline-flex items-center justify-center rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 border border-teal-200"
-              data-testid="text-pending-count"
-            >
-              {customers.length}
-            </span>
-          )}
+        <CardTitle className="text-base">
+          <button
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            aria-expanded={open}
+            className="flex w-full items-center gap-2 text-left"
+            data-testid="button-pending-toggle"
+          >
+            <ChevronDown
+              className={`${iconSize.sm} flex-shrink-0 text-gray-400 transition-transform ${
+                open ? "" : "-rotate-90"
+              }`}
+            />
+            <ClipboardList className={`${iconSize.sm} text-teal-600`} />
+            Noch zu erstellen
+            {customers && customers.length > 0 && (
+              <span
+                className="ml-1 inline-flex items-center justify-center rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 border border-teal-200"
+                data-testid="text-pending-count"
+              >
+                {customers.length}
+              </span>
+            )}
+          </button>
         </CardTitle>
       </CardHeader>
+      {open && (
       <CardContent className="pt-0">
         {isLoading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
@@ -133,6 +157,7 @@ export function PendingInvoicesCard({
           </>
         )}
       </CardContent>
+      )}
     </Card>
   );
 }
