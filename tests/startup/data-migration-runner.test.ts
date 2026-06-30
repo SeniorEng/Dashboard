@@ -28,6 +28,7 @@ const PRE_BUDGET_ORDER = [
   "migrate-in-progress-appointments",
   "migrate-task-status-in-progress",
   "migrate-expired-unsigned-appointments",
+  "dedupe-pending-monthly-service-records-1534",
 ];
 
 const POST_BUDGET_ORDER = [
@@ -60,14 +61,14 @@ describe("Task #1428 — NICHT-Budget Daten-Migrations-Registry", () => {
     expect(new Set(registry.map((m) => m.name)).size).toBe(registry.length);
   });
 
-  it("registriert genau 15 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
+  it("registriert genau 16 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
     const [pre, post] = await Promise.all([
       buildPreBudgetRegistry(),
       buildPostBudgetRegistry(),
     ]);
     const all = [...pre, ...post];
-    expect(all).toHaveLength(15);
-    expect(new Set(all.map((m) => m.name)).size).toBe(15);
+    expect(all).toHaveLength(16);
+    expect(new Set(all.map((m) => m.name)).size).toBe(16);
   });
 
   it("aktiviert GoBD-Bypass NUR für die drei GoBD-Backfills", async () => {

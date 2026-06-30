@@ -98,6 +98,7 @@ export async function buildPreBudgetRegistry(): Promise<GuardedBudgetMigration[]
   const { migrateInProgressAppointments } = await import("./migrate-in-progress-appointments");
   const { migrateTaskStatusInProgress } = await import("./migrate-task-status-in-progress");
   const { migrateExpiredUnsignedAppointments } = await import("./migrate-expired-unsigned-appointments");
+  const { dedupePendingMonthlyServiceRecords } = await import("./dedupe-pending-monthly-service-records");
 
   return [
     {
@@ -170,6 +171,20 @@ export async function buildPreBudgetRegistry(): Promise<GuardedBudgetMigration[]
       conservationCheck: false,
       migrate: async (tx) => {
         await migrateExpiredUnsignedAppointments(tx);
+      },
+    },
+    {
+      // Task #1534 — MUSS vor `ensureMonthlyServiceRecordPendingUnique`
+      // (pre-budget-Phase läuft VOR der Index-Erstellung in server/index.ts)
+      // laufen: konsolidiert bestehende Doppel-Monats-LNs, sonst scheitert der
+      // partielle Unique-Index still an den Duplikaten.
+      // monthly_service_records ist nicht GoBD-trigger-immutable (kein Bypass),
+      // keine Budget-Topf-Mutation (kein Conservation-Check).
+      name: "dedupe-pending-monthly-service-records-1534",
+      gobdBypass: false,
+      conservationCheck: false,
+      migrate: async (tx) => {
+        await dedupePendingMonthlyServiceRecords(tx);
       },
     },
   ];
