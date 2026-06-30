@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAuth, canAccessCustomer } from "../middleware/auth";
-import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments, invoiceLineItems, invoices as invoicesTable } from "@shared/schema";
+import { insertServiceRecordSchema, insertSingleServiceRecordSchema, signServiceRecordSchema, serviceRecordAppointments, monthlyServiceRecords, appointments, invoiceLineItems, invoices as invoicesTable, NO_SHOW_REASON_LABELS, type NoShowReason } from "@shared/schema";
 import { asyncHandler, sendForbidden, sendNotFound, sendConflict, sendBadRequest } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import { authService } from "../services/auth";
@@ -157,17 +157,43 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
   const primaryIds = await getPrimaryCustomerIds(effectiveUserId);
   const isPrimary = primaryIds.includes(customerId);
   
-  const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount] = await Promise.all([
+  const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount, noShowAppointments] = await Promise.all([
     storage.getServiceRecordByPeriod(customerId, effectiveUserId, year, month, isPrimary),
     storage.getAppointmentCountsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
     storage.getCustomer(customerId),
     storage.getCoveredBySingleCount(customerId, effectiveUserId, year, month, isPrimary),
     storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month, isPrimary),
+    storage.getNoShowAppointmentsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
   ]);
 
   const coveredCount = coveredBySingleCount + coveredByMonthlyCount;
   const uncoveredDocumentedCount = Math.max(0, counts.documentedCount - coveredCount);
-  
+
+  // Task #1518 — No-Shows rein informativ aufbereiten. Sie erzeugen weder einen
+  // Leistungsnachweis noch (außerhalb der Selbstzahler-„Vergebliche Anfahrt")
+  // eine Abrechnung. `producesCharge` spiegelt exakt die Bedingung aus
+  // `invoice-data.ts`: nur Selbstzahler mit Ausfall-Policy und ohne bewusste
+  // Unterdrückung führen zu einer Privatrechnung.
+  const noShows = noShowAppointments.map((appt) => {
+    const reason = (appt.noShowReason ?? null) as NoShowReason | null;
+    const producesCharge =
+      customerData?.billingType === "selbstzahler" &&
+      (customerData?.cancellationPolicyType ?? "none") !== "none" &&
+      !appt.noShowChargeSuppressed;
+    return {
+      id: appt.id,
+      date: appt.date,
+      scheduledStart: appt.scheduledStart,
+      scheduledEnd: appt.scheduledEnd,
+      reason,
+      reasonLabel: reason ? NO_SHOW_REASON_LABELS[reason] : null,
+      reasonText: appt.noShowReasonText ?? null,
+      notes: appt.noShowNotes ?? null,
+      chargeSuppressed: appt.noShowChargeSuppressed,
+      producesCharge,
+    };
+  });
+
   res.json({
     existingRecord,
     documentedCount: counts.documentedCount,
@@ -176,6 +202,7 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     coveredByMonthlyCount,
     uncoveredDocumentedCount,
     canCreateRecord: counts.undocumentedCount === 0 && counts.documentedCount > 0 && uncoveredDocumentedCount > 0,
+    noShowAppointments: noShows,
   });
 }));
 

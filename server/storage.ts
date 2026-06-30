@@ -114,6 +114,7 @@ export interface IStorage {
   addAppointmentsToServiceRecord(serviceRecordId: number, appointmentIds: number[]): Promise<void>;
   getDocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]>;
   getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]>;
+  getNoShowAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]>;
   getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]>;
   isAppointmentLocked(appointmentId: number): Promise<boolean>;
   getAppointmentIdsInServiceRecords(appointmentIds: number[]): Promise<number[]>;
@@ -221,6 +222,7 @@ class DatabaseStorage implements IStorage {
   addAppointmentsToServiceRecord = serviceRecordsStorage.addAppointmentsToServiceRecord;
   getDocumentedAppointmentsForPeriod = serviceRecordsStorage.getDocumentedAppointmentsForPeriod;
   getUndocumentedAppointmentsForPeriod = serviceRecordsStorage.getUndocumentedAppointmentsForPeriod;
+  getNoShowAppointmentsForPeriod = serviceRecordsStorage.getNoShowAppointmentsForPeriod;
   getPendingServiceRecords = serviceRecordsStorage.getPendingServiceRecords;
   getAppointmentIdsInServiceRecords = serviceRecordsStorage.getAppointmentIdsInServiceRecords;
   getServiceRecordForAppointment = serviceRecordsStorage.getServiceRecordForAppointment;

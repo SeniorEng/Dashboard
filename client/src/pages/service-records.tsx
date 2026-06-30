@@ -34,6 +34,19 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
+interface NoShowInfo {
+  id: number;
+  date: string;
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+  reason: string | null;
+  reasonLabel: string | null;
+  reasonText: string | null;
+  notes: string | null;
+  chargeSuppressed: boolean;
+  producesCharge: boolean;
+}
+
 interface PeriodCheckResponse {
   existingRecord: MonthlyServiceRecord | null;
   documentedCount: number;
@@ -42,12 +55,19 @@ interface PeriodCheckResponse {
   coveredByMonthlyCount: number;
   uncoveredDocumentedCount: number;
   canCreateRecord: boolean;
+  noShowAppointments: NoShowInfo[];
 }
 
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember"
 ];
+
+function formatNoShowDate(date: string): string {
+  const [year, month, day] = date.split("-").map((n) => parseInt(n, 10));
+  if (!year || !month || !day) return date;
+  return `${day}. ${MONTH_NAMES[month - 1]} ${year}`;
+}
 
 
 export default function ServiceRecordsPage() {
@@ -401,8 +421,10 @@ function CustomerDetailView({
   const readyCount = periodCheck.uncoveredDocumentedCount;
   const undocumentedCount = periodCheck.undocumentedCount;
   const hasRecords = records.length > 0;
+  const noShowAppointments = periodCheck.noShowAppointments ?? [];
+  const hasNoShows = noShowAppointments.length > 0;
   const hasAnyAppointments = periodCheck.documentedCount > 0 || undocumentedCount > 0;
-  const showEmptyState = !hasRecords && !hasAnyAppointments;
+  const showEmptyState = !hasRecords && !hasAnyAppointments && !hasNoShows;
 
   const deadline = computeDeadlineInfo(selectedYear, selectedMonth);
   const showStatusHeader = completedRecordsCount > 0 || readyCount > 0 || undocumentedCount > 0;
@@ -530,6 +552,62 @@ function CustomerDetailView({
               <ServiceRecordCard key={record.id} record={record} />
             ))}
           </div>
+        </div>
+      )}
+
+      {hasNoShows && (
+        <div className="flex flex-col gap-2" data-testid="section-no-shows">
+          <h2 className="text-sm font-medium text-muted-foreground px-1">
+            Nicht stattgefundene Termine (kein Leistungsnachweis)
+          </h2>
+          <Card>
+            <CardContent className="p-4 sm:p-5">
+              <p className="text-sm text-muted-foreground mb-3" data-testid="text-no-show-intro">
+                Diese Termine haben nicht stattgefunden und sind hier nur zur Information aufgeführt.
+                Sie erzeugen weder einen Leistungsnachweis noch eine offene Aufgabe.
+              </p>
+              <div className="flex flex-col divide-y divide-border">
+                {noShowAppointments.map((ns) => (
+                  <div
+                    key={ns.id}
+                    className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0"
+                    data-testid={`row-no-show-${ns.id}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium" data-testid={`text-no-show-date-${ns.id}`}>
+                        {formatNoShowDate(ns.date)}
+                      </span>
+                      {ns.scheduledStart && (
+                        <span className="text-sm text-muted-foreground" data-testid={`text-no-show-time-${ns.id}`}>
+                          {ns.scheduledStart.slice(0, 5)}
+                          {ns.scheduledEnd ? `–${ns.scheduledEnd.slice(0, 5)} Uhr` : " Uhr"}
+                        </span>
+                      )}
+                      <Badge variant="secondary" data-testid={`badge-no-show-${ns.id}`}>
+                        Nicht stattgefunden
+                      </Badge>
+                    </div>
+                    {(ns.reasonLabel || ns.reasonText) && (
+                      <p className="text-sm text-muted-foreground" data-testid={`text-no-show-reason-${ns.id}`}>
+                        {ns.reasonLabel}
+                        {ns.reasonText ? `${ns.reasonLabel ? " – " : ""}${ns.reasonText}` : ""}
+                      </p>
+                    )}
+                    {ns.notes && (
+                      <p className="text-sm text-muted-foreground" data-testid={`text-no-show-notes-${ns.id}`}>
+                        {ns.notes}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground" data-testid={`text-no-show-billing-${ns.id}`}>
+                      {ns.producesCharge
+                        ? "Wird als „Vergebliche Anfahrt“ privat abgerechnet."
+                        : "Kein Leistungsnachweis und keine Abrechnung."}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 

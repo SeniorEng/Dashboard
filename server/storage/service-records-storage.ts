@@ -10,6 +10,7 @@ import {
   invoices as invoicesTable,
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
+import { UNDOCUMENTED_STATUSES } from "@shared/domain/appointments";
 import { computeDataHash } from "../services/signature-integrity";
 import { analyzeSignatureImage } from "../lib/signature-validation";
 import { eq, sql as sqlBuilder, ne, and, or, inArray, isNull, type SQL, type SQLWrapper } from "drizzle-orm";
@@ -295,7 +296,27 @@ export function getDocumentedAppointmentsForPeriod(customerId: number, employeeI
 }
 
 export function getUndocumentedAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
-  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [ne(appointments.status, 'completed'), ne(appointments.status, 'cancelled')], isPrimary);
+  // „Undokumentiert" = der Termin wartet noch auf eine Mitarbeiter-Handlung
+  // (geplant oder in Dokumentation). Terminal-Status — `completed`,
+  // `cancelled` UND `customer_no_show` — gehören NICHT hierher. No-Shows sind
+  // bewusst kein To-do (Task #1518); sie würden sonst sowohl die
+  // LN-Erstellung blockieren als auch in der „Offene Termine"-Liste auftauchen.
+  // Positiv gefiltert über UNDOCUMENTED_STATUSES, damit diese Liste deckungs-
+  // gleich mit `getAppointmentCountsForPeriod.undocumentedCount` bleibt.
+  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [inArray(appointments.status, UNDOCUMENTED_STATUSES)], isPrimary);
+}
+
+/**
+ * No-Show-Termine eines Kunden im Monat — rein informativ (Task #1518).
+ *
+ * Diese Termine erzeugen KEINEN Leistungsnachweis und sind kein To-do; sie
+ * werden ausschließlich für die Büro-/Admin-Anzeige geladen, damit
+ * nachvollziehbar bleibt, warum an einem Tag „nichts passiert" ist. Die
+ * Abrechnungslogik (private „Vergebliche Anfahrt" für Selbstzahler) bleibt
+ * unberührt.
+ */
+export function getNoShowAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]> {
+  return getAppointmentsForPeriodBase(customerId, employeeId, year, month, [eq(appointments.status, 'customer_no_show')], isPrimary);
 }
 
 export async function getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]> {
