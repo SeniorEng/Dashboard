@@ -12,29 +12,6 @@ export interface MonthClosingStatus {
   reopenedByUserId: number | null;
 }
 
-export interface OpenAppointment {
-  id: number;
-  date: string;
-  scheduledStart: string | null;
-  status: string;
-  customerName: string;
-}
-
-export interface MonthClosingReadiness {
-  ready: boolean;
-  openAppointments: OpenAppointment[];
-  unsignedAppointments: OpenAppointment[];
-  hasTimeEntries: boolean;
-  timeEntryCount: number;
-}
-
-export interface AdminEmployeeReadiness extends MonthClosingReadiness {
-  userId: number;
-  displayName: string;
-  isClosed: boolean;
-  closingId: number | null;
-}
-
 export function useMonthClosingStatus(year: number, month: number) {
   return useQuery<{ closing: MonthClosingStatus | null }>({
     queryKey: ["month-closing", year, month],
@@ -46,20 +23,9 @@ export function useMonthClosingStatus(year: number, month: number) {
   });
 }
 
-export function useAdminMonthClosingReadiness(year: number, month: number) {
-  return useQuery<{ employees: AdminEmployeeReadiness[] }>({
-    queryKey: ["admin-month-closing-readiness", year, month],
-    queryFn: async () => {
-      const result = await api.get<{ employees: AdminEmployeeReadiness[] }>(
-        `/time-entries/month-closings/admin/${year}/${month}/readiness`
-      );
-      return unwrapResult(result);
-    },
-    staleTime: 30000,
-  });
-}
-
 // Task #1496: useAdminCloseMonth / useAdminReopenMonth / useAdminBatchCloseMonth
 // wurden entfernt — der Monatsabschluss läuft ausschließlich automatisch am Cutoff
-// (kein manueller Einzel-/Batch-Abschluss, kein Wieder-Öffnen mehr). Diese Datei
-// stellt nur noch lesende Status-/Readiness-Queries bereit.
+// (kein manueller Einzel-/Batch-Abschluss, kein Wieder-Öffnen mehr).
+// Task #1504: Die admin-seitige Readiness-Query (useAdminMonthClosingReadiness)
+// wurde mit der read-only Monatsabschluss-Seite entfernt. Diese Datei stellt nur
+// noch den lesenden Mitarbeiter-Status (useMonthClosingStatus) bereit.

@@ -313,10 +313,10 @@ export default function AdminTimeEntries() {
               </div>
             </div>
             <div className={componentStyles.pageHeaderActions}>
-              <Link href="/admin/month-closing">
+              <Link href="/admin/billing">
                 <Button variant="outline" size="sm" data-testid="link-month-closing">
                   <Lock className={`${iconSize.sm} mr-1`} />
-                  Monatsabschluss
+                  Abrechnung
                   <ExternalLink className="h-3 w-3 ml-1" />
                 </Button>
               </Link>

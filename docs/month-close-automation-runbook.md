@@ -22,9 +22,9 @@
   - `GET /month-closing/missing-signatures` (requireAdmin) — fehlende Unterschriften nach Abschluss
   - `GET /month-closing/:year/:month` + `/readiness` + `/preview`
   - `GET /month-close/banner`, `GET /month-close/cutoff/:year/:month`
-- `client/src/components/month-close-banner.tsx` — In-App-Banner (im `Layout`)
-- `client/src/pages/admin/month-closing.tsx` — Admin-Seite (read-only): Cutoff-Karte + Liste „fehlende Unterschriften nach Abschluss"
-- `client/src/features/admin/components/admin-cockpit.tsx` — Cockpit-Inbox-Eintrag, der auf die offenen Unterschriften verlinkt
+- `client/src/components/month-close-banner.tsx` — In-App-Banner (im `Layout`); Admin-CTA führt in den Arbeitsplatz „Abrechnung" (`/admin/billing`)
+- `client/src/features/billing/components/missing-signatures-card.tsx` — Liste „fehlende Unterschriften nach Abschluss" (jetzt im Arbeitsplatz „Abrechnung", Task #1504; die eigenständige read-only Monatsabschluss-Seite wurde entfernt)
+- `client/src/features/admin/components/admin-cockpit.tsx` — Cockpit-Inbox-Eintrag, der auf die offenen Unterschriften (`/admin/billing`) verlinkt
 
 ## Manuelle Tests
 1. **Cutoff-Berechnung**: `npx vitest run tests/equality/month-close-cutoff.test.ts`

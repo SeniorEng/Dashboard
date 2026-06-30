@@ -45,7 +45,7 @@ const DOMAIN_QUERY_KEYS: Record<Domain, string[][]> = {
     ["month-closing"],
     ["month-closing-readiness"],
     ["month-closing-preview"],
-    ["admin-month-closing-readiness"],
+    ["month-closing-missing-signatures"],
     ["open-tasks"],
   ],
   "service-records": [

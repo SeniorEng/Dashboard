@@ -19,9 +19,9 @@ const MONTH_NAMES = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli
 
 export function MonthCloseBanner() {
   const { user } = useAuth();
-  // Admins landen im geführten Lauf (Station ① Dokumentation); der Hub ist
-  // admin-only, daher gehen alle anderen in ihre eigene Zeiterfassung.
-  const blockerHref = user?.isAdmin ? "/admin/month-close-run" : "/my-times";
+  // Admins landen im Arbeitsplatz „Abrechnung" (Monatsabschluss + Rechnungen);
+  // alle anderen gehen in ihre eigene Zeiterfassung.
+  const blockerHref = user?.isAdmin ? "/admin/billing" : "/my-times";
   const { data } = useQuery<{ banner: BannerData | null }>({
     queryKey: ["month-close-banner"],
     queryFn: async () => {

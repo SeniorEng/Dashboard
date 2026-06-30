@@ -42,6 +42,7 @@ import {
   EconomicsOverviewCard,
   StatusPipelineCard,
   TermineTab,
+  MissingSignaturesCard,
   InvoiceList,
   PendingInvoicesCard,
   BulkSendDialog,
@@ -354,6 +355,8 @@ export default function AdminBilling() {
         activeStatus={statusFilter}
         onStageSelect={handleStageSelect}
       />
+
+      <MissingSignaturesCard />
 
       <div
         className="mb-4 mt-2 inline-flex gap-1 rounded-lg border border-gray-200 bg-white p-1"

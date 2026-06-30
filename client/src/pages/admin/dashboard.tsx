@@ -8,7 +8,7 @@ import { Layout } from "@/components/layout";
 import {
   Users, ArrowLeft, Contact2, Clock, Settings,
   Building2, ClipboardList, FileText, Shield, Receipt, Gift, BarChart3, UserPlus,
-  GraduationCap, FileCheck, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, CalendarClock, Lock, Repeat,
+  GraduationCap, Landmark, MessageSquare, FileSpreadsheet, CalendarCheck, CalendarClock, Repeat,
   ChevronDown,
 } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
@@ -263,39 +263,12 @@ export default function AdminDashboard() {
       icon: <Receipt className={iconSize.md} />,
       cards: [
         {
-          href: "/admin/month-close-run",
-          testId: "card-month-close-run",
-          icon: <CalendarCheck className={`${iconSize.lg} text-teal-600`} />,
-          iconBg: "bg-teal-100",
-          title: "Monatsabschluss & Abrechnung",
-          description: "Geführter Lauf: Abschluss, Prüfung, Rechnungen, Zahlungen, Export",
-          permissionKey: "billing",
-        },
-        {
-          href: "/admin/month-closing",
-          testId: "card-month-closing",
-          icon: <Lock className={`${iconSize.lg} text-teal-600`} />,
-          iconBg: "bg-teal-100",
-          title: "Monatsabschluss",
-          description: "Monate zentral für alle Mitarbeiter prüfen und abschließen",
-          permissionKey: "time_entries",
-        },
-        {
           href: "/admin/billing",
           testId: "card-billing",
           icon: <Receipt className={`${iconSize.lg} text-emerald-600`} />,
           iconBg: "bg-emerald-100",
           title: "Abrechnung",
-          description: "Rechnungen erstellen, Leistungsnachweise und Storno",
-          permissionKey: "billing",
-        },
-        {
-          href: "/admin/proof-review",
-          testId: "card-proof-review",
-          icon: <FileCheck className={`${iconSize.lg} text-sky-600`} />,
-          iconBg: "bg-sky-100",
-          title: "Leistungsnachweis-Prüfung",
-          description: "Eingereichte Leistungsnachweise prüfen und freigeben",
+          description: "Monatsabschluss, Rechnungen, Leistungsnachweise und Storno",
           permissionKey: "billing",
         },
         {

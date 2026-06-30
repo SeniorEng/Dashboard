@@ -74,7 +74,7 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
   const overspendAlert = findAlert("Budget-Überschreitung");
 
   // Task #1496: Aktive „fehlende Unterschriften nach Abschluss"-Liste — gleiche
-  // Quelle wie die Zielseite (/admin/month-closing), abgeleitet aus der
+  // Quelle wie der Arbeitsplatz „Abrechnung" (/admin/billing), abgeleitet aus der
   // „Dokumentiert"-Stufe gefiltert auf geschlossene Monate.
   const { data: missingSignatures } = useQuery<{ items: unknown[] }>({
     queryKey: ["month-closing-missing-signatures"],
@@ -133,7 +133,7 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
           : `${monthLabel} – ${banner.daysUntilCutoff < 0 ? "überfällig" : `${banner.daysUntilCutoff} Tage bis Cutoff`}`
         : "Kein offener Abschluss",
       count: monthCloseCount,
-      href: "/admin/month-closing",
+      href: "/admin/billing",
       show: can("time_entries"),
     },
     {
@@ -151,7 +151,7 @@ export function AdminCockpit({ isSuperAdmin, can }: AdminCockpitProps) {
       label: "Fehlende Unterschriften",
       subtitle: "Dokumentierte Termine in abgeschlossenen Monaten ohne Unterschrift",
       count: missingSignatureCount,
-      href: "/admin/month-closing",
+      href: "/admin/billing",
       show: can("time_entries"),
     },
     {
