@@ -16,6 +16,11 @@ fails on a clean checkout (completed-unsigned appts now DO count toward wage hou
 
 **How to apply:** if you see this test red while touching wage/export code, do NOT
 re-introduce `documentedAndSignedSqlRaw` into the hours queries to make it green — that
-would regress the decoupled semantics. The test itself is stale and should be updated
-to the documented-only expectation (or removed) under a payroll-semantics task, not a
-wage-rate task. Confirm pre-existing-ness via `git diff HEAD` on the gating lines.
+would regress the decoupled semantics. Confirm pre-existing-ness via `git diff HEAD` on
+the gating lines.
+
+**Resolved:** `tests/lexware-export-signed-gate.test.ts` was updated to documented-only
+expectations — completed-but-unsigned appts DO count toward wage hours/km AND still
+surface as the `completedButUnsignedSqlRaw` warning (count + minutes); only `documenting`
+(non-completed) is excluded. The `unsigned-only employee` case now expects counted hours
+(2.0h) PLUS the warning, not 0h. Don't revert these to signature-gated assertions.
