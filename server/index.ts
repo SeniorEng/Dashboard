@@ -366,6 +366,20 @@ async function runStartupTasks() {
       log(`Qonto-Match-Idempotenz-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { ensureRoleWageRates } = await import("./startup/ensure-role-wage-rates");
+    try {
+      await ensureRoleWageRates();
+    } catch (err) {
+      log(`Role-Wage-Rates-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
+    const { dropEmployeeCompensationHistory } = await import("./startup/drop-employee-compensation-history");
+    try {
+      await dropEmployeeCompensationHistory();
+    } catch (err) {
+      log(`Drop-Employee-Compensation-History-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { serviceCatalogStorage } = await import("./storage/service-catalog");
     try {
       await serviceCatalogStorage.syncServiceCatalog();

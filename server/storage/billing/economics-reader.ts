@@ -34,9 +34,11 @@ import {
 } from "@shared/domain/statistics/economics";
 import type {
   EconomicsBreakdown,
+  EconomicsCostOverride,
   EconomicsInput,
   EconomicsRatesCents,
 } from "@shared/statistics";
+import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
@@ -82,16 +84,31 @@ async function resolveRatesPlus(): Promise<RatesPlus> {
   };
 }
 
-/** Pro-Mitarbeiter gesammelte Mengen, die in `buildEconomics` einfließen. */
+/**
+ * Pro-Mitarbeiter gesammelte Mengen UND rollenbasierte Kosten, die in
+ * `buildEconomics` einfließen.
+ *
+ * Task #1503: Die `*Cost`-Felder sind die über `wageFor` (Rolle des
+ * leistenden/buchenden Mitarbeiters × Leistung × Datum) PRO Termin/Eintrag
+ * gerundeten Kosten. Da der Summen-Überblick (`totalAgg`) seine Kosten als
+ * Summe der bereits gerundeten Mitarbeiter-Kosten bildet, gilt
+ * Σ(Mitarbeiter-Kosten) === Termin-genaue Gesamtkosten exakt.
+ */
 interface EmpAgg {
   hwMinutes: number;
   abMinutes: number;
   hwRevenueCents: number;
   abRevenueCents: number;
+  hwCostCents: number;
+  abCostCents: number;
   travelKm: number;
   customerKm: number;
   timeEntryKm: number;
+  travelKmPaidCents: number;
+  customerKmPaidCents: number;
+  timeEntryKmPaidCents: number;
   nonBillable: Map<string, number>;
+  nonBillableCost: Map<string, number>;
 }
 
 function emptyAgg(): EmpAgg {
@@ -100,10 +117,16 @@ function emptyAgg(): EmpAgg {
     abMinutes: 0,
     hwRevenueCents: 0,
     abRevenueCents: 0,
+    hwCostCents: 0,
+    abCostCents: 0,
     travelKm: 0,
     customerKm: 0,
     timeEntryKm: 0,
+    travelKmPaidCents: 0,
+    customerKmPaidCents: 0,
+    timeEntryKmPaidCents: 0,
     nonBillable: new Map(),
+    nonBillableCost: new Map(),
   };
 }
 
@@ -138,13 +161,17 @@ export async function readBillingEconomics(
 
   const rates = await resolveRatesPlus();
 
-  // --- 1) HW/AB-Minuten je Mitarbeiter (appt-Ebene, DISTINCT ON, wie SSoT). ----
+  // --- 1) HW/AB-Minuten + rollenbasierte Kosten je Mitarbeiter (appt-Ebene). ---
+  // Task #1503: Kosten je Termin über `wageFor` (Rolle des leistenden
+  // Mitarbeiters × kanonische Kategorie-Leistung × Termin-Datum), pro Termin
+  // gerundet (`ROUND(min/60 × Lohnsatz)`), dann je Mitarbeiter summiert.
   const minutesRes = await db.execute(sql`
     WITH appt_category AS (
       SELECT DISTINCT ON (a.id)
         a.id,
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
         a.duration_promised,
+        a.date::date AS d,
         CASE
           WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN s.lohnart_kategorie
           ELSE 'sonstige'
@@ -157,11 +184,21 @@ export async function readBillingEconomics(
       ORDER BY a.id,
         CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
         COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+    ),
+    priced AS (
+      SELECT ac.employee_id, ac.category, ac.duration_promised,
+        ROUND(ac.duration_promised / 60.0 * ${resolvedWageCentsSql(wageRoleSql("u"), "cs", sql`ac.d`)}) AS cost_cents
+      FROM appt_category ac
+      LEFT JOIN users u ON u.id = ac.employee_id
+      LEFT JOIN services cs ON cs.code = ac.category
+      WHERE ac.category IN ('hauswirtschaft','alltagsbegleitung')
     )
     SELECT employee_id,
       COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN duration_promised END), 0)::int AS hw,
-      COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN duration_promised END), 0)::int AS ab
-    FROM appt_category
+      COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN duration_promised END), 0)::int AS ab,
+      COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN cost_cents END), 0)::bigint AS hw_cost,
+      COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN cost_cents END), 0)::bigint AS ab_cost
+    FROM priced
     WHERE employee_id IS NOT NULL
     GROUP BY employee_id
   `);
@@ -200,16 +237,30 @@ export async function readBillingEconomics(
     GROUP BY employee_id
   `);
 
-  // --- 3) Termin-km (Anfahrt + Kunden-km) je Mitarbeiter. ---------------------
+  // --- 3) Termin-km (Anfahrt + Kunden-km) + rollenbasierte km-Kosten je MA. ----
+  // km je Termin auf 2 NK quantisiert (km-SSoT) × `wageFor`-km-Lohnsatz, pro
+  // Termin gerundet, dann je Mitarbeiter summiert.
   const kmRes = await db.execute(sql`
-    SELECT COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
-      COALESCE(SUM(COALESCE(a.travel_kilometers, 0)), 0)::float8 AS travel_km,
-      COALESCE(SUM(COALESCE(a.customer_kilometers, 0)), 0)::float8 AS customer_km
-    FROM appointments a
-    WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
-      AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IS NOT NULL
-      ${dApptFilter} ${empApptFilter} ${insApptFilter}
-    GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
+    WITH appt_km AS (
+      SELECT COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
+        a.date::date AS d,
+        COALESCE(a.travel_kilometers, 0) AS tkm,
+        COALESCE(a.customer_kilometers, 0) AS ckm
+      FROM appointments a
+      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+        AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IS NOT NULL
+        ${dApptFilter} ${empApptFilter} ${insApptFilter}
+    )
+    SELECT ak.employee_id,
+      COALESCE(SUM(ak.tkm), 0)::float8 AS travel_km,
+      COALESCE(SUM(ak.ckm), 0)::float8 AS customer_km,
+      COALESCE(SUM(ROUND(ROUND(ak.tkm::numeric, 2) * ${resolvedWageCentsSql(wageRoleSql("u"), "cst", sql`ak.d`)})), 0)::bigint AS travel_paid,
+      COALESCE(SUM(ROUND(ROUND(ak.ckm::numeric, 2) * ${resolvedWageCentsSql(wageRoleSql("u"), "csc", sql`ak.d`)})), 0)::bigint AS customer_paid
+    FROM appt_km ak
+    LEFT JOIN users u ON u.id = ak.employee_id
+    LEFT JOIN services cst ON cst.code = 'travel_km'
+    LEFT JOIN services csc ON csc.code = 'customer_km'
+    GROUP BY ak.employee_id
   `);
 
   // --- 4) Overhead (nicht-abrechenbare Zeit + Zeiterfassungs-km) — nur ohne ----
@@ -217,19 +268,31 @@ export async function readBillingEconomics(
   let nbRows: Rows = [];
   let teKmRows: Rows = [];
   if (includeOverhead) {
+    // Nicht-abrechenbare Zeit zum HW-Lohnsatz DER ROLLE des Mitarbeiters
+    // bewertet (Spiegel von `nonBillableRateCents` = HW-Satz), pro Eintrag
+    // gerundet, dann je Mitarbeiter × Kategorie summiert.
     const nbRes = await db.execute(sql`
       SELECT t.user_id AS employee_id, t.entry_type AS category,
-        COALESCE(SUM(t.duration_minutes), 0)::int AS minutes
+        COALESCE(SUM(t.duration_minutes), 0)::int AS minutes,
+        COALESCE(SUM(ROUND(t.duration_minutes / 60.0 * ${resolvedWageCentsSql(wageRoleSql("u"), "cs", sql`t.entry_date::date`)})), 0)::bigint AS cost
       FROM employee_time_entries t
+      LEFT JOIN users u ON u.id = t.user_id
+      LEFT JOIN services cs ON cs.code = 'hauswirtschaft'
       WHERE t.deleted_at IS NULL
         AND t.entry_type IN ('bueroarbeit','vertrieb','sonstiges','krankheit','urlaub')
         ${dTeFilter} ${empTeFilter}
       GROUP BY t.user_id, t.entry_type
     `);
     nbRows = nbRes.rows as Rows;
+    // Zeiterfassungs-km zum Anfahrts-Lohnsatz DER ROLLE bewertet (Spiegel von
+    // `travelKmRateCents`), je Eintrag km auf 2 NK quantisiert + gerundet.
     const teKmRes = await db.execute(sql`
-      SELECT t.user_id AS employee_id, COALESCE(SUM(COALESCE(t.kilometers, 0)), 0)::float8 AS te_km
+      SELECT t.user_id AS employee_id,
+        COALESCE(SUM(COALESCE(t.kilometers, 0)), 0)::float8 AS te_km,
+        COALESCE(SUM(ROUND(ROUND(COALESCE(t.kilometers, 0)::numeric, 2) * ${resolvedWageCentsSql(wageRoleSql("u"), "cst", sql`t.entry_date::date`)})), 0)::bigint AS te_paid
       FROM employee_time_entries t
+      LEFT JOIN users u ON u.id = t.user_id
+      LEFT JOIN services cst ON cst.code = 'travel_km'
       WHERE t.deleted_at IS NULL ${dTeFilter} ${empTeFilter}
       GROUP BY t.user_id
     `);
@@ -253,6 +316,8 @@ export async function readBillingEconomics(
     const e = ensure(id);
     e.hwMinutes += num(row.hw);
     e.abMinutes += num(row.ab);
+    e.hwCostCents += num(row.hw_cost);
+    e.abCostCents += num(row.ab_cost);
   }
   for (const row of revenueRes.rows as Rows) {
     const id = num(row.employee_id);
@@ -267,6 +332,8 @@ export async function readBillingEconomics(
     const e = ensure(id);
     e.travelKm += num(row.travel_km);
     e.customerKm += num(row.customer_km);
+    e.travelKmPaidCents += num(row.travel_paid);
+    e.customerKmPaidCents += num(row.customer_paid);
   }
   for (const row of nbRows) {
     const id = num(row.employee_id);
@@ -274,12 +341,28 @@ export async function readBillingEconomics(
     const e = ensure(id);
     const cat = String(row.category);
     e.nonBillable.set(cat, (e.nonBillable.get(cat) ?? 0) + num(row.minutes));
+    e.nonBillableCost.set(cat, (e.nonBillableCost.get(cat) ?? 0) + num(row.cost));
   }
   for (const row of teKmRows) {
     const id = num(row.employee_id);
     if (!id) continue;
-    ensure(id).timeEntryKm += num(row.te_km);
+    const e = ensure(id);
+    e.timeEntryKm += num(row.te_km);
+    e.timeEntryKmPaidCents += num(row.te_paid);
   }
+
+  // Task #1503: rollenbasierte Kosten (in SQL über `wageFor` je leistendem
+  // Mitarbeiter aufgelöst) als Override an die SSoT übergeben — ersetzt die
+  // KOSTEN-Seite; Erlös/Preis bleibt katalog-/preisgesteuert.
+  const costOverrideFor = (agg: EmpAgg): EconomicsCostOverride => ({
+    hauswirtschaftCostCents: agg.hwCostCents,
+    alltagsbegleitungCostCents: agg.abCostCents,
+    erstberatungCostCents: 0,
+    nonBillableCostCentsByCategory: Object.fromEntries(agg.nonBillableCost),
+    travelKmPaidCents: agg.travelKmPaidCents,
+    customerKmPaidCents: agg.customerKmPaidCents,
+    timeEntryKmPaidCents: agg.timeEntryKmPaidCents,
+  });
 
   const inputFor = (agg: EmpAgg): EconomicsInput => ({
     rates,
@@ -296,6 +379,7 @@ export async function readBillingEconomics(
     customerKm: agg.customerKm,
     timeEntryKm: agg.timeEntryKm,
     documentedServiceRevenueCents: agg.hwRevenueCents + agg.abRevenueCents,
+    costOverride: costOverrideFor(agg),
   });
 
   const buildRow = (
@@ -380,11 +464,19 @@ export async function readBillingEconomics(
     totalAgg.abMinutes += agg.abMinutes;
     totalAgg.hwRevenueCents += agg.hwRevenueCents;
     totalAgg.abRevenueCents += agg.abRevenueCents;
+    totalAgg.hwCostCents += agg.hwCostCents;
+    totalAgg.abCostCents += agg.abCostCents;
     totalAgg.travelKm += agg.travelKm;
     totalAgg.customerKm += agg.customerKm;
     totalAgg.timeEntryKm += agg.timeEntryKm;
+    totalAgg.travelKmPaidCents += agg.travelKmPaidCents;
+    totalAgg.customerKmPaidCents += agg.customerKmPaidCents;
+    totalAgg.timeEntryKmPaidCents += agg.timeEntryKmPaidCents;
     for (const [cat, m] of agg.nonBillable) {
       totalAgg.nonBillable.set(cat, (totalAgg.nonBillable.get(cat) ?? 0) + m);
+    }
+    for (const [cat, c] of agg.nonBillableCost) {
+      totalAgg.nonBillableCost.set(cat, (totalAgg.nonBillableCost.get(cat) ?? 0) + c);
     }
   }
   const totalEcon = buildEconomics(inputFor(totalAgg));

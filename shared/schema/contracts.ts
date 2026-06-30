@@ -178,3 +178,59 @@ export const insertPriceSchema = z.object({
 
 export type Price = typeof prices.$inferSelect;
 export type InsertPrice = z.infer<typeof insertPriceSchema>;
+
+// ============================================
+// ROLLENBASIERTE VERGÜTUNG (Task #1503)
+// ============================================
+// `role_wage_rates` ist die EINE zeitversionierte Lohnsatz-Quelle hinter der
+// `wageFor`-SSoT (`shared/domain/pricing/wage-for.ts`) — analog zur `prices`-SSoT
+// hinter `priceFor`. Sie ERSETZT den flachen Katalogwert
+// (`services.employee_rate_cents`) als Override-Quelle UND die schlafende
+// `employee_compensation_history` (datierte, nie befüllte Mitarbeiter-Sätze).
+//
+// Auflösung (Mitarbeiter × Leistung × Datum):
+//   1. Rollen-Satz (Rolle × Leistung, datiert) — diese Tabelle
+//   2. Katalog-Standardvergütung (`services.employee_rate_cents`) — Fallback
+//
+// Rolle = die des LEISTENDEN Mitarbeiters (admin > teamLead > employee), nicht
+// des Anfragenden — abgeleitet über `wageRoleForUserFlags`.
+//
+// Append-only/GoBD: bestehende Zeilen werden NIE in-place überschrieben; eine
+// Änderung ist immer eine neue versionierte Zeile (Phasen-Append + Soft-Delete
+// bei identischem validFrom). Partieller Unique-Index verhindert zwei aktive
+// Sätze mit identischem validFrom je (Rolle, Service).
+export const WAGE_ROLES = ["admin", "teamLead", "employee"] as const;
+export type WageRole = typeof WAGE_ROLES[number];
+
+export const roleWageRates = pgTable("role_wage_rates", {
+  id: serial("id").primaryKey(),
+  // Rolle des leistenden Mitarbeiters (s. WAGE_ROLES).
+  role: text("role").notNull(),
+  serviceId: integer("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  // Absoluter Stundensatz in Integer-Cents (SSoT-Geldregel) — Existenz der Zeile
+  // gewinnt, auch cents=0.
+  cents: integer("cents").notNull(),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to"), // null = offenes Ende (aktiv)
+  // Soft-Delete (verlustfreier Ersatz bei identischem validFrom).
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+}, (table) => [
+  index("role_wage_rates_role_service_idx").on(table.role, table.serviceId),
+  // Verhindert zwei aktive Sätze mit identischem validFrom je (Rolle, Service).
+  uniqueIndex("role_wage_rates_active_validfrom_uniq")
+    .on(table.role, table.serviceId, table.validFrom)
+    .where(sql`deleted_at IS NULL`),
+]);
+
+export const insertRoleWageRateSchema = z.object({
+  role: z.enum(WAGE_ROLES),
+  serviceId: z.number().int(),
+  cents: z.number().int().min(0, "Betrag darf nicht negativ sein"),
+  validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein").optional(),
+  validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum muss im Format YYYY-MM-DD sein").nullable().optional(),
+});
+
+export type RoleWageRate = typeof roleWageRates.$inferSelect;
+export type InsertRoleWageRate = z.infer<typeof insertRoleWageRateSchema>;

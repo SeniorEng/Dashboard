@@ -48,20 +48,31 @@ export function nonBillableRateCents(rates: EconomicsRatesCents): number {
  */
 export function buildEconomics(input: EconomicsInput): EconomicsBreakdown {
   const { rates } = input;
+  // Task #1503: rollenbasierte Kosten (in SQL über `wageFor` aufgelöst) gewinnen
+  // über die flache Katalogrechnung; fehlt das Override, gilt das alte Verhalten.
+  const ov = input.costOverride;
 
-  const hwCost = costForMinutes(input.hauswirtschaftMinutes, rates.hauswirtschaftRateCents);
-  const abCost = costForMinutes(input.alltagsbegleitungMinutes, rates.alltagsbegleitungRateCents);
+  const hwCost = ov
+    ? ov.hauswirtschaftCostCents
+    : costForMinutes(input.hauswirtschaftMinutes, rates.hauswirtschaftRateCents);
+  const abCost = ov
+    ? ov.alltagsbegleitungCostCents
+    : costForMinutes(input.alltagsbegleitungMinutes, rates.alltagsbegleitungRateCents);
   const billableMinutes = input.hauswirtschaftMinutes + input.alltagsbegleitungMinutes;
   const billableCost = hwCost + abCost;
 
-  const erstberatungCost = costForMinutes(input.erstberatungMinutes, rates.erstberatungRateCents);
+  const erstberatungCost = ov
+    ? ov.erstberatungCostCents
+    : costForMinutes(input.erstberatungMinutes, rates.erstberatungRateCents);
 
   const nbRate = nonBillableRateCents(rates);
   const byCategory = input.nonBillable.map((c) => ({
     category: c.category,
     label: getEntryTypeLabel(c.category),
     minutes: c.minutes,
-    costCents: costForMinutes(c.minutes, nbRate),
+    costCents: ov
+      ? (ov.nonBillableCostCentsByCategory[c.category] ?? 0)
+      : costForMinutes(c.minutes, nbRate),
   }));
   const nonBillableMinutes = byCategory.reduce((s, c) => s + c.minutes, 0);
   const nonBillableCost = byCategory.reduce((s, c) => s + c.costCents, 0);
@@ -72,19 +83,25 @@ export function buildEconomics(input: EconomicsInput): EconomicsBreakdown {
   const travel = {
     km: input.travelKm,
     chargedCents: computeKmLineTotalCents(input.travelKm, rates.travelKmPriceCents),
-    paidCents: computeKmLineTotalCents(input.travelKm, rates.travelKmRateCents),
+    paidCents: ov
+      ? ov.travelKmPaidCents
+      : computeKmLineTotalCents(input.travelKm, rates.travelKmRateCents),
   };
   const customer = {
     km: input.customerKm,
     chargedCents: computeKmLineTotalCents(input.customerKm, rates.customerKmPriceCents),
-    paidCents: computeKmLineTotalCents(input.customerKm, rates.customerKmRateCents),
+    paidCents: ov
+      ? ov.customerKmPaidCents
+      : computeKmLineTotalCents(input.customerKm, rates.customerKmRateCents),
   };
   // Mitarbeiter-km aus der Zeiterfassung werden dem Kunden NICHT berechnet
   // (kein Termin-Bezug) — nur Kostenseite, zum Anfahrts-Satz bewertet.
   const timeEntry = {
     km: input.timeEntryKm,
     chargedCents: 0,
-    paidCents: computeKmLineTotalCents(input.timeEntryKm, rates.travelKmRateCents),
+    paidCents: ov
+      ? ov.timeEntryKmPaidCents
+      : computeKmLineTotalCents(input.timeEntryKm, rates.travelKmRateCents),
   };
   const kmChargedCents = travel.chargedCents + customer.chargedCents + timeEntry.chargedCents;
   const kmPaidCents = travel.paidCents + customer.paidCents + timeEntry.paidCents;

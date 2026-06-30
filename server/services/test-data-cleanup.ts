@@ -528,7 +528,6 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
       // Serien echter Kunden treffen. Series der Test-Kunden sind bereits über
       // purge-customers weg; verbleibende Series gehören echten Kunden und
       // bekommen unten SET NULL.
-      await tx.execute(sql`DELETE FROM employee_compensation_history WHERE created_by_user_id IN (${idList})`);
 
       // SET NULL on nullable FK refs (NO ACTION rules)
       await tx.execute(sql`UPDATE birthday_card_tracking SET sent_by_user_id = NULL WHERE sent_by_user_id IN (${idList})`);
@@ -563,7 +562,6 @@ export async function purgeTestUsersByIds(ids: number[]): Promise<PurgeUsersResu
       await tx.execute(sql`UPDATE customer_insurance_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_needs_assessments SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE document_deliveries SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-      await tx.execute(sql`UPDATE employee_compensation_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE employee_document_proofs SET reviewed_by_user_id = NULL WHERE reviewed_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE employee_documents SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE employee_month_closings SET reopened_by_user_id = NULL WHERE reopened_by_user_id IN (${idList})`);

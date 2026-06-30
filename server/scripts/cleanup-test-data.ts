@@ -584,7 +584,6 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
       // Serien echter Kunden löschen, denen mal ein Test-Mitarbeiter zugewiesen
       // war. Series von Test-Kunden sind in Phase 1 bereits weg; verbleibende
       // Series gehören echten Kunden und bekommen unten nur SET NULL.
-      await tx.execute(sql`DELETE FROM employee_compensation_history WHERE created_by_user_id IN (${idList})`);
 
       // SET NULL on nullable FK refs (NO ACTION rules); rows belonging to test customers
       // are already gone from Phase 1, so these affect only orphan/system rows.
@@ -622,7 +621,6 @@ async function purgeTestUsers(apply: boolean): Promise<void> {
       await tx.execute(sql`UPDATE customer_insurance_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE customer_needs_assessments SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE document_deliveries SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
-      await tx.execute(sql`UPDATE employee_compensation_history SET created_by_user_id = NULL WHERE created_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE employee_document_proofs SET reviewed_by_user_id = NULL WHERE reviewed_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE employee_documents SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id IN (${idList})`);
       await tx.execute(sql`UPDATE employee_month_closings SET reopened_by_user_id = NULL WHERE reopened_by_user_id IN (${idList})`);

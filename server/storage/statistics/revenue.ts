@@ -4,6 +4,7 @@ import type { RevenueStatsResponse, RevenueGapRow, PlannedRevenueTotals } from "
 import { billingPeriodFilter, buildKpi, dateFilter, num, periodToResponse, previousPeriod, previousYearPeriod, type ResolvedPeriod } from "./common";
 import { getEconomics } from "./economics";
 import { marginPercent } from "@shared/domain/statistics/economics";
+import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 
 function perAppointmentCte(p: ResolvedPeriod) {
   const dFilter = dateFilter(p, sql`a.date::date`);
@@ -359,8 +360,10 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       WITH ${perAppointmentCte(period)},
       doc_rev AS (SELECT COALESCE(SUM(revenue_cents), 0)::bigint AS r FROM per_appt WHERE status IN ('completed','documented')),
       travel_cost AS (
-        SELECT COALESCE(SUM(ROUND(COALESCE(a.travel_kilometers, 0) * COALESCE((SELECT employee_rate_cents FROM services WHERE code = 'travel_km'), 0))), 0)::bigint AS c
+        SELECT COALESCE(SUM(ROUND(COALESCE(a.travel_kilometers, 0) * ${resolvedWageCentsSql(wageRoleSql("u"), "cst", sql`a.date::date`)})), 0)::bigint AS c
         FROM appointments a
+        LEFT JOIN users u ON u.id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
+        LEFT JOIN services cst ON cst.code = 'travel_km'
         WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented') ${dFilter}
       )
       SELECT (SELECT r FROM doc_rev) AS revenue, (SELECT c FROM travel_cost) AS travel_cost
@@ -381,11 +384,12 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
             )
           ))::bigint AS revenue_cents,
           SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
-            COALESCE(s.employee_rate_cents, 0)
+            ${resolvedWageCentsSql(wageRoleSql("u"), "s", sql`a.date::date`)}
           ))::bigint AS cost_cents
         FROM appointments a
         JOIN appointment_services asvc ON asvc.appointment_id = a.id
         JOIN services s ON s.id = asvc.service_id
+        LEFT JOIN users u ON u.id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
         WHERE a.deleted_at IS NULL AND s.unit_type = 'hours'
           AND a.status IN ('scheduled','completed','documented')
           ${dFilter}
@@ -407,8 +411,10 @@ export async function getRevenueStats(period: ResolvedPeriod): Promise<RevenueSt
       ),
       tc_by_emp AS (
         SELECT COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
-          COALESCE(SUM(ROUND(COALESCE(a.travel_kilometers, 0) * COALESCE((SELECT employee_rate_cents FROM services WHERE code = 'travel_km'), 0))), 0)::bigint AS travel_cost
+          COALESCE(SUM(ROUND(COALESCE(a.travel_kilometers, 0) * ${resolvedWageCentsSql(wageRoleSql("u"), "cst", sql`a.date::date`)})), 0)::bigint AS travel_cost
         FROM appointments a
+        LEFT JOIN users u ON u.id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
+        LEFT JOIN services cst ON cst.code = 'travel_km'
         WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented') ${dFilter}
         GROUP BY 1
       )

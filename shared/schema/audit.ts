@@ -111,6 +111,10 @@ export const AUDIT_ACTIONS = [
   "insurance_provider_deleted",
   "appointment_status_restored_from_expired",
   "budget_reconcile_skipped",
+  "role_wage_rate_created",
+  "role_wage_rate_replaced",
+  "role_wage_rate_deleted",
+  "role_wage_rate_changed_closed",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

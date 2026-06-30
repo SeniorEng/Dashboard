@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../lib/errors";
 import { requireIntParam } from "../lib/params";
 import standardPricesRouter from "./standard-prices";
+import roleWageRatesRouter from "./role-wage-rates";
 
 const router = Router();
 
@@ -12,6 +13,10 @@ const router = Router();
 // Katalog-IDENTITÄT bleibt read-only (siehe 403-Routen unten); nur die
 // `standard`-Preiszeilen in der `prices`-SSoT sind über diese Routen pflegbar.
 router.use(standardPricesRouter);
+
+// Task #1503 — rollenbasierte Vergütung (Lohnsatz je Rolle × Leistung,
+// zeitversioniert). Schreibt in die `role_wage_rates`-SSoT hinter `wageFor`.
+router.use(roleWageRatesRouter);
 
 /**
  * Der Dienstleistungskatalog ist konfigurationsgesteuert

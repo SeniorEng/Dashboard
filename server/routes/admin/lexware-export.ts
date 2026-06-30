@@ -1,7 +1,9 @@
 import { Router, Request, Response } from "express";
 import { db } from "../../lib/db";
-import { users, employeeCompensationHistory } from "@shared/schema/users";
+import { users } from "@shared/schema/users";
 import { companySettings } from "@shared/schema/company";
+import { roleWageRates } from "@shared/schema/contracts";
+import { services } from "@shared/schema/services";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
 import { and, gte, lte, sql, inArray, eq, isNull } from "drizzle-orm";
 import { employeeTimeEntriesRepo } from "../../repos";
@@ -9,6 +11,9 @@ import { asyncHandler } from "../../lib/errors";
 import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { documentedSqlRaw, completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
+import { resolveWageFor, wageRoleForUserFlags, type WageRole, type VersionedWageRow } from "@shared/domain/pricing/wage-for";
+import { resolvedWageCentsSql, wageRoleSql } from "../../storage/pricing/wage-for-sql";
+import { isTeamLead } from "../../lib/team-lead";
 
 const router = Router();
 
@@ -38,11 +43,6 @@ interface EmployeeSummaryRow {
   uebertragNeuCents: number | null;
   unsignedAppointmentCount: number;
   unsignedMinutes: number;
-}
-
-interface CompensationRates {
-  hwCents: number;
-  abCents: number;
 }
 
 function calculateHolidayHours(
@@ -78,21 +78,23 @@ function calculateHolidayHours(
   return Math.round(totalHours * 100) / 100;
 }
 
+/**
+ * Task #1503: Die Lohn-Summen pro Lohn-Komponente werden bereits PRO LEISTUNGS-
+ * DATUM über die `wageFor`-SSoT aufgelöst (SQL-Spiegel `resolvedWageCentsSql`)
+ * und hier nur noch addiert — KEINE eigene „Stunden × ein Monats-Satz"-Mathematik
+ * mehr (driftete gegen Wirtschaftlichkeit/Statistik bei unterjährigem
+ * Satzwechsel). `otherWageCents` bündelt Erstberatung + Anfahrt + Sonstiges (alle
+ * zum HW-Satz, wie zuvor), `feiertagCents` die Feiertagsstunden zum HW-Satz.
+ */
 function calculateBruttoAndCarryover(
-  hwHours: number,
-  abHours: number,
-  sonstigesHours: number,
-  feiertagHours: number,
-  rates: CompensationRates,
+  hwWageCents: number,
+  abWageCents: number,
+  otherWageCents: number,
+  feiertagCents: number,
   earningsLimitCents: number,
   carryoverCentsFromPrev: number
 ): { bruttoCents: number; auszahlbarCents: number; carryoverCents: number } {
-  const hwCents = Math.round(hwHours * rates.hwCents);
-  const abCents = Math.round(abHours * rates.abCents);
-  const sonstigesCents = Math.round(sonstigesHours * rates.hwCents);
-  const feiertagCents = Math.round(feiertagHours * rates.hwCents);
-
-  const bruttoCents = hwCents + abCents + sonstigesCents + feiertagCents;
+  const bruttoCents = hwWageCents + abWageCents + otherWageCents + feiertagCents;
 
   const totalPayableCents = bruttoCents + carryoverCentsFromPrev;
 
@@ -117,12 +119,21 @@ type MonthlyHoursBucket = {
   erstberatung: number;
   anfahrt: number;
   sonstiges: number;
+  // Task #1503: pro Leistungsdatum über `wageFor` aufgelöste Lohn-Summen
+  // (Integer-Cents). hw/ab = Termin-Stunden zum eigenen Rollen-Satz;
+  // otherWageCents = Erstberatung + Anfahrt + Sonstiges, alle zum HW-Satz.
+  hwWageCents: number;
+  abWageCents: number;
+  otherWageCents: number;
 };
 
 type MonthlyHoursMap = Record<number, Record<number, MonthlyHoursBucket>>;
 
 function emptyBucket(): MonthlyHoursBucket {
-  return { hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, anfahrt: 0, sonstiges: 0 };
+  return {
+    hauswirtschaft: 0, alltagsbegleitung: 0, erstberatung: 0, anfahrt: 0, sonstiges: 0,
+    hwWageCents: 0, abWageCents: 0, otherWageCents: 0,
+  };
 }
 
 // Time-entry types that count as paid working time (consistent with employee "Meine Zeiten" view).
@@ -133,7 +144,9 @@ async function getMonthlyHoursBatch(
   employeeIds: number[],
   year: number,
   fromMonth: number,
-  toMonth: number
+  toMonth: number,
+  roleByEmployeeId: Record<number, WageRole>,
+  resolveHwRateAt: (role: WageRole, dateISO: string) => number,
 ): Promise<MonthlyHoursMap> {
   const startDate = `${year}-${String(fromMonth).padStart(2, "0")}-01`;
   const lastDay = new Date(year, toMonth, 0).getDate();
@@ -147,15 +160,27 @@ async function getMonthlyHoursBatch(
     return result[m][empId];
   };
 
+  // Task #1503: Lohn-Summe je Zeile PRO Termin-Datum über `wageFor` (SQL-Spiegel)
+  // — HW/AB zum eigenen Rollen-Satz, Erstberatung (wie zuvor) zum HW-Satz. Die
+  // ROUND-pro-Zeile-dann-SUM-Reihenfolge ist deckungsgleich mit Wirtschaftlich-
+  // keit/Statistik (`revenue.ts`/`performance.ts`), damit Anzeige === Export.
+  const hwRate = resolvedWageCentsSql(wageRoleSql("u"), "s", sql`a.date::date`);
+  const hwRateForOther = resolvedWageCentsSql(wageRoleSql("u"), "hw", sql`a.date::date`);
   const appointmentHours = await db.execute(sql`
     SELECT 
       a.performed_by_employee_id as employee_id,
       EXTRACT(MONTH FROM a.date::date) as month_num,
       s.code as service_code,
-      SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes
+      SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes)) as minutes,
+      SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+        CASE WHEN s.code IN ('hauswirtschaft', 'alltagsbegleitung') THEN ${hwRate}
+             ELSE ${hwRateForOther} END
+      )) as wage_cents
     FROM appointments a
     JOIN appointment_services asvc ON asvc.appointment_id = a.id
     JOIN services s ON s.id = asvc.service_id
+    JOIN users u ON u.id = a.performed_by_employee_id
+    CROSS JOIN (SELECT id, employee_rate_cents FROM services WHERE code = 'hauswirtschaft' LIMIT 1) hw
     WHERE ${documentedSqlRaw('a')}
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
@@ -169,34 +194,42 @@ async function getMonthlyHoursBatch(
   for (const row of appointmentHours.rows as any[]) {
     const bucket = ensureBucket(Number(row.month_num), row.employee_id);
     const minutes = Number(row.minutes) || 0;
+    const wageCents = Number(row.wage_cents) || 0;
     const code = row.service_code as string;
     if (code === "alltagsbegleitung") {
       bucket.alltagsbegleitung += minutes;
+      bucket.abWageCents += wageCents;
     } else if (code === "hauswirtschaft") {
       bucket.hauswirtschaft += minutes;
+      bucket.hwWageCents += wageCents;
     } else if (code === "erstberatung") {
       bucket.erstberatung += minutes;
+      bucket.otherWageCents += wageCents;
     }
   }
 
   const travelMinutes = await db.execute(sql`
     SELECT 
-      performed_by_employee_id as employee_id,
-      EXTRACT(MONTH FROM date::date) as month_num,
-      SUM(COALESCE(travel_minutes, 0)) as total_travel_minutes
+      a.performed_by_employee_id as employee_id,
+      EXTRACT(MONTH FROM a.date::date) as month_num,
+      SUM(COALESCE(a.travel_minutes, 0)) as total_travel_minutes,
+      SUM(ROUND(COALESCE(a.travel_minutes, 0) / 60.0 * ${hwRateForOther})) as travel_wage_cents
     FROM appointments a
+    JOIN users u ON u.id = a.performed_by_employee_id
+    CROSS JOIN (SELECT id, employee_rate_cents FROM services WHERE code = 'hauswirtschaft' LIMIT 1) hw
     WHERE ${documentedSqlRaw('a')}
-      AND deleted_at IS NULL
-      AND date >= ${startDate}
-      AND date <= ${endDate}
-      AND performed_by_employee_id = ANY(${sql`ARRAY[${sql.join(employeeIds.map(id => sql`${id}`), sql`, `)}]::int[]`})
-      AND travel_minutes > 0
-    GROUP BY performed_by_employee_id, EXTRACT(MONTH FROM date::date)
+      AND a.deleted_at IS NULL
+      AND a.date >= ${startDate}
+      AND a.date <= ${endDate}
+      AND a.performed_by_employee_id = ANY(${sql`ARRAY[${sql.join(employeeIds.map(id => sql`${id}`), sql`, `)}]::int[]`})
+      AND a.travel_minutes > 0
+    GROUP BY a.performed_by_employee_id, EXTRACT(MONTH FROM a.date::date)
   `);
 
   for (const row of travelMinutes.rows as any[]) {
     const bucket = ensureBucket(Number(row.month_num), row.employee_id);
     bucket.anfahrt += Number(row.total_travel_minutes) || 0;
+    bucket.otherWageCents += Number(row.travel_wage_cents) || 0;
   }
 
   const timeEntries = await employeeTimeEntriesRepo.selectColumnsFrom({
@@ -225,6 +258,10 @@ async function getMonthlyHoursBatch(
       minutes = (eh * 60 + em) - (sh * 60 + sm);
     }
     bucket.sonstiges += minutes;
+    // Sonstiges-Zeiteinträge werden zum HW-Satz vergütet — pro Eintrags-Datum
+    // über `wageFor` aufgelöst (ROUND pro Zeile, analog SQL-Aggregaten).
+    const role = roleByEmployeeId[entry.userId] ?? "employee";
+    bucket.otherWageCents += Math.round((minutes / 60) * resolveHwRateAt(role, entry.entryDate.slice(0, 10)));
   }
 
   return result;
@@ -251,6 +288,11 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     employmentType: users.employmentType,
     weeklyWorkDays: users.weeklyWorkDays,
     monthlyWorkHours: users.monthlyWorkHours,
+    isAdmin: users.isAdmin,
+    isSuperAdmin: users.isSuperAdmin,
+    isTeamLead: users.isTeamLead,
+    isActive: users.isActive,
+    isAnonymized: users.isAnonymized,
   }).from(users).where(eq(users.isActive, true));
 
   if (employees.length === 0) {
@@ -266,53 +308,84 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
 
   const earningsLimitCents = companySettingsRow?.minijobEarningsLimitCents ?? 55600;
 
-  const compensationRecords = await db.select({
-    userId: employeeCompensationHistory.userId,
-    hwCents: employeeCompensationHistory.hourlyRateHauswirtschaftCents,
-    abCents: employeeCompensationHistory.hourlyRateAlltagsbegleitungCents,
-  }).from(employeeCompensationHistory).where(
-    and(
-      inArray(employeeCompensationHistory.userId, employeeIds),
-      isNull(employeeCompensationHistory.validTo)
-    )
-  );
+  // Task #1503: Lohnsätze stammen aus der EINEN `wageFor`-SSoT (Rollen-Satz →
+  // Katalog-Default), je leistendem Mitarbeiter über SEINE Rolle und PRO
+  // Leistungsdatum aufgelöst (HW/AB direkt in SQL via resolvedWageCentsSql) —
+  // nicht mehr aus der (entfernten) employee_compensation_history, die hier
+  // dauerhaft 0 € lieferte, und nicht mehr nur am Monatsende.
+  const [hwService] = await db.select({ id: services.id, rate: services.employeeRateCents })
+    .from(services).where(eq(services.code, "hauswirtschaft")).limit(1);
 
-  const ratesByEmployee: Record<number, CompensationRates> = {};
-  for (const comp of compensationRecords) {
-    ratesByEmployee[comp.userId] = {
-      hwCents: comp.hwCents ?? 0,
-      abCents: comp.abCents ?? 0,
-    };
+  // HW-Rollen-Zeilen für die JS-seitige Auflösung (Feiertage + Sonstiges-Einträge,
+  // die zum HW-Satz vergütet werden). HW/AB-Termine rechnen direkt in SQL.
+  const hwWageRows = hwService
+    ? await db.select({
+        role: roleWageRates.role,
+        cents: roleWageRates.cents,
+        validFrom: roleWageRates.validFrom,
+        validTo: roleWageRates.validTo,
+        id: roleWageRates.id,
+      }).from(roleWageRates).where(and(
+        eq(roleWageRates.serviceId, hwService.id),
+        isNull(roleWageRates.deletedAt),
+      ))
+    : [];
+
+  const hwWageRowsByRole = new Map<string, VersionedWageRow[]>();
+  for (const r of hwWageRows) {
+    const list = hwWageRowsByRole.get(r.role) ?? [];
+    list.push({ cents: r.cents, validFrom: r.validFrom, validTo: r.validTo, id: r.id });
+    hwWageRowsByRole.set(r.role, list);
   }
+
+  const roleByEmployeeId: Record<number, WageRole> = {};
+  for (const emp of employees) {
+    roleByEmployeeId[emp.id] = wageRoleForUserFlags(
+      Boolean(emp.isSuperAdmin), Boolean(emp.isAdmin), isTeamLead(emp),
+    );
+  }
+
+  // Auflösung über die SSoT: Existenz einer Rollen-Zeile gewinnt (auch 0 €),
+  // sonst Katalog-Default — pro Datum (nicht mehr fix am Monatsende).
+  const resolveHwRateAt = (role: WageRole, dateISO: string): number => {
+    if (!hwService) return 0;
+    const res = resolveWageFor({
+      date: dateISO,
+      roleRows: hwWageRowsByRole.get(role) ?? [],
+      catalog: { employeeRateCents: hwService.rate },
+    });
+    return res?.cents ?? 0;
+  };
 
   const minijobberIds = employees.filter(e => e.employmentType === "minijobber").map(e => e.id);
   const carryoverByEmployee: Record<number, number> = {};
 
-  const allMonthsHours = await getMonthlyHoursBatch(employeeIds, year, 1, month);
+  const allMonthsHours = await getMonthlyHoursBatch(employeeIds, year, 1, month, roleByEmployeeId, resolveHwRateAt);
 
   if (minijobberIds.length > 0) {
     for (let m = 1; m < month; m++) {
       const monthData = allMonthsHours[m] || {};
-      
-      for (const empId of minijobberIds) {
-        const rates = ratesByEmployee[empId];
-        if (!rates || (rates.hwCents === 0 && rates.abCents === 0)) continue;
+      const lastDayOfM = new Date(year, m, 0).getDate();
+      const monthEndISO = `${year}-${String(m).padStart(2, "0")}-${String(lastDayOfM).padStart(2, "0")}`;
 
+      for (const empId of minijobberIds) {
+        const role = roleByEmployeeId[empId] ?? "employee";
         const hours = monthData[empId] || emptyBucket();
         const emp = employees.find(e => e.id === empId)!;
         const feiertage = calculateHolidayHours(year, m, emp.employmentType, emp.monthlyWorkHours);
+        const feiertagCents = Math.round(feiertage * resolveHwRateAt(role, monthEndISO));
 
-        // Pay Erstberatung + Anfahrt + Sonstiges manual entries together at HW rate
-        // (preserves the previous payout where these were lumped into "sonstiges").
-        const sonstigesForPayoutMinutes = hours.sonstiges + hours.erstberatung + hours.anfahrt;
-
+        // Erstberatung + Anfahrt + Sonstiges sind bereits in otherWageCents zum
+        // HW-Satz pro Datum aggregiert (vorher als „sonstiges" zusammengefasst).
         const prevCarryover = carryoverByEmployee[empId] || 0;
+        const bruttoComponents = hours.hwWageCents + hours.abWageCents + hours.otherWageCents + feiertagCents;
+        if (bruttoComponents === 0 && prevCarryover === 0) continue;
+
         const result = calculateBruttoAndCarryover(
-          hours.hauswirtschaft / 60,
-          hours.alltagsbegleitung / 60,
-          sonstigesForPayoutMinutes / 60,
-          feiertage,
-          rates,
+          hours.hwWageCents,
+          hours.abWageCents,
+          hours.otherWageCents,
+          feiertagCents,
           earningsLimitCents,
           prevCarryover
         );
@@ -418,16 +491,18 @@ router.get("/hours-overview", asyncHandler("Stundenübersicht konnte nicht gelad
     let uebertragNeuCents: number | null = null;
 
     if (emp.employmentType === "minijobber") {
-      const rates = ratesByEmployee[emp.id];
-      if (rates && (rates.hwCents > 0 || rates.abCents > 0)) {
-        const prevCarryoverCents = carryoverByEmployee[emp.id] || 0;
+      const role = roleByEmployeeId[emp.id] ?? "employee";
+      const feiertagCents = Math.round(feiertage * resolveHwRateAt(role, endDate));
+      const prevCarryoverCents = carryoverByEmployee[emp.id] || 0;
+      const bruttoComponents = hours.hwWageCents + hours.abWageCents + hours.otherWageCents + feiertagCents;
+      if (bruttoComponents > 0 || prevCarryoverCents > 0) {
         uebertragVormonatCents = prevCarryoverCents;
 
-        // Erstberatung + Anfahrt + Sonstiges paid together at HW rate (preserves prior payout amounts).
-        const sonstigesForPayout = stundenSonstiges + stundenErstberatung + stundenAnfahrt;
+        // Erstberatung + Anfahrt + Sonstiges sind bereits in otherWageCents zum
+        // HW-Satz pro Datum aggregiert (vorher als „sonstiges" zusammengefasst).
         const result = calculateBruttoAndCarryover(
-          stundenHW, stundenAB, sonstigesForPayout, feiertage,
-          rates, earningsLimitCents, prevCarryoverCents
+          hours.hwWageCents, hours.abWageCents, hours.otherWageCents, feiertagCents,
+          earningsLimitCents, prevCarryoverCents
         );
         bruttoCents = result.bruttoCents;
         auszahlbarCents = result.auszahlbarCents;

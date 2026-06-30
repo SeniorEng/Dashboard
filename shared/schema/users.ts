@@ -131,26 +131,10 @@ export const adminPermissions = pgTable("admin_permissions", {
 
 export type AdminPermission = typeof adminPermissions.$inferSelect;
 
-// Employee compensation history (historized)
-export const TRAVEL_COST_TYPES = ["kilometergeld", "pauschale"] as const;
-export type TravelCostType = typeof TRAVEL_COST_TYPES[number];
-
-export const employeeCompensationHistory = pgTable("employee_compensation_history", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  hourlyRateHauswirtschaftCents: integer("hourly_rate_hauswirtschaft_cents"),
-  hourlyRateAlltagsbegleitungCents: integer("hourly_rate_alltagsbegleitung_cents"),
-  travelCostType: text("travel_cost_type"), // "kilometergeld" | "pauschale"
-  kilometerRateCents: integer("kilometer_rate_cents"),
-  monthlyTravelAllowanceCents: integer("monthly_travel_allowance_cents"),
-  validFrom: date("valid_from").notNull(),
-  validTo: date("valid_to"), // null = currently valid
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  createdByUserId: integer("created_by_user_id").references(() => users.id),
-}, (table) => [
-  index("employee_compensation_user_idx").on(table.userId),
-  index("employee_compensation_valid_idx").on(table.userId, table.validFrom, table.validTo),
-]);
+// Task #1503: `employee_compensation_history` (datierte, nie befüllte
+// Mitarbeiter-Sätze) wurde entfernt. Lohnsätze laufen jetzt ausschließlich über
+// die `wageFor`-SSoT (Rollen-Satz `role_wage_rates` → Katalog-Default
+// `services.employee_rate_cents`).
 
 export const EMPLOYMENT_TYPES = ["minijobber", "sozialversicherungspflichtig"] as const;
 export type EmploymentType = typeof EMPLOYMENT_TYPES[number];
@@ -230,34 +214,5 @@ export type UserRole = typeof userRoles.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 
-// Employee compensation schemas
-export const insertEmployeeCompensationSchema = z.object({
-  userId: z.number(),
-  hourlyRateHauswirtschaftCents: z.number().int().nullable().optional(),
-  hourlyRateAlltagsbegleitungCents: z.number().int().nullable().optional(),
-  travelCostType: z.enum(TRAVEL_COST_TYPES).nullable().optional(),
-  kilometerRateCents: z.number().int().nullable().optional(),
-  monthlyTravelAllowanceCents: z.number().int().nullable().optional(),
-  validFrom: z.string(),
-}).refine((data) => {
-  if (data.travelCostType === "kilometergeld") {
-    return data.kilometerRateCents && !data.monthlyTravelAllowanceCents;
-  }
-  if (data.travelCostType === "pauschale") {
-    return data.monthlyTravelAllowanceCents && !data.kilometerRateCents;
-  }
-  return true;
-}, {
-  message: "Bei Kilometergeld muss der Km-Satz angegeben werden, bei Pauschale die monatliche Pauschale",
-});
-
-export type EmployeeCompensation = typeof employeeCompensationHistory.$inferSelect;
-export type InsertEmployeeCompensation = z.infer<typeof insertEmployeeCompensationSchema>;
-
 // User with roles (for API responses)
 export type UserWithRoles = User & { roles: EmployeeRole[] };
-
-// User with roles and current compensation (for admin views)
-export type UserWithRolesAndCompensation = UserWithRoles & { 
-  currentCompensation: EmployeeCompensation | null;
-};

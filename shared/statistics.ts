@@ -245,6 +245,27 @@ export interface EconomicsInput {
   timeEntryKm: number;
   /** Dokumentierter Service-Erlös (Stunden-Leistungen, ohne km). */
   documentedServiceRevenueCents: number;
+  /**
+   * Task #1503 — optional vorberechnete, rollenbasierte Personal-/km-KOSTEN
+   * (über `wageFor` je leistendem Mitarbeiter × Leistung × Datum in SQL
+   * aufgelöst). Ist dieses Feld gesetzt, ersetzt es die flache
+   * `costForMinutes`/km-Kostenrechnung für die KOSTEN-Seite; die ERLÖS-Seite
+   * (Preis) bleibt katalog-/preisgesteuert. Fehlt es, gilt das alte
+   * flache-Satz-Verhalten (Rückwärtskompatibilität der reinen Unit-Tests).
+   */
+  costOverride?: EconomicsCostOverride;
+}
+
+/** Task #1503 — rollenbasiert (in SQL) vorberechnete Kosten-Beträge. */
+export interface EconomicsCostOverride {
+  hauswirtschaftCostCents: number;
+  alltagsbegleitungCostCents: number;
+  erstberatungCostCents: number;
+  /** Kategorie → Kosten-Cents (zum HW-Lohnsatz der jeweils leistenden Rolle). */
+  nonBillableCostCentsByCategory: Record<string, number>;
+  travelKmPaidCents: number;
+  customerKmPaidCents: number;
+  timeEntryKmPaidCents: number;
 }
 
 export interface EconomicsCostGroup {
