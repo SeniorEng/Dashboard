@@ -37,3 +37,20 @@ already live, first confirm it's a fresh stampede vs a stale build (re-publish),
 and check `/api/health → chromium`. The structural root-fix (out of scope, only
 documented in `docs/pdf-chromium.md`) is moving PDF off Autoscale to a **Reserved
 VM** (permanently warm ⇒ no boot stampede) — a cost/ops decision, not code.
+
+**Verified live (post-publish):** after the levers shipped, boot prewarm
+succeeds (de-stagger boot lines present), `/api/health → chromium` flips to `ok`,
+the startup PDF backfill renders stuck invoices, and live invoice generation runs
+fine (steady `ZUGFeRD PDF eingebettet … PDF/A=true | XML=true`). 60s LAUNCH
+timeouts collapsed from ~every-launch to ~1/hr (mid-life re-launches, not boot
+stampede) — do NOT tune the boot jitter/lock for those.
+
+**New bottleneck once launches are fixed:** the nightly integrity sweep
+(`verifyRecentInvoiceIntegrity` → `verifyInvoiceIntegrity`) re-renders EVERY
+invoice of the last 30 days serially through Chromium *only to extract the
+ZUGFeRD XML for comparison* (the PDF-hash check uses stored bytes, not the
+re-render). Under contention with live generation these re-renders hit the 15s
+navigation / 30s render timeout en masse. It's a background-job design cost, not
+a launch-stampede regression and not data corruption (timed-out invoices are
+just skipped, no false drift). Fix = reconstruct the XML without a full Chromium
+render, or throttle/serialize the sweep off the live render path.
