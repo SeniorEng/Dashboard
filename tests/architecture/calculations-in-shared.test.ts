@@ -135,19 +135,26 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
    * SSoT-Resolvern (`priceFor`/`wageFor`) bzw. der Katalog-/Preis-/Lohn-Tabelle
    * stammt — NIE aus einer hartcodierten Zahl oder einem Dummy-Fallback.
    *
-   * Geprüft werden die distinktiven Katalog-Cent-Werte (3800/1600/4200/1800)
-   * sowie km-Satz-Fallbacks/-Zuweisungen (35/30 ct bzw. 0,35/0,30 €), jeweils
-   * NUR wenn die Zeile zusätzlich ein Geld-/Raten-Stichwort
-   * (cents/rate/preis/price/lohn/wage/satz/km/kilometer) enthält — das hält
-   * Fehlalarme (Urlaubstage `?? 30`, Margin-Farben `>= 30`, Timeouts `1800`)
-   * heraus. Vergleichsoperatoren (`>=`/`<=`/`==`) werden bewusst ausgenommen.
+   * Geprüft werden die distinktiven Katalog-Cent-Werte (3800/1600/4200/1800),
+   * die Euro-Kurzschreibweise derselben Raten (38/16/42/18) sowie
+   * km-Satz-Fallbacks/-Zuweisungen (35/30 ct bzw. 0,35/0,30 €), jeweils NUR
+   * wenn ein Geld-/Raten-Stichwort (cents/rate/preis/price/lohn/wage/satz/km/
+   * kilometer) IN DER NÄHE steht — geprüft wird nicht nur die Zeile selbst,
+   * sondern ein kleines Fenster umliegender Zeilen (Task #1517), damit auch ein
+   * „nackter" Wert auf eigener Zeile erwischt wird (mehrzeilige Zuweisung,
+   * `return 1600;` in einer Preis-Funktion). Das Fenster-Gate hält weiterhin
+   * Fehlalarme heraus (Urlaubstage `?? 30`, Margin-Farben `>= 30`, Timeouts
+   * `1800` ohne Raten-Kontext). Vergleichsoperatoren (`>=`/`<=`/`==`) werden
+   * bewusst ausgenommen; die Euro-Kurz- und km-Werte zünden nur in einem echten
+   * Zuweisungs-/Fallback-/Return-Kontext, damit unverwandte 16/18/30/35-Zahlen
+   * nicht stören.
    *
    * Legitime Heimat der Rate-Literale ist die Katalog-SSoT
    * (`shared/config/services.ts`) und das einmalige Recovery-Skript
    * (`recover-prices-from-backup.ts`, Soll-Wert-Assertions). Gesetzliche
    * Konstanten (§45b 131 €, §39/§42a) und MwSt-Sätze haben andere Werte und
    * sind nicht betroffen. Für seltene, begründete Ausnahmen gibt es den
-   * Inline-Escape `// rate-literal-allowed: <Grund>`.
+   * Inline-Escape `// rate-literal-allowed: <Grund>` (gilt auch fenster-weit).
    */
   it("Keine hartcodierten Preis-/Lohn-/km-Satz-Magic-Numbers außerhalb der Katalog-SSoT (Task #1514)", () => {
     // Pfade, in denen Rate-Literale legitim leben.
@@ -160,13 +167,26 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
       "node_modules/",
     ];
 
-    // Distinktive Katalog-Cent-Werte (HW 3800/1600, AB 4200/1800).
+    // Distinktive Katalog-Cent-Werte (HW 3800/1600, AB 4200/1800). So markant,
+    // dass sie überall auf der Zeile zünden dürfen.
     const distinctiveCentsRe = /\b(3800|1600|4200|1800)\b/;
-    // km-Satz als Fallback (`?? 35`) oder Zuweisung (`= 35`, `: 30`), inkl.
-    // Euro-Schreibweise (0,35/0,30). Vergleichsoperatoren ausgenommen.
-    const kmRateRe = /(?:\?\?|\|\||(?<![<>=!])[:=])\s*(?:0\.3[05]|3[05])\b/;
-    // Geld-/Raten-Kontext auf der Zeile (gate gegen Fehlalarme).
+    // Zuweisungs-/Fallback-/Return-Kontext-Präfix (Vergleichsoperatoren und
+    // Dezimal-/Zahlfortsetzungen via Lookbehind ausgenommen).
+    const assignPrefix = String.raw`(?:\?\?|\|\||return|(?<![<>=!.\d])[:=])\s*\(?\s*`;
+    // km-Satz als Fallback/Zuweisung/Return, inkl. Euro-Schreibweise (0,35/0,30).
+    const kmRateRe = new RegExp(assignPrefix + String.raw`(?:0\.3[05]|3[05])\b`);
+    // Euro-Kurzschreibweise der Katalog-Raten (38/16/42/18) — nur im
+    // Zuweisungs-/Fallback-/Return-Kontext, damit unverwandte 16/18 (z. B.
+    // `fontSize: 16` ohne Raten-Stichwort) nicht stören.
+    const euroShorthandRe = new RegExp(assignPrefix + String.raw`(?:38|16|42|18)\b`);
+    // Geld-/Raten-Kontext (gate gegen Fehlalarme).
     const moneyKeywordRe = /\b(cents?|rate|preis|price|lohn|wage|satz|kilometer|km)/i;
+
+    // Fenstergröße für die Stichwort-Suche rund um den Wert: ein nackter Wert
+    // steht meist DIREKT unter seinem Bezeichner (mehrzeilige Zuweisung) oder
+    // im Body knapp unter dem Funktionsnamen (`return 1600;`).
+    const KEYWORD_WINDOW_BEFORE = 4;
+    const KEYWORD_WINDOW_AFTER = 1;
 
     const hits: Array<{ file: string; line: number; snippet: string }> = [];
     const scanRoots = ["server", "client/src", "shared"].map((p) => join(ROOT, p));
@@ -177,19 +197,42 @@ describe("Architektur — zentrale Berechnungen in shared/domain/", () => {
         if (RATE_LITERAL_ALLOWED_PATHS.some((p) => rel.startsWith(p))) continue;
         const content = readFileSync(file, "utf-8");
         const lines = content.split("\n");
+
+        // Pro Zeile vorab bestimmen: enthält der Code (ohne Kommentar) ein
+        // Geld-/Raten-Stichwort? Und steht hier ein Inline-Escape?
+        const isCommentLine = (t: string) =>
+          t.startsWith("*") || t.startsWith("//") || t.startsWith("/*");
+        const keywordLine = lines.map((l) => {
+          const t = l.trim();
+          if (isCommentLine(t)) return false;
+          return moneyKeywordRe.test(l.split("//")[0]);
+        });
+        const escapeLine = lines.map((l) => /rate-literal-allowed:/.test(l));
+
+        const inWindow = (i: number, flags: boolean[]) => {
+          const from = Math.max(0, i - KEYWORD_WINDOW_BEFORE);
+          const to = Math.min(lines.length - 1, i + KEYWORD_WINDOW_AFTER);
+          for (let j = from; j <= to; j++) if (flags[j]) return true;
+          return false;
+        };
+
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
-          // Inline-Escape für begründete Ausnahmen.
-          if (/rate-literal-allowed:/.test(line)) continue;
           const trimmed = line.trim();
           // Reine Kommentar-/Doc-Zeilen ignorieren.
-          if (trimmed.startsWith("*") || trimmed.startsWith("//") || trimmed.startsWith("/*")) continue;
+          if (isCommentLine(trimmed)) continue;
+          // Inline-Escape (auf der Zeile oder fenster-weit) respektieren.
+          if (inWindow(i, escapeLine)) continue;
           // Trailing-Zeilenkommentar abschneiden (Werte in Kommentaren zählen nicht).
           const code = line.split("//")[0];
-          if (!moneyKeywordRe.test(code)) continue;
-          if (distinctiveCentsRe.test(code) || kmRateRe.test(code)) {
-            hits.push({ file: rel, line: i + 1, snippet: trimmed.slice(0, 140) });
-          }
+          const isRateLiteral =
+            distinctiveCentsRe.test(code) ||
+            kmRateRe.test(code) ||
+            euroShorthandRe.test(code);
+          if (!isRateLiteral) continue;
+          // Geld-/Raten-Stichwort im Fenster verlangen.
+          if (!inWindow(i, keywordLine)) continue;
+          hits.push({ file: rel, line: i + 1, snippet: trimmed.slice(0, 140) });
         }
       }
     }
