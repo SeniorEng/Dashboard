@@ -24,12 +24,21 @@ import { billingPeriodFilter, buildKpi, dateFilter, getHealthThresholds, num, pe
  * als abgerechnet, wenn er ein Line-Item auf einer Rechnung hat, die weder
  * `storniert` noch eine `stornorechnung` ist. Stornierte Rechnungen geben ihre
  * Termine dadurch automatisch wieder in diese Liste frei.
+ *
+ * Task #1536 — Ausnahme „nichts abzurechnen": Ein No-Show-Termin
+ * (`status='customer_no_show'`) mit unterdrückter Privatrechnung
+ * (`no_show_charge_suppressed=true`) erzeugt ABSICHTLICH kein Line-Item
+ * (`server/services/invoice-data.ts`). Er ist damit nicht „unberechnet",
+ * sondern „nichts abzurechnen" und darf den Nachweis nicht dauerhaft im
+ * Safety-Net festhalten (falsch-positiver Alarm). Solche Termine werden hier
+ * wie abgerechnete Termine behandelt.
  */
 function recordHasUnbilledAppointment(msrIdCol: SQL): SQL {
   return sql`EXISTS (
     SELECT 1 FROM service_record_appointments sra
     JOIN appointments a ON a.id = sra.appointment_id AND a.deleted_at IS NULL
     WHERE sra.service_record_id = ${msrIdCol}
+      AND NOT (a.status = 'customer_no_show' AND a.no_show_charge_suppressed = true)
       AND NOT EXISTS (
         SELECT 1 FROM invoice_line_items ili
         JOIN invoices i ON i.id = ili.invoice_id

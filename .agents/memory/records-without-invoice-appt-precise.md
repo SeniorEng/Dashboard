@@ -21,7 +21,10 @@ is never prompted to bill (a prod snapshot found real cases).
 three separate queries that must share ONE appointment-level predicate —
 never re-hand-roll the appointment-vs-invoice check in one of them or
 revert any to a period-level invoice-existence test. Count records with
-`DISTINCT` so a record with several unbilled appts counts once. Known
-accepted edge: a suppressed `customer_no_show` produces no line item, so it
-reads as "unbilled" forever under the strict appointment criterion (see the
-no-show follow-up).
+`DISTINCT` so a record with several unbilled appts counts once. Edge now
+handled: a suppressed no-show (`status='customer_no_show'` AND
+`no_show_charge_suppressed=true`) intentionally produces NO line item, so the
+predicate excludes it as "nothing to bill" (not "unbilled") — otherwise it
+pinned a record in the net forever. Don't revert this exclusion; if you add
+another "intentionally no line item" appointment kind, extend the same NOT(...)
+guard.

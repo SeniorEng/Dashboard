@@ -46,6 +46,18 @@ async function insertAppointment(customerId: number, day: number): Promise<numbe
   return Number((r.rows[0] as { id: number }).id);
 }
 
+// Task #1536: No-Show mit unterdrückter Privatrechnung erzeugt absichtlich kein
+// Line-Item ("nichts abzurechnen"), darf den Nachweis also nicht festhalten.
+async function insertSuppressedNoShowAppointment(customerId: number, day: number): Promise<number> {
+  const date = `${YEAR}-${String(MONTH).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const r = await db.execute(sql`
+    INSERT INTO appointments (customer_id, appointment_type, date, scheduled_start, duration_promised, status, no_show_charge_suppressed, no_show_charge_suppression_reason)
+    VALUES (${customerId}, 'kundentermin', ${date}::date, '09:00', 60, 'customer_no_show', true, 'Kulanz: Kunde war kurzfristig im Krankenhaus.')
+    RETURNING id
+  `);
+  return Number((r.rows[0] as { id: number }).id);
+}
+
 async function insertCompletedRecord(customerId: number, appointmentIds: number[]): Promise<number> {
   const r = await db.execute(sql`
     INSERT INTO monthly_service_records (customer_id, employee_id, year, month, record_type, status)
@@ -166,6 +178,28 @@ describe("Task #1530 – records-without-invoice ist termin-genau", () => {
     await insertInvoiceWithLines(c.id, [a1], { invoiceType: "stornorechnung" });
 
     expect(await isRecordListed(record)).toBe(true);
+  });
+
+  it("Task #1536: ein Nachweis, dessen einziger offener Termin ein unterdrückter No-Show ist, taucht NICHT auf", async () => {
+    const c = await createTestCustomer();
+    customerIds.push(c.id);
+    const noShow = await insertSuppressedNoShowAppointment(c.id, 9);
+    const record = await insertCompletedRecord(c.id, [noShow]);
+
+    // Suppressed No-Show = "nichts abzurechnen" → kein falsch-positiver Eintrag.
+    expect(await isRecordListed(record)).toBe(false);
+  });
+
+  it("Task #1536: ein Nachweis mit einem echten offenen Termin neben einem unterdrückten No-Show bleibt sichtbar", async () => {
+    const c = await createTestCustomer();
+    customerIds.push(c.id);
+    const noShow = await insertSuppressedNoShowAppointment(c.id, 13);
+    const open = await insertAppointment(c.id, 14);
+    const record = await insertCompletedRecord(c.id, [noShow, open]);
+
+    // Der echte offene Termin hält den Nachweis im Net; der No-Show ändert daran nichts.
+    expect(await isRecordListed(record)).toBe(true);
+    expect(await countListedForRecord(record)).toBe(1);
   });
 
   it("der KPI-Zähler bewegt sich, wenn der letzte offene Termin abgerechnet wird (Konsistenz Liste ⇄ Zähler)", async () => {
