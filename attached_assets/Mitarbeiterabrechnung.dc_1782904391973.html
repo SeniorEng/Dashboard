@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#e9ddc8;font-family:'Outfit',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;color:#26303f}
+select,input,button{font-family:inherit}
+input.num::-webkit-outer-spin-button,input.num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+</style>
+</helmet>
+
+<div style="max-width:1240px;margin:0 auto;padding:30px 26px 72px">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px;gap:16px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#9a8a64;text-transform:uppercase;letter-spacing:.1em">Senioren Engel · Care Connect</div>
+      <h1 style="font-size:27px;font-weight:700;color:#26303f;margin:5px 0 0;letter-spacing:-.02em">Mitarbeiterabrechnung</h1>
+      <div style="font-size:14px;color:#8a8170;margin-top:4px">Termine, Stunden &amp; Stundenkonto — ein Blick, fertig für Lexware</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <span style="font-size:13.5px;color:#8a7f6a">Stand 01.07.2026</span>
+      <button onClick="{{ exportCsv }}" style="display:inline-flex;align-items:center;gap:8px;padding:10px 17px;border:1px solid #cdeee7;background:#fff;color:#0f766e;border-radius:11px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(20,30,40,.06)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        Nach Lexware exportieren
+      </button>
+    </div>
+  </div>
+
+  <!-- FILTER -->
+  <div style="background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 26px rgba(28,28,40,.05);padding:18px 22px;margin-bottom:16px">
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#9a8a64;text-transform:uppercase;letter-spacing:.06em;padding-bottom:11px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Abrechnungslauf
+      </div>
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8a8170;font-weight:500">Monat
+        <select value="{{ month }}" onChange="{{ setMonth }}" style="min-width:132px;padding:9px 12px;border:1px solid #e3e6ea;border-radius:10px;font-size:14px;color:#26303f;background:#fff">
+          <option>Januar</option><option>Februar</option><option>März</option><option>April</option><option>Mai</option><option>Juni</option><option>Juli</option><option>August</option><option>September</option><option>Oktober</option><option>November</option><option>Dezember</option>
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8a8170;font-weight:500">Jahr
+        <select style="padding:9px 12px;border:1px solid #e3e6ea;border-radius:10px;font-size:14px;color:#26303f;background:#fff"><option>2026</option><option>2025</option></select>
+      </label>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px">
+
+    <div style="background:#fff;border-radius:16px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 24px rgba(28,28,40,.04);padding:18px 20px">
+      <div style="font-size:13px;color:#7a8290;font-weight:500">Erfasste Stunden</div>
+      <div style="font-size:28px;font-weight:700;color:#26303f;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">{{ kTotalStd }}</div>
+      <div style="font-size:12px;color:#9aa0aa;margin-top:3px">{{ monthLabel }} · {{ kCount }} Mitarbeiter</div>
+    </div>
+
+    <div style="background:#fff;border-radius:16px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 24px rgba(28,28,40,.04);padding:18px 20px">
+      <div style="font-size:13px;color:#3f8b78;font-weight:600">Abrechenbare Stunden</div>
+      <div style="font-size:28px;font-weight:700;color:#0f766e;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">{{ kBillable }}</div>
+      <div style="font-size:12px;color:#9aa0aa;margin-top:3px">produktiv — nur HW &amp; AB, an Klient:innen</div>
+    </div>
+
+    <div style="background:#fff;border-radius:16px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 24px rgba(28,28,40,.04);padding:18px 20px">
+      <div style="display:flex;align-items:center;gap:7px;font-size:13px;color:#7a8290;font-weight:500">Produktivquote <span style="font-size:11px;color:#b9a06a;font-style:italic">„Wasserkopf"</span></div>
+      <div style="font-size:28px;font-weight:700;color:#26303f;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">{{ kProdQ }}</div>
+      <div style="display:flex;height:7px;border-radius:5px;background:#eef0f3;margin-top:9px;overflow:hidden">
+        <div style="height:100%;width:{{ kProdQNum }}%;background:#14b8a6"></div>
+      </div>
+      <div style="font-size:12px;color:#9aa0aa;margin-top:6px">abrechenbar vs. gesamt · Gemeinkosten {{ kOverheadStr }}</div>
+    </div>
+
+    <div style="background:#fff;border-radius:16px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 24px rgba(28,28,40,.04);padding:18px 20px">
+      <div style="font-size:13px;color:#7a8290;font-weight:500">Wachstum vs. {{ prevMonthLabel }}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:11px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between">
+          <span style="font-size:13.5px;color:#5a6573">Produktiv</span>
+          <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:{{ kProdColor }}">{{ kProdArrow }} {{ kProdDelta }}</span>
+        </div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between">
+          <span style="font-size:13.5px;color:#5a6573">Gemeinkosten</span>
+          <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:{{ kNonColor }}">{{ kNonArrow }} {{ kNonDelta }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="background:#fff;border-radius:16px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 24px rgba(28,28,40,.04);padding:18px 20px">
+      <div style="font-size:13px;color:#7a8290;font-weight:500">Stundenkonto-Saldo</div>
+      <div style="font-size:28px;font-weight:700;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:{{ kSaldoColor }}">{{ kSaldo }}</div>
+      <div style="font-size:12px;color:#9aa0aa;margin-top:3px">Guthaben − Minus · kumuliert</div>
+    </div>
+
+    <div style="background:#fffdf6;border:1px solid #f6ecd0;border-radius:16px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 10px 24px rgba(28,28,40,.04);padding:18px 20px">
+      <div style="font-size:13px;color:#a9843a;font-weight:600">Offene Termine</div>
+      <div style="font-size:28px;font-weight:700;color:#b45309;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">{{ kOffen }}</div>
+      <div style="font-size:12px;color:#bfa06a;margin-top:3px">dokumentiert — zählen mit</div>
+    </div>
+
+  </div>
+
+  <!-- MAIN TABLE -->
+  <div data-screen-label="Mitarbeiterabrechnung" style="background:#fff;border-radius:20px;box-shadow:0 1px 2px rgba(28,28,40,.05),0 12px 30px rgba(28,28,40,.05);padding:24px 28px 26px">
+
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap">
+      <span style="width:38px;height:38px;border-radius:11px;background:#e8f3f1;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline></svg>
+      </span>
+      <div>
+        <div style="font-size:19px;font-weight:700;color:#26303f;letter-spacing:-.01em">Stunden &amp; Stundenkonto je Mitarbeiter</div>
+        <div style="font-size:13px;color:#8a8170;margin-top:1px">Aggregiert nach Lohnart — Zeile aufklappen für Termine, Aufschlüsselung &amp; Kontoführung</div>
+      </div>
+      <span style="margin-left:auto;font-size:13.5px;color:#9aa0aa">{{ monthLabel }}</span>
+    </div>
+
+    <!-- friendly info -->
+    <div style="display:flex;align-items:center;gap:11px;background:#f0fdfa;border:1px solid #cdeee7;border-radius:12px;padding:11px 15px;margin-bottom:18px">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+      <div style="font-size:13.5px;color:#3f6b64;line-height:1.4">Termine, die noch auf <strong style="color:#b45309;font-weight:600">Unterschrift</strong> warten, sind mit <span style="display:inline-flex;align-items:center;gap:4px;color:#b45309;font-weight:600"><span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;display:inline-block"></span>markiert</span>.</div>
+    </div>
+
+    <!-- header -->
+    <div style="display:grid;grid-template-columns:minmax(230px,1.9fr) 104px 96px 90px 116px 168px;gap:16px;padding:0 12px 11px;font-size:11px;color:#9aa0aa;font-weight:600;text-transform:uppercase;letter-spacing:.05em">
+      <div>Mitarbeiter:in</div>
+      <div style="text-align:right;line-height:1.3">HW <span style="color:#c3c8d0;font-weight:500;text-transform:none">Std</span></div>
+      <div style="text-align:right;line-height:1.3">AB <span style="color:#c3c8d0;font-weight:500;text-transform:none">Std</span></div>
+      <div style="text-align:right;line-height:1.3">Feiert. <span style="color:#c3c8d0;font-weight:500;text-transform:none">Std</span></div>
+      <div style="text-align:right;line-height:1.3">KM <span style="color:#c3c8d0;font-weight:500;text-transform:none">km</span></div>
+      <div style="text-align:right;line-height:1.3">Stundenkonto <span style="color:#c3c8d0;font-weight:500;text-transform:none">kumuliert</span></div>
+    </div>
+
+    <sc-for list="{{ employees }}" as="e" hint-placeholder-count="8">
+      <div style="border-top:1px solid #f0f1f4">
+        <div onClick="{{ e.onToggle }}" style="display:grid;grid-template-columns:minmax(230px,1.9fr) 104px 96px 90px 116px 168px;gap:16px;align-items:center;padding:14px 12px;cursor:pointer;background:{{ e.rowBg }}">
+          <div style="display:flex;align-items:center;gap:12px;min-width:0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b3b9c2" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;transition:transform .18s;transform:rotate({{ e.chevDeg }}deg)"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            <span style="width:34px;height:34px;border-radius:50%;background:#eef1f4;color:#5a6573;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;flex-shrink:0">{{ e.initials }}</span>
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-weight:600;color:#26303f;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.name }}</span>
+                <span style="font-size:10.5px;font-weight:700;color:{{ e.badgeText }};background:{{ e.badgeBg }};border-radius:6px;padding:1px 6px;flex-shrink:0">{{ e.type }}</span>
+              </div>
+              <sc-if value="{{ e.unsignedShow }}" hint-placeholder-val="{{ false }}">
+                <div style="display:inline-flex;align-items:center;gap:5px;margin-top:3px;font-size:11.5px;color:#b45309;font-weight:500">
+                  <span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;display:inline-block"></span>{{ e.unsignedStr }}
+                </div>
+              </sc-if>
+            </div>
+          </div>
+          <div style="text-align:right"><div style="font-size:16px;font-weight:700;color:#26303f;font-variant-numeric:tabular-nums">{{ e.hwH }}</div></div>
+          <div style="text-align:right"><div style="font-size:16px;font-weight:600;color:#3a4658;font-variant-numeric:tabular-nums">{{ e.abH }}</div></div>
+          <div style="text-align:right"><div style="font-size:16px;font-weight:600;color:#3a4658;font-variant-numeric:tabular-nums">{{ e.feH }}</div></div>
+          <div style="text-align:right"><div style="font-size:16px;font-weight:600;color:#3a4658;font-variant-numeric:tabular-nums">{{ e.kmH }}</div></div>
+          <div style="text-align:right">
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;background:{{ e.saldoBg }};color:{{ e.saldoText }};border:1px solid {{ e.saldoBr }};border-radius:999px;padding:4px 12px">{{ e.saldoStr }}</span>
+            <div style="font-size:11px;color:#9aa0aa;margin-top:3px;font-variant-numeric:tabular-nums">HW {{ e.saldoHwStr }} · AB {{ e.saldoAbStr }} Std</div>
+          </div>
+        </div>
+
+        <sc-if value="{{ e.expanded }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#f8f9fb;border:1px solid #eef0f3;border-radius:15px;padding:18px 22px 20px;margin:2px 6px 16px">
+
+          <!-- sub-tabs -->
+          <div style="display:inline-flex;gap:5px;background:#eceef2;border-radius:12px;padding:5px;margin-bottom:18px">
+            <button onClick="{{ e.setTermine }}" style="{{ e.tabTermineStyle }}">Termine &amp; Zeiten</button>
+            <button onClick="{{ e.setAuf }}" style="{{ e.tabAufStyle }}">Aufschlüsselung</button>
+            <button onClick="{{ e.setKonto }}" style="{{ e.tabKontoStyle }}">Stundenkonto</button>
+          </div>
+
+          <!-- ===== TERMINE & ZEITEN ===== -->
+          <sc-if value="{{ e.isTermine }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap">
+              <div style="font-size:13.5px;color:#5a6573">
+                <strong style="color:#26303f;font-weight:700;font-variant-numeric:tabular-nums">{{ e.termineCountStr }}</strong> Termine ·
+                <strong style="color:#26303f;font-weight:600;font-variant-numeric:tabular-nums">{{ e.termineStdStr }}</strong> erfasst
+                <sc-if value="{{ e.unsignedShow }}" hint-placeholder-val="{{ false }}"><span style="color:#b45309"> · {{ e.unsignedStr }}</span></sc-if>
+              </div>
+              <div style="margin-left:auto;display:flex;gap:8px">
+                <button style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid #cdeee7;background:#fff;color:#0f766e;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Eintrag
+                </button>
+                <button style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid #e3e6ea;background:#fff;color:#5a6573;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>Urlaubskontingent
+                </button>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <sc-for list="{{ e.termine }}" as="t" hint-placeholder-count="5">
+                <div style="display:flex;align-items:center;gap:14px;padding:12px 15px;border:1px solid {{ t.br }};background:{{ t.soft }};border-radius:11px">
+                  <span style="width:32px;height:32px;border-radius:9px;background:{{ t.st.bg }};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ t.st.text }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                  </span>
+                  <div style="min-width:0;flex:1">
+                    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+                      <span style="font-size:14.5px;font-weight:600;color:#26303f">{{ t.title }}</span>
+                      <span style="font-size:11.5px;font-weight:600;color:{{ t.st.text }};background:{{ t.st.bg }};border:1px solid {{ t.st.br }};border-radius:999px;padding:2px 9px">{{ t.st.label }}</span>
+                    </div>
+                    <div style="font-size:12.5px;color:#8a909a;margin-top:2px;font-variant-numeric:tabular-nums">{{ t.when }}<sc-if value="{{ t.hasService }}" hint-placeholder-val="{{ true }}"> · {{ t.serviceLabel }}</sc-if></div>
+                  </div>
+                  <span style="font-size:14px;font-weight:700;color:#3a4658;font-variant-numeric:tabular-nums;white-space:nowrap">{{ t.durStr }}</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c4cad3" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+              </sc-for>
+              <sc-if value="{{ e.hasMore }}" hint-placeholder-val="{{ false }}">
+                <div style="text-align:center;padding:11px;font-size:13px;color:#0d9488;font-weight:600;cursor:pointer">+ {{ e.moreStr }} weitere Termine anzeigen</div>
+              </sc-if>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- ===== AUFSCHLÜSSELUNG ===== -->
+          <sc-if value="{{ e.isAuf }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="font-size:12.5px;color:#8a909a;margin-bottom:12px">Ist im {{ monthLabel }} · Soll <strong style="color:#5a6573;font-weight:600">{{ e.sollStr }}/Tag</strong> — Urlaub &amp; Krankheit werden damit in Stunden umgerechnet</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ e.detail }}" as="d" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #eef0f3;border-radius:12px;padding:12px 15px;flex-wrap:wrap">
+                  <span style="font-size:14px;font-weight:600;color:#26303f;min-width:150px">{{ d.label }}</span>
+                  <span style="font-size:10.5px;font-weight:700;color:#5a6573;background:#f1f2f5;border-radius:6px;padding:2px 8px;white-space:nowrap">{{ d.lohnart }}</span>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:200px">
+                    <sc-for list="{{ d.chips }}" as="c" hint-placeholder-count="3">
+                      <span style="display:inline-flex;align-items:baseline;gap:5px;font-size:12.5px;color:#7a8290;background:#f7f8fa;border:1px solid #eef0f3;border-radius:8px;padding:3px 9px">{{ c.label }} <strong style="color:#3a4658;font-weight:600;font-variant-numeric:tabular-nums">{{ c.val }}</strong></span>
+                    </sc-for>
+                  </div>
+                  <span style="text-align:right;white-space:nowrap;font-size:15px;font-weight:700;color:#26303f;font-variant-numeric:tabular-nums">{{ d.total }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- ===== STUNDENKONTO ===== -->
+          <sc-if value="{{ e.isKonto }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="display:flex;align-items:flex-start;gap:11px;background:#fff;border:1px solid #eef0f3;border-radius:11px;padding:11px 15px;margin-bottom:14px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <div style="font-size:12.5px;color:#5a6573;line-height:1.45">HW und AB werden <strong style="color:#26303f;font-weight:600">getrennt</strong> geführt (unterschiedliche Sätze). <strong style="color:#0f766e;font-weight:600">Anfangsbestand</strong> einmalig beim Start eintragen (laufender Betrieb), <strong style="color:#0f766e;font-weight:600">Bezahlt</strong> monatlich — der Saldo läuft automatisch weiter.</div>
+            </div>
+            <div style="background:#fff;border:1px solid #eef0f3;border-radius:13px;overflow:hidden">
+              <div style="display:grid;grid-template-columns:minmax(160px,1.5fr) 1.1fr .95fr 1.1fr 1fr;gap:12px;padding:11px 18px;background:#fbfcfd;border-bottom:1px solid #eef0f3;font-size:11px;color:#9aa0aa;font-weight:600;text-transform:uppercase;letter-spacing:.04em">
+                <div>Kategorie</div>
+                <div style="text-align:right">Anfangsbestand</div>
+                <div style="text-align:right">+ Erfasst</div>
+                <div style="text-align:right">− Bezahlt</div>
+                <div style="text-align:right">= Saldo</div>
+              </div>
+              <sc-for list="{{ e.account }}" as="a" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:minmax(160px,1.5fr) 1.1fr .95fr 1.1fr 1fr;gap:12px;padding:11px 18px;align-items:center;border-bottom:1px solid #f4f5f7;background:{{ a.rowBg }}">
+                  <div>
+                    <div style="font-size:13.5px;font-weight:600;color:{{ a.labelColor }}">{{ a.label }}</div>
+                    <div style="font-size:11px;color:#9aa0aa;margin-top:1px">{{ a.rateLabel }}</div>
+                  </div>
+                  <div style="text-align:right">
+                    <sc-if value="{{ a.editable }}" hint-placeholder-val="{{ true }}">
+                      <span style="display:inline-flex;align-items:center;gap:5px;justify-content:flex-end">
+                        <input class="num" type="text" inputmode="decimal" value="{{ a.openValue }}" onChange="{{ a.openOnChange }}" onClick="{{ a.stop }}" style="width:60px;text-align:right;padding:6px 8px;border:1px dashed #d3d8de;border-radius:8px;font-size:13px;color:#5a6573;background:#fbfcfd;font-variant-numeric:tabular-nums;outline:none" style-focus="border-style:solid;border-color:#14b8a6;background:#fff"/>
+                        <span style="font-size:11.5px;color:#9aa0aa">{{ a.unit }}</span>
+                      </span>
+                    </sc-if>
+                    <sc-if value="{{ a.isTotal }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:13.5px;font-weight:600;color:#8a909a;font-variant-numeric:tabular-nums">{{ a.openStr }}</span>
+                    </sc-if>
+                  </div>
+                  <div style="text-align:right;font-size:13.5px;color:#3a4658;font-variant-numeric:tabular-nums">{{ a.erfStr }}</div>
+                  <div style="text-align:right">
+                    <sc-if value="{{ a.editable }}" hint-placeholder-val="{{ true }}">
+                      <span style="display:inline-flex;align-items:center;gap:5px;justify-content:flex-end">
+                        <input class="num" type="text" inputmode="decimal" value="{{ a.paidValue }}" onChange="{{ a.paidOnChange }}" onClick="{{ a.stop }}" style="width:60px;text-align:right;padding:6px 8px;border:1px solid #d7e6e2;border-radius:8px;font-size:13.5px;color:#26303f;background:#f5fffd;font-variant-numeric:tabular-nums;outline:none" style-focus="border-color:#14b8a6;background:#fff"/>
+                        <span style="font-size:11.5px;color:#9aa0aa">{{ a.unit }}</span>
+                      </span>
+                    </sc-if>
+                    <sc-if value="{{ a.isTotal }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:13.5px;font-weight:600;color:#5a6573;font-variant-numeric:tabular-nums">{{ a.paidStr }}</span>
+                    </sc-if>
+                  </div>
+                  <div style="text-align:right;font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums;color:{{ a.saldoColor }}">{{ a.saldoStr }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+              <button style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border:none;background:#0d9488;color:#fff;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(13,148,136,.24)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Monat abschließen &amp; buchen
+              </button>
+              <button style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border:1px solid #e3e6ea;background:#fff;color:#5a6573;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>Stundenkonto-Auszug (PDF)
+              </button>
+            </div>
+          </div>
+          </sc-if>
+
+        </div>
+        </sc-if>
+      </div>
+    </sc-for>
+
+    <div style="border-top:2px solid #eef0f3;margin-top:2px;display:grid;grid-template-columns:minmax(230px,1.9fr) 104px 96px 90px 116px 168px;gap:16px;align-items:center;padding:15px 12px 2px">
+      <div style="font-size:13.5px;font-weight:700;color:#5a6573;padding-left:60px">Gesamt · {{ kCount }} Mitarbeiter</div>
+      <div style="text-align:right;font-size:14px;font-weight:700;color:#26303f;font-variant-numeric:tabular-nums">{{ tHwH }}</div>
+      <div style="text-align:right;font-size:14px;font-weight:700;color:#26303f;font-variant-numeric:tabular-nums">{{ tAbH }}</div>
+      <div style="text-align:right;font-size:14px;font-weight:700;color:#26303f;font-variant-numeric:tabular-nums">{{ tFeH }}</div>
+      <div style="text-align:right;font-size:14px;font-weight:700;color:#26303f;font-variant-numeric:tabular-nums">{{ tKmH }}</div>
+      <div style="text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;color:{{ kSaldoColor }}">{{ kSaldo }}</div>
+    </div>
+
+    <div style="display:flex;gap:18px;margin-top:16px;flex-wrap:wrap;font-size:12.5px;color:#9aa0aa">
+      <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:#22c55e;display:inline-block"></span>Guthaben (Plusstunden)</span>
+      <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:#f43f5e;display:inline-block"></span>Minusstunden</span>
+      <span style="margin-left:auto">HW = Hauswirtschaft · AB = Alltagsbegleitung (abrechenbar) · Lohnart-Zuordnung für Lexware</span>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1240,&quot;height&quot;:1720},&quot;stundenkontoAmpel&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Stundenkonto&quot;},&quot;kontozeitraum&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;kumuliert&quot;,&quot;nurMonat&quot;],&quot;default&quot;:&quot;kumuliert&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Stundenkonto&quot;}}">
+class Component extends DCLogic {
+  state = { month: 'Juni', expanded: 'Schäfer, Anja', subtab: {}, openRaw: {}, paidRaw: {} };
+
+  data() {
+    // hours in Std, km in km. open = Anfangsbestand (opening balance), paidDef = default "Bezahlt" this month.
+    return [
+      { name: 'Ahnert, Ute', type: 'MJ', soll: 4.0, hw: 44.25, ab: 3.75, erst: 0, anf: 0.25, sonst: 1.0, feier: 0, km: 90.0, urlT: 0, krankT: 0, unsigned: 4, open: { hw: 6.5, ab: 0, fe: 0, km: 0 }, paidDef: { hw: 40, ab: 3.75, fe: 0, km: 90 } },
+      { name: 'Buchmann, Mandy', type: 'TZ', soll: 6.0, hw: 69.5, ab: 17.0, erst: 0, anf: 5.53, sonst: 3.25, feier: 0, km: 457.2, urlT: 0, krankT: 0, unsigned: 0, open: { hw: -3.0, ab: 2.0, fe: 0, km: 0 }, paidDef: { hw: 78, ab: 19, fe: 0, km: 457 } },
+      { name: 'Fiebag, Christiane', type: 'TZ', soll: 8.0, hw: 48.0, ab: 9.25, erst: 4.0, anf: 7.68, sonst: 7.5, feier: 0, km: 406.3, urlT: 4, krankT: 0, unsigned: 7, open: { hw: 2.0, ab: 0, fe: 0, km: 0 }, paidDef: { hw: 95, ab: 9, fe: 0, km: 400 } },
+      { name: 'Fiebag, Marcel', type: 'MJ', soll: 4.0, hw: 7.0, ab: 4.0, erst: 0, anf: 0.25, sonst: 0, feier: 0, km: 43.0, urlT: 0, krankT: 0, unsigned: 0, open: { hw: 0, ab: 0, fe: 0, km: 0 }, paidDef: { hw: 11, ab: 4, fe: 0, km: 43 } },
+      { name: 'Geitner, Monique', type: 'MJ', soll: 4.0, hw: 13.5, ab: 0, erst: 0, anf: 0, sonst: 1.25, feier: 0, km: 39.9, urlT: 0, krankT: 0, unsigned: 0, open: { hw: 1.0, ab: 0, fe: 0, km: 0 }, paidDef: { hw: 14, ab: 0, fe: 0, km: 40 } },
+      { name: 'Heidel, Yvonne', type: 'TZ', soll: 6.0, hw: 8.0, ab: 0, erst: 0, anf: 0, sonst: 0, feier: 0, km: 30.1, urlT: 10, krankT: 0, unsigned: 2, open: { hw: 0, ab: 0, fe: 0, km: 0 }, paidDef: { hw: 60, ab: 0, fe: 0, km: 30 } },
+      { name: 'Klitzsch, Janet', type: 'MJ', soll: 4.0, hw: 28.25, ab: 2.0, erst: 0, anf: 0, sonst: 0, feier: 0, km: 91.8, urlT: 0, krankT: 0, unsigned: 1, open: { hw: -5.0, ab: 0, fe: 0, km: 0 }, paidDef: { hw: 30, ab: 2, fe: 0, km: 90 } },
+      { name: 'Schäfer, Anja', type: 'VZ', soll: 8.0, hw: 92.0, ab: 18.0, erst: 2.0, anf: 9.0, sonst: 4.0, feier: 8.0, km: 512.0, urlT: 0, krankT: 3, unsigned: 0, open: { hw: 4.0, ab: 1.0, fe: 0, km: 0 }, paidDef: { hw: 120, ab: 18, fe: 8, km: 500 } },
+      { name: 'Minuth, Celine', type: 'TZ', soll: 6.0, hw: 40.0, ab: 30.0, erst: 0, anf: 6.0, sonst: 2.0, feier: 6.0, km: 380.0, urlT: 5, krankT: 0, unsigned: 3, open: { hw: 0, ab: -4.0, fe: 0, km: 0 }, paidDef: { hw: 75, ab: 34, fe: 6, km: 380 } },
+      { name: 'Nowak, Tomasz', type: 'TZ', soll: 8.0, hw: 40.0, ab: 24.0, erst: 0, anf: 5.0, sonst: 3.0, feier: 0, km: 300.0, urlT: 0, krankT: 2, unsigned: 0, open: { hw: 1.0, ab: 0, fe: 0, km: 0 }, paidDef: { hw: 60, ab: 24, fe: 0, km: 300 } },
+    ];
+  }
+
+  timeStr(h) { const H = Math.floor(h + 1e-9); const M = Math.round((h - H) * 60); return (H < 10 ? '0' : '') + H + ':' + (M < 10 ? '0' : '') + M; }
+  weekday(day) { return ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'][(day - 1) % 7]; }
+  parseNum(raw) { if (raw === undefined || raw === '') return null; const v = parseFloat(String(raw).replace(',', '.')); return isNaN(v) ? 0 : v; }
+
+  compute() {
+    const R = { hw: 16, ab: 18, fe: 16, km: 0.30 };
+    const kum = (this.props.kontozeitraum ?? 'kumuliert') === 'kumuliert';
+    return this.data().map(e => {
+      const hwErf = e.hw + e.sonst + e.erst + e.anf + e.urlT * e.soll + e.krankT * e.soll;
+      const erf = { hw: hwErf, ab: e.ab, fe: e.feier, km: e.km };
+      const g = (map, k, def) => { const p = this.parseNum((this.state[map][e.name] || {})[k]); return p === null ? def : p; };
+      const open0 = { hw: g('openRaw', 'hw', e.open.hw), ab: g('openRaw', 'ab', e.open.ab), fe: g('openRaw', 'fe', e.open.fe), km: g('openRaw', 'km', e.open.km) };
+      const open = kum ? open0 : { hw: 0, ab: 0, fe: 0, km: 0 };
+      const paid = { hw: g('paidRaw', 'hw', e.paidDef.hw), ab: g('paidRaw', 'ab', e.paidDef.ab), fe: g('paidRaw', 'fe', e.paidDef.fe), km: g('paidRaw', 'km', e.paidDef.km) };
+      const saldo = { hw: open.hw + erf.hw - paid.hw, ab: open.ab + erf.ab - paid.ab, fe: open.fe + erf.fe - paid.fe, km: open.km + erf.km - paid.km };
+      const saldoStd = saldo.hw + saldo.ab + saldo.fe;
+      const saldoEur = saldo.hw * R.hw + saldo.ab * R.ab + saldo.fe * R.fe + saldo.km * R.km;
+      return { e, R, erf, open, paid, saldo, saldoStd, saldoEur };
+    });
+  }
+
+  renderVals() {
+    const R = { hw: 16, ab: 18, fe: 16, km: 0.30 };
+    const nf = (n, d) => n.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const eur = (n) => nf(n, 2) + '\u00A0€';
+    const hStd = (n) => nf(n, 2);
+    const sgn = (n) => (n > 0.005 ? '+' : '') + nf(n, 2);
+    const dash = (n, fmt) => (Math.abs(n) < 0.005 ? '–' : fmt(n));
+    const ampel = this.props.stundenkontoAmpel ?? true;
+
+    const saldoCol = (v) => {
+      if (!ampel) return { bg: '#f7f8fa', text: '#3a4658', br: '#eceef2' };
+      if (v > 0.05) return { bg: '#f0fdf4', text: '#15803d', br: '#bbf7d0' };
+      if (v < -0.05) return { bg: '#fff1f2', text: '#be123c', br: '#fecdd3' };
+      return { bg: '#f3f4f6', text: '#6b7280', br: '#e5e7eb' };
+    };
+    const saldoTextCol = (v) => {
+      if (!ampel) return '#3a4658';
+      if (v > 0.05) return '#15803d';
+      if (v < -0.05) return '#be123c';
+      return '#6b7280';
+    };
+
+    const stMeta = {
+      signed: { label: 'Unterschrieben', bg: '#f0fdf4', text: '#15803d', br: '#bbf7d0' },
+      ohne: { label: 'Ohne Unterschrift', bg: '#fffbeb', text: '#b45309', br: '#fde68a' },
+      geplant: { label: 'Geplant', bg: '#f3f4f6', text: '#6b7280', br: '#e5e7eb' },
+    };
+    const clients = ['Renate Krause', 'Gabriele Schmuck', 'Ramona Kraft', 'Catrin Barz', 'Christoph Hennig', 'Ursula Neuber', 'Günter Hofmann', 'Helga Trojahn'];
+    const svcLabel = { hw: 'Hauswirtschaft', ab: 'Alltagsbegleitung', anf: 'Anfahrt', erst: 'Erstberatung' };
+    const seq = ['hw', 'hw', 'ab', 'hw', 'anf', 'hw'];
+
+    const rows = this.compute();
+    const monthName = this.state.month || 'Juni';
+    const monthLabel = monthName + ' 2026';
+
+    const employees = rows.map(({ e, erf, open, paid, saldo, saldoStd }, i) => {
+      const bd = e.type === 'MJ' ? { bg: '#eef2ff', text: '#4338ca' } : (e.type === 'VZ' ? { bg: '#e8f3f1', text: '#0f766e' } : { bg: '#f1f2f5', text: '#6b7280' });
+      const setMap = (map, k) => (ev) => { const val = ev.target.value; this.setState(s => ({ [map]: { ...s[map], [e.name]: { ...(s[map][e.name] || {}), [k]: val } } })); };
+      const dispVal = (map, k, def) => { const raw = (this.state[map][e.name] || {})[k]; return (raw === undefined) ? nf(def, 2) : raw; };
+      const sc = saldoCol(saldoStd);
+
+      // ---- Termine & Zeiten ----
+      const termine = [];
+      let dd = 2 + (i % 4);
+      for (let j = 0; j < 6; j++) {
+        let svc = seq[j];
+        if (svc === 'ab' && e.ab <= 0) svc = 'hw';
+        if (svc === 'anf' && e.anf <= 0) svc = 'hw';
+        const dur = svc === 'ab' ? 2 : (svc === 'anf' ? 0.25 : 1);
+        const fromH = [8.5, 10, 13, 14.5, 16, 9][j % 6];
+        const status = j < e.unsigned ? 'ohne' : (j % 2 === 0 ? 'signed' : 'geplant');
+        termine.push({
+          title: 'Termin bei ' + clients[(i + j) % clients.length],
+          when: this.weekday(dd) + '., ' + dd + '. ' + monthName + ' · ' + this.timeStr(fromH) + '–' + this.timeStr(fromH + dur),
+          hasService: true, serviceLabel: svcLabel[svc], durStr: nf(dur, 2) + '\u00A0Std',
+          st: stMeta[status], soft: '#fff', br: '#eef0f3',
+        });
+        dd += 2 + (j % 3);
+      }
+      if (e.urlT > 0) termine.push({ title: 'Urlaub', when: e.urlT + ' Tag' + (e.urlT === 1 ? '' : 'e') + ' · genehmigt', hasService: false, serviceLabel: '', durStr: e.urlT + '\u00A0T → ' + nf(e.urlT * e.soll, 2) + '\u00A0Std', st: { label: 'Urlaub', bg: '#f0f9ff', text: '#0369a1', br: '#bae6fd' }, soft: '#f7fbff', br: '#e3f0fb' });
+      if (e.krankT > 0) termine.push({ title: 'Krankheit', when: e.krankT + ' Tag' + (e.krankT === 1 ? '' : 'e') + ' · AU liegt vor', hasService: false, serviceLabel: '', durStr: e.krankT + '\u00A0T → ' + nf(e.krankT * e.soll, 2) + '\u00A0Std', st: { label: 'Krankheit', bg: '#fff1f2', text: '#be123c', br: '#fecdd3' }, soft: '#fff6f6', br: '#fbe3e6' });
+      const apptShown = 6;
+      const totalAppt = Math.max(apptShown, Math.round((e.hw + e.ab + e.erst + e.anf) / 1.4));
+      const moreN = totalAppt - apptShown;
+
+      // ---- Aufschlüsselung ----
+      const detail = [
+        {
+          label: 'HW-Sammelposten', lohnart: 'Lohnart 100',
+          chips: [
+            { label: 'Hauswirtschaft', val: hStd(e.hw) },
+            { label: 'Sonstige', val: hStd(e.sonst) },
+            { label: 'Erstberatung', val: hStd(e.erst) },
+            { label: 'Anfahrt', val: hStd(e.anf) },
+            { label: 'Urlaub', val: e.urlT + '\u00A0T → ' + hStd(e.urlT * e.soll) },
+            { label: 'Krankheit', val: e.krankT + '\u00A0T → ' + hStd(e.krankT * e.soll) },
+          ],
+          total: hStd(erf.hw) + '\u00A0Std',
+        },
+        { label: 'Alltagsbegleitung', lohnart: 'Lohnart 110', chips: [{ label: 'Betreuung', val: hStd(e.ab) }], total: hStd(erf.ab) + '\u00A0Std' },
+        { label: 'Feiertage', lohnart: 'Lohnart 120', chips: [{ label: 'Feiertagsstunden', val: hStd(e.feier) }], total: hStd(erf.fe) + '\u00A0Std' },
+        { label: 'Kilometer', lohnart: 'Lohnart 500', chips: [{ label: 'Anfahrt', val: nf(Math.round(e.km * 0.4 * 10) / 10, 1) + '\u00A0km' }, { label: 'mit/für Kunden', val: nf(e.km - Math.round(e.km * 0.4 * 10) / 10, 1) + '\u00A0km' }], total: nf(erf.km, 1) + '\u00A0km' },
+      ];
+
+      // ---- Stundenkonto (HW & AB priced separately) ----
+      const acctRow = (key, label, rateLabel, unit, dec) => ({
+        label, rateLabel, unit, editable: true, isTotal: false, labelColor: '#26303f', rowBg: '#fff',
+        openValue: dispVal('openRaw', key, e.open[key]), openOnChange: setMap('openRaw', key),
+        erfStr: nf(erf[key], dec) + '\u00A0' + unit,
+        paidValue: dispVal('paidRaw', key, e.paidDef[key]), paidOnChange: setMap('paidRaw', key),
+        saldoStr: sgn(saldo[key]) + '\u00A0' + unit, saldoColor: saldoTextCol(saldo[key]),
+        stop: (ev) => ev.stopPropagation(),
+      });
+      const account = [
+        acctRow('hw', 'HW-Sammelposten', 'Lohnart 100', 'Std', 2),
+        acctRow('ab', 'Alltagsbegleitung', 'Lohnart 110', 'Std', 2),
+        acctRow('fe', 'Feiertage', 'Lohnart 120', 'Std', 2),
+        acctRow('km', 'Kilometer', 'Lohnart 500', 'km', 1),
+        {
+          label: 'Gesamt', rateLabel: 'Zeit-Lohnarten (HW + AB + Feiert.)', unit: 'Std', editable: false, isTotal: true,
+          labelColor: '#0f766e', rowBg: '#f5fffd',
+          openStr: sgn(open.hw + open.ab + open.fe) + '\u00A0Std',
+          erfStr: nf(erf.hw + erf.ab + erf.fe, 2) + '\u00A0Std',
+          paidStr: nf(paid.hw + paid.ab + paid.fe, 2) + '\u00A0Std',
+          saldoStr: sgn(saldoStd) + '\u00A0Std', saldoColor: saldoTextCol(saldoStd),
+        },
+      ];
+
+      const stab = this.state.subtab[e.name] || 'auf';
+      const segOff = 'padding:8px 16px;border-radius:9px;font-size:13.5px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#6b7280;';
+      const segOn = 'padding:8px 16px;border-radius:9px;font-size:13.5px;font-weight:600;cursor:pointer;border:none;background:#fff;color:#0f766e;box-shadow:0 1px 2px rgba(20,30,40,.10);';
+
+      return {
+        name: e.name, type: e.type, badgeBg: bd.bg, badgeText: bd.text,
+        initials: e.name.split(',')[0].slice(0, 1) + (e.name.split(', ')[1] || ' ').slice(0, 1),
+        unsignedShow: e.unsigned > 0, unsignedStr: e.unsigned + ' Termin' + (e.unsigned === 1 ? '' : 'e') + ' ohne Unterschrift',
+        hwH: hStd(erf.hw), abH: dash(erf.ab, hStd), feH: dash(erf.fe, hStd), kmH: nf(erf.km, 1),
+        saldoStr: sgn(saldoStd) + '\u00A0Std', saldoBg: sc.bg, saldoText: sc.text, saldoBr: sc.br,
+        saldoHwStr: sgn(saldo.hw), saldoAbStr: sgn(saldo.ab),
+        sollStr: nf(e.soll, 1) + '\u00A0Std',
+        expanded: e.name === this.state.expanded, chevDeg: e.name === this.state.expanded ? 90 : 0,
+        rowBg: e.name === this.state.expanded ? '#fbfcfd' : '#fff',
+        onToggle: () => this.setState(s => ({ expanded: s.expanded === e.name ? null : e.name })),
+        detail, account, termine,
+        termineCountStr: String(totalAppt), termineStdStr: nf(e.hw + e.ab + e.erst + e.anf, 2) + '\u00A0Std',
+        hasMore: moreN > 0, moreStr: String(moreN),
+        isTermine: stab === 'termine', isAuf: stab === 'auf', isKonto: stab === 'konto',
+        tabTermineStyle: stab === 'termine' ? segOn : segOff, tabAufStyle: stab === 'auf' ? segOn : segOff, tabKontoStyle: stab === 'konto' ? segOn : segOff,
+        setTermine: () => this.setState(s => ({ subtab: { ...s.subtab, [e.name]: 'termine' } })),
+        setAuf: () => this.setState(s => ({ subtab: { ...s.subtab, [e.name]: 'auf' } })),
+        setKonto: () => this.setState(s => ({ subtab: { ...s.subtab, [e.name]: 'konto' } })),
+      };
+    });
+
+    // ---- totals + statistics ----
+    let tHw = 0, tAb = 0, tFe = 0, tKm = 0, tSaldo = 0, tOffen = 0, billable = 0, nonBill = 0;
+    rows.forEach(({ e, erf, saldoStd }) => {
+      tHw += erf.hw; tAb += erf.ab; tFe += erf.fe; tKm += erf.km; tSaldo += saldoStd; tOffen += e.unsigned;
+      billable += e.hw + e.ab;
+      nonBill += e.sonst + e.erst + e.anf + e.feier + e.urlT * e.soll + e.krankT * e.soll;
+    });
+    const totalH = billable + nonBill;
+    const prodQ = totalH ? billable / totalH * 100 : 0;
+    const prodDelta = 6.4, nonDelta = -2.1; // vs. Vormonat (Wachstum produktiver / unproduktiver Stunden)
+    const months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+    const mi = months.indexOf(monthName);
+    const prevMonthLabel = (mi > 0 ? months[mi - 1] + ' 2026' : 'Dezember 2025');
+    const dStr = (v) => (v > 0 ? '+' : '') + nf(v, 1) + '\u00A0%';
+
+    return {
+      month: this.state.month, setMonth: (ev) => this.setState({ month: ev.target.value }),
+      monthLabel, employees,
+      kTotalStd: nf(totalH, 2) + '\u00A0Std', kCount: rows.length,
+      kBillable: nf(billable, 2) + '\u00A0Std',
+      kProdQ: nf(prodQ, 1) + '\u00A0%', kProdQNum: Math.round(prodQ), kOverheadStr: nf(nonBill, 1) + '\u00A0Std',
+      kProdDelta: dStr(prodDelta), kProdArrow: prodDelta >= 0 ? '▲' : '▼', kProdColor: prodDelta >= 0 ? '#15803d' : '#be123c',
+      kNonDelta: dStr(nonDelta), kNonArrow: nonDelta >= 0 ? '▲' : '▼', kNonColor: nonDelta <= 0 ? '#15803d' : '#be123c',
+      prevMonthLabel,
+      kSaldo: sgn(tSaldo) + '\u00A0Std', kSaldoColor: saldoTextCol(tSaldo),
+      kOffen: String(tOffen),
+      tHwH: nf(tHw, 2), tAbH: nf(tAb, 2), tFeH: nf(tFe, 2), tKmH: nf(tKm, 1),
+      exportCsv: () => {
+        const rr = this.compute();
+        const lines = [['Mitarbeiter', 'Lohnart', 'Bezeichnung', 'Stunden_bzw_KM'].join(';')];
+        const map = [['hw', '100', 'HW-Sammelposten'], ['ab', '110', 'Alltagsbegleitung'], ['fe', '120', 'Feiertage'], ['km', '500', 'Kilometer']];
+        rr.forEach(({ e, erf }) => map.forEach(([k, la, bez]) => {
+          if (erf[k] > 0.005) lines.push([e.name, la, bez, nf(erf[k], k === 'km' ? 1 : 2)].join(';'));
+        }));
+        try {
+          const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = 'lexware_stunden_' + (this.state.month || 'Juni') + '_2026.csv';
+          document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        } catch (err) { console.warn('CSV export', err); }
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>

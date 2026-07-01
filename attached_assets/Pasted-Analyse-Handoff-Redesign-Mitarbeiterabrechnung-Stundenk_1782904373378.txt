@@ -1,0 +1,135 @@
+Analyse & Handoff: Redesign „Mitarbeiterabrechnung & Stundenkonto"
+
+Projekt: EngelDesk / Care Connect (Senioren Engel), React/TS + Node + Postgres, Repo SeniorEng/Dashboard.
+Gegenstand: Das von Claude Design gelieferte Redesign (design_handoff_mitarbeiterabrechnung), das die zwei bisherigen Admin-Anlaufstellen Zeiterfassung (Termin-/Zeit-Einträge je Mitarbeiter) und Stundenübersicht (Monatsstunden je Mitarbeiter) zu einer Monats-Abschluss-Fläche zusammenführt.
+Zweck dieses Dokuments: (1) fachliche Bewertung des Entwurfs, (2) konkrete Verbesserungen mit Best-Practice-Beleg, (3) sauberer Übergabe-Text für Replit AI.
+Stand: 01.07.2026. Noch nichts gebaut — read-only Inventur zuerst, dann phasenweiser Build.
+
+
+1. Kurzfazit
+
+Der Entwurf ist stark und geht in die richtige Richtung: eine Anlaufstelle statt zwei, „nur Stunden, kein €", Aggregation nach Lohnart, direkter Lexware-Bezug, sauberes Design-System (identisch zur Abrechnungs-Fläche). Das Design-README ist bereits ein ausgezeichneter Handoff (Tokens, Business-Rules, State) — es muss nicht neu gebaut, sondern an drei Stellen korrigiert/geklärt werden, bevor Replit loslegt:
+
+
+Das Lexware-CSV-Format im Entwurf ist so nicht importierbar — es fehlen die Pflichtfelder (Personalnummer, Jahr, Monat, Lohnartnummer).
+Der Begriff „Stundenkonto" vermischt zwei verschiedene Konten — „Erfasst − Bezahlt" (Auszahl-Rückstand) vs. das klassische „Ist − Soll" (Überstunden-/Minusstundenkonto). Das muss fachlich entschieden werden.
+Die editierbaren Salden brauchen Audit-Trail + Sperre nach Monatsabschluss — sonst nicht revisionssicher (Zeiterfassungspflicht/GoBD).
+
+
+Dazu ein paar kleinere Anpassungen und offene Entscheidungen (Abschnitt 4).
+
+
+2. Was das Redesign richtig macht (mit Best-Practice-Beleg)
+
+Konsolidierung 2 → 1. Zwei getrennte Tabs für dasselbe Thema sind der eigentliche Schmerzpunkt. Best Practice für Arbeitszeitkonten ist ausdrücklich, dass Zeiterfassung, Kontenmodell und Lohnabrechnung ineinandergreifen und zentral/automatisiert geführt werden — nicht in getrennten Silos.
+
+Abwesenheit in Stunden = Tage × Soll/Tag ist korrekt. Der Prototyp rechnet urlT*soll bzw. krankT*soll und schreibt nie Minusstunden. Das ist exakt die Entgeltfortzahlungs-Regel: bei Urlaub und Krankheit gelten die vertraglich geschuldeten Sollstunden des jeweiligen Tages als geleistet, es dürfen keine Minusstunden entstehen. Die transparente Anzeige „3 T → 24,00 Std" ist genau richtig.
+
+Fahrtzeit/Anfahrt zählt als bezahlte Arbeitszeit. Der Entwurf steckt anf in den Lohn (HW-Sammelposten). Das deckt sich mit der Rechtslage: Fahrtzeit zwischen Einsätzen (nicht der Weg Wohnung→Büro) ist vergütungspflichtige Arbeitszeit (BAG, 12.12.2012). Siehe aber die Verfeinerung in Abschnitt 4 (eigene Lohnart / anderer Satz zulässig).
+
+Alle Stunden werden erfasst, nicht nur die abrechenbaren. Das ist Pflicht: Seit dem BAG-Beschluss vom 13.09.2022 (1 ABR 22/21, ausgerechnet im Streit eines Pflegedienstes) muss der Arbeitgeber die gesamte Arbeitszeit objektiv, verlässlich und zugänglich erfassen. Der Entwurf erfasst Produktiv- + Gemeinkosten- + Abwesenheitsstunden — richtig.
+
+Produktivquote / „Wasserkopf" als Steuerungs-KPI. Sinnvolle betriebswirtschaftliche Kennzahl (abrechenbar vs. gesamt). Nur die Benennung „Gemeinkosten" sauber halten — Fahrtzeit, Erstberatung etc. sind notwendige unproduktive Zeit, kein Verschnitt.
+
+
+3. Muss vor dem Build angepasst werden (nach Priorität)
+
+3.1 Lexware-Export: Format stimmt nicht — sonst nicht importierbar  ⛔ Blocker
+
+Der Prototyp baut die CSV mit Spalten Mitarbeiter; Lohnart; Bezeichnung; Stunden_bzw_KM. Der ASCII-/CSV-Import von Lexware Lohn + Gehalt verlangt aber als Pflichtfelder: Jahr; Monat; Personalnummer; Lohnartnummer; Wert.
+
+Konkret zu ändern:
+
+
+Personalnummer statt Mitarbeitername. Lexware ordnet über die Personalnummer zu, nicht über den Namen. Es braucht also ein gepflegtes Feld „Personalnummer (Lexware)" je Mitarbeiter (analog zur Beschäftigtennummer, die es für die Leistungsnachweise schon gibt — prüfen, ob dieselbe Nummer taugt oder ein separates Feld nötig ist).
+Spalten Jahr und Monat ergänzen (Abrechnungsperiode).
+Lohnartnummer muss mit den tatsächlich im Lexware-Mandanten angelegten Lohnarten übereinstimmen. Die Nummern 100/110/120/500 aus dem Entwurf sind Annahmen — vor dem Go-Live gegen den echten Lexware-Lohnarten-Stamm abgleichen und ggf. konfigurierbar machen.
+Wert: Stunden/km mit Komma als Dezimaltrenner, Semikolon als Feldtrenner, keine führenden Nullen, UTF-8. Ein Stundensatz muss nicht mitgegeben werden — fehlt er, zieht Lexware den Satz der Lohnart. Das passt perfekt zur Vorgabe „kein € auf dieser Fläche".
+
+
+→ Ergebnis: eine Zeile je Mitarbeiter × Lohnart mit Jahr;Monat;Personalnummer;Lohnartnummer;Wert.
+
+3.2 „Stundenkonto": zwei Konten-Begriffe sauseinanderhalten  ⚠️ Fachentscheidung
+
+Der Entwurf rechnet je Kategorie: Saldo = Anfangsbestand + Erfasst − Bezahlt. Das ist ein Auszahlungs-Rückstandskonto („welche erfassten Stunden sind noch nicht ausgezahlt"). Sinnvoll — u. a. für Minijob-Steuerung und für „mitgenommene" Stunden.
+
+Aber: Die Sprache im Entwurf („Guthaben / Plusstunden / Minusstunden") ist die des klassischen Arbeitszeitkontos, und das ist etwas anderes: dort ist Saldo = Ist − Soll (hat der/die Mitarbeitende mehr oder weniger als die Vertragsstunden gearbeitet). Der Entwurf trägt das soll je Mitarbeiter zwar mit, nutzt es aber nur für die Abwesenheits-Umrechnung — eine Ist-/Soll-Gegenüberstellung fehlt komplett.
+
+Zu entscheiden (mit Alrik):
+
+
+Will die Geschäftsleitung das Auszahl-Rückstandskonto (Erfasst−Bezahlt) — dann Wording anpassen (nicht „Minusstunden", sondern z. B. „noch nicht ausgezahlt")?
+Oder das echte Überstundenkonto (Ist vs. Vertragsstunden) — dann fehlt die Soll-Spalte/Vergleich?
+Oder beides nebeneinander?
+
+
+Das ist die wichtigste inhaltliche Klärung. Gerade bei Minijob/Teilzeit ist der Soll-Bezug (Vertragsstunden) betrieblich relevant.
+
+3.3 Editierbare Salden brauchen Audit-Trail + Abschluss-Sperre  ⚠️ Compliance
+
+Anfangsbestand und Bezahlt sind frei editierbare Felder. Für ein prüffestes Arbeitszeit-/Lohnkonto verlangt die Zeiterfassungspflicht Verlässlichkeit (manipulationssicher) und Zugänglichkeit; GoBD verlangt Nachvollziehbarkeit. Daher:
+
+
+Jede Änderung protokollieren (wer, wann, alt→neu).
+Abgeschlossene Monate sperren — an den bestehenden Monatsabschluss (auto-8., read-only) koppeln, den es schon gibt. Nach Abschluss keine stille Nachbearbeitung von Anfangsbestand/Bezahlt.
+Der „Anfangsbestand" wird laut Konzept einmalig bei Go-Live gesetzt und danach = Vormonats-Saldo. Dieser Übertrag sollte systemisch erfolgen (Saldo(Monat) → Anfangsbestand(Monat+1)), nicht per Hand — sonst driftet das Konto.
+
+
+
+4. Weitere Verbesserungen & offene Entscheidungen
+
+Minijob-Kappung sichtbar machen. Mehrere Mitarbeiter sind Typ MJ (Minijob). Die 556-€-Grenze (Stand 2025/26) reißt, wenn Stunden × Satz zu hoch werden — mit Statusverlust-Folgen. Der Entwurf blendet € bewusst aus (gut für die Produktivsicht), aber für Minijobber braucht es einen Kappungs-Indikator/Warnung (z. B. Ampel „X % der 556-€-Grenze"), auch wenn € sonst verborgen bleibt.
+
+Unsigned-Termine: für Lohn zählen, aber als „Abrechnungs-Risiko" markieren. Die Unterschrift ist die Kunden-Bestätigung für die Abrechnung (Leistungsnachweis) — nicht für den Lohn. Gearbeitete Zeit ist Lohn-relevant, egal ob der Kunde schon unterschrieben hat. Empfehlung: unsigned in Erfasst (Lohn) belassen, aber sie zusätzlich als „Kosten entstanden, noch nicht abrechenbar" ausweisen. Das trennt die Lohn-Seite sauber von der Abrechnungs-Seite (die offene README-Frage ist damit beantwortet).
+
+Fahrtzeit ggf. eigene Lohnart. Fahrtzeit ist Arbeitszeit, darf aber vertraglich/tariflich anders vergütet werden als die eigentliche Tätigkeit. Der Entwurf verlohnt anf im HW-Sammelposten (Lohnart 100, 16 €). Wenn Fahrtzeit anders bezahlt wird → eigene Lohnart. Entscheidung nötig. (Und: nur Zeit zwischen Einsätzen, nicht der Weg Wohnung→Büro.)
+
+Kilometer-Split als echte Felder. Der 40/60-Split (Anfahrt / mit Kunden) ist im Prototyp geschätzt. In Produktion zwei echte Felder erfassen und für Lohnart 500 summieren.
+
+Vormonatsvergleich mit echten Daten. Die Wachstums-Deltas (+6,4 % / −2,1 %) sind Platzhalter — an echte Vormonats-Aggregate anschließen.
+
+Soll/Tag bei variablen Dienstplänen. Tage × flaches Soll ist für konstante Verträge korrekt. Bei schwankenden Dienstplänen wären die konkret geplanten Stunden der Abwesenheitstage genauer (Entgeltfortzahlung stellt auf den verbindlichen Dienstplan des Tages ab). Für den Start pragmatisch flach, aber als bekannte Vereinfachung dokumentieren.
+
+Mitarbeiter-Einsehbarkeit. Die Zeiterfassungspflicht verlangt Zugänglichkeit für die Beschäftigten. Der „Stundenkonto-Auszug (PDF)" ist ein guter Anfang; perspektivisch eine Selbst-Sicht je Mitarbeiter erwägen.
+
+
+5. Konsolidierung der zwei Admin-Anlaufstellen
+
+Der Entwurf führt Zeiterfassung und Stundenübersicht bereits in einer Fläche zusammen (Termin-Detail landet im Drilldown-Reiter „Termine & Zeiten", die Monatsstunden in Tabelle + „Aufschlüsselung"). Damit daraus wirklich eine Anlaufstelle wird:
+
+
+Nach dem Build die beiden alten Routen/Tabs stilllegen (Redirect auf die neue Fläche) — genau wie zuvor /admin/cockpit retired wurde.
+Vorher read-only prüfen, welche Stellen im Code auf die alten Routen/Komponenten zeigen (Navigation, Deep-Links, evtl. Exporte), damit nichts ins Leere läuft.
+Ziel: kein Nutzer landet mehr in zwei „Wahrheiten" für dasselbe Thema.
+
+
+
+6. Wie an Replit AI übermitteln
+
+Das Design-README ist bereits sehr gut — Replit soll es als Vorlage nehmen, nicht ersetzen. Der Übergabe-Text unten formuliert nur die Änderungen/Klarstellungen gegenüber dem README plus die Vorgehens-Disziplin, die in diesem Projekt gilt (read-only zuerst, additive Phasen, GoBD, Abschluss-Kopplung).
+
+Empfohlenes Vorgehen für Replit:
+
+
+Read-only Inventur: Wo kommen die Rohfelder (hw, ab, erst, anf, sonst, feier, km, urlT, krankT, soll, type, unsigned) je Mitarbeiter/Monat tatsächlich her? Gibt es eine Personalnummer? Wie ist der Monatsabschluss angebunden? Wo leben die bisherigen zwei Tabs?
+Design-Review: Datenmodell für Stundenkonto (nach Klärung 3.2), Audit/Lock (3.3), Lexware-Export (3.1).
+Build phasenweise, additiv: neue Route zuerst neben den alten; erst wenn stabil, alte Tabs retiren.
+
+
+
+7. Paste-fertiger Übergabe-Text für Replit AI
+
+
+Neue Fläche „Mitarbeiterabrechnung & Stundenkonto" — bitte nach dem Design-README design_handoff_mitarbeiterabrechnung bauen. Folgende Korrekturen/Klarstellungen gehen dem README vor. Read-only Inventur zuerst, additiv bauen, GoBD-Disziplin.
+
+1. Lexware-CSV neu (das Format im README ist nicht importierbar). Der ASCII-Import von Lexware Lohn+Gehalt verlangt die Pflichtfelder Jahr;Monat;Personalnummer;Lohnartnummer;Wert (Semikolon-getrennt, Komma-Dezimal, UTF-8, keine führenden Nullen). Also: eine Zeile je Mitarbeiter×Lohnart mit genau diesen Spalten. Personalnummer statt Name — read-only prüfen, ob es ein Personalnummer-Feld gibt (ggf. Beschäftigtennummer der LN prüfen) oder ob eines ergänzt werden muss. Lohnartnummern (100/110/120/500) sind Annahmen — konfigurierbar halten und gegen den echten Lexware-Lohnarten-Stamm abgleichen. Kein Stundensatz mitgeben (Lexware zieht den Satz der Lohnart) — passt zu „kein € auf der Fläche".
+
+2. „Stundenkonto"-Semantik VOR dem Bauen klären (fachliche Entscheidung Alrik). Der README-Saldo ist Anfangsbestand + Erfasst − Bezahlt = ein Auszahl-Rückstandskonto. Die Wording „Plus-/Minusstunden" gehört aber zum klassischen Arbeitszeitkonto Ist − Soll (Vertragsstunden), das im Entwurf fehlt (soll wird nur für Abwesenheits-Umrechnung genutzt). Nicht raten — als offene Entscheidung markieren: Auszahl-Ledger, echtes Überstundenkonto (dann Soll-Vergleich ergänzen), oder beides.
+
+3. Editierbare Salden = revisionssicher. Anfangsbestand und Bezahlt brauchen ein Änderungsprotokoll (wer/wann/alt→neu) und müssen nach Monatsabschluss gesperrt sein (an den bestehenden auto-Abschluss koppeln). Der Übertrag Saldo(Monat) → Anfangsbestand(Monat+1) soll systemisch passieren, nicht manuell.
+
+4. Weitere Punkte: (a) Minijob-Kappung sichtbar machen (556-€-Grenze) für MJ-Mitarbeiter, auch wenn € sonst verborgen bleibt. (b) Unsigned-Termine zählen für den Lohn (Erfasst) mit — Unterschrift gated nur die Abrechnung; unsigned zusätzlich als „noch nicht abrechenbar" ausweisen, nicht aus Erfasst entfernen. (c) Fahrtzeit ggf. eigene Lohnart (darf anders vergütet werden als HW) — Entscheidung; nur Zeit zwischen Einsätzen, nicht der Arbeitsweg. (d) Kilometer-Split (Anfahrt/mit Kunden) als zwei echte Felder statt 40/60-Schätzung. (e) Vormonatsvergleich an echte Aggregate anschließen (Platzhalter +6,4 %/−2,1 % raus).
+
+5. Konsolidierung: Diese Fläche ersetzt die zwei getrennten Tabs Zeiterfassung + Stundenübersicht. Nach stabilem Build die alten Routen retiren/redirecten (wie zuvor /admin/cockpit); vorher read-only prüfen, welche Stellen auf die alten Routen zeigen.
+
+Vorgehen: (1) read-only Inventur (Rohfelder-Herkunft, Personalnummer, Monatsabschluss-Anbindung, alte Tabs), (2) Design-Review Datenmodell/Export/Audit, (3) additiv bauen — neue Route neben den alten, alte erst danach stilllegen. Design-Tokens, Copy (Deutsch) und Interaktionen exakt aus dem README übernehmen
