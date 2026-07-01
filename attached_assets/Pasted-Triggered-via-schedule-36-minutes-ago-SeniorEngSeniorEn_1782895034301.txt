@@ -1,0 +1,35 @@
+Triggered via schedule 36 minutes ago
+@SeniorEngSeniorEng
+⁠
+ d8f598c
+main
+Status
+Failure
+Total duration
+1m 59s
+Artifacts
+1
+
+
+crash-recovery-smoke summary
+Vitest Test Report
+Summary
+Test Files: ❌ 1 failure · 1 total
+Test Results: ❌ 1 failure · 1 total
+Job summary generated at run-time
+Annotations
+2 errors, 1 warning, and 1 notice
+crash-recovery-smoke
+Process completed with exit code 1.
+[unit] tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts > Orchestrator-Neustart nach Hart-Abbruch (Smoke, Task #1492) > räumt verwaiste Prozesse + DB ab und führt einen vollständigen Lauf grün zu Ende: tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts#L255
+AssertionError: PID-Preflight-Zeile fehlt: expected '[ephemeral-db] [sweep] verwaiste Test…' to match /PID-Auslastung:/ - Expected: /PID-Auslastung:/ + Received: "[ephemeral-db] [sweep] verwaiste Test-DB gedroppt: cc_test_mr1roj9d_smoke_c4e45c58 [ephemeral-db] [sweep] verwaisten server-Prozess gekillt: pid 3343 [ephemeral-db] Prozess-Sweep: 1 verwaiste Test-Prozess(e) beendet. [ephemeral-db] Cache nicht frisch — hole Build-Lock (serialisiert konkurrierende Aufbauten) ... [ephemeral-db] Cache-Template cc_test_tmpl_cache fehlt — wird neu gebaut ... [ephemeral-db] Pushe Drizzle-Schema (drizzle-kit push --force) ... No config path provided, using default 'drizzle.config.ts' Reading config file '/home/runner/work/Dashboard/Dashboard/drizzle.config.ts' Using 'pg' driver for database querying [⣷] Pulling schema from database... [✓] Pulling schema from database... [✓] Changes applied [ephemeral-db] Seede Test-Superadmin ... [db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy localhost:4444 (kein TLS). [db] pool configured — max=20 idleTimeout=300s connectTimeout=15s keepAlive=on [ci-seed] Test-User *** angelegt. [ci-seed] Superadmin-Rechte + aktiv-Status + Onboarding-Flag sichergestellt. [ci-seed] Service-Rollen sichergestellt (5). [ephemeral-db] Seede Basis-Referenzdaten (Leistungen) ... [db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy localhost:4444 (kein TLS). [db] pool configured — max=20 idleTimeout=300s connectTimeout=15s keepAlive=on [seed-ref-data] company_settings Firmenidentität geseedet. [ephemeral-db] Cache-Template cc_test_tmpl_cache neu gebaut (Hash hinterlegt). [ephemeral-db] CACHE_RESULT=cold [ephemeral-db] Klone Per-Lauf-Template cc_test_mr1sexn1_3560_ec8f7d49_tmpl aus Cache cc_test_tmpl_cache ... [ephemeral-db] Baue Test-Server-Bundle (esbuild, API-only) ... [ephemeral-db] Test-Server-Bundle fertig in 291ms (.local/test-server-mr1sexn1_3560_ec8f7d49.cjs). [ephemeral-db] Provisioniere 1 Worker (DB + Server) ... [ephemeral-db] Starte App-Server (cc_test_mr1sexn1_3560_ec8f7d49_w0) auf Port 38135 via node .local/test-server-mr1sexn1_3560_ec8f7d49.cjs (Logs: .local/test-server-38135.log) ... [ephemeral-db] 1 Server healthy. Führe Tests aus: node -e process.exit(0) ephemeral-restart-smoke-vitest " ❯ tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts:255:48
+crash-recovery-smoke
+Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/github-script@v7, actions/setup-node@v4, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+crash-recovery-smoke
+crash-recovery-smoke-Alarm aktualisiert: Issue #3
+Artifacts
+Produced during runtime
+Name	Size	Digest	
+crash-recovery-smoke-log
+2.06 KB	
+sha256:79963451ab322cd2cb8351f0527603f03e1d9cdc8deea0792b2eab1d93301508

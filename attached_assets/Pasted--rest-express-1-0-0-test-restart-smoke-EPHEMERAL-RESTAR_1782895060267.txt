@@ -1,0 +1,70 @@
+
+> rest-express@1.0.0 test:restart-smoke
+> EPHEMERAL_RESTART_SMOKE=1 vitest run tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts --project unit
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.7 [39m[90m/home/runner/work/Dashboard/Dashboard[39m
+
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 51712[2mms[22m[39m
+[31m     [31m×[31m räumt verwaiste Prozesse + DB ab und führt einen vollständigen Lauf grün zu Ende[39m[33m 51710[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts[2m > [22mOrchestrator-Neustart nach Hart-Abbruch (Smoke, Task #1492)[2m > [22mräumt verwaiste Prozesse + DB ab und führt einen vollständigen Lauf grün zu Ende
+[31m[1mAssertionError[22m: PID-Preflight-Zeile fehlt: expected '[ephemeral-db] [sweep] verwaiste Test…' to match /PID-Auslastung:/[39m
+
+[32m- Expected:[39m
+/PID-Auslastung:/
+
+[31m+ Received:[39m
+"[ephemeral-db] [sweep] verwaiste Test-DB gedroppt: cc_test_mr1roj9d_smoke_c4e45c58
+[ephemeral-db] [sweep] verwaisten server-Prozess gekillt: pid 3343
+[ephemeral-db] Prozess-Sweep: 1 verwaiste Test-Prozess(e) beendet.
+[ephemeral-db] Cache nicht frisch — hole Build-Lock (serialisiert konkurrierende Aufbauten) ...
+[ephemeral-db] Cache-Template cc_test_tmpl_cache fehlt — wird neu gebaut ...
+[ephemeral-db] Pushe Drizzle-Schema (drizzle-kit push --force) ...
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/home/runner/work/Dashboard/Dashboard/drizzle.config.ts'
+Using 'pg' driver for database querying
+[⣷] Pulling schema from database...
+[2K[1G[✓] Pulling schema from database...
+[✓] Changes applied
+[ephemeral-db] Seede Test-Superadmin ...
+[db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy localhost:4444 (kein TLS).
+[db] pool configured — max=20 idleTimeout=300s connectTimeout=15s keepAlive=on
+[ci-seed] Test-User ci-superadmin@careconnect.test angelegt.
+[ci-seed] Superadmin-Rechte + aktiv-Status + Onboarding-Flag sichergestellt.
+[ci-seed] Service-Rollen sichergestellt (5).
+[ephemeral-db] Seede Basis-Referenzdaten (Leistungen) ...
+[db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy localhost:4444 (kein TLS).
+[db] pool configured — max=20 idleTimeout=300s connectTimeout=15s keepAlive=on
+[seed-ref-data] company_settings Firmenidentität geseedet.
+[ephemeral-db] Cache-Template cc_test_tmpl_cache neu gebaut (Hash hinterlegt).
+[ephemeral-db] CACHE_RESULT=cold
+[ephemeral-db] Klone Per-Lauf-Template cc_test_mr1sexn1_3560_ec8f7d49_tmpl aus Cache cc_test_tmpl_cache ...
+[ephemeral-db] Baue Test-Server-Bundle (esbuild, API-only) ...
+[ephemeral-db] Test-Server-Bundle fertig in 291ms (.local/test-server-mr1sexn1_3560_ec8f7d49.cjs).
+[ephemeral-db] Provisioniere 1 Worker (DB + Server) ...
+[ephemeral-db] Starte App-Server (cc_test_mr1sexn1_3560_ec8f7d49_w0) auf Port 38135 via node .local/test-server-mr1sexn1_3560_ec8f7d49.cjs (Logs: .local/test-server-38135.log) ...
+[ephemeral-db] 1 Server healthy. Führe Tests aus: node -e process.exit(0) ephemeral-restart-smoke-vitest
+
+"
+
+[36m [2m❯[22m tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts:[2m255:48[22m[39m
+    [90m253|[39m
+    [90m254|[39m       // PID-Preflight hat beim Start gegriffen (Diagnose-Zeile vorhan…
+    [90m255|[39m       expect(out, "PID-Preflight-Zeile fehlt").toMatch(/PID-Auslastung…
+    [90m   |[39m                                                [31m^[39m
+    [90m256|[39m
+    [90m257|[39m       // Prozess-Sweep hat gegriffen: der verwaiste Server-Prozess ist…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m   Start at [22m 08:01:33
+[2m   Duration [22m 51.97s[2m (transform 87ms, setup 61ms, import 60ms, tests 51.71s, environment 0ms)[22m
+
+
+::error file=/home/runner/work/Dashboard/Dashboard/tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts,title=[unit] tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts > Orchestrator-Neustart nach Hart-Abbruch (Smoke%2C Task #1492) > räumt verwaiste Prozesse + DB ab und führt einen vollständigen Lauf grün zu Ende,line=255,column=48::AssertionError: PID-Preflight-Zeile fehlt: expected '[ephemeral-db] [sweep] verwaiste Test…' to match /PID-Auslastung:/%0A%0A- Expected:%0A/PID-Auslastung:/%0A%0A+ Received:%0A"[ephemeral-db] [sweep] verwaiste Test-DB gedroppt: cc_test_mr1roj9d_smoke_c4e45c58%0A[ephemeral-db] [sweep] verwaisten server-Prozess gekillt: pid 3343%0A[ephemeral-db] Prozess-Sweep: 1 verwaiste Test-Prozess(e) beendet.%0A[ephemeral-db] Cache nicht frisch — hole Build-Lock (serialisiert konkurrierende Aufbauten) ...%0A[ephemeral-db] Cache-Template cc_test_tmpl_cache fehlt — wird neu gebaut ...%0A[ephemeral-db] Pushe Drizzle-Schema (drizzle-kit push --force) ...%0ANo config path provided, using default 'drizzle.config.ts'%0AReading config file '/home/runner/work/Dashboard/Dashboard/drizzle.config.ts'%0AUsing 'pg' driver for database querying%0A[⣷] Pulling schema from database...%0A[✓] Pulling schema from database...%0A[✓] Changes applied%0A[ephemeral-db] Seede Test-Superadmin ...%0A[db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy localhost:4444 (kein TLS).%0A[db] pool configured — max=20 idleTimeout=300s connectTimeout=15s keepAlive=on%0A[ci-seed] Test-User ci-superadmin@careconnect.test angelegt.%0A[ci-seed] Superadmin-Rechte + aktiv-Status + Onboarding-Flag sichergestellt.%0A[ci-seed] Service-Rollen sichergestellt (5).%0A[ephemeral-db] Seede Basis-Referenzdaten (Leistungen) ...%0A[db] NEON_LOCAL_WS_PROXY gesetzt — WebSocket über Proxy localhost:4444 (kein TLS).%0A[db] pool configured — max=20 idleTimeout=300s connectTimeout=15s keepAlive=on%0A[seed-ref-data] company_settings Firmenidentität geseedet.%0A[ephemeral-db] Cache-Template cc_test_tmpl_cache neu gebaut (Hash hinterlegt).%0A[ephemeral-db] CACHE_RESULT=cold%0A[ephemeral-db] Klone Per-Lauf-Template cc_test_mr1sexn1_3560_ec8f7d49_tmpl aus Cache cc_test_tmpl_cache ...%0A[ephemeral-db] Baue Test-Server-Bundle (esbuild, API-only) ...%0A[ephemeral-db] Test-Server-Bundle fertig in 291ms (.local/test-server-mr1sexn1_3560_ec8f7d49.cjs).%0A[ephemeral-db] Provisioniere 1 Worker (DB + Server) ...%0A[ephemeral-db] Starte App-Server (cc_test_mr1sexn1_3560_ec8f7d49_w0) auf Port 38135 via node .local/test-server-mr1sexn1_3560_ec8f7d49.cjs (Logs: .local/test-server-38135.log) ...%0A[ephemeral-db] 1 Server healthy. Führe Tests aus: node -e process.exit(0) ephemeral-restart-smoke-vitest%0A%0A"%0A%0A ❯ tests/unit/ephemeral-db-restart-after-crash-smoke.test.ts:255:48%0A%0A
