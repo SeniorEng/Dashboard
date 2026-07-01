@@ -189,9 +189,17 @@ export interface TestAppointment {
 
 export async function createAppointment(
   session: ApiSession,
-  opts: { customerId: number; employeeId: number },
+  opts: {
+    customerId: number;
+    employeeId: number;
+    /** Optional fixed date (YYYY-MM-DD). Defaults to `nextWeekday(7)`. */
+    date?: string;
+    /** Optional start time (HH:MM). Defaults to "10:00". */
+    scheduledStart?: string;
+  },
 ): Promise<TestAppointment> {
-  const date = nextWeekday(7);
+  const date = opts.date ?? nextWeekday(7);
+  const scheduledStart = opts.scheduledStart ?? "10:00";
   const serviceId = await getServiceIdByCode(session, "hauswirtschaft");
   const { status, data } = await apiPost<unknown>(
     session,
@@ -200,7 +208,7 @@ export async function createAppointment(
       customerId: opts.customerId,
       assignedEmployeeId: opts.employeeId,
       date,
-      scheduledStart: "10:00",
+      scheduledStart,
       services: [{ serviceId, durationMinutes: 60 }],
       notes: "",
     },

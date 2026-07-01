@@ -14,6 +14,7 @@ import {
   createProspect,
   createSingleServiceRecord,
   deactivateEmployee,
+  documentAppointment,
   getServiceIdByCode,
   validSignatureDataUrl,
 } from "../helpers/test-data";
@@ -1504,5 +1505,107 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
           });
       }
     }
+  });
+
+  // ---------- Sammel-LN Auswahl — Termin abwählen (#1543) ----------
+  // Task #1542 fügte den Auswahl-Sheet hinzu, in dem der Mitarbeiter beim
+  // Erstellen eines Sammel-Leistungsnachweises einzelne dokumentierte Termine
+  // abwählen kann. Dieser Smoke-Test fährt den kompletten Browser-Round-Trip:
+  // Sheet öffnen → einen Termin abwählen → absenden → prüfen, dass der erzeugte
+  // Nachweis GENAU den ausgewählten Termin abdeckt und der abgewählte Termin für
+  // einen zweiten Nachweis weiterhin auswählbar bleibt.
+  test("Sammel-LN — abgewählter Termin bleibt für zweiten Nachweis verfügbar", async ({ page }) => {
+    test.setTimeout(90_000);
+    const customer = await createCustomer(session);
+
+    // Den angemeldeten Admin (= die Browser-Session) als primären Mitarbeiter
+    // zuweisen. So ist `check-period`/Create für exakt diesen User `isPrimary`
+    // und liefert die dokumentierten Termine ohne View-as. Der Create-Screen
+    // verhält sich für den Sachbearbeiter identisch.
+    const me = (await session.api.get("/api/auth/me").then((r) => r.json())) as {
+      user: { id: number };
+    };
+    const adminId = me.user.id;
+    await assignEmployee(session, customer.id, adminId);
+
+    // Zwei dokumentierte Termine am selben Tag (unterschiedliche Uhrzeiten →
+    // keine Überschneidung), damit beide sicher im selben Monat liegen.
+    const apptA = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: adminId,
+      scheduledStart: "10:00",
+    });
+    const apptB = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: adminId,
+      date: apptA.date,
+      scheduledStart: "11:00",
+    });
+
+    const serviceId = await getServiceIdByCode(session, "hauswirtschaft");
+    await documentAppointment(session, apptA.id, { serviceId });
+    await documentAppointment(session, apptB.id, { serviceId });
+
+    const [year, month] = apptA.date.split("-").map((n) => parseInt(n, 10));
+
+    await page.goto(
+      `/service-records?customerId=${customer.id}&year=${year}&month=${month}`,
+      { waitUntil: "domcontentloaded" },
+    );
+
+    // Auswahl-Sheet öffnen.
+    const openBtn = page.locator("[data-testid='button-create-record']");
+    await expect(openBtn).toBeVisible({ timeout: 15000 });
+    await openBtn.click();
+
+    const sheet = page.locator("[data-testid='sheet-select-appointments']");
+    await expect(sheet).toBeVisible({ timeout: 10000 });
+
+    // Beide Termine sind vorausgewählt. Termin B abwählen.
+    const checkboxA = page.locator(`[data-testid='checkbox-appointment-${apptA.id}']`);
+    const checkboxB = page.locator(`[data-testid='checkbox-appointment-${apptB.id}']`);
+    await expect(checkboxA).toBeVisible({ timeout: 10000 });
+    await expect(checkboxB).toBeVisible({ timeout: 10000 });
+    await expect(checkboxA).toHaveAttribute("data-state", "checked");
+    await expect(checkboxB).toHaveAttribute("data-state", "checked");
+
+    await checkboxB.click();
+    await expect(checkboxB).toHaveAttribute("data-state", "unchecked");
+
+    // Absenden — es geht nur der ausgewählte Termin A mit.
+    await clickSaveAndWait(
+      page,
+      { url: "/api/service-records", methods: ["POST"] },
+      "button-confirm-create",
+    );
+
+    // onSuccess navigiert auf /service-records/:id — die neue Record-ID
+    // aus der URL lesen.
+    await page.waitForURL(/\/service-records\/\d+$/, { timeout: 15000 });
+    const newRecordId = parseInt(page.url().split("/service-records/")[1], 10);
+    expect(Number.isFinite(newRecordId)).toBe(true);
+
+    // Der erzeugte Nachweis deckt GENAU Termin A ab (nicht B).
+    const covered = (await session.api
+      .get(`/api/service-records/${newRecordId}/appointments`)
+      .then((r) => (r.ok() ? r.json() : []))) as Array<{ id: number }>;
+    const coveredIds = covered.map((a) => a.id);
+    expect(coveredIds).toContain(apptA.id);
+    expect(coveredIds).not.toContain(apptB.id);
+
+    // Der abgewählte Termin B bleibt für einen zweiten Nachweis auswählbar.
+    const period = (await session.api
+      .get(
+        `/api/service-records/check-period?customerId=${customer.id}&year=${year}&month=${month}`,
+      )
+      .then((r) => (r.ok() ? r.json() : null))) as {
+      uncoveredDocumentedCount: number;
+      selectableAppointments: Array<{ id: number }>;
+    } | null;
+    expect(period, "check-period nach Erstellung nicht ladbar").toBeTruthy();
+    const selectableIds = period!.selectableAppointments.map((a) => a.id);
+    expect(selectableIds).toContain(apptB.id);
+    expect(selectableIds).not.toContain(apptA.id);
+    expect(period!.uncoveredDocumentedCount).toBe(1);
   });
 });
