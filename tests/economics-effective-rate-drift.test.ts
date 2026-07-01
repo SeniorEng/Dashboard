@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../server/lib/db";
 import { getAuthCookie, createTestCustomer, cleanupCustomer } from "./test-utils";
 import { getPerformanceStats } from "../server/storage/statistics/performance";
-import { getEconomics } from "../server/storage/statistics/economics";
+import { getEconomics, listNonBillableHours } from "../server/storage/statistics/economics";
 import { readBillingEconomics } from "../server/storage/billing/economics-reader";
 import { resolvePeriod } from "../server/storage/statistics/common";
 import { quantizeKm } from "../shared/domain/invoice-line-items";
@@ -474,5 +474,102 @@ describe("Task #1553 — Reporting: Zeiterfassungs-km-Lohn effektiv aus Geld ÷ 
 
     // Kosten-only: Zeiterfassungs-km werden dem Kunden NIE berechnet.
     expect(economics.km.timeEntry.chargedCents).toBe(0);
+  });
+});
+
+/**
+ * Task #1554 — Anzeige-vs-Buchung für den NICHT-ABRECHENBARE-STUNDEN-Export
+ * (Drill-down / CSV) — `listNonBillableHours`.
+ *
+ * Der Wirtschaftlichkeits-Überblick (Reader 2, oben) ist gegen Katalog-vs-
+ * Effektiv-Drift des rollenbasierten Nicht-abrechenbar-Lohns abgesichert. Der
+ * gleichnamige Drill-down/CSV-Export (`listNonBillableHours`) berechnet die
+ * Kosten je Mitarbeiter × Kategorie über DIESELBE rollenbasierte Lohn-Auflösung
+ * (`resolvedWageCentsSql` gegen die `hauswirtschaft`-Leistung), war aber bislang
+ * durch KEINEN Test gegen ein stilles Zurückfallen auf den flachen Katalog-Satz
+ * (`services.employee_rate_cents`) geschützt. Eine künftige Änderung an der
+ * Lohn-Auflösung könnte die exportierten Kosten unbemerkt auf den Katalog-Satz
+ * driften lassen, ohne dass ein Test bricht.
+ *
+ * Diese Suite bucht nicht-abrechenbare Zeiterfassungs-Einträge (bueroarbeit/
+ * vertrieb) in einem isolierten, weit entfernten Jahr für einen Mitarbeiter und
+ * setzt einen `hauswirtschaft`-Rollenlohn (`role_wage_rates`), der bewusst vom
+ * flachen Katalog-Satz abweicht. Sie prüft je Drill-down-Zeile:
+ *   - `costCents` === effektiver Rollenlohn × Stunden (Minuten/60),
+ *   - `costCents` !== Katalog-Satz × Stunden,
+ *   - `costCents / Minuten` rundet auf den effektiven (nicht Katalog-) Satz.
+ */
+describe("Task #1554 — Reporting: Nicht-abrechenbar-Export Lohn effektiv aus Geld ÷ Std (nicht Katalog)", () => {
+  const NB_YEAR = 2042; // Eigenes, weit entferntes Jahr ⇒ keine Vermischung mit anderen Suites.
+  const NB_MONTH = 6;
+  const BUERO_MINUTES = 120; // 2 Std ⇒ Katalog-vs-Effektiv-Differenz klar sichtbar.
+  const VERTRIEB_MINUTES = 60; // 1 Std.
+
+  let userId: number;
+  let hauswirtschaftServiceId = 0;
+  let hwWageId = 0;
+  const timeEntryIds: number[] = [];
+  let catalogHwRateCents = 0;
+  let effectiveHwWageCents = 0;
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    userId = auth.user.id; // Seed-Superadmin ⇒ Lohn-Rolle 'admin'.
+
+    // Reale HW-Leistung (der Export löst den Nicht-abrechenbar-Lohn über
+    // `hauswirtschaft` auf).
+    const svc = await db.execute(sql`
+      SELECT id, COALESCE(employee_rate_cents, 0)::int AS rate
+      FROM services WHERE code = 'hauswirtschaft' LIMIT 1
+    `).then((r) => r.rows as Array<{ id: number; rate: number }>);
+    hauswirtschaftServiceId = svc[0].id;
+    catalogHwRateCents = svc[0].rate;
+    // Garantiert vom Katalog-Satz verschieden.
+    effectiveHwWageCents = catalogHwRateCents + 613;
+
+    // Rollen-Lohnsatz (admin × hauswirtschaft) für das Testjahr — spätestes
+    // valid_from gewinnt, kollidiert also nicht mit anderen Suites.
+    hwWageId = await db.execute(sql`
+      INSERT INTO role_wage_rates (role, service_id, cents, valid_from, valid_to, created_by_user_id)
+      VALUES ('admin', ${hauswirtschaftServiceId}, ${effectiveHwWageCents}, ${`${NB_YEAR}-01-01`}, ${`${NB_YEAR}-12-31`}, ${userId})
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+
+    // Zwei nicht-abrechenbare Einträge (verschiedene Kategorien ⇒ zwei Zeilen).
+    for (const [entryType, minutes] of [["bueroarbeit", BUERO_MINUTES], ["vertrieb", VERTRIEB_MINUTES]] as const) {
+      const id = await db.execute(sql`
+        INSERT INTO employee_time_entries
+          (user_id, entry_type, entry_date, duration_minutes, kilometers, is_full_day)
+        VALUES (${userId}, ${entryType}, ${`${NB_YEAR}-0${NB_MONTH}-15`}, ${minutes}, 0, false)
+        RETURNING id
+      `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+      timeEntryIds.push(id);
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of timeEntryIds) await db.execute(sql`DELETE FROM employee_time_entries WHERE id = ${id}`);
+    if (hwWageId) await db.execute(sql`DELETE FROM role_wage_rates WHERE id = ${hwWageId}`);
+  });
+
+  it("Drill-down/CSV: Kosten je Zeile = effektiver Rollenlohn × Std, nicht Katalog", async () => {
+    const rows = await listNonBillableHours(resolvePeriod({ year: NB_YEAR }));
+    const mine = rows.filter((row) => row.employeeId === userId);
+
+    // Katalog ≠ Effektiv (sonst prüft der Test nichts).
+    expect(effectiveHwWageCents).not.toBe(catalogHwRateCents);
+
+    for (const [category, minutes] of [["bueroarbeit", BUERO_MINUTES], ["vertrieb", VERTRIEB_MINUTES]] as const) {
+      const row = mine.find((r) => r.category === category);
+      expect(row).toBeDefined();
+      expect(row!.minutes).toBe(minutes);
+
+      // Kosten = effektiver Rollenlohn × Std (Geld ÷ Minuten ⇒ effektiv), NICHT Katalog.
+      expect(row!.costCents).toBe(Math.round((effectiveHwWageCents * minutes) / 60));
+      expect(row!.costCents).not.toBe(Math.round((catalogHwRateCents * minutes) / 60));
+
+      // Rück-Ableitung: Kosten ÷ Std rundet auf den effektiven (nicht Katalog-) Satz.
+      expect(Math.round((row!.costCents * 60) / row!.minutes)).toBe(effectiveHwWageCents);
+    }
   });
 });
