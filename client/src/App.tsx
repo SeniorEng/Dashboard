@@ -34,7 +34,6 @@ const AdminUsers = lazy(() => import("@/pages/admin/users"));
 const AdminCustomers = lazy(() => import("@/pages/admin/customers"));
 const AdminCustomerDetail = lazy(() => import("@/pages/admin/customer-detail"));
 const AdminCustomerNew = lazy(() => import("@/pages/admin/customer-new"));
-const AdminTimeEntries = lazy(() => import("@/pages/admin/time-entries"));
 const AdminInsuranceProviders = lazy(() => import("@/pages/admin/insurance-providers"));
 const AdminServices = lazy(() => import("@/pages/admin/services"));
 const AdminSettings = lazy(() => import("@/pages/admin/settings"));
@@ -49,7 +48,7 @@ const AdminStatisticsRevenue = lazy(() => import("@/pages/admin/statistics/v2/re
 const AdminStatisticsPerformance = lazy(() => import("@/pages/admin/statistics/v2/performance-page"));
 const AdminStatisticsBudgets = lazy(() => import("@/pages/admin/statistics/v2/budgets-page"));
 const AdminBilling = lazy(() => import("@/pages/admin/billing"));
-const AdminHoursOverview = lazy(() => import("@/pages/admin/lexware-export"));
+const AdminMitarbeiterabrechnung = lazy(() => import("@/pages/admin/mitarbeiterabrechnung"));
 const AdminProspects = lazy(() => import("@/pages/admin/prospects"));
 const AdminProofReview = lazy(() => import("@/pages/admin/proof-review"));
 const AdminQonto = lazy(() => import("@/pages/admin/qonto"));
@@ -231,7 +230,7 @@ function Router() {
         <AdminRoute component={AdminServices} />
       </Route>
       <Route path="/admin/time-entries">
-        <AdminRoute component={AdminTimeEntries} />
+        <Redirect to="/admin/mitarbeiterabrechnung" />
       </Route>
       <Route path="/admin/availability">
         <AdminRoute component={AdminAvailability} />
@@ -278,8 +277,11 @@ function Router() {
       <Route path="/admin/billing">
         <AdminRoute component={AdminBilling} />
       </Route>
+      <Route path="/admin/mitarbeiterabrechnung">
+        <SuperAdminRoute component={AdminMitarbeiterabrechnung} />
+      </Route>
       <Route path="/admin/hours-overview">
-        <SuperAdminRoute component={AdminHoursOverview} />
+        <Redirect to="/admin/mitarbeiterabrechnung" />
       </Route>
       <Route path="/admin/proof-review">
         <AdminRoute component={AdminProofReview} />

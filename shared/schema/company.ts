@@ -42,7 +42,7 @@ export const companySettings = pgTable("company_settings", {
   smtpSecure: boolean("smtp_secure").notNull().default(false),
   letterxpressUsername: text("letterxpress_username"),
   letterxpressApiKey: encryptedText("letterxpress_api_key"),
-  minijobEarningsLimitCents: integer("minijob_earnings_limit_cents").notNull().default(55600),
+  minijobEarningsLimitCents: integer("minijob_earnings_limit_cents").notNull().default(60300),
   // Task #562 — Standard-Fälligkeit in Tagen für neu erzeugte Rechnungen.
   // Wird beim Insert auf invoices.due_date = issueDate + N Tage angewendet.
   // Mandant kann hier abweichen; Default 30 entspricht der gängigen Praxis.

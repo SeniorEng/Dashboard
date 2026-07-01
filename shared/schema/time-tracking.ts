@@ -77,6 +77,58 @@ export const vacationEntitlementHistory = pgTable("vacation_entitlement_history"
   index("vacation_entitlement_history_user_idx").on(table.userId),
 ]);
 
+// ============================================
+// STUNDENKONTO — Auszahl-Rückstand pro Mitarbeiter × Monat × Kategorie
+// (Task #1555). Saldo = Anfangsbestand + Erfasst − Bezahlt (in Stunden bzw. km).
+// `erfasst` ist NICHT persistiert (wird aus den Termin-/Zeitdaten abgeleitet —
+// SSoT `payroll-hours`); hier landen nur die MANUELL pflegbaren Werte:
+//   - anfangsbestand: einmaliger Go-Live-Eröffnungssaldo (openingBalanceType
+//     'go_live'). Übertragene Salden ('carryover') werden NICHT gespeichert,
+//     sondern zur Laufzeit aus dem Vormonat abgeleitet.
+//   - bezahlt: tatsächlich ausgezahlte Stunden/km im Monat. NULL ⇒ default =
+//     Erfasst (also standardmäßig vollständig ausgezahlt, Saldo bleibt
+//     unverändert).
+// Editier-Sperre nach dem 8.-des-Monats-Auto-Abschluss über employeeMonthClosings.
+// ============================================
+export const HOURS_ACCOUNT_CATEGORIES = ["hw", "ab", "feiertage", "kilometer"] as const;
+export type HoursAccountCategory = (typeof HOURS_ACCOUNT_CATEGORIES)[number];
+
+export const HOURS_ACCOUNT_OPENING_TYPES = ["go_live", "carryover"] as const;
+export type HoursAccountOpeningType = (typeof HOURS_ACCOUNT_OPENING_TYPES)[number];
+
+export const employeeHoursAccounts = pgTable("employee_hours_accounts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  year: integer("year").notNull(),
+  month: integer("month").notNull(),
+  category: text("category").notNull(), // HoursAccountCategory
+  // Manueller Anfangsbestand (Stunden bzw. km). NULL ⇒ zur Laufzeit aus dem
+  // Vormonats-Saldo abgeleitet (Übertrag).
+  anfangsbestand: numeric("anfangsbestand", { precision: 10, scale: 2, mode: "number" }),
+  // Manuell ausgezahlt (Stunden bzw. km). NULL ⇒ default = Erfasst.
+  bezahlt: numeric("bezahlt", { precision: 10, scale: 2, mode: "number" }),
+  openingBalanceType: text("opening_balance_type").notNull().default("carryover"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("hours_account_unique").on(table.userId, table.year, table.month, table.category),
+  index("hours_account_user_idx").on(table.userId),
+  index("hours_account_period_idx").on(table.year, table.month),
+]);
+
+export const upsertHoursAccountSchema = z.object({
+  userId: z.number().int(),
+  year: z.number().int().min(2020).max(2100),
+  month: z.number().int().min(1).max(12),
+  category: z.enum(HOURS_ACCOUNT_CATEGORIES),
+  anfangsbestand: z.number().optional().nullable(),
+  bezahlt: z.number().min(0, "Bezahlt darf nicht negativ sein").optional().nullable(),
+  openingBalanceType: z.enum(HOURS_ACCOUNT_OPENING_TYPES).optional(),
+});
+
+export type EmployeeHoursAccount = typeof employeeHoursAccounts.$inferSelect;
+export type UpsertHoursAccount = z.infer<typeof upsertHoursAccountSchema>;
+
 // Insert schemas
 export const insertTimeEntrySchema = z.object({
   entryType: z.enum(TIME_ENTRY_TYPES),

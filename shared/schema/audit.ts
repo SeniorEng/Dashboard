@@ -115,6 +115,7 @@ export const AUDIT_ACTIONS = [
   "role_wage_rate_replaced",
   "role_wage_rate_deleted",
   "role_wage_rate_changed_closed",
+  "hours_account_updated",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -132,6 +133,7 @@ export const AUDIT_ENTITY_TYPES = [
   "employee",
   "insurance_provider",
   "service",
+  "hours_account",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

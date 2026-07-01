@@ -220,15 +220,6 @@ export default function AdminDashboard() {
           permissionKey: "customers",
         },
         {
-          href: "/admin/time-entries",
-          testId: "card-time-entries",
-          icon: <Clock className={`${iconSize.lg} text-green-600`} />,
-          iconBg: "bg-green-100",
-          title: "Zeiterfassung",
-          description: "Zeiten nachtragen, Urlaub & Krankheit verwalten",
-          permissionKey: "time_entries",
-        },
-        {
           href: "/admin/proof-review",
           testId: "card-document-review",
           icon: <GraduationCap className={`${iconSize.lg} text-orange-600`} />,
@@ -272,13 +263,13 @@ export default function AdminDashboard() {
           permissionKey: "billing",
         },
         {
-          href: "/admin/hours-overview",
-          testId: "card-hours-overview",
+          href: "/admin/mitarbeiterabrechnung",
+          testId: "card-mitarbeiterabrechnung",
           icon: <Clock className={`${iconSize.lg} text-cyan-600`} />,
           iconBg: "bg-cyan-100",
-          title: "Stundenübersicht",
-          description: "Monatliche Stunden, KM, Urlaub und Krankheit je Mitarbeiter",
-          // Task #1512 — Lexware-Auszahlungsdaten pro Mitarbeiter sind Superadmin-only.
+          title: "Mitarbeiterabrechnung & Stundenkonto",
+          description: "Lohnzeiten, Kilometer, Auszahl-Rückstände und Monatsabschluss je Mitarbeiter",
+          // Wage-/Minijob-Daten pro Mitarbeiter sind Superadmin-only.
           permissionKey: "super_admin_only",
         },
       ],

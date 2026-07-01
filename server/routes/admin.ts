@@ -12,6 +12,7 @@ import timeTrackingRouter from "./admin/time-tracking";
 import documentsRouter from "./admin/documents";
 import auditRouter from "./admin/audit";
 import lexwareExportRouter from "./admin/lexware-export";
+import mitarbeiterabrechnungRouter from "./admin/mitarbeiterabrechnung";
 import documentDeliveryRouter from "./admin/document-delivery";
 import prospectsRouter from "./admin/prospects";
 import qontoRouter from "./admin/qonto";
@@ -76,12 +77,12 @@ const ROUTE_PERMISSION_MAP: Record<string, AdminPermissionKey> = {
   "/billing": "billing",
   "/invoices": "billing",
   "/hours-overview": "hours_overview",
+  "/mitarbeiterabrechnung": "hours_overview",
   "/settings": "settings",
   "/company-settings": "settings",
   "/audit-log": "audit_log",
   "/verify-signature": "audit_log",
   "/revoke-signature": "audit_log",
-  "/lexware-export": "billing",
   "/document-delivery": "documents",
   "/whatsapp": "whatsapp",
   "/budget": "customers",
@@ -146,6 +147,7 @@ router.use("/", timeTrackingRouter);
 router.use("/", documentsRouter);
 router.use("/", auditRouter);
 router.use("/", lexwareExportRouter);
+router.use("/", mitarbeiterabrechnungRouter);
 router.use("/", documentDeliveryRouter);
 router.use("/", prospectsRouter);
 router.use("/", importAppointmentsRouter);

@@ -57,9 +57,9 @@ const ALLOWED_PATHS = [
   // Storno-Policy-Beschreibung: Anzeige der Anfahrts-Strecke in einer
   // Policy-Begründung, nicht auf einer Rechnungs-Line.
   "shared/domain/cancellation-policy.ts",
-  // Lexware-Export-Aggregat (Anfahrt + Kunden + Sonstige als Tooltip),
-  // bewusst NICHT die Rechnungs-Line.
-  "client/src/pages/admin/lexware-export.tsx",
+  // Mitarbeiterabrechnung-Aggregat (Kilometer je Mitarbeiter/Monat als
+  // Anzeige-Summe), bewusst NICHT die Rechnungs-Line.
+  "client/src/pages/admin/mitarbeiterabrechnung.tsx",
   // Budget-Ledger-Transaktionsanzeige, zeigt eingegebene km roh —
   // keine Rechnungs-Line-Item-Menge.
   "client/src/components/budget/BudgetLedgerSection.tsx",
