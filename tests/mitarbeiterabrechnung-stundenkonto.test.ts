@@ -280,3 +280,127 @@ describe("Task #1557: Stundenkonto-Saldo + Monatsabschluss-Sperre", () => {
     expect(cells.hw.bezahlt).toBe(1);
   });
 });
+
+/**
+ * Task #1555-Regression — Route-Smoke auf die BASIS-Übersichtsroute.
+ *
+ * Symptom: Das Frontend rief `GET /api/admin/mitarbeiterabrechnung?year&month`
+ * auf und bekam 404 ⇒ KPI-Board, Aggregat-Tabelle und Stundenkonto blieben
+ * für alle Monate leer. Die bestehenden Tests (#1551–#1554, #1557) trafen
+ * entweder die Aggregationsfunktion direkt oder nur die Unterrouten
+ * `/employee/:id` bzw. `/account` — die BASIS-Route war HTTP-seitig ungetestet,
+ * daher rutschte ein Pfad-/Methoden-/Registrierungs-Mismatch stumm durch.
+ *
+ * Dieser Test feuert exakt denselben GET-Pfad wie das Frontend und schlägt
+ * fehl, sobald die Route nicht (mehr) unter diesem Pfad registriert ist.
+ */
+const SMOKE_YEAR = 2022;
+const SMOKE_MONTH = 11;
+const SMOKE_DATE = `${SMOKE_YEAR}-${SMOKE_MONTH}-14`; // Montag, kein Wochenende
+const SMOKE_HW_MINUTES = 90; // ⇒ erfasst.hw = 1.5 h
+const SMOKE_TRAVEL_KM = 7;
+
+interface OverviewRow {
+  employeeId: number;
+  vorname: string;
+  nachname: string;
+  erfasst: { hw: number; ab: number; feiertage: number; kilometer: number };
+  unsignedAppointmentCount: number;
+}
+
+interface OverviewResponse {
+  year: number;
+  month: number;
+  kpis: {
+    erfassteStunden: { current: number; previous: number; deltaPct: number | null };
+    abrechenbareStunden: { current: number; previous: number; deltaPct: number | null };
+    produktivquote: { current: number; gemeinkostenStunden: number };
+    wachstum: { produktivDeltaPct: number | null; gemeinkostenDeltaPct: number | null };
+    stundenkontoSaldo: number;
+    offeneTermine: { hours: number; count: number };
+  };
+  rows: OverviewRow[];
+}
+
+describe("Task #1555-Regression: GET /mitarbeiterabrechnung (Route-Smoke)", () => {
+  let customerId: number;
+  let employeeId: number;
+
+  async function getOverview() {
+    return apiGet<OverviewResponse>(
+      `/api/admin/mitarbeiterabrechnung?year=${SMOKE_YEAR}&month=${SMOKE_MONTH}`,
+    );
+  }
+
+  beforeAll(async () => {
+    const customer = await createTestCustomer();
+    customerId = customer.id as number;
+    const serviceId = await getSeededHauswirtschaftServiceId();
+    const employee = await createTestEmployee({ nachnamePrefix: "TestSmoke" });
+    employeeId = employee.id;
+    await assignEmployeeToCustomer(customerId, employeeId);
+
+    const { appointmentId } = await createAndDocumentAppointment(customerId, serviceId, {
+      assignedEmployeeId: employeeId,
+      durationMinutes: SMOKE_HW_MINUTES,
+    });
+    await db.execute(sql`
+      UPDATE appointments
+      SET date = ${SMOKE_DATE},
+          status = 'completed',
+          signature_data = 'data:image/png;base64,SMOKE_SIGNED',
+          performed_by_employee_id = ${employeeId},
+          assigned_employee_id = ${employeeId},
+          travel_minutes = 0,
+          travel_kilometers = ${SMOKE_TRAVEL_KM},
+          customer_kilometers = 0
+      WHERE id = ${appointmentId}
+    `);
+    await db.execute(sql`
+      UPDATE appointment_services
+      SET actual_duration_minutes = ${SMOKE_HW_MINUTES}
+      WHERE appointment_id = ${appointmentId}
+    `);
+  });
+
+  afterAll(async () => {
+    await db.execute(sql`DELETE FROM employee_hours_accounts WHERE user_id = ${employeeId}`);
+    await db.execute(sql`DELETE FROM employee_month_closings WHERE user_id = ${employeeId}`);
+    await cleanupCustomer(customerId);
+    await deactivateTestEmployee(employeeId);
+  });
+
+  it("antwortet mit 200 (nicht 404) auf denselben GET-Pfad wie das Frontend", async () => {
+    const res = await getOverview();
+    expect(res.status).toBe(200);
+    expect(res.data.year).toBe(SMOKE_YEAR);
+    expect(res.data.month).toBe(SMOKE_MONTH);
+  });
+
+  it("liefert das erwartete KPI-Board- und Tabellen-Shape", async () => {
+    const res = await getOverview();
+    expect(res.status).toBe(200);
+    const { kpis, rows } = res.data;
+    // Alle sechs KPI-Gruppen des Boards müssen vorhanden und numerisch sein,
+    // sonst rendern die KpiCards NaN/leer.
+    expect(typeof kpis.erfassteStunden.current).toBe("number");
+    expect(typeof kpis.abrechenbareStunden.current).toBe("number");
+    expect(typeof kpis.produktivquote.current).toBe("number");
+    expect(kpis.wachstum).toBeDefined();
+    expect(typeof kpis.stundenkontoSaldo).toBe("number");
+    expect(typeof kpis.offeneTermine.hours).toBe("number");
+    expect(typeof kpis.offeneTermine.count).toBe("number");
+    expect(Array.isArray(rows)).toBe(true);
+  });
+
+  it("verdrahtet die Aggregation mit der Route: der dokumentierte Termin erscheint in der Zeile", async () => {
+    const res = await getOverview();
+    expect(res.status).toBe(200);
+    const mine = res.data.rows.find((r) => r.employeeId === employeeId);
+    expect(mine, "Mitarbeiter mit dokumentiertem Termin muss eine Zeile haben").toBeDefined();
+    expect(mine!.erfasst.hw).toBeCloseTo(SMOKE_HW_MINUTES / 60, 2); // 1.5
+    expect(mine!.erfasst.kilometer).toBeCloseTo(SMOKE_TRAVEL_KM, 3);
+    // Termin ist dokumentiert UND unterschrieben ⇒ keine offene Unterschrift.
+    expect(mine!.unsignedAppointmentCount).toBe(0);
+  });
+});
