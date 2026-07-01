@@ -30,7 +30,6 @@ import { num } from "../statistics/common";
 import {
   buildEconomics,
   marginPercent,
-  nonBillableRateCents,
 } from "@shared/domain/statistics/economics";
 import type {
   EconomicsBreakdown,
@@ -51,13 +50,14 @@ const NON_BILLABLE_TYPES = ["bueroarbeit", "vertrieb", "sonstiges", "krankheit",
 
 type Rows = Record<string, unknown>[];
 
-/** Sätze + zusätzlich die HW/AB-Katalog-Erlös-Sätze (für die Anzeige-Spalten). */
-interface RatesPlus extends EconomicsRatesCents {
-  hauswirtschaftPriceCents: number;
-  alltagsbegleitungPriceCents: number;
-}
-
-async function resolveRatesPlus(): Promise<RatesPlus> {
+/**
+ * Sätze für die Kosten-/Erlös-Berechnung in `buildEconomics` (km-Preis/-Lohnsatz,
+ * HW-/AB-/Erstberatungs-Lohnsatz). Die je Zeile ANGEZEIGTEN Stunden-/km-Sätze
+ * werden NICHT hier abgeleitet, sondern in `buildRow` effektiv aus Geld ÷ Menge
+ * gerechnet (Anzeige === Buchung), damit rollenbasierte Löhne und kundenspezi-
+ * fische Preise sich im Satz-Label spiegeln statt der flachen Katalogspalten.
+ */
+async function resolveRates(): Promise<EconomicsRatesCents> {
   const r = await db.execute(sql`
     SELECT s.code,
       COALESCE(s.employee_rate_cents, 0)::int AS rate_cents,
@@ -79,9 +79,20 @@ async function resolveRatesPlus(): Promise<RatesPlus> {
     customerKmRateCents: rate("customer_km"),
     travelKmPriceCents: price("travel_km"),
     customerKmPriceCents: price("customer_km"),
-    hauswirtschaftPriceCents: price("hauswirtschaft"),
-    alltagsbegleitungPriceCents: price("alltagsbegleitung"),
   };
+}
+
+/**
+ * Effektiver Anzeige-Satz aus Geld ÷ Menge (Anzeige === Buchung):
+ *  - `hours`: Menge ist in Minuten ⇒ Satz je Stunde = round(cents × 60 / Minuten)
+ *  - `km`:    Satz je km = round(cents / km)
+ *  - ohne Menge (oder Einheit `none`): kein Satz (0)
+ */
+function effectiveRateCents(unit: BillingEconomicsUnit, quantity: number, cents: number): number {
+  if (quantity <= 0) return 0;
+  if (unit === "hours") return Math.round((cents * 60) / quantity);
+  if (unit === "km") return Math.round(cents / quantity);
+  return 0;
 }
 
 /**
@@ -159,7 +170,7 @@ export async function readBillingEconomics(
   const dTeFilter = sql`AND EXTRACT(YEAR FROM t.entry_date::date) = ${billingYear} AND EXTRACT(MONTH FROM t.entry_date::date) = ${billingMonth}`;
   const empTeFilter = employeeId !== undefined ? sql`AND t.user_id = ${employeeId}` : sql``;
 
-  const rates = await resolveRatesPlus();
+  const rates = await resolveRates();
 
   // --- 1) HW/AB-Minuten + rollenbasierte Kosten je Mitarbeiter (appt-Ebene). ---
   // Task #1503: Kosten je Termin über `wageFor` (Rolle des leistenden
@@ -382,6 +393,10 @@ export async function readBillingEconomics(
     costOverride: costOverrideFor(agg),
   });
 
+  // Task #1546: Der angezeigte Erlös-/Kosten-Satz je Zeile wird effektiv aus
+  // Geld ÷ Menge abgeleitet (nicht aus Katalogspalten), damit das Satz-Label
+  // die rollenbasierten Löhne + kundenspezifischen Preise der Geld-Spalten
+  // exakt spiegelt (Anzeige === Buchung). Ohne Menge ⇒ kein Satz.
   const buildRow = (
     key: string,
     label: string,
@@ -389,8 +404,6 @@ export async function readBillingEconomics(
     quantity: number,
     revenueCents: number,
     costCents: number,
-    revenueRateCents: number,
-    costRateCents: number,
   ): BillingEconomicsRow => {
     const marginCents = revenueCents - costCents;
     return {
@@ -402,8 +415,8 @@ export async function readBillingEconomics(
       costCents,
       marginCents,
       marginPercent: marginPercent(revenueCents, marginCents),
-      revenueRateCents,
-      costRateCents,
+      revenueRateCents: effectiveRateCents(unit, quantity, revenueCents),
+      costRateCents: effectiveRateCents(unit, quantity, costCents),
     };
   };
 
@@ -421,8 +434,6 @@ export async function readBillingEconomics(
         econ.personnel.hauswirtschaft.minutes,
         hwRevenueCents,
         econ.personnel.hauswirtschaft.costCents,
-        rates.hauswirtschaftPriceCents,
-        rates.hauswirtschaftRateCents,
       ),
       buildRow(
         "alltagsbegleitung",
@@ -431,8 +442,6 @@ export async function readBillingEconomics(
         econ.personnel.alltagsbegleitung.minutes,
         abRevenueCents,
         econ.personnel.alltagsbegleitung.costCents,
-        rates.alltagsbegleitungPriceCents,
-        rates.alltagsbegleitungRateCents,
       ),
       buildRow(
         "kilometer",
@@ -441,8 +450,6 @@ export async function readBillingEconomics(
         kmQuantity,
         econ.km.totalChargedCents,
         econ.km.totalPaidCents,
-        rates.travelKmPriceCents,
-        rates.travelKmRateCents,
       ),
       buildRow(
         "gemeinkosten",
@@ -451,8 +458,6 @@ export async function readBillingEconomics(
         0,
         0,
         econ.result.nonBillableCostCents,
-        0,
-        nonBillableRateCents(rates),
       ),
     ];
   };

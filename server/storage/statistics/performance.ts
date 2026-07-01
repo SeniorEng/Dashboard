@@ -53,12 +53,73 @@ async function utilizationAndRevenue(p: ResolvedPeriod): Promise<UtilizationCoun
   };
 }
 
+/**
+ * Dokumentierter Stunden-Erlös je Leistungskategorie (HW/AB/Erstberatung).
+ *
+ * Task #1546: Grundlage für die effektiven Anzeige-Sätze der Kalkulations-
+ * grundlage. Der Erlös je Termin nutzt — identisch zum Erlös-Trichter — den
+ * kundenspezifischen Preis (sonst Katalog-Default) und wird je Termin gerundet.
+ * Die Kategorie-Zuordnung spiegelt die dominante Kategorie des Termins
+ * (`DISTINCT ON`, HW/AB priorisiert), damit die Zuordnung mit
+ * `categoryMinutesAndCosts` (Kosten/Minuten) übereinstimmt.
+ */
+async function categoryRevenue(p: ResolvedPeriod): Promise<{ hw: number; ab: number; eb: number }> {
+  const dFilter = dateFilter(p, sql`a.date::date`);
+  const r = await db.execute(sql`
+    WITH appt_category AS (
+      SELECT DISTINCT ON (a.id)
+        a.id,
+        CASE
+          WHEN a.appointment_type = 'Erstberatung' THEN 'erstberatung'
+          WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN s.lohnart_kategorie
+          ELSE 'sonstige'
+        END AS category
+      FROM appointments a
+      LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      LEFT JOIN services s ON s.id = asvc.service_id
+      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+        ${dFilter}
+      ORDER BY a.id,
+        CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
+    ),
+    appt_revenue AS (
+      SELECT a.id,
+        SUM(ROUND(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes) / 60.0 *
+          COALESCE(
+            (SELECT csp.cents FROM prices csp
+             WHERE csp.scope = 'customer' AND csp.origin = 'customer_service_prices' AND csp.customer_id = a.customer_id AND csp.service_id = s.id
+               AND csp.deleted_at IS NULL
+               AND csp.valid_from::date <= a.date::date
+               AND (csp.valid_to IS NULL OR csp.valid_to::date >= a.date::date)
+             ORDER BY csp.valid_from DESC LIMIT 1),
+            s.default_price_cents
+          )
+        ))::bigint AS revenue_cents
+      FROM appointments a
+      JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      JOIN services s ON s.id = asvc.service_id
+      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented') AND s.unit_type = 'hours'
+        ${dFilter}
+      GROUP BY a.id
+    )
+    SELECT
+      COALESCE(SUM(CASE WHEN ac.category = 'hauswirtschaft' THEN ar.revenue_cents END), 0)::bigint AS hw,
+      COALESCE(SUM(CASE WHEN ac.category = 'alltagsbegleitung' THEN ar.revenue_cents END), 0)::bigint AS ab,
+      COALESCE(SUM(CASE WHEN ac.category = 'erstberatung' THEN ar.revenue_cents END), 0)::bigint AS eb
+    FROM appt_category ac
+    JOIN appt_revenue ar ON ar.id = ac.id
+  `);
+  const row = r.rows[0] as Record<string, unknown>;
+  return { hw: num(row.hw), ab: num(row.ab), eb: num(row.eb) };
+}
+
 export async function getPerformanceStats(period: ResolvedPeriod): Promise<PerformanceStatsResponse> {
   const prev = previousPeriod(period);
   const prevY = previousYearPeriod(period);
   const dFilter = dateFilter(period, sql`a.date::date`);
 
-  const [minutesByMonthRow, avgDurationRow, revPerHourRow, profitabilityRow, servicePricesRow, cur, pre, yoy, economicsResult] = await Promise.all([
+  const [minutesByMonthRow, avgDurationRow, revPerHourRow, profitabilityRow, servicePricesRow, cur, pre, yoy, economicsResult, catRevenue] = await Promise.all([
     db.execute(sql`
       WITH appt_category AS (
         SELECT DISTINCT ON (a.id)
@@ -194,6 +255,7 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
     utilizationAndRevenue(prev),
     utilizationAndRevenue(prevY),
     getEconomics(period),
+    categoryRevenue(period),
   ]);
 
   const total = cur.productive + cur.overhead + cur.sickVac;
@@ -249,12 +311,29 @@ export async function getPerformanceStats(period: ResolvedPeriod): Promise<Perfo
       const totalRevenueCents = byEmployee.reduce((s, e) => s + e.revenueCents, 0);
       const totalCostCents = byEmployee.reduce((s, e) => s + e.costCents, 0);
       const totalMarginCents = totalRevenueCents - totalCostCents;
+      // Task #1546: Die angezeigten Erlös-/Lohn-Sätze der Kalkulationsgrundlage
+      // werden effektiv aus den gebuchten Summen ÷ Menge abgeleitet (Anzeige ===
+      // Buchung): Erlös/h aus dem kundenspezifischen Erlös je Kategorie, Lohn/h
+      // aus den rollenbasierten Personalkosten (`getEconomics`), jeweils geteilt
+      // durch die dokumentierten Minuten. Ohne Menge fällt die Zeile auf die
+      // Katalog-Referenz zurück.
+      const personnel = economicsResult.economics.personnel;
+      const effByCode: Record<string, { revenueCents: number; costCents: number; minutes: number }> = {
+        hauswirtschaft: { revenueCents: catRevenue.hw, costCents: personnel.hauswirtschaft.costCents, minutes: personnel.hauswirtschaft.minutes },
+        alltagsbegleitung: { revenueCents: catRevenue.ab, costCents: personnel.alltagsbegleitung.costCents, minutes: personnel.alltagsbegleitung.minutes },
+        erstberatung: { revenueCents: catRevenue.eb, costCents: personnel.erstberatung.costCents, minutes: personnel.erstberatung.minutes },
+      };
       const servicePrices = servicePricesRow.rows.map((r: Record<string, unknown>) => {
-        const priceCents = num(r.price_cents);
-        const rateCents = num(r.rate_cents);
+        const code = String(r.code ?? "");
+        const catalogPriceCents = num(r.price_cents);
+        const catalogRateCents = num(r.rate_cents);
+        const eff = effByCode[code];
+        const minutes = eff?.minutes ?? 0;
+        const priceCents = minutes > 0 ? Math.round((eff.revenueCents * 60) / minutes) : catalogPriceCents;
+        const rateCents = minutes > 0 ? Math.round((eff.costCents * 60) / minutes) : catalogRateCents;
         const marginCents = priceCents - rateCents;
         return {
-          code: String(r.code ?? ""),
+          code,
           label: String(r.label ?? r.code ?? ""),
           priceCents,
           rateCents,
