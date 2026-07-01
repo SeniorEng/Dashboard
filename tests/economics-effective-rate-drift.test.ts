@@ -390,3 +390,89 @@ describe("Task #1552 — Reporting: km-Satz effektiv aus Geld ÷ km (Anzeige ===
     expect(economics.km.customer.chargedCents).toBe(catalogCustomerPriceCents * CUSTOMER_KM);
   });
 });
+
+/**
+ * Task #1553 — Anzeige-vs-Buchung für die DRITTE km-Fläche: Mitarbeiter-km aus
+ * der Zeiterfassung (`economics.km.timeEntry`).
+ *
+ * Task #1552 (oben) sichert die beiden TERMIN-basierten km-Typen (Anfahrts-/
+ * Kunden-km) gegen Katalog-vs-Effektiv-Drift des ausgezahlten km-Lohns ab. Die
+ * dritte km-Quelle — Mitarbeiter-km aus der Zeiterfassung — blieb ungeprüft.
+ * Sie ist eine reine KOSTEN-Zeile: der Lohn wird dem Mitarbeiter gezahlt, dem
+ * Kunden aber NIE berechnet (kein Termin-Bezug), und bewertet über den
+ * effektiven, rollenbasierten km-Lohnsatz der `travel_km`-Leistung
+ * (`role_wage_rates`), nicht den flachen Katalog-km-Satz
+ * (`services.employee_rate_cents`).
+ *
+ * Eine künftige Änderung an der km-Lohn-Auflösung könnte die Zeiterfassungs-km
+ * still auf den Katalog-Satz zurückfallen lassen, ohne dass ein Test bricht.
+ * Diese Suite bucht Mitarbeiter-km in einem isolierten, weit entfernten Jahr,
+ * setzt einen `travel_km`-Rollenlohn ≠ Katalog und prüft:
+ *   - `paidCents` === effektiver Rollenlohn × km (Geld ÷ km ⇒ effektiv),
+ *   - `paidCents / km` rundet auf den effektiven (nicht Katalog-) Satz zurück,
+ *   - die Zeile hat KEINE Erlös-/Berechnungs-Seite (`chargedCents === 0`).
+ */
+describe("Task #1553 — Reporting: Zeiterfassungs-km-Lohn effektiv aus Geld ÷ km (nur Kostenseite)", () => {
+  const TE_YEAR = 2041; // Eigenes, weit entferntes Jahr ⇒ keine Vermischung mit anderen Suites.
+  const TE_MONTH = 6;
+  const TE_KM = 12; // Ganzzahlig ⇒ quantizeKm exakt ⇒ Satz × km === Geld.
+
+  let userId: number;
+  let travelKmServiceId = 0;
+  let travelKmWageId = 0;
+  let timeEntryId = 0;
+  let catalogTravelRateCents = 0;
+  let effectiveTravelWageCents = 0;
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    userId = auth.user.id; // Seed-Superadmin ⇒ Lohn-Rolle 'admin'.
+
+    // Reale km-Leistung (der Reader löst den Zeiterfassungs-km-Lohn über
+    // `travel_km` auf).
+    const svc = await db.execute(sql`
+      SELECT id, COALESCE(employee_rate_cents, 0)::int AS rate
+      FROM services WHERE code = 'travel_km' LIMIT 1
+    `).then((r) => r.rows as Array<{ id: number; rate: number }>);
+    travelKmServiceId = svc[0].id;
+    catalogTravelRateCents = svc[0].rate;
+    // Garantiert vom Katalog-km-Satz verschieden.
+    effectiveTravelWageCents = catalogTravelRateCents + 41;
+
+    // Rollen-km-Lohnsatz (admin × travel_km) für das Testjahr — spätestes
+    // valid_from gewinnt, kollidiert also nicht mit anderen Suites.
+    travelKmWageId = await db.execute(sql`
+      INSERT INTO role_wage_rates (role, service_id, cents, valid_from, valid_to, created_by_user_id)
+      VALUES ('admin', ${travelKmServiceId}, ${effectiveTravelWageCents}, ${`${TE_YEAR}-01-01`}, ${`${TE_YEAR}-12-31`}, ${userId})
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+
+    // Genau EIN Zeiterfassungs-Eintrag mit Mitarbeiter-km im isolierten Jahr.
+    timeEntryId = await db.execute(sql`
+      INSERT INTO employee_time_entries
+        (user_id, entry_type, entry_date, duration_minutes, kilometers, is_full_day)
+      VALUES (${userId}, 'vertrieb', ${`${TE_YEAR}-0${TE_MONTH}-15`}, 60, ${TE_KM}, false)
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+  });
+
+  afterAll(async () => {
+    if (timeEntryId) await db.execute(sql`DELETE FROM employee_time_entries WHERE id = ${timeEntryId}`);
+    if (travelKmWageId) await db.execute(sql`DELETE FROM role_wage_rates WHERE id = ${travelKmWageId}`);
+  });
+
+  it("Reader 2 (Statistik): Zeiterfassungs-km — Lohn = effektiver Rollenlohn × km, nicht Katalog", async () => {
+    const { economics } = await getEconomics(resolvePeriod({ year: TE_YEAR }));
+
+    expect(economics.km.timeEntry.km).toBe(TE_KM);
+
+    // Bezahlt = effektiver Rollenlohn × km (Geld ÷ km ⇒ effektiv), NICHT Katalog.
+    expect(economics.km.timeEntry.paidCents).toBe(effectiveTravelWageCents * TE_KM);
+    expect(Math.round(economics.km.timeEntry.paidCents / economics.km.timeEntry.km)).toBe(effectiveTravelWageCents);
+    expect(effectiveTravelWageCents).not.toBe(catalogTravelRateCents);
+    expect(economics.km.timeEntry.paidCents).not.toBe(catalogTravelRateCents * TE_KM);
+
+    // Kosten-only: Zeiterfassungs-km werden dem Kunden NIE berechnet.
+    expect(economics.km.timeEntry.chargedCents).toBe(0);
+  });
+});
