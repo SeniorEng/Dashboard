@@ -1151,6 +1151,16 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
   const kmRebookHolder: { value: RebookKmResult | null } = { value: null };
 
   const updated = await db.transaction(async (tx) => {
+    // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. Der oben über
+    // `loadPolicyFlags` gelesene `isLocked`-Wert steuert nur die UX-Policy und
+    // läuft außerhalb der Transaktion (check-then-write). Eine gleichzeitig
+    // committende Unterschrift könnte den Sammel-LN zwischen Policy-Read und
+    // diesem Update versiegeln. Der FOR-UPDATE-Re-Check serialisiert gegen die
+    // Unterschrift und bricht ab, wenn der LN inzwischen versiegelt wurde.
+    if (await storage.lockAndCheckAppointmentLocked(id, tx)) {
+      throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr geändert werden.");
+    }
+
     const sync = await syncAppointmentServicesAndDuration(
       id,
       {
@@ -1566,6 +1576,16 @@ router.post("/:id/reopen", asyncHandler("Fehler beim Wiedereröffnen des Termins
   const transactions = await budgetStorage.getTransactionsByAppointmentId(id);
 
   const updatedAppointment = await db.transaction(async (txClient) => {
+    // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. Ein Reopen setzt
+    // den Termin auf `documenting` zurück und entfernt die Signatur; läge der
+    // Termin auf einem gleichzeitig versiegelten Sammel-LN, würde der Nachweis
+    // auf einen nun un-dokumentierten Termin verweisen. Der FOR-UPDATE-Re-Check
+    // serialisiert gegen die Unterschrift und bricht ab, wenn der LN inzwischen
+    // versiegelt wurde.
+    if (await storage.lockAndCheckAppointmentLocked(id, txClient)) {
+      throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr geändert werden.");
+    }
+
     for (const tx of transactions) {
       await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
     }
@@ -1647,27 +1667,30 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   let reversedTransactions = 0;
   const transactions = await budgetStorage.getTransactionsByAppointmentId(id);
 
-  if (transactions.length > 0 || budgetStorage.hardHoldsEnabled()) {
-    await db.transaction(async (txClient) => {
-      for (const tx of transactions) {
-        await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
-      }
-      // Task #875 (gated) — aktive Holds des Termins freigeben (R6). Flag aus = No-op.
-      if (budgetStorage.hardHoldsEnabled()) {
-        await budgetStorage.releaseHolds(id, req.user!.id, txClient);
-      }
-      const deleted = await storage.deleteAppointment(id, txClient);
-      if (!deleted) {
-        throw new Error("Termin konnte nicht gelöscht werden");
-      }
-    });
-    reversedTransactions = transactions.length;
-  } else {
-    const deleted = await storage.deleteAppointment(id);
-    if (!deleted) {
-      return sendServerError(res, ErrorMessages.deleteAppointmentFailed);
+  // Task #1544 — Das Löschen läuft IMMER in einer Transaktion, damit die
+  // Race-sichere Lock-Prüfung greift. Die junction `service_record_appointments`
+  // ist ON DELETE CASCADE; ohne die In-Tx-Prüfung könnte eine gleichzeitig
+  // committende Unterschrift den Sammel-LN zwischen dem `loadPolicyFlags`-Read
+  // und dem Delete versiegeln, und der Cascade-Delete würde diesen versiegelten
+  // (GoBD-)Nachweis mutieren. Der FOR-UPDATE-Re-Check serialisiert gegen die
+  // Unterschrift und bricht ab, wenn der LN inzwischen versiegelt wurde.
+  await db.transaction(async (txClient) => {
+    if (await storage.lockAndCheckAppointmentLocked(id, txClient)) {
+      throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr gelöscht werden.");
     }
-  }
+    for (const tx of transactions) {
+      await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
+    }
+    // Task #875 (gated) — aktive Holds des Termins freigeben (R6). Flag aus = No-op.
+    if (budgetStorage.hardHoldsEnabled()) {
+      await budgetStorage.releaseHolds(id, req.user!.id, txClient);
+    }
+    const deleted = await storage.deleteAppointment(id, txClient);
+    if (!deleted) {
+      throw new Error("Termin konnte nicht gelöscht werden");
+    }
+  });
+  reversedTransactions = transactions.length;
 
   await auditService.log(
     req.user!.id,

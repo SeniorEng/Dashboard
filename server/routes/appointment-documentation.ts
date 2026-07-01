@@ -114,6 +114,16 @@ router.post("/:id/document", asyncHandler("Fehler beim Speichern der Dokumentati
   let budgetWarning: string | null = null;
 
   const updatedAppointment = await db.transaction(async (tx) => {
+    // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. Der oben gelesene
+    // `isLocked`-Wert steuert nur die UX-Policy (check-then-write außerhalb der
+    // Tx). Eine gleichzeitig committende Unterschrift könnte den Sammel-LN
+    // zwischen Policy-Read und diesem Update versiegeln. Der FOR-UPDATE-Re-Check
+    // serialisiert gegen die Unterschrift und bricht ab, wenn der LN inzwischen
+    // versiegelt wurde.
+    if (await storage.lockAndCheckAppointmentLocked(id, tx)) {
+      throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr geändert werden.");
+    }
+
     const result = await storage.updateAppointment(id, updateData, tx);
     if (!result) {
       throw new AppError(500, "SERVER_ERROR", "Fehler beim Speichern der Dokumentation");
@@ -450,6 +460,11 @@ router.post("/:id/document-no-show", asyncHandler("Fehler beim Speichern der Ver
   };
 
   const updatedAppointment = await db.transaction(async (tx) => {
+    // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx (siehe /:id/document).
+    if (await storage.lockAndCheckAppointmentLocked(id, tx)) {
+      throw new AppError(409, "APPOINTMENT_LOCKED", "Dieser Termin liegt auf einem unterschriebenen Leistungsnachweis und kann nicht mehr geändert werden.");
+    }
+
     const result = await storage.updateAppointment(id, updateData, tx);
     if (!result) {
       throw new AppError(500, "SERVER_ERROR", "Fehler beim Speichern der Vergeblichen Anfahrt");

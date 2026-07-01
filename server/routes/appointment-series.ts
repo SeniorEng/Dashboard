@@ -586,11 +586,26 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
   // wiren den Pfad trotzdem in einer Transaktion, damit zukünftig erweiterte
   // Bulk-Felder (z.B. Datum) automatisch korrekt gebucht werden.
   const rebookResults = new Map<number, RebookKmResult>();
+  let processedIds: number[] = eligibleIds;
   const updatedRows = await db.transaction(async (tx) => {
-    const _count = await seriesStorage.bulkUpdateSeriesAppointments(eligibleIds, updateData, tx);
+    // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. Die
+    // `eligibleIds` wurden außerhalb der Tx via `isAppointmentLocked` gefiltert
+    // (check-then-write). Eine gleichzeitig committende Unterschrift könnte einen
+    // dieser Termine zwischenzeitlich auf einem versiegelten Sammel-LN versiegeln.
+    // Wir prüfen jeden Kandidaten mit FOR UPDATE erneut und lassen inzwischen
+    // versiegelte Termine fallen — analog zur bestehenden „locked ⇒ skip"-Semantik
+    // des Bulk-Pfads (kein Hard-Error für die restlichen Termine).
+    const safeIds: number[] = [];
+    for (const aptId of eligibleIds) {
+      if (!(await storage.lockAndCheckAppointmentLocked(aptId, tx))) {
+        safeIds.push(aptId);
+      }
+    }
+    processedIds = safeIds;
+    const _count = await seriesStorage.bulkUpdateSeriesAppointments(safeIds, updateData, tx);
     void _count;
     const rows = await Promise.all(
-      eligibleIds.map(id => storage.getAppointment(id)),
+      safeIds.map(id => storage.getAppointment(id)),
     );
     for (const apt of rows) {
       if (!apt || apt.customerId == null) continue;
@@ -629,7 +644,7 @@ router.post("/:seriesId/appointments/:appointmentId/update", asyncHandler("Serie
       ip,
     );
   }
-  const count = eligibleIds.length;
+  const count = processedIds.length;
 
   const seriesRuleUpdate: Record<string, unknown> = {};
   if (updateFields.scheduledStart !== undefined) seriesRuleUpdate.scheduledStart = updateFields.scheduledStart;
@@ -873,13 +888,31 @@ router.post("/:id/shorten", asyncHandler("Serie konnte nicht verkürzt werden", 
     deletableIds.push(apt.id);
   }
 
+  let deletedCount = deletableIds.length;
   await db.transaction(async (tx) => {
-    await seriesStorage.bulkDeleteSeriesAppointments(deletableIds, tx);
+    // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. `deletableIds`
+    // wurde außerhalb via `isAppointmentLocked` gefiltert (check-then-write). Die
+    // junction `service_record_appointments` ist ON DELETE CASCADE; eine
+    // gleichzeitig committende Unterschrift könnte einen dieser Termine
+    // zwischenzeitlich auf einem versiegelten Sammel-LN versiegeln. Wir prüfen
+    // jeden Kandidaten mit FOR UPDATE erneut und lassen inzwischen versiegelte
+    // Termine fallen (analog „locked ⇒ skip"), damit der Cascade-Delete keinen
+    // versiegelten Nachweis mutiert.
+    const safeIds: number[] = [];
+    for (const aptId of deletableIds) {
+      if (await storage.lockAndCheckAppointmentLocked(aptId, tx)) {
+        skippedCount.locked++;
+      } else {
+        safeIds.push(aptId);
+      }
+    }
+    deletedCount = safeIds.length;
+    await seriesStorage.bulkDeleteSeriesAppointments(safeIds, tx);
     await seriesStorage.updateSeries(id, { endDate: newEndDate }, tx);
   });
 
   res.json({
-    deleted: deletableIds.length,
+    deleted: deletedCount,
     newEndDate,
     skipped: skippedCount,
   });

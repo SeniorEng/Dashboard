@@ -408,6 +408,57 @@ export async function lockAppointmentsForUpdate(appointmentIds: number[], txClie
     .for("update");
 }
 
+/**
+ * Task #1544 — Race-sichere Lock-Prüfung INNERHALB einer Mutations-Transaktion.
+ *
+ * `isAppointmentLocked` läuft heute außerhalb der Transaktion (check-then-write).
+ * Zwischen dieser Prüfung und dem eigentlichen Edit/Delete kann eine gleichzeitige
+ * Mitarbeiter-/Kunden-Unterschrift den Sammel-LN versiegeln. Weil die junction
+ * `service_record_appointments` ON DELETE CASCADE ist, würde ein Delete danach
+ * einen bereits versiegelten (GoBD-)Nachweis mutieren — Verstoß gegen die
+ * Invariante „einmal unterschrieben = unveränderlich".
+ *
+ * Diese Funktion schließt das Fenster:
+ *   1) Sie sperrt die Termin-Zeile selbst mit FOR UPDATE (`lockAppointmentsForUpdate`),
+ *      wodurch sie gegen eine gleichzeitig laufende LN-Erstellung (die dieselbe
+ *      Termin-Zeile sperrt) serialisiert.
+ *   2) Sie sperrt die verknüpften `monthly_service_records`-Zeilen mit FOR UPDATE
+ *      und wertet den Lock-Status ERNEUT aus. Da die Unterschrift denselben
+ *      Datensatz per bedingtem UPDATE sperrt (siehe `signServiceRecord`),
+ *      serialisiert dieser Lock die Termin-Mutation gegen die Unterschrift:
+ *        - Unterschrift committet zuerst → Re-Check liefert `true` → Mutation
+ *          bricht ab (Aufrufer wirft/antwortet mit APPOINTMENT_LOCKED).
+ *        - Mutation committet zuerst → Unterschrift läuft auf dem (noch nicht
+ *          versiegelten) Datensatz weiter; das Entfernen eines Termins VOR der
+ *          Versiegelung ist zulässig.
+ *
+ * MUSS innerhalb einer Transaktion aufgerufen werden.
+ */
+export async function lockAndCheckAppointmentLocked(
+  appointmentId: number,
+  txClient: DbOrTx,
+): Promise<boolean> {
+  await lockAppointmentsForUpdate([appointmentId], txClient);
+
+  const rows = await txClient.select({
+    status: monthlyServiceRecords.status,
+  })
+    .from(serviceRecordAppointments)
+    .innerJoin(
+      monthlyServiceRecords,
+      eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id),
+    )
+    .where(and(
+      eq(serviceRecordAppointments.appointmentId, appointmentId),
+      isNull(monthlyServiceRecords.deletedAt),
+    ))
+    .for("update");
+
+  return rows.some(
+    (r) => r.status === "employee_signed" || r.status === "completed",
+  );
+}
+
 export async function getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined> {
   const result = await db.select({ record: monthlyServiceRecords })
     .from(serviceRecordAppointments)

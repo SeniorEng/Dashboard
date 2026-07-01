@@ -1068,3 +1068,195 @@ describe("LN-17: Race-Safe Coverage-Ausschluss (Task #1542)", () => {
     expect(forApptRes.data?.id, "Der Termin muss genau einem LN zugeordnet sein").toBeTruthy();
   });
 });
+
+// Task #1544: Termin-Mutation vs. LN-Unterschrift Race.
+// Bearbeiten/Löschen eines Termins prüft die Sperre (isAppointmentLocked) ausserhalb
+// der Transaktion. Ohne die transaktionale Re-Prüfung koennte eine gleichzeitige
+// Unterschrift den Sammel-LN zwischen Sperr-Check und Schreiben versiegeln — und
+// der Termin-Löschvorgang wuerde per ON DELETE CASCADE einen bereits versiegelten
+// (GoBD-plombierten) Nachweis stillschweigend veraendern. Der Fix sperrt die
+// zugehoerigen monthly_service_records FOR UPDATE INNERHALB der Mutations-Tx und
+// prueft den Sperrzustand erneut. Diese Tests beweisen: ein Delete/Edit landet
+// niemals auf einem versiegelten Nachweis.
+describe("LN-18: Termin-Mutation vs. LN-Unterschrift Race (Task #1544)", () => {
+  let mId: number;
+  let mYear: number;
+  let mMonth: number;
+  const mDates: string[] = [];
+  const mApptIds: number[] = [];
+
+  beforeAll(async () => {
+    const cust = await createTestCustomer({ nachname: `LN-MutRace_${Date.now()}` });
+    mId = cust.id;
+    await apiPatch(`/api/admin/customers/${mId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    mYear = prev.getFullYear();
+    mMonth = prev.getMonth() + 1;
+    let day = 2;
+    while (mDates.length < 4 && day <= 28) {
+      const cur = new Date(mYear, mMonth - 1, day);
+      const dow = cur.getDay();
+      if (dow !== 0 && dow !== 6) {
+        mDates.push(`${mYear}-${String(mMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+      }
+      day++;
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of mApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch {}
+    }
+  });
+
+  async function createAndDocumentOnDate(dateStr: string, time: string): Promise<number | null> {
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: mId,
+      date: dateStr,
+      scheduledStart: time,
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    if (createRes.status !== 201) return null;
+    mApptIds.push(createRes.data.id);
+    const docRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/document`, {
+      actualStart: time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "mut-race-test" }],
+    });
+    return docRes.status === 200 ? createRes.data.id : null;
+  }
+
+  async function createSammelLN(appointmentIds: number[]): Promise<number> {
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: mId,
+      employeeId: auth.user.id,
+      year: mYear,
+      month: mMonth,
+      appointmentIds,
+    });
+    expect(res.status, "Sammel-LN muss angelegt werden").toBe(201);
+    expect(res.data.status).toBe("pending");
+    return res.data.id;
+  }
+
+  it("LN-18.0 – Vormonats-Werktage muessen verfuegbar sein", () => {
+    expect(mDates.length, "Vier Vormonats-Werktage werden benoetigt").toBe(4);
+  });
+
+  it("LN-18.1 – Löschen vs. Unterschrift: das Delete landet nie auf einem versiegelten LN", async () => {
+    const apptA = await createAndDocumentOnDate(mDates[0], "09:00");
+    const apptB = await createAndDocumentOnDate(mDates[1], "10:00");
+    expect(apptA, "Termin A muss dokumentiert werden").toBeTruthy();
+    expect(apptB, "Termin B muss dokumentiert werden").toBeTruthy();
+
+    const recordId = await createSammelLN([apptA!, apptB!]);
+
+    const signOnce = () =>
+      apiPost<any>(`/api/service-records/${recordId}/sign`, {
+        signatureData: validSignatureDataUrl(),
+        signerType: "employee",
+        signingLocation: "Vor Ort",
+      });
+    const deleteOnce = () => apiDelete<any>(`/api/appointments/${apptA}`);
+
+    const [signRes, deleteRes] = await Promise.all([signOnce(), deleteOnce()]);
+
+    // Die Unterschrift versiegelt den LN in jedem Fall (Delete aendert nur den Termin).
+    expect(signRes.status, "Unterschrift muss den LN versiegeln").toBe(200);
+    const lnAfter = await apiGet<any>(`/api/service-records/${recordId}`);
+    expect(lnAfter.data.status).toBe("employee_signed");
+
+    const apptAAfter = await apiGet<any>(`/api/appointments/${apptA}`);
+    const coveredAppts = await apiGet<any>(`/api/service-records/${recordId}/appointments`);
+    const coveredIds: number[] = (coveredAppts.data as any[]).map((a: any) => a.id);
+
+    if (deleteRes.status === 200) {
+      // Delete gewann das Rennen (committete VOR der Versiegelung): Termin A ist weg,
+      // und der versiegelte Nachweis referenziert ihn NICHT (kein CASCADE nach Plombe).
+      expect(apptAAfter.status, "Termin A wurde vor Versiegelung geloescht").toBe(404);
+      expect(coveredIds, "Versiegelter LN darf keinen geloeschten Termin fuehren").not.toContain(apptA);
+    } else {
+      // Der einzig zulaessige Verlierer-Status: 409 (LN wurde zuerst versiegelt).
+      expect(deleteRes.status, "Delete muss mit 409 abgewiesen werden").toBe(409);
+      expect(apptAAfter.status, "Abgewiesenes Delete → Termin A lebt weiter").toBe(200);
+      expect(apptAAfter.data.isLocked, "Termin A ist jetzt gesperrt (versiegelter LN)").toBe(true);
+      expect(coveredIds, "Versiegelter LN behaelt Termin A").toContain(apptA);
+    }
+
+    // Termin B ueberlebt in beiden Faellen und bleibt im versiegelten Nachweis.
+    const apptBAfter = await apiGet<any>(`/api/appointments/${apptB}`);
+    expect(apptBAfter.status).toBe(200);
+    expect(coveredIds, "Versiegelter LN muss Termin B fuehren").toContain(apptB);
+  });
+
+  it("LN-18.2 – Wiedereroeffnen vs. Unterschrift: das Reopen landet nie auf einem versiegelten LN", async () => {
+    // Direkte Feld-Edits (PATCH) auf abgeschlossenen Terminen sind bereits
+    // kategorisch gesperrt („Abgeschlossene Termine koennen nicht mehr geaendert
+    // werden", 403 unabhaengig vom Lock) — es gibt also gar kein Feld-Edit-Rennen.
+    // Der einzige mutierende „Bearbeitungs"-Pfad auf einen dokumentierten Termin
+    // ist das Wiedereroeffnen (completed → documenting, entfernt Signatur,
+    // reversiert Budget). Genau hier muss der In-Tx-Lock verhindern, dass ein
+    // parallel versiegelter Sammel-LN auf einen dann un-dokumentierten Termin zeigt.
+    const apptC = await createAndDocumentOnDate(mDates[2], "09:00");
+    const apptD = await createAndDocumentOnDate(mDates[3], "10:00");
+    expect(apptC, "Termin C muss dokumentiert werden").toBeTruthy();
+    expect(apptD, "Termin D muss dokumentiert werden").toBeTruthy();
+
+    const recordId = await createSammelLN([apptC!, apptD!]);
+
+    const signOnce = () =>
+      apiPost<any>(`/api/service-records/${recordId}/sign`, {
+        signatureData: validSignatureDataUrl(),
+        signerType: "employee",
+        signingLocation: "Vor Ort",
+      });
+    const reopenOnce = () =>
+      apiPost<any>(`/api/appointments/${apptC}/reopen`, {});
+
+    const [signRes, reopenRes] = await Promise.all([signOnce(), reopenOnce()]);
+
+    expect(signRes.status, "Unterschrift muss den LN versiegeln").toBe(200);
+    const lnAfter = await apiGet<any>(`/api/service-records/${recordId}`);
+    expect(lnAfter.data.status, "LN muss versiegelt sein").toBe("employee_signed");
+
+    const apptCAfter = await apiGet<any>(`/api/appointments/${apptC}`);
+    expect(apptCAfter.status).toBe(200);
+
+    if (reopenRes.status === 200) {
+      // Reopen gewann das Rennen (committete VOR der Versiegelung): der Termin
+      // wurde regulaer zurueckgesetzt, waehrend der LN noch offen war.
+      expect(apptCAfter.data.status, "Gewonnenes Reopen → Termin ist documenting").toBe("documenting");
+    } else {
+      // Verlierer: entweder die aeussere Policy-Pruefung sah den Lock schon
+      // (403 APPOINTMENT_LOCKED via denyByPolicy → sendForbidden) ODER der Reopen
+      // passierte die aeussere Pruefung und wurde erst vom race-sicheren
+      // In-Tx-FOR-UPDATE-Guard gestoppt (409 APPOINTMENT_LOCKED). Beide sind
+      // korrekte Zurueckweisungen — entscheidend ist, dass der versiegelte
+      // Nachweis UNVERAENDERT bleibt.
+      expect(
+        [403, 409],
+        "Abgewiesenes Reopen muss 403 (Policy) oder 409 (In-Tx-Lock) sein",
+      ).toContain(reopenRes.status);
+      expect(apptCAfter.data.status, "Abgewiesenes Reopen → Termin bleibt completed").toBe("completed");
+      expect(apptCAfter.data.isLocked, "Termin C ist gesperrt (versiegelter LN)").toBe(true);
+      // Der versiegelte LN fuehrt Termin C weiterhin — nichts wurde still entfernt.
+      const coveredCRes = await apiGet<any>(`/api/service-records/${recordId}/appointments`);
+      const coveredCIds: number[] = (coveredCRes.data as any[]).map((a: any) => a.id);
+      expect(coveredCIds, "Versiegelter LN behaelt Termin C").toContain(apptC);
+    }
+
+    // Termin D ueberlebt in beiden Faellen dokumentiert und im versiegelten Nachweis.
+    const coveredDRes = await apiGet<any>(`/api/service-records/${recordId}/appointments`);
+    const coveredDIds: number[] = (coveredDRes.data as any[]).map((a: any) => a.id);
+    expect(coveredDIds, "Versiegelter LN muss Termin D fuehren").toContain(apptD);
+  });
+});
