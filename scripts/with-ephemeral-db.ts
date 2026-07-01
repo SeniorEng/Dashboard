@@ -821,6 +821,13 @@ async function main(): Promise<number> {
       console.log(
         `[ephemeral-db] PID-Auslastung: ${pre.current}/${pre.max} (${((pre.ratio ?? 0) * 100).toFixed(0)}%, Schwelle ${(ratio * 100).toFixed(0)}%).`,
       );
+    } else {
+      // Kein finites cgroup-pids-Limit lesbar (z.B. GitHub-Actions-Runner: `max`
+      // = unbegrenzt/unlesbar). Trotzdem eine Diagnose-Zeile ausgeben — analog zu
+      // scripts/sweep-test-dbs.ts —, damit der Preflight nachweisbar gelaufen ist.
+      console.log(
+        "[ephemeral-db] PID-Auslastung: nicht ermittelbar / kein Limit (cgroup-pids-Limit unbegrenzt oder nicht lesbar).",
+      );
     }
     if (!pre.ok) {
       fail(
