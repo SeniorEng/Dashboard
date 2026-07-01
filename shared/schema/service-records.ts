@@ -1,5 +1,4 @@
-import { pgTable, text, integer, serial, unique, index, uniqueIndex } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
+import { pgTable, text, integer, serial, unique, index } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { timestamp } from "./common";
 import { customers } from "./customers";
@@ -16,9 +15,17 @@ export const SERVICE_RECORD_STATUSES = [
   "completed",            // Both signatures collected, record finalized
 ] as const;
 
+// Task #1542 — Bedeutung neu interpretiert (GoBD: KEINE Datenmutation der
+// bestehenden record_type-Werte):
+//   "monthly" = Sammel-Leistungsnachweis (ein Bündel aus N dokumentierten
+//               Terminen eines Monats; on-demand vom Mitarbeiter angelegt).
+//   "single"  = Einzel-Leistungsnachweis (genau ein Termin).
+// Es gibt KEINEN automatisch wachsenden Monatscontainer mehr; pro Monat können
+// mehrere Sammel-LN existieren. Bestehende "monthly"-Sätze bleiben unverändert
+// und gelten fortan als (abgeschlossener) Sammel-LN.
 export const SERVICE_RECORD_TYPES = [
-  "monthly",   // Traditional monthly service record (all appointments in a month)
-  "single",    // Single-appointment service record
+  "monthly",   // Sammel-Leistungsnachweis (Bündel mehrerer Termine)
+  "single",    // Einzel-Leistungsnachweis (genau ein Termin)
 ] as const;
 
 export type ServiceRecordStatus = typeof SERVICE_RECORD_STATUSES[number];
@@ -30,7 +37,7 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   employeeId: integer("employee_id").notNull().references(() => users.id),
   year: integer("year").notNull(),
   month: integer("month").notNull(), // 1-12
-  recordType: text("record_type").notNull().default("monthly"), // "monthly" | "single"
+  recordType: text("record_type").notNull().default("monthly"), // "monthly" = Sammel-LN | "single" = Einzel-LN
   status: text("status").notNull().default("pending"), // ServiceRecordStatus
   // Employee signature
   employeeSignatureData: text("employee_signature_data"),
@@ -56,15 +63,13 @@ export const monthlyServiceRecords = pgTable("monthly_service_records", {
   index("service_records_period_idx").on(table.year, table.month),
   index("service_records_status_idx").on(table.status),
   index("service_records_type_idx").on(table.recordType),
-  // Task #1528 — Höchstens EIN offener (pending) Monats-LN pro
-  // Kunde+Mitarbeiter+Monat. Schließt das verbleibende Race: zwei
-  // gleichzeitige Create-Requests ohne bestehenden pending-LN würden sonst
-  // beide einen anlegen (Doppel-LN). Versiegelte (employee_signed/completed)
-  // und gelöschte (deleted_at) Datensätze sind bewusst ausgenommen, damit ein
-  // neuer LN für spätere Termine korrekt angelegt werden kann.
-  uniqueIndex("monthly_service_records_pending_unique_idx")
-    .on(table.customerId, table.employeeId, table.year, table.month)
-    .where(sql`record_type = 'monthly' AND status = 'pending' AND deleted_at IS NULL`),
+  // Task #1542 — Der partielle Unique-Index aus #1528
+  // (monthly_service_records_pending_unique_idx) wurde ENTFERNT: mit dem
+  // On-Demand-Sammel-LN sind mehrere offene Bündel pro Kunde+Mitarbeiter+Monat
+  // gewollt (kein automatisch wachsender Monatscontainer mehr). Der Index wird
+  // idempotent per Startup-Migration
+  // (drop-monthly-service-record-pending-unique.ts) auf Bestandssystemen
+  // abgeräumt.
 ]);
 
 // Join table to link appointments to service records
@@ -86,6 +91,10 @@ export const insertServiceRecordSchema = z.object({
   year: z.number().min(2020, "Jahr muss zwischen 2020 und 2100 liegen").max(2100, "Jahr muss zwischen 2020 und 2100 liegen"),
   month: z.number().min(1, "Monat muss zwischen 1 und 12 liegen").max(12, "Monat muss zwischen 1 und 12 liegen"),
   recordType: z.enum(["monthly", "single"]).default("monthly"),
+  // Task #1542 — On-Demand-Sammel-LN: der Mitarbeiter wählt gezielt aus, welche
+  // dokumentierten Termine des Monats gebündelt werden. Ohne Angabe werden alle
+  // noch nicht abgedeckten, dokumentierten Termine des Monats vorgeschlagen.
+  appointmentIds: z.number().array().optional(),
 });
 
 export const insertSingleServiceRecordSchema = z.object({

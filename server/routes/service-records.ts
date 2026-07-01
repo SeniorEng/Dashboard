@@ -13,24 +13,6 @@ import { getPrimaryCustomerIds } from "../storage/customers-storage";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { timeTrackingStorage } from "../storage/time-tracking";
 
-function hasPgCode(value: unknown): value is { code: string } {
-  return typeof value === "object" && value !== null && "code" in value
-    && typeof (value as { code: unknown }).code === "string";
-}
-
-// Task #1528 — Doppel-Monats-LN-Schutz auf DB-Ebene: der partielle Unique-Index
-// monthly_service_records_pending_unique_idx wirft 23505, wenn zwei parallele
-// Create-Requests beide einen pending-LN für denselben Kunde+Mitarbeiter+Monat
-// anlegen wollen. Der Verlierer fängt das ab und merged stattdessen.
-function isUniqueViolation(err: unknown): boolean {
-  if (hasPgCode(err) && err.code === "23505") return true;
-  if (typeof err === "object" && err !== null && "cause" in err) {
-    const cause = (err as { cause: unknown }).cause;
-    if (hasPgCode(cause) && cause.code === "23505") return true;
-  }
-  return false;
-}
-
 async function ensureMonthOpenForRecord(
   record: { employeeId: number; year: number; month: number },
   user: { isSuperAdmin?: boolean | null },
@@ -181,17 +163,33 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
   const primaryIds = await getPrimaryCustomerIds(effectiveUserId);
   const isPrimary = primaryIds.includes(customerId);
   
-  const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount, noShowAppointments] = await Promise.all([
+  const [existingRecord, counts, customerData, coveredBySingleCount, coveredByMonthlyCount, noShowAppointments, documentedAppointments] = await Promise.all([
     storage.getServiceRecordByPeriod(customerId, effectiveUserId, year, month, isPrimary),
     storage.getAppointmentCountsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
     storage.getCustomer(customerId),
     storage.getCoveredBySingleCount(customerId, effectiveUserId, year, month, isPrimary),
     storage.getCoveredByMonthlyCount(customerId, effectiveUserId, year, month, isPrimary),
     storage.getNoShowAppointmentsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
+    storage.getDocumentedAppointmentsForPeriod(customerId, effectiveUserId, year, month, isPrimary),
   ]);
 
   const coveredCount = coveredBySingleCount + coveredByMonthlyCount;
   const uncoveredDocumentedCount = Math.max(0, counts.documentedCount - coveredCount);
+
+  // Task #1542 — Für den On-Demand-Sammel-LN liefert der Endpoint die konkrete
+  // Liste der noch nicht abgedeckten, dokumentierten Termine mit. Daraus baut
+  // das Frontend die Auswahl (alle vorausgewählt, einzelne abwählbar), die als
+  // `appointmentIds` an POST /service-records zurückgeht.
+  const documentedApptIds = documentedAppointments.map((apt) => apt.id);
+  const alreadyCoveredApptIds = await storage.getAppointmentIdsInServiceRecords(documentedApptIds);
+  const selectableAppointments = documentedAppointments
+    .filter((apt) => !alreadyCoveredApptIds.includes(apt.id))
+    .map((apt) => ({
+      id: apt.id,
+      date: apt.date,
+      scheduledStart: apt.scheduledStart,
+      scheduledEnd: apt.scheduledEnd,
+    }));
 
   // Task #1518 — No-Shows rein informativ aufbereiten. Sie erzeugen weder einen
   // Leistungsnachweis noch (außerhalb der Selbstzahler-„Vergebliche Anfahrt")
@@ -227,6 +225,7 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
     uncoveredDocumentedCount,
     canCreateRecord: counts.undocumentedCount === 0 && counts.documentedCount > 0 && uncoveredDocumentedCount > 0,
     noShowAppointments: noShows,
+    selectableAppointments,
   });
 }));
 
@@ -327,38 +326,54 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
   const allApptIds = documentedAppointments.map(apt => apt.id);
   const alreadyCoveredIds = await storage.getAppointmentIdsInServiceRecords(allApptIds);
   const remainingAppointments = documentedAppointments.filter(apt => !alreadyCoveredIds.includes(apt.id));
-  
+
   if (remainingAppointments.length === 0) {
     return res.status(400).json({ 
       message: "Alle dokumentierten Termine sind bereits durch bestehende Leistungsnachweise abgedeckt." 
     });
   }
-  
-  const appointmentIds = remainingAppointments.map(apt => apt.id);
 
-  // Task #1526: Wenn für diesen Kunden+Mitarbeiter+Monat bereits ein NICHT
-  // unterschriebener (pending) Monats-LN existiert, werden die neu dokumentierten
-  // Termine an diesen angehängt — statt einen zweiten pending-LN zu erzeugen.
-  // employee_signed/completed = versiegelt (GoBD): dann ist ein NEUER LN für die
-  // späteren Termine korrekt, der versiegelte wird nie mutiert.
-  //
-  // Der Lookup läuft INNERHALB der Transaktion mit `FOR UPDATE`-Sperre: so kann
-  // zwischen „pending gefunden" und „Termine angehängt" keine parallele
-  // Unterschrift den LN versiegeln (sonst würde ein GoBD-versiegelter LN mutiert).
+  // Task #1542 — On-Demand-Sammel-LN: der Mitarbeiter entscheidet, WELCHE der
+  // noch nicht abgedeckten, dokumentierten Termine gebündelt werden. Ohne
+  // explizite Auswahl werden ALLE offenen dokumentierten Termine des Monats
+  // vorgeschlagen (Default). Es entsteht IMMER genau EIN neuer Sammel-LN
+  // (recordType='monthly') — KEIN Merge in einen bestehenden pending-LN mehr,
+  // KEIN automatisch wachsender Monatscontainer. Mehrere Sammel-LN pro Monat
+  // sind dadurch gewollt möglich (der Pending-Unique-Index aus #1528 wurde
+  // entfernt).
+  const remainingIds = new Set(remainingAppointments.map(apt => apt.id));
+  let appointmentIds: number[];
+  if (parsed.data.appointmentIds && parsed.data.appointmentIds.length > 0) {
+    const requested = Array.from(new Set(parsed.data.appointmentIds));
+    const invalid = requested.filter(id => !remainingIds.has(id));
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        message:
+          "Mindestens ein ausgewählter Termin ist nicht (mehr) verfügbar: er gehört nicht zu diesem Kunden/Monat, ist nicht dokumentiert oder bereits durch einen anderen Leistungsnachweis abgedeckt.",
+        invalidAppointmentIds: invalid,
+      });
+    }
+    appointmentIds = requested;
+  } else {
+    appointmentIds = remainingAppointments.map(apt => apt.id);
+  }
+
   const ip = req.ip || req.socket.remoteAddress;
 
-  const runCreateOrMerge = () => db.transaction(async (tx) => {
-    const existingPending = await storage.getPendingMonthlyServiceRecord(customerId, effectiveEmployeeId, year, month, tx);
-
-    if (existingPending) {
-      await storage.addAppointmentsToServiceRecord(existingPending.id, appointmentIds, tx);
-      await auditService.serviceRecordCreated(
-        userId,
-        existingPending.id,
-        { customerId, year, month, appointmentCount: appointmentIds.length, mergedIntoPending: true },
-        ip
-      );
-      return existingPending;
+  // Task #1542 — Race-Safe Coverage-Ausschluss: die obige Prüfung
+  // (getAppointmentIdsInServiceRecords) lief außerhalb der Transaktion. Ohne den
+  // früheren Pending-Unique-Index könnten zwei gleichzeitige Creates denselben
+  // Termin in zwei verschiedene Sammel-LN aufnehmen (Invariante „ein Termin liegt
+  // in genau EINEM aktiven LN"). Deshalb werden die zu bündelnden Termin-Zeilen
+  // innerhalb der Transaktion mit FOR UPDATE gesperrt und die Abdeckung erneut
+  // geprüft; ein zwischenzeitlich abgedeckter Termin bricht mit 409 ab.
+  let conflictingIds: number[] | null = null;
+  const record = await db.transaction(async (tx) => {
+    await storage.lockAppointmentsForUpdate(appointmentIds, tx);
+    const nowCovered = await storage.getAppointmentIdsInServiceRecords(appointmentIds, tx);
+    if (nowCovered.length > 0) {
+      conflictingIds = nowCovered;
+      return null;
     }
 
     const rec = await storage.createServiceRecord({
@@ -381,17 +396,12 @@ router.post("/", requireAuth, asyncHandler("Leistungsnachweis konnte nicht erste
     return rec;
   });
 
-  // Task #1528: Trifft ein gleichzeitiger Create ohne bestehenden pending-LN
-  // ein, sehen beide „kein pending" und versuchen zu inserten. Der partielle
-  // Unique-Index lässt nur EINEN gewinnen; der zweite läuft in 23505. Wir
-  // wiederholen die Transaktion EINMAL — diesmal findet der FOR-UPDATE-Lookup
-  // den inzwischen committeten pending-LN und merged korrekt hinein.
-  let record;
-  try {
-    record = await runCreateOrMerge();
-  } catch (err) {
-    if (!isUniqueViolation(err)) throw err;
-    record = await runCreateOrMerge();
+  if (conflictingIds !== null) {
+    return res.status(409).json({
+      message:
+        "Mindestens ein Termin wurde zeitgleich durch einen anderen Leistungsnachweis abgedeckt. Bitte laden Sie die Liste neu und wählen Sie erneut.",
+      invalidAppointmentIds: conflictingIds,
+    });
   }
 
   res.status(201).json(record);
@@ -460,7 +470,20 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
   // Task #1496: Einzel-Leistungsnachweis nach Monatsabschluss erlaubt (siehe oben).
   // Die Vorbedingung „Termin ist abgeschlossen (completed)" bleibt aktiv.
 
+  // Task #1542 — Race-Safe Coverage-Ausschluss (analog zum Sammel-LN): die obige
+  // getServiceRecordForAppointment-Prüfung lief außerhalb der Transaktion. Innerhalb
+  // der Transaktion wird die Termin-Zeile mit FOR UPDATE gesperrt und die globale
+  // Abdeckung erneut geprüft, damit derselbe Termin nicht durch einen gleichzeitigen
+  // Einzel- oder Sammel-LN doppelt belegt wird.
+  let alreadyCovered = false;
   const record = await db.transaction(async (tx) => {
+    await storage.lockAppointmentsForUpdate([appointmentId], tx);
+    const nowCovered = await storage.getAppointmentIdsInServiceRecords([appointmentId], tx);
+    if (nowCovered.length > 0) {
+      alreadyCovered = true;
+      return null;
+    }
+
     const rec = await storage.createServiceRecord({
       customerId,
       employeeId: appointmentEmployeeId,
@@ -481,6 +504,12 @@ router.post("/single", requireAuth, asyncHandler("Einzeltermin-Leistungsnachweis
 
     return rec;
   });
+
+  if (alreadyCovered) {
+    return res.status(409).json({
+      message: "Für diesen Termin existiert bereits ein Leistungsnachweis.",
+    });
+  }
 
   res.status(201).json(record);
 }));

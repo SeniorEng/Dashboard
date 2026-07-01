@@ -951,7 +951,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
       const groups = groupByAppointment(sectionItems);
       const sectionCents = sectionItems.reduce((sum, item) => sum + grossOf(item), 0);
 
-      const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
+      const sectionLabel = sig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Sammel-Leistungsnachweis";
       const sectionEmployeeName = sig.employeeName ? escapeHtml(sig.employeeName) : employeeLabel;
       const sectionEmployeeQual = sig.employeeName && data.employeeQualifications ? data.employeeQualifications.get(sig.employeeName) || "" : "";
 
@@ -969,7 +969,7 @@ export function generateLeistungsnachweisHtml(data: InvoicePdfData): string {
     const groups = groupByAppointment(allSorted);
     const sectionCents = allSorted.reduce((sum, item) => sum + grossOf(item), 0);
     const singleSig = data.signatures && data.signatures.length > 0 ? data.signatures[0] : null;
-    const sectionLabel = singleSig && singleSig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Monatlicher Leistungsnachweis";
+    const sectionLabel = singleSig && singleSig.recordType === "single" ? "Einzeltermin-Leistungsnachweis" : "Sammel-Leistungsnachweis";
     const signaturesHtml = data.signatures && data.signatures.length > 0
       ? data.signatures.map(s => renderSignature(s, employeeLabel)).join("")
       : `

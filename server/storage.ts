@@ -15,7 +15,7 @@ import {
 } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { eq } from "drizzle-orm";
-import { db } from "./lib/db";
+import { db, type DbOrTx } from "./lib/db";
 import { decryptRow, encryptRow } from "./lib/encrypted-row";
 
 import * as customersStorage from "./storage/customers-storage";
@@ -107,7 +107,6 @@ export interface IStorage {
   getServiceRecordsForCustomer(customerId: number): Promise<MonthlyServiceRecord[]>;
   getServiceRecord(id: number): Promise<MonthlyServiceRecord | undefined>;
   getServiceRecordByPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<MonthlyServiceRecord | undefined>;
-  getPendingMonthlyServiceRecord(customerId: number, employeeId: number, year: number, month: number, txClient?: import("./lib/db").DbOrTx): Promise<MonthlyServiceRecord | undefined>;
   createServiceRecord(record: InsertServiceRecord): Promise<MonthlyServiceRecord>;
   signServiceRecord(id: number, signatureData: string, signerType: 'employee' | 'customer', userId?: number, signingIp?: string | null, signingLocation?: string | null): Promise<MonthlyServiceRecord | undefined>;
   updateServiceRecord(id: number, data: Partial<typeof monthlyServiceRecords.$inferInsert>): Promise<MonthlyServiceRecord | undefined>;
@@ -118,7 +117,8 @@ export interface IStorage {
   getNoShowAppointmentsForPeriod(customerId: number, employeeId: number, year: number, month: number, isPrimary?: boolean): Promise<AppointmentWithCustomer[]>;
   getPendingServiceRecords(employeeId: number): Promise<MonthlyServiceRecord[]>;
   isAppointmentLocked(appointmentId: number): Promise<boolean>;
-  getAppointmentIdsInServiceRecords(appointmentIds: number[]): Promise<number[]>;
+  getAppointmentIdsInServiceRecords(appointmentIds: number[], txClient?: DbOrTx): Promise<number[]>;
+  lockAppointmentsForUpdate(appointmentIds: number[], txClient: DbOrTx): Promise<void>;
   getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined>;
   
   // Optimized overview query
@@ -215,7 +215,6 @@ class DatabaseStorage implements IStorage {
   getServiceRecordsForCustomer = serviceRecordsStorage.getServiceRecordsForCustomer;
   getServiceRecord = serviceRecordsStorage.getServiceRecord;
   getServiceRecordByPeriod = serviceRecordsStorage.getServiceRecordByPeriod;
-  getPendingMonthlyServiceRecord = serviceRecordsStorage.getPendingMonthlyServiceRecord;
   createServiceRecord = serviceRecordsStorage.createServiceRecord;
   signServiceRecord = serviceRecordsStorage.signServiceRecord;
   updateServiceRecord = serviceRecordsStorage.updateServiceRecord;
@@ -226,6 +225,7 @@ class DatabaseStorage implements IStorage {
   getNoShowAppointmentsForPeriod = serviceRecordsStorage.getNoShowAppointmentsForPeriod;
   getPendingServiceRecords = serviceRecordsStorage.getPendingServiceRecords;
   getAppointmentIdsInServiceRecords = serviceRecordsStorage.getAppointmentIdsInServiceRecords;
+  lockAppointmentsForUpdate = serviceRecordsStorage.lockAppointmentsForUpdate;
   getServiceRecordForAppointment = serviceRecordsStorage.getServiceRecordForAppointment;
   isAppointmentLocked = serviceRecordsStorage.isAppointmentLocked;
   getServiceRecordsOverview = serviceRecordsStorage.getServiceRecordsOverview;

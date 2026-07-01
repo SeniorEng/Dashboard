@@ -97,31 +97,6 @@ export async function getServiceRecordByPeriod(customerId: number, employeeId: n
   return result[0];
 }
 
-// Task #1526: Wenn innerhalb einer Transaktion gelesen wird (Merge-Pfad in
-// POST /service-records), MUSS die gefundene pending-Zeile per `FOR UPDATE`
-// gesperrt werden. Sonst kann zwischen Lookup und Anhängen der Termine eine
-// parallele Unterschrift den LN versiegeln (employee_signed) — und wir würden
-// einen GoBD-versiegelten LN mutieren. Mit Lock blockiert das konkurrierende
-// UPDATE bis zum Commit; ein bereits versiegelter LN wird vom Status-Filter
-// gar nicht erst zurückgegeben (→ Aufrufer legt korrekt einen neuen LN an).
-export async function getPendingMonthlyServiceRecord(customerId: number, employeeId: number, year: number, month: number, txClient?: DbOrTx): Promise<MonthlyServiceRecord | undefined> {
-  const executor = txClient ?? db;
-  const query = monthlyServiceRecordsRepo.selectFrom(executor)
-    .where(and(
-      eq(monthlyServiceRecords.customerId, customerId),
-      eq(monthlyServiceRecords.employeeId, employeeId),
-      eq(monthlyServiceRecords.year, year),
-      eq(monthlyServiceRecords.month, month),
-      eq(monthlyServiceRecords.recordType, "monthly"),
-      eq(monthlyServiceRecords.status, "pending"),
-      isNull(monthlyServiceRecords.deletedAt),
-    ))
-    .orderBy(monthlyServiceRecords.id)
-    .limit(1);
-  const result = await (txClient ? query.for("update") : query);
-  return result[0];
-}
-
 export async function createServiceRecord(record: InsertServiceRecord, txClient?: DbOrTx): Promise<MonthlyServiceRecord> {
   const executor = txClient ?? db;
   const result = await executor.insert(monthlyServiceRecords)
@@ -398,9 +373,10 @@ export async function getPendingServiceRecords(employeeId: number): Promise<Mont
     .orderBy(monthlyServiceRecords.year, monthlyServiceRecords.month);
 }
 
-export async function getAppointmentIdsInServiceRecords(appointmentIds: number[]): Promise<number[]> {
+export async function getAppointmentIdsInServiceRecords(appointmentIds: number[], txClient?: DbOrTx): Promise<number[]> {
   if (appointmentIds.length === 0) return [];
-  const rows = await db.select({ appointmentId: serviceRecordAppointments.appointmentId })
+  const executor = txClient ?? db;
+  const rows = await executor.select({ appointmentId: serviceRecordAppointments.appointmentId })
     .from(serviceRecordAppointments)
     .innerJoin(monthlyServiceRecords, eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id))
     .where(and(
@@ -408,6 +384,28 @@ export async function getAppointmentIdsInServiceRecords(appointmentIds: number[]
       isNull(monthlyServiceRecords.deletedAt)
     ));
   return rows.map(r => r.appointmentId);
+}
+
+/**
+ * Task #1542 — Race-Safe Coverage-Ausschluss.
+ *
+ * Sperrt die zu bündelnden Termin-Zeilen mit `FOR UPDATE` (aufsteigend nach id,
+ * um Deadlocks zu vermeiden). Da der Coverage-Ausschluss global pro Termin gilt
+ * (ein Termin darf in genau EINEM aktiven LN liegen — unabhängig vom
+ * Mitarbeiter), serialisiert das Sperren der Termin-Zeilen zwei gleichzeitige
+ * Sammel-LN-Creates, die denselben Termin beanspruchen. Der Aufrufer prüft danach
+ * INNERHALB derselben Transaktion erneut die Abdeckung (getAppointmentIdsIn-
+ * ServiceRecords mit tx) und bricht ab, falls der Termin zwischenzeitlich
+ * abgedeckt wurde. MUSS mit einem Transaktions-Client aufgerufen werden.
+ */
+export async function lockAppointmentsForUpdate(appointmentIds: number[], txClient: DbOrTx): Promise<void> {
+  if (appointmentIds.length === 0) return;
+  const ordered = [...new Set(appointmentIds)].sort((a, b) => a - b);
+  await txClient.select({ id: appointments.id })
+    .from(appointments)
+    .where(inArray(appointments.id, ordered))
+    .orderBy(appointments.id)
+    .for("update");
 }
 
 export async function getServiceRecordForAppointment(appointmentId: number): Promise<MonthlyServiceRecord | undefined> {

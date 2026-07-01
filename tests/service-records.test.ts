@@ -596,18 +596,18 @@ describe("LN-13: Monatlicher LN – Positive Erstellung mit dokumentierten Termi
   });
 });
 
-// Task #1526: Monats-LN Pending-Merge.
-// Bug (Käthe/Maxim): ein zweiter Monatsabschnitt erzeugte einen ZWEITEN
-// pending-LN für denselben Kunden+Mitarbeiter+Monat → doppelte LN. Fix:
-// pending-LN ist mergebar (neue Termine anhängen), employee_signed/completed
-// ist GoBD-versiegelt → dann ist ein NEUER LN korrekt.
-describe("LN-14: Monats-LN Pending-Merge (Task #1526)", () => {
+// Task #1542: Kein automatisch wachsender Monats-Container mehr — jeder Create
+// erzeugt einen separaten Sammel-LN. Erhalten bleiben die Invarianten aus #1526:
+// ein versiegelter (employee_signed/completed) LN wird NIE mutiert, und die
+// Übersicht zeigt alle Sammel-LN eines Kunden ohne Duplikat.
+describe("LN-14: Sammel-LN separat + versiegelt-unveränderlich (Task #1542, Invarianten #1526)", () => {
   let mergeCustomerId: number;
   let mergeYear: number;
   let mergeMonth: number;
   const mergeDates: string[] = [];
   const mergeApptIds: number[] = [];
   let firstPendingRecordId: number | null = null;
+  let secondPendingRecordId: number | null = null;
   let sealedRecordId: number | null = null;
   let newRecordIdAfterSeal: number | null = null;
 
@@ -687,7 +687,7 @@ describe("LN-14: Monats-LN Pending-Merge (Task #1526)", () => {
     expect(apptsRes.data.length).toBe(1);
   });
 
-  it("LN-14.2 – zweiter Termin wird in den pending-LN gemerged (kein neuer LN)", async () => {
+  it("LN-14.2 – zweiter Termin erzeugt einen SEPARATEN Sammel-LN (kein Merge)", async () => {
     expect(firstPendingRecordId, "Erster pending-LN muss existieren").toBeTruthy();
     const apptId = await createAndDocumentOnDate(mergeDates[1], "10:00");
     expect(apptId, "Zweiter Termin muss dokumentiert werden").toBeTruthy();
@@ -699,13 +699,20 @@ describe("LN-14: Monats-LN Pending-Merge (Task #1526)", () => {
       month: mergeMonth,
     });
     expect(res.status).toBe(201);
-    // Merge: DIESELBE LN-Id, kein zweiter pending-LN.
-    expect(res.data.id).toBe(firstPendingRecordId);
+    // Task #1542: KEIN Merge mehr — ein zweiter Create erzeugt einen separaten
+    // Sammel-LN mit eigener Id für den noch offenen Termin.
+    expect(res.data.id).not.toBe(firstPendingRecordId);
     expect(res.data.status).toBe("pending");
+    secondPendingRecordId = res.data.id;
 
-    const apptsRes = await apiGet<any>(`/api/service-records/${firstPendingRecordId}/appointments`);
-    expect(apptsRes.status).toBe(200);
-    expect(apptsRes.data.length, "Beide Termine hängen am selben LN").toBe(2);
+    // Der erste LN bleibt unverändert bei genau einem Termin.
+    const firstApptsRes = await apiGet<any>(`/api/service-records/${firstPendingRecordId}/appointments`);
+    expect(firstApptsRes.status).toBe(200);
+    expect(firstApptsRes.data.length, "Erster LN behält genau einen Termin").toBe(1);
+    // Der neue LN deckt genau den zweiten Termin ab.
+    const secondApptsRes = await apiGet<any>(`/api/service-records/${secondPendingRecordId}/appointments`);
+    expect(secondApptsRes.status).toBe(200);
+    expect(secondApptsRes.data.length, "Neuer LN deckt genau den zweiten Termin ab").toBe(1);
   });
 
   it("LN-14.3 – nach Mitarbeiter-Unterschrift (versiegelt) entsteht ein NEUER LN", async () => {
@@ -750,12 +757,13 @@ describe("LN-14: Monats-LN Pending-Merge (Task #1526)", () => {
 
     const ids = item.monthlyRecords.map((r: any) => r.id);
     expect(ids).toContain(sealedRecordId);
+    expect(ids).toContain(secondPendingRecordId);
     expect(ids).toContain(newRecordIdAfterSeal);
     // Kein Duplikat: jede LN-Id genau einmal.
     expect(new Set(ids).size).toBe(ids.length);
-    // Genau EIN pending-LN (der neue); der versiegelte ist employee_signed.
+    // Zwei pending-LN (LN-14.2 + LN-14.3); der versiegelte ist employee_signed.
     const pendingCount = item.monthlyRecords.filter((r: any) => r.status === "pending").length;
-    expect(pendingCount).toBe(1);
+    expect(pendingCount).toBe(2);
   });
 });
 
@@ -813,52 +821,215 @@ describe("LN-15: Doppel-Unterschrift Atomarität (Task #1529)", () => {
   });
 });
 
-// Task #1528: Race-Schutz gegen Doppel-Monats-LN bei gleichzeitigen Requests.
-// Wenn NOCH KEIN pending-LN existiert und zwei Create-Requests gleichzeitig
-// eintreffen (Doppel-Klick / zwei Tabs), sehen beide „kein pending" und würden
-// ohne DB-Garantie je einen pending-LN anlegen. Der partielle Unique-Index
-// monthly_service_records_pending_unique_idx erzwingt genau EINEN; der Verlierer
-// läuft in 23505 und merged in den Sieger. Ergebnis: GENAU ein pending-LN.
-describe("LN-16: Monats-LN Concurrency-Schutz (Task #1528)", () => {
-  let raceCustomerId: number;
-  let raceYear: number;
-  let raceMonth: number;
-  const raceApptIds: number[] = [];
+// Task #1542: On-Demand-Sammel-LN statt automatisch wachsendem Monats-Container.
+// Der Mitarbeiter erstellt gezielt einen Sammel-LN und wählt aus, welche der noch
+// nicht abgedeckten, dokumentierten Termine gebündelt werden. Es entsteht IMMER
+// genau EIN neuer Sammel-LN (recordType='monthly') — KEIN Merge in einen
+// bestehenden pending-LN. Mehrere Sammel-LN pro Monat sind dadurch möglich; der
+// Pending-Unique-Index aus #1528 wurde entfernt. Deselektierte Termine bleiben
+// für einen weiteren Sammel-LN verfügbar.
+describe("LN-16: On-Demand-Sammel-LN (Task #1542)", () => {
+  let cId: number;
+  let cYear: number;
+  let cMonth: number;
+  const cDates: string[] = [];
+  const cApptIds: number[] = [];
+  let apptA: number | null = null;
+  let apptB: number | null = null;
+  let apptC: number | null = null;
+  let firstRecordId: number | null = null;
+  let secondRecordId: number | null = null;
 
   beforeAll(async () => {
-    const cust = await createTestCustomer({ nachname: `LN-Race_${Date.now()}` });
-    raceCustomerId = cust.id;
-    await apiPatch(`/api/admin/customers/${raceCustomerId}/assign`, {
+    const cust = await createTestCustomer({ nachname: `LN-OnDemand_${Date.now()}` });
+    cId = cust.id;
+    await apiPatch(`/api/admin/customers/${cId}/assign`, {
       primaryEmployeeId: auth.user.id,
       backupEmployeeId: null,
       backupEmployeeId2: null,
     });
 
-    // Ein dokumentierter Werktag im vollständig vergangenen Vormonat.
     const now = new Date();
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    raceYear = prev.getFullYear();
-    raceMonth = prev.getMonth() + 1;
-    let dateStr: string | null = null;
-    for (let day = 2; day <= 28 && !dateStr; day++) {
-      const cur = new Date(raceYear, raceMonth - 1, day);
+    cYear = prev.getFullYear();
+    cMonth = prev.getMonth() + 1;
+    let day = 2;
+    while (cDates.length < 3 && day <= 28) {
+      const cur = new Date(cYear, cMonth - 1, day);
       const dow = cur.getDay();
       if (dow !== 0 && dow !== 6) {
-        dateStr = `${raceYear}-${String(raceMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        cDates.push(`${cYear}-${String(cMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
       }
+      day++;
     }
-    expect(dateStr, "Ein Vormonats-Werktag muss verfügbar sein").toBeTruthy();
+  });
 
+  afterAll(async () => {
+    for (const id of cApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch {}
+    }
+  });
+
+  async function createAndDocumentOnDate(dateStr: string, time: string): Promise<number | null> {
     const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: raceCustomerId,
+      customerId: cId,
       date: dateStr,
+      scheduledStart: time,
+      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
+      assignedEmployeeId: auth.user.id,
+    });
+    if (createRes.status !== 201) return null;
+    cApptIds.push(createRes.data.id);
+    const docRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/document`, {
+      actualStart: time,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "on-demand-test" }],
+    });
+    return docRes.status === 200 ? createRes.data.id : null;
+  }
+
+  it("LN-16.1 – drei dokumentierte Termine vorbereiten", async () => {
+    expect(cDates.length, "Drei Vormonats-Werktage müssen verfügbar sein").toBe(3);
+    apptA = await createAndDocumentOnDate(cDates[0], "09:00");
+    apptB = await createAndDocumentOnDate(cDates[1], "10:00");
+    apptC = await createAndDocumentOnDate(cDates[2], "11:00");
+    expect(apptA, "Termin A muss dokumentiert werden").toBeTruthy();
+    expect(apptB, "Termin B muss dokumentiert werden").toBeTruthy();
+    expect(apptC, "Termin C muss dokumentiert werden").toBeTruthy();
+  });
+
+  it("LN-16.2 – Sammel-LN mit Teilauswahl deckt nur die gewählten Termine ab", async () => {
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: cId,
+      employeeId: auth.user.id,
+      year: cYear,
+      month: cMonth,
+      appointmentIds: [apptA],
+    });
+    expect(res.status, "Sammel-LN mit Teilauswahl muss 201 liefern").toBe(201);
+    expect(res.data.recordType).toBe("monthly");
+    firstRecordId = res.data.id;
+
+    const apptsRes = await apiGet<any>(`/api/service-records/${firstRecordId}/appointments`);
+    const appts: any[] = Array.isArray(apptsRes.data) ? apptsRes.data : [];
+    expect(appts.map((a: any) => a.id).sort((x, y) => x - y)).toEqual([apptA]);
+  });
+
+  it("LN-16.3 – ein bereits abgedeckter Termin in appointmentIds ⇒ 400 invalidAppointmentIds", async () => {
+    // apptA ist durch LN-16.2 bereits abgedeckt; apptB/apptC sind noch offen, der
+    // Create läuft also NICHT in den „alle abgedeckt"-Fall, sondern in die
+    // Auswahl-Validierung.
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: cId,
+      employeeId: auth.user.id,
+      year: cYear,
+      month: cMonth,
+      appointmentIds: [apptA, apptB],
+    });
+    expect(res.status).toBe(400);
+    expect(res.data.invalidAppointmentIds).toContain(apptA);
+  });
+
+  it("LN-16.4 – deselektierte Termine bleiben für einen zweiten Sammel-LN verfügbar", async () => {
+    // Default (keine appointmentIds) ⇒ alle noch nicht abgedeckten Termine, hier
+    // apptB und apptC. Es entsteht ein ZWEITER, separater Sammel-LN.
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: cId,
+      employeeId: auth.user.id,
+      year: cYear,
+      month: cMonth,
+    });
+    expect(res.status, "Zweiter Sammel-LN muss 201 liefern").toBe(201);
+    secondRecordId = res.data.id;
+    expect(secondRecordId, "Zweiter LN muss eine eigene id haben").not.toBe(firstRecordId);
+
+    const apptsRes = await apiGet<any>(`/api/service-records/${secondRecordId}/appointments`);
+    const appts: any[] = Array.isArray(apptsRes.data) ? apptsRes.data : [];
+    expect(appts.map((a: any) => a.id).sort((x, y) => x - y)).toEqual(
+      [apptB!, apptC!].sort((x, y) => x - y)
+    );
+
+    // Beide Sammel-LN existieren separat nebeneinander (kein Merge).
+    const listRes = await apiGet<any>(
+      `/api/service-records?customerId=${cId}&year=${cYear}&month=${cMonth}`
+    );
+    const records: any[] = Array.isArray(listRes.data) ? listRes.data : (listRes.data?.data ?? []);
+    const monthlyIds = records
+      .filter((r: any) => r.recordType === "monthly")
+      .map((r: any) => r.id);
+    expect(monthlyIds).toContain(firstRecordId);
+    expect(monthlyIds).toContain(secondRecordId);
+  });
+
+  it("LN-16.5 – sind alle Termine abgedeckt, schlägt ein weiterer Sammel-LN mit 400 fehl", async () => {
+    const res = await apiPost<any>("/api/service-records", {
+      customerId: cId,
+      employeeId: auth.user.id,
+      year: cYear,
+      month: cMonth,
+    });
+    expect(res.status, "Ohne offene Termine muss der Create mit 400 abweisen").toBe(400);
+  });
+});
+
+// Task #1542: Race-Safe Coverage-Ausschluss. Ohne den entfernten Pending-Unique-
+// Index (#1528) sichert nur noch die transaktionale Termin-Sperre (FOR UPDATE) +
+// erneute Abdeckungsprüfung die Invariante „ein Termin liegt in genau EINEM aktiven
+// LN". Zwei fast zeitgleiche Sammel-LN-Creates, die denselben Termin beanspruchen,
+// dürfen NICHT beide erfolgreich sein.
+describe("LN-17: Race-Safe Coverage-Ausschluss (Task #1542)", () => {
+  let rId: number;
+  let rYear: number;
+  let rMonth: number;
+  let rDate: string | null = null;
+  const rApptIds: number[] = [];
+  let raceApptId: number | null = null;
+
+  beforeAll(async () => {
+    const cust = await createTestCustomer({ nachname: `LN-Race_${Date.now()}` });
+    rId = cust.id;
+    await apiPatch(`/api/admin/customers/${rId}/assign`, {
+      primaryEmployeeId: auth.user.id,
+      backupEmployeeId: null,
+      backupEmployeeId2: null,
+    });
+
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    rYear = prev.getFullYear();
+    rMonth = prev.getMonth() + 1;
+    let day = 2;
+    while (rDate === null && day <= 28) {
+      const cur = new Date(rYear, rMonth - 1, day);
+      const dow = cur.getDay();
+      if (dow !== 0 && dow !== 6) {
+        rDate = `${rYear}-${String(rMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      day++;
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of rApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch {}
+    }
+  });
+
+  it("LN-17.1 – ein dokumentierter Termin für den Race-Test vorbereiten", async () => {
+    expect(rDate, "Ein Vormonats-Werktag muss verfügbar sein").toBeTruthy();
+    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: rId,
+      date: rDate,
       scheduledStart: "09:00",
       services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
       assignedEmployeeId: auth.user.id,
     });
     expect(createRes.status).toBe(201);
-    raceApptIds.push(createRes.data.id);
-    const docRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/document`, {
+    raceApptId = createRes.data.id;
+    rApptIds.push(createRes.data.id);
+    const docRes = await apiPost<any>(`/api/appointments/${raceApptId}/document`, {
       actualStart: "09:00",
       travelOriginType: "home",
       travelKilometers: 0,
@@ -868,201 +1039,32 @@ describe("LN-16: Monats-LN Concurrency-Schutz (Task #1528)", () => {
     expect(docRes.status).toBe(200);
   });
 
-  afterAll(async () => {
-    for (const id of raceApptIds) {
-      try { await apiDelete(`/api/appointments/${id}`); } catch {}
-    }
-  });
+  it("LN-17.2 – zwei zeitgleiche Creates desselben Termins: genau einer gewinnt", async () => {
+    expect(raceApptId, "raceApptId muss aus LN-17.1 gesetzt sein").toBeTruthy();
 
-  it("LN-16.1 – zwei parallele Create-Requests ohne bestehenden pending-LN ⇒ genau EIN pending-LN", async () => {
-    const body = {
-      customerId: raceCustomerId,
-      employeeId: auth.user.id,
-      year: raceYear,
-      month: raceMonth,
-    };
-
-    // Beide Requests gleichzeitig abfeuern (Doppel-Submit-Simulation).
-    const [resA, resB] = await Promise.all([
-      apiPost<any>("/api/service-records", body),
-      apiPost<any>("/api/service-records", body),
-    ]);
-
-    // Beide müssen erfolgreich sein: der Sieger legt an, der Verlierer merged.
-    expect(resA.status, "Erster Request muss 201 liefern").toBe(201);
-    expect(resB.status, "Zweiter Request muss 201 liefern (Merge, kein 500)").toBe(201);
-
-    // Exakt EIN pending Monats-LN für diesen Kunde+Mitarbeiter+Monat.
-    const listRes = await apiGet<any>(
-      `/api/service-records?customerId=${raceCustomerId}&year=${raceYear}&month=${raceMonth}`
-    );
-    expect(listRes.status).toBe(200);
-    const records: any[] = Array.isArray(listRes.data) ? listRes.data : (listRes.data?.data ?? []);
-    const pendingMonthly = records.filter(
-      (r: any) => r.recordType === "monthly" && r.status === "pending"
-    );
-    expect(pendingMonthly.length, "Es darf nur EINEN pending Monats-LN geben").toBe(1);
-
-    // Beide Antworten zeigen auf denselben LN.
-    expect(resA.data.id).toBe(resB.data.id);
-    expect(resA.data.id).toBe(pendingMonthly[0].id);
-  });
-});
-
-// LN-17: Merge + gleichzeitige Unterschrift (Task #1531).
-// Ein frisch dokumentierter Termin wird in einen pending Monats-LN gemerged,
-// WÄHREND derselbe LN unterschrieben wird. Zusammenspiel der zwei Schutz-
-// schichten:
-//   - der FOR-UPDATE-Lookup des pending-LN (Task #1526) und
-//   - der atomare bedingte Status-Übergang (Task #1529)
-// müssen garantieren, dass eine zeitgleiche Unterschrift weder einen Termin
-// strandet noch doppelt abdeckt und keinen bereits versiegelten LN mutiert.
-// Beide möglichen Reihenfolgen sind korrekt:
-//   - Merge gewinnt: Termin hängt am LN_1, danach versiegelt die Unterschrift LN_1.
-//   - Unterschrift gewinnt: LN_1 wird versiegelt, der Merge legt LN_2 (pending) an.
-// In BEIDEN Fällen ist der neue Termin von GENAU EINEM Monats-LN abgedeckt und
-// LN_1 endet als employee_signed.
-describe("LN-17: Merge + gleichzeitige Unterschrift (Task #1531)", () => {
-  let mcId: number;
-  let mYear: number;
-  let mMonth: number;
-  const mDates: string[] = [];
-  const mApptIds: number[] = [];
-  let firstApptId: number | null = null;
-  let secondApptId: number | null = null;
-  let pendingRecordId: number | null = null;
-
-  beforeAll(async () => {
-    const cust = await createTestCustomer({ nachname: `LN-MergeSign_${Date.now()}` });
-    mcId = cust.id;
-    // Superadmin wird PRIMARY → isPrimary=true, alle dokumentierten Termine
-    // sichtbar, Übersicht/Liste ohne viewAs.
-    await apiPatch(`/api/admin/customers/${mcId}/assign`, {
-      primaryEmployeeId: auth.user.id,
-      backupEmployeeId: null,
-      backupEmployeeId2: null,
-    });
-
-    const now = new Date();
-    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    mYear = prev.getFullYear();
-    mMonth = prev.getMonth() + 1;
-    let day = 2;
-    while (mDates.length < 2 && day <= 28) {
-      const cur = new Date(mYear, mMonth - 1, day);
-      const dow = cur.getDay();
-      if (dow !== 0 && dow !== 6) {
-        mDates.push(
-          `${mYear}-${String(mMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`
-        );
-      }
-      day++;
-    }
-  });
-
-  afterAll(async () => {
-    for (const id of mApptIds) {
-      try { await apiDelete(`/api/appointments/${id}`); } catch {}
-    }
-  });
-
-  async function createAndDocumentOnDate(dateStr: string, time: string): Promise<number | null> {
-    const createRes = await apiPost<any>("/api/appointments/kundentermin", {
-      customerId: mcId,
-      date: dateStr,
-      scheduledStart: time,
-      services: [{ serviceId: hwServiceId, durationMinutes: 30 }],
-      assignedEmployeeId: auth.user.id,
-    });
-    if (createRes.status !== 201) return null;
-    mApptIds.push(createRes.data.id);
-    const docRes = await apiPost<any>(`/api/appointments/${createRes.data.id}/document`, {
-      actualStart: time,
-      travelOriginType: "home",
-      travelKilometers: 0,
-      customerKilometers: 0,
-      services: [{ serviceId: hwServiceId, actualDurationMinutes: 30, details: "merge-sign-test" }],
-    });
-    return docRes.status === 200 ? createRes.data.id : null;
-  }
-
-  it("LN-17.1 – pending Monats-LN mit erstem Termin vorbereiten, zweiten Termin dokumentieren", async () => {
-    expect(mDates.length, "Zwei Vormonats-Werktage müssen verfügbar sein").toBe(2);
-
-    firstApptId = await createAndDocumentOnDate(mDates[0], "09:00");
-    expect(firstApptId, "Erster Termin muss dokumentiert werden").toBeTruthy();
-
-    const res = await apiPost<any>("/api/service-records", {
-      customerId: mcId,
-      employeeId: auth.user.id,
-      year: mYear,
-      month: mMonth,
-    });
-    expect(res.status).toBe(201);
-    expect(res.data.status).toBe("pending");
-    expect(res.data.recordType).toBe("monthly");
-    pendingRecordId = res.data.id;
-
-    // Zweiter Termin wird dokumentiert, hängt aber noch an KEINEM LN.
-    secondApptId = await createAndDocumentOnDate(mDates[1], "10:00");
-    expect(secondApptId, "Zweiter Termin muss dokumentiert werden").toBeTruthy();
-  });
-
-  it("LN-17.2 – Merge + Unterschrift zeitgleich: kein Strand, keine Doppel-Abdeckung", async () => {
-    expect(pendingRecordId, "pendingRecordId muss aus LN-17.1 gesetzt sein").toBeTruthy();
-    expect(secondApptId, "secondApptId muss aus LN-17.1 gesetzt sein").toBeTruthy();
-
-    const mergeReq = () =>
+    const createOnce = () =>
       apiPost<any>("/api/service-records", {
-        customerId: mcId,
+        customerId: rId,
         employeeId: auth.user.id,
-        year: mYear,
-        month: mMonth,
-      });
-    const signReq = () =>
-      apiPost<any>(`/api/service-records/${pendingRecordId}/sign`, {
-        signatureData: validSignatureDataUrl(),
-        signerType: "employee",
-        signingLocation: "Vor Ort",
+        year: rYear,
+        month: rMonth,
+        appointmentIds: [raceApptId],
       });
 
-    const [mergeRes, signRes] = await Promise.all([mergeReq(), signReq()]);
+    const [a, b] = await Promise.all([createOnce(), createOnce()]);
+    const statuses = [a.status, b.status];
 
-    // Der Merge legt IMMER erfolgreich einen LN an oder hängt an (201) – egal,
-    // ob er LN_1 (noch pending) erwischt oder LN_2 neu erstellt.
-    expect(mergeRes.status).toBe(201);
-    // Die Unterschrift greift genau einmal: LN_1 war beim bedingten UPDATE noch
-    // pending (der Merge ändert den Status nicht), also Übergang angewendet.
-    expect(signRes.status).toBe(200);
+    // Genau EIN erfolgreicher Create (201); der zweite scheitert coverage-sicher
+    // (409 durch die transaktionale Re-Prüfung ODER 400, falls die Vor-Prüfung den
+    // bereits abgedeckten Termin sieht). Niemals zwei 201.
+    const successCount = statuses.filter((s) => s === 201).length;
+    expect(successCount, "Genau ein Create darf erfolgreich sein").toBe(1);
+    const loser = statuses.find((s) => s !== 201);
+    expect([400, 409], "Der Verlierer muss coverage-sicher abweisen").toContain(loser);
 
-    // LN_1 ist jetzt versiegelt – unabhängig von der gewonnenen Reihenfolge.
-    const sealed = await apiGet<any>(`/api/service-records/${pendingRecordId}`);
-    expect(sealed.status).toBe(200);
-    expect(sealed.data.status).toBe("employee_signed");
-
-    // Kein versiegelter LN wird mutiert und kein Termin doppelt abgedeckt:
-    // der zweite Termin liegt auf GENAU EINEM Monats-LN (entweder am
-    // versiegelten LN_1, wenn der Merge zuerst war, oder an einem neuen
-    // pending LN_2, wenn die Unterschrift zuerst war).
-    const listRes = await apiGet<any>(
-      `/api/service-records?customerId=${mcId}&year=${mYear}&month=${mMonth}`
-    );
-    expect(listRes.status).toBe(200);
-    const records: any[] = Array.isArray(listRes.data) ? listRes.data : (listRes.data?.data ?? []);
-    const monthly = records.filter((r: any) => r.recordType === "monthly");
-    expect(monthly.length, "Mindestens der ursprüngliche Monats-LN existiert").toBeGreaterThanOrEqual(1);
-
-    let coverageCount = 0;
-    for (const rec of monthly) {
-      const apptsRes = await apiGet<any>(`/api/service-records/${rec.id}/appointments`);
-      const appts: any[] = Array.isArray(apptsRes.data) ? apptsRes.data : [];
-      if (appts.some((a: any) => a.id === secondApptId)) coverageCount++;
-    }
-    expect(coverageCount, "Zweiter Termin genau einmal abgedeckt (kein Strand, kein Duplikat)").toBe(1);
-
-    // Höchstens EIN pending Monats-LN: entweder LN_1 wurde versiegelt (0 pending,
-    // Termin am versiegelten LN) oder es entstand genau ein neuer pending LN_2.
-    const pendingMonthly = monthly.filter((r: any) => r.status === "pending");
-    expect(pendingMonthly.length, "Höchstens ein pending Monats-LN").toBeLessThanOrEqual(1);
+    // Der Termin liegt danach in GENAU EINEM Leistungsnachweis.
+    const forApptRes = await apiGet<any>(`/api/service-records/for-appointment/${raceApptId}`);
+    expect(forApptRes.status).toBe(200);
+    expect(forApptRes.data?.id, "Der Termin muss genau einem LN zugeordnet sein").toBeTruthy();
   });
 });

@@ -25,7 +25,6 @@ import {
   auditLog,
 } from "@shared/schema";
 import { dedupePendingMonthlyServiceRecords } from "../../server/startup/dedupe-pending-monthly-service-records";
-import { MONTHLY_SERVICE_RECORD_PENDING_UNIQUE_INDEX_SQL } from "../../server/startup/ensure-monthly-service-record-pending-unique";
 import { uniqueId } from "../test-utils";
 
 const TAG = `t1534-${uniqueId()}`;
@@ -126,10 +125,10 @@ async function auditCountFor(ids: number[]): Promise<number> {
 }
 
 beforeAll(async () => {
-  // Der partielle Unique-Index aus Task #1528 wird auf einer frischen (duplikat-
-  // freien) Test-DB beim Boot bereits angelegt. Um den PROD-Vor-Migrations-
-  // Zustand (Duplikate vorhanden) nachzustellen, droppen wir ihn hier und legen
-  // ihn in afterAll über die SSoT-DDL wieder an.
+  // Task #1542 — Der partielle Unique-Index aus #1528 wurde entfernt (On-Demand-
+  // Sammel-LN erlaubt mehrere offene monthly-Bündel pro Monat). Die Konsolidie-
+  // rungs-Migration bleibt als historischer, ledger-gegateter One-Shot bestehen;
+  // ihre Logik (Merge doppelter offener LNs) wird hier weiterhin abgesichert.
   await db.execute(sql`DROP INDEX IF EXISTS monthly_service_records_pending_unique_idx`);
   customerId = await insertCustomer();
   employeeId = await insertEmployee();
@@ -169,9 +168,6 @@ afterAll(async () => {
   for (const id of createdCustomerIds) {
     try { await db.delete(customers).where(eq(customers.id, id)); } catch {}
   }
-  // Den in beforeAll gedroppten Unique-Index wiederherstellen (SSoT-DDL), damit
-  // andere Tests auf derselben Worker-DB den Produktiv-Schutz wieder vorfinden.
-  try { await db.execute(sql.raw(MONTHLY_SERVICE_RECORD_PENDING_UNIQUE_INDEX_SQL)); } catch {}
 });
 
 describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
@@ -225,30 +221,6 @@ describe("Task #1534 — dedupe-pending-monthly-service-records", () => {
     expect(result.appointmentsMoved).toBe(0);
     expect(await linkedApptIds(survivor)).toEqual([shared]);
     expect(await linkedApptIds(redundant)).toEqual([]);
-  });
-
-  it("Nach Cleanup lässt sich der partielle Unique-Index aus Task #1528 anlegen", async () => {
-    const survivor = await insertPendingRecord();
-    const redundant = await insertPendingRecord();
-    const apptA = await insertAppointment();
-    await linkAppointment(redundant, apptA);
-
-    const idxName = `t1534_pending_unique_${uniqueId()}`;
-    const createIdx = sql.raw(`
-      CREATE UNIQUE INDEX ${idxName}
-      ON monthly_service_records (customer_id, employee_id, year, month)
-      WHERE record_type = 'monthly' AND status = 'pending' AND deleted_at IS NULL
-    `);
-
-    // Vor dem Cleanup: Index-Build muss an den Duplikaten scheitern.
-    await expect(db.execute(createIdx)).rejects.toThrow();
-
-    await dedupePendingMonthlyServiceRecords();
-
-    // Nach dem Cleanup: Index-Build gelingt.
-    await db.execute(createIdx);
-    await db.execute(sql.raw(`DROP INDEX IF EXISTS ${idxName}`));
-    expect((await recordState(survivor))?.deletedAtIsNull).toBe(true);
   });
 
   it("Fehlender Audit-Akteur: keine Mutation", async () => {

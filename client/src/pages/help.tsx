@@ -281,11 +281,11 @@ const helpSections: HelpSection[] = [
         </ol>
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800">
-          <p className="font-medium">Unterschied zum monatlichen Nachweis:</p>
+          <p className="font-medium">Unterschied zum Sammel-Nachweis:</p>
           <ul className="list-disc list-inside space-y-1 mt-1">
             <li>Der <strong>Einzeltermin-LN</strong> enthält nur einen einzigen Termin.</li>
-            <li>Der <strong>monatliche LN</strong> fasst alle dokumentierten Termine eines Monats zusammen.</li>
-            <li>Termine, die bereits in einem Einzeltermin-LN enthalten sind, werden im monatlichen LN nicht erneut aufgenommen.</li>
+            <li>Der <strong>Sammel-LN</strong> bündelt mehrere dokumentierte Termine eines Monats. Sie wählen beim Erstellen aus, welche Termine enthalten sein sollen — nicht abgedeckte Termine können später in einen weiteren Sammel-LN aufgenommen werden.</li>
+            <li>Termine, die bereits in einem anderen Leistungsnachweis enthalten sind, werden nicht erneut aufgenommen.</li>
           </ul>
         </div>
       </div>

@@ -556,15 +556,14 @@ async function runStartupTasks() {
       log(`Invoice-Per-Pot-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
-    // Task #1528 — Partieller Unique-Index gegen Doppel-Monats-LN (höchstens ein
-    // pending-Monats-LN pro Kunde+Mitarbeiter+Monat). Idempotent, KEIN
-    // drizzle-kit push. Setzt voraus, dass der Prod-Duplikat-Cleanup zuvor lief
-    // (sonst loggt der Hook den Fehler und der Boot läuft weiter).
-    const { ensureMonthlyServiceRecordPendingUnique } = await import("./startup/ensure-monthly-service-record-pending-unique");
+    // Task #1542 — Partiellen Unique-Index aus #1528 abräumen (On-Demand-
+    // Sammel-LN erlaubt mehrere offene monthly-Bündel pro Kunde+Mitarbeiter+
+    // Monat). Idempotent (DROP INDEX IF EXISTS), KEIN drizzle-kit push.
+    const { dropMonthlyServiceRecordPendingUnique } = await import("./startup/drop-monthly-service-record-pending-unique");
     try {
-      await ensureMonthlyServiceRecordPendingUnique();
+      await dropMonthlyServiceRecordPendingUnique();
     } catch (err) {
-      log(`Monthly-Service-Record-Pending-Unique-Migration fehlgeschlagen: ${err}`, "startup");
+      log(`Monthly-Service-Record-Pending-Unique-Index-Drop fehlgeschlagen: ${err}`, "startup");
     }
 
     // Task #924 — Bereits-provisionierte Prod-DBs versöhnen, deren Spalten von

@@ -31,6 +31,7 @@ import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { MonthlyServiceRecord, Customer, Appointment } from "@shared/schema";
 import type { AppointmentWithCustomer } from "@shared/types";
 
@@ -47,6 +48,13 @@ interface NoShowInfo {
   producesCharge: boolean;
 }
 
+interface SelectableAppointment {
+  id: number;
+  date: string;
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+}
+
 interface PeriodCheckResponse {
   existingRecord: MonthlyServiceRecord | null;
   documentedCount: number;
@@ -56,6 +64,7 @@ interface PeriodCheckResponse {
   uncoveredDocumentedCount: number;
   canCreateRecord: boolean;
   noShowAppointments: NoShowInfo[];
+  selectableAppointments: SelectableAppointment[];
 }
 
 const MONTH_NAMES = [
@@ -146,7 +155,7 @@ export default function ServiceRecordsPage() {
 
   // Mutation to create a new service record
   const createRecordMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (appointmentIds?: number[]) => {
       if (!user?.id) {
         throw new Error("Nicht angemeldet");
       }
@@ -155,6 +164,7 @@ export default function ServiceRecordsPage() {
         employeeId: viewAsEmployeeId || user.id,
         year: selectedYear,
         month: selectedMonth,
+        ...(appointmentIds && appointmentIds.length > 0 ? { appointmentIds } : {}),
       });
       return unwrapResult(result);
     },
@@ -332,7 +342,7 @@ export default function ServiceRecordsPage() {
           customerId={customerId}
           selectedYear={selectedYear}
           selectedMonth={selectedMonth}
-          onCreateRecord={() => createRecordMutation.mutate()}
+          onCreateRecord={(appointmentIds) => createRecordMutation.mutate(appointmentIds)}
           isCreating={createRecordMutation.isPending}
         />
       )}
@@ -403,7 +413,7 @@ interface CustomerDetailViewProps {
   customerId: number;
   selectedYear: number;
   selectedMonth: number;
-  onCreateRecord: () => void;
+  onCreateRecord: (appointmentIds?: number[]) => void;
   isCreating: boolean;
 }
 
@@ -416,6 +426,27 @@ function CustomerDetailView({
   onCreateRecord,
   isCreating,
 }: CustomerDetailViewProps) {
+  const selectableAppointments = periodCheck.selectableAppointments ?? [];
+  const [selectSheetOpen, setSelectSheetOpen] = useState(false);
+  const [selectedApptIds, setSelectedApptIds] = useState<number[]>([]);
+
+  const openSelectSheet = () => {
+    setSelectedApptIds(selectableAppointments.map((apt) => apt.id));
+    setSelectSheetOpen(true);
+  };
+
+  const toggleAppt = (id: number) => {
+    setSelectedApptIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const confirmCreate = () => {
+    if (selectedApptIds.length === 0) return;
+    const allSelected = selectedApptIds.length === selectableAppointments.length;
+    onCreateRecord(allSelected ? undefined : selectedApptIds);
+    setSelectSheetOpen(false);
+  };
   const completedRecordsCount = records.filter((r) => r.status === "completed").length;
   const coveredAppointments = periodCheck.coveredBySingleCount + periodCheck.coveredByMonthlyCount;
   const readyCount = periodCheck.uncoveredDocumentedCount;
@@ -477,7 +508,7 @@ function CustomerDetailView({
                         {readyCount} {readyCount === 1 ? "Termin" : "Termine"} bereit für Leistungsnachweis
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Monatlichen Leistungsnachweis für {readyCount === 1 ? "diesen Termin" : `diese ${readyCount} Termine`} erstellen.
+                        Sammel-Leistungsnachweis für {readyCount === 1 ? "diesen Termin" : `diese ${readyCount} Termine`} erstellen. Einzelne Termine können vorher abgewählt werden.
                       </p>
                       {deadline && (
                         <div className="mt-1">
@@ -488,7 +519,7 @@ function CustomerDetailView({
                   </div>
                   {periodCheck.canCreateRecord && (
                     <Button
-                      onClick={onCreateRecord}
+                      onClick={openSelectSheet}
                       disabled={isCreating}
                       className="w-full sm:w-auto shrink-0"
                       data-testid="button-create-record"
@@ -498,7 +529,7 @@ function CustomerDetailView({
                       ) : (
                         <Plus className={`${iconSize.sm} mr-2`} />
                       )}
-                      Monatlichen Leistungsnachweis erstellen
+                      Sammel-Leistungsnachweis erstellen
                     </Button>
                   )}
                 </div>
@@ -622,6 +653,72 @@ function CustomerDetailView({
           </CardContent>
         </Card>
       )}
+
+      <Sheet open={selectSheetOpen} onOpenChange={setSelectSheetOpen}>
+        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto" data-testid="sheet-select-appointments">
+          <SheetHeader>
+            <SheetTitle>Termine für Sammel-Leistungsnachweis auswählen</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground" data-testid="text-select-intro">
+              Alle dokumentierten Termine sind vorausgewählt. Termine, die nicht in diesen
+              Leistungsnachweis sollen, können abgewählt werden.
+            </p>
+            <div className="flex flex-col divide-y divide-border">
+              {selectableAppointments.map((apt) => {
+                const checked = selectedApptIds.includes(apt.id);
+                return (
+                  <label
+                    key={apt.id}
+                    className="flex items-center gap-3 py-3 first:pt-0 cursor-pointer"
+                    data-testid={`row-select-appointment-${apt.id}`}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={() => toggleAppt(apt.id)}
+                      data-testid={`checkbox-appointment-${apt.id}`}
+                    />
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span className="font-medium" data-testid={`text-select-date-${apt.id}`}>
+                        {formatNoShowDate(apt.date)}
+                      </span>
+                      {apt.scheduledStart && (
+                        <span className="text-sm text-muted-foreground" data-testid={`text-select-time-${apt.id}`}>
+                          {apt.scheduledStart.slice(0, 5)}
+                          {apt.scheduledEnd ? `–${apt.scheduledEnd.slice(0, 5)} Uhr` : " Uhr"}
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="mt-2 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setSelectSheetOpen(false)}
+                data-testid="button-cancel-select"
+              >
+                Abbrechen
+              </Button>
+              <Button
+                onClick={confirmCreate}
+                disabled={isCreating || selectedApptIds.length === 0}
+                data-testid="button-confirm-create"
+              >
+                {isCreating ? (
+                  <Loader2 className={`${iconSize.sm} animate-spin mr-2`} />
+                ) : (
+                  <Plus className={`${iconSize.sm} mr-2`} />
+                )}
+                {selectedApptIds.length === 1
+                  ? "Leistungsnachweis für 1 Termin erstellen"
+                  : `Leistungsnachweis für ${selectedApptIds.length} Termine erstellen`}
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

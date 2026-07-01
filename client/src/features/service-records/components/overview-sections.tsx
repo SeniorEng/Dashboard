@@ -233,7 +233,7 @@ function CompletedCustomerCard({ item, selectedYear, selectedMonth }: CompletedC
   const parts: string[] = [
     `${item.totalAppointments} ${item.totalAppointments === 1 ? "Termin" : "Termine"}`,
   ];
-  if (monthlyCount > 0) parts.push(`${monthlyCount} monatl. LN`);
+  if (monthlyCount > 0) parts.push(`${monthlyCount} Sammel-LN`);
   if (singleCount > 0) parts.push(`${singleCount} Einzel-LN`);
 
   return (
@@ -291,7 +291,7 @@ function statusLabel(status: string): string {
 
 function AwaitingSignatureCard({ item, proof }: { item: CustomerOverviewItem; proof: PendingProof }) {
   const href = `/service-records/${proof.id}`;
-  const kindLabel = proof.kind === "monthly" ? "Monats-LN" : "Einzel-LN";
+  const kindLabel = proof.kind === "monthly" ? "Sammel-LN" : "Einzel-LN";
 
   return (
     <Link href={href}>

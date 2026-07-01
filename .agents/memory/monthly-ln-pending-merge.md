@@ -1,63 +1,51 @@
 ---
-name: Monthly-LN pending-merge SSoT
-description: How duplicate monthly Leistungsnachweise are prevented (pending-merge + sealing invariant + overview array).
+name: Sammel-LN on-demand model
+description: Monthly/Sammel Leistungsnachweis creation is on-demand & non-merging; coverage-exclusion is race-safe via row-lock; sealed-never-mutated + overview-array invariants.
 ---
 
-# Monthly Leistungsnachweis (LN) — duplicate prevention
+# Sammel-Leistungsnachweis (LN) — on-demand creation model
 
-The duplicate-monthly-LN bug had two roots, fixed together:
+**Model (on-demand, no merge).** `POST /api/service-records` (monthly create) creates a
+**separate** Sammel-LN each call. No auto-growing monthly container, no merge-into-existing-
+pending. The employee picks which documented appointments of a month go on the proof
+(`appointmentIds` optional; omitted ⇒ all still-uncovered documented appts of that
+customer+employee+month). The `monthly` `record_type` is reinterpreted as "Sammel-LN" — no
+enum delete/mutate (GoBD). `/single` creates a one-appointment LN.
 
-1. **Creation merged, not duplicated.** `POST /api/service-records` (monthly create)
-   merges newly documented appointments into an existing **PENDING** monthly LN for the
-   same customer+employee+month instead of creating a second pending LN.
-   `employee_signed`/`completed` are **GoBD-sealed** — a sealed LN is NEVER mutated, so
-   later appointments correctly get a brand-new LN.
+**Coverage-exclusion is app-level, made race-safe by a transactional row-lock — NOT a DB
+constraint.** A `serviceRecordAppointments` row on a non-soft-deleted `monthlyServiceRecords`
+covers an appt (soft-deleted LN's junction rows persist but don't count, so the appt is
+re-addable). The junction's only unique is `(serviceRecordId, appointmentId)` — that does NOT
+enforce "one appt in one LN". A plain unique index on `appointment_id` is WRONG (soft-deletes
+must free the appt; a partial index can't reference the parent's `deletedAt`).
+**The guard is: inside the create tx, `SELECT … FOR UPDATE` the claimed appointment rows
+(ordered by id, dedup — `lockAppointmentsForUpdate`), then re-run the coverage read
+(`getAppointmentIdsInServiceRecords`, tx-bound) and abort with 409 if any is now covered,
+before create+link.** Coverage is global per appt (across employees), so locking the appt row
+— the actually-contended resource — serializes two creates regardless of `effectiveEmployeeId`.
+Both `POST /` and `POST /single` do this.
 
-2. **Overview must keep every proof.** The overview storage returns
-   `monthlyRecords: {id; status}[]` per customer. The old code collapsed multiple monthly
-   proofs into a single map slot, so a second proof was invisible. Frontend renders
-   awaiting-signature **per proof**, not per customer.
+**Route 400 ordering (POST /):** undocumented → documented-empty → remaining-empty ("bereits
+abgedeckt") → appointmentIds-invalid (`invalidAppointmentIds`) → [tx] now-covered → 409. So to
+hit the invalid-id branch a test needs ≥1 still-open appt (else remaining-empty 400 fires
+first). A concurrent-create loser is 400 (pre-tx caught it) OR 409 (tx re-check caught it) —
+never a second 201.
 
-**Why the FOR UPDATE matters (rule):** the pending lookup
-(`getPendingMonthlyServiceRecord`) MUST run **inside** the create `db.transaction`, and in
-tx context it issues `SELECT … FOR UPDATE` on the matching pending row. Otherwise a
-concurrent signature can seal the LN between "found pending" and "append appointments",
-mutating a sealed (GoBD) record. With the lock + `status='pending'` filter: a sealed row is
-excluded (→ new LN), and merge-vs-merge serializes on the same row.
+**Durable invariants (preserve):**
+1. **Sealed-never-mutated.** `employee_signed`/`completed` are GoBD-sealed; a sealed LN is
+   NEVER mutated — a later create just makes a new LN.
+2. **Overview keeps every proof.** Overview storage returns `monthlyRecords: {id;status}[]`
+   per customer; never collapse multiple proofs into one slot or a second proof vanishes.
+3. **Per-employee separation** and **race-safe coverage-exclusion** hold across all write paths.
 
-**How to apply:** any new write path that attaches appointments to a monthly LN must (a)
-respect the sealed-never-mutated boundary and (b) take the pending row under FOR UPDATE in a
-tx. Any reader of the overview must treat `monthlyRecords` as an array.
+**How to apply:** any new write path attaching appointments to a Sammel-LN MUST lock the appt
+rows + re-check coverage inside the same tx, respect the sealed boundary, and treat overview
+`monthlyRecords` as an array.
 
-**Sign+merge confirmed race-safe (tested).** The sign double-apply is resolved: signing is
-an atomic conditional `UPDATE … WHERE status=<expected>` (one racer transitions, the other
-hits 0 rows → 400), and merge takes the pending row under FOR UPDATE. Both PG READ-COMMITTED
-orderings leave the merged appointment on exactly one record (merge-first → appended then
-sealed; sign-first → sealed then merge makes a new pending LN). Covered by the LN-16
-concurrent merge+sign test in `tests/service-records.test.ts`.
-
-**DB uniqueness guard (now in place):** the no-pending-row race is closed by partial unique
-index `monthly_service_records_pending_unique_idx` on (customer_id, employee_id, year, month)
-WHERE record_type='monthly' AND status='pending' AND deleted_at IS NULL (idempotent startup
-migration `ensureMonthlyServiceRecordPendingUnique`, not drizzle-kit push). **Trap:** that
-migration SWALLOWS its create error — if pre-existing duplicates exist the index silently
-never creates and the safeguard is inert; the only signal is `INDEX_EXISTS=false` in prod.
-The duplicate cleanup must run FIRST: idempotent ledger-gated startup migration
-`dedupePendingMonthlyServiceRecords` (registered pre-budget so it runs before the index
-migration) — GoBD-safe: survivor = MIN(id) (matches `getPendingMonthlyServiceRecord` ORDER BY
-id), appointments re-linked to survivor, redundant rows SOFT-deleted (never hard), audit
-`monthly_service_record_deduplicated`. monthly_service_records & service_record_appointments
-are NOT GoBD-trigger-immutable (no bypass needed). `signServiceRecord` also has its own
-pre-existing read-before-write status-transition TOCTOU.
-
-**Testing trap:** a fresh ephemeral test DB already HAS the partial unique index (it creates
-cleanly with no duplicates), so a dedup test must DROP it in beforeAll to recreate the prod
-pre-migration state and recreate it (via the exported DDL SSoT) in afterAll.
-
-**Known remaining gaps (deferred, NOT a sign race):**
-1. **appointment-MUTATION lock-check TOCTOU** — `isAppointmentLocked` is a correct pure read
-   of committed state, but callers in `server/routes/appointments.ts` /
-   `appointment-documentation.ts` / `appointment-series.ts` check-then-write: a concurrent
-   sign can seal the LN between the check and an edit/delete (junction has ON DELETE CASCADE
-   → would mutate a GoBD-sealed proof). Fix = lock the related monthlyServiceRecords rows in
-   the mutation tx and re-check inside it.
+## Known remaining gap (deferred)
+- **appointment-MUTATION lock-check TOCTOU** — `isAppointmentLocked` is a correct pure read,
+  but callers in `server/routes/appointments.ts` / `appointment-documentation.ts` /
+  `appointment-series.ts` check-then-write: a concurrent sign can seal the LN between check and
+  edit/delete (junction ON DELETE CASCADE → would mutate a sealed proof). Fix = lock the related
+  `monthlyServiceRecords` rows in the mutation tx and re-check inside it. (This is the mutation
+  side; the create side is now race-safe as above.)

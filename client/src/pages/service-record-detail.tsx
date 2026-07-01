@@ -239,7 +239,7 @@ export default function ServiceRecordDetailPage() {
               </Badge>
             ) : (
               <Badge variant="secondary" className="text-xs" data-testid="badge-record-type-monthly">
-                Monatlich
+                Sammel-LN
               </Badge>
             )}
           </div>

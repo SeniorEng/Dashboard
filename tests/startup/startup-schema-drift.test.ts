@@ -88,7 +88,6 @@ import {
   CBTS_UNIQUE_INDEX_SQL,
   BUDGET_ALLOCATIONS_AUTO_UNIQUE_INDEX_SQL,
 } from "../../server/startup/backfill-budget-historization";
-import { MONTHLY_SERVICE_RECORD_PENDING_UNIQUE_INDEX_SQL } from "../../server/startup/ensure-monthly-service-record-pending-unique";
 import {
   ROLE_WAGE_RATES_ROLE_SERVICE_INDEX_SQL,
   ROLE_WAGE_RATES_ACTIVE_VALIDFROM_UNIQ_SQL,
@@ -770,16 +769,6 @@ const INDEX_SOURCES: IndexSource[] = [
     drizzleTable: budgetAllocations,
     tempColumns:
       "customer_id integer, budget_type text, year integer, month integer, source text, deleted_at timestamptz",
-  },
-  {
-    label:
-      "ensure-monthly-service-record-pending-unique: monthly_service_records_pending_unique_idx",
-    rawSql: MONTHLY_SERVICE_RECORD_PENDING_UNIQUE_INDEX_SQL,
-    indexName: "monthly_service_records_pending_unique_idx",
-    realTable: "monthly_service_records",
-    drizzleTable: monthlyServiceRecords,
-    tempColumns:
-      "customer_id integer, employee_id integer, year integer, month integer, record_type text, status text, deleted_at timestamptz",
   },
   {
     label: "ensure-role-wage-rates: role_wage_rates_role_service_idx",
