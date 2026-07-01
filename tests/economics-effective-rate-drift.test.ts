@@ -6,6 +6,7 @@ import { getPerformanceStats } from "../server/storage/statistics/performance";
 import { getEconomics } from "../server/storage/statistics/economics";
 import { readBillingEconomics } from "../server/storage/billing/economics-reader";
 import { resolvePeriod } from "../server/storage/statistics/common";
+import { quantizeKm } from "../shared/domain/invoice-line-items";
 
 /**
  * Task #1546 / #1551 — Anzeige-vs-Buchung für Satz-LABELS im Reporting.
@@ -214,4 +215,178 @@ describe("Task #1546/#1551 — Reporting: Sätze effektiv aus Geld ÷ Menge (Anz
       expect(row!.marginCents).toBe(f.effectivePriceCents - f.effectiveWageCents);
     });
   }
+});
+
+/**
+ * Task #1552 — Anzeige-vs-Buchung für die KILOMETER-Satz-Labels im Reporting.
+ *
+ * Die drei Hours-Kategorien (Task #1546/#1551, oben) sind gegen Katalog-vs-
+ * Effektiv-Drift des ANGEZEIGTEN Stundensatzes abgesichert. Dieselben Reader
+ * zeigen aber auch eine „Kilometer"-Zeile mit per-km-Satz-Labels (berechneter
+ * km-Preis vs. ausgezahlter km-Lohn) — dafür fehlte bislang JEDE Drift-Absi-
+ * cherung. Eine künftige Änderung an der km-Satz-Auflösung könnte die Katalog-
+ * vs-Effektiv-Drift für Kilometer still wieder einführen, ohne dass ein Test
+ * bricht.
+ *
+ * Diese Suite bucht km in einem isolierten, weit entfernten Jahr und setzt für
+ * den KOSTEN-Pfad einen rollenbasierten km-Lohnsatz (`role_wage_rates`), der
+ * bewusst vom flachen Katalog-km-Satz (`services.employee_rate_cents`) abweicht.
+ * Sie prüft, dass die Reader den EFFEKTIVEN Satz (Geld ÷ km) zeigen, dass
+ * Satz × km === die jeweilige Geld-Spalte gilt und dass km 0 ⇒ Satz 0.
+ *
+ * Für die ERLÖS-Seite gibt es bei km KEINEN kundenspezifischen Preis-Pfad — der
+ * berechnete km-Preis stammt immer aus dem Katalog (`default_price_cents`). Die
+ * Erlös-Assertion prüft daher nur „Satz === Geld ÷ km" (nicht ≠ Katalog).
+ *
+ * ISOLATION je km-Typ über einen EIGENEN Monat: Reader 1 (Abrechnung) fasst
+ * Anfahrts-, Kunden- und Zeiterfassungs-km in EINER gemischten „Kilometer"-Zeile
+ * zusammen. Lägen unterschiedliche km-Sätze im selben Monat, wäre der gemischte
+ * Zeilen-Satz ein Blend und die Einzel-Satz-Assertion nicht mehr sauber prüfbar.
+ * Getrennte Monate halten jede km-Zeile bei genau einem Satz.
+ */
+describe("Task #1552 — Reporting: km-Satz effektiv aus Geld ÷ km (Anzeige === Buchung)", () => {
+  const KM_YEAR = 2040;
+  const TRAVEL_MONTH = 6; // Nur Anfahrts-km.
+  const CUSTOMER_MONTH = 7; // Nur Kunden-km.
+  const EMPTY_MONTH = 8; // Ohne km.
+  const TRAVEL_KM = 10; // Ganzzahlig ⇒ quantizeKm exakt ⇒ Satz × km === Geld.
+  const CUSTOMER_KM = 8;
+
+  let userId: number;
+  let customerId: number;
+  let travelKmWageId = 0;
+  let customerKmWageId = 0;
+  let catalogTravelRateCents = 0;
+  let catalogTravelPriceCents = 0;
+  let catalogCustomerRateCents = 0;
+  let catalogCustomerPriceCents = 0;
+  let effectiveTravelWageCents = 0;
+  let effectiveCustomerWageCents = 0;
+
+  const insertKmAppointment = async (dateIso: string, travelKm: number, customerKm: number) => {
+    await db.execute(sql`
+      INSERT INTO appointments (
+        customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
+        appointment_type, date, scheduled_start, scheduled_end, duration_promised,
+        status, actual_start, actual_end, travel_origin_type, travel_kilometers,
+        travel_minutes, customer_kilometers, signed_at, signed_by_user_id
+      ) VALUES (
+        ${customerId}, ${userId}, ${userId}, ${userId},
+        'Kundentermin', ${dateIso}, '09:00', '10:00', 60,
+        'completed', '09:00', '10:00', 'home', ${travelKm},
+        0, ${customerKm}, NOW(), ${userId}
+      )
+    `);
+  };
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    userId = auth.user.id; // Seed-Superadmin ⇒ Lohn-Rolle 'admin'.
+
+    const customer = await createTestCustomer({ vorname: "T1552", nachname: `Km_${Date.now()}` });
+    customerId = customer.id as number;
+
+    // Reale km-Leistungen (die Reader filtern nach Code).
+    const svc = await db.execute(sql`
+      SELECT code, id, COALESCE(default_price_cents, 0)::int AS price, COALESCE(employee_rate_cents, 0)::int AS rate
+      FROM services WHERE code IN ('travel_km','customer_km')
+    `).then((r) => r.rows as Array<{ code: string; id: number; price: number; rate: number }>);
+    const travel = svc.find((s) => s.code === "travel_km")!;
+    const customerKmSvc = svc.find((s) => s.code === "customer_km")!;
+    catalogTravelRateCents = travel.rate;
+    catalogTravelPriceCents = travel.price;
+    catalogCustomerRateCents = customerKmSvc.rate;
+    catalogCustomerPriceCents = customerKmSvc.price;
+    // Garantiert vom Katalog-km-Satz verschieden.
+    effectiveTravelWageCents = catalogTravelRateCents + 37;
+    effectiveCustomerWageCents = catalogCustomerRateCents + 53;
+
+    // Rollen-km-Lohnsatz (admin × km-Leistung) für das Testjahr — spätestes
+    // valid_from gewinnt, kollidiert also nicht mit anderen Suites.
+    travelKmWageId = await db.execute(sql`
+      INSERT INTO role_wage_rates (role, service_id, cents, valid_from, valid_to, created_by_user_id)
+      VALUES ('admin', ${travel.id}, ${effectiveTravelWageCents}, ${`${KM_YEAR}-01-01`}, ${`${KM_YEAR}-12-31`}, ${userId})
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+    customerKmWageId = await db.execute(sql`
+      INSERT INTO role_wage_rates (role, service_id, cents, valid_from, valid_to, created_by_user_id)
+      VALUES ('admin', ${customerKmSvc.id}, ${effectiveCustomerWageCents}, ${`${KM_YEAR}-01-01`}, ${`${KM_YEAR}-12-31`}, ${userId})
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+
+    // Ein km-Termin je Typ in getrennten Monaten (kein km-Satz-Blend in Reader 1).
+    await insertKmAppointment(`${KM_YEAR}-0${TRAVEL_MONTH}-15`, TRAVEL_KM, 0);
+    await insertKmAppointment(`${KM_YEAR}-0${CUSTOMER_MONTH}-15`, 0, CUSTOMER_KM);
+  });
+
+  afterAll(async () => {
+    await cleanupCustomer(customerId); // entfernt Termine (FK-Cascade)
+    if (travelKmWageId) await db.execute(sql`DELETE FROM role_wage_rates WHERE id = ${travelKmWageId}`);
+    if (customerKmWageId) await db.execute(sql`DELETE FROM role_wage_rates WHERE id = ${customerKmWageId}`);
+  });
+
+  // --- Reader 1: Abrechnung-Wirtschaftlichkeit — „Kilometer"-Zeile. -----------
+  it("Reader 1 (Abrechnung): Anfahrts-km — Kosten-Satz = effektiver Rollenlohn, nicht Katalog", async () => {
+    const billing = await readBillingEconomics(KM_YEAR, TRAVEL_MONTH);
+    const row = billing.byService.find((r) => r.key === "kilometer");
+    expect(row).toBeDefined();
+    expect(row!.unit).toBe("km");
+    expect(row!.quantity).toBe(TRAVEL_KM);
+
+    // Kosten-Satz je km stammt aus Geld ÷ km (effektiver Rollenlohn), NICHT Katalog.
+    expect(row!.costRateCents).toBe(effectiveTravelWageCents);
+    expect(row!.costRateCents).not.toBe(catalogTravelRateCents);
+    expect(Math.round(row!.costCents / row!.quantity)).toBe(row!.costRateCents);
+    expect(row!.costRateCents * quantizeKm(row!.quantity)).toBe(row!.costCents);
+
+    // Erlös-Satz ebenfalls aus Geld ÷ km (km-Erlös nutzt den Katalog-km-Preis).
+    expect(row!.revenueRateCents).toBe(catalogTravelPriceCents);
+    expect(Math.round(row!.revenueCents / row!.quantity)).toBe(row!.revenueRateCents);
+    expect(row!.revenueRateCents * quantizeKm(row!.quantity)).toBe(row!.revenueCents);
+  });
+
+  it("Reader 1 (Abrechnung): Kunden-km — Kosten-Satz = effektiver Rollenlohn, nicht Katalog", async () => {
+    const billing = await readBillingEconomics(KM_YEAR, CUSTOMER_MONTH);
+    const row = billing.byService.find((r) => r.key === "kilometer");
+    expect(row).toBeDefined();
+    expect(row!.unit).toBe("km");
+    expect(row!.quantity).toBe(CUSTOMER_KM);
+
+    expect(row!.costRateCents).toBe(effectiveCustomerWageCents);
+    expect(row!.costRateCents).not.toBe(catalogCustomerRateCents);
+    expect(Math.round(row!.costCents / row!.quantity)).toBe(row!.costRateCents);
+    expect(row!.costRateCents * quantizeKm(row!.quantity)).toBe(row!.costCents);
+
+    expect(row!.revenueRateCents).toBe(catalogCustomerPriceCents);
+    expect(Math.round(row!.revenueCents / row!.quantity)).toBe(row!.revenueRateCents);
+    expect(row!.revenueRateCents * quantizeKm(row!.quantity)).toBe(row!.revenueCents);
+  });
+
+  it("Reader 1 (Abrechnung): ohne km ⇒ km-Satz 0", async () => {
+    const billing = await readBillingEconomics(KM_YEAR, EMPTY_MONTH);
+    const row = billing.byService.find((r) => r.key === "kilometer");
+    expect(row).toBeDefined();
+    expect(row!.quantity).toBe(0);
+    expect(row!.costRateCents).toBe(0);
+    expect(row!.revenueRateCents).toBe(0);
+  });
+
+  // --- Reader 2: Statistik-Wirtschaftlichkeit — km-Zeilen (travel/customer). ---
+  it("Reader 2 (Statistik): km-Zeilen — impliziter km-Satz = effektiver Rollenlohn, nicht Katalog", async () => {
+    const { economics } = await getEconomics(resolvePeriod({ year: KM_YEAR }));
+
+    // Anfahrts-km: bezahlt = effektiver Rollenlohn × km (Geld ÷ km ⇒ effektiv).
+    expect(economics.km.travel.km).toBe(TRAVEL_KM);
+    expect(economics.km.travel.paidCents).toBe(effectiveTravelWageCents * TRAVEL_KM);
+    expect(Math.round(economics.km.travel.paidCents / economics.km.travel.km)).toBe(effectiveTravelWageCents);
+    expect(effectiveTravelWageCents).not.toBe(catalogTravelRateCents);
+    expect(economics.km.travel.chargedCents).toBe(catalogTravelPriceCents * TRAVEL_KM);
+
+    // Kunden-km: analog mit eigenem Rollenlohn.
+    expect(economics.km.customer.km).toBe(CUSTOMER_KM);
+    expect(economics.km.customer.paidCents).toBe(effectiveCustomerWageCents * CUSTOMER_KM);
+    expect(Math.round(economics.km.customer.paidCents / economics.km.customer.km)).toBe(effectiveCustomerWageCents);
+    expect(effectiveCustomerWageCents).not.toBe(catalogCustomerRateCents);
+    expect(economics.km.customer.chargedCents).toBe(catalogCustomerPriceCents * CUSTOMER_KM);
+  });
 });
