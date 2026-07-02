@@ -27,8 +27,6 @@ import {
   createAndDocumentAppointment,
 } from "./test-utils";
 
-const UNRESOLVED_CUSTOMER_LABEL = "Kein Kunde zugeordnet";
-
 async function getSeededHauswirtschaftServiceId(): Promise<number> {
   const res = await db.execute(
     sql`SELECT id FROM services WHERE code = 'hauswirtschaft' LIMIT 1`,
@@ -185,11 +183,11 @@ describe("Task #1569: Übersichts-Zähler ≡ Detailliste (Noch nicht abrechenba
     const listMinutes = list.reduce((s, a) => s + a.minutes, 0);
     expect(listMinutes).toBe(overview.unsignedMinutes);
 
-    // Der Termin ohne auflösbaren Kunden erscheint mit Platzhalter statt leerem
-    // Namen (kein stiller Wegfall).
+    // Der Termin ohne Kundenzuordnung erscheint mit dem Interessenten-Namen
+    // (Task #1570), nicht mit dem generischen Platzhalter — kein stiller Wegfall.
     const orphan = list.find((a) => a.id === apptOrphanId);
     expect(orphan, "Termin ohne auflösbaren Kunden muss in der Liste stehen").toBeDefined();
-    expect(orphan!.customerName).toBe(UNRESOLVED_CUSTOMER_LABEL);
+    expect(orphan!.customerName).toBe("Interessent: Test1569 OrphanProspect");
   });
 
   it("fällt auf 0, sobald beide Termine unterschrieben sind (Zähler UND Liste)", async () => {

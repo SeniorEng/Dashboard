@@ -30,6 +30,22 @@ const router = Router();
  */
 const UNRESOLVED_CUSTOMER_LABEL = "Kein Kunde zugeordnet";
 
+/**
+ * Task #1570 — Termine ohne Kundenzuordnung sind fast immer Interessenten-/
+ * Erstberatungstermine (`customer_id` NULL, `prospect_id` gesetzt). Statt des
+ * nichtssagenden Platzhalters zeigen Detailliste und Drill-down dann den
+ * Interessenten-Namen ("Interessent: <Name>"). Fällt weiter auf den Platzhalter
+ * zurück, wenn weder Kunde noch Interessent auflösbar ist.
+ */
+function resolveAppointmentPartyName(
+  customerName: string | null | undefined,
+  prospectName: string | null | undefined,
+): string {
+  if (customerName) return customerName;
+  if (prospectName) return `Interessent: ${prospectName}`;
+  return UNRESOLVED_CUSTOMER_LABEL;
+}
+
 function parseYearMonth(req: Request, res: Response): { year: number; month: number } | null {
   const year = parseInt(req.query.year as string);
   const month = parseInt(req.query.month as string);
@@ -230,6 +246,7 @@ router.get("/mitarbeiterabrechnung/employee/:id", requireWageDataAccess, asyncHa
       a.scheduled_start as scheduled_start,
       a.status as status,
       c.name as customer_name,
+      NULLIF(TRIM(CONCAT(p.vorname, ' ', p.nachname)), '') as prospect_name,
       COALESCE(a.travel_kilometers, 0) as travel_km,
       COALESCE(a.customer_kilometers, 0) as customer_km,
       COALESCE(a.travel_minutes, 0) as travel_minutes,
@@ -239,6 +256,7 @@ router.get("/mitarbeiterabrechnung/employee/:id", requireWageDataAccess, asyncHa
       ), 0) as service_minutes
     FROM appointments a
     LEFT JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN prospects p ON p.id = a.prospect_id
     WHERE ${documentedSqlRaw('a')}
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
@@ -251,7 +269,7 @@ router.get("/mitarbeiterabrechnung/employee/:id", requireWageDataAccess, asyncHa
     date: typeof r.date === "string" ? r.date : new Date(r.date).toISOString().slice(0, 10),
     scheduledStart: r.scheduled_start ?? null,
     status: r.status as string,
-    customerName: r.customer_name ?? UNRESOLVED_CUSTOMER_LABEL,
+    customerName: resolveAppointmentPartyName(r.customer_name, r.prospect_name),
     serviceMinutes: Number(r.service_minutes) || 0,
     travelMinutes: Number(r.travel_minutes) || 0,
     travelKm: Number(r.travel_km) || 0,
@@ -303,9 +321,11 @@ router.get("/mitarbeiterabrechnung/unsigned-appointments", requireWageDataAccess
       a.date as date,
       a.scheduled_start as scheduled_start,
       c.name as customer_name,
+      NULLIF(TRIM(CONCAT(p.vorname, ' ', p.nachname)), '') as prospect_name,
       COALESCE(svc_minutes.minutes, 0) as minutes
     FROM appointments a
     LEFT JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN prospects p ON p.id = a.prospect_id
     ${unsignedServiceMinutesLateralRaw('a', 'svc_minutes')}
     WHERE ${completedButUnsignedSqlRaw('a')}
       AND a.deleted_at IS NULL
@@ -318,7 +338,7 @@ router.get("/mitarbeiterabrechnung/unsigned-appointments", requireWageDataAccess
     id: Number(row.id),
     date: typeof row.date === "string" ? row.date : new Date(row.date).toISOString().slice(0, 10),
     scheduledStart: row.scheduled_start ?? null,
-    customerName: row.customer_name ?? UNRESOLVED_CUSTOMER_LABEL,
+    customerName: resolveAppointmentPartyName(row.customer_name, row.prospect_name),
     minutes: Number(row.minutes) || 0,
   }));
 
