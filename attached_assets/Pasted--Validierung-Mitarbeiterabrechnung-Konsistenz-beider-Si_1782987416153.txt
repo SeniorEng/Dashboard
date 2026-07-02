@@ -1,0 +1,91 @@
+# Validierung: Mitarbeiterabrechnung — Konsistenz beider Sichten, Fahrtzeit & No-Show
+
+**Projekt:** EngelDesk / Care Connect (Senioren Engel).
+**Geprüft:** Live-Produktion (`admin.seniorenengel-alltagsbegleitung.de`), **read-only**, Juni 2026.
+**Sichten:** Mitarbeitersicht „Meine Zeiten" (`/my-times`) ↔ Admin „Mitarbeiterabrechnung & Stundenkonto" (`/admin/mitarbeiterabrechnung`, #1555).
+**Stand:** 02.07.2026.
+
+---
+
+## 1. Kurzfazit
+
+- **Konsistenz beider Sichten: bestätigt.** Die Zahlen speisen sich aus derselben Aggregation; ein termingenauer Abgleich (Ahnert, Juni) rekonziliert exakt. **Kein Rechen-Drift.**
+- **Eine Anzeige-Inkonsistenz:** die Mitarbeitersicht führt eine „Leerfahrten"-Zeile, die die Admin-Aufschlüsselung als Kategorie nicht kennt (beide lassen sie aus der Summe raus).
+- **No-Show wird uneinheitlich behandelt** — mal unterbezahlt (als „Leerfahrt" aus der Summe), mal überbezahlt (voller Termin) — **live belegt** an zwei realen Fällen. Das ist der eigentliche Handlungsbedarf.
+- **Fahrtzeit** wird **mitarbeiterabhängig uneinheitlich** erfasst (ein Mitarbeiter loggt Fahrtzeit, ein anderer praktisch nicht) → Lohn-Fairness driftet.
+- **Positiv:** Minijob-603-€-Kappung + Übertrag, „nicht abrechenbar"-Kennzeichnung und Stundenkonto-Default (Bezahlt = Erfasst) funktionieren korrekt.
+
+---
+
+## 2. Konsistenz-Nachweis (Logikprüfung, Ahnert Ute, Juni 2026)
+
+Termingenaue Rekonziliation aus dem Admin-Drilldown „Termine & Zeiten":
+
+- Summe **dokumentierte Termine (Leistung)** = **48,00 h**
+- + **Anfahrtszeit** (nur Termin Löscher 08.06.) = **0,25 h**
+- + **manueller Eintrag „Vertrieb"** (05.06.) = **1,00 h**
+- **= 49,25 h**
+
+Das stimmt exakt überein mit:
+- Admin „Erfasst" = **49,25 h**
+- Admin-Aufschlüsselung: HW 44,25 + AB 3,75 (= die 48,0 h Leistung, gesplittet) + Anfahrt 0,25 + Sonstiges 1,0 = **49,25 h**
+- Mitarbeitersicht „Gesamt" = **49h15 = 49,25 h**
+- km: 90,0 in allen Sichten.
+
+**Ergebnis:** Beide Sichten rechnen aus derselben Quelle; die Werte sind bis auf die Nachkommastelle deckungsgleich. **Kein Rechen-Drift.**
+
+**Minijob-Block (Ahnert, verifiziert):** Brutto **795,50 €** (= 45,5 h × 16 € + 3,75 h × 18 €) → **Auszahlbar gekappt auf 603,00 €** → **Übertrag Folgemonat 192,50 €**. Die 2026-Kappung (603 €) und der Carryover rechnen korrekt.
+
+### Die eine verbleibende Inkonsistenz (Anzeige, kein Rechenfehler)
+Die Mitarbeitersicht zeigt eine **„Leerfahrten"-Zeile**; die Admin-Aufschlüsselung kennt diese Kategorie **nicht**. Beide schließen den Betrag aus der Summe aus, daher stimmen die Totale trotzdem — aber die **Bucket-Taxonomie der beiden Sichten ist nicht identisch**. Zusätzlich summieren sich die Einzelpositionen der Mitarbeitersicht optisch nicht auf die dort angezeigte „Gesamt" (die Leerfahrt-Zeile ist enthalten in der Liste, aber nicht in der Summe).
+
+---
+
+## 3. No-Show — live belegte Uneinheitlichkeit
+
+Zwei reale Juni-2026-Fälle zeigen **zwei gegensätzliche Behandlungen desselben Sachverhalts**:
+
+| Fall | Erfassung | Wirkung auf Lohn | Bewertung |
+|---|---|---|---|
+| **Ahnert – „Leerfahrt"** | als Leerfahrt (15 min + 10 min Wartezeit, Tag „Kundenrechnung") | **aus der Summe ausgeschlossen** (Gesamt 49,25 h ohne sie) | **unterbezahlt** |
+| **Fiebag – Kraft, Dieter, 15.06. (13–15 Uhr)** | als **normaler dokumentierter Termin**: Leistung **2,0 h**, Anfahrt 0,33 h, 11,8 km | **volle 2,0 h** fließen in „Erfasst" (Lohn) | **überbezahlt** (~1,4 h zu viel), kein Kundenumsatz |
+
+**Kernproblem:** Der im Kalender gesetzte **No-Show-Status wirkt sich nicht auf die Lohnzeit aus**. Je nachdem, wie der Termin erfasst wird, wird der Mitarbeiter entweder zu wenig (Leerfahrt ausgeschlossen) oder zu viel (voller Termin) vergütet. Es fehlt **ein** definierter, konsistenter No-Show-Weg.
+
+### Best Practice (recherchiert)
+- **Mitarbeiter/Lohn:** Hinfahrt + zumutbare Wartezeit (bis ~30 min gilt als üblich) sind **vergütungspflichtige Arbeitszeit** und müssen bezahlt werden; km dokumentieren. **Nicht** die volle geplante Leistungsdauer.
+- **Kasse:** No-Show ist **nicht** abrechenbar (keine Leistung, keine Unterschrift).
+- **Kunde privat:** **Ausfallgebühr** nur mit entsprechender Klausel im Pflegevertrag und bei vom Kunden verschuldeter/zu später Absage.
+
+### Empfohlenes einheitliches Modell
+1. Eigener, klarer Status **„No-Show / Leerfahrt"** am Termin (nicht als voller Leistungstermin, nicht als stumme Leerfahrt).
+2. **Lohn-Gutschrift = reale Fahrtzeit + gekappte Wartezeit-Pauschale** (z. B. Fahrtzeit + max. 15–20 min), km pflicht-dokumentiert.
+3. Klassifikation als **nicht abrechenbar / Gemeinkosten** (bezahlte Zeit ohne Erlös → drückt korrekt die Produktivquote).
+4. **Kasse: nichts.** Optional **Ausfallgebühr an den Kunden** (Kundenrechnung) nur mit Vertragsklausel.
+5. **Identisch gebucht in beiden Sichten** (Mitarbeiter + Admin).
+
+---
+
+## 4. Nebenbefund: Fahrtzeit-Erfassung uneinheitlich
+
+- **Ahnert:** 90,0 km Anfahrt, aber nur **0,25 h** Anfahrtszeit erfasst → ~2 h reale Fahrt praktisch **nicht** als Arbeitszeit erfasst.
+- **Fiebag:** erfasst Fahrtzeiten regelmäßig (0,33 / 0,42 / 0,5 / 0,77 h …) bei 406 km.
+
+Fahrtzeit zwischen Einsätzen ist rechtlich Arbeitszeit. Die Erfassung ist **mitarbeiterabhängig uneinheitlich** → einige werden für Fahrtzeit bezahlt, andere kaum. **Grundsatzentscheidung nötig:** Wird Fahrtzeit real erfasst, pauschaliert oder separat vergütet? Und wie wird konsistente Erfassung sichergestellt?
+
+---
+
+## 5. Empfehlungen (priorisiert)
+
+1. **Einheitlicher No-Show-Status** mit fixer Lohn-Gutschriftregel (Abschnitt 3) — höchste Priorität, betrifft Lohnkorrektheit.
+2. **Fahrtzeit-Erfassung** vereinheitlichen/pauschalieren (Abschnitt 4).
+3. **Bucket-Taxonomie** beider Sichten angleichen (Leerfahrten) + Mitarbeitersicht-Summenlogik korrigieren.
+4. **#167 Invariant-Test** (Admin-Summe ≡ Σ Mitarbeitersichten) als dauerhaftes Anti-Drift-Netz bauen.
+
+---
+
+## Quellen (Best-Practice)
+- Fahrtzeit zwischen Einsätzen = Arbeitszeit (BAG 12.12.2012): [Springer Pflege](https://www.springerpflege.de/fahrtzeit-arbeitszeit-in-der-pflege/14237932), [Rechtsdepesche](https://www.rechtsdepesche.de/muessen-umkleide-und-fahrtzeiten-verguetet-werden/)
+- No-Show / Fehlfahrt, Wartezeit, private Ausfallgebühr statt Kasse: [Verbraucherzentrale](https://www.verbraucherzentrale.de/wissen/gesundheit-pflege/pflege-zu-hause/probleme-mit-der-rechnung-des-pflegedienstes-was-kann-ich-tun-74395), [Sonja Froese – Fehlanfahrten](https://www.sonjafroese.de/pflegeliteratur/posts/ampquotheute-nichtampquot---der-umgang-mit-verweigerung-absagen-und-fehlanfahrten-35.php)
+- Arbeitszeiterfassungspflicht (BAG 13.09.2022, Pflegedienst): [BAG](https://www.bundesarbeitsgericht.de/entscheidung/1-abr-22-21/)
+- Minijob-Grenze 2026 = 603 €: [Deutsche Rentenversicherung](https://www.deutsche-rentenversicherung.de/BadenWuerttemberg/DE/Presse/Pressemitteilungen/2025/251222_Minijob?nn=6a097e1bca84ce5471c1cc07)
