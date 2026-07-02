@@ -1200,6 +1200,162 @@ describe("TE-BIZ-19: CRUD-Ergänzungen (PUT, Urlaub, Offene Aufgaben)", () => {
   });
 });
 
+describe("TE-BIZ-20: Prospect-Erstberatungen lösen die Pausen-Warnung aus (Task #1573)", () => {
+  // Task #1572 hat `getOpenTasks` von INNER JOIN auf LEFT JOIN umgestellt, damit
+  // kundenlose Erstberatungs-/Interessenten-Termine (customer_id NULL,
+  // prospect_id gesetzt) in die ArbZG-Arbeitszeit-/Pausen-Berechnung einfließen.
+  // Dieser Test sichert genau diesen Regressionsfall ab: Ein Tag mit
+  // ausschließlich Prospect-Terminen >6h muss über die "Offene Aufgaben"-API
+  // eine fehlende Pause melden — und mit ausreichender Pause eben nicht.
+  const createdProspectIds: number[] = [];
+  const createdApptIds: number[] = [];
+  let erstberatungServiceId: number;
+  let priorAutoBreaksEnabled = true;
+
+  // `getOpenTasks` betrachtet nur die letzten 30 Tage inkl. heute. Die Termine
+  // müssen also in der jüngeren Vergangenheit liegen (nicht in der Zukunft wie
+  // die übrigen Prospect-Tests).
+  function getPastWeekday(daysAgo: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    // Rückwärts auf einen Werktag rollen, der kein Feiertag ist.
+    for (let i = 0; i < 14; i++) {
+      const dow = d.getDay();
+      const iso = d.toISOString().slice(0, 10);
+      if (dow !== 0 && dow !== 6 && !getVacationHolidayName(iso)) return iso;
+      d.setDate(d.getDate() - 1);
+    }
+    return d.toISOString().slice(0, 10);
+  }
+
+  async function createDocumentedProspectErstberatung(opts: {
+    nachname: string;
+    date: string;
+    scheduledStart: string;
+    dauer: number;
+  }): Promise<{ prospectId: number; apptId: number }> {
+    const prospectRes = await apiPost<any>("/api/admin/prospects", {
+      vorname: "Test",
+      nachname: opts.nachname,
+      telefon: "+49 30 12345678",
+      status: "neu",
+    });
+    expect(prospectRes.status).toBe(201);
+    const prospectId = prospectRes.data.id;
+    createdProspectIds.push(prospectId);
+
+    const apptRes = await apiPost<any>("/api/appointments/prospect-erstberatung", {
+      prospectId,
+      date: opts.date,
+      scheduledStart: opts.scheduledStart,
+      erstberatungDauer: opts.dauer,
+      assignedEmployeeId: auth.user.id,
+    });
+    expect(
+      apptRes.status,
+      `Prospect-Erstberatung anlegen fehlgeschlagen: ${JSON.stringify(apptRes.data)}`,
+    ).toBe(201);
+    const apptId = apptRes.data.appointment.id;
+    createdApptIds.push(apptId);
+
+    const docRes = await apiPost<any>(`/api/appointments/${apptId}/document`, {
+      performedByEmployeeId: auth.user.id,
+      actualStart: opts.scheduledStart,
+      travelOriginType: "home",
+      travelKilometers: 0,
+      services: [
+        { serviceId: erstberatungServiceId, actualDurationMinutes: opts.dauer, details: "Erstberatung Test" },
+      ],
+    });
+    expect(docRes.status, `Dokumentation fehlgeschlagen: ${JSON.stringify(docRes.data)}`).toBe(200);
+    expect(docRes.data.status).toBe("completed");
+
+    return { prospectId, apptId };
+  }
+
+  beforeAll(async () => {
+    const svcRes = await apiGet<any[]>("/api/services/all");
+    const erstberatungSvc = svcRes.data?.find?.((s: any) => s.code === "erstberatung");
+    expect(erstberatungSvc, "Erstberatungs-Service muss im Service-Katalog existieren").toBeDefined();
+    erstberatungServiceId = erstberatungSvc.id;
+
+    // Automatische ArbZG-Pausen deaktivieren: sonst legt die Dokumentation eines
+    // >6h-Termins sofort eine deckende Auto-Pause an und die "fehlende Pause"
+    // würde nie über die Offene-Aufgaben-API gemeldet. Wir wollen hier gerade
+    // den ungedeckten Zustand testen.
+    const settingsRes = await apiGet<any>("/api/settings");
+    priorAutoBreaksEnabled = settingsRes.data?.autoBreaksEnabled ?? true;
+    const patchRes = await apiPatch<any>("/api/settings", { autoBreaksEnabled: false });
+    expect(patchRes.status, `Auto-Pausen deaktivieren fehlgeschlagen: ${JSON.stringify(patchRes.data)}`).toBe(200);
+  });
+
+  afterAll(async () => {
+    try { await apiPatch<any>("/api/settings", { autoBreaksEnabled: priorAutoBreaksEnabled }); } catch {}
+    for (const id of createdApptIds) {
+      try { await apiDelete(`/api/appointments/${id}`); } catch {}
+    }
+    for (const id of createdProspectIds) {
+      try { await apiDelete(`/api/admin/prospects/${id}`); } catch {}
+    }
+  });
+
+  it("TE-BIZ-20.1 – Tag mit nur Prospect-Terminen >6h meldet fehlende Pause", async () => {
+    // >6h (405 min = 6h45m) → ArbZG verlangt 30 min Pause. Kein Pause-Eintrag →
+    // muss in daysWithMissingBreaks erscheinen.
+    const testDate = getPastWeekday(6);
+    await clearDateEntries(testDate);
+
+    await createDocumentedProspectErstberatung({
+      nachname: `ProspectBreak_${Date.now()}`,
+      date: testDate,
+      scheduledStart: "08:00",
+      dauer: 405,
+    });
+
+    const { status, data } = await apiGet<any>("/api/time-entries/open-tasks");
+    expect(status).toBe(200);
+    const day = (data.daysWithMissingBreaks as any[]).find((d) => d.date === testDate);
+    expect(
+      day,
+      `Tag mit >6h Prospect-Erstberatung (${testDate}) muss eine fehlende Pause melden`,
+    ).toBeDefined();
+    expect(day.totalWorkMinutes).toBeGreaterThanOrEqual(405);
+    expect(day.requiredBreakMinutes).toBe(30);
+    expect(day.documentedBreakMinutes).toBe(0);
+  });
+
+  it("TE-BIZ-20.2 – Gegenprobe: mit ausreichender Pause keine Warnung", async () => {
+    const testDate = getPastWeekday(13);
+    await clearDateEntries(testDate);
+
+    await createDocumentedProspectErstberatung({
+      nachname: `ProspectBreakOk_${Date.now()}`,
+      date: testDate,
+      scheduledStart: "08:00",
+      dauer: 405,
+    });
+
+    // 30 min Pause dokumentieren → Bedarf gedeckt.
+    const pauseRes = await apiPost<any>("/api/time-entries", {
+      entryDate: testDate,
+      entryType: "pause",
+      startTime: "14:45",
+      endTime: "15:15",
+      durationMinutes: 30,
+    });
+    expect(pauseRes.status, `Pause-Eintrag fehlgeschlagen: ${JSON.stringify(pauseRes.data)}`).toBe(201);
+    cleanupIds.push(pauseRes.data.id);
+
+    const { status, data } = await apiGet<any>("/api/time-entries/open-tasks");
+    expect(status).toBe(200);
+    const day = (data.daysWithMissingBreaks as any[]).find((d) => d.date === testDate);
+    expect(
+      day,
+      `Tag mit >6h Prospect-Erstberatung UND 30 min Pause (${testDate}) darf keine Warnung melden`,
+    ).toBeUndefined();
+  });
+});
+
 describe("TE-EDGE: Zeiterfassung Grenzfälle", () => {
   // Task #1496: Es gibt keinen manuellen Monatsabschluss mehr. Die Readiness
   // bleibt als reine Anzeige-Information erhalten — ohne Aktivität meldet sie
