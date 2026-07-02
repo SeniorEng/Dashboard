@@ -86,8 +86,11 @@ router.post("/:id/documents", asyncHandler("Kundendokument konnte nicht hochgela
     return;
   }
 
+  const skipDeactivation = req.body.skipDeactivation === true;
+  const batchId = typeof req.body.batchId === "string" ? req.body.batchId : undefined;
+  const batchLabel = typeof req.body.batchLabel === "string" ? req.body.batchLabel : undefined;
   const documentDate = typeof req.body.documentDate === "string" && req.body.documentDate ? req.body.documentDate : undefined;
-  const doc = await documentStorage.uploadCustomerDocument(result.data, user.id, { documentDate });
+  const doc = await documentStorage.uploadCustomerDocument(result.data, user.id, { skipDeactivation, batchId, batchLabel, documentDate });
   res.status(201).json(doc);
 }));
 

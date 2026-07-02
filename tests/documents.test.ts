@@ -5,6 +5,8 @@ import {
   apiPatch,
   apiPut,
   getAuthCookie,
+  createTestCustomer,
+  cleanupCustomer,
 } from "./test-utils";
 
 beforeAll(async () => {
@@ -181,5 +183,93 @@ describe("DOC-5: Dokumentenhistorie", () => {
       expect(res.status).toBe(200);
       expect(Array.isArray(res.data)).toBe(true);
     }
+  });
+});
+
+describe("DOC-7: Upload-Modus Version vs. weitere Seiten (Task #1578)", () => {
+  let customerId: number;
+  let docTypeId: number;
+  const createdTypeIds: number[] = [];
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    const ts = Date.now();
+    const rand = Math.random().toString(36).slice(2, 7);
+    const typeRes = await apiPost<any>("/api/admin/document-types", {
+      name: `DOC7_${ts}_${rand}`,
+      targetType: "customer",
+      context: "bestandskunde",
+      inputMethod: "upload",
+      isMandatory: false,
+      isActive: true,
+    });
+    expect(typeRes.status).toBe(201);
+    docTypeId = typeRes.data.id;
+    createdTypeIds.push(docTypeId);
+
+    const cust = await createTestCustomer({ nachname: `DOC7_${ts}_${rand}` });
+    customerId = cust.id;
+  });
+
+  afterAll(async () => {
+    await cleanupCustomer(customerId);
+    for (const id of createdTypeIds) {
+      try {
+        await apiPatch(`/api/admin/document-types/${id}`, { isActive: false });
+      } catch {}
+    }
+  });
+
+  async function upload(body: Record<string, unknown>) {
+    return apiPost<any>(`/api/customers/${customerId}/documents`, {
+      documentTypeId: docTypeId,
+      fileName: `page-${Math.random().toString(36).slice(2, 6)}.pdf`,
+      objectPath: `/test/doc7/${Math.random().toString(36).slice(2, 8)}.pdf`,
+      ...body,
+    });
+  }
+
+  function currentForType(docs: any[]) {
+    return docs.filter((d) => d.documentTypeId === docTypeId && d.isCurrent);
+  }
+
+  it("DOC-7.1 – Erst-Upload legt ein aktuelles Dokument mit batchId an", async () => {
+    const res = await upload({});
+    expect(res.status).toBe(201);
+    expect(typeof res.data.batchId).toBe("string");
+
+    const list = await apiGet<any[]>(`/api/customers/${customerId}/documents`);
+    expect(currentForType(list.data)).toHaveLength(1);
+  });
+
+  it("DOC-7.2 – 'Weitere Seiten' (skipDeactivation + gleiche batchId) hält beide aktuell", async () => {
+    const before = await apiGet<any[]>(`/api/customers/${customerId}/documents`);
+    const batchId = currentForType(before.data)[0].batchId;
+
+    const res = await upload({ skipDeactivation: true, batchId });
+    expect(res.status).toBe(201);
+    expect(res.data.batchId).toBe(batchId);
+
+    const after = await apiGet<any[]>(`/api/customers/${customerId}/documents`);
+    const current = currentForType(after.data);
+    expect(current).toHaveLength(2);
+    // Beide Seiten teilen sich denselben Batch → gelten als EIN Dokument
+    expect(new Set(current.map((d) => d.batchId))).toEqual(new Set([batchId]));
+  });
+
+  it("DOC-7.3 – 'Neue Version' (ohne skipDeactivation) archiviert den bisherigen Batch", async () => {
+    const before = await apiGet<any[]>(`/api/customers/${customerId}/documents`);
+    const oldBatchId = currentForType(before.data)[0].batchId;
+
+    const res = await upload({});
+    expect(res.status).toBe(201);
+    const newBatchId = res.data.batchId;
+    expect(newBatchId).not.toBe(oldBatchId);
+
+    const after = await apiGet<any[]>(`/api/customers/${customerId}/documents`);
+    const current = currentForType(after.data);
+    // Alter Batch (2 Seiten) ist archiviert, nur die neue Version bleibt aktuell
+    expect(current).toHaveLength(1);
+    expect(current[0].batchId).toBe(newBatchId);
   });
 });

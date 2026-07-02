@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import {
   Sheet,
@@ -59,6 +60,9 @@ interface CustomerDocumentData {
   reviewDueDate: string | null;
   isCurrent: boolean;
   notes: string | null;
+  batchId: string;
+  batchLabel: string | null;
+  documentDate: string | null;
   documentType: { id: number; name: string };
 }
 
@@ -80,6 +84,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const queryClient = useQueryClient();
   const [addSheetOpen, setAddSheetOpen] = useState(false);
   const [selectedTypeForUpload, setSelectedTypeForUpload] = useState<DocumentTypeWithTemplate | null>(null);
+  const [uploadMode, setUploadMode] = useState<"version" | "append">("version");
   const [digitalFlowSlug, setDigitalFlowSlug] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [expandedDocId, setExpandedDocId] = useState<number | null>(null);
@@ -169,7 +174,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null }) => {
+    mutationFn: async (data: { documentTypeId: number; fileName: string; objectPath: string; notes?: string | null; skipDeactivation?: boolean; batchId?: string; batchLabel?: string; documentDate?: string }) => {
       const result = await api.post(`/customers/${customerId}/documents`, data);
       return unwrapResult(result);
     },
@@ -178,10 +183,29 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     },
   });
 
+  const existingCurrentForType = selectedTypeForUpload
+    ? currentUploads
+        .filter(d => d.documentTypeId === selectedTypeForUpload.id)
+        .slice()
+        .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))
+    : [];
+  const existingCurrentDoc = existingCurrentForType[0];
+  const isAppendMode = uploadMode === "append" && !!existingCurrentDoc;
+
   const handleUpload = useCallback(async () => {
     if (selectedFiles.length === 0 || !selectedTypeForUpload) return;
 
-    for (const file of selectedFiles) {
+    const targetDoc = uploadMode === "append"
+      ? currentUploads
+          .filter(d => d.documentTypeId === selectedTypeForUpload.id)
+          .slice()
+          .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))[0]
+      : undefined;
+    const isAppend = !!targetDoc;
+    const uploadBatchId = isAppend ? targetDoc!.batchId : crypto.randomUUID();
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
       const uploadResult = await uploadFile(file);
       if (!uploadResult) return;
 
@@ -190,22 +214,28 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         fileName: file.name,
         objectPath: uploadResult.objectPath,
         notes: notes || null,
+        skipDeactivation: isAppend ? true : i > 0,
+        batchId: uploadBatchId,
+        batchLabel: isAppend ? (targetDoc!.batchLabel ?? undefined) : undefined,
+        documentDate: isAppend ? (targetDoc!.documentDate ?? undefined) : undefined,
       });
     }
 
     invalidateRelated(queryClient, "customer-documents");
     const count = selectedFiles.length;
     setSelectedTypeForUpload(null);
+    setUploadMode("version");
     setNotes("");
     clearAllFiles();
     setAddSheetOpen(false);
-    toast({ title: count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
-  }, [selectedFiles, selectedTypeForUpload, notes, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
+    toast({ title: isAppend ? (count > 1 ? `${count} Seiten hinzugefügt` : "Seite hinzugefügt") : (count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt") });
+  }, [selectedFiles, selectedTypeForUpload, uploadMode, currentUploads, notes, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
 
   const isSubmitting = isUploading || saveMutation.isPending;
 
   const openAddSheet = () => {
     setSelectedTypeForUpload(null);
+    setUploadMode("version");
     clearAllFiles();
     setNotes("");
     setAddSheetOpen(true);
@@ -213,6 +243,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
 
   const handleSelectTypeForUpload = (dt: DocumentTypeWithTemplate) => {
     setSelectedTypeForUpload(dt);
+    setUploadMode("version");
     clearAllFiles();
     setNotes("");
   };
@@ -493,7 +524,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 variant="ghost"
                 size="sm"
                 className="text-gray-500 -ml-2"
-                onClick={() => setSelectedTypeForUpload(null)}
+                onClick={() => { setSelectedTypeForUpload(null); setUploadMode("version"); }}
                 data-testid="button-back-to-types"
               >
                 ← Zurück
@@ -517,6 +548,31 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                   <Upload className={iconSize.sm} />
                   Datei hochladen
                 </p>
+
+                {existingCurrentDoc && (
+                  <div className="mb-3 space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3" data-testid="upload-mode-choice">
+                    <p className="text-xs font-medium text-gray-700">
+                      Für „{selectedTypeForUpload.name}“ gibt es bereits ein Dokument. Was möchten Sie tun?
+                    </p>
+                    <RadioGroup value={uploadMode} onValueChange={(v) => setUploadMode(v as "version" | "append")}>
+                      <div className="flex items-start gap-2">
+                        <RadioGroupItem value="version" id="upload-mode-version" className="mt-0.5" data-testid="radio-upload-mode-version" />
+                        <Label htmlFor="upload-mode-version" className="font-normal cursor-pointer leading-snug">
+                          <span className="font-medium">Neue Version</span> — ersetzt das bisherige Dokument (das alte wandert ins Archiv)
+                        </Label>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <RadioGroupItem value="append" id="upload-mode-append" className="mt-0.5" data-testid="radio-upload-mode-append" />
+                        <Label htmlFor="upload-mode-append" className="font-normal cursor-pointer leading-snug">
+                          <span className="font-medium">Weitere Seiten</span> — zum bestehenden Dokument hinzufügen
+                          {existingCurrentDoc.documentDate
+                            ? ` (Dok. vom ${formatDateForDisplay(existingCurrentDoc.documentDate)})`
+                            : ""}
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                )}
 
                 <div className="space-y-3">
                   <div className="flex gap-2">
@@ -610,7 +666,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                         <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hochgeladen...</>
                       ) : selectedFiles.length > 1 ? `${selectedFiles.length} Dateien hochladen` : "Hochladen"}
                     </Button>
-                    <Button variant="outline" className="min-h-[44px]" onClick={() => { setSelectedTypeForUpload(null); clearAllFiles(); }}>
+                    <Button variant="outline" className="min-h-[44px]" onClick={() => { setSelectedTypeForUpload(null); setUploadMode("version"); clearAllFiles(); }}>
                       Abbrechen
                     </Button>
                   </div>

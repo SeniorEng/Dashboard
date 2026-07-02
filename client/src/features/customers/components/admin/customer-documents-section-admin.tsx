@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { iconSize } from "@/design-system";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import {
@@ -107,6 +108,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isDigitalFlowOpen, setIsDigitalFlowOpen] = useState(false);
   const [selectedDocTypeId, setSelectedDocTypeId] = useState("");
+  const [uploadMode, setUploadMode] = useState<"version" | "append">("version");
   const [batchLabel, setBatchLabel] = useState("");
   const [notes, setNotes] = useState("");
   const [documentDate, setDocumentDate] = useState("");
@@ -196,7 +198,11 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const handleUpload = useCallback(async () => {
     if (selectedFiles.length === 0 || !selectedDocTypeId) return;
 
-    const uploadBatchId = crypto.randomUUID();
+    const targetBatch = groupedDocs
+      ?.find(g => g.documentType.id === parseInt(selectedDocTypeId))
+      ?.currentBatches.slice().sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))[0];
+    const isAppend = uploadMode === "append" && !!targetBatch;
+    const uploadBatchId = isAppend ? targetBatch!.batchId : crypto.randomUUID();
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
@@ -208,10 +214,10 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
         fileName: file.name,
         objectPath: uploadResult.objectPath,
         notes: notes || null,
-        skipDeactivation: i > 0,
+        skipDeactivation: isAppend ? true : i > 0,
         batchId: uploadBatchId,
-        batchLabel: batchLabel || undefined,
-        documentDate: documentDate || undefined,
+        batchLabel: isAppend ? (targetBatch!.batchLabel ?? undefined) : (batchLabel || undefined),
+        documentDate: isAppend ? (targetBatch!.documentDate ?? undefined) : (documentDate || undefined),
       });
     }
 
@@ -219,12 +225,13 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
     const count = selectedFiles.length;
     setIsUploadOpen(false);
     setSelectedDocTypeId("");
+    setUploadMode("version");
     setBatchLabel("");
     setNotes("");
     setDocumentDate("");
     clearAllFiles();
-    toast({ title: count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt" });
-  }, [selectedFiles, selectedDocTypeId, notes, batchLabel, documentDate, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
+    toast({ title: isAppend ? (count > 1 ? `${count} Seiten hinzugefügt` : "Seite hinzugefügt") : (count > 1 ? `${count} Dokumente hinzugefügt` : "Dokument hinzugefügt") });
+  }, [selectedFiles, selectedDocTypeId, uploadMode, groupedDocs, notes, batchLabel, documentDate, uploadFile, saveMutation, queryClient, customerId, toast, clearAllFiles]);
 
   const toggleType = (typeId: number) => {
     setExpandedTypes(prev => {
@@ -241,6 +248,14 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const availableDocTypes = (docTypes?.filter(dt => dt.isActive) || []).sort((a, b) => a.name.localeCompare(b.name, "de"));
   const isSubmitting = isUploading || saveMutation.isPending;
   const isDeleting = deleteFileMutation.isPending || deleteBatchMutation.isPending;
+
+  const selectedGroup = selectedDocTypeId
+    ? groupedDocs?.find(g => g.documentType.id === parseInt(selectedDocTypeId))
+    : undefined;
+  const existingCurrentBatch = (selectedGroup?.currentBatches ?? [])
+    .slice()
+    .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))[0];
+  const isAppendMode = uploadMode === "append" && !!existingCurrentBatch;
 
   const getBestReviewStatus = (batches: BatchData[]) => {
     let worstStatus: "ok" | "warning" | "overdue" | null = null;
@@ -276,7 +291,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setIsUploadOpen(!isUploadOpen)}
+            onClick={() => { if (isUploadOpen) setUploadMode("version"); setIsUploadOpen(!isUploadOpen); }}
             data-testid="button-upload-customer-document"
           >
             <Upload className={`${iconSize.sm} mr-1`} />
@@ -291,7 +306,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Dokumententyp *</Label>
-              <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
+              <Select value={selectedDocTypeId} onValueChange={(v) => { setSelectedDocTypeId(v); setUploadMode("version"); }}>
                 <SelectTrigger data-testid="select-customer-doc-type">
                   <SelectValue placeholder="Typ auswählen..." />
                 </SelectTrigger>
@@ -312,30 +327,60 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>Bezeichnung (optional)</Label>
-              <Input
-                value={batchLabel}
-                onChange={(e) => setBatchLabel(e.target.value)}
-                placeholder="z.B. Pflegevertrag, Vollmacht"
-                className="text-base"
-                data-testid="input-customer-batch-label"
-              />
-              <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
-            </div>
+            {!isAppendMode && (
+              <div className="space-y-2">
+                <Label>Bezeichnung (optional)</Label>
+                <Input
+                  value={batchLabel}
+                  onChange={(e) => setBatchLabel(e.target.value)}
+                  placeholder="z.B. Pflegevertrag, Vollmacht"
+                  className="text-base"
+                  data-testid="input-customer-batch-label"
+                />
+                <p className="text-[11px] text-gray-500">Hilft beim Zuordnen, wenn es mehrere Uploads gibt</p>
+              </div>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Dokument vom (optional)</Label>
-              <Input
-                type="date"
-                value={documentDate}
-                onChange={(e) => setDocumentDate(e.target.value)}
-                className="text-base"
-                data-testid="input-customer-document-date"
-              />
+          {existingCurrentBatch && (
+            <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3" data-testid="customer-upload-mode-choice">
+              <p className="text-xs font-medium text-gray-700">
+                Für „{selectedGroup?.documentType.name}“ gibt es bereits ein Dokument. Was möchten Sie tun?
+              </p>
+              <RadioGroup value={uploadMode} onValueChange={(v) => setUploadMode(v as "version" | "append")}>
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem value="version" id="customer-upload-mode-version" className="mt-0.5" data-testid="radio-customer-upload-mode-version" />
+                  <Label htmlFor="customer-upload-mode-version" className="font-normal cursor-pointer leading-snug">
+                    <span className="font-medium">Neue Version</span> — ersetzt das bisherige Dokument (das alte wandert ins Archiv)
+                  </Label>
+                </div>
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem value="append" id="customer-upload-mode-append" className="mt-0.5" data-testid="radio-customer-upload-mode-append" />
+                  <Label htmlFor="customer-upload-mode-append" className="font-normal cursor-pointer leading-snug">
+                    <span className="font-medium">Weitere Seiten</span> — zum Dokument vom{" "}
+                    {existingCurrentBatch.documentDate
+                      ? formatDateForDisplay(existingCurrentBatch.documentDate)
+                      : formatDateForDisplay(existingCurrentBatch.uploadedAt.split("T")[0])}{" "}
+                    hinzufügen
+                  </Label>
+                </div>
+              </RadioGroup>
             </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {!isAppendMode && (
+              <div className="space-y-2">
+                <Label>Dokument vom (optional)</Label>
+                <Input
+                  type="date"
+                  value={documentDate}
+                  onChange={(e) => setDocumentDate(e.target.value)}
+                  className="text-base"
+                  data-testid="input-customer-document-date"
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Notiz (optional)</Label>
               <Input
@@ -445,7 +490,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                 <><Loader2 className={`mr-2 ${iconSize.sm} animate-spin`} />Wird hinzugefügt...</>
               ) : selectedFiles.length > 1 ? `${selectedFiles.length} Dateien hinzufügen` : "Hinzufügen"}
             </Button>
-            <Button variant="outline" onClick={() => { setIsUploadOpen(false); clearAllFiles(); setBatchLabel(""); setNotes(""); setDocumentDate(""); }}>
+            <Button variant="outline" onClick={() => { setIsUploadOpen(false); clearAllFiles(); setUploadMode("version"); setBatchLabel(""); setNotes(""); setDocumentDate(""); }}>
               Abbrechen
             </Button>
           </div>
