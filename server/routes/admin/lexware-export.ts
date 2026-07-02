@@ -18,6 +18,7 @@ import { asyncHandler } from "../../lib/errors";
 import { requireWageDataAccess } from "../../middleware/auth";
 import { completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
 import { getEmployeePayrollRows } from "../../storage/time-tracking/payroll-hours";
+import { resolveAppointmentPartyName } from "@shared/domain/appointment-party-name";
 
 const router = Router();
 
@@ -95,15 +96,22 @@ router.get("/hours-overview/unsigned-appointments", requireWageDataAccess, async
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
+  // Task #1571 — LEFT JOIN statt INNER JOIN, damit kundenlose Interessenten-/
+  // Erstberatungstermine (customer_id NULL, prospect_id gesetzt) nicht still
+  // aus der Liste fallen; Namen werden über die geteilte SSoT
+  // resolveAppointmentPartyName aufgelöst ("Interessent: <Name>").
   const result = await db.execute(sql`
     SELECT
       a.id as id,
       a.date as date,
       a.scheduled_start as scheduled_start,
       c.name as customer_name,
+      p.vorname as prospect_vorname,
+      p.nachname as prospect_nachname,
       COALESCE(svc_minutes.minutes, 0) as minutes
     FROM appointments a
-    JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN prospects p ON p.id = a.prospect_id
     ${unsignedServiceMinutesLateralRaw('a', 'svc_minutes')}
     WHERE ${completedButUnsignedSqlRaw('a')}
       AND a.deleted_at IS NULL
@@ -113,13 +121,19 @@ router.get("/hours-overview/unsigned-appointments", requireWageDataAccess, async
     ORDER BY a.date ASC, a.scheduled_start ASC NULLS LAST
   `);
 
-  const appointments: UnsignedAppointmentRow[] = (result.rows as any[]).map(row => ({
-    id: Number(row.id),
-    date: typeof row.date === "string" ? row.date : new Date(row.date).toISOString().slice(0, 10),
-    scheduledStart: row.scheduled_start ?? null,
-    customerName: row.customer_name ?? "",
-    minutes: Number(row.minutes) || 0,
-  }));
+  const appointments: UnsignedAppointmentRow[] = (result.rows as any[]).map(row => {
+    const prospectName = [row.prospect_vorname, row.prospect_nachname]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return {
+      id: Number(row.id),
+      date: typeof row.date === "string" ? row.date : new Date(row.date).toISOString().slice(0, 10),
+      scheduledStart: row.scheduled_start ?? null,
+      customerName: resolveAppointmentPartyName(row.customer_name, prospectName || null),
+      minutes: Number(row.minutes) || 0,
+    };
+  });
 
   res.json({ appointments, year, month, employeeId });
 }));

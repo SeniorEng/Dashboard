@@ -17,34 +17,19 @@ import { completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw, documente
 import { upsertHoursAccountSchema, HOURS_ACCOUNT_CATEGORIES } from "@shared/schema/time-tracking";
 import { getEmployeePayrollRows, type PayrollEmployeeRow } from "../../storage/time-tracking/payroll-hours";
 import { computeAccountsForMonth, upsertHoursAccount, OpeningBalanceLockedError, type AccountCell } from "../../storage/time-tracking/payroll-accounts";
+import { resolveAppointmentPartyName } from "@shared/domain/appointment-party-name";
 
 const router = Router();
 
 /**
- * Task #1569 — Platzhalter für Termine, deren `customer_id` NULL ist oder auf
- * keinen (noch existierenden) Kundendatensatz zeigt. Früher filterte ein
- * INNER JOIN auf `customers` solche Termine still aus der Detailliste heraus,
- * während der Überblicks-Zähler sie mitzählte („Anzeige-gegen-Anzeige"-Drift).
- * Jetzt LEFT JOIN + dieser Platzhalter, damit Zähler und Liste deckungsgleich
- * bleiben und kein Termin stillschweigend verschwindet.
+ * Task #1569/#1570/#1571 — Termine ohne Kundenzuordnung sind fast immer
+ * Interessenten-/Erstberatungstermine (`customer_id` NULL, `prospect_id`
+ * gesetzt). Statt eines nichtssagenden Platzhalters wird überall der
+ * Interessenten-Name ("Interessent: <Name>") angezeigt. Die Auflöse-Logik lebt
+ * jetzt als geteilte SSoT in `@shared/domain/appointment-party-name`
+ * (`resolveAppointmentPartyName`), damit alle Termin-Listen (Mitarbeiter-
+ * abrechnung, Lexware-/Payroll-Export …) identisch auflösen.
  */
-const UNRESOLVED_CUSTOMER_LABEL = "Kein Kunde zugeordnet";
-
-/**
- * Task #1570 — Termine ohne Kundenzuordnung sind fast immer Interessenten-/
- * Erstberatungstermine (`customer_id` NULL, `prospect_id` gesetzt). Statt des
- * nichtssagenden Platzhalters zeigen Detailliste und Drill-down dann den
- * Interessenten-Namen ("Interessent: <Name>"). Fällt weiter auf den Platzhalter
- * zurück, wenn weder Kunde noch Interessent auflösbar ist.
- */
-function resolveAppointmentPartyName(
-  customerName: string | null | undefined,
-  prospectName: string | null | undefined,
-): string {
-  if (customerName) return customerName;
-  if (prospectName) return `Interessent: ${prospectName}`;
-  return UNRESOLVED_CUSTOMER_LABEL;
-}
 
 function parseYearMonth(req: Request, res: Response): { year: number; month: number } | null {
   const year = parseInt(req.query.year as string);
