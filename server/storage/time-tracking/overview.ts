@@ -250,7 +250,12 @@ export async function getOpenTasks(userId: number): Promise<OpenTasksSummary> {
       status: appointments.status,
       durationPromised: appointments.durationPromised,
     }, db)
-      .innerJoin(customers, eq(appointments.customerId, customers.id))
+      // LEFT JOIN, damit kundenlose Erstberatungs-/Interessententermine
+      // (customer_id NULL, prospect_id gesetzt) in die Arbeitszeit-/Pausen-
+      // Berechnung einfließen. Die Dauer kommt aus `appointments`, nicht aus
+      // `customers`; der Visibility-Filter greift für solche Termine über
+      // `assignedEmployeeId`.
+      .leftJoin(customers, eq(appointments.customerId, customers.id))
       .where(
         and(
           employeeVisibleAppointmentsFilter(userId),
