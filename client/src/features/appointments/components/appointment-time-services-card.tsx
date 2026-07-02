@@ -4,6 +4,8 @@ import { Calendar, Car } from "lucide-react";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { formatDuration } from "@shared/types";
 import { formatDateForDisplay } from "@shared/utils/datetime";
+import { computeNoShowWage } from "@shared/domain/no-show-wage";
+import { formatKm } from "@/lib/utils";
 
 type AppointmentService = {
   id: number;
@@ -28,6 +30,19 @@ export function AppointmentTimeServicesCard({ appointment, services, isCompleted
   const hasAnyDocumentedService = services.some(
     (s) => s.actualDurationMinutes !== null && s.actualDurationMinutes > 0,
   );
+
+  // Task #167 — Leerfahrt (customer_no_show): keine Leistungsstunden, sondern
+  // bezahlte Zeit = origin-gated Fahrtzeit + gedeckelte Wartezeit + Anfahrt-km
+  // (SSoT computeNoShowWage). NICHT die geplante Dauer als "Gesamt" anzeigen.
+  const isNoShow = appointment.status === "customer_no_show";
+  const noShowWage = isNoShow
+    ? computeNoShowWage({
+        travelOriginType: appointment.travelOriginType,
+        travelMinutes: appointment.travelMinutes,
+        noShowWaitMinutes: appointment.noShowWaitMinutes,
+        noShowKilometers: appointment.noShowKilometers,
+      })
+    : null;
 
   return (
     <SectionCard
@@ -128,7 +143,32 @@ export function AppointmentTimeServicesCard({ appointment, services, isCompleted
           </div>
         )}
 
-        {(hasAnyService || (isCompleted && hasAnyDocumentedService)) && (
+        {isNoShow && noShowWage && (
+          <div className="py-2 border-t border-border" data-testid="section-no-show-leerfahrt">
+            <div className="flex items-center gap-2 mb-2 text-amber-700">
+              <Car className={iconSize.sm} />
+              <span className="font-medium">Leerfahrt (Kunde nicht angetroffen)</span>
+            </div>
+            <div className="flex items-center justify-between py-1 text-sm">
+              <span className="text-muted-foreground">Fahrtzeit</span>
+              <span className="font-medium" data-testid="text-no-show-travel-minutes">{formatDuration(noShowWage.travelMinutes)}</span>
+            </div>
+            <div className="flex items-center justify-between py-1 text-sm">
+              <span className="text-muted-foreground">Wartezeit</span>
+              <span className="font-medium" data-testid="text-no-show-wait-minutes">{formatDuration(noShowWage.waitMinutes)}</span>
+            </div>
+            <div className="flex items-center justify-between py-1 text-sm">
+              <span className="text-muted-foreground">Anfahrt-km</span>
+              <span className="font-medium" data-testid="text-no-show-km">{formatKm(noShowWage.kilometers)} km</span>
+            </div>
+            <div className="flex items-center justify-between py-2 pt-2 border-t border-border">
+              <span className="font-medium">Bezahlte Zeit</span>
+              <span className="font-semibold text-amber-700" data-testid="text-no-show-paid-minutes">{formatDuration(noShowWage.paidMinutes)}</span>
+            </div>
+          </div>
+        )}
+
+        {!isNoShow && (hasAnyService || (isCompleted && hasAnyDocumentedService)) && (
           <>
             {isCompleted && hasAnyDocumentedService && (
               <div className="hidden sm:flex items-center justify-between pt-2 pb-1">

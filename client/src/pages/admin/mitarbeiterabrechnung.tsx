@@ -151,6 +151,7 @@ interface DrillRow extends OverviewRow {
   stundenErstberatung: number;
   stundenAnfahrt: number;
   stundenSonstiges: number;
+  stundenLeerfahrten: number;
   stundenFeiertage: number;
   tageUrlaub: number;
   tageKrankheit: number;
@@ -160,6 +161,7 @@ interface DrillRow extends OverviewRow {
   kilometerAnfahrt: number;
   kilometerKunden: number;
   kilometerSonstige: number;
+  kilometerLeerfahrten: number;
   dailySollHours: number;
 }
 interface DrillData {
@@ -918,6 +920,7 @@ function DrillAufschluesselung({ row }: { row: DrillRow | null }) {
     { label: "Alltagsbegleitung", value: fmtHours(row.stundenAlltagsbegleitung) },
     { label: "Erstberatung", value: fmtHours(row.stundenErstberatung) },
     { label: "Anfahrtszeit", value: fmtHours(row.stundenAnfahrt) },
+    { label: "Leerfahrten", value: fmtHours(row.stundenLeerfahrten) },
     { label: "Sonstiges (Büro/Vertrieb)", value: fmtHours(row.stundenSonstiges) },
     { label: "Feiertage", value: fmtHours(row.stundenFeiertage) },
     { label: `Urlaub (${row.tageUrlaub} Tage)`, value: fmtHours(row.urlaubStunden) },
@@ -926,6 +929,7 @@ function DrillAufschluesselung({ row }: { row: DrillRow | null }) {
   const kmLines: { label: string; value: string }[] = [
     { label: "Anfahrt-km", value: fmtKm(row.kilometerAnfahrt) },
     { label: "Kunden-km", value: fmtKm(row.kilometerKunden) },
+    { label: "Leerfahrten-km", value: fmtKm(row.kilometerLeerfahrten) },
     { label: "Sonstige km", value: fmtKm(row.kilometerSonstige) },
     { label: "Summe km", value: fmtKm(row.kilometer) },
   ];

@@ -7,6 +7,7 @@ import { customers } from "./customers";
 import { prospects } from "./prospects";
 import { users } from "./users";
 import { services } from "./services";
+import { NO_SHOW_WAIT_CAP_MINUTES } from "../domain/no-show-wage";
 
 // ============================================
 // APPOINTMENT SERIES (recurring appointment rules)
@@ -326,13 +327,23 @@ export const documentNoShowSchema = z.object({
   travelMinutes: z.number().min(0).max(480).nullable().optional(),
   noShowReason: z.enum(NO_SHOW_REASONS),
   noShowReasonText: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
-  noShowWaitMinutes: z.number().int().min(0, "Wartezeit darf nicht negativ sein").max(240, "Maximal 240 Minuten Wartezeit").default(10),
+  noShowWaitMinutes: z.number().int().min(0, "Wartezeit darf nicht negativ sein").max(NO_SHOW_WAIT_CAP_MINUTES, `Maximal ${NO_SHOW_WAIT_CAP_MINUTES} Minuten Wartezeit`).default(10),
   noShowNotes: z.string().max(255, "Maximal 255 Zeichen").optional().nullable(),
   // Privatrechnung erzeugen oder unterdrücken? Bei Suppression ist eine
   // Begründung Pflicht (≥10 Zeichen), wird ins Audit-Log geschrieben.
   noShowChargeSuppressed: z.boolean().default(false),
   noShowChargeSuppressionReason: z.string().max(500).optional().nullable(),
 }).superRefine((data, ctx) => {
+  // Task #167 — spiegelt documentAppointmentSchema: kommt der MA von einem
+  // anderen Termin (origin='appointment'), ist die Fahrzeit Pflicht, sonst
+  // wäre die origin-gated Leerfahrt-Lohnzeit stillschweigend 0.
+  if (data.travelOriginType === "appointment" && (data.travelMinutes === null || data.travelMinutes === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Fahrzeit ist erforderlich wenn Sie von einem anderen Termin kommen",
+      path: ["travelMinutes"],
+    });
+  }
   if (data.noShowReason === "sonstiges" && !(data.noShowReasonText && data.noShowReasonText.trim().length > 0)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

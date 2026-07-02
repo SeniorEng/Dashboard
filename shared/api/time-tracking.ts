@@ -138,13 +138,18 @@ export interface TimeOverviewData {
    */
   otherEntries: Record<string, EmployeeTimeEntry[]>;
   /**
-   * Task #485 — Leerfahrten-Kachel: aggregierte Kennzahlen für Termine mit
+   * Task #485/#167 — Leerfahrten-Kachel: aggregierte Kennzahlen für Termine mit
    * Status `customer_no_show` (Kunde nicht angetroffen / abgesagt). Werden
-   * separat von den echten Service-Stunden ausgewiesen.
+   * separat von den echten Service-Stunden ausgewiesen. Der Lohn folgt der
+   * SSoT `computeNoShowWage`: `wageMinutes` = origin-gated Fahrtzeit +
+   * gedeckelte Wartezeit (ersetzt die frühere `plannedMinutes`-Semantik auf
+   * Basis der geplanten Dauer). `travelMinutes`/`waitMinutes` bleiben zur
+   * Transparenz erhalten.
    */
   leerfahrten?: {
     count: number;
-    plannedMinutes: number;
+    wageMinutes: number;
+    travelMinutes: number;
     waitMinutes: number;
     kilometers: number;
   };

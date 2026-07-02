@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Layout } from "@/components/layout";
@@ -8,13 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronLeft, Loader2, AlertCircle, Check, UserX } from "lucide-react";
+import { ChevronLeft, Loader2, AlertCircle, Check, UserX, Home, MapPin } from "lucide-react";
 import { iconSize, componentStyles } from "@/design-system";
 import { useAppointment } from "@/features/appointments/hooks/use-appointments";
-import { useDocumentNoShow } from "@/features/appointments/hooks/use-appointment-mutations";
+import { useDocumentNoShow, useTravelSuggestion } from "@/features/appointments/hooks/use-appointment-mutations";
 import { useToast } from "@/hooks/use-toast";
 import { api, unwrapResult } from "@/lib/api/client";
 import { NO_SHOW_REASONS, NO_SHOW_REASON_LABELS, type NoShowReason } from "@shared/schema";
+import { NO_SHOW_WAIT_CAP_MINUTES } from "@shared/domain/no-show-wage";
 import type { CancellationPolicyType, NoShowCharge } from "@shared/domain/cancellation-policy";
 import { formatEuroDE } from "@shared/utils/money";
 import { formatTimeHHMM } from "@shared/utils/datetime";
@@ -34,6 +35,7 @@ export default function DocumentAppointmentNoShow() {
 
   const { data: appointment, isLoading } = useAppointment(id);
   const noShowMutation = useDocumentNoShow(id);
+  const { data: travelSuggestion } = useTravelSuggestion(id);
 
   // Cancellation-Policy des Kunden (nur Selbstzahler werden privat berechnet,
   // aber für die Vorschau zeigen wir die Policy in beiden Fällen).
@@ -50,9 +52,30 @@ export default function DocumentAppointmentNoShow() {
   const [reasonText, setReasonText] = useState("");
   const [waitMinutes, setWaitMinutes] = useState<number>(10);
   const [travelKilometers, setTravelKilometers] = useState<number>(0);
+  const [travelOriginType, setTravelOriginType] = useState<"home" | "appointment">("home");
+  const [travelMinutes, setTravelMinutes] = useState<number>(0);
+  const [travelFromAppointmentId, setTravelFromAppointmentId] = useState<number | null>(null);
+  const [manualOriginChange, setManualOriginChange] = useState(false);
   const [notes, setNotes] = useState("");
   const [chargeMode, setChargeMode] = useState<"charge" | "suppress">("charge");
   const [suppressionReason, setSuppressionReason] = useState("");
+
+  // Anfahrt-Herkunft (home/appointment) analog zur regulären Dokumentation:
+  // Fahrzeit wird für die Leerfahrten-Vergütung NUR bezahlt, wenn die Anfahrt
+  // vom vorherigen Termin kam (SSoT computeNoShowWage). Prefill aus der
+  // Routen-Vorschlagslogik, solange der Nutzer nicht manuell umgestellt hat.
+  useEffect(() => {
+    if (travelSuggestion && !manualOriginChange) {
+      setTravelOriginType(travelSuggestion.suggestedOrigin);
+      setTravelFromAppointmentId(travelSuggestion.previousAppointmentId);
+      if (travelSuggestion.suggestedKilometers != null) {
+        setTravelKilometers(travelSuggestion.suggestedKilometers);
+      }
+      if (travelSuggestion.suggestedMinutes != null) {
+        setTravelMinutes(travelSuggestion.suggestedMinutes);
+      }
+    }
+  }, [travelSuggestion, manualOriginChange]);
 
   // Vorschau wird SERVER-SEITIG berechnet — gleiche Quelle wie die spätere
   // Buchung & Rechnung (verhindert Preview-vs-Booking-Drift, da der Server
@@ -123,10 +146,10 @@ export default function DocumentAppointmentNoShow() {
       await noShowMutation.mutateAsync({
         performedByEmployeeId: appointment.assignedEmployeeId ?? null,
         actualStart,
-        travelOriginType: "home",
-        travelFromAppointmentId: null,
+        travelOriginType,
+        travelFromAppointmentId: travelOriginType === "appointment" ? travelFromAppointmentId : null,
         travelKilometers,
-        travelMinutes: null,
+        travelMinutes: travelOriginType === "appointment" ? travelMinutes : null,
         noShowReason: reason,
         noShowReasonText: reasonTextRequired ? reasonText.trim() : null,
         noShowWaitMinutes: waitMinutes,
@@ -169,8 +192,9 @@ export default function DocumentAppointmentNoShow() {
               Was ist passiert?
             </CardTitle>
             <CardDescription>
-              Sie werden für diesen Termin voll bezahlt (geplante Dauer + Anfahrt).
-              §45b-Budget des Kunden wird nicht belastet.
+              Sie werden für die Leerfahrt vergütet: bezahlte Fahrzeit (nur bei
+              Anfahrt vom vorherigen Termin) plus bis zu {NO_SHOW_WAIT_CAP_MINUTES}{" "}
+              Minuten Wartezeit. §45b-Budget des Kunden wird nicht belastet.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -212,19 +236,81 @@ export default function DocumentAppointmentNoShow() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
+              <Label>Woher sind Sie gefahren?</Label>
+              <RadioGroup
+                value={travelOriginType}
+                onValueChange={(v) => {
+                  setManualOriginChange(true);
+                  setTravelOriginType(v as "home" | "appointment");
+                  if (v === "home") {
+                    setTravelFromAppointmentId(null);
+                  } else {
+                    setTravelFromAppointmentId(travelSuggestion?.previousAppointmentId ?? null);
+                  }
+                }}
+                className="space-y-2"
+              >
+                <div className={`flex items-center space-x-3 p-3 rounded-lg border ${travelOriginType === "home" ? "border-amber-500 bg-amber-50" : "border-border"}`}>
+                  <RadioGroupItem value="home" id="noshow-origin-home" data-testid="radio-noshow-origin-home" />
+                  <Label htmlFor="noshow-origin-home" className="flex items-center gap-2 cursor-pointer flex-1 font-medium">
+                    <Home className={`${iconSize.sm} text-muted-foreground`} />
+                    Von zu Hause
+                  </Label>
+                </div>
+                <div className={`flex items-center space-x-3 p-3 rounded-lg border ${travelOriginType === "appointment" ? "border-amber-500 bg-amber-50" : "border-border"}`}>
+                  <RadioGroupItem value="appointment" id="noshow-origin-appointment" data-testid="radio-noshow-origin-appointment" />
+                  <Label htmlFor="noshow-origin-appointment" className="flex items-center gap-2 cursor-pointer flex-1 font-medium">
+                    <MapPin className={`${iconSize.sm} text-muted-foreground`} />
+                    <div>
+                      <span>Vom vorherigen Kunden</span>
+                      {travelSuggestion?.previousCustomerName && (
+                        <p className="text-xs text-muted-foreground font-normal">
+                          {travelSuggestion.previousCustomerName}
+                        </p>
+                      )}
+                    </div>
+                  </Label>
+                </div>
+              </RadioGroup>
+              <p className="text-xs text-muted-foreground">
+                Fahrzeit wird nur bei Anfahrt vom vorherigen Termin vergütet.
+              </p>
+            </div>
+            {travelOriginType === "appointment" && (
+              <div className="space-y-2">
+                <Label htmlFor="noshow-travel-minutes">Fahrzeit (Minuten)</Label>
+                <div className="relative">
+                  <Input
+                    id="noshow-travel-minutes"
+                    type="number"
+                    min="0"
+                    value={travelMinutes || ""}
+                    onChange={(e) => setTravelMinutes(Math.max(0, parseInt(e.target.value) || 0))}
+                    placeholder="0"
+                    className="pr-12 min-h-[44px] text-base"
+                    data-testid="input-noshow-travel-minutes"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">Min.</span>
+                </div>
+              </div>
+            )}
+            <div className="space-y-2">
               <Label htmlFor="noshow-wait">Wartezeit (Minuten)</Label>
               <Input
                 id="noshow-wait"
                 type="number"
                 min="0"
-                max="240"
+                max={NO_SHOW_WAIT_CAP_MINUTES}
                 step="5"
                 value={waitMinutes || ""}
-                onChange={(e) => setWaitMinutes(Math.max(0, Math.min(240, parseInt(e.target.value) || 0)))}
+                onChange={(e) => setWaitMinutes(Math.max(0, Math.min(NO_SHOW_WAIT_CAP_MINUTES, parseInt(e.target.value) || 0)))}
                 placeholder="0"
                 className="min-h-[44px] text-base"
                 data-testid="input-noshow-wait-minutes"
               />
+              <p className="text-xs text-muted-foreground">
+                Bezahlt werden maximal {NO_SHOW_WAIT_CAP_MINUTES} Minuten Wartezeit.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="noshow-km">Anfahrt-Kilometer</Label>

@@ -7,6 +7,7 @@ import { iconSize } from "@/design-system";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { isHoliday as checkHoliday } from "@shared/utils/holidays";
 import { TIME_ENTRY_TYPE_CONFIG, formatMinutesToHours, isEntryLocked } from "../constants";
+import { computeNoShowWage } from "@shared/domain/no-show-wage";
 import type { TimeEntryType, AppointmentWithCustomerName } from "@/lib/api/types";
 
 export interface DayTimeEntry {
@@ -41,6 +42,18 @@ const SERVICE_CODE_LABELS: Record<string, string> = {
 };
 
 function getAppointmentServices(appt: AppointmentWithCustomerName) {
+  // Task #167 — Leerfahrt (customer_no_show): keine Leistungsstunden, sondern
+  // die bezahlte Zeit = origin-gated Fahrtzeit + gedeckelte Wartezeit (SSoT
+  // computeNoShowWage). NICHT die geplante Dauer anzeigen.
+  if (appt.status === "customer_no_show") {
+    const wage = computeNoShowWage({
+      travelOriginType: appt.travelOriginType,
+      travelMinutes: appt.travelMinutes,
+      noShowWaitMinutes: appt.noShowWaitMinutes,
+      noShowKilometers: appt.noShowKilometers,
+    });
+    return [{ name: "Leerfahrt", minutes: wage.paidMinutes }];
+  }
   if (appt.services && appt.services.length > 0) {
     const isDocumented = appt.status === "completed" || appt.status === "documenting";
     return appt.services.map(s => {
@@ -171,6 +184,19 @@ export function DayDetailPanel({
             {appointments.map((appt) => {
               const services = getAppointmentServices(appt);
               const endTime = getAppointmentEndTime(appt, services);
+              // Task #167 — Leerfahrt: Anfahrt/Wartezeit/Km folgen der SSoT
+              // computeNoShowWage (origin-gated Fahrtzeit + gedeckelte Wartezeit,
+              // Km ausschließlich aus noShowKilometers), NICHT den rohen
+              // travelKilometers/travelMinutes eines Normal-Termins.
+              const isNoShow = appt.status === "customer_no_show";
+              const noShowWage = isNoShow
+                ? computeNoShowWage({
+                    travelOriginType: appt.travelOriginType,
+                    travelMinutes: appt.travelMinutes,
+                    noShowWaitMinutes: appt.noShowWaitMinutes,
+                    noShowKilometers: appt.noShowKilometers,
+                  })
+                : null;
               return (
                 <div
                   key={`appt-${appt.id}`}
@@ -191,21 +217,38 @@ export function DayDetailPanel({
                           </span>
                         ))}
                       </div>
-                      {(appt.travelKilometers || appt.travelMinutes) && (
-                        <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
-                          <Car className={iconSize.xs} />
-                          <span>
-                            Anfahrt: {appt.travelKilometers ? `${formatKm(appt.travelKilometers)} km` : ""}
-                            {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
-                            {appt.travelMinutes ? `${appt.travelMinutes} Min.` : ""}
-                          </span>
-                        </div>
-                      )}
-                      {appt.customerKilometers && appt.customerKilometers > 0 && (
-                        <div className="flex items-center gap-2 mt-1 text-xs text-teal-700">
-                          <Car className={iconSize.xs} />
-                          <span>Km für/mit Kunde: {formatKm(appt.customerKilometers)} km</span>
-                        </div>
+                      {noShowWage ? (
+                        (noShowWage.kilometers > 0 || noShowWage.travelMinutes > 0 || noShowWage.waitMinutes > 0) && (
+                          <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
+                            <Car className={iconSize.xs} />
+                            <span>
+                              {noShowWage.kilometers > 0 ? `${formatKm(noShowWage.kilometers)} km` : ""}
+                              {noShowWage.kilometers > 0 && noShowWage.travelMinutes > 0 ? " • " : ""}
+                              {noShowWage.travelMinutes > 0 ? `${noShowWage.travelMinutes} Min. Fahrt` : ""}
+                              {(noShowWage.kilometers > 0 || noShowWage.travelMinutes > 0) && noShowWage.waitMinutes > 0 ? " • " : ""}
+                              {noShowWage.waitMinutes > 0 ? `${noShowWage.waitMinutes} Min. Wartezeit` : ""}
+                            </span>
+                          </div>
+                        )
+                      ) : (
+                        <>
+                          {(appt.travelKilometers || appt.travelMinutes) && (
+                            <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
+                              <Car className={iconSize.xs} />
+                              <span>
+                                Anfahrt: {appt.travelKilometers ? `${formatKm(appt.travelKilometers)} km` : ""}
+                                {appt.travelKilometers && appt.travelMinutes ? " • " : ""}
+                                {appt.travelMinutes ? `${appt.travelMinutes} Min.` : ""}
+                              </span>
+                            </div>
+                          )}
+                          {appt.customerKilometers && appt.customerKilometers > 0 && (
+                            <div className="flex items-center gap-2 mt-1 text-xs text-teal-700">
+                              <Car className={iconSize.xs} />
+                              <span>Km für/mit Kunde: {formatKm(appt.customerKilometers)} km</span>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

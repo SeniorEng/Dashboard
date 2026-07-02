@@ -21,6 +21,7 @@ import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { documentedSqlRaw, completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
 import { resolveWageFor, wageRoleForUserFlags, type WageRole, type VersionedWageRow } from "@shared/domain/pricing/wage-for";
+import { NO_SHOW_WAIT_CAP_MINUTES } from "@shared/domain/no-show-wage";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
 import { isTeamLead } from "../../lib/team-lead";
 
@@ -72,6 +73,10 @@ export interface PayrollEmployeeRow {
   stundenErstberatung: number;
   stundenAnfahrt: number;
   stundenSonstiges: number;
+  /** Task #167 — Leerfahrten (customer_no_show): bezahlte Stunden = origin-gated
+   * Fahrtzeit + gedeckelte Wartezeit (SSoT computeNoShowWage). In `erfasst.hw`
+   * und die Minijob-Auszahlung eingerechnet. */
+  stundenLeerfahrten: number;
   stundenFeiertage: number;
   tageUrlaub: number;
   tageKrankheit: number;
@@ -81,6 +86,9 @@ export interface PayrollEmployeeRow {
   kilometerAnfahrt: number;
   kilometerKunden: number;
   kilometerSonstige: number;
+  /** Task #167 — Leerfahrten-Anfahrt-km (aus `noShowKilometers`), im km-Total
+   * enthalten. */
+  kilometerLeerfahrten: number;
   erfasst: CategoryErfasst;
   minijob: MinijobPay | null;
   unsignedAppointmentCount: number;
@@ -161,6 +169,13 @@ interface RawMonthBucket {
   hwWageCents: number;
   abWageCents: number;
   otherWageCents: number;
+  // Task #167 — Leerfahrten (customer_no_show): eigene Kategorie, damit
+  // Übersicht & Abrechnung dieselbe Taxonomie teilen. leerMin = origin-gated
+  // Fahrtzeit + gedeckelte Wartezeit (SSoT computeNoShowWage), NICHT geplante
+  // Dauer; leerWageCents wird in die Minijob-Brutto-Summe eingerechnet.
+  leerMin: number;
+  leerWageCents: number;
+  leerKm: number;
   travelKm: number;
   customerKm: number;
   entryKm: number;
@@ -172,6 +187,7 @@ function emptyRaw(): RawMonthBucket {
   return {
     hwMin: 0, abMin: 0, erstMin: 0, anfMin: 0, sonstMin: 0,
     hwWageCents: 0, abWageCents: 0, otherWageCents: 0,
+    leerMin: 0, leerWageCents: 0, leerKm: 0,
     travelKm: 0, customerKm: 0, entryKm: 0,
     urlaubDays: 0, krankDays: 0,
   };
@@ -365,6 +381,45 @@ async function computeRawBuckets(
     bucket.customerKm += Number(row.customer_km) || 0;
   }
 
+  // Task #167 — Leerfahrten (customer_no_show): bewusst NICHT über
+  // `documentedSqlRaw` (das ist completed-only) gefiltert — ein No-Show ist per
+  // Definition nicht `completed`. Stattdessen ein separater
+  // `status = 'customer_no_show'`-Branch. Die Lohn-Minuten spiegeln EXAKT die
+  // SSoT `computeNoShowWage` (shared/domain/no-show-wage.ts): origin-gated
+  // Fahrtzeit (`travel_minutes` nur wenn `travel_origin_type = 'appointment'`)
+  // + `LEAST(no_show_wait_minutes, NO_SHOW_WAIT_CAP_MINUTES)`. Km ausschließlich
+  // aus `no_show_kilometers`. Bei Änderung an computeNoShowWage MUSS diese
+  // Query im Gleichschritt angepasst werden (Anti-Drift-Test gesichert).
+  const noShow = await db.execute(sql`
+    SELECT
+      a.performed_by_employee_id as employee_id,
+      EXTRACT(MONTH FROM a.date::date) as month_num,
+      SUM(
+        CASE WHEN a.travel_origin_type = 'appointment' THEN GREATEST(COALESCE(a.travel_minutes, 0), 0) ELSE 0 END
+        + LEAST(${NO_SHOW_WAIT_CAP_MINUTES}, GREATEST(COALESCE(a.no_show_wait_minutes, 0), 0))
+      ) as leer_minutes,
+      SUM(ROUND((
+        CASE WHEN a.travel_origin_type = 'appointment' THEN GREATEST(COALESCE(a.travel_minutes, 0), 0) ELSE 0 END
+        + LEAST(${NO_SHOW_WAIT_CAP_MINUTES}, GREATEST(COALESCE(a.no_show_wait_minutes, 0), 0))
+      ) / 60.0 * ${hwRateForOther})) as leer_wage_cents,
+      COALESCE(SUM(GREATEST(COALESCE(a.no_show_kilometers, 0), 0)), 0) as leer_km
+    FROM appointments a
+    JOIN users u ON u.id = a.performed_by_employee_id
+    CROSS JOIN (SELECT id, employee_rate_cents FROM services WHERE code = 'hauswirtschaft' LIMIT 1) hw
+    WHERE a.status = 'customer_no_show'
+      AND a.deleted_at IS NULL
+      AND a.date >= ${startDate}
+      AND a.date <= ${endDate}
+      AND a.performed_by_employee_id = ANY(${empArray})
+    GROUP BY a.performed_by_employee_id, EXTRACT(MONTH FROM a.date::date)
+  `);
+  for (const row of noShow.rows as any[]) {
+    const bucket = ensure(Number(row.month_num), row.employee_id);
+    bucket.leerMin += Number(row.leer_minutes) || 0;
+    bucket.leerWageCents += Number(row.leer_wage_cents) || 0;
+    bucket.leerKm += Number(row.leer_km) || 0;
+  }
+
   const timeEntries = await employeeTimeEntriesRepo.selectColumnsFrom({
     userId: employeeTimeEntries.userId,
     entryType: employeeTimeEntries.entryType,
@@ -420,19 +475,24 @@ function rowFromBucket(
   const stundenErst = raw.erstMin / 60;
   const stundenAnf = raw.anfMin / 60;
   const stundenSonst = raw.sonstMin / 60;
+  const stundenLeer = raw.leerMin / 60;
   const feiertage = calculateHolidayHours(year, month, emp.employmentType, emp.monthlyWorkHours);
   const urlaubStunden = Math.round(raw.urlaubDays * soll * 100) / 100;
   const krankheitStunden = Math.round(raw.krankDays * soll * 100) / 100;
   const kmAnfahrt = raw.travelKm;
   const kmKunden = raw.customerKm;
   const kmSonstige = raw.entryKm;
-  const km = kmAnfahrt + kmKunden + kmSonstige;
+  const kmLeer = raw.leerKm;
+  const km = kmAnfahrt + kmKunden + kmSonstige + kmLeer;
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  const hwErfasst = r2(stundenHW + stundenSonst + stundenErst + stundenAnf + urlaubStunden + krankheitStunden);
+  // Task #167: Leerfahrten-Stunden fließen in die "Erfasst"-Summe ein, damit
+  // die Kategorie-Taxonomie mit der Mitarbeiter-Sicht übereinstimmt.
+  const hwErfasst = r2(stundenHW + stundenSonst + stundenErst + stundenAnf + stundenLeer + urlaubStunden + krankheitStunden);
 
   const hasActivity =
     raw.hwMin > 0 || raw.abMin > 0 || raw.erstMin > 0 || raw.anfMin > 0 || raw.sonstMin > 0 ||
+    raw.leerMin > 0 || raw.leerKm > 0 ||
     raw.travelKm > 0 || raw.customerKm > 0 || raw.entryKm > 0 ||
     raw.urlaubDays > 0 || raw.krankDays > 0;
 
@@ -451,6 +511,7 @@ function rowFromBucket(
     stundenErstberatung: r2(stundenErst),
     stundenAnfahrt: r2(stundenAnf),
     stundenSonstiges: r2(stundenSonst),
+    stundenLeerfahrten: r2(stundenLeer),
     stundenFeiertage: feiertage,
     tageUrlaub: raw.urlaubDays,
     tageKrankheit: raw.krankDays,
@@ -460,6 +521,7 @@ function rowFromBucket(
     kilometerAnfahrt: Math.round(kmAnfahrt * 10) / 10,
     kilometerKunden: Math.round(kmKunden * 10) / 10,
     kilometerSonstige: Math.round(kmSonstige * 10) / 10,
+    kilometerLeerfahrten: Math.round(kmLeer * 10) / 10,
     erfasst: {
       hw: hwErfasst,
       ab: r2(stundenAB),
@@ -519,7 +581,7 @@ export async function getEmployeePayrollRows(year: number, month: number): Promi
         const raw = buckets[m]?.[empId] || emptyRaw();
         const feiertage = calculateHolidayHours(year, m, emp.employmentType, emp.monthlyWorkHours);
         const feiertagCents = Math.round(feiertage * ctx.resolveHwRateAt(emp.role, monthEndISO));
-        const brutto = raw.hwWageCents + raw.abWageCents + raw.otherWageCents + feiertagCents;
+        const brutto = raw.hwWageCents + raw.abWageCents + raw.otherWageCents + raw.leerWageCents + feiertagCents;
         const prev = carryoverByEmployee[empId] || 0;
         if (brutto === 0 && prev === 0) continue;
         const res = calculateBruttoAndCarryover(brutto, ctx.earningsLimitCents, prev);
@@ -564,7 +626,7 @@ export async function getEmployeePayrollRows(year: number, month: number): Promi
     let minijob: MinijobPay | null = null;
     if (emp.employmentType === "minijobber") {
       const feiertagCents = Math.round(base.stundenFeiertage * ctx.resolveHwRateAt(emp.role, monthEndISO));
-      const brutto = raw.hwWageCents + raw.abWageCents + raw.otherWageCents + feiertagCents;
+      const brutto = raw.hwWageCents + raw.abWageCents + raw.otherWageCents + raw.leerWageCents + feiertagCents;
       const prev = carryoverByEmployee[emp.id] || 0;
       if (brutto > 0 || prev > 0) {
         const res = calculateBruttoAndCarryover(brutto, ctx.earningsLimitCents, prev);

@@ -25,6 +25,7 @@ import {
   attributeAppointmentToEmployees,
   type CustomerCoverage,
 } from "@shared/domain/appointment-attribution";
+import { computeNoShowWage } from "@shared/domain/no-show-wage";
 import { monthDateRange, type TimeOverviewFilters } from "./shared";
 import { getAllAppointmentsInRange, getEmployeeAppointments } from "./appointments";
 import { getAllTimeEntries, getTimeEntries } from "./entries";
@@ -88,12 +89,15 @@ export async function getTimeOverview(
   const completedTravel = { totalKilometers: 0, customerKilometers: 0, totalMinutes: 0 };
   const plannedTravel = { totalKilometers: 0, customerKilometers: 0, totalMinutes: 0 };
 
-  // Task #485 — Leerfahrten (customer_no_show): MA war vor Ort, hat aber keine
-  // Leistung erbracht. Wird separat aggregiert, damit die "echten" Service-
-  // Stunden nicht durch No-Shows verwässert werden.
+  // Task #485/#167 — Leerfahrten (customer_no_show): MA war vor Ort, hat aber
+  // keine Leistung erbracht. Wird separat aggregiert, damit die "echten"
+  // Service-Stunden nicht durch No-Shows verwässert werden. Der Lohn folgt der
+  // SSoT `computeNoShowWage` (origin-gated Fahrtzeit + gedeckelte Wartezeit),
+  // NICHT der geplanten Dauer.
   const leerfahrten = {
     count: 0,
-    plannedMinutes: 0,
+    wageMinutes: 0,
+    travelMinutes: 0,
     waitMinutes: 0,
     kilometers: 0,
   };
@@ -110,17 +114,22 @@ export async function getTimeOverview(
     if (appt.status === 'cancelled') continue;
     if (appt.status === 'customer_no_show') {
       // No-Show: keine erbrachten Service-Minuten, aber Anfahrt & Wartezeit
-      // werden für die "Leerfahrten"-Kachel aggregiert. MA-Lohn wird über
-      // die geplante Dauer (durationPromised) abgerechnet — siehe Lohnart
-      // `leerfahrt` im Service-Katalog (Task #485).
+      // werden für die "Leerfahrten"-Kachel aggregiert. Task #167: der MA-Lohn
+      // folgt der SSoT `computeNoShowWage` (origin-gated Fahrtzeit +
+      // gedeckelte Wartezeit) statt der geplanten Dauer — identisch mit der
+      // Admin-Mitarbeiterabrechnung (Anti-Drift-Test gesichert). Km bleiben aus
+      // `noShowKilometers` (Task #1565), der einzigen No-Show-Km-SSoT.
+      const wage = computeNoShowWage({
+        travelOriginType: appt.travelOriginType,
+        travelMinutes: appt.travelMinutes,
+        noShowWaitMinutes: appt.noShowWaitMinutes,
+        noShowKilometers: appt.noShowKilometers,
+      });
       leerfahrten.count++;
-      leerfahrten.plannedMinutes += appt.durationPromised || 0;
-      leerfahrten.waitMinutes += appt.noShowWaitMinutes || 0;
-      // Task #1565: No-Show-Km-SSoT ist `noShowKilometers` (identisch mit dem
-      // Abrechnungs-Pfad in `invoice-data.ts`). Früher wurde hier
-      // `travelKilometers` gelesen — eine Drift-Quelle, sobald nur eines der
-      // beiden Felder aktualisiert wurde.
-      leerfahrten.kilometers += appt.noShowKilometers || 0;
+      leerfahrten.travelMinutes += wage.travelMinutes;
+      leerfahrten.waitMinutes += wage.waitMinutes;
+      leerfahrten.wageMinutes += wage.paidMinutes;
+      leerfahrten.kilometers += wage.kilometers;
       continue;
     }
     const apptServices = servicesByAppointment.get(appt.id) || [];

@@ -33,7 +33,8 @@ interface TimeOverview {
   };
   leerfahrten?: {
     count: number;
-    plannedMinutes: number;
+    wageMinutes: number;
+    travelMinutes: number;
     waitMinutes: number;
     kilometers: number;
   };
@@ -124,7 +125,12 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
   const plannedTotal = pHw + pAb + pEb + pTravel;
   const hasPlanned = plannedTotal > 0;
 
-  const totalServiceMinutes = completedTotal + plannedTotal;
+  const leerfahrtenWageMinutesForTotal = timeOverview?.leerfahrten?.wageMinutes || 0;
+  // Leerfahrten (customer_no_show) werden in der "Dokumentiert"-Spalte
+  // ausgewiesen, daher MUSS ihre bezahlte Zeit in die dokumentierte
+  // Zwischensumme einfließen, sonst summiert die Spalte nicht auf.
+  const documentedTotalWithLeer = completedTotal + leerfahrtenWageMinutesForTotal;
+  const totalServiceMinutes = documentedTotalWithLeer + plannedTotal;
 
   const euRentnerMonthWarning = (() => {
     if (!isEuRentner) return null;
@@ -143,8 +149,9 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
   const completedCustomerKm = timeOverview?.completedTravel?.customerKilometers || 0;
   const leerfahrten = timeOverview?.leerfahrten;
   const leerfahrtenKm = leerfahrten?.kilometers || 0;
+  const leerfahrtenTravelMin = leerfahrten?.travelMinutes || 0;
   const leerfahrtenWaitMin = leerfahrten?.waitMinutes || 0;
-  const leerfahrtenPlannedMin = leerfahrten?.plannedMinutes || 0;
+  const leerfahrtenWageMin = leerfahrten?.wageMinutes || 0;
   const leerfahrtenCount = leerfahrten?.count || 0;
   const totalKm = completedTravelKm + completedCustomerKm + timeEntryKm + leerfahrtenKm;
 
@@ -198,14 +205,15 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
                 <tr>
                   <td className="py-0.5 text-gray-600">
                     Leerfahrten ({leerfahrtenCount})
-                    {leerfahrtenWaitMin > 0 && (
+                    {(leerfahrtenTravelMin > 0 || leerfahrtenWaitMin > 0) && (
                       <span className="text-xs text-gray-500 ml-1">
-                        (+ {formatMinutesToHours(leerfahrtenWaitMin)} Wartezeit, Kundenrechnung)
+                        ({formatMinutesToHours(leerfahrtenTravelMin)} Fahrt
+                        {leerfahrtenWaitMin > 0 && ` + ${formatMinutesToHours(leerfahrtenWaitMin)} Wartezeit`})
                       </span>
                     )}
                   </td>
                   <td className="py-0.5 text-right font-semibold text-amber-700" data-testid="text-leerfahrten-hours">
-                    {formatMinutesToHours(leerfahrtenPlannedMin)}
+                    {formatMinutesToHours(leerfahrtenWageMin)}
                   </td>
                   {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3"></td>}
                 </tr>
@@ -216,7 +224,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
                 <>
                   <tr className="border-t">
                     <td className="pt-2 font-medium text-gray-700">Zwischensumme</td>
-                    <td className="pt-2 text-right font-bold text-gray-900" data-testid="text-completed-service-hours">{formatMinutesToHours(completedTotal)}</td>
+                    <td className="pt-2 text-right font-bold text-gray-900" data-testid="text-completed-service-hours">{formatMinutesToHours(documentedTotalWithLeer)}</td>
                     <td className="pt-2 text-right font-semibold text-gray-600 pl-3" data-testid="text-planned-service-hours">{formatMinutesToHours(plannedTotal)}</td>
                   </tr>
                   <tr className="border-t">
@@ -228,7 +236,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
                 <tr className="border-t">
                   <td className="pt-2 font-medium text-gray-700">Gesamt</td>
                   <td className="pt-2 text-right font-bold text-gray-900" data-testid="text-completed-service-hours">
-                    <span data-testid="text-total-service-hours">{formatMinutesToHours(completedTotal)}</span>
+                    <span data-testid="text-total-service-hours">{formatMinutesToHours(totalServiceMinutes)}</span>
                   </td>
                 </tr>
               )}
