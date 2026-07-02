@@ -391,7 +391,12 @@ export default function Mitarbeiterabrechnung() {
                           <th className="px-4 py-2 font-medium text-right">Erfasst</th>
                           <th className="px-4 py-2 font-medium text-right">Kilometer</th>
                           <th className="px-4 py-2 font-medium text-right">Stundenkonto</th>
-                          <th className="px-4 py-2 font-medium text-right">Nicht abrechenbar</th>
+                          <th
+                            className="px-4 py-2 font-medium text-right"
+                            title="Dokumentierte Termine ohne Unterschrift. Diese Stunden zählen zur Lohnzeit und sind bereits in „Erfasst“ enthalten – sie sind nur noch nicht gegenüber Kunde/Pflegekasse abrechenbar, weil die Unterschrift fehlt."
+                          >
+                            Noch nicht abrechenbar
+                          </th>
                           <th className="px-4 py-2 font-medium">Status</th>
                           <th className="px-4 py-2"></th>
                         </tr>

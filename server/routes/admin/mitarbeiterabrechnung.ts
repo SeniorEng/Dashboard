@@ -20,6 +20,16 @@ import { computeAccountsForMonth, upsertHoursAccount, OpeningBalanceLockedError,
 
 const router = Router();
 
+/**
+ * Task #1569 — Platzhalter für Termine, deren `customer_id` NULL ist oder auf
+ * keinen (noch existierenden) Kundendatensatz zeigt. Früher filterte ein
+ * INNER JOIN auf `customers` solche Termine still aus der Detailliste heraus,
+ * während der Überblicks-Zähler sie mitzählte („Anzeige-gegen-Anzeige"-Drift).
+ * Jetzt LEFT JOIN + dieser Platzhalter, damit Zähler und Liste deckungsgleich
+ * bleiben und kein Termin stillschweigend verschwindet.
+ */
+const UNRESOLVED_CUSTOMER_LABEL = "Kein Kunde zugeordnet";
+
 function parseYearMonth(req: Request, res: Response): { year: number; month: number } | null {
   const year = parseInt(req.query.year as string);
   const month = parseInt(req.query.month as string);
@@ -228,7 +238,7 @@ router.get("/mitarbeiterabrechnung/employee/:id", requireWageDataAccess, asyncHa
         FROM appointment_services asvc WHERE asvc.appointment_id = a.id
       ), 0) as service_minutes
     FROM appointments a
-    JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN customers c ON c.id = a.customer_id
     WHERE ${documentedSqlRaw('a')}
       AND a.deleted_at IS NULL
       AND a.date >= ${startDate}
@@ -241,7 +251,7 @@ router.get("/mitarbeiterabrechnung/employee/:id", requireWageDataAccess, asyncHa
     date: typeof r.date === "string" ? r.date : new Date(r.date).toISOString().slice(0, 10),
     scheduledStart: r.scheduled_start ?? null,
     status: r.status as string,
-    customerName: r.customer_name ?? "",
+    customerName: r.customer_name ?? UNRESOLVED_CUSTOMER_LABEL,
     serviceMinutes: Number(r.service_minutes) || 0,
     travelMinutes: Number(r.travel_minutes) || 0,
     travelKm: Number(r.travel_km) || 0,
@@ -295,7 +305,7 @@ router.get("/mitarbeiterabrechnung/unsigned-appointments", requireWageDataAccess
       c.name as customer_name,
       COALESCE(svc_minutes.minutes, 0) as minutes
     FROM appointments a
-    JOIN customers c ON c.id = a.customer_id
+    LEFT JOIN customers c ON c.id = a.customer_id
     ${unsignedServiceMinutesLateralRaw('a', 'svc_minutes')}
     WHERE ${completedButUnsignedSqlRaw('a')}
       AND a.deleted_at IS NULL
@@ -308,7 +318,7 @@ router.get("/mitarbeiterabrechnung/unsigned-appointments", requireWageDataAccess
     id: Number(row.id),
     date: typeof row.date === "string" ? row.date : new Date(row.date).toISOString().slice(0, 10),
     scheduledStart: row.scheduled_start ?? null,
-    customerName: row.customer_name ?? "",
+    customerName: row.customer_name ?? UNRESOLVED_CUSTOMER_LABEL,
     minutes: Number(row.minutes) || 0,
   }));
 
