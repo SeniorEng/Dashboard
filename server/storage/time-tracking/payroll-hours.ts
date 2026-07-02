@@ -200,7 +200,9 @@ interface PayrollContext {
   resolveHwRateAt: (role: WageRole, dateISO: string) => number;
 }
 
-async function loadContext(): Promise<PayrollContext> {
+export type { PayrollContext };
+
+export async function loadContext(): Promise<PayrollContext> {
   const employeeRows = await db.select({
     id: users.id,
     vorname: users.vorname,
@@ -536,8 +538,12 @@ function rowFromBucket(
 export async function getMonthlyCategoryErfasst(
   year: number,
   uptoMonth: number,
+  preloadedCtx?: PayrollContext,
 ): Promise<{ byEmployeeMonth: Record<number, Record<number, CategoryErfasst>>; employees: EmployeeMeta[] }> {
-  const ctx = await loadContext();
+  // Der Kontext (Mitarbeiter, Verdienstgrenze, Lohnsätze) ist JAHRESUNABHÄNGIG.
+  // Bei der Cross-Year-Übertragskette (computeAccountsForMonth) wird er einmal
+  // geladen und über alle Jahre wiederverwendet, statt pro Jahr neu zu laden.
+  const ctx = preloadedCtx ?? await loadContext();
   const employeeIds = ctx.employees.map(e => e.id);
   const roleByEmployeeId: Record<number, WageRole> = {};
   for (const e of ctx.employees) roleByEmployeeId[e.id] = e.role;

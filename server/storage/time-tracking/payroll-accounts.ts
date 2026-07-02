@@ -30,7 +30,7 @@ import {
 } from "@shared/schema/time-tracking";
 import { withAudit } from "../../lib/with-audit";
 import { isMonthClosed } from "./month-closing";
-import { getMonthlyCategoryErfasst, type EmployeeMeta } from "./payroll-hours";
+import { getMonthlyCategoryErfasst, loadContext, type EmployeeMeta } from "./payroll-hours";
 
 export interface AccountCell {
   category: HoursAccountCategory;
@@ -138,16 +138,21 @@ export async function computeAccountsForMonth(
 ): Promise<{ byEmployee: Record<number, Record<string, AccountCell>>; employees: EmployeeMeta[] }> {
   const startYear = await findChainStartYear(year);
 
+  // Der Kontext (aktive Mitarbeiter, Verdienstgrenze, Lohnsätze) ist
+  // jahresunabhängig — einmal laden und über ALLE Jahre der Übertragskette
+  // wiederverwenden, statt ihn (samt Employee-/Wage-Queries) pro Jahr neu zu
+  // laden (Task #1568).
+  const ctx = await loadContext();
+  const employees: EmployeeMeta[] = ctx.employees;
+
   const byEmployee: Record<number, Record<string, AccountCell>> = {};
   // Fortlaufender Saldo pro Mitarbeiter × Kategorie, über Jahresgrenzen getragen.
   const saldoCarry: Record<number, Record<string, number>> = {};
-  let employees: EmployeeMeta[] = [];
 
   for (let y = startYear; y <= year; y++) {
     const uptoMonth = y === year ? month : 12;
-    const { byEmployeeMonth, employees: yearEmployees } = await getMonthlyCategoryErfasst(y, uptoMonth);
+    const { byEmployeeMonth, employees: yearEmployees } = await getMonthlyCategoryErfasst(y, uptoMonth, ctx);
     const stored = await loadStoredRows(y, uptoMonth);
-    employees = yearEmployees;
 
     for (const emp of yearEmployees) {
       const cells: Record<string, AccountCell> = {};
