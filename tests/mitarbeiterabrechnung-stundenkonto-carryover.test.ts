@@ -17,8 +17,9 @@
  *   2. Ein gespeicherter Go-Live-Anfangsbestand überschreibt den abgeleiteten
  *      Übertrag NUR für diesen einen Monat; die Kette läuft danach ab dem neuen
  *      Saldo weiter.
- *   3. Ohne gespeicherten Januar-Anker rollt der Saldo NICHT über die
- *      Jahresgrenze (Dezember → Januar) — bewusste Vereinfachung.
+ *   3. Der Saldo rollt AUTOMATISCH über die Jahresgrenze (Dezember → Januar):
+ *      der Dezember-Saldo wird zum abgeleiteten 'carryover'-Anfangsbestand des
+ *      Folgejahr-Januars — durch denselben Reader (Task #1564).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
@@ -94,6 +95,19 @@ describe("Task #1558: Stundenkonto-Übertragskette (Anfangsbestand-Carryover)", 
     const byCat: Record<string, AccountCell> = {};
     for (const c of res.data.accountCells) byCat[c.category] = c;
     return byCat;
+  }
+
+  // Übersichts-Route (SSoT teilt sich denselben Reader wie der Drill-down):
+  // liefert je Mitarbeiter eine Zeile mit Kategorie-Saldi + Stundenkonto-Saldo.
+  async function getOverviewRow(
+    year: number,
+    month: number,
+  ): Promise<{ saldo: Record<string, number>; stundenkontoSaldo: number } | null> {
+    const res = await apiGet<{ rows: Array<{ employeeId: number; saldo: Record<string, number>; stundenkontoSaldo: number }> }>(
+      `/api/admin/mitarbeiterabrechnung?year=${year}&month=${month}`,
+    );
+    expect(res.status).toBe(200);
+    return res.data.rows.find((r) => r.employeeId === employeeId) ?? null;
   }
 
   beforeAll(async () => {
@@ -213,17 +227,34 @@ describe("Task #1558: Stundenkonto-Übertragskette (Anfangsbestand-Carryover)", 
     expect(dec.hw.saldo).toBe(GOLIVE_ANFANGSBESTAND);
   });
 
-  it("überträgt ohne gespeicherten Januar-Anker NICHT über die Jahresgrenze (Dez → Jan)", async () => {
+  it("überträgt den Dezember-Saldo automatisch über die Jahresgrenze (Dez → Jan)", async () => {
     // Dezember 2023 trägt einen Saldo von 10 h.
     const dec = await getCells(YEAR, MONTH_AFTER_GOLIVE);
     expect(dec.hw.saldo).toBe(GOLIVE_ANFANGSBESTAND);
 
-    // Januar 2024 startet die Kette bei m=1 neu: ohne gespeicherten Anker ist
-    // der Anfangsbestand 0 (bewusste Cross-Year-Vereinfachung), NICHT der
-    // Dezember-Saldo.
+    // Januar 2024 erbt den Dezember-2023-Saldo als abgeleiteten 'carryover'-
+    // Anfangsbestand (Task #1564) — der Saldo fällt am Jahreswechsel NICHT mehr
+    // still auf 0 zurück.
     const jan = await getCells(NEXT_YEAR, 1);
     expect(jan.hw.anfangsbestandType).toBe("carryover");
-    expect(jan.hw.anfangsbestand).toBe(0); // NICHT 10
-    expect(jan.hw.saldo).toBe(0);
+    expect(jan.hw.anfangsbestand).toBe(GOLIVE_ANFANGSBESTAND); // 10, ererbt vom Dezember-Saldo
+    expect(jan.hw.erfasst).toBe(0);
+    expect(jan.hw.bezahltIsDefault).toBe(true);
+    expect(jan.hw.saldo).toBe(GOLIVE_ANFANGSBESTAND); // 10 + 0 − 0
+
+    // Auch nach mehreren aktivitätslosen Folgemonaten bleibt der Saldo erhalten.
+    const feb = await getCells(NEXT_YEAR, 2);
+    expect(feb.hw.anfangsbestandType).toBe("carryover");
+    expect(feb.hw.anfangsbestand).toBe(GOLIVE_ANFANGSBESTAND); // 10
+    expect(feb.hw.saldo).toBe(GOLIVE_ANFANGSBESTAND);
+
+    // Die ÜBERSICHTS-Route (nicht nur der Drill-down) muss den übertragenen
+    // Saldo im Januar-des-Folgejahres ebenfalls zeigen — der reine Übertrags-
+    // Mitarbeiter darf nicht aus der Liste fallen und der Saldo nicht auf 0
+    // zurückspringen.
+    const janOverview = await getOverviewRow(NEXT_YEAR, 1);
+    expect(janOverview).not.toBeNull();
+    expect(janOverview!.saldo.hw).toBe(GOLIVE_ANFANGSBESTAND); // 10
+    expect(janOverview!.stundenkontoSaldo).toBe(GOLIVE_ANFANGSBESTAND); // 10
   });
 });

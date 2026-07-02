@@ -9,14 +9,19 @@
  *    solange der Monat offen ist) ODER zur Laufzeit aus dem Vormonats-Saldo
  *    abgeleiteter Übertrag ('carryover', abgeleitet/gesperrt).
  *
- * Übertragskette wird innerhalb eines Jahres berechnet (Januar-Anker =
- * gespeicherter Wert oder 0). Cross-Year benötigt einen gespeicherten
- * Januar-Anfangsbestand (Go-Live/Übertrag) — bewusste Vereinfachung.
+ * Übertragskette läuft KONTINUIERLICH über Jahresgrenzen hinweg (Task #1564,
+ * ersetzt die frühere Vereinfachung „Januar-Anker = 0"): der Dezember-Saldo
+ * eines Jahres wird automatisch zum abgeleiteten 'carryover'-Anfangsbestand des
+ * darauffolgenden Januars — durch denselben Reader, damit Übersicht UND
+ * Drill-down identisch fortführen. Ein gespeicherter Go-Live-Anfangsbestand
+ * setzt die Kette in seinem Monat neu; der Ketten-Start (frühestes Jahr mit
+ * Aktivität/gespeichertem Wert, gedeckelt via MAX_CARRYOVER_LOOKBACK_YEARS)
+ * startet bei 0.
  *
  * Editier-Sperre: nach dem 8.-des-Monats-Auto-Abschluss (`isMonthClosed`).
  */
 import { db } from "../../lib/db";
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import {
   employeeHoursAccounts,
   HOURS_ACCOUNT_CATEGORIES,
@@ -83,51 +88,106 @@ async function loadStoredRows(
   return out;
 }
 
+// Sicherheits-Deckel für den Cross-Year-Rückblick: die Übertragskette startet
+// höchstens so viele Jahre vor dem angefragten Jahr. Verhindert unbeschränkte
+// Query-Fan-outs bei alten/verwaisten Aktivitätsdaten; der so gedeckelte
+// Ketten-Start beginnt (wie ein Ketten-Anfang) bei 0.
+const MAX_CARRYOVER_LOOKBACK_YEARS = 15;
+
+/**
+ * Bestimmt das früheste Jahr, ab dem die Übertragskette gerechnet werden muss:
+ * das kleinste Jahr mit gespeichertem Stundenkonto-Wert ODER dokumentierter
+ * Termin-/Zeiteintrags-Aktivität. Frühere Jahre tragen (Anker 0, keine
+ * Aktivität) ohnehin einen Dezember-Saldo von 0 bei und dürfen entfallen.
+ */
+async function findChainStartYear(year: number): Promise<number> {
+  // MIN über ein UNION ALL: der Aggregat-MIN ignoriert NULL-Teilergebnisse
+  // (leere Quelltabellen) und liefert nur dann NULL, wenn ALLE Quellen leer
+  // sind. So kollabiert eine einzelne leere Tabelle das Ergebnis NICHT auf NULL
+  // (was den Ketten-Start fälschlich aufs angefragte Jahr zurücksetzen würde).
+  const res = await db.execute(sql`
+    SELECT MIN(y)::int AS start_year FROM (
+      SELECT MIN(year) AS y FROM employee_hours_accounts
+      UNION ALL
+      SELECT MIN(EXTRACT(YEAR FROM date::date))::int FROM appointments
+        WHERE performed_by_employee_id IS NOT NULL AND deleted_at IS NULL
+      UNION ALL
+      SELECT MIN(EXTRACT(YEAR FROM entry_date::date))::int FROM employee_time_entries
+        WHERE deleted_at IS NULL
+    ) t
+  `);
+  const raw = (res.rows?.[0] as { start_year: number | string | null } | undefined)?.start_year;
+  let startYear = raw == null ? year : Number(raw);
+  if (!Number.isFinite(startYear) || startYear > year) startYear = year;
+  const floor = year - MAX_CARRYOVER_LOOKBACK_YEARS;
+  if (startYear < floor) startYear = floor;
+  return startYear;
+}
+
 /**
  * Berechnet für JEDEN Mitarbeiter die Kontozellen (alle Kategorien) des
- * gewählten Monats inkl. der Übertragskette ab Januar.
+ * gewählten Monats inkl. der Übertragskette. Die Kette läuft KONTINUIERLICH ab
+ * dem frühesten relevanten Jahr bis zum angefragten Monat und überschreitet
+ * dabei Jahresgrenzen: der Dezember-Saldo wird zum Januar-Anfangsbestand des
+ * Folgejahres (Task #1564). Ein gespeicherter Go-Live-Anfangsbestand setzt die
+ * Kette in seinem Monat neu.
  */
 export async function computeAccountsForMonth(
   year: number,
   month: number,
 ): Promise<{ byEmployee: Record<number, Record<string, AccountCell>>; employees: EmployeeMeta[] }> {
-  const { byEmployeeMonth, employees } = await getMonthlyCategoryErfasst(year, month);
-  const stored = await loadStoredRows(year, month);
+  const startYear = await findChainStartYear(year);
 
   const byEmployee: Record<number, Record<string, AccountCell>> = {};
+  // Fortlaufender Saldo pro Mitarbeiter × Kategorie, über Jahresgrenzen getragen.
+  const saldoCarry: Record<number, Record<string, number>> = {};
+  let employees: EmployeeMeta[] = [];
 
-  for (const emp of employees) {
-    const cells: Record<string, AccountCell> = {};
-    for (const category of HOURS_ACCOUNT_CATEGORIES) {
-      // Übertragskette Jan..month
-      let saldoPrev = 0;
-      let cell: AccountCell | null = null;
-      for (let m = 1; m <= month; m++) {
-        const erfasst = r2(byEmployeeMonth[emp.id]?.[m]?.[category] ?? 0);
-        const row = stored[emp.id]?.[m]?.[category];
+  for (let y = startYear; y <= year; y++) {
+    const uptoMonth = y === year ? month : 12;
+    const { byEmployeeMonth, employees: yearEmployees } = await getMonthlyCategoryErfasst(y, uptoMonth);
+    const stored = await loadStoredRows(y, uptoMonth);
+    employees = yearEmployees;
 
-        let anfangsbestand: number;
-        let anfangsbestandType: "go_live" | "carryover";
-        if (row && row.anfangsbestand !== null && row.openingBalanceType === "go_live") {
-          anfangsbestand = r2(row.anfangsbestand);
-          anfangsbestandType = "go_live";
-        } else {
-          anfangsbestand = m === 1 ? 0 : r2(saldoPrev);
-          anfangsbestandType = "carryover";
+    for (const emp of yearEmployees) {
+      const cells: Record<string, AccountCell> = {};
+      for (const category of HOURS_ACCOUNT_CATEGORIES) {
+        // Eingehender Anker: Dezember-Saldo des Vorjahres (0 am Ketten-Start).
+        let saldoPrev = saldoCarry[emp.id]?.[category] ?? 0;
+        let cell: AccountCell | null = null;
+        for (let m = 1; m <= uptoMonth; m++) {
+          const erfasst = r2(byEmployeeMonth[emp.id]?.[m]?.[category] ?? 0);
+          const row = stored[emp.id]?.[m]?.[category];
+
+          let anfangsbestand: number;
+          let anfangsbestandType: "go_live" | "carryover";
+          if (row && row.anfangsbestand !== null && row.openingBalanceType === "go_live") {
+            anfangsbestand = r2(row.anfangsbestand);
+            anfangsbestandType = "go_live";
+          } else {
+            // Nur der allererste Monat der GESAMTEN Kette startet bei 0; jeder
+            // Folgemonat (auch der Januar eines Folgejahres) erbt den Vormonats-
+            // bzw. Vorjahres-Dezember-Saldo.
+            anfangsbestand = y === startYear && m === 1 ? 0 : r2(saldoPrev);
+            anfangsbestandType = "carryover";
+          }
+
+          const bezahltIsDefault = !(row && row.bezahlt !== null);
+          const bezahlt = bezahltIsDefault ? erfasst : r2(row!.bezahlt!);
+          const saldo = r2(anfangsbestand + erfasst - bezahlt);
+
+          saldoPrev = saldo;
+          if (y === year && m === uptoMonth) {
+            cell = { category, anfangsbestand, anfangsbestandType, erfasst, bezahlt, bezahltIsDefault, saldo };
+          }
         }
-
-        const bezahltIsDefault = !(row && row.bezahlt !== null);
-        const bezahlt = bezahltIsDefault ? erfasst : r2(row!.bezahlt!);
-        const saldo = r2(anfangsbestand + erfasst - bezahlt);
-
-        saldoPrev = saldo;
-        if (m === month) {
-          cell = { category, anfangsbestand, anfangsbestandType, erfasst, bezahlt, bezahltIsDefault, saldo };
-        }
+        // Dezember-Saldo (bzw. Saldo des letzten gerechneten Monats) ins
+        // nächste Jahr übertragen.
+        (saldoCarry[emp.id] ??= {})[category] = saldoPrev;
+        if (y === year) cells[category] = cell!;
       }
-      cells[category] = cell!;
+      if (y === year) byEmployee[emp.id] = cells;
     }
-    byEmployee[emp.id] = cells;
   }
 
   return { byEmployee, employees };
