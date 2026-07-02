@@ -116,7 +116,11 @@ export async function getTimeOverview(
       leerfahrten.count++;
       leerfahrten.plannedMinutes += appt.durationPromised || 0;
       leerfahrten.waitMinutes += appt.noShowWaitMinutes || 0;
-      leerfahrten.kilometers += appt.travelKilometers || 0;
+      // Task #1565: No-Show-Km-SSoT ist `noShowKilometers` (identisch mit dem
+      // Abrechnungs-Pfad in `invoice-data.ts`). Früher wurde hier
+      // `travelKilometers` gelesen — eine Drift-Quelle, sobald nur eines der
+      // beiden Felder aktualisiert wurde.
+      leerfahrten.kilometers += appt.noShowKilometers || 0;
       continue;
     }
     const apptServices = servicesByAppointment.get(appt.id) || [];

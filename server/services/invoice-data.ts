@@ -194,7 +194,11 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
             kmRateCents: cancellationPolicy.kmRateCents,
           },
           {
-            travelKilometers: appt.noShowKilometers ?? appt.travelKilometers ?? 0,
+            // Task #1565: No-Show-Km-SSoT ist ausschließlich `noShowKilometers`
+            // (identisch mit der Zeitübersicht-Leerfahrten-Kachel). Der frühere
+            // `?? travelKilometers`-Fallback war die zweite Quelle und ist
+            // entfernt; Alt-Datensätze werden per Startup-Backfill migriert.
+            travelKilometers: appt.noShowKilometers ?? 0,
             waitMinutes: appt.noShowWaitMinutes ?? 0,
           },
           {

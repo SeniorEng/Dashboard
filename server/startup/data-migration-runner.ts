@@ -207,6 +207,7 @@ export async function buildPostBudgetRegistry(): Promise<GuardedBudgetMigration[
   const { migrateProspectStatuses } = await import("./migrate-prospect-statuses");
   const { migrateSchulungBesprechungToSonstiges } = await import("./migrate-schulung-besprechung-to-sonstiges");
   const { cleanupVacationOnHolidays } = await import("./cleanup-vacation-on-holidays");
+  const { backfillNoShowKilometers } = await import("./backfill-no-show-kilometers");
 
   return [
     {
@@ -255,6 +256,17 @@ export async function buildPostBudgetRegistry(): Promise<GuardedBudgetMigration[
       conservationCheck: false,
       migrate: async (tx) => {
         await cleanupVacationOnHolidays(tx);
+      },
+    },
+    {
+      // Task #1565 — Backfill No-Show-Km auf die no_show_kilometers-SSoT.
+      // appointments ist nicht GoBD-trigger-immutable (kein Bypass) und es
+      // wird kein Budget-Topf verändert (kein Conservation-Check).
+      name: "backfill-no-show-kilometers-1565",
+      gobdBypass: false,
+      conservationCheck: false,
+      migrate: async (tx) => {
+        await backfillNoShowKilometers(tx);
       },
     },
   ];

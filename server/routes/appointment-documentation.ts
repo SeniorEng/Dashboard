@@ -445,11 +445,14 @@ router.post("/:id/document-no-show", asyncHandler("Fehler beim Speichern der Ver
     // separierbar von echten Terminen.
     travelOriginType: validated.travelOriginType,
     travelFromAppointmentId: validated.travelFromAppointmentId ?? null,
-    travelKilometers: validated.travelKilometers,
     travelMinutes: validated.travelMinutes ?? null,
     noShowReason: validated.noShowReason,
     noShowReasonText: validated.noShowReasonText ?? null,
     noShowWaitMinutes: validated.noShowWaitMinutes,
+    // Task #1565: `noShowKilometers` ist die EINZIGE SSoT für No-Show-Km.
+    // Früher wurde derselbe Wert zusätzlich in `travelKilometers` kopiert —
+    // dieser Dual-Write war die Wurzel der Anzeige-vs-Buchung-Drift und
+    // entfällt bewusst (Anzeige & Abrechnung lesen jetzt beide dieses Feld).
     noShowKilometers: validated.travelKilometers,
     noShowNotes: validated.noShowNotes ?? null,
     noShowChargeSuppressed: validated.noShowChargeSuppressed,
