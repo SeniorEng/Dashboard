@@ -1,0 +1,65 @@
+2026-07-02T19:15:29.7141562Z ##[group]Run npx vitest run tests/architecture/sweep-dev-guard.test.ts --reporter=default
+2026-07-02T19:15:29.7142228Z [36;1mnpx vitest run tests/architecture/sweep-dev-guard.test.ts --reporter=default[0m
+2026-07-02T19:15:29.7174948Z shell: /usr/bin/bash -e {0}
+2026-07-02T19:15:29.7175284Z env:
+2026-07-02T19:15:29.7175481Z   NODE_VERSION: 20
+2026-07-02T19:15:29.7175700Z ##[endgroup]
+2026-07-02T19:15:30.3102281Z 
+2026-07-02T19:15:30.3104936Z [1m[30m[46m RUN [49m[39m[22m [36mv4.1.7 [39m[90m/home/runner/work/Dashboard/Dashboard[39m
+2026-07-02T19:15:30.3105927Z 
+2026-07-02T19:15:30.6127642Z [90mstdout[2m | tests/architecture/sweep-dev-guard.test.ts[2m > [22m[2msweep-dev-test-data assertDevDatabase() Guards[2m > [22m[2mpassiert bei einem normalen Dev-Host (auch wenn PROD_DATABASE_URL auf einen anderen Host zeigt)
+2026-07-02T19:15:30.6130021Z [22m[39mSicherheits-Checks ok. Dev-DB-Host: db.dev.example
+2026-07-02T19:15:30.6130544Z 
+2026-07-02T19:15:30.6132258Z [90mstdout[2m | tests/architecture/sweep-dev-guard.test.ts[2m > [22m[2msweep-dev-test-data assertDevDatabase() Guards[2m > [22m[2mpassiert ohne gesetztes PROD_DATABASE_URL
+2026-07-02T19:15:30.6134301Z [22m[39mSicherheits-Checks ok. Dev-DB-Host: db.dev.example
+2026-07-02T19:15:30.6135086Z 
+2026-07-02T19:15:30.6228153Z  [31m❯[39m [30m[42m unit [49m[39m tests/architecture/sweep-dev-guard.test.ts [2m([22m[2m21 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 20[2mms[22m[39m
+2026-07-02T19:15:30.6230281Z      [32m✓[39m extrahiert den Hostnamen aus einer validen postgres-URL[32m 2[2mms[22m[39m
+2026-07-02T19:15:30.6231567Z      [32m✓[39m lowercased den Hostnamen[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6233074Z [31m     [31m×[31m fällt bei nicht-parsebarer URL auf die @host-Regex zurück[39m[32m 5[2mms[22m[39m
+2026-07-02T19:15:30.6234885Z      [32m✓[39m liefert leeren String, wenn kein Host ermittelbar ist[32m 1[2mms[22m[39m
+2026-07-02T19:15:30.6236223Z      [32m✓[39m matched Prod-Host 'db.prod.example'[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6237560Z      [32m✓[39m matched Prod-Host 'db.production.internal'[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6238974Z      [32m✓[39m matched Prod-Host 'prod-db.example'[32m 1[2mms[22m[39m
+2026-07-02T19:15:30.6240164Z      [32m✓[39m matched Prod-Host 'db-prod.example'[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6241401Z      [32m✓[39m matched Prod-Host 'myproductiondb.example'[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6242640Z      [32m✓[39m matched Dev-Host 'db.dev.example' NICHT[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6244242Z      [32m✓[39m matched Dev-Host 'localhost' NICHT[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6245780Z      [32m✓[39m matched Dev-Host 'staging-db.example' NICHT[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6247374Z      [32m✓[39m matched Dev-Host 'ep-cool-name-123.eu-central-1.aws.neon.tech' NICHT[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6248828Z      [32m✓[39m bricht bei NODE_ENV=production ab[32m 1[2mms[22m[39m
+2026-07-02T19:15:30.6250129Z      [32m✓[39m bricht ab, wenn DATABASE_URL nicht gesetzt ist[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6251444Z      [32m✓[39m bricht bei einem Prod-aussehenden DB-Host ab[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6252740Z      [32m✓[39m bricht bei einem 'production'-Host ab[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6254152Z      [32m✓[39m fail-closed: bricht ab, wenn der Host nicht extrahierbar ist[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6256052Z      [32m✓[39m bricht ab, wenn DATABASE_URL-Host == PROD_DATABASE_URL-Host[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6257899Z      [32m✓[39m passiert bei einem normalen Dev-Host (auch wenn PROD_DATABASE_URL auf einen anderen Host zeigt)[32m 2[2mms[22m[39m
+2026-07-02T19:15:30.6259808Z      [32m✓[39m passiert ohne gesetztes PROD_DATABASE_URL[32m 0[2mms[22m[39m
+2026-07-02T19:15:30.6285415Z 
+2026-07-02T19:15:30.6286858Z [31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+2026-07-02T19:15:30.6287907Z 
+2026-07-02T19:15:30.6304665Z [41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/architecture/sweep-dev-guard.test.ts[2m > [22msweep-dev-test-data dbHostOf()[2m > [22mfällt bei nicht-parsebarer URL auf die @host-Regex zurück
+2026-07-02T19:15:30.6306958Z [31m[1mAssertionError[22m: expected '' to be 'legacy-dev-host' // Object.is equality[39m
+2026-07-02T19:15:30.6307689Z 
+2026-07-02T19:15:30.6307995Z [32m- Expected[39m
+2026-07-02T19:15:30.6308563Z [31m+ Received[39m
+2026-07-02T19:15:30.6308820Z 
+2026-07-02T19:15:30.6309142Z [32m- legacy-dev-host[39m
+2026-07-02T19:15:30.6309461Z 
+2026-07-02T19:15:30.6310345Z [36m [2m❯[22m tests/architecture/sweep-dev-guard.test.ts:[2m69:64[22m[39m
+2026-07-02T19:15:30.6330888Z     [90m 67|[39m     // `new URL(...)` wirft hier (kaputtes Schema) → Fallback-Regex `@…
+2026-07-02T19:15:30.6332160Z     [90m 68|[39m     [90m// greift und liest den Host hinter dem `@`.[39m
+2026-07-02T19:15:30.6333398Z     [90m 69|[39m     expect(dbHostOf("postgres ://x@legacy-dev-host:5432/app")).toBe("l…
+2026-07-02T19:15:30.6335802Z     [90m   |[39m                                                                [31m^[39m
+2026-07-02T19:15:30.6336667Z     [90m 70|[39m   })[33m;[39m
+2026-07-02T19:15:30.6337231Z     [90m 71|[39m
+2026-07-02T19:15:30.6337487Z 
+2026-07-02T19:15:30.6337969Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+2026-07-02T19:15:30.6338361Z 
+2026-07-02T19:15:30.6338379Z 
+2026-07-02T19:15:30.6341509Z [2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+2026-07-02T19:15:30.6342931Z [2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m20 passed[39m[22m[90m (21)[39m
+2026-07-02T19:15:30.6343991Z [2m   Start at [22m 19:15:30
+2026-07-02T19:15:30.6345562Z [2m   Duration [22m 292ms[2m (transform 73ms, setup 62ms, import 43ms, tests 20ms, environment 0ms)[22m
+2026-07-02T19:15:30.6346574Z 
+2026-07-02T19:15:30.6570169Z ##[error]Process completed with exit code 1.

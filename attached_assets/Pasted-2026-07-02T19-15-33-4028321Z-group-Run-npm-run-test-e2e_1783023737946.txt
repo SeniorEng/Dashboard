@@ -1,0 +1,541 @@
+2026-07-02T19:15:33.4028321Z ##[group]Run npm run test:e2e:smoke
+2026-07-02T19:15:33.4028868Z [36;1mnpm run test:e2e:smoke[0m
+2026-07-02T19:15:33.4080823Z shell: /usr/bin/bash -e {0}
+2026-07-02T19:15:33.4081273Z env:
+2026-07-02T19:15:33.4081612Z   NODE_VERSION: 20
+2026-07-02T19:15:33.4082004Z   CI: true
+2026-07-02T19:15:33.4082357Z   NODE_ENV: test
+2026-07-02T19:15:33.4083097Z   DATABASE_URL: ***localhost:5432/careconnect
+2026-07-02T19:15:33.4083675Z   NEON_LOCAL_WS_PROXY: localhost:4444
+2026-07-02T19:15:33.4084392Z   ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+2026-07-02T19:15:33.4085158Z   SKIP_SERVER_FRESHNESS_CHECK: 1
+2026-07-02T19:15:33.4085756Z   TEST_USER_EMAIL: ***
+2026-07-02T19:15:33.4086399Z   TEST_USER_PASSWORD: ***
+2026-07-02T19:15:33.4086951Z   SUPER_ADMIN_EMAIL: ***
+2026-07-02T19:15:33.4087399Z   SERVER_PID: 4086
+2026-07-02T19:15:33.4087783Z ##[endgroup]
+2026-07-02T19:15:33.6000157Z 
+2026-07-02T19:15:33.6000842Z > rest-express@1.0.0 test:e2e:smoke
+2026-07-02T19:15:33.6001664Z > playwright test --grep @smoke
+2026-07-02T19:15:33.6029839Z 
+2026-07-02T19:15:35.7511370Z [e2e:globalSetup] App ist healthy nach 0.3s.
+2026-07-02T19:15:36.5078548Z 
+2026-07-02T19:15:36.5079254Z Running 37 tests using 1 worker
+2026-07-02T19:15:36.5079888Z 
+2026-07-02T19:15:49.0591974Z   ✓   1 [chromium] › e2e/smoke/appointment-detail-mobile-layout.spec.ts:45:3 › @smoke Termin-Detail Mobile-Layout › abgeschlossener Termin mit Leistungsnachweis: CTA & Gesamt-Zeile bleiben im 375-px-Viewport intakt (4.8s)
+2026-07-02T19:15:49.0598266Z   -   2 [chromium] › e2e/smoke/billing-bulk.spec.ts:129:3 › @smoke Billing — Massenerstellung & Bündel-Druck › Generate-All erstellt 2 Rechnungen, Bündel-Druck liefert PDF, Mark-Sent setzt sentAt
+2026-07-02T19:15:53.1841784Z   ✓   3 [chromium] › e2e/smoke/billing-page-overview.spec.ts:164:3 › @smoke Abrechnung — Seiten-Überblick › KPIs/Pipeline/Termine rendern, Pipeline-Chip steuert Tab+Filter, Sammeldruck ist read-only (3.8s)
+2026-07-02T19:15:56.7618400Z   ✓   4 [chromium] › e2e/smoke/budget-45b-fifo-breakdown.spec.ts:60:3 › @smoke §45b FIFO-Aufschlüsselung — Balken auf der Detailseite › echter §45b-Kunde (Übertrag + laufendes Jahr + dok. Termin) zeigt den FIFO-Balken (3.3s)
+2026-07-02T19:15:57.5228158Z   ✓   5 [chromium] › e2e/smoke/budget-selbstzahler-45b-hardblock.spec.ts:65:3 › @smoke Buchungs-Hard-Block — Selbstzahler vs. §45b › Selbstzahler-Termin kann nicht aus §45b finanziert werden (409, flag-unabhängig) (456ms)
+2026-07-02T19:16:00.8370489Z   ✓   6 [chromium] › e2e/smoke/budget-setup-required-banner.spec.ts:38:3 › @smoke Budget-Setup-Banner — Sichtbarkeit & CTA › Pflegekasse-Kunde ohne Töpfe → Banner sichtbar, CTA wechselt in den Budgets-Tab (3.0s)
+2026-07-02T19:16:09.7726310Z   ✓   7 [chromium] › e2e/smoke/documentation-submit-retry.spec.ts:71:3 › @smoke Doku-Submit Resilienz (#490) › zeigt Fehler-Banner bei 503, gespeichert nach Retry (8.6s)
+2026-07-02T19:16:12.2616511Z   ✓   8 [chromium] › e2e/smoke/documentation-submit-retry.spec.ts:154:3 › @smoke Doku-Submit Resilienz (#490) › ALREADY_COMPLETED zeigt spezifische Meldung und sperrt Retry (2.5s)
+2026-07-02T19:16:15.6941305Z   ✓   9 [chromium] › e2e/smoke/edit-persistence.spec.ts:49:3 › @smoke Edit-Persistence Round-Trip › Kunde bearbeiten — Adresse persistiert nach Reload (3.1s)
+2026-07-02T19:16:18.5089196Z   ✓  10 [chromium] › e2e/smoke/edit-persistence.spec.ts:68:3 › @smoke Edit-Persistence Round-Trip › Kunde bearbeiten — Pflegegrad persistiert nach Reload (2.8s)
+2026-07-02T19:16:21.0870034Z   ✓  11 [chromium] › e2e/smoke/edit-persistence.spec.ts:95:3 › @smoke Edit-Persistence Round-Trip › Kunde bearbeiten — Kontaktperson hinzufügen persistiert nach Reload (2.6s)
+2026-07-02T19:16:25.7796003Z   ✓  12 [chromium] › e2e/smoke/edit-persistence.spec.ts:122:3 › @smoke Edit-Persistence Round-Trip › Mitarbeiter bearbeiten — Stammdaten persistieren nach Reload (4.7s)
+2026-07-02T19:16:30.5965884Z   ✓  13 [chromium] › e2e/smoke/edit-persistence.spec.ts:172:3 › @smoke Edit-Persistence Round-Trip › Mitarbeiter bearbeiten — Verfügbarkeit (Wochenstunden) persistiert (4.8s)
+2026-07-02T19:16:36.3002717Z   ✓  14 [chromium] › e2e/smoke/edit-persistence.spec.ts:209:3 › @smoke Edit-Persistence Round-Trip › Termin bearbeiten — Zeit + Mitarbeiter-Wechsel persistieren nach Reload (5.7s)
+2026-07-02T19:16:39.4751324Z   ✓  15 [chromium] › e2e/smoke/edit-persistence.spec.ts:265:3 › @smoke Edit-Persistence Round-Trip › Termin dokumentieren — Leistungen + Notiz persistieren nach Reload (3.2s)
+2026-07-02T19:16:42.7205798Z   ✓  16 [chromium] › e2e/smoke/edit-persistence.spec.ts:331:3 › @smoke Edit-Persistence Round-Trip › Termin dokumentieren — Anfahrt-km + Kunden-km landen im selben Schritt (Ja) (3.2s)
+2026-07-02T19:16:45.8387563Z   ✓  17 [chromium] › e2e/smoke/edit-persistence.spec.ts:389:3 › @smoke Edit-Persistence Round-Trip › Termin dokumentieren — Kunden-km bleibt 0 bei Toggle 'Nein' (3.1s)
+2026-07-02T19:18:20.0997765Z   ✘  18 [chromium] › e2e/smoke/edit-persistence.spec.ts:443:3 › @smoke Edit-Persistence Round-Trip › Termin km 7,3 → 12,7 — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '12,70 km' (1.6m)
+2026-07-02T19:19:56.3550737Z   ✘  19 [chromium] › e2e/smoke/edit-persistence.spec.ts:443:3 › @smoke Edit-Persistence Round-Trip › Termin km 7,3 → 12,7 — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '12,70 km' (retry #1) (1.6m)
+2026-07-02T19:21:32.2539563Z   ✘  20 [chromium] › e2e/smoke/edit-persistence.spec.ts:443:3 › @smoke Edit-Persistence Round-Trip › Termin km 7,3 → 12,7 — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '12,70 km' (retry #2) (1.6m)
+2026-07-02T19:23:08.3713495Z   ✘  21 [chromium] › e2e/smoke/edit-persistence.spec.ts:744:3 › @smoke Edit-Persistence Round-Trip › Termin Hauswirtschaft 45 → 72 Min — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '1 Std. 12 Min.' (1.6m)
+2026-07-02T19:24:44.5626270Z   ✘  22 [chromium] › e2e/smoke/edit-persistence.spec.ts:744:3 › @smoke Edit-Persistence Round-Trip › Termin Hauswirtschaft 45 → 72 Min — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '1 Std. 12 Min.' (retry #1) (1.6m)
+2026-07-02T19:26:20.6388924Z   ✘  23 [chromium] › e2e/smoke/edit-persistence.spec.ts:744:3 › @smoke Edit-Persistence Round-Trip › Termin Hauswirtschaft 45 → 72 Min — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '1 Std. 12 Min.' (retry #2) (1.6m)
+2026-07-02T19:26:26.6675547Z   ✓  24 [chromium] › e2e/smoke/edit-persistence.spec.ts:1005:3 › @smoke Edit-Persistence Round-Trip › Lead bearbeiten — Status + Notiz persistieren nach Reload (4.2s)
+2026-07-02T19:26:29.9816620Z   ✓  25 [chromium] › e2e/smoke/edit-persistence.spec.ts:1045:3 › @smoke Edit-Persistence Round-Trip › Budget-Einstellungen — Cap + zweiter Pott persistieren nach Reload (3.3s)
+2026-07-02T19:26:33.1730134Z   ✓  26 [chromium] › e2e/smoke/edit-persistence.spec.ts:1102:3 › @smoke Edit-Persistence Round-Trip › Kundenpreis 0,00 € für Anfahrtskilometer speichern und nach Reload anzeigen (3.2s)
+2026-07-02T19:26:35.2666408Z   ✓  27 [chromium] › e2e/smoke/edit-persistence.spec.ts:1155:3 › @smoke Edit-Persistence Round-Trip › Kundenpreis: negative Eingabe (-0,01) wird im UI abgelehnt (2.1s)
+2026-07-02T19:26:47.8314526Z   ✘  28 [chromium] › e2e/smoke/edit-persistence.spec.ts:1212:3 › @smoke Edit-Persistence Round-Trip › §45b-Carryover — Löschen über die UI persistiert nach Reload (12.4s)
+2026-07-02T19:27:02.3359148Z   ✘  29 [chromium] › e2e/smoke/edit-persistence.spec.ts:1212:3 › @smoke Edit-Persistence Round-Trip › §45b-Carryover — Löschen über die UI persistiert nach Reload (retry #1) (12.5s)
+2026-07-02T19:27:16.8448694Z   ✘  30 [chromium] › e2e/smoke/edit-persistence.spec.ts:1212:3 › @smoke Edit-Persistence Round-Trip › §45b-Carryover — Löschen über die UI persistiert nach Reload (retry #2) (12.5s)
+2026-07-02T19:27:21.5619326Z   ✓  31 [chromium] › e2e/smoke/edit-persistence.spec.ts:1352:3 › @smoke Edit-Persistence Round-Trip › Firmenstammdaten — Telefon persistiert nach Reload (2.9s)
+2026-07-02T19:27:38.6049060Z   ✘  32 [chromium] › e2e/smoke/edit-persistence.spec.ts:1395:3 › @smoke Edit-Persistence Round-Trip › Standardpreis anlegen + ersetzen (PRICE_CONFLICT) persistiert nach Reload (16.9s)
+2026-07-02T19:27:57.6235666Z   ✘  33 [chromium] › e2e/smoke/edit-persistence.spec.ts:1395:3 › @smoke Edit-Persistence Round-Trip › Standardpreis anlegen + ersetzen (PRICE_CONFLICT) persistiert nach Reload (retry #1) (17.0s)
+2026-07-02T19:28:16.3254402Z   ✘  34 [chromium] › e2e/smoke/edit-persistence.spec.ts:1395:3 › @smoke Edit-Persistence Round-Trip › Standardpreis anlegen + ersetzen (PRICE_CONFLICT) persistiert nach Reload (retry #2) (16.7s)
+2026-07-02T19:28:21.6797904Z   ✓  35 [chromium] › e2e/smoke/edit-persistence.spec.ts:1517:3 › @smoke Edit-Persistence Round-Trip › Sammel-LN — abgewählter Termin bleibt für zweiten Nachweis verfügbar (3.5s)
+2026-07-02T19:28:25.4241060Z   ✓  36 [chromium] › e2e/smoke/prospect-disqualify.spec.ts:37:3 › @smoke Prospect-Disqualify Round-Trip › 'Kontaktiert' → Disqualifizieren (mit Grund) → 'Disqualifiziert' + Verlauf (3.4s)
+2026-07-02T19:28:27.5813721Z   ✓  37 [chromium] › e2e/smoke/prospect-erstberatung-card.spec.ts:180:3 › @smoke Interessenten-Karte zeigt Erstberatungs-Details › Geplante Erstberatung: Karte rendert Datum, Uhrzeit, Status und Mitarbeiter (1.8s)
+2026-07-02T19:28:29.4851644Z   ✓  38 [chromium] › e2e/smoke/prospect-erstberatung-card.spec.ts:220:3 › @smoke Interessenten-Karte zeigt Erstberatungs-Details › Nach Umplanung: Karte zeigt den aktuellsten (späteren) Erstberatungstermin (1.9s)
+2026-07-02T19:28:31.6070639Z   ✓  39 [chromium] › e2e/smoke/prospect-erstberatung-card.spec.ts:269:3 › @smoke Interessenten-Karte zeigt Erstberatungs-Details › Abgeschlossene Erstberatung durch Vertretung: Karte zeigt durchführenden Mitarbeiter + 'Abgeschlossen' (2.1s)
+2026-07-02T19:28:33.3982431Z   ✓  40 [chromium] › e2e/smoke/prospect-erstberatung-card.spec.ts:326:3 › @smoke Interessenten-Karte zeigt Erstberatungs-Details › Ohne Termin: Karte zeigt keinen Erstberatungs-Block (1.8s)
+2026-07-02T19:28:36.8400083Z   ✓  41 [chromium] › e2e/smoke/prospect-revive.spec.ts:36:3 › @smoke Prospect-Revive Round-Trip › 'Nicht interessiert' → Wieder aufnehmen → 'Qualifiziert' + Erstberatung planbar + Verlauf (3.1s)
+2026-07-02T19:28:40.6029861Z   ✓  42 [chromium] › e2e/smoke/service-record-drilldown.spec.ts:39:3 › @smoke Offene Termine Drill-Down › Offene Termine → Termindetail → Zurück bleibt in der Liste (3.5s)
+2026-07-02T19:28:46.9406129Z   ✓  43 [chromium] › e2e/smoke/wizard-45b-override.spec.ts:183:3 › @smoke §45b Restguthaben-Override (Wizard) › Override AN erzeugt genau eine §45b initial_balance-Allokation (6.0s)
+2026-07-02T19:28:53.7522565Z   ✓  44 [chromium] › e2e/smoke/wizard-45b-override.spec.ts:218:3 › @smoke §45b Restguthaben-Override (Wizard) › Override AUS: keine §45b initial_balance, aber Type-Settings + Carryover (6.8s)
+2026-07-02T19:28:59.3429716Z   ✓  45 [chromium] › e2e/smoke/wizard-45b-override.spec.ts:270:3 › @smoke §45b Restguthaben-Override (Wizard) › Über-Cap-Restguthaben wird client-seitig geblockt (5.6s)
+2026-07-02T19:28:59.4135514Z 
+2026-07-02T19:28:59.4141221Z 
+2026-07-02T19:28:59.4156860Z   1) [chromium] › e2e/smoke/edit-persistence.spec.ts:443:3 › @smoke Edit-Persistence Round-Trip › Termin km 7,3 → 12,7 — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '12,70 km' 
+2026-07-02T19:28:59.4158168Z 
+2026-07-02T19:28:59.4158662Z     [31mTest timeout of 90000ms exceeded.[39m
+2026-07-02T19:28:59.4159403Z 
+2026-07-02T19:28:59.4162819Z     Error: locator.click: Test timeout of 90000ms exceeded.
+2026-07-02T19:28:59.4163314Z     Call log:
+2026-07-02T19:28:59.4164028Z     [2m  - waiting for locator('[data-testid=\'select-billing-month\']')[22m
+2026-07-02T19:28:59.4164434Z 
+2026-07-02T19:28:59.4164443Z 
+2026-07-02T19:28:59.4164683Z       710 |       const billingMonth = apptDate.getMonth() + 1;
+2026-07-02T19:28:59.4165266Z       711 |       const billingYear = apptDate.getFullYear();
+2026-07-02T19:28:59.4165979Z     > 712 |       await page.locator("[data-testid='select-billing-month']").click();
+2026-07-02T19:28:59.4166573Z           |                                                                  ^
+2026-07-02T19:28:59.4167536Z       713 |       await page.getByRole("option", { name: new RegExp(`^${
+2026-07-02T19:28:59.4168770Z       714 |         ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][billingMonth - 1]
+2026-07-02T19:28:59.4170209Z       715 |       }$`) }).click();
+2026-07-02T19:28:59.4171165Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:712:66
+2026-07-02T19:28:59.4171682Z 
+2026-07-02T19:28:59.4172221Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4173093Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium/test-failed-1.png
+2026-07-02T19:28:59.4174102Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4174455Z 
+2026-07-02T19:28:59.4175232Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4176619Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium/video.webm
+2026-07-02T19:28:59.4177451Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4177742Z 
+2026-07-02T19:28:59.4178313Z     Error Context: test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium/error-context.md
+2026-07-02T19:28:59.4179411Z 
+2026-07-02T19:28:59.4180180Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4180946Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium/trace.zip
+2026-07-02T19:28:59.4181459Z     Usage:
+2026-07-02T19:28:59.4181577Z 
+2026-07-02T19:28:59.4182070Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium/trace.zip
+2026-07-02T19:28:59.4182594Z 
+2026-07-02T19:28:59.4182966Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4183259Z 
+2026-07-02T19:28:59.4183618Z     Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4183916Z 
+2026-07-02T19:28:59.4184113Z     [31mTest timeout of 90000ms exceeded.[39m
+2026-07-02T19:28:59.4184327Z 
+2026-07-02T19:28:59.4184538Z     Error: locator.click: Test timeout of 90000ms exceeded.
+2026-07-02T19:28:59.4184869Z     Call log:
+2026-07-02T19:28:59.4185306Z     [2m  - waiting for locator('[data-testid=\'select-billing-month\']')[22m
+2026-07-02T19:28:59.4185622Z 
+2026-07-02T19:28:59.4185628Z 
+2026-07-02T19:28:59.4185820Z       710 |       const billingMonth = apptDate.getMonth() + 1;
+2026-07-02T19:28:59.4186252Z       711 |       const billingYear = apptDate.getFullYear();
+2026-07-02T19:28:59.4186751Z     > 712 |       await page.locator("[data-testid='select-billing-month']").click();
+2026-07-02T19:28:59.4187422Z           |                                                                  ^
+2026-07-02T19:28:59.4187885Z       713 |       await page.getByRole("option", { name: new RegExp(`^${
+2026-07-02T19:28:59.4188724Z       714 |         ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][billingMonth - 1]
+2026-07-02T19:28:59.4189322Z       715 |       }$`) }).click();
+2026-07-02T19:28:59.4190161Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:712:66
+2026-07-02T19:28:59.4190534Z 
+2026-07-02T19:28:59.4190954Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4191763Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry1/test-failed-1.png
+2026-07-02T19:28:59.4192606Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4192900Z 
+2026-07-02T19:28:59.4193300Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4194041Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry1/video.webm
+2026-07-02T19:28:59.4194837Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4195284Z 
+2026-07-02T19:28:59.4195790Z     Error Context: test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry1/error-context.md
+2026-07-02T19:28:59.4196332Z 
+2026-07-02T19:28:59.4196736Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4197656Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry1/trace.zip
+2026-07-02T19:28:59.4198367Z     Usage:
+2026-07-02T19:28:59.4198493Z 
+2026-07-02T19:28:59.4199152Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry1/trace.zip
+2026-07-02T19:28:59.4200019Z 
+2026-07-02T19:28:59.4200664Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4200994Z 
+2026-07-02T19:28:59.4201488Z     Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4201936Z 
+2026-07-02T19:28:59.4202154Z     [31mTest timeout of 90000ms exceeded.[39m
+2026-07-02T19:28:59.4202421Z 
+2026-07-02T19:28:59.4202696Z     Error: locator.click: Test timeout of 90000ms exceeded.
+2026-07-02T19:28:59.4203100Z     Call log:
+2026-07-02T19:28:59.4203652Z     [2m  - waiting for locator('[data-testid=\'select-billing-month\']')[22m
+2026-07-02T19:28:59.4204067Z 
+2026-07-02T19:28:59.4204075Z 
+2026-07-02T19:28:59.4204288Z       710 |       const billingMonth = apptDate.getMonth() + 1;
+2026-07-02T19:28:59.4204833Z       711 |       const billingYear = apptDate.getFullYear();
+2026-07-02T19:28:59.4205526Z     > 712 |       await page.locator("[data-testid='select-billing-month']").click();
+2026-07-02T19:28:59.4206154Z           |                                                                  ^
+2026-07-02T19:28:59.4206603Z       713 |       await page.getByRole("option", { name: new RegExp(`^${
+2026-07-02T19:28:59.4207454Z       714 |         ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][billingMonth - 1]
+2026-07-02T19:28:59.4208064Z       715 |       }$`) }).click();
+2026-07-02T19:28:59.4208554Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:712:66
+2026-07-02T19:28:59.4208916Z 
+2026-07-02T19:28:59.4209325Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4210494Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry2/test-failed-1.png
+2026-07-02T19:28:59.4211355Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4211664Z 
+2026-07-02T19:28:59.4212058Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4212816Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry2/video.webm
+2026-07-02T19:28:59.4213924Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4214501Z 
+2026-07-02T19:28:59.4215224Z     Error Context: test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry2/error-context.md
+2026-07-02T19:28:59.4215952Z 
+2026-07-02T19:28:59.4216564Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4217675Z     test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry2/trace.zip
+2026-07-02T19:28:59.4218397Z     Usage:
+2026-07-02T19:28:59.4218545Z 
+2026-07-02T19:28:59.4219268Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-549c5--zeigen-identisch-12-70-km--chromium-retry2/trace.zip
+2026-07-02T19:28:59.4220246Z 
+2026-07-02T19:28:59.4220824Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4221179Z 
+2026-07-02T19:28:59.4222296Z   2) [chromium] › e2e/smoke/edit-persistence.spec.ts:744:3 › @smoke Edit-Persistence Round-Trip › Termin Hauswirtschaft 45 → 72 Min — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '1 Std. 12 Min.' 
+2026-07-02T19:28:59.4223076Z 
+2026-07-02T19:28:59.4223280Z     [31mTest timeout of 90000ms exceeded.[39m
+2026-07-02T19:28:59.4223501Z 
+2026-07-02T19:28:59.4223695Z     Error: locator.click: Test timeout of 90000ms exceeded.
+2026-07-02T19:28:59.4224050Z     Call log:
+2026-07-02T19:28:59.4224496Z     [2m  - waiting for locator('[data-testid=\'select-billing-month\']')[22m
+2026-07-02T19:28:59.4224805Z 
+2026-07-02T19:28:59.4224984Z 
+2026-07-02T19:28:59.4225199Z       965 |       const billingMonth = apptDate.getMonth() + 1;
+2026-07-02T19:28:59.4225652Z       966 |       const billingYear = apptDate.getFullYear();
+2026-07-02T19:28:59.4226274Z     > 967 |       await page.locator("[data-testid='select-billing-month']").click();
+2026-07-02T19:28:59.4227028Z           |                                                                  ^
+2026-07-02T19:28:59.4227544Z       968 |       await page
+2026-07-02T19:28:59.4228000Z       969 |         .getByRole("option", {
+2026-07-02T19:28:59.4228486Z       970 |           name: new RegExp(
+2026-07-02T19:28:59.4229235Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:967:66
+2026-07-02T19:28:59.4230074Z 
+2026-07-02T19:28:59.4230706Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4231849Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium/test-failed-1.png
+2026-07-02T19:28:59.4232894Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4233199Z 
+2026-07-02T19:28:59.4233596Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4234324Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium/video.webm
+2026-07-02T19:28:59.4235492Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4235861Z 
+2026-07-02T19:28:59.4236730Z     Error Context: test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium/error-context.md
+2026-07-02T19:28:59.4237580Z 
+2026-07-02T19:28:59.4238500Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4239894Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium/trace.zip
+2026-07-02T19:28:59.4240596Z     Usage:
+2026-07-02T19:28:59.4240720Z 
+2026-07-02T19:28:59.4241396Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium/trace.zip
+2026-07-02T19:28:59.4242216Z 
+2026-07-02T19:28:59.4242674Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4242989Z 
+2026-07-02T19:28:59.4243568Z     Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4244037Z 
+2026-07-02T19:28:59.4244264Z     [31mTest timeout of 90000ms exceeded.[39m
+2026-07-02T19:28:59.4244483Z 
+2026-07-02T19:28:59.4244673Z     Error: locator.click: Test timeout of 90000ms exceeded.
+2026-07-02T19:28:59.4245015Z     Call log:
+2026-07-02T19:28:59.4245460Z     [2m  - waiting for locator('[data-testid=\'select-billing-month\']')[22m
+2026-07-02T19:28:59.4245772Z 
+2026-07-02T19:28:59.4245779Z 
+2026-07-02T19:28:59.4245970Z       965 |       const billingMonth = apptDate.getMonth() + 1;
+2026-07-02T19:28:59.4246615Z       966 |       const billingYear = apptDate.getFullYear();
+2026-07-02T19:28:59.4247124Z     > 967 |       await page.locator("[data-testid='select-billing-month']").click();
+2026-07-02T19:28:59.4247608Z           |                                                                  ^
+2026-07-02T19:28:59.4247948Z       968 |       await page
+2026-07-02T19:28:59.4248235Z       969 |         .getByRole("option", {
+2026-07-02T19:28:59.4248548Z       970 |           name: new RegExp(
+2026-07-02T19:28:59.4249040Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:967:66
+2026-07-02T19:28:59.4249394Z 
+2026-07-02T19:28:59.4250101Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4250929Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry1/test-failed-1.png
+2026-07-02T19:28:59.4251781Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4252080Z 
+2026-07-02T19:28:59.4252624Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4253419Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry1/video.webm
+2026-07-02T19:28:59.4254409Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4254692Z 
+2026-07-02T19:28:59.4255200Z     Error Context: test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry1/error-context.md
+2026-07-02T19:28:59.4255785Z 
+2026-07-02T19:28:59.4256508Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4257304Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry1/trace.zip
+2026-07-02T19:28:59.4257875Z     Usage:
+2026-07-02T19:28:59.4257991Z 
+2026-07-02T19:28:59.4258520Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry1/trace.zip
+2026-07-02T19:28:59.4259080Z 
+2026-07-02T19:28:59.4259907Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4260290Z 
+2026-07-02T19:28:59.4260865Z     Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4261182Z 
+2026-07-02T19:28:59.4261387Z     [31mTest timeout of 90000ms exceeded.[39m
+2026-07-02T19:28:59.4261606Z 
+2026-07-02T19:28:59.4261806Z     Error: locator.click: Test timeout of 90000ms exceeded.
+2026-07-02T19:28:59.4262144Z     Call log:
+2026-07-02T19:28:59.4262578Z     [2m  - waiting for locator('[data-testid=\'select-billing-month\']')[22m
+2026-07-02T19:28:59.4262898Z 
+2026-07-02T19:28:59.4262905Z 
+2026-07-02T19:28:59.4263101Z       965 |       const billingMonth = apptDate.getMonth() + 1;
+2026-07-02T19:28:59.4263917Z       966 |       const billingYear = apptDate.getFullYear();
+2026-07-02T19:28:59.4264436Z     > 967 |       await page.locator("[data-testid='select-billing-month']").click();
+2026-07-02T19:28:59.4264924Z           |                                                                  ^
+2026-07-02T19:28:59.4265255Z       968 |       await page
+2026-07-02T19:28:59.4265559Z       969 |         .getByRole("option", {
+2026-07-02T19:28:59.4265868Z       970 |           name: new RegExp(
+2026-07-02T19:28:59.4266361Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:967:66
+2026-07-02T19:28:59.4266717Z 
+2026-07-02T19:28:59.4267138Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4267961Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry2/test-failed-1.png
+2026-07-02T19:28:59.4268810Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4269109Z 
+2026-07-02T19:28:59.4269710Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4270480Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry2/video.webm
+2026-07-02T19:28:59.4271452Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4271751Z 
+2026-07-02T19:28:59.4272257Z     Error Context: test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry2/error-context.md
+2026-07-02T19:28:59.4272800Z 
+2026-07-02T19:28:59.4273204Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4273970Z     test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry2/trace.zip
+2026-07-02T19:28:59.4274520Z     Usage:
+2026-07-02T19:28:59.4274654Z 
+2026-07-02T19:28:59.4275184Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-4ffda-gen-identisch-1-Std-12-Min--chromium-retry2/trace.zip
+2026-07-02T19:28:59.4275745Z 
+2026-07-02T19:28:59.4276099Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4276389Z 
+2026-07-02T19:28:59.4277175Z   3) [chromium] › e2e/smoke/edit-persistence.spec.ts:1212:3 › @smoke Edit-Persistence Round-Trip › §45b-Carryover — Löschen über die UI persistiert nach Reload 
+2026-07-02T19:28:59.4277780Z 
+2026-07-02T19:28:59.4278161Z     Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+2026-07-02T19:28:59.4278511Z 
+2026-07-02T19:28:59.4278711Z     Locator: locator('[data-testid=\'text-45b-carryover\']')
+2026-07-02T19:28:59.4279071Z     Expected: visible
+2026-07-02T19:28:59.4279315Z     Timeout: 10000ms
+2026-07-02T19:28:59.4279716Z     Error: element(s) not found
+2026-07-02T19:28:59.4280037Z 
+2026-07-02T19:28:59.4280129Z     Call log:
+2026-07-02T19:28:59.4280499Z     [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+2026-07-02T19:28:59.4281043Z     [2m  - waiting for locator('[data-testid=\'text-45b-carryover\']')[22m
+2026-07-02T19:28:59.4281342Z 
+2026-07-02T19:28:59.4281348Z 
+2026-07-02T19:28:59.4281436Z       1287 |
+2026-07-02T19:28:59.4281846Z       1288 |     // BudgetSummary zeigt den Carryover-Wert vor dem Löschen.
+2026-07-02T19:28:59.4282448Z     > 1289 |     await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
+2026-07-02T19:28:59.4282983Z            |                                                                      ^
+2026-07-02T19:28:59.4283342Z       1290 |       timeout: 10000,
+2026-07-02T19:28:59.4283603Z       1291 |     });
+2026-07-02T19:28:59.4283815Z       1292 |
+2026-07-02T19:28:59.4284244Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:1289:70
+2026-07-02T19:28:59.4284609Z 
+2026-07-02T19:28:59.4285025Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4285800Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium/test-failed-1.png
+2026-07-02T19:28:59.4286612Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4286903Z 
+2026-07-02T19:28:59.4287422Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4288138Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium/video.webm
+2026-07-02T19:28:59.4288926Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4289402Z 
+2026-07-02T19:28:59.4290510Z     Error Context: test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium/error-context.md
+2026-07-02T19:28:59.4291499Z 
+2026-07-02T19:28:59.4291957Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4292724Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium/trace.zip
+2026-07-02T19:28:59.4306666Z     Usage:
+2026-07-02T19:28:59.4306888Z 
+2026-07-02T19:28:59.4307720Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium/trace.zip
+2026-07-02T19:28:59.4308357Z 
+2026-07-02T19:28:59.4308787Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4309103Z 
+2026-07-02T19:28:59.4309720Z     Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4310080Z 
+2026-07-02T19:28:59.4310479Z     Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+2026-07-02T19:28:59.4310834Z 
+2026-07-02T19:28:59.4311039Z     Locator: locator('[data-testid=\'text-45b-carryover\']')
+2026-07-02T19:28:59.4311612Z     Expected: visible
+2026-07-02T19:28:59.4311858Z     Timeout: 10000ms
+2026-07-02T19:28:59.4312108Z     Error: element(s) not found
+2026-07-02T19:28:59.4312278Z 
+2026-07-02T19:28:59.4312367Z     Call log:
+2026-07-02T19:28:59.4312724Z     [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+2026-07-02T19:28:59.4313258Z     [2m  - waiting for locator('[data-testid=\'text-45b-carryover\']')[22m
+2026-07-02T19:28:59.4313572Z 
+2026-07-02T19:28:59.4313579Z 
+2026-07-02T19:28:59.4313666Z       1287 |
+2026-07-02T19:28:59.4314071Z       1288 |     // BudgetSummary zeigt den Carryover-Wert vor dem Löschen.
+2026-07-02T19:28:59.4314663Z     > 1289 |     await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
+2026-07-02T19:28:59.4315258Z            |                                                                      ^
+2026-07-02T19:28:59.4315902Z       1290 |       timeout: 10000,
+2026-07-02T19:28:59.4316342Z       1291 |     });
+2026-07-02T19:28:59.4316730Z       1292 |
+2026-07-02T19:28:59.4317231Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:1289:70
+2026-07-02T19:28:59.4317676Z 
+2026-07-02T19:28:59.4318173Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4319063Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry1/test-failed-1.png
+2026-07-02T19:28:59.4320376Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4320681Z 
+2026-07-02T19:28:59.4321076Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4321828Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry1/video.webm
+2026-07-02T19:28:59.4322621Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4322925Z 
+2026-07-02T19:28:59.4323425Z     Error Context: test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry1/error-context.md
+2026-07-02T19:28:59.4323961Z 
+2026-07-02T19:28:59.4324360Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4325119Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry1/trace.zip
+2026-07-02T19:28:59.4325679Z     Usage:
+2026-07-02T19:28:59.4325796Z 
+2026-07-02T19:28:59.4326319Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry1/trace.zip
+2026-07-02T19:28:59.4326874Z 
+2026-07-02T19:28:59.4327218Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4327504Z 
+2026-07-02T19:28:59.4327859Z     Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4328302Z 
+2026-07-02T19:28:59.4328668Z     Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+2026-07-02T19:28:59.4329005Z 
+2026-07-02T19:28:59.4329205Z     Locator: locator('[data-testid=\'text-45b-carryover\']')
+2026-07-02T19:28:59.4329857Z     Expected: visible
+2026-07-02T19:28:59.4330105Z     Timeout: 10000ms
+2026-07-02T19:28:59.4330359Z     Error: element(s) not found
+2026-07-02T19:28:59.4330543Z 
+2026-07-02T19:28:59.4330633Z     Call log:
+2026-07-02T19:28:59.4330990Z     [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+2026-07-02T19:28:59.4331516Z     [2m  - waiting for locator('[data-testid=\'text-45b-carryover\']')[22m
+2026-07-02T19:28:59.4331812Z 
+2026-07-02T19:28:59.4331818Z 
+2026-07-02T19:28:59.4331906Z       1287 |
+2026-07-02T19:28:59.4332315Z       1288 |     // BudgetSummary zeigt den Carryover-Wert vor dem Löschen.
+2026-07-02T19:28:59.4332907Z     > 1289 |     await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
+2026-07-02T19:28:59.4333457Z            |                                                                      ^
+2026-07-02T19:28:59.4333812Z       1290 |       timeout: 10000,
+2026-07-02T19:28:59.4334073Z       1291 |     });
+2026-07-02T19:28:59.4334285Z       1292 |
+2026-07-02T19:28:59.4334711Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:1289:70
+2026-07-02T19:28:59.4335213Z 
+2026-07-02T19:28:59.4335627Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4336424Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry2/test-failed-1.png
+2026-07-02T19:28:59.4337265Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4337553Z 
+2026-07-02T19:28:59.4337939Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4338690Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry2/video.webm
+2026-07-02T19:28:59.4339731Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4340108Z 
+2026-07-02T19:28:59.4340614Z     Error Context: test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry2/error-context.md
+2026-07-02T19:28:59.4341175Z 
+2026-07-02T19:28:59.4341589Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4342339Z     test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry2/trace.zip
+2026-07-02T19:28:59.4342871Z     Usage:
+2026-07-02T19:28:59.4342985Z 
+2026-07-02T19:28:59.4343508Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-1d6b0--UI-persistiert-nach-Reload-chromium-retry2/trace.zip
+2026-07-02T19:28:59.4344061Z 
+2026-07-02T19:28:59.4344409Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4344847Z 
+2026-07-02T19:28:59.4345610Z   4) [chromium] › e2e/smoke/edit-persistence.spec.ts:1395:3 › @smoke Edit-Persistence Round-Trip › Standardpreis anlegen + ersetzen (PRICE_CONFLICT) persistiert nach Reload 
+2026-07-02T19:28:59.4346241Z 
+2026-07-02T19:28:59.4346599Z     Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+2026-07-02T19:28:59.4346960Z 
+2026-07-02T19:28:59.4347151Z     Locator: locator('[data-testid=\'pricing-row-1\']')
+2026-07-02T19:28:59.4347485Z     Expected: visible
+2026-07-02T19:28:59.4347725Z     Timeout: 15000ms
+2026-07-02T19:28:59.4347977Z     Error: element(s) not found
+2026-07-02T19:28:59.4348147Z 
+2026-07-02T19:28:59.4348231Z     Call log:
+2026-07-02T19:28:59.4348580Z     [2m  - Expect "toBeVisible" with timeout 15000ms[22m
+2026-07-02T19:28:59.4349085Z     [2m  - waiting for locator('[data-testid=\'pricing-row-1\']')[22m
+2026-07-02T19:28:59.4349361Z 
+2026-07-02T19:28:59.4349377Z 
+2026-07-02T19:28:59.4349727Z       1430 |
+2026-07-02T19:28:59.4350185Z       1431 |       const row = page.locator(`[data-testid='pricing-row-${serviceId}']`);
+2026-07-02T19:28:59.4350712Z     > 1432 |       await expect(row).toBeVisible({ timeout: 15000 });
+2026-07-02T19:28:59.4351085Z            |                         ^
+2026-07-02T19:28:59.4351349Z       1433 |
+2026-07-02T19:28:59.4351907Z       1434 |       await page.locator(`[data-testid='btn-edit-price-${serviceId}']`).click();
+2026-07-02T19:28:59.4352546Z       1435 |       const priceField = page.locator(`[data-testid='input-price-${serviceId}']`);
+2026-07-02T19:28:59.4353194Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:1432:25
+2026-07-02T19:28:59.4353559Z 
+2026-07-02T19:28:59.4353986Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4354752Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium/test-failed-1.png
+2026-07-02T19:28:59.4355563Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4355852Z 
+2026-07-02T19:28:59.4356236Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4356944Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium/video.webm
+2026-07-02T19:28:59.4357729Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4358014Z 
+2026-07-02T19:28:59.4358488Z     Error Context: test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium/error-context.md
+2026-07-02T19:28:59.4358996Z 
+2026-07-02T19:28:59.4359388Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4360252Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium/trace.zip
+2026-07-02T19:28:59.4360906Z     Usage:
+2026-07-02T19:28:59.4361024Z 
+2026-07-02T19:28:59.4361515Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium/trace.zip
+2026-07-02T19:28:59.4362039Z 
+2026-07-02T19:28:59.4362392Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4362697Z 
+2026-07-02T19:28:59.4363057Z     Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4363353Z 
+2026-07-02T19:28:59.4363714Z     Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+2026-07-02T19:28:59.4364055Z 
+2026-07-02T19:28:59.4364229Z     Locator: locator('[data-testid=\'pricing-row-1\']')
+2026-07-02T19:28:59.4364559Z     Expected: visible
+2026-07-02T19:28:59.4364798Z     Timeout: 15000ms
+2026-07-02T19:28:59.4365050Z     Error: element(s) not found
+2026-07-02T19:28:59.4365231Z 
+2026-07-02T19:28:59.4365318Z     Call log:
+2026-07-02T19:28:59.4365660Z     [2m  - Expect "toBeVisible" with timeout 15000ms[22m
+2026-07-02T19:28:59.4366167Z     [2m  - waiting for locator('[data-testid=\'pricing-row-1\']')[22m
+2026-07-02T19:28:59.4366441Z 
+2026-07-02T19:28:59.4366447Z 
+2026-07-02T19:28:59.4366534Z       1430 |
+2026-07-02T19:28:59.4366911Z       1431 |       const row = page.locator(`[data-testid='pricing-row-${serviceId}']`);
+2026-07-02T19:28:59.4367581Z     > 1432 |       await expect(row).toBeVisible({ timeout: 15000 });
+2026-07-02T19:28:59.4367944Z            |                         ^
+2026-07-02T19:28:59.4368203Z       1433 |
+2026-07-02T19:28:59.4368603Z       1434 |       await page.locator(`[data-testid='btn-edit-price-${serviceId}']`).click();
+2026-07-02T19:28:59.4369225Z       1435 |       const priceField = page.locator(`[data-testid='input-price-${serviceId}']`);
+2026-07-02T19:28:59.4370260Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:1432:25
+2026-07-02T19:28:59.4370639Z 
+2026-07-02T19:28:59.4371065Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4371869Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry1/test-failed-1.png
+2026-07-02T19:28:59.4372716Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4373012Z 
+2026-07-02T19:28:59.4373397Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4374136Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry1/video.webm
+2026-07-02T19:28:59.4374936Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4375221Z 
+2026-07-02T19:28:59.4375727Z     Error Context: test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry1/error-context.md
+2026-07-02T19:28:59.4376441Z 
+2026-07-02T19:28:59.4376844Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4377605Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry1/trace.zip
+2026-07-02T19:28:59.4378153Z     Usage:
+2026-07-02T19:28:59.4378263Z 
+2026-07-02T19:28:59.4378800Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry1/trace.zip
+2026-07-02T19:28:59.4379357Z 
+2026-07-02T19:28:59.4379867Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4380157Z 
+2026-07-02T19:28:59.4380514Z     Retry #2 ───────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4380802Z 
+2026-07-02T19:28:59.4381160Z     Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+2026-07-02T19:28:59.4381508Z 
+2026-07-02T19:28:59.4381693Z     Locator: locator('[data-testid=\'pricing-row-1\']')
+2026-07-02T19:28:59.4382015Z     Expected: visible
+2026-07-02T19:28:59.4382239Z     Timeout: 15000ms
+2026-07-02T19:28:59.4382495Z     Error: element(s) not found
+2026-07-02T19:28:59.4382665Z 
+2026-07-02T19:28:59.4382747Z     Call log:
+2026-07-02T19:28:59.4383091Z     [2m  - Expect "toBeVisible" with timeout 15000ms[22m
+2026-07-02T19:28:59.4383738Z     [2m  - waiting for locator('[data-testid=\'pricing-row-1\']')[22m
+2026-07-02T19:28:59.4384010Z 
+2026-07-02T19:28:59.4384020Z 
+2026-07-02T19:28:59.4384101Z       1430 |
+2026-07-02T19:28:59.4384488Z       1431 |       const row = page.locator(`[data-testid='pricing-row-${serviceId}']`);
+2026-07-02T19:28:59.4385003Z     > 1432 |       await expect(row).toBeVisible({ timeout: 15000 });
+2026-07-02T19:28:59.4385368Z            |                         ^
+2026-07-02T19:28:59.4385625Z       1433 |
+2026-07-02T19:28:59.4386020Z       1434 |       await page.locator(`[data-testid='btn-edit-price-${serviceId}']`).click();
+2026-07-02T19:28:59.4386650Z       1435 |       const priceField = page.locator(`[data-testid='input-price-${serviceId}']`);
+2026-07-02T19:28:59.4387300Z         at /home/runner/work/Dashboard/Dashboard/e2e/smoke/edit-persistence.spec.ts:1432:25
+2026-07-02T19:28:59.4387652Z 
+2026-07-02T19:28:59.4388062Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4388870Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry2/test-failed-1.png
+2026-07-02T19:28:59.4389995Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4390291Z 
+2026-07-02T19:28:59.4390678Z     attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4391432Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry2/video.webm
+2026-07-02T19:28:59.4392394Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4392681Z 
+2026-07-02T19:28:59.4393193Z     Error Context: test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry2/error-context.md
+2026-07-02T19:28:59.4393736Z 
+2026-07-02T19:28:59.4394128Z     attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4394902Z     test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry2/trace.zip
+2026-07-02T19:28:59.4395436Z     Usage:
+2026-07-02T19:28:59.4395549Z 
+2026-07-02T19:28:59.4396078Z         npx playwright show-trace test-results/smoke-edit-persistence--sm-f3cfd-ICT-persistiert-nach-Reload-chromium-retry2/trace.zip
+2026-07-02T19:28:59.4396637Z 
+2026-07-02T19:28:59.4396983Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+2026-07-02T19:28:59.4397278Z 
+2026-07-02T19:28:59.4397367Z   4 failed
+2026-07-02T19:28:59.4398296Z     [chromium] › e2e/smoke/edit-persistence.spec.ts:443:3 › @smoke Edit-Persistence Round-Trip › Termin km 7,3 → 12,7 — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '12,70 km' 
+2026-07-02T19:28:59.4400022Z     [chromium] › e2e/smoke/edit-persistence.spec.ts:744:3 › @smoke Edit-Persistence Round-Trip › Termin Hauswirtschaft 45 → 72 Min — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch '1 Std. 12 Min.' 
+2026-07-02T19:28:59.4401665Z     [chromium] › e2e/smoke/edit-persistence.spec.ts:1212:3 › @smoke Edit-Persistence Round-Trip › §45b-Carryover — Löschen über die UI persistiert nach Reload 
+2026-07-02T19:28:59.4402997Z     [chromium] › e2e/smoke/edit-persistence.spec.ts:1395:3 › @smoke Edit-Persistence Round-Trip › Standardpreis anlegen + ersetzen (PRICE_CONFLICT) persistiert nach Reload 
+2026-07-02T19:28:59.4403714Z   1 skipped
+2026-07-02T19:28:59.4403920Z   32 passed (13.4m)
+2026-07-02T19:28:59.5910916Z ##[error]Process completed with exit code 1.
