@@ -67,6 +67,30 @@ router.post("/sync", asyncHandler("Qonto-Synchronisation fehlgeschlagen", async 
 // Fester 32-bit-Schlüssel "QBKF" (Qonto BacKFill).
 const QONTO_BACKFILL_LOCK_KEY = String(0x51424b46);
 
+// Task #1600 — Live-Status des Voll-Sync-Lauf-Locks. Prüft (ohne den Lock selbst
+// zu erwerben) via pg_locks, ob der advisory Lock aus Task #1591 aktuell von
+// irgendeiner Sitzung gehalten wird. Damit kann das Frontend proaktiv (auch in
+// anderen Tabs/Sitzungen) „Voll-Sync läuft…" anzeigen und den Start-Button für
+// alle sperren, statt erst reaktiv beim 409 zu reagieren.
+// pg_try_advisory_lock(bigint) legt den Lock in pg_locks als classid = obere
+// 32 Bit, objid = untere 32 Bit ab (objsubid = 1). Der Schlüssel passt in 32
+// Bit → classid = 0, objid = Schlüssel. Bewusst ohne BigInt-Literale (tsc-Target).
+const QONTO_BACKFILL_LOCK_CLASSID = Math.floor(Number(QONTO_BACKFILL_LOCK_KEY) / 0x100000000);
+const QONTO_BACKFILL_LOCK_OBJID = Number(QONTO_BACKFILL_LOCK_KEY) % 0x100000000;
+
+router.get("/backfill/status", asyncHandler("Voll-Sync-Status konnte nicht geladen werden", async (_req, res) => {
+  const lockRes = await pool.query<{ running: boolean }>(
+    `SELECT COUNT(*) > 0 AS running
+       FROM pg_locks
+      WHERE locktype = 'advisory'
+        AND classid = $1
+        AND objid = $2
+        AND objsubid = 1`,
+    [QONTO_BACKFILL_LOCK_CLASSID, QONTO_BACKFILL_LOCK_OBJID],
+  );
+  res.json({ running: lockRes.rows?.[0]?.running === true });
+}));
+
 router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (_req, res) => {
   const lockClient = await pool.connect();
   let gotLock = false;

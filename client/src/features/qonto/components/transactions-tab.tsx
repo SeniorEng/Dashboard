@@ -23,6 +23,7 @@ import {
   useTransactionMutations,
   useSyncMutation,
   useBackfillMutation,
+  useQontoBackfillStatus,
 } from "../hooks";
 import type { MatchFilter } from "../types";
 
@@ -45,6 +46,9 @@ export function TransactionsTab({
 
   const syncMutation = useSyncMutation();
   const backfillMutation = useBackfillMutation();
+  const backfillStatusQuery = useQontoBackfillStatus(configured);
+  const backfillRunning = backfillStatusQuery.data?.running ?? false;
+  const backfillBusy = backfillMutation.isPending || backfillRunning;
 
   const {
     matchMutation,
@@ -86,15 +90,26 @@ export function TransactionsTab({
     <div className="space-y-4">
       {/* Sync-Leiste: Transaktionen von Qonto abrufen */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-gray-500" data-testid="text-last-sync">
-          {lastSync
-            ? `Letzter Sync: ${formatDate(lastSync)} um ${new Date(lastSync).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`
-            : "Noch nicht synchronisiert"}
-        </p>
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-gray-500" data-testid="text-last-sync">
+            {lastSync
+              ? `Letzter Sync: ${formatDate(lastSync)} um ${new Date(lastSync).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`
+              : "Noch nicht synchronisiert"}
+          </p>
+          {backfillRunning && (
+            <span
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700"
+              data-testid="text-backfill-running"
+            >
+              <Loader2 className={`${iconSize.sm} animate-spin`} />
+              Voll-Sync läuft… bitte warten
+            </span>
+          )}
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button
             onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending || backfillMutation.isPending}
+            disabled={syncMutation.isPending || backfillBusy}
             className="w-full sm:w-auto"
             data-testid="button-sync"
           >
@@ -108,17 +123,21 @@ export function TransactionsTab({
           <Button
             variant="outline"
             onClick={() => setBackfillConfirmOpen(true)}
-            disabled={syncMutation.isPending || backfillMutation.isPending}
+            disabled={syncMutation.isPending || backfillBusy}
             className="w-full sm:w-auto"
             data-testid="button-backfill"
-            title="Zieht die komplette Historie der nachträglich ergänzten Zusatzkonten ohne Zeitfenster."
+            title={
+              backfillRunning
+                ? "Ein Voll-Sync läuft bereits (ggf. in einer anderen Sitzung). Bitte warten Sie, bis er abgeschlossen ist."
+                : "Zieht die komplette Historie der nachträglich ergänzten Zusatzkonten ohne Zeitfenster."
+            }
           >
-            {backfillMutation.isPending ? (
+            {backfillBusy ? (
               <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
             ) : (
               <History className={`${iconSize.sm} mr-2`} />
             )}
-            Voll-Sync Zusatzkonten
+            {backfillRunning ? "Voll-Sync läuft…" : "Voll-Sync Zusatzkonten"}
           </Button>
         </div>
       </div>

@@ -11,6 +11,20 @@ export function useQontoStatus(enabled: boolean = true) {
   });
 }
 
+// Task #1600 — Live-Status, ob gerade ein Voll-Sync läuft (serverseitiger
+// Lauf-Lock aus Task #1591). Wird gepollt, damit auch andere Sitzungen/Tabs
+// proaktiv „Voll-Sync läuft…" sehen und der Start-Button für alle sperrt.
+export function useQontoBackfillStatus(enabled: boolean) {
+  return useQuery<{ running: boolean }>({
+    queryKey: ["qonto", "backfill-status"],
+    queryFn: async () => unwrapResult(await api.get("/admin/qonto/backfill/status")),
+    enabled,
+    staleTime: 0,
+    refetchInterval: (query) => (query.state.data?.running ? 2500 : 6000),
+    refetchIntervalInBackground: false,
+  });
+}
+
 export function useQontoTransactions(matchFilter: MatchFilter, configured: boolean) {
   return useQuery<{ transactions: QontoTransaction[]; total: number }>({
     queryKey: ["qonto", "transactions", matchFilter],

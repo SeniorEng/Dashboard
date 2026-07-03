@@ -1,5 +1,6 @@
 export {
   useQontoStatus,
+  useQontoBackfillStatus,
   useQontoTransactions,
   useMatchableInvoices,
   useQontoAdvices,
