@@ -1,0 +1,65 @@
+# Validierung: Team-Auslastung (Kapazitäts-/Zuteilungssicht)
+
+**Geprüft:** Live-Prod + Quellcode (`server/lib/team-workload.ts`), read-only, 02.07.2026.
+**Zweck der Sicht:** Entscheidungshilfe „Wer ist überlastet, wer kann noch Kunden übernehmen?" — Kunden-Auslastung je Mitarbeiter + „mögliche Zusatzkunden". Read-only, nach höchster Auslastung sortiert.
+
+---
+
+## 1. Verifizierte Berechnung (`computeSollIst`)
+
+```
+istHours   = (avgMonthlyHwMinutes + avgMonthlyAllMinutes) / 60      // NUR Hauswirtschaft + Alltagsbegleitung
+sollHours  = monthlyWorkHours                                        // gesamte Monats-Vertragszeit
+auslastungPct = istHours / sollHours * 100
+freieStunden  = max(0, sollHours − istHours)
+moeglicheZusatzKunden = floor(freieStunden / 3,85)                   // 3,85 = globaler Ø HW+AB-Std pro Kunde/Monat
+```
+Der Monatsschnitt teilt korrekt durch `months_considered` (die „2,5 von 3 Monate" sind also sauber gewichtet — **kein** Problem).
+
+Live bestätigt: Ullmann 59 − 43,3 = **15,7h frei**, 15,7 / 3,85 = **4 Kunden** ✅. Konzept grundsätzlich sinnvoll und funktionsfähig.
+
+---
+
+## 2. Befunde & Empfehlungen
+
+### 2.1 Bug — „+0 h über" bei Überlasteten
+Im Backend gibt es **gar kein Overage-Feld** — nur `freieStunden = max(0, soll − ist)`, das bei Überlast **0** wird. Die UI zeigt genau diese 0 als „+0 h über" (Fiebag: 63,1h Ist vs. 40h Soll → real **+23,1h**). **Fix:** `overHours = max(0, istHours − sollHours)` berechnen und statt der 0 anzeigen. Klein, isoliert.
+
+### 2.2 Konzeptioneller Kern — „Ist" (nur produktiv) vs. „Soll" (gesamte Vertragszeit)
+`istHours` zählt **nur HW + Alltagsbegleitung** (Kunden-Zeit) — **ohne Fahrtzeit, Büro, Sonstiges**. `sollHours` ist die **gesamte** Vertragszeit. Damit ist `freieStunden = Soll − Ist` = Vertragszeit minus Produktivzeit — es zählt die **gesamte Overhead-Zeit (Fahrt/Büro) als „frei für Kunden"**. Und `moeglicheZusatzKunden` teilt diese optimistischen Frei-Stunden durch einen **produktiven** Pro-Kunde-Schnitt (3,85h) — zwei **unterschiedliche Bezugsgrößen**.
+
+**Folge:** Die „freie Kapazität" ist **systematisch zu hoch** — neue Kunden bringen ja auch Fahrt-/Rüstzeit, die hier nicht reserviert wird. Konkret: Fiebags reale Gesamtzeit lag im Juni bei ~83,8h (vs. 63,1h produktiv) — die 158 % **unterschätzen** ihre echte Last sogar.
+
+**Gut:** Die App kennt die nötige Unterscheidung bereits — in `server/storage/statistics/performance.ts` gibt es `UtilizationCounts { productive, overhead, sickVac }` (produktiv = HW+AB, overhead = Büroarbeit/Vertrieb/Sonstiges). Diese Aufteilung lässt sich für die Team-Auslastung wiederverwenden, statt neu zu erfinden.
+
+### 2.3 Kein Puffer — implizit wird auf 100 % Vertragszeit geplant
+Die Frei-Rechnung zielt auf **volle** Auslastung (Soll − Ist). Best Practice in der Personaleinsatz-/Kapazitätsplanung: **nicht auf 100 % planen** — Zielauslastung eher **75–80 %**, weil Rüst-/Fahr-/Ausfall-/Puffer-Zeit erhalten bleiben muss (in der Pflege ist Fahrzeit ausdrücklich „unproduktive Zeit", die eingeplant werden muss; max. 10 h/Tag). Praktische Kapazität = Vertragszeit − notwendige unproduktive Zeit − Puffer.
+
+**Empfehlung:** „mögliche Zusatzkunden" auf einer **realistischen Rest-Kapazität** rechnen:
+`freie Produktiv-Kapazität = Soll × Zielauslastung(z. B. 0,8) × Produktivanteil − aktuelle Produktivstunden` — oder mindestens die Frei-Stunden um den historischen Overhead-Anteil und einen Puffer kürzen. So wird niemandem ein Kunde zugeteilt, der real schon am Limit ist.
+
+### 2.4 Globaler 3,85h-Schlüssel vs. Mitarbeiter-Realität
+3,85h/Kunde ist ein globaler Schnitt; die tatsächliche Pro-Kunde-Zeit streut stark (Fiebag ~1,9–2,6h, Ullmann ~1,3–2,1h — beide klar darunter). Ein **mitarbeiter-eigener** historischer Pro-Kunde-Schnitt (oder pro Tätigkeitsbereich) schätzt die Kapazität realistischer. Mindestens als **Näherung** kennzeichnen.
+
+### 2.5 Verständlichkeit
+„24 · 24 HV · 6 V1 · 3 V2 · 33 ges." — HV/V1/V2 (Hauptverantwortlich / Vertretung 1/2?) ohne Legende schwer lesbar. Kleiner Tooltip/Legende in der Lese-Ansicht.
+
+---
+
+## 3. Priorisierung
+
+1. **Bug „+0 h über"** (2.1) — schnell, klar.
+2. **Kern-Entscheidung (2.2/2.3):** Soll die Auslastung/Kapazität auf **Kunden-Stunden** oder **Gesamt-Arbeitszeit** basieren, und mit welchem **Ziel-Puffer**? Das entscheidet, ob „freie Kapazität" ehrlich ist. Fachentscheidung Alrik.
+3. Danach: realistischer Zusatzkunden-Schätzer (2.3/2.4) + Legende (2.5).
+
+---
+
+## 4. Paste-fertiger Replit-Handoff
+
+> **Team-Auslastung: Overage-Bug + realistische Rest-Kapazität.** (a) **Bug:** `computeSollIst` (`server/lib/team-workload.ts`) berechnet keine Overage; die UI zeigt bei Überlast „+0 h über". `overHours = max(0, istHours − sollHours)` ergänzen und anzeigen. (b) **Konzept-Klärung mit Alrik vor Umbau:** `istHours` = nur HW+Alltagsbegleitung (produktiv), `sollHours` = gesamte Vertragszeit → `freieStunden` zählt Overhead-Zeit (Fahrt/Büro) als frei ⇒ „freie Kapazität"/„mögliche Zusatzkunden" systematisch zu hoch. Entscheiden: Auslastung/Kapazität auf Gesamt-Arbeitszeit (produktiv+overhead) beziehen und/oder die Rest-Kapazität um Overhead-Anteil **und** einen Ziel-Puffer (Best Practice ~75–80 %) kürzen. Die Produktiv/Overhead/SickVac-Aufteilung existiert bereits in `server/storage/statistics/performance.ts` (`UtilizationCounts`) — wiederverwenden, nicht neu bauen. (c) Zusatzkunden-Schätzer: statt globaler 3,85h optional mitarbeiter-eigenen historischen Pro-Kunde-Schnitt; mindestens als Näherung labeln. (d) Legende/Tooltip für HV/V1/V2. **Out of scope:** Read-only-Charakter der Seite bleibt; keine Änderung an Lohn/Abrechnung.
+
+---
+
+## Quellen (Best-Practice)
+- Zielauslastung nicht 100 %, ~75–80 %, Kapazität = Theorie − notwendige unproduktive Zeit − Puffer; billable ≠ capacity: [Parakeeto](https://www.parakeeto.com/blog/resource-utilization-capacity-planning-for-marketing-agency-2/), [Scoro – Billable Utilization](https://www.scoro.com/blog/billable-utilization/), [Drivetrain – billable vs utilization](https://www.drivetrain.ai/post/billable-hours-vs-utilization)
+- Ambulante Pflege: Fahrzeit als „unproduktive Zeit" einplanen, Tourenplanung, max. 10 h/Tag: [contec – Tourenplanung](https://www.contec.de/magazin/ambulante-pflege-tourenplanung-7-tipps), [MEDIFOX DAN – Personaleinsatzplanung](https://www.medifoxdan.de/software-ambulante-pflege/module/personaleinsatzplanung/)
