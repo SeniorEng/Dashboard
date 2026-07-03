@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize } from "@/design-system";
 import { Loader2, Pencil, Save, Users, X } from "lucide-react";
-import { useActiveEmployees } from "@/features/appointments/hooks/use-active-employees";
+import { useActiveEmployees, useEmployeeNames } from "@/features/appointments/hooks/use-active-employees";
 import type { Customer } from "@shared/schema";
 
 interface CustomerAssignmentSectionProps {
@@ -28,6 +28,23 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
 
   const { data: activeEmployees = [] } = useActiveEmployees();
 
+  const assignedIds = useMemo(
+    () =>
+      [customer.primaryEmployeeId, customer.backupEmployeeId, customer.backupEmployeeId2].filter(
+        (id): id is number => id != null,
+      ),
+    [customer.primaryEmployeeId, customer.backupEmployeeId, customer.backupEmployeeId2],
+  );
+
+  const activeIds = useMemo(() => new Set(activeEmployees.map((e) => e.id)), [activeEmployees]);
+
+  const inactiveAssignedIds = useMemo(
+    () => assignedIds.filter((id) => !activeIds.has(id)),
+    [assignedIds, activeIds],
+  );
+
+  const { data: inactiveNames = [] } = useEmployeeNames(inactiveAssignedIds);
+
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [primaryId, setPrimaryId] = useState<string>("");
@@ -44,7 +61,9 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
   const employeeName = (id: number | null | undefined): string => {
     if (id == null) return "Nicht zugewiesen";
     const e = activeEmployees.find((x) => x.id === id);
-    return e?.displayName ?? "Ehemalige/r Mitarbeiter/in";
+    if (e) return e.displayName;
+    const inactive = inactiveNames.find((x) => x.id === id);
+    return inactive?.displayName ?? "Ehemalige/r Mitarbeiter/in";
   };
 
   const startEditing = () => {

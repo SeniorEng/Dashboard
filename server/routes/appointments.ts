@@ -224,6 +224,31 @@ router.get("/active-employees", asyncHandler("Mitarbeiter konnten nicht geladen 
   res.json(safeEmployees);
 }));
 
+/**
+ * Löst Anzeigenamen für konkrete Mitarbeiter-IDs auf – auch für deaktivierte
+ * Mitarbeiter, die nicht mehr in /active-employees enthalten sind. Wird für die
+ * Kunden-„Zuständige Mitarbeiter"-Karte benötigt, damit ehemalige Zuständige
+ * weiterhin mit ihrem echten Namen angezeigt werden. Es werden AUSSCHLIESSLICH
+ * id + displayName ausgeliefert (keine weiteren sensiblen Felder).
+ */
+router.get("/employee-names", asyncHandler("Mitarbeiternamen konnten nicht geladen werden", async (req, res) => {
+  const raw = typeof req.query.ids === "string" ? req.query.ids : "";
+  const ids = [...new Set(
+    raw
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isInteger(n) && n > 0),
+  )];
+  if (ids.length === 0) {
+    return res.json([]);
+  }
+  const rows = await db
+    .select({ id: users.id, displayName: users.displayName })
+    .from(users)
+    .where(inArray(users.id, ids));
+  res.json(rows);
+}));
+
 router.get("/coverage-check", asyncHandler("Fehler beim Laden der Terminabdeckung", async (req, res) => {
   const user = req.user!;
   const employeeIdParam = req.query.employeeId ? parseInt(req.query.employeeId as string, 10) : null;

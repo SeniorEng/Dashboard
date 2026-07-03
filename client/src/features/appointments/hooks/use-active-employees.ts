@@ -20,6 +20,28 @@ export function useActiveEmployees(options?: { enabled?: boolean }) {
   });
 }
 
+export interface EmployeeNameItem {
+  id: number;
+  displayName: string;
+}
+
+/**
+ * Löst Anzeigenamen für konkrete Mitarbeiter-IDs auf – auch für deaktivierte
+ * Mitarbeiter, die nicht mehr in der Aktiv-Liste enthalten sind. Liefert nur
+ * id + displayName.
+ */
+export function useEmployeeNames(ids: number[], options?: { enabled?: boolean }) {
+  const uniqueSorted = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0))).sort((a, b) => a - b);
+  return useQuery<EmployeeNameItem[]>({
+    queryKey: ["employee-names", uniqueSorted],
+    queryFn: async () => {
+      const result = await api.get<EmployeeNameItem[]>(`/appointments/employee-names?ids=${uniqueSorted.join(",")}`);
+      return unwrapResult(result);
+    },
+    enabled: (options?.enabled ?? true) && uniqueSorted.length > 0,
+  });
+}
+
 export function useAdminEmployees(options?: { enabled?: boolean }) {
   return useQuery<UserType[]>({
     queryKey: ["admin", "employees"],
