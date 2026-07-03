@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, unwrapResult } from "@/lib/api";
+import { api, unwrapResult, ApiError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import type { PaymentAdvice } from "../types";
@@ -35,6 +35,14 @@ export function useBackfillMutation() {
       invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
+      // Task #1591 — Läuft bereits ein Voll-Sync (serverseitiger Lauf-Lock),
+      // antwortet die Route mit 409; der spezifische Code "QONTO_BACKFILL_RUNNING"
+      // landet nach parseErrorResponse in details.errorCode. Dann eine ruhige,
+      // verständliche Meldung statt eines generischen Fehlers zeigen.
+      if (error instanceof ApiError && error.details?.errorCode === "QONTO_BACKFILL_RUNNING") {
+        toast({ title: "Ein Voll-Sync läuft bereits", description: error.message });
+        return;
+      }
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
