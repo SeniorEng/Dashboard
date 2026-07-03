@@ -3,6 +3,7 @@ import {
   apiGet,
   apiPost,
   apiPatch,
+  apiDelete,
   apiGetAs,
   loginAs,
   getAuthCookie,
@@ -206,6 +207,91 @@ describe("CV-2: Overlap-Regeln", () => {
       scheduledStart: "09:15",
     });
     expect(patch.status).toBe(200);
+  });
+});
+
+describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
+  async function createCoVisit(dayOffset: number): Promise<{ customerId: number; groupId: string; legA: any; legB: any; date: string }> {
+    const customer = await createTestCustomer();
+    customerIds.push(customer.id as number);
+    await assignEmployeeToCustomer(customer.id as number, empA!.id);
+
+    const service = await getAnyService();
+    const date = getFutureDate(dayOffset);
+
+    const create = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: customer.id,
+      date,
+      scheduledStart: "10:00",
+      services: [{ serviceId: service.id, durationMinutes: 60 }],
+      assignedEmployeeId: empA!.id,
+      secondAssignedEmployeeId: empB!.id,
+    });
+    expect(create.status).toBe(201);
+    const groupId = create.data.coVisitGroupId as string;
+
+    const list = await apiGet<any[]>(`/api/appointments?date=${date}&customerId=${customer.id}`);
+    const legs = list.data.filter((a: any) => a.coVisitGroupId === groupId);
+    expect(legs.length).toBe(2);
+    const legA = legs.find((a: any) => a.assignedEmployeeId === empA!.id);
+    const legB = legs.find((a: any) => a.assignedEmployeeId === empB!.id);
+    return { customerId: customer.id as number, groupId, legA, legB, date };
+  }
+
+  it("CV-4.1 – Absage eines Legs sagt den Partner-Leg mit ab (kein halb-abgesagter Einsatz)", async () => {
+    const { groupId, legA, legB, date, customerId } = await createCoVisit(40);
+
+    const patch = await apiPatch<any>(`/api/appointments/${legA.id}`, { status: "cancelled" });
+    expect(patch.status).toBe(200);
+
+    // Beide Legs müssen jetzt storniert sein.
+    const list = await apiGet<any[]>(`/api/appointments?date=${date}&customerId=${customerId}&includeAll=true`);
+    const legs = list.data.filter((a: any) => a.coVisitGroupId === groupId);
+    // Falls die Liste stornierte ausblendet, prüfen wir die Legs einzeln.
+    const [a, b] = await Promise.all([
+      apiGet<any>(`/api/appointments/${legA.id}`),
+      apiGet<any>(`/api/appointments/${legB.id}`),
+    ]);
+    expect(a.data.status).toBe("cancelled");
+    expect(b.data.status).toBe("cancelled");
+    void legs;
+  });
+
+  it("CV-4.2 – Löschen eines Legs löscht den Partner-Leg mit", async () => {
+    const { legA, legB } = await createCoVisit(41);
+
+    const del = await apiDelete(`/api/appointments/${legA.id}`);
+    expect(del.status).toBe(200);
+    expect((del.data as any).coVisitCascadedLegIds).toContain(legB.id);
+
+    // Beide Legs sind weg (404).
+    const [a, b] = await Promise.all([
+      apiGet<any>(`/api/appointments/${legA.id}`),
+      apiGet<any>(`/api/appointments/${legB.id}`),
+    ]);
+    expect(a.status).toBe(404);
+    expect(b.status).toBe(404);
+  });
+
+  it("CV-4.3 – Einzeltermin ohne Partner löscht ohne Kaskade", async () => {
+    const customer = await createTestCustomer();
+    customerIds.push(customer.id as number);
+    await assignEmployeeToCustomer(customer.id as number, empA!.id);
+    const service = await getAnyService();
+    const date = getFutureDate(42);
+
+    const create = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: customer.id,
+      date,
+      scheduledStart: "10:00",
+      services: [{ serviceId: service.id, durationMinutes: 60 }],
+      assignedEmployeeId: empA!.id,
+    });
+    expect(create.status).toBe(201);
+
+    const del = await apiDelete(`/api/appointments/${create.data.id}`);
+    expect(del.status).toBe(200);
+    expect((del.data as any).coVisitCascadedLegIds).toEqual([]);
   });
 });
 

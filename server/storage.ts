@@ -85,6 +85,7 @@ export interface IStorage {
   updateAppointment(id: number, appointment: UpdateAppointment, tx?: import("./lib/db").DbOrTx): Promise<Appointment | undefined>;
   deleteAppointment(id: number): Promise<boolean>;
   getAppointmentsByDate(date: string): Promise<Appointment[]>;
+  getCoVisitPartnerAppointments(coVisitGroupId: string, excludeId: number, tx?: import("./lib/db").DbOrTx): Promise<Appointment[]>;
   
   // Appointments - Counts
   getAppointmentCountsByDates(dates: string[], customerIds?: number[], employeeId?: number, assignedOnly?: boolean): Promise<Record<string, number>>;
@@ -194,6 +195,7 @@ class DatabaseStorage implements IStorage {
   getAppointment = appointmentsStorage.getAppointment;
   getAppointmentIncludeDeleted = appointmentsStorage.getAppointmentIncludeDeleted;
   getAppointmentsByDate = appointmentsStorage.getAppointmentsByDate;
+  getCoVisitPartnerAppointments = appointmentsStorage.getCoVisitPartnerAppointments;
   getAppointmentCountsByDates = appointmentsStorage.getAppointmentCountsByDates;
   createAppointment = appointmentsStorage.createAppointment;
   updateAppointment = appointmentsStorage.updateAppointment;

@@ -36,6 +36,28 @@ export async function getAppointmentsByDate(date: string): Promise<Appointment[]
   return await appointmentsRepo.selectFrom(db).where(and(eq(appointments.date, date), isNull(appointments.deletedAt), ne(appointments.status, "cancelled")));
 }
 
+/**
+ * Task #1615 — liefert die PARTNER-Legs eines Zwei-Kräfte-Einsatzes (gleiche
+ * coVisitGroupId), ohne den auslösenden Leg selbst. Wird für das kaskadierende
+ * Absagen/Löschen genutzt, damit ein Co-Visit nie halb-storniert zurückbleibt.
+ * Bereits gelöschte Legs werden übersprungen; der Aufrufer entscheidet anhand
+ * des Status, ob der Partner mitgeführt werden darf.
+ */
+export async function getCoVisitPartnerAppointments(
+  coVisitGroupId: string,
+  excludeId: number,
+  tx?: DbOrTx,
+): Promise<Appointment[]> {
+  const client = tx || db;
+  return await appointmentsRepo.selectFrom(client).where(
+    and(
+      eq(appointments.coVisitGroupId, coVisitGroupId),
+      ne(appointments.id, excludeId),
+      isNull(appointments.deletedAt),
+    ),
+  );
+}
+
 function buildEmployeeCondition(employeeId: number | number[] | undefined, assignedOnly?: boolean) {
   if (employeeId === undefined) return undefined;
   const ids = Array.isArray(employeeId) ? employeeId : [employeeId];

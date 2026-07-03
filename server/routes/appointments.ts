@@ -16,7 +16,7 @@ import { authService } from "../services/auth";
 import { auditService } from "../services/audit";
 import { serviceCatalogStorage } from "../storage/service-catalog";
 import { getCachedCompanySettings } from "../services/cache";
-import { suggestTravelOrigin, isMoreThan3MonthsInPast } from "@shared/domain/appointments";
+import { suggestTravelOrigin, isMoreThan3MonthsInPast, canModifyAppointment } from "@shared/domain/appointments";
 import { REBOOK_TRIGGERS } from "@shared/domain/budget-rebook-triggers";
 import { calculateRoute } from "../services/routing";
 import { geocodeCustomer } from "../services/geocoding";
@@ -1261,6 +1261,15 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
 
   const kmRebookHolder: { value: RebookKmResult | null } = { value: null };
 
+  // Task #1615 — Zwei-Kräfte-Einsatz: Wird ein Leg abgesagt (Status → cancelled),
+  // muss der Partner-Leg (gleiche coVisitGroupId) mit-abgesagt werden, sonst
+  // bliebe genau ein Leg storniert und der andere aktiv zurück (halb-abgesagter
+  // Einsatz). Nur noch änderbare Partner (scheduled) und nicht versiegelte Legs
+  // werden mitgezogen; Partner mit eigenem Ausgang bleiben unangetastet.
+  const isCancelling =
+    validatedData.status === "cancelled" && existingAppointment.status !== "cancelled";
+  const cascadedCancelledLegIds: number[] = [];
+
   const updated = await db.transaction(async (tx) => {
     // Task #1544 — Race-sichere Lock-Prüfung INNERHALB der Tx. Der oben über
     // `loadPolicyFlags` gelesene `isLocked`-Wert steuert nur die UX-Policy und
@@ -1329,6 +1338,22 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       }
     }
 
+    // Task #1615 — Absage-Kaskade auf die Partner-Legs, in DERSELBEN Tx.
+    if (isCancelling && existingAppointment.coVisitGroupId != null) {
+      const partners = await storage.getCoVisitPartnerAppointments(existingAppointment.coVisitGroupId, id, tx);
+      for (const partner of partners) {
+        // Nur ein noch geplanter, nicht versiegelter Partner kann abgesagt
+        // werden (Absage ist ausschließlich aus `scheduled` gültig). Partner mit
+        // eigenem Ausgang (completed/no_show/bereits cancelled) bleiben bestehen.
+        if (partner.status !== "scheduled") continue;
+        if (await storage.lockAndCheckAppointmentLocked(partner.id, tx)) continue;
+        const partnerUpdated = await storage.updateAppointment(partner.id, { status: "cancelled" }, tx);
+        if (partnerUpdated) {
+          cascadedCancelledLegIds.push(partner.id);
+        }
+      }
+    }
+
     return result;
   }).catch((err) => {
     // Task #875 — Hard-Block beim atomaren Reschedule rollt das ganze Edit zurück
@@ -1356,6 +1381,29 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       },
       ip
     );
+  }
+
+  // Task #1615 — je kaskadiert abgesagtem Partner-Leg ein eigener Audit-Eintrag,
+  // damit der Absagegrund (Co-Visit-Kaskade) im Verlauf jedes Legs sichtbar ist.
+  if (cascadedCancelledLegIds.length > 0) {
+    const ip = req.ip || req.socket.remoteAddress;
+    for (const partnerId of cascadedCancelledLegIds) {
+      await auditService.log(
+        req.user!.id,
+        "appointment_updated",
+        "appointment",
+        partnerId,
+        {
+          customerId: existingAppointment.customerId ?? undefined,
+          changedFields: ["status"],
+          status: "cancelled",
+          coVisitGroupId: existingAppointment.coVisitGroupId ?? undefined,
+          coVisitCascadeFromLegId: id,
+          actor: { role: actorRole(req.user!) },
+        },
+        ip
+      );
+    }
   }
 
   // Task #613/#618: separater Audit-Eintrag für den automatischen Rebook,
@@ -1778,6 +1826,16 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
   let reversedTransactions = 0;
   const transactions = await budgetStorage.getTransactionsByAppointmentId(id);
 
+  // Task #1615 — Zwei-Kräfte-Einsatz: Ein Co-Visit ist EIN logischer Einsatz aus
+  // zwei verknüpften Legs. Wird ein Leg gelöscht, muss der Partner-Leg (gleiche
+  // coVisitGroupId) mitgelöscht werden, damit nie ein halber Einsatz übrig
+  // bleibt. Ausgenommen sind Partner-Legs, die bereits einen eigenen, echten
+  // Ausgang haben (nicht mehr änderbar: completed/customer_no_show/cancelled)
+  // oder auf einem versiegelten LN liegen — die bleiben unangetastet (kein
+  // widersprüchlicher Zustand, GoBD-Schutz). Die IDs der so kaskadierten Legs
+  // werden für Audit + Antwort gesammelt.
+  const cascadedDeletedLegIds: number[] = [];
+
   // Task #1544 — Das Löschen läuft IMMER in einer Transaktion, damit die
   // Race-sichere Lock-Prüfung greift. Die junction `service_record_appointments`
   // ist ON DELETE CASCADE; ohne die In-Tx-Prüfung könnte eine gleichzeitig
@@ -1800,6 +1858,31 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     if (!deleted) {
       throw new Error("Termin konnte nicht gelöscht werden");
     }
+
+    // Kaskade auf die Partner-Legs — in DERSELBEN Transaktion, damit entweder
+    // beide Legs verschwinden oder (bei einem versiegelten Partner) das Löschen
+    // vollständig zurückgerollt wird.
+    if (appointment.coVisitGroupId != null) {
+      const partners = await storage.getCoVisitPartnerAppointments(appointment.coVisitGroupId, id, txClient);
+      for (const partner of partners) {
+        // Partner mit eigenem, echten Ausgang bleiben unangetastet.
+        if (!canModifyAppointment(partner.status as AppointmentStatus)) continue;
+        // Versiegelter Partner (unterschriebener LN) darf nicht mutiert werden.
+        if (await storage.lockAndCheckAppointmentLocked(partner.id, txClient)) continue;
+
+        const partnerTx = await budgetStorage.getTransactionsByAppointmentId(partner.id);
+        for (const tx of partnerTx) {
+          await budgetStorage.reverseBudgetTransaction(tx.id, req.user!.id, txClient);
+        }
+        if (budgetStorage.hardHoldsEnabled()) {
+          await budgetStorage.releaseHolds(partner.id, req.user!.id, txClient);
+        }
+        const partnerDeleted = await storage.deleteAppointment(partner.id, txClient);
+        if (partnerDeleted) {
+          cascadedDeletedLegIds.push(partner.id);
+        }
+      }
+    }
   });
   reversedTransactions = transactions.length;
 
@@ -1815,10 +1898,31 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
       adminForceDelete: isAdmin && isCompleted,
       reversedTransactions,
       wasLocked: isLocked,
+      coVisitGroupId: appointment.coVisitGroupId ?? undefined,
+      coVisitCascadedLegIds: cascadedDeletedLegIds.length > 0 ? cascadedDeletedLegIds : undefined,
       actor: { role: actorRole(user) },
     },
     ip
   );
+
+  // Task #1615 — je kaskadiertem Partner-Leg ein eigener Audit-Eintrag, damit
+  // der Löschgrund (Co-Visit-Kaskade) im Verlauf jedes Legs sichtbar ist.
+  for (const partnerId of cascadedDeletedLegIds) {
+    await auditService.log(
+      req.user!.id,
+      "appointment_deleted",
+      "appointment",
+      partnerId,
+      {
+        customerId: appointment.customerId,
+        date: appointment.date,
+        coVisitGroupId: appointment.coVisitGroupId ?? undefined,
+        coVisitCascadeFromLegId: id,
+        actor: { role: actorRole(user) },
+      },
+      ip
+    );
+  }
 
   if (appointment.appointmentType?.trim().toLowerCase() === "erstberatung" && appointment.prospectId) {
     const prospectData = await prospectStorage.getAppointmentData(appointment.prospectId);
@@ -1841,7 +1945,14 @@ router.delete("/:id", asyncHandler(ErrorMessages.deleteAppointmentFailed, async 
     }
   }
   
-  res.json({ success: true, message: "Termin erfolgreich gelöscht" });
+  const cascadeCount = cascadedDeletedLegIds.length;
+  res.json({
+    success: true,
+    message: cascadeCount > 0
+      ? "Zwei-Kräfte-Einsatz gelöscht — beide verknüpften Termine wurden entfernt."
+      : "Termin erfolgreich gelöscht",
+    coVisitCascadedLegIds: cascadedDeletedLegIds,
+  });
 }));
 
 export default router;
