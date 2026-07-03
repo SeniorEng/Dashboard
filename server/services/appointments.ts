@@ -220,6 +220,8 @@ interface KundenterminInput {
   services: Array<{ serviceId: number; durationMinutes: number; serviceCode?: string | null }>;
   notes?: string;
   assignedEmployeeId?: number | null;
+  // Task #1613 — Zwei-Kräfte-Einsatz: verknüpft die beiden Legs eines Einsatzes.
+  coVisitGroupId?: string | null;
   isFahrtdienst?: boolean;
   doctorName?: string;
   doctorAppointmentTime?: string;
@@ -307,7 +309,11 @@ class AppointmentService {
     startTime: string,
     endTime: string,
     customerId: number | null,
-    excludeId?: number
+    excludeId?: number,
+    // Task #1613 — Zwei-Kräfte-Einsatz: Beim Buchen eines Co-Visit-Legs ist ein
+    // Kunden-Overlap mit dem PARTNER-Leg erlaubt (gleiche coVisitGroupId, aber
+    // ein ANDERER Mitarbeiter). Employee-Overlap (checkOverlap) bleibt hart.
+    coVisit?: { groupId: string; assignedEmployeeId: number | null }
   ): Promise<boolean> {
     // Defensive Schicht: Erstberatungen haben customerId = null (sie hängen an
     // prospectId). Würde der Aufrufer hier null durchreichen, würde die Skip-
@@ -322,6 +328,17 @@ class AppointmentService {
       if (excludeId && apt.id === excludeId) continue;
       if (apt.customerId !== customerId) continue;
       if (apt.status === "cancelled") continue;
+      // Co-Visit-Ausnahme: derselbe Einsatz (identische coVisitGroupId), aber
+      // ein anderer Mitarbeiter — die beiden Legs dürfen sich beim Kunden
+      // überschneiden. Nur wenn BEIDE Bedingungen erfüllt sind.
+      if (
+        coVisit &&
+        apt.coVisitGroupId != null &&
+        apt.coVisitGroupId === coVisit.groupId &&
+        apt.assignedEmployeeId !== coVisit.assignedEmployeeId
+      ) {
+        continue;
+      }
 
       if (apt.status === "completed") {
         if (apt.actualEnd) {
@@ -474,6 +491,7 @@ class AppointmentService {
       notes: input.notes || null,
       status: "scheduled",
       assignedEmployeeId: input.assignedEmployeeId ?? null,
+      coVisitGroupId: input.coVisitGroupId ?? null,
       isFahrtdienst: input.isFahrtdienst ?? false,
       doctorName: input.doctorName ?? null,
       doctorAppointmentTime: input.doctorAppointmentTime ?? null,

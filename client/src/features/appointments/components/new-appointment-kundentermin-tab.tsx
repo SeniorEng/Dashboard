@@ -63,6 +63,30 @@ export function NewAppointmentKundenterminTab({ form, onBack }: { form: Appointm
                 </div>
               )}
 
+              {/* Zwei-Kräfte-Einsatz (Task #1613) — optionale zweite Pflegekraft.
+                  Nur bei Einzelterminen (nicht bei Serien). Erzeugt zwei verknüpfte Termine. */}
+              {form.canChangeAssignment && !form.seriesEnabled && (
+                <div className="space-y-2">
+                  <Label>
+                    <Users className={`${iconSize.sm} inline mr-1`} /> Zweite Pflegekraft (optional)
+                  </Label>
+                  <SearchableSelect
+                    options={form.employeeOptions.filter((o) => o.value !== form.ktAssignedEmployeeId)}
+                    value={form.ktSecondAssignedEmployeeId}
+                    onValueChange={form.setKtSecondAssignedEmployeeId}
+                    placeholder="Keine zweite Pflegekraft..."
+                    searchPlaceholder="Mitarbeiter suchen..."
+                    emptyText="Kein Mitarbeiter gefunden."
+                    data-testid="select-kt-second-employee"
+                  />
+                  {form.ktSecondAssignedEmployeeId && (
+                    <p className="text-xs text-muted-foreground" data-testid="hint-co-visit">
+                      Es werden zwei verknüpfte Termine erstellt — je einer pro Pflegekraft. Beide werden separat dokumentiert und abgerechnet.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Date & Time */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">

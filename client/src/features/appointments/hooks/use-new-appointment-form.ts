@@ -150,6 +150,9 @@ export function useNewAppointmentForm() {
   const [ktServices, setKtServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
   const [ktNotes, setKtNotes] = useState<string>("");
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
+  // Task #1613 — Zwei-Kräfte-Einsatz: optionale zweite Pflegekraft. Gesetzt =>
+  // zwei verknüpfte Termine. Nur relevant für Einzeltermine (kein Serientermin).
+  const [ktSecondAssignedEmployeeId, setKtSecondAssignedEmployeeId] = useState<string>("");
   const fromProspectId = urlParams.get("prospectId");
 
   interface ProspectAppointmentData {
@@ -538,6 +541,9 @@ export function useNewAppointmentForm() {
       services: ktServices,
       notes: ktNotes || undefined,
       assignedEmployeeId: canChangeAssignment && ktAssignedEmployeeId ? parseInt(ktAssignedEmployeeId) : undefined,
+      // Task #1613 — Zwei-Kräfte-Einsatz nur für Einzeltermine (Serien-Pfad oben
+      // schließt es aus). Nur Admin/Teamleitung dürfen zuweisen.
+      secondAssignedEmployeeId: canChangeAssignment && ktSecondAssignedEmployeeId ? parseInt(ktSecondAssignedEmployeeId) : undefined,
     };
 
     if (hasAlltagsbegleitung && fahrtdienst.enabled && fahrtdienst.doctorAppointmentTime && fahrtdienst.doctorStrasse) {
@@ -774,6 +780,8 @@ export function useNewAppointmentForm() {
     setKtNotes,
     ktAssignedEmployeeId,
     setKtAssignedEmployeeId,
+    ktSecondAssignedEmployeeId,
+    setKtSecondAssignedEmployeeId,
     selectedCustomerBillingType: selectedCustomer?.billingType ?? null,
 
     prospectData: effectiveProspectData,

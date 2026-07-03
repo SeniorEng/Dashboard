@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { storage } from "../storage";
 import { withDbRetry } from "../lib/db";
@@ -670,7 +671,43 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   } else {
     assignedEmployeeId = user.id;
   }
-  
+
+  // Task #1613 — Zwei-Kräfte-Einsatz: optionale zweite Pflegekraft auflösen.
+  // Nur Admin/Teamleitung dürfen zuweisen (spiegelt die assignedEmployeeId-
+  // Regel). Gesetzt => es entstehen ZWEI verknüpfte, voll eigenständige Termine.
+  let secondAssignedEmployeeId: number | null = null;
+  if (validatedData.secondAssignedEmployeeId != null) {
+    if (!(user.isAdmin || isTeamLead(user))) {
+      return sendBadRequest(res, "Nur Admin oder Teamleitung dürfen eine zweite Pflegekraft zuweisen.");
+    }
+    if (validatedData.secondAssignedEmployeeId === assignedEmployeeId) {
+      return sendBadRequest(res, "Die zweite Pflegekraft muss sich von der ersten unterscheiden.");
+    }
+    const [secondEmployee] = await db
+      .select({ id: users.id, isActive: users.isActive })
+      .from(users)
+      .where(eq(users.id, validatedData.secondAssignedEmployeeId))
+      .limit(1);
+    if (!secondEmployee || secondEmployee.isActive === false) {
+      return sendBadRequest(
+        res,
+        "Die ausgewählte zweite Pflegekraft ist nicht aktiv. Bitte wählen Sie einen aktiven Mitarbeiter aus.",
+      );
+    }
+    // Der zweite Leg ist voll eigenständig — sein Monat darf nicht abgeschlossen sein.
+    const secondMonthClosed = await timeTrackingStorage.isMonthClosed(
+      validatedData.secondAssignedEmployeeId, validatedData.date,
+    );
+    if (secondMonthClosed) {
+      return sendBadRequest(res, "Der Monat der zweiten Pflegekraft ist bereits abgeschlossen.");
+    }
+    secondAssignedEmployeeId = validatedData.secondAssignedEmployeeId;
+  }
+
+  // Gemeinsame Klammer beider Legs. NUR bei Zwei-Kräfte-Einsatz gesetzt —
+  // Einzeltermine (der Normalfall) bleiben NULL und byte-identisch zu vorher.
+  const coVisitGroupId = secondAssignedEmployeeId != null ? randomUUID() : null;
+
   const serviceIds = validatedData.services.map(s => s.serviceId);
   const serviceRecords = await storage.getServicesByIds(serviceIds);
   const serviceCodeMap = Object.fromEntries(serviceRecords.map(s => [s.id, s.code]));
@@ -685,6 +722,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     ...validatedData,
     services: servicesWithCodes,
     assignedEmployeeId,
+    coVisitGroupId,
     isFahrtdienst: validatedData.isFahrtdienst ?? false,
     doctorName: validatedData.doctorName,
     doctorAppointmentTime: validatedData.doctorAppointmentTime,
@@ -724,41 +762,88 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     return sendConflict(res, "Mitarbeiter blockiert", blockerConflict);
   }
 
+  // Task #1613 — Zwei-Kräfte-Einsatz: Employee-Overlap bleibt HART, auch für den
+  // zweiten Leg (die beiden Mitarbeiter dürfen zeitgleich sein, jeder einzelne
+  // aber nicht doppelt gebucht werden).
+  if (secondAssignedEmployeeId != null) {
+    const secondOverlap = await appointmentService.checkOverlap(
+      validatedData.date, validatedData.scheduledStart, scheduledEnd, secondAssignedEmployeeId,
+    );
+    if (secondOverlap.hasUnreliableData) {
+      return sendConflict(
+        res,
+        "Datenprüfung erforderlich",
+        ErrorMessages.unreliableData(secondOverlap.unreliableAppointmentId!),
+      );
+    }
+    if (secondOverlap.hasOverlap) {
+      return sendConflict(res, "Terminüberschneidung", "Die zweite Pflegekraft hat bereits einen Termin in diesem Zeitraum.");
+    }
+    const secondBlocker = await checkEmployeeBlocker(
+      secondAssignedEmployeeId, validatedData.date, validatedData.scheduledStart, scheduledEnd,
+    );
+    if (secondBlocker) {
+      return sendConflict(res, "Mitarbeiter blockiert", secondBlocker);
+    }
+  }
+
+  // Kunden-Overlap: eine Prüfung deckt beide (zeitgleichen) Legs ab. Bei einem
+  // Zwei-Kräfte-Einsatz wird der coVisit-Kontext übergeben — der Partner-Leg
+  // (gleiche coVisitGroupId, anderer Mitarbeiter) darf sich überschneiden, ein
+  // fremder Kundentermin blockiert weiterhin.
   const customerOverlap = await appointmentService.checkCustomerOverlap(
-    validatedData.date, validatedData.scheduledStart, scheduledEnd, validatedData.customerId
+    validatedData.date, validatedData.scheduledStart, scheduledEnd, validatedData.customerId,
+    undefined,
+    coVisitGroupId != null ? { groupId: coVisitGroupId, assignedEmployeeId } : undefined,
   );
   if (customerOverlap) {
     return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");
   }
-  
-  const appointment = await db.transaction(async (tx) => {
+
+  const secondAppointmentData = secondAssignedEmployeeId != null
+    ? { ...appointmentData, assignedEmployeeId: secondAssignedEmployeeId }
+    : null;
+
+  const { primary: appointment, second: secondAppointment } = await db.transaction(async (tx) => {
+    // Task #875 (gated) — Hard-Hold beim Planen: reserviert Budget in derselben
+    // Transaktion wie die Terminanlage. Wirft planHold einen Hard-Block, rollt
+    // der ganze Termin zurück (Overdraft unmöglich, R3/I14). Flag aus = No-op.
+    // Beim Zwei-Kräfte-Einsatz gilt das für BEIDE Legs (all-or-nothing).
+    const planHoldFor = async (apptId: number) => {
+      if (!budgetStorage.hardHoldsEnabled()) return;
+      const planned = await getPlannedHoldInputs(apptId, tx);
+      if (!planned) return;
+      await budgetStorage.planHold(
+        {
+          customerId: planned.customerId,
+          appointmentId: apptId,
+          transactionDate: planned.date,
+          hauswirtschaftMinutes: planned.hauswirtschaftMinutes,
+          alltagsbegleitungMinutes: planned.alltagsbegleitungMinutes,
+          travelKilometers: planned.travelKilometers,
+          customerKilometers: planned.customerKilometers,
+          userId: user.id,
+        },
+        tx,
+      );
+    };
+
     const created = await storage.createAppointment(appointmentData, tx);
     if (serviceEntries.length > 0) {
       await storage.createAppointmentServices(created.id, serviceEntries, tx);
     }
+    await planHoldFor(created.id);
 
-    // Task #875 (gated) — Hard-Hold beim Planen: reserviert Budget in derselben
-    // Transaktion wie die Terminanlage. Wirft planHold einen Hard-Block, rollt
-    // der ganze Termin zurück (Overdraft unmöglich, R3/I14). Flag aus = No-op.
-    if (budgetStorage.hardHoldsEnabled()) {
-      const planned = await getPlannedHoldInputs(created.id, tx);
-      if (planned) {
-        await budgetStorage.planHold(
-          {
-            customerId: planned.customerId,
-            appointmentId: created.id,
-            transactionDate: planned.date,
-            hauswirtschaftMinutes: planned.hauswirtschaftMinutes,
-            alltagsbegleitungMinutes: planned.alltagsbegleitungMinutes,
-            travelKilometers: planned.travelKilometers,
-            customerKilometers: planned.customerKilometers,
-            userId: user.id,
-          },
-          tx,
-        );
+    let secondCreated = null;
+    if (secondAppointmentData) {
+      secondCreated = await storage.createAppointment(secondAppointmentData, tx);
+      if (serviceEntries.length > 0) {
+        await storage.createAppointmentServices(secondCreated.id, serviceEntries, tx);
       }
+      await planHoldFor(secondCreated.id);
     }
-    return created;
+
+    return { primary: created, second: secondCreated };
   }).catch((err) => {
     // Task #875 — Hard-Block beim Planen (gekappte Töpfe reichen nicht, Kunde
     // zahlt nicht privat) ist eine designte Geschäfts-Ablehnung, kein 500.
@@ -784,6 +869,25 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
   if (assignedEmployeeId !== user.id) {
     const customerName = `${customer.vorname} ${customer.nachname}`;
     notificationService.notifyAppointmentCreated(appointment.id, customerName, validatedData.date, assignedEmployeeId, user.id);
+  }
+
+  // Task #1613 — zweiter Leg: eigene Audit-Spur + Benachrichtigung (voll eigenständig).
+  if (secondAppointment && secondAssignedEmployeeId != null) {
+    await auditService.appointmentCreated(
+      user.id,
+      secondAppointment.id,
+      {
+        customerId: validatedData.customerId,
+        assignedEmployeeId: secondAssignedEmployeeId,
+        date: validatedData.date,
+        actor: { role: actorRole(user) },
+      },
+      req.ip,
+    );
+    if (secondAssignedEmployeeId !== user.id) {
+      const customerName = `${customer.vorname} ${customer.nachname}`;
+      notificationService.notifyAppointmentCreated(secondAppointment.id, customerName, validatedData.date, secondAssignedEmployeeId, user.id);
+    }
   }
 
   try {
@@ -1099,8 +1203,15 @@ router.patch("/:id", asyncHandler(ErrorMessages.updateAppointmentFailed, async (
       // haben customerId = null. Eine Kunden-Überlappung kann es nur geben,
       // wenn tatsächlich eine customerId existiert.
       if (existingAppointment.customerId != null) {
+        // Task #1613 — Zwei-Kräfte-Einsatz: gehört dieser Termin zu einer
+        // verknüpften Gruppe, darf der Partner-Leg (gleiche coVisitGroupId,
+        // andere Kraft) sich weiterhin mit dem Kunden überschneiden — auch beim
+        // Bearbeiten/Umplanen. Fremde Kundentermine blockieren weiterhin.
+        const coVisitCtx = existingAppointment.coVisitGroupId != null && assignedEmpId != null
+          ? { groupId: existingAppointment.coVisitGroupId, assignedEmployeeId: assignedEmpId }
+          : undefined;
         const customerOverlap = await appointmentService.checkCustomerOverlap(
-          checkDate, checkStart, checkEnd, existingAppointment.customerId, id
+          checkDate, checkStart, checkEnd, existingAppointment.customerId, id, coVisitCtx
         );
         if (customerOverlap) {
           return sendConflict(res, "Kundenüberschneidung", "Dieser Kunde hat bereits einen Termin in diesem Zeitraum.");

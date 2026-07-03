@@ -556,6 +556,15 @@ async function runStartupTasks() {
       log(`Invoice-Per-Pot-Spalten-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    // Task #1613 — Zwei-Kräfte-Einsatz: appointments.co_visit_group_id (nullable)
+    // + Lookup-Index sicherstellen. Idempotent, KEIN drizzle-kit push.
+    const { ensureAppointmentCoVisitGroup } = await import("./startup/ensure-appointment-co-visit-group");
+    try {
+      await ensureAppointmentCoVisitGroup();
+    } catch (err) {
+      log(`Appointment-Co-Visit-Group-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     // Task #1542 — Partiellen Unique-Index aus #1528 abräumen (On-Demand-
     // Sammel-LN erlaubt mehrere offene monthly-Bündel pro Kunde+Mitarbeiter+
     // Monat). Idempotent (DROP INDEX IF EXISTS), KEIN drizzle-kit push.

@@ -133,6 +133,18 @@ export const appointments = pgTable("appointments", {
   seriesId: integer("series_id").references(() => appointmentSeries.id, { onDelete: "set null" }),
   isSeriesException: boolean("is_series_exception").notNull().default(false),
   // ============================================
+  // ZWEI-KRÄFTE-EINSATZ / CO-VISIT (Task #1613)
+  // ============================================
+  // Verknüpft zwei gleichzeitige Termine desselben Kunden mit verschiedenen
+  // Mitarbeitern zu EINEM Einsatz ("Option A": ein Mitarbeiter je Termin bleibt
+  // Fundament). Nullable — Einzeltermine (der Normalfall) tragen NULL.
+  //
+  // WICHTIG (Sichtbarkeits-/Privacy-Invariante): Diese Spalte dient EINZIG der
+  // Kunden-Overlap-Ausnahme bei der Anlage. Sie darf NIEMALS genutzt werden, um
+  // Sichtbarkeit, Dokumentations- oder Leistungsnachweis-Scope eines
+  // Mitarbeiters auf den Partner-Leg auszuweiten.
+  coVisitGroupId: text("co_visit_group_id"),
+  // ============================================
   // CUSTOMER NO-SHOW FIELDS (Task #485)
   // ============================================
   // Status == 'customer_no_show' setzt: MA wird voll bezahlt (Annahmeverzug,
@@ -163,6 +175,7 @@ export const appointments = pgTable("appointments", {
   index("appointments_active_employee_date_idx").on(table.assignedEmployeeId, table.date).where(isNull(table.deletedAt)),
   index("appointments_prospect_id_idx").on(table.prospectId),
   index("appointments_series_id_idx").on(table.seriesId),
+  index("appointments_co_visit_group_id_idx").on(table.coVisitGroupId),
 ]);
 
 // ============================================
@@ -222,6 +235,11 @@ export const insertKundenterminSchema = z.object({
   services: z.array(appointmentServiceEntrySchema).min(1, "Mindestens ein Service muss ausgewählt werden"),
   notes: z.string().max(255, "Maximal 255 Zeichen").optional(),
   assignedEmployeeId: z.number().nullable().optional(),
+  // Task #1613 — Zwei-Kräfte-Einsatz: optionale zweite Pflegekraft. Gesetzt =>
+  // es entstehen ZWEI verknüpfte Termine (je Mitarbeiter einer) mit gemeinsamer
+  // coVisitGroupId. Muss ein anderer aktiver Mitarbeiter als assignedEmployeeId
+  // sein (server-seitig validiert).
+  secondAssignedEmployeeId: z.number().nullable().optional(),
   isFahrtdienst: z.boolean().optional().default(false),
   doctorAppointmentTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Ungültiges Zeitformat").optional(),
   doctorStrasse: z.string().max(200).optional(),
