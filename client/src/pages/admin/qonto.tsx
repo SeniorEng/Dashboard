@@ -4,18 +4,17 @@ import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { iconSize, componentStyles } from "@/design-system";
 import { ArrowLeft } from "lucide-react";
-import { StatusTab, TransactionsTab, AdvicesTab } from "@/features/qonto";
+import { TransactionsTab, AdvicesTab } from "@/features/qonto";
 import type { Tab, MatchFilter } from "@/features/qonto";
 import { useQontoStatus } from "@/features/qonto";
 
 export default function AdminQonto() {
-  const [tab, setTab] = useState<Tab>("status");
+  const [tab, setTab] = useState<Tab>("transactions");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
 
   const statusQuery = useQontoStatus();
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "status", label: "Verbindung" },
     { id: "transactions", label: "Transaktionen" },
     { id: "advices", label: "Avise" },
   ];
@@ -51,12 +50,12 @@ export default function AdminQonto() {
         ))}
       </div>
 
-      {tab === "status" && <StatusTab status={statusQuery.data} isLoading={statusQuery.isLoading} />}
       {tab === "transactions" && (
         <TransactionsTab
           configured={statusQuery.data?.configured ?? false}
           matchFilter={matchFilter}
           onFilterChange={setMatchFilter}
+          lastSync={statusQuery.data?.lastSync ?? null}
         />
       )}
       {tab === "advices" && <AdvicesTab />}

@@ -22,7 +22,7 @@ class QontoStorage {
   async getTransactions(filters: {
     from?: string;
     to?: string;
-    matched?: "matched" | "unmatched" | "all";
+    matched?: "matched" | "unmatched" | "ignored" | "all";
     limit?: number;
     offset?: number;
   } = {}): Promise<{ transactions: QontoTransaction[]; total: number }> {
@@ -44,7 +44,11 @@ class QontoStorage {
     if (filters.matched === "matched") {
       conditions.push(isNotNull(qontoTransactions.matchedInvoiceId));
     } else if (filters.matched === "unmatched") {
+      // „Offen" = weder zugeordnet NOCH als nicht abrechnungsrelevant markiert.
       conditions.push(isNull(qontoTransactions.matchedInvoiceId));
+      conditions.push(isNull(qontoTransactions.billingIrrelevantAt));
+    } else if (filters.matched === "ignored") {
+      conditions.push(isNotNull(qontoTransactions.billingIrrelevantAt));
     }
 
     const where = and(...conditions);
@@ -122,10 +126,13 @@ class QontoStorage {
   }
 
   async getUnmatchedTransactions(): Promise<QontoTransaction[]> {
+    // Auto-Abgleich ignoriert als „nicht abrechnungsrelevant" markierte
+    // Eingänge (billing_irrelevant_at IS NOT NULL) — konsistent zur „Offen"-Liste.
     return db.select()
       .from(qontoTransactions)
       .where(and(
         isNull(qontoTransactions.matchedInvoiceId),
+        isNull(qontoTransactions.billingIrrelevantAt),
         eq(qontoTransactions.side, "credit")
       ))
       .orderBy(desc(qontoTransactions.emittedAt));

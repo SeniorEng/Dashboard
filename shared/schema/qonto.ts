@@ -24,6 +24,12 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   sourceIban: text("source_iban"),
   matchedInvoiceId: integer("matched_invoice_id").references(() => invoices.id),
   matchConfidence: text("match_confidence"),
+  // Qonto-Zahlung als „nicht abrechnungsrelevant" markieren: setzt einen
+  // Zeitstempel (Wer/Wann werden über das audit_log historisiert). NULL =
+  // abrechnungsrelevant (Default, Altbestand). Solche Eingänge (sonstige
+  // Einnahmen/Erstattungen/Kosten) fallen aus dem offenen Abgleich UND aus
+  // dem Auto-Abgleich heraus. Reversibel (kann wieder auf NULL gesetzt werden).
+  billingIrrelevantAt: timestamp("billing_irrelevant_at"),
   rawData: jsonb("raw_data"),
   syncedAt: timestamp("synced_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),

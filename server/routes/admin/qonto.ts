@@ -9,7 +9,7 @@ import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
 import { db, type DbOrTx } from "../../lib/db";
 import { invoices, qontoTransactions, paymentAdviceItems, paymentAdvices } from "@shared/schema";
-import { eq, and, ilike, isNull, inArray } from "drizzle-orm";
+import { eq, and, ilike, isNull, isNotNull, inArray } from "drizzle-orm";
 import { withAudit } from "../../lib/with-audit";
 import { readTestFaults } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
@@ -67,7 +67,7 @@ router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen we
   const result = await qontoStorage.getTransactions({
     from: from as string | undefined,
     to: to as string | undefined,
-    matched: (matched as "matched" | "unmatched" | "all") || "all",
+    matched: (matched as "matched" | "unmatched" | "ignored" | "all") || "all",
     limit: limit ? parseInt(limit as string) : 50,
     offset: offset ? parseInt(offset as string) : 0,
   });
@@ -84,6 +84,10 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
 
   const tx = await qontoStorage.getTransaction(id);
   if (!tx) throw notFound("Transaktion nicht gefunden");
+
+  if (tx.billingIrrelevantAt) {
+    throw badRequest("Transaktion ist als nicht abrechnungsrelevant markiert. Bitte zuerst die Markierung aufheben.");
+  }
 
   const { invoiceId } = matchSchema.parse(req.body);
 
@@ -105,6 +109,7 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
       .where(and(
         eq(qontoTransactions.id, id),
         isNull(qontoTransactions.matchedInvoiceId),
+        isNull(qontoTransactions.billingIrrelevantAt),
       ))
       .returning();
 
@@ -194,6 +199,107 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
     });
 
     return unmatchUpdate[0];
+  }, { faults: readTestFaults(req) });
+
+  res.json(updated);
+}));
+
+// „Nicht abrechnungsrelevant" markieren — Qonto-Eingänge, die keine Rechnung
+// betreffen (sonstige Einnahmen/Erstattungen/Kosten), aus dem offenen Abgleich
+// UND dem Auto-Abgleich ausblenden. Reversibel (DELETE hebt die Markierung
+// wieder auf), GoBD-auditiert. Nur für noch NICHT zugeordnete Transaktionen.
+router.post("/transactions/:id/ignore", asyncHandler("Markierung fehlgeschlagen", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+
+  if (tx.side !== "credit") {
+    throw badRequest("Nur Zahlungseingänge können als nicht abrechnungsrelevant markiert werden.");
+  }
+
+  if (tx.matchedInvoiceId) {
+    throw badRequest("Zugeordnete Transaktion kann nicht als nicht abrechnungsrelevant markiert werden. Bitte zuerst die Zuordnung aufheben.");
+  }
+
+  // Idempotenz: bereits markiert → no-op, keine doppelte Audit-Zeile.
+  if (tx.billingIrrelevantAt) {
+    res.json(tx);
+    return;
+  }
+
+  const updated = await withAudit(async (dbTx, audit) => {
+    const marked = await dbTx.update(qontoTransactions)
+      .set({ billingIrrelevantAt: new Date() })
+      .where(and(
+        eq(qontoTransactions.id, id),
+        isNull(qontoTransactions.billingIrrelevantAt),
+        isNull(qontoTransactions.matchedInvoiceId),
+      ))
+      .returning();
+
+    if (marked.length === 0) {
+      throw badRequest("Transaktion wurde zwischenzeitlich verändert.");
+    }
+
+    audit.record({
+      userId: req.user!.id,
+      action: "qonto_transaction_marked_irrelevant",
+      entityType: "qonto_transaction",
+      entityId: id,
+      metadata: {
+        qontoTransactionExternalId: tx.qontoTransactionId,
+        amountCents: tx.amountCents,
+        counterpartyName: tx.counterpartyName,
+      },
+      ipAddress: req.ip,
+    });
+
+    return marked[0];
+  }, { faults: readTestFaults(req) });
+
+  res.json(updated);
+}));
+
+router.delete("/transactions/:id/ignore", asyncHandler("Markierung konnte nicht aufgehoben werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+
+  // Idempotenz: nicht markiert → no-op.
+  if (!tx.billingIrrelevantAt) {
+    res.json(tx);
+    return;
+  }
+
+  const updated = await withAudit(async (dbTx, audit) => {
+    const cleared = await dbTx.update(qontoTransactions)
+      .set({ billingIrrelevantAt: null })
+      .where(and(
+        eq(qontoTransactions.id, id),
+        isNotNull(qontoTransactions.billingIrrelevantAt),
+      ))
+      .returning();
+
+    if (cleared.length === 0) {
+      throw badRequest("Transaktion wurde zwischenzeitlich verändert.");
+    }
+
+    audit.record({
+      userId: req.user!.id,
+      action: "qonto_transaction_unmarked_irrelevant",
+      entityType: "qonto_transaction",
+      entityId: id,
+      metadata: {
+        qontoTransactionExternalId: tx.qontoTransactionId,
+      },
+      ipAddress: req.ip,
+    });
+
+    return cleared[0];
   }, { faults: readTestFaults(req) });
 
   res.json(updated);

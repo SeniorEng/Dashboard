@@ -96,7 +96,31 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
     },
   });
 
-  return { matchMutation, unmatchMutation, autoMatchMutation, csvImportMutation };
+  const ignoreMutation = useMutation({
+    mutationFn: async (txId: number) =>
+      unwrapResult(await api.post(`/admin/qonto/transactions/${txId}/ignore`, {})),
+    onSuccess: () => {
+      toast({ title: "Als nicht abrechnungsrelevant markiert" });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const unignoreMutation = useMutation({
+    mutationFn: async (txId: number) =>
+      unwrapResult(await api.delete(`/admin/qonto/transactions/${txId}/ignore`)),
+    onSuccess: () => {
+      toast({ title: "Markierung aufgehoben" });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return { matchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation };
 }
 
 export function useAdviceMutations({ onCreateSuccess }: { onCreateSuccess: () => void }) {

@@ -335,6 +335,7 @@ class QontoService {
           .where(and(
             eq(qontoTransactions.id, qtx.id),
             isNull(qontoTransactions.matchedInvoiceId),
+            isNull(qontoTransactions.billingIrrelevantAt),
           ))
           .returning({ id: qontoTransactions.id });
 

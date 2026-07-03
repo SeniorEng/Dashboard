@@ -29,6 +29,7 @@ export interface QontoTransaction {
   sourceIban: string | null;
   matchedInvoiceId: number | null;
   matchConfidence: string | null;
+  billingIrrelevantAt: string | null;
 }
 
 export interface Invoice {
@@ -77,6 +78,6 @@ export interface PaymentAdvice {
   unpaidMatchedCount?: number;
 }
 
-export type Tab = "status" | "transactions" | "advices";
+export type Tab = "transactions" | "advices";
 
-export type MatchFilter = "all" | "matched" | "unmatched";
+export type MatchFilter = "all" | "matched" | "unmatched" | "ignored";
