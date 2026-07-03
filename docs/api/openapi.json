@@ -1633,6 +1633,12 @@
           "krankheitDays": {
             "type": "number"
           },
+          "urlaubHours": {
+            "type": "number"
+          },
+          "krankheitHours": {
+            "type": "number"
+          },
           "pauseMinutes": {
             "type": "number"
           },
@@ -1649,6 +1655,8 @@
         "required": [
           "urlaubDays",
           "krankheitDays",
+          "urlaubHours",
+          "krankheitHours",
           "pauseMinutes",
           "bueroarbeitMinutes",
           "vertriebMinutes",

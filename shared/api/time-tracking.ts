@@ -113,6 +113,15 @@ export interface TravelSummary {
 export interface TimeEntrySummary {
   urlaubDays: number;
   krankheitDays: number;
+  /**
+   * Aus den Urlaubs-/Kranktagen abgeleiteter Stundenwert (Tage × Tages-Soll).
+   * Nutzt denselben Tages-Soll-Berechner (`dailySollHours`) wie die
+   * Admin-Mitarbeiterabrechnung, damit Eigensicht und Abrechnung identische
+   * Abwesenheits-Stunden zeigen. 0, wenn kein vertragliches Monatsstunden-Soll
+   * hinterlegt ist (Tages-Soll = 0).
+   */
+  urlaubHours: number;
+  krankheitHours: number;
   pauseMinutes: number;
   bueroarbeitMinutes: number;
   vertriebMinutes: number;

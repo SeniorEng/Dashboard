@@ -4,6 +4,8 @@ import {
   customers,
   employeeTimeEntries,
 } from "@shared/schema";
+import { users } from "@shared/schema/users";
+import { dailySollHours } from "./payroll-hours";
 import { appointmentServices as appointmentServicesTable } from "@shared/schema/appointments";
 import { services as servicesTable } from "@shared/schema/services";
 import type {
@@ -39,10 +41,23 @@ export async function getTimeOverview(
   const { year, month } = filters;
   const { startDate, endDate } = monthDateRange(year, month);
 
-  const [employeeAppointments, timeEntries] = await Promise.all([
+  const [employeeAppointments, timeEntries, employeeRow] = await Promise.all([
     getEmployeeAppointments(userId, startDate, endDate),
     getTimeEntries(userId, { year, month }),
+    db.select({
+      employmentType: users.employmentType,
+      monthlyWorkHours: users.monthlyWorkHours,
+    }).from(users).where(eq(users.id, userId)).limit(1),
   ]);
+
+  // Tages-Soll aus den vertraglich hinterlegten Monatsstunden ableiten
+  // (Monatsstunden ÷ 21,7). Dieselbe SSoT `dailySollHours` wie die
+  // Admin-Mitarbeiterabrechnung, damit Eigensicht und Abrechnung identische
+  // Urlaubs-/Kranken-Stunden zeigen. Kein hinterlegtes Soll ⇒ 0 h.
+  const dailySoll = dailySollHours(
+    employeeRow[0]?.employmentType ?? "",
+    employeeRow[0]?.monthlyWorkHours ?? null,
+  );
 
   const appointmentIds = employeeAppointments.map(a => a.id);
 
@@ -171,6 +186,8 @@ export async function getTimeOverview(
   const timeEntrySummary: TimeEntrySummary = {
     urlaubDays: 0,
     krankheitDays: 0,
+    urlaubHours: 0,
+    krankheitHours: 0,
     pauseMinutes: 0,
     bueroarbeitMinutes: 0,
     vertriebMinutes: 0,
@@ -201,6 +218,13 @@ export async function getTimeOverview(
         break;
     }
   }
+
+  // Abwesenheits-Stunden = Tage × Tages-Soll (informativ, fließen NICHT in die
+  // gearbeiteten Service-Stunden ein). Tages-Soll = 0 ⇒ Stunden bleiben 0.
+  timeEntrySummary.urlaubHours =
+    Math.round(timeEntrySummary.urlaubDays * dailySoll * 100) / 100;
+  timeEntrySummary.krankheitHours =
+    Math.round(timeEntrySummary.krankheitDays * dailySoll * 100) / 100;
 
   type EnrichedAppointment = typeof employeeAppointments[number] & {
     services: Array<{

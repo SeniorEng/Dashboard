@@ -26,6 +26,10 @@ interface TimeOverview {
   completedTravel?: Pick<TravelInfo, 'totalMinutes' | 'totalKilometers' | 'customerKilometers'>;
   plannedTravel?: Pick<TravelInfo, 'totalMinutes' | 'totalKilometers' | 'customerKilometers'>;
   timeEntries?: {
+    urlaubDays?: number;
+    krankheitDays?: number;
+    urlaubHours?: number;
+    krankheitHours?: number;
     pauseMinutes?: number;
     bueroarbeitMinutes?: number;
     vertriebMinutes?: number;
@@ -144,6 +148,12 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
     return null;
   })();
 
+  const urlaubDays = timeOverview?.timeEntries?.urlaubDays || 0;
+  const krankheitDays = timeOverview?.timeEntries?.krankheitDays || 0;
+  const urlaubHours = timeOverview?.timeEntries?.urlaubHours || 0;
+  const krankheitHours = timeOverview?.timeEntries?.krankheitHours || 0;
+  const pauseMinutes = timeOverview?.timeEntries?.pauseMinutes || 0;
+
   const timeEntryKm = timeOverview?.travel?.timeEntryKilometers || 0;
   const completedTravelKm = timeOverview?.completedTravel?.totalKilometers || 0;
   const completedCustomerKm = timeOverview?.completedTravel?.customerKilometers || 0;
@@ -165,9 +175,9 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-hours-summary"
       >
         <div className="space-y-0">
-          <table className="w-full text-sm" data-testid="label-completed-section">
+          <table className="w-full text-sm text-gray-900" data-testid="label-completed-section">
             <thead>
-              <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <tr className="text-sm font-semibold text-gray-900">
                 <th className="text-left font-semibold pb-2"></th>
                 <th className="text-right font-semibold pb-2">Dokumentiert</th>
                 {hasPlanned && (
@@ -175,47 +185,47 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
                 )}
               </tr>
             </thead>
-            <tbody className="text-gray-700">
+            <tbody className="text-gray-900">
               <tr>
-                <td className="py-0.5 text-gray-600">Hauswirtschaft</td>
-                <td className="py-0.5 text-right font-semibold" data-testid="text-hauswirtschaft-hours">{formatMinutesToHours(cHw)}</td>
-                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-hauswirtschaft-hours">{formatMinutesToHours(pHw)}</td>}
+                <td className="py-1">Hauswirtschaft</td>
+                <td className="py-1 text-right font-semibold" data-testid="text-hauswirtschaft-hours">{formatMinutesToHours(cHw)}</td>
+                {hasPlanned && <td className="py-1 text-right font-semibold pl-3" data-testid="text-planned-hauswirtschaft-hours">{formatMinutesToHours(pHw)}</td>}
               </tr>
               <tr>
-                <td className="py-0.5 text-gray-600">Alltagsbegleitung</td>
-                <td className="py-0.5 text-right font-semibold" data-testid="text-alltagsbegleitung-hours">{formatMinutesToHours(cAb)}</td>
-                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-alltagsbegleitung-hours">{formatMinutesToHours(pAb)}</td>}
+                <td className="py-1">Alltagsbegleitung</td>
+                <td className="py-1 text-right font-semibold" data-testid="text-alltagsbegleitung-hours">{formatMinutesToHours(cAb)}</td>
+                {hasPlanned && <td className="py-1 text-right font-semibold pl-3" data-testid="text-planned-alltagsbegleitung-hours">{formatMinutesToHours(pAb)}</td>}
               </tr>
               <tr>
-                <td className="py-0.5 text-gray-600">Erstberatung</td>
-                <td className="py-0.5 text-right font-semibold" data-testid="text-erstberatung-hours">{formatMinutesToHours(cEb)}</td>
-                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-erstberatung-hours">{formatMinutesToHours(pEb)}</td>}
+                <td className="py-1">Erstberatung</td>
+                <td className="py-1 text-right font-semibold" data-testid="text-erstberatung-hours">{formatMinutesToHours(cEb)}</td>
+                {hasPlanned && <td className="py-1 text-right font-semibold pl-3" data-testid="text-planned-erstberatung-hours">{formatMinutesToHours(pEb)}</td>}
               </tr>
               <tr>
-                <td className="py-0.5 text-gray-600">Anfahrt</td>
-                <td className="py-0.5 text-right font-semibold" data-testid="text-travel-time-hours">{formatMinutesToHours(cTravel)}</td>
-                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3" data-testid="text-planned-travel-time-hours">{formatMinutesToHours(pTravel)}</td>}
+                <td className="py-1">Anfahrt</td>
+                <td className="py-1 text-right font-semibold" data-testid="text-travel-time-hours">{formatMinutesToHours(cTravel)}</td>
+                {hasPlanned && <td className="py-1 text-right font-semibold pl-3" data-testid="text-planned-travel-time-hours">{formatMinutesToHours(pTravel)}</td>}
               </tr>
               <tr>
-                <td className="py-0.5 text-gray-600">Sonstiges</td>
-                <td className="py-0.5 text-right font-semibold" data-testid="text-sonstiges-hours">{formatMinutesToHours(sonstigesMinutes)}</td>
-                {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3"></td>}
+                <td className="py-1">Sonstiges</td>
+                <td className="py-1 text-right font-semibold" data-testid="text-sonstiges-hours">{formatMinutesToHours(sonstigesMinutes)}</td>
+                {hasPlanned && <td className="py-1 text-right font-semibold pl-3"></td>}
               </tr>
               {leerfahrtenCount > 0 && (
                 <tr>
-                  <td className="py-0.5 text-gray-600">
+                  <td className="py-1">
                     Leerfahrten ({leerfahrtenCount})
                     {(leerfahrtenTravelMin > 0 || leerfahrtenWaitMin > 0) && (
-                      <span className="text-xs text-gray-500 ml-1">
+                      <span className="ml-1">
                         ({formatMinutesToHours(leerfahrtenTravelMin)} Fahrt
                         {leerfahrtenWaitMin > 0 && ` + ${formatMinutesToHours(leerfahrtenWaitMin)} Wartezeit`})
                       </span>
                     )}
                   </td>
-                  <td className="py-0.5 text-right font-semibold text-amber-700" data-testid="text-leerfahrten-hours">
+                  <td className="py-1 text-right font-semibold" data-testid="text-leerfahrten-hours">
                     {formatMinutesToHours(leerfahrtenWageMin)}
                   </td>
-                  {hasPlanned && <td className="py-0.5 text-right font-semibold text-gray-500 pl-3"></td>}
+                  {hasPlanned && <td className="py-1 text-right font-semibold pl-3"></td>}
                 </tr>
               )}
             </tbody>
@@ -223,18 +233,18 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
               {hasPlanned ? (
                 <>
                   <tr className="border-t">
-                    <td className="pt-2 font-medium text-gray-700">Zwischensumme</td>
+                    <td className="pt-2 font-bold text-gray-900">Zwischensumme</td>
                     <td className="pt-2 text-right font-bold text-gray-900" data-testid="text-completed-service-hours">{formatMinutesToHours(documentedTotalWithLeer)}</td>
-                    <td className="pt-2 text-right font-semibold text-gray-600 pl-3" data-testid="text-planned-service-hours">{formatMinutesToHours(plannedTotal)}</td>
+                    <td className="pt-2 text-right font-bold text-gray-900 pl-3" data-testid="text-planned-service-hours">{formatMinutesToHours(plannedTotal)}</td>
                   </tr>
                   <tr className="border-t">
-                    <td className="pt-2 font-medium text-gray-700">Gesamt</td>
+                    <td className="pt-2 font-bold text-gray-900">Gesamt</td>
                     <td colSpan={2} className="pt-2 text-right font-bold text-gray-900" data-testid="text-total-service-hours">{formatMinutesToHours(totalServiceMinutes)}</td>
                   </tr>
                 </>
               ) : (
                 <tr className="border-t">
-                  <td className="pt-2 font-medium text-gray-700">Gesamt</td>
+                  <td className="pt-2 font-bold text-gray-900">Gesamt</td>
                   <td className="pt-2 text-right font-bold text-gray-900" data-testid="text-completed-service-hours">
                     <span data-testid="text-total-service-hours">{formatMinutesToHours(totalServiceMinutes)}</span>
                   </td>
@@ -242,12 +252,36 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
               )}
             </tfoot>
           </table>
-          {(timeOverview?.timeEntries?.pauseMinutes || 0) > 0 && (
-            <div className="flex justify-between items-center pt-1 text-gray-500">
-              <span className="text-xs">davon Pause (unbezahlt)</span>
-              <span className="text-xs font-medium" data-testid="text-pause-hours">
-                {formatMinutesToHours(timeOverview?.timeEntries?.pauseMinutes || 0)}
-              </span>
+          {(pauseMinutes > 0 || urlaubDays > 0 || krankheitDays > 0) && (
+            <div className="pt-1">
+              {pauseMinutes > 0 && (
+                <div className="flex justify-between items-center py-1 text-gray-900">
+                  <span>davon Pause (unbezahlt)</span>
+                  <span className="font-semibold" data-testid="text-pause-hours">
+                    {formatMinutesToHours(pauseMinutes)}
+                  </span>
+                </div>
+              )}
+              {urlaubDays > 0 && (
+                <div className="flex justify-between items-center py-1 text-gray-900">
+                  <span>Urlaub</span>
+                  <span className="font-semibold" data-testid="text-urlaub-hours">
+                    {urlaubHours > 0
+                      ? formatMinutesToHours(Math.round(urlaubHours * 60))
+                      : `${formatVacationDays(urlaubDays)} ${urlaubDays === 1 ? "Tag" : "Tage"}`}
+                  </span>
+                </div>
+              )}
+              {krankheitDays > 0 && (
+                <div className="flex justify-between items-center py-1 text-gray-900">
+                  <span>Krankheit</span>
+                  <span className="font-semibold" data-testid="text-krankheit-hours">
+                    {krankheitHours > 0
+                      ? formatMinutesToHours(Math.round(krankheitHours * 60))
+                      : `${formatVacationDays(krankheitDays)} ${krankheitDays === 1 ? "Tag" : "Tage"}`}
+                  </span>
+                </div>
+              )}
             </div>
           )}
           {euRentnerMonthWarning && (
@@ -269,19 +303,19 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
         testId="card-km-summary"
       >
         <div className="space-y-2">
-          <SummaryRow label="Anfahrt" value={`${formatKm(completedTravelKm)} km`} color="text-gray-700" testId="text-anfahrt-km" />
-          <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-gray-700" testId="text-customer-km" />
-          <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-700" testId="text-time-entry-km" />
+          <SummaryRow label="Anfahrt" value={`${formatKm(completedTravelKm)} km`} color="text-gray-900" testId="text-anfahrt-km" />
+          <SummaryRow label="Km mit Kunden" value={`${formatKm(completedCustomerKm)} km`} color="text-gray-900" testId="text-customer-km" />
+          <SummaryRow label="Sonstige Fahrten" value={`${formatKm(timeEntryKm)} km`} color="text-gray-900" testId="text-time-entry-km" />
           {leerfahrtenCount > 0 && (
             <SummaryRow
               label={`Leerfahrten (${leerfahrtenCount})`}
               value={`${formatKm(leerfahrtenKm)} km`}
-              color="text-amber-700"
+              color="text-gray-900"
               testId="text-leerfahrten-km"
             />
           )}
           <div className="border-t pt-2 mt-2 flex justify-between items-center">
-            <span className="text-sm font-medium text-gray-700">Gesamt</span>
+            <span className="text-sm font-bold text-gray-900">Gesamt</span>
             <span className="font-bold text-gray-900" data-testid="text-total-km">
               {formatKm(totalKm)} km
             </span>
@@ -298,18 +332,18 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
       >
         {vacationSummary ? (
           <div className="space-y-2">
-            <SummaryRow label="Anspruch" value={`${formatVacationDays(vacationSummary.totalDays)} ${vacationSummary.totalDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-total-vacation" />
+            <SummaryRow label="Anspruch" value={`${formatVacationDays(vacationSummary.totalDays)} ${vacationSummary.totalDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-total-vacation" />
             {vacationSummary.carryOverDays > 0 && (
-              <SummaryRow label="Übertrag (bis 01.04.)" value={`${formatVacationDays(vacationSummary.carryOverDays)} ${vacationSummary.carryOverDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-carry-over" />
+              <SummaryRow label="Übertrag (bis 01.04.)" value={`${formatVacationDays(vacationSummary.carryOverDays)} ${vacationSummary.carryOverDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-carry-over" />
             )}
-            <SummaryRow label="Genommen" value={`${formatVacationDays(vacationSummary.usedDays)} ${vacationSummary.usedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-used-days" />
-            <SummaryRow label="Geplant" value={`${formatVacationDays(vacationSummary.plannedDays)} ${vacationSummary.plannedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-700" testId="text-planned-days" />
+            <SummaryRow label="Genommen" value={`${formatVacationDays(vacationSummary.usedDays)} ${vacationSummary.usedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-used-days" />
+            <SummaryRow label="Geplant" value={`${formatVacationDays(vacationSummary.plannedDays)} ${vacationSummary.plannedDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-planned-days" />
             <div className="border-t pt-2 mt-2">
               <SummaryRow label="Verfügbar" value={`${formatVacationDays(vacationSummary.remainingDays)} ${vacationSummary.remainingDays === 1 ? 'Tag' : 'Tage'}`} color="text-gray-900" testId="text-remaining-days" bold />
             </div>
             <div className="border-t pt-2 mt-2 flex justify-between items-center">
-              <span className="text-sm text-gray-600">Krankheit</span>
-              <span className="font-semibold text-gray-700" data-testid="text-sick-days">
+              <span className="text-sm text-gray-900">Krankheit</span>
+              <span className="font-semibold text-gray-900" data-testid="text-sick-days">
                 {vacationSummary.sickDays} {vacationSummary.sickDays === 1 ? 'Tag' : 'Tage'}
               </span>
             </div>
@@ -325,7 +359,7 @@ export function TimeOverviewSummary({ timeOverview, vacationSummary, selectedMon
 function SummaryRow({ label, value, color, testId, bold }: { label: string; value: string; color: string; testId: string; bold?: boolean }) {
   return (
     <div className="flex justify-between items-center">
-      <span className="text-sm text-gray-600">{label}</span>
+      <span className="text-sm text-gray-900">{label}</span>
       <span className={`${bold ? "font-bold" : "font-semibold"} ${color}`} data-testid={testId}>
         {value}
       </span>

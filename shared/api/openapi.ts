@@ -648,6 +648,8 @@ export const TimeEntrySummarySchema = component(
   z.object({
     urlaubDays: z.number(),
     krankheitDays: z.number(),
+    urlaubHours: z.number(),
+    krankheitHours: z.number(),
     pauseMinutes: z.number(),
     bueroarbeitMinutes: z.number(),
     vertriebMinutes: z.number(),
