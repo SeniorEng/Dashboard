@@ -1245,7 +1245,14 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       expect(carry?.amountCents).toBe(carryoverCents);
     }
 
-    await page.goto(`/admin/customers/${customer.id}?tab=budgets`, {
+    // Task #1582 — Stichtag `?asOf=` in der URL koppelt die Budget-Kacheln an
+    // ein festes Datum (der Endpoint `/overview` liest `?date=`). Wir wählen den
+    // 15.06. des laufenden Jahres: garantiert INNERHALB des §45b-Übertrag-Fensters
+    // (validFrom = YYYY-01-01, expiresAt = YYYY-06-30), unabhängig vom Wanduhr-
+    // Monat des CI-Laufs. Damit wird die Kachel-Sichtbarkeit deterministisch
+    // getestet — auch in H2, wo der Übertrag zur „heute"-Ansicht verfallen wäre.
+    const asOfInWindow = `${today.getFullYear()}-06-15`;
+    await page.goto(`/admin/customers/${customer.id}?tab=budgets&asOf=${asOfInWindow}`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -1264,21 +1271,13 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     await expect(carryoverSection).toBeVisible({ timeout: 10000 });
     await expect(carryoverSection).toContainText("Übertrag");
 
-    // BudgetSummary zeigt den Carryover-Wert vor dem Löschen — ABER nur, solange
-    // der §45b-Übertrag im gesetzlichen Fenster liegt. Der Seed legt den Übertrag
-    // fürs laufende Jahr an (validFrom = YYYY-01-01, expiresAt = YYYY-06-30, SGB XI
-    // §45b Abs. 3). Nach dem 30.06. ist er KORREKT verfallen: die Summary
-    // (`carryoverCents === 0`) blendet die Kachel bewusst aus. Es gibt keinen
-    // API-Pfad, der einen §45b-Carryover mit Ablauf > 30.06. anlegt, daher wird die
-    // Kachel-Sichtbarkeit nur im gültigen Fenster (H1) geprüft. Der eigentliche
-    // Lösch-Round-Trip läuft datumsunabhängig über die Carryover-Sektion (oben) und
-    // die API-Verifikation (unten) und bleibt in H2 voll wirksam.
-    const carryoverStillValid = today.getMonth() <= 5; // 0-basiert: Jan–Jun
-    if (carryoverStillValid) {
-      await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
-        timeout: 10000,
-      });
-    }
+    // BudgetSummary zeigt den Carryover-Wert vor dem Löschen. Dank des `?asOf=`-
+    // Stichtags (15.06., s.o.) liegt der §45b-Übertrag garantiert im gesetzlichen
+    // Fenster (SGB XI §45b Abs. 3, Verfall 30.06.) — die Kachel MUSS also
+    // erscheinen, unabhängig vom Wanduhr-Monat des CI-Laufs.
+    await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
+      timeout: 10000,
+    });
 
     // Trash → Mini-Confirm → DELETE abwarten. Die Zeile trägt den Quelljahr-
     // Suffix; wir treffen sie über das gemeinsame Präfix.
@@ -1303,8 +1302,11 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     ]);
 
     // Vollständiger Reload — `page.reload()` allein würde nur den Cache des
-    // SPA neu hydratisieren; Re-Navigation forciert frische Queries.
-    await page.goto(`/admin/customers/${customer.id}?tab=budgets`, {
+    // SPA neu hydratisieren; Re-Navigation forciert frische Queries. Der `?asOf=`-
+    // Stichtag bleibt erhalten, damit die Kachel-Assertion unten denselben
+    // (in-window) Stichtag prüft: die Kachel verschwindet also nur, weil der
+    // Übertrag GELÖSCHT wurde — nicht, weil er zum heutigen Datum verfallen wäre.
+    await page.goto(`/admin/customers/${customer.id}?tab=budgets&asOf=${asOfInWindow}`, {
       waitUntil: "domcontentloaded",
     });
 

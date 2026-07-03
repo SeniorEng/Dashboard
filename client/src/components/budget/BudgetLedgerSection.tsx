@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -113,6 +114,21 @@ interface BudgetLedgerSectionProps {
 export function BudgetLedgerSection({ customerId, customerName, onRefresh }: BudgetLedgerSectionProps) {
   const queryClient = useQueryClient();
 
+  // Task #1582 — Optionaler Stichtag `?asOf=YYYY-MM-DD` aus der URL. Der
+  // `/overview`-Endpoint akzeptiert bereits `?date=` (Default heute); ohne den
+  // Param bleibt das Verhalten unverändert (Live-Ansicht = heute). Der Param
+  // erlaubt es, die Budget-Kacheln (u.a. den §45b-Übertrag, der gesetzlich am
+  // 30.06. verfällt) deterministisch zu einem festen Datum zu rendern —
+  // unabhängig vom Wanduhr-Monat. Nur ein striktes YYYY-MM-DD wird akzeptiert.
+  const searchString = useSearch();
+  const asOfDate = (() => {
+    const raw = new URLSearchParams(searchString).get("asOf");
+    return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  })();
+  const overviewPath = asOfDate
+    ? `/budget/${customerId}/overview?date=${asOfDate}`
+    : `/budget/${customerId}/overview`;
+
   const { data: typeSettings, isLoading: settingsLoading } = useQuery<BudgetTypeSetting[]>({
     queryKey: ["budget-type-settings", customerId],
     queryFn: async () => unwrapResult(await api.get<BudgetTypeSetting[]>(`/budget/${customerId}/type-settings`)),
@@ -120,8 +136,8 @@ export function BudgetLedgerSection({ customerId, customerName, onRefresh }: Bud
   });
 
   const { data: overview, isLoading: overviewLoading } = useQuery<BudgetOverview>({
-    queryKey: ["budget-overview", customerId],
-    queryFn: async () => unwrapResult(await api.get<BudgetOverview>(`/budget/${customerId}/overview`)),
+    queryKey: ["budget-overview", customerId, asOfDate],
+    queryFn: async () => unwrapResult(await api.get<BudgetOverview>(overviewPath)),
     staleTime: 30000,
   });
 
