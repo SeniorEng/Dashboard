@@ -30,6 +30,16 @@ export interface QontoTransaction {
   matchedInvoiceId: number | null;
   matchConfidence: string | null;
   billingIrrelevantAt: string | null;
+  billingIrrelevantSource: string | null;
+  billingRelevantOverrideAt: string | null;
+}
+
+export interface QontoHideRule {
+  id: number;
+  ruleType: "counterparty" | "iban";
+  value: string;
+  createdByUserId: number | null;
+  createdAt: string;
 }
 
 export interface Invoice {

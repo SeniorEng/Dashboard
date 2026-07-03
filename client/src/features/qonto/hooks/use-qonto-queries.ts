@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter } from "../types";
+import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter, QontoHideRule } from "../types";
 
 export function useQontoStatus(enabled: boolean = true) {
   return useQuery<QontoStatus>({
@@ -42,6 +42,15 @@ export function useMatchableInvoices(enabled: boolean) {
       return unwrapResult(result);
     },
     enabled,
+  });
+}
+
+export function useQontoHideRules(enabled: boolean = true) {
+  return useQuery<QontoHideRule[]>({
+    queryKey: ["qonto", "hide-rules"],
+    queryFn: async () => unwrapResult(await api.get("/admin/qonto/hide-rules")),
+    enabled,
+    staleTime: 15000,
   });
 }
 

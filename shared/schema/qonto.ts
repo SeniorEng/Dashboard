@@ -30,6 +30,17 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   // Einnahmen/Erstattungen/Kosten) fallen aus dem offenen Abgleich UND aus
   // dem Auto-Abgleich heraus. Reversibel (kann wieder auf NULL gesetzt werden).
   billingIrrelevantAt: timestamp("billing_irrelevant_at"),
+  // Woher stammt die Markierung: 'manual' (Nutzer hat den ⊘-Button geklickt)
+  // oder 'auto' (eine Auto-Ausblenden-Regel hat gegriffen). NULL, solange die
+  // Transaktion abrechnungsrelevant ist. Nur informativ / für Audit-Kontext.
+  billingIrrelevantSource: text("billing_irrelevant_source"),
+  // „Manuelle Wahl gewinnt": Hat der Nutzer eine Transaktion aktiv wieder
+  // sichtbar gemacht (Markierung aufgehoben), wird hier ein Zeitstempel
+  // gesetzt. Auto-Ausblenden-Regeln überspringen jede Transaktion mit
+  // gesetztem Override dauerhaft, damit eine Regel eine bewusste manuelle
+  // Entscheidung nicht wieder überschreibt. Manuelles Ausblenden setzt den
+  // Override zurück (der Nutzer entscheidet sich dann bewusst fürs Ausblenden).
+  billingRelevantOverrideAt: timestamp("billing_relevant_override_at"),
   rawData: jsonb("raw_data"),
   syncedAt: timestamp("synced_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -45,6 +56,27 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   uniqueIndex("qonto_transactions_matched_invoice_unique_idx")
     .on(table.matchedInvoiceId)
     .where(sql`matched_invoice_id IS NOT NULL`),
+]);
+
+// Auto-Ausblenden-Regeln: markieren neu eingehende (oder bei Regel-Anlage
+// bereits vorhandene, noch offene) Qonto-Zahlungseingänge automatisch als
+// „nicht abrechnungsrelevant". Eine Regel trifft entweder über einen
+// Teilstring im Zahler-/Counterparty-Namen ODER über eine ganze Quell-IBAN.
+// Eine manuell wieder sichtbar gemachte Transaktion (Override) wird NIE erneut
+// automatisch ausgeblendet. Soft-Delete (deletedAt) für Audit-Nachvollzug.
+export const qontoHideRules = pgTable("qonto_hide_rules", {
+  id: serial("id").primaryKey(),
+  // 'counterparty' = Teilstring-Treffer im Zahler-Namen; 'iban' = exakte
+  // (normalisierte) Quell-IBAN.
+  ruleType: text("rule_type").notNull(),
+  // Bei 'counterparty' der gesuchte Teilstring; bei 'iban' die (bereits
+  // normalisierte) IBAN.
+  value: text("value").notNull(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => [
+  index("qonto_hide_rules_active_idx").on(table.deletedAt),
 ]);
 
 export const paymentAdvices = pgTable("payment_advices", {
@@ -96,6 +128,14 @@ export const insertQontoTransactionSchema = createInsertSchema(qontoTransactions
 });
 export type InsertQontoTransaction = z.infer<typeof insertQontoTransactionSchema>;
 export type QontoTransaction = typeof qontoTransactions.$inferSelect;
+
+export const insertQontoHideRuleSchema = createInsertSchema(qontoHideRules).omit({
+  id: true,
+  createdAt: true,
+  deletedAt: true,
+});
+export type InsertQontoHideRule = z.infer<typeof insertQontoHideRuleSchema>;
+export type QontoHideRule = typeof qontoHideRules.$inferSelect;
 
 export const insertPaymentAdviceSchema = createInsertSchema(paymentAdvices).omit({
   id: true,

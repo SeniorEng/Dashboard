@@ -118,6 +118,9 @@ export const AUDIT_ACTIONS = [
   "hours_account_updated",
   "qonto_transaction_marked_irrelevant",
   "qonto_transaction_unmarked_irrelevant",
+  "qonto_backfill_executed",
+  "qonto_hide_rule_created",
+  "qonto_hide_rule_deleted",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -137,6 +140,7 @@ export const AUDIT_ENTITY_TYPES = [
   "service",
   "hours_account",
   "qonto_transaction",
+  "qonto_hide_rule",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

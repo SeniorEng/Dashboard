@@ -107,6 +107,7 @@ const EXPECTED_TABLES: readonly string[] = [
   "prospect_notes",
   "prospect_offers",
   "prospects",
+  "qonto_hide_rules",
   "qonto_transactions",
   "qualification_documents",
   "qualifications",

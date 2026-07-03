@@ -4,7 +4,9 @@ import { invoices, qontoTransactions } from "@shared/schema";
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { withAudit } from "../lib/with-audit";
-import { resolveMonitoredIbans, resolveAdditionalMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
+import { resolveMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
+import { matchesAnyHideRule } from "@shared/domain/qonto/hide-rules";
+import { enumerateMonthlyWindows } from "@shared/domain/qonto/backfill-windows";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -68,18 +70,6 @@ class QontoService {
   async getMonitoredIbans(): Promise<string[]> {
     const settings = await storage.getCompanySettings();
     return resolveMonitoredIbans({
-      qontoIban: settings.qontoIban,
-      qontoAdditionalIbans: settings.qontoAdditionalIbans,
-    });
-  }
-
-  /**
-   * Nur die nachträglich ergänzten Zusatzkonten (ohne primäres Geschäftskonto).
-   * Für den einmaligen Voll-Sync / Backfill.
-   */
-  async getAdditionalMonitoredIbans(): Promise<string[]> {
-    const settings = await storage.getCompanySettings();
-    return resolveAdditionalMonitoredIbans({
       qontoIban: settings.qontoIban,
       qontoAdditionalIbans: settings.qontoAdditionalIbans,
     });
@@ -178,7 +168,7 @@ class QontoService {
    */
   private async fetchAndUpsert(
     ibans: string[],
-    updatedSince: Date | null,
+    dateParams: Record<string, string> = {},
   ): Promise<{ synced: number; total: number }> {
     let totalSynced = 0;
     let totalFetched = 0;
@@ -194,11 +184,8 @@ class QontoService {
           side: "credit",
           per_page: "100",
           page: page.toString(),
+          ...dateParams,
         };
-
-        if (updatedSince) {
-          params.updated_at_from = updatedSince.toISOString();
-        }
 
         const response = await this.apiRequest<QontoTransactionsResponse>("/transactions", params);
 
@@ -228,7 +215,7 @@ class QontoService {
     return { synced: totalSynced, total: totalFetched };
   }
 
-  async syncTransactions(): Promise<{ synced: number; total: number }> {
+  async syncTransactions(): Promise<{ synced: number; total: number; autoHidden: number }> {
     const creds = await this.getCredentials();
     if (!creds) {
       throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
@@ -241,32 +228,71 @@ class QontoService {
 
     // getLastSyncTime bleibt global (ein Sync-Lauf über alle Konten).
     const lastSync = await qontoStorage.getLastSyncTime();
-    const updatedSince = lastSync ? new Date(lastSync.getTime() - 24 * 60 * 60 * 1000) : null;
+    const dateParams: Record<string, string> = lastSync
+      ? { updated_at_from: new Date(lastSync.getTime() - 24 * 60 * 60 * 1000).toISOString() }
+      : {};
 
     // Pro überwachtem Konto paginiert synchronisieren (gleiche Zugangsdaten).
-    return this.fetchAndUpsert(ibans, updatedSince);
+    const result = await this.fetchAndUpsert(ibans, dateParams);
+    const autoHidden = await this.applyHideRules();
+    return { ...result, autoHidden };
   }
 
   /**
-   * Einmaliger Voll-Sync (Backfill) NUR der nachträglich ergänzten Zusatzkonten:
-   * zieht deren komplette completed-credit-Historie OHNE `updated_at_from`-Fenster,
-   * damit vor der Umstellung eingegangene (Fehl-)Überweisungen sicher erfasst und
-   * zuordenbar werden. Das primäre Konto wird ausgelassen (läuft bereits
-   * inkrementell). Upserts sind idempotent; die Auto-Matching-Logik bleibt unberührt.
+   * Task #1599 — Datums-basierter Backfill über ALLE überwachten Konten
+   * (Primär- + Zusatzkonten): zieht die komplette completed-credit-Historie ab
+   * `startDate` monatsweise (`emitted_at_from`/`emitted_at_to`), damit vor einer
+   * Konto-Umstellung eingegangene (Fehl-)Überweisungen sicher erfasst und
+   * zuordenbar werden. Ersetzt den früheren Zusatzkonten-Voll-Sync. Upserts sind
+   * idempotent; das Auto-Matching bleibt unberührt. Nach dem Abruf werden die
+   * Auto-Ausblenden-Regeln angewandt.
    */
-  async backfillTransactions(): Promise<{ synced: number; total: number; accounts: number }> {
+  async backfillTransactions(
+    startDate: Date,
+  ): Promise<{ synced: number; total: number; accounts: number; autoHidden: number }> {
     const creds = await this.getCredentials();
     if (!creds) {
       throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
     }
 
-    const ibans = await this.getAdditionalMonitoredIbans();
+    const ibans = await this.getMonitoredIbans();
     if (ibans.length === 0) {
-      return { synced: 0, total: 0, accounts: 0 };
+      throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
     }
 
-    const result = await this.fetchAndUpsert(ibans, null);
-    return { ...result, accounts: ibans.length };
+    const windows = enumerateMonthlyWindows(startDate, new Date());
+    let totalSynced = 0;
+    let totalFetched = 0;
+
+    for (const window of windows) {
+      const result = await this.fetchAndUpsert(ibans, {
+        emitted_at_from: window.from.toISOString(),
+        emitted_at_to: window.to.toISOString(),
+      });
+      totalSynced += result.synced;
+      totalFetched += result.total;
+    }
+
+    const autoHidden = await this.applyHideRules();
+    return { synced: totalSynced, total: totalFetched, accounts: ibans.length, autoHidden };
+  }
+
+  /**
+   * Task #1599 — wendet die aktiven Auto-Ausblenden-Regeln auf alle offenen,
+   * noch nicht ausgeblendeten Zahlungseingänge an (respektiert manuelle
+   * „doch relevant"-Overrides). Liefert die Anzahl neu ausgeblendeter
+   * Transaktionen. Idempotent — mehrfaches Ausführen blendet nichts doppelt aus.
+   */
+  async applyHideRules(): Promise<number> {
+    const rules = await qontoStorage.getHideRules();
+    if (rules.length === 0) return 0;
+
+    const candidates = await qontoStorage.getAutoHideCandidates();
+    const toHide = candidates
+      .filter((tx) => matchesAnyHideRule(tx, rules))
+      .map((tx) => tx.id);
+
+    return qontoStorage.markTransactionsIrrelevantAuto(toHide);
   }
 
   async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number }> {

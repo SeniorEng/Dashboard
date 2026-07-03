@@ -13,6 +13,7 @@ import { eq, and, ilike, isNull, isNotNull, inArray } from "drizzle-orm";
 import { withAudit } from "../../lib/with-audit";
 import { readTestFaults } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
+import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -54,9 +55,10 @@ router.post("/sync", asyncHandler("Qonto-Synchronisation fehlgeschlagen", async 
   res.json(result);
 }));
 
-// Task #1588 — Einmaliger Voll-Sync (Backfill) der nachträglich ergänzten
-// Zusatzkonten: zieht deren komplette Historie ohne updated_at_from-Fenster,
-// damit vor der Umstellung eingegangene Zahlungen sicher erfasst werden.
+// Task #1599 — Datums-basierter Backfill über ALLE überwachten Konten (Primär-
+// + Zusatzkonten) ab einem gewählten Startdatum. Ersetzt den früheren
+// Zusatzkonten-Voll-Sync. Zieht die completed-credit-Historie monatsweise,
+// wendet danach die Auto-Ausblenden-Regeln an. GoBD-auditiert.
 //
 // Task #1591 — Serverseitiger Lauf-Lock: Der teure Voll-Abzug darf immer nur
 // EINMAL gleichzeitig laufen. Ein session-scoped `pg_try_advisory_lock` auf
@@ -78,6 +80,10 @@ const QONTO_BACKFILL_LOCK_KEY = String(0x51424b46);
 const QONTO_BACKFILL_LOCK_CLASSID = Math.floor(Number(QONTO_BACKFILL_LOCK_KEY) / 0x100000000);
 const QONTO_BACKFILL_LOCK_OBJID = Number(QONTO_BACKFILL_LOCK_KEY) % 0x100000000;
 
+const backfillSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Startdatum (erwartet YYYY-MM-DD)"),
+});
+
 router.get("/backfill/status", asyncHandler("Voll-Sync-Status konnte nicht geladen werden", async (_req, res) => {
   const lockRes = await pool.query<{ running: boolean }>(
     `SELECT COUNT(*) > 0 AS running
@@ -91,7 +97,10 @@ router.get("/backfill/status", asyncHandler("Voll-Sync-Status konnte nicht gelad
   res.json({ running: lockRes.rows?.[0]?.running === true });
 }));
 
-router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (_req, res) => {
+router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (req, res) => {
+  const { startDate } = backfillSchema.parse(req.body);
+  const parsedStart = parseLocalDate(startDate);
+
   const lockClient = await pool.connect();
   let gotLock = false;
   try {
@@ -104,7 +113,25 @@ router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (_
       throw conflict("QONTO_BACKFILL_RUNNING", "Ein Voll-Sync läuft bereits. Bitte warten Sie, bis der aktuelle Abzug abgeschlossen ist.");
     }
 
-    const result = await qontoService.backfillTransactions();
+    const result = await qontoService.backfillTransactions(parsedStart);
+
+    await withAudit(async (_dbTx, audit) => {
+      audit.record({
+        userId: req.user!.id,
+        action: "qonto_backfill_executed",
+        entityType: "qonto_transaction",
+        entityId: 0,
+        metadata: {
+          startDate,
+          synced: result.synced,
+          total: result.total,
+          accounts: result.accounts,
+          autoHidden: result.autoHidden,
+        },
+        ipAddress: req.ip,
+      });
+    }, { faults: readTestFaults(req) });
+
     res.json(result);
   } finally {
     try {
@@ -285,8 +312,11 @@ router.post("/transactions/:id/ignore", asyncHandler("Markierung fehlgeschlagen"
   }
 
   const updated = await withAudit(async (dbTx, audit) => {
+    // Manuelles Ausblenden setzt Quelle 'manual' und LÖSCHT einen etwaigen
+    // "doch relevant"-Override: der Nutzer entscheidet sich bewusst fürs
+    // Ausblenden.
     const marked = await dbTx.update(qontoTransactions)
-      .set({ billingIrrelevantAt: new Date() })
+      .set({ billingIrrelevantAt: new Date(), billingIrrelevantSource: "manual", billingRelevantOverrideAt: null })
       .where(and(
         eq(qontoTransactions.id, id),
         isNull(qontoTransactions.billingIrrelevantAt),
@@ -331,8 +361,11 @@ router.delete("/transactions/:id/ignore", asyncHandler("Markierung konnte nicht 
   }
 
   const updated = await withAudit(async (dbTx, audit) => {
+    // Manuelles Wieder-Sichtbarmachen setzt einen dauerhaften Override:
+    // Auto-Ausblenden-Regeln dürfen diese bewusste Entscheidung nie erneut
+    // überschreiben. Quelle wird zurückgesetzt.
     const cleared = await dbTx.update(qontoTransactions)
-      .set({ billingIrrelevantAt: null })
+      .set({ billingIrrelevantAt: null, billingIrrelevantSource: null, billingRelevantOverrideAt: new Date() })
       .where(and(
         eq(qontoTransactions.id, id),
         isNotNull(qontoTransactions.billingIrrelevantAt),
@@ -363,6 +396,72 @@ router.delete("/transactions/:id/ignore", asyncHandler("Markierung konnte nicht 
 router.post("/auto-match", asyncHandler("Auto-Abgleich fehlgeschlagen", async (req, res) => {
   const result = await qontoService.autoMatch(req.user!.id, req.ip);
   res.json(result);
+}));
+
+// Task #1599 — Auto-Ausblenden-Regeln: markieren neu eingehende (und bei
+// Regel-Anlage bereits vorhandene, noch offene) Zahlungseingänge automatisch
+// als nicht abrechnungsrelevant. Regel-Anlage/-Löschung sind GoBD-auditiert.
+router.get("/hide-rules", asyncHandler("Regeln konnten nicht geladen werden", async (_req, res) => {
+  const rules = await qontoStorage.getHideRules();
+  res.json(rules);
+}));
+
+const hideRuleSchema = z.object({
+  ruleType: z.enum(["counterparty", "iban"], {
+    errorMap: () => ({ message: "Regeltyp muss 'counterparty' oder 'iban' sein." }),
+  }),
+  value: z.string().trim().min(1, "Wert darf nicht leer sein."),
+});
+
+router.post("/hide-rules", asyncHandler("Regel konnte nicht angelegt werden", async (req, res) => {
+  const parsed = hideRuleSchema.parse(req.body);
+  const value = normalizeHideRuleValue(parsed.ruleType, parsed.value);
+  if (!value) {
+    throw badRequest("Wert darf nicht leer sein.");
+  }
+
+  const rule = await qontoStorage.createHideRule({
+    ruleType: parsed.ruleType,
+    value,
+    createdByUserId: req.user!.id,
+  });
+
+  // Regel rückwirkend auf bereits vorhandene offene Transaktionen anwenden.
+  const autoHidden = await qontoService.applyHideRules();
+
+  await withAudit(async (_dbTx, audit) => {
+    audit.record({
+      userId: req.user!.id,
+      action: "qonto_hide_rule_created",
+      entityType: "qonto_hide_rule",
+      entityId: rule.id,
+      metadata: { ruleType: rule.ruleType, value: rule.value, autoHidden },
+      ipAddress: req.ip,
+    });
+  }, { faults: readTestFaults(req) });
+
+  res.json({ rule, autoHidden });
+}));
+
+router.delete("/hide-rules/:id", asyncHandler("Regel konnte nicht gelöscht werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const deleted = await qontoStorage.deleteHideRule(id);
+  if (!deleted) throw notFound("Regel nicht gefunden");
+
+  await withAudit(async (_dbTx, audit) => {
+    audit.record({
+      userId: req.user!.id,
+      action: "qonto_hide_rule_deleted",
+      entityType: "qonto_hide_rule",
+      entityId: id,
+      metadata: { ruleType: deleted.ruleType, value: deleted.value },
+      ipAddress: req.ip,
+    });
+  }, { faults: readTestFaults(req) });
+
+  res.json(deleted);
 }));
 
 const csvImportSchema = z.object({

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog,
@@ -15,7 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { iconSize } from "@/design-system";
-import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw } from "lucide-react";
+import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff } from "lucide-react";
 import { formatCents, formatDate } from "../utils";
 import {
   useQontoTransactions,
@@ -24,8 +25,13 @@ import {
   useSyncMutation,
   useBackfillMutation,
   useQontoBackfillStatus,
+  useQontoHideRules,
+  useHideRuleMutations,
 } from "../hooks";
 import type { MatchFilter } from "../types";
+
+// Task #1599 — Vorbelegtes Standard-Startdatum für den Voll-Abruf.
+const DEFAULT_BACKFILL_START = "2026-06-01";
 
 export function TransactionsTab({
   configured,
@@ -40,15 +46,30 @@ export function TransactionsTab({
 }) {
   const [matchingTxId, setMatchingTxId] = useState<number | null>(null);
   const [backfillConfirmOpen, setBackfillConfirmOpen] = useState(false);
+  const [backfillDate, setBackfillDate] = useState(DEFAULT_BACKFILL_START);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [newRuleType, setNewRuleType] = useState<"counterparty" | "iban">("counterparty");
+  const [newRuleValue, setNewRuleValue] = useState("");
 
   const transactionsQuery = useQontoTransactions(matchFilter, configured);
   const invoicesQuery = useMatchableInvoices(matchingTxId !== null);
+  const hideRulesQuery = useQontoHideRules(configured && rulesOpen);
+  const { createRuleMutation, deleteRuleMutation } = useHideRuleMutations();
 
   const syncMutation = useSyncMutation();
   const backfillMutation = useBackfillMutation();
   const backfillStatusQuery = useQontoBackfillStatus(configured);
   const backfillRunning = backfillStatusQuery.data?.running ?? false;
   const backfillBusy = backfillMutation.isPending || backfillRunning;
+
+  const handleCreateRule = () => {
+    const value = newRuleValue.trim();
+    if (!value) return;
+    createRuleMutation.mutate(
+      { ruleType: newRuleType, value },
+      { onSuccess: () => setNewRuleValue("") },
+    );
+  };
 
   const {
     matchMutation,
@@ -120,25 +141,36 @@ export function TransactionsTab({
             )}
             Jetzt synchronisieren
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => setBackfillConfirmOpen(true)}
-            disabled={syncMutation.isPending || backfillBusy}
-            className="w-full sm:w-auto"
-            data-testid="button-backfill"
-            title={
-              backfillRunning
-                ? "Ein Voll-Sync läuft bereits (ggf. in einer anderen Sitzung). Bitte warten Sie, bis er abgeschlossen ist."
-                : "Zieht die komplette Historie der nachträglich ergänzten Zusatzkonten ohne Zeitfenster."
-            }
-          >
-            {backfillBusy ? (
-              <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-            ) : (
-              <History className={`${iconSize.sm} mr-2`} />
-            )}
-            {backfillRunning ? "Voll-Sync läuft…" : "Voll-Sync Zusatzkonten"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={backfillDate}
+              onChange={e => setBackfillDate(e.target.value)}
+              disabled={syncMutation.isPending || backfillBusy}
+              className="w-[150px]"
+              aria-label="Startdatum für den Abruf"
+              data-testid="input-backfill-date"
+            />
+            <Button
+              variant="outline"
+              onClick={() => setBackfillConfirmOpen(true)}
+              disabled={syncMutation.isPending || backfillBusy || !backfillDate}
+              className="w-full sm:w-auto"
+              data-testid="button-backfill"
+              title={
+                backfillRunning
+                  ? "Ein Voll-Sync läuft bereits (ggf. in einer anderen Sitzung). Bitte warten Sie, bis er abgeschlossen ist."
+                  : "Ruft alle Transaktionen ab dem gewählten Datum über ALLE Konten (Haupt- + Zusatzkonten) ab."
+              }
+            >
+              {backfillBusy ? (
+                <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+              ) : (
+                <History className={`${iconSize.sm} mr-2`} />
+              )}
+              {backfillRunning ? "Voll-Sync läuft…" : "Ab Datum abrufen"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -157,6 +189,14 @@ export function TransactionsTab({
         </Select>
 
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setRulesOpen(o => !o)}
+            data-testid="button-toggle-hide-rules"
+          >
+            <EyeOff className={`${iconSize.sm} mr-2`} />
+            Auto-Ausblenden
+          </Button>
           <Button
             variant="outline"
             onClick={() => autoMatchMutation.mutate()}
@@ -193,6 +233,99 @@ export function TransactionsTab({
           />
         </div>
       </div>
+
+      {rulesOpen && (
+        <Card data-testid="card-hide-rules">
+          <CardContent className="p-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-medium">Automatisch ausblenden</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Eingehende Transaktionen, deren Gegenpartei den Text enthält oder deren
+                Quell-IBAN übereinstimmt, werden beim Abrufen automatisch als „nicht
+                abrechnungsrelevant" markiert. Manuell wieder eingeblendete Transaktionen
+                bleiben dauerhaft sichtbar.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Typ</Label>
+                <Select value={newRuleType} onValueChange={v => setNewRuleType(v as "counterparty" | "iban")}>
+                  <SelectTrigger className="w-[180px]" data-testid="select-rule-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="counterparty">Gegenpartei enthält</SelectItem>
+                    <SelectItem value="iban">Quell-IBAN</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1 flex-1">
+                <Label className="text-xs">Wert</Label>
+                <Input
+                  value={newRuleValue}
+                  onChange={e => setNewRuleValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleCreateRule();
+                    }
+                  }}
+                  placeholder={newRuleType === "iban" ? "DE.. IBAN" : "z.B. Finanzamt"}
+                  data-testid="input-rule-value"
+                />
+              </div>
+              <Button
+                onClick={handleCreateRule}
+                disabled={createRuleMutation.isPending || !newRuleValue.trim()}
+                data-testid="button-add-rule"
+              >
+                {createRuleMutation.isPending ? (
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                ) : (
+                  <Plus className={`${iconSize.sm} mr-2`} />
+                )}
+                Regel hinzufügen
+              </Button>
+            </div>
+
+            {hideRulesQuery.isLoading ? (
+              <Loader2 className={`${iconSize.sm} animate-spin`} />
+            ) : (hideRulesQuery.data ?? []).length === 0 ? (
+              <p className="text-xs text-gray-500" data-testid="text-no-rules">
+                Noch keine Regeln angelegt.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {(hideRulesQuery.data ?? []).map(rule => (
+                  <div
+                    key={rule.id}
+                    className="flex items-center justify-between gap-2 rounded border px-3 py-1.5"
+                    data-testid={`rule-row-${rule.id}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Badge variant="outline" className="text-xs shrink-0">
+                        {rule.ruleType === "iban" ? "Quell-IBAN" : "Gegenpartei"}
+                      </Badge>
+                      <span className="text-sm font-mono truncate">{rule.value}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => deleteRuleMutation.mutate(rule.id)}
+                      disabled={deleteRuleMutation.isPending}
+                      aria-label="Regel löschen"
+                      data-testid={`button-delete-rule-${rule.id}`}
+                    >
+                      <Trash2 className={iconSize.sm} />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {transactionsQuery.isLoading ? (
         <div className="flex items-center justify-center py-8">
@@ -335,22 +468,22 @@ export function TransactionsTab({
       <AlertDialog open={backfillConfirmOpen} onOpenChange={setBackfillConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Voll-Sync Zusatzkonten starten?</AlertDialogTitle>
+            <AlertDialogTitle>Transaktionen ab Datum abrufen?</AlertDialogTitle>
             <AlertDialogDescription>
-              Dies ist ein einmaliger Voll-Abzug: Die komplette Historie der
-              nachträglich ergänzten Zusatzkonten wird ohne Zeitfenster geladen
-              (mehrere Qonto-API-Seiten, ggf. viele Transaktionen). Der Vorgang
-              kann etwas dauern und ist keine reguläre Sync-Aktion. Für den
-              Regelbetrieb bitte „Jetzt synchronisieren" verwenden.
+              Es werden ALLE Transaktionen ab dem {formatDate(backfillDate)} über
+              alle Konten (Haupt- und Zusatzkonten) geladen (mehrere Qonto-API-Seiten,
+              ggf. viele Transaktionen). Der Vorgang kann etwas dauern und ist keine
+              reguläre Sync-Aktion. Für den Regelbetrieb bitte „Jetzt synchronisieren"
+              verwenden.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-backfill">Abbrechen</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => backfillMutation.mutate()}
+              onClick={() => backfillMutation.mutate(backfillDate)}
               data-testid="button-confirm-backfill"
             >
-              Voll-Sync starten
+              Abruf starten
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

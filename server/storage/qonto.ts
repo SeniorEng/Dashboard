@@ -1,15 +1,18 @@
 import {
   qontoTransactions,
+  qontoHideRules,
   paymentAdvices,
   paymentAdviceItems,
   type QontoTransaction,
   type InsertQontoTransaction,
+  type QontoHideRule,
+  type InsertQontoHideRule,
   type PaymentAdvice,
   type InsertPaymentAdvice,
   type PaymentAdviceItem,
   type InsertPaymentAdviceItem,
 } from "@shared/schema";
-import { eq, and, isNull, isNotNull, desc, gte, lte, sql } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, desc, gte, lte, sql, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { paymentAdvicesRepo } from "../repos";
@@ -136,6 +139,67 @@ class QontoStorage {
         eq(qontoTransactions.side, "credit")
       ))
       .orderBy(desc(qontoTransactions.emittedAt));
+  }
+
+  // Task #1599 — Auto-Ausblenden-Regeln.
+  async getHideRules(): Promise<QontoHideRule[]> {
+    return db.select()
+      .from(qontoHideRules)
+      .where(isNull(qontoHideRules.deletedAt))
+      .orderBy(desc(qontoHideRules.createdAt));
+  }
+
+  async getHideRule(id: number): Promise<QontoHideRule | undefined> {
+    const [rule] = await db.select()
+      .from(qontoHideRules)
+      .where(and(eq(qontoHideRules.id, id), isNull(qontoHideRules.deletedAt)));
+    return rule;
+  }
+
+  async createHideRule(data: InsertQontoHideRule): Promise<QontoHideRule> {
+    const [created] = await db.insert(qontoHideRules).values(data).returning();
+    return created;
+  }
+
+  async deleteHideRule(id: number): Promise<QontoHideRule | undefined> {
+    const [deleted] = await db.update(qontoHideRules)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(qontoHideRules.id, id), isNull(qontoHideRules.deletedAt)))
+      .returning();
+    return deleted;
+  }
+
+  /**
+   * Task #1599 — Kandidaten für das automatische Ausblenden: offene
+   * Zahlungseingänge (credit), die weder zugeordnet noch bereits ausgeblendet
+   * sind und für die der Nutzer keine manuelle „doch relevant"-Entscheidung
+   * getroffen hat (Override). Die eigentliche Regel-Prüfung erfolgt in JS über
+   * die geteilte matchesAnyHideRule()-Logik.
+   */
+  async getAutoHideCandidates(): Promise<QontoTransaction[]> {
+    return db.select()
+      .from(qontoTransactions)
+      .where(and(
+        eq(qontoTransactions.side, "credit"),
+        isNull(qontoTransactions.matchedInvoiceId),
+        isNull(qontoTransactions.billingIrrelevantAt),
+        isNull(qontoTransactions.billingRelevantOverrideAt),
+      ));
+  }
+
+  /** Markiert die übergebenen Transaktionen als automatisch ausgeblendet. */
+  async markTransactionsIrrelevantAuto(ids: number[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const updated = await db.update(qontoTransactions)
+      .set({ billingIrrelevantAt: new Date(), billingIrrelevantSource: "auto" })
+      .where(and(
+        inArray(qontoTransactions.id, ids),
+        isNull(qontoTransactions.billingIrrelevantAt),
+        isNull(qontoTransactions.matchedInvoiceId),
+        isNull(qontoTransactions.billingRelevantOverrideAt),
+      ))
+      .returning({ id: qontoTransactions.id });
+    return updated.length;
   }
 
   async getLastSyncTime(): Promise<Date | null> {

@@ -129,34 +129,45 @@ describe("Qonto Multi-IBAN Sync (Task #1587)", () => {
     expect((conn.accounts ?? []).every((a) => a.success)).toBe(true);
   });
 
-  // Task #1588 — Backfill zieht NUR die Zusatzkonten und OHNE updated_at_from.
-  it("backfillTransactions synchronisiert nur Zusatzkonten ohne Zeitfenster", async () => {
+  // Task #1599 — Backfill zieht ALLE Konten (primär + Zusatz) ab einem Startdatum
+  // per emitted_at-Fenster (ersetzt den additional-only Voll-Sync aus #1588).
+  it("backfillTransactions synchronisiert ALLE Konten ab Startdatum per emitted_at-Fenster", async () => {
     stubFetchPerIban();
 
-    const result = await qontoService.backfillTransactions();
-    expect(result.accounts).toBe(1);
-    expect(result.synced).toBe(1);
+    // Startdatum am Monatsersten des aktuellen Monats → genau ein Monats-Fenster.
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+
+    const result = await qontoService.backfillTransactions(startDate);
+    expect(result.accounts).toBe(2);
+    expect(result.synced).toBe(2);
 
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
     const calledUrls = fetchMock.mock.calls.map((c) => new URL(c[0].toString()));
     const calledIbans = calledUrls.map((u) => u.searchParams.get("iban"));
 
-    // Nur das Zusatzkonto wird abgefragt, das primäre Konto NICHT.
+    // BEIDE Konten werden abgefragt (nicht mehr nur die Zusatzkonten).
+    expect(calledIbans).toContain(PRIMARY_IBAN);
     expect(calledIbans).toContain(SECOND_IBAN);
-    expect(calledIbans).not.toContain(PRIMARY_IBAN);
 
-    // Kein updated_at_from-Fenster → Voll-Historie.
+    // Datums-Fenster über emitted_at (kein updated_at_from mehr).
     for (const url of calledUrls) {
       expect(url.searchParams.get("updated_at_from")).toBeNull();
+      expect(url.searchParams.get("emitted_at_from")).not.toBeNull();
+      expect(url.searchParams.get("emitted_at_to")).not.toBeNull();
       expect(url.searchParams.get("status")).toBe("completed");
       expect(url.searchParams.get("side")).toBe("credit");
     }
+    // Das erste Fenster beginnt exakt am gewählten Startdatum.
+    expect(calledUrls[0].searchParams.get("emitted_at_from")).toBe(startDate.toISOString());
 
-    // Die Zusatzkonto-Transaktion ist mit ihrer Quell-IBAN gestempelt.
+    // Beide Transaktionen sind mit ihrer Quell-IBAN gestempelt.
     const rows = await db
       .select()
       .from(qontoTransactions)
-      .where(inArray(qontoTransactions.qontoTransactionId, [TX_SECOND]));
-    expect(rows[0]?.sourceIban).toBe(SECOND_IBAN);
+      .where(inArray(qontoTransactions.qontoTransactionId, [TX_PRIMARY, TX_SECOND]));
+    const byId = new Map(rows.map((r) => [r.qontoTransactionId, r]));
+    expect(byId.get(TX_PRIMARY)?.sourceIban).toBe(PRIMARY_IBAN);
+    expect(byId.get(TX_SECOND)?.sourceIban).toBe(SECOND_IBAN);
   });
 });

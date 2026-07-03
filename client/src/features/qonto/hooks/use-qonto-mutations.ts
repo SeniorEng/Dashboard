@@ -25,13 +25,18 @@ export function useBackfillMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async () =>
-      unwrapResult(await api.post<{ synced: number; total: number; accounts: number }>("/admin/qonto/backfill", {})),
+    mutationFn: async (startDate: string) =>
+      unwrapResult(
+        await api.post<{ synced: number; total: number; accounts: number; autoHidden: number }>(
+          "/admin/qonto/backfill",
+          { startDate },
+        ),
+      ),
     onSuccess: (data) => {
-      const title = data.accounts === 0
-        ? "Keine Zusatzkonten hinterlegt — nichts zu laden"
-        : `Voll-Sync: ${data.synced} Transaktionen von ${data.accounts} Zusatzkonto(en) geladen`;
-      toast({ title });
+      const hidden = data.autoHidden > 0 ? `, ${data.autoHidden} automatisch ausgeblendet` : "";
+      toast({
+        title: `Abruf: ${data.synced} Transaktionen von ${data.accounts} Konto(en) geladen${hidden}`,
+      });
       invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {
@@ -46,6 +51,39 @@ export function useBackfillMutation() {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     },
   });
+}
+
+export function useHideRuleMutations() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const createRuleMutation = useMutation({
+    mutationFn: async (data: { ruleType: "counterparty" | "iban"; value: string }) =>
+      unwrapResult(await api.post<{ rule: unknown; autoHidden: number }>("/admin/qonto/hide-rules", data)),
+    onSuccess: (result) => {
+      const hidden = result.autoHidden > 0
+        ? `Regel angelegt — ${result.autoHidden} Transaktion(en) ausgeblendet`
+        : "Regel angelegt";
+      toast({ title: hidden });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteRuleMutation = useMutation({
+    mutationFn: async (id: number) => unwrapResult(await api.delete(`/admin/qonto/hide-rules/${id}`)),
+    onSuccess: () => {
+      toast({ title: "Regel gelöscht" });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return { createRuleMutation, deleteRuleMutation };
 }
 
 export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: () => void }) {
