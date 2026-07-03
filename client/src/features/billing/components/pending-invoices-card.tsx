@@ -10,6 +10,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
+import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
 import { BILLING_TYPE_LABELS } from "../constants";
 import { getCustomerName } from "../utils";
 import { useRowCap } from "../hooks/use-row-cap";
@@ -97,9 +98,9 @@ export function PendingInvoicesCard({
             {visible.map((c) => {
               // Partial-Signing-Hinweis: weniger Termine durch einen aktiven
               // Leistungsnachweis abgedeckt als dokumentiert wurden.
-              const partial =
-                c.completedAppointments > 0 &&
-                c.coveredAppointments < c.completedAppointments;
+              // Task #1625: gemeinsame SSoT-Regel (`isPartiallyDocumented`),
+              // identisch zum Server-Skip in `/generate-all`.
+              const partial = isPartiallyDocumented(c);
               return (
                 <li
                   key={c.id}

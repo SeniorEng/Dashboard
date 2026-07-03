@@ -33,7 +33,6 @@ import {
   invoices as invoicesTable,
   invoiceLineItems,
   monthlyServiceRecords,
-  serviceRecordAppointments,
   budgetTransactions,
 } from "@shared/schema";
 import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
@@ -87,7 +86,8 @@ import {
     storedInvoicePdfContainsLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
-import { getBlockingDraftInvoices } from "../services/invoice-data";
+import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer } from "../services/invoice-data";
+import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
 import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
 import {
   MONTH_NAMES_DE,
@@ -349,41 +349,11 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   // aktive LNs abgedeckten Termine. Liegt eine Lücke vor, kann das
   // Frontend einen Hinweis anzeigen ("3 von 5 Terminen erfasst"),
   // sodass Admins sehen, ob noch ein zweiter LN nötig ist.
-  const mm = String(month).padStart(2, "0");
-  const periodStartStr = `${year}-${mm}-01`;
-  const nextMonth = month === 12 ? 1 : month + 1;
-  const nextYear = month === 12 ? year + 1 : year;
-  const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
-
-  const completedRows = await appointmentsRepo.selectColumnsFrom({
-    customerId: appointments.customerId,
-    count: sql<number>`COUNT(*)::int`,
-  })
-    .where(and(
-      inArray(appointments.customerId, uniqueCustomerIds),
-      eq(appointments.status, "completed"),
-      appointmentsRepo.activeOnly(),
-      gte(appointments.date, periodStartStr),
-      lt(appointments.date, periodEndStr),
-    ))
-    .groupBy(appointments.customerId);
-  const completedByCustomer = new Map(completedRows.map(r => [r.customerId, Number(r.count)]));
-
-  const allActiveSrIds = signedRecords.map(r => r.id);
-  const coveredRows = allActiveSrIds.length > 0
-    ? await db.select({
-        customerId: appointments.customerId,
-        count: sql<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
-      })
-        .from(serviceRecordAppointments)
-        .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
-        .where(and(
-          inArray(serviceRecordAppointments.serviceRecordId, allActiveSrIds),
-          inArray(appointments.customerId, uniqueCustomerIds),
-        ))
-        .groupBy(appointments.customerId)
-    : [];
-  const coveredByCustomer = new Map(coveredRows.map(r => [r.customerId, Number(r.count)]));
+  // Task #1625 — dokumentierte-vs-abgedeckte Termine pro Kunde aus der EINEN
+  // gemeinsamen Berechnung (`getDocumentationCoverageByCustomer`). Dieselbe
+  // Quelle nutzt der optionale Skip in `POST /generate-all`, damit Anzeige
+  // (Hinweis + „überspringen"-Zähler) und Server-Skip nie auseinanderdriften.
+  const coverageByCustomer = await getDocumentationCoverageByCustomer(uniqueCustomerIds, year, month);
 
   const customerRows = await db.select({
     id: customersTable.id,
@@ -480,8 +450,8 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
 
   const eligibleCustomers: BillingCustomerItem[] = filteredCustomerRows.map(c => ({
     ...c,
-    completedAppointments: completedByCustomer.get(c.id) ?? 0,
-    coveredAppointments: coveredByCustomer.get(c.id) ?? 0,
+    completedAppointments: coverageByCustomer.get(c.id)?.completedAppointments ?? 0,
+    coveredAppointments: coverageByCustomer.get(c.id)?.coveredAppointments ?? 0,
   }));
 
   res.json(eligibleCustomers);
@@ -2935,9 +2905,14 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     // innerhalb des Monats). Leer = ganzer Monat (Bestandsverhalten).
     dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    // Task #1625: Wenn gesetzt, werden Kunden mit im Zeitraum unvollständig
+    // dokumentierten Terminen (dokumentiert > durch aktive LNs abgedeckt)
+    // NICHT abgerechnet, sondern als „übersprungen" gemeldet. Nutzt dieselbe
+    // covered-vs-completed-Berechnung wie `/eligible-customers`.
+    skipIncomplete: z.boolean().optional(),
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
-  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo } = parsed.data;
+  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo, skipIncomplete } = parsed.data;
   const hasDateRange = !!(dateFrom || dateTo);
   // Task #586 — Strukturiertes Start-/Ende-Log + Voll-Stack im inneren
   // Catch, damit der nächste 500-Vorfall in Prod im Server-Log sofort
@@ -2977,8 +2952,24 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     customerIds = customerIds.filter(id => allowed.has(id));
   }
 
+  // Task #1625: Optionaler Skip unvollständig dokumentierter Kunden. Nutzt die
+  // EINE gemeinsame covered-vs-completed-Berechnung (`getDocumentationCoverageByCustomer`)
+  // und die pure Regel `isPartiallyDocumented` — dieselbe Quelle wie der
+  // „Nur X/Y dokumentierte Termine"-Hinweis in `/eligible-customers`. Betroffene
+  // Kunden werden aus der Erstellung genommen und als „übersprungen" gemeldet.
+  let incompleteSkippedIds: number[] = [];
+  if (skipIncomplete && customerIds.length > 0) {
+    const coverage = await getDocumentationCoverageByCustomer(customerIds, billingYear, billingMonth);
+    incompleteSkippedIds = customerIds.filter(id => {
+      const c = coverage.get(id);
+      return c ? isPartiallyDocumented(c) : false;
+    });
+    const skipSet = new Set(incompleteSkippedIds);
+    customerIds = customerIds.filter(id => !skipSet.has(id));
+  }
+
   log(
-    `generate-all start month=${billingMonth}/${billingYear} eligibleCustomers=${customerIds.length}${insuranceProviderId ? ` insuranceProviderId=${insuranceProviderId}` : ""} userId=${userId ?? "?"}`,
+    `generate-all start month=${billingMonth}/${billingYear} eligibleCustomers=${customerIds.length}${insuranceProviderId ? ` insuranceProviderId=${insuranceProviderId}` : ""}${skipIncomplete ? ` skipIncomplete=1 incompleteSkipped=${incompleteSkippedIds.length}` : ""} userId=${userId ?? "?"}`,
     "billing",
   );
 
@@ -2988,6 +2979,13 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     invoiceCount?: number;
     message?: string;
   }> = [];
+
+  // Task #1625: übersprungene (unvollständig dokumentierte) Kunden in die
+  // Summary/Ergebnisliste aufnehmen, damit der Admin sieht, wer nicht
+  // abgerechnet wurde.
+  for (const customerId of incompleteSkippedIds) {
+    results.push({ customerId, status: "skipped", message: "Nicht vollständig dokumentiert" });
+  }
 
   for (const customerId of customerIds) {
     try {

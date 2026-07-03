@@ -7,11 +7,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { iconSize } from "@/design-system";
 import { Layers, Loader2 } from "lucide-react";
+import { useState } from "react";
 import type { RefObject } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { BillingCustomerItem } from "@shared/api";
+import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
 import { MONTH_NAMES } from "../constants";
 import { getCustomerName } from "../utils";
 import type { GenerateAllResponse } from "../types";
@@ -21,7 +24,7 @@ interface GenerateAllDialogProps {
   setOpen: (open: boolean) => void;
   generateAllProgress: GenerateAllResponse | null;
   setGenerateAllProgress: (progress: GenerateAllResponse | null) => void;
-  generateAllMutation: UseMutationResult<GenerateAllResponse, Error, void, unknown>;
+  generateAllMutation: UseMutationResult<GenerateAllResponse, Error, boolean, unknown>;
   customers: BillingCustomerItem[] | undefined;
   selectedMonth: number;
   selectedYear: number;
@@ -39,6 +42,17 @@ export function GenerateAllDialog({
   selectedYear,
   closeButtonRef,
 }: GenerateAllDialogProps) {
+  // Task #1625: Kunden mit unvollständig dokumentierten Terminen überspringen —
+  // per Default AN, damit nur vollständig dokumentierte Kunden abgerechnet
+  // werden. Die Zähler unten leiten sich aus derselben Regel ab
+  // (`isPartiallyDocumented`), die auch der Server für den Skip nutzt.
+  const [skipIncomplete, setSkipIncomplete] = useState(true);
+
+  const totalCount = customers?.length ?? 0;
+  const incompleteCount = customers?.filter((c) => isPartiallyDocumented(c)).length ?? 0;
+  const willCreate = skipIncomplete ? totalCount - incompleteCount : totalCount;
+  const willSkip = skipIncomplete ? incompleteCount : 0;
+
   return (
     <Dialog
       open={open}
@@ -58,8 +72,30 @@ export function GenerateAllDialog({
 
         <div className="space-y-3 pt-2 text-sm">
           <div className="text-gray-700">
-            Berechtigte Kunden: <span className="font-medium" data-testid="text-generate-all-count">{customers?.length ?? 0}</span>
+            Berechtigte Kunden: <span className="font-medium" data-testid="text-generate-all-count">{totalCount}</span>
           </div>
+
+          {!generateAllProgress && (
+            <div className="space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={skipIncomplete}
+                  onCheckedChange={(v) => setSkipIncomplete(v === true)}
+                  disabled={generateAllMutation.isPending}
+                  className="mt-0.5"
+                  data-testid="checkbox-skip-incomplete"
+                />
+                <span className="text-gray-700">
+                  Kunden mit unvollständig dokumentierten Terminen überspringen
+                </span>
+              </label>
+              <div className="text-gray-600" data-testid="text-generate-all-plan">
+                <span className="font-medium text-green-700" data-testid="text-generate-all-will-create">{willCreate}</span> werden erstellt
+                {" · "}
+                <span className="font-medium text-gray-700" data-testid="text-generate-all-will-skip">{willSkip}</span> übersprungen
+              </div>
+            </div>
+          )}
 
           {generateAllMutation.isPending && (
             <div className="flex items-center gap-2 text-teal-700">
@@ -145,7 +181,7 @@ export function GenerateAllDialog({
             Schließen
           </Button>
           <Button
-            onClick={() => generateAllMutation.mutate()}
+            onClick={() => generateAllMutation.mutate(skipIncomplete)}
             disabled={generateAllMutation.isPending || !customers || customers.length === 0 || !!generateAllProgress}
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-confirm-generate-all"

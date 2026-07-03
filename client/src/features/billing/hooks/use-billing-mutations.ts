@@ -213,7 +213,9 @@ export function useBillingMutations({
   // Task #533: Massenerstellung — sequenzielle Erstellung aller berechtigten
   // Kunden des Monats. Fortschritt + Summary werden im Dialog angezeigt.
   const generateAllMutation = useMutation({
-    mutationFn: async () => {
+    // Task #1625: `skipIncomplete` steuert, ob Kunden mit unvollständig
+    // dokumentierten Terminen übersprungen werden (Dialog-Checkbox, default an).
+    mutationFn: async (skipIncomplete: boolean) => {
       setGenerateAllProgress(null);
       const result = await api.post<GenerateAllResponse>("/billing/generate-all", {
         billingMonth: selectedMonth,
@@ -221,6 +223,7 @@ export function useBillingMutations({
         ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
         ...(dateFrom ? { dateFrom } : {}),
         ...(dateTo ? { dateTo } : {}),
+        skipIncomplete,
       });
       return unwrapResult(result);
     },

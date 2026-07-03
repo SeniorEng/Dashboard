@@ -55,6 +55,33 @@ export function isServiceRecordSignedForBilling(
     : status === "completed" || status === "employee_signed";
 }
 
+/**
+ * Task #1625 — Fakten der Dokumentations-Abdeckung eines Kunden im Zeitraum:
+ * dokumentierte (`completed`) Termine vs. die davon durch aktive
+ * Leistungsnachweise abgedeckten Termine. Identisch zu den Feldern, die
+ * `/billing/eligible-customers` pro Kunde ausliefert.
+ */
+export interface DocumentationCoverage {
+  completedAppointments: number;
+  coveredAppointments: number;
+}
+
+/**
+ * Task #1625 — PURE SSoT der „unvollständig dokumentiert"-Regel. Ein Kunde
+ * gilt als partiell dokumentiert, wenn im Zeitraum dokumentierte Termine
+ * existieren, aber weniger davon durch aktive Leistungsnachweise abgedeckt
+ * sind als dokumentiert wurden. Genau dieses Signal zeigt das Frontend als
+ * „Nur X/Y dokumentierte Termine im Leistungsnachweis" — es gibt KEINE zweite
+ * Definition, damit Anzeige (Hinweis + Skip-Zähler) und der server-seitige
+ * Skip in der Massenerstellung garantiert übereinstimmen.
+ */
+export function isPartiallyDocumented(coverage: DocumentationCoverage): boolean {
+  return (
+    coverage.completedAppointments > 0 &&
+    coverage.coveredAppointments < coverage.completedAppointments
+  );
+}
+
 export type BillingEligibilityStatus = "eligible" | "blocked";
 
 /** Eingangsfakten der Klassifikation (vom Server aus denselben Readern gefüllt). */

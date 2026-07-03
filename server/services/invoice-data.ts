@@ -6,7 +6,7 @@ import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, budgetTransactions } from "@shared/schema";
-import { eq, and, isNull, inArray, ne, desc, or } from "drizzle-orm";
+import { eq, and, isNull, inArray, ne, desc, or, gte, lt, sql } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
@@ -89,6 +89,81 @@ export async function getAppointmentIdsFromServiceRecords(serviceRecordIds: numb
     .from(serviceRecordAppointments)
     .where(inArray(serviceRecordAppointments.serviceRecordId, serviceRecordIds));
   return rows.map(r => r.appointmentId);
+}
+
+/**
+ * Task #1625 — Dokumentations-Abdeckung pro Kunde für einen Abrechnungsmonat.
+ * Liefert je Kunde die Zahl der dokumentierten (`completed`) Termine im Monat
+ * und die davon durch aktive Leistungsnachweise abgedeckten Termine. Das ist
+ * die EINE Berechnung, die sowohl `/billing/eligible-customers` (Anzeige-Hinweis
+ * + Zähler) als auch `POST /billing/generate-all` (optionaler Skip
+ * unvollständiger Kunden) nutzen — kein zweiter Ableitungspfad. Die „partiell
+ * dokumentiert"-Klassifikation selbst lebt in der pure SSoT
+ * `isPartiallyDocumented` (`@shared/domain/billing-eligibility`).
+ */
+export async function getDocumentationCoverageByCustomer(
+  customerIds: number[],
+  billingYear: number,
+  billingMonth: number,
+): Promise<Map<number, { completedAppointments: number; coveredAppointments: number }>> {
+  const result = new Map<number, { completedAppointments: number; coveredAppointments: number }>();
+  if (customerIds.length === 0) return result;
+
+  const mm = String(billingMonth).padStart(2, "0");
+  const periodStartStr = `${billingYear}-${mm}-01`;
+  const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
+  const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
+  const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+
+  const completedRows = await appointmentsRepo.selectColumnsFrom({
+    customerId: appointments.customerId,
+    count: sql<number>`COUNT(*)::int`,
+  })
+    .where(and(
+      inArray(appointments.customerId, customerIds),
+      eq(appointments.status, "completed"),
+      appointmentsRepo.activeOnly(),
+      gte(appointments.date, periodStartStr),
+      lt(appointments.date, periodEndStr),
+    ))
+    .groupBy(appointments.customerId);
+  const completedByCustomer = new Map(completedRows.map(r => [r.customerId, Number(r.count)]));
+
+  const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
+    id: monthlyServiceRecords.id,
+  })
+    .where(and(
+      eq(monthlyServiceRecords.year, billingYear),
+      eq(monthlyServiceRecords.month, billingMonth),
+      or(
+        eq(monthlyServiceRecords.status, "completed"),
+        eq(monthlyServiceRecords.status, "employee_signed"),
+      ),
+      monthlyServiceRecordsRepo.activeOnly(),
+    ));
+  const allActiveSrIds = signedRecords.map(r => r.id);
+  const coveredRows = allActiveSrIds.length > 0
+    ? await db.select({
+        customerId: appointments.customerId,
+        count: sql<number>`COUNT(DISTINCT ${serviceRecordAppointments.appointmentId})::int`,
+      })
+        .from(serviceRecordAppointments)
+        .innerJoin(appointments, eq(serviceRecordAppointments.appointmentId, appointments.id))
+        .where(and(
+          inArray(serviceRecordAppointments.serviceRecordId, allActiveSrIds),
+          inArray(appointments.customerId, customerIds),
+        ))
+        .groupBy(appointments.customerId)
+    : [];
+  const coveredByCustomer = new Map(coveredRows.map(r => [r.customerId, Number(r.count)]));
+
+  for (const id of customerIds) {
+    result.set(id, {
+      completedAppointments: completedByCustomer.get(id) ?? 0,
+      coveredAppointments: coveredByCustomer.get(id) ?? 0,
+    });
+  }
+  return result;
 }
 
 export async function buildLineItemsFromAppointments(apptIds: number[], customerId?: number, billingType?: string) {
