@@ -14,6 +14,7 @@ import {
   deactivateTestEmployee,
   getFutureDate,
 } from "../test-utils";
+import { validSignatureDataUrl } from "../helpers/valid-signature";
 
 /**
  * Task #1613 — Zwei-Kräfte-Einsatz (Co-Visit).
@@ -292,6 +293,171 @@ describe("CV-4: Absage-/Löschung-Kaskade (Task #1615)", () => {
     const del = await apiDelete(`/api/appointments/${create.data.id}`);
     expect(del.status).toBe(200);
     expect((del.data as any).coVisitCascadedLegIds).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task #1620 — Ein Partner-Leg mit eigenem, echtem Ausgang (completed) oder
+  // auf einem unterschriebenen (versiegelten) Leistungsnachweis bleibt von der
+  // Absage-/Löschung-Kaskade UNANGETASTET. Das ist GoBD-korrekt und ein legitimes
+  // reales Ergebnis (ein halb-durchgeführter Einsatz). Der handelnde Leg
+  // storniert/löscht trotzdem sauber, ohne Fehler und ohne den versiegelten
+  // Partner still stillschweigend mit-zu-mutieren.
+  // ---------------------------------------------------------------------------
+
+  // Vergangene Werktags-Datum (dokumentieren/unterschreiben verlangt einen
+  // nicht in der Zukunft liegenden Termin).
+  function getPastWeekday(daysAgo: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    const dow = d.getDay();
+    if (dow === 0) d.setDate(d.getDate() - 2);
+    else if (dow === 6) d.setDate(d.getDate() - 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  async function createPastCoVisit(daysAgo: number): Promise<{ customerId: number; groupId: string; legA: any; legB: any; date: string; serviceId: number }> {
+    const customer = await createTestCustomer();
+    customerIds.push(customer.id as number);
+    await assignEmployeeToCustomer(customer.id as number, empA!.id);
+
+    const service = await getAnyService();
+    const date = getPastWeekday(daysAgo);
+
+    const create = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: customer.id,
+      date,
+      scheduledStart: "10:00",
+      services: [{ serviceId: service.id, durationMinutes: 60 }],
+      assignedEmployeeId: empA!.id,
+      secondAssignedEmployeeId: empB!.id,
+    });
+    expect(create.status, `create failed: ${JSON.stringify(create.data)}`).toBe(201);
+    const groupId = create.data.coVisitGroupId as string;
+
+    const list = await apiGet<any[]>(`/api/appointments?date=${date}&customerId=${customer.id}`);
+    const legs = list.data.filter((a: any) => a.coVisitGroupId === groupId);
+    expect(legs.length).toBe(2);
+    const legA = legs.find((a: any) => a.assignedEmployeeId === empA!.id);
+    const legB = legs.find((a: any) => a.assignedEmployeeId === empB!.id);
+    return { customerId: customer.id as number, groupId, legA, legB, date, serviceId: service.id };
+  }
+
+  async function documentLeg(id: number, serviceId: number): Promise<void> {
+    const res = await apiPost<any>(`/api/appointments/${id}/document`, {
+      actualStart: "10:00",
+      travelOriginType: "home",
+      travelKilometers: 0,
+      customerKilometers: 0,
+      services: [{ serviceId, actualDurationMinutes: 60, details: "CV-1620" }],
+    });
+    if (res.status !== 200 && res.status !== 201) {
+      throw new Error(`documentLeg failed: ${res.status} ${JSON.stringify(res.data)}`);
+    }
+  }
+
+  async function signLnForLeg(customerId: number, employeeId: number, legId: number, date: string): Promise<void> {
+    const d = new Date(date);
+    const sr = await apiPost<any>("/api/service-records", {
+      customerId,
+      employeeId,
+      appointmentIds: [legId],
+      year: d.getFullYear(),
+      month: d.getMonth() + 1,
+    });
+    if (sr.status !== 201 && sr.status !== 200) {
+      throw new Error(`service-record create failed: ${sr.status} ${JSON.stringify(sr.data)}`);
+    }
+    for (const signerType of ["employee", "customer"] as const) {
+      const sig = await apiPost<any>(`/api/service-records/${sr.data.id}/sign`, {
+        signerType,
+        signatureData: validSignatureDataUrl(),
+      });
+      if (sig.status !== 200) {
+        throw new Error(`service-record sign(${signerType}) failed: ${sig.status} ${JSON.stringify(sig.data)}`);
+      }
+    }
+  }
+
+  it("CV-4.4 – Absage: abgeschlossener Partner-Leg bleibt unverändert, handelnder Leg storniert", async () => {
+    const { legA, legB, serviceId } = await createPastCoVisit(40);
+
+    // Partner-Leg B abschließen (completed) — eigener echter Ausgang.
+    await documentLeg(legB.id, serviceId);
+    const beforeB = await apiGet<any>(`/api/appointments/${legB.id}`);
+    expect(beforeB.data.status).toBe("completed");
+
+    // Leg A absagen.
+    const patch = await apiPatch<any>(`/api/appointments/${legA.id}`, { status: "cancelled" });
+    expect(patch.status, `patch failed: ${JSON.stringify(patch.data)}`).toBe(200);
+
+    const [a, b] = await Promise.all([
+      apiGet<any>(`/api/appointments/${legA.id}`),
+      apiGet<any>(`/api/appointments/${legB.id}`),
+    ]);
+    // Handelnder Leg ist storniert, abgeschlossener Partner UNVERÄNDERT.
+    expect(a.data.status).toBe("cancelled");
+    expect(b.data.status).toBe("completed");
+  });
+
+  it("CV-4.5 – Absage: Partner-Leg mit unterschriebenem LN (versiegelt) bleibt unangetastet", async () => {
+    const { customerId, legA, legB, date, serviceId } = await createPastCoVisit(43);
+
+    // Partner-Leg B dokumentieren + LN beidseitig unterschreiben (versiegelt/locked).
+    await documentLeg(legB.id, serviceId);
+    await signLnForLeg(customerId, empB!.id, legB.id, date);
+
+    const patch = await apiPatch<any>(`/api/appointments/${legA.id}`, { status: "cancelled" });
+    expect(patch.status, `patch failed: ${JSON.stringify(patch.data)}`).toBe(200);
+
+    const [a, b] = await Promise.all([
+      apiGet<any>(`/api/appointments/${legA.id}`),
+      apiGet<any>(`/api/appointments/${legB.id}`),
+    ]);
+    expect(a.data.status).toBe("cancelled");
+    // Versiegelter Partner darf NICHT storniert werden.
+    expect(b.data.status).toBe("completed");
+  });
+
+  it("CV-4.6 – Löschen: abgeschlossener Partner-Leg bleibt bestehen, handelnder Leg wird gelöscht", async () => {
+    const { legA, legB, serviceId } = await createPastCoVisit(46);
+
+    await documentLeg(legB.id, serviceId);
+
+    const del = await apiDelete(`/api/appointments/${legA.id}`);
+    expect(del.status, `delete failed: ${JSON.stringify(del.data)}`).toBe(200);
+    // Der abgeschlossene Partner darf NICHT mitkaskadiert werden.
+    expect((del.data as any).coVisitCascadedLegIds ?? []).not.toContain(legB.id);
+
+    const [a, b] = await Promise.all([
+      apiGet<any>(`/api/appointments/${legA.id}`),
+      apiGet<any>(`/api/appointments/${legB.id}`),
+    ]);
+    expect(a.status).toBe(404);
+    expect(b.status).toBe(200);
+    expect(b.data.status).toBe("completed");
+  });
+
+  it("CV-4.7 – Löschen: Partner-Leg mit unterschriebenem LN (versiegelt) bleibt bestehen", async () => {
+    const { customerId, legA, legB, date, serviceId } = await createPastCoVisit(49);
+
+    await documentLeg(legB.id, serviceId);
+    await signLnForLeg(customerId, empB!.id, legB.id, date);
+
+    const del = await apiDelete(`/api/appointments/${legA.id}`);
+    expect(del.status, `delete failed: ${JSON.stringify(del.data)}`).toBe(200);
+    expect((del.data as any).coVisitCascadedLegIds ?? []).not.toContain(legB.id);
+
+    const [a, b] = await Promise.all([
+      apiGet<any>(`/api/appointments/${legA.id}`),
+      apiGet<any>(`/api/appointments/${legB.id}`),
+    ]);
+    expect(a.status).toBe(404);
+    // Versiegelter Partner bleibt bestehen und unverändert.
+    expect(b.status).toBe(200);
+    expect(b.data.status).toBe("completed");
   });
 });
 
