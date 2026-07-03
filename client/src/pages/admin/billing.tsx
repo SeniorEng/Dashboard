@@ -239,6 +239,40 @@ export default function AdminBilling() {
     lexwareExportMutation.mutate(ids);
   };
 
+  // Task #1630: Print-only Druck der aktuellen Auswahl (Rechnung +
+  // Leistungsnachweis), rein lesend — KEIN Statuswechsel. Da der Bündel-Druck
+  // nur Entwürfe erzeugt, wird die Auswahl vorab auf druckbare Entwürfe
+  // gefiltert; enthält sie keine, gibt es verständliches Feedback statt einer
+  // leeren Datei.
+  const handleBulkPrintSelection = () => {
+    if (selectedIds.size === 0) {
+      toast({ title: "Keine Rechnungen ausgewählt", variant: "destructive" });
+      return;
+    }
+    const printableIds = (visibleInvoices ?? [])
+      .filter(
+        (inv) =>
+          selectedIds.has(inv.id) &&
+          inv.status === "entwurf" &&
+          inv.invoiceType !== "stornorechnung",
+      )
+      .map((inv) => inv.id);
+    if (printableIds.length === 0) {
+      toast({
+        title: "Keine druckbaren Rechnungen in der Auswahl",
+        description:
+          "Der Druck ist auf Entwürfe beschränkt (versendete oder stornierte Rechnungen sind ausgeschlossen).",
+        variant: "destructive",
+      });
+      return;
+    }
+    bulkPrintPreviewMutation.mutate({
+      groupByPayer: false,
+      includeLeistungsnachweise: true,
+      invoiceIds: printableIds,
+    });
+  };
+
   const handleGenerate = () => {
     if (!selectedCustomerId) {
       toast({ title: "Bitte Kunden auswählen", variant: "destructive" });
@@ -286,6 +320,19 @@ export default function AdminBilling() {
     } else {
       setSelectedIds(new Set());
     }
+  };
+
+  // Task #1630: „Nach Status auswählen" — alle Rechnungen eines Handlungs-
+  // Clusters auf einmal auswählen/abwählen.
+  const handleToggleSelectCluster = (ids: number[], checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   };
 
   const bulkActionPending = bulkDeleteMutation.isPending || bulkStatusMutation.isPending;
@@ -462,10 +509,13 @@ export default function AdminBilling() {
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
             onToggleSelectAll={handleToggleSelectAll}
+            onToggleSelectCluster={handleToggleSelectCluster}
             onBulkDelete={() => setPendingBulkAction({ type: "delete" })}
             onBulkStatus={(status) => setPendingBulkAction({ type: "status", status })}
             onBulkLexwareExport={handleBulkLexwareExport}
             lexwareExportPending={lexwareExportMutation.isPending}
+            onBulkPrintSelection={handleBulkPrintSelection}
+            bulkPrintPending={bulkPrintPreviewMutation.isPending}
             bulkActionPending={bulkActionPending}
             bulkActionProgress={bulkActionProgress}
           />

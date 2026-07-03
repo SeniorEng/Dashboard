@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { iconSize } from "@/design-system";
-import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight, FileDown } from "lucide-react";
+import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight, FileDown, Printer } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
 import {
@@ -68,11 +68,17 @@ interface InvoiceListProps {
   selectedIds: Set<number>;
   onToggleSelect: (invoiceId: number, checked: boolean) => void;
   onToggleSelectAll: (checked: boolean) => void;
+  // Task #1630: „Nach Status auswählen" — alle Rechnungen eines Clusters
+  // auf einmal auswählen/abwählen.
+  onToggleSelectCluster: (invoiceIds: number[], checked: boolean) => void;
   onBulkDelete: () => void;
   onBulkStatus: (status: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt") => void;
   // Task #1459: Lexware-PDF-Export der ausgewählten Rechnungen (READ-ONLY).
   onBulkLexwareExport: () => void;
   lexwareExportPending: boolean;
+  // Task #1630: Print-only Druck der Auswahl (Rechnung + Leistungsnachweis).
+  onBulkPrintSelection: () => void;
+  bulkPrintPending: boolean;
   bulkActionPending: boolean;
   // Task #1380: laufender Fortschritt der blockweisen Sammelaktion.
   bulkActionProgress: BulkActionProgress | null;
@@ -95,10 +101,13 @@ export function InvoiceList({
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
+  onToggleSelectCluster,
   onBulkDelete,
   onBulkStatus,
   onBulkLexwareExport,
   lexwareExportPending,
+  onBulkPrintSelection,
+  bulkPrintPending,
   bulkActionPending,
   bulkActionProgress,
 }: InvoiceListProps) {
@@ -231,6 +240,22 @@ export function InvoiceList({
                   )}
                   Lexware-Export
                 </Button>
+                {/* Task #1630: Print-only Druck der Auswahl (Rechnung +
+                    Leistungsnachweis). READ-ONLY — kein Statuswechsel. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onBulkPrintSelection}
+                  disabled={bulkPrintPending}
+                  data-testid="button-bulk-print-selection"
+                >
+                  {bulkPrintPending ? (
+                    <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                  ) : (
+                    <Printer className={`${iconSize.sm} mr-1`} />
+                  )}
+                  Drucken (inkl. Leistungsnachweise)
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -254,47 +279,72 @@ export function InvoiceList({
           const group = grouped.get(cluster)!;
           if (group.items.length === 0) return null;
           const isCollapsed = collapsed.has(cluster);
+          // Task #1630: Auswahl-Zustand des Clusters aus der bestehenden
+          // `selectedIds`-Menge ableiten (alle/teils/keine).
+          const clusterIds = group.items.map((inv) => inv.id);
+          const selectedInCluster = clusterIds.reduce(
+            (n, id) => (selectedIds.has(id) ? n + 1 : n),
+            0,
+          );
+          const clusterChecked: boolean | "indeterminate" =
+            selectedInCluster === 0
+              ? false
+              : selectedInCluster === clusterIds.length
+                ? true
+                : "indeterminate";
           return (
             <section key={cluster} data-testid={`cluster-${cluster}`} className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => toggleCluster(cluster)}
-                aria-expanded={!isCollapsed}
-                className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-left hover:bg-gray-50"
-                data-testid={`button-cluster-toggle-${cluster}`}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className={`${iconSize.sm} text-gray-400`} />
-                ) : (
-                  <ChevronDown className={`${iconSize.sm} text-gray-400`} />
-                )}
-                <span className="font-semibold text-gray-900 text-sm">
-                  {INVOICE_ACTION_CLUSTER_LABELS[cluster]}
-                </span>
-                <span
-                  className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-                  data-testid={`text-cluster-count-${cluster}`}
+              {/* Task #1630: Kopfzeile ist kein <button> mehr — die
+                  Cluster-Auswahl-Checkbox darf nicht in einem Button
+                  verschachtelt sein. Checkbox + Klapp-Button sind Geschwister;
+                  ein Klick auf die Checkbox löst das Ein-/Ausklappen NICHT aus. */}
+              <div className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 hover:bg-gray-50">
+                <Checkbox
+                  checked={clusterChecked}
+                  onCheckedChange={(checked) => onToggleSelectCluster(clusterIds, checked === true)}
+                  aria-label={`Alle Rechnungen im Cluster ${INVOICE_ACTION_CLUSTER_LABELS[cluster]} auswählen`}
+                  data-testid={`checkbox-select-cluster-${cluster}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleCluster(cluster)}
+                  aria-expanded={!isCollapsed}
+                  className="flex flex-1 items-center gap-2 text-left"
+                  data-testid={`button-cluster-toggle-${cluster}`}
                 >
-                  {group.items.length}
-                </span>
-                {group.overdue > 0 && (
-                  <span
-                    className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-200"
-                    data-testid={`text-cluster-overdue-${cluster}`}
-                  >
-                    {group.overdue} überfällig
+                  {isCollapsed ? (
+                    <ChevronRight className={`${iconSize.sm} text-gray-400`} />
+                  ) : (
+                    <ChevronDown className={`${iconSize.sm} text-gray-400`} />
+                  )}
+                  <span className="font-semibold text-gray-900 text-sm">
+                    {INVOICE_ACTION_CLUSTER_LABELS[cluster]}
                   </span>
-                )}
-                <span className="hidden sm:inline text-xs text-gray-400">
-                  {CLUSTER_HINTS[cluster]}
-                </span>
-                <span
-                  className={`ml-auto text-sm font-medium tabular-nums ${group.totalCents < 0 ? "text-red-600" : "text-gray-900"}`}
-                  data-testid={`text-cluster-sum-${cluster}`}
-                >
-                  {formatAmount(group.totalCents)}
-                </span>
-              </button>
+                  <span
+                    className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+                    data-testid={`text-cluster-count-${cluster}`}
+                  >
+                    {group.items.length}
+                  </span>
+                  {group.overdue > 0 && (
+                    <span
+                      className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 border border-red-200"
+                      data-testid={`text-cluster-overdue-${cluster}`}
+                    >
+                      {group.overdue} überfällig
+                    </span>
+                  )}
+                  <span className="hidden sm:inline text-xs text-gray-400">
+                    {CLUSTER_HINTS[cluster]}
+                  </span>
+                  <span
+                    className={`ml-auto text-sm font-medium tabular-nums ${group.totalCents < 0 ? "text-red-600" : "text-gray-900"}`}
+                    data-testid={`text-cluster-sum-${cluster}`}
+                  >
+                    {formatAmount(group.totalCents)}
+                  </span>
+                </button>
+              </div>
 
               {!isCollapsed &&
                 group.items.map((invoice) => (

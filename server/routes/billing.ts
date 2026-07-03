@@ -2509,23 +2509,45 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
     insuranceProviderId: z.number().int().positive().optional(),
     groupByPayer: z.boolean().optional().default(false),
     includeLeistungsnachweise: z.boolean().optional().default(true),
+    // Task #1630: Optionale Auswahl konkreter Rechnungen. Wenn gesetzt, wird
+    // genau diese (auf druckbare Entwürfe gefilterte) Menge gedruckt statt aller
+    // Monats-Entwürfe. Ohne IDs bleibt das bisherige Monats-Verhalten
+    // unverändert (Sammeldruck-Button). Grenzen wie bei den anderen
+    // Bulk-Endpoints.
+    invoiceIds: z.array(z.number().int().positive()).min(1).max(200).optional(),
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
-  const { billingMonth, billingYear, insuranceProviderId, groupByPayer, includeLeistungsnachweise } = parsed.data;
+  const { billingMonth, billingYear, insuranceProviderId, groupByPayer, includeLeistungsnachweise, invoiceIds } = parsed.data;
 
-  const allDrafts = await storage.getInvoices({
-    year: billingYear,
-    month: billingMonth,
-    status: "entwurf",
-    insuranceProviderId,
-  });
-  const drafts = allDrafts
-    .filter(inv => inv.invoiceType !== "stornorechnung")
-    .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+  type PreviewInvoice = Awaited<ReturnType<typeof storage.getInvoices>>[number];
+  const hasIds = !!invoiceIds && invoiceIds.length > 0;
+  let drafts: PreviewInvoice[];
+  if (hasIds) {
+    // Auswahl-basierter Druck: genau die übergebenen Rechnungen, gefiltert auf
+    // druckbare Entwürfe (kein Storno) — der Bündel-Druck erzeugt nur Entwürfe.
+    const uniqueIds = Array.from(new Set(invoiceIds!));
+    const loaded = await Promise.all(uniqueIds.map((id) => storage.getInvoice(id)));
+    drafts = loaded
+      .filter((inv): inv is PreviewInvoice => inv !== undefined && inv !== null)
+      .filter(inv => inv.status === "entwurf" && inv.invoiceType !== "stornorechnung")
+      .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+  } else {
+    const allDrafts = await storage.getInvoices({
+      year: billingYear,
+      month: billingMonth,
+      status: "entwurf",
+      insuranceProviderId,
+    });
+    drafts = allDrafts
+      .filter(inv => inv.invoiceType !== "stornorechnung")
+      .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
+  }
 
   if (drafts.length === 0) {
     throw notFound(
-      `Keine Entwurfs-Rechnungen für ${String(billingMonth).padStart(2, "0")}/${billingYear} gefunden.`,
+      hasIds
+        ? "Keine druckbaren Entwurfs-Rechnungen in der Auswahl gefunden."
+        : `Keine Entwurfs-Rechnungen für ${String(billingMonth).padStart(2, "0")}/${billingYear} gefunden.`,
     );
   }
 

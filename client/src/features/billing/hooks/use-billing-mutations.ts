@@ -371,7 +371,7 @@ export function useBillingMutations({
   // versendet markieren" vorbehalten. Zwei Optionen: nur Rechnungen oder
   // Rechnungen + Leistungsnachweise. READ-ONLY ⇒ kein invalidate/refetch.
   const bulkPrintPreviewMutation = useMutation({
-    mutationFn: async (opts: { groupByPayer: boolean; includeLeistungsnachweise: boolean }) => {
+    mutationFn: async (opts: { groupByPayer: boolean; includeLeistungsnachweise: boolean; invoiceIds?: number[] }) => {
       setBulkPrintResult(null);
       const result = await api.postBlob<BulkPrintSummary>(
         "/billing/bulk-print-preview",
@@ -380,6 +380,9 @@ export function useBillingMutations({
           billingYear: selectedYear,
           groupByPayer: opts.groupByPayer,
           includeLeistungsnachweise: opts.includeLeistungsnachweise,
+          // Task #1630: Auswahl-basierter Druck — nur wenn IDs übergeben werden,
+          // sonst bleibt der Monats-Sammeldruck unverändert.
+          ...(opts.invoiceIds && opts.invoiceIds.length > 0 ? { invoiceIds: opts.invoiceIds } : {}),
           ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
         },
         "X-Bulk-Print-Summary",
