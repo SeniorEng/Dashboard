@@ -8,6 +8,8 @@ import {
 import { and, asc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { addDays, formatDateISO, todayISO } from "@shared/utils/datetime";
 import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-validator";
+import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
+import { AppError } from "../../lib/errors";
 import { db } from "../../lib/db";
 import { customersRepo } from "../../repos";
 import type { DbClient } from "./types";
@@ -26,6 +28,22 @@ export class SelbstzahlerStatutoryPotError extends Error {
     super(message);
     this.name = "SelbstzahlerStatutoryPotError";
     this.code = "BUDGET_NOT_AVAILABLE_FOR_SELBSTZAHLER";
+  }
+}
+
+/**
+ * Task #1623 — Rückdatierung des „Gültig ab" ist beim ERSTeintrag erlaubt
+ * (Leer-Topf, im UI „Bis dahin gilt: —"), aber verboten, sobald für den
+ * gewünschten Zeitraum bereits ein Betrag in Kraft war — eine bereits geltende
+ * Zahl darf nicht rückwirkend verändert werden (GoBD). Als `AppError`
+ * modelliert (statusCode 400), damit der zentrale `asyncHandler`/
+ * `errorMiddleware` ihn ohne Route-Sonderbehandlung als 400 mit deutscher
+ * Meldung ausliefert.
+ */
+export class BudgetBackdateNotAllowedError extends AppError {
+  constructor(message: string) {
+    super(400, "BUDGET_BACKDATE_NOT_ALLOWED", message);
+    this.name = "BudgetBackdateNotAllowedError";
   }
 }
 
@@ -333,6 +351,30 @@ function settingsEqual(a: CustomerBudgetTypeSetting, b: SettingPayload): boolean
 }
 
 /**
+ * Task #1623 — Hatte der Topf im Fenster [fromDate .. today] jemals einen
+ * Betrag in Kraft? „Betrag in Kraft" = eine Zeile mit gesetztem
+ * `monthlyLimitCents` ODER `yearlyLimitCents`, deren Gültigkeit
+ * [validFrom .. validTo] das Fenster überschneidet (validFrom NULL = -∞,
+ * validTo NULL = offen). Grundlage der Rückdatierungs-Erlaubnis: nur wenn
+ * KEINE wertbelegte Phase das Fenster berührt (Leer-Topf), darf ein
+ * rückdatiertes `validFrom` als echte Phase übernommen werden — sonst würde
+ * eine Rückdatierung einen bereits geltenden Wert rückwirkend verändern.
+ */
+function hasValuedPhaseInWindow(
+  rows: CustomerBudgetTypeSetting[],
+  fromDate: string,
+  today: string,
+): boolean {
+  return rows.some(r => {
+    const valued = r.monthlyLimitCents != null || r.yearlyLimitCents != null;
+    if (!valued) return false;
+    const startsByToday = r.validFrom == null || r.validFrom <= today;
+    const endsAfterFrom = r.validTo == null || r.validTo >= fromDate;
+    return startsByToday && endsAfterFrom;
+  });
+}
+
+/**
  * Historisierte Aktualisierung der Topf-Konfiguration (Task #440 / GoBD,
  * Phasen-Append-Only-Fix Task #721).
  *
@@ -478,6 +520,60 @@ export async function upsertBudgetTypeSettings(
         && explicitVf > today
         && (!current || (current.validFrom ?? null) !== explicitVf);
 
+      // Task #1623 — „Frisch" = die aktuelle offene Zeile war noch nie in Kraft
+      // (Zukunfts-`validFrom` ODER rückwirkende, HEUTE angelegte NULL-Zeile).
+      // EINE Quelle für zwei Entscheidungen: die Rückdatierungs-Erlaubnis hier
+      // und der Same-Day-In-Place-Pfad (`isStillFresh`) weiter unten — beide
+      // müssen dieselbe „noch nie in Kraft"-Definition benutzen.
+      const currentCreatedToday = current?.createdAt ? formatDateISO(current.createdAt) === today : false;
+      const currentIsFresh = !!current && (
+        (current.validFrom != null && current.validFrom >= today)
+        || (current.validFrom == null && currentCreatedToday)
+      );
+
+      // Task #1623 — Rückdatierungs-Sperre über ALLE Eintrittspfade. Ein
+      // explizites `validFrom <= heute`, das den Wert-Beginn verschiebt, darf
+      // NUR durchgehen, wenn im Fenster [explicitVf .. heute] KEINE wertbelegte
+      // Phase in Kraft war/ist (Leer-Topf, im UI „Bis dahin gilt: —"). Sonst
+      // wird die rückwirkende Änderung eines bereits geltenden Betrags hart
+      // abgelehnt (GoBD — Option 2 out of scope).
+      //
+      // Die Prüfung darf NICHT an `current`/`currentIsFresh` hängen, sonst
+      // schlüpfen zwei Fälle durch:
+      //   1) Nach einer Same-Day-Transition ist die offene Zeile „frisch"
+      //      (validFrom = morgen); ein zweites, rückdatiertes Save würde sonst
+      //      über den In-Place-Pfad den wertbelegten Vorgänger rückwirkend
+      //      überschreiben.
+      //   2) Ein Topf mit ausschließlich geschlossenen/abgelaufenen wertbelegten
+      //      Zeilen hat KEINE offene `current`-Zeile; eine rückdatierte
+      //      Erstanlage würde die geschlossene Wert-Phase im Fenster überlappen.
+      // „Blocker" sind nur Zeilen, die je in Kraft waren: die gerade editierte,
+      // noch nie in Kraft gewesene (frische) Zeile zählt NICHT als ihr eigener
+      // Blocker — sonst bräche die legitime Same-Day-Korrektur einer
+      // rückwirkenden NULL-Baseline (der In-Place-Pfad unten übernimmt ein
+      // rückdatiertes `s.validFrom` dann verlustfrei).
+      const isExplicitBackdate = explicitVf != null && explicitVf <= today;
+      const backdateShiftsStart = isExplicitBackdate
+        && (current == null || (current.validFrom ?? null) !== explicitVf);
+      const backdateBlockerRows = (rowsByType.get(s.budgetType) ?? [])
+        .filter(r => !(current != null && r.id === current.id && currentIsFresh));
+      if (backdateShiftsStart && hasValuedPhaseInWindow(backdateBlockerRows, explicitVf, today)) {
+        const label = BUDGET_TYPE_LABELS[s.budgetType as BudgetType] ?? s.budgetType;
+        throw new BudgetBackdateNotAllowedError(
+          `Für den Budget-Topf „${label}" ist in diesem Zeitraum bereits ein Betrag hinterlegt. Ein bereits geltender Wert kann nicht rückwirkend geändert werden. Bitte speichere die Änderung ohne Rückdatierung — sie gilt dann ab morgen.`,
+        );
+      }
+      // Sichere Rückdatierung (Lücken-Füllung auf einem nicht-frischen Leer-Topf)
+      // → echte, eingeklemmte Phase. Frische bzw. current-lose Leer-Fenster
+      // laufen über den In-Place-/Erstanlage-Pfad, nicht über diesen Append.
+      // `settingsEqual` vergleicht bewusst OHNE `validFrom`, damit eine reine
+      // Datums-Änderung auf einem weiterhin leeren Topf ein No-Op bleibt.
+      const wantsBackdate = isExplicitBackdate
+        && !!current
+        && !currentIsFresh
+        && (current.validFrom ?? null) !== explicitVf;
+      const isSafeBackdate = wantsBackdate && !!current && !settingsEqual(current, s);
+
       // Task #1169 — GoBD-Härtung: Ein PUT OHNE explizites `validFrom` auf eine
       // noch zukunfts-datierte offene Zeile, HINTER der bereits eine in Kraft
       // befindliche Vorgängerphase steht (eine andere Zeile, die `today`
@@ -499,9 +595,10 @@ export async function upsertBudgetTypeSettings(
           && (r.validTo == null || r.validTo >= today));
       const isNewVersionTodayAppend = explicitVf == null && hasInForcePredecessor;
 
-      const isPhaseAppend = isExplicitPhaseAppend || isNewVersionTodayAppend;
-      // Stichtag der neuen Phase: explizit aus dem Payload, sonst „ab heute".
-      const appendVf = isExplicitPhaseAppend ? explicitVf! : today;
+      const isPhaseAppend = isExplicitPhaseAppend || isNewVersionTodayAppend || isSafeBackdate;
+      // Stichtag der neuen Phase: explizit aus dem Payload (Zukunfts-Append ODER
+      // sichere Rückdatierung, Task #1623), sonst „ab heute".
+      const appendVf = (isExplicitPhaseAppend || isSafeBackdate) ? explicitVf! : today;
 
       if (isPhaseAppend) {
         const allOfType = rowsByType.get(s.budgetType) ?? [];
@@ -620,12 +717,10 @@ export async function upsertBudgetTypeSettings(
         //       — d.h. die Zeile existiert noch keinen Werktag, kann also keine
         //       reale Buchung referenziert haben.
         const oldValidFrom = current.validFrom;
-        // Wichtig: lokale (Berlin-)Datums-Formatierung verwenden, NICHT
-        // `toISOString().slice(0,10)` — letzteres liefert UTC und führt
-        // nachts zwischen 00:00 und 02:00 Berlin-Zeit zu einem Off-by-One
-        // (createdAt-UTC-Datum = gestern, today-Berlin = heute), wodurch
-        // Same-day-Updates fälschlich als Transition erkannt würden.
-        const createdToday = current.createdAt ? formatDateISO(current.createdAt) === today : false;
+        // Task #1623 — „noch nie in Kraft" ist EINE Quelle: `currentIsFresh`
+        // (oben hergeleitet, inkl. Berlin-lokaler `createdAt`-Formatierung, die
+        // den nächtlichen UTC-Off-by-One vermeidet). Hier wiederverwendet, damit
+        // Rückdatierungs- und Same-Day-Pfad dieselbe Definition teilen.
         // Task #608 (Revision nach Code-Review): Den Backfill-Sentinel
         // '1970-01-01' beim Edit NICHT in-place ersetzen — das hätte für
         // historische asOfDate-Lookups (`getActiveBudgetTypeSettings(date)`,
@@ -636,9 +731,7 @@ export async function upsertBudgetTypeSettings(
         // mit validTo=today, neue Zeile mit validFrom=tomorrow). Die
         // UI maskiert den Sentinel kosmetisch, der Edit wird ab morgen
         // wirksam — historische Lookups bleiben stabil.
-        const isStillFresh = (oldValidFrom != null && oldValidFrom >= today)
-          || (oldValidFrom == null && createdToday);
-        if (isStillFresh) {
+        if (currentIsFresh) {
           // Task #754 (BUG-13) — PUT ohne explizites `validFrom` auf eine
           // offene Zeile, deren `validFrom` in der Zukunft liegt, bedeutet
           // semantisch „jetzt aktivieren". Vor dem Fix hat
