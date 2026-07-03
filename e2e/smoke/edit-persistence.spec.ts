@@ -709,12 +709,10 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       // setzt das Datum auf den nächsten Werktag +7).
       const billingMonth = apptDate.getMonth() + 1;
       const billingYear = apptDate.getFullYear();
-      await page.locator("[data-testid='select-billing-month']").click();
-      await page.getByRole("option", { name: new RegExp(`^${
-        ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"][billingMonth - 1]
-      }$`) }).click();
-      await page.locator("[data-testid='select-billing-year']").click();
-      await page.getByRole("option", { name: String(billingYear) }).click();
+      await page.locator("[data-testid='select-month']").click();
+      await page.locator(`[data-testid='option-month-${billingMonth}']`).click();
+      await page.locator("[data-testid='select-year']").click();
+      await page.locator(`[data-testid='option-year-${billingYear}']`).click();
 
       const invoiceRow = page.locator(
         `[data-testid='invoice-row-${invoiceId}']`,
@@ -964,29 +962,10 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
       const billingMonth = apptDate.getMonth() + 1;
       const billingYear = apptDate.getFullYear();
-      await page.locator("[data-testid='select-billing-month']").click();
-      await page
-        .getByRole("option", {
-          name: new RegExp(
-            `^${[
-              "Januar",
-              "Februar",
-              "März",
-              "April",
-              "Mai",
-              "Juni",
-              "Juli",
-              "August",
-              "September",
-              "Oktober",
-              "November",
-              "Dezember",
-            ][billingMonth - 1]}$`,
-          ),
-        })
-        .click();
-      await page.locator("[data-testid='select-billing-year']").click();
-      await page.getByRole("option", { name: String(billingYear) }).click();
+      await page.locator("[data-testid='select-month']").click();
+      await page.locator(`[data-testid='option-month-${billingMonth}']`).click();
+      await page.locator("[data-testid='select-year']").click();
+      await page.locator(`[data-testid='option-year-${billingYear}']`).click();
 
       const invoiceRow = page.locator(`[data-testid='invoice-row-${invoiceId}']`);
       await expect(invoiceRow).toBeVisible({ timeout: 15000 });
@@ -1285,10 +1264,21 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     await expect(carryoverSection).toBeVisible({ timeout: 10000 });
     await expect(carryoverSection).toContainText("Übertrag");
 
-    // BudgetSummary zeigt den Carryover-Wert vor dem Löschen.
-    await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
-      timeout: 10000,
-    });
+    // BudgetSummary zeigt den Carryover-Wert vor dem Löschen — ABER nur, solange
+    // der §45b-Übertrag im gesetzlichen Fenster liegt. Der Seed legt den Übertrag
+    // fürs laufende Jahr an (validFrom = YYYY-01-01, expiresAt = YYYY-06-30, SGB XI
+    // §45b Abs. 3). Nach dem 30.06. ist er KORREKT verfallen: die Summary
+    // (`carryoverCents === 0`) blendet die Kachel bewusst aus. Es gibt keinen
+    // API-Pfad, der einen §45b-Carryover mit Ablauf > 30.06. anlegt, daher wird die
+    // Kachel-Sichtbarkeit nur im gültigen Fenster (H1) geprüft. Der eigentliche
+    // Lösch-Round-Trip läuft datumsunabhängig über die Carryover-Sektion (oben) und
+    // die API-Verifikation (unten) und bleibt in H2 voll wirksam.
+    const carryoverStillValid = today.getMonth() <= 5; // 0-basiert: Jan–Jun
+    if (carryoverStillValid) {
+      await expect(page.locator("[data-testid='text-45b-carryover']")).toBeVisible({
+        timeout: 10000,
+      });
+    }
 
     // Trash → Mini-Confirm → DELETE abwarten. Die Zeile trägt den Quelljahr-
     // Suffix; wir treffen sie über das gemeinsame Präfix.
@@ -1428,23 +1418,23 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       // --- Schritt 1: Standardpreis 111,11 € mit Zukunfts-Stichtag anlegen ---
       await page.goto("/admin/services", { waitUntil: "domcontentloaded" });
 
-      const row = page.locator(`[data-testid='pricing-row-${serviceId}']`);
+      const row = page.locator(`[data-testid='row-economics-${serviceId}']`);
       await expect(row).toBeVisible({ timeout: 15000 });
 
-      await page.locator(`[data-testid='btn-edit-price-${serviceId}']`).click();
+      await page.locator(`[data-testid='button-edit-price-${serviceId}']`).click();
       const priceField = page.locator(`[data-testid='input-price-${serviceId}']`);
       await expect(priceField).toBeVisible({ timeout: 10000 });
       await priceField.fill("111,11");
-      await page.locator(`[data-testid='input-valid-from-${serviceId}']`).fill(validFrom);
+      await page.locator(`[data-testid='input-price-valid-from-${serviceId}']`).fill(validFrom);
 
       const firstId = await waitForCreatedPrice(
-        page.locator(`[data-testid='btn-save-price-${serviceId}']`).click(),
+        page.locator(`[data-testid='button-save-price-${serviceId}']`).click(),
       );
       createdPriceIds.push(firstId);
 
       // --- Reload + Persistenz-Check (Zukunfts-Preis sichtbar) ---
       await page.reload({ waitUntil: "domcontentloaded" });
-      const futureEntry = page.locator(`[data-testid='future-price-${firstId}']`);
+      const futureEntry = page.locator(`[data-testid='text-future-price-${firstId}']`);
       await expect(futureEntry).toBeVisible({ timeout: 10000 });
       await expect(futureEntry).toContainText("111,11");
 
@@ -1461,30 +1451,30 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       expect(persisted!.priceCents).toBe(11111);
 
       // --- Schritt 2: Gleicher Stichtag → PRICE_CONFLICT → "Ja, ersetzen" ---
-      await page.locator(`[data-testid='btn-edit-price-${serviceId}']`).click();
+      await page.locator(`[data-testid='button-edit-price-${serviceId}']`).click();
       const priceField2 = page.locator(`[data-testid='input-price-${serviceId}']`);
       await expect(priceField2).toBeVisible({ timeout: 10000 });
       await priceField2.fill("222,22");
-      await page.locator(`[data-testid='input-valid-from-${serviceId}']`).fill(validFrom);
+      await page.locator(`[data-testid='input-price-valid-from-${serviceId}']`).fill(validFrom);
 
       // Speichern löst zunächst den 409 PRICE_CONFLICT aus → Ersetzen-Dialog.
-      await page.locator(`[data-testid='btn-save-price-${serviceId}']`).click();
+      await page.locator(`[data-testid='button-save-price-${serviceId}']`).click();
       const replaceDialog = page.locator("[data-testid='dialog-replace-price']");
       await expect(replaceDialog).toBeVisible({ timeout: 10000 });
       await expect(page.locator("[data-testid='text-new-price']")).toContainText("222,22");
 
       const replacedId = await waitForCreatedPrice(
-        page.locator("[data-testid='btn-confirm-replace']").click(),
+        page.locator("[data-testid='btn-confirm-replace-price']").click(),
       );
       createdPriceIds.push(replacedId);
 
       // --- Reload + Persistenz-Check (ersetzter Preis sichtbar, alter weg) ---
       await page.reload({ waitUntil: "domcontentloaded" });
-      const replacedEntry = page.locator(`[data-testid='future-price-${replacedId}']`);
+      const replacedEntry = page.locator(`[data-testid='text-future-price-${replacedId}']`);
       await expect(replacedEntry).toBeVisible({ timeout: 10000 });
       await expect(replacedEntry).toContainText("222,22");
       await expect(
-        page.locator(`[data-testid='future-price-${firstId}']`),
+        page.locator(`[data-testid='text-future-price-${firstId}']`),
       ).toHaveCount(0);
 
       const futuresAfter = (await session.api

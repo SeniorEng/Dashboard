@@ -63,10 +63,14 @@ describe("sweep-dev-test-data dbHostOf()", () => {
     expect(dbHostOf("postgresql://user:pass@DB.PROD.Example:5432/app")).toBe("db.prod.example");
   });
 
-  it("fällt bei nicht-parsebarer URL auf die @host-Regex zurück", () => {
-    // `new URL(...)` wirft hier (kaputtes Schema) → Fallback-Regex `@([^:/?#]+)`
-    // greift und liest den Host hinter dem `@`.
-    expect(dbHostOf("postgres ://x@legacy-dev-host:5432/app")).toBe("legacy-dev-host");
+  it("liefert bei malformtem Schema (Leerzeichen) einen leeren Host (fail-closed)", () => {
+    // `new URL(...)` wirft hier (kaputtes Schema mit Leerzeichen). Der Fallback
+    // akzeptiert NUR ein gültiges `scheme://`-Präfix — zeichengleich zur sed-Regex
+    // in scripts/lib/assert-dev-db.sh (Cross-Language-Parität, Task #1438). Ein
+    // malformtes Schema liefert daher KEINEN Host, sondern leer → der Aufrufer
+    // bricht fail-closed ab (Prod-Schutz). Eine reine `@host`-Regex würde hier
+    // fälschlich `legacy-dev-host` extrahieren und die Guards passieren lassen.
+    expect(dbHostOf("postgres ://x@legacy-dev-host:5432/app")).toBe("");
   });
 
   it("liefert leeren String, wenn kein Host ermittelbar ist", () => {
