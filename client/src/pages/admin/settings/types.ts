@@ -30,6 +30,7 @@ export const emptyCompanyForm = {
   qontoLogin: "",
   qontoSecretKey: "",
   qontoIban: "",
+  qontoAdditionalIbans: "",
   twilioAccountSid: "",
   twilioAuthToken: "",
   twilioPhoneNumber: "",

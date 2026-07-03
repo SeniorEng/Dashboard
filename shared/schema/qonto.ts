@@ -17,6 +17,11 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   label: text("label"),
   emittedAt: timestamp("emitted_at").notNull(),
   status: text("status").notNull(),
+  // Task #1587 — IBAN des Kontos, von dem diese Transaktion beim Sync
+  // eingesammelt wurde. Erlaubt es, fehlgeleitete Eingänge (Zahlung auf das
+  // falsche Konto desselben Qonto-Logins) in der Liste erkennbar zu machen.
+  // Nullable: Altbestand vor diesem Task trägt keine Quell-IBAN.
+  sourceIban: text("source_iban"),
   matchedInvoiceId: integer("matched_invoice_id").references(() => invoices.id),
   matchConfidence: text("match_confidence"),
   rawData: jsonb("raw_data"),

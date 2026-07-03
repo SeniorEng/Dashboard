@@ -60,6 +60,29 @@ export function StatusTab({ status, isLoading }: { status?: QontoStatus; isLoadi
             </div>
           )}
 
+          {configured && (status?.connection?.accounts?.length ?? 0) > 0 && (
+            <div className="space-y-2" data-testid="list-qonto-accounts">
+              <p className="text-xs font-medium text-gray-600">Überwachte Konten</p>
+              {status!.connection!.accounts!.map((acc) => (
+                <div
+                  key={acc.iban}
+                  className="flex items-center gap-2 text-xs"
+                  data-testid={`account-status-${acc.iban.slice(-4)}`}
+                >
+                  {acc.success ? (
+                    <CheckCircle2 className={`${iconSize.sm} text-green-600 shrink-0`} />
+                  ) : (
+                    <XCircle className={`${iconSize.sm} text-red-600 shrink-0`} />
+                  )}
+                  <span className="font-mono text-gray-700">…{acc.iban.slice(-4)}</span>
+                  {!acc.success && acc.error && (
+                    <span className="text-red-600 truncate">{acc.error}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {status?.lastSync && (
             <p className="text-xs text-gray-500">
               Letzter Sync: {formatDate(status.lastSync)} um {new Date(status.lastSync).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}

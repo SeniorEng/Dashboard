@@ -1,7 +1,18 @@
+export interface QontoAccountStatus {
+  iban: string;
+  success: boolean;
+  error?: string;
+}
+
 export interface QontoStatus {
   configured: boolean;
   lastSync: string | null;
-  connection: { success: boolean; error?: string; bankAccountName?: string } | null;
+  connection: {
+    success: boolean;
+    error?: string;
+    bankAccountName?: string;
+    accounts?: QontoAccountStatus[];
+  } | null;
 }
 
 export interface QontoTransaction {
@@ -15,6 +26,7 @@ export interface QontoTransaction {
   label: string | null;
   emittedAt: string;
   status: string;
+  sourceIban: string | null;
   matchedInvoiceId: number | null;
   matchConfidence: string | null;
 }

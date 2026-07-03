@@ -83,6 +83,7 @@ export default function AdminSettings() {
         qontoLogin: companyData.qontoLogin ?? "",
         qontoSecretKey: companyData.qontoSecretKey ?? "",
         qontoIban: companyData.qontoIban ?? "",
+        qontoAdditionalIbans: (companyData.qontoAdditionalIbans ?? []).join("\n"),
         twilioAccountSid: companyData.twilioAccountSid ?? "",
         twilioAuthToken: companyData.twilioAuthToken ?? "",
         twilioPhoneNumber: companyData.twilioPhoneNumber ?? "",
@@ -169,6 +170,10 @@ export default function AdminSettings() {
         qontoLogin: companyForm.qontoLogin,
         qontoSecretKey: companyForm.qontoSecretKey,
         qontoIban: companyForm.qontoIban,
+        qontoAdditionalIbans: companyForm.qontoAdditionalIbans
+          .split(/[\n,;]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
       });
       return unwrapResult(result);
     },
@@ -348,6 +353,20 @@ export default function AdminSettings() {
                         placeholder="DE89 3704 0044 0532 0130 00"
                         data-testid="input-qonto-iban"
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="qontoAdditionalIbans">Weitere IBANs (gleicher Qonto-Login)</Label>
+                      <Textarea
+                        id="qontoAdditionalIbans"
+                        value={companyForm.qontoAdditionalIbans}
+                        onChange={(e) => updateField("qontoAdditionalIbans", e.target.value)}
+                        placeholder="Eine IBAN pro Zeile"
+                        rows={3}
+                        data-testid="input-qonto-additional-ibans"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Optional: zusätzliche Konten desselben Qonto-Logins, die im Zahlungsabgleich mitsynchronisiert werden. Eine IBAN pro Zeile.
+                      </p>
                     </div>
                     <div className="flex justify-end pt-2 border-t">
                       <Button

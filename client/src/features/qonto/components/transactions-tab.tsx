@@ -142,6 +142,11 @@ export function TransactionsTab({
                           ({tx.matchConfidence === "manual" ? "manuell" : "automatisch"})
                         </span>
                       )}
+                      {tx.sourceIban && (
+                        <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-xs font-mono" data-testid={`badge-source-iban-${tx.id}`}>
+                          Konto …{tx.sourceIban.slice(-4)}
+                        </Badge>
+                      )}
                     </div>
                     {tx.counterpartyName && (
                       <p className="text-sm text-gray-700 mt-1 truncate">{tx.counterpartyName}</p>

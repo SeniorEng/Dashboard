@@ -92,6 +92,7 @@ class QontoStorage {
           counterpartyName: data.counterpartyName,
           reference: data.reference,
           label: data.label,
+          sourceIban: data.sourceIban,
           rawData: data.rawData,
           syncedAt: new Date(),
         })

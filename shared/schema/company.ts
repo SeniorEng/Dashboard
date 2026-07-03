@@ -1,4 +1,5 @@
 import { pgTable, text, integer, serial, boolean, numeric, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { timestamp, optionalGermanPhoneSchema, optionalInternationalPhoneSchema } from "./common";
 import { encryptedText } from "./encrypted-columns";
@@ -51,6 +52,11 @@ export const companySettings = pgTable("company_settings", {
   qontoLogin: text("qonto_login"),
   qontoSecretKey: encryptedText("qonto_secret_key"),
   qontoIban: text("qonto_iban"),
+  // Task #1587 — Weitere IBANs desselben Qonto-Logins, die im
+  // Zahlungsabgleich mitsynchronisiert werden. `qontoIban` bleibt das
+  // primäre Geschäftskonto; diese Liste ist rein additiv. IBANs sind nicht
+  // sensibel (Pass-through), nur `qontoSecretKey` bleibt redigiert.
+  qontoAdditionalIbans: text("qonto_additional_ibans").array().notNull().default(sql`ARRAY[]::text[]`),
   whatsappAccessToken: encryptedText("whatsapp_access_token"),
   whatsappPhoneNumberId: text("whatsapp_phone_number_id"),
   whatsappBusinessAccountId: text("whatsapp_business_account_id"),
@@ -114,6 +120,7 @@ export const updateCompanySettingsSchema = z.object({
   qontoLogin: z.string().optional().nullable(),
   qontoSecretKey: z.string().optional().nullable(),
   qontoIban: z.string().optional().nullable(),
+  qontoAdditionalIbans: z.array(z.string()).optional(),
   whatsappAccessToken: z.string().optional().nullable(),
   whatsappPhoneNumberId: z.string().optional().nullable(),
   whatsappBusinessAccountId: z.string().optional().nullable(),
