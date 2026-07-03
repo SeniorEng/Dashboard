@@ -10,7 +10,7 @@
  *     Status (`accounts[]`).
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { storage } from "../../server/storage";
 import { qontoService } from "../../server/services/qonto";
 import { qontoStorage } from "../../server/storage/qonto";
@@ -68,6 +68,17 @@ afterAll(async () => {
   await db.delete(qontoTransactions).where(
     inArray(qontoTransactions.qontoTransactionId, [TX_PRIMARY, TX_SECOND]),
   );
+});
+
+// Root-Cause-Fix (Task #1611): Jeder Test, der `global.fetch` per
+// `vi.stubGlobal("fetch", …)` durch einen Qonto-API-Mock ersetzt, MUSS ihn
+// wieder herstellen — sonst erbt eine spätere Suite den Mock und ihr
+// `apiPost`/`apiDelete`-Login schlägt mit dem irreführenden Fehler
+// „CSRF-Token nicht in Cookies gefunden" fehl. Ein file-weiter `afterEach`
+// stellt `fetch` nach JEDEM Test wieder her, damit keine Suite mehr von der
+// Ausführungsreihenfolge abhängt (siehe .agents/memory/qonto-test-fetch-stub-leak.md).
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 /** Mockt die Qonto-API: liefert pro IBAN je genau eine Transaktion. */
@@ -296,10 +307,11 @@ describe("Qonto un-hide/hide Routen setzen Override auditiert (Task #1608)", () 
   let ruleId: number | null = null;
   let txDbId: number | null = null;
 
-  // Vorige Blöcke stubben `global.fetch` (Qonto-API-Mock) und stellen es nicht
-  // immer wieder her. Diese Suite ruft ECHTE HTTP-Routen über `apiPost`/
-  // `apiDelete` (= `fetch`) auf → das echte `fetch` muss wieder aktiv sein,
-  // sonst schlägt schon das Login (kein Set-Cookie) fehl.
+  // Diese Suite ruft ECHTE HTTP-Routen über `apiPost`/`apiDelete` (= `fetch`)
+  // auf → das echte `fetch` muss aktiv sein. Seit Task #1611 stellt der
+  // file-weite `afterEach` `fetch` nach jedem Test wieder her; dieser
+  // `beforeAll` bleibt als Defense-in-Depth erhalten, falls die Suite je isoliert
+  // oder vor dem ersten stubbenden Test läuft.
   beforeAll(() => {
     vi.unstubAllGlobals();
   });

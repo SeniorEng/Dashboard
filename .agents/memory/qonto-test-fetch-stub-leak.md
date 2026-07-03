@@ -15,9 +15,20 @@ server, gets no `Set-Cookie`, and fails with
 `"CSRF-Token nicht in Cookies gefunden"` — a misleading error that looks like an
 auth/CSRF bug but is really a leaked mock.
 
-**Rule:** any describe block that uses the real HTTP routes (apiPost/apiDelete)
-must `vi.unstubAllGlobals()` in its own `beforeAll` when it shares a file with
-fetch-stubbing suites — don't rely on sibling suites to restore fetch.
+**Root cause fixed:** the file now has a file-wide `afterEach(() =>
+vi.unstubAllGlobals())`, so `fetch` is restored after EVERY test — no suite
+depends on ordering anymore. The #1608 `beforeAll` unstub is kept only as
+defense-in-depth.
+
+**Guard:** `tests/architecture/no-leaked-fetch-stub.test.ts` fails any test file
+that `vi.stubGlobal("fetch", …)` without restoring it somewhere
+(`unstubAllGlobals`/`restoreAllMocks`). Comment-only mentions are stripped before
+scanning (so a documented example like `tests/helpers/letterxpress.ts` is fine).
+
+**Rule (still true):** any describe block that uses the real HTTP routes
+(apiPost/apiDelete) must not run under a leaked fetch mock; prefer a file-wide
+`afterEach` unstub over relying on sibling suites to restore fetch.
 
 **Why:** test order in a single file is sequential; a leaked global stub silently
-poisons every later suite that assumes real `fetch`.
+poisons every later suite that assumes real `fetch`, surfacing as the misleading
+`"CSRF-Token nicht in Cookies gefunden"` login error.
