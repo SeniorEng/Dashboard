@@ -13,9 +13,10 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { storage } from "../../server/storage";
 import { qontoService } from "../../server/services/qonto";
+import { qontoStorage } from "../../server/storage/qonto";
 import { db } from "../../server/lib/db";
-import { qontoTransactions } from "../../shared/schema";
-import { inArray } from "drizzle-orm";
+import { qontoTransactions, qontoHideRules } from "../../shared/schema";
+import { eq, inArray } from "drizzle-orm";
 import { uniqueId } from "../test-utils";
 
 const PRIMARY_IBAN = "DE00PRIMARY0000000001";
@@ -169,5 +170,115 @@ describe("Qonto Multi-IBAN Sync (Task #1587)", () => {
     const byId = new Map(rows.map((r) => [r.qontoTransactionId, r]));
     expect(byId.get(TX_PRIMARY)?.sourceIban).toBe(PRIMARY_IBAN);
     expect(byId.get(TX_SECOND)?.sourceIban).toBe(SECOND_IBAN);
+  });
+});
+
+// Task #1605 — Ein manuell wieder sichtbar gemachter Zahlungseingang (Override)
+// darf durch einen erneuten Sync/Backfill NICHT erneut automatisch ausgeblendet
+// werden. Deckt die höchstrisiko-Verhaltensweise aus #1599 end-to-end ab: eine
+// Regression würde bewusst wiederhergestellte Einnahmen still ausblenden.
+describe("Qonto un-hide Override überlebt Re-Sync (Task #1605)", () => {
+  const otag = uniqueId();
+  const TX_OVERRIDDEN = `qonto-tx-override-${otag}`;
+  const TX_MATCHING = `qonto-tx-matching-${otag}`;
+  // Eindeutiger Counterparty-Teilstring, damit die Regel NUR die hier
+  // gesäten Transaktionen trifft (keine Fremdzeilen der geteilten Test-DB).
+  const HIDE_VALUE = `finanzamt-${otag}`;
+  let ruleId: number | null = null;
+
+  async function seedCreditTx(externalId: string) {
+    const [row] = await db
+      .insert(qontoTransactions)
+      .values({
+        qontoTransactionId: externalId,
+        amountCents: 5000,
+        currency: "EUR",
+        side: "credit",
+        counterpartyName: `Finanzamt ${HIDE_VALUE}`,
+        emittedAt: new Date(),
+        status: "completed",
+      })
+      .returning();
+    return row;
+  }
+
+  async function reload(externalId: string) {
+    const [row] = await db
+      .select()
+      .from(qontoTransactions)
+      .where(eq(qontoTransactions.qontoTransactionId, externalId));
+    return row;
+  }
+
+  /** Mockt die Qonto-API leer, damit backfill nur die Regel-Anwendung ausübt. */
+  function stubFetchEmpty() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ transactions: [], meta: { total_pages: 1 } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+  }
+
+  afterAll(async () => {
+    await db
+      .delete(qontoTransactions)
+      .where(inArray(qontoTransactions.qontoTransactionId, [TX_OVERRIDDEN, TX_MATCHING]));
+    if (ruleId !== null) {
+      await db.delete(qontoHideRules).where(eq(qontoHideRules.id, ruleId));
+    }
+  });
+
+  it("blendet einen un-hidden Override bei einem erneuten Backfill NICHT wieder aus, hidet aber weiterhin nicht-überschriebene Treffer", async () => {
+    const overridden = await seedCreditTx(TX_OVERRIDDEN);
+
+    // Passende Auto-Ausblenden-Regel anlegen.
+    const rule = await qontoStorage.createHideRule({
+      ruleType: "counterparty",
+      value: HIDE_VALUE,
+      createdByUserId: null,
+    });
+    ruleId = rule.id;
+
+    // Erster Sync blendet die Transaktion automatisch aus.
+    await qontoService.applyHideRules();
+    const afterFirst = await reload(TX_OVERRIDDEN);
+    expect(afterFirst.billingIrrelevantAt).not.toBeNull();
+    expect(afterFirst.billingIrrelevantSource).toBe("auto");
+
+    // Admin macht die Transaktion bewusst wieder sichtbar (spiegelt die
+    // DELETE /transactions/:id/ignore-Route: Override setzen, Markierung löschen).
+    await db
+      .update(qontoTransactions)
+      .set({
+        billingIrrelevantAt: null,
+        billingIrrelevantSource: null,
+        billingRelevantOverrideAt: new Date(),
+      })
+      .where(eq(qontoTransactions.id, overridden.id));
+
+    // Ein zweiter, NICHT-überschriebener Treffer, der weiterhin ausgeblendet
+    // werden muss (Gegenprobe zur Override-Ausnahme).
+    await seedCreditTx(TX_MATCHING);
+
+    // Voller Backfill-Zyklus: fetch leer, aber applyHideRules läuft am Ende.
+    stubFetchEmpty();
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    await qontoService.backfillTransactions(startDate);
+
+    // Override überlebt: bleibt sichtbar (abrechnungsrelevant).
+    const overriddenAfter = await reload(TX_OVERRIDDEN);
+    expect(overriddenAfter.billingIrrelevantAt).toBeNull();
+    expect(overriddenAfter.billingRelevantOverrideAt).not.toBeNull();
+
+    // Gegenprobe: der nicht-überschriebene Treffer wird vom selben Lauf
+    // automatisch ausgeblendet.
+    const matchingAfter = await reload(TX_MATCHING);
+    expect(matchingAfter.billingIrrelevantAt).not.toBeNull();
+    expect(matchingAfter.billingIrrelevantSource).toBe("auto");
   });
 });
