@@ -30,6 +30,19 @@ import { max45bStartValueCents } from "../../shared/domain/budget/carryover-elig
 const creds = getAdminCreds();
 test.skip(!creds, "TEST_USER_EMAIL/TEST_USER_PASSWORD nicht gesetzt — Smoke-Suite übersprungen.");
 
+// Rechnungs-Verifikationen (Verifikation 3/4 in den km-/Minuten-Drift-Tests)
+// erzeugen über `POST /api/billing/generate` eine Rechnung inkl. server-seitiger
+// PDF-Persistenz im Object Storage. Lokal/Replit ist der Sidecar vorhanden
+// (`PRIVATE_OBJECT_DIR`/`PUBLIC_OBJECT_SEARCH_PATHS` gesetzt); in der
+// GitHub-Actions-CI fehlt er (Vitest skippt PDF-Tests über
+// `tests/helpers/object-storage.ts`, Playwright kennt diesen Helper nicht).
+// Ohne Bucket persistiert `persistInvoicePdf` bewusst kein PDF und die Rechnung
+// erscheint nicht in der Abrechnungs-UI — daher wird der Rechnungs-Teil dieser
+// Tests dann übersprungen (identisches Kriterium wie in `billing-bulk.spec.ts`).
+// Termin-Detail und Budget-Ledger (Verifikation 1/2) laufen weiterhin in der CI.
+const hasObjectStorage =
+  !!process.env.PRIVATE_OBJECT_DIR && !!process.env.PUBLIC_OBJECT_SEARCH_PATHS;
+
 let session: ApiSession;
 
 test.beforeAll(async () => {
@@ -635,6 +648,11 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       await expect(ledgerRow).toContainText("Anfahrt: 12,70 km");
 
       // --- Verifikation 3: Rechnungs-Line-Item zeigt 12,7 km mit identischem Cent-Betrag ---
+      // Ohne Object-Storage-Sidecar (GitHub-Actions-CI) kann keine Rechnung
+      // persistiert werden — Termin-Detail (Verif. 1) und Budget-Ledger
+      // (Verif. 2) sind bereits geprüft, der `finally`-Cleanup läuft trotz
+      // `return` weiter. Vgl. `billing-bulk.spec.ts` (gleiches Skip-Kriterium).
+      if (!hasObjectStorage) return;
       const sr = await createSingleServiceRecord(session, {
         customerId: customer.id,
         appointmentId: appt.id,
@@ -898,6 +916,11 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
         customerId: customer.id,
         appointmentId: appt.id,
       });
+      // Ohne Object-Storage-Sidecar (GitHub-Actions-CI) kann keine Rechnung
+      // persistiert werden — Termin-Detail (Verif. 1) und Budget-Ledger
+      // (Verif. 2) sind bereits geprüft, der `finally`-Cleanup läuft trotz
+      // `return` weiter. Vgl. `billing-bulk.spec.ts` (gleiches Skip-Kriterium).
+      if (!hasObjectStorage) return;
       // Task #1074: §45b = Pflegekassen-Abrechnung → Kundenunterschrift Pflicht
       // (employee_signed allein genügt nicht). Beide Unterschriften setzen.
       for (const signerType of ["employee", "customer"] as const) {
