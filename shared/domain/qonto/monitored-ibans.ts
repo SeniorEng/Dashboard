@@ -47,3 +47,20 @@ export function resolveMonitoredIbans(settings: MonitoredIbanSettings): string[]
 
   return result;
 }
+
+/**
+ * Liefert die überwachten Konten OHNE das primäre Geschäftskonto — also nur die
+ * nachträglich hinzugekommenen Zusatzkonten. Wird für den einmaligen Voll-Sync
+ * (Backfill) genutzt: das primäre Konto hat historisch bereits einen laufenden
+ * inkrementellen Sync, nur die später ergänzten Konten haben Transaktionen
+ * außerhalb des `updated_at_from`-Fensters.
+ */
+export function resolveAdditionalMonitoredIbans(
+  settings: MonitoredIbanSettings,
+): string[] {
+  const all = resolveMonitoredIbans(settings);
+  const primary = (settings.qontoIban ?? "").trim();
+  if (!primary) return all;
+  const primaryKey = normalizeIban(primary);
+  return all.filter((iban) => normalizeIban(iban) !== primaryKey);
+}

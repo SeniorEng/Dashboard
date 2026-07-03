@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeIban,
   resolveMonitoredIbans,
+  resolveAdditionalMonitoredIbans,
 } from "../../shared/domain/qonto/monitored-ibans";
 
 describe("normalizeIban", () => {
@@ -66,5 +67,43 @@ describe("resolveMonitoredIbans", () => {
         qontoAdditionalIbans: ["DE222", "DE222"],
       }),
     ).toEqual(["DE222"]);
+  });
+});
+
+describe("resolveAdditionalMonitoredIbans (Task #1588)", () => {
+  it("lässt das primäre Geschäftskonto aus", () => {
+    expect(
+      resolveAdditionalMonitoredIbans({
+        qontoIban: "DE111",
+        qontoAdditionalIbans: ["DE222", "DE333"],
+      }),
+    ).toEqual(["DE222", "DE333"]);
+  });
+
+  it("liefert leere Liste, wenn nur das Geschäftskonto hinterlegt ist", () => {
+    expect(
+      resolveAdditionalMonitoredIbans({
+        qontoIban: "DE111",
+        qontoAdditionalIbans: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it("filtert das primäre Konto auch bei abweichender Formatierung heraus", () => {
+    expect(
+      resolveAdditionalMonitoredIbans({
+        qontoIban: "DE89 3704 0044 0532 0130 00",
+        qontoAdditionalIbans: ["de8937040044053201300 0", "DE222"],
+      }),
+    ).toEqual(["DE222"]);
+  });
+
+  it("liefert alle Zusatzkonten, wenn kein primäres Konto gesetzt ist", () => {
+    expect(
+      resolveAdditionalMonitoredIbans({
+        qontoIban: null,
+        qontoAdditionalIbans: ["DE222", "DE333"],
+      }),
+    ).toEqual(["DE222", "DE333"]);
   });
 });

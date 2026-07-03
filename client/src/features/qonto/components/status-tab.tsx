@@ -1,13 +1,14 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { iconSize } from "@/design-system";
-import { RefreshCw, Loader2, CheckCircle2, XCircle, Landmark } from "lucide-react";
+import { RefreshCw, Loader2, CheckCircle2, XCircle, Landmark, History } from "lucide-react";
 import { formatDate } from "../utils";
-import { useSyncMutation } from "../hooks";
+import { useSyncMutation, useBackfillMutation } from "../hooks";
 import type { QontoStatus } from "../types";
 
 export function StatusTab({ status, isLoading }: { status?: QontoStatus; isLoading: boolean }) {
   const syncMutation = useSyncMutation();
+  const backfillMutation = useBackfillMutation();
 
   if (isLoading) {
     return (
@@ -90,19 +91,36 @@ export function StatusTab({ status, isLoading }: { status?: QontoStatus; isLoadi
           )}
 
           {configured && (
-            <Button
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-              className="w-full sm:w-auto"
-              data-testid="button-sync"
-            >
-              {syncMutation.isPending ? (
-                <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
-              ) : (
-                <RefreshCw className={`${iconSize.sm} mr-2`} />
-              )}
-              Jetzt synchronisieren
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <Button
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending || backfillMutation.isPending}
+                className="w-full sm:w-auto"
+                data-testid="button-sync"
+              >
+                {syncMutation.isPending ? (
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                ) : (
+                  <RefreshCw className={`${iconSize.sm} mr-2`} />
+                )}
+                Jetzt synchronisieren
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => backfillMutation.mutate()}
+                disabled={syncMutation.isPending || backfillMutation.isPending}
+                className="w-full sm:w-auto"
+                data-testid="button-backfill"
+                title="Zieht die komplette Historie der nachträglich ergänzten Zusatzkonten ohne Zeitfenster."
+              >
+                {backfillMutation.isPending ? (
+                  <Loader2 className={`${iconSize.sm} mr-2 animate-spin`} />
+                ) : (
+                  <History className={`${iconSize.sm} mr-2`} />
+                )}
+                Voll-Sync Zusatzkonten
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

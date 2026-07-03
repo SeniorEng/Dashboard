@@ -6,6 +6,7 @@ export {
 } from "./use-qonto-queries";
 export {
   useSyncMutation,
+  useBackfillMutation,
   useTransactionMutations,
   useAdviceMutations,
 } from "./use-qonto-mutations";

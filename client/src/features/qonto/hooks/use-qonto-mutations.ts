@@ -20,6 +20,26 @@ export function useSyncMutation() {
   });
 }
 
+export function useBackfillMutation() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () =>
+      unwrapResult(await api.post<{ synced: number; total: number; accounts: number }>("/admin/qonto/backfill", {})),
+    onSuccess: (data) => {
+      const title = data.accounts === 0
+        ? "Keine Zusatzkonten hinterlegt — nichts zu laden"
+        : `Voll-Sync: ${data.synced} Transaktionen von ${data.accounts} Zusatzkonto(en) geladen`;
+      toast({ title });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
 export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: () => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();

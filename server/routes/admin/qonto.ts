@@ -54,6 +54,14 @@ router.post("/sync", asyncHandler("Qonto-Synchronisation fehlgeschlagen", async 
   res.json(result);
 }));
 
+// Task #1588 — Einmaliger Voll-Sync (Backfill) der nachträglich ergänzten
+// Zusatzkonten: zieht deren komplette Historie ohne updated_at_from-Fenster,
+// damit vor der Umstellung eingegangene Zahlungen sicher erfasst werden.
+router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (_req, res) => {
+  const result = await qontoService.backfillTransactions();
+  res.json(result);
+}));
+
 router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen werden", async (req, res) => {
   const { from, to, matched, limit, offset } = req.query;
   const result = await qontoStorage.getTransactions({

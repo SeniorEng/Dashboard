@@ -4,7 +4,7 @@ import { invoices, qontoTransactions } from "@shared/schema";
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { withAudit } from "../lib/with-audit";
-import { resolveMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
+import { resolveMonitoredIbans, resolveAdditionalMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -68,6 +68,18 @@ class QontoService {
   async getMonitoredIbans(): Promise<string[]> {
     const settings = await storage.getCompanySettings();
     return resolveMonitoredIbans({
+      qontoIban: settings.qontoIban,
+      qontoAdditionalIbans: settings.qontoAdditionalIbans,
+    });
+  }
+
+  /**
+   * Nur die nachträglich ergänzten Zusatzkonten (ohne primäres Geschäftskonto).
+   * Für den einmaligen Voll-Sync / Backfill.
+   */
+  async getAdditionalMonitoredIbans(): Promise<string[]> {
+    const settings = await storage.getCompanySettings();
+    return resolveAdditionalMonitoredIbans({
       qontoIban: settings.qontoIban,
       qontoAdditionalIbans: settings.qontoAdditionalIbans,
     });
@@ -158,25 +170,19 @@ class QontoService {
     };
   }
 
-  async syncTransactions(): Promise<{ synced: number; total: number }> {
-    const creds = await this.getCredentials();
-    if (!creds) {
-      throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
-    }
-
-    const ibans = await this.getMonitoredIbans();
-    if (ibans.length === 0) {
-      throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
-    }
-
-    // getLastSyncTime bleibt global (ein Sync-Lauf über alle Konten).
-    const lastSync = await qontoStorage.getLastSyncTime();
-
+  /**
+   * Paginiert die completed-credit-Transaktionen der übergebenen Konten und
+   * schreibt sie (idempotent) in den Store. `updatedSince` grenzt inkrementell
+   * ein (`updated_at_from`); `null` zieht die vollständige Historie (Backfill).
+   * Jede Transaktion wird mit ihrer Quell-IBAN gestempelt.
+   */
+  private async fetchAndUpsert(
+    ibans: string[],
+    updatedSince: Date | null,
+  ): Promise<{ synced: number; total: number }> {
     let totalSynced = 0;
     let totalFetched = 0;
 
-    // Pro überwachtem Konto paginiert synchronisieren (gleiche Zugangsdaten).
-    // Jede Transaktion wird mit ihrer Quell-IBAN gestempelt.
     for (const iban of ibans) {
       let page = 1;
       let hasMore = true;
@@ -190,9 +196,8 @@ class QontoService {
           page: page.toString(),
         };
 
-        if (lastSync) {
-          const syncDate = new Date(lastSync.getTime() - 24 * 60 * 60 * 1000);
-          params.updated_at_from = syncDate.toISOString();
+        if (updatedSince) {
+          params.updated_at_from = updatedSince.toISOString();
         }
 
         const response = await this.apiRequest<QontoTransactionsResponse>("/transactions", params);
@@ -221,6 +226,47 @@ class QontoService {
     }
 
     return { synced: totalSynced, total: totalFetched };
+  }
+
+  async syncTransactions(): Promise<{ synced: number; total: number }> {
+    const creds = await this.getCredentials();
+    if (!creds) {
+      throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
+    }
+
+    const ibans = await this.getMonitoredIbans();
+    if (ibans.length === 0) {
+      throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
+    }
+
+    // getLastSyncTime bleibt global (ein Sync-Lauf über alle Konten).
+    const lastSync = await qontoStorage.getLastSyncTime();
+    const updatedSince = lastSync ? new Date(lastSync.getTime() - 24 * 60 * 60 * 1000) : null;
+
+    // Pro überwachtem Konto paginiert synchronisieren (gleiche Zugangsdaten).
+    return this.fetchAndUpsert(ibans, updatedSince);
+  }
+
+  /**
+   * Einmaliger Voll-Sync (Backfill) NUR der nachträglich ergänzten Zusatzkonten:
+   * zieht deren komplette completed-credit-Historie OHNE `updated_at_from`-Fenster,
+   * damit vor der Umstellung eingegangene (Fehl-)Überweisungen sicher erfasst und
+   * zuordenbar werden. Das primäre Konto wird ausgelassen (läuft bereits
+   * inkrementell). Upserts sind idempotent; die Auto-Matching-Logik bleibt unberührt.
+   */
+  async backfillTransactions(): Promise<{ synced: number; total: number; accounts: number }> {
+    const creds = await this.getCredentials();
+    if (!creds) {
+      throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
+    }
+
+    const ibans = await this.getAdditionalMonitoredIbans();
+    if (ibans.length === 0) {
+      return { synced: 0, total: 0, accounts: 0 };
+    }
+
+    const result = await this.fetchAndUpsert(ibans, null);
+    return { ...result, accounts: ibans.length };
   }
 
   async autoMatch(userId: number, ipAddress?: string): Promise<{ matched: number; skipped: number }> {
