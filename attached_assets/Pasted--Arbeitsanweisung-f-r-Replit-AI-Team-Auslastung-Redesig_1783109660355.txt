@@ -1,0 +1,110 @@
+# Arbeitsanweisung für Replit AI — Team-Auslastung, Redesign „1a Ampel-Liste"
+
+**Repo:** Care-Connect / Senioren Engel.
+**Was:** Die bestehende Team-Auslastung-Seite (Kapazitäts-/Zuteilungssicht) durch eine kompakte, ehrliche Entscheidungs-Liste ersetzen — mit korrigierter Kapazitätsrechnung.
+**Charakter:** Read-only. **Keine** Änderung an Lohn/Abrechnung. Vorgehen: read-only Inventur zuerst, dann additiv umbauen, bestehende Tokens/Muster nutzen.
+
+---
+
+## 1. Warum
+
+Die Seite beantwortet **eine** Frage: *„Wer ist überlastet, wer kann noch Kunden übernehmen?"* Das alte Design war richtig gemeint, hatte aber zwei Fehler: (a) die freie Kapazität war falsch berechnet (zählte Fahrt-/Bürozeit als „frei"), und es gab (b) einen „+0 h über"-Bug (Overage wurde nie berechnet). Diese Anweisung behebt beides und macht die Sicht ehrlich und ruhig lesbar.
+
+## 2. Rechenmodell — der Kern (verbindlich)
+
+Je Mitarbeiter:in liegen Monats-Ø-Werte vor: `soll` (Vertrags-Monatsstunden), `prod` (produktive Kundenzeit = HW + Alltagsbegleitung), `overhead` (Fahrt/Büro/Sonstiges), `sickVac` (Krank/Urlaub als Monatsschnitt), sowie Kundenzahlen `hv`/`v1`/`v2` (Hauptverantwortlich / Vertretung 1 / 2).
+
+```
+committed = prod + overhead                      // tatsächlich geleistete Arbeitszeit
+usedAll   = prod + overhead + sickVac            // inkl. Abwesenheit
+freeH     = max(0, soll − usedAll)               // ECHTE freie Vertragszeit
+over      = max(0, committed − soll)             // echte Überlast  (Fix des „+0 h"-Bugs)
+pct       = committed / soll * 100               // Auslastung = geleistete Gesamtarbeit / Soll
+perClientOwn = hv > 0 ? prodHV / hv : 3,85       // eigener Ø produktive Std je HV-Kunde
+perClient    = perClientOwn + REISEPUFFER        // + Fahrt/Rüstzeit je Zusatzkunde (Default 1,0 h)
+addClients   = floor(freeH / perClient)          // mögliche Zusatzkunden
+status = over > 0.05 ? 'over'
+       : freeH >= perClient ? 'free'
+       : 'limit'
+```
+
+**Was das gegenüber heute ändert (und warum es richtig ist):**
+- Heute: `freieStunden = soll − prod` → zählt Fahrt-/Bürozeit als frei ⇒ Kapazität systematisch zu hoch; `over` existiert gar nicht (daher „+0 h über").
+- Neu: Overhead **und** Krank/Urlaub werden abgezogen; freie Kapazität ist nur, was danach übrig bleibt; jeder Zusatzkunde kostet **produktive Zeit + Fahr-/Rüstzeit**.
+
+**Datenquelle im Repo (wiederverwenden, nicht neu bauen):**
+- Heutige Berechnung: `server/lib/team-workload.ts` (`computeSollIst`).
+- Die Produktiv/Overhead/Krank-Aufteilung existiert bereits: `server/storage/statistics/performance.ts` → `UtilizationCounts { productive, overhead, sickVac }`. Diese Aufteilung als Basis für `prod`/`overhead`/`sickVac` nutzen.
+
+**Fachvorgaben (verbindlich, nicht neu entscheiden):**
+- Kapazität/Zusatzkunden beziehen sich **nur auf Hauptverantwortlich (HV)** — ein neuer Kunde macht die Person zur HV.
+- `perClientOwn` ideal = produktive Std. der HV-Kunden ÷ `hv`. Liegt die produktive Zeit **nicht** nach Rolle vor: als **Näherung** `prod / (hv+v1+v2)` nehmen und im UI **als „Näherung" labeln**. Der globale Ø 3,85 h dient nur als Fallback/Referenz.
+- **Kein** zusätzlicher 75–80 %-Zielpuffer — der reale Overhead wird bereits konkret abgezogen, nicht doppelt kürzen.
+
+**Konfigurierbar / als Annahme dokumentieren:** `REISEPUFFER` (Default 1,0 h je Zusatzkunde) als **benannte Konstante** anlegen (nicht inline hardcoden), damit der Wert nachvollziehbar/anpassbar ist. Ideal später aus dem realen Overhead-Anteil ableitbar.
+
+## 3. Seitenaufbau (1a)
+
+```
+Header:  „Team-Auslastung" + Untertitel „Wer kann noch Kunden übernehmen? — Reine Lese-Ansicht · <Monat>"
+Kachel:  Berechnungsbasis (weiße Karte) → „~{perClientBasis} h Kundenarbeit · ~{REISEPUFFER} h Sonstiges · ~{Summe} h je Zusatzkunde"
+Summary: 3 Kacheln → [überlastet N] [am Limit N] [freie Kapazität N → X Kunden zuteilbar]
+Controls: Suche (Name) + Sortierung (Höchste Auslastung / Meiste freie Kapazität)
+Legende: Farb-Swatches der Balkensegmente
+Liste:   eine Zeile je Mitarbeiter:in, sortiert, aufklappbar (Progressive Disclosure)
+```
+
+**Zeile (collapsed), 4 Spalten:** `[ Name + Vertrags-Badges ] [ Stacked-Bar + Caption ] [ Verdikt ] [ ▸ ]`
+- Name-Spalte: Name; darunter Badges (`TEAMLEITUNG`, `SV-PFLICHTIG`, `MINIJOB`).
+- Verdikt-Spalte (rechtsbündig):
+  - `over` → `+{over} h` (rot), Sub „über Soll (inkl. Fahrt/Büro)"
+  - `limit` → „Am Limit" (amber), Sub „kein Puffer für neue Kunden"
+  - `free` → `{addClients} Kunde(n) frei` (grün), Sub „{freeH} h frei nach Overhead"
+
+**Zeile (expanded), Detailpanel:**
+- **Ø Stunden / Monat:** `{HW} h HW · {Allt} h Allt. · {overhead} h Sonstiges`
+- **Kunden (Rolle):** `{hv} HV · {v1} V1 · {v2} V2` — **mit Tooltip/Legende, was HV/V1/V2 bedeutet.**
+- **Ø je Kunde:** `{perClientOwn} h produktiv` (ggf. „Näherung")
+- **{Über Soll | Freie Kapazität}:** Verdikt-Wort (Label wechselt bei `over` → „Über Soll", sonst „Freie Kapazität")
+- **HV-Kundenliste:** Chips/Namen + Zeile „{hv} Hauptverantwortlich — zählt für die Kapazität"
+
+## 4. Stacked-Bar (zentrale Visualisierung)
+
+**Regel: Balkenlänge = Soll. Nur wer über Soll arbeitet, ragt darüber hinaus** — so entsteht kein leerer Raum, der fälschlich wie freie Kapazität aussieht.
+
+```
+scale = max(soll, usedAll)
+Segmente (Reihenfolge, Breite = h/scale):
+  Produktiv     Teal    #0f766e
+  Fahrt/Büro    Gold    #c99a3f
+  Krank/Urlaub  Grau    #c3c7cd
+  Frei          Hellgrün #9ad9bd   (nur wenn freeH > 0)
+Soll-Marker (dunkle 2px-Linie bei soll/scale): nur zeigen, wenn scale > soll
+Überlast-Overlay: halbtransparentes Rot rgba(192,57,43,.32) von soll bis committed
+```
+**Caption:** nicht über Soll → links `{committed} h geleistet`, rechts `Soll {soll} h`. Über Soll → **eine** rechtsbündige Zeile `{committed} h geleistet · Soll {soll} h` (kein zweites, überlappendes Label). **Farbe nie allein — immer mit Text.**
+
+## 5. Verhalten
+- Sortierung „Höchste Auslastung" (`pct` desc) | „Meiste freie Kapazität" (`addClients` desc).
+- Suche filtert Namen. Zeilenklick = auf/zu (Default: nichts offen, oder die überlasteste Person offen).
+- Read-only — keine Zuteil-Aktion in dieser Sicht.
+
+## 6. Design-Tokens (bestehender Care-Connect-Look)
+Font **Outfit** (400–700). Seiten-BG `#e9ddc8`, Karten `#fff`, Radius 16–22px, Schatten `0 1px 2px rgba(28,28,40,.05), 0 10px 24px rgba(28,28,40,.05)`. Text `#26303f` / muted `#8a8170` / Label-Gold `#9a8a64` / Teal `#0f766e`. Status rot `#c0392b`, amber `#c89020`, grün `#2f8f6b`. Balken-Track `#ece8de`.
+
+## 7. Definition of Done
+- [ ] `over = max(0, committed − soll)` wird berechnet und angezeigt (kein „+0 h über" mehr).
+- [ ] `pct = committed / soll` mit `committed = prod + overhead`; **der %-Wert ist als „Gesamtauslastung (inkl. Fahrt/Büro)" beschriftet — NICHT als „Kunden-Auslastung"** (sonst werden die höheren Werte falsch gelesen).
+- [ ] `freeH` zieht Overhead **und** Krank/Urlaub ab; `addClients` basiert auf `perClient = perClientOwn + REISEPUFFER`.
+- [ ] Pro-Kunde-Schnitt je Mitarbeiter (HV-basiert; Näherung `prod/(hv+v1+v2)` als „Näherung" gelabelt), nicht global 3,85.
+- [ ] `REISEPUFFER` als benannte, dokumentierte Konstante (Default 1,0 h), nicht inline hardcodiert.
+- [ ] Balkenlänge = Soll; Überlast ragt rot darüber; kein leerer „Frei"-Raum jenseits Soll.
+- [ ] Kapazität nur auf HV bezogen; HV/V1/V2 im Detail mit Tooltip/Legende erklärt.
+- [ ] Read-only; Lohn/Abrechnung unangetastet; `performance.ts`-Aufteilung wiederverwendet (kein Neubau).
+- [ ] Test: Overload-Fall (committed > soll) zeigt korrektes `over`; Frei-Fall zieht Overhead+Krank/Urlaub ab und `addClients` stimmt; Näherungs-Fallback greift, wenn produktive Zeit nicht rollen-aufgeschlüsselt ist.
+
+## 8. Bekannte, bewusst akzeptierte Eigenschaften (kein Bug)
+- **Kein Variabilitäts-Puffer:** wer bis `freeH ≈ 0` verplant ist, hat keine Reserve für schwerere Monate. `floor()` + `REISEPUFFER` geben etwas impliziten Puffer; im Betrieb beobachten, ob „free = 0"-Zuteilungen tragfähig bleiben.
+- **sickVac-Fenster-Effekt:** ein einmaliger langer Urlaub in den 3 Monaten hebt den sickVac-Schnitt → freie Kapazität wird konservativ **unter**zeichnet (sicher, nicht gefährlich).
+
+> Referenz-Prototyp: `Team-Auslastung.dc.html`, Option **1a**.
