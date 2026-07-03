@@ -1,0 +1,64 @@
+# Fix-Plan: CI-Run #85 (main rot) — alle Fehler
+
+**Run:** CI #85 „Task #1584: Zeiten-Tab unify look + Urlaub/Krankheit hour rows", Commit `e8ae2f3`, Branch **main** — Failure.
+**Analyse:** 02.07.2026 (GitHub Actions Logs, eingeloggt).
+**Übergreifend:** `main` ist rot (schon #84/#1582 scheiterte identisch; #86/#1587 läuft auf rotem main). Zwei Fehlerklassen: (A) Dependency-Hygiene (undici) — unabhängig vom Code, blockiert jeden Push; (B) Regressionen aus dem #1584-Change (Stunden/Anzeige).
+
+---
+
+## Fehler 1 — static-analysis: `undici`-Verwundbarkeiten (Dependency, nicht Code)
+
+**Log:** Schritt „Security audit (better-npm-audit, .nsprc allowlist)" → *5 vulnerabilities found. Node security advisories: 1121089, 1121191, 1121187, 1121244, 1121247* → exit 1. Alle in **`undici`** (u. a. GHSA-pr7r-676h-xcf6 *moderate* cross-user info disclosure via shared cache; GHSA-35p6-xmwp-9g52, GHSA-g8m3-5g58-fq7m *low*). Zusätzlich: *„1 of the excluded vulnerabilities did not match … GHSA-gv7w-rqvm-qjhr. It can be removed from the .nsprc file."*
+
+**Ursache:** neue undici-Advisories, kein Code-Bezug. Deshalb scheitern #84 und #85 identisch.
+
+**Fix (bevorzugt = patchen, nicht unterdrücken):**
+1. `npm ls undici` prüfen (transitiv, woher). In `package.json` ein **`overrides`** (npm) auf eine **gepatchte undici-Version** setzen, die alle 5 Advisories schließt; `npm install`.
+2. `.nsprc` aufräumen: den **veralteten Eintrag `GHSA-gv7w-rqvm-qjhr` entfernen**.
+3. `better-npm-audit` lokal laufen lassen → 0 offene, dann grün.
+4. Nur falls (unwahrscheinlich) keine gepatchte undici verfügbar ist: die *low*-Advisories befristet allowlisten — die *moderate* cross-user-Disclosure **nicht** unterdrücken.
+
+---
+
+## Fehler 2 — tests: 22 Dateien / 39 Tests + 2 Snapshots rot
+
+**Log-Summary:** `Test Files 22 failed | 377 passed` · `Tests 39 failed | 2864 passed` · `Snapshots 2 failed` → exit 1.
+
+**Cluster A — Architektur-Guard `tests/architecture/soft-delete-coverage.test.ts` (3 rot):**
+- „Storage-Module dürfen kein `db.select().from(<soft-deletable-Tabelle>)` direkt nutzen"
+- 2× Snapshot „pro Routen-/Storage-Datei nur Repo-vermittelte Reads registriert" (`repoUsageSnapshot(STORAGE_ROOT)`)
+
+→ Der #1584-Change hat einen **direkten Select auf eine soft-deletable Tabelle in einem Storage-Modul** eingeführt (verletzt die Soft-Delete-Disziplin — genau das Thema des Drafts #1550).
+**Fix:** den direkten `db.select().from(...)` durch den **Repo-vermittelten Read** ersetzen (Muster, das der Guard erzwingt). Erst danach die 2 Registrierungs-Snapshots aktualisieren — **nur** wenn der neue Read-Satz beabsichtigt ist, nicht blind `-u`.
+
+**Cluster B — breite Stunden-Assertions (Rest der 39):**
+→ Der Urlaub/Krankheit-Stunden-Change hat viele erwartete Stundenwerte verschoben.
+**Fix:** Vitest lokal laufen, die Failures **triagen** in:
+- (a) **echte Regression** (Stunden-Logik falsch) → **Code** fixen;
+- (b) **beabsichtigter neuer Wert** → Test-Erwartung/Snapshot **bewusst** anpassen.
+Nicht pauschal Snapshots neu schreiben — jede Änderung begründen.
+
+---
+
+## Fehler 3 — e2e-smoke: 2 Round-Trip-Smokes rot
+
+**Log:** `2 failed` in `e2e/smoke/edit-persistence.spec.ts`:
+- `:443` — „Termin km 7,3 → 12,7 — Termin-Detail, Budget-Ledger und Rechnung zeigen identisch **'12,70 km'**"
+- `:742` — „Termin Hauswirtschaft 45 → 72 Min — … zeigen identisch **'1 Std. 12 Min.'**"
+(34 passed, 1 skipped.)
+
+**Ursache:** direkte Folge der #1584-Anzeige-Änderung — das **Termin-Detail** rendert km/Dauer nicht mehr **im selben kanonischen Format** wie Budget-Ledger und Rechnung, deshalb schlägt die Konsistenz-Assertion fehl. (Betrifft die in #1584 angefassten Anzeige-Surfaces, u. a. `appointment-time-services-card.tsx` / `day-detail-panel.tsx` / Termin-Detail.)
+
+**Fix:** die Termin-Detail-Formatierung von km (`'12,70 km'`) und Dauer (`'1 Std. 12 Min.'`) wieder an das **gemeinsame Format** angleichen, das Budget-Ledger und Rechnung nutzen — idealerweise denselben Formatter/dieselbe Helper-Funktion teilen, nicht parallel formatieren. Danach passt der Round-Trip-Smoke wieder.
+
+---
+
+## Reihenfolge & Prozess
+
+1. **undici-Fix zuerst** (entsperrt static-analysis für alle Runs).
+2. **Soft-Delete-Verletzung** beheben (Repo-Read) + Snapshots bewusst aktualisieren.
+3. **39 Stunden-Assertions triagen** (Code-Fix vs. bewusste Erwartungs-Anpassung).
+4. **Termin-Detail-Formatter** angleichen → e2e grün.
+5. **CI komplett grün** verifizieren, **bevor** weitere Tasks auf `main` gemergt werden.
+
+**Prozess-Hinweis:** #1582 und #1584 sind auf **rotem main** gelandet, #1587 baut darauf auf. Empfehlung: main erst grün bekommen und künftig **nicht auf rot mergen** (Branch-Protection / „required checks" erwägen), sonst stapeln sich Regressionen.
