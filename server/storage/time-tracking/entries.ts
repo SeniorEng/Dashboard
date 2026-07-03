@@ -150,6 +150,64 @@ export function collectVacationWorkdays(startDate: string, endDate: string): str
   return collectVacationRangeBreakdown(startDate, endDate).workdays;
 }
 
+export interface AbsenceBlock {
+  typ: "urlaub" | "krankheit";
+  von: string;
+  bis: string;
+  tage: number;
+}
+
+function addDaysISO(dateStr: string, delta: number): string {
+  const d = parseLocalDate(dateStr);
+  d.setDate(d.getDate() + delta);
+  return formatDateISO(d);
+}
+
+/**
+ * Rekonstruiert zusammenhängende Abwesenheitsblöcke (Von–Bis) aus den einzelnen
+ * Tages-Einträgen (`employee_time_entries`) eines Mitarbeiters. Verwendet
+ * DIESELBEN Datums-/Feiertags-Helfer wie die Eingabe-Expansion (Urlaub
+ * überspringt Wochenenden UND Feiertage, Krankheit nur Wochenenden), damit
+ * Anzeige und Erfassung nie driften.
+ *
+ * Zwei aufeinanderfolgende erfasste Tage gehören zum selben Block, wenn zwischen
+ * ihnen KEIN „zählbarer" (nicht übersprungener) Tag liegt. Liegt ein zählbarer,
+ * aber nicht erfasster Tag dazwischen (echte Lücke = Arbeitstag), beginnt ein
+ * neuer Block. Damit gilt: Σ `tage` je Typ === Anzahl erfasster Tage je Typ
+ * (dieselbe Zählung wie `tageUrlaub`/`tageKrankheit` in `payroll-hours`).
+ */
+export function reconstructAbsenceBlocks(
+  typ: "urlaub" | "krankheit",
+  dates: string[],
+): AbsenceBlock[] {
+  const sorted = Array.from(new Set(dates)).sort();
+  const blocks: AbsenceBlock[] = [];
+  let cur: AbsenceBlock | null = null;
+
+  const countedDaysBetween = (a: string, b: string): number => {
+    const start = addDaysISO(a, 1);
+    const end = addDaysISO(b, -1);
+    if (start > end) return 0;
+    return typ === "urlaub"
+      ? collectVacationWorkdays(start, end).length
+      : collectWeekdayDates(start, end).length;
+  };
+
+  for (const d of sorted) {
+    if (!cur) {
+      cur = { typ, von: d, bis: d, tage: 1 };
+    } else if (countedDaysBetween(cur.bis, d) === 0) {
+      cur.bis = d;
+      cur.tage += 1;
+    } else {
+      blocks.push(cur);
+      cur = { typ, von: d, bis: d, tage: 1 };
+    }
+  }
+  if (cur) blocks.push(cur);
+  return blocks;
+}
+
 /**
  * Erzeugt für jedes Datum aus `dates` einen Zeiteintrag mit den gleichen
  * Basisdaten. Verwendet eine Transaktion, damit die Mehrtages-Anlage

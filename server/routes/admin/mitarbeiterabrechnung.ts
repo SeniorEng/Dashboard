@@ -15,7 +15,7 @@ import { requireWageDataAccess } from "../../middleware/auth";
 import { employeeMonthClosings } from "@shared/schema/system";
 import { completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw, documentedSqlRaw } from "../../lib/appointment-signed";
 import { upsertHoursAccountSchema, HOURS_ACCOUNT_CATEGORIES } from "@shared/schema/time-tracking";
-import { getEmployeePayrollRows, type PayrollEmployeeRow } from "../../storage/time-tracking/payroll-hours";
+import { getEmployeePayrollRows, getMonthlyAbsenceBlocks, type PayrollEmployeeRow } from "../../storage/time-tracking/payroll-hours";
 import { computeAccountsForMonth, upsertHoursAccount, OpeningBalanceLockedError, type AccountCell } from "../../storage/time-tracking/payroll-accounts";
 import { resolveAppointmentPartyName } from "@shared/domain/appointment-party-name";
 
@@ -45,8 +45,11 @@ function prevPeriod(year: number, month: number): { year: number; month: number 
   return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
 }
 
+// Task #1616 — „Erfasste Stunden" = HW + AB (deckungsgleich mit den beiden
+// Tabellenspalten). Feiertage/Urlaub/Krankheit werden separat geführt und
+// zählen NICHT zur Erfasst-Summe.
 function sumHours(rows: PayrollEmployeeRow[]): number {
-  const total = rows.reduce((s, r) => s + r.erfasst.hw + r.erfasst.ab + r.erfasst.feiertage, 0);
+  const total = rows.reduce((s, r) => s + r.erfasst.hw + r.erfasst.ab, 0);
   return Math.round(total * 100) / 100;
 }
 /** Abrechenbare (produktive) Stunden = rohe Hauswirtschaft + Alltagsbegleitung. */
@@ -88,6 +91,8 @@ router.get("/mitarbeiterabrechnung", requireWageDataAccess, asyncHandler("Mitarb
   const prev = prevPeriod(year, month);
   const { rows: prevRows } = await getEmployeePayrollRows(prev.year, prev.month);
 
+  const absenceBlocks = await getMonthlyAbsenceBlocks(year, month, rows.map((r) => r.employeeId));
+
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
   let stundenkontoSaldo = 0;
@@ -124,6 +129,7 @@ router.get("/mitarbeiterabrechnung", requireWageDataAccess, asyncHandler("Mitarb
         employmentType: r.employmentType,
         isEuRentner: r.isEuRentner,
         erfasst: r.erfasst,
+        abwesenheiten: absenceBlocks[r.employeeId] ?? [],
         saldo,
         stundenkontoSaldo: stundenkonto,
         kilometerSaldo: saldo.kilometer,

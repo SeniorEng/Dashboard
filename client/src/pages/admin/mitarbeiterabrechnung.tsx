@@ -81,6 +81,12 @@ interface MinijobPay {
   limitCents: number;
   kappung: boolean;
 }
+interface AbsenceBlock {
+  typ: "urlaub" | "krankheit";
+  von: string;
+  bis: string;
+  tage: number;
+}
 interface OverviewRow {
   employeeId: number;
   vorname: string;
@@ -88,6 +94,7 @@ interface OverviewRow {
   employmentType: string;
   isEuRentner: boolean;
   erfasst: ErfasstBucket;
+  abwesenheiten: AbsenceBlock[];
   saldo: SaldoBucket;
   stundenkontoSaldo: number;
   kilometerSaldo: number;
@@ -199,6 +206,13 @@ function fmtHours(n: number): string {
 }
 function fmtKm(n: number): string {
   return `${n.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`;
+}
+// Task #1616 — kurzes Datum „TT.MM." für Abwesenheits-Blöcke (ISO-String
+// wird nicht als lokale Date-Instanz geparst, um Zeitzonen-Verschiebung zu
+// vermeiden).
+function fmtDateShort(iso: string): string {
+  const [, m, d] = iso.slice(0, 10).split("-");
+  return `${d}.${m}.`;
 }
 function fmtMinutesAsHours(min: number): string {
   return fmtHours(Math.round((min / 60) * 100) / 100);
@@ -390,12 +404,23 @@ export default function Mitarbeiterabrechnung() {
                       <thead>
                         <tr className="border-b text-left text-gray-500">
                           <th className="px-4 py-2 font-medium">Mitarbeiter</th>
-                          <th className="px-4 py-2 font-medium text-right">Erfasst</th>
+                          <th
+                            className="px-4 py-2 font-medium text-right"
+                            title="HW = Hauswirtschaft + Erstberatung + Anfahrtszeit + Leerfahrten + Sonstiges (ohne Urlaub/Krankheit/Feiertage)."
+                          >
+                            HW
+                          </th>
+                          <th
+                            className="px-4 py-2 font-medium text-right"
+                            title="AB = Alltagsbegleitung."
+                          >
+                            AB
+                          </th>
                           <th className="px-4 py-2 font-medium text-right">Kilometer</th>
                           <th className="px-4 py-2 font-medium text-right">Stundenkonto</th>
                           <th
                             className="px-4 py-2 font-medium text-right"
-                            title="Dokumentierte Termine ohne Unterschrift. Diese Stunden zählen zur Lohnzeit und sind bereits in „Erfasst“ enthalten – sie sind nur noch nicht gegenüber Kunde/Pflegekasse abrechenbar, weil die Unterschrift fehlt."
+                            title="Dokumentierte Termine ohne Unterschrift. Diese Stunden zählen zur Lohnzeit und sind bereits in „HW“/„AB“ enthalten – sie sind nur noch nicht gegenüber Kunde/Pflegekasse abrechenbar, weil die Unterschrift fehlt."
                           >
                             Noch nicht abrechenbar
                           </th>
@@ -405,7 +430,6 @@ export default function Mitarbeiterabrechnung() {
                       </thead>
                       <tbody>
                         {data.rows.map((r) => {
-                          const erfasstStd = Math.round((r.erfasst.hw + r.erfasst.ab + r.erfasst.feiertage) * 100) / 100;
                           const name = `${r.nachname}, ${r.vorname}`;
                           return (
                             <tr
@@ -416,8 +440,29 @@ export default function Mitarbeiterabrechnung() {
                               <td className="px-4 py-3">
                                 <div className="font-medium text-gray-900" data-testid={`text-name-${r.employeeId}`}>{name}</div>
                                 <div className="text-xs text-gray-500">{employmentLabel(r.employmentType, r.isEuRentner)}</div>
+                                {r.abwesenheiten.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1" data-testid={`abwesenheiten-${r.employeeId}`}>
+                                    {r.abwesenheiten.map((b, i) => {
+                                      const badge = b.typ === "urlaub" ? colors.badge.blue : colors.badge.orange;
+                                      const label = b.typ === "urlaub" ? "Urlaub" : "Krankheit";
+                                      const range = b.von === b.bis
+                                        ? fmtDateShort(b.von)
+                                        : `${fmtDateShort(b.von)}–${fmtDateShort(b.bis)}`;
+                                      return (
+                                        <span
+                                          key={`${b.typ}-${b.von}-${i}`}
+                                          className={`text-xs px-1.5 py-0.5 rounded ${badge.bg} ${badge.text}`}
+                                          data-testid={`badge-absence-${r.employeeId}-${i}`}
+                                        >
+                                          {label} {range} ({b.tage} T)
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </td>
-                              <td className="px-4 py-3 text-right" data-testid={`text-erfasst-${r.employeeId}`}>{fmtHours(erfasstStd)}</td>
+                              <td className="px-4 py-3 text-right" data-testid={`text-hw-${r.employeeId}`}>{fmtHours(r.erfasst.hw)}</td>
+                              <td className="px-4 py-3 text-right" data-testid={`text-ab-${r.employeeId}`}>{fmtHours(r.erfasst.ab)}</td>
                               <td className="px-4 py-3 text-right" data-testid={`text-km-${r.employeeId}`}>{fmtKm(r.erfasst.kilometer)}</td>
                               <td className="px-4 py-3 text-right" data-testid={`text-saldo-${r.employeeId}`}>
                                 <span className={r.stundenkontoSaldo !== 0 ? "font-medium text-amber-700" : "text-gray-500"}>
@@ -915,13 +960,20 @@ function DrillAufschluesselung({ row }: { row: DrillRow | null }) {
   if (!row) {
     return <p className="text-sm text-gray-500 pt-2" data-testid="text-no-breakdown">Keine Daten.</p>;
   }
-  const lines: { label: string; value: string }[] = [
+  // Task #1616 — Stunden gruppiert nach den beiden Lexware-Töpfen HW und AB;
+  // Feiertage/Urlaub/Krankheit stehen separat (nicht in HW/AB). Die Zwischen-
+  // summen sind deckungsgleich mit den Übersichts-Spalten (row.erfasst.hw/.ab).
+  const hwLines: { label: string; value: string }[] = [
     { label: "Hauswirtschaft", value: fmtHours(row.stundenHauswirtschaft) },
-    { label: "Alltagsbegleitung", value: fmtHours(row.stundenAlltagsbegleitung) },
     { label: "Erstberatung", value: fmtHours(row.stundenErstberatung) },
     { label: "Anfahrtszeit", value: fmtHours(row.stundenAnfahrt) },
     { label: "Leerfahrten", value: fmtHours(row.stundenLeerfahrten) },
     { label: "Sonstiges (Büro/Vertrieb)", value: fmtHours(row.stundenSonstiges) },
+  ];
+  const abLines: { label: string; value: string }[] = [
+    { label: "Alltagsbegleitung", value: fmtHours(row.stundenAlltagsbegleitung) },
+  ];
+  const separatLines: { label: string; value: string }[] = [
     { label: "Feiertage", value: fmtHours(row.stundenFeiertage) },
     { label: `Urlaub (${row.tageUrlaub} Tage)`, value: fmtHours(row.urlaubStunden) },
     { label: `Krankheit (${row.tageKrankheit} Tage)`, value: fmtHours(row.krankheitStunden) },
@@ -939,7 +991,38 @@ function DrillAufschluesselung({ row }: { row: DrillRow | null }) {
         <div>
           <h3 className="text-sm font-medium text-gray-900 mb-2">Stunden</h3>
           <dl className="text-sm">
-            {lines.map((l) => (
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 pb-1">
+              HW · Hauswirtschaft &amp; Nebenzeiten
+            </div>
+            {hwLines.map((l) => (
+              <div key={l.label} className="flex justify-between border-b py-1" data-testid={`breakdown-${l.label}`}>
+                <dt className="text-gray-600">{l.label}</dt>
+                <dd className="tabular-nums">{l.value}</dd>
+              </div>
+            ))}
+            <div className="flex justify-between border-b-2 border-gray-300 py-1 font-medium text-gray-900" data-testid="breakdown-subtotal-hw">
+              <dt>Summe HW</dt>
+              <dd className="tabular-nums">{fmtHours(row.erfasst.hw)}</dd>
+            </div>
+
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 pt-3 pb-1">
+              AB · Alltagsbegleitung
+            </div>
+            {abLines.map((l) => (
+              <div key={l.label} className="flex justify-between border-b py-1" data-testid={`breakdown-${l.label}`}>
+                <dt className="text-gray-600">{l.label}</dt>
+                <dd className="tabular-nums">{l.value}</dd>
+              </div>
+            ))}
+            <div className="flex justify-between border-b-2 border-gray-300 py-1 font-medium text-gray-900" data-testid="breakdown-subtotal-ab">
+              <dt>Summe AB</dt>
+              <dd className="tabular-nums">{fmtHours(row.erfasst.ab)}</dd>
+            </div>
+
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 pt-3 pb-1">
+              Separat · nicht in HW/AB
+            </div>
+            {separatLines.map((l) => (
               <div key={l.label} className="flex justify-between border-b py-1 last:border-0" data-testid={`breakdown-${l.label}`}>
                 <dt className="text-gray-600">{l.label}</dt>
                 <dd className="tabular-nums">{l.value}</dd>

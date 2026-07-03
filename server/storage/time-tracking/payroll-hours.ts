@@ -17,6 +17,7 @@ import { services } from "@shared/schema/services";
 import { employeeTimeEntries } from "@shared/schema/time-tracking";
 import { and, gte, lte, sql, inArray, eq, isNull } from "drizzle-orm";
 import { employeeTimeEntriesRepo } from "../../repos";
+import { reconstructAbsenceBlocks, type AbsenceBlock } from "./entries";
 import { getHolidays } from "@shared/utils/holidays";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { documentedSqlRaw, completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw } from "../../lib/appointment-signed";
@@ -488,9 +489,12 @@ function rowFromBucket(
   const km = kmAnfahrt + kmKunden + kmSonstige + kmLeer;
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  // Task #167: Leerfahrten-Stunden fließen in die "Erfasst"-Summe ein, damit
-  // die Kategorie-Taxonomie mit der Mitarbeiter-Sicht übereinstimmt.
-  const hwErfasst = r2(stundenHW + stundenSonst + stundenErst + stundenAnf + stundenLeer + urlaubStunden + krankheitStunden);
+  // Task #167: Leerfahrten-Stunden fließen in die "HW"-Summe ein, damit die
+  // Kategorie-Taxonomie mit der Mitarbeiter-Sicht übereinstimmt.
+  // Task #1616: HW = reine Arbeitsstunden (Hauswirtschaft + Erstberatung +
+  // Anfahrtszeit + Leerfahrten + Sonstiges) OHNE Urlaub/Krankheit/Feiertage.
+  // Urlaub/Krankheit werden ausschließlich als Tage/Stunden separat geführt.
+  const hwErfasst = r2(stundenHW + stundenSonst + stundenErst + stundenAnf + stundenLeer);
 
   const hasActivity =
     raw.hwMin > 0 || raw.abMin > 0 || raw.erstMin > 0 || raw.anfMin > 0 || raw.sonstMin > 0 ||
@@ -560,6 +564,56 @@ export async function getMonthlyCategoryErfasst(
     }
   }
   return { byEmployeeMonth, employees: ctx.employees };
+}
+
+/**
+ * Task #1616 — Abwesenheits-Blöcke (Urlaub/Krankheit) je Mitarbeiter für den
+ * gewählten Monat. Rekonstruiert zusammenhängende Von–Bis-Blöcke aus den
+ * einzelnen Tages-Einträgen mit denselben Datums-/Feiertags-Helfern wie die
+ * Eingabe-Expansion. Wird im Übersichts-Payload je Zeile mitgeliefert.
+ */
+export async function getMonthlyAbsenceBlocks(
+  year: number,
+  month: number,
+  employeeIds: number[],
+): Promise<Record<number, AbsenceBlock[]>> {
+  const result: Record<number, AbsenceBlock[]> = {};
+  if (employeeIds.length === 0) return result;
+
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+
+  const rows = await employeeTimeEntriesRepo
+    .selectColumnsFrom({
+      userId: employeeTimeEntries.userId,
+      entryType: employeeTimeEntries.entryType,
+      entryDate: employeeTimeEntries.entryDate,
+    })
+    .where(
+      and(
+        inArray(employeeTimeEntries.userId, employeeIds),
+        gte(employeeTimeEntries.entryDate, startDate),
+        lte(employeeTimeEntries.entryDate, endDate),
+        employeeTimeEntriesRepo.activeOnly(),
+      ),
+    );
+
+  const byEmp: Record<number, { urlaub: string[]; krankheit: string[] }> = {};
+  for (const r of rows) {
+    if (r.entryType !== "urlaub" && r.entryType !== "krankheit") continue;
+    const e = (byEmp[r.userId] ??= { urlaub: [], krankheit: [] });
+    e[r.entryType].push(r.entryDate.slice(0, 10));
+  }
+
+  for (const [empId, sets] of Object.entries(byEmp)) {
+    const blocks = [
+      ...reconstructAbsenceBlocks("urlaub", sets.urlaub),
+      ...reconstructAbsenceBlocks("krankheit", sets.krankheit),
+    ].sort((a, b) => a.von.localeCompare(b.von));
+    if (blocks.length > 0) result[Number(empId)] = blocks;
+  }
+  return result;
 }
 
 /** Volle Zeilen für den gewählten Monat (Übersicht + Aufschlüsselung). */
