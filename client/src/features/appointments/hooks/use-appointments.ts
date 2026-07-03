@@ -105,6 +105,29 @@ export function useAppointment(id: number) {
   });
 }
 
+/**
+ * Task #1619 — Zwei-Kräfte-Einsatz (Co-Visit): liefert die Partner-Legs eines
+ * Termins (gleiche `coVisitGroupId`, anderer Termin) desselben Tages. Wird
+ * genutzt, um Planer VOR dem Absagen/Löschen zu warnen, dass die Aktion auch
+ * die zweite Pflegekraft betrifft (Backend kaskadiert die Absage/Löschung).
+ * Bewusst OHNE viewAsEmployee-Filter, damit der Partner-Leg (andere Kraft)
+ * sichtbar bleibt.
+ */
+export function useCoVisitPartners(appointment: AppointmentWithCustomer | undefined) {
+  const coVisitGroupId = appointment?.coVisitGroupId ?? null;
+  const date = appointment?.date;
+  const currentId = appointment?.id;
+  return useQuery({
+    queryKey: [QUERY_KEY, "co-visit-partners", coVisitGroupId, currentId],
+    queryFn: async () => {
+      const list = await fetchAppointments(date);
+      return list.filter((a) => a.coVisitGroupId === coVisitGroupId && a.id !== currentId);
+    },
+    enabled: !!coVisitGroupId && !!date,
+    staleTime: 30000,
+  });
+}
+
 export function useDeleteAppointment() {
   const queryClient = useQueryClient();
   const { toast } = useToast();

@@ -8,7 +8,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { iconSize } from "@/design-system";
-import { Loader2, Repeat } from "lucide-react";
+import { Loader2, Repeat, Users } from "lucide-react";
 
 type Mode = "single" | "this_and_future" | "all_future";
 
@@ -18,9 +18,25 @@ interface Props {
   isCompleted: boolean;
   isPending: boolean;
   onChoose: (mode: Mode) => void;
+  /**
+   * Task #1619 — true, wenn der Termin Teil eines Zwei-Kräfte-Einsatzes ist.
+   * Dann wird gewarnt, dass die Absage auch die zweite Kraft betrifft (das
+   * Backend kaskadiert die Absage auf den Partner-Leg).
+   */
+  isCoVisit?: boolean;
+  /** Namen der Partner-Pflegekräfte (andere Legs) für die Warnung. */
+  coVisitPartnerNames?: string[];
 }
 
-export function AppointmentSeriesDeleteDialog({ open, onOpenChange, isCompleted, isPending, onChoose }: Props) {
+export function AppointmentSeriesDeleteDialog({
+  open,
+  onOpenChange,
+  isCompleted,
+  isPending,
+  onChoose,
+  isCoVisit = false,
+  coVisitPartnerNames = [],
+}: Props) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="max-w-md">
@@ -40,6 +56,21 @@ export function AppointmentSeriesDeleteDialog({ open, onOpenChange, isCompleted,
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {isCoVisit && (
+          <div
+            className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
+            data-testid="warning-co-visit-series-cancel"
+          >
+            <Users className={`${iconSize.sm} text-amber-600 shrink-0 mt-0.5`} />
+            <p className="text-sm text-amber-800">
+              Dieser Termin ist Teil eines Zwei-Kräfte-Einsatzes — die Absage betrifft auch die zweite Kraft
+              {coVisitPartnerNames.length > 0 ? (
+                <> (<strong>{coVisitPartnerNames.join(", ")}</strong>)</>
+              ) : null}
+              . Der Partner-Termin wird ebenfalls abgesagt.
+            </p>
+          </div>
+        )}
         <div className="space-y-3 py-2">
           <button
             onClick={() => onChoose("single")}

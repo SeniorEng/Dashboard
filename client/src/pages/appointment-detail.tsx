@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment, useAppointmentBudgetFit } from "@/features/appointments";
-import { useDeleteAppointment } from "@/features/appointments/hooks";
+import { useDeleteAppointment, useCoVisitPartners } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   FileText, ChevronLeft, Loader2,
-  Pencil, Trash2, AlertTriangle, RotateCcw, Copy, Repeat, ArrowRight,
+  Pencil, Trash2, AlertTriangle, RotateCcw, Copy, Repeat, ArrowRight, Users,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
@@ -95,6 +95,15 @@ export default function AppointmentDetail() {
   // verfügbare §45b-Kontingent? Map enthält nur §45b-aktive Kunden.
   const { data: budgetFit } = useAppointmentBudgetFit(appointment?.customerId ?? null);
   const budgetOverrun = budgetFit?.get(id)?.fitsInMonthlyBudget === false;
+
+  // Task #1619 — Zwei-Kräfte-Einsatz: Partner-Legs (andere Pflegekraft) laden,
+  // um vor dem Löschen/Absagen zu warnen. Das Backend kaskadiert die Löschung
+  // auf den Partner-Leg; der Planer soll das VOR dem Bestätigen wissen.
+  const { data: coVisitPartners } = useCoVisitPartners(appointment);
+  const isCoVisit = !!appointment?.coVisitGroupId;
+  const coVisitPartnerNames = (coVisitPartners ?? [])
+    .map((p) => p.assignedEmployeeName)
+    .filter((n): n is string => !!n);
 
   const seriesCancelMutation = useMutation({
     mutationFn: async (data: { mode: "single" | "this_and_future" | "all_future" }) => {
@@ -442,6 +451,21 @@ export default function AppointmentDetail() {
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {isCoVisit && (
+            <div
+              className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
+              data-testid="warning-co-visit-delete"
+            >
+              <Users className={`${iconSize.sm} text-amber-600 shrink-0 mt-0.5`} />
+              <p className="text-sm text-amber-800">
+                Dieser Termin ist Teil eines Zwei-Kräfte-Einsatzes — das Löschen betrifft auch die zweite Kraft
+                {coVisitPartnerNames.length > 0 ? (
+                  <> (<strong>{coVisitPartnerNames.join(", ")}</strong>)</>
+                ) : null}
+                . Der Partner-Termin wird ebenfalls entfernt.
+              </p>
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Abbrechen</AlertDialogCancel>
             <AlertDialogAction
@@ -484,6 +508,8 @@ export default function AppointmentDetail() {
         isCompleted={appointment?.status === "completed"}
         isPending={seriesCancelMutation.isPending}
         onChoose={(mode) => seriesCancelMutation.mutate({ mode })}
+        isCoVisit={isCoVisit}
+        coVisitPartnerNames={coVisitPartnerNames}
       />
     </Layout>
   );
