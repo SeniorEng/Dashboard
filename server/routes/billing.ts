@@ -2521,38 +2521,43 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
 
   type PreviewInvoice = Awaited<ReturnType<typeof storage.getInvoices>>[number];
   const hasIds = !!invoiceIds && invoiceIds.length > 0;
-  let drafts: PreviewInvoice[];
+  let targets: PreviewInvoice[];
   if (hasIds) {
-    // Auswahl-basierter Druck: genau die übergebenen Rechnungen, gefiltert auf
-    // druckbare Entwürfe (kein Storno) — der Bündel-Druck erzeugt nur Entwürfe.
+    // Task #1631 — Auswahl-basierter Druck: genau die übergebenen Rechnungen.
+    // ANDERS als der Monats-Sammeldruck ist die Auswahl NICHT auf Entwürfe
+    // beschränkt: auch bereits versendete/bezahlte Rechnungen dürfen als
+    // read-only Nachdruck-/Archiv-Bündel gedruckt werden (kein Statuswechsel,
+    // kein Re-Seal der versiegelten Originale — siehe Phase 1 unten). Reine
+    // Stornorechnungen bleiben ausgeschlossen (wie in allen Bündel-Routen).
     const uniqueIds = Array.from(new Set(invoiceIds!));
     const loaded = await Promise.all(uniqueIds.map((id) => storage.getInvoice(id)));
-    drafts = loaded
+    targets = loaded
       .filter((inv): inv is PreviewInvoice => inv !== undefined && inv !== null)
-      .filter(inv => inv.status === "entwurf" && inv.invoiceType !== "stornorechnung")
+      .filter(inv => inv.invoiceType !== "stornorechnung")
       .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
   } else {
+    // Monats-Sammeldruck (ohne Auswahl): weiterhin nur Entwürfe des Monats.
     const allDrafts = await storage.getInvoices({
       year: billingYear,
       month: billingMonth,
       status: "entwurf",
       insuranceProviderId,
     });
-    drafts = allDrafts
+    targets = allDrafts
       .filter(inv => inv.invoiceType !== "stornorechnung")
       .sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber));
   }
 
-  if (drafts.length === 0) {
+  if (targets.length === 0) {
     throw notFound(
       hasIds
-        ? "Keine druckbaren Entwurfs-Rechnungen in der Auswahl gefunden."
+        ? "Keine druckbaren Rechnungen in der Auswahl gefunden."
         : `Keine Entwurfs-Rechnungen für ${String(billingMonth).padStart(2, "0")}/${billingYear} gefunden.`,
     );
   }
 
   // Krankenkassen-Zuordnung je Kunde (für groupByPayer + Dateinamen).
-  const customerIds = Array.from(new Set(drafts.map(d => d.customerId)));
+  const customerIds = Array.from(new Set(targets.map(d => d.customerId)));
   const payerRows = await db.select({
     customerId: customerInsuranceHistory.customerId,
     providerId: insuranceProviders.id,
@@ -2587,7 +2592,12 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
   };
   const rendered: RenderedPreview[] = [];
   const failInvoicePdfIds = readTestFailInvoicePdfIds(req);
-  for (const inv of drafts) {
+  // Task #1631 — versendete/bezahlte Rechnungen liefern read-only die
+  // versiegelten Bytes bzw. bei kundenadressierten (gemergten) Rechnungen einen
+  // frischen invoice-only Re-Render (identisch zum /lexware-export-Muster);
+  // dafür werden die Company-Settings einmalig geladen. Kein Re-Seal.
+  const companySettings = await getCachedCompanySettings();
+  for (const inv of targets) {
     try {
       if (failInvoicePdfIds.has(inv.id)) {
         throw classifyPdfRenderError(
@@ -2595,34 +2605,87 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
           `Rechnungs-PDF ${inv.invoiceNumber}`,
         );
       }
-      let invoicePdf = await loadInvoicePdfFromStorage(inv);
-      let lnPdf = includeLeistungsnachweise ? await loadLeistungsnachweisPdfFromStorage(inv) : null;
-      const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
-      let persistError: unknown = null;
-      if (!invoicePdf || (includeLeistungsnachweise && !lnPdf && isPflegekasse)) {
-        try {
-          await persistInvoicePdf(inv.id);
-        } catch (err) {
-          persistError = err;
-          console.error(`[billing/bulk-print-preview] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
-        }
-        const refreshed = await storage.getInvoice(inv.id);
-        if (refreshed) {
-          invoicePdf = await loadInvoicePdfFromStorage(refreshed) ?? invoicePdf;
-          if (includeLeistungsnachweise) {
-            lnPdf = await loadLeistungsnachweisPdfFromStorage(refreshed) ?? lnPdf;
+      const isDraft = inv.status === "entwurf";
+      let invoicePdf: Buffer | null;
+      let lnPdf: Buffer | null = null;
+      let appendLn: boolean;
+      if (isDraft) {
+        // Entwürfe: bisheriges Verhalten — fehlende PDFs werden persistiert
+        // und der separat gecachte LN nur angehängt, wenn er nicht bereits im
+        // Rechnungs-PDF steckt (shouldAppendStandaloneLeistungsnachweis).
+        invoicePdf = await loadInvoicePdfFromStorage(inv);
+        lnPdf = includeLeistungsnachweise ? await loadLeistungsnachweisPdfFromStorage(inv) : null;
+        const isPflegekasse = inv.billingType === "pflegekasse_gesetzlich" || inv.billingType === "pflegekasse_privat";
+        let persistError: unknown = null;
+        if (!invoicePdf || (includeLeistungsnachweise && !lnPdf && isPflegekasse)) {
+          try {
+            await persistInvoicePdf(inv.id);
+          } catch (err) {
+            persistError = err;
+            console.error(`[billing/bulk-print-preview] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
+          }
+          const refreshed = await storage.getInvoice(inv.id);
+          if (refreshed) {
+            invoicePdf = await loadInvoicePdfFromStorage(refreshed) ?? invoicePdf;
+            if (includeLeistungsnachweise) {
+              lnPdf = await loadLeistungsnachweisPdfFromStorage(refreshed) ?? lnPdf;
+            }
           }
         }
-      }
-      if (!invoicePdf) {
-        throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${inv.invoiceNumber}`);
-      }
-      const appendLn = includeLeistungsnachweise && await shouldAppendStandaloneLeistungsnachweis(inv);
-      if (includeLeistungsnachweise && !lnPdf && appendLn) {
-        try {
-          lnPdf = await renderLeistungsnachweisOnTheFly(inv);
-        } catch (err) {
-          throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
+        if (!invoicePdf) {
+          throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${inv.invoiceNumber}`);
+        }
+        appendLn = includeLeistungsnachweise && await shouldAppendStandaloneLeistungsnachweis(inv);
+        if (includeLeistungsnachweise && !lnPdf && appendLn) {
+          try {
+            lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+          } catch (err) {
+            throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
+          }
+        }
+      } else {
+        // Task #1631 — Versendete/bezahlte Rechnung: KEIN Statuswechsel, KEIN
+        // Re-Seal. Rechnungs-Bytes wie in /lexware-export beschaffen:
+        //   - LN-freies versiegeltes PDF (Kasse gesetzlich / Selbstzahler):
+        //     Bytes 1:1 (Cache-Miss → einmalig nachpersistieren).
+        //   - kundenadressiert (gemergt: privat / rechnungAnKunde / Beihilfe):
+        //     invoice-only frisch re-rendern aus dem versiegelten Snapshot.
+        // Danach ist invoicePdf garantiert LN-frei → der standalone LN wird —
+        // wenn angefordert — separat angehängt (einheitlich für alle Typen).
+        const containsLn = await storedInvoicePdfContainsLeistungsnachweis(inv);
+        if (!containsLn) {
+          invoicePdf = await loadInvoicePdfFromStorage(inv);
+          if (!invoicePdf) {
+            let persistError: unknown = null;
+            try {
+              await persistInvoicePdf(inv.id);
+            } catch (err) {
+              persistError = err;
+              console.error(`[billing/bulk-print-preview] PDF-Persistierung für versendete Rechnung ${inv.id} fehlgeschlagen:`, err);
+            }
+            const refreshed = await storage.getInvoice(inv.id);
+            if (refreshed) invoicePdf = await loadInvoicePdfFromStorage(refreshed);
+            if (!invoicePdf) throw classifyPdfRenderError(persistError, `Rechnungs-PDF ${inv.invoiceNumber}`);
+          }
+        } else {
+          const snapshot = (inv.renderSnapshot ?? null) as InvoiceRenderSnapshot | null;
+          try {
+            const built = await buildInvoicePdfBytes(inv, companySettings, { snapshot, invoiceOnly: true });
+            invoicePdf = built.pdf;
+          } catch (err) {
+            throw classifyPdfRenderError(err, `Rechnungs-PDF ${inv.invoiceNumber}`);
+          }
+        }
+        appendLn = includeLeistungsnachweise;
+        if (includeLeistungsnachweise) {
+          lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
+          if (!lnPdf) {
+            try {
+              lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+            } catch (err) {
+              throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
+            }
+          }
         }
       }
       const payer = payerByCustomer.get(inv.customerId);
@@ -2714,7 +2777,7 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
 
   const errors = results.filter(r => r.status === "error").length;
   const summary = {
-    total: drafts.length,
+    total: targets.length,
     printed: rendered.length,
     marked: 0,
     errors,
@@ -2722,7 +2785,7 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
     results,
   };
   log(
-    `bulk-print-preview done month=${billingMonth}/${billingYear} total=${drafts.length} printed=${rendered.length} errors=${errors} groupByPayer=${groupByPayer} includeLN=${includeLeistungsnachweise} userId=${req.user?.id ?? "?"}`,
+    `bulk-print-preview done month=${billingMonth}/${billingYear} total=${targets.length} printed=${rendered.length} errors=${errors} groupByPayer=${groupByPayer} includeLN=${includeLeistungsnachweise} userId=${req.user?.id ?? "?"}`,
     "billing",
   );
 

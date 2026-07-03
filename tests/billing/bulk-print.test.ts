@@ -27,6 +27,7 @@ import { describe } from "../helpers/object-storage";
 import {
   apiGet,
   apiPost,
+  apiPatch,
   getAuthCookie,
   uniqueId,
   createTestEmployee,
@@ -554,5 +555,130 @@ describe("BP: Sammeldruck (POST /api/billing/bulk-print)", () => {
       groupByPayer: false,
     });
     expect(out.status).toBe(404);
+  });
+});
+
+// ---------- Preview mit expliziter Rechnungsauswahl (Task #1631) ----------
+
+interface BulkPrintPreviewSummary {
+  total: number;
+  printed: number;
+  marked: number;
+  errors: number;
+  groupedByPayer: boolean;
+  results: BulkPrintResultEntry[];
+}
+
+async function bulkPrintPreview(body: {
+  billingMonth: number;
+  billingYear: number;
+  invoiceIds?: number[];
+  groupByPayer?: boolean;
+  includeLeistungsnachweise?: boolean;
+}): Promise<{ status: number; contentType: string | null; summary: BulkPrintPreviewSummary | null; buffer: Buffer }> {
+  const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
+  const res = await fetch(`${BASE_URL}/api/billing/bulk-print-preview`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookieHeader,
+      "x-csrf-token": auth.csrfToken,
+    },
+    body: JSON.stringify(body),
+  });
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const header = res.headers.get("x-bulk-print-summary");
+  const summary = header ? (JSON.parse(decodeURIComponent(header)) as BulkPrintPreviewSummary) : null;
+  return {
+    status: res.status,
+    contentType: res.headers.get("content-type"),
+    summary,
+    buffer,
+  };
+}
+
+async function markInvoicesSent(invoiceIds: number[]): Promise<void> {
+  const res = await apiPost<unknown>("/api/billing/bulk-status", {
+    invoiceIds,
+    status: "versendet",
+  });
+  if (res.status !== 200) {
+    throw new Error(`markInvoicesSent failed: ${res.status} ${JSON.stringify(res.data)}`);
+  }
+}
+
+describe("BP-Preview: Auswahl-Druck versendeter Rechnungen (POST /api/billing/bulk-print-preview)", () => {
+  it("BP-P1 — versendete Rechnung wird per invoiceIds gedruckt, OHNE Statuswechsel", async () => {
+    const { year, month } = recentPastWeekdayAnchor();
+    const provider = await createDedicatedProvider(`P1${Date.now().toString(36)}`);
+
+    const invId = await createPflegekasseDraft(provider.id, year, month, "P1");
+    // Rechnung erst versenden (Entwurf → versendet), dann Auswahl-Druck.
+    await markInvoicesSent([invId]);
+    const before = await getInvoiceRow(invId);
+    expect(before?.status, "Vorbedingung: Rechnung ist versendet").toBe("versendet");
+
+    const out = await bulkPrintPreview({
+      billingMonth: month,
+      billingYear: year,
+      invoiceIds: [invId],
+      groupByPayer: false,
+      includeLeistungsnachweise: true,
+    });
+
+    expect(out.status, `Preview HTTP 200 (ct=${out.contentType})`).toBe(200);
+    expect(out.contentType).toContain("application/pdf");
+    expect(out.buffer.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+
+    const entry = findResult(out.summary, invId);
+    expect(entry?.status, "versendete Rechnung wurde gedruckt").toBe("printed");
+    // Preview markiert NICHTS.
+    expect(out.summary?.marked, "Preview darf nichts markieren").toBe(0);
+
+    // Status bleibt unverändert versendet.
+    const after = await getInvoiceRow(invId);
+    expect(after?.status, "Status bleibt versendet (kein Reset auf Entwurf)").toBe("versendet");
+    // Preview erzeugt keine bulk_print-Audit-Zeile.
+    expect(await countBulkPrintAudit(invId), "Preview darf keine bulk_print-Audit-Zeile schreiben").toBe(0);
+  });
+
+  it("BP-P2 — stornorechnung (Gutschrift) wird aus der Auswahl ausgeschlossen", async () => {
+    const { year, month } = recentPastWeekdayAnchor();
+    const provider = await createDedicatedProvider(`P2${Date.now().toString(36)}`);
+
+    const invId = await createPflegekasseDraft(provider.id, year, month, "P2");
+    await markInvoicesSent([invId]);
+
+    // Rechnung stornieren → Original wird "storniert" + es entsteht eine
+    // eigene stornorechnung (Gutschrift). Die Auswahl darf die Gutschrift
+    // NICHT drucken.
+    const cancel = await apiPatch<unknown>(`/api/billing/${invId}/status`, {
+      status: "storniert",
+    });
+    expect(cancel.status, `Storno: ${JSON.stringify(cancel.data)}`).toBe(200);
+
+    // stornorechnung-ID über die Rückverknüpfung stornierteRechnungId finden.
+    const stornoRows = await db
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.stornierteRechnungId, invId),
+          eq(invoices.invoiceType, "stornorechnung"),
+        ),
+      );
+    const stornoId = stornoRows[0]?.id;
+    expect(stornoId, "stornorechnung muss zur Originalrechnung existieren").toBeTruthy();
+
+    // Auswahl enthält NUR die Gutschrift → wird ausgefiltert → keine druckbare
+    // Rechnung → 404.
+    const out = await bulkPrintPreview({
+      billingMonth: month,
+      billingYear: year,
+      invoiceIds: [stornoId!],
+      groupByPayer: false,
+      includeLeistungsnachweise: true,
+    });
+    expect(out.status, `stornorechnung ausgefiltert → 404 (ct=${out.contentType})`).toBe(404);
   });
 });

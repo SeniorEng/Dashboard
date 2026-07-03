@@ -239,11 +239,11 @@ export default function AdminBilling() {
     lexwareExportMutation.mutate(ids);
   };
 
-  // Task #1630: Print-only Druck der aktuellen Auswahl (Rechnung +
-  // Leistungsnachweis), rein lesend — KEIN Statuswechsel. Da der Bündel-Druck
-  // nur Entwürfe erzeugt, wird die Auswahl vorab auf druckbare Entwürfe
-  // gefiltert; enthält sie keine, gibt es verständliches Feedback statt einer
-  // leeren Datei.
+  // Task #1630/#1631: Print-only Druck der aktuellen Auswahl (Rechnung +
+  // Leistungsnachweis), rein lesend — KEIN Statuswechsel. Neben Entwürfen
+  // dürfen auch bereits versendete/bezahlte Rechnungen als read-only Nachdruck-/
+  // Archiv-Bündel gedruckt werden (versiegelte Bytes, kein Re-Seal); lediglich
+  // reine Stornorechnungen sind ausgeschlossen.
   const handleBulkPrintSelection = () => {
     if (selectedIds.size === 0) {
       toast({ title: "Keine Rechnungen ausgewählt", variant: "destructive" });
@@ -253,7 +253,6 @@ export default function AdminBilling() {
       .filter(
         (inv) =>
           selectedIds.has(inv.id) &&
-          inv.status === "entwurf" &&
           inv.invoiceType !== "stornorechnung",
       )
       .map((inv) => inv.id);
@@ -261,7 +260,7 @@ export default function AdminBilling() {
       toast({
         title: "Keine druckbaren Rechnungen in der Auswahl",
         description:
-          "Der Druck ist auf Entwürfe beschränkt (versendete oder stornierte Rechnungen sind ausgeschlossen).",
+          "Reine Stornorechnungen können nicht gedruckt werden.",
         variant: "destructive",
       });
       return;
