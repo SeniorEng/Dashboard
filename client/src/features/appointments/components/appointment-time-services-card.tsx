@@ -1,6 +1,6 @@
 import { SectionCard } from "@/components/patterns/section-card";
 import { iconSize, getServiceColors } from "@/design-system";
-import { Calendar, Car } from "lucide-react";
+import { Calendar, Car, Users } from "lucide-react";
 import { formatTimeSlot, getEndTime } from "@/features/appointments/utils";
 import { formatDuration } from "@shared/types";
 import { formatDateForDisplay } from "@shared/utils/datetime";
@@ -23,9 +23,10 @@ interface Props {
   services: AppointmentService[];
   isCompleted: boolean;
   isErstberatung: boolean;
+  isAdmin?: boolean;
 }
 
-export function AppointmentTimeServicesCard({ appointment, services, isCompleted, isErstberatung }: Props) {
+export function AppointmentTimeServicesCard({ appointment, services, isCompleted, isErstberatung, isAdmin }: Props) {
   const hasAnyService = services.length > 0;
   const hasAnyDocumentedService = services.some(
     (s) => s.actualDurationMinutes !== null && s.actualDurationMinutes > 0,
@@ -99,6 +100,16 @@ export function AppointmentTimeServicesCard({ appointment, services, isCompleted
             ) : "Kundentermin"}
           </span>
         </div>
+
+        {isAdmin && appointment.coVisitGroupId && (
+          <div className="flex items-center justify-between py-2 border-b border-border/50" data-testid="row-co-visit">
+            <span className="text-muted-foreground">Einsatz</span>
+            <span className="flex items-center gap-1.5 font-medium text-teal-700">
+              <Users className="h-3.5 w-3.5" />
+              Zwei-Kräfte-Einsatz
+            </span>
+          </div>
+        )}
 
         {appointment.isFahrtdienst && appointment.doctorAppointmentTime && (
           <div className="py-2 border-b border-border/50 space-y-1.5" data-testid="panel-fahrtdienst-detail">

@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo } from "react";
 import { formatGermanDate } from "@shared/utils/datetime";
 import { Card } from "@/components/ui/card";
-import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Repeat, Car, AlertCircle } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Users, Repeat, Car, AlertCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer } from "@shared/types";
@@ -162,6 +162,16 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQue
               )}
               {appointment.seriesId && (
                 <Repeat className="w-3 h-3 text-primary/60 shrink-0" data-testid={`icon-series-${appointment.id}`} />
+              )}
+              {user?.isAdmin && appointment.coVisitGroupId && (
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-700 text-[10px] font-bold uppercase tracking-wide shrink-0"
+                  data-testid={`pill-co-visit-${appointment.id}`}
+                  title="Zwei-Kräfte-Einsatz: Dieser Termin wird gemeinsam mit einer zweiten Pflegekraft durchgeführt"
+                >
+                  <Users className="w-3 h-3" />
+                  Zwei Kräfte
+                </span>
               )}
               {isOverdueDoc && !isSubstitute && (
                 <span

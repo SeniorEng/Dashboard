@@ -272,6 +272,7 @@ export default function AppointmentDetail() {
         services={services}
         isCompleted={isCompleted}
         isErstberatung={isErstberatung}
+        isAdmin={!!user?.isAdmin}
       />
 
       {isCompleted && <AppointmentTravelCard appointment={appointment} />}
