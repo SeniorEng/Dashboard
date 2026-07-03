@@ -109,7 +109,7 @@ export function StatusPipelineCard({
             className="text-lg font-semibold tabular-nums text-gray-900"
             data-testid="text-pipeline-grand-total"
           >
-            {isLoading || !pipeline ? "—" : formatAmount(pipeline.totals.grandTotalCents)}
+            {isLoading || !pipeline ? "—" : formatAmount(pipeline.totals.stageTotalCents)}
           </div>
         </div>
       }
@@ -139,17 +139,51 @@ export function StatusPipelineCard({
               <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
                 {pipeline.sides
                   .filter((side) => side.itemCount > 0)
-                  .map((side) => (
-                    <span
-                      key={side.state}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700"
-                      data-testid={`pipeline-side-${side.state}`}
-                    >
-                      <span className="text-gray-500">{side.label}:</span>
-                      <span className="font-medium tabular-nums">{formatAmount(side.totalCents)}</span>
-                      <span className="text-gray-400">({side.itemCount})</span>
-                    </span>
-                  ))}
+                  .map((side) => {
+                    const content = (
+                      <>
+                        <span className="text-gray-500">{side.label}:</span>
+                        <span className="font-medium tabular-nums">
+                          {formatAmount(side.totalCents)}
+                        </span>
+                        <span className="text-gray-400">({side.itemCount})</span>
+                      </>
+                    );
+                    // Side-Badges tragen NICHT in den Gesamt-Umsatz ein (nur die
+                    // Pipeline-Stufen). „Kunde nicht angetroffen" ist anklickbar
+                    // und filtert die Termine-Liste, damit entgangene Termine
+                    // analysiert werden können; die übrigen Badges sind rein
+                    // informativ.
+                    if (side.state === "kunde_nicht_angetroffen") {
+                      const isActive = activeStatus === "kunde_nicht_angetroffen";
+                      return (
+                        <button
+                          key={side.state}
+                          type="button"
+                          onClick={() =>
+                            onStageSelect({ tab: "termine", status: "kunde_nicht_angetroffen" })
+                          }
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                            isActive
+                              ? "border-teal-400 bg-teal-50 text-teal-700"
+                              : "border-gray-200 bg-white text-gray-700 hover:bg-gray-100"
+                          }`}
+                          data-testid={`pipeline-side-${side.state}`}
+                        >
+                          {content}
+                        </button>
+                      );
+                    }
+                    return (
+                      <span
+                        key={side.state}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700"
+                        data-testid={`pipeline-side-${side.state}`}
+                      >
+                        {content}
+                      </span>
+                    );
+                  })}
               </div>
             )}
           </div>

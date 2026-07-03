@@ -14,9 +14,10 @@
  *  - „dokumentiert & unterschrieben": `documentedAndSignedSqlRaw`
  *    (= SQL-Spiegel von `isAppointmentDocumentedAndSigned`).
  *
- * Side-States (storniert, Kunde nicht angetroffen, expired_unsigned) sind NICHT
- * Teil dieser Liste (Vertrag `shared/api/billing-termine.ts`); sie werden über
- * die Status-Filterung bzw. das Verwerfen der Side-Zuordnung ausgeschlossen.
+ * Der Side-State „Kunde nicht angetroffen" (customer_no_show) IST als terminaler
+ * Filter-Zustand Teil dieser Liste (Vertrag `shared/api/billing-termine.ts`),
+ * trägt aber keinen Geldbetrag. Die übrigen Side-States (storniert,
+ * expired_unsigned) bleiben ausgeschlossen.
  *
  * Diese Liste trägt KEINE Geldbeträge (die Geld-Sicht lebt in der Pipeline).
  */
@@ -47,6 +48,7 @@ const ALL_STAGES: BillingTermineStage[] = [
   "versendet",
   "avis_erhalten",
   "bezahlt",
+  "kunde_nicht_angetroffen",
 ];
 
 function emptyCounts(): Record<BillingTermineStage, number> {
@@ -82,8 +84,9 @@ export async function readBillingTermine(
       )`
     : sql``;
 
-  // Side-/Endzustände auf Termin-Ebene (cancelled, customer_no_show) werden über
-  // die Status-Whitelist ausgeschlossen; expired_unsigned ist nicht persistiert.
+  // Termin-Status-Whitelist: aktive Stufen + „Kunde nicht angetroffen"
+  // (customer_no_show, terminaler Filter-Zustand). cancelled bleibt aus der
+  // Liste; expired_unsigned ist ein abgeleiteter, nicht persistierter Status.
   const rows = await db.execute(sql`
     SELECT
       a.id AS id,
@@ -124,7 +127,7 @@ export async function readBillingTermine(
       LIMIT 1
     ) inv ON true
     WHERE a.deleted_at IS NULL
-      AND a.status IN ('scheduled','documenting','completed')
+      AND a.status IN ('scheduled','documenting','completed','customer_no_show')
       AND EXTRACT(YEAR FROM a.date::date) = ${billingYear}
       AND EXTRACT(MONTH FROM a.date::date) = ${billingMonth}
       ${insFilter}
@@ -145,33 +148,39 @@ export async function readBillingTermine(
     const invoiceId = nullableInt(raw.invoice_id);
     const isInvoiced = invoiceId != null;
 
-    // Stufe: NACH Rechnung über den Rechnungsstatus, sonst über den Termin.
+    // Stufe folgt der Pipeline-SSoT `assignAppointmentStage`: terminale
+    // Side-Zustände (Kunde nicht angetroffen) haben Vorrang vor „abgerechnet?",
+    // danach greift der Rechnungsstatus, sonst die Termin-Stufe.
+    const apptAssignment = assignAppointmentStage({
+      status,
+      documentedAndSigned: raw.documented_and_signed === true,
+      isInvoiced,
+    });
     let stage: BillingTermineStage | null = null;
-    if (isInvoiced) {
-      const assignment = assignInvoiceStage({
+    if (apptAssignment.kind === "side") {
+      // Von den Side-Zuständen ist nur „Kunde nicht angetroffen" in der Liste
+      // filterbar (storniert/expired_unsigned bleiben ausgeschlossen).
+      if (apptAssignment.state === "kunde_nicht_angetroffen") {
+        stage = "kunde_nicht_angetroffen";
+      }
+    } else if (apptAssignment.kind === "excluded" && apptAssignment.reason === "invoiced") {
+      const invAssignment = assignInvoiceStage({
         status: String(raw.invoice_status),
         invoiceType: String(raw.invoice_type),
       });
       // Späte Stufen (rechnung_erstellt/versendet/avis_erhalten/bezahlt) sind
       // namensgleich mit den Termine-Stufen; Side („storniert") ist hier durch
       // den Join bereits ausgeschlossen.
-      if (assignment.kind === "stage") {
-        stage = assignment.stage as BillingTermineStage;
+      if (invAssignment.kind === "stage") {
+        stage = invAssignment.stage as BillingTermineStage;
       }
-    } else {
-      const assignment = assignAppointmentStage({
-        status,
-        documentedAndSigned: raw.documented_and_signed === true,
-        isInvoiced: false,
-      });
-      if (assignment.kind === "stage") {
-        // Pipeline „unterschrieben" === Termine-Vertrag „nachgewiesen".
-        stage = assignment.stage === "unterschrieben"
-          ? "nachgewiesen"
-          : (assignment.stage as BillingTermineStage);
-      }
+    } else if (apptAssignment.kind === "stage") {
+      // Pipeline „unterschrieben" === Termine-Vertrag „nachgewiesen".
+      stage = apptAssignment.stage === "unterschrieben"
+        ? "nachgewiesen"
+        : (apptAssignment.stage as BillingTermineStage);
     }
-    if (!stage) continue; // Side-/excluded-Zustände gehören nicht in die Liste.
+    if (!stage) continue; // cancelled / expired_unsigned gehören nicht in die Liste.
 
     const attributed = attributeAppointmentToEmployees(
       {

@@ -26,6 +26,7 @@ const STAGE_ORDER: BillingTermineStage[] = [
   "versendet",
   "avis_erhalten",
   "bezahlt",
+  "kunde_nicht_angetroffen",
 ];
 
 const STAGE_LABELS: Record<BillingTermineStage, string> = {
@@ -36,6 +37,7 @@ const STAGE_LABELS: Record<BillingTermineStage, string> = {
   versendet: "Versendet",
   avis_erhalten: "Avis erhalten",
   bezahlt: "Bezahlt",
+  kunde_nicht_angetroffen: "Kunde nicht angetroffen",
 };
 
 const STAGE_BADGE: Record<BillingTermineStage, string> = {
@@ -46,6 +48,7 @@ const STAGE_BADGE: Record<BillingTermineStage, string> = {
   versendet: "bg-indigo-50 text-indigo-700 border-indigo-200",
   avis_erhalten: "bg-purple-50 text-purple-700 border-purple-200",
   bezahlt: "bg-green-50 text-green-700 border-green-200",
+  kunde_nicht_angetroffen: "bg-rose-50 text-rose-700 border-rose-200",
 };
 
 function EmployeeGroup({

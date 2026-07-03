@@ -7,9 +7,12 @@
  * Lebenszyklus-Stufe eines Termins folgt der Pipeline-SSoT
  * (`shared/domain/billing-pipeline.ts`): vor Rechnung über `assignAppointmentStage`
  * (offen/dokumentiert/nachgewiesen), nach Rechnung über den Rechnungsstatus
- * (rechnung_erstellt/versendet/avis_erhalten/bezahlt). Side-States (storniert,
- * Kunde nicht angetroffen, expired_unsigned) sind NICHT Teil dieser Liste — sie
- * erscheinen als Pipeline-Chips.
+ * (rechnung_erstellt/versendet/avis_erhalten/bezahlt). Der Side-State
+ * „Kunde nicht angetroffen" (customer_no_show) IST als terminaler Filter-Zustand
+ * Teil dieser Liste (trägt aber weiterhin KEINEN Geldbetrag — die €-Sicht bleibt
+ * die Pipeline), damit entgangene Termine analysiert werden können. Die übrigen
+ * Side-States (storniert, expired_unsigned) sind NICHT Teil dieser Liste; sie
+ * erscheinen nur als Pipeline-Chips.
  *
  * Diese Liste trägt KEINE Geldbeträge (die Geld-Sicht lebt in der Pipeline);
  * eine Termin-Zeile zeigt nur Datum/Zeit, Kunde, Leistung und Stufe.
@@ -23,7 +26,9 @@ export type BillingTermineStage =
   | "rechnung_erstellt"
   | "versendet"
   | "avis_erhalten"
-  | "bezahlt";
+  | "bezahlt"
+  // Terminaler Side-Zustand, in der Liste nur als Filter sichtbar (kein Geldbetrag).
+  | "kunde_nicht_angetroffen";
 
 export interface BillingTermineAppointment {
   appointmentId: number;
