@@ -24,9 +24,6 @@ exports[`Architektur — Soft-Delete-Coverage in server/routes/** > Snapshot: pr
   "server/routes/admin/employee-users.ts": [
     "appointmentsRepo",
   ],
-  "server/routes/admin/lexware-export.ts": [
-    "employeeTimeEntriesRepo",
-  ],
   "server/routes/admin/test-cleanup.ts": [
     "appointmentsRepo",
   ],
@@ -188,6 +185,9 @@ exports[`Architektur — Soft-Delete-Coverage in server/storage/** (Task #454) >
   "server/storage/time-tracking/overview.ts": [
     "appointmentsRepo",
     "customersRepo",
+    "employeeTimeEntriesRepo",
+  ],
+  "server/storage/time-tracking/payroll-hours.ts": [
     "employeeTimeEntriesRepo",
   ],
   "server/storage/time-tracking/vacation.ts": [

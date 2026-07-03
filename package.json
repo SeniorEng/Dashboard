@@ -81,10 +81,10 @@
     "helmet": "^8.1.0",
     "libphonenumber-js": "^1.12.31",
     "lucide-react": "^0.545.0",
-    "multer": "^2.1.1",
+    "multer": "^2.2.0",
     "nanoid": "^5.1.6",
     "node-zugferd": "^0.1.1-beta.1",
-    "nodemailer": "^8.0.1",
+    "nodemailer": "^9.0.3",
     "pdf-lib": "^1.17.1",
     "puppeteer-core": "^24.37.3",
     "react": "^19.2.0",
@@ -143,6 +143,7 @@
     "axios": "^1.17.0",
     "form-data": "^4.0.6",
     "tmp": "^0.2.7",
+    "undici": "^7.28.0",
     "@esbuild-kit/core-utils": {
       "esbuild": ">=0.25.0"
     }

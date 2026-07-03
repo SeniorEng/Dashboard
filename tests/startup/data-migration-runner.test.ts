@@ -7,7 +7,7 @@
  * wird zentral im Wrapper getestet (`tests/startup/budget-migration-runner*`).
  * Dieser Test verifiziert ausschließlich, dass die NICHT-Budget-Registry korrekt
  * gebaut wird:
- *  - vollständig (alle 15 Migrationen, korrekte Reihenfolge, eindeutige Namen),
+ *  - vollständig (alle 17 Migrationen, korrekte Reihenfolge, eindeutige Namen),
  *  - GoBD-Bypass NUR für die drei GoBD-budget_transactions-Backfills aktiv,
  *  - Conservation-Check für ALLE deaktiviert (keine Budget-Topf-Mutation),
  *  - jede Migration liefert einen ausführbaren `migrate(tx)`-Callback.
@@ -38,6 +38,7 @@ const POST_BUDGET_ORDER = [
   "migrate-prospect-statuses",
   "migrate-schulung-besprechung-to-sonstiges",
   "cleanup-vacation-on-holidays",
+  "backfill-no-show-kilometers-1565",
 ];
 
 // GoBD-Bypass darf NUR für die drei Backfills aktiv sein, die GoBD-historisierte
@@ -61,14 +62,14 @@ describe("Task #1428 — NICHT-Budget Daten-Migrations-Registry", () => {
     expect(new Set(registry.map((m) => m.name)).size).toBe(registry.length);
   });
 
-  it("registriert genau 16 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
+  it("registriert genau 17 NICHT-Budget Migrationen mit eindeutigen Namen", async () => {
     const [pre, post] = await Promise.all([
       buildPreBudgetRegistry(),
       buildPostBudgetRegistry(),
     ]);
     const all = [...pre, ...post];
-    expect(all).toHaveLength(16);
-    expect(new Set(all.map((m) => m.name)).size).toBe(16);
+    expect(all).toHaveLength(17);
+    expect(new Set(all.map((m) => m.name)).size).toBe(17);
   });
 
   it("aktiviert GoBD-Bypass NUR für die drei GoBD-Backfills", async () => {

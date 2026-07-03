@@ -88,6 +88,7 @@ const EXPECTED_TABLES: readonly string[] = [
   "document_types",
   "employee_document_proofs",
   "employee_documents",
+  "employee_hours_accounts",
   "employee_month_closings",
   "employee_qualifications",
   "employee_time_entries",

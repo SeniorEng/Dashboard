@@ -401,8 +401,13 @@ export async function getAppointmentIdsInServiceRecords(appointmentIds: number[]
 export async function lockAppointmentsForUpdate(appointmentIds: number[], txClient: DbOrTx): Promise<void> {
   if (appointmentIds.length === 0) return;
   const ordered = [...new Set(appointmentIds)].sort((a, b) => a - b);
-  await txClient.select({ id: appointments.id })
-    .from(appointments)
+  // Repo-vermittelter Read (Soft-Delete-Guard), aber BEWUSST OHNE `activeOnly()`:
+  // Dies ist ein ID-gezielter FOR-UPDATE-Lock auf einen bereits upstream
+  // ermittelten Termin-Satz, kein Listing. Ein eventuell soft-gelöschter Termin
+  // in `appointmentIds` MUSS trotzdem gelockt werden, damit konkurrierende
+  // Service-Record-Läufe deterministisch serialisiert werden (Lock-Semantik
+  // exakt erhalten: inArray → orderBy(id) → for("update")).
+  await appointmentsRepo.selectColumnsFrom({ id: appointments.id }, txClient)
     .where(inArray(appointments.id, ordered))
     .orderBy(appointments.id)
     .for("update");

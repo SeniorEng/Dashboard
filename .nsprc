@@ -1,7 +1,1 @@
-{
-  "GHSA-gv7w-rqvm-qjhr": {
-    "active": true,
-    "notes": "esbuild dev-server/Deno-RCE advisory (high). Betrifft AUSSCHLIESSLICH Dev-/Build-Tooling (vite, tsx, drizzle-kit, esbuild, @vitest/coverage-v8) und ist NICHT im produktiven Server-Bundle dist/index.cjs enthalten. Kein Major-Upgrade von vite/esbuild in diesem Task (siehe dedizierter Follow-up). Ablaufdatum erzwingt Neubewertung.",
-    "expiry": "2026-09-15"
-  }
-}
+{}
