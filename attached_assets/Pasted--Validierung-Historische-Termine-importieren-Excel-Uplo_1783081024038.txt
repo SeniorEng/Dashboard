@@ -1,0 +1,71 @@
+# Validierung: „Historische Termine importieren" (Excel-Upload)
+
+**Geprüft:** Quellcode `SeniorEng/Dashboard` (read-only Clone), 02.07.2026.
+**Frage:** Kann der Excel-Import bestehendes brechen — bereits abgerechnete Termine überschreiben, Budgets falsch zuordnen, Überlauf?
+**Kern-Dateien:** `server/routes/admin/import-appointments.ts`, `server/services/appointment-import.ts` (Haupt-Import), `server/services/appointment-import-reconcile.ts` (separater Reconcile-Pfad), `server/storage/budget/km-rebook.ts`, `client/src/pages/admin/import-appointments.tsx`.
+
+---
+
+## 1. Kurzfazit
+
+Der Import ist **überraschend gut abgesichert** — viele der befürchteten Fehler sind bereits abgefangen. **Eine echte Lücke** bleibt und trifft genau deinen Punkt: der **„update"-Pfad des Haupt-Imports prüft NICHT, ob ein Termin bereits auf einem unterschriebenen Leistungsnachweis / einer Rechnung liegt**, bevor er ihn überschreibt und die §45b-Budget-Buchung neu bucht. Der separate Reconcile-Pfad hat diesen Schutz — der Haupt-Import nicht.
+
+---
+
+## 2. Was bereits sauber geschützt ist ✅
+
+- **Nur Superadmin** (`requireSuperAdmin`).
+- **Doppel-Import-Erkennung:** SHA-256 des Datei-Puffers → Warnung, wenn dieselbe Datei schon importiert wurde (Task #819).
+- **Server-trusted Snapshot** (Task #708): Execute prüft Datum, Kunde, Service, Mitarbeiter, `existingAppointmentId`, Status **exakt** gegen die vom Server geparste Preview — ein manipulierter Client kann Zeilen-Daten und Mutations-Ziel **nicht** verschieben. Preview-Token ist Pflicht, kein Fallback.
+- **Cutoff-Schutz** (Task #708): Termine nach dem Excel-Cutoff werden **nie** angefasst (`cutoffProtected`), doppelt abgesichert im Execute.
+- **Kein Budget-Überlauf:** Reicht das Budget nicht, wird die Leistung auf die **verfügbaren Minuten gekürzt** (oder auf 0) statt überzogen — mit Trim-Notiz. Budgets werden also nicht gesprengt.
+- **Vorjahres-Kassen-Termine = Dokumentation ohne Budgetverbrauch** (Task #1243): historische Termine echter Pflegekassen-Kunden verbrauchen **kein** laufendes Budget (`documentationOnly`).
+- **Soft-Delete-Schutz:** gelöschte Termine werden nicht still wiederbelebt (`activeOnly()`, Task #454/#674).
+- **Upgrade-Pfad ist eng:** ein bestehender Termin wird nur „upgraded" (auf completed gehoben), wenn er `scheduled` UND **unsigniert** ist — beim Ausführen nochmals geprüft (Idempotenz/Race-Schutz). Signierte Termine gehen diesen Weg nicht.
+- **Voller Audit-Trail** + **Batch-Rückverfolgbarkeit** (`import_batch_id` an Terminen und Budget-Buchungen).
+
+---
+
+## 3. Die Lücke ⚠️ — „update" überschreibt auch abgerechnete Termine
+
+**Ablauf:** Ein Excel-Zeile matcht einen **bestehenden** Termin. Ist der `completed` (also nicht scheduled+unsigniert), bekommt er Status **`duplicate`**. Der Operator kann Duplikate auf Aktion **`update`** setzen — es gibt sogar einen Button **„Alle Duplikate aktualisieren"** (`setAllActions('update','duplicate')`), und ein Duplikat **mit Abweichung** wird automatisch als „update" klassifiziert (Drift-Reparatur, z. B. „Excel sagt Hauswirtschaft, DB blieb Alltagsbegleitung").
+
+**Was der `update`-Pfad dann tut** (`appointment-import.ts`, ~Zeile 938–1160):
+1. Überschreibt am Termin: km, Mitarbeiter, End-Zeit, `durationPromised`, Notizen.
+2. **Ersetzt die Service-Zeilen** (delete + insert der neuen Leistungsart/Dauer).
+3. **Bucht die §45b-Budget-Consumption neu** (Storno + Neuanlage via `rebookAppointmentConsumption`).
+
+**Der fehlende Guard:** Dieser Pfad prüft nur `activeOnly()` (nicht gelöscht). Er prüft **NICHT**, ob der Termin
+- auf einem beidseitig **unterschriebenen Leistungsnachweis** liegt, oder
+- bereits **fakturiert** (auf einer versendeten Rechnung) ist.
+
+`km-rebook.ts` (die Rebook-Funktion) enthält ebenfalls **keinen** Rechnungs-/LN-Guard.
+
+**Folge, wenn ein bereits abgerechneter Termin „updated" wird:**
+- Termin-Inhalt (Leistungsart/Dauer/km) ändert sich, **während der versiegelte LN und die versendete Rechnung unverändert bleiben** → LN/Rechnung passt nicht mehr zum Termin (GoBD-Desync).
+- Die **§45b-Consumption wird storniert + neu gebucht** unter einer bereits fakturierten Leistung → Budget-vs-Rechnung-Mismatch (genau die „überzogenes Budget / Abweichungen"-Klasse, die du beobachtest).
+
+**Beweis, dass der Schutz woanders existiert:** Der **separate Reconcile-Pfad** (`appointment-import-reconcile.ts`, Z. 156–168, 233–234, 389) schließt Termine mit `exclusionReason: "signed_service_record"` („Termin ist Teil eines unterschriebenen Leistungsnachweises") **explizit aus**. Dieser Guard fehlt im Haupt-Import-`update`-Pfad — eine **Inkonsistenz**, kein Designprinzip.
+
+**Zusatz-Beobachtung:** In der Preview wird pro Duplikat **nicht** angezeigt, ob es bereits abgerechnet ist. Der Operator sieht also nicht, welche der Duplikate er mit „Alle Duplikate aktualisieren" gefährdet. Und die vorhandenen Startup-Backfills `backfill-import-update-budget-drift.ts` / `backfill-missing-import-consumption.ts` belegen, dass Import-verursachte Budget-Drift **schon vorgekommen** ist.
+
+---
+
+## 4. Empfehlungen
+
+**Code-Fix (eigentliche Lücke schließen):**
+1. Im Haupt-Import den **`signed_service_record`-Ausschluss aus dem Reconcile-Pfad spiegeln**: Bevor `update` (und `upgrade`) einen Termin mutiert, prüfen, ob er auf einem beidseitig unterschriebenen `monthly_service_records` liegt ODER auf einer Rechnung — wenn ja: **hart überspringen** und als `billedProtected` zählen/ausweisen. Idealerweise schon in `matchRows`: solche Duplikate als **geschützt** taggen, damit sie gar nicht erst auf „update" gesetzt werden können.
+2. **Preview transparent machen:** je Duplikat anzeigen „bereits abgerechnet / auf LN" — dann kann „Alle Duplikate aktualisieren" diese ausnehmen.
+3. Optional: den Reconcile-Guard und den Import-Guard in **eine gemeinsame Pure-Function** ziehen (SSoT), damit sie nicht wieder auseinanderlaufen.
+
+**Sicheres Vorgehen für den 2026-Import JETZT (bis der Fix da ist):**
+- **Vorher Backup** (die Import-Buchungen sind zwar per Batch rückverfolgbar, aber ein Backup ist die Sicherheitsleine).
+- Im Preview **nur `new` importieren**; **Duplikate auf `skip` lassen** — insbesondere **NICHT** „Alle Duplikate aktualisieren" klicken, solange abgerechnete 2026-Termine im Bestand sind.
+- Zuerst an **einem Kunden ohne bereits abgerechnete 2026-Termine** testen und das Ergebnis (Termine + §45b-Budget + LN) prüfen, bevor breit importiert wird.
+- Nach dem Import den **Batch** kontrollieren (importierte/aktualisierte Zahlen) und stichprobenartig Budget/LN gegenprüfen.
+
+---
+
+## 5. Paste-fertiger Replit-Handoff
+
+> **Haupt-Import „Historische Termine": `update`/`upgrade`-Pfad muss abgerechnete Termine schützen.** Der Reconcile-Pfad (`appointment-import-reconcile.ts`) schließt Termine auf beidseitig unterschriebenem Leistungsnachweis als `signed_service_record` aus — der Haupt-Import-`update`-Pfad (`appointment-import.ts`, ~938–1160) und `km-rebook.ts` haben diesen Guard **nicht** und überschreiben/rebuchen auch `completed`, signierte, bereits fakturierte Termine. Bitte: (1) denselben Signed-LN-/Rechnungs-Ausschluss in `matchRows` + `executeImport` (update UND upgrade) spiegeln — solche Termine hart überspringen und als `billedProtected` ausweisen; gemeinsame Pure-Function mit dem Reconcile-Guard (SSoT). (2) In der Preview je Duplikat „bereits abgerechnet/auf LN" anzeigen, sodass „Alle Duplikate aktualisieren" diese ausnimmt. (3) Test: ein `completed` Termin auf beidseitig unterschriebenem LN + Rechnung darf durch Import-`update` **weder** in Leistungsart/Dauer/km **noch** in der §45b-Consumption verändert werden. §45b/Budget-Verhalten sonst unverändert.
