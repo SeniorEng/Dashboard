@@ -1,0 +1,14 @@
+Geprüft — und deine Kernsorge ist strukturell erfüllt: Genau weil das Konzept zwei getrennte Termine (je ein assignedEmployeeId) statt eines Termins mit zwei Mitarbeitern nutzt, bleibt Sichtbarkeit und Abrechnung unverändert per Mitarbeiter. Jeder sieht nur seinen Leg, dokumentiert nur seinen Leg, erstellt seinen eigenen Leistungsnachweis und rechnet nur seinen ab. Das war der ganze Grund, Option A statt Option B (Junction-Tabelle) zu wählen — Option B hätte genau diese Trennung gebrochen. Der coVisitGroupId-Link dient laut Plan ausschließlich der Overlap-Ausnahme, nicht der Sichtbarkeit (Step 5 + Out-of-scope bestätigen das). Passt.
+Der Plan setzt das schlanke Konzept sauber um: additives coVisitGroupId, atomare Paar-Anlage in einer Transaktion, Kunden-Overlap-Ausnahme nur fürs Paar (Mitarbeiter-Overlap bleibt hart, auch die zwei neuen Legs blockieren sich nicht gegenseitig), nachgelagerte Pfade unangetastet. Gut.
+Eine Sache würde ich ergänzen — genau wegen deiner Anforderung: Step 6 hat noch keinen expliziten Sichtbarkeits-Test. Ich würde als Abnahmekriterium aufnehmen:
+
+Mitarbeiter A sieht in seiner Übersicht nur Leg A (nicht Leg B), kann nur Leg A dokumentieren/abschließen/Leistungsnachweis erstellen/abrechnen; coVisitGroupId wird nirgends genutzt, um die Sichtbarkeit oder den LN-Scope eines Mitarbeiters zu erweitern.
+
+Das nagelt genau das fest, was dir wichtig ist — und schützt davor, dass später jemand den Link versehentlich zum „Partner-Leg mitanzeigen" missbraucht.
+Drei kleinere Punkte (kein Blocker):
+
+Lohn-Feld verifizieren: Step 5 sagt „entlohnt über performedByEmployeeId" — kurz gegenprüfen, ob payroll-hours tatsächlich auf performedByEmployeeId oder auf assignedEmployeeId keyt. Im Ergebnis egal (bei jedem Leg sind beide Felder derselbe Mitarbeiter), aber die Aussage sollte stimmen.
+Kürzungs-Reihenfolge = Dokumentationszeit: Bei knappem Topf zieht der zuerst dokumentierte Leg das Budget, der später dokumentierte wird ggf. gekürzt (Step 5). Ist sinnvoll und deterministisch zur Laufzeit — nur bewusst wissen: welcher Mitarbeiter „zu spät" dokumentiert, dessen Leg trifft die Kürzung.
+Absagen ist pro Leg unabhängig (Out of scope): das Stornieren eines Legs sagt das andere nicht mit ab. Willst du das so (jeder storniert selbst), oder wenigstens ein Hinweis „Teil eines Zwei-Kräfte-Einsatzes — der Partner-Leg bleibt bestehen"? Und der optionale „Zwei-Kräfte"-Badge sollte einem Mitarbeiter keine Details des Partner-Legs zeigen.
+
+Fazit: build-ready. Vor „Start building" nur den expliziten Sichtbarkeits-Test in Step 6 ergänzen — das ist die direkte Absicherung deiner Vorgabe. Punkte 1–3 sind kurze Klarstellungen im Zuge von Step 5/6.
