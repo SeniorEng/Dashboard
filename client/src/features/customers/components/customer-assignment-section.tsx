@@ -26,7 +26,7 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
   const isTeamLead = user?.isTeamLead ?? false;
   const canEdit = isAdmin || isTeamLead;
 
-  const { data: activeEmployees = [] } = useActiveEmployees({ enabled: canEdit });
+  const { data: activeEmployees = [] } = useActiveEmployees();
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -44,7 +44,7 @@ export function CustomerAssignmentSection({ customer, customerId }: CustomerAssi
   const employeeName = (id: number | null | undefined): string => {
     if (id == null) return "Nicht zugewiesen";
     const e = activeEmployees.find((x) => x.id === id);
-    return e?.displayName ?? `#${id}`;
+    return e?.displayName ?? "Ehemalige/r Mitarbeiter/in";
   };
 
   const startEditing = () => {
