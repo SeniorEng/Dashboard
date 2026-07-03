@@ -1,0 +1,71 @@
+# Konzept: Zwei Mitarbeiter bei einem Termin (Zwei-Kräfte-Einsatz)
+
+**Projekt:** EngelDesk / Care Connect (Senioren Engel).
+**Zweck:** Übergabe-/Diskussionskonzept, wie ein Termin mit **zwei Mitarbeitern** (aus Sicherheits- oder Arbeitslastgründen) modelliert wird — Anlage, Dokumentation, Lohn und Abrechnung — ohne das bestehende „ein Mitarbeiter je Termin"-Fundament zu brechen.
+**Stand:** 02.07.2026. Konzept, noch nichts gebaut.
+
+---
+
+## 1. Ausgangslage (im Code verifiziert)
+
+- Ein Termin hat **genau einen** `assignedEmployeeId` (NOT NULL) + optional `performedByEmployeeId` (= wer ihn tatsächlich durchgeführt hat, i. d. R. dieselbe Person). **Kein** Zweit-Mitarbeiter-Konzept.
+- Das gesamte Umfeld hängt an „ein Mitarbeiter je Termin": **Leistungsnachweis-Invariant** (Kunde + Mitarbeiter + Periode), **Lohn** (`getMonthlyHoursBatch` je `assignedEmployeeId`), **§45b-Consumption** je Termin, **Abrechnung** termin-/mitarbeiterbezogen.
+- Zwei Guards verhindern heute den Parallel-Termin: `checkCustomerOverlap` („Kunde hat bereits einen Termin") und `checkOverlap` („Mitarbeiter-Terminüberschneidung"). Genau deshalb muss man heute zwei Termine nacheinander tricksen.
+
+## 2. Was Best Practice / SGB XI verlangt
+
+- **Dokumentation:** alle beteiligten Mitarbeiter sind zu dokumentieren; an die Kostenträger sind **max. 2 Beschäftigtennummern (LBNR) je Leistung** übertragbar. Seit 01/2023 ist die **LBNR** Pflicht — fehlt sie, wird abgelehnt.
+- **Abrechnung gegenüber der Kasse:** Ein Zwei-Kräfte-Einsatz wird **nicht automatisch doppelt** bezahlt. Nur in **begründeten Einzelfällen** (z. B. Schwerstpflege, Härtefall) und **mit vorheriger Zustimmung der Pflegekasse** (ggf. MDK) darf der Leistungskomplex höher bewertet werden — je nach Vereinbarung **1,5-fach oder 2-fach**.
+- **Anfahrt (LK 20) wird für die zweite Kraft NICHT zusätzlich** berechnet — nur **eine** Anfahrt je Einsatz.
+- **Sicherheits-/lastbedingte** Doppelbesetzung ohne Kassen-Genehmigung ist i. d. R. **interne Kosten** (beide werden entlohnt, aber der Kasse wird **nur einfach** berechnet).
+
+**Übersetzt heißt das:** beide Mitarbeiter **dokumentieren + werden entlohnt**; der Kasse wird die Leistung standardmäßig **einfach** berechnet (Anfahrt nur einmal), ein 1,5-/2-fach-Ansatz **nur mit hinterlegter Kassen-Genehmigung**.
+
+## 3. Zwei Lösungswege
+
+### Option A — Verknüpftes Kräfte-Paar (empfohlen)
+„Ein Mitarbeiter je Termin" bleibt. Für einen Zwei-Kräfte-Einsatz werden **zwei Termine** angelegt (je Mitarbeiter einer), aber über eine **`coVisitGroupId`** als **ein Einsatz verknüpft**. Konkret:
+- **Overlap-Guards anpassen:** der **Kunden-Overlap** wird für verknüpfte Kräfte-Paar-Termine **erlaubt** (zwei gleichzeitige Termine desselben Kunden — aber **nur** als Co-Visit-Paar mit **verschiedenen** Mitarbeitern). Der **Mitarbeiter-Overlap bleibt hart** (niemand ist doppelt verplant).
+- **Dokumentation & Lohn:** unverändert — **jeder Mitarbeiter dokumentiert seinen eigenen Termin**, bekommt seinen eigenen Leistungsnachweis, wird eigenständig entlohnt. Passt 1:1 auf das bestehende Modell.
+- **Abrechnung (nach Alrik):** **beide** Termine werden berechnet — die Leistung **zweifach** (je Mitarbeiter einmal), also **2× Consumption (Budget-Kaskade)** und **2× auf der Kassenrechnung**, **inkl. beider Anfahrten** ganz normal wie bei einem Einzeltermin. **Keine Sonderbehandlung.** Beide Mitarbeiter erhalten Zeit + Anfahrt im **Lohn** wie gehabt. Beide LBNR sind übertragbar (max. 2).
+- **Kassen-Genehmigung: organisatorisch (Entscheidung Alrik).** Die zweifache Kassenberechnung wird **außerhalb des Systems** durch die vorherige Kassen-Genehmigung im Einzelfall sichergestellt — **kein** System-Gate. Das System berechnet den erfassten Zwei-Kräfte-Einsatz **immer zweifach**. (Zur Kenntnis: die 2×-Berechnung ist gegenüber der Kasse nur mit dieser Genehmigung zulässig; das Regress-Risiko liegt damit bewusst in eurer Hand.) **Budget-Folge:** 2× §45b verbraucht das Budget doppelt schnell → die bestehende Budget-Trim-Logik greift entsprechend früher.
+
+*Warum empfohlen:* minimaler Eingriff, nutzt die bestehenden per-Mitarbeiter-Pfade (LN, Lohn, Budget-Kaskade) **unverändert** — beide Termine sind **zu 100 % normale** Abrechnungs-Termine. Der einzige echte Eingriff ist die **Overlap-Ausnahme** für das verknüpfte Paar.
+
+### Ablauf (nach Alrik)
+
+**Ablauf (nutzt bestehende Mechanismen, nur kleine Tweaks):**
+1. Mitarbeiter A plant den Termin und wählt im **bestehenden Termin-Formular** einen **zweiten Mitarbeiter** (der eine neue Tweak — ein Feld, keine neue Fläche). Beim Speichern entstehen **zwei verknüpfte Termine** (gemeinsame `coVisitGroupId`), je Mitarbeiter einer.
+2. Beide Termine erscheinen **automatisch** in der jeweiligen Mitarbeiter-Übersicht (weil je ein `assignedEmployeeId`) — kein neuer Code.
+3. Beide Mitarbeiter **dokumentieren und schließen ihren eigenen Termin** über den **bestehenden** Dokumentations-/Abschluss-Flow ab.
+4. Ergebnis: **zwei abgeschlossene Termine** → je ein Leistungsnachweis (bestehende LN-Erstellung) → 2× auf der Kassenrechnung (bestehende Abrechnung). Nichts an LN-/Billing-Logik neu.
+
+**Anfahrt (vereinfacht nach Alrik) — keine Sonderbehandlung:** Beide Termine tragen ihre Anfahrt **ganz normal** wie bei einem Einzeltermin — beide Mitarbeiter bekommen ihre Anfahrt im **Lohn**, und beide Anfahrten werden regulär berechnet. Damit entfällt **jeglicher Eingriff** in die Consumption-/Abrechnungslogik; kein Flag, kein `travelKilometers`-Sonderfall — die zwei Termine sind zu 100 % normale Termine.
+- *Compliance-Hinweis (einmalig, zur Kenntnis):* Das Regelwerk sieht vor, dass die **Anfahrt (LK 20) für die zweite Kraft nicht zusätzlich** berechnet wird — die **zweifache Anfahrt gegenüber der Pflegekasse** ist damit der Punkt, der am ehesten hinterfragt würde. Da ihr die Kassen-Freigabe ohnehin organisatorisch absichert, liegt auch das bewusst bei euch.
+
+**Budget-Nutzung — „wie definiert" (wichtig, keine §45b-Sonderlogik):** Jeder der beiden Termine dokumentiert seine Leistung(en) **unabhängig** (gleich oder unterschiedlich) und läuft durch die **bestehende Consumption-Kaskade** (`planCascade`/`createCascadeConsumption`): die Kosten werden je Leistung über die **definierten Töpfe in Reihenfolge** verbucht — `entlastungsbetrag_45b` → `umwandlung_45a` → `ersatzpflege_39_42a` (§42a-Jahresbetrag) → ggf. privat, FIFO mit Cap-Limits. Der Zwei-Kräfte-Einsatz ändert an dieser Zuordnung **nichts** — es sind zwei normale Termine, die jeweils regulär durch die Kaskade gehen. **Folge der 2×-Berechnung:** die betroffenen Töpfe werden für **beide** Legs verbraucht, d. h. sie erschöpfen schneller; greift ein Topf nicht mehr, kürzt die **bestehende** Trim-Logik — Budgets werden also exakt „wie definiert" genutzt, nur doppelt beansprucht. **Deterministische Reihenfolge:** damit bei knappem Topf klar ist, welcher Leg zuerst konsumiert (und ggf. welcher gekürzt wird), verbraucht der **Lead-Termin vor dem Zweit-Termin** (gleicher Zeitstempel → Tiebreaker Lead zuerst).
+
+### Option B — Ein Termin, mehrere Mitarbeiter (Junction-Tabelle)
+Neue Tabelle `appointment_employees` (Termin ↔ N Mitarbeiter, Rolle primär/sekundär). Ein Termin-Datensatz, zwei Mitarbeiter.
+- **Sauberer** konzeptionell (ein Besuch = ein Termin, eine Kassenrechnung, 2 LBNR).
+- **Aber:** bricht genau die Invarianten, die wir gerade stabilisiert haben — **Lohn-Aggregation** (`getMonthlyHoursBatch` müsste die Termin-Stunden auf **beide** Mitarbeiter verteilen), **LN-Zuordnung** (derselbe Termin müsste auf **zwei** Leistungsnachweisen liegen — der Invariant „Kunde+Mitarbeiter+Periode" und die `serviceRecordAppointments`-Mechanik), und **Dokumentation/Unterschrift** (heute je Termin, müsste je Mitarbeiter-je-Termin werden). Hohe Streubreite über LN, Lohn und §45b.
+
+*Fazit:* konzeptionell hübscher, aber teuer und riskant — trifft die fragilsten Systeme.
+
+## 4. Empfehlung
+
+**Option A (verknüpftes Kräfte-Paar).** Sie liefert exakt das gewünschte Verhalten — zwei Mitarbeiter tragen sich ein, beide dokumentieren, beide werden entlohnt, die Leistung wird der Kasse **zweifach** berechnet (beide Anfahrten normal, keine Sonderbehandlung) — und respektiert das „ein Mitarbeiter je Termin"-Fundament. Option B nur erwägen, wenn Zwei-Kräfte-Einsätze zum **Regelfall** werden.
+
+**Entschieden (Alrik):** Kassen-Genehmigung wird **organisatorisch** sichergestellt, **kein** System-Gate — das System berechnet immer **2×**. Anfahrt: der **zuerst geplante Termin (Mitarbeiter A)** trägt sie zur Kasse; der **Zweit-Termin** wird per Flag `anfahrtNichtAbrechnen` **nur im Lohn** berücksichtigt, nicht in der §45b-/Kassen-Abrechnung.
+
+**Entschieden (Alrik):** Beide Kräfte dokumentieren ihre Leistung(en) **unabhängig** — gleich oder unterschiedlich. Jeder Termin läuft mit seiner eigenen Leistung durch die **bestehende Budget-Kaskade** (§45b → §45a → §39/§42a → privat, FIFO/Cap), also je Leistung in den **definierten** Topf, ohne Sonderlogik. Damit sind alle Fachfragen geklärt — der Handoff ist final.
+
+## 5. Paste-fertiger Replit-Handoff (Konzept, noch kein Build)
+
+> **Zwei-Kräfte-Einsatz als verknüpftes Termin-Paar (Option A).** Read-only Inventur zuerst, dann additiv. (a) Neues Feld `coVisitGroupId` (nullable) an `appointments`, das zwei gleichzeitige Termine **desselben Kunden** mit **verschiedenen** Mitarbeitern als einen Einsatz verknüpft. (b) `checkCustomerOverlap` so anpassen, dass ein Kunden-Overlap **erlaubt** ist, wenn es sich um ein Co-Visit-Paar (gleiche `coVisitGroupId`, unterschiedliche `assignedEmployeeId`) handelt; **`checkOverlap` (Mitarbeiter) bleibt hart**. (c) **Beide** Termine werden regulär berechnet — Leistung **zweifach** (2× Consumption/Budget-Kaskade, 2× Kassenrechnung), **inkl. beider Anfahrten** ganz normal wie bei Einzelterminen. **Keine Anfahrt-Sonderbehandlung, kein Flag, kein Eingriff in `appointment-cost-calculator`/Consumption.** (d) Dokumentation, Leistungsnachweis und Lohn bleiben **je Termin/Mitarbeiter unverändert** — beide dokumentieren und werden entlohnt. (e) **Kein Genehmigungs-Gate** (organisatorisch abgesichert) — immer 2× berechnen. **Keine Anfahrt-Sonderbehandlung:** beide Termine tragen ihre Anfahrt normal (beide MA bekommen Anfahrt im Lohn, beide Anfahrten werden berechnet) — **kein Flag, kein Eingriff** in `appointment-cost-calculator`/Consumption/`payroll-hours`. **Budget-Nutzung:** beide Legs dokumentieren **unabhängig** ihre Leistung(en) und laufen **unverändert** durch die bestehende Consumption-**Kaskade** (`planCascade`/`createCascadeConsumption`: `entlastungsbetrag_45b` → `umwandlung_45a` → `ersatzpflege_39_42a` → privat, FIFO/Cap) — **keine §45b-Sonderlogik**, Buchung je Leistung in den definierten Topf. 2× Verbrauch → Töpfe erschöpfen schneller, bestehende Trim-Logik greift. **Deterministische Verbrauchsreihenfolge:** Lead-Termin vor Zweit-Termin (Tiebreaker bei gleichem Zeitstempel). **Out of scope:** Junction-Modell (Option B), Änderungen am LN-Invariant/an der Budget-Kaskade selbst, generischer Termin-Edit-Pfad.
+
+---
+
+## Quellen (Best-Practice-Recherche)
+- Zwei-Kräfte-Einsatz nur mit vorheriger Kassen-Zustimmung, 1,5-/2-fach, Anfahrt nur einmal: [vdek Leistungskomplexkatalog (PDF)](https://www.vdek.com/LVen/SHS/Vertragspartner/download-center/Pflege/_jcr_content/par/download_575019127/file.res/Leistungskomplexkatalog.pdf), [betanet – Leistungskomplexe/Abrechnung](https://www.betanet.de/leistungskomplexe.html)
+- Alle beteiligten MA dokumentieren, max. 2 LBNR je Leistung, LBNR-Pflicht seit 2023: [rzh – LBNR-Dokumentation auf Leistungsnachweisen](https://www.rzh.de/lbnr-dokumentation-auf-leistungsnachweisen/), [§105 SGB XI](https://www.sozialgesetzbuch-sgb.de/sgbxi/105.html)
