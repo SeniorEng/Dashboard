@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,9 +29,51 @@ import {
   useHideRuleMutations,
 } from "../hooks";
 import type { MatchFilter } from "../types";
+import { enumerateMonthlyWindows } from "@shared/domain/qonto/backfill-windows";
 
 // Task #1599 — Vorbelegtes Standard-Startdatum für den Voll-Abruf.
 const DEFAULT_BACKFILL_START = "2026-06-01";
+
+// Task #1606 — Schwelle, ab der ein Backfill als „groß/langsam" gilt.
+const LARGE_BACKFILL_WINDOW_THRESHOLD = 6;
+
+/**
+ * Task #1606 — Schätzt Umfang eines Backfills ab dem gewählten Startdatum bis
+ * heute: Anzahl der Monats-Fenster (== Qonto-Abfragen pro Konto) und wie weit
+ * zurück der Zeitraum reicht. Reine Anzeige-Hilfe, ändert die Backfill-Semantik
+ * nicht.
+ */
+function estimateBackfillScope(startDateStr: string): {
+  windowCount: number;
+  monthsBack: number;
+  isLarge: boolean;
+} | null {
+  if (!startDateStr) return null;
+  const start = new Date(`${startDateStr}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+  const now = new Date();
+  if (start.getTime() > now.getTime()) {
+    return { windowCount: 0, monthsBack: 0, isLarge: false };
+  }
+  const windowCount = enumerateMonthlyWindows(start, now).length;
+  const monthsBack =
+    (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  return {
+    windowCount,
+    monthsBack,
+    isLarge: windowCount >= LARGE_BACKFILL_WINDOW_THRESHOLD,
+  };
+}
+
+function formatMonthsBack(monthsBack: number): string {
+  if (monthsBack <= 0) return "den aktuellen Monat";
+  const years = Math.floor(monthsBack / 12);
+  const months = monthsBack % 12;
+  const parts: string[] = [];
+  if (years > 0) parts.push(years === 1 ? "1 Jahr" : `${years} Jahre`);
+  if (months > 0) parts.push(months === 1 ? "1 Monat" : `${months} Monate`);
+  return parts.length > 0 ? parts.join(" und ") : "unter 1 Monat";
+}
 
 export function TransactionsTab({
   configured,
@@ -47,6 +89,7 @@ export function TransactionsTab({
   const [matchingTxId, setMatchingTxId] = useState<number | null>(null);
   const [backfillConfirmOpen, setBackfillConfirmOpen] = useState(false);
   const [backfillDate, setBackfillDate] = useState(DEFAULT_BACKFILL_START);
+  const backfillScope = useMemo(() => estimateBackfillScope(backfillDate), [backfillDate]);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [newRuleType, setNewRuleType] = useState<"counterparty" | "iban">("counterparty");
   const [newRuleValue, setNewRuleValue] = useState("");
@@ -477,6 +520,27 @@ export function TransactionsTab({
               verwenden.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {backfillScope && backfillScope.windowCount > 0 && (
+            <div
+              className={`rounded-md border px-3 py-2 text-sm ${
+                backfillScope.isLarge
+                  ? "border-amber-300 bg-amber-50 text-amber-800"
+                  : "border-gray-200 bg-gray-50 text-gray-700"
+              }`}
+              data-testid="text-backfill-scope"
+            >
+              <p>
+                Umfang: <strong>{backfillScope.windowCount}</strong> Monats-Fenster pro Konto
+                (Zeitraum: {formatMonthsBack(backfillScope.monthsBack)} zurück).
+              </p>
+              {backfillScope.isLarge && (
+                <p className="mt-1 font-medium" data-testid="text-backfill-large-warning">
+                  Das ist ein großer Abruf und kann mehrere Minuten dauern. Für ein
+                  aktuelles Startdatum wird der Vorgang deutlich kürzer.
+                </p>
+              )}
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-backfill">Abbrechen</AlertDialogCancel>
             <AlertDialogAction
