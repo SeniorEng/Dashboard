@@ -35,9 +35,16 @@ export function appointmentDocumentedAndSignedCondition(): SQL {
 /**
  * Drizzle-Bedingung „completed, aber unsigniert" — der Anteil der completed-Termine
  * ohne jegliche Unterschrift (weder direkt noch via Leistungsnachweis).
+ *
+ * Carve-out (Task #1586): Erstberatungen (`appointment_type = 'Erstberatung'`) werden
+ * dokumentiert (status = 'completed'), bekommen aber NIE eine Unterschrift — es gibt
+ * keinen Kunden, gegen den unterschrieben würde. Sie sind daher hier ausgeschlossen
+ * und tauchen nie als „Unterschrift fehlt" auf. `appointment_type` ist `NOT NULL`,
+ * daher ist `<> 'Erstberatung'` ohne NULL-Falle sicher. MUSS mit `completedButUnsignedSqlRaw`
+ * in lockstep bleiben.
  */
 export function appointmentCompletedButUnsignedCondition(): SQL {
-  return sql`(${appointments.status} = 'completed' AND ${appointments.signatureData} IS NULL AND NOT ${SIGNED_SR_EXISTS})`;
+  return sql`(${appointments.status} = 'completed' AND ${appointments.appointmentType} <> 'Erstberatung' AND ${appointments.signatureData} IS NULL AND NOT ${SIGNED_SR_EXISTS})`;
 }
 
 /**
@@ -93,10 +100,15 @@ export function documentedSqlRaw(alias: string): SQL {
  * einem Tabellen-Alias arbeiten (z.B. `FROM appointments a`). Spiegelt
  * `appointmentCompletedButUnsignedCondition()` und MUSS mit dem reinen TS-Prädikat
  * in `shared/domain/appointments.ts` in lockstep bleiben.
+ *
+ * Carve-out (Task #1586): Erstberatungen (`appointment_type = 'Erstberatung'`) sind
+ * ausgeschlossen — sie werden dokumentiert, aber nie unterschrieben (kein Kunde).
+ * `appointment_type` ist `NOT NULL`, daher ist `<> 'Erstberatung'` NULL-sicher. MUSS
+ * mit `appointmentCompletedButUnsignedCondition()` in lockstep bleiben.
  */
 export function completedButUnsignedSqlRaw(alias: string): SQL {
   const a = sql.raw(alias);
-  return sql`(${a}.status = 'completed' AND ${a}.signature_data IS NULL AND NOT EXISTS (
+  return sql`(${a}.status = 'completed' AND ${a}.appointment_type <> 'Erstberatung' AND ${a}.signature_data IS NULL AND NOT EXISTS (
     SELECT 1
     FROM service_record_appointments sra
     JOIN monthly_service_records msr ON msr.id = sra.service_record_id

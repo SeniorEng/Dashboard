@@ -4,15 +4,17 @@
  * Der Überblick zählt unsignierte, dokumentierte Termine je Mitarbeiter
  * (`unsignedAppointmentCount`/`unsignedMinutes`, SSoT in
  * `server/storage/time-tracking/payroll-hours.ts`) OHNE Kunden-Join. Die
- * Detailliste (GET /mitarbeiterabrechnung/unsigned-appointments) holte die
- * Termine früher über einen INNER JOIN auf `customers` — jeder Termin ohne
- * auflösbaren Kunden (`customer_id` NULL oder verwaister Verweis) wurde damit
- * gezählt, aber aus der Liste herausgefiltert („Anzeige-gegen-Anzeige"-Drift).
+ * Detailliste (GET /mitarbeiterabrechnung/unsigned-appointments) holt die
+ * Termine über einen LEFT JOIN auf `customers` — Zähler (Anzahl + Minuten) und
+ * Detailliste (Länge + Summe Minuten) MÜSSEN deckungsgleich sein.
  *
- * Nach dem Fix (LEFT JOIN + Platzhalter) MÜSSEN Zähler (Anzahl + Minuten) und
- * Detailliste (Länge + Summe Minuten) deckungsgleich sein — auch für den Fall
- * „unsignierter Termin ohne auflösbaren Kunden" — und beide fallen auf 0,
- * sobald der Termin unterschrieben ist.
+ * Task #1586 — Carve-out: Erstberatungen (`appointment_type = 'Erstberatung'`)
+ * werden dokumentiert, bekommen aber NIE eine Unterschrift (kein Kunde). Sie
+ * sind aus der SSoT „completed, aber unsigniert" ausgeschlossen und dürfen
+ * daher WEDER im Zähler NOCH in der Detailliste auftauchen. Der einzige real
+ * mögliche kundenlose Fall ist eine Erstberatung — sie wird hier als
+ * ausgeschlossen behauptet; ein normaler Termin (mit Kunde, completed,
+ * unsigniert) bleibt gezählt und gelistet (Invariante Zähler ≡ Liste hält).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { sql } from "drizzle-orm";
@@ -124,13 +126,15 @@ describe("Task #1569: Übersichts-Zähler ≡ Detailliste (Noch nicht abrechenba
     apptWithCustomerId = a1.appointmentId;
     await makeCompletedUnsigned(apptWithCustomerId, DATE_WITH_CUSTOMER, MIN_WITH_CUSTOMER);
 
-    // Kern-Fall: Termin OHNE auflösbaren Kunden. Der einzige real mögliche Fall
-    // ist ein Interessenten-Termin (Erstberatung): der CHECK-Constraint
+    // Kern-Fall (Task #1586): Termin OHNE auflösbaren Kunden. Der einzige real
+    // mögliche Fall ist ein Interessenten-Termin (Erstberatung): der CHECK-Constraint
     // `appointments_prospect_or_customer_check` verlangt prospect_id ODER
     // customer_id, und die FK verhindert einen verwaisten customer_id-Verweis —
-    // also customer_id NULL + prospect_id gesetzt. Ein solcher Termin wird vom
-    // Überblick gezählt, fiel aber früher durch den INNER JOIN auf `customers`
-    // aus der Detailliste. Direkt per SQL angelegt (keine Budget-Transaktionen),
+    // also customer_id NULL + prospect_id gesetzt. Erstberatungen werden
+    // dokumentiert (status='completed'), aber nie unterschrieben; sie sind aus
+    // der SSoT „completed, aber unsigniert" ausgeschlossen und dürfen weder im
+    // Zähler noch in der Liste erscheinen. Mit dem kanonischen appointment_type
+    // 'Erstberatung' (groß) angelegt. Direkt per SQL (keine Budget-Transaktionen),
     // damit die Aufräumung nicht am GoBD-Trigger scheitert.
     const prospectRes = await db.execute(sql`
       INSERT INTO prospects (vorname, nachname, status)
@@ -145,7 +149,7 @@ describe("Task #1569: Übersichts-Zähler ≡ Detailliste (Noch nicht abrechenba
         scheduled_start, scheduled_end, duration_promised, status,
         signature_data, performed_by_employee_id, assigned_employee_id
       ) VALUES (
-        ${prospectId}, NULL, 'erstberatung', ${DATE_ORPHAN},
+        ${prospectId}, NULL, 'Erstberatung', ${DATE_ORPHAN},
         '09:00:00', '09:45:00', ${MIN_ORPHAN}, 'completed',
         NULL, ${employeeId}, ${employeeId}
       ) RETURNING id
@@ -170,27 +174,29 @@ describe("Task #1569: Übersichts-Zähler ≡ Detailliste (Noch nicht abrechenba
     await deactivateTestEmployee(employeeId);
   });
 
-  it("zählt beide unsignierten Termine — inkl. dem ohne auflösbaren Kunden — im Überblick UND in der Liste", async () => {
+  it("zählt nur den Nicht-Erstberatungs-Termin — die Erstberatung ist aus Zähler UND Liste ausgeschlossen", async () => {
     const overview = await getOverviewRow();
     const list = await getUnsignedList();
 
-    // Kontroll-Anker: genau zwei Termine, Summe der Minuten stimmt.
-    expect(overview.unsignedAppointmentCount).toBe(2);
-    expect(overview.unsignedMinutes).toBe(MIN_WITH_CUSTOMER + MIN_ORPHAN);
+    // Kontroll-Anker: genau EIN Termin (der mit Kunde), Erstberatung fällt raus.
+    expect(overview.unsignedAppointmentCount).toBe(1);
+    expect(overview.unsignedMinutes).toBe(MIN_WITH_CUSTOMER);
 
     // Kern-Invariante: Zähler ≡ Detailliste (Anzahl + Summe Minuten).
     expect(list.length).toBe(overview.unsignedAppointmentCount);
     const listMinutes = list.reduce((s, a) => s + a.minutes, 0);
     expect(listMinutes).toBe(overview.unsignedMinutes);
 
-    // Der Termin ohne Kundenzuordnung erscheint mit dem Interessenten-Namen
-    // (Task #1570), nicht mit dem generischen Platzhalter — kein stiller Wegfall.
-    const orphan = list.find((a) => a.id === apptOrphanId);
-    expect(orphan, "Termin ohne auflösbaren Kunden muss in der Liste stehen").toBeDefined();
-    expect(orphan!.customerName).toBe("Interessent: Test1569 OrphanProspect");
+    // Der Nicht-Erstberatungs-Termin ist vorhanden …
+    expect(list.some((a) => a.id === apptWithCustomerId)).toBe(true);
+    // … die dokumentierte, unsignierte Erstberatung NICHT (Task #1586).
+    expect(
+      list.find((a) => a.id === apptOrphanId),
+      "Erstberatung darf nicht als unsigniert gelistet werden",
+    ).toBeUndefined();
   });
 
-  it("fällt auf 0, sobald beide Termine unterschrieben sind (Zähler UND Liste)", async () => {
+  it("fällt auf 0, sobald der gezählte Termin unterschrieben ist (Zähler UND Liste)", async () => {
     await db.execute(sql`
       UPDATE appointments
       SET signature_data = 'data:image/png;base64,SIGNED_1569'
