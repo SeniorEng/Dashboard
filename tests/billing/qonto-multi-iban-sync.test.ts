@@ -15,9 +15,9 @@ import { storage } from "../../server/storage";
 import { qontoService } from "../../server/services/qonto";
 import { qontoStorage } from "../../server/storage/qonto";
 import { db } from "../../server/lib/db";
-import { qontoTransactions, qontoHideRules } from "../../shared/schema";
-import { eq, inArray } from "drizzle-orm";
-import { uniqueId } from "../test-utils";
+import { qontoTransactions, qontoHideRules, auditLog } from "../../shared/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { uniqueId, apiPost, apiDelete } from "../test-utils";
 
 const PRIMARY_IBAN = "DE00PRIMARY0000000001";
 const SECOND_IBAN = "DE00SECOND0000000002";
@@ -280,5 +280,142 @@ describe("Qonto un-hide Override überlebt Re-Sync (Task #1605)", () => {
     const matchingAfter = await reload(TX_MATCHING);
     expect(matchingAfter.billingIrrelevantAt).not.toBeNull();
     expect(matchingAfter.billingIrrelevantSource).toBe("auto");
+  });
+});
+
+// Task #1608 — Der manuelle „Un-hide"-Button (DELETE /transactions/:id/ignore)
+// muss den Override end-to-end über die auditierte Route setzen (nicht nur per
+// direktem DB-Schreiben wie #1605). Eine Regression in der Route — z.B. das
+// Override zu setzen vergessen, oder der „doch nicht relevant"-Pfad, der das
+// Override wieder löschen muss — würde die bisherige Coverage passieren.
+// Deshalb hier die echten HTTP-Routen mit authentifiziertem Nutzer.
+describe("Qonto un-hide/hide Routen setzen Override auditiert (Task #1608)", () => {
+  const rtag = uniqueId();
+  const TX_ROUTE = `qonto-tx-route-${rtag}`;
+  const HIDE_VALUE = `finanzamt-route-${rtag}`;
+  let ruleId: number | null = null;
+  let txDbId: number | null = null;
+
+  // Vorige Blöcke stubben `global.fetch` (Qonto-API-Mock) und stellen es nicht
+  // immer wieder her. Diese Suite ruft ECHTE HTTP-Routen über `apiPost`/
+  // `apiDelete` (= `fetch`) auf → das echte `fetch` muss wieder aktiv sein,
+  // sonst schlägt schon das Login (kein Set-Cookie) fehl.
+  beforeAll(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function seedCreditTx(externalId: string) {
+    const [row] = await db
+      .insert(qontoTransactions)
+      .values({
+        qontoTransactionId: externalId,
+        amountCents: 7500,
+        currency: "EUR",
+        side: "credit",
+        counterpartyName: `Finanzamt ${HIDE_VALUE}`,
+        emittedAt: new Date(),
+        status: "completed",
+      })
+      .returning();
+    return row;
+  }
+
+  async function reload(id: number) {
+    const [row] = await db
+      .select()
+      .from(qontoTransactions)
+      .where(eq(qontoTransactions.id, id));
+    return row;
+  }
+
+  async function countAudit(action: string, entityId: number): Promise<number> {
+    const rows = await db
+      .select({ id: auditLog.id })
+      .from(auditLog)
+      .where(and(
+        eq(auditLog.action, action),
+        eq(auditLog.entityType, "qonto_transaction"),
+        eq(auditLog.entityId, entityId),
+      ));
+    return rows.length;
+  }
+
+  afterAll(async () => {
+    // audit_log ist GoBD-unveränderbar (Trigger) → Löschen nur über Bypass-GUC.
+    if (txDbId !== null) {
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL app.allow_audit_log_mutation = 'on'`);
+        await tx.delete(auditLog).where(and(
+          eq(auditLog.entityType, "qonto_transaction"),
+          eq(auditLog.entityId, txDbId!),
+        ));
+      });
+    }
+    await db
+      .delete(qontoTransactions)
+      .where(eq(qontoTransactions.qontoTransactionId, TX_ROUTE));
+    if (ruleId !== null) {
+      await db.delete(qontoHideRules).where(eq(qontoHideRules.id, ruleId));
+    }
+  });
+
+  it("DELETE /transactions/:id/ignore setzt den Override, auditiert ihn und schützt vor erneutem Auto-Hide", async () => {
+    const seeded = await seedCreditTx(TX_ROUTE);
+    txDbId = seeded.id;
+
+    // Passende Auto-Ausblenden-Regel: würde ohne Override erneut greifen.
+    const rule = await qontoStorage.createHideRule({
+      ruleType: "counterparty",
+      value: HIDE_VALUE,
+      createdByUserId: null,
+    });
+    ruleId = rule.id;
+
+    // Erst manuell ausblenden (POST-Route), damit ein DELETE etwas aufzuheben hat.
+    const hideRes = await apiPost(`/api/admin/qonto/transactions/${txDbId}/ignore`, {});
+    expect(hideRes.status).toBe(200);
+    const afterHide = await reload(txDbId);
+    expect(afterHide.billingIrrelevantAt).not.toBeNull();
+    expect(afterHide.billingIrrelevantSource).toBe("manual");
+    expect(await countAudit("qonto_transaction_marked_irrelevant", txDbId)).toBe(1);
+
+    // Jetzt der eigentliche „Un-hide"-Button: DELETE-Route.
+    const unhideRes = await apiDelete(`/api/admin/qonto/transactions/${txDbId}/ignore`);
+    expect(unhideRes.status).toBe(200);
+
+    const afterUnhide = await reload(txDbId);
+    // Override gesetzt, Markierung + Quelle gelöscht.
+    expect(afterUnhide.billingIrrelevantAt).toBeNull();
+    expect(afterUnhide.billingIrrelevantSource).toBeNull();
+    expect(afterUnhide.billingRelevantOverrideAt).not.toBeNull();
+
+    // Audit-Zeile für das Aufheben.
+    expect(await countAudit("qonto_transaction_unmarked_irrelevant", txDbId)).toBe(1);
+
+    // Der eigentliche Schutz: applyHideRules darf die Transaktion trotz
+    // passender Regel NICHT wieder ausblenden.
+    await qontoService.applyHideRules();
+    const afterRules = await reload(txDbId);
+    expect(afterRules.billingIrrelevantAt).toBeNull();
+    expect(afterRules.billingRelevantOverrideAt).not.toBeNull();
+  });
+
+  it("POST /transactions/:id/ignore löscht einen bestehenden Override wieder (bewusstes Ausblenden gewinnt)", async () => {
+    // Vorbedingung aus dem vorigen Test: Transaktion ist sichtbar mit Override.
+    expect(txDbId).not.toBeNull();
+    const before = await reload(txDbId!);
+    expect(before.billingRelevantOverrideAt).not.toBeNull();
+
+    const hideRes = await apiPost(`/api/admin/qonto/transactions/${txDbId}/ignore`, {});
+    expect(hideRes.status).toBe(200);
+
+    const after = await reload(txDbId!);
+    // Ausblenden gesetzt, Override wieder gelöscht.
+    expect(after.billingIrrelevantAt).not.toBeNull();
+    expect(after.billingIrrelevantSource).toBe("manual");
+    expect(after.billingRelevantOverrideAt).toBeNull();
+
+    // Zweite marked_irrelevant-Audit-Zeile (die erste stammt aus dem 1. Test).
+    expect(await countAudit("qonto_transaction_marked_irrelevant", txDbId!)).toBe(2);
   });
 });
