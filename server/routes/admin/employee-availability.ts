@@ -515,7 +515,7 @@ router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht g
     loadTeamWorkload(),
     getGlobalAvgHoursPerCustomerPerMonth(),
   ]);
-  const workloadMap: Record<number, { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number; monthsConsidered: number; monthlyWorkHours: number | null; employmentType: "minijobber" | "sozialversicherungspflichtig"; assignments: { id: number; name: string; role: "HV" | "V1" | "V2" }[] }> = {};
+  const workloadMap: Record<number, { primaryCount: number; backupCount: number; backup2Count: number; avgMonthlyHwMinutes: number; avgMonthlyAllMinutes: number; avgProdHvMinutes: number; avgOverheadMinutes: number; avgSickVacMinutes: number; monthsConsidered: number; monthlyWorkHours: number | null; employmentType: "minijobber" | "sozialversicherungspflichtig"; assignments: { id: number; name: string; role: "HV" | "V1" | "V2" }[] }> = {};
   for (const r of rows) {
     workloadMap[r.employeeId] = {
       primaryCount: r.primaryCount,
@@ -523,6 +523,9 @@ router.get("/employees/workload", asyncHandler("Auslastungsdaten konnten nicht g
       backup2Count: r.backup2Count,
       avgMonthlyHwMinutes: r.avgMonthlyHwMinutes,
       avgMonthlyAllMinutes: r.avgMonthlyAllMinutes,
+      avgProdHvMinutes: r.avgProdHvMinutes,
+      avgOverheadMinutes: r.avgOverheadMinutes,
+      avgSickVacMinutes: r.avgSickVacMinutes,
       monthsConsidered: r.monthsConsidered,
       monthlyWorkHours: r.monthlyWorkHours,
       employmentType: r.employmentType,

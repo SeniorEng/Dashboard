@@ -36,6 +36,9 @@ router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werde
     backup2Count: number;
     avgMonthlyHwMinutes: number;
     avgMonthlyAllMinutes: number;
+    avgProdHvMinutes: number;
+    avgOverheadMinutes: number;
+    avgSickVacMinutes: number;
     monthsConsidered: number;
     monthlyWorkHours: number | null;
     employmentType: "minijobber" | "sozialversicherungspflichtig";
@@ -48,6 +51,9 @@ router.get("/workload", asyncHandler("Team-Auslastung konnte nicht geladen werde
       backup2Count: r.backup2Count,
       avgMonthlyHwMinutes: r.avgMonthlyHwMinutes,
       avgMonthlyAllMinutes: r.avgMonthlyAllMinutes,
+      avgProdHvMinutes: r.avgProdHvMinutes,
+      avgOverheadMinutes: r.avgOverheadMinutes,
+      avgSickVacMinutes: r.avgSickVacMinutes,
       monthsConsidered: r.monthsConsidered,
       monthlyWorkHours: r.monthlyWorkHours,
       employmentType: r.employmentType,

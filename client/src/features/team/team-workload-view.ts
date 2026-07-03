@@ -1,3 +1,8 @@
+import {
+  computeTeamWorkload,
+  type TeamWorkloadInputs,
+  type TeamWorkloadMetrics,
+} from "@shared/domain/team-workload";
 import type {
   TeamWorkloadEmployee,
   TeamWorkloadEntry,
@@ -12,18 +17,10 @@ export type SortKey =
   | "auslastung-asc"
   | "freie-kunden-desc";
 
-export interface SollIstView {
-  sollHours: number | null;
-  istHours: number;
-  auslastungPct: number | null;
-  freieStunden: number | null;
-  moeglicheZusatzKunden: number | null;
-}
-
 export interface TeamWorkloadRow {
   employee: TeamWorkloadEmployee & { displayName: string; roles: string[] };
   workload: TeamWorkloadEntry;
-  sollIst: SollIstView;
+  metrics: TeamWorkloadMetrics;
 }
 
 export type TeamWorkloadViewState =
@@ -40,6 +37,9 @@ export function emptyEntry(): TeamWorkloadEntry {
     backup2Count: 0,
     avgMonthlyHwMinutes: 0,
     avgMonthlyAllMinutes: 0,
+    avgProdHvMinutes: 0,
+    avgOverheadMinutes: 0,
+    avgSickVacMinutes: 0,
     monthsConsidered: 0,
     monthlyWorkHours: null,
     employmentType: "sozialversicherungspflichtig",
@@ -57,41 +57,21 @@ export function safeName(emp: {
   return combined || "Unbenannt";
 }
 
-export function deriveSollIst(
-  wl: TeamWorkloadEntry,
-  globalAvg: number,
-): SollIstView {
-  const istHoursRaw = (wl.avgMonthlyHwMinutes + wl.avgMonthlyAllMinutes) / 60;
-  const sollHours = wl.monthlyWorkHours;
-  if (sollHours === null || sollHours <= 0) {
-    return {
-      sollHours: null,
-      istHours: istHoursRaw,
-      auslastungPct: null,
-      freieStunden: null,
-      moeglicheZusatzKunden: null,
-    };
-  }
-  if (wl.monthsConsidered <= 0) {
-    return {
-      sollHours,
-      istHours: 0,
-      auslastungPct: null,
-      freieStunden: sollHours,
-      moeglicheZusatzKunden: null,
-    };
-  }
-  const auslastungPct = (istHoursRaw / sollHours) * 100;
-  const freieStunden = Math.max(0, sollHours - istHoursRaw);
-  const moeglicheZusatzKunden =
-    globalAvg > 0 ? Math.floor(freieStunden / globalAvg) : null;
-  return {
-    sollHours,
-    istHours: istHoursRaw,
-    auslastungPct,
-    freieStunden,
-    moeglicheZusatzKunden,
+/** Baut die SSoT-Inputs aus einer Workload-Zeile und ruft die EINE Rechenfunktion. */
+export function metricsFromEntry(wl: TeamWorkloadEntry): TeamWorkloadMetrics {
+  const inputs: TeamWorkloadInputs = {
+    monthlyWorkHours: wl.monthlyWorkHours,
+    avgProdPerformedHwMinutes: wl.avgMonthlyHwMinutes,
+    avgProdPerformedAllMinutes: wl.avgMonthlyAllMinutes,
+    avgProdHvMinutes: wl.avgProdHvMinutes,
+    avgOverheadMinutes: wl.avgOverheadMinutes,
+    avgSickVacMinutes: wl.avgSickVacMinutes,
+    hvCount: wl.primaryCount,
+    v1Count: wl.backupCount,
+    v2Count: wl.backup2Count,
+    monthsConsidered: wl.monthsConsidered,
   };
+  return computeTeamWorkload(inputs);
 }
 
 export function selectTeamWorkloadRows(args: {
@@ -102,7 +82,6 @@ export function selectTeamWorkloadRows(args: {
 }): TeamWorkloadRow[] {
   const { data, searchQuery, roleFilter, sortKey } = args;
   if (!data || !Array.isArray(data.employees)) return [];
-  const globalAvg = data.globalAvgHoursPerCustomerPerMonth ?? 0;
   const workloadMap = data.workload ?? {};
   const q = searchQuery.trim().toLowerCase();
   const filtered = data.employees.filter((emp) => {
@@ -114,7 +93,7 @@ export function selectTeamWorkloadRows(args: {
   });
   const withWorkload: TeamWorkloadRow[] = filtered.map((emp) => {
     const workload = workloadMap[emp.id] ?? emptyEntry();
-    const sollIst = deriveSollIst(workload, globalAvg);
+    const metrics = metricsFromEntry(workload);
     return {
       employee: {
         ...emp,
@@ -122,7 +101,7 @@ export function selectTeamWorkloadRows(args: {
         roles: Array.isArray(emp.roles) ? emp.roles : [],
       },
       workload,
-      sollIst,
+      metrics,
     };
   });
   withWorkload.sort((a, b) => {
@@ -137,18 +116,18 @@ export function selectTeamWorkloadRows(args: {
       case "hv-desc":
         return b.workload.primaryCount - a.workload.primaryCount;
       case "auslastung-desc": {
-        const av = a.sollIst.auslastungPct ?? -1;
-        const bv = b.sollIst.auslastungPct ?? -1;
+        const av = a.metrics.pct ?? -1;
+        const bv = b.metrics.pct ?? -1;
         return bv - av;
       }
       case "auslastung-asc": {
-        const av = a.sollIst.auslastungPct ?? Number.POSITIVE_INFINITY;
-        const bv = b.sollIst.auslastungPct ?? Number.POSITIVE_INFINITY;
+        const av = a.metrics.pct ?? Number.POSITIVE_INFINITY;
+        const bv = b.metrics.pct ?? Number.POSITIVE_INFINITY;
         return av - bv;
       }
       case "freie-kunden-desc": {
-        const av = a.sollIst.moeglicheZusatzKunden ?? -1;
-        const bv = b.sollIst.moeglicheZusatzKunden ?? -1;
+        const av = a.metrics.addClients ?? -1;
+        const bv = b.metrics.addClients ?? -1;
         return bv - av;
       }
       default:

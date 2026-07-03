@@ -18,13 +18,16 @@ import {
 } from "./test-utils";
 
 /**
- * Task #365 — Regressionsschutz für die monatsgenaue Auslastungs-Berechnung
- * in `server/lib/team-workload.ts`.
+ * Task #365 / #1640 — Regressionsschutz für die monatsgenaue Divisor-Basis
+ * (`monthsConsidered`) in `server/lib/team-workload.ts`.
  *
- * Vor der Refaktorierung wurde der Durchschnitt fix durch 3 geteilt. Jetzt
- * werden Urlaubs-, Krankheits- und Vor-Eintrittsdatum-Tage anteilig aus dem
- * 3-Monats-Fenster herausgerechnet. Diese Tests pinnen `monthsConsidered`
- * an konkrete Werte, damit ein versehentliches Zurückdrehen sofort auffällt.
+ * Der Divisor ist die Beschäftigungs-Basis: Werktage AB Eintrittsdatum. Tage
+ * vor dem Eintritt schrumpfen den Divisor weiterhin. Abwesenheit
+ * (Urlaub/Krankheit) schrumpft den Divisor seit Task #1640 NICHT mehr — sie
+ * wird ausschließlich über den expliziten sickVac-Abzug in der SSoT
+ * (`computeTeamWorkload`) verrechnet, damit Abwesenheit nicht doppelt zählt.
+ * Diese Tests pinnen `monthsConsidered` an konkrete Werte, damit ein
+ * versehentliches Zurückdrehen sofort auffällt.
  */
 
 // Festes "now" in der Zukunft → 3-Monats-Fenster = Jan/Feb/Mär 2027.
@@ -80,8 +83,8 @@ afterAll(async () => {
   resetAuthCache();
 });
 
-describe("Task #365 — team-workload monthsConsidered", () => {
-  it("zieht einen vollen Urlaubsmonat aus dem 3-Monats-Fenster heraus", async () => {
+describe("Task #365 / #1640 — team-workload monthsConsidered", () => {
+  it("ein voller Urlaubsmonat schrumpft den Divisor NICHT mehr (Abwesenheit zählt separat als sickVac)", async () => {
     await getAuthCookie();
     const emp = await createTestEmployee({ nachnamePrefix: "T365_Vac" });
     createdEmployeeIds.push(emp.id);
@@ -124,8 +127,9 @@ describe("Task #365 — team-workload monthsConsidered", () => {
     createdServiceIds.push(hwService.id);
 
     // Dokumentierte Termine: 240 Min im Januar + 240 Min im März.
-    // Der Februar bleibt leer (kompletter Urlaub) → Σ = 480 Min auf 2 Monate.
-    // Alte "fix durch 3"-Logik: 480/3 = 160. Neue Logik: 480/2 = 240.
+    // Der Februar bleibt produktiv leer (kompletter Urlaub) → Σ = 480 Min.
+    // Der Divisor bleibt 3.0 (Eintritt weit vor dem Fenster, Abwesenheit
+    // schrumpft ihn seit #1640 NICHT mehr) → 480 / 3 = 160.
     const apptValues = [
       { date: "2027-01-15", duration: 240 },
       { date: "2027-03-15", duration: 240 },
@@ -157,13 +161,16 @@ describe("Task #365 — team-workload monthsConsidered", () => {
     const row = rows.find((r) => r.employeeId === emp.id);
 
     expect(row, "Mitarbeiter sollte in der Workload-Liste auftauchen").toBeDefined();
-    // Jan 2027 = 1.0, Feb 2027 = 0.0 (komplett Urlaub), Mär 2027 = 1.0 → 2.0.
-    // Würde der alte "fix durch 3"-Code zurückkehren, käme hier 3.0 raus.
-    expect(row!.monthsConsidered).toBeCloseTo(2.0, 2);
-    // Kernregression: Durchschnitt teilt durch 2 (verfügbare Monate),
-    // nicht durch 3 (Fenstergröße). 480 Min / 2 = 240 (alt: 160).
-    expect(row!.avgMonthlyHwMinutes).toBe(240);
+    // Kernregression #1640: Abwesenheit schrumpft den Divisor NICHT. Alle drei
+    // Monate sind Beschäftigungs-Monate (Eintritt 2024) → monthsConsidered = 3.0.
+    // Würde die alte absence-shrink-Logik zurückkehren, käme hier 2.0 raus.
+    expect(row!.monthsConsidered).toBeCloseTo(3.0, 2);
+    // 480 produktive Min / 3 = 160.
+    expect(row!.avgMonthlyHwMinutes).toBe(160);
     expect(row!.avgMonthlyAllMinutes).toBe(0);
+    // Der volle Urlaubsmonat taucht stattdessen als sickVac-Abzug auf:
+    // 20 Werktage × 480 Min = 9600 Min / 3 = 3200.
+    expect(row!.avgSickVacMinutes).toBe(3200);
   });
 
   it("schliesst Tage vor dem Eintrittsdatum aus dem Fenster aus", async () => {

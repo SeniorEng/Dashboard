@@ -16,19 +16,21 @@ export interface WorkloadRow {
   primaryCount: number;
   backupCount: number;
   backup2Count: number;
+  /** Ø selbst geleistete produktive HW-Minuten/Monat (alle Rollen, HV + Vertretung). */
   avgMonthlyHwMinutes: number;
+  /** Ø selbst geleistete produktive Alltagsbegleitungs-Minuten/Monat (alle Rollen). */
   avgMonthlyAllMinutes: number;
+  /** Ø produktive Minuten/Monat der EIGENEN HV-Kunden (HW + AB). Kapazitäts-Basis. */
+  avgProdHvMinutes: number;
+  /** Ø Overhead-Minuten/Monat (Büroarbeit/Vertrieb/Sonstiges). */
+  avgOverheadMinutes: number;
+  /** Ø Krank-/Urlaubs-Minuten/Monat. */
+  avgSickVacMinutes: number;
+  /** Beschäftigungsmonate im Fenster (0..3, fraktional). Divisor aller Ø-Werte. */
   monthsConsidered: number;
   monthlyWorkHours: number | null;
   employmentType: EmploymentType;
   assignments: CustomerAssignment[];
-}
-
-export interface SollIstResult {
-  istHours: number;
-  auslastungPct: number | null;
-  freieStunden: number | null;
-  moeglicheZusatzKunden: number | null;
 }
 
 function pad2(n: number): string {
@@ -85,49 +87,15 @@ export async function loadTeamWorkload(now: Date = new Date()): Promise<Workload
       backup2Count: Number(r.backup2Count),
       avgMonthlyHwMinutes: Number(r.avgMonthlyHwMinutes),
       avgMonthlyAllMinutes: Number(r.avgMonthlyAllMinutes),
+      avgProdHvMinutes: Number(r.avgProdHvMinutes),
+      avgOverheadMinutes: Number(r.avgOverheadMinutes),
+      avgSickVacMinutes: Number(r.avgSickVacMinutes),
       monthsConsidered: Number(r.monthsConsidered),
       monthlyWorkHours: monthly === null || monthly === undefined ? null : Number(monthly),
       employmentType: (empType === "minijobber" ? "minijobber" : "sozialversicherungspflichtig"),
       assignments,
     };
   });
-}
-
-/**
- * Pure calculation: ergibt Soll-Ist und mögliche Zusatzkunden für eine Workload-Zeile.
- * Edge cases:
- * - monthlyWorkHours null → alle Kennzahlen null (UI zeigt Hinweis "Vertragsstunden fehlen").
- * - monthlyWorkHours <= 0 → alle Kennzahlen null (UI zeigt "n/a", KEIN Hinweis-Badge).
- *   Die Unterscheidung null vs 0 erfolgt im Frontend anhand von row.monthlyWorkHours.
- * - monthsConsidered 0 → istHours 0, Auslastung null.
- * - globalAvgHoursPerCustomerPerMonth <= 0 → moeglicheZusatzKunden null.
- * - istHours > sollHours → freieStunden 0, moeglicheZusatzKunden 0.
- */
-export function computeSollIst(
-  row: Pick<WorkloadRow, "avgMonthlyHwMinutes" | "avgMonthlyAllMinutes" | "monthsConsidered" | "monthlyWorkHours">,
-  globalAvgHoursPerCustomerPerMonth: number,
-): SollIstResult {
-  const istHours = (row.avgMonthlyHwMinutes + row.avgMonthlyAllMinutes) / 60;
-
-  if (row.monthlyWorkHours === null || row.monthlyWorkHours <= 0) {
-    return { istHours, auslastungPct: null, freieStunden: null, moeglicheZusatzKunden: null };
-  }
-  if (row.monthsConsidered <= 0) {
-    return { istHours: 0, auslastungPct: null, freieStunden: row.monthlyWorkHours, moeglicheZusatzKunden: null };
-  }
-
-  const sollHours = row.monthlyWorkHours;
-  const auslastungPct = (istHours / sollHours) * 100;
-  const freieStunden = Math.max(0, sollHours - istHours);
-
-  let moeglicheZusatzKunden: number | null;
-  if (globalAvgHoursPerCustomerPerMonth <= 0) {
-    moeglicheZusatzKunden = null;
-  } else {
-    moeglicheZusatzKunden = Math.floor(freieStunden / globalAvgHoursPerCustomerPerMonth);
-  }
-
-  return { istHours, auslastungPct, freieStunden, moeglicheZusatzKunden };
 }
 
 function workloadSql(params: {
@@ -194,15 +162,17 @@ function workloadSql(params: {
       LEFT JOIN customer_assignments ca ON ca.employee_id = ae.id
       GROUP BY ae.id
     ),
-    period_hours AS (
-      -- Ist-Stunden eines Mitarbeiters zählen NUR, wenn er den Termin selbst
-      -- durchgeführt hat UND Hauptverantwortlicher des Kunden ist. Vertretungs-
-      -- Einsätze (er springt für jemand anderen ein) fließen bewusst NICHT in
-      -- seine Auslastung ein, weil sie kein Stamm-Aufwand sind, sondern
-      -- Aushilfen, die nur greifen, wenn der eigentliche HV nicht kann.
+    prod_minutes AS (
+      -- Produktive Minuten je Mitarbeiter (= Durchführender, COALESCE
+      -- performed/assigned), getrennt nach Kategorie und danach, ob er dabei
+      -- Hauptverantwortlicher des Kunden ist (is_hv). prodPerformed = ALLE
+      -- selbst geleisteten Minuten (HV + Vertretung) → Last-Seite; prodHV =
+      -- nur is_hv → Kapazitäts-Seite. Vertretung fließt so in die Auslastung,
+      -- aber nicht in die Kapazität pro HV-Kunde.
       SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
-        s.lohnart_kategorie,
+        s.lohnart_kategorie AS category,
+        (c.primary_employee_id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)) AS is_hv,
         SUM(COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes))::numeric AS total_minutes
       FROM appointments a
       JOIN appointment_services asvc ON asvc.appointment_id = a.id
@@ -213,9 +183,24 @@ function workloadSql(params: {
         AND a.date::date >= ${windowStartStr}::date
         AND a.date::date < ${windowEndStr}::date
         AND s.unit_type = 'hours'
-        AND c.primary_employee_id = COALESCE(a.performed_by_employee_id, a.assigned_employee_id)
+        AND s.lohnart_kategorie IN ('hauswirtschaft', 'alltagsbegleitung')
         AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IN (SELECT id FROM active_employees)
-      GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id), s.lohnart_kategorie
+      GROUP BY 1, 2, 3
+    ),
+    time_entry_minutes AS (
+      -- Overhead (Büro/Vertrieb/Sonstiges) und Krank/Urlaub aus den
+      -- Zeiterfassungen im selben Fenster. Kategorien identisch zur
+      -- Statistik-Performance-Definition.
+      SELECT
+        ete.user_id AS employee_id,
+        COALESCE(SUM(ete.duration_minutes) FILTER (WHERE ete.entry_type IN ('bueroarbeit','vertrieb','sonstiges')), 0)::numeric AS overhead_minutes,
+        COALESCE(SUM(ete.duration_minutes) FILTER (WHERE ete.entry_type IN ('krankheit','urlaub')), 0)::numeric AS sickvac_minutes
+      FROM employee_time_entries ete
+      WHERE ete.deleted_at IS NULL
+        AND ete.entry_date >= ${windowStartStr}::date
+        AND ete.entry_date < ${windowEndStr}::date
+        AND ete.user_id IN (SELECT id FROM active_employees)
+      GROUP BY ete.user_id
     ),
     months AS (
       SELECT ${monthStarts[0]}::date AS month_start
@@ -223,6 +208,10 @@ function workloadSql(params: {
       UNION ALL SELECT ${monthStarts[2]}::date
     ),
     month_workdays AS (
+      -- Beschäftigungs-Basis: Werktage ab Eintrittsdatum. Abwesenheit
+      -- (Urlaub/Krankheit) schrumpft den Divisor NICHT mehr — sie wird
+      -- ausschließlich über den expliziten sickVac-Abzug im SSoT verrechnet,
+      -- damit Abwesenheit nicht doppelt zählt.
       SELECT
         ae.id AS employee_id,
         m.month_start,
@@ -230,14 +219,7 @@ function workloadSql(params: {
         COUNT(*) FILTER (
           WHERE EXTRACT(ISODOW FROM d.day) < 6
             AND (ae.eintrittsdatum IS NULL OR d.day >= ae.eintrittsdatum)
-            AND NOT EXISTS (
-              SELECT 1 FROM employee_time_entries ete
-              WHERE ete.user_id = ae.id
-                AND ete.entry_date = d.day
-                AND ete.entry_type IN ('urlaub','krankheit')
-                AND ete.deleted_at IS NULL
-            )
-        )::int AS available_workdays
+        )::int AS employed_workdays
       FROM active_employees ae
       CROSS JOIN months m
       CROSS JOIN LATERAL generate_series(
@@ -247,32 +229,48 @@ function workloadSql(params: {
       ) AS d(day)
       GROUP BY ae.id, m.month_start
     ),
-    months_considered AS (
+    window_months AS (
       SELECT
         employee_id,
         SUM(
           CASE WHEN total_workdays > 0
-            THEN LEAST(1.0, available_workdays::numeric / total_workdays)
+            THEN LEAST(1.0, employed_workdays::numeric / total_workdays)
             ELSE 0
           END
-        )::numeric AS months_considered
+        )::numeric AS window_months
       FROM month_workdays
       GROUP BY employee_id
     ),
     avg_minutes AS (
       SELECT
         ae.id AS employee_id,
-        CASE WHEN COALESCE(mc.months_considered, 0) > 0
-          THEN ROUND(COALESCE(SUM(CASE WHEN ph.lohnart_kategorie = 'hauswirtschaft' THEN ph.total_minutes END), 0) / mc.months_considered)::int
+        CASE WHEN COALESCE(wm.window_months, 0) > 0
+          THEN ROUND(COALESCE(SUM(pm.total_minutes) FILTER (WHERE pm.category = 'hauswirtschaft'), 0) / wm.window_months)::int
           ELSE 0 END AS avg_hw_minutes,
-        CASE WHEN COALESCE(mc.months_considered, 0) > 0
-          THEN ROUND(COALESCE(SUM(CASE WHEN ph.lohnart_kategorie = 'alltagsbegleitung' THEN ph.total_minutes END), 0) / mc.months_considered)::int
+        CASE WHEN COALESCE(wm.window_months, 0) > 0
+          THEN ROUND(COALESCE(SUM(pm.total_minutes) FILTER (WHERE pm.category = 'alltagsbegleitung'), 0) / wm.window_months)::int
           ELSE 0 END AS avg_all_minutes,
-        COALESCE(mc.months_considered, 0)::numeric AS months_considered
+        CASE WHEN COALESCE(wm.window_months, 0) > 0
+          THEN ROUND(COALESCE(SUM(pm.total_minutes) FILTER (WHERE pm.is_hv), 0) / wm.window_months)::int
+          ELSE 0 END AS avg_prod_hv_minutes,
+        COALESCE(wm.window_months, 0)::numeric AS months_considered
       FROM active_employees ae
-      LEFT JOIN period_hours ph ON ph.employee_id = ae.id
-      LEFT JOIN months_considered mc ON mc.employee_id = ae.id
-      GROUP BY ae.id, mc.months_considered
+      LEFT JOIN prod_minutes pm ON pm.employee_id = ae.id
+      LEFT JOIN window_months wm ON wm.employee_id = ae.id
+      GROUP BY ae.id, wm.window_months
+    ),
+    avg_time_entries AS (
+      SELECT
+        ae.id AS employee_id,
+        CASE WHEN COALESCE(wm.window_months, 0) > 0
+          THEN ROUND(COALESCE(tem.overhead_minutes, 0) / wm.window_months)::int
+          ELSE 0 END AS avg_overhead_minutes,
+        CASE WHEN COALESCE(wm.window_months, 0) > 0
+          THEN ROUND(COALESCE(tem.sickvac_minutes, 0) / wm.window_months)::int
+          ELSE 0 END AS avg_sickvac_minutes
+      FROM active_employees ae
+      LEFT JOIN time_entry_minutes tem ON tem.employee_id = ae.id
+      LEFT JOIN window_months wm ON wm.employee_id = ae.id
     )
     SELECT
       cc.employee_id AS "employeeId",
@@ -281,12 +279,16 @@ function workloadSql(params: {
       cc.v2_count AS "backup2Count",
       am.avg_hw_minutes AS "avgMonthlyHwMinutes",
       am.avg_all_minutes AS "avgMonthlyAllMinutes",
+      am.avg_prod_hv_minutes AS "avgProdHvMinutes",
+      ate.avg_overhead_minutes AS "avgOverheadMinutes",
+      ate.avg_sickvac_minutes AS "avgSickVacMinutes",
       am.months_considered AS "monthsConsidered",
       ae.monthly_work_hours AS "monthlyWorkHours",
       ae.employment_type AS "employmentType",
       caa.assignments AS "assignments"
     FROM customer_counts cc
     JOIN avg_minutes am ON am.employee_id = cc.employee_id
+    JOIN avg_time_entries ate ON ate.employee_id = cc.employee_id
     JOIN active_employees ae ON ae.id = cc.employee_id
     LEFT JOIN customer_assignments_agg caa ON caa.employee_id = cc.employee_id
   `;

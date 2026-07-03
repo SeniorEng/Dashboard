@@ -205,16 +205,14 @@ export default function AdminUsers() {
     },
   });
 
-  const globalAvg = workloadData?.globalAvgHoursPerCustomerPerMonth ?? 0;
-
   const userMetrics = useMemo(() => {
     const map = new Map<number, WorkloadMetrics | null>();
     if (!users || !workloadData) return map;
     for (const u of users) {
-      map.set(u.id, computeWorkloadMetrics(workloadData.workload[u.id], globalAvg));
+      map.set(u.id, computeWorkloadMetrics(workloadData.workload[u.id]));
     }
     return map;
-  }, [users, workloadData, globalAvg]);
+  }, [users, workloadData]);
 
   const counts = useMemo(() => {
     if (!users) return { alle: 0, ueberlastet: 0, kapazitaet: 0 };

@@ -9,6 +9,9 @@ export interface EmployeeWorkload {
   backup2Count: number;
   avgMonthlyHwMinutes: number;
   avgMonthlyAllMinutes: number;
+  avgProdHvMinutes: number;
+  avgOverheadMinutes: number;
+  avgSickVacMinutes: number;
   monthsConsidered: number;
   monthlyWorkHours: number | null;
   employmentType: EmploymentType;
