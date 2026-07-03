@@ -1,5 +1,16 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { iconSize } from "@/design-system";
 import { RefreshCw, Loader2, CheckCircle2, XCircle, Landmark, History } from "lucide-react";
 import { formatDate } from "../utils";
@@ -9,6 +20,7 @@ import type { QontoStatus } from "../types";
 export function StatusTab({ status, isLoading }: { status?: QontoStatus; isLoading: boolean }) {
   const syncMutation = useSyncMutation();
   const backfillMutation = useBackfillMutation();
+  const [backfillConfirmOpen, setBackfillConfirmOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -107,7 +119,7 @@ export function StatusTab({ status, isLoading }: { status?: QontoStatus; isLoadi
               </Button>
               <Button
                 variant="outline"
-                onClick={() => backfillMutation.mutate()}
+                onClick={() => setBackfillConfirmOpen(true)}
                 disabled={syncMutation.isPending || backfillMutation.isPending}
                 className="w-full sm:w-auto"
                 data-testid="button-backfill"
@@ -124,6 +136,30 @@ export function StatusTab({ status, isLoading }: { status?: QontoStatus; isLoadi
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={backfillConfirmOpen} onOpenChange={setBackfillConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Voll-Sync Zusatzkonten starten?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Dies ist ein einmaliger Voll-Abzug: Die komplette Historie der
+              nachträglich ergänzten Zusatzkonten wird ohne Zeitfenster geladen
+              (mehrere Qonto-API-Seiten, ggf. viele Transaktionen). Der Vorgang
+              kann etwas dauern und ist keine reguläre Sync-Aktion. Für den
+              Regelbetrieb bitte „Jetzt synchronisieren" verwenden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-backfill">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => backfillMutation.mutate()}
+              data-testid="button-confirm-backfill"
+            >
+              Voll-Sync starten
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
