@@ -25,11 +25,16 @@ export function useBackfillMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (startDate: string) =>
+    mutationFn: async (
+      vars: { startDate: string; acknowledgeExtendedLookback?: boolean },
+    ) =>
       unwrapResult(
         await api.post<{ synced: number; total: number; accounts: number; autoHidden: number }>(
           "/admin/qonto/backfill",
-          { startDate },
+          {
+            startDate: vars.startDate,
+            acknowledgeExtendedLookback: vars.acknowledgeExtendedLookback,
+          },
         ),
       ),
     onSuccess: (data) => {

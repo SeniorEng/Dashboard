@@ -3,7 +3,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { enumerateMonthlyWindows } from "../../shared/domain/qonto/backfill-windows";
+import {
+  enumerateMonthlyWindows,
+  monthsBetween,
+  exceedsBackfillLookbackCap,
+  MAX_BACKFILL_LOOKBACK_MONTHS,
+} from "../../shared/domain/qonto/backfill-windows";
 
 describe("enumerateMonthlyWindows", () => {
   it("liefert genau ein Fenster innerhalb eines Monats", () => {
@@ -49,5 +54,33 @@ describe("enumerateMonthlyWindows", () => {
     expect(windows).toHaveLength(2);
     expect(windows[1].from.getTime()).toBe(new Date(2026, 0, 1, 0, 0, 0, 0).getTime());
     expect(windows[1].to.getTime()).toBe(end.getTime());
+  });
+});
+
+describe("monthsBetween", () => {
+  it("zählt volle Kalendermonate zwischen start und end", () => {
+    expect(monthsBetween(new Date(2026, 0, 15), new Date(2026, 3, 1))).toBe(3);
+    expect(monthsBetween(new Date(2024, 5, 1), new Date(2026, 5, 1))).toBe(24);
+  });
+
+  it("liefert 0, wenn start im selben Monat oder nach end liegt", () => {
+    expect(monthsBetween(new Date(2026, 5, 1), new Date(2026, 5, 28))).toBe(0);
+    expect(monthsBetween(new Date(2026, 5, 1), new Date(2026, 3, 1))).toBe(0);
+  });
+});
+
+describe("exceedsBackfillLookbackCap (Task #1607)", () => {
+  it("erlaubt aktuelle Backfills innerhalb der Grenze", () => {
+    const end = new Date(2026, 5, 15); // 15.06.2026
+    // Genau an der Grenze (== MAX Monate zurück) ist noch erlaubt.
+    const atLimit = new Date(2026 - 2, 5, 1); // 24 Monate zurück
+    expect(monthsBetween(atLimit, end)).toBe(MAX_BACKFILL_LOOKBACK_MONTHS);
+    expect(exceedsBackfillLookbackCap(atLimit, end)).toBe(false);
+  });
+
+  it("blockiert Läufe, die weiter als die Grenze zurückreichen", () => {
+    const end = new Date(2026, 5, 15); // 15.06.2026
+    const tooFar = new Date(2026 - 3, 4, 1); // > 24 Monate zurück
+    expect(exceedsBackfillLookbackCap(tooFar, end)).toBe(true);
   });
 });

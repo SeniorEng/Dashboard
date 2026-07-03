@@ -28,8 +28,13 @@ import {
   useQontoHideRules,
   useHideRuleMutations,
 } from "../hooks";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { MatchFilter } from "../types";
-import { enumerateMonthlyWindows } from "@shared/domain/qonto/backfill-windows";
+import {
+  enumerateMonthlyWindows,
+  exceedsBackfillLookbackCap,
+  MAX_BACKFILL_LOOKBACK_MONTHS,
+} from "@shared/domain/qonto/backfill-windows";
 
 // Task #1599 — Vorbelegtes Standard-Startdatum für den Voll-Abruf.
 const DEFAULT_BACKFILL_START = "2026-06-01";
@@ -47,13 +52,14 @@ function estimateBackfillScope(startDateStr: string): {
   windowCount: number;
   monthsBack: number;
   isLarge: boolean;
+  exceedsCap: boolean;
 } | null {
   if (!startDateStr) return null;
   const start = new Date(`${startDateStr}T00:00:00`);
   if (Number.isNaN(start.getTime())) return null;
   const now = new Date();
   if (start.getTime() > now.getTime()) {
-    return { windowCount: 0, monthsBack: 0, isLarge: false };
+    return { windowCount: 0, monthsBack: 0, isLarge: false, exceedsCap: false };
   }
   const windowCount = enumerateMonthlyWindows(start, now).length;
   const monthsBack =
@@ -62,6 +68,9 @@ function estimateBackfillScope(startDateStr: string): {
     windowCount,
     monthsBack,
     isLarge: windowCount >= LARGE_BACKFILL_WINDOW_THRESHOLD,
+    // Task #1607 — reicht der Zeitraum über die harte Rückreichweiten-Grenze
+    // hinaus, ist eine explizite Zusatz-Bestätigung nötig.
+    exceedsCap: exceedsBackfillLookbackCap(start, now),
   };
 }
 
@@ -89,6 +98,7 @@ export function TransactionsTab({
   const [matchingTxId, setMatchingTxId] = useState<number | null>(null);
   const [backfillConfirmOpen, setBackfillConfirmOpen] = useState(false);
   const [backfillDate, setBackfillDate] = useState(DEFAULT_BACKFILL_START);
+  const [extendedLookbackAck, setExtendedLookbackAck] = useState(false);
   const backfillScope = useMemo(() => estimateBackfillScope(backfillDate), [backfillDate]);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [newRuleType, setNewRuleType] = useState<"counterparty" | "iban">("counterparty");
@@ -508,7 +518,13 @@ export function TransactionsTab({
         </div>
       )}
 
-      <AlertDialog open={backfillConfirmOpen} onOpenChange={setBackfillConfirmOpen}>
+      <AlertDialog
+        open={backfillConfirmOpen}
+        onOpenChange={open => {
+          setBackfillConfirmOpen(open);
+          if (!open) setExtendedLookbackAck(false);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Transaktionen ab Datum abrufen?</AlertDialogTitle>
@@ -541,10 +557,36 @@ export function TransactionsTab({
               )}
             </div>
           )}
+          {/* Task #1607 — Reicht der Zeitraum über die harte Rückreichweiten-
+              Grenze hinaus, ist eine explizite Zusatz-Bestätigung Pflicht. */}
+          {backfillScope?.exceedsCap && (
+            <label
+              className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+              data-testid="label-backfill-extended-ack"
+            >
+              <Checkbox
+                checked={extendedLookbackAck}
+                onCheckedChange={v => setExtendedLookbackAck(v === true)}
+                className="mt-0.5"
+                data-testid="checkbox-backfill-extended-ack"
+              />
+              <span>
+                Der Zeitraum reicht weiter als {MAX_BACKFILL_LOOKBACK_MONTHS} Monate zurück.
+                Ich bestätige ausdrücklich, dass ich diesen sehr großen, langsamen
+                Abzug wirklich starten möchte.
+              </span>
+            </label>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-backfill">Abbrechen</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => backfillMutation.mutate(backfillDate)}
+              disabled={backfillScope?.exceedsCap && !extendedLookbackAck}
+              onClick={() =>
+                backfillMutation.mutate({
+                  startDate: backfillDate,
+                  acknowledgeExtendedLookback: backfillScope?.exceedsCap ? extendedLookbackAck : undefined,
+                })
+              }
               data-testid="button-confirm-backfill"
             >
               Abruf starten

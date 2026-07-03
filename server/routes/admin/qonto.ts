@@ -14,6 +14,7 @@ import { withAudit } from "../../lib/with-audit";
 import { readTestFaults } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
+import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -82,6 +83,9 @@ const QONTO_BACKFILL_LOCK_OBJID = Number(QONTO_BACKFILL_LOCK_KEY) % 0x100000000;
 
 const backfillSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Startdatum (erwartet YYYY-MM-DD)"),
+  // Task #1607 — Explizite Zusatz-Bestätigung für „gefährlich große" Läufe,
+  // deren Startdatum weiter als MAX_BACKFILL_LOOKBACK_MONTHS zurückreicht.
+  acknowledgeExtendedLookback: z.boolean().optional(),
 });
 
 router.get("/backfill/status", asyncHandler("Voll-Sync-Status konnte nicht geladen werden", async (_req, res) => {
@@ -98,8 +102,19 @@ router.get("/backfill/status", asyncHandler("Voll-Sync-Status konnte nicht gelad
 }));
 
 router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (req, res) => {
-  const { startDate } = backfillSchema.parse(req.body);
+  const { startDate, acknowledgeExtendedLookback } = backfillSchema.parse(req.body);
   const parsedStart = parseLocalDate(startDate);
+
+  // Task #1607 — Harte Guardrail gegen versehentliche Mehrjahres-Abzüge: Reicht
+  // das Startdatum weiter als MAX_BACKFILL_LOOKBACK_MONTHS zurück, wird der Lauf
+  // ohne explizite Zusatz-Bestätigung blockiert (nicht nur gewarnt, Task #1606).
+  // Der Frontend-Checkbox-Schutz greift nur in der eigenen Sitzung; dieser
+  // Server-Guard schützt auch direkte API-Aufrufe.
+  if (exceedsBackfillLookbackCap(parsedStart, new Date()) && !acknowledgeExtendedLookback) {
+    throw badRequest(
+      `Der gewählte Zeitraum reicht weiter als ${MAX_BACKFILL_LOOKBACK_MONTHS} Monate zurück. Ein so großer Abzug belastet die Qonto-API stark und dauert lange. Bitte wählen Sie ein späteres Startdatum oder bestätigen Sie den erweiterten Zeitraum ausdrücklich.`,
+    );
+  }
 
   const lockClient = await pool.connect();
   let gotLock = false;
