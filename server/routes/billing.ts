@@ -9,7 +9,6 @@ import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line
 import {
   splitLineItemsAcrossPots,
   sumSharesByPot,
-  toPotKey,
   POT_ORDER,
   type InvoicePotKey,
   type BudgetSplitForAppointment,
@@ -33,30 +32,26 @@ import {
   invoices as invoicesTable,
   invoiceLineItems,
   monthlyServiceRecords,
-  budgetTransactions,
 } from "@shared/schema";
-import type { Invoice, InvoiceLineItem, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
+import type { Invoice, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
 import type { BillingCustomerItem, BillingInvoicePreview, BlockingDraftInvoice, DiscardDraftsResponse, BulkDeleteResultItem, BulkDeleteResponse, BulkStatusResultItem, BulkStatusResponse } from "@shared/api";
 import { documentDeliveries } from "@shared/schema";
 import { computeDataHash } from "../services/signature-integrity";
-import { budgetStorage } from "../storage/budget-storage";
 import { objectStorageClient } from "../replit_integrations/object_storage/objectStorage";
 import { parseObjectPath, getPrivateDir } from "../lib/object-storage-helpers";
 import { eq, and, gte, lte, lt, isNull, inArray, ne, notInArray, or, desc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
-import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp, addDays } from "@shared/utils/datetime";
+import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
 import { storage } from "../storage";
 import { db } from "../lib/db";
 import { monthlyServiceRecordsRepo, appointmentsRepo } from "../repos";
 import {
-  getNextInvoiceNumberTx,
-  createInvoiceTx,
   updateInvoiceStatusTx,
-  getInvoiceLineItemsTx,
   getInvoiceForUpdateTx,
 } from "../storage/billing-storage";
+import { stornoInvoiceCascade } from "../services/invoice-storno";
 import { readBillingPipeline } from "../storage/billing/pipeline-reader";
 import { readBillingEconomics } from "../storage/billing/economics-reader";
 import { readBillingTermine } from "../storage/billing/termine-reader";
@@ -1268,198 +1263,30 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
     // Task #759 — Cascade-Storno: ein PATCH storniert alle Geschwister-
     // Rechnungen einer billing_run_id in EINER Transaktion. So bleibt der
     // Topf-Split atomar konsistent (entweder ALLE Rechnungen storniert
-    // oder keine).
-    const { stornoInvoice, invoiceNumber, updatedOriginal, cascadeIds } = await withAudit(async (tx, audit) => {
-      const performStorno = async (originalId: number): Promise<{ stornoInvoice: Invoice; invoiceNumber: string; updatedOriginal: Invoice }> => {
-      // Re-Read mit FOR UPDATE: serialisiert parallele Stornos derselben
-      // Originalrechnung. Ohne Lock würden zwei PATCHs den alten Status sehen
-      // und beide eine Stornorechnung erzeugen.
-      const locked = await getInvoiceForUpdateTx(tx, originalId);
-      if (!locked) throw notFound("Rechnung nicht gefunden");
-      if (locked.status === "storniert") {
-        throw badRequest("Diese Rechnung wurde bereits storniert.");
-      }
-      if (locked.invoiceType === "stornorechnung") {
-        throw badRequest("Stornorechnungen können nicht erneut storniert werden.");
-      }
-
-      const number = await getNextInvoiceNumberTx(tx, locked.billingYear);
-      const lineItems = await getInvoiceLineItemsTx(tx, originalId);
-
-      // Task #562 — Fälligkeit auch für Storno-Inserts (außerhalb von
-      // generateInvoiceCore): companySettings + Default 30 Tage.
-      const stornoCompanySettings = await getCachedCompanySettings();
-      const stornoDueDays = stornoCompanySettings?.invoiceDefaultDueDays ?? 30;
-      const stornoDueDateIso = addDays(todayISO(), stornoDueDays);
-
-      const stornoData = {
-        invoiceNumber: number,
-        customerId: locked.customerId,
-        billingType: locked.billingType,
-        invoiceType: "stornorechnung",
-        billingMonth: locked.billingMonth,
-        billingYear: locked.billingYear,
-        recipientName: locked.recipientName,
-        recipientAddress: locked.recipientAddress,
-        customerName: locked.customerName,
-        insuranceProviderName: locked.insuranceProviderName,
-        insuranceIkNummer: locked.insuranceIkNummer,
-        versichertennummer: locked.versichertennummer,
-        pflegegrad: locked.pflegegrad,
-        netAmountCents: -locked.netAmountCents,
-        vatAmountCents: -locked.vatAmountCents,
-        grossAmountCents: -locked.grossAmountCents,
-        vatRate: locked.vatRate,
-        // T10/BL-12: Stornorechnung startet als Entwurf, nicht als versendet —
-        // der Versand-Pfad setzt status erst nach erfolgreicher Zustellung.
-        status: "entwurf",
-        stornierteRechnungId: id,
-        // Task #562 — Storno-Rechnung spiegelt die Pflichtfelder der
-        // Originalrechnung. Fälligkeit wird auf das aktuelle Datum + N Tage
-        // gesetzt, damit eine Storno-Korrektur kein abgelaufenes Ziel trägt.
-        dueDate: stornoDueDateIso,
-        buyerReference: locked.buyerReference ?? null,
-        assignmentDeclarationDate: locked.assignmentDeclarationDate ?? null,
-        assignmentDeclarationRef: locked.assignmentDeclarationRef ?? null,
-      };
-
-      const stornoLineItems = lineItems.map((item: InvoiceLineItem) => ({
-        appointmentId: item.appointmentId,
-        appointmentDate: item.appointmentDate,
-        serviceDescription: item.serviceDescription,
-        serviceCode: item.serviceCode,
-        startTime: item.startTime,
-        endTime: item.endTime,
-        durationMinutes: item.durationMinutes,
-        // Task #561: Menge/Einheit der Originalrechnung 1:1 übernehmen.
-        // Für historische Original-Lines (vor Task #561) sind beide Felder
-        // NULL — Storno bleibt damit konsistent zur Original-Anzeige.
-        quantityRaw: item.quantityRaw,
-        quantityUnit: item.quantityUnit,
-        unitPriceCents: item.unitPriceCents,
-        totalCents: -item.totalCents,
-        employeeName: item.employeeName,
-        appointmentNotes: item.appointmentNotes || null,
-        serviceDetails: item.serviceDetails || null,
-      }));
-
-      const created = await createInvoiceTx(tx, stornoData, stornoLineItems, req.user!.id);
-      const original = await updateInvoiceStatusTx(tx, originalId, status, req.user!.id);
-
-      // Task #576: Storno darf den zugehörigen Leistungsnachweis NIE
-      // soft-löschen. Der frühere T05/K3-Pfad hat bei Partial-Signing
-      // (LN deckt nur N von M dokumentierten Terminen ab) den gesamten LN
-      // entfernt — Folge: der Kunde verschwand aus `/eligible-customers`
-      // (Filter `activeOnly()`), und „Neue Rechnung erstellen" zeigte ihn
-      // nicht mehr an. Re-Abrechnung derselben Termine (BF-5.3) und
-      // Nachberechnung neu hinzukommender Termine sind beide weiterhin
-      // möglich, ohne den LN anzufassen: `buildLineItemsFromAppointments`
-      // schließt stornierte Termine über `status='storniert'` /
-      // `invoiceType='stornorechnung'` aus. Ein evtl. nötiger neuer LN
-      // für zusätzliche dokumentierte Termine wird vom Mitarbeiter
-      // bewusst angelegt — automatischer LN-Reset ist nicht GoBD-konform
-      // und war die Ursache für die verschwundenen Kunden (Prod-IDs
-      // 108/117, 22.05.2026).
-
-      // T04/K2: Storno-Reversal — die Budget-Transaktionen der Original-
-      // Rechnungs-Termine werden in derselben Transaktion zurückgebucht,
-      // damit der jeweilige Topf wieder als verfügbar angezeigt wird.
-      //
-      // Task #1377 — Pot-bewusster Storno: Bei einer per-Topf-Split-Rechnung
-      // (`billingRunId` gesetzt) trägt EIN Termin Konsumptionen in mehreren
-      // Töpfen (z.B. §45b + privat), die als getrennte Rechnungen pro Topf
-      // ausgestellt sind. Der Storno EINER Topf-Rechnung darf deshalb nur die
-      // Konsumptionen DIESES Topfes zurückbuchen — sonst entwertet er
-      // stillschweigend den Verbrauch der noch lebenden Geschwister-Rechnung
-      // im anderen Topf. Der Topf der Rechnung ergibt sich aus `budgetType`
-      // (NULL = Selbstzahler-/Privat-Anteil, vgl. `toPotKey`).
-      //
-      // Bestands-/Single-Pot-Rechnungen (`billingRunId` NULL) verhalten sich
-      // unverändert und buchen ALLE Konsumptionen der Termine zurück.
-      const isPotSplitInvoice = locked.billingRunId != null;
-      const invoicePotKey = toPotKey(locked.budgetType ?? "private");
-      const apptIdsForReversal = Array.from(
-        new Set(
-          lineItems
-            .map((it: InvoiceLineItem) => it.appointmentId)
-            .filter((v): v is number => typeof v === "number"),
-        ),
-      );
-      for (const apptId of apptIdsForReversal) {
-        const txs = await tx.select()
-          .from(budgetTransactions)
-          .where(and(
-            eq(budgetTransactions.appointmentId, apptId),
-            eq(budgetTransactions.transactionType, "consumption"),
-          ));
-        for (const t of txs) {
-          if (isPotSplitInvoice && toPotKey(t.budgetType) !== invoicePotKey) {
-            continue; // anderer Topf — Geschwister-Rechnung bleibt lebend
-          }
-          await budgetStorage.reverseBudgetTransaction(t.id, req.user!.id, tx);
-        }
-      }
-
-      audit.record({
-        userId: req.user!.id,
-        action: "invoice_cancelled",
-        entityType: "invoice",
-        entityId: originalId,
-        metadata: {
-          originalInvoiceNumber: locked.invoiceNumber,
-          stornoInvoiceId: created.id,
-          stornoInvoiceNumber: number,
-          customerId: locked.customerId,
-          grossAmountCents: locked.grossAmountCents,
-          oldStatus: locked.status,
-          newStatus: status,
-          ...(locked.billingRunId ? { billingRunId: locked.billingRunId } : {}),
-        },
-        ipAddress: req.ip,
-      });
-
-      return { stornoInvoice: created, invoiceNumber: number, updatedOriginal: original };
-      };
-
-      // 1) Haupt-Rechnung stornieren.
-      const main = await performStorno(id);
-
-      // 2) Optional: Cascade über billing_run_id-Geschwister.
-      const cascadeStornoIds: number[] = [];
-      if (cascadeRun && invoice.billingRunId) {
-        const siblings = await tx.select({ id: invoicesTable.id })
-          .from(invoicesTable)
-          .where(and(
-            eq(invoicesTable.billingRunId, invoice.billingRunId),
-            ne(invoicesTable.id, id),
-            ne(invoicesTable.status, "storniert"),
-            ne(invoicesTable.invoiceType, "stornorechnung"),
-          ));
-        for (const s of siblings) {
-          const r = await performStorno(s.id);
-          cascadeStornoIds.push(r.stornoInvoice.id);
-        }
-      }
-
-      return {
-        stornoInvoice: main.stornoInvoice,
-        invoiceNumber: main.invoiceNumber,
-        updatedOriginal: main.updatedOriginal,
-        cascadeIds: cascadeStornoIds,
-      };
-    }, { faults: readTestFaults(req) });
+    // oder keine). Die Storno-Logik selbst lebt als SSoT in
+    // `stornoInvoiceCascade` (server/services/invoice-storno.ts) und wird auch
+    // vom GoBD-Reparatur-Skript (Task #1651) genutzt.
+    const { mainStornoInvoice, updatedOriginal, cascadeStornoIds } = await withAudit(
+      async (tx, audit) =>
+        stornoInvoiceCascade(tx, audit, {
+          rootInvoiceId: id,
+          cascadeRun: !!cascadeRun,
+          userId: req.user!.id,
+          ipAddress: req.ip,
+        }),
+      { faults: readTestFaults(req) },
+    );
 
     // Task #577: Storno-PDF im Hintergrund persistieren — analog zum normalen
     // Rechnungs-Erstanlage-Pfad (siehe generateInvoiceCore / Task #544).
     // Ohne diesen Aufruf bleibt `pdf_path` der Stornorechnung NULL, was
     // E-Mail-/E-POST-Versand blockiert. (Prod-IDs 5/6/7/9 sind das Erbe
     // dieses Defekts und werden via Startup-Migration nachgezogen.)
-    schedulePdfPersistInBackground(stornoInvoice.id);
+    schedulePdfPersistInBackground(mainStornoInvoice.id);
     // Task #759: Auch die Geschwister-Stornos brauchen ihre PDFs.
-    for (const sid of cascadeIds) {
+    for (const sid of cascadeStornoIds) {
       schedulePdfPersistInBackground(sid);
     }
-    void invoiceNumber;
 
     updated = updatedOriginal;
   } else {
