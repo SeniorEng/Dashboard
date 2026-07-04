@@ -109,7 +109,7 @@ export function useAppointment(id: number) {
  * Task #1619 — Zwei-Kräfte-Einsatz (Co-Visit): liefert die Partner-Legs eines
  * Termins (gleiche `coVisitGroupId`, anderer Termin) desselben Tages. Wird
  * genutzt, um Planer VOR dem Absagen/Löschen zu warnen, dass die Aktion auch
- * die zweite Pflegekraft betrifft (Backend kaskadiert die Absage/Löschung).
+ * den zweiten Mitarbeiter betrifft (Backend kaskadiert die Absage/Löschung).
  * Bewusst OHNE viewAsEmployee-Filter, damit der Partner-Leg (andere Kraft)
  * sichtbar bleibt.
  */

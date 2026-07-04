@@ -96,7 +96,7 @@ export default function AppointmentDetail() {
   const { data: budgetFit } = useAppointmentBudgetFit(appointment?.customerId ?? null);
   const budgetOverrun = budgetFit?.get(id)?.fitsInMonthlyBudget === false;
 
-  // Task #1619 — Zwei-Kräfte-Einsatz: Partner-Legs (andere Pflegekraft) laden,
+  // Task #1619 — Zwei-Kräfte-Einsatz: Partner-Legs (anderer Mitarbeiter) laden,
   // um vor dem Löschen/Absagen zu warnen. Das Backend kaskadiert die Löschung
   // auf den Partner-Leg; der Planer soll das VOR dem Bestätigen wissen.
   const { data: coVisitPartners } = useCoVisitPartners(appointment);

@@ -19,7 +19,7 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
  * Task #1613 — Zwei-Kräfte-Einsatz (Co-Visit).
  *
- * Ein Kundentermin kann mit einer ZWEITEN Pflegekraft gebucht werden. Es
+ * Ein Kundentermin kann mit einem ZWEITEN Mitarbeiter gebucht werden. Es
  * entstehen ZWEI verknüpfte Termine (gemeinsame coVisitGroupId, je ein
  * Mitarbeiter). Beide Legs sind voll eigenständig; die einzige echte
  * Sonderregel ist eine Kunden-Overlap-Ausnahme für das Paar. Employee-Overlap

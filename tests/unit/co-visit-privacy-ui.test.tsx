@@ -11,10 +11,10 @@ import { Router } from "wouter";
  * Task #1614 zeigt die „Zwei-Kräfte-Einsatz"-Kennzeichnung ausschließlich für
  * Admins/Teamleitung (Gate über `user?.isAdmin` in der Karte bzw. den `isAdmin`-
  * Prop in der Detailkarte). Die Privacy-Invariante besagt: die gemeinsame
- * `coVisitGroupId` darf die Sichtbarkeit einer einzelnen Pflegekraft NICHT
+ * `coVisitGroupId` darf die Sichtbarkeit eines einzelnen Mitarbeiters NICHT
  * erweitern. Serverseitig ist das über die Zuordnungs-Filterung abgesichert
  * (siehe CV-3 in tests/appointments/co-visit.test.ts). Dieser Test pinnt die
- * ZWEITE Verteidigungslinie im Frontend: eine Pflegekraft (Nicht-Admin) sieht
+ * ZWEITE Verteidigungslinie im Frontend: ein Mitarbeiter (Nicht-Admin) sieht
  * die Partner-Kennzeichnung gar nicht erst, ein Admin schon — auf beiden
  * verknüpften Legs.
  *
@@ -88,7 +88,7 @@ describe("AppointmentCard — Zwei-Kräfte-Badge nur für Admin (Task #1618)", (
     );
   }
 
-  it("Pflegekraft (Nicht-Admin): KEIN pill-co-visit trotz gesetzter coVisitGroupId", async () => {
+  it("Mitarbeiter (Nicht-Admin): KEIN pill-co-visit trotz gesetzter coVisitGroupId", async () => {
     mockIsAdmin = false;
     const appt = makeAppointment();
     await renderCard(appt);
@@ -148,7 +148,7 @@ describe("AppointmentTimeServicesCard — Zwei-Kräfte-Zeile nur für Admin (Tas
     );
   }
 
-  it("Pflegekraft (Nicht-Admin): KEINE row-co-visit trotz gesetzter coVisitGroupId", async () => {
+  it("Mitarbeiter (Nicht-Admin): KEINE row-co-visit trotz gesetzter coVisitGroupId", async () => {
     const appt = makeAppointment();
     await renderDetail(false, appt);
 

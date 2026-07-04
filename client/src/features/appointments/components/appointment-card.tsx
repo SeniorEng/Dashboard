@@ -167,7 +167,7 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQue
                 <span
                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-700 text-[10px] font-bold uppercase tracking-wide shrink-0"
                   data-testid={`pill-co-visit-${appointment.id}`}
-                  title="Zwei-Kräfte-Einsatz: Dieser Termin wird gemeinsam mit einer zweiten Pflegekraft durchgeführt"
+                  title="Zwei-Kräfte-Einsatz: Dieser Termin wird gemeinsam mit einem zweiten Mitarbeiter durchgeführt"
                 >
                   <Users className="w-3 h-3" />
                   Zwei Kräfte

@@ -697,16 +697,16 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     assignedEmployeeId = user.id;
   }
 
-  // Task #1613 — Zwei-Kräfte-Einsatz: optionale zweite Pflegekraft auflösen.
+  // Task #1613 — Zwei-Kräfte-Einsatz: optionalen zweiten Mitarbeiter auflösen.
   // Nur Admin/Teamleitung dürfen zuweisen (spiegelt die assignedEmployeeId-
   // Regel). Gesetzt => es entstehen ZWEI verknüpfte, voll eigenständige Termine.
   let secondAssignedEmployeeId: number | null = null;
   if (validatedData.secondAssignedEmployeeId != null) {
     if (!(user.isAdmin || isTeamLead(user))) {
-      return sendBadRequest(res, "Nur Admin oder Teamleitung dürfen eine zweite Pflegekraft zuweisen.");
+      return sendBadRequest(res, "Nur Admin oder Teamleitung dürfen einen zweiten Mitarbeiter zuweisen.");
     }
     if (validatedData.secondAssignedEmployeeId === assignedEmployeeId) {
-      return sendBadRequest(res, "Die zweite Pflegekraft muss sich von der ersten unterscheiden.");
+      return sendBadRequest(res, "Der zweite Mitarbeiter muss sich von der ersten unterscheiden.");
     }
     const [secondEmployee] = await db
       .select({ id: users.id, isActive: users.isActive })
@@ -716,7 +716,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
     if (!secondEmployee || secondEmployee.isActive === false) {
       return sendBadRequest(
         res,
-        "Die ausgewählte zweite Pflegekraft ist nicht aktiv. Bitte wählen Sie einen aktiven Mitarbeiter aus.",
+        "Der ausgewählte zweite Mitarbeiter ist nicht aktiv. Bitte wählen Sie einen aktiven Mitarbeiter aus.",
       );
     }
     // Der zweite Leg ist voll eigenständig — sein Monat darf nicht abgeschlossen sein.
@@ -724,7 +724,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
       validatedData.secondAssignedEmployeeId, validatedData.date,
     );
     if (secondMonthClosed) {
-      return sendBadRequest(res, "Der Monat der zweiten Pflegekraft ist bereits abgeschlossen.");
+      return sendBadRequest(res, "Der Monat des zweiten Mitarbeiters ist bereits abgeschlossen.");
     }
     secondAssignedEmployeeId = validatedData.secondAssignedEmployeeId;
   }
@@ -802,7 +802,7 @@ router.post("/kundentermin", asyncHandler(ErrorMessages.createAppointmentFailed,
       );
     }
     if (secondOverlap.hasOverlap) {
-      return sendConflict(res, "Terminüberschneidung", "Die zweite Pflegekraft hat bereits einen Termin in diesem Zeitraum.");
+      return sendConflict(res, "Terminüberschneidung", "Der zweite Mitarbeiter hat bereits einen Termin in diesem Zeitraum.");
     }
     const secondBlocker = await checkEmployeeBlocker(
       secondAssignedEmployeeId, validatedData.date, validatedData.scheduledStart, scheduledEnd,

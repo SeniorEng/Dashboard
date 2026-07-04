@@ -150,7 +150,7 @@ export function useNewAppointmentForm() {
   const [ktServices, setKtServices] = useState<Array<{ serviceId: number; durationMinutes: number }>>([]);
   const [ktNotes, setKtNotes] = useState<string>("");
   const [ktAssignedEmployeeId, setKtAssignedEmployeeId] = useState<string>("");
-  // Task #1613 — Zwei-Kräfte-Einsatz: optionale zweite Pflegekraft. Gesetzt =>
+  // Task #1613 — Zwei-Kräfte-Einsatz: optionaler zweiter Mitarbeiter. Gesetzt =>
   // zwei verknüpfte Termine. Nur relevant für Einzeltermine (kein Serientermin).
   const [ktSecondAssignedEmployeeId, setKtSecondAssignedEmployeeId] = useState<string>("");
   const fromProspectId = urlParams.get("prospectId");

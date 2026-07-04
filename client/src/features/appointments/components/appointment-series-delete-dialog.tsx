@@ -24,7 +24,7 @@ interface Props {
    * Backend kaskadiert die Absage auf den Partner-Leg).
    */
   isCoVisit?: boolean;
-  /** Namen der Partner-Pflegekräfte (andere Legs) für die Warnung. */
+  /** Namen der Partner-Mitarbeiter (andere Legs) für die Warnung. */
   coVisitPartnerNames?: string[];
 }
 

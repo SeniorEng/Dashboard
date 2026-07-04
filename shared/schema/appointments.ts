@@ -235,7 +235,7 @@ export const insertKundenterminSchema = z.object({
   services: z.array(appointmentServiceEntrySchema).min(1, "Mindestens ein Service muss ausgewählt werden"),
   notes: z.string().max(255, "Maximal 255 Zeichen").optional(),
   assignedEmployeeId: z.number().nullable().optional(),
-  // Task #1613 — Zwei-Kräfte-Einsatz: optionale zweite Pflegekraft. Gesetzt =>
+  // Task #1613 — Zwei-Kräfte-Einsatz: optionaler zweiter Mitarbeiter. Gesetzt =>
   // es entstehen ZWEI verknüpfte Termine (je Mitarbeiter einer) mit gemeinsamer
   // coVisitGroupId. Muss ein anderer aktiver Mitarbeiter als assignedEmployeeId
   // sein (server-seitig validiert).
