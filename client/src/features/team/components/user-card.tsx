@@ -216,11 +216,11 @@ export function UserCard({
                 <span className="font-semibold" data-testid={`workload-soll-${user.id}`}>
                   {m.sollHours}h
                 </span>
-                {m.hasIstBasis && m.auslastungPct !== null && m.auslastungPct > 100 && (
+                {m.hasIstBasis && m.auslastungPct !== null && m.auslastungPct > 100 && m.overHours !== null && (
                   <>
                     <span className="text-gray-400">·</span>
                     <span className="text-red-600 font-semibold" data-testid={`workload-over-${user.id}`}>
-                      +{(m.istHours - m.sollHours!).toLocaleString("de-DE", { maximumFractionDigits: 1 })} h über
+                      +{m.overHours.toLocaleString("de-DE", { maximumFractionDigits: 1 })} h über
                     </span>
                   </>
                 )}

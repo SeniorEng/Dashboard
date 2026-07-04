@@ -9,6 +9,7 @@ export interface WorkloadMetrics {
   hasSoll: boolean;
   hasIstBasis: boolean;
   auslastungPct: number | null;
+  overHours: number | null;
   freieStunden: number | null;
   freieKunden: number | null;
   isOverloaded: boolean;
@@ -58,6 +59,7 @@ export function computeWorkloadMetrics(
     hasSoll: m.hasSoll,
     hasIstBasis: m.hasIstBasis,
     auslastungPct: m.pct !== null ? Math.round(m.pct) : null,
+    overHours: m.overHours !== null ? Math.round(m.overHours * 10) / 10 : null,
     freieStunden: m.freeHours,
     freieKunden: m.addClients,
     isOverloaded: m.isOverloaded,
