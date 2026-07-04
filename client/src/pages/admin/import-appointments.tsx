@@ -58,6 +58,8 @@ interface MatchedRow {
   diff: ImportRowDiff | null;
   /** Task #1243: Vorjahres-Termin echter Pflegekasse → nur Dokumentation, kein Budgetverbrauch. */
   documentationOnly?: boolean;
+  /** Task #1602: Bestandstermin bereits abgerechnet (signierter LN ODER nicht-stornierte Rechnung) → nicht aktualisierbar. */
+  billedProtected?: boolean;
 }
 
 function serviceCodeLabel(code: string | null | undefined): string {
@@ -77,7 +79,7 @@ interface DuplicateImportWarning {
 
 interface PreviewResponse {
   rows: MatchedRow[];
-  summary: { total: number; new: number; duplicate: number; upgrade: number; beyondCutoff: number; error: number; budgetTrimmed: number; documentationOnly: number };
+  summary: { total: number; new: number; duplicate: number; upgrade: number; beyondCutoff: number; error: number; budgetTrimmed: number; documentationOnly: number; billedProtected: number };
   /** Task #708: Server-Token für Trust-Boundary im Execute. */
   previewToken: string;
   /** Task #819: SHA-256 des Datei-Puffers (Doppel-Import-Erkennung). */
@@ -97,6 +99,8 @@ interface ImportResult {
   cutoffProtected: number;
   /** Task #1243: als reine Dokumentation (ohne Budgetverbrauch) importierte Vorjahres-Termine. */
   documentationOnly: number;
+  /** Task #1602: übersprungene, bereits abgerechnete Bestandstermine (LN/Rechnung). */
+  billedProtected: number;
   errors: { rowIndex: number; error: string }[];
 }
 
@@ -152,7 +156,11 @@ export default function ImportAppointmentsPage() {
       for (const row of data.rows) {
         defaultActions.set(
           row.rowIndex,
-          determineImportAction({ status: row.status, hasDiff: row.diff !== null }),
+          determineImportAction({
+            status: row.status,
+            hasDiff: row.diff !== null,
+            billedProtected: row.billedProtected === true,
+          }),
         );
       }
       setRowActions(defaultActions);
@@ -220,6 +228,9 @@ export default function ImportAppointmentsPage() {
     for (const row of preview.rows) {
       if (filter && row.status !== filter) continue;
       if (row.status === "error" && action !== "skip") continue;
+      // Task #1602: Bereits abgerechnete Bestandstermine bleiben immer `skip`
+      // (Massen-Aktion darf sie nicht auf update/upgrade/import setzen).
+      if (row.billedProtected && action !== "skip") continue;
       newActions.set(row.rowIndex, action);
     }
     setRowActions(newActions);
@@ -342,6 +353,12 @@ export default function ImportAppointmentsPage() {
                       <span>Cutoff-geschützt: {preview.summary.beyondCutoff}</span>
                     </div>
                   )}
+                  {preview.summary.billedProtected > 0 && (
+                    <div className="flex items-center gap-1" data-testid="summary-billed-protected">
+                      <AlertTriangle className="h-4 w-4 text-purple-600" />
+                      <span>Bereits abgerechnet: {preview.summary.billedProtected}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-1">
                     <XCircle className="h-4 w-4 text-red-600" />
                     <span>Fehler: {preview.summary.error}</span>
@@ -437,11 +454,11 @@ export default function ImportAppointmentsPage() {
                         <td className="p-2">
                           <Checkbox
                             checked={isSelected}
-                            disabled={(row.status === "error" && !hasEmployeeError) || row.status === "beyond_cutoff"}
+                            disabled={(row.status === "error" && !hasEmployeeError) || row.status === "beyond_cutoff" || row.billedProtected === true}
                             onCheckedChange={(checked) => {
                               const newActions = new Map(rowActions);
                               if (checked) {
-                                newActions.set(row.rowIndex, actionWhenSelected(row.status));
+                                newActions.set(row.rowIndex, actionWhenSelected(row.status, row.billedProtected === true));
                               } else {
                                 newActions.set(row.rowIndex, "skip");
                               }
@@ -487,8 +504,16 @@ export default function ImportAppointmentsPage() {
                               Fehler
                             </Badge>
                           )}
+                          {/* Task #1602: Bereits abgerechneter Bestandstermin
+                              (signierter LN ODER nicht-stornierte Rechnung) →
+                              hart geschützt, kein Update per Import. */}
+                          {row.billedProtected && (
+                            <Badge variant="outline" className="ml-1 text-purple-700 border-purple-300 bg-purple-50 text-[10px]" data-testid={`status-billed-protected-${row.rowIndex}`}>
+                              bereits abgerechnet
+                            </Badge>
+                          )}
                           {/* Task #819: Aktions-Klassifikation (create/update/noop) */}
-                          {(row.status === "duplicate" || row.status === "upgrade") && (
+                          {(row.status === "duplicate" || row.status === "upgrade") && !row.billedProtected && (
                             classifyImportAction({ status: row.status, hasDiff: row.diff !== null }) === "update" ? (
                               <Badge variant="outline" className="ml-1 text-amber-700 border-amber-300 bg-amber-50 text-[10px]" data-testid={`classify-update-${row.rowIndex}`}>
                                 Update: alt→neu
@@ -499,6 +524,12 @@ export default function ImportAppointmentsPage() {
                               </Badge>
                             )
                           )}
+                          {/* Task #1602: Diff + Schutz → Nutzer muss per Storno korrigieren. */}
+                          {row.billedProtected && row.diff !== null && (
+                            <Badge variant="outline" className="ml-1 text-purple-600 border-purple-300 text-[10px]" data-testid={`classify-protected-drift-${row.rowIndex}`}>
+                              prüfen / ggf. per Storno korrigieren
+                            </Badge>
+                          )}
                         </td>
                         <td className="p-2">
                           {row.status === "beyond_cutoff" ? (
@@ -506,7 +537,9 @@ export default function ImportAppointmentsPage() {
                           ) : row.status !== "error" || hasEmployeeError ? (
                             <Select
                               value={action}
+                              disabled={row.billedProtected === true}
                               onValueChange={(val: string) => {
+                                if (row.billedProtected === true) return;
                                 const newActions = new Map(rowActions);
                                 newActions.set(row.rowIndex, val as RowAction);
                                 setRowActions(newActions);
@@ -517,9 +550,9 @@ export default function ImportAppointmentsPage() {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="skip">Überspringen</SelectItem>
-                                <SelectItem value="import">Importieren</SelectItem>
-                                {row.status === "duplicate" && <SelectItem value="update">Aktualisieren</SelectItem>}
-                                {row.status === "upgrade" && <SelectItem value="upgrade">Hochstufen</SelectItem>}
+                                {!row.billedProtected && <SelectItem value="import">Importieren</SelectItem>}
+                                {!row.billedProtected && row.status === "duplicate" && <SelectItem value="update">Aktualisieren</SelectItem>}
+                                {!row.billedProtected && row.status === "upgrade" && <SelectItem value="upgrade">Hochstufen</SelectItem>}
                               </SelectContent>
                             </Select>
                           ) : (
@@ -703,6 +736,12 @@ export default function ImportAppointmentsPage() {
                   <div className="p-3 rounded bg-amber-50 border border-amber-200" data-testid="text-result-cutoff-protected">
                     <div className="font-medium text-amber-800">Cutoff-geschützt</div>
                     <div className="text-2xl font-bold text-amber-700">{importResult.cutoffProtected}</div>
+                  </div>
+                )}
+                {importResult.billedProtected > 0 && (
+                  <div className="p-3 rounded bg-purple-50 border border-purple-200" data-testid="text-result-billed-protected">
+                    <div className="font-medium text-purple-800">Bereits abgerechnet</div>
+                    <div className="text-2xl font-bold text-purple-700">{importResult.billedProtected}</div>
                   </div>
                 )}
                 <div className="p-3 rounded bg-gray-50 border border-gray-200" data-testid="text-result-skipped">

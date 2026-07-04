@@ -35,6 +35,12 @@ export interface TrustedRowSnapshot {
   serviceId: number | null;
   existingAppointmentId: number | null;
   status: "new" | "duplicate" | "upgrade" | "beyond_cutoff" | "error";
+  /**
+   * Task #1602: Bestandstermin ist bereits abgerechnet → Import darf ihn nicht
+   * mutieren. Der Execute-Pfad lehnt eine `update`/`upgrade`-Aktion für eine
+   * so markierte Zeile ab (Server-trusted, gegen Client-Manipulation).
+   */
+  billedProtected: boolean;
 }
 
 export interface ImportPreviewSnapshot {

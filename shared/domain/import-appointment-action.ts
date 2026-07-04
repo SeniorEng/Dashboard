@@ -20,12 +20,22 @@ export interface ImportActionInput {
   status: "new" | "duplicate" | "upgrade" | "beyond_cutoff" | "error";
   /** Liegt ein Feld-Diff gegenüber dem Bestandstermin vor? */
   hasDiff: boolean;
+  /**
+   * Task #1602: Bestandstermin ist bereits abgerechnet (auf signiertem
+   * Leistungsnachweis ODER auf einer nicht-stornierten Rechnung). Solche
+   * Zeilen dürfen NIE mutiert werden → immer `noop` (kein Update/Upgrade),
+   * unabhängig von Status oder Diff. Korrektur nur per Storno.
+   */
+  billedProtected?: boolean;
 }
 
 /**
  * Fachliche Klassifikation der Zeile (create/update/noop) — UI-unabhängig.
  */
 export function classifyImportAction(input: ImportActionInput): ImportActionKind {
+  // Task #1602: Abgerechnete Bestandstermine sind hart gegen Mutation
+  // geschützt — vor allen Status-Zweigen abfangen.
+  if (input.billedProtected) return "noop";
   switch (input.status) {
     case "new":
       return "create";
@@ -56,10 +66,15 @@ export function determineImportAction(input: ImportActionInput): ImportRowAction
 /**
  * Aktion, wenn der Nutzer die Zeile in der UI per Checkbox AKTIVIERT.
  * (Status entscheidet, ob importiert/aktualisiert/hochgestuft wird.)
+ *
+ * Task #1602: Bereits abgerechnete Bestandstermine bleiben `skip` — sie
+ * dürfen selbst bei manueller Aktivierung nicht mutiert werden.
  */
 export function actionWhenSelected(
   status: ImportActionInput["status"],
+  billedProtected?: boolean,
 ): ImportRowAction {
+  if (billedProtected) return "skip";
   if (status === "upgrade") return "upgrade";
   if (status === "duplicate") return "update";
   return "import";

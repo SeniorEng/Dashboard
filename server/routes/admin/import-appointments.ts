@@ -60,6 +60,10 @@ router.post(
       // Task #1243: Vorjahres-Termine echter Pflegekassen-Kunden, die nur als
       // Dokumentation (ohne Budgetverbrauch) importiert werden.
       documentationOnly: matched.filter((r) => r.documentationOnly === true).length,
+      // Task #1602: Bestandstermine, die bereits abgerechnet sind (signierter
+      // LN ODER nicht-stornierte Rechnung) und daher nicht aktualisiert werden
+      // dürfen.
+      billedProtected: matched.filter((r) => r.billedProtected === true).length,
     };
 
     // Task #708: Server-trusted Snapshot — Cutoff aus den vom Server selbst
@@ -77,6 +81,7 @@ router.post(
         serviceId: r.serviceId,
         existingAppointmentId: r.existingAppointmentId,
         status: r.status,
+        billedProtected: r.billedProtected === true,
       });
       allowedRowIndexes.add(r.rowIndex);
     }
@@ -127,6 +132,9 @@ const matchedRowSchema = z.object({
   status: z.enum(["new", "duplicate", "upgrade", "beyond_cutoff", "error"]),
   errors: z.array(z.string()),
   existingAppointmentId: z.number().nullable(),
+  // Task #1602: bereits abgerechneter Bestandstermin (nur informativ im
+  // Payload — die verbindliche Wahrheit steht im server-trusted Snapshot).
+  billedProtected: z.boolean().optional(),
   differences: z.array(z.string()),
   budgetTrimInfo: z.object({
     originalMinutes: z.number(),
@@ -222,6 +230,28 @@ router.post(
       }
     }
 
+    // Task #1602: Bereits abgerechnete Bestandstermine (server-trusted
+    // `billedProtected`) dürfen NIE mutiert werden — eine `update`/`upgrade`-
+    // Aktion für eine solche Zeile ist nur durch Client-Manipulation möglich
+    // (die legitime Vorschau setzt sie nie) und wird hart abgelehnt. `import`
+    // ist ausgeschlossen, weil geschützte Zeilen immer einen Bestandstermin
+    // haben (Status `duplicate`/`upgrade`).
+    for (const action of actions) {
+      const trusted = snapshot.rows.get(action.rowIndex);
+      if (
+        trusted?.billedProtected &&
+        (action.action === "update" || action.action === "upgrade")
+      ) {
+        res.status(400).json({
+          error:
+            `Termin (rowIndex=${action.rowIndex}) ist bereits abgerechnet ` +
+            `(Leistungsnachweis oder Rechnung) und darf nicht per Import ` +
+            `aktualisiert werden. Korrektur nur per Storno.`,
+        });
+        return;
+      }
+    }
+
     // Trusted Zeilen aus dem Snapshot anstelle des Client-Payloads
     // weiterverarbeiten — der Client-Payload diente nur dazu, Aktionen pro
     // rowIndex zu bestimmen.
@@ -235,6 +265,7 @@ router.post(
         employeeId: trusted.employeeId,
         existingAppointmentId: trusted.existingAppointmentId,
         status: trusted.status,
+        billedProtected: trusted.billedProtected,
         budgetTrimInfo: r.budgetTrimInfo ?? null,
         diff: r.diff ?? null,
         // Task #1243: Der Dokumentations-Entscheid wird in `executeImport`

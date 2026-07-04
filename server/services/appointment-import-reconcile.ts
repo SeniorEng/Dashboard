@@ -19,14 +19,10 @@
  */
 
 import { randomUUID } from "crypto";
-import { and, eq, gte, isNull, lte, inArray, isNotNull, or } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, inArray } from "drizzle-orm";
 import { db } from "../lib/db";
-import {
-  appointments,
-  customers,
-  monthlyServiceRecords,
-  serviceRecordAppointments,
-} from "@shared/schema";
+import { appointments, customers } from "@shared/schema";
+import { getMutationProtectedAppointmentIds } from "./appointment-billing-protection";
 import { auditService } from "./audit";
 import { budgetStorage } from "../storage/budget-storage";
 import { storage } from "../storage";
@@ -146,31 +142,13 @@ export async function previewReconcile(
       ),
     );
 
-  // Service-Record-Lookup: welche Termine sind via Join an einen
-  // signierten (employee ODER customer) und nicht soft-gelöschten
-  // monthly_service_records gebunden?
+  // Task #1602: Service-Record-Lookup über die gemeinsame Schutz-SSoT.
+  // Reconcile verhält sich UNVERÄNDERT — es konsumiert bewusst weiterhin
+  // NUR die signierte-LN-Teilmenge (nicht die Rechnungs-Teilmenge), damit
+  // die Ausschluss-Logik (`signed_service_record`) bit-identisch bleibt.
   const apptIds = rows.map((r) => r.appointmentId);
-  const signedRecordAppointmentIds = new Set<number>();
-  if (apptIds.length > 0) {
-    const signed = await db
-      .select({ appointmentId: serviceRecordAppointments.appointmentId })
-      .from(serviceRecordAppointments)
-      .innerJoin(
-        monthlyServiceRecords,
-        eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id),
-      )
-      .where(
-        and(
-          inArray(serviceRecordAppointments.appointmentId, apptIds),
-          isNull(monthlyServiceRecords.deletedAt),
-          or(
-            isNotNull(monthlyServiceRecords.employeeSignedAt),
-            isNotNull(monthlyServiceRecords.customerSignedAt),
-          ),
-        ),
-      );
-    for (const s of signed) signedRecordAppointmentIds.add(s.appointmentId);
-  }
+  const { signedServiceRecordIds: signedRecordAppointmentIds } =
+    await getMutationProtectedAppointmentIds(apptIds);
 
   // Month-Close-Lookup pro Mitarbeiter+YYYY-MM, gecacht.
   const monthCloseCache = new Map<string, boolean>();
@@ -351,27 +329,12 @@ export async function executeReconcile(params: {
 
     const rowById = new Map(rows.map((r) => [r.id, r]));
 
-    const signedRecordSet = new Set<number>();
-    if (rows.length > 0) {
-      const signed = await tx
-        .select({ appointmentId: serviceRecordAppointments.appointmentId })
-        .from(serviceRecordAppointments)
-        .innerJoin(
-          monthlyServiceRecords,
-          eq(serviceRecordAppointments.serviceRecordId, monthlyServiceRecords.id),
-        )
-        .where(
-          and(
-            inArray(serviceRecordAppointments.appointmentId, rows.map((r) => r.id)),
-            isNull(monthlyServiceRecords.deletedAt),
-            or(
-              isNotNull(monthlyServiceRecords.employeeSignedAt),
-              isNotNull(monthlyServiceRecords.customerSignedAt),
-            ),
-          ),
-        );
-      for (const s of signed) signedRecordSet.add(s.appointmentId);
-    }
+    // Task #1602: Signierte-LN-Re-Check über die gemeinsame Schutz-SSoT
+    // (innerhalb DERSELBEN Transaktion, damit Guard-Read und Mutation
+    // denselben Snapshot sehen). Reconcile konsumiert bewusst nur die
+    // signierte-LN-Teilmenge → Verhalten unverändert.
+    const { signedServiceRecordIds: signedRecordSet } =
+      await getMutationProtectedAppointmentIds(rows.map((r) => r.id), tx);
 
     for (const appointmentId of appointmentIds) {
       const row = rowById.get(appointmentId);

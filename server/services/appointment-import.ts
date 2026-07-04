@@ -16,6 +16,7 @@ import { excelServiceArtToCategory, isHauswirtschaftArt } from "@shared/domain/e
 import { computeLastExcelMonth, isBeyondCutoff, type ExcelCutoff } from "@shared/domain/import-cutoff";
 import { isDocumentationOnlyImport } from "@shared/domain/import-documentation-only";
 import { isPrivatePaymentAllowed } from "@shared/domain/budget-selbstzahler-validator";
+import { getMutationProtectedAppointmentIds } from "./appointment-billing-protection";
 
 interface ImportRow {
   rowIndex: number;
@@ -75,6 +76,13 @@ export interface MatchedRow extends ImportRow {
    * importiert. SSoT: `isDocumentationOnlyImport`.
    */
   documentationOnly?: boolean;
+  /**
+   * Task #1602: Bestandstermin ist bereits abgerechnet (auf signiertem
+   * Leistungsnachweis ODER auf einer nicht-stornierten Rechnung). Der Import
+   * darf ihn NICHT mutieren/rebuchen; die Vorschau setzt die Aktion nie auf
+   * `update`/`upgrade` (Server-trusted Snapshot lehnt eine solche Aktion ab).
+   */
+  billedProtected?: boolean;
 }
 
 interface ImportAction {
@@ -92,6 +100,13 @@ interface ImportResult {
   trimmed: number;
   /** Task #708: durch Cutoff-Schutz blockierte Mutationen. */
   cutoffProtected: number;
+  /**
+   * Task #1602: hart übersprungene `update`-Zeilen, die einen bereits
+   * abgerechneten Termin getroffen haben (auf signiertem Leistungsnachweis
+   * ODER auf einer nicht-stornierten Rechnung). Diese werden NICHT mutiert
+   * und NICHT rebucht — der versiegelte LN / die Rechnung bleibt konsistent.
+   */
+  billedProtected: number;
   /**
    * Task #1243: Als reine Dokumentation (ohne Budgetverbrauch) importierte
    * Vorjahres-Termine. SSoT: `isDocumentationOnlyImport`.
@@ -421,6 +436,13 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
   // noch nicht durchgeführte Termine.
   const cutoff = computeLastExcelMonth(rows.map((r) => r.date));
 
+  // Task #1602: Bereits abgerechnete Bestands-Termine vorab über die
+  // gemeinsame SSoT ermitteln, damit die Vorschau sie markieren und ihre
+  // Aktion nie auf `update`/`upgrade` setzen kann (der Server-trusted
+  // Snapshot lehnt eine solche Aktion zusätzlich ab).
+  const { protectedIds: billedProtectedExistingIds } =
+    await getMutationProtectedAppointmentIds(existingAppts.map((a) => a.id));
+
   return rows.map((row) => {
     const errors: string[] = [];
     const differences: string[] = [];
@@ -567,6 +589,9 @@ export async function matchRows(rows: ImportRow[]): Promise<MatchedRow[]> {
       differences,
       budgetTrimInfo: null,
       diff,
+      billedProtected:
+        existingAppointmentId != null &&
+        billedProtectedExistingIds.has(existingAppointmentId),
     };
   });
 }
@@ -825,7 +850,7 @@ export async function executeImport(
   /** Task #819: Verknüpft alle erzeugten/aktualisierten Datensätze mit dem Import-Batch. */
   importBatchId?: number | null,
 ): Promise<ImportResult> {
-  const result: ImportResult = { imported: 0, updated: 0, upgraded: 0, skipped: 0, trimmed: 0, cutoffProtected: 0, documentationOnly: 0, errors: [] };
+  const result: ImportResult = { imported: 0, updated: 0, upgraded: 0, skipped: 0, trimmed: 0, cutoffProtected: 0, billedProtected: 0, documentationOnly: 0, errors: [] };
 
   const actionMap = new Map<number, ImportAction>();
   for (const a of actions) {
@@ -856,6 +881,23 @@ export async function executeImport(
     excelCutoff !== undefined
       ? excelCutoff
       : computeLastExcelMonth(matchedRows.map((r) => r.date));
+
+  // Task #1602: Bereits abgerechnete Termine (auf signiertem Leistungsnachweis
+  // ODER auf einer nicht-stornierten Rechnung) dürfen vom Import NICHT mutiert
+  // oder rebucht werden. Die Schutz-Menge EINMAL vorab über die gemeinsame
+  // SSoT ermitteln (defense-in-depth: eine feingranulare Re-Prüfung erfolgt
+  // zusätzlich unmittelbar vor der eigentlichen Mutation).
+  const protectionCandidateIds = matchedRows
+    .filter((r) => {
+      const a = actionMap.get(r.rowIndex);
+      return (
+        r.existingAppointmentId != null &&
+        (a?.action === "update" || a?.action === "upgrade")
+      );
+    })
+    .map((r) => r.existingAppointmentId!) as number[];
+  const { protectedIds: billedProtectedIds } =
+    await getMutationProtectedAppointmentIds(protectionCandidateIds);
 
   for (const row of matchedRows) {
     const action = actionMap.get(row.rowIndex);
@@ -938,10 +980,31 @@ export async function executeImport(
     if (action.action === "update" && row.existingAppointmentId) {
       const appointmentId = row.existingAppointmentId;
 
+      // Task #1602: Bereits abgerechnete Termine hart überspringen — der
+      // Update-Pfad überschreibt Termin/Services und rebucht §45b-Verbrauch;
+      // das würde einen signierten Leistungsnachweis oder eine gestellte
+      // Rechnung stillschweigend desynchronisieren. Primärer Schutz aus der
+      // vorab ermittelten Menge; eine feingranulare Re-Prüfung folgt direkt
+      // vor der Mutation (defense-in-depth gegen Races).
+      if (billedProtectedIds.has(appointmentId)) {
+        result.billedProtected++;
+        continue;
+      }
+
       // Task #647: Update braucht alle Stamm-IDs, damit Service-Art /
       // Dauer / End-Zeit / Mitarbeiter aus der Excel übernommen werden.
       if (!row.customerId || !effectiveEmployeeId || !row.serviceId) {
         result.errors.push({ rowIndex: row.rowIndex, error: "Fehlende IDs für Update" });
+        continue;
+      }
+
+      // Task #1602: Defense-in-depth — unmittelbar vor der Mutation erneut
+      // gegen die SSoT prüfen (frischer Read), damit ein zwischen Vorab-Read
+      // und jetzt gestellter LN/Rechnung den Termin nicht doch mutiert.
+      const { protectedIds: freshProtected } =
+        await getMutationProtectedAppointmentIds([appointmentId]);
+      if (freshProtected.has(appointmentId)) {
+        result.billedProtected++;
         continue;
       }
 
@@ -1169,8 +1232,24 @@ export async function executeImport(
     if (action.action === "upgrade" && row.existingAppointmentId) {
       const appointmentId = row.existingAppointmentId;
 
+      // Task #1602: Auch der Upgrade-Pfad überschreibt Termin/Services und
+      // hebt auf `completed` (bucht Consumption) — bereits abgerechnete Termine
+      // hart überspringen. Die Route lehnt eine solche Aktion bereits ab; hier
+      // als Defense-in-Depth gegen direkte Service-Aufrufe und Races.
+      if (billedProtectedIds.has(appointmentId)) {
+        result.billedProtected++;
+        continue;
+      }
+
       if (!row.customerId || !effectiveEmployeeId || !row.serviceId) {
         result.errors.push({ rowIndex: row.rowIndex, error: "Fehlende IDs für Upgrade" });
+        continue;
+      }
+
+      const { protectedIds: freshProtectedUpgrade } =
+        await getMutationProtectedAppointmentIds([appointmentId]);
+      if (freshProtectedUpgrade.has(appointmentId)) {
+        result.billedProtected++;
         continue;
       }
 
