@@ -68,7 +68,7 @@ interface CliArgs {
   importLinkedOnly: boolean;
 }
 
-function parseArgs(): CliArgs {
+export function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
   const apptArg = args.find((a) => a.startsWith("--appointment="));
   const customerArg = args.find((a) => a.startsWith("--customer="));
@@ -502,6 +502,24 @@ export async function findBilledImportDriftRows(opts: {
   );
 }
 
+/**
+ * Wendet die CLI-Argumente an: ruft die reine Drift-Erkennung auf und
+ * verengt das Ergebnis bei `--import-linked-only` auf import-verursachte
+ * Treffer. EINE gemeinsame Stelle für `main()` UND den Regressions-Test —
+ * so ist die Flag-Verdrahtung (`parseArgs` → Filter) mitgetestet, nicht
+ * nur die Zeilen-Semantik.
+ */
+export async function runDriftAudit(
+  args: Pick<CliArgs, "appointmentIds" | "customerIds" | "importLinkedOnly">,
+): Promise<BilledImportDriftRow[]> {
+  let rows = await findBilledImportDriftRows({
+    appointmentIds: args.appointmentIds.length > 0 ? args.appointmentIds : undefined,
+    customerIds: args.customerIds.length > 0 ? args.customerIds : undefined,
+  });
+  if (args.importLinkedOnly) rows = rows.filter((r) => r.importLinked);
+  return rows;
+}
+
 function toCsv(rows: BilledImportDriftRow[]): string {
   const header = [
     "appointmentId",
@@ -582,11 +600,7 @@ async function main() {
   if (args.importLinkedOnly)
     console.log("Filter:              nur import-verursachte Treffer (--import-linked-only)");
 
-  let rows = await findBilledImportDriftRows({
-    appointmentIds: args.appointmentIds.length > 0 ? args.appointmentIds : undefined,
-    customerIds: args.customerIds.length > 0 ? args.customerIds : undefined,
-  });
-  if (args.importLinkedOnly) rows = rows.filter((r) => r.importLinked);
+  const rows = await runDriftAudit(args);
 
   console.log(`\nBetroffene abgerechnete Termine: ${rows.length}`);
   for (const r of rows) {
