@@ -82,7 +82,7 @@ import {
 } from "../services/invoice-pdf-orchestrator";
 import { dbHostOf, PROD_HOST_PATTERN } from "../lib/dev-db-guard";
 
-interface Args {
+export interface Args {
   apply: boolean;
   customerIds: number[];
   appointmentIds: number[];
@@ -222,7 +222,7 @@ interface RepairPlanItem {
   signedServiceRecordIds: number[];
 }
 
-interface RepairSummary {
+export interface RepairSummary {
   apply: boolean;
   scanned: number;
   flagged: BilledImportDriftRow[];
@@ -239,7 +239,7 @@ function monthKey(customerId: number, year: number, month: number): string {
   return `${customerId}:${year}:${month}`;
 }
 
-async function reconcile(args: Args): Promise<RepairSummary> {
+export async function reconcile(args: Args): Promise<RepairSummary> {
   // 1) Erkennung über die SSoT. Im scharfen Lauf ist die Menge auf die
   //    bestätigte Allowlist eingegrenzt; im Trockenlauf wird optional nach
   //    Kunden gefiltert.
