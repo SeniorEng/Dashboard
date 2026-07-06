@@ -16,7 +16,7 @@ import { employeeMonthClosings } from "@shared/schema/system";
 import { completedButUnsignedSqlRaw, unsignedServiceMinutesLateralRaw, documentedSqlRaw } from "../../lib/appointment-signed";
 import { upsertHoursAccountSchema, HOURS_ACCOUNT_CATEGORIES } from "@shared/schema/time-tracking";
 import { getEmployeePayrollRows, getMonthlyAbsenceBlocks, type PayrollEmployeeRow } from "../../storage/time-tracking/payroll-hours";
-import { computeAccountsForMonth, upsertHoursAccount, OpeningBalanceLockedError, type AccountCell } from "../../storage/time-tracking/payroll-accounts";
+import { computeAccountsForMonth, sumStundenkontoSaldo, upsertHoursAccount, OpeningBalanceLockedError, type AccountCell } from "../../storage/time-tracking/payroll-accounts";
 import { resolveAppointmentPartyName } from "@shared/domain/appointment-party-name";
 
 const router = Router();
@@ -113,7 +113,7 @@ router.get("/mitarbeiterabrechnung", requireWageDataAccess, asyncHandler("Mitarb
       feiertage: cells.feiertage?.saldo ?? 0,
       kilometer: cells.kilometer?.saldo ?? 0,
     };
-    const stundenkonto = Math.round((saldo.hw + saldo.ab + saldo.feiertage) * 100) / 100;
+    const stundenkonto = sumStundenkontoSaldo(cells);
     const materialAccount = cellList.some(
       (c) => c.saldo !== 0 || c.anfangsbestand !== 0 || !c.bezahltIsDefault,
     );

@@ -42,6 +42,21 @@ export interface AccountCell {
   saldo: number;
 }
 
+/**
+ * SSoT für den Gesamt-Stundenkonto-Saldo (Reststunden) eines Mitarbeiters aus
+ * seinen Kategorie-Zellen: Summe der Salden von HW + AB + Feiertage, auf 2 NK
+ * gerundet. Kilometer ist KEINE Stunde und bleibt bewusst ausgeschlossen.
+ * Diese eine Funktion liefert die Zahl sowohl für die Admin-Spalte
+ * „Stundenkonto" als auch für die Mitarbeiter-Selbstansicht — nie parallel
+ * nachrechnen (Anzeige-≠-Buchung-Drift vermeiden).
+ */
+export function sumStundenkontoSaldo(cells: Record<string, AccountCell> | undefined): number {
+  const hw = cells?.hw?.saldo ?? 0;
+  const ab = cells?.ab?.saldo ?? 0;
+  const feiertage = cells?.feiertage?.saldo ?? 0;
+  return Math.round((hw + ab + feiertage) * 100) / 100;
+}
+
 type StoredRow = {
   category: string;
   anfangsbestand: number | null;

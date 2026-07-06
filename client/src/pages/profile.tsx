@@ -13,6 +13,7 @@ import {
   PasswordSection,
   ProofsSection,
   DocumentsSection,
+  HoursAccountSection,
 } from "@/features/profile";
 
 export default function ProfilePage() {
@@ -48,6 +49,7 @@ export default function ProfilePage() {
       <PageHeader title="Mein Profil" backHref="/" />
       <div className="space-y-4">
         <PersonalDataSection profile={profile} />
+        <HoursAccountSection />
         <EmergencyContactSection profile={profile} />
         <PetAcceptanceSection profile={profile} />
         <WhatsAppSection />

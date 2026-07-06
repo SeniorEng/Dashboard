@@ -9,6 +9,7 @@ import { usersCache, birthdaysCache } from "../services/cache";
 import { sanitizeUser } from "../utils/sanitize-user";
 import { geocodeEmployee } from "../services/geocoding";
 import { optionalGermanPhoneSchema } from "@shared/schema/common";
+import { computeAccountsForMonth, sumStundenkontoSaldo } from "../storage/time-tracking/payroll-accounts";
 
 const router = Router();
 
@@ -158,6 +159,42 @@ router.patch("/proofs/:proofId/upload", asyncHandler("Nachweis konnte nicht hoch
 
   const updated = await documentStorage.uploadProof(proofId, result.data.fileName, result.data.objectPath);
   res.json(updated);
+}));
+
+// GET /hours-account — eigenes Stundenkonto (Reststunden-Saldo) des angemeldeten
+// Mitarbeiters. Self-scoped auf req.user.id (kein Fremd-Zugriff). Nutzt dieselbe
+// SSoT wie die Admin-Mitarbeiterabrechnung (`computeAccountsForMonth`), damit die
+// hier angezeigte Zahl deckungsgleich mit der Admin-Spalte „Stundenkonto" ist:
+// Saldo = Anfangsbestand + Erfasst − Bezahlt, fortlaufend Monat für Monat
+// übertragen. Der Gesamt-Saldo summiert (wie die Admin-Übersicht) HW + AB +
+// Feiertage; Kilometer bleiben ausgeschlossen (keine Stunden).
+router.get("/hours-account", asyncHandler("Stundenkonto konnte nicht geladen werden", async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+
+  const { byEmployee } = await computeAccountsForMonth(year, month);
+  const cells = byEmployee[userId];
+
+  if (!cells) {
+    res.json({ hasAccount: false, year, month, stundenkontoSaldo: 0, categories: [] });
+    return;
+  }
+
+  const stundenkontoSaldo = sumStundenkontoSaldo(cells);
+
+  res.json({
+    hasAccount: true,
+    year,
+    month,
+    stundenkontoSaldo,
+    categories: [
+      { category: "hw", saldo: cells.hw?.saldo ?? 0 },
+      { category: "ab", saldo: cells.ab?.saldo ?? 0 },
+      { category: "feiertage", saldo: cells.feiertage?.saldo ?? 0 },
+    ],
+  });
 }));
 
 export default router;

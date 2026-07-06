@@ -6,5 +6,6 @@ export { PetAcceptanceSection } from "./components/pet-acceptance-section";
 export { WhatsAppSection } from "./components/whatsapp-section";
 export { BrowserNotificationsSection } from "./components/browser-notifications-section";
 export { PasswordSection } from "./components/password-section";
+export { HoursAccountSection } from "./components/hours-account-section";
 export { ProofsSection } from "./components/proofs-section";
 export { DocumentsSection } from "./components/documents-section";
