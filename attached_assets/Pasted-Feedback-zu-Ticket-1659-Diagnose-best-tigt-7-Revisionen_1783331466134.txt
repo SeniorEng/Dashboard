@@ -1,0 +1,78 @@
+Feedback zu Ticket #1659 — Diagnose bestätigt, 7 Revisionen erforderlich
+Diagnose: ✅ 100% korrekt bis in die Zeile verifiziert.
+Der Bug lebt in server/services/invoice-data.ts:319-320:
+typescriptconst vatBasisPoints = isVatExempt ? 0 : (svc.vatRate || 0);  // Name lügt: das ist PERCENT
+const vatCents = Math.round(totalCents * vatBasisPoints / 10000);  // ÷ 10000 = BP-Interpretation
+services.vatRate ist per Schema integer NOT NULL DEFAULT 19 mit Zod-Constraint .max(100, "MwSt-Satz darf maximal 100% sein") — unmissverständlich Prozent. Division durch 10000 dividiert 100× zu viel. Zentrale SSoT STANDARD_VAT_RATE_BP = 1900 in shared/domain/invoice-vat.ts:24 ist sauber, wird in invoice-calc.ts an mehreren Stellen korrekt genutzt — invoice-data.ts wurde beim Refactor nur nicht auf die SSoT gezogen.
+Regressions-Commit identifiziert: 9d6f9d48 "Refactor billing.ts into thin handlers + testable services (Task #892)" vom 2026-06-01 21:54. Der Ticket-Datum-Marker (2026-06-18 = RE-0117) ist der erste Selbstzahler danach, nicht das Regressions-Datum.
+
+🔴 BLOCKING (müssen ins Fix-PR)
+R1 — Bug betrifft ZWEI Line-Types
+Ticket-Angabe „invoice-data.ts:312-344, 346-396" impliziert nur den Stunden-Pfad. Identischer Bug-Pattern lebt auch im km-Pfad in Zeilen 375-378:
+typescriptconst kmVatBasisPoints = isVatExempt ? 0 : (kmSvc.vatRate || 0);
+const kmVatCents = Math.round(kmTotalCents * kmVatBasisPoints / 10000);
+→ Fix muss beide Line-Types adressieren, sonst wandert Selbstzahler-km weiter mit 0,19 % durch. Bitte im Ticket explizit machen.
+R2 — Storno-Symmetrie: RE-2026-0142 mitre-generieren
+Wenn der Fix nur Neu-Erzeugungen betrifft und RE-2026-0142 (die Storno-Rechnung von 0117) nicht neu erzeugt wird, entsteht eine neue Drift-Klasse: Original 0117 hat 0,19 %, Stornorechnung 0142 hätte nach Fix 19 % → Netto stimmt, USt-Summen ungleich → GoBD-Widerspruch, „die Stornorechnung storniert nicht bit-genau das Original".
+Zwei Optionen:
+
+(a) Ticket-Step 4 zwingend um RE-2026-0142-Re-Generierung erweitern
+(b) createStornoInvoice so ändern, dass sie -original.vatAmountCents übernimmt statt neu zu rechnen. Das ist die GoBD-saubere Semantik (Storno storniert exakt was verbucht wurde, nicht was heute richtig wäre) — und verhindert die Drift dauerhaft für künftige Regel-Änderungen.
+
+Empfehlung: (b), plus Backfill für 0142 einmalig.
+R3 — Grep-basierter Architektur-Test (nicht nur Fixture-Test)
+Ticket-Step 2 beschreibt nur einen Fixture-Test. Der wirkt reaktiv, nicht präventiv. Bitte zusätzlich einen Architektur-Test einführen — analog zu bestehendem tests/architecture/no-money-arithmetic-outside-helper.test.ts:
+typescript// tests/architecture/no-raw-service-vat-arithmetic.test.ts
+it("services.vatRate wird nie roh mit / oder * verwendet — nur via Helper", () => {
+  const grep = execSync(
+    `grep -rn "\\.vatRate\\s*[/*]" --include="*.ts" server shared`,
+    { encoding: "utf-8" },
+  );
+  const allowedFiles = ["shared/domain/invoice-vat.ts"];
+  const violations = grep.split("\n").filter(
+    line => line && !allowedFiles.some(f => line.startsWith(f)),
+  );
+  expect(violations).toEqual([]);
+});
+Das ist der einzige Guard, der einen Refactor wie den 9d6f9d48-Refactor wieder abfängt.
+
+🟡 SHOULD (im selben PR oder direkter Follow-up)
+R4 — services.vatRate-Feld ist ein Footgun (dauerhaft)
+Nach dem Fix wird das Feld faktisch nur noch als Boolean „exempt/standard" genutzt, aber die 19-vs-1900-Ambiguität wartet auf den nächsten Refactor. Bitte im Ticket entscheiden:
+
+(a) Minimal: JSDoc + Schema-Kommentar // Value in PERCENT (0-100), NOT basis points. Use STANDARD_VAT_RATE_BP for math.
+(b) Sauber: Feld deprecaten, services.isVatExempt: boolean einführen
+(c) Pragmatisch: Helper serviceVatRateBP(svc): number einführen, alle Nutzer der Rate rufen NUR den Helper auf
+
+Empfehlung: (c) — kein Migrations-Risiko, verhindert Rohrverwendung dauerhaft, matcht Architektur-Test aus R3.
+R5 — Anzeige-vs-Buchung explizit im Regressions-Test
+Ticket erklärt richtig, dass Frontend × 1.19 korrekt hochrechnet, aber falschen persistierten Total zeigt. Der Guard-Test muss diesen sichtbaren Widerspruch selbst reproduzieren:
+typescriptit("PDF-Gesamt === Σ(Positions-Brutto) für Selbstzahler", () => {
+  const invoice = createSelbstzahlerFixture({ netCents: 4908 });
+  const pdf = renderInvoicePdf(invoice);
+  const summedLines = pdf.lineItems.reduce((s, li) => s + li.grossCents, 0);
+  expect(pdf.grossAmountCents).toBe(summedLines);
+  expect(pdf.vatAmountCents).toBe(933);  // 19% von 4908
+});
+R6 — Edge-Case svc.vatRate = null
+Aktueller Fallback (svc.vatRate || 0) schluckt null silent als „steuerfrei". Nach dem Fix bitte entscheiden:
+
+Als Konfigurationsfehler thrown (analog zu Zeile 316 „Kein Preis hinterlegt")
+Oder default = Regelsatz (STANDARD_VAT_RATE_BP)
+
+Explizite Entscheidung, nicht dem Refactor überlassen.
+R7 — Naming-Cleanup
+Die Variablen vatBasisPoints / kmVatBasisPoints sind Anti-Dokumentation — sie behaupten Basispunkte, enthalten aber Prozent. Nach dem Umbau auf SSoT sollten sie ganz verschwinden (STANDARD_VAT_RATE_BP oder serviceVatRateBP(svc) steht direkt in der Rechnung). Kein Legacy-Naming stehenlassen.
+
+Lessons-Learned für's Refactor-Playbook
+Regressions-Commit 9d6f9d48 als Case-Study eintragen: ein „Refactor into thin handlers"-PR verschob die USt-Rechnung aus einer Datei, die die SSoT konsistent nutzte, in eine Datei, die die Konstante roh aus dem DB-Feld las. Beide Formeln sahen visuell ähnlich aus (round(x × 19 / 10000) vs. round(x × 1900 / 10000)), aber die Semantik unterschied sich um Faktor 100.
+Regel für künftige Refactor-Extraktionen: Bei „thin handler"-Extraction prüfen, ob Konstanten/Einheiten-Konversionen implizit im ursprünglichen Kontext waren und nun explizit gemacht werden müssen. Grep-basierte Architektur-Tests (siehe R3) sind der einzige zuverlässige Guard.
+
+Zusammenfassung
+Ticket kann als Basis gebaut werden. Bitte:
+
+R1, R2, R3 als BLOCKING in denselben PR (invoice-data.ts km-Pfad + Storno-Semantik-Fix + Architektur-Test)
+R4, R5, R6, R7 als SHOULD — idealerweise auch im selben PR, sonst Follow-up-Ticket
+Regressions-Commit 9d6f9d48 als „Learn"-Case im Refactor-Playbook dokumentieren
+
+Bei Rückfragen: die Verifikations-Ausführung + Line-Reads sind in Abrechnung-SSoT-Answers… und dem Chat-Log dokumentiert.
