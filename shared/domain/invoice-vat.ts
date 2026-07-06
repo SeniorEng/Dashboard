@@ -26,6 +26,48 @@ export const STANDARD_VAT_RATE_BP = 1900;
 const BUDGET_TYPE_SET: ReadonlySet<string> = new Set(BUDGET_TYPES as readonly string[]);
 
 /**
+ * Task #1659 — EINZIGE Roh-Zugriffsstelle auf das Service-Feld `vatRate`.
+ *
+ * `services.vatRate` ist als PROZENT-Wert gespeichert (Schema
+ * `integer NOT NULL DEFAULT 19`, Zod `.max(100)`), NICHT als Basispunkte.
+ * Der Rechnungs-Erzeugungspfad rechnet die USt aber in Basispunkten
+ * (`round(netto × rateBP / 10000)`, identisch zu {@link STANDARD_VAT_RATE_BP}).
+ * Wer die Rohrate ohne Umrechnung durch 10000 teilt, erhält 0,19 % statt 19 %
+ * — genau die Regression aus Commit `9d6f9d4` (RE-2026-0250 & Co.).
+ *
+ * Deshalb übersetzt DIESER Helper die Prozent-Rate in Basispunkte und ist die
+ * einzige Stelle, an der `vatRate` roh gelesen/gerechnet werden darf. Ein
+ * fehlender (`null`) Satz ist ein Konfigurationsfehler (analog „Kein Preis
+ * hinterlegt") und wird geworfen — NIE still als steuerfrei (`|| 0`)
+ * geschluckt. Der Architektur-Guard
+ * `tests/architecture/no-raw-service-vat-rate.test.ts` verhindert, dass
+ * `services.vatRate` je wieder außerhalb dieser Datei roh mit `*`/`/`
+ * verrechnet wird.
+ *
+ * Lessons Learned (SHOULD, Step 8): Bei „thin handler"-Extraktionen (wie
+ * `9d6f9d4`) müssen implizite Einheiten-Konversionen (Prozent → Basispunkte)
+ * explizit gemacht werden; Grep-/AST-Architektur-Tests sind der zuverlässige
+ * Guard gegen diesen Regressionstyp.
+ */
+export function serviceVatRateBP(svc: {
+  vatRate: number | null | undefined;
+  name?: string | null;
+  code?: string | null;
+  serviceName?: string | null;
+  serviceCode?: string | null;
+}): number {
+  const percent = svc.vatRate;
+  if (percent == null) {
+    const label = svc.name ?? svc.serviceName ?? svc.code ?? svc.serviceCode ?? "Dienstleistung";
+    throw new Error(
+      `Kein MwSt-Satz hinterlegt für Dienstleistung "${label}". Bitte prüfen Sie den Dienstleistungskatalog.`,
+    );
+  }
+  // Prozent → Basispunkte: 19 % → 1900 (== STANDARD_VAT_RATE_BP).
+  return percent * 100;
+}
+
+/**
  * Entscheidet die USt-Behandlung anhand des Budget-Topfs (Primärsignal) mit
  * Fallback auf den `billingType` für Alt-/Einzeltopf-Rechnungen ohne
  * `budgetType`-Marker.

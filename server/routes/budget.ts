@@ -17,6 +17,7 @@ import { validateSelbstzahlerBudget } from "@shared/domain/budget-selbstzahler-v
 import { validatePflegegradBudget } from "@shared/domain/budget-pflegegrad-validator";
 import { carryoverWindowFor } from "@shared/domain/budget-carryover-dedup";
 import { classifyCostEstimate } from "@shared/domain/budget/cost-estimate-outcome";
+import { serviceVatRateBP } from "@shared/domain/invoice-vat";
 import {
   max45bStartValueCents,
   resolve45bAccrualAnchor,
@@ -176,7 +177,10 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
 
   let totalCostCents = 0;
   let weightedVatRate = 19;
-  const costDetails: { serviceId: number; costCents: number; vatRate: number }[] = [];
+  // Task #1659 — der USt-Satz eines Service wird ausschließlich über die SSoT
+  // `serviceVatRateBP` gelesen (liefert Basispunkte, 19 % → 1900). Kein roher
+  // `service.vatRate`-Zugriff mehr in der Kostenschätzung.
+  const costDetails: { serviceId: number; costCents: number; vatRateBp: number }[] = [];
 
   const serviceIdsParam = req.query.serviceIds as string | undefined;
   const serviceDurationsParam = req.query.serviceDurations as string | undefined;
@@ -207,7 +211,7 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
         }
         if (costCents > 0) {
           totalCostCents += costCents;
-          costDetails.push({ serviceId: service.id, costCents, vatRate: service.vatRate });
+          costDetails.push({ serviceId: service.id, costCents, vatRateBp: serviceVatRateBP(service) });
         }
       }
     } else {
@@ -232,10 +236,10 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
         serviceCatalogStorage.getServiceByCode("travel_km"),
         serviceCatalogStorage.getServiceByCode("customer_km"),
       ]);
-      if (hwService && hauswirtschaftMinutes > 0) costDetails.push({ serviceId: hwService.id, costCents: costs.hauswirtschaftCents, vatRate: hwService.vatRate });
-      if (abService && alltagsbegleitungMinutes > 0) costDetails.push({ serviceId: abService.id, costCents: costs.alltagsbegleitungCents, vatRate: abService.vatRate });
-      if (travelKmService && travelKilometers > 0 && costs.travelCents > 0) costDetails.push({ serviceId: travelKmService.id, costCents: costs.travelCents, vatRate: travelKmService.vatRate });
-      if (customerKmService && customerKilometers > 0 && costs.customerKilometersCents > 0) costDetails.push({ serviceId: customerKmService.id, costCents: costs.customerKilometersCents, vatRate: customerKmService.vatRate });
+      if (hwService && hauswirtschaftMinutes > 0) costDetails.push({ serviceId: hwService.id, costCents: costs.hauswirtschaftCents, vatRateBp: serviceVatRateBP(hwService) });
+      if (abService && alltagsbegleitungMinutes > 0) costDetails.push({ serviceId: abService.id, costCents: costs.alltagsbegleitungCents, vatRateBp: serviceVatRateBP(abService) });
+      if (travelKmService && travelKilometers > 0 && costs.travelCents > 0) costDetails.push({ serviceId: travelKmService.id, costCents: costs.travelCents, vatRateBp: serviceVatRateBP(travelKmService) });
+      if (customerKmService && customerKilometers > 0 && costs.customerKilometersCents > 0) costDetails.push({ serviceId: customerKmService.id, costCents: costs.customerKilometersCents, vatRateBp: serviceVatRateBP(customerKmService) });
     }
   } catch (error: unknown) {
     if (error instanceof Error && error.message.includes("Preisvereinbarung")) {
@@ -260,7 +264,9 @@ router.get("/:customerId/cost-estimate", checkCustomerAccess, asyncHandler("Kost
   if (costDetails.length > 0) {
     const totalCost = costDetails.reduce((s, c) => s + c.costCents, 0);
     if (totalCost > 0) {
-      weightedVatRate = costDetails.reduce((s, c) => s + (c.vatRate * c.costCents / totalCost), 0);
+      // Gewichteter Durchschnitt in Basispunkten → Prozent (classifyCostEstimate
+      // erwartet Prozent). Die SSoT liefert BP, deshalb hier einmal /100.
+      weightedVatRate = costDetails.reduce((s, c) => s + (c.vatRateBp * c.costCents / totalCost), 0) / 100;
     }
   }
 

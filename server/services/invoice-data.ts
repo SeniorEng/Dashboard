@@ -1,6 +1,7 @@
 import { badRequest } from "../lib/errors";
 import { computeNoShowCharge, type CancellationPolicyType } from "@shared/domain/cancellation-policy";
 import { quantizeKm, computeKmLineTotalCents } from "@shared/domain/invoice-line-items";
+import { serviceVatRateBP } from "@shared/domain/invoice-vat";
 import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetSplitForAppointment, type SplitReversalRow } from "@shared/domain/budget-invoice-split";
 import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
@@ -316,8 +317,12 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
         throw badRequest(`Kein Preis hinterlegt für Dienstleistung "${svc.serviceName || svc.serviceCode}". Bitte prüfen Sie den Dienstleistungskatalog.`);
       }
       const totalCents = Math.round((durationMinutes / 60) * pricePer60Min);
-      const vatBasisPoints = isVatExempt ? 0 : (svc.vatRate || 0);
-      const vatCents = Math.round(totalCents * vatBasisPoints / 10000);
+      // Task #1659 — USt über die zentrale SSoT (`serviceVatRateBP` liefert
+      // Basispunkte, 19 % → 1900). Der frühere Code las `svc.vatRate` (Prozent)
+      // roh und teilte durch 10000 → 0,19 % statt 19 % (Regression `9d6f9d4`,
+      // RE-2026-0250). Steuerbefreite Töpfe (Pflegekasse) bleiben 0.
+      const vatRateBp = isVatExempt ? 0 : serviceVatRateBP(svc);
+      const vatCents = Math.round(totalCents * vatRateBp / 10000);
 
       lineItems.push({
         appointmentId: appt.id,
@@ -368,8 +373,10 @@ export async function buildLineItemsFromAppointments(apptIds: number[], customer
       // `Math.round(km)` als Anzeige → Drift (s. RE-2026-0003).
       const quantityKm = quantizeKm(kmEntry.km);
       const kmTotalCents = computeKmLineTotalCents(kmEntry.km, pricePerKm);
-      const kmVatBasisPoints = isVatExempt ? 0 : (kmSvc.vatRate || 0);
-      const kmVatCents = Math.round(kmTotalCents * kmVatBasisPoints / 10000);
+      // Task #1659 — identische Korrektur für den Kilometer-Pfad: USt-Satz über
+      // die SSoT (Basispunkte), damit Selbstzahler-km 19 % statt 0,19 % tragen.
+      const kmVatRateBp = isVatExempt ? 0 : serviceVatRateBP(kmSvc);
+      const kmVatCents = Math.round(kmTotalCents * kmVatRateBp / 10000);
 
       lineItems.push({
         appointmentId: appt.id,
