@@ -481,4 +481,173 @@ objectStorageDescribe("Import-Drift-Reparatur bei Rechnungs-Line-Drift (Signal B
       180_000,
     );
   }
+
+  // --------------------------------------------------------------------------
+  // KOMBINIERTER Drift (Task #1664): In einem echten Vor-Guard-Import driften
+  // NICHT einzelne Felder isoliert, sondern MEHRERE Termin-Stammdaten auf
+  // DEMSELBEN versiegelten Termin GLEICHZEITIG (z.B. ein längerer HW-Besuch an
+  // einem anderen Tag mit zusätzlichen km). Die Erkennung ORt zwar die
+  // Unterflags, aber die Neu-Ausstellung MUSS den VOLLSTÄNDIG kombinierten
+  // neuen Zustand re-buchen — eine Reparatur, die nur EIN Feld aufgreift, würde
+  // die neu ausgestellte Rechnung vom Ledger abweichen lassen, und KEIN
+  // Einzelfeld-Test oben würde das bemerken. Dieser Test schliesst genau diese
+  // Lücke: alle vier Drift-Arten feuern zusammen, und der re-abgerechnete
+  // §45b-Verbrauch muss der voll kombinierten gedrifteten Kostenlage
+  // entsprechen (HW @ 45 min + 5 travel-km).
+  // --------------------------------------------------------------------------
+  it(
+    "Kombinierter Drift (Dauer + km + Service + Datum zugleich): alle 4 Unterflags feuern, Neu-Ausstellung deckt die voll kombinierte Kostenlage",
+    async () => {
+      // Erwartete voll kombinierte, gedriftete §45b-Kostenlage:
+      //   Service AB→HW, Dauer 30→45 min ⇒ HW @ 45 min = 3800 * 45/60 = 2850
+      //   + 5 travel-km * 35 ct                                     =  175
+      //   ─────────────────────────────────────────────────────────────────
+      //   Summe                                                     = 3025
+      const COMBINED_REISSUED_CENTS = (HW_HOURLY_CENTS * 45) / 60 + 5 * KM_RATE_CENTS; // 3025
+
+      // --- Realer Abrechnungs-Fluss (identisch zu den Einzelfeld-Szenarien).
+      const customerId = await setupSinglePotCustomer();
+      const appt = await createAppt(customerId);
+      const apptId = appt.id;
+      await documentAppt(apptId, appt.time);
+      const serviceRecordId = await createAndSignSr(customerId);
+      const invoices = await generate(customerId);
+      expect(invoices.length, "erste Abrechnung erzeugt genau 1 Rechnung").toBe(1);
+      const originalInvoiceId = invoices[0].id;
+      expect(await liveConsumption45bCents(customerId), "Dokumentation belegt §45b live").toBe(APPT_COST_CENTS);
+
+      // --- Kombinierte Drift-Injektion: ALLE vier Felder NACH dem Siegel
+      //     gleichzeitig direkt in der DB mutieren (simulierter Vor-Guard-Import).
+      const altDate = alternateWeekdayInMonth(appt.date);
+      await db
+        .update(appointmentServices)
+        .set({ serviceId: hwServiceId, actualDurationMinutes: 45 })
+        .where(eq(appointmentServices.appointmentId, apptId));
+      await db
+        .update(appointments)
+        .set({ travelKilometers: 5, date: altDate })
+        .where(eq(appointments.id, apptId));
+
+      // --- Trockenlauf: Signal B feuert mit ALLEN vier Unterflags, Signal A nicht.
+      const dry = await reconcile({
+        apply: false,
+        customerIds: [],
+        appointmentIds: [apptId],
+        importLinkedOnly: false,
+      });
+      const flagged = dry.flagged.find((r) => r.appointmentId === apptId);
+      expect(flagged, "Termin muss als Drift erkannt werden").toBeDefined();
+      expect(flagged!.invoiceLineDrift, "Signal B (Line-Drift) muss feuern").toBe(true);
+      expect(flagged!.driftDuration, "Unterflag driftDuration muss feuern").toBe(true);
+      expect(flagged!.driftKm, "Unterflag driftKm muss feuern").toBe(true);
+      expect(flagged!.driftService, "Unterflag driftService muss feuern").toBe(true);
+      expect(flagged!.driftDate, "Unterflag driftDate muss feuern").toBe(true);
+      expect(
+        flagged!.consumptionRebookedAfterSeal,
+        "Signal A darf NICHT feuern (keine Nach-Siegel-Consumption)",
+      ).toBe(false);
+
+      const planItem = dry.plan.find((p) => p.appointmentId === apptId);
+      expect(planItem, "Reparatur-Plan enthält den Termin").toBeDefined();
+      expect(planItem!.sealedInvoiceIds).toContain(originalInvoiceId);
+      expect(planItem!.signedServiceRecordIds).toContain(serviceRecordId);
+
+      expect(dry.stornoedInvoiceIds).toHaveLength(0);
+      expect(dry.reissuedInvoiceIds).toHaveLength(0);
+      expect(dry.softStornoedServiceRecordIds).toHaveLength(0);
+      expect(dry.batchId, "kein Batch im Trockenlauf").toBeUndefined();
+
+      // Original-Line-Items VOR der Reparatur festhalten.
+      const beforeLines = await db.select({
+        id: invoiceLineItems.id,
+        totalCents: invoiceLineItems.totalCents,
+        durationMinutes: invoiceLineItems.durationMinutes,
+        appointmentId: invoiceLineItems.appointmentId,
+      }).from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, originalInvoiceId));
+      expect(beforeLines.length, "Original-Rechnung hat Line-Items").toBeGreaterThan(0);
+
+      // --- Scharfer Lauf.
+      const args: Args = {
+        apply: true,
+        customerIds: [],
+        appointmentIds: [apptId],
+        userId: superadminId,
+        reason: "Integrationstest kombinierter Import-Line-Drift (Dauer+km+Service+Datum) #1664",
+        importLinkedOnly: false,
+      };
+      const summary = await reconcile(args);
+
+      // --- Garantie 1: versiegelte Rechnung nur storniert, NIE in-place editiert.
+      expect(summary.stornoedInvoiceIds, "Original-Rechnung storniert").toContain(originalInvoiceId);
+      const [orig] = await db.select({ status: invoicesTable.status })
+        .from(invoicesTable).where(eq(invoicesTable.id, originalInvoiceId)).limit(1);
+      expect(orig.status, "Original ist storniert").toBe("storniert");
+
+      const stornos = await db.select({ id: invoicesTable.id })
+        .from(invoicesTable).where(and(
+          eq(invoicesTable.customerId, customerId),
+          eq(invoicesTable.invoiceType, "stornorechnung"),
+          eq(invoicesTable.stornierteRechnungId, originalInvoiceId),
+        ));
+      expect(stornos.length, "genau eine Stornorechnung zur Original").toBe(1);
+      for (const s of stornos) cleanupInvoiceIds.push(s.id);
+
+      const afterLines = await db.select({
+        id: invoiceLineItems.id,
+        totalCents: invoiceLineItems.totalCents,
+        durationMinutes: invoiceLineItems.durationMinutes,
+        appointmentId: invoiceLineItems.appointmentId,
+      }).from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, originalInvoiceId));
+      expect(afterLines, "Original-Line-Items unverändert (append-only)").toEqual(beforeLines);
+
+      // --- Garantie 2: Monat neu ausgestellt, Rechnung deckt sich mit Ledger.
+      expect(summary.reissuedInvoiceIds.length, "mindestens eine neue Rechnung ausgestellt").toBeGreaterThan(0);
+      for (const rid of summary.reissuedInvoiceIds) if (!cleanupInvoiceIds.includes(rid)) cleanupInvoiceIds.push(rid);
+      const reissued = summary.reissuedInvoiceIds[0];
+      const reissuedLines = await db.select({ appointmentId: invoiceLineItems.appointmentId })
+        .from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, reissued));
+      expect(reissuedLines.map((l) => l.appointmentId), "neue Rechnung deckt den Termin ab").toContain(apptId);
+
+      const live = await liveConsumption45bCents(customerId);
+      const active = await activeInvoices(customerId);
+      const activeNet = active.reduce((sum, i) => sum + (i.netAmountCents ?? 0), 0);
+      expect(active.length, "genau eine aktive Rechnung (die neu ausgestellte)").toBe(1);
+      // Kern-Invariante: Rechnung == Ledger (beide aus derselben frischen Buchung).
+      expect(activeNet, "Σ aktive Rechnungen === Live-Ledger").toBe(live);
+      // Kern-Aussage dieses Tests: die Neu-Ausstellung spiegelt die VOLL
+      // KOMBINIERTEN gedrifteten Termindaten — nicht nur ein einzelnes Feld.
+      expect(
+        live,
+        "re-abgerechneter §45b-Verbrauch spiegelt die voll kombinierten gedrifteten Termindaten (HW @ 45 min + 5 km)",
+      ).toBe(COMBINED_REISSUED_CENTS);
+
+      // --- Garantie 3: signierter LN soft-storniert + Audit, KEINE Neuerstellung.
+      expect(summary.softStornoedServiceRecordIds, "LN soft-storniert").toContain(serviceRecordId);
+      const [ln] = await db.select({ deletedAt: monthlyServiceRecords.deletedAt })
+        .from(monthlyServiceRecords).where(eq(monthlyServiceRecords.id, serviceRecordId)).limit(1);
+      expect(ln.deletedAt, "LN hat deleted_at").not.toBeNull();
+
+      const deletionAudit = await db.select({ id: auditLog.id, metadata: auditLog.metadata })
+        .from(auditLog).where(and(
+          eq(auditLog.action, "service_record_deleted"),
+          eq(auditLog.entityType, "service_record"),
+          eq(auditLog.entityId, serviceRecordId),
+        ));
+      expect(deletionAudit.length, "service_record_deleted-Audit geschrieben").toBeGreaterThan(0);
+      const meta = (deletionAudit[0].metadata ?? {}) as Record<string, unknown>;
+      expect(meta.task, "Audit trägt Task-Attribution").toBe("#1651");
+      expect(meta.batchId, "Audit trägt Reparatur-Batch").toBe(summary.batchId);
+
+      const liveLns = await db.select({ id: monthlyServiceRecords.id })
+        .from(monthlyServiceRecords).where(and(
+          eq(monthlyServiceRecords.customerId, customerId),
+          isNull(monthlyServiceRecords.deletedAt),
+        ));
+      expect(liveLns.length, "kein Auto-Reset des LN (Task #576)").toBe(0);
+
+      // --- Garantie 4: Termin zur manuellen Neu-Dokumentation ausgewiesen.
+      expect(summary.lnReDocRequiredAppointmentIds, "Termin zur Neu-Doku freigegeben").toContain(apptId);
+    },
+    180_000,
+  );
 });
