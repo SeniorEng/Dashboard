@@ -37,7 +37,7 @@ export function MissingSignaturesCard() {
     staleTime: 5 * 60 * 1000,
   });
   const missingSignatures = data?.items ?? [];
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   if (missingSignatures.length === 0) return null;
 
