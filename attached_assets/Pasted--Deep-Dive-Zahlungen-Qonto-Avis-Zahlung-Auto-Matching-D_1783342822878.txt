@@ -1,0 +1,335 @@
+# Deep-Dive: Zahlungen & Qonto — Avis + Zahlung Auto-Matching
+
+**Datum:** 2026-07-06
+**Repo-Stand:** `origin/main` HEAD `f192ffe6`
+**Betroffene Files:** `client/src/features/qonto/**`, `server/routes/admin/qonto.ts`, `server/services/qonto.ts`, `server/services/avis-parser.ts`, `shared/schema/qonto.ts`
+
+---
+
+## TL;DR
+
+**Ja, Avis und Zahlung spielen zusammen — aber nur bei „schöner" Rechnungs-Referenz im Verwendungszweck. Für den Regelfall (Pflegekassen-Sammel-Avis + spätere Sammelzahlung mit Bezug „Avis #…") gibt es KEINE automatische Verknüpfung.**
+
+**Status:**
+- 🟢 1:1 Match (Zahlung → einzelne Rechnung via Rechnungsnummer im Verwendungszweck) — funktioniert
+- 🟡 Avis → Rechnung-Match — funktioniert für pro-Zeile-Rechnungen
+- 🟡 Avis + Zahlung kaskadierend — funktioniert **wenn** Sammelzahlung eine Rechnungsnummer im Verwendungszweck enthält
+- 🔴 **Sammel-Avis ↔ Sammelzahlung (der Hauptfall!)** — **manuell nur** via „Als bezahlt markieren"-Button, kein Auto-Matching zwischen Avis-Header und Qonto-Betrag
+- 🔴 **Qonto-Transaktion ↔ Payment-Advice** — **keine direkte Datenmodell-Verknüpfung** möglich
+
+---
+
+## A. Architektur — was existiert
+
+### A.1 UI-Ebene
+
+`client/src/pages/admin/qonto.tsx` — zwei Tabs unter „Zahlungen & Qonto":
+
+| Tab | Komponente | Zweck |
+|---|---|---|
+| Transaktionen | `TransactionsTab` | Zeigt Qonto-Bank-Transaktionen mit Match-Filter (alle / gematcht / offen) |
+| Avise | `AdvicesTab` | Upload + Liste von Payment-Advices, mit „Als bezahlt markieren"-Aktion |
+
+**Die zwei Tabs sind bewusst getrennt — kein Cross-Linking im UI.**
+
+### A.2 Datenmodell (`shared/schema/qonto.ts`)
+
+**Zwei Tabellen mit Rechnung als Mittler:**
+
+```
+                                  invoices.id
+                                       ▲
+                                       │
+              ┌────────────────────────┴─────────────────────┐
+              │                                              │
+   qonto_transactions.matched_invoice_id        payment_advice_items.matched_invoice_id
+   (UNIQUE — 1 TX ↔ 1 Rechnung max)              (0..N Items ↔ 1 Rechnung)
+```
+
+**Kein direktes Feld** `qonto_transactions.matched_payment_advice_id` oder Ähnliches. Die Verknüpfung Avis ↔ Zahlung geht IMMER indirekt über Invoice.
+
+### A.3 Kern-Tabellen im Detail
+
+**`qonto_transactions`** (30+ Spalten):
+- `amountCents`, `counterparty_name`, `reference`, `label`, `emitted_at`
+- `matched_invoice_id` (nullable), `match_confidence` (`auto_exact`/`auto_number`/`auto_amount`/`manual`)
+- `billing_irrelevant_at` — für „nicht relevant"-Markierung (z.B. Kosten, sonstige Einnahmen)
+- **UNIQUE INDEX auf `matched_invoice_id WHERE matched_invoice_id IS NOT NULL`** → Pro Rechnung nur EINE gematchte Zahlung möglich
+
+**`payment_advices`** (Header):
+- `insurance_provider_name`, `ik_nummer`, `avis_nummer`, `beleg_nummer`
+- **`gesamt_betrag_cents`** ← ist da! Wird für Sammelzahlungen aber nicht benutzt.
+- `zahlungs_datum`, `kostentraeger_ik`, `zahlungsempfaenger_iban`
+- `skonto_cents`, `kuerzung_cents`
+
+**`payment_advice_items`** (N pro Advice):
+- `beleg_nr`, `vorgangs_nr`, `rechnungs_nummer`, `rechnungs_datum`
+- `verwendungszweck`, `betrag_cents`, `skonto_cents`
+- **`matched_invoice_id`** — verlinkt zur Rechnung nach Avis-Parse
+
+---
+
+## B. Auto-Match-Logik — was passiert wirklich
+
+### B.1 Wenn ein **Avis** hochgeladen wird
+
+**Pfad:** `POST /api/admin/qonto/payment-advices` (CSV oder PDF-Upload)
+
+**Ablauf:**
+1. `parseAvisCsv(csvContent)` — Parser erkennt Format automatisch (**davaso** oder **barmer**)
+2. Header + Items werden in `payment_advices` + `payment_advice_items` persistiert
+3. **`autoMatchAvisItems(items)`** läuft:
+   - Für jedes Item mit `rechnungsNummer` != null:
+     - Exact-Match: `SELECT * FROM invoices WHERE invoice_number = 'RE-2026-0250'`
+     - Fallback ILIKE-Match für Nummern ohne `RE-`-Präfix
+   - Bei Treffer: `payment_advice_items.matched_invoice_id = X` UND **`invoice.status: versendet → avis_erhalten`**
+4. Guard: bereits `bezahlt` oder `storniert` bleiben unangetastet (kein Downgrade)
+
+**Erfolgsrate:** Hoch (~95%), weil Avis-Items **explizit die Rechnungsnummer enthalten** (das ist der ganze Zweck des Avis).
+
+### B.2 Wenn eine **Qonto-Zahlung** eingeht
+
+**Pfad:** `POST /api/admin/qonto/auto-match` (manuell getriggert oder via Sync)
+
+**Ablauf (`qontoService.autoMatch`, Zeilen 298-380):**
+1. Lade **unmatched** Transaktionen
+2. Lade **offene Rechnungen**: status ∈ `["versendet", "avis_erhalten", "entwurf"]`
+   → **Wichtig:** `avis_erhalten` gilt als „noch offen" für Match-Zwecke!
+3. Baue zwei Lookup-Maps:
+   - `invoiceByNumber`: `invoice_number.toLowerCase() → invoice`
+   - `invoiceByAmount`: `gross_amount_cents → invoice[]` (kann mehrere pro Betrag)
+4. Für jede Transaktion:
+   - **Suchtext** = `reference + label + counterparty_name` (join, lowercase)
+   - **Strategie 1** — Rechnungsnummer im Suchtext **UND** Betrag stimmt → `auto_exact` ✅
+   - **Strategie 2** — Rechnungsnummer im Suchtext, Betrag ≠ → `auto_number` ⚠️ (Confidence niedrig)
+   - **Strategie 3** — Nur Betrag stimmt, EINDEUTIG (genau 1 Rechnung mit diesem Betrag) → `auto_amount` ⚠️
+5. Bei Match: `qonto_transactions.matched_invoice_id = X` UND **`invoice.status → bezahlt`**
+
+**Wichtige Guards (Concurrency-safe):**
+- Match-Update mit `WHERE matched_invoice_id IS NULL` (Idempotenz gegen Parallel-Match)
+- Invoice-Update mit `WHERE status IN ['versendet', 'avis_erhalten']` (kein Downgrade)
+- Alles in `withAudit`-Transaktion — Match + Status + Audit atomar
+
+### B.3 Manuelle Alternative — „Avis als bezahlt markieren"
+
+**Pfad:** `POST /api/admin/qonto/payment-advices/:id/mark-paid`
+
+Der User klickt in der Avis-Detail-Ansicht einen Button. Alle bereits gematchten Rechnungen des Avis wandern von `avis_erhalten` → `bezahlt`. `paidAt` kommt aus `advice.zahlungs_datum` (Fallback: now).
+
+**Warum das existiert:** Genau als Workaround für den Fall, dass die Sammelzahlung nicht automatisch mit den Rechnungen matcht.
+
+---
+
+## C. Die Kernfrage — spielt Avis + Sammelzahlung zusammen?
+
+### Szenario 1 — „glücklicher Fall" ✅
+
+- Kunde bekommt Avis (25 Rechnungen, Gesamt 12.847,50 €)
+- 3 Wochen später: Sammelzahlung 12.847,50 € mit Verwendungszweck „**RE-2026-0250** und weitere"
+- Auto-Match:
+  1. Suchtext enthält `re-2026-0250`
+  2. Betrag = 12.847,50 € ≠ 349,20 € (Betrag von RE-0250)
+  3. → `auto_number` — Confidence niedrig, aber Match erfolgt
+  4. **Nur RE-0250 wandert auf `bezahlt`. Die anderen 24 bleiben auf `avis_erhalten`.**
+
+→ **1 von 25 Rechnungen automatisch geschlossen. User muss die anderen 24 manuell schließen** (per „Avis als bezahlt markieren").
+
+### Szenario 2 — „Regelfall" ⚠️
+
+- Sammel-Avis wie oben
+- Sammelzahlung mit Verwendungszweck „**Sammelzahlung Avis 2026-0812**" (nur die Avis-Nummer, keine Rechnungsnummer)
+- Auto-Match:
+  1. Suchtext enthält `2026-0812` — aber **keine** Rechnungsnummer matcht dieses Pattern
+  2. Betrag-Match: `invoiceByAmount.get(1284750)` → EINE Rechnung mit exakt diesem Betrag? **Nein** (Sammelzahlung ist unwahrscheinlich exakt = eine einzelne Rechnung)
+  3. → **KEIN MATCH. User muss manuell:** Qonto-TX zur Kenntnis nehmen + „Avis als bezahlt markieren"-Button klicken.
+
+### Szenario 3 — „katastrophaler Fall" 🔴
+
+- Sammelzahlung wie oben, kein Text-Bezug im Verwendungszweck
+- User klickt „Avis als bezahlt markieren"
+- **Ergebnis:** 25 Rechnungen auf `bezahlt`. Qonto-TX bleibt **ungematcht** (weiter im Filter „Offen"). Der User sieht eine Zahlung ohne Zuordnung.
+- **Manueller Fallback:** User kann in der Qonto-TX-Detail-Ansicht eine Rechnung auswählen — aber nur EINE (UNIQUE INDEX). Also kann er der Zahlung willkürlich EINE der 25 zuordnen, was semantisch falsch ist.
+
+**Dies ist der Sumpf, den der User meint.**
+
+---
+
+## D. Was fehlt konkret
+
+### D.1 🔴 Payment-Advice ↔ Qonto-Transaction — direktes Feld fehlt
+
+Datenmodell hat kein `qonto_transactions.matched_payment_advice_id`. Ohne dieses Feld gibt es keinen Weg, eine Sammelzahlung sauber mit einem Sammel-Avis zu verknüpfen.
+
+**Fix:** Neue Spalte `matched_payment_advice_id INT REFERENCES payment_advices(id)` in `qonto_transactions`. Plus Constraint: **entweder** matched_invoice_id ODER matched_payment_advice_id, nie beide (XOR).
+
+### D.2 🔴 Advice-Level-Betragsmatch fehlt in `autoMatch`
+
+Der Auto-Match-Algorithmus sucht nur nach Rechnungsnummer + Rechnungs-Betrag. Er ignoriert `advice.gesamtBetragCents` und `advice.avisNummer`.
+
+**Fix — neue Match-Strategie einfügen (Priorität zwischen Strategie 1 und 2):**
+
+```typescript
+// Strategie 1.5: Sammel-Avis-Match
+const openAdvices = await db.select().from(paymentAdvices)
+  .where(and(
+    isNull(paymentAdvices.deletedAt),
+    // Alle Items noch nicht bezahlt
+    sql`NOT EXISTS (SELECT 1 FROM payment_advice_items pai
+                    JOIN invoices i ON i.id = pai.matched_invoice_id
+                    WHERE pai.payment_advice_id = payment_advices.id
+                    AND i.status = 'bezahlt')`,
+  ));
+
+for (const advice of openAdvices) {
+  // Betragsmatch mit Toleranz für Skonto/Kürzung
+  const expected = advice.gesamtBetragCents - advice.skontoCents;
+  if (Math.abs(qtx.amountCents) === expected
+      || searchText.includes(advice.avisNummer?.toLowerCase() ?? "___NULL___")) {
+    // BINGO: Sammelzahlung matcht Sammel-Avis
+    bestMatch = {
+      type: "advice",
+      adviceId: advice.id,
+      confidence: "auto_bulk_advice",
+    };
+    break;
+  }
+}
+```
+
+Bei Match:
+- `qonto_transactions.matched_payment_advice_id = advice.id`
+- Alle Rechnungen des Advice: `versendet|avis_erhalten → bezahlt` mit `paidAt = qtx.emittedAt`
+
+### D.3 🟡 Avis-Nummer im Verwendungszweck erkennen
+
+Simpler Add zu Strategie 1 in `qontoService.autoMatch`:
+
+```typescript
+// Fuzzy-Suche auf Avis-Nummer und Beleg-Nummer im Verwendungszweck
+const adviceByAvisNr = new Map(openAdvices.map(a => [a.avisNummer?.toLowerCase(), a]).filter(([k]) => k));
+for (const [nr, advice] of adviceByAvisNr) {
+  if (searchText.includes(nr)) {
+    // Bulk-Advice-Match
+  }
+}
+```
+
+### D.4 🟡 UNIQUE-Constraint blockiert Sammelzahlung
+
+Aktueller Index: `UNIQUE (matched_invoice_id) WHERE matched_invoice_id IS NOT NULL`
+
+Für Sammelzahlung ↔ Sammel-Avis (N Rechnungen) reicht das nicht. Neuer Constraint:
+
+```sql
+UNIQUE (matched_payment_advice_id) WHERE matched_payment_advice_id IS NOT NULL
+-- ODER
+CHECK (matched_invoice_id IS NULL OR matched_payment_advice_id IS NULL)  -- XOR
+```
+
+Bedeutung: Eine Qonto-TX matcht ENTWEDER eine einzelne Rechnung ODER ein Sammel-Avis, nie beides gleichzeitig.
+
+### D.5 🟢 UI-Konsequenzen
+
+**Transaktionen-Tab:** eine mit `matched_payment_advice_id` gematchte TX zeigt als Ziel „Avis 2026-0812 (25 Rechnungen, 12.847,50 €)" statt einer einzelnen Rechnung.
+
+**Avise-Tab:** Advice-Detail zeigt „Zahlungseingang am 04.07.2026, Qonto-Tx #4711" — geschlossene Kette sichtbar.
+
+**Dashboard-Karte „Zahlungen & Qonto":** Zeigt statt Count-Unmatched-Only auch „N Avise offen, Σ Betrag" — konsolidierte Sicht.
+
+### D.6 🟢 Toleranz für Skonto/Kürzung im Betragsmatch
+
+`advice.skontoCents` und `advice.kuerzungCents` sind schon persistiert — der Match muss `Math.abs(qtx.amount) === (advice.gesamt - advice.skonto - advice.kuerzung)` prüfen.
+
+**Vorsicht:** Rundungs-Toleranz von 1-2 Cent für den Realfall einbauen (Skonto-Berechnungen driften manchmal).
+
+---
+
+## E. Empfohlener Fix-Plan
+
+### Phase 1 — Datenmodell (S, 0.5 PT)
+
+- Migration: `ALTER TABLE qonto_transactions ADD COLUMN matched_payment_advice_id INT REFERENCES payment_advices(id)`
+- Constraint: `CHECK (matched_invoice_id IS NULL OR matched_payment_advice_id IS NULL)`
+- Index: `CREATE UNIQUE INDEX ... ON matched_payment_advice_id WHERE matched_payment_advice_id IS NOT NULL`
+
+### Phase 2 — Auto-Match-Erweiterung (M, 1 PT)
+
+In `qontoService.autoMatch` **vor Strategie 1**:
+1. Sammel-Avis-Match via `avisNummer` im Verwendungszweck
+2. Sammel-Avis-Match via `gesamtBetragCents - skonto - kürzung ± 2 cent`
+
+Bei Match:
+- TX auf Advice matchen
+- Alle Advice-Rechnungen auf `bezahlt` setzen (bestehende `mark-paid`-Logik wiederverwenden)
+- Audit: `qonto_matched_to_advice`, mit `matched_by: 'auto_bulk_advice'`
+
+### Phase 3 — UI (M, 1 PT)
+
+- Transaktionen-Tab zeigt Advice-Match korrekt (Ziel = Advice-Header statt einzelne Rechnung)
+- Avise-Tab zeigt verlinkten Qonto-TX
+- Manueller „Zahlung zum Avis zuweisen"-Button in Advice-Detail (Fallback für Cases wo Auto nicht greift)
+
+### Phase 4 — Test-Coverage (S, 0.5 PT)
+
+- Fixture: Sammel-Avis (5 Rechnungen, Σ 987,50 €) + Sammelzahlung 987,50 € ohne Rechnungsnummer → Auto-Match matcht Advice, alle 5 auf `bezahlt`
+- Fixture: Sammel-Avis + Zahlung 987,45 € (5 Cent Rundung) → Match mit Toleranz
+- Fixture: 2 gleichgroße Avise (990,00 € beide) + Zahlung 990,00 € → Skip (nicht eindeutig, Confidence-Guard)
+- Negativer Test: Sammelzahlung enthält Rechnungsnummer + Advice-Nummer → Rechnungsnummer gewinnt (Priorität), kein Doppel-Match
+
+### Phase 5 — Migrations-Cleanup (S, 0.25 PT)
+
+Für alle bestehenden `payment_advices` mit allen Items auf `bezahlt`: prüfen, ob im gleichen Zeitfenster eine ungematchte Qonto-TX mit dem passenden Gesamtbetrag existiert. Wenn ja, rückwirkend verlinken. Read-only Verifier-Script + Dry-Run zuerst.
+
+---
+
+## F. Alternative Denkweise — Datenmodell-Refactor
+
+**Radikaler:** Statt Advice ↔ Qonto direkt zu verlinken, ein `payments`-Konzept einführen:
+
+```
+payments {
+  id
+  source: 'qonto' | 'avis-manual' | 'sepa-manual'
+  qonto_transaction_id (nullable)
+  payment_advice_id (nullable)
+  amount_cents
+  received_at
+}
+
+invoices.status_reached_by_payment_id (nullable, → payments.id)
+```
+
+Eine Zahlung ist ein first-class-Entity, nicht mehr direkt an Invoice geknüpft. Kann N Rechnungen auf `bezahlt` setzen, kann von Qonto ODER Avis ODER manuell kommen.
+
+**Vorteil:** sauberer für Sammelzahlungen mit Teilzuweisungen, Skonto, Kürzungen, Verrechnungen.
+
+**Nachteil:** großer Umbau, alle existierenden Reports betroffen. Vermutlich Overkill für den akuten Bedarf. **Nur wenn perspektivisch weitere Payment-Sources dazukommen (SEPA-Lastschrift, Bar, Verrechnung)**.
+
+---
+
+## G. Sofort-Antwort auf die Kern-Frage
+
+> **„Spielt Avis + Zahlung zusammen so, dass wir Avise & Zahlungen automatisch matchen können?"**
+
+**Antwort:** Heute nur teilweise. Der Kaskaden-Fluss `versendet → avis_erhalten → bezahlt` funktioniert, ABER die kritische Brücke fehlt: **wenn die Sammelzahlung nicht zufällig eine einzelne Rechnungsnummer im Verwendungszweck trägt, gibt es kein Auto-Matching zwischen Zahlung und Advice.**
+
+Der eingebaute „Avis als bezahlt markieren"-Button ist der aktuelle **manuelle Workaround** — er schließt alle Rechnungen des Avis, koppelt aber die Qonto-Transaktion nicht mit dem Advice.
+
+**Mit Phase 1 + 2 (1,5 PT) wäre das Auto-Matching Sammel-Avis ↔ Sammelzahlung produktiv.** Phase 3 + 4 (1,5 PT) macht's benutzbar. Phase 5 säubert historische Daten. Gesamt: **~3 PT für „stimmt einfach"** — das rechtfertigt sich bei der Häufigkeit dieses Falls in der Pflege-Abrechnung.
+
+---
+
+## H. Relevante Files (für Ticket-Verwendung)
+
+- `shared/schema/qonto.ts:1-180` — `qontoTransactions`, `paymentAdvices`, `paymentAdviceItems`
+- `server/routes/admin/qonto.ts:411` — `router.post("/auto-match", ...)`
+- `server/routes/admin/qonto.ts:506-560` — `autoMatchAvisItems` (Avis → Rechnung)
+- `server/services/qonto.ts:298-380` — `autoMatch` (Transaction → Rechnung)
+- `server/services/avis-parser.ts` — `parseAvisCsv` (davaso/barmer)
+- `server/routes/admin/qonto.ts:715-770` — `POST /payment-advices/:id/mark-paid`
+- `client/src/features/qonto/components/advices-tab.tsx` — UI Avise-Tab
+- `client/src/features/qonto/components/transactions-tab.tsx` — UI Transaktionen-Tab
+
+**Existierende Tests:**
+- `tests/billing/qonto-match-audit.test.ts`
+- `tests/equality/*` (aber keine Avis-spezifischen im obersten Level gefunden — Coverage-Lücke?)

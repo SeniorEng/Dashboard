@@ -1,0 +1,23 @@
+Fragen für Reviewing AI — Qonto-Avis-Sammelzahlung-Match
+Zum Weitergeben an einen zweiten Reviewer (ChatGPT / Gemini / anderer Replit-AI-Kontext). Kurz gehalten, damit die Antworten scharf werden.
+
+Q1 — XOR wirklich sinnvoll?
+Der Plan erlaubt entweder matched_invoice_id ODER matched_payment_advice_id, nie beide. Aber: was, wenn eine Sammelzahlung teilweise einer Rechnungsnummer entspricht und teilweise dem Advice-Rest? Ist der XOR-Constraint zu streng, oder ist das ein Case, den man auf UI-Ebene mit „manuellem Split" abfängt?
+Q2 — Skonto/Kürzung-Toleranz — welche Zahl?
+Wir schlagen ±2 Cent Toleranz für Rundungsdrift vor. Bei Skonto-Beträgen im 1-3-%-Bereich kann das aber nicht reichen. Was ist das realistische Delta bei Pflegekassen-Kürzungen (Beanstandungen), das im Auto-Match noch akzeptiert werden darf, bevor ein manuelles Review erzwungen werden muss?
+Q3 — Ambiguität: zwei Advices mit gleichem Gesamtbetrag
+Zwei offene Sammel-Avise à 12.847,50 € + Sammelzahlung 12.847,50 € ohne Textbezug. Der aktuelle 1:1-Match-Code skippt bei mehrdeutigen Beträgen (amountMatches.length === 1). Wenden wir für Advices dieselbe Regel an, oder braucht der Advice-Match ein zusätzliches Signal (z.B. Zahler-IK vs. advice.kostentraeger_ik)?
+Q4 — Reihenfolge: Zahlung kommt VOR Avis
+Zahlung geht heute ein → Auto-Match findet nichts (kein Advice hochgeladen), User lässt sie offen. 5 Tage später kommt das Advice-CSV. Sollte der Advice-Import einen retroaktiven Zahlungs-Match triggern (letzte 30 Tage ungematcht + Betrag = Advice-Total)? Wenn ja: welche Confidence, und wie verhindern wir Fehl-Matches bei Zufallsübereinstimmungen?
+Q5 — Storno-Kette in einem gematchten Advice
+Ein Sammel-Avis matcht 25 Rechnungen auf avis_erhalten. Zwischenzeitlich wird eine der 25 storniert → Stornorechnung. Kommt jetzt die Sammelzahlung mit advice.gesamtBetragCents: stimmt der Betrag nicht mehr. Wie handhaben wir das? Auto-Match überspringen? Auf Basis der 24 verbliebenen matchen mit „auto_bulk_advice_partial"? Manuell erzwingen?
+Q6 — Multi-Advice-Zahlung (1 TX, N Advices)
+Die Kasse zahlt manchmal zwei separate Sammel-Avise in einer Überweisung: 12.847,50 € + 8.203,00 € = 21.050,50 €. Sollte der Match-Algorithmus Kombinationen aus mehreren Advices ausprobieren, oder ist das explizit „manuell only" wegen Kombinatorik-Explosion?
+Q7 — Backfill-Sicherheit
+Der Plan schlägt einen Backfill für historische Advice-mit-allen-bezahlt + ungematchte Qonto-TX vor. Wie hoch ist das Risiko rückwirkender False-Positive-Matches (z.B. zufällig gleichhoher Betrag zu einer anderen Ursache)? Welches Signal-Set (Betrag + Zeitraum ± 21 Tage + Kostenträger-IK + Zahler-IBAN) reicht für „confidence hoch genug" ohne dass ein User jede Zuordnung manuell bestätigen muss?
+Q8 — Alternative: payments als First-Class-Entity
+Der Plan geht den inkrementellen Weg (Feld hinzufügen). Die Alternative wäre eine neue payments-Tabelle mit N-Rechnungen-Zuweisung, egal ob Zahlung von Qonto, Avis, SEPA oder bar kommt. Ab welcher Signalanzahl (weitere Payment-Sources geplant? SEPA-Lastschrift kommt? Verrechnung mit Retouren?) ist der Refactor auf payments das bessere Investment als weitere Ad-hoc-Felder?
+Q9 — GoBD-Auditierbarkeit für Bulk-Match
+Der bestehende qonto_matched_to_invoice-Audit ist pro Rechnung. Bei einem Bulk-Advice-Match werden 25 Rechnungen in einer Aktion auf bezahlt gesetzt. Ist ein einzelner qonto_matched_to_advice mit metadata.affectedInvoiceIds: [...] GoBD-konform, oder muss pro Rechnung ein Einzelauditrecord entstehen (Traceability jeder Statusänderung)?
+Q10 — Reversierbarkeit
+Auto-Match matcht falsch (z.B. richtige Betragssumme, falsches Advice). User merkt es 2 Tage später. Was ist der sichere „Un-Match"-Pfad? Nur matched_payment_advice_id = NULL setzen reicht nicht — die 25 Rechnungen stehen jetzt auf bezahlt mit paidAt. Muss der Downgrade auf avis_erhalten (oder versendet) automatisch mitgezogen werden, mit welchem Guard, welche Fallstricke?
