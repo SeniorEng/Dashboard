@@ -5,6 +5,7 @@ import {
 } from "@shared/schema";
 import { db, type DbOrTx, type Tx } from "../lib/db";
 import type { InvoiceWithCustomer } from "../storage";
+import { formatInvoiceNumber } from "@shared/domain/invoice-number";
 
 export async function getInvoices(filters: { year?: number; month?: number; customerId?: number; status?: string; insuranceProviderId?: number; dateFrom?: string; dateTo?: string }): Promise<InvoiceWithCustomer[]> {
   const { invoices, customers } = await import("@shared/schema");
@@ -158,7 +159,7 @@ export async function getNextInvoiceNumberTx(tx: Tx, year: number): Promise<stri
   .from(invoices)
   .where(eq(invoices.billingYear, year));
   const next = (result[0]?.maxNum || 0) + 1;
-  return `RE-${year}-${String(next).padStart(4, "0")}`;
+  return formatInvoiceNumber(year, next);
 }
 
 export async function getInvoiceLineItemsTx(exec: DbOrTx, invoiceId: number): Promise<InvoiceLineItem[]> {

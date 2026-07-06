@@ -25,6 +25,7 @@
  */
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DbOrTx } from "./db";
+import { formatInvoiceNumber } from "@shared/domain/invoice-number";
 import {
   appointments,
   auditLog,
@@ -532,7 +533,7 @@ export async function checkInvoiceNumberIntegrity(
       if (!present.has(n) && !discarded.has(n)) {
         gaps.push({
           billingYear: year,
-          missingNumber: `RE-${year}-${String(n).padStart(4, "0")}`,
+          missingNumber: formatInvoiceNumber(year, n),
         });
       }
     }
