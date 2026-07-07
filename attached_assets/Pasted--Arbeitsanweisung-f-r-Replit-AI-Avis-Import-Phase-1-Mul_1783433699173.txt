@@ -1,0 +1,47 @@
+# Arbeitsanweisung für Replit AI — Avis-Import Phase 1 (Multi-Kassen-CSV, AOK-Fix)
+
+**Repo:** Care-Connect / Senioren Engel.
+**Priorität:** **AOK ist der größte Zahler und wird heute fehlerhaft (als Barmer) geparst** — AOK-Format zuerst bauen und als primären Abnahmepfad verifizieren. Barmer und DAVASO/IKK danach nur per **Regressionstest** absichern (dürfen sich nicht verändern).
+**Charakter:** Read-only Inventur zuerst, dann additiv. Rechnungs-Lebenszyklus (`versendet → avis_erhalten`) und Read-only-Charakter der Seite unverändert. Kein Eingriff in Lohn/Abrechnung.
+
+---
+
+## What & Why
+Der Avis-Import (`server/services/avis-parser.ts` → Match in `server/routes/admin/qonto.ts`, `autoMatchAvisItems`) kennt nur zwei CSV-Formate — DAVASO (`LfdNr,`) und Barmer (`1;`) — und nimmt **alles Nicht-DAVASO als Barmer** an (stiller Fehl-Default). Dadurch werden **AOK-Avise falsch geparst**. Ziel: AOK korrekt unterstützen, Matching robuster machen, unbekannte Formate nicht mehr still fehl-parsen, Kürzungen sichtbar machen.
+
+## Verifizierte Fakten aus echten Kassen-Avisen (bindend — vor dem Bauen an je 1 Sample gegenprüfen)
+- **IKK Classic = DAVASO** (`LfdNr,AvisPos,AVISNr,KTR_IK,…`) → funktioniert, nur Regression.
+- **AOK (BW/Bayern/Plus) UND Barmer beginnen beide mit `1;`**, haben aber **unterschiedliche Spalten**:
+  - **AOK-Position:** `2;<BelegNr>;<Name,Vers-Nr>;<Datum Rechnungsref>;<Datum>;<Betrag>;<Vz>;EUR` → **Betrag an Feld 5**.
+  - **Barmer-Position:** `2;<BelegNr>;<Rechnungsref, Zeitraum>;<Datum>;<Betrag>;<Vz>;EUR` → **Betrag an Feld 4**.
+  - Der heutige Barmer-Parser liest bei AOK das **Datum als Betrag** (`parseEuroCents("23.06.2026")`) → Fehl-Match.
+  - **Unterscheidungssignal im Header:** Barmer packt Name+Anschrift in **ein** Feld (mit Kommas); AOK **splittet** Name/Anschrift über mehrere Felder; zusätzlich Kostenträgername/-IK prüfen (AOK vs BARMER).
+- **Datenfallen in den Referenzen:** `RE-2026-O191` (Buchstabe **O** statt Null) → aktuelle Regex `RE-\d{4}-\d+` matcht nicht. Belege wie `8,57011E+11` sind **Excel-Exponential-Müll**. Referenzen variieren stark: `RE-2026-0193`, `§45B`, `2026-02-02_1`, `2025090521`, `09/2025`, Kassen-Beleg `4000000…/013/2026`.
+
+## Steps
+1. **AOK als eigenes CSV-Format** ergänzen (eigene Spaltenmap) und `detectFormat` schärfen: sicher zwischen DAVASO / Barmer / AOK unterscheiden (Header-Signatur + Kostenträger-IK/Name), **nicht** nur am ersten Zeichen.
+2. **Kein stiller Barmer-Default:** wird das Format nicht sicher erkannt → **Vorschau + manuelles Spalten-Mapping**, nicht raten.
+3. **Matching robust:** `O→0` normalisieren; primär unsere RE-Nummer, **Fallback Betrag + Kostenträger-IK + Zeitraum**; die Referenz-Varianten tolerieren.
+4. **Excel-Exponential-Belege** (`…E+11`) erkennen und als **Warnung** ausweisen, nicht still matchen.
+5. **Kürzung/Skonto sichtbar:** DAVASO liefert `KTR_BTR_DTA_Kuerzg`/`Skonto` explizit; bei `1;`-Formaten Vorzeichen + Differenz Forderung↔Zahlung erfassen → das Büro sieht **Unterzahlungen**.
+6. **„Nicht zugeordnet"-Liste** für unmatchte Positionen (nichts verschwindet still).
+
+## Definition of Done
+- [ ] **AOK-Sample matcht korrekt** (Betrag aus Feld 5, O→0-Normalisierung greift) — primärer Abnahmepfad.
+- [ ] AOK wird **nicht** mehr als Barmer geparst; Detektor trennt DAVASO/Barmer/AOK sicher.
+- [ ] `RE-2026-O191` matcht `RE-2026-0191`; variable Referenzen werden toleriert (Fallback Betrag+IK+Zeitraum).
+- [ ] Excel-Exponential-Beleg wird erkannt + gewarnt (kein stiller Fehl-Match).
+- [ ] Kürzung/Skonto je Position ausgewiesen; „nicht zugeordnet"-Liste vorhanden.
+- [ ] Unbekanntes Format → manuelles Mapping (kein stiller Barmer-Default).
+- [ ] **Regression:** Barmer- und DAVASO/IKK-Samples liefern unveränderte Ergebnisse; Rechnungs-Lebenszyklus unverändert.
+
+## Out of scope (separate Folge-Tasks)
+- **Knappschaft** — liefert nur PDF, keine CSV → eigener Task (strukturierte Datei anfordern oder PDF-Parser).
+- **AOK-Plus-XML** (SAP-ABAP, sauber strukturiert) → optionaler eigener Parser.
+
+## Relevant files
+- `server/services/avis-parser.ts`
+- `server/routes/admin/qonto.ts`
+- Avis-Upload-UI (Client)
+
+*Referenz: Analyse `Analyse_Avis-Import_Kassenformate.md` im Projektordner. Quelle der echten Formate: Ordner `09_Pflegekassen` (Malteser ausgelassen).*
