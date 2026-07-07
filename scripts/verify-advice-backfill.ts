@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
-// Task #1672 — Historischer Backfill-Verifier (Schritt 7): Sammel-Avis ↔
-// Sammelzahlung.
+// Task #1672 / #1680 — Historischer Backfill: Sammel-Avis ↔ Sammelzahlung.
 //
-// NUR LESEN / DRY-RUN. Dieses Skript schreibt NICHTS. Es paart bereits
-// VOLLSTÄNDIG BEZAHLTE Avise (alle zugeordneten Rechnungen `bezahlt`, noch KEINE
-// Sammel-Avis-Verknüpfung) mit noch nicht zugeordneten Qonto-Gutschriften und
-// druckt die Vorschläge, die ein späterer — separat freigegebener — `--apply`-Lauf
-// verbinden würde.
+// Standard = DRY-RUN (nur lesen). Mit `--apply` = Schreiblauf (Task #1680).
+//
+// Das Skript paart bereits VOLLSTÄNDIG BEZAHLTE Avise (alle zugeordneten
+// Rechnungen `bezahlt`, noch KEINE Sammel-Avis-Verknüpfung) mit noch nicht
+// zugeordneten Qonto-Gutschriften.
 //
 // Gating-Signale (Schritt 7, K3):
 //   1. Exakter Betrag: abs(TX.amountCents) ≈ advice.gesamtBetragCents
@@ -23,8 +22,14 @@
 // offene Rechnungen prüft) greift also nicht mehr. Der Backfill fällt daher auf
 // „exakter Betrag + Fenster + IBAN" zurück, wie in Schritt 7 spezifiziert.
 //
-// `--apply` ist in DIESEM Task NICHT implementiert: ein Schreiblauf ist eine
-// separat freigegebene Operation mit Prod-in-Dev-Vorbereitungsdisziplin.
+// `--apply` (Task #1680) verknüpft je EINDEUTIGEM Vorschlag die Transaktion mit
+// dem Avis (`matched_payment_advice_id`), bleibt XOR-sicher (geguardetes Update),
+// überspringt bereits verknüpfte Avise/Transaktionen und schreibt ein Audit je
+// betroffenem Avis. Die Avis-Rechnungen sind bereits `bezahlt` und werden NICHT
+// angefasst. Idempotent: ein zweiter Lauf trifft null Zeilen.
+//
+// PROD-DISZIPLIN: In Dev vorbereiten/verifizieren (Dry-Run), `--apply` gegen Prod
+// erst nach Sign-off (PROD_DATABASE_URL / Deployment-Kontext).
 // ---------------------------------------------------------------------------
 
 import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
@@ -34,10 +39,19 @@ import {
   paymentAdvices,
   paymentAdviceItems,
   invoices,
+  users,
 } from "@shared/schema";
+import { auditService } from "../server/services/audit";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeIban } from "@shared/domain/qonto/monitored-ibans";
 import { BULK_ADVICE_TOLERANCE_CENTS } from "@shared/domain/qonto/bulk-advice-match";
+
+/**
+ * Provenienz-Marker in `qonto_transactions.match_confidence` für per Backfill
+ * (Task #1680) verknüpfte Sammelzahlungen — bewusst getrennt vom Live-Auto-Match
+ * (`auto_bulk_advice`), damit der historische Ursprung nachvollziehbar bleibt.
+ */
+export const BACKFILL_MATCH_CONFIDENCE = "backfill_bulk_advice";
 
 /** Zeitfenster für die Backfill-Paarung (Schritt 7). */
 const BACKFILL_WINDOW_DAYS = 21;
@@ -81,7 +95,7 @@ interface ProposedLink {
  * `matched_payment_advice_id` verknüpft sind: mindestens eine zugeordnete
  * Rechnung, ALLE zugeordneten Rechnungen im Status `bezahlt`.
  */
-async function loadFullyPaidUnlinkedAdvices(): Promise<FullyPaidAdvice[]> {
+export async function loadFullyPaidUnlinkedAdvices(): Promise<FullyPaidAdvice[]> {
   const advices = await db
     .select()
     .from(paymentAdvices)
@@ -139,7 +153,7 @@ async function loadFullyPaidUnlinkedAdvices(): Promise<FullyPaidAdvice[]> {
 }
 
 /** Noch nicht zugeordnete Qonto-Gutschriften (weder Rechnung noch Avis verknüpft). */
-async function loadUnmatchedCredits() {
+export async function loadUnmatchedCredits() {
   return db
     .select()
     .from(qontoTransactions)
@@ -152,36 +166,16 @@ async function loadUnmatchedCredits() {
     );
 }
 
-async function main() {
-  const apply = process.argv.includes("--apply");
-  if (apply) {
-    console.error(
-      "\n✖ --apply ist in Task #1672 NICHT implementiert.\n" +
-        "  Ein Schreiblauf ist eine separat freigegebene Operation (Prod-in-Dev-\n" +
-        "  Vorbereitung, Sign-off). Dieses Skript bleibt reiner Dry-Run.\n",
-    );
-    process.exit(2);
-  }
-
-  console.log("═".repeat(78));
-  console.log("Task #1672 — Backfill-Verifier (DRY-RUN, keine Schreibvorgänge)");
-  console.log("Bereits bezahlte Avise ↔ nicht zugeordnete Qonto-Sammelzahlungen");
-  console.log("═".repeat(78));
-
-  const [advices, credits] = await Promise.all([
-    loadFullyPaidUnlinkedAdvices(),
-    loadUnmatchedCredits(),
-  ]);
-
-  console.log(
-    `\nKandidaten: ${advices.length} vollständig bezahlte, unverknüpfte Avise · ` +
-      `${credits.length} nicht zugeordnete Gutschriften.`,
-  );
-  console.log(
-    `Gating: exakter Betrag (±${BULK_ADVICE_TOLERANCE_CENTS} ct) · ` +
-      `±${BACKFILL_WINDOW_DAYS} Tage · Empfänger-IBAN. Name = nur Kontext.\n`,
-  );
-
+/**
+ * Reine Paarungs-Logik: liefert eindeutige Vorschläge (genau eine passende
+ * Gutschrift) und mehrdeutige Avise (mehrere passende Gutschriften → kein
+ * Vorschlag). Wird von Dry-Run UND `--apply` geteilt, damit beide exakt dieselben
+ * Gates anwenden.
+ */
+export function computeProposals(
+  advices: FullyPaidAdvice[],
+  credits: Awaited<ReturnType<typeof loadUnmatchedCredits>>,
+): { proposals: ProposedLink[]; ambiguous: FullyPaidAdvice[] } {
   const proposals: ProposedLink[] = [];
   const ambiguous: FullyPaidAdvice[] = [];
 
@@ -222,18 +216,200 @@ async function main() {
       proposals.push(matches[0]);
     } else if (matches.length > 1) {
       ambiguous.push(advice);
+    }
+  }
+
+  // Ein Backfill-Vorschlag ist auch dann mehrdeutig, wenn dieselbe Gutschrift
+  // (txId) für mehrere Avise vorgeschlagen würde — die Zahlung kann nur EINEM
+  // Avis zugeordnet werden. In dem Fall wird KEINE der kollidierenden
+  // Zuordnungen automatisch gebucht (manuelle Prüfung).
+  const txCounts = new Map<number, number>();
+  for (const p of proposals) txCounts.set(p.txId, (txCounts.get(p.txId) ?? 0) + 1);
+  const uniqueProposals: ProposedLink[] = [];
+  for (const p of proposals) {
+    if ((txCounts.get(p.txId) ?? 0) > 1) {
+      ambiguous.push(p.advice);
+    } else {
+      uniqueProposals.push(p);
+    }
+  }
+
+  return { proposals: uniqueProposals, ambiguous };
+}
+
+/**
+ * Verknüpft je eindeutigem Vorschlag die Gutschrift mit dem Avis. Pro Vorschlag
+ * eine eigene Transaktion:
+ *   - geguardetes UPDATE (tx ist noch UNverknüpft, nicht billing-irrelevant) →
+ *     XOR-sicher & idempotent (zweiter Lauf trifft 0 Zeilen).
+ *   - zusätzliche Absicherung: Avis darf noch an keine andere Gutschrift
+ *     gebunden sein (deckt sich mit dem Partial-Unique-Index, wir prüfen aber
+ *     vorab, um sauber zu überspringen statt in einen Constraint-Fehler zu
+ *     laufen).
+ *   - EIN Audit je betroffenem Avis (`advice_payment_reconciled`,
+ *     `matchedBy: "backfill"`).
+ * Die Avis-Rechnungen sind bereits `bezahlt` und werden NICHT verändert.
+ * Liefert die Zahl der tatsächlich verknüpften Avise.
+ */
+export async function applyProposals(
+  proposals: ProposedLink[],
+  userId: number,
+  reason: string,
+): Promise<number> {
+  let linked = 0;
+
+  for (const p of proposals) {
+    const adviceId = p.advice.id;
+    const didLink = await db.transaction(async (tx) => {
+      // Avis bereits (durch eine andere Gutschrift) gebunden? → überspringen.
+      const alreadyLinked = await tx
+        .select({ id: qontoTransactions.id })
+        .from(qontoTransactions)
+        .where(eq(qontoTransactions.matchedPaymentAdviceId, adviceId))
+        .limit(1);
+      if (alreadyLinked.length > 0) return false;
+
+      const updated = await tx
+        .update(qontoTransactions)
+        .set({
+          matchedPaymentAdviceId: adviceId,
+          matchConfidence: BACKFILL_MATCH_CONFIDENCE,
+        })
+        .where(
+          and(
+            eq(qontoTransactions.id, p.txId),
+            isNull(qontoTransactions.matchedInvoiceId),
+            isNull(qontoTransactions.matchedPaymentAdviceId),
+            isNull(qontoTransactions.billingIrrelevantAt),
+          ),
+        )
+        .returning({ id: qontoTransactions.id });
+
+      if (updated.length === 0) return false; // schon verknüpft/irrelevant ⇒ idempotent.
+
+      await auditService.log(
+        userId,
+        "advice_payment_reconciled",
+        "payment_advice",
+        adviceId,
+        {
+          qontoTransactionId: p.txId,
+          matchedBy: "backfill",
+          reason,
+          gate: "historical_backfill_amount_window_iban",
+          invoiceCount: p.advice.invoiceCount,
+          amountCents: p.txAmountCents,
+          daysDelta: p.daysDelta,
+          confidence: BACKFILL_MATCH_CONFIDENCE,
+        },
+        undefined,
+        tx,
+      );
+
+      return true;
+    });
+
+    if (didLink) {
+      linked += 1;
       console.log(
-        `⚠  Avis ${advice.avisNummer ?? `#${advice.id}`} (${formatEuro(advice.gesamtBetragCents)}): ` +
-          `${matches.length} passende Gutschriften — mehrdeutig, KEIN Vorschlag (manuelle Prüfung).`,
+        `✓ Avis ${p.advice.avisNummer ?? `#${adviceId}`} → Qonto-TX #${p.txId} verknüpft ` +
+          `(${formatEuro(Math.abs(p.txAmountCents))}).`,
+      );
+    } else {
+      console.log(
+        `· Avis ${p.advice.avisNummer ?? `#${adviceId}`} übersprungen ` +
+          `(bereits verknüpft / nicht mehr passend).`,
       );
     }
+  }
+
+  return linked;
+}
+
+/** Stellt sicher, dass die Audit-Attribution ein aktiver Superadmin ist. */
+async function assertSuperadminOrThrow(userId: number): Promise<void> {
+  const [row] = await db
+    .select({
+      id: users.id,
+      isSuperAdmin: users.isSuperAdmin,
+      isActive: users.isActive,
+      displayName: users.displayName,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row) throw new Error(`--user=${userId}: User existiert nicht`);
+  if (!row.isActive) throw new Error(`--user=${userId} (${row.displayName}) ist inaktiv`);
+  if (!row.isSuperAdmin) {
+    throw new Error(
+      `--user=${userId} (${row.displayName}) ist kein Superadmin. ` +
+        `Der Sammel-Avis-Backfill-Schreiblauf ist auf Superadmins beschränkt (GoBD-Audit).`,
+    );
+  }
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const apply = argv.includes("--apply");
+  const get = (p: string) => argv.find((a) => a.startsWith(p))?.split("=")[1];
+  const userArg = get("--user=");
+  const parsedUserId = userArg ? parseInt(userArg, 10) : undefined;
+  const userId = parsedUserId !== undefined && Number.isFinite(parsedUserId) ? parsedUserId : undefined;
+  const reason = get("--reason=");
+
+  if (apply) {
+    if (userId === undefined) {
+      console.error("Fehler: --apply erfordert --user=<superadmin-id> für GoBD-Audit-Attribution.");
+      process.exit(1);
+    }
+    if (!reason || reason.length < 10) {
+      console.error('Fehler: --apply erfordert --reason="..." (≥10 Zeichen Begründung für den Audit-Log).');
+      process.exit(1);
+    }
+    await assertSuperadminOrThrow(userId);
+  }
+
+  console.log("═".repeat(78));
+  console.log(
+    apply
+      ? "Task #1680 — Backfill APPLY (Schreiblauf: Avise ↔ Sammelzahlungen)"
+      : "Task #1680 — Backfill-Verifier (DRY-RUN, keine Schreibvorgänge)",
+  );
+  console.log("Bereits bezahlte Avise ↔ nicht zugeordnete Qonto-Sammelzahlungen");
+  console.log("═".repeat(78));
+
+  const [advices, credits] = await Promise.all([
+    loadFullyPaidUnlinkedAdvices(),
+    loadUnmatchedCredits(),
+  ]);
+
+  console.log(
+    `\nKandidaten: ${advices.length} vollständig bezahlte, unverknüpfte Avise · ` +
+      `${credits.length} nicht zugeordnete Gutschriften.`,
+  );
+  console.log(
+    `Gating: exakter Betrag (±${BULK_ADVICE_TOLERANCE_CENTS} ct) · ` +
+      `±${BACKFILL_WINDOW_DAYS} Tage · Empfänger-IBAN. Name = nur Kontext.\n`,
+  );
+
+  const { proposals, ambiguous } = computeProposals(advices, credits);
+
+  for (const a of ambiguous) {
+    console.log(
+      `⚠  Avis ${a.avisNummer ?? `#${a.id}`} (${formatEuro(a.gesamtBetragCents)}): ` +
+        `mehrdeutig — KEIN Vorschlag (manuelle Prüfung).`,
+    );
   }
 
   console.log("\n" + "─".repeat(78));
   if (proposals.length === 0) {
     console.log("Keine eindeutigen Backfill-Vorschläge gefunden.");
   } else {
-    console.log(`Eindeutige Vorschläge (würden bei --apply verknüpft): ${proposals.length}\n`);
+    console.log(
+      apply
+        ? `Eindeutige Vorschläge werden jetzt verknüpft: ${proposals.length}\n`
+        : `Eindeutige Vorschläge (würden bei --apply verknüpft): ${proposals.length}\n`,
+    );
     for (const p of proposals) {
       const a = p.advice;
       console.log(
@@ -250,10 +426,28 @@ async function main() {
     }
   }
   console.log("─".repeat(78));
+
+  if (!apply) {
+    console.log(
+      `\nZusammenfassung: ${proposals.length} eindeutig · ${ambiguous.length} mehrdeutig (übersprungen).`,
+    );
+    console.log(
+      '\nScharf verknüpfen mit: --apply --user=<superadmin-id> --reason="…"' +
+        "\n  WICHTIG: In Dev vorbereiten/verifizieren, --apply gegen Prod erst nach Sign-off.",
+    );
+    console.log("DRY-RUN beendet — es wurde NICHTS geschrieben.\n");
+    return;
+  }
+
+  console.log(`\nSuperadmin: ${userId} · Begründung: ${reason}`);
+  console.log("\n" + "─".repeat(78));
+  const linked = await applyProposals(proposals, userId!, reason!);
+  console.log("─".repeat(78));
   console.log(
-    `\nZusammenfassung: ${proposals.length} eindeutig · ${ambiguous.length} mehrdeutig (übersprungen).`,
+    `\nAPPLY beendet: ${linked} Avis(e) verknüpft · ` +
+      `${proposals.length - linked} übersprungen (idempotent) · ` +
+      `${ambiguous.length} mehrdeutig.\n`,
   );
-  console.log("DRY-RUN beendet — es wurde NICHTS geschrieben.\n");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

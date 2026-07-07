@@ -34,6 +34,14 @@ import {
 } from "../../shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { withGobdMutation } from "../helpers/gobd";
+import {
+  loadFullyPaidUnlinkedAdvices,
+  loadUnmatchedCredits,
+  computeProposals,
+  applyProposals,
+  BACKFILL_MATCH_CONFIDENCE,
+} from "../../scripts/verify-advice-backfill";
+import { users } from "../../shared/schema";
 
 interface Seeded {
   customerId: number;
@@ -76,6 +84,8 @@ async function insertQontoTx(opts: {
   amountCents: number;
   sourceIban?: string;
   reference?: string;
+  emittedAt?: Date;
+  counterpartyName?: string;
 }): Promise<number> {
   const tag = uniqueId();
   const [row] = await db.insert(qontoTransactions).values({
@@ -84,9 +94,10 @@ async function insertQontoTx(opts: {
     currency: "EUR",
     side: "credit",
     status: "completed",
-    emittedAt: new Date(),
+    emittedAt: opts.emittedAt ?? new Date(),
     sourceIban: opts.sourceIban ?? null,
     reference: opts.reference ?? null,
+    counterpartyName: opts.counterpartyName ?? null,
   }).returning({ id: qontoTransactions.id });
   seeded.qontoTxIds.push(row.id);
   return row.id;
@@ -482,5 +493,158 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
         .set({ matchedInvoiceId: invA, matchedPaymentAdviceId: adviceId })
         .where(eq(qontoTransactions.id, txId)),
     ).rejects.toThrow();
+  });
+});
+
+/**
+ * Task #1680 — Historischer Sammel-Avis-Backfill (`--apply`).
+ *
+ * Der Backfill paart BEREITS VOLLSTÄNDIG BEZAHLTE Avise (Σ offen = 0, Live-
+ * Triple-Equality greift nicht mehr) mit unverknüpften Gutschriften über
+ * Betrag ±2ct + ±21d + Empfänger-IBAN und schreibt `matched_payment_advice_id`
+ * + ein Audit je Avis, ohne die (bereits `bezahlt`en) Rechnungen anzufassen.
+ */
+describe("Task #1680 — Sammel-Avis Backfill --apply", () => {
+  let superadminId = 0;
+
+  beforeAll(async () => {
+    const [sa] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.isSuperAdmin, true))
+      .limit(1);
+    expect(sa).toBeTruthy();
+    superadminId = sa.id;
+  });
+
+  /** Erzeugt ein vollständig BEZAHLTES, noch unverknüpftes Avis. */
+  async function createFullyPaidAdvice(opts: {
+    items: Array<{ num: string; cents: number }>;
+    totalCents: number;
+    zahlungsDatum: string;
+    iban: string;
+  }): Promise<{ adviceId: number; invoiceIds: number[] }> {
+    const invoiceIds: number[] = [];
+    for (const it of opts.items) {
+      invoiceIds.push(await insertInvoice({ amountCents: it.cents, invoiceNumber: it.num }));
+    }
+    const { adviceId } = await createAdvice(opts);
+    // Alle Mitglieds-Rechnungen auf `bezahlt` — ohne Qonto-Verknüpfung.
+    await withGobdMutation((tx) =>
+      tx.update(invoices)
+        .set({ status: "bezahlt", paidAt: new Date() })
+        .where(inArray(invoices.id, invoiceIds)),
+    );
+    return { adviceId, invoiceIds };
+  }
+
+  it("(k) verknüpft eindeutigen Backfill-Vorschlag + schreibt Audit, ohne Rechnungen anzufassen", async () => {
+    const numA = nextInvoiceNumber();
+    const numB = nextInvoiceNumber();
+    const { adviceId, invoiceIds } = await createFullyPaidAdvice({
+      items: [{ num: numA, cents: 51100 }, { num: numB, cents: 40000 }],
+      totalCents: 91100,
+      zahlungsDatum: "15.04.2026",
+      iban: IBAN_A,
+    });
+
+    const txId = await insertQontoTx({
+      amountCents: 91100,
+      sourceIban: IBAN_A,
+      emittedAt: new Date("2026-04-20T00:00:00Z"),
+    });
+
+    const advices = await loadFullyPaidUnlinkedAdvices();
+    const credits = await loadUnmatchedCredits();
+    const { proposals } = computeProposals(advices, credits);
+    const mine = proposals.filter((p) => p.advice.id === adviceId);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].txId).toBe(txId);
+
+    const linked = await applyProposals(mine, superadminId, "Backfill-Test Task #1680");
+    expect(linked).toBe(1);
+
+    const tx = await getTxMatch(txId);
+    expect(tx.matchedPaymentAdviceId).toBe(adviceId);
+    expect(tx.matchedInvoiceId).toBeNull();
+    expect(tx.matchConfidence).toBe(BACKFILL_MATCH_CONFIDENCE);
+    // Rechnungen bleiben `bezahlt` (Backfill fasst sie nicht an).
+    for (const id of invoiceIds) {
+      expect(await getInvoiceStatus(id)).toBe("bezahlt");
+    }
+    expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(1);
+  });
+
+  it("(l) idempotent — zweiter --apply-Lauf verknüpft null Zeilen, kein zweites Audit", async () => {
+    const numA = nextInvoiceNumber();
+    const { adviceId } = await createFullyPaidAdvice({
+      items: [{ num: numA, cents: 51200 }],
+      totalCents: 51200,
+      zahlungsDatum: "15.04.2026",
+      iban: IBAN_A,
+    });
+    const txId = await insertQontoTx({
+      amountCents: 51200,
+      sourceIban: IBAN_A,
+      emittedAt: new Date("2026-04-20T00:00:00Z"),
+    });
+
+    const proposals1 = computeProposals(
+      await loadFullyPaidUnlinkedAdvices(),
+      await loadUnmatchedCredits(),
+    ).proposals.filter((p) => p.advice.id === adviceId);
+    expect(await applyProposals(proposals1, superadminId, "Backfill-Test idempotent #1680")).toBe(1);
+    expect((await getTxMatch(txId)).matchedPaymentAdviceId).toBe(adviceId);
+    expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(1);
+
+    // Zweiter Lauf: das Avis ist verknüpft ⇒ nicht mehr Kandidat, geguardetes
+    // Update träfe ohnehin 0 Zeilen.
+    const proposals2 = computeProposals(
+      await loadFullyPaidUnlinkedAdvices(),
+      await loadUnmatchedCredits(),
+    ).proposals.filter((p) => p.advice.id === adviceId);
+    expect(proposals2).toHaveLength(0);
+    expect(await applyProposals(proposals1, superadminId, "Backfill-Test idempotent #1680")).toBe(0);
+    expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(1);
+  });
+
+  it("(m) mehrdeutig (2 passende Gutschriften) ⇒ kein Vorschlag, keine Verknüpfung", async () => {
+    const numA = nextInvoiceNumber();
+    const { adviceId } = await createFullyPaidAdvice({
+      items: [{ num: numA, cents: 51300 }],
+      totalCents: 51300,
+      zahlungsDatum: "15.04.2026",
+      iban: IBAN_A,
+    });
+    // Zwei betrags-/IBAN-/fenstergleiche Gutschriften ⇒ mehrdeutig.
+    await insertQontoTx({ amountCents: 51300, sourceIban: IBAN_A, emittedAt: new Date("2026-04-18T00:00:00Z") });
+    await insertQontoTx({ amountCents: 51300, sourceIban: IBAN_A, emittedAt: new Date("2026-04-22T00:00:00Z") });
+
+    const { proposals, ambiguous } = computeProposals(
+      await loadFullyPaidUnlinkedAdvices(),
+      await loadUnmatchedCredits(),
+    );
+    expect(proposals.filter((p) => p.advice.id === adviceId)).toHaveLength(0);
+    expect(ambiguous.some((a) => a.id === adviceId)).toBe(true);
+    expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(0);
+  });
+
+  it("(n) IBAN-Mismatch ⇒ kein Vorschlag (IBAN ist Pflicht-Gate)", async () => {
+    const numA = nextInvoiceNumber();
+    const { adviceId } = await createFullyPaidAdvice({
+      items: [{ num: numA, cents: 51400 }],
+      totalCents: 51400,
+      zahlungsDatum: "15.04.2026",
+      iban: IBAN_A,
+    });
+    // Betrag + Fenster passen, aber IBAN nicht ⇒ kein Match.
+    await insertQontoTx({ amountCents: 51400, sourceIban: IBAN_B, emittedAt: new Date("2026-04-20T00:00:00Z") });
+
+    const { proposals } = computeProposals(
+      await loadFullyPaidUnlinkedAdvices(),
+      await loadUnmatchedCredits(),
+    );
+    expect(proposals.filter((p) => p.advice.id === adviceId)).toHaveLength(0);
+    expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(0);
   });
 });
