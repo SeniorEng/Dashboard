@@ -22,6 +22,14 @@ variable for a safe fuzzy).
 zero fully-paid advices. And do NOT add a name-fuzzy gate — a wrong name-match would
 auto-link 25 invoices.
 
+**Prod run outcome (verified read-only, 2026-07):** the production backfill is a
+NO-OP — prod has NO legitimate active payment advices (only soft-deleted malformed
+test uploads), so 0 fully-paid-unlinked candidates ⇒ 0 proposals. The Sammel-Avis
+feature was essentially unused in prod. Don't re-chase this as a code/data defect;
+re-verify current prod state via read-only `pg` before assuming there's anything to
+link. Note: the app's Neon-serverless pool can't execute a write against prod from
+the dev sandbox anyway (see prod-readonly-investigation-access).
+
 **How to apply:** the `--apply` writer reuses these three gates + a uniqueness
 guard (a credit matching >1 advice ⇒ ambiguous ⇒ skipped, no proposal). Per
 proposal: one db.transaction, guarded UPDATE on qonto_transactions (isNull
