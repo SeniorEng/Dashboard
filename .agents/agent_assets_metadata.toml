@@ -179,3 +179,9 @@ id = "7WDVdU6hFqQWWBlNvWRbE"
 uri = "file://.local/tasks/monatsabschluss-removal-assessment.md"
 type = "text"
 title = "Monatsabschluss Removal Assessment"
+
+[[outputs]]
+id = "kJ-5yRfVL7pFoYgfczTZR"
+uri = "file://exports/kundenliste.xlsx"
+type = "table"
+title = "Kundenliste (Prod)"
