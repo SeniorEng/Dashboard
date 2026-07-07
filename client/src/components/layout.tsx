@@ -379,6 +379,10 @@ export function Layout({ children, variant = 'default' }: { children: React.Reac
                           <UserPlus className="mr-2 h-4 w-4 text-teal-600" />
                           + Kunde
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate("/admin/customers")} data-testid="menu-customer-overview">
+                          <Users className="mr-2 h-4 w-4 text-teal-600" />
+                          Kundenübersicht
+                        </DropdownMenuItem>
                       </>
                     )}
                   </>
