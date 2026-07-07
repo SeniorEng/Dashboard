@@ -171,7 +171,35 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
     },
   });
 
-  return { matchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation };
+  // Task #1672 — rückwirkenden Sammel-Avis-Vorschlag bestätigen (bucht die
+  // Zuordnung; Triple-Equality bleibt serverseitig erzwungen).
+  const confirmAdviceMutation = useMutation({
+    mutationFn: async ({ txId, adviceId }: { txId: number; adviceId: number }) =>
+      unwrapResult(await api.post(`/admin/qonto/transactions/${txId}/confirm-advice`, { adviceId })),
+    onSuccess: () => {
+      toast({ title: "Sammel-Avis zugeordnet, offene Rechnungen als bezahlt markiert" });
+      onMatchSuccess();
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Task #1672 — Vorschlag ablehnen (wird nach dem nächsten Sync nicht erneut angeboten).
+  const dismissAdviceSuggestionMutation = useMutation({
+    mutationFn: async (txId: number) =>
+      unwrapResult(await api.post(`/admin/qonto/transactions/${txId}/dismiss-advice-suggestion`, {})),
+    onSuccess: () => {
+      toast({ title: "Vorschlag abgelehnt" });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return { matchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation, confirmAdviceMutation, dismissAdviceSuggestionMutation };
 }
 
 export function useAdviceMutations({ onCreateSuccess }: { onCreateSuccess: () => void }) {

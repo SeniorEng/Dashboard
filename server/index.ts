@@ -366,6 +366,13 @@ async function runStartupTasks() {
       log(`Qonto-Match-Idempotenz-Migration fehlgeschlagen: ${err}`, "startup");
     }
 
+    const { ensureQontoAdviceMatchSchema } = await import("./startup/ensure-qonto-advice-match-schema");
+    try {
+      await ensureQontoAdviceMatchSchema();
+    } catch (err) {
+      log(`Qonto-Avis-Match-Schema-Migration fehlgeschlagen: ${err}`, "startup");
+    }
+
     const { ensureRoleWageRates } = await import("./startup/ensure-role-wage-rates");
     try {
       await ensureRoleWageRates();

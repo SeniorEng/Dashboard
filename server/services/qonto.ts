@@ -7,6 +7,12 @@ import { withAudit } from "../lib/with-audit";
 import { resolveMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
 import { matchesAnyHideRule } from "@shared/domain/qonto/hide-rules";
 import { enumerateMonthlyWindows } from "@shared/domain/qonto/backfill-windows";
+import {
+  resolveUniqueBulkMatch,
+  scanAdviceSuggestions,
+  BULK_ADVICE_CONFIDENCE,
+  type BulkAdviceCandidate,
+} from "@shared/domain/qonto/bulk-advice-match";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -314,6 +320,10 @@ class QontoService {
       invoiceByAmount.get(key)!.push(inv);
     }
 
+    // Task #1672 — offene Avise (Sammel-Avis-Match). Der Bulk-Strategie-Pfad
+    // läuft NACH den Einzelrechnungs-Strategien (Priorität: Rechnungsnummer > Bulk).
+    let openAdvices = await qontoStorage.getOpenAdvicesForMatching();
+
     let matched = 0;
     let skipped = 0;
 
@@ -340,6 +350,20 @@ class QontoService {
         if (amountMatches && amountMatches.length === 1) {
           bestMatch = { invoiceId: amountMatches[0].id, confidence: "auto_amount" };
         }
+      }
+
+      // Task #1672 — Bulk-Avis-Strategie NACH den Einzelrechnungs-Strategien:
+      // nur versuchen, wenn keine Rechnungsnummer/Betrag-Einzelrechnung traf.
+      if (!bestMatch && openAdvices.length > 0) {
+        const didBulk = await this.tryBulkAdviceMatch(qtx, openAdvices, userId, ipAddress);
+        if (didBulk) {
+          matched++;
+          // in-memory: geschlossenes Avis nicht erneut als Kandidat anbieten.
+          openAdvices = openAdvices.filter(a => a.id !== didBulk.adviceId);
+        } else {
+          skipped++;
+        }
+        continue;
       }
 
       if (!bestMatch) {
@@ -411,6 +435,186 @@ class QontoService {
     }
 
     return { matched, skipped };
+  }
+
+  /**
+   * Task #1672 — versucht, eine Sammelzahlung (Qonto-Credit) genau einem offenen
+   * Sammel-Avis zuzuordnen. Triple-Equality + Eindeutigkeits-/Diskriminator-Logik
+   * liegen pur in shared/domain (SSoT). Auf Treffer: transaktion → Avis binden
+   * (guarded, XOR/billing-irrelevant respektiert), alle offenen Avis-Rechnungen
+   * `versendet|avis_erhalten → bezahlt` (guarded), ein Audit je Rechnung + ein
+   * Avis-Level-Audit. Idempotent: geguardete Updates greifen auf 0 Zeilen, wenn
+   * bereits gebunden/geschlossen. Liefert das getroffene Avis oder null.
+   */
+  async tryBulkAdviceMatch(
+    qtx: Pick<typeof qontoTransactions.$inferSelect,
+      "id" | "amountCents" | "emittedAt" | "reference" | "label" | "counterpartyName" | "sourceIban" | "qontoTransactionId">,
+    openAdvices: Array<{
+      id: number;
+      avisNummer: string | null;
+      gesamtBetragCents: number | null;
+      zahlungsempfaengerIban: string | null;
+      openInvoiceIds: number[];
+      sumOpenInvoiceCents: number;
+    }>,
+    userId: number,
+    ipAddress?: string,
+  ): Promise<{ adviceId: number } | null> {
+    const candidates: BulkAdviceCandidate[] = openAdvices.map(a => ({
+      adviceId: a.id,
+      advice: {
+        avisNummer: a.avisNummer,
+        gesamtBetragCents: a.gesamtBetragCents,
+        zahlungsempfaengerIban: a.zahlungsempfaengerIban,
+      },
+      sumOpenInvoiceCents: a.sumOpenInvoiceCents,
+    }));
+
+    const resolved = resolveUniqueBulkMatch(qtx, Math.abs(qtx.amountCents), candidates);
+    if (!resolved) return null;
+
+    const advice = openAdvices.find(a => a.id === resolved.adviceId);
+    if (!advice) return null;
+
+    const didMatch = await withAudit(async (dbTx, audit) => {
+      const matchUpdate = await dbTx.update(qontoTransactions)
+        .set({ matchedPaymentAdviceId: resolved.adviceId, matchConfidence: BULK_ADVICE_CONFIDENCE })
+        .where(and(
+          eq(qontoTransactions.id, qtx.id),
+          isNull(qontoTransactions.matchedInvoiceId),
+          isNull(qontoTransactions.matchedPaymentAdviceId),
+          isNull(qontoTransactions.billingIrrelevantAt),
+        ))
+        .returning({ id: qontoTransactions.id });
+
+      if (matchUpdate.length === 0) {
+        return false;
+      }
+
+      const invoiceUpdate = await dbTx.update(invoices)
+        .set({ status: "bezahlt", paidAt: qtx.emittedAt })
+        .where(and(
+          inArray(invoices.id, advice.openInvoiceIds),
+          inArray(invoices.status, ["versendet", "avis_erhalten"]),
+        ))
+        .returning({ id: invoices.id });
+
+      if (invoiceUpdate.length === 0) {
+        // Alle Rechnungen wurden parallel bezahlt/storniert — Match zurückrollen,
+        // damit keine Bindung ohne Status-Wechsel committed wird.
+        throw new Error("ADVICE_INVOICES_CHANGED");
+      }
+
+      for (const row of invoiceUpdate) {
+        audit.record({
+          userId,
+          action: "invoice_payment_reconciled",
+          entityType: "invoice",
+          entityId: row.id,
+          metadata: {
+            qontoTransactionId: qtx.id,
+            qontoTransactionExternalId: qtx.qontoTransactionId,
+            paymentAdviceId: resolved.adviceId,
+            matchedBy: "auto",
+            confidence: BULK_ADVICE_CONFIDENCE,
+            amountCents: qtx.amountCents,
+          },
+          ipAddress,
+        });
+      }
+
+      // Avis-Level-Audit (eine Aktion für die Sammel-Zuordnung).
+      audit.record({
+        userId,
+        action: "advice_payment_reconciled",
+        entityType: "payment_advice",
+        entityId: resolved.adviceId,
+        metadata: {
+          qontoTransactionId: qtx.id,
+          qontoTransactionExternalId: qtx.qontoTransactionId,
+          matchedBy: "auto",
+          reason: resolved.reason,
+          invoiceCount: invoiceUpdate.length,
+          amountCents: qtx.amountCents,
+        },
+        ipAddress,
+      });
+
+      return true;
+    }).catch((err: unknown) => {
+      if (err instanceof Error && err.message === "ADVICE_INVOICES_CHANGED") {
+        return false;
+      }
+      throw err;
+    });
+
+    return didMatch ? { adviceId: resolved.adviceId } : null;
+  }
+
+  /**
+   * Task #1672 — expliziter Confirm-Pfad (Vorschlag „Bestätigen" bzw. manuelles
+   * „dieser Zahlung ein Avis zuordnen"): bindet die Transaktion an GENAU das
+   * gewählte Avis. Die Triple-Equality bleibt als Sicherheitsnetz erzwungen
+   * (der Nutzer wählt aus den betrags-passenden Kandidaten). Liefert das Avis
+   * bei Erfolg, sonst null (z.B. Betrag passt nicht (mehr), bereits gebunden).
+   */
+  async confirmBulkAdviceMatch(
+    txId: number,
+    adviceId: number,
+    userId: number,
+    ipAddress?: string,
+  ): Promise<{ adviceId: number } | null> {
+    const [qtx] = await db.select().from(qontoTransactions).where(eq(qontoTransactions.id, txId));
+    if (!qtx) return null;
+    if (qtx.matchedInvoiceId || qtx.matchedPaymentAdviceId || qtx.billingIrrelevantAt) return null;
+
+    const openAdvices = await qontoStorage.getOpenAdvicesForMatching();
+    const chosen = openAdvices.filter(a => a.id === adviceId);
+    if (chosen.length === 0) return null;
+
+    // Nur das gewählte Avis als Kandidat ⇒ resolveUniqueBulkMatch verlangt
+    // weiterhin die Triple-Equality (unique_amount), bindet aber gezielt dieses.
+    return this.tryBulkAdviceMatch(qtx, chosen, userId, ipAddress);
+  }
+
+  /**
+   * Task #1672 — Import-Zeit-Auto-Close: direkt nach dem Anlegen eines neuen
+   * Sammel-Avis prüfen, ob bereits eine offene Sammelzahlung dazu in Qonto liegt.
+   * NUR bei einem starken Signal (Triple-Equality UND Diskriminator: Avis-Nummer
+   * im Verwendungszweck ODER passende Empfänger-IBAN) und NUR wenn genau EINE
+   * Transaktion stark trifft, wird automatisch gebunden/geschlossen. Sonst nichts
+   * (mehrdeutige/schwache Fälle bleiben dem rückwirkenden Vorschlag überlassen).
+   * Liefert die getroffene Transaktion oder null.
+   */
+  async autoCloseAdviceFromTransactions(
+    adviceId: number,
+    userId: number,
+    ipAddress?: string,
+  ): Promise<{ adviceId: number; txId: number } | null> {
+    const openAdvices = await qontoStorage.getOpenAdvicesForMatching();
+    const chosen = openAdvices.find(a => a.id === adviceId);
+    if (!chosen) return null;
+
+    const candidate: BulkAdviceCandidate = {
+      adviceId: chosen.id,
+      advice: {
+        avisNummer: chosen.avisNummer,
+        gesamtBetragCents: chosen.gesamtBetragCents,
+        zahlungsempfaengerIban: chosen.zahlungsempfaengerIban,
+      },
+      sumOpenInvoiceCents: chosen.sumOpenInvoiceCents,
+    };
+
+    const unmatched = await qontoStorage.getUnmatchedTransactions();
+    const strongTxs = unmatched.filter(qtx =>
+      scanAdviceSuggestions(qtx, Math.abs(qtx.amountCents), [candidate]).some(s => s.strong),
+    );
+
+    // Nur bei genau EINER stark passenden Zahlung automatisch schließen.
+    if (strongTxs.length !== 1) return null;
+
+    const bound = await this.tryBulkAdviceMatch(strongTxs[0], [chosen], userId, ipAddress);
+    return bound ? { adviceId: bound.adviceId, txId: strongTxs[0].id } : null;
   }
 }
 

@@ -121,6 +121,8 @@ export const AUDIT_ACTIONS = [
   "qonto_backfill_executed",
   "qonto_hide_rule_created",
   "qonto_hide_rule_deleted",
+  "advice_payment_reconciled",
+  "advice_payment_unreconciled",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -141,6 +143,7 @@ export const AUDIT_ENTITY_TYPES = [
   "hours_account",
   "qonto_transaction",
   "qonto_hide_rule",
+  "payment_advice",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];

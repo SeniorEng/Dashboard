@@ -1,4 +1,4 @@
-import { pgTable, text, integer, serial, index, uniqueIndex, jsonb, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, index, uniqueIndex, jsonb, unique, check } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
@@ -23,6 +23,12 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   // Nullable: Altbestand vor diesem Task trägt keine Quell-IBAN.
   sourceIban: text("source_iban"),
   matchedInvoiceId: integer("matched_invoice_id").references(() => invoices.id),
+  // Task #1672 — Sammel-Avis-Zuordnung: eine Sammelzahlung (Qonto-Sammel-Credit)
+  // zeigt statt auf eine einzelne Rechnung auf das ganze Pflegekassen-Avis. XOR
+  // zu matchedInvoiceId (nie beide gleichzeitig, DB-Check unten). Ersetzt den
+  // Missbrauch von matchedInvoiceId für Bulk-Zahlungen (eine Zahlung auf eine
+  // beliebige Einzelrechnung gezwungen).
+  matchedPaymentAdviceId: integer("matched_payment_advice_id").references(() => paymentAdvices.id),
   matchConfidence: text("match_confidence"),
   // Qonto-Zahlung als „nicht abrechnungsrelevant" markieren: setzt einen
   // Zeitstempel (Wer/Wann werden über das audit_log historisiert). NULL =
@@ -41,6 +47,11 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   // Entscheidung nicht wieder überschreibt. Manuelles Ausblenden setzt den
   // Override zurück (der Nutzer entscheidet sich dann bewusst fürs Ausblenden).
   billingRelevantOverrideAt: timestamp("billing_relevant_override_at"),
+  // Task #1672 — ein abgelehnter rückwirkender Sammel-Avis-Vorschlag darf beim
+  // nächsten Sync/Import nicht erneut erscheinen. Setzt ein Zeitstempel beim
+  // „Ablehnen"; die Vorschlags-Suche überspringt Transaktionen mit gesetztem
+  // Wert. Ein explizites manuelles Zuordnen bleibt weiterhin möglich.
+  adviceSuggestionDismissedAt: timestamp("advice_suggestion_dismissed_at"),
   rawData: jsonb("raw_data"),
   syncedAt: timestamp("synced_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -56,6 +67,18 @@ export const qontoTransactions = pgTable("qonto_transactions", {
   uniqueIndex("qonto_transactions_matched_invoice_unique_idx")
     .on(table.matchedInvoiceId)
     .where(sql`matched_invoice_id IS NOT NULL`),
+  // Task #1672 — pro Avis darf höchstens eine Sammelzahlung gematcht sein
+  // (eine Zahlung ↔ ein Avis), analog zum Einzelrechnungs-Index.
+  uniqueIndex("qonto_transactions_matched_advice_unique_idx")
+    .on(table.matchedPaymentAdviceId)
+    .where(sql`matched_payment_advice_id IS NOT NULL`),
+  index("qonto_transactions_matched_advice_idx").on(table.matchedPaymentAdviceId),
+  // Task #1672 — XOR: eine Transaktion zeigt entweder auf eine Einzelrechnung
+  // ODER auf ein Sammel-Avis, nie auf beides gleichzeitig.
+  check(
+    "qonto_transactions_match_xor",
+    sql`NOT (matched_invoice_id IS NOT NULL AND matched_payment_advice_id IS NOT NULL)`,
+  ),
 ]);
 
 // Auto-Ausblenden-Regeln: markieren neu eingehende (oder bei Regel-Anlage

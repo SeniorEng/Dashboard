@@ -3,6 +3,7 @@ import {
   qontoHideRules,
   paymentAdvices,
   paymentAdviceItems,
+  invoices,
   type QontoTransaction,
   type InsertQontoTransaction,
   type QontoHideRule,
@@ -45,10 +46,12 @@ class QontoStorage {
       conditions.push(lte(qontoTransactions.emittedAt, endOfDay));
     }
     if (filters.matched === "matched") {
-      conditions.push(isNotNull(qontoTransactions.matchedInvoiceId));
+      // Task #1672 — „zugeordnet" = an eine Rechnung ODER an einen Sammel-Avis gebunden.
+      conditions.push(sql`(${qontoTransactions.matchedInvoiceId} IS NOT NULL OR ${qontoTransactions.matchedPaymentAdviceId} IS NOT NULL)`);
     } else if (filters.matched === "unmatched") {
-      // „Offen" = weder zugeordnet NOCH als nicht abrechnungsrelevant markiert.
+      // „Offen" = weder zugeordnet (Rechnung/Avis) NOCH nicht abrechnungsrelevant.
       conditions.push(isNull(qontoTransactions.matchedInvoiceId));
+      conditions.push(isNull(qontoTransactions.matchedPaymentAdviceId));
       conditions.push(isNull(qontoTransactions.billingIrrelevantAt));
     } else if (filters.matched === "ignored") {
       conditions.push(isNotNull(qontoTransactions.billingIrrelevantAt));
@@ -135,6 +138,7 @@ class QontoStorage {
       .from(qontoTransactions)
       .where(and(
         isNull(qontoTransactions.matchedInvoiceId),
+        isNull(qontoTransactions.matchedPaymentAdviceId),
         isNull(qontoTransactions.billingIrrelevantAt),
         eq(qontoTransactions.side, "credit")
       ))
@@ -299,6 +303,125 @@ class QontoStorage {
       .where(eq(paymentAdviceItems.paymentAdviceId, id));
 
     return { ...advice, items };
+  }
+
+  /**
+   * Task #1672 — offene Avise für den Sammel-Avis-Match: nicht gelöschte Avise
+   * mit gesetztem Gesamtbetrag, die mindestens eine zugeordnete Rechnung im
+   * Status `versendet`/`avis_erhalten` tragen (bezahlt/storniert zählen NICHT).
+   * Liefert je Avis die offenen Rechnungs-IDs und ihre Summe (Integer-Cents) für
+   * die Triple-Equality. Bereits per Sammelzahlung geschlossene Avise fallen
+   * automatisch heraus (ihre Rechnungen sind dann `bezahlt` ⇒ keine offenen).
+   */
+  async getOpenAdvicesForMatching(): Promise<Array<{
+    id: number;
+    avisNummer: string | null;
+    gesamtBetragCents: number | null;
+    zahlungsempfaengerIban: string | null;
+    openInvoiceIds: number[];
+    sumOpenInvoiceCents: number;
+  }>> {
+    const advices = await db.select()
+      .from(paymentAdvices)
+      .where(and(isNull(paymentAdvices.deletedAt), isNotNull(paymentAdvices.gesamtBetragCents)));
+
+    if (advices.length === 0) return [];
+
+    const adviceIds = advices.map(a => a.id);
+    const rows = await db.select({
+      adviceId: paymentAdviceItems.paymentAdviceId,
+      invoiceId: invoices.id,
+      grossAmountCents: invoices.grossAmountCents,
+    })
+      .from(paymentAdviceItems)
+      .innerJoin(invoices, eq(paymentAdviceItems.matchedInvoiceId, invoices.id))
+      .where(and(
+        inArray(paymentAdviceItems.paymentAdviceId, adviceIds),
+        inArray(invoices.status, ["versendet", "avis_erhalten"]),
+      ));
+
+    const byAdvice = new Map<number, { ids: number[]; sum: number }>();
+    for (const r of rows) {
+      const agg = byAdvice.get(r.adviceId) ?? { ids: [], sum: 0 };
+      if (!agg.ids.includes(r.invoiceId)) {
+        agg.ids.push(r.invoiceId);
+        agg.sum += r.grossAmountCents;
+      }
+      byAdvice.set(r.adviceId, agg);
+    }
+
+    return advices
+      .map(a => {
+        const agg = byAdvice.get(a.id);
+        return {
+          id: a.id,
+          avisNummer: a.avisNummer,
+          gesamtBetragCents: a.gesamtBetragCents,
+          zahlungsempfaengerIban: a.zahlungsempfaengerIban,
+          openInvoiceIds: agg?.ids ?? [],
+          sumOpenInvoiceCents: agg?.sum ?? 0,
+        };
+      })
+      .filter(a => a.openInvoiceIds.length > 0);
+  }
+
+  /**
+   * Task #1672 — Anzeige-Zusammenfassung mehrerer Avise (für die Transaktions-
+   * liste: „Avis 2026-0812 · 25 Rechnungen · 12.847,50 €"). invoiceCount zählt
+   * ALLE dem Avis zugeordneten Rechnungen (nicht nur offene), damit die Anzeige
+   * nach dem Bezahlen stabil bleibt.
+   */
+  async getAdviceSummariesByIds(ids: number[]): Promise<Map<number, {
+    id: number;
+    avisNummer: string | null;
+    gesamtBetragCents: number | null;
+    invoiceCount: number;
+  }>> {
+    const result = new Map<number, { id: number; avisNummer: string | null; gesamtBetragCents: number | null; invoiceCount: number }>();
+    if (ids.length === 0) return result;
+
+    const advices = await db.select({
+      id: paymentAdvices.id,
+      avisNummer: paymentAdvices.avisNummer,
+      gesamtBetragCents: paymentAdvices.gesamtBetragCents,
+    })
+      .from(paymentAdvices)
+      .where(inArray(paymentAdvices.id, ids));
+
+    const counts = await db.select({
+      adviceId: paymentAdviceItems.paymentAdviceId,
+      cnt: sql<number>`count(*)::int`,
+    })
+      .from(paymentAdviceItems)
+      .where(and(
+        inArray(paymentAdviceItems.paymentAdviceId, ids),
+        isNotNull(paymentAdviceItems.matchedInvoiceId),
+      ))
+      .groupBy(paymentAdviceItems.paymentAdviceId);
+
+    const countByAdvice = new Map(counts.map(c => [c.adviceId, c.cnt]));
+    for (const a of advices) {
+      result.set(a.id, {
+        id: a.id,
+        avisNummer: a.avisNummer,
+        gesamtBetragCents: a.gesamtBetragCents,
+        invoiceCount: countByAdvice.get(a.id) ?? 0,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * Task #1672 — abgelehnter Vorschlag: Zeitstempel setzen, damit derselbe
+   * rückwirkende Sammel-Avis-Vorschlag nach dem nächsten Sync/Import nicht
+   * erneut angeboten wird. Nur auf noch nicht zugeordneten Transaktionen sinnvoll.
+   */
+  async dismissAdviceSuggestion(txId: number): Promise<QontoTransaction | undefined> {
+    const [updated] = await db.update(qontoTransactions)
+      .set({ adviceSuggestionDismissedAt: new Date() })
+      .where(eq(qontoTransactions.id, txId))
+      .returning();
+    return updated;
   }
 
   async updatePaymentAdviceItemMatch(

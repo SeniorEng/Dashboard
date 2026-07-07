@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter, QontoHideRule } from "../types";
+import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter, QontoHideRule, AdviceSuggestion } from "../types";
 
 export function useQontoStatus(enabled: boolean = true) {
   return useQuery<QontoStatus>({
@@ -58,5 +58,15 @@ export function useQontoAdvices() {
   return useQuery<PaymentAdvice[]>({
     queryKey: ["qonto", "payment-advices"],
     queryFn: async () => unwrapResult(await api.get("/admin/qonto/payment-advices")),
+  });
+}
+
+// Task #1672 — rückwirkende Sammel-Avis-Vorschläge für offene Zahlungseingänge.
+export function useAdviceSuggestions(enabled: boolean) {
+  return useQuery<{ suggestions: AdviceSuggestion[] }>({
+    queryKey: ["qonto", "advice-suggestions"],
+    queryFn: async () => unwrapResult(await api.get("/admin/qonto/transactions/advice-suggestions")),
+    enabled,
+    staleTime: 15000,
   });
 }

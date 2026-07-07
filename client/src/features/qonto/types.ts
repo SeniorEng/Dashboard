@@ -28,10 +28,34 @@ export interface QontoTransaction {
   status: string;
   sourceIban: string | null;
   matchedInvoiceId: number | null;
+  matchedPaymentAdviceId: number | null;
   matchConfidence: string | null;
   billingIrrelevantAt: string | null;
   billingIrrelevantSource: string | null;
   billingRelevantOverrideAt: string | null;
+  adviceSuggestionDismissedAt: string | null;
+  /** Task #1672 — Anzeige-Infos zum verknüpften Sammel-Avis (nur wenn gebunden). */
+  matchedAdvice?: {
+    id: number;
+    avisNummer: string | null;
+    invoiceCount: number;
+    gesamtBetragCents: number | null;
+  } | null;
+}
+
+/** Task #1672 — ein rückwirkender Sammel-Avis-Vorschlag für eine offene Zahlung. */
+export interface AdviceSuggestionCandidate {
+  adviceId: number;
+  avisNummer: string | null;
+  invoiceCount: number;
+  gesamtBetragCents: number | null;
+  reason: "unique_amount" | "discriminator" | "amount_ambiguous";
+  strong: boolean;
+}
+
+export interface AdviceSuggestion {
+  transactionId: number;
+  candidates: AdviceSuggestionCandidate[];
 }
 
 export interface QontoHideRule {

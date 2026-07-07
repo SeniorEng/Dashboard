@@ -15,6 +15,7 @@ import { readTestFaults } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
+import { scanAdviceSuggestions } from "@shared/domain/qonto/bulk-advice-match";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -168,7 +169,24 @@ router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen we
     limit: limit ? parseInt(limit as string) : 50,
     offset: offset ? parseInt(offset as string) : 0,
   });
-  res.json(result);
+
+  // Task #1672 — Sammel-Avis-Anzeige anreichern (Nummer · Rechnungsanzahl · Summe).
+  const adviceIds = Array.from(new Set(
+    result.transactions.map(t => t.matchedPaymentAdviceId).filter((v): v is number => v !== null),
+  ));
+  const adviceSummaries = await qontoStorage.getAdviceSummariesByIds(adviceIds);
+  const transactions = result.transactions.map(t => {
+    if (!t.matchedPaymentAdviceId) return { ...t, matchedAdvice: null };
+    const s = adviceSummaries.get(t.matchedPaymentAdviceId);
+    return {
+      ...t,
+      matchedAdvice: s
+        ? { id: s.id, avisNummer: s.avisNummer, invoiceCount: s.invoiceCount, gesamtBetragCents: s.gesamtBetragCents }
+        : null,
+    };
+  });
+
+  res.json({ ...result, transactions });
 }));
 
 const matchSchema = z.object({
@@ -254,12 +272,90 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
   if (!tx) throw notFound("Transaktion nicht gefunden");
 
   // Idempotenz: nichts zu lösen → no-op.
-  if (!tx.matchedInvoiceId) {
+  if (!tx.matchedInvoiceId && !tx.matchedPaymentAdviceId) {
     res.json(tx);
     return;
   }
 
-  const previousInvoiceId = tx.matchedInvoiceId;
+  // Task #1672 — Sammel-Avis-Zuordnung (Sammelzahlung) reversibel aufheben:
+  // Bindung an das Avis lösen, alle über das Avis bezahlten offenen Rechnungen
+  // `bezahlt → avis_erhalten` zurücksetzen (Avis bleibt bestehen).
+  if (tx.matchedPaymentAdviceId) {
+    const previousAdviceId = tx.matchedPaymentAdviceId;
+    const previousConfidence = tx.matchConfidence;
+
+    const updated = await withAudit(async (dbTx, audit) => {
+      const unmatchUpdate = await dbTx.update(qontoTransactions)
+        .set({ matchedPaymentAdviceId: null, matchConfidence: null })
+        .where(and(
+          eq(qontoTransactions.id, id),
+          eq(qontoTransactions.matchedPaymentAdviceId, previousAdviceId),
+        ))
+        .returning();
+
+      if (unmatchUpdate.length === 0) {
+        throw badRequest("Zuordnung wurde zwischenzeitlich verändert.");
+      }
+
+      // Die durch diese Sammelzahlung geschlossenen Rechnungen zurückstufen.
+      // Nur `bezahlt` herabsetzen (storniert/andere Zustände unangetastet).
+      const adviceInvoiceRows = await dbTx.select({ invoiceId: paymentAdviceItems.matchedInvoiceId })
+        .from(paymentAdviceItems)
+        .where(and(
+          eq(paymentAdviceItems.paymentAdviceId, previousAdviceId),
+          isNotNull(paymentAdviceItems.matchedInvoiceId),
+        ));
+      const adviceInvoiceIds = adviceInvoiceRows
+        .map(r => r.invoiceId)
+        .filter((v): v is number => v !== null);
+
+      const reverted: number[] = [];
+      if (adviceInvoiceIds.length > 0) {
+        const revertUpdate = await dbTx.update(invoices)
+          .set({ status: "avis_erhalten", paidAt: null })
+          .where(and(inArray(invoices.id, adviceInvoiceIds), eq(invoices.status, "bezahlt")))
+          .returning({ id: invoices.id });
+        reverted.push(...revertUpdate.map(r => r.id));
+      }
+
+      for (const invId of reverted) {
+        audit.record({
+          userId: req.user!.id,
+          action: "invoice_payment_unreconciled",
+          entityType: "invoice",
+          entityId: invId,
+          metadata: {
+            qontoTransactionId: id,
+            qontoTransactionExternalId: tx.qontoTransactionId,
+            paymentAdviceId: previousAdviceId,
+            previousConfidence,
+          },
+          ipAddress: req.ip,
+        });
+      }
+
+      audit.record({
+        userId: req.user!.id,
+        action: "advice_payment_unreconciled",
+        entityType: "payment_advice",
+        entityId: previousAdviceId,
+        metadata: {
+          qontoTransactionId: id,
+          qontoTransactionExternalId: tx.qontoTransactionId,
+          previousConfidence,
+          invoiceCount: reverted.length,
+        },
+        ipAddress: req.ip,
+      });
+
+      return unmatchUpdate[0];
+    }, { faults: readTestFaults(req) });
+
+    res.json(updated);
+    return;
+  }
+
+  const previousInvoiceId = tx.matchedInvoiceId!;
   const previousConfidence = tx.matchConfidence;
 
   const updated = await withAudit(async (dbTx, audit) => {
@@ -298,6 +394,109 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
     return unmatchUpdate[0];
   }, { faults: readTestFaults(req) });
 
+  res.json(updated);
+}));
+
+// Task #1672 — rückwirkende Sammel-Avis-Vorschläge: offene Zahlungseingänge
+// (~30 Tage, nicht abgelehnt) gegen offene Avise per Triple-Equality scannen.
+// Reine Anzeige — Buchen erst über „Bestätigen" (confirm-Route). Kein Auto-Close.
+const ADVICE_SUGGESTION_WINDOW_DAYS = 30;
+
+router.get("/transactions/advice-suggestions", asyncHandler("Vorschläge konnten nicht geladen werden", async (_req, res) => {
+  const openAdvices = await qontoStorage.getOpenAdvicesForMatching();
+  if (openAdvices.length === 0) {
+    res.json({ suggestions: [] });
+    return;
+  }
+
+  const candidates = openAdvices.map(a => ({
+    adviceId: a.id,
+    advice: {
+      avisNummer: a.avisNummer,
+      gesamtBetragCents: a.gesamtBetragCents,
+      zahlungsempfaengerIban: a.zahlungsempfaengerIban,
+    },
+    sumOpenInvoiceCents: a.sumOpenInvoiceCents,
+  }));
+  const adviceById = new Map(openAdvices.map(a => [a.id, a]));
+
+  const windowStart = new Date();
+  windowStart.setDate(windowStart.getDate() - ADVICE_SUGGESTION_WINDOW_DAYS);
+
+  const unmatched = await qontoStorage.getUnmatchedTransactions();
+  const suggestions = [];
+  for (const qtx of unmatched) {
+    if (qtx.adviceSuggestionDismissedAt) continue;
+    if (qtx.emittedAt < windowStart) continue;
+
+    const hits = scanAdviceSuggestions(qtx, Math.abs(qtx.amountCents), candidates);
+    if (hits.length === 0) continue;
+
+    suggestions.push({
+      transactionId: qtx.id,
+      candidates: hits.map(h => {
+        const a = adviceById.get(h.adviceId)!;
+        return {
+          adviceId: h.adviceId,
+          avisNummer: a.avisNummer,
+          invoiceCount: a.openInvoiceIds.length,
+          gesamtBetragCents: a.gesamtBetragCents,
+          reason: h.reason,
+          strong: h.strong,
+        };
+      }),
+    });
+  }
+
+  res.json({ suggestions });
+}));
+
+const confirmAdviceSchema = z.object({
+  adviceId: z.number().int().positive("Ungültige Avis-ID"),
+});
+
+// Vorschlag „Bestätigen" bzw. manuelles „dieser Zahlung ein Avis zuordnen":
+// bindet die gewählte Transaktion gezielt an das gewählte Avis (Triple-Equality
+// bleibt als Sicherheitsnetz erzwungen) und schließt dessen offene Rechnungen.
+router.post("/transactions/:id/confirm-advice", asyncHandler("Avis-Zuordnung fehlgeschlagen", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+  if (tx.billingIrrelevantAt) {
+    throw badRequest("Transaktion ist als nicht abrechnungsrelevant markiert. Bitte zuerst die Markierung aufheben.");
+  }
+  if (tx.matchedInvoiceId || tx.matchedPaymentAdviceId) {
+    throw badRequest("Transaktion ist bereits zugeordnet. Bitte zuerst die Zuordnung aufheben.");
+  }
+
+  const { adviceId } = confirmAdviceSchema.parse(req.body);
+  const result = await qontoService.confirmBulkAdviceMatch(id, adviceId, req.user!.id, req.ip);
+  if (!result) {
+    throw badRequest("Zuordnung nicht möglich: Betrag stimmt nicht mit dem Avis-Gesamtbetrag und der Summe der offenen Rechnungen überein (±2 ct).");
+  }
+
+  const updated = await qontoStorage.getTransaction(id);
+  res.json(updated);
+}));
+
+// Vorschlag „Ablehnen": denselben rückwirkenden Vorschlag nach dem nächsten
+// Sync/Import nicht erneut anbieten. Manuelles Zuordnen bleibt weiter möglich.
+router.post("/transactions/:id/dismiss-advice-suggestion", asyncHandler("Vorschlag konnte nicht abgelehnt werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+
+  // Idempotenz: bereits abgelehnt → no-op.
+  if (tx.adviceSuggestionDismissedAt) {
+    res.json(tx);
+    return;
+  }
+
+  const updated = await qontoStorage.dismissAdviceSuggestion(id);
   res.json(updated);
 }));
 
@@ -639,8 +838,13 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
       .map(i => ({ id: i.id, rechnungsNummer: i.rechnungsNummer }));
     const matchCount = await autoMatchAvisItems(itemsToMatch, req.user!.id, req.ip);
 
+    // Task #1672 — Import-Zeit-Auto-Close: liegt bereits eine passende Sammel-
+    // zahlung in Qonto (starkes Signal, genau eine Transaktion), das Avis direkt
+    // schließen und die offenen Rechnungen auf „bezahlt" setzen.
+    const bulkClose = await qontoService.autoCloseAdviceFromTransactions(advice.id, req.user!.id, req.ip);
+
     const refreshed = await qontoStorage.getPaymentAdviceById(advice.id);
-    res.json({ advice: refreshed, matched: matchCount });
+    res.json({ advice: refreshed, matched: matchCount, bulkClosed: bulkClose != null });
     return;
   }
 

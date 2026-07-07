@@ -5,6 +5,7 @@ export {
   useMatchableInvoices,
   useQontoHideRules,
   useQontoAdvices,
+  useAdviceSuggestions,
 } from "./use-qonto-queries";
 export {
   useSyncMutation,

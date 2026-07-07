@@ -16,8 +16,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { iconSize } from "@/design-system";
-import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff } from "lucide-react";
-import { formatCents, formatDate } from "../utils";
+import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff, Sparkles, Check, X, Layers } from "lucide-react";
+import { formatCents, formatDate, confidenceBadge, confidenceSortRank } from "../utils";
 import {
   useQontoTransactions,
   useMatchableInvoices,
@@ -27,9 +27,10 @@ import {
   useQontoBackfillStatus,
   useQontoHideRules,
   useHideRuleMutations,
+  useAdviceSuggestions,
 } from "../hooks";
 import { Checkbox } from "@/components/ui/checkbox";
-import type { MatchFilter } from "../types";
+import type { MatchFilter, AdviceSuggestionCandidate } from "../types";
 import {
   enumerateMonthlyWindows,
   exceedsBackfillLookbackCap,
@@ -131,7 +132,18 @@ export function TransactionsTab({
     csvImportMutation,
     ignoreMutation,
     unignoreMutation,
+    confirmAdviceMutation,
+    dismissAdviceSuggestionMutation,
   } = useTransactionMutations({ onMatchSuccess: () => setMatchingTxId(null) });
+
+  // Task #1672 — rückwirkende Sammel-Avis-Vorschläge (nur relevant, solange
+  // offene/alle Transaktionen sichtbar sind). Map txId → Kandidaten.
+  const suggestionsQuery = useAdviceSuggestions(configured && matchFilter !== "ignored" && matchFilter !== "matched");
+  const suggestionsByTx = useMemo(() => {
+    const m = new Map<number, AdviceSuggestionCandidate[]>();
+    for (const s of suggestionsQuery.data?.suggestions ?? []) m.set(s.transactionId, s.candidates);
+    return m;
+  }, [suggestionsQuery.data]);
 
   const [csvImporting, setCsvImporting] = useState(false);
 
@@ -158,7 +170,15 @@ export function TransactionsTab({
     );
   }
 
-  const transactions = transactionsQuery.data?.transactions ?? [];
+  // Task #1672 — unsichere Auto-Treffer („nur Betrag") nach oben, sonst Reihenfolge
+  // beibehalten (stabil per Index-Tiebreak). Kein Hook (steht nach Early-Return).
+  const transactions = (transactionsQuery.data?.transactions ?? [])
+    .map((tx, i) => ({ tx, i }))
+    .sort((a, b) => {
+      const r = confidenceSortRank(a.tx.matchConfidence) - confidenceSortRank(b.tx.matchConfidence);
+      return r !== 0 ? r : a.i - b.i;
+    })
+    .map((x) => x.tx);
 
   return (
     <div className="space-y-4">
@@ -404,6 +424,11 @@ export function TransactionsTab({
                         <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-300 text-xs" data-testid={`badge-irrelevant-${tx.id}`}>
                           Nicht abrechnungsrelevant
                         </Badge>
+                      ) : tx.matchedPaymentAdviceId ? (
+                        <Badge variant="outline" className="bg-teal-50 text-teal-700 border-teal-200 text-xs" data-testid={`badge-advice-matched-${tx.id}`}>
+                          <Layers className={`${iconSize.xs} mr-1`} />
+                          Sammel-Avis zugeordnet
+                        </Badge>
                       ) : tx.matchedInvoiceId ? (
                         <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs" data-testid={`badge-matched-${tx.id}`}>
                           Zugeordnet
@@ -413,11 +438,14 @@ export function TransactionsTab({
                           Offen
                         </Badge>
                       )}
-                      {tx.matchConfidence && (
-                        <span className="text-xs text-gray-500">
-                          ({tx.matchConfidence === "manual" ? "manuell" : "automatisch"})
-                        </span>
-                      )}
+                      {(tx.matchedInvoiceId || tx.matchedPaymentAdviceId) && tx.matchConfidence && (() => {
+                        const badge = confidenceBadge(tx.matchConfidence);
+                        return (
+                          <Badge variant="outline" className={`${badge.className} text-xs`} data-testid={`badge-confidence-${tx.id}`}>
+                            {badge.label}
+                          </Badge>
+                        );
+                      })()}
                       {tx.sourceIban && (
                         <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-xs font-mono" data-testid={`badge-source-iban-${tx.id}`}>
                           Konto …{tx.sourceIban.slice(-4)}
@@ -448,13 +476,14 @@ export function TransactionsTab({
                       >
                         <RotateCcw className={iconSize.sm} />
                       </Button>
-                    ) : tx.matchedInvoiceId ? (
+                    ) : tx.matchedInvoiceId || tx.matchedPaymentAdviceId ? (
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => unmatchMutation.mutate(tx.id)}
                         disabled={unmatchMutation.isPending}
                         aria-label="Zuordnung aufheben"
+                        title={tx.matchedPaymentAdviceId ? "Sammel-Avis-Zuordnung aufheben (Rechnungen wieder öffnen)" : "Zuordnung aufheben"}
                         data-testid={`button-unmatch-${tx.id}`}
                       >
                         <Unlink className={iconSize.sm} />
@@ -485,6 +514,67 @@ export function TransactionsTab({
                     )}
                   </div>
                 </div>
+
+                {/* Task #1672 — rückwirkende Sammel-Avis-Vorschläge für offene Zahlungen */}
+                {!tx.billingIrrelevantAt && !tx.matchedInvoiceId && !tx.matchedPaymentAdviceId &&
+                  (suggestionsByTx.get(tx.id) ?? []).length > 0 && (
+                  <div className="mt-3 pt-3 border-t space-y-2" data-testid={`advice-suggestions-${tx.id}`}>
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className={`${iconSize.sm} text-teal-600`} />
+                      <Label className="text-xs font-medium text-gray-700">Sammel-Avis-Vorschlag</Label>
+                    </div>
+                    {(suggestionsByTx.get(tx.id) ?? []).map(cand => (
+                      <div
+                        key={cand.adviceId}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-md border border-teal-100 bg-teal-50/50 px-3 py-2"
+                        data-testid={`advice-candidate-${tx.id}-${cand.adviceId}`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium">
+                              Avis {cand.avisNummer ?? `#${cand.adviceId}`}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${cand.strong ? "bg-teal-50 text-teal-700 border-teal-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}
+                              data-testid={`advice-candidate-confidence-${tx.id}-${cand.adviceId}`}
+                            >
+                              {cand.strong ? "empfohlen" : "prüfen"}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-gray-600 mt-0.5">
+                            {cand.invoiceCount} Rechnung{cand.invoiceCount === 1 ? "" : "en"}
+                            {cand.gesamtBetragCents != null && ` · ${formatCents(cand.gesamtBetragCents)}`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 border-teal-300 text-teal-700 hover:bg-teal-100"
+                            onClick={() => confirmAdviceMutation.mutate({ txId: tx.id, adviceId: cand.adviceId })}
+                            disabled={confirmAdviceMutation.isPending}
+                            data-testid={`button-confirm-advice-${tx.id}-${cand.adviceId}`}
+                          >
+                            <Check className={`${iconSize.sm} mr-1`} />
+                            Zuordnen
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-gray-500"
+                      onClick={() => dismissAdviceSuggestionMutation.mutate(tx.id)}
+                      disabled={dismissAdviceSuggestionMutation.isPending}
+                      data-testid={`button-dismiss-advice-${tx.id}`}
+                    >
+                      <X className={`${iconSize.xs} mr-1`} />
+                      Vorschlag ablehnen
+                    </Button>
+                  </div>
+                )}
 
                 {matchingTxId === tx.id && (
                   <div className="mt-3 pt-3 border-t space-y-2">
