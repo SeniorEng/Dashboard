@@ -86,6 +86,10 @@ export interface PaymentAdviceItem {
   skontoCents: number;
   buchungsDatum: string | null;
   matchedInvoiceId: number | null;
+  /** Task #1687 — Brutto der zugeordneten Rechnung (nur bei Treffer, am Lesepfad angereichert). */
+  matchedInvoiceGrossCents?: number | null;
+  /** Task #1687 — abgeleitete Unterzahlung/Kürzung = max(0, Rechnungs-Brutto − gezahlt). */
+  unterzahlungCents?: number;
 }
 
 export interface PaymentAdvice {
@@ -110,6 +114,8 @@ export interface PaymentAdvice {
   items: PaymentAdviceItem[];
   matchedInvoiceCount?: number;
   unpaidMatchedCount?: number;
+  /** Task #1687 — Σ der abgeleiteten Positions-Unterzahlungen (am Lesepfad angereichert). */
+  unterzahlungCents?: number;
 }
 
 export type Tab = "transactions" | "advices";

@@ -95,6 +95,37 @@ function buildBarmerCsv(opts: {
   return lines.join("\n");
 }
 
+/**
+ * Task #1687 — AOK-Plus-artige `1;`-CSV: der Betrag steht NICHT am festen
+ * Barmer-Feld-Index 4, sondern an Feld 5
+ * (`2;<Zweck>;<Ref>;<Datum>;<Code>;<Betrag>;+;EUR`). Verifiziert, dass der Parser
+ * den Betrag STRUKTURELL erkennt statt still als Barmer (parts[4]) fehlzudeuten.
+ * `ref` erlaubt O-statt-0-Referenzen (O→0-Normalisierung).
+ */
+function buildAokCsv(opts: {
+  ref: string;
+  amountEuro: string;
+  zahlungsDatum: string;
+  verwendungszweck?: string;
+}): string {
+  const zweck = opts.verwendungszweck ?? "Pflegeleistung";
+  return [
+    "1;IK987654321;AOK PLUS",
+    `2;${zweck};${opts.ref};${opts.zahlungsDatum};0;${opts.amountEuro};+;EUR`,
+    `3;BELEG-${uniqueId()};${opts.zahlungsDatum};${opts.amountEuro};DE00987654320000000000`,
+  ].join("\n");
+}
+
+async function createAdviceWithRawCsv(csvContent: string): Promise<{ adviceId: number; matched: number }> {
+  const res = await apiPost<{ advice: { id: number }; matched: number }>(
+    "/api/admin/qonto/payment-advices",
+    { fileName: `aok-avis-${uniqueId()}.csv`, csvContent },
+  );
+  expect(res.status).toBe(200);
+  seeded.adviceIds.push(res.data.advice.id);
+  return { adviceId: res.data.advice.id, matched: res.data.matched };
+}
+
 async function createAdviceWithCsv(opts: {
   invoiceNumbers: string[];
   amountEuro: string;
@@ -320,5 +351,68 @@ describe("Task #1284 — avis_erhalten Lebenszyklus", () => {
     const advice2 = res2.data.find(a => a.id === adviceId);
     expect(advice2!.matchedInvoiceCount).toBe(2);
     expect(advice2!.unpaidMatchedCount).toBe(0);
+  });
+});
+
+describe("Task #1687 — Avis-Import: strukturell + robustes Matching", () => {
+  it("AOK-CSV (Betrag an Feld 5) + O→0-Referenz hebt versendet → avis_erhalten", async () => {
+    // Rechnungsnummer mit Nullen; die CSV-Referenz verwendet O statt 0.
+    const num = "RE-2026-700500";
+    const invoiceId = await insertInvoice({ amountCents: 12399, invoiceNumber: num });
+    seeded.invoiceIds.push(invoiceId);
+
+    const csv = buildAokCsv({
+      ref: "RE-2026-7OO5OO", // O→0 ⇒ RE-2026-700500
+      amountEuro: "123,99",
+      zahlungsDatum: "15.04.2026",
+    });
+    const { matched } = await createAdviceWithRawCsv(csv);
+    expect(matched).toBe(1); // Betrag wurde strukturell an Feld 5 erkannt.
+
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
+  });
+
+  it("Betrags-Fallback: garble Referenz ⇒ genau EINE offene Rechnung mit exaktem Brutto", async () => {
+    // Einmaliger Betrag ⇒ genau ein Kandidat für den Betrags-Fallback.
+    const invoiceId = await insertInvoice({ amountCents: 81237, invoiceNumber: nextInvoiceNumber() });
+
+    // Referenz ist Excel-Exponential-Müll ⇒ keine Rechnungsnummer extrahierbar.
+    const csv = buildAokCsv({
+      ref: "4,00000061835E+15",
+      amountEuro: "812,37",
+      zahlungsDatum: "17.04.2026",
+      verwendungszweck: "Kein Bezug",
+    });
+    const { matched } = await createAdviceWithRawCsv(csv);
+    expect(matched).toBe(1); // über exakten Bruttobetrag zugeordnet.
+
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+    expect(await countAudit("invoice_avis_received", invoiceId)).toBe(1);
+  });
+
+  it("GET leitet Unterzahlung (Kürzung) pro Position am Lesepfad ab", async () => {
+    const num = nextInvoiceNumber();
+    const invoiceId = await insertInvoice({ amountCents: 10000, invoiceNumber: num });
+
+    // Gezahlt 90,00 auf 100,00-Rechnung ⇒ Unterzahlung 10,00 (1000 Cent).
+    const csv = buildAokCsv({ ref: num, amountEuro: "90,00", zahlungsDatum: "19.04.2026" });
+    const { adviceId, matched } = await createAdviceWithRawCsv(csv);
+    expect(matched).toBe(1);
+    expect((await getInvoiceStatus(invoiceId)).status).toBe("avis_erhalten");
+
+    const res = await apiGet<Array<{
+      id: number;
+      unterzahlungCents: number;
+      items: Array<{ matchedInvoiceId: number | null; unterzahlungCents: number; matchedInvoiceGrossCents: number | null }>;
+    }>>("/api/admin/qonto/payment-advices");
+    expect(res.status).toBe(200);
+    const advice = res.data.find(a => a.id === adviceId);
+    expect(advice).toBeDefined();
+    expect(advice!.unterzahlungCents).toBe(1000);
+    const item = advice!.items.find(i => i.matchedInvoiceId === invoiceId);
+    expect(item).toBeDefined();
+    expect(item!.matchedInvoiceGrossCents).toBe(10000);
+    expect(item!.unterzahlungCents).toBe(1000);
   });
 });

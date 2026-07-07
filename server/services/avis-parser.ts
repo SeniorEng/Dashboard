@@ -1,5 +1,18 @@
+import {
+  type AvisColumnMap,
+  type AvisFormat,
+  AvisParseUncertainError,
+  buildSuggestedColumnMap,
+  classifyKassenCsvFormat,
+  detectAmountFieldIndex,
+} from "../../shared/domain/qonto/avis-format";
+import { extractInvoiceNumber } from "../../shared/domain/qonto/avis-match";
+
+export { AvisParseUncertainError };
+export type { AvisColumnMap };
+
 interface ParsedAvisHeader {
-  format: "davaso" | "barmer";
+  format: AvisFormat;
   avisNummer: string | null;
   belegNummer: string | null;
   gesamtBetragCents: number;
@@ -28,21 +41,18 @@ interface ParsedAvis {
   items: ParsedAvisItem[];
 }
 
+export interface ParseAvisOptions {
+  fileName?: string | null;
+  /** Manuelles Spalten-Mapping als Fallback, wenn die strukturelle Betrags-
+   * erkennung mehrdeutig ist (Feld-Indizes einer `2;`-Zeile). */
+  columnMap?: AvisColumnMap | null;
+}
+
 function parseEuroCents(value: string): number {
   const cleaned = value.trim().replace(/\s/g, "").replace(/€/g, "").replace(/\./g, "").replace(",", ".");
   const num = parseFloat(cleaned);
   if (isNaN(num)) return 0;
   return Math.round(num * 100);
-}
-
-function extractInvoiceNumber(text: string): string | null {
-  const reMatch = text.match(/RE-\d{4}-\d+/);
-  if (reMatch) return reMatch[0];
-
-  const numMatch = text.match(/\b(\d{6,})\b/);
-  if (numMatch) return numMatch[1];
-
-  return null;
 }
 
 function detectDelimiter(headerLine: string): string {
@@ -51,13 +61,14 @@ function detectDelimiter(headerLine: string): string {
   return semicolons > commas ? ";" : ",";
 }
 
-function detectFormat(csvContent: string): "davaso" | "barmer" | null {
+/** Rohformat: `davaso` (Header `LfdNr,…`) vs. `1;`-Kassen-Familie vs. unbekannt. */
+function detectRawFormat(csvContent: string): "davaso" | "kassen" | null {
   const firstLine = csvContent.replace(/^\uFEFF/, "").trim().split("\n")[0].trim();
   if (firstLine.startsWith("LfdNr,") || firstLine.startsWith("LfdNr;")) {
     return "davaso";
   }
-  if (/^\s*1;/.test(firstLine) || /^\uFEFF?\s*1;/.test(firstLine)) {
-    return "barmer";
+  if (/^\uFEFF?\s*1;/.test(firstLine)) {
+    return "kassen";
   }
   return null;
 }
@@ -73,6 +84,15 @@ function splitCsvLine(line: string, delimiter: string): string[] {
   }
   parts.push(current.trim());
   return parts;
+}
+
+function toIsoDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const parts = raw.split(".");
+  if (parts.length === 3) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return raw;
 }
 
 function parseDavaso(csvContent: string): ParsedAvis {
@@ -94,7 +114,7 @@ function parseDavaso(csvContent: string): ParsedAvis {
 
   const dataRows = lines.slice(1).filter(l => l.trim()).map(l => splitCsvLine(l, delimiter));
 
-  let headerData: ParsedAvisHeader = {
+  const headerData: ParsedAvisHeader = {
     format: "davaso",
     avisNummer: null,
     belegNummer: null,
@@ -124,40 +144,18 @@ function parseDavaso(csvContent: string): ParsedAvis {
     headerData.zahlungsempfaengerIban = getField(summaryRow, "ZEM_IBAN") || null;
     headerData.skontoCents = parseEuroCents(getField(summaryRow, "KTR_BTR_Skonto"));
     headerData.kuerzungCents = parseEuroCents(getField(summaryRow, "KTR_BTR_DTA_Kuerzg"));
-
-    const datumRaw = getField(summaryRow, "Datum_ZahlungAusfuehrg");
-    if (datumRaw) {
-      const parts = datumRaw.split(".");
-      if (parts.length === 3) {
-        headerData.zahlungsDatum = `${parts[2]}-${parts[1]}-${parts[0]}`;
-      } else {
-        headerData.zahlungsDatum = datumRaw;
-      }
-    }
+    headerData.zahlungsDatum = toIsoDate(getField(summaryRow, "Datum_ZahlungAusfuehrg") || null);
   }
 
   for (const row of dataRows) {
     const belegNr = getField(row, "ZEM_BelegNr");
     if (!belegNr) continue;
 
-    const rechnungsNummer = getField(row, "ZEM_RecNr") || null;
-
-    const recDatumRaw = getField(row, "ZEM_RecDatum");
-    let rechnungsDatum: string | null = null;
-    if (recDatumRaw) {
-      const parts = recDatumRaw.split(".");
-      if (parts.length === 3) {
-        rechnungsDatum = `${parts[2]}-${parts[1]}-${parts[0]}`;
-      } else {
-        rechnungsDatum = recDatumRaw;
-      }
-    }
-
     items.push({
       belegNr,
       vorgangsNr: getField(row, "ZEM_VorgangsNr") || null,
-      rechnungsNummer,
-      rechnungsDatum,
+      rechnungsNummer: getField(row, "ZEM_RecNr") || null,
+      rechnungsDatum: toIsoDate(getField(row, "ZEM_RecDatum") || null),
       verwendungszweck: null,
       betragCents: parseEuroCents(getField(row, "ZEM_BTR_Forderg")),
       skontoCents: parseEuroCents(getField(row, "KTR_BTR_Skonto")),
@@ -166,11 +164,10 @@ function parseDavaso(csvContent: string): ParsedAvis {
   }
 
   if (items.length === 0 && summaryRow) {
-    const rechnungsNummer = getField(summaryRow, "ZEM_RecNr") || null;
     items.push({
       belegNr: null,
       vorgangsNr: getField(summaryRow, "ZEM_VorgangsNr") || null,
-      rechnungsNummer,
+      rechnungsNummer: getField(summaryRow, "ZEM_RecNr") || null,
       rechnungsDatum: headerData.zahlungsDatum,
       verwendungszweck: null,
       betragCents: headerData.gesamtBetragCents,
@@ -182,17 +179,27 @@ function parseDavaso(csvContent: string): ParsedAvis {
   return { header: headerData, items };
 }
 
-function parseBarmer(csvContent: string): ParsedAvis {
+/**
+ * Parser der `1;`-Kassen-Familie (AOK-Plus, Barmer & Co.). Zeilentypen:
+ *  - `1;<Zahlungsempfänger-IK>;<Name/Anschrift>;`
+ *  - `2;<Referenz/Verwendungszweck>;…;<Betrag>;<+/->;EUR;` → Betrag STRUKTURELL erkannt
+ *  - `3;<Belegnummer>;<Zahlungsdatum>;<Gesamtbetrag>;<Empfänger-IBAN>;`
+ *
+ * Der Betrag wird nicht mehr an einem festen Feld-Index angenommen, sondern über
+ * `detectAmountFieldIndex` ermittelt. Ist er mehrdeutig und liegt kein manuelles
+ * `columnMap` vor, wird `AvisParseUncertainError` geworfen (⇒ Mapping-Dialog).
+ */
+function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedAvis {
   const lines = csvContent.trim().split("\n").map(l => l.replace(/^\uFEFF/, "").trim()).filter(l => l);
 
-  let headerData: ParsedAvisHeader = {
-    format: "barmer",
+  const headerData: ParsedAvisHeader = {
+    format: "kassen-csv",
     avisNummer: null,
     belegNummer: null,
     gesamtBetragCents: 0,
     zahlungsDatum: null,
     kostentraegerIk: null,
-    kostentraegerName: "BARMER",
+    kostentraegerName: null,
     zahlungsempfaengerIk: null,
     zahlungsempfaengerIban: null,
     skontoCents: 0,
@@ -200,6 +207,7 @@ function parseBarmer(csvContent: string): ParsedAvis {
   };
 
   const items: ParsedAvisItem[] = [];
+  const columnMap = options?.columnMap ?? null;
 
   for (const line of lines) {
     const parts = line.split(";").map(p => p.trim());
@@ -208,14 +216,32 @@ function parseBarmer(csvContent: string): ParsedAvis {
     if (lineType === "1") {
       headerData.zahlungsempfaengerIk = parts[1] || null;
     } else if (lineType === "2") {
-      const verwendungszweck = parts[1] || null;
-      const refField = parts[2] || "";
-      const buchungsDatum = parts[3] || null;
-      const betragStr = parts[4] || "0";
-      const betragCents = parseEuroCents(betragStr);
+      let betragIdx: number;
+      if (columnMap) {
+        betragIdx = columnMap.betrag;
+      } else {
+        betragIdx = detectAmountFieldIndex(parts);
+        if (betragIdx < 0) {
+          const preview = lines
+            .filter(l => l.startsWith("2;"))
+            .slice(0, 5)
+            .map(l => l.split(";").map(p => p.trim()));
+          throw new AvisParseUncertainError(
+            "Betrags-Feld konnte nicht eindeutig erkannt werden. Bitte Spalten manuell zuordnen.",
+            preview,
+            buildSuggestedColumnMap(parts),
+          );
+        }
+      }
 
-      let rechnungsNummer = extractInvoiceNumber(refField);
-      if (!rechnungsNummer && verwendungszweck) {
+      const betragCents = parseEuroCents(parts[betragIdx] ?? "0");
+
+      const verwendungszweck = parts[1] || null;
+      const refFieldIdx = columnMap?.referenz ?? 2;
+      const datumIdx = columnMap?.datum ?? 3;
+
+      let rechnungsNummer = extractInvoiceNumber(parts[refFieldIdx] ?? "");
+      if (!rechnungsNummer) {
         rechnungsNummer = extractInvoiceNumber(verwendungszweck);
       }
 
@@ -227,32 +253,29 @@ function parseBarmer(csvContent: string): ParsedAvis {
         verwendungszweck,
         betragCents,
         skontoCents: 0,
-        buchungsDatum,
+        buchungsDatum: parts[datumIdx] || null,
       });
     } else if (lineType === "3") {
       headerData.belegNummer = parts[1] || null;
-      const datumRaw = parts[2] || null;
-      if (datumRaw) {
-        const dotParts = datumRaw.split(".");
-        if (dotParts.length === 3) {
-          headerData.zahlungsDatum = `${dotParts[2]}-${dotParts[1]}-${dotParts[0]}`;
-        } else {
-          headerData.zahlungsDatum = datumRaw;
-        }
-      }
+      headerData.zahlungsDatum = toIsoDate(parts[2] || null);
       headerData.gesamtBetragCents = parseEuroCents(parts[3] || "0");
       headerData.zahlungsempfaengerIban = parts[4] || null;
     }
   }
 
+  headerData.format = classifyKassenCsvFormat({
+    fileName: options?.fileName,
+    kostentraegerName: headerData.kostentraegerName,
+  });
+
   return { header: headerData, items };
 }
 
-export function parseAvisCsv(csvContent: string): ParsedAvis {
-  const format = detectFormat(csvContent);
+export function parseAvisCsv(csvContent: string, options?: ParseAvisOptions): ParsedAvis {
+  const format = detectRawFormat(csvContent);
   if (!format) {
-    throw new Error("CSV-Format nicht erkannt. Unterstützt: DAVASO (mit Header 'LfdNr,...') und Barmer (Zeilentypen 1/2/3 mit Semikolon).");
+    throw new Error("CSV-Format nicht erkannt. Unterstützt: DAVASO (Header 'LfdNr,...') und Kassen-CSV (Zeilentypen 1/2/3 mit Semikolon).");
   }
   if (format === "davaso") return parseDavaso(csvContent);
-  return parseBarmer(csvContent);
+  return parseKassenCsv(csvContent, options);
 }

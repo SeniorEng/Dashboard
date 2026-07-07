@@ -18,9 +18,76 @@ import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@/lib/api";
 import { useUpload } from "@/hooks/use-upload";
 import { iconSize } from "@/design-system";
-import { Loader2, Upload, Trash2, Eye, CheckCircle2, XCircle, FileText } from "lucide-react";
+import { Loader2, Upload, Trash2, Eye, CheckCircle2, XCircle, FileText, AlertTriangle } from "lucide-react";
+import { isExcelExponential } from "@shared/domain/qonto/avis-match";
 import { formatCents, formatDate } from "../utils";
 import { useQontoAdvices, useAdviceMutations } from "../hooks";
+import type { PaymentAdviceItem } from "../types";
+
+/** Task #1687 — Excel schreibt lange Belegnummern als `…E+11`. Solche Positionen
+ * dürfen nicht still fehl-matchen; wir warnen an der Position. Prüft die rohen
+ * Referenz-Felder (Beleg/Vorgang/Rechnungsnummer/Zweck). */
+function hasExcelExponentialRef(item: PaymentAdviceItem): boolean {
+  return [item.belegNr, item.vorgangsNr, item.rechnungsNummer, item.verwendungszweck]
+    .some(v => !!v && isExcelExponential(v));
+}
+
+/** Eine einzelne Avis-Position (Task #1687: mit Excel-Format-Warnung + abgeleiteter
+ * Positions-Unterzahlung). `position` ist die 1-basierte Original-Reihenfolge. */
+function AdviceItemRow({ item, position }: { item: PaymentAdviceItem; position: number }) {
+  const excelExp = hasExcelExponentialRef(item);
+  const unterzahlung = item.unterzahlungCents ?? 0;
+  return (
+    <div
+      className={`flex items-center justify-between gap-2 p-2 rounded text-sm ${
+        item.matchedInvoiceId ? "bg-green-50" : "bg-amber-50"
+      }`}
+      data-testid={`advice-item-${item.id}`}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-mono text-gray-500">#{position}</span>
+          {item.verwendungszweck && (
+            <span className="text-sm truncate">{item.verwendungszweck}</span>
+          )}
+          {item.rechnungsNummer && (
+            <span className="text-xs font-mono text-blue-600">{item.rechnungsNummer}</span>
+          )}
+          {excelExp && (
+            <Badge
+              variant="outline"
+              className="text-xs bg-amber-100 text-amber-800 border-amber-300"
+              data-testid={`badge-excel-exp-${item.id}`}
+            >
+              <AlertTriangle className="h-3 w-3 mr-1" />
+              Excel-Format (…E+)
+            </Badge>
+          )}
+        </div>
+        {item.buchungsDatum && (
+          <span className="text-xs text-gray-500">Buchung: {item.buchungsDatum}</span>
+        )}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {unterzahlung > 0 && (
+          <Badge
+            variant="outline"
+            className="text-xs bg-red-50 text-red-700 border-red-200"
+            data-testid={`badge-item-unterzahlung-${item.id}`}
+          >
+            −{formatCents(unterzahlung)}
+          </Badge>
+        )}
+        <span className="font-medium text-sm">{formatCents(item.betragCents)}</span>
+        {item.matchedInvoiceId ? (
+          <CheckCircle2 className={`${iconSize.sm} text-green-600`} />
+        ) : (
+          <XCircle className={`${iconSize.sm} text-amber-500`} />
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function AdvicesTab() {
   const { toast } = useToast();
@@ -29,6 +96,16 @@ export function AdvicesTab() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [duplicateDialog, setDuplicateDialog] = useState<{ open: boolean; message: string; pendingData: Record<string, unknown> | null }>({ open: false, message: "", pendingData: null });
+  // Task #1687 — Fallback-Dialog: `1;`-Format strukturell nicht eindeutig ⇒ Nutzer
+  // ordnet Betrag/Referenz/Datum manuell zu (kein stiller Barmer-Default).
+  const [mappingDialog, setMappingDialog] = useState<{
+    open: boolean;
+    preview: string[][];
+    betrag: number;
+    referenz: number | null;
+    datum: number | null;
+    pendingData: Record<string, unknown> | null;
+  }>({ open: false, preview: [], betrag: 0, referenz: null, datum: null, pendingData: null });
 
   const advicesQuery = useQontoAdvices();
 
@@ -50,7 +127,17 @@ export function AdvicesTab() {
     try {
       await createMutation.mutateAsync(payload);
     } catch (err) {
-      if (err instanceof ApiError && err.details?.duplicate) {
+      if (err instanceof ApiError && err.details?.avisUncertain) {
+        const suggested = err.details.suggestedColumnMap as { betrag: number; referenz: number | null; datum: number | null } | null;
+        setMappingDialog({
+          open: true,
+          preview: (err.details.preview as string[][]) ?? [],
+          betrag: suggested?.betrag ?? 0,
+          referenz: suggested?.referenz ?? null,
+          datum: suggested?.datum ?? null,
+          pendingData: payload,
+        });
+      } else if (err instanceof ApiError && err.details?.duplicate) {
         setDuplicateDialog({
           open: true,
           message: err.message,
@@ -111,6 +198,34 @@ export function AdvicesTab() {
     }
   };
 
+  const closeMappingDialog = () =>
+    setMappingDialog({ open: false, preview: [], betrag: 0, referenz: null, datum: null, pendingData: null });
+
+  // Task #1687 — mit manuellem Spalten-Mapping erneut importieren.
+  const handleMappingSubmit = async () => {
+    const pending = mappingDialog.pendingData;
+    if (!pending) return;
+    const columnMap = { betrag: mappingDialog.betrag, referenz: mappingDialog.referenz, datum: mappingDialog.datum };
+    closeMappingDialog();
+    setUploading(true);
+    try {
+      await createMutation.mutateAsync({ ...pending, columnMap });
+    } catch (err) {
+      // Nach dem Mapping kann noch eine Doppelerfassung greifen → Mapping mitnehmen.
+      if (err instanceof ApiError && err.details?.duplicate) {
+        setDuplicateDialog({ open: true, message: err.message, pendingData: { ...pending, columnMap } });
+      } else {
+        toast({ title: "Fehler", description: err instanceof Error ? err.message : "Import fehlgeschlagen", variant: "destructive" });
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const mappingColumnCount = mappingDialog.preview.reduce((max, row) => Math.max(max, row.length), 0);
+  const mappingColumnIndices = Array.from({ length: mappingColumnCount }, (_, i) => i);
+  const mappingSelectClass = "w-full h-9 rounded-md border border-input bg-background px-2 text-sm";
+
   const advices = advicesQuery.data ?? [];
 
   return (
@@ -129,6 +244,88 @@ export function AdvicesTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog open={mappingDialog.open} onOpenChange={(open) => { if (!open) closeMappingDialog(); }}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Spalten manuell zuordnen</AlertDialogTitle>
+            <AlertDialogDescription>
+              Das CSV-Format konnte nicht sicher erkannt werden. Bitte ordnen Sie anhand der Vorschau zu, in welchem Feld Betrag, Referenz und Datum stehen.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {mappingDialog.preview.length > 0 && (
+            <div className="overflow-x-auto border rounded text-xs" data-testid="avis-mapping-preview">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50">
+                    {mappingColumnIndices.map(i => (
+                      <th key={i} className="px-2 py-1 text-left font-mono text-gray-500 whitespace-nowrap">Feld {i}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {mappingDialog.preview.map((row, r) => (
+                    <tr key={r} className="border-t">
+                      {mappingColumnIndices.map(i => (
+                        <td key={i} className="px-2 py-1 whitespace-nowrap">{row[i] ?? ""}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label htmlFor="map-betrag">Betrag *</Label>
+              <select
+                id="map-betrag"
+                className={mappingSelectClass}
+                value={mappingDialog.betrag}
+                onChange={(e) => setMappingDialog(m => ({ ...m, betrag: Number(e.target.value) }))}
+                data-testid="select-map-betrag"
+              >
+                {mappingColumnIndices.map(i => (
+                  <option key={i} value={i}>Feld {i}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="map-referenz">Referenz</Label>
+              <select
+                id="map-referenz"
+                className={mappingSelectClass}
+                value={mappingDialog.referenz ?? ""}
+                onChange={(e) => setMappingDialog(m => ({ ...m, referenz: e.target.value === "" ? null : Number(e.target.value) }))}
+                data-testid="select-map-referenz"
+              >
+                <option value="">—</option>
+                {mappingColumnIndices.map(i => (
+                  <option key={i} value={i}>Feld {i}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="map-datum">Datum</Label>
+              <select
+                id="map-datum"
+                className={mappingSelectClass}
+                value={mappingDialog.datum ?? ""}
+                onChange={(e) => setMappingDialog(m => ({ ...m, datum: e.target.value === "" ? null : Number(e.target.value) }))}
+                data-testid="select-map-datum"
+              >
+                <option value="">—</option>
+                {mappingColumnIndices.map(i => (
+                  <option key={i} value={i}>Feld {i}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-mapping">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction onClick={handleMappingSubmit} data-testid="button-apply-mapping">Übernehmen &amp; importieren</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -138,7 +335,7 @@ export function AdvicesTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-gray-500">
-            CSV-Dateien werden automatisch analysiert (DAVASO, Barmer). Rechnungen werden anhand der Rechnungsnummer zugeordnet.
+            CSV-Dateien werden automatisch analysiert (DAVASO, Barmer, AOK). Rechnungen werden anhand der Rechnungsnummer zugeordnet – ersatzweise über den Betrag.
           </p>
           <div>
             <Label htmlFor="advice-notes-new">Notizen (optional)</Label>
@@ -199,7 +396,9 @@ export function AdvicesTab() {
         ) : (
           advices.map(advice => {
             const isExpanded = expandedId === advice.id;
-            const matchedCount = advice.items.filter(i => i.matchedInvoiceId).length;
+            const matchedItems = advice.items.filter(i => i.matchedInvoiceId);
+            const unmatchedItems = advice.items.filter(i => !i.matchedInvoiceId);
+            const matchedCount = matchedItems.length;
             const totalItems = advice.items.length;
             const isParsed = advice.format !== "manuell";
 
@@ -258,6 +457,15 @@ export function AdvicesTab() {
                             {advice.kuerzungCents > 0 ? `Kürzung: ${formatCents(advice.kuerzungCents)}` : ""}
                           </Badge>
                         )}
+                        {(advice.unterzahlungCents ?? 0) > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs bg-red-50 text-red-700 border-red-200"
+                            data-testid={`badge-advice-unterzahlung-${advice.id}`}
+                          >
+                            Unterzahlung: {formatCents(advice.unterzahlungCents!)}
+                          </Badge>
+                        )}
                       </div>
                       {advice.notes && (
                         <p className="text-xs text-gray-500 mt-0.5">{advice.notes}</p>
@@ -303,43 +511,37 @@ export function AdvicesTab() {
                   </div>
 
                   {isExpanded && advice.items.length > 0 && (
-                    <div className="mt-3 pt-3 border-t">
-                      <div className="space-y-1.5">
-                        {advice.items.map((item, idx) => (
-                          <div
-                            key={item.id}
-                            className={`flex items-center justify-between gap-2 p-2 rounded text-sm ${
-                              item.matchedInvoiceId ? "bg-green-50" : "bg-amber-50"
-                            }`}
-                            data-testid={`advice-item-${item.id}`}
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs font-mono text-gray-500">#{idx + 1}</span>
-                                {item.verwendungszweck && (
-                                  <span className="text-sm truncate">{item.verwendungszweck}</span>
-                                )}
-                                {item.rechnungsNummer && (
-                                  <span className="text-xs font-mono text-blue-600">
-                                    {item.rechnungsNummer}
-                                  </span>
-                                )}
-                              </div>
-                              {item.buchungsDatum && (
-                                <span className="text-xs text-gray-500">Buchung: {item.buchungsDatum}</span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="font-medium text-sm">{formatCents(item.betragCents)}</span>
-                              {item.matchedInvoiceId ? (
-                                <CheckCircle2 className={`${iconSize.sm} text-green-600`} />
-                              ) : (
-                                <XCircle className={`${iconSize.sm} text-amber-500`} />
-                              )}
-                            </div>
+                    <div className="mt-3 pt-3 border-t space-y-3">
+                      {unmatchedItems.length > 0 && (
+                        <div className="space-y-1.5" data-testid={`advice-unmatched-list-${advice.id}`}>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700">
+                            <AlertTriangle className={iconSize.sm} />
+                            Nicht zugeordnet ({unmatchedItems.length})
                           </div>
-                        ))}
-                      </div>
+                          {unmatchedItems.map(item => (
+                            <AdviceItemRow
+                              key={item.id}
+                              item={item}
+                              position={advice.items.indexOf(item) + 1}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {matchedItems.length > 0 && (
+                        <div className="space-y-1.5" data-testid={`advice-matched-list-${advice.id}`}>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-green-700">
+                            <CheckCircle2 className={iconSize.sm} />
+                            Zugeordnet ({matchedItems.length})
+                          </div>
+                          {matchedItems.map(item => (
+                            <AdviceItemRow
+                              key={item.id}
+                              item={item}
+                              position={advice.items.indexOf(item) + 1}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>

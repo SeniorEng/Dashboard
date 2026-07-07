@@ -4,7 +4,7 @@ import { asyncHandler, badRequest, notFound, conflict } from "../../lib/errors";
 import { requireIntParam } from "../../lib/params";
 import { qontoService } from "../../services/qonto";
 import { qontoStorage } from "../../storage/qonto";
-import { parseAvisCsv } from "../../services/avis-parser";
+import { parseAvisCsv, AvisParseUncertainError } from "../../services/avis-parser";
 import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
 import { db, pool, type DbOrTx } from "../../lib/db";
@@ -16,6 +16,7 @@ import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
 import { scanAdviceSuggestions } from "@shared/domain/qonto/bulk-advice-match";
+import { resolveUniqueMatch } from "@shared/domain/qonto/avis-match";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -703,29 +704,51 @@ router.post("/transactions/import-csv", asyncHandler("CSV-Import fehlgeschlagen"
 }));
 
 async function autoMatchAvisItems(
-  items: Array<{ id: number; rechnungsNummer: string | null }>,
+  items: Array<{ id: number; rechnungsNummer: string | null; betragCents: number }>,
   userId: number,
   ipAddress?: string,
 ) {
   let matched = 0;
   for (const item of items) {
-    if (!item.rechnungsNummer) continue;
-
     const searchNum = item.rechnungsNummer;
-    let invoiceRows = await db.select({ id: invoices.id })
-      .from(invoices)
-      .where(eq(invoices.invoiceNumber, searchNum))
-      .limit(1);
+    let matchedId: number | null = null;
 
-    if (invoiceRows.length === 0 && !searchNum.startsWith("RE-") && searchNum.length >= 6) {
-      invoiceRows = await db.select({ id: invoices.id })
+    if (searchNum) {
+      // 1) Exakte Rechnungsnummer (bereits O→0-normalisiert vom Parser).
+      const exact = await db.select({ id: invoices.id })
         .from(invoices)
-        .where(ilike(invoices.invoiceNumber, `%${searchNum}%`))
+        .where(eq(invoices.invoiceNumber, searchNum))
         .limit(1);
+      if (exact.length > 0) {
+        matchedId = exact[0].id;
+      } else if (!searchNum.startsWith("RE-") && searchNum.length >= 6) {
+        // 2) Tolerante Teilstring-Suche — aber nur bei GENAU EINEM Treffer
+        //    (limit 2 ⇒ resolveUniqueMatch verwirft ≥2 als mehrdeutig).
+        const fuzzy = await db.select({ id: invoices.id })
+          .from(invoices)
+          .where(ilike(invoices.invoiceNumber, `%${searchNum}%`))
+          .limit(2);
+        const unique = resolveUniqueMatch(fuzzy);
+        if (unique) matchedId = unique.id;
+      }
     }
 
-    if (invoiceRows.length > 0) {
-      const invoiceId = invoiceRows[0].id;
+    // 3) Betrags-Fallback: keine Referenz-Zuordnung ⇒ genau EINE offene Rechnung
+    //    (versendet/avis_erhalten) mit exakt passendem Bruttobetrag.
+    if (matchedId === null && item.betragCents > 0) {
+      const byAmount = await db.select({ id: invoices.id })
+        .from(invoices)
+        .where(and(
+          eq(invoices.grossAmountCents, item.betragCents),
+          inArray(invoices.status, ["versendet", "avis_erhalten"]),
+        ))
+        .limit(2);
+      const unique = resolveUniqueMatch(byAmount);
+      if (unique) matchedId = unique.id;
+    }
+
+    if (matchedId !== null) {
+      const invoiceId = matchedId;
       await qontoStorage.updatePaymentAdviceItemMatch(item.id, invoiceId);
       matched++;
 
@@ -766,13 +789,38 @@ const paymentAdviceSchema = z.object({
   notes: z.string().optional().nullable(),
   csvContent: z.string().optional().nullable(),
   force: z.boolean().optional(),
+  // Task #1687 — manuelles Spalten-Mapping (Fallback), wenn die strukturelle
+  // Betrags-Erkennung mehrdeutig war (`AvisParseUncertainError` ⇒ 422 ⇒ Dialog).
+  columnMap: z.object({
+    betrag: z.number().int().nonnegative(),
+    referenz: z.number().int().nonnegative().nullable(),
+    datum: z.number().int().nonnegative().nullable(),
+  }).optional().nullable(),
 });
 
 router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeichert werden", async (req, res) => {
   const data = paymentAdviceSchema.parse(req.body);
 
   if (data.csvContent) {
-    const parsed = parseAvisCsv(data.csvContent);
+    let parsed;
+    try {
+      parsed = parseAvisCsv(data.csvContent, { fileName: data.fileName, columnMap: data.columnMap ?? null });
+    } catch (err) {
+      // Task #1687 — `1;`-Format strukturell nicht eindeutig (Betragsfeld unklar):
+      // kein stiller Barmer-Default, sondern Vorschau + Mapping-Vorschlag ans FE.
+      if (err instanceof AvisParseUncertainError) {
+        return res.status(422).json({
+          message: err.message,
+          code: "AVIS_PARSE_UNCERTAIN",
+          details: {
+            avisUncertain: true,
+            preview: err.preview,
+            suggestedColumnMap: err.suggestedColumnMap,
+          },
+        });
+      }
+      throw err;
+    }
     if (parsed.items.length === 0) {
       return res.status(400).json({ message: "CSV enthält keine Positionen" });
     }
@@ -834,8 +882,8 @@ router.post("/payment-advices", asyncHandler("Zahlungsavis konnte nicht gespeich
     );
 
     const itemsToMatch = advice.items
-      .filter(i => i.rechnungsNummer)
-      .map(i => ({ id: i.id, rechnungsNummer: i.rechnungsNummer }));
+      .filter(i => i.rechnungsNummer || i.betragCents > 0)
+      .map(i => ({ id: i.id, rechnungsNummer: i.rechnungsNummer, betragCents: i.betragCents }));
     const matchCount = await autoMatchAvisItems(itemsToMatch, req.user!.id, req.ip);
 
     // Task #1672 — Import-Zeit-Auto-Close: liegt bereits eine passende Sammel-
@@ -889,19 +937,35 @@ router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen
     advices.flatMap(a => a.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null)),
   ));
   const statusById = new Map<number, string>();
+  const grossById = new Map<number, number>();
   if (matchedInvoiceIds.length > 0) {
-    const rows = await db.select({ id: invoices.id, status: invoices.status })
+    const rows = await db.select({ id: invoices.id, status: invoices.status, grossAmountCents: invoices.grossAmountCents })
       .from(invoices)
       .where(inArray(invoices.id, matchedInvoiceIds));
-    for (const row of rows) statusById.set(row.id, row.status);
+    for (const row of rows) {
+      statusById.set(row.id, row.status);
+      grossById.set(row.id, row.grossAmountCents);
+    }
   }
 
+  // Task #1687 — Kürzung/Unterzahlung für die 1;-Kassen-Formate wird am Lesepfad
+  // abgeleitet (kein Forderungsfeld in der CSV, kein Schema-Write): pro
+  // zugeordneter Position = max(0, Rechnungs-Brutto − gezahlter Betrag).
   const enriched = advices.map(a => {
     const matchedIds = a.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null);
     const unpaidMatchedCount = matchedIds.filter(
       id => statusById.get(id) === "versendet" || statusById.get(id) === "avis_erhalten",
     ).length;
-    return { ...a, matchedInvoiceCount: matchedIds.length, unpaidMatchedCount };
+    const items = a.items.map(i => {
+      if (i.matchedInvoiceId == null) {
+        return { ...i, matchedInvoiceGrossCents: null, unterzahlungCents: 0 };
+      }
+      const gross = grossById.get(i.matchedInvoiceId) ?? null;
+      const unterzahlungCents = gross != null ? Math.max(0, gross - i.betragCents) : 0;
+      return { ...i, matchedInvoiceGrossCents: gross, unterzahlungCents };
+    });
+    const unterzahlungCents = items.reduce((sum, i) => sum + i.unterzahlungCents, 0);
+    return { ...a, items, matchedInvoiceCount: matchedIds.length, unpaidMatchedCount, unterzahlungCents };
   });
 
   res.json(enriched);
