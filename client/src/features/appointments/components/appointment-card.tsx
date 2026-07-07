@@ -1,13 +1,15 @@
 import { memo, useCallback, useMemo } from "react";
 import { formatGermanDate } from "@shared/utils/datetime";
 import { Card } from "@/components/ui/card";
-import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Users, Repeat, Car, AlertCircle } from "lucide-react";
+import { MapPin, CheckCircle2, Clock, FileText, Phone, Navigation, User, Users, Repeat, Car, AlertCircle, Smartphone } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AppointmentWithCustomer } from "@shared/types";
 import { useAuth } from "@/hooks/use-auth";
 import { getCardServiceInfoFromAppointment, isDocumentationOverdue } from "@shared/types";
 import { api, unwrapResult } from "@/lib/api";
+import { formatPhoneForDisplay } from "@shared/utils/phone";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatTimeSlot, getEndTime } from "../utils";
 
 interface AppointmentCardProps {
@@ -220,22 +222,64 @@ function AppointmentCardComponent({ appointment, showDate, isSubstitute, linkQue
           </div>
 
           {!isSubstitute && (() => {
-            const phoneNumber = appointment.customer?.telefon || appointment.customer?.festnetz;
-            const hasPhone = !!phoneNumber;
+            const mobile = appointment.customer?.telefon?.trim() || "";
+            const landline = appointment.customer?.festnetz?.trim() || "";
+            const phoneOptions = [
+              mobile ? { label: "Mobil", number: mobile, Icon: Smartphone } : null,
+              landline ? { label: "Festnetz", number: landline, Icon: Phone } : null,
+            ].filter((o): o is { label: string; number: string; Icon: typeof Phone } => o !== null);
+            const hasPhone = phoneOptions.length > 0;
             const hasAddress = !!appointment.customer?.address;
             if (!hasPhone && !hasAddress) return null;
+            const callButtonClass = `flex-1 flex items-center justify-center px-3 bg-green-50 text-green-600 hover:bg-green-100 active:bg-green-200 transition-colors ${hasAddress ? "border-b border-border/30" : ""}`;
             return (
               <div className="shrink-0 flex flex-col border-l border-border/30">
-                {hasPhone && (
+                {hasPhone && phoneOptions.length === 1 && (
                   <a
-                    href={`tel:${phoneNumber}`}
-                    className={`flex-1 flex items-center justify-center px-3 bg-green-50 text-green-600 hover:bg-green-100 active:bg-green-200 transition-colors ${hasAddress ? "border-b border-border/30" : ""}`}
+                    href={`tel:${phoneOptions[0].number}`}
+                    className={callButtonClass}
                     onClick={(e) => e.stopPropagation()}
                     aria-label="Anrufen"
                     data-testid={`button-call-${appointment.id}`}
                   >
                     <Phone className="w-4 h-4" />
                   </a>
+                )}
+                {hasPhone && phoneOptions.length > 1 && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={callButtonClass}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Anrufen – Nummer wählen"
+                        data-testid={`button-call-${appointment.id}`}
+                      >
+                        <Phone className="w-4 h-4" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="end"
+                      className="w-56 p-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {phoneOptions.map((opt) => (
+                        <a
+                          key={opt.label}
+                          href={`tel:${opt.number}`}
+                          className="flex items-center gap-3 rounded-md px-3 py-3 text-sm hover:bg-green-50 active:bg-green-100 text-foreground transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                          data-testid={`link-call-${opt.label.toLowerCase()}-${appointment.id}`}
+                        >
+                          <opt.Icon className="w-4 h-4 text-green-600 shrink-0" />
+                          <span className="flex flex-col min-w-0">
+                            <span className="text-xs text-muted-foreground">{opt.label}</span>
+                            <span className="font-medium truncate">{formatPhoneForDisplay(opt.number)}</span>
+                          </span>
+                        </a>
+                      ))}
+                    </PopoverContent>
+                  </Popover>
                 )}
                 {hasAddress && (
                   <a
