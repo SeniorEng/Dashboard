@@ -39,6 +39,8 @@ import {
   loadUnmatchedCredits,
   computeProposals,
   applyProposals,
+  buildAmbiguousReportRows,
+  formatAmbiguousReportCsv,
   BACKFILL_MATCH_CONFIDENCE,
 } from "../../scripts/verify-advice-backfill";
 import { users } from "../../shared/schema";
@@ -625,8 +627,83 @@ describe("Task #1680 — Sammel-Avis Backfill --apply", () => {
       await loadUnmatchedCredits(),
     );
     expect(proposals.filter((p) => p.advice.id === adviceId)).toHaveLength(0);
-    expect(ambiguous.some((a) => a.id === adviceId)).toBe(true);
+    const mine = ambiguous.find((a) => a.advice.id === adviceId);
+    expect(mine).toBeTruthy();
+    expect(mine!.reason).toBe("multiple_credits");
+    // Beide konkurrierenden Gutschriften sind für die manuelle Prüfung erhalten.
+    expect(mine!.candidates).toHaveLength(2);
+    expect(mine!.candidates.map((c) => c.txId).sort()).toEqual([...mine!.candidates.map((c) => c.txId)].sort());
     expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(0);
+  });
+
+  it("(m2) Report enthält für jedes mehrdeutige Avis eine Zeile je konkurrierender Gutschrift (CSV + Rows)", async () => {
+    const numA = nextInvoiceNumber();
+    const { adviceId } = await createFullyPaidAdvice({
+      items: [{ num: numA, cents: 51350 }],
+      totalCents: 51350,
+      zahlungsDatum: "15.04.2026",
+      iban: IBAN_A,
+    });
+    const tx1 = await insertQontoTx({ amountCents: 51350, sourceIban: IBAN_A, emittedAt: new Date("2026-04-18T00:00:00Z"), counterpartyName: "AOK Nordost" });
+    const tx2 = await insertQontoTx({ amountCents: 51350, sourceIban: IBAN_A, emittedAt: new Date("2026-04-22T00:00:00Z"), counterpartyName: "AOK Bayern" });
+
+    const { ambiguous } = computeProposals(
+      await loadFullyPaidUnlinkedAdvices(),
+      await loadUnmatchedCredits(),
+    );
+
+    const rows = buildAmbiguousReportRows(ambiguous).filter((r) => r.adviceId === adviceId);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.txId).sort()).toEqual([tx1, tx2].sort());
+    // Jede Zeile trägt den Avis-Kontext UND die konkurrierende Gutschrift.
+    for (const r of rows) {
+      expect(r.adviceAmountCents).toBe(51350);
+      expect(r.reason).toBe("multiple_credits");
+      expect(r.txAmountCents).toBe(51350);
+      expect(r.txSourceIban).toBe(IBAN_A);
+    }
+
+    const csv = formatAmbiguousReportCsv(ambiguous);
+    const header = csv.split("\n")[0];
+    expect(header).toContain("advice_id");
+    expect(header).toContain("tx_id");
+    // Beide Gegenpartei-Namen tauchen im CSV auf.
+    expect(csv).toContain("AOK Nordost");
+    expect(csv).toContain("AOK Bayern");
+  });
+
+  it("(m3) Kollision: eine Gutschrift für zwei Avise ⇒ beide mehrdeutig, mit collidingAdviceIds", async () => {
+    const numA = nextInvoiceNumber();
+    const numB = nextInvoiceNumber();
+    const a1 = await createFullyPaidAdvice({
+      items: [{ num: numA, cents: 51360 }],
+      totalCents: 51360,
+      zahlungsDatum: "15.04.2026",
+      iban: IBAN_A,
+    });
+    const a2 = await createFullyPaidAdvice({
+      items: [{ num: numB, cents: 51360 }],
+      totalCents: 51360,
+      zahlungsDatum: "15.04.2026",
+      iban: IBAN_A,
+    });
+    // GENAU EINE passende Gutschrift ⇒ jedes Avis hätte für sich einen eindeutigen
+    // Vorschlag, aber beide beanspruchen dieselbe TX ⇒ Kollision.
+    const txId = await insertQontoTx({ amountCents: 51360, sourceIban: IBAN_A, emittedAt: new Date("2026-04-20T00:00:00Z") });
+
+    const { proposals, ambiguous } = computeProposals(
+      await loadFullyPaidUnlinkedAdvices(),
+      await loadUnmatchedCredits(),
+    );
+
+    expect(proposals.filter((p) => p.txId === txId)).toHaveLength(0);
+    const e1 = ambiguous.find((a) => a.advice.id === a1.adviceId);
+    const e2 = ambiguous.find((a) => a.advice.id === a2.adviceId);
+    expect(e1?.reason).toBe("credit_collision");
+    expect(e2?.reason).toBe("credit_collision");
+    expect(e1?.candidates[0].txId).toBe(txId);
+    expect(e1?.collidingAdviceIds).toContain(a2.adviceId);
+    expect(e2?.collidingAdviceIds).toContain(a1.adviceId);
   });
 
   it("(n) IBAN-Mismatch ⇒ kein Vorschlag (IBAN ist Pflicht-Gate)", async () => {

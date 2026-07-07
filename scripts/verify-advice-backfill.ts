@@ -28,10 +28,19 @@
 // betroffenem Avis. Die Avis-Rechnungen sind bereits `bezahlt` und werden NICHT
 // angefasst. Idempotent: ein zweiter Lauf trifft null Zeilen.
 //
+// MEHRDEUTIGE AVISE (Task #1683): Avise, für die MEHRERE Gutschriften passen (oder
+// deren einzige passende Gutschrift von einem weiteren Avis beansprucht wird),
+// werden bewusst NICHT auto-verknüpft. Sie werden zusätzlich zur Konsole als
+// durabler Report (`advice-backfill-ambiguous.csv` + `.json`, Pfad via `--out=`)
+// geschrieben — je Zeile das Avis PLUS die konkurrierende Gutschrift, damit ein
+// Operator die richtige Zuordnung manuell auswählen kann.
+//
 // PROD-DISZIPLIN: In Dev vorbereiten/verifizieren (Dry-Run), `--apply` gegen Prod
 // erst nach Sign-off (PROD_DATABASE_URL / Deployment-Kontext).
 // ---------------------------------------------------------------------------
 
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { db } from "../server/lib/db";
 import {
@@ -86,8 +95,50 @@ interface ProposedLink {
   txAmountCents: number;
   txEmittedAt: Date;
   txCounterpartyName: string | null;
+  txSourceIban: string | null;
   daysDelta: number;
   nameMatchesAdvisory: boolean;
+}
+
+/** Eine der miteinander konkurrierenden Gutschriften eines mehrdeutigen Avis. */
+export interface AmbiguousCredit {
+  txId: number;
+  txAmountCents: number;
+  txEmittedAt: Date;
+  txCounterpartyName: string | null;
+  txSourceIban: string | null;
+  daysDelta: number;
+  nameMatchesAdvisory: boolean;
+}
+
+/**
+ * Ein Avis, das NICHT automatisch verknüpft werden kann, weil die Zuordnung
+ * mehrdeutig ist — inklusive der konkurrierenden Gutschriften, zwischen denen ein
+ * Mensch entscheiden muss.
+ *
+ *  - `multiple_credits`: mehrere Gutschriften passen auf DASSELBE Avis
+ *    (`candidates` = alle passenden Gutschriften).
+ *  - `credit_collision`: EINE Gutschrift würde für mehrere Avise vorgeschlagen
+ *    (`candidates` = die eine geteilte Gutschrift, `collidingAdviceIds` = die
+ *    anderen Avise, die dieselbe Gutschrift beanspruchen).
+ */
+export interface AmbiguousAdvice {
+  advice: FullyPaidAdvice;
+  reason: "multiple_credits" | "credit_collision";
+  candidates: AmbiguousCredit[];
+  collidingAdviceIds: number[];
+}
+
+function toAmbiguousCredit(p: ProposedLink): AmbiguousCredit {
+  return {
+    txId: p.txId,
+    txAmountCents: p.txAmountCents,
+    txEmittedAt: p.txEmittedAt,
+    txCounterpartyName: p.txCounterpartyName,
+    txSourceIban: p.txSourceIban,
+    daysDelta: p.daysDelta,
+    nameMatchesAdvisory: p.nameMatchesAdvisory,
+  };
 }
 
 /**
@@ -175,9 +226,9 @@ export async function loadUnmatchedCredits() {
 export function computeProposals(
   advices: FullyPaidAdvice[],
   credits: Awaited<ReturnType<typeof loadUnmatchedCredits>>,
-): { proposals: ProposedLink[]; ambiguous: FullyPaidAdvice[] } {
+): { proposals: ProposedLink[]; ambiguous: AmbiguousAdvice[] } {
   const proposals: ProposedLink[] = [];
-  const ambiguous: FullyPaidAdvice[] = [];
+  const ambiguous: AmbiguousAdvice[] = [];
 
   for (const advice of advices) {
     const adviceIban = advice.zahlungsempfaengerIban ? normalizeIban(advice.zahlungsempfaengerIban) : null;
@@ -207,6 +258,7 @@ export function computeProposals(
         txAmountCents: tx.amountCents,
         txEmittedAt: tx.emittedAt,
         txCounterpartyName: tx.counterpartyName,
+        txSourceIban: tx.sourceIban,
         daysDelta,
         nameMatchesAdvisory: nameAdvisory,
       });
@@ -215,7 +267,12 @@ export function computeProposals(
     if (matches.length === 1) {
       proposals.push(matches[0]);
     } else if (matches.length > 1) {
-      ambiguous.push(advice);
+      ambiguous.push({
+        advice,
+        reason: "multiple_credits",
+        candidates: matches.map(toAmbiguousCredit),
+        collidingAdviceIds: [],
+      });
     }
   }
 
@@ -224,17 +281,141 @@ export function computeProposals(
   // Avis zugeordnet werden. In dem Fall wird KEINE der kollidierenden
   // Zuordnungen automatisch gebucht (manuelle Prüfung).
   const txCounts = new Map<number, number>();
-  for (const p of proposals) txCounts.set(p.txId, (txCounts.get(p.txId) ?? 0) + 1);
+  const txToAdviceIds = new Map<number, number[]>();
+  for (const p of proposals) {
+    txCounts.set(p.txId, (txCounts.get(p.txId) ?? 0) + 1);
+    const arr = txToAdviceIds.get(p.txId) ?? [];
+    arr.push(p.advice.id);
+    txToAdviceIds.set(p.txId, arr);
+  }
   const uniqueProposals: ProposedLink[] = [];
   for (const p of proposals) {
     if ((txCounts.get(p.txId) ?? 0) > 1) {
-      ambiguous.push(p.advice);
+      const collidingAdviceIds = (txToAdviceIds.get(p.txId) ?? []).filter((id) => id !== p.advice.id);
+      ambiguous.push({
+        advice: p.advice,
+        reason: "credit_collision",
+        candidates: [toAmbiguousCredit(p)],
+        collidingAdviceIds,
+      });
     } else {
       uniqueProposals.push(p);
     }
   }
 
   return { proposals: uniqueProposals, ambiguous };
+}
+
+/** Eine flache Zeile des Mehrdeutigkeits-Reports (ein Avis × eine Gutschrift). */
+export interface AmbiguousReportRow {
+  adviceId: number;
+  avisNummer: string | null;
+  adviceAmountCents: number;
+  adviceIban: string | null;
+  kostentraegerName: string | null;
+  anchorDate: string | null;
+  invoiceCount: number;
+  reason: AmbiguousAdvice["reason"];
+  collidingAdviceIds: number[];
+  txId: number;
+  txAmountCents: number;
+  txEmittedAt: string;
+  daysDelta: number;
+  txCounterpartyName: string | null;
+  txSourceIban: string | null;
+  nameMatchesAdvisory: boolean;
+}
+
+/**
+ * Flacht die mehrdeutigen Avise zu je einer Zeile pro konkurrierender Gutschrift
+ * aus, damit ein Operator sie in Tabellenform (CSV/JSON) durcharbeiten kann.
+ * Reine Transformation ohne Seiteneffekte.
+ */
+export function buildAmbiguousReportRows(ambiguous: AmbiguousAdvice[]): AmbiguousReportRow[] {
+  const rows: AmbiguousReportRow[] = [];
+  for (const entry of ambiguous) {
+    const a = entry.advice;
+    for (const c of entry.candidates) {
+      rows.push({
+        adviceId: a.id,
+        avisNummer: a.avisNummer,
+        adviceAmountCents: a.gesamtBetragCents,
+        adviceIban: a.zahlungsempfaengerIban,
+        kostentraegerName: a.kostentraegerName,
+        anchorDate: formatDate(a.anchorDate),
+        invoiceCount: a.invoiceCount,
+        reason: entry.reason,
+        collidingAdviceIds: entry.collidingAdviceIds,
+        txId: c.txId,
+        txAmountCents: c.txAmountCents,
+        txEmittedAt: formatDate(c.txEmittedAt),
+        daysDelta: c.daysDelta,
+        txCounterpartyName: c.txCounterpartyName,
+        txSourceIban: c.txSourceIban,
+        nameMatchesAdvisory: c.nameMatchesAdvisory,
+      });
+    }
+  }
+  return rows;
+}
+
+const AMBIGUOUS_REPORT_CSV_HEADER = [
+  "advice_id",
+  "avis_nummer",
+  "advice_amount_eur",
+  "advice_iban",
+  "kostentraeger",
+  "anchor_date",
+  "invoice_count",
+  "reason",
+  "colliding_advice_ids",
+  "tx_id",
+  "tx_amount_eur",
+  "tx_date",
+  "days_delta",
+  "tx_counterparty",
+  "tx_source_iban",
+  "name_matches_advisory",
+] as const;
+
+function csvCell(value: string | number | null): string {
+  const s = value == null ? "" : String(value);
+  return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * Formatiert die mehrdeutigen Avise als CSV (Semikolon-getrennt, DE-üblich) —
+ * eine Kopfzeile plus eine Zeile pro konkurrierender Gutschrift. Beträge in Euro
+ * (Punkt als Dezimaltrenner, CSV-neutral).
+ */
+export function formatAmbiguousReportCsv(ambiguous: AmbiguousAdvice[]): string {
+  const rows = buildAmbiguousReportRows(ambiguous);
+  const lines = [AMBIGUOUS_REPORT_CSV_HEADER.join(";")];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.adviceId,
+        r.avisNummer,
+        (r.adviceAmountCents / 100).toFixed(2),
+        r.adviceIban,
+        r.kostentraegerName,
+        r.anchorDate,
+        r.invoiceCount,
+        r.reason,
+        r.collidingAdviceIds.join("|"),
+        r.txId,
+        (r.txAmountCents / 100).toFixed(2),
+        r.txEmittedAt,
+        r.daysDelta,
+        r.txCounterpartyName,
+        r.txSourceIban,
+        r.nameMatchesAdvisory ? "ja" : "nein",
+      ]
+        .map(csvCell)
+        .join(";"),
+    );
+  }
+  return lines.join("\n") + "\n";
 }
 
 /**
@@ -394,10 +575,48 @@ async function main() {
 
   const { proposals, ambiguous } = computeProposals(advices, credits);
 
-  for (const a of ambiguous) {
+  for (const entry of ambiguous) {
+    const a = entry.advice;
     console.log(
-      `⚠  Avis ${a.avisNummer ?? `#${a.id}`} (${formatEuro(a.gesamtBetragCents)}): ` +
-        `mehrdeutig — KEIN Vorschlag (manuelle Prüfung).`,
+      `⚠  Avis ${a.avisNummer ?? `#${a.id}`} (${formatEuro(a.gesamtBetragCents)}): mehrdeutig — ` +
+        (entry.reason === "multiple_credits"
+          ? `${entry.candidates.length} passende Gutschriften`
+          : `Gutschrift auch von Avis ${entry.collidingAdviceIds.map((id) => `#${id}`).join(", ")} beansprucht`) +
+        ` ⇒ KEIN Vorschlag (manuelle Prüfung).`,
+    );
+    for (const c of entry.candidates) {
+      console.log(
+        `      · Qonto-TX #${c.txId} · ${formatEuro(Math.abs(c.txAmountCents))} · ` +
+          `${formatDate(c.txEmittedAt)} (${c.daysDelta >= 0 ? "+" : ""}${c.daysDelta} d) · ` +
+          `„${c.txCounterpartyName ?? "—"}"`,
+      );
+    }
+  }
+
+  // Durable Report: die mehrdeutigen Avise + ihre konkurrierenden Gutschriften
+  // werden als CSV UND JSON auf Platte geschrieben, damit ein Operator sie
+  // außerhalb der Konsolen-Ausgabe abarbeiten kann (Task #1683).
+  if (ambiguous.length > 0) {
+    const outPrefix = get("--out=") ?? "advice-backfill-ambiguous";
+    const csvPath = resolve(process.cwd(), `${outPrefix}.csv`);
+    const jsonPath = resolve(process.cwd(), `${outPrefix}.json`);
+    writeFileSync(csvPath, formatAmbiguousReportCsv(ambiguous), "utf8");
+    writeFileSync(
+      jsonPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          ambiguousAdviceCount: ambiguous.length,
+          rows: buildAmbiguousReportRows(ambiguous),
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    console.log(
+      `\n📄 Mehrdeutigkeits-Report geschrieben (${ambiguous.length} Avis(e)):\n` +
+        `      ${csvPath}\n      ${jsonPath}`,
     );
   }
 
@@ -431,6 +650,12 @@ async function main() {
     console.log(
       `\nZusammenfassung: ${proposals.length} eindeutig · ${ambiguous.length} mehrdeutig (übersprungen).`,
     );
+    if (ambiguous.length > 0) {
+      console.log(
+        `\nMehrdeutige Avise müssen manuell aufgelöst werden — siehe den geschriebenen ` +
+          `Report (CSV/JSON) oben; jede Zeile zeigt das Avis + die konkurrierende Gutschrift.`,
+      );
+    }
     console.log(
       '\nScharf verknüpfen mit: --apply --user=<superadmin-id> --reason="…"' +
         "\n  WICHTIG: In Dev vorbereiten/verifizieren, --apply gegen Prod erst nach Sign-off.",
