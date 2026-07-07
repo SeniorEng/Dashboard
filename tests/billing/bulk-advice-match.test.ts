@@ -65,6 +65,32 @@ function centsToEuro(cents: number): string {
   return (cents / 100).toFixed(2).replace(".", ",");
 }
 
+/**
+ * Kollisions-Registry für Gesamtbeträge.
+ *
+ * Der Auto-Match-/Backfill-Pfad scannt ALLE noch offenen Avise/Gutschriften in
+ * der geteilten Worker-DB. Zwei Cases mit demselben Gesamtbetrag können sich
+ * daher gegenseitig „querbinden" — ein nicht-lokaler, verwirrender Fehler.
+ * Deshalb MUSS jeder Case einen global eindeutigen Gesamtbetrag nutzen.
+ * Absichtliche Duplikate innerhalb DESSELBEN Case (z.B. (c)/(d): zwei
+ * betragsgleiche Avise) sind erlaubt — sie teilen sich dieselbe `caseId`.
+ */
+const totalsByCase = new Map<number, string>();
+
+function registerCaseTotal(totalCents: number, caseId: string): void {
+  const existing = totalsByCase.get(totalCents);
+  if (existing !== undefined && existing !== caseId) {
+    throw new Error(
+      `Sammel-Avis Test-Kollision: Gesamtbetrag ${totalCents} wird von Case "${existing}" ` +
+        `UND Case "${caseId}" verwendet. Der Auto-Match scannt ALLE offenen Avise/Gutschriften ` +
+        `in der geteilten Worker-DB, daher braucht jeder Case einen global eindeutigen Gesamtbetrag. ` +
+        `Nutze einen anderen Betrag (Ausnahme: absichtliche Duplikate innerhalb desselben Case ` +
+        `wie (c)/(d) — diese müssen dieselbe caseId teilen).`,
+    );
+  }
+  totalsByCase.set(totalCents, caseId);
+}
+
 async function insertInvoice(opts: { amountCents: number; invoiceNumber: string }): Promise<number> {
   const [row] = await db.insert(invoices).values({
     invoiceNumber: opts.invoiceNumber,
@@ -130,7 +156,9 @@ async function createAdvice(opts: {
   totalCents: number;
   zahlungsDatum: string;
   iban: string;
+  caseId: string;
 }): Promise<{ adviceId: number; matched: number }> {
+  registerCaseTotal(opts.totalCents, opts.caseId);
   const csvContent = buildAvisCsv(opts);
   const res = await apiPost<{ advice: { id: number }; matched: number }>(
     "/api/admin/qonto/payment-advices",
@@ -240,6 +268,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
       totalCents: 90100,
       zahlungsDatum: "15.04.2026",
       iban: IBAN_A,
+      caseId: "a",
     });
     // Items sind zugeordnet ⇒ Rechnungen auf avis_erhalten.
     expect(await getInvoiceStatus(invA)).toBe("avis_erhalten");
@@ -268,6 +297,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
       totalCents: 90200,
       zahlungsDatum: "15.04.2026",
       iban: IBAN_A,
+      caseId: "b",
     });
 
     // Zahlung 2 ct über dem Gesamtbetrag ⇒ innerhalb der Toleranz.
@@ -292,11 +322,11 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const a1 = await createAdvice({
       items: [{ num: n1, cents: 50300 }, { num: n2, cents: 40000 }],
-      totalCents: 90300, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 90300, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "c",
     });
     const a2 = await createAdvice({
       items: [{ num: n3, cents: 40300 }, { num: n4, cents: 50000 }],
-      totalCents: 90300, zahlungsDatum: "15.04.2026", iban: IBAN_B,
+      totalCents: 90300, zahlungsDatum: "15.04.2026", iban: IBAN_B, caseId: "c",
     });
 
     // Zahlung ohne IBAN/Nummer ⇒ beide Avise passen betraglich, kein Diskriminator.
@@ -325,11 +355,11 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const aA = await createAdvice({
       items: [{ num: n1, cents: 50400 }, { num: n2, cents: 40000 }],
-      totalCents: 90400, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 90400, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "d",
     });
     const aB = await createAdvice({
       items: [{ num: n3, cents: 40400 }, { num: n4, cents: 50000 }],
-      totalCents: 90400, zahlungsDatum: "15.04.2026", iban: IBAN_B,
+      totalCents: 90400, zahlungsDatum: "15.04.2026", iban: IBAN_B, caseId: "d",
     });
 
     // Zahlung mit Quell-IBAN == Empfänger-IBAN von Avis A ⇒ eindeutig A.
@@ -354,7 +384,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const { adviceId } = await createAdvice({
       items: [{ num: numA, cents: 50500 }, { num: numB, cents: 40000 }],
-      totalCents: 90500, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 90500, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "e",
     });
 
     // Zahlung trägt Gesamtbetrag, aber im Verwendungszweck eine Einzel-Rechnungsnummer.
@@ -378,7 +408,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const { adviceId } = await createAdvice({
       items: [{ num: numA, cents: 50600 }, { num: numB, cents: 40000 }],
-      totalCents: 90600, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 90600, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "f",
     });
 
     // Storno von invB ⇒ Σ offen (50600) < Gesamtbetrag (90600).
@@ -404,7 +434,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const { adviceId } = await createAdvice({
       items: [{ num: numA, cents: 50700 }, { num: numB, cents: 40000 }],
-      totalCents: 90700, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 90700, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "g",
     });
 
     // invB bereits einzeln bezahlt ⇒ Σ offen (50700) < Gesamt (90700).
@@ -431,7 +461,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     await createAdvice({
       items: [{ num: numA, cents: 50800 }, { num: numB, cents: 40000 }],
-      totalCents: 90800, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 90800, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "h",
     });
 
     const txId = await insertQontoTx({ amountCents: 90800 });
@@ -464,7 +494,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
 
     const { adviceId } = await createAdvice({
       items: [{ num: numA, cents: 50900 }, { num: numB, cents: 40000 }],
-      totalCents: 90900, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 90900, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "i",
     });
 
     const txId = await insertQontoTx({ amountCents: 90900 });
@@ -485,7 +515,7 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
     const invA = await insertInvoice({ amountCents: 91000, invoiceNumber: numA });
     const { adviceId } = await createAdvice({
       items: [{ num: numA, cents: 91000 }],
-      totalCents: 91000, zahlungsDatum: "15.04.2026", iban: IBAN_A,
+      totalCents: 91000, zahlungsDatum: "15.04.2026", iban: IBAN_A, caseId: "j",
     });
 
     const txId = await insertQontoTx({ amountCents: 91000 });
@@ -525,6 +555,7 @@ describe("Task #1680 — Sammel-Avis Backfill --apply", () => {
     totalCents: number;
     zahlungsDatum: string;
     iban: string;
+    caseId: string;
   }): Promise<{ adviceId: number; invoiceIds: number[] }> {
     const invoiceIds: number[] = [];
     for (const it of opts.items) {
@@ -548,6 +579,7 @@ describe("Task #1680 — Sammel-Avis Backfill --apply", () => {
       totalCents: 91100,
       zahlungsDatum: "15.04.2026",
       iban: IBAN_A,
+      caseId: "k",
     });
 
     const txId = await insertQontoTx({
@@ -584,6 +616,7 @@ describe("Task #1680 — Sammel-Avis Backfill --apply", () => {
       totalCents: 51200,
       zahlungsDatum: "15.04.2026",
       iban: IBAN_A,
+      caseId: "l",
     });
     const txId = await insertQontoTx({
       amountCents: 51200,
@@ -617,6 +650,7 @@ describe("Task #1680 — Sammel-Avis Backfill --apply", () => {
       totalCents: 51300,
       zahlungsDatum: "15.04.2026",
       iban: IBAN_A,
+      caseId: "m",
     });
     // Zwei betrags-/IBAN-/fenstergleiche Gutschriften ⇒ mehrdeutig.
     await insertQontoTx({ amountCents: 51300, sourceIban: IBAN_A, emittedAt: new Date("2026-04-18T00:00:00Z") });
@@ -713,6 +747,7 @@ describe("Task #1680 — Sammel-Avis Backfill --apply", () => {
       totalCents: 51400,
       zahlungsDatum: "15.04.2026",
       iban: IBAN_A,
+      caseId: "n",
     });
     // Betrag + Fenster passen, aber IBAN nicht ⇒ kein Match.
     await insertQontoTx({ amountCents: 51400, sourceIban: IBAN_B, emittedAt: new Date("2026-04-20T00:00:00Z") });
