@@ -409,6 +409,11 @@ beforeAll(async () => {
   // Seriell seeden — dieselbe Mitarbeiter-Zuweisung teilt sich die Slots.
   await seedCustomer("M", monthStart, year, month, { drift: true, importLinked: true });
   await seedCustomer("H", monthStart, year, month, { drift: false, importLinked: false });
+  // N — Nach-Siegel-Drift, aber NICHT import-verknüpft (kein Import-Batch auf der
+  // Buchung). Der Sicherheits-Gegenpol zu M: eine MANUELL abgerechnete Split-
+  // Rechnung mit Drift darf von einem import-scoped Reparatur-Lauf
+  // (importLinkedOnly: true) NICHT storniert werden.
+  await seedCustomer("N", monthStart, year, month, { drift: true, importLinked: false });
 }, 600_000);
 
 afterAll(async () => {
@@ -568,5 +573,115 @@ objectStorageDescribe("Import-Drift-Reparatur: Bulk storniert ALLE Topf-Geschwis
 
     // --- H (gesund) bleibt in BEIDEN Rechnungen byte-genau unangetastet.
     await assertUntouched(H);
+  }, 300_000);
+
+  it("importLinkedOnly:true überspringt NICHT-import-verknüpfte Drift (manueller Split bleibt unangetastet); importLinkedOnly:false repariert sie dann vollständig (Task #1673)", async () => {
+    const N = byLabel("N");
+
+    // Vorbedingung: N hat einen echten Nach-Siegel-Drift (zusätzliche
+    // §45a-Consumption), aber OHNE Import-Batch/Audit → `importLinked === false`.
+    expect(N.invoices.length, "N: genau 2 Split-Rechnungen geseedet").toBe(2);
+    expect(N.drift, "N: Drift injiziert").toBe(true);
+    expect(N.importLinked, "N: Drift NICHT import-verknüpft").toBe(false);
+    expect(N.invoices.some((i) => i.billingType === "selbstzahler"), "N: private Selbstzahler-Rechnung vorhanden").toBe(true);
+    expect(N.invoices.some((i) => i.budgetType === POT_45A), "N: §45a-Kasse-Rechnung vorhanden").toBe(true);
+
+    // --- SCHRITT 1: import-scoped Lauf (importLinkedOnly: true) MUSS N überspringen.
+    const skipSummary = await reconcile({
+      apply: true,
+      customerIds: [],
+      appointmentIds: [N.apptId],
+      userId: superadminId,
+      reason: "Integrationstest: import-scoped Lauf darf manuellen Split nicht anfassen #1673",
+      importLinkedOnly: true,
+    });
+
+    // Der Drift wird zwar erkannt, aber durch den Import-Attributions-Filter
+    // herausgefiltert → weder geflaggt noch im Plan noch storniert.
+    const skipFlagged = new Set(skipSummary.flagged.map((r) => r.appointmentId));
+    expect(skipFlagged.has(N.apptId), "N: bei importLinkedOnly:true NICHT geflaggt").toBe(false);
+    expect(skipSummary.plan.some((p) => p.appointmentId === N.apptId), "N: nicht im Reparatur-Plan").toBe(false);
+    expect(skipSummary.stornoedInvoiceIds.length, "N: keine Rechnung storniert").toBe(0);
+    expect(skipSummary.reissuedInvoiceIds.length, "N: keine Rechnung neu ausgestellt").toBe(0);
+    expect(skipSummary.softStornoedServiceRecordIds.length, "N: kein LN soft-storniert").toBe(0);
+
+    // KERN-GARANTIE: BEIDE Split-Rechnungen + LN von N sind byte-genau unverändert
+    // aktiv, es existiert keine Stornorechnung.
+    await assertUntouched(N);
+
+    // --- SCHRITT 2: voller Lauf (importLinkedOnly: false) repariert N doch.
+    const repairSummary = await reconcile({
+      apply: true,
+      customerIds: [],
+      appointmentIds: [N.apptId],
+      userId: superadminId,
+      reason: "Integrationstest: voller Lauf repariert auch manuellen Split #1673",
+      importLinkedOnly: false,
+    });
+
+    const repFlagged = new Set(repairSummary.flagged.map((r) => r.appointmentId));
+    expect(repFlagged.has(N.apptId), "N: bei importLinkedOnly:false erkannt").toBe(true);
+
+    const nPlan = repairSummary.plan.find((p) => p.appointmentId === N.apptId);
+    expect(nPlan, "N: im Reparatur-Plan").toBeDefined();
+    expect(nPlan!.sealedInvoiceIds.sort(), "N: Plan verweist auf BEIDE Split-Rechnungen")
+      .toEqual(N.invoices.map((i) => i.id).sort());
+
+    // Beide Original-Rechnungen (§45a-Kasse + privat-Selbstzahler) sind jetzt
+    // storniert; Original-Line-Items byte-unverändert.
+    let originalGrossSum = 0;
+    for (const inv of N.invoices) {
+      const [row] = await db
+        .select({ status: invoicesTable.status, gross: invoicesTable.grossAmountCents })
+        .from(invoicesTable).where(eq(invoicesTable.id, inv.id)).limit(1);
+      expect(row.status, `N: Split-Rechnung ${inv.id} (${inv.budgetType ?? inv.billingType}) ist storniert`).toBe("storniert");
+      originalGrossSum += row.gross;
+      const afterLines = await freezeLines(inv.id);
+      expect(afterLines, `N: Line-Items der Rechnung ${inv.id} unverändert`).toEqual(inv.frozenLines);
+    }
+
+    // Cascade-Storno: pro Original genau eine negierte Stornorechnung (2 gesamt),
+    // beide auf die Storno-WURZEL verweisend. Σ negiert das gesamte Brutto.
+    const rootInvoiceId = repairSummary.stornoedInvoiceIds[0];
+    expect(N.invoices.map((i) => i.id), "N: Storno-Wurzel ist eine der beiden Rechnungen")
+      .toContain(rootInvoiceId);
+    const nStornos = await db
+      .select({ id: invoicesTable.id, gross: invoicesTable.grossAmountCents })
+      .from(invoicesTable).where(and(
+        eq(invoicesTable.invoiceType, "stornorechnung"),
+        eq(invoicesTable.stornierteRechnungId, rootInvoiceId),
+      ));
+    expect(nStornos.length, "N: genau 2 Stornorechnungen (§45a-Kasse + privat)").toBe(2);
+    for (const s of nStornos) cleanupInvoiceIds.push(s.id);
+    const stornoGrossSum = nStornos.reduce((sum, s) => sum + s.gross, 0);
+    expect(stornoGrossSum, "N: Storno-Summe negiert Kasse- UND Privat-Brutto").toBe(-originalGrossSum);
+
+    // Keine der beiden Original-Rechnungen bleibt aktiv.
+    const nActiveOriginalIds = (await activeInvoices(N.customerId)).map((i) => i.id);
+    for (const inv of N.invoices) {
+      expect(nActiveOriginalIds, `N: Original ${inv.id} nicht mehr aktiv`).not.toContain(inv.id);
+    }
+
+    // LN soft-storniert, Termin zur Neu-Doku freigegeben.
+    const [nLn] = await db.select({ deletedAt: monthlyServiceRecords.deletedAt })
+      .from(monthlyServiceRecords).where(eq(monthlyServiceRecords.id, N.serviceRecordId)).limit(1);
+    expect(nLn.deletedAt, "N: LN soft-storniert").not.toBeNull();
+    expect(repairSummary.lnReDocRequiredAppointmentIds, "N: Termin zur Neu-Doku freigegeben").toContain(N.apptId);
+
+    // Neuausstellung: Monat frisch abgerechnet, Value-Conservation pro Topf.
+    for (const rid of repairSummary.reissuedInvoiceIds) if (!cleanupInvoiceIds.includes(rid)) cleanupInvoiceIds.push(rid);
+    expect(repairSummary.reissuedInvoiceIds.length, "N: Neuausstellung liefert 2 Split-Rechnungen").toBeGreaterThanOrEqual(2);
+
+    const live45a = await liveConsumptionCents(N.customerId, POT_45A);
+    const livePrivate = await liveConsumptionCents(N.customerId, POT_PRIVATE);
+    expect(live45a, "N: §45a nach Re-Book == Cap-Anteil").toBe(A_45A_CENTS);
+    expect(livePrivate, "N: privat nach Re-Book == Überlauf-Anteil").toBe(A_PRIVATE_CENTS);
+
+    const active = await activeInvoices(N.customerId);
+    expect(active.length, "N: genau 2 aktive (neu ausgestellte) Rechnungen").toBe(2);
+    const activeNet45a = active.filter((i) => i.billingType !== "selbstzahler").reduce((s, i) => s + (i.netAmountCents ?? 0), 0);
+    const activeNetPrivate = active.filter((i) => i.billingType === "selbstzahler").reduce((s, i) => s + (i.netAmountCents ?? 0), 0);
+    expect(activeNet45a, "N: Σ aktive §45a-Rechnungen === Live-Ledger").toBe(live45a);
+    expect(activeNetPrivate, "N: Σ aktive Privat-Rechnungen === Live-Ledger").toBe(livePrivate);
   }, 300_000);
 });
