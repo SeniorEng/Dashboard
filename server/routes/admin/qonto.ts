@@ -17,6 +17,12 @@ import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
 import { scanAdviceSuggestions } from "@shared/domain/qonto/bulk-advice-match";
 import { resolveUniqueMatch } from "@shared/domain/qonto/avis-match";
+import {
+  loadFullyPaidUnlinkedAdvices,
+  loadUnmatchedCredits,
+  computeProposals,
+  applyProposals,
+} from "../../../scripts/verify-advice-backfill";
 
 const router = Router();
 router.use(requireSuperAdmin);
@@ -499,6 +505,99 @@ router.post("/transactions/:id/dismiss-advice-suggestion", asyncHandler("Vorschl
 
   const updated = await qontoStorage.dismissAdviceSuggestion(id);
   res.json(updated);
+}));
+
+// Task #1685 — Mehrdeutige Sammel-Avis ↔ Sammelzahlung-Zuordnungen im Admin-UI
+// auflösen. Nutzt EXAKT dieselbe Mehrdeutigkeits-Logik wie der Backfill-Verifier
+// (`computeProposals`, SSoT), damit UI und Skript nie auseinanderlaufen: ein Avis
+// ist mehrdeutig, wenn mehrere Gutschriften passen (`multiple_credits`) oder seine
+// einzige passende Gutschrift von einem weiteren Avis beansprucht wird
+// (`credit_collision`). Der Operator sieht je Avis die konkurrierenden Gutschriften
+// und wählt die richtige aus.
+router.get("/transactions/ambiguous-advices", asyncHandler("Mehrdeutige Zuordnungen konnten nicht geladen werden", async (_req, res) => {
+  const [advices, credits] = await Promise.all([
+    loadFullyPaidUnlinkedAdvices(),
+    loadUnmatchedCredits(),
+  ]);
+  const { ambiguous } = computeProposals(advices, credits);
+
+  const result = ambiguous.map(entry => ({
+    adviceId: entry.advice.id,
+    avisNummer: entry.advice.avisNummer,
+    adviceAmountCents: entry.advice.gesamtBetragCents,
+    adviceIban: entry.advice.zahlungsempfaengerIban,
+    kostentraegerName: entry.advice.kostentraegerName,
+    anchorDate: entry.advice.anchorDate ? entry.advice.anchorDate.toISOString() : null,
+    invoiceCount: entry.advice.invoiceCount,
+    reason: entry.reason,
+    collidingAdviceIds: entry.collidingAdviceIds,
+    candidates: entry.candidates.map(c => ({
+      txId: c.txId,
+      txAmountCents: c.txAmountCents,
+      txEmittedAt: c.txEmittedAt.toISOString(),
+      daysDelta: c.daysDelta,
+      txCounterpartyName: c.txCounterpartyName,
+      txSourceIban: c.txSourceIban,
+      nameMatchesAdvisory: c.nameMatchesAdvisory,
+    })),
+  }));
+
+  res.json({ ambiguous: result });
+}));
+
+const resolveAmbiguousSchema = z.object({
+  txId: z.number().int().positive("Ungültige Transaktions-ID"),
+});
+
+// Auflösen einer mehrdeutigen Zuordnung: der Operator hat für das Avis genau EINE
+// der konkurrierenden Gutschriften gewählt. Vor dem Buchen wird die Mehrdeutigkeit
+// FRISCH neu berechnet (dieselbe SSoT-Gate wie oben), damit ein veraltetes UI keine
+// inzwischen ungültige Paarung schreibt. Das eigentliche Verknüpfen läuft über den
+// geteilten, geguardeten & auditierten Backfill-Linker (`applyProposals`) —
+// XOR-sicher und idempotent, ein GoBD-Audit je Avis.
+router.post("/transactions/ambiguous-advices/:adviceId/resolve", asyncHandler("Zuordnung konnte nicht aufgelöst werden", async (req, res) => {
+  const adviceId = requireIntParam(req.params.adviceId, res);
+  if (adviceId === null) return;
+
+  const { txId } = resolveAmbiguousSchema.parse(req.body);
+
+  const [advices, credits] = await Promise.all([
+    loadFullyPaidUnlinkedAdvices(),
+    loadUnmatchedCredits(),
+  ]);
+  const { ambiguous } = computeProposals(advices, credits);
+
+  const entry = ambiguous.find(a => a.advice.id === adviceId);
+  if (!entry) {
+    throw badRequest("Dieses Avis ist nicht mehr mehrdeutig (bereits zugeordnet oder keine passende Gutschrift mehr). Bitte die Liste aktualisieren.");
+  }
+
+  const candidate = entry.candidates.find(c => c.txId === txId);
+  if (!candidate) {
+    throw badRequest("Die gewählte Gutschrift passt nicht mehr zu diesem Avis. Bitte die Liste aktualisieren.");
+  }
+
+  const reason = `Manuelle Auflösung einer mehrdeutigen Sammel-Avis-Zuordnung im Admin-UI (Grund: ${entry.reason}).`;
+  const linked = await applyProposals(
+    [{
+      advice: entry.advice,
+      txId: candidate.txId,
+      txAmountCents: candidate.txAmountCents,
+      txEmittedAt: candidate.txEmittedAt,
+      txCounterpartyName: candidate.txCounterpartyName,
+      txSourceIban: candidate.txSourceIban,
+      daysDelta: candidate.daysDelta,
+      nameMatchesAdvisory: candidate.nameMatchesAdvisory,
+    }],
+    req.user!.id,
+    reason,
+  );
+
+  if (linked === 0) {
+    throw badRequest("Zuordnung nicht möglich — das Avis oder die Gutschrift wurde zwischenzeitlich anderweitig zugeordnet. Bitte die Liste aktualisieren.");
+  }
+
+  res.json({ success: true, adviceId, txId });
 }));
 
 // „Nicht abrechnungsrelevant" markieren — Qonto-Eingänge, die keine Rechnung

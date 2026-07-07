@@ -4,7 +4,7 @@ import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { iconSize, componentStyles } from "@/design-system";
 import { ArrowLeft } from "lucide-react";
-import { TransactionsTab, AdvicesTab } from "@/features/qonto";
+import { TransactionsTab, AdvicesTab, AmbiguousAdvicesTab } from "@/features/qonto";
 import type { Tab, MatchFilter } from "@/features/qonto";
 import { useQontoStatus } from "@/features/qonto";
 
@@ -17,6 +17,7 @@ export default function AdminQonto() {
   const tabs: { id: Tab; label: string }[] = [
     { id: "transactions", label: "Transaktionen" },
     { id: "advices", label: "Avise" },
+    { id: "ambiguous", label: "Mehrdeutige" },
   ];
 
   return (
@@ -59,6 +60,9 @@ export default function AdminQonto() {
         />
       )}
       {tab === "advices" && <AdvicesTab />}
+      {tab === "ambiguous" && (
+        <AmbiguousAdvicesTab configured={statusQuery.data?.configured ?? false} />
+      )}
     </Layout>
   );
 }

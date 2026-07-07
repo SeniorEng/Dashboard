@@ -202,6 +202,26 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
   return { matchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation, confirmAdviceMutation, dismissAdviceSuggestionMutation };
 }
 
+// Task #1685 — mehrdeutige Sammel-Avis-Zuordnung manuell auflösen: der Operator
+// wählt für ein Avis genau eine der konkurrierenden Gutschriften. Verknüpft
+// serverseitig über den geteilten, geguardeten & auditierten Backfill-Linker.
+export function useResolveAmbiguousAdviceMutation() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ adviceId, txId }: { adviceId: number; txId: number }) =>
+      unwrapResult(await api.post(`/admin/qonto/transactions/ambiguous-advices/${adviceId}/resolve`, { txId })),
+    onSuccess: () => {
+      toast({ title: "Zuordnung aufgelöst — Avis mit gewählter Gutschrift verknüpft" });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
 export function useAdviceMutations({ onCreateSuccess }: { onCreateSuccess: () => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();

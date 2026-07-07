@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter, QontoHideRule, AdviceSuggestion } from "../types";
+import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter, QontoHideRule, AdviceSuggestion, AmbiguousAdvice } from "../types";
 
 export function useQontoStatus(enabled: boolean = true) {
   return useQuery<QontoStatus>({
@@ -58,6 +58,17 @@ export function useQontoAdvices() {
   return useQuery<PaymentAdvice[]>({
     queryKey: ["qonto", "payment-advices"],
     queryFn: async () => unwrapResult(await api.get("/admin/qonto/payment-advices")),
+  });
+}
+
+// Task #1685 — mehrdeutige Sammel-Avis ↔ Sammelzahlung-Zuordnungen, die manuell
+// aufgelöst werden müssen (mehrere passende Gutschriften oder geteilte Gutschrift).
+export function useAmbiguousAdvices(enabled: boolean = true) {
+  return useQuery<{ ambiguous: AmbiguousAdvice[] }>({
+    queryKey: ["qonto", "ambiguous-advices"],
+    queryFn: async () => unwrapResult(await api.get("/admin/qonto/transactions/ambiguous-advices")),
+    enabled,
+    staleTime: 15000,
   });
 }
 

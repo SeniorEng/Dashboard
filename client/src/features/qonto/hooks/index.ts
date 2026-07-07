@@ -6,6 +6,7 @@ export {
   useQontoHideRules,
   useQontoAdvices,
   useAdviceSuggestions,
+  useAmbiguousAdvices,
 } from "./use-qonto-queries";
 export {
   useSyncMutation,
@@ -13,4 +14,5 @@ export {
   useHideRuleMutations,
   useTransactionMutations,
   useAdviceMutations,
+  useResolveAmbiguousAdviceMutation,
 } from "./use-qonto-mutations";

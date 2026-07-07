@@ -118,6 +118,35 @@ export interface PaymentAdvice {
   unterzahlungCents?: number;
 }
 
-export type Tab = "transactions" | "advices";
+/** Task #1685 — eine konkurrierende Gutschrift eines mehrdeutigen Avis. */
+export interface AmbiguousAdviceCredit {
+  txId: number;
+  txAmountCents: number;
+  txEmittedAt: string;
+  daysDelta: number;
+  txCounterpartyName: string | null;
+  txSourceIban: string | null;
+  nameMatchesAdvisory: boolean;
+}
+
+/**
+ * Task #1685 — ein Avis, dessen Sammelzahlungs-Zuordnung mehrdeutig ist und daher
+ * vom Operator manuell aufgelöst werden muss. Spiegelt die `AmbiguousAdvice`-Logik
+ * aus dem Backfill-Verifier (SSoT `computeProposals`).
+ */
+export interface AmbiguousAdvice {
+  adviceId: number;
+  avisNummer: string | null;
+  adviceAmountCents: number;
+  adviceIban: string | null;
+  kostentraegerName: string | null;
+  anchorDate: string | null;
+  invoiceCount: number;
+  reason: "multiple_credits" | "credit_collision";
+  collidingAdviceIds: number[];
+  candidates: AmbiguousAdviceCredit[];
+}
+
+export type Tab = "transactions" | "advices" | "ambiguous";
 
 export type MatchFilter = "all" | "matched" | "unmatched" | "ignored";
