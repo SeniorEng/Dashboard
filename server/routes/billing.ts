@@ -1103,7 +1103,15 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
   // Task #1039 — `appendLn` steuert, ob der separat gecachte Standalone-LN
   // zusätzlich angehängt wird. Bei kundenadressierten Rechnungen ist der LN
   // bereits im Rechnungs-PDF einmontiert → nicht doppelt anhängen.
-  type Pair = { invoiceNumber: string; invoicePdf: Buffer; lnPdf: Buffer | null; appendLn: boolean };
+  type Pair = {
+    invoiceNumber: string;
+    customerVorname?: string | null;
+    customerNachname?: string | null;
+    customerName?: string | null;
+    invoicePdf: Buffer;
+    lnPdf: Buffer | null;
+    appendLn: boolean;
+  };
   const pairs: Pair[] = [];
   for (const inv of printable) {
     let invoicePdf = await loadInvoicePdfFromStorage(inv);
@@ -1138,7 +1146,15 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
         throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
       }
     }
-    pairs.push({ invoiceNumber: inv.invoiceNumber, invoicePdf, lnPdf, appendLn });
+    pairs.push({
+      invoiceNumber: inv.invoiceNumber,
+      customerVorname: inv.customerVorname,
+      customerNachname: inv.customerNachname,
+      customerName: inv.customerName,
+      invoicePdf,
+      lnPdf,
+      appendLn,
+    });
   }
 
   if (format === "pdf") {
@@ -1177,12 +1193,40 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
     res.end();
   });
   archive.pipe(res);
+  // Task #1700 — Sprechende, filesystem-sichere und innerhalb des Archivs
+  // kollisionsfreie Eintrags-Namen (analog zu den drei Einzel-Downloads):
+  // `Rechnungsnummer - Nachname, Vorname - Dokumentart.pdf`. Erst alle Namen
+  // in Reihenfolge (Rechnung, optional LN je Paar) bauen, dann gemeinsam
+  // de-duplizieren, damit ein `-2`-Suffix Rechnung UND LN korrekt trennt.
+  const entries: Array<{ pdf: Buffer; name: string }> = [];
   for (const p of pairs) {
-    archive.append(p.invoicePdf, { name: `${p.invoiceNumber}-Rechnung.pdf` });
+    entries.push({
+      pdf: p.invoicePdf,
+      name: buildSpeakingInvoiceFilename({
+        invoiceNumber: p.invoiceNumber,
+        vorname: p.customerVorname,
+        nachname: p.customerNachname,
+        customerName: p.customerName,
+        kind: "invoice",
+      }),
+    });
     if (p.lnPdf && p.appendLn) {
-      archive.append(p.lnPdf, { name: `${p.invoiceNumber}-Leistungsnachweis.pdf` });
+      entries.push({
+        pdf: p.lnPdf,
+        name: buildSpeakingInvoiceFilename({
+          invoiceNumber: p.invoiceNumber,
+          vorname: p.customerVorname,
+          nachname: p.customerNachname,
+          customerName: p.customerName,
+          kind: "leistungsnachweis",
+        }),
+      });
     }
   }
+  const dedupedEntryNames = dedupeExportFilenames(entries.map((e) => e.name));
+  entries.forEach((e, i) => {
+    archive.append(e.pdf, { name: dedupedEntryNames[i] });
+  });
   await archive.finalize();
 }));
 
