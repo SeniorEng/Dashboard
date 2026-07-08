@@ -255,8 +255,21 @@ class QontoService {
    */
   async backfillTransactions(
     startDate: Date,
-    options?: { ibans?: string[] },
+    options?: { ibans?: string[]; testStubHttp?: boolean },
   ): Promise<{ synced: number; total: number; accounts: number; autoHidden: number }> {
+    // Task #1721 — NODE_ENV=test-only Kurzschluss: behandelt den Lauf so, als
+    // hätte Qonto für jedes Konto eine leere Antwort geliefert, OHNE eine echte
+    // ausgehende HTTP-Abfrage und OHNE Abhängigkeit vom (prozess-lokal
+    // gecachten) Company-Settings-Zustand des separaten App-Server-Prozesses.
+    // Dient EINZIG dem End-to-End-Test der Lock-Freigabe dieser Route über HTTP
+    // (der Test-Prozess kann `fetch` des App-Servers nicht stubben). Der Lock
+    // wird davon nicht berührt — er wird weiterhin von `withQontoBackfillLock`
+    // in der Route erworben/freigegeben. Inert außerhalb von NODE_ENV=test.
+    if (options?.testStubHttp === true && process.env.NODE_ENV === "test") {
+      const autoHidden = await this.applyHideRules();
+      return { synced: 0, total: 0, accounts: 0, autoHidden };
+    }
+
     const creds = await this.getCredentials();
     if (!creds) {
       throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");

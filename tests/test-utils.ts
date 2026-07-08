@@ -122,7 +122,12 @@ export async function apiGetAs<T = unknown>(auth: AuthCookie, path: string): Pro
   return { status: response.status, data: data as T };
 }
 
-export async function apiPostAs<T = unknown>(auth: AuthCookie, path: string, body: unknown): Promise<{ status: number; data: T }> {
+export async function apiPostAs<T = unknown>(
+  auth: AuthCookie,
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<{ status: number; data: T }> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const response = await fetchWithRetry(`${BASE_URL}${path}`, {
     method: "POST",
@@ -130,6 +135,7 @@ export async function apiPostAs<T = unknown>(auth: AuthCookie, path: string, bod
       "Content-Type": "application/json",
       Cookie: cookieHeader,
       "x-csrf-token": auth.csrfToken,
+      ...extraHeaders,
     },
     body: JSON.stringify(body),
   });

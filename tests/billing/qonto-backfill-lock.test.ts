@@ -125,6 +125,39 @@ describe("Qonto-Voll-Sync Lauf-Lock (Task #1591)", () => {
     }
   });
 
+  it("gibt den Lock end-to-end über die HTTP-Route wieder frei (zweiter POST erfolgreich)", async () => {
+    // Task #1721 — Beweist, dass die Route ihren Advisory-Lock im `finally`
+    // freigibt: ein echter POST /backfill über HTTP muss so terminieren, dass
+    // ein DIREKT nachfolgender zweiter POST wieder 200 liefert (kein 409-
+    // Reststau). Der NODE_ENV=test-only Header `x-test-qonto-stub` kurzschließt
+    // die ausgehenden Qonto-HTTP-Aufrufe im separaten App-Server-Prozess (den
+    // der Test-Prozess NICHT per fetch-Stub erreichen kann), ohne die Lock-
+    // Mechanik zu berühren.
+    const auth = await getAuthCookie();
+    const stubHeader = { "x-test-qonto-stub": "1" };
+
+    const first = await apiPostAs<{ synced: number }>(
+      auth,
+      "/api/admin/qonto/backfill",
+      { startDate: currentMonthStartDate() },
+      stubHeader,
+    );
+    expect(first.status).toBe(200);
+    expect(first.data.synced).toBe(0);
+
+    // Sofortiger zweiter Lauf: nur möglich, wenn der erste den Lock wirklich
+    // freigegeben hat. Ein Leak (Lock nicht freigegeben / Pool-Verbindung nicht
+    // zurückgegeben) würde hier zu 409 (QONTO_BACKFILL_RUNNING) führen.
+    const second = await apiPostAs<{ synced: number }>(
+      auth,
+      "/api/admin/qonto/backfill",
+      { startDate: currentMonthStartDate() },
+      stubHeader,
+    );
+    expect(second.status).toBe(200);
+    expect(second.data.synced).toBe(0);
+  });
+
   it("ist nach Freigabe wieder erwerbbar und startet einen neuen Lauf", async () => {
     // Qonto-API leer stubben, damit der in-process Backfill keine echte HTTP-
     // Abfrage macht und deterministisch terminiert.

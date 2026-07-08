@@ -11,7 +11,7 @@ import { db, type DbOrTx } from "../../lib/db";
 import { invoices, qontoTransactions, paymentAdviceItems, paymentAdvices } from "@shared/schema";
 import { eq, and, ilike, isNull, isNotNull, inArray } from "drizzle-orm";
 import { withAudit } from "../../lib/with-audit";
-import { readTestFaults } from "../../lib/test-fault-injector";
+import { readTestFaults, readQontoHttpStub } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
@@ -102,8 +102,13 @@ router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (r
     );
   }
 
+  // Task #1721 — NODE_ENV=test-only Kurzschluss der ausgehenden Qonto-HTTP-
+  // Aufrufe, damit die Lock-Freigabe dieser Route end-to-end über HTTP prüfbar
+  // ist (der Test-Prozess kann `fetch` des separaten App-Servers nicht stubben).
+  const testStubHttp = readQontoHttpStub(req);
+
   const outcome = await withQontoBackfillLock(async () => {
-    const result = await qontoService.backfillTransactions(parsedStart);
+    const result = await qontoService.backfillTransactions(parsedStart, { testStubHttp });
 
     await withAudit(async (_dbTx, audit) => {
       audit.record({

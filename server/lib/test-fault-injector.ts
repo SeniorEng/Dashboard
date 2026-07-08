@@ -52,3 +52,19 @@ export function readTestFailInvoicePdfIds(req: Request): Set<number> {
       .filter(n => Number.isInteger(n)),
   );
 }
+
+/**
+ * Task #1721 — NODE_ENV=test-only Kurzschluss für die ausgehenden Qonto-HTTP-
+ * Aufrufe des Voll-Syncs (`/backfill`). Der App-Server läuft in einem SEPARATEN
+ * Prozess, daher kann der Test-Prozess dessen `fetch` NICHT stubben; ein echter
+ * POST würde mit Test-Zugangsdaten eine echte Qonto-Abfrage versuchen und
+ * werfen. Ist der Header `x-test-qonto-stub` gesetzt, behandelt der Backfill
+ * jedes überwachte Konto so, als hätte Qonto eine leere Antwort geliefert
+ * (keine ausgehende HTTP-Abfrage) — so lässt sich die Lock-Freigabe der Route
+ * end-to-end über HTTP prüfen. Außerhalb von NODE_ENV=test ist der Header inert.
+ */
+export function readQontoHttpStub(req: Request): boolean {
+  if (!ENABLED) return false;
+  const header = req.headers["x-test-qonto-stub"];
+  return typeof header === "string" && header.length > 0;
+}
