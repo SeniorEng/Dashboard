@@ -35,6 +35,7 @@ import {
   cleanupCustomer,
 } from "../test-utils";
 import { validSignatureDataUrl } from "../helpers/valid-signature";
+import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
 import { db } from "../../server/lib/db";
 import { invoices, auditLog } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -298,7 +299,7 @@ async function bulkPrint(body: {
   billingYear: number;
   insuranceProviderId?: number;
   groupByPayer?: boolean;
-}, opts?: { failInvoicePdfIds?: number[] }): Promise<{ status: number; contentType: string | null; summary: BulkPrintSummary | null; buffer: Buffer }> {
+}, opts?: { failInvoicePdfIds?: number[] }): Promise<{ status: number; contentType: string | null; contentDisposition: string | null; summary: BulkPrintSummary | null; buffer: Buffer }> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -321,6 +322,7 @@ async function bulkPrint(body: {
   return {
     status: res.status,
     contentType: res.headers.get("content-type"),
+    contentDisposition: res.headers.get("content-disposition"),
     summary,
     buffer,
   };
@@ -411,6 +413,43 @@ describe("BP: Sammeldruck (POST /api/billing/bulk-print)", () => {
 
       expect(await countBulkPrintAudit(invId), `Rechnung ${invId} braucht eine bulk_print-Audit-Zeile`).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  it("BP-1b — Content-Disposition läuft über den umlaut-sicheren Helper (ASCII-Fallback + RFC-5987 filename*) (Task #1702)", async () => {
+    const { year, month } = recentPastWeekdayAnchor();
+    const provider = await createDedicatedProvider(`CD${Date.now().toString(36)}`);
+    await createPflegekasseDraft(provider.id, year, month, "CD-A");
+
+    const out = await bulkPrint({
+      billingMonth: month,
+      billingYear: year,
+      insuranceProviderId: provider.id,
+      groupByPayer: false,
+    });
+
+    expect(out.status).toBe(200);
+    expect(out.contentDisposition, "Download trägt Content-Disposition").toBeTruthy();
+
+    const monthSlug = `${String(month).padStart(2, "0")}-${year}`;
+    const expectedFileName = `Sammeldruck-${monthSlug}.pdf`;
+    const expectedHeader = buildContentDisposition(expectedFileName, "attachment");
+
+    // Vertrag: der Header ist byte-identisch mit dem SSoT-Helper — ein Refactor
+    // zurück auf das rohe `attachment; filename="…"` (ohne filename*) wird rot.
+    expect(out.contentDisposition, "Content-Disposition == SSoT-Helper").toBe(expectedHeader);
+    expect(out.contentDisposition!, "enthält ASCII filename=").toContain(`filename="${expectedFileName}"`);
+    expect(out.contentDisposition!, "enthält RFC-5987 filename*").toContain("filename*=UTF-8''");
+
+    // Umlaut-Sicherheit des vom Route jetzt genutzten Helpers: ein Umlaut-Name
+    // überlebt im UTF-8-`filename*` und wird im ASCII-Fallback zu `_`.
+    const umlautName = "Sammeldruck-Süd-Württemberg.pdf";
+    const umlautHeader = buildContentDisposition(umlautName, "attachment");
+    expect(umlautHeader, "Umlaut überlebt in filename*").toContain(
+      `filename*=UTF-8''${encodeURIComponent(umlautName)}`,
+    );
+    expect(umlautHeader, "ASCII-Fallback ohne Umlaut, header-gültig").toContain(
+      `filename="Sammeldruck-S_d-W_rttemberg.pdf"`,
+    );
   });
 
   it("BP-2 — ZIP (groupByPayer=true): application/zip mit je einer PDF pro Payer-Gruppe", async () => {

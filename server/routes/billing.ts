@@ -2380,7 +2380,7 @@ router.post("/bulk-print", asyncHandler("Sammeldruck konnte nicht erstellt werde
   );
 
   res.setHeader("Content-Type", contentType);
-  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.setHeader("Content-Disposition", buildContentDisposition(fileName, "attachment"));
   res.setHeader("X-Bulk-Print-Summary", encodeURIComponent(JSON.stringify(summary)));
   res.send(outputBuffer);
 }));
@@ -2682,7 +2682,7 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
   );
 
   res.setHeader("Content-Type", contentType);
-  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.setHeader("Content-Disposition", buildContentDisposition(fileName, "attachment"));
   res.setHeader("X-Bulk-Print-Summary", encodeURIComponent(JSON.stringify(summary)));
   res.send(outputBuffer);
 }));
@@ -2888,7 +2888,7 @@ router.post("/single-pdf-export", asyncHandler("Einzel-PDF-Export konnte nicht e
     ? `Rechnungen-${String(billingMonth).padStart(2, "0")}-${billingYear}.zip`
     : `Rechnungen-${todayISO()}.zip`;
   res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename="${zipName}"`);
+  res.setHeader("Content-Disposition", buildContentDisposition(zipName, "attachment"));
   res.setHeader("X-Single-Pdf-Export-Summary", encodeURIComponent(JSON.stringify(summary)));
   res.send(outputBuffer);
 }));
