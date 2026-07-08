@@ -299,3 +299,150 @@ describe("Task #1710 — Qonto Bulk-Match (manuelle Mehrfach-Zuordnung)", () => 
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * Task #1712 — Teil-Aufhebung (partial-unmatch) einer Sammelzahlung.
+ *
+ * Dokumentiert die BEABSICHTIGTE Semantik: eine einzelne Rechnung aus einem
+ * bestehenden Sammel-Match zu entfernen (und die übrigen verknüpft zu lassen)
+ * ist NICHT unterstützt. Der einzige Pfad ist „komplette Zuordnung aufheben +
+ * neu matchen". Diese Tests verankern das Verhalten, damit eine spätere
+ * Änderung nicht still die Avis-/Item-Summen korrumpiert.
+ *
+ *  1. DELETE /match ist all-or-nothing: es hebt IMMER die gesamte
+ *     Sammelzahlung auf (soft-delete Avis + alle Rechnungen zurück), es gibt
+ *     keinen Body/Parameter, um nur eine Rechnung zu lösen.
+ *  2. Ein erneuter bulk-match mit einer Teilmenge der bereits gematchten
+ *     Rechnungen wird mit 400 abgelehnt („zuerst Zuordnung aufheben"); das
+ *     bestehende Avis (Betrag + Items) bleibt dabei UNVERÄNDERT.
+ *  3. Der unterstützte Pfad (Full-Unmatch + Re-Match mit Teilmenge) hält
+ *     Avis-betragCents und payment_advice_items konsistent.
+ */
+describe("Task #1712 — Teil-Aufhebung einer Sammelzahlung (partial-unmatch)", () => {
+  it("DELETE /match ist all-or-nothing: hebt die gesamte Sammelzahlung auf, nicht nur eine Rechnung", async () => {
+    const invA = await insertInvoice(seeded.customerId, { amountCents: 4000, suffix: "P1A" });
+    const invB = await insertInvoice(seeded.customerId, { amountCents: 5000, suffix: "P1B" });
+    const invC = await insertInvoice(seeded.customerId, { amountCents: 6000, suffix: "P1C" });
+    const txId = await insertQontoTx({ amountCents: 15000 });
+    seeded.invoiceIds.push(invA, invB, invC);
+    seeded.qontoTxIds.push(txId);
+
+    const bulk = await apiPost(`/api/admin/qonto/transactions/${txId}/bulk-match`, {
+      invoiceIds: [invA, invB, invC],
+    });
+    expect(bulk.status).toBe(200);
+    const [tx] = await db.select({ adviceId: qontoTransactions.matchedPaymentAdviceId })
+      .from(qontoTransactions).where(eq(qontoTransactions.id, txId));
+    const adviceId = tx.adviceId!;
+    seeded.adviceIds.push(adviceId);
+
+    // Es gibt keinen partiellen Löschpfad: DELETE ohne/mit Body verhält sich
+    // identisch und hebt IMMER die komplette Zuordnung auf.
+    const unmatch = await apiDelete(`/api/admin/qonto/transactions/${txId}/match`);
+    expect(unmatch.status).toBe(200);
+
+    // Alle drei Rechnungen zurückgesetzt (nicht nur eine).
+    const invRows = await db.select({ id: invoices.id, status: invoices.status })
+      .from(invoices).where(inArray(invoices.id, [invA, invB, invC]));
+    expect(invRows.length).toBe(3);
+    expect(invRows.every(r => r.status === "versendet")).toBe(true);
+
+    // Avis komplett soft-gelöscht (kein partieller Rest-Avis).
+    const [advice] = await db.select({ deletedAt: paymentAdvices.deletedAt })
+      .from(paymentAdvices).where(eq(paymentAdvices.id, adviceId));
+    expect(advice.deletedAt).not.toBeNull();
+  });
+
+  it("Re-Match mit Teilmenge einer bereits gematchten Zahlung → 400; Avis + Items bleiben unverändert", async () => {
+    const invA = await insertInvoice(seeded.customerId, { amountCents: 3000, suffix: "P2A" });
+    const invB = await insertInvoice(seeded.customerId, { amountCents: 3500, suffix: "P2B" });
+    const invC = await insertInvoice(seeded.customerId, { amountCents: 4500, suffix: "P2C" });
+    const txId = await insertQontoTx({ amountCents: 11000 });
+    seeded.invoiceIds.push(invA, invB, invC);
+    seeded.qontoTxIds.push(txId);
+
+    const bulk = await apiPost(`/api/admin/qonto/transactions/${txId}/bulk-match`, {
+      invoiceIds: [invA, invB, invC],
+    });
+    expect(bulk.status).toBe(200);
+    const [tx] = await db.select({ adviceId: qontoTransactions.matchedPaymentAdviceId })
+      .from(qontoTransactions).where(eq(qontoTransactions.id, txId));
+    const adviceId = tx.adviceId!;
+    seeded.adviceIds.push(adviceId);
+
+    // Versuch, invC zu „entfernen", indem man nur mit [invA, invB] neu matcht.
+    const partial = await apiPost(`/api/admin/qonto/transactions/${txId}/bulk-match`, {
+      invoiceIds: [invA, invB],
+    });
+    expect(partial.status).toBe(400);
+
+    // Das bestehende Avis ist unverändert: gleicher Gesamtbetrag, alle 3 Items.
+    const [advice] = await db.select({ gross: paymentAdvices.gesamtBetragCents, deletedAt: paymentAdvices.deletedAt })
+      .from(paymentAdvices).where(eq(paymentAdvices.id, adviceId));
+    expect(advice.deletedAt).toBeNull();
+    expect(advice.gross).toBe(11000);
+    const items = await db.select({ inv: paymentAdviceItems.matchedInvoiceId, betrag: paymentAdviceItems.betragCents })
+      .from(paymentAdviceItems).where(eq(paymentAdviceItems.paymentAdviceId, adviceId));
+    expect(items.length).toBe(3);
+    expect(new Set(items.map(i => i.inv))).toEqual(new Set([invA, invB, invC]));
+    const itemsSum = items.reduce((sum, i) => sum + i.betrag, 0);
+    expect(itemsSum).toBe(11000);
+
+    // Alle 3 Rechnungen bleiben bezahlt (invC nicht heimlich gelöst).
+    const invRows = await db.select({ id: invoices.id, status: invoices.status })
+      .from(invoices).where(inArray(invoices.id, [invA, invB, invC]));
+    expect(invRows.every(r => r.status === "bezahlt")).toBe(true);
+  });
+
+  it("Unterstützter Pfad: Full-Unmatch + Re-Match mit Teilmenge hält Betrag/Items konsistent", async () => {
+    const invA = await insertInvoice(seeded.customerId, { amountCents: 2000, suffix: "P3A" });
+    const invB = await insertInvoice(seeded.customerId, { amountCents: 2500, suffix: "P3B" });
+    const invC = await insertInvoice(seeded.customerId, { amountCents: 3000, suffix: "P3C" });
+    const txId = await insertQontoTx({ amountCents: 7500 });
+    seeded.invoiceIds.push(invA, invB, invC);
+    seeded.qontoTxIds.push(txId);
+
+    const bulk = await apiPost(`/api/admin/qonto/transactions/${txId}/bulk-match`, {
+      invoiceIds: [invA, invB, invC],
+    });
+    expect(bulk.status).toBe(200);
+    const [tx1] = await db.select({ adviceId: qontoTransactions.matchedPaymentAdviceId })
+      .from(qontoTransactions).where(eq(qontoTransactions.id, txId));
+    seeded.adviceIds.push(tx1.adviceId!);
+
+    // Full-Unmatch.
+    const unmatch = await apiDelete(`/api/admin/qonto/transactions/${txId}/match`);
+    expect(unmatch.status).toBe(200);
+
+    // Re-Match mit Teilmenge (invC bewusst weggelassen).
+    const rematch = await apiPost(`/api/admin/qonto/transactions/${txId}/bulk-match`, {
+      invoiceIds: [invA, invB],
+    });
+    expect(rematch.status).toBe(200);
+    const [tx2] = await db.select({ adviceId: qontoTransactions.matchedPaymentAdviceId })
+      .from(qontoTransactions).where(eq(qontoTransactions.id, txId));
+    const newAdviceId = tx2.adviceId!;
+    expect(newAdviceId).not.toBe(tx1.adviceId!);
+    seeded.adviceIds.push(newAdviceId);
+
+    // Neues Avis: nur die 2 verbliebenen Items, Betrag = Σ items = Tx-Betrag.
+    const items = await db.select({ inv: paymentAdviceItems.matchedInvoiceId, betrag: paymentAdviceItems.betragCents })
+      .from(paymentAdviceItems).where(eq(paymentAdviceItems.paymentAdviceId, newAdviceId));
+    expect(items.length).toBe(2);
+    expect(new Set(items.map(i => i.inv))).toEqual(new Set([invA, invB]));
+
+    const [advice] = await db.select({ gross: paymentAdvices.gesamtBetragCents })
+      .from(paymentAdvices).where(eq(paymentAdvices.id, newAdviceId));
+    const itemsSum = items.reduce((sum, i) => sum + i.betrag, 0);
+    expect(itemsSum).toBe(4500);
+    expect(advice.gross).toBe(7500);
+
+    // invC wieder frei/offen, invA+invB bezahlt.
+    const invRows = await db.select({ id: invoices.id, status: invoices.status })
+      .from(invoices).where(inArray(invoices.id, [invA, invB, invC]));
+    const statusById = new Map(invRows.map(r => [r.id, r.status]));
+    expect(statusById.get(invA)).toBe("bezahlt");
+    expect(statusById.get(invB)).toBe("bezahlt");
+    expect(statusById.get(invC)).toBe("versendet");
+  });
+});
