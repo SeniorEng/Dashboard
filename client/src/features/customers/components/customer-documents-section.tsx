@@ -118,7 +118,13 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
   const { data: history, isLoading: historyLoading } = useQuery<CustomerDocumentData[]>({
     queryKey: ["customers", customerId, "documents", expandedHistory, "history"],
     queryFn: async () => {
-      const result = await api.get<CustomerDocumentData[]>(`/customers/${customerId}/documents/${expandedHistory}/history`);
+      // Der History-Endpoint filtert serverseitig nach documentTypeId, NICHT
+      // nach Dokument-ID. `expandedHistory` ist die ID des aktuellen Dokuments
+      // (UI-Toggle-Key) — daraus die documentTypeId auflösen, sonst liefert der
+      // Endpoint immer [] und die archivierten Downloads sind unerreichbar.
+      const doc = (documents || []).find(d => d.id === expandedHistory);
+      const documentTypeId = doc?.documentTypeId ?? expandedHistory;
+      const result = await api.get<CustomerDocumentData[]>(`/customers/${customerId}/documents/${documentTypeId}/history`);
       return unwrapResult(result);
     },
     enabled: !!expandedHistory,
@@ -399,7 +405,7 @@ export function CustomerDocumentsSection({ customerId, customerName }: { custome
                                   <div key={h.id} className="flex items-center justify-between text-xs text-gray-500 p-1 bg-white rounded">
                                     <span className="truncate flex-1">{h.fileName}</span>
                                     <span className="shrink-0 ml-2">{formatDateForDisplay(h.uploadedAt.split("T")[0])}</span>
-                                    <a href={h.objectPath} target="_blank" rel="noopener noreferrer" className="ml-2 shrink-0">
+                                    <a href={h.objectPath} target="_blank" rel="noopener noreferrer" className="ml-2 shrink-0" data-testid={`button-download-archived-doc-${h.id}`}>
                                       <Download className="h-3 w-3 text-gray-500 hover:text-gray-600" />
                                     </a>
                                   </div>

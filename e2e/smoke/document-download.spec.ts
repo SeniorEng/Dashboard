@@ -63,7 +63,10 @@ async function expectOk(res: APIResponse, label: string): Promise<void> {
   }
 }
 
-async function createCustomerDocumentType(s: ApiSession): Promise<number> {
+async function createCustomerDocumentType(
+  s: ApiSession,
+  extra: Record<string, unknown> = {},
+): Promise<number> {
   const { status, data } = await apiPost<{ id?: number }>(
     s,
     "/api/admin/document-types",
@@ -72,6 +75,7 @@ async function createCustomerDocumentType(s: ApiSession): Promise<number> {
       targetType: "customer",
       context: "beide",
       inputMethod: "upload",
+      ...extra,
     },
   );
   if (status !== 201 || typeof data?.id !== "number") {
@@ -240,5 +244,65 @@ test.describe("@smoke Dokument-Download-Buttons liefern zur Laufzeit eine Datei"
     expect(body.length).toBeGreaterThan(0);
     expect(res.headers()["content-type"]).toContain("application/pdf");
     expect(res.headers()["content-disposition"]).toBeTruthy();
+  });
+
+  // Task #1727: Die ARCHIVIERTEN (historischen) Kundendokument-Versionen im
+  // Historie-Expander rendern Download-Anchors mit demselben dynamischen
+  // `href={h.objectPath}`-Muster, das der statische Guard (Task #1722) NICHT
+  // auflösen kann. Sie hatten bisher weder eine stabile test-id noch Laufzeit-
+  // Coverage — eine Dead-URL-Regression in der Archiv-Ansicht bliebe unbemerkt.
+  //
+  // Ablauf: einen Dokumenttyp MIT Prüfintervall anlegen (nur dann rendert die UI
+  // den Historie-Button), eine erste Version hochladen, dann eine ZWEITE Version
+  // hochladen (die erste wird archiviert). Danach die Historie aufklappen, den
+  // `href` des archivierten Anchors lesen und die URL über die authentifizierte
+  // Session abrufen.
+  test("Archiviertes Kundendokument: `href={h.objectPath}` in der Historie streamt eine Datei", async ({ page }) => {
+    const customer = await createCustomer(session);
+    // reviewIntervalMonths ist nötig, damit die UI den Historie-Button rendert.
+    const docTypeId = await createCustomerDocumentType(session, { reviewIntervalMonths: 12 });
+
+    // Erste Version hochladen (wird später zur archivierten Version).
+    const archivedObjectPath = await uploadObjectBytes(session, "kunde-archiv-v1.pdf");
+    const v1 = await apiPost<{ id?: number }>(
+      session,
+      `/api/customers/${customer.id}/documents`,
+      { documentTypeId: docTypeId, fileName: "kunde-archiv-v1.pdf", objectPath: archivedObjectPath },
+    );
+    if (v1.status !== 201 || typeof v1.data?.id !== "number") {
+      throw new Error(`save customer document v1 failed: ${v1.status} ${JSON.stringify(v1.data)}`);
+    }
+    const archivedDocId = v1.data.id;
+
+    // Zweite Version hochladen → erste Version wird archiviert (isCurrent=false).
+    const currentObjectPath = await uploadObjectBytes(session, "kunde-archiv-v2.pdf");
+    const v2 = await apiPost<{ id?: number }>(
+      session,
+      `/api/customers/${customer.id}/documents`,
+      { documentTypeId: docTypeId, fileName: "kunde-archiv-v2.pdf", objectPath: currentObjectPath },
+    );
+    if (v2.status !== 201 || typeof v2.data?.id !== "number") {
+      throw new Error(`save customer document v2 failed: ${v2.status} ${JSON.stringify(v2.data)}`);
+    }
+    const currentDocId = v2.data.id;
+
+    // UI rendern, die Dokumentgruppe aufklappen und die Historie des aktuellen
+    // Dokuments öffnen.
+    await page.goto(`/customer/${customer.id}`);
+    await page.getByTestId(`doc-group-toggle-${docTypeId}`).click();
+    await page.getByTestId(`button-history-${currentDocId}`).click();
+
+    const downloadLink = page.getByTestId(`button-download-archived-doc-${archivedDocId}`);
+    await expect(downloadLink).toBeVisible();
+    const href = await downloadLink.getAttribute("href");
+    expect(href).toBe(archivedObjectPath);
+
+    // Das Anklicken des archivierten Anchors entspricht einem GET auf die href-URL.
+    const res = await session.api.get(href!);
+    await expectOk(res, "GET archived customer object");
+    const body = await res.body();
+    expect(body.length).toBeGreaterThan(0);
+    expect(res.headers()["content-type"]).toBeTruthy();
+    expect(res.headers()["content-disposition"]).toContain("kunde-archiv-v1.pdf");
   });
 });

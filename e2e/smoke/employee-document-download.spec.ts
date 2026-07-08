@@ -205,4 +205,60 @@ test.describe("@smoke Mitarbeiter-Dokument-Download-Buttons liefern zur Laufzeit
     expect(res.headers()["content-type"]).toContain("application/pdf");
     expect(res.headers()["content-disposition"]).toBeTruthy();
   });
+
+  // Task #1727: Auch die ARCHIVIERTEN (historischen) Uploads im "X ältere Uploads"-
+  // Expander rendern Download-Anchors mit demselben dynamischen
+  // `href={file.objectPath}`-Muster, das der statische Guard (Task #1722) NICHT
+  // auflösen kann. Sie hatten bisher weder eine stabile test-id noch Laufzeit-
+  // Coverage — eine Dead-URL-Regression in der Archiv-Ansicht bliebe unbemerkt.
+  //
+  // Ablauf: eine erste Version hochladen, dann eine ZWEITE Version desselben
+  // Dokumenttyps hochladen (ohne skipDeactivation → die erste wird archiviert).
+  // Danach den Archiv-Expander aufklappen, den `href` des archivierten Anchors
+  // lesen und die URL über die authentifizierte Session abrufen.
+  test("Archiviertes Mitarbeiterdokument: `href={file.objectPath}` im 'ältere Uploads'-Expander streamt eine Datei", async ({ page }) => {
+    const employee = await createEmployee(session);
+    const docTypeId = await createEmployeeDocumentType(session);
+
+    // Erste Version hochladen (wird später zur archivierten Version).
+    const archivedObjectPath = await uploadObjectBytes(session, "ma-archiv-v1.pdf");
+    const v1 = await apiPost<{ id?: number }>(
+      session,
+      `/api/admin/employees/${employee.id}/documents`,
+      { documentTypeId: docTypeId, fileName: "ma-archiv-v1.pdf", objectPath: archivedObjectPath },
+    );
+    if (v1.status !== 201 || typeof v1.data?.id !== "number") {
+      throw new Error(`save employee document v1 failed: ${v1.status} ${JSON.stringify(v1.data)}`);
+    }
+    const archivedDocId = v1.data.id;
+
+    // Zweite Version desselben Typs hochladen → erste Version wird archiviert.
+    const currentObjectPath = await uploadObjectBytes(session, "ma-archiv-v2.pdf");
+    const v2 = await apiPost<{ id?: number }>(
+      session,
+      `/api/admin/employees/${employee.id}/documents`,
+      { documentTypeId: docTypeId, fileName: "ma-archiv-v2.pdf", objectPath: currentObjectPath },
+    );
+    if (v2.status !== 201 || typeof v2.data?.id !== "number") {
+      throw new Error(`save employee document v2 failed: ${v2.status} ${JSON.stringify(v2.data)}`);
+    }
+
+    // UI rendern und den Archiv-Expander ("X ältere Uploads") aufklappen.
+    await openEmployeeEditDialog(page, employee.id);
+    await page.getByTestId(`button-toggle-doctype-${docTypeId}`).click();
+    await page.getByTestId(`button-archive-${docTypeId}`).click();
+
+    const downloadLink = page.getByTestId(`button-download-archived-doc-${archivedDocId}`);
+    await expect(downloadLink).toBeVisible();
+    const href = await downloadLink.getAttribute("href");
+    expect(href).toBe(archivedObjectPath);
+
+    // Das Anklicken des archivierten Anchors entspricht einem GET auf die href-URL.
+    const res = await session.api.get(href!);
+    await expectOk(res, "GET archived employee object");
+    const body = await res.body();
+    expect(body.length).toBeGreaterThan(0);
+    expect(res.headers()["content-type"]).toBeTruthy();
+    expect(res.headers()["content-disposition"]).toContain("ma-archiv-v1.pdf");
+  });
 });

@@ -667,6 +667,7 @@ export function EmployeeDocumentsSection({ employeeId, userName, isAdmin = false
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="ml-2 shrink-0"
+                                        data-testid={`button-download-archived-doc-${file.id}`}
                                       >
                                         <Download className="h-3 w-3 text-gray-500 hover:text-gray-600" />
                                       </a>
