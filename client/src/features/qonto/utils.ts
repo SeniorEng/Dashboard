@@ -29,6 +29,9 @@ export function confidenceBadge(confidence: string | null): {
       return { label: "Auto · nur Betrag · prüfen", className: "bg-amber-50 text-amber-700 border-amber-200", weak: true };
     case "manual":
       return { label: "Manuell", className: "bg-sky-50 text-sky-700 border-sky-200", weak: false };
+    case "manual_bulk":
+      // Task #1710 — manuelle Mehrfach-Zuordnung mehrerer Rechnungen zu einer Zahlung.
+      return { label: "Manuell · Sammel", className: "bg-sky-50 text-sky-700 border-sky-200", weak: false };
     default:
       return { label: "Automatisch", className: "bg-gray-50 text-gray-600 border-gray-200", weak: false };
   }

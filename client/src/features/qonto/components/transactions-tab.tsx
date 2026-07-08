@@ -125,8 +125,13 @@ export function TransactionsTab({
     );
   };
 
+  // Task #1710 — Auswahl für die manuelle (Mehrfach-)Zuordnung. 1 Rechnung ⇒
+  // 1:1-Match, 2+ ⇒ Sammel-Bulk-Match. Wird beim Schließen des Panels geleert.
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<number[]>([]);
+
   const {
     matchMutation,
+    bulkMatchMutation,
     unmatchMutation,
     autoMatchMutation,
     csvImportMutation,
@@ -134,7 +139,32 @@ export function TransactionsTab({
     unignoreMutation,
     confirmAdviceMutation,
     dismissAdviceSuggestionMutation,
-  } = useTransactionMutations({ onMatchSuccess: () => setMatchingTxId(null) });
+  } = useTransactionMutations({
+    onMatchSuccess: () => {
+      setMatchingTxId(null);
+      setSelectedInvoiceIds([]);
+    },
+  });
+
+  const toggleInvoiceSelection = (invoiceId: number) => {
+    setSelectedInvoiceIds(prev =>
+      prev.includes(invoiceId) ? prev.filter(id => id !== invoiceId) : [...prev, invoiceId],
+    );
+  };
+
+  const openMatchPanel = (txId: number) => {
+    const next = matchingTxId === txId ? null : txId;
+    setMatchingTxId(next);
+    setSelectedInvoiceIds([]);
+  };
+
+  const submitMatch = (txId: number) => {
+    if (selectedInvoiceIds.length === 1) {
+      matchMutation.mutate({ txId, invoiceId: selectedInvoiceIds[0] });
+    } else if (selectedInvoiceIds.length >= 2) {
+      bulkMatchMutation.mutate({ txId, invoiceIds: selectedInvoiceIds });
+    }
+  };
 
   // Task #1672 — rückwirkende Sammel-Avis-Vorschläge (nur relevant, solange
   // offene/alle Transaktionen sichtbar sind). Map txId → Kandidaten.
@@ -493,7 +523,7 @@ export function TransactionsTab({
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => setMatchingTxId(matchingTxId === tx.id ? null : tx.id)}
+                          onClick={() => openMatchPanel(tx.id)}
                           aria-label="Rechnung zuordnen"
                           data-testid={`button-match-${tx.id}`}
                         >
@@ -578,24 +608,69 @@ export function TransactionsTab({
 
                 {matchingTxId === tx.id && (
                   <div className="mt-3 pt-3 border-t space-y-2">
-                    <Label className="text-xs font-medium text-gray-600">Rechnung zuordnen</Label>
+                    <Label className="text-xs font-medium text-gray-600">
+                      Rechnung(en) zuordnen — mehrere für eine Sammelzahlung wählbar
+                    </Label>
                     {invoicesQuery.isLoading ? (
                       <Loader2 className={`${iconSize.sm} animate-spin`} />
+                    ) : (invoicesQuery.data ?? []).length === 0 ? (
+                      <p className="text-xs text-gray-500" data-testid={`text-no-open-invoices-${tx.id}`}>
+                        Keine offenen Rechnungen verfügbar.
+                      </p>
                     ) : (
-                      <Select
-                        onValueChange={v => matchMutation.mutate({ txId: tx.id, invoiceId: parseInt(v) })}
-                      >
-                        <SelectTrigger data-testid={`select-invoice-${tx.id}`}>
-                          <SelectValue placeholder="Rechnung wählen..." />
-                        </SelectTrigger>
-                        <SelectContent>
+                      <>
+                        <div className="max-h-56 overflow-y-auto space-y-1 rounded-md border p-1" data-testid={`invoice-picker-${tx.id}`}>
                           {(invoicesQuery.data ?? []).map(inv => (
-                            <SelectItem key={inv.id} value={inv.id.toString()}>
-                              {inv.invoiceNumber} — {inv.customerName} — {formatCents(inv.grossAmountCents)}
-                            </SelectItem>
+                            <label
+                              key={inv.id}
+                              className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-gray-50 cursor-pointer"
+                              data-testid={`invoice-option-${tx.id}-${inv.id}`}
+                            >
+                              <Checkbox
+                                checked={selectedInvoiceIds.includes(inv.id)}
+                                onCheckedChange={() => toggleInvoiceSelection(inv.id)}
+                                data-testid={`checkbox-invoice-${tx.id}-${inv.id}`}
+                              />
+                              <span className="min-w-0 flex-1 truncate">
+                                {inv.invoiceNumber} — {inv.customerName} — {formatCents(inv.grossAmountCents)}
+                              </span>
+                            </label>
                           ))}
-                        </SelectContent>
-                      </Select>
+                        </div>
+                        {selectedInvoiceIds.length > 0 && (() => {
+                          const selectedSum = (invoicesQuery.data ?? [])
+                            .filter(inv => selectedInvoiceIds.includes(inv.id))
+                            .reduce((acc, inv) => acc + inv.grossAmountCents, 0);
+                          const txAmount = Math.abs(tx.amountCents);
+                          const mismatch = selectedSum !== txAmount;
+                          return (
+                            <div className="flex items-center justify-between gap-2 text-xs" data-testid={`match-total-${tx.id}`}>
+                              <span className="text-gray-600">
+                                {selectedInvoiceIds.length} gewählt · Σ {formatCents(selectedSum)} / Zahlung {formatCents(txAmount)}
+                              </span>
+                              {mismatch && (
+                                <span className="text-amber-600" data-testid={`match-mismatch-${tx.id}`}>
+                                  Summe weicht ab
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                        <Button
+                          size="sm"
+                          className="w-full"
+                          disabled={selectedInvoiceIds.length === 0 || matchMutation.isPending || bulkMatchMutation.isPending}
+                          onClick={() => submitMatch(tx.id)}
+                          data-testid={`button-confirm-match-${tx.id}`}
+                        >
+                          {(matchMutation.isPending || bulkMatchMutation.isPending) && (
+                            <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                          )}
+                          {selectedInvoiceIds.length >= 2
+                            ? `${selectedInvoiceIds.length} Rechnungen zuordnen`
+                            : "Rechnung zuordnen"}
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}

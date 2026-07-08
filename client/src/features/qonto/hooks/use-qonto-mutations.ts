@@ -108,6 +108,21 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
     },
   });
 
+  // Task #1710 — manuelle Mehrfach-Zuordnung: 2+ offene Rechnungen mit EINER
+  // Qonto-Zahlung verknüpfen (ad-hoc Sammel-Avis serverseitig).
+  const bulkMatchMutation = useMutation({
+    mutationFn: async ({ txId, invoiceIds }: { txId: number; invoiceIds: number[] }) =>
+      unwrapResult(await api.post(`/admin/qonto/transactions/${txId}/bulk-match`, { invoiceIds })),
+    onSuccess: () => {
+      toast({ title: "Mehrfach-Zuordnung gespeichert, Rechnungen als bezahlt markiert" });
+      onMatchSuccess();
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
   const unmatchMutation = useMutation({
     mutationFn: async (txId: number) =>
       unwrapResult(await api.delete(`/admin/qonto/transactions/${txId}/match`)),
@@ -199,7 +214,7 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
     },
   });
 
-  return { matchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation, confirmAdviceMutation, dismissAdviceSuggestionMutation };
+  return { matchMutation, bulkMatchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation, confirmAdviceMutation, dismissAdviceSuggestionMutation };
 }
 
 // Task #1685 — mehrdeutige Sammel-Avis-Zuordnung manuell auflösen: der Operator

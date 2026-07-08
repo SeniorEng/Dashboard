@@ -15,7 +15,7 @@ import { readTestFaults } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
-import { scanAdviceSuggestions } from "@shared/domain/qonto/bulk-advice-match";
+import { scanAdviceSuggestions, MANUAL_BULK_ADVICE_CONFIDENCE } from "@shared/domain/qonto/bulk-advice-match";
 import { resolveUniqueMatch } from "@shared/domain/qonto/avis-match";
 import {
   loadFullyPaidUnlinkedAdvices,
@@ -271,6 +271,166 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
   res.json(updated);
 }));
 
+// Task #1710 — Manuelle Mehrfach-Zuordnung: 2+ offene Rechnungen von Hand mit
+// EINER Qonto-Zahlung verknüpfen. Wiederverwendet den 1:N-Pfad (ad-hoc
+// `format='manuell'`-Avis + Items + `matched_payment_advice_id`); die
+// Einzel-Rechnung bleibt auf dem 1:1-`matchedInvoiceId`-Pfad.
+const bulkMatchSchema = z.object({
+  invoiceIds: z.array(z.number().int().positive("Ungültige Rechnungs-ID"))
+    .min(2, "Für eine Mehrfach-Zuordnung müssen mindestens zwei Rechnungen gewählt werden"),
+});
+
+router.post("/transactions/:id/bulk-match", asyncHandler("Mehrfach-Zuordnung fehlgeschlagen", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+
+  if (tx.billingIrrelevantAt) {
+    throw badRequest("Transaktion ist als nicht abrechnungsrelevant markiert. Bitte zuerst die Markierung aufheben.");
+  }
+
+  const parsed = bulkMatchSchema.parse(req.body);
+  const invoiceIds = Array.from(new Set(parsed.invoiceIds));
+  if (invoiceIds.length < 2) {
+    throw badRequest("Für eine Mehrfach-Zuordnung müssen mindestens zwei unterschiedliche Rechnungen gewählt werden.");
+  }
+
+  // Idempotenz: ist die Transaktion bereits an ein Sammel-Avis mit exakt
+  // derselben Rechnungsmenge gebunden → no-op (keine doppelten Audit-Zeilen).
+  if (tx.matchedInvoiceId) {
+    throw badRequest("Transaktion ist bereits einer einzelnen Rechnung zugeordnet. Bitte zuerst Zuordnung aufheben.");
+  }
+  if (tx.matchedPaymentAdviceId) {
+    const existing = await qontoStorage.getPaymentAdviceById(tx.matchedPaymentAdviceId);
+    const existingIds = new Set(
+      (existing?.items ?? [])
+        .map(it => it.matchedInvoiceId)
+        .filter((v): v is number => v != null),
+    );
+    const requested = new Set(invoiceIds);
+    const sameSet = existingIds.size === requested.size
+      && [...requested].every(x => existingIds.has(x));
+    if (sameSet) {
+      res.json(tx);
+      return;
+    }
+    throw badRequest("Transaktion ist bereits einer Zahlung zugeordnet. Bitte zuerst Zuordnung aufheben.");
+  }
+
+  // Ausgewählte Rechnungen laden (Existenz, Brutto, Status, Nummer).
+  const selectedInvoices = await db.select({
+    id: invoices.id,
+    invoiceNumber: invoices.invoiceNumber,
+    grossAmountCents: invoices.grossAmountCents,
+    status: invoices.status,
+  })
+    .from(invoices)
+    .where(inArray(invoices.id, invoiceIds));
+
+  if (selectedInvoices.length !== invoiceIds.length) {
+    throw badRequest("Mindestens eine gewählte Rechnung wurde nicht gefunden.");
+  }
+  const invoiceById = new Map(selectedInvoices.map(inv => [inv.id, inv]));
+
+  const emitted = tx.emittedAt instanceof Date ? tx.emittedAt : new Date(tx.emittedAt);
+  const zahlungsDatum = emitted.toISOString().slice(0, 10);
+
+  const updated = await withAudit(async (dbTx, audit) => {
+    // Doppelzählungs-Guard (innerhalb der Transaktion, vor Item-Insert): keine
+    // Rechnung darf bereits 1:1 gematcht oder Mitglied eines aktiven Avis sein.
+    const claimed = await qontoStorage.getClaimedInvoiceIds(dbTx, invoiceIds);
+    if (claimed.size > 0) {
+      throw badRequest("Mindestens eine Rechnung ist bereits einer Zahlung zugeordnet.");
+    }
+
+    // Ad-hoc Sammel-Avis (format='manuell') als 1:N-Container erstellen.
+    const [advice] = await dbTx.insert(paymentAdvices).values({
+      fileName: `Manuelle Sammelzuordnung ${tx.qontoTransactionId}`,
+      format: "manuell",
+      gesamtBetragCents: Math.abs(tx.amountCents),
+      zahlungsDatum,
+      notes: "Task #1710 — manuelle Mehrfach-Zuordnung zu einer Qonto-Zahlung",
+      uploadedByUserId: req.user!.id,
+    }).returning();
+
+    await dbTx.insert(paymentAdviceItems).values(
+      invoiceIds.map(invId => {
+        const inv = invoiceById.get(invId)!;
+        return {
+          paymentAdviceId: advice.id,
+          rechnungsNummer: inv.invoiceNumber,
+          betragCents: inv.grossAmountCents,
+          matchedInvoiceId: invId,
+        };
+      }),
+    );
+
+    // Transaktion geguarded ans Avis binden (parallele Zuordnung ausschließen).
+    const linkUpdate = await dbTx.update(qontoTransactions)
+      .set({ matchedPaymentAdviceId: advice.id, matchConfidence: MANUAL_BULK_ADVICE_CONFIDENCE })
+      .where(and(
+        eq(qontoTransactions.id, id),
+        isNull(qontoTransactions.matchedInvoiceId),
+        isNull(qontoTransactions.matchedPaymentAdviceId),
+        isNull(qontoTransactions.billingIrrelevantAt),
+      ))
+      .returning();
+
+    if (linkUpdate.length === 0) {
+      throw badRequest("Transaktion wurde zwischenzeitlich zugeordnet.");
+    }
+
+    // Rechnungen geguarded auf bezahlt setzen (nur offene versendet/avis_erhalten).
+    const flipped = await dbTx.update(invoices)
+      .set({ status: "bezahlt", paidAt: emitted })
+      .where(and(inArray(invoices.id, invoiceIds), inArray(invoices.status, ["versendet", "avis_erhalten"])))
+      .returning({ id: invoices.id });
+
+    if (flipped.length !== invoiceIds.length) {
+      throw badRequest("Mindestens eine Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
+    }
+
+    for (const invId of invoiceIds) {
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_payment_reconciled",
+        entityType: "invoice",
+        entityId: invId,
+        metadata: {
+          qontoTransactionId: id,
+          qontoTransactionExternalId: tx.qontoTransactionId,
+          paymentAdviceId: advice.id,
+          matchedBy: "manual_bulk",
+          confidence: MANUAL_BULK_ADVICE_CONFIDENCE,
+          amountCents: tx.amountCents,
+        },
+        ipAddress: req.ip,
+      });
+    }
+
+    audit.record({
+      userId: req.user!.id,
+      action: "advice_payment_reconciled",
+      entityType: "payment_advice",
+      entityId: advice.id,
+      metadata: {
+        qontoTransactionId: id,
+        qontoTransactionExternalId: tx.qontoTransactionId,
+        confidence: MANUAL_BULK_ADVICE_CONFIDENCE,
+        invoiceCount: invoiceIds.length,
+        amountCents: tx.amountCents,
+      },
+      ipAddress: req.ip,
+    });
+
+    return linkUpdate[0];
+  }, { faults: readTestFaults(req) });
+
+  res.json(updated);
+}));
+
 router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht aufgehoben werden", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
@@ -290,6 +450,12 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
   if (tx.matchedPaymentAdviceId) {
     const previousAdviceId = tx.matchedPaymentAdviceId;
     const previousConfidence = tx.matchConfidence;
+    // Task #1710 — nur ein ad-hoc erzeugtes Sammel-Zuordnungs-Avis (manuelle
+    // Mehrfach-Zuordnung) wird beim Aufheben wieder soft-gelöscht und seine
+    // Mitglieder pro Rechnung auf ihren avis-gestützten Vorstatus zurückgesetzt
+    // (versendet, sofern nicht noch durch ein anderes Avis gedeckt). Importierte
+    // Avise bleiben bestehen ⇒ bisheriges Verhalten `bezahlt → avis_erhalten`.
+    const isAdHocBulk = previousConfidence === MANUAL_BULK_ADVICE_CONFIDENCE;
 
     const updated = await withAudit(async (dbTx, audit) => {
       const unmatchUpdate = await dbTx.update(qontoTransactions)
@@ -316,8 +482,28 @@ router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht au
         .map(r => r.invoiceId)
         .filter((v): v is number => v !== null);
 
+      // Bei einem ad-hoc Bulk-Avis zuerst das Avis soft-löschen, damit
+      // resolveAvisBackedStatus die Mitglieder korrekt nicht mehr als
+      // avis-gedeckt zählt (sofern keine andere Zuordnung existiert).
+      if (isAdHocBulk) {
+        await dbTx.update(paymentAdvices)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(paymentAdvices.id, previousAdviceId), isNull(paymentAdvices.deletedAt)));
+      }
+
       const reverted: number[] = [];
-      if (adviceInvoiceIds.length > 0) {
+      if (adviceInvoiceIds.length > 0 && isAdHocBulk) {
+        // Pro Rechnung individuell zurücksetzen (versendet vs. avis_erhalten je
+        // nach verbleibender Avis-Deckung).
+        for (const invId of adviceInvoiceIds) {
+          const resetStatus = await resolveAvisBackedStatus(dbTx, invId);
+          const revertUpdate = await dbTx.update(invoices)
+            .set({ status: resetStatus, paidAt: null })
+            .where(and(eq(invoices.id, invId), eq(invoices.status, "bezahlt")))
+            .returning({ id: invoices.id });
+          reverted.push(...revertUpdate.map(r => r.id));
+        }
+      } else if (adviceInvoiceIds.length > 0) {
         const revertUpdate = await dbTx.update(invoices)
           .set({ status: "avis_erhalten", paidAt: null })
           .where(and(inArray(invoices.id, adviceInvoiceIds), eq(invoices.status, "bezahlt")))

@@ -38,7 +38,9 @@ export function useMatchableInvoices(enabled: boolean) {
   return useQuery<Invoice[]>({
     queryKey: ["billing", "open-for-match"],
     queryFn: async () => {
-      const result = await api.get<Invoice[]>("/billing?status=versendet");
+      // Task #1710 — nur wirklich offene, noch nicht durch eine Zahlung
+      // beanspruchte Rechnungen (serverseitige Doppelzählungs-Ausblendung).
+      const result = await api.get<Invoice[]>("/billing/open-for-match");
       return unwrapResult(result);
     },
     enabled,

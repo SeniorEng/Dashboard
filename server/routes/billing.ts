@@ -45,6 +45,7 @@ import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { formatDateForDisplay, formatDateISO, todayISO, parseTimestamp } from "@shared/utils/datetime";
 import { storage } from "../storage";
+import { qontoStorage } from "../storage/qonto";
 import { db } from "../lib/db";
 import { monthlyServiceRecordsRepo, appointmentsRepo } from "../repos";
 import {
@@ -209,6 +210,16 @@ router.get("/", asyncHandler("Rechnungen konnten nicht geladen werden", async (r
   }
   const invoices = await storage.getInvoices(filters);
   res.json(invoices);
+}));
+
+// Task #1710 — Rechnungen, die für die manuelle (Mehrfach-)Zuordnung zu einer
+// Qonto-Zahlung offen sind: Status `versendet`, aber NICHT bereits durch eine
+// Zahlung beansprucht (kein 1:1-Match, kein Mitglied eines aktiven Avis).
+// Verhindert, dass dieselbe Rechnung zwei Zahlungen zufällt.
+router.get("/open-for-match", asyncHandler("Offene Rechnungen konnten nicht geladen werden", async (_req, res) => {
+  const sent = await storage.getInvoices({ status: "versendet" });
+  const claimed = await qontoStorage.getClaimedInvoiceIds(db, sent.map(inv => inv.id));
+  res.json(sent.filter(inv => !claimed.has(inv.id)));
 }));
 
 // Task #1405 — Abrechnungs-Pipeline-Board (SSoT-Reader). Liefert den

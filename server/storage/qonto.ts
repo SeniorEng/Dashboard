@@ -14,7 +14,7 @@ import {
   type InsertPaymentAdviceItem,
 } from "@shared/schema";
 import { eq, and, isNull, isNotNull, desc, gte, lte, sql, inArray } from "drizzle-orm";
-import { db } from "../lib/db";
+import { db, type DbOrTx } from "../lib/db";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { paymentAdvicesRepo } from "../repos";
 
@@ -433,6 +433,40 @@ class QontoStorage {
       .where(eq(paymentAdviceItems.id, itemId))
       .returning();
     return updated;
+  }
+
+  /**
+   * Task #1710 — Doppelzählungs-Guard für die manuelle Mehrfach-Zuordnung:
+   * liefert aus den übergebenen Kandidaten-Rechnungs-IDs die Teilmenge, die
+   * bereits durch eine Zahlung „beansprucht" ist — d.h. entweder 1:1 an eine
+   * Qonto-Transaktion gebunden (`matched_invoice_id`) ODER Mitglied eines noch
+   * nicht gelöschten (importierten oder manuellen) Zahlungsavis. Wird sowohl im
+   * Picker-Lesepfad als auch im Schreib-Guard des Bulk-Match innerhalb der
+   * Transaktion verwendet, damit dieselbe Rechnung nie zwei Zahlungen zufällt.
+   */
+  async getClaimedInvoiceIds(exec: DbOrTx, candidateIds: number[]): Promise<Set<number>> {
+    const claimed = new Set<number>();
+    if (candidateIds.length === 0) return claimed;
+
+    const adviceRows = await exec.select({ invoiceId: paymentAdviceItems.matchedInvoiceId })
+      .from(paymentAdviceItems)
+      .innerJoin(paymentAdvices, eq(paymentAdviceItems.paymentAdviceId, paymentAdvices.id))
+      .where(and(
+        inArray(paymentAdviceItems.matchedInvoiceId, candidateIds),
+        isNull(paymentAdvices.deletedAt),
+      ));
+    for (const r of adviceRows) {
+      if (r.invoiceId != null) claimed.add(r.invoiceId);
+    }
+
+    const txRows = await exec.select({ invoiceId: qontoTransactions.matchedInvoiceId })
+      .from(qontoTransactions)
+      .where(inArray(qontoTransactions.matchedInvoiceId, candidateIds));
+    for (const r of txRows) {
+      if (r.invoiceId != null) claimed.add(r.invoiceId);
+    }
+
+    return claimed;
   }
 
   async deletePaymentAdvice(id: number): Promise<boolean> {

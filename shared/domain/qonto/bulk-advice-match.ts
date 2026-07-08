@@ -14,6 +14,15 @@ import { normalizeIban } from "./monitored-ibans";
 export const BULK_ADVICE_CONFIDENCE = "auto_bulk_advice";
 
 /**
+ * Task #1710 — Confidence-Label für eine MANUELLE Mehrfach-Zuordnung: der
+ * Operator verknüpft von Hand mehrere offene Rechnungen mit einer Qonto-Zahlung
+ * (ad-hoc `format='manuell'`-Avis). Dient zugleich als Diskriminator: nur ein
+ * so markiertes Avis wird beim Aufheben der Zuordnung wieder soft-gelöscht
+ * (siehe reversibler Un-Link), importierte/hochgeladene Avise bleiben bestehen.
+ */
+export const MANUAL_BULK_ADVICE_CONFIDENCE = "manual_bulk";
+
+/**
  * Toleranz für die Triple-Equality (reine Rundungsdifferenzen). Jede größere
  * Abweichung ⇒ kein sauberer Sammelzahlungs-Match ⇒ manuelle Prüfung.
  */
