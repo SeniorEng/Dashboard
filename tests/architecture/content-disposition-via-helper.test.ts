@@ -36,6 +36,19 @@ const ROOT = process.cwd();
 const DISPOSITION_HEADER_PATTERN = /["'`]content-disposition["'`]/i;
 
 /**
+ * Express-Shortcuts `res.download(...)` und `res.attachment(...)` setzen
+ * INTERN einen `Content-Disposition: attachment; filename="…"`-Header — und
+ * zwar OHNE RFC-5987-`filename*`. Damit würden sie Umlaute erneut verstümmeln
+ * und den zentralen Helper komplett umgehen (der Header-Name taucht im
+ * Quelltext gar nicht auf, `DISPOSITION_HEADER_PATTERN` greift also nicht).
+ * Deshalb werden diese Aufrufe hier separat verboten: Wer einen Datei-Download
+ * mit sprechendem Namen braucht, MUSS `Content-Type`/`Content-Length` selbst
+ * setzen und den `Content-Disposition`-Header über `buildContentDisposition`
+ * bauen (bzw. `downloadObject(file, res, ttl, { filename })` nutzen).
+ */
+const IMPLICIT_DISPOSITION_PATTERN = /\bres\s*\.\s*(?:download|attachment)\s*\(/;
+
+/**
  * Der einzige erlaubte Weg, einen Content-Disposition-Wert zu bauen.
  */
 const HELPER_CALL = "buildContentDisposition";
@@ -116,6 +129,20 @@ describe("Architektur — Content-Disposition via zentralem Helper", () => {
           }
           line = stripLineComment(line);
           if (!line) continue;
+
+          // (a) Implizite Content-Disposition via `res.download(...)` /
+          // `res.attachment(...)` — diese Shortcuts setzen den Header intern
+          // ohne `filename*` und dürfen daher gar nicht verwendet werden.
+          if (IMPLICIT_DISPOSITION_PATTERN.test(line)) {
+            hits.push({
+              file: relative(ROOT, file).split(sep).join("/"),
+              line: i + 1,
+              snippet: line.trim(),
+            });
+            continue;
+          }
+
+          // (b) Expliziter Content-Disposition-Header — muss den Helper nutzen.
           if (!DISPOSITION_HEADER_PATTERN.test(line)) continue;
 
           // Der Wert wird bei mehrzeiligen Aufrufen erst in Folgezeilen
@@ -140,16 +167,23 @@ describe("Architektur — Content-Disposition via zentralem Helper", () => {
         .map((h) => `  ${h.file}:${h.line} — '${h.snippet}'`)
         .join("\n");
       expect.fail(
-        `Folgende Content-Disposition-Header umgehen den zentralen Helper ` +
+        `Folgende Datei-Downloads umgehen den zentralen Helper ` +
         `aus 'shared/domain/invoice-export-filename.ts':\n` +
         `${msg}\n\n` +
-        `Fix: Baue den Wert IMMER mit ` +
+        `Fix (expliziter Header): Baue den Wert IMMER mit ` +
         `'buildContentDisposition(filename, "inline" | "attachment")'. Der ` +
         `Helper liefert einen ASCII-Fallback UND ein RFC-5987-'filename*', ` +
         `sodass Umlaute (Müller-Vertrag.pdf) im „Speichern unter"-Dialog ` +
         `erhalten bleiben. Ein handgebauter 'inline; filename="\${name}"'-` +
-        `Header verstümmelt Umlaute erneut. Wenn der Treffer ein legitimer ` +
-        `Sonderfall ist, ergänze die Allowlist 'ALLOWED_PATHS' in ` +
+        `Header verstümmelt Umlaute erneut.\n` +
+        `Fix (res.download/res.attachment): Diese Express-Shortcuts setzen ` +
+        `intern 'Content-Disposition' OHNE 'filename*' und sind verboten — ` +
+        `setze 'Content-Type'/'Content-Length' selbst und den ` +
+        `'Content-Disposition'-Header über 'buildContentDisposition' (bzw. ` +
+        `nutze 'downloadObject(file, res, ttl, { filename })' für ` +
+        `Object-Storage-Streams).\n` +
+        `Wenn der Treffer ein legitimer Sonderfall ist, ergänze die Allowlist ` +
+        `'ALLOWED_PATHS' in ` +
         `'tests/architecture/content-disposition-via-helper.test.ts' mit ` +
         `einer kurzen Begründung.`,
       );

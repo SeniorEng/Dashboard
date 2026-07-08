@@ -8,6 +8,7 @@ import {
   getObjectAclPolicy,
   setObjectAclPolicy,
 } from "./objectAcl";
+import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -95,7 +96,20 @@ export class ObjectStorageService {
   }
 
   // Downloads an object to the response.
-  async downloadObject(file: File, res: Response, cacheTtlSec: number = 3600) {
+  //
+  // `options.filename` (optional): setzt einen `Content-Disposition`-Header über
+  // den zentralen SSoT `buildContentDisposition` (ASCII-Fallback +
+  // RFC-5987-`filename*`), damit Umlaute (Müller-Vertrag.pdf) im „Speichern
+  // unter"-Dialog erhalten bleiben — auch bei Nicht-PDF-Dateitypen, die über den
+  // Object-Storage-Stream ausgeliefert werden. Ohne `filename` bleibt das
+  // bisherige Verhalten (kein Content-Disposition, Browser wählt den Namen aus
+  // dem Pfad) unverändert.
+  async downloadObject(
+    file: File,
+    res: Response,
+    cacheTtlSec: number = 3600,
+    options?: { filename?: string; disposition?: "inline" | "attachment" },
+  ) {
     try {
       // Get file metadata
       const [metadata] = await file.getMetadata();
@@ -110,6 +124,12 @@ export class ObjectStorageService {
           isPublic ? "public" : "private"
         }, max-age=${cacheTtlSec}`,
       });
+      if (options?.filename) {
+        res.setHeader(
+          "Content-Disposition",
+          buildContentDisposition(options.filename, options.disposition ?? "attachment"),
+        );
+      }
 
       // Stream the file to the response
       const stream = file.createReadStream();
