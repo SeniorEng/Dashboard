@@ -7,6 +7,8 @@ import { storage } from "../storage";
 import { geocodeCompanySettings } from "../services/geocoding";
 import { buildLeadAutoReplyHtml } from "../services/lead-auto-reply";
 import { getCachedCompanySettings, companySettingsCache } from "../services/cache";
+import { resolveNewlyAddedMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
+import { autoBackfillNewIbans } from "../services/qonto-backfill-runner";
 
 const router = Router();
 router.use(requireAuth);
@@ -36,6 +38,10 @@ router.patch("/", requireAdmin, asyncHandler("Firmendaten konnten nicht gespeich
   if (!parsed.success) {
     throw badRequest(fromError(parsed.error).toString());
   }
+  // Task #1717 — Vor dem Schreiben den bisherigen Stand lesen, damit wir NEU
+  // hinzugekommene überwachte Qonto-IBANs erkennen können (Diff before→after).
+  const before = await storage.getCompanySettings();
+
   companySettingsCache.invalidate();
   const updated = await storage.updateCompanySettings(parsed.data, req.user!.id);
   companySettingsCache.invalidate();
@@ -43,6 +49,18 @@ router.patch("/", requireAdmin, asyncHandler("Firmendaten konnten nicht gespeich
   const addressFields = ["strasse", "hausnummer", "plz", "stadt"];
   if (addressFields.some(f => f in parsed.data)) {
     geocodeCompanySettings().catch(err => console.error("[geocoding] Background geocoding failed:", err));
+  }
+
+  // Task #1717 — Wurde eine WIRKLICH neue überwachte IBAN ergänzt (nicht nur
+  // umformatiert, nicht entfernt), automatisch einen fokussierten Voll-Sync für
+  // diese Konten anstoßen — nicht-blockierend im Hintergrund, idempotent,
+  // GoBD-auditiert und unter demselben Advisory-Lock wie der manuelle Backfill.
+  // Ersetzt den bisherigen manuellen „Nach IBAN-Anlage bitte Voll-Sync"-Schritt.
+  const newlyAddedIbans = resolveNewlyAddedMonitoredIbans(before, updated);
+  if (newlyAddedIbans.length > 0) {
+    void autoBackfillNewIbans(newlyAddedIbans, req.user!.id, req.ip).catch(err =>
+      console.error("[qonto] Auto-Backfill für neue IBAN fehlgeschlagen:", err),
+    );
   }
 
   res.json(updated);

@@ -10,6 +10,7 @@ import {
   normalizeIban,
   resolveMonitoredIbans,
   resolveAdditionalMonitoredIbans,
+  resolveNewlyAddedMonitoredIbans,
 } from "../../shared/domain/qonto/monitored-ibans";
 
 describe("normalizeIban", () => {
@@ -105,5 +106,61 @@ describe("resolveAdditionalMonitoredIbans (Task #1588)", () => {
         qontoAdditionalIbans: ["DE222", "DE333"],
       }),
     ).toEqual(["DE222", "DE333"]);
+  });
+});
+
+describe("resolveNewlyAddedMonitoredIbans (Task #1717)", () => {
+  it("erkennt ein neu ergänztes Zusatzkonto", () => {
+    expect(
+      resolveNewlyAddedMonitoredIbans(
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE222"] },
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE222", "DE333"] },
+      ),
+    ).toEqual(["DE333"]);
+  });
+
+  it("erkennt ein neu gesetztes primäres Konto", () => {
+    expect(
+      resolveNewlyAddedMonitoredIbans(
+        { qontoIban: null, qontoAdditionalIbans: [] },
+        { qontoIban: "DE111", qontoAdditionalIbans: [] },
+      ),
+    ).toEqual(["DE111"]);
+  });
+
+  it("wertet eine reine Formatierungsänderung NICHT als neu", () => {
+    expect(
+      resolveNewlyAddedMonitoredIbans(
+        { qontoIban: "DE89 3704 0044 0532 0130 00", qontoAdditionalIbans: [] },
+        { qontoIban: "de8937040044053201300 0", qontoAdditionalIbans: [] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("meldet nichts, wenn eine IBAN nur ENTFERNT wurde", () => {
+    expect(
+      resolveNewlyAddedMonitoredIbans(
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE222", "DE333"] },
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE222"] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("meldet nichts bei unverändertem Speichern", () => {
+    expect(
+      resolveNewlyAddedMonitoredIbans(
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE222"] },
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE222"] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("meldet nur die neuen IBANs, wenn gleichzeitig ergänzt und entfernt wird", () => {
+    expect(
+      resolveNewlyAddedMonitoredIbans(
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE222"] },
+        { qontoIban: "DE111", qontoAdditionalIbans: ["DE333"] },
+      ),
+    ).toEqual(["DE333"]);
   });
 });

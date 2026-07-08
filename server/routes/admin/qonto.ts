@@ -7,7 +7,7 @@ import { qontoStorage } from "../../storage/qonto";
 import { parseAvisCsv, AvisParseUncertainError } from "../../services/avis-parser";
 import { parseQontoCsv } from "../../services/qonto-csv-parser";
 import { z } from "zod";
-import { db, pool, type DbOrTx } from "../../lib/db";
+import { db, type DbOrTx } from "../../lib/db";
 import { invoices, qontoTransactions, paymentAdviceItems, paymentAdvices } from "@shared/schema";
 import { eq, and, ilike, isNull, isNotNull, inArray } from "drizzle-orm";
 import { withAudit } from "../../lib/with-audit";
@@ -15,6 +15,7 @@ import { readTestFaults } from "../../lib/test-fault-injector";
 import { parseLocalDate } from "@shared/utils/datetime";
 import { normalizeHideRuleValue } from "@shared/domain/qonto/hide-rules";
 import { exceedsBackfillLookbackCap, MAX_BACKFILL_LOOKBACK_MONTHS } from "@shared/domain/qonto/backfill-windows";
+import { withQontoBackfillLock, isQontoBackfillRunning } from "../../services/qonto-backfill-runner";
 import { scanAdviceSuggestions, MANUAL_BULK_ADVICE_CONFIDENCE } from "@shared/domain/qonto/bulk-advice-match";
 import { resolveUniqueMatch } from "@shared/domain/qonto/avis-match";
 import {
@@ -69,25 +70,11 @@ router.post("/sync", asyncHandler("Qonto-Synchronisation fehlgeschlagen", async 
 // Zusatzkonten-Voll-Sync. Zieht die completed-credit-Historie monatsweise,
 // wendet danach die Auto-Ausblenden-Regeln an. GoBD-auditiert.
 //
-// Task #1591 — Serverseitiger Lauf-Lock: Der teure Voll-Abzug darf immer nur
-// EINMAL gleichzeitig laufen. Ein session-scoped `pg_try_advisory_lock` auf
-// einer dedizierten Pool-Verbindung serialisiert instanzübergreifend. Wird der
-// Lock nicht sofort gewährt, läuft bereits ein Voll-Sync → 409 (kein zweiter
-// Abzug). Der Frontend-Button-Disable schützt nur die eigene Sitzung; dieser
-// Lock schützt gegen parallele Sitzungen / erneutes Öffnen der Seite.
-// Fester 32-bit-Schlüssel "QBKF" (Qonto BacKFill).
-const QONTO_BACKFILL_LOCK_KEY = String(0x51424b46);
-
-// Task #1600 — Live-Status des Voll-Sync-Lauf-Locks. Prüft (ohne den Lock selbst
-// zu erwerben) via pg_locks, ob der advisory Lock aus Task #1591 aktuell von
-// irgendeiner Sitzung gehalten wird. Damit kann das Frontend proaktiv (auch in
-// anderen Tabs/Sitzungen) „Voll-Sync läuft…" anzeigen und den Start-Button für
-// alle sperren, statt erst reaktiv beim 409 zu reagieren.
-// pg_try_advisory_lock(bigint) legt den Lock in pg_locks als classid = obere
-// 32 Bit, objid = untere 32 Bit ab (objsubid = 1). Der Schlüssel passt in 32
-// Bit → classid = 0, objid = Schlüssel. Bewusst ohne BigInt-Literale (tsc-Target).
-const QONTO_BACKFILL_LOCK_CLASSID = Math.floor(Number(QONTO_BACKFILL_LOCK_KEY) / 0x100000000);
-const QONTO_BACKFILL_LOCK_OBJID = Number(QONTO_BACKFILL_LOCK_KEY) % 0x100000000;
+// Task #1591 / #1717 — Serverseitiger Lauf-Lock: Der teure Voll-Abzug darf immer
+// nur EINMAL gleichzeitig laufen. Lock-Schlüssel + Erwerb/Freigabe leben jetzt
+// zentral in `server/services/qonto-backfill-runner.ts` (geteilt mit dem
+// automatischen Backfill neuer IBANs), damit sich manueller und automatischer
+// Backfill denselben Lock teilen.
 
 const backfillSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ungültiges Startdatum (erwartet YYYY-MM-DD)"),
@@ -97,16 +84,7 @@ const backfillSchema = z.object({
 });
 
 router.get("/backfill/status", asyncHandler("Voll-Sync-Status konnte nicht geladen werden", async (_req, res) => {
-  const lockRes = await pool.query<{ running: boolean }>(
-    `SELECT COUNT(*) > 0 AS running
-       FROM pg_locks
-      WHERE locktype = 'advisory'
-        AND classid = $1
-        AND objid = $2
-        AND objsubid = 1`,
-    [QONTO_BACKFILL_LOCK_CLASSID, QONTO_BACKFILL_LOCK_OBJID],
-  );
-  res.json({ running: lockRes.rows?.[0]?.running === true });
+  res.json({ running: await isQontoBackfillRunning() });
 }));
 
 router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (req, res) => {
@@ -124,18 +102,7 @@ router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (r
     );
   }
 
-  const lockClient = await pool.connect();
-  let gotLock = false;
-  try {
-    const lockRes = await lockClient.query<{ locked: boolean }>(
-      "SELECT pg_try_advisory_lock($1) AS locked",
-      [QONTO_BACKFILL_LOCK_KEY],
-    );
-    gotLock = lockRes.rows?.[0]?.locked === true;
-    if (!gotLock) {
-      throw conflict("QONTO_BACKFILL_RUNNING", "Ein Voll-Sync läuft bereits. Bitte warten Sie, bis der aktuelle Abzug abgeschlossen ist.");
-    }
-
+  const outcome = await withQontoBackfillLock(async () => {
     const result = await qontoService.backfillTransactions(parsedStart);
 
     await withAudit(async (_dbTx, audit) => {
@@ -155,16 +122,14 @@ router.post("/backfill", asyncHandler("Qonto-Voll-Sync fehlgeschlagen", async (r
       });
     }, { faults: readTestFaults(req) });
 
-    res.json(result);
-  } finally {
-    try {
-      if (gotLock) {
-        await lockClient.query("SELECT pg_advisory_unlock($1)", [QONTO_BACKFILL_LOCK_KEY]);
-      }
-    } finally {
-      lockClient.release();
-    }
+    return result;
+  });
+
+  if (!outcome.ran) {
+    throw conflict("QONTO_BACKFILL_RUNNING", "Ein Voll-Sync läuft bereits. Bitte warten Sie, bis der aktuelle Abzug abgeschlossen ist.");
   }
+
+  res.json(outcome.result);
 }));
 
 router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen werden", async (req, res) => {

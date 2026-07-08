@@ -64,3 +64,24 @@ export function resolveAdditionalMonitoredIbans(
   const primaryKey = normalizeIban(primary);
   return all.filter((iban) => normalizeIban(iban) !== primaryKey);
 }
+
+/**
+ * Task #1717 — Liefert die überwachten IBANs, die in `after` NEU hinzugekommen
+ * sind (in `after`, aber nicht in `before`). Vergleich erfolgt normalisiert
+ * (Whitespace/Groß-Klein egal), damit reine Formatierungsänderungen NICHT als
+ * „neu" gelten. Ergebnis behält die Formatierung aus `after`.
+ *
+ * SSoT für „welches Konto wurde gerade ergänzt?" — genutzt vom Schreibpfad der
+ * Firmen-Einstellungen (Server: automatischer Backfill anstoßen) UND von der
+ * Einstellungen-UI (Client: „Voll-Sync gestartet"-Rückmeldung), damit beide
+ * Seiten dieselbe Diff-Logik verwenden.
+ */
+export function resolveNewlyAddedMonitoredIbans(
+  before: MonitoredIbanSettings,
+  after: MonitoredIbanSettings,
+): string[] {
+  const beforeKeys = new Set(resolveMonitoredIbans(before).map(normalizeIban));
+  return resolveMonitoredIbans(after).filter(
+    (iban) => !beforeKeys.has(normalizeIban(iban)),
+  );
+}

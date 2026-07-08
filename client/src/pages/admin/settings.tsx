@@ -16,6 +16,7 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { iconSize, componentStyles } from "@/design-system";
 import type { SystemSettings, CompanySettings } from "@shared/schema";
 import { formatPhoneAsYouType, validateDachPhone } from "@shared/utils/phone";
+import { resolveNewlyAddedMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
 import { isValidPhoneNumber } from "libphonenumber-js/min";
 import { emptyCompanyForm } from "./settings/types";
 import { LogoUploadCard } from "./settings/logo-upload";
@@ -166,6 +167,13 @@ export default function AdminSettings() {
 
   const qontoSaveMutation = useMutation({
     mutationFn: async () => {
+      // Task #1717 — Vorherigen IBAN-Stand festhalten, damit wir nach dem
+      // Speichern melden können, ob ein neues überwachtes Konto ergänzt wurde
+      // (Server stößt dafür automatisch einen fokussierten Voll-Sync an).
+      const previousMonitored = {
+        qontoIban: companyData?.qontoIban ?? null,
+        qontoAdditionalIbans: companyData?.qontoAdditionalIbans ?? [],
+      };
       const result = await api.patch<CompanySettings>("/company-settings", {
         qontoLogin: companyForm.qontoLogin,
         qontoSecretKey: companyForm.qontoSecretKey,
@@ -175,11 +183,29 @@ export default function AdminSettings() {
           .map((s) => s.trim())
           .filter(Boolean),
       });
-      return unwrapResult(result);
+      const updated = unwrapResult(result);
+      const newlyAdded = resolveNewlyAddedMonitoredIbans(previousMonitored, {
+        qontoIban: updated.qontoIban,
+        qontoAdditionalIbans: updated.qontoAdditionalIbans,
+      });
+      return { updated, newlyAdded };
     },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["company-settings"], data);
-      toast({ title: "Qonto-Einstellungen gespeichert" });
+    onSuccess: ({ updated, newlyAdded }) => {
+      queryClient.setQueryData(["company-settings"], updated);
+      if (newlyAdded.length > 0) {
+        // Konsistent mit der Voll-Sync-Statusanzeige im Qonto-Tab: der Abruf
+        // läuft im Hintergrund, Fortschritt/Ende sind dort (Voll-Sync-Status)
+        // sichtbar.
+        const masked = newlyAdded
+          .map((iban) => `…${iban.replace(/\s+/g, "").slice(-4)}`)
+          .join(", ");
+        toast({
+          title: "Qonto-Einstellungen gespeichert",
+          description: `Voll-Sync für neues Konto (${masked}) gestartet – läuft im Hintergrund. Status im Qonto-Tab.`,
+        });
+      } else {
+        toast({ title: "Qonto-Einstellungen gespeichert" });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });

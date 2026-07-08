@@ -4,7 +4,7 @@ import { invoices, qontoTransactions } from "@shared/schema";
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db";
 import { withAudit } from "../lib/with-audit";
-import { resolveMonitoredIbans } from "@shared/domain/qonto/monitored-ibans";
+import { resolveMonitoredIbans, normalizeIban } from "@shared/domain/qonto/monitored-ibans";
 import { matchesAnyHideRule } from "@shared/domain/qonto/hide-rules";
 import { enumerateMonthlyWindows } from "@shared/domain/qonto/backfill-windows";
 import {
@@ -255,15 +255,30 @@ class QontoService {
    */
   async backfillTransactions(
     startDate: Date,
+    options?: { ibans?: string[] },
   ): Promise<{ synced: number; total: number; accounts: number; autoHidden: number }> {
     const creds = await this.getCredentials();
     if (!creds) {
       throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
     }
 
-    const ibans = await this.getMonitoredIbans();
-    if (ibans.length === 0) {
+    const monitored = await this.getMonitoredIbans();
+    if (monitored.length === 0) {
       throw new Error("Qonto-Zugangsdaten nicht konfiguriert.");
+    }
+
+    // Task #1717 — Optionaler Fokus auf ein/mehrere Konto(en) (z.B. eine neu
+    // ergänzte IBAN). Nur überwachte Konten sind zulässig; unbekannte IBANs
+    // werden ignoriert. Ohne `options.ibans` läuft der Backfill wie bisher über
+    // ALLE überwachten Konten.
+    const focus = options?.ibans;
+    const ibans = focus
+      ? monitored.filter((m) =>
+          focus.some((f) => normalizeIban(f) === normalizeIban(m)),
+        )
+      : monitored;
+    if (ibans.length === 0) {
+      throw new Error("Keine überwachte IBAN für den Backfill gefunden.");
     }
 
     const windows = enumerateMonthlyWindows(startDate, new Date());
