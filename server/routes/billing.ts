@@ -15,7 +15,7 @@ import {
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
-import { buildLexwareExportFilename, dedupeExportFilenames } from "@shared/domain/lexware-export-filename";
+import { buildInvoiceExportFilename, dedupeExportFilenames } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import {
@@ -2421,7 +2421,7 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
   const failInvoicePdfIds = readTestFailInvoicePdfIds(req);
   // Task #1631 — versendete/bezahlte Rechnungen liefern read-only die
   // versiegelten Bytes bzw. bei kundenadressierten (gemergten) Rechnungen einen
-  // frischen invoice-only Re-Render (identisch zum /lexware-export-Muster);
+  // frischen invoice-only Re-Render (identisch zum /single-pdf-export-Muster);
   // dafür werden die Company-Settings einmalig geladen. Kein Re-Seal.
   const companySettings = await getCachedCompanySettings();
   for (const inv of targets) {
@@ -2472,7 +2472,7 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
         }
       } else {
         // Task #1631 — Versendete/bezahlte Rechnung: KEIN Statuswechsel, KEIN
-        // Re-Seal. Rechnungs-Bytes wie in /lexware-export beschaffen:
+        // Re-Seal. Rechnungs-Bytes wie in /single-pdf-export beschaffen:
         //   - LN-freies versiegeltes PDF (Kasse gesetzlich / Selbstzahler):
         //     Bytes 1:1 (Cache-Miss → einmalig nachpersistieren).
         //   - kundenadressiert (gemergt: privat / rechnungAnKunde / Beihilfe):
@@ -2622,17 +2622,20 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
   res.send(outputBuffer);
 }));
 
-// Task #1459 — Phase 3: Lexware-PDF-Export. Der Admin wählt Rechnungen
-// (per IDs und/oder Zeitraum) und lädt ein ZIP, in dem JEDE Rechnung eine
-// eigene LN-FREIE PDF mit Lexware-freundlichem Dateinamen
-// (`Rechnungsnummer_Kunde_Datum.pdf`) ist.
+// Task #1695 — Einzel-PDF-Export (ehem. „Lexware-Export"). Der Admin wählt
+// Rechnungen (per IDs und/oder Zeitraum) und lädt ein ZIP, in dem JEDE Rechnung
+// eine eigene PDF mit lesbarem Dateinamen (`Rechnungsnummer_Kunde_Datum.pdf`)
+// ist. Über `includeLeistungsnachweise` wird je Rechnung der zugehörige
+// Leistungsnachweis in DIESELBE Einzel-PDF gemergt (eine Datei je Rechnung).
+// Dies ist die „Einzeln (ZIP)"-Variante des konsolidierten „Drucken"-Menüs;
+// die „Zusammengefasst"-Variante bleibt `/bulk-print-preview`.
 //
 // READ-ONLY / status-neutral — ANDERS als /bulk-print:
 //   - KEINE Status-Änderung (kein „versendet"), KEIN sentAt, KEIN Audit-Mark.
 //   - KEINE DB-Mutation; die versiegelten Originale (`pdf_path`/`pdf_hash`)
 //     werden NIE angefasst, kein Re-Seal.
 //
-// LN-frei-Beschaffung pro Rechnung (verzweigt über
+// Invoice-only-Beschaffung pro Rechnung (verzweigt über
 // `storedInvoicePdfContainsLeistungsnachweis`):
 //   - FALSE (Kasse gesetzlich / Selbstzahler): versiegeltes PDF ist bereits
 //     LN-frei → Bytes 1:1 ausliefern (kein Re-Render).
@@ -2641,19 +2644,24 @@ router.post("/bulk-print-preview", asyncHandler("Sammeldruck-Vorschau konnte nic
 //     (`buildInvoicePdfBytes(..., { invoiceOnly:true })`), NIE per Seiten-Strip.
 //     Diese Bytes sind Wegwerf-Export-Kopien (Zeitstempel ≠ versiegelter Hash —
 //     erwartet, der Export wird NICHT auf Hash-Reproduktion geprüft).
+// Danach ist das Rechnungs-PDF garantiert LN-frei; bei
+// `includeLeistungsnachweise` wird der LN (gleiche Beschaffung wie in
+// `/bulk-print-preview`: Storage-Cache → On-the-fly-Render) je Rechnung
+// angehängt.
 //
 // Stornorechnungen: wie in den Bündel-Routen (reine Stornos ausgeschlossen).
 // Render läuft AUSSERHALB jeder db.transaction/withAudit (Pool-Starvation,
 // Arch-Test no-render-inside-transaction).
-router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstellt werden", async (req, res) => {
+router.post("/single-pdf-export", asyncHandler("Einzel-PDF-Export konnte nicht erstellt werden", async (req, res) => {
   const parsed = z.object({
     invoiceIds: z.array(z.number().int().positive()).optional(),
     billingMonth: z.number().int().min(1).max(12).optional(),
     billingYear: z.number().int().min(2000).max(2100).optional(),
     insuranceProviderId: z.number().int().positive().optional(),
+    includeLeistungsnachweise: z.boolean().optional().default(false),
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
-  const { invoiceIds, billingMonth, billingYear, insuranceProviderId } = parsed.data;
+  const { invoiceIds, billingMonth, billingYear, insuranceProviderId, includeLeistungsnachweise } = parsed.data;
 
   // Rechnungen entweder über explizite IDs oder über einen Zeitraum (Monat/Jahr,
   // optional Kassen-Filter) auswählen. Mindestens eine Quelle ist erforderlich.
@@ -2693,8 +2701,10 @@ router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstell
   };
   const results: ResultEntry[] = [];
 
-  // Phase 1 — LN-freie PDF-Bytes je Rechnung beschaffen (KEIN State-Change).
-  type Rendered = { invoice: ExportInvoice; invoicePdf: Buffer };
+  // Phase 1 — Einzel-PDF-Bytes je Rechnung beschaffen (KEIN State-Change). Das
+  // Rechnungs-PDF ist stets LN-frei; bei `includeLeistungsnachweise` wird der
+  // zugehörige LN in DIESELBE Einzel-PDF gemergt.
+  type Rendered = { invoice: ExportInvoice; pdf: Buffer };
   const rendered: Rendered[] = [];
   for (const inv of invoices) {
     try {
@@ -2711,7 +2721,7 @@ router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstell
             await persistInvoicePdf(inv.id);
           } catch (err) {
             persistError = err;
-            console.error(`[billing/lexware-export] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
+            console.error(`[billing/single-pdf-export] PDF-Persistierung für Rechnung ${inv.id} fehlgeschlagen:`, err);
           }
           const refreshed = await storage.getInvoice(inv.id);
           if (refreshed) invoicePdf = await loadInvoicePdfFromStorage(refreshed);
@@ -2728,10 +2738,27 @@ router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstell
           throw classifyPdfRenderError(err, `Rechnungs-PDF ${inv.invoiceNumber}`);
         }
       }
-      rendered.push({ invoice: inv, invoicePdf });
+
+      // „+ Leistungsnachweise": LN je Rechnung beschaffen (gleiche Beschaffung
+      // wie /bulk-print-preview: versiegelter Storage-Cache → On-the-fly-Render)
+      // und in DIESELBE Einzel-PDF hinter die Rechnung mergen. Das Rechnungs-PDF
+      // ist hier garantiert LN-frei (siehe oben), daher unbedingt anhängen.
+      let pdf = invoicePdf;
+      if (includeLeistungsnachweise) {
+        let lnPdf = await loadLeistungsnachweisPdfFromStorage(inv);
+        if (!lnPdf) {
+          try {
+            lnPdf = await renderLeistungsnachweisOnTheFly(inv);
+          } catch (err) {
+            throw classifyPdfRenderError(err, `Leistungsnachweis ${inv.invoiceNumber}`);
+          }
+        }
+        pdf = await combinePdfBuffers([invoicePdf, lnPdf]);
+      }
+      rendered.push({ invoice: inv, pdf });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
-      console.error(`[billing/lexware-export] Export für Rechnung ${inv.id} fehlgeschlagen:`, err);
+      console.error(`[billing/single-pdf-export] Export für Rechnung ${inv.id} fehlgeschlagen:`, err);
       results.push({
         invoiceId: inv.id,
         invoiceNumber: inv.invoiceNumber,
@@ -2745,14 +2772,14 @@ router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstell
   if (rendered.length === 0) {
     throw new AppError(
       500,
-      "Keine der ausgewählten Rechnungen konnte für den Lexware-Export gerendert werden.",
-      "LEXWARE_EXPORT_RENDER_FAILED",
+      "Keine der ausgewählten Rechnungen konnte für den Einzel-PDF-Export gerendert werden.",
+      "SINGLE_PDF_EXPORT_RENDER_FAILED",
     );
   }
 
-  // Phase 2 — ZIP bauen (eine PDF pro Rechnung). Lexware-freundliche
-  // Dateinamen, kollisionsfrei innerhalb des Archivs.
-  const baseNames = rendered.map((r) => buildLexwareExportFilename({
+  // Phase 2 — ZIP bauen (eine PDF pro Rechnung). Lesbare Dateinamen,
+  // kollisionsfrei innerhalb des Archivs.
+  const baseNames = rendered.map((r) => buildInvoiceExportFilename({
     invoiceNumber: r.invoice.invoiceNumber,
     customerName: r.invoice.customerName,
     date: formatDateISO(r.invoice.sentAt ?? r.invoice.createdAt),
@@ -2768,7 +2795,7 @@ router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstell
     archive.on("error", (err: Error) => reject(err));
   });
   rendered.forEach((r, i) => {
-    archive.append(r.invoicePdf, { name: fileNames[i] });
+    archive.append(r.pdf, { name: fileNames[i] });
     results.push({
       invoiceId: r.invoice.id,
       invoiceNumber: r.invoice.invoiceNumber,
@@ -2788,16 +2815,16 @@ router.post("/lexware-export", asyncHandler("Lexware-Export konnte nicht erstell
     results,
   };
   log(
-    `lexware-export done total=${invoices.length} exported=${rendered.length} errors=${errors} userId=${req.user?.id ?? "?"}`,
+    `single-pdf-export done total=${invoices.length} exported=${rendered.length} errors=${errors} withLn=${includeLeistungsnachweise} userId=${req.user?.id ?? "?"}`,
     "billing",
   );
 
   const zipName = hasPeriod && !hasIds
-    ? `Lexware-Export-${String(billingMonth).padStart(2, "0")}-${billingYear}.zip`
-    : `Lexware-Export-${todayISO()}.zip`;
+    ? `Rechnungen-${String(billingMonth).padStart(2, "0")}-${billingYear}.zip`
+    : `Rechnungen-${todayISO()}.zip`;
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", `attachment; filename="${zipName}"`);
-  res.setHeader("X-Lexware-Export-Summary", encodeURIComponent(JSON.stringify(summary)));
+  res.setHeader("X-Single-Pdf-Export-Summary", encodeURIComponent(JSON.stringify(summary)));
   res.send(outputBuffer);
 }));
 

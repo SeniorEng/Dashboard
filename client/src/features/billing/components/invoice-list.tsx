@@ -6,10 +6,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { iconSize } from "@/design-system";
-import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight, FileDown, Printer } from "lucide-react";
+import { Loader2, Receipt, Trash2, ChevronDown, ChevronRight, Printer } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { InvoiceItem, InvoiceDetail as InvoiceDetailType, DeliveryRecord } from "@shared/api";
 import {
@@ -73,12 +75,15 @@ interface InvoiceListProps {
   onToggleSelectCluster: (invoiceIds: number[], checked: boolean) => void;
   onBulkDelete: () => void;
   onBulkStatus: (status: "entwurf" | "versendet" | "avis_erhalten" | "bezahlt") => void;
-  // Task #1459: Lexware-PDF-Export der ausgewählten Rechnungen (READ-ONLY).
-  onBulkLexwareExport: () => void;
-  lexwareExportPending: boolean;
-  // Task #1630: Print-only Druck der Auswahl (Rechnung + Leistungsnachweis).
-  onBulkPrintSelection: () => void;
+  // Task #1695: EIN „Drucken"-Menü für die Auswahl (READ-ONLY — kein
+  // Statuswechsel). 2×2-Matrix: Zusammengefasst (1 PDF) vs Einzeln (ZIP), je ×
+  // Nur Rechnungen vs + Leistungsnachweise. Ersetzt „Lexware-Export" und
+  // „Drucken (inkl. Leistungsnachweise)".
+  onBulkPrint: (opts: { combine: boolean; includeLeistungsnachweise: boolean }) => void;
+  // Laufender „Zusammengefasst"-Druck (1 PDF, /bulk-print-preview).
   bulkPrintPending: boolean;
+  // Laufender „Einzeln (ZIP)"-Export (/single-pdf-export).
+  singlePdfExportPending: boolean;
   bulkActionPending: boolean;
   // Task #1380: laufender Fortschritt der blockweisen Sammelaktion.
   bulkActionProgress: BulkActionProgress | null;
@@ -104,10 +109,9 @@ export function InvoiceList({
   onToggleSelectCluster,
   onBulkDelete,
   onBulkStatus,
-  onBulkLexwareExport,
-  lexwareExportPending,
-  onBulkPrintSelection,
+  onBulkPrint,
   bulkPrintPending,
+  singlePdfExportPending,
   bulkActionPending,
   bulkActionProgress,
 }: InvoiceListProps) {
@@ -224,38 +228,57 @@ export function InvoiceList({
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                {/* Task #1459: Lexware-PDF-Export der Auswahl (READ-ONLY — kein
-                    Status-Change). Lädt ein ZIP mit je einer LN-freien PDF. */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onBulkLexwareExport}
-                  disabled={lexwareExportPending}
-                  data-testid="button-bulk-lexware-export"
-                >
-                  {lexwareExportPending ? (
-                    <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
-                  ) : (
-                    <FileDown className={`${iconSize.sm} mr-1`} />
-                  )}
-                  Lexware-Export
-                </Button>
-                {/* Task #1630: Print-only Druck der Auswahl (Rechnung +
-                    Leistungsnachweis). READ-ONLY — kein Statuswechsel. */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onBulkPrintSelection}
-                  disabled={bulkPrintPending}
-                  data-testid="button-bulk-print-selection"
-                >
-                  {bulkPrintPending ? (
-                    <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
-                  ) : (
-                    <Printer className={`${iconSize.sm} mr-1`} />
-                  )}
-                  Drucken (inkl. Leistungsnachweise)
-                </Button>
+                {/* Task #1695: EIN „Drucken"-Menü für die Auswahl (READ-ONLY —
+                    kein Statuswechsel). 2×2-Matrix: Zusammengefasst (1 PDF) vs
+                    Einzeln (ZIP), je × Nur Rechnungen vs + Leistungsnachweise.
+                    Ersetzt „Lexware-Export" + „Drucken (inkl. LN)". */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={bulkPrintPending || singlePdfExportPending}
+                      data-testid="button-bulk-print"
+                    >
+                      {bulkPrintPending || singlePdfExportPending ? (
+                        <Loader2 className={`${iconSize.sm} mr-1 animate-spin`} />
+                      ) : (
+                        <Printer className={`${iconSize.sm} mr-1`} />
+                      )}
+                      Drucken
+                      <ChevronDown className={`${iconSize.sm} ml-1`} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuLabel>Zusammengefasst (1 PDF)</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onSelect={() => onBulkPrint({ combine: true, includeLeistungsnachweise: false })}
+                      data-testid="button-bulk-print-combined-invoices-only"
+                    >
+                      Nur Rechnungen
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => onBulkPrint({ combine: true, includeLeistungsnachweise: true })}
+                      data-testid="button-bulk-print-combined-with-ln"
+                    >
+                      + Leistungsnachweise
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>Einzeln (ZIP)</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onSelect={() => onBulkPrint({ combine: false, includeLeistungsnachweise: false })}
+                      data-testid="button-bulk-print-single-invoices-only"
+                    >
+                      Nur Rechnungen
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => onBulkPrint({ combine: false, includeLeistungsnachweise: true })}
+                      data-testid="button-bulk-print-single-with-ln"
+                    >
+                      + Leistungsnachweise
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button
                   variant="outline"
                   size="sm"

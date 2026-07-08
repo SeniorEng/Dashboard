@@ -175,7 +175,7 @@ export default function AdminBilling() {
     batchSendMutation,
     bulkSendMutation,
     bulkPrintPreviewMutation,
-    lexwareExportMutation,
+    singlePdfExportMutation,
     sendingInvoiceId,
     batchSending,
     generateAllProgress,
@@ -230,21 +230,20 @@ export default function AdminBilling() {
     bulkPrintPreviewMutation.mutate({ groupByPayer: false, includeLeistungsnachweise });
   };
 
-  const handleBulkLexwareExport = () => {
-    const ids = Array.from(selectedIds);
-    if (ids.length === 0) {
-      toast({ title: "Keine Rechnungen ausgewählt", variant: "destructive" });
-      return;
-    }
-    lexwareExportMutation.mutate(ids);
-  };
-
-  // Task #1630/#1631: Print-only Druck der aktuellen Auswahl (Rechnung +
-  // Leistungsnachweis), rein lesend — KEIN Statuswechsel. Neben Entwürfen
-  // dürfen auch bereits versendete/bezahlte Rechnungen als read-only Nachdruck-/
-  // Archiv-Bündel gedruckt werden (versiegelte Bytes, kein Re-Seal); lediglich
-  // reine Stornorechnungen sind ausgeschlossen.
-  const handleBulkPrintSelection = () => {
+  // Task #1695: EIN „Drucken"-Menü für die aktuelle Auswahl, rein lesend — KEIN
+  // Statuswechsel. 2×2-Matrix: Zusammengefasst (1 PDF, /bulk-print-preview) vs
+  // Einzeln (ZIP, /single-pdf-export), je × Nur Rechnungen vs +
+  // Leistungsnachweise. Neben Entwürfen dürfen auch bereits versendete/bezahlte
+  // Rechnungen als read-only Nachdruck-/Archiv-Bündel gedruckt werden
+  // (versiegelte Bytes, kein Re-Seal); reine Stornorechnungen sind
+  // ausgeschlossen. Ersetzt handleBulkLexwareExport + handleBulkPrintSelection.
+  const handleBulkPrint = ({
+    combine,
+    includeLeistungsnachweise,
+  }: {
+    combine: boolean;
+    includeLeistungsnachweise: boolean;
+  }) => {
     if (selectedIds.size === 0) {
       toast({ title: "Keine Rechnungen ausgewählt", variant: "destructive" });
       return;
@@ -265,11 +264,18 @@ export default function AdminBilling() {
       });
       return;
     }
-    bulkPrintPreviewMutation.mutate({
-      groupByPayer: false,
-      includeLeistungsnachweise: true,
-      invoiceIds: printableIds,
-    });
+    if (combine) {
+      bulkPrintPreviewMutation.mutate({
+        groupByPayer: false,
+        includeLeistungsnachweise,
+        invoiceIds: printableIds,
+      });
+    } else {
+      singlePdfExportMutation.mutate({
+        invoiceIds: printableIds,
+        includeLeistungsnachweise,
+      });
+    }
   };
 
   const handleGenerate = () => {
@@ -511,10 +517,9 @@ export default function AdminBilling() {
             onToggleSelectCluster={handleToggleSelectCluster}
             onBulkDelete={() => setPendingBulkAction({ type: "delete" })}
             onBulkStatus={(status) => setPendingBulkAction({ type: "status", status })}
-            onBulkLexwareExport={handleBulkLexwareExport}
-            lexwareExportPending={lexwareExportMutation.isPending}
-            onBulkPrintSelection={handleBulkPrintSelection}
+            onBulkPrint={handleBulkPrint}
             bulkPrintPending={bulkPrintPreviewMutation.isPending}
+            singlePdfExportPending={singlePdfExportMutation.isPending}
             bulkActionPending={bulkActionPending}
             bulkActionProgress={bulkActionProgress}
           />

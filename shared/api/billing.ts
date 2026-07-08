@@ -236,11 +236,13 @@ export interface BulkPrintSummary {
   }>;
 }
 
-// Task #1459 — Lexware-Export: Zusammenfassung, die der binäre
-// `/billing/lexware-export` ZIP-Download im `X-Lexware-Export-Summary`-Header
-// (URL-encodiertes JSON) mitliefert. READ-ONLY — KEIN Status-/Markierungs-Feld
-// (anders als BulkPrintSummary: kein `marked`), da der Export NICHTS mutiert.
-export interface LexwareExportSummary {
+// Task #1695 — Einzel-PDF-Export (ehem. „Lexware-Export"): Zusammenfassung, die
+// der binäre `/billing/single-pdf-export` ZIP-Download im
+// `X-Single-Pdf-Export-Summary`-Header (URL-encodiertes JSON) mitliefert. Je
+// Rechnung genau eine PDF (optional inkl. Leistungsnachweis). READ-ONLY — KEIN
+// Status-/Markierungs-Feld (anders als BulkPrintSummary: kein `marked`), da der
+// Export NICHTS mutiert.
+export interface SinglePdfExportSummary {
   total: number;
   exported: number;
   errors: number;

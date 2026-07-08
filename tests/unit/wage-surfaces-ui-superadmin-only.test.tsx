@@ -222,7 +222,7 @@ vi.mock("@/features/billing", () => ({
     batchSendMutation: mutation(),
     bulkSendMutation: mutation(),
     bulkPrintPreviewMutation: mutation(),
-    lexwareExportMutation: mutation(),
+    singlePdfExportMutation: mutation(),
     sendingInvoiceId: null,
     batchSending: false,
     generateAllProgress: null,

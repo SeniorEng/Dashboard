@@ -1,9 +1,9 @@
 /**
- * Task #1459 — Lexware-PDF-Export.
+ * Task #1695 — Einzel-PDF-Export (ehem. „Lexware-Export").
  *
- * Pure Datei-Namens-Helfer für den Lexware-Bulk-PDF-Export auf /admin/billing.
- * Jede exportierte Rechnung wird als eigene LN-freie PDF in ein ZIP gepackt;
- * der Eintrags-Name folgt dem Lexware-freundlichen Muster
+ * Pure Datei-Namens-Helfer für den „Einzeln (ZIP)"-Rechnungsdruck auf
+ * /admin/billing. Jede Rechnung wird als eigene PDF (optional inkl.
+ * Leistungsnachweis) in ein ZIP gepackt; der Eintrags-Name folgt dem Muster
  * `Rechnungsnummer_Kunde_Datum.pdf` (filesystem-sicher sanitisiert).
  *
  * Reine String-Logik (kein DB-/IO-Zugriff), bewusst NICHT als
@@ -27,7 +27,7 @@ export function sanitizeExportSegment(input: string | null | undefined, fallback
   return cleaned || fallback;
 }
 
-export interface LexwareExportFilenameInput {
+export interface InvoiceExportFilenameInput {
   invoiceNumber: string;
   customerName?: string | null;
   /** Anzeigedatum für den Dateinamen (ISO yyyy-mm-dd bevorzugt). */
@@ -35,12 +35,12 @@ export interface LexwareExportFilenameInput {
 }
 
 /**
- * Baut den Lexware-freundlichen Basis-Dateinamen (inkl. `.pdf`-Endung) aus
- * Rechnungsnummer, Kundenname und Datum: `Rechnungsnummer_Kunde_Datum.pdf`.
- * Jedes Segment wird einzeln sanitisiert, sodass das Trenn-`_` zwischen den
- * Feldern erhalten bleibt.
+ * Baut den Basis-Dateinamen (inkl. `.pdf`-Endung) aus Rechnungsnummer,
+ * Kundenname und Datum: `Rechnungsnummer_Kunde_Datum.pdf`. Jedes Segment wird
+ * einzeln sanitisiert, sodass das Trenn-`_` zwischen den Feldern erhalten
+ * bleibt.
  */
-export function buildLexwareExportFilename(input: LexwareExportFilenameInput): string {
+export function buildInvoiceExportFilename(input: InvoiceExportFilenameInput): string {
   const number = sanitizeExportSegment(input.invoiceNumber, "Rechnung");
   const customer = sanitizeExportSegment(input.customerName, "Kunde");
   const date = sanitizeExportSegment(input.date, "Datum");

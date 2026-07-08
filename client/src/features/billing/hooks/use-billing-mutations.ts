@@ -10,7 +10,7 @@ import type {
   BatchSendInvoiceResponse as BatchSendResponse,
   BulkSendInvoiceResponse,
   BulkPrintSummary,
-  LexwareExportSummary,
+  SinglePdfExportSummary,
   DiscardDraftsResponse,
   BulkDeleteResponse,
   BulkStatusResponse,
@@ -70,8 +70,8 @@ export function useBillingMutations({
   const [generateAllProgress, setGenerateAllProgress] = useState<GenerateAllResponse | null>(null);
   const [bulkSendResult, setBulkSendResult] = useState<BulkSendInvoiceResponse | null>(null);
   const [bulkPrintResult, setBulkPrintResult] = useState<BulkPrintSummary | null>(null);
-  // Task #1459: Ergebnis des letzten Lexware-Exports (READ-ONLY, kein State-Change).
-  const [lexwareExportResult, setLexwareExportResult] = useState<LexwareExportSummary | null>(null);
+  // Task #1695: Ergebnis des letzten Einzel-PDF-Exports (READ-ONLY, kein State-Change).
+  const [singlePdfExportResult, setSinglePdfExportResult] = useState<SinglePdfExportSummary | null>(null);
   // Task #1380: laufender Fortschritt der blockweisen Sammelaktionen
   // (Löschen / Statuswechsel). `null` = keine Aktion läuft.
   const [bulkActionProgress, setBulkActionProgress] = useState<BulkActionProgress | null>(null);
@@ -411,18 +411,20 @@ export function useBillingMutations({
     },
   });
 
-  // Task #1459: Lexware-PDF-Export. Lädt ein ZIP mit je einer LN-freien PDF pro
-  // ausgewählter Rechnung (Dateiname Rechnungsnummer_Kunde_Datum.pdf).
-  // READ-ONLY: KEIN Status-Change, KEINE Markierung als „versendet", daher
-  // bewusst KEIN invalidateRelated/refetch (nichts hat sich serverseitig
-  // geändert). Auswahl per Rechnungs-IDs.
-  const lexwareExportMutation = useMutation({
-    mutationFn: async (invoiceIds: number[]) => {
-      setLexwareExportResult(null);
-      const result = await api.postBlob<LexwareExportSummary>(
-        "/billing/lexware-export",
-        { invoiceIds },
-        "X-Lexware-Export-Summary",
+  // Task #1695: Einzel-PDF-Export („Einzeln (ZIP)"-Variante des „Drucken"-Menüs).
+  // Lädt ein ZIP mit je einer PDF pro ausgewählter Rechnung (Dateiname
+  // Rechnungsnummer_Kunde_Datum.pdf). Über `includeLeistungsnachweise` wird je
+  // Rechnung der Leistungsnachweis in DIESELBE Einzel-PDF gemergt. READ-ONLY:
+  // KEIN Status-Change, KEINE Markierung als „versendet", daher bewusst KEIN
+  // invalidateRelated/refetch (nichts hat sich serverseitig geändert). Auswahl
+  // per Rechnungs-IDs.
+  const singlePdfExportMutation = useMutation({
+    mutationFn: async (opts: { invoiceIds: number[]; includeLeistungsnachweise: boolean }) => {
+      setSinglePdfExportResult(null);
+      const result = await api.postBlob<SinglePdfExportSummary>(
+        "/billing/single-pdf-export",
+        { invoiceIds: opts.invoiceIds, includeLeistungsnachweise: opts.includeLeistungsnachweise },
+        "X-Single-Pdf-Export-Summary",
       );
       return unwrapResult(result);
     },
@@ -437,17 +439,17 @@ export function useBillingMutations({
       a.remove();
       URL.revokeObjectURL(url);
 
-      setLexwareExportResult(data.summary);
+      setSinglePdfExportResult(data.summary);
       const s = data.summary;
       toast({
-        title: "Lexware-Export erstellt",
+        title: "Einzel-PDF-Export erstellt",
         description: s
           ? `${s.exported} exportiert, ${s.errors} Fehler`
           : "Download wurde gestartet.",
       });
     },
     onError: (error: Error) => {
-      toast({ title: "Lexware-Export fehlgeschlagen", description: error.message, variant: "destructive" });
+      toast({ title: "Einzel-PDF-Export fehlgeschlagen", description: error.message, variant: "destructive" });
     },
   });
 
@@ -556,7 +558,7 @@ export function useBillingMutations({
     batchSendMutation,
     bulkSendMutation,
     bulkPrintPreviewMutation,
-    lexwareExportMutation,
+    singlePdfExportMutation,
     sendingInvoiceId,
     batchSending,
     generateAllProgress,
@@ -565,8 +567,8 @@ export function useBillingMutations({
     setBulkSendResult,
     bulkPrintResult,
     setBulkPrintResult,
-    lexwareExportResult,
-    setLexwareExportResult,
+    singlePdfExportResult,
+    setSinglePdfExportResult,
     bulkActionProgress,
   };
 }

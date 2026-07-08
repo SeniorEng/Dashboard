@@ -1,20 +1,25 @@
 /**
- * Task #1459 — Phase 3: Lexware-PDF-Export (POST /api/billing/lexware-export)
+ * Task #1695 — Einzel-PDF-Export (POST /api/billing/single-pdf-export)
  *
- * Der Admin wählt Rechnungen (per IDs und/oder Zeitraum) und lädt ein ZIP, in
- * dem JEDE Rechnung als eigene, LN-FREIE PDF mit Lexware-freundlichem Dateinamen
- * (`Rechnungsnummer_Kunde_Datum.pdf`) liegt.
+ * Die „Einzeln (ZIP)"-Variante des konsolidierten „Drucken"-Menüs. Der Admin
+ * wählt Rechnungen (per IDs und/oder Zeitraum) und lädt ein ZIP, in dem JEDE
+ * Rechnung als eigene PDF mit lesbarem Dateinamen
+ * (`Rechnungsnummer_Kunde_Datum.pdf`) liegt. Über `includeLeistungsnachweise`
+ * wird je Rechnung der zugehörige Leistungsnachweis in DIESELBE Einzel-PDF
+ * gemergt (eine Datei je Rechnung).
  *
  * Dieser Test fixiert die Kern-Invarianten der Route:
  *   1. Genau EINE PDF pro ausgewählter Rechnung im ZIP.
- *   2. Jede PDF ist LN-FREI — sowohl für den 1:1-Pfad (gesetzliche Kasse,
- *      versiegeltes PDF ist bereits ohne LN) als auch für den invoice-only-
- *      Re-Render-Pfad (privat: das versiegelte PDF ist Rechnung+LN gemergt, der
- *      Export rendert die Rechnung ohne LN neu).
- *   3. READ-ONLY: Status bleibt `entwurf` (kein „versendet"), und das versiegelte
+ *   2. „Nur Rechnungen": Jede PDF ist LN-FREI — sowohl für den 1:1-Pfad
+ *      (gesetzliche Kasse, versiegeltes PDF ist bereits ohne LN) als auch für
+ *      den invoice-only-Re-Render-Pfad (privat: das versiegelte PDF ist
+ *      Rechnung+LN gemergt, der Export rendert die Rechnung ohne LN neu).
+ *   3. „+ Leistungsnachweise": Jede PDF enthält genau EINEN LN, in dieselbe
+ *      Einzel-PDF gemergt.
+ *   4. READ-ONLY: Status bleibt `entwurf` (kein „versendet"), und das versiegelte
  *      Original-PDF (pdfHash + LN im Bündel) ist nach dem Export BYTE-unverändert.
- *   4. Reine Stornorechnungen werden vom Export ausgeschlossen.
- *   5. Dateinamen folgen dem Lexware-Muster und sind innerhalb des ZIP eindeutig.
+ *   5. Reine Stornorechnungen werden vom Export ausgeschlossen.
+ *   6. Dateinamen folgen dem Muster und sind innerhalb des ZIP eindeutig.
  *
  * Tests laufen seriell gegen eine isolierte Wegwerf-Test-DB pro Worker; jeder
  * Test legt eigene Kunden an und räumt im afterAll auf.
@@ -219,13 +224,14 @@ async function readZipPdfEntries(buf: Buffer): Promise<ZipPdfEntry[]> {
   return out;
 }
 
-async function lexwareExport(body: {
+async function singlePdfExport(body: {
   invoiceIds?: number[];
   billingMonth?: number;
   billingYear?: number;
   insuranceProviderId?: number;
+  includeLeistungsnachweise?: boolean;
 }): Promise<{ status: number; contentType: string; buffer: Buffer; summaryHeader: string | null }> {
-  const res = await fetch(`${BASE_URL}/api/billing/lexware-export`, {
+  const res = await fetch(`${BASE_URL}/api/billing/single-pdf-export`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -238,7 +244,7 @@ async function lexwareExport(body: {
     status: res.status,
     contentType: res.headers.get("content-type") ?? "",
     buffer: Buffer.from(await res.arrayBuffer()),
-    summaryHeader: res.headers.get("x-lexware-export-summary"),
+    summaryHeader: res.headers.get("x-single-pdf-export-summary"),
   };
 }
 
@@ -278,8 +284,8 @@ afterAll(async () => {
   }
 });
 
-describe("Lexware-Export: LN-freies ZIP, eine PDF pro Rechnung, READ-ONLY (Task #1459)", () => {
-  it("exportiert je eine LN-freie PDF pro Rechnung (1:1- und Re-Render-Pfad) ohne Status-Änderung", async () => {
+describe("Einzel-PDF-Export: eine PDF pro Rechnung, LN-Merge optional, READ-ONLY (Task #1695)", () => {
+  it("exportiert je eine LN-freie PDF pro Rechnung (1:1- und Re-Render-Pfad) ohne Status-Aenderung; +LN mergt je einen LN", async () => {
     const { year, month } = recentPastWeekdayAnchor();
 
     // Gesetzliche Kasse → versiegeltes PDF ist bereits LN-FREI (1:1-Pfad).
@@ -352,9 +358,9 @@ describe("Lexware-Export: LN-freies ZIP, eine PDF pro Rechnung, READ-ONLY (Task 
     const sealedPvBundle = await fetchBundlePdf(pvIds[0]);
     expect(await countLeistungsnachweise(sealedPvBundle), "privat sealed = 1 LN").toBe(1);
 
-    // ---- Export beider Rechnungen ----
-    const out = await lexwareExport({ invoiceIds: [gkIds[0], pvIds[0]] });
-    expect(out.status, "lexware-export HTTP 200").toBe(200);
+    // ---- „Nur Rechnungen": Export beider Rechnungen ohne LN ----
+    const out = await singlePdfExport({ invoiceIds: [gkIds[0], pvIds[0]] });
+    expect(out.status, "single-pdf-export HTTP 200").toBe(200);
     expect(out.contentType).toContain("application/zip");
 
     const entries = await readZipPdfEntries(out.buffer);
@@ -364,12 +370,12 @@ describe("Lexware-Export: LN-freies ZIP, eine PDF pro Rechnung, READ-ONLY (Task 
       expect(e.content.subarray(0, 5).toString("latin1"), `${e.name} ist ein PDF`).toBe("%PDF-");
       // 2. Jede PDF ist LN-FREI.
       expect(await countLeistungsnachweise(e.content), `${e.name} LN-frei`).toBe(0);
-      // 5. Dateiname folgt dem Lexware-Muster Rechnungsnummer_Kunde_Datum.pdf.
-      expect(e.name, `${e.name} folgt dem Lexware-Muster`).toMatch(
+      // 6. Dateiname folgt dem Muster Rechnungsnummer_Kunde_Datum.pdf.
+      expect(e.name, `${e.name} folgt dem Muster`).toMatch(
         /^[A-Za-z0-9_-]+_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+\.pdf$/,
       );
     }
-    // 5. Dateinamen eindeutig.
+    // 6. Dateinamen eindeutig.
     const lowerNames = entries.map((e) => e.name.toLowerCase());
     expect(new Set(lowerNames).size, "Dateinamen eindeutig").toBe(entries.length);
 
@@ -383,11 +389,26 @@ describe("Lexware-Export: LN-freies ZIP, eine PDF pro Rechnung, READ-ONLY (Task 
     expect(summary.exported).toBe(2);
     expect(summary.errors).toBe(0);
 
-    // 3. READ-ONLY: Status bleibt entwurf (KEIN „versendet").
+    // ---- „+ Leistungsnachweise": je eine PDF mit genau EINEM gemergten LN ----
+    const outLn = await singlePdfExport({
+      invoiceIds: [gkIds[0], pvIds[0]],
+      includeLeistungsnachweise: true,
+    });
+    expect(outLn.status, "single-pdf-export +LN HTTP 200").toBe(200);
+    const entriesLn = await readZipPdfEntries(outLn.buffer);
+    // 1. Weiterhin genau eine (jetzt gemergte) PDF pro Rechnung.
+    expect(entriesLn.length, "+LN: eine PDF pro Rechnung").toBe(2);
+    for (const e of entriesLn) {
+      expect(e.content.subarray(0, 5).toString("latin1"), `${e.name} ist ein PDF`).toBe("%PDF-");
+      // 3. Genau EIN LN je Rechnung, in dieselbe Einzel-PDF gemergt.
+      expect(await countLeistungsnachweise(e.content), `${e.name} enthält genau 1 LN`).toBe(1);
+    }
+
+    // 4. READ-ONLY: Status bleibt entwurf (KEIN „versendet").
     expect(await getInvoiceStatus(gkIds[0], year, month), "gk Status unverändert").toBe("entwurf");
     expect(await getInvoiceStatus(pvIds[0], year, month), "pv Status unverändert").toBe("entwurf");
 
-    // 3. READ-ONLY: versiegeltes Privat-PDF unverändert (LN weiterhin enthalten).
+    // 4. READ-ONLY: versiegeltes Privat-PDF unverändert (LN weiterhin enthalten).
     const sealedPvAfter = await fetchBundlePdf(pvIds[0]);
     expect(await countLeistungsnachweise(sealedPvAfter), "privat sealed nach Export = 1 LN").toBe(1);
   }, 300_000);
@@ -443,7 +464,7 @@ describe("Lexware-Export: LN-freies ZIP, eine PDF pro Rechnung, READ-ONLY (Task 
     const stornoNumbers = new Set(stornoBelege.map((inv) => inv.invoiceNumber));
 
     // Export über den Zeitraum: die Stornorechnung darf NICHT im ZIP landen.
-    const out = await lexwareExport({ billingMonth: month, billingYear: year, insuranceProviderId: provider.id });
+    const out = await singlePdfExport({ billingMonth: month, billingYear: year, insuranceProviderId: provider.id });
     expect(out.status).toBe(200);
     const summary = JSON.parse(decodeURIComponent(out.summaryHeader!)) as { results: Array<{ invoiceId: number; invoiceNumber: string }> };
     for (const r of summary.results) {
@@ -452,7 +473,7 @@ describe("Lexware-Export: LN-freies ZIP, eine PDF pro Rechnung, READ-ONLY (Task 
   }, 300_000);
 
   it("lehnt eine Anfrage ohne IDs und ohne Zeitraum ab (400)", async () => {
-    const out = await lexwareExport({});
+    const out = await singlePdfExport({});
     expect(out.status).toBe(400);
   });
 });

@@ -114,10 +114,9 @@ function Harness({ invoices }: { invoices: InvoiceItem[] }) {
       }
       onBulkDelete={vi.fn()}
       onBulkStatus={vi.fn()}
-      onBulkLexwareExport={vi.fn()}
-      lexwareExportPending={false}
-      onBulkPrintSelection={vi.fn()}
+      onBulkPrint={vi.fn()}
       bulkPrintPending={false}
+      singlePdfExportPending={false}
       bulkActionPending={false}
       bulkActionProgress={null}
     />
