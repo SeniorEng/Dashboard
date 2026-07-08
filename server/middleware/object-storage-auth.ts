@@ -116,6 +116,57 @@ async function checkEmployeeAccess(
   return false;
 }
 
+// Resolviert den ursprünglichen, menschenlesbaren Dateinamen (DB-`fileName`) zu
+// einem `/objects/...`-Pfad, damit der `/objects/*`-Download-Stream einen
+// sprechenden `Content-Disposition`-Namen (statt der UUID aus dem Objektpfad)
+// setzen kann. Prüft alle Tabellen, die einen `objectPath` referenzieren.
+// Gibt `undefined` zurück, wenn kein Datensatz passt (z.B. Logos) — dann bleibt
+// das bisherige Verhalten (Browser leitet den Namen aus dem Pfad ab) erhalten.
+export async function resolveObjectFilename(
+  objectPath: string,
+): Promise<string | undefined> {
+  const pathVariants = getPathVariants(objectPath);
+
+  const [empDoc, proofDoc, custDoc, genDoc] = await Promise.all([
+    db
+      .select({ fileName: employeeDocuments.fileName })
+      .from(employeeDocuments)
+      .where(orForPaths(employeeDocuments.objectPath, pathVariants))
+      .limit(1),
+    db
+      .select({ fileName: employeeDocumentProofs.fileName })
+      .from(employeeDocumentProofs)
+      .where(orForPaths(employeeDocumentProofs.objectPath, pathVariants))
+      .limit(1),
+    db
+      .select({ fileName: customerDocuments.fileName })
+      .from(customerDocuments)
+      .where(orForPaths(customerDocuments.objectPath, pathVariants))
+      .limit(1),
+    db
+      .select({ fileName: generatedDocuments.fileName })
+      .from(generatedDocuments)
+      .where(orForPaths(generatedDocuments.objectPath, pathVariants))
+      .limit(1),
+  ]);
+
+  return (
+    empDoc[0]?.fileName ??
+    proofDoc[0]?.fileName ??
+    custDoc[0]?.fileName ??
+    genDoc[0]?.fileName ??
+    undefined
+  );
+}
+
+function orForPaths(
+  column: Parameters<typeof eq>[0],
+  pathVariants: string[],
+) {
+  const conditions = pathVariants.map((p) => eq(column, p));
+  return conditions.length > 1 ? or(...conditions) : conditions[0];
+}
+
 async function checkCustomerAccess(
   pathVariants: string[],
   userId: number
