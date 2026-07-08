@@ -129,6 +129,15 @@ export function TransactionsTab({
   // 1:1-Match, 2+ ⇒ Sammel-Bulk-Match. Wird beim Schließen des Panels geleert.
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<number[]>([]);
 
+  // Task #1711 — Bestätigungsdialog, wenn die Summe der gewählten Rechnungen
+  // vom Zahlbetrag abweicht.
+  const [mismatchConfirm, setMismatchConfirm] = useState<{
+    txId: number;
+    selectedSum: number;
+    txAmount: number;
+    count: number;
+  } | null>(null);
+
   const {
     matchMutation,
     bulkMatchMutation,
@@ -158,12 +167,29 @@ export function TransactionsTab({
     setSelectedInvoiceIds([]);
   };
 
-  const submitMatch = (txId: number) => {
+  const runMatch = (txId: number) => {
     if (selectedInvoiceIds.length === 1) {
       matchMutation.mutate({ txId, invoiceId: selectedInvoiceIds[0] });
     } else if (selectedInvoiceIds.length >= 2) {
       bulkMatchMutation.mutate({ txId, invoiceIds: selectedInvoiceIds });
     }
+  };
+
+  const submitMatch = (txId: number) => {
+    const tx = (transactionsQuery.data?.transactions ?? []).find(t => t.id === txId);
+    if (!tx) return;
+    const selectedSum = (invoicesQuery.data ?? [])
+      .filter(inv => selectedInvoiceIds.includes(inv.id))
+      .reduce((acc, inv) => acc + inv.grossAmountCents, 0);
+    const txAmount = Math.abs(tx.amountCents);
+    // Task #1711 — Weicht die Summe der gewählten Rechnungen vom Zahlbetrag ab,
+    // ist eine explizite Bestätigung Pflicht (Fehl-Zuordnungen sind mühsam zu
+    // korrigieren). Exakte Treffer werden direkt mit einem Klick zugeordnet.
+    if (selectedSum !== txAmount) {
+      setMismatchConfirm({ txId, selectedSum, txAmount, count: selectedInvoiceIds.length });
+      return;
+    }
+    runMatch(txId);
   };
 
   // Task #1672 — rückwirkende Sammel-Avis-Vorschläge (nur relevant, solange
@@ -755,6 +781,45 @@ export function TransactionsTab({
               data-testid="button-confirm-backfill"
             >
               Abruf starten
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Task #1711 — Explizite Bestätigung bei abweichender Summe. */}
+      <AlertDialog
+        open={mismatchConfirm !== null}
+        onOpenChange={open => {
+          if (!open) setMismatchConfirm(null);
+        }}
+      >
+        <AlertDialogContent data-testid="dialog-match-mismatch">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Summe weicht ab — trotzdem zuordnen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {mismatchConfirm && (
+                <>
+                  Die Summe der {mismatchConfirm.count}{" "}
+                  {mismatchConfirm.count === 1 ? "gewählten Rechnung" : "gewählten Rechnungen"} (
+                  {formatCents(mismatchConfirm.selectedSum)}) stimmt nicht mit dem
+                  Zahlbetrag ({formatCents(mismatchConfirm.txAmount)}) überein — Differenz{" "}
+                  {formatCents(Math.abs(mismatchConfirm.selectedSum - mismatchConfirm.txAmount))}.
+                  Fehl-Zuordnungen einer Sammelzahlung sind mühsam zu korrigieren.
+                  Möchtest du die Zuordnung trotzdem vornehmen?
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-mismatch">Abbrechen</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (mismatchConfirm) runMatch(mismatchConfirm.txId);
+                setMismatchConfirm(null);
+              }}
+              data-testid="button-confirm-mismatch"
+            >
+              Trotzdem zuordnen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
