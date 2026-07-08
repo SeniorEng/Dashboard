@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildSpeakingInvoiceFilename,
+  buildSpeakingKassenBundleFilename,
   sanitizeSpeakingSegment,
   buildContentDisposition,
 } from "@shared/domain/invoice-export-filename";
@@ -88,6 +89,63 @@ describe("buildSpeakingInvoiceFilename", () => {
         kind: "invoice",
       }),
     ).toBe("RE-2026-0034 - Kunde - Rechnung.pdf");
+  });
+});
+
+describe("buildSpeakingKassenBundleFilename", () => {
+  it("baut den Bündel-Namen im Muster `Pflegekasse - YYYY-MM - Sammelbündel` (pdf)", () => {
+    expect(
+      buildSpeakingKassenBundleFilename({
+        providerName: "AOK Bayern",
+        year: 2026,
+        month: 3,
+        extension: "pdf",
+      }),
+    ).toBe("AOK Bayern - 2026-03 - Sammelbündel.pdf");
+  });
+
+  it("nutzt die zip-Endung im ZIP-Modus", () => {
+    expect(
+      buildSpeakingKassenBundleFilename({
+        providerName: "AOK Bayern",
+        year: 2026,
+        month: 12,
+        extension: "zip",
+      }),
+    ).toBe("AOK Bayern - 2026-12 - Sammelbündel.zip");
+  });
+
+  it("bewahrt Umlaute im Kassennamen", () => {
+    expect(
+      buildSpeakingKassenBundleFilename({
+        providerName: "Techniker Krankenkasse Süd",
+        year: 2026,
+        month: 1,
+        extension: "pdf",
+      }),
+    ).toBe("Techniker Krankenkasse Süd - 2026-01 - Sammelbündel.pdf");
+  });
+
+  it("entfernt filesystem-unsichere Zeichen aus dem Kassennamen", () => {
+    expect(
+      buildSpeakingKassenBundleFilename({
+        providerName: "AOK/Bayern:Süd",
+        year: 2026,
+        month: 6,
+        extension: "zip",
+      }),
+    ).toBe("AOK Bayern Süd - 2026-06 - Sammelbündel.zip");
+  });
+
+  it("fällt auf `Pflegekasse` zurück, wenn der Name fehlt", () => {
+    expect(
+      buildSpeakingKassenBundleFilename({
+        providerName: null,
+        year: 2026,
+        month: 7,
+        extension: "pdf",
+      }),
+    ).toBe("Pflegekasse - 2026-07 - Sammelbündel.pdf");
   });
 });
 

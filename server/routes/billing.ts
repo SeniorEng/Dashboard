@@ -15,7 +15,7 @@ import {
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
-import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
+import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import {
@@ -1141,9 +1141,6 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
     pairs.push({ invoiceNumber: inv.invoiceNumber, invoicePdf, lnPdf, appendLn });
   }
 
-  const safeProviderSlug = providerName.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "Kasse";
-  const baseFileName = `Buendel-${safeProviderSlug}-${String(month).padStart(2, "0")}-${year}`;
-
   if (format === "pdf") {
     const { PDFDocument } = await import("pdf-lib");
     const merged = await PDFDocument.create();
@@ -1159,14 +1156,20 @@ router.get("/bundle-by-payer", asyncHandler("Krankenkassen-Bündel konnte nicht 
     }
     const bytes = Buffer.from(await merged.save());
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${baseFileName}.pdf"`);
+    res.setHeader("Content-Disposition", buildContentDisposition(
+      buildSpeakingKassenBundleFilename({ providerName, year, month, extension: "pdf" }),
+      "inline",
+    ));
     return res.send(bytes);
   }
 
   // format === "zip"
   const archiver = (await import("archiver")).default;
   res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename="${baseFileName}.zip"`);
+  res.setHeader("Content-Disposition", buildContentDisposition(
+    buildSpeakingKassenBundleFilename({ providerName, year, month, extension: "zip" }),
+    "attachment",
+  ));
   const archive = archiver("zip", { zlib: { level: 6 } });
   archive.on("error", (err: Error) => {
     console.error("[billing/bundle-by-payer] archive error:", err);

@@ -125,6 +125,26 @@ export function buildSpeakingInvoiceFilename(input: SpeakingInvoiceFilenameInput
 }
 
 /**
+ * Task #1698 — „Sprechender" Datei-Name für den Krankenkassen-Bündel-Download
+ * (ein Monat + eine Pflegekasse, als zusammengeführtes PDF oder ZIP). Analog zu
+ * `buildSpeakingInvoiceFilename` bleiben Umlaute BEWAHRT, nur filesystem-
+ * Unsicheres wird entfernt. Format: `<Pflegekasse> - <YYYY-MM> - Sammelbündel.<ext>`.
+ * Abgegrenzt vom monatsweiten Sammeldruck (bleibt unverändert).
+ */
+export interface SpeakingKassenBundleFilenameInput {
+  providerName?: string | null;
+  year: number;
+  month: number;
+  extension: "pdf" | "zip";
+}
+
+export function buildSpeakingKassenBundleFilename(input: SpeakingKassenBundleFilenameInput): string {
+  const provider = sanitizeSpeakingSegment(input.providerName, "Pflegekasse");
+  const period = `${input.year}-${String(input.month).padStart(2, "0")}`;
+  return `${provider} - ${period} - Sammelbündel.${input.extension}`;
+}
+
+/**
  * Baut einen header-sicheren `Content-Disposition`-Wert mit ASCII-Fallback und
  * RFC-5987-`filename*` (UTF-8-percent-encoded), sodass Umlaute im „Speichern
  * unter"-Dialog erhalten bleiben. `disposition` ist standardmäßig `inline`.
