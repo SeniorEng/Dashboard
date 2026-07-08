@@ -36,6 +36,7 @@ import {
   cleanupCustomer,
 } from "../test-utils";
 import { validSignatureDataUrl } from "../helpers/valid-signature";
+import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 
@@ -230,7 +231,7 @@ async function singlePdfExport(body: {
   billingYear?: number;
   insuranceProviderId?: number;
   includeLeistungsnachweise?: boolean;
-}): Promise<{ status: number; contentType: string; buffer: Buffer; summaryHeader: string | null }> {
+}): Promise<{ status: number; contentType: string; contentDisposition: string | null; buffer: Buffer; summaryHeader: string | null }> {
   const res = await fetch(`${BASE_URL}/api/billing/single-pdf-export`, {
     method: "POST",
     headers: {
@@ -243,6 +244,7 @@ async function singlePdfExport(body: {
   return {
     status: res.status,
     contentType: res.headers.get("content-type") ?? "",
+    contentDisposition: res.headers.get("content-disposition"),
     buffer: Buffer.from(await res.arrayBuffer()),
     summaryHeader: res.headers.get("x-single-pdf-export-summary"),
   };
@@ -476,4 +478,59 @@ describe("Einzel-PDF-Export: eine PDF pro Rechnung, LN-Merge optional, READ-ONLY
     const out = await singlePdfExport({});
     expect(out.status).toBe(400);
   });
+
+  it("Content-Disposition läuft über den umlaut-sicheren Helper (ASCII-Fallback + RFC-5987 filename*) (Task #1704)", async () => {
+    const { year, month } = recentPastWeekdayAnchor();
+    const provider = await createDedicatedProvider("CD");
+    const customerId = await createCustomer({
+      vorname: "Lex-Disp",
+      nachname: `K-${uniqueId()}`,
+      geburtsdatum: "1941-06-06",
+      strasse: "Dispweg",
+      nr: "3",
+      plz: "10115",
+      stadt: "Berlin",
+      pflegegrad: 3,
+      pflegegradSeit: "2024-01-01",
+      billingType: "pflegekasse_gesetzlich",
+      acceptsPrivatePayment: false,
+      rechnungAnKunde: false,
+      insurance: {
+        providerId: provider.id,
+        versichertennummer: "D" + String(Math.floor(100000000 + Math.random() * 900000000)),
+        validFrom: "2024-01-01",
+      },
+      budgets: {
+        entlastungsbetrag45b: 13100,
+        verhinderungspflege39: 0,
+        pflegesachleistungen36: 0,
+        validFrom: "2024-01-01",
+      },
+    });
+    const appt = await createAppointmentInMonth(customerId, hwServiceId, 30, year, month, "cd");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 30);
+    await createAndSignServiceRecord(customerId, year, month);
+    const ids = await generateInvoice(customerId, year, month);
+    expect(ids.length).toBe(1);
+
+    // Zeitraum-only-Export (ohne IDs) → deterministischer ZIP-Name
+    // `Rechnungen-MM-YYYY.zip`.
+    const out = await singlePdfExport({
+      billingMonth: month,
+      billingYear: year,
+      insuranceProviderId: provider.id,
+    });
+    expect(out.status).toBe(200);
+    expect(out.contentType).toContain("application/zip");
+    expect(out.contentDisposition, "Download trägt Content-Disposition").toBeTruthy();
+
+    const expectedZipName = `Rechnungen-${String(month).padStart(2, "0")}-${year}.zip`;
+    const expectedHeader = buildContentDisposition(expectedZipName, "attachment");
+
+    // Vertrag: der Header ist byte-identisch mit dem SSoT-Helper — ein Refactor
+    // zurück auf das rohe `attachment; filename="…"` (ohne filename*) wird rot.
+    expect(out.contentDisposition, "Content-Disposition == SSoT-Helper").toBe(expectedHeader);
+    expect(out.contentDisposition!, "enthält ASCII filename=").toContain(`filename="${expectedZipName}"`);
+    expect(out.contentDisposition!, "enthält RFC-5987 filename*").toContain("filename*=UTF-8''");
+  }, 300_000);
 });

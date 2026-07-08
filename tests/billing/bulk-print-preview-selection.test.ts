@@ -28,6 +28,7 @@ import {
   cleanupCustomer,
 } from "../test-utils";
 import { validSignatureDataUrl } from "../helpers/valid-signature";
+import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
 import { db } from "../../server/lib/db";
 import { invoices, auditLog } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -225,7 +226,7 @@ async function bulkPrintPreview(body: {
   groupByPayer?: boolean;
   includeLeistungsnachweise?: boolean;
   invoiceIds?: number[];
-}): Promise<{ status: number; contentType: string | null; summary: PreviewSummary | null; buffer: Buffer; json: unknown }> {
+}): Promise<{ status: number; contentType: string | null; contentDisposition: string | null; summary: PreviewSummary | null; buffer: Buffer; json: unknown }> {
   const cookieHeader = `${auth.cookie}; careconnect_csrf=${auth.csrfToken}`;
   const res = await fetch(`${BASE_URL}/api/billing/bulk-print-preview`, {
     method: "POST",
@@ -240,11 +241,12 @@ async function bulkPrintPreview(body: {
   const header = res.headers.get("x-bulk-print-summary");
   const summary = header ? (JSON.parse(decodeURIComponent(header)) as PreviewSummary) : null;
   const contentType = res.headers.get("content-type");
+  const contentDisposition = res.headers.get("content-disposition");
   let json: unknown = null;
   if (contentType?.includes("application/json")) {
     try { json = JSON.parse(buffer.toString("utf8")); } catch { /* ignore */ }
   }
-  return { status: res.status, contentType, summary, buffer, json };
+  return { status: res.status, contentType, contentDisposition, summary, buffer, json };
 }
 
 function findResult(summary: PreviewSummary | null, invoiceId: number): PreviewResultEntry | undefined {
@@ -390,5 +392,29 @@ describe("PP: Auswahl-Sammeldruck-Vorschau (POST /api/billing/bulk-print-preview
 
     // Weiterhin status-neutral (der Fehlpfad mutiert nichts).
     expect((await getInvoiceRow(invA))?.status).toBe("versendet");
+  });
+
+  it("PP-4 — Content-Disposition läuft über den umlaut-sicheren Helper (ASCII-Fallback + RFC-5987 filename*) (Task #1704)", async () => {
+    const { year, month } = recentPastWeekdayAnchor();
+    await createSelbstzahlerDraft(year, month, "CD-A");
+
+    const out = await bulkPrintPreview({
+      billingMonth: month,
+      billingYear: year,
+    });
+
+    expect(out.status).toBe(200);
+    expect(out.contentType).toContain("application/pdf");
+    expect(out.contentDisposition, "Download trägt Content-Disposition").toBeTruthy();
+
+    const monthSlug = `${String(month).padStart(2, "0")}-${year}`;
+    const expectedFileName = `Sammeldruck-Vorschau-${monthSlug}.pdf`;
+    const expectedHeader = buildContentDisposition(expectedFileName, "attachment");
+
+    // Vertrag: der Header ist byte-identisch mit dem SSoT-Helper — ein Refactor
+    // zurück auf das rohe `attachment; filename="…"` (ohne filename*) wird rot.
+    expect(out.contentDisposition, "Content-Disposition == SSoT-Helper").toBe(expectedHeader);
+    expect(out.contentDisposition!, "enthält ASCII filename=").toContain(`filename="${expectedFileName}"`);
+    expect(out.contentDisposition!, "enthält RFC-5987 filename*").toContain("filename*=UTF-8''");
   });
 });
