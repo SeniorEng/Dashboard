@@ -191,4 +191,54 @@ test.describe("@smoke Dokument-Download-Buttons liefern zur Laufzeit eine Datei"
     expect(res.headers()["content-type"]).toContain("application/pdf");
     expect(res.headers()["content-disposition"]).toBeTruthy();
   });
+
+  // Task #1726: Der Admin-Download `GET /api/admin/generated-documents/:id/download`
+  // ist ein SEPARATER Code-Pfad zum Kunden-Download (server/routes/admin/documents.ts).
+  // Er wird über den Admin-Generate-Flow (`POST /api/admin/documents/generate-pdf`)
+  // gespeist. Regrediert er, bekämen Admins einen leeren/kaputten Download ohne dass
+  // ein Test es fängt. Hier wird der Endpoint zur Laufzeit über die authentifizierte
+  // Admin-Session abgerufen — Erwartung: HTTP 200, nicht-leerer Body,
+  // `application/pdf` + `Content-Disposition`.
+  test("Admin-Download: `/api/admin/generated-documents/:id/download` streamt eine Datei", async () => {
+    const customer = await createCustomer(session);
+    const docTypeId = await createCustomerDocumentType(session);
+
+    // Vorlage anlegen (ohne Unterschrifts-Pflicht → sofort `complete`).
+    const tpl = await apiPost<{ id?: number }>(
+      session,
+      "/api/admin/document-templates",
+      {
+        slug: `e2e-admin-download-${Date.now()}`,
+        name: "E2E Admin Download Vorlage",
+        htmlContent: "<p>Testdokument für den Admin-Download-Smoke.</p>",
+        documentTypeId: docTypeId,
+        targetType: "customer",
+        context: "beide",
+        requiresCustomerSignature: false,
+        requiresEmployeeSignature: false,
+      },
+    );
+    if (tpl.status !== 201 || typeof tpl.data?.id !== "number") {
+      throw new Error(`create template failed: ${tpl.status} ${JSON.stringify(tpl.data)}`);
+    }
+
+    // PDF serverseitig über den Admin-Generate-Flow generieren + persistieren.
+    const gen = await apiPost<{ id?: number }>(
+      session,
+      "/api/admin/documents/generate-pdf",
+      { templateId: tpl.data.id, customerId: customer.id },
+    );
+    if (gen.status !== 201 || typeof gen.data?.id !== "number") {
+      throw new Error(`admin generate-pdf failed: ${gen.status} ${JSON.stringify(gen.data)}`);
+    }
+    const generatedId = gen.data.id;
+
+    // Direkter GET auf den Admin-Download-Endpoint (der Admin-UI-Button ruft exakt diese URL).
+    const res = await session.api.get(`/api/admin/generated-documents/${generatedId}/download`);
+    await expectOk(res, "GET admin generated document");
+    const body = await res.body();
+    expect(body.length).toBeGreaterThan(0);
+    expect(res.headers()["content-type"]).toContain("application/pdf");
+    expect(res.headers()["content-disposition"]).toBeTruthy();
+  });
 });
