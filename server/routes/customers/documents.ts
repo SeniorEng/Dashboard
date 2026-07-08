@@ -5,6 +5,7 @@ import { renderTemplateForCustomer, wrapInPrintableHtml, extractInputPlaceholder
 import { generateAndStorePdf, getDocumentPdfBuffer, createSigningLinkAndRespond } from "../../services/document-pdf";
 import { asyncHandler } from "../../lib/errors";
 import { requireIntParam, requireCustomerAccess, requireCustomerReadAccess } from "../../lib/params";
+import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
 
 const router = Router();
 
@@ -41,7 +42,7 @@ router.get("/generated-documents/:docId/download", asyncHandler("PDF konnte nich
 
   const pdfBuffer = await getDocumentPdfBuffer(doc.objectPath);
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${doc.fileName}"`);
+  res.setHeader("Content-Disposition", buildContentDisposition(doc.fileName, "inline"));
   res.setHeader("Content-Length", pdfBuffer.length);
   res.send(pdfBuffer);
 }));

@@ -9,6 +9,7 @@ import { requireIntParam } from "../../lib/params";
 import { renderTemplateForCustomer, renderTemplateFromFormData, wrapInPrintableHtml, getPlaceholderCatalog, type WizardFormData } from "../../services/template-engine";
 import { generateAndStorePdf, getDocumentPdfBuffer, createSigningLinkAndRespond } from "../../services/document-pdf";
 import { evaluateTriggersForCustomer, evaluateTriggersForEmployee } from "../../services/document-trigger-engine";
+import { buildContentDisposition } from "@shared/domain/invoice-export-filename";
 
 const router = Router();
 
@@ -426,7 +427,7 @@ router.get("/generated-documents/:id/download", asyncHandler("PDF konnte nicht h
   const pdfBuffer = await getDocumentPdfBuffer(doc.objectPath);
 
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${doc.fileName}"`);
+  res.setHeader("Content-Disposition", buildContentDisposition(doc.fileName, "inline"));
   res.setHeader("Content-Length", pdfBuffer.length);
   res.send(pdfBuffer);
 }));
