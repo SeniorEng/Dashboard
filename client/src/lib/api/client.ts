@@ -356,6 +356,24 @@ async function apiRequest<TResponse, TBody = unknown>(
 }
 
 /**
+ * Liest den Datei-Namen aus einem `Content-Disposition`-Header. Bevorzugt den
+ * RFC-5987-`filename*=UTF-8''…`-Wert (percent-encoded, erhält Umlaute) und
+ * fällt sonst auf den ASCII-`filename="…"`-Wert zurück.
+ */
+function parseFilenameFromContentDisposition(cd: string): string {
+  const star = /filename\*=(?:UTF-8|utf-8)''([^;]+)/i.exec(cd);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // Fällt auf den ASCII-Namen zurück.
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1].trim() : 'download';
+}
+
+/**
  * Convenience methods for common HTTP operations
  */
 export const api = {
@@ -441,8 +459,7 @@ export const api = {
 
       const blob = await response.blob();
       const cd = response.headers.get('Content-Disposition') || '';
-      const match = /filename="?([^"]+)"?/i.exec(cd);
-      const fileName = match ? match[1] : 'download';
+      const fileName = parseFilenameFromContentDisposition(cd);
 
       let summary: S | null = null;
       if (summaryHeader) {
@@ -492,8 +509,7 @@ export const api = {
 
       const blob = await response.blob();
       const cd = response.headers.get('Content-Disposition') || '';
-      const match = /filename="?([^"]+)"?/i.exec(cd);
-      const fileName = match ? match[1] : 'download';
+      const fileName = parseFilenameFromContentDisposition(cd);
       return { success: true, data: { blob, fileName } };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {

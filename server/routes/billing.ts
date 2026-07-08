@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { requireAuth, requireAdmin, requireWageDataAccess } from "../middleware/auth";
 import { AppError, asyncHandler, badRequest, notFound } from "../lib/errors";
 import { log } from "../lib/log";
@@ -15,7 +15,7 @@ import {
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
-import { buildInvoiceExportFilename, dedupeExportFilenames } from "@shared/domain/invoice-export-filename";
+import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
 import { randomUUID } from "crypto";
 import {
@@ -1312,6 +1312,24 @@ router.patch("/:id/status", asyncHandler("Status konnte nicht aktualisiert werde
   res.json(updated);
 }));
 
+// Task #1696 — Sprechenden Datei-Namen (Rechnungsnummer - Nachname, Vorname -
+// Dokumentart) als Content-Disposition setzen. Kundenname aus dem Stammdaten-
+// Vor-/Nachnamen (wie „Leistungsempfänger" im LN), NICHT der Kassen-Empfänger.
+function setSpeakingPdfDisposition(
+  res: Response,
+  invoice: { invoiceNumber: string; customerVorname?: string | null; customerNachname?: string | null; customerName?: string | null },
+  kind: SpeakingInvoiceDocumentKind,
+): void {
+  const filename = buildSpeakingInvoiceFilename({
+    invoiceNumber: invoice.invoiceNumber,
+    vorname: invoice.customerVorname,
+    nachname: invoice.customerNachname,
+    customerName: invoice.customerName,
+    kind,
+  });
+  res.setHeader("Content-Disposition", buildContentDisposition(filename, "inline"));
+}
+
 router.get("/:id/pdf", asyncHandler("PDF konnte nicht erzeugt werden — bitte in wenigen Minuten erneut versuchen oder den Support kontaktieren.", async (req, res) => {
   const id = requireIntParam(req.params.id, res);
   if (id === null) return;
@@ -1331,7 +1349,7 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht erzeugt werden — bitte i
   }
   if (cached) {
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+    setSpeakingPdfDisposition(res, invoice, "invoice");
     // Task #522: Drift-Header — wenn die Live-Daten nicht mehr zum
     // gespeicherten Fingerprint passen, wird das PDF weiterhin GoBD-konform
     // aus dem Cache ausgeliefert, aber Aufrufer/UI bekommen den Hinweis.
@@ -1367,7 +1385,7 @@ router.get("/:id/pdf", asyncHandler("PDF konnte nicht erzeugt werden — bitte i
     throw notFound("PDF konnte nicht aus dem Speicher gelesen werden — bitte erneut versuchen.");
   }
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${invoice.invoiceNumber}.pdf"`);
+  setSpeakingPdfDisposition(res, invoice, "invoice");
   res.send(fresh);
 }));
 
@@ -1389,7 +1407,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   }
   if (cachedLn) {
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
+    setSpeakingPdfDisposition(res, invoice, "leistungsnachweis");
     // Task #522: Drift-Header für den Leistungsnachweis.
     if (invoice.leistungsnachweisDataFingerprint) {
       try {
@@ -1429,7 +1447,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
     }
     if (fresh) {
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
+      setSpeakingPdfDisposition(res, invoice, "leistungsnachweis");
       res.send(fresh);
       return;
     }
@@ -1439,7 +1457,7 @@ router.get("/:id/leistungsnachweis", asyncHandler("Leistungsnachweis konnte nich
   const buffer = await renderLeistungsnachweisOnTheFly(invoice);
 
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="LN-${invoice.invoiceNumber}.pdf"`);
+  setSpeakingPdfDisposition(res, invoice, "leistungsnachweis");
   res.send(buffer);
 }));
 
@@ -1851,7 +1869,7 @@ router.get("/:id/bundle", asyncHandler("Druck-Bündel konnte nicht erzeugt werde
   }
   const bytes = Buffer.from(await merged.save());
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="Bundle-${invoice.invoiceNumber}.pdf"`);
+  setSpeakingPdfDisposition(res, invoice, "bundle");
   res.send(bytes);
 }));
 

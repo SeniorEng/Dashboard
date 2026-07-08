@@ -48,6 +48,99 @@ export function buildInvoiceExportFilename(input: InvoiceExportFilenameInput): s
 }
 
 /**
+ * Task #1696 — „Sprechende" Datei-Namen für Einzel-Downloads (Rechnung,
+ * Leistungsnachweis, Bündel) im Rechnungs-Zeilen-Menü.
+ *
+ * Anders als `sanitizeExportSegment` (ZIP-Eintrag, ASCII-only) sollen diese
+ * Namen für den Menschen lesbar bleiben: deutsche Umlaute (Müller, Schäfer)
+ * werden BEWAHRT, es wird lediglich filesystem-Unsicheres entfernt. Format:
+ * `Rechnungsnummer - Nachname, Vorname - Dokumentart.pdf`.
+ */
+
+export type SpeakingInvoiceDocumentKind = "invoice" | "leistungsnachweis" | "bundle";
+
+const SPEAKING_KIND_LABEL: Record<SpeakingInvoiceDocumentKind, string> = {
+  invoice: "Rechnung",
+  leistungsnachweis: "Leistungsnachweis",
+  bundle: "Rechnung+Leistungsnachweis",
+};
+
+/**
+ * Entfernt filesystem-unsichere Zeichen (`\\ / : * ? " < > |` sowie
+ * Steuerzeichen), erhält aber Buchstaben inkl. Umlaute, Ziffern, Leerzeichen,
+ * Komma, Bindestrich, Plus und Punkt. Whitespace wird kollabiert/getrimmt.
+ * Leeres Ergebnis → `fallback`.
+ */
+export function sanitizeSpeakingSegment(input: string | null | undefined, fallback: string): string {
+  const cleaned = (input ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || fallback;
+}
+
+/**
+ * Baut das Namens-Segment `Nachname, Vorname`. Fällt auf einen einzelnen
+ * vorhandenen Namensteil, dann auf den kombinierten Kundennamen und zuletzt auf
+ * `Kunde` zurück, damit nie ein kaputter Dateiname entsteht.
+ */
+function buildSpeakingNameSegment(
+  vorname: string | null | undefined,
+  nachname: string | null | undefined,
+  customerName: string | null | undefined,
+): string {
+  const v = (vorname ?? "").trim();
+  const n = (nachname ?? "").trim();
+  if (n && v) return `${n}, ${v}`;
+  if (n) return n;
+  if (v) return v;
+  const combined = (customerName ?? "").trim();
+  if (combined) return combined;
+  return "Kunde";
+}
+
+export interface SpeakingInvoiceFilenameInput {
+  invoiceNumber: string;
+  vorname?: string | null;
+  nachname?: string | null;
+  /** Kombinierter Kundenname als Fallback, wenn Vor-/Nachname fehlen. */
+  customerName?: string | null;
+  kind: SpeakingInvoiceDocumentKind;
+}
+
+/**
+ * Baut den sprechenden Datei-Namen (inkl. `.pdf`) im Muster
+ * `Rechnungsnummer - Nachname, Vorname - Dokumentart.pdf`. Jedes Segment wird
+ * einzeln sanitisiert, sodass die ` - `-Trenner erhalten bleiben.
+ */
+export function buildSpeakingInvoiceFilename(input: SpeakingInvoiceFilenameInput): string {
+  const number = sanitizeSpeakingSegment(input.invoiceNumber, "Rechnung");
+  const name = sanitizeSpeakingSegment(
+    buildSpeakingNameSegment(input.vorname, input.nachname, input.customerName),
+    "Kunde",
+  );
+  const label = SPEAKING_KIND_LABEL[input.kind];
+  return `${number} - ${name} - ${label}.pdf`;
+}
+
+/**
+ * Baut einen header-sicheren `Content-Disposition`-Wert mit ASCII-Fallback und
+ * RFC-5987-`filename*` (UTF-8-percent-encoded), sodass Umlaute im „Speichern
+ * unter"-Dialog erhalten bleiben. `disposition` ist standardmäßig `inline`.
+ */
+export function buildContentDisposition(
+  filename: string,
+  disposition: "inline" | "attachment" = "inline",
+): string {
+  // ASCII-Fallback: Nicht-ASCII → `_`, Anführungszeichen/Backslash entschärfen.
+  // eslint-disable-next-line no-control-regex
+  const asciiFallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  const encoded = encodeURIComponent(filename);
+  return `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
  * De-dupliziert eine Liste von Dateinamen innerhalb desselben ZIP-Archivs:
  * Kollisionen erhalten ein `-2`, `-3`, … vor der Endung. Reihenfolge bleibt
  * erhalten; Vergleich case-insensitiv (Windows-ZIP-Sicherheit).

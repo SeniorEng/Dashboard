@@ -88,24 +88,21 @@ export function InvoiceRow({
   aging = "none",
 }: InvoiceRowProps) {
   const { toast } = useToast();
-  // Task #1349: Öffnet ein Dokument-PDF (Rechnung / Leistungsnachweis / Bündel)
-  // robust statt über einen rohen `<a target="_blank">`-Link. Bei einem
-  // vorübergehend nicht erreichbaren Speicher (503) oder einem anderen Fehler
-  // wird KEINE rohe Fehlerseite im neuen Tab geöffnet, sondern eine klare
-  // Meldung mit „Erneut versuchen"-Aktion angezeigt. Der Tab wird synchron im
-  // Klick-Gesten-Kontext geöffnet (Popup-Blocker-sicher) und erst gefüllt, wenn
-  // die Bytes da sind — bei Fehler wieder geschlossen.
+  // Task #1349/#1696: Lädt ein Dokument-PDF (Rechnung / Leistungsnachweis /
+  // Bündel) als echten Datei-Download herunter — mit dem sprechenden Dateinamen
+  // aus dem `Content-Disposition`-Header (z. B. `RE-2026-0034 - Mustermann,
+  // Erika - Rechnung.pdf`). Ein `blob:`-URL im neuen Tab würde beim Speichern
+  // nur die UUID übernehmen (Task #1696), daher der explizite `<a download>`.
+  // Bei nicht erreichbarem Speicher (503) oder anderem Fehler wird KEINE rohe
+  // Fehlerseite gezeigt, sondern eine klare Meldung mit „Erneut versuchen".
   const [openingPath, setOpeningPath] = useState<string | null>(null);
 
-  async function openDocument(path: string, label: string) {
+  async function downloadDocument(path: string, label: string) {
     if (openingPath) return;
     setOpeningPath(path);
-    const win = window.open("about:blank", "_blank");
-    if (win) win.opener = null;
     try {
       const result = await api.getBlob(path);
       if (!result.success) {
-        if (win && !win.closed) win.close();
         const isStorageUnavailable =
           result.error.code === "STORAGE_UNAVAILABLE" || result.error.status === 503;
         toast({
@@ -117,26 +114,21 @@ export function InvoiceRow({
             : result.error.message,
           variant: "destructive",
           action: (
-            <ToastAction altText="Erneut versuchen" onClick={() => openDocument(path, label)}>
+            <ToastAction altText="Erneut versuchen" onClick={() => downloadDocument(path, label)}>
               Erneut versuchen
             </ToastAction>
           ),
         });
         return;
       }
+      // Echter Datei-Download mit dem vom Server gelieferten sprechenden Namen.
       const url = URL.createObjectURL(result.data.blob);
-      if (win && !win.closed) {
-        win.location.href = url;
-      } else {
-        // Popup wurde geblockt: als Datei-Download nachreichen.
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = result.data.fileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-      // Blob-URL erst nach dem Laden im neuen Tab freigeben.
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.data.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } finally {
       setOpeningPath(null);
@@ -351,7 +343,7 @@ export function InvoiceRow({
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    onSelect={() => openDocument(`/billing/${invoice.id}/pdf`, "Rechnungs-PDF")}
+                    onSelect={() => downloadDocument(`/billing/${invoice.id}/pdf`, "Rechnungs-PDF")}
                     disabled={openingPath !== null}
                     data-testid={`button-pdf-${invoice.id}`}
                   >
@@ -359,7 +351,7 @@ export function InvoiceRow({
                     PDF herunterladen
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={() => openDocument(`/billing/${invoice.id}/leistungsnachweis`, "Leistungsnachweis")}
+                    onSelect={() => downloadDocument(`/billing/${invoice.id}/leistungsnachweis`, "Leistungsnachweis")}
                     disabled={openingPath !== null}
                     data-testid={`button-leistungsnachweis-${invoice.id}`}
                   >
@@ -368,7 +360,7 @@ export function InvoiceRow({
                   </DropdownMenuItem>
                   {/* Task #533: Bündel-Druck — Rechnung + Leistungsnachweis als ein PDF. */}
                   <DropdownMenuItem
-                    onSelect={() => openDocument(`/billing/${invoice.id}/bundle`, "Druck-Bündel")}
+                    onSelect={() => downloadDocument(`/billing/${invoice.id}/bundle`, "Druck-Bündel")}
                     disabled={openingPath !== null}
                     data-testid={`button-bundle-${invoice.id}`}
                   >
