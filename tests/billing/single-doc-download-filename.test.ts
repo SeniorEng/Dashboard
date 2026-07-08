@@ -306,9 +306,10 @@ describe("Einzel-Download-Header: sprechender Datei-Name mit Umlaut (Task #1701)
 
       // Zusätzliche, explizite Zusicherungen (falls der Helfer sich ändert,
       // bleiben die fachlichen Garantien sichtbar):
-      // 1) ASCII-Fallback: Umlaut wird zu `_`, keine Roh-Umlaute im Fallback.
+      // 1) ASCII-Fallback: Umlaute werden ausgeschrieben (`ü→ue`, `ä→ae`),
+      //    keine Roh-Umlaute und kein `_` an Umlaut-Stelle mehr (Task #1706).
       expect(out.contentDisposition).toContain('filename="');
-      expect(out.contentDisposition).toMatch(/filename="[^"]*M_ller-Sch_fer[^"]*"/);
+      expect(out.contentDisposition).toMatch(/filename="[^"]*Mueller-Schaefer[^"]*"/);
       // 2) RFC-5987: percent-encodete UTF-8-Variante mit erhaltenem Umlaut.
       expect(out.contentDisposition).toContain("filename*=UTF-8''");
       expect(out.contentDisposition).toContain(encodeURIComponent(expectedFilename));

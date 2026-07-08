@@ -441,14 +441,15 @@ describe("BP: Sammeldruck (POST /api/billing/bulk-print)", () => {
     expect(out.contentDisposition!, "enthält RFC-5987 filename*").toContain("filename*=UTF-8''");
 
     // Umlaut-Sicherheit des vom Route jetzt genutzten Helpers: ein Umlaut-Name
-    // überlebt im UTF-8-`filename*` und wird im ASCII-Fallback zu `_`.
+    // überlebt im UTF-8-`filename*` und wird im ASCII-Fallback ausgeschrieben
+    // (`ü→ue`, `ö→oe`), nicht mehr zu `_` gestrippt (Task #1706).
     const umlautName = "Sammeldruck-Süd-Württemberg.pdf";
     const umlautHeader = buildContentDisposition(umlautName, "attachment");
     expect(umlautHeader, "Umlaut überlebt in filename*").toContain(
       `filename*=UTF-8''${encodeURIComponent(umlautName)}`,
     );
-    expect(umlautHeader, "ASCII-Fallback ohne Umlaut, header-gültig").toContain(
-      `filename="Sammeldruck-S_d-W_rttemberg.pdf"`,
+    expect(umlautHeader, "ASCII-Fallback schreibt Umlaute aus, header-gültig").toContain(
+      `filename="Sammeldruck-Sued-Wuerttemberg.pdf"`,
     );
   });
 

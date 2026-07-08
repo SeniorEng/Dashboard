@@ -15,12 +15,33 @@
  */
 
 /**
+ * Deutsche Umlaut-Transliteration (SSoT): `ä/ö/ü/Ä/Ö/Ü/ß/ẞ` →
+ * `ae/oe/ue/Ae/Oe/Ue/ss/SS`. Dies ist der EINE Ort, an dem diese Zuordnung
+ * lebt — jeder ASCII-Fallback/Slug-Pfad ruft diese Funktion auf, statt eine
+ * eigene `.replace`-Kette zu bauen. Wichtig: VOR jedem `NFKD`/Strip-Schritt
+ * anwenden, sonst zerlegt `NFKD` `ü` in `u` + Akzent und der Akzent wird zu `_`
+ * (der ursprüngliche Bug: `Unterschütz → Unterschu_tz`).
+ */
+export function transliterateGermanUmlauts(input: string | null | undefined): string {
+  return (input ?? "")
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/Ä/g, "Ae")
+    .replace(/Ö/g, "Oe")
+    .replace(/Ü/g, "Ue")
+    .replace(/ß/g, "ss")
+    .replace(/ẞ/g, "SS");
+}
+
+/**
  * Sanitisiert ein einzelnes Namens-Segment auf filesystem- und ZIP-sichere
- * Zeichen: alles außer `A-Z a-z 0-9 _ -` wird zu `_` zusammengefasst, führende/
- * abschließende `_` entfernt. Leeres Ergebnis → `fallback`.
+ * Zeichen: deutsche Umlaute werden zuerst ausgeschrieben (`ä→ae`), dann wird
+ * alles außer `A-Z a-z 0-9 _ -` zu `_` zusammengefasst, führende/abschließende
+ * `_` entfernt. Leeres Ergebnis → `fallback`.
  */
 export function sanitizeExportSegment(input: string | null | undefined, fallback: string): string {
-  const cleaned = (input ?? "")
+  const cleaned = transliterateGermanUmlauts(input)
     .normalize("NFKD")
     .replace(/[^A-Za-z0-9_-]+/g, "_")
     .replace(/^_+|_+$/g, "");
@@ -153,9 +174,14 @@ export function buildContentDisposition(
   filename: string,
   disposition: "inline" | "attachment" = "inline",
 ): string {
-  // ASCII-Fallback: Nicht-ASCII → `_`, Anführungszeichen/Backslash entschärfen.
+  // ASCII-Fallback: deutsche Umlaute zuerst ausschreiben (`Schröder→Schroeder`),
+  // erst danach verbleibende Nicht-ASCII → `_`, Anführungszeichen/Backslash
+  // entschärfen. So liest der Fallback `ae/oe/ue/ss` statt `_`.
   // eslint-disable-next-line no-control-regex
-  const asciiFallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  const asciiFallback = transliterateGermanUmlauts(filename)
+    .replace(/[^\x20-\x7e]/g, "_")
+    .replace(/["\\]/g, "_");
+  // `filename*` bleibt originaltreu (echte Umlaute via UTF-8-Percent-Encoding).
   const encoded = encodeURIComponent(filename);
   return `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
 }

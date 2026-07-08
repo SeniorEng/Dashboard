@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { invalidateRelated } from "@/lib/query-invalidation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { todayISO, formatDateForDisplay } from "@shared/utils/datetime";
+import { transliterateGermanUmlauts } from "@shared/domain/invoice-export-filename";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,9 +128,8 @@ function toFormData(t: TemplateData): TemplateFormData {
 }
 
 function generateSlug(name: string): string {
-  return name
+  return transliterateGermanUmlauts(name)
     .toLowerCase()
-    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_|_$/g, "");
 }

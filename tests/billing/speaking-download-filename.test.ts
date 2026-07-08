@@ -44,6 +44,7 @@ import { validSignatureDataUrl } from "../helpers/valid-signature";
 import {
   buildSpeakingInvoiceFilename,
   buildContentDisposition,
+  transliterateGermanUmlauts,
   type SpeakingInvoiceDocumentKind,
 } from "@shared/domain/invoice-export-filename";
 
@@ -241,9 +242,18 @@ async function expectSpeakingDisposition(args: {
   expect(disposition, `${path} Content-Disposition == SSoT`).toBe(expectedHeader);
 
   // Redundant, aber selbst-erklärend gegen künftige Regressionen: beide
-  // Filename-Varianten sind vorhanden.
-  const asciiFallback = expectedFilename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_"); // eslint-disable-line no-control-regex
+  // Filename-Varianten sind vorhanden. Der ASCII-Fallback schreibt deutsche
+  // Umlaute aus (`ä→ae`, kein `_`), bevor verbleibende Nicht-ASCII zu `_` werden.
+  const asciiFallback = transliterateGermanUmlauts(expectedFilename)
+    .replace(/[^\x20-\x7e]/g, "_") // eslint-disable-line no-control-regex
+    .replace(/["\\]/g, "_");
   expect(disposition!, `${path} enthält ASCII filename=`).toContain(`filename="${asciiFallback}"`);
+  // Wenn der Name Umlaute trägt, MUSS der ASCII-Fallback ausgeschrieben sein
+  // (kein rohes `_` an Umlaut-Stelle) — der eigentliche Task-#1706-Nachweis.
+  if (/[äöüÄÖÜß]/.test(nachname) || /[äöüÄÖÜß]/.test(vorname)) {
+    expect(asciiFallback, `${path} ASCII-Fallback schreibt Umlaute aus`).not.toMatch(/[äöüÄÖÜß]/);
+    expect(asciiFallback, `${path} ASCII-Fallback ist rein ASCII`).toMatch(/^[\x20-\x7e]+$/); // eslint-disable-line no-control-regex
+  }
   expect(disposition!, `${path} enthält RFC-5987 filename*`).toContain(
     `filename*=UTF-8''${encodeURIComponent(expectedFilename)}`,
   );

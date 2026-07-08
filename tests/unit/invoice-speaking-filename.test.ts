@@ -3,7 +3,9 @@ import {
   buildSpeakingInvoiceFilename,
   buildSpeakingKassenBundleFilename,
   sanitizeSpeakingSegment,
+  sanitizeExportSegment,
   buildContentDisposition,
+  transliterateGermanUmlauts,
 } from "@shared/domain/invoice-export-filename";
 
 describe("buildSpeakingInvoiceFilename", () => {
@@ -149,6 +151,45 @@ describe("buildSpeakingKassenBundleFilename", () => {
   });
 });
 
+describe("transliterateGermanUmlauts", () => {
+  it("mappt alle deutschen Umlaute korrekt", () => {
+    expect(transliterateGermanUmlauts("äöüÄÖÜ")).toBe("aeoeueAeOeUe");
+    expect(transliterateGermanUmlauts("ß")).toBe("ss");
+    expect(transliterateGermanUmlauts("ẞ")).toBe("SS");
+  });
+
+  it("transliteriert echte Kundennamen (Task #1706)", () => {
+    expect(transliterateGermanUmlauts("Unterschütz")).toBe("Unterschuetz");
+    expect(transliterateGermanUmlauts("Schröder")).toBe("Schroeder");
+    expect(transliterateGermanUmlauts("Müller")).toBe("Mueller");
+    expect(transliterateGermanUmlauts("Straße")).toBe("Strasse");
+  });
+
+  it("lässt Nicht-Umlaut-Zeichen unangetastet und toleriert null/undefined", () => {
+    expect(transliterateGermanUmlauts("Meyer")).toBe("Meyer");
+    expect(transliterateGermanUmlauts(null)).toBe("");
+    expect(transliterateGermanUmlauts(undefined)).toBe("");
+  });
+});
+
+describe("sanitizeExportSegment (ZIP-Eintrag)", () => {
+  it("schreibt Umlaute aus, statt sie zu `_` zu strippen (Task #1706)", () => {
+    expect(sanitizeExportSegment("Unterschütz", "Kunde")).toBe("Unterschuetz");
+    expect(sanitizeExportSegment("Schröder", "Kunde")).toBe("Schroeder");
+    expect(sanitizeExportSegment("Müller", "Kunde")).toBe("Mueller");
+    expect(sanitizeExportSegment("Straße", "Kunde")).toBe("Strasse");
+  });
+
+  it("ersetzt verbleibende Nicht-ASCII/Sonderzeichen weiterhin durch `_`", () => {
+    expect(sanitizeExportSegment("Öztürk-Émile", "Kunde")).toBe("Oeztuerk-E_mile");
+  });
+
+  it("liefert den Fallback bei leerer Eingabe", () => {
+    expect(sanitizeExportSegment("", "Kunde")).toBe("Kunde");
+    expect(sanitizeExportSegment(null, "Datum")).toBe("Datum");
+  });
+});
+
 describe("sanitizeSpeakingSegment", () => {
   it("erhält Umlaute, Komma, Bindestrich und Plus", () => {
     expect(sanitizeSpeakingSegment("Müller-Schäfer, Jörg+", "x")).toBe("Müller-Schäfer, Jörg+");
@@ -168,11 +209,18 @@ describe("buildContentDisposition", () => {
   it("liefert ASCII-Fallback und RFC-5987 filename* mit UTF-8-Encoding", () => {
     const cd = buildContentDisposition("RE-2026-0034 - Müller, Jörg - Rechnung.pdf");
     expect(cd).toContain('inline; filename="');
-    // Umlaute im ASCII-Fallback durch `_` ersetzt:
-    expect(cd).toContain('filename="RE-2026-0034 - M_ller, J_rg - Rechnung.pdf"');
-    // filename* percent-encoded (UTF-8):
+    // Umlaute im ASCII-Fallback ausgeschrieben (`ü→ue`, `ö→oe`), nicht `_` (Task #1706):
+    expect(cd).toContain('filename="RE-2026-0034 - Mueller, Joerg - Rechnung.pdf"');
+    // filename* percent-encoded (UTF-8) — echte Umlaute bleiben erhalten:
     expect(cd).toContain("filename*=UTF-8''");
     expect(cd).toContain(encodeURIComponent("RE-2026-0034 - Müller, Jörg - Rechnung.pdf"));
+  });
+
+  it("schreibt alle deutschen Umlaute im ASCII-Fallback aus (Task #1706)", () => {
+    const cd = buildContentDisposition("RE-2026-0066 - Unterschütz, Karla - Rechnung.pdf");
+    expect(cd).toContain('filename="RE-2026-0066 - Unterschuetz, Karla - Rechnung.pdf"');
+    const cd2 = buildContentDisposition("RE-2026-0071 - Schröder, Marvin - Rechnung.pdf");
+    expect(cd2).toContain('filename="RE-2026-0071 - Schroeder, Marvin - Rechnung.pdf"');
   });
 
   it("unterstützt den attachment-Modus", () => {
