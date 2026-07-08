@@ -32,6 +32,10 @@ import {
   cleanupCustomer,
 } from "../test-utils";
 import { validSignatureDataUrl } from "../helpers/valid-signature";
+import {
+  buildSpeakingKassenBundleFilename,
+  buildContentDisposition,
+} from "../../shared/domain/invoice-export-filename";
 
 const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:5000";
 
@@ -530,7 +534,7 @@ async function fetchBundleByPayer(
   year: number,
   month: number,
   format: "pdf" | "zip",
-): Promise<{ status: number; contentType: string; buffer: Buffer }> {
+): Promise<{ status: number; contentType: string; contentDisposition: string; buffer: Buffer }> {
   const res = await fetch(
     `${BASE_URL}/api/billing/bundle-by-payer?year=${year}&month=${month}&insuranceProviderId=${providerId}&format=${format}`,
     { headers: { Cookie: auth.cookie } },
@@ -538,6 +542,7 @@ async function fetchBundleByPayer(
   return {
     status: res.status,
     contentType: res.headers.get("content-type") ?? "",
+    contentDisposition: res.headers.get("content-disposition") ?? "",
     buffer: Buffer.from(await res.arrayBuffer()),
   };
 }
@@ -624,4 +629,80 @@ describe("LN-Dup: Kassen-Bündel & Sammeldruck enthalten den LN genau einmal (Ta
       }, 120_000);
     });
   }
+});
+
+// ============================================================
+// Task #1699 — Der „sprechende" Bündel-Dateiname (Content-Disposition) für
+// GET /bundle-by-payer ist bisher nur auf Helfer-Ebene (unit) abgesichert. Die
+// Route-Verdrahtung (Header für pdf/inline UND zip/attachment) hatte keine
+// Route-Level-Abdeckung — ein Refactor könnte den umlaut-sicheren Header
+// unbemerkt fallen lassen. Dieser Test schießt real gegen die Route und prüft
+// den Content-Disposition-Header gegen die pure Helfer-SSoT
+// (buildSpeakingKassenBundleFilename + buildContentDisposition) für BEIDE
+// Formate. Der Provider-Name trägt bewusst Umlaute, damit sowohl der ASCII-
+// Fallback (`filename="…"`) als auch der RFC-5987-Zweig (`filename*=UTF-8''…`)
+// nachweislich gesetzt sind.
+// ============================================================
+
+describe("Bundle-by-payer: sprechender Content-Disposition-Dateiname (Task #1699)", () => {
+  const { year, month } = recentPastWeekdayAnchor();
+  let providerId: number;
+  let providerName: string;
+
+  beforeAll(async () => {
+    // Provider-Name MIT Umlaut → erzwingt den RFC-5987-Zweig im Header.
+    const provRes = await apiPost<{ id: number; name: string }>("/api/admin/insurance-providers", {
+      name: `Pflegekasse Süd-Württemberg ${uniqueId()}`,
+      ikNummer: rand9(),
+      isPrivate: false,
+    });
+    if (provRes.status !== 201) {
+      throw new Error(`createProvider (1699) failed: ${provRes.status} ${JSON.stringify(provRes.data)}`);
+    }
+    providerId = provRes.data.id;
+    providerName = provRes.data.name;
+
+    const customerId = await createCustomer(typedCustomerPayload("gesetzlich", providerId));
+    const appt = await createAppointmentInMonth(customerId, hwServiceId, 30, year, month, "t1699");
+    await documentAppointment(appt.id, appt.time, hwServiceId, 30);
+    await createAndSignServiceRecord(customerId, year, month);
+    const ids = await generateInvoice(customerId, year, month);
+    expect(ids.length, "1699-Setup darf nicht splitten").toBe(1);
+  }, 240_000);
+
+  it("PDF → Content-Disposition inline mit sprechendem Namen (ASCII-Fallback + filename*)", async () => {
+    const out = await fetchBundleByPayer(providerId, year, month, "pdf");
+    expect(out.status, "bundle-by-payer PDF HTTP 200").toBe(200);
+
+    const expected = buildContentDisposition(
+      buildSpeakingKassenBundleFilename({ providerName, year, month, extension: "pdf" }),
+      "inline",
+    );
+    expect(out.contentDisposition, "PDF Content-Disposition == Helfer-SSoT").toBe(expected);
+    expect(out.contentDisposition).toMatch(/^inline;/);
+    // ASCII-Fallback (Umlaute → `_`) UND RFC-5987 filename* müssen vorhanden sein.
+    expect(out.contentDisposition).toContain('filename="');
+    expect(out.contentDisposition).toContain("filename*=UTF-8''");
+    // Umlaut ist im ASCII-Fallback entschärft, im filename* percent-encoded.
+    expect(out.contentDisposition).not.toContain("Süd");
+    expect(out.contentDisposition).toContain(encodeURIComponent("Süd-Württemberg"));
+    expect(out.contentDisposition).toContain("Sammelb%C3%BCndel.pdf");
+  }, 120_000);
+
+  it("ZIP → Content-Disposition attachment mit sprechendem Namen (ASCII-Fallback + filename*)", async () => {
+    const out = await fetchBundleByPayer(providerId, year, month, "zip");
+    expect(out.status, "bundle-by-payer ZIP HTTP 200").toBe(200);
+
+    const expected = buildContentDisposition(
+      buildSpeakingKassenBundleFilename({ providerName, year, month, extension: "zip" }),
+      "attachment",
+    );
+    expect(out.contentDisposition, "ZIP Content-Disposition == Helfer-SSoT").toBe(expected);
+    expect(out.contentDisposition).toMatch(/^attachment;/);
+    expect(out.contentDisposition).toContain('filename="');
+    expect(out.contentDisposition).toContain("filename*=UTF-8''");
+    expect(out.contentDisposition).not.toContain("Süd");
+    expect(out.contentDisposition).toContain(encodeURIComponent("Süd-Württemberg"));
+    expect(out.contentDisposition).toContain("Sammelb%C3%BCndel.zip");
+  }, 120_000);
 });
