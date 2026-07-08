@@ -489,7 +489,7 @@ export function AdvicesTab() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={(e) => { e.stopPropagation(); window.open(`/api/object-storage/download?path=${encodeURIComponent(advice.objectPath!)}`, "_blank"); }}
+                          onClick={(e) => { e.stopPropagation(); window.open(advice.objectPath!, "_blank"); }}
                           aria-label="PDF anzeigen"
                           data-testid={`button-view-advice-${advice.id}`}
                         >

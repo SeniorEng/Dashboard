@@ -126,7 +126,7 @@ function ProofReviewContent() {
                             variant="ghost"
                             size="icon"
                             aria-label="Nachweis anzeigen"
-                            onClick={() => window.open(`/api/object-storage/download?path=${encodeURIComponent(proof.objectPath!)}`, '_blank')}
+                            onClick={() => window.open(proof.objectPath!, '_blank')}
                             data-testid={`button-view-proof-${proof.id}`}
                           >
                             <Eye className="h-4 w-4" />
