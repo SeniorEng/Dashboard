@@ -591,7 +591,7 @@ function EmployeeDrillDialog({ employeeId, name, year, month, onClose }: {
             {MONTH_NAMES[month - 1]} {year}
             {data?.isClosed && (
               <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-500">
-                <Lock className={iconSize.xs} /> Monat abgeschlossen — schreibgeschützt
+                <Lock className={iconSize.xs} /> Monat abgeschlossen — nur „Bezahlt" (Auszahlung) editierbar
               </span>
             )}
           </DialogDescription>
@@ -1074,6 +1074,11 @@ function DrillStundenkonto({ employeeId, year, month, cells, isClosed }: {
       <p className="text-xs text-gray-500">
         Saldo = Anfangsbestand + Erfasst − Bezahlt. „Bezahlt" ohne Eingabe entspricht „Erfasst" (Saldo 0).
       </p>
+      {isClosed && (
+        <p className="text-xs text-gray-500" data-testid="hint-closed-bezahlt-editable">
+          Der Monat ist abgeschlossen: Nur die Auszahlung („Bezahlt") kann noch erfasst werden — Anfangsbestand, Erfasst und alle übrigen Angaben sind schreibgeschützt.
+        </p>
+      )}
       {cells.map((cell) => (
         <AccountCellEditor
           key={cell.category}
@@ -1192,25 +1197,19 @@ function AccountCellEditor({ employeeId, year, month, cell, isClosed }: {
         </div>
         <div>
           <Label className="text-xs text-gray-500">Bezahlt</Label>
-          {isClosed ? (
-            <div className="h-8 flex items-center text-sm tabular-nums text-gray-700" data-testid={`text-bezahlt-${cell.category}`}>
-              {cell.bezahlt.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
-            </div>
-          ) : (
-            <div className="flex gap-1">
-              <Input
-                value={bezahlt}
-                onChange={(e) => setBezahlt(e.target.value)}
-                placeholder={cell.erfasst.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
-                inputMode="decimal"
-                className="h-8"
-                data-testid={`input-bezahlt-${cell.category}`}
-              />
-              <Button size="sm" variant="outline" className="h-8" onClick={saveBezahlt} disabled={mutation.isPending} data-testid={`button-save-bezahlt-${cell.category}`}>
-                OK
-              </Button>
-            </div>
-          )}
+          <div className="flex gap-1">
+            <Input
+              value={bezahlt}
+              onChange={(e) => setBezahlt(e.target.value)}
+              placeholder={cell.erfasst.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+              inputMode="decimal"
+              className="h-8"
+              data-testid={`input-bezahlt-${cell.category}`}
+            />
+            <Button size="sm" variant="outline" className="h-8" onClick={saveBezahlt} disabled={mutation.isPending} data-testid={`button-save-bezahlt-${cell.category}`}>
+              OK
+            </Button>
+          </div>
         </div>
         <div className="text-right">
           <Label className="text-xs text-gray-500">Einheit</Label>

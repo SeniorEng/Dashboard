@@ -355,7 +355,7 @@ router.put("/mitarbeiterabrechnung/account", requireWageDataAccess, asyncHandler
     throw err;
   }
   if (locked) {
-    res.status(403).json({ error: "MONTH_CLOSED", message: "Der Monat ist abgeschlossen und kann nicht mehr bearbeitet werden." });
+    res.status(403).json({ error: "MONTH_CLOSED", message: "Nach dem Monatsabschluss kann nur noch die Auszahlung (Bezahlt) erfasst werden; der Anfangsbestand ist gesperrt." });
     return;
   }
 

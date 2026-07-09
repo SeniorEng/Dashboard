@@ -239,9 +239,18 @@ export async function upsertHoursAccount(
     throw new OpeningBalanceLockedError();
   }
 
+  // Feld-granulare Monatsabschluss-Sperre (Task #1733): Nach dem Auto-Abschluss
+  // bleibt ausschließlich der Auszahlungswert „Bezahlt" editierbar (Lohnlauf
+  // läuft nach dem 8.). Der Anfangsbestand (Übertrag/Go-Live-Eröffnung) bleibt
+  // gesperrt — analog dazu, dass Unterschriften nach Abschluss weiter erlaubt
+  // sind. Kein neuer Mechanismus: derselbe `bezahlt`-Wert über denselben Pfad.
   const dateStr = `${input.year}-${String(input.month).padStart(2, "0")}-15`;
   if (await isMonthClosed(input.userId, dateStr)) {
-    return { locked: true };
+    const changesOpeningBalance =
+      input.anfangsbestand !== undefined || input.openingBalanceType !== undefined;
+    if (changesOpeningBalance) {
+      return { locked: true };
+    }
   }
 
   await withAudit(async (tx, audit) => {

@@ -243,7 +243,10 @@ describe("Task #1557: Stundenkonto-Saldo + Monatsabschluss-Sperre", () => {
     expect((put.data as { error: string }).error).toBe("OPENING_BALANCE_LOCKED");
   });
 
-  it("sperrt jede Bearbeitung, sobald der Monat abgeschlossen ist", async () => {
+  it("haelt Bezahlt nach dem Monatsabschluss editierbar, sperrt aber den Anfangsbestand", async () => {
+    // Task #1733 — Feld-granulare Sperre: der Lohnlauf läuft NACH dem
+    // Auto-Abschluss, daher muss „Bezahlt" weiter erfassbar bleiben, während
+    // der Anfangsbestand (Übertrag/Go-Live) gesperrt bleibt.
     // Auto-Abschluss simulieren: Periodensperre schreiben (kein reopened_at).
     const auth = await getAuthCookie();
     await db.execute(sql`
@@ -254,21 +257,21 @@ describe("Task #1557: Stundenkonto-Saldo + Monatsabschluss-Sperre", () => {
 
     const before = await countAudit();
 
-    const put = await apiPut(`/api/admin/mitarbeiterabrechnung/account`, {
+    // „Bezahlt" bleibt auf einem abgeschlossenen Monat erfassbar (200) …
+    const putBezahlt = await apiPut(`/api/admin/mitarbeiterabrechnung/account`, {
       userId: employeeId,
       year: TARGET_YEAR,
       month: TARGET_MONTH,
       category: "hw",
       bezahlt: 99,
     });
-    expect(put.status).toBe(403);
-    expect((put.data as { error: string }).error).toBe("MONTH_CLOSED");
+    expect(putBezahlt.status).toBe(200);
 
-    // Kein Schreibvorgang ⇒ kein zusätzlicher Audit-Eintrag.
+    // … und wird wie bisher auditiert.
     const after = await countAudit();
-    expect(after).toBe(before);
+    expect(after).toBe(before + 1);
 
-    // Der zuvor gesetzte Saldo bleibt unverändert (Sperre greift bevor geschrieben wird).
+    // Der neue Bezahlt-Wert schlägt im Saldo durch: 5 + 2 − 99 = -92.
     const detail = await apiGet<DrilldownResponse>(
       `/api/admin/mitarbeiterabrechnung/employee/${employeeId}?year=${TARGET_YEAR}&month=${TARGET_MONTH}`,
     );
@@ -276,8 +279,38 @@ describe("Task #1557: Stundenkonto-Saldo + Monatsabschluss-Sperre", () => {
     expect(detail.data.isClosed).toBe(true);
     const cells: Record<string, AccountCell> = {};
     for (const c of detail.data.accountCells) cells[c.category] = c;
-    expect(cells.hw.saldo).toBe(6);
-    expect(cells.hw.bezahlt).toBe(1);
+    expect(cells.hw.bezahlt).toBe(99);
+    expect(cells.hw.anfangsbestand).toBe(5);
+    expect(cells.hw.saldo).toBe(r2(5 + HW_MINUTES / 60 - 99));
+    assertSaldoIdentity(cells);
+  });
+
+  it("sperrt den Anfangsbestand auf einem abgeschlossenen Monat (403)", async () => {
+    // Der abschließende Monat wurde im vorigen Test gesperrt und bleibt es.
+    const before = await countAudit();
+
+    const putOpening = await apiPut(`/api/admin/mitarbeiterabrechnung/account`, {
+      userId: employeeId,
+      year: TARGET_YEAR,
+      month: TARGET_MONTH,
+      category: "hw",
+      anfangsbestand: 42,
+      openingBalanceType: "go_live",
+    });
+    expect(putOpening.status).toBe(403);
+    expect((putOpening.data as { error: string }).error).toBe("MONTH_CLOSED");
+
+    // Kein Schreibvorgang ⇒ kein zusätzlicher Audit-Eintrag, Anfangsbestand unverändert.
+    const after = await countAudit();
+    expect(after).toBe(before);
+
+    const detail = await apiGet<DrilldownResponse>(
+      `/api/admin/mitarbeiterabrechnung/employee/${employeeId}?year=${TARGET_YEAR}&month=${TARGET_MONTH}`,
+    );
+    expect(detail.status).toBe(200);
+    const cells: Record<string, AccountCell> = {};
+    for (const c of detail.data.accountCells) cells[c.category] = c;
+    expect(cells.hw.anfangsbestand).toBe(5);
   });
 });
 
