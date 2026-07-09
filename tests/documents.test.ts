@@ -186,6 +186,105 @@ describe("DOC-5: Dokumentenhistorie", () => {
   });
 });
 
+describe("DOC-8: Kundendokument-Historie Query-Param-Mapping (Task #1728)", () => {
+  // Regression-Guard: Der Historie-Endpoint filtert serverseitig nach
+  // documentTypeId, NICHT nach der Dokument-Zeilen-ID. Wird versehentlich die
+  // Dokument-ID durchgereicht (der ursprüngliche Bug), liefert der Endpoint [] und
+  // alle archivierten Versionen sind unsichtbar. Dieser Round-Trip lädt zwei
+  // Versionen hoch (v1 wird archiviert), ruft die Historie einmal korrekt (per
+  // documentTypeId) und einmal falsch (per Dokument-ID) ab und stellt sicher, dass
+  // nur die korrekte Zuordnung alle Versionen zurückgibt.
+  let customerId: number;
+  let docTypeId: number;
+  const createdTypeIds: number[] = [];
+
+  beforeAll(async () => {
+    await getAuthCookie();
+    const ts = Date.now();
+    const rand = Math.random().toString(36).slice(2, 7);
+    const typeRes = await apiPost<any>("/api/admin/document-types", {
+      name: `DOC8_${ts}_${rand}`,
+      targetType: "customer",
+      context: "bestandskunde",
+      inputMethod: "upload",
+      isMandatory: false,
+      isActive: true,
+      reviewIntervalMonths: 12,
+    });
+    expect(typeRes.status).toBe(201);
+    docTypeId = typeRes.data.id;
+    createdTypeIds.push(docTypeId);
+
+    const cust = await createTestCustomer({ nachname: `DOC8_${ts}_${rand}` });
+    customerId = cust.id;
+  });
+
+  afterAll(async () => {
+    await cleanupCustomer(customerId);
+    for (const id of createdTypeIds) {
+      try {
+        await apiPatch(`/api/admin/document-types/${id}`, { isActive: false });
+      } catch {}
+    }
+  });
+
+  async function upload(fileName: string) {
+    return apiPost<any>(`/api/customers/${customerId}/documents`, {
+      documentTypeId: docTypeId,
+      fileName,
+      objectPath: `/test/doc8/${Math.random().toString(36).slice(2, 8)}.pdf`,
+    });
+  }
+
+  it("DOC-8.1 – Historie per documentTypeId listet alle Versionen (aktuell + archiviert)", async () => {
+    const v1 = await upload("doc8-v1.pdf");
+    expect(v1.status).toBe(201);
+    const v2 = await upload("doc8-v2.pdf");
+    expect(v2.status).toBe(201);
+
+    const res = await apiGet<any[]>(`/api/customers/${customerId}/documents/${docTypeId}/history`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.data)).toBe(true);
+
+    const ids = res.data.map((d) => d.id);
+    expect(ids).toContain(v1.data.id);
+    expect(ids).toContain(v2.data.id);
+
+    // v1 wurde durch v2 archiviert, v2 ist aktuell.
+    const archived = res.data.find((d) => d.id === v1.data.id);
+    const current = res.data.find((d) => d.id === v2.data.id);
+    expect(archived.isCurrent).toBe(false);
+    expect(current.isCurrent).toBe(true);
+
+    // Alle Versionen tragen ihren downloadbaren objectPath + Upload-Datum.
+    for (const d of res.data) {
+      expect(typeof d.objectPath).toBe("string");
+      expect(d.objectPath.length).toBeGreaterThan(0);
+      expect(d.uploadedAt).toBeTruthy();
+    }
+
+    // Absteigend nach Upload-Datum sortiert (neueste zuerst).
+    const uploadedAts = res.data.map((d) => new Date(d.uploadedAt).getTime());
+    const sortedDesc = [...uploadedAts].sort((a, b) => b - a);
+    expect(uploadedAts).toEqual(sortedDesc);
+  });
+
+  it("DOC-8.2 – Historie per Dokument-Zeilen-ID (der ursprüngliche Bug) liefert NICHT die Versionen dieses Typs", async () => {
+    const list = await apiGet<any[]>(`/api/customers/${customerId}/documents`);
+    const currentDoc = list.data.find((d) => d.documentTypeId === docTypeId && d.isCurrent);
+    expect(currentDoc).toBeDefined();
+    // Der Bug: Dokument-Zeilen-ID ≠ documentTypeId. Würde die ID durchgereicht,
+    // filterte der Endpoint nach einem falschen documentTypeId → keine Treffer.
+    expect(currentDoc.id).not.toBe(docTypeId);
+
+    const wrong = await apiGet<any[]>(`/api/customers/${customerId}/documents/${currentDoc.id}/history`);
+    expect(wrong.status).toBe(200);
+    // Es dürfen keine Dokumente dieses Typs zurückkommen, wenn nach der Zeilen-ID
+    // (die als documentTypeId interpretiert wird) gefiltert wird.
+    expect(wrong.data.some((d) => d.documentTypeId === docTypeId)).toBe(false);
+  });
+});
+
 describe("DOC-7: Upload-Modus Version vs. weitere Seiten (Task #1578)", () => {
   let customerId: number;
   let docTypeId: number;
