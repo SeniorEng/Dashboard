@@ -139,10 +139,13 @@ export const appointments = pgTable("appointments", {
   // Mitarbeitern zu EINEM Einsatz ("Option A": ein Mitarbeiter je Termin bleibt
   // Fundament). Nullable — Einzeltermine (der Normalfall) tragen NULL.
   //
-  // WICHTIG (Sichtbarkeits-/Privacy-Invariante): Diese Spalte dient EINZIG der
-  // Kunden-Overlap-Ausnahme bei der Anlage. Sie darf NIEMALS genutzt werden, um
-  // Sichtbarkeit, Dokumentations- oder Leistungsnachweis-Scope eines
-  // Mitarbeiters auf den Partner-Leg auszuweiten.
+  // WICHTIG (Sichtbarkeits-/Privacy-Invariante): Diese Spalte dient der
+  // Kunden-Overlap-Ausnahme bei der Anlage sowie der Ableitung des reinen
+  // Partner-NAMENS (Task #1736, `coVisitPartnerName` — sichtbar für Admins UND
+  // die am Einsatz beteiligte Kraft, damit sie sich abstimmen können). Sie darf
+  // NIEMALS genutzt werden, um Sichtbarkeit, Dokumentations- oder
+  // Leistungsnachweis-Scope eines Mitarbeiters auf den Partner-Leg auszuweiten:
+  // erlaubt ist ausschließlich der Name, KEIN weiterer Partner-Termin-Payload.
   coVisitGroupId: text("co_visit_group_id"),
   // ============================================
   // CUSTOMER NO-SHOW FIELDS (Task #485)

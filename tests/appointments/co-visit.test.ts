@@ -495,4 +495,56 @@ describe("CV-3: Privacy-Invariante (coVisitGroupId erweitert NIE die Sichtbarkei
     expect(groupLegsVisibleToB[0].assignedEmployeeId).toBe(empB!.id);
     expect(listB.data.some((a: any) => a.assignedEmployeeId === empA!.id)).toBe(false);
   });
+
+  it("CV-3.2 – beteiligte Kraft erhält den Partner-NAMEN am eigenen Leg (Task #1736), NICHT den Partner-Leg", async () => {
+    const customer = await createTestCustomer();
+    customerIds.push(customer.id as number);
+    await assignEmployeeToCustomer(customer.id as number, empA!.id);
+
+    const service = await getAnyService();
+    const date = getFutureDate(27);
+
+    const create = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: customer.id,
+      date,
+      scheduledStart: "15:00",
+      services: [{ serviceId: service.id, durationMinutes: 60 }],
+      assignedEmployeeId: empA!.id,
+      secondAssignedEmployeeId: empB!.id,
+    });
+    expect(create.status).toBe(201);
+    const groupId = create.data.coVisitGroupId;
+
+    // empB (nicht-Admin) sieht NUR seinen eigenen Leg — dieser trägt jetzt aber
+    // den abgeleiteten Partner-NAMEN (empA), damit sich beide abstimmen können.
+    const authB = await loginAs(empB!.email, empB!.password);
+    const listB = await apiGetAs<any[]>(authB, `/api/appointments?date=${date}`);
+    expect(listB.status).toBe(200);
+
+    const ownLeg = listB.data.find(
+      (a: any) => a.coVisitGroupId === groupId && a.assignedEmployeeId === empB!.id,
+    );
+    expect(ownLeg).toBeTruthy();
+    // Reiner Name des Partners (empA) — kein weiterer Partner-Termin-Payload.
+    expect(typeof ownLeg.coVisitPartnerName).toBe("string");
+    expect(ownLeg.coVisitPartnerName).toContain("CoVisitA");
+    // Scope-Non-Expansion bleibt: der Partner-Leg (empA) selbst ist unsichtbar.
+    expect(listB.data.some((a: any) => a.assignedEmployeeId === empA!.id)).toBe(false);
+
+    // Einzeltermin-Gegenprobe: ein Leg ohne Partner liefert null.
+    const soloCustomer = await createTestCustomer();
+    customerIds.push(soloCustomer.id as number);
+    await assignEmployeeToCustomer(soloCustomer.id as number, empB!.id);
+    const solo = await apiPost<any>("/api/appointments/kundentermin", {
+      customerId: soloCustomer.id,
+      date,
+      scheduledStart: "17:00",
+      services: [{ serviceId: service.id, durationMinutes: 60 }],
+      assignedEmployeeId: empB!.id,
+    });
+    expect(solo.status).toBe(201);
+    const soloRead = await apiGet<any>(`/api/appointments/${solo.data.id}`);
+    expect(soloRead.data.coVisitGroupId).toBeNull();
+    expect(soloRead.data.coVisitPartnerName ?? null).toBeNull();
+  });
 });

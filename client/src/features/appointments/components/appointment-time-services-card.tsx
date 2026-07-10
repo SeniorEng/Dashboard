@@ -23,10 +23,9 @@ interface Props {
   services: AppointmentService[];
   isCompleted: boolean;
   isErstberatung: boolean;
-  isAdmin?: boolean;
 }
 
-export function AppointmentTimeServicesCard({ appointment, services, isCompleted, isErstberatung, isAdmin }: Props) {
+export function AppointmentTimeServicesCard({ appointment, services, isCompleted, isErstberatung }: Props) {
   const hasAnyService = services.length > 0;
   const hasAnyDocumentedService = services.some(
     (s) => s.actualDurationMinutes !== null && s.actualDurationMinutes > 0,
@@ -101,12 +100,14 @@ export function AppointmentTimeServicesCard({ appointment, services, isCompleted
           </span>
         </div>
 
-        {isAdmin && appointment.coVisitGroupId && (
+        {appointment.coVisitGroupId && (
           <div className="flex items-center justify-between py-2 border-b border-border/50" data-testid="row-co-visit">
             <span className="text-muted-foreground">Einsatz</span>
             <span className="flex items-center gap-1.5 font-medium text-teal-700">
               <Users className="h-3.5 w-3.5" />
-              Zwei-Kräfte-Einsatz
+              {appointment.coVisitPartnerName
+                ? `Zwei-Kräfte-Einsatz: ${appointment.coVisitPartnerName}`
+                : "Zwei-Kräfte-Einsatz"}
             </span>
           </div>
         )}

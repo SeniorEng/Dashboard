@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/layout";
 import { useAppointment, useAppointmentBudgetFit } from "@/features/appointments";
-import { useDeleteAppointment, useCoVisitPartners } from "@/features/appointments/hooks";
+import { useDeleteAppointment } from "@/features/appointments/hooks";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { SectionCard } from "@/components/patterns/section-card";
@@ -96,14 +96,14 @@ export default function AppointmentDetail() {
   const { data: budgetFit } = useAppointmentBudgetFit(appointment?.customerId ?? null);
   const budgetOverrun = budgetFit?.get(id)?.fitsInMonthlyBudget === false;
 
-  // Task #1619 — Zwei-Kräfte-Einsatz: Partner-Legs (anderer Mitarbeiter) laden,
-  // um vor dem Löschen/Absagen zu warnen. Das Backend kaskadiert die Löschung
-  // auf den Partner-Leg; der Planer soll das VOR dem Bestätigen wissen.
-  const { data: coVisitPartners } = useCoVisitPartners(appointment);
+  // Task #1736 — Zwei-Kräfte-Einsatz: der Partner-NAME kommt jetzt serverseitig
+  // abgeleitet direkt am Termin mit (`coVisitPartnerName`, sichtbar für Admins
+  // UND die beteiligte Kraft) und ersetzt das frühere clientseitige Nachladen
+  // der Partner-Legs. Genutzt für die Kaskaden-Warnung beim Löschen/Absagen.
   const isCoVisit = !!appointment?.coVisitGroupId;
-  const coVisitPartnerNames = (coVisitPartners ?? [])
-    .map((p) => p.assignedEmployeeName)
-    .filter((n): n is string => !!n);
+  const coVisitPartnerNames = appointment?.coVisitPartnerName
+    ? [appointment.coVisitPartnerName]
+    : [];
 
   const seriesCancelMutation = useMutation({
     mutationFn: async (data: { mode: "single" | "this_and_future" | "all_future" }) => {
@@ -281,7 +281,6 @@ export default function AppointmentDetail() {
         services={services}
         isCompleted={isCompleted}
         isErstberatung={isErstberatung}
-        isAdmin={!!user?.isAdmin}
       />
 
       {isCompleted && <AppointmentTravelCard appointment={appointment} />}

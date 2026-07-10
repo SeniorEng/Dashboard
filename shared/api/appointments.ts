@@ -14,6 +14,15 @@ export interface AppointmentWithCustomer extends Appointment {
    * via SQL berechnet (siehe `server/storage/appointment-helpers.ts`).
    */
   serviceType: string | null;
+  /**
+   * Task #1736 — Zwei-Kräfte-Einsatz (Co-Visit): der reine Anzeige-NAME der
+   * zweiten Kraft (Partner-Leg mit gleicher `coVisitGroupId`). Serverseitig aus
+   * dem Partner-Leg abgeleitet (kein persistiertes Feld), damit sowohl Admins
+   * ALS AUCH die am Einsatz beteiligte Kraft den Partner erkennen. Streng auf
+   * den Namen begrenzt — er erweitert NICHT den Sichtbarkeits-/Doku-Scope.
+   * NULL bei Einzelterminen (keine `coVisitGroupId`).
+   */
+  coVisitPartnerName?: string | null;
 }
 
 /**

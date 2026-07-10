@@ -75,6 +75,24 @@ export function employeesMonthClosingResponsibilityFilter(userIds: number[]): SQ
 
 const assignedEmployee = sqlBuilder`(SELECT display_name FROM users WHERE users.id = ${appointments.assignedEmployeeId})`.as("assigned_employee_name");
 
+// Task #1736 — Zwei-Kräfte-Einsatz (Co-Visit): der NAME der zweiten Kraft.
+// Abgeleitet aus dem PARTNER-Leg (gleiche co_visit_group_id, anderer Termin, je
+// ein Mitarbeiter je Leg / "Option A"), NICHT persistiert. Bewusst nur der reine
+// Anzeige-Name — kein weiterer Partner-Termin-Payload —, damit die beteiligte
+// Kraft den Partner erkennt, ohne den Sichtbarkeits-/Doku-Scope zu erweitern.
+// Einzeltermine (co_visit_group_id NULL) liefern NULL (kein Partner-Match).
+const coVisitPartnerName = sqlBuilder<string | null>`(
+  SELECT u.display_name
+  FROM appointments partner
+  JOIN users u ON u.id = partner.assigned_employee_id
+  WHERE ${appointments.coVisitGroupId} IS NOT NULL
+    AND partner.co_visit_group_id = ${appointments.coVisitGroupId}
+    AND partner.id <> ${appointments.id}
+    AND partner.deleted_at IS NULL
+  ORDER BY partner.id
+  LIMIT 1
+)`.as("co_visit_partner_name");
+
 // Derived from appointment_services + services.lohnart_kategorie. Returns the
 // human-readable label that the frontend (`getCardServiceInfoFromAppointment`,
 // employee-time-card, day-detail-panel) historically read from the now-deprecated
@@ -137,6 +155,7 @@ export const appointmentWithCustomerSelectFields = {
   travelBufferMinutes: appointments.travelBufferMinutes,
   importBatchId: appointments.importBatchId,
   assignedEmployeeName: assignedEmployee,
+  coVisitPartnerName: coVisitPartnerName,
   customer: {
     id: customers.id,
     name: customers.name,
@@ -232,6 +251,7 @@ export function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unkn
     noShowChargeSuppressionReason: (row.noShowChargeSuppressionReason as string | null) ?? null,
     importBatchId: (row.importBatchId as number | null) ?? null,
     assignedEmployeeName: (row.assignedEmployeeName as string | null) ?? null,
+    coVisitPartnerName: (row.coVisitPartnerName as string | null) ?? null,
     customer: (row.customer as { id?: number })?.id
       ? row.customer as AppointmentWithCustomer["customer"]
       : (row.prospect as { id?: number })?.id
