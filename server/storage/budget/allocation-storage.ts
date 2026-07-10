@@ -815,7 +815,17 @@ async function calculateAllocated45b(
     return clamped.monthlyLimitCents ?? DEFAULT_MONTHLY_BUDGET_CENTS;
   };
 
-  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
+  // Task #1740 — Diese §45b-Zeile wird OHNE `enabled`-Filter gesucht (wie der
+  // SSoT-Resolver `resolve45bActivation` in `shared/domain/budgets.ts`). Das ist
+  // hier zwar KEIN Aktivierungs-Gate — die Zeile speist nur den
+  // allocStart-Shift-Fallback unten und wird ausschließlich benutzt, wenn
+  // `all45bSettings.length === 0` (dann ist auch `typeSettings` frei von
+  // §45b-Zeilen, der Filter wäre also ohnehin wirkungslos). Wir vermeiden den
+  // `&& s.enabled`-Filter trotzdem bewusst, weil genau dieses Muster (eine
+  // DEAKTIVIERTE Zeile wie eine FEHLENDE behandeln) die anderswo entfernte
+  // „Budget überschritten"-Regression war und ein künftiger Edit ihn hier sonst
+  // still wieder einführen könnte.
+  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b");
 
   // Task #668-Followup: bei mehreren `customer_budget_type_settings`-Zeilen
   // (Append-only-Transition: alte Zeile geschlossen, neue Zeile ab Folgetag)
