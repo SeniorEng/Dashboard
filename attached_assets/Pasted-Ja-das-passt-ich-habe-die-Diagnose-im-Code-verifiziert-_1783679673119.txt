@@ -1,0 +1,11 @@
+Ja, das passt — ich habe die Diagnose im Code verifiziert, sie stimmt exakt.
+Bestätigt (mit Code-Beleg):
+
+Das fehlerhafte Muster steht wörtlich in summary-queries.ts:265 und :378:
+find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled) → bei einer deaktivierten Zeile liefert find undefined, !s45b ist true → Fallback auf default45bEnabled (für gesetzlich Versicherte = true) → §45b gilt fälschlich als aktiv. Da der Topf 0 € hat, wird jeder geplante Termin als Überschreitung markiert. Genau der Fall bei Seidel (§45b enabled=false, nutzt §39).
+Das korrekte Muster steht schon in der SSoT: net-available-45b.ts:147 und unified-reader.ts:203 machen find(...) ohne enabled-Filter und dann enabled45b = s45b ? s45b.enabled : default — das gibt bei deaktivierter Zeile korrekt false. Der Fix ist also 1:1 das Übernehmen dieses vorhandenen Musters. Richtig.
+Amüsant: an :266 steht sogar schon ein Kommentar „BUG-19 (Facette A): fehlende Zeile = Default" — man hat den fehlende-Zeile-Fall bedacht, aber übersehen, dass && s.enabled eine deaktivierte Zeile wie eine fehlende aussehen lässt. Das ist die unbemerkte zweite Facette.
+
+Und beruhigend (steht auch im Plan, stimmt): Es ist nur das weiche Banner — die Terminanlage/Buchung routet korrekt auf §39. An Seidels Terminen ist nichts falsch verbucht.
+§45a/§39 zu Recht out of scope: deren Default ist false, dadurch geben „deaktiviert" und „fehlt" beide korrekt „inaktiv" — die Konflation liefert dort zufällig das richtige Ergebnis. Bestätigt.
+Eine Sache würde ich vor „Buchung ist korrekt = out of scope" absichern: Dasselbe fehlerhafte Muster (&& s.enabled) existiert noch 4× in allocation-storage.ts (Zeilen 410, 818, 1353, 1383) — also im Buchungs-/Allocation-Pfad. Der Plan nimmt an, dass Buchung korrekt ist (0-€-Topf wird übersprungen → §39). Das ist plausibel (deshalb schadet die Konflation dort nicht), aber ich würde es verifizieren statt annehmen. Der Plan schlägt selbst einen „gemeinsamen kleinen Helfer, damit die Logik nicht ein viertes Mal dupliziert wird" vor — genau richtig: den Helfer einführen und die 4 Allocation-Stellen ebenfalls durchleiten (oder dokumentieren, warum sie sicher sind). Sonst bleibt dieselbe latente Konflation an 4 Stellen liegen und kann später doch mal beißen.
