@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   applyAuthToBrowser,
   apiPatch,
@@ -42,6 +42,45 @@ test.skip(!creds, "TEST_USER_EMAIL/TEST_USER_PASSWORD nicht gesetzt — Smoke-Su
 // Termin-Detail und Budget-Ledger (Verifikation 1/2) laufen weiterhin in der CI.
 const hasObjectStorage =
   !!process.env.PRIVATE_OBJECT_DIR && !!process.env.PUBLIC_OBJECT_SEARCH_PATHS;
+
+// Verifikation-4-Helfer (Task #1732): Rechnungs-Detail in der Admin-Abrechnung
+// robust öffnen. Die Rechnung existiert zu diesem Zeitpunkt bereits in der DB
+// (Verifikation 1–3 laufen API-seitig grün); nur die TanStack-Query-Liste kann
+// unter Last (mehrere Workflows parallel → RAM-Druck) verzögert rendern oder ein
+// Refetch nach dem Monat/Jahr-Filter racen. Die frühere einmalige
+// `toBeVisible`-Assertion flakte dann an Verifikation 4. Wir setzen Monat/Jahr,
+// warten auf die Rechnungs-Row und laden bei Bedarf die Seite neu (Filter erneut
+// setzen ⇒ frischer billing-invoices-Fetch statt evtl. stale Cache), bevor wir
+// das Überlauf-Menü + Detail öffnen. Gleiches Poll-then-assert-Muster wie
+// `billing-bulk.spec.ts` (`fetchInvoiceFor`).
+async function openInvoiceDetailInBilling(
+  page: Page,
+  invoiceId: number,
+  billingMonth: number,
+  billingYear: number,
+): Promise<void> {
+  const invoiceRow = page.locator(`[data-testid='invoice-row-${invoiceId}']`);
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
+    await page.locator("[data-testid='select-month']").click();
+    await page.locator(`[data-testid='option-month-${billingMonth}']`).click();
+    await page.locator("[data-testid='select-year']").click();
+    await page.locator(`[data-testid='option-year-${billingYear}']`).click();
+    try {
+      await expect(invoiceRow).toBeVisible({ timeout: 15000 });
+      break;
+    } catch (err) {
+      // Letzter Versuch: Fehler durchreichen, damit die Assertion sichtbar
+      // fehlschlägt. Sonst nächste Iteration mit Reload + Filter-Neusatz.
+      if (attempt === maxAttempts) throw err;
+    }
+  }
+  // Task #990: Sekundäraktionen (inkl. Details) liegen im Überlauf-Menü —
+  // erst Menü öffnen, dann Detail-Eintrag klicken.
+  await page.locator(`[data-testid='button-actions-menu-${invoiceId}']`).click();
+  await page.locator(`[data-testid='button-detail-${invoiceId}']`).click();
+}
 
 let session: ApiSession;
 
@@ -720,26 +759,17 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       // Browser-View der Rechnung; die eigentliche PDF wird per
       // `target="_blank"` als Datei-Download geöffnet, ist also in
       // Playwright nicht direkt im DOM prüfbar.
-      await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
       // Monat/Jahr explizit auf den Rechnungs-Zeitraum stellen — die
       // Billing-Seite filtert per Default auf den heutigen Monat, der
       // Test-Termin liegt aber ggf. im Folgemonat (createAppointment
-      // setzt das Datum auf den nächsten Werktag +7).
-      const billingMonth = apptDate.getMonth() + 1;
-      const billingYear = apptDate.getFullYear();
-      await page.locator("[data-testid='select-month']").click();
-      await page.locator(`[data-testid='option-month-${billingMonth}']`).click();
-      await page.locator("[data-testid='select-year']").click();
-      await page.locator(`[data-testid='option-year-${billingYear}']`).click();
-
-      const invoiceRow = page.locator(
-        `[data-testid='invoice-row-${invoiceId}']`,
+      // setzt das Datum auf den nächsten Werktag +7). Öffnen erfolgt über den
+      // robusten Reload-Retry-Helfer (Task #1732).
+      await openInvoiceDetailInBilling(
+        page,
+        invoiceId!,
+        apptDate.getMonth() + 1,
+        apptDate.getFullYear(),
       );
-      await expect(invoiceRow).toBeVisible({ timeout: 15000 });
-      // Task #990: Sekundäraktionen (inkl. Details) liegen jetzt im
-      // Überlauf-Menü — erst Menü öffnen, dann Detail-Eintrag klicken.
-      await page.locator(`[data-testid='button-actions-menu-${invoiceId}']`).click();
-      await page.locator(`[data-testid='button-detail-${invoiceId}']`).click();
       // Detail-Karte rendert direkt nach der Row — wir suchen den
       // km-Text innerhalb der Detail-Tabelle (toleranter Lookup, weil
       // die Karte kein eigenes data-testid hat).
@@ -982,19 +1012,13 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       expect(hwLine!.totalCents).toBe(ledgerHwCents);
 
       // --- Verifikation 4: Rechnungs-Detail in der Admin-UI zeigt "1 Std. 12 Min." ---
-      await page.goto("/admin/billing", { waitUntil: "domcontentloaded" });
-      const billingMonth = apptDate.getMonth() + 1;
-      const billingYear = apptDate.getFullYear();
-      await page.locator("[data-testid='select-month']").click();
-      await page.locator(`[data-testid='option-month-${billingMonth}']`).click();
-      await page.locator("[data-testid='select-year']").click();
-      await page.locator(`[data-testid='option-year-${billingYear}']`).click();
-
-      const invoiceRow = page.locator(`[data-testid='invoice-row-${invoiceId}']`);
-      await expect(invoiceRow).toBeVisible({ timeout: 15000 });
-      // Task #990: Detail-Aktion liegt jetzt im Überlauf-Menü.
-      await page.locator(`[data-testid='button-actions-menu-${invoiceId}']`).click();
-      await page.locator(`[data-testid='button-detail-${invoiceId}']`).click();
+      // Öffnen über den robusten Reload-Retry-Helfer (Task #1732).
+      await openInvoiceDetailInBilling(
+        page,
+        invoiceId!,
+        apptDate.getMonth() + 1,
+        apptDate.getFullYear(),
+      );
       await expect(page.getByText("1 Std. 12 Min.").first()).toBeVisible({
         timeout: 10000,
       });
