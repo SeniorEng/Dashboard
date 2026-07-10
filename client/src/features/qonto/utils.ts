@@ -36,11 +36,3 @@ export function confidenceBadge(confidence: string | null): {
       return { label: "Automatisch", className: "bg-gray-50 text-gray-600 border-gray-200", weak: false };
   }
 }
-
-/**
- * Task #1672 — Sortier-Rang: unsichere („prüfen") Auto-Treffer zuerst, damit sie
- * oben auffallen; danach der Rest. Offene/ignorierte Transaktionen sind neutral.
- */
-export function confidenceSortRank(confidence: string | null): number {
-  return confidence === "auto_amount" ? 0 : 1;
-}

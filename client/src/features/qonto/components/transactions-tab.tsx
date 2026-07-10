@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { iconSize } from "@/design-system";
 import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff, Sparkles, Check, X, Layers } from "lucide-react";
-import { formatCents, formatDate, confidenceBadge, confidenceSortRank } from "../utils";
+import { formatCents, formatDate, confidenceBadge } from "../utils";
 import {
   useQontoTransactions,
   useMatchableInvoices,
@@ -226,12 +226,13 @@ export function TransactionsTab({
     );
   }
 
-  // Task #1672 — unsichere Auto-Treffer („nur Betrag") nach oben, sonst Reihenfolge
-  // beibehalten (stabil per Index-Tiebreak). Kein Hook (steht nach Early-Return).
+  // Task #1735 — streng nach Emissionsdatum absteigend (neueste oben). Der Server
+  // liefert bereits desc(emittedAt); wir sortieren defensiv erneut mit stabilem
+  // Index-Tiebreak bei gleichem Datum. Kein Hook (steht nach Early-Return).
   const transactions = (transactionsQuery.data?.transactions ?? [])
     .map((tx, i) => ({ tx, i }))
     .sort((a, b) => {
-      const r = confidenceSortRank(a.tx.matchConfidence) - confidenceSortRank(b.tx.matchConfidence);
+      const r = new Date(b.tx.emittedAt).getTime() - new Date(a.tx.emittedAt).getTime();
       return r !== 0 ? r : a.i - b.i;
     })
     .map((x) => x.tx);
