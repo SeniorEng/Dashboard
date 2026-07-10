@@ -15,10 +15,10 @@ interface MissingSignatureItem {
   month: number;
 }
 
-const MONTH_NAMES = [
-  "Januar", "Februar", "März", "April", "Mai", "Juni",
-  "Juli", "August", "September", "Oktober", "November", "Dezember",
-];
+interface MissingSignaturesCardProps {
+  selectedYear: number;
+  selectedMonth: number;
+}
 
 function formatDate(isoDate: string): string {
   const parts = isoDate.split("-");
@@ -29,14 +29,19 @@ function formatDate(isoDate: string): string {
 // entfernten read-only Monatsabschluss-Seite, jetzt im Arbeitsplatz „Abrechnung".
 // Rein abgeleitet aus der „Dokumentiert"-Stufe, gefiltert auf geschlossene
 // Monate; Einträge verschwinden automatisch, sobald der Termin unterschrieben ist.
-export function MissingSignaturesCard() {
+// Task #1738: Auf den in der Filterleiste gewählten Monat/Jahr begrenzt (die Zahl
+// im Titel zählt entsprechend); der Query-Key bleibt unverändert, damit die
+// zentrale Query-Invalidierung weiter greift.
+export function MissingSignaturesCard({ selectedYear, selectedMonth }: MissingSignaturesCardProps) {
   const { data } = useQuery<{ items: MissingSignatureItem[] }>({
     queryKey: ["month-closing-missing-signatures"],
     queryFn: async () =>
       unwrapResult(await api.get<{ items: MissingSignatureItem[] }>("/time-entries/month-closing/missing-signatures")),
     staleTime: 5 * 60 * 1000,
   });
-  const missingSignatures = data?.items ?? [];
+  const missingSignatures = (data?.items ?? []).filter(
+    (item) => item.year === selectedYear && item.month === selectedMonth,
+  );
   const [collapsed, setCollapsed] = useState(true);
 
   if (missingSignatures.length === 0) return null;
@@ -79,7 +84,6 @@ export function MissingSignaturesCard() {
                   <span className="font-medium">{formatDate(item.date)} {item.scheduledStart?.slice(0, 5)}</span>
                   <span className="truncate">{item.customerName}</span>
                   <span className="text-gray-400 ml-auto shrink-0">{item.employeeName}</span>
-                  <span className="text-gray-400 shrink-0">{MONTH_NAMES[item.month - 1]} {item.year}</span>
                 </Link>
               ))}
             </div>

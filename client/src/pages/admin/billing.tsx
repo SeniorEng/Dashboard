@@ -415,8 +415,6 @@ export default function AdminBilling() {
         onStageSelect={handleStageSelect}
       />
 
-      <MissingSignaturesCard />
-
       <div
         className="mb-4 mt-2 inline-flex gap-1 rounded-lg border border-gray-200 bg-white p-1"
         data-testid="tabs-billing"
@@ -440,6 +438,8 @@ export default function AdminBilling() {
           Rechnungen verwalten
         </button>
       </div>
+
+      <MissingSignaturesCard selectedYear={selectedYear} selectedMonth={selectedMonth} />
 
       {activeTab === "termine" ? (
         <TermineTab
