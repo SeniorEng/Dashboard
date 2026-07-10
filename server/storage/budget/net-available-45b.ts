@@ -77,8 +77,8 @@ import { customersRepo } from "../../repos";
 import type { DbClient } from "./types";
 import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-storage";
 import { calculateAllocatedCents, getExcluded45bConsumption } from "./allocation-storage";
-import { activeHoldsCents, netConsumedUpToDate, isInRange } from "./unified-reader";
-import { effectiveDefaultPots } from "@shared/domain/budgets";
+import { activeHoldsCents, netConsumedUpToDate } from "./unified-reader";
+import { resolve45bActivation } from "@shared/domain/budgets";
 import {
   computeNetAvailable45b,
   type NetAvailable45bComposition,
@@ -145,12 +145,11 @@ export async function netAvailable45bAt(
   // aus der SSoT `effectiveDefaultPots`, persistierte Zeilen behalten ihren
   // `enabled`-Wert; ein Stichtag außerhalb `validFrom..validTo` sperrt den Topf.
   const s45b = typeSettings.find((s) => s.budgetType === BUDGET_TYPE_45B);
-  const defaultEnabled45b =
-    effectiveDefaultPots({ billingType, pflegegrad: null }).find(
-      (p) => p.budgetType === BUDGET_TYPE_45B,
-    )?.enabled ?? false;
-  const enabled45b = s45b ? s45b.enabled : defaultEnabled45b;
-  const inRange45b = !s45b ? true : isInRange(asOfDate, s45b.validFrom, s45b.validTo);
+  const { enabled: enabled45b, inRange: inRange45b } = resolve45bActivation({
+    setting: s45b,
+    billingType,
+    asOfDate,
+  });
 
   if (!enabled45b || !inRange45b) {
     // Gesperrter Topf → keine §45b-Verfügbarkeit (entspricht `emptyPot` im Reader).

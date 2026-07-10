@@ -30,7 +30,7 @@ import { readBudgetTypeSettings, getBudgetPreferences } from "./preferences-stor
 import { calculateAllocatedCents } from "./allocation-storage";
 import { computeCapSlot } from "./cap-calculator";
 import { netAvailable45bAt } from "./net-available-45b";
-import { effectiveDefaultPots } from "@shared/domain/budgets";
+import { effectiveDefaultPots, resolve45bActivation } from "@shared/domain/budgets";
 
 /**
  * Task #875 (Phase 5): aktive Hard-Holds (`budget_reservations.state = 'hold'`)
@@ -201,8 +201,13 @@ export async function readUnifiedBudgetAvailability(
 
   // ---- §45b (Jahrestopf ohne statutarischen Fenster-Cap) ----
   const s45b = settingsMap.get("entlastungsbetrag_45b");
-  const enabled45b = s45b ? s45b.enabled : (defaultEnabled.get("entlastungsbetrag_45b") ?? false);
-  const inRange45b = !s45b ? true : isInRange(asOfDate, s45b.validFrom, s45b.validTo);
+  // §45b-Aktivität über die SSoT `resolve45bActivation` (BUG-19 Facette A):
+  // vorhandene Zeile behält ihren `enabled`-Wert, fehlende fällt auf den Default.
+  const { enabled: enabled45b, inRange: inRange45b } = resolve45bActivation({
+    setting: s45b,
+    billingType,
+    asOfDate,
+  });
   let pot45b = emptyPot("entlastungsbetrag_45b", enabled45b, inRange45b);
   if (enabled45b && inRange45b) {
     // Task #1348 — §45b-Verfügbarkeits-SSoT: die Erhaltungs-Identität

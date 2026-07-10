@@ -8,7 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, lte, gte, isNull, or, asc, inArray } from "drizzle-orm";
 import { todayISO, parseLocalDate, lastDayOfMonth } from "@shared/utils/datetime";
-import { clampToStatutoryMax, effectiveDefaultPots } from "@shared/domain/budgets";
+import { clampToStatutoryMax, resolve45bActivation } from "@shared/domain/budgets";
 import { db } from "../../lib/db";
 import { customersRepo } from "../../repos";
 import type { DbClient, BudgetSummary, Budget45aSummary, Budget39_42aSummary, AllBudgetSummaries } from "./types";
@@ -262,16 +262,16 @@ export async function getBudgetSummary(customerId: number, _preferences?: Custom
     }
   }
 
-  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-  // BUG-19 (Facette A): fehlende §45b-Zeile = Default-Aktivierung → aus der SSoT
-  // `effectiveDefaultPots(customer)`, die den Selbstzahler-Anspruchs-Gate
-  // durchläuft (keine eigene Zweitprüfung). `pflegegrad` ist für den §45b-Default
-  // irrelevant (nur billingType-abhängig).
-  const default45bEnabled = effectiveDefaultPots({ billingType, pflegegrad: null })
-    .find(p => p.budgetType === "entlastungsbetrag_45b")?.enabled ?? false;
-  const isCurrentlyActive = !s45b
-    ? default45bEnabled
-    : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
+  // BUG-19 (Facette A): §45b-Zeile OHNE `enabled`-Filter suchen (eine
+  // DEAKTIVIERTE Zeile darf nicht wie eine FEHLENDE aussehen, sonst greift
+  // fälschlich die Default-Aktivierung → falsche „Budget überschritten"-Warnung
+  // trotz 0-€-Topf). Aktivität kommt aus der SSoT `resolve45bActivation`.
+  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b");
+  const { active: isCurrentlyActive } = resolve45bActivation({
+    setting: s45b,
+    billingType,
+    asOfDate: today,
+  });
 
   // §45b ist ein Jahrestopf — kein harter Monats-Cap. Die "Verfügbar diesen
   // Monat"-Anzeige entspricht der gesamten zum Stichtag aufgelaufenen
@@ -373,14 +373,16 @@ export async function getMonthlyBudgetFitByAppointment(
   ]);
   const billingType = customerRows[0]?.billingType;
 
-  // §45b-Aktivität identisch zu getBudgetSummary (BUG-19 Facette A): fehlende
-  // Zeile ⇒ Default-Aktivierung über effectiveDefaultPots (Selbstzahler-Gate).
-  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b" && s.enabled);
-  const default45bEnabled = effectiveDefaultPots({ billingType, pflegegrad: null })
-    .find(p => p.budgetType === "entlastungsbetrag_45b")?.enabled ?? false;
-  const isCurrentlyActive = !s45b
-    ? default45bEnabled
-    : (!s45b.validFrom || today >= s45b.validFrom) && (!s45b.validTo || today <= s45b.validTo);
+  // §45b-Aktivität identisch zu getBudgetSummary (BUG-19 Facette A): Zeile OHNE
+  // `enabled`-Filter suchen und Aktivität über die SSoT `resolve45bActivation`
+  // auflösen — eine deaktivierte Zeile ⇒ inaktiv (kein Fehlalarm), fehlende
+  // Zeile ⇒ Default-Aktivierung (Selbstzahler-Gate).
+  const s45b = typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b");
+  const { active: isCurrentlyActive } = resolve45bActivation({
+    setting: s45b,
+    billingType,
+    asOfDate: today,
+  });
   if (!isCurrentlyActive) return [];
 
   const plannedByAppt = await getPlannedCostByAppointment(customerId);

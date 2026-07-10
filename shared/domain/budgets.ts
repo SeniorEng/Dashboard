@@ -210,6 +210,61 @@ export function effectiveDefaultPots(customer: DefaultPotCustomer): EffectiveDef
   }));
 }
 
+/** Persistierte (oder fehlende) §45b-Type-Settings-Zeile, soweit für die Aktivitäts-Auflösung relevant. */
+export interface Budget45bSettingRow {
+  enabled: boolean;
+  validFrom: string | null | undefined;
+  validTo: string | null | undefined;
+}
+
+/** Aufgelöster §45b-Aktivitäts-Zustand zum Stichtag. */
+export interface Budget45bActivation {
+  /** `enabled`-Zustand: aus der persistierten Zeile, sonst Default (`effectiveDefaultPots`). */
+  enabled: boolean;
+  /** Liegt der Stichtag im `validFrom..validTo`-Fenster? (fehlende Zeile ⇒ immer true). */
+  inRange: boolean;
+  /** §45b ist zum Stichtag wirksam (`enabled && inRange`). */
+  active: boolean;
+}
+
+/**
+ * BUG-19 (Facette A) — SSoT für „ist der §45b-Entlastungsbetrag zum Stichtag aktiv?".
+ *
+ * WICHTIG: Die §45b-Zeile MUSS OHNE `enabled`-Filter gesucht werden
+ * (`typeSettings.find(s => s.budgetType === "entlastungsbetrag_45b")`). Eine
+ * vorhandene, aber DEAKTIVIERTE Zeile (`enabled=false`) darf NICHT wie eine
+ * FEHLENDE Zeile behandelt werden — sonst greift fälschlich die
+ * Default-Aktivierung (`effectiveDefaultPots`), und ein bewusst abgeschalteter
+ * §45b-Topf erscheint als aktiv (mit 0 € Topf ⇒ falsche „Budget
+ * überschritten"-Warnung; Prod-Regression Kunde „Seidel, Wolfgang").
+ *
+ *   - Zeile vorhanden ⇒ deren `enabled` gilt; `inRange` = Stichtag in
+ *     `validFrom..validTo` (offene Grenzen unbeschränkt).
+ *   - Zeile fehlt      ⇒ Default aus `effectiveDefaultPots(billingType)`;
+ *     `inRange` = true (kein Fenster ⇒ unbeschränkt).
+ *
+ * Pure: kein DB-Zugriff. Alle §45b-Aktiv-Prüfungen (unified-reader,
+ * net-available-45b, summary-queries) rufen denselben Resolver — kein
+ * „Anzeige vs. Buchung"-Drift und keine erneute Duplizierung der Logik.
+ */
+export function resolve45bActivation(args: {
+  setting: Budget45bSettingRow | null | undefined;
+  billingType: string | null | undefined;
+  asOfDate: string;
+}): Budget45bActivation {
+  const { setting, billingType, asOfDate } = args;
+  const defaultEnabled =
+    effectiveDefaultPots({ billingType, pflegegrad: null }).find(
+      (p) => p.budgetType === "entlastungsbetrag_45b",
+    )?.enabled ?? false;
+  const enabled = setting ? setting.enabled : defaultEnabled;
+  const inRange = !setting
+    ? true
+    : (!setting.validFrom || asOfDate >= setting.validFrom) &&
+      (!setting.validTo || asOfDate <= setting.validTo);
+  return { enabled, inRange, active: enabled && inRange };
+}
+
 // ============================================
 // Statutorische Cap-Clamping (Task #441)
 // ============================================
