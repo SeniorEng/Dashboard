@@ -147,6 +147,25 @@ export interface AmbiguousAdvice {
   candidates: AmbiguousAdviceCredit[];
 }
 
+/** Task #1742 — eine Rechnung, die in eine Zahlung eingeflossen ist (Anzeige). */
+export interface MatchedInvoiceDisplay {
+  id: number;
+  invoiceNumber: string;
+  recipientName: string;
+  customerName: string | null;
+  grossAmountCents: number;
+  status: string;
+  createdAt: string;
+}
+
+/** Task #1742 — die einer Qonto-Zahlung zugeordneten Rechnungen inkl. Σ-Abgleich. */
+export interface MatchedInvoicesForTransaction {
+  matchType: "single" | "bulk" | "none";
+  transactionAmountCents: number;
+  invoices: MatchedInvoiceDisplay[];
+  sumCents: number;
+}
+
 export type Tab = "transactions" | "advices" | "ambiguous";
 
 export type MatchFilter = "all" | "matched" | "unmatched" | "ignored";

@@ -166,6 +166,19 @@ router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen we
   res.json({ ...result, transactions });
 }));
 
+// Task #1742 — Transparenz: welche Rechnungen stecken in EINER Zahlung? Deckt
+// 1:1- und Sammel-Avis-Zuordnungen ab (manuell wie automatisch). Rein lesend;
+// lazy vom Frontend beim Aufklappen einer zugeordneten Zahlung geladen.
+router.get("/transactions/:id/matched-invoices", asyncHandler("Zugeordnete Rechnungen konnten nicht geladen werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const result = await qontoStorage.getMatchedInvoicesForTransaction(id);
+  if (!result) throw notFound("Transaktion nicht gefunden");
+
+  res.json(result);
+}));
+
 const matchSchema = z.object({
   invoiceId: z.number().int().positive("Ungültige Rechnungs-ID"),
 });

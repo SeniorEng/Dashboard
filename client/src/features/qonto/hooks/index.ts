@@ -7,6 +7,7 @@ export {
   useQontoAdvices,
   useAdviceSuggestions,
   useAmbiguousAdvices,
+  useMatchedInvoicesForTransaction,
 } from "./use-qonto-queries";
 export {
   useSyncMutation,

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrapResult } from "@/lib/api";
-import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter, QontoHideRule, AdviceSuggestion, AmbiguousAdvice } from "../types";
+import type { QontoStatus, QontoTransaction, Invoice, PaymentAdvice, MatchFilter, QontoHideRule, AdviceSuggestion, AmbiguousAdvice, MatchedInvoicesForTransaction } from "../types";
 
 export function useQontoStatus(enabled: boolean = true) {
   return useQuery<QontoStatus>({
@@ -80,6 +80,19 @@ export function useAdviceSuggestions(enabled: boolean) {
     queryKey: ["qonto", "advice-suggestions"],
     queryFn: async () => unwrapResult(await api.get("/admin/qonto/transactions/advice-suggestions")),
     enabled,
+    staleTime: 15000,
+  });
+}
+
+// Task #1742 — die einer zugeordneten Zahlung zugrunde liegenden Rechnungen
+// (1:1 oder Sammel-Avis). Lazy: nur laden, wenn die Zahlung aufgeklappt ist.
+// Der Key liegt unter ["qonto", …] und wird daher von invalidateRelated(qc,
+// "qonto") nach Zuordnen/Aufheben automatisch mit-invalidiert.
+export function useMatchedInvoicesForTransaction(txId: number | null, enabled: boolean) {
+  return useQuery<MatchedInvoicesForTransaction>({
+    queryKey: ["qonto", "matched-invoices", txId],
+    queryFn: async () => unwrapResult(await api.get(`/admin/qonto/transactions/${txId}/matched-invoices`)),
+    enabled: enabled && txId !== null,
     staleTime: 15000,
   });
 }

@@ -22,6 +22,34 @@ interface PaymentAdviceWithItems extends PaymentAdvice {
   items: PaymentAdviceItem[];
 }
 
+/**
+ * Task #1742 — Anzeige-Zeile einer Rechnung, die in eine Zahlung eingeflossen ist.
+ * Rein lesend/anzeigend: keine Buchungslogik, keine Beträge außer dem Brutto.
+ */
+export interface MatchedInvoiceDisplay {
+  id: number;
+  invoiceNumber: string;
+  recipientName: string;
+  customerName: string | null;
+  grossAmountCents: number;
+  status: string;
+  /** Rechnungs-/Erstellungsdatum (ISO), für die Anzeige. */
+  createdAt: string;
+}
+
+/**
+ * Task #1742 — die einer Qonto-Zahlung zugeordneten Rechnungen (1:1 ODER
+ * Sammel-Avis), inkl. Summe und Zahlbetrag für die Abgleich-Zeile.
+ */
+export interface MatchedInvoicesForTransaction {
+  matchType: "single" | "bulk" | "none";
+  /** Betrag der Zahlung (Betrag der Gutschrift, positiv). */
+  transactionAmountCents: number;
+  invoices: MatchedInvoiceDisplay[];
+  /** Σ der Rechnungs-Brutto-Beträge (Integer-Cents). */
+  sumCents: number;
+}
+
 class QontoStorage {
   async getTransactions(filters: {
     from?: string;
@@ -467,6 +495,74 @@ class QontoStorage {
     }
 
     return claimed;
+  }
+
+  /**
+   * Task #1742 — Transparenz-Leser: welche Rechnungen stecken in EINER Zahlung?
+   * Deckt beide Zuordnungswege ab (1:1 `matchedInvoiceId` ODER Sammel-Avis
+   * `matchedPaymentAdviceId`, egal ob manuell oder automatisch verknüpft) und
+   * wiederverwendet dafür den bestehenden Avis-Leser (`getPaymentAdviceById`) —
+   * kein dritter, paralleler Pfad. Rein lesend, keine Buchungslogik.
+   * Gibt `null` zurück, wenn die Transaktion nicht existiert.
+   */
+  async getMatchedInvoicesForTransaction(
+    txId: number,
+  ): Promise<MatchedInvoicesForTransaction | null> {
+    const tx = await this.getTransaction(txId);
+    if (!tx) return null;
+
+    const transactionAmountCents = Math.abs(tx.amountCents);
+
+    let matchType: MatchedInvoicesForTransaction["matchType"] = "none";
+    let invoiceIds: number[] = [];
+
+    if (tx.matchedInvoiceId) {
+      matchType = "single";
+      invoiceIds = [tx.matchedInvoiceId];
+    } else if (tx.matchedPaymentAdviceId) {
+      matchType = "bulk";
+      const advice = await this.getPaymentAdviceById(tx.matchedPaymentAdviceId);
+      invoiceIds = (advice?.items ?? [])
+        .map(it => it.matchedInvoiceId)
+        .filter((v): v is number => v != null);
+    }
+
+    if (invoiceIds.length === 0) {
+      return { matchType, transactionAmountCents, invoices: [], sumCents: 0 };
+    }
+
+    // Deduplizieren, Reihenfolge der IDs erhalten.
+    const uniqueIds = Array.from(new Set(invoiceIds));
+    const rows = await db.select({
+      id: invoices.id,
+      invoiceNumber: invoices.invoiceNumber,
+      recipientName: invoices.recipientName,
+      customerName: invoices.customerName,
+      grossAmountCents: invoices.grossAmountCents,
+      status: invoices.status,
+      createdAt: invoices.createdAt,
+    })
+      .from(invoices)
+      .where(inArray(invoices.id, uniqueIds));
+
+    const byId = new Map(rows.map(r => [r.id, r]));
+    const displayInvoices: MatchedInvoiceDisplay[] = [];
+    for (const id of uniqueIds) {
+      const r = byId.get(id);
+      if (!r) continue;
+      displayInvoices.push({
+        id: r.id,
+        invoiceNumber: r.invoiceNumber,
+        recipientName: r.recipientName,
+        customerName: r.customerName,
+        grossAmountCents: r.grossAmountCents,
+        status: r.status,
+        createdAt: (r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt)).toISOString(),
+      });
+    }
+
+    const sumCents = displayInvoices.reduce((acc, inv) => acc + inv.grossAmountCents, 0);
+    return { matchType, transactionAmountCents, invoices: displayInvoices, sumCents };
   }
 
   async deletePaymentAdvice(id: number): Promise<boolean> {

@@ -16,7 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { iconSize } from "@/design-system";
-import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff, Sparkles, Check, X, Layers } from "lucide-react";
+import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff, Sparkles, Check, X, Layers, ChevronDown, ChevronUp } from "lucide-react";
 import { formatCents, formatDate, confidenceBadge } from "../utils";
 import {
   useQontoTransactions,
@@ -28,9 +28,11 @@ import {
   useQontoHideRules,
   useHideRuleMutations,
   useAdviceSuggestions,
+  useMatchedInvoicesForTransaction,
 } from "../hooks";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { MatchFilter, AdviceSuggestionCandidate } from "../types";
+import { BULK_ADVICE_TOLERANCE_CENTS } from "@shared/domain/qonto/bulk-advice-match";
 import {
   enumerateMonthlyWindows,
   exceedsBackfillLookbackCap,
@@ -97,6 +99,9 @@ export function TransactionsTab({
   lastSync?: string | null;
 }) {
   const [matchingTxId, setMatchingTxId] = useState<number | null>(null);
+  // Task #1742 — welche zugeordnete Zahlung ist gerade aufgeklappt (Details zu
+  // den zugrunde liegenden Rechnungen). Immer nur eine gleichzeitig.
+  const [detailTxId, setDetailTxId] = useState<number | null>(null);
   const [backfillConfirmOpen, setBackfillConfirmOpen] = useState(false);
   const [backfillDate, setBackfillDate] = useState(DEFAULT_BACKFILL_START);
   const [extendedLookbackAck, setExtendedLookbackAck] = useState(false);
@@ -107,6 +112,8 @@ export function TransactionsTab({
 
   const transactionsQuery = useQontoTransactions(matchFilter, configured);
   const invoicesQuery = useMatchableInvoices(matchingTxId !== null);
+  // Task #1742 — lazy: erst laden, wenn eine zugeordnete Zahlung aufgeklappt ist.
+  const matchedInvoicesQuery = useMatchedInvoicesForTransaction(detailTxId, detailTxId !== null);
   const hideRulesQuery = useQontoHideRules(configured && rulesOpen);
   const { createRuleMutation, deleteRuleMutation } = useHideRuleMutations();
 
@@ -534,17 +541,38 @@ export function TransactionsTab({
                         <RotateCcw className={iconSize.sm} />
                       </Button>
                     ) : tx.matchedInvoiceId || tx.matchedPaymentAdviceId ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => unmatchMutation.mutate(tx.id)}
-                        disabled={unmatchMutation.isPending}
-                        aria-label="Zuordnung aufheben"
-                        title={tx.matchedPaymentAdviceId ? "Sammel-Avis-Zuordnung aufheben (Rechnungen wieder öffnen)" : "Zuordnung aufheben"}
-                        data-testid={`button-unmatch-${tx.id}`}
-                      >
-                        <Unlink className={iconSize.sm} />
-                      </Button>
+                      <>
+                        {/* Task #1742 — zugeordnete Rechnungen ein-/ausklappen. */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDetailTxId(prev => (prev === tx.id ? null : tx.id))}
+                          aria-label={detailTxId === tx.id ? "Zugeordnete Rechnungen ausblenden" : "Zugeordnete Rechnungen anzeigen"}
+                          aria-expanded={detailTxId === tx.id}
+                          title="Zugeordnete Rechnungen anzeigen"
+                          data-testid={`button-toggle-matched-invoices-${tx.id}`}
+                        >
+                          {detailTxId === tx.id ? (
+                            <ChevronUp className={iconSize.sm} />
+                          ) : (
+                            <ChevronDown className={iconSize.sm} />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            if (detailTxId === tx.id) setDetailTxId(null);
+                            unmatchMutation.mutate(tx.id);
+                          }}
+                          disabled={unmatchMutation.isPending}
+                          aria-label="Zuordnung aufheben"
+                          title={tx.matchedPaymentAdviceId ? "Sammel-Avis-Zuordnung aufheben (Rechnungen wieder öffnen)" : "Zuordnung aufheben"}
+                          data-testid={`button-unmatch-${tx.id}`}
+                        >
+                          <Unlink className={iconSize.sm} />
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Button
@@ -630,6 +658,80 @@ export function TransactionsTab({
                       <X className={`${iconSize.xs} mr-1`} />
                       Vorschlag ablehnen
                     </Button>
+                  </div>
+                )}
+
+                {/* Task #1742 — welche Rechnungen stecken in dieser Zahlung? */}
+                {detailTxId === tx.id && (
+                  <div className="mt-3 pt-3 border-t space-y-2" data-testid={`matched-invoices-panel-${tx.id}`}>
+                    <Label className="text-xs font-medium text-gray-600">
+                      Zugeordnete Rechnung(en)
+                    </Label>
+                    {matchedInvoicesQuery.isLoading ? (
+                      <Loader2 className={`${iconSize.sm} animate-spin`} data-testid={`loading-matched-invoices-${tx.id}`} />
+                    ) : matchedInvoicesQuery.isError ? (
+                      <p className="text-xs text-red-600" data-testid={`error-matched-invoices-${tx.id}`}>
+                        Zugeordnete Rechnungen konnten nicht geladen werden.
+                      </p>
+                    ) : (matchedInvoicesQuery.data?.invoices ?? []).length === 0 ? (
+                      <p className="text-xs text-gray-500" data-testid={`text-no-matched-invoices-${tx.id}`}>
+                        Keine Rechnungsdetails verfügbar.
+                      </p>
+                    ) : (() => {
+                      const detail = matchedInvoicesQuery.data!;
+                      const diff = detail.sumCents - detail.transactionAmountCents;
+                      const reconciled = Math.abs(diff) <= BULK_ADVICE_TOLERANCE_CENTS;
+                      return (
+                        <>
+                          <div className="space-y-1 rounded-md border p-1" data-testid={`matched-invoices-list-${tx.id}`}>
+                            {detail.invoices.map(inv => (
+                              <div
+                                key={inv.id}
+                                className="flex items-center justify-between gap-2 rounded px-2 py-1.5 text-sm"
+                                data-testid={`matched-invoice-${tx.id}-${inv.id}`}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-medium" data-testid={`matched-invoice-number-${inv.id}`}>
+                                      {inv.invoiceNumber}
+                                    </span>
+                                    <Badge variant="outline" className="text-xs" data-testid={`matched-invoice-status-${inv.id}`}>
+                                      {inv.status}
+                                    </Badge>
+                                    <span className="text-xs text-gray-500" data-testid={`matched-invoice-date-${inv.id}`}>
+                                      {formatDate(inv.createdAt)}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 truncate" data-testid={`matched-invoice-recipient-${inv.id}`}>
+                                    {inv.customerName ?? inv.recipientName}
+                                  </p>
+                                </div>
+                                <span className="shrink-0 font-medium" data-testid={`matched-invoice-amount-${inv.id}`}>
+                                  {formatCents(inv.grossAmountCents)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <div
+                            className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs ${
+                              reconciled
+                                ? "bg-green-50 text-green-700"
+                                : "bg-amber-50 text-amber-700"
+                            }`}
+                            data-testid={`matched-invoices-reconciliation-${tx.id}`}
+                          >
+                            <span>
+                              Σ {formatCents(detail.sumCents)} / Zahlung {formatCents(detail.transactionAmountCents)}
+                            </span>
+                            <span data-testid={`matched-invoices-reconciliation-status-${tx.id}`}>
+                              {reconciled
+                                ? "Stimmt überein"
+                                : `Differenz ${formatCents(Math.abs(diff))}`}
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
 
