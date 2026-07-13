@@ -349,9 +349,8 @@ class QontoStorage {
     openInvoiceIds: number[];
     sumOpenInvoiceCents: number;
   }>> {
-    const advices = await db.select()
-      .from(paymentAdvices)
-      .where(and(isNull(paymentAdvices.deletedAt), isNotNull(paymentAdvices.gesamtBetragCents)));
+    const advices = await paymentAdvicesRepo.selectFrom(db)
+      .where(and(paymentAdvicesRepo.activeOnly(), isNotNull(paymentAdvices.gesamtBetragCents)));
 
     if (advices.length === 0) return [];
 
@@ -408,13 +407,12 @@ class QontoStorage {
     const result = new Map<number, { id: number; avisNummer: string | null; gesamtBetragCents: number | null; invoiceCount: number }>();
     if (ids.length === 0) return result;
 
-    const advices = await db.select({
+    const advices = await paymentAdvicesRepo.selectColumnsFrom({
       id: paymentAdvices.id,
       avisNummer: paymentAdvices.avisNummer,
       gesamtBetragCents: paymentAdvices.gesamtBetragCents,
-    })
-      .from(paymentAdvices)
-      .where(inArray(paymentAdvices.id, ids));
+    }, db)
+      .where(and(inArray(paymentAdvices.id, ids), paymentAdvicesRepo.activeOnly()));
 
     const counts = await db.select({
       adviceId: paymentAdviceItems.paymentAdviceId,
