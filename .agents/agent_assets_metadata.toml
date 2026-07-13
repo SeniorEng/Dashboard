@@ -185,3 +185,9 @@ id = "kJ-5yRfVL7pFoYgfczTZR"
 uri = "file://exports/kundenliste.xlsx"
 type = "table"
 title = "Kundenliste (Prod)"
+
+[[outputs]]
+id = "ZmqNp9aRuA4apwByB0k1T"
+uri = "file://exports/Aufschluesselung-Juni-2026.xlsx"
+type = "table"
+title = "Aufschlüsselung Juni 2026 – Firmenweite Gesamtsumme"
