@@ -15,6 +15,12 @@ export interface BillingCustomerItem {
   // (Hinweis im UI, dass evtl. ein zweiter LN nötig ist).
   completedAppointments: number;
   coveredAppointments: number;
+  // Task #1743: Anzahl der im gewählten Monat noch OFFENEN (geplanten) Termine
+  // dieses Kunden — abgeleitet aus der `FINAL_APPOINTMENT_STATUSES`-SSoT (nicht
+  // completed/cancelled/customer_no_show). Das Frontend gruppiert die Karte
+  // „Noch zu erstellen" danach in „Bereit zum Abrechnen" (=0) und „Noch offene
+  // Termine" (>0); der Kunde bleibt in beiden Fällen sichtbar.
+  openAppointments: number;
 }
 
 export interface InvoiceItem {

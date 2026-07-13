@@ -354,6 +354,7 @@ export const BillingCustomerItemSchema = component(
     status: z.string(),
     completedAppointments: z.number().int(),
     coveredAppointments: z.number().int(),
+    openAppointments: z.number().int(),
   }),
 );
 

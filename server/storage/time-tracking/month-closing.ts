@@ -7,6 +7,7 @@ import {
   users,
 } from "@shared/schema";
 import { db, type DbOrTx } from "../../lib/db";
+import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
 import {
   employeeMonthClosingResponsibilityFilter,
   employeesMonthClosingResponsibilityFilter,
@@ -53,7 +54,7 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
+        notInArray(appointments.status, [...FINAL_APPOINTMENT_STATUSES]),
       ),
     )
     .orderBy(asc(appointments.date), asc(appointments.scheduledStart));
@@ -96,7 +97,7 @@ export async function getMonthClosingReadiness(userId: number, year: number, mon
         gte(appointments.date, startDate),
         lte(appointments.date, endDate),
         isNull(appointments.deletedAt),
-        inArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
+        inArray(appointments.status, [...FINAL_APPOINTMENT_STATUSES]),
       ),
     );
 
@@ -151,7 +152,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
-          notInArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
+          notInArray(appointments.status, [...FINAL_APPOINTMENT_STATUSES]),
           responsibilityMembership,
         ),
       )
@@ -202,7 +203,7 @@ export async function getAdminMonthClosingReadiness(year: number, month: number)
           gte(appointments.date, startDate),
           lte(appointments.date, endDate),
           isNull(appointments.deletedAt),
-          inArray(appointments.status, ["completed", "cancelled", "customer_no_show"]),
+          inArray(appointments.status, [...FINAL_APPOINTMENT_STATUSES]),
           responsibilityMembership,
         ),
       )

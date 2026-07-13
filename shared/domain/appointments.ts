@@ -20,6 +20,41 @@ export type TravelOriginType = "home" | "appointment";
 // CONSTANTS
 // ============================================
 
+/**
+ * Alle Status, die tatsächlich in `appointments.status` persistiert werden.
+ * `expired_unsigned` ist KEIN persistierter Status (nur ein Anzeige-Label,
+ * siehe oben) und daher hier bewusst nicht enthalten. Diese Liste ist die
+ * Basis, aus der die Partition „terminal vs. offen" abgeleitet wird — es gibt
+ * keine zweite, von Hand gepflegte Gegenliste.
+ */
+export const PERSISTED_APPOINTMENT_STATUSES = [
+  "scheduled",
+  "documenting",
+  "completed",
+  "cancelled",
+  "customer_no_show",
+] as const satisfies readonly AppointmentStatus[];
+
+/**
+ * Task #1743 — SSoT der terminalen (abgeschlossenen) Terminstatus. Ein Termin
+ * mit einem dieser Status ist fachlich „fertig" und zählt NICHT mehr als
+ * offen/geplant; alle anderen persistierten Status gelten als offen (siehe
+ * `UNDOCUMENTED_STATUSES`, das genau als Komplement hieraus abgeleitet wird).
+ * `expired_unsigned` ist kein persistierter Status (nur ein Anzeige-Label,
+ * siehe oben) und daher hier bewusst nicht enthalten.
+ *
+ * Diese eine Liste beantwortet die fachliche Frage „ist dieser Termin noch
+ * offen?" für ALLE Stellen, die sie brauchen: die Monatsabschluss-Readiness
+ * (offene vs. abgeschlossene Termine), die Leistungsnachweis-Blockade
+ * (`UNDOCUMENTED_STATUSES`) UND die Abrechnungs-Übersicht („noch offene
+ * Termine" pro Kunde in der Karte „Noch zu erstellen"). Keine zweite
+ * Definition, damit alle drei nie auseinanderdriften.
+ */
+export const FINAL_APPOINTMENT_STATUSES = [
+  "completed",
+  "cancelled",
+  "customer_no_show",
+] as const satisfies readonly AppointmentStatus[];
 
 const STATUS_ORDER: Record<AppointmentStatus, number> = {
   "scheduled": 0,
@@ -121,10 +156,18 @@ export function deriveAppointmentDisplayStatus(
 // ============================================
 
 /**
- * Status, die einen Leistungsnachweis blockieren.
- * Solange Termine mit diesen Status existieren, kann kein Leistungsnachweis erstellt werden.
+ * Status, die einen Leistungsnachweis blockieren (= noch offene Termine).
+ * Solange Termine mit diesen Status existieren, kann kein Leistungsnachweis
+ * erstellt werden.
+ *
+ * SSoT: Abgeleitet als exaktes Komplement von `FINAL_APPOINTMENT_STATUSES`
+ * über allen persistierten Status. „Offen" und „terminal" sind damit per
+ * Konstruktion eine einzige Partition — es gibt keine zweite, von Hand
+ * gepflegte Liste, die auseinanderdriften könnte.
  */
-export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = ["scheduled", "documenting"];
+export const UNDOCUMENTED_STATUSES: AppointmentStatus[] = PERSISTED_APPOINTMENT_STATUSES.filter(
+  (s) => !(FINAL_APPOINTMENT_STATUSES as readonly AppointmentStatus[]).includes(s),
+);
 
 
 export const PFLEGEGRAD_OPTIONS = [1, 2, 3, 4, 5] as const;

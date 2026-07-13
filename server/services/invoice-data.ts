@@ -6,8 +6,9 @@ import { buildBudgetSplitFromLedger, POT_ORDER, type InvoicePotKey, type BudgetS
 import { effectiveDefaultPots } from "@shared/domain/budgets";
 import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade";
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
+import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, budgetTransactions } from "@shared/schema";
-import { eq, and, isNull, inArray, ne, desc, or, gte, lt, sql } from "drizzle-orm";
+import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, sql } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
@@ -163,6 +164,50 @@ export async function getDocumentationCoverageByCustomer(
       completedAppointments: completedByCustomer.get(id) ?? 0,
       coveredAppointments: coveredByCustomer.get(id) ?? 0,
     });
+  }
+  return result;
+}
+
+/**
+ * Task #1743 — Anzahl der im Abrechnungsmonat noch OFFENEN (geplanten) Termine
+ * pro Kunde. „Offen" = jeder aktive Termin, dessen Status NICHT terminal ist —
+ * exakt die Definition der `FINAL_APPOINTMENT_STATUSES`-SSoT, die auch die
+ * Monatsabschluss-Readiness nutzt (offene vs. abgeschlossene Termine). Damit
+ * kann die Abrechnungs-Übersicht („Noch zu erstellen") Kunden mit noch offenen
+ * Terminen getrennt ausweisen, ohne eine zweite „offener Termin"-Regel zu
+ * definieren. Monats-scoped identisch zu `getDocumentationCoverageByCustomer`.
+ */
+export async function getOpenAppointmentCountByCustomer(
+  customerIds: number[],
+  billingYear: number,
+  billingMonth: number,
+): Promise<Map<number, number>> {
+  const result = new Map<number, number>();
+  if (customerIds.length === 0) return result;
+  for (const id of customerIds) result.set(id, 0);
+
+  const mm = String(billingMonth).padStart(2, "0");
+  const periodStartStr = `${billingYear}-${mm}-01`;
+  const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
+  const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
+  const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+
+  const openRows = await appointmentsRepo.selectColumnsFrom({
+    customerId: appointments.customerId,
+    count: sql<number>`COUNT(*)::int`,
+  })
+    .where(and(
+      inArray(appointments.customerId, customerIds),
+      notInArray(appointments.status, [...FINAL_APPOINTMENT_STATUSES]),
+      appointmentsRepo.activeOnly(),
+      gte(appointments.date, periodStartStr),
+      lt(appointments.date, periodEndStr),
+    ))
+    .groupBy(appointments.customerId);
+
+  for (const r of openRows) {
+    if (r.customerId == null) continue;
+    result.set(r.customerId, Number(r.count));
   }
   return result;
 }

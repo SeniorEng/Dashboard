@@ -781,6 +781,9 @@
           },
           "coveredAppointments": {
             "type": "integer"
+          },
+          "openAppointments": {
+            "type": "integer"
           }
         },
         "required": [
@@ -791,7 +794,8 @@
           "billingType",
           "status",
           "completedAppointments",
-          "coveredAppointments"
+          "coveredAppointments",
+          "openAppointments"
         ]
       },
       "InvoiceItem": {

@@ -82,7 +82,7 @@ import {
     storedInvoicePdfContainsLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
-import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer } from "../services/invoice-data";
+import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer } from "../services/invoice-data";
 import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
 import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
 import {
@@ -359,7 +359,16 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   // gemeinsamen Berechnung (`getDocumentationCoverageByCustomer`). Dieselbe
   // Quelle nutzt der optionale Skip in `POST /generate-all`, damit Anzeige
   // (Hinweis + „überspringen"-Zähler) und Server-Skip nie auseinanderdriften.
-  const coverageByCustomer = await getDocumentationCoverageByCustomer(uniqueCustomerIds, year, month);
+  // Task #1743 — zusätzlich pro Kunde die Anzahl der im Monat noch OFFENEN
+  // (geplanten) Termine. Nutzt DIESELBE „offener Termin"-SSoT
+  // (`FINAL_APPOINTMENT_STATUSES`) wie die Monatsabschluss-Readiness, damit
+  // „bereit zum Abrechnen" (keine offenen Termine) und Monatsabschluss nicht
+  // auseinanderdriften. Das Frontend gruppiert die Karte „Noch zu erstellen"
+  // danach in „Bereit zum Abrechnen" (0 offen) und „Noch offene Termine" (>0).
+  const [coverageByCustomer, openByCustomer] = await Promise.all([
+    getDocumentationCoverageByCustomer(uniqueCustomerIds, year, month),
+    getOpenAppointmentCountByCustomer(uniqueCustomerIds, year, month),
+  ]);
 
   const customerRows = await db.select({
     id: customersTable.id,
@@ -458,6 +467,7 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     ...c,
     completedAppointments: coverageByCustomer.get(c.id)?.completedAppointments ?? 0,
     coveredAppointments: coverageByCustomer.get(c.id)?.coveredAppointments ?? 0,
+    openAppointments: openByCustomer.get(c.id) ?? 0,
   }));
 
   res.json(eligibleCustomers);
