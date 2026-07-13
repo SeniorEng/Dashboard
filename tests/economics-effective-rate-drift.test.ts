@@ -7,6 +7,7 @@ import { getEconomics, listNonBillableHours } from "../server/storage/statistics
 import { readBillingEconomics } from "../server/storage/billing/economics-reader";
 import { resolvePeriod } from "../server/storage/statistics/common";
 import { quantizeKm } from "../shared/domain/invoice-line-items";
+import { getMonthlyCategoryErfasst } from "../server/storage/time-tracking/payroll-hours";
 
 /**
  * Task #1546 / #1551 — Anzeige-vs-Buchung für Satz-LABELS im Reporting.
@@ -571,5 +572,178 @@ describe("Task #1554 — Reporting: Nicht-abrechenbar-Export Lohn effektiv aus G
       // Rück-Ableitung: Kosten ÷ Std rundet auf den effektiven (nicht Katalog-) Satz.
       expect(Math.round((row!.costCents * 60) / row!.minutes)).toBe(effectiveHwWageCents);
     }
+  });
+});
+
+/**
+ * Task #1752 — „Wirtschaftlicher Überblick → Nach Mitarbeiter": Stunden, Kosten
+ * und Satz-Labels müssen auf DERSELBEN Dokumentiert-Ist-Minuten-SSoT beruhen wie
+ * Umsatz und Lohn.
+ *
+ * Zwei konkrete Fehler wurden behoben:
+ *  1) Der Kosten-/Stunden-Pfad (Reader-Query 1) kollabierte per `DISTINCT ON
+ *     (a.id)` alle Leistungen EINES Termins auf EINE Zeile und rechnete mit
+ *     `duration_promised` statt der dokumentierten Ist-Minuten. Ein Termin mit
+ *     zwei Leistungen (HW + AB) verlor dadurch eine Kategorie komplett und wich
+ *     von der Lohn-Aufschlüsselung ab. Jetzt wird je `appointment_service`-Zeile
+ *     mit `COALESCE(actual_duration_minutes, planned_duration_minutes)`
+ *     aggregiert — beide Kategorien erscheinen, jede mit ihren Ist-Minuten.
+ *  2) Der km-Satz-Label-Nenner verwendete die GESAMT-km (inkl. nicht-
+ *     abrechenbarer Zeiterfassungs-km) und verdünnte so den angezeigten €/km-
+ *     Satz. Der Satz beruht jetzt auf den ABRECHENBAREN Termin-km, während die
+ *     angezeigte Mengen-Spalte weiterhin die Gesamt-km zeigt.
+ *
+ * Isoliertes, weit entferntes Jahr ⇒ keine Vermischung mit anderen Suites; ohne
+ * geseedete `role_wage_rates` fällt die Lohn-Auflösung auf den Katalog zurück
+ * (Standard-Preis-Szenario), sodass die effektiven Satz-Labels exakt den
+ * Katalog-Sätzen entsprechen müssen.
+ */
+describe("Task #1752 — Nach Mitarbeiter: Ist-Minuten-SSoT (kein Termin-Kollaps, km-Satz nur abrechenbar)", () => {
+  const YEAR = 2045; // Eigenes, weit entferntes Jahr.
+  const MONTH = 6;
+  const HW_ACTUAL = 120; // 2,00 h — dokumentierte Ist-Minuten (≠ planned).
+  const AB_ACTUAL = 60; // 1,00 h — zweite Leistung DESSELBEN Termins.
+  const TRAVEL_KM = 10; // abrechenbare Anfahrts-km (ganzzahlig ⇒ Satz exakt).
+  const TE_KM = 20; // Zeiterfassungs-km ⇒ verdünnt die Gesamt-Menge, NICHT den Satz.
+
+  let userId: number;
+  let customerId: number;
+  let timeEntryId = 0;
+  let hwServiceId = 0;
+  let abServiceId = 0;
+  let catalogHwRateCents = 0;
+  let catalogHwPriceCents = 0;
+  let catalogAbRateCents = 0;
+  let catalogAbPriceCents = 0;
+  let catalogTravelRateCents = 0;
+  let catalogTravelPriceCents = 0;
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    userId = auth.user.id; // Seed-Superadmin ⇒ Lohn-Rolle 'admin'.
+
+    const customer = await createTestCustomer({ vorname: "T1752", nachname: `Ueberblick_${Date.now()}` });
+    customerId = customer.id as number;
+
+    const svc = await db.execute(sql`
+      SELECT code, id, COALESCE(default_price_cents, 0)::int AS price, COALESCE(employee_rate_cents, 0)::int AS rate
+      FROM services WHERE code IN ('hauswirtschaft','alltagsbegleitung','travel_km')
+    `).then((r) => r.rows as Array<{ code: string; id: number; price: number; rate: number }>);
+    const hw = svc.find((s) => s.code === "hauswirtschaft")!;
+    const ab = svc.find((s) => s.code === "alltagsbegleitung")!;
+    const travel = svc.find((s) => s.code === "travel_km")!;
+    hwServiceId = hw.id;
+    abServiceId = ab.id;
+    catalogHwRateCents = hw.rate;
+    catalogHwPriceCents = hw.price;
+    catalogAbRateCents = ab.rate;
+    catalogAbPriceCents = ab.price;
+    catalogTravelRateCents = travel.rate;
+    catalogTravelPriceCents = travel.price;
+
+    // EIN dokumentierter Termin mit ZWEI Leistungen (HW + AB) + abrechenbaren
+    // Anfahrts-km. planned ≠ actual ⇒ beweist Ist-Minuten-Basis.
+    const apptDate = `${YEAR}-0${MONTH}-15`;
+    const apptId = await db.execute(sql`
+      INSERT INTO appointments (
+        customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
+        appointment_type, date, scheduled_start, scheduled_end, duration_promised,
+        status, actual_start, actual_end, travel_origin_type, travel_kilometers,
+        travel_minutes, customer_kilometers, signed_at, signed_by_user_id
+      ) VALUES (
+        ${customerId}, ${userId}, ${userId}, ${userId},
+        'Kundentermin', ${apptDate}, '09:00', '12:00', 180,
+        'completed', '09:00', '12:00', 'home', ${TRAVEL_KM},
+        0, 0, NOW(), ${userId}
+      )
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+    await db.execute(sql`
+      INSERT INTO appointment_services
+        (appointment_id, service_id, planned_duration_minutes, actual_duration_minutes, details)
+      VALUES
+        (${apptId}, ${hwServiceId}, 60, ${HW_ACTUAL}, 'T1752 HW'),
+        (${apptId}, ${abServiceId}, 90, ${AB_ACTUAL}, 'T1752 AB')
+    `);
+
+    // Zeiterfassungs-km (nie berechnet) ⇒ verdünnt die Gesamt-km-Menge.
+    timeEntryId = await db.execute(sql`
+      INSERT INTO employee_time_entries
+        (user_id, entry_type, entry_date, duration_minutes, kilometers, is_full_day)
+      VALUES (${userId}, 'vertrieb', ${apptDate}, 0, ${TE_KM}, false)
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+  });
+
+  afterAll(async () => {
+    await cleanupCustomer(customerId); // entfernt Termin + Leistungen (FK-Cascade)
+    if (timeEntryId) await db.execute(sql`DELETE FROM employee_time_entries WHERE id = ${timeEntryId}`);
+  });
+
+  it("kein Termin-Kollaps: beide Leistungen (HW + AB) erscheinen mit ihren Ist-Minuten", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const emp = billing.byEmployee.find((e) => e.employeeId === userId);
+    expect(emp).toBeDefined();
+
+    const hwRow = emp!.services.find((r) => r.key === "hauswirtschaft");
+    const abRow = emp!.services.find((r) => r.key === "alltagsbegleitung");
+    expect(hwRow).toBeDefined();
+    expect(abRow).toBeDefined();
+
+    // Ist-Minuten (actual), NICHT duration_promised, und keine kollabierte Zeile.
+    expect(hwRow!.quantity).toBe(HW_ACTUAL);
+    expect(abRow!.quantity).toBe(AB_ACTUAL);
+  });
+
+  it("Satz-Labels effektiv = Katalog (Standard-Preise, kein Rollen-Override im Jahr)", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const emp = billing.byEmployee.find((e) => e.employeeId === userId)!;
+    const hwRow = emp.services.find((r) => r.key === "hauswirtschaft")!;
+    const abRow = emp.services.find((r) => r.key === "alltagsbegleitung")!;
+
+    // Kosten/h = Katalog-Lohn, Erlös/h = Katalog-Preis; Satz × Std === Geld-Spalte.
+    expect(hwRow.costRateCents).toBe(catalogHwRateCents);
+    expect(hwRow.revenueRateCents).toBe(catalogHwPriceCents);
+    expect(Math.round((hwRow.costRateCents * hwRow.quantity) / 60)).toBe(hwRow.costCents);
+    expect(Math.round((hwRow.revenueRateCents * hwRow.quantity) / 60)).toBe(hwRow.revenueCents);
+
+    expect(abRow.costRateCents).toBe(catalogAbRateCents);
+    expect(abRow.revenueRateCents).toBe(catalogAbPriceCents);
+    expect(Math.round((abRow.costRateCents * abRow.quantity) / 60)).toBe(abRow.costCents);
+    expect(Math.round((abRow.revenueRateCents * abRow.quantity) / 60)).toBe(abRow.revenueCents);
+  });
+
+  it("km-Satz beruht auf abrechenbaren Termin-km (Menge zeigt Gesamt inkl. Zeiterfassungs-km)", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const emp = billing.byEmployee.find((e) => e.employeeId === userId)!;
+    const kmRow = emp.services.find((r) => r.key === "kilometer")!;
+
+    // Angezeigte Menge = Gesamt-km (abrechenbar + Zeiterfassung).
+    expect(kmRow.unit).toBe("km");
+    expect(kmRow.quantity).toBe(TRAVEL_KM + TE_KM);
+
+    // Satz-Nenner = NUR abrechenbare Termin-km ⇒ Katalog-km-Satz, NICHT verdünnt.
+    expect(kmRow.revenueRateCents).toBe(catalogTravelPriceCents);
+    expect(kmRow.costRateCents).toBe(catalogTravelRateCents);
+    // Ohne den Fix würde der Nenner die Gesamt-km nutzen und den Satz verwässern.
+    expect(kmRow.revenueRateCents).not.toBe(
+      Math.round(kmRow.revenueCents / (TRAVEL_KM + TE_KM)),
+    );
+  });
+
+  it("Economics-Stunden === Lohn-Aufschlüsselung-Stunden pro Kategorie (gleiche Ist-Minuten-SSoT)", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const emp = billing.byEmployee.find((e) => e.employeeId === userId)!;
+    const hwRow = emp.services.find((r) => r.key === "hauswirtschaft")!;
+    const abRow = emp.services.find((r) => r.key === "alltagsbegleitung")!;
+
+    const { byEmployeeMonth } = await getMonthlyCategoryErfasst(YEAR, MONTH);
+    const payroll = byEmployeeMonth[userId]?.[MONTH];
+    expect(payroll).toBeDefined();
+
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    // Beide Sichten leiten die Stunden aus denselben dokumentierten Ist-Minuten ab.
+    expect(r2(hwRow.quantity / 60)).toBe(payroll!.hw);
+    expect(r2(abRow.quantity / 60)).toBe(payroll!.ab);
   });
 });

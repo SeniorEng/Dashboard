@@ -38,6 +38,7 @@ import type {
   EconomicsRatesCents,
 } from "@shared/statistics";
 import { resolvedWageCentsSql, wageRoleSql } from "../pricing/wage-for-sql";
+import { documentedSqlRaw } from "../../lib/appointment-signed";
 import type {
   BillingEconomicsResponse,
   BillingEconomicsRow,
@@ -176,37 +177,38 @@ export async function readBillingEconomics(
   // Task #1503: Kosten je Termin über `wageFor` (Rolle des leistenden
   // Mitarbeiters × kanonische Kategorie-Leistung × Termin-Datum), pro Termin
   // gerundet (`ROUND(min/60 × Lohnsatz)`), dann je Mitarbeiter summiert.
+  // Task #1752: Stunden UND Kosten je Leistung (nicht je Termin) auf der
+  // dokumentierten Ist-Dauer `COALESCE(actual, planned)` — exakt die Basis der
+  // Erlös-Query unten und der Lohn-Aufschlüsselung (`payroll-hours.ts`). Kein
+  // `DISTINCT ON (a.id)`-Kollaps mehr: ein gemischter Termin (HW+AB) trägt seine
+  // HW- UND AB-Minuten jeweils der richtigen Kategorie bei. Kosten pro Leistung
+  // gerundet (`ROUND(min/60 × Lohnsatz)`), dann je Mitarbeiter × Kategorie
+  // summiert (Spiegel des per-Zeile-Rundens in der Lohn-Aufschlüsselung).
   const minutesRes = await db.execute(sql`
-    WITH appt_category AS (
-      SELECT DISTINCT ON (a.id)
-        a.id,
+    WITH svc AS (
+      SELECT
         COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
-        a.duration_promised,
-        a.date::date AS d,
-        CASE
-          WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN s.lohnart_kategorie
-          ELSE 'sonstige'
-        END AS category
+        s.lohnart_kategorie AS category,
+        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) AS minutes,
+        a.date::date AS d
       FROM appointments a
-      LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
-      LEFT JOIN services s ON s.id = asvc.service_id
-      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+      JOIN appointment_services asvc ON asvc.appointment_id = a.id
+      JOIN services s ON s.id = asvc.service_id
+      WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')}
+        AND s.unit_type = 'hours'
+        AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
         ${dApptFilter} ${empApptFilter} ${insApptFilter}
-      ORDER BY a.id,
-        CASE WHEN s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung') THEN 0 ELSE 1 END,
-        COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) DESC NULLS LAST
     ),
     priced AS (
-      SELECT ac.employee_id, ac.category, ac.duration_promised,
-        ROUND(ac.duration_promised / 60.0 * ${resolvedWageCentsSql(wageRoleSql("u"), "cs", sql`ac.d`)}) AS cost_cents
-      FROM appt_category ac
-      LEFT JOIN users u ON u.id = ac.employee_id
-      LEFT JOIN services cs ON cs.code = ac.category
-      WHERE ac.category IN ('hauswirtschaft','alltagsbegleitung')
+      SELECT svc.employee_id, svc.category, svc.minutes,
+        ROUND(svc.minutes / 60.0 * ${resolvedWageCentsSql(wageRoleSql("u"), "cs", sql`svc.d`)}) AS cost_cents
+      FROM svc
+      LEFT JOIN users u ON u.id = svc.employee_id
+      LEFT JOIN services cs ON cs.code = svc.category
     )
     SELECT employee_id,
-      COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN duration_promised END), 0)::int AS hw,
-      COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN duration_promised END), 0)::int AS ab,
+      COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN minutes END), 0)::int AS hw,
+      COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN minutes END), 0)::int AS ab,
       COALESCE(SUM(CASE WHEN category = 'hauswirtschaft' THEN cost_cents END), 0)::bigint AS hw_cost,
       COALESCE(SUM(CASE WHEN category = 'alltagsbegleitung' THEN cost_cents END), 0)::bigint AS ab_cost
     FROM priced
@@ -235,7 +237,7 @@ export async function readBillingEconomics(
       FROM appointments a
       JOIN appointment_services asvc ON asvc.appointment_id = a.id
       JOIN services s ON s.id = asvc.service_id
-      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented') AND s.unit_type = 'hours'
+      WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')} AND s.unit_type = 'hours'
         AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
         ${dApptFilter} ${empApptFilter} ${insApptFilter}
       GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id), s.lohnart_kategorie
@@ -258,7 +260,7 @@ export async function readBillingEconomics(
         COALESCE(a.travel_kilometers, 0) AS tkm,
         COALESCE(a.customer_kilometers, 0) AS ckm
       FROM appointments a
-      WHERE a.deleted_at IS NULL AND a.status IN ('completed','documented')
+      WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')}
         AND COALESCE(a.performed_by_employee_id, a.assigned_employee_id) IS NOT NULL
         ${dApptFilter} ${empApptFilter} ${insApptFilter}
     )
@@ -404,8 +406,14 @@ export async function readBillingEconomics(
     quantity: number,
     revenueCents: number,
     costCents: number,
+    // Task #1752: Optionale Satz-Basis (Menge + Geld) für das Satz-LABEL, falls
+    // sie von den angezeigten Spalten abweicht. Die km-Zeile zeigt die GESAMT-km
+    // (inkl. nicht-abrechenbarer Zeiterfassungs-km), aber ihr €/km-Satz muss auf
+    // den ABRECHENBAREN Termin-km beruhen (sonst driftet 0,35 → 0,33 €/km).
+    rateBasis?: { quantity: number; revenueCents: number; costCents: number },
   ): BillingEconomicsRow => {
     const marginCents = revenueCents - costCents;
+    const rb = rateBasis ?? { quantity, revenueCents, costCents };
     return {
       key,
       label,
@@ -415,8 +423,8 @@ export async function readBillingEconomics(
       costCents,
       marginCents,
       marginPercent: marginPercent(revenueCents, marginCents),
-      revenueRateCents: effectiveRateCents(unit, quantity, revenueCents),
-      costRateCents: effectiveRateCents(unit, quantity, costCents),
+      revenueRateCents: effectiveRateCents(unit, rb.quantity, rb.revenueCents),
+      costRateCents: effectiveRateCents(unit, rb.quantity, rb.costCents),
     };
   };
 
@@ -426,6 +434,14 @@ export async function readBillingEconomics(
     abRevenueCents: number,
   ): BillingEconomicsRow[] => {
     const kmQuantity = econ.km.travel.km + econ.km.customer.km + econ.km.timeEntry.km;
+    // Task #1752: Satz-Basis der km-Zeile = NUR abrechenbare Termin-km
+    // (Anfahrt + Kunden-km) und deren Geld. Der berechnete km-Erlös entsteht
+    // ausschließlich aus diesen (Zeiterfassungs-km werden nie berechnet), und der
+    // ausgezahlte km-Lohn wird auf diese Basis bezogen, damit €/km === Katalog-
+    // km-Satz gilt statt durch die nicht-abrechenbaren Zeiterfassungs-km verdünnt.
+    const billableKm = econ.km.travel.km + econ.km.customer.km;
+    const billableChargedCents = econ.km.travel.chargedCents + econ.km.customer.chargedCents;
+    const billablePaidCents = econ.km.travel.paidCents + econ.km.customer.paidCents;
     return [
       buildRow(
         "hauswirtschaft",
@@ -450,6 +466,7 @@ export async function readBillingEconomics(
         kmQuantity,
         econ.km.totalChargedCents,
         econ.km.totalPaidCents,
+        { quantity: billableKm, revenueCents: billableChargedCents, costCents: billablePaidCents },
       ),
       buildRow(
         "gemeinkosten",
