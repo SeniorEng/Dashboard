@@ -189,6 +189,23 @@ async function eligibleRowFor(customerId: number): Promise<EligibleRow | undefin
   return res.data.find((c) => c.id === customerId);
 }
 
+/** Wie `eligibleRowFor`, aber mit optionalem von–bis-Datumsbereich (Task #1317). */
+async function eligibleRowForRange(
+  customerId: number,
+  dateFrom: string,
+  dateTo: string,
+): Promise<EligibleRow | undefined> {
+  const res = await apiGet<EligibleRow[]>(
+    `/api/billing/eligible-customers?month=${BILLING_MONTH}&year=${BILLING_YEAR}&dateFrom=${dateFrom}&dateTo=${dateTo}`,
+  );
+  if (res.status !== 200) {
+    throw new Error(`eligible-customers(range) failed: ${res.status} ${JSON.stringify(res.data)}`);
+  }
+  return res.data.find((c) => c.id === customerId);
+}
+
+const FIRST_OF_MONTH_STR = `${BILLING_YEAR}-${String(BILLING_MONTH).padStart(2, "0")}-01`;
+
 beforeAll(async () => {
   auth = await getAuthCookie();
 
@@ -214,6 +231,8 @@ afterAll(async () => {
 describe("OPEN: eligible-customers meldet offene (geplante) Termine pro Kunde", () => {
   let readyCustomerId: number;   // (a) nur dokumentierte Termine → 0 offen
   let withOpenCustomerId: number; // (b) zusätzlich ein geplanter Termin → 1 offen
+  let withOpenDocDate: string;   // dokumentierter Termin (frühe Hälfte)
+  let withOpenOpenDate: string;  // geplanter Termin (späte Hälfte)
 
   beforeAll(async () => {
     // (a) „Bereit zum Abrechnen": ein dokumentierter Termin, LN deckt ihn.
@@ -229,9 +248,11 @@ describe("OPEN: eligible-customers meldet offene (geplante) Termine pro Kunde", 
     // die LN-Erstellung ist blockiert, solange noch Termine undokumentiert sind.
     withOpenCustomerId = await createSelbstzahlerCustomer("withopen");
     const docAppt = await createApptInDayRange(withOpenCustomerId, 30, 1, 14, "wo-doc");
+    withOpenDocDate = docAppt.date;
     await documentAppointment(docAppt.id, docAppt.time, 30, "wo-doc");
     await createAndSignServiceRecord(withOpenCustomerId); // deckt den dokumentierten
-    await createApptInDayRange(withOpenCustomerId, 30, 15, LAST_DAY, "wo-open"); // danach: bleibt geplant
+    const openAppt = await createApptInDayRange(withOpenCustomerId, 30, 15, LAST_DAY, "wo-open"); // danach: bleibt geplant
+    withOpenOpenDate = openAppt.date;
   });
 
   it("OPEN-1 — Kunde ohne offene Termine meldet openAppointments === 0", async () => {
@@ -247,5 +268,19 @@ describe("OPEN: eligible-customers meldet offene (geplante) Termine pro Kunde", 
     // Der dokumentierte Termin zählt NICHT als offen, der geplante schon.
     expect(row!.completedAppointments).toBe(1);
     expect(row!.openAppointments).toBe(1);
+  });
+
+  it("OPEN-3 — offene Termine folgen dem gewählten Datumsbereich (nicht dem ganzen Monat)", async () => {
+    // Bereich = nur frühe Hälfte (bis inkl. dokumentiertem Termin): der geplante
+    // Termin liegt in der späten Hälfte → AUSSERHALB → 0 offen. Der Kunde bleibt
+    // gelistet, weil der dokumentierte Termin IM Bereich liegt.
+    const rowEarly = await eligibleRowForRange(withOpenCustomerId, FIRST_OF_MONTH_STR, withOpenDocDate);
+    expect(rowEarly).toBeDefined();
+    expect(rowEarly!.openAppointments).toBe(0);
+
+    // Bereich, der bis zum geplanten Termin reicht → er liegt jetzt INNERHALB → 1 offen.
+    const rowFull = await eligibleRowForRange(withOpenCustomerId, FIRST_OF_MONTH_STR, withOpenOpenDate);
+    expect(rowFull).toBeDefined();
+    expect(rowFull!.openAppointments).toBe(1);
   });
 });

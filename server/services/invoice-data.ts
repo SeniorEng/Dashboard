@@ -8,7 +8,7 @@ import { planCascade, type CascadePot } from "@shared/domain/budget/plan-cascade
 import { parseStornoReference } from "@shared/domain/budget/phantom-storno";
 import { FINAL_APPOINTMENT_STATUSES } from "@shared/domain/appointments";
 import { appointments, appointmentServices as appointmentServicesTable, services as servicesTable, users, customers as customersTable, customerInsuranceHistory, insuranceProviders, invoices as invoicesTable, invoiceLineItems, monthlyServiceRecords, serviceRecordAppointments, budgetTransactions } from "@shared/schema";
-import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, sql } from "drizzle-orm";
+import { eq, and, isNull, inArray, notInArray, ne, desc, or, gte, lt, lte, sql } from "drizzle-orm";
 import { formatDateForDisplay } from "@shared/utils/datetime";
 import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
@@ -169,28 +169,46 @@ export async function getDocumentationCoverageByCustomer(
 }
 
 /**
- * Task #1743 — Anzahl der im Abrechnungsmonat noch OFFENEN (geplanten) Termine
- * pro Kunde. „Offen" = jeder aktive Termin, dessen Status NICHT terminal ist —
- * exakt die Definition der `FINAL_APPOINTMENT_STATUSES`-SSoT, die auch die
- * Monatsabschluss-Readiness nutzt (offene vs. abgeschlossene Termine). Damit
- * kann die Abrechnungs-Übersicht („Noch zu erstellen") Kunden mit noch offenen
- * Terminen getrennt ausweisen, ohne eine zweite „offener Termin"-Regel zu
- * definieren. Monats-scoped identisch zu `getDocumentationCoverageByCustomer`.
+ * Task #1743 — Anzahl der noch OFFENEN (geplanten) Termine pro Kunde im
+ * abzurechnenden Fenster. „Offen" = jeder aktive Termin, dessen Status NICHT
+ * terminal ist — exakt die Definition der `FINAL_APPOINTMENT_STATUSES`-SSoT,
+ * die auch die Monatsabschluss-Readiness nutzt (offene vs. abgeschlossene
+ * Termine). Damit kann die Abrechnungs-Übersicht („Noch zu erstellen") Kunden
+ * mit noch offenen Terminen getrennt ausweisen, ohne eine zweite „offener
+ * Termin"-Regel zu definieren.
+ *
+ * Task #1317 — Der Zähl-Scope spiegelt EXAKT den Eligibility-Scope von
+ * `GET /billing/eligible-customers`: Ohne Datumsbereich der ganze Monat
+ * (`gte periodStart` … `lt nextMonth`); mit optionalem `dateFrom`/`dateTo`
+ * (ISO) NUR das gewählte Fenster (inklusiver `lte dateTo`, wie der
+ * Eligibility-Filter). Sonst würde die Gruppierung „bereit vs. offen" bei
+ * Teil-Abrechnung nicht zum gefilterten Fenster passen.
  */
 export async function getOpenAppointmentCountByCustomer(
   customerIds: number[],
   billingYear: number,
   billingMonth: number,
+  range?: { dateFrom?: string; dateTo?: string },
 ): Promise<Map<number, number>> {
   const result = new Map<number, number>();
   if (customerIds.length === 0) return result;
   for (const id of customerIds) result.set(id, 0);
 
-  const mm = String(billingMonth).padStart(2, "0");
-  const periodStartStr = `${billingYear}-${mm}-01`;
-  const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
-  const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
-  const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+  // Fenster identisch zur Eligibility-Logik in `/eligible-customers`:
+  // gesetzter Datumsbereich verengt (nur die vorhandenen Grenzen), sonst Monat.
+  const dateConds = range?.dateFrom || range?.dateTo
+    ? [
+        ...(range.dateFrom ? [gte(appointments.date, range.dateFrom)] : []),
+        ...(range.dateTo ? [lte(appointments.date, range.dateTo)] : []),
+      ]
+    : (() => {
+        const mm = String(billingMonth).padStart(2, "0");
+        const periodStartStr = `${billingYear}-${mm}-01`;
+        const nextMonth = billingMonth === 12 ? 1 : billingMonth + 1;
+        const nextYear = billingMonth === 12 ? billingYear + 1 : billingYear;
+        const periodEndStr = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+        return [gte(appointments.date, periodStartStr), lt(appointments.date, periodEndStr)];
+      })();
 
   const openRows = await appointmentsRepo.selectColumnsFrom({
     customerId: appointments.customerId,
@@ -200,8 +218,7 @@ export async function getOpenAppointmentCountByCustomer(
       inArray(appointments.customerId, customerIds),
       notInArray(appointments.status, [...FINAL_APPOINTMENT_STATUSES]),
       appointmentsRepo.activeOnly(),
-      gte(appointments.date, periodStartStr),
-      lt(appointments.date, periodEndStr),
+      ...dateConds,
     ))
     .groupBy(appointments.customerId);
 

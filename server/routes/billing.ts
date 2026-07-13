@@ -365,9 +365,18 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   // „bereit zum Abrechnen" (keine offenen Termine) und Monatsabschluss nicht
   // auseinanderdriften. Das Frontend gruppiert die Karte „Noch zu erstellen"
   // danach in „Bereit zum Abrechnen" (0 offen) und „Noch offene Termine" (>0).
+  // Task #1317: Optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd) — nur
+  // wohlgeformte Werte zählen. Ist er gesetzt, verengen sowohl der
+  // Eligibility-Filter (unten) ALS AUCH die „noch offene Termine"-Zählung den
+  // Scope auf dieses Fenster, damit die Gruppierung „bereit vs. offen" exakt
+  // zum gefilterten Bereich passt.
+  const isoDateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const dateFromQ = typeof req.query.dateFrom === "string" && isoDateRe.test(req.query.dateFrom) ? req.query.dateFrom : undefined;
+  const dateToQ = typeof req.query.dateTo === "string" && isoDateRe.test(req.query.dateTo) ? req.query.dateTo : undefined;
+
   const [coverageByCustomer, openByCustomer] = await Promise.all([
     getDocumentationCoverageByCustomer(uniqueCustomerIds, year, month),
-    getOpenAppointmentCountByCustomer(uniqueCustomerIds, year, month),
+    getOpenAppointmentCountByCustomer(uniqueCustomerIds, year, month, { dateFrom: dateFromQ, dateTo: dateToQ }),
   ]);
 
   const customerRows = await db.select({
@@ -398,13 +407,7 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     filteredCustomerRows = customerRows.filter(c => allowed.has(c.id));
   }
 
-  // Task #1317: Optionaler von–bis-Datumsbereich (ISO yyyy-mm-dd) — nur
-  // wohlgeformte Werte zählen. Ist er gesetzt, muss der Counter den auf den
-  // Bereich verengten Scope spiegeln (siehe unten).
-  const isoDateRe = /^\d{4}-\d{2}-\d{2}$/;
-  const dateFromQ = typeof req.query.dateFrom === "string" && isoDateRe.test(req.query.dateFrom) ? req.query.dateFrom : undefined;
-  const dateToQ = typeof req.query.dateTo === "string" && isoDateRe.test(req.query.dateTo) ? req.query.dateTo : undefined;
-
+  // dateFromQ/dateToQ oben geparst (Scope für Counter + Eligibility identisch).
   const candidateIds = filteredCustomerRows.map(c => c.id);
   if (candidateIds.length > 0 && (dateFromQ || dateToQ)) {
     // Task #1317: Mit Datumsbereich erlaubt die Massenerstellung Teil-
