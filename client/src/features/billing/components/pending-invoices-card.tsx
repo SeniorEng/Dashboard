@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { iconSize } from "@/design-system";
@@ -9,6 +10,7 @@ import {
   ClipboardList,
   ChevronDown,
   CalendarClock,
+  ChevronRight,
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
 import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
@@ -20,6 +22,10 @@ interface PendingInvoicesCardProps {
   customers: BillingCustomerItem[] | undefined;
   isLoading: boolean;
   onCreateForCustomer: (customerId: number) => void;
+  // Task #1744: gewählter Abrechnungsmonat/-jahr, damit der Absprung „noch X
+  // geplante Termine" die Kundendetail-Terminliste auf denselben Monat scopt.
+  selectedMonth: number;
+  selectedYear: number;
 }
 
 // Task #1743: Ein Kunde gilt als „bereit zum Abrechnen", wenn er im gewählten
@@ -37,9 +43,13 @@ function hasOpenAppointments(c: BillingCustomerItem): boolean {
 function PendingCustomerRow({
   customer: c,
   onCreateForCustomer,
+  selectedMonth,
+  selectedYear,
 }: {
   customer: BillingCustomerItem;
   onCreateForCustomer: (customerId: number) => void;
+  selectedMonth: number;
+  selectedYear: number;
 }) {
   // Partial-Signing-Hinweis: weniger Termine durch einen aktiven
   // Leistungsnachweis abgedeckt als dokumentiert wurden. Task #1625:
@@ -81,12 +91,14 @@ function PendingCustomerRow({
           </div>
         )}
         {openCount > 0 && (
-          <div
-            className="mt-0.5 text-xs text-amber-700"
+          <Link
+            href={`/service-records/open?customerId=${c.id}&year=${selectedYear}&month=${selectedMonth}`}
+            className="mt-0.5 inline-flex items-center gap-0.5 text-xs text-amber-700 underline-offset-2 hover:text-amber-900 hover:underline"
             data-testid={`text-pending-open-note-${c.id}`}
           >
             noch {openCount} {openCount === 1 ? "geplanter Termin" : "geplante Termine"}
-          </div>
+            <ChevronRight className={iconSize.xs} />
+          </Link>
         )}
       </div>
       <Button
@@ -114,6 +126,8 @@ function PendingSection({
   customers,
   onCreateForCustomer,
   testIdKey,
+  selectedMonth,
+  selectedYear,
 }: {
   title: string;
   icon: ReactNode;
@@ -121,6 +135,8 @@ function PendingSection({
   customers: BillingCustomerItem[];
   onCreateForCustomer: (customerId: number) => void;
   testIdKey: string;
+  selectedMonth: number;
+  selectedYear: number;
 }) {
   const { visible, showAll, setShowAll, hiddenCount, capped, total } =
     useRowCap(customers);
@@ -143,6 +159,8 @@ function PendingSection({
             key={c.id}
             customer={c}
             onCreateForCustomer={onCreateForCustomer}
+            selectedMonth={selectedMonth}
+            selectedYear={selectedYear}
           />
         ))}
       </ul>
@@ -176,6 +194,8 @@ export function PendingInvoicesCard({
   customers,
   isLoading,
   onCreateForCustomer,
+  selectedMonth,
+  selectedYear,
 }: PendingInvoicesCardProps) {
   // Task #1501: Karte einklappbar — der Kopf dient als Toggle, der Zähler bleibt
   // auch im eingeklappten Zustand sichtbar. Standard: aufgeklappt.
@@ -247,6 +267,8 @@ export function PendingInvoicesCard({
                   customers={readyCustomers}
                   onCreateForCustomer={onCreateForCustomer}
                   testIdKey="ready"
+                  selectedMonth={selectedMonth}
+                  selectedYear={selectedYear}
                 />
                 <PendingSection
                   title="Noch offene Termine"
@@ -255,6 +277,8 @@ export function PendingInvoicesCard({
                   customers={openCustomers}
                   onCreateForCustomer={onCreateForCustomer}
                   testIdKey="open"
+                  selectedMonth={selectedMonth}
+                  selectedYear={selectedYear}
                 />
               </>
             )}

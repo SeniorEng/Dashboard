@@ -495,6 +495,8 @@ export default function AdminBilling() {
             customers={customers}
             isLoading={customersLoading}
             onCreateForCustomer={handleCreateForCustomer}
+            selectedMonth={selectedMonth}
+            selectedYear={selectedYear}
           />
 
           <InvoiceList
