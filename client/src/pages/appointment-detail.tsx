@@ -66,15 +66,24 @@ export default function AppointmentDetail() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const reopenMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (_preReopenStatus: string) => {
       const result = await api.post(`/appointments/${id}/reopen`, {});
       return unwrapResult(result);
     },
-    onSuccess: () => {
+    onSuccess: (_data, preReopenStatus) => {
       invalidateRelated(queryClient, "appointments");
       toast({ title: "Dokumentation zur Korrektur geöffnet" });
       setShowReopenDialog(false);
-      setLocation(`/document-appointment/${id}`);
+      // Task #1757 — ein reopeneter No-Show darf NUR wieder als No-Show
+      // geschlossen werden. Wir leiten deshalb gezielt in den No-Show-
+      // Dokumentationspfad statt in die reguläre Doku (die Hauswirtschaft +
+      // §45b buchen würde). So kann ein No-Show nicht versehentlich zu einem
+      // regulären Leistungstermin werden.
+      setLocation(
+        preReopenStatus === "customer_no_show"
+          ? `/document-appointment/${id}/no-show`
+          : `/document-appointment/${id}`,
+      );
     },
     onError: (error: Error) => {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
@@ -218,6 +227,12 @@ export default function AppointmentDetail() {
 
   const services = appointmentServices || [];
   const isCompleted = appointment.status === "completed";
+  const isNoShow = appointment.status === "customer_no_show";
+  // Task #1757 — für No-Shows keinen „Bearbeiten"-Knopf: das generische
+  // Bearbeiten-Formular zeigt eine irreführende Planungs-/Kostenvorschau und der
+  // Server blockt die Änderung ohnehin. Korrektur läuft über „Dokumentation
+  // korrigieren" (Reopen → No-Show-Doku).
+  const showEdit = canEdit && !isNoShow;
 
   return (
     <Layout>
@@ -351,7 +366,7 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {isCompleted && canReopen && (
+      {(isCompleted || isNoShow) && canReopen && (
         <div className="mt-6">
           <Button
             variant="outline"
@@ -366,9 +381,9 @@ export default function AppointmentDetail() {
         </div>
       )}
 
-      {(canEdit || canDelete) && (
+      {(showEdit || canDelete) && (
         <div className="flex gap-3 mt-6">
-          {canEdit && (
+          {showEdit && (
             <Button
               variant="outline"
               className="flex-1"
@@ -491,7 +506,7 @@ export default function AppointmentDetail() {
           <AlertDialogFooter>
             <AlertDialogCancel>Abbrechen</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => reopenMutation.mutate()}
+              onClick={() => reopenMutation.mutate(appointment.status)}
               disabled={reopenMutation.isPending}
             >
               {reopenMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}

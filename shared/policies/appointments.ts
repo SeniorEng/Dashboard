@@ -291,8 +291,11 @@ export function canReopenAppointment(
   if (!isAdminLike(user) && !isAssignedEmployee(user, appt)) {
     return deny("Nur der zugewiesene Mitarbeiter darf diesen Termin wiedereröffnen.");
   }
-  if (appt.status !== "completed") {
-    return deny("Nur abgeschlossene Termine können zur Korrektur geöffnet werden.");
+  // Task #1757 — auch als „Kunde nicht angetroffen" (No-Show) dokumentierte
+  // Termine sind ein abgeschlossenes Terminal-Ergebnis und müssen zur Korrektur
+  // (z. B. falsch erfasste Anfahrts-Kilometer) wiedereröffnet werden können.
+  if (appt.status !== "completed" && appt.status !== "customer_no_show") {
+    return deny("Nur abgeschlossene oder als No-Show dokumentierte Termine können zur Korrektur geöffnet werden.");
   }
   if (appt.isLocked) {
     return deny("Dieser Termin ist Teil eines unterschriebenen Leistungsnachweises und kann nicht mehr bearbeitet werden.");

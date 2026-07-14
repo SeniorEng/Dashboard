@@ -61,6 +61,35 @@ export default function EditAppointment() {
     );
   }
 
+  // Task #1757 — als „Kunde nicht angetroffen" (No-Show) dokumentierte Termine
+  // dürfen NICHT über das generische Bearbeiten-Formular geändert werden: es
+  // zeigt eine irreführende Planungs-/Kostenvorschau und der Server blockt die
+  // Änderung ohnehin. Korrektur der Anfahrts-Kilometer läuft ausschließlich über
+  // „Dokumentation korrigieren" auf der Termin-Detailseite (Reopen → No-Show-Doku).
+  if (appointment.status === "customer_no_show") {
+    return (
+      <Layout>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="pl-0 text-muted-foreground hover:text-foreground mb-4"
+          onClick={() => setLocation(`/appointment/${appointment.id}`)}
+          data-testid="button-back"
+        >
+          <ChevronLeft className={`${iconSize.sm} mr-1`} /> Zurück
+        </Button>
+        <div className="text-center py-12 space-y-4">
+          <AlertTriangle className={`${iconSize.xl} text-amber-500 mx-auto`} />
+          <h2 className="text-xl font-bold">Bearbeitung nicht möglich</h2>
+          <p className="text-muted-foreground">
+            „Kunde nicht angetroffen"-Termine werden über „Dokumentation korrigieren"
+            auf der Termin-Detailseite angepasst.
+          </p>
+        </div>
+      </Layout>
+    );
+  }
+
   const { isKundentermin, isErstberatung } = f;
 
   return (

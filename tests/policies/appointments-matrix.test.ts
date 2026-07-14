@@ -219,6 +219,31 @@ describe("Berechtigungs-Matrix Termine", () => {
     expect(canReopenAppointment(ROLES.super_admin, completed).allowed).toBe(true);
   });
 
+  it("No-Show darf zur Korrektur wiedereröffnet werden (Task #1757)", () => {
+    const open: ScenarioFlags = { isLocked: false, isMonthClosed: false };
+    const closed: ScenarioFlags = { isLocked: false, isMonthClosed: true };
+    const locked: ScenarioFlags = { isLocked: true, isMonthClosed: false };
+
+    // Ein als "Kunde nicht angetroffen" dokumentierter Termin ist ein
+    // abgeschlossenes Terminal-Ergebnis und muss — wie ein `completed`-Termin —
+    // zur Korrektur (z. B. falscher Anfahrts-km) wiedereröffnet werden können.
+    const noShowOpen = buildAppointment("employee_assigned", "customer_no_show", open);
+    expect(canReopenAppointment(ROLES.employee_assigned, noShowOpen).allowed).toBe(true);
+    expect(canReopenAppointment(ROLES.admin, noShowOpen).allowed).toBe(true);
+    expect(canReopenAppointment(ROLES.super_admin, noShowOpen).allowed).toBe(true);
+
+    // Fremder Mitarbeiter (weder zugewiesen noch admin-artig) darf nicht.
+    expect(canReopenAppointment(ROLES.employee_other, noShowOpen).allowed).toBe(false);
+
+    // Lock und Monatsabschluss blocken den No-Show-Reopen exakt wie beim
+    // abgeschlossenen Termin — nur die Geschäftsführung überschreibt den Abschluss.
+    const noShowLocked = buildAppointment("employee_assigned", "customer_no_show", locked);
+    expect(canReopenAppointment(ROLES.admin, noShowLocked).allowed).toBe(false);
+    const noShowClosed = buildAppointment("admin", "customer_no_show", closed);
+    expect(canReopenAppointment(ROLES.admin, noShowClosed).allowed).toBe(false);
+    expect(canReopenAppointment(ROLES.super_admin, noShowClosed).allowed).toBe(true);
+  });
+
   it("Lock blockiert edit/document/reopen — nur Admin darf gesperrte Termine löschen", () => {
     const flags: ScenarioFlags = { isLocked: true, isMonthClosed: false };
     const appt = buildAppointment("admin", "completed", flags);
