@@ -1707,4 +1707,89 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       await deactivateEmployee(session, employee.id);
     }
   });
+
+  // ---------- 10. Leerfahrt — Wartezeit + Anfahrt-km im Zeiterfassungs-Tagesdetail (#1760) ----------
+  // Task #1759 hat die Termin-Detailkachel (`/appointment/:id`) gegen die
+  // Null-Anzeige abgesichert. Dieselben Leerfahrt-Werte werden aber auch im
+  // Tagesdetail der Zeiterfassung (`/my-times`, DayDetailPanel) gerendert —
+  // ohne bisherige UI-Absicherung. Dieser Round-Trip schließt die Lücke für
+  // die zweite Anzeigefläche: Leerfahrt dokumentieren → als Mitarbeiter-Sicht
+  // (viewAsEmployeeId) das Tagesdetail öffnen → page.reload() → Wartezeit und
+  // Anfahrt-km stehen mit den ECHTEN Werten in der Kachel (nicht 0 / 0,00).
+  // Assertion über stabile data-testid-Guard-Elemente
+  // (`text-day-no-show-wait-minutes-*` / `text-day-no-show-km-*`), kein
+  // Leerzeichen-Regex (U+202F-Falle).
+  test("Leerfahrt dokumentieren — Wartezeit + Anfahrt-km erscheinen im Zeiterfassungs-Tagesdetail nach Reload", async ({ page }) => {
+    const customer = await createCustomer(session);
+    const employee = await createEmployee(session);
+    await assignEmployee(session, customer.id, employee.id);
+    const appt = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: employee.id,
+    });
+
+    try {
+      // Leerfahrt dokumentieren: Wartezeit 10 Min (unter dem 15-Min-Cap, geht
+      // 1:1 durch) + Anfahrt-km 8 → formatKm(8) === "8,00".
+      const doc = await apiPost(
+        session,
+        `/api/appointments/${appt.id}/document-no-show`,
+        {
+          actualStart: "10:00",
+          travelOriginType: "home",
+          travelKilometers: 8,
+          noShowReason: "sonstiges",
+          noShowReasonText: "Tür nicht geöffnet",
+          noShowWaitMinutes: 10,
+          noShowNotes: "Nachbarin wusste nichts",
+        },
+      );
+      if (doc.status !== 200) {
+        throw new Error(`document-no-show failed: ${doc.status} ${JSON.stringify(doc.data)}`);
+      }
+
+      // Der Termin gehört dem frisch erstellten Mitarbeiter. Als Admin die
+      // Mitarbeiter-Sicht einnehmen (sessionStorage-getriebener viewAsEmployeeId),
+      // damit das Tagesdetail dessen Leerfahrt-Termin lädt.
+      await page.addInitScript((empId: number) => {
+        try {
+          sessionStorage.setItem("viewAsEmployeeId", String(empId));
+          sessionStorage.setItem("viewAsEmployeeName", "E2E Mitarbeiter");
+        } catch {}
+      }, employee.id);
+
+      const [year, month] = appt.date.split("-").map(Number);
+
+      // Tagesdetail öffnen (Monat/Jahr des Termins) und HART neu laden.
+      await page.goto(`/my-times?year=${year}&month=${month}`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+
+      // Tag im Kalender auswählen → DayDetailPanel rendert die Termin-Kachel.
+      const dayCell = page.locator(`[data-testid='calendar-day-${appt.date}']`);
+      await expect(dayCell).toBeVisible({ timeout: 15000 });
+      await dayCell.click();
+
+      // Termin-Kachel + Leerfahrt-Sektion müssen gerendert sein.
+      const apptTile = page.locator(`[data-testid='appointment-${appt.id}']`);
+      await expect(apptTile).toBeVisible({ timeout: 15000 });
+
+      // Guard-Elemente: echte Werte, nicht 0 / 0,00. Assertion auf den
+      // numerischen Teil (kein Leerzeichen-/Einheiten-Regex).
+      const waitGuard = page.locator(
+        `[data-testid='text-day-no-show-wait-minutes-${appt.id}']`,
+      );
+      await expect(waitGuard).toBeVisible({ timeout: 10000 });
+      await expect(waitGuard).toContainText("10");
+
+      const kmGuard = page.locator(
+        `[data-testid='text-day-no-show-km-${appt.id}']`,
+      );
+      await expect(kmGuard).toBeVisible({ timeout: 10000 });
+      await expect(kmGuard).toContainText("8,00");
+    } finally {
+      await deactivateEmployee(session, employee.id);
+    }
+  });
 });

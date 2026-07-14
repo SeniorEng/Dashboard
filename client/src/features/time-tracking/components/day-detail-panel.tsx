@@ -219,14 +219,21 @@ export function DayDetailPanel({
                       </div>
                       {noShowWage ? (
                         (noShowWage.kilometers > 0 || noShowWage.travelMinutes > 0 || noShowWage.waitMinutes > 0) && (
-                          <div className="flex items-center gap-2 mt-1 text-xs text-amber-700">
+                          <div
+                            className="flex items-center gap-2 mt-1 text-xs text-amber-700"
+                            data-testid={`section-day-no-show-leerfahrt-${appt.id}`}
+                          >
                             <Car className={iconSize.xs} />
                             <span>
-                              {noShowWage.kilometers > 0 ? `${formatKm(noShowWage.kilometers)} km` : ""}
+                              {noShowWage.kilometers > 0 ? (
+                                <span data-testid={`text-day-no-show-km-${appt.id}`}>{`${formatKm(noShowWage.kilometers)} km`}</span>
+                              ) : ""}
                               {noShowWage.kilometers > 0 && noShowWage.travelMinutes > 0 ? " • " : ""}
                               {noShowWage.travelMinutes > 0 ? `${noShowWage.travelMinutes} Min. Fahrt` : ""}
                               {(noShowWage.kilometers > 0 || noShowWage.travelMinutes > 0) && noShowWage.waitMinutes > 0 ? " • " : ""}
-                              {noShowWage.waitMinutes > 0 ? `${noShowWage.waitMinutes} Min. Wartezeit` : ""}
+                              {noShowWage.waitMinutes > 0 ? (
+                                <span data-testid={`text-day-no-show-wait-minutes-${appt.id}`}>{`${noShowWage.waitMinutes} Min. Wartezeit`}</span>
+                              ) : ""}
                             </span>
                           </div>
                         )
