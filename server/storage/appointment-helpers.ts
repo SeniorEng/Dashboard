@@ -153,6 +153,13 @@ export const appointmentWithCustomerSelectFields = {
   doctorLongitude: appointments.doctorLongitude,
   estimatedTravelMinutes: appointments.estimatedTravelMinutes,
   travelBufferMinutes: appointments.travelBufferMinutes,
+  noShowReason: appointments.noShowReason,
+  noShowReasonText: appointments.noShowReasonText,
+  noShowWaitMinutes: appointments.noShowWaitMinutes,
+  noShowKilometers: appointments.noShowKilometers,
+  noShowNotes: appointments.noShowNotes,
+  noShowChargeSuppressed: appointments.noShowChargeSuppressed,
+  noShowChargeSuppressionReason: appointments.noShowChargeSuppressionReason,
   importBatchId: appointments.importBatchId,
   assignedEmployeeName: assignedEmployee,
   coVisitPartnerName: coVisitPartnerName,
@@ -199,7 +206,12 @@ type AppointmentQueryRow = typeof appointmentWithCustomerSelectFields extends in
   ? { [K in keyof T]: T[K] extends { $inferSelect: infer S } ? S : unknown }
   : never;
 
-export function mapAppointmentRow(row: AppointmentQueryRow & Record<string, unknown>): AppointmentWithCustomer {
+// Bewusst NICHT `& Record<string, unknown>`: der Parameter ist strikt aus
+// `appointmentWithCustomerSelectFields` abgeleitet. Liest der Mapper ein Feld,
+// das die Projektion nicht (mehr) selektiert, bricht `tsc` — genau so wurde der
+// No-Show-Anzeige-Bug (Task #1758) verhindert, bei dem die no_show_*-Spalten aus
+// der Projektion fehlten und das Cast auf `unknown` den Fehler verschluckte.
+export function mapAppointmentRow(row: AppointmentQueryRow): AppointmentWithCustomer {
   return {
     id: row.id as number,
     customerId: row.customerId as number | null,
