@@ -1792,4 +1792,77 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
       await deactivateEmployee(session, employee.id);
     }
   });
+
+  // ---------- 11. Leerfahrt — Wartezeit + Anfahrt-km in der Leistungsnachweis-Übersicht (#1761) ----------
+  // Tasks #1759/#1760 haben die Termin-Detailkachel und das
+  // Zeiterfassungs-Tagesdetail gegen die Null-Anzeige abgesichert. Dieselben
+  // Leerfahrt-Werte werden aber auch in der Leistungsnachweis-/Service-Records-
+  // Übersicht (`/service-records`, Block `section-no-shows`) gerendert. Dieser
+  // Round-Trip schließt die Lücke für die dritte Anzeigefläche: Termin als
+  // Leerfahrt dokumentieren → Übersicht öffnen → page.reload() → Wartezeit und
+  // Anfahrt-km stehen mit den ECHTEN Werten (nicht 0 / 0,00). Assertion über
+  // stabile data-testid-Guard-Elemente (`text-no-show-wait-minutes-*` /
+  // `text-no-show-km-*`), kein Leerzeichen-Regex (U+202F-Falle).
+  test("Leerfahrt dokumentieren — Wartezeit + Anfahrt-km erscheinen in der Leistungsnachweis-Übersicht nach Reload", async ({ page }) => {
+    const customer = await createCustomer(session);
+    const employee = await createEmployee(session);
+    await assignEmployee(session, customer.id, employee.id);
+    const appt = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: employee.id,
+    });
+
+    try {
+      // Leerfahrt dokumentieren: Wartezeit 10 Min (unter dem 15-Min-Cap, geht
+      // 1:1 durch) + Anfahrt-km 8 → formatKm(8) === "8,00".
+      const doc = await apiPost(
+        session,
+        `/api/appointments/${appt.id}/document-no-show`,
+        {
+          actualStart: "10:00",
+          travelOriginType: "home",
+          travelKilometers: 8,
+          noShowReason: "sonstiges",
+          noShowReasonText: "Tür nicht geöffnet",
+          noShowWaitMinutes: 10,
+          noShowNotes: "Nachbarin wusste nichts",
+        },
+      );
+      if (doc.status !== 200) {
+        throw new Error(`document-no-show failed: ${doc.status} ${JSON.stringify(doc.data)}`);
+      }
+
+      const [year, month] = appt.date.split("-").map(Number);
+
+      // Leistungsnachweis-Übersicht des Kunden öffnen (Monat/Jahr des Termins)
+      // und HART neu laden (kein In-Memory-State).
+      await page.goto(
+        `/service-records?customerId=${customer.id}&year=${year}&month=${month}`,
+        { waitUntil: "domcontentloaded" },
+      );
+      await page.reload({ waitUntil: "domcontentloaded" });
+
+      // No-Show-Sektion + Leerfahrt-Zeile müssen gerendert sein.
+      const section = page.locator(
+        `[data-testid='section-no-show-leerfahrt-${appt.id}']`,
+      );
+      await expect(section).toBeVisible({ timeout: 15000 });
+
+      // Guard-Elemente: echte Werte, nicht 0 / 0,00. Assertion auf den
+      // numerischen Teil (kein Leerzeichen-/Einheiten-Regex).
+      const waitGuard = page.locator(
+        `[data-testid='text-no-show-wait-minutes-${appt.id}']`,
+      );
+      await expect(waitGuard).toBeVisible({ timeout: 10000 });
+      await expect(waitGuard).toContainText("10");
+
+      const kmGuard = page.locator(
+        `[data-testid='text-no-show-km-${appt.id}']`,
+      );
+      await expect(kmGuard).toBeVisible({ timeout: 10000 });
+      await expect(kmGuard).toContainText("8,00");
+    } finally {
+      await deactivateEmployee(session, employee.id);
+    }
+  });
 });

@@ -29,6 +29,7 @@ import { api, unwrapResult } from "@/lib/api/client";
 import { useAuth } from "@/hooks/use-auth";
 import { useViewAsEmployee } from "@/hooks/use-view-as-employee";
 import { invalidateRelated } from "@/lib/query-invalidation";
+import { formatKm } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,6 +47,8 @@ interface NoShowInfo {
   notes: string | null;
   chargeSuppressed: boolean;
   producesCharge: boolean;
+  waitMinutes: number | null;
+  kilometers: number | null;
 }
 
 interface SelectableAppointment {
@@ -627,6 +630,21 @@ function CustomerDetailView({
                     {ns.notes && (
                       <p className="text-sm text-muted-foreground" data-testid={`text-no-show-notes-${ns.id}`}>
                         {ns.notes}
+                      </p>
+                    )}
+                    {((ns.waitMinutes ?? 0) > 0 || (ns.kilometers ?? 0) > 0) && (
+                      <p
+                        className="text-sm text-muted-foreground"
+                        data-testid={`section-no-show-leerfahrt-${ns.id}`}
+                      >
+                        Leerfahrt:{" "}
+                        <span data-testid={`text-no-show-km-${ns.id}`}>
+                          {`${formatKm(ns.kilometers ?? 0)} km`}
+                        </span>
+                        {" • "}
+                        <span data-testid={`text-no-show-wait-minutes-${ns.id}`}>
+                          {`${ns.waitMinutes ?? 0} Min. Wartezeit`}
+                        </span>
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground" data-testid={`text-no-show-billing-${ns.id}`}>

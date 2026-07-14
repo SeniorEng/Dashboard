@@ -213,6 +213,8 @@ router.get("/check-period", requireAuth, asyncHandler("Periodendaten konnten nic
       notes: appt.noShowNotes ?? null,
       chargeSuppressed: appt.noShowChargeSuppressed,
       producesCharge,
+      waitMinutes: appt.noShowWaitMinutes ?? null,
+      kilometers: appt.noShowKilometers ?? null,
     };
   });
 
