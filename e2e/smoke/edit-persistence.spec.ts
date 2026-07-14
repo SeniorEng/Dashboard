@@ -1647,4 +1647,64 @@ test.describe("@smoke Edit-Persistence Round-Trip", () => {
     expect(selectableIds).not.toContain(apptA.id);
     expect(period!.uncoveredDocumentedCount).toBe(1);
   });
+
+  // ---------- 9. Leerfahrt dokumentieren — Wartezeit + Anfahrt-km in der Termin-Kachel (#1759) ----------
+  // Task #1758 hat den reinen Lese-/API-Pfad (GET /api/appointments/:id) gegen
+  // die Null-Projektion abgesichert. Dieser Test schließt die verbleibende Lücke
+  // zwischen "API liefert korrekt" und "Kachel zeigt korrekt": Termin als
+  // Leerfahrt dokumentieren → Detailseite laden → page.reload() → in der
+  // Detailkachel muss die ECHTE Wartezeit und die ECHTEN Anfahrt-km stehen
+  // (nicht 0 / 0,00). Assertion über data-testid-Guard-Elemente
+  // (`text-no-show-wait-minutes` / `text-no-show-km`), nicht über Text-Regex
+  // mit Leerzeichen (formatEuroDE/U+202F-Falle).
+  test("Leerfahrt dokumentieren — Wartezeit + Anfahrt-km erscheinen in der Detailkachel nach Reload", async ({ page }) => {
+    const customer = await createCustomer(session);
+    const employee = await createEmployee(session);
+    await assignEmployee(session, customer.id, employee.id);
+    const appt = await createAppointment(session, {
+      customerId: customer.id,
+      employeeId: employee.id,
+    });
+
+    try {
+      // Leerfahrt dokumentieren: Wartezeit 10 Min (unter dem 15-Min-Cap, geht
+      // 1:1 durch) + Anfahrt-km 8 → formatKm(8) === "8,00".
+      const doc = await apiPost(
+        session,
+        `/api/appointments/${appt.id}/document-no-show`,
+        {
+          actualStart: "10:00",
+          travelOriginType: "home",
+          travelKilometers: 8,
+          noShowReason: "sonstiges",
+          noShowReasonText: "Tür nicht geöffnet",
+          noShowWaitMinutes: 10,
+          noShowNotes: "Nachbarin wusste nichts",
+        },
+      );
+      if (doc.status !== 200) {
+        throw new Error(`document-no-show failed: ${doc.status} ${JSON.stringify(doc.data)}`);
+      }
+
+      // Detailkachel öffnen und HART neu laden (kein In-Memory-State).
+      await page.goto(`/appointment/${appt.id}`, { waitUntil: "domcontentloaded" });
+      await page.reload({ waitUntil: "domcontentloaded" });
+
+      // Leerfahrt-Sektion muss gerendert sein.
+      const section = page.locator("[data-testid='section-no-show-leerfahrt']");
+      await expect(section).toBeVisible({ timeout: 15000 });
+
+      // Guard-Elemente: echte Werte, nicht 0 / 0,00. Assertion auf den
+      // numerischen Teil (kein Leerzeichen-/Einheiten-Regex).
+      const waitGuard = page.locator("[data-testid='text-no-show-wait-minutes']");
+      await expect(waitGuard).toBeVisible({ timeout: 10000 });
+      await expect(waitGuard).toContainText("10");
+
+      const kmGuard = page.locator("[data-testid='text-no-show-km']");
+      await expect(kmGuard).toBeVisible({ timeout: 10000 });
+      await expect(kmGuard).toContainText("8,00");
+    } finally {
+      await deactivateEmployee(session, employee.id);
+    }
+  });
 });
