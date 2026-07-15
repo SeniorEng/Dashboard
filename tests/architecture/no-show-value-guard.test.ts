@@ -161,4 +161,96 @@ describe("Architektur — Leerfahrt-Anzeigen brauchen Guard-data-testid", () => 
       expect(isNoShowValueCandidate(stripped), `${surface} sollte als noShow-Kandidat erkannt werden`).toBe(true);
     }
   });
+
+  /**
+   * Task #1763 — Der Guard oben stellt nur sicher, dass eine Anzeige-Oberfläche
+   * einen stabilen `data-testid` TRÄGT. Er sagt nichts darüber aus, ob dieser
+   * Guard auch tatsächlich von einem VERHALTENS-Test (Round-Trip) gelesen wird.
+   * Ohne diese zweite Schranke könnte ein Guard-`data-testid` existieren, aber
+   * ungetestet sein — die Round-Trip-Abdeckung einer Oberfläche könnte still
+   * wegfallen und der „zeigt still 0 / 0,00"-Bug wieder durchrutschen.
+   *
+   * Diese Schranke prüft daher, dass die Edit-Persistence-Smoke-Suite für jede
+   * der drei Anzeige-Oberflächen einen Round-Trip-Test enthält, der
+   * (a) eine Leerfahrt dokumentiert (`POST .../document-no-show`),
+   * (b) die Seite hart neu lädt (`page.reload(`) und
+   * (c) den oberflächenspezifischen Guard-`data-testid` mit dem ECHTEN
+   *     Nicht-Null-Wert (Wartezeit + Anfahrt-km) prüft.
+   */
+  it("Jede noShow-Anzeige-Oberfläche hat einen Verhaltens-Round-Trip, der den Guard liest", () => {
+    const specPath = join(ROOT, "e2e/smoke/edit-persistence.spec.ts");
+    try { statSync(specPath); } catch {
+      expect.fail(
+        "e2e/smoke/edit-persistence.spec.ts fehlt — der Verhaltens-" +
+        "Round-Trip für Leerfahrt-Werte kann nicht abgesichert werden.",
+      );
+    }
+    const spec = stripComments(readFileSync(specPath, "utf-8"));
+
+    // Grundvoraussetzungen: Leerfahrt-Dokumentation + harter Reload +
+    // Nicht-Null-Wert-Assertions müssen mindestens dreimal (je Oberfläche)
+    // vorkommen.
+    const countOccurrences = (hay: string, needle: string): number =>
+      hay.split(needle).length - 1;
+
+    expect(
+      countOccurrences(spec, "/document-no-show"),
+      "edit-persistence.spec.ts muss die Leerfahrt je Oberfläche dokumentieren " +
+        "(POST .../document-no-show) — erwartet ≥ 3 Vorkommen.",
+    ).toBeGreaterThanOrEqual(3);
+
+    expect(
+      countOccurrences(spec, "page.reload("),
+      "edit-persistence.spec.ts muss je Oberfläche hart neu laden " +
+        "(page.reload()) — erwartet ≥ 3 Vorkommen.",
+    ).toBeGreaterThanOrEqual(3);
+
+    // Jede Oberfläche muss ihren oberflächenspezifischen Guard-data-testid im
+    // Spec lesen (km UND Wartezeit). Die Token sind so gewählt, dass sie die
+    // drei Oberflächen eindeutig unterscheiden:
+    //  - Termin-Detailkachel: statische (un-suffixierte) Guard-ids
+    //  - Zeiterfassungs-Tagesdetail: `text-day-no-show-*-<id>`
+    //  - Leistungsnachweis-Übersicht: `text-no-show-*-<id>` (suffixiert)
+    const behavioralSurfaces: Array<{ surface: string; guardTokens: string[] }> = [
+      {
+        surface:
+          "client/src/features/appointments/components/appointment-time-services-card.tsx",
+        guardTokens: [
+          "data-testid='text-no-show-km'",
+          "data-testid='text-no-show-wait-minutes'",
+        ],
+      },
+      {
+        surface:
+          "client/src/features/time-tracking/components/day-detail-panel.tsx",
+        guardTokens: ["text-day-no-show-km-", "text-day-no-show-wait-minutes-"],
+      },
+      {
+        surface: "client/src/pages/service-records.tsx",
+        guardTokens: ["text-no-show-km-", "text-no-show-wait-minutes-"],
+      },
+    ];
+
+    const missing: string[] = [];
+    for (const { surface, guardTokens } of behavioralSurfaces) {
+      const absent = guardTokens.filter((t) => !spec.includes(t));
+      if (absent.length > 0) {
+        missing.push(`  ${surface} — kein Round-Trip liest: ${absent.join(", ")}`);
+      }
+    }
+
+    if (missing.length > 0) {
+      expect.fail(
+        "Folgende noShow-Anzeige-Oberflächen haben zwar einen Guard-" +
+          "data-testid, werden aber von keinem Verhaltens-Round-Trip-Test in " +
+          "e2e/smoke/edit-persistence.spec.ts gelesen:\n" +
+          missing.join("\n") +
+          "\n\nFix: Ergänze/behalte je Oberfläche einen Round-Trip-Test, der " +
+          "eine Leerfahrt dokumentiert, hart neu lädt und den obigen Guard-" +
+          "data-testid mit dem ECHTEN Nicht-Null-Wert prüft (vgl. Tests " +
+          "#1759/#1760/#1761). Nur einen Guard-data-testid zu setzen genügt " +
+          "nicht — der Wert muss nachweislich round-trippen.",
+      );
+    }
+  });
 });
