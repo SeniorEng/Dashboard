@@ -140,10 +140,25 @@ function PendingSection({
 }) {
   const { visible, showAll, setShowAll, hiddenCount, capped, total } =
     useRowCap(customers);
+  // Task #1772: Jede Sektion ist einzeln einklappbar — die Überschrift dient
+  // als Toggle, der Zähler bleibt auch im eingeklappten Zustand sichtbar.
+  // Standard: aufgeklappt.
+  const [open, setOpen] = useState(true);
   if (customers.length === 0) return null;
   return (
     <div className="mt-5 first:mt-0" data-testid={`section-pending-${testIdKey}`}>
-      <div className={`mb-1 flex items-center gap-2 text-sm font-medium ${headerClassName}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        className={`mb-1 flex w-full items-center gap-2 text-left text-sm font-medium ${headerClassName}`}
+        data-testid={`button-pending-section-toggle-${testIdKey}`}
+      >
+        <ChevronDown
+          className={`${iconSize.sm} flex-shrink-0 text-gray-400 transition-transform ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
         {icon}
         <span>{title}</span>
         <span
@@ -152,32 +167,44 @@ function PendingSection({
         >
           {customers.length}
         </span>
-      </div>
-      <ul className="divide-y divide-gray-100">
-        {visible.map((c) => (
-          <PendingCustomerRow
-            key={c.id}
-            customer={c}
-            onCreateForCustomer={onCreateForCustomer}
-            selectedMonth={selectedMonth}
-            selectedYear={selectedYear}
-          />
-        ))}
-      </ul>
-      {capped && (
-        <div className="mt-3 flex justify-center">
-          <button
-            type="button"
-            onClick={() => setShowAll(!showAll)}
-            className="text-xs font-medium text-teal-700 hover:text-teal-800"
-            data-testid={`button-pending-show-more-${testIdKey}`}
-          >
-            {showAll
-              ? "Weniger anzeigen"
-              : `Alle ${total} anzeigen (${hiddenCount} weitere)`}
-          </button>
+      </button>
+      {/* Task #1772: weiches Ein-/Ausklappen via grid-rows-Transition (kein
+          CSS-Transform), analog zur Karte. */}
+      <div
+        className={`grid transition-[grid-template-rows,opacity] duration-200 ease-in-out ${
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        }`}
+        data-testid={`region-pending-section-${testIdKey}`}
+        aria-hidden={!open}
+      >
+        <div className="overflow-hidden">
+          <ul className="divide-y divide-gray-100">
+            {visible.map((c) => (
+              <PendingCustomerRow
+                key={c.id}
+                customer={c}
+                onCreateForCustomer={onCreateForCustomer}
+                selectedMonth={selectedMonth}
+                selectedYear={selectedYear}
+              />
+            ))}
+          </ul>
+          {capped && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setShowAll(!showAll)}
+                className="text-xs font-medium text-teal-700 hover:text-teal-800"
+                data-testid={`button-pending-show-more-${testIdKey}`}
+              >
+                {showAll
+                  ? "Weniger anzeigen"
+                  : `Alle ${total} anzeigen (${hiddenCount} weitere)`}
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -198,8 +225,9 @@ export function PendingInvoicesCard({
   selectedYear,
 }: PendingInvoicesCardProps) {
   // Task #1501: Karte einklappbar — der Kopf dient als Toggle, der Zähler bleibt
-  // auch im eingeklappten Zustand sichtbar. Standard: aufgeklappt.
-  const [open, setOpen] = useState(true);
+  // auch im eingeklappten Zustand sichtbar.
+  // Task #1772: Standard beim Betreten der Seite ist eingeklappt.
+  const [open, setOpen] = useState(false);
 
   const all = customers ?? [];
   const readyCustomers = all.filter((c) => !hasOpenAppointments(c));
