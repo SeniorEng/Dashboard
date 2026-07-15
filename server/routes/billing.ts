@@ -83,7 +83,6 @@ import {
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
 import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer } from "../services/invoice-data";
-import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
 import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
 import {
   MONTH_NAMES_DE,
@@ -2933,20 +2932,16 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     // innerhalb des Monats). Leer = ganzer Monat (Bestandsverhalten).
     dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    // Task #1625: Wenn gesetzt, werden Kunden mit im Zeitraum unvollständig
-    // dokumentierten Terminen (dokumentiert > durch aktive LNs abgedeckt)
-    // NICHT abgerechnet, sondern als „übersprungen" gemeldet. Nutzt dieselbe
-    // covered-vs-completed-Berechnung wie `/eligible-customers`.
-    skipIncomplete: z.boolean().optional(),
-    // Task #1771: Reife-Scope für den Split-Knopf „Alle erstellen". „ready" =
-    // nur Kunden OHNE offene (geplante) Termine, „open" = nur Kunden MIT offenen
-    // Terminen, „all"/weggelassen = alle (Bestandsverhalten). Nutzt DIESELBE
-    // „offene Termine"-SSoT (getOpenAppointmentCountByCustomer) wie
-    // /eligible-customers und die Karten-Gruppierung — keine zweite Berechnung.
-    maturityScope: z.enum(["all", "ready", "open"]).optional(),
+    // Task #1771: Wenn gesetzt, werden NUR Kunden ohne offene (geplante) Termine
+    // abgerechnet („Bereit zum Abrechnen") — Kunden mit noch offenen Terminen
+    // werden als „übersprungen" gemeldet. Nutzt DIESELBE „offene Termine"-SSoT
+    // (getOpenAppointmentCountByCustomer, FINAL_APPOINTMENT_STATUSES) wie
+    // /eligible-customers und die Karten-Gruppierung „Bereit zum Abrechnen" —
+    // keine zweite Berechnung. Weggelassen/false = alle berechtigten Kunden.
+    readyOnly: z.boolean().optional(),
   }).safeParse(req.body);
   if (!parsed.success) throw badRequest(fromError(parsed.error).toString());
-  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo, skipIncomplete, maturityScope } = parsed.data;
+  const { billingMonth, billingYear, insuranceProviderId, dateFrom, dateTo, readyOnly } = parsed.data;
   const hasDateRange = !!(dateFrom || dateTo);
   // Task #586 — Strukturiertes Start-/Ende-Log + Voll-Stack im inneren
   // Catch, damit der nächste 500-Vorfall in Prod im Server-Log sofort
@@ -2986,42 +2981,28 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     customerIds = customerIds.filter(id => allowed.has(id));
   }
 
-  // Task #1771: Reife-Scope — VOR dem optionalen Skip anwenden, damit nur Kunden
-  // der gewählten Gruppe abgerechnet UND (bei skipIncomplete) als übersprungen
-  // gemeldet werden. Nutzt DIESELBE „offene Termine"-SSoT
-  // (getOpenAppointmentCountByCustomer, FINAL_APPOINTMENT_STATUSES) mit
-  // demselben Datumsbereich wie /eligible-customers — keine zweite Berechnung.
-  if (maturityScope && maturityScope !== "all" && customerIds.length > 0) {
+  // Task #1771: Wenn `readyOnly` gesetzt ist, werden NUR Kunden ohne offene
+  // (geplante) Termine abgerechnet — Kunden mit noch offenen Terminen werden aus
+  // der Erstellung genommen und als „übersprungen" gemeldet. Nutzt DIESELBE
+  // „offene Termine"-SSoT (getOpenAppointmentCountByCustomer,
+  // FINAL_APPOINTMENT_STATUSES) mit demselben Datumsbereich wie
+  // /eligible-customers und die Karten-Gruppierung „Bereit zum Abrechnen" —
+  // keine zweite Berechnung, damit Dialog-Auswahl und Liste nie divergieren.
+  let openSkippedIds: number[] = [];
+  if (readyOnly && customerIds.length > 0) {
     const openByCustomer = await getOpenAppointmentCountByCustomer(
       customerIds,
       billingYear,
       billingMonth,
       { dateFrom, dateTo },
     );
-    customerIds = customerIds.filter((id) => {
-      const openCount = openByCustomer.get(id) ?? 0;
-      return maturityScope === "ready" ? openCount === 0 : openCount > 0;
-    });
-  }
-
-  // Task #1625: Optionaler Skip unvollständig dokumentierter Kunden. Nutzt die
-  // EINE gemeinsame covered-vs-completed-Berechnung (`getDocumentationCoverageByCustomer`)
-  // und die pure Regel `isPartiallyDocumented` — dieselbe Quelle wie der
-  // „Nur X/Y dokumentierte Termine"-Hinweis in `/eligible-customers`. Betroffene
-  // Kunden werden aus der Erstellung genommen und als „übersprungen" gemeldet.
-  let incompleteSkippedIds: number[] = [];
-  if (skipIncomplete && customerIds.length > 0) {
-    const coverage = await getDocumentationCoverageByCustomer(customerIds, billingYear, billingMonth);
-    incompleteSkippedIds = customerIds.filter(id => {
-      const c = coverage.get(id);
-      return c ? isPartiallyDocumented(c) : false;
-    });
-    const skipSet = new Set(incompleteSkippedIds);
-    customerIds = customerIds.filter(id => !skipSet.has(id));
+    openSkippedIds = customerIds.filter((id) => (openByCustomer.get(id) ?? 0) > 0);
+    const skipSet = new Set(openSkippedIds);
+    customerIds = customerIds.filter((id) => !skipSet.has(id));
   }
 
   log(
-    `generate-all start month=${billingMonth}/${billingYear} eligibleCustomers=${customerIds.length}${insuranceProviderId ? ` insuranceProviderId=${insuranceProviderId}` : ""}${maturityScope && maturityScope !== "all" ? ` scope=${maturityScope}` : ""}${skipIncomplete ? ` skipIncomplete=1 incompleteSkipped=${incompleteSkippedIds.length}` : ""} userId=${userId ?? "?"}`,
+    `generate-all start month=${billingMonth}/${billingYear} eligibleCustomers=${customerIds.length}${insuranceProviderId ? ` insuranceProviderId=${insuranceProviderId}` : ""}${readyOnly ? ` readyOnly=1 openSkipped=${openSkippedIds.length}` : ""} userId=${userId ?? "?"}`,
     "billing",
   );
 
@@ -3032,11 +3013,11 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     message?: string;
   }> = [];
 
-  // Task #1625: übersprungene (unvollständig dokumentierte) Kunden in die
+  // Task #1771: übersprungene Kunden mit noch offenen Terminen in die
   // Summary/Ergebnisliste aufnehmen, damit der Admin sieht, wer nicht
   // abgerechnet wurde.
-  for (const customerId of incompleteSkippedIds) {
-    results.push({ customerId, status: "skipped", message: "Nicht vollständig dokumentiert" });
+  for (const customerId of openSkippedIds) {
+    results.push({ customerId, status: "skipped", message: "Noch offene Termine" });
   }
 
   for (const customerId of customerIds) {

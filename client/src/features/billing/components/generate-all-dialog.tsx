@@ -14,10 +14,10 @@ import { useMemo, useState } from "react";
 import type { RefObject } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { BillingCustomerItem } from "@shared/api";
-import { isPartiallyDocumented, hasOpenAppointments } from "@shared/domain/billing-eligibility";
-import { MONTH_NAMES, BILLING_MATURITY_SCOPE_LABELS } from "../constants";
+import { hasOpenAppointments } from "@shared/domain/billing-eligibility";
+import { MONTH_NAMES } from "../constants";
 import { getCustomerName } from "../utils";
-import type { GenerateAllResponse, BillingMaturityScope } from "../types";
+import type { GenerateAllResponse } from "../types";
 
 interface GenerateAllDialogProps {
   open: boolean;
@@ -27,13 +27,10 @@ interface GenerateAllDialogProps {
   generateAllMutation: UseMutationResult<
     GenerateAllResponse,
     Error,
-    { skipIncomplete: boolean; maturityScope: BillingMaturityScope },
+    { readyOnly: boolean },
     unknown
   >;
   customers: BillingCustomerItem[] | undefined;
-  // Task #1771: gewählte Reifegruppe des Split-Knopfs — steuert den Untertitel,
-  // die Zähler (nur Kunden der Gruppe) und den an den Server übergebenen Scope.
-  maturityScope: BillingMaturityScope;
   selectedMonth: number;
   selectedYear: number;
   closeButtonRef: RefObject<HTMLButtonElement | null>;
@@ -46,33 +43,24 @@ export function GenerateAllDialog({
   setGenerateAllProgress,
   generateAllMutation,
   customers,
-  maturityScope,
   selectedMonth,
   selectedYear,
   closeButtonRef,
 }: GenerateAllDialogProps) {
-  // Task #1625: Kunden mit unvollständig dokumentierten Terminen überspringen —
-  // per Default AN, damit nur vollständig dokumentierte Kunden abgerechnet
-  // werden. Die Zähler unten leiten sich aus derselben Regel ab
-  // (`isPartiallyDocumented`), die auch der Server für den Skip nutzt.
-  const [skipIncomplete, setSkipIncomplete] = useState(true);
+  // Task #1771: „Nur Kunden ohne offene Termine abrechnen" — per Default AN,
+  // damit die Massenerstellung dieselbe Menge trifft wie die Karten-Gruppierung
+  // „Bereit zum Abrechnen". AUS = alle berechtigten Kunden. Die Zähler leiten
+  // sich aus derselben reinen SSoT (`hasOpenAppointments`) ab, die auch der
+  // Server-Filter nutzt — so können Dialog-Auswahl und Liste nie divergieren.
+  const [readyOnly, setReadyOnly] = useState(true);
 
-  // Task #1771: Auf die gewählte Reifegruppe eingeschränkte Kundenmenge. „ready"
-  // = nur Kunden ohne offene Termine, „open" = nur Kunden mit offenen Terminen,
-  // „all" = alle. Nutzt dieselbe reine SSoT (`hasOpenAppointments`) wie die
-  // Karte „Noch zu erstellen" UND der Server-Filter — keine zweite Regel. Alle
-  // Zähler unten leiten sich aus dieser Menge ab.
-  const scopedCustomers = useMemo(() => {
-    const list = customers ?? [];
-    if (maturityScope === "ready") return list.filter((c) => !hasOpenAppointments(c));
-    if (maturityScope === "open") return list.filter((c) => hasOpenAppointments(c));
-    return list;
-  }, [customers, maturityScope]);
-
-  const totalCount = scopedCustomers.length;
-  const incompleteCount = scopedCustomers.filter((c) => isPartiallyDocumented(c)).length;
-  const willCreate = skipIncomplete ? totalCount - incompleteCount : totalCount;
-  const willSkip = skipIncomplete ? incompleteCount : 0;
+  const totalCount = customers?.length ?? 0;
+  const readyCount = useMemo(
+    () => (customers ?? []).filter((c) => !hasOpenAppointments(c)).length,
+    [customers],
+  );
+  const willCreate = readyOnly ? readyCount : totalCount;
+  const willSkip = readyOnly ? totalCount - readyCount : 0;
 
   return (
     <Dialog
@@ -92,11 +80,6 @@ export function GenerateAllDialog({
         </DialogHeader>
 
         <div className="space-y-3 pt-2 text-sm">
-          {/* Task #1771: gewählte Reifegruppe sichtbar machen, damit klar ist,
-              welche Teilmenge der berechtigten Kunden abgerechnet wird. */}
-          <div className="text-gray-600" data-testid="text-generate-all-scope">
-            Auswahl: <span className="font-medium text-gray-800">{BILLING_MATURITY_SCOPE_LABELS[maturityScope]}</span>
-          </div>
           <div className="text-gray-700">
             Berechtigte Kunden: <span className="font-medium" data-testid="text-generate-all-count">{totalCount}</span>
           </div>
@@ -105,14 +88,14 @@ export function GenerateAllDialog({
             <div className="space-y-2">
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
-                  checked={skipIncomplete}
-                  onCheckedChange={(v) => setSkipIncomplete(v === true)}
+                  checked={readyOnly}
+                  onCheckedChange={(v) => setReadyOnly(v === true)}
                   disabled={generateAllMutation.isPending}
                   className="mt-0.5"
-                  data-testid="checkbox-skip-incomplete"
+                  data-testid="checkbox-ready-only"
                 />
                 <span className="text-gray-700">
-                  Kunden mit unvollständig dokumentierten Terminen überspringen
+                  Nur Kunden ohne offene Termine abrechnen
                 </span>
               </label>
               <div className="text-gray-600" data-testid="text-generate-all-plan">
@@ -142,7 +125,7 @@ export function GenerateAllDialog({
                     <span className="text-green-700 font-medium">{generateAllProgress.summary.created}</span> erstellt
                   </li>
                   <li>
-                    <span className="text-gray-600 font-medium">{generateAllProgress.summary.skipped}</span> übersprungen (bereits abgerechnet)
+                    <span className="text-gray-600 font-medium">{generateAllProgress.summary.skipped}</span> übersprungen
                   </li>
                   <li>
                     <span className={generateAllProgress.summary.errors > 0 ? "text-red-700 font-medium" : "text-gray-600 font-medium"}>
@@ -156,7 +139,7 @@ export function GenerateAllDialog({
               {/* Task #587: Nur fehlgeschlagene Kunden namentlich auflisten —
                   inkl. Server-`message` (Task #586). Erfolgreiche bleiben
                   in der Summary, übersprungene ebenfalls (Grund ist generisch
-                  „bereits abgerechnet"). */}
+                  „bereits abgerechnet" bzw. „noch offene Termine"). */}
               {(() => {
                 const failed = generateAllProgress.results.filter((r) => r.status === "error");
                 if (failed.length === 0) return null;
@@ -207,8 +190,8 @@ export function GenerateAllDialog({
             Schließen
           </Button>
           <Button
-            onClick={() => generateAllMutation.mutate({ skipIncomplete, maturityScope })}
-            disabled={generateAllMutation.isPending || scopedCustomers.length === 0 || !!generateAllProgress}
+            onClick={() => generateAllMutation.mutate({ readyOnly })}
+            disabled={generateAllMutation.isPending || willCreate === 0 || !!generateAllProgress}
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-confirm-generate-all"
           >

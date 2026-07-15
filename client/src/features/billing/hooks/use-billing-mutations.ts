@@ -15,7 +15,7 @@ import type {
   BulkDeleteResponse,
   BulkStatusResponse,
 } from "@shared/api";
-import type { GenerateAllResponse, BillingMaturityScope } from "../types";
+import type { GenerateAllResponse } from "../types";
 
 // Task #1380: Sammelaktionen (Löschen / Statuswechsel) verarbeiten bis zu 200
 // Rechnungen pro Aufruf. Um bei großen Auswahlen ein laufendes Fortschritts-
@@ -213,17 +213,14 @@ export function useBillingMutations({
   // Task #533: Massenerstellung — sequenzielle Erstellung aller berechtigten
   // Kunden des Monats. Fortschritt + Summary werden im Dialog angezeigt.
   const generateAllMutation = useMutation({
-    // Task #1625: `skipIncomplete` steuert, ob Kunden mit unvollständig
-    // dokumentierten Terminen übersprungen werden (Dialog-Checkbox, default an).
-    // Task #1771: `maturityScope` wählt die Reifegruppe des Split-Knopfs
-    // („all" = alle, „ready" = nur Kunden ohne offene Termine, „open" = nur mit
-    // offenen Terminen). „all" wird weggelassen ⇒ Bestandsverhalten des Servers.
+    // Task #1771: `readyOnly` steuert (Dialog-Checkbox, default an), ob NUR Kunden
+    // ohne offene (geplante) Termine abgerechnet werden („Bereit zum Abrechnen").
+    // Aus = alle berechtigten Kunden (Bestandsverhalten des Servers). Nutzt
+    // dieselbe „offene Termine"-SSoT wie die Karten-Gruppierung.
     mutationFn: async ({
-      skipIncomplete,
-      maturityScope,
+      readyOnly,
     }: {
-      skipIncomplete: boolean;
-      maturityScope: BillingMaturityScope;
+      readyOnly: boolean;
     }) => {
       setGenerateAllProgress(null);
       const result = await api.post<GenerateAllResponse>("/billing/generate-all", {
@@ -232,8 +229,7 @@ export function useBillingMutations({
         ...(payerFilter !== "alle" ? { insuranceProviderId: parseInt(payerFilter) } : {}),
         ...(dateFrom ? { dateFrom } : {}),
         ...(dateTo ? { dateTo } : {}),
-        skipIncomplete,
-        ...(maturityScope !== "all" ? { maturityScope } : {}),
+        readyOnly,
       });
       return unwrapResult(result);
     },

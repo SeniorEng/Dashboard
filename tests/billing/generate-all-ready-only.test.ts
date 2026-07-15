@@ -1,24 +1,28 @@
 import { validSignatureDataUrl } from "../helpers/valid-signature";
 /**
- * Massenerstellung — „unvollständig dokumentierte Kunden überspringen"
- * (Task #1627, sichert Task #1625 ab)
+ * Massenerstellung — „nur Kunden ohne offene Termine abrechnen" (Task #1771)
  *
- * Task #1625 hat der Massenerstellung (`POST /api/billing/generate-all`) die
- * optionale Server-Option `skipIncomplete` gegeben: Kunden, deren im Zeitraum
- * dokumentierte (`completed`) Termine nicht vollständig durch aktive
- * Leistungsnachweise abgedeckt sind, werden NICHT abgerechnet, sondern als
- * „übersprungen" mit der Meldung „Nicht vollständig dokumentiert" gemeldet.
+ * Der Dialog „Alle erstellen" hat GENAU EINE Checkbox `readyOnly`
+ * (`POST /api/billing/generate-all`, Feld `readyOnly`), per Default AN:
+ *   - readyOnly=true  → NUR Kunden OHNE offene (geplante) Termine werden
+ *     abgerechnet; Kunden mit noch offenen Terminen werden NICHT abgerechnet,
+ *     sondern als „übersprungen" mit der Meldung „Noch offene Termine" gemeldet.
+ *   - readyOnly weggelassen/false → ALLE berechtigten Kunden (mit signiertem LN)
+ *     werden abgerechnet (Bestandsverhalten).
  *
- * Bisher gab es KEINEN automatischen Test, der garantiert, dass
- *   (a) vollständig dokumentierte Kunden trotzdem abgerechnet werden,
- *   (b) NUR die partiell dokumentierten (dokumentiert > abgedeckt) übersprungen
- *       werden — und zwar mit exakt dieser Meldung,
- *   (c) Kunden ohne dokumentierte Termine im Zeitraum davon unberührt bleiben,
- * und dass die Skip-Menge aus DERSELBEN Abdeckungs-Berechnung stammt wie der
- * „Nur X/Y dokumentierte Termine"-Hinweis in `/billing/eligible-customers`
- * (`getDocumentationCoverageByCustomer` + `isPartiallyDocumented`). Eine
- * Regression hier würde entweder legitime Rechnungen still fallenlassen oder
- * gültige Kunden fälschlich überspringen.
+ * Damit trifft die Massenerstellung DIESELBE Menge wie die Karten-Gruppierung
+ * „Bereit zum Abrechnen" auf der Abrechnungsseite — beide leiten „offen?" aus
+ * DERSELBEN SSoT ab (`getOpenAppointmentCountByCustomer` bzw.
+ * `hasOpenAppointments`, FINAL_APPOINTMENT_STATUSES). Dieser Test sichert ab:
+ *   (a) ein READY-Kunde (dokumentiert+signiert, KEIN offener Termin) wird bei
+ *       readyOnly=true trotzdem abgerechnet,
+ *   (b) ein OPEN-Kunde (dokumentiert+signierter LN, ABER zusätzlich ein offener
+ *       geplanter Termin im Monat) wird bei readyOnly=true übersprungen — mit
+ *       exakt dieser Meldung,
+ *   (c) derselbe OPEN-Kunde wird ohne readyOnly abgerechnet (der abgedeckte
+ *       Termin wird berechnet, der offene ignoriert).
+ * Eine Regression würde entweder legitime Rechnungen still fallenlassen oder
+ * Kunden mit offenen Terminen fälschlich mit-abrechnen.
  *
  * ISOLATION: `generate-all` läuft global über alle Kunden mit signiertem LN im
  * Monat (nur optional nach Pflegekasse gefiltert). Wir verwenden daher
@@ -95,7 +99,7 @@ async function createApptInDayRange(
         customerId,
         date: dateStr,
         scheduledStart: time,
-        notes: `SKI-${tag}-${uniqueId()}`,
+        notes: `RO-${tag}-${uniqueId()}`,
         assignedEmployeeId: auth.user.id,
         services: [{ serviceId: hwServiceId, durationMinutes }],
       });
@@ -164,7 +168,7 @@ async function createAndSignServiceRecord(
 /** Legt einen Selbstzahler-Kunden an und weist den Test-Admin zu. */
 async function createSelbstzahlerCustomer(tag: string): Promise<number> {
   const res = await apiPost<any>("/api/admin/customers", {
-    vorname: "SKI",
+    vorname: "RO",
     nachname: `Privat-${tag}-${uniqueId()}`,
     geburtsdatum: "1942-03-10",
     email: `ski-${tag}-${uniqueId()}@test.local`,
@@ -181,7 +185,7 @@ async function createSelbstzahlerCustomer(tag: string): Promise<number> {
         contactType: "familie",
         isPrimary: true,
         vorname: "Kontakt",
-        nachname: "SKI",
+        nachname: "RO",
         mobilnummer: "+4917600000010",
       },
     ],
@@ -219,9 +223,9 @@ async function eligibleRowFor(customerId: number): Promise<EligibleRow | undefin
 
 type GenResult = { customerId: number; status: string; message?: string; invoiceCount?: number };
 
-async function generateAll(skipIncomplete?: boolean): Promise<GenResult[]> {
+async function generateAll(readyOnly?: boolean): Promise<GenResult[]> {
   const body: Record<string, any> = { billingMonth: BILLING_MONTH, billingYear: BILLING_YEAR };
-  if (skipIncomplete !== undefined) body.skipIncomplete = skipIncomplete;
+  if (readyOnly !== undefined) body.readyOnly = readyOnly;
   const res = await apiPost<any>("/api/billing/generate-all", body);
   if (res.status !== 200) {
     throw new Error(`generate-all failed: ${res.status} ${JSON.stringify(res.data)}`);
@@ -233,7 +237,7 @@ function resultFor(results: GenResult[], customerId: number): GenResult | undefi
   return results.find((r) => r.customerId === customerId);
 }
 
-const INCOMPLETE_MSG = "Nicht vollständig dokumentiert";
+const OPEN_MSG = "Noch offene Termine";
 
 // ---------- Lifecycle ----------
 
@@ -245,7 +249,7 @@ beforeAll(async () => {
   if (!hw) throw new Error("Pflicht-Service hauswirtschaft fehlt in der Test-DB");
   hwServiceId = hw.id;
 
-  const emp = await createTestEmployee({ nachnamePrefix: "TestSKI" });
+  const emp = await createTestEmployee({ nachnamePrefix: "TestRO" });
   testEmployeeId = emp.id;
 });
 
@@ -261,106 +265,91 @@ afterAll(async () => {
 
 // ---------------------------------------------------------------------------
 
-describe("SKI: generate-all skipIncomplete überspringt nur partiell dokumentierte Kunden", () => {
-  let fullCustomerId: number;    // (a) vollständig dokumentiert (LN deckt alle Termine)
-  let partialCustomerId: number; // (b) partiell dokumentiert (LN deckt nur 1 von 2)
-  let noneCustomerId: number;    // (c) kein dokumentierter Termin im Zeitraum
+describe("RO: generate-all readyOnly rechnet nur Kunden OHNE offene Termine ab", () => {
+  let readyCustomerId: number; // (a) dokumentiert+signiert, KEIN offener Termin
+  let openCustomerId: number;  // (b) dokumentiert+signierter LN + zusätzl. offener Termin
 
   beforeAll(async () => {
-    // (a) Vollständig dokumentiert: zwei dokumentierte Termine, ein LN deckt BEIDE.
-    fullCustomerId = await createSelbstzahlerCustomer("full");
-    const fullEarly = await createApptInDayRange(fullCustomerId, 30, 1, 14, "full-early");
-    const fullLate = await createApptInDayRange(fullCustomerId, 30, 15, LAST_DAY, "full-late");
-    await documentAppointment(fullEarly.id, fullEarly.time, 30, "full-early");
-    await documentAppointment(fullLate.id, fullLate.time, 30, "full-late");
-    await createAndSignServiceRecord(fullCustomerId); // ohne Auswahl → deckt beide
+    // (a) READY: ein dokumentierter Termin, LN deckt ihn ab, KEIN offener Termin.
+    readyCustomerId = await createSelbstzahlerCustomer("ready");
+    const readyAppt = await createApptInDayRange(readyCustomerId, 30, 1, 14, "ready");
+    await documentAppointment(readyAppt.id, readyAppt.time, 30, "ready");
+    await createAndSignServiceRecord(readyCustomerId); // deckt den einen Termin
 
-    // (b) Partiell dokumentiert: zwei dokumentierte Termine, LN deckt NUR den frühen.
-    partialCustomerId = await createSelbstzahlerCustomer("partial");
-    const partEarly = await createApptInDayRange(partialCustomerId, 30, 1, 14, "part-early");
-    const partLate = await createApptInDayRange(partialCustomerId, 30, 15, LAST_DAY, "part-late");
-    await documentAppointment(partEarly.id, partEarly.time, 30, "part-early");
-    await documentAppointment(partLate.id, partLate.time, 30, "part-late");
-    await createAndSignServiceRecord(partialCustomerId, [partEarly.id]); // nur 1 von 2
-
-    // (c) Kein dokumentierter Termin: nur ein geplanter (undokumentierter)
-    // Termin, kein Leistungsnachweis → kein Abrechnungs-Kandidat.
-    noneCustomerId = await createSelbstzahlerCustomer("none");
-    await createApptInDayRange(noneCustomerId, 30, 1, 14, "none-scheduled");
+    // (b) OPEN: ERST einen Termin dokumentieren + signierten LN erstellen (macht
+    // den Kunden zum Abrechnungs-Kandidaten), DANACH einen zusätzlichen geplanten
+    // (undokumentierten) Termin anlegen → offener Termin im Monat.
+    openCustomerId = await createSelbstzahlerCustomer("open");
+    const openEarly = await createApptInDayRange(openCustomerId, 30, 1, 14, "open-early");
+    await documentAppointment(openEarly.id, openEarly.time, 30, "open-early");
+    await createAndSignServiceRecord(openCustomerId, [openEarly.id]); // deckt den frühen
+    // Zusätzlicher geplanter Termin (NICHT dokumentiert) → offener Termin im Monat.
+    await createApptInDayRange(openCustomerId, 30, 15, LAST_DAY, "open-late");
   });
 
-  it("SKI-1 — /eligible-customers spiegelt die Abdeckung: (a) vollständig, (b) partiell, (c) kein Kandidat", async () => {
-    const full = await eligibleRowFor(fullCustomerId);
-    expect(full).toBeDefined();
-    expect(full!.completedAppointments).toBe(2);
-    expect(full!.coveredAppointments).toBe(2);
-    // Vollständig ⇒ NICHT partiell (completed === covered).
-    expect(full!.coveredAppointments).toBe(full!.completedAppointments);
+  it("RO-1 — /eligible-customers listet beide Kunden als Kandidaten (signierter LN im Monat)", async () => {
+    const ready = await eligibleRowFor(readyCustomerId);
+    expect(ready).toBeDefined();
+    expect(ready!.completedAppointments).toBe(1);
+    expect(ready!.coveredAppointments).toBe(1);
 
-    const partial = await eligibleRowFor(partialCustomerId);
-    expect(partial).toBeDefined();
-    expect(partial!.completedAppointments).toBe(2);
-    expect(partial!.coveredAppointments).toBe(1);
-    // Partiell ⇒ dokumentiert > abgedeckt (genau das Signal von isPartiallyDocumented).
-    expect(partial!.completedAppointments).toBeGreaterThan(partial!.coveredAppointments);
-
-    // (c) hat keinen signierten LN und keinen dokumentierten Termin → kein Kandidat.
-    const none = await eligibleRowFor(noneCustomerId);
-    expect(none).toBeUndefined();
+    // Der OPEN-Kunde hat GENAU EINEN dokumentierten (abgedeckten) Termin; der
+    // zusätzliche geplante Termin ist NICHT dokumentiert (taucht hier nicht als
+    // completed auf) — er ist der offene Termin, der den Skip auslöst.
+    const open = await eligibleRowFor(openCustomerId);
+    expect(open).toBeDefined();
+    expect(open!.completedAppointments).toBe(1);
+    expect(open!.coveredAppointments).toBe(1);
   });
 
-  it("SKI-2 — skipIncomplete=true: (b) uebersprungen mit Meldung, (a) erstellt, (c) unberuehrt", async () => {
+  it("RO-2 — readyOnly=true: READY wird erstellt, OPEN uebersprungen mit Meldung", async () => {
     const results = await generateAll(true);
 
-    // (a) vollständig dokumentiert → wird abgerechnet.
-    const full = resultFor(results, fullCustomerId);
-    expect(full).toBeDefined();
-    expect(full!.status).toBe("created");
+    // (a) READY (kein offener Termin) → wird abgerechnet.
+    const ready = resultFor(results, readyCustomerId);
+    expect(ready).toBeDefined();
+    expect(ready!.status).toBe("created");
 
-    // (b) partiell dokumentiert → übersprungen mit exakt dieser Meldung.
-    const partial = resultFor(results, partialCustomerId);
-    expect(partial).toBeDefined();
-    expect(partial!.status).toBe("skipped");
-    expect(partial!.message).toBe(INCOMPLETE_MSG);
+    // (b) OPEN (noch offener Termin) → übersprungen mit exakt dieser Meldung.
+    const open = resultFor(results, openCustomerId);
+    expect(open).toBeDefined();
+    expect(open!.status).toBe("skipped");
+    expect(open!.message).toBe(OPEN_MSG);
 
-    // (c) kein Kandidat → taucht überhaupt nicht auf (weder erstellt noch übersprungen).
-    expect(resultFor(results, noneCustomerId)).toBeUndefined();
-
-    // Kein anderer eigener Kunde wurde mit dieser Meldung übersprungen.
+    // Der READY-Kunde wurde NICHT fälschlich mit der offene-Termine-Meldung übersprungen.
     const wronglySkipped = results.filter(
-      (r) => r.message === INCOMPLETE_MSG && r.customerId === fullCustomerId,
+      (r) => r.message === OPEN_MSG && r.customerId === readyCustomerId,
     );
     expect(wronglySkipped).toHaveLength(0);
   });
 });
 
-describe("SKI-3: skipIncomplete weggelassen/false rechnet auch partiell dokumentierte Kunden ab", () => {
-  let partialCustomerId: number;
+describe("RO-3: generate-all ohne readyOnly rechnet auch Kunden mit offenen Terminen ab", () => {
+  let openCustomerId: number;
 
   beforeAll(async () => {
-    // Frischer partiell dokumentierter Kunde (unabhängig vom Skip-Lauf oben):
-    // zwei dokumentierte Termine, LN deckt nur den frühen.
-    partialCustomerId = await createSelbstzahlerCustomer("partial-nofskip");
-    const early = await createApptInDayRange(partialCustomerId, 30, 1, 14, "nofskip-early");
-    const late = await createApptInDayRange(partialCustomerId, 30, 15, LAST_DAY, "nofskip-late");
-    await documentAppointment(early.id, early.time, 30, "nofskip-early");
-    await documentAppointment(late.id, late.time, 30, "nofskip-late");
-    await createAndSignServiceRecord(partialCustomerId, [early.id]); // nur 1 von 2
+    // Frischer OPEN-Kunde (unabhängig vom Lauf oben): ein dokumentierter +
+    // signierter Termin plus ein zusätzlicher geplanter (offener) Termin.
+    openCustomerId = await createSelbstzahlerCustomer("open-noflag");
+    const early = await createApptInDayRange(openCustomerId, 30, 1, 14, "noflag-early");
+    await documentAppointment(early.id, early.time, 30, "noflag-early");
+    await createAndSignServiceRecord(openCustomerId, [early.id]); // deckt den frühen
+    await createApptInDayRange(openCustomerId, 30, 15, LAST_DAY, "noflag-late");
   });
 
-  it("SKI-3.1 — /eligible-customers meldet den Kunden als partiell dokumentiert (completed > covered)", async () => {
-    const row = await eligibleRowFor(partialCustomerId);
+  it("RO-3.1 — /eligible-customers meldet den Kunden als Kandidaten (signierter LN)", async () => {
+    const row = await eligibleRowFor(openCustomerId);
     expect(row).toBeDefined();
-    expect(row!.completedAppointments).toBeGreaterThan(row!.coveredAppointments);
+    expect(row!.coveredAppointments).toBeGreaterThan(0);
   });
 
-  it("SKI-3.2 — ohne skipIncomplete wird der partiell dokumentierte Kunde NICHT übersprungen, sondern abgerechnet", async () => {
-    const results = await generateAll(); // skipIncomplete weggelassen
-    const partial = resultFor(results, partialCustomerId);
-    expect(partial).toBeDefined();
+  it("RO-3.2 — ohne readyOnly wird der Kunde mit offenem Termin NICHT übersprungen, sondern abgerechnet", async () => {
+    const results = await generateAll(); // readyOnly weggelassen
+    const open = resultFor(results, openCustomerId);
+    expect(open).toBeDefined();
     // Er wird abgerechnet (deckt den einen abgedeckten Termin ab) …
-    expect(partial!.status).toBe("created");
-    // … und auf KEINEN Fall mit der „unvollständig"-Meldung übersprungen.
-    expect(partial!.message).not.toBe(INCOMPLETE_MSG);
+    expect(open!.status).toBe("created");
+    // … und auf KEINEN Fall mit der offene-Termine-Meldung übersprungen.
+    expect(open!.message).not.toBe(OPEN_MSG);
   });
 });

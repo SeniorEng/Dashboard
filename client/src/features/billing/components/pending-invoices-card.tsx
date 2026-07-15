@@ -13,7 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
-import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
+import { isPartiallyDocumented, hasOpenAppointments } from "@shared/domain/billing-eligibility";
 import { BILLING_TYPE_LABELS } from "../constants";
 import { getCustomerName } from "../utils";
 import { useRowCap } from "../hooks/use-row-cap";
@@ -32,10 +32,9 @@ interface PendingInvoicesCardProps {
 // Monat KEINE offenen (geplanten) Termine mehr hat — sonst sollte man mit der
 // Rechnung warten, bis alle Termine dokumentiert sind. Die Zahl der offenen
 // Termine liefert der Server aus der `FINAL_APPOINTMENT_STATUSES`-SSoT
-// (identisch zur Monatsabschluss-Readiness), hier wird nur gruppiert.
-function hasOpenAppointments(c: BillingCustomerItem): boolean {
-  return (c.openAppointments ?? 0) > 0;
-}
+// (identisch zur Monatsabschluss-Readiness); die „offen?"-Regel selbst ist die
+// gemeinsame SSoT `hasOpenAppointments` (@shared/domain/billing-eligibility),
+// die auch der „Alle erstellen"-Dialog und der Server-`readyOnly`-Skip nutzen.
 
 // Task #1743: Eine einzelne Kundenzeile. Der „noch X geplante Termine"-Hinweis
 // ist datengetrieben (erscheint nur bei offenen Terminen), sodass beide
@@ -52,9 +51,9 @@ function PendingCustomerRow({
   selectedYear: number;
 }) {
   // Partial-Signing-Hinweis: weniger Termine durch einen aktiven
-  // Leistungsnachweis abgedeckt als dokumentiert wurden. Task #1625:
-  // gemeinsame SSoT-Regel (`isPartiallyDocumented`), identisch zum Server-Skip
-  // in `/generate-all`.
+  // Leistungsnachweis abgedeckt als dokumentiert wurden. Gemeinsame SSoT-Regel
+  // `isPartiallyDocumented` (@shared/domain/billing-eligibility), dieselbe, die
+  // `/billing/eligible-customers` für den „nur X/Y dokumentiert"-Hinweis nutzt.
   const partial = isPartiallyDocumented(c);
   const openCount = c.openAppointments ?? 0;
   return (

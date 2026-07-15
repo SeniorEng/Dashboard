@@ -1,17 +1,7 @@
-import type { BillingMaturityScope } from "./types";
-
 export const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
-
-// Task #1771: Beschriftungen der Reifegruppen im Split-Knopf „Alle erstellen"
-// (Menü-Einträge + Dialog-Untertitel). Reihenfolge = Anzeigereihenfolge.
-export const BILLING_MATURITY_SCOPE_LABELS: Record<BillingMaturityScope, string> = {
-  all: "Alle berechtigten Kunden",
-  ready: 'Nur „Bereit zum Abrechnen"',
-  open: 'Nur „Noch offene Termine"',
-};
 
 export const STATUS_LABELS: Record<string, string> = {
   entwurf: "Entwurf",
