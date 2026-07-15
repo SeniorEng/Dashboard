@@ -49,6 +49,20 @@ import type {
 /** Nicht-abrechenbare Zeiterfassungs-Typen (SSoT-Spiegel aus economics.ts). */
 const NON_BILLABLE_TYPES = ["bueroarbeit", "vertrieb", "sonstiges", "krankheit", "urlaub"] as const;
 
+/**
+ * Task #1765: Overhead-Schlüssel für die (unberechnete, aber bezahlte)
+ * Erstberatungs-Arbeitszeit. Erstberatung ist im billing-scoped Überblick KEINE
+ * produktive Erlös-/Zeilen-Größe, sondern fließt als Gemeinkosten (Overhead) in
+ * `nonBillableCostCents` → die einzelne Gemeinkosten-Zeile und die Headline-
+ * Lohnkosten. Sie wird über denselben `nonBillable`/`nonBillableCost`-Kanal wie
+ * die Zeiterfassungs-Overhead-Typen geführt und folgt demselben
+ * `includeOverhead`-Gate (bei gesetztem Kassen-Filter nicht zurechenbar).
+ */
+const ERSTBERATUNG_OVERHEAD_CATEGORY = "erstberatung";
+
+/** Overhead-Kategorien, die in `buildEconomics` in die Gemeinkosten fließen. */
+const OVERHEAD_CATEGORIES = [...NON_BILLABLE_TYPES, ERSTBERATUNG_OVERHEAD_CATEGORY] as const;
+
 type Rows = Record<string, unknown>[];
 
 /**
@@ -197,6 +211,7 @@ export async function readBillingEconomics(
       WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')}
         AND s.unit_type = 'hours'
         AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
+        AND a.appointment_type <> 'Erstberatung'
         ${dApptFilter} ${empApptFilter} ${insApptFilter}
     ),
     priced AS (
@@ -239,6 +254,7 @@ export async function readBillingEconomics(
       JOIN services s ON s.id = asvc.service_id
       WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')} AND s.unit_type = 'hours'
         AND s.lohnart_kategorie IN ('hauswirtschaft','alltagsbegleitung')
+        AND a.appointment_type <> 'Erstberatung'
         ${dApptFilter} ${empApptFilter} ${insApptFilter}
       GROUP BY COALESCE(a.performed_by_employee_id, a.assigned_employee_id), s.lohnart_kategorie
     )
@@ -280,6 +296,7 @@ export async function readBillingEconomics(
   //        Kassen-Filter (sonst keiner Kasse zurechenbar).
   let nbRows: Rows = [];
   let teKmRows: Rows = [];
+  let ebRows: Rows = [];
   if (includeOverhead) {
     // Nicht-abrechenbare Zeit zum HW-Lohnsatz DER ROLLE des Mitarbeiters
     // bewertet (Spiegel von `nonBillableRateCents` = HW-Satz), pro Eintrag
@@ -310,6 +327,44 @@ export async function readBillingEconomics(
       GROUP BY t.user_id
     `);
     teKmRows = teKmRes.rows as Rows;
+
+    // Task #1765: Erstberatungs-Arbeitszeit + rollenbasierte Lohnkosten je
+    // Mitarbeiter. Erstberatung ist im billing-scoped Überblick keine produktive
+    // Zeile, sondern Overhead — die (unberechnete, aber bezahlte) Arbeitszeit
+    // wird über den Erstberatungs-Lohnsatz DER ROLLE bewertet (Spiegel von
+    // Reader 2, `server/storage/statistics/economics.ts`), pro Termin gerundet
+    // und je Mitarbeiter summiert. Partitioniert exakt komplementär zur HW/AB-
+    // Query (`a.appointment_type <> 'Erstberatung'` dort ⇔ `= 'Erstberatung'`
+    // hier), damit keine Minute doppelt oder gar nicht gezählt wird.
+    const ebRes = await db.execute(sql`
+      WITH eb AS (
+        SELECT
+          COALESCE(a.performed_by_employee_id, a.assigned_employee_id) AS employee_id,
+          COALESCE(asvc.actual_duration_minutes, asvc.planned_duration_minutes, 0) AS minutes,
+          a.date::date AS d
+        FROM appointments a
+        JOIN appointment_services asvc ON asvc.appointment_id = a.id
+        JOIN services s ON s.id = asvc.service_id
+        WHERE a.deleted_at IS NULL AND ${documentedSqlRaw('a')}
+          AND s.unit_type = 'hours'
+          AND a.appointment_type = 'Erstberatung'
+          ${dApptFilter} ${empApptFilter}
+      ),
+      priced AS (
+        SELECT eb.employee_id, eb.minutes,
+          ROUND(eb.minutes / 60.0 * ${resolvedWageCentsSql(wageRoleSql("u"), "cs", sql`eb.d`)}) AS cost_cents
+        FROM eb
+        LEFT JOIN users u ON u.id = eb.employee_id
+        LEFT JOIN services cs ON cs.code = 'erstberatung'
+      )
+      SELECT employee_id,
+        COALESCE(SUM(minutes), 0)::int AS minutes,
+        COALESCE(SUM(cost_cents), 0)::bigint AS cost
+      FROM priced
+      WHERE employee_id IS NOT NULL
+      GROUP BY employee_id
+    `);
+    ebRows = ebRes.rows as Rows;
   }
 
   // --- Mengen je Mitarbeiter zusammenführen. ----------------------------------
@@ -363,6 +418,22 @@ export async function readBillingEconomics(
     e.timeEntryKm += num(row.te_km);
     e.timeEntryKmPaidCents += num(row.te_paid);
   }
+  // Task #1765: Erstberatung als Overhead in denselben Gemeinkosten-Kanal
+  // einspeisen (Minuten + rollenbasierte Lohnkosten), damit sie in
+  // `nonBillableCostCents` → Gemeinkosten-Zeile + Headline-Lohnkosten landet.
+  for (const row of ebRows) {
+    const id = num(row.employee_id);
+    if (!id) continue;
+    const e = ensure(id);
+    e.nonBillable.set(
+      ERSTBERATUNG_OVERHEAD_CATEGORY,
+      (e.nonBillable.get(ERSTBERATUNG_OVERHEAD_CATEGORY) ?? 0) + num(row.minutes),
+    );
+    e.nonBillableCost.set(
+      ERSTBERATUNG_OVERHEAD_CATEGORY,
+      (e.nonBillableCost.get(ERSTBERATUNG_OVERHEAD_CATEGORY) ?? 0) + num(row.cost),
+    );
+  }
 
   // Task #1503: rollenbasierte Kosten (in SQL über `wageFor` je leistendem
   // Mitarbeiter aufgelöst) als Override an die SSoT übergeben — ersetzt die
@@ -381,10 +452,13 @@ export async function readBillingEconomics(
     rates,
     hauswirtschaftMinutes: agg.hwMinutes,
     alltagsbegleitungMinutes: agg.abMinutes,
-    // Erstberatung ist im billing-scoped Überblick keine Karten-/Zeilen-Größe;
-    // Gemeinkosten = ausschließlich nicht-abrechenbarer Overhead.
+    // Erstberatung ist im billing-scoped Überblick keine produktive Karten-/
+    // Zeilen-Größe: die bezahlte Arbeitszeit läuft über den Overhead-Kanal
+    // (OVERHEAD_CATEGORIES) in die Gemeinkosten, NICHT über den produktiven
+    // `erstberatungMinutes`-Pfad (der würde weder in der Gemeinkosten-Zeile
+    // auftauchen noch die Σ === KPI-Invariante halten).
     erstberatungMinutes: 0,
-    nonBillable: NON_BILLABLE_TYPES.map((category) => ({
+    nonBillable: OVERHEAD_CATEGORIES.map((category) => ({
       category,
       minutes: agg.nonBillable.get(category) ?? 0,
     })),

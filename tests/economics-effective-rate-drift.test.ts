@@ -747,3 +747,125 @@ describe("Task #1752 — Nach Mitarbeiter: Ist-Minuten-SSoT (kein Termin-Kollaps
     expect(r2(abRow.quantity / 60)).toBe(payroll!.ab);
   });
 });
+
+/**
+ * Task #1765 — Erstberatung darf den Hauswirtschaft-Satz im „Wirtschaftlichen
+ * Überblick" (Reader 1, Abrechnung) NICHT mehr verdünnen.
+ *
+ * Der Service `erstberatung` trägt `lohnart_kategorie = 'hauswirtschaft'`,
+ * `default_price_cents = 0`, `isBillable = false`. Zuvor bucketierte der billing-
+ * scoped Reader Stunden UND Erlös ALLEIN nach `lohnart_kategorie` und mischte so
+ * dokumentierte Erstberatungs-Termine (≈0 € Erlös) in die Hauswirtschaft-Zeile —
+ * ihr effektiver Erlös-Satz fiel dadurch unter den Katalog-Netto-Satz (38,00 €).
+ *
+ * Diese Suite legt einen Hauswirtschaft- UND einen Erstberatungs-Termin im
+ * SELBEN Zeitraum an (bewusst KEIN Umweg über getrennte Jahre) und prüft:
+ *   (a) HW effektiver Erlös-Satz === 3800 (nicht verdünnt),
+ *   (b) Alltagsbegleitung unverändert (42,00 €),
+ *   (c) die bezahlte Erstberatungs-Arbeitszeit steckt in den Gemeinkosten-Kosten,
+ *   (d) Σ(byService.costCents) === totals.laborCostCents (Anzeige === Buchung).
+ *
+ * Ohne geseedete `role_wage_rates` fällt die Lohn-Auflösung auf den Katalog
+ * zurück, sodass die effektiven Satz-Labels exakt den Katalog-Sätzen entsprechen.
+ */
+describe("Task #1765 — Reader 1: Erstberatung verdünnt Hauswirtschaft-Satz nicht (Gemeinkosten)", () => {
+  const YEAR = 2047; // Eigenes, weit entferntes Jahr.
+  const MONTH = 6;
+  const HW_MIN = 60;
+  const AB_MIN = 60;
+  const EB_MIN = 120; // 2 h Erstberatung im SELBEN Zeitraum wie HW.
+
+  let userId: number;
+  let customerId: number;
+  let hwServiceId = 0;
+  let abServiceId = 0;
+  let ebServiceId = 0;
+  let catalogHwPriceCents = 0;
+  let catalogAbPriceCents = 0;
+  let catalogEbRateCents = 0;
+
+  const insertAppt = async (type: string, serviceId: number, minutes: number) => {
+    const apptId = await db.execute(sql`
+      INSERT INTO appointments (
+        customer_id, created_by_user_id, assigned_employee_id, performed_by_employee_id,
+        appointment_type, date, scheduled_start, scheduled_end, duration_promised,
+        status, actual_start, actual_end, travel_origin_type, travel_kilometers,
+        travel_minutes, customer_kilometers, signed_at, signed_by_user_id
+      ) VALUES (
+        ${customerId}, ${userId}, ${userId}, ${userId},
+        ${type}, ${`${YEAR}-0${MONTH}-15`}, '09:00', '10:00', ${minutes},
+        'completed', '09:00', '10:00', 'home', 0,
+        0, 0, NOW(), ${userId}
+      )
+      RETURNING id
+    `).then((r) => (r.rows as Array<{ id: number }>)[0].id);
+    await db.execute(sql`
+      INSERT INTO appointment_services
+        (appointment_id, service_id, planned_duration_minutes, actual_duration_minutes, details)
+      VALUES (${apptId}, ${serviceId}, ${minutes}, ${minutes}, 'T1765 fixture')
+    `);
+  };
+
+  beforeAll(async () => {
+    const auth = await getAuthCookie();
+    userId = auth.user.id; // Seed-Superadmin ⇒ Lohn-Rolle 'admin'.
+
+    const customer = await createTestCustomer({ vorname: "T1765", nachname: `Overhead_${Date.now()}` });
+    customerId = customer.id as number;
+
+    const svc = await db.execute(sql`
+      SELECT code, id, COALESCE(default_price_cents, 0)::int AS price, COALESCE(employee_rate_cents, 0)::int AS rate
+      FROM services WHERE code IN ('hauswirtschaft','alltagsbegleitung','erstberatung')
+    `).then((r) => r.rows as Array<{ code: string; id: number; price: number; rate: number }>);
+    const hw = svc.find((s) => s.code === "hauswirtschaft")!;
+    const ab = svc.find((s) => s.code === "alltagsbegleitung")!;
+    const eb = svc.find((s) => s.code === "erstberatung")!;
+    hwServiceId = hw.id;
+    abServiceId = ab.id;
+    ebServiceId = eb.id;
+    catalogHwPriceCents = hw.price;
+    catalogAbPriceCents = ab.price;
+    catalogEbRateCents = eb.rate;
+
+    // HW + AB + Erstberatung im SELBEN Zeitraum (der zu behebende Regressionsfall).
+    await insertAppt("Kundentermin", hwServiceId, HW_MIN);
+    await insertAppt("Kundentermin", abServiceId, AB_MIN);
+    await insertAppt("Erstberatung", ebServiceId, EB_MIN);
+  });
+
+  afterAll(async () => {
+    await cleanupCustomer(customerId); // entfernt Termine + Leistungen (FK-Cascade)
+  });
+
+  it("(a) HW-Erlös-Satz === 38,00 € (nicht durch Erstberatung verdünnt)", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const hwRow = billing.byService.find((r) => r.key === "hauswirtschaft")!;
+    expect(hwRow.quantity).toBe(HW_MIN); // NUR HW-Minuten, keine Erstberatung.
+    expect(hwRow.revenueRateCents).toBe(3800);
+    expect(hwRow.revenueRateCents).toBe(catalogHwPriceCents);
+  });
+
+  it("(b) Alltagsbegleitung bleibt unverändert (42,00 €)", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const abRow = billing.byService.find((r) => r.key === "alltagsbegleitung")!;
+    expect(abRow.quantity).toBe(AB_MIN);
+    expect(abRow.revenueRateCents).toBe(4200);
+    expect(abRow.revenueRateCents).toBe(catalogAbPriceCents);
+  });
+
+  it("(c) Erstberatungs-Lohnkosten stecken in der Gemeinkosten-Zeile", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const gk = billing.byService.find((r) => r.key === "gemeinkosten")!;
+    // Erwartete Erstberatungs-Kosten = Katalog-Lohnsatz × Std (kein Rollen-Override).
+    const expectedEbCost = Math.round((catalogEbRateCents * EB_MIN) / 60);
+    expect(expectedEbCost).toBeGreaterThan(0);
+    expect(gk.costCents).toBe(expectedEbCost);
+    expect(gk.quantity).toBe(0); // Gemeinkosten sind eine reine Kosten-Restzeile.
+  });
+
+  it("(d) Σ(byService.costCents) === totals.laborCostCents (Anzeige === Buchung)", async () => {
+    const billing = await readBillingEconomics(YEAR, MONTH);
+    const sum = billing.byService.reduce((s, r) => s + r.costCents, 0);
+    expect(sum).toBe(billing.totals.laborCostCents);
+  });
+});
