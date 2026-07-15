@@ -15,7 +15,7 @@ import type {
   BulkDeleteResponse,
   BulkStatusResponse,
 } from "@shared/api";
-import type { GenerateAllResponse } from "../types";
+import type { GenerateAllResponse, BillingMaturityScope } from "../types";
 
 // Task #1380: Sammelaktionen (Löschen / Statuswechsel) verarbeiten bis zu 200
 // Rechnungen pro Aufruf. Um bei großen Auswahlen ein laufendes Fortschritts-
@@ -215,7 +215,16 @@ export function useBillingMutations({
   const generateAllMutation = useMutation({
     // Task #1625: `skipIncomplete` steuert, ob Kunden mit unvollständig
     // dokumentierten Terminen übersprungen werden (Dialog-Checkbox, default an).
-    mutationFn: async (skipIncomplete: boolean) => {
+    // Task #1771: `maturityScope` wählt die Reifegruppe des Split-Knopfs
+    // („all" = alle, „ready" = nur Kunden ohne offene Termine, „open" = nur mit
+    // offenen Terminen). „all" wird weggelassen ⇒ Bestandsverhalten des Servers.
+    mutationFn: async ({
+      skipIncomplete,
+      maturityScope,
+    }: {
+      skipIncomplete: boolean;
+      maturityScope: BillingMaturityScope;
+    }) => {
       setGenerateAllProgress(null);
       const result = await api.post<GenerateAllResponse>("/billing/generate-all", {
         billingMonth: selectedMonth,
@@ -224,6 +233,7 @@ export function useBillingMutations({
         ...(dateFrom ? { dateFrom } : {}),
         ...(dateTo ? { dateTo } : {}),
         skipIncomplete,
+        ...(maturityScope !== "all" ? { maturityScope } : {}),
       });
       return unwrapResult(result);
     },

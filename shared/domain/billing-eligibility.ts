@@ -82,6 +82,20 @@ export function isPartiallyDocumented(coverage: DocumentationCoverage): boolean 
   );
 }
 
+/**
+ * Task #1771 — PURE SSoT der Reifegruppierung „hat noch offene Termine?". Ein
+ * Kunde gilt als „noch offen", wenn im gewählten Monat mindestens ein offener
+ * (geplanter) Termin verbleibt. Die Zahl der offenen Termine liefert der Server
+ * aus DER EINEN `FINAL_APPOINTMENT_STATUSES`-SSoT
+ * (`getOpenAppointmentCountByCustomer`); hier wird nur die Schwelle (> 0)
+ * angewandt. Dieselbe Regel nutzen die Karte „Noch zu erstellen" (Gruppierung
+ * „Bereit zum Abrechnen" vs. „Noch offene Termine") UND der Reife-Scope im
+ * Split-Knopf „Alle erstellen", damit beide nie auseinanderlaufen.
+ */
+export function hasOpenAppointments(c: { openAppointments?: number | null }): boolean {
+  return (c.openAppointments ?? 0) > 0;
+}
+
 export type BillingEligibilityStatus = "eligible" | "blocked";
 
 /** Eingangsfakten der Klassifikation (vom Server aus denselben Readern gefüllt). */

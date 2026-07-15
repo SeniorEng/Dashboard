@@ -10,22 +10,30 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { iconSize } from "@/design-system";
 import { Layers, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { RefObject } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { BillingCustomerItem } from "@shared/api";
-import { isPartiallyDocumented } from "@shared/domain/billing-eligibility";
-import { MONTH_NAMES } from "../constants";
+import { isPartiallyDocumented, hasOpenAppointments } from "@shared/domain/billing-eligibility";
+import { MONTH_NAMES, BILLING_MATURITY_SCOPE_LABELS } from "../constants";
 import { getCustomerName } from "../utils";
-import type { GenerateAllResponse } from "../types";
+import type { GenerateAllResponse, BillingMaturityScope } from "../types";
 
 interface GenerateAllDialogProps {
   open: boolean;
   setOpen: (open: boolean) => void;
   generateAllProgress: GenerateAllResponse | null;
   setGenerateAllProgress: (progress: GenerateAllResponse | null) => void;
-  generateAllMutation: UseMutationResult<GenerateAllResponse, Error, boolean, unknown>;
+  generateAllMutation: UseMutationResult<
+    GenerateAllResponse,
+    Error,
+    { skipIncomplete: boolean; maturityScope: BillingMaturityScope },
+    unknown
+  >;
   customers: BillingCustomerItem[] | undefined;
+  // Task #1771: gewählte Reifegruppe des Split-Knopfs — steuert den Untertitel,
+  // die Zähler (nur Kunden der Gruppe) und den an den Server übergebenen Scope.
+  maturityScope: BillingMaturityScope;
   selectedMonth: number;
   selectedYear: number;
   closeButtonRef: RefObject<HTMLButtonElement | null>;
@@ -38,6 +46,7 @@ export function GenerateAllDialog({
   setGenerateAllProgress,
   generateAllMutation,
   customers,
+  maturityScope,
   selectedMonth,
   selectedYear,
   closeButtonRef,
@@ -48,8 +57,20 @@ export function GenerateAllDialog({
   // (`isPartiallyDocumented`), die auch der Server für den Skip nutzt.
   const [skipIncomplete, setSkipIncomplete] = useState(true);
 
-  const totalCount = customers?.length ?? 0;
-  const incompleteCount = customers?.filter((c) => isPartiallyDocumented(c)).length ?? 0;
+  // Task #1771: Auf die gewählte Reifegruppe eingeschränkte Kundenmenge. „ready"
+  // = nur Kunden ohne offene Termine, „open" = nur Kunden mit offenen Terminen,
+  // „all" = alle. Nutzt dieselbe reine SSoT (`hasOpenAppointments`) wie die
+  // Karte „Noch zu erstellen" UND der Server-Filter — keine zweite Regel. Alle
+  // Zähler unten leiten sich aus dieser Menge ab.
+  const scopedCustomers = useMemo(() => {
+    const list = customers ?? [];
+    if (maturityScope === "ready") return list.filter((c) => !hasOpenAppointments(c));
+    if (maturityScope === "open") return list.filter((c) => hasOpenAppointments(c));
+    return list;
+  }, [customers, maturityScope]);
+
+  const totalCount = scopedCustomers.length;
+  const incompleteCount = scopedCustomers.filter((c) => isPartiallyDocumented(c)).length;
   const willCreate = skipIncomplete ? totalCount - incompleteCount : totalCount;
   const willSkip = skipIncomplete ? incompleteCount : 0;
 
@@ -71,6 +92,11 @@ export function GenerateAllDialog({
         </DialogHeader>
 
         <div className="space-y-3 pt-2 text-sm">
+          {/* Task #1771: gewählte Reifegruppe sichtbar machen, damit klar ist,
+              welche Teilmenge der berechtigten Kunden abgerechnet wird. */}
+          <div className="text-gray-600" data-testid="text-generate-all-scope">
+            Auswahl: <span className="font-medium text-gray-800">{BILLING_MATURITY_SCOPE_LABELS[maturityScope]}</span>
+          </div>
           <div className="text-gray-700">
             Berechtigte Kunden: <span className="font-medium" data-testid="text-generate-all-count">{totalCount}</span>
           </div>
@@ -181,8 +207,8 @@ export function GenerateAllDialog({
             Schließen
           </Button>
           <Button
-            onClick={() => generateAllMutation.mutate(skipIncomplete)}
-            disabled={generateAllMutation.isPending || !customers || customers.length === 0 || !!generateAllProgress}
+            onClick={() => generateAllMutation.mutate({ skipIncomplete, maturityScope })}
+            disabled={generateAllMutation.isPending || scopedCustomers.length === 0 || !!generateAllProgress}
             className="bg-teal-600 hover:bg-teal-700 text-white"
             data-testid="button-confirm-generate-all"
           >
