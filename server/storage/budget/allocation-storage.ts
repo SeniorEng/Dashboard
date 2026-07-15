@@ -618,6 +618,15 @@ async function calculateAllocated45b(
   // anders als §45a greift hier KEIN `monthlyAmount==0`-Schutz. Echte
   // persistierte Mittel (initial_balance/carryover) ankern weiterhin
   // unabhängig vom Gate über die Fallbacks unten.
+  // Task #1766 — Herkunft des Ankers festhalten. Der `initialBalanceMonths`-
+  // `allocStart`-Shift (unten) darf die Monatsansammlung der Monate VOR einem
+  // Startwert nur dann wegschneiden, wenn der Startwert SELBST die Anker-Herkunft
+  // ist (Onboarding ohne frühere Eligibility). Liegt eine frühere Eligibility vor
+  // (Pflegegrad-Historie / Carryover / gelöschter Startwert / Fallback), akkumulieren
+  // die Monate davor weiter; die Doppelzählung des Startwert-Monats verhindert allein
+  // der `initialBalanceSet`-Skip-Set (Antje Jungnickel: Anker 01/2026, Startwert
+  // 07/2026 → 917 € statt fälschlich 131 €).
+  let anchorFromInitialBalance = false;
   const s45bEnabled = all45bSettings.some(s => s.enabled);
   const pgStart = await getEarliestCareLevelStart(customerId, d);
   if (pgStart && s45bEnabled) {
@@ -631,6 +640,7 @@ async function calculateAllocated45b(
       budgetStartDate = initialBalances.reduce((min, a) =>
         a.validFrom < min.validFrom ? a : min
       ).validFrom;
+      anchorFromInitialBalance = true;
     }
   }
 
@@ -704,7 +714,15 @@ async function calculateAllocated45b(
     .filter(a => a.source === "initial_balance" && a.month != null)
     .map(a => ({ year: a.year, month: a.month! }));
 
-  if (initialBalanceMonths.length > 0) {
+  // Task #1766 — Der Shift greift NUR NOCH, wenn der Startwert selbst die
+  // Anker-Herkunft ist (`anchorFromInitialBalance`, Onboarding ohne frühere
+  // Eligibility). Existiert eine frühere Eligibility (Pflegegrad-Historie o.Ä.),
+  // schöbe der Shift `allocStart` auf den Monat NACH dem spätesten Startwert und
+  // schnitte damit die komplette davorliegende Monatsansammlung weg (Antje: Anker
+  // 01/2026, Startwert 07/2026 → allocStart 08/2026 > Horizont 07/2026 → 0 Monate,
+  // nur 131 € statt 917 €). Die Doppelzählung des Startwert-Monats verhindert
+  // unabhängig davon der `initialBalanceSet`-Skip-Set unten.
+  if (anchorFromInitialBalance && initialBalanceMonths.length > 0) {
     let latestIbYear = 0, latestIbMonth = 0;
     for (const ib of initialBalanceMonths) {
       if (ib.year > latestIbYear || (ib.year === latestIbYear && ib.month > latestIbMonth)) {

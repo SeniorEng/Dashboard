@@ -300,8 +300,23 @@ function BudgetPot45b({
     onRefresh();
   };
 
+  // Task #1766 — Karten-Konsistenz: „zugewiesen − verbraucht (angerechnet) =
+  // verfügbar" muss auf der Karte aufgehen. `totalUsedCents` ist die ROHE
+  // Verbrauchs-Summe (inkl. Buchungen gegen einen inzwischen verfallenen
+  // Übertrag), während `availableCents` diesen verfallenen Verbrauch bereits
+  // symmetrisch herausrechnet (#1340). Ohne Trennung zeigte die Karte
+  // „Davon 1.226,74 € verbraucht" bei nur 917 € zugewiesen — verwirrend.
+  // Der angerechnete Verbrauch ist daher „zugewiesen − verfügbar"; die
+  // Differenz zur rohen Summe ist der Verbrauch aus verfallenem Übertrag.
+  // Er wird nur als eigene Zeile ausgewiesen, wenn er real existiert
+  // (verfügbar > 0 UND roh > angerechnet — nur bei tatsächlicher Exklusion
+  // möglich, nicht bei echter Budget-Überschreitung).
+  const attributedUsedCents = Math.max(0, data.totalAllocatedCents - data.availableCents);
+  const expiredUsedCents = data.totalUsedCents - attributedUsedCents;
+  const hasExpiredUsage = data.availableCents > 0 && expiredUsedCents > 0;
+
   const usagePercent = data.totalAllocatedCents > 0
-    ? Math.min(100, (data.totalUsedCents / data.totalAllocatedCents) * 100)
+    ? Math.min(100, (attributedUsedCents / data.totalAllocatedCents) * 100)
     : 0;
 
   const plannedPercent = data.totalAllocatedCents > 0
@@ -386,9 +401,14 @@ function BudgetPot45b({
             <p className="text-2xl font-bold text-blue-700 mt-1" data-testid="text-45b-allocated">
               {formatCurrency(data.totalAllocatedCents)}
             </p>
-            <p className="text-xs text-gray-500 mt-2">
-              Davon {formatCurrency(data.totalUsedCents)} verbraucht
+            <p className="text-xs text-gray-500 mt-2" data-testid="text-45b-used-attributed">
+              Davon {formatCurrency(attributedUsedCents)} verbraucht
             </p>
+            {hasExpiredUsage && (
+              <p className="text-xs text-amber-600 mt-1" data-testid="text-45b-used-expired">
+                + {formatCurrency(expiredUsedCents)} aus verfallenem Übertrag
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
