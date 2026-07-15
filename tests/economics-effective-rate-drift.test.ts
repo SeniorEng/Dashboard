@@ -868,4 +868,59 @@ describe("Task #1765 — Reader 1: Erstberatung verdünnt Hauswirtschaft-Satz ni
     const sum = billing.byService.reduce((s, r) => s + r.costCents, 0);
     expect(sum).toBe(billing.totals.laborCostCents);
   });
+
+  /**
+   * Task #1767 — Die beiden statistik-scoped Reader (Reader 2 = Wirtschaftlicher
+   * Überblick, Reader 3 = Kalkulationsgrundlage/Performance) MÜSSEN denselben
+   * (korrigierten) Hauswirtschaft-Satz zeigen wie Reader 1 (oben, Task #1765),
+   * damit die Ansichten nicht widersprüchlich werden. Sie klassifizieren
+   * Erstberatung — obwohl deren Leistung `lohnart_kategorie = 'hauswirtschaft'`
+   * trägt — bereits über `appointment_type = 'Erstberatung'` in eine EIGENE
+   * Kategorie (`erstberatung`), sodass die HW-Kategorie nicht verdünnt wird.
+   *
+   * Der Unterschied zu Reader 1 ist bewusst und rein DARSTELLEND: Reader 1 führt
+   * die bezahlte Erstberatungs-Arbeitszeit als Gemeinkosten (Overhead), Reader 2
+   * und 3 als eigene produktive Zeile — in ALLEN dreien bleibt der HW-Satz aber
+   * unverdünnt (Anzeige === Buchung).
+   */
+  it("(e) Reader 2 (Statistik): HW-Minuten unverdünnt + Erstberatung eigene Zeile", async () => {
+    const { economics } = await getEconomics(resolvePeriod({ year: YEAR }));
+    const p = economics.personnel;
+    // HW-Kategorie enthält NUR den HW-Termin, nicht die Erstberatung.
+    expect(p.hauswirtschaft.minutes).toBe(HW_MIN);
+    expect(p.alltagsbegleitung.minutes).toBe(AB_MIN);
+    // Erstberatung ist hier eine EIGENE produktive Zeile (intended difference).
+    expect(p.erstberatung.minutes).toBe(EB_MIN);
+    // HW-Kosten-Satz (Kosten/h) = Katalog-HW-Lohnsatz (kein Rollen-Override) =
+    // 16,00 €/h, NICHT durch die Erstberatungs-Stunden verdünnt.
+    expect(Math.round((p.hauswirtschaft.costCents * 60) / p.hauswirtschaft.minutes)).toBe(1600);
+  });
+
+  it("(f) Reader 3 (Performance): HW-Erlös-Satz === 38,00 € (nicht verdünnt), Erstberatung eigene Zeile", async () => {
+    const perf = await getPerformanceStats(resolvePeriod({ year: YEAR }));
+    const hwRow = perf.profitability.servicePrices.find((s) => s.code === "hauswirtschaft")!;
+    expect(hwRow.priceCents).toBe(3800);
+    expect(hwRow.priceCents).toBe(catalogHwPriceCents);
+    // Erstberatung erscheint als eigene Zeile (default_price 0 ⇒ 0 €/h Erlös).
+    const ebRow = perf.profitability.servicePrices.find((s) => s.code === "erstberatung")!;
+    expect(ebRow.priceCents).toBe(0);
+    expect(ebRow.rateCents).toBe(catalogEbRateCents);
+  });
+
+  it("(g) Alle drei Reader stimmen im HW-Erlös-Satz überein (38,00 €)", async () => {
+    const [billing, { economics }, perf] = await Promise.all([
+      readBillingEconomics(YEAR, MONTH),
+      getEconomics(resolvePeriod({ year: YEAR })),
+      getPerformanceStats(resolvePeriod({ year: YEAR })),
+    ]);
+    const r1 = billing.byService.find((r) => r.key === "hauswirtschaft")!.revenueRateCents;
+    // Reader 2 trägt keinen per-Kategorie-Erlös-Satz; der HW-Erlös-Satz von
+    // Reader 3 stammt aus DEMSELBEN getEconomics-Aufruf (personnel.hauswirtschaft
+    // + categoryRevenue.hw), daher genügt der Vergleich R1 === R3.
+    void economics;
+    const r3 = perf.profitability.servicePrices.find((s) => s.code === "hauswirtschaft")!.priceCents;
+    expect(r1).toBe(3800);
+    expect(r3).toBe(3800);
+    expect(r1).toBe(r3);
+  });
 });
