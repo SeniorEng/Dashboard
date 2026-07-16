@@ -55,8 +55,18 @@ export function GenerateAllDialog({
   const [readyOnly, setReadyOnly] = useState(true);
 
   const totalCount = customers?.length ?? 0;
+  // Task #1775: Der (N)-Zähler „werden erstellt" darf nur die Kunden zählen, die
+  // tatsächlich abgerechnet werden — also solche ohne offene Termine UND mit
+  // erfülltem Unterschrifts-Gate (`eligibility.status === "eligible"`). Das
+  // entspricht der Karten-Gruppe „Bereit zum Abrechnen". Signatur-blockierte
+  // Pflegekasse-Kunden (`customer_signature_required`) haben keine offenen
+  // Termine mehr, werden aber server-seitig nicht abgerechnet — sie zählten
+  // vorher fälschlich mit und ließen den Zähler mehr versprechen, als entsteht.
   const readyCount = useMemo(
-    () => (customers ?? []).filter((c) => !hasOpenAppointments(c)).length,
+    () =>
+      (customers ?? []).filter(
+        (c) => !hasOpenAppointments(c) && c.eligibility.status === "eligible",
+      ).length,
     [customers],
   );
   const willCreate = readyOnly ? readyCount : totalCount;
