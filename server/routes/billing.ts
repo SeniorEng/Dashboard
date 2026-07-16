@@ -14,6 +14,7 @@ import {
   type BudgetSplitForAppointment,
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
+import { classifyBillingEligibility, isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
@@ -32,6 +33,7 @@ import {
   invoices as invoicesTable,
   invoiceLineItems,
   monthlyServiceRecords,
+  serviceRecordAppointments,
 } from "@shared/schema";
 import type { Invoice, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
@@ -332,6 +334,7 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
   const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
     id: monthlyServiceRecords.id,
     customerId: monthlyServiceRecords.customerId,
+    status: monthlyServiceRecords.status,
   })
     .where(and(
       eq(monthlyServiceRecords.year, year),
@@ -465,12 +468,101 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     filteredCustomerRows = filteredCustomerRows.filter(c => !alreadyInvoiced.has(c.id));
   }
 
-  const eligibleCustomers: BillingCustomerItem[] = filteredCustomerRows.map(c => ({
-    ...c,
-    completedAppointments: coverageByCustomer.get(c.id)?.completedAppointments ?? 0,
-    coveredAppointments: coverageByCustomer.get(c.id)?.coveredAppointments ?? 0,
-    openAppointments: openByCustomer.get(c.id) ?? 0,
-  }));
+  // Task #1774 — Abrechnungs-Berechtigung pro Kunde aus DERSELBEN SSoT, die auch
+  // `buildInvoiceDraft` nutzt (`classifyBillingEligibility`). Die Anzeige darf
+  // NICHT allein anhand „keine offenen Termine" gruppieren — das kassen-/zahler-
+  // abhängige Unterschrifts-Gate (Pflegekasse verlangt Kundenunterschrift =
+  // `completed`, reine `employee_signed`-LNs genügen NICHT) muss mitentscheiden.
+  // Wir spiegeln die Fakten des Generate-Pfads: LN-Status je Kunde, Termine unter
+  // strikt-signierten LNs und davon die noch nicht abgerechneten. Keine zweite
+  // Kopie der Regel — nur Faktenbeschaffung + `classifyBillingEligibility`.
+  const finalIds = filteredCustomerRows.map(c => c.id);
+  const billingTypeById = new Map(customerRows.map(c => [c.id, c.billingType]));
+
+  // LN-Status je Kunde (loser Filter completed/employee_signed reicht: der
+  // strikte Signatur-Filter in der SSoT ist eine Teilmenge davon).
+  const statusesByCustomer = new Map<number, string[]>();
+  for (const r of signedRecords) {
+    if (!finalIds.includes(r.customerId)) continue;
+    const arr = statusesByCustomer.get(r.customerId) ?? [];
+    arr.push(r.status);
+    statusesByCustomer.set(r.customerId, arr);
+  }
+
+  // Strikt-signierte LN-IDs je Kunde (identische Akzeptanz-Regel wie
+  // `buildInvoiceDraft`) — Basis für die Termin-Zählung.
+  const strictSrToCustomer = new Map<number, number>();
+  for (const r of signedRecords) {
+    if (!finalIds.includes(r.customerId)) continue;
+    if (isServiceRecordSignedForBilling(billingTypeById.get(r.customerId), r.status)) {
+      strictSrToCustomer.set(r.id, r.customerId);
+    }
+  }
+  const strictSrIds = Array.from(strictSrToCustomer.keys());
+
+  // Termine unter strikt-signierten LNs (spiegelt
+  // `getAppointmentIdsFromServiceRecords` — kein activeOnly, keine DISTINCT).
+  const signedApptByCustomer = new Map<number, Set<number>>();
+  if (strictSrIds.length > 0) {
+    const srApptRows = await db.select({
+      serviceRecordId: serviceRecordAppointments.serviceRecordId,
+      appointmentId: serviceRecordAppointments.appointmentId,
+    })
+      .from(serviceRecordAppointments)
+      .where(inArray(serviceRecordAppointments.serviceRecordId, strictSrIds));
+    for (const row of srApptRows) {
+      const cid = strictSrToCustomer.get(row.serviceRecordId);
+      if (cid == null) continue;
+      const set = signedApptByCustomer.get(cid) ?? new Set<number>();
+      set.add(row.appointmentId);
+      signedApptByCustomer.set(cid, set);
+    }
+  }
+
+  // Bereits abgerechnete Termine je Kunde (spiegelt
+  // `getAlreadyInvoicedAppointmentIds`, batch über alle Kandidaten).
+  const invoicedApptByCustomer = new Map<number, Set<number>>();
+  if (finalIds.length > 0) {
+    const invoicedRows = await db.select({
+      customerId: invoicesTable.customerId,
+      appointmentId: invoiceLineItems.appointmentId,
+    })
+      .from(invoiceLineItems)
+      .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+      .where(and(
+        inArray(invoicesTable.customerId, finalIds),
+        eq(invoicesTable.billingYear, year),
+        eq(invoicesTable.billingMonth, month),
+        ne(invoicesTable.status, "storniert"),
+        ne(invoicesTable.invoiceType, "stornorechnung"),
+      ));
+    for (const row of invoicedRows) {
+      if (row.customerId == null || row.appointmentId == null) continue;
+      const set = invoicedApptByCustomer.get(row.customerId) ?? new Set<number>();
+      set.add(row.appointmentId);
+      invoicedApptByCustomer.set(row.customerId, set);
+    }
+  }
+
+  const eligibleCustomers: BillingCustomerItem[] = filteredCustomerRows.map(c => {
+    const signedAppts = signedApptByCustomer.get(c.id) ?? new Set<number>();
+    const invoicedAppts = invoicedApptByCustomer.get(c.id) ?? new Set<number>();
+    let unbilled = 0;
+    for (const id of signedAppts) if (!invoicedAppts.has(id)) unbilled++;
+    const { status, reason } = classifyBillingEligibility({
+      billingType: c.billingType,
+      serviceRecordStatuses: statusesByCustomer.get(c.id) ?? [],
+      signedAppointmentCount: signedAppts.size,
+      unbilledAppointmentCount: unbilled,
+    });
+    return {
+      ...c,
+      completedAppointments: coverageByCustomer.get(c.id)?.completedAppointments ?? 0,
+      coveredAppointments: coverageByCustomer.get(c.id)?.coveredAppointments ?? 0,
+      openAppointments: openByCustomer.get(c.id) ?? 0,
+      eligibility: { status, reason },
+    };
+  });
 
   res.json(eligibleCustomers);
 }));

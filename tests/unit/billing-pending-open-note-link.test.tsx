@@ -29,6 +29,7 @@ const BASE_CUSTOMER: Omit<BillingCustomerItem, "id"> = {
   completedAppointments: 0,
   coveredAppointments: 0,
   openAppointments: 0,
+  eligibility: { status: "eligible", reason: null },
 };
 
 function makeCustomer(

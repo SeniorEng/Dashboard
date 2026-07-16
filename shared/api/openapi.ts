@@ -355,6 +355,17 @@ export const BillingCustomerItemSchema = component(
     completedAppointments: z.number().int(),
     coveredAppointments: z.number().int(),
     openAppointments: z.number().int(),
+    eligibility: z.object({
+      status: z.enum(["eligible", "blocked"]),
+      reason: z
+        .enum([
+          "customer_signature_required",
+          "not_signed",
+          "no_appointments",
+          "already_billed",
+        ])
+        .nullable(),
+    }),
   }),
 );
 

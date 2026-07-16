@@ -11,6 +11,7 @@ import {
   ChevronDown,
   CalendarClock,
   ChevronRight,
+  PenLine,
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
 import { isPartiallyDocumented, hasOpenAppointments } from "@shared/domain/billing-eligibility";
@@ -229,8 +230,23 @@ export function PendingInvoicesCard({
   const [open, setOpen] = useState(false);
 
   const all = customers ?? [];
-  const readyCustomers = all.filter((c) => !hasOpenAppointments(c));
+  // Task #1774: Reihenfolge der Reifegruppen —
+  //  1. „Noch offene Termine": im Monat sind noch geplante Termine offen.
+  //  2. „Wartet auf Kundenunterschrift": keine offenen Termine mehr, aber das
+  //     kassen-/zahlerabhängige Unterschrifts-Gate ist NICHT erfüllt (Pflegekasse
+  //     ohne Kundenunterschrift, nur `employee_signed`). Kommt aus DERSELBEN SSoT
+  //     wie der Erstellungs-Pfad (`classifyBillingEligibility`), sodass Anzeige
+  //     und tatsächliche Erstellung nicht auseinanderdriften.
+  //  3. „Bereit zum Abrechnen": tatsächlich abrechenbar (eligible) UND keine
+  //     offenen Termine mehr.
   const openCustomers = all.filter((c) => hasOpenAppointments(c));
+  const notOpen = all.filter((c) => !hasOpenAppointments(c));
+  const signatureBlockedCustomers = notOpen.filter(
+    (c) => c.eligibility.reason === "customer_signature_required",
+  );
+  const readyCustomers = notOpen.filter(
+    (c) => c.eligibility.status === "eligible",
+  );
 
   return (
     <Card className="mb-6" data-testid="card-pending-invoices">
@@ -294,6 +310,16 @@ export function PendingInvoicesCard({
                   customers={readyCustomers}
                   onCreateForCustomer={onCreateForCustomer}
                   testIdKey="ready"
+                  selectedMonth={selectedMonth}
+                  selectedYear={selectedYear}
+                />
+                <PendingSection
+                  title="Wartet auf Kundenunterschrift"
+                  icon={<PenLine className={`${iconSize.sm} text-amber-600`} />}
+                  headerClassName="text-amber-700"
+                  customers={signatureBlockedCustomers}
+                  onCreateForCustomer={onCreateForCustomer}
+                  testIdKey="signature"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}
                 />

@@ -1,4 +1,5 @@
 import type { InvoicePotKey } from "../domain/budget-invoice-split";
+import type { BillingEligibilityStatus, BillingBlockReason } from "../domain/billing-eligibility";
 
 export interface BillingCustomerItem {
   id: number;
@@ -21,6 +22,18 @@ export interface BillingCustomerItem {
   // „Noch zu erstellen" danach in „Bereit zum Abrechnen" (=0) und „Noch offene
   // Termine" (>0); der Kunde bleibt in beiden Fällen sichtbar.
   openAppointments: number;
+  // Task #1774: Abrechnungs-Berechtigung aus DERSELBEN SSoT
+  // (`classifyBillingEligibility` in `shared/domain/billing-eligibility.ts`), die
+  // auch der Erstellungs-Pfad (`buildInvoiceDraft`) nutzt. `status` = "eligible"
+  // (tatsächlich abrechenbar) oder "blocked"; `reason` nennt den maschinen-
+  // lesbaren Grund (insb. `customer_signature_required`, wenn bei Pflegekasse nur
+  // eine Mitarbeiter-Unterschrift, aber keine Kundenunterschrift vorliegt). Das
+  // Frontend hält damit „Bereit zum Abrechnen" wahrheitsgemäß (nur eligible) und
+  // weist unterschrifts-blockierte Kunden separat aus — ohne zweite Reiferegel.
+  eligibility: {
+    status: BillingEligibilityStatus;
+    reason: BillingBlockReason | null;
+  };
 }
 
 export interface InvoiceItem {

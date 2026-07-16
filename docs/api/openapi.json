@@ -784,6 +784,32 @@
           },
           "openAppointments": {
             "type": "integer"
+          },
+          "eligibility": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "eligible",
+                  "blocked"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "nullable": true,
+                "enum": [
+                  "customer_signature_required",
+                  "not_signed",
+                  "no_appointments",
+                  "already_billed"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "reason"
+            ]
           }
         },
         "required": [
@@ -795,7 +821,8 @@
           "status",
           "completedAppointments",
           "coveredAppointments",
-          "openAppointments"
+          "openAppointments",
+          "eligibility"
         ]
       },
       "InvoiceItem": {
