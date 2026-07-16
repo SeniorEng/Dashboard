@@ -14,6 +14,7 @@ import { db } from "../lib/db";
 import { readUnifiedBudgetAvailability, type CappedBudgetPot } from "../storage/budget/unified-reader";
 import { loadCustomerPriceContext } from "../storage/pricing/price-for";
 import { monthlyServiceRecordsRepo, appointmentsRepo, customersRepo } from "../repos";
+import { isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
 
 export interface BuildLineItem extends Record<string, unknown> {
   appointmentId: number;
@@ -73,6 +74,125 @@ export async function getBlockingDraftInvoices(customerId: number, billingYear: 
       ne(invoicesTable.invoiceType, "stornorechnung"),
     ))
     .orderBy(desc(invoicesTable.createdAt));
+}
+
+/**
+ * Task #1790 — EINE SSoT: welche Kunden haben im Monat ≥1 dokumentierten
+ * (`completed`), strikt signierten, noch NICHT abgerechneten Termin?
+ *
+ * Spiegelt die Termin-genaue Idempotenz von `getAlreadyInvoicedAppointmentIds`
+ * und der process-health-„noch abzurechnen"-Sicht: pro Kunde die Termine unter
+ * strikt-signierten Leistungsnachweisen (`isServiceRecordSignedForBilling`,
+ * kassen-/zahlerabhängig) minus die bereits abgerechneten Termine.
+ *
+ * Sowohl `GET /billing/eligible-customers` (Anzeige + Zähler, no-date-range) als
+ * auch `POST /billing/generate-all` (Skip-Vorprüfung, no-date-range) nutzen
+ * DIESE Funktion — kein zweiter Ableitungspfad, damit „taucht in der Liste auf"
+ * und „wird tatsächlich abgerechnet" nie auseinanderlaufen. Ersetzt den bis
+ * dahin kunde-groben „hat irgendeine Rechnung im Monat → ausschließen/skip"-
+ * Filter, der spät signierte Nachzügler-Termine unsichtbar machte.
+ */
+export interface UnbilledSignedFacts {
+  /** Termine unter strikt-signierten LNs (vor „bereits abgerechnet"-Filter). */
+  signedAppointmentCount: number;
+  /** Anzahl davon, die NOCH NICHT abgerechnet sind. */
+  unbilledAppointmentCount: number;
+}
+
+export async function getUnbilledSignedAppointmentFactsByCustomer(
+  customerIds: number[],
+  billingYear: number,
+  billingMonth: number,
+): Promise<Map<number, UnbilledSignedFacts>> {
+  const result = new Map<number, UnbilledSignedFacts>();
+  if (customerIds.length === 0) return result;
+
+  // LN-Status je Kunde (loser Filter completed/employee_signed — der strikte
+  // Signatur-Filter unten ist eine Teilmenge davon).
+  const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
+    id: monthlyServiceRecords.id,
+    customerId: monthlyServiceRecords.customerId,
+    status: monthlyServiceRecords.status,
+  })
+    .where(and(
+      inArray(monthlyServiceRecords.customerId, customerIds),
+      eq(monthlyServiceRecords.year, billingYear),
+      eq(monthlyServiceRecords.month, billingMonth),
+      or(
+        eq(monthlyServiceRecords.status, "completed"),
+        eq(monthlyServiceRecords.status, "employee_signed"),
+      ),
+      monthlyServiceRecordsRepo.activeOnly(),
+    ));
+  if (signedRecords.length === 0) return result;
+
+  // Kassen-/zahlerabhängiges Signatur-Gate braucht den billingType je Kunde.
+  const billingTypeRows = await db.select({
+    id: customersTable.id,
+    billingType: customersTable.billingType,
+  })
+    .from(customersTable)
+    .where(inArray(customersTable.id, customerIds));
+  const billingTypeById = new Map(billingTypeRows.map(c => [c.id, c.billingType]));
+
+  // Strikt-signierte LN-IDs je Kunde (identische Akzeptanz wie `buildInvoiceDraft`).
+  const strictSrToCustomer = new Map<number, number>();
+  for (const r of signedRecords) {
+    if (isServiceRecordSignedForBilling(billingTypeById.get(r.customerId), r.status)) {
+      strictSrToCustomer.set(r.id, r.customerId);
+    }
+  }
+  const strictSrIds = Array.from(strictSrToCustomer.keys());
+  if (strictSrIds.length === 0) return result;
+
+  // Termine unter strikt-signierten LNs (spiegelt `getAppointmentIdsFromServiceRecords`).
+  const signedApptByCustomer = new Map<number, Set<number>>();
+  const srApptRows = await db.select({
+    serviceRecordId: serviceRecordAppointments.serviceRecordId,
+    appointmentId: serviceRecordAppointments.appointmentId,
+  })
+    .from(serviceRecordAppointments)
+    .where(inArray(serviceRecordAppointments.serviceRecordId, strictSrIds));
+  for (const row of srApptRows) {
+    const cid = strictSrToCustomer.get(row.serviceRecordId);
+    if (cid == null) continue;
+    const set = signedApptByCustomer.get(cid) ?? new Set<number>();
+    set.add(row.appointmentId);
+    signedApptByCustomer.set(cid, set);
+  }
+
+  // Bereits abgerechnete Termine je Kunde (spiegelt `getAlreadyInvoicedAppointmentIds`, batch).
+  const invoicedApptByCustomer = new Map<number, Set<number>>();
+  const invoicedRows = await db.select({
+    customerId: invoicesTable.customerId,
+    appointmentId: invoiceLineItems.appointmentId,
+  })
+    .from(invoiceLineItems)
+    .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
+    .where(and(
+      inArray(invoicesTable.customerId, customerIds),
+      eq(invoicesTable.billingYear, billingYear),
+      eq(invoicesTable.billingMonth, billingMonth),
+      ne(invoicesTable.status, "storniert"),
+      ne(invoicesTable.invoiceType, "stornorechnung"),
+    ));
+  for (const row of invoicedRows) {
+    if (row.customerId == null || row.appointmentId == null) continue;
+    const set = invoicedApptByCustomer.get(row.customerId) ?? new Set<number>();
+    set.add(row.appointmentId);
+    invoicedApptByCustomer.set(row.customerId, set);
+  }
+
+  for (const [cid, signedAppts] of signedApptByCustomer) {
+    const invoicedAppts = invoicedApptByCustomer.get(cid) ?? new Set<number>();
+    let unbilled = 0;
+    for (const id of signedAppts) if (!invoicedAppts.has(id)) unbilled++;
+    result.set(cid, {
+      signedAppointmentCount: signedAppts.size,
+      unbilledAppointmentCount: unbilled,
+    });
+  }
+  return result;
 }
 
 export async function getServiceRecordsForPeriod(customerId: number, year: number, month: number) {

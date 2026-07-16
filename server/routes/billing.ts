@@ -14,7 +14,7 @@ import {
   type BudgetSplitForAppointment,
 } from "@shared/domain/budget-invoice-split";
 import { BUDGET_TYPE_LABELS, type BudgetType } from "@shared/domain/budgets";
-import { classifyBillingEligibility, isServiceRecordSignedForBilling } from "@shared/domain/billing-eligibility";
+import { classifyBillingEligibility } from "@shared/domain/billing-eligibility";
 import { INVOICE_STATUS_TRANSITIONS, isAllowedInvoiceStatusTransition } from "@shared/domain/invoice-status";
 import { buildInvoiceExportFilename, dedupeExportFilenames, buildSpeakingInvoiceFilename, buildSpeakingKassenBundleFilename, buildContentDisposition, type SpeakingInvoiceDocumentKind } from "@shared/domain/invoice-export-filename";
 import { resolveBudgetRecipient } from "../storage/budget-recipients";
@@ -33,7 +33,6 @@ import {
   invoices as invoicesTable,
   invoiceLineItems,
   monthlyServiceRecords,
-  serviceRecordAppointments,
 } from "@shared/schema";
 import type { Invoice, CompanySettings, InsertDocumentDelivery, InvoiceRenderSnapshot, InvoiceRenderCompanySnapshot } from "@shared/schema";
 import { INVOICE_RENDER_COMPANY_SNAPSHOT_KEYS } from "@shared/schema";
@@ -84,7 +83,7 @@ import {
     storedInvoicePdfContainsLeistungsnachweis,
   } from "../services/invoice-pdf-orchestrator";
 import { ChromiumUnavailableError } from "../services/pdf-generator";
-import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer } from "../services/invoice-data";
+import { getBlockingDraftInvoices, getDocumentationCoverageByCustomer, getOpenAppointmentCountByCustomer, getUnbilledSignedAppointmentFactsByCustomer, type UnbilledSignedFacts } from "../services/invoice-data";
 import { buildInvoiceDraft, generateInvoiceCore } from "../services/invoice-calc";
 import {
   MONTH_NAMES_DE,
@@ -411,6 +410,15 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
 
   // dateFromQ/dateToQ oben geparst (Scope für Counter + Eligibility identisch).
   const candidateIds = filteredCustomerRows.map(c => c.id);
+
+  // Task #1790 — Termin-genaue „noch offene, signierte Termine?"-Fakten je Kunde
+  // aus DER EINEN SSoT (`getUnbilledSignedAppointmentFactsByCustomer`). Geteilt
+  // mit dem no-date-range-Filter unten UND dem Skip in `POST /generate-all`, und
+  // dient zugleich als Faktenquelle für `classifyBillingEligibility` (Step 2),
+  // sodass es keine zweite Kopie der „signiert & noch nicht abgerechnet"-Regel
+  // mehr gibt.
+  const unbilledFacts = await getUnbilledSignedAppointmentFactsByCustomer(candidateIds, year, month);
+
   if (candidateIds.length > 0 && (dateFromQ || dateToQ)) {
     // Task #1317: Mit Datumsbereich erlaubt die Massenerstellung Teil-
     // Abrechnung innerhalb des Monats. Der grobe „hat irgendeine Rechnung im
@@ -448,24 +456,27 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     }
     filteredCustomerRows = filteredCustomerRows.filter(c => eligibleByRange.has(c.id));
   } else if (candidateIds.length > 0) {
-    // Task #996: Ohne Datumsbereich — Kunden mit bereits existierender aktiver
-    // (nicht stornierter) Rechnung für diesen Monat ausschließen — spiegelt die
-    // Idempotenz-Prüfung aus `POST /generate-all` (hasActive), damit der „Alle
-    // offenen erstellen (N)"-Counter exakt die Kunden zählt, für die die
-    // Massenerstellung tatsächlich eine Rechnung anlegt (und nicht überspringt).
-    const existingInvoices = await db.select({
-      customerId: invoicesTable.customerId,
-    })
-      .from(invoicesTable)
-      .where(and(
-        inArray(invoicesTable.customerId, candidateIds),
-        eq(invoicesTable.billingYear, year),
-        eq(invoicesTable.billingMonth, month),
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
-      ));
-    const alreadyInvoiced = new Set(existingInvoices.map(r => r.customerId));
-    filteredCustomerRows = filteredCustomerRows.filter(c => !alreadyInvoiced.has(c.id));
+    // Task #1790: Ohne Datumsbereich Termin-genau statt kunde-grob. Der frühere
+    // grobe „hat irgendeine aktive Rechnung im Monat → ausschließen"-Filter
+    // (Task #996) machte spät signierte Nachzügler-Termine unsichtbar: Sobald
+    // eine erste Rechnung existierte, verschwand der Kunde komplett aus der
+    // Liste, auch wenn danach weitere Termine unterschrieben wurden.
+    //
+    // Ausgeschlossen wird jetzt NUR der vollständig abgerechnete Kunde: es gab
+    // (strikt) signierte Termine, aber keiner ist mehr offen
+    // (`signedAppointmentCount > 0 && unbilledAppointmentCount === 0`). Weil
+    // `unbilled = signiert − abgerechnet`, tritt „signiert>0 & unbilled=0" genau
+    // dann ein, wenn ALLE signierten Termine bereits abgerechnet sind (es also
+    // eine Rechnung gibt) — kein separater „hat Rechnung?"-Query nötig.
+    // Signatur-blockierte Kunden (kein strikt signierter Termin ⇒ signiert=0)
+    // bleiben in der Liste, damit sie weiterhin als „blocked" sichtbar sind
+    // (Bestandsverhalten, Task #1776).
+    filteredCustomerRows = filteredCustomerRows.filter(c => {
+      const facts = unbilledFacts.get(c.id);
+      const signed = facts?.signedAppointmentCount ?? 0;
+      const unbilled = facts?.unbilledAppointmentCount ?? 0;
+      return !(signed > 0 && unbilled === 0);
+    });
   }
 
   // Task #1774 — Abrechnungs-Berechtigung pro Kunde aus DERSELBEN SSoT, die auch
@@ -489,71 +500,15 @@ router.get("/eligible-customers", asyncHandler("Berechtigte Kunden konnten nicht
     statusesByCustomer.set(r.customerId, arr);
   }
 
-  // Strikt-signierte LN-IDs je Kunde (identische Akzeptanz-Regel wie
-  // `buildInvoiceDraft`) — Basis für die Termin-Zählung.
-  const strictSrToCustomer = new Map<number, number>();
-  for (const r of signedRecords) {
-    if (!finalIds.includes(r.customerId)) continue;
-    if (isServiceRecordSignedForBilling(billingTypeById.get(r.customerId), r.status)) {
-      strictSrToCustomer.set(r.id, r.customerId);
-    }
-  }
-  const strictSrIds = Array.from(strictSrToCustomer.keys());
-
-  // Termine unter strikt-signierten LNs (spiegelt
-  // `getAppointmentIdsFromServiceRecords` — kein activeOnly, keine DISTINCT).
-  const signedApptByCustomer = new Map<number, Set<number>>();
-  if (strictSrIds.length > 0) {
-    const srApptRows = await db.select({
-      serviceRecordId: serviceRecordAppointments.serviceRecordId,
-      appointmentId: serviceRecordAppointments.appointmentId,
-    })
-      .from(serviceRecordAppointments)
-      .where(inArray(serviceRecordAppointments.serviceRecordId, strictSrIds));
-    for (const row of srApptRows) {
-      const cid = strictSrToCustomer.get(row.serviceRecordId);
-      if (cid == null) continue;
-      const set = signedApptByCustomer.get(cid) ?? new Set<number>();
-      set.add(row.appointmentId);
-      signedApptByCustomer.set(cid, set);
-    }
-  }
-
-  // Bereits abgerechnete Termine je Kunde (spiegelt
-  // `getAlreadyInvoicedAppointmentIds`, batch über alle Kandidaten).
-  const invoicedApptByCustomer = new Map<number, Set<number>>();
-  if (finalIds.length > 0) {
-    const invoicedRows = await db.select({
-      customerId: invoicesTable.customerId,
-      appointmentId: invoiceLineItems.appointmentId,
-    })
-      .from(invoiceLineItems)
-      .innerJoin(invoicesTable, eq(invoiceLineItems.invoiceId, invoicesTable.id))
-      .where(and(
-        inArray(invoicesTable.customerId, finalIds),
-        eq(invoicesTable.billingYear, year),
-        eq(invoicesTable.billingMonth, month),
-        ne(invoicesTable.status, "storniert"),
-        ne(invoicesTable.invoiceType, "stornorechnung"),
-      ));
-    for (const row of invoicedRows) {
-      if (row.customerId == null || row.appointmentId == null) continue;
-      const set = invoicedApptByCustomer.get(row.customerId) ?? new Set<number>();
-      set.add(row.appointmentId);
-      invoicedApptByCustomer.set(row.customerId, set);
-    }
-  }
-
+  // Termin-Fakten (signiert / noch nicht abgerechnet) je Kunde aus DER EINEN
+  // SSoT `unbilledFacts` (oben berechnet) — keine zweite Kopie der Regel mehr.
   const eligibleCustomers: BillingCustomerItem[] = filteredCustomerRows.map(c => {
-    const signedAppts = signedApptByCustomer.get(c.id) ?? new Set<number>();
-    const invoicedAppts = invoicedApptByCustomer.get(c.id) ?? new Set<number>();
-    let unbilled = 0;
-    for (const id of signedAppts) if (!invoicedAppts.has(id)) unbilled++;
+    const facts = unbilledFacts.get(c.id);
     const { status, reason } = classifyBillingEligibility({
       billingType: c.billingType,
       serviceRecordStatuses: statusesByCustomer.get(c.id) ?? [],
-      signedAppointmentCount: signedAppts.size,
-      unbilledAppointmentCount: unbilled,
+      signedAppointmentCount: facts?.signedAppointmentCount ?? 0,
+      unbilledAppointmentCount: facts?.unbilledAppointmentCount ?? 0,
     });
     return {
       ...c,
@@ -3140,6 +3095,17 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     "billing",
   );
 
+  // Task #1790 — Ohne Datumsbereich Termin-genaue Idempotenz statt grober
+  // „hat irgendeine Rechnung im Monat"-Skip. EINE SSoT mit
+  // `/eligible-customers` (`getUnbilledSignedAppointmentFactsByCustomer`), damit
+  // die Liste („N noch zu erstellen") und die Massenerstellung nie divergieren:
+  // ein Kunde mit spät signierten Nachzügler-Terminen wird nicht mehr
+  // fälschlich übersprungen, nur weil bereits eine frühere Rechnung existiert.
+  let unbilledFactsByCustomer = new Map<number, UnbilledSignedFacts>();
+  if (!hasDateRange && customerIds.length > 0) {
+    unbilledFactsByCustomer = await getUnbilledSignedAppointmentFactsByCustomer(customerIds, billingYear, billingMonth);
+  }
+
   const results: Array<{
     customerId: number;
     status: "created" | "skipped" | "error";
@@ -3162,17 +3128,20 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
 
   for (const customerId of customerIds) {
     try {
-      // Idempotenz: existiert bereits eine aktive (nicht stornierte)
-      // Rechnung dieses Monats, überspringen.
+      // Idempotenz: Termin-genau statt kunde-grob.
       // Task #1317: Mit Datumsbereich ist Teil-Abrechnung gewollt — der grobe
       // „hat irgendeine Rechnung im Monat"-Skip würde den zweiten Bereich
-      // blockieren. Wir überspringen den Grob-Filter dann und überlassen die
+      // blockieren. Wir überspringen den Vor-Skip dann und überlassen die
       // Idempotenz der Termin-Ebene in `buildInvoiceDraft` (bereits
       // abgerechnete Termine fallen raus → „bereits abgerechnet" = Skip).
+      // Task #1790: Ohne Datumsbereich NICHT mehr grob „hat irgendeine aktive
+      // Rechnung → skip" (das übersprang Kunden mit spät signierten Nachzügler-
+      // Terminen). Stattdessen nur skippen, wenn KEIN dokumentierter, signierter,
+      // noch nicht abgerechneter Termin mehr offen ist — dieselbe SSoT wie
+      // `/eligible-customers`.
       if (!hasDateRange) {
-        const existing = await storage.getInvoicesForCustomerMonth(customerId, billingYear, billingMonth);
-        const hasActive = existing.some(inv => inv.status !== "storniert" && inv.invoiceType !== "stornorechnung");
-        if (hasActive) {
+        const facts = unbilledFactsByCustomer.get(customerId);
+        if (!facts || facts.unbilledAppointmentCount === 0) {
           results.push({ customerId, status: "skipped", message: "Bereits abgerechnet" });
           continue;
         }
