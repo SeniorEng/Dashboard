@@ -35,6 +35,19 @@ export const BILLING_BLOCK_MESSAGES: Record<BillingBlockReason, string> = {
   already_billed: "Alle Termine aus dem Leistungsnachweis wurden bereits abgerechnet.",
 };
 
+/**
+ * Task #1786 — Prägnante Kurz-Labels für die Inline-Anzeige in der Kundenzeile
+ * (Karte „Noch zu erstellen"). Die ausführlichen Meldungen (`BILLING_BLOCK_MESSAGES`)
+ * bleiben für Dialog/Vorschau; hier genügt ein knapper Grund-Hinweis im dezenten
+ * Stil des bestehenden „noch X geplante Termine"-Vermerks.
+ */
+export const BILLING_BLOCK_SHORT_LABELS: Record<BillingBlockReason, string> = {
+  customer_signature_required: "Kundenunterschrift fehlt",
+  not_signed: "Nicht unterschrieben",
+  no_appointments: "Keine Termine",
+  already_billed: "Bereits abgerechnet",
+};
+
 /** Pflegekassen-Abrechnung (gesetzlich/privat) verlangt die Kundenunterschrift. */
 export function isPflegekasseBillingType(billingType: string | null | undefined): boolean {
   return billingType === "pflegekasse_gesetzlich" || billingType === "pflegekasse_privat";
@@ -151,4 +164,49 @@ export function classifyBillingEligibility(
     };
   }
   return { status: "eligible", reason: null, message: null };
+}
+
+/**
+ * Task #1786 — Reifegruppe eines Kunden in der Karte „Noch zu erstellen".
+ * Genau EINE Gruppe pro Kunde:
+ *  • `has_open_appointments` — im Monat sind noch offene (geplante) Termine.
+ *  • `signature_blocked`     — keine offenen Termine mehr, aber Pflegekasse ohne
+ *                              Kundenunterschrift (nur `employee_signed`).
+ *  • `partially_documented`  — abrechenbar, aber weniger Termine durch aktive
+ *                              Leistungsnachweise abgedeckt als dokumentiert.
+ *  • `ready`                 — tatsächlich abrechenbar, vollständig dokumentiert,
+ *                              keine offenen Termine mehr.
+ */
+export type BillingMaturityGroup =
+  | "ready"
+  | "partially_documented"
+  | "signature_blocked"
+  | "has_open_appointments";
+
+/** Eingangsfakten der Reifegruppierung — schon vom Server gelieferte Felder. */
+export interface BillingMaturityFacts {
+  openAppointments?: number | null;
+  completedAppointments: number;
+  coveredAppointments: number;
+  eligibility: { status: BillingEligibilityStatus; reason: BillingBlockReason | null };
+}
+
+/**
+ * PURE SSoT der Reifegruppierung. Verwendet dieselben Helfer wie Anzeige und
+ * Server-Skip (`hasOpenAppointments`, `isPartiallyDocumented`,
+ * `eligibility.reason/status`) — KEINE zweite parallele Regel, damit Anzeige und
+ * Erstellungs-Pfad nie auseinanderlaufen. Reihenfolge = Schwere/Blockierung:
+ * offene Termine → fehlende Kundenunterschrift → unvollständig dokumentiert →
+ * bereit.
+ */
+export function classifyBillingMaturity(c: BillingMaturityFacts): BillingMaturityGroup {
+  if (hasOpenAppointments(c)) return "has_open_appointments";
+  // Blockierte Kunden dürfen NIE unter „ready" landen. Fehlende Kundenunterschrift
+  // ist der Regelfall und bekommt eine eigene Gruppe; alle übrigen Block-Gründe
+  // (not_signed/no_appointments/already_billed) werden pragmatisch ebenfalls in
+  // „signature_blocked" (= „nicht bereit, Grund per Inline-Label") einsortiert,
+  // damit sie sichtbar bleiben und nicht als abrechenbar erscheinen.
+  if (c.eligibility.status !== "eligible") return "signature_blocked";
+  if (isPartiallyDocumented(c)) return "partially_documented";
+  return "ready";
 }

@@ -14,7 +14,12 @@ import {
   PenLine,
 } from "lucide-react";
 import type { BillingCustomerItem } from "@shared/api";
-import { isPartiallyDocumented, hasOpenAppointments } from "@shared/domain/billing-eligibility";
+import {
+  isPartiallyDocumented,
+  hasOpenAppointments,
+  classifyBillingMaturity,
+  BILLING_BLOCK_SHORT_LABELS,
+} from "@shared/domain/billing-eligibility";
 import { BILLING_TYPE_LABELS } from "../constants";
 import { getCustomerName } from "../utils";
 import { useRowCap } from "../hooks/use-row-cap";
@@ -57,6 +62,14 @@ function PendingCustomerRow({
   // `/billing/eligible-customers` für den „nur X/Y dokumentiert"-Hinweis nutzt.
   const partial = isPartiallyDocumented(c);
   const openCount = c.openAppointments ?? 0;
+  // Task #1786: Kurz-Hinweis für unterschrifts-blockierte Zeilen (z.B.
+  // „Kundenunterschrift fehlt"). Nur relevant, wenn keine offenen Termine mehr
+  // anstehen (sonst dominiert der „noch X geplante Termine"-Vermerk) und der
+  // Kunde nicht ohnehin über den Partial-Hinweis erklärt wird.
+  const blockLabel =
+    openCount === 0 && !partial && c.eligibility.reason
+      ? BILLING_BLOCK_SHORT_LABELS[c.eligibility.reason]
+      : null;
   return (
     <li
       className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
@@ -88,6 +101,14 @@ function PendingCustomerRow({
             data-testid={`text-pending-partial-${c.id}`}
           >
             Nur {c.coveredAppointments}/{c.completedAppointments} dokumentierte Termine im Leistungsnachweis
+          </div>
+        )}
+        {blockLabel && (
+          <div
+            className="mt-0.5 text-xs text-amber-700"
+            data-testid={`text-pending-block-${c.id}`}
+          >
+            {blockLabel}
           </div>
         )}
         {openCount > 0 && (
@@ -239,14 +260,31 @@ export function PendingInvoicesCard({
   //     und tatsächliche Erstellung nicht auseinanderdriften.
   //  3. „Bereit zum Abrechnen": tatsächlich abrechenbar (eligible) UND keine
   //     offenen Termine mehr.
-  const openCustomers = all.filter((c) => hasOpenAppointments(c));
-  const notOpen = all.filter((c) => !hasOpenAppointments(c));
-  const signatureBlockedCustomers = notOpen.filter(
-    (c) => c.eligibility.reason === "customer_signature_required",
-  );
-  const readyCustomers = notOpen.filter(
-    (c) => c.eligibility.status === "eligible",
-  );
+  // Task #1786: Reifegruppierung über die EINE SSoT `classifyBillingMaturity`
+  // (@shared/domain/billing-eligibility) — genau eine Gruppe pro Kunde. Damit
+  // enthält „Bereit zum Abrechnen" nur wirklich abrechenbare UND vollständig
+  // dokumentierte Kunden; unvollständig dokumentierte wandern in eine eigene
+  // Gruppe, unterschrifts-blockierte in „Wartet auf Kundenunterschrift".
+  const openCustomers: BillingCustomerItem[] = [];
+  const signatureBlockedCustomers: BillingCustomerItem[] = [];
+  const partiallyDocumentedCustomers: BillingCustomerItem[] = [];
+  const readyCustomers: BillingCustomerItem[] = [];
+  for (const c of all) {
+    switch (classifyBillingMaturity(c)) {
+      case "has_open_appointments":
+        openCustomers.push(c);
+        break;
+      case "signature_blocked":
+        signatureBlockedCustomers.push(c);
+        break;
+      case "partially_documented":
+        partiallyDocumentedCustomers.push(c);
+        break;
+      case "ready":
+        readyCustomers.push(c);
+        break;
+    }
+  }
 
   return (
     <Card className="mb-6" data-testid="card-pending-invoices">
@@ -310,6 +348,16 @@ export function PendingInvoicesCard({
                   customers={readyCustomers}
                   onCreateForCustomer={onCreateForCustomer}
                   testIdKey="ready"
+                  selectedMonth={selectedMonth}
+                  selectedYear={selectedYear}
+                />
+                <PendingSection
+                  title="Unvollständig dokumentiert"
+                  icon={<FileText className={`${iconSize.sm} text-amber-600`} />}
+                  headerClassName="text-amber-700"
+                  customers={partiallyDocumentedCustomers}
+                  onCreateForCustomer={onCreateForCustomer}
+                  testIdKey="partial"
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}
                 />

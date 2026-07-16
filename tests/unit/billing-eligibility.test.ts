@@ -9,7 +9,9 @@
 import { describe, it, expect } from "vitest";
 import {
   BILLING_BLOCK_MESSAGES,
+  BILLING_BLOCK_SHORT_LABELS,
   classifyBillingEligibility,
+  classifyBillingMaturity,
   isPflegekasseBillingType,
   isServiceRecordSignedForBilling,
 } from "@shared/domain/billing-eligibility";
@@ -113,5 +115,75 @@ describe("classifyBillingEligibility — Prüf-Reihenfolge spiegelt buildInvoice
     });
     expect(r.status).toBe("blocked");
     expect(r.reason).toBe("customer_signature_required");
+  });
+});
+
+describe("classifyBillingMaturity — genau eine Reifegruppe pro Kunde", () => {
+  const eligible = { status: "eligible" as const, reason: null };
+
+  it("offene Termine ⇒ has_open_appointments (schlägt alles andere)", () => {
+    expect(
+      classifyBillingMaturity({
+        openAppointments: 2,
+        completedAppointments: 3,
+        coveredAppointments: 1,
+        eligibility: { status: "blocked", reason: "customer_signature_required" },
+      }),
+    ).toBe("has_open_appointments");
+  });
+
+  it("keine offenen Termine + Kundenunterschrift fehlt ⇒ signature_blocked", () => {
+    expect(
+      classifyBillingMaturity({
+        openAppointments: 0,
+        completedAppointments: 2,
+        coveredAppointments: 2,
+        eligibility: { status: "blocked", reason: "customer_signature_required" },
+      }),
+    ).toBe("signature_blocked");
+  });
+
+  it("blockiert (not_signed/no_appointments/already_billed) ⇒ nie ready", () => {
+    for (const reason of ["not_signed", "no_appointments", "already_billed"] as const) {
+      expect(
+        classifyBillingMaturity({
+          openAppointments: 0,
+          completedAppointments: 2,
+          coveredAppointments: 2,
+          eligibility: { status: "blocked", reason },
+        }),
+      ).not.toBe("ready");
+    }
+  });
+
+  it("abrechenbar, aber nur teilweise abgedeckt ⇒ partially_documented", () => {
+    expect(
+      classifyBillingMaturity({
+        openAppointments: 0,
+        completedAppointments: 3,
+        coveredAppointments: 2,
+        eligibility: eligible,
+      }),
+    ).toBe("partially_documented");
+  });
+
+  it("abrechenbar + vollständig abgedeckt + keine offenen Termine ⇒ ready", () => {
+    expect(
+      classifyBillingMaturity({
+        openAppointments: 0,
+        completedAppointments: 3,
+        coveredAppointments: 3,
+        eligibility: eligible,
+      }),
+    ).toBe("ready");
+  });
+});
+
+describe("BILLING_BLOCK_SHORT_LABELS", () => {
+  it("liefert prägnante Kurz-Labels je Blockgrund", () => {
+    expect(BILLING_BLOCK_SHORT_LABELS.customer_signature_required).toBe("Kundenunterschrift fehlt");
+    expect(BILLING_BLOCK_SHORT_LABELS.not_signed).toBeTruthy();
+    expect(BILLING_BLOCK_SHORT_LABELS.no_appointments).toBeTruthy();
+    expect(BILLING_BLOCK_SHORT_LABELS.already_billed).toBeTruthy();
   });
 });
