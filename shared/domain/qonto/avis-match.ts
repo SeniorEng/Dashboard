@@ -14,7 +14,7 @@
  * Rechnungsnummer-Token angewandt, damit Namen o.Ä. unberührt bleiben.
  */
 export function normalizeAvisRef(raw: string): string {
-  return raw.replace(/[Oo]/g, "0");
+  return raw.replace(/\s+/g, "").replace(/[Oo]/g, "0");
 }
 
 /**
@@ -27,7 +27,7 @@ export function isExcelExponential(text: string): boolean {
   return /\d[.,]?\d*e\+?\d+/i.test(text.trim());
 }
 
-const RE_INVOICE_PATTERN = /RE-\d{4}-[0-9Oo]+/;
+const RE_INVOICE_PATTERN = /RE-\d{4}-\s*[0-9Oo]+/;
 const NUMERIC_INVOICE_PATTERN = /\b(\d{6,})\b/;
 
 /**
@@ -46,6 +46,20 @@ export function extractInvoiceNumber(text: string | null | undefined): string | 
   if (numMatch) return numMatch[1];
 
   return null;
+}
+
+/**
+ * Wie `extractInvoiceNumber`, aber NUR das kanonische `RE-JJJJ-NNNN`-Muster —
+ * ohne den ≥6-stelligen Ziffern-Fallback. Gedacht zum Scannen einer ganzen
+ * Kassen-CSV-Positionszeile: manche Kassen legen die Rechnungsnummer neben das
+ * Buchungsdatum statt in die Referenzspalte. Der Ziffern-Fallback würde dort
+ * fälschlich die lange Kassen-Belegnummer greifen und die echte Rechnungsnummer
+ * verdecken — darum hier bewusst ausgeschlossen.
+ */
+export function extractReInvoiceNumber(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const reMatch = text.match(RE_INVOICE_PATTERN);
+  return reMatch ? normalizeAvisRef(reMatch[0]) : null;
 }
 
 /**

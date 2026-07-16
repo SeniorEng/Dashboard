@@ -85,3 +85,33 @@ describe("Task #1687 — Parser-Regressions-Snapshot (Betrag/Gesamt/Anzahl)", ()
     expect(r.header.kostentraegerIk).toBe("183500693");
   });
 });
+
+// --- Neuere SAP-Variante (Juli 2026): die Kasse legt UNSERE Rechnungsnummer
+// „RE-JJJJ-NNNN" (mit Leerzeichen: „RE-2026- 0212") NEBEN das Buchungsdatum in
+// die Datums-Spalte (parts[3]), während die Referenzspalte (parts[1]) die lange
+// Kassen-Belegnummer trägt. VOR dem Fix griff der Ziffern-Fallback die
+// Belegnummer als „Rechnungsnummer" → Nummer-Match scheiterte, das Matching fiel
+// still auf den Betrag zurück und scheiterte bei Teilzahlung/mehrdeutigem Betrag.
+const SAP_JULI_RE_IM_DATUM = [
+  "1;461438852;Senioren Engel Alltagsbegleitung UG (haftungsbeschränkt), Zwickauer Str. 145, 09116 Chemnitz;",
+  "2;853010969199;01.06.2026 - 30.06.2026;27.06.2026 RE-2026- 0212;262,00;+;EUR;",
+  "2;854010988377;01.06.2026 - 30.06.2026;27.06.2026 RE-2026- 0241;39,26;+;EUR;",
+  "3;130050598;82051000;301,26;EUR;",
+].join("\n");
+
+describe("SAP-Juli-Variante — RE-Nummer steht in der Datums-Spalte", () => {
+  it("extrahiert die kanonische RE-Nummer (nicht die Belegnummer) trotz Leerzeichen", () => {
+    const r = parseAvisCsv(SAP_JULI_RE_IM_DATUM);
+    // Der Kern des Fixes: echte Rechnungsnummer statt Kassen-Belegnummer.
+    expect(r.items.map(i => i.rechnungsNummer)).toEqual(["RE-2026-0212", "RE-2026-0241"]);
+    // Beträge unverändert strukturell erkannt.
+    expect(r.items.map(i => i.betragCents)).toEqual([26200, 3926]);
+    // Datums-Spalte bleibt roh erhalten (inkl. eingebetteter RE-Nummer).
+    expect(r.items.map(i => i.buchungsDatum)).toEqual([
+      "27.06.2026 RE-2026- 0212",
+      "27.06.2026 RE-2026- 0241",
+    ]);
+    expect(r.header.gesamtBetragCents).toBe(30126);
+    expect(r.header.zahlungsempfaengerIk).toBe("461438852");
+  });
+});

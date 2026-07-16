@@ -6,7 +6,7 @@ import {
   classifyKassenCsvFormat,
   detectAmountFieldIndex,
 } from "../../shared/domain/qonto/avis-format";
-import { extractInvoiceNumber } from "../../shared/domain/qonto/avis-match";
+import { extractInvoiceNumber, extractReInvoiceNumber } from "../../shared/domain/qonto/avis-match";
 
 export { AvisParseUncertainError };
 export type { AvisColumnMap };
@@ -240,7 +240,16 @@ function parseKassenCsv(csvContent: string, options?: ParseAvisOptions): ParsedA
       const refFieldIdx = columnMap?.referenz ?? 2;
       const datumIdx = columnMap?.datum ?? 3;
 
-      let rechnungsNummer = extractInvoiceNumber(parts[refFieldIdx] ?? "");
+      // Die kanonische RE-Rechnungsnummer hat Vorrang und darf in JEDEM Feld der
+      // Zeile stehen — manche Kassen legen sie neben das Buchungsdatum statt in
+      // die Referenzspalte. Erst danach die feldbasierte Heuristik; deren
+      // Ziffern-Fallback würde sonst die lange Kassen-Belegnummer greifen und die
+      // echte Rechnungsnummer verdecken (⇒ Matching fiele still auf den Betrag
+      // zurück und scheiterte bei Teilzahlungen/mehrdeutigen Beträgen).
+      let rechnungsNummer = extractReInvoiceNumber(line);
+      if (!rechnungsNummer) {
+        rechnungsNummer = extractInvoiceNumber(parts[refFieldIdx] ?? "");
+      }
       if (!rechnungsNummer) {
         rechnungsNummer = extractInvoiceNumber(verwendungszweck);
       }
