@@ -1,4 +1,10 @@
-modules = ["nodejs-20", "web", "python-3.11", "java-graalvm22.3", "postgresql-16"]
+modules = [
+  "nodejs-20",
+  "web",
+  "python-3.11",
+  "java-graalvm22.3",
+  "postgresql-16",
+]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
@@ -9,7 +15,11 @@ packages = ["chromium"]
 [deployment]
 deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
-run = ["sh", "-c", "node script/check-build.mjs && NODE_ENV=production node dist/index.cjs"]
+run = [
+  "sh",
+  "-c",
+  "node script/check-build.mjs && NODE_ENV=production node dist/index.cjs",
+]
 
 [[ports]]
 localPort = 5000
@@ -140,7 +150,7 @@ BUDGET_HARD_HOLDS = "1"
 
 [userenv.shared]
 SUPER_ADMIN_EMAIL = "alrikdegenkolb@seniorenengel-alltagsbegleitung.de"
-ENCRYPTION_KEY = "16cd865645bc85fca814fa59a9d1e9c4734a9420cf65f8769a70e0eedfd866a1"
+
 
 [userenv.production]
 BUDGET_HARD_HOLDS = "1"
