@@ -420,7 +420,17 @@ export async function upsertBudgetTypeSettings(
   settings: SettingPayload[],
   tx?: DbClient,
   userId?: number,
-  options?: { allowStatutoryForSelbstzahler?: boolean },
+  options?: {
+    allowStatutoryForSelbstzahler?: boolean;
+    // Task #1792 — Superadmin-Rückdatierungs-Override: weicht die Task-#1623-
+    // Sperre PUNKTUELL auf. Greift NUR, wenn ALLE drei Kernfelder gesetzt sind
+    // (Flag + Akteur-ID + Begründung ≥ 20 Zeichen) — sonst bleibt die Sperre
+    // aktiv, damit Storage-Aufrufer sie nicht versehentlich umgehen.
+    overrideBackdateGuard?: boolean;
+    overrideUserId?: number;
+    overrideReason?: string;
+    overrideIpAddress?: string;
+  },
 ): Promise<CustomerBudgetTypeSetting[]> {
   const today = todayISO();
   const tomorrow = addDays(today, 1);
@@ -478,6 +488,17 @@ export async function upsertBudgetTypeSettings(
       | { kind: "in_place_update"; budgetType: string; before: CustomerBudgetTypeSetting; after: SettingPayload; nextValidFrom: string | null }
       | { kind: "transition"; budgetType: string; before: CustomerBudgetTypeSetting; after: SettingPayload; nextValidFrom: string };
     const auditEntries: AuditEntry[] = [];
+    // Task #1792 — separate, vollständige GoBD-Override-Protokolle (eigene
+    // Audit-Action `budget_backdate_override`), zusätzlich zur regulären
+    // Settings-Transition.
+    const overrideAuditEntries: Array<{
+      budgetType: string;
+      before: CustomerBudgetTypeSetting | null;
+      oldValidFrom: string | null;
+      newValidFrom: string;
+      newValidTo: string | null;
+      after: SettingPayload;
+    }> = [];
 
     // 1. Aus dem Payload entfernte Töpfe schließen.
     for (const row of openRows) {
@@ -557,12 +578,39 @@ export async function upsertBudgetTypeSettings(
         && (current == null || (current.validFrom ?? null) !== explicitVf);
       const backdateBlockerRows = (rowsByType.get(s.budgetType) ?? [])
         .filter(r => !(current != null && r.id === current.id && currentIsFresh));
-      if (backdateShiftsStart && hasValuedPhaseInWindow(backdateBlockerRows, explicitVf, today)) {
+      const wouldBlockBackdate = backdateShiftsStart
+        && hasValuedPhaseInWindow(backdateBlockerRows, explicitVf, today);
+      // Task #1792 — Superadmin-Override: die Sperre wird NUR aufgeweicht, wenn
+      // ALLE drei Bedingungen erfüllt sind (Flag + Akteur-ID + Begründung ≥ 20
+      // Zeichen). Fehlt eine davon, bleibt der harte Block bestehen — ein
+      // Storage-Aufrufer kann die GoBD-Sperre so nicht versehentlich umgehen.
+      const overrideAllowed = options?.overrideBackdateGuard === true
+        && options.overrideUserId != null
+        && (options.overrideReason?.trim().length ?? 0) >= 20;
+      if (wouldBlockBackdate && !overrideAllowed) {
         const label = BUDGET_TYPE_LABELS[s.budgetType as BudgetType] ?? s.budgetType;
         throw new BudgetBackdateNotAllowedError(
           `Für den Budget-Topf „${label}" ist in diesem Zeitraum bereits ein Betrag hinterlegt. Ein bereits geltender Wert kann nicht rückwirkend geändert werden. Bitte speichere die Änderung ohne Rückdatierung — sie gilt dann ab morgen.`,
         );
       }
+      // Ist der Override aktiv, erzwingen wir unten den Phasen-Append-Pfad
+      // (Vorgänger klemmen, Nachfolger begrenzen), damit auch bei fehlender
+      // offener Zeile / frischer Zeile KEINE überlappenden wertbelegten Phasen
+      // zurückbleiben (die zwei Bypass-Fälle aus Task #1623).
+      //
+      // GoBD-Nuance: „Append-only" meint hier die Phasen-GRENZEN. Trifft das
+      // rückdatierte `validFrom` EXAKT den Beginn einer bereits bestehenden
+      // (ggf. geschlossenen, historischen) Zeile, aktualisiert der
+      // exactMatch-Zweig (unten) diese Zeile IN-PLACE (`oldValidFrom ===
+      // newValidFrom`, `validTo` bleibt) — eine zweite koexistierende Phase
+      // über dasselbe Fenster ist im Schema NICHT darstellbar (kein Soft-Delete,
+      // partieller Unique-Index verbietet zwei offene Zeilen, zwei geschlossene
+      // Zeilen über dasselbe Fenster wären mehrdeutig). Das ist für DIESE
+      // Konfig-Tabelle GoBD-konform: ihr Immutability-Trigger sperrt nur den
+      // Hard-DELETE (Append-only = kein Zeilen-VERLUST); UPDATEs sind erlaubt und
+      // die Wertänderung ist über die revisionssichere `budget_backdate_override`-
+      // Audit-Zeile (before/after) lückenlos belegt.
+      const backdateOverrideActive = wouldBlockBackdate && overrideAllowed;
       // Sichere Rückdatierung (Lücken-Füllung auf einem nicht-frischen Leer-Topf)
       // → echte, eingeklemmte Phase. Frische bzw. current-lose Leer-Fenster
       // laufen über den In-Place-/Erstanlage-Pfad, nicht über diesen Append.
@@ -595,10 +643,11 @@ export async function upsertBudgetTypeSettings(
           && (r.validTo == null || r.validTo >= today));
       const isNewVersionTodayAppend = explicitVf == null && hasInForcePredecessor;
 
-      const isPhaseAppend = isExplicitPhaseAppend || isNewVersionTodayAppend || isSafeBackdate;
-      // Stichtag der neuen Phase: explizit aus dem Payload (Zukunfts-Append ODER
-      // sichere Rückdatierung, Task #1623), sonst „ab heute".
-      const appendVf = (isExplicitPhaseAppend || isSafeBackdate) ? explicitVf! : today;
+      const isPhaseAppend = isExplicitPhaseAppend || isNewVersionTodayAppend || isSafeBackdate || backdateOverrideActive;
+      // Stichtag der neuen Phase: explizit aus dem Payload (Zukunfts-Append,
+      // sichere Rückdatierung Task #1623 ODER Superadmin-Override Task #1792),
+      // sonst „ab heute".
+      const appendVf = (isExplicitPhaseAppend || isSafeBackdate || backdateOverrideActive) ? explicitVf! : today;
 
       if (isPhaseAppend) {
         const allOfType = rowsByType.get(s.budgetType) ?? [];
@@ -625,6 +674,16 @@ export async function upsertBudgetTypeSettings(
               })
               .where(eq(customerBudgetTypeSettings.id, exactMatch.id));
             auditEntries.push({ kind: "in_place_update", budgetType: s.budgetType, before: exactMatch, after: s, nextValidFrom: appendVf });
+            if (backdateOverrideActive) {
+              overrideAuditEntries.push({
+                budgetType: s.budgetType,
+                before: exactMatch,
+                oldValidFrom: exactMatch.validFrom,
+                newValidFrom: appendVf,
+                newValidTo: exactMatch.validTo,
+                after: s,
+              });
+            }
           }
           continue;
         }
@@ -682,6 +741,16 @@ export async function upsertBudgetTypeSettings(
           validTo: newValidTo,
         });
         auditEntries.push({ kind: "create", budgetType: s.budgetType, before: null, after: s, nextValidFrom: appendVf });
+        if (backdateOverrideActive) {
+          overrideAuditEntries.push({
+            budgetType: s.budgetType,
+            before: predecessor,
+            oldValidFrom: predecessor?.validFrom ?? null,
+            newValidFrom: appendVf,
+            newValidTo,
+            after: s,
+          });
+        }
         continue;
       }
 
@@ -804,6 +873,50 @@ export async function upsertBudgetTypeSettings(
           closedAt: today,
         });
       }
+    }
+
+    // Task #1792 — Override-Protokoll: pro rückdatiertem Superadmin-Override ein
+    // eigener, vollständiger GoBD-Audit-Eintrag (Akteur, IP, Zeitstempel via
+    // created_at UND `overriddenAt`, Vorher-/Nachher-Zustand, Begründung,
+    // Platzhalter `affectedRebookedTransactionIds` für eine spätere Umbuchung).
+    // Bewusst transaktional (executor): schlägt das Protokoll fehl, rollt die
+    // gesamte Änderung zurück — ein Override OHNE Protokoll ist GoBD-untauglich.
+    // `overrideUserId` ist bei aktivem Override garantiert gesetzt (Bypass-
+    // Bedingung oben).
+    for (const o of overrideAuditEntries) {
+      await auditService.log(
+        options!.overrideUserId!,
+        "budget_backdate_override",
+        "budget",
+        customerId,
+        {
+          customerId,
+          budgetType: o.budgetType,
+          reason: options!.overrideReason,
+          oldValidFrom: o.oldValidFrom,
+          newValidFrom: o.newValidFrom,
+          before: o.before ? {
+            enabled: o.before.enabled,
+            priority: o.before.priority,
+            monthlyLimitCents: o.before.monthlyLimitCents,
+            yearlyLimitCents: o.before.yearlyLimitCents,
+            validFrom: o.before.validFrom,
+            validTo: o.before.validTo,
+          } : null,
+          after: {
+            enabled: o.after.enabled,
+            priority: o.after.priority,
+            monthlyLimitCents: o.after.monthlyLimitCents ?? null,
+            yearlyLimitCents: o.after.yearlyLimitCents ?? null,
+            validFrom: o.newValidFrom,
+            validTo: o.newValidTo,
+          },
+          affectedRebookedTransactionIds: [],
+          overriddenAt: new Date().toISOString(),
+        },
+        options!.overrideIpAddress,
+        executor,
+      );
     }
 
     return getActiveBudgetTypeSettings(customerId, today, executor);

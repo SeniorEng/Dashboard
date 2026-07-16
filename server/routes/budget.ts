@@ -792,6 +792,12 @@ const bulkBudgetTypeSettingsSchema = z.object({
     validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   })).min(1).max(3),
+  // Task #1792 — Superadmin-Rückdatierungs-Override (GoBD-Ausnahme). Nur gesetzt,
+  // wenn der Superadmin die rückwirkende Änderung eines bereits wertbelegten
+  // Topfes im Bestätigungsdialog ausdrücklich freigibt. Begründung ≥ 20 Zeichen
+  // wird zusätzlich im Handler UND im Storage geprüft (Defense-in-Depth).
+  overrideBackdateGuard: z.boolean().optional(),
+  overrideReason: z.string().optional(),
 });
 
 router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen konnten nicht gespeichert werden", async (req: Request, res: Response) => {
@@ -876,10 +882,39 @@ router.put("/:customerId/type-settings", asyncHandler("Budget-Typ-Einstellungen 
     }
   }
 
+  // Task #1792 — Superadmin-Rückdatierungs-Override. Nur ein Superadmin darf die
+  // GoBD-Rückdatierungssperre (Task #1623) aufheben; die Begründung ist Pflicht
+  // (≥ 20 Zeichen) und wird revisionssicher protokolliert. Die eigentliche
+  // Bypass-Logik liegt zusätzlich im Storage (Defense-in-Depth: dort greift der
+  // Override nur mit Flag + Akteur-ID + Begründung ≥ 20 Zeichen).
+  const overrideBackdateGuard = result.data.overrideBackdateGuard === true;
+  const overrideReason = result.data.overrideReason?.trim() ?? "";
+  if (overrideBackdateGuard) {
+    if (!req.user?.isSuperAdmin) {
+      res.status(403).json({
+        error: "SUPERADMIN_REQUIRED",
+        message: "Nur ein Superadmin darf eine rückwirkende Budget-Änderung freigeben.",
+      });
+      return;
+    }
+    if (overrideReason.length < 20) {
+      res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Bitte gib eine Begründung mit mindestens 20 Zeichen an, warum die rückwirkende Änderung nötig ist.",
+      });
+      return;
+    }
+  }
+
   const userId = req.user?.id;
   // userId an Storage durchreichen, damit jede Settings-Transition GoBD-konform
   // ein `budget_type_settings_transition`-Audit-Log mit Akteur bekommt (Task #440).
-  const saved = await budgetStorage.upsertBudgetTypeSettings(customerId, result.data.settings, undefined, userId);
+  const saved = await budgetStorage.upsertBudgetTypeSettings(customerId, result.data.settings, undefined, userId, {
+    overrideBackdateGuard,
+    overrideUserId: overrideBackdateGuard ? userId : undefined,
+    overrideReason: overrideBackdateGuard ? overrideReason : undefined,
+    overrideIpAddress: overrideBackdateGuard ? (req.ip || req.socket.remoteAddress || undefined) : undefined,
+  });
 
   await budgetStorage.syncCarryoverAndExpiry(customerId);
 

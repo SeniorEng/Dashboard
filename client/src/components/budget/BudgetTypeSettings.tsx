@@ -6,8 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { StatusBadge } from "@/components/patterns/status-badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { ArrowUp, ArrowDown, Save, Plus, History, ChevronDown, ChevronUp, ChevronRight, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { BUDGET_TYPE_LABELS, type BudgetType, BUDGET_45B_MAX_MONTHLY_CENTS, BUDGET_39_42A_MAX_YEARLY_CENTS, BUDGET_45A_MAX_BY_PFLEGEGRAD } from "@shared/domain/budgets";
 import { api, unwrapResult } from "@/lib/api/client";
 import { invalidateRelated } from "@/lib/query-invalidation";
@@ -135,6 +138,16 @@ export function BudgetTypeSettings({ customerId, pflegegrad, careLevelHistory }:
   const [expandedInitialBalance, setExpandedInitialBalance] = useState<Record<string, boolean>>({});
   const [euroValues, setEuroValues] = useState<Record<string, { monthly: string; yearly: string }>>({});
   const [dateValues, setDateValues] = useState<Record<string, { validFrom: string; validTo: string }>>({});
+  // Task #1792 — Superadmin-Rückdatierungs-Override: State für den GoBD-
+  // Bestätigungsdialog. Wird nur einem Superadmin angeboten, wenn der Server
+  // die Rückdatierung mit `BUDGET_BACKDATE_NOT_ALLOWED` blockiert.
+  const { user } = useAuth();
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
+  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
+  const [overridePendingSettings, setOverridePendingSettings] = useState<BudgetTypeSetting[] | null>(null);
+  const [overrideBlockMessage, setOverrideBlockMessage] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false);
 
   const { data, isLoading } = useQuery<BudgetTypeSetting[]>({
     queryKey: ["budget-type-settings", customerId],
@@ -169,8 +182,8 @@ export function BudgetTypeSettings({ customerId, pflegegrad, careLevelHistory }:
   }, [data]);
 
   const saveMutation = useMutation({
-    mutationFn: async (newSettings: BudgetTypeSetting[]) => {
-      const settingsPayload = newSettings.map(s => {
+    mutationFn: async (vars: { newSettings: BudgetTypeSetting[]; overrideReason?: string }) => {
+      const settingsPayload = vars.newSettings.map(s => {
         const ev = euroValues[s.budgetType];
         const dv = dateValues[s.budgetType];
         return {
@@ -183,9 +196,12 @@ export function BudgetTypeSettings({ customerId, pflegegrad, careLevelHistory }:
           validTo: dv?.validTo || null,
         };
       });
-      return unwrapResult(await api.put(`/budget/${customerId}/type-settings`, {
-        settings: settingsPayload,
-      }));
+      // Task #1792 — Override-Felder nur mitsenden, wenn der Superadmin die
+      // rückwirkende Änderung im GoBD-Dialog ausdrücklich freigegeben hat.
+      const body = vars.overrideReason
+        ? { settings: settingsPayload, overrideBackdateGuard: true, overrideReason: vars.overrideReason }
+        : { settings: settingsPayload };
+      return unwrapResult(await api.put(`/budget/${customerId}/type-settings`, body));
     },
     onSuccess: async () => {
       await queryClient.refetchQueries({ queryKey: ["budget-overview", customerId], type: "active" });
@@ -197,11 +213,39 @@ export function BudgetTypeSettings({ customerId, pflegegrad, careLevelHistory }:
       invalidateRelated(queryClient, "budget", { customerId });
       toast({ title: "Budget-Einstellungen gespeichert" });
       setHasChanges(false);
+      // Task #1792 — Override-Dialog nach erfolgreichem Speichern schließen und
+      // zurücksetzen (greift sowohl beim normalen Speichern als auch nach einem
+      // bestätigten Override).
+      setOverrideDialogOpen(false);
+      setOverridePendingSettings(null);
+      setOverrideReason("");
+      setOverrideConfirmed(false);
     },
-    onError: (error: Error) => {
+    onError: (error: Error, vars) => {
+      // Task #1792 — Bei Rückdatierungssperre bietet der Superadmin-Dialog die
+      // GoBD-Freigabe an. Nur öffnen, wenn NICHT bereits mit Override gespeichert
+      // wurde (sonst würde ein echter Serverfehler den Dialog in einer Schleife
+      // erneut öffnen).
+      const code = (error as { code?: string }).code;
+      if (code === "BUDGET_BACKDATE_NOT_ALLOWED" && isSuperAdmin && !vars.overrideReason) {
+        setOverridePendingSettings(vars.newSettings);
+        setOverrideBlockMessage(error.message);
+        setOverrideReason("");
+        setOverrideConfirmed(false);
+        setOverrideDialogOpen(true);
+        return;
+      }
       toast({ variant: "destructive", title: "Fehler", description: error.message });
     },
   });
+
+  // Task #1792 — Bestätigt der Superadmin den GoBD-Override (Begründung ≥ 20
+  // Zeichen + Haken), wird derselbe Payload erneut MIT Override-Flag gesendet.
+  const confirmBackdateOverride = () => {
+    if (!overridePendingSettings) return;
+    if (overrideReason.trim().length < 20 || !overrideConfirmed) return;
+    saveMutation.mutate({ newSettings: overridePendingSettings, overrideReason: overrideReason.trim() });
+  };
 
   const movePriority = (index: number, direction: "up" | "down") => {
     const newSettings = [...settings];
@@ -456,7 +500,7 @@ export function BudgetTypeSettings({ customerId, pflegegrad, careLevelHistory }:
 
       {hasChanges && (
         <Button
-          onClick={() => saveMutation.mutate(settings)}
+          onClick={() => saveMutation.mutate({ newSettings: settings })}
           disabled={saveMutation.isPending}
           className="w-full"
           data-testid="btn-save-budget-type-settings"
@@ -471,6 +515,81 @@ export function BudgetTypeSettings({ customerId, pflegegrad, careLevelHistory }:
       ) : (
         <RebookSection customerId={customerId} />
       )}
+
+      {/* Task #1792 — GoBD-Warndialog für die rückwirkende Änderung eines bereits
+          wertbelegten Budget-Topfes. Nur Superadmins gelangen hierher. Bestätigen
+          ist erst möglich, wenn Begründung ≥ 20 Zeichen UND Haken gesetzt sind. */}
+      <Dialog open={overrideDialogOpen} onOpenChange={(open) => {
+        setOverrideDialogOpen(open);
+        if (!open) {
+          setOverridePendingSettings(null);
+          setOverrideReason("");
+          setOverrideConfirmed(false);
+        }
+      }}>
+        <DialogContent data-testid="dialog-backdate-override">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="h-5 w-5" />
+              Rückwirkende Änderung freigeben?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium">GoBD-relevante Ausnahme</p>
+              <p className="mt-1" data-testid="text-override-block-message">
+                {overrideBlockMessage || "Für diesen Budget-Topf ist im gewählten Zeitraum bereits ein Betrag hinterlegt."}
+              </p>
+              <p className="mt-2">
+                Du bist dabei, einen bereits geltenden Wert <strong>rückwirkend</strong> zu ändern.
+                Das ist eine Ausnahme und wird revisionssicher protokolliert (wer, wann, warum).
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="override-reason">Begründung (Pflicht, mindestens 20 Zeichen)</Label>
+              <Textarea
+                id="override-reason"
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                placeholder="Warum ist die rückwirkende Änderung nötig? (z. B. Korrektur eines falsch erfassten Startdatums nach Rücksprache mit der Pflegekasse)"
+                rows={3}
+                data-testid="input-override-reason"
+              />
+              <p className="text-xs text-gray-500" data-testid="text-override-reason-count">
+                {overrideReason.trim().length}/20 Zeichen
+              </p>
+            </div>
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={overrideConfirmed}
+                onCheckedChange={(checked) => setOverrideConfirmed(checked === true)}
+                data-testid="checkbox-override-confirm"
+              />
+              <span>
+                Mir ist bewusst, dass ich eine bereits geltende, GoBD-relevante Budget-Einstellung
+                rückwirkend ändere, und ich übernehme dafür die Verantwortung.
+              </span>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setOverrideDialogOpen(false)}
+              data-testid="btn-override-cancel"
+            >
+              Abbrechen
+            </Button>
+            <Button
+              onClick={confirmBackdateOverride}
+              disabled={overrideReason.trim().length < 20 || !overrideConfirmed || saveMutation.isPending}
+              className="bg-amber-600 hover:bg-amber-700"
+              data-testid="btn-override-confirm"
+            >
+              {saveMutation.isPending ? "Wird gespeichert..." : "Rückwirkend speichern"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

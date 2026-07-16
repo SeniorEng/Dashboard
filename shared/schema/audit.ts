@@ -126,6 +126,7 @@ export const AUDIT_ACTIONS = [
   "advice_payment_reconciled",
   "advice_payment_unreconciled",
   "advice_payment_mismatch",
+  "budget_backdate_override",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

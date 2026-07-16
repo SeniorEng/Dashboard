@@ -1,0 +1,44 @@
+Was der Replit-Build zwingend richtig haben muss
+1. Superadmin-Guard nicht nur im UI, auch im Endpoint
+Häufiger Fehler: Nur der Button ist versteckt für Nicht-Superadmins, aber der API-Endpoint akzeptiert trotzdem den Override-Flag. Der Guard muss im PUT-Route-Handler stehen, nicht nur im Frontend:
+typescriptif (payload.overrideBackdateGuard && req.user!.role !== 'superadmin') {
+  throw forbidden('SUPERADMIN_REQUIRED', 'Rückwirkende Änderung eines wertbelegten Topfes erfordert Geschäftsführungs-Rechte');
+}
+2. Reason-Feld ist PFLICHT, nicht optional
+Ohne Grund keine GoBD-Ausnahme. Text-Feld min. 20 Zeichen erzwingen. Sonst tippt jemand „x" rein und der Override ist wertlos für die Steuerprüfung.
+3. Audit-Log muss vollständig sein
+Neuer Audit-Action-Type budget_backdate_override mit:
+
+userId, ipAddress, timestamp
+beforeState (die alte wertbelegte Phase)
+afterState (was der Superadmin setzt)
+reason (der Text vom User)
+affectedRebookedTransactionIds (falls direkt danach rebook läuft)
+
+Ohne diese Metadaten ist der Override GoBD-untauglich.
+4. Bestätigungs-Dialog mit expliziter GoBD-Warnung
+Nicht nur ein Standard-„OK?"-Dialog. Text muss explizit sein:
+
+⚠️ GoBD-Ausnahme
+Sie ändern rückwirkend eine bereits geltende Budget-Konfiguration.
+Dieser Vorgang wird vollständig protokolliert und ist steuerrechtlich prüfrelevant.
+Begründung (Pflicht, min. 20 Zeichen): [_________________________]
+☐ Ich bestätige die Notwendigkeit der Rückdatierung.
+[Abbrechen] [Rückdatierung bestätigen]
+
+5. Task #1623 punktuell aufweichen, nicht abschalten
+BudgetBackdateNotAllowedError ist in preferences-storage.ts:~500 verankert und schützt gegen jeden Aufrufer. Der Override darf nur greifen wenn:
+
+options.overrideBackdateGuard === true (expliziter Storage-Parameter)
+UND options.overrideUserId ist gesetzt (für Audit)
+UND options.overrideReason ist gesetzt (≥20 chars)
+
+Ohne alle drei bleibt die Sperre aktiv. So können Storage-Aufrufer die Sperre nicht versehentlich umgehen.
+6. Test-Coverage
+Mindestens 3 Tests:
+
+Normaler Admin sendet overrideBackdateGuard=true → 403 Forbidden
+Superadmin ohne Reason → 400 Validation
+Superadmin mit Reason → 200, Audit-Log korrekt, Setting rückwirkend gesetzt
+
+Plus 1 Architektur-Test: grep 'overrideBackdateGuard' server/ zeigt nur die 1-2 legitimen Aufrufer (Route + Storage).
