@@ -3046,6 +3046,7 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
   // Berechtigte Kunden = Kunden mit signiertem Leistungsnachweis für den Monat.
   const signedRecords = await monthlyServiceRecordsRepo.selectColumnsFrom({
     customerId: monthlyServiceRecords.customerId,
+    status: monthlyServiceRecords.status,
   })
     .where(and(
       eq(monthlyServiceRecords.year, billingYear),
@@ -3093,8 +3094,49 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
     customerIds = customerIds.filter((id) => !skipSet.has(id));
   }
 
+  // Task #1779: Signatur-blockierte Pflegekasse-Kunden VOR dem
+  // `generateInvoiceCore`-Lauf herausnehmen und als „übersprungen" (nicht als
+  // „Fehler") melden. Solche Kunden haben keine offenen Termine mehr (sie
+  // werden also nicht schon von `openSkippedIds` erfasst), warten aber noch auf
+  // die Kundenunterschrift — ihr Leistungsnachweis ist nur `employee_signed`.
+  // Ohne diese Vorab-Aussortierung liefen sie in `generateInvoiceCore` in den
+  // 400-Signatur-Block und erschienen im Ergebnis-Dialog rot als „Fehler",
+  // obwohl es das erwartete Unterschrifts-Gate ist. Eligibilität kommt aus
+  // DERSELBEN SSoT (`classifyBillingEligibility`) wie in `/eligible-customers`.
+  let signatureSkippedIds: number[] = [];
+  if (customerIds.length > 0) {
+    const statusesByCustomer = new Map<number, string[]>();
+    for (const r of signedRecords) {
+      if (!customerIds.includes(r.customerId)) continue;
+      const arr = statusesByCustomer.get(r.customerId) ?? [];
+      arr.push(r.status);
+      statusesByCustomer.set(r.customerId, arr);
+    }
+    const billingTypeRows = await db.select({
+      id: customersTable.id,
+      billingType: customersTable.billingType,
+    })
+      .from(customersTable)
+      .where(inArray(customersTable.id, customerIds));
+    const billingTypeById = new Map(billingTypeRows.map((c) => [c.id, c.billingType]));
+    signatureSkippedIds = customerIds.filter((id) => {
+      const { reason } = classifyBillingEligibility({
+        billingType: billingTypeById.get(id) ?? null,
+        serviceRecordStatuses: statusesByCustomer.get(id) ?? [],
+        // Nur der Signatur-Grund (`signedRecordCount === 0`) wird hier vorab
+        // ausgefiltert; die übrigen Fakten sind für diese Verzweigung
+        // irrelevant und werden vom Generate-Pfad selbst behandelt.
+        signedAppointmentCount: 1,
+        unbilledAppointmentCount: 1,
+      });
+      return reason === "customer_signature_required";
+    });
+    const sigSkipSet = new Set(signatureSkippedIds);
+    customerIds = customerIds.filter((id) => !sigSkipSet.has(id));
+  }
+
   log(
-    `generate-all start month=${billingMonth}/${billingYear} eligibleCustomers=${customerIds.length}${insuranceProviderId ? ` insuranceProviderId=${insuranceProviderId}` : ""}${readyOnly ? ` readyOnly=1 openSkipped=${openSkippedIds.length}` : ""} userId=${userId ?? "?"}`,
+    `generate-all start month=${billingMonth}/${billingYear} eligibleCustomers=${customerIds.length}${insuranceProviderId ? ` insuranceProviderId=${insuranceProviderId}` : ""}${readyOnly ? ` readyOnly=1 openSkipped=${openSkippedIds.length}` : ""}${signatureSkippedIds.length > 0 ? ` sigSkipped=${signatureSkippedIds.length}` : ""} userId=${userId ?? "?"}`,
     "billing",
   );
 
@@ -3110,6 +3152,12 @@ router.post("/generate-all", asyncHandler("Massenerstellung fehlgeschlagen", asy
   // abgerechnet wurde.
   for (const customerId of openSkippedIds) {
     results.push({ customerId, status: "skipped", message: "Noch offene Termine" });
+  }
+
+  // Task #1779: Signatur-blockierte Kunden als „übersprungen" mit klarem Grund
+  // melden — nicht als Fehler.
+  for (const customerId of signatureSkippedIds) {
+    results.push({ customerId, status: "skipped", message: "Wartet auf Kundenunterschrift" });
   }
 
   for (const customerId of customerIds) {

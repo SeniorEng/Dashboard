@@ -149,7 +149,8 @@ export function GenerateAllDialog({
               {/* Task #587: Nur fehlgeschlagene Kunden namentlich auflisten —
                   inkl. Server-`message` (Task #586). Erfolgreiche bleiben
                   in der Summary, übersprungene ebenfalls (Grund ist generisch
-                  „bereits abgerechnet" bzw. „noch offene Termine"). */}
+                  „bereits abgerechnet", „noch offene Termine" bzw.
+                  „Wartet auf Kundenunterschrift" — Task #1779). */}
               {(() => {
                 const failed = generateAllProgress.results.filter((r) => r.status === "error");
                 if (failed.length === 0) return null;
