@@ -69,8 +69,18 @@ export function GenerateAllDialog({
       ).length,
     [customers],
   );
-  const willCreate = readyOnly ? readyCount : totalCount;
-  const willSkip = readyOnly ? totalCount - readyCount : 0;
+  // Task #1783: Auch ohne readyOnly werden signatur-blockierte Kunden
+  // (`eligibility.status !== "eligible"`) server-seitig übersprungen. Der
+  // Vorab-Zähler muss diese als `willSkip` ausweisen, damit Vorab-Schätzung
+  // und tatsächliches Lauf-Ergebnis übereinstimmen.
+  const signatureBlockedCount = useMemo(
+    () =>
+      (customers ?? []).filter((c) => c.eligibility.status !== "eligible")
+        .length,
+    [customers],
+  );
+  const willCreate = readyOnly ? readyCount : totalCount - signatureBlockedCount;
+  const willSkip = readyOnly ? totalCount - readyCount : signatureBlockedCount;
 
   return (
     <Dialog
