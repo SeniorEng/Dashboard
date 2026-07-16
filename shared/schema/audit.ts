@@ -127,6 +127,7 @@ export const AUDIT_ACTIONS = [
   "advice_payment_unreconciled",
   "advice_payment_mismatch",
   "budget_backdate_override",
+  "company_secrets_reencrypted",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
@@ -148,6 +149,7 @@ export const AUDIT_ENTITY_TYPES = [
   "qonto_transaction",
   "qonto_hide_rule",
   "payment_advice",
+  "company_settings",
 ] as const;
 
 export type AuditEntityType = typeof AUDIT_ENTITY_TYPES[number];
