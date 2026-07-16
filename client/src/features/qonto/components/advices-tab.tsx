@@ -37,6 +37,7 @@ function hasExcelExponentialRef(item: PaymentAdviceItem): boolean {
 function AdviceItemRow({ item, position }: { item: PaymentAdviceItem; position: number }) {
   const excelExp = hasExcelExponentialRef(item);
   const unterzahlung = item.unterzahlungCents ?? 0;
+  const ueberzahlung = item.ueberzahlungCents ?? 0;
   return (
     <div
       className={`flex items-center justify-between gap-2 p-2 rounded text-sm ${
@@ -76,6 +77,15 @@ function AdviceItemRow({ item, position }: { item: PaymentAdviceItem; position: 
             data-testid={`badge-item-unterzahlung-${item.id}`}
           >
             −{formatCents(unterzahlung)}
+          </Badge>
+        )}
+        {ueberzahlung > 0 && (
+          <Badge
+            variant="outline"
+            className="text-xs bg-orange-50 text-orange-700 border-orange-200"
+            data-testid={`badge-item-ueberzahlung-${item.id}`}
+          >
+            +{formatCents(ueberzahlung)}
           </Badge>
         )}
         <span className="font-medium text-sm">{formatCents(item.betragCents)}</span>
@@ -464,6 +474,15 @@ export function AdvicesTab() {
                             data-testid={`badge-advice-unterzahlung-${advice.id}`}
                           >
                             Unterzahlung: {formatCents(advice.unterzahlungCents!)}
+                          </Badge>
+                        )}
+                        {(advice.ueberzahlungCents ?? 0) > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs bg-orange-50 text-orange-700 border-orange-200"
+                            data-testid={`badge-advice-ueberzahlung-${advice.id}`}
+                          >
+                            Überzahlung: {formatCents(advice.ueberzahlungCents!)}
                           </Badge>
                         )}
                       </div>

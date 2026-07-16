@@ -214,7 +214,24 @@ export function useTransactionMutations({ onMatchSuccess }: { onMatchSuccess: ()
     },
   });
 
-  return { matchMutation, bulkMatchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation, confirmAdviceMutation, dismissAdviceSuggestionMutation };
+  // Differenz bewusst akzeptieren: eine bereits gebundene Zahlung mit
+  // Betragsabweichung nach Prüfung final als „bezahlt" bestätigen. Setzt nur
+  // noch offene, gebundene Rechnungen auf bezahlt (serverseitig auditiert).
+  const confirmPaidMutation = useMutation({
+    mutationFn: async (txId: number) =>
+      unwrapResult(await api.post<{ paid: number; paymentDifferenceCents: number; paymentDifferenceResult: string }>(
+        `/admin/qonto/transactions/${txId}/confirm-paid`, {},
+      )),
+    onSuccess: (data) => {
+      toast({ title: `${data.paid} Rechnung(en) trotz Differenz als bezahlt bestätigt` });
+      invalidateRelated(queryClient, "qonto");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Fehler", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return { matchMutation, bulkMatchMutation, unmatchMutation, autoMatchMutation, csvImportMutation, ignoreMutation, unignoreMutation, confirmAdviceMutation, dismissAdviceSuggestionMutation, confirmPaidMutation };
 }
 
 // Task #1685 — mehrdeutige Sammel-Avis-Zuordnung manuell auflösen: der Operator
@@ -271,9 +288,17 @@ export function useAdviceMutations({ onCreateSuccess }: { onCreateSuccess: () =>
 
   const markPaidMutation = useMutation({
     mutationFn: async (id: number) =>
-      unwrapResult(await api.post<{ paid: number }>(`/admin/qonto/payment-advices/${id}/mark-paid`, {})),
+      unwrapResult(await api.post<{ paid: number; flagged: number }>(`/admin/qonto/payment-advices/${id}/mark-paid`, {})),
     onSuccess: (data) => {
-      toast({ title: `${data.paid} Rechnung(en) als bezahlt markiert` });
+      // Zahlungen mit Über-Toleranz-Abweichung werden NICHT still auf „bezahlt"
+      // gesetzt, sondern nur gebunden und zur Prüfung markiert.
+      const flagged = data.flagged > 0
+        ? ` — ${data.flagged} mit Betragsabweichung zur Prüfung markiert`
+        : "";
+      toast({
+        title: `${data.paid} Rechnung(en) als bezahlt markiert${flagged}`,
+        variant: data.flagged > 0 ? "destructive" : undefined,
+      });
       invalidateRelated(queryClient, "qonto");
     },
     onError: (error: Error) => {

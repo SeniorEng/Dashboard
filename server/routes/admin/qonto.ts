@@ -19,6 +19,11 @@ import { withQontoBackfillLock, isQontoBackfillRunning } from "../../services/qo
 import { scanAdviceSuggestions, MANUAL_BULK_ADVICE_CONFIDENCE } from "@shared/domain/qonto/bulk-advice-match";
 import { resolveUniqueMatch } from "@shared/domain/qonto/avis-match";
 import {
+  classifyPaymentDifference,
+  isPaymentFullyCovered,
+  PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
+} from "@shared/domain/qonto/payment-difference";
+import {
   loadFullyPaidUnlinkedAdvices,
   loadUnmatchedCredits,
   computeProposals,
@@ -152,14 +157,36 @@ router.get("/transactions", asyncHandler("Transaktionen konnten nicht geladen we
     result.transactions.map(t => t.matchedPaymentAdviceId).filter((v): v is number => v !== null),
   ));
   const adviceSummaries = await qontoStorage.getAdviceSummariesByIds(adviceIds);
+
+  // Differenz „gezahlt vs. Forderung" pro zugeordneter Transaktion ableiten
+  // (SSoT `classifyPaymentDifference`). Über-Toleranz-Abweichungen bleiben so in
+  // der Liste sichtbar, weil die Rechnung dann bewusst NICHT auf „bezahlt"
+  // gesetzt, sondern zur Prüfung markiert wurde.
+  const grossByTxId = await qontoStorage.getMatchedGrossByTxIds(
+    result.transactions.map(t => ({
+      id: t.id,
+      matchedInvoiceId: t.matchedInvoiceId,
+      matchedPaymentAdviceId: t.matchedPaymentAdviceId,
+    })),
+  );
+
   const transactions = result.transactions.map(t => {
-    if (!t.matchedPaymentAdviceId) return { ...t, matchedAdvice: null };
-    const s = adviceSummaries.get(t.matchedPaymentAdviceId);
+    const s = t.matchedPaymentAdviceId ? adviceSummaries.get(t.matchedPaymentAdviceId) : undefined;
+    const matchedAdvice = s
+      ? { id: s.id, avisNummer: s.avisNummer, invoiceCount: s.invoiceCount, gesamtBetragCents: s.gesamtBetragCents }
+      : null;
+
+    const gross = grossByTxId.get(t.id);
+    const cls = gross != null
+      ? classifyPaymentDifference({ invoiceGrossCents: gross, paidCents: Math.abs(t.amountCents) })
+      : null;
+
     return {
       ...t,
-      matchedAdvice: s
-        ? { id: s.id, avisNummer: s.avisNummer, invoiceCount: s.invoiceCount, gesamtBetragCents: s.gesamtBetragCents }
-        : null,
+      matchedAdvice,
+      matchedGrossCents: gross ?? null,
+      paymentDifferenceCents: cls ? cls.differenceCents : null,
+      paymentDifferenceResult: cls ? cls.result : null,
     };
   });
 
@@ -207,6 +234,20 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
     throw badRequest("Transaktion ist bereits einer anderen Rechnung zugeordnet. Bitte zuerst Zuordnung aufheben.");
   }
 
+  // Rechnung laden (Brutto + Status) für die Betrags-Klassifikation (SSoT).
+  const [invoice] = await db.select({
+    id: invoices.id,
+    grossAmountCents: invoices.grossAmountCents,
+    status: invoices.status,
+  }).from(invoices).where(eq(invoices.id, invoiceId));
+  if (!invoice) throw notFound("Rechnung nicht gefunden");
+
+  const classification = classifyPaymentDifference({
+    invoiceGrossCents: invoice.grossAmountCents,
+    paidCents: Math.abs(tx.amountCents),
+  });
+  const fullyCovered = isPaymentFullyCovered(classification);
+
   const updated = await withAudit(async (dbTx, audit) => {
     // Geguarded gegen parallele Matches auf dieselbe Transaktion.
     const matchUpdate = await dbTx.update(qontoTransactions)
@@ -222,36 +263,70 @@ router.post("/transactions/:id/match", asyncHandler("Zuordnung fehlgeschlagen", 
       throw badRequest("Transaktion wurde zwischenzeitlich einer anderen Rechnung zugeordnet.");
     }
 
-    // Task #1284 — Qonto-Zahlungseingang setzt bezahlt, auch wenn die Rechnung
-    // bereits über ein Zahlungsavis auf "avis_erhalten" stand.
-    const invoiceUpdate = await dbTx.update(invoices)
-      .set({ status: "bezahlt", paidAt: tx.emittedAt })
-      .where(and(eq(invoices.id, invoiceId), inArray(invoices.status, ["versendet", "avis_erhalten"])))
-      .returning({ id: invoices.id });
+    if (fullyCovered) {
+      // Task #1284 — Qonto-Zahlungseingang setzt bezahlt, auch wenn die Rechnung
+      // bereits über ein Zahlungsavis auf "avis_erhalten" stand. Nur bei exakt
+      // passendem oder tolerierbar abweichendem Betrag (Skonto/Rundung).
+      const invoiceUpdate = await dbTx.update(invoices)
+        .set({ status: "bezahlt", paidAt: tx.emittedAt })
+        .where(and(eq(invoices.id, invoiceId), inArray(invoices.status, ["versendet", "avis_erhalten"])))
+        .returning({ id: invoices.id });
 
-    if (invoiceUpdate.length === 0) {
-      throw badRequest("Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
+      if (invoiceUpdate.length === 0) {
+        throw badRequest("Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
+      }
+
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_payment_reconciled",
+        entityType: "invoice",
+        entityId: invoiceId,
+        metadata: {
+          qontoTransactionId: id,
+          qontoTransactionExternalId: tx.qontoTransactionId,
+          matchedBy: "manual",
+          confidence: "manual",
+          amountCents: tx.amountCents,
+          differenceCents: classification.differenceCents,
+          result: classification.result,
+        },
+        ipAddress: req.ip,
+      });
+    } else {
+      // Über-Toleranz-Abweichung: Zahlung an die Rechnung binden, aber NICHT auf
+      // „bezahlt" setzen — die Rechnung bleibt zur manuellen Prüfung offen
+      // (Differenz-Ansicht). Bewusst gebunden, damit der Zusammenhang sichtbar
+      // ist und die Zahlung nicht als „ohne Treffer" gilt.
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_payment_mismatch",
+        entityType: "invoice",
+        entityId: invoiceId,
+        metadata: {
+          qontoTransactionId: id,
+          qontoTransactionExternalId: tx.qontoTransactionId,
+          matchedBy: "manual",
+          confidence: "manual",
+          amountCents: tx.amountCents,
+          paidCents: Math.abs(tx.amountCents),
+          invoiceGrossCents: invoice.grossAmountCents,
+          differenceCents: classification.differenceCents,
+          result: classification.result,
+          toleranceCents: PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
+        },
+        ipAddress: req.ip,
+      });
     }
-
-    audit.record({
-      userId: req.user!.id,
-      action: "invoice_payment_reconciled",
-      entityType: "invoice",
-      entityId: invoiceId,
-      metadata: {
-        qontoTransactionId: id,
-        qontoTransactionExternalId: tx.qontoTransactionId,
-        matchedBy: "manual",
-        confidence: "manual",
-        amountCents: tx.amountCents,
-      },
-      ipAddress: req.ip,
-    });
 
     return matchUpdate[0];
   }, { faults: readTestFaults(req) });
 
-  res.json(updated);
+  res.json({
+    ...updated,
+    invoiceMarkedPaid: fullyCovered,
+    paymentDifferenceCents: classification.differenceCents,
+    paymentDifferenceResult: classification.result,
+  });
 }));
 
 // Task #1710 — Manuelle Mehrfach-Zuordnung: 2+ offene Rechnungen von Hand mit
@@ -317,6 +392,14 @@ router.post("/transactions/:id/bulk-match", asyncHandler("Mehrfach-Zuordnung feh
   }
   const invoiceById = new Map(selectedInvoices.map(inv => [inv.id, inv]));
 
+  // Σ Brutto der gewählten Rechnungen gegen den Zahlungsbetrag klassifizieren (SSoT).
+  const sumGrossCents = selectedInvoices.reduce((s, inv) => s + inv.grossAmountCents, 0);
+  const classification = classifyPaymentDifference({
+    invoiceGrossCents: sumGrossCents,
+    paidCents: Math.abs(tx.amountCents),
+  });
+  const fullyCovered = isPaymentFullyCovered(classification);
+
   const emitted = tx.emittedAt instanceof Date ? tx.emittedAt : new Date(tx.emittedAt);
   const zahlungsDatum = emitted.toISOString().slice(0, 10);
 
@@ -365,53 +448,110 @@ router.post("/transactions/:id/bulk-match", asyncHandler("Mehrfach-Zuordnung feh
       throw badRequest("Transaktion wurde zwischenzeitlich zugeordnet.");
     }
 
-    // Rechnungen geguarded auf bezahlt setzen (nur offene versendet/avis_erhalten).
-    const flipped = await dbTx.update(invoices)
-      .set({ status: "bezahlt", paidAt: emitted })
-      .where(and(inArray(invoices.id, invoiceIds), inArray(invoices.status, ["versendet", "avis_erhalten"])))
-      .returning({ id: invoices.id });
+    if (fullyCovered) {
+      // Rechnungen geguarded auf bezahlt setzen (nur offene versendet/avis_erhalten).
+      // Nur, wenn die Σ Brutto zum Zahlungsbetrag passt (exakt oder tolerierbar).
+      const flipped = await dbTx.update(invoices)
+        .set({ status: "bezahlt", paidAt: emitted })
+        .where(and(inArray(invoices.id, invoiceIds), inArray(invoices.status, ["versendet", "avis_erhalten"])))
+        .returning({ id: invoices.id });
 
-    if (flipped.length !== invoiceIds.length) {
-      throw badRequest("Mindestens eine Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
-    }
+      if (flipped.length !== invoiceIds.length) {
+        throw badRequest("Mindestens eine Rechnung ist nicht im Status 'versendet' oder 'avis_erhalten' und kann nicht abgeglichen werden.");
+      }
 
-    for (const invId of invoiceIds) {
+      for (const invId of invoiceIds) {
+        audit.record({
+          userId: req.user!.id,
+          action: "invoice_payment_reconciled",
+          entityType: "invoice",
+          entityId: invId,
+          metadata: {
+            qontoTransactionId: id,
+            qontoTransactionExternalId: tx.qontoTransactionId,
+            paymentAdviceId: advice.id,
+            matchedBy: "manual_bulk",
+            confidence: MANUAL_BULK_ADVICE_CONFIDENCE,
+            amountCents: tx.amountCents,
+            differenceCents: classification.differenceCents,
+            result: classification.result,
+          },
+          ipAddress: req.ip,
+        });
+      }
+
       audit.record({
         userId: req.user!.id,
-        action: "invoice_payment_reconciled",
-        entityType: "invoice",
-        entityId: invId,
+        action: "advice_payment_reconciled",
+        entityType: "payment_advice",
+        entityId: advice.id,
         metadata: {
           qontoTransactionId: id,
           qontoTransactionExternalId: tx.qontoTransactionId,
-          paymentAdviceId: advice.id,
-          matchedBy: "manual_bulk",
           confidence: MANUAL_BULK_ADVICE_CONFIDENCE,
+          invoiceCount: invoiceIds.length,
           amountCents: tx.amountCents,
+          differenceCents: classification.differenceCents,
+          result: classification.result,
+        },
+        ipAddress: req.ip,
+      });
+    } else {
+      // Über-Toleranz-Abweichung (Σ Brutto ≠ Zahlung): Avis + Zahlung binden, aber
+      // KEINE Rechnung auf „bezahlt" setzen — die Auswahl bleibt zur manuellen
+      // Prüfung offen (Differenz-Ansicht), statt still eine falsche Vollzahlung
+      // zu buchen.
+      for (const invId of invoiceIds) {
+        audit.record({
+          userId: req.user!.id,
+          action: "invoice_payment_mismatch",
+          entityType: "invoice",
+          entityId: invId,
+          metadata: {
+            qontoTransactionId: id,
+            qontoTransactionExternalId: tx.qontoTransactionId,
+            paymentAdviceId: advice.id,
+            matchedBy: "manual_bulk",
+            confidence: MANUAL_BULK_ADVICE_CONFIDENCE,
+            amountCents: tx.amountCents,
+            invoiceGrossSumCents: sumGrossCents,
+            differenceCents: classification.differenceCents,
+            result: classification.result,
+            toleranceCents: PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
+          },
+          ipAddress: req.ip,
+        });
+      }
+
+      audit.record({
+        userId: req.user!.id,
+        action: "advice_payment_mismatch",
+        entityType: "payment_advice",
+        entityId: advice.id,
+        metadata: {
+          qontoTransactionId: id,
+          qontoTransactionExternalId: tx.qontoTransactionId,
+          confidence: MANUAL_BULK_ADVICE_CONFIDENCE,
+          invoiceCount: invoiceIds.length,
+          amountCents: tx.amountCents,
+          invoiceGrossSumCents: sumGrossCents,
+          differenceCents: classification.differenceCents,
+          result: classification.result,
+          toleranceCents: PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
         },
         ipAddress: req.ip,
       });
     }
 
-    audit.record({
-      userId: req.user!.id,
-      action: "advice_payment_reconciled",
-      entityType: "payment_advice",
-      entityId: advice.id,
-      metadata: {
-        qontoTransactionId: id,
-        qontoTransactionExternalId: tx.qontoTransactionId,
-        confidence: MANUAL_BULK_ADVICE_CONFIDENCE,
-        invoiceCount: invoiceIds.length,
-        amountCents: tx.amountCents,
-      },
-      ipAddress: req.ip,
-    });
-
     return linkUpdate[0];
   }, { faults: readTestFaults(req) });
 
-  res.json(updated);
+  res.json({
+    ...updated,
+    invoiceMarkedPaid: fullyCovered,
+    paymentDifferenceCents: classification.differenceCents,
+    paymentDifferenceResult: classification.result,
+  });
 }));
 
 router.delete("/transactions/:id/match", asyncHandler("Zuordnung konnte nicht aufgehoben werden", async (req, res) => {
@@ -655,6 +795,87 @@ router.post("/transactions/:id/confirm-advice", asyncHandler("Avis-Zuordnung feh
 
   const updated = await qontoStorage.getTransaction(id);
   res.json(updated);
+}));
+
+// Differenz bewusst akzeptieren: Eine bereits GEBUNDENE Zahlung mit Über-Toleranz-
+// Abweichung (siehe /match & /bulk-match Bind-only-Pfad) wird vom Operator nach
+// Prüfung final als „bezahlt" bestätigt. Setzt NUR noch offene, gebundene
+// Rechnungen auf bezahlt und protokolliert die akzeptierte Differenz. Ersetzt
+// das frühere stille Auto-Setzen bei abweichendem Betrag durch eine explizite
+// menschliche Freigabe.
+router.post("/transactions/:id/confirm-paid", asyncHandler("Rechnung konnte nicht als bezahlt bestätigt werden", async (req, res) => {
+  const id = requireIntParam(req.params.id, res);
+  if (id === null) return;
+
+  const tx = await qontoStorage.getTransaction(id);
+  if (!tx) throw notFound("Transaktion nicht gefunden");
+  if (!tx.matchedInvoiceId && !tx.matchedPaymentAdviceId) {
+    throw badRequest("Transaktion ist keiner Rechnung zugeordnet.");
+  }
+
+  // Gebundene Rechnungs-IDs ermitteln (1:1 oder über Sammel-Avis).
+  let boundInvoiceIds: number[] = [];
+  if (tx.matchedInvoiceId) {
+    boundInvoiceIds = [tx.matchedInvoiceId];
+  } else if (tx.matchedPaymentAdviceId) {
+    const advice = await qontoStorage.getPaymentAdviceById(tx.matchedPaymentAdviceId);
+    boundInvoiceIds = Array.from(new Set(
+      (advice?.items ?? []).map(i => i.matchedInvoiceId).filter((x): x is number => x != null),
+    ));
+  }
+  if (boundInvoiceIds.length === 0) {
+    throw badRequest("Keine zugeordnete Rechnung gefunden.");
+  }
+
+  const rows = await db.select({
+    id: invoices.id,
+    grossAmountCents: invoices.grossAmountCents,
+    status: invoices.status,
+  }).from(invoices).where(inArray(invoices.id, boundInvoiceIds));
+  const sumGrossCents = rows.reduce((s, r) => s + r.grossAmountCents, 0);
+  const classification = classifyPaymentDifference({
+    invoiceGrossCents: sumGrossCents,
+    paidCents: Math.abs(tx.amountCents),
+  });
+
+  const emitted = tx.emittedAt instanceof Date ? tx.emittedAt : new Date(tx.emittedAt);
+
+  let paid = 0;
+  await withAudit(async (dbTx, audit) => {
+    const updatedRows = await dbTx.update(invoices)
+      .set({ status: "bezahlt", paidAt: emitted })
+      .where(and(
+        inArray(invoices.id, boundInvoiceIds),
+        inArray(invoices.status, ["versendet", "avis_erhalten"]),
+      ))
+      .returning({ id: invoices.id });
+
+    for (const row of updatedRows) {
+      audit.record({
+        userId: req.user!.id,
+        action: "invoice_payment_difference_accepted",
+        entityType: "invoice",
+        entityId: row.id,
+        metadata: {
+          qontoTransactionId: id,
+          qontoTransactionExternalId: tx.qontoTransactionId,
+          amountCents: tx.amountCents,
+          paidCents: Math.abs(tx.amountCents),
+          invoiceGrossSumCents: sumGrossCents,
+          differenceCents: classification.differenceCents,
+          result: classification.result,
+        },
+        ipAddress: req.ip,
+      });
+    }
+    paid = updatedRows.length;
+  }, { faults: readTestFaults(req) });
+
+  res.json({
+    paid,
+    paymentDifferenceCents: classification.differenceCents,
+    paymentDifferenceResult: classification.result,
+  });
 }));
 
 // Vorschlag „Ablehnen": denselben rückwirkenden Vorschlag nach dem nächsten
@@ -1216,9 +1437,11 @@ router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen
     }
   }
 
-  // Task #1687 — Kürzung/Unterzahlung für die 1;-Kassen-Formate wird am Lesepfad
+  // Kürzung/Unter-/Überzahlung für die Kassen-Formate wird am Lesepfad
   // abgeleitet (kein Forderungsfeld in der CSV, kein Schema-Write): pro
-  // zugeordneter Position = max(0, Rechnungs-Brutto − gezahlter Betrag).
+  // zugeordneter Position über die SSoT `classifyPaymentDifference`
+  // (Rechnungs-Brutto − Skonto − gezahlter Betrag). Ersetzt das frühere
+  // `Math.max(0, gross − betrag)`, das Überzahlungen verschluckte und Skonto ignorierte.
   const enriched = advices.map(a => {
     const matchedIds = a.items.map(i => i.matchedInvoiceId).filter((x): x is number => x != null);
     const unpaidMatchedCount = matchedIds.filter(
@@ -1226,14 +1449,28 @@ router.get("/payment-advices", asyncHandler("Zahlungsavise konnten nicht geladen
     ).length;
     const items = a.items.map(i => {
       if (i.matchedInvoiceId == null) {
-        return { ...i, matchedInvoiceGrossCents: null, unterzahlungCents: 0 };
+        return { ...i, matchedInvoiceGrossCents: null, unterzahlungCents: 0, ueberzahlungCents: 0, paymentDifferenceResult: null };
       }
       const gross = grossById.get(i.matchedInvoiceId) ?? null;
-      const unterzahlungCents = gross != null ? Math.max(0, gross - i.betragCents) : 0;
-      return { ...i, matchedInvoiceGrossCents: gross, unterzahlungCents };
+      if (gross == null) {
+        return { ...i, matchedInvoiceGrossCents: null, unterzahlungCents: 0, ueberzahlungCents: 0, paymentDifferenceResult: null };
+      }
+      const cls = classifyPaymentDifference({
+        invoiceGrossCents: gross,
+        paidCents: i.betragCents,
+        skontoCents: i.skontoCents ?? 0,
+      });
+      return {
+        ...i,
+        matchedInvoiceGrossCents: gross,
+        unterzahlungCents: cls.differenceCents > 0 ? cls.differenceCents : 0,
+        ueberzahlungCents: cls.differenceCents < 0 ? -cls.differenceCents : 0,
+        paymentDifferenceResult: cls.result,
+      };
     });
     const unterzahlungCents = items.reduce((sum, i) => sum + i.unterzahlungCents, 0);
-    return { ...a, items, matchedInvoiceCount: matchedIds.length, unpaidMatchedCount, unterzahlungCents };
+    const ueberzahlungCents = items.reduce((sum, i) => sum + i.ueberzahlungCents, 0);
+    return { ...a, items, matchedInvoiceCount: matchedIds.length, unpaidMatchedCount, unterzahlungCents, ueberzahlungCents };
   });
 
   res.json(enriched);
@@ -1264,37 +1501,89 @@ router.post("/payment-advices/:id/mark-paid", asyncHandler("Avis konnte nicht al
 
   const paidAt = advice.zahlungsDatum ? parseLocalDate(advice.zahlungsDatum) : new Date();
 
-  let paid = 0;
+  // Brutto je zugeordneter Rechnung laden und pro Avis-Position klassifizieren
+  // (SSoT, inkl. Skonto). Nur voll gedeckte Positionen dürfen auf „bezahlt"
+  // kippen; gekürzte/über-tolerierte bleiben offen und werden gemeldet.
+  const grossById = new Map<number, number>();
   if (matchedInvoiceIds.length > 0) {
-    await withAudit(async (dbTx, audit) => {
-      const updatedRows = await dbTx.update(invoices)
-        .set({ status: "bezahlt", paidAt })
-        .where(and(
-          inArray(invoices.id, matchedInvoiceIds),
-          inArray(invoices.status, ["versendet", "avis_erhalten"]),
-        ))
-        .returning({ id: invoices.id });
+    const rows = await db.select({ id: invoices.id, grossAmountCents: invoices.grossAmountCents })
+      .from(invoices)
+      .where(inArray(invoices.id, matchedInvoiceIds));
+    for (const row of rows) grossById.set(row.id, row.grossAmountCents);
+  }
 
-      for (const row of updatedRows) {
+  const coveredInvoiceIds = new Set<number>();
+  const flagged: { invoiceId: number; differenceCents: number; result: string }[] = [];
+  for (const item of advice.items) {
+    if (item.matchedInvoiceId == null) continue;
+    const gross = grossById.get(item.matchedInvoiceId);
+    if (gross == null) continue;
+    const cls = classifyPaymentDifference({
+      invoiceGrossCents: gross,
+      paidCents: item.betragCents,
+      skontoCents: item.skontoCents ?? 0,
+    });
+    if (isPaymentFullyCovered(cls)) {
+      coveredInvoiceIds.add(item.matchedInvoiceId);
+    } else {
+      flagged.push({ invoiceId: item.matchedInvoiceId, differenceCents: cls.differenceCents, result: cls.result });
+    }
+  }
+  const coveredIds = Array.from(coveredInvoiceIds);
+
+  let paid = 0;
+  if (coveredIds.length > 0 || flagged.length > 0) {
+    await withAudit(async (dbTx, audit) => {
+      if (coveredIds.length > 0) {
+        const updatedRows = await dbTx.update(invoices)
+          .set({ status: "bezahlt", paidAt })
+          .where(and(
+            inArray(invoices.id, coveredIds),
+            inArray(invoices.status, ["versendet", "avis_erhalten"]),
+          ))
+          .returning({ id: invoices.id });
+
+        for (const row of updatedRows) {
+          audit.record({
+            userId: req.user!.id,
+            action: "invoice_payment_reconciled",
+            entityType: "invoice",
+            entityId: row.id,
+            metadata: {
+              paymentAdviceId: id,
+              matchedBy: "avis",
+              zahlungsDatum: advice.zahlungsDatum,
+            },
+            ipAddress: req.ip,
+          });
+        }
+
+        paid = updatedRows.length;
+      }
+
+      // Gekürzte/über-tolerierte Positionen: NICHT bezahlt setzen, sondern zur
+      // Prüfung protokollieren (bleiben in der Differenz-Ansicht sichtbar).
+      for (const f of flagged) {
         audit.record({
           userId: req.user!.id,
-          action: "invoice_payment_reconciled",
+          action: "invoice_payment_mismatch",
           entityType: "invoice",
-          entityId: row.id,
+          entityId: f.invoiceId,
           metadata: {
             paymentAdviceId: id,
             matchedBy: "avis",
             zahlungsDatum: advice.zahlungsDatum,
+            differenceCents: f.differenceCents,
+            result: f.result,
+            toleranceCents: PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
           },
           ipAddress: req.ip,
         });
       }
-
-      paid = updatedRows.length;
     }, { faults: readTestFaults(req) });
   }
 
-  res.json({ paid });
+  res.json({ paid, flagged });
 }));
 
 router.delete("/payment-advices/:id", asyncHandler("Zahlungsavis konnte nicht gelöscht werden", async (req, res) => {

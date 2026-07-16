@@ -434,10 +434,26 @@ describe("Task #1712 — Teil-Aufhebung einer Sammelzahlung (partial-unmatch)", 
     const [advice] = await db.select({ gross: paymentAdvices.gesamtBetragCents })
       .from(paymentAdvices).where(eq(paymentAdvices.id, newAdviceId));
     const itemsSum = items.reduce((sum, i) => sum + i.betrag, 0);
+    // Σ der neu zugeordneten Rechnungen (4500) ≠ Avis-Gesamt = Zahlungsbetrag (7500).
     expect(itemsSum).toBe(4500);
     expect(advice.gross).toBe(7500);
 
-    // invC wieder frei/offen, invA+invB bezahlt.
+    // Die Zahlung (7500) weicht > Toleranz von der Summe der zugeordneten
+    // Rechnungen (4500) ab ⇒ Bind-only + Flag: A/B werden NICHT still auf
+    // „bezahlt" gesetzt, sondern bleiben „versendet" und werden pro Rechnung
+    // zur manuellen Prüfung markiert (invoice_payment_mismatch).
+    const flagged = await db.select({ id: invoices.id, status: invoices.status })
+      .from(invoices).where(inArray(invoices.id, [invA, invB]));
+    for (const r of flagged) expect(r.status).toBe("versendet");
+    expect(await countAudit("invoice_payment_mismatch", "invoice", invA)).toBe(1);
+    expect(await countAudit("invoice_payment_mismatch", "invoice", invB)).toBe(1);
+
+    // Operator prüft die Differenz und bestätigt sie explizit (confirm-paid) ⇒
+    // erst jetzt gehen die gebundenen Rechnungen auf „bezahlt".
+    const confirm = await apiPost(`/api/admin/qonto/transactions/${txId}/confirm-paid`, {});
+    expect(confirm.status).toBe(200);
+
+    // invC wieder frei/offen, invA+invB nach Freigabe bezahlt.
     const invRows = await db.select({ id: invoices.id, status: invoices.status })
       .from(invoices).where(inArray(invoices.id, [invA, invB, invC]));
     const statusById = new Map(invRows.map(r => [r.id, r.status]));

@@ -75,6 +75,8 @@ export const AUDIT_ACTIONS = [
   "month_close_reminder_sent",
   "invoice_payment_reconciled",
   "invoice_payment_unreconciled",
+  "invoice_payment_mismatch",
+  "invoice_payment_difference_accepted",
   "invoice_avis_received",
   "invoice_avis_reverted",
   "call_bridge_failed",
@@ -123,6 +125,7 @@ export const AUDIT_ACTIONS = [
   "qonto_hide_rule_deleted",
   "advice_payment_reconciled",
   "advice_payment_unreconciled",
+  "advice_payment_mismatch",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];

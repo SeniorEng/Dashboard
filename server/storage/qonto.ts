@@ -438,6 +438,61 @@ class QontoStorage {
   }
 
   /**
+   * Summe der Brutto-Forderung(en), die einer Qonto-Zahlung zugeordnet sind —
+   * batched über viele Transaktionen für den Listen-Lesepfad. Für 1:1-Matches ist
+   * es das Rechnungs-Brutto, für Sammel-Avis-Bindungen die Σ der über das Avis
+   * verknüpften Rechnungen. Reines Anzeige-Plumbing; die fachliche Bewertung
+   * „passt der Betrag?" macht ausschließlich `classifyPaymentDifference` (SSoT).
+   */
+  async getMatchedGrossByTxIds(
+    txs: { id: number; matchedInvoiceId: number | null; matchedPaymentAdviceId: number | null }[],
+  ): Promise<Map<number, number>> {
+    const result = new Map<number, number>();
+
+    const invoiceIds = Array.from(new Set(
+      txs.map(t => t.matchedInvoiceId).filter((v): v is number => v != null),
+    ));
+    const adviceIds = Array.from(new Set(
+      txs.map(t => t.matchedPaymentAdviceId).filter((v): v is number => v != null),
+    ));
+
+    const grossByInvoiceId = new Map<number, number>();
+    if (invoiceIds.length > 0) {
+      const rows = await db.select({ id: invoices.id, grossAmountCents: invoices.grossAmountCents })
+        .from(invoices)
+        .where(inArray(invoices.id, invoiceIds));
+      for (const r of rows) grossByInvoiceId.set(r.id, r.grossAmountCents);
+    }
+
+    const grossByAdviceId = new Map<number, number>();
+    if (adviceIds.length > 0) {
+      const rows = await db.select({
+        adviceId: paymentAdviceItems.paymentAdviceId,
+        grossSum: sql<number>`coalesce(sum(${invoices.grossAmountCents}), 0)::int`,
+      })
+        .from(paymentAdviceItems)
+        .innerJoin(invoices, eq(paymentAdviceItems.matchedInvoiceId, invoices.id))
+        .where(and(
+          inArray(paymentAdviceItems.paymentAdviceId, adviceIds),
+          isNotNull(paymentAdviceItems.matchedInvoiceId),
+        ))
+        .groupBy(paymentAdviceItems.paymentAdviceId);
+      for (const r of rows) grossByAdviceId.set(r.adviceId, r.grossSum);
+    }
+
+    for (const t of txs) {
+      if (t.matchedInvoiceId != null) {
+        const gross = grossByInvoiceId.get(t.matchedInvoiceId);
+        if (gross != null) result.set(t.id, gross);
+      } else if (t.matchedPaymentAdviceId != null) {
+        const gross = grossByAdviceId.get(t.matchedPaymentAdviceId);
+        if (gross != null) result.set(t.id, gross);
+      }
+    }
+    return result;
+  }
+
+  /**
    * Task #1672 — abgelehnter Vorschlag: Zeitstempel setzen, damit derselbe
    * rückwirkende Sammel-Avis-Vorschlag nach dem nächsten Sync/Import nicht
    * erneut angeboten wird. Nur auf noch nicht zugeordneten Transaktionen sinnvoll.

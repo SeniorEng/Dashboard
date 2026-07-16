@@ -1,3 +1,7 @@
+import type { PaymentDifferenceResult } from "@shared/domain/qonto/payment-difference";
+
+export type { PaymentDifferenceResult };
+
 export interface QontoAccountStatus {
   iban: string;
   success: boolean;
@@ -41,6 +45,12 @@ export interface QontoTransaction {
     invoiceCount: number;
     gesamtBetragCents: number | null;
   } | null;
+  /** Σ Brutto aller dieser Zahlung zugeordneten Rechnungen (nur wenn gebunden). */
+  matchedGrossCents?: number | null;
+  /** `matchedGross − gezahlt`: >0 Unterzahlung, <0 Überzahlung (nur wenn gebunden). */
+  paymentDifferenceCents?: number | null;
+  /** SSoT-Klassifikation der Zahlungsdifferenz (nur wenn gebunden). */
+  paymentDifferenceResult?: PaymentDifferenceResult | null;
 }
 
 /** Task #1672 — ein rückwirkender Sammel-Avis-Vorschlag für eine offene Zahlung. */
@@ -90,6 +100,10 @@ export interface PaymentAdviceItem {
   matchedInvoiceGrossCents?: number | null;
   /** Task #1687 — abgeleitete Unterzahlung/Kürzung = max(0, Rechnungs-Brutto − gezahlt). */
   unterzahlungCents?: number;
+  /** Abgeleitete Überzahlung = max(0, gezahlt − Rechnungs-Brutto) (am Lesepfad angereichert). */
+  ueberzahlungCents?: number;
+  /** SSoT-Klassifikation der Positions-Zahlungsdifferenz (nur bei Treffer). */
+  paymentDifferenceResult?: PaymentDifferenceResult | null;
 }
 
 export interface PaymentAdvice {
@@ -116,6 +130,8 @@ export interface PaymentAdvice {
   unpaidMatchedCount?: number;
   /** Task #1687 — Σ der abgeleiteten Positions-Unterzahlungen (am Lesepfad angereichert). */
   unterzahlungCents?: number;
+  /** Σ der abgeleiteten Positions-Überzahlungen (am Lesepfad angereichert). */
+  ueberzahlungCents?: number;
 }
 
 /** Task #1685 — eine konkurrierende Gutschrift eines mehrdeutigen Avis. */

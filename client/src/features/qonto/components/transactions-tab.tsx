@@ -16,7 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { iconSize } from "@/design-system";
-import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff, Sparkles, Check, X, Layers, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Link2, Unlink, Upload, Zap, RefreshCw, History, Ban, RotateCcw, Plus, Trash2, EyeOff, Sparkles, Check, X, Layers, ChevronDown, ChevronUp, AlertTriangle, CheckCheck } from "lucide-react";
 import { formatCents, formatDate, confidenceBadge } from "../utils";
 import {
   useQontoTransactions,
@@ -109,6 +109,9 @@ export function TransactionsTab({
   const [rulesOpen, setRulesOpen] = useState(false);
   const [newRuleType, setNewRuleType] = useState<"counterparty" | "iban">("counterparty");
   const [newRuleValue, setNewRuleValue] = useState("");
+  // Nur zugeordnete Zahlungen anzeigen, deren gezahlter Betrag über die Toleranz
+  // hinaus von der Rechnungsforderung abweicht (Kürzung/Überzahlung, zur Prüfung).
+  const [showOnlyDifferences, setShowOnlyDifferences] = useState(false);
 
   const transactionsQuery = useQontoTransactions(matchFilter, configured);
   const invoicesQuery = useMatchableInvoices(matchingTxId !== null);
@@ -155,6 +158,7 @@ export function TransactionsTab({
     unignoreMutation,
     confirmAdviceMutation,
     dismissAdviceSuggestionMutation,
+    confirmPaidMutation,
   } = useTransactionMutations({
     onMatchSuccess: () => {
       setMatchingTxId(null);
@@ -237,6 +241,10 @@ export function TransactionsTab({
   // liefert bereits desc(emittedAt); wir sortieren defensiv erneut mit stabilem
   // Index-Tiebreak bei gleichem Datum. Kein Hook (steht nach Early-Return).
   const transactions = (transactionsQuery.data?.transactions ?? [])
+    .filter(tx =>
+      !showOnlyDifferences ||
+      tx.paymentDifferenceResult === "underpaid" ||
+      tx.paymentDifferenceResult === "overpaid")
     .map((tx, i) => ({ tx, i }))
     .sort((a, b) => {
       const r = new Date(b.tx.emittedAt).getTime() - new Date(a.tx.emittedAt).getTime();
@@ -313,17 +321,31 @@ export function TransactionsTab({
 
       {/* Abgleich-Leiste: Filter + Zuordnungs-Aktionen */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <Select value={matchFilter} onValueChange={v => onFilterChange(v as MatchFilter)}>
-          <SelectTrigger className="w-[240px]" data-testid="select-match-filter">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Alle Transaktionen</SelectItem>
-            <SelectItem value="unmatched">Offen (ohne Zuordnung)</SelectItem>
-            <SelectItem value="matched">Zugeordnet</SelectItem>
-            <SelectItem value="ignored">Nicht abrechnungsrelevant</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Select value={matchFilter} onValueChange={v => onFilterChange(v as MatchFilter)}>
+            <SelectTrigger className="w-[240px]" data-testid="select-match-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle Transaktionen</SelectItem>
+              <SelectItem value="unmatched">Offen (ohne Zuordnung)</SelectItem>
+              <SelectItem value="matched">Zugeordnet</SelectItem>
+              <SelectItem value="ignored">Nicht abrechnungsrelevant</SelectItem>
+            </SelectContent>
+          </Select>
+          {/* Client-seitiger Zusatzfilter: nur zugeordnete Zahlungen mit
+              Betragsdifferenz (zur Prüfung). Wirkt auf die bereits geladene Liste. */}
+          <Button
+            variant={showOnlyDifferences ? "default" : "outline"}
+            onClick={() => setShowOnlyDifferences(v => !v)}
+            aria-pressed={showOnlyDifferences}
+            title="Nur zugeordnete Zahlungen mit Betragsdifferenz anzeigen"
+            data-testid="button-filter-differences"
+          >
+            <AlertTriangle className={`${iconSize.sm} mr-2`} />
+            Nur Differenzen
+          </Button>
+        </div>
 
         <div className="flex gap-2">
           <Button
@@ -510,6 +532,19 @@ export function TransactionsTab({
                           </Badge>
                         );
                       })()}
+                      {/* Betragsdifferenz: gezahlt weicht über die Toleranz hinaus von der
+                          Forderung ab. Die Rechnung wurde bewusst NICHT auf „bezahlt"
+                          gesetzt, sondern nur gebunden und zur Prüfung markiert. */}
+                      {tx.paymentDifferenceResult === "underpaid" && tx.paymentDifferenceCents != null && (
+                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs" data-testid={`badge-underpaid-${tx.id}`}>
+                          −{formatCents(Math.abs(tx.paymentDifferenceCents))} Unterzahlung
+                        </Badge>
+                      )}
+                      {tx.paymentDifferenceResult === "overpaid" && tx.paymentDifferenceCents != null && (
+                        <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 text-xs" data-testid={`badge-overpaid-${tx.id}`}>
+                          +{formatCents(Math.abs(tx.paymentDifferenceCents))} Überzahlung
+                        </Badge>
+                      )}
                       {tx.sourceIban && (
                         <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-xs font-mono" data-testid={`badge-source-iban-${tx.id}`}>
                           Konto …{tx.sourceIban.slice(-4)}
@@ -542,6 +577,23 @@ export function TransactionsTab({
                       </Button>
                     ) : tx.matchedInvoiceId || tx.matchedPaymentAdviceId ? (
                       <>
+                        {/* Differenz bewusst akzeptieren: eine gebundene, aber wegen
+                            Betragsabweichung noch offene Rechnung final auf „bezahlt"
+                            setzen (serverseitig geprüft & auditiert). */}
+                        {(tx.paymentDifferenceResult === "underpaid" || tx.paymentDifferenceResult === "overpaid") && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => confirmPaidMutation.mutate(tx.id)}
+                            disabled={confirmPaidMutation.isPending}
+                            aria-label="Trotz Differenz als bezahlt bestätigen"
+                            title="Trotz Differenz als bezahlt bestätigen"
+                            className="text-green-700 hover:text-green-800"
+                            data-testid={`button-confirm-paid-${tx.id}`}
+                          >
+                            <CheckCheck className={iconSize.sm} />
+                          </Button>
+                        )}
                         {/* Task #1742 — zugeordnete Rechnungen ein-/ausklappen. */}
                         <Button
                           variant="ghost"

@@ -13,6 +13,11 @@ import {
   BULK_ADVICE_CONFIDENCE,
   type BulkAdviceCandidate,
 } from "@shared/domain/qonto/bulk-advice-match";
+import {
+  classifyPaymentDifference,
+  isPaymentFullyCovered,
+  PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
+} from "@shared/domain/qonto/payment-difference";
 
 const QONTO_BASE_URL = "https://thirdparty.qonto.com/v2";
 
@@ -361,22 +366,22 @@ class QontoService {
         .join(" ")
         .toLowerCase();
 
-      let bestMatch: { invoiceId: number; confidence: string } | null = null;
+      let bestMatch: { invoiceId: number; confidence: string; invoiceGrossCents: number } | null = null;
 
       for (const [num, inv] of Array.from(invoiceByNumber.entries())) {
         if (searchText.includes(num)) {
           if (Math.abs(qtx.amountCents) === inv.grossAmountCents) {
-            bestMatch = { invoiceId: inv.id, confidence: "auto_exact" };
+            bestMatch = { invoiceId: inv.id, confidence: "auto_exact", invoiceGrossCents: inv.grossAmountCents };
             break;
           }
-          bestMatch = { invoiceId: inv.id, confidence: "auto_number" };
+          bestMatch = { invoiceId: inv.id, confidence: "auto_number", invoiceGrossCents: inv.grossAmountCents };
         }
       }
 
       if (!bestMatch) {
         const amountMatches = invoiceByAmount.get(Math.abs(qtx.amountCents));
         if (amountMatches && amountMatches.length === 1) {
-          bestMatch = { invoiceId: amountMatches[0].id, confidence: "auto_amount" };
+          bestMatch = { invoiceId: amountMatches[0].id, confidence: "auto_amount", invoiceGrossCents: amountMatches[0].grossAmountCents };
         }
       }
 
@@ -421,35 +426,75 @@ class QontoService {
           return false;
         }
 
-        const invoiceUpdate = await dbTx.update(invoices)
-          .set({ status: "bezahlt", paidAt: qtx.emittedAt })
-          .where(and(
-            eq(invoices.id, match.invoiceId),
-            inArray(invoices.status, ["versendet", "avis_erhalten"]),
-          ))
-          .returning({ id: invoices.id });
-
-        if (invoiceUpdate.length === 0) {
-          // Invoice wurde parallel storniert/bereits bezahlt — Tx
-          // zurückrollen, damit der Match nicht ohne Status-Wechsel
-          // committed wird (Audit-Konsistenz).
-          throw new Error("INVOICE_STATUS_CHANGED");
-        }
-
-        audit.record({
-          userId,
-          action: "invoice_payment_reconciled",
-          entityType: "invoice",
-          entityId: match.invoiceId,
-          metadata: {
-            qontoTransactionId: qtx.id,
-            qontoTransactionExternalId: qtx.qontoTransactionId,
-            matchedBy: "auto",
-            confidence: match.confidence,
-            amountCents: qtx.amountCents,
-          },
-          ipAddress,
+        // Betrag klassifizieren (SSoT). Nur voll gedeckte Zahlungen (exakt oder
+        // tolerierbar, z.B. Skonto/Rundung) setzen die Rechnung auf „bezahlt".
+        // Über-Toleranz-Abweichungen (Kürzung/Überzahlung) werden nur gebunden
+        // und zur Prüfung markiert — nie still als Vollzahlung gebucht.
+        const classification = classifyPaymentDifference({
+          invoiceGrossCents: match.invoiceGrossCents,
+          paidCents: Math.abs(qtx.amountCents),
         });
+
+        if (isPaymentFullyCovered(classification)) {
+          const invoiceUpdate = await dbTx.update(invoices)
+            .set({ status: "bezahlt", paidAt: qtx.emittedAt })
+            .where(and(
+              eq(invoices.id, match.invoiceId),
+              inArray(invoices.status, ["versendet", "avis_erhalten"]),
+            ))
+            .returning({ id: invoices.id });
+
+          if (invoiceUpdate.length === 0) {
+            // Invoice wurde parallel storniert/bereits bezahlt — Tx
+            // zurückrollen, damit der Match nicht ohne Status-Wechsel
+            // committed wird (Audit-Konsistenz).
+            throw new Error("INVOICE_STATUS_CHANGED");
+          }
+
+          audit.record({
+            userId,
+            action: "invoice_payment_reconciled",
+            entityType: "invoice",
+            entityId: match.invoiceId,
+            metadata: {
+              qontoTransactionId: qtx.id,
+              qontoTransactionExternalId: qtx.qontoTransactionId,
+              matchedBy: "auto",
+              confidence: match.confidence,
+              amountCents: qtx.amountCents,
+              differenceCents: classification.differenceCents,
+              result: classification.result,
+            },
+            ipAddress,
+          });
+        } else {
+          // Über-Toleranz-Abweichung: Transaktion bleibt an die Rechnung
+          // gebunden, aber die Rechnung wird NICHT still auf „bezahlt" gesetzt,
+          // sondern nur zur manuellen Prüfung markiert. Bekannter Fall: eine
+          // Sammelzahlung trägt im Verwendungszweck EINE Einzel-Rechnungsnummer
+          // (Einzel-Match gewinnt), obwohl der Betrag dem Avis-Gesamtbetrag über
+          // mehrere Rechnungen entspricht — Freigabe erfolgt nach Prüfung per
+          // confirm-paid (oder Unmatch + korrekte Avis-Zuordnung).
+          audit.record({
+            userId,
+            action: "invoice_payment_mismatch",
+            entityType: "invoice",
+            entityId: match.invoiceId,
+            metadata: {
+              qontoTransactionId: qtx.id,
+              qontoTransactionExternalId: qtx.qontoTransactionId,
+              matchedBy: "auto",
+              confidence: match.confidence,
+              amountCents: qtx.amountCents,
+              paidCents: Math.abs(qtx.amountCents),
+              invoiceGrossCents: match.invoiceGrossCents,
+              differenceCents: classification.differenceCents,
+              result: classification.result,
+              toleranceCents: PAYMENT_DIFFERENCE_TOLERANCE_CENTS,
+            },
+            ipAddress,
+          });
+        }
 
         return true;
       }).catch((err: unknown) => {

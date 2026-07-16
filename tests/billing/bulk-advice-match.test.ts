@@ -204,6 +204,17 @@ async function countAdviceAudit(action: string, adviceId: number): Promise<numbe
   return rows.length;
 }
 
+async function countInvoiceAudit(action: string, invoiceId: number): Promise<number> {
+  const rows = await db.select({ id: auditLog.id })
+    .from(auditLog)
+    .where(and(
+      eq(auditLog.action, action),
+      eq(auditLog.entityType, "invoice"),
+      eq(auditLog.entityId, invoiceId),
+    ));
+  return rows.length;
+}
+
 beforeAll(async () => {
   const tag = uniqueId();
   const [row] = await db.insert(customers).values({
@@ -395,8 +406,14 @@ describe("Task #1672 — Sammel-Avis ↔ Sammelzahlung Auto-Match", () => {
     // Einzelrechnungs-Match (Nummer) gewinnt ⇒ an die Rechnung gebunden, NICHT ans Avis.
     expect(tx.matchedInvoiceId).toBe(invA);
     expect(tx.matchedPaymentAdviceId).toBeNull();
-    expect(await getInvoiceStatus(invA)).toBe("bezahlt");
+    // Bekannter Bind+Flag-Fall: Der Zahlungsbetrag (90500 = Sammel-Betrag des
+    // Avis) weicht > Toleranz vom Brutto der einzeln getroffenen Rechnung invA
+    // (50500) ab. invA wird daher NICHT still auf „bezahlt" gesetzt, sondern nur
+    // gebunden und pro Rechnung zur manuellen Prüfung markiert
+    // (invoice_payment_mismatch). invB bleibt als Avis-Mitglied unangetastet.
+    expect(await getInvoiceStatus(invA)).toBe("avis_erhalten");
     expect(await getInvoiceStatus(invB)).toBe("avis_erhalten");
+    expect(await countInvoiceAudit("invoice_payment_mismatch", invA)).toBe(1);
     expect(await countAdviceAudit("advice_payment_reconciled", adviceId)).toBe(0);
   });
 
