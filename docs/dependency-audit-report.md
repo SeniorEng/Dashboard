@@ -16,7 +16,7 @@
 
 **Kern-Ergebnis:** Der Aufräumeffekt ist gering. Die einzige reale Bereinigungschance liegt im **PostCSS-Pipeline-Setup** (postcss.config.js + autoprefixer + direkter postcss-Eintrag), die mit Tailwind v4 + `@tailwindcss/vite` durch die Vite-Konfiguration faktisch ausgeschaltet ist.
 
-**Korrekturen am vorherigen Bericht (`docs/dead-code-report.md`, Abschnitt 6a):**
+**Korrekturen am vorherigen Bericht (`docs/archive/dead-code-report.md`, Abschnitt 6a):**
 - ❌ `@playwright/test` als _„Verdacht: ungenutzt"_ ist **falsch**. Es existieren `playwright.config.ts` + `e2e/health.spec.ts` + `e2e/login.spec.ts` (siehe §3).
 - ❌ `libphonenumber-js` als _„nicht direkt importiert"_ ist **falsch**. Drei direkte Importe in `shared/schema/common.ts`, `shared/utils/phone.ts`, `client/src/pages/admin/settings.tsx` (siehe §3).
 
@@ -204,7 +204,7 @@ Daraus folgt:
 |---|------------|:------:|:-------:|--------|
 | 1 | `postcss.config.js`, `autoprefixer`, `postcss` (direkt) entfernen — siehe §4 | niedrig | S | −2 devDeps, klarere Toolchain |
 | 2 | `knip.json#ignoreDependencies` nach #1 um `autoprefixer` + `postcss` kürzen | niedrig | XS | bessere Audit-Genauigkeit |
-| 3 | Korrektur-Notiz im `dead-code-report.md §6a` ergänzen, dass `@playwright/test` und `libphonenumber-js` produktiv genutzt werden | keins | XS | konsistente Doku |
+| 3 | Korrektur-Notiz im `archive/dead-code-report.md §6a` ergänzen, dass `@playwright/test` und `libphonenumber-js` produktiv genutzt werden | keins | XS | konsistente Doku |
 
 **Alle übrigen 73 Dependencies sind aktiv im Einsatz und sollten unverändert bleiben.**
 

@@ -76,12 +76,12 @@ Commit/Stand und werden nicht laufend gepflegt.
 Punktuelle Analysen/Berichte, gültig zum jeweiligen Erstellungsdatum. Sie
 dokumentieren einen vergangenen Zustand und werden **nicht** aktualisiert.
 
-- [dead-code-report.md](dead-code-report.md) — Dead-Code-Bericht (Knip-Befund, Momentaufnahme).
+- [archive/dead-code-report.md](archive/dead-code-report.md) — Dead-Code-Bericht (Knip-Befund, Momentaufnahme, archiviert).
 - [dependency-audit-report.md](dependency-audit-report.md) — Dependency-Audit-Bericht (Schwachstellen/Veraltung, Momentaufnahme).
-- [schema-audit-report.md](schema-audit-report.md) — Schema-Audit-Report (Drizzle-Schema-Befunde, Momentaufnahme).
+- [archive/schema-audit-report.md](archive/schema-audit-report.md) — Schema-Audit-Report (Drizzle-Schema-Befunde, Momentaufnahme, archiviert).
 - [quality-sweep-2026-05-27.md](quality-sweep-2026-05-27.md) — Full Quality Sweep (Snapshot 2026-05-27).
 - [stabilitaets-check-2026-04.md](stabilitaets-check-2026-04.md) — Stabilitäts-Check nach großen Änderungen (Snapshot April 2026).
-- [import-budget-drift-report-20260527.md](import-budget-drift-report-20260527.md) — Budget-Ledger-Drift nach Excel-Import — Diagnose-Report (Snapshot 2026-05-27).
+- [archive/import-budget-drift-report-20260527.md](archive/import-budget-drift-report-20260527.md) — Budget-Ledger-Drift nach Excel-Import — Diagnose-Report (Snapshot 2026-05-27, archiviert).
 - [erstberatung-orphan-source.md](erstberatung-orphan-source.md) — März-2026-Karteileichen — Quellenanalyse verwaister Erstberatungs-Datensätze.
 - [erstberatung-prod-analysis.md](erstberatung-prod-analysis.md) — Erstberatungs-Kunden in Produktion — Read-only-Analyse (Momentaufnahme).
 - [phantom-pot-split-analysis.md](phantom-pot-split-analysis.md) — Phantom-Topf-Splits in der Rechnungserzeugung — Analyse & Bestandsvermessung.

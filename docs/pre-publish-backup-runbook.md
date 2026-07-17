@@ -22,7 +22,7 @@ Vor **jedem** Publish, der mindestens eines der folgenden Risiken trägt:
 - `customer_contracts.hauswirtschaft_rate_cents`, `alltagsbegleitung_rate_cents`, `kilometer_rate_cents` (je 108 Zeilen, alle Werte = 0)
 - Tabelle `customer_pricing_history` (Prod: leer)
 
-Quelle: `docs/schema-audit-report.md`, §1 + §4.
+Quelle: `docs/archive/schema-audit-report.md`, §1 + §4.
 
 ---
 

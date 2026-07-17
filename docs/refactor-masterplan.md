@@ -12,7 +12,7 @@ nicht Dateien, sofern nicht anders vermerkt.
 - `toISOString()`-Hotspots: `rg -n "toISOString\(\)" server/ shared/ -g '!*.test.ts'` — gezählt werden Production-Pfade (ohne `server/replit_integrations/**`, das ist 3rd-party).
 - Silent-Drop-Pfade: `rg -n "\.\w+ !== undefined" server/ -g '!*.test.ts'` — gezählt werden NUR Production-Pfade (ohne `server/scripts/**`). Skripte (Reconciliation, Audits) sind interaktiv und außerhalb des Mutation-Flusses.
 - ESLint-Disables: `rg -c "eslint-disable" -g "*.ts" -g "*.tsx" client/ server/ shared/`
-- Knip-Treffer: Reports unter `docs/dead-code-report.md`.
+- Knip-Treffer: Reports unter `docs/archive/dead-code-report.md`.
 
 Dieses Dokument friert die Ziel-Architektur für die nächste Refactor-Welle ein.
 Es ersetzt KEINE Implementierungs-Tasks — es definiert nur die Konventionen und

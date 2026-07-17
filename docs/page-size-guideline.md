@@ -50,3 +50,34 @@ The page itself should:
 ## Enforcement
 
 Reviewers should flag any new page over 500 LOC and block any new page over 800 LOC. Existing pages between 500 and 800 LOC are acceptable but should be decomposed opportunistically when touched.
+
+## Markdown / docs size & rotation
+
+The same anti-bloat discipline applies to documentation under `docs/` and to the
+standing context files (`replit.md`, `.agents/memory/`). Big, ever-growing docs
+are read on almost every task and silently inflate context cost.
+
+- **Soft cap: ~40 KB (~800 lines) per living doc.** A living doc is reference
+  material kept up to date (architecture, runbooks, guidelines). Beyond the soft
+  cap, split by concern or move detail into a linked sub-doc.
+- **Append-only logs must rotate.** Chronological logs (e.g. `deployment-log.md`)
+  keep only the current window (≈ last quarter / ~3 months) in the live file;
+  older entries move to `docs/archive/<name>-<YEAR>H<1|2>.md` with a link back.
+  The live file carries a short "Rotations-Regel" section describing the cut.
+- **One-off reports get archived, not kept hot.** Dated snapshots (drift reports,
+  schema/dead-code audits, point-in-time analyses) are never maintained going
+  forward. Once acted on, move them to `docs/archive/` and update `docs/README.md`
+  (the doc index) plus any inbound links. Delete only what is trivially
+  regenerable (e.g. a raw tool dump); otherwise archive.
+- **Pre-move reference grep is mandatory.** Before moving/renaming any doc, grep
+  the repo for its path (code comments, other docs, `docs/README.md`, `replit.md`).
+  Update every inbound reference in the same change. Do NOT move a doc that a test
+  asserts on without moving the test too.
+
+## Replace instead of add (Ersetzungs-Regel for docs)
+
+Mirroring the project-wide Ersetzungs-Regel: a new doc, section, or memory entry
+MUST name what it REPLACES. If the answer is "nothing, it's purely additional",
+consolidate into the existing doc/entry instead of creating a parallel one. This
+is what keeps the doc set and `.agents/memory/` from growing without bound.
+`docs/README.md` is the single index — every doc is linked there exactly once.

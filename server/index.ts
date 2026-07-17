@@ -637,7 +637,7 @@ async function runStartupTasks() {
     // Task #988/#993/#994 — Die einmalige Phantom-Storno-Import-Drift-Korrektur
     // (#987) lief beim Prod-(Re-)Deploy einmalig scharf durch und ist bestätigt
     // (0 offene Waisen, 28 Korrekturen, Audit-Batch in
-    // docs/import-budget-drift-report-20260527.md §10.4). Der Startup-Hook wurde
+    // docs/archive/import-budget-drift-report-20260527.md §10.4). Der Startup-Hook wurde
     // daher in Task #994 ersatzlos entfernt; der manuelle CLI-Fallback
     // server/scripts/reconcile-phantom-stornos.ts bleibt als scharfes Werkzeug.
 
