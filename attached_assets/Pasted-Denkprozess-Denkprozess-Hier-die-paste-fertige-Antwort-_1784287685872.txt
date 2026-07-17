@@ -1,0 +1,15 @@
+Denkprozess
+Denkprozess
+Hier die paste-fertige Antwort an Replit:
+
+Beide Pläne (#1799 + #1800): GO — mit je einer Auflage. Reihenfolge: erst grüner Baseline, dann diese beiden.
+
+#1799 (CI-Kosten): Freigegeben. Duplicate push+PR eliminieren, timeout-minutes je Job, Artefakte nur bei Failure + kürzere Retention, branch-protection-sicheres Path-Gating (skipped required check bleibt „pending" → auf grünen No-Op kurzschließen, nicht skippen) — alles bauen.
+
+Auflage: Den node_modules-Cache (Skip npm ci) nur konservativ umsetzen. Ein restauriertes node_modules überspringt npm ci und postinstall, und native Binaries (esbuild, Playwright/Chromium, drizzle) sind cache-heikel. Wenn nicht nachweislich cache-sicher: cache: npm + npm ci beibehalten und diesen einen Hebel weglassen — ein Caching-Fehler = Flakes = mehr Kosten.
+Abnahme („PR zu main alle required checks grün") setzt den grünen Baseline voraus — parallel bauen, aber nach dem Baseline-Fix verifizieren.
+#1800 (Kontext-/Doc-Kosten): Freigegeben. deployment-log rotieren, One-off-Reports archivieren, Living-Docs entschlacken, Memory konsolidieren, Anti-Bloat-Regel in die bestehende docs/page-size-guideline.md (keine neue Datei).
+
+Auflage: Test-gekoppelte Docs nicht verschieben/entschlacken ohne die Tests im Gleichschritt — bestätigt: docs/permissions-matrix-appointments.md (von tests/policies/appointments-matrix.test.ts generiert + geprüft) und docs/budget-legal-spec.md (von tests/architecture/budget-legal-spec-conformance.test.ts gelesen). Den Referenz-Grep (Step 7) vor jedem Move laufen lassen, nicht danach.
+SSoT-Docs (budget.md, ssot-inventory) nur klare Dubletten/überholtes entfernen, nicht aggressiv kürzen. Die falsche Memory-Notiz no-show-km-edit-path.md explizit bereinigen (behauptet eine nicht existente /document-no-show-Route).
+Sequenz: (1) main grün (undici-overrides + Testfehler-Triage + e2e-Formatter) → (2) #1799 → (3) #1800. Grün zuerst, weil eine rote Pipeline jeden Folge-Task verteuert und #1799s Abnahme sie grün braucht.

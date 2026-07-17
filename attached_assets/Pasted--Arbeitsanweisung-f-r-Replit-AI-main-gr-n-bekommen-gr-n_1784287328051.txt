@@ -1,0 +1,37 @@
+# Arbeitsanweisung für Replit AI — `main` grün bekommen + grün halten
+
+**Warum:** `main` ist rot. Jeder neue Task auf rotem Baseline zwingt den Agenten, **vorbestehende** Fehler mit zu diagnostizieren → jede Folge-Arbeit wird teurer. Ziel: CI vollständig grün, dann per Branch-Protection grün halten. Read-only Inventur zuerst.
+
+---
+
+## Schritt 0 — Aktuellen Stand verifizieren (read-only)
+Den **neuesten CI-Run** auf `SeniorEng/Dashboard` öffnen und die **tatsächlich** fehlschlagenden Jobs/Schritte auflisten (die unten genannten Fehler stammen aus Run #85 — vor dem Fixen bestätigen, was aktuell rot ist; einiges kann sich verschoben haben).
+
+## Schritt 1 — static-analysis: `undici`-CVEs (Dependency, unabhängig vom Code)
+Der Security-Audit (`better-npm-audit`, `.nsprc`) scheitert an **5 `undici`-Advisories** (u. a. GHSA-pr7r-676h-xcf6 *moderate*), die nicht allowlisted sind.
+- **Fix:** `npm ls undici` prüfen; in `package.json` ein **`overrides`** auf eine **gepatchte `undici`-Version** setzen, `npm install`, `better-npm-audit` lokal → 0 offene.
+- Den **veralteten `.nsprc`-Eintrag** (Run #85: `GHSA-gv7w-rqvm-qjhr`, „did not match any found vulnerability") entfernen.
+- Nur wenn keine gepatchte Version existiert: *low*-Advisories befristet allowlisten — die *moderate* cross-user-Disclosure **nicht** unterdrücken.
+
+## Schritt 2 — tests (Vitest): Fehler triagen
+Run #85: **22 Dateien / 39 Tests + 2 Snapshots** rot. Zwei Cluster:
+- **Architektur-Guard `tests/architecture/soft-delete-coverage.test.ts`** — ein Storage-Modul nutzt `db.select().from(<soft-deletable-Tabelle>)` direkt. **Fix:** durch den **Repo-vermittelten Read** ersetzen (Muster, das der Guard erzwingt); danach die Registrierungs-Snapshots **nur** aktualisieren, wenn der neue Read-Satz beabsichtigt ist.
+- **Breite Stunden-Assertions** (Folge des Zeiten-/Urlaub-Krankheit-Changes #1584). **Triage je Failure:** (a) echte Regression → **Code** fixen; (b) beabsichtigter neuer Wert → Erwartung/Snapshot **bewusst** anpassen. Nicht pauschal `-u`.
+
+## Schritt 3 — e2e-smoke: 2 Round-Trip-Tests
+Run #85: `edit-persistence.spec.ts` — Termin-Detail zeigt km/Dauer **nicht identisch** zu Budget-Ledger und Rechnung. **Fix:** die Termin-Detail-Formatierung (km `'12,70 km'`, Dauer `'1 Std. 12 Min.'`) an den **gemeinsamen Formatter** angleichen, den Budget-Ledger/Rechnung nutzen (nicht parallel formatieren).
+
+## Schritt 4 — grün halten (verhindert Rückfall + spart künftig Kosten)
+- **Branch-Protection** auf `main`: die Pflicht-Gates als *required checks* — **nichts** mergt mehr auf rot.
+- **Iterations-Disziplin dokumentieren:** während der Entwicklung nur die schnelle **`unit`-Vitest-Suite** laufen; die volle **Integration/CI** erst vor dem Merge. (Spart Debug-/Rechenzeit pro Task.)
+
+## Reihenfolge
+1 (undici, entsperrt static-analysis für alle) → 2 (soft-delete zuerst, dann Stunden-Triage) → 3 (Formatter) → **CI komplett grün verifizieren** → 4 (Branch-Protection). **Erst danach** neue Feature-Tasks.
+
+## Relevant files
+- `package.json` (undici `overrides`), `.nsprc`
+- `tests/architecture/soft-delete-coverage.test.ts` + das verletzende Storage-Modul
+- `e2e/smoke/edit-persistence.spec.ts` + die Termin-Detail-Anzeige-Komponente + der gemeinsame km/Dauer-Formatter
+- `.github/workflows/ci.yml` (required checks / Branch-Protection)
+
+*Referenz: `Fix-Plan_CI_Run85_main-rot.md` (Detail-Analyse Run #85) im Projektordner.*
