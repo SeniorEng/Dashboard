@@ -141,6 +141,16 @@ looks_like_auth_failure() {
   printf '%s' "$1" | grep -qiE 'Authentication failed|Invalid username or password|Bad credentials|could not read Username|remote: (Invalid|Permission)|HTTP (401|403)|403 Forbidden|401 Unauthorized'
 }
 
+# Erkennt an der git-Ausgabe, ob der Push wegen DIVERGIERTER Historie abgelehnt
+# wurde (non-fast-forward). Das ist KEIN Token-/Netzwerkfehler, sondern verlangt
+# einen einmaligen, kontrollierten Force-Push-Reconcile über das Runbook
+# (docs/ci-pipeline.md → Force-Push/Branch-Protection). Ohne diese Erkennung
+# maskierte der generische "kein Token akzeptierte den Push"-Zweig die wahre
+# Ursache und der Sync blieb still stehen (Backlog wuchs unbemerkt).
+looks_like_non_fast_forward() {
+  printf '%s' "$1" | grep -qiE 'non-fast-forward|failed to push some refs|Updates were rejected|fetch first|tip of your current branch is behind'
+}
+
 cmd_push() {
   local lsha rsha
   lsha="$(local_sha)"
@@ -158,6 +168,7 @@ cmd_push() {
   local out=""
 
   local auth_seen=0
+  local nonff_seen=0
 
   # 1) Standard-Connector-Token (Code/Doku-Pushes).
   if [ -n "$connector" ]; then
@@ -169,6 +180,7 @@ cmd_push() {
     log "Connector-Token-Push fehlgeschlagen:"
     printf '%s\n' "$out" >&2
     looks_like_auth_failure "$out" && auth_seen=1
+    looks_like_non_fast_forward "$out" && nonff_seen=1
     if printf '%s' "$out" | grep -qiE 'GH013|workflow|refusing to allow'; then
       log "Workflow-Scope-Problem (.github/workflows/*) erkannt — versuche GITHUB_WORKFLOW_PAT."
     fi
@@ -186,12 +198,18 @@ cmd_push() {
     log "PAT-Push fehlgeschlagen:"
     printf '%s\n' "$out" >&2
     looks_like_auth_failure "$out" && auth_seen=1
+    looks_like_non_fast_forward "$out" && nonff_seen=1
   else
     log "Kein GITHUB_WORKFLOW_PAT gesetzt — Workflow-Dateien können nicht gepusht werden (GH013)."
   fi
 
   log "FEHLER: GitHub-Sync-Push fehlgeschlagen — GitHub main bleibt zurück (Backlog wächst)."
-  if [ "$auth_seen" = "1" ]; then
+  if [ "$nonff_seen" = "1" ]; then
+    log "→ Ursache: DIVERGIERTE Historie (non-fast-forward) — GitHub main hat Commits, die Replit nicht hat, oder die Historien sind auseinandergelaufen."
+    log "→ Ein normaler Sync-Push kann das NICHT reparieren. Einmaliger kontrollierter Force-Push-Reconcile nötig:"
+    log "→   docs/ci-pipeline.md → 'Force-Push / Branch-Protection' (allow_force_pushes temporär an, --force-with-lease, sofort wieder aus)."
+    log "→ Bis dahin testet die GitHub-CI veralteten Code — dieser Fehlschlag ist der beabsichtigte Alarm, kein stiller Stillstand."
+  elif [ "$auth_seen" = "1" ]; then
     log "→ Ursache: Token ungültig/abgelaufen. GITHUB_WORKFLOW_PAT (Scope repo+workflow) in den Deployment-Secrets erneuern."
   else
     log "→ Push wurde von keinem Token akzeptiert (siehe Ausgabe oben). Token/Secrets und Netzwerk prüfen."

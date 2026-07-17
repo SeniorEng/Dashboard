@@ -70,6 +70,13 @@ merge commit is wrong (the next local commit descends from the local SHA, not fr
 GitHub-side merge node, so the following push would also be non-ff). That requires a
 **force-push**.
 
+`scripts/github-sync.sh` now classifies this case explicitly: `looks_like_non_fast_forward`
+matches the git rejection (`non-fast-forward`/`failed to push some refs`/`Updates were
+rejected`/`fetch first`/`tip … is behind`) and the push-failure branch emits a divergence
+alarm pointing at the reconcile runbook, instead of the misleading generic "no token
+accepted the push" message. Keep this distinct from `looks_like_auth_failure` — a divergence
+is NOT a token problem and must not be "fixed" by rotating the PAT.
+
 Branch protection blocks force-push for EVERYONE incl. admins: `allow_force_pushes=false`
 rejects with `GH006` even with an admin PAT and `enforce_admins=false` (admin override
 covers required-checks/reviews, NOT force-push). Procedure: GET the full protection
